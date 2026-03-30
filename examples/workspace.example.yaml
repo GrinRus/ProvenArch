@@ -1,0 +1,8 @@
+version: 1
+repos:
+  - name: payments-service
+    path: /absolute/path/to/payments-service
+  - name: infra-k8s
+    path: /absolute/path/to/infra-k8s
+docs:
+  imports_path: ./docs/imports
