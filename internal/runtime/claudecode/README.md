@@ -1,10 +1,11 @@
-package claudecode
+# internal/runtime/claudecode
 
-// MVP placeholder.
-// This package will run Claude Code headless and return TaskResult JSON.
-//
-// Next milestones:
-// - define Runner interface
-// - implement os/exec invocation
-// - capture stdout/stderr
-// - parse TaskResult JSON and return to orchestrator
+Пакет содержит runtime adapters для orchestrator:
+- `HeadlessRunner` — opt-in локальный запуск Claude Code headless;
+- `FakeRunner` — deterministic default для required CI без live dependencies;
+- `RecordedRunner` — replay recorded fixtures для scenario/golden тестов.
+
+Runtime policy в beta:
+- process-scoped selector `fake|headless`;
+- `fake` обязателен для required CI;
+- `headless` используется только как opt-in.

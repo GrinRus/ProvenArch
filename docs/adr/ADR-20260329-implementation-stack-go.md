@@ -3,7 +3,7 @@
 - **ADR ID:** ADR-20260329-implementation-stack-go
 - **Status:** accepted
 - **Date:** 2026-03-29
-- **Owners:** TBD
+- **Owners:** ACP maintainers
 
 ## Context
 

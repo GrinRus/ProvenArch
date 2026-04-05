@@ -1,9 +1,35 @@
 # Appendix: Schemas (MVP v0)
 
-Этот документ — companion к `schemas/taskresult.schema.json`.
+Этот документ — companion к machine-readable схемам в `schemas/`.
 Цель: дать человеко-читаемое описание контрактов без дублирования всей JSON Schema.
 
-## 1) TaskResult JSON Schema
+## 1) Workspace manifest schema
+
+- **Source of truth:** `schemas/workspace.schema.json`
+- Человеко-читаемая спецификация: `docs/spec/WORKSPACE_SPEC.md`
+
+### Top-level shape
+- required:
+  - `version`
+  - `repos`
+- optional:
+  - `docs`
+
+### MVP constraints
+- сейчас поддерживается только `version: 1`
+- `repos[]` должен содержать как минимум одну запись
+- каждая запись repo содержит:
+  - required `name`
+  - ровно одно из `path | git_url`
+  - optional `ref`
+- `repo.name` значения должны быть уникальными; это semantic validation rule workspace validator-а поверх JSON Schema
+- `docs.imports_path` optional, default `./docs/imports`
+
+### Важное ограничение
+`workspace.yaml` не конфигурирует workspace layout beyond repo sources и imports path.
+Папки `charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/` фиксированы MVP convention.
+
+## 2) TaskResult JSON Schema
 
 - **Source of truth:** `schemas/taskresult.schema.json`
 - Контракт между **orchestrator** и **runtime** (MVP runtime: Claude Code headless).
@@ -34,6 +60,7 @@
   - `repo_scopes[]`
 
 > Политика MVP: фактически используем `runtime.name = "claude-code"`, даже если схема допускает любое непустое значение.
+> `repo_scopes[]` соответствует repo entries, заданным в `workspace.yaml`, и использует их `name`.
 
 ### Changeset operations (MVP)
 - `upsert_entity`
@@ -44,6 +71,16 @@
 - `add_doc_artifact`
 - `add_question`
 - `set_coverage`
+
+### Canonical MVP semantics
+- runtime по умолчанию пишет `questions[]` и `coverage` на top-level
+- `add_question` и `set_coverage` считаются legacy-compatible forms
+- orchestrator обязан нормализовать legacy forms в canonical top-level representation до persistence/materialization
+
+Conflict policy:
+- если top-level и operation-form присутствуют одновременно, persisted source of truth — merged normalized result
+- duplicate questions dedupe по `id`
+- `coverage.observed`, `coverage.missing`, `coverage.notes` merge-ятся по unique string
 
 ### Provenance и evidence
 - `provenance.kind`: `observation | inference | assertion`
@@ -58,28 +95,34 @@
 Операции `write_file(content)` в TaskResult нет.
 Поэтому генерация `reports/as-is/*` и упаковка `proposals/*` в MVP реализуются orchestrator/compiler шагами (см. `docs/spec/PIPELINE_SPEC.md`).
 
----
+`add_doc_artifact` в MVP:
+- metadata registration op
+- не содержит content payload
+- не инициирует свободную запись файлов runtime’ом
+- может ссылаться только на уже существующий или позднее materialized orchestrator artifact
+- не является required dependency path для обязательных outputs Step 1 или Step 3
 
-## 2) Model conventions
+Фиксация unknowns происходит через `questions`, `coverage` и subsequent findings, а не через свободную запись произвольных файлов runtime.
+
+## 3) Model conventions
 
 - **Source of truth:** `docs/spec/MODEL_SPEC.md`
 - Каноническая модель хранится как entity-per-file:
   - `model/entities/*`
   - `model/edges/*`
+- Stable ID patterns и normalization rules зафиксированы в `MODEL_SPEC`.
+- Канонические patterns в MVP: `svc.<slug>`, `team.<slug>`, `repo.<slug>`, `ext.<slug>`, `db.<engine>.<slug>`, `api.http.<service-slug>.<method>.<path-slug>`, `api.grpc.<service-slug>.<service>.<method>`, `topic.<slug>`, `edge.<from>.<type>.<to>`.
 
----
-
-## 3) Charter и skills conventions
+## 4) Charter и skills conventions
 
 - **Source of truth:** `docs/spec/PIPELINE_SPEC.md`
 - Charter хранится в `charter/`.
+- Cards `charter/cards/domains/*` и `charter/cards/teams/*` являются canonical human-owned source of truth.
 - Skills хранятся в `skills/` в версионируемом формате (manifest + prompts + templates).
 
----
-
-## 4) Изменения схем/контрактов
+## 5) Изменения схем/контрактов
 
 Любые изменения в `schemas/` и контрактах сопровождаются:
-- обновлением `docs/spec/*` и `docs/APPENDIX_SCHEMAS.md`,
-- обновлением примеров/фикстур,
-- кратким rationale в PR.
+- обновлением `docs/spec/*` и `docs/APPENDIX_SCHEMAS.md`
+- обновлением примеров/фикстур
+- кратким rationale в PR

@@ -1,0 +1,5 @@
+version: 1
+repos:
+  - name: invalid-repo
+    path: /absolute/path/to/repo
+    git_url: https://gitlab.example.com/platform/repo.git

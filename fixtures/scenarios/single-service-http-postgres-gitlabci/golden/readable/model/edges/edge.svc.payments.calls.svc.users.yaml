@@ -1,0 +1,15 @@
+id: edge.svc.payments.calls.svc.users
+type: calls
+from: svc.payments
+to: svc.users
+provenance:
+    kind: inference
+    confidence: 0.62
+    evidence:
+        - repo: payments-service
+          ref: main@abc123
+          path: internal/clients/users_client.go
+          lines:
+            start: 10
+            end: 88
+          excerpt_hash: sha256:cafebabe

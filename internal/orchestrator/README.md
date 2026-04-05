@@ -1,10 +1,12 @@
-package orchestrator
+# internal/orchestrator
 
-// MVP placeholder.
-// This package will own pipeline orchestration and step registry.
-//
-// Next milestones:
-// - define Step interface and registry
-// - call runtime adapter to get TaskResult
-// - validate TaskResult schema
-// - apply changeset to workspace model
+Пакет реализует orchestration pipeline `init|refresh`:
+- sequencing шагов (Step 0..4 для `init`, Step 1..4 для `refresh`);
+- run control (single active run + debounce queue policy);
+- вызов runtime runner и обработку TaskResult;
+- materialization артефактов (`model/`, `reports/`, `proposals/`).
+
+Контракт и поведение синхронизируются с:
+- `docs/spec/PIPELINE_SPEC.md`
+- `docs/ARCHITECTURE.md`
+- `docs/STAKEHOLDER_DOC.md` (Canonical Stakeholder Matrix)

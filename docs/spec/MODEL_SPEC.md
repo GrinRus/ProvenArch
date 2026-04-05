@@ -13,9 +13,9 @@ model/
 ```
 
 Почему так:
-- минимальные merge-конфликты,
-- читаемые diffs,
-- проще поддерживать детерминированность.
+- минимальные merge-конфликты
+- читаемые diffs
+- проще поддерживать детерминированность
 
 ## 2) Core types (MVP)
 
@@ -25,6 +25,7 @@ model/
 - `api.grpc`
 - `event.topic`
 - `datastore`
+- `external.system`
 - `repo` (optional)
 - `team` (optional)
 
@@ -62,6 +63,11 @@ model/
 - `attributes` (map)
 - `owner_team_id` (для entity)
 
+MVP-практика:
+- внешние интеграции желательно представлять отдельными `external.system` entities;
+- `owner_team_id` должен ссылаться на существующий `team.<slug>`;
+- CI/CD topology пока фиксируется в `reports/as-is/ci-cd.md` и `reports/coverage/*`, а не как отдельный core type модели.
+
 ## 4) Формат evidence
 
 Каждый элемент `evidence[]`:
@@ -73,7 +79,67 @@ model/
 
 Для `provenance.kind = observation` evidence должен быть непустым.
 
-## 5) Пример entity YAML
+## 5) Canonical stable IDs (MVP)
+
+### Entity ID patterns
+- `service`: `svc.<slug>`
+- `team`: `team.<slug>`
+- `repo`: `repo.<slug>`
+- `external.system`: `ext.<slug>`
+- `datastore`: `db.<engine>.<slug>`
+- `api.http`: `api.http.<service-slug>.<method>.<path-slug>`
+- `api.grpc`: `api.grpc.<service-slug>.<service>.<method>`
+- `event.topic`: `topic.<slug>`
+
+### Edge ID pattern
+- `edge.<from>.<type>.<to>`
+
+`from` и `to` в edge ID используют уже нормализованные canonical IDs сущностей.
+
+## 6) Normalization rules
+
+### General slug rules
+- lowercase ASCII only
+- separator: `-`
+- удаляем ведущие/хвостовые separator symbols
+- подряд идущие не-alnum символы схлопываются в один `-`
+- для `service-slug` используется slug service name без префикса `svc.`
+
+### Service / team / repo / external / datastore slug
+- основа slug строится из human-readable canonical name или стабильного anchor
+- `db.<engine>.<slug>` использует отдельный engine slug, например `db.postgres.payments`
+
+### HTTP path slug
+Для `api.http.<service-slug>.<method>.<path-slug>`:
+- HTTP method → lowercase (`get`, `post`, `put`, `delete`, ...)
+- путь `/` нормализуется в `root`
+- сегменты пути нормализуются по одному
+- static segment `/payments` → `payments`
+- parameter segment `{id}` или `:id` → `by-id`
+- итоговые segments join-ятся через `-`
+
+Примеры:
+- `GET /payments` → `api.http.payments.get.payments`
+- `GET /payments/{id}` → `api.http.payments.get.payments-by-id`
+- `POST /` → `api.http.payments.post.root`
+
+### gRPC service/method slug
+Для `api.grpc.<service-slug>.<service>.<method>`:
+- proto service и method нормализуются теми же general slug rules
+- package prefix в canonical ID не включается, если он не нужен для устранения коллизии
+
+### Collision rule
+- если canonical slug уже занят другим entity того же logical pattern, добавляется suffix `.repo-<repo-slug>`
+- collision resolution должна быть детерминированной и опираться на repo source, а не на случайный порядок обхода
+
+## 7) Rename / move policy
+
+- canonical ID автоматически не меняется при rename/move
+- для миграций используются `aliases[]`
+- смена canonical ID требует явной human/manual migration
+- orchestrator/runtime не должны silently re-key существующую сущность
+
+## 8) Пример entity YAML
 
 ```yaml
 id: svc.payments
@@ -99,7 +165,7 @@ provenance:
       excerpt_hash: sha256:deadbeef
 ```
 
-## 6) Пример edge YAML
+## 9) Пример edge YAML
 
 ```yaml
 id: edge.svc.payments.calls.svc.users
@@ -118,10 +184,3 @@ provenance:
         start: 10
         end: 44
 ```
-
-## 7) Стратегия stable IDs (baseline)
-
-Используем гибрид:
-- человеко-читаемые canonical IDs (`svc.<name>`, `api.<name>.<protocol>`, `db.<name>.<engine>`),
-- `aliases[]` для миграций rename/move,
-- предпочтение evidence-backed anchors (entrypoints, module/package path, ingress host, image name).

@@ -1,8 +1,14 @@
 version: 1
 repos:
+  # Exactly one of `path` or `git_url` is expected per repo entry.
+  # If `git_url` is used, ACP resolves it through the local `git` context
+  # of the current user/runner; ACP does not store separate credentials.
+  # The rest of the workspace layout is fixed by MVP convention and is not
+  # configured through `workspace.yaml`.
   - name: payments-service
     path: /absolute/path/to/payments-service
-  - name: infra-k8s
-    path: /absolute/path/to/infra-k8s
+  - name: users-service
+    git_url: https://gitlab.example.com/platform/users-service.git
+    ref: main
 docs:
   imports_path: ./docs/imports

@@ -1,0 +1,6 @@
+version: 1
+repos:
+  - name: payments-service
+    path: ../repos/payments-service
+docs:
+  imports_path: ./docs/imports
