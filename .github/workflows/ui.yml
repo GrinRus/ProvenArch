@@ -1,0 +1,34 @@
+name: ui
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install UI dependencies
+        run: npm ci --prefix ui
+
+      - name: Typecheck UI
+        run: npm run typecheck --prefix ui
+
+      - name: Run UI tests
+        run: npm run test --prefix ui -- --run
+
+      - name: Build UI
+        run: npm run build --prefix ui
