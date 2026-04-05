@@ -6,6 +6,8 @@ server_log="$tmpdir/server.log"
 workspace="$tmpdir/workspace"
 repo="$tmpdir/repos/payments-service"
 api_port="${ACP_SMOKE_API_PORT:-}"
+ready_timeout_sec="${ACP_SMOKE_API_READY_TIMEOUT_SEC:-60}"
+ready_interval_sec="${ACP_SMOKE_API_READY_INTERVAL_SEC:-0.25}"
 mkdir -p "$workspace" "$repo"
 cat > "$workspace/workspace.yaml" <<MANIFEST
 version: 1
@@ -32,15 +34,23 @@ server_pid=$!
 trap 'kill "$server_pid" >/dev/null 2>&1 || true; wait "$server_pid" 2>/dev/null || true; rm -rf "$tmpdir"' EXIT
 
 ready=0
-for _ in {1..40}; do
+attempts="$(python3 - <<'PY' "$ready_timeout_sec" "$ready_interval_sec"
+import math
+import sys
+timeout = float(sys.argv[1])
+interval = float(sys.argv[2])
+print(max(1, math.ceil(timeout / interval)))
+PY
+)"
+for _ in $(seq 1 "$attempts"); do
   if curl -sSf "$api_base/api/health" >/dev/null 2>/dev/null; then
     ready=1
     break
   fi
-  sleep 0.25
+  sleep "$ready_interval_sec"
 done
 if [[ "$ready" -ne 1 ]]; then
-  echo "api smoke: server did not become healthy in time" >&2
+  echo "api smoke: server did not become healthy in time (${ready_timeout_sec}s timeout)" >&2
   cat "$server_log" >&2
   exit 1
 fi
