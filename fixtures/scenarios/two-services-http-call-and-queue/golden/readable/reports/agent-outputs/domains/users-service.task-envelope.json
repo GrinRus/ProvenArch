@@ -1,0 +1,14 @@
+{
+  "contract_version": 1,
+  "agent_id": "domain-analyst",
+  "domain_id": "users-service",
+  "repo_scope": "users-service",
+  "inputs": {
+    "domain_card_path": "charter/cards/domains/users-service.md",
+    "coverage_summary_path": "reports/coverage/summary.md",
+    "questions_path": "reports/coverage/open-questions.md",
+    "model_entities_glob": "model/entities/*.yaml",
+    "findings_path": "reports/findings/findings.md"
+  },
+  "output_path": "reports/agent-outputs/domains/users-service.md"
+}

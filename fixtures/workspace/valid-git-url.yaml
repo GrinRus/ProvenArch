@@ -1,0 +1,7 @@
+version: 1
+repos:
+  - name: users-service
+    git_url: https://gitlab.example.com/platform/users-service.git
+    ref: main
+docs:
+  imports_path: ./docs/imports

@@ -1,0 +1,6 @@
+version: 1
+repos:
+  - name: inventory-service
+    path: ../repos/inventory-service
+docs:
+  imports_path: ./docs/imports

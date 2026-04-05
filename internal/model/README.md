@@ -1,10 +1,9 @@
-package model
+# internal/model
 
-// MVP placeholder.
-// This package will apply TaskResult changeset to entity-per-file model in workspace.
-//
-// Next milestones:
-// - define entity/edge structs (or generic map + schema validation)
-// - implement upsert/remove entity
-// - implement upsert/remove edge
-// - implement ID resolution with aliases
+Пакет реализует entity-per-file model store в workspace:
+- upsert/remove entity и edge;
+- alias/canonical ID resolution;
+- deterministic collision policy (`.repo-<repo-slug>`);
+- semantic guardrails (например, owner linkage).
+
+Model layer является deterministic baseline surface и защищён golden/scenario тестами.

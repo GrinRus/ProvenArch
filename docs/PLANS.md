@@ -1,6 +1,7 @@
 # PLANS.md
 
 ExecPlan помогает агентам доставлять многошаговые изменения надёжно.
+Файл хранит только шаблон и текущие активные планы.
 
 ## Когда использовать
 Используйте ExecPlan, если:
@@ -45,101 +46,162 @@ EP-YYYYMMDD-<slug>
 
 ---
 
-## ExecPlan
+## Active Plans
 
 ### Plan ID
-EP-20260330-baseline-v0-4-migration
+EP-20260403-acp-mvp-beta-foundation
 
 ### Context
-Требуется логически перенести документы и контракты из исходной baseline-папки v0.4 в основной репозиторий как новую baseline-версию,
-сохранив RU-first подачу в основных документах и не оставив дублирующий каталог.
+Нужно перевести ACP из bootstrap skeleton в рабочий MVP beta foundation: валидируемый workspace, применяемый TaskResult, рабочие `init/refresh` run paths для CLI/API, deterministic materialization артефактов в workspace и required локальные проверки без live network dependencies.
 
 ### Goals (must have)
-- [x] Перенести и синхронизировать документы baseline v0.4 в канонические пути репозитория.
-- [x] Обновить TaskResult schema и пример под новую контрактную версию.
-- [x] Заархивировать предыдущий `docs/STAKEHOLDER_DOC.md` v0.3 и заменить root-файл на v0.4.
-- [x] Удалить исходный каталог baseline v0.4 и убрать все ссылки на него.
+- [x] Обновить AGENTS baseline правила (source-of-truth priority, DoD, contract-sync rule)
+- [x] Реализовать workspace manifest loading + semantic validation
+- [x] Реализовать TaskResult validation + normalization legacy forms
+- [x] Реализовать рабочий orchestrator run path для `init`/`refresh`
+- [x] Реализовать API baseline endpoints `/api/health`, `/api/workspace/validate`, `/api/artifacts`, `/api/pipeline/*`
+- [x] Реализовать deterministic materialization `model/`, `reports/`, `proposals/`, `changelog`, `taskruns`
+- [x] Добавить/обновить тесты и прогнать `make contracts test lint build`
 
 ### Non-goals
-- [x] Не добавлять код реализации продукта (`.go`, `.ts`, `.tsx`) в рамках этой миграции.
-- [x] Не менять scope MVP (по-прежнему local-first + Claude Code headless).
+- [x] Hosted/multi-tenant режим
+- [x] Security/compliance enforcement
+- [x] Wave 1+ интеграции (autodocs, Jira manager agents)
+- [x] Не включать `POST /api/qa/ask` в required release surface
 
 ### Approach
-1) Синхронизировать core docs (`README`, `BACKLOG`, `BASELINE_POLICY`, `STAKEHOLDER_DOC`).
-2) Синхронизировать контракты и specs (`schemas/taskresult.schema.json`, `examples/taskresult.example.json`, `docs/spec/*`, `docs/APPENDIX_SCHEMAS.md`).
-3) Провести проверку ссылочной консистентности, затем удалить исходный каталог baseline v0.4.
+1) Сделать документарный baseline hardening и зафиксировать этот план.
+2) Реализовать contracts/workspace/runtime/orchestrator минимально, но полностью исполнимыми.
+3) Реализовать API/CLI execution flow и deterministic artifact materialization.
+4) Закрыть тестовый слой (contract + semantic + run-path smoke) и синхронизировать документацию.
 
 ### Files expected to change
+- `AGENTS.md`
 - `docs/PLANS.md`
-- `README.md`
-- `docs/BACKLOG.md`
-- `docs/BASELINE_POLICY.md`
-- `docs/STAKEHOLDER_DOC.md`
-- исторический `STAKEHOLDER_DOC` (предыдущая версия)
-- `schemas/taskresult.schema.json`
-- `examples/taskresult.example.json`
-- `docs/spec/MODEL_SPEC.md`
-- `docs/spec/PIPELINE_SPEC.md`
-- `docs/APPENDIX_SCHEMAS.md`
+- `cmd/acp/*`
+- `internal/workspace/*`
+- `internal/orchestrator/*`
+- `internal/runtime/claudecode/*`
+- `internal/model/*`
+- `internal/reports/*`
+- `internal/api/*`
+- `fixtures/*` (при необходимости)
+- `README.md`, `docs/ARCHITECTURE.md`, `docs/spec/*` (при изменении поведения/контракта)
 
 ### Acceptance criteria
-- [x] `rg -n "<baseline-source-folder>"` не находит совпадений.
-- [x] `schemas/taskresult.schema.json` и `examples/taskresult.example.json` валидно парсятся.
-- [x] `README`, `ARCHITECTURE`, `STAKEHOLDER_DOC`, `APPENDIX_SCHEMAS` не противоречат новой схеме.
-- [x] `examples/workspace.example.yaml` сохраняет переносимый generic path формат.
+- [x] Тесты обновлены/добавлены
+- [x] Схемы валидируются
+- [x] Документация обновлена
 
 ### Risks
-- Потеря согласованности между docs/spec и schema при неполном переносе семантики.
-- Случайное сохранение ссылок на удаляемый каталог.
+- Большой объём изменений для одного slice может увеличить риск регрессий.
+- Нужна аккуратная балансировка между "рабочий MVP foundation" и "не раздувать scope".
 
 ### Progress log
-- 2026-03-30: ExecPlan добавлен, перенос baseline v0.4 выполнен.
+- 2026-04-03: План создан. Начат Phase A (baseline hardening).
+- 2026-04-03: Реализованы Phase A/B/C/D/E foundation: workspace+TaskResult validation/normalization, runnable orchestrator init|refresh, API `/api/*`, model/reports/proposals/changelog materialization, fake/recorded runtime harness.
+- 2026-04-03: Добавлены/обновлены тесты и пройдены `make contracts`, `make test`, `make lint`, `make build`.
+- 2026-04-03: Начат gap-closing beta pass: schema-driven runtime validation, workspace diagnostics, repo source resolver (`path` + `git_url` cache/fetch), run coordinator/debounce, deterministic artifact hardening, embedded UI/API + editor/git-helper endpoints.
+- 2026-04-03: Добавлены scenario fixtures, deterministic scenario integration tests, smoke scripts и CI workflows (`golden`, `smoke-cli`, `smoke-api`, `ui-smoke`, optional `live-runner-smoke`).
 
 ---
 
 ### Plan ID
-EP-20260330-variant2-workspace-docs-sync
+EP-20260403-acp-beta-gap-closing
 
 ### Context
-Нужно зафиксировать в active docs единый формат хранения MVP: central `arch-workspace` (Variant 2),
-вынести решение из appendix stakeholder-документа в основной поток и убрать альтернативные форматы из канонической документации.
+Закрыть выявленные после аудита расхождения между фактической реализацией и документированными контрактами, а также усилить deterministic/smoke контур до beta-ready required CI без live network dependencies.
 
 ### Goals (must have)
-- [x] Обновить `docs/STAKEHOLDER_DOC.md` до v0.5 и перенести выбранный Variant 2 в основной раздел.
-- [x] Удалить из активного stakeholder-дока развернутые альтернативы (Variant 1/3, Hybrid).
-- [x] Синхронизировать `README`, `ARCHITECTURE`, `docs/spec/PIPELINE_SPEC.md`, `docs/spec/API_SPEC.md`, `BACKLOG`, `docs/BASELINE_POLICY.md`.
-- [x] Сохранить неизменными схемы/контракты (`schemas/taskresult.schema.json` и API wire-shape).
+- [x] Привести API docs к фактическому wire-contract (`error.code/error.message`, diagnostics shape, trigger/not_supported cases)
+- [x] Усилить API тесты на негативные кейсы (`invalid_request_body`, `trigger_unsupported`, `not_supported`)
+- [x] Усилить smoke/API и scenario fixtures (dynamic port, timeout fail, fixture contract/semantic gate)
+- [x] Зафиксировать golden deterministic baseline через snapshot hashes
+- [x] Расширить UI smoke до реального flow `open -> validate -> run -> inspect` с mocked API
+- [x] Обновить README/ARCHITECTURE/TESTING_STRATEGY/PLANS до согласованного состояния
 
 ### Non-goals
-- [x] Не редактировать historical docs вне active baseline.
-- [x] Не менять runtime scope MVP (по-прежнему только Claude Code headless).
-- [x] Не вводить новые операции/поля в TaskResult schema.
+- [x] Не включать `/api/qa/ask` в beta required surface
+- [x] Не добавлять новые runtime кроме `claude-code`
+- [x] Не вводить hosted/multi-tenant control plane
 
 ### Approach
-1) Обновить stakeholder-док: версия, перенос Variant 2 в основную часть, appendix без альтернатив.
-2) Внести единообразные формулировки по central workspace в core-docs/spec/policy/backlog.
-3) Прогнать grep-проверки на отсутствие альтернатив и на наличие canonical markers.
+1) Закрыть compile/test/lint regressions в изменённых slice.
+2) Зафиксировать deterministic scenario baseline и fixture semantics.
+3) Синхронизировать docs/spec/API с реальным поведением серверных handler-ов.
+4) Прогнать release gates (`contracts/test/lint/build/smoke/race`).
 
 ### Files expected to change
-- `docs/PLANS.md`
-- `docs/STAKEHOLDER_DOC.md`
+- `internal/api/*`
+- `internal/orchestrator/scenario_test.go`
+- `fixtures/scenarios/*`
+- `scripts/smoke-api.sh`
+- `ui/src/App.test.tsx`
+- `docs/spec/API_SPEC.md`
+- `internal/api/README.md`
 - `README.md`
 - `docs/ARCHITECTURE.md`
-- `docs/spec/PIPELINE_SPEC.md`
-- `docs/spec/API_SPEC.md`
-- `docs/BACKLOG.md`
-- `docs/BASELINE_POLICY.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/PLANS.md`
 
 ### Acceptance criteria
-- [x] `rg -n "Вариант 1|Вариант 3|Hybrid" docs/STAKEHOLDER_DOC.md README.md docs/ARCHITECTURE.md docs/BACKLOG.md docs/BASELINE_POLICY.md docs/spec/*.md` не находит совпадений в active docs.
-- [x] `rg -n "arch-workspace|workspace.yaml|docs/imports" docs/STAKEHOLDER_DOC.md README.md docs/ARCHITECTURE.md docs/spec/*.md docs/BACKLOG.md` подтверждает канонические маркеры.
-- [x] `rg -n "v0\\.4|v0\\.5" docs/STAKEHOLDER_DOC.md README.md` показывает `v0.5` в stakeholder и обновлённую ссылку в README.
-- [x] Формулировки про central workspace (Variant 2) согласованы между stakeholder и инженерными документами.
+- [x] `make contracts` зелёный
+- [x] `make test` зелёный
+- [x] `make lint` зелёный
+- [x] `make build` зелёный
+- [x] `bash ./scripts/smoke-cli.sh` зелёный
+- [x] `bash ./scripts/smoke-api.sh` зелёный
+- [x] `go test -race ./...` зелёный
 
 ### Risks
-- Неполная синхронизация формулировок между stakeholder и инженерными docs.
-- Случайные остатки альтернативных вариантов в active docs.
+- Документация может снова устаревать без дисциплины синхронизации при следующих slice.
+- Run-specific артефакты могут ошибочно попадать в deterministic compare при расширении pipeline.
 
 ### Progress log
-- 2026-03-30: Создан и реализован план синхронизации active docs под Variant 2.
-- 2026-03-30: Acceptance checks выполнены (`rg`), противоречий не найдено.
+- 2026-04-03: Добавлен unified error envelope для `POST /api/workspace/validate` и API tests на negative cases.
+- 2026-04-03: Усилен `scripts/smoke-api.sh` (dynamic port + timeout fail), исправлен `copyScenarioRoot`, добавлен fixture semantic gate.
+- 2026-04-03: Зафиксирован scenario golden baseline через `golden/snapshot.sha256` и сравнение в тестах.
+- 2026-04-03: Расширен UI smoke test до полного mocked flow `open -> validate -> run -> inspect`.
+- 2026-04-03: Пройдены `make contracts`, `make test`, `make lint`, `make build`, `smoke-cli`, `smoke-api`, `go test -race ./...`.
+- 2026-04-04: Добавлен process-scoped runtime selector (`--runtime fake|headless`) для `acp run|serve`, actionable runner diagnostics (`runner_unavailable`, `runner_parse_failed`) и `error_code` в run status API.
+- 2026-04-04: Domain fan-out переведён на per-domain execution contracts (`*.task-envelope.json`) с deterministic tests и unresolved-domain questions.
+- 2026-04-04: Усилен internal QA indexing (charter/cards + model + reports + docs/imports), добавлены ranking/citations tests, добавлены GitLab trigger templates и docs sync pass.
+- 2026-04-04: Устранён async coordinator gap: rejected start вне debounce window больше не создаёт orphan `queued` run-record.
+- 2026-04-04: API/docs truth-sync: `runner_parse_failed` зафиксирован как run-level `error_code` после `202` async start, а не как start-time HTTP ошибка.
+- 2026-04-04: Закрыт residual gap: `runner_parse_failed` исключён из start-time API mapping, Step 1 domain unresolved questions materialize-ятся в coverage сразу, async polling в API/orchestrator тестах унифицирован через общий wait helper.
+- 2026-04-04: Добавлен read-only CLI consumption layer для QA (`acp qa --workspace ... --question ...`) поверх `internal/qa`.
+- 2026-04-04: Step 1 domain/team card enrichment доведён до deterministic derived section updates для существующих canonical cards без auto-create/rename.
+- 2026-04-04: UI baseline editor расширен до selectable набора `charter/*` и `skills/*` артефактов; добавлен UI regression test на save flow.
+- 2026-04-04: `golden` workflow зафиксирован на 5 deterministic scenario tests (включая domain envelopes и deterministic-scope exclusion).
+- 2026-04-04: Закрыт Step0 wiring gap: `init.step0.constitution` читает `charter/wizard/step0-contract.json`, при missing/invalid contract использует baseline fallback и пишет warning в run diagnostics.
+- 2026-04-04: `POST /api/workspace/validate` усилен pre-run layout readiness diagnostics (`workspace.layout.dir.missing|not_dir|unreadable`) + добавлены API/workspace regression tests.
+- 2026-04-04: Усилены deterministic derived sections для team cards (`evidence_refs`) и обновлён scenario golden snapshot hash baseline.
+- 2026-04-05: Step 1 переведён на реальное per-domain runtime execution с отдельными raw taskruns по каждому canonical domain card; architect summary теперь агрегируется из фактических domain outputs с детерминированной сортировкой.
+- 2026-04-05: Усилен internal QA слой (explainable citation reasons, стабилизированная confidence policy, deterministic ranking) и добавлены дополнительные QA regression tests.
+- 2026-04-05: Добавлен docs-consistency gate (`internal/docsync`) и синхронизирована каноническая stakeholder matrix (`docs/STAKEHOLDER_DOC.md`) с README/ARCHITECTURE/PLANS/PIPELINE/API docs.
+- 2026-04-05: Выполнен cleanup truth-sync slice: удалены stale `future/skeleton/placeholder` формулировки в CLI/help и ключевых docs, добавлены docsync проверки stale markers + CLI docs parity, зафиксирована policy tracked generated artifacts (`internal/api/ui_dist`, `fixtures/scenarios/*/golden/readable`) и добавлены post-beta follow-up cleanup items в backlog.
+- 2026-04-05: Закрыт cleanup follow-up по `slugify`: дубли в orchestrator/model/runtime объединены в `internal/slugutil` с unit-tests без изменения публичных контрактов.
+
+---
+
+## Implemented vs Planned (operational mirror)
+
+Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.
+Таблица ниже — инженерный mirror и должна оставаться синхронизированной с канонической матрицей.
+
+| Epic | Статус | Комментарий |
+|---|---|---|
+| 1 Workspace/contracts | done (beta baseline) | Schema-driven + semantic validation, resolver `path/git_url`, diagnostics API |
+| 2 TaskResult foundations | done (beta baseline) | Validation + normalization legacy forms, contract tests |
+| 3 Runtime/orchestration seam | done (beta baseline) | Fake default + opt-in headless runtime selector, raw taskruns materialization |
+| 4 Model deterministic core | done (beta baseline) | Canonical IDs/collision rules + deterministic regression tests |
+| 5 Pipeline 0–4 | done (beta baseline) | `init|refresh` runnable через CLI/API |
+| 6 UI baseline | done (beta baseline) | Setup/validate/run/inspect + editors + git helpers |
+| 7 Domain-first layer | done (beta baseline) | Per-domain contracts + deterministic Step 1 enrichment canonical domain/team cards without auto-create |
+| 8 Baseline bundle | done (beta baseline) | `skills/subagents.yaml` + prompt packs + validation |
+| 9 Q&A capability | done (beta boundary) | Workspace-backed QA service + read-only CLI `acp qa`; публичный endpoint остаётся follow-up |
+| 10 Changelog compilers | done (beta baseline) | Iteration changelog materialization в `reports/changelog/*` |
+| 11 `POST /api/qa/ask` | follow-up (post-beta) | Не входит в required beta surface |
+| 12–13 | out of MVP | Вне текущего beta scope |
+| 14 CI trigger mode | done (beta baseline) | CLI batch required, smoke/golden/ui-smoke jobs без live network deps |
+| 15 Domain/baseline pack hardening | done (beta baseline) | Baseline skills/prompts wired и versioned в workspace |

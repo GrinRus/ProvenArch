@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+tmpdir="$(mktemp -d)"
+server_log="$tmpdir/server.log"
+workspace="$tmpdir/workspace"
+repo="$tmpdir/repos/payments-service"
+api_port="${ACP_SMOKE_API_PORT:-}"
+mkdir -p "$workspace" "$repo"
+cat > "$workspace/workspace.yaml" <<MANIFEST
+version: 1
+repos:
+  - name: payments-service
+    path: $repo
+MANIFEST
+
+if [[ -z "$api_port" ]]; then
+  api_port="$(python3 - <<'PY'
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+)"
+fi
+
+api_base="http://127.0.0.1:$api_port"
+
+go run ./cmd/acp serve --workspace "$workspace" --listen "127.0.0.1:$api_port" >"$server_log" 2>&1 &
+server_pid=$!
+trap 'kill "$server_pid" >/dev/null 2>&1 || true; wait "$server_pid" 2>/dev/null || true; rm -rf "$tmpdir"' EXIT
+
+ready=0
+for _ in {1..40}; do
+  if curl -sSf "$api_base/api/health" >/dev/null 2>/dev/null; then
+    ready=1
+    break
+  fi
+  sleep 0.25
+done
+if [[ "$ready" -ne 1 ]]; then
+  echo "api smoke: server did not become healthy in time" >&2
+  cat "$server_log" >&2
+  exit 1
+fi
+
+curl -sSf -X POST "$api_base/api/workspace/validate" >/dev/null
+run_id="$(curl -sSf -X POST -H 'Content-Type: application/json' -d '{"trigger":"manual"}' "$api_base/api/pipeline/refresh" | sed -n 's/.*"run_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+
+if [[ -z "$run_id" ]]; then
+  echo "failed to parse run_id" >&2
+  cat "$server_log" >&2
+  exit 1
+fi
+
+run_done=0
+status_payload=""
+for _ in {1..80}; do
+  status_payload="$(curl -sSf "$api_base/api/pipeline/runs/$run_id")"
+  status="$(echo "$status_payload" | sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+  if [[ "$status" == "succeeded" ]]; then
+    run_done=1
+    break
+  fi
+  if [[ "$status" == "failed" ]]; then
+    echo "run failed: $status_payload" >&2
+    exit 1
+  fi
+  sleep 0.25
+done
+
+if [[ "$run_done" -ne 1 ]]; then
+  echo "run did not reach succeeded status in time (run_id=$run_id)" >&2
+  if [[ -n "$status_payload" ]]; then
+    echo "last status payload: $status_payload" >&2
+  fi
+  cat "$server_log" >&2
+  exit 1
+fi
+
+curl -sSf "$api_base/api/pipeline/runs/$run_id/artifacts" >/dev/null
+
+echo "smoke-api passed"
