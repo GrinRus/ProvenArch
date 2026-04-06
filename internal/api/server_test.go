@@ -262,6 +262,187 @@ func TestPipelineEndpoints(t *testing.T) {
 	}
 }
 
+func TestPipelineRunsListEndpointReturnsRecentRuns(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	firstStartResp, err := http.Post(httpServer.URL+"/api/pipeline/init", "application/json", bytes.NewBufferString(`{"trigger":"ui"}`))
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/init first run: %v", err)
+	}
+	defer firstStartResp.Body.Close()
+	if firstStartResp.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected first run status 202, got %d", firstStartResp.StatusCode)
+	}
+	var firstPayload struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(firstStartResp.Body).Decode(&firstPayload); err != nil {
+		t.Fatalf("decode first run payload: %v", err)
+	}
+	if firstPayload.RunID == "" {
+		t.Fatalf("expected first run id")
+	}
+	_ = waitForRunTerminalStatus(t, httpServer.URL, firstPayload.RunID, 8*time.Second)
+
+	secondStartResp, err := http.Post(httpServer.URL+"/api/pipeline/refresh", "application/json", bytes.NewBufferString(`{"trigger":"manual"}`))
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/refresh second run: %v", err)
+	}
+	defer secondStartResp.Body.Close()
+	if secondStartResp.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected second run status 202, got %d", secondStartResp.StatusCode)
+	}
+	var secondPayload struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(secondStartResp.Body).Decode(&secondPayload); err != nil {
+		t.Fatalf("decode second run payload: %v", err)
+	}
+	if secondPayload.RunID == "" {
+		t.Fatalf("expected second run id")
+	}
+	_ = waitForRunTerminalStatus(t, httpServer.URL, secondPayload.RunID, 8*time.Second)
+
+	listResp, err := http.Get(httpServer.URL + "/api/pipeline/runs?limit=1")
+	if err != nil {
+		t.Fatalf("GET /api/pipeline/runs?limit=1: %v", err)
+	}
+	defer listResp.Body.Close()
+	if listResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", listResp.StatusCode)
+	}
+	var listPayload struct {
+		Items []struct {
+			RunID      string   `json:"run_id"`
+			Pipeline   string   `json:"pipeline"`
+			Status     string   `json:"status"`
+			StartedAt  string   `json:"started_at"`
+			FinishedAt *string  `json:"finished_at"`
+			Warnings   []string `json:"warnings"`
+			ErrorCode  any      `json:"error_code"`
+			Error      any      `json:"error"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&listPayload); err != nil {
+		t.Fatalf("decode runs list payload: %v", err)
+	}
+	if len(listPayload.Items) != 1 {
+		t.Fatalf("expected one run from limited list, got %d", len(listPayload.Items))
+	}
+	if listPayload.Items[0].RunID != secondPayload.RunID {
+		t.Fatalf("expected newest run first, got %q want %q", listPayload.Items[0].RunID, secondPayload.RunID)
+	}
+	if listPayload.Items[0].Pipeline != "refresh" {
+		t.Fatalf("expected pipeline refresh, got %q", listPayload.Items[0].Pipeline)
+	}
+	if listPayload.Items[0].StartedAt == "" || listPayload.Items[0].FinishedAt == nil {
+		t.Fatalf("expected started_at and finished_at in list payload, got %+v", listPayload.Items[0])
+	}
+	if listPayload.Items[0].Status != "succeeded" {
+		t.Fatalf("expected status succeeded, got %q", listPayload.Items[0].Status)
+	}
+}
+
+func TestPipelineRunsListEndpointRejectsInvalidLimit(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Get(httpServer.URL + "/api/pipeline/runs?limit=not-a-number")
+	if err != nil {
+		t.Fatalf("GET /api/pipeline/runs invalid limit: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", response.StatusCode)
+	}
+
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode invalid limit payload: %v", err)
+	}
+	if payload.Error.Code != "invalid_limit" {
+		t.Fatalf("expected invalid_limit code, got %q", payload.Error.Code)
+	}
+}
+
+func TestRunDetailAndArtifactsLoadFromPersistedHistoryAfterRestart(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "repos", "payments-service")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("create repo path: %v", err)
+	}
+	manifest := `version: 1
+repos:
+  - name: payments-service
+    path: ` + repoPath + `
+`
+	ws, err := workspace.Open(writeManifestRootWithRoot(t, root, manifest))
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+
+	serviceWithRuns := orchestrator.NewService(orchestrator.WithHistoryWorkspace(ws))
+	runInfo, artifacts, err := serviceWithRuns.Run(context.Background(), orchestrator.RunRequest{
+		Workspace:      ws,
+		Pipeline:       orchestrator.PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run pipeline for persisted history setup: %v", err)
+	}
+	if runInfo.RunID == "" {
+		t.Fatalf("expected run id from setup run")
+	}
+	if len(artifacts) == 0 {
+		t.Fatalf("expected non-empty artifacts from setup run")
+	}
+
+	restartedService := orchestrator.NewService(orchestrator.WithHistoryWorkspace(ws))
+	server := NewServer(ws, restartedService)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	runResp, err := http.Get(httpServer.URL + "/api/pipeline/runs/" + runInfo.RunID)
+	if err != nil {
+		t.Fatalf("GET run from persisted history: %v", err)
+	}
+	defer runResp.Body.Close()
+	if runResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200 for persisted run detail, got %d", runResp.StatusCode)
+	}
+
+	artifactsResp, err := http.Get(httpServer.URL + "/api/pipeline/runs/" + runInfo.RunID + "/artifacts")
+	if err != nil {
+		t.Fatalf("GET run artifacts from persisted history: %v", err)
+	}
+	defer artifactsResp.Body.Close()
+	if artifactsResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200 for persisted run artifacts, got %d", artifactsResp.StatusCode)
+	}
+	var artifactsPayload struct {
+		Artifacts []orchestrator.Artifact `json:"artifacts"`
+	}
+	if err := json.NewDecoder(artifactsResp.Body).Decode(&artifactsPayload); err != nil {
+		t.Fatalf("decode persisted artifacts payload: %v", err)
+	}
+	if len(artifactsPayload.Artifacts) == 0 {
+		t.Fatalf("expected non-empty artifacts from persisted history")
+	}
+}
+
 func TestWorkspaceManifestRoundTrip(t *testing.T) {
 	t.Parallel()
 
@@ -678,13 +859,22 @@ func newTestServerFromManifest(t *testing.T, manifest string) *Server {
 		t.Fatalf("open workspace: %v", err)
 	}
 
-	return NewServer(ws, orchestrator.NewService())
+	return NewServer(ws, orchestrator.NewService(orchestrator.WithHistoryWorkspace(ws)))
 }
 
 func writeManifestRoot(t *testing.T, manifest string) string {
 	t.Helper()
 
 	root := t.TempDir()
+	return writeManifestRootWithRoot(t, root, manifest)
+}
+
+func writeManifestRootWithRoot(t *testing.T, root string, manifest string) string {
+	t.Helper()
+
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("create root: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(root, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}

@@ -91,110 +91,86 @@ MVP policy: Observation + Assertion отображаются как рабоча
 
 ---
 
-## Быстрый старт (baseline)
+## Быстрый старт (minimal local MVP)
 
-### Prerequisites
+### Минимальные prerequisites для первого запуска
 - Git
 - Go 1.20.x
-- Node.js 22.21.1
-- npm 10.x
-- локальный доступ пользователя к git на устройстве, где запускается ACP
-- локальные клоны релевантных репозиториев и/или доступные через локальный `git` GitHub/GitLab `git_url`
-- установленный Claude Code в PATH
+- локальный клон хотя бы одного анализируемого репозитория
+- Node.js 22.21.1 + npm 10.x (нужно для UI dev/build в этом репозитории)
 
-### 1) Создайте architecture workspace
+Для первого запуска достаточно `--runtime fake`.
+Claude Code требуется только для реальных запусков с `--runtime headless`.
 
-Для MVP это единственная каноническая конвенция хранения: central `arch-workspace` repo.
+### 1) Поднимите сервис одной командой (auto-init)
 
-Рекомендуемый layout отдельного git-репозитория:
-
-```text
-arch-workspace/
-  workspace.yaml
-  charter/
-    cards/
-      domains/
-      teams/
-  skills/
-    subagents.yaml
-  model/
-  reports/
-    as-is/
-    findings/
-    coverage/
-    taskruns/
-    agent-outputs/
-      domains/
-      architect/
-    changelog/
-  proposals/
-  docs/
-    imports/
-    rfcs/
-    meetings/
-    decisions/
+```bash
+acp serve --workspace /path/to/arch-workspace --auto-init --repo-name payments-service --repo-path /path/to/payments-service --runtime fake
 ```
 
-### 2) Заполните `workspace.yaml`
+Эта команда:
+- создаёт `workspace.yaml`, если он отсутствует,
+- создаёт fixed MVP layout,
+- поднимает backend + embedded UI без блокирующего preflight repo-resolution на старте.
 
-Source of truth:
+### 2) Запустите первый анализ
+
+Можно из UI (кнопка `Run init`) или CLI:
+
+```bash
+acp run --workspace /path/to/arch-workspace --pipeline init --runtime fake --non-interactive
+```
+
+После запуска UI отображает dashboard со всеми run'ами (`queued/running/succeeded/failed`), включая уже завершённые запуски.
+История сохраняется в workspace: `reports/taskruns/run-history.json`.
+
+### 3) Альтернативный явный bootstrap через `init-workspace`
+
+```bash
+acp init-workspace --workspace /path/to/arch-workspace --repo-name payments-service --repo-path /path/to/payments-service
+```
+
+Команда:
+- создаёт/обновляет `workspace.yaml`,
+- создаёт fixed MVP layout (`charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/`),
+- валидирует manifest и repo source.
+
+Source of truth для manifest contract:
 - `docs/spec/WORKSPACE_SPEC.md`
 - `schemas/workspace.schema.json`
 - `examples/workspace.example.yaml`
 
-В manifest описываются только repo sources и optional `docs.imports_path`.
-Layout `charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/` не конфигурируется через `workspace.yaml` и считается fixed MVP convention.
+Для remote source можно использовать:
 
-См. [examples/workspace.example.yaml](examples/workspace.example.yaml):
-
-```yaml
-version: 1
-repos:
-  - name: payments-service
-    path: /absolute/path/to/payments-service
-  - name: users-service
-    git_url: https://gitlab.example.com/platform/users-service.git
-    ref: main
-docs:
-  imports_path: ./docs/imports
+```bash
+acp init-workspace --workspace /path/to/arch-workspace --repo-name users-service --repo-git-url https://gitlab.example.com/platform/users-service.git --repo-ref main
 ```
 
-Для каждой записи в `repos[]` задаётся либо `path`, либо `git_url`.
-Если указан `git_url`, workspace layer выполняет clone/fetch на той же машине через локальный `git` и текущий git-контекст пользователя/runner.
-Отдельное хранилище credentials внутри ACP в MVP не вводится.
-Имена репозиториев в `repos[]` должны быть уникальными, потому что используются как repo scopes и evidence references.
+### 3.1) Read-only QA по артефактам workspace (опционально)
 
-### 3) Импортируйте документы вручную (MVP)
+```bash
+acp qa --workspace /path/to/arch-workspace --question "Who owns payments-service?"
+```
+
+### 4) Самый короткий локальный flow через Makefile
+
+```bash
+make quickstart-local WORKSPACE=/path/to/arch-workspace REPO_PATH=/path/to/payments-service REPO_NAME=payments-service
+```
+
+Команда выполняет `init-workspace` + первый `init` pipeline. После неё можно сразу запускать `acp serve`.
+
+### 5) Импортируйте документы вручную (MVP)
 
 Документы (например, выгрузки из Confluence) кладутся в `docs/imports/`.
 Для импортов рекомендуется вести `docs/imports/index.yaml` с metadata: источник, путь, checksum, imported_at, source_updated_at.
 
-### 4) Запускайте CLI
+### 6) Когда переходить на headless runtime
 
-Доступные интерфейсы в baseline slice:
-- локальный UI/API (через `acp serve --workspace <abs-path>`)
-- минимальный CLI
-- batch mode для GitHub/GitLab CI/CD
-- запуск через SCM hook и/или manual pipeline button/job
+- `--runtime fake` — default для required deterministic CI surface и первого локального старта.
+- `--runtime headless` — opt-in для реального анализа через Claude Code.
 
-`acp serve` в MVP поднимает single-workspace-per-process service.
-Поэтому pipeline endpoints работают с уже привязанным workspace и не принимают `workspace_path` в request body.
-Для CI/CD required surface — CLI batch mode; internal API trigger остаётся optional и допустим только для trusted local/private deployment.
-
-`acp run` выполняет рабочий baseline pipeline (`init`/`refresh`) и материализует артефакты в workspace.
-`acp serve` поднимает локальный API backend и embedded UI (SPA fallback на non-API routes); для быстрой проверки wiring доступен `--dry-run`.
-Runtime selector фиксируется на уровне процесса:
-- `--runtime fake` (default, deterministic required CI surface)
-- `--runtime headless` (opt-in для реальных локальных прогонов через Claude Code headless)
-
-Пример доступных команд:
-- `acp serve --workspace /path/to/arch-workspace --runtime fake`
-- `acp serve --workspace /path/to/arch-workspace --runtime headless`
-- `acp run --workspace ... --pipeline init --runtime fake`
-- `acp run --workspace ... --pipeline refresh --runtime fake --non-interactive`
-- `acp qa --workspace ... --question "Who owns payments-service?"`
-
-### 5) Поднимите dev environment
+### 7) Поднимите dev environment
 
 Root entrypoints:
 - `make bootstrap`

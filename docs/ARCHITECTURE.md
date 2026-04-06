@@ -15,9 +15,12 @@
 
 ## Компоненты
 1) **Go entrypoint (`cmd/acp`)** *(implemented baseline)*
+   - `init-workspace --workspace <abs-path> --repo-name <name> (--repo-path <path> | --repo-git-url <url>)` создаёт/обновляет `workspace.yaml`, bootstrap-ит fixed layout и выполняет dry validation для первого старта
    - Раздаёт UI (embedded static assets из `ui/dist`)
    - Экспортирует API под `/api/*`
-   - `serve --workspace <abs-path> [--runtime fake|headless]` поднимает single-workspace-per-process service
+   - `serve --workspace <abs-path> [--runtime fake|headless] [--auto-init --repo-name <name> (--repo-path <path> | --repo-git-url <url>)]` поднимает single-workspace-per-process service
+   - `serve --auto-init` bootstrap-ит workspace manifest/layout при отсутствии `workspace.yaml`
+   - startup для `serve` lenient: без блокирующего repo preflight; readiness diagnostics доступны через `/api/workspace/validate`
    - Поддерживает batch/non-interactive режим для CI jobs
    - `run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--non-interactive]`
    - runtime selector process-scoped: `fake` default для required CI, `headless` opt-in
@@ -30,6 +33,7 @@
    - Dev: `npm run dev` с proxy на backend
    - Prod: `npm run build` → `ui/dist` встраивается в Go бинарь
    - Редактирует baseline bundle artifacts через guided selector (`charter/*`, `skills/*`, prompt packs, `skills/subagents.yaml`)
+   - Показывает run dashboard (queued/running/succeeded/failed), включая завершённые run'ы из persisted history
 
 3) **Orchestrator (`internal/orchestrator`)** *(implemented baseline)*
    - Step registry (шаги init pipeline)
@@ -50,6 +54,7 @@
    - Не auto-create/rename canonical domain/team cards
    - Триггерит генерацию отчётов
    - Поддерживает async run coordination: single active run + debounce queue (`last event wins`)
+   - Ведёт persisted run history в `reports/taskruns/run-history.json` (versioned index, retention 500)
    - (опционально) делает git commit
 
 4) **Agent Topology (domain-first, baseline)**
@@ -136,6 +141,7 @@ Execution modes:
 - Run-specific artifacts:
   - `reports/changelog/*`
   - `reports/taskruns/*`
+  - `reports/taskruns/run-history.json`
   - run status registry (`/api/pipeline/runs/*`)
 
 ## Follow-up boundary

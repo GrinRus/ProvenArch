@@ -2,7 +2,7 @@
 
 Этот документ фиксирует фактический wire-contract HTTP API для local-first ACP standalone сервера.
 
-> MVP режим: `acp serve --workspace <abs-path>`.
+> MVP режим: `acp serve --workspace <abs-path> [--auto-init ...]`.
 > Service работает с одним bound workspace на процесс.
 > Required CI/CD surface: CLI batch mode (`acp run ... --non-interactive`). API-trigger остаётся optional для trusted local/private deployment.
 
@@ -219,6 +219,34 @@ Body: отсутствует.
 Для runtime parse/runtime ошибок после успешного async start используется run-level статус:
 - `error_code: "runner_parse_failed"` (или другой actionable code) в `failed` run.
 
+### GET `/api/pipeline/runs?limit=<n>`
+Возвращает список запусков pipeline (queued/running/succeeded/failed), отсортированный по `started_at desc`.
+
+Параметры:
+- `limit` optional, default `50`, max `500`
+
+**200**
+```json
+{
+  "items": [
+    {
+      "run_id": "run_20260403_001",
+      "pipeline": "init",
+      "status": "succeeded",
+      "started_at": "2026-04-03T12:00:00Z",
+      "finished_at": "2026-04-03T12:00:02Z",
+      "current_step": "init.step4.proposals",
+      "warnings": [],
+      "error_code": null,
+      "error": null
+    }
+  ]
+}
+```
+
+**400**
+- `invalid_limit`
+
 ### GET `/api/pipeline/runs/<run_id>/artifacts`
 Возвращает список materialized artifacts для run.
 
@@ -294,6 +322,7 @@ Body: отсутствует.
 Run-specific поверхность (не входит в strict deterministic golden compare):
 - `reports/changelog/*`
 - `reports/taskruns/*`
+- `reports/taskruns/run-history.json`
 - runtime run registry/status (`/api/pipeline/runs/*`)
 
 ## 7) Follow-up boundary (post-beta)
@@ -302,7 +331,8 @@ Run-specific поверхность (не входит в strict deterministic g
 Каноническая фиксация runtime/Q&A boundary: `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.
 
 ## 8) Deployment boundary
-- `acp serve --workspace <abs-path> [--runtime fake|headless]`: local interactive и trusted local/private deployment.
+- `acp serve --workspace <abs-path> [--runtime fake|headless] [--auto-init --repo-name <name> (--repo-path <path> | --repo-git-url <url>)]`: local interactive и trusted local/private deployment.
+- `serve` startup работает в lenient mode: сервис стартует без блокирующего repo preflight; readiness diagnostics доступны через `POST /api/workspace/validate`.
 - `acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--non-interactive]`.
 - default runtime mode: `fake` (required deterministic CI surface), `headless` — opt-in.
 - GitHub/GitLab hooks/manual jobs для required CI/CD должны использовать CLI batch mode с deterministic defaults (`--runtime fake`).

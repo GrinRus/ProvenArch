@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import App from "./App";
 
 type MockJSON = Record<string, unknown>;
@@ -19,14 +19,36 @@ function textResponse(body: string, status = 200): Response {
 
 describe("App", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
   it("runs mocked flow open -> validate -> run -> inspect", async () => {
+    let runStarted = false;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
       const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        if (!runStarted) {
+          return jsonResponse({ items: [] });
+        }
+        return jsonResponse({
+          items: [
+            {
+              run_id: "run-1",
+              pipeline: "init",
+              status: "succeeded",
+              started_at: "2026-04-03T12:00:00Z",
+              finished_at: "2026-04-03T12:00:02Z",
+              warnings: [],
+              error_code: null,
+              error: null
+            }
+          ]
+        });
+      }
 
       if (method === "GET" && url === "/api/workspace/manifest") {
         return jsonResponse({
@@ -75,6 +97,7 @@ describe("App", () => {
       }
 
       if (method === "POST" && url === "/api/pipeline/init") {
+        runStarted = true;
         return jsonResponse({ run_id: "run-1", status: "queued" });
       }
 
@@ -84,7 +107,9 @@ describe("App", () => {
           pipeline: "init",
           status: "succeeded",
           started_at: "2026-04-03T12:00:00Z",
-          finished_at: "2026-04-03T12:00:02Z"
+          finished_at: "2026-04-03T12:00:02Z",
+          error_code: null,
+          warnings: []
         });
       }
 
@@ -138,6 +163,8 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: /^run init$/i }));
 
     await screen.findByText(/Pipeline:\s*init/i);
+    await screen.findByRole("button", { name: /run-1/i });
+    expect(screen.getByText(/Running:\s*0\s*\|\s*Succeeded:\s*1\s*\|\s*Failed:\s*0/i)).toBeInTheDocument();
     await screen.findByRole("button", { name: /reports\/as-is\/overview.md/i });
 
     fireEvent.click(screen.getByRole("button", { name: /reports\/as-is\/overview.md/i }));
@@ -160,6 +187,10 @@ describe("App", () => {
         return jsonResponse({
           content: "version: 1\nrepos:\n  - name: payments-service\n    path: /tmp/payments-service\n"
         });
+      }
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        return jsonResponse({ items: [] });
       }
 
       if (method === "GET" && url === "/api/artifacts?path=charter%2Foverview.md") {
@@ -212,5 +243,166 @@ describe("App", () => {
         content: "qa prompt baseline\nupdated line\n"
       })
     );
+  });
+
+  it("does not start polling loop when there are no active runs", async () => {
+    vi.useFakeTimers();
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        return jsonResponse({ items: [] });
+      }
+      if (method === "GET" && url === "/api/workspace/manifest") {
+        return jsonResponse({
+          content: "version: 1\nrepos:\n  - name: payments-service\n    path: /tmp/payments-service\n"
+        });
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Foverview.md") {
+        return textResponse("# Charter\n");
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Fwizard%2Fstep0-contract.json") {
+        return textResponse("not found", 404);
+      }
+
+      return jsonResponse(
+        {
+          error: {
+            code: "not_found",
+            message: `unhandled request: ${method} ${url}`
+          }
+        },
+        404
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    expect(screen.getByText(/Запуски анализа/i)).toBeInTheDocument();
+
+    const listCallsBefore = fetchMock.mock.calls.filter((call) => call[0] === "/api/pipeline/runs?limit=100").length;
+    expect(listCallsBefore).toBe(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+
+    const listCallsAfter = fetchMock.mock.calls.filter((call) => call[0] === "/api/pipeline/runs?limit=100").length;
+    expect(listCallsAfter).toBe(1);
+  });
+
+  it("renders queued/succeeded/failed runs and opens selected run details", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        return jsonResponse({
+          items: [
+            {
+              run_id: "run-queued",
+              pipeline: "refresh",
+              status: "queued",
+              started_at: "2026-04-03T12:01:00Z",
+              finished_at: null,
+              warnings: [],
+              error_code: null,
+              error: null
+            },
+            {
+              run_id: "run-ok",
+              pipeline: "init",
+              status: "succeeded",
+              started_at: "2026-04-03T12:00:00Z",
+              finished_at: "2026-04-03T12:00:02Z",
+              warnings: ["step0_wizard_contract_missing: fallback baseline used"],
+              error_code: null,
+              error: null
+            },
+            {
+              run_id: "run-failed",
+              pipeline: "refresh",
+              status: "failed",
+              started_at: "2026-04-03T11:59:00Z",
+              finished_at: "2026-04-03T11:59:04Z",
+              warnings: ["repo source warning"],
+              error_code: "runner_parse_failed",
+              error: "synthetic parse failure"
+            }
+          ]
+        });
+      }
+      if (method === "GET" && url === "/api/workspace/manifest") {
+        return jsonResponse({
+          content: "version: 1\nrepos:\n  - name: payments-service\n    path: /tmp/payments-service\n"
+        });
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Foverview.md") {
+        return textResponse("# Charter\n");
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Fwizard%2Fstep0-contract.json") {
+        return textResponse("not found", 404);
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-failed") {
+        return jsonResponse({
+          run_id: "run-failed",
+          pipeline: "refresh",
+          status: "failed",
+          started_at: "2026-04-03T11:59:00Z",
+          finished_at: "2026-04-03T11:59:04Z",
+          current_step: "refresh.step3.findings",
+          warnings: ["repo source warning"],
+          error_code: "runner_parse_failed",
+          error: "synthetic parse failure"
+        });
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-failed/artifacts") {
+        return jsonResponse({
+          run_id: "run-failed",
+          artifacts: [
+            {
+              path: "reports/taskruns/run-failed.json",
+              kind: "taskrun",
+              label: "run-failed taskrun"
+            }
+          ]
+        });
+      }
+      if (method === "GET" && url === "/api/artifacts?path=reports%2Ftaskruns%2Frun-failed.json") {
+        return textResponse("{\"status\":\"failed\"}\n");
+      }
+      if (method === "GET" && url === "/api/artifacts?path=reports%2Fcoverage%2Fsummary.md") {
+        return textResponse("Coverage: 61%\n");
+      }
+      if (method === "GET" && url === "/api/artifacts?path=reports%2Fcoverage%2Fopen-questions.md") {
+        return textResponse("- clarify ownership\n");
+      }
+
+      return jsonResponse(
+        {
+          error: {
+            code: "not_found",
+            message: `unhandled request: ${method} ${url}`
+          }
+        },
+        404
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    await screen.findByText(/Запуски анализа/i);
+    await screen.findByRole("button", { name: /run-queued/i });
+    await screen.findByRole("button", { name: /run-ok/i });
+    await screen.findByRole("button", { name: /run-failed/i });
+    expect(screen.getByText(/Running:\s*1\s*\|\s*Succeeded:\s*1\s*\|\s*Failed:\s*1/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /run-failed/i }));
+    await screen.findByText(/Error code:\s*runner_parse_failed/i);
+    await screen.findByRole("button", { name: /reports\/taskruns\/run-failed.json/i });
   });
 });

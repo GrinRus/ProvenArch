@@ -8,13 +8,7 @@ repo="$tmpdir/repos/payments-service"
 api_port="${ACP_SMOKE_API_PORT:-}"
 ready_timeout_sec="${ACP_SMOKE_API_READY_TIMEOUT_SEC:-60}"
 ready_interval_sec="${ACP_SMOKE_API_READY_INTERVAL_SEC:-0.25}"
-mkdir -p "$workspace" "$repo"
-cat > "$workspace/workspace.yaml" <<MANIFEST
-version: 1
-repos:
-  - name: payments-service
-    path: $repo
-MANIFEST
+mkdir -p "$repo"
 
 if [[ -z "$api_port" ]]; then
   api_port="$(python3 - <<'PY'
@@ -29,7 +23,12 @@ fi
 
 api_base="http://127.0.0.1:$api_port"
 
-go run ./cmd/acp serve --workspace "$workspace" --listen "127.0.0.1:$api_port" >"$server_log" 2>&1 &
+go run ./cmd/acp serve \
+  --workspace "$workspace" \
+  --auto-init \
+  --repo-name "payments-service" \
+  --repo-path "$repo" \
+  --listen "127.0.0.1:$api_port" >"$server_log" 2>&1 &
 server_pid=$!
 trap 'kill "$server_pid" >/dev/null 2>&1 || true; wait "$server_pid" 2>/dev/null || true; rm -rf "$tmpdir"' EXIT
 
@@ -90,5 +89,11 @@ if [[ "$run_done" -ne 1 ]]; then
 fi
 
 curl -sSf "$api_base/api/pipeline/runs/$run_id/artifacts" >/dev/null
+list_payload="$(curl -sSf "$api_base/api/pipeline/runs?limit=5")"
+if ! echo "$list_payload" | grep -q "$run_id"; then
+  echo "run list does not include started run id: $run_id" >&2
+  echo "list payload: $list_payload" >&2
+  exit 1
+fi
 
 echo "smoke-api passed"

@@ -52,8 +52,8 @@ Epic matrix:
 Ниже — ожидаемая “история” использования MVP от нуля до результата:
 
 1) **Подготовка workspace**
-- пользователь создаёт отдельный git‑репозиторий `arch-workspace/`;
-- указывает в `workspace.yaml` локальные пути к репозиториям и/или GitHub/GitLab URL;
+- пользователь поднимает сервис одной командой `acp serve --workspace ... --auto-init --repo-name ... (--repo-path ... | --repo-git-url ...)`;
+- при `--auto-init` ACP создаёт `workspace.yaml` и fixed layout автоматически;
 - складывает выгрузки docs (например из Confluence) в `docs/imports/`;
 - ведёт `docs/imports/index.yaml` как metadata index импортированных материалов.
 
@@ -72,6 +72,7 @@ Epic matrix:
 - в `reports/coverage/` появляется coverage report и список открытых вопросов по недостающей информации;
 - в `reports/findings/` — список провалов/анти‑паттернов с evidence;
 - в `proposals/` — 1–3 “proposal пакета” улучшений (to‑be) + черновики ADR/RFC.
+- в UI dashboard видны все run'ы анализа (queued/running/succeeded/failed), включая уже завершённые.
 
 5) **Git‑ветка proposal**
 - пользователь создаёт `proposal/<topic>` из UI (MVP) или вручную;
@@ -433,6 +434,9 @@ Wizard из блоков-шаблонов:
 
 ### 10.1. Ручной режим MVP
 В MVP обновления инициируются вручную:
+- самый короткий старт: `acp serve --workspace ... --auto-init --repo-name ... (--repo-path ... | --repo-git-url ...) --runtime fake`
+- первый bootstrap workspace выполняется через `acp init-workspace --workspace ... --repo-name ... (--repo-path ... | --repo-git-url ...)`
+- первый materialization запуск: `acp run --workspace ... --pipeline init --runtime fake --non-interactive`
 - пользователь добавил новые документы в workspace  
 - пользователь обновил репозитории (git pull)  
 - пользователь нажал “Rebuild as‑is / Re-run analysis”

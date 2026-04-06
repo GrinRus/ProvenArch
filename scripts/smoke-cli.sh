@@ -7,12 +7,12 @@ trap 'rm -rf "$tmpdir"' EXIT
 workspace="$tmpdir/workspace"
 repo="$tmpdir/repos/payments-service"
 mkdir -p "$workspace" "$repo"
-cat > "$workspace/workspace.yaml" <<MANIFEST
-version: 1
-repos:
-  - name: payments-service
-    path: $repo
-MANIFEST
+
+go run ./cmd/acp init-workspace \
+  --workspace "$workspace" \
+  --repo-name "payments-service" \
+  --repo-path "$repo" \
+  --force >/dev/null
 
 go run ./cmd/acp run --workspace "$workspace" --pipeline init --non-interactive >/dev/null
 go run ./cmd/acp run --workspace "$workspace" --pipeline refresh --non-interactive >/dev/null

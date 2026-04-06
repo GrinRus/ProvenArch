@@ -184,6 +184,74 @@ EP-20260403-acp-beta-gap-closing
 
 ---
 
+### Plan ID
+EP-20260406-mvp-onboarding-simplification
+
+### Context
+Нужно сократить количество ручных действий для первого локального запуска ACP MVP. Сейчас пользователь обязан вручную создавать `arch-workspace` и `workspace.yaml`, из-за чего onboarding получается длинным и хрупким.
+
+### Goals (must have)
+- [x] Выполнить repo audit и зафиксировать фактический MVP execution path
+- [x] Проверить, что README отражает текущее состояние реализации, и устранить найденные расхождения
+- [x] Добавить минимальный bootstrap entrypoint для первичного создания workspace (`workspace.yaml` + layout)
+- [x] Обновить быстрый локальный запуск MVP до минимального набора шагов
+- [x] Добавить/обновить тесты и smoke coverage под новый onboarding flow
+
+### Non-goals
+- [x] Изменение schema/contracts (`schemas/*`, `docs/spec/*`) без строгой необходимости
+- [x] Добавление новых runtime в MVP (кроме `fake|headless`)
+- [x] Изменение hosted/security boundary (остаётся вне MVP)
+
+### Approach
+1) Провести audit реализации (`cmd/internal/ui/scripts`) и сверить с README/ARCHITECTURE/spec.
+2) Ввести CLI bootstrap команду для инициализации workspace с минимальным набором обязательных аргументов.
+3) Обновить Make/docs quickstart так, чтобы первый локальный запуск был максимально коротким и повторяемым.
+4) Закрыть slice тестами (`cmd/acp`, smoke scripts, docs sync).
+
+### Files expected to change
+- `cmd/acp/main.go`
+- `cmd/acp/main_test.go`
+- `Makefile`
+- `scripts/smoke-cli.sh`
+- `scripts/smoke-api.sh`
+- `README.md`
+- `docs/STAKEHOLDER_DOC.md`
+- `cmd/README.md`
+- `cmd/acp/README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/spec/API_SPEC.md`
+- `internal/api/server.go`
+- `internal/api/server_test.go`
+- `internal/orchestrator/orchestrator.go`
+- `internal/orchestrator/orchestrator_test.go`
+- `ui/src/App.tsx`
+- `ui/src/App.test.tsx`
+- `ui/src/styles.css`
+- `docs/PLANS.md`
+- `internal/docsync/docsync_test.go`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены
+- [x] Схемы валидируются
+- [x] Документация обновлена
+- [x] Первый локальный MVP запуск документирован как минимальный и практически применимый flow
+
+### Risks
+- Усложнение CLI surface при добавлении нового bootstrap subcommand.
+- Риск документарного рассинхрона между README, `cmd/acp/README.md` и `docs/ARCHITECTURE.md`.
+
+### Progress log
+- 2026-04-06: План создан, начат audit текущего состояния и onboarding pain points.
+- 2026-04-06: Добавлена CLI команда `acp init-workspace` (bootstrap manifest + fixed layout + dry validation) и обновлён root help surface.
+- 2026-04-06: Добавлен `make quickstart-local` для минимального локального потока (`init-workspace` + `run init`), smoke CLI переведён на новый onboarding path.
+- 2026-04-06: Обновлены `README`/`cmd` docs/`ARCHITECTURE`/`STAKEHOLDER_DOC` и docsync assertions под новый CLI onboarding.
+- 2026-04-06: Пройдены DoD проверки: `make contracts`, `make test`, `make lint`, `make build`, плюс `bash ./scripts/smoke-cli.sh` и `bash ./scripts/smoke-api.sh`.
+- 2026-04-06: `acp serve` расширен `--auto-init` и repo flags; startup переведён в lenient mode без блокирующего repo preflight.
+- 2026-04-06: Добавлен persisted run history (`reports/taskruns/run-history.json`, retention 500) + API list endpoint `GET /api/pipeline/runs?limit=<n>`.
+- 2026-04-06: UI расширен run dashboard (queued/running/succeeded/failed, counters, persisted history selection) + добавлены API/UI/orchestrator regression tests.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.

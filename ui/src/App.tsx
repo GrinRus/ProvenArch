@@ -30,7 +30,24 @@ type RunStatusResponse = {
   finished_at?: string | null;
   current_step?: string;
   warnings?: string[];
+  error_code?: string | null;
   error?: string | null;
+};
+
+type RunListItem = {
+  run_id: string;
+  pipeline: string;
+  status: "queued" | "running" | "succeeded" | "failed";
+  started_at: string;
+  finished_at?: string | null;
+  current_step?: string;
+  warnings?: string[];
+  error_code?: string | null;
+  error?: string | null;
+};
+
+type RunListResponse = {
+  items: RunListItem[];
 };
 
 type Artifact = {
@@ -100,6 +117,7 @@ const baselineEditorArtifacts: EditableArtifactOption[] = [
 ];
 
 const finalStatuses = new Set(["succeeded", "failed"]);
+const activeStatuses = new Set(["queued", "running"]);
 
 function getErrorMessage(payload: unknown, fallback: string): string {
   const typed = payload as APIErrorPayload;
@@ -131,6 +149,17 @@ function splitListInput(input: string): string[] {
     .filter((item) => item.length > 0);
 }
 
+function formatTimestamp(value?: string | null): string {
+  if (!value) {
+    return "-";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toISOString().replace("T", " ").replace(".000Z", " UTC");
+}
+
 export default function App() {
   const [validateResult, setValidateResult] = useState<ValidateResponse | null>(null);
   const [busy, setBusy] = useState(false);
@@ -156,6 +185,7 @@ export default function App() {
 
   const [runId, setRunID] = useState<string | null>(null);
   const [runStatus, setRunStatus] = useState<RunStatusResponse | null>(null);
+  const [runList, setRunList] = useState<RunListItem[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [selectedArtifact, setSelectedArtifact] = useState<string>("");
   const [selectedArtifactContent, setSelectedArtifactContent] = useState<string>("");
@@ -167,30 +197,48 @@ export default function App() {
   const [proposalBranch, setProposalBranch] = useState("proposal/beta-refresh");
   const [gitStatus, setGitStatus] = useState<string>("");
 
-  const canPollRun = useMemo(() => {
-    if (!runStatus) {
-      return Boolean(runId);
-    }
-    return !finalStatuses.has(runStatus.status);
-  }, [runId, runStatus]);
+  const hasActiveRuns = useMemo(() => runList.some((run) => activeStatuses.has(run.status)), [runList]);
+  const runCounters = useMemo(
+    () =>
+      runList.reduce(
+        (acc, run) => {
+          if (run.status === "running" || run.status === "queued") {
+            acc.running += 1;
+          } else if (run.status === "succeeded") {
+            acc.succeeded += 1;
+          } else if (run.status === "failed") {
+            acc.failed += 1;
+          }
+          return acc;
+        },
+        { running: 0, succeeded: 0, failed: 0 }
+      ),
+    [runList]
+  );
 
   useEffect(() => {
     void bootstrapEditorData();
   }, []);
 
   useEffect(() => {
-    if (!runId || !canPollRun) {
+    if (!hasActiveRuns) {
       return;
     }
 
     const interval = setInterval(() => {
-      void fetchRunStatus(runId);
+      void pollRunUpdates();
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [runId, canPollRun]);
+  }, [hasActiveRuns, runId]);
 
   async function bootstrapEditorData() {
+    try {
+      await loadRunList(100);
+    } catch {
+      setRunList([]);
+    }
+
     try {
       const manifest = await fetchJSON<{ content: string }>("/api/workspace/manifest");
       setManifestContent(manifest.content ?? "");
@@ -200,6 +248,22 @@ export default function App() {
 
     await loadTextArtifact(selectedEditorPath, setSelectedEditorContent);
     await loadWizardContract();
+  }
+
+  async function loadRunList(limit = 100) {
+    const payload = await fetchJSON<RunListResponse>(`/api/pipeline/runs?limit=${limit}`);
+    setRunList(payload.items ?? []);
+  }
+
+  async function pollRunUpdates() {
+    try {
+      await loadRunList(100);
+      if (runId) {
+        await fetchRunStatus(runId);
+      }
+    } catch {
+      // keep UI responsive even if polling fails temporarily
+    }
   }
 
   async function loadWizardContract() {
@@ -382,8 +446,22 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ trigger: "ui", commit: false, create_proposal_branch: false })
       });
+      setRunList((previous) => [
+        {
+          run_id: payload.run_id,
+          pipeline,
+          status: "queued",
+          started_at: new Date().toISOString(),
+          finished_at: null,
+          warnings: [],
+          error_code: null,
+          error: null
+        },
+        ...previous.filter((run) => run.run_id !== payload.run_id)
+      ]);
       setRunID(payload.run_id);
       await fetchRunStatus(payload.run_id);
+      await loadRunList(100);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "failed to start pipeline");
     } finally {
@@ -397,6 +475,16 @@ export default function App() {
     if (finalStatuses.has(payload.status)) {
       await fetchArtifacts(id);
       await loadCoverageArtifacts();
+    }
+  }
+
+  async function handleSelectRun(id: string) {
+    try {
+      setRunID(id);
+      await fetchRunStatus(id);
+      await fetchArtifacts(id);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "failed to load run details");
     }
   }
 
@@ -600,9 +688,64 @@ export default function App() {
             </p>
             <p>Pipeline: {runStatus.pipeline}</p>
             {runStatus.current_step ? <p>Current step: {runStatus.current_step}</p> : null}
+            {runStatus.error_code ? <p className="status warn">Error code: {runStatus.error_code}</p> : null}
             {runStatus.error ? <p className="status err">Error: {runStatus.error}</p> : null}
           </div>
         ) : null}
+      </section>
+
+      <section className="panel">
+        <h2>Запуски анализа</h2>
+        <p className="hint">
+          Running: {runCounters.running} | Succeeded: {runCounters.succeeded} | Failed: {runCounters.failed}
+        </p>
+        {runList.length === 0 ? (
+          <p>No runs yet.</p>
+        ) : (
+          <div className="run-table-wrap">
+            <table className="run-table">
+              <thead>
+                <tr>
+                  <th>Run ID</th>
+                  <th>Status</th>
+                  <th>Pipeline</th>
+                  <th>Started</th>
+                  <th>Finished</th>
+                  <th>Error code</th>
+                  <th>Warnings</th>
+                </tr>
+              </thead>
+              <tbody>
+                {runList.map((run) => (
+                  <tr
+                    key={run.run_id}
+                    className={runId === run.run_id ? "selected" : ""}
+                    onClick={() => void handleSelectRun(run.run_id)}
+                  >
+                    <td>
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleSelectRun(run.run_id);
+                        }}
+                      >
+                        {run.run_id}
+                      </button>
+                    </td>
+                    <td>{run.status}</td>
+                    <td>{run.pipeline}</td>
+                    <td>{formatTimestamp(run.started_at)}</td>
+                    <td>{formatTimestamp(run.finished_at)}</td>
+                    <td>{run.error_code || "-"}</td>
+                    <td>{run.warnings?.length ?? 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       <section className="panel">
