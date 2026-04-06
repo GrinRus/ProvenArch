@@ -271,6 +271,179 @@ func TestStartAsyncRunRegistersAndCompletesRun(t *testing.T) {
 	}
 }
 
+func TestListRunsReturnsMostRecentFirstWithLimit(t *testing.T) {
+	t.Parallel()
+
+	service := NewService()
+	baseTime := time.Date(2026, 4, 6, 12, 0, 0, 0, time.UTC)
+	service.storeRun(runRecord{
+		info: RunInfo{
+			RunID:     "run_oldest",
+			Pipeline:  string(PipelineInit),
+			Status:    RunStatusSucceeded,
+			StartedAt: baseTime,
+		},
+	})
+	service.storeRun(runRecord{
+		info: RunInfo{
+			RunID:     "run_middle",
+			Pipeline:  string(PipelineRefresh),
+			Status:    RunStatusSucceeded,
+			StartedAt: baseTime.Add(1 * time.Minute),
+		},
+	})
+	service.storeRun(runRecord{
+		info: RunInfo{
+			RunID:     "run_newest",
+			Pipeline:  string(PipelineRefresh),
+			Status:    RunStatusRunning,
+			StartedAt: baseTime.Add(2 * time.Minute),
+		},
+	})
+
+	runs := service.ListRuns(2)
+	if len(runs) != 2 {
+		t.Fatalf("expected 2 runs from limited list, got %d", len(runs))
+	}
+	if runs[0].RunID != "run_newest" || runs[1].RunID != "run_middle" {
+		t.Fatalf("unexpected run order: %+v", runs)
+	}
+}
+
+func TestRunHistoryPersistsAndLoadsAcrossServiceRestart(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	service := NewService(
+		WithHistoryWorkspace(ws),
+		WithClock(func() time.Time {
+			return time.Date(2026, 4, 6, 12, 0, 0, 0, time.UTC)
+		}),
+	)
+
+	runInfo, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run refresh pipeline: %v", err)
+	}
+	if runInfo.RunID == "" {
+		t.Fatalf("expected non-empty run id")
+	}
+
+	historyContent, err := os.ReadFile(filepath.Join(ws.Path, "reports/taskruns/run-history.json"))
+	if err != nil {
+		t.Fatalf("read run history file: %v", err)
+	}
+	var snapshot runHistorySnapshot
+	if err := json.Unmarshal(historyContent, &snapshot); err != nil {
+		t.Fatalf("decode run history snapshot: %v", err)
+	}
+	if snapshot.Version != runHistoryVersion {
+		t.Fatalf("unexpected run history version: %d", snapshot.Version)
+	}
+	if len(snapshot.Items) == 0 {
+		t.Fatalf("expected non-empty run history items")
+	}
+
+	restartedService := NewService(WithHistoryWorkspace(ws))
+	reloadedInfo, ok := restartedService.GetRun(runInfo.RunID)
+	if !ok {
+		t.Fatalf("expected run %q to be loaded from persisted history", runInfo.RunID)
+	}
+	if reloadedInfo.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status from persisted history, got %s", reloadedInfo.Status)
+	}
+}
+
+func TestRunHistoryRetentionKeepsLast500Runs(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	service := NewService(WithHistoryWorkspace(ws))
+
+	baseTime := time.Date(2026, 4, 6, 12, 0, 0, 0, time.UTC)
+	totalRuns := runHistoryRetention + 5
+	for idx := 0; idx < totalRuns; idx++ {
+		service.storeRun(runRecord{
+			info: RunInfo{
+				RunID:     fmt.Sprintf("run_%04d", idx),
+				Pipeline:  string(PipelineRefresh),
+				Status:    RunStatusSucceeded,
+				StartedAt: baseTime.Add(time.Duration(idx) * time.Second),
+			},
+		})
+	}
+
+	if got := runRegistrySize(service); got != runHistoryRetention {
+		t.Fatalf("expected run registry retention %d, got %d", runHistoryRetention, got)
+	}
+
+	historyContent, err := os.ReadFile(filepath.Join(ws.Path, "reports/taskruns/run-history.json"))
+	if err != nil {
+		t.Fatalf("read run history file: %v", err)
+	}
+	var snapshot runHistorySnapshot
+	if err := json.Unmarshal(historyContent, &snapshot); err != nil {
+		t.Fatalf("decode run history snapshot: %v", err)
+	}
+	if len(snapshot.Items) != runHistoryRetention {
+		t.Fatalf("expected %d persisted runs, got %d", runHistoryRetention, len(snapshot.Items))
+	}
+	if snapshot.Items[0].RunID != "run_0005" {
+		t.Fatalf("expected oldest retained run to be run_0005, got %q", snapshot.Items[0].RunID)
+	}
+	if snapshot.Items[len(snapshot.Items)-1].RunID != fmt.Sprintf("run_%04d", totalRuns-1) {
+		t.Fatalf("expected latest retained run to be run_%04d, got %q", totalRuns-1, snapshot.Items[len(snapshot.Items)-1].RunID)
+	}
+}
+
+func TestRunHistoryAsyncTransitionsQueuedRunningFinal(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	service := NewService(
+		WithHistoryWorkspace(ws),
+		WithRunner(delayedRunner{delay: 220 * time.Millisecond}),
+	)
+
+	run1, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("start first async run: %v", err)
+	}
+	run2, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("start second async run: %v", err)
+	}
+
+	if status := waitForRunHistoryStatus(t, ws, run2, 8*time.Second, RunStatusQueued); status != RunStatusQueued {
+		t.Fatalf("expected queued status in persisted history, got %s", status)
+	}
+	if status := waitForRunHistoryStatus(t, ws, run2, 8*time.Second, RunStatusRunning); status != RunStatusRunning {
+		t.Fatalf("expected running status in persisted history, got %s", status)
+	}
+
+	_ = waitForRunTerminalState(t, service, run1, 8*time.Second)
+	final2 := waitForRunTerminalState(t, service, run2, 8*time.Second)
+	if final2.Status != RunStatusSucceeded {
+		t.Fatalf("expected second run success, got status=%s error=%q", final2.Status, final2.Error)
+	}
+
+	if status := waitForRunHistoryStatus(t, ws, run2, 8*time.Second, RunStatusSucceeded); status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status in persisted history, got %s", status)
+	}
+}
+
 func TestStartAsyncRunFailsWhenWorkspaceLayoutCannotBeCreated(t *testing.T) {
 	t.Parallel()
 
@@ -858,6 +1031,39 @@ func assertRunRegistryContainsOnly(t *testing.T, service *Service, runIDs ...str
 			t.Fatalf("unexpected run registry entry %q", runID)
 		}
 	}
+}
+
+func waitForRunHistoryStatus(t *testing.T, ws workspace.Root, runID string, timeout time.Duration, wanted RunStatus) RunStatus {
+	t.Helper()
+
+	var observed RunStatus
+	testutil.WaitFor(t, timeout, testutil.WaitDescription("run %q did not reach history status %q", runID, wanted), func() (bool, error) {
+		snapshot, err := loadRunHistorySnapshot(ws)
+		if err != nil {
+			return false, nil
+		}
+		for _, item := range snapshot.Items {
+			if item.RunID != runID {
+				continue
+			}
+			observed = item.Status
+			return item.Status == wanted, nil
+		}
+		return false, nil
+	})
+	return observed
+}
+
+func loadRunHistorySnapshot(ws workspace.Root) (runHistorySnapshot, error) {
+	content, err := os.ReadFile(filepath.Join(ws.Path, runHistoryPath))
+	if err != nil {
+		return runHistorySnapshot{}, err
+	}
+	var snapshot runHistorySnapshot
+	if err := json.Unmarshal(content, &snapshot); err != nil {
+		return runHistorySnapshot{}, err
+	}
+	return snapshot, nil
 }
 
 func hasWarningPrefix(warnings []string, prefix string) bool {

@@ -2,8 +2,11 @@ GO ?= go
 NPM ?= npm
 UI_DIR := ui
 GO_FILES := $(shell find cmd internal -name '*.go' -type f 2>/dev/null)
+RUNTIME ?= fake
+REPO_NAME ?= primary-repo
+DOCS_IMPORTS_PATH ?= ./docs/imports
 
-.PHONY: bootstrap contracts test test-stress lint build run-backend run-ui
+.PHONY: bootstrap contracts test test-stress lint build run-backend run-ui quickstart-local
 
 bootstrap:
 	$(GO) mod tidy
@@ -43,3 +46,10 @@ run-backend:
 
 run-ui:
 	$(NPM) run dev --prefix $(UI_DIR)
+
+quickstart-local:
+	@test -n "$(WORKSPACE)" || (echo "Set WORKSPACE=/abs/path/to/arch-workspace"; exit 1)
+	@test -n "$(REPO_PATH)" || (echo "Set REPO_PATH=/abs/path/to/local/repo"; exit 1)
+	$(GO) run ./cmd/acp init-workspace --workspace "$(WORKSPACE)" --repo-name "$(REPO_NAME)" --repo-path "$(REPO_PATH)" --docs-imports-path "$(DOCS_IMPORTS_PATH)" --force
+	$(GO) run ./cmd/acp run --workspace "$(WORKSPACE)" --pipeline init --runtime "$(RUNTIME)" --non-interactive
+	@echo "Next: $(GO) run ./cmd/acp serve --workspace \"$(WORKSPACE)\" --runtime \"$(RUNTIME)\""

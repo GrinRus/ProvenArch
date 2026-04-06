@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +45,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/git/proposal-branch", s.handleGitProposalBranch)
 	mux.HandleFunc("/api/pipeline/init", s.handlePipelineInit)
 	mux.HandleFunc("/api/pipeline/refresh", s.handlePipelineRefresh)
+	mux.HandleFunc("/api/pipeline/runs", s.handlePipelineRuns)
 	mux.HandleFunc("/api/pipeline/runs/", s.handlePipelineRuns)
 
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -392,6 +394,36 @@ func (s *Server) handlePipelineRuns(writer http.ResponseWriter, request *http.Re
 		return
 	}
 
+	if request.URL.Path == "/api/pipeline/runs" || request.URL.Path == "/api/pipeline/runs/" {
+		const (
+			defaultLimit = 50
+			maxLimit     = 500
+		)
+		limit := defaultLimit
+		rawLimit := strings.TrimSpace(request.URL.Query().Get("limit"))
+		if rawLimit != "" {
+			parsedLimit, err := strconv.Atoi(rawLimit)
+			if err != nil || parsedLimit <= 0 {
+				writeError(writer, http.StatusBadRequest, "invalid_limit", "limit must be a positive integer")
+				return
+			}
+			if parsedLimit > maxLimit {
+				parsedLimit = maxLimit
+			}
+			limit = parsedLimit
+		}
+
+		runs := s.service.ListRuns(limit)
+		items := make([]map[string]any, 0, len(runs))
+		for _, runInfo := range runs {
+			items = append(items, formatRunInfoPayload(runInfo))
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"items": items,
+		})
+		return
+	}
+
 	rest := strings.TrimPrefix(request.URL.Path, "/api/pipeline/runs/")
 	parts := strings.Split(strings.Trim(rest, "/"), "/")
 	if len(parts) == 0 || parts[0] == "" {
@@ -406,17 +438,7 @@ func (s *Server) handlePipelineRuns(writer http.ResponseWriter, request *http.Re
 			writeError(writer, http.StatusNotFound, "run_not_found", "run not found")
 			return
 		}
-		writeJSON(writer, http.StatusOK, map[string]any{
-			"run_id":       runInfo.RunID,
-			"pipeline":     runInfo.Pipeline,
-			"status":       runInfo.Status,
-			"started_at":   runInfo.StartedAt.UTC().Format(time.RFC3339),
-			"finished_at":  formatOptionalTime(runInfo.FinishedAt),
-			"current_step": runInfo.CurrentStep,
-			"warnings":     runInfo.Warnings,
-			"error_code":   formatOptionalString(runInfo.ErrorCode),
-			"error":        formatOptionalString(runInfo.Error),
-		})
+		writeJSON(writer, http.StatusOK, formatRunInfoPayload(runInfo))
 		return
 	}
 
@@ -524,6 +546,20 @@ func formatOptionalString(value string) any {
 		return nil
 	}
 	return value
+}
+
+func formatRunInfoPayload(runInfo orchestrator.RunInfo) map[string]any {
+	return map[string]any{
+		"run_id":       runInfo.RunID,
+		"pipeline":     runInfo.Pipeline,
+		"status":       runInfo.Status,
+		"started_at":   runInfo.StartedAt.UTC().Format(time.RFC3339),
+		"finished_at":  formatOptionalTime(runInfo.FinishedAt),
+		"current_step": runInfo.CurrentStep,
+		"warnings":     runInfo.Warnings,
+		"error_code":   formatOptionalString(runInfo.ErrorCode),
+		"error":        formatOptionalString(runInfo.Error),
+	}
 }
 
 func mapTypedRunnerAPIError(err error) (statusCode int, code string, message string, ok bool) {

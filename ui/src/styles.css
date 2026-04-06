@@ -176,6 +176,39 @@ body {
   word-break: break-word;
 }
 
+.run-table-wrap {
+  overflow-x: auto;
+}
+
+.run-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.run-table th,
+.run-table td {
+  padding: 0.55rem 0.5rem;
+  border-bottom: 1px solid rgba(20, 33, 61, 0.12);
+  text-align: left;
+  vertical-align: top;
+}
+
+.run-table th {
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #30475e;
+}
+
+.run-table tr.selected {
+  background: rgba(15, 93, 189, 0.08);
+}
+
+.run-table tbody tr {
+  cursor: pointer;
+}
+
 @media (max-width: 640px) {
   .shell {
     padding-top: 2rem;

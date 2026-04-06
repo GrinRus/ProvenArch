@@ -31,6 +31,12 @@ const (
 	PipelineRefresh Pipeline = "refresh"
 )
 
+const (
+	runHistoryPath      = "reports/taskruns/run-history.json"
+	runHistoryVersion   = 1
+	runHistoryRetention = 500
+)
+
 type RunStatus string
 
 const (
@@ -50,6 +56,10 @@ type Service struct {
 	debounceWindow time.Duration
 	activeRunID    string
 	pendingRun     *pendingRun
+
+	historyWorkspace workspace.Root
+	historyEnabled   bool
+	historyRetention int
 }
 
 type pendingRun struct {
@@ -87,6 +97,24 @@ type RunRequest struct {
 	NonInteractive bool
 }
 
+type runHistorySnapshot struct {
+	Version int              `json:"version"`
+	Items   []runHistoryItem `json:"items"`
+}
+
+type runHistoryItem struct {
+	RunID       string     `json:"run_id"`
+	Pipeline    string     `json:"pipeline"`
+	Status      RunStatus  `json:"status"`
+	StartedAt   string     `json:"started_at"`
+	FinishedAt  *string    `json:"finished_at,omitempty"`
+	CurrentStep string     `json:"current_step,omitempty"`
+	Warnings    []string   `json:"warnings,omitempty"`
+	ErrorCode   string     `json:"error_code,omitempty"`
+	Error       string     `json:"error,omitempty"`
+	Artifacts   []Artifact `json:"artifacts,omitempty"`
+}
+
 type Option func(*Service)
 
 func WithRunner(runner claudecode.Runner) Option {
@@ -109,16 +137,25 @@ func WithDebounceWindow(window time.Duration) Option {
 	}
 }
 
+func WithHistoryWorkspace(ws workspace.Root) Option {
+	return func(service *Service) {
+		service.historyWorkspace = ws
+		service.historyEnabled = strings.TrimSpace(ws.Path) != ""
+	}
+}
+
 func NewService(options ...Option) *Service {
 	service := &Service{
-		runner:         claudecode.FakeRunner{},
-		clock:          time.Now,
-		runs:           map[string]*runRecord{},
-		debounceWindow: 5 * time.Minute,
+		runner:           claudecode.FakeRunner{},
+		clock:            time.Now,
+		runs:             map[string]*runRecord{},
+		debounceWindow:   5 * time.Minute,
+		historyRetention: runHistoryRetention,
 	}
 	for _, option := range options {
 		option(service)
 	}
+	service.loadHistory()
 	return service
 }
 
@@ -256,14 +293,14 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 
 	s.mu.Lock()
 	storeQueuedRun := func() {
-		s.runs[runID] = &runRecord{
+		s.upsertRunLocked(runRecord{
 			info: RunInfo{
 				RunID:     runID,
 				Pipeline:  string(request.Pipeline),
 				Status:    RunStatusQueued,
 				StartedAt: now,
 			},
-		}
+		})
 	}
 	if s.isActiveRunLocked() {
 		if s.pendingRun != nil {
@@ -329,19 +366,47 @@ func (s *Service) GetRunArtifacts(runID string) ([]Artifact, bool) {
 	return artifacts, true
 }
 
+func (s *Service) ListRuns(limit int) []RunInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	infos := make([]RunInfo, 0, len(s.runs))
+	for _, record := range s.runs {
+		info := record.info
+		info.Warnings = append([]string(nil), record.info.Warnings...)
+		infos = append(infos, info)
+	}
+	sort.Slice(infos, func(i, j int) bool {
+		if infos[i].StartedAt.Equal(infos[j].StartedAt) {
+			return infos[i].RunID > infos[j].RunID
+		}
+		return infos[i].StartedAt.After(infos[j].StartedAt)
+	})
+
+	if limit <= 0 || limit >= len(infos) {
+		return infos
+	}
+	return infos[:limit]
+}
+
 func (s *Service) nextRunID() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.runIDSequence++
-	return fmt.Sprintf("run_%s_%03d", s.clock().UTC().Format("20060102_150405"), s.runIDSequence)
+	for {
+		s.runIDSequence++
+		runID := fmt.Sprintf("run_%s_%03d", s.clock().UTC().Format("20060102_150405"), s.runIDSequence)
+		if _, exists := s.runs[runID]; !exists {
+			return runID
+		}
+	}
 }
 
 func (s *Service) storeRun(record runRecord) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.runs[record.info.RunID] = &record
+	s.upsertRunLocked(record)
 }
 
 func (s *Service) launchAsyncRun(ctx context.Context, runID string, request RunRequest) {
@@ -392,10 +457,164 @@ func (s *Service) markRunSupersededLocked(oldRunID string, newRunID string) {
 	superseded.ErrorCode = ""
 	superseded.Error = fmt.Sprintf("run superseded by newer event %q (last-event-wins)", newRunID)
 	superseded.FinishedAt = &finishedAt
-	s.runs[oldRunID] = &runRecord{
+	s.upsertRunLocked(runRecord{
 		info:      superseded,
 		artifacts: record.artifacts,
+	})
+}
+
+func (s *Service) upsertRunLocked(record runRecord) {
+	s.runs[record.info.RunID] = &record
+	s.trimRunRegistryLocked()
+	s.persistHistoryLocked()
+}
+
+func (s *Service) trimRunRegistryLocked() {
+	retention := s.historyRetention
+	if retention <= 0 {
+		retention = runHistoryRetention
 	}
+	if len(s.runs) <= retention {
+		return
+	}
+
+	runIDs := make([]string, 0, len(s.runs))
+	for runID := range s.runs {
+		runIDs = append(runIDs, runID)
+	}
+	sort.Slice(runIDs, func(i, j int) bool {
+		left := s.runs[runIDs[i]].info
+		right := s.runs[runIDs[j]].info
+		if left.StartedAt.Equal(right.StartedAt) {
+			return left.RunID < right.RunID
+		}
+		return left.StartedAt.Before(right.StartedAt)
+	})
+	removeCount := len(s.runs) - retention
+	for idx := 0; idx < removeCount; idx++ {
+		delete(s.runs, runIDs[idx])
+	}
+}
+
+func (s *Service) loadHistory() {
+	if !s.historyEnabled {
+		return
+	}
+	content, err := s.historyWorkspace.ReadFile(runHistoryPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return
+		}
+		return
+	}
+
+	var snapshot runHistorySnapshot
+	if err := json.Unmarshal(content, &snapshot); err != nil {
+		return
+	}
+	if snapshot.Version != runHistoryVersion {
+		return
+	}
+
+	for _, item := range snapshot.Items {
+		record, ok := historyItemToRunRecord(item)
+		if !ok {
+			continue
+		}
+		s.runs[record.info.RunID] = &record
+	}
+}
+
+func (s *Service) persistHistoryLocked() {
+	if !s.historyEnabled {
+		return
+	}
+
+	items := make([]runHistoryItem, 0, len(s.runs))
+	records := make([]runRecord, 0, len(s.runs))
+	for _, record := range s.runs {
+		records = append(records, runRecord{
+			info:      record.info,
+			artifacts: append([]Artifact(nil), record.artifacts...),
+		})
+	}
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].info.StartedAt.Equal(records[j].info.StartedAt) {
+			return records[i].info.RunID < records[j].info.RunID
+		}
+		return records[i].info.StartedAt.Before(records[j].info.StartedAt)
+	})
+
+	retention := s.historyRetention
+	if retention <= 0 {
+		retention = runHistoryRetention
+	}
+	if len(records) > retention {
+		records = records[len(records)-retention:]
+	}
+
+	for _, record := range records {
+		items = append(items, runRecordToHistoryItem(record))
+	}
+
+	snapshot := runHistorySnapshot{
+		Version: runHistoryVersion,
+		Items:   items,
+	}
+	encoded, err := json.MarshalIndent(snapshot, "", "  ")
+	if err != nil {
+		return
+	}
+	encoded = append(encoded, '\n')
+	_ = s.historyWorkspace.WriteFile(runHistoryPath, encoded)
+}
+
+func runRecordToHistoryItem(record runRecord) runHistoryItem {
+	item := runHistoryItem{
+		RunID:       record.info.RunID,
+		Pipeline:    record.info.Pipeline,
+		Status:      record.info.Status,
+		StartedAt:   record.info.StartedAt.UTC().Format(time.RFC3339),
+		CurrentStep: record.info.CurrentStep,
+		Warnings:    append([]string(nil), record.info.Warnings...),
+		ErrorCode:   record.info.ErrorCode,
+		Error:       record.info.Error,
+		Artifacts:   append([]Artifact(nil), record.artifacts...),
+	}
+	if record.info.FinishedAt != nil {
+		finished := record.info.FinishedAt.UTC().Format(time.RFC3339)
+		item.FinishedAt = &finished
+	}
+	return item
+}
+
+func historyItemToRunRecord(item runHistoryItem) (runRecord, bool) {
+	startedAt, err := time.Parse(time.RFC3339, strings.TrimSpace(item.StartedAt))
+	if err != nil {
+		return runRecord{}, false
+	}
+	var finishedAt *time.Time
+	if item.FinishedAt != nil && strings.TrimSpace(*item.FinishedAt) != "" {
+		parsedFinishedAt, parseErr := time.Parse(time.RFC3339, strings.TrimSpace(*item.FinishedAt))
+		if parseErr != nil {
+			return runRecord{}, false
+		}
+		finishedAt = &parsedFinishedAt
+	}
+	return runRecord{
+		info: RunInfo{
+			RunID:       item.RunID,
+			Pipeline:    item.Pipeline,
+			Status:      item.Status,
+			StartedAt:   startedAt.UTC(),
+			FinishedAt:  finishedAt,
+			CurrentStep: item.CurrentStep,
+			Warnings:    append([]string(nil), item.Warnings...),
+			ErrorCode:   item.ErrorCode,
+			Error:       item.Error,
+		},
+		artifacts: append([]Artifact(nil), item.Artifacts...),
+	}, true
 }
 
 func classifyExecutionError(err error) (code string, message string) {
