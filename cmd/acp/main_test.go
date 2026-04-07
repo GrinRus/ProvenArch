@@ -48,7 +48,7 @@ func TestInitWorkspaceHelpReturnsZero(t *testing.T) {
 	if code != exitCodeOK {
 		t.Fatalf("expected exit code %d, got %d", exitCodeOK, code)
 	}
-	if !strings.Contains(stderr.String(), "Usage: acp init-workspace --workspace <abs-path> --repo-name <name> (--repo-path <path> | --repo-git-url <url>)") {
+	if !strings.Contains(stderr.String(), "Usage: acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)") {
 		t.Fatalf("expected init-workspace usage in stderr, got %q", stderr.String())
 	}
 }
@@ -154,6 +154,13 @@ func TestInitWorkspaceCreatesManifestAndLayout(t *testing.T) {
 	if !strings.Contains(stdout.String(), "next commands:") {
 		t.Fatalf("expected next commands guidance, got %q", stdout.String())
 	}
+
+	if info, err := os.Stat(filepath.Join(workspaceRoot, ".git")); err != nil || !info.IsDir() {
+		t.Fatalf("expected workspace git repo to be initialized: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspaceRoot, "skills", "subagents.yaml")); err != nil {
+		t.Fatalf("expected baseline bundle to be seeded: %v", err)
+	}
 }
 
 func TestInitWorkspaceRejectsExistingManifestWithoutForce(t *testing.T) {
@@ -238,6 +245,32 @@ func TestServeRejectsUnsupportedRuntime(t *testing.T) {
 	}
 }
 
+func TestServeRejectsInvalidRunLogsRetentionFlags(t *testing.T) {
+	t.Parallel()
+
+	root := writeWorkspace(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"serve", "--workspace", root, "--runtime", "fake", "--dry-run", "--run-logs-ttl-hours", "0"}, &stdout, &stderr)
+	if code != exitCodeValidation {
+		t.Fatalf("expected exit code %d, got %d", exitCodeValidation, code)
+	}
+	if !strings.Contains(stderr.String(), "--run-logs-ttl-hours must be > 0") {
+		t.Fatalf("expected run logs ttl validation error, got %q", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{"serve", "--workspace", root, "--runtime", "fake", "--dry-run", "--run-logs-max-runs", "0"}, &stdout, &stderr)
+	if code != exitCodeValidation {
+		t.Fatalf("expected exit code %d, got %d", exitCodeValidation, code)
+	}
+	if !strings.Contains(stderr.String(), "--run-logs-max-runs must be > 0") {
+		t.Fatalf("expected run logs max-runs validation error, got %q", stderr.String())
+	}
+}
+
 func TestRunRejectsUnsupportedRuntime(t *testing.T) {
 	t.Parallel()
 
@@ -251,6 +284,46 @@ func TestRunRejectsUnsupportedRuntime(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "unsupported runtime") {
 		t.Fatalf("expected runtime validation error, got %q", stderr.String())
+	}
+}
+
+func TestRunRejectsInvalidRunLogsRetentionFlags(t *testing.T) {
+	t.Parallel()
+
+	root := writeWorkspace(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"run",
+		"--workspace", root,
+		"--pipeline", "init",
+		"--runtime", "fake",
+		"--non-interactive",
+		"--run-logs-ttl-hours", "0",
+	}, &stdout, &stderr)
+	if code != exitCodeValidation {
+		t.Fatalf("expected exit code %d, got %d", exitCodeValidation, code)
+	}
+	if !strings.Contains(stderr.String(), "--run-logs-ttl-hours must be > 0") {
+		t.Fatalf("expected run logs ttl validation error, got %q", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{
+		"run",
+		"--workspace", root,
+		"--pipeline", "init",
+		"--runtime", "fake",
+		"--non-interactive",
+		"--run-logs-max-runs", "0",
+	}, &stdout, &stderr)
+	if code != exitCodeValidation {
+		t.Fatalf("expected exit code %d, got %d", exitCodeValidation, code)
+	}
+	if !strings.Contains(stderr.String(), "--run-logs-max-runs must be > 0") {
+		t.Fatalf("expected run logs max-runs validation error, got %q", stderr.String())
 	}
 }
 
@@ -356,6 +429,12 @@ func TestServeAutoInitCreatesWorkspaceOnDryRun(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(workspacePath, "workspace.yaml")); err != nil {
 		t.Fatalf("expected workspace.yaml after auto-init: %v", err)
 	}
+	if info, err := os.Stat(filepath.Join(workspacePath, ".git")); err != nil || !info.IsDir() {
+		t.Fatalf("expected workspace git repo to be initialized: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspacePath, "skills", "subagents.yaml")); err != nil {
+		t.Fatalf("expected baseline bundle to be seeded on auto-init: %v", err)
+	}
 	if !strings.Contains(stdout.String(), "workspace ready") {
 		t.Fatalf("expected workspace ready output, got %q", stdout.String())
 	}
@@ -377,7 +456,7 @@ func TestServeAutoInitRequiresSingleRepoSourceWhenWorkspaceMissing(t *testing.T)
 	if code != exitCodeValidation {
 		t.Fatalf("expected exit code %d, got %d", exitCodeValidation, code)
 	}
-	if !strings.Contains(stderr.String(), "set exactly one of --repo-path or --repo-git-url") {
+	if !strings.Contains(stderr.String(), "set exactly one of --repo-path or --repo-git-url") && !strings.Contains(stderr.String(), "set either --repos-file or single-repo flags") {
 		t.Fatalf("expected repo source validation error, got %q", stderr.String())
 	}
 
@@ -395,8 +474,93 @@ func TestServeAutoInitRequiresSingleRepoSourceWhenWorkspaceMissing(t *testing.T)
 	if code != exitCodeValidation {
 		t.Fatalf("expected exit code %d, got %d", exitCodeValidation, code)
 	}
-	if !strings.Contains(stderr.String(), "set exactly one of --repo-path or --repo-git-url") {
+	if !strings.Contains(stderr.String(), "set exactly one of --repo-path or --repo-git-url") && !strings.Contains(stderr.String(), "set either --repos-file or single-repo flags") {
 		t.Fatalf("expected mutually-exclusive source validation error, got %q", stderr.String())
+	}
+}
+
+func TestInitWorkspaceSupportsReposFile(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspaceRoot := filepath.Join(root, "arch-workspace")
+	repoA := filepath.Join(root, "repos", "a")
+	repoB := filepath.Join(root, "repos", "b")
+	if err := os.MkdirAll(repoA, 0o755); err != nil {
+		t.Fatalf("create repoA: %v", err)
+	}
+	if err := os.MkdirAll(repoB, 0o755); err != nil {
+		t.Fatalf("create repoB: %v", err)
+	}
+	reposFile := filepath.Join(root, "repos.yaml")
+	reposContent := `repos:
+  - name: repo-a
+    path: ` + repoA + `
+  - name: repo-b
+    path: ` + repoB + `
+`
+	if err := os.WriteFile(reposFile, []byte(reposContent), 0o644); err != nil {
+		t.Fatalf("write repos file: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"init-workspace",
+		"--workspace", workspaceRoot,
+		"--repos-file", reposFile,
+	}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d: stderr=%q", exitCodeOK, code, stderr.String())
+	}
+	manifestContent, err := os.ReadFile(filepath.Join(workspaceRoot, "workspace.yaml"))
+	if err != nil {
+		t.Fatalf("read workspace manifest: %v", err)
+	}
+	manifestText := string(manifestContent)
+	if !strings.Contains(manifestText, "name: repo-a") || !strings.Contains(manifestText, "name: repo-b") {
+		t.Fatalf("expected repos from repos-file in manifest, got %q", manifestText)
+	}
+}
+
+func TestServeAutoInitSupportsReposFile(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspacePath := filepath.Join(root, "arch-workspace")
+	repoA := filepath.Join(root, "repos", "a")
+	repoB := filepath.Join(root, "repos", "b")
+	if err := os.MkdirAll(repoA, 0o755); err != nil {
+		t.Fatalf("create repoA: %v", err)
+	}
+	if err := os.MkdirAll(repoB, 0o755); err != nil {
+		t.Fatalf("create repoB: %v", err)
+	}
+	reposFile := filepath.Join(root, "repos.yaml")
+	reposContent := `repos:
+  - name: repo-a
+    path: ` + repoA + `
+  - name: repo-b
+    path: ` + repoB + `
+`
+	if err := os.WriteFile(reposFile, []byte(reposContent), 0o644); err != nil {
+		t.Fatalf("write repos file: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"serve",
+		"--workspace", workspacePath,
+		"--auto-init",
+		"--repos-file", reposFile,
+		"--dry-run",
+	}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d: stderr=%q", exitCodeOK, code, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(workspacePath, "workspace.yaml")); err != nil {
+		t.Fatalf("expected workspace.yaml after auto-init repos-file: %v", err)
 	}
 }
 
@@ -412,6 +576,27 @@ func TestRunHeadlessReturnsRunnerUnavailableWhenCommandMissing(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "runner_unavailable") {
 		t.Fatalf("expected runner_unavailable diagnostics, got %q", stderr.String())
+	}
+}
+
+func TestEnsureWorkspaceGitRepositoryReturnsActionableErrorWhenGitMissing(t *testing.T) {
+	t.Setenv("PATH", "")
+	err := ensureWorkspaceGitRepository(t.TempDir())
+	if err == nil {
+		t.Fatalf("expected git required error")
+	}
+	if !strings.Contains(err.Error(), "workspace.git.init.git_required") {
+		t.Fatalf("expected workspace.git.init.git_required code, got %q", err.Error())
+	}
+}
+
+func TestEnsureWorkspaceGitRepositoryAcceptsGitFileMarker(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: /tmp/nonexistent\n"), 0o644); err != nil {
+		t.Fatalf("write .git marker: %v", err)
+	}
+	if err := ensureWorkspaceGitRepository(root); err != nil {
+		t.Fatalf("expected .git file marker to be accepted, got %v", err)
 	}
 }
 

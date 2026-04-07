@@ -52,8 +52,9 @@ Epic matrix:
 Ниже — ожидаемая “история” использования MVP от нуля до результата:
 
 1) **Подготовка workspace**
-- пользователь поднимает сервис одной командой `acp serve --workspace ... --auto-init --repo-name ... (--repo-path ... | --repo-git-url ...)`;
+- пользователь поднимает сервис одной командой `acp serve --workspace ... --auto-init ((--repo-name ... (--repo-path ... | --repo-git-url ...) [--repo-ref ...]) | --repos-file ...)`;
 - при `--auto-init` ACP создаёт `workspace.yaml` и fixed layout автоматически;
+- при bootstrap ACP автоматически выполняет `git init` в workspace root, если `.git` отсутствует;
 - складывает выгрузки docs (например из Confluence) в `docs/imports/`;
 - ведёт `docs/imports/index.yaml` как metadata index импортированных материалов.
 
@@ -434,8 +435,8 @@ Wizard из блоков-шаблонов:
 
 ### 10.1. Ручной режим MVP
 В MVP обновления инициируются вручную:
-- самый короткий старт: `acp serve --workspace ... --auto-init --repo-name ... (--repo-path ... | --repo-git-url ...) --runtime fake`
-- первый bootstrap workspace выполняется через `acp init-workspace --workspace ... --repo-name ... (--repo-path ... | --repo-git-url ...)`
+- самый короткий старт: `acp serve --workspace ... --auto-init ((--repo-name ... (--repo-path ... | --repo-git-url ...) [--repo-ref ...]) | --repos-file ...) --runtime fake`
+- первый bootstrap workspace выполняется через `acp init-workspace --workspace ... ((--repo-name ... (--repo-path ... | --repo-git-url ...) [--repo-ref ...]) | --repos-file ...)`
 - первый materialization запуск: `acp run --workspace ... --pipeline init --runtime fake --non-interactive`
 - пользователь добавил новые документы в workspace  
 - пользователь обновил репозитории (git pull)  

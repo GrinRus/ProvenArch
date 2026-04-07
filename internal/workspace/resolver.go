@@ -72,12 +72,11 @@ func (r Root) ResolveRepoSources(ctx context.Context, options ResolveOptions) ([
 	for _, repo := range r.Manifest.Repos {
 		name := strings.TrimSpace(repo.Name)
 		if strings.TrimSpace(repo.Path) != "" {
-			entry, diag := r.resolvePathRepo(ctx, gitExec, repo, options, gitAvailable)
-			if diag != nil {
-				diagnostics = append(diagnostics, *diag)
-				continue
+			entry, repoDiagnostics := r.resolvePathRepo(ctx, gitExec, repo, options, gitAvailable)
+			if entry.Name != "" {
+				resolved = append(resolved, entry)
 			}
-			resolved = append(resolved, entry)
+			diagnostics = append(diagnostics, repoDiagnostics...)
 			continue
 		}
 		if strings.TrimSpace(repo.GitURL) != "" {
@@ -101,16 +100,16 @@ func (r Root) ResolveRepoSources(ctx context.Context, options ResolveOptions) ([
 	return resolved, diagnostics
 }
 
-func (r Root) resolvePathRepo(ctx context.Context, gitExec GitExecutor, repo RepoSource, options ResolveOptions, gitAvailable bool) (ResolvedRepo, *Diagnostic) {
+func (r Root) resolvePathRepo(ctx context.Context, gitExec GitExecutor, repo RepoSource, options ResolveOptions, gitAvailable bool) (ResolvedRepo, []Diagnostic) {
 	repoPath := strings.TrimSpace(repo.Path)
 	if repoPath == "" {
-		return ResolvedRepo{}, &Diagnostic{
+		return ResolvedRepo{}, []Diagnostic{{
 			Level:      DiagnosticError,
 			Code:       "workspace.repo.path.empty",
 			Repo:       repo.Name,
 			Message:    "repo path is empty",
 			Suggestion: "Set a valid path for the repository",
-		}
+		}}
 	}
 	if !filepath.IsAbs(repoPath) {
 		repoPath = filepath.Join(r.Path, repoPath)
@@ -118,50 +117,69 @@ func (r Root) resolvePathRepo(ctx context.Context, gitExec GitExecutor, repo Rep
 	repoPath = filepath.Clean(repoPath)
 	info, err := os.Stat(repoPath)
 	if err != nil {
-		return ResolvedRepo{}, &Diagnostic{
+		return ResolvedRepo{}, []Diagnostic{{
 			Level:      DiagnosticError,
 			Code:       "workspace.repo.path.unreachable",
 			Repo:       repo.Name,
 			Path:       repoPath,
 			Message:    fmt.Sprintf("repo path is not accessible: %v", err),
 			Suggestion: "Ensure path exists and is readable by ACP",
-		}
+		}}
 	}
 	if !info.IsDir() {
-		return ResolvedRepo{}, &Diagnostic{
+		return ResolvedRepo{}, []Diagnostic{{
 			Level:      DiagnosticError,
 			Code:       "workspace.repo.path.not_dir",
 			Repo:       repo.Name,
 			Path:       repoPath,
 			Message:    "repo path must point to a directory",
 			Suggestion: "Fix repo path in workspace.yaml",
-		}
+		}}
 	}
 
+	repoDiagnostics := []Diagnostic{}
 	if options.VerifyRefs && strings.TrimSpace(repo.Ref) != "" {
 		if !gitAvailable {
-			return ResolvedRepo{}, &Diagnostic{
+			return ResolvedRepo{}, []Diagnostic{{
 				Level:      DiagnosticError,
 				Code:       "workspace.repo.ref.verify.git_required",
 				Repo:       repo.Name,
 				Path:       repoPath,
 				Message:    "cannot verify repo ref because git is unavailable",
 				Suggestion: "Install git or remove ref from workspace manifest",
-			}
+			}}
 		}
-		if _, err := gitExec.Run(ctx, repoPath, "rev-parse", "--verify", strings.TrimSpace(repo.Ref)+"^{commit}"); err != nil {
-			return ResolvedRepo{}, &Diagnostic{
+		verifiedRef, warnings, err := resolvePathRepoRef(ctx, gitExec, repoPath, strings.TrimSpace(repo.Ref))
+		for idx := range warnings {
+			warnings[idx].Repo = repo.Name
+			warnings[idx].Path = repoPath
+		}
+		repoDiagnostics = append(repoDiagnostics, warnings...)
+		if err != nil {
+			return ResolvedRepo{}, []Diagnostic{{
 				Level:      DiagnosticError,
 				Code:       "workspace.repo.ref.invalid",
 				Repo:       repo.Name,
 				Path:       repoPath,
-				Message:    fmt.Sprintf("cannot resolve ref %q: %v", repo.Ref, err),
-				Suggestion: "Use an existing branch/tag/commit in workspace.yaml",
-			}
+				Message:    err.Error(),
+				Suggestion: "Use an existing local or origin-tracked branch/tag/commit in workspace.yaml",
+			}}
+		}
+		headSHA, headErr := gitExec.Run(ctx, repoPath, "rev-parse", "--verify", "HEAD^{commit}")
+		resolvedSHA, refErr := gitExec.Run(ctx, repoPath, "rev-parse", "--verify", verifiedRef+"^{commit}")
+		if headErr == nil && refErr == nil && strings.TrimSpace(headSHA) != strings.TrimSpace(resolvedSHA) {
+			repoDiagnostics = append(repoDiagnostics, Diagnostic{
+				Level:      DiagnosticWarning,
+				Code:       "workspace.repo.ref.head_mismatch",
+				Repo:       repo.Name,
+				Path:       repoPath,
+				Message:    fmt.Sprintf("configured ref %q resolves to %s, but current HEAD is %s", repo.Ref, strings.TrimSpace(resolvedSHA), strings.TrimSpace(headSHA)),
+				Suggestion: "Switch local checkout to the configured ref for deterministic local runs",
+			})
 		}
 	}
 
-	return ResolvedRepo{Name: repo.Name, Source: "path", Path: repoPath, Ref: repo.Ref}, nil
+	return ResolvedRepo{Name: repo.Name, Source: "path", Path: repoPath, Ref: repo.Ref}, repoDiagnostics
 }
 
 func (r Root) resolveGitURLRepo(ctx context.Context, gitExec GitExecutor, repo RepoSource, options ResolveOptions, gitAvailable bool) (ResolvedRepo, []Diagnostic) {
@@ -324,4 +342,54 @@ func repoCacheSlug(name string) string {
 		return "unknown"
 	}
 	return slug
+}
+
+func resolvePathRepoRef(ctx context.Context, gitExec GitExecutor, repoPath string, requestedRef string) (string, []Diagnostic, error) {
+	ref := strings.TrimSpace(requestedRef)
+	candidates := []string{ref}
+	if strings.HasPrefix(ref, "origin/") {
+		suffix := strings.TrimPrefix(ref, "origin/")
+		if suffix != "" {
+			candidates = append(candidates, "refs/remotes/origin/"+suffix)
+		}
+	} else if !strings.HasPrefix(ref, "refs/remotes/") {
+		candidates = append(candidates, "origin/"+ref)
+		candidates = append(candidates, "refs/remotes/origin/"+ref)
+	}
+
+	tried := []string{}
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if containsString(tried, candidate) {
+			continue
+		}
+		tried = append(tried, candidate)
+		if _, err := gitExec.Run(ctx, repoPath, "rev-parse", "--verify", candidate+"^{commit}"); err == nil {
+			warnings := []Diagnostic{}
+			if candidate != ref {
+				warnings = append(warnings, Diagnostic{
+					Level:      DiagnosticWarning,
+					Code:       "workspace.repo.ref.resolved_via_remote",
+					Path:       repoPath,
+					Message:    fmt.Sprintf("ref %q was resolved via %q", ref, candidate),
+					Suggestion: "Set ref to a local branch or keep it empty for current checkout",
+				})
+			}
+			return candidate, warnings, nil
+		}
+	}
+
+	return "", nil, fmt.Errorf("cannot resolve ref %q (tried: %s)", requestedRef, strings.Join(tried, ", "))
+}
+
+func containsString(values []string, candidate string) bool {
+	for _, value := range values {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
 }

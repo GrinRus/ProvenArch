@@ -40,6 +40,9 @@ Layout `charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/` не �
 - `path` означает локально доступный checkout
 - `git_url` означает remote source, который ACP разрешает через локальный `git` context пользователя/runner
 - `ref` задаёт желаемую ветку/тег/sha, если repo source поддерживает checkout/fetch semantics
+- для `path`-source ACP не делает checkout (non-mutating policy в пользовательском репозитории)
+- verify `ref` для `path`-source использует fallback-резолвинг: `<ref>` -> `origin/<ref>` -> `refs/remotes/origin/<ref>`
+- при fallback/расхождении с `HEAD` validator возвращает warnings (не блокирующие), а не изменяет checkout
 
 ACP в MVP не хранит отдельные git credentials и не вводит собственный credential plane.
 
@@ -78,3 +81,8 @@ Manifest считается невалидным, если:
 - запись repo содержит одновременно `path` и `git_url`
 - запись repo не содержит ни `path`, ни `git_url`
 - manifest пытается конфигурировать workspace layout beyond supported fields
+
+Дополнительные runtime diagnostics для `POST /api/workspace/validate`:
+- `workspace.repo.ref.invalid` (error): `ref` не резолвится ни локально, ни через origin-tracking fallback
+- `workspace.repo.ref.resolved_via_remote` (warning): `ref` был разрешён через remote-tracking ref
+- `workspace.repo.ref.head_mismatch` (warning): `ref` и текущий `HEAD` указывают на разные коммиты

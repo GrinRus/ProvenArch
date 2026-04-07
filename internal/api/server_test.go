@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -259,6 +260,173 @@ func TestPipelineEndpoints(t *testing.T) {
 	runStatus := waitForRunTerminalStatus(t, httpServer.URL, runID, 8*time.Second)
 	if runStatus.Status != string(orchestrator.RunStatusSucceeded) {
 		t.Fatalf("expected async run success, got status=%q error_code=%q", runStatus.Status, runStatus.ErrorCode)
+	}
+}
+
+func TestPipelineRunLogsEndpointSupportsPagination(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Post(httpServer.URL+"/api/pipeline/init", "application/json", bytes.NewBufferString(`{"trigger":"ui"}`))
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/init: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", response.StatusCode)
+	}
+
+	var started struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&started); err != nil {
+		t.Fatalf("decode start response: %v", err)
+	}
+	if strings.TrimSpace(started.RunID) == "" {
+		t.Fatalf("expected non-empty run_id")
+	}
+
+	runStatus := waitForRunTerminalStatus(t, httpServer.URL, started.RunID, 8*time.Second)
+	if runStatus.Status != string(orchestrator.RunStatusSucceeded) {
+		t.Fatalf("expected async run success, got status=%q error_code=%q", runStatus.Status, runStatus.ErrorCode)
+	}
+
+	logResp, err := http.Get(httpServer.URL + "/api/pipeline/runs/" + started.RunID + "/logs?cursor=0&limit=2")
+	if err != nil {
+		t.Fatalf("GET /api/pipeline/runs/<id>/logs: %v", err)
+	}
+	defer logResp.Body.Close()
+	if logResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", logResp.StatusCode)
+	}
+
+	var firstPage struct {
+		RunID string `json:"run_id"`
+		Items []struct {
+			Cursor  int    `json:"cursor"`
+			Message string `json:"message"`
+		} `json:"items"`
+		NextCursor int  `json:"next_cursor"`
+		EOF        bool `json:"eof"`
+	}
+	if err := json.NewDecoder(logResp.Body).Decode(&firstPage); err != nil {
+		t.Fatalf("decode first logs page: %v", err)
+	}
+	if firstPage.RunID != started.RunID {
+		t.Fatalf("expected run_id %q, got %q", started.RunID, firstPage.RunID)
+	}
+	if len(firstPage.Items) == 0 {
+		t.Fatalf("expected non-empty first logs page")
+	}
+	if strings.TrimSpace(firstPage.Items[0].Message) == "" {
+		t.Fatalf("expected non-empty log message")
+	}
+	if firstPage.NextCursor <= firstPage.Items[len(firstPage.Items)-1].Cursor {
+		t.Fatalf("expected next_cursor to move forward, got next=%d last_cursor=%d", firstPage.NextCursor, firstPage.Items[len(firstPage.Items)-1].Cursor)
+	}
+
+	logResp2, err := http.Get(httpServer.URL + "/api/pipeline/runs/" + started.RunID + "/logs?cursor=" + fmt.Sprintf("%d", firstPage.NextCursor) + "&limit=2")
+	if err != nil {
+		t.Fatalf("GET second logs page: %v", err)
+	}
+	defer logResp2.Body.Close()
+	if logResp2.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200 for second page, got %d", logResp2.StatusCode)
+	}
+
+	var secondPage struct {
+		Items []struct {
+			Cursor int `json:"cursor"`
+		} `json:"items"`
+		NextCursor int  `json:"next_cursor"`
+		EOF        bool `json:"eof"`
+	}
+	if err := json.NewDecoder(logResp2.Body).Decode(&secondPage); err != nil {
+		t.Fatalf("decode second logs page: %v", err)
+	}
+	for _, item := range secondPage.Items {
+		if item.Cursor < firstPage.NextCursor {
+			t.Fatalf("expected cursor >= %d, got %d", firstPage.NextCursor, item.Cursor)
+		}
+	}
+}
+
+func TestPipelineRunLogsEndpointValidatesParams(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	resp, err := http.Get(httpServer.URL + "/api/pipeline/runs/run-unknown/logs?cursor=-1&limit=10")
+	if err != nil {
+		t.Fatalf("GET invalid cursor logs request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected status 400 for invalid cursor, got %d", resp.StatusCode)
+	}
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode invalid cursor error payload: %v", err)
+	}
+	if payload.Error.Code != "invalid_cursor" {
+		t.Fatalf("expected invalid_cursor code, got %q", payload.Error.Code)
+	}
+
+	resp2, err := http.Get(httpServer.URL + "/api/pipeline/runs/run-unknown/logs?cursor=0&limit=0")
+	if err != nil {
+		t.Fatalf("GET invalid limit logs request: %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected status 400 for invalid limit, got %d", resp2.StatusCode)
+	}
+	var payload2 struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(resp2.Body).Decode(&payload2); err != nil {
+		t.Fatalf("decode invalid limit error payload: %v", err)
+	}
+	if payload2.Error.Code != "invalid_limit" {
+		t.Fatalf("expected invalid_limit code, got %q", payload2.Error.Code)
+	}
+}
+
+func TestPipelineRunLogsEndpointReturnsRunNotFound(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	resp, err := http.Get(httpServer.URL + "/api/pipeline/runs/run-missing/logs?cursor=0&limit=10")
+	if err != nil {
+		t.Fatalf("GET /api/pipeline/runs/run-missing/logs: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", resp.StatusCode)
+	}
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode run-not-found payload: %v", err)
+	}
+	if payload.Error.Code != "run_not_found" {
+		t.Fatalf("expected run_not_found code, got %q", payload.Error.Code)
 	}
 }
 

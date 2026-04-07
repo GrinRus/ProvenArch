@@ -455,6 +455,50 @@ func (s *Server) handlePipelineRuns(writer http.ResponseWriter, request *http.Re
 		return
 	}
 
+	if len(parts) == 2 && parts[1] == "logs" {
+		cursor := 0
+		rawCursor := strings.TrimSpace(request.URL.Query().Get("cursor"))
+		if rawCursor != "" {
+			parsedCursor, err := strconv.Atoi(rawCursor)
+			if err != nil || parsedCursor < 0 {
+				writeError(writer, http.StatusBadRequest, "invalid_cursor", "cursor must be a non-negative integer")
+				return
+			}
+			cursor = parsedCursor
+		}
+
+		limit := 200
+		rawLimit := strings.TrimSpace(request.URL.Query().Get("limit"))
+		if rawLimit != "" {
+			parsedLimit, err := strconv.Atoi(rawLimit)
+			if err != nil || parsedLimit <= 0 {
+				writeError(writer, http.StatusBadRequest, "invalid_limit", "limit must be a positive integer")
+				return
+			}
+			if parsedLimit > 500 {
+				parsedLimit = 500
+			}
+			limit = parsedLimit
+		}
+
+		page, ok, err := s.service.GetRunLogs(runID, cursor, limit)
+		if !ok {
+			writeError(writer, http.StatusNotFound, "run_not_found", "run not found")
+			return
+		}
+		if err != nil {
+			writeError(writer, http.StatusInternalServerError, "run_logs_unavailable", err.Error())
+			return
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"run_id":      page.RunID,
+			"items":       page.Items,
+			"next_cursor": page.NextCursor,
+			"eof":         page.EOF,
+		})
+		return
+	}
+
 	writeError(writer, http.StatusNotFound, "endpoint_not_found", "endpoint not found")
 }
 

@@ -75,6 +75,11 @@ Body: отсутствует.
 - `workspace.layout.dir.not_dir` (error: конфликтующий file path вместо required directory)
 - `workspace.layout.dir.unreadable` (error: нет доступа к required directory path)
 
+Примеры repo diagnostics в `warnings[]`/`errors[]`:
+- `workspace.repo.ref.invalid` (error, для `path` source)
+- `workspace.repo.ref.resolved_via_remote` (warning, `ref` разрешён через `origin/*`)
+- `workspace.repo.ref.head_mismatch` (warning, локальный `HEAD` отличается от ожидаемого `ref`)
+
 ### GET `/api/workspace/manifest`
 Возвращает текущее содержимое `workspace.yaml`.
 
@@ -247,6 +252,49 @@ Body: отсутствует.
 **400**
 - `invalid_limit`
 
+### GET `/api/pipeline/runs/<run_id>/logs?cursor=<n>&limit=<n>`
+Возвращает run-level лог-стрим (cursor pagination) для выбранного run.
+
+Логи сохраняются в workspace:
+- `reports/taskruns/logs/<run_id>.ndjson`
+
+Параметры:
+- `cursor` optional, default `0`, должен быть `>= 0`
+- `limit` optional, default `200`, max `500`
+
+**200**
+```json
+{
+  "run_id": "run_20260403_001",
+  "items": [
+    {
+      "cursor": 0,
+      "timestamp": "2026-04-03T12:00:00Z",
+      "level": "info",
+      "step_id": "init.step1.collect",
+      "domain_id": "payments-service",
+      "message": "runtime task started",
+      "taskrun_path": "reports/taskruns/run_20260403_001-step1-collect-domain-payments-service.json",
+      "fields": {
+        "task_id": "task-run_20260403_001-init-step1-collect-payments-service"
+      }
+    }
+  ],
+  "next_cursor": 1,
+  "eof": false
+}
+```
+
+**400**
+- `invalid_cursor`
+- `invalid_limit`
+
+**404**
+- `run_not_found`
+
+**500**
+- `run_logs_unavailable`
+
 ### GET `/api/pipeline/runs/<run_id>/artifacts`
 Возвращает список materialized artifacts для run.
 
@@ -323,6 +371,7 @@ Run-specific поверхность (не входит в strict deterministic g
 - `reports/changelog/*`
 - `reports/taskruns/*`
 - `reports/taskruns/run-history.json`
+- `reports/taskruns/logs/*`
 - runtime run registry/status (`/api/pipeline/runs/*`)
 
 ## 7) Follow-up boundary (post-beta)
@@ -331,9 +380,15 @@ Run-specific поверхность (не входит в strict deterministic g
 Каноническая фиксация runtime/Q&A boundary: `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.
 
 ## 8) Deployment boundary
-- `acp serve --workspace <abs-path> [--runtime fake|headless] [--auto-init --repo-name <name> (--repo-path <path> | --repo-git-url <url>)]`: local interactive и trusted local/private deployment.
+- `acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)`: explicit bootstrap.
+- `acp serve --workspace <abs-path> [--runtime fake|headless] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)]`: local interactive и trusted local/private deployment.
+- bootstrap behavior: если workspace root не является git-репозиторием, ACP автоматически выполняет `git init` (без auto-commit/auto-push).
 - `serve` startup работает в lenient mode: сервис стартует без блокирующего repo preflight; readiness diagnostics доступны через `POST /api/workspace/validate`.
 - `acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--non-interactive]`.
+- run logs retention knobs:
+  - CLI flags: `--run-logs-ttl-hours`, `--run-logs-max-runs` (для `serve` и `run`)
+  - env overrides: `ACP_RUN_LOGS_TTL_HOURS`, `ACP_RUN_LOGS_MAX_RUNS`
+  - defaults: `168h` TTL и `200` run log files
 - default runtime mode: `fake` (required deterministic CI surface), `headless` — opt-in.
 - GitHub/GitLab hooks/manual jobs для required CI/CD должны использовать CLI batch mode с deterministic defaults (`--runtime fake`).
 - API-trigger не должен превращаться в hosted control plane в рамках MVP.

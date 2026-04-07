@@ -65,6 +65,11 @@ body {
   margin-bottom: 0.75rem;
 }
 
+.panel h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
 .panel label {
   display: block;
   margin-bottom: 0.4rem;
@@ -78,6 +83,17 @@ body {
   border-radius: 0.75rem;
   border: 1px solid rgba(20, 33, 61, 0.22);
   font: inherit;
+}
+
+.panel select {
+  width: 100%;
+  max-width: 40rem;
+  margin-bottom: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(20, 33, 61, 0.22);
+  font: inherit;
+  background: #fff;
 }
 
 .panel textarea {
@@ -111,6 +127,41 @@ body {
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
+}
+
+.repo-card {
+  padding: 1rem;
+  margin-bottom: 0.9rem;
+  border: 1px solid rgba(20, 33, 61, 0.14);
+  border-radius: 0.95rem;
+  background: rgba(247, 250, 255, 0.65);
+}
+
+.repo-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.65rem;
+}
+
+.panel button.inline-danger {
+  margin: 0;
+  padding: 0.4rem 0.65rem;
+  border: 1px solid rgba(143, 17, 17, 0.28);
+  border-radius: 0.6rem;
+  background: rgba(143, 17, 17, 0.08);
+  color: #8f1111;
+}
+
+.panel button.inline-danger:disabled {
+  opacity: 0.5;
+}
+
+.repo-summary {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(20, 33, 61, 0.12);
 }
 
 .status {

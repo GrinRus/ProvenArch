@@ -143,8 +143,8 @@ func TestCLIDocsSurfaceMatchesHelp(t *testing.T) {
 
 	helpSource := readDoc(t, "cmd/acp/main.go")
 	helpTokens := []string{
-		"acp init-workspace --workspace <abs-path> --repo-name <name> (--repo-path <path> | --repo-git-url <url>)",
-		"acp serve --workspace <abs-path> [--runtime fake|headless]",
+		"acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>)) | --repos-file <path>)",
+		"acp serve --workspace <abs-path> [--runtime fake|headless] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>)) | --repos-file <path>)]",
 		"acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--non-interactive]",
 		"acp qa --workspace <abs-path> --question \\\"<text>\\\"",
 	}
@@ -158,23 +158,26 @@ func TestCLIDocsSurfaceMatchesHelp(t *testing.T) {
 		"README.md": {
 			"acp init-workspace --workspace /path/to/arch-workspace --repo-name payments-service --repo-path /path/to/payments-service",
 			"acp serve --workspace /path/to/arch-workspace --auto-init --repo-name payments-service --repo-path /path/to/payments-service --runtime fake",
+			"acp init-workspace --workspace /path/to/arch-workspace --repos-file /path/to/repos.yaml",
+			"acp serve --workspace /path/to/arch-workspace --auto-init --repos-file /path/to/repos.yaml --runtime fake",
 			"acp run --workspace /path/to/arch-workspace --pipeline init --runtime fake --non-interactive",
 			"acp qa --workspace /path/to/arch-workspace --question \"Who owns payments-service?\"",
 		},
 		"cmd/acp/README.md": {
-			"acp init-workspace --workspace <abs-path> --repo-name <name> (--repo-path <path> | --repo-git-url <url>)",
-			"acp serve --workspace <abs-path> [--runtime fake|headless]",
+			"acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)",
+			"acp serve --workspace <abs-path> [--runtime fake|headless] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]",
 			"acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--non-interactive]",
 			"acp qa --workspace <abs-path> --question",
 		},
 		"docs/ARCHITECTURE.md": {
-			"`init-workspace --workspace <abs-path> --repo-name <name> (--repo-path <path> | --repo-git-url <url>)`",
-			"serve --workspace <abs-path> [--runtime fake|headless]",
+			"`init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)`",
+			"`serve --workspace <abs-path> [--runtime fake|headless] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)]`",
 			"run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--non-interactive]",
 			"`acp qa`",
 		},
 		"docs/spec/API_SPEC.md": {
-			"acp serve --workspace <abs-path> [--runtime fake|headless]",
+			"acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)",
+			"acp serve --workspace <abs-path> [--runtime fake|headless] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)]",
 			"acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--non-interactive]",
 		},
 	}

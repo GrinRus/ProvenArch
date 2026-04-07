@@ -103,6 +103,7 @@ EP-20260403-acp-mvp-beta-foundation
 - 2026-04-03: Добавлены/обновлены тесты и пройдены `make contracts`, `make test`, `make lint`, `make build`.
 - 2026-04-03: Начат gap-closing beta pass: schema-driven runtime validation, workspace diagnostics, repo source resolver (`path` + `git_url` cache/fetch), run coordinator/debounce, deterministic artifact hardening, embedded UI/API + editor/git-helper endpoints.
 - 2026-04-03: Добавлены scenario fixtures, deterministic scenario integration tests, smoke scripts и CI workflows (`golden`, `smoke-cli`, `smoke-api`, `ui-smoke`, optional `live-runner-smoke`).
+- 2026-04-07: `trash-cleanup` slice: удален dead-code в `scripts/full-run-ai-advent.sh` (`QUALITY_GATES_NOTE`), очищены hardcoded defaults для full-run, удалён placeholder `live-runner-smoke` workflow и обновлены централизованные инструкции для scenario run.
 
 ---
 

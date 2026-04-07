@@ -15,11 +15,12 @@
 
 ## Компоненты
 1) **Go entrypoint (`cmd/acp`)** *(implemented baseline)*
-   - `init-workspace --workspace <abs-path> --repo-name <name> (--repo-path <path> | --repo-git-url <url>)` создаёт/обновляет `workspace.yaml`, bootstrap-ит fixed layout и выполняет dry validation для первого старта
+   - `init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)` создаёт/обновляет `workspace.yaml`, bootstrap-ит fixed layout/baseline bundle и выполняет dry validation для первого старта
    - Раздаёт UI (embedded static assets из `ui/dist`)
    - Экспортирует API под `/api/*`
-   - `serve --workspace <abs-path> [--runtime fake|headless] [--auto-init --repo-name <name> (--repo-path <path> | --repo-git-url <url>)]` поднимает single-workspace-per-process service
+   - `serve --workspace <abs-path> [--runtime fake|headless] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)]` поднимает single-workspace-per-process service
    - `serve --auto-init` bootstrap-ит workspace manifest/layout при отсутствии `workspace.yaml`
+   - bootstrap (`init-workspace`/`serve --auto-init`) автоматически делает `git init` для workspace root при отсутствии `.git`
    - startup для `serve` lenient: без блокирующего repo preflight; readiness diagnostics доступны через `/api/workspace/validate`
    - Поддерживает batch/non-interactive режим для CI jobs
    - `run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--non-interactive]`
@@ -32,13 +33,18 @@
    - React + TypeScript + Vite
    - Dev: `npm run dev` с proxy на backend
    - Prod: `npm run build` → `ui/dist` встраивается в Go бинарь
+   - Guided setup поддерживает multi-repo (`repos[]`) с add/remove rows и optional `ref`
+   - Показывает repo overview в validate surface: `resolved_repos` + diagnostics, сгруппированные по repo
    - Редактирует baseline bundle artifacts через guided selector (`charter/*`, `skills/*`, prompt packs, `skills/subagents.yaml`)
+   - UI разбит на явные секции `Setup / Baseline / Runs / Results`
    - Показывает run dashboard (queued/running/succeeded/failed), включая завершённые run'ы из persisted history
+   - Показывает `Runs: Logs` для выбранного run (`timestamp/level/step/domain/message`) с quick actions `Copy logs`, `Download logs`, `Open taskrun artifact`
 
 3) **Orchestrator (`internal/orchestrator`)** *(implemented baseline)*
    - Step registry (шаги init pipeline)
    - Step 0 materialization читает persisted wizard contract `charter/wizard/step0-contract.json`
    - при missing/invalid wizard contract применяется deterministic baseline fallback и warning фиксируется в run diagnostics
+   - baseline bundle seeding выполняется create-if-missing, без перезаписи пользовательских правок
    - Готовит ContextPack/PromptPack
    - Загружает baseline bundle agents/skills/prompts из workspace
    - Работает с единым central workspace (`arch-workspace`) как корнем артефактов MVP
@@ -46,6 +52,8 @@
    - Разрешает repo sources (`path`/`git_url`) в локальные checkout перед анализом через системный `git` текущего пользователя/runner
    - Оркестрирует domain-first слой агентов
    - Materialize-ит per-domain execution contracts (`reports/agent-outputs/domains/*.task-envelope.json`) для canonical domain cards
+   - Step1 repo binding: источник истины `repo_scope` в domain card; fallback только slug-match `domain_id` ↔ `repo.name`
+   - Монолитный сценарий many-domains-to-one-repo поддержан через общий `repo_scope`; unknown scope фиксируется вопросом `q.domain.<id>.unknown-repo-scope`
    - Выполняет runtime collect-step per-domain и сохраняет отдельные raw taskruns в `reports/taskruns/*-step1-collect-domain-*.json`
    - Вызывает runtime adapter
    - Валидирует TaskResult (schema)
@@ -55,6 +63,10 @@
    - Триггерит генерацию отчётов
    - Поддерживает async run coordination: single active run + debounce queue (`last event wins`)
    - Ведёт persisted run history в `reports/taskruns/run-history.json` (versioned index, retention 500)
+   - Ведёт run-level logs в `reports/taskruns/logs/<run_id>.ndjson` с cursor query API (`GET /api/pipeline/runs/<run_id>/logs`)
+   - Пробрасывает `TaskResult.warnings` в run diagnostics (`RunInfo.Warnings`) и логирует warning events
+   - Materialize-ит per-run quality summary `reports/taskruns/<run_id>-quality.json` (signal metrics/runtime versions)
+   - Run logs retention policy (TTL + max runs) запускается при старте сервиса, перед run и после run
    - (опционально) делает git commit
 
 4) **Agent Topology (domain-first, baseline)**
@@ -76,6 +88,7 @@
    - валидирует manifest по `schemas/workspace.schema.json`
    - поддерживает `docs/imports/index.yaml` как metadata index для imported docs
    - поддерживает repo entries с `path` или `git_url` + optional `ref`
+   - verify `ref` для `path` source использует fallback (`ref` -> `origin/ref` -> `refs/remotes/origin/ref`) и выдаёт warning при `HEAD` mismatch
    - clone/fetch для `git_url` выполняет на той же машине через локальный `git` и текущий user/runner auth context
    - не хранит отдельные credentials внутри ACP
    - safe path joins (никогда не читаем вне workspace root)

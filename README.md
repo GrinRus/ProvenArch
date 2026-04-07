@@ -2,7 +2,7 @@
 
 > **Статус:** MVP beta foundation / runnable local pipeline baseline + strict contracts
 > **Принятый стек реализации:** Go (backend/orchestrator) + React/TypeScript UI (embedded), runtime анализа в MVP: **Claude Code headless**
-> **Последняя ревизия:** 2026-04-05
+> **Последняя ревизия:** 2026-04-06
 
 ## Что это
 
@@ -78,6 +78,10 @@ Q&A API follow-up в baseline зарезервирован как read-only endp
 - skills: `service-inventory`, `interface-extraction`, `integration-mapping`, `datastore-mapping`, `cicd-mapping`, `ownership-coverage`, `findings`, `proposals`
 - prompt packs: `constitution`, `collect-context`, `findings`, `proposals`, `qa`
 
+Bundle bootstrap policy:
+- `init-workspace` и `serve --auto-init` создают baseline artifacts по стратегии create-if-missing;
+- существующие пользовательские правки в baseline файлах не перезаписываются.
+
 ---
 
 ## Ключевые понятия (trust model)
@@ -111,7 +115,14 @@ acp serve --workspace /path/to/arch-workspace --auto-init --repo-name payments-s
 Эта команда:
 - создаёт `workspace.yaml`, если он отсутствует,
 - создаёт fixed MVP layout,
+- автоматически выполняет `git init` в workspace root, если `.git` отсутствует,
 - поднимает backend + embedded UI без блокирующего preflight repo-resolution на старте.
+
+Для multi-repo bootstrap вместо single-repo флагов можно использовать:
+
+```bash
+acp serve --workspace /path/to/arch-workspace --auto-init --repos-file /path/to/repos.yaml --runtime fake
+```
 
 ### 2) Запустите первый анализ
 
@@ -133,6 +144,7 @@ acp init-workspace --workspace /path/to/arch-workspace --repo-name payments-serv
 Команда:
 - создаёт/обновляет `workspace.yaml`,
 - создаёт fixed MVP layout (`charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/`),
+- автоматически выполняет `git init` в workspace root, если `.git` отсутствует,
 - валидирует manifest и repo source.
 
 Source of truth для manifest contract:
@@ -145,6 +157,16 @@ Source of truth для manifest contract:
 ```bash
 acp init-workspace --workspace /path/to/arch-workspace --repo-name users-service --repo-git-url https://gitlab.example.com/platform/users-service.git --repo-ref main
 ```
+
+Для 2+ репозиториев:
+
+```bash
+acp init-workspace --workspace /path/to/arch-workspace --repos-file /path/to/repos.yaml
+```
+
+`repos.yaml` поддерживает формат:
+- `repos: [...]`
+- или top-level массив записей `repos[]`
 
 ### 3.1) Read-only QA по артефактам workspace (опционально)
 
@@ -181,6 +203,37 @@ Root entrypoints:
 - `make run-backend WORKSPACE=/abs/path/to/arch-workspace`
 - `make run-ui`
 
+### 8) Полный локальный прогон (scenario)
+
+Готовый runbook и script:
+- [docs/LOCAL_FULL_RUN_AI_ADVENT.md](docs/LOCAL_FULL_RUN_AI_ADVENT.md)
+- `scripts/full-run-ai-advent.sh`
+
+Быстрый запуск:
+
+```bash
+TARGET_REPO=/path/to/target-repo ./scripts/full-run-ai-advent.sh
+```
+
+Script делает strict полный цикл:
+- API simulation + runtime `fake + headless`;
+- anti-mock/anti-zero-signal проверки для headless run;
+- quality regression guard (последний run не должен быть слабее предыдущего в итерации);
+- per-run snapshots в `TMP_ROOT/snapshots/<run_id>/...`;
+- гарантированные debug artifacts: `TMP_ROOT/full-run.log` и `TMP_ROOT/session-summary.md` даже при раннем fail.
+
+Если нужно сохранить временный workspace для ручного анализа:
+
+```bash
+TARGET_REPO=/path/to/target-repo KEEP_TMP=1 ./scripts/full-run-ai-advent.sh
+```
+
+Опциональные параметры retention для run logs:
+
+```bash
+TARGET_REPO=/path/to/target-repo RUN_LOGS_TTL_HOURS=168 RUN_LOGS_MAX_RUNS=200 ./scripts/full-run-ai-advent.sh
+```
+
 Repo CI по умолчанию живёт в GitHub Actions:
 - `contracts`
 - `backend`
@@ -189,7 +242,6 @@ Repo CI по умолчанию живёт в GitHub Actions:
 - `smoke-cli`
 - `smoke-api`
 - `ui-smoke`
-- `live-runner-smoke` (manual/optional)
 
 ---
 
@@ -327,10 +379,11 @@ MVP canonical runtime shape:
 
 UI в MVP должен покрывать минимум:
 - wizard для Step 0 (charter);
-- настройку источников репозиториев: локальные папки и GitHub/GitLab URL;
+- настройку `repos[]` (multi-repo) для локальных папок и GitHub/GitLab URL;
 - baseline-wide редактор `charter/*` + `skills/*` (prompt packs, `subagents.yaml`, skill prompts);
 - запуск pipeline (init/update);
-- просмотр результатов (`as-is`, findings, proposals);
+- явные секции `Setup / Baseline / Runs / Results`;
+- просмотр результатов (`as-is`, findings, proposals) и repo validation overview (`resolved_repos` + diagnostics по repo);
 - просмотр coverage/questions по недостающим данным;
 - вызовы backend через `/api/*` (см. `docs/spec/API_SPEC.md`).
 
@@ -346,7 +399,8 @@ UI в MVP должен покрывать минимум:
   - golden/regression tests для model/compiler outputs
   - scenario integration tests на synthetic repos
   - smoke tests для CLI/API/UI
-- optional `live-runner-smoke` остаётся manual/opt-in и не блокирует merge
+- local live-runner smoke выполняется вручную (не через required CI) через
+  `scripts/full-run-ai-advent.sh` с реально доступным headless runner на доверенной машине
 
 ---
 
