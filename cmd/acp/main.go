@@ -7,8 +7,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/api"
 	"github.com/GrinRus/ProvenArch/internal/orchestrator"
@@ -57,15 +61,18 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	workspacePath := fs.String("workspace", "", "absolute path to arch-workspace")
 	listenAddress := fs.String("listen", "127.0.0.1:8080", "listen address for local API server")
 	runtimeMode := fs.String("runtime", "fake", "runtime mode: fake or headless")
+	runLogsTTLHrs := fs.Int("run-logs-ttl-hours", envInt("ACP_RUN_LOGS_TTL_HOURS", 168), "run logs retention TTL in hours")
+	runLogsMaxRuns := fs.Int("run-logs-max-runs", envInt("ACP_RUN_LOGS_MAX_RUNS", 200), "maximum number of run log files to retain")
 	dryRun := fs.Bool("dry-run", false, "validate workspace and server wiring without starting listener")
 	autoInit := fs.Bool("auto-init", false, "bootstrap workspace manifest/layout when workspace.yaml is missing")
 	repoName := fs.String("repo-name", "", "repo scope name for --auto-init")
 	repoPath := fs.String("repo-path", "", "local repo checkout path (absolute or relative) for --auto-init")
 	repoGitURL := fs.String("repo-git-url", "", "git repository URL source for --auto-init")
 	repoRef := fs.String("repo-ref", "", "optional repo ref (branch/tag/commit) for --auto-init")
+	reposFile := fs.String("repos-file", "", "YAML file with repos[] entries for --auto-init")
 	docsImportsPath := fs.String("docs-imports-path", "./docs/imports", "docs imports path in workspace.yaml for --auto-init")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: acp serve --workspace <abs-path> [--runtime fake|headless] [--listen 127.0.0.1:8080] [--dry-run] [--auto-init --repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>] [--docs-imports-path ./docs/imports]]")
+		fmt.Fprintln(stderr, "Usage: acp serve --workspace <abs-path> [--runtime fake|headless] [--listen 127.0.0.1:8080] [--dry-run] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]")
 		fs.PrintDefaults()
 	}
 
@@ -80,6 +87,14 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return exitCodeInvalidCommand
 	}
+	if *runLogsTTLHrs <= 0 {
+		fmt.Fprintln(stderr, "run logs validation failed: --run-logs-ttl-hours must be > 0")
+		return exitCodeValidation
+	}
+	if *runLogsMaxRuns <= 0 {
+		fmt.Fprintln(stderr, "run logs validation failed: --run-logs-max-runs must be > 0")
+		return exitCodeValidation
+	}
 
 	ws, err := openOrAutoInitWorkspace(workspaceInitConfig{
 		WorkspacePath:   *workspacePath,
@@ -87,6 +102,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		RepoPath:        *repoPath,
 		RepoGitURL:      *repoGitURL,
 		RepoRef:         *repoRef,
+		ReposFile:       *reposFile,
 		DocsImportsPath: *docsImportsPath,
 		Force:           false,
 		RequireRepo:     true,
@@ -108,6 +124,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	service := orchestrator.NewService(
 		orchestrator.WithRunner(runner),
 		orchestrator.WithHistoryWorkspace(ws),
+		orchestrator.WithRunLogsRetention(time.Duration(*runLogsTTLHrs)*time.Hour, *runLogsMaxRuns),
 	)
 	if err := service.ValidateRuntime(context.Background()); err != nil {
 		printRunnerError(stderr, err)
@@ -135,14 +152,15 @@ func runInitWorkspace(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 
 	workspacePath := fs.String("workspace", "", "absolute path to arch-workspace")
-	repoName := fs.String("repo-name", "primary-repo", "repo scope name")
+	repoName := fs.String("repo-name", "", "repo scope name")
 	repoPath := fs.String("repo-path", "", "local repo checkout path (absolute or relative)")
 	repoGitURL := fs.String("repo-git-url", "", "git repository URL source")
 	repoRef := fs.String("repo-ref", "", "optional repo ref (branch/tag/commit)")
+	reposFile := fs.String("repos-file", "", "YAML file with repos[] entries")
 	docsImportsPath := fs.String("docs-imports-path", "./docs/imports", "docs imports path in workspace.yaml")
 	force := fs.Bool("force", false, "overwrite existing workspace.yaml")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: acp init-workspace --workspace <abs-path> --repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>] [--docs-imports-path ./docs/imports] [--force]")
+		fmt.Fprintln(stderr, "Usage: acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports] [--force]")
 		fs.PrintDefaults()
 	}
 
@@ -164,6 +182,7 @@ func runInitWorkspace(args []string, stdout, stderr io.Writer) int {
 		RepoPath:        *repoPath,
 		RepoGitURL:      *repoGitURL,
 		RepoRef:         *repoRef,
+		ReposFile:       *reposFile,
 		DocsImportsPath: *docsImportsPath,
 		Force:           *force,
 		RequireRepo:     true,
@@ -200,6 +219,8 @@ type workspaceInitConfig struct {
 	RepoPath        string
 	RepoGitURL      string
 	RepoRef         string
+	ReposFile       string
+	Repos           []workspace.RepoSource
 	DocsImportsPath string
 	Force           bool
 	RequireRepo     bool
@@ -213,6 +234,9 @@ func createWorkspaceFromConfig(config workspaceInitConfig) (workspace.Root, erro
 	if err := os.MkdirAll(normalized.WorkspacePath, 0o755); err != nil {
 		return workspace.Root{}, fmt.Errorf("create workspace directory: %w", err)
 	}
+	if err := ensureWorkspaceGitRepository(normalized.WorkspacePath); err != nil {
+		return workspace.Root{}, err
+	}
 
 	manifestPath := filepath.Join(normalized.WorkspacePath, workspace.ManifestFileName)
 	if _, err := os.Stat(manifestPath); err == nil && !normalized.Force {
@@ -221,15 +245,19 @@ func createWorkspaceFromConfig(config workspaceInitConfig) (workspace.Root, erro
 		return workspace.Root{}, fmt.Errorf("stat workspace manifest: %w", err)
 	}
 
-	manifest := workspace.Manifest{
-		Version: 1,
-		Repos: []workspace.RepoSource{{
+	repos := append([]workspace.RepoSource(nil), normalized.Repos...)
+	if len(repos) == 0 {
+		repos = []workspace.RepoSource{{
 			Name:   normalized.RepoName,
 			Path:   normalized.RepoPath,
 			GitURL: normalized.RepoGitURL,
 			Ref:    normalized.RepoRef,
-		}},
-		Docs: workspace.DocsConfig{ImportsPath: normalized.DocsImportsPath},
+		}}
+	}
+	manifest := workspace.Manifest{
+		Version: 1,
+		Repos:   repos,
+		Docs:    workspace.DocsConfig{ImportsPath: normalized.DocsImportsPath},
 	}
 
 	manifestContent, err := yaml.Marshal(manifest)
@@ -246,6 +274,9 @@ func createWorkspaceFromConfig(config workspaceInitConfig) (workspace.Root, erro
 	}
 	if err := ws.EnsureLayout(); err != nil {
 		return workspace.Root{}, fmt.Errorf("ensure workspace layout: %w", err)
+	}
+	if err := ws.EnsureBaselineBundle(); err != nil {
+		return workspace.Root{}, fmt.Errorf("ensure baseline bundle: %w", err)
 	}
 	return ws, nil
 }
@@ -291,12 +322,25 @@ func normalizeWorkspaceInitConfig(config workspaceInitConfig) (workspaceInitConf
 	repoPath := strings.TrimSpace(config.RepoPath)
 	repoGitURL := strings.TrimSpace(config.RepoGitURL)
 	repoRef := strings.TrimSpace(config.RepoRef)
+	reposFile := strings.TrimSpace(config.ReposFile)
 	importsPath := strings.TrimSpace(config.DocsImportsPath)
 	if importsPath == "" {
 		importsPath = "./docs/imports"
 	}
 
-	if config.RequireRepo {
+	repos := []workspace.RepoSource{}
+	if reposFile != "" {
+		if repoName != "" || repoPath != "" || repoGitURL != "" || repoRef != "" {
+			return workspaceInitConfig{}, errors.New("set either --repos-file or single-repo flags (--repo-name + --repo-path|--repo-git-url)")
+		}
+		loadedRepos, err := loadRepoSourcesFromFile(reposFile)
+		if err != nil {
+			return workspaceInitConfig{}, err
+		}
+		repos = loadedRepos
+	}
+
+	if config.RequireRepo && len(repos) == 0 {
 		if repoName == "" {
 			return workspaceInitConfig{}, errors.New("--repo-name is required")
 		}
@@ -306,7 +350,7 @@ func normalizeWorkspaceInitConfig(config workspaceInitConfig) (workspaceInitConf
 			return workspaceInitConfig{}, errors.New("set exactly one of --repo-path or --repo-git-url")
 		}
 	}
-	if repoPath != "" {
+	if len(repos) == 0 && repoPath != "" {
 		resolvedPath, err := filepath.Abs(repoPath)
 		if err != nil {
 			return workspaceInitConfig{}, fmt.Errorf("resolve --repo-path: %w", err)
@@ -320,6 +364,8 @@ func normalizeWorkspaceInitConfig(config workspaceInitConfig) (workspaceInitConf
 		RepoPath:        repoPath,
 		RepoGitURL:      repoGitURL,
 		RepoRef:         repoRef,
+		ReposFile:       reposFile,
+		Repos:           repos,
 		DocsImportsPath: importsPath,
 		Force:           config.Force,
 		RequireRepo:     config.RequireRepo,
@@ -333,6 +379,8 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 	workspacePath := fs.String("workspace", "", "absolute path to arch-workspace")
 	pipelineName := fs.String("pipeline", "", "pipeline to run: init or refresh")
 	runtimeMode := fs.String("runtime", "fake", "runtime mode: fake or headless")
+	runLogsTTLHrs := fs.Int("run-logs-ttl-hours", envInt("ACP_RUN_LOGS_TTL_HOURS", 168), "run logs retention TTL in hours")
+	runLogsMaxRuns := fs.Int("run-logs-max-runs", envInt("ACP_RUN_LOGS_MAX_RUNS", 200), "maximum number of run log files to retain")
 	nonInteractive := fs.Bool("non-interactive", false, "disable interactive prompts")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "Usage: acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--non-interactive]")
@@ -349,6 +397,14 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "unexpected positional arguments: %s\n", strings.Join(fs.Args(), " "))
 		fs.Usage()
 		return exitCodeInvalidCommand
+	}
+	if *runLogsTTLHrs <= 0 {
+		fmt.Fprintln(stderr, "run logs validation failed: --run-logs-ttl-hours must be > 0")
+		return exitCodeValidation
+	}
+	if *runLogsMaxRuns <= 0 {
+		fmt.Fprintln(stderr, "run logs validation failed: --run-logs-max-runs must be > 0")
+		return exitCodeValidation
 	}
 
 	ws, err := workspace.Open(*workspacePath)
@@ -380,6 +436,7 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 	service := orchestrator.NewService(
 		orchestrator.WithRunner(runner),
 		orchestrator.WithHistoryWorkspace(ws),
+		orchestrator.WithRunLogsRetention(time.Duration(*runLogsTTLHrs)*time.Hour, *runLogsMaxRuns),
 	)
 	if err := service.ValidateRuntime(context.Background()); err != nil {
 		printRunnerError(stderr, err)
@@ -479,8 +536,8 @@ func printRootUsage(w io.Writer) {
 	fmt.Fprintln(w, "ACP CLI")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  acp init-workspace --workspace <abs-path> --repo-name <name> (--repo-path <path> | --repo-git-url <url>)")
-	fmt.Fprintln(w, "  acp serve --workspace <abs-path> [--runtime fake|headless] [--auto-init --repo-name <name> (--repo-path <path> | --repo-git-url <url>)]")
+	fmt.Fprintln(w, "  acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>)) | --repos-file <path>)")
+	fmt.Fprintln(w, "  acp serve --workspace <abs-path> [--runtime fake|headless] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>)) | --repos-file <path>)]")
 	fmt.Fprintln(w, "  acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--non-interactive]")
 	fmt.Fprintln(w, "  acp qa --workspace <abs-path> --question \"<text>\"")
 	fmt.Fprintln(w)
@@ -525,4 +582,120 @@ func printRunnerError(w io.Writer, err error) {
 		return
 	}
 	fmt.Fprintf(w, "runner validation failed: %v\n", err)
+}
+
+func envInt(name string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return value
+}
+
+func ensureWorkspaceGitRepository(workspacePath string) error {
+	gitDir := filepath.Join(workspacePath, ".git")
+	_, err := os.Stat(gitDir)
+	if err == nil {
+		// Accept both ".git" directory and ".git" file (git worktree marker).
+		return nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("workspace.git.init.stat_failed: %w", err)
+	}
+
+	if _, err := exec.LookPath("git"); err != nil {
+		return fmt.Errorf("workspace.git.init.git_required: install git and ensure it is available in PATH: %w", err)
+	}
+	cmd := exec.Command("git", "init")
+	cmd.Dir = workspacePath
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("workspace.git.init.failed: git init failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func loadRepoSourcesFromFile(rawPath string) ([]workspace.RepoSource, error) {
+	path := strings.TrimSpace(rawPath)
+	if path == "" {
+		return nil, errors.New("repos file path is required")
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve --repos-file: %w", err)
+	}
+	content, err := os.ReadFile(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("read --repos-file %q: %w", absPath, err)
+	}
+
+	var envelope struct {
+		Repos []workspace.RepoSource `yaml:"repos"`
+	}
+	if err := yaml.Unmarshal(content, &envelope); err != nil {
+		return nil, fmt.Errorf("parse --repos-file %q: %w", absPath, err)
+	}
+	repos := envelope.Repos
+	if len(repos) == 0 {
+		var list []workspace.RepoSource
+		if err := yaml.Unmarshal(content, &list); err != nil {
+			return nil, fmt.Errorf("parse --repos-file %q: expected YAML with repos[] or array of repo entries", absPath)
+		}
+		repos = list
+	}
+	if len(repos) == 0 {
+		return nil, fmt.Errorf("--repos-file %q contains no repos", absPath)
+	}
+
+	baseDir := filepath.Dir(absPath)
+	normalized := make([]workspace.RepoSource, 0, len(repos))
+	seenNames := map[string]struct{}{}
+	for idx, repo := range repos {
+		item, normalizeErr := normalizeRepoSource(repo, baseDir, idx)
+		if normalizeErr != nil {
+			return nil, normalizeErr
+		}
+		if _, exists := seenNames[item.Name]; exists {
+			return nil, fmt.Errorf("--repos-file %q contains duplicate repo.name %q", absPath, item.Name)
+		}
+		seenNames[item.Name] = struct{}{}
+		normalized = append(normalized, item)
+	}
+	sort.Slice(normalized, func(i, j int) bool {
+		return normalized[i].Name < normalized[j].Name
+	})
+	return normalized, nil
+}
+
+func normalizeRepoSource(repo workspace.RepoSource, baseDir string, index int) (workspace.RepoSource, error) {
+	repo.Name = strings.TrimSpace(repo.Name)
+	repo.Path = strings.TrimSpace(repo.Path)
+	repo.GitURL = strings.TrimSpace(repo.GitURL)
+	repo.Ref = strings.TrimSpace(repo.Ref)
+
+	label := fmt.Sprintf("repos[%d]", index)
+	if repo.Name == "" {
+		return workspace.RepoSource{}, fmt.Errorf("%s.name is required", label)
+	}
+	hasPath := repo.Path != ""
+	hasGitURL := repo.GitURL != ""
+	if hasPath == hasGitURL {
+		return workspace.RepoSource{}, fmt.Errorf("%s must contain exactly one of path or git_url", label)
+	}
+	if hasPath && !filepath.IsAbs(repo.Path) {
+		repo.Path = filepath.Join(baseDir, repo.Path)
+	}
+	if hasPath {
+		resolvedPath, err := filepath.Abs(repo.Path)
+		if err != nil {
+			return workspace.RepoSource{}, fmt.Errorf("resolve %s.path: %w", label, err)
+		}
+		repo.Path = resolvedPath
+	}
+
+	return repo, nil
 }

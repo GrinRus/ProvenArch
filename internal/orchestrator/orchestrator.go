@@ -35,6 +35,7 @@ const (
 	runHistoryPath      = "reports/taskruns/run-history.json"
 	runHistoryVersion   = 1
 	runHistoryRetention = 500
+	runLogsPath         = "reports/taskruns/logs"
 )
 
 type RunStatus string
@@ -60,6 +61,11 @@ type Service struct {
 	historyWorkspace workspace.Root
 	historyEnabled   bool
 	historyRetention int
+
+	runLogsWorkspace workspace.Root
+	runLogsEnabled   bool
+	runLogsTTL       time.Duration
+	runLogsMaxRuns   int
 }
 
 type pendingRun struct {
@@ -141,6 +147,19 @@ func WithHistoryWorkspace(ws workspace.Root) Option {
 	return func(service *Service) {
 		service.historyWorkspace = ws
 		service.historyEnabled = strings.TrimSpace(ws.Path) != ""
+		service.runLogsWorkspace = ws
+		service.runLogsEnabled = strings.TrimSpace(ws.Path) != ""
+	}
+}
+
+func WithRunLogsRetention(ttl time.Duration, maxRuns int) Option {
+	return func(service *Service) {
+		if ttl > 0 {
+			service.runLogsTTL = ttl
+		}
+		if maxRuns > 0 {
+			service.runLogsMaxRuns = maxRuns
+		}
 	}
 }
 
@@ -151,11 +170,14 @@ func NewService(options ...Option) *Service {
 		runs:             map[string]*runRecord{},
 		debounceWindow:   5 * time.Minute,
 		historyRetention: runHistoryRetention,
+		runLogsTTL:       7 * 24 * time.Hour,
+		runLogsMaxRuns:   200,
 	}
 	for _, option := range options {
 		option(service)
 	}
 	service.loadHistory()
+	_ = service.cleanupRunLogs()
 	return service
 }
 
@@ -183,6 +205,7 @@ func (s *Service) ValidateRuntime(ctx context.Context) error {
 }
 
 func (s *Service) runWithID(ctx context.Context, request RunRequest, runID string) (RunInfo, []Artifact, error) {
+	_ = s.cleanupRunLogs()
 	now := s.clock().UTC()
 	initialInfo := RunInfo{
 		RunID:     runID,
@@ -191,6 +214,14 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		StartedAt: now,
 	}
 	s.storeRun(runRecord{info: initialInfo})
+	s.appendRunLog(runID, RunLogEntry{
+		Timestamp: now,
+		Level:     RunLogLevelInfo,
+		Message:   "run started",
+		Fields: map[string]any{
+			"pipeline": string(request.Pipeline),
+		},
+	})
 	if err := s.ValidateRuntime(ctx); err != nil {
 		finishedAt := s.clock().UTC()
 		failedInfo := initialInfo
@@ -198,6 +229,16 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		failedInfo.ErrorCode, failedInfo.Error = classifyExecutionError(err)
 		failedInfo.FinishedAt = &finishedAt
 		s.storeRun(runRecord{info: failedInfo})
+		s.appendRunLog(runID, RunLogEntry{
+			Timestamp: finishedAt,
+			Level:     RunLogLevelError,
+			Message:   "run failed: runtime validation",
+			Fields: map[string]any{
+				"error_code": failedInfo.ErrorCode,
+				"error":      failedInfo.Error,
+			},
+		})
+		_ = s.cleanupRunLogs()
 		return failedInfo, nil, err
 	}
 	if err := request.Workspace.EnsureLayout(); err != nil {
@@ -207,6 +248,15 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		failedInfo.Error = fmt.Sprintf("ensure workspace layout: %v", err)
 		failedInfo.FinishedAt = &finishedAt
 		s.storeRun(runRecord{info: failedInfo})
+		s.appendRunLog(runID, RunLogEntry{
+			Timestamp: finishedAt,
+			Level:     RunLogLevelError,
+			Message:   "run failed: ensure workspace layout",
+			Fields: map[string]any{
+				"error": failedInfo.Error,
+			},
+		})
+		_ = s.cleanupRunLogs()
 		return failedInfo, nil, err
 	}
 	validation := request.Workspace.Validate(ctx, workspace.ValidateOptions{
@@ -224,25 +274,43 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		s.storeRun(runRecord{
 			info: failedInfo,
 		})
+		s.appendRunLog(runID, RunLogEntry{
+			Timestamp: finishedAt,
+			Level:     RunLogLevelError,
+			Message:   "run failed: workspace validation",
+			Fields: map[string]any{
+				"error":    failedInfo.Error,
+				"warnings": failedInfo.Warnings,
+			},
+		})
+		_ = s.cleanupRunLogs()
 		return failedInfo, nil, errors.New(failedInfo.Error)
 	}
 
 	execution := pipelineExecution{
-		runID:         runID,
-		pipeline:      request.Pipeline,
-		startedAt:     now,
-		workspace:     request.Workspace,
-		runner:        s.runner,
-		store:         model.NewStore(request.Workspace),
-		compiler:      reports.NewCompiler(request.Workspace),
-		clock:         s.clock,
-		artifacts:     []Artifact{},
-		artifactIndex: map[string]int{},
-		findings:      []contracts.Finding{},
-		questions:     []contracts.Question{},
-		coverage:      nil,
-		domainRuns:    map[string]domainRunSummary{},
-		stepStatus:    initialInfo,
+		runID:              runID,
+		pipeline:           request.Pipeline,
+		startedAt:          now,
+		workspace:          request.Workspace,
+		runner:             s.runner,
+		store:              model.NewStore(request.Workspace),
+		compiler:           reports.NewCompiler(request.Workspace),
+		clock:              s.clock,
+		artifacts:          []Artifact{},
+		artifactIndex:      map[string]int{},
+		findings:           []contracts.Finding{},
+		questions:          []contracts.Question{},
+		coverage:           nil,
+		domainRuns:         map[string]domainRunSummary{},
+		stepStatus:         initialInfo,
+		runtimeStepMetrics: []runtimeStepQuality{},
+		runtimeVersions:    map[string]struct{}{},
+	}
+	execution.onLog = func(entry RunLogEntry) {
+		if strings.TrimSpace(entry.StepID) == "" {
+			entry.StepID = execution.stepStatus.CurrentStep
+		}
+		s.appendRunLog(runID, entry)
 	}
 	execution.onStep = func(stepID string) {
 		progress := initialInfo
@@ -253,6 +321,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 			info:      progress,
 			artifacts: append([]Artifact(nil), execution.artifacts...),
 		})
+		execution.logInfo(stepID, "", "step started", nil)
 	}
 
 	if err := execution.run(ctx); err != nil {
@@ -263,10 +332,23 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		failedInfo.CurrentStep = execution.stepStatus.CurrentStep
 		failedInfo.Warnings = append([]string(nil), execution.warnings...)
 		failedInfo.FinishedAt = &finishedAt
+		if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusFailed, failedInfo.ErrorCode, failedInfo.Error); qualityErr == nil {
+			execution.addArtifacts(qualityArtifact)
+		} else {
+			failedInfo.Warnings = append(failedInfo.Warnings, fmt.Sprintf("run quality summary write failed: %v", qualityErr))
+			execution.logWarn(execution.stepStatus.CurrentStep, "", "failed to write run quality summary", map[string]any{
+				"error": qualityErr.Error(),
+			})
+		}
 		s.storeRun(runRecord{
 			info:      failedInfo,
 			artifacts: execution.artifacts,
 		})
+		execution.logError(execution.stepStatus.CurrentStep, "", "run failed", map[string]any{
+			"error_code": failedInfo.ErrorCode,
+			"error":      failedInfo.Error,
+		})
+		_ = s.cleanupRunLogs()
 		return failedInfo, execution.artifacts, err
 	}
 
@@ -276,15 +358,28 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	succeeded.CurrentStep = execution.stepStatus.CurrentStep
 	succeeded.Warnings = append([]string(nil), execution.warnings...)
 	succeeded.FinishedAt = &finishedAt
+	if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusSucceeded, "", ""); qualityErr == nil {
+		execution.addArtifacts(qualityArtifact)
+	} else {
+		succeeded.Warnings = append(succeeded.Warnings, fmt.Sprintf("run quality summary write failed: %v", qualityErr))
+		execution.logWarn(execution.stepStatus.CurrentStep, "", "failed to write run quality summary", map[string]any{
+			"error": qualityErr.Error(),
+		})
+	}
 	s.storeRun(runRecord{
 		info:      succeeded,
 		artifacts: execution.artifacts,
 	})
+	execution.logInfo(execution.stepStatus.CurrentStep, "", "run succeeded", map[string]any{
+		"artifacts": len(execution.artifacts),
+	})
+	_ = s.cleanupRunLogs()
 
 	return succeeded, execution.artifacts, nil
 }
 
 func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string, error) {
+	_ = s.cleanupRunLogs()
 	if err := s.ValidateRuntime(ctx); err != nil {
 		return "", err
 	}
@@ -332,6 +427,14 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 	s.mu.Unlock()
 
 	s.launchAsyncRun(ctx, runID, request)
+	s.appendRunLog(runID, RunLogEntry{
+		Timestamp: now,
+		Level:     RunLogLevelInfo,
+		Message:   "run queued",
+		Fields: map[string]any{
+			"pipeline": string(request.Pipeline),
+		},
+	})
 
 	return runID, nil
 }
@@ -364,6 +467,21 @@ func (s *Service) GetRunArtifacts(runID string) ([]Artifact, bool) {
 		return artifacts[i].Kind < artifacts[j].Kind
 	})
 	return artifacts, true
+}
+
+func (s *Service) GetRunLogs(runID string, cursor int, limit int) (RunLogPage, bool, error) {
+	s.mu.RLock()
+	_, ok := s.runs[runID]
+	s.mu.RUnlock()
+	if !ok {
+		return RunLogPage{}, false, nil
+	}
+
+	page, err := s.queryRunLogs(runID, cursor, limit)
+	if err != nil {
+		return RunLogPage{}, true, err
+	}
+	return page, true, nil
 }
 
 func (s *Service) ListRuns(limit int) []RunInfo {
@@ -629,23 +747,26 @@ func classifyExecutionError(err error) (code string, message string) {
 }
 
 type pipelineExecution struct {
-	runID         string
-	pipeline      Pipeline
-	startedAt     time.Time
-	workspace     workspace.Root
-	runner        claudecode.Runner
-	store         model.Store
-	compiler      reports.Compiler
-	clock         func() time.Time
-	artifacts     []Artifact
-	artifactIndex map[string]int
-	findings      []contracts.Finding
-	questions     []contracts.Question
-	coverage      *contracts.Coverage
-	domainRuns    map[string]domainRunSummary
-	stepStatus    RunInfo
-	onStep        func(stepID string)
-	warnings      []string
+	runID              string
+	pipeline           Pipeline
+	startedAt          time.Time
+	workspace          workspace.Root
+	runner             claudecode.Runner
+	store              model.Store
+	compiler           reports.Compiler
+	clock              func() time.Time
+	artifacts          []Artifact
+	artifactIndex      map[string]int
+	findings           []contracts.Finding
+	questions          []contracts.Question
+	coverage           *contracts.Coverage
+	domainRuns         map[string]domainRunSummary
+	stepStatus         RunInfo
+	onStep             func(stepID string)
+	onLog              func(entry RunLogEntry)
+	warnings           []string
+	runtimeStepMetrics []runtimeStepQuality
+	runtimeVersions    map[string]struct{}
 }
 
 type runtimeTaskExecution struct {
@@ -702,6 +823,7 @@ func (e *pipelineExecution) runStep(ctx context.Context, stepID string) error {
 }
 
 func (e *pipelineExecution) runStepConstitution() error {
+	e.logInfo("init.step0.constitution", "", "materializing constitution artifacts", nil)
 	step0Contract, hasStep0Contract, err := loadStep0WizardContract(e.workspace)
 	if err != nil {
 		e.addWarning(fmt.Sprintf("step0_wizard_contract_invalid: %v; fallback baseline constitution materialization is used", err))
@@ -729,7 +851,7 @@ func (e *pipelineExecution) runRuntimeStep(ctx context.Context, stepID string) e
 			return err
 		}
 	} else {
-		execution, err := e.executeRuntimeTask(ctx, stepID, "", collectRepoScopes(e.workspace.Manifest.Repos))
+		execution, err := e.executeRuntimeTask(ctx, stepID, "", collectRepoScopes(e.workspace.Manifest.Repos), "")
 		if err != nil {
 			return err
 		}
@@ -767,6 +889,9 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 	if err != nil {
 		return err
 	}
+	e.logInfo(stepID, "", "domain fan-out prepared", map[string]any{
+		"domains": len(domainIDs),
+	})
 	if len(domainIDs) == 0 {
 		e.questions = mergeQuestions(e.questions, []contracts.Question{
 			{
@@ -780,9 +905,22 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 	domainReports := map[string]string{}
 	domainEnvelopes := make([]reports.DomainTaskEnvelope, 0, len(domainIDs))
 	for _, domainID := range domainIDs {
-		repoScope := repoScopeForDomain(domainID, e.workspace.Manifest.Repos)
+		e.logInfo(stepID, domainID, "domain collect start", nil)
+		repoScope, declaredRepoScope, hasDeclaredRepoScope, err := resolveRepoScopeForDomainCard(e.workspace, domainID, e.workspace.Manifest.Repos)
+		if err != nil {
+			return err
+		}
 		unresolved := []string{}
-		if strings.TrimSpace(repoScope) == "" {
+		if hasDeclaredRepoScope && declaredRepoScope != "" && strings.TrimSpace(repoScope) == "" {
+			unresolved = append(unresolved, "repo_scope")
+			e.questions = mergeQuestions(e.questions, []contracts.Question{
+				{
+					ID:       fmt.Sprintf("q.domain.%s.unknown-repo-scope", slugutil.Slugify(domainID)),
+					Text:     fmt.Sprintf("Canonical domain %q declares unknown repo_scope %q (not present in workspace.yaml)", domainID, declaredRepoScope),
+					Priority: "high",
+				},
+			})
+		} else if strings.TrimSpace(repoScope) == "" {
 			unresolved = append(unresolved, "repo_scope")
 			e.questions = mergeQuestions(e.questions, []contracts.Question{
 				{
@@ -815,7 +953,7 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 		if strings.TrimSpace(repoScope) != "" {
 			domainScopes = append(domainScopes, repoScope)
 		}
-		execution, err := e.executeRuntimeTask(ctx, stepID, "domain-"+sanitizeDomainArtifactSlug(domainID), domainScopes)
+		execution, err := e.executeRuntimeTask(ctx, stepID, "domain-"+sanitizeDomainArtifactSlug(domainID), domainScopes, domainID)
 		if err != nil {
 			return err
 		}
@@ -852,6 +990,12 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 			FindingIDs:     findingIDs,
 			Unresolved:     append([]string(nil), unresolved...),
 		}
+		e.logInfo(stepID, domainID, "domain collect completed", map[string]any{
+			"repo_scope":       repoScope,
+			"question_count":   len(questionIDs),
+			"finding_count":    len(findingIDs),
+			"unresolved_count": len(unresolved),
+		})
 	}
 
 	contractArtifacts, err := e.compiler.WriteDomainTaskEnvelopes(domainEnvelopes)
@@ -885,7 +1029,13 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 	return nil
 }
 
-func (e *pipelineExecution) executeRuntimeTask(ctx context.Context, stepID string, taskSuffix string, repoScopes []string) (runtimeTaskExecution, error) {
+func (e *pipelineExecution) executeRuntimeTask(
+	ctx context.Context,
+	stepID string,
+	taskSuffix string,
+	repoScopes []string,
+	domainID string,
+) (runtimeTaskExecution, error) {
 	taskID := fmt.Sprintf("task-%s-%s", e.runID, strings.ReplaceAll(stepID, ".", "-"))
 	taskSuffix = strings.TrimSpace(taskSuffix)
 	if taskSuffix != "" {
@@ -899,9 +1049,17 @@ func (e *pipelineExecution) executeRuntimeTask(ctx context.Context, stepID strin
 		RepoScopes:   append([]string(nil), repoScopes...),
 		StartedAtUTC: e.clock().UTC(),
 	}
+	e.logInfo(stepID, domainID, "runtime task started", map[string]any{
+		"task_id":     task.TaskID,
+		"repo_scopes": task.RepoScopes,
+	})
 
 	result, err := e.runner.Run(ctx, task)
 	if err != nil {
+		e.logError(stepID, domainID, "runtime task failed", map[string]any{
+			"task_id": task.TaskID,
+			"error":   strings.TrimSpace(err.Error()),
+		})
 		return runtimeTaskExecution{}, err
 	}
 	if len(result.RawJSON) == 0 {
@@ -914,11 +1072,43 @@ func (e *pipelineExecution) executeRuntimeTask(ctx context.Context, stepID strin
 
 	parsed, err := contracts.ParseTaskResult(result.RawJSON)
 	if err != nil {
+		e.logError(stepID, domainID, "runtime task parse failed", map[string]any{
+			"task_id": task.TaskID,
+			"error":   strings.TrimSpace(err.Error()),
+		})
 		return runtimeTaskExecution{}, err
 	}
 	normalized := contracts.NormalizeTaskResult(parsed)
+	runtimeName := strings.TrimSpace(normalized.Meta.Runtime.Name)
+	runtimeVersion := strings.TrimSpace(normalized.Meta.Runtime.Version)
+	if runtimeName == "" {
+		runtimeName = "unknown"
+	}
+	e.runtimeVersions[runtimeName+"@"+runtimeVersion] = struct{}{}
+
+	if len(normalized.Warnings) > 0 {
+		for _, runtimeWarning := range normalized.Warnings {
+			warningText := strings.TrimSpace(runtimeWarning)
+			if warningText == "" {
+				continue
+			}
+			prefixedWarning := warningText
+			if strings.TrimSpace(stepID) != "" {
+				prefixedWarning = fmt.Sprintf("%s: %s", stepID, warningText)
+			}
+			e.addWarning(prefixedWarning)
+			e.logWarn(stepID, domainID, "runtime warning", map[string]any{
+				"warning": warningText,
+			})
+		}
+	}
+
 	applyReport, err := e.store.ApplyChangeset(normalized)
 	if err != nil {
+		e.logError(stepID, domainID, "model apply failed", map[string]any{
+			"task_id": task.TaskID,
+			"error":   strings.TrimSpace(err.Error()),
+		})
 		return runtimeTaskExecution{}, err
 	}
 	if len(applyReport.DocArtifacts) > 0 {
@@ -932,6 +1122,33 @@ func (e *pipelineExecution) executeRuntimeTask(ctx context.Context, stepID strin
 	e.questions = mergeQuestions(e.questions, normalized.Questions)
 	e.coverage = mergeCoverage(e.coverage, normalized.Coverage)
 	e.findings = append(e.findings, applyReport.Findings...)
+	e.runtimeStepMetrics = append(e.runtimeStepMetrics, runtimeStepQuality{
+		StepID:           stepID,
+		DomainID:         domainID,
+		RuntimeName:      runtimeName,
+		RuntimeVersion:   runtimeVersion,
+		RepoScopes:       append([]string(nil), task.RepoScopes...),
+		ChangesetOps:     len(normalized.Changeset),
+		EntityUpserts:    applyReport.UpsertedEntities,
+		EdgeUpserts:      applyReport.UpsertedEdges,
+		FindingsAdded:    len(applyReport.Findings),
+		QuestionsCount:   len(normalized.Questions),
+		CoverageObserved: countCoverageObserved(normalized.Coverage),
+		CoverageMissing:  countCoverageMissing(normalized.Coverage),
+		WarningsCount:    len(normalized.Warnings),
+	})
+	e.logInfo(stepID, domainID, "runtime task completed", map[string]any{
+		"task_id":          task.TaskID,
+		"runtime_name":     runtimeName,
+		"runtime_version":  runtimeVersion,
+		"changeset_ops":    len(normalized.Changeset),
+		"entity_upserts":   applyReport.UpsertedEntities,
+		"edge_upserts":     applyReport.UpsertedEdges,
+		"findings_added":   len(applyReport.Findings),
+		"questions_count":  len(normalized.Questions),
+		"coverage_missing": countCoverageMissing(normalized.Coverage),
+		"warnings_count":   len(normalized.Warnings),
+	})
 
 	return runtimeTaskExecution{
 		RawJSON:    result.RawJSON,
@@ -945,6 +1162,10 @@ func (e *pipelineExecution) persistTaskRun(path string, label string, raw []byte
 		return err
 	}
 	e.addArtifacts(Artifact{Path: path, Kind: "taskrun", Label: label})
+	e.logInfo(e.stepStatus.CurrentStep, "", "taskrun persisted", map[string]any{
+		"taskrun_path": path,
+		"label":        label,
+	})
 	return nil
 }
 
@@ -1031,6 +1252,7 @@ func extractFindingIDs(findings []contracts.Finding) []string {
 }
 
 func (e *pipelineExecution) runStepAsIs() error {
+	e.logInfo(e.stepStatus.CurrentStep, "", "compiling as-is reports", nil)
 	entities, err := e.store.ListEntities()
 	if err != nil {
 		return err
@@ -1044,10 +1266,18 @@ func (e *pipelineExecution) runStepAsIs() error {
 		return err
 	}
 	e.addArtifacts(toOrchestratorArtifacts(artifacts)...)
+	e.logInfo(e.stepStatus.CurrentStep, "", "as-is reports compiled", map[string]any{
+		"entities":  len(entities),
+		"edges":     len(edges),
+		"artifacts": len(artifacts),
+	})
 	return nil
 }
 
 func (e *pipelineExecution) runStepProposals() error {
+	e.logInfo(e.stepStatus.CurrentStep, "", "compiling proposals", map[string]any{
+		"findings": len(e.findings),
+	})
 	artifacts, err := e.compiler.CompileProposals(e.findings)
 	if err != nil {
 		return err
@@ -1068,6 +1298,9 @@ func (e *pipelineExecution) runStepProposals() error {
 		Path:  changelog.Path,
 		Kind:  changelog.Kind,
 		Label: changelog.Label,
+	})
+	e.logInfo(e.stepStatus.CurrentStep, "", "proposals and changelog compiled", map[string]any{
+		"artifacts": len(artifacts) + 1,
 	})
 	return nil
 }
@@ -1255,52 +1488,7 @@ func normalizeOrderedUniqueStrings(values []string) []string {
 }
 
 func writeBaselineBundle(ws workspace.Root) error {
-	subagents := `agents:
-  - id: domain-analyst
-    skills: [service-inventory, interface-extraction, integration-mapping, datastore-mapping, cicd-mapping, ownership-coverage]
-  - id: architect-aggregator
-    skills: [findings, proposals]
-  - id: system-analyst-qa
-    skills: [qa]
-`
-	if err := ws.WriteFile("skills/subagents.yaml", []byte(subagents)); err != nil {
-		return err
-	}
-
-	skills := []string{
-		"service-inventory",
-		"interface-extraction",
-		"integration-mapping",
-		"datastore-mapping",
-		"cicd-mapping",
-		"ownership-coverage",
-		"findings",
-		"proposals",
-		"qa",
-	}
-	for _, skill := range skills {
-		manifest := fmt.Sprintf("name: %s\nversion: 1\napplies_to: [mvp]\ninputs: []\noutputs: []\n", skill)
-		if err := ws.WriteFile(fmt.Sprintf("skills/%s/manifest.yaml", skill), []byte(manifest)); err != nil {
-			return err
-		}
-		if err := ws.WriteFile(fmt.Sprintf("skills/%s/prompts/system.md", skill), []byte("# System prompt\n")); err != nil {
-			return err
-		}
-		if err := ws.WriteFile(fmt.Sprintf("skills/%s/prompts/task.md", skill), []byte("# Task prompt\n")); err != nil {
-			return err
-		}
-		if err := ws.WriteFile(fmt.Sprintf("skills/%s/templates/adr.md", skill), []byte("# ADR template\n")); err != nil {
-			return err
-		}
-	}
-
-	promptPacks := []string{"constitution", "collect-context", "findings", "proposals", "qa"}
-	for _, pack := range promptPacks {
-		if err := ws.WriteFile(fmt.Sprintf("skills/prompt-packs/%s.md", pack), []byte("# Prompt pack\n")); err != nil {
-			return err
-		}
-	}
-	return nil
+	return ws.EnsureBaselineBundle()
 }
 
 func collectRepoScopes(repos []workspace.RepoSource) []string {
@@ -1362,6 +1550,59 @@ func (e *pipelineExecution) addWarning(message string) {
 		}
 	}
 	e.warnings = append(e.warnings, message)
+	e.logWarn(e.stepStatus.CurrentStep, "", "run warning", map[string]any{
+		"warning": message,
+	})
+}
+
+func (e *pipelineExecution) logInfo(stepID string, domainID string, message string, fields map[string]any) {
+	e.logRunEvent(RunLogLevelInfo, stepID, domainID, message, fields)
+}
+
+func (e *pipelineExecution) logWarn(stepID string, domainID string, message string, fields map[string]any) {
+	e.logRunEvent(RunLogLevelWarning, stepID, domainID, message, fields)
+}
+
+func (e *pipelineExecution) logError(stepID string, domainID string, message string, fields map[string]any) {
+	e.logRunEvent(RunLogLevelError, stepID, domainID, message, fields)
+}
+
+func (e *pipelineExecution) logRunEvent(level RunLogLevel, stepID string, domainID string, message string, fields map[string]any) {
+	if e.onLog == nil {
+		return
+	}
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return
+	}
+	entry := RunLogEntry{
+		Timestamp: e.clock().UTC(),
+		Level:     level,
+		StepID:    strings.TrimSpace(stepID),
+		DomainID:  strings.TrimSpace(domainID),
+		Message:   message,
+	}
+	if len(fields) > 0 {
+		entry.Fields = fields
+		if taskrunPath, ok := fields["taskrun_path"].(string); ok {
+			entry.TaskrunPath = strings.TrimSpace(taskrunPath)
+		}
+	}
+	e.onLog(entry)
+}
+
+func countCoverageObserved(coverage *contracts.Coverage) int {
+	if coverage == nil {
+		return 0
+	}
+	return len(coverage.Observed)
+}
+
+func countCoverageMissing(coverage *contracts.Coverage) int {
+	if coverage == nil {
+		return 0
+	}
+	return len(coverage.Missing)
 }
 
 func mergeQuestions(existing []contracts.Question, incoming []contracts.Question) []contracts.Question {
@@ -1485,6 +1726,38 @@ func repoScopeForDomain(domainID string, repos []workspace.RepoSource) string {
 		}
 	}
 	return ""
+}
+
+func resolveRepoScopeForDomainCard(ws workspace.Root, domainID string, repos []workspace.RepoSource) (repoScope string, declaredRepoScope string, hasDeclaredRepoScope bool, err error) {
+	cardPath := fmt.Sprintf("charter/cards/domains/%s.md", domainID)
+	contentBytes, err := ws.ReadFile(cardPath)
+	if err != nil {
+		return "", "", false, err
+	}
+	content := normalizeLineEndings(string(contentBytes))
+	declaredRepoScope = strings.TrimSpace(extractCardField(content, "repo_scope"))
+	if declaredRepoScope != "" {
+		hasDeclaredRepoScope = true
+		if repoScopeExists(declaredRepoScope, repos) {
+			return declaredRepoScope, declaredRepoScope, true, nil
+		}
+		return "", declaredRepoScope, true, nil
+	}
+	repoScope = strings.TrimSpace(repoScopeForDomain(domainID, repos))
+	return repoScope, "", false, nil
+}
+
+func repoScopeExists(scope string, repos []workspace.RepoSource) bool {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return false
+	}
+	for _, repo := range repos {
+		if strings.TrimSpace(repo.Name) == scope {
+			return true
+		}
+	}
+	return false
 }
 
 func repoScopeOrUnknown(scope string) string {

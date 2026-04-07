@@ -902,6 +902,94 @@ func TestRefreshStep1MissingRepoScopeWritesQuestion(t *testing.T) {
 	}
 }
 
+func TestRefreshStep1UsesDeclaredRepoScopeForMonolithDomain(t *testing.T) {
+	t.Parallel()
+
+	ws := createMonolithWorkspace(t)
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure workspace layout: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/billing.md", []byte("# Domain: Billing\n\n- id: `billing`\n- repo_scope: `orders-monolith`\n")); err != nil {
+		t.Fatalf("write billing domain card: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/shipping.md", []byte("# Domain: Shipping\n\n- id: `shipping`\n- repo_scope: `orders-monolith`\n")); err != nil {
+		t.Fatalf("write shipping domain card: %v", err)
+	}
+
+	runner := &trackingRunner{}
+	service := NewService(WithRunner(runner))
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("expected refresh run to succeed, got %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
+	}
+
+	collectTasks := runner.tasksForStep("refresh.step1.collect")
+	if len(collectTasks) != 2 {
+		t.Fatalf("expected two domain collect tasks, got %d", len(collectTasks))
+	}
+	for _, task := range collectTasks {
+		if len(task.RepoScopes) != 1 || task.RepoScopes[0] != "orders-monolith" {
+			t.Fatalf("expected monolith repo scope in collect task, got %+v", task.RepoScopes)
+		}
+	}
+
+	questionsReport, err := os.ReadFile(filepath.Join(ws.Path, "reports/coverage/open-questions.md"))
+	if err != nil {
+		t.Fatalf("read open questions report: %v", err)
+	}
+	text := string(questionsReport)
+	if strings.Contains(text, "q.domain.billing.missing-repo-scope") {
+		t.Fatalf("did not expect missing repo scope question, got %q", text)
+	}
+	if strings.Contains(text, "q.domain.billing.unknown-repo-scope") {
+		t.Fatalf("did not expect unknown repo scope question, got %q", text)
+	}
+}
+
+func TestRefreshStep1UnknownDeclaredRepoScopeWritesQuestion(t *testing.T) {
+	t.Parallel()
+
+	ws := createMonolithWorkspace(t)
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure workspace layout: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/billing.md", []byte("# Domain: Billing\n\n- id: `billing`\n- repo_scope: `unknown-scope`\n")); err != nil {
+		t.Fatalf("write billing domain card: %v", err)
+	}
+
+	service := NewService(WithRunner(step3ParseFailureRunner{}))
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err == nil {
+		t.Fatalf("expected refresh run to fail at step3")
+	}
+	if info.Status != RunStatusFailed {
+		t.Fatalf("expected failed status, got %s", info.Status)
+	}
+
+	questionsReport, err := os.ReadFile(filepath.Join(ws.Path, "reports/coverage/open-questions.md"))
+	if err != nil {
+		t.Fatalf("read open questions report: %v", err)
+	}
+	text := string(questionsReport)
+	if !strings.Contains(text, "q.domain.billing.unknown-repo-scope") {
+		t.Fatalf("expected unknown repo scope question, got %q", text)
+	}
+	if strings.Contains(text, "q.domain.billing.missing-repo-scope") {
+		t.Fatalf("did not expect missing repo scope question when repo_scope is declared, got %q", text)
+	}
+}
+
 type delayedRunner struct {
 	delay time.Duration
 }
@@ -980,6 +1068,30 @@ repos:
     path: ` + repoA + `
   - name: users-service
     path: ` + repoB + `
+`
+	if err := os.WriteFile(filepath.Join(root, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	ws, err := workspace.Open(root)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+	return ws
+}
+
+func createMonolithWorkspace(t *testing.T) workspace.Root {
+	t.Helper()
+
+	root := t.TempDir()
+	repo := filepath.Join(root, "repos", "orders-monolith")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatalf("create monolith repo: %v", err)
+	}
+	manifest := `version: 1
+repos:
+  - name: orders-monolith
+    path: ` + repo + `
 `
 	if err := os.WriteFile(filepath.Join(root, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)

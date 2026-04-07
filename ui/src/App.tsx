@@ -61,6 +61,24 @@ type ArtifactsResponse = {
   artifacts: Artifact[];
 };
 
+type RunLogEntry = {
+  cursor: number;
+  timestamp: string;
+  level: "info" | "warning" | "error";
+  step_id?: string;
+  domain_id?: string;
+  message: string;
+  taskrun_path?: string;
+  fields?: Record<string, unknown>;
+};
+
+type RunLogsResponse = {
+  run_id: string;
+  items: RunLogEntry[];
+  next_cursor: number;
+  eof: boolean;
+};
+
 type APIErrorPayload = {
   error?:
     | string
@@ -71,6 +89,15 @@ type APIErrorPayload = {
 };
 
 type RepoSourceMode = "path" | "git_url";
+
+type GuidedRepo = {
+  id: string;
+  name: string;
+  mode: RepoSourceMode;
+  path: string;
+  git_url: string;
+  ref: string;
+};
 
 type WizardContract = {
   version: number;
@@ -118,6 +145,20 @@ const baselineEditorArtifacts: EditableArtifactOption[] = [
 
 const finalStatuses = new Set(["succeeded", "failed"]);
 const activeStatuses = new Set(["queued", "running"]);
+const runLogsPageLimit = 200;
+let guidedRepoSeed = 0;
+
+function makeGuidedRepo(partial?: Partial<GuidedRepo>): GuidedRepo {
+  guidedRepoSeed += 1;
+  return {
+    id: partial?.id ?? `repo-${guidedRepoSeed}`,
+    name: partial?.name ?? `repo-${guidedRepoSeed}`,
+    mode: partial?.mode ?? "path",
+    path: partial?.path ?? "/absolute/path/to/repository",
+    git_url: partial?.git_url ?? "https://gitlab.example.com/group/repository.git",
+    ref: partial?.ref ?? "",
+  };
+}
 
 function getErrorMessage(payload: unknown, fallback: string): string {
   const typed = payload as APIErrorPayload;
@@ -170,11 +211,13 @@ export default function App() {
   const [selectedEditorContent, setSelectedEditorContent] = useState("");
   const [editorStatus, setEditorStatus] = useState("");
 
-  const [guidedRepoName, setGuidedRepoName] = useState("payments-service");
-  const [guidedRepoMode, setGuidedRepoMode] = useState<RepoSourceMode>("path");
-  const [guidedRepoPath, setGuidedRepoPath] = useState("/absolute/path/to/payments-service");
-  const [guidedRepoGitURL, setGuidedRepoGitURL] = useState("https://gitlab.example.com/platform/payments-service.git");
-  const [guidedRepoRef, setGuidedRepoRef] = useState("main");
+  const [guidedRepos, setGuidedRepos] = useState<GuidedRepo[]>(() => [
+    makeGuidedRepo({
+      name: "payments-service",
+      mode: "path",
+      path: "/absolute/path/to/payments-service"
+    })
+  ]);
   const [guidedDocsImportsPath, setGuidedDocsImportsPath] = useState("./docs/imports");
 
   const [wizardProjectName, setWizardProjectName] = useState("ProvenArch MVP");
@@ -189,6 +232,10 @@ export default function App() {
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [selectedArtifact, setSelectedArtifact] = useState<string>("");
   const [selectedArtifactContent, setSelectedArtifactContent] = useState<string>("");
+  const [runLogs, setRunLogs] = useState<RunLogEntry[]>([]);
+  const [runLogsCursor, setRunLogsCursor] = useState(0);
+  const [runLogsEOF, setRunLogsEOF] = useState(false);
+  const [runLogsStatus, setRunLogsStatus] = useState("");
 
   const [coverageSummary, setCoverageSummary] = useState<string>("");
   const [openQuestions, setOpenQuestions] = useState<string>("");
@@ -215,13 +262,39 @@ export default function App() {
       ),
     [runList]
   );
+  const shouldPollRunDetails = useMemo(() => {
+    return hasActiveRuns || (runId !== null && !runLogsEOF);
+  }, [hasActiveRuns, runId, runLogsEOF]);
+  const validationDiagnosticsByRepo = useMemo(() => {
+    if (!validateResult) {
+      return [];
+    }
+    const grouped = new Map<string, Diagnostic[]>();
+    const diagnostics = [...(validateResult.warnings ?? []), ...(validateResult.errors ?? [])];
+    for (const diagnostic of diagnostics) {
+      const key = diagnostic.repo?.trim() ? diagnostic.repo : "__workspace__";
+      const existing = grouped.get(key) ?? [];
+      existing.push(diagnostic);
+      grouped.set(key, existing);
+    }
+    return Array.from(grouped.entries()).sort((left, right) => left[0].localeCompare(right[0]));
+  }, [validateResult]);
+  const runLogTaskrunPaths = useMemo(() => {
+    const paths = new Set<string>();
+    for (const entry of runLogs) {
+      if (entry.taskrun_path && entry.taskrun_path.trim().length > 0) {
+        paths.add(entry.taskrun_path.trim());
+      }
+    }
+    return Array.from(paths).sort((left, right) => left.localeCompare(right));
+  }, [runLogs]);
 
   useEffect(() => {
     void bootstrapEditorData();
   }, []);
 
   useEffect(() => {
-    if (!hasActiveRuns) {
+    if (!shouldPollRunDetails) {
       return;
     }
 
@@ -230,7 +303,7 @@ export default function App() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [hasActiveRuns, runId]);
+  }, [shouldPollRunDetails]);
 
   async function bootstrapEditorData() {
     try {
@@ -255,11 +328,78 @@ export default function App() {
     setRunList(payload.items ?? []);
   }
 
+  function resetRunLogs() {
+    setRunLogs([]);
+    setRunLogsCursor(0);
+    setRunLogsEOF(false);
+    setRunLogsStatus("");
+  }
+
+  function mergeRunLogsPayload(payload: RunLogsResponse, reset: boolean, fallbackCursor: number) {
+    setRunLogs((previous) => {
+      const seed = reset ? [] : previous;
+      const merged = [...seed];
+      const seen = new Set(merged.map((entry) => entry.cursor));
+      for (const entry of payload.items ?? []) {
+        if (seen.has(entry.cursor)) {
+          continue;
+        }
+        merged.push(entry);
+        seen.add(entry.cursor);
+      }
+      merged.sort((left, right) => left.cursor - right.cursor);
+      return merged;
+    });
+    setRunLogsCursor(payload.next_cursor ?? fallbackCursor);
+    setRunLogsEOF(Boolean(payload.eof));
+  }
+
+  async function fetchRunLogs(id: string, reset = false): Promise<RunLogsResponse | null> {
+    if (!id) {
+      return null;
+    }
+    const cursor = reset ? 0 : runLogsCursor;
+    if (!reset && runLogsEOF) {
+      return null;
+    }
+    const payload = await fetchJSON<RunLogsResponse>(
+      `/api/pipeline/runs/${id}/logs?cursor=${cursor}&limit=${runLogsPageLimit}`
+    );
+    mergeRunLogsPayload(payload, reset, cursor);
+    return payload;
+  }
+
+  async function fetchRunLogsUntilEOF(id: string) {
+    if (!id) {
+      return;
+    }
+    let cursor = 0;
+    let reset = true;
+    for (let page = 0; page < 25; page += 1) {
+      const payload = await fetchJSON<RunLogsResponse>(
+        `/api/pipeline/runs/${id}/logs?cursor=${cursor}&limit=${runLogsPageLimit}`
+      );
+      mergeRunLogsPayload(payload, reset, cursor);
+      if (payload.eof) {
+        return;
+      }
+      const nextCursor = payload.next_cursor ?? cursor;
+      if (nextCursor <= cursor) {
+        return;
+      }
+      cursor = nextCursor;
+      reset = false;
+    }
+  }
+
   async function pollRunUpdates() {
     try {
       await loadRunList(100);
       if (runId) {
-        await fetchRunStatus(runId);
+        const status = await fetchRunStatus(runId);
+        if (activeStatuses.has(status.status) || !runLogsEOF) {
+          await fetchRunLogs(runId, false);
+        }
       }
     } catch {
       // keep UI responsive even if polling fails temporarily
@@ -327,27 +467,67 @@ export default function App() {
     }
   }
 
+  function updateGuidedRepo(id: string, patch: Partial<GuidedRepo>) {
+    setGuidedRepos((previous) => previous.map((repo) => (repo.id === id ? { ...repo, ...patch } : repo)));
+  }
+
+  function handleAddGuidedRepo() {
+    setGuidedRepos((previous) => [...previous, makeGuidedRepo()]);
+  }
+
+  function handleRemoveGuidedRepo(id: string) {
+    setGuidedRepos((previous) => {
+      if (previous.length <= 1) {
+        return previous;
+      }
+      return previous.filter((repo) => repo.id !== id);
+    });
+  }
+
   function buildManifestFromGuidedForm(): string {
-    const name = guidedRepoName.trim();
-    const pathValue = guidedRepoPath.trim();
-    const gitURLValue = guidedRepoGitURL.trim();
-    const refValue = guidedRepoRef.trim();
     const importsPath = guidedDocsImportsPath.trim() || "./docs/imports";
+    const names = new Set<string>();
+    const lines = ["version: 1", "repos:"];
 
-    if (!name) {
-      throw new Error("repo name is required");
-    }
-    if (guidedRepoMode === "path" && !pathValue) {
-      throw new Error("path source requires absolute or workspace-relative path");
-    }
-    if (guidedRepoMode === "git_url" && !gitURLValue) {
-      throw new Error("git_url source requires repository URL");
+    if (guidedRepos.length === 0) {
+      throw new Error("at least one repo entry is required");
     }
 
-    const sourceLine = guidedRepoMode === "path" ? `    path: ${pathValue}` : `    git_url: ${gitURLValue}`;
-    const refLine = refValue ? `\n    ref: ${refValue}` : "";
+    for (const repo of guidedRepos) {
+      const name = repo.name.trim();
+      const pathValue = repo.path.trim();
+      const gitURLValue = repo.git_url.trim();
+      const refValue = repo.ref.trim();
 
-    return `version: 1\nrepos:\n  - name: ${name}\n${sourceLine}${refLine}\ndocs:\n  imports_path: ${importsPath}\n`;
+      if (!name) {
+        throw new Error("repo name is required for every entry");
+      }
+      if (names.has(name)) {
+        throw new Error(`duplicate repo name "${name}" in guided setup`);
+      }
+      names.add(name);
+
+      if (repo.mode === "path" && !pathValue) {
+        throw new Error(`repo "${name}" with path source requires non-empty path`);
+      }
+      if (repo.mode === "git_url" && !gitURLValue) {
+        throw new Error(`repo "${name}" with git_url source requires repository URL`);
+      }
+
+      lines.push(`  - name: ${name}`);
+      if (repo.mode === "path") {
+        lines.push(`    path: ${pathValue}`);
+      } else {
+        lines.push(`    git_url: ${gitURLValue}`);
+      }
+      if (refValue) {
+        lines.push(`    ref: ${refValue}`);
+      }
+    }
+
+    lines.push("docs:");
+    lines.push(`  imports_path: ${importsPath}`);
+    return `${lines.join("\n")}\n`;
   }
 
   function handleApplyGuidedWorkspaceSetup() {
@@ -440,6 +620,7 @@ export default function App() {
     setArtifacts([]);
     setSelectedArtifact("");
     setSelectedArtifactContent("");
+    resetRunLogs();
     try {
       const payload = await fetchJSON<RunStartResponse>(`/api/pipeline/${pipeline}`, {
         method: "POST",
@@ -460,7 +641,11 @@ export default function App() {
         ...previous.filter((run) => run.run_id !== payload.run_id)
       ]);
       setRunID(payload.run_id);
-      await fetchRunStatus(payload.run_id);
+      const status = await fetchRunStatus(payload.run_id);
+      await fetchRunLogs(payload.run_id, true);
+      if (finalStatuses.has(status.status)) {
+        await fetchRunLogsUntilEOF(payload.run_id);
+      }
       await loadRunList(100);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "failed to start pipeline");
@@ -469,20 +654,26 @@ export default function App() {
     }
   }
 
-  async function fetchRunStatus(id: string) {
+  async function fetchRunStatus(id: string): Promise<RunStatusResponse> {
     const payload = await fetchJSON<RunStatusResponse>(`/api/pipeline/runs/${id}`);
     setRunStatus(payload);
     if (finalStatuses.has(payload.status)) {
       await fetchArtifacts(id);
       await loadCoverageArtifacts();
     }
+    return payload;
   }
 
   async function handleSelectRun(id: string) {
     try {
       setRunID(id);
-      await fetchRunStatus(id);
+      resetRunLogs();
+      const status = await fetchRunStatus(id);
       await fetchArtifacts(id);
+      await fetchRunLogs(id, true);
+      if (finalStatuses.has(status.status)) {
+        await fetchRunLogsUntilEOF(id);
+      }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "failed to load run details");
     }
@@ -502,6 +693,54 @@ export default function App() {
     setSelectedArtifact(path);
     setSelectedArtifactContent("Loading...");
     await loadTextArtifact(path, setSelectedArtifactContent);
+  }
+
+  function formatRunLogLine(entry: RunLogEntry): string {
+    const parts = [
+      entry.timestamp,
+      entry.level.toUpperCase(),
+      entry.step_id ? `[${entry.step_id}]` : "",
+      entry.domain_id ? `(${entry.domain_id})` : "",
+      entry.message
+    ].filter((value) => value && value.trim().length > 0);
+    return parts.join(" ");
+  }
+
+  async function handleCopyRunLogs() {
+    if (runLogs.length === 0) {
+      return;
+    }
+    const text = runLogs.map((entry) => formatRunLogLine(entry)).join("\n");
+    if (!navigator.clipboard || !navigator.clipboard.writeText) {
+      setRunLogsStatus("Clipboard API is not available in this browser context.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setRunLogsStatus("Run logs copied to clipboard");
+    } catch (requestError) {
+      setRunLogsStatus(
+        requestError instanceof Error ? requestError.message : "Run logs copy failed"
+      );
+    }
+  }
+
+  function handleDownloadRunLogs() {
+    if (runLogs.length === 0 || !runId) {
+      return;
+    }
+    const text = runLogs.map((entry) => formatRunLogLine(entry)).join("\n");
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${runId}.logs.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    setRunLogsStatus(`Downloaded ${runId}.logs.txt`);
   }
 
   async function handleGitCommit() {
@@ -552,36 +791,71 @@ export default function App() {
       </section>
 
       <section className="panel">
-        <h2>Workspace Setup</h2>
-        <p className="hint">Guided repo source form writes a valid `workspace.yaml` draft.</p>
-        <label htmlFor="guidedRepoName">Repo name</label>
-        <input id="guidedRepoName" value={guidedRepoName} onChange={(event) => setGuidedRepoName(event.target.value)} />
+        <h2>Setup: Workspace</h2>
+        <p className="hint">Guided setup writes a valid multi-repo `workspace.yaml` draft.</p>
+        {guidedRepos.map((repo, index) => (
+          <div className="repo-card" key={repo.id}>
+            <div className="repo-card-head">
+              <h3>Repo {index + 1}</h3>
+              <button type="button" className="inline-danger" onClick={() => handleRemoveGuidedRepo(repo.id)} disabled={busy || guidedRepos.length <= 1}>
+                Remove
+              </button>
+            </div>
 
-        <label htmlFor="guidedRepoMode">Repo source type</label>
-        <select id="guidedRepoMode" value={guidedRepoMode} onChange={(event) => setGuidedRepoMode(event.target.value as RepoSourceMode)}>
-          <option value="path">path</option>
-          <option value="git_url">git_url</option>
-        </select>
+            <label htmlFor={`guidedRepoName-${repo.id}`}>Repo name</label>
+            <input
+              id={`guidedRepoName-${repo.id}`}
+              value={repo.name}
+              onChange={(event) => updateGuidedRepo(repo.id, { name: event.target.value })}
+            />
 
-        {guidedRepoMode === "path" ? (
-          <>
-            <label htmlFor="guidedRepoPath">path</label>
-            <input id="guidedRepoPath" value={guidedRepoPath} onChange={(event) => setGuidedRepoPath(event.target.value)} />
-          </>
-        ) : (
-          <>
-            <label htmlFor="guidedRepoGitURL">git_url</label>
-            <input id="guidedRepoGitURL" value={guidedRepoGitURL} onChange={(event) => setGuidedRepoGitURL(event.target.value)} />
-          </>
-        )}
+            <label htmlFor={`guidedRepoMode-${repo.id}`}>Repo source type</label>
+            <select
+              id={`guidedRepoMode-${repo.id}`}
+              value={repo.mode}
+              onChange={(event) => updateGuidedRepo(repo.id, { mode: event.target.value as RepoSourceMode })}
+            >
+              <option value="path">path</option>
+              <option value="git_url">git_url</option>
+            </select>
 
-        <label htmlFor="guidedRepoRef">ref (optional)</label>
-        <input id="guidedRepoRef" value={guidedRepoRef} onChange={(event) => setGuidedRepoRef(event.target.value)} />
+            {repo.mode === "path" ? (
+              <>
+                <label htmlFor={`guidedRepoPath-${repo.id}`}>path</label>
+                <input
+                  id={`guidedRepoPath-${repo.id}`}
+                  value={repo.path}
+                  onChange={(event) => updateGuidedRepo(repo.id, { path: event.target.value })}
+                />
+              </>
+            ) : (
+              <>
+                <label htmlFor={`guidedRepoGitURL-${repo.id}`}>git_url</label>
+                <input
+                  id={`guidedRepoGitURL-${repo.id}`}
+                  value={repo.git_url}
+                  onChange={(event) => updateGuidedRepo(repo.id, { git_url: event.target.value })}
+                />
+              </>
+            )}
+
+            <label htmlFor={`guidedRepoRef-${repo.id}`}>ref (optional)</label>
+            <input
+              id={`guidedRepoRef-${repo.id}`}
+              value={repo.ref}
+              onChange={(event) => updateGuidedRepo(repo.id, { ref: event.target.value })}
+              placeholder="Leave empty to use current checkout"
+            />
+          </div>
+        ))}
 
         <label htmlFor="guidedDocsImportsPath">docs.imports_path</label>
         <input id="guidedDocsImportsPath" value={guidedDocsImportsPath} onChange={(event) => setGuidedDocsImportsPath(event.target.value)} />
 
         <div className="actions">
+          <button type="button" onClick={handleAddGuidedRepo} disabled={busy}>
+            Add repo
+          </button>
           <button type="button" onClick={handleApplyGuidedWorkspaceSetup} disabled={busy}>
             Apply guided workspace form
           </button>
@@ -603,22 +877,37 @@ export default function App() {
               Workspace: <code>{validateResult.workspace}</code>
             </p>
             <p>Status: {validateResult.ok ? "valid" : "invalid"}</p>
-            {(validateResult.warnings ?? []).map((warning) => (
-              <p className="status warn" key={`warn-${warning.code}`}>
-                Warning [{warning.code}]: {warning.message}
-              </p>
-            ))}
-            {(validateResult.errors ?? []).map((diagnostic) => (
-              <p className="status err" key={`err-${diagnostic.code}`}>
-                Error [{diagnostic.code}]: {diagnostic.message}
-              </p>
+
+            {(validateResult.resolved_repos ?? []).length > 0 ? (
+              <div className="repo-summary">
+                <p className="hint">Resolved repos</p>
+                <ul>
+                  {(validateResult.resolved_repos ?? []).map((repo) => (
+                    <li key={`resolved-${repo.name}-${repo.path}`}>
+                      <code>{repo.name}</code> ({repo.source}) {repo.path}
+                      {repo.ref ? ` @ ${repo.ref}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {validationDiagnosticsByRepo.map(([repoKey, diagnostics]) => (
+              <div key={`diag-group-${repoKey}`} className="repo-summary">
+                <p className="hint">{repoKey === "__workspace__" ? "Workspace diagnostics" : `Diagnostics for ${repoKey}`}</p>
+                {diagnostics.map((diagnostic, index) => (
+                  <p className={diagnostic.level === "error" ? "status err" : "status warn"} key={`${repoKey}-${diagnostic.code}-${diagnostic.message}-${index}`}>
+                    {diagnostic.level === "error" ? "Error" : "Warning"} [{diagnostic.code}]: {diagnostic.message}
+                  </p>
+                ))}
+              </div>
             ))}
           </div>
         ) : null}
       </section>
 
       <section className="panel">
-        <h2>Step 0 Wizard Contract</h2>
+        <h2>Setup: Step 0 Wizard Contract</h2>
         <p className="hint">Structured contract persisted as `charter/wizard/step0-contract.json`.</p>
 
         <label htmlFor="wizardProjectName">Project name</label>
@@ -641,7 +930,7 @@ export default function App() {
       </section>
 
       <section className="panel">
-        <h2>Baseline Editors</h2>
+        <h2>Baseline: Editors</h2>
         <p className="hint">Editable baseline files from `charter/*` and `skills/*`.</p>
         <label htmlFor="baselineArtifactSelect">Select artifact</label>
         <select
@@ -671,7 +960,7 @@ export default function App() {
       </section>
 
       <section className="panel">
-        <h2>Run Pipeline</h2>
+        <h2>Runs: Pipeline Control</h2>
         <div className="actions">
           <button type="button" onClick={() => void handleRunPipeline("init")} disabled={busy}>
             Run init
@@ -695,7 +984,7 @@ export default function App() {
       </section>
 
       <section className="panel">
-        <h2>Запуски анализа</h2>
+        <h2>Runs: History</h2>
         <p className="hint">
           Running: {runCounters.running} | Succeeded: {runCounters.succeeded} | Failed: {runCounters.failed}
         </p>
@@ -749,7 +1038,34 @@ export default function App() {
       </section>
 
       <section className="panel">
-        <h2>Coverage & Questions</h2>
+        <h2>Runs: Logs</h2>
+        <div className="actions">
+          <button type="button" onClick={() => void handleCopyRunLogs()} disabled={runLogs.length === 0}>
+            Copy logs
+          </button>
+          <button type="button" onClick={() => handleDownloadRunLogs()} disabled={runLogs.length === 0 || !runId}>
+            Download logs
+          </button>
+        </div>
+        {runLogsStatus ? <p className="status ok">{runLogsStatus}</p> : null}
+        {runLogTaskrunPaths.length > 0 ? (
+          <div className="actions">
+            {runLogTaskrunPaths.map((path) => (
+              <button key={`taskrun-log-open-${path}`} type="button" onClick={() => void handleOpenArtifact(path)}>
+                Open taskrun artifact: {path}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {runLogs.length === 0 ? (
+          <p>No run logs yet.</p>
+        ) : (
+          <pre>{runLogs.map((entry) => formatRunLogLine(entry)).join("\n")}</pre>
+        )}
+      </section>
+
+      <section className="panel">
+        <h2>Results: Coverage & Questions</h2>
         <div className="columns">
           <div>
             <h3>Coverage Summary</h3>
@@ -763,7 +1079,7 @@ export default function App() {
       </section>
 
       <section className="panel">
-        <h2>Run Artifacts</h2>
+        <h2>Results: Run Artifacts</h2>
         {artifacts.length === 0 ? (
           <p>No artifacts yet.</p>
         ) : (
@@ -787,7 +1103,7 @@ export default function App() {
       </section>
 
       <section className="panel">
-        <h2>Git Helper Actions</h2>
+        <h2>Baseline: Git Helper Actions</h2>
         <label htmlFor="gitMessage">Commit message</label>
         <input id="gitMessage" value={gitMessage} onChange={(event) => setGitMessage(event.target.value)} />
         <button type="button" onClick={() => void handleGitCommit()} disabled={busy}>

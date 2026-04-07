@@ -115,7 +115,7 @@ Implemented additional jobs:
 - `smoke-api`
   - `acp serve --workspace ... --runtime fake`
   - `/api/workspace/validate`
-  - pipeline status/artifacts endpoints
+  - pipeline status/artifacts/logs endpoints
   - dynamic free port + explicit fail on run polling timeout
 - `ui-smoke`
   - workspace setup
@@ -123,10 +123,6 @@ Implemented additional jobs:
   - validate
   - run pipeline
   - results viewer
-- `live-runner-smoke`
-  - manual/opt-in only
-  - never required for merge
-
 ## 7) Базовый набор тестов
 
 ### Contract tests
@@ -163,13 +159,25 @@ Implemented additional jobs:
 - `acp serve --workspace ... --runtime fake`
 - `/api/workspace/validate` без request body
 - pipeline endpoints не принимают `workspace_path`
+- run logs endpoint:
+  - `GET /api/pipeline/runs/<run_id>/logs?cursor=<n>&limit=<n>`
+  - pagination + invalid params + run_not_found
 - UI path: open workspace, validate, run, inspect coverage/questions
+- UI run logs surface:
+  - log panel render (`Runs: Logs`)
+  - log polling/append without duplicates
+  - quick action `Open taskrun artifact`
+- локальный full-run regression сценарий на реальном репозитории:
+  - `scripts/full-run-ai-advent.sh`
+  - bootstrap в `tmp`, API simulation, runtime циклы `fake + headless`
+  - strict quality checks: anti-mock + anti-zero-signal + no last-run degradation
+  - summary/log/snapshots: `TMP_ROOT/session-summary.md`, `TMP_ROOT/full-run.log`, `TMP_ROOT/snapshots/*`
 
 ## 8) Acceptance для testing strategy
 
 - любой required CI run проходит без live network dependencies
 - любое изменение schema/spec/examples требует update fixtures/golden в том же PR
-- live Claude Code smoke не блокирует merge и запускается только вручную/по opt-in
+- live Claude Code smoke не блокирует merge; для обязательного CI используется только `contracts`, `backend`, `ui`, `golden`, `smoke-cli`, `smoke-api`, `ui-smoke`
 - scenario fixtures и golden outputs считаются канонической regression surface до появления production-scale test corpus
 - optional readable golden export доступен для review-diff:
   - `ACP_EXPORT_SCENARIO_GOLDEN=1 go test ./internal/orchestrator -run TestScenarioFixturesDeterministicInitPipeline -count=1`
@@ -194,3 +202,4 @@ Implemented additional jobs:
 - `make build`
 - `make run-backend WORKSPACE=/abs/path/to/arch-workspace`
 - `make run-ui`
+- `./scripts/full-run-ai-advent.sh`

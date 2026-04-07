@@ -17,6 +17,22 @@ function textResponse(body: string, status = 200): Response {
   });
 }
 
+function maybeRunLogsResponse(method: string, url: string): Response | null {
+  if (method !== "GET") {
+    return null;
+  }
+  const match = url.match(/^\/api\/pipeline\/runs\/([^/]+)\/logs\?.*$/);
+  if (!match) {
+    return null;
+  }
+  return jsonResponse({
+    run_id: match[1],
+    items: [],
+    next_cursor: 0,
+    eof: true
+  });
+}
+
 describe("App", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -29,6 +45,10 @@ describe("App", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
       const method = (init?.method ?? "GET").toUpperCase();
+      const runLogsResponse = maybeRunLogsResponse(method, url);
+      if (runLogsResponse) {
+        return runLogsResponse;
+      }
 
       if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
         if (!runStarted) {
@@ -182,6 +202,10 @@ describe("App", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
       const method = (init?.method ?? "GET").toUpperCase();
+      const runLogsResponse = maybeRunLogsResponse(method, url);
+      if (runLogsResponse) {
+        return runLogsResponse;
+      }
 
       if (method === "GET" && url === "/api/workspace/manifest") {
         return jsonResponse({
@@ -251,6 +275,10 @@ describe("App", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
       const method = (init?.method ?? "GET").toUpperCase();
+      const runLogsResponse = maybeRunLogsResponse(method, url);
+      if (runLogsResponse) {
+        return runLogsResponse;
+      }
 
       if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
         return jsonResponse({ items: [] });
@@ -281,7 +309,7 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
 
-    expect(screen.getByText(/Запуски анализа/i)).toBeInTheDocument();
+    expect(screen.getByText(/Runs:\s*History/i)).toBeInTheDocument();
 
     const listCallsBefore = fetchMock.mock.calls.filter((call) => call[0] === "/api/pipeline/runs?limit=100").length;
     expect(listCallsBefore).toBe(1);
@@ -298,6 +326,10 @@ describe("App", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
       const method = (init?.method ?? "GET").toUpperCase();
+      const runLogsResponse = maybeRunLogsResponse(method, url);
+      if (runLogsResponse) {
+        return runLogsResponse;
+      }
 
       if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
         return jsonResponse({
@@ -395,7 +427,7 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
 
-    await screen.findByText(/Запуски анализа/i);
+    await screen.findByText(/Runs:\s*History/i);
     await screen.findByRole("button", { name: /run-queued/i });
     await screen.findByRole("button", { name: /run-ok/i });
     await screen.findByRole("button", { name: /run-failed/i });
@@ -404,5 +436,285 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: /run-failed/i }));
     await screen.findByText(/Error code:\s*runner_parse_failed/i);
     await screen.findByRole("button", { name: /reports\/taskruns\/run-failed.json/i });
+  });
+
+  it("builds multi-repo manifest in guided setup with empty refs by default", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+      const runLogsResponse = maybeRunLogsResponse(method, url);
+      if (runLogsResponse) {
+        return runLogsResponse;
+      }
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        return jsonResponse({ items: [] });
+      }
+      if (method === "GET" && url === "/api/workspace/manifest") {
+        return jsonResponse({
+          content: "version: 1\nrepos:\n  - name: payments-service\n    path: /tmp/payments-service\n"
+        });
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Foverview.md") {
+        return textResponse("# Charter\n");
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Fwizard%2Fstep0-contract.json") {
+        return textResponse("not found", 404);
+      }
+      if (method === "PUT" && url === "/api/workspace/manifest") {
+        return jsonResponse({ ok: true });
+      }
+      if (method === "POST" && url === "/api/workspace/validate") {
+        return jsonResponse({
+          ok: true,
+          workspace: "/tmp/workspace",
+          warnings: [],
+          errors: [],
+          resolved_repos: []
+        });
+      }
+
+      return jsonResponse(
+        {
+          error: {
+            code: "not_found",
+            message: `unhandled request: ${method} ${url}`
+          }
+        },
+        404
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /add repo/i }));
+
+    const repoNameInputs = screen.getAllByLabelText(/Repo name/i);
+    fireEvent.change(repoNameInputs[1], { target: { value: "users-service" } });
+
+    const repoModeSelects = screen.getAllByLabelText(/Repo source type/i);
+    fireEvent.change(repoModeSelects[1], { target: { value: "git_url" } });
+
+    const gitURLInput = await screen.findByLabelText(/^git_url$/i);
+    fireEvent.change(gitURLInput, {
+      target: { value: "https://gitlab.example.com/platform/users-service.git" }
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /apply guided workspace form/i }));
+    fireEvent.click(screen.getByRole("button", { name: /save workspace\.yaml/i }));
+
+    await screen.findByText("Status: valid");
+
+    const saveCalls = fetchMock.mock.calls.filter(
+      (call) => call[0] === "/api/workspace/manifest" && ((call[1] as RequestInit | undefined)?.method ?? "").toUpperCase() === "PUT"
+    );
+    expect(saveCalls.length).toBe(1);
+
+    const [, saveInit] = saveCalls[0] as [RequestInfo | URL, RequestInit];
+    const parsed = JSON.parse(String(saveInit?.body)) as { content: string };
+    expect(parsed.content).toContain("name: payments-service");
+    expect(parsed.content).toContain("name: users-service");
+    expect(parsed.content).toContain("git_url: https://gitlab.example.com/platform/users-service.git");
+    expect(parsed.content).not.toContain("\n    ref:");
+  });
+
+  it("shows resolved repos and diagnostics grouped by repo", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+      const runLogsResponse = maybeRunLogsResponse(method, url);
+      if (runLogsResponse) {
+        return runLogsResponse;
+      }
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        return jsonResponse({ items: [] });
+      }
+      if (method === "GET" && url === "/api/workspace/manifest") {
+        return jsonResponse({
+          content: "version: 1\nrepos:\n  - name: payments-service\n    path: /tmp/payments-service\n"
+        });
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Foverview.md") {
+        return textResponse("# Charter\n");
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Fwizard%2Fstep0-contract.json") {
+        return textResponse("not found", 404);
+      }
+      if (method === "POST" && url === "/api/workspace/validate") {
+        return jsonResponse({
+          ok: false,
+          workspace: "/tmp/workspace",
+          resolved_repos: [
+            {
+              name: "payments-service",
+              source: "path",
+              path: "/tmp/payments-service",
+              ref: "main"
+            }
+          ],
+          warnings: [
+            {
+              level: "warning",
+              code: "workspace.repo.ref.resolved_via_remote",
+              message: "ref \"main\" was resolved via \"origin/main\"",
+              repo: "payments-service"
+            }
+          ],
+          errors: [
+            {
+              level: "error",
+              code: "workspace.layout.dir.unreadable",
+              message: "workspace directory unreadable"
+            }
+          ]
+        });
+      }
+
+      return jsonResponse(
+        {
+          error: {
+            code: "not_found",
+            message: `unhandled request: ${method} ${url}`
+          }
+        },
+        404
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /validate workspace/i }));
+
+    await screen.findByText("Status: invalid");
+    expect(screen.getByText(/Resolved repos/i)).toBeInTheDocument();
+    expect(screen.getByText(/Diagnostics for payments-service/i)).toBeInTheDocument();
+    expect(screen.getByText(/Workspace diagnostics/i)).toBeInTheDocument();
+    expect(screen.getByText(/workspace\.repo\.ref\.resolved_via_remote/i)).toBeInTheDocument();
+    expect(screen.getByText(/workspace\.layout\.dir\.unreadable/i)).toBeInTheDocument();
+  });
+
+  it("renders run logs panel and opens taskrun artifact from log quick action", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        return jsonResponse({
+          items: [
+            {
+              run_id: "run-log",
+              pipeline: "init",
+              status: "succeeded",
+              started_at: "2026-04-03T12:00:00Z",
+              finished_at: "2026-04-03T12:00:02Z",
+              warnings: ["init.step1.collect: synthetic runtime warning"],
+              error_code: null,
+              error: null
+            }
+          ]
+        });
+      }
+      if (method === "GET" && url === "/api/workspace/manifest") {
+        return jsonResponse({
+          content: "version: 1\nrepos:\n  - name: payments-service\n    path: /tmp/payments-service\n"
+        });
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Foverview.md") {
+        return textResponse("# Charter\n");
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Fwizard%2Fstep0-contract.json") {
+        return textResponse("not found", 404);
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-log") {
+        return jsonResponse({
+          run_id: "run-log",
+          pipeline: "init",
+          status: "succeeded",
+          started_at: "2026-04-03T12:00:00Z",
+          finished_at: "2026-04-03T12:00:02Z",
+          current_step: null,
+          warnings: ["init.step1.collect: synthetic runtime warning"],
+          error_code: null,
+          error: null
+        });
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-log/artifacts") {
+        return jsonResponse({
+          run_id: "run-log",
+          artifacts: [
+            {
+              path: "reports/taskruns/run-log-step1.json",
+              kind: "taskrun",
+              label: "run-log step1 taskrun"
+            }
+          ]
+        });
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-log/logs?cursor=0&limit=200") {
+        return jsonResponse({
+          run_id: "run-log",
+          items: [
+            {
+              cursor: 0,
+              timestamp: "2026-04-03T12:00:00Z",
+              level: "info",
+              step_id: "init.step1.collect",
+              domain_id: "payments-service",
+              message: "runtime task started"
+            },
+            {
+              cursor: 1,
+              timestamp: "2026-04-03T12:00:01Z",
+              level: "warning",
+              step_id: "init.step1.collect",
+              domain_id: "payments-service",
+              message: "runtime warning",
+              taskrun_path: "reports/taskruns/run-log-step1.json"
+            }
+          ],
+          next_cursor: 2,
+          eof: true
+        });
+      }
+      if (method === "GET" && url === "/api/artifacts?path=reports%2Ftaskruns%2Frun-log-step1.json") {
+        return textResponse("{\"status\":\"ok\"}\n");
+      }
+      if (method === "GET" && url === "/api/artifacts?path=reports%2Fcoverage%2Fsummary.md") {
+        return textResponse("Coverage: 70%\n");
+      }
+      if (method === "GET" && url === "/api/artifacts?path=reports%2Fcoverage%2Fopen-questions.md") {
+        return textResponse("- verify ownership\n");
+      }
+
+      const runLogsResponse = maybeRunLogsResponse(method, url);
+      if (runLogsResponse) {
+        return runLogsResponse;
+      }
+
+      return jsonResponse(
+        {
+          error: {
+            code: "not_found",
+            message: `unhandled request: ${method} ${url}`
+          }
+        },
+        404
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    await screen.findByRole("button", { name: /run-log/i });
+    fireEvent.click(screen.getByRole("button", { name: /run-log/i }));
+
+    await screen.findByText(/runtime task started/i);
+    await screen.findByRole("button", { name: /Open taskrun artifact: reports\/taskruns\/run-log-step1\.json/i });
+
+    fireEvent.click(screen.getByRole("button", { name: /Open taskrun artifact: reports\/taskruns\/run-log-step1\.json/i }));
+    await screen.findByText(/\{\"status\":\"ok\"\}/i);
   });
 });
