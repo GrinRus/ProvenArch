@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/orchestrator"
-	"github.com/GrinRus/ProvenArch/internal/runtime/claudecode"
+	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
@@ -607,14 +607,14 @@ func formatRunInfoPayload(runInfo orchestrator.RunInfo) map[string]any {
 }
 
 func mapTypedRunnerAPIError(err error) (statusCode int, code string, message string, ok bool) {
-	runnerCode, runnerMessage, classified := claudecode.ClassifyError(err)
+	runnerCode, runnerMessage, classified := acpruntime.ClassifyError(err)
 	if !classified {
 		return 0, "", "", false
 	}
 	switch runnerCode {
-	case string(claudecode.ErrorCodeRunnerUnavailable):
+	case string(acpruntime.ErrorCodeRunnerUnavailable):
 		return http.StatusServiceUnavailable, runnerCode, runnerMessage, true
-	case string(claudecode.ErrorCodeRunnerParseFailed):
+	case string(acpruntime.ErrorCodeRunnerParseFailed):
 		// Parse failures are surfaced as run-level failures (`error_code`) after async start.
 		return 0, "", "", false
 	default:

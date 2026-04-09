@@ -15,8 +15,8 @@ func TestParseTaskResultFromFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse taskresult: %v", err)
 	}
-	if result.Meta.Runtime.Name != "claude-code" {
-		t.Fatalf("expected runtime claude-code, got %q", result.Meta.Runtime.Name)
+	if strings.TrimSpace(result.Meta.Runtime.Name) == "" {
+		t.Fatalf("expected non-empty runtime.name")
 	}
 	if len(result.Changeset) == 0 {
 		t.Fatalf("expected non-empty changeset")
@@ -84,8 +84,8 @@ func TestParseTaskResultAllowsNestedAdditionalProperties(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected nested additional properties to be allowed, got %v", err)
 	}
-	if parsed.Meta.Runtime.Name != "claude-code" {
-		t.Fatalf("unexpected runtime name: %q", parsed.Meta.Runtime.Name)
+	if strings.TrimSpace(parsed.Meta.Runtime.Name) == "" {
+		t.Fatalf("expected non-empty runtime.name")
 	}
 }
 

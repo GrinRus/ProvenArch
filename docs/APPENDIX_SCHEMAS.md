@@ -32,7 +32,7 @@
 ## 2) TaskResult JSON Schema
 
 - **Source of truth:** `schemas/taskresult.schema.json`
-- Контракт между **orchestrator** и **runtime** (MVP runtime: Claude Code headless).
+- Контракт между **orchestrator** и **runtime** (MVP runtime: headless providers `claude-code|qwen-code` + fake baseline).
 - Orchestrator обязан валидировать TaskResult до применения изменений.
 
 ### Top-level поля
@@ -59,7 +59,7 @@
   - `workspace`
   - `repo_scopes[]`
 
-> Политика MVP: фактически используем `runtime.name = "claude-code"`, даже если схема допускает любое непустое значение.
+> Политика MVP: `runtime.name` остаётся provider-aware (`claude-code` или `qwen-code` для headless, `claude-code` для fake baseline), при этом схема по-прежнему требует только непустую строку.
 > `repo_scopes[]` соответствует repo entries, заданным в `workspace.yaml`, и использует их `name`.
 
 ### Changeset operations (MVP)

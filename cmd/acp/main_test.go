@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,7 +64,7 @@ func TestRunSubcommandHelpReturnsZero(t *testing.T) {
 	if code != exitCodeOK {
 		t.Fatalf("expected exit code %d, got %d", exitCodeOK, code)
 	}
-	if !strings.Contains(stderr.String(), "Usage: acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--non-interactive]") {
+	if !strings.Contains(stderr.String(), "Usage: acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--non-interactive]") {
 		t.Fatalf("expected run usage in stderr, got %q", stderr.String())
 	}
 }
@@ -245,6 +246,22 @@ func TestServeRejectsUnsupportedRuntime(t *testing.T) {
 	}
 }
 
+func TestServeRejectsUnsupportedRuntimeProvider(t *testing.T) {
+	t.Parallel()
+
+	root := writeWorkspace(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"serve", "--workspace", root, "--runtime-provider", "bogus", "--dry-run"}, &stdout, &stderr)
+	if code != exitCodeValidation {
+		t.Fatalf("expected exit code %d, got %d", exitCodeValidation, code)
+	}
+	if !strings.Contains(stderr.String(), "unsupported runtime provider") {
+		t.Fatalf("expected runtime provider validation error, got %q", stderr.String())
+	}
+}
+
 func TestServeRejectsInvalidRunLogsRetentionFlags(t *testing.T) {
 	t.Parallel()
 
@@ -284,6 +301,22 @@ func TestRunRejectsUnsupportedRuntime(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "unsupported runtime") {
 		t.Fatalf("expected runtime validation error, got %q", stderr.String())
+	}
+}
+
+func TestRunRejectsUnsupportedRuntimeProvider(t *testing.T) {
+	t.Parallel()
+
+	root := writeWorkspace(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"run", "--workspace", root, "--pipeline", "init", "--runtime-provider", "bogus", "--non-interactive"}, &stdout, &stderr)
+	if code != exitCodeValidation {
+		t.Fatalf("expected exit code %d, got %d", exitCodeValidation, code)
+	}
+	if !strings.Contains(stderr.String(), "unsupported runtime provider") {
+		t.Fatalf("expected runtime provider validation error, got %q", stderr.String())
 	}
 }
 
@@ -357,6 +390,15 @@ func TestRunPipelineBootstrapSkeleton(t *testing.T) {
 	if !strings.Contains(stdout.String(), "status: succeeded") {
 		t.Fatalf("expected successful run output, got %q", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "runtime mode: fake") {
+		t.Fatalf("expected runtime mode output, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "runtime provider: claude-code") {
+		t.Fatalf("expected runtime provider output, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "runtime provider note: ignored in fake mode") {
+		t.Fatalf("expected fake runtime provider note, got %q", stdout.String())
+	}
 	if stderr.Len() != 0 {
 		t.Fatalf("expected empty stderr, got %q", stderr.String())
 	}
@@ -382,8 +424,30 @@ func TestServeBootstrapSkeleton(t *testing.T) {
 	if !strings.Contains(stdout.String(), "runtime mode: fake") {
 		t.Fatalf("expected runtime mode output, got %q", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "runtime provider: claude-code") {
+		t.Fatalf("expected runtime provider output, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "runtime provider note: ignored in fake mode") {
+		t.Fatalf("expected fake runtime provider note, got %q", stdout.String())
+	}
 	if stderr.Len() != 0 {
 		t.Fatalf("expected empty stderr, got %q", stderr.String())
+	}
+}
+
+func TestServeDryRunUsesRuntimeProviderFromEnv(t *testing.T) {
+	root := writeWorkspace(t)
+	t.Setenv("ACP_RUNTIME_PROVIDER", "qwen-code")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"serve", "--workspace", root, "--runtime", "fake", "--dry-run"}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d", exitCodeOK, code)
+	}
+	if !strings.Contains(stdout.String(), "runtime provider: qwen-code") {
+		t.Fatalf("expected runtime provider from env, got %q", stdout.String())
 	}
 }
 
@@ -579,6 +643,212 @@ func TestRunHeadlessReturnsRunnerUnavailableWhenCommandMissing(t *testing.T) {
 	}
 }
 
+func TestServeHeadlessQwenReturnsRunnerUnavailableWhenCommandMissing(t *testing.T) {
+	root := writeWorkspace(t)
+	t.Setenv("ACP_QWEN_CMD", "definitely-missing-acp-qwen-command")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"serve",
+		"--workspace", root,
+		"--runtime", "headless",
+		"--runtime-provider", "qwen-code",
+		"--dry-run",
+	}, &stdout, &stderr)
+	if code != exitCodeValidation {
+		t.Fatalf("expected exit code %d, got %d", exitCodeValidation, code)
+	}
+	if !strings.Contains(stderr.String(), "runner_unavailable") {
+		t.Fatalf("expected runner_unavailable diagnostics, got %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "qwen-code") {
+		t.Fatalf("expected qwen-code diagnostics, got %q", stderr.String())
+	}
+}
+
+func TestServeHeadlessClaudeCodeWithStubRunnerDryRunSucceeds(t *testing.T) {
+	root := writeWorkspace(t)
+	t.Setenv("ACP_CLAUDE_CMD", writeStubHeadlessRunner(t, "claude-code"))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"serve",
+		"--workspace", root,
+		"--runtime", "headless",
+		"--runtime-provider", "claude-code",
+		"--dry-run",
+	}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d: stderr=%q", exitCodeOK, code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "runtime mode: headless") {
+		t.Fatalf("expected runtime mode output, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "runtime provider: claude-code") {
+		t.Fatalf("expected runtime provider output, got %q", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "ignored in fake mode") {
+		t.Fatalf("did not expect fake-mode provider note, got %q", stdout.String())
+	}
+}
+
+func TestServeHeadlessQwenCodeWithStubRunnerDryRunSucceeds(t *testing.T) {
+	root := writeWorkspace(t)
+	t.Setenv("ACP_QWEN_CMD", writeStubHeadlessRunner(t, "qwen-code"))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"serve",
+		"--workspace", root,
+		"--runtime", "headless",
+		"--runtime-provider", "qwen-code",
+		"--dry-run",
+	}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d: stderr=%q", exitCodeOK, code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "runtime mode: headless") {
+		t.Fatalf("expected runtime mode output, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "runtime provider: qwen-code") {
+		t.Fatalf("expected runtime provider output, got %q", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "ignored in fake mode") {
+		t.Fatalf("did not expect fake-mode provider note, got %q", stdout.String())
+	}
+}
+
+func TestRunHeadlessQwenReturnsRunnerUnavailableWhenCommandMissing(t *testing.T) {
+	root := writeWorkspace(t)
+	t.Setenv("ACP_QWEN_CMD", "definitely-missing-acp-qwen-command")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"run",
+		"--workspace", root,
+		"--pipeline", "refresh",
+		"--runtime", "headless",
+		"--runtime-provider", "qwen-code",
+		"--non-interactive",
+	}, &stdout, &stderr)
+	if code != exitCodeValidation {
+		t.Fatalf("expected exit code %d, got %d", exitCodeValidation, code)
+	}
+	if !strings.Contains(stderr.String(), "runner_unavailable") {
+		t.Fatalf("expected runner_unavailable diagnostics, got %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "qwen-code") {
+		t.Fatalf("expected qwen-code diagnostics, got %q", stderr.String())
+	}
+}
+
+func TestRunHeadlessClaudeCodeWithStubRunnerSucceeds(t *testing.T) {
+	root := writeWorkspace(t)
+	t.Setenv("ACP_CLAUDE_CMD", writeStubHeadlessRunner(t, "claude-code"))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"run",
+		"--workspace", root,
+		"--pipeline", "init",
+		"--runtime", "headless",
+		"--runtime-provider", "claude-code",
+		"--non-interactive",
+	}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d: stderr=%q", exitCodeOK, code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "status: succeeded") {
+		t.Fatalf("expected succeeded run, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "runtime provider: claude-code") {
+		t.Fatalf("expected runtime provider output, got %q", stdout.String())
+	}
+}
+
+func TestRunHeadlessQwenCodeWithStubRunnerSucceeds(t *testing.T) {
+	root := writeWorkspace(t)
+	t.Setenv("ACP_QWEN_CMD", writeStubHeadlessRunner(t, "qwen-code"))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"run",
+		"--workspace", root,
+		"--pipeline", "init",
+		"--runtime", "headless",
+		"--runtime-provider", "qwen-code",
+		"--non-interactive",
+	}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d: stderr=%q", exitCodeOK, code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "status: succeeded") {
+		t.Fatalf("expected succeeded run, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "runtime provider: qwen-code") {
+		t.Fatalf("expected runtime provider output, got %q", stdout.String())
+	}
+
+	runID := outputField(stdout.String(), "run_id")
+	if runID == "" {
+		t.Fatalf("expected non-empty run_id in output, got %q", stdout.String())
+	}
+	qualityPath := filepath.Join(root, "reports", "taskruns", runID+"-quality.json")
+	content, err := os.ReadFile(qualityPath)
+	if err != nil {
+		t.Fatalf("read quality summary: %v", err)
+	}
+	var quality struct {
+		RuntimeVersions []string `json:"runtime_versions"`
+	}
+	if err := json.Unmarshal(content, &quality); err != nil {
+		t.Fatalf("decode quality summary: %v", err)
+	}
+	containsQwen := false
+	for _, version := range quality.RuntimeVersions {
+		if strings.Contains(strings.ToLower(version), "qwen-code") {
+			containsQwen = true
+			break
+		}
+	}
+	if !containsQwen {
+		t.Fatalf("expected qwen runtime in quality summary, got %+v", quality.RuntimeVersions)
+	}
+}
+
+func TestRunHeadlessRuntimeProviderFlagOverridesEnv(t *testing.T) {
+	root := writeWorkspace(t)
+	t.Setenv("ACP_RUNTIME_PROVIDER", "qwen-code")
+	t.Setenv("ACP_CLAUDE_CMD", "missing-claude-provider-command")
+	t.Setenv("ACP_QWEN_CMD", "missing-qwen-provider-command")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"run",
+		"--workspace", root,
+		"--pipeline", "refresh",
+		"--runtime", "headless",
+		"--runtime-provider", "claude-code",
+		"--non-interactive",
+	}, &stdout, &stderr)
+	if code != exitCodeValidation {
+		t.Fatalf("expected exit code %d, got %d", exitCodeValidation, code)
+	}
+	if !strings.Contains(stderr.String(), "missing-claude-provider-command") {
+		t.Fatalf("expected CLI provider to win over env, got %q", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "missing-qwen-provider-command") {
+		t.Fatalf("expected env provider command not to be used, got %q", stderr.String())
+	}
+}
+
 func TestEnsureWorkspaceGitRepositoryReturnsActionableErrorWhenGitMissing(t *testing.T) {
 	t.Setenv("PATH", "")
 	err := ensureWorkspaceGitRepository(t.TempDir())
@@ -614,4 +884,50 @@ func writeWorkspace(t *testing.T) string {
 		t.Fatalf("write workspace manifest: %v", err)
 	}
 	return root
+}
+
+func writeStubHeadlessRunner(t *testing.T, runtimeName string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "stub-headless-runner.sh")
+	script := `#!/usr/bin/env bash
+TASK_PAYLOAD="$(cat)"
+TASK_PAYLOAD="$TASK_PAYLOAD" python3 - <<'PY'
+import json
+import os
+import sys
+
+raw = os.environ.get("TASK_PAYLOAD", "").strip()
+task = json.loads(raw) if raw else {}
+payload = {
+    "meta": {
+        "task_id": task.get("task_id", "task"),
+        "step_id": task.get("step_id", "init.step1.collect"),
+        "run_id": task.get("run_id", ""),
+        "runtime": {
+            "name": "` + runtimeName + `",
+            "version": "stub"
+        },
+        "started_at": "2026-04-03T12:00:00Z"
+    },
+    "summary": "stub taskresult",
+    "changeset": []
+}
+sys.stdout.write(json.dumps(payload))
+PY
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write stub headless runner: %v", err)
+	}
+	return path
+}
+
+func outputField(output string, key string) string {
+	prefix := key + ": "
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		}
+	}
+	return ""
 }

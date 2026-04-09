@@ -19,6 +19,8 @@ API_INIT_RUN_ID=""
 API_INIT_FINAL_STATUS=""
 QUALITY_GATES_STATUS="not_run"
 LAST_SIGNAL=""
+HEADLESS_PROVIDER=""
+HEADLESS_CMD=""
 
 if [[ ! "$ITERATIONS" =~ ^[1-9][0-9]*$ ]]; then
   echo "ITERATIONS must be a positive integer, got: $ITERATIONS" >&2
@@ -276,33 +278,45 @@ PY
 }
 
 run_cli_pipeline() {
-  local runtime="$1"
-  local pipeline="$2"
-  local iteration="$3"
-  local previous_signal="$4"
+  local runtime_mode="$1"
+  local runtime_provider="$2"
+  local pipeline="$3"
+  local iteration="$4"
+  local previous_signal="$5"
 
-  local output_path="$LOG_DIR/run-iter${iteration}-${runtime}-${pipeline}.log"
+  local runtime_label="$runtime_mode"
+  if [[ "$runtime_mode" == "headless" ]]; then
+    runtime_label="${runtime_mode}:${runtime_provider}"
+  fi
+
+  local output_path="$LOG_DIR/run-iter${iteration}-${runtime_mode}-${runtime_provider}-${pipeline}.log"
   local quality_path
   local run_id
   local status
 
-  log "run: iteration=$iteration runtime=$runtime pipeline=$pipeline"
-  if ! "$ACP_BIN" run \
-    --workspace "$WORKSPACE" \
-    --pipeline "$pipeline" \
-    --runtime "$runtime" \
-    --non-interactive \
-    --run-logs-ttl-hours "$RUN_LOGS_TTL_HOURS" \
-    --run-logs-max-runs "$RUN_LOGS_MAX_RUNS" >"$output_path" 2>&1; then
-    echo "pipeline failed: runtime=$runtime pipeline=$pipeline (see $output_path)" >&2
-    tail -n 120 "$output_path" >&2 || true
-    die "pipeline command failed for runtime=$runtime pipeline=$pipeline"
+  log "run: iteration=$iteration runtime=$runtime_label pipeline=$pipeline"
+  local run_cmd=(
+    "$ACP_BIN" run
+    --workspace "$WORKSPACE"
+    --pipeline "$pipeline"
+    --runtime "$runtime_mode"
+    --non-interactive
+    --run-logs-ttl-hours "$RUN_LOGS_TTL_HOURS"
+    --run-logs-max-runs "$RUN_LOGS_MAX_RUNS"
+  )
+  if [[ "$runtime_mode" == "headless" ]]; then
+    run_cmd+=(--runtime-provider "$runtime_provider")
   fi
 
+  if ! "${run_cmd[@]}" >"$output_path" 2>&1; then
+    echo "pipeline failed: runtime=$runtime_label pipeline=$pipeline (see $output_path)" >&2
+    tail -n 120 "$output_path" >&2 || true
+    die "pipeline command failed for runtime=$runtime_label pipeline=$pipeline"
+  fi
   status="$(sed -n 's/^status: //p' "$output_path" | tail -n1 | tr -d '\r')"
   run_id="$(sed -n 's/^run_id: //p' "$output_path" | tail -n1 | tr -d '\r')"
   if [[ -z "$run_id" ]]; then
-    die "missing run_id in CLI output for runtime=$runtime pipeline=$pipeline"
+    die "missing run_id in CLI output for runtime=$runtime_label pipeline=$pipeline"
   fi
   if [[ "$status" != "succeeded" ]]; then
     die "unexpected run status for $run_id: $status"
@@ -324,7 +338,7 @@ run_cli_pipeline() {
     die "quality summary status is not succeeded for run $run_id: $quality_status"
   fi
 
-  if [[ "$runtime" == "headless" ]]; then
+  if [[ "$runtime_mode" == "headless" ]]; then
     if [[ "$mock_flag" == "1" ]]; then
       die "headless run $run_id uses mock/fake runtime version ($runtime_versions)"
     fi
@@ -336,7 +350,7 @@ run_cli_pipeline() {
     fi
   fi
 
-  if [[ "$runtime" == "headless" && "$pipeline" == "refresh" ]]; then
+  if [[ "$runtime_mode" == "headless" && "$pipeline" == "refresh" ]]; then
     if [[ -n "$previous_signal" ]] && (( signal_score < previous_signal )); then
       die "quality regression: last run signal ($signal_score) is lower than previous run signal ($previous_signal) in iteration $iteration"
     fi
@@ -345,10 +359,10 @@ run_cli_pipeline() {
     fi
   fi
 
-  snapshot_run_artifacts "$run_id" "$runtime" "$pipeline" "$iteration"
+  snapshot_run_artifacts "$run_id" "$runtime_label" "$pipeline" "$iteration"
 
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$iteration" "$runtime" "$pipeline" "$run_id" "$status" "$signal_score" "$changeset" "$findings" "$questions" "$coverage_observed" "$coverage_missing" "$warnings" "$runtime_versions" "$quality_path" "$output_path" >> "$RUN_RESULTS_TSV"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$signal_score" "$changeset" "$findings" "$questions" "$coverage_observed" "$coverage_missing" "$warnings" "$runtime_versions" "$quality_path" "$output_path" >> "$RUN_RESULTS_TSV"
 
   LAST_SIGNAL="$signal_score"
   return 0
@@ -377,7 +391,8 @@ write_summary() {
     echo "- run_logs_ttl_hours: $RUN_LOGS_TTL_HOURS"
     echo "- run_logs_max_runs: $RUN_LOGS_MAX_RUNS"
     echo "- keep_tmp: $KEEP_TMP"
-    echo "- headless_command: ${ACP_CLAUDE_CMD:-unset}"
+    echo "- headless_provider: ${HEADLESS_PROVIDER:-unset}"
+    echo "- headless_command: ${HEADLESS_CMD:-unset}"
     echo
 
     echo "## API Simulation"
@@ -394,10 +409,10 @@ write_summary() {
     if [[ ! -s "$RUN_RESULTS_TSV" ]]; then
       echo "- no completed runs recorded"
     else
-      echo "| iteration | runtime | pipeline | run_id | status | signal | changeset | findings | questions | cov_obs | cov_missing | warnings |"
-      echo "|---|---|---|---|---|---|---|---|---|---|---|---|"
-      while IFS=$'\t' read -r iter runtime pipeline run_id status signal changeset findings questions cov_obs cov_missing warnings _runtime_versions _quality_path _run_log; do
-        echo "| $iter | $runtime | $pipeline | $run_id | $status | $signal | $changeset | $findings | $questions | $cov_obs | $cov_missing | $warnings |"
+      echo "| iteration | runtime_mode | runtime_provider | pipeline | run_id | status | signal | changeset | findings | questions | cov_obs | cov_missing | warnings |"
+      echo "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+      while IFS=$'\t' read -r iter runtime_mode runtime_provider pipeline run_id status signal changeset findings questions cov_obs cov_missing warnings _runtime_versions _quality_path _run_log; do
+        echo "| $iter | $runtime_mode | $runtime_provider | $pipeline | $run_id | $status | $signal | $changeset | $findings | $questions | $cov_obs | $cov_missing | $warnings |"
       done < "$RUN_RESULTS_TSV"
     fi
     echo
@@ -506,11 +521,24 @@ if [[ ! -d "$TARGET_REPO" ]]; then
   die "TARGET_REPO does not exist: $TARGET_REPO"
 fi
 
-HEADLESS_CMD="${ACP_CLAUDE_CMD:-claude-code}"
+HEADLESS_PROVIDER="${ACP_RUNTIME_PROVIDER:-claude-code}"
+case "$HEADLESS_PROVIDER" in
+  claude-code)
+    HEADLESS_CMD="${ACP_CLAUDE_CMD:-claude-code}"
+    export ACP_CLAUDE_CMD="$HEADLESS_CMD"
+    ;;
+  qwen-code)
+    HEADLESS_CMD="${ACP_QWEN_CMD:-qwen}"
+    export ACP_QWEN_CMD="$HEADLESS_CMD"
+    ;;
+  *)
+    die "unsupported ACP_RUNTIME_PROVIDER '$HEADLESS_PROVIDER' (allowed: claude-code, qwen-code)"
+    ;;
+esac
 if ! command -v "$HEADLESS_CMD" >/dev/null 2>&1; then
-  die "headless runtime command '$HEADLESS_CMD' is unavailable. Install claude-code or set ACP_CLAUDE_CMD"
+  die "headless runtime command '$HEADLESS_CMD' is unavailable for provider '$HEADLESS_PROVIDER'. Install command or set ACP_CLAUDE_CMD/ACP_QWEN_CMD"
 fi
-export ACP_CLAUDE_CMD="$HEADLESS_CMD"
+export ACP_RUNTIME_PROVIDER="$HEADLESS_PROVIDER"
 
 log "build ProvenArch binary"
 (
@@ -633,20 +661,20 @@ API_SIM_STATUS="succeeded"
 log "stop API server"
 stop_server
 
-log "run runtime cycles: fake + headless"
+log "run runtime cycles: fake + headless(provider=$HEADLESS_PROVIDER)"
 for iteration in $(seq 1 "$ITERATIONS"); do
   previous_signal=""
 
-  run_cli_pipeline "fake" "init" "$iteration" "$previous_signal"
+  run_cli_pipeline "fake" "$HEADLESS_PROVIDER" "init" "$iteration" "$previous_signal"
   previous_signal="$LAST_SIGNAL"
 
-  run_cli_pipeline "fake" "refresh" "$iteration" "$previous_signal"
+  run_cli_pipeline "fake" "$HEADLESS_PROVIDER" "refresh" "$iteration" "$previous_signal"
   previous_signal="$LAST_SIGNAL"
 
-  run_cli_pipeline "headless" "init" "$iteration" "$previous_signal"
+  run_cli_pipeline "headless" "$HEADLESS_PROVIDER" "init" "$iteration" "$previous_signal"
   previous_signal="$LAST_SIGNAL"
 
-  run_cli_pipeline "headless" "refresh" "$iteration" "$previous_signal"
+  run_cli_pipeline "headless" "$HEADLESS_PROVIDER" "refresh" "$iteration" "$previous_signal"
   previous_signal="$LAST_SIGNAL"
 done
 
@@ -654,7 +682,9 @@ if [[ "$RUN_QUALITY_GATES" == "1" ]]; then
   log "run quality gates: make contracts test lint build"
   if ! (
     cd "$PROVENARCH_ROOT"
-    make contracts test lint build >"$QUALITY_LOG" 2>&1
+    # Run project gates with neutral runtime env so defaults in tests are stable.
+    env -u ACP_RUNTIME_PROVIDER -u ACP_QWEN_CMD -u ACP_CLAUDE_CMD \
+      make contracts test lint build >"$QUALITY_LOG" 2>&1
   ); then
     QUALITY_GATES_STATUS="failed"
     die "quality gates failed (see $QUALITY_LOG)"

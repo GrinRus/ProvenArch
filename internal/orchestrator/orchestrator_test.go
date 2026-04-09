@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
+	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/claudecode"
 	"github.com/GrinRus/ProvenArch/internal/testutil"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
@@ -994,10 +995,10 @@ type delayedRunner struct {
 	delay time.Duration
 }
 
-func (r delayedRunner) Run(ctx context.Context, task claudecode.Task) (claudecode.Result, error) {
+func (r delayedRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
 	select {
 	case <-ctx.Done():
-		return claudecode.Result{}, ctx.Err()
+		return acpruntime.Result{}, ctx.Err()
 	case <-time.After(r.delay):
 	}
 	return claudecode.FakeRunner{}.Run(ctx, task)
@@ -1005,10 +1006,11 @@ func (r delayedRunner) Run(ctx context.Context, task claudecode.Task) (claudecod
 
 type step3ParseFailureRunner struct{}
 
-func (step3ParseFailureRunner) Run(ctx context.Context, task claudecode.Task) (claudecode.Result, error) {
+func (step3ParseFailureRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
 	if strings.HasSuffix(task.StepID, "step3.findings") {
-		return claudecode.Result{}, claudecode.WrapRunnerError(
-			claudecode.ErrorCodeRunnerParseFailed,
+		return acpruntime.Result{}, acpruntime.WrapRunnerError(
+			acpruntime.ProviderClaudeCode,
+			acpruntime.ErrorCodeRunnerParseFailed,
 			"synthetic parse failure at findings step",
 			nil,
 		)
@@ -1022,11 +1024,11 @@ func (step3ParseFailureRunner) Preflight(context.Context) error {
 
 type docArtifactRunner struct{}
 
-func (docArtifactRunner) Run(ctx context.Context, task claudecode.Task) (claudecode.Result, error) {
+func (docArtifactRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
 	base := claudecode.FakeRunner{}
 	result, err := base.Run(ctx, task)
 	if err != nil {
-		return claudecode.Result{}, err
+		return acpruntime.Result{}, err
 	}
 	if strings.HasSuffix(task.StepID, "step1.collect") {
 		taskResult := result.TaskResult
@@ -1042,7 +1044,7 @@ func (docArtifactRunner) Run(ctx context.Context, task claudecode.Task) (claudec
 		})
 		raw, marshalErr := json.MarshalIndent(taskResult, "", "  ")
 		if marshalErr != nil {
-			return claudecode.Result{}, marshalErr
+			return acpruntime.Result{}, marshalErr
 		}
 		result.TaskResult = taskResult
 		result.RawJSON = raw
@@ -1189,20 +1191,20 @@ func hasWarningPrefix(warnings []string, prefix string) bool {
 
 type trackingRunner struct {
 	mu    sync.Mutex
-	tasks []claudecode.Task
+	tasks []acpruntime.Task
 }
 
-func (r *trackingRunner) Run(ctx context.Context, task claudecode.Task) (claudecode.Result, error) {
+func (r *trackingRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
 	r.mu.Lock()
 	r.tasks = append(r.tasks, task)
 	r.mu.Unlock()
 	return claudecode.FakeRunner{}.Run(ctx, task)
 }
 
-func (r *trackingRunner) tasksForStep(stepID string) []claudecode.Task {
+func (r *trackingRunner) tasksForStep(stepID string) []acpruntime.Task {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	filtered := []claudecode.Task{}
+	filtered := []acpruntime.Task{}
 	for _, task := range r.tasks {
 		if task.StepID == stepID {
 			filtered = append(filtered, task)

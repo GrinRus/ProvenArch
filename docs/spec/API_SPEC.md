@@ -174,7 +174,7 @@ Body: отсутствует.
 Поведение:
 - при пустом body используются defaults (`trigger` по endpoint, flags=false)
 - `commit=true` или `create_proposal_branch=true` в этом slice возвращают `501 not_supported`
-- runtime mode фиксируется конфигурацией процесса (`acp serve --runtime ...`) и не задаётся per-request.
+- runtime mode/provider фиксируются конфигурацией процесса (`acp serve --runtime ... --runtime-provider ...`) и не задаются per-request.
 
 **202**
 ```json
@@ -381,14 +381,17 @@ Run-specific поверхность (не входит в strict deterministic g
 
 ## 8) Deployment boundary
 - `acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)`: explicit bootstrap.
-- `acp serve --workspace <abs-path> [--runtime fake|headless] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)]`: local interactive и trusted local/private deployment.
+- `acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)]`: local interactive и trusted local/private deployment.
 - bootstrap behavior: если workspace root не является git-репозиторием, ACP автоматически выполняет `git init` (без auto-commit/auto-push).
 - `serve` startup работает в lenient mode: сервис стартует без блокирующего repo preflight; readiness diagnostics доступны через `POST /api/workspace/validate`.
-- `acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--non-interactive]`.
+- `acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--non-interactive]`.
 - run logs retention knobs:
   - CLI flags: `--run-logs-ttl-hours`, `--run-logs-max-runs` (для `serve` и `run`)
   - env overrides: `ACP_RUN_LOGS_TTL_HOURS`, `ACP_RUN_LOGS_MAX_RUNS`
   - defaults: `168h` TTL и `200` run log files
 - default runtime mode: `fake` (required deterministic CI surface), `headless` — opt-in.
+- default runtime provider: `claude-code`; fallback env `ACP_RUNTIME_PROVIDER`; CLI override `--runtime-provider`.
+- provider-specific command envs: `ACP_CLAUDE_CMD` и `ACP_QWEN_CMD`.
+- при `--runtime fake` provider value валидируется, но live provider command не выполняется.
 - GitHub/GitLab hooks/manual jobs для required CI/CD должны использовать CLI batch mode с deterministic defaults (`--runtime fake`).
 - API-trigger не должен превращаться в hosted control plane в рамках MVP.

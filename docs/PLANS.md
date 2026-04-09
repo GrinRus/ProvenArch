@@ -253,6 +253,67 @@ EP-20260406-mvp-onboarding-simplification
 
 ---
 
+### Plan ID
+EP-20260409-runtime-provider-selection-mvp
+
+### Context
+Нужно добавить официальный выбор headless runtime provider в MVP без изменения API/TaskResult контрактов и без нарушения required deterministic CI baseline (`--runtime fake`).
+
+### Goals (must have)
+- [x] Ввести provider-aware runtime layer и factory для `claude-code`/`qwen-code`
+- [x] Добавить CLI/env contract для provider selection (`--runtime-provider`, `ACP_RUNTIME_PROVIDER`)
+- [x] Реализовать native `qwen-code` runner с actionable error mapping (`runner_unavailable`, `runner_parse_failed`)
+- [x] Сохранить backward compatibility (default provider `claude-code`, fake baseline неизменён)
+- [x] Синхронизировать runtime policy/docs/runbooks и обновить тесты
+
+### Non-goals
+- [x] Перевод required CI на live runtime provider checks
+- [x] Расширение provider списка beyond `claude-code` и `qwen-code`
+- [x] Изменение `TaskResult` schema/model contracts
+
+### Approach
+1) Добавить shared runtime contracts/errors и provider factory.
+2) Подключить provider selection в `acp run|serve` (flag/env/default precedence).
+3) Реализовать `qwen-code` headless runner + parse strategy + tests.
+4) Обновить docs/policy/runbooks и прогнать DoD.
+
+### Files expected to change
+- `internal/runtime/runtime.go`
+- `internal/runtime/providers/*`
+- `internal/runtime/claudecode/*`
+- `internal/runtime/qwencode/*`
+- `internal/orchestrator/*`
+- `internal/api/*`
+- `cmd/acp/*`
+- `README.md`
+- `cmd/acp/README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/spec/API_SPEC.md`
+- `docs/spec/PIPELINE_SPEC.md`
+- `docs/BASELINE_POLICY.md`
+- `docs/STAKEHOLDER_DOC.md`
+- `docs/APPENDIX_SCHEMAS.md`
+- `docs/LOCAL_FULL_RUN_AI_ADVENT.md`
+- `scripts/full-run-ai-advent.sh`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены
+- [x] Схемы валидируются
+- [x] Документация обновлена
+
+### Risks
+- Drift между фактическими CLI флагами и docs usage.
+- Live provider команды могут отсутствовать в среде разработчика.
+
+### Progress log
+- 2026-04-09: Добавлен shared runtime layer (`Task/Result/Runner`, provider parse/resolve, unified runner error classifier).
+- 2026-04-09: Внедрён provider-aware factory и подключение в CLI/orchestrator/API.
+- 2026-04-09: Добавлен native `qwen-code` headless runner с strict TaskResult parse/validation.
+- 2026-04-09: Обновлены unit/integration tests для provider selection и headless provider paths.
+- 2026-04-09: Синхронизированы README/spec/policy/runbook документы и full-run script под provider-aware runtime contract.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.
@@ -262,7 +323,7 @@ EP-20260406-mvp-onboarding-simplification
 |---|---|---|
 | 1 Workspace/contracts | done (beta baseline) | Schema-driven + semantic validation, resolver `path/git_url`, diagnostics API |
 | 2 TaskResult foundations | done (beta baseline) | Validation + normalization legacy forms, contract tests |
-| 3 Runtime/orchestration seam | done (beta baseline) | Fake default + opt-in headless runtime selector, raw taskruns materialization |
+| 3 Runtime/orchestration seam | done (beta baseline) | Fake default + opt-in headless runtime selector with provider choice (`claude-code` default, `qwen-code`), raw taskruns materialization |
 | 4 Model deterministic core | done (beta baseline) | Canonical IDs/collision rules + deterministic regression tests |
 | 5 Pipeline 0–4 | done (beta baseline) | `init|refresh` runnable через CLI/API |
 | 6 UI baseline | done (beta baseline) | Setup/validate/run/inspect + editors + git helpers |
