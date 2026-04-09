@@ -1,7 +1,7 @@
 # Architecture Control Plane (Local-first MVP)
 
 > **Статус:** MVP beta foundation / runnable local pipeline baseline + strict contracts
-> **Принятый стек реализации:** Go (backend/orchestrator) + React/TypeScript UI (embedded), runtime анализа в MVP: **Claude Code headless**
+> **Принятый стек реализации:** Go (backend/orchestrator) + React/TypeScript UI (embedded), runtime анализа в MVP: **headless multi-provider** (`claude-code` default, `qwen-code` optional)
 > **Последняя ревизия:** 2026-04-06
 
 ## Что это
@@ -30,7 +30,7 @@ ACP не является "рисовалкой диаграмм". Архите�
 ## Scope MVP (явно)
 
 ✅ В MVP включено:
-- только Claude Code как runtime (headless/bare execution)
+- process-scoped runtime provider selection для headless режима: `claude-code` (default) и `qwen-code`
 - local-first режим (всё запускается локально)
 - запуск того же standalone orchestrator в CI/CD через GitHub/GitLab hooks и/или manual pipeline/job trigger
 - единый формат хранения: central `arch-workspace` git-репозиторий (Variant 2)
@@ -44,7 +44,7 @@ ACP не является "рисовалкой диаграмм". Архите�
 - internal Q&A capability системного аналитика поверх артефактов workspace (`internal/qa` + `acp qa`, без публичного API endpoint в beta surface)
 - итерационный changelog в `reports/changelog`
 - детальный анализ каждого сервиса: архитектура, внешние интеграции, БД, CI/CD
-- анализ arbitrary stacks через Claude Code + baseline prompt bundle, без фиксированного whitelist парсеров в MVP
+- анализ arbitrary stacks через выбранный headless provider (`claude-code|qwen-code`) + baseline prompt bundle, без фиксированного whitelist парсеров в MVP
 - явная фиксация недостатка информации через `coverage`, `questions` и findings
 - Git-based versioning/branching для модели, правил, отчётов и proposal-пакетов
 - строгий контракт TaskResult (JSON Schema) между runtime и orchestrator
@@ -104,7 +104,7 @@ MVP policy: Observation + Assertion отображаются как рабоча
 - Node.js 22.21.1 + npm 10.x (нужно для UI dev/build в этом репозитории)
 
 Для первого запуска достаточно `--runtime fake`.
-Claude Code требуется только для реальных запусков с `--runtime headless`.
+Для реальных запусков `--runtime headless` нужен установленный provider command (`claude-code` или `qwen`) либо env override (`ACP_CLAUDE_CMD`/`ACP_QWEN_CMD`).
 
 ### 1) Поднимите сервис одной командой (auto-init)
 
@@ -190,7 +190,13 @@ make quickstart-local WORKSPACE=/path/to/arch-workspace REPO_PATH=/path/to/payme
 ### 6) Когда переходить на headless runtime
 
 - `--runtime fake` — default для required deterministic CI surface и первого локального старта.
-- `--runtime headless` — opt-in для реального анализа через Claude Code.
+- `--runtime headless` — opt-in для реального анализа через выбранный provider.
+- `--runtime-provider` поддерживает `claude-code` (default) и `qwen-code`.
+- precedence выбора provider: CLI `--runtime-provider` > `ACP_RUNTIME_PROVIDER` > `claude-code`.
+- command env:
+  - `ACP_CLAUDE_CMD` (default `claude-code`)
+  - `ACP_QWEN_CMD` (default `qwen`)
+- в `--runtime fake` provider проходит валидацию, но фактически не используется runner’ом.
 
 ### 7) Поднимите dev environment
 
@@ -252,7 +258,7 @@ Repo CI по умолчанию живёт в GitHub Actions:
 - **Agent topology**: domain analysts, architect aggregator, system analyst Q&A + baseline bundle skills/prompts
 - **UI**: guided workspace setup + baseline editors для `charter/*` и `skills/*`, запуск pipeline, просмотр результатов
 - **Orchestrator (Go)**: шаги pipeline, context/prompt packs, вызов runtime, local execution и CI/CD trigger execution
-- **Claude Code runner**: headless jobs анализа
+- **Runtime providers**: headless jobs анализа через `claude-code|qwen-code`
 - **Model store**: `model/` в формате entity-per-file, включая внешние системы и datastores
 - **Reports/Proposals**: `reports/` (включая `agent-outputs/` и `changelog/`) и `proposals/`
 
@@ -264,7 +270,7 @@ flowchart LR
   SCM[GitHub/GitLab hooks or pipeline button] --> ORCH
   UI --> ORCH[Orchestrator (Go)]
   ORCH --> WS[arch-workspace (git)]
-  ORCH --> CC[Claude Code (headless)]
+  ORCH --> CC[Headless Runtime Provider (claude-code or qwen-code)]
   ORCH --> SRC[Repo sources from workspace.yaml]
   SRC --> REPOS[Local checkout paths]
   SRC --> GITLAB[GitHub/GitLab git_url via local git]
@@ -392,7 +398,7 @@ UI в MVP должен покрывать минимум:
 ## Стратегия тестирования (baseline)
 
 - source of truth: `docs/TESTING_STRATEGY.md`
-- required CI использует synthetic fixtures, recorded runner outputs и не зависит от live Claude Code / live network
+- required CI использует synthetic fixtures, recorded runner outputs и не зависит от live headless providers / live network
 - baseline layers:
   - contract tests для `workspace.yaml` и `TaskResult`
   - semantic validator tests
@@ -453,6 +459,6 @@ Run-specific поверхность (исключена из strict golden compa
 1) финализировать baseline model + TaskResult contract
 2) реализовать baseline bundle agents/skills/prompts
 3) реализовать CI/CD trigger surface: hooks/manual pipeline button/job + batch mode
-4) реализовать orchestrator + Claude Code adapter
+4) реализовать orchestrator + runtime provider adapters (`claude-code`, `qwen-code`)
 5) реализовать model store (entity-per-file) и extraction coverage for integrations/datastores/CI-CD
 6) реализовать UI (workspace setup, charter/skills/run/results)

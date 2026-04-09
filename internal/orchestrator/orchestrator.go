@@ -19,6 +19,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	"github.com/GrinRus/ProvenArch/internal/model"
 	"github.com/GrinRus/ProvenArch/internal/reports"
+	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/claudecode"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
@@ -48,7 +49,7 @@ const (
 )
 
 type Service struct {
-	runner claudecode.Runner
+	runner acpruntime.Runner
 	clock  func() time.Time
 
 	mu             sync.RWMutex
@@ -123,7 +124,7 @@ type runHistoryItem struct {
 
 type Option func(*Service)
 
-func WithRunner(runner claudecode.Runner) Option {
+func WithRunner(runner acpruntime.Runner) Option {
 	return func(service *Service) {
 		service.runner = runner
 	}
@@ -198,7 +199,7 @@ func (s *Service) Run(ctx context.Context, request RunRequest) (RunInfo, []Artif
 }
 
 func (s *Service) ValidateRuntime(ctx context.Context) error {
-	if checker, ok := s.runner.(interface{ Preflight(context.Context) error }); ok {
+	if checker, ok := s.runner.(acpruntime.PreflightRunner); ok {
 		return checker.Preflight(ctx)
 	}
 	return nil
@@ -737,7 +738,7 @@ func historyItemToRunRecord(item runHistoryItem) (runRecord, bool) {
 
 func classifyExecutionError(err error) (code string, message string) {
 	message = strings.TrimSpace(err.Error())
-	if runtimeCode, runtimeMessage, ok := claudecode.ClassifyError(err); ok {
+	if runtimeCode, runtimeMessage, ok := acpruntime.ClassifyError(err); ok {
 		if strings.TrimSpace(runtimeMessage) != "" {
 			message = runtimeMessage
 		}
@@ -751,7 +752,7 @@ type pipelineExecution struct {
 	pipeline           Pipeline
 	startedAt          time.Time
 	workspace          workspace.Root
-	runner             claudecode.Runner
+	runner             acpruntime.Runner
 	store              model.Store
 	compiler           reports.Compiler
 	clock              func() time.Time
@@ -1041,7 +1042,7 @@ func (e *pipelineExecution) executeRuntimeTask(
 	if taskSuffix != "" {
 		taskID += "-" + taskSuffix
 	}
-	task := claudecode.Task{
+	task := acpruntime.Task{
 		TaskID:       taskID,
 		RunID:        e.runID,
 		StepID:       stepID,

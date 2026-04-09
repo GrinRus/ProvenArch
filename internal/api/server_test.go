@@ -17,7 +17,9 @@ import (
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/orchestrator"
+	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/claudecode"
+	"github.com/GrinRus/ProvenArch/internal/runtime/qwencode"
 	"github.com/GrinRus/ProvenArch/internal/testutil"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
@@ -260,6 +262,82 @@ func TestPipelineEndpoints(t *testing.T) {
 	runStatus := waitForRunTerminalStatus(t, httpServer.URL, runID, 8*time.Second)
 	if runStatus.Status != string(orchestrator.RunStatusSucceeded) {
 		t.Fatalf("expected async run success, got status=%q error_code=%q", runStatus.Status, runStatus.ErrorCode)
+	}
+}
+
+func TestPipelineEndpointsSucceedWithHeadlessClaudeRunnerStub(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServerWithRunner(t, claudecode.HeadlessRunner{
+		Command: writeHeadlessRunnerStub(t, "claude-code"),
+	})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Post(httpServer.URL+"/api/pipeline/init", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/init: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", response.StatusCode)
+	}
+
+	var started struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&started); err != nil {
+		t.Fatalf("decode start payload: %v", err)
+	}
+	if strings.TrimSpace(started.RunID) == "" {
+		t.Fatalf("expected non-empty run_id")
+	}
+
+	runStatus := waitForRunTerminalStatus(t, httpServer.URL, started.RunID, 8*time.Second)
+	if runStatus.Status != string(orchestrator.RunStatusSucceeded) {
+		t.Fatalf("expected succeeded status, got %q", runStatus.Status)
+	}
+	if runStatus.ErrorCode != "" {
+		t.Fatalf("expected empty error_code, got %q", runStatus.ErrorCode)
+	}
+}
+
+func TestPipelineEndpointsSucceedWithHeadlessQwenRunnerStub(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServerWithRunner(t, qwencode.HeadlessRunner{
+		Command: writeHeadlessRunnerStub(t, "qwen-code"),
+	})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Post(httpServer.URL+"/api/pipeline/init", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/init: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", response.StatusCode)
+	}
+
+	var started struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&started); err != nil {
+		t.Fatalf("decode start payload: %v", err)
+	}
+	if strings.TrimSpace(started.RunID) == "" {
+		t.Fatalf("expected non-empty run_id")
+	}
+
+	runStatus := waitForRunTerminalStatus(t, httpServer.URL, started.RunID, 8*time.Second)
+	if runStatus.Status != string(orchestrator.RunStatusSucceeded) {
+		t.Fatalf("expected succeeded status, got %q", runStatus.Status)
+	}
+	if runStatus.ErrorCode != "" {
+		t.Fatalf("expected empty error_code, got %q", runStatus.ErrorCode)
 	}
 }
 
@@ -992,8 +1070,9 @@ repos:
 func TestMapTypedRunnerAPIErrorDoesNotExposeRunnerParseFailedAtStartTime(t *testing.T) {
 	t.Parallel()
 
-	err := claudecode.WrapRunnerError(
-		claudecode.ErrorCodeRunnerParseFailed,
+	err := acpruntime.WrapRunnerError(
+		acpruntime.ProviderClaudeCode,
+		acpruntime.ErrorCodeRunnerParseFailed,
 		"runner returned invalid taskresult in test",
 		errors.New("json decode error"),
 	)
@@ -1028,6 +1107,67 @@ func newTestServerFromManifest(t *testing.T, manifest string) *Server {
 	}
 
 	return NewServer(ws, orchestrator.NewService(orchestrator.WithHistoryWorkspace(ws)))
+}
+
+func newTestServerWithRunner(t *testing.T, runner acpruntime.Runner) *Server {
+	t.Helper()
+
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "repos", "payments-service")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("create repo path: %v", err)
+	}
+	manifest := `version: 1
+repos:
+  - name: payments-service
+    path: ` + repoPath + `
+`
+	root = writeManifestRootWithRoot(t, root, manifest)
+	ws, err := workspace.Open(root)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+
+	service := orchestrator.NewService(
+		orchestrator.WithHistoryWorkspace(ws),
+		orchestrator.WithRunner(runner),
+	)
+	return NewServer(ws, service)
+}
+
+func writeHeadlessRunnerStub(t *testing.T, runtimeName string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "headless-runner-stub.sh")
+	script := `#!/usr/bin/env bash
+TASK_PAYLOAD="$(cat)"
+TASK_PAYLOAD="$TASK_PAYLOAD" python3 - <<'PY'
+import json
+import os
+
+raw = os.environ.get("TASK_PAYLOAD", "").strip()
+task = json.loads(raw) if raw else {}
+payload = {
+    "meta": {
+        "task_id": task.get("task_id", "task"),
+        "step_id": task.get("step_id", "init.step1.collect"),
+        "run_id": task.get("run_id", ""),
+        "runtime": {
+            "name": "` + runtimeName + `",
+            "version": "stub"
+        },
+        "started_at": "2026-04-03T12:00:00Z"
+    },
+    "summary": "stub taskresult",
+    "changeset": []
+}
+print(json.dumps(payload))
+PY
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write runner stub: %v", err)
+	}
+	return path
 }
 
 func writeManifestRoot(t *testing.T, manifest string) string {
@@ -1092,17 +1232,19 @@ func waitForRunTerminalStatus(t *testing.T, serverURL string, runID string, time
 
 type unavailableRunner struct{}
 
-func (unavailableRunner) Run(context.Context, claudecode.Task) (claudecode.Result, error) {
-	return claudecode.Result{}, claudecode.WrapRunnerError(
-		claudecode.ErrorCodeRunnerUnavailable,
+func (unavailableRunner) Run(context.Context, acpruntime.Task) (acpruntime.Result, error) {
+	return acpruntime.Result{}, acpruntime.WrapRunnerError(
+		acpruntime.ProviderClaudeCode,
+		acpruntime.ErrorCodeRunnerUnavailable,
 		"headless runner command is unavailable in test",
 		nil,
 	)
 }
 
 func (unavailableRunner) Preflight(context.Context) error {
-	return claudecode.WrapRunnerError(
-		claudecode.ErrorCodeRunnerUnavailable,
+	return acpruntime.WrapRunnerError(
+		acpruntime.ProviderClaudeCode,
+		acpruntime.ErrorCodeRunnerUnavailable,
 		"headless runner command is unavailable in test",
 		nil,
 	)
@@ -1110,9 +1252,10 @@ func (unavailableRunner) Preflight(context.Context) error {
 
 type parseFailureRunner struct{}
 
-func (parseFailureRunner) Run(context.Context, claudecode.Task) (claudecode.Result, error) {
-	return claudecode.Result{}, claudecode.WrapRunnerError(
-		claudecode.ErrorCodeRunnerParseFailed,
+func (parseFailureRunner) Run(context.Context, acpruntime.Task) (acpruntime.Result, error) {
+	return acpruntime.Result{}, acpruntime.WrapRunnerError(
+		acpruntime.ProviderClaudeCode,
+		acpruntime.ErrorCodeRunnerParseFailed,
 		"runner returned invalid taskresult in test",
 		nil,
 	)

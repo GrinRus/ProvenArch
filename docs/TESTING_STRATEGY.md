@@ -5,10 +5,10 @@
 ## 1) Цели и принципы
 
 - Required CI должен проходить локально и в CI без live network dependencies.
-- Required CI не зависит от live Claude Code, GitHub, GitLab или реальных пользовательских репозиториев.
+- Required CI не зависит от live headless providers (`claude-code`/`qwen-code`), GitHub, GitLab или реальных пользовательских репозиториев.
 - Любые изменения schema/spec/examples должны сопровождаться обновлением fixtures и golden outputs в том же PR.
 - Synthetic fixtures считаются baseline regression surface.
-- Live Claude Code проверяется только optional smoke на trusted machine/runner и не блокирует merge.
+- Live headless providers проверяются только optional smoke на trusted machine/runner и не блокируют merge.
 
 ## 2) Тестовая пирамида MVP
 
@@ -78,7 +78,7 @@ Baseline scenario set:
 
 ## 5) Обязательные internal test seams
 
-- fake/recorded runner вместо live Claude Code в required tests
+- fake/recorded runner вместо live headless providers в required tests
 - injectable clock/run-id provider для deterministic golden outputs
 - injectable git executor/repo resolver для local test doubles
 - workspace sandbox root для integration tests без записи вне test workspace
@@ -177,7 +177,7 @@ Implemented additional jobs:
 
 - любой required CI run проходит без live network dependencies
 - любое изменение schema/spec/examples требует update fixtures/golden в том же PR
-- live Claude Code smoke не блокирует merge; для обязательного CI используется только `contracts`, `backend`, `ui`, `golden`, `smoke-cli`, `smoke-api`, `ui-smoke`
+- live headless provider smoke не блокирует merge; для обязательного CI используется только `contracts`, `backend`, `ui`, `golden`, `smoke-cli`, `smoke-api`, `ui-smoke`
 - scenario fixtures и golden outputs считаются канонической regression surface до появления production-scale test corpus
 - optional readable golden export доступен для review-diff:
   - `ACP_EXPORT_SCENARIO_GOLDEN=1 go test ./internal/orchestrator -run TestScenarioFixturesDeterministicInitPipeline -count=1`

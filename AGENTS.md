@@ -4,7 +4,7 @@ Codex читает `AGENTS.md` перед началом работы. Держ�
 
 ## Mission (MVP)
 Собрать ACP как **local-first** инструмент:
-- runtime анализа: **Claude Code headless** (только в MVP)
+- runtime анализа: **headless multi-provider** (`claude-code` default, `qwen-code` optional) + deterministic `fake` baseline
 - стек реализации: **Go backend/orchestrator + React UI**
 - outputs: Git‑версионируемые файлы workspace (entity-per-file модель)
 
@@ -36,6 +36,6 @@ Codex читает `AGENTS.md` перед началом работы. Держ�
 - Required CI проектировать без live network dependencies; live runner checks оставлять optional
 
 ## Не делать
-- Не добавлять другие runtimes в MVP (только Claude Code)
+- Не расширять список headless providers в MVP beyond `claude-code` и `qwen-code` без отдельного slice
 - Не “выдумывать” форматы данных/модели
 - Не писать в пользовательские репозитории; писать только в workspace

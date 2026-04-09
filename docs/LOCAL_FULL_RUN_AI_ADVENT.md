@@ -29,7 +29,9 @@
 - `PROVENARCH_ROOT` (default: текущий repo ProvenArch)
 - `TARGET_REPO` (required: path to the repository used for full-run)
 - `TMP_ROOT` (default: auto `mktemp -d -t provenarch-ai-advent.XXXXXX`)
-- `ACP_CLAUDE_CMD` (headless runner command; default `claude-code`)
+- `ACP_RUNTIME_PROVIDER` (headless provider: `claude-code` default или `qwen-code`)
+- `ACP_CLAUDE_CMD` (команда для provider `claude-code`; default `claude-code`)
+- `ACP_QWEN_CMD` (команда для provider `qwen-code`; default `qwen`)
 - `KEEP_TMP` (`0/1`, default `0`)
 - `ITERATIONS` (default `1`)
 - `RUN_QUALITY_GATES` (`0/1`, default `1`)
@@ -41,13 +43,16 @@
 ```bash
 cd /path/to/ProvenArch
 
-# Вариант 1: с реальным headless runner (claude-code в PATH)
+# Вариант 1: default headless provider (claude-code в PATH)
 TARGET_REPO=/path/to/target-repo ./scripts/full-run-ai-advent.sh
 
-# Вариант 2: явно задать headless command
-TARGET_REPO=/path/to/target-repo ACP_CLAUDE_CMD=/abs/path/to/headless-runner ./scripts/full-run-ai-advent.sh
+# Вариант 2: явно задать provider=qwen-code
+TARGET_REPO=/path/to/target-repo ACP_RUNTIME_PROVIDER=qwen-code ./scripts/full-run-ai-advent.sh
 
-# Вариант 3: оставить tmp workspace для ручного анализа
+# Вариант 3: явно задать команду для выбранного provider
+TARGET_REPO=/path/to/target-repo ACP_RUNTIME_PROVIDER=qwen-code ACP_QWEN_CMD=/abs/path/to/qwen ./scripts/full-run-ai-advent.sh
+
+# Вариант 4: оставить tmp workspace для ручного анализа
 TARGET_REPO=/path/to/target-repo KEEP_TMP=1 ./scripts/full-run-ai-advent.sh
 ```
 
@@ -84,8 +89,8 @@ PORT=18080
 # Runtime cycle: fake + headless
 ./bin/acp run --workspace "$WORKSPACE" --pipeline init --runtime fake --non-interactive
 ./bin/acp run --workspace "$WORKSPACE" --pipeline refresh --runtime fake --non-interactive
-./bin/acp run --workspace "$WORKSPACE" --pipeline init --runtime headless --non-interactive
-./bin/acp run --workspace "$WORKSPACE" --pipeline refresh --runtime headless --non-interactive
+./bin/acp run --workspace "$WORKSPACE" --pipeline init --runtime headless --runtime-provider claude-code --non-interactive
+./bin/acp run --workspace "$WORKSPACE" --pipeline refresh --runtime headless --runtime-provider claude-code --non-interactive
 ```
 
 Ключевые артефакты после прогона:
@@ -147,7 +152,9 @@ PORT=18080
 ## 7) Диагностика типовых проблем
 
 - Ошибка `headless runtime command ... is unavailable`:
-  - установить `claude-code`, либо задать `ACP_CLAUDE_CMD=/abs/path/to/runner`.
+  - проверить `ACP_RUNTIME_PROVIDER`;
+  - для `claude-code`: установить `claude-code` или задать `ACP_CLAUDE_CMD=/abs/path/to/runner`;
+  - для `qwen-code`: установить `qwen` или задать `ACP_QWEN_CMD=/abs/path/to/runner`.
 - Ошибки bootstrap (`workspace.yaml/.git/skills/subagents.yaml` не созданы):
   - проверить вывод `logs/init-workspace.log`.
 - API run timeout:

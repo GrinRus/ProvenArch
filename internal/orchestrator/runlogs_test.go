@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GrinRus/ProvenArch/internal/runtime/claudecode"
+	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
 
 func TestRunWritesQualitySummaryAndQueryableLogs(t *testing.T) {
@@ -234,7 +234,7 @@ func TestCleanupRunLogsByTTLAndMaxRuns(t *testing.T) {
 
 type syntheticWarningRunner struct{}
 
-func (syntheticWarningRunner) Run(_ context.Context, task claudecode.Task) (claudecode.Result, error) {
+func (syntheticWarningRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
 	payload := map[string]any{
 		"meta": map[string]any{
 			"task_id":    task.TaskID,
@@ -249,9 +249,9 @@ func (syntheticWarningRunner) Run(_ context.Context, task claudecode.Task) (clau
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return claudecode.Result{}, err
+		return acpruntime.Result{}, err
 	}
-	return claudecode.Result{RawJSON: raw}, nil
+	return acpruntime.Result{RawJSON: raw}, nil
 }
 
 func (syntheticWarningRunner) Preflight(context.Context) error { return nil }

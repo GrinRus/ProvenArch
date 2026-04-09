@@ -6,7 +6,7 @@
 ## Scope (MVP)
 - Local-first: всё работает на машине разработчика
 - Тот же entrypoint поддерживает non-interactive batch execution в GitHub/GitLab CI jobs
-- Runtime (analysis): **Claude Code headless** (только в MVP)
+- Runtime (analysis): **headless multi-provider** (`claude-code` default, `qwen-code` optional) + deterministic `fake` baseline
 - Реализация продукта: **Go backend/orchestrator + embedded React UI**
 - Единая workspace-конвенция MVP: central `arch-workspace` git-репозиторий (Variant 2)
 - Agent operating model MVP: идеи `1,2,3,5,7` (domain-first cards/agents/changelog/Q&A)
@@ -18,13 +18,14 @@
    - `init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)` создаёт/обновляет `workspace.yaml`, bootstrap-ит fixed layout/baseline bundle и выполняет dry validation для первого старта
    - Раздаёт UI (embedded static assets из `ui/dist`)
    - Экспортирует API под `/api/*`
-   - `serve --workspace <abs-path> [--runtime fake|headless] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)]` поднимает single-workspace-per-process service
+   - `serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)]` поднимает single-workspace-per-process service
    - `serve --auto-init` bootstrap-ит workspace manifest/layout при отсутствии `workspace.yaml`
    - bootstrap (`init-workspace`/`serve --auto-init`) автоматически делает `git init` для workspace root при отсутствии `.git`
    - startup для `serve` lenient: без блокирующего repo preflight; readiness diagnostics доступны через `/api/workspace/validate`
    - Поддерживает batch/non-interactive режим для CI jobs
-   - `run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--non-interactive]`
+   - `run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--non-interactive]`
    - runtime selector process-scoped: `fake` default для required CI, `headless` opt-in
+   - provider selector process-scoped: `--runtime-provider` > `ACP_RUNTIME_PROVIDER` > `claude-code`
    - Используется как локально, так и из SCM-triggered pipeline jobs/manual buttons
    - Internal API trigger остаётся optional trusted-mode capability, а не обязательной CI/CD поверхностью
    - Раздаёт embedded UI shell и API в одном процессе `acp serve`
@@ -76,11 +77,13 @@
    - System Analyst Q&A Agent (on-demand ответы по артефактам workspace, internal capability + `acp qa`)
    - Базовые skill/prompt bundles поставляются вместе с продуктом и versioned в workspace
 
-5) **Claude Code adapter (`internal/runtime/claudecode`)** *(implemented baseline)*
-   - headless запуск процесса
-   - возвращает TaskResult JSON
-   - анализирует сервисную архитектуру, внешние интеграции, datastores и CI/CD evidence
-   - в MVP опирается на LLM runner + prompt packs для arbitrary stacks, а не на фиксированный whitelist parser implementations
+5) **Runtime providers (`internal/runtime/*`)** *(implemented baseline)*
+   - headless providers: `claude-code` (`internal/runtime/claudecode`) и `qwen-code` (`internal/runtime/qwencode`)
+   - общий runtime layer + provider factory: `internal/runtime/runtime.go`, `internal/runtime/providers/factory.go`
+   - каждый provider возвращает TaskResult JSON; parse failures классифицируются как `runner_parse_failed`
+   - command overrides:
+     - `ACP_CLAUDE_CMD` (default `claude-code`)
+     - `ACP_QWEN_CMD` (default `qwen`)
 
 6) **Workspace (`internal/workspace`)** *(implemented baseline)*
    - реализует/валидирует структуру central `arch-workspace` (Variant 2)

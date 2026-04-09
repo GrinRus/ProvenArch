@@ -14,75 +14,13 @@ import (
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
+	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 )
 
 var (
 	ErrRunnerUnavailable = errors.New("claude-code runner is unavailable")
 )
-
-type ErrorCode string
-
-const (
-	ErrorCodeRunnerUnavailable ErrorCode = "runner_unavailable"
-	ErrorCodeRunnerParseFailed ErrorCode = "runner_parse_failed"
-)
-
-type RunnerError struct {
-	Code    ErrorCode
-	Message string
-	Cause   error
-}
-
-func (e RunnerError) Error() string {
-	if strings.TrimSpace(e.Message) != "" {
-		return e.Message
-	}
-	if e.Cause != nil {
-		return e.Cause.Error()
-	}
-	return string(e.Code)
-}
-
-func (e RunnerError) Unwrap() error {
-	return e.Cause
-}
-
-func WrapRunnerError(code ErrorCode, message string, cause error) error {
-	return RunnerError{
-		Code:    code,
-		Message: strings.TrimSpace(message),
-		Cause:   cause,
-	}
-}
-
-func ClassifyError(err error) (code string, message string, ok bool) {
-	var runnerErr RunnerError
-	if !errors.As(err, &runnerErr) {
-		return "", "", false
-	}
-	return string(runnerErr.Code), runnerErr.Error(), true
-}
-
-type Task struct {
-	TaskID       string
-	RunID        string
-	StepID       string
-	Workspace    string
-	RepoScopes   []string
-	StartedAtUTC time.Time
-}
-
-type Result struct {
-	TaskResult contracts.TaskResult
-	RawJSON    []byte
-	Stdout     string
-	Stderr     string
-}
-
-type Runner interface {
-	Run(context.Context, Task) (Result, error)
-}
 
 type HeadlessRunner struct {
 	Command string
@@ -103,24 +41,25 @@ func (r HeadlessRunner) commandName() string {
 func (r HeadlessRunner) Preflight(_ context.Context) error {
 	command := r.commandName()
 	if _, err := exec.LookPath(command); err != nil {
-		return WrapRunnerError(
-			ErrorCodeRunnerUnavailable,
-			fmt.Sprintf("headless runner command %q is unavailable: %v", command, err),
+		return acpruntime.WrapRunnerError(
+			acpruntime.ProviderClaudeCode,
+			acpruntime.ErrorCodeRunnerUnavailable,
+			fmt.Sprintf("headless provider %q command %q is unavailable: %v", acpruntime.ProviderClaudeCode, command, err),
 			err,
 		)
 	}
 	return nil
 }
 
-func (r HeadlessRunner) Run(ctx context.Context, task Task) (Result, error) {
+func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
 	if err := r.Preflight(ctx); err != nil {
-		return Result{}, err
+		return acpruntime.Result{}, err
 	}
 	command := r.commandName()
 
 	taskPayload, err := json.Marshal(task)
 	if err != nil {
-		return Result{}, fmt.Errorf("marshal runner task: %w", err)
+		return acpruntime.Result{}, fmt.Errorf("marshal runner task: %w", err)
 	}
 
 	cmd := exec.CommandContext(ctx, command, r.Args...)
@@ -136,8 +75,9 @@ func (r HeadlessRunner) Run(ctx context.Context, task Task) (Result, error) {
 		if errText == "" {
 			errText = err.Error()
 		}
-		return Result{}, WrapRunnerError(
-			ErrorCodeRunnerUnavailable,
+		return acpruntime.Result{}, acpruntime.WrapRunnerError(
+			acpruntime.ProviderClaudeCode,
+			acpruntime.ErrorCodeRunnerUnavailable,
 			fmt.Sprintf("%v: %s", ErrRunnerUnavailable, errText),
 			err,
 		)
@@ -146,14 +86,15 @@ func (r HeadlessRunner) Run(ctx context.Context, task Task) (Result, error) {
 	raw := bytes.TrimSpace(stdout.Bytes())
 	taskResult, err := contracts.ParseTaskResult(raw)
 	if err != nil {
-		return Result{}, WrapRunnerError(
-			ErrorCodeRunnerParseFailed,
-			fmt.Sprintf("headless runner returned invalid taskresult: %v", err),
+		return acpruntime.Result{}, acpruntime.WrapRunnerError(
+			acpruntime.ProviderClaudeCode,
+			acpruntime.ErrorCodeRunnerParseFailed,
+			fmt.Sprintf("headless provider %q returned invalid taskresult: %v", acpruntime.ProviderClaudeCode, err),
 			err,
 		)
 	}
 
-	return Result{
+	return acpruntime.Result{
 		TaskResult: taskResult,
 		RawJSON:    raw,
 		Stdout:     stdout.String(),
@@ -163,7 +104,7 @@ func (r HeadlessRunner) Run(ctx context.Context, task Task) (Result, error) {
 
 type FakeRunner struct{}
 
-func (FakeRunner) Run(_ context.Context, task Task) (Result, error) {
+func (FakeRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
 	repoScopes := append([]string(nil), task.RepoScopes...)
 	sort.Strings(repoScopes)
 
@@ -207,7 +148,7 @@ func (FakeRunner) Run(_ context.Context, task Task) (Result, error) {
 		}
 		return marshalResult(result)
 	default:
-		return Result{}, fmt.Errorf("fake runner does not support step %q", task.StepID)
+		return acpruntime.Result{}, fmt.Errorf("fake runner does not support step %q", task.StepID)
 	}
 }
 
@@ -215,31 +156,31 @@ type RecordedRunner struct {
 	ByStep map[string]string
 }
 
-func (r RecordedRunner) Run(_ context.Context, task Task) (Result, error) {
+func (r RecordedRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
 	path, ok := r.ByStep[task.StepID]
 	if !ok {
-		return Result{}, fmt.Errorf("recorded taskresult is missing for step %q", task.StepID)
+		return acpruntime.Result{}, fmt.Errorf("recorded taskresult is missing for step %q", task.StepID)
 	}
 	content, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
-		return Result{}, fmt.Errorf("read recorded taskresult: %w", err)
+		return acpruntime.Result{}, fmt.Errorf("read recorded taskresult: %w", err)
 	}
 	taskResult, err := contracts.ParseTaskResult(content)
 	if err != nil {
-		return Result{}, fmt.Errorf("parse recorded taskresult: %w", err)
+		return acpruntime.Result{}, fmt.Errorf("parse recorded taskresult: %w", err)
 	}
-	return Result{
+	return acpruntime.Result{
 		TaskResult: taskResult,
 		RawJSON:    bytes.TrimSpace(content),
 	}, nil
 }
 
-func marshalResult(result contracts.TaskResult) (Result, error) {
+func marshalResult(result contracts.TaskResult) (acpruntime.Result, error) {
 	raw, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
-		return Result{}, fmt.Errorf("marshal fake taskresult: %w", err)
+		return acpruntime.Result{}, fmt.Errorf("marshal fake taskresult: %w", err)
 	}
-	return Result{
+	return acpruntime.Result{
 		TaskResult: result,
 		RawJSON:    raw,
 	}, nil

@@ -1,0 +1,130 @@
+package runtime
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/GrinRus/ProvenArch/internal/contracts"
+)
+
+const RuntimeModeFake = "fake"
+const RuntimeModeHeadless = "headless"
+
+// Provider identifies the live runtime implementation used for headless runs.
+type Provider string
+
+const (
+	ProviderClaudeCode Provider = "claude-code"
+	ProviderQwenCode   Provider = "qwen-code"
+)
+
+const RuntimeProviderEnv = "ACP_RUNTIME_PROVIDER"
+
+func ParseProvider(value string) (Provider, error) {
+	normalized := strings.TrimSpace(strings.ToLower(value))
+	switch normalized {
+	case string(ProviderClaudeCode):
+		return ProviderClaudeCode, nil
+	case string(ProviderQwenCode):
+		return ProviderQwenCode, nil
+	default:
+		return "", fmt.Errorf("unsupported runtime provider %q (allowed: %s, %s)", value, ProviderClaudeCode, ProviderQwenCode)
+	}
+}
+
+func ResolveProvider(cliValue string) (Provider, error) {
+	value := strings.TrimSpace(cliValue)
+	if value == "" {
+		value = strings.TrimSpace(os.Getenv(RuntimeProviderEnv))
+	}
+	if value == "" {
+		return ProviderClaudeCode, nil
+	}
+	return ParseProvider(value)
+}
+
+func NormalizeMode(mode string) (string, error) {
+	normalized := strings.TrimSpace(strings.ToLower(mode))
+	if normalized == "" {
+		normalized = RuntimeModeFake
+	}
+	switch normalized {
+	case RuntimeModeFake, RuntimeModeHeadless:
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("unsupported runtime %q (allowed: %s, %s)", mode, RuntimeModeFake, RuntimeModeHeadless)
+	}
+}
+
+type ErrorCode string
+
+const (
+	ErrorCodeRunnerUnavailable ErrorCode = "runner_unavailable"
+	ErrorCodeRunnerParseFailed ErrorCode = "runner_parse_failed"
+)
+
+type RunnerError struct {
+	Provider Provider
+	Code     ErrorCode
+	Message  string
+	Cause    error
+}
+
+func (e RunnerError) Error() string {
+	if strings.TrimSpace(e.Message) != "" {
+		return e.Message
+	}
+	if e.Cause != nil {
+		return e.Cause.Error()
+	}
+	return string(e.Code)
+}
+
+func (e RunnerError) Unwrap() error {
+	return e.Cause
+}
+
+func WrapRunnerError(provider Provider, code ErrorCode, message string, cause error) error {
+	return RunnerError{
+		Provider: provider,
+		Code:     code,
+		Message:  strings.TrimSpace(message),
+		Cause:    cause,
+	}
+}
+
+func ClassifyError(err error) (code string, message string, ok bool) {
+	var runnerErr RunnerError
+	if !errors.As(err, &runnerErr) {
+		return "", "", false
+	}
+	return string(runnerErr.Code), runnerErr.Error(), true
+}
+
+type Task struct {
+	TaskID       string
+	RunID        string
+	StepID       string
+	Workspace    string
+	RepoScopes   []string
+	StartedAtUTC time.Time
+}
+
+type Result struct {
+	TaskResult contracts.TaskResult
+	RawJSON    []byte
+	Stdout     string
+	Stderr     string
+}
+
+type Runner interface {
+	Run(context.Context, Task) (Result, error)
+}
+
+type PreflightRunner interface {
+	Preflight(context.Context) error
+}

@@ -7,11 +7,11 @@
 - **Workspace**: единый central git-репозиторий `arch-workspace/` (каноническая MVP-конвенция, Variant 2) с `workspace.yaml`, `charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/`.
 - **Workspace manifest**: `workspace.yaml`, валидируемый по `schemas/workspace.schema.json` и описанный в `docs/spec/WORKSPACE_SPEC.md`.
 - **Orchestrator**: управляет шагами, готовит PromptPack/ContextPack, вызывает runtime, валидирует TaskResult.
-- **Runtime (MVP)**: Claude Code headless (opt-in) + deterministic fake harness (default for required CI/testing).
+- **Runtime (MVP)**: headless multi-provider (`claude-code` default, `qwen-code` optional) + deterministic fake harness (default for required CI/testing).
 - **TaskResult**: структурированный JSON ответа runtime-шага (`schemas/taskresult.schema.json`).
 
-> Несмотря на schema-гибкость, MVP policy фиксирует production/runtime target как `claude-code`, а MVP changeset contract считаем замороженным без `write_file`.
-> CLI/process runtime mode задаётся флагом `--runtime fake|headless` (`fake` default, `headless` opt-in).
+> MVP policy фиксирует process-scoped runtime provider contract: `claude-code` (default) или `qwen-code` для headless runs; changeset contract остаётся замороженным без `write_file`.
+> CLI/process runtime mode задаётся флагом `--runtime fake|headless` (`fake` default, `headless` opt-in), provider — `--runtime-provider claude-code|qwen-code` (`claude-code` default, env fallback `ACP_RUNTIME_PROVIDER`).
 
 ## Repo source manifest (MVP)
 
@@ -190,7 +190,7 @@ Inputs:
 - `skills/*`
 
 Runtime focuses on:
-- arbitrary stacks через Claude Code + baseline skill/prompt bundle, без фиксированного whitelist parser implementations в MVP
+- arbitrary stacks через выбранный headless provider (`claude-code|qwen-code`) + baseline skill/prompt bundle, без фиксированного whitelist parser implementations в MVP
 - service topology и entrypoints
 - interfaces (HTTP/gRPC/events)
 - external systems/integrations

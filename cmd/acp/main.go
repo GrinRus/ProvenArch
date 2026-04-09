@@ -17,7 +17,8 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/api"
 	"github.com/GrinRus/ProvenArch/internal/orchestrator"
 	"github.com/GrinRus/ProvenArch/internal/qa"
-	"github.com/GrinRus/ProvenArch/internal/runtime/claudecode"
+	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtime/providers"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 	"gopkg.in/yaml.v3"
 )
@@ -61,6 +62,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	workspacePath := fs.String("workspace", "", "absolute path to arch-workspace")
 	listenAddress := fs.String("listen", "127.0.0.1:8080", "listen address for local API server")
 	runtimeMode := fs.String("runtime", "fake", "runtime mode: fake or headless")
+	runtimeProvider := fs.String("runtime-provider", "", "runtime provider for headless mode: claude-code or qwen-code (fallback: ACP_RUNTIME_PROVIDER)")
 	runLogsTTLHrs := fs.Int("run-logs-ttl-hours", envInt("ACP_RUN_LOGS_TTL_HOURS", 168), "run logs retention TTL in hours")
 	runLogsMaxRuns := fs.Int("run-logs-max-runs", envInt("ACP_RUN_LOGS_MAX_RUNS", 200), "maximum number of run log files to retain")
 	dryRun := fs.Bool("dry-run", false, "validate workspace and server wiring without starting listener")
@@ -72,7 +74,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	reposFile := fs.String("repos-file", "", "YAML file with repos[] entries for --auto-init")
 	docsImportsPath := fs.String("docs-imports-path", "./docs/imports", "docs imports path in workspace.yaml for --auto-init")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: acp serve --workspace <abs-path> [--runtime fake|headless] [--listen 127.0.0.1:8080] [--dry-run] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]")
+		fmt.Fprintln(stderr, "Usage: acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--listen 127.0.0.1:8080] [--dry-run] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]")
 		fs.PrintDefaults()
 	}
 
@@ -116,7 +118,18 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		return exitCodeValidation
 	}
 
-	runner, err := buildRunner(*runtimeMode)
+	mode, err := acpruntime.NormalizeMode(*runtimeMode)
+	if err != nil {
+		fmt.Fprintf(stderr, "runtime validation failed: %v\n", err)
+		return exitCodeValidation
+	}
+	provider, err := acpruntime.ResolveProvider(*runtimeProvider)
+	if err != nil {
+		fmt.Fprintf(stderr, "runtime validation failed: %v\n", err)
+		return exitCodeValidation
+	}
+
+	runner, err := buildRunner(mode, provider)
 	if err != nil {
 		fmt.Fprintf(stderr, "runtime validation failed: %v\n", err)
 		return exitCodeValidation
@@ -134,7 +147,11 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	if *dryRun {
 		fmt.Fprintf(stdout, "workspace ready at %s\n", ws.Path)
 		fmt.Fprintf(stdout, "server configured for %s\n", *listenAddress)
-		fmt.Fprintf(stdout, "runtime mode: %s\n", strings.TrimSpace(strings.ToLower(*runtimeMode)))
+		fmt.Fprintf(stdout, "runtime mode: %s\n", mode)
+		fmt.Fprintf(stdout, "runtime provider: %s\n", provider)
+		if mode == acpruntime.RuntimeModeFake {
+			fmt.Fprintln(stdout, "runtime provider note: ignored in fake mode")
+		}
 		return exitCodeOK
 	}
 
@@ -379,11 +396,12 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 	workspacePath := fs.String("workspace", "", "absolute path to arch-workspace")
 	pipelineName := fs.String("pipeline", "", "pipeline to run: init or refresh")
 	runtimeMode := fs.String("runtime", "fake", "runtime mode: fake or headless")
+	runtimeProvider := fs.String("runtime-provider", "", "runtime provider for headless mode: claude-code or qwen-code (fallback: ACP_RUNTIME_PROVIDER)")
 	runLogsTTLHrs := fs.Int("run-logs-ttl-hours", envInt("ACP_RUN_LOGS_TTL_HOURS", 168), "run logs retention TTL in hours")
 	runLogsMaxRuns := fs.Int("run-logs-max-runs", envInt("ACP_RUN_LOGS_MAX_RUNS", 200), "maximum number of run log files to retain")
 	nonInteractive := fs.Bool("non-interactive", false, "disable interactive prompts")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--non-interactive]")
+		fmt.Fprintln(stderr, "Usage: acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--non-interactive]")
 		fs.PrintDefaults()
 	}
 
@@ -428,7 +446,18 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 		return exitCodeValidation
 	}
 
-	runner, err := buildRunner(*runtimeMode)
+	mode, err := acpruntime.NormalizeMode(*runtimeMode)
+	if err != nil {
+		fmt.Fprintf(stderr, "runtime validation failed: %v\n", err)
+		return exitCodeValidation
+	}
+	provider, err := acpruntime.ResolveProvider(*runtimeProvider)
+	if err != nil {
+		fmt.Fprintf(stderr, "runtime validation failed: %v\n", err)
+		return exitCodeValidation
+	}
+
+	runner, err := buildRunner(mode, provider)
 	if err != nil {
 		fmt.Fprintf(stderr, "runtime validation failed: %v\n", err)
 		return exitCodeValidation
@@ -459,6 +488,11 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "run_id: %s\n", runInfo.RunID)
 	fmt.Fprintf(stdout, "pipeline: %s\n", runInfo.Pipeline)
 	fmt.Fprintf(stdout, "status: %s\n", runInfo.Status)
+	fmt.Fprintf(stdout, "runtime mode: %s\n", mode)
+	fmt.Fprintf(stdout, "runtime provider: %s\n", provider)
+	if mode == acpruntime.RuntimeModeFake {
+		fmt.Fprintln(stdout, "runtime provider note: ignored in fake mode")
+	}
 	fmt.Fprintf(stdout, "artifacts: %d\n", len(artifacts))
 
 	return exitCodeOK
@@ -537,8 +571,8 @@ func printRootUsage(w io.Writer) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>)) | --repos-file <path>)")
-	fmt.Fprintln(w, "  acp serve --workspace <abs-path> [--runtime fake|headless] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>)) | --repos-file <path>)]")
-	fmt.Fprintln(w, "  acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--non-interactive]")
+	fmt.Fprintln(w, "  acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>)) | --repos-file <path>)]")
+	fmt.Fprintln(w, "  acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--non-interactive]")
 	fmt.Fprintln(w, "  acp qa --workspace <abs-path> --question \"<text>\"")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Commands:")
@@ -561,23 +595,12 @@ func printValidationReport(w io.Writer, report workspace.ValidationReport) {
 	}
 }
 
-func buildRunner(runtimeMode string) (claudecode.Runner, error) {
-	mode := strings.TrimSpace(strings.ToLower(runtimeMode))
-	if mode == "" {
-		mode = "fake"
-	}
-	switch mode {
-	case "fake":
-		return claudecode.FakeRunner{}, nil
-	case "headless":
-		return claudecode.HeadlessRunner{}, nil
-	default:
-		return nil, fmt.Errorf("unsupported runtime %q (allowed: fake, headless)", runtimeMode)
-	}
+func buildRunner(runtimeMode string, provider acpruntime.Provider) (acpruntime.Runner, error) {
+	return providers.BuildRunner(runtimeMode, provider)
 }
 
 func printRunnerError(w io.Writer, err error) {
-	if code, message, ok := claudecode.ClassifyError(err); ok {
+	if code, message, ok := acpruntime.ClassifyError(err); ok {
 		fmt.Fprintf(w, "%s: %s\n", code, message)
 		return
 	}

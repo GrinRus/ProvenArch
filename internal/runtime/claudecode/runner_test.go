@@ -5,13 +5,15 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
 
 func TestFakeRunnerCollectStep(t *testing.T) {
 	t.Parallel()
 
 	runner := FakeRunner{}
-	result, err := runner.Run(context.Background(), Task{
+	result, err := runner.Run(context.Background(), acpruntime.Task{
 		TaskID:       "task-1",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
@@ -41,7 +43,7 @@ func TestFakeRunnerFindingsStep(t *testing.T) {
 	t.Parallel()
 
 	runner := FakeRunner{}
-	result, err := runner.Run(context.Background(), Task{
+	result, err := runner.Run(context.Background(), acpruntime.Task{
 		TaskID:       "task-2",
 		RunID:        "run-1",
 		StepID:       "init.step3.findings",
@@ -64,7 +66,7 @@ func TestHeadlessRunnerUnavailableClassifiesAsRunnerUnavailable(t *testing.T) {
 	t.Parallel()
 
 	runner := HeadlessRunner{Command: "definitely-missing-acp-headless-command"}
-	_, err := runner.Run(context.Background(), Task{
+	_, err := runner.Run(context.Background(), acpruntime.Task{
 		TaskID:       "task-1",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
@@ -75,11 +77,11 @@ func TestHeadlessRunnerUnavailableClassifiesAsRunnerUnavailable(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected headless runner unavailable error")
 	}
-	code, message, ok := ClassifyError(err)
+	code, message, ok := acpruntime.ClassifyError(err)
 	if !ok {
 		t.Fatalf("expected classify error to succeed")
 	}
-	if code != string(ErrorCodeRunnerUnavailable) {
+	if code != string(acpruntime.ErrorCodeRunnerUnavailable) {
 		t.Fatalf("unexpected error code %q", code)
 	}
 	if !strings.Contains(message, "is unavailable") {
@@ -97,7 +99,7 @@ func TestHeadlessRunnerInvalidTaskResultClassifiesAsParseFailed(t *testing.T) {
 			"cat >/dev/null; echo '{\"meta\": {\"task_id\": \"bad\"}}'",
 		},
 	}
-	_, err := runner.Run(context.Background(), Task{
+	_, err := runner.Run(context.Background(), acpruntime.Task{
 		TaskID:       "task-2",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
@@ -108,11 +110,11 @@ func TestHeadlessRunnerInvalidTaskResultClassifiesAsParseFailed(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected parse-failed error")
 	}
-	code, message, ok := ClassifyError(err)
+	code, message, ok := acpruntime.ClassifyError(err)
 	if !ok {
 		t.Fatalf("expected classify error to succeed")
 	}
-	if code != string(ErrorCodeRunnerParseFailed) {
+	if code != string(acpruntime.ErrorCodeRunnerParseFailed) {
 		t.Fatalf("unexpected error code %q", code)
 	}
 	if !strings.Contains(message, "invalid taskresult") {
