@@ -122,3 +122,57 @@ func TestHeadlessRunnerParsesTaskResultFromJsonArrayResultMessage(t *testing.T) 
 		t.Fatalf("unexpected step id %q", result.TaskResult.Meta.StepID)
 	}
 }
+
+func TestHeadlessRunnerParsesTaskResultFromQwenAssistantContentEvents(t *testing.T) {
+	t.Parallel()
+
+	runner := HeadlessRunner{
+		Command: "sh",
+		Args: []string{
+			"-c",
+			`printf '%s\n' '[{"type":"system","subtype":"init"},{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"ignored"},{"type":"text","text":"{\"meta\":{\"task_id\":\"task-1\",\"step_id\":\"init.step1.collect\",\"runtime\":{\"name\":\"qwen-code\",\"version\":\"test\"},\"started_at\":\"2026-04-03T12:00:00Z\"},\"summary\":\"ok\",\"changeset\":[]}" }]}}]'`,
+		},
+	}
+
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-1",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    "/tmp/workspace",
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("run qwen event content parser: %v", err)
+	}
+	if result.TaskResult.Meta.Runtime.Name != "qwen-code" {
+		t.Fatalf("unexpected runtime name %q", result.TaskResult.Meta.Runtime.Name)
+	}
+}
+
+func TestHeadlessRunnerParsesTaskResultFromJsonObjectsStream(t *testing.T) {
+	t.Parallel()
+
+	runner := HeadlessRunner{
+		Command: "sh",
+		Args: []string{
+			"-c",
+			`printf '%s\n%s\n' '{"type":"system","message":"ignored"}' '{"type":"result","result":"{\"meta\":{\"task_id\":\"task-1\",\"step_id\":\"init.step1.collect\",\"runtime\":{\"name\":\"qwen-code\",\"version\":\"test\"},\"started_at\":\"2026-04-03T12:00:00Z\"},\"summary\":\"ok\",\"changeset\":[]}"}'`,
+		},
+	}
+
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-1",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    "/tmp/workspace",
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("run qwen stream parser: %v", err)
+	}
+	if result.TaskResult.Meta.TaskID != "task-1" {
+		t.Fatalf("unexpected task id %q", result.TaskResult.Meta.TaskID)
+	}
+}

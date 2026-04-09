@@ -682,7 +682,9 @@ if [[ "$RUN_QUALITY_GATES" == "1" ]]; then
   log "run quality gates: make contracts test lint build"
   if ! (
     cd "$PROVENARCH_ROOT"
-    make contracts test lint build >"$QUALITY_LOG" 2>&1
+    # Run project gates with neutral runtime env so defaults in tests are stable.
+    env -u ACP_RUNTIME_PROVIDER -u ACP_QWEN_CMD -u ACP_CLAUDE_CMD \
+      make contracts test lint build >"$QUALITY_LOG" 2>&1
   ); then
     QUALITY_GATES_STATUS="failed"
     die "quality gates failed (see $QUALITY_LOG)"
