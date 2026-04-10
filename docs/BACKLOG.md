@@ -2,7 +2,7 @@
 
 Этот backlog описывает эпики реализации, критерии приёмки MVP и рекомендуемую PR-level нарезку.
 Для MVP-эпиков `Suggested PR slices` зафиксированы прямо в этом файле.
-Required CI для MVP опирается на schema/contracts, synthetic fixtures, fake/recorded runner artifacts и не требует live Claude Code.
+Required CI для MVP опирается на schema/contracts, synthetic fixtures, fake/recorded runner artifacts и не требует live headless provider binaries.
 
 ## Epic 1 — Управление workspace
 Acceptance:
@@ -36,13 +36,13 @@ Suggested PR slices:
 - `2D TaskResult normalization policy`
 - `2E normalization + error tests`
 
-## Epic 3 — Claude Code adapter (headless)
+## Epic 3 — Headless runtime adapters (historически стартовал как Claude Code adapter)
 Acceptance:
-- orchestrator запускает Claude Code headless для workspace
+- orchestrator запускает headless runtime adapter для workspace (`claude-code` default, `qwen-code` optional)
 - поддерживается передача PromptPack + subagents + skills
 - adapter работает поверх baseline bundle agents/skills/prompts
 - raw TaskResult сохраняется в `reports/taskruns/`
-- required tests используют fake/recorded runner harness вместо live Claude Code
+- required tests используют fake/recorded runner harness вместо live provider binaries
 
 Suggested PR slices:
 - `3A runner interface`

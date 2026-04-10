@@ -1,15 +1,16 @@
 # ADR-20260329-implementation-stack-go.md
 
 - **ADR ID:** ADR-20260329-implementation-stack-go
-- **Status:** accepted
+- **Status:** superseded
 - **Date:** 2026-03-29
 - **Owners:** ACP maintainers
+- **Superseded by:** [ADR-20260410-headless-runtime-multi-provider](ADR-20260410-headless-runtime-multi-provider.md)
 
 ## Context
 
 ACP is a local-first MVP:
 - runs locally on developer machine
-- runtime for extraction/analysis is **Claude Code headless** (MVP only)
+- runtime for extraction/analysis was initially constrained to **Claude Code headless** (MVP draft assumption)
 - workspace is a Git repository with entity-per-file model and generated reports
 
 We evaluated monorepo implementation stacks:
@@ -30,14 +31,14 @@ UI choice (implementation detail):
 ## Rationale
 
 - Go is well-suited for **local-first packaging** (single binary) and dependable execution.
-- Strong control over filesystem and process execution (Claude Code headless runner).
+- Strong control over filesystem and process execution (headless runtime runner).
 - Operational simplicity for early adopters: “download → run → open localhost”.
 
 ## Consequences
 
 - UI still requires Node toolchain for build, but runtime distribution remains a single Go binary.
 - We will shell out to `git` CLI in MVP for predictable behavior.
-- We avoid adding other runtimes in MVP (Claude Code only). Multi-runtime support is deferred.
+- Runtime scope in this ADR is historical and superseded by multi-provider MVP policy in ADR-20260410.
 
 ## Follow-ups
 

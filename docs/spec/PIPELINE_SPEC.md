@@ -151,8 +151,8 @@ Orchestrator normalization policy:
 - operation-form `add_question` и `set_coverage` нормализуются в canonical top-level representation до persistence/materialization
 - если в одном TaskResult присутствуют и top-level поля, и operation-form:
   - source of truth для persisted artifacts — merged result after normalization
-  - duplicate questions dedupe по `id`
-  - coverage merge для `observed`, `missing`, `notes` идёт по unique string
+  - duplicate questions dedupe по canonical `id` и нормализованному `text`
+  - coverage merge для `observed`, `missing`, `notes` использует semantic canonicalization (`snake_case`/`kebab-case`/spaced variants) с дедупликацией по нормализованной форме
 
 `add_doc_artifact` в MVP:
 - трактуется только как metadata registration op

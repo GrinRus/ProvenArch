@@ -79,8 +79,8 @@
 
 Conflict policy:
 - если top-level и operation-form присутствуют одновременно, persisted source of truth — merged normalized result
-- duplicate questions dedupe по `id`
-- `coverage.observed`, `coverage.missing`, `coverage.notes` merge-ятся по unique string
+- duplicate questions dedupe по canonical `id` и нормализованному `text`
+- `coverage.observed`, `coverage.missing`, `coverage.notes` merge-ятся после semantic canonicalization (snake/kebab/spaced variants) и дедупликации по нормализованной форме
 
 ### Provenance и evidence
 - `provenance.kind`: `observation | inference | assertion`

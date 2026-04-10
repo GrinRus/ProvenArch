@@ -20,14 +20,17 @@
   - fail при `No findings reported` в headless refresh при owner-related gaps в coverage,
   - fail при canonical duplicates в `coverage.missing`,
   - fail при duplicate open-question texts после нормализации,
-  - hard-fail при off-topic drift (`analysis:off-topic`) в `refresh.step1.collect` для non-power target,
-  - hard-fail при невалидном evidence scope (`analysis:evidence-scope`) — paths вне target/workspace или synthetic prefixes,
-  - hard-fail при cross-doc contradictions (`analysis:cross-doc`) между overview/findings,
+  - fail при critical off-topic markers в headless refresh artifacts (local semantic check),
   - ai-advent profile checks для минимально содержательного сигнала.
 - Snapshot artifacts per run: `TMP_ROOT/snapshots/<run_id>/...`.
 - Проверка ключевых артефактов (`as-is/findings/coverage`) и run quality summaries.
 - (Опционально) quality gates: `make contracts`, `make test`, `make lint`, `make build`.
 - (Опционально) live frontend e2e через Playwright: `validate -> run init -> inspect artifacts`.
+
+Batch-only semantic hard-fail checks (в `scripts/e2e_batch_report.py`):
+- `analysis:off-topic`
+- `analysis:evidence-scope`
+- `analysis:cross-doc`
 
 ## 2) Переменные скрипта
 
@@ -59,7 +62,10 @@ Batch/Frontend scripts:
   - `RUNTIME_PROVIDER` (required: `claude-code|qwen-code`)
   - `OUTPUT_DIR` (optional; default `mktemp`)
   - `LISTEN` (optional; default free local port)
-  - `UI_E2E_OUTPUT_DIR` (optional; default `/tmp/provenarch-ui-e2e/test-results`)
+  - Playwright output path для wrapper фиксируется как `$OUTPUT_DIR/playwright-results`
+
+Direct Playwright запуск (без wrapper) использует:
+- `UI_E2E_OUTPUT_DIR` (optional; default `/tmp/provenarch-ui-e2e/test-results`)
 
 ## 3) Быстрый запуск (script)
 
@@ -195,7 +201,9 @@ ACP_CLAUDE_CMD=claude \
 ./scripts/frontend-live-e2e.sh
 ```
 
-Playwright output по умолчанию: `/tmp/provenarch-ui-e2e/test-results` (можно переопределить через `UI_E2E_OUTPUT_DIR`).
+Output semantics:
+- direct `npm run --prefix ui e2e:live`: default `/tmp/provenarch-ui-e2e/test-results`, override `UI_E2E_OUTPUT_DIR`;
+- `scripts/frontend-live-e2e.sh`: output в `$OUTPUT_DIR/playwright-results`.
 
 ## 6) Continuous Improvement Loop (balanced backend/frontend)
 

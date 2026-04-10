@@ -171,6 +171,7 @@ Implemented additional jobs:
   - `scripts/full-run-ai-advent.sh`
   - bootstrap в `tmp`, API simulation, runtime циклы `fake + headless`
   - strict quality checks: anti-mock + anti-zero-signal + no last-run degradation
+  - full-run semantic checks ограничены локальным скриптом (owner-gap/findings, coverage/questions dedupe, critical off-topic markers) и не включают batch-only `analysis:evidence-scope`/`analysis:cross-doc`
   - summary/log/snapshots: `TMP_ROOT/session-summary.md`, `TMP_ROOT/full-run.log`, `TMP_ROOT/snapshots/*`
 - batch regression `5x2` + frontend live e2e:
   - `scripts/full-run-batch-5x2.sh`
@@ -184,7 +185,8 @@ Implemented additional jobs:
   - reports: `run_matrix_<batch-id>.md`, `frontend_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md` (+ fields `artifact_source`, `semantic_hard_fail`, `off_topic_hits`)
 - optional frontend live smoke:
   - `scripts/frontend-live-e2e.sh` (local)
-  - Playwright output default: `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
+  - direct `npm run e2e:live --prefix ui`: Playwright output default `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
+  - `scripts/frontend-live-e2e.sh`: Playwright output в `$OUTPUT_DIR/playwright-results`
   - `ui/e2e/live-flow.spec.ts` + `npm run e2e:live --prefix ui`
 
 ## 8) Acceptance для testing strategy

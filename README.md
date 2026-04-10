@@ -2,7 +2,7 @@
 
 > **Статус:** MVP beta foundation / runnable local pipeline baseline + strict contracts
 > **Принятый стек реализации:** Go (backend/orchestrator) + React/TypeScript UI (embedded), runtime анализа в MVP: **headless multi-provider** (`claude-code` default, `qwen-code` optional)
-> **Последняя ревизия:** 2026-04-06
+> **Последняя ревизия:** 2026-04-10
 
 ## Что это
 
@@ -126,6 +126,8 @@ acp serve --workspace /path/to/arch-workspace --auto-init --repo-name payments-s
 acp serve --workspace /path/to/arch-workspace --auto-init --repos-file /path/to/repos.yaml --runtime fake
 ```
 
+Опционально для `serve --auto-init` можно задать `--docs-imports-path <path>` (default `./docs/imports` в `workspace.yaml`).
+
 ### 2) Запустите первый анализ
 
 Можно из UI (кнопка `Run init`) или CLI:
@@ -230,6 +232,7 @@ Script делает strict полный цикл:
 - API simulation + runtime `fake + headless`;
 - anti-mock/anti-zero-signal проверки для headless run;
 - quality regression guard по одинаковой паре `(runtime_mode, pipeline)` между итерациями;
+- локальные semantic checks full-run: owner-gap+findings, canonical duplicates в coverage/questions, critical off-topic markers;
 - per-run snapshots в `TMP_ROOT/snapshots/<run_id>/...`;
 - гарантированные debug artifacts: `TMP_ROOT/full-run.log` и `TMP_ROOT/session-summary.md` даже при раннем fail.
 
@@ -261,8 +264,10 @@ ACP_QWEN_CMD_BIN=qwen \
   - `/tmp/provenarch-test_arch_project/reports/frontend_e2e_matrix_<batch-id>.md`
   - `/tmp/provenarch-test_arch_project/reports/quality_report_<batch-id>.md`
 - backend quality считается только по snapshot-артефактам (`snapshots/<run_id>/reports/*`), frontend smoke запускается на отдельной `frontend-workspace` копии и не мутирует backend baseline
+- batch evaluator добавляет semantic hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`
 - в `run_matrix`/`quality_report` дополнительно фиксируются `artifact_source`, `semantic_hard_fail`, `off_topic_hits`
-- Playwright live e2e output по умолчанию сохраняется в `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
+- direct `npm run --prefix ui e2e:live`: Playwright output default `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
+- `scripts/frontend-live-e2e.sh`: Playwright output сохраняется в `$OUTPUT_DIR/playwright-results`
 
 `TARGET_REPO` для batch-скрипта обязателен и должен указывать на один локальный checkout path целевого репозитория.
 
