@@ -34,12 +34,14 @@
    - React + TypeScript + Vite
    - Dev: `npm run dev` с proxy на backend
    - Prod: `npm run build` → `ui/dist` встраивается в Go бинарь
+   - Live browser e2e: Playwright optional smoke (`ui/e2e/live-flow.spec.ts`, `npm run e2e:live --prefix ui`)
    - Guided setup поддерживает multi-repo (`repos[]`) с add/remove rows и optional `ref`
    - Показывает repo overview в validate surface: `resolved_repos` + diagnostics, сгруппированные по repo
    - Редактирует baseline bundle artifacts через guided selector (`charter/*`, `skills/*`, prompt packs, `skills/subagents.yaml`)
    - UI разбит на явные секции `Setup / Baseline / Runs / Results`
    - Показывает run dashboard (queued/running/succeeded/failed), включая завершённые run'ы из persisted history
    - Показывает `Runs: Logs` для выбранного run (`timestamp/level/step/domain/message`) с quick actions `Copy logs`, `Download logs`, `Open taskrun artifact`
+   - Критичные UI-контролы для live e2e снабжены стабильными `data-testid` (`validate/run/status/artifacts/logs`)
 
 3) **Orchestrator (`internal/orchestrator`)** *(implemented baseline)*
    - Step registry (шаги init pipeline)

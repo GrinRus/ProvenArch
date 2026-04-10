@@ -172,12 +172,21 @@ Implemented additional jobs:
   - bootstrap в `tmp`, API simulation, runtime циклы `fake + headless`
   - strict quality checks: anti-mock + anti-zero-signal + no last-run degradation
   - summary/log/snapshots: `TMP_ROOT/session-summary.md`, `TMP_ROOT/full-run.log`, `TMP_ROOT/snapshots/*`
+- batch regression `5x2` + frontend live e2e:
+  - `scripts/full-run-batch-5x2.sh`
+  - direct-only runtime commands (`claude`, `qwen`)
+  - run artifacts: `test_arch_project/runs/<batch-id>/<provider>/runN/*`
+  - reports: `run_matrix_<batch-id>.md`, `frontend_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md`
+- optional frontend live smoke:
+  - `scripts/frontend-live-e2e.sh` (local)
+  - `ui/e2e/live-flow.spec.ts` + `npm run e2e:live --prefix ui`
 
 ## 8) Acceptance для testing strategy
 
 - любой required CI run проходит без live network dependencies
 - любое изменение schema/spec/examples требует update fixtures/golden в том же PR
 - live headless provider smoke не блокирует merge; для обязательного CI используется только `contracts`, `backend`, `ui`, `golden`, `smoke-cli`, `smoke-api`, `ui-smoke`
+- workflow `ui-live-smoke-optional` запускается только вручную (`workflow_dispatch`) и не является required gate
 - scenario fixtures и golden outputs считаются канонической regression surface до появления production-scale test corpus
 - optional readable golden export доступен для review-diff:
   - `ACP_EXPORT_SCENARIO_GOLDEN=1 go test ./internal/orchestrator -run TestScenarioFixturesDeterministicInitPipeline -count=1`
@@ -203,3 +212,5 @@ Implemented additional jobs:
 - `make run-backend WORKSPACE=/abs/path/to/arch-workspace`
 - `make run-ui`
 - `./scripts/full-run-ai-advent.sh`
+- `./scripts/full-run-batch-5x2.sh`
+- `./scripts/frontend-live-e2e.sh`

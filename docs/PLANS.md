@@ -379,6 +379,55 @@ EP-20260410-orchestration-prompt-quality
 
 ---
 
+### Plan ID
+EP-20260410-batch-5x2-frontend-reaudit
+
+### Context
+Нужно выполнить повторный e2e re-audit на target repo в формате `5x2` (5 run для `qwen-code` + 5 run для `claude-code`) в direct-only режиме (`qwen`/`claude`, без wrapper), добавить live frontend e2e automation и выпустить агрегированные quality-отчёты.
+
+### Goals (must have)
+- [x] Добавить batch runner `5x2` с фиксированным layout артефактов в `test_arch_project/runs/<batch-id>/...`
+- [x] Добавить frontend live e2e automation на Playwright + стабильные `data-testid` в UI
+- [x] Добавить локальный script для live UI smoke against running `acp serve` с provider-aware runtime
+- [x] Добавить optional CI workflow для manual live UI smoke (не required gate)
+- [x] Сформировать агрегированные отчёты: run matrix, frontend matrix, quality report
+
+### Non-goals
+- [x] Изменение CLI/API/TaskResult публичных контрактов
+- [x] Добавление новых runtime providers beyond `claude-code|qwen-code`
+- [x] Перевод live runtime smoke в required CI
+
+### Approach
+1) Добавить Playwright e2e test (`validate -> run init -> artifacts`) и `data-testid` для стабильного селектора.
+2) Добавить `scripts/frontend-live-e2e.sh` для поднятия backend и запуска Playwright smoke с выбранным provider.
+3) Добавить `scripts/full-run-batch-5x2.sh` для preflight + 10 full-run + 2 frontend e2e.
+4) Добавить `scripts/e2e_batch_report.py` для rubric-based quality aggregation и markdown отчётов.
+5) Обновить README/ARCHITECTURE/TESTING_STRATEGY/LOCAL_FULL_RUN runbook под новые entrypoints.
+
+### Files expected to change
+- `ui/src/App.tsx`
+- `ui/package.json`
+- `ui/package-lock.json`
+- `ui/playwright.live.config.ts`
+- `ui/e2e/live-flow.spec.ts`
+- `scripts/frontend-live-e2e.sh`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/e2e_batch_report.py`
+- `.github/workflows/ui-live-smoke-optional.yml`
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/LOCAL_FULL_RUN_AI_ADVENT.md`
+- `docs/PLANS.md`
+
+### Progress log
+- 2026-04-10: Добавлены `data-testid` для критичных UI секций (`validate/run/status/logs/artifacts`) и Playwright live spec/config/scripts.
+- 2026-04-10: Добавлены automation scripts `frontend-live-e2e.sh`, `full-run-batch-5x2.sh`, `e2e_batch_report.py` с provider-aware direct-only режимом.
+- 2026-04-10: Добавлен optional manual workflow `ui-live-smoke-optional` (workflow_dispatch, non-required).
+- 2026-04-10: Обновлены README/ARCHITECTURE/TESTING_STRATEGY/LOCAL_FULL_RUN runbooks для batch `5x2` и frontend live smoke.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.

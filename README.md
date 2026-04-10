@@ -217,6 +217,8 @@ Root entrypoints:
 Готовый runbook и script:
 - [docs/LOCAL_FULL_RUN_AI_ADVENT.md](docs/LOCAL_FULL_RUN_AI_ADVENT.md)
 - `scripts/full-run-ai-advent.sh`
+- `scripts/full-run-batch-5x2.sh` (batch `5x2` + frontend live e2e + quality report aggregation)
+- `scripts/frontend-live-e2e.sh` (локальный live UI smoke для выбранного provider)
 
 Быстрый запуск:
 
@@ -243,6 +245,22 @@ TARGET_REPO=/path/to/target-repo KEEP_TMP=1 ./scripts/full-run-ai-advent.sh
 TARGET_REPO=/path/to/target-repo RUN_LOGS_TTL_HOURS=168 RUN_LOGS_MAX_RUNS=200 ./scripts/full-run-ai-advent.sh
 ```
 
+Batch re-audit `5x2` (direct-only `claude`/`qwen`, без wrapper):
+
+```bash
+TARGET_REPO=/path/to/target-repo \
+ACP_CLAUDE_CMD_BIN=claude \
+ACP_QWEN_CMD_BIN=qwen \
+./scripts/full-run-batch-5x2.sh
+```
+
+Скрипт сохраняет:
+- run artifacts: `test_arch_project/runs/<batch-id>/<provider>/runN/...`
+- quality reports:
+  - `test_arch_project/reports/run_matrix_<batch-id>.md`
+  - `test_arch_project/reports/frontend_e2e_matrix_<batch-id>.md`
+  - `test_arch_project/reports/quality_report_<batch-id>.md`
+
 Repo CI по умолчанию живёт в GitHub Actions:
 - `contracts`
 - `backend`
@@ -251,6 +269,7 @@ Repo CI по умолчанию живёт в GitHub Actions:
 - `smoke-cli`
 - `smoke-api`
 - `ui-smoke`
+- `ui-live-smoke-optional` (workflow_dispatch, не required gate)
 
 ---
 

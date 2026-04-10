@@ -24,6 +24,7 @@
 - Snapshot artifacts per run: `TMP_ROOT/snapshots/<run_id>/...`.
 - Проверка ключевых артефактов (`as-is/findings/coverage`) и run quality summaries.
 - (Опционально) quality gates: `make contracts`, `make test`, `make lint`, `make build`.
+- (Опционально) live frontend e2e через Playwright: `validate -> run init -> inspect artifacts`.
 
 ## 2) Переменные скрипта
 
@@ -40,6 +41,18 @@
 - `RUN_QUALITY_GATES` (`0/1`, default `1`)
 - `RUN_LOGS_TTL_HOURS` (default `168`)
 - `RUN_LOGS_MAX_RUNS` (default `200`)
+
+Batch/Frontend scripts:
+- `scripts/full-run-batch-5x2.sh`
+  - `BATCH_ID` (default `batch-<UTC timestamp>`)
+  - `TARGET_REPO` (default `test_arch_project/repos/ibatulanandjp__ecommerce-microservices`)
+  - `ACP_CLAUDE_CMD_BIN` (default `claude`, direct binary)
+  - `ACP_QWEN_CMD_BIN` (default `qwen`, direct binary)
+- `scripts/frontend-live-e2e.sh`
+  - `WORKSPACE` (required)
+  - `RUNTIME_PROVIDER` (required: `claude-code|qwen-code`)
+  - `OUTPUT_DIR` (optional; default `mktemp`)
+  - `LISTEN` (optional; default free local port)
 
 ## 3) Быстрый запуск (script)
 
@@ -60,6 +73,12 @@ TARGET_REPO=/path/to/target-repo ACP_RUNTIME_PROVIDER=qwen-code ACP_QWEN_CMD=/ab
 
 # Вариант 5: оставить tmp workspace для ручного анализа
 TARGET_REPO=/path/to/target-repo KEEP_TMP=1 ./scripts/full-run-ai-advent.sh
+
+# Вариант 6: batch 5x2 + frontend live e2e + агрегированный quality report
+TARGET_REPO=/path/to/target-repo \
+ACP_CLAUDE_CMD_BIN=claude \
+ACP_QWEN_CMD_BIN=qwen \
+./scripts/full-run-batch-5x2.sh
 ```
 
 Script всегда формирует:
@@ -68,6 +87,11 @@ Script всегда формирует:
 - `TMP_ROOT/snapshots/<run_id>/...`
 
 При ошибке script всегда сохраняет `TMP_ROOT` для дебага независимо от `KEEP_TMP`.
+
+Для batch-скрипта отчёты сохраняются в:
+- `test_arch_project/reports/run_matrix_<batch-id>.md`
+- `test_arch_project/reports/frontend_e2e_matrix_<batch-id>.md`
+- `test_arch_project/reports/quality_report_<batch-id>.md`
 
 ## 4) CLI/API поток вручную (без скрипта)
 
@@ -135,6 +159,29 @@ PORT=18080
 
 - `Results: Coverage & Questions`: показываются coverage/open questions.
 - `Results: Run Artifacts`: можно открыть артефакты run.
+
+### Optional automation (Playwright live smoke)
+
+```bash
+cd /path/to/ProvenArch
+make build
+npm ci --prefix ui
+npm exec --prefix ui playwright install chromium
+
+WORKSPACE=/path/to/arch-workspace \
+RUNTIME_PROVIDER=qwen-code \
+ACP_QWEN_CMD=qwen \
+./scripts/frontend-live-e2e.sh
+```
+
+Для `claude-code`:
+
+```bash
+WORKSPACE=/path/to/arch-workspace \
+RUNTIME_PROVIDER=claude-code \
+ACP_CLAUDE_CMD=claude \
+./scripts/frontend-live-e2e.sh
+```
 
 ## 6) Continuous Improvement Loop (balanced backend/frontend)
 
