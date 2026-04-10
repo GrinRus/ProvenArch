@@ -277,6 +277,74 @@ print(f"text_signal_ok findings_items={findings_items} questions_items={question
 PY
 }
 
+check_headless_refresh_semantic_quality() {
+  local run_id="$1"
+  python3 - "$WORKSPACE" "$run_id" <<'PY'
+import os
+import re
+import sys
+
+workspace = sys.argv[1]
+run_id = sys.argv[2]
+findings_path = os.path.join(workspace, "reports/findings/findings.md")
+coverage_path = os.path.join(workspace, "reports/coverage/summary.md")
+questions_path = os.path.join(workspace, "reports/coverage/open-questions.md")
+
+for path in (findings_path, coverage_path, questions_path):
+    if not os.path.isfile(path):
+        print(f"missing artifact: {path}")
+        sys.exit(2)
+
+findings_text = open(findings_path, encoding="utf-8").read()
+coverage_lines = open(coverage_path, encoding="utf-8").read().splitlines()
+questions_lines = open(questions_path, encoding="utf-8").read().splitlines()
+
+def normalize(value: str) -> str:
+    value = value.strip().lower().replace("_", " ").replace("-", " ")
+    value = " ".join(value.split())
+    return value
+
+missing_values = []
+in_missing = False
+for line in coverage_lines:
+    if line.startswith("## "):
+        in_missing = line.strip().lower() == "## missing"
+        continue
+    if in_missing and line.strip().startswith("- "):
+        missing_values.append(normalize(line.strip()[2:].strip("`")))
+
+if len(missing_values) != len(set(missing_values)):
+    print(f"semantic quality failed for run {run_id}: duplicate coverage.missing terms after canonicalization")
+    sys.exit(3)
+
+owner_gap = any(item in {"owner mappings", "owner mapping", "owner team mappings", "owner team mapping"} for item in missing_values)
+if owner_gap and re.search(r"no findings reported\.", findings_text, flags=re.IGNORECASE):
+    print(f"semantic quality failed for run {run_id}: owner-related gap exists but findings report is empty")
+    sys.exit(4)
+
+question_texts = []
+for line in questions_lines:
+    line = line.strip()
+    if not line.startswith("- "):
+        continue
+    body = line[2:].strip()
+    match = re.match(r"`[^`]+`\s*(.*)$", body)
+    text = match.group(1) if match else body
+    question_texts.append(normalize(text))
+
+if len(question_texts) != len(set(question_texts)):
+    print(f"semantic quality failed for run {run_id}: duplicate open-question texts after normalization")
+    sys.exit(5)
+
+print(
+    "semantic_quality_ok "
+    f"owner_gap={int(owner_gap)} "
+    f"coverage_missing={len(missing_values)} "
+    f"open_questions={len(question_texts)}"
+)
+PY
+}
+
 run_cli_pipeline() {
   local runtime_mode="$1"
   local runtime_provider="$2"
@@ -354,6 +422,7 @@ run_cli_pipeline() {
     if [[ -n "$previous_signal" ]] && (( signal_score < previous_signal )); then
       die "quality regression: last run signal ($signal_score) is lower than previous run signal ($previous_signal) in iteration $iteration"
     fi
+    check_headless_refresh_semantic_quality "$run_id" || die "headless refresh semantic quality checks failed for run $run_id"
     if [[ "$TARGET_PROFILE" == "ai-advent" ]]; then
       check_ai_advent_text_signal "$run_id" || die "ai-advent textual quality check failed for run $run_id"
     fi
@@ -662,20 +731,22 @@ log "stop API server"
 stop_server
 
 log "run runtime cycles: fake + headless(provider=$HEADLESS_PROVIDER)"
+prev_fake_init_signal=""
+prev_fake_refresh_signal=""
+prev_headless_init_signal=""
+prev_headless_refresh_signal=""
 for iteration in $(seq 1 "$ITERATIONS"); do
-  previous_signal=""
+  run_cli_pipeline "fake" "$HEADLESS_PROVIDER" "init" "$iteration" "$prev_fake_init_signal"
+  prev_fake_init_signal="$LAST_SIGNAL"
 
-  run_cli_pipeline "fake" "$HEADLESS_PROVIDER" "init" "$iteration" "$previous_signal"
-  previous_signal="$LAST_SIGNAL"
+  run_cli_pipeline "fake" "$HEADLESS_PROVIDER" "refresh" "$iteration" "$prev_fake_refresh_signal"
+  prev_fake_refresh_signal="$LAST_SIGNAL"
 
-  run_cli_pipeline "fake" "$HEADLESS_PROVIDER" "refresh" "$iteration" "$previous_signal"
-  previous_signal="$LAST_SIGNAL"
+  run_cli_pipeline "headless" "$HEADLESS_PROVIDER" "init" "$iteration" "$prev_headless_init_signal"
+  prev_headless_init_signal="$LAST_SIGNAL"
 
-  run_cli_pipeline "headless" "$HEADLESS_PROVIDER" "init" "$iteration" "$previous_signal"
-  previous_signal="$LAST_SIGNAL"
-
-  run_cli_pipeline "headless" "$HEADLESS_PROVIDER" "refresh" "$iteration" "$previous_signal"
-  previous_signal="$LAST_SIGNAL"
+  run_cli_pipeline "headless" "$HEADLESS_PROVIDER" "refresh" "$iteration" "$prev_headless_refresh_signal"
+  prev_headless_refresh_signal="$LAST_SIGNAL"
 done
 
 if [[ "$RUN_QUALITY_GATES" == "1" ]]; then

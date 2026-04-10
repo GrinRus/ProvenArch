@@ -16,7 +16,10 @@
 - Quality guardrails для headless:
   - запрет mock/fake runtime version,
   - fail при zero-signal quality summary,
-  - fail при “последний run хуже предыдущего” в итерации,
+  - fail при регрессии сигнала относительно предыдущей итерации для той же пары `(runtime_mode, pipeline)`,
+  - fail при `No findings reported` в headless refresh при owner-related gaps в coverage,
+  - fail при canonical duplicates в `coverage.missing`,
+  - fail при duplicate open-question texts после нормализации,
   - ai-advent profile checks для минимально содержательного сигнала.
 - Snapshot artifacts per run: `TMP_ROOT/snapshots/<run_id>/...`.
 - Проверка ключевых артефактов (`as-is/findings/coverage`) и run quality summaries.
@@ -30,7 +33,7 @@
 - `TARGET_REPO` (required: path to the repository used for full-run)
 - `TMP_ROOT` (default: auto `mktemp -d -t provenarch-ai-advent.XXXXXX`)
 - `ACP_RUNTIME_PROVIDER` (headless provider: `claude-code` default или `qwen-code`)
-- `ACP_CLAUDE_CMD` (команда для provider `claude-code`; default `claude-code`)
+- `ACP_CLAUDE_CMD` (команда для provider `claude-code`; default `claude-code`, поддержан direct `claude` без wrapper)
 - `ACP_QWEN_CMD` (команда для provider `qwen-code`; default `qwen`)
 - `KEEP_TMP` (`0/1`, default `0`)
 - `ITERATIONS` (default `1`)
@@ -46,13 +49,16 @@ cd /path/to/ProvenArch
 # Вариант 1: default headless provider (claude-code в PATH)
 TARGET_REPO=/path/to/target-repo ./scripts/full-run-ai-advent.sh
 
-# Вариант 2: явно задать provider=qwen-code
+# Вариант 2: direct claude без wrapper
+TARGET_REPO=/path/to/target-repo ACP_RUNTIME_PROVIDER=claude-code ACP_CLAUDE_CMD=claude ./scripts/full-run-ai-advent.sh
+
+# Вариант 3: явно задать provider=qwen-code
 TARGET_REPO=/path/to/target-repo ACP_RUNTIME_PROVIDER=qwen-code ./scripts/full-run-ai-advent.sh
 
-# Вариант 3: явно задать команду для выбранного provider
+# Вариант 4: явно задать команду для выбранного provider
 TARGET_REPO=/path/to/target-repo ACP_RUNTIME_PROVIDER=qwen-code ACP_QWEN_CMD=/abs/path/to/qwen ./scripts/full-run-ai-advent.sh
 
-# Вариант 4: оставить tmp workspace для ручного анализа
+# Вариант 5: оставить tmp workspace для ручного анализа
 TARGET_REPO=/path/to/target-repo KEEP_TMP=1 ./scripts/full-run-ai-advent.sh
 ```
 
@@ -148,12 +154,13 @@ PORT=18080
 - зелёные `make contracts`, `make test`, `make lint`, `make build`
 - отсутствие P1/P2 находок по последнему полному прогону;
 - headless runs проходят strict quality checks (non-mock, non-zero-signal, no degradation).
+- headless refresh проходит semantic checks (owner-gap+findings, coverage/question dedupe).
 
 ## 7) Диагностика типовых проблем
 
 - Ошибка `headless runtime command ... is unavailable`:
   - проверить `ACP_RUNTIME_PROVIDER`;
-  - для `claude-code`: установить `claude-code` или задать `ACP_CLAUDE_CMD=/abs/path/to/runner`;
+  - для `claude-code`: установить `claude-code` или использовать direct `ACP_CLAUDE_CMD=claude` (либо задать `ACP_CLAUDE_CMD=/abs/path/to/runner`);
   - для `qwen-code`: установить `qwen` или задать `ACP_QWEN_CMD=/abs/path/to/runner`.
 - Ошибки bootstrap (`workspace.yaml/.git/skills/subagents.yaml` не созданы):
   - проверить вывод `logs/init-workspace.log`.

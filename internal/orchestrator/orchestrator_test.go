@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
+	"github.com/GrinRus/ProvenArch/internal/model"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/claudecode"
 	"github.com/GrinRus/ProvenArch/internal/testutil"
@@ -991,6 +992,124 @@ func TestRefreshStep1UnknownDeclaredRepoScopeWritesQuestion(t *testing.T) {
 	}
 }
 
+func TestSemanticGuardDropsRuntimeProviderEntityInRefreshStep1Collect(t *testing.T) {
+	t.Parallel()
+
+	ws := createMonolithWorkspace(t)
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure workspace layout: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/billing.md", []byte("# Domain: Billing\n\n- id: `billing`\n- repo_scope: `orders-monolith`\n")); err != nil {
+		t.Fatalf("write billing domain card: %v", err)
+	}
+
+	service := NewService(WithRunner(refreshCollectNoiseRunner{}))
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run refresh pipeline: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
+	}
+	if !hasWarningPrefix(info.Warnings, "refresh.step1.collect: semantic_guard: dropped refresh.step1.collect entity types") {
+		t.Fatalf("expected semantic guard warning in run warnings, got %#v", info.Warnings)
+	}
+
+	entities, err := model.NewStore(ws).ListEntities()
+	if err != nil {
+		t.Fatalf("list entities: %v", err)
+	}
+	for _, entity := range entities {
+		if entity.Type == "runtime_provider" {
+			t.Fatalf("runtime_provider entity must be filtered by semantic guard, found %q", entity.ID)
+		}
+	}
+}
+
+func TestSemanticGuardAddsFallbackFindingForOwnerGapInRefreshStep3(t *testing.T) {
+	t.Parallel()
+
+	ws := createMonolithWorkspace(t)
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure workspace layout: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/billing.md", []byte("# Domain: Billing\n\n- id: `billing`\n- repo_scope: `orders-monolith`\n")); err != nil {
+		t.Fatalf("write billing domain card: %v", err)
+	}
+
+	service := NewService(WithRunner(refreshMissingFindingsRunner{}))
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run refresh pipeline: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
+	}
+	if !hasWarningPrefix(info.Warnings, "refresh.step3.findings: semantic_guard: added fallback owner-mapping finding") {
+		t.Fatalf("expected fallback-finding warning in run warnings, got %#v", info.Warnings)
+	}
+
+	findingsReport, err := os.ReadFile(filepath.Join(ws.Path, "reports/findings/findings.md"))
+	if err != nil {
+		t.Fatalf("read findings report: %v", err)
+	}
+	text := string(findingsReport)
+	if strings.Contains(text, "No findings reported.") {
+		t.Fatalf("expected fallback finding to be materialized, got %q", text)
+	}
+	if !strings.Contains(text, "Missing owner mapping") {
+		t.Fatalf("expected owner mapping finding in report, got %q", text)
+	}
+}
+
+func TestSemanticGuardAddsGenericFallbackFindingWhenNoServiceCandidate(t *testing.T) {
+	t.Parallel()
+
+	ws := createMonolithWorkspace(t)
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure workspace layout: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/billing.md", []byte("# Domain: Billing\n\n- id: `billing`\n- repo_scope: `orders-monolith`\n")); err != nil {
+		t.Fatalf("write billing domain card: %v", err)
+	}
+
+	service := NewService(WithRunner(refreshNoServiceMissingFindingsRunner{}))
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run refresh pipeline: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
+	}
+	if !hasWarningPrefix(info.Warnings, "refresh.step3.findings: semantic_guard: added fallback owner-mapping finding") {
+		t.Fatalf("expected fallback-finding warning in run warnings, got %#v", info.Warnings)
+	}
+
+	findingsReport, err := os.ReadFile(filepath.Join(ws.Path, "reports/findings/findings.md"))
+	if err != nil {
+		t.Fatalf("read findings report: %v", err)
+	}
+	text := string(findingsReport)
+	if !strings.Contains(text, "owner mappings are unresolved for repo scope") {
+		t.Fatalf("expected generic fallback finding description in report, got %q", text)
+	}
+	if !strings.Contains(text, "`scope.orders-monolith`") {
+		t.Fatalf("expected generic fallback related id in report, got %q", text)
+	}
+}
+
 type delayedRunner struct {
 	delay time.Duration
 }
@@ -1021,6 +1140,114 @@ func (step3ParseFailureRunner) Run(ctx context.Context, task acpruntime.Task) (a
 func (step3ParseFailureRunner) Preflight(context.Context) error {
 	return nil
 }
+
+type refreshCollectNoiseRunner struct{}
+
+func (refreshCollectNoiseRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	base := claudecode.FakeRunner{}
+	result, err := base.Run(ctx, task)
+	if err != nil {
+		return acpruntime.Result{}, err
+	}
+	if task.StepID != "refresh.step1.collect" {
+		return result, nil
+	}
+
+	taskResult := result.TaskResult
+	taskResult.Changeset = append(taskResult.Changeset, contracts.Operation{
+		Op: "upsert_entity",
+		Entity: &contracts.Entity{
+			ID:   "runtime.claude-code.orders-monolith",
+			Type: "runtime_provider",
+			Name: "Claude Runtime",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 1,
+				Evidence: []contracts.Evidence{
+					{Repo: "orders-monolith", Path: "runtime-manifest.json"},
+				},
+			},
+		},
+	})
+
+	raw, marshalErr := json.MarshalIndent(taskResult, "", "  ")
+	if marshalErr != nil {
+		return acpruntime.Result{}, marshalErr
+	}
+	result.TaskResult = taskResult
+	result.RawJSON = raw
+	return result, nil
+}
+
+func (refreshCollectNoiseRunner) Preflight(context.Context) error { return nil }
+
+type refreshMissingFindingsRunner struct{}
+
+func (refreshMissingFindingsRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	base := claudecode.FakeRunner{}
+	result, err := base.Run(ctx, task)
+	if err != nil {
+		return acpruntime.Result{}, err
+	}
+	if task.StepID != "refresh.step3.findings" {
+		return result, nil
+	}
+
+	taskResult := result.TaskResult
+	taskResult.Changeset = []contracts.Operation{}
+	taskResult.Coverage = &contracts.Coverage{
+		Observed: []string{"services"},
+		Missing:  []string{"owner mappings", "ci-cd evidence", "delta validation"},
+		Notes:    []string{"refresh evidence is incomplete"},
+	}
+	taskResult.Questions = []contracts.Question{
+		{ID: "q.refresh.delta", Text: "What changed since previous run that affects ownership or dependencies?", Priority: "high"},
+	}
+
+	raw, marshalErr := json.MarshalIndent(taskResult, "", "  ")
+	if marshalErr != nil {
+		return acpruntime.Result{}, marshalErr
+	}
+	result.TaskResult = taskResult
+	result.RawJSON = raw
+	return result, nil
+}
+
+func (refreshMissingFindingsRunner) Preflight(context.Context) error { return nil }
+
+type refreshNoServiceMissingFindingsRunner struct{}
+
+func (refreshNoServiceMissingFindingsRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	base := claudecode.FakeRunner{}
+	result, err := base.Run(ctx, task)
+	if err != nil {
+		return acpruntime.Result{}, err
+	}
+	if task.StepID != "refresh.step1.collect" && task.StepID != "refresh.step3.findings" {
+		return result, nil
+	}
+
+	taskResult := result.TaskResult
+	taskResult.Changeset = []contracts.Operation{}
+	taskResult.Coverage = &contracts.Coverage{
+		Observed: []string{"services"},
+		Missing:  []string{"owner mappings", "ci-cd evidence", "delta validation"},
+		Notes:    []string{"refresh evidence is incomplete"},
+	}
+	taskResult.Questions = []contracts.Question{
+		{ID: "q.refresh.delta", Text: "What changed since previous run that affects ownership or dependencies?", Priority: "high"},
+	}
+
+	raw, marshalErr := json.MarshalIndent(taskResult, "", "  ")
+	if marshalErr != nil {
+		return acpruntime.Result{}, marshalErr
+	}
+	result.TaskResult = taskResult
+	result.RawJSON = raw
+	return result, nil
+}
+
+func (refreshNoServiceMissingFindingsRunner) Preflight(context.Context) error { return nil }
 
 type docArtifactRunner struct{}
 

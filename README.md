@@ -46,6 +46,7 @@ ACP не является "рисовалкой диаграмм". Архите�
 - детальный анализ каждого сервиса: архитектура, внешние интеграции, БД, CI/CD
 - анализ arbitrary stacks через выбранный headless provider (`claude-code|qwen-code`) + baseline prompt bundle, без фиксированного whitelist парсеров в MVP
 - явная фиксация недостатка информации через `coverage`, `questions` и findings
+- semantic guard в refresh-цикле: фильтрация нерелевантных placeholder-операций, fallback finding при owner-gap, канонизация/дедуп coverage+questions
 - Git-based versioning/branching для модели, правил, отчётов и proposal-пакетов
 - строгий контракт TaskResult (JSON Schema) между runtime и orchestrator
 
@@ -104,7 +105,8 @@ MVP policy: Observation + Assertion отображаются как рабоча
 - Node.js 22.21.1 + npm 10.x (нужно для UI dev/build в этом репозитории)
 
 Для первого запуска достаточно `--runtime fake`.
-Для реальных запусков `--runtime headless` нужен установленный provider command (`claude-code` или `qwen`) либо env override (`ACP_CLAUDE_CMD`/`ACP_QWEN_CMD`).
+Для реальных запусков `--runtime headless` нужен установленный provider command (`claude-code`/`qwen`) либо env override (`ACP_CLAUDE_CMD`/`ACP_QWEN_CMD`).
+Direct режим `ACP_CLAUDE_CMD=claude` поддерживается нативно (без wrapper).
 
 ### 1) Поднимите сервис одной командой (auto-init)
 
@@ -196,6 +198,7 @@ make quickstart-local WORKSPACE=/path/to/arch-workspace REPO_PATH=/path/to/payme
 - command env:
   - `ACP_CLAUDE_CMD` (default `claude-code`)
   - `ACP_QWEN_CMD` (default `qwen`)
+- direct `claude` режим: `ACP_CLAUDE_CMD=claude` (native one-shot invocation с envelope parse).
 - в `--runtime fake` provider проходит валидацию, но фактически не используется runner’ом.
 
 ### 7) Поднимите dev environment
@@ -224,7 +227,7 @@ TARGET_REPO=/path/to/target-repo ./scripts/full-run-ai-advent.sh
 Script делает strict полный цикл:
 - API simulation + runtime `fake + headless`;
 - anti-mock/anti-zero-signal проверки для headless run;
-- quality regression guard (последний run не должен быть слабее предыдущего в итерации);
+- quality regression guard по одинаковой паре `(runtime_mode, pipeline)` между итерациями;
 - per-run snapshots в `TMP_ROOT/snapshots/<run_id>/...`;
 - гарантированные debug artifacts: `TMP_ROOT/full-run.log` и `TMP_ROOT/session-summary.md` даже при раннем fail.
 

@@ -314,6 +314,71 @@ EP-20260409-runtime-provider-selection-mvp
 
 ---
 
+### Plan ID
+EP-20260409-direct-claude-stabilization
+
+### Context
+Нужно стабилизировать прямой headless запуск `claude` без wrapper (`ACP_CLAUDE_CMD=claude`) и убрать шум в quality-артефактах (`runtime_versions`, coverage term drift), сохранив существующие контракты.
+
+### Goals (must have)
+- [x] Добавить native direct flow для `claude` в `claudecode` runner (без wrapper)
+- [x] Вынести extraction mixed/envelope output в shared helper и использовать в `qwen`/`claude`
+- [x] Убрать trailing `@` в `runtime_versions` при пустой версии
+- [x] Канонизировать coverage missing terms (`owner/ci-cd/delta/dependency/runtime`) перед дедупом
+- [x] Обновить тесты и runbook docs под direct `claude`
+
+### Non-goals
+- [x] Изменение TaskResult schema/model contracts
+- [x] Изменение CLI/API wire contracts
+- [x] Расширение списка providers beyond `claude-code|qwen-code`
+
+### Approach
+1) Реализовать dual-mode `claudecode` runner: legacy passthrough + native direct `claude --output-format json -p`.
+2) Добавить shared taskresult extractor и подключить в `claudecode`/`qwencode`.
+3) Нормализовать quality aggregation (`runtime_versions`) и coverage merge canonicalization.
+4) Синхронизировать docs/runbook и прогнать DoD + e2e acceptance.
+
+### Progress log
+- 2026-04-09: Добавлен shared extractor `internal/runtime/taskresultextractor` и интеграция в `qwen`/`claude` runner paths.
+- 2026-04-09: `claudecode` runner переведён на dual-mode, добавлен native direct flow с retry при parse-fail.
+- 2026-04-09: Обновлены orchestrator normalization rules для `runtime_versions` и coverage missing canonicalization.
+- 2026-04-09: Добавлены/обновлены unit tests (`claudecode`, extractor, orchestrator quality/coverage), обновлены runtime usage + full-run runbook docs.
+
+---
+
+### Plan ID
+EP-20260410-orchestration-prompt-quality
+
+### Context
+Нужно снизить семантический шум в refresh-артефактах и стабилизировать содержательный результат headless рантаймов (`claude-code`/`qwen-code`) без изменения публичных контрактов.
+
+### Goals (must have)
+- [x] Ввести post-normalize semantic guard для refresh (`step1` фильтр placeholder entities, `step3` fallback finding при owner-gap)
+- [x] Усилить step-specific prompt policy для `claude` и `qwen` (allowed/forbidden entities, finding requirement, anti-noise rules)
+- [x] Расширить канонизацию/дедуп coverage и questions (ID suffix collapse + text-level dedupe)
+- [x] Усилить full-run quality gates semantic checks (owner-gap + empty findings, canonical duplicates)
+- [x] Обновить отчётный рендер findings (rule_id, related_ids, evidence refs)
+
+### Non-goals
+- [x] Изменение CLI/API/env surface
+- [x] Изменение `schemas/taskresult.schema.json`
+- [x] Добавление новых runtime providers
+
+### Approach
+1) Добавить semantic guard в orchestrator после `NormalizeTaskResult`.
+2) Сделать prompts step-aware и provider-consistent для `claude`/`qwen`.
+3) Нормализовать merge coverage/questions и report rendering.
+4) Добавить semantic проверки в `scripts/full-run-ai-advent.sh` и закрыть тестами.
+
+### Progress log
+- 2026-04-10: В `orchestrator` добавлен semantic guard: фильтрация runtime placeholders в `refresh.step1.collect`, fallback findings в `refresh.step3.findings` (включая generic fallback без service candidate).
+- 2026-04-10: Обновлены merge правила вопросов/coverage: canonical question IDs, text dedupe, semantic dedupe/канонизация coverage missing+notes.
+- 2026-04-10: Hardened prompts для `claude`/`qwen`: step policies, canonical dictionaries, anti-noise contract, retry strict-mode hints.
+- 2026-04-10: Усилен full-run quality gate (`check_headless_refresh_semantic_quality`) и обновлены docs (`README`, `ARCHITECTURE`, `LOCAL_FULL_RUN_AI_ADVENT`).
+- 2026-04-10: Добавлены/обновлены unit+integration tests и golden fixtures для findings/report changes.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.

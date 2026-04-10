@@ -1080,12 +1080,21 @@ func (e *pipelineExecution) executeRuntimeTask(
 		return runtimeTaskExecution{}, err
 	}
 	normalized := contracts.NormalizeTaskResult(parsed)
+	normalized = e.applySemanticGuards(stepID, domainID, task, normalized)
+	normalizedRaw, err := json.MarshalIndent(normalized, "", "  ")
+	if err != nil {
+		return runtimeTaskExecution{}, fmt.Errorf("marshal normalized taskresult: %w", err)
+	}
 	runtimeName := strings.TrimSpace(normalized.Meta.Runtime.Name)
 	runtimeVersion := strings.TrimSpace(normalized.Meta.Runtime.Version)
 	if runtimeName == "" {
 		runtimeName = "unknown"
 	}
-	e.runtimeVersions[runtimeName+"@"+runtimeVersion] = struct{}{}
+	runtimeKey := runtimeName
+	if runtimeVersion != "" {
+		runtimeKey = runtimeName + "@" + runtimeVersion
+	}
+	e.runtimeVersions[runtimeKey] = struct{}{}
 
 	if len(normalized.Warnings) > 0 {
 		for _, runtimeWarning := range normalized.Warnings {
@@ -1152,7 +1161,7 @@ func (e *pipelineExecution) executeRuntimeTask(
 	})
 
 	return runtimeTaskExecution{
-		RawJSON:    result.RawJSON,
+		RawJSON:    normalizedRaw,
 		Normalized: normalized,
 		Apply:      applyReport,
 	}, nil
@@ -1608,18 +1617,31 @@ func countCoverageMissing(coverage *contracts.Coverage) int {
 
 func mergeQuestions(existing []contracts.Question, incoming []contracts.Question) []contracts.Question {
 	byID := map[string]contracts.Question{}
+	byText := map[string]string{}
 	order := make([]string, 0, len(existing)+len(incoming))
 
 	appendQuestion := func(question contracts.Question) {
-		id := strings.TrimSpace(question.ID)
+		id := canonicalizeQuestionID(question.ID)
 		if id == "" {
 			return
+		}
+		question.ID = id
+		textKey := normalizeQuestionText(question.Text)
+		if textKey != "" {
+			if existingID, exists := byText[textKey]; exists {
+				if existingID != id {
+					return
+				}
+			}
 		}
 		if _, exists := byID[id]; exists {
 			return
 		}
 		byID[id] = question
 		order = append(order, id)
+		if textKey != "" {
+			byText[textKey] = id
+		}
 	}
 	for _, question := range existing {
 		appendQuestion(question)
@@ -1641,25 +1663,307 @@ func mergeCoverage(existing *contracts.Coverage, incoming *contracts.Coverage) *
 	}
 	if existing == nil {
 		copyCoverage := *incoming
-		copyCoverage.Observed = dedupeStrings(copyCoverage.Observed)
-		copyCoverage.Missing = dedupeStrings(copyCoverage.Missing)
-		copyCoverage.Notes = dedupeStrings(copyCoverage.Notes)
+		copyCoverage.Observed = dedupeSemanticStrings(copyCoverage.Observed)
+		copyCoverage.Missing = dedupeSemanticStrings(canonicalizeCoverageMissing(copyCoverage.Missing))
+		copyCoverage.Notes = dedupeSemanticStrings(copyCoverage.Notes)
 		return &copyCoverage
 	}
 	if incoming == nil {
 		copyCoverage := *existing
-		copyCoverage.Observed = dedupeStrings(copyCoverage.Observed)
-		copyCoverage.Missing = dedupeStrings(copyCoverage.Missing)
-		copyCoverage.Notes = dedupeStrings(copyCoverage.Notes)
+		copyCoverage.Observed = dedupeSemanticStrings(copyCoverage.Observed)
+		copyCoverage.Missing = dedupeSemanticStrings(canonicalizeCoverageMissing(copyCoverage.Missing))
+		copyCoverage.Notes = dedupeSemanticStrings(copyCoverage.Notes)
 		return &copyCoverage
 	}
 
 	merged := &contracts.Coverage{
-		Observed: dedupeStrings(append(existing.Observed, incoming.Observed...)),
-		Missing:  dedupeStrings(append(existing.Missing, incoming.Missing...)),
-		Notes:    dedupeStrings(append(existing.Notes, incoming.Notes...)),
+		Observed: dedupeSemanticStrings(append(existing.Observed, incoming.Observed...)),
+		Missing:  dedupeSemanticStrings(canonicalizeCoverageMissing(append(existing.Missing, incoming.Missing...))),
+		Notes:    dedupeSemanticStrings(append(existing.Notes, incoming.Notes...)),
 	}
 	return merged
+}
+
+func canonicalizeCoverageMissing(values []string) []string {
+	canonical := make([]string, 0, len(values))
+	for _, value := range values {
+		canonical = append(canonical, canonicalizeCoverageMissingValue(value))
+	}
+	return canonical
+}
+
+func canonicalizeCoverageMissingValue(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	normalized := strings.ToLower(trimmed)
+	normalized = strings.ReplaceAll(normalized, "_", " ")
+	normalized = strings.ReplaceAll(normalized, "-", " ")
+	normalized = strings.Join(strings.Fields(normalized), " ")
+
+	switch normalized {
+	case "owner mappings", "owner mapping", "owner team mapping", "owner team mappings":
+		return "owner mappings"
+	case "ci cd evidence", "ci cd pipelines", "ci cd pipeline evidence", "cicd evidence", "ci pipelines":
+		return "ci-cd evidence"
+	case "delta validation":
+		return "delta validation"
+	case "dependency graph":
+		return "dependency graph"
+	case "runtime metrics":
+		return "runtime metrics"
+	case "api contracts", "api contract", "api contracts drift", "api specification drift", "api specs":
+		return "api contracts"
+	case "deployment configs", "deployment config", "deployment configuration", "deployment configurations":
+		return "deployment configs"
+	case "integration edges", "service integrations":
+		return "integration edges"
+	case "datastore bindings", "database bindings":
+		return "datastore bindings"
+	case "dependencies", "dependency drift":
+		return "dependencies"
+	default:
+		return trimmed
+	}
+}
+
+func normalizeSemanticKey(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = strings.ReplaceAll(normalized, "_", " ")
+	normalized = strings.ReplaceAll(normalized, "-", " ")
+	normalized = strings.Join(strings.Fields(normalized), " ")
+	return normalized
+}
+
+func dedupeSemanticStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		key := normalizeSemanticKey(trimmed)
+		if key == "" {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
+}
+
+func canonicalizeQuestionID(id string) string {
+	canonical := strings.TrimSpace(id)
+	for {
+		dot := strings.LastIndex(canonical, ".")
+		if dot <= 0 {
+			break
+		}
+		suffix := canonical[dot+1:]
+		if _, err := strconv.Atoi(suffix); err != nil {
+			break
+		}
+		canonical = canonical[:dot]
+	}
+	return strings.TrimSpace(canonical)
+}
+
+func normalizeQuestionText(text string) string {
+	return normalizeSemanticKey(text)
+}
+
+func isOwnerMappingsMissing(coverage *contracts.Coverage) bool {
+	if coverage == nil {
+		return false
+	}
+	for _, missing := range coverage.Missing {
+		if canonicalizeCoverageMissingValue(missing) == "owner mappings" {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldFilterRefreshCollectEntityType(entityType string) bool {
+	switch normalizeSemanticKey(entityType) {
+	case "runtime provider", "runtime", "runtime meta", "metadata":
+		return true
+	default:
+		return false
+	}
+}
+
+func (e *pipelineExecution) applySemanticGuards(stepID string, domainID string, task acpruntime.Task, normalized contracts.TaskResult) contracts.TaskResult {
+	if stepID == "refresh.step1.collect" {
+		filtered := make([]contracts.Operation, 0, len(normalized.Changeset))
+		droppedByType := map[string]int{}
+		for _, op := range normalized.Changeset {
+			if op.Op == "upsert_entity" && op.Entity != nil && shouldFilterRefreshCollectEntityType(op.Entity.Type) {
+				droppedByType[op.Entity.Type]++
+				continue
+			}
+			filtered = append(filtered, op)
+		}
+		if len(droppedByType) > 0 {
+			normalized.Changeset = filtered
+			parts := make([]string, 0, len(droppedByType))
+			for typ, count := range droppedByType {
+				parts = append(parts, fmt.Sprintf("%s=%d", strings.TrimSpace(typ), count))
+			}
+			sort.Strings(parts)
+			normalized.Warnings = append(
+				normalized.Warnings,
+				fmt.Sprintf("semantic_guard: dropped refresh.step1.collect entity types [%s]", strings.Join(parts, ", ")),
+			)
+		}
+	}
+
+	if stepID != "refresh.step3.findings" {
+		return normalized
+	}
+	hasFinding := false
+	for _, op := range normalized.Changeset {
+		if op.Op == "add_finding" && op.Finding != nil {
+			hasFinding = true
+			break
+		}
+	}
+	if hasFinding {
+		return normalized
+	}
+	if !isOwnerMappingsMissing(normalized.Coverage) {
+		return normalized
+	}
+
+	entities, err := e.store.ListEntities()
+	if err != nil {
+		normalized.Warnings = append(normalized.Warnings, fmt.Sprintf("semantic_guard: owner-gap check failed: %v", err))
+		return normalized
+	}
+	scopeSet := map[string]struct{}{}
+	for _, scope := range task.RepoScopes {
+		scope = strings.TrimSpace(scope)
+		if scope == "" {
+			continue
+		}
+		scopeSet[scope] = struct{}{}
+	}
+
+	var candidate contracts.Entity
+	found := false
+	for _, entity := range entities {
+		if entity.Type != "service" {
+			continue
+		}
+		if strings.TrimSpace(entity.OwnerTeamID) != "" {
+			continue
+		}
+		if len(scopeSet) > 0 {
+			attributes, ok := entity.Attributes.(map[string]any)
+			if !ok {
+				continue
+			}
+			repoScope, _ := attributes["repo_scope"].(string)
+			repoScope = strings.TrimSpace(repoScope)
+			if repoScope == "" {
+				continue
+			}
+			if _, ok := scopeSet[repoScope]; !ok {
+				continue
+			}
+		}
+		candidate = entity
+		found = true
+		break
+	}
+	if !found {
+		repo := "unknown"
+		if len(task.RepoScopes) > 0 && strings.TrimSpace(task.RepoScopes[0]) != "" {
+			repo = strings.TrimSpace(task.RepoScopes[0])
+		}
+		relatedID := "scope." + slugutil.Slugify(repo)
+		if relatedID == "scope." {
+			relatedID = "scope.unknown"
+		}
+		findingID := "finding.missing-owner." + slugutil.Slugify(relatedID) + ".refresh"
+		if strings.TrimSpace(domainID) != "" {
+			findingID = findingID + "." + slugutil.Slugify(domainID)
+		}
+		normalized.Changeset = append(normalized.Changeset, contracts.Operation{
+			Op: "add_finding",
+			Finding: &contracts.Finding{
+				ID:          findingID,
+				Severity:    "medium",
+				Title:       "Missing owner mapping",
+				Description: fmt.Sprintf("owner mappings are unresolved for repo scope %q", repo),
+				RuleID:      "rule.owner.required",
+				RelatedIDs:  []string{relatedID},
+				Provenance: contracts.Provenance{
+					Kind:       "inference",
+					Confidence: 0.62,
+					Evidence: []contracts.Evidence{
+						{
+							Repo: repo,
+							Path: "README.md",
+						},
+					},
+				},
+			},
+		})
+		normalized.Warnings = append(
+			normalized.Warnings,
+			fmt.Sprintf("semantic_guard: added fallback owner-mapping finding %q", findingID),
+		)
+		return normalized
+	}
+
+	evidence := append([]contracts.Evidence(nil), candidate.Provenance.Evidence...)
+	if len(evidence) == 0 {
+		repo := "unknown"
+		if len(task.RepoScopes) > 0 && strings.TrimSpace(task.RepoScopes[0]) != "" {
+			repo = strings.TrimSpace(task.RepoScopes[0])
+		}
+		evidence = []contracts.Evidence{
+			{
+				Repo: repo,
+				Path: "README.md",
+			},
+		}
+	}
+	relatedID := strings.TrimSpace(candidate.ID)
+	if relatedID == "" {
+		relatedID = "svc.unknown"
+	}
+	findingID := "finding.missing-owner." + slugutil.Slugify(relatedID) + ".refresh"
+	if strings.TrimSpace(domainID) != "" {
+		findingID = findingID + "." + slugutil.Slugify(domainID)
+	}
+	normalized.Changeset = append(normalized.Changeset, contracts.Operation{
+		Op: "add_finding",
+		Finding: &contracts.Finding{
+			ID:          findingID,
+			Severity:    "medium",
+			Title:       "Missing owner mapping",
+			Description: fmt.Sprintf("owner_team_id is not confirmed for service %q", relatedID),
+			RuleID:      "rule.owner.required",
+			RelatedIDs:  []string{relatedID},
+			Provenance: contracts.Provenance{
+				Kind:       "inference",
+				Confidence: 0.66,
+				Evidence:   evidence,
+			},
+		},
+	})
+	normalized.Warnings = append(
+		normalized.Warnings,
+		fmt.Sprintf("semantic_guard: added fallback owner-mapping finding %q", findingID),
+	)
+	return normalized
 }
 
 func dedupeStrings(values []string) []string {

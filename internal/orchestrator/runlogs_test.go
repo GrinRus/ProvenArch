@@ -158,6 +158,113 @@ func TestRunAggregatesTaskResultWarningsIntoRunWarningsAndLogs(t *testing.T) {
 	}
 }
 
+func TestRunQualitySummaryRuntimeVersionsOmitTrailingAtWhenVersionIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	service := NewService(
+		WithHistoryWorkspace(ws),
+		WithRunner(syntheticNoVersionRunner{}),
+	)
+
+	info, artifacts, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run init pipeline with no-version runner: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded run status, got %s", info.Status)
+	}
+
+	qualityPath := "reports/taskruns/" + info.RunID + "-quality.json"
+	foundQualityArtifact := false
+	for _, artifact := range artifacts {
+		if artifact.Path == qualityPath {
+			foundQualityArtifact = true
+			break
+		}
+	}
+	if !foundQualityArtifact {
+		t.Fatalf("expected quality summary artifact %q in run artifacts", qualityPath)
+	}
+
+	qualityBytes, err := os.ReadFile(filepath.Join(ws.Path, qualityPath))
+	if err != nil {
+		t.Fatalf("read quality summary %q: %v", qualityPath, err)
+	}
+	var quality struct {
+		RuntimeVersions []string `json:"runtime_versions"`
+	}
+	if err := json.Unmarshal(qualityBytes, &quality); err != nil {
+		t.Fatalf("decode quality summary: %v", err)
+	}
+	if len(quality.RuntimeVersions) == 0 {
+		t.Fatalf("expected runtime versions in quality summary")
+	}
+	for _, version := range quality.RuntimeVersions {
+		if strings.HasSuffix(version, "@") {
+			t.Fatalf("runtime version must not have trailing '@': %q", version)
+		}
+	}
+	if quality.RuntimeVersions[0] != "synthetic-headless" {
+		t.Fatalf("expected runtime_versions to contain bare runtime name, got %+v", quality.RuntimeVersions)
+	}
+}
+
+func TestRunQualitySummaryRuntimeVersionsPreferVersionedEntry(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	service := NewService(
+		WithHistoryWorkspace(ws),
+		WithRunner(syntheticMixedVersionRunner{}),
+	)
+
+	info, artifacts, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run init pipeline with mixed-version runner: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded run status, got %s", info.Status)
+	}
+
+	qualityPath := "reports/taskruns/" + info.RunID + "-quality.json"
+	foundQualityArtifact := false
+	for _, artifact := range artifacts {
+		if artifact.Path == qualityPath {
+			foundQualityArtifact = true
+			break
+		}
+	}
+	if !foundQualityArtifact {
+		t.Fatalf("expected quality summary artifact %q in run artifacts", qualityPath)
+	}
+
+	qualityBytes, err := os.ReadFile(filepath.Join(ws.Path, qualityPath))
+	if err != nil {
+		t.Fatalf("read quality summary %q: %v", qualityPath, err)
+	}
+	var quality struct {
+		RuntimeVersions []string `json:"runtime_versions"`
+	}
+	if err := json.Unmarshal(qualityBytes, &quality); err != nil {
+		t.Fatalf("decode quality summary: %v", err)
+	}
+	if len(quality.RuntimeVersions) != 1 {
+		t.Fatalf("expected single runtime version entry, got %+v", quality.RuntimeVersions)
+	}
+	if quality.RuntimeVersions[0] != "synthetic-headless@v1" {
+		t.Fatalf("expected versioned runtime entry to win over bare name, got %+v", quality.RuntimeVersions)
+	}
+}
+
 func TestCleanupRunLogsByTTLAndMaxRuns(t *testing.T) {
 	t.Parallel()
 
@@ -255,3 +362,53 @@ func (syntheticWarningRunner) Run(_ context.Context, task acpruntime.Task) (acpr
 }
 
 func (syntheticWarningRunner) Preflight(context.Context) error { return nil }
+
+type syntheticNoVersionRunner struct{}
+
+func (syntheticNoVersionRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	payload := map[string]any{
+		"meta": map[string]any{
+			"task_id":    task.TaskID,
+			"step_id":    task.StepID,
+			"run_id":     task.RunID,
+			"runtime":    map[string]any{"name": "synthetic-headless"},
+			"started_at": task.StartedAtUTC.Format(time.RFC3339),
+		},
+		"summary":   "synthetic success",
+		"changeset": []any{},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return acpruntime.Result{}, err
+	}
+	return acpruntime.Result{RawJSON: raw}, nil
+}
+
+func (syntheticNoVersionRunner) Preflight(context.Context) error { return nil }
+
+type syntheticMixedVersionRunner struct{}
+
+func (syntheticMixedVersionRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	runtime := map[string]any{"name": "synthetic-headless"}
+	if task.StepID == "init.step3.findings" {
+		runtime["version"] = "v1"
+	}
+	payload := map[string]any{
+		"meta": map[string]any{
+			"task_id":    task.TaskID,
+			"step_id":    task.StepID,
+			"run_id":     task.RunID,
+			"runtime":    runtime,
+			"started_at": task.StartedAtUTC.Format(time.RFC3339),
+		},
+		"summary":   "synthetic success",
+		"changeset": []any{},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return acpruntime.Result{}, err
+	}
+	return acpruntime.Result{RawJSON: raw}, nil
+}
+
+func (syntheticMixedVersionRunner) Preflight(context.Context) error { return nil }
