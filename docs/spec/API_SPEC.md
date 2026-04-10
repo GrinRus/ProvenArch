@@ -2,7 +2,7 @@
 
 Этот документ фиксирует фактический wire-contract HTTP API для local-first ACP standalone сервера.
 
-> MVP режим: `acp serve --workspace <abs-path> [--auto-init ...]`.
+> MVP режим: `acp serve --workspace <abs-path> [--auto-init ... [--docs-imports-path <path>]]`.
 > Service работает с одним bound workspace на процесс.
 > Required CI/CD surface: CLI batch mode (`acp run ... --non-interactive`). API-trigger остаётся optional для trusted local/private deployment.
 
@@ -381,7 +381,7 @@ Run-specific поверхность (не входит в strict deterministic g
 
 ## 8) Deployment boundary
 - `acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)`: explicit bootstrap.
-- `acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)]`: local interactive и trusted local/private deployment.
+- `acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]`: local interactive и trusted local/private deployment.
 - bootstrap behavior: если workspace root не является git-репозиторием, ACP автоматически выполняет `git init` (без auto-commit/auto-push).
 - `serve` startup работает в lenient mode: сервис стартует без блокирующего repo preflight; readiness diagnostics доступны через `POST /api/workspace/validate`.
 - `acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--non-interactive]`.

@@ -207,8 +207,36 @@ func (c Compiler) WriteFindings(findings []contracts.Finding) ([]Artifact, error
 			content.WriteString(fmt.Sprintf("## %s\n\n", finding.Title))
 			content.WriteString(fmt.Sprintf("- ID: `%s`\n", finding.ID))
 			content.WriteString(fmt.Sprintf("- Severity: `%s`\n", finding.Severity))
+			if strings.TrimSpace(finding.RuleID) != "" {
+				content.WriteString(fmt.Sprintf("- Rule ID: `%s`\n", finding.RuleID))
+			}
+			if len(finding.RelatedIDs) > 0 {
+				content.WriteString(fmt.Sprintf("- Related IDs: %s\n", renderBacktickList(uniqueSorted(append([]string(nil), finding.RelatedIDs...)))))
+			}
 			if finding.Description != "" {
 				content.WriteString(fmt.Sprintf("- Description: %s\n", finding.Description))
+			}
+			if len(finding.Provenance.Evidence) > 0 {
+				refs := make([]string, 0, len(finding.Provenance.Evidence))
+				for _, evidence := range finding.Provenance.Evidence {
+					repo := strings.TrimSpace(evidence.Repo)
+					path := strings.TrimSpace(evidence.Path)
+					if repo == "" && path == "" {
+						continue
+					}
+					if repo == "" {
+						refs = append(refs, path)
+						continue
+					}
+					if path == "" {
+						refs = append(refs, repo)
+						continue
+					}
+					refs = append(refs, repo+":"+path)
+				}
+				if len(refs) > 0 {
+					content.WriteString(fmt.Sprintf("- Evidence: %s\n", renderBacktickList(uniqueSorted(refs))))
+				}
 			}
 			content.WriteString("\n")
 		}
@@ -445,6 +473,41 @@ func writeStringList(builder *strings.Builder, title string, values []string) {
 		builder.WriteString(fmt.Sprintf("- %s\n", value))
 	}
 	builder.WriteString("\n")
+}
+
+func uniqueSorted(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	uniq := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		uniq = append(uniq, trimmed)
+	}
+	sort.Strings(uniq)
+	return uniq
+}
+
+func renderBacktickList(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	rendered := make([]string, 0, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		rendered = append(rendered, fmt.Sprintf("`%s`", value))
+	}
+	return strings.Join(rendered, ", ")
 }
 
 func sortArtifacts(artifacts []Artifact) {

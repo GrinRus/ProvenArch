@@ -13,6 +13,7 @@ import (
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultextractor"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 )
 
@@ -62,9 +63,50 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 
 	args := append([]string(nil), r.Args...)
 	if len(args) == 0 {
-		args = []string{"--output-format", "json", "--yolo", "--channel", "CI", buildPrompt(taskPayload)}
+		args = []string{"--output-format", "json", "--yolo", "--channel", "CI", buildPrompt(taskPayload, false)}
 	}
 
+	result, parseErr, runErr := runQwenCommand(ctx, command, args)
+	if runErr != nil {
+		return acpruntime.Result{}, acpruntime.WrapRunnerError(
+			acpruntime.ProviderQwenCode,
+			acpruntime.ErrorCodeRunnerUnavailable,
+			fmt.Sprintf("%v: %s", ErrRunnerUnavailable, runErr),
+			runErr,
+		)
+	}
+	if parseErr == nil {
+		return result, nil
+	}
+
+	// Live qwen output can occasionally contain malformed tokens. Retry once with
+	// an explicitly stricter prompt before classifying as parse failure.
+	if len(r.Args) == 0 {
+		retryArgs := []string{"--output-format", "json", "--yolo", "--channel", "CI", buildPrompt(taskPayload, true)}
+		retryResult, retryParseErr, retryRunErr := runQwenCommand(ctx, command, retryArgs)
+		if retryRunErr != nil {
+			return acpruntime.Result{}, acpruntime.WrapRunnerError(
+				acpruntime.ProviderQwenCode,
+				acpruntime.ErrorCodeRunnerUnavailable,
+				fmt.Sprintf("%v: %s", ErrRunnerUnavailable, retryRunErr),
+				retryRunErr,
+			)
+		}
+		if retryParseErr == nil {
+			return retryResult, nil
+		}
+		parseErr = retryParseErr
+	}
+
+	return acpruntime.Result{}, acpruntime.WrapRunnerError(
+		acpruntime.ProviderQwenCode,
+		acpruntime.ErrorCodeRunnerParseFailed,
+		fmt.Sprintf("headless provider %q returned invalid taskresult: %v", acpruntime.ProviderQwenCode, parseErr),
+		parseErr,
+	)
+}
+
+func runQwenCommand(ctx context.Context, command string, args []string) (acpruntime.Result, error, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
 
 	var stdout bytes.Buffer
@@ -77,42 +119,32 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 		if errText == "" {
 			errText = err.Error()
 		}
-		return acpruntime.Result{}, acpruntime.WrapRunnerError(
-			acpruntime.ProviderQwenCode,
-			acpruntime.ErrorCodeRunnerUnavailable,
-			fmt.Sprintf("%v: %s", ErrRunnerUnavailable, errText),
-			err,
-		)
+		return acpruntime.Result{}, nil, errors.New(errText)
 	}
 
-	rawTaskResult, err := extractTaskResultJSON(stdout.Bytes())
+	rawTaskResult, err := taskresultextractor.Extract(stdout.Bytes())
 	if err != nil {
-		return acpruntime.Result{}, acpruntime.WrapRunnerError(
-			acpruntime.ProviderQwenCode,
-			acpruntime.ErrorCodeRunnerParseFailed,
-			fmt.Sprintf("headless provider %q returned invalid taskresult: %v", acpruntime.ProviderQwenCode, err),
-			err,
-		)
+		return acpruntime.Result{
+			Stdout: stdout.String(),
+			Stderr: stderr.String(),
+		}, err, nil
 	}
 	taskResult, err := contracts.ParseTaskResult(rawTaskResult)
 	if err != nil {
-		return acpruntime.Result{}, acpruntime.WrapRunnerError(
-			acpruntime.ProviderQwenCode,
-			acpruntime.ErrorCodeRunnerParseFailed,
-			fmt.Sprintf("headless provider %q returned invalid taskresult: %v", acpruntime.ProviderQwenCode, err),
-			err,
-		)
+		return acpruntime.Result{
+			Stdout: stdout.String(),
+			Stderr: stderr.String(),
+		}, err, nil
 	}
-
 	return acpruntime.Result{
 		TaskResult: taskResult,
 		RawJSON:    rawTaskResult,
 		Stdout:     stdout.String(),
 		Stderr:     stderr.String(),
-	}, nil
+	}, nil, nil
 }
 
-func buildPrompt(taskPayload []byte) string {
+func buildPrompt(taskPayload []byte, retry bool) string {
 	var task acpruntime.Task
 	if err := json.Unmarshal(taskPayload, &task); err != nil {
 		return strings.TrimSpace(fmt.Sprintf(`You are ACP runtime provider %q.
@@ -126,9 +158,15 @@ Task payload JSON:
 	if rawRepoScopes, err := json.Marshal(task.RepoScopes); err == nil {
 		repoScopesJSON = string(rawRepoScopes)
 	}
-	refreshHint := ""
-	if strings.HasPrefix(task.StepID, "refresh.") {
-		refreshHint = `For refresh steps include at least one question object and at least three items in coverage.missing.`
+	stepPolicy := buildStepSpecificPolicy(task.StepID)
+	retryHint := ""
+	if retry {
+		retryHint = strings.Join([]string{
+			`RETRY MODE: previous output was invalid JSON.`,
+			`Do not include non-ASCII symbols in numbers or timestamps.`,
+			`RFC3339 timestamps only (example: 2026-04-09T15:28:49Z).`,
+			`Decimals must be compact numeric literals (example: 0.7, not 0. 7).`,
+		}, "\n")
 	}
 
 	return strings.TrimSpace(fmt.Sprintf(`You are ACP runtime provider %q.
@@ -145,6 +183,10 @@ STRICT CONTRACT (must pass):
 - provenance.confidence MUST be a NUMBER in range [0,1], never a string.
 - provenance.evidence MUST be an ARRAY of objects with repo/path.
 - if "questions" is present, it MUST be an array of objects (each object has at least "id" and "text").
+- coverage.missing MUST use canonical terms only: owner mappings, ci-cd evidence, delta validation, dependency graph, runtime metrics, api contracts, deployment configs, integration edges, datastore bindings, dependencies.
+- question IDs MUST use canonical form without numeric suffixes (example: q.refresh.delta, not q.refresh.delta.1).
+- Do not claim workspace is empty/minimal unless provenance evidence includes concrete file paths proving it.
+%s
 %s
 
 Set meta fields exactly:
@@ -160,7 +202,7 @@ Schema-valid template for this task (copy structure and field TYPES, then refine
 %s
 
 Serialized runtime task JSON (context only):
-%s`, acpruntime.ProviderQwenCode, refreshHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderQwenCode, task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, repoScopesJSON, buildTaskResultTemplateJSON(task), strings.TrimSpace(string(taskPayload))))
+%s`, acpruntime.ProviderQwenCode, stepPolicy, retryHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderQwenCode, task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, repoScopesJSON, buildTaskResultTemplateJSON(task), strings.TrimSpace(string(taskPayload))))
 }
 
 func buildTaskResultTemplateJSON(task acpruntime.Task) string {
@@ -203,6 +245,35 @@ func buildTaskResultTemplateJSON(task acpruntime.Task) string {
 		return "{}"
 	}
 	return string(raw)
+}
+
+func buildStepSpecificPolicy(stepID string) string {
+	switch stepID {
+	case "refresh.step1.collect":
+		return strings.Join([]string{
+			`STEP POLICY refresh.step1.collect:`,
+			`- Allowed upsert_entity types: service, datastore, integration, external.system, team, domain, api, component.`,
+			`- Forbidden placeholder entity types: runtime_provider, runtime, metadata.`,
+			`- Analyze only repository/workspace artifacts; do NOT perform web search or external browsing.`,
+			`- Every provenance.evidence.path must resolve to an existing file in workspace/repo scope.`,
+			`- Do NOT emit synthetic evidence paths such as search_source/*, search_query/*, search_config/*.`,
+			`- Do NOT introduce unrelated incident domains (for example bidding/tender/power-system topics) unless explicitly present in repository evidence.`,
+			`- If evidence is incomplete, capture gap via coverage.missing instead of synthetic placeholder entities.`,
+			`- Include at least one question and at least three items in coverage.missing.`,
+		}, "\n")
+	case "refresh.step3.findings":
+		return strings.Join([]string{
+			`STEP POLICY refresh.step3.findings:`,
+			`- If owner mapping is unresolved in evidence/coverage, include at least one add_finding operation.`,
+			`- Each finding must include rule_id, related_ids, and provenance.evidence[].`,
+			`- Include at least one question and at least three items in coverage.missing.`,
+		}, "\n")
+	default:
+		if strings.HasPrefix(stepID, "refresh.") {
+			return `For refresh steps include at least one question object and at least three items in coverage.missing.`
+		}
+		return ""
+	}
 }
 
 func buildTemplateChangeset(task acpruntime.Task) []contracts.Operation {
@@ -294,173 +365,4 @@ func humanizeScope(scope string) string {
 		return "Repository"
 	}
 	return name
-}
-
-func extractTaskResultJSON(raw []byte) ([]byte, error) {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 {
-		return nil, errors.New("empty stdout")
-	}
-	if _, err := contracts.ParseTaskResult(trimmed); err == nil {
-		return trimmed, nil
-	}
-
-	if parsed, err := parseTaskResultFromJSON(trimmed); err == nil {
-		return parsed, nil
-	}
-	if parsed, err := parseTaskResultFromText(string(trimmed)); err == nil {
-		return parsed, nil
-	}
-
-	return nil, errors.New("unable to extract valid TaskResult JSON from qwen output")
-}
-
-func parseTaskResultFromJSON(raw []byte) ([]byte, error) {
-	var value any
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return nil, err
-	}
-	return parseCandidateValue(value)
-}
-
-func parseCandidateValue(value any) ([]byte, error) {
-	switch typed := value.(type) {
-	case string:
-		return parseTaskResultFromText(typed)
-	case map[string]any:
-		raw, err := json.Marshal(typed)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := contracts.ParseTaskResult(raw); err == nil {
-			return raw, nil
-		}
-
-		priorityKeys := []string{"response", "result", "message", "content", "text"}
-		seen := map[string]struct{}{}
-		for _, key := range priorityKeys {
-			seen[key] = struct{}{}
-			nested, ok := typed[key]
-			if !ok {
-				continue
-			}
-			if parsed, nestedErr := parseCandidateValue(nested); nestedErr == nil {
-				return parsed, nil
-			}
-		}
-		for key, nested := range typed {
-			if _, ok := seen[key]; ok {
-				continue
-			}
-			if parsed, nestedErr := parseCandidateValue(nested); nestedErr == nil {
-				return parsed, nil
-			}
-		}
-	case []any:
-		for idx := len(typed) - 1; idx >= 0; idx-- {
-			item := typed[idx]
-			if parsed, err := parseCandidateValue(item); err == nil {
-				return parsed, nil
-			}
-		}
-	}
-	return nil, errors.New("unsupported candidate value")
-}
-
-func parseTaskResultFromText(text string) ([]byte, error) {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" {
-		return nil, errors.New("empty text")
-	}
-
-	if candidate, ok := stripCodeFence(trimmed); ok {
-		trimmed = candidate
-	}
-
-	if json.Valid([]byte(trimmed)) {
-		if parsed, err := parseTaskResultFromJSON([]byte(trimmed)); err == nil {
-			return parsed, nil
-		}
-	}
-
-	candidates := extractJSONObjects(trimmed)
-	if len(candidates) == 0 {
-		return nil, errors.New("no json object found in text")
-	}
-	for _, candidate := range candidates {
-		if parsed, err := parseTaskResultFromJSON([]byte(candidate)); err == nil {
-			return parsed, nil
-		}
-	}
-	return nil, errors.New("unable to parse taskresult from extracted json objects")
-}
-
-func stripCodeFence(input string) (string, bool) {
-	if !strings.HasPrefix(input, "```") {
-		return "", false
-	}
-	withoutPrefix := input[3:]
-	if newline := strings.IndexByte(withoutPrefix, '\n'); newline >= 0 {
-		withoutPrefix = withoutPrefix[newline+1:]
-	}
-	if tail := strings.LastIndex(withoutPrefix, "```"); tail >= 0 {
-		withoutPrefix = withoutPrefix[:tail]
-	}
-	candidate := strings.TrimSpace(withoutPrefix)
-	if candidate == "" {
-		return "", false
-	}
-	return candidate, true
-}
-
-func extractJSONObjects(input string) []string {
-	candidates := make([]string, 0, 4)
-	start := strings.IndexByte(input, '{')
-	for start >= 0 {
-		depth := 0
-		inString := false
-		escapeNext := false
-		found := false
-		for idx := start; idx < len(input); idx++ {
-			ch := input[idx]
-			if inString {
-				if escapeNext {
-					escapeNext = false
-					continue
-				}
-				switch ch {
-				case '\\':
-					escapeNext = true
-				case '"':
-					inString = false
-				}
-				continue
-			}
-			switch ch {
-			case '"':
-				inString = true
-			case '{':
-				depth++
-			case '}':
-				depth--
-				if depth == 0 {
-					candidate := strings.TrimSpace(input[start : idx+1])
-					if candidate != "" && json.Valid([]byte(candidate)) {
-						candidates = append(candidates, candidate)
-					}
-					found = true
-					break
-				}
-			}
-		}
-		if !found {
-			break
-		}
-		next := strings.IndexByte(input[start+1:], '{')
-		if next < 0 {
-			break
-		}
-		start = start + 1 + next
-	}
-	return candidates
 }

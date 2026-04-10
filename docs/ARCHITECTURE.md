@@ -18,7 +18,7 @@
    - `init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)` создаёт/обновляет `workspace.yaml`, bootstrap-ит fixed layout/baseline bundle и выполняет dry validation для первого старта
    - Раздаёт UI (embedded static assets из `ui/dist`)
    - Экспортирует API под `/api/*`
-   - `serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)]` поднимает single-workspace-per-process service
+   - `serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]` поднимает single-workspace-per-process service
    - `serve --auto-init` bootstrap-ит workspace manifest/layout при отсутствии `workspace.yaml`
    - bootstrap (`init-workspace`/`serve --auto-init`) автоматически делает `git init` для workspace root при отсутствии `.git`
    - startup для `serve` lenient: без блокирующего repo preflight; readiness diagnostics доступны через `/api/workspace/validate`
@@ -34,12 +34,14 @@
    - React + TypeScript + Vite
    - Dev: `npm run dev` с proxy на backend
    - Prod: `npm run build` → `ui/dist` встраивается в Go бинарь
+   - Live browser e2e: Playwright optional smoke (`ui/e2e/live-flow.spec.ts`, `npm run e2e:live --prefix ui`)
    - Guided setup поддерживает multi-repo (`repos[]`) с add/remove rows и optional `ref`
    - Показывает repo overview в validate surface: `resolved_repos` + diagnostics, сгруппированные по repo
    - Редактирует baseline bundle artifacts через guided selector (`charter/*`, `skills/*`, prompt packs, `skills/subagents.yaml`)
    - UI разбит на явные секции `Setup / Baseline / Runs / Results`
    - Показывает run dashboard (queued/running/succeeded/failed), включая завершённые run'ы из persisted history
    - Показывает `Runs: Logs` для выбранного run (`timestamp/level/step/domain/message`) с quick actions `Copy logs`, `Download logs`, `Open taskrun artifact`
+   - Критичные UI-контролы для live e2e снабжены стабильными `data-testid` (`validate/run/status/artifacts/logs`)
 
 3) **Orchestrator (`internal/orchestrator`)** *(implemented baseline)*
    - Step registry (шаги init pipeline)
@@ -59,6 +61,7 @@
    - Вызывает runtime adapter
    - Валидирует TaskResult (schema)
    - Нормализует legacy `add_question` / `set_coverage` в canonical top-level form
+   - Применяет semantic guard для refresh-taskruns: фильтрует placeholder/off-topic артефакты в `refresh.step1.collect`, добавляет deterministic fallback finding при owner-gap в `refresh.step3.findings`, канонизирует/дедуплицирует coverage/question semantics
    - Применяет changeset к модели workspace
    - Не auto-create/rename canonical domain/team cards
    - Триггерит генерацию отчётов

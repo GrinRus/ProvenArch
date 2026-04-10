@@ -790,7 +790,7 @@ export default function App() {
         </p>
       </section>
 
-      <section className="panel">
+      <section className="panel" data-testid="workspace-panel">
         <h2>Setup: Workspace</h2>
         <p className="hint">Guided setup writes a valid multi-repo `workspace.yaml` draft.</p>
         {guidedRepos.map((repo, index) => (
@@ -864,15 +864,20 @@ export default function App() {
         <p className="hint">`workspace.yaml` editor (path/git_url sources)</p>
         <textarea value={manifestContent} onChange={(event) => setManifestContent(event.target.value)} rows={12} />
         <div className="actions">
-          <button type="button" onClick={() => void handleSaveManifest()} disabled={busy}>
+          <button type="button" onClick={() => void handleSaveManifest()} disabled={busy} data-testid="workspace-save-btn">
             Save workspace.yaml
           </button>
-          <button type="button" onClick={() => void handleValidateWorkspace()} disabled={busy}>
+          <button
+            type="button"
+            onClick={() => void handleValidateWorkspace()}
+            disabled={busy}
+            data-testid="workspace-validate-btn"
+          >
             Validate workspace
           </button>
         </div>
         {validateResult ? (
-          <div className="status-block">
+          <div className="status-block" data-testid="workspace-validate-result">
             <p>
               Workspace: <code>{validateResult.workspace}</code>
             </p>
@@ -959,21 +964,27 @@ export default function App() {
         {editorStatus ? <p className="status ok">{editorStatus}</p> : null}
       </section>
 
-      <section className="panel">
+      <section className="panel" data-testid="runs-control-panel">
         <h2>Runs: Pipeline Control</h2>
         <div className="actions">
-          <button type="button" onClick={() => void handleRunPipeline("init")} disabled={busy}>
+          <button type="button" onClick={() => void handleRunPipeline("init")} disabled={busy} data-testid="run-init-btn">
             Run init
           </button>
-          <button type="button" onClick={() => void handleRunPipeline("refresh")} disabled={busy}>
+          <button
+            type="button"
+            onClick={() => void handleRunPipeline("refresh")}
+            disabled={busy}
+            data-testid="run-refresh-btn"
+          >
             Run refresh
           </button>
         </div>
 
         {runStatus ? (
-          <div className="status-block">
+          <div className="status-block" data-testid="run-status-panel">
             <p>
-              Run <code>{runStatus.run_id}</code> status: <strong>{runStatus.status}</strong>
+              Run <code data-testid="run-status-run-id">{runStatus.run_id}</code> status:{" "}
+              <strong data-testid="run-status-value">{runStatus.status}</strong>
             </p>
             <p>Pipeline: {runStatus.pipeline}</p>
             {runStatus.current_step ? <p>Current step: {runStatus.current_step}</p> : null}
@@ -983,7 +994,7 @@ export default function App() {
         ) : null}
       </section>
 
-      <section className="panel">
+      <section className="panel" data-testid="runs-history-panel">
         <h2>Runs: History</h2>
         <p className="hint">
           Running: {runCounters.running} | Succeeded: {runCounters.succeeded} | Failed: {runCounters.failed}
@@ -992,7 +1003,7 @@ export default function App() {
           <p>No runs yet.</p>
         ) : (
           <div className="run-table-wrap">
-            <table className="run-table">
+            <table className="run-table" data-testid="runs-history-table">
               <thead>
                 <tr>
                   <th>Run ID</th>
@@ -1037,13 +1048,23 @@ export default function App() {
         )}
       </section>
 
-      <section className="panel">
+      <section className="panel" data-testid="runs-logs-panel">
         <h2>Runs: Logs</h2>
         <div className="actions">
-          <button type="button" onClick={() => void handleCopyRunLogs()} disabled={runLogs.length === 0}>
+          <button
+            type="button"
+            onClick={() => void handleCopyRunLogs()}
+            disabled={runLogs.length === 0}
+            data-testid="run-logs-copy-btn"
+          >
             Copy logs
           </button>
-          <button type="button" onClick={() => handleDownloadRunLogs()} disabled={runLogs.length === 0 || !runId}>
+          <button
+            type="button"
+            onClick={() => handleDownloadRunLogs()}
+            disabled={runLogs.length === 0 || !runId}
+            data-testid="run-logs-download-btn"
+          >
             Download logs
           </button>
         </div>
@@ -1060,31 +1081,31 @@ export default function App() {
         {runLogs.length === 0 ? (
           <p>No run logs yet.</p>
         ) : (
-          <pre>{runLogs.map((entry) => formatRunLogLine(entry)).join("\n")}</pre>
+          <pre data-testid="run-logs-content">{runLogs.map((entry) => formatRunLogLine(entry)).join("\n")}</pre>
         )}
       </section>
 
-      <section className="panel">
+      <section className="panel" data-testid="results-coverage-panel">
         <h2>Results: Coverage & Questions</h2>
         <div className="columns">
           <div>
             <h3>Coverage Summary</h3>
-            <pre>{coverageSummary || "No coverage summary yet."}</pre>
+            <pre data-testid="coverage-summary-content">{coverageSummary || "No coverage summary yet."}</pre>
           </div>
           <div>
             <h3>Open Questions</h3>
-            <pre>{openQuestions || "No open questions yet."}</pre>
+            <pre data-testid="open-questions-content">{openQuestions || "No open questions yet."}</pre>
           </div>
         </div>
       </section>
 
-      <section className="panel">
+      <section className="panel" data-testid="results-artifacts-panel">
         <h2>Results: Run Artifacts</h2>
         {artifacts.length === 0 ? (
           <p>No artifacts yet.</p>
         ) : (
           <div className="columns">
-            <ul>
+            <ul data-testid="run-artifacts-list">
               {artifacts.map((artifact) => (
                 <li key={`${artifact.kind}-${artifact.path}`}>
                   <button type="button" className="link-button" onClick={() => void handleOpenArtifact(artifact.path)}>
@@ -1094,9 +1115,9 @@ export default function App() {
                 </li>
               ))}
             </ul>
-            <div>
-              <h3>{selectedArtifact || "Artifact Content"}</h3>
-              <pre>{selectedArtifactContent || "Select artifact to inspect."}</pre>
+            <div data-testid="run-artifact-content-panel">
+              <h3 data-testid="run-artifact-selected-path">{selectedArtifact || "Artifact Content"}</h3>
+              <pre data-testid="run-artifact-content">{selectedArtifactContent || "Select artifact to inspect."}</pre>
             </div>
           </div>
         )}

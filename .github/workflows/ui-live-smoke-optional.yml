@@ -1,0 +1,94 @@
+name: ui-live-smoke-optional
+
+on:
+  workflow_dispatch:
+    inputs:
+      runtime_provider:
+        description: Runtime provider for live UI smoke
+        required: true
+        default: qwen-code
+        type: choice
+        options:
+          - qwen-code
+          - claude-code
+      target_repo_url:
+        description: Target repository URL for workspace bootstrap
+        required: true
+        default: https://github.com/ibatulanandjp/ecommerce-microservices.git
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  ui-live-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Build ACP
+        run: make build
+
+      - name: Install UI + Playwright
+        run: |
+          npm ci --prefix ui
+          npm exec --prefix ui playwright install --with-deps chromium
+
+      - name: Prepare target repo
+        run: |
+          set -euo pipefail
+          TARGET_DIR="$(mktemp -d -t ui-live-target.XXXXXX)"
+          git clone --depth=1 "${{ github.event.inputs.target_repo_url }}" "$TARGET_DIR"
+          echo "TARGET_DIR=$TARGET_DIR" >> "$GITHUB_ENV"
+
+      - name: Check runtime command availability
+        id: runtime
+        run: |
+          set -euo pipefail
+          provider="${{ github.event.inputs.runtime_provider }}"
+          case "$provider" in
+            claude-code) cmd="claude" ;;
+            qwen-code) cmd="qwen" ;;
+            *) echo "unsupported provider: $provider"; exit 1 ;;
+          esac
+          if ! command -v "$cmd" >/dev/null 2>&1; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "runtime_cmd=$cmd" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "runtime_cmd=$cmd" >> "$GITHUB_OUTPUT"
+
+      - name: Skip (runtime missing on runner)
+        if: steps.runtime.outputs.available != 'true'
+        run: |
+          echo "Skipping optional live smoke: runtime command '${{ steps.runtime.outputs.runtime_cmd }}' is unavailable."
+
+      - name: Bootstrap workspace
+        if: steps.runtime.outputs.available == 'true'
+        run: |
+          set -euo pipefail
+          WORKSPACE="$(mktemp -d -t ui-live-workspace.XXXXXX)"
+          ./bin/acp init-workspace --workspace "$WORKSPACE" --repo-name target --repo-path "$TARGET_DIR"
+          echo "WORKSPACE=$WORKSPACE" >> "$GITHUB_ENV"
+
+      - name: Run optional live UI smoke
+        if: steps.runtime.outputs.available == 'true'
+        env:
+          RUNTIME_PROVIDER: ${{ github.event.inputs.runtime_provider }}
+          WORKSPACE: ${{ env.WORKSPACE }}
+        run: |
+          set -euo pipefail
+          export ACP_CLAUDE_CMD=claude
+          export ACP_QWEN_CMD=qwen
+          ./scripts/frontend-live-e2e.sh

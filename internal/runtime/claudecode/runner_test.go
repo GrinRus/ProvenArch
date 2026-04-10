@@ -2,6 +2,10 @@ package claudecode
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -120,4 +124,172 @@ func TestHeadlessRunnerInvalidTaskResultClassifiesAsParseFailed(t *testing.T) {
 	if !strings.Contains(message, "invalid taskresult") {
 		t.Fatalf("unexpected error message %q", message)
 	}
+}
+
+func TestHeadlessRunnerLegacyPassthroughWhenArgsConfigured(t *testing.T) {
+	t.Parallel()
+
+	runner := HeadlessRunner{
+		Command: "sh",
+		Args: []string{
+			"-c",
+			fmt.Sprintf("cat >/dev/null; echo '%s'", validTaskResultJSON("claude-code", "legacy-test")),
+		},
+	}
+
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-legacy",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    "/tmp/workspace",
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("run legacy passthrough: %v", err)
+	}
+	if result.TaskResult.Meta.Runtime.Name != "claude-code" {
+		t.Fatalf("unexpected runtime name %q", result.TaskResult.Meta.Runtime.Name)
+	}
+}
+
+func TestHeadlessRunnerUsesLegacyModeForNonClaudeCommandWithEmptyArgs(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	commandPath := filepath.Join(tempDir, "custom-runner")
+	script := `#!/bin/sh
+set -eu
+input="$(cat)"
+if [ -z "$input" ]; then
+  echo "missing stdin payload" >&2
+  exit 1
+fi
+cat <<'JSON'
+{"meta":{"task_id":"task-1","step_id":"init.step1.collect","runtime":{"name":"claude-code","version":"legacy"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}
+JSON
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write custom command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-legacy-empty-args",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    "/tmp/workspace",
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("expected legacy mode success: %v", err)
+	}
+	if result.TaskResult.Meta.Runtime.Version != "legacy" {
+		t.Fatalf("expected legacy runtime version, got %q", result.TaskResult.Meta.Runtime.Version)
+	}
+}
+
+func TestHeadlessRunnerNativeDirectClaudeParsesEnvelopeResult(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	commandPath := filepath.Join(tempDir, "claude")
+	script := `#!/bin/sh
+set -eu
+cat <<'JSON'
+{"type":"result","result":"{\"meta\":{\"task_id\":\"task-1\",\"step_id\":\"init.step1.collect\",\"runtime\":{\"name\":\"claude-code\",\"version\":\"claude-cli\"},\"started_at\":\"2026-04-03T12:00:00Z\"},\"summary\":\"ok\",\"changeset\":[]}"}
+JSON
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write claude direct command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-native-success",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    "/tmp/workspace",
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("run native direct claude: %v", err)
+	}
+	if result.TaskResult.Meta.Runtime.Name != "claude-code" {
+		t.Fatalf("unexpected runtime name %q", result.TaskResult.Meta.Runtime.Name)
+	}
+}
+
+func TestHeadlessRunnerNativeDirectClaudeRetriesOnParseFailure(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	commandPath := filepath.Join(tempDir, "claude")
+	script := `#!/bin/sh
+set -eu
+last_arg=""
+for arg in "$@"; do
+  last_arg="$arg"
+done
+if echo "$last_arg" | grep -q "RETRY MODE"; then
+  cat <<'JSON'
+{"result":"{\"meta\":{\"task_id\":\"task-1\",\"step_id\":\"init.step1.collect\",\"runtime\":{\"name\":\"claude-code\",\"version\":\"claude-cli\"},\"started_at\":\"2026-04-03T12:00:00Z\"},\"summary\":\"ok\",\"changeset\":[]}"}
+JSON
+  exit 0
+fi
+echo "This is not JSON"
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write claude retry command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-native-retry",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    "/tmp/workspace",
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("expected retry run to succeed: %v", err)
+	}
+	if result.TaskResult.Meta.Runtime.Version != "claude-cli" {
+		t.Fatalf("unexpected runtime version %q", result.TaskResult.Meta.Runtime.Version)
+	}
+}
+
+func TestBuildDirectPromptIncludesStepSpecificPolicies(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		TaskID:       "task-refresh",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		Workspace:    "/tmp/workspace",
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	prompt := buildDirectPrompt(raw, false)
+	if !strings.Contains(prompt, "STEP POLICY refresh.step1.collect") {
+		t.Fatalf("expected step1 policy block in prompt")
+	}
+	if !strings.Contains(prompt, "Forbidden placeholder entity types: runtime_provider, runtime, metadata.") {
+		t.Fatalf("expected forbidden runtime placeholder policy in prompt")
+	}
+	if !strings.Contains(prompt, "question IDs MUST use canonical form without numeric suffixes") {
+		t.Fatalf("expected canonical question-id policy in prompt")
+	}
+}
+
+func validTaskResultJSON(runtimeName string, runtimeVersion string) string {
+	return fmt.Sprintf(`{"meta":{"task_id":"task-1","step_id":"init.step1.collect","runtime":{"name":"%s","version":"%s"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}`, runtimeName, runtimeVersion)
 }

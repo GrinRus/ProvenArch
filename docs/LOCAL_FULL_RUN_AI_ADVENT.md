@@ -16,11 +16,21 @@
 - Quality guardrails для headless:
   - запрет mock/fake runtime version,
   - fail при zero-signal quality summary,
-  - fail при “последний run хуже предыдущего” в итерации,
+  - fail при регрессии сигнала относительно предыдущей итерации для той же пары `(runtime_mode, pipeline)`,
+  - fail при `No findings reported` в headless refresh при owner-related gaps в coverage,
+  - fail при canonical duplicates в `coverage.missing`,
+  - fail при duplicate open-question texts после нормализации,
+  - fail при critical off-topic markers в headless refresh artifacts (local semantic check),
   - ai-advent profile checks для минимально содержательного сигнала.
 - Snapshot artifacts per run: `TMP_ROOT/snapshots/<run_id>/...`.
 - Проверка ключевых артефактов (`as-is/findings/coverage`) и run quality summaries.
 - (Опционально) quality gates: `make contracts`, `make test`, `make lint`, `make build`.
+- (Опционально) live frontend e2e через Playwright: `validate -> run init -> inspect artifacts`.
+
+Batch-only semantic hard-fail checks (в `scripts/e2e_batch_report.py`):
+- `analysis:off-topic`
+- `analysis:evidence-scope`
+- `analysis:cross-doc`
 
 ## 2) Переменные скрипта
 
@@ -30,13 +40,32 @@
 - `TARGET_REPO` (required: path to the repository used for full-run)
 - `TMP_ROOT` (default: auto `mktemp -d -t provenarch-ai-advent.XXXXXX`)
 - `ACP_RUNTIME_PROVIDER` (headless provider: `claude-code` default или `qwen-code`)
-- `ACP_CLAUDE_CMD` (команда для provider `claude-code`; default `claude-code`)
+- `ACP_CLAUDE_CMD` (команда для provider `claude-code`; default `claude-code`, поддержан direct `claude` без wrapper)
 - `ACP_QWEN_CMD` (команда для provider `qwen-code`; default `qwen`)
 - `KEEP_TMP` (`0/1`, default `0`)
 - `ITERATIONS` (default `1`)
 - `RUN_QUALITY_GATES` (`0/1`, default `1`)
 - `RUN_LOGS_TTL_HOURS` (default `168`)
 - `RUN_LOGS_MAX_RUNS` (default `200`)
+
+Batch/Frontend scripts:
+- `scripts/full-run-batch-5x2.sh`
+  - `BATCH_ID` (default `batch-<UTC timestamp>`)
+  - `TARGET_REPO` (required; один локальный checkout path целевого репозитория)
+  - `E2E_TMP_ROOT` (default `/tmp/provenarch-test_arch_project`)
+  - `BATCH_ROOT` (default `${E2E_TMP_ROOT}/runs/${BATCH_ID}`)
+  - `REPORTS_ROOT` (default `${E2E_TMP_ROOT}/reports`)
+  - `ACP_CLAUDE_CMD_BIN` (default `claude`, direct binary)
+  - `ACP_QWEN_CMD_BIN` (default `qwen`, direct binary)
+- `scripts/frontend-live-e2e.sh`
+  - `WORKSPACE` (required)
+  - `RUNTIME_PROVIDER` (required: `claude-code|qwen-code`)
+  - `OUTPUT_DIR` (optional; default `mktemp`)
+  - `LISTEN` (optional; default free local port)
+  - Playwright output path для wrapper фиксируется как `$OUTPUT_DIR/playwright-results`
+
+Direct Playwright запуск (без wrapper) использует:
+- `UI_E2E_OUTPUT_DIR` (optional; default `/tmp/provenarch-ui-e2e/test-results`)
 
 ## 3) Быстрый запуск (script)
 
@@ -46,14 +75,23 @@ cd /path/to/ProvenArch
 # Вариант 1: default headless provider (claude-code в PATH)
 TARGET_REPO=/path/to/target-repo ./scripts/full-run-ai-advent.sh
 
-# Вариант 2: явно задать provider=qwen-code
+# Вариант 2: direct claude без wrapper
+TARGET_REPO=/path/to/target-repo ACP_RUNTIME_PROVIDER=claude-code ACP_CLAUDE_CMD=claude ./scripts/full-run-ai-advent.sh
+
+# Вариант 3: явно задать provider=qwen-code
 TARGET_REPO=/path/to/target-repo ACP_RUNTIME_PROVIDER=qwen-code ./scripts/full-run-ai-advent.sh
 
-# Вариант 3: явно задать команду для выбранного provider
+# Вариант 4: явно задать команду для выбранного provider
 TARGET_REPO=/path/to/target-repo ACP_RUNTIME_PROVIDER=qwen-code ACP_QWEN_CMD=/abs/path/to/qwen ./scripts/full-run-ai-advent.sh
 
-# Вариант 4: оставить tmp workspace для ручного анализа
+# Вариант 5: оставить tmp workspace для ручного анализа
 TARGET_REPO=/path/to/target-repo KEEP_TMP=1 ./scripts/full-run-ai-advent.sh
+
+# Вариант 6: batch 5x2 + frontend live e2e + агрегированный quality report
+TARGET_REPO=/path/to/target-repo \
+ACP_CLAUDE_CMD_BIN=claude \
+ACP_QWEN_CMD_BIN=qwen \
+./scripts/full-run-batch-5x2.sh
 ```
 
 Script всегда формирует:
@@ -62,6 +100,16 @@ Script всегда формирует:
 - `TMP_ROOT/snapshots/<run_id>/...`
 
 При ошибке script всегда сохраняет `TMP_ROOT` для дебага независимо от `KEEP_TMP`.
+
+Для batch-скрипта отчёты сохраняются в:
+- `/tmp/provenarch-test_arch_project/reports/run_matrix_<batch-id>.md`
+- `/tmp/provenarch-test_arch_project/reports/frontend_e2e_matrix_<batch-id>.md`
+- `/tmp/provenarch-test_arch_project/reports/quality_report_<batch-id>.md`
+
+Batch evaluator source-of-truth:
+- backend quality берётся из snapshot-артефактов `snapshots/<run_id>/reports/*`;
+- если snapshot недоступен, в отчёт попадает `artifact_source=workspace-fallback` и issue `reliability:snapshot-missing`;
+- frontend live e2e запускается на отдельной копии workspace (`frontend-workspace`) и не влияет на backend quality content score.
 
 ## 4) CLI/API поток вручную (без скрипта)
 
@@ -130,6 +178,33 @@ PORT=18080
 - `Results: Coverage & Questions`: показываются coverage/open questions.
 - `Results: Run Artifacts`: можно открыть артефакты run.
 
+### Optional automation (Playwright live smoke)
+
+```bash
+cd /path/to/ProvenArch
+make build
+npm ci --prefix ui
+npm exec --prefix ui playwright install chromium
+
+WORKSPACE=/path/to/arch-workspace \
+RUNTIME_PROVIDER=qwen-code \
+ACP_QWEN_CMD=qwen \
+./scripts/frontend-live-e2e.sh
+```
+
+Для `claude-code`:
+
+```bash
+WORKSPACE=/path/to/arch-workspace \
+RUNTIME_PROVIDER=claude-code \
+ACP_CLAUDE_CMD=claude \
+./scripts/frontend-live-e2e.sh
+```
+
+Output semantics:
+- direct `npm run --prefix ui e2e:live`: default `/tmp/provenarch-ui-e2e/test-results`, override `UI_E2E_OUTPUT_DIR`;
+- `scripts/frontend-live-e2e.sh`: output в `$OUTPUT_DIR/playwright-results`.
+
 ## 6) Continuous Improvement Loop (balanced backend/frontend)
 
 Используйте script как базовый повторяемый цикл.
@@ -148,12 +223,13 @@ PORT=18080
 - зелёные `make contracts`, `make test`, `make lint`, `make build`
 - отсутствие P1/P2 находок по последнему полному прогону;
 - headless runs проходят strict quality checks (non-mock, non-zero-signal, no degradation).
+- headless refresh проходит semantic checks (owner-gap+findings, coverage/question dedupe).
 
 ## 7) Диагностика типовых проблем
 
 - Ошибка `headless runtime command ... is unavailable`:
   - проверить `ACP_RUNTIME_PROVIDER`;
-  - для `claude-code`: установить `claude-code` или задать `ACP_CLAUDE_CMD=/abs/path/to/runner`;
+  - для `claude-code`: установить `claude-code` или использовать direct `ACP_CLAUDE_CMD=claude` (либо задать `ACP_CLAUDE_CMD=/abs/path/to/runner`);
   - для `qwen-code`: установить `qwen` или задать `ACP_QWEN_CMD=/abs/path/to/runner`.
 - Ошибки bootstrap (`workspace.yaml/.git/skills/subagents.yaml` не созданы):
   - проверить вывод `logs/init-workspace.log`.

@@ -2,7 +2,7 @@
 
 > **Статус:** MVP beta foundation / runnable local pipeline baseline + strict contracts
 > **Принятый стек реализации:** Go (backend/orchestrator) + React/TypeScript UI (embedded), runtime анализа в MVP: **headless multi-provider** (`claude-code` default, `qwen-code` optional)
-> **Последняя ревизия:** 2026-04-06
+> **Последняя ревизия:** 2026-04-10
 
 ## Что это
 
@@ -46,6 +46,7 @@ ACP не является "рисовалкой диаграмм". Архите�
 - детальный анализ каждого сервиса: архитектура, внешние интеграции, БД, CI/CD
 - анализ arbitrary stacks через выбранный headless provider (`claude-code|qwen-code`) + baseline prompt bundle, без фиксированного whitelist парсеров в MVP
 - явная фиксация недостатка информации через `coverage`, `questions` и findings
+- semantic guard в refresh-цикле: фильтрация нерелевантных placeholder-операций, fallback finding при owner-gap, канонизация/дедуп coverage+questions
 - Git-based versioning/branching для модели, правил, отчётов и proposal-пакетов
 - строгий контракт TaskResult (JSON Schema) между runtime и orchestrator
 
@@ -104,7 +105,8 @@ MVP policy: Observation + Assertion отображаются как рабоча
 - Node.js 22.21.1 + npm 10.x (нужно для UI dev/build в этом репозитории)
 
 Для первого запуска достаточно `--runtime fake`.
-Для реальных запусков `--runtime headless` нужен установленный provider command (`claude-code` или `qwen`) либо env override (`ACP_CLAUDE_CMD`/`ACP_QWEN_CMD`).
+Для реальных запусков `--runtime headless` нужен установленный provider command (`claude-code`/`qwen`) либо env override (`ACP_CLAUDE_CMD`/`ACP_QWEN_CMD`).
+Direct режим `ACP_CLAUDE_CMD=claude` поддерживается нативно (без wrapper).
 
 ### 1) Поднимите сервис одной командой (auto-init)
 
@@ -123,6 +125,8 @@ acp serve --workspace /path/to/arch-workspace --auto-init --repo-name payments-s
 ```bash
 acp serve --workspace /path/to/arch-workspace --auto-init --repos-file /path/to/repos.yaml --runtime fake
 ```
+
+Опционально для `serve --auto-init` можно задать `--docs-imports-path <path>` (default `./docs/imports` в `workspace.yaml`).
 
 ### 2) Запустите первый анализ
 
@@ -196,6 +200,7 @@ make quickstart-local WORKSPACE=/path/to/arch-workspace REPO_PATH=/path/to/payme
 - command env:
   - `ACP_CLAUDE_CMD` (default `claude-code`)
   - `ACP_QWEN_CMD` (default `qwen`)
+- direct `claude` режим: `ACP_CLAUDE_CMD=claude` (native one-shot invocation с envelope parse).
 - в `--runtime fake` provider проходит валидацию, но фактически не используется runner’ом.
 
 ### 7) Поднимите dev environment
@@ -214,6 +219,8 @@ Root entrypoints:
 Готовый runbook и script:
 - [docs/LOCAL_FULL_RUN_AI_ADVENT.md](docs/LOCAL_FULL_RUN_AI_ADVENT.md)
 - `scripts/full-run-ai-advent.sh`
+- `scripts/full-run-batch-5x2.sh` (batch `5x2` + frontend live e2e + quality report aggregation)
+- `scripts/frontend-live-e2e.sh` (локальный live UI smoke для выбранного provider)
 
 Быстрый запуск:
 
@@ -224,7 +231,8 @@ TARGET_REPO=/path/to/target-repo ./scripts/full-run-ai-advent.sh
 Script делает strict полный цикл:
 - API simulation + runtime `fake + headless`;
 - anti-mock/anti-zero-signal проверки для headless run;
-- quality regression guard (последний run не должен быть слабее предыдущего в итерации);
+- quality regression guard по одинаковой паре `(runtime_mode, pipeline)` между итерациями;
+- локальные semantic checks full-run: owner-gap+findings, canonical duplicates в coverage/questions, critical off-topic markers;
 - per-run snapshots в `TMP_ROOT/snapshots/<run_id>/...`;
 - гарантированные debug artifacts: `TMP_ROOT/full-run.log` и `TMP_ROOT/session-summary.md` даже при раннем fail.
 
@@ -240,6 +248,29 @@ TARGET_REPO=/path/to/target-repo KEEP_TMP=1 ./scripts/full-run-ai-advent.sh
 TARGET_REPO=/path/to/target-repo RUN_LOGS_TTL_HOURS=168 RUN_LOGS_MAX_RUNS=200 ./scripts/full-run-ai-advent.sh
 ```
 
+Batch re-audit `5x2` (direct-only `claude`/`qwen`, без wrapper):
+
+```bash
+TARGET_REPO=/path/to/target-repo \
+ACP_CLAUDE_CMD_BIN=claude \
+ACP_QWEN_CMD_BIN=qwen \
+./scripts/full-run-batch-5x2.sh
+```
+
+Скрипт сохраняет:
+- run artifacts (default): `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/...`
+- quality reports:
+  - `/tmp/provenarch-test_arch_project/reports/run_matrix_<batch-id>.md`
+  - `/tmp/provenarch-test_arch_project/reports/frontend_e2e_matrix_<batch-id>.md`
+  - `/tmp/provenarch-test_arch_project/reports/quality_report_<batch-id>.md`
+- backend quality считается только по snapshot-артефактам (`snapshots/<run_id>/reports/*`), frontend smoke запускается на отдельной `frontend-workspace` копии и не мутирует backend baseline
+- batch evaluator добавляет semantic hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`
+- в `run_matrix`/`quality_report` дополнительно фиксируются `artifact_source`, `semantic_hard_fail`, `off_topic_hits`
+- direct `npm run --prefix ui e2e:live`: Playwright output default `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
+- `scripts/frontend-live-e2e.sh`: Playwright output сохраняется в `$OUTPUT_DIR/playwright-results`
+
+`TARGET_REPO` для batch-скрипта обязателен и должен указывать на один локальный checkout path целевого репозитория.
+
 Repo CI по умолчанию живёт в GitHub Actions:
 - `contracts`
 - `backend`
@@ -248,6 +279,7 @@ Repo CI по умолчанию живёт в GitHub Actions:
 - `smoke-cli`
 - `smoke-api`
 - `ui-smoke`
+- `ui-live-smoke-optional` (workflow_dispatch, не required gate)
 
 ---
 

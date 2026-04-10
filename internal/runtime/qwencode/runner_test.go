@@ -2,6 +2,9 @@ package qwencode
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -66,6 +69,46 @@ func TestHeadlessRunnerInvalidTaskResultClassifiesAsParseFailed(t *testing.T) {
 	}
 	if !strings.Contains(message, "invalid taskresult") {
 		t.Fatalf("unexpected error message %q", message)
+	}
+}
+
+func TestHeadlessRunnerRetriesOnceOnParseFailureForDefaultArgs(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	commandPath := filepath.Join(tempDir, "qwen-retry-stub.sh")
+	script := `#!/bin/sh
+set -eu
+last_arg=""
+for arg in "$@"; do
+  last_arg="$arg"
+done
+if echo "$last_arg" | grep -q "RETRY MODE"; then
+  cat <<'JSON'
+{"meta":{"task_id":"task-1","step_id":"init.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[{"op":"upsert_entity","entity":{"id":"svc.payments-service","type":"service","name":"Payments Service","attributes":{"repo_scope":"payments-service"},"provenance":{"kind":"observation","confidence":0.7,"evidence":[{"repo":"payments-service","path":"README.md"}]}}}]}
+JSON
+  exit 0
+fi
+echo '{"response":"not-json"}'
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write retry command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-1",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    "/tmp/workspace",
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("expected retry run to succeed: %v", err)
+	}
+	if result.TaskResult.Meta.Runtime.Name != "qwen-code" {
+		t.Fatalf("unexpected runtime name %q", result.TaskResult.Meta.Runtime.Name)
 	}
 }
 
@@ -174,5 +217,58 @@ func TestHeadlessRunnerParsesTaskResultFromJsonObjectsStream(t *testing.T) {
 	}
 	if result.TaskResult.Meta.TaskID != "task-1" {
 		t.Fatalf("unexpected task id %q", result.TaskResult.Meta.TaskID)
+	}
+}
+
+func TestBuildPromptIncludesStepSpecificPolicies(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		TaskID:       "task-refresh",
+		RunID:        "run-1",
+		StepID:       "refresh.step3.findings",
+		Workspace:    "/tmp/workspace",
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	prompt := buildPrompt(raw, false)
+	if !strings.Contains(prompt, "STEP POLICY refresh.step3.findings") {
+		t.Fatalf("expected step3 policy block in prompt")
+	}
+	if !strings.Contains(prompt, "include at least one add_finding operation") {
+		t.Fatalf("expected required add_finding policy in prompt")
+	}
+	if !strings.Contains(prompt, "coverage.missing MUST use canonical terms only") {
+		t.Fatalf("expected canonical coverage dictionary policy in prompt")
+	}
+}
+
+func TestBuildPromptRefreshStep1CollectIncludesNoWebSearchPolicy(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		TaskID:       "task-refresh-step1",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		Workspace:    "/tmp/workspace",
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	prompt := buildPrompt(raw, false)
+	if !strings.Contains(prompt, "do NOT perform web search or external browsing") {
+		t.Fatalf("expected no-web-search rule in step1 collect policy")
+	}
+	if !strings.Contains(prompt, "Do NOT emit synthetic evidence paths such as search_source/*") {
+		t.Fatalf("expected synthetic evidence-path ban in step1 collect policy")
 	}
 }

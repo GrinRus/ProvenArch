@@ -143,8 +143,8 @@ func TestCLIDocsSurfaceMatchesHelp(t *testing.T) {
 
 	helpSource := readDoc(t, "cmd/acp/main.go")
 	helpTokens := []string{
-		"acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>)) | --repos-file <path>)",
-		"acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>)) | --repos-file <path>)]",
+		"acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]",
+		"acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]",
 		"acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--non-interactive]",
 		"acp qa --workspace <abs-path> --question \\\"<text>\\\"",
 	}
@@ -171,13 +171,13 @@ func TestCLIDocsSurfaceMatchesHelp(t *testing.T) {
 		},
 		"docs/ARCHITECTURE.md": {
 			"`init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)`",
-			"`serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)]`",
+			"`serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]`",
 			"run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--non-interactive]",
 			"`acp qa`",
 		},
 		"docs/spec/API_SPEC.md": {
 			"acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)",
-			"acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)]",
+			"acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]",
 			"acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--non-interactive]",
 		},
 	}

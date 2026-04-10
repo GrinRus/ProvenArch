@@ -51,11 +51,7 @@ type runQualitySummary struct {
 }
 
 func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode string, errorMessage string) (Artifact, error) {
-	versions := make([]string, 0, len(e.runtimeVersions))
-	for version := range e.runtimeVersions {
-		versions = append(versions, version)
-	}
-	sort.Strings(versions)
+	versions := normalizeRuntimeVersions(e.runtimeVersions)
 
 	steps := append([]runtimeStepQuality(nil), e.runtimeStepMetrics...)
 	sort.Slice(steps, func(i, j int) bool {
@@ -111,4 +107,48 @@ func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode s
 		"signal_score": totals.SignalScore,
 	})
 	return Artifact{Path: path, Kind: "taskrun", Label: "Run Quality Summary"}, nil
+}
+
+func normalizeRuntimeVersions(values map[string]struct{}) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	bare := map[string]struct{}{}
+	versioned := map[string]map[string]struct{}{}
+
+	for value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		name, version, hasSep := strings.Cut(trimmed, "@")
+		name = strings.TrimSpace(name)
+		version = strings.TrimSpace(version)
+		if name == "" {
+			continue
+		}
+		if !hasSep || version == "" {
+			bare[name] = struct{}{}
+			continue
+		}
+		if _, exists := versioned[name]; !exists {
+			versioned[name] = map[string]struct{}{}
+		}
+		versioned[name][version] = struct{}{}
+	}
+
+	normalized := make([]string, 0, len(values))
+	for name, versionSet := range versioned {
+		for version := range versionSet {
+			normalized = append(normalized, name+"@"+version)
+		}
+	}
+	for name := range bare {
+		if _, exists := versioned[name]; exists {
+			continue
+		}
+		normalized = append(normalized, name)
+	}
+	sort.Strings(normalized)
+	return normalized
 }
