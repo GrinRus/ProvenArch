@@ -251,6 +251,7 @@ func TestStartAsyncRunRegistersAndCompletesRun(t *testing.T) {
 
 	ws := createWorkspace(t)
 	service := NewService()
+	defer waitForAsyncDrain(t, service, 8*time.Second)
 
 	runID, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
@@ -410,6 +411,7 @@ func TestRunHistoryAsyncTransitionsQueuedRunningFinal(t *testing.T) {
 		WithHistoryWorkspace(ws),
 		WithRunner(delayedRunner{delay: 220 * time.Millisecond}),
 	)
+	defer waitForAsyncDrain(t, service, 8*time.Second)
 
 	run1, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
@@ -456,6 +458,7 @@ func TestStartAsyncRunFailsWhenWorkspaceLayoutCannotBeCreated(t *testing.T) {
 	}
 
 	service := NewService()
+	defer waitForAsyncDrain(t, service, 8*time.Second)
 	runID, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineInit,
@@ -482,6 +485,7 @@ func TestStartAsyncRunDebounceLastEventWins(t *testing.T) {
 		WithRunner(delayedRunner{delay: 200 * time.Millisecond}),
 		WithDebounceWindow(5*time.Minute),
 	)
+	defer waitForAsyncDrain(t, service, 8*time.Second)
 
 	run1, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
@@ -535,6 +539,7 @@ func TestStartAsyncRunRejectsWhenPendingOutsideDebounceWindow(t *testing.T) {
 		WithRunner(delayedRunner{delay: 220 * time.Millisecond}),
 		WithDebounceWindow(10*time.Millisecond),
 	)
+	defer waitForAsyncDrain(t, service, 8*time.Second)
 
 	run1, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
@@ -1346,6 +1351,28 @@ func waitForRunTerminalState(t *testing.T, service *Service, runID string, timeo
 		return false, nil
 	})
 	return terminal
+}
+
+func waitForAsyncDrain(t *testing.T, service *Service, timeout time.Duration) {
+	t.Helper()
+
+	testutil.WaitFor(t, timeout, testutil.WaitDescription("async runs did not drain"), func() (bool, error) {
+		service.mu.RLock()
+		defer service.mu.RUnlock()
+
+		if strings.TrimSpace(service.activeRunID) != "" || service.pendingRun != nil {
+			return false, nil
+		}
+		for _, record := range service.runs {
+			if record == nil {
+				continue
+			}
+			if record.info.Status == RunStatusQueued || record.info.Status == RunStatusRunning {
+				return false, nil
+			}
+		}
+		return true, nil
+	})
 }
 
 func runRegistrySize(service *Service) int {
