@@ -255,11 +255,16 @@ ACP_QWEN_CMD_BIN=qwen \
 ```
 
 Скрипт сохраняет:
-- run artifacts: `test_arch_project/runs/<batch-id>/<provider>/runN/...`
+- run artifacts (default): `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/...`
 - quality reports:
-  - `test_arch_project/reports/run_matrix_<batch-id>.md`
-  - `test_arch_project/reports/frontend_e2e_matrix_<batch-id>.md`
-  - `test_arch_project/reports/quality_report_<batch-id>.md`
+  - `/tmp/provenarch-test_arch_project/reports/run_matrix_<batch-id>.md`
+  - `/tmp/provenarch-test_arch_project/reports/frontend_e2e_matrix_<batch-id>.md`
+  - `/tmp/provenarch-test_arch_project/reports/quality_report_<batch-id>.md`
+- backend quality считается только по snapshot-артефактам (`snapshots/<run_id>/reports/*`), frontend smoke запускается на отдельной `frontend-workspace` копии и не мутирует backend baseline
+- в `run_matrix`/`quality_report` дополнительно фиксируются `artifact_source`, `semantic_hard_fail`, `off_topic_hits`
+- Playwright live e2e output по умолчанию сохраняется в `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
+
+`TARGET_REPO` для batch-скрипта обязателен и должен указывать на один локальный checkout path целевого репозитория.
 
 Repo CI по умолчанию живёт в GitHub Actions:
 - `contracts`

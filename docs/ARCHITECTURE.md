@@ -61,7 +61,7 @@
    - Вызывает runtime adapter
    - Валидирует TaskResult (schema)
    - Нормализует legacy `add_question` / `set_coverage` в canonical top-level form
-   - Применяет semantic guard для refresh-taskruns: фильтрует нерелевантные placeholder-entities в `refresh.step1.collect`, добавляет deterministic fallback finding при owner-gap в `refresh.step3.findings`, канонизирует/дедуплицирует coverage/question semantics
+   - Применяет semantic guard для refresh-taskruns: фильтрует placeholder/off-topic артефакты в `refresh.step1.collect`, добавляет deterministic fallback finding при owner-gap в `refresh.step3.findings`, канонизирует/дедуплицирует coverage/question semantics
    - Применяет changeset к модели workspace
    - Не auto-create/rename canonical domain/team cards
    - Триггерит генерацию отчётов

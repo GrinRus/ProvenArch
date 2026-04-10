@@ -20,6 +20,9 @@
   - fail при `No findings reported` в headless refresh при owner-related gaps в coverage,
   - fail при canonical duplicates в `coverage.missing`,
   - fail при duplicate open-question texts после нормализации,
+  - hard-fail при off-topic drift (`analysis:off-topic`) в `refresh.step1.collect` для non-power target,
+  - hard-fail при невалидном evidence scope (`analysis:evidence-scope`) — paths вне target/workspace или synthetic prefixes,
+  - hard-fail при cross-doc contradictions (`analysis:cross-doc`) между overview/findings,
   - ai-advent profile checks для минимально содержательного сигнала.
 - Snapshot artifacts per run: `TMP_ROOT/snapshots/<run_id>/...`.
 - Проверка ключевых артефактов (`as-is/findings/coverage`) и run quality summaries.
@@ -45,7 +48,10 @@
 Batch/Frontend scripts:
 - `scripts/full-run-batch-5x2.sh`
   - `BATCH_ID` (default `batch-<UTC timestamp>`)
-  - `TARGET_REPO` (default `test_arch_project/repos/ibatulanandjp__ecommerce-microservices`)
+  - `TARGET_REPO` (required; один локальный checkout path целевого репозитория)
+  - `E2E_TMP_ROOT` (default `/tmp/provenarch-test_arch_project`)
+  - `BATCH_ROOT` (default `${E2E_TMP_ROOT}/runs/${BATCH_ID}`)
+  - `REPORTS_ROOT` (default `${E2E_TMP_ROOT}/reports`)
   - `ACP_CLAUDE_CMD_BIN` (default `claude`, direct binary)
   - `ACP_QWEN_CMD_BIN` (default `qwen`, direct binary)
 - `scripts/frontend-live-e2e.sh`
@@ -53,6 +59,7 @@ Batch/Frontend scripts:
   - `RUNTIME_PROVIDER` (required: `claude-code|qwen-code`)
   - `OUTPUT_DIR` (optional; default `mktemp`)
   - `LISTEN` (optional; default free local port)
+  - `UI_E2E_OUTPUT_DIR` (optional; default `/tmp/provenarch-ui-e2e/test-results`)
 
 ## 3) Быстрый запуск (script)
 
@@ -89,9 +96,14 @@ Script всегда формирует:
 При ошибке script всегда сохраняет `TMP_ROOT` для дебага независимо от `KEEP_TMP`.
 
 Для batch-скрипта отчёты сохраняются в:
-- `test_arch_project/reports/run_matrix_<batch-id>.md`
-- `test_arch_project/reports/frontend_e2e_matrix_<batch-id>.md`
-- `test_arch_project/reports/quality_report_<batch-id>.md`
+- `/tmp/provenarch-test_arch_project/reports/run_matrix_<batch-id>.md`
+- `/tmp/provenarch-test_arch_project/reports/frontend_e2e_matrix_<batch-id>.md`
+- `/tmp/provenarch-test_arch_project/reports/quality_report_<batch-id>.md`
+
+Batch evaluator source-of-truth:
+- backend quality берётся из snapshot-артефактов `snapshots/<run_id>/reports/*`;
+- если snapshot недоступен, в отчёт попадает `artifact_source=workspace-fallback` и issue `reliability:snapshot-missing`;
+- frontend live e2e запускается на отдельной копии workspace (`frontend-workspace`) и не влияет на backend quality content score.
 
 ## 4) CLI/API поток вручную (без скрипта)
 
@@ -182,6 +194,8 @@ RUNTIME_PROVIDER=claude-code \
 ACP_CLAUDE_CMD=claude \
 ./scripts/frontend-live-e2e.sh
 ```
+
+Playwright output по умолчанию: `/tmp/provenarch-ui-e2e/test-results` (можно переопределить через `UI_E2E_OUTPUT_DIR`).
 
 ## 6) Continuous Improvement Loop (balanced backend/frontend)
 

@@ -105,8 +105,10 @@ fi
 BASE_URL="http://${LISTEN}"
 SERVER_LOG="$OUTPUT_DIR/serve-${RUNTIME_PROVIDER}.log"
 PLAYWRIGHT_LOG="$OUTPUT_DIR/playwright-${RUNTIME_PROVIDER}.log"
+PLAYWRIGHT_RESULTS_DIR="$OUTPUT_DIR/playwright-results"
 RESULT_JSON="$OUTPUT_DIR/frontend-e2e-result.json"
 started_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+mkdir -p "$PLAYWRIGHT_RESULTS_DIR"
 
 log "starting ACP server (provider=$RUNTIME_PROVIDER listen=$LISTEN)"
 "$ACP_BIN" serve \
@@ -125,7 +127,10 @@ fi
 status="passed"
 if ! (
   cd "$PROVENARCH_ROOT"
-  UI_E2E_BASE_URL="$BASE_URL" UI_E2E_RUNTIME_PROVIDER="$RUNTIME_PROVIDER" npm run --prefix ui e2e:live
+  UI_E2E_BASE_URL="$BASE_URL" \
+  UI_E2E_RUNTIME_PROVIDER="$RUNTIME_PROVIDER" \
+  UI_E2E_OUTPUT_DIR="$PLAYWRIGHT_RESULTS_DIR" \
+  npm run --prefix ui e2e:live
 ) >"$PLAYWRIGHT_LOG" 2>&1; then
   status="failed"
 fi

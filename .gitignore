@@ -12,8 +12,12 @@ Thumbs.db
 # Node / UI
 ui/node_modules/
 ui/dist/
+ui/test-results/
 npm-debug.log*
 yarn-error.log*
 
 # Local configs
 .env
+
+# Local e2e artifacts
+test_arch_project/

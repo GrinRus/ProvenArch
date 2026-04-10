@@ -254,6 +254,10 @@ func buildStepSpecificPolicy(stepID string) string {
 			`STEP POLICY refresh.step1.collect:`,
 			`- Allowed upsert_entity types: service, datastore, integration, external.system, team, domain, api, component.`,
 			`- Forbidden placeholder entity types: runtime_provider, runtime, metadata.`,
+			`- Analyze only repository/workspace artifacts; do NOT perform web search or external browsing.`,
+			`- Every provenance.evidence.path must resolve to an existing file in workspace/repo scope.`,
+			`- Do NOT emit synthetic evidence paths such as search_source/*, search_query/*, search_config/*.`,
+			`- Do NOT introduce unrelated incident domains (for example bidding/tender/power-system topics) unless explicitly present in repository evidence.`,
 			`- If evidence is incomplete, capture gap via coverage.missing instead of synthetic placeholder entities.`,
 			`- Include at least one question and at least three items in coverage.missing.`,
 		}, "\n")

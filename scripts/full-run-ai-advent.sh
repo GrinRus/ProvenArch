@@ -158,6 +158,11 @@ snapshot_run_artifacts() {
   copy_if_exists "$WORKSPACE/reports/coverage/open-questions.md" "$dst/reports/coverage/open-questions.md"
   copy_if_exists "$WORKSPACE/reports/taskruns/${run_id}.json" "$dst/reports/taskruns/${run_id}.json"
   copy_if_exists "$WORKSPACE/reports/taskruns/${run_id}-quality.json" "$dst/reports/taskruns/${run_id}-quality.json"
+  for taskrun_json in "$WORKSPACE/reports/taskruns/${run_id}-"*.json; do
+    if [[ -f "$taskrun_json" ]]; then
+      copy_if_exists "$taskrun_json" "$dst/reports/taskruns/$(basename "$taskrun_json")"
+    fi
+  done
 
   local run_slug
   run_slug="$(slugify "$run_id")"
@@ -280,6 +285,8 @@ PY
 check_headless_refresh_semantic_quality() {
   local run_id="$1"
   python3 - "$WORKSPACE" "$run_id" <<'PY'
+import glob
+import json
 import os
 import re
 import sys
@@ -335,6 +342,18 @@ for line in questions_lines:
 if len(question_texts) != len(set(question_texts)):
     print(f"semantic quality failed for run {run_id}: duplicate open-question texts after normalization")
     sys.exit(5)
+
+critical_marker = "semantic_guard: critical_off_topic_drift in refresh.step1.collect"
+taskrun_glob = os.path.join(workspace, "reports", "taskruns", f"{run_id}-refresh-step1-collect-*.json")
+for taskrun_path in sorted(glob.glob(taskrun_glob)):
+    try:
+        payload = json.load(open(taskrun_path, encoding="utf-8"))
+    except Exception:
+        continue
+    warnings = payload.get("warnings") or []
+    if any(critical_marker in str(item) for item in warnings):
+        print(f"semantic quality failed for run {run_id}: critical off-topic drift marker found in {taskrun_path}")
+        sys.exit(6)
 
 print(
     "semantic_quality_ok "

@@ -1798,14 +1798,102 @@ func shouldFilterRefreshCollectEntityType(entityType string) bool {
 	}
 }
 
+func offTopicCollectTerms() []string {
+	return []string{
+		"bidding",
+		"tender",
+		"chinabidding",
+		"power system",
+		"power enterprise",
+		"relay protection",
+		"load flow",
+		"electric analysis",
+		"继电",
+		"潮流",
+		"电力",
+		"招标",
+	}
+}
+
+func isLikelyPowerScope(value string) bool {
+	normalized := normalizeSemanticKey(value)
+	if normalized == "" {
+		return false
+	}
+	for _, hint := range []string{"power", "energy", "electric", "grid", "utility"} {
+		if strings.Contains(normalized, hint) {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldApplyOffTopicGuard(task acpruntime.Task) bool {
+	if isLikelyPowerScope(task.Workspace) {
+		return false
+	}
+	for _, scope := range task.RepoScopes {
+		if isLikelyPowerScope(scope) {
+			return false
+		}
+	}
+	return true
+}
+
+func detectOffTopicTerms(text string) []string {
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	if normalized == "" {
+		return nil
+	}
+	hits := []string{}
+	for _, term := range offTopicCollectTerms() {
+		if strings.Contains(normalized, strings.ToLower(term)) {
+			hits = append(hits, term)
+		}
+	}
+	return dedupeSemanticStrings(hits)
+}
+
+func entitySemanticText(entity *contracts.Entity) string {
+	if entity == nil {
+		return ""
+	}
+	parts := []string{
+		strings.TrimSpace(entity.ID),
+		strings.TrimSpace(entity.Type),
+		strings.TrimSpace(entity.Name),
+	}
+	if len(entity.Aliases) > 0 {
+		parts = append(parts, strings.Join(entity.Aliases, " "))
+	}
+	if entity.Attributes != nil {
+		if raw, err := json.Marshal(entity.Attributes); err == nil {
+			parts = append(parts, string(raw))
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
 func (e *pipelineExecution) applySemanticGuards(stepID string, domainID string, task acpruntime.Task, normalized contracts.TaskResult) contracts.TaskResult {
 	if stepID == "refresh.step1.collect" {
 		filtered := make([]contracts.Operation, 0, len(normalized.Changeset))
 		droppedByType := map[string]int{}
+		droppedOffTopicEntities := 0
+		droppedOffTopicQuestions := 0
+		droppedOffTopicTerms := []string{}
+		offTopicGuard := shouldApplyOffTopicGuard(task)
 		for _, op := range normalized.Changeset {
 			if op.Op == "upsert_entity" && op.Entity != nil && shouldFilterRefreshCollectEntityType(op.Entity.Type) {
 				droppedByType[op.Entity.Type]++
 				continue
+			}
+			if offTopicGuard && op.Op == "upsert_entity" && op.Entity != nil {
+				hits := detectOffTopicTerms(entitySemanticText(op.Entity))
+				if len(hits) > 0 {
+					droppedOffTopicEntities++
+					droppedOffTopicTerms = append(droppedOffTopicTerms, hits...)
+					continue
+				}
 			}
 			filtered = append(filtered, op)
 		}
@@ -1820,6 +1908,38 @@ func (e *pipelineExecution) applySemanticGuards(stepID string, domainID string, 
 				normalized.Warnings,
 				fmt.Sprintf("semantic_guard: dropped refresh.step1.collect entity types [%s]", strings.Join(parts, ", ")),
 			)
+		} else {
+			normalized.Changeset = filtered
+		}
+		if offTopicGuard {
+			questions := make([]contracts.Question, 0, len(normalized.Questions))
+			for _, question := range normalized.Questions {
+				hits := detectOffTopicTerms(question.Text)
+				if len(hits) > 0 {
+					droppedOffTopicQuestions++
+					droppedOffTopicTerms = append(droppedOffTopicTerms, hits...)
+					continue
+				}
+				questions = append(questions, question)
+			}
+			normalized.Questions = questions
+		}
+		if droppedOffTopicEntities > 0 || droppedOffTopicQuestions > 0 {
+			normalized.Warnings = append(
+				normalized.Warnings,
+				fmt.Sprintf(
+					"semantic_guard: dropped refresh.step1.collect off-topic artifacts entities=%d questions=%d terms=[%s]",
+					droppedOffTopicEntities,
+					droppedOffTopicQuestions,
+					strings.Join(dedupeSemanticStrings(droppedOffTopicTerms), ", "),
+				),
+			)
+			if len(normalized.Changeset) == 0 {
+				normalized.Warnings = append(
+					normalized.Warnings,
+					"semantic_guard: critical_off_topic_drift in refresh.step1.collect",
+				)
+			}
 		}
 	}
 

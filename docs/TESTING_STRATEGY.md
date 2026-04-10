@@ -174,11 +174,17 @@ Implemented additional jobs:
   - summary/log/snapshots: `TMP_ROOT/session-summary.md`, `TMP_ROOT/full-run.log`, `TMP_ROOT/snapshots/*`
 - batch regression `5x2` + frontend live e2e:
   - `scripts/full-run-batch-5x2.sh`
+  - `TARGET_REPO` обязателен и указывает на один локальный checkout path
   - direct-only runtime commands (`claude`, `qwen`)
-  - run artifacts: `test_arch_project/runs/<batch-id>/<provider>/runN/*`
-  - reports: `run_matrix_<batch-id>.md`, `frontend_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md`
+  - frontend live e2e работает на отдельной `frontend-workspace` копии run snapshot, не мутируя backend baseline
+  - backend quality source-of-truth: snapshot reports (`snapshots/<run_id>/reports/*`), fallback помечается как `reliability:snapshot-missing`
+  - semantic hard-fail checks в batch evaluator: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`
+  - hard-pass учитывает semantic hard-fail и snapshot source validity
+  - run artifacts default: `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/*`
+  - reports: `run_matrix_<batch-id>.md`, `frontend_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md` (+ fields `artifact_source`, `semantic_hard_fail`, `off_topic_hits`)
 - optional frontend live smoke:
   - `scripts/frontend-live-e2e.sh` (local)
+  - Playwright output default: `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
   - `ui/e2e/live-flow.spec.ts` + `npm run e2e:live --prefix ui`
 
 ## 8) Acceptance для testing strategy

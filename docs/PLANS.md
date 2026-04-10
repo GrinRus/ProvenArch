@@ -386,7 +386,7 @@ EP-20260410-batch-5x2-frontend-reaudit
 Нужно выполнить повторный e2e re-audit на target repo в формате `5x2` (5 run для `qwen-code` + 5 run для `claude-code`) в direct-only режиме (`qwen`/`claude`, без wrapper), добавить live frontend e2e automation и выпустить агрегированные quality-отчёты.
 
 ### Goals (must have)
-- [x] Добавить batch runner `5x2` с фиксированным layout артефактов в `test_arch_project/runs/<batch-id>/...`
+- [x] Добавить batch runner `5x2` с фиксированным layout артефактов (default: `/tmp/provenarch-test_arch_project/runs/<batch-id>/...`)
 - [x] Добавить frontend live e2e automation на Playwright + стабильные `data-testid` в UI
 - [x] Добавить локальный script для live UI smoke against running `acp serve` с provider-aware runtime
 - [x] Добавить optional CI workflow для manual live UI smoke (не required gate)

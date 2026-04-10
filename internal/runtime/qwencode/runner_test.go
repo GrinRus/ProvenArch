@@ -247,3 +247,28 @@ func TestBuildPromptIncludesStepSpecificPolicies(t *testing.T) {
 		t.Fatalf("expected canonical coverage dictionary policy in prompt")
 	}
 }
+
+func TestBuildPromptRefreshStep1CollectIncludesNoWebSearchPolicy(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		TaskID:       "task-refresh-step1",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		Workspace:    "/tmp/workspace",
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	prompt := buildPrompt(raw, false)
+	if !strings.Contains(prompt, "do NOT perform web search or external browsing") {
+		t.Fatalf("expected no-web-search rule in step1 collect policy")
+	}
+	if !strings.Contains(prompt, "Do NOT emit synthetic evidence paths such as search_source/*") {
+		t.Fatalf("expected synthetic evidence-path ban in step1 collect policy")
+	}
+}

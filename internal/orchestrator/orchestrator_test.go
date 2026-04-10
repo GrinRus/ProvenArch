@@ -1035,6 +1035,130 @@ func TestSemanticGuardDropsRuntimeProviderEntityInRefreshStep1Collect(t *testing
 	}
 }
 
+func TestSemanticGuardDropsOffTopicArtifactsInRefreshStep1Collect(t *testing.T) {
+	t.Parallel()
+
+	ws := createMonolithWorkspace(t)
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure workspace layout: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/billing.md", []byte("# Domain: Billing\n\n- id: `billing`\n- repo_scope: `orders-monolith`\n")); err != nil {
+		t.Fatalf("write billing domain card: %v", err)
+	}
+
+	service := NewService(WithRunner(refreshCollectOffTopicRunner{}))
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run refresh pipeline: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
+	}
+	if !hasWarningPrefix(info.Warnings, "refresh.step1.collect: semantic_guard: dropped refresh.step1.collect off-topic artifacts") {
+		t.Fatalf("expected off-topic semantic guard warning in run warnings, got %#v", info.Warnings)
+	}
+
+	taskrunsDir := filepath.Join(ws.Path, "reports", "taskruns")
+	step1Taskruns, err := filepath.Glob(filepath.Join(taskrunsDir, "*-refresh-step1-collect-domain-*.json"))
+	if err != nil {
+		t.Fatalf("glob refresh step1 taskruns: %v", err)
+	}
+	if len(step1Taskruns) == 0 {
+		t.Fatalf("expected refresh step1 taskrun files")
+	}
+	latest := step1Taskruns[len(step1Taskruns)-1]
+	raw, err := os.ReadFile(latest)
+	if err != nil {
+		t.Fatalf("read taskrun: %v", err)
+	}
+	var payload contracts.TaskResult
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal taskrun payload: %v", err)
+	}
+	for _, op := range payload.Changeset {
+		if op.Op != "upsert_entity" || op.Entity == nil {
+			continue
+		}
+		entityText := strings.ToLower(strings.Join([]string{op.Entity.ID, op.Entity.Type, op.Entity.Name}, " "))
+		if strings.Contains(entityText, "chinabidding") || strings.Contains(entityText, "bidding") {
+			t.Fatalf("off-topic entity should be filtered from normalized taskrun, got %q", entityText)
+		}
+	}
+	for _, question := range payload.Questions {
+		if strings.Contains(strings.ToLower(question.Text), "bidding") {
+			t.Fatalf("off-topic question should be filtered from normalized taskrun, got %q", question.Text)
+		}
+	}
+
+	questionsReport, err := os.ReadFile(filepath.Join(ws.Path, "reports/coverage/open-questions.md"))
+	if err != nil {
+		t.Fatalf("read open questions report: %v", err)
+	}
+	if strings.Contains(strings.ToLower(string(questionsReport)), "bidding") {
+		t.Fatalf("off-topic question should be filtered from coverage questions report, got %q", string(questionsReport))
+	}
+}
+
+func TestSemanticGuardMarksCriticalOffTopicDriftInRefreshStep1Collect(t *testing.T) {
+	t.Parallel()
+
+	ws := createMonolithWorkspace(t)
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure workspace layout: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/billing.md", []byte("# Domain: Billing\n\n- id: `billing`\n- repo_scope: `orders-monolith`\n")); err != nil {
+		t.Fatalf("write billing domain card: %v", err)
+	}
+
+	service := NewService(WithRunner(refreshCollectCriticalOffTopicRunner{}))
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run refresh pipeline: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
+	}
+	if !hasWarningPrefix(info.Warnings, "refresh.step1.collect: semantic_guard: critical_off_topic_drift in refresh.step1.collect") {
+		t.Fatalf("expected critical off-topic drift warning in run warnings, got %#v", info.Warnings)
+	}
+
+	taskrunsDir := filepath.Join(ws.Path, "reports", "taskruns")
+	step1Taskruns, err := filepath.Glob(filepath.Join(taskrunsDir, "*-refresh-step1-collect-domain-*.json"))
+	if err != nil {
+		t.Fatalf("glob refresh step1 taskruns: %v", err)
+	}
+	if len(step1Taskruns) == 0 {
+		t.Fatalf("expected refresh step1 taskrun files")
+	}
+	latest := step1Taskruns[len(step1Taskruns)-1]
+	raw, err := os.ReadFile(latest)
+	if err != nil {
+		t.Fatalf("read taskrun: %v", err)
+	}
+	var payload contracts.TaskResult
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal taskrun payload: %v", err)
+	}
+	foundCriticalWarning := false
+	for _, warning := range payload.Warnings {
+		if strings.Contains(warning, "semantic_guard: critical_off_topic_drift in refresh.step1.collect") {
+			foundCriticalWarning = true
+			break
+		}
+	}
+	if !foundCriticalWarning {
+		t.Fatalf("expected critical off-topic warning in normalized step1 taskrun payload, got %#v", payload.Warnings)
+	}
+}
+
 func TestSemanticGuardAddsFallbackFindingForOwnerGapInRefreshStep3(t *testing.T) {
 	t.Parallel()
 
@@ -1253,6 +1377,106 @@ func (refreshNoServiceMissingFindingsRunner) Run(ctx context.Context, task acpru
 }
 
 func (refreshNoServiceMissingFindingsRunner) Preflight(context.Context) error { return nil }
+
+type refreshCollectOffTopicRunner struct{}
+
+func (refreshCollectOffTopicRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	base := claudecode.FakeRunner{}
+	result, err := base.Run(ctx, task)
+	if err != nil {
+		return acpruntime.Result{}, err
+	}
+	if task.StepID != "refresh.step1.collect" {
+		return result, nil
+	}
+
+	taskResult := result.TaskResult
+	taskResult.Changeset = append(taskResult.Changeset, contracts.Operation{
+		Op: "upsert_entity",
+		Entity: &contracts.Entity{
+			ID:   "external.chinabidding",
+			Type: "external.system",
+			Name: "China Bidding Network",
+			Attributes: map[string]any{
+				"url": "https://www.chinabidding.cn",
+			},
+			Provenance: contracts.Provenance{
+				Kind:       "inference",
+				Confidence: 0.4,
+				Evidence: []contracts.Evidence{
+					{Repo: "orders-monolith", Path: "search_source/chinabidding.cn"},
+				},
+			},
+		},
+	})
+	taskResult.Questions = append(taskResult.Questions, contracts.Question{
+		ID:       "q.refresh.delta.1",
+		Text:     "What bidding announcements were published since last run?",
+		Priority: "high",
+	})
+
+	raw, marshalErr := json.MarshalIndent(taskResult, "", "  ")
+	if marshalErr != nil {
+		return acpruntime.Result{}, marshalErr
+	}
+	result.TaskResult = taskResult
+	result.RawJSON = raw
+	return result, nil
+}
+
+func (refreshCollectOffTopicRunner) Preflight(context.Context) error { return nil }
+
+type refreshCollectCriticalOffTopicRunner struct{}
+
+func (refreshCollectCriticalOffTopicRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	base := claudecode.FakeRunner{}
+	result, err := base.Run(ctx, task)
+	if err != nil {
+		return acpruntime.Result{}, err
+	}
+	if task.StepID != "refresh.step1.collect" {
+		return result, nil
+	}
+
+	taskResult := result.TaskResult
+	taskResult.Changeset = []contracts.Operation{
+		{
+			Op: "upsert_entity",
+			Entity: &contracts.Entity{
+				ID:   "external.chinabidding",
+				Type: "external.system",
+				Name: "China Bidding Network",
+				Attributes: map[string]any{
+					"url": "https://www.chinabidding.cn",
+				},
+				Provenance: contracts.Provenance{
+					Kind:       "inference",
+					Confidence: 0.4,
+					Evidence: []contracts.Evidence{
+						{Repo: "orders-monolith", Path: "search_source/chinabidding.cn"},
+					},
+				},
+			},
+		},
+	}
+	taskResult.Questions = []contracts.Question{
+		{
+			ID:       "q.refresh.delta.critical",
+			Text:     "What bidding announcements were published since last run?",
+			Priority: "high",
+		},
+	}
+
+	raw, marshalErr := json.MarshalIndent(taskResult, "", "  ")
+	if marshalErr != nil {
+		return acpruntime.Result{}, marshalErr
+	}
+	result.TaskResult = taskResult
+	result.RawJSON = raw
+	return result, nil
+}
+
+func (refreshCollectCriticalOffTopicRunner) Preflight(context.Context) error { return nil }
 
 type docArtifactRunner struct{}
 

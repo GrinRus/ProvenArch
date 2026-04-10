@@ -2,13 +2,14 @@
 set -Eeuo pipefail
 
 PROVENARCH_ROOT="${PROVENARCH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-TARGET_REPO="${TARGET_REPO:-$PROVENARCH_ROOT/test_arch_project/repos/ibatulanandjp__ecommerce-microservices}"
+TARGET_REPO="${TARGET_REPO:-}"
 BATCH_ID="${BATCH_ID:-batch-$(date -u +'%Y%m%dT%H%M%SZ')}"
 RUN_COUNT="${RUN_COUNT:-5}"
 ACP_CLAUDE_CMD_BIN="${ACP_CLAUDE_CMD_BIN:-claude}"
 ACP_QWEN_CMD_BIN="${ACP_QWEN_CMD_BIN:-qwen}"
-BATCH_ROOT="${BATCH_ROOT:-$PROVENARCH_ROOT/test_arch_project/runs/$BATCH_ID}"
-REPORTS_ROOT="${REPORTS_ROOT:-$PROVENARCH_ROOT/test_arch_project/reports}"
+E2E_TMP_ROOT="${E2E_TMP_ROOT:-/tmp/provenarch-test_arch_project}"
+BATCH_ROOT="${BATCH_ROOT:-$E2E_TMP_ROOT/runs/$BATCH_ID}"
+REPORTS_ROOT="${REPORTS_ROOT:-$E2E_TMP_ROOT/reports}"
 
 log() {
   printf '[batch-5x2] %s\n' "$*" >&2
@@ -31,6 +32,9 @@ if [[ ! "$RUN_COUNT" =~ ^[1-9][0-9]*$ ]]; then
 fi
 if [[ "$RUN_COUNT" != "5" ]]; then
   die "RUN_COUNT must be 5 for this batch plan (got '$RUN_COUNT')"
+fi
+if [[ -z "$TARGET_REPO" ]]; then
+  die "TARGET_REPO is required and must point to an existing local checkout (example: TARGET_REPO=/abs/path/to/repo)"
 fi
 if [[ ! -d "$TARGET_REPO" ]]; then
   die "TARGET_REPO does not exist: $TARGET_REPO"
@@ -135,13 +139,34 @@ done
 
 frontend_failures=0
 for provider in qwen-code claude-code; do
-  workspace="$BATCH_ROOT/$provider/run1/arch-workspace"
+  backend_run_dir="$BATCH_ROOT/$provider/run1"
+  workspace="$backend_run_dir/arch-workspace"
   output_dir="$BATCH_ROOT/frontend/$provider"
+  frontend_workspace="$output_dir/frontend-workspace"
+  run_results_path="$backend_run_dir/run-results.tsv"
+  refresh_run_id=""
+  snapshot_reports=""
   mkdir -p "$output_dir"
-  log "frontend live e2e provider=$provider workspace=$workspace"
+  if [[ -f "$run_results_path" ]]; then
+    refresh_run_id="$(awk -F'\t' '$2=="headless" && $4=="refresh" {print $5}' "$run_results_path" | tail -n1)"
+  fi
+  if [[ -n "$refresh_run_id" ]]; then
+    snapshot_reports="$backend_run_dir/snapshots/$refresh_run_id/reports"
+  fi
+
+  rm -rf "$frontend_workspace"
+  cp -a "$workspace" "$frontend_workspace"
+  frontend_source="workspace-fallback"
+  if [[ -d "$snapshot_reports" ]]; then
+    rm -rf "$frontend_workspace/reports"
+    cp -a "$snapshot_reports" "$frontend_workspace/reports"
+    frontend_source="snapshot"
+  fi
+
+  log "frontend live e2e provider=$provider workspace=$frontend_workspace artifact_source=$frontend_source refresh_run_id=${refresh_run_id:-unknown}"
   if ! (
     cd "$PROVENARCH_ROOT"
-    WORKSPACE="$workspace" \
+    WORKSPACE="$frontend_workspace" \
     RUNTIME_PROVIDER="$provider" \
     OUTPUT_DIR="$output_dir" \
     ACP_CLAUDE_CMD="$ACP_CLAUDE_CMD_BIN" \

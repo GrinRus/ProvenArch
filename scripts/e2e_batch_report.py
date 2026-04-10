@@ -30,6 +30,37 @@ RUN_RESULTS_COLUMNS = [
     "output_path",
 ]
 
+OFF_TOPIC_TERMS = (
+    "bidding",
+    "tender",
+    "chinabidding",
+    "power system",
+    "power enterprise",
+    "relay protection",
+    "load flow",
+    "electric analysis",
+    "继电",
+    "潮流",
+    "电力",
+    "招标",
+)
+
+POWER_TARGET_HINTS = (
+    "power",
+    "energy",
+    "electric",
+    "grid",
+    "utility",
+)
+
+SYNTHETIC_EVIDENCE_PREFIXES = (
+    "search_source/",
+    "search_query/",
+    "search_config/",
+    "web_search/",
+    "browser/",
+)
+
 
 def normalize_text(value: str) -> str:
     cleaned = value.strip().lower().replace("_", " ").replace("-", " ")
@@ -49,6 +80,11 @@ def parse_markdown_scalar(text: str, key: str) -> str:
 def parse_api_status(text: str) -> str:
     match = re.search(r"## API Simulation\s+- status:\s*(\S+)", text, flags=re.MULTILINE)
     return match.group(1).strip() if match else ""
+
+
+def first_token(value: str) -> str:
+    parts = value.split()
+    return parts[0] if parts else ""
 
 
 def parse_run_results(path: Path) -> list[dict[str, Any]]:
@@ -118,6 +154,177 @@ def parse_headless_rows(rows: list[dict[str, Any]], provider: str) -> dict[str, 
     return result
 
 
+def resolve_reports_root(run_dir: Path, run_id: str) -> tuple[Path, str]:
+    snapshot_reports = run_dir / "snapshots" / run_id / "reports"
+    if snapshot_reports.exists():
+        return snapshot_reports, "snapshot"
+    return run_dir / "arch-workspace" / "reports", "workspace-fallback"
+
+
+def resolve_quality_json(run_dir: Path, row: dict[str, Any]) -> tuple[Path, str]:
+    run_id = str(row.get("run_id", "")).strip()
+    reports_root, source = resolve_reports_root(run_dir, run_id)
+    return reports_root / "taskruns" / f"{run_id}-quality.json", source
+
+
+def resolve_step_taskrun_files(run_dir: Path, run_id: str, pipeline: str) -> tuple[list[Path], str]:
+    reports_root, source = resolve_reports_root(run_dir, run_id)
+    files = sorted((reports_root / "taskruns").glob(f"{run_id}-{pipeline}-*.json"))
+    return files, source
+
+
+def is_within(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except Exception:
+        return False
+
+
+def collect_evidence_paths(payload: Any) -> list[str]:
+    result: list[str] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            provenance = node.get("provenance")
+            if isinstance(provenance, dict):
+                evidence = provenance.get("evidence")
+                if isinstance(evidence, list):
+                    for item in evidence:
+                        if isinstance(item, dict):
+                            path_value = item.get("path")
+                            if isinstance(path_value, str):
+                                result.append(path_value.strip())
+            for value in node.values():
+                walk(value)
+            return
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(payload)
+    return result
+
+
+def normalize_evidence_path(path_value: str) -> str:
+    raw = path_value.strip().strip("`")
+    if not raw:
+        return ""
+    # Allow evidence values with URL/hash/query/line suffix decorations.
+    base = raw.split("?", 1)[0].split("#", 1)[0].strip()
+    if not base:
+        return ""
+    line_suffix = re.match(r"^(.*?):\d+(?::\d+)?$", base)
+    if line_suffix:
+        prefix = line_suffix.group(1)
+        # Keep Windows drive form like C:\... intact.
+        if not re.match(r"^[A-Za-z]:[\\/]", prefix):
+            base = prefix
+    return base.strip()
+
+
+def evidence_path_resolves(path_value: str, target_repo: Path, workspace: Path) -> tuple[bool, str]:
+    raw = path_value.strip()
+    if not raw:
+        return False, "empty path"
+    normalized_raw = normalize_text(raw)
+    raw_lower = raw.lower()
+    normalized_candidate = normalize_evidence_path(raw)
+    if not normalized_candidate:
+        return False, "empty normalized path"
+    normalized_candidate_text = normalize_text(normalized_candidate)
+    candidate_lower = normalized_candidate.lower()
+    if raw in ("/", ".", ".."):
+        return False, "path points to root/relative marker"
+    if any(raw_lower.startswith(prefix) for prefix in SYNTHETIC_EVIDENCE_PREFIXES):
+        return False, "synthetic prefix"
+    if any(normalized_raw.startswith(normalize_text(prefix)) for prefix in SYNTHETIC_EVIDENCE_PREFIXES):
+        return False, "synthetic prefix"
+    if any(candidate_lower.startswith(prefix) for prefix in SYNTHETIC_EVIDENCE_PREFIXES):
+        return False, "synthetic prefix"
+    if any(normalized_candidate_text.startswith(normalize_text(prefix)) for prefix in SYNTHETIC_EVIDENCE_PREFIXES):
+        return False, "synthetic prefix"
+    if re.match(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://", raw):
+        return False, "uri-like path"
+    if re.match(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://", normalized_candidate):
+        return False, "uri-like path"
+
+    candidate = Path(normalized_candidate)
+    if candidate.is_absolute():
+        if not candidate.exists():
+            return False, "absolute path missing"
+        if is_within(candidate, target_repo) or is_within(candidate, workspace):
+            return True, "ok"
+        return False, "absolute path outside target/workspace"
+
+    candidate_variants = [candidate]
+    parts = candidate.parts
+    if parts and parts[0] in {"arch-workspace", "workspace"} and len(parts) > 1:
+        candidate_variants.append(Path(*parts[1:]))
+
+    for variant in candidate_variants:
+        for resolved in (target_repo / variant, workspace / variant):
+            if resolved.exists():
+                return True, "ok"
+    return False, "relative path missing in target/workspace"
+
+
+def is_power_target(target_repo: Path) -> bool:
+    text = str(target_repo).lower()
+    return any(hint in text for hint in POWER_TARGET_HINTS)
+
+
+def collect_off_topic_hits(payload: dict[str, Any]) -> list[str]:
+    fragments: list[str] = []
+    summary = str(payload.get("summary", "")).strip()
+    if summary:
+        fragments.append(summary)
+
+    questions = payload.get("questions") or []
+    if isinstance(questions, list):
+        for question in questions:
+            if isinstance(question, dict):
+                text = str(question.get("text", "")).strip()
+                if text:
+                    fragments.append(text)
+
+    changeset = payload.get("changeset") or []
+    if isinstance(changeset, list):
+        for op in changeset:
+            if not isinstance(op, dict):
+                continue
+            if isinstance(op.get("entity"), dict):
+                entity = op["entity"]
+                fragments.extend(
+                    [
+                        str(entity.get("id", "")).strip(),
+                        str(entity.get("type", "")).strip(),
+                        str(entity.get("name", "")).strip(),
+                        json.dumps(entity.get("attributes", {}), ensure_ascii=False),
+                    ]
+                )
+
+    corpus = "\n".join(fragment for fragment in fragments if fragment).lower()
+    if not corpus:
+        return []
+    hits = [term for term in OFF_TOPIC_TERMS if term in corpus]
+    return sorted(set(hits))
+
+
+def parse_overview_counts(path: Path) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    if not path.exists():
+        return counts
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        match = re.match(r"^- ([^:]+):\s*([0-9]+)$", line)
+        if not match:
+            continue
+        label = normalize_text(match.group(1))
+        counts[label] = int(match.group(2))
+    return counts
+
+
 def bool_score(value: bool, weight: int) -> int:
     return weight if value else 0
 
@@ -148,28 +355,28 @@ class RunEvaluation:
     refresh_findings: int = 0
     refresh_questions: int = 0
     refresh_cov_missing: int = 0
+    artifact_source: str = "snapshot"
+    semantic_hard_fail: bool = False
+    off_topic_hits: int = 0
     issues: list[str] = field(default_factory=list)
     issue_details: list[str] = field(default_factory=list)
     error_codes: list[str] = field(default_factory=list)
 
 
-def evaluate_run(provider: str, run_index: int, run_dir: Path) -> RunEvaluation:
+def evaluate_run(provider: str, run_index: int, run_dir: Path, preflight: dict[str, Any]) -> RunEvaluation:
     summary_path = run_dir / "session-summary.md"
     run_results_path = run_dir / "run-results.tsv"
     full_run_log = run_dir / "full-run.log"
     workspace = run_dir / "arch-workspace"
-    findings_path = workspace / "reports/findings/findings.md"
-    overview_path = workspace / "reports/as-is/overview.md"
-    coverage_path = workspace / "reports/coverage/summary.md"
-    questions_path = workspace / "reports/coverage/open-questions.md"
+    target_repo = Path(str(preflight.get("target_repo", ""))).resolve() if preflight.get("target_repo") else workspace
 
     issues: list[str] = []
     details: list[str] = []
     error_codes: list[str] = []
 
     summary_text = summary_path.read_text(encoding="utf-8") if summary_path.exists() else ""
-    result_value = parse_markdown_scalar(summary_text, "result").split()[0] if summary_text else ""
-    quality_gates_value = parse_markdown_scalar(summary_text, "quality_gates").split()[0] if summary_text else ""
+    result_value = first_token(parse_markdown_scalar(summary_text, "result")) if summary_text else ""
+    quality_gates_value = first_token(parse_markdown_scalar(summary_text, "quality_gates")) if summary_text else ""
     api_status = parse_api_status(summary_text)
 
     rows = parse_run_results(run_results_path)
@@ -177,15 +384,33 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path) -> RunEvaluation:
     init_row = headless_rows.get("init")
     refresh_row = headless_rows.get("refresh")
 
+    snapshot_ok = True
+    snapshot_semantic_fallback_used = False
+    artifact_source = "snapshot"
+    for row in (init_row, refresh_row):
+        if not row:
+            continue
+        run_id = str(row.get("run_id", "")).strip()
+        reports_root, source = resolve_reports_root(run_dir, run_id)
+        if source != "snapshot":
+            snapshot_ok = False
+            artifact_source = "workspace-fallback"
+            details.append(f"reliability/snapshot-missing -> {run_dir / 'snapshots' / run_id}: fallback={reports_root}")
+
     h1 = result_value == "passed" and quality_gates_value == "passed" and api_status == "succeeded"
     if not h1:
         issues.append("reliability:session")
-        details.append(f"reliability/session -> {summary_path}: result={result_value} quality_gates={quality_gates_value} api={api_status}")
+        details.append(
+            f"reliability/session -> {summary_path}: result={result_value} quality_gates={quality_gates_value} api={api_status}"
+        )
 
     h2 = bool(init_row and refresh_row and init_row["status"] == "succeeded" and refresh_row["status"] == "succeeded")
     if not h2:
         issues.append("reliability:headless-status")
-        details.append(f"reliability/headless-status -> {run_results_path}: init={init_row['status'] if init_row else 'missing'} refresh={refresh_row['status'] if refresh_row else 'missing'}")
+        details.append(
+            f"reliability/headless-status -> {run_results_path}: init={init_row['status'] if init_row else 'missing'} "
+            f"refresh={refresh_row['status'] if refresh_row else 'missing'}"
+        )
 
     runner_error_hit = False
     for source_path in (summary_path, full_run_log):
@@ -209,7 +434,9 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path) -> RunEvaluation:
         details.append(f"reliability/signal -> {run_results_path}: init_signal={init_signal} refresh_signal={refresh_signal}")
 
     reliability = bool_score(h1, 10) + bool_score(h2, 10) + bool_score(h3, 10) + bool_score(h4, 10)
-    hard_pass = h1 and h2 and h3 and h4
+    if not snapshot_ok:
+        issues.append("reliability:snapshot-missing")
+        reliability = max(0, reliability - 10)
 
     c1_runtime_name_ok = True
     c2_runtime_versions_ok = True
@@ -223,7 +450,9 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path) -> RunEvaluation:
             continue
         pipeline = str(row["pipeline"])
         run_id = str(row["run_id"])
-        quality_path = Path(str(row["quality_path"]))
+        quality_path, quality_source = resolve_quality_json(run_dir, row)
+        if quality_source != "snapshot":
+            artifact_source = "workspace-fallback"
         if not quality_path.exists():
             c2_runtime_versions_ok = False
             c3_metrics_ok = False
@@ -258,19 +487,37 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path) -> RunEvaluation:
             total_value = int(totals.get(total_key, 0))
             if row_value != total_value:
                 c3_metrics_ok = False
-                details.append(
-                    f"contract/metrics-parity -> {quality_path}: {row_key} row={row_value} json={total_value}"
-                )
+                details.append(f"contract/metrics-parity -> {quality_path}: {row_key} row={row_value} json={total_value}")
 
-        taskrun_files = sorted((workspace / "reports/taskruns").glob(f"{run_id}-{pipeline}-*.json"))
+        taskrun_files, _ = resolve_step_taskrun_files(run_dir, run_id, pipeline)
         if not taskrun_files:
-            c1_runtime_name_ok = False
-            details.append(f"contract/runtime-name -> {workspace / 'reports/taskruns'}: no step files for run_id={run_id}")
+            quality_steps = quality_payload.get("steps") or []
+            matching_runtime_names = [
+                str(step.get("runtime_name", "")).strip()
+                for step in quality_steps
+                if str(step.get("step_id", "")).strip().startswith(f"{pipeline}.")
+            ]
+            if not matching_runtime_names:
+                c1_runtime_name_ok = False
+                details.append(
+                    f"contract/runtime-name -> missing step files and quality step runtime_name for run_id={run_id} pipeline={pipeline}"
+                )
+            for runtime_name in matching_runtime_names:
+                if not runtime_name:
+                    c1_runtime_name_ok = False
+                    details.append(
+                        f"contract/runtime-name -> quality step runtime_name is empty for run_id={run_id} pipeline={pipeline}"
+                    )
+                    continue
+                if runtime_name != provider:
+                    c1_runtime_name_ok = False
+                    details.append(
+                        f"contract/runtime-name -> quality step runtime_name mismatch for run_id={run_id} pipeline={pipeline}: "
+                        f"expected={provider} got={runtime_name}"
+                    )
         for taskrun_file in taskrun_files:
             payload = read_json(taskrun_file)
-            runtime_name = (
-                str((payload.get("meta") or {}).get("runtime", {}).get("name", "")).strip()
-            )
+            runtime_name = str((payload.get("meta") or {}).get("runtime", {}).get("name", "")).strip()
             if not runtime_name:
                 c1_runtime_name_ok = False
                 details.append(f"contract/runtime-name -> {taskrun_file}: empty meta.runtime.name")
@@ -287,6 +534,17 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path) -> RunEvaluation:
 
     contract = bool_score(c1_runtime_name_ok, 8) + bool_score(c2_runtime_versions_ok, 6) + bool_score(c3_metrics_ok, 6)
 
+    analysis_run_id = str((refresh_row or init_row or {}).get("run_id", "")).strip()
+    analysis_reports_root = workspace / "reports"
+    if analysis_run_id:
+        analysis_reports_root, analysis_source = resolve_reports_root(run_dir, analysis_run_id)
+        if analysis_source != "snapshot":
+            artifact_source = "workspace-fallback"
+    findings_path = analysis_reports_root / "findings/findings.md"
+    overview_path = analysis_reports_root / "as-is/overview.md"
+    coverage_path = analysis_reports_root / "coverage/summary.md"
+    questions_path = analysis_reports_root / "coverage/open-questions.md"
+
     overview_ok = False
     findings_ok = False
     coverage_ok = False
@@ -297,11 +555,14 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path) -> RunEvaluation:
         placeholder_hit = any("no " in line.lower() and " yet" in line.lower() for line in non_empty_lines)
         overview_ok = len(non_empty_lines) >= 4 and not placeholder_hit
         if not overview_ok:
-            details.append(f"analysis/overview -> {overview_path}: non_empty_lines={len(non_empty_lines)} placeholder={int(placeholder_hit)}")
+            details.append(
+                f"analysis/overview -> {overview_path}: non_empty_lines={len(non_empty_lines)} placeholder={int(placeholder_hit)}"
+            )
     else:
         details.append(f"analysis/overview -> missing {overview_path}")
 
     findings_text = findings_path.read_text(encoding="utf-8") if findings_path.exists() else ""
+    findings_text_lower = findings_text.lower()
     has_finding_heading = "## " in findings_text
     has_severity = "- Severity:" in findings_text
     has_description = "- Description:" in findings_text
@@ -325,21 +586,82 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path) -> RunEvaluation:
             f"analysis/coverage -> {coverage_path}: missing={len(missing_terms)} missing_dupes={int(missing_dupes)} notes_dupes={int(notes_dupes)}"
         )
 
-    question_ids, question_texts = parse_open_questions(questions_path)
+    _question_ids, question_texts = parse_open_questions(questions_path)
     question_texts_norm = [normalize_text(text) for text in question_texts if text.strip()]
     question_dupes = len(question_texts_norm) != len(set(question_texts_norm))
     questions_ok = len(question_texts_norm) > 0 and not question_dupes
     if not questions_ok:
-        details.append(
-            f"analysis/questions -> {questions_path}: count={len(question_texts_norm)} dupes={int(question_dupes)}"
-        )
+        details.append(f"analysis/questions -> {questions_path}: count={len(question_texts_norm)} dupes={int(question_dupes)}")
 
     owner_gap = any(term in {"owner mappings", "owner mapping", "owner team mappings", "owner team mapping"} for term in missing_terms)
     if owner_gap and has_empty_marker:
         findings_ok = False
+        details.append(f"analysis/findings-owner-gap -> {findings_path}: owner gap exists in {coverage_path}, findings are empty")
+
+    semantic_hard_fail = False
+    off_topic_hits = 0
+
+    refresh_step_files: list[Path] = []
+    if refresh_row:
+        refresh_run_id = str(refresh_row.get("run_id", ""))
+        refresh_step_files, refresh_source = resolve_step_taskrun_files(run_dir, refresh_run_id, "refresh")
+        if refresh_source != "snapshot":
+            artifact_source = "workspace-fallback"
+        if not refresh_step_files:
+            fallback_glob = sorted((workspace / "reports" / "taskruns").glob(f"{refresh_run_id}-refresh-*.json"))
+            if fallback_glob:
+                refresh_step_files = fallback_glob
+                snapshot_semantic_fallback_used = True
+                artifact_source = "workspace-fallback"
+                details.append(
+                    f"reliability/snapshot-missing -> missing refresh step taskruns in snapshot, fallback to workspace reports for run_id={refresh_run_id}"
+                )
+
+    if refresh_step_files:
+        non_power_target = not is_power_target(target_repo)
+        step1_files = [path for path in refresh_step_files if "-step1-collect-" in path.name]
+        if non_power_target:
+            for step_file in step1_files:
+                payload = read_json(step_file)
+                hits = collect_off_topic_hits(payload)
+                if hits:
+                    off_topic_hits += len(hits)
+                    semantic_hard_fail = True
+                    issues.append("analysis:off-topic")
+                    details.append(f"analysis/off-topic -> {step_file}: hits={','.join(hits)}")
+
+        invalid_evidence: list[str] = []
+        for step_file in refresh_step_files:
+            payload = read_json(step_file)
+            for evidence_path in collect_evidence_paths(payload):
+                ok, reason = evidence_path_resolves(evidence_path, target_repo, workspace)
+                if not ok:
+                    invalid_evidence.append(f"{step_file} :: {evidence_path} ({reason})")
+        if invalid_evidence:
+            semantic_hard_fail = True
+            issues.append("analysis:evidence-scope")
+            for item in invalid_evidence[:8]:
+                details.append(f"analysis/evidence-scope -> {item}")
+            if len(invalid_evidence) > 8:
+                details.append(f"analysis/evidence-scope -> +{len(invalid_evidence) - 8} more invalid evidence paths")
+
+    overview_counts = parse_overview_counts(overview_path)
+    services_count = int(overview_counts.get("services", 0))
+    if services_count > 0 and "missing service definition files" in findings_text_lower:
+        semantic_hard_fail = True
+        issues.append("analysis:cross-doc")
         details.append(
-            f"analysis/findings-owner-gap -> {findings_path}: owner gap exists in {coverage_path}, findings are empty"
+            f"analysis/cross-doc -> {overview_path} services={services_count} conflicts with 'missing service definition files' in {findings_path}"
         )
+
+    if semantic_hard_fail:
+        issues.append("reliability:semantic-hard-fail")
+
+    if snapshot_semantic_fallback_used and snapshot_ok:
+        snapshot_ok = False
+        if "reliability:snapshot-missing" not in issues:
+            issues.append("reliability:snapshot-missing")
+        reliability = max(0, reliability - 10)
 
     if not overview_ok:
         issues.append("analysis:overview")
@@ -351,6 +673,7 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path) -> RunEvaluation:
         issues.append("analysis:questions")
 
     analysis = bool_score(overview_ok, 10) + bool_score(findings_ok, 10) + bool_score(coverage_ok, 10) + bool_score(questions_ok, 10)
+    hard_pass = h1 and h2 and h3 and h4 and snapshot_ok and not semantic_hard_fail
 
     total = reliability + contract + analysis
     return RunEvaluation(
@@ -368,6 +691,9 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path) -> RunEvaluation:
         refresh_findings=int(refresh_row["findings"]) if refresh_row else 0,
         refresh_questions=int(refresh_row["questions"]) if refresh_row else 0,
         refresh_cov_missing=int(refresh_row["cov_missing"]) if refresh_row else 0,
+        artifact_source=artifact_source,
+        semantic_hard_fail=semantic_hard_fail,
+        off_topic_hits=off_topic_hits,
         issues=sorted(set(issues)),
         issue_details=details,
         error_codes=sorted(set(error_codes)),
@@ -389,14 +715,15 @@ def write_run_matrix(path: Path, runs: list[RunEvaluation]) -> None:
     lines = [
         "# Run Matrix",
         "",
-        "| provider | run | hard_pass | reliability | contract | analysis | total | verdict | init_signal | refresh_signal | refresh_findings | refresh_questions | refresh_cov_missing | issues |",
-        "|---|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|---|",
+        "| provider | run | hard_pass | reliability | contract | analysis | total | verdict | artifact_source | semantic_hard_fail | off_topic_hits | init_signal | refresh_signal | refresh_findings | refresh_questions | refresh_cov_missing | issues |",
+        "|---|---:|---:|---:|---:|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for item in runs:
         lines.append(
             "| "
             f"{item.provider} | {item.run_index} | {int(item.hard_pass)} | {item.reliability} | {item.contract} | "
-            f"{item.analysis} | {item.total} | {item.verdict} | {item.init_signal} | {item.refresh_signal} | "
+            f"{item.analysis} | {item.total} | {item.verdict} | {item.artifact_source} | {int(item.semantic_hard_fail)} | {item.off_topic_hits} | "
+            f"{item.init_signal} | {item.refresh_signal} | "
             f"{item.refresh_findings} | {item.refresh_questions} | {item.refresh_cov_missing} | "
             f"{', '.join(item.issues) if item.issues else '-'} |"
         )
@@ -438,9 +765,11 @@ def provider_matrix_rows(
         refresh_signals = [item.refresh_signal for item in items]
         issues_counter = Counter()
         error_codes_counter = Counter()
+        artifact_sources = Counter()
         for item in items:
             issues_counter.update(item.issues)
             error_codes_counter.update(item.error_codes)
+            artifact_sources.update([item.artifact_source])
         frontend_status = frontend.get(provider, {}).get("status")
         frontend_pass_rate = 1.0 if frontend_status == "passed" else 0.0 if frontend_status else 0.0
         rows.append(
@@ -458,8 +787,11 @@ def provider_matrix_rows(
                 "avg_findings": mean([item.refresh_findings for item in items]) if items else 0.0,
                 "avg_questions": mean([item.refresh_questions for item in items]) if items else 0.0,
                 "avg_cov_missing": mean([item.refresh_cov_missing for item in items]) if items else 0.0,
+                "off_topic_hits": sum(item.off_topic_hits for item in items),
+                "semantic_hard_fail_runs": sum(1 for item in items if item.semantic_hard_fail),
                 "error_codes": ", ".join(f"{code}={count}" for code, count in sorted(error_codes_counter.items())) or "-",
                 "issues_top": ", ".join(f"{name}={count}" for name, count in issues_counter.most_common(3)) or "-",
+                "artifact_sources": ", ".join(f"{name}={count}" for name, count in sorted(artifact_sources.items())) or "-",
                 "frontend_pass_rate": frontend_pass_rate,
             }
         )
@@ -475,9 +807,12 @@ def write_quality_report(
 ) -> None:
     provider_rows = provider_matrix_rows(runs, frontend)
     hard_pass_all = sum(1 for run in runs if run.hard_pass)
+    semantic_hard_fail_runs = sum(1 for run in runs if run.semantic_hard_fail)
     issue_counter = Counter()
     for run in runs:
         issue_counter.update(run.issues)
+    snapshot_runs = sum(1 for run in runs if run.artifact_source == "snapshot")
+    workspace_fallback_runs = len(runs) - snapshot_runs
 
     lines = [
         f"# Quality Report: {batch_id}",
@@ -490,13 +825,20 @@ def write_quality_report(
         f"- claude: {((preflight.get('runtimes') or {}).get('claude') or {}).get('version_line', '-')}",
         f"- qwen: {((preflight.get('runtimes') or {}).get('qwen') or {}).get('version_line', '-')}",
         "",
-        "## Hard-Gates",
+        "## Backend Quality Verdict (source-of-truth)",
         f"- hard_pass_runs: {hard_pass_all}/{len(runs)}",
+        f"- semantic_hard_fail_runs: {semantic_hard_fail_runs}/{len(runs)}",
+        f"- artifact_source_snapshot_runs: {snapshot_runs}/{len(runs)}",
+        f"- artifact_source_workspace_fallback_runs: {workspace_fallback_runs}/{len(runs)}",
+        "",
+        "## Frontend Live Smoke Verdict",
+        f"- qwen-code: {(frontend.get('qwen-code') or {}).get('status', 'missing')}",
+        f"- claude-code: {(frontend.get('claude-code') or {}).get('status', 'missing')}",
         "",
         "## Provider Matrix",
         "",
-        "| provider | runs | pass_rate | avg_total | std_total | avg_reliability | avg_contract | avg_analysis | avg_refresh_signal | std_refresh_signal | avg_refresh_findings | avg_refresh_questions | avg_refresh_cov_missing | error_codes | frontend_live_pass_rate |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|",
+        "| provider | runs | pass_rate | avg_total | std_total | avg_reliability | avg_contract | avg_analysis | avg_refresh_signal | std_refresh_signal | avg_refresh_findings | avg_refresh_questions | avg_refresh_cov_missing | off_topic_hits | semantic_hard_fail_runs | artifact_sources | error_codes | frontend_live_pass_rate |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---:|",
     ]
     for row in provider_rows:
         lines.append(
@@ -504,7 +846,8 @@ def write_quality_report(
             f"{row['provider']} | {row['runs']} | {row['pass_rate']:.2f} | {row['avg_total']:.2f} | {row['std_total']:.2f} | "
             f"{row['avg_reliability']:.2f} | {row['avg_contract']:.2f} | {row['avg_analysis']:.2f} | "
             f"{row['avg_signal']:.2f} | {row['std_signal']:.2f} | {row['avg_findings']:.2f} | {row['avg_questions']:.2f} | "
-            f"{row['avg_cov_missing']:.2f} | {row['error_codes']} | {row['frontend_pass_rate']:.2f} |"
+            f"{row['avg_cov_missing']:.2f} | {row['off_topic_hits']} | {row['semantic_hard_fail_runs']} | "
+            f"{row['artifact_sources']} | {row['error_codes']} | {row['frontend_pass_rate']:.2f} |"
         )
 
     lines.extend(
@@ -577,6 +920,9 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
         "refresh_findings",
         "refresh_questions",
         "refresh_cov_missing",
+        "artifact_source",
+        "semantic_hard_fail",
+        "off_topic_hits",
         "issues",
     ]
     lines = ["\t".join(header)]
@@ -597,6 +943,9 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
                     str(run.refresh_findings),
                     str(run.refresh_questions),
                     str(run.refresh_cov_missing),
+                    run.artifact_source,
+                    str(int(run.semantic_hard_fail)),
+                    str(run.off_topic_hits),
                     ",".join(run.issues),
                 ]
             )
@@ -615,16 +964,17 @@ def main() -> int:
     reports_root = Path(args.reports_root).resolve()
     reports_root.mkdir(parents=True, exist_ok=True)
 
+    preflight_path = batch_root / "preflight.json"
+    preflight = read_json(preflight_path) if preflight_path.exists() else {}
+
     runs: list[RunEvaluation] = []
     for provider in ("qwen-code", "claude-code"):
         for run_index in range(1, 6):
             run_dir = batch_root / provider / f"run{run_index}"
-            runs.append(evaluate_run(provider, run_index, run_dir))
+            runs.append(evaluate_run(provider, run_index, run_dir, preflight))
     runs.sort(key=lambda item: (item.provider, item.run_index))
 
     frontend = load_frontend_results(batch_root)
-    preflight_path = batch_root / "preflight.json"
-    preflight = read_json(preflight_path) if preflight_path.exists() else {}
 
     run_matrix_path = reports_root / f"run_matrix_{args.batch_id}.md"
     frontend_matrix_path = reports_root / f"frontend_e2e_matrix_{args.batch_id}.md"
