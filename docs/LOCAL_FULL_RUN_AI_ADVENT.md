@@ -31,13 +31,17 @@ Batch-only semantic hard-fail checks (в `scripts/e2e_batch_report.py`):
 - `analysis:off-topic`
 - `analysis:evidence-scope`
 - `analysis:cross-doc`
+- `analysis:cross-repo-missing` (для multi-profile, `expected_repo_count >= 2`)
 
 ## 2) Переменные скрипта
 
 `./scripts/full-run-ai-advent.sh` поддерживает:
 
 - `PROVENARCH_ROOT` (default: текущий repo ProvenArch)
-- `TARGET_REPO` (required: path to the repository used for full-run)
+- `TARGET_REPOS_FILE` (canonical: YAML с `repos[]`, как в `workspace.yaml`)
+- legacy single inputs (backward compatibility):
+  - `TARGET_REPO` (single path)
+  - `TARGET_REPO_GIT_URL` + `TARGET_REPO_NAME` + `TARGET_REPO_REF` (single `git_url`, pinned ref required)
 - `TMP_ROOT` (default: auto `mktemp -d -t provenarch-ai-advent.XXXXXX`)
 - `ACP_RUNTIME_PROVIDER` (headless provider: `claude-code` default или `qwen-code`)
 - `ACP_CLAUDE_CMD` (команда для provider `claude-code`; default `claude-code`, поддержан direct `claude` без wrapper)
@@ -51,15 +55,30 @@ Batch-only semantic hard-fail checks (в `scripts/e2e_batch_report.py`):
 Batch/Frontend scripts:
 - `scripts/full-run-batch-5x2.sh`
   - `BATCH_ID` (default `batch-<UTC timestamp>`)
-  - `TARGET_REPO` (required; один локальный checkout path целевого репозитория)
+  - `TARGET_REPOS_FILE` (canonical; основной вход)
+  - legacy compatibility:
+    - `TARGET_REPO` (single path)
+    - `TARGET_REPO_GIT_URL` + `TARGET_REPO_NAME` + `TARGET_REPO_REF` (single `git_url`)
+  - optional profile metadata:
+    - `PROFILE_ID`
+    - `PROFILE_SOURCE_KIND` (`path|git_url`)
+    - `EXPECTED_REPO_COUNT`
   - `E2E_TMP_ROOT` (default `/tmp/provenarch-test_arch_project`)
   - `BATCH_ROOT` (default `${E2E_TMP_ROOT}/runs/${BATCH_ID}`)
   - `REPORTS_ROOT` (default `${E2E_TMP_ROOT}/reports`)
   - `ACP_CLAUDE_CMD_BIN` (default `claude`, direct binary)
   - `ACP_QWEN_CMD_BIN` (default `qwen`, direct binary)
+- `scripts/full-run-batch-matrix.sh`
+  - `E2E_MATRIX_FILE` (required; YAML `profiles[]`)
+  - обязательные профили: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
+  - `repos_file` в matrix-профилях: относительные пути резолвятся от директории `E2E_MATRIX_FILE`
+  - `MATRIX_ID` (default `matrix-<UTC timestamp>`)
+  - `MATRIX_ROOT` (default `${E2E_TMP_ROOT}/matrix/${MATRIX_ID}`)
+  - профильный запуск делегируется в `full-run-batch-5x2.sh` (каждый профиль = отдельный batch)
 - `scripts/frontend-live-e2e.sh`
   - `WORKSPACE` (required)
   - `RUNTIME_PROVIDER` (required: `claude-code|qwen-code`)
+  - `UI_E2E_EXPECTED_REPO_COUNT` (optional; default `1`)
   - `OUTPUT_DIR` (optional; default `mktemp`)
   - `LISTEN` (optional; default free local port)
   - Playwright output path для wrapper фиксируется как `$OUTPUT_DIR/playwright-results`
@@ -73,26 +92,34 @@ Direct Playwright запуск (без wrapper) использует:
 cd /path/to/ProvenArch
 
 # Вариант 1: default headless provider (claude-code в PATH)
-TARGET_REPO=/path/to/target-repo ./scripts/full-run-ai-advent.sh
+TARGET_REPOS_FILE=/abs/path/to/repos.yaml ./scripts/full-run-ai-advent.sh
 
 # Вариант 2: direct claude без wrapper
-TARGET_REPO=/path/to/target-repo ACP_RUNTIME_PROVIDER=claude-code ACP_CLAUDE_CMD=claude ./scripts/full-run-ai-advent.sh
+TARGET_REPOS_FILE=/abs/path/to/repos.yaml ACP_RUNTIME_PROVIDER=claude-code ACP_CLAUDE_CMD=claude ./scripts/full-run-ai-advent.sh
 
 # Вариант 3: явно задать provider=qwen-code
-TARGET_REPO=/path/to/target-repo ACP_RUNTIME_PROVIDER=qwen-code ./scripts/full-run-ai-advent.sh
+TARGET_REPOS_FILE=/abs/path/to/repos.yaml ACP_RUNTIME_PROVIDER=qwen-code ./scripts/full-run-ai-advent.sh
 
 # Вариант 4: явно задать команду для выбранного provider
-TARGET_REPO=/path/to/target-repo ACP_RUNTIME_PROVIDER=qwen-code ACP_QWEN_CMD=/abs/path/to/qwen ./scripts/full-run-ai-advent.sh
+TARGET_REPOS_FILE=/abs/path/to/repos.yaml ACP_RUNTIME_PROVIDER=qwen-code ACP_QWEN_CMD=/abs/path/to/qwen ./scripts/full-run-ai-advent.sh
 
 # Вариант 5: оставить tmp workspace для ручного анализа
-TARGET_REPO=/path/to/target-repo KEEP_TMP=1 ./scripts/full-run-ai-advent.sh
+TARGET_REPOS_FILE=/abs/path/to/repos.yaml KEEP_TMP=1 ./scripts/full-run-ai-advent.sh
 
 # Вариант 6: batch 5x2 + frontend live e2e + агрегированный quality report
-TARGET_REPO=/path/to/target-repo \
+TARGET_REPOS_FILE=/abs/path/to/repos.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
 ./scripts/full-run-batch-5x2.sh
+
+# Вариант 7: matrix 4 профиля (single+multi, path+git_url)
+E2E_MATRIX_FILE=/abs/path/to/e2e-matrix.yaml \
+ACP_CLAUDE_CMD_BIN=claude \
+ACP_QWEN_CMD_BIN=qwen \
+./scripts/full-run-batch-matrix.sh
 ```
+
+`full-run-batch-matrix.sh` — официальный локальный (trusted machine) runbook и не входит в required CI gates.
 
 Script всегда формирует:
 - `TMP_ROOT/full-run.log`
@@ -110,6 +137,7 @@ Batch evaluator source-of-truth:
 - backend quality берётся из snapshot-артефактов `snapshots/<run_id>/reports/*`;
 - если snapshot недоступен, в отчёт попадает `artifact_source=workspace-fallback` и issue `reliability:snapshot-missing`;
 - frontend live e2e запускается на отдельной копии workspace (`frontend-workspace`) и не влияет на backend quality content score.
+- для multi-profile (`EXPECTED_REPO_COUNT >= 2`) batch hard-fail включает `analysis:cross-repo-missing`.
 
 ## 4) CLI/API поток вручную (без скрипта)
 
@@ -122,8 +150,7 @@ WORKSPACE="$TMP_ROOT/arch-workspace"
 
 ./bin/acp init-workspace \
   --workspace "$WORKSPACE" \
-  --repo-name ai-advent \
-  --repo-path /path/to/target-repo
+  --repos-file /abs/path/to/repos.yaml
 
 # API simulation
 PORT=18080
@@ -203,7 +230,8 @@ ACP_CLAUDE_CMD=claude \
 
 Output semantics:
 - direct `npm run --prefix ui e2e:live`: default `/tmp/provenarch-ui-e2e/test-results`, override `UI_E2E_OUTPUT_DIR`;
-- `scripts/frontend-live-e2e.sh`: output в `$OUTPUT_DIR/playwright-results`.
+- `scripts/frontend-live-e2e.sh`: output в `$OUTPUT_DIR/playwright-results`;
+- `UI_E2E_EXPECTED_REPO_COUNT` задаёт ожидаемое число resolved repos в live e2e (default `1`).
 
 ## 6) Continuous Improvement Loop (balanced backend/frontend)
 

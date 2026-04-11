@@ -1,0 +1,21 @@
+version: 1
+profiles:
+  - id: single-path
+    source_kind: path
+    expected_repo_count: 1
+    repos_file: ./examples/repos/single-path.repos.yaml
+
+  - id: single-git_url
+    source_kind: git_url
+    expected_repo_count: 1
+    repos_file: ./examples/repos/single-git-url.repos.yaml
+
+  - id: multi-path
+    source_kind: path
+    expected_repo_count: 2
+    repos_file: ./examples/repos/multi-path.repos.yaml
+
+  - id: multi-git_url
+    source_kind: git_url
+    expected_repo_count: 2
+    repos_file: ./examples/repos/multi-git-url.repos.yaml

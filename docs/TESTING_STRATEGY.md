@@ -175,18 +175,28 @@ Implemented additional jobs:
   - summary/log/snapshots: `TMP_ROOT/session-summary.md`, `TMP_ROOT/full-run.log`, `TMP_ROOT/snapshots/*`
 - batch regression `5x2` + frontend live e2e:
   - `scripts/full-run-batch-5x2.sh`
-  - `TARGET_REPO` обязателен и указывает на один локальный checkout path
+  - canonical input: `TARGET_REPOS_FILE` (`repos[]` format)
+  - legacy compatibility: `TARGET_REPO` или `TARGET_REPO_GIT_URL+TARGET_REPO_NAME+TARGET_REPO_REF`
   - direct-only runtime commands (`claude`, `qwen`)
   - frontend live e2e работает на отдельной `frontend-workspace` копии run snapshot, не мутируя backend baseline
   - backend quality source-of-truth: snapshot reports (`snapshots/<run_id>/reports/*`), fallback помечается как `reliability:snapshot-missing`
   - semantic hard-fail checks в batch evaluator: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`
+  - multi-profile hard-fail: `analysis:cross-repo-missing` при `expected_repo_count >= 2` и отсутствии cross-repo сигнала
   - hard-pass учитывает semantic hard-fail и snapshot source validity
   - run artifacts default: `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/*`
   - reports: `run_matrix_<batch-id>.md`, `frontend_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md` (+ fields `artifact_source`, `semantic_hard_fail`, `off_topic_hits`)
+- profile matrix regression (local official runbook, non-required CI):
+  - `scripts/full-run-batch-matrix.sh`
+  - `E2E_MATRIX_FILE` обязателен (`profiles[]`: `id`, `repos_file`, `expected_repo_count`, `source_kind`)
+  - относительные `repos_file` пути резолвятся от директории `E2E_MATRIX_FILE`
+  - официальные профили: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
+  - для `source_kind=git_url` refs должны быть pinned
+  - агрегированный отчёт: `profile_matrix_<matrix-id>.md` + `profile_matrix_<matrix-id>.tsv`
 - optional frontend live smoke:
   - `scripts/frontend-live-e2e.sh` (local)
   - direct `npm run e2e:live --prefix ui`: Playwright output default `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
   - `scripts/frontend-live-e2e.sh`: Playwright output в `$OUTPUT_DIR/playwright-results`
+  - `UI_E2E_EXPECTED_REPO_COUNT` задаёт ожидаемое количество resolved repos (default `1`)
   - `ui/e2e/live-flow.spec.ts` + `npm run e2e:live --prefix ui`
 
 ## 8) Acceptance для testing strategy
@@ -221,4 +231,5 @@ Implemented additional jobs:
 - `make run-ui`
 - `./scripts/full-run-ai-advent.sh`
 - `./scripts/full-run-batch-5x2.sh`
+- `./scripts/full-run-batch-matrix.sh`
 - `./scripts/frontend-live-e2e.sh`

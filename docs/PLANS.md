@@ -428,6 +428,39 @@ EP-20260410-batch-5x2-frontend-reaudit
 
 ---
 
+### Plan ID
+EP-20260411-multi-repo-e2e-matrix
+
+### Context
+Нужно расширить локальный e2e контур с single-repo на multi-repo связки без изменения публичных API/CLI/schema контрактов. Канонический input для run scripts должен перейти на `repos-file`, при сохранении backward compatibility.
+
+### Goals (must have)
+- [x] Поддержать canonical `TARGET_REPOS_FILE` в `full-run-ai-advent.sh` и `full-run-batch-5x2.sh`
+- [x] Сохранить legacy single inputs (`TARGET_REPO`, `TARGET_REPO_GIT_URL+TARGET_REPO_NAME+TARGET_REPO_REF`)
+- [x] Добавить profile matrix orchestrator (`full-run-batch-matrix.sh`) для `single-path|single-git_url|multi-path|multi-git_url`
+- [x] Усилить batch evaluator: multi-root evidence scope + hard-fail `analysis:cross-repo-missing`
+- [x] Обновить frontend live e2e на expected repo count (`UI_E2E_EXPECTED_REPO_COUNT`)
+- [x] Синхронизировать README/runbook/testing docs
+
+### Non-goals
+- [x] Изменение runtime provider contracts (`claude-code|qwen-code`)
+- [x] Изменение CLI/API wire contracts
+- [x] Изменение `TaskResult` schema
+
+### Approach
+1) Нормализовать target input в scripts через repos-file adapter.
+2) Добавить matrix-level launcher с profile metadata.
+3) Расширить batch quality evaluator на multi-repo semantics.
+4) Обновить frontend live e2e ожидания и doc truth-sync.
+
+### Progress log
+- 2026-04-11: Добавлен canonical `TARGET_REPOS_FILE` flow с legacy adapters в `full-run-ai-advent.sh` и `full-run-batch-5x2.sh`.
+- 2026-04-11: Добавлен `scripts/full-run-batch-matrix.sh` (`E2E_MATRIX_FILE` profiles) с агрегированным `profile_matrix` отчётом.
+- 2026-04-11: `scripts/e2e_batch_report.py` обновлён на multi-root evidence validation и hard-fail `analysis:cross-repo-missing`.
+- 2026-04-11: Frontend live e2e расширен `UI_E2E_EXPECTED_REPO_COUNT`; docs (`README`, `LOCAL_FULL_RUN_AI_ADVENT`, `TESTING_STRATEGY`) синхронизированы.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.

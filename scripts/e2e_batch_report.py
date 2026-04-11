@@ -154,6 +154,96 @@ def parse_headless_rows(rows: list[dict[str, Any]], provider: str) -> dict[str, 
     return result
 
 
+def normalize_declared_repos_meta(preflight: dict[str, Any]) -> dict[str, Any]:
+    meta = preflight.get("declared_repos_meta")
+    if isinstance(meta, dict):
+        declared = meta.get("declared_repos")
+        if isinstance(declared, list) and declared:
+            expected = meta.get("expected_repo_count", len(declared))
+            try:
+                expected_count = int(expected)
+            except Exception:
+                expected_count = len(declared)
+            if expected_count <= 0:
+                expected_count = len(declared)
+            return {
+                "target_repos_file": str(meta.get("target_repos_file", preflight.get("target_repos_file", "-"))),
+                "profile_id": str(meta.get("profile_id", preflight.get("profile_id", "adhoc"))),
+                "profile_source_kind": str(meta.get("profile_source_kind", preflight.get("profile_source_kind", "mixed"))),
+                "expected_repo_count": expected_count,
+                "declared_repos": declared,
+            }
+    target_repo = preflight.get("target_repo")
+    declared: list[dict[str, Any]] = []
+    if target_repo:
+        declared.append({"name": "target-repo", "source": "path", "path": str(target_repo), "ref": ""})
+    return {
+        "target_repos_file": str(preflight.get("target_repos_file", "-")),
+        "profile_id": str(preflight.get("profile_id", "legacy")),
+        "profile_source_kind": str(preflight.get("profile_source_kind", "mixed")),
+        "expected_repo_count": len(declared) if declared else 1,
+        "declared_repos": declared,
+    }
+
+
+def parse_workspace_validate_resolved_roots(run_dir: Path) -> list[Path]:
+    validate_path = run_dir / "workspace-validate.json"
+    if not validate_path.exists():
+        return []
+    try:
+        payload = read_json(validate_path)
+    except Exception:
+        return []
+    repos = payload.get("resolved_repos") or []
+    roots: list[Path] = []
+    for item in repos:
+        if not isinstance(item, dict):
+            continue
+        raw_path = str(item.get("path", "")).strip()
+        if not raw_path:
+            continue
+        path_obj = Path(raw_path).expanduser().resolve()
+        if path_obj.exists() and path_obj.is_dir():
+            roots.append(path_obj)
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        key = str(root)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(root)
+    return deduped
+
+
+def collect_repo_roots(run_dir: Path, declared_meta: dict[str, Any]) -> list[Path]:
+    roots = parse_workspace_validate_resolved_roots(run_dir)
+    if roots:
+        return roots
+    declared = declared_meta.get("declared_repos") or []
+    fallback: list[Path] = []
+    for item in declared:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("source", "")).strip() != "path":
+            continue
+        raw_path = str(item.get("path", "")).strip()
+        if not raw_path:
+            continue
+        path_obj = Path(raw_path).expanduser().resolve()
+        if path_obj.exists() and path_obj.is_dir():
+            fallback.append(path_obj)
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for root in fallback:
+        key = str(root)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(root)
+    return deduped
+
+
 def resolve_reports_root(run_dir: Path, run_id: str) -> tuple[Path, str]:
     snapshot_reports = run_dir / "snapshots" / run_id / "reports"
     if snapshot_reports.exists():
@@ -223,7 +313,7 @@ def normalize_evidence_path(path_value: str) -> str:
     return base.strip()
 
 
-def evidence_path_resolves(path_value: str, target_repo: Path, workspace: Path) -> tuple[bool, str]:
+def evidence_path_resolves(path_value: str, repo_roots: list[Path], workspace: Path) -> tuple[bool, str]:
     raw = path_value.strip()
     if not raw:
         return False, "empty path"
@@ -253,25 +343,83 @@ def evidence_path_resolves(path_value: str, target_repo: Path, workspace: Path) 
     if candidate.is_absolute():
         if not candidate.exists():
             return False, "absolute path missing"
-        if is_within(candidate, target_repo) or is_within(candidate, workspace):
+        if any(is_within(candidate, root) for root in repo_roots) or is_within(candidate, workspace):
             return True, "ok"
-        return False, "absolute path outside target/workspace"
+        return False, "absolute path outside repos/workspace"
 
     candidate_variants = [candidate]
     parts = candidate.parts
     if parts and parts[0] in {"arch-workspace", "workspace"} and len(parts) > 1:
         candidate_variants.append(Path(*parts[1:]))
 
+    roots = [workspace, *repo_roots]
     for variant in candidate_variants:
-        for resolved in (target_repo / variant, workspace / variant):
+        for root in roots:
+            resolved = root / variant
             if resolved.exists():
                 return True, "ok"
-    return False, "relative path missing in target/workspace"
+    return False, "relative path missing in repos/workspace"
 
 
-def is_power_target(target_repo: Path) -> bool:
-    text = str(target_repo).lower()
-    return any(hint in text for hint in POWER_TARGET_HINTS)
+def is_power_target(repo_roots: list[Path], declared_meta: dict[str, Any]) -> bool:
+    fragments: list[str] = []
+    for root in repo_roots:
+        fragments.append(str(root))
+        fragments.append(root.name)
+    for item in declared_meta.get("declared_repos") or []:
+        if not isinstance(item, dict):
+            continue
+        for key in ("name", "path", "git_url", "ref"):
+            value = str(item.get(key, "")).strip()
+            if value:
+                fragments.append(value)
+    corpus = "\n".join(fragments).lower()
+    return any(hint in corpus for hint in POWER_TARGET_HINTS)
+
+
+def collect_repo_mentions(payload: dict[str, Any]) -> set[str]:
+    mentions: set[str] = set()
+    meta = payload.get("meta") or {}
+    repo_scopes = meta.get("repo_scopes")
+    if isinstance(repo_scopes, list):
+        for item in repo_scopes:
+            value = str(item).strip()
+            if value:
+                mentions.add(normalize_text(value))
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            provenance = node.get("provenance")
+            if isinstance(provenance, dict):
+                evidence = provenance.get("evidence")
+                if isinstance(evidence, list):
+                    for item in evidence:
+                        if isinstance(item, dict):
+                            repo_name = str(item.get("repo", "")).strip()
+                            if repo_name:
+                                mentions.add(normalize_text(repo_name))
+            for value in node.values():
+                walk(value)
+            return
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(payload)
+    return mentions
+
+
+def count_upsert_edge_ops(payload: dict[str, Any]) -> int:
+    changeset = payload.get("changeset") or []
+    if not isinstance(changeset, list):
+        return 0
+    count = 0
+    for op in changeset:
+        if not isinstance(op, dict):
+            continue
+        if str(op.get("op", "")).strip() == "upsert_edge":
+            count += 1
+    return count
 
 
 def collect_off_topic_hits(payload: dict[str, Any]) -> list[str]:
@@ -368,7 +516,9 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path, preflight: dict[s
     run_results_path = run_dir / "run-results.tsv"
     full_run_log = run_dir / "full-run.log"
     workspace = run_dir / "arch-workspace"
-    target_repo = Path(str(preflight.get("target_repo", ""))).resolve() if preflight.get("target_repo") else workspace
+    declared_meta = normalize_declared_repos_meta(preflight)
+    expected_repo_count = int(declared_meta.get("expected_repo_count", 1))
+    repo_roots = collect_repo_roots(run_dir, declared_meta)
 
     issues: list[str] = []
     details: list[str] = []
@@ -618,7 +768,7 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path, preflight: dict[s
                 )
 
     if refresh_step_files:
-        non_power_target = not is_power_target(target_repo)
+        non_power_target = not is_power_target(repo_roots, declared_meta)
         step1_files = [path for path in refresh_step_files if "-step1-collect-" in path.name]
         if non_power_target:
             for step_file in step1_files:
@@ -634,7 +784,7 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path, preflight: dict[s
         for step_file in refresh_step_files:
             payload = read_json(step_file)
             for evidence_path in collect_evidence_paths(payload):
-                ok, reason = evidence_path_resolves(evidence_path, target_repo, workspace)
+                ok, reason = evidence_path_resolves(evidence_path, repo_roots, workspace)
                 if not ok:
                     invalid_evidence.append(f"{step_file} :: {evidence_path} ({reason})")
         if invalid_evidence:
@@ -644,6 +794,28 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path, preflight: dict[s
                 details.append(f"analysis/evidence-scope -> {item}")
             if len(invalid_evidence) > 8:
                 details.append(f"analysis/evidence-scope -> +{len(invalid_evidence) - 8} more invalid evidence paths")
+
+        if expected_repo_count >= 2:
+            repo_mentions: set[str] = set()
+            edge_upserts = 0
+            for step_file in refresh_step_files:
+                payload = read_json(step_file)
+                repo_mentions.update(collect_repo_mentions(payload))
+                edge_upserts += count_upsert_edge_ops(payload)
+            if len(repo_mentions) < 2 or edge_upserts < 1:
+                semantic_hard_fail = True
+                issues.append("analysis:cross-repo-missing")
+                details.append(
+                    f"analysis/cross-repo-missing -> run_dir={run_dir} expected_repo_count={expected_repo_count} "
+                    f"repo_mentions={len(repo_mentions)} edge_upserts={edge_upserts}"
+                )
+    elif expected_repo_count >= 2:
+        semantic_hard_fail = True
+        issues.append("analysis:cross-repo-missing")
+        details.append(
+            f"analysis/cross-repo-missing -> run_dir={run_dir} expected_repo_count={expected_repo_count} "
+            "missing refresh step taskrun artifacts"
+        )
 
     overview_counts = parse_overview_counts(overview_path)
     services_count = int(overview_counts.get("services", 0))
@@ -808,6 +980,8 @@ def write_quality_report(
     provider_rows = provider_matrix_rows(runs, frontend)
     hard_pass_all = sum(1 for run in runs if run.hard_pass)
     semantic_hard_fail_runs = sum(1 for run in runs if run.semantic_hard_fail)
+    declared_meta = normalize_declared_repos_meta(preflight)
+    declared_repos = declared_meta.get("declared_repos") or []
     issue_counter = Counter()
     for run in runs:
         issue_counter.update(run.issues)
@@ -820,8 +994,11 @@ def write_quality_report(
         "## Context",
         f"- generated_at_utc: {preflight.get('generated_at_utc', '-')}",
         f"- provenarch_sha: {preflight.get('provenarch_sha', '-')}",
-        f"- target_repo: {preflight.get('target_repo', '-')}",
-        f"- target_repo_sha: {preflight.get('target_repo_sha', '-')}",
+        f"- target_repos_file: {declared_meta.get('target_repos_file', '-')}",
+        f"- profile_id: {declared_meta.get('profile_id', '-')}",
+        f"- profile_source_kind: {declared_meta.get('profile_source_kind', '-')}",
+        f"- expected_repo_count: {declared_meta.get('expected_repo_count', '-')}",
+        f"- declared_repos_count: {len(declared_repos)}",
         f"- claude: {((preflight.get('runtimes') or {}).get('claude') or {}).get('version_line', '-')}",
         f"- qwen: {((preflight.get('runtimes') or {}).get('qwen') or {}).get('version_line', '-')}",
         "",

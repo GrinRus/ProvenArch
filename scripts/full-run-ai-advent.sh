@@ -3,6 +3,13 @@ set -Eeuo pipefail
 
 PROVENARCH_ROOT="${PROVENARCH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 TARGET_REPO="${TARGET_REPO:-}"
+TARGET_REPOS_FILE="${TARGET_REPOS_FILE:-}"
+TARGET_REPO_GIT_URL="${TARGET_REPO_GIT_URL:-}"
+TARGET_REPO_NAME="${TARGET_REPO_NAME:-}"
+TARGET_REPO_REF="${TARGET_REPO_REF:-}"
+PROFILE_ID="${PROFILE_ID:-}"
+PROFILE_SOURCE_KIND="${PROFILE_SOURCE_KIND:-}"
+EXPECTED_REPO_COUNT="${EXPECTED_REPO_COUNT:-}"
 TMP_ROOT="${TMP_ROOT:-}"
 KEEP_TMP="${KEEP_TMP:-0}"
 ITERATIONS="${ITERATIONS:-1}"
@@ -21,6 +28,10 @@ QUALITY_GATES_STATUS="not_run"
 LAST_SIGNAL=""
 HEADLESS_PROVIDER=""
 HEADLESS_CMD=""
+TARGET_INPUT_MODE=""
+TARGET_PROFILE="generic"
+RESOLVED_TARGET_REPOS_FILE=""
+TARGET_REPOS_META_JSON=""
 
 if [[ ! "$ITERATIONS" =~ ^[1-9][0-9]*$ ]]; then
   echo "ITERATIONS must be a positive integer, got: $ITERATIONS" >&2
@@ -48,10 +59,6 @@ if [[ -z "$TMP_ROOT" ]]; then
   CREATED_TMP=1
 else
   mkdir -p "$TMP_ROOT"
-fi
-
-if [[ -z "$TARGET_REPO" ]]; then
-  die "TARGET_REPO is required. Set TARGET_REPO to the path of the repository used for full-run."
 fi
 
 WORKSPACE="$TMP_ROOT/arch-workspace"
@@ -101,6 +108,177 @@ slugify() {
     value="run"
   fi
   printf '%s' "$value"
+}
+
+prepare_target_repos_file() {
+  local generated_dir="$TMP_ROOT/generated-inputs"
+  mkdir -p "$generated_dir"
+
+  if [[ -n "$TARGET_REPOS_FILE" ]]; then
+    if [[ ! -f "$TARGET_REPOS_FILE" ]]; then
+      die "TARGET_REPOS_FILE does not exist: $TARGET_REPOS_FILE"
+    fi
+    TARGET_INPUT_MODE="repos-file"
+    RESOLVED_TARGET_REPOS_FILE="$(cd "$(dirname "$TARGET_REPOS_FILE")" && pwd)/$(basename "$TARGET_REPOS_FILE")"
+    return 0
+  fi
+
+  if [[ -n "$TARGET_REPO" ]]; then
+    if [[ ! -d "$TARGET_REPO" ]]; then
+      die "TARGET_REPO does not exist: $TARGET_REPO"
+    fi
+    local repo_abs
+    repo_abs="$(cd "$TARGET_REPO" && pwd)"
+    local repo_name
+    repo_name="$(basename "$repo_abs")"
+    TARGET_INPUT_MODE="legacy-single-path"
+    RESOLVED_TARGET_REPOS_FILE="$generated_dir/legacy-single-path.repos.yaml"
+    cat >"$RESOLVED_TARGET_REPOS_FILE" <<EOF
+version: 1
+repos:
+  - name: ${repo_name}
+    path: ${repo_abs}
+docs:
+  imports_path: ./docs/imports
+EOF
+    return 0
+  fi
+
+  if [[ -n "$TARGET_REPO_GIT_URL" ]]; then
+    if [[ -z "$TARGET_REPO_NAME" ]]; then
+      die "TARGET_REPO_NAME is required when TARGET_REPO_GIT_URL is set"
+    fi
+    if [[ -z "$TARGET_REPO_REF" ]]; then
+      die "TARGET_REPO_REF is required when TARGET_REPO_GIT_URL is set (pinned ref policy)"
+    fi
+    TARGET_INPUT_MODE="legacy-single-git-url"
+    RESOLVED_TARGET_REPOS_FILE="$generated_dir/legacy-single-git-url.repos.yaml"
+    cat >"$RESOLVED_TARGET_REPOS_FILE" <<EOF
+version: 1
+repos:
+  - name: ${TARGET_REPO_NAME}
+    git_url: ${TARGET_REPO_GIT_URL}
+    ref: ${TARGET_REPO_REF}
+docs:
+  imports_path: ./docs/imports
+EOF
+    return 0
+  fi
+
+  die "missing target input: set TARGET_REPOS_FILE (canonical) or legacy TARGET_REPO / TARGET_REPO_GIT_URL+TARGET_REPO_NAME+TARGET_REPO_REF"
+}
+
+validate_target_repos_file() {
+  TARGET_REPOS_META_JSON="$TMP_ROOT/target-repos-meta.json"
+  python3 - "$RESOLVED_TARGET_REPOS_FILE" "$EXPECTED_REPO_COUNT" "$PROFILE_SOURCE_KIND" "$PROFILE_ID" "$TARGET_REPOS_META_JSON" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+try:
+    import yaml  # type: ignore
+except Exception as exc:  # pragma: no cover
+    raise SystemExit(f"PyYAML is required for parsing repos file: {exc}")
+
+repos_file = Path(sys.argv[1]).resolve()
+expected_raw = (sys.argv[2] or "").strip()
+source_kind = (sys.argv[3] or "").strip()
+profile_id = (sys.argv[4] or "").strip()
+meta_path = Path(sys.argv[5]).resolve()
+
+allowed_kinds = {"", "path", "git_url"}
+if source_kind not in allowed_kinds:
+    raise SystemExit(f"PROFILE_SOURCE_KIND must be one of path|git_url, got: {source_kind}")
+
+payload = yaml.safe_load(repos_file.read_text(encoding="utf-8"))
+if isinstance(payload, list):
+    repos = payload
+elif isinstance(payload, dict):
+    repos = payload.get("repos")
+else:
+    repos = None
+
+if not isinstance(repos, list) or not repos:
+    raise SystemExit(f"repos file {repos_file} must contain non-empty repos[]")
+
+declared = []
+for idx, item in enumerate(repos, start=1):
+    if not isinstance(item, dict):
+        raise SystemExit(f"repos[{idx}] must be an object")
+    name = str(item.get("name", "")).strip()
+    if not name:
+        raise SystemExit(f"repos[{idx}] is missing name")
+    path_raw = str(item.get("path", "")).strip()
+    git_url = str(item.get("git_url", "")).strip()
+    has_path = bool(path_raw)
+    has_git = bool(git_url)
+    if has_path == has_git:
+        raise SystemExit(f"repos[{idx}] must set exactly one of path or git_url")
+    ref = str(item.get("ref", "")).strip()
+    if has_path:
+        source = "path"
+        path_value = Path(path_raw)
+        abs_path = (repos_file.parent / path_value).resolve() if not path_value.is_absolute() else path_value.resolve()
+        if not abs_path.exists():
+            raise SystemExit(f"repos[{idx}] path does not exist: {abs_path}")
+        if not abs_path.is_dir():
+            raise SystemExit(f"repos[{idx}] path is not a directory: {abs_path}")
+        entry = {
+            "name": name,
+            "source": source,
+            "path": str(abs_path),
+            "ref": ref,
+        }
+    else:
+        source = "git_url"
+        entry = {
+            "name": name,
+            "source": source,
+            "git_url": git_url,
+            "ref": ref,
+        }
+    if source_kind == "path" and source != "path":
+        raise SystemExit(f"profile source_kind=path but repos[{idx}] uses git_url")
+    if source_kind == "git_url":
+        if source != "git_url":
+            raise SystemExit(f"profile source_kind=git_url but repos[{idx}] uses path")
+        if not ref:
+            raise SystemExit(f"repos[{idx}] git_url entry must have pinned ref for source_kind=git_url")
+    declared.append(entry)
+
+if expected_raw:
+    try:
+        expected_count = int(expected_raw)
+    except ValueError:
+        raise SystemExit(f"EXPECTED_REPO_COUNT must be an integer, got: {expected_raw}")
+    if expected_count <= 0:
+        raise SystemExit(f"EXPECTED_REPO_COUNT must be > 0, got: {expected_count}")
+    if len(declared) != expected_count:
+        raise SystemExit(f"expected {expected_count} repos but got {len(declared)} in {repos_file}")
+else:
+    expected_count = len(declared)
+
+target_profile = "generic"
+for repo in declared:
+    haystack = " ".join(
+        part for part in [repo.get("name", ""), repo.get("path", ""), repo.get("git_url", ""), repo.get("ref", "")] if part
+    ).lower()
+    if "ai_advent_challenge_new" in haystack:
+        target_profile = "ai-advent"
+        break
+
+meta = {
+    "repos_file": str(repos_file),
+    "profile_id": profile_id or "adhoc",
+    "profile_source_kind": source_kind or "mixed",
+    "expected_repo_count": expected_count,
+    "target_profile": target_profile,
+    "declared_repos": declared,
+}
+meta_path.parent.mkdir(parents=True, exist_ok=True)
+meta_path.write_text(json.dumps(meta, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+PY
 }
 
 allocate_free_port() {
@@ -470,7 +648,19 @@ write_summary() {
     echo "- generated_at: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
     echo "- result: $result"
     echo "- provenarch_root: $PROVENARCH_ROOT"
-    echo "- target_repo: $TARGET_REPO"
+    echo "- target_input_mode: ${TARGET_INPUT_MODE:-unknown}"
+    echo "- target_repos_file: ${RESOLVED_TARGET_REPOS_FILE:-unset}"
+    if [[ -n "$TARGET_REPO" ]]; then
+      echo "- target_repo_legacy_path: $TARGET_REPO"
+    fi
+    if [[ -n "$TARGET_REPO_GIT_URL" ]]; then
+      echo "- target_repo_legacy_git_url: $TARGET_REPO_GIT_URL"
+      echo "- target_repo_legacy_name: ${TARGET_REPO_NAME:-unset}"
+      echo "- target_repo_legacy_ref: ${TARGET_REPO_REF:-unset}"
+    fi
+    echo "- profile_id: ${PROFILE_ID:-adhoc}"
+    echo "- profile_source_kind: ${PROFILE_SOURCE_KIND:-mixed}"
+    echo "- expected_repo_count: ${EXPECTED_REPO_COUNT:-auto}"
     echo "- target_profile: $TARGET_PROFILE"
     echo "- workspace: $WORKSPACE"
     echo "- tmp_root: $TMP_ROOT"
@@ -589,12 +779,6 @@ cleanup() {
 }
 trap 'cleanup $?' EXIT
 
-TARGET_BASENAME="$(basename "$TARGET_REPO")"
-TARGET_PROFILE="generic"
-if [[ "$TARGET_BASENAME" == "ai_advent_challenge_new" ]]; then
-  TARGET_PROFILE="ai-advent"
-fi
-
 require_cmd git "Install git and ensure it is available in PATH."
 require_cmd go "Install Go 1.20+ and ensure it is available in PATH."
 require_cmd npm "Install Node.js/npm and ensure it is available in PATH."
@@ -605,9 +789,17 @@ require_cmd python3 "Install python3 and ensure it is available in PATH."
 if [[ ! -d "$PROVENARCH_ROOT" ]]; then
   die "PROVENARCH_ROOT does not exist: $PROVENARCH_ROOT"
 fi
-if [[ ! -d "$TARGET_REPO" ]]; then
-  die "TARGET_REPO does not exist: $TARGET_REPO"
-fi
+
+prepare_target_repos_file
+validate_target_repos_file
+TARGET_PROFILE="$(python3 - "$TARGET_REPOS_META_JSON" <<'PY'
+import json
+import sys
+payload = json.load(open(sys.argv[1], encoding='utf-8'))
+print(payload.get("target_profile", "generic"))
+PY
+)"
+log "target input resolved: mode=$TARGET_INPUT_MODE repos_file=$RESOLVED_TARGET_REPOS_FILE profile=$TARGET_PROFILE"
 
 HEADLESS_PROVIDER="${ACP_RUNTIME_PROVIDER:-claude-code}"
 case "$HEADLESS_PROVIDER" in
@@ -641,8 +833,7 @@ fi
 log "bootstrap workspace in tmp"
 "$ACP_BIN" init-workspace \
   --workspace "$WORKSPACE" \
-  --repo-name ai-advent \
-  --repo-path "$TARGET_REPO" >"$LOG_DIR/init-workspace.log" 2>&1
+  --repos-file "$RESOLVED_TARGET_REPOS_FILE" >"$LOG_DIR/init-workspace.log" 2>&1
 
 if [[ ! -f "$WORKSPACE/workspace.yaml" ]]; then
   die "workspace bootstrap failed: missing $WORKSPACE/workspace.yaml"
@@ -673,7 +864,7 @@ fi
 
 log "POST /api/workspace/validate"
 curl -fsS -X POST "$API_BASE/api/workspace/validate" > "$VALIDATE_JSON"
-python3 - "$VALIDATE_JSON" <<'PY'
+python3 - "$VALIDATE_JSON" "$TARGET_REPOS_META_JSON" <<'PY'
 import json
 import sys
 payload = json.load(open(sys.argv[1], encoding='utf-8'))
@@ -682,6 +873,10 @@ if not payload.get('ok'):
 resolved = payload.get('resolved_repos') or []
 if not resolved:
     raise SystemExit('workspace validate returned empty resolved_repos')
+meta = json.load(open(sys.argv[2], encoding='utf-8'))
+expected_count = int(meta.get('expected_repo_count', len(resolved)))
+if len(resolved) != expected_count:
+    raise SystemExit(f"workspace validate resolved_repos count mismatch: expected={expected_count} got={len(resolved)}")
 print(f"resolved_repos={len(resolved)}")
 PY
 

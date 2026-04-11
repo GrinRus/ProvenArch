@@ -213,6 +213,64 @@ func TestGeneratedArtifactsPolicyIsDocumented(t *testing.T) {
 	assertContains(t, fixtures, "human-readable deterministic export")
 }
 
+func TestMultiRepoE2EDocsAreConsistent(t *testing.T) {
+	t.Parallel()
+
+	required := map[string][]string{
+		"README.md": {
+			"TARGET_REPOS_FILE",
+			"E2E_MATRIX_FILE",
+			"single-path",
+			"single-git_url",
+			"multi-path",
+			"multi-git_url",
+			"UI_E2E_EXPECTED_REPO_COUNT",
+			"required ci gate",
+			"pinned",
+		},
+		"docs/LOCAL_FULL_RUN_AI_ADVENT.md": {
+			"TARGET_REPOS_FILE",
+			"TARGET_REPO_GIT_URL",
+			"E2E_MATRIX_FILE",
+			"single-path",
+			"single-git_url",
+			"multi-path",
+			"multi-git_url",
+			"analysis:cross-repo-missing",
+			"trusted machine",
+		},
+		"docs/TESTING_STRATEGY.md": {
+			"TARGET_REPOS_FILE",
+			"E2E_MATRIX_FILE",
+			"analysis:cross-repo-missing",
+			"single-path",
+			"single-git_url",
+			"multi-path",
+			"multi-git_url",
+			"UI_E2E_EXPECTED_REPO_COUNT",
+		},
+	}
+
+	for path, tokens := range required {
+		path := path
+		tokens := tokens
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			content := readDoc(t, path)
+			lower := strings.ToLower(content)
+			for _, token := range tokens {
+				if strings.HasPrefix(token, "analysis:") {
+					assertContains(t, content, token)
+					continue
+				}
+				if !strings.Contains(lower, strings.ToLower(token)) {
+					t.Fatalf("expected %s to include token %q", path, token)
+				}
+			}
+		})
+	}
+}
+
 func assertContains(t *testing.T, content string, needle string) {
 	t.Helper()
 	if !strings.Contains(content, needle) {

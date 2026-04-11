@@ -2,6 +2,8 @@ import { expect, test } from "@playwright/test";
 
 test("live ui flow: validate -> run init -> inspect artifacts", async ({ page }) => {
   const runtimeProvider = process.env.UI_E2E_RUNTIME_PROVIDER ?? "unknown";
+  const expectedRepoCountRaw = Number.parseInt(process.env.UI_E2E_EXPECTED_REPO_COUNT ?? "1", 10);
+  const expectedRepoCount = Number.isFinite(expectedRepoCountRaw) && expectedRepoCountRaw > 0 ? expectedRepoCountRaw : 1;
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Local-first architecture control plane" })).toBeVisible();
@@ -9,6 +11,8 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page })
   await page.getByTestId("workspace-validate-btn").click();
   await expect(page.getByTestId("workspace-validate-result")).toBeVisible();
   await expect(page.getByText("Status: valid")).toBeVisible();
+  const resolvedRepoRows = page.getByTestId("workspace-validate-result").locator(".repo-summary ul li");
+  await expect(resolvedRepoRows).toHaveCount(expectedRepoCount);
 
   await page.getByTestId("run-init-btn").click();
   await expect(page.getByTestId("run-status-panel")).toBeVisible();

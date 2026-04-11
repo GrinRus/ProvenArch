@@ -1,0 +1,10 @@
+version: 1
+repos:
+  - name: app-main
+    git_url: https://github.com/example-org/app-main.git
+    ref: 2c54b8f1c6d8a8f9e6f2f4e6f0d5c7b8a9e1d2f3
+  - name: app-shared
+    git_url: https://github.com/example-org/app-shared.git
+    ref: 17d4a2f034cf7bf1888d4cb8a2b4cf09e1a7b6c5
+docs:
+  imports_path: ./docs/imports

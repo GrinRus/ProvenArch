@@ -220,13 +220,19 @@ Root entrypoints:
 - [docs/LOCAL_FULL_RUN_AI_ADVENT.md](docs/LOCAL_FULL_RUN_AI_ADVENT.md)
 - `scripts/full-run-ai-advent.sh`
 - `scripts/full-run-batch-5x2.sh` (batch `5x2` + frontend live e2e + quality report aggregation)
+- `scripts/full-run-batch-matrix.sh` (multi-profile matrix orchestrator over `full-run-batch-5x2.sh`)
 - `scripts/frontend-live-e2e.sh` (локальный live UI smoke для выбранного provider)
 
 Быстрый запуск:
 
 ```bash
-TARGET_REPO=/path/to/target-repo ./scripts/full-run-ai-advent.sh
+TARGET_REPOS_FILE=/abs/path/to/repos.yaml ./scripts/full-run-ai-advent.sh
 ```
+
+Канонический input для full-run/batch: `TARGET_REPOS_FILE` (`repos[]` в формате `workspace.yaml`).
+Legacy compatibility сохранена:
+- `TARGET_REPO=/path/to/repo` (single-path)
+- `TARGET_REPO_GIT_URL + TARGET_REPO_NAME + TARGET_REPO_REF` (single-git_url)
 
 Script делает strict полный цикл:
 - API simulation + runtime `fake + headless`;
@@ -239,23 +245,43 @@ Script делает strict полный цикл:
 Если нужно сохранить временный workspace для ручного анализа:
 
 ```bash
-TARGET_REPO=/path/to/target-repo KEEP_TMP=1 ./scripts/full-run-ai-advent.sh
+TARGET_REPOS_FILE=/abs/path/to/repos.yaml KEEP_TMP=1 ./scripts/full-run-ai-advent.sh
 ```
 
 Опциональные параметры retention для run logs:
 
 ```bash
-TARGET_REPO=/path/to/target-repo RUN_LOGS_TTL_HOURS=168 RUN_LOGS_MAX_RUNS=200 ./scripts/full-run-ai-advent.sh
+TARGET_REPOS_FILE=/abs/path/to/repos.yaml RUN_LOGS_TTL_HOURS=168 RUN_LOGS_MAX_RUNS=200 ./scripts/full-run-ai-advent.sh
 ```
 
 Batch re-audit `5x2` (direct-only `claude`/`qwen`, без wrapper):
 
 ```bash
-TARGET_REPO=/path/to/target-repo \
+TARGET_REPOS_FILE=/abs/path/to/repos.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
 ./scripts/full-run-batch-5x2.sh
 ```
+
+Matrix runbook `4` профиля (`single-path`, `single-git_url`, `multi-path`, `multi-git_url`):
+
+```bash
+E2E_MATRIX_FILE=/abs/path/to/e2e-matrix.yaml \
+ACP_CLAUDE_CMD_BIN=claude \
+ACP_QWEN_CMD_BIN=qwen \
+./scripts/full-run-batch-matrix.sh
+```
+
+`E2E_MATRIX_FILE` поддерживает `profiles[]`:
+- `id`
+- `repos_file`
+- `expected_repo_count`
+- `source_kind` (`path|git_url`)
+- обязательный набор профилей: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
+- для `git_url` профилей refs должны быть pinned в `repos_file`
+- относительные пути `repos_file` резолвятся относительно директории `E2E_MATRIX_FILE`
+
+Готовый шаблон: `examples/e2e-matrix.example.yaml` (+ `examples/repos/*.repos.yaml`).
 
 Скрипт сохраняет:
 - run artifacts (default): `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/...`
@@ -264,12 +290,14 @@ ACP_QWEN_CMD_BIN=qwen \
   - `/tmp/provenarch-test_arch_project/reports/frontend_e2e_matrix_<batch-id>.md`
   - `/tmp/provenarch-test_arch_project/reports/quality_report_<batch-id>.md`
 - backend quality считается только по snapshot-артефактам (`snapshots/<run_id>/reports/*`), frontend smoke запускается на отдельной `frontend-workspace` копии и не мутирует backend baseline
-- batch evaluator добавляет semantic hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`
+- batch evaluator добавляет semantic hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`; для multi-profile (`expected_repo_count >= 2`) обязателен `cross-repo` сигнал (`analysis:cross-repo-missing` при отсутствии)
 - в `run_matrix`/`quality_report` дополнительно фиксируются `artifact_source`, `semantic_hard_fail`, `off_topic_hits`
 - direct `npm run --prefix ui e2e:live`: Playwright output default `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
 - `scripts/frontend-live-e2e.sh`: Playwright output сохраняется в `$OUTPUT_DIR/playwright-results`
+- frontend live e2e ожидает число resolved repos из `UI_E2E_EXPECTED_REPO_COUNT` (default `1`)
 
-`TARGET_REPO` для batch-скрипта обязателен и должен указывать на один локальный checkout path целевого репозитория.
+`TARGET_REPOS_FILE` — основной batch-контракт; single legacy env поддерживаются для обратной совместимости.
+Full matrix (`full-run-batch-matrix.sh`) — локальный trusted-machine runbook, не required CI gate.
 
 Repo CI по умолчанию живёт в GitHub Actions:
 - `contracts`
