@@ -71,6 +71,8 @@ type RunnerError struct {
 	Provider Provider
 	Code     ErrorCode
 	Message  string
+	Stdout   string
+	Stderr   string
 	Cause    error
 }
 
@@ -89,10 +91,23 @@ func (e RunnerError) Unwrap() error {
 }
 
 func WrapRunnerError(provider Provider, code ErrorCode, message string, cause error) error {
+	return WrapRunnerErrorWithOutput(provider, code, message, "", "", cause)
+}
+
+func WrapRunnerErrorWithOutput(
+	provider Provider,
+	code ErrorCode,
+	message string,
+	stdout string,
+	stderr string,
+	cause error,
+) error {
 	return RunnerError{
 		Provider: provider,
 		Code:     code,
 		Message:  strings.TrimSpace(message),
+		Stdout:   stdout,
+		Stderr:   stderr,
 		Cause:    cause,
 	}
 }

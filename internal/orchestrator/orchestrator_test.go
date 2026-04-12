@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -583,6 +584,324 @@ func TestStartAsyncRunRejectsWhenPendingOutsideDebounceWindow(t *testing.T) {
 	info2 := waitForRunTerminalState(t, service, run2, 8*time.Second)
 	if info2.Status != RunStatusSucceeded {
 		t.Fatalf("expected run2 success, got status=%s error=%q", info2.Status, info2.Error)
+	}
+}
+
+func TestCancelRunPendingImmediateFailure(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	runner := &countingDelayedRunner{delay: 240 * time.Millisecond}
+	service := NewService(
+		WithRunner(runner),
+		WithDebounceWindow(5*time.Minute),
+	)
+	defer waitForAsyncDrain(t, service, 8*time.Second)
+
+	run1, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("start run1: %v", err)
+	}
+	run2, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("start run2: %v", err)
+	}
+
+	if err := service.CancelRun(run2); err != nil {
+		t.Fatalf("cancel pending run2: %v", err)
+	}
+
+	info2 := waitForRunTerminalState(t, service, run2, 8*time.Second)
+	if info2.Status != RunStatusFailed {
+		t.Fatalf("expected run2 failed status, got %s", info2.Status)
+	}
+	if info2.ErrorCode != runErrorCodeCanceled {
+		t.Fatalf("expected run2 error_code %q, got %q", runErrorCodeCanceled, info2.ErrorCode)
+	}
+	if info2.CurrentStep != "" {
+		t.Fatalf("expected run2 to never enter running step, got current_step %q", info2.CurrentStep)
+	}
+	if runner.callsForRun(run2) != 0 {
+		t.Fatalf("expected no runtime invocations for canceled pending run, got %d", runner.callsForRun(run2))
+	}
+
+	info1 := waitForRunTerminalState(t, service, run1, 8*time.Second)
+	if info1.Status != RunStatusSucceeded {
+		t.Fatalf("expected run1 success, got status=%s error=%q", info1.Status, info1.Error)
+	}
+}
+
+func TestCancelRunActiveCooperativeAndQueueContinues(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	runner := &countingDelayedRunner{delay: 260 * time.Millisecond}
+	service := NewService(
+		WithRunner(runner),
+		WithDebounceWindow(5*time.Minute),
+	)
+	defer waitForAsyncDrain(t, service, 8*time.Second)
+
+	run1, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("start run1: %v", err)
+	}
+	run2, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("start run2: %v", err)
+	}
+
+	testutil.WaitFor(t, 8*time.Second, testutil.WaitDescription("run1 did not become running"), func() (bool, error) {
+		info, ok := service.GetRun(run1)
+		if !ok {
+			return false, nil
+		}
+		return info.Status == RunStatusRunning, nil
+	})
+
+	if err := service.CancelRun(run1); err != nil {
+		t.Fatalf("cancel active run1: %v", err)
+	}
+
+	info1 := waitForRunTerminalState(t, service, run1, 8*time.Second)
+	if info1.Status != RunStatusFailed {
+		t.Fatalf("expected run1 failed status, got %s", info1.Status)
+	}
+	if info1.ErrorCode != runErrorCodeCanceled {
+		t.Fatalf("expected run1 error_code %q, got %q", runErrorCodeCanceled, info1.ErrorCode)
+	}
+
+	info2 := waitForRunTerminalState(t, service, run2, 8*time.Second)
+	if info2.Status != RunStatusSucceeded {
+		t.Fatalf("expected run2 succeeded after run1 cancel, got status=%s error=%q", info2.Status, info2.Error)
+	}
+	if runner.callsForRun(run2) == 0 {
+		t.Fatalf("expected runtime invocations for run2 after canceled run1")
+	}
+}
+
+func TestNewServiceReconcilesStaleRunsAfterRestart(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	baseTime := time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC)
+	service := NewService(
+		WithHistoryWorkspace(ws),
+		WithClock(func() time.Time { return baseTime }),
+	)
+
+	service.storeRun(runRecord{
+		info: RunInfo{
+			RunID:       "run_queued_stale",
+			Pipeline:    string(PipelineRefresh),
+			Status:      RunStatusQueued,
+			StartedAt:   baseTime.Add(-2 * time.Minute),
+			CurrentStep: "",
+		},
+	})
+	service.storeRun(runRecord{
+		info: RunInfo{
+			RunID:       "run_running_stale",
+			Pipeline:    string(PipelineRefresh),
+			Status:      RunStatusRunning,
+			StartedAt:   baseTime.Add(-3 * time.Minute),
+			CurrentStep: "refresh.step1.collect",
+		},
+	})
+	service.storeRun(runRecord{
+		info: RunInfo{
+			RunID:       "run_succeeded",
+			Pipeline:    string(PipelineInit),
+			Status:      RunStatusSucceeded,
+			StartedAt:   baseTime.Add(-5 * time.Minute),
+			CurrentStep: "init.step4.proposals",
+		},
+	})
+
+	reconciledAt := baseTime.Add(1 * time.Hour)
+	restartedService := NewService(
+		WithHistoryWorkspace(ws),
+		WithClock(func() time.Time { return reconciledAt }),
+	)
+
+	queuedInfo, ok := restartedService.GetRun("run_queued_stale")
+	if !ok {
+		t.Fatalf("expected reconciled queued run in registry")
+	}
+	if queuedInfo.Status != RunStatusFailed {
+		t.Fatalf("expected queued stale run failed after restart, got %s", queuedInfo.Status)
+	}
+	if queuedInfo.ErrorCode != runErrorCodeReconciledAfterRestart {
+		t.Fatalf("expected queued stale error_code %q, got %q", runErrorCodeReconciledAfterRestart, queuedInfo.ErrorCode)
+	}
+	if queuedInfo.FinishedAt == nil || !queuedInfo.FinishedAt.UTC().Equal(reconciledAt) {
+		t.Fatalf("expected queued stale finished_at=%s, got %+v", reconciledAt.Format(time.RFC3339), queuedInfo.FinishedAt)
+	}
+
+	runningInfo, ok := restartedService.GetRun("run_running_stale")
+	if !ok {
+		t.Fatalf("expected reconciled running run in registry")
+	}
+	if runningInfo.Status != RunStatusFailed {
+		t.Fatalf("expected running stale run failed after restart, got %s", runningInfo.Status)
+	}
+	if runningInfo.ErrorCode != runErrorCodeReconciledAfterRestart {
+		t.Fatalf("expected running stale error_code %q, got %q", runErrorCodeReconciledAfterRestart, runningInfo.ErrorCode)
+	}
+
+	succeededInfo, ok := restartedService.GetRun("run_succeeded")
+	if !ok {
+		t.Fatalf("expected succeeded run in registry")
+	}
+	if succeededInfo.Status != RunStatusSucceeded {
+		t.Fatalf("expected terminal run unchanged, got %s", succeededInfo.Status)
+	}
+
+	logPage, found, err := restartedService.GetRunLogs("run_running_stale", 0, 100)
+	if err != nil {
+		t.Fatalf("query run logs for reconciled run: %v", err)
+	}
+	if !found {
+		t.Fatalf("expected logs to exist for reconciled run")
+	}
+	foundReconciliationEvent := false
+	for _, item := range logPage.Items {
+		if item.Message != "run reconciled after restart" {
+			continue
+		}
+		code, _ := item.Fields["error_code"].(string)
+		if code != runErrorCodeReconciledAfterRestart {
+			t.Fatalf("expected reconciliation log error_code %q, got %q", runErrorCodeReconciledAfterRestart, code)
+		}
+		foundReconciliationEvent = true
+		break
+	}
+	if !foundReconciliationEvent {
+		t.Fatalf("expected reconciliation run-log event, got %+v", logPage.Items)
+	}
+}
+
+func TestRuntimeFailureLogsIncludeSanitizedSnippets(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	service := NewService(
+		WithHistoryWorkspace(ws),
+		WithRunner(runtimeFailureWithOutputRunner{}),
+	)
+
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err == nil {
+		t.Fatalf("expected runtime failure")
+	}
+	if info.Status != RunStatusFailed {
+		t.Fatalf("expected failed status, got %s", info.Status)
+	}
+
+	page, ok, logsErr := service.GetRunLogs(info.RunID, 0, 500)
+	if logsErr != nil {
+		t.Fatalf("query run logs: %v", logsErr)
+	}
+	if !ok {
+		t.Fatalf("expected run logs for failed run")
+	}
+	entry := findRunLogByMessage(t, page.Items, "runtime task failed")
+	stdoutSnippet, stdoutOk := entry.Fields["stdout_snippet"].(string)
+	stderrSnippet, stderrOk := entry.Fields["stderr_snippet"].(string)
+	if !stdoutOk || strings.TrimSpace(stdoutSnippet) == "" {
+		t.Fatalf("expected stdout_snippet in runtime failure fields, got %+v", entry.Fields)
+	}
+	if !stderrOk || strings.TrimSpace(stderrSnippet) == "" {
+		t.Fatalf("expected stderr_snippet in runtime failure fields, got %+v", entry.Fields)
+	}
+	if strings.Contains(stdoutSnippet, "\r") || strings.Contains(stderrSnippet, "\r") {
+		t.Fatalf("expected snippets without carriage returns, got stdout=%q stderr=%q", stdoutSnippet, stderrSnippet)
+	}
+	if !strings.HasSuffix(stdoutSnippet, runtimeOutputSnippetSuffix) {
+		t.Fatalf("expected stdout snippet to be truncated with suffix, got %q", stdoutSnippet)
+	}
+	if !strings.HasSuffix(stderrSnippet, runtimeOutputSnippetSuffix) {
+		t.Fatalf("expected stderr snippet to be truncated with suffix, got %q", stderrSnippet)
+	}
+	stdoutRunes := len([]rune(stdoutSnippet))
+	stderrRunes := len([]rune(stderrSnippet))
+	limitRunes := runtimeOutputSnippetLimitRunes + len([]rune(runtimeOutputSnippetSuffix))
+	if stdoutRunes > limitRunes {
+		t.Fatalf("stdout snippet exceeds deterministic limit: got=%d limit=%d", stdoutRunes, limitRunes)
+	}
+	if stderrRunes > limitRunes {
+		t.Fatalf("stderr snippet exceeds deterministic limit: got=%d limit=%d", stderrRunes, limitRunes)
+	}
+}
+
+func TestRuntimeParseFailureLogsIncludeSanitizedSnippets(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	service := NewService(
+		WithHistoryWorkspace(ws),
+		WithRunner(runtimeParseFailureWithOutputRunner{}),
+	)
+
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err == nil {
+		t.Fatalf("expected parse failure")
+	}
+	if info.Status != RunStatusFailed {
+		t.Fatalf("expected failed status, got %s", info.Status)
+	}
+
+	page, ok, logsErr := service.GetRunLogs(info.RunID, 0, 500)
+	if logsErr != nil {
+		t.Fatalf("query run logs: %v", logsErr)
+	}
+	if !ok {
+		t.Fatalf("expected run logs for failed run")
+	}
+	entry := findRunLogByMessage(t, page.Items, "runtime task parse failed")
+	stdoutSnippet, stdoutOk := entry.Fields["stdout_snippet"].(string)
+	stderrSnippet, stderrOk := entry.Fields["stderr_snippet"].(string)
+	if !stdoutOk || strings.TrimSpace(stdoutSnippet) == "" {
+		t.Fatalf("expected stdout_snippet in parse failure fields, got %+v", entry.Fields)
+	}
+	if !stderrOk || strings.TrimSpace(stderrSnippet) == "" {
+		t.Fatalf("expected stderr_snippet in parse failure fields, got %+v", entry.Fields)
+	}
+	if strings.Contains(stdoutSnippet, "\r") || strings.Contains(stderrSnippet, "\r") {
+		t.Fatalf("expected snippets without carriage returns, got stdout=%q stderr=%q", stdoutSnippet, stderrSnippet)
+	}
+	stdoutRunes := len([]rune(stdoutSnippet))
+	stderrRunes := len([]rune(stderrSnippet))
+	limitRunes := runtimeOutputSnippetLimitRunes + len([]rune(runtimeOutputSnippetSuffix))
+	if stdoutRunes > limitRunes {
+		t.Fatalf("stdout snippet exceeds deterministic limit: got=%d limit=%d", stdoutRunes, limitRunes)
+	}
+	if stderrRunes > limitRunes {
+		t.Fatalf("stderr snippet exceeds deterministic limit: got=%d limit=%d", stderrRunes, limitRunes)
 	}
 }
 
@@ -1252,6 +1571,71 @@ func (r delayedRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntim
 	return claudecode.FakeRunner{}.Run(ctx, task)
 }
 
+type countingDelayedRunner struct {
+	delay time.Duration
+
+	mu    sync.Mutex
+	calls map[string]int
+}
+
+func (r *countingDelayedRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	r.mu.Lock()
+	if r.calls == nil {
+		r.calls = map[string]int{}
+	}
+	r.calls[task.RunID]++
+	r.mu.Unlock()
+
+	select {
+	case <-ctx.Done():
+		return acpruntime.Result{}, ctx.Err()
+	case <-time.After(r.delay):
+	}
+	return claudecode.FakeRunner{}.Run(ctx, task)
+}
+
+func (r *countingDelayedRunner) callsForRun(runID string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls[runID]
+}
+
+type runtimeFailureWithOutputRunner struct{}
+
+func (runtimeFailureWithOutputRunner) Run(context.Context, acpruntime.Task) (acpruntime.Result, error) {
+	return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+		acpruntime.ProviderClaudeCode,
+		acpruntime.ErrorCodeRunnerUnavailable,
+		"synthetic runtime failure",
+		buildLongSnippet("stdout-synthetic"),
+		buildLongSnippet("stderr-synthetic"),
+		errors.New("synthetic runtime failure"),
+	)
+}
+
+func (runtimeFailureWithOutputRunner) Preflight(context.Context) error {
+	return nil
+}
+
+type runtimeParseFailureWithOutputRunner struct{}
+
+func (runtimeParseFailureWithOutputRunner) Run(context.Context, acpruntime.Task) (acpruntime.Result, error) {
+	return acpruntime.Result{
+		RawJSON: []byte(`{"meta":`),
+		Stdout:  buildLongSnippet("stdout-parse"),
+		Stderr:  buildLongSnippet("stderr-parse"),
+	}, nil
+}
+
+func (runtimeParseFailureWithOutputRunner) Preflight(context.Context) error {
+	return nil
+}
+
+func buildLongSnippet(prefix string) string {
+	payload := prefix + "\r\n" + strings.Repeat(prefix+"-chunk-", 600)
+	return payload
+}
+
 type step3ParseFailureRunner struct{}
 
 func (step3ParseFailureRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
@@ -1665,6 +2049,17 @@ func hasWarningPrefix(warnings []string, prefix string) bool {
 		}
 	}
 	return false
+}
+
+func findRunLogByMessage(t *testing.T, entries []RunLogEntry, message string) RunLogEntry {
+	t.Helper()
+	for _, entry := range entries {
+		if entry.Message == message {
+			return entry
+		}
+	}
+	t.Fatalf("expected run log message %q, got %+v", message, entries)
+	return RunLogEntry{}
 }
 
 type trackingRunner struct {

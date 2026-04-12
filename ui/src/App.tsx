@@ -22,6 +22,11 @@ type RunStartResponse = {
   status: string;
 };
 
+type RunCancelResponse = {
+  run_id: string;
+  status: "cancel_requested";
+};
+
 type RunStatusResponse = {
   run_id: string;
   pipeline: string;
@@ -201,6 +206,39 @@ function formatTimestamp(value?: string | null): string {
   return date.toISOString().replace("T", " ").replace(".000Z", " UTC");
 }
 
+function parseTimeOrMin(value?: string | null): number {
+  if (!value) {
+    return Number.NEGATIVE_INFINITY;
+  }
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) {
+    return Number.NEGATIVE_INFINITY;
+  }
+  return parsed;
+}
+
+function pickBootstrapRun(items: RunListItem[]): RunListItem | null {
+  if (!Array.isArray(items) || items.length === 0) {
+    return null;
+  }
+  let newestActive: RunListItem | null = null;
+  let newestActiveStartedAt = Number.NEGATIVE_INFINITY;
+  for (const item of items) {
+    if (!activeStatuses.has(item.status)) {
+      continue;
+    }
+    const startedAt = parseTimeOrMin(item.started_at);
+    if (newestActive === null || startedAt > newestActiveStartedAt) {
+      newestActive = item;
+      newestActiveStartedAt = startedAt;
+    }
+  }
+  if (newestActive) {
+    return newestActive;
+  }
+  return items[0];
+}
+
 export default function App() {
   const [validateResult, setValidateResult] = useState<ValidateResponse | null>(null);
   const [busy, setBusy] = useState(false);
@@ -236,6 +274,9 @@ export default function App() {
   const [runLogsCursor, setRunLogsCursor] = useState(0);
   const [runLogsEOF, setRunLogsEOF] = useState(false);
   const [runLogsStatus, setRunLogsStatus] = useState("");
+  const [runLogsViewMode, setRunLogsViewMode] = useState<"line" | "line+fields">("line");
+  const [runActionStatus, setRunActionStatus] = useState("");
+  const [cancelBusy, setCancelBusy] = useState(false);
 
   const [coverageSummary, setCoverageSummary] = useState<string>("");
   const [openQuestions, setOpenQuestions] = useState<string>("");
@@ -288,6 +329,46 @@ export default function App() {
     }
     return Array.from(paths).sort((left, right) => left.localeCompare(right));
   }, [runLogs]);
+  const selectedRunListItem = useMemo(() => {
+    if (!runId) {
+      return null;
+    }
+    return runList.find((item) => item.run_id === runId) ?? null;
+  }, [runId, runList]);
+  const selectedRunWarnings = useMemo(() => {
+    if (runStatus && runId && runStatus.run_id === runId) {
+      return runStatus.warnings ?? [];
+    }
+    return selectedRunListItem?.warnings ?? [];
+  }, [runId, runStatus, selectedRunListItem]);
+  const selectedRunIsActive = useMemo(() => {
+    if (runStatus && runId && runStatus.run_id === runId) {
+      return activeStatuses.has(runStatus.status);
+    }
+    if (selectedRunListItem) {
+      return activeStatuses.has(selectedRunListItem.status);
+    }
+    return false;
+  }, [runId, runStatus, selectedRunListItem]);
+  const runLogsRendered = useMemo(() => {
+    const includeFields = runLogsViewMode === "line+fields";
+    return runLogs
+      .map((entry) => {
+        const line = formatRunLogLine(entry);
+        if (!includeFields) {
+          return line;
+        }
+        if (!entry.fields || Object.keys(entry.fields).length === 0) {
+          return line;
+        }
+        const serialized = JSON.stringify(entry.fields, null, 2);
+        if (!serialized) {
+          return line;
+        }
+        return `${line}\n${serialized}`;
+      })
+      .join(includeFields ? "\n\n" : "\n");
+  }, [runLogs, runLogsViewMode]);
 
   useEffect(() => {
     void bootstrapEditorData();
@@ -303,13 +384,19 @@ export default function App() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [shouldPollRunDetails]);
+  }, [shouldPollRunDetails, runId, runLogsCursor, runLogsEOF]);
 
   async function bootstrapEditorData() {
+    let initialRuns: RunListItem[] = [];
     try {
-      await loadRunList(100);
+      initialRuns = await loadRunList(100);
     } catch {
       setRunList([]);
+    }
+
+    const bootstrapRun = pickBootstrapRun(initialRuns);
+    if (bootstrapRun) {
+      await handleSelectRun(bootstrapRun.run_id, { silentErrors: true });
     }
 
     try {
@@ -323,9 +410,11 @@ export default function App() {
     await loadWizardContract();
   }
 
-  async function loadRunList(limit = 100) {
+  async function loadRunList(limit = 100): Promise<RunListItem[]> {
     const payload = await fetchJSON<RunListResponse>(`/api/pipeline/runs?limit=${limit}`);
-    setRunList(payload.items ?? []);
+    const items = payload.items ?? [];
+    setRunList(items);
+    return items;
   }
 
   function resetRunLogs() {
@@ -394,8 +483,20 @@ export default function App() {
 
   async function pollRunUpdates() {
     try {
-      await loadRunList(100);
+      const latestRuns = await loadRunList(100);
       if (runId) {
+        const selectedRunExists = latestRuns.some((item) => item.run_id === runId);
+        if (!selectedRunExists) {
+          setRunStatus((previous) => {
+            if (previous && previous.run_id === runId) {
+              return null;
+            }
+            return previous;
+          });
+          setArtifacts([]);
+          resetRunLogs();
+          return;
+        }
         const status = await fetchRunStatus(runId);
         if (activeStatuses.has(status.status) || !runLogsEOF) {
           await fetchRunLogs(runId, false);
@@ -617,6 +718,7 @@ export default function App() {
   async function handleRunPipeline(pipeline: "init" | "refresh") {
     setBusy(true);
     setError(null);
+    setRunActionStatus("");
     setArtifacts([]);
     setSelectedArtifact("");
     setSelectedArtifactContent("");
@@ -664,8 +766,14 @@ export default function App() {
     return payload;
   }
 
-  async function handleSelectRun(id: string) {
+  async function handleSelectRun(
+    id: string,
+    options?: {
+      silentErrors?: boolean;
+    }
+  ) {
     try {
+      setRunActionStatus("");
       setRunID(id);
       resetRunLogs();
       const status = await fetchRunStatus(id);
@@ -675,7 +783,62 @@ export default function App() {
         await fetchRunLogsUntilEOF(id);
       }
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "failed to load run details");
+      if (!options?.silentErrors) {
+        setError(requestError instanceof Error ? requestError.message : "failed to load run details");
+      }
+    }
+  }
+
+  async function handleCancelSelectedRun() {
+    if (!runId || !selectedRunIsActive) {
+      return;
+    }
+
+    setCancelBusy(true);
+    setError(null);
+    setRunActionStatus("");
+    try {
+      const response = await fetch(`/api/pipeline/runs/${runId}/cancel`, {
+        method: "POST"
+      });
+      const payload = (await response.json()) as RunCancelResponse & APIErrorPayload;
+
+      if (response.status === 202) {
+        setRunActionStatus(`Cancel requested for ${runId}`);
+        await loadRunList(100);
+        await fetchRunStatus(runId);
+        return;
+      }
+
+      if (response.status === 404) {
+        setRunActionStatus("Selected run no longer exists.");
+        const latestRuns = await loadRunList(100);
+        const selectedRunExists = latestRuns.some((item) => item.run_id === runId);
+        if (!selectedRunExists) {
+          setRunStatus((previous) => {
+            if (previous && previous.run_id === runId) {
+              return null;
+            }
+            return previous;
+          });
+          setArtifacts([]);
+          resetRunLogs();
+        }
+        return;
+      }
+
+      if (response.status === 409) {
+        setRunActionStatus("Selected run is already terminal.");
+        await loadRunList(100);
+        await fetchRunStatus(runId);
+        return;
+      }
+
+      throw new Error(getErrorMessage(payload, "failed to cancel selected run"));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "failed to cancel selected run");
+    } finally {
+      setCancelBusy(false);
     }
   }
 
@@ -978,7 +1141,16 @@ export default function App() {
           >
             Run refresh
           </button>
+          <button
+            type="button"
+            onClick={() => void handleCancelSelectedRun()}
+            disabled={busy || cancelBusy || !runId || !selectedRunIsActive}
+            data-testid="run-cancel-btn"
+          >
+            Cancel selected run
+          </button>
         </div>
+        {runActionStatus ? <p className="status warn">{runActionStatus}</p> : null}
 
         {runStatus ? (
           <div className="status-block" data-testid="run-status-panel">
@@ -990,6 +1162,18 @@ export default function App() {
             {runStatus.current_step ? <p>Current step: {runStatus.current_step}</p> : null}
             {runStatus.error_code ? <p className="status warn">Error code: {runStatus.error_code}</p> : null}
             {runStatus.error ? <p className="status err">Error: {runStatus.error}</p> : null}
+            {selectedRunWarnings.length > 0 ? (
+              <div data-testid="run-status-warnings">
+                <p className="hint">Warnings ({selectedRunWarnings.length})</p>
+                <ul>
+                  {selectedRunWarnings.map((warning, index) => (
+                    <li key={`run-warning-${index}-${warning}`}>{warning}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p data-testid="run-status-warnings-empty">Warnings: none</p>
+            )}
           </div>
         ) : null}
       </section>
@@ -1051,6 +1235,17 @@ export default function App() {
       <section className="panel" data-testid="runs-logs-panel">
         <h2>Runs: Logs</h2>
         <div className="actions">
+          <label htmlFor="runLogsViewMode">View</label>
+          <select
+            id="runLogsViewMode"
+            value={runLogsViewMode}
+            onChange={(event) => setRunLogsViewMode(event.target.value as "line" | "line+fields")}
+            className="inline-select"
+            data-testid="run-logs-view-select"
+          >
+            <option value="line">line</option>
+            <option value="line+fields">line+fields</option>
+          </select>
           <button
             type="button"
             onClick={() => void handleCopyRunLogs()}
@@ -1081,7 +1276,7 @@ export default function App() {
         {runLogs.length === 0 ? (
           <p>No run logs yet.</p>
         ) : (
-          <pre data-testid="run-logs-content">{runLogs.map((entry) => formatRunLogLine(entry)).join("\n")}</pre>
+          <pre data-testid="run-logs-content">{runLogsRendered}</pre>
         )}
       </section>
 

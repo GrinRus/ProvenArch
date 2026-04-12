@@ -69,16 +69,20 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 
 	result, parseErr, runErr := runQwenCommand(ctx, command, args)
 	if runErr != nil {
-		return acpruntime.Result{}, acpruntime.WrapRunnerError(
+		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 			acpruntime.ProviderQwenCode,
 			acpruntime.ErrorCodeRunnerUnavailable,
 			fmt.Sprintf("%v: %s", ErrRunnerUnavailable, runErr),
+			result.Stdout,
+			result.Stderr,
 			runErr,
 		)
 	}
 	if parseErr == nil {
 		return result, nil
 	}
+	finalStdout := result.Stdout
+	finalStderr := result.Stderr
 
 	// Live qwen output can occasionally contain malformed tokens. Retry once with
 	// an explicitly stricter prompt before classifying as parse failure.
@@ -86,10 +90,12 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 		retryArgs := []string{"--output-format", "json", "--yolo", "--channel", "CI", buildPrompt(taskPayload, true)}
 		retryResult, retryParseErr, retryRunErr := runQwenCommand(ctx, command, retryArgs)
 		if retryRunErr != nil {
-			return acpruntime.Result{}, acpruntime.WrapRunnerError(
+			return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 				acpruntime.ProviderQwenCode,
 				acpruntime.ErrorCodeRunnerUnavailable,
 				fmt.Sprintf("%v: %s", ErrRunnerUnavailable, retryRunErr),
+				retryResult.Stdout,
+				retryResult.Stderr,
 				retryRunErr,
 			)
 		}
@@ -98,13 +104,17 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 		}
 		result = retryResult
 		parseErr = retryParseErr
+		finalStdout = retryResult.Stdout
+		finalStderr = retryResult.Stderr
 	}
 
 	parseFailureMessage := buildParseFailureMessage(task, parseErr, result)
-	return acpruntime.Result{}, acpruntime.WrapRunnerError(
+	return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 		acpruntime.ProviderQwenCode,
 		acpruntime.ErrorCodeRunnerParseFailed,
 		fmt.Sprintf("headless provider %q returned invalid taskresult: %s", acpruntime.ProviderQwenCode, parseFailureMessage),
+		finalStdout,
+		finalStderr,
 		parseErr,
 	)
 }
@@ -142,7 +152,10 @@ func runQwenCommand(ctx context.Context, command string, args []string) (acprunt
 		if errText == "" {
 			errText = err.Error()
 		}
-		return acpruntime.Result{}, nil, errors.New(errText)
+		return acpruntime.Result{
+			Stdout: stdout.String(),
+			Stderr: stderr.String(),
+		}, nil, errors.New(errText)
 	}
 
 	rawTaskResult, err := taskresultextractor.Extract(stdout.Bytes())

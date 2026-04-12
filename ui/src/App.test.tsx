@@ -672,7 +672,11 @@ describe("App", () => {
               step_id: "init.step1.collect",
               domain_id: "payments-service",
               message: "runtime warning",
-              taskrun_path: "reports/taskruns/run-log-step1.json"
+              taskrun_path: "reports/taskruns/run-log-step1.json",
+              fields: {
+                task_id: "task-run-log-init-step1",
+                stderr_snippet: "line-1\\nline-2"
+              }
             }
           ],
           next_cursor: 2,
@@ -708,13 +712,586 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
 
-    await screen.findByRole("button", { name: /run-log/i });
-    fireEvent.click(screen.getByRole("button", { name: /run-log/i }));
+    await screen.findByRole("button", { name: /^run-log$/i });
+    fireEvent.click(screen.getByRole("button", { name: /^run-log$/i }));
 
     await screen.findByText(/runtime task started/i);
     await screen.findByRole("button", { name: /Open taskrun artifact: reports\/taskruns\/run-log-step1\.json/i });
+    expect(screen.queryByText(/task-run-log-init-step1/i)).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId("run-logs-view-select"), { target: { value: "line+fields" } });
+    await screen.findByText(/task-run-log-init-step1/i);
 
     fireEvent.click(screen.getByRole("button", { name: /Open taskrun artifact: reports\/taskruns\/run-log-step1\.json/i }));
     await screen.findByText(/\{\"status\":\"ok\"\}/i);
+  });
+
+  it("auto-selects newest active run on bootstrap even if list order differs", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        return jsonResponse({
+          items: [
+            {
+              run_id: "run-active-old",
+              pipeline: "refresh",
+              status: "running",
+              started_at: "2026-04-03T12:01:00Z",
+              finished_at: null,
+              warnings: ["older active run"],
+              error_code: null,
+              error: null
+            },
+            {
+              run_id: "run-active-new",
+              pipeline: "refresh",
+              status: "queued",
+              started_at: "2026-04-03T12:03:00Z",
+              finished_at: null,
+              warnings: ["newest active run"],
+              error_code: null,
+              error: null
+            },
+            {
+              run_id: "run-old",
+              pipeline: "init",
+              status: "succeeded",
+              started_at: "2026-04-03T11:58:00Z",
+              finished_at: "2026-04-03T11:58:02Z",
+              warnings: [],
+              error_code: null,
+              error: null
+            }
+          ]
+        });
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-active-new") {
+        return jsonResponse({
+          run_id: "run-active-new",
+          pipeline: "refresh",
+          status: "queued",
+          started_at: "2026-04-03T12:03:00Z",
+          finished_at: null,
+          current_step: "",
+          warnings: ["newest active run"],
+          error_code: null,
+          error: null
+        });
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-active-new/artifacts") {
+        return jsonResponse({
+          run_id: "run-active-new",
+          artifacts: []
+        });
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-active-new/logs?cursor=0&limit=200") {
+        return jsonResponse({
+          run_id: "run-active-new",
+          items: [],
+          next_cursor: 0,
+          eof: true
+        });
+      }
+      if (method === "GET" && url === "/api/workspace/manifest") {
+        return jsonResponse({
+          content: "version: 1\nrepos:\n  - name: payments-service\n    path: /tmp/payments-service\n"
+        });
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Foverview.md") {
+        return textResponse("# Charter\n");
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Fwizard%2Fstep0-contract.json") {
+        return textResponse("not found", 404);
+      }
+
+      const runLogsResponse = maybeRunLogsResponse(method, url);
+      if (runLogsResponse) {
+        return runLogsResponse;
+      }
+
+      return jsonResponse(
+        {
+          error: {
+            code: "not_found",
+            message: `unhandled request: ${method} ${url}`
+          }
+        },
+        404
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    await screen.findByTestId("run-status-run-id");
+    expect(screen.getByTestId("run-status-run-id")).toHaveTextContent("run-active-new");
+    expect(screen.getByText(/Warnings \(1\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/newest active run/i)).toBeInTheDocument();
+  });
+
+  it("keeps manual run selection and does not auto-switch on polling updates", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        return jsonResponse({
+          items: [
+            {
+              run_id: "run-active-new",
+              pipeline: "refresh",
+              status: "running",
+              started_at: "2026-04-03T12:03:00Z",
+              finished_at: null,
+              warnings: ["newest active run"],
+              error_code: null,
+              error: null
+            },
+            {
+              run_id: "run-active-old",
+              pipeline: "refresh",
+              status: "running",
+              started_at: "2026-04-03T12:01:00Z",
+              finished_at: null,
+              warnings: ["older active run"],
+              error_code: null,
+              error: null
+            }
+          ]
+        });
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-active-new") {
+        return jsonResponse({
+          run_id: "run-active-new",
+          pipeline: "refresh",
+          status: "running",
+          started_at: "2026-04-03T12:03:00Z",
+          finished_at: null,
+          current_step: "refresh.step1.collect",
+          warnings: ["newest active run"],
+          error_code: null,
+          error: null
+        });
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-active-old") {
+        return jsonResponse({
+          run_id: "run-active-old",
+          pipeline: "refresh",
+          status: "running",
+          started_at: "2026-04-03T12:01:00Z",
+          finished_at: null,
+          current_step: "refresh.step0.prepare",
+          warnings: ["older active run"],
+          error_code: null,
+          error: null
+        });
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-active-new/artifacts") {
+        return jsonResponse({
+          run_id: "run-active-new",
+          artifacts: []
+        });
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-active-old/artifacts") {
+        return jsonResponse({
+          run_id: "run-active-old",
+          artifacts: []
+        });
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-active-new/logs?cursor=0&limit=200") {
+        return jsonResponse({
+          run_id: "run-active-new",
+          items: [],
+          next_cursor: 0,
+          eof: true
+        });
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-active-old/logs?cursor=0&limit=200") {
+        return jsonResponse({
+          run_id: "run-active-old",
+          items: [],
+          next_cursor: 0,
+          eof: true
+        });
+      }
+      if (method === "GET" && url === "/api/workspace/manifest") {
+        return jsonResponse({
+          content: "version: 1\nrepos:\n  - name: payments-service\n    path: /tmp/payments-service\n"
+        });
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Foverview.md") {
+        return textResponse("# Charter\n");
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Fwizard%2Fstep0-contract.json") {
+        return textResponse("not found", 404);
+      }
+
+      const runLogsResponse = maybeRunLogsResponse(method, url);
+      if (runLogsResponse) {
+        return runLogsResponse;
+      }
+
+      return jsonResponse(
+        {
+          error: {
+            code: "not_found",
+            message: `unhandled request: ${method} ${url}`
+          }
+        },
+        404
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    await screen.findByTestId("run-status-run-id");
+    expect(screen.getByTestId("run-status-run-id")).toHaveTextContent("run-active-new");
+
+    fireEvent.click(screen.getByRole("button", { name: /^run-active-old$/i }));
+    await waitFor(() => {
+      expect(screen.getByTestId("run-status-run-id")).toHaveTextContent("run-active-old");
+    });
+
+    await waitFor(() => {
+      const polls = fetchMock.mock.calls.filter(
+        (call) => typeof call[0] === "string" && call[0] === "/api/pipeline/runs?limit=100"
+      );
+      expect(polls.length).toBeGreaterThan(1);
+    }, { timeout: 3500 });
+    expect(screen.getByTestId("run-status-run-id")).toHaveTextContent("run-active-old");
+  });
+
+  it("cancels selected active run and updates status", async () => {
+    let canceled = false;
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        return jsonResponse({
+          items: [
+            {
+              run_id: "run-active",
+              pipeline: "refresh",
+              status: canceled ? "failed" : "running",
+              started_at: "2026-04-03T12:01:00Z",
+              finished_at: canceled ? "2026-04-03T12:01:09Z" : null,
+              warnings: canceled ? ["user canceled run"] : [],
+              error_code: canceled ? "run_canceled" : null,
+              error: canceled ? "run canceled by request" : null
+            }
+          ]
+        });
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-active") {
+        return jsonResponse({
+          run_id: "run-active",
+          pipeline: "refresh",
+          status: canceled ? "failed" : "running",
+          started_at: "2026-04-03T12:01:00Z",
+          finished_at: canceled ? "2026-04-03T12:01:09Z" : null,
+          current_step: canceled ? "refresh.step1.collect" : "refresh.step1.collect",
+          warnings: canceled ? ["user canceled run"] : [],
+          error_code: canceled ? "run_canceled" : null,
+          error: canceled ? "run canceled by request" : null
+        });
+      }
+      if (method === "POST" && url === "/api/pipeline/runs/run-active/cancel") {
+        canceled = true;
+        return jsonResponse({
+          run_id: "run-active",
+          status: "cancel_requested"
+        }, 202);
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-active/artifacts") {
+        return jsonResponse({
+          run_id: "run-active",
+          artifacts: []
+        });
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-active/logs?cursor=0&limit=200") {
+        return jsonResponse({
+          run_id: "run-active",
+          items: [],
+          next_cursor: 0,
+          eof: true
+        });
+      }
+      if (method === "GET" && url === "/api/artifacts?path=reports%2Fcoverage%2Fsummary.md") {
+        return textResponse("Coverage: 70%\n");
+      }
+      if (method === "GET" && url === "/api/artifacts?path=reports%2Fcoverage%2Fopen-questions.md") {
+        return textResponse("- verify ownership\n");
+      }
+      if (method === "GET" && url === "/api/workspace/manifest") {
+        return jsonResponse({
+          content: "version: 1\nrepos:\n  - name: payments-service\n    path: /tmp/payments-service\n"
+        });
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Foverview.md") {
+        return textResponse("# Charter\n");
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Fwizard%2Fstep0-contract.json") {
+        return textResponse("not found", 404);
+      }
+
+      const runLogsResponse = maybeRunLogsResponse(method, url);
+      if (runLogsResponse) {
+        return runLogsResponse;
+      }
+
+      return jsonResponse(
+        {
+          error: {
+            code: "not_found",
+            message: `unhandled request: ${method} ${url}`
+          }
+        },
+        404
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    await screen.findByTestId("run-status-run-id");
+    await waitFor(() => {
+      expect(screen.getByTestId("run-cancel-btn")).toBeEnabled();
+    });
+    fireEvent.click(screen.getByTestId("run-cancel-btn"));
+
+    await screen.findByText(/Cancel requested for run-active/i);
+    await waitFor(() => {
+      expect(screen.getByTestId("run-status-value")).toHaveTextContent("failed");
+    });
+    await screen.findByText(/Error code:\s*run_canceled/i);
+  });
+
+  it("shows cancel endpoint conflict/not-found responses in UI status", async () => {
+    let mode: "not_found" | "not_cancelable" = "not_found";
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        return jsonResponse({
+          items: [
+            {
+              run_id: "run-active",
+              pipeline: "refresh",
+              status: "running",
+              started_at: "2026-04-03T12:01:00Z",
+              finished_at: null,
+              warnings: [],
+              error_code: null,
+              error: null
+            }
+          ]
+        });
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-active") {
+        return jsonResponse({
+          run_id: "run-active",
+          pipeline: "refresh",
+          status: "running",
+          started_at: "2026-04-03T12:01:00Z",
+          finished_at: null,
+          current_step: "refresh.step1.collect",
+          warnings: [],
+          error_code: null,
+          error: null
+        });
+      }
+      if (method === "POST" && url === "/api/pipeline/runs/run-active/cancel") {
+        if (mode === "not_found") {
+          mode = "not_cancelable";
+          return jsonResponse(
+            {
+              error: {
+                code: "run_not_found",
+                message: "run not found"
+              }
+            },
+            404
+          );
+        }
+        return jsonResponse(
+          {
+            error: {
+              code: "run_not_cancelable",
+              message: "run is already terminal"
+            }
+          },
+          409
+        );
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-active/artifacts") {
+        return jsonResponse({
+          run_id: "run-active",
+          artifacts: []
+        });
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-active/logs?cursor=0&limit=200") {
+        return jsonResponse({
+          run_id: "run-active",
+          items: [],
+          next_cursor: 0,
+          eof: true
+        });
+      }
+      if (method === "GET" && url === "/api/workspace/manifest") {
+        return jsonResponse({
+          content: "version: 1\nrepos:\n  - name: payments-service\n    path: /tmp/payments-service\n"
+        });
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Foverview.md") {
+        return textResponse("# Charter\n");
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Fwizard%2Fstep0-contract.json") {
+        return textResponse("not found", 404);
+      }
+
+      const runLogsResponse = maybeRunLogsResponse(method, url);
+      if (runLogsResponse) {
+        return runLogsResponse;
+      }
+
+      return jsonResponse(
+        {
+          error: {
+            code: "not_found",
+            message: `unhandled request: ${method} ${url}`
+          }
+        },
+        404
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    await screen.findByTestId("run-status-run-id");
+    await waitFor(() => {
+      expect(screen.getByTestId("run-cancel-btn")).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByTestId("run-cancel-btn"));
+    await screen.findByText(/Selected run no longer exists\./i);
+
+    fireEvent.click(screen.getByTestId("run-cancel-btn"));
+    await screen.findByText(/Selected run is already terminal\./i);
+  });
+
+  it("clears stale selected run details when selected run disappears from list", async () => {
+    let runsCalls = 0;
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        runsCalls += 1;
+        if (runsCalls === 1) {
+          return jsonResponse({
+            items: [
+              {
+                run_id: "run-active",
+                pipeline: "refresh",
+                status: "running",
+                started_at: "2026-04-03T12:01:00Z",
+                finished_at: null,
+                warnings: [],
+                error_code: null,
+                error: null
+              }
+            ]
+          });
+        }
+        return jsonResponse({ items: [] });
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-active") {
+        return jsonResponse({
+          run_id: "run-active",
+          pipeline: "refresh",
+          status: "running",
+          started_at: "2026-04-03T12:01:00Z",
+          finished_at: null,
+          current_step: "refresh.step1.collect",
+          warnings: [],
+          error_code: null,
+          error: null
+        });
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-active/artifacts") {
+        return jsonResponse({
+          run_id: "run-active",
+          artifacts: []
+        });
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-active/logs?cursor=0&limit=200") {
+        return jsonResponse({
+          run_id: "run-active",
+          items: [],
+          next_cursor: 0,
+          eof: true
+        });
+      }
+      if (method === "GET" && url === "/api/workspace/manifest") {
+        return jsonResponse({
+          content: "version: 1\nrepos:\n  - name: payments-service\n    path: /tmp/payments-service\n"
+        });
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Foverview.md") {
+        return textResponse("# Charter\n");
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Fwizard%2Fstep0-contract.json") {
+        return textResponse("not found", 404);
+      }
+
+      const runLogsResponse = maybeRunLogsResponse(method, url);
+      if (runLogsResponse) {
+        return runLogsResponse;
+      }
+
+      return jsonResponse(
+        {
+          error: {
+            code: "not_found",
+            message: `unhandled request: ${method} ${url}`
+          }
+        },
+        404
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    await screen.findByTestId("run-status-run-id");
+    expect(screen.getByTestId("run-status-run-id")).toHaveTextContent("run-active");
+    expect(screen.getByTestId("run-cancel-btn")).toBeEnabled();
+
+    await waitFor(
+      () => {
+        const polls = fetchMock.mock.calls.filter(
+          (call) => typeof call[0] === "string" && call[0] === "/api/pipeline/runs?limit=100"
+        );
+        expect(polls.length).toBeGreaterThan(1);
+      },
+      { timeout: 3500 }
+    );
+
+    await waitFor(
+      () => {
+        expect(screen.queryByTestId("run-status-panel")).not.toBeInTheDocument();
+      },
+      { timeout: 3500 }
+    );
+    expect(screen.getByTestId("run-cancel-btn")).toBeDisabled();
   });
 });

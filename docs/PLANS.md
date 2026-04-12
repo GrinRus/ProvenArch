@@ -513,6 +513,77 @@ EP-20260411-multi-repo-e2e-matrix
 
 ---
 
+### Plan ID
+EP-20260411-orchestrator-runner-frontend-operability
+
+### Context
+По результатам детального аудита run-flow нужно закрыть операционные пробелы: прозрачность текущего прогресса на UI, полезность runtime логов, предсказуемость restart/recovery на существующем workspace и явные механизмы управления long-running run.
+
+### Goals (must have)
+- [x] Улучшить run observability в UI: показывать не только `status/current_step`, но и детальные warnings/error причины для выбранного run
+- [x] Улучшить run logs UX: выводить структурированные `fields` (task_id, counters, repo scopes, warning/error payload) и упростить навигацию по step/domain
+- [x] Добавить restart reconciliation: при старте сервиса детерминированно переводить "зависшие" `queued/running` run из persisted history в terminal failed state с понятной причиной
+- [x] Добавить управляемость run lifecycle: API+orchestrator cancel для активного/pending run
+- [x] Улучшить runner failure diagnostics: писать в run logs безопасный срез `stdout/stderr` при parse/runtime fail без утечки лишнего контента
+- [x] Синхронизировать docs/spec и покрыть изменения тестами (orchestrator/api/ui)
+
+### Non-goals
+- [ ] Не менять `schemas/taskresult.schema.json` и model/entity contracts
+- [ ] Не добавлять runtime providers beyond `claude-code` и `qwen-code`
+- [ ] Не переводить required CI на live network dependencies
+
+### Approach
+1) Backend lifecycle hardening:
+   - добавить `CancelRun(run_id)` в orchestrator service (active + pending cases);
+   - добавить startup reconciliation pass после `loadHistory()` для stale non-terminal runs;
+   - ввести отдельные `error_code` для lifecycle событий (`run_canceled`, `run_reconciled_after_restart`) и использовать их в `RunInfo`.
+2) API surface:
+   - добавить `POST /api/pipeline/runs/<run_id>/cancel`;
+   - сохранить backward compatibility `GET /api/pipeline/runs*`, расширив только допустимые `error_code` semantics и docs.
+3) Runtime diagnostics:
+   - при runtime fail/parse fail логировать structured snippet полей (`stderr_snippet`, `stdout_snippet`, `task_id`, `provider`) в `RunLogEntry.fields`;
+   - ограничить размер snippet и sanitize multiline output для стабильного UI отображения.
+4) Frontend run UX:
+   - на `Runs: History`/`Run status` показывать warnings list и full error reason выбранного run;
+   - в `Runs: Logs` показывать переключаемый structured view (`line` + `fields`);
+   - авто-выбирать newest active run при загрузке dashboard, чтобы live polling сразу показывал "что сейчас происходит".
+5) Verification + docs sync:
+   - добавить/обновить unit/integration/UI tests;
+   - обновить `docs/spec/API_SPEC.md`, `docs/ARCHITECTURE.md`, `README.md`, `docs/TESTING_STRATEGY.md`.
+
+### Files expected to change
+- `internal/orchestrator/orchestrator.go`
+- `internal/orchestrator/runlogs.go`
+- `internal/orchestrator/orchestrator_test.go`
+- `internal/orchestrator/runlogs_test.go`
+- `internal/api/server.go`
+- `internal/api/server_test.go`
+- `ui/src/App.tsx`
+- `ui/src/App.test.tsx`
+- `docs/spec/API_SPEC.md`
+- `docs/ARCHITECTURE.md`
+- `docs/TESTING_STRATEGY.md`
+- `README.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Активный run можно отменить через API, статус и логи отражают cancel reason детерминированно
+- [x] После рестарта сервиса stale `queued/running` run не остаются в подвешенном состоянии
+- [x] UI для выбранного run показывает полный контекст: status, current step, warnings, error details, логи с structured fields
+- [x] Runner parse/runtime fail содержит actionable diagnostics в run logs без избыточного шума
+- [x] Обновлены API/docs и пройдены DoD проверки: `make contracts`, `make test`, `make lint`, `make build`
+
+### Risks
+- Расширение lifecycle logic может повлиять на текущие async/debounce инварианты и требует аккуратной синхронизации mutex/state.
+- Неверно подобранные log snippets могут либо быть слишком шумными, либо потерять полезную диагностику.
+- Добавление cancel/reconciliation без четкой error-code policy может ухудшить читаемость run history.
+
+### Progress log
+- 2026-04-11: План создан на основе code-level аудита orchestrator/runtime/UI run-flow, логирования и restart behavior.
+- 2026-04-12: Реализованы orchestrator cancel/reconciliation, API cancel endpoint, structured runtime diagnostics snippets в run logs, UI auto-select + warnings + log fields view + cancel flow, добавлены unit/API/UI тесты и docs sync.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.
