@@ -73,7 +73,8 @@ Epic matrix:
 - в `reports/coverage/` появляется coverage report и список открытых вопросов по недостающей информации;
 - в `reports/findings/` — список провалов/анти‑паттернов с evidence;
 - в `proposals/` — 1–3 “proposal пакета” улучшений (to‑be) + черновики ADR/RFC.
-- в UI dashboard видны все run'ы анализа (queued/running/succeeded/failed), включая уже завершённые.
+- в UI dashboard видны все run'ы анализа (queued/running/succeeded/failed), включая уже завершённые;
+- для выбранного run UI показывает полный warnings/error контекст, live logs (в т.ч. structured fields) и поддерживает cancel active run.
 
 5) **Git‑ветка proposal**
 - пользователь создаёт `proposal/<topic>` из UI (MVP) или вручную;

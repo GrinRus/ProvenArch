@@ -3,6 +3,7 @@ package claudecode
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -309,6 +310,46 @@ JSON
 	}
 	if result.TaskResult.Meta.TaskID != "task-native-empty-retry" {
 		t.Fatalf("unexpected task id %q", result.TaskResult.Meta.TaskID)
+	}
+}
+
+func TestHeadlessRunnerPreservesContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	commandPath := filepath.Join(tempDir, "claude-cancel-stub.sh")
+	script := `#!/bin/sh
+set -eu
+cat >/dev/null
+sleep 10
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write cancel command: %v", err)
+	}
+
+	runner := HeadlessRunner{
+		Command: commandPath,
+		Args: []string{
+			"-c",
+			"cat >/dev/null; sleep 10",
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(150*time.Millisecond, cancel)
+
+	_, err := runner.Run(ctx, acpruntime.Task{
+		TaskID:       "task-cancel",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    "/tmp/workspace",
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected cancellation error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected error to preserve context.Canceled, got %v", err)
 	}
 }
 

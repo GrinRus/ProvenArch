@@ -40,7 +40,11 @@
    - Редактирует baseline bundle artifacts через guided selector (`charter/*`, `skills/*`, prompt packs, `skills/subagents.yaml`)
    - UI разбит на явные секции `Setup / Baseline / Runs / Results`
    - Показывает run dashboard (queued/running/succeeded/failed), включая завершённые run'ы из persisted history
-   - Показывает `Runs: Logs` для выбранного run (`timestamp/level/step/domain/message`) с quick actions `Copy logs`, `Download logs`, `Open taskrun artifact`
+   - При bootstrap авто-выбирает newest active run (`queued/running`), иначе первый run в history; после ручного выбора run auto-switch не выполняется
+   - Если выбранный run исчезает из history (например, retention/restart race), UI очищает stale `Run status`/logs для этого run и не auto-switch-ится на другой run
+   - Показывает `Run status` выбранного run с полным warnings list (`RunInfo.warnings`), `error_code` и `error`
+   - Показывает `Runs: Logs` для выбранного run (`timestamp/level/step/domain/message`) с переключателем `line | line+fields` и quick actions `Copy logs`, `Download logs`, `Open taskrun artifact`
+   - Поддерживает `Cancel selected run` для active run через `POST /api/pipeline/runs/<run_id>/cancel`
    - Критичные UI-контролы для live e2e снабжены стабильными `data-testid` (`validate/run/status/artifacts/logs`)
 
 3) **Orchestrator (`internal/orchestrator`)** *(implemented baseline)*
@@ -66,8 +70,13 @@
    - Не auto-create/rename canonical domain/team cards
    - Триггерит генерацию отчётов
    - Поддерживает async run coordination: single active run + debounce queue (`last event wins`)
+   - Поддерживает управляемую отмену run:
+     - pending run в debounce queue отменяется immediate (`failed`, `error_code=run_canceled`)
+     - active run отменяется cooperative через `context cancel` (`failed`, `error_code=run_canceled`)
+   - На старте сервиса делает reconciliation stale persisted run (`queued/running`) в `failed` с `error_code=run_reconciled_after_restart`
    - Ведёт persisted run history в `reports/taskruns/run-history.json` (versioned index, retention 500)
    - Ведёт run-level logs в `reports/taskruns/logs/<run_id>.ndjson` с cursor query API (`GET /api/pipeline/runs/<run_id>/logs`)
+   - При runtime/parse fail логирует structured diagnostics snippets (`stdout_snippet`/`stderr_snippet`) в `RunLogEntry.fields` (sanitize + truncate)
    - Пробрасывает `TaskResult.warnings` в run diagnostics (`RunInfo.Warnings`) и логирует warning events
    - Materialize-ит per-run quality summary `reports/taskruns/<run_id>-quality.json` (signal metrics/runtime versions)
    - Run logs retention policy (TTL + max runs) запускается при старте сервиса, перед run и после run

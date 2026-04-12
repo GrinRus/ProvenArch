@@ -71,6 +71,10 @@ Baseline scenario set:
 - Step 1 runtime не auto-create-ит canonical domain/team cards
 - Step 0 wizard contract wiring: valid contract влияет на charter/cards; missing/invalid contract даёт fallback + run warning
 - workspace validate выдаёт layout readiness diagnostics (`missing`/`not_dir`/`unreadable`)
+- async lifecycle operability:
+  - `CancelRun` для pending run даёт immediate terminal `failed` + `error_code=run_canceled`
+  - `CancelRun` для active run даёт cooperative cancel + `failed` + `error_code=run_canceled`, очередь продолжает работать
+  - stale persisted `queued/running` run при старте сервиса reconciled в `failed` + `error_code=run_reconciled_after_restart`
 - docs truth-sync gate проверяет:
   - согласованность runtime policy/Q&A boundary и ссылок на canonical stakeholder matrix;
   - отсутствие stale-маркеров в ключевых surfaces (`future`, `skeleton`, `placeholder`, устаревшие version-маркеры);
@@ -162,11 +166,21 @@ Implemented additional jobs:
 - run logs endpoint:
   - `GET /api/pipeline/runs/<run_id>/logs?cursor=<n>&limit=<n>`
   - pagination + invalid params + run_not_found
+  - structured failure diagnostics в `fields` (`stdout_snippet`/`stderr_snippet`, `task_id`, `provider`, counters)
+- run cancel endpoint:
+  - `POST /api/pipeline/runs/<run_id>/cancel`
+  - happy-path `202`, `404 run_not_found`, `409 run_not_cancelable`, `400 invalid_request_body`
 - UI path: open workspace, validate, run, inspect coverage/questions
 - UI run logs surface:
   - log panel render (`Runs: Logs`)
   - log polling/append without duplicates
+  - view toggle `line | line+fields`
   - quick action `Open taskrun artifact`
+- UI run lifecycle operability:
+  - bootstrap auto-select newest active run
+  - если выбранный run исчезает из list endpoint, UI очищает stale run details/logs и не auto-switch-ится на другой run
+  - `Run status` показывает полный warnings list выбранного run
+  - `Cancel selected run` корректно обрабатывает `202/404/409`
 - локальный full-run regression сценарий на реальном репозитории:
   - `scripts/full-run-ai-advent.sh`
   - bootstrap в `tmp`, API simulation, runtime циклы `fake + headless`
@@ -200,6 +214,10 @@ Implemented additional jobs:
   - direct `npm run e2e:live --prefix ui`: Playwright output default `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
   - `scripts/frontend-live-e2e.sh`: Playwright output в `$OUTPUT_DIR/playwright-results`
   - `UI_E2E_EXPECTED_REPO_COUNT` задаёт ожидаемое количество resolved repos (default `1`)
+  - `UI_E2E_SCENARIO=init-inspect|cancel-refresh` переключает live flow:
+    - `init-inspect`: validate -> run init -> inspect artifacts
+    - `cancel-refresh`: validate -> run refresh -> cancel selected run -> expect `failed + run_canceled`
+  - `UI_E2E_CANCEL_STUB_SLEEP_SEC` задаёт длительность controlled slow stub runner для `cancel-refresh`
   - `ui/e2e/live-flow.spec.ts` + `npm run e2e:live --prefix ui`
 
 ## 8) Acceptance для testing strategy

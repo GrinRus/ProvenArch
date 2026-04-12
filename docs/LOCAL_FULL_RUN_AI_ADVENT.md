@@ -244,6 +244,11 @@ Output semantics:
 - direct `npm run --prefix ui e2e:live`: default `/tmp/provenarch-ui-e2e/test-results`, override `UI_E2E_OUTPUT_DIR`;
 - `scripts/frontend-live-e2e.sh`: output в `$OUTPUT_DIR/playwright-results`;
 - `UI_E2E_EXPECTED_REPO_COUNT` задаёт ожидаемое число resolved repos в live e2e (default `1`).
+- `UI_E2E_SCENARIO`:
+  - `init-inspect` (default): validate -> run init -> inspect artifacts;
+  - `cancel-refresh`: validate -> run refresh -> cancel selected run -> verify `failed + run_canceled`.
+- для `UI_E2E_SCENARIO=cancel-refresh` script использует controlled slow stub runner;
+  длительность задаётся `UI_E2E_CANCEL_STUB_SLEEP_SEC` (default `90`).
 
 ## 6) Continuous Improvement Loop (balanced backend/frontend)
 

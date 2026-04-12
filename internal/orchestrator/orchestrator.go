@@ -39,6 +39,13 @@ const (
 	runLogsPath         = "reports/taskruns/logs"
 )
 
+const (
+	runErrorCodeCanceled               = "run_canceled"
+	runErrorCodeReconciledAfterRestart = "run_reconciled_after_restart"
+	runtimeOutputSnippetLimitRunes     = 2000
+	runtimeOutputSnippetSuffix         = " ... [truncated]"
+)
+
 type RunStatus string
 
 const (
@@ -46,6 +53,11 @@ const (
 	RunStatusRunning   RunStatus = "running"
 	RunStatusSucceeded RunStatus = "succeeded"
 	RunStatusFailed    RunStatus = "failed"
+)
+
+var (
+	ErrRunNotFound      = errors.New("run not found")
+	ErrRunNotCancelable = errors.New("run not cancelable")
 )
 
 type Service struct {
@@ -58,6 +70,8 @@ type Service struct {
 	debounceWindow time.Duration
 	activeRunID    string
 	pendingRun     *pendingRun
+	runCancels     map[string]context.CancelFunc
+	cancelRequests map[string]struct{}
 
 	historyWorkspace workspace.Root
 	historyEnabled   bool
@@ -170,6 +184,8 @@ func NewService(options ...Option) *Service {
 		clock:            time.Now,
 		runs:             map[string]*runRecord{},
 		debounceWindow:   5 * time.Minute,
+		runCancels:       map[string]context.CancelFunc{},
+		cancelRequests:   map[string]struct{}{},
 		historyRetention: runHistoryRetention,
 		runLogsTTL:       7 * 24 * time.Hour,
 		runLogsMaxRuns:   200,
@@ -178,6 +194,7 @@ func NewService(options ...Option) *Service {
 		option(service)
 	}
 	service.loadHistory()
+	service.reconcileStaleRunsAfterRestart()
 	_ = service.cleanupRunLogs()
 	return service
 }
@@ -227,7 +244,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		finishedAt := s.clock().UTC()
 		failedInfo := initialInfo
 		failedInfo.Status = RunStatusFailed
-		failedInfo.ErrorCode, failedInfo.Error = classifyExecutionError(err)
+		failedInfo.ErrorCode, failedInfo.Error = s.classifyRunFailure(runID, err)
 		failedInfo.FinishedAt = &finishedAt
 		s.storeRun(runRecord{info: failedInfo})
 		s.appendRunLog(runID, RunLogEntry{
@@ -329,7 +346,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		finishedAt := s.clock().UTC()
 		failedInfo := initialInfo
 		failedInfo.Status = RunStatusFailed
-		failedInfo.ErrorCode, failedInfo.Error = classifyExecutionError(err)
+		failedInfo.ErrorCode, failedInfo.Error = s.classifyRunFailure(runID, err)
 		failedInfo.CurrentStep = execution.stepStatus.CurrentStep
 		failedInfo.Warnings = append([]string(nil), execution.warnings...)
 		failedInfo.FinishedAt = &finishedAt
@@ -440,6 +457,85 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 	return runID, nil
 }
 
+func (s *Service) CancelRun(runID string) error {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return ErrRunNotFound
+	}
+
+	now := s.clock().UTC()
+	var cancelFn context.CancelFunc
+
+	s.mu.Lock()
+	record, ok := s.runs[runID]
+	if !ok {
+		s.mu.Unlock()
+		return ErrRunNotFound
+	}
+
+	switch record.info.Status {
+	case RunStatusSucceeded, RunStatusFailed:
+		s.mu.Unlock()
+		return ErrRunNotCancelable
+	case RunStatusQueued:
+		if s.pendingRun != nil && s.pendingRun.runID == runID {
+			s.pendingRun = nil
+			if s.cancelRequests != nil {
+				delete(s.cancelRequests, runID)
+			}
+			failedInfo := record.info
+			failedInfo.Status = RunStatusFailed
+			failedInfo.ErrorCode = runErrorCodeCanceled
+			failedInfo.Error = fmt.Sprintf("run canceled while queued (previous_status=%s)", RunStatusQueued)
+			failedInfo.FinishedAt = &now
+			copiedArtifacts := append([]Artifact(nil), record.artifacts...)
+			s.upsertRunLocked(runRecord{
+				info:      failedInfo,
+				artifacts: copiedArtifacts,
+			})
+			s.mu.Unlock()
+			s.appendRunLog(runID, RunLogEntry{
+				Timestamp: now,
+				Level:     RunLogLevelWarning,
+				Message:   "run canceled while queued",
+				Fields: map[string]any{
+					"error_code":      runErrorCodeCanceled,
+					"previous_status": string(RunStatusQueued),
+				},
+			})
+			return nil
+		}
+	}
+
+	if runID != s.activeRunID {
+		s.mu.Unlock()
+		return ErrRunNotCancelable
+	}
+
+	if s.cancelRequests == nil {
+		s.cancelRequests = map[string]struct{}{}
+	}
+	s.cancelRequests[runID] = struct{}{}
+	if s.runCancels != nil {
+		cancelFn = s.runCancels[runID]
+	}
+	s.mu.Unlock()
+
+	if cancelFn != nil {
+		cancelFn()
+	}
+
+	s.appendRunLog(runID, RunLogEntry{
+		Timestamp: now,
+		Level:     RunLogLevelInfo,
+		Message:   "run cancellation requested",
+		Fields: map[string]any{
+			"error_code": runErrorCodeCanceled,
+		},
+	})
+	return nil
+}
+
 func (s *Service) GetRun(runID string) (RunInfo, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -529,16 +625,41 @@ func (s *Service) storeRun(record runRecord) {
 }
 
 func (s *Service) launchAsyncRun(ctx context.Context, runID string, request RunRequest) {
+	runCtx, cancel := context.WithCancel(ctx)
+
+	shouldCancelImmediately := false
+	s.mu.Lock()
+	if s.runCancels == nil {
+		s.runCancels = map[string]context.CancelFunc{}
+	}
+	s.runCancels[runID] = cancel
+	if _, requested := s.cancelRequests[runID]; requested {
+		shouldCancelImmediately = true
+	}
+	s.mu.Unlock()
+
+	if shouldCancelImmediately {
+		cancel()
+	}
+
 	go func() {
-		_, _, _ = s.runWithID(ctx, request, runID)
+		_, _, _ = s.runWithID(runCtx, request, runID)
 		s.finishAsyncRun(ctx, runID)
 	}()
 }
 
 func (s *Service) finishAsyncRun(ctx context.Context, runID string) {
 	var next *pendingRun
+	var cancelFn context.CancelFunc
 
 	s.mu.Lock()
+	if s.runCancels != nil {
+		cancelFn = s.runCancels[runID]
+		delete(s.runCancels, runID)
+	}
+	if s.cancelRequests != nil {
+		delete(s.cancelRequests, runID)
+	}
 	if s.activeRunID == runID {
 		s.activeRunID = ""
 	}
@@ -549,6 +670,9 @@ func (s *Service) finishAsyncRun(ctx context.Context, runID string) {
 	}
 	s.mu.Unlock()
 
+	if cancelFn != nil {
+		cancelFn()
+	}
 	if next != nil {
 		s.launchAsyncRun(ctx, next.runID, next.request)
 	}
@@ -641,6 +765,71 @@ func (s *Service) loadHistory() {
 			continue
 		}
 		s.runs[record.info.RunID] = &record
+	}
+}
+
+func (s *Service) reconcileStaleRunsAfterRestart() {
+	now := s.clock().UTC()
+	type staleRun struct {
+		runID         string
+		previousState RunStatus
+	}
+	staleRuns := []staleRun{}
+
+	s.mu.Lock()
+	for runID, record := range s.runs {
+		if record == nil {
+			continue
+		}
+		if record.info.Status != RunStatusQueued && record.info.Status != RunStatusRunning {
+			continue
+		}
+		previousStatus := record.info.Status
+		finishedAt := now
+		reconciledInfo := record.info
+		reconciledInfo.Status = RunStatusFailed
+		reconciledInfo.ErrorCode = runErrorCodeReconciledAfterRestart
+		reconciledInfo.Error = fmt.Sprintf("run reconciled after service restart (stale status=%s)", previousStatus)
+		reconciledInfo.FinishedAt = &finishedAt
+		record.info = reconciledInfo
+		s.runs[runID] = record
+		staleRuns = append(staleRuns, staleRun{
+			runID:         runID,
+			previousState: previousStatus,
+		})
+	}
+	if len(staleRuns) > 0 {
+		s.persistHistoryLocked()
+	}
+	s.activeRunID = ""
+	s.pendingRun = nil
+	if s.runCancels == nil {
+		s.runCancels = map[string]context.CancelFunc{}
+	}
+	for runID, cancel := range s.runCancels {
+		if cancel != nil {
+			cancel()
+		}
+		delete(s.runCancels, runID)
+	}
+	if s.cancelRequests == nil {
+		s.cancelRequests = map[string]struct{}{}
+	}
+	for runID := range s.cancelRequests {
+		delete(s.cancelRequests, runID)
+	}
+	s.mu.Unlock()
+
+	for _, stale := range staleRuns {
+		s.appendRunLog(stale.runID, RunLogEntry{
+			Timestamp: now,
+			Level:     RunLogLevelWarning,
+			Message:   "run reconciled after restart",
+			Fields: map[string]any{
+				"error_code":      runErrorCodeReconciledAfterRestart,
+				"previous_status": string(stale.previousState),
+			},
+		})
 	}
 }
 
@@ -745,6 +934,33 @@ func classifyExecutionError(err error) (code string, message string) {
 		return runtimeCode, message
 	}
 	return "", message
+}
+
+func (s *Service) classifyRunFailure(runID string, err error) (string, string) {
+	if s.isCancelRequested(runID) {
+		if errors.Is(err, context.Canceled) {
+			return runErrorCodeCanceled, "run canceled by request"
+		}
+		message := strings.TrimSpace(err.Error())
+		if message == "" {
+			message = "run canceled by request"
+		} else {
+			message = fmt.Sprintf("run canceled by request (%s)", message)
+		}
+		return runErrorCodeCanceled, message
+	}
+	return classifyExecutionError(err)
+}
+
+func (s *Service) isCancelRequested(runID string) bool {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.cancelRequests[runID]
+	return ok
 }
 
 type pipelineExecution struct {
@@ -1057,10 +1273,7 @@ func (e *pipelineExecution) executeRuntimeTask(
 
 	result, err := e.runner.Run(ctx, task)
 	if err != nil {
-		e.logError(stepID, domainID, "runtime task failed", map[string]any{
-			"task_id": task.TaskID,
-			"error":   strings.TrimSpace(err.Error()),
-		})
+		e.logError(stepID, domainID, "runtime task failed", runtimeFailureLogFields(task, err, "", ""))
 		return runtimeTaskExecution{}, err
 	}
 	if len(result.RawJSON) == 0 {
@@ -1073,10 +1286,7 @@ func (e *pipelineExecution) executeRuntimeTask(
 
 	parsed, err := contracts.ParseTaskResult(result.RawJSON)
 	if err != nil {
-		e.logError(stepID, domainID, "runtime task parse failed", map[string]any{
-			"task_id": task.TaskID,
-			"error":   strings.TrimSpace(err.Error()),
-		})
+		e.logError(stepID, domainID, "runtime task parse failed", runtimeFailureLogFields(task, err, result.Stdout, result.Stderr))
 		return runtimeTaskExecution{}, err
 	}
 	normalized := contracts.NormalizeTaskResult(parsed)
@@ -1599,6 +1809,68 @@ func (e *pipelineExecution) logRunEvent(level RunLogLevel, stepID string, domain
 		}
 	}
 	e.onLog(entry)
+}
+
+func runtimeFailureLogFields(task acpruntime.Task, err error, fallbackStdout string, fallbackStderr string) map[string]any {
+	fields := map[string]any{
+		"task_id":     task.TaskID,
+		"repo_scopes": append([]string(nil), task.RepoScopes...),
+		"error":       strings.TrimSpace(err.Error()),
+	}
+	if runtimeCode, _, ok := acpruntime.ClassifyError(err); ok {
+		fields["error_code"] = runtimeCode
+	}
+
+	stdout := fallbackStdout
+	stderr := fallbackStderr
+	var runnerErr acpruntime.RunnerError
+	if errors.As(err, &runnerErr) {
+		if strings.TrimSpace(string(runnerErr.Provider)) != "" {
+			fields["provider"] = string(runnerErr.Provider)
+		}
+		if strings.TrimSpace(stdout) == "" {
+			stdout = runnerErr.Stdout
+		}
+		if strings.TrimSpace(stderr) == "" {
+			stderr = runnerErr.Stderr
+		}
+	}
+
+	appendSnippetField(fields, "stdout_snippet", stdout)
+	appendSnippetField(fields, "stderr_snippet", stderr)
+	return fields
+}
+
+func appendSnippetField(fields map[string]any, key string, raw string) {
+	if fields == nil {
+		return
+	}
+	snippet := sanitizeAndTruncateSnippet(raw, runtimeOutputSnippetLimitRunes)
+	if snippet == "" {
+		return
+	}
+	fields[key] = snippet
+}
+
+func sanitizeAndTruncateSnippet(raw string, limitRunes int) string {
+	normalized := strings.ReplaceAll(raw, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	normalized = strings.TrimSpace(normalized)
+	if normalized == "" {
+		return ""
+	}
+	if limitRunes <= 0 {
+		limitRunes = runtimeOutputSnippetLimitRunes
+	}
+	runes := []rune(normalized)
+	if len(runes) <= limitRunes {
+		return normalized
+	}
+	truncated := strings.TrimSpace(string(runes[:limitRunes]))
+	if truncated == "" {
+		truncated = string(runes[:limitRunes])
+	}
+	return truncated + runtimeOutputSnippetSuffix
 }
 
 func countCoverageObserved(coverage *contracts.Coverage) int {

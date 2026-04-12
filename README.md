@@ -137,6 +137,7 @@ acp run --workspace /path/to/arch-workspace --pipeline init --runtime fake --non
 ```
 
 После запуска UI отображает dashboard со всеми run'ами (`queued/running/succeeded/failed`), включая уже завершённые запуски.
+Для operability UI автоматически выбирает newest active run (или первый из списка), показывает полный warnings list выбранного run, позволяет переключать log view `line/line+fields` и поддерживает `Cancel selected run`.
 История сохраняется в workspace: `reports/taskruns/run-history.json`.
 
 ### 3) Альтернативный явный bootstrap через `init-workspace`
@@ -298,6 +299,10 @@ ACP_QWEN_CMD_BIN=qwen \
 - direct `npm run --prefix ui e2e:live`: Playwright output default `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
 - `scripts/frontend-live-e2e.sh`: Playwright output сохраняется в `$OUTPUT_DIR/playwright-results`
 - frontend live e2e ожидает число resolved repos из `UI_E2E_EXPECTED_REPO_COUNT` (default `1`)
+- `UI_E2E_SCENARIO` переключает live flow:
+  - `init-inspect` (default): validate -> run init -> inspect artifacts
+  - `cancel-refresh`: validate -> run refresh -> cancel selected run -> expect `failed + run_canceled`
+- `UI_E2E_CANCEL_STUB_SLEEP_SEC` задаёт длительность controlled slow stub runner для сценария `cancel-refresh`
 
 `TARGET_REPOS_FILE` — основной batch-контракт; single legacy env поддерживаются для обратной совместимости.
 Full matrix (`full-run-batch-matrix.sh`) — локальный trusted-machine runbook, не required CI gate.
@@ -488,7 +493,7 @@ Run-specific поверхность (исключена из strict golden compa
 - `reports/changelog/*`
 - `reports/taskruns/*`
 - runtime run registry/status (`/api/pipeline/runs/*`)
-- runtime parse/runtime ошибки после успешного async start отражаются в `GET /api/pipeline/runs/<run_id>.error_code` (например, `runner_parse_failed`)
+- runtime parse/runtime и lifecycle ошибки после async start отражаются в `GET /api/pipeline/runs/<run_id>.error_code` (например, `runner_parse_failed`, `run_canceled`, `run_reconciled_after_restart`)
 
 Статус покрытия epics (single source): `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.
 

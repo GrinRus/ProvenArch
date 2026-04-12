@@ -79,19 +79,23 @@ func isNativeDirectClaudeCommand(command string) bool {
 func runLegacyPassthrough(ctx context.Context, command string, args []string, task acpruntime.Task, taskPayload []byte) (acpruntime.Result, error) {
 	result, parseStage, parseErr, runErr := runClaudeCommand(ctx, task, command, append([]string(nil), args...), taskPayload)
 	if runErr != nil {
-		return acpruntime.Result{}, acpruntime.WrapRunnerError(
+		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 			acpruntime.ProviderClaudeCode,
 			acpruntime.ErrorCodeRunnerUnavailable,
 			fmt.Sprintf("%v: %s", ErrRunnerUnavailable, runErr),
+			result.Stdout,
+			result.Stderr,
 			runErr,
 		)
 	}
 	if parseErr != nil {
 		parseFailureMessage := buildParseFailureMessage(task, parseStage, parseErr, result)
-		return acpruntime.Result{}, acpruntime.WrapRunnerError(
+		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 			acpruntime.ProviderClaudeCode,
 			acpruntime.ErrorCodeRunnerParseFailed,
 			fmt.Sprintf("headless provider %q returned invalid taskresult: %s", acpruntime.ProviderClaudeCode, parseFailureMessage),
+			result.Stdout,
+			result.Stderr,
 			parseErr,
 		)
 	}
@@ -102,10 +106,12 @@ func runNativeDirectClaude(ctx context.Context, command string, task acpruntime.
 	args := buildNativeDirectClaudeArgs(task, buildDirectPrompt(taskPayload, false, false))
 	result, parseStage, parseErr, runErr := runClaudeCommand(ctx, task, command, args, nil)
 	if runErr != nil {
-		return acpruntime.Result{}, acpruntime.WrapRunnerError(
+		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 			acpruntime.ProviderClaudeCode,
 			acpruntime.ErrorCodeRunnerUnavailable,
 			fmt.Sprintf("%v: %s", ErrRunnerUnavailable, runErr),
+			result.Stdout,
+			result.Stderr,
 			runErr,
 		)
 	}
@@ -119,10 +125,12 @@ func runNativeDirectClaude(ctx context.Context, command string, task acpruntime.
 	)
 	retryResult, retryParseStage, retryParseErr, retryRunErr := runClaudeCommand(ctx, task, command, retryArgs, nil)
 	if retryRunErr != nil {
-		return acpruntime.Result{}, acpruntime.WrapRunnerError(
+		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 			acpruntime.ProviderClaudeCode,
 			acpruntime.ErrorCodeRunnerUnavailable,
 			fmt.Sprintf("%v: %s", ErrRunnerUnavailable, retryRunErr),
+			retryResult.Stdout,
+			retryResult.Stderr,
 			retryRunErr,
 		)
 	}
@@ -131,10 +139,12 @@ func runNativeDirectClaude(ctx context.Context, command string, task acpruntime.
 	}
 
 	parseFailureMessage := buildParseFailureMessage(task, retryParseStage, retryParseErr, retryResult)
-	return acpruntime.Result{}, acpruntime.WrapRunnerError(
+	return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 		acpruntime.ProviderClaudeCode,
 		acpruntime.ErrorCodeRunnerParseFailed,
 		fmt.Sprintf("headless provider %q returned invalid taskresult: %s", acpruntime.ProviderClaudeCode, parseFailureMessage),
+		retryResult.Stdout,
+		retryResult.Stderr,
 		retryParseErr,
 	)
 }
@@ -194,11 +204,20 @@ func runClaudeCommand(ctx context.Context, task acpruntime.Task, command string,
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return acpruntime.Result{
+				Stdout: stdout.String(),
+				Stderr: stderr.String(),
+			}, "", nil, ctxErr
+		}
 		errText := strings.TrimSpace(stderr.String())
 		if errText == "" {
 			errText = err.Error()
 		}
-		return acpruntime.Result{}, "", nil, errors.New(errText)
+		return acpruntime.Result{
+			Stdout: stdout.String(),
+			Stderr: stderr.String(),
+		}, "", nil, errors.New(errText)
 	}
 
 	raw, err := taskresultextractor.Extract(stdout.Bytes())

@@ -389,11 +389,17 @@ func (s *Server) handlePipelineStart(writer http.ResponseWriter, request *http.R
 }
 
 func (s *Server) handlePipelineRuns(writer http.ResponseWriter, request *http.Request) {
-	if request.Method != http.MethodGet {
-		writeMethodNotAllowed(writer, http.MethodGet)
-		return
+	switch request.Method {
+	case http.MethodGet:
+		s.handlePipelineRunsGet(writer, request)
+	case http.MethodPost:
+		s.handlePipelineRunsPost(writer, request)
+	default:
+		writeMethodNotAllowed(writer, http.MethodGet+", "+http.MethodPost)
 	}
+}
 
+func (s *Server) handlePipelineRunsGet(writer http.ResponseWriter, request *http.Request) {
 	if request.URL.Path == "/api/pipeline/runs" || request.URL.Path == "/api/pipeline/runs/" {
 		const (
 			defaultLimit = 50
@@ -500,6 +506,42 @@ func (s *Server) handlePipelineRuns(writer http.ResponseWriter, request *http.Re
 	}
 
 	writeError(writer, http.StatusNotFound, "endpoint_not_found", "endpoint not found")
+}
+
+func (s *Server) handlePipelineRunsPost(writer http.ResponseWriter, request *http.Request) {
+	rest := strings.TrimPrefix(request.URL.Path, "/api/pipeline/runs/")
+	parts := strings.Split(strings.Trim(rest, "/"), "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] != "cancel" {
+		writeError(writer, http.StatusNotFound, "endpoint_not_found", "endpoint not found")
+		return
+	}
+	runID := strings.TrimSpace(parts[0])
+
+	if request.Body != nil {
+		var payload struct{}
+		if err := decodeStrictJSON(request, &payload); err != nil && !errors.Is(err, io.EOF) {
+			writeError(writer, http.StatusBadRequest, "invalid_request_body", "invalid request body")
+			return
+		}
+	}
+
+	if err := s.service.CancelRun(runID); err != nil {
+		if errors.Is(err, orchestrator.ErrRunNotFound) {
+			writeError(writer, http.StatusNotFound, "run_not_found", "run not found")
+			return
+		}
+		if errors.Is(err, orchestrator.ErrRunNotCancelable) {
+			writeError(writer, http.StatusConflict, "run_not_cancelable", "run is already terminal")
+			return
+		}
+		writeError(writer, http.StatusInternalServerError, "run_cancel_failed", err.Error())
+		return
+	}
+
+	writeJSON(writer, http.StatusAccepted, map[string]any{
+		"run_id": runID,
+		"status": "cancel_requested",
+	})
 }
 
 func runGit(ctx context.Context, repoPath string, args ...string) (string, error) {

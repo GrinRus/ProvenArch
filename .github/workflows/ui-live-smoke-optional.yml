@@ -16,6 +16,14 @@ on:
         required: true
         default: https://github.com/ibatulanandjp/ecommerce-microservices.git
         type: string
+      ui_e2e_scenario:
+        description: Live UI e2e scenario
+        required: true
+        default: init-inspect
+        type: choice
+        options:
+          - init-inspect
+          - cancel-refresh
 
 permissions:
   contents: read
@@ -55,6 +63,12 @@ jobs:
         id: runtime
         run: |
           set -euo pipefail
+          scenario="${{ github.event.inputs.ui_e2e_scenario }}"
+          if [[ "$scenario" == "cancel-refresh" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "runtime_cmd=cancel-stub" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           provider="${{ github.event.inputs.runtime_provider }}"
           case "$provider" in
             claude-code) cmd="claude" ;;
@@ -86,6 +100,7 @@ jobs:
         if: steps.runtime.outputs.available == 'true'
         env:
           RUNTIME_PROVIDER: ${{ github.event.inputs.runtime_provider }}
+          UI_E2E_SCENARIO: ${{ github.event.inputs.ui_e2e_scenario }}
           WORKSPACE: ${{ env.WORKSPACE }}
         run: |
           set -euo pipefail

@@ -508,6 +508,280 @@ func TestPipelineRunLogsEndpointReturnsRunNotFound(t *testing.T) {
 	}
 }
 
+func TestPipelineRunCancelEndpointAcceptsRunningRun(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServerWithRunner(t, cancellableDelayedRunner{delay: 260 * time.Millisecond})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	startResp, err := http.Post(httpServer.URL+"/api/pipeline/refresh", "application/json", bytes.NewBufferString(`{"trigger":"ui"}`))
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/refresh: %v", err)
+	}
+	defer startResp.Body.Close()
+	if startResp.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", startResp.StatusCode)
+	}
+
+	var started struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(startResp.Body).Decode(&started); err != nil {
+		t.Fatalf("decode start payload: %v", err)
+	}
+	if strings.TrimSpace(started.RunID) == "" {
+		t.Fatalf("expected non-empty run id")
+	}
+
+	cancelReq, err := http.NewRequest(http.MethodPost, httpServer.URL+"/api/pipeline/runs/"+started.RunID+"/cancel", nil)
+	if err != nil {
+		t.Fatalf("create cancel request: %v", err)
+	}
+	cancelResp, err := http.DefaultClient.Do(cancelReq)
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/runs/<id>/cancel: %v", err)
+	}
+	defer cancelResp.Body.Close()
+	if cancelResp.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", cancelResp.StatusCode)
+	}
+
+	var cancelPayload struct {
+		RunID  string `json:"run_id"`
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(cancelResp.Body).Decode(&cancelPayload); err != nil {
+		t.Fatalf("decode cancel payload: %v", err)
+	}
+	if cancelPayload.RunID != started.RunID {
+		t.Fatalf("expected run_id %q, got %q", started.RunID, cancelPayload.RunID)
+	}
+	if cancelPayload.Status != "cancel_requested" {
+		t.Fatalf("expected cancel_requested status, got %q", cancelPayload.Status)
+	}
+
+	terminal := waitForRunTerminalStatus(t, httpServer.URL, started.RunID, 8*time.Second)
+	if terminal.Status != string(orchestrator.RunStatusFailed) {
+		t.Fatalf("expected canceled run to fail, got status=%q", terminal.Status)
+	}
+	if terminal.ErrorCode != "run_canceled" {
+		t.Fatalf("expected error_code run_canceled, got %q", terminal.ErrorCode)
+	}
+}
+
+func TestPipelineRunCancelEndpointReturnsRunNotCancelableAfterAcceptedCancel(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServerWithRunner(t, cancellableDelayedRunner{delay: 260 * time.Millisecond})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	startResp, err := http.Post(httpServer.URL+"/api/pipeline/refresh", "application/json", bytes.NewBufferString(`{"trigger":"ui"}`))
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/refresh: %v", err)
+	}
+	defer startResp.Body.Close()
+	if startResp.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", startResp.StatusCode)
+	}
+
+	var started struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(startResp.Body).Decode(&started); err != nil {
+		t.Fatalf("decode start payload: %v", err)
+	}
+	if strings.TrimSpace(started.RunID) == "" {
+		t.Fatalf("expected non-empty run id")
+	}
+
+	cancelReq, err := http.NewRequest(http.MethodPost, httpServer.URL+"/api/pipeline/runs/"+started.RunID+"/cancel", nil)
+	if err != nil {
+		t.Fatalf("create first cancel request: %v", err)
+	}
+	cancelResp, err := http.DefaultClient.Do(cancelReq)
+	if err != nil {
+		t.Fatalf("first POST /api/pipeline/runs/<id>/cancel: %v", err)
+	}
+	defer cancelResp.Body.Close()
+	if cancelResp.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected first cancel status 202, got %d", cancelResp.StatusCode)
+	}
+
+	_ = waitForRunTerminalStatus(t, httpServer.URL, started.RunID, 8*time.Second)
+
+	secondCancelReq, err := http.NewRequest(http.MethodPost, httpServer.URL+"/api/pipeline/runs/"+started.RunID+"/cancel", nil)
+	if err != nil {
+		t.Fatalf("create second cancel request: %v", err)
+	}
+	secondCancelResp, err := http.DefaultClient.Do(secondCancelReq)
+	if err != nil {
+		t.Fatalf("second POST /api/pipeline/runs/<id>/cancel: %v", err)
+	}
+	defer secondCancelResp.Body.Close()
+	if secondCancelResp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected second cancel status 409, got %d", secondCancelResp.StatusCode)
+	}
+
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(secondCancelResp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode second cancel payload: %v", err)
+	}
+	if payload.Error.Code != "run_not_cancelable" {
+		t.Fatalf("expected run_not_cancelable code on second cancel, got %q", payload.Error.Code)
+	}
+}
+
+func TestPipelineRunCancelEndpointReturnsRunNotFound(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	cancelReq, err := http.NewRequest(http.MethodPost, httpServer.URL+"/api/pipeline/runs/run-missing/cancel", nil)
+	if err != nil {
+		t.Fatalf("create cancel request: %v", err)
+	}
+	cancelResp, err := http.DefaultClient.Do(cancelReq)
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/runs/run-missing/cancel: %v", err)
+	}
+	defer cancelResp.Body.Close()
+	if cancelResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", cancelResp.StatusCode)
+	}
+
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(cancelResp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode run-not-found payload: %v", err)
+	}
+	if payload.Error.Code != "run_not_found" {
+		t.Fatalf("expected run_not_found code, got %q", payload.Error.Code)
+	}
+}
+
+func TestPipelineRunCancelEndpointReturnsRunNotCancelableForTerminalRun(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	startResp, err := http.Post(httpServer.URL+"/api/pipeline/init", "application/json", bytes.NewBufferString(`{"trigger":"ui"}`))
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/init: %v", err)
+	}
+	defer startResp.Body.Close()
+	if startResp.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", startResp.StatusCode)
+	}
+
+	var started struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(startResp.Body).Decode(&started); err != nil {
+		t.Fatalf("decode start payload: %v", err)
+	}
+	if strings.TrimSpace(started.RunID) == "" {
+		t.Fatalf("expected non-empty run id")
+	}
+	_ = waitForRunTerminalStatus(t, httpServer.URL, started.RunID, 8*time.Second)
+
+	cancelReq, err := http.NewRequest(http.MethodPost, httpServer.URL+"/api/pipeline/runs/"+started.RunID+"/cancel", nil)
+	if err != nil {
+		t.Fatalf("create cancel request: %v", err)
+	}
+	cancelResp, err := http.DefaultClient.Do(cancelReq)
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/runs/<id>/cancel: %v", err)
+	}
+	defer cancelResp.Body.Close()
+	if cancelResp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected status 409, got %d", cancelResp.StatusCode)
+	}
+
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(cancelResp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode run-not-cancelable payload: %v", err)
+	}
+	if payload.Error.Code != "run_not_cancelable" {
+		t.Fatalf("expected run_not_cancelable code, got %q", payload.Error.Code)
+	}
+}
+
+func TestPipelineRunCancelEndpointRejectsInvalidRequestBody(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServerWithRunner(t, cancellableDelayedRunner{delay: 260 * time.Millisecond})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	startResp, err := http.Post(httpServer.URL+"/api/pipeline/refresh", "application/json", bytes.NewBufferString(`{"trigger":"ui"}`))
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/refresh: %v", err)
+	}
+	defer startResp.Body.Close()
+	if startResp.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", startResp.StatusCode)
+	}
+
+	var started struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(startResp.Body).Decode(&started); err != nil {
+		t.Fatalf("decode start payload: %v", err)
+	}
+	if strings.TrimSpace(started.RunID) == "" {
+		t.Fatalf("expected non-empty run id")
+	}
+
+	cancelReq, err := http.NewRequest(
+		http.MethodPost,
+		httpServer.URL+"/api/pipeline/runs/"+started.RunID+"/cancel",
+		bytes.NewBufferString(`{"unexpected":"field"}`),
+	)
+	if err != nil {
+		t.Fatalf("create cancel request: %v", err)
+	}
+	cancelReq.Header.Set("Content-Type", "application/json")
+	cancelResp, err := http.DefaultClient.Do(cancelReq)
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/runs/<id>/cancel invalid body: %v", err)
+	}
+	defer cancelResp.Body.Close()
+	if cancelResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", cancelResp.StatusCode)
+	}
+
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(cancelResp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode invalid body payload: %v", err)
+	}
+	if payload.Error.Code != "invalid_request_body" {
+		t.Fatalf("expected invalid_request_body code, got %q", payload.Error.Code)
+	}
+
+	_ = waitForRunTerminalStatus(t, httpServer.URL, started.RunID, 8*time.Second)
+}
+
 func TestPipelineRunsListEndpointReturnsRecentRuns(t *testing.T) {
 	t.Parallel()
 
@@ -1291,5 +1565,22 @@ func (parseFailureRunner) Run(context.Context, acpruntime.Task) (acpruntime.Resu
 }
 
 func (parseFailureRunner) Preflight(context.Context) error {
+	return nil
+}
+
+type cancellableDelayedRunner struct {
+	delay time.Duration
+}
+
+func (r cancellableDelayedRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	select {
+	case <-ctx.Done():
+		return acpruntime.Result{}, ctx.Err()
+	case <-time.After(r.delay):
+	}
+	return claudecode.FakeRunner{}.Run(ctx, task)
+}
+
+func (cancellableDelayedRunner) Preflight(context.Context) error {
 	return nil
 }
