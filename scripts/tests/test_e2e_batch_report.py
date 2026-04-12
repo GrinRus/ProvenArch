@@ -755,6 +755,61 @@ class EvaluateRunTests(unittest.TestCase):
             self.assertEqual("workspace-fallback", result.artifact_source)
             self.assertIn("reliability:snapshot-missing", result.issues)
 
+    def test_classifies_infra_incomplete_cycle_from_summary_counters(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            target_repo = root / "target-repo"
+            write_text(target_repo / "README.md", "# demo\n")
+
+            run_dir = root / "batch/qwen-code/run1"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            write_text(
+                run_dir / "session-summary.md",
+                "\n".join(
+                    [
+                        "# ProvenArch Full Run Session Summary",
+                        "",
+                        "- result: passed",
+                        "- quality_gates: passed",
+                        "- expected_runs: 4",
+                        "- completed_runs: 2",
+                        "- expected_headless_runs: 2",
+                        "- completed_headless_runs: 1",
+                        "- running_runs_detected: 1",
+                        "- failure_reason: infra_incomplete_cycle",
+                        "",
+                        "## API Simulation",
+                        "- status: succeeded",
+                        "",
+                    ]
+                ),
+            )
+            write_text(run_dir / "full-run.log", "")
+            write_text(run_dir / "run-results.tsv", "")
+
+            result = report.evaluate_run("qwen-code", 1, run_dir, {"target_repo": str(target_repo)})
+            self.assertFalse(result.hard_pass)
+            self.assertEqual("infra_incomplete_cycle", result.failure_class)
+            self.assertTrue(result.infra_incomplete_cycle)
+            self.assertIn("reliability:infra-incomplete-cycle", result.issues)
+
+    def test_classifies_summary_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            target_repo = root / "target-repo"
+            write_text(target_repo / "README.md", "# demo\n")
+
+            run_dir = root / "batch/claude-code/run1"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            write_text(run_dir / "full-run.log", "")
+            write_text(run_dir / "run-results.tsv", "")
+
+            result = report.evaluate_run("claude-code", 1, run_dir, {"target_repo": str(target_repo)})
+            self.assertFalse(result.hard_pass)
+            self.assertEqual("summary_missing", result.failure_class)
+            self.assertTrue(result.summary_missing)
+            self.assertIn("reliability:summary-missing", result.issues)
+
 
 if __name__ == "__main__":
     unittest.main()

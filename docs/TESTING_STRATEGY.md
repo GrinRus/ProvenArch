@@ -171,8 +171,11 @@ Implemented additional jobs:
   - `scripts/full-run-ai-advent.sh`
   - bootstrap в `tmp`, API simulation, runtime циклы `fake + headless`
   - strict quality checks: anti-mock + anti-zero-signal + no last-run degradation
+  - completion invariants: expected/completed runtime counts, per-iteration headless `init+refresh`, отсутствие `running` в run-history
+  - signal handling: `TERM/INT/HUP/PIPE` => `infra_signal_terminated`, `result=passed` запрещён при неполном цикле
   - full-run semantic checks ограничены локальным скриптом (owner-gap/findings, coverage/questions dedupe, critical off-topic markers) и не включают batch-only `analysis:evidence-scope`/`analysis:cross-doc`
   - summary/log/snapshots: `TMP_ROOT/session-summary.md`, `TMP_ROOT/full-run.log`, `TMP_ROOT/snapshots/*`
+  - при parse-fail runtime сохраняет raw-output diagnostics в `reports/taskruns/raw/*` (stdout/stderr/meta with checksum)
 - batch regression `5x2` + frontend live e2e:
   - `scripts/full-run-batch-5x2.sh`
   - canonical input: `TARGET_REPOS_FILE` (`repos[]` format)
@@ -184,7 +187,7 @@ Implemented additional jobs:
   - multi-profile hard-fail: `analysis:cross-repo-missing` при `expected_repo_count >= 2` и отсутствии cross-repo сигнала
   - hard-pass учитывает semantic hard-fail и snapshot source validity
   - run artifacts default: `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/*`
-  - reports: `run_matrix_<batch-id>.md`, `frontend_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md` (+ fields `artifact_source`, `semantic_hard_fail`, `off_topic_hits`)
+  - reports: `run_matrix_<batch-id>.md`, `frontend_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md` (+ fields `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, failure classes `runtime_parse/runner_unavailable/infra_signal_terminated/infra_incomplete_cycle/summary_missing`)
 - profile matrix regression (local official runbook, non-required CI):
   - `scripts/full-run-batch-matrix.sh`
   - `E2E_MATRIX_FILE` обязателен (`profiles[]`: `id`, `repos_file`, `expected_repo_count`, `source_kind`)

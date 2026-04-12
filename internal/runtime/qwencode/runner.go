@@ -13,6 +13,7 @@ import (
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtime/runnerdiag"
 	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultextractor"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 )
@@ -95,14 +96,36 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 		if retryParseErr == nil {
 			return retryResult, nil
 		}
+		result = retryResult
 		parseErr = retryParseErr
 	}
 
+	parseFailureMessage := buildParseFailureMessage(task, parseErr, result)
 	return acpruntime.Result{}, acpruntime.WrapRunnerError(
 		acpruntime.ProviderQwenCode,
 		acpruntime.ErrorCodeRunnerParseFailed,
-		fmt.Sprintf("headless provider %q returned invalid taskresult: %v", acpruntime.ProviderQwenCode, parseErr),
+		fmt.Sprintf("headless provider %q returned invalid taskresult: %s", acpruntime.ProviderQwenCode, parseFailureMessage),
 		parseErr,
+	)
+}
+
+func buildParseFailureMessage(task acpruntime.Task, parseErr error, result acpruntime.Result) string {
+	base := strings.TrimSpace(parseErr.Error())
+	if base == "" {
+		base = "unknown parse error"
+	}
+	artifacts, err := runnerdiag.WriteParseFailureArtifacts(task, acpruntime.ProviderQwenCode, result.Stdout, result.Stderr)
+	if err != nil {
+		return fmt.Sprintf("%s (raw_output_persist_failed=%v)", base, err)
+	}
+	return fmt.Sprintf(
+		"%s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
+		base,
+		artifacts.RelativeMetadataPath,
+		artifacts.Stdout.Bytes,
+		artifacts.Stdout.SHA256,
+		artifacts.Stderr.Bytes,
+		artifacts.Stderr.SHA256,
 	)
 }
 

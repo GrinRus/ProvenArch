@@ -2,6 +2,7 @@ package taskresultextractor
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
@@ -54,6 +55,36 @@ func TestExtractFromFencedText(t *testing.T) {
 	parsed, err := Extract([]byte(input))
 	if err != nil {
 		t.Fatalf("extract fenced json: %v", err)
+	}
+	if _, err := contracts.ParseTaskResult(parsed); err != nil {
+		t.Fatalf("parsed output must be valid taskresult: %v", err)
+	}
+}
+
+func TestExtractFromNDJSONDataStreamWithPrefixNoise(t *testing.T) {
+	t.Parallel()
+
+	input := strings.Join([]string{
+		"event: message",
+		"data: {\"type\":\"log\",\"message\":\"warming up\"}",
+		"data: {\"type\":\"result\",\"result\":" + strconv.Quote(validTaskResultJSON) + "}",
+	}, "\n")
+	parsed, err := Extract([]byte(input))
+	if err != nil {
+		t.Fatalf("extract ndjson stream: %v", err)
+	}
+	if _, err := contracts.ParseTaskResult(parsed); err != nil {
+		t.Fatalf("parsed output must be valid taskresult: %v", err)
+	}
+}
+
+func TestExtractFromNoisyOutputWithANSIAndControlChars(t *testing.T) {
+	t.Parallel()
+
+	input := "\x1b[32mINFO\x1b[0m runner output follows\n\x00" + validTaskResultJSON + "\x00"
+	parsed, err := Extract([]byte(input))
+	if err != nil {
+		t.Fatalf("extract noisy output: %v", err)
 	}
 	if _, err := contracts.ParseTaskResult(parsed); err != nil {
 		t.Fatalf("parsed output must be valid taskresult: %v", err)

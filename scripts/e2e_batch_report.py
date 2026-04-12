@@ -87,6 +87,13 @@ def first_token(value: str) -> str:
     return parts[0] if parts else ""
 
 
+def parse_int(value: str, default: int = 0) -> int:
+    try:
+        return int(str(value).strip())
+    except Exception:
+        return default
+
+
 def parse_run_results(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     if not path.exists():
@@ -506,6 +513,12 @@ class RunEvaluation:
     artifact_source: str = "snapshot"
     semantic_hard_fail: bool = False
     off_topic_hits: int = 0
+    failure_class: str = "none"
+    runtime_parse: bool = False
+    runner_unavailable: bool = False
+    infra_signal_terminated: bool = False
+    infra_incomplete_cycle: bool = False
+    summary_missing: bool = False
     issues: list[str] = field(default_factory=list)
     issue_details: list[str] = field(default_factory=list)
     error_codes: list[str] = field(default_factory=list)
@@ -525,8 +538,16 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path, preflight: dict[s
     error_codes: list[str] = []
 
     summary_text = summary_path.read_text(encoding="utf-8") if summary_path.exists() else ""
+    summary_missing = not summary_path.exists()
     result_value = first_token(parse_markdown_scalar(summary_text, "result")) if summary_text else ""
     quality_gates_value = first_token(parse_markdown_scalar(summary_text, "quality_gates")) if summary_text else ""
+    failure_reason = first_token(parse_markdown_scalar(summary_text, "failure_reason")) if summary_text else ""
+    termination_signal = first_token(parse_markdown_scalar(summary_text, "termination_signal")) if summary_text else ""
+    expected_runs = parse_int(parse_markdown_scalar(summary_text, "expected_runs"), 0) if summary_text else 0
+    completed_runs = parse_int(parse_markdown_scalar(summary_text, "completed_runs"), 0) if summary_text else 0
+    expected_headless_runs = parse_int(parse_markdown_scalar(summary_text, "expected_headless_runs"), 0) if summary_text else 0
+    completed_headless_runs = parse_int(parse_markdown_scalar(summary_text, "completed_headless_runs"), 0) if summary_text else 0
+    running_runs_detected = parse_int(parse_markdown_scalar(summary_text, "running_runs_detected"), 0) if summary_text else 0
     api_status = parse_api_status(summary_text)
 
     rows = parse_run_results(run_results_path)
@@ -547,6 +568,10 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path, preflight: dict[s
             artifact_source = "workspace-fallback"
             details.append(f"reliability/snapshot-missing -> {run_dir / 'snapshots' / run_id}: fallback={reports_root}")
 
+    if summary_missing:
+        issues.append("reliability:summary-missing")
+        details.append(f"reliability/summary-missing -> {summary_path} is missing")
+
     h1 = result_value == "passed" and quality_gates_value == "passed" and api_status == "succeeded"
     if not h1:
         issues.append("reliability:session")
@@ -562,19 +587,29 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path, preflight: dict[s
             f"refresh={refresh_row['status'] if refresh_row else 'missing'}"
         )
 
+    runtime_parse_hit = False
+    runner_unavailable_hit = False
     runner_error_hit = False
     for source_path in (summary_path, full_run_log):
         if not source_path.exists():
             continue
         text = source_path.read_text(encoding="utf-8")
-        for code in ("runner_unavailable", "runner_parse_failed"):
-            if code in text:
-                runner_error_hit = True
-                error_codes.append(code)
+        if "runner_unavailable" in text:
+            runner_unavailable_hit = True
+            runner_error_hit = True
+            error_codes.append("runner_unavailable")
+        if "runner_parse_failed" in text:
+            runtime_parse_hit = True
+            runner_error_hit = True
+            error_codes.append("runner_parse_failed")
     h3 = not runner_error_hit
     if not h3:
         issues.append("reliability:runner-errors")
         details.append(f"reliability/runner-errors -> {full_run_log}: detected {sorted(set(error_codes))}")
+    if runtime_parse_hit:
+        issues.append("reliability:runtime-parse")
+    if runner_unavailable_hit:
+        issues.append("reliability:runner-unavailable")
 
     init_signal = int(init_row["signal"]) if init_row else 0
     refresh_signal = int(refresh_row["signal"]) if refresh_row else 0
@@ -587,6 +622,31 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path, preflight: dict[s
     if not snapshot_ok:
         issues.append("reliability:snapshot-missing")
         reliability = max(0, reliability - 10)
+    if summary_missing:
+        reliability = max(0, reliability - 10)
+
+    infra_signal_terminated = (
+        failure_reason == "infra_signal_terminated"
+        or (termination_signal not in {"", "none"} and termination_signal != "-")
+    )
+    infra_incomplete_cycle = failure_reason == "infra_incomplete_cycle"
+    if expected_runs > 0 and completed_runs != expected_runs:
+        infra_incomplete_cycle = True
+    if expected_headless_runs > 0 and completed_headless_runs != expected_headless_runs:
+        infra_incomplete_cycle = True
+    if running_runs_detected > 0:
+        infra_incomplete_cycle = True
+    if infra_signal_terminated:
+        issues.append("reliability:infra-signal-terminated")
+        details.append(
+            f"reliability/infra-signal-terminated -> {summary_path}: failure_reason={failure_reason or '-'} termination_signal={termination_signal or '-'}"
+        )
+    if infra_incomplete_cycle:
+        issues.append("reliability:infra-incomplete-cycle")
+        details.append(
+            f"reliability/infra-incomplete-cycle -> {summary_path}: expected_runs={expected_runs} completed_runs={completed_runs} "
+            f"expected_headless_runs={expected_headless_runs} completed_headless_runs={completed_headless_runs} running_runs_detected={running_runs_detected}"
+        )
 
     c1_runtime_name_ok = True
     c2_runtime_versions_ok = True
@@ -845,7 +905,30 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path, preflight: dict[s
         issues.append("analysis:questions")
 
     analysis = bool_score(overview_ok, 10) + bool_score(findings_ok, 10) + bool_score(coverage_ok, 10) + bool_score(questions_ok, 10)
-    hard_pass = h1 and h2 and h3 and h4 and snapshot_ok and not semantic_hard_fail
+
+    failure_class = "none"
+    if summary_missing:
+        failure_class = "summary_missing"
+    elif runner_unavailable_hit:
+        failure_class = "runner_unavailable"
+    elif runtime_parse_hit:
+        failure_class = "runtime_parse"
+    elif infra_signal_terminated:
+        failure_class = "infra_signal_terminated"
+    elif infra_incomplete_cycle:
+        failure_class = "infra_incomplete_cycle"
+
+    hard_pass = (
+        h1
+        and h2
+        and h3
+        and h4
+        and snapshot_ok
+        and not semantic_hard_fail
+        and not summary_missing
+        and not infra_signal_terminated
+        and not infra_incomplete_cycle
+    )
 
     total = reliability + contract + analysis
     return RunEvaluation(
@@ -866,6 +949,12 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path, preflight: dict[s
         artifact_source=artifact_source,
         semantic_hard_fail=semantic_hard_fail,
         off_topic_hits=off_topic_hits,
+        failure_class=failure_class,
+        runtime_parse=runtime_parse_hit,
+        runner_unavailable=runner_unavailable_hit,
+        infra_signal_terminated=infra_signal_terminated,
+        infra_incomplete_cycle=infra_incomplete_cycle,
+        summary_missing=summary_missing,
         issues=sorted(set(issues)),
         issue_details=details,
         error_codes=sorted(set(error_codes)),
@@ -887,14 +976,16 @@ def write_run_matrix(path: Path, runs: list[RunEvaluation]) -> None:
     lines = [
         "# Run Matrix",
         "",
-        "| provider | run | hard_pass | reliability | contract | analysis | total | verdict | artifact_source | semantic_hard_fail | off_topic_hits | init_signal | refresh_signal | refresh_findings | refresh_questions | refresh_cov_missing | issues |",
-        "|---|---:|---:|---:|---:|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---|",
+        "| provider | run | hard_pass | reliability | contract | analysis | total | verdict | artifact_source | semantic_hard_fail | failure_class | runtime_parse | runner_unavailable | infra_signal_terminated | infra_incomplete_cycle | summary_missing | off_topic_hits | init_signal | refresh_signal | refresh_findings | refresh_questions | refresh_cov_missing | issues |",
+        "|---|---:|---:|---:|---:|---:|---:|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for item in runs:
         lines.append(
             "| "
             f"{item.provider} | {item.run_index} | {int(item.hard_pass)} | {item.reliability} | {item.contract} | "
-            f"{item.analysis} | {item.total} | {item.verdict} | {item.artifact_source} | {int(item.semantic_hard_fail)} | {item.off_topic_hits} | "
+            f"{item.analysis} | {item.total} | {item.verdict} | {item.artifact_source} | {int(item.semantic_hard_fail)} | {item.failure_class} | "
+            f"{int(item.runtime_parse)} | {int(item.runner_unavailable)} | {int(item.infra_signal_terminated)} | "
+            f"{int(item.infra_incomplete_cycle)} | {int(item.summary_missing)} | {item.off_topic_hits} | "
             f"{item.init_signal} | {item.refresh_signal} | "
             f"{item.refresh_findings} | {item.refresh_questions} | {item.refresh_cov_missing} | "
             f"{', '.join(item.issues) if item.issues else '-'} |"
@@ -961,6 +1052,11 @@ def provider_matrix_rows(
                 "avg_cov_missing": mean([item.refresh_cov_missing for item in items]) if items else 0.0,
                 "off_topic_hits": sum(item.off_topic_hits for item in items),
                 "semantic_hard_fail_runs": sum(1 for item in items if item.semantic_hard_fail),
+                "runtime_parse_failures": sum(1 for item in items if item.runtime_parse),
+                "runner_unavailable_failures": sum(1 for item in items if item.runner_unavailable),
+                "infra_signal_terminated_failures": sum(1 for item in items if item.infra_signal_terminated),
+                "infra_incomplete_cycle_failures": sum(1 for item in items if item.infra_incomplete_cycle),
+                "summary_missing_failures": sum(1 for item in items if item.summary_missing),
                 "error_codes": ", ".join(f"{code}={count}" for code, count in sorted(error_codes_counter.items())) or "-",
                 "issues_top": ", ".join(f"{name}={count}" for name, count in issues_counter.most_common(3)) or "-",
                 "artifact_sources": ", ".join(f"{name}={count}" for name, count in sorted(artifact_sources.items())) or "-",
@@ -1014,8 +1110,8 @@ def write_quality_report(
         "",
         "## Provider Matrix",
         "",
-        "| provider | runs | pass_rate | avg_total | std_total | avg_reliability | avg_contract | avg_analysis | avg_refresh_signal | std_refresh_signal | avg_refresh_findings | avg_refresh_questions | avg_refresh_cov_missing | off_topic_hits | semantic_hard_fail_runs | artifact_sources | error_codes | frontend_live_pass_rate |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---:|",
+        "| provider | runs | pass_rate | avg_total | std_total | avg_reliability | avg_contract | avg_analysis | avg_refresh_signal | std_refresh_signal | avg_refresh_findings | avg_refresh_questions | avg_refresh_cov_missing | off_topic_hits | semantic_hard_fail_runs | runtime_parse_failures | runner_unavailable_failures | infra_signal_terminated_failures | infra_incomplete_cycle_failures | summary_missing_failures | artifact_sources | error_codes | frontend_live_pass_rate |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---:|",
     ]
     for row in provider_rows:
         lines.append(
@@ -1024,6 +1120,8 @@ def write_quality_report(
             f"{row['avg_reliability']:.2f} | {row['avg_contract']:.2f} | {row['avg_analysis']:.2f} | "
             f"{row['avg_signal']:.2f} | {row['std_signal']:.2f} | {row['avg_findings']:.2f} | {row['avg_questions']:.2f} | "
             f"{row['avg_cov_missing']:.2f} | {row['off_topic_hits']} | {row['semantic_hard_fail_runs']} | "
+            f"{row['runtime_parse_failures']} | {row['runner_unavailable_failures']} | {row['infra_signal_terminated_failures']} | "
+            f"{row['infra_incomplete_cycle_failures']} | {row['summary_missing_failures']} | "
             f"{row['artifact_sources']} | {row['error_codes']} | {row['frontend_pass_rate']:.2f} |"
         )
 
@@ -1099,6 +1197,12 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
         "refresh_cov_missing",
         "artifact_source",
         "semantic_hard_fail",
+        "failure_class",
+        "runtime_parse",
+        "runner_unavailable",
+        "infra_signal_terminated",
+        "infra_incomplete_cycle",
+        "summary_missing",
         "off_topic_hits",
         "issues",
     ]
@@ -1122,6 +1226,12 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
                     str(run.refresh_cov_missing),
                     run.artifact_source,
                     str(int(run.semantic_hard_fail)),
+                    run.failure_class,
+                    str(int(run.runtime_parse)),
+                    str(int(run.runner_unavailable)),
+                    str(int(run.infra_signal_terminated)),
+                    str(int(run.infra_incomplete_cycle)),
+                    str(int(run.summary_missing)),
                     str(run.off_topic_hits),
                     ",".join(run.issues),
                 ]

@@ -239,8 +239,11 @@ Script делает strict полный цикл:
 - anti-mock/anti-zero-signal проверки для headless run;
 - quality regression guard по одинаковой паре `(runtime_mode, pipeline)` между итерациями;
 - локальные semantic checks full-run: owner-gap+findings, canonical duplicates в coverage/questions, critical off-topic markers;
+- completion invariants перед `result=passed`: ожидаемое число runtime/headless run, наличие headless `init+refresh` на каждую итерацию, отсутствие `running` в `run-history.json`;
+- trap-handling для `TERM/INT/HUP/PIPE` с `failure_reason=infra_signal_terminated` и truthful summary semantics;
 - per-run snapshots в `TMP_ROOT/snapshots/<run_id>/...`;
 - гарантированные debug artifacts: `TMP_ROOT/full-run.log` и `TMP_ROOT/session-summary.md` даже при раннем fail.
+- при `runner_parse_failed` runtime сохраняет raw-output evidence в `reports/taskruns/raw/*` (stdout/stderr + checksums + meta).
 
 Если нужно сохранить временный workspace для ручного анализа:
 
@@ -291,7 +294,7 @@ ACP_QWEN_CMD_BIN=qwen \
   - `/tmp/provenarch-test_arch_project/reports/quality_report_<batch-id>.md`
 - backend quality считается только по snapshot-артефактам (`snapshots/<run_id>/reports/*`), frontend smoke запускается на отдельной `frontend-workspace` копии и не мутирует backend baseline
 - batch evaluator добавляет semantic hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`; для multi-profile (`expected_repo_count >= 2`) обязателен `cross-repo` сигнал (`analysis:cross-repo-missing` при отсутствии)
-- в `run_matrix`/`quality_report` дополнительно фиксируются `artifact_source`, `semantic_hard_fail`, `off_topic_hits`
+- в `run_matrix`/`quality_report` дополнительно фиксируются `artifact_source`, `semantic_hard_fail`, `off_topic_hits` и failure classes (`runtime_parse`, `runner_unavailable`, `infra_signal_terminated`, `infra_incomplete_cycle`, `summary_missing`)
 - direct `npm run --prefix ui e2e:live`: Playwright output default `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
 - `scripts/frontend-live-e2e.sh`: Playwright output сохраняется в `$OUTPUT_DIR/playwright-results`
 - frontend live e2e ожидает число resolved repos из `UI_E2E_EXPECTED_REPO_COUNT` (default `1`)

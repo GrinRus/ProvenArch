@@ -49,6 +49,58 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 
 ### Plan ID
+EP-20260411-e2e-stability-hardening
+
+### Context
+Нужно устранить ложные pass/fail в локальном e2e контуре: процессные сигналы и неполные циклы не должны завершаться как `passed`, а runtime parse-fail должен оставлять воспроизводимые raw diagnostics. Дополнительно нужно разнести failure classes в batch/matrix отчётах.
+
+### Goals (must have)
+- [x] Укрепить `scripts/full-run-ai-advent.sh` (signal traps, truthful summary, completion invariants)
+- [x] Укрепить `scripts/full-run-batch-5x2.sh` post-run validation и классификацию failure classes
+- [x] Расширить `scripts/full-run-batch-matrix.sh` агрегированными колонками failure classes
+- [x] Добавить raw parse-fail artifacts в runtime runners (`claude-code`, `qwen-code`)
+- [x] Усилить extractor mixed/noisy output парсинг без изменения schema contracts
+- [x] Обновить тесты и документацию
+
+### Non-goals
+- [x] Изменение CLI/API wire-contracts
+- [x] Изменение `schemas/taskresult.schema.json`
+- [x] Добавление новых runtime providers
+
+### Approach
+1) Исправить truthfulness и completion-валидацию single full-run.
+2) Добавить batch-level post-run validation и отдельные классы сбоев.
+3) Усилить runtime parse diagnostics (raw outputs + checksum) и extractor.
+4) Синхронизировать docs и прогнать DoD проверки.
+
+### Files expected to change
+- `scripts/full-run-ai-advent.sh`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/e2e_batch_report.py`
+- `internal/runtime/{claudecode,qwencode,taskresultextractor}/*`
+- `internal/runtime/runnerdiag/*`
+- `scripts/tests/test_e2e_batch_report.py`
+- `README.md`, `docs/LOCAL_FULL_RUN_AI_ADVENT.md`, `docs/TESTING_STRATEGY.md`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены
+- [x] Схемы валидируются
+- [x] Документация обновлена
+
+### Risks
+- Дополнительная строгость completion-инвариантов может выявить ранее скрытые инфраструктурные проблемы в локальных окружениях.
+- Расширенный extractor может начать принимать ранее невалидные шумные carrier-форматы; это требует regression coverage.
+
+### Progress log
+- 2026-04-11: Реализованы signal traps + completion invariants + truthful summary в `full-run-ai-advent.sh`.
+- 2026-04-11: Добавлены post-run validation и failure-class aggregation в `full-run-batch-5x2.sh`, расширен `profile_matrix` в `full-run-batch-matrix.sh`.
+- 2026-04-11: Добавлен `internal/runtime/runnerdiag` и raw parse-fail artifacts в claude/qwen runners.
+- 2026-04-11: Усилен `taskresultextractor` для noisy NDJSON/mixed output; обновлены unit tests и docs.
+
+---
+
+### Plan ID
 EP-20260403-acp-mvp-beta-foundation
 
 ### Context

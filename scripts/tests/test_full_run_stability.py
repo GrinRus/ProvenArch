@@ -1,0 +1,700 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import os
+import signal
+import subprocess
+import tempfile
+import textwrap
+import time
+import unittest
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+FULL_RUN_SCRIPT = REPO_ROOT / "scripts" / "full-run-ai-advent.sh"
+BATCH_SCRIPT = REPO_ROOT / "scripts" / "full-run-batch-5x2.sh"
+
+
+def write_text(path: Path, content: str, mode: int = 0o644) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    path.chmod(mode)
+
+
+def parse_summary_scalar(summary: str, key: str) -> str:
+    needle = f"- {key}: "
+    for line in summary.splitlines():
+        if line.startswith(needle):
+            return line[len(needle) :].strip()
+    return ""
+
+
+def create_full_run_stub_environment(root: Path) -> tuple[Path, Path, Path, Path, Path]:
+    provenarch_root = root / "provenarch-root"
+    tools_dir = root / "tools"
+    target_repo = root / "target-repo"
+    tmp_root = root / "tmp-run"
+    repos_file = root / "inputs" / "repos.yaml"
+    acp_stub = root / "acp-stub.sh"
+
+    write_text(target_repo / "README.md", "# target repo\n")
+    write_text(
+        repos_file,
+        textwrap.dedent(
+            f"""\
+            version: 1
+            repos:
+              - name: target-repo
+                path: {target_repo}
+            docs:
+              imports_path: ./docs/imports
+            """
+        ),
+    )
+
+    write_text(
+        acp_stub,
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            cmd="${1:-}"
+            if [[ -z "$cmd" ]]; then
+              echo "missing command" >&2
+              exit 1
+            fi
+            shift || true
+
+            if [[ "$cmd" == "init-workspace" ]]; then
+              workspace=""
+              while [[ $# -gt 0 ]]; do
+                case "$1" in
+                  --workspace)
+                    workspace="$2"
+                    shift 2
+                    ;;
+                  *)
+                    shift
+                    ;;
+                esac
+              done
+              mkdir -p "$workspace/.git" "$workspace/skills" "$workspace/reports/taskruns" "$workspace/reports/as-is" "$workspace/reports/findings" "$workspace/reports/coverage"
+              cat >"$workspace/workspace.yaml" <<'YAML'
+            version: 1
+            repos:
+              - name: target-repo
+                path: /tmp/target-repo
+            YAML
+              cat >"$workspace/skills/subagents.yaml" <<'YAML'
+            version: 1
+            subagents: []
+            YAML
+              exit 0
+            fi
+
+            if [[ "$cmd" == "serve" ]]; then
+              trap 'exit 0' TERM INT HUP
+              while true; do
+                sleep 1
+              done
+            fi
+
+            if [[ "$cmd" == "run" ]]; then
+              workspace=""
+              runtime=""
+              pipeline=""
+              runtime_provider=""
+              while [[ $# -gt 0 ]]; do
+                case "$1" in
+                  --workspace)
+                    workspace="$2"
+                    shift 2
+                    ;;
+                  --runtime)
+                    runtime="$2"
+                    shift 2
+                    ;;
+                  --pipeline)
+                    pipeline="$2"
+                    shift 2
+                    ;;
+                  --runtime-provider)
+                    runtime_provider="$2"
+                    shift 2
+                    ;;
+                  *)
+                    shift
+                    ;;
+                esac
+              done
+
+              mkdir -p "$workspace/reports/taskruns" "$workspace/reports/as-is" "$workspace/reports/findings" "$workspace/reports/coverage"
+              counter_file="$workspace/.stub-run-counter"
+              counter=0
+              if [[ -f "$counter_file" ]]; then
+                counter="$(cat "$counter_file")"
+              fi
+              counter=$((counter + 1))
+              printf '%s\\n' "$counter" >"$counter_file"
+              run_id="run-${runtime}-${pipeline}-${counter}"
+
+              runtime_name="$runtime_provider"
+              runtime_version=""
+              if [[ "$runtime" == "fake" ]]; then
+                runtime_name="fake"
+                runtime_version="fake"
+              elif [[ "$runtime" == "headless" ]]; then
+                if [[ -z "$runtime_name" ]]; then
+                  runtime_name="${ACP_RUNTIME_PROVIDER:-qwen-code}"
+                fi
+                case "$runtime_name" in
+                  qwen-code) runtime_version="qwen-cli" ;;
+                  claude-code) runtime_version="claude-cli" ;;
+                  *) runtime_version="headless" ;;
+                esac
+              fi
+              runtime_key="$runtime_name"
+              if [[ -n "$runtime_version" ]]; then
+                runtime_key="${runtime_name}@${runtime_version}"
+              fi
+
+              if [[ "${ACP_STUB_RUN_SLEEP:-0}" != "0" ]]; then
+                sleep "${ACP_STUB_RUN_SLEEP}"
+              fi
+
+              quality_path="$workspace/reports/taskruns/${run_id}-quality.json"
+              python3 - "$quality_path" "$run_id" "$pipeline" "$runtime_name" "$runtime_version" "$runtime_key" <<'PY'
+            import json
+            import sys
+            path, run_id, pipeline, runtime_name, runtime_version, runtime_key = sys.argv[1:]
+            payload = {
+                "version": 1,
+                "run_id": run_id,
+                "pipeline": pipeline,
+                "status": "succeeded",
+                "generated_at": "2026-04-12T10:00:00Z",
+                "runtime_versions": [runtime_key],
+                "totals": {
+                    "steps": 2,
+                    "changeset_ops": 2,
+                    "entity_upserts": 1,
+                    "edge_upserts": 1,
+                    "findings_added": 1,
+                    "questions_count": 1,
+                    "coverage_observed": 2,
+                    "coverage_missing": 2,
+                    "warnings_count": 0,
+                    "signal_score": 9,
+                },
+                "steps": [
+                    {
+                        "step_id": f"{pipeline}.step1.collect",
+                        "runtime_name": runtime_name,
+                        "runtime_version": runtime_version,
+                        "domain_id": "domain-main",
+                        "repo_scopes": ["target-repo"],
+                        "changeset_ops": 1,
+                        "entity_upserts": 1,
+                        "edge_upserts": 0,
+                        "findings_added": 0,
+                        "questions_count": 1,
+                        "coverage_observed": 1,
+                        "coverage_missing": 1,
+                        "warnings_count": 0,
+                    },
+                    {
+                        "step_id": f"{pipeline}.step3.findings",
+                        "runtime_name": runtime_name,
+                        "runtime_version": runtime_version,
+                        "domain_id": "domain-main",
+                        "repo_scopes": ["target-repo"],
+                        "changeset_ops": 1,
+                        "entity_upserts": 0,
+                        "edge_upserts": 1,
+                        "findings_added": 1,
+                        "questions_count": 0,
+                        "coverage_observed": 1,
+                        "coverage_missing": 1,
+                        "warnings_count": 0,
+                    },
+                ],
+            }
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=True, indent=2)
+                f.write("\\n")
+            PY
+
+              cat >"$workspace/reports/as-is/overview.md" <<'MD'
+            # Overview
+
+            - services: 1
+            - datastores: 1
+            - integrations: 1
+            - teams: 1
+            MD
+              cat >"$workspace/reports/findings/findings.md" <<'MD'
+            # Findings
+
+            ## Missing Owner Mapping
+            - Severity: medium
+            - Description: Owner mapping requires confirmation.
+            MD
+              cat >"$workspace/reports/coverage/summary.md" <<'MD'
+            # Coverage
+
+            ## Missing
+            - owner mappings
+            - ci-cd evidence
+            - delta validation
+
+            ## Notes
+            - owner mapping is incomplete
+            MD
+              cat >"$workspace/reports/coverage/open-questions.md" <<'MD'
+            # Open Questions
+
+            - `q.owner.mapping` Which team owns target-repo?
+            MD
+
+              if [[ "${ACP_STUB_DISABLE_RUN_HISTORY:-0}" != "1" ]]; then
+                run_history="$workspace/reports/taskruns/run-history.json"
+                status="${ACP_STUB_RUN_HISTORY_STATUS:-succeeded}"
+                python3 - "$run_history" "$run_id" "$status" <<'PY'
+            import json
+            import os
+            import sys
+            path, run_id, status = sys.argv[1:]
+            payload = {"runs": []}
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as f:
+                    payload = json.load(f)
+            items = payload.get("runs")
+            if not isinstance(items, list):
+                items = []
+            items.append({"run_id": run_id, "status": status})
+            payload["runs"] = items
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=True, indent=2)
+                f.write("\\n")
+            PY
+              fi
+
+              echo "status: succeeded"
+              echo "run_id: $run_id"
+              exit 0
+            fi
+
+            echo "unsupported acp command: $cmd" >&2
+            exit 1
+            """
+        ),
+        mode=0o755,
+    )
+
+    write_text(
+        provenarch_root / "Makefile",
+        textwrap.dedent(
+            """\
+            .PHONY: build contracts test lint
+            build:
+            \tmkdir -p bin
+            \tcp "$(ACP_STUB_SOURCE)" bin/acp
+            \tchmod +x bin/acp
+            contracts test lint:
+            \t@:
+            """
+        ),
+    )
+    write_text(provenarch_root / ".gitkeep", "stub\n")
+
+    write_text(
+        tools_dir / "qwen",
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            if [[ "${1:-}" == "--version" ]]; then
+              echo "qwen 1.0.0"
+              exit 0
+            fi
+            echo "qwen stub"
+            exit 0
+            """
+        ),
+        mode=0o755,
+    )
+    write_text(
+        tools_dir / "curl",
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            url="${@: -1}"
+            if [[ "$url" == *"/api/health" ]]; then
+              echo '{"ok":true}'
+              exit 0
+            fi
+            if [[ "$url" == *"/api/workspace/validate" ]]; then
+              repo_path="${ACP_STUB_TARGET_REPO:-/tmp/target-repo}"
+              printf '{"ok":true,"workspace":"%s","warnings":[],"errors":[],"resolved_repos":[{"name":"target-repo","source":"path","path":"%s"}]}\\n' "${ACP_STUB_WORKSPACE:-/tmp/workspace}" "$repo_path"
+              exit 0
+            fi
+            if [[ "$url" == *"/api/pipeline/init" ]]; then
+              echo '{"run_id":"api-init-1"}'
+              exit 0
+            fi
+            if [[ "$url" == *"/api/pipeline/runs/"*"/artifacts" ]]; then
+              echo '{"artifacts":[{"path":"reports/as-is/overview.md"}]}'
+              exit 0
+            fi
+            if [[ "$url" == *"/api/pipeline/runs/"*"/logs"* ]]; then
+              echo '{"items":[{"id":"1","message":"ok"}]}'
+              exit 0
+            fi
+            if [[ "$url" == *"/api/pipeline/runs/"* ]]; then
+              echo '{"status":"succeeded"}'
+              exit 0
+            fi
+            echo '{}'
+            exit 0
+            """
+        ),
+        mode=0o755,
+    )
+
+    return provenarch_root, tools_dir, target_repo, tmp_root, repos_file
+
+
+class FullRunStabilityIntegrationTests(unittest.TestCase):
+    def test_full_run_marks_incomplete_cycle(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, target_repo, tmp_root, repos_file = create_full_run_stub_environment(root)
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TMP_ROOT": str(tmp_root),
+                    "KEEP_TMP": "1",
+                    "ITERATIONS": "1",
+                    "RUN_QUALITY_GATES": "0",
+                    "TARGET_REPOS_FILE": str(repos_file),
+                    "ACP_RUNTIME_PROVIDER": "qwen-code",
+                    "ACP_QWEN_CMD": str(tools_dir / "qwen"),
+                    "ACP_STUB_SOURCE": str(root / "acp-stub.sh"),
+                    "ACP_STUB_TARGET_REPO": str(target_repo),
+                    "ACP_STUB_DISABLE_RUN_HISTORY": "1",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(FULL_RUN_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+
+            summary_path = tmp_root / "session-summary.md"
+            self.assertTrue(summary_path.exists(), msg="session-summary.md is missing")
+            summary = summary_path.read_text(encoding="utf-8")
+            self.assertEqual("failed", parse_summary_scalar(summary, "result"))
+            self.assertEqual("infra_incomplete_cycle", parse_summary_scalar(summary, "failure_reason"))
+            self.assertEqual("4", parse_summary_scalar(summary, "expected_runs"))
+            self.assertEqual("2", parse_summary_scalar(summary, "expected_headless_runs"))
+            completed_runs = parse_summary_scalar(summary, "completed_runs")
+            self.assertEqual("4", completed_runs)
+
+    def test_full_run_marks_signal_termination(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, target_repo, tmp_root, repos_file = create_full_run_stub_environment(root)
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TMP_ROOT": str(tmp_root),
+                    "KEEP_TMP": "1",
+                    "ITERATIONS": "1",
+                    "RUN_QUALITY_GATES": "0",
+                    "TARGET_REPOS_FILE": str(repos_file),
+                    "ACP_RUNTIME_PROVIDER": "qwen-code",
+                    "ACP_QWEN_CMD": str(tools_dir / "qwen"),
+                    "ACP_STUB_SOURCE": str(root / "acp-stub.sh"),
+                    "ACP_STUB_TARGET_REPO": str(target_repo),
+                    "ACP_STUB_RUN_SLEEP": "30",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+
+            proc = subprocess.Popen(
+                [str(FULL_RUN_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                preexec_fn=os.setsid,
+            )
+            try:
+                log_path = tmp_root / "full-run.log"
+                deadline = time.time() + 20
+                while time.time() < deadline:
+                    if log_path.exists():
+                        body = log_path.read_text(encoding="utf-8", errors="ignore")
+                        if "bootstrap workspace in tmp" in body:
+                            break
+                    time.sleep(0.1)
+                try:
+                    os.killpg(proc.pid, signal.SIGTERM)
+                except (PermissionError, ProcessLookupError):
+                    proc.terminate()
+                proc.wait(timeout=40)
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=10)
+
+            self.assertNotEqual(proc.returncode, 0, msg="full-run script unexpectedly succeeded after SIGTERM")
+            summary_path = tmp_root / "session-summary.md"
+            self.assertTrue(summary_path.exists(), msg="session-summary.md is missing")
+            summary = summary_path.read_text(encoding="utf-8")
+            self.assertEqual("failed", parse_summary_scalar(summary, "result"))
+            self.assertEqual("infra_signal_terminated", parse_summary_scalar(summary, "failure_reason"))
+            self.assertIn(parse_summary_scalar(summary, "termination_signal"), {"TERM", "SIGTERM"})
+
+
+def create_batch_stub_environment(root: Path) -> tuple[Path, Path, Path]:
+    provenarch_root = root / "batch-root"
+    tools_dir = root / "tools"
+    target_repo = root / "target-repo"
+    scripts_dir = provenarch_root / "scripts"
+    reports_py = scripts_dir / "e2e_batch_report.py"
+
+    write_text(target_repo / "README.md", "# target\n")
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+
+    write_text(
+        provenarch_root / "Makefile",
+        textwrap.dedent(
+            """\
+            .PHONY: contracts test lint build
+            contracts test lint build:
+            \t@:
+            """
+        ),
+    )
+    write_text(
+        scripts_dir / "full-run-ai-advent.sh",
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            : "${TMP_ROOT:?TMP_ROOT is required}"
+            mkdir -p "$TMP_ROOT/arch-workspace/reports/as-is" "$TMP_ROOT/arch-workspace/reports/findings" "$TMP_ROOT/arch-workspace/reports/coverage" "$TMP_ROOT/arch-workspace/reports/taskruns" "$TMP_ROOT/snapshots"
+            cat >"$TMP_ROOT/session-summary.md" <<'MD'
+            # ProvenArch Full Run Session Summary
+
+            - result: passed
+            - quality_gates: passed
+            - expected_runs: 4
+            - completed_runs: 1
+            - expected_headless_runs: 2
+            - completed_headless_runs: 1
+            - running_runs_detected: 0
+            - termination_signal: none
+
+            ## API Simulation
+            - status: succeeded
+            MD
+            runtime_provider="${ACP_RUNTIME_PROVIDER:-qwen-code}"
+            printf '1\theadless\t%s\tinit\trun-stub\tsucceeded\t5\t1\t1\t1\t1\t1\t0\t%s@test\t%s\t%s\n' \
+              "$runtime_provider" "$runtime_provider" "$TMP_ROOT/arch-workspace/reports/taskruns/run-stub-quality.json" "$TMP_ROOT/logs/stub.log" >"$TMP_ROOT/run-results.tsv"
+            cat >"$TMP_ROOT/arch-workspace/reports/taskruns/run-stub-quality.json" <<'JSON'
+            {"status":"succeeded","totals":{"signal_score":5,"changeset_ops":1,"findings_added":1,"questions_count":1,"coverage_observed":1,"coverage_missing":1,"warnings_count":0},"runtime_versions":["qwen-code@test"],"steps":[{"step_id":"init.step1.collect","runtime_name":"qwen-code","runtime_version":"test","domain_id":"domain-main"}]}
+            JSON
+            cat >"$TMP_ROOT/arch-workspace/reports/as-is/overview.md" <<'MD'
+            # Overview
+            - services: 1
+            MD
+            cat >"$TMP_ROOT/arch-workspace/reports/findings/findings.md" <<'MD'
+            # Findings
+            ## Finding
+            - Severity: medium
+            - Description: stub
+            MD
+            cat >"$TMP_ROOT/arch-workspace/reports/coverage/summary.md" <<'MD'
+            # Coverage
+            ## Missing
+            - owner mappings
+            MD
+            cat >"$TMP_ROOT/arch-workspace/reports/coverage/open-questions.md" <<'MD'
+            # Open Questions
+            - `q.stub` stub?
+            MD
+            exit 0
+            """
+        ),
+        mode=0o755,
+    )
+    write_text(
+        scripts_dir / "frontend-live-e2e.sh",
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            : "${OUTPUT_DIR:?OUTPUT_DIR is required}"
+            mkdir -p "$OUTPUT_DIR"
+            cat >"$OUTPUT_DIR/frontend-e2e-result.json" <<'JSON'
+            {"status":"passed","runtime_provider":"stub"}
+            JSON
+            exit 0
+            """
+        ),
+        mode=0o755,
+    )
+    write_text(
+        reports_py,
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env python3
+            import argparse
+            from pathlib import Path
+
+            parser = argparse.ArgumentParser()
+            parser.add_argument("--batch-id", required=True)
+            parser.add_argument("--batch-root", required=True)
+            parser.add_argument("--reports-root", required=True)
+            args = parser.parse_args()
+
+            reports_root = Path(args.reports_root)
+            reports_root.mkdir(parents=True, exist_ok=True)
+            run_matrix_tsv = reports_root / f"run_matrix_{args.batch_id}.tsv"
+            run_matrix_tsv.write_text(
+                "provider\\trun\\thard_pass\\treliability\\tcontract\\tanalysis\\ttotal\\tverdict\\tinit_signal\\trefresh_signal\\trefresh_findings\\trefresh_questions\\trefresh_cov_missing\\tartifact_source\\tsemantic_hard_fail\\tfailure_class\\truntime_parse\\trunner_unavailable\\tinfra_signal_terminated\\tinfra_incomplete_cycle\\tsummary_missing\\toff_topic_hits\\tissues\\n"
+                "qwen-code\\t1\\t0\\t10\\t10\\t10\\t30\\tPoor\\t0\\t0\\t0\\t0\\t0\\tsnapshot\\t0\\tinfra_incomplete_cycle\\t0\\t0\\t0\\t1\\t0\\t0\\treliability:infra-incomplete-cycle\\n",
+                encoding="utf-8",
+            )
+            run_matrix_md = reports_root / f"run_matrix_{args.batch_id}.md"
+            run_matrix_md.write_text("# Run Matrix\\n", encoding="utf-8")
+            frontend_md = reports_root / f"frontend_e2e_matrix_{args.batch_id}.md"
+            frontend_md.write_text("# Frontend Matrix\\n", encoding="utf-8")
+            quality_md = reports_root / f"quality_report_{args.batch_id}.md"
+            quality_md.write_text("# Quality\\n", encoding="utf-8")
+
+            print(str(run_matrix_md))
+            print(str(frontend_md))
+            print(str(quality_md))
+            print(str(run_matrix_tsv))
+            """
+        ),
+        mode=0o755,
+    )
+
+    write_text(
+        tools_dir / "git",
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            if [[ "$*" == *"rev-parse HEAD"* ]]; then
+              echo "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+              exit 0
+            fi
+            if [[ "$*" == *"rev-parse --abbrev-ref HEAD"* ]]; then
+              echo "main"
+              exit 0
+            fi
+            echo "git-stub"
+            exit 0
+            """
+        ),
+        mode=0o755,
+    )
+    write_text(
+        tools_dir / "npm",
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            exit 0
+            """
+        ),
+        mode=0o755,
+    )
+    write_text(
+        tools_dir / "claude",
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            if [[ "${1:-}" == "--version" ]]; then
+              echo "claude 2.1.85"
+              exit 0
+            fi
+            exit 0
+            """
+        ),
+        mode=0o755,
+    )
+    write_text(
+        tools_dir / "qwen",
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            if [[ "${1:-}" == "--version" ]]; then
+              echo "qwen 1.0.0"
+              exit 0
+            fi
+            exit 0
+            """
+        ),
+        mode=0o755,
+    )
+
+    return provenarch_root, tools_dir, target_repo
+
+
+class BatchPostRunValidationIntegrationTests(unittest.TestCase):
+    def test_batch_marks_incomplete_cycle_even_when_full_run_exit_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            e2e_tmp_root = root / "e2e"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TARGET_REPO": str(target_repo),
+                    "BATCH_ID": "batch-stability-test",
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+
+            classification_path = e2e_tmp_root / "runs" / "batch-stability-test" / "backend-run-classifications.tsv"
+            self.assertTrue(classification_path.exists(), msg="backend-run-classifications.tsv is missing")
+            rows = [line for line in classification_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertGreaterEqual(len(rows), 2, msg="classification file must contain header + rows")
+            self.assertTrue(
+                any("\tinfra_incomplete_cycle\t" in line for line in rows[1:]),
+                msg="expected infra_incomplete_cycle classification for incomplete run results",
+            )
+            self.assertIn("infra_incomplete_cycle=", result.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -126,6 +126,12 @@ Script всегда формирует:
 - `TMP_ROOT/session-summary.md`
 - `TMP_ROOT/snapshots/<run_id>/...`
 
+`session-summary.md` верифицирует полноту цикла и содержит:
+- `expected_runs` / `completed_runs`
+- `expected_headless_runs` / `completed_headless_runs`
+- `running_runs_detected`
+- `termination_signal`
+
 При ошибке script всегда сохраняет `TMP_ROOT` для дебага независимо от `KEEP_TMP`.
 
 Для batch-скрипта отчёты сохраняются в:
@@ -138,6 +144,12 @@ Batch evaluator source-of-truth:
 - если snapshot недоступен, в отчёт попадает `artifact_source=workspace-fallback` и issue `reliability:snapshot-missing`;
 - frontend live e2e запускается на отдельной копии workspace (`frontend-workspace`) и не влияет на backend quality content score.
 - для multi-profile (`EXPECTED_REPO_COUNT >= 2`) batch hard-fail включает `analysis:cross-repo-missing`.
+- backend run-matrix дополнительно классифицирует failure classes: `runtime_parse`, `runner_unavailable`, `infra_signal_terminated`, `infra_incomplete_cycle`, `summary_missing`.
+
+При `runner_parse_failed` raw stdout/stderr сохраняются в:
+- `WORKSPACE/reports/taskruns/raw/*-stdout.log`
+- `WORKSPACE/reports/taskruns/raw/*-stderr.log`
+- `WORKSPACE/reports/taskruns/raw/*-meta.json` (bytes/hash + task context)
 
 ## 4) CLI/API поток вручную (без скрипта)
 

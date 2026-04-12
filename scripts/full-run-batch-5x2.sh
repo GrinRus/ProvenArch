@@ -19,6 +19,14 @@ BATCH_ROOT="${BATCH_ROOT:-$E2E_TMP_ROOT/runs/$BATCH_ID}"
 REPORTS_ROOT="${REPORTS_ROOT:-$E2E_TMP_ROOT/reports}"
 RESOLVED_TARGET_REPOS_FILE=""
 DECLARED_REPOS_JSON=""
+RUN_CLASSIFICATIONS_TSV=""
+RUNTIME_PARSE_FAILURES=0
+RUNNER_UNAVAILABLE_FAILURES=0
+INFRA_SIGNAL_TERMINATED_FAILURES=0
+INFRA_INCOMPLETE_CYCLE_FAILURES=0
+SUMMARY_MISSING_FAILURES=0
+OTHER_FAILURES=0
+LAST_RUN_FAILURE_CLASS="none"
 
 log() {
   printf '[batch-5x2] %s\n' "$*" >&2
@@ -34,6 +42,180 @@ require_cmd() {
   if ! command -v "$cmd" >/dev/null 2>&1; then
     die "required command is unavailable: $cmd"
   fi
+}
+
+summary_scalar() {
+  local summary_path="$1"
+  local key="$2"
+  if [[ ! -f "$summary_path" ]]; then
+    printf ''
+    return 0
+  fi
+  sed -n "s/^- ${key}: //p" "$summary_path" | tail -n1 | tr -d '\r'
+}
+
+contains_in_files() {
+  local needle="$1"
+  shift
+  local path
+  for path in "$@"; do
+    if [[ -f "$path" ]] && grep -q "$needle" "$path"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+classify_run_failure() {
+  local provider="$1"
+  local run_index="$2"
+  local run_dir="$3"
+  local process_exit="$4"
+  local summary_path="$run_dir/session-summary.md"
+  local run_results_path="$run_dir/run-results.tsv"
+  local full_log_path="$run_dir/full-run.log"
+  local batch_driver_log="$run_dir/batch-driver.log"
+
+  local summary_result=""
+  local failure_reason=""
+  local expected_runs=""
+  local completed_runs=""
+  local expected_headless_runs=""
+  local completed_headless_runs=""
+  local running_runs_detected=""
+  local termination_signal=""
+  local run_count=0
+  local run_class="none"
+
+  if [[ ! -f "$summary_path" ]]; then
+    run_class="summary_missing"
+    summary_result="missing"
+    failure_reason="summary_missing"
+  else
+    summary_result="$(summary_scalar "$summary_path" "result" | awk '{print $1}')"
+    failure_reason="$(summary_scalar "$summary_path" "failure_reason" | awk '{print $1}')"
+    expected_runs="$(summary_scalar "$summary_path" "expected_runs" | awk '{print $1}')"
+    completed_runs="$(summary_scalar "$summary_path" "completed_runs" | awk '{print $1}')"
+    expected_headless_runs="$(summary_scalar "$summary_path" "expected_headless_runs" | awk '{print $1}')"
+    completed_headless_runs="$(summary_scalar "$summary_path" "completed_headless_runs" | awk '{print $1}')"
+    running_runs_detected="$(summary_scalar "$summary_path" "running_runs_detected" | awk '{print $1}')"
+    termination_signal="$(summary_scalar "$summary_path" "termination_signal" | awk '{print $1}')"
+  fi
+
+  if [[ -f "$run_results_path" ]]; then
+    run_count="$(awk 'NF { count++ } END { print count+0 }' "$run_results_path")"
+  fi
+
+  if [[ "$run_class" == "none" ]] && contains_in_files "runner_unavailable" "$summary_path" "$full_log_path" "$batch_driver_log"; then
+    run_class="runner_unavailable"
+  fi
+  if [[ "$run_class" == "none" ]] && contains_in_files "runner_parse_failed" "$summary_path" "$full_log_path" "$batch_driver_log"; then
+    run_class="runtime_parse"
+  fi
+
+  if [[ "$run_class" == "none" ]]; then
+    if [[ "$failure_reason" == "infra_signal_terminated" ]]; then
+      run_class="infra_signal_terminated"
+    elif [[ "$termination_signal" != "" && "$termination_signal" != "none" ]]; then
+      run_class="infra_signal_terminated"
+    fi
+  fi
+
+  if [[ "$run_class" == "none" ]]; then
+    if [[ "$failure_reason" == "infra_incomplete_cycle" ]]; then
+      run_class="infra_incomplete_cycle"
+    fi
+    if [[ "$expected_runs" =~ ^[0-9]+$ && "$completed_runs" =~ ^[0-9]+$ ]]; then
+      if (( completed_runs != expected_runs )); then
+        run_class="infra_incomplete_cycle"
+      fi
+    fi
+    if [[ "$expected_headless_runs" =~ ^[0-9]+$ && "$completed_headless_runs" =~ ^[0-9]+$ ]]; then
+      if (( completed_headless_runs != expected_headless_runs )); then
+        run_class="infra_incomplete_cycle"
+      fi
+    fi
+    if [[ "$running_runs_detected" =~ ^[0-9]+$ ]] && (( running_runs_detected > 0 )); then
+      run_class="infra_incomplete_cycle"
+    fi
+    if [[ "$summary_result" != "passed" && "$run_class" == "none" ]]; then
+      run_class="infra_incomplete_cycle"
+    fi
+    if [[ ! -f "$run_results_path" ]]; then
+      run_class="infra_incomplete_cycle"
+    fi
+  fi
+
+  if [[ "$process_exit" -ne 0 && "$run_class" == "none" ]]; then
+    run_class="infra_incomplete_cycle"
+  fi
+  if [[ -z "$summary_result" ]]; then
+    summary_result="missing"
+  fi
+  if [[ -z "$failure_reason" ]]; then
+    failure_reason="-"
+  fi
+  if [[ -z "$termination_signal" ]]; then
+    termination_signal="none"
+  fi
+  if [[ -z "$expected_runs" ]]; then
+    expected_runs="-"
+  fi
+  if [[ -z "$completed_runs" ]]; then
+    completed_runs="-"
+  fi
+  if [[ -z "$expected_headless_runs" ]]; then
+    expected_headless_runs="-"
+  fi
+  if [[ -z "$completed_headless_runs" ]]; then
+    completed_headless_runs="-"
+  fi
+  if [[ -z "$running_runs_detected" ]]; then
+    running_runs_detected="-"
+  fi
+
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$provider" \
+    "$run_index" \
+    "$run_class" \
+    "$process_exit" \
+    "$summary_result" \
+    "$failure_reason" \
+    "$termination_signal" \
+    "$expected_runs" \
+    "$completed_runs" \
+    "$expected_headless_runs" \
+    "$completed_headless_runs" \
+    "$running_runs_detected" \
+    "$run_count" >>"$RUN_CLASSIFICATIONS_TSV"
+
+  LAST_RUN_FAILURE_CLASS="$run_class"
+}
+
+increment_failure_class_counter() {
+  local run_class="$1"
+  case "$run_class" in
+    runtime_parse)
+      RUNTIME_PARSE_FAILURES=$((RUNTIME_PARSE_FAILURES + 1))
+      ;;
+    runner_unavailable)
+      RUNNER_UNAVAILABLE_FAILURES=$((RUNNER_UNAVAILABLE_FAILURES + 1))
+      ;;
+    infra_signal_terminated)
+      INFRA_SIGNAL_TERMINATED_FAILURES=$((INFRA_SIGNAL_TERMINATED_FAILURES + 1))
+      ;;
+    infra_incomplete_cycle)
+      INFRA_INCOMPLETE_CYCLE_FAILURES=$((INFRA_INCOMPLETE_CYCLE_FAILURES + 1))
+      ;;
+    summary_missing)
+      SUMMARY_MISSING_FAILURES=$((SUMMARY_MISSING_FAILURES + 1))
+      ;;
+    none)
+      ;;
+    *)
+      OTHER_FAILURES=$((OTHER_FAILURES + 1))
+      ;;
+  esac
 }
 
 prepare_target_repos_file() {
@@ -200,6 +382,8 @@ require_cmd "$ACP_QWEN_CMD_BIN"
 mkdir -p "$BATCH_ROOT" "$REPORTS_ROOT"
 prepare_target_repos_file
 collect_declared_repos
+RUN_CLASSIFICATIONS_TSV="$BATCH_ROOT/backend-run-classifications.tsv"
+echo -e "provider\trun_index\tfailure_class\tprocess_exit\tsummary_result\tfailure_reason\ttermination_signal\texpected_runs\tcompleted_runs\texpected_headless_runs\tcompleted_headless_runs\trunning_runs_detected\trun_results_rows" >"$RUN_CLASSIFICATIONS_TSV"
 
 PROVENARCH_SHA="$(git -C "$PROVENARCH_ROOT" rev-parse HEAD)"
 PROVENARCH_BRANCH="$(git -C "$PROVENARCH_ROOT" rev-parse --abbrev-ref HEAD)"
@@ -283,7 +467,8 @@ for provider in qwen-code claude-code; do
     run_dir="$BATCH_ROOT/$provider/run${i}"
     mkdir -p "$run_dir"
     log "full-run provider=$provider run=$i tmp_root=$run_dir"
-    if ! (
+    process_exit=0
+    (
       cd "$PROVENARCH_ROOT"
       TARGET_REPOS_FILE="$RESOLVED_TARGET_REPOS_FILE" \
       TMP_ROOT="$run_dir" \
@@ -297,9 +482,13 @@ for provider in qwen-code claude-code; do
       ACP_CLAUDE_CMD="$ACP_CLAUDE_CMD_BIN" \
       ACP_QWEN_CMD="$ACP_QWEN_CMD_BIN" \
       ./scripts/full-run-ai-advent.sh
-    ) >"$run_dir/batch-driver.log" 2>&1; then
+    ) >"$run_dir/batch-driver.log" 2>&1 || process_exit=$?
+
+    classify_run_failure "$provider" "$i" "$run_dir" "$process_exit"
+    if [[ "$LAST_RUN_FAILURE_CLASS" != "none" ]]; then
       failed_runs=$((failed_runs + 1))
-      log "run failed provider=$provider run=$i (see $run_dir/batch-driver.log)"
+      increment_failure_class_counter "$LAST_RUN_FAILURE_CLASS"
+      log "run failed provider=$provider run=$i class=$LAST_RUN_FAILURE_CLASS (see $run_dir/batch-driver.log)"
     fi
   done
 done
@@ -358,8 +547,10 @@ log "generating quality reports for batch=$BATCH_ID"
 log "report paths:"
 cat "$BATCH_ROOT/report-paths.txt"
 
+log "backend failure classes: runtime_parse=$RUNTIME_PARSE_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES other=$OTHER_FAILURES"
+
 if [[ "$failed_runs" -ne 0 || "$frontend_failures" -ne 0 ]]; then
-  die "batch completed with failures: full_run_failed=$failed_runs frontend_failed=$frontend_failures"
+  die "batch completed with failures: full_run_failed=$failed_runs frontend_failed=$frontend_failures runtime_parse=$RUNTIME_PARSE_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES other=$OTHER_FAILURES"
 fi
 
 log "batch completed successfully"

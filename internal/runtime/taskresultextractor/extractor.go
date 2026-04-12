@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"strings"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 )
+
+var ansiEscapePattern = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
 
 // Extract returns a schema-valid TaskResult JSON object extracted from runner stdout.
 func Extract(raw []byte) ([]byte, error) {
@@ -81,18 +84,21 @@ func parseCandidate(value any) ([]byte, error) {
 }
 
 func parseFromText(text string) ([]byte, error) {
-	trimmed := strings.TrimSpace(text)
+	trimmed := normalizeText(text)
 	if trimmed == "" {
 		return nil, errors.New("empty text")
 	}
 	if candidate, ok := stripCodeFence(trimmed); ok {
-		trimmed = candidate
+		trimmed = normalizeText(candidate)
 	}
 
 	if json.Valid([]byte(trimmed)) {
 		if parsed, err := parseFromJSON([]byte(trimmed)); err == nil {
 			return parsed, nil
 		}
+	}
+	if parsed, err := parseFromNDJSON(trimmed); err == nil {
+		return parsed, nil
 	}
 
 	candidates := extractJSONObjects(trimmed)
@@ -124,6 +130,66 @@ func stripCodeFence(input string) (string, bool) {
 		return "", false
 	}
 	return candidate, true
+}
+
+func normalizeText(input string) string {
+	if input == "" {
+		return ""
+	}
+	normalized := strings.ReplaceAll(input, "\ufeff", "")
+	normalized = ansiEscapePattern.ReplaceAllString(normalized, "")
+	var builder strings.Builder
+	builder.Grow(len(normalized))
+	for _, r := range normalized {
+		if r == '\n' || r == '\r' || r == '\t' || r >= 0x20 {
+			builder.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(builder.String())
+}
+
+func parseFromNDJSON(text string) ([]byte, error) {
+	lines := strings.Split(text, "\n")
+	if len(lines) <= 1 {
+		return nil, errors.New("not ndjson")
+	}
+	candidates := make([]string, 0, len(lines))
+	for _, line := range lines {
+		candidate := normalizeNDJSONLine(line)
+		if candidate == "" || !json.Valid([]byte(candidate)) {
+			continue
+		}
+		candidates = append(candidates, candidate)
+	}
+	if len(candidates) == 0 {
+		return nil, errors.New("no ndjson candidates")
+	}
+	for idx := len(candidates) - 1; idx >= 0; idx-- {
+		if parsed, err := parseFromJSON([]byte(candidates[idx])); err == nil {
+			return parsed, nil
+		}
+	}
+	return nil, errors.New("unable to parse taskresult from ndjson")
+}
+
+func normalizeNDJSONLine(line string) string {
+	candidate := normalizeText(line)
+	if candidate == "" {
+		return ""
+	}
+	if strings.HasPrefix(strings.ToLower(candidate), "data:") {
+		candidate = strings.TrimSpace(candidate[5:])
+	}
+	if strings.HasPrefix(strings.ToLower(candidate), "event:") {
+		return ""
+	}
+	if strings.HasPrefix(strings.ToLower(candidate), "id:") {
+		return ""
+	}
+	if idx := strings.IndexAny(candidate, "{["); idx > 0 {
+		candidate = strings.TrimSpace(candidate[idx:])
+	}
+	return candidate
 }
 
 func extractJSONObjects(input string) []string {

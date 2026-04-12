@@ -42,6 +42,7 @@ func TestHeadlessRunnerUnavailableClassifiesAsRunnerUnavailable(t *testing.T) {
 func TestHeadlessRunnerInvalidTaskResultClassifiesAsParseFailed(t *testing.T) {
 	t.Parallel()
 
+	workspace := t.TempDir()
 	runner := HeadlessRunner{
 		Command: "sh",
 		Args: []string{
@@ -53,7 +54,7 @@ func TestHeadlessRunnerInvalidTaskResultClassifiesAsParseFailed(t *testing.T) {
 		TaskID:       "task-2",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    workspace,
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -67,8 +68,15 @@ func TestHeadlessRunnerInvalidTaskResultClassifiesAsParseFailed(t *testing.T) {
 	if code != string(acpruntime.ErrorCodeRunnerParseFailed) {
 		t.Fatalf("unexpected error code %q", code)
 	}
-	if !strings.Contains(message, "invalid taskresult") {
+	if !strings.Contains(message, "invalid taskresult") || !strings.Contains(message, "raw_output=reports/taskruns/raw/") {
 		t.Fatalf("unexpected error message %q", message)
+	}
+	rawMetaFiles, globErr := filepath.Glob(filepath.Join(workspace, "reports", "taskruns", "raw", "*-meta.json"))
+	if globErr != nil {
+		t.Fatalf("glob raw output meta files: %v", globErr)
+	}
+	if len(rawMetaFiles) == 0 {
+		t.Fatalf("expected parse-fail raw output metadata in %s", filepath.Join(workspace, "reports", "taskruns", "raw"))
 	}
 }
 

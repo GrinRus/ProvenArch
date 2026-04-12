@@ -21,6 +21,7 @@ RUN_LOGS_MAX_RUNS="${RUN_LOGS_MAX_RUNS:-200}"
 CREATED_TMP=0
 SERVER_PID=""
 FAILURE_REASON=""
+TERMINATION_SIGNAL=""
 API_SIM_STATUS="not_started"
 API_INIT_RUN_ID=""
 API_INIT_FINAL_STATUS=""
@@ -32,6 +33,12 @@ TARGET_INPUT_MODE=""
 TARGET_PROFILE="generic"
 RESOLVED_TARGET_REPOS_FILE=""
 TARGET_REPOS_META_JSON=""
+EXPECTED_RUNS=0
+COMPLETED_RUNS=0
+EXPECTED_HEADLESS_RUNS=0
+COMPLETED_HEADLESS_RUNS=0
+RUNNING_RUNS_DETECTED=0
+SUMMARY_RESULT=""
 
 if [[ ! "$ITERATIONS" =~ ^[1-9][0-9]*$ ]]; then
   echo "ITERATIONS must be a positive integer, got: $ITERATIONS" >&2
@@ -53,6 +60,8 @@ if [[ ! "$RUN_LOGS_MAX_RUNS" =~ ^[1-9][0-9]*$ ]]; then
   echo "RUN_LOGS_MAX_RUNS must be a positive integer, got: $RUN_LOGS_MAX_RUNS" >&2
   exit 1
 fi
+EXPECTED_RUNS=$((ITERATIONS * 4))
+EXPECTED_HEADLESS_RUNS=$((ITERATIONS * 2))
 
 if [[ -z "$TMP_ROOT" ]]; then
   TMP_ROOT="$(mktemp -d -t provenarch-ai-advent.XXXXXX)"
@@ -78,11 +87,16 @@ mkdir -p "$LOG_DIR" "$SNAPSHOT_DIR"
 : > "$FULL_RUN_LOG"
 : > "$RUN_RESULTS_TSV"
 
-# Capture everything for post-mortem debugging.
-exec > >(tee -a "$FULL_RUN_LOG") 2>&1
+# Keep original stdio for user-facing progress, but avoid tee/process-substitution
+# in the critical path. All script output is persisted to FULL_RUN_LOG.
+exec 3>&1 4>&2
+exec >>"$FULL_RUN_LOG" 2>&1
 
 log() {
-  printf '[full-run] %s\n' "$*" >&2
+  local line
+  line="[full-run] $*"
+  printf '%s\n' "$line"
+  printf '%s\n' "$line" >&4
 }
 
 require_cmd() {
@@ -90,15 +104,110 @@ require_cmd() {
   local hint="$2"
   if ! command -v "$cmd" >/dev/null 2>&1; then
     FAILURE_REASON="missing required command: $cmd"
-    echo "missing required command: $cmd. $hint" >&2
+    local line
+    line="missing required command: $cmd. $hint"
+    echo "$line"
+    echo "$line" >&4
     exit 1
   fi
 }
 
 die() {
   FAILURE_REASON="$1"
-  echo "[full-run][error] $1" >&2
+  local line
+  line="[full-run][error] $1"
+  echo "$line"
+  echo "$line" >&4
   exit 1
+}
+
+on_termination_signal() {
+  local signal_name="$1"
+  TERMINATION_SIGNAL="$signal_name"
+  FAILURE_REASON="infra_signal_terminated"
+  log "received termination signal: $signal_name"
+  exit 1
+}
+
+refresh_runtime_cycle_metrics() {
+  if [[ -f "$RUN_RESULTS_TSV" ]]; then
+    COMPLETED_RUNS="$(awk 'NF { count++ } END { print count+0 }' "$RUN_RESULTS_TSV")"
+    COMPLETED_HEADLESS_RUNS="$(awk -F'\t' 'NF && $2 == "headless" { count++ } END { print count+0 }' "$RUN_RESULTS_TSV")"
+  else
+    COMPLETED_RUNS=0
+    COMPLETED_HEADLESS_RUNS=0
+  fi
+
+  local run_history_path="$WORKSPACE/reports/taskruns/run-history.json"
+  if [[ -f "$run_history_path" ]]; then
+    RUNNING_RUNS_DETECTED="$(python3 - "$run_history_path" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+payload = json.load(open(path, encoding='utf-8'))
+items = payload.get('runs')
+if not isinstance(items, list):
+    items = payload if isinstance(payload, list) else []
+running = 0
+for item in items:
+    if not isinstance(item, dict):
+        continue
+    if str(item.get('status', '')).strip().lower() == 'running':
+        running += 1
+print(running)
+PY
+)"
+  else
+    RUNNING_RUNS_DETECTED=0
+  fi
+}
+
+validate_runtime_cycle_completion() {
+  refresh_runtime_cycle_metrics
+
+  local failed=0
+  if (( COMPLETED_RUNS != EXPECTED_RUNS )); then
+    log "completion invariant failed: expected_runs=$EXPECTED_RUNS completed_runs=$COMPLETED_RUNS"
+    failed=1
+  fi
+  if (( COMPLETED_HEADLESS_RUNS != EXPECTED_HEADLESS_RUNS )); then
+    log "completion invariant failed: expected_headless_runs=$EXPECTED_HEADLESS_RUNS completed_headless_runs=$COMPLETED_HEADLESS_RUNS"
+    failed=1
+  fi
+
+  if [[ ! -f "$RUN_RESULTS_TSV" ]]; then
+    log "completion invariant failed: missing $RUN_RESULTS_TSV"
+    failed=1
+  else
+    for iteration in $(seq 1 "$ITERATIONS"); do
+      if ! awk -F'\t' -v iter="$iteration" '$1 == iter && $2 == "headless" && $4 == "init" { ok=1 } END { exit ok ? 0 : 1 }' "$RUN_RESULTS_TSV"; then
+        log "completion invariant failed: missing headless init for iteration=$iteration"
+        failed=1
+      fi
+      if ! awk -F'\t' -v iter="$iteration" '$1 == iter && $2 == "headless" && $4 == "refresh" { ok=1 } END { exit ok ? 0 : 1 }' "$RUN_RESULTS_TSV"; then
+        log "completion invariant failed: missing headless refresh for iteration=$iteration"
+        failed=1
+      fi
+    done
+  fi
+
+  local run_history_path="$WORKSPACE/reports/taskruns/run-history.json"
+  if [[ ! -f "$run_history_path" ]]; then
+    log "completion invariant failed: missing run history $run_history_path"
+    failed=1
+  elif (( RUNNING_RUNS_DETECTED > 0 )); then
+    log "completion invariant failed: detected running runs in history ($RUNNING_RUNS_DETECTED)"
+    failed=1
+  fi
+
+  if (( failed != 0 )); then
+    if [[ -z "$FAILURE_REASON" || "$FAILURE_REASON" == "unknown" ]]; then
+      FAILURE_REASON="infra_incomplete_cycle"
+    fi
+    return 1
+  fi
+  return 0
 }
 
 slugify() {
@@ -636,10 +745,32 @@ run_cli_pipeline() {
 
 write_summary() {
   local exit_code="$1"
+  refresh_runtime_cycle_metrics
   local result
   result="passed"
-  if [[ "$exit_code" -ne 0 ]]; then
+  local completion_ok=1
+  if (( COMPLETED_RUNS != EXPECTED_RUNS )); then
+    completion_ok=0
+  fi
+  if (( COMPLETED_HEADLESS_RUNS != EXPECTED_HEADLESS_RUNS )); then
+    completion_ok=0
+  fi
+  if (( RUNNING_RUNS_DETECTED > 0 )); then
+    completion_ok=0
+  fi
+  if [[ "$exit_code" -ne 0 || "$completion_ok" -ne 1 || -n "$TERMINATION_SIGNAL" ]]; then
     result="failed"
+  fi
+  SUMMARY_RESULT="$result"
+
+  if [[ "$result" == "failed" && -z "$FAILURE_REASON" ]]; then
+    if [[ -n "$TERMINATION_SIGNAL" ]]; then
+      FAILURE_REASON="infra_signal_terminated"
+    elif [[ "$completion_ok" -ne 1 ]]; then
+      FAILURE_REASON="infra_incomplete_cycle"
+    else
+      FAILURE_REASON="infra_unknown_failure"
+    fi
   fi
 
   {
@@ -669,6 +800,16 @@ write_summary() {
     echo "- run_logs_ttl_hours: $RUN_LOGS_TTL_HOURS"
     echo "- run_logs_max_runs: $RUN_LOGS_MAX_RUNS"
     echo "- keep_tmp: $KEEP_TMP"
+    echo "- expected_runs: $EXPECTED_RUNS"
+    echo "- completed_runs: $COMPLETED_RUNS"
+    echo "- expected_headless_runs: $EXPECTED_HEADLESS_RUNS"
+    echo "- completed_headless_runs: $COMPLETED_HEADLESS_RUNS"
+    echo "- running_runs_detected: $RUNNING_RUNS_DETECTED"
+    if [[ -n "$TERMINATION_SIGNAL" ]]; then
+      echo "- termination_signal: $TERMINATION_SIGNAL"
+    else
+      echo "- termination_signal: none"
+    fi
     echo "- headless_provider: ${HEADLESS_PROVIDER:-unset}"
     echo "- headless_command: ${HEADLESS_CMD:-unset}"
     echo
@@ -761,7 +902,7 @@ cleanup() {
   stop_server
   write_summary "$exit_code"
 
-  if [[ "$exit_code" -ne 0 ]]; then
+  if [[ "$exit_code" -ne 0 || "$SUMMARY_RESULT" != "passed" ]]; then
     log "run failed; keeping artifacts for debugging at $TMP_ROOT"
     log "summary: $SUMMARY_PATH"
     return
@@ -773,10 +914,14 @@ cleanup() {
     return
   fi
 
-  cat "$SUMMARY_PATH"
+  cat "$SUMMARY_PATH" >&4
   rm -rf "$TMP_ROOT"
   log "temporary artifacts removed (set KEEP_TMP=1 to keep)"
 }
+trap 'on_termination_signal TERM' TERM
+trap 'on_termination_signal INT' INT
+trap 'on_termination_signal HUP' HUP
+trap 'on_termination_signal PIPE' PIPE
 trap 'cleanup $?' EXIT
 
 require_cmd git "Install git and ensure it is available in PATH."
@@ -962,6 +1107,16 @@ for iteration in $(seq 1 "$ITERATIONS"); do
   run_cli_pipeline "headless" "$HEADLESS_PROVIDER" "refresh" "$iteration" "$prev_headless_refresh_signal"
   prev_headless_refresh_signal="$LAST_SIGNAL"
 done
+
+if ! validate_runtime_cycle_completion; then
+  if [[ -z "$FAILURE_REASON" || "$FAILURE_REASON" == "unknown" ]]; then
+    FAILURE_REASON="infra_incomplete_cycle"
+  fi
+  local_line="[full-run][error] runtime cycle completion invariants failed"
+  echo "$local_line"
+  echo "$local_line" >&4
+  exit 1
+fi
 
 if [[ "$RUN_QUALITY_GATES" == "1" ]]; then
   log "run quality gates: make contracts test lint build"

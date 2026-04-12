@@ -15,6 +15,7 @@ import (
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtime/runnerdiag"
 	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultextractor"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 )
@@ -85,10 +86,11 @@ func runLegacyPassthrough(ctx context.Context, command string, args []string, ta
 		)
 	}
 	if parseErr != nil {
+		parseFailureMessage := buildParseFailureMessage(taskPayload, parseErr, result)
 		return acpruntime.Result{}, acpruntime.WrapRunnerError(
 			acpruntime.ProviderClaudeCode,
 			acpruntime.ErrorCodeRunnerParseFailed,
-			fmt.Sprintf("headless provider %q returned invalid taskresult: %v", acpruntime.ProviderClaudeCode, parseErr),
+			fmt.Sprintf("headless provider %q returned invalid taskresult: %s", acpruntime.ProviderClaudeCode, parseFailureMessage),
 			parseErr,
 		)
 	}
@@ -124,11 +126,36 @@ func runNativeDirectClaude(ctx context.Context, command string, taskPayload []by
 		return retryResult, nil
 	}
 
+	parseFailureMessage := buildParseFailureMessage(taskPayload, retryParseErr, retryResult)
 	return acpruntime.Result{}, acpruntime.WrapRunnerError(
 		acpruntime.ProviderClaudeCode,
 		acpruntime.ErrorCodeRunnerParseFailed,
-		fmt.Sprintf("headless provider %q returned invalid taskresult: %v", acpruntime.ProviderClaudeCode, retryParseErr),
+		fmt.Sprintf("headless provider %q returned invalid taskresult: %s", acpruntime.ProviderClaudeCode, parseFailureMessage),
 		retryParseErr,
+	)
+}
+
+func buildParseFailureMessage(taskPayload []byte, parseErr error, result acpruntime.Result) string {
+	base := strings.TrimSpace(parseErr.Error())
+	if base == "" {
+		base = "unknown parse error"
+	}
+	var task acpruntime.Task
+	if err := json.Unmarshal(taskPayload, &task); err != nil {
+		return fmt.Sprintf("%s (task_unmarshal_failed=%v)", base, err)
+	}
+	artifacts, err := runnerdiag.WriteParseFailureArtifacts(task, acpruntime.ProviderClaudeCode, result.Stdout, result.Stderr)
+	if err != nil {
+		return fmt.Sprintf("%s (raw_output_persist_failed=%v)", base, err)
+	}
+	return fmt.Sprintf(
+		"%s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
+		base,
+		artifacts.RelativeMetadataPath,
+		artifacts.Stdout.Bytes,
+		artifacts.Stdout.SHA256,
+		artifacts.Stderr.Bytes,
+		artifacts.Stderr.SHA256,
 	)
 }
 
