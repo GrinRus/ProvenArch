@@ -183,6 +183,42 @@ echo 'first stderr detail' >&2
 	}
 }
 
+func TestHeadlessRunnerPreservesContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	commandPath := filepath.Join(tempDir, "qwen-cancel-stub.sh")
+	script := `#!/bin/sh
+set -eu
+sleep 10
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write cancel command: %v", err)
+	}
+
+	runner := HeadlessRunner{
+		Command: commandPath,
+		Args:    []string{},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(150*time.Millisecond, cancel)
+
+	_, err := runner.Run(ctx, acpruntime.Task{
+		TaskID:       "task-cancel",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    "/tmp/workspace",
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected cancellation error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected error to preserve context.Canceled, got %v", err)
+	}
+}
+
 func TestHeadlessRunnerParsesTaskResultFromResponseField(t *testing.T) {
 	t.Parallel()
 

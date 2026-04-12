@@ -303,9 +303,6 @@ export default function App() {
       ),
     [runList]
   );
-  const shouldPollRunDetails = useMemo(() => {
-    return hasActiveRuns || (runId !== null && !runLogsEOF);
-  }, [hasActiveRuns, runId, runLogsEOF]);
   const validationDiagnosticsByRepo = useMemo(() => {
     if (!validateResult) {
       return [];
@@ -350,6 +347,9 @@ export default function App() {
     }
     return false;
   }, [runId, runStatus, selectedRunListItem]);
+  const shouldPollRunDetails = useMemo(() => {
+    return hasActiveRuns || selectedRunIsActive || (runId !== null && !runLogsEOF);
+  }, [hasActiveRuns, selectedRunIsActive, runId, runLogsEOF]);
   const runLogsRendered = useMemo(() => {
     const includeFields = runLogsViewMode === "line+fields";
     return runLogs
@@ -497,9 +497,15 @@ export default function App() {
           resetRunLogs();
           return;
         }
+        const previousStatus = runStatus?.status ?? null;
         const status = await fetchRunStatus(runId);
-        if (activeStatuses.has(status.status) || !runLogsEOF) {
+        if (activeStatuses.has(status.status)) {
           await fetchRunLogs(runId, false);
+          return;
+        }
+        const statusChanged = previousStatus !== status.status;
+        if (statusChanged || !runLogsEOF) {
+          await fetchRunLogsUntilEOF(runId);
         }
       }
     } catch {
@@ -806,7 +812,12 @@ export default function App() {
       if (response.status === 202) {
         setRunActionStatus(`Cancel requested for ${runId}`);
         await loadRunList(100);
-        await fetchRunStatus(runId);
+        const status = await fetchRunStatus(runId);
+        if (finalStatuses.has(status.status)) {
+          await fetchRunLogsUntilEOF(runId);
+        } else {
+          await fetchRunLogs(runId, false);
+        }
         return;
       }
 
@@ -830,7 +841,10 @@ export default function App() {
       if (response.status === 409) {
         setRunActionStatus("Selected run is already terminal.");
         await loadRunList(100);
-        await fetchRunStatus(runId);
+        const status = await fetchRunStatus(runId);
+        if (finalStatuses.has(status.status)) {
+          await fetchRunLogsUntilEOF(runId);
+        }
         return;
       }
 

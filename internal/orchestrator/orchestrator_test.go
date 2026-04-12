@@ -696,6 +696,46 @@ func TestCancelRunActiveCooperativeAndQueueContinues(t *testing.T) {
 	}
 }
 
+func TestCancelRunActiveClassifiesRunnerKilledAsCanceled(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	service := NewService(WithRunner(cancelReturnsRunnerUnavailableRunner{}))
+	defer waitForAsyncDrain(t, service, 8*time.Second)
+
+	runID, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	testutil.WaitFor(t, 8*time.Second, testutil.WaitDescription("run did not become running"), func() (bool, error) {
+		info, ok := service.GetRun(runID)
+		if !ok {
+			return false, nil
+		}
+		return info.Status == RunStatusRunning, nil
+	})
+
+	if err := service.CancelRun(runID); err != nil {
+		t.Fatalf("cancel active run: %v", err)
+	}
+
+	info := waitForRunTerminalState(t, service, runID, 8*time.Second)
+	if info.Status != RunStatusFailed {
+		t.Fatalf("expected failed status, got %s", info.Status)
+	}
+	if info.ErrorCode != runErrorCodeCanceled {
+		t.Fatalf("expected error_code %q, got %q (error=%q)", runErrorCodeCanceled, info.ErrorCode, info.Error)
+	}
+	if !strings.Contains(info.Error, "run canceled by request") {
+		t.Fatalf("expected cancel message in error, got %q", info.Error)
+	}
+}
+
 func TestNewServiceReconcilesStaleRunsAfterRestart(t *testing.T) {
 	t.Parallel()
 
@@ -1598,6 +1638,22 @@ func (r *countingDelayedRunner) callsForRun(runID string) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.calls[runID]
+}
+
+type cancelReturnsRunnerUnavailableRunner struct{}
+
+func (cancelReturnsRunnerUnavailableRunner) Run(ctx context.Context, _ acpruntime.Task) (acpruntime.Result, error) {
+	<-ctx.Done()
+	return acpruntime.Result{}, acpruntime.WrapRunnerError(
+		acpruntime.ProviderQwenCode,
+		acpruntime.ErrorCodeRunnerUnavailable,
+		"qwen-code runner is unavailable: signal: killed",
+		errors.New("signal: killed"),
+	)
+}
+
+func (cancelReturnsRunnerUnavailableRunner) Preflight(context.Context) error {
+	return nil
 }
 
 type runtimeFailureWithOutputRunner struct{}

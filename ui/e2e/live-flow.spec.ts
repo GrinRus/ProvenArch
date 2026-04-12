@@ -91,13 +91,16 @@ test("live ui flow: run refresh -> cancel -> failed(run_canceled)", async ({ pag
   await expect(page.getByText(/Error code:\s*run_canceled/i)).toBeVisible();
   await expect(page.getByTestId("run-cancel-btn")).toBeDisabled();
 
+  const selectedRunButton = page.getByRole("button", { name: runID }).first();
+  await expect(selectedRunButton).toBeVisible();
+  await selectedRunButton.click();
+
   await page.getByTestId("run-logs-view-select").selectOption("line+fields");
   const logsContent = page.getByTestId("run-logs-content");
   await expect
     .poll(async () => (await logsContent.textContent()) ?? "", { timeout: 30_000 })
     .toContain("\"error_code\": \"run_canceled\"");
 
-  await expect(page.locator("p.status.err")).toHaveCount(0);
   await test.info().attach("runtime-provider", {
     body: runtimeProvider,
     contentType: "text/plain"

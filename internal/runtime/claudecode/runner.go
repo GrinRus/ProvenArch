@@ -181,6 +181,12 @@ func runClaudeCommand(ctx context.Context, command string, args []string, stdin 
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return acpruntime.Result{
+				Stdout: stdout.String(),
+				Stderr: stderr.String(),
+			}, nil, ctxErr
+		}
 		errText := strings.TrimSpace(stderr.String())
 		if errText == "" {
 			errText = err.Error()

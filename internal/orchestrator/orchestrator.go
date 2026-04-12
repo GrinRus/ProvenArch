@@ -937,8 +937,17 @@ func classifyExecutionError(err error) (code string, message string) {
 }
 
 func (s *Service) classifyRunFailure(runID string, err error) (string, string) {
-	if errors.Is(err, context.Canceled) && s.isCancelRequested(runID) {
-		return runErrorCodeCanceled, "run canceled by request"
+	if s.isCancelRequested(runID) {
+		if errors.Is(err, context.Canceled) {
+			return runErrorCodeCanceled, "run canceled by request"
+		}
+		message := strings.TrimSpace(err.Error())
+		if message == "" {
+			message = "run canceled by request"
+		} else {
+			message = fmt.Sprintf("run canceled by request (%s)", message)
+		}
+		return runErrorCodeCanceled, message
 	}
 	return classifyExecutionError(err)
 }

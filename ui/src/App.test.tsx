@@ -1014,10 +1014,49 @@ describe("App", () => {
         });
       }
       if (method === "GET" && url === "/api/pipeline/runs/run-active/logs?cursor=0&limit=200") {
+        if (canceled) {
+          return jsonResponse({
+            run_id: "run-active",
+            items: [
+              {
+                cursor: 0,
+                timestamp: "2026-04-03T12:01:01Z",
+                level: "info",
+                message: "run queued",
+                fields: {
+                  pipeline: "refresh"
+                }
+              },
+              {
+                cursor: 1,
+                timestamp: "2026-04-03T12:01:09Z",
+                level: "error",
+                step_id: "refresh.step3.findings",
+                message: "run failed",
+                fields: {
+                  error_code: "run_canceled",
+                  error: "run canceled by request"
+                }
+              }
+            ],
+            next_cursor: 2,
+            eof: true
+          });
+        }
         return jsonResponse({
           run_id: "run-active",
-          items: [],
-          next_cursor: 0,
+          items: [
+            {
+              cursor: 0,
+              timestamp: "2026-04-03T12:01:01Z",
+              level: "info",
+              message: "run queued",
+              fields: {
+                pipeline: "refresh"
+              }
+            }
+          ],
+          next_cursor: 1,
           eof: true
         });
       }
@@ -1069,6 +1108,10 @@ describe("App", () => {
       expect(screen.getByTestId("run-status-value")).toHaveTextContent("failed");
     });
     await screen.findByText(/Error code:\s*run_canceled/i);
+    fireEvent.change(screen.getByTestId("run-logs-view-select"), { target: { value: "line+fields" } });
+    await waitFor(() => {
+      expect(screen.getByTestId("run-logs-content")).toHaveTextContent('"error_code": "run_canceled"');
+    });
   });
 
   it("shows cancel endpoint conflict/not-found responses in UI status", async () => {
