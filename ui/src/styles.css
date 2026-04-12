@@ -96,6 +96,13 @@ body {
   background: #fff;
 }
 
+.panel select.inline-select {
+  width: auto;
+  max-width: none;
+  margin-bottom: 0;
+  min-width: 9rem;
+}
+
 .panel textarea {
   width: 100%;
   max-width: 100%;

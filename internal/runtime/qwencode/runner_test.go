@@ -3,6 +3,7 @@ package qwencode
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,6 +118,104 @@ echo '{"response":"not-json"}'
 	}
 	if result.TaskResult.Meta.Runtime.Name != "qwen-code" {
 		t.Fatalf("unexpected runtime name %q", result.TaskResult.Meta.Runtime.Name)
+	}
+}
+
+func TestHeadlessRunnerRetryParseFailureUsesRetryOutputInRunnerError(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	commandPath := filepath.Join(tempDir, "qwen-retry-parse-fail-stub.sh")
+	script := `#!/bin/sh
+set -eu
+last_arg=""
+for arg in "$@"; do
+  last_arg="$arg"
+done
+if echo "$last_arg" | grep -q "RETRY MODE"; then
+  echo 'retry invalid payload'
+  echo 'retry stderr detail' >&2
+  exit 0
+fi
+echo 'first invalid payload'
+echo 'first stderr detail' >&2
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write retry-parse-fail command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-1",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    "/tmp/workspace",
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected parse-failed error")
+	}
+
+	code, _, ok := acpruntime.ClassifyError(err)
+	if !ok {
+		t.Fatalf("expected classify error to succeed")
+	}
+	if code != string(acpruntime.ErrorCodeRunnerParseFailed) {
+		t.Fatalf("unexpected error code %q", code)
+	}
+
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError details")
+	}
+	if !strings.Contains(runnerErr.Stdout, "retry invalid payload") {
+		t.Fatalf("expected retry stdout in runner error, got %q", runnerErr.Stdout)
+	}
+	if strings.Contains(runnerErr.Stdout, "first invalid payload") {
+		t.Fatalf("did not expect first-attempt stdout in runner error, got %q", runnerErr.Stdout)
+	}
+	if !strings.Contains(runnerErr.Stderr, "retry stderr detail") {
+		t.Fatalf("expected retry stderr in runner error, got %q", runnerErr.Stderr)
+	}
+	if strings.Contains(runnerErr.Stderr, "first stderr detail") {
+		t.Fatalf("did not expect first-attempt stderr in runner error, got %q", runnerErr.Stderr)
+	}
+}
+
+func TestHeadlessRunnerPreservesContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	commandPath := filepath.Join(tempDir, "qwen-cancel-stub.sh")
+	script := `#!/bin/sh
+set -eu
+sleep 10
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write cancel command: %v", err)
+	}
+
+	runner := HeadlessRunner{
+		Command: commandPath,
+		Args:    []string{},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(150*time.Millisecond, cancel)
+
+	_, err := runner.Run(ctx, acpruntime.Task{
+		TaskID:       "task-cancel",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    "/tmp/workspace",
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected cancellation error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected error to preserve context.Canceled, got %v", err)
 	}
 }
 

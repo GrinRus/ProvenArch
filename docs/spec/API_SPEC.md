@@ -197,6 +197,35 @@ Body: отсутствует.
 **501**
 - `not_supported`
 
+### POST `/api/pipeline/runs/<run_id>/cancel`
+Запрашивает отмену async run.
+
+Отмена не вводит новый `status` enum:
+- pending (`queued` в debounce queue) переводится в terminal `failed` немедленно;
+- active (`queued/running` текущий active run) отменяется cooperative через `context cancel` и завершается `failed`.
+
+**Request body**
+- пустой body допустим;
+- optional `{}` допустим;
+- неизвестные поля → `400 invalid_request_body`.
+
+**202**
+```json
+{
+  "run_id": "run_20260403_001",
+  "status": "cancel_requested"
+}
+```
+
+**404**
+- `run_not_found`
+
+**409**
+- `run_not_cancelable` (run уже terminal: `succeeded|failed`)
+
+**400**
+- `invalid_request_body`
+
 ### GET `/api/pipeline/runs/<run_id>`
 Возвращает run status.
 
@@ -223,6 +252,10 @@ Body: отсутствует.
 
 Для runtime parse/runtime ошибок после успешного async start используется run-level статус:
 - `error_code: "runner_parse_failed"` (или другой actionable code) в `failed` run.
+
+Для lifecycle сценариев используются дополнительные `error_code`:
+- `run_canceled` — run отменён пользователем;
+- `run_reconciled_after_restart` — stale `queued/running` run был reconciled в `failed` при старте сервиса после рестарта.
 
 ### GET `/api/pipeline/runs?limit=<n>`
 Возвращает список запусков pipeline (queued/running/succeeded/failed), отсортированный по `started_at desc`.
@@ -276,7 +309,10 @@ Body: отсутствует.
       "message": "runtime task started",
       "taskrun_path": "reports/taskruns/run_20260403_001-step1-collect-domain-payments-service.json",
       "fields": {
-        "task_id": "task-run_20260403_001-init-step1-collect-payments-service"
+        "task_id": "task-run_20260403_001-init-step1-collect-payments-service",
+        "provider": "claude-code",
+        "repo_scopes": ["payments-service"],
+        "stderr_snippet": "json parse error ... [truncated]"
       }
     }
   ],

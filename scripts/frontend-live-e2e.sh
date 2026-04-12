@@ -11,6 +11,8 @@ RUN_LOGS_MAX_RUNS="${RUN_LOGS_MAX_RUNS:-200}"
 OUTPUT_DIR="${OUTPUT_DIR:-}"
 LISTEN="${LISTEN:-}"
 UI_E2E_EXPECTED_REPO_COUNT="${UI_E2E_EXPECTED_REPO_COUNT:-1}"
+UI_E2E_SCENARIO="${UI_E2E_SCENARIO:-init-inspect}"
+UI_E2E_CANCEL_STUB_SLEEP_SEC="${UI_E2E_CANCEL_STUB_SLEEP_SEC:-90}"
 
 SERVER_PID=""
 BASE_URL=""
@@ -81,11 +83,21 @@ else
   mkdir -p "$OUTPUT_DIR"
 fi
 
+case "$UI_E2E_SCENARIO" in
+  init-inspect|cancel-refresh)
+    ;;
+  *)
+    die "unsupported UI_E2E_SCENARIO '$UI_E2E_SCENARIO' (allowed: init-inspect, cancel-refresh)"
+    ;;
+esac
+
 require_cmd curl
 require_cmd python3
 require_cmd npm
 
 runtime_cmd=""
+declare -a server_env
+server_env=()
 case "$RUNTIME_PROVIDER" in
   claude-code)
     runtime_cmd="${ACP_CLAUDE_CMD:-claude}"
@@ -97,6 +109,30 @@ case "$RUNTIME_PROVIDER" in
     die "unsupported RUNTIME_PROVIDER '$RUNTIME_PROVIDER' (allowed: claude-code, qwen-code)"
     ;;
 esac
+
+if [[ "$UI_E2E_SCENARIO" == "cancel-refresh" ]]; then
+  stub_runner="$OUTPUT_DIR/runtime-cancel-stub.sh"
+  cat >"$stub_runner" <<EOF
+#!/usr/bin/env bash
+set -Eeuo pipefail
+trap 'exit 130' TERM INT HUP PIPE
+sleep ${UI_E2E_CANCEL_STUB_SLEEP_SEC}
+cat <<'JSON'
+{"meta":{"task_id":"task-stub","step_id":"refresh.step1.collect","runtime":{"name":"${RUNTIME_PROVIDER}","version":"cancel-stub"},"started_at":"2026-04-12T00:00:00Z"},"summary":"stub completion (unexpected in cancel scenario)","changeset":[]}
+JSON
+EOF
+  chmod +x "$stub_runner"
+  runtime_cmd="$stub_runner"
+  case "$RUNTIME_PROVIDER" in
+    claude-code)
+      server_env+=("ACP_CLAUDE_CMD=$runtime_cmd")
+      ;;
+    qwen-code)
+      server_env+=("ACP_QWEN_CMD=$runtime_cmd")
+      ;;
+  esac
+fi
+
 require_cmd "$runtime_cmd"
 
 if [[ -z "$LISTEN" ]]; then
@@ -112,7 +148,7 @@ started_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 mkdir -p "$PLAYWRIGHT_RESULTS_DIR"
 
 log "starting ACP server (provider=$RUNTIME_PROVIDER listen=$LISTEN)"
-"$ACP_BIN" serve \
+env "${server_env[@]}" "$ACP_BIN" serve \
   --workspace "$WORKSPACE" \
   --runtime headless \
   --runtime-provider "$RUNTIME_PROVIDER" \
@@ -130,6 +166,7 @@ if ! (
   cd "$PROVENARCH_ROOT"
   UI_E2E_BASE_URL="$BASE_URL" \
   UI_E2E_RUNTIME_PROVIDER="$RUNTIME_PROVIDER" \
+  UI_E2E_SCENARIO="$UI_E2E_SCENARIO" \
   UI_E2E_EXPECTED_REPO_COUNT="$UI_E2E_EXPECTED_REPO_COUNT" \
   UI_E2E_OUTPUT_DIR="$PLAYWRIGHT_RESULTS_DIR" \
   npm run --prefix ui e2e:live
@@ -145,6 +182,7 @@ export FRONTEND_E2E_PROVIDER="$RUNTIME_PROVIDER"
 export FRONTEND_E2E_BASE_URL="$BASE_URL"
 export FRONTEND_E2E_WORKSPACE="$WORKSPACE"
 export FRONTEND_E2E_RUNTIME_CMD="$runtime_cmd"
+export FRONTEND_E2E_SCENARIO="$UI_E2E_SCENARIO"
 export FRONTEND_E2E_SERVER_LOG="$SERVER_LOG"
 export FRONTEND_E2E_PLAYWRIGHT_LOG="$PLAYWRIGHT_LOG"
 python3 - "$RESULT_JSON" <<'PY'
@@ -161,6 +199,7 @@ payload = {
     "base_url": os.environ.get("FRONTEND_E2E_BASE_URL"),
     "workspace": os.environ.get("FRONTEND_E2E_WORKSPACE"),
     "runtime_command": os.environ.get("FRONTEND_E2E_RUNTIME_CMD"),
+    "scenario": os.environ.get("FRONTEND_E2E_SCENARIO"),
     "server_log": os.environ.get("FRONTEND_E2E_SERVER_LOG"),
     "playwright_log": os.environ.get("FRONTEND_E2E_PLAYWRIGHT_LOG"),
 }

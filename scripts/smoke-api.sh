@@ -23,6 +23,25 @@ fi
 
 api_base="http://127.0.0.1:$api_port"
 
+extract_error_code() {
+  local payload="$1"
+  PAYLOAD="$payload" python3 - <<'PY'
+import json
+import os
+import sys
+
+raw = os.environ.get("PAYLOAD", "")
+try:
+    parsed = json.loads(raw)
+except Exception:
+    print("")
+    raise SystemExit(0)
+error = parsed.get("error") or {}
+code = error.get("code") or ""
+print(code)
+PY
+}
+
 go run ./cmd/acp serve \
   --workspace "$workspace" \
   --auto-init \
@@ -93,6 +112,38 @@ list_payload="$(curl -sSf "$api_base/api/pipeline/runs?limit=5")"
 if ! echo "$list_payload" | grep -q "$run_id"; then
   echo "run list does not include started run id: $run_id" >&2
   echo "list payload: $list_payload" >&2
+  exit 1
+fi
+
+# cancel endpoint: unknown run -> 404 run_not_found
+cancel_missing_body_file="$tmpdir/cancel-missing.json"
+cancel_missing_status="$(curl -sS -o "$cancel_missing_body_file" -w "%{http_code}" -X POST "$api_base/api/pipeline/runs/run-missing/cancel")"
+cancel_missing_payload="$(cat "$cancel_missing_body_file")"
+if [[ "$cancel_missing_status" != "404" ]]; then
+  echo "expected cancel missing status 404, got $cancel_missing_status" >&2
+  echo "payload: $cancel_missing_payload" >&2
+  exit 1
+fi
+cancel_missing_code="$(extract_error_code "$cancel_missing_payload")"
+if [[ "$cancel_missing_code" != "run_not_found" ]]; then
+  echo "expected cancel missing error code run_not_found, got '$cancel_missing_code'" >&2
+  echo "payload: $cancel_missing_payload" >&2
+  exit 1
+fi
+
+# cancel endpoint: terminal run -> 409 run_not_cancelable
+cancel_terminal_body_file="$tmpdir/cancel-terminal.json"
+cancel_terminal_status="$(curl -sS -o "$cancel_terminal_body_file" -w "%{http_code}" -X POST "$api_base/api/pipeline/runs/$run_id/cancel")"
+cancel_terminal_payload="$(cat "$cancel_terminal_body_file")"
+if [[ "$cancel_terminal_status" != "409" ]]; then
+  echo "expected cancel terminal status 409, got $cancel_terminal_status" >&2
+  echo "payload: $cancel_terminal_payload" >&2
+  exit 1
+fi
+cancel_terminal_code="$(extract_error_code "$cancel_terminal_payload")"
+if [[ "$cancel_terminal_code" != "run_not_cancelable" ]]; then
+  echo "expected cancel terminal error code run_not_cancelable, got '$cancel_terminal_code'" >&2
+  echo "payload: $cancel_terminal_payload" >&2
   exit 1
 fi
 
