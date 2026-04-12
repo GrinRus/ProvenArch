@@ -214,6 +214,10 @@ Implemented additional jobs:
   - direct `npm run e2e:live --prefix ui`: Playwright output default `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
   - `scripts/frontend-live-e2e.sh`: Playwright output в `$OUTPUT_DIR/playwright-results`
   - `UI_E2E_EXPECTED_REPO_COUNT` задаёт ожидаемое количество resolved repos (default `1`)
+  - `UI_E2E_SCENARIO=init-inspect|cancel-refresh` переключает live flow:
+    - `init-inspect`: validate -> run init -> inspect artifacts
+    - `cancel-refresh`: validate -> run refresh -> cancel selected run -> expect `failed + run_canceled`
+  - `UI_E2E_CANCEL_STUB_SLEEP_SEC` задаёт длительность controlled slow stub runner для `cancel-refresh`
   - `ui/e2e/live-flow.spec.ts` + `npm run e2e:live --prefix ui`
 
 ## 8) Acceptance для testing strategy

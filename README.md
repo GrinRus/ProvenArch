@@ -299,6 +299,10 @@ ACP_QWEN_CMD_BIN=qwen \
 - direct `npm run --prefix ui e2e:live`: Playwright output default `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
 - `scripts/frontend-live-e2e.sh`: Playwright output сохраняется в `$OUTPUT_DIR/playwright-results`
 - frontend live e2e ожидает число resolved repos из `UI_E2E_EXPECTED_REPO_COUNT` (default `1`)
+- `UI_E2E_SCENARIO` переключает live flow:
+  - `init-inspect` (default): validate -> run init -> inspect artifacts
+  - `cancel-refresh`: validate -> run refresh -> cancel selected run -> expect `failed + run_canceled`
+- `UI_E2E_CANCEL_STUB_SLEEP_SEC` задаёт длительность controlled slow stub runner для сценария `cancel-refresh`
 
 `TARGET_REPOS_FILE` — основной batch-контракт; single legacy env поддерживаются для обратной совместимости.
 Full matrix (`full-run-batch-matrix.sh`) — локальный trusted-machine runbook, не required CI gate.
