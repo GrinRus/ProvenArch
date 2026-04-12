@@ -1943,9 +1943,15 @@ func (e *pipelineExecution) applySemanticGuards(stepID string, domainID string, 
 		}
 	}
 
-	if stepID != "refresh.step3.findings" {
-		return normalized
+	if stepID == "refresh.step3.findings" {
+		normalized = e.ensureOwnerGapFallback(domainID, task, normalized)
+		normalized = e.ensureCrossRepoEdgeFallback(domainID, task, normalized)
 	}
+
+	return e.applyEvidencePathSemanticGuard(stepID, task, normalized)
+}
+
+func (e *pipelineExecution) ensureOwnerGapFallback(domainID string, task acpruntime.Task, normalized contracts.TaskResult) contracts.TaskResult {
 	hasFinding := false
 	for _, op := range normalized.Changeset {
 		if op.Op == "add_finding" && op.Finding != nil {
@@ -2084,6 +2090,455 @@ func (e *pipelineExecution) applySemanticGuards(stepID string, domainID string, 
 		fmt.Sprintf("semantic_guard: added fallback owner-mapping finding %q", findingID),
 	)
 	return normalized
+}
+
+func (e *pipelineExecution) ensureCrossRepoEdgeFallback(domainID string, task acpruntime.Task, normalized contracts.TaskResult) contracts.TaskResult {
+	scopes := normalizeOrderedUniqueStrings(task.RepoScopes)
+	if len(scopes) < 2 {
+		return normalized
+	}
+	for _, op := range normalized.Changeset {
+		if op.Op == "upsert_edge" && op.Edge != nil {
+			return normalized
+		}
+	}
+
+	type serviceCandidate struct {
+		ID       string
+		Repo     string
+		Evidence contracts.Evidence
+	}
+
+	scopeSet := map[string]struct{}{}
+	for _, scope := range scopes {
+		scopeSet[scope] = struct{}{}
+	}
+	repoRoots := declaredRepoRoots(e.workspace)
+
+	entities, err := e.store.ListEntities()
+	if err != nil {
+		normalized.Warnings = append(normalized.Warnings, fmt.Sprintf("semantic_guard: cross-repo fallback edge skipped: %v", err))
+		return normalized
+	}
+
+	candidates := make([]serviceCandidate, 0, len(entities))
+	for _, entity := range entities {
+		if strings.TrimSpace(entity.Type) != "service" {
+			continue
+		}
+		entityID := strings.TrimSpace(entity.ID)
+		if entityID == "" {
+			continue
+		}
+		repoScope := entityRepoScope(entity, task)
+		if repoScope == "" {
+			continue
+		}
+		if _, ok := scopeSet[repoScope]; !ok {
+			continue
+		}
+		evidence, ok := fallbackEvidenceForEntity(entity, repoScope, e.workspace.Path, repoRoots)
+		if !ok {
+			continue
+		}
+		candidates = append(candidates, serviceCandidate{
+			ID:       entityID,
+			Repo:     repoScope,
+			Evidence: evidence,
+		})
+	}
+	if len(candidates) < 2 {
+		normalized.Warnings = append(normalized.Warnings, "semantic_guard: cross-repo fallback edge skipped: insufficient multi-scope service entities with valid evidence")
+		return normalized
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].Repo == candidates[j].Repo {
+			return candidates[i].ID < candidates[j].ID
+		}
+		return candidates[i].Repo < candidates[j].Repo
+	})
+
+	from := candidates[0]
+	toIndex := -1
+	for idx := 1; idx < len(candidates); idx++ {
+		if candidates[idx].Repo != from.Repo {
+			toIndex = idx
+			break
+		}
+	}
+	if toIndex == -1 {
+		normalized.Warnings = append(normalized.Warnings, "semantic_guard: cross-repo fallback edge skipped: candidates resolved to one repo_scope")
+		return normalized
+	}
+	to := candidates[toIndex]
+
+	edgeID := "edge.cross-repo." + slugutil.Slugify(from.ID) + ".depends-on." + slugutil.Slugify(to.ID)
+	if strings.TrimSpace(domainID) != "" {
+		edgeID += "." + slugutil.Slugify(domainID)
+	}
+	normalized.Changeset = append(normalized.Changeset, contracts.Operation{
+		Op: "upsert_edge",
+		Edge: &contracts.Edge{
+			ID:   edgeID,
+			Type: "depends_on",
+			From: from.ID,
+			To:   to.ID,
+			Name: "Cross-repo dependency",
+			Attributes: map[string]any{
+				"inferred":        true,
+				"guard_added":     true,
+				"from_repo_scope": from.Repo,
+				"to_repo_scope":   to.Repo,
+			},
+			Provenance: contracts.Provenance{
+				Kind:       "inference",
+				Confidence: 0.61,
+				Evidence: []contracts.Evidence{
+					from.Evidence,
+					to.Evidence,
+				},
+			},
+		},
+	})
+	normalized.Warnings = append(
+		normalized.Warnings,
+		fmt.Sprintf(
+			"semantic_guard: added fallback cross-repo edge %q from=%q(%s) to=%q(%s)",
+			edgeID,
+			from.ID,
+			from.Repo,
+			to.ID,
+			to.Repo,
+		),
+	)
+	return normalized
+}
+
+func (e *pipelineExecution) applyEvidencePathSemanticGuard(stepID string, task acpruntime.Task, normalized contracts.TaskResult) contracts.TaskResult {
+	if stepID != "refresh.step1.collect" && stepID != "refresh.step3.findings" {
+		return normalized
+	}
+
+	repoRoots := declaredRepoRoots(e.workspace)
+	removedTotal := 0
+	downgradedTotal := 0
+
+	for idx := range normalized.Changeset {
+		op := &normalized.Changeset[idx]
+		switch op.Op {
+		case "upsert_entity":
+			if op.Entity == nil {
+				continue
+			}
+			defaultRepo := entityRepoScope(*op.Entity, task)
+			removed, downgraded := sanitizeProvenanceEvidence(&op.Entity.Provenance, defaultRepo, e.workspace.Path, repoRoots)
+			removedTotal += removed
+			if downgraded {
+				downgradedTotal++
+			}
+		case "upsert_edge":
+			if op.Edge == nil {
+				continue
+			}
+			defaultRepo := ""
+			if len(task.RepoScopes) > 0 {
+				defaultRepo = strings.TrimSpace(task.RepoScopes[0])
+			}
+			removed, downgraded := sanitizeProvenanceEvidence(&op.Edge.Provenance, defaultRepo, e.workspace.Path, repoRoots)
+			removedTotal += removed
+			if downgraded {
+				downgradedTotal++
+			}
+		case "add_finding":
+			if op.Finding == nil {
+				continue
+			}
+			defaultRepo := ""
+			if len(task.RepoScopes) > 0 {
+				defaultRepo = strings.TrimSpace(task.RepoScopes[0])
+			}
+			removed, downgraded := sanitizeProvenanceEvidence(&op.Finding.Provenance, defaultRepo, e.workspace.Path, repoRoots)
+			removedTotal += removed
+			if downgraded {
+				downgradedTotal++
+			}
+		}
+	}
+
+	if removedTotal > 0 {
+		normalized.Warnings = append(
+			normalized.Warnings,
+			fmt.Sprintf("semantic_guard: removed invalid evidence paths count=%d", removedTotal),
+		)
+	}
+	if downgradedTotal > 0 {
+		normalized.Warnings = append(
+			normalized.Warnings,
+			fmt.Sprintf("semantic_guard: downgraded observation provenance to inference count=%d", downgradedTotal),
+		)
+	}
+
+	return normalized
+}
+
+func entityRepoScope(entity contracts.Entity, task acpruntime.Task) string {
+	if attributes, ok := entity.Attributes.(map[string]any); ok {
+		if repoScope, ok := attributes["repo_scope"].(string); ok {
+			repoScope = strings.TrimSpace(repoScope)
+			if repoScope != "" {
+				return repoScope
+			}
+		}
+	}
+	for _, evidence := range entity.Provenance.Evidence {
+		repo := strings.TrimSpace(evidence.Repo)
+		if repo != "" {
+			return repo
+		}
+	}
+	if len(task.RepoScopes) > 0 {
+		return strings.TrimSpace(task.RepoScopes[0])
+	}
+	return ""
+}
+
+func fallbackEvidenceForEntity(entity contracts.Entity, repoScope string, workspaceRoot string, repoRoots map[string]string) (contracts.Evidence, bool) {
+	for _, evidence := range entity.Provenance.Evidence {
+		candidate := evidence
+		repo := strings.TrimSpace(candidate.Repo)
+		if repo == "" {
+			repo = strings.TrimSpace(repoScope)
+		}
+		candidate.Repo = repo
+		if evidencePathResolvesInScope(candidate, workspaceRoot, repoRoots) {
+			return contracts.Evidence{
+				Repo: strings.TrimSpace(candidate.Repo),
+				Ref:  strings.TrimSpace(candidate.Ref),
+				Path: strings.TrimSpace(candidate.Path),
+			}, true
+		}
+	}
+
+	repo := strings.TrimSpace(repoScope)
+	if repo == "" {
+		repo = "unknown"
+	}
+	for _, candidatePath := range []string{"README.md", "README", "go.mod", "package.json", "pom.xml"} {
+		candidate := contracts.Evidence{
+			Repo: repo,
+			Path: candidatePath,
+		}
+		if evidencePathResolvesInScope(candidate, workspaceRoot, repoRoots) {
+			return candidate, true
+		}
+	}
+	return contracts.Evidence{}, false
+}
+
+func sanitizeProvenanceEvidence(provenance *contracts.Provenance, defaultRepo string, workspaceRoot string, repoRoots map[string]string) (removed int, downgraded bool) {
+	if provenance == nil {
+		return 0, false
+	}
+	filtered := make([]contracts.Evidence, 0, len(provenance.Evidence))
+	for _, evidence := range provenance.Evidence {
+		candidate := evidence
+		if strings.TrimSpace(candidate.Repo) == "" && strings.TrimSpace(defaultRepo) != "" {
+			candidate.Repo = strings.TrimSpace(defaultRepo)
+		}
+		if evidencePathResolvesInScope(candidate, workspaceRoot, repoRoots) {
+			filtered = append(filtered, candidate)
+			continue
+		}
+		removed++
+	}
+	provenance.Evidence = filtered
+	if strings.TrimSpace(provenance.Kind) == "observation" && len(provenance.Evidence) == 0 {
+		provenance.Kind = "inference"
+		downgraded = true
+	}
+	return removed, downgraded
+}
+
+func declaredRepoRoots(ws workspace.Root) map[string]string {
+	roots := map[string]string{}
+	for _, repo := range ws.Manifest.Repos {
+		name := strings.TrimSpace(repo.Name)
+		if name == "" {
+			continue
+		}
+		root := strings.TrimSpace(repo.Path)
+		if root == "" && strings.TrimSpace(repo.GitURL) != "" {
+			root = filepath.Join(ws.Path, ".acp", "repos", slugutil.Slugify(name))
+		}
+		if root == "" {
+			continue
+		}
+		if !filepath.IsAbs(root) {
+			root = filepath.Join(ws.Path, root)
+		}
+		root = filepath.Clean(root)
+		info, err := os.Stat(root)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		roots[normalizeSemanticKey(name)] = root
+	}
+	return roots
+}
+
+func evidencePathResolvesInScope(evidence contracts.Evidence, workspaceRoot string, repoRoots map[string]string) bool {
+	raw := strings.TrimSpace(evidence.Path)
+	if raw == "" {
+		return false
+	}
+	if raw == "." || raw == "/" || raw == ".." {
+		return false
+	}
+
+	normalized := normalizeEvidencePath(raw)
+	if normalized == "" {
+		return false
+	}
+	normalizedLower := strings.ToLower(normalized)
+	for _, prefix := range []string{"search_source/", "search_query/", "search_config/", "web_search/", "external_search/"} {
+		if strings.HasPrefix(strings.ToLower(raw), prefix) || strings.HasPrefix(normalizedLower, prefix) {
+			return false
+		}
+	}
+	if strings.Contains(normalizedLower, "://") {
+		return false
+	}
+
+	candidate := filepath.Clean(filepath.FromSlash(normalized))
+	if candidate == "." || candidate == ".." {
+		return false
+	}
+	if filepath.IsAbs(candidate) {
+		info, err := os.Stat(candidate)
+		if err != nil || info.IsDir() {
+			return false
+		}
+		if isPathWithinRoot(candidate, workspaceRoot) {
+			return true
+		}
+		for _, root := range repoRoots {
+			if isPathWithinRoot(candidate, root) {
+				return true
+			}
+		}
+		return false
+	}
+
+	var roots []string
+	repoScope := normalizeSemanticKey(strings.TrimSpace(evidence.Repo))
+	if repoScope != "" {
+		if root, ok := repoRoots[repoScope]; ok {
+			roots = append(roots, root)
+		}
+	}
+	if len(roots) == 0 {
+		roots = append(roots, workspaceRoot)
+		for _, root := range repoRoots {
+			roots = append(roots, root)
+		}
+	} else {
+		roots = append(roots, workspaceRoot)
+	}
+
+	candidateVariants := []string{candidate}
+	normalizedSlash := filepath.ToSlash(candidate)
+	if strings.HasPrefix(normalizedSlash, "arch-workspace/") || strings.HasPrefix(normalizedSlash, "workspace/") {
+		parts := strings.SplitN(normalizedSlash, "/", 2)
+		if len(parts) == 2 && strings.TrimSpace(parts[1]) != "" {
+			candidateVariants = append(candidateVariants, filepath.Clean(filepath.FromSlash(parts[1])))
+		}
+	}
+
+	for _, variant := range candidateVariants {
+		for _, root := range roots {
+			absCandidate := filepath.Join(root, variant)
+			info, err := os.Stat(absCandidate)
+			if err == nil && !info.IsDir() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func normalizeEvidencePath(pathValue string) string {
+	value := strings.TrimSpace(strings.Trim(pathValue, "`"))
+	if value == "" {
+		return ""
+	}
+	if queryIndex := strings.IndexByte(value, '?'); queryIndex >= 0 {
+		value = value[:queryIndex]
+	}
+	if hashIndex := strings.IndexByte(value, '#'); hashIndex >= 0 {
+		value = value[:hashIndex]
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if colon := strings.LastIndex(value, ":"); colon > 0 {
+		prefix := value[:colon]
+		suffix := value[colon+1:]
+		if !looksLikeWindowsDrive(prefix) && looksLikeLineSuffix(suffix) {
+			value = strings.TrimSpace(prefix)
+		}
+	}
+	return strings.TrimSpace(value)
+}
+
+func looksLikeLineSuffix(value string) bool {
+	parts := strings.Split(value, ":")
+	if len(parts) == 0 {
+		return false
+	}
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return false
+		}
+		if _, err := strconv.Atoi(part); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+func looksLikeWindowsDrive(prefix string) bool {
+	if len(prefix) < 2 {
+		return false
+	}
+	letter := prefix[0]
+	if (letter < 'A' || letter > 'Z') && (letter < 'a' || letter > 'z') {
+		return false
+	}
+	return prefix[1] == ':'
+}
+
+func isPathWithinRoot(candidate string, root string) bool {
+	absCandidate, err := filepath.Abs(candidate)
+	if err != nil {
+		return false
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(absRoot, absCandidate)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	if rel == ".." {
+		return false
+	}
+	return !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func dedupeStrings(values []string) []string {

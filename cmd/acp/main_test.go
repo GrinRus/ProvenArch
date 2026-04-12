@@ -891,19 +891,47 @@ func writeStubHeadlessRunner(t *testing.T, runtimeName string) string {
 
 	path := filepath.Join(t.TempDir(), "stub-headless-runner.sh")
 	script := `#!/usr/bin/env bash
+set -eu
 TASK_PAYLOAD="$(cat)"
-TASK_PAYLOAD="$TASK_PAYLOAD" python3 - <<'PY'
+LAST_ARG=""
+for arg in "$@"; do
+  LAST_ARG="$arg"
+done
+TASK_PAYLOAD="$TASK_PAYLOAD" TASK_PROMPT="$LAST_ARG" python3 - <<'PY'
 import json
 import os
+import re
 import sys
 
 raw = os.environ.get("TASK_PAYLOAD", "").strip()
-task = json.loads(raw) if raw else {}
+prompt = os.environ.get("TASK_PROMPT", "")
+
+def first_non_empty(mapping, keys):
+    for key in keys:
+        value = mapping.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+def from_prompt(field):
+    match = re.search(r'"%s"\s*:\s*"([^"]+)"' % re.escape(field), prompt)
+    return match.group(1).strip() if match else ""
+
+task = {}
+if raw:
+    try:
+        task = json.loads(raw)
+    except Exception:
+        task = {}
+
+task_id = first_non_empty(task, ["task_id", "TaskID"]) or from_prompt("TaskID") or from_prompt("task_id") or "task"
+step_id = first_non_empty(task, ["step_id", "StepID"]) or from_prompt("StepID") or from_prompt("step_id") or "init.step1.collect"
+run_id = first_non_empty(task, ["run_id", "RunID"]) or from_prompt("RunID") or from_prompt("run_id")
 payload = {
     "meta": {
-        "task_id": task.get("task_id", "task"),
-        "step_id": task.get("step_id", "init.step1.collect"),
-        "run_id": task.get("run_id", ""),
+        "task_id": task_id,
+        "step_id": step_id,
+        "run_id": run_id,
         "runtime": {
             "name": "` + runtimeName + `",
             "version": "stub"

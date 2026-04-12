@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -20,16 +21,20 @@ func Extract(raw []byte) ([]byte, error) {
 	}
 	if _, err := contracts.ParseTaskResult(trimmed); err == nil {
 		return trimmed, nil
+	} else {
+		bestErr := fmt.Errorf("schema validation failed for raw stdout: %w", err)
+		if parsed, parseErr := parseFromJSON(trimmed); parseErr == nil {
+			return parsed, nil
+		} else {
+			bestErr = preferExtractError(bestErr, parseErr)
+		}
+		if parsed, parseErr := parseFromText(string(trimmed)); parseErr == nil {
+			return parsed, nil
+		} else {
+			bestErr = preferExtractError(bestErr, parseErr)
+		}
+		return nil, fmt.Errorf("unable to extract valid TaskResult JSON from runner output: %w", bestErr)
 	}
-
-	if parsed, err := parseFromJSON(trimmed); err == nil {
-		return parsed, nil
-	}
-	if parsed, err := parseFromText(string(trimmed)); err == nil {
-		return parsed, nil
-	}
-
-	return nil, errors.New("unable to extract valid TaskResult JSON from runner output")
 }
 
 func parseFromJSON(raw []byte) ([]byte, error) {
@@ -43,7 +48,11 @@ func parseFromJSON(raw []byte) ([]byte, error) {
 func parseCandidate(value any) ([]byte, error) {
 	switch typed := value.(type) {
 	case string:
-		return parseFromText(typed)
+		parsed, err := parseFromText(typed)
+		if err != nil {
+			return nil, fmt.Errorf("string candidate parse failed: %w", err)
+		}
+		return parsed, nil
 	case map[string]any:
 		raw, err := json.Marshal(typed)
 		if err != nil {
@@ -51,33 +60,53 @@ func parseCandidate(value any) ([]byte, error) {
 		}
 		if _, err := contracts.ParseTaskResult(raw); err == nil {
 			return raw, nil
-		}
-
-		priorityKeys := []string{"result", "response", "message", "content", "text"}
-		seen := map[string]struct{}{}
-		for _, key := range priorityKeys {
-			seen[key] = struct{}{}
-			nested, ok := typed[key]
-			if !ok {
-				continue
+		} else {
+			bestErr := fmt.Errorf("taskresult schema validation failed: %w", err)
+			priorityKeys := []string{"result", "response", "message", "content", "text"}
+			seen := map[string]struct{}{}
+			for _, key := range priorityKeys {
+				seen[key] = struct{}{}
+				nested, ok := typed[key]
+				if !ok {
+					continue
+				}
+				if key == "result" {
+					if resultValue, isString := nested.(string); isString && strings.TrimSpace(resultValue) == "" {
+						bestErr = preferExtractError(bestErr, errors.New("envelope result is empty"))
+						continue
+					}
+				}
+				if parsed, nestedErr := parseCandidate(nested); nestedErr == nil {
+					return parsed, nil
+				} else {
+					bestErr = preferExtractError(bestErr, fmt.Errorf("envelope key %q: %w", key, nestedErr))
+				}
 			}
-			if parsed, nestedErr := parseCandidate(nested); nestedErr == nil {
-				return parsed, nil
+			for key, nested := range typed {
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				if parsed, nestedErr := parseCandidate(nested); nestedErr == nil {
+					return parsed, nil
+				} else {
+					bestErr = preferExtractError(bestErr, fmt.Errorf("object key %q: %w", key, nestedErr))
+				}
 			}
-		}
-		for key, nested := range typed {
-			if _, ok := seen[key]; ok {
-				continue
-			}
-			if parsed, nestedErr := parseCandidate(nested); nestedErr == nil {
-				return parsed, nil
+			if bestErr != nil {
+				return nil, bestErr
 			}
 		}
 	case []any:
+		var bestErr error
 		for idx := len(typed) - 1; idx >= 0; idx-- {
 			if parsed, err := parseCandidate(typed[idx]); err == nil {
 				return parsed, nil
+			} else {
+				bestErr = preferExtractError(bestErr, fmt.Errorf("array item[%d]: %w", idx, err))
 			}
+		}
+		if bestErr != nil {
+			return nil, bestErr
 		}
 	}
 	return nil, errors.New("unsupported candidate value")
@@ -92,25 +121,37 @@ func parseFromText(text string) ([]byte, error) {
 		trimmed = normalizeText(candidate)
 	}
 
+	var bestErr error
 	if json.Valid([]byte(trimmed)) {
 		if parsed, err := parseFromJSON([]byte(trimmed)); err == nil {
 			return parsed, nil
+		} else {
+			bestErr = preferExtractError(bestErr, err)
 		}
 	}
 	if parsed, err := parseFromNDJSON(trimmed); err == nil {
 		return parsed, nil
+	} else {
+		bestErr = preferExtractError(bestErr, err)
 	}
 
 	candidates := extractJSONObjects(trimmed)
 	if len(candidates) == 0 {
+		if bestErr != nil {
+			return nil, bestErr
+		}
 		return nil, errors.New("no json object found in text")
 	}
 	for _, candidate := range candidates {
 		if parsed, err := parseFromJSON([]byte(candidate)); err == nil {
 			return parsed, nil
+		} else {
+			bestErr = preferExtractError(bestErr, err)
 		}
 	}
-
+	if bestErr != nil {
+		return nil, bestErr
+	}
 	return nil, errors.New("unable to parse taskresult from extracted json objects")
 }
 
@@ -164,10 +205,16 @@ func parseFromNDJSON(text string) ([]byte, error) {
 	if len(candidates) == 0 {
 		return nil, errors.New("no ndjson candidates")
 	}
+	var bestErr error
 	for idx := len(candidates) - 1; idx >= 0; idx-- {
 		if parsed, err := parseFromJSON([]byte(candidates[idx])); err == nil {
 			return parsed, nil
+		} else {
+			bestErr = preferExtractError(bestErr, err)
 		}
+	}
+	if bestErr != nil {
+		return nil, bestErr
 	}
 	return nil, errors.New("unable to parse taskresult from ndjson")
 }
@@ -242,4 +289,28 @@ func extractJSONObjects(input string) []string {
 		start = start + 1 + next
 	}
 	return candidates
+}
+
+func preferExtractError(current error, candidate error) error {
+	if candidate == nil {
+		return current
+	}
+	if current == nil {
+		return candidate
+	}
+	currentText := strings.ToLower(strings.TrimSpace(current.Error()))
+	candidateText := strings.ToLower(strings.TrimSpace(candidate.Error()))
+	if strings.Contains(candidateText, "envelope result is empty") {
+		return candidate
+	}
+	if strings.Contains(currentText, "unsupported candidate value") {
+		return candidate
+	}
+	if strings.Contains(currentText, "unable to parse taskresult") && !strings.Contains(candidateText, "unable to parse taskresult") {
+		return candidate
+	}
+	if strings.Contains(candidateText, "taskresult") && !strings.Contains(currentText, "taskresult") {
+		return candidate
+	}
+	return current
 }

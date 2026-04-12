@@ -71,6 +71,9 @@ func TestHeadlessRunnerInvalidTaskResultClassifiesAsParseFailed(t *testing.T) {
 	if !strings.Contains(message, "invalid taskresult") || !strings.Contains(message, "raw_output=reports/taskruns/raw/") {
 		t.Fatalf("unexpected error message %q", message)
 	}
+	if !strings.Contains(message, "parse_stage=") {
+		t.Fatalf("expected parse_stage marker in parse-fail message, got %q", message)
+	}
 	rawMetaFiles, globErr := filepath.Glob(filepath.Join(workspace, "reports", "taskruns", "raw", "*-meta.json"))
 	if globErr != nil {
 		t.Fatalf("glob raw output meta files: %v", globErr)
@@ -225,6 +228,41 @@ func TestHeadlessRunnerParsesTaskResultFromJsonObjectsStream(t *testing.T) {
 	}
 	if result.TaskResult.Meta.TaskID != "task-1" {
 		t.Fatalf("unexpected task id %q", result.TaskResult.Meta.TaskID)
+	}
+}
+
+func TestHeadlessRunnerBindingMismatchClassifiesAsParseFailed(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	runner := HeadlessRunner{
+		Command: "sh",
+		Args: []string{
+			"-c",
+			`printf '%s\n' '{"meta":{"task_id":"task-stale","step_id":"init.step1.collect","run_id":"run-stale","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}'`,
+		},
+	}
+
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-expected",
+		RunID:        "run-expected",
+		StepID:       "init.step1.collect",
+		Workspace:    workspace,
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected binding parse-failed error")
+	}
+	code, message, ok := acpruntime.ClassifyError(err)
+	if !ok {
+		t.Fatalf("expected classify error to succeed")
+	}
+	if code != string(acpruntime.ErrorCodeRunnerParseFailed) {
+		t.Fatalf("unexpected error code %q", code)
+	}
+	if !strings.Contains(message, "parse_stage=binding") {
+		t.Fatalf("expected parse_stage=binding in parse-fail message, got %q", message)
 	}
 }
 

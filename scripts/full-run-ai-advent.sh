@@ -38,6 +38,8 @@ COMPLETED_RUNS=0
 EXPECTED_HEADLESS_RUNS=0
 COMPLETED_HEADLESS_RUNS=0
 RUNNING_RUNS_DETECTED=0
+RUNNING_RUNS_BASELINE=0
+RUNNING_RUNS_HEADLESS=0
 SUMMARY_RESULT=""
 
 if [[ ! "$ITERATIONS" =~ ^[1-9][0-9]*$ ]]; then
@@ -70,7 +72,10 @@ else
   mkdir -p "$TMP_ROOT"
 fi
 
-WORKSPACE="$TMP_ROOT/arch-workspace"
+WORKSPACE_HEADLESS="$TMP_ROOT/arch-workspace"
+WORKSPACE_BASELINE="$TMP_ROOT/arch-workspace-baseline"
+# Keep legacy alias for compatibility in older helper code paths.
+WORKSPACE="$WORKSPACE_HEADLESS"
 LOG_DIR="$TMP_ROOT/logs"
 SNAPSHOT_DIR="$TMP_ROOT/snapshots"
 SUMMARY_PATH="$TMP_ROOT/session-summary.md"
@@ -129,18 +134,13 @@ on_termination_signal() {
   exit 1
 }
 
-refresh_runtime_cycle_metrics() {
-  if [[ -f "$RUN_RESULTS_TSV" ]]; then
-    COMPLETED_RUNS="$(awk 'NF { count++ } END { print count+0 }' "$RUN_RESULTS_TSV")"
-    COMPLETED_HEADLESS_RUNS="$(awk -F'\t' 'NF && $2 == "headless" { count++ } END { print count+0 }' "$RUN_RESULTS_TSV")"
-  else
-    COMPLETED_RUNS=0
-    COMPLETED_HEADLESS_RUNS=0
+count_running_runs_in_history() {
+  local run_history_path="$1"
+  if [[ ! -f "$run_history_path" ]]; then
+    printf '0'
+    return 0
   fi
-
-  local run_history_path="$WORKSPACE/reports/taskruns/run-history.json"
-  if [[ -f "$run_history_path" ]]; then
-    RUNNING_RUNS_DETECTED="$(python3 - "$run_history_path" <<'PY'
+  python3 - "$run_history_path" <<'PY'
 import json
 import sys
 
@@ -157,10 +157,22 @@ for item in items:
         running += 1
 print(running)
 PY
-)"
+}
+
+refresh_runtime_cycle_metrics() {
+  if [[ -f "$RUN_RESULTS_TSV" ]]; then
+    COMPLETED_RUNS="$(awk 'NF { count++ } END { print count+0 }' "$RUN_RESULTS_TSV")"
+    COMPLETED_HEADLESS_RUNS="$(awk -F'\t' 'NF && $2 == "headless" { count++ } END { print count+0 }' "$RUN_RESULTS_TSV")"
   else
-    RUNNING_RUNS_DETECTED=0
+    COMPLETED_RUNS=0
+    COMPLETED_HEADLESS_RUNS=0
   fi
+
+  local baseline_history_path="$WORKSPACE_BASELINE/reports/taskruns/run-history.json"
+  local headless_history_path="$WORKSPACE_HEADLESS/reports/taskruns/run-history.json"
+  RUNNING_RUNS_BASELINE="$(count_running_runs_in_history "$baseline_history_path")"
+  RUNNING_RUNS_HEADLESS="$(count_running_runs_in_history "$headless_history_path")"
+  RUNNING_RUNS_DETECTED=$((RUNNING_RUNS_BASELINE + RUNNING_RUNS_HEADLESS))
 }
 
 validate_runtime_cycle_completion() {
@@ -192,12 +204,17 @@ validate_runtime_cycle_completion() {
     done
   fi
 
-  local run_history_path="$WORKSPACE/reports/taskruns/run-history.json"
-  if [[ ! -f "$run_history_path" ]]; then
-    log "completion invariant failed: missing run history $run_history_path"
+  local baseline_history_path="$WORKSPACE_BASELINE/reports/taskruns/run-history.json"
+  local headless_history_path="$WORKSPACE_HEADLESS/reports/taskruns/run-history.json"
+  if [[ ! -f "$baseline_history_path" ]]; then
+    log "completion invariant failed: missing run history $baseline_history_path"
+    failed=1
+  fi
+  if [[ ! -f "$headless_history_path" ]]; then
+    log "completion invariant failed: missing run history $headless_history_path"
     failed=1
   elif (( RUNNING_RUNS_DETECTED > 0 )); then
-    log "completion invariant failed: detected running runs in history ($RUNNING_RUNS_DETECTED)"
+    log "completion invariant failed: detected running runs in history (baseline=$RUNNING_RUNS_BASELINE headless=$RUNNING_RUNS_HEADLESS total=$RUNNING_RUNS_DETECTED)"
     failed=1
   fi
 
@@ -435,17 +452,18 @@ snapshot_run_artifacts() {
   local runtime="$2"
   local pipeline="$3"
   local iteration="$4"
+  local workspace_path="$5"
 
   local dst="$SNAPSHOT_DIR/$run_id"
   mkdir -p "$dst"
 
-  copy_if_exists "$WORKSPACE/reports/as-is/overview.md" "$dst/reports/as-is/overview.md"
-  copy_if_exists "$WORKSPACE/reports/findings/findings.md" "$dst/reports/findings/findings.md"
-  copy_if_exists "$WORKSPACE/reports/coverage/summary.md" "$dst/reports/coverage/summary.md"
-  copy_if_exists "$WORKSPACE/reports/coverage/open-questions.md" "$dst/reports/coverage/open-questions.md"
-  copy_if_exists "$WORKSPACE/reports/taskruns/${run_id}.json" "$dst/reports/taskruns/${run_id}.json"
-  copy_if_exists "$WORKSPACE/reports/taskruns/${run_id}-quality.json" "$dst/reports/taskruns/${run_id}-quality.json"
-  for taskrun_json in "$WORKSPACE/reports/taskruns/${run_id}-"*.json; do
+  copy_if_exists "$workspace_path/reports/as-is/overview.md" "$dst/reports/as-is/overview.md"
+  copy_if_exists "$workspace_path/reports/findings/findings.md" "$dst/reports/findings/findings.md"
+  copy_if_exists "$workspace_path/reports/coverage/summary.md" "$dst/reports/coverage/summary.md"
+  copy_if_exists "$workspace_path/reports/coverage/open-questions.md" "$dst/reports/coverage/open-questions.md"
+  copy_if_exists "$workspace_path/reports/taskruns/${run_id}.json" "$dst/reports/taskruns/${run_id}.json"
+  copy_if_exists "$workspace_path/reports/taskruns/${run_id}-quality.json" "$dst/reports/taskruns/${run_id}-quality.json"
+  for taskrun_json in "$workspace_path/reports/taskruns/${run_id}-"*.json; do
     if [[ -f "$taskrun_json" ]]; then
       copy_if_exists "$taskrun_json" "$dst/reports/taskruns/$(basename "$taskrun_json")"
     fi
@@ -453,13 +471,14 @@ snapshot_run_artifacts() {
 
   local run_slug
   run_slug="$(slugify "$run_id")"
-  copy_if_exists "$WORKSPACE/reports/taskruns/logs/${run_slug}.ndjson" "$dst/reports/taskruns/logs/${run_slug}.ndjson"
+  copy_if_exists "$workspace_path/reports/taskruns/logs/${run_slug}.ndjson" "$dst/reports/taskruns/logs/${run_slug}.ndjson"
 
   cat > "$dst/snapshot-meta.txt" <<META
 iteration=$iteration
 runtime=$runtime
 pipeline=$pipeline
 run_id=$run_id
+workspace=$workspace_path
 captured_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
 META
 }
@@ -529,8 +548,9 @@ PY
 }
 
 check_ai_advent_text_signal() {
-  local run_id="$1"
-  python3 - "$WORKSPACE" "$run_id" <<'PY'
+  local workspace_path="$1"
+  local run_id="$2"
+  python3 - "$workspace_path" "$run_id" <<'PY'
 import os
 import re
 import sys
@@ -570,8 +590,9 @@ PY
 }
 
 check_headless_refresh_semantic_quality() {
-  local run_id="$1"
-  python3 - "$WORKSPACE" "$run_id" <<'PY'
+  local workspace_path="$1"
+  local run_id="$2"
+  python3 - "$workspace_path" "$run_id" <<'PY'
 import glob
 import json
 import os
@@ -656,7 +677,8 @@ run_cli_pipeline() {
   local runtime_provider="$2"
   local pipeline="$3"
   local iteration="$4"
-  local previous_signal="$5"
+  local workspace_path="$5"
+  local previous_signal="$6"
 
   local runtime_label="$runtime_mode"
   if [[ "$runtime_mode" == "headless" ]]; then
@@ -671,7 +693,7 @@ run_cli_pipeline() {
   log "run: iteration=$iteration runtime=$runtime_label pipeline=$pipeline"
   local run_cmd=(
     "$ACP_BIN" run
-    --workspace "$WORKSPACE"
+    --workspace "$workspace_path"
     --pipeline "$pipeline"
     --runtime "$runtime_mode"
     --non-interactive
@@ -696,7 +718,7 @@ run_cli_pipeline() {
     die "unexpected run status for $run_id: $status"
   fi
 
-  quality_path="$WORKSPACE/reports/taskruns/${run_id}-quality.json"
+  quality_path="$workspace_path/reports/taskruns/${run_id}-quality.json"
   if [[ ! -f "$quality_path" ]]; then
     die "missing quality summary for run $run_id at $quality_path"
   fi
@@ -728,13 +750,13 @@ run_cli_pipeline() {
     if [[ -n "$previous_signal" ]] && (( signal_score < previous_signal )); then
       die "quality regression: last run signal ($signal_score) is lower than previous run signal ($previous_signal) in iteration $iteration"
     fi
-    check_headless_refresh_semantic_quality "$run_id" || die "headless refresh semantic quality checks failed for run $run_id"
+    check_headless_refresh_semantic_quality "$workspace_path" "$run_id" || die "headless refresh semantic quality checks failed for run $run_id"
     if [[ "$TARGET_PROFILE" == "ai-advent" ]]; then
-      check_ai_advent_text_signal "$run_id" || die "ai-advent textual quality check failed for run $run_id"
+      check_ai_advent_text_signal "$workspace_path" "$run_id" || die "ai-advent textual quality check failed for run $run_id"
     fi
   fi
 
-  snapshot_run_artifacts "$run_id" "$runtime_label" "$pipeline" "$iteration"
+  snapshot_run_artifacts "$run_id" "$runtime_label" "$pipeline" "$iteration" "$workspace_path"
 
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$signal_score" "$changeset" "$findings" "$questions" "$coverage_observed" "$coverage_missing" "$warnings" "$runtime_versions" "$quality_path" "$output_path" >> "$RUN_RESULTS_TSV"
@@ -793,7 +815,9 @@ write_summary() {
     echo "- profile_source_kind: ${PROFILE_SOURCE_KIND:-mixed}"
     echo "- expected_repo_count: ${EXPECTED_REPO_COUNT:-auto}"
     echo "- target_profile: $TARGET_PROFILE"
-    echo "- workspace: $WORKSPACE"
+    echo "- workspace_baseline: $WORKSPACE_BASELINE"
+    echo "- workspace_headless: $WORKSPACE_HEADLESS"
+    echo "- workspace: $WORKSPACE_HEADLESS"
     echo "- tmp_root: $TMP_ROOT"
     echo "- full_run_log: $FULL_RUN_LOG"
     echo "- iterations: $ITERATIONS"
@@ -866,12 +890,12 @@ PY
     echo
 
     echo "## Key Artifacts"
-    echo "- $WORKSPACE/reports/as-is/overview.md"
-    echo "- $WORKSPACE/reports/findings/findings.md"
-    echo "- $WORKSPACE/reports/coverage/summary.md"
-    echo "- $WORKSPACE/reports/coverage/open-questions.md"
-    echo "- $WORKSPACE/reports/taskruns/run-history.json"
-    echo "- $WORKSPACE/reports/taskruns/logs/"
+    echo "- $WORKSPACE_HEADLESS/reports/as-is/overview.md"
+    echo "- $WORKSPACE_HEADLESS/reports/findings/findings.md"
+    echo "- $WORKSPACE_HEADLESS/reports/coverage/summary.md"
+    echo "- $WORKSPACE_HEADLESS/reports/coverage/open-questions.md"
+    echo "- $WORKSPACE_HEADLESS/reports/taskruns/run-history.json"
+    echo "- $WORKSPACE_HEADLESS/reports/taskruns/logs/"
     echo "- $SNAPSHOT_DIR"
     if [[ "$QUALITY_GATES_STATUS" == "passed" ]]; then
       echo "- quality_gates: passed ($QUALITY_LOG)"
@@ -975,18 +999,18 @@ if [[ ! -x "$ACP_BIN" ]]; then
   die "acp binary was not built at $ACP_BIN (see $LOG_DIR/make-build.log)"
 fi
 
-log "bootstrap workspace in tmp"
+log "bootstrap baseline workspace in tmp"
 "$ACP_BIN" init-workspace \
-  --workspace "$WORKSPACE" \
+  --workspace "$WORKSPACE_BASELINE" \
   --repos-file "$RESOLVED_TARGET_REPOS_FILE" >"$LOG_DIR/init-workspace.log" 2>&1
 
-if [[ ! -f "$WORKSPACE/workspace.yaml" ]]; then
-  die "workspace bootstrap failed: missing $WORKSPACE/workspace.yaml"
+if [[ ! -f "$WORKSPACE_BASELINE/workspace.yaml" ]]; then
+  die "workspace bootstrap failed: missing $WORKSPACE_BASELINE/workspace.yaml"
 fi
-if [[ ! -d "$WORKSPACE/.git" ]]; then
-  die "workspace bootstrap failed: missing $WORKSPACE/.git"
+if [[ ! -d "$WORKSPACE_BASELINE/.git" ]]; then
+  die "workspace bootstrap failed: missing $WORKSPACE_BASELINE/.git"
 fi
-if [[ ! -f "$WORKSPACE/skills/subagents.yaml" ]]; then
+if [[ ! -f "$WORKSPACE_BASELINE/skills/subagents.yaml" ]]; then
   die "workspace bootstrap failed: missing baseline bundle artifact skills/subagents.yaml"
 fi
 
@@ -996,7 +1020,7 @@ SERVER_LOG="$LOG_DIR/serve-fake.log"
 
 log "start API server for validate/init simulation"
 "$ACP_BIN" serve \
-  --workspace "$WORKSPACE" \
+  --workspace "$WORKSPACE_BASELINE" \
   --runtime fake \
   --listen "127.0.0.1:${API_PORT}" \
   --run-logs-ttl-hours "$RUN_LOGS_TTL_HOURS" \
@@ -1089,22 +1113,33 @@ API_SIM_STATUS="succeeded"
 log "stop API server"
 stop_server
 
+log "bootstrap headless workspace in tmp"
+"$ACP_BIN" init-workspace \
+  --workspace "$WORKSPACE_HEADLESS" \
+  --repos-file "$RESOLVED_TARGET_REPOS_FILE" >"$LOG_DIR/init-workspace-headless.log" 2>&1
+if [[ ! -f "$WORKSPACE_HEADLESS/workspace.yaml" ]]; then
+  die "headless workspace bootstrap failed: missing $WORKSPACE_HEADLESS/workspace.yaml"
+fi
+if [[ ! -d "$WORKSPACE_HEADLESS/.git" ]]; then
+  die "headless workspace bootstrap failed: missing $WORKSPACE_HEADLESS/.git"
+fi
+
 log "run runtime cycles: fake + headless(provider=$HEADLESS_PROVIDER)"
 prev_fake_init_signal=""
 prev_fake_refresh_signal=""
 prev_headless_init_signal=""
 prev_headless_refresh_signal=""
 for iteration in $(seq 1 "$ITERATIONS"); do
-  run_cli_pipeline "fake" "$HEADLESS_PROVIDER" "init" "$iteration" "$prev_fake_init_signal"
+  run_cli_pipeline "fake" "$HEADLESS_PROVIDER" "init" "$iteration" "$WORKSPACE_BASELINE" "$prev_fake_init_signal"
   prev_fake_init_signal="$LAST_SIGNAL"
 
-  run_cli_pipeline "fake" "$HEADLESS_PROVIDER" "refresh" "$iteration" "$prev_fake_refresh_signal"
+  run_cli_pipeline "fake" "$HEADLESS_PROVIDER" "refresh" "$iteration" "$WORKSPACE_BASELINE" "$prev_fake_refresh_signal"
   prev_fake_refresh_signal="$LAST_SIGNAL"
 
-  run_cli_pipeline "headless" "$HEADLESS_PROVIDER" "init" "$iteration" "$prev_headless_init_signal"
+  run_cli_pipeline "headless" "$HEADLESS_PROVIDER" "init" "$iteration" "$WORKSPACE_HEADLESS" "$prev_headless_init_signal"
   prev_headless_init_signal="$LAST_SIGNAL"
 
-  run_cli_pipeline "headless" "$HEADLESS_PROVIDER" "refresh" "$iteration" "$prev_headless_refresh_signal"
+  run_cli_pipeline "headless" "$HEADLESS_PROVIDER" "refresh" "$iteration" "$WORKSPACE_HEADLESS" "$prev_headless_refresh_signal"
   prev_headless_refresh_signal="$LAST_SIGNAL"
 done
 
@@ -1135,9 +1170,9 @@ else
 fi
 
 for path in \
-  "$WORKSPACE/reports/as-is/overview.md" \
-  "$WORKSPACE/reports/findings/findings.md" \
-  "$WORKSPACE/reports/coverage/open-questions.md"; do
+  "$WORKSPACE_HEADLESS/reports/as-is/overview.md" \
+  "$WORKSPACE_HEADLESS/reports/findings/findings.md" \
+  "$WORKSPACE_HEADLESS/reports/coverage/open-questions.md"; do
   if [[ ! -f "$path" ]]; then
     die "missing expected artifact after run cycle: $path"
   fi

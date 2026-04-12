@@ -16,6 +16,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/runnerdiag"
+	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultbinding"
 	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultextractor"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 )
@@ -64,10 +65,10 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 		return acpruntime.Result{}, fmt.Errorf("marshal runner task: %w", err)
 	}
 	if len(r.Args) > 0 || !isNativeDirectClaudeCommand(command) {
-		return runLegacyPassthrough(ctx, command, r.Args, taskPayload)
+		return runLegacyPassthrough(ctx, command, r.Args, task, taskPayload)
 	}
 
-	return runNativeDirectClaude(ctx, command, taskPayload)
+	return runNativeDirectClaude(ctx, command, task, taskPayload)
 }
 
 func isNativeDirectClaudeCommand(command string) bool {
@@ -75,8 +76,8 @@ func isNativeDirectClaudeCommand(command string) bool {
 	return base == "claude" || base == "claude.exe"
 }
 
-func runLegacyPassthrough(ctx context.Context, command string, args []string, taskPayload []byte) (acpruntime.Result, error) {
-	result, parseErr, runErr := runClaudeCommand(ctx, command, append([]string(nil), args...), taskPayload)
+func runLegacyPassthrough(ctx context.Context, command string, args []string, task acpruntime.Task, taskPayload []byte) (acpruntime.Result, error) {
+	result, parseStage, parseErr, runErr := runClaudeCommand(ctx, task, command, append([]string(nil), args...), taskPayload)
 	if runErr != nil {
 		return acpruntime.Result{}, acpruntime.WrapRunnerError(
 			acpruntime.ProviderClaudeCode,
@@ -86,7 +87,7 @@ func runLegacyPassthrough(ctx context.Context, command string, args []string, ta
 		)
 	}
 	if parseErr != nil {
-		parseFailureMessage := buildParseFailureMessage(taskPayload, parseErr, result)
+		parseFailureMessage := buildParseFailureMessage(task, parseStage, parseErr, result)
 		return acpruntime.Result{}, acpruntime.WrapRunnerError(
 			acpruntime.ProviderClaudeCode,
 			acpruntime.ErrorCodeRunnerParseFailed,
@@ -97,9 +98,9 @@ func runLegacyPassthrough(ctx context.Context, command string, args []string, ta
 	return result, nil
 }
 
-func runNativeDirectClaude(ctx context.Context, command string, taskPayload []byte) (acpruntime.Result, error) {
-	args := []string{"--output-format", "json", "-p", buildDirectPrompt(taskPayload, false)}
-	result, parseErr, runErr := runClaudeCommand(ctx, command, args, nil)
+func runNativeDirectClaude(ctx context.Context, command string, task acpruntime.Task, taskPayload []byte) (acpruntime.Result, error) {
+	args := buildNativeDirectClaudeArgs(task, buildDirectPrompt(taskPayload, false, false))
+	result, parseStage, parseErr, runErr := runClaudeCommand(ctx, task, command, args, nil)
 	if runErr != nil {
 		return acpruntime.Result{}, acpruntime.WrapRunnerError(
 			acpruntime.ProviderClaudeCode,
@@ -112,8 +113,11 @@ func runNativeDirectClaude(ctx context.Context, command string, taskPayload []by
 		return result, nil
 	}
 
-	retryArgs := []string{"--output-format", "json", "-p", buildDirectPrompt(taskPayload, true)}
-	retryResult, retryParseErr, retryRunErr := runClaudeCommand(ctx, command, retryArgs, nil)
+	retryArgs := buildNativeDirectClaudeArgs(
+		task,
+		buildDirectPrompt(taskPayload, true, parseStage == "extract" && isEnvelopeResultEmptyError(parseErr)),
+	)
+	retryResult, retryParseStage, retryParseErr, retryRunErr := runClaudeCommand(ctx, task, command, retryArgs, nil)
 	if retryRunErr != nil {
 		return acpruntime.Result{}, acpruntime.WrapRunnerError(
 			acpruntime.ProviderClaudeCode,
@@ -126,7 +130,7 @@ func runNativeDirectClaude(ctx context.Context, command string, taskPayload []by
 		return retryResult, nil
 	}
 
-	parseFailureMessage := buildParseFailureMessage(taskPayload, retryParseErr, retryResult)
+	parseFailureMessage := buildParseFailureMessage(task, retryParseStage, retryParseErr, retryResult)
 	return acpruntime.Result{}, acpruntime.WrapRunnerError(
 		acpruntime.ProviderClaudeCode,
 		acpruntime.ErrorCodeRunnerParseFailed,
@@ -135,21 +139,36 @@ func runNativeDirectClaude(ctx context.Context, command string, taskPayload []by
 	)
 }
 
-func buildParseFailureMessage(taskPayload []byte, parseErr error, result acpruntime.Result) string {
+func buildNativeDirectClaudeArgs(task acpruntime.Task, prompt string) []string {
+	args := []string{"--output-format", "json", "--permission-mode", "bypassPermissions"}
+	workspace := strings.TrimSpace(task.Workspace)
+	if workspace != "" {
+		args = append(args, "--add-dir", workspace)
+	}
+	args = append(args, "-p", prompt)
+	return args
+}
+
+func isEnvelopeResultEmptyError(err error) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(err.Error())), "envelope result is empty")
+}
+
+func buildParseFailureMessage(task acpruntime.Task, parseStage string, parseErr error, result acpruntime.Result) string {
 	base := strings.TrimSpace(parseErr.Error())
 	if base == "" {
 		base = "unknown parse error"
 	}
-	var task acpruntime.Task
-	if err := json.Unmarshal(taskPayload, &task); err != nil {
-		return fmt.Sprintf("%s (task_unmarshal_failed=%v)", base, err)
+	stage := strings.TrimSpace(parseStage)
+	if stage == "" {
+		stage = "unknown"
 	}
 	artifacts, err := runnerdiag.WriteParseFailureArtifacts(task, acpruntime.ProviderClaudeCode, result.Stdout, result.Stderr)
 	if err != nil {
-		return fmt.Sprintf("%s (raw_output_persist_failed=%v)", base, err)
+		return fmt.Sprintf("parse_stage=%s %s (raw_output_persist_failed=%v)", stage, base, err)
 	}
 	return fmt.Sprintf(
-		"%s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
+		"parse_stage=%s %s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
+		stage,
 		base,
 		artifacts.RelativeMetadataPath,
 		artifacts.Stdout.Bytes,
@@ -159,8 +178,12 @@ func buildParseFailureMessage(taskPayload []byte, parseErr error, result acprunt
 	)
 }
 
-func runClaudeCommand(ctx context.Context, command string, args []string, stdin []byte) (acpruntime.Result, error, error) {
+func runClaudeCommand(ctx context.Context, task acpruntime.Task, command string, args []string, stdin []byte) (acpruntime.Result, string, error, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
+	workspace := strings.TrimSpace(task.Workspace)
+	if workspace != "" {
+		cmd.Dir = workspace
+	}
 	if len(stdin) > 0 {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
@@ -175,7 +198,7 @@ func runClaudeCommand(ctx context.Context, command string, args []string, stdin 
 		if errText == "" {
 			errText = err.Error()
 		}
-		return acpruntime.Result{}, nil, errors.New(errText)
+		return acpruntime.Result{}, "", nil, errors.New(errText)
 	}
 
 	raw, err := taskresultextractor.Extract(stdout.Bytes())
@@ -183,14 +206,20 @@ func runClaudeCommand(ctx context.Context, command string, args []string, stdin 
 		return acpruntime.Result{
 			Stdout: stdout.String(),
 			Stderr: stderr.String(),
-		}, err, nil
+		}, "extract", err, nil
 	}
 	taskResult, err := contracts.ParseTaskResult(raw)
 	if err != nil {
 		return acpruntime.Result{
 			Stdout: stdout.String(),
 			Stderr: stderr.String(),
-		}, err, nil
+		}, "schema", err, nil
+	}
+	if err := taskresultbinding.Validate(task, taskResult, acpruntime.ProviderClaudeCode); err != nil {
+		return acpruntime.Result{
+			Stdout: stdout.String(),
+			Stderr: stderr.String(),
+		}, "binding", err, nil
 	}
 
 	return acpruntime.Result{
@@ -198,10 +227,10 @@ func runClaudeCommand(ctx context.Context, command string, args []string, stdin 
 		RawJSON:    raw,
 		Stdout:     stdout.String(),
 		Stderr:     stderr.String(),
-	}, nil, nil
+	}, "", nil, nil
 }
 
-func buildDirectPrompt(taskPayload []byte, retry bool) string {
+func buildDirectPrompt(taskPayload []byte, retry bool, requireNonEmptyResult bool) string {
 	var task acpruntime.Task
 	if err := json.Unmarshal(taskPayload, &task); err != nil {
 		return strings.TrimSpace(fmt.Sprintf(`You are ACP runtime provider %q.
@@ -226,6 +255,14 @@ Task payload JSON:
 			`Return only JSON object, without prose.`,
 		}, "\n")
 	}
+	nonEmptyResultHint := ""
+	if requireNonEmptyResult {
+		nonEmptyResultHint = strings.Join([]string{
+			`NON-EMPTY RESULT ONLY JSON MODE:`,
+			`- If using envelope fields like "result", value MUST be non-empty valid JSON object string.`,
+			`- Do NOT emit empty "result": "".`,
+		}, "\n")
+	}
 
 	return strings.TrimSpace(fmt.Sprintf(`You are ACP runtime provider %q.
 Return exactly one valid JSON object for ACP TaskResult.
@@ -246,6 +283,7 @@ STRICT CONTRACT (must pass):
 - Do not claim workspace is empty/minimal unless provenance evidence includes concrete file paths proving it.
 %s
 %s
+%s
 
 Set meta fields exactly:
 - meta.task_id = %q
@@ -261,7 +299,7 @@ Schema-valid template for this task (copy structure and field TYPES, then refine
 %s
 
 Serialized runtime task JSON (context only):
-%s`, acpruntime.ProviderClaudeCode, stepPolicy, retryHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderClaudeCode, "claude-cli", task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, repoScopesJSON, buildDirectTaskResultTemplateJSON(task), strings.TrimSpace(string(taskPayload))))
+%s`, acpruntime.ProviderClaudeCode, stepPolicy, retryHint, nonEmptyResultHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderClaudeCode, "claude-cli", task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, repoScopesJSON, buildDirectTaskResultTemplateJSON(task), strings.TrimSpace(string(taskPayload))))
 }
 
 func buildDirectTaskResultTemplateJSON(task acpruntime.Task) string {
@@ -321,6 +359,8 @@ func buildStepSpecificDirectPolicy(stepID string) string {
 			`STEP POLICY refresh.step3.findings:`,
 			`- If owner mapping is unresolved in evidence/coverage, include at least one add_finding operation.`,
 			`- Each finding must include rule_id, related_ids, and provenance.evidence[].`,
+			`- For observation provenance, evidence array MUST be non-empty.`,
+			`- If meta.repo_scopes has 2+ scopes, include at least one upsert_edge that links entities from different repo_scope values.`,
 			`- Include at least one question and at least three items in coverage.missing.`,
 		}, "\n")
 	default:

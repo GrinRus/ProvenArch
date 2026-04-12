@@ -590,6 +590,7 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path, preflight: dict[s
     runtime_parse_hit = False
     runner_unavailable_hit = False
     runner_error_hit = False
+    parse_stages: set[str] = set()
     for source_path in (summary_path, full_run_log):
         if not source_path.exists():
             continue
@@ -602,10 +603,13 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path, preflight: dict[s
             runtime_parse_hit = True
             runner_error_hit = True
             error_codes.append("runner_parse_failed")
+        parse_stages.update(match.group(1).strip() for match in re.finditer(r"parse_stage=([a-z_]+)", text))
     h3 = not runner_error_hit
     if not h3:
         issues.append("reliability:runner-errors")
         details.append(f"reliability/runner-errors -> {full_run_log}: detected {sorted(set(error_codes))}")
+        if parse_stages:
+            details.append(f"reliability/runner-errors -> parse_stages={sorted(parse_stages)}")
     if runtime_parse_hit:
         issues.append("reliability:runtime-parse")
     if runner_unavailable_hit:

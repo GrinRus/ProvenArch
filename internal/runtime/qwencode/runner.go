@@ -14,6 +14,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/runnerdiag"
+	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultbinding"
 	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultextractor"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 )
@@ -64,10 +65,10 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 
 	args := append([]string(nil), r.Args...)
 	if len(args) == 0 {
-		args = []string{"--output-format", "json", "--yolo", "--channel", "CI", buildPrompt(taskPayload, false)}
+		args = buildDefaultQwenArgs(task, buildPrompt(taskPayload, false))
 	}
 
-	result, parseErr, runErr := runQwenCommand(ctx, command, args)
+	result, parseStage, parseErr, runErr := runQwenCommand(ctx, task, command, args)
 	if runErr != nil {
 		return acpruntime.Result{}, acpruntime.WrapRunnerError(
 			acpruntime.ProviderQwenCode,
@@ -83,8 +84,8 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 	// Live qwen output can occasionally contain malformed tokens. Retry once with
 	// an explicitly stricter prompt before classifying as parse failure.
 	if len(r.Args) == 0 {
-		retryArgs := []string{"--output-format", "json", "--yolo", "--channel", "CI", buildPrompt(taskPayload, true)}
-		retryResult, retryParseErr, retryRunErr := runQwenCommand(ctx, command, retryArgs)
+		retryArgs := buildDefaultQwenArgs(task, buildPrompt(taskPayload, true))
+		retryResult, retryParseStage, retryParseErr, retryRunErr := runQwenCommand(ctx, task, command, retryArgs)
 		if retryRunErr != nil {
 			return acpruntime.Result{}, acpruntime.WrapRunnerError(
 				acpruntime.ProviderQwenCode,
@@ -97,10 +98,11 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 			return retryResult, nil
 		}
 		result = retryResult
+		parseStage = retryParseStage
 		parseErr = retryParseErr
 	}
 
-	parseFailureMessage := buildParseFailureMessage(task, parseErr, result)
+	parseFailureMessage := buildParseFailureMessage(task, parseStage, parseErr, result)
 	return acpruntime.Result{}, acpruntime.WrapRunnerError(
 		acpruntime.ProviderQwenCode,
 		acpruntime.ErrorCodeRunnerParseFailed,
@@ -109,17 +111,32 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 	)
 }
 
-func buildParseFailureMessage(task acpruntime.Task, parseErr error, result acpruntime.Result) string {
+func buildDefaultQwenArgs(task acpruntime.Task, prompt string) []string {
+	args := []string{"--output-format", "json", "--yolo", "--channel", "CI"}
+	workspace := strings.TrimSpace(task.Workspace)
+	if workspace != "" {
+		args = append(args, "--include-directories", workspace)
+	}
+	args = append(args, prompt)
+	return args
+}
+
+func buildParseFailureMessage(task acpruntime.Task, parseStage string, parseErr error, result acpruntime.Result) string {
 	base := strings.TrimSpace(parseErr.Error())
 	if base == "" {
 		base = "unknown parse error"
 	}
+	stage := strings.TrimSpace(parseStage)
+	if stage == "" {
+		stage = "unknown"
+	}
 	artifacts, err := runnerdiag.WriteParseFailureArtifacts(task, acpruntime.ProviderQwenCode, result.Stdout, result.Stderr)
 	if err != nil {
-		return fmt.Sprintf("%s (raw_output_persist_failed=%v)", base, err)
+		return fmt.Sprintf("parse_stage=%s %s (raw_output_persist_failed=%v)", stage, base, err)
 	}
 	return fmt.Sprintf(
-		"%s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
+		"parse_stage=%s %s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
+		stage,
 		base,
 		artifacts.RelativeMetadataPath,
 		artifacts.Stdout.Bytes,
@@ -129,8 +146,12 @@ func buildParseFailureMessage(task acpruntime.Task, parseErr error, result acpru
 	)
 }
 
-func runQwenCommand(ctx context.Context, command string, args []string) (acpruntime.Result, error, error) {
+func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, args []string) (acpruntime.Result, string, error, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
+	workspace := strings.TrimSpace(task.Workspace)
+	if workspace != "" {
+		cmd.Dir = workspace
+	}
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -142,7 +163,7 @@ func runQwenCommand(ctx context.Context, command string, args []string) (acprunt
 		if errText == "" {
 			errText = err.Error()
 		}
-		return acpruntime.Result{}, nil, errors.New(errText)
+		return acpruntime.Result{}, "", nil, errors.New(errText)
 	}
 
 	rawTaskResult, err := taskresultextractor.Extract(stdout.Bytes())
@@ -150,21 +171,27 @@ func runQwenCommand(ctx context.Context, command string, args []string) (acprunt
 		return acpruntime.Result{
 			Stdout: stdout.String(),
 			Stderr: stderr.String(),
-		}, err, nil
+		}, "extract", err, nil
 	}
 	taskResult, err := contracts.ParseTaskResult(rawTaskResult)
 	if err != nil {
 		return acpruntime.Result{
 			Stdout: stdout.String(),
 			Stderr: stderr.String(),
-		}, err, nil
+		}, "schema", err, nil
+	}
+	if err := taskresultbinding.Validate(task, taskResult, acpruntime.ProviderQwenCode); err != nil {
+		return acpruntime.Result{
+			Stdout: stdout.String(),
+			Stderr: stderr.String(),
+		}, "binding", err, nil
 	}
 	return acpruntime.Result{
 		TaskResult: taskResult,
 		RawJSON:    rawTaskResult,
 		Stdout:     stdout.String(),
 		Stderr:     stderr.String(),
-	}, nil, nil
+	}, "", nil, nil
 }
 
 func buildPrompt(taskPayload []byte, retry bool) string {
@@ -189,6 +216,10 @@ Task payload JSON:
 			`Do not include non-ASCII symbols in numbers or timestamps.`,
 			`RFC3339 timestamps only (example: 2026-04-09T15:28:49Z).`,
 			`Decimals must be compact numeric literals (example: 0.7, not 0. 7).`,
+			`COMPACT JSON MODE: keep output concise and deterministic.`,
+			`- Limit changeset to the minimum actionable operations for this step.`,
+			`- Keep coverage.notes short (<=2 entries).`,
+			`- Avoid long prose in summary; keep a single sentence.`,
 		}, "\n")
 	}
 
@@ -289,6 +320,8 @@ func buildStepSpecificPolicy(stepID string) string {
 			`STEP POLICY refresh.step3.findings:`,
 			`- If owner mapping is unresolved in evidence/coverage, include at least one add_finding operation.`,
 			`- Each finding must include rule_id, related_ids, and provenance.evidence[].`,
+			`- For observation provenance, evidence array MUST be non-empty.`,
+			`- If meta.repo_scopes has 2+ scopes, include at least one upsert_edge that links entities from different repo_scope values.`,
 			`- Include at least one question and at least three items in coverage.missing.`,
 		}, "\n")
 	default:

@@ -366,6 +366,81 @@ def create_full_run_stub_environment(root: Path) -> tuple[Path, Path, Path, Path
 
 
 class FullRunStabilityIntegrationTests(unittest.TestCase):
+    def test_full_run_uses_isolated_baseline_and_headless_workspaces(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, target_repo, tmp_root, repos_file = create_full_run_stub_environment(root)
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TMP_ROOT": str(tmp_root),
+                    "KEEP_TMP": "1",
+                    "ITERATIONS": "1",
+                    "RUN_QUALITY_GATES": "0",
+                    "TARGET_REPOS_FILE": str(repos_file),
+                    "ACP_RUNTIME_PROVIDER": "qwen-code",
+                    "ACP_QWEN_CMD": str(tools_dir / "qwen"),
+                    "ACP_STUB_SOURCE": str(root / "acp-stub.sh"),
+                    "ACP_STUB_TARGET_REPO": str(target_repo),
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(FULL_RUN_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertEqual(0, result.returncode, msg=result.stdout + "\n" + result.stderr)
+
+            summary_path = tmp_root / "session-summary.md"
+            self.assertTrue(summary_path.exists(), msg="session-summary.md is missing")
+            summary = summary_path.read_text(encoding="utf-8")
+            self.assertEqual("passed", parse_summary_scalar(summary, "result"))
+            self.assertEqual(str(tmp_root / "arch-workspace-baseline"), parse_summary_scalar(summary, "workspace_baseline"))
+            self.assertEqual(str(tmp_root / "arch-workspace"), parse_summary_scalar(summary, "workspace_headless"))
+
+            run_results_path = tmp_root / "run-results.tsv"
+            self.assertTrue(run_results_path.exists(), msg="run-results.tsv is missing")
+            rows = [line for line in run_results_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(4, len(rows), msg="expected 4 rows for ITERATIONS=1 (fake+headless init/refresh)")
+
+            fake_rows = []
+            headless_rows = []
+            for row in rows:
+                cols = row.split("\t")
+                self.assertGreaterEqual(len(cols), 15, msg=f"unexpected run-results row shape: {row}")
+                runtime_mode = cols[1]
+                quality_path = cols[14]
+                if runtime_mode == "fake":
+                    fake_rows.append(quality_path)
+                if runtime_mode == "headless":
+                    headless_rows.append(quality_path)
+
+            self.assertEqual(2, len(fake_rows), msg=f"unexpected fake rows: {rows}")
+            self.assertEqual(2, len(headless_rows), msg=f"unexpected headless rows: {rows}")
+            self.assertTrue(
+                all("/arch-workspace-baseline/" in path for path in fake_rows),
+                msg=f"fake rows must write baseline workspace quality files: {fake_rows}",
+            )
+            self.assertTrue(
+                all("/arch-workspace/" in path and "/arch-workspace-baseline/" not in path for path in headless_rows),
+                msg=f"headless rows must write headless workspace quality files: {headless_rows}",
+            )
+
+            for quality_path in headless_rows:
+                payload = json.loads(Path(quality_path).read_text(encoding="utf-8"))
+                runtime_versions = payload.get("runtime_versions") or []
+                self.assertTrue(runtime_versions, msg=f"missing runtime_versions in {quality_path}")
+                self.assertTrue(
+                    all("fake" not in str(item).lower() for item in runtime_versions),
+                    msg=f"headless quality summary leaked fake runtime markers: {runtime_versions}",
+                )
+
     def test_full_run_marks_incomplete_cycle(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

@@ -141,7 +141,7 @@ func TestHeadlessRunnerLegacyPassthroughWhenArgsConfigured(t *testing.T) {
 		Command: "sh",
 		Args: []string{
 			"-c",
-			fmt.Sprintf("cat >/dev/null; echo '%s'", validTaskResultJSON("claude-code", "legacy-test")),
+			fmt.Sprintf("cat >/dev/null; echo '%s'", validTaskResultJSON("task-legacy", "init.step1.collect", "claude-code", "legacy-test")),
 		},
 	}
 
@@ -174,7 +174,7 @@ if [ -z "$input" ]; then
   exit 1
 fi
 cat <<'JSON'
-{"meta":{"task_id":"task-1","step_id":"init.step1.collect","runtime":{"name":"claude-code","version":"legacy"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}
+{"meta":{"task_id":"task-legacy-empty-args","step_id":"init.step1.collect","runtime":{"name":"claude-code","version":"legacy"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}
 JSON
 `
 	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
@@ -206,7 +206,7 @@ func TestHeadlessRunnerNativeDirectClaudeParsesEnvelopeResult(t *testing.T) {
 	script := `#!/bin/sh
 set -eu
 cat <<'JSON'
-{"type":"result","result":"{\"meta\":{\"task_id\":\"task-1\",\"step_id\":\"init.step1.collect\",\"runtime\":{\"name\":\"claude-code\",\"version\":\"claude-cli\"},\"started_at\":\"2026-04-03T12:00:00Z\"},\"summary\":\"ok\",\"changeset\":[]}"}
+{"type":"result","result":"{\"meta\":{\"task_id\":\"task-native-success\",\"step_id\":\"init.step1.collect\",\"runtime\":{\"name\":\"claude-code\",\"version\":\"claude-cli\"},\"started_at\":\"2026-04-03T12:00:00Z\"},\"summary\":\"ok\",\"changeset\":[]}"}
 JSON
 `
 	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
@@ -243,7 +243,7 @@ for arg in "$@"; do
 done
 if echo "$last_arg" | grep -q "RETRY MODE"; then
   cat <<'JSON'
-{"result":"{\"meta\":{\"task_id\":\"task-1\",\"step_id\":\"init.step1.collect\",\"runtime\":{\"name\":\"claude-code\",\"version\":\"claude-cli\"},\"started_at\":\"2026-04-03T12:00:00Z\"},\"summary\":\"ok\",\"changeset\":[]}"}
+{"result":"{\"meta\":{\"task_id\":\"task-native-retry\",\"step_id\":\"init.step1.collect\",\"runtime\":{\"name\":\"claude-code\",\"version\":\"claude-cli\"},\"started_at\":\"2026-04-03T12:00:00Z\"},\"summary\":\"ok\",\"changeset\":[]}"}
 JSON
   exit 0
 fi
@@ -270,6 +270,82 @@ echo "This is not JSON"
 	}
 }
 
+func TestHeadlessRunnerNativeDirectClaudeRetriesOnEmptyEnvelopeResult(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	commandPath := filepath.Join(tempDir, "claude")
+	script := `#!/bin/sh
+set -eu
+last_arg=""
+for arg in "$@"; do
+  last_arg="$arg"
+done
+if echo "$last_arg" | grep -q "NON-EMPTY RESULT ONLY JSON MODE"; then
+  cat <<'JSON'
+{"result":"{\"meta\":{\"task_id\":\"task-native-empty-retry\",\"step_id\":\"init.step1.collect\",\"runtime\":{\"name\":\"claude-code\",\"version\":\"claude-cli\"},\"started_at\":\"2026-04-03T12:00:00Z\"},\"summary\":\"ok\",\"changeset\":[]}"}
+JSON
+  exit 0
+fi
+cat <<'JSON'
+{"type":"result","result":""}
+JSON
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write claude empty-result retry command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-native-empty-retry",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    "/tmp/workspace",
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("expected empty-envelope retry run to succeed: %v", err)
+	}
+	if result.TaskResult.Meta.TaskID != "task-native-empty-retry" {
+		t.Fatalf("unexpected task id %q", result.TaskResult.Meta.TaskID)
+	}
+}
+
+func TestHeadlessRunnerBindingMismatchClassifiesAsParseFailed(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	runner := HeadlessRunner{
+		Command: "sh",
+		Args: []string{
+			"-c",
+			`cat >/dev/null; echo '{"meta":{"task_id":"task-stale","step_id":"init.step1.collect","run_id":"run-stale","runtime":{"name":"claude-code","version":"legacy"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}'`,
+		},
+	}
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-expected",
+		RunID:        "run-expected",
+		StepID:       "init.step1.collect",
+		Workspace:    workspace,
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected binding parse-failed error")
+	}
+	code, message, ok := acpruntime.ClassifyError(err)
+	if !ok {
+		t.Fatalf("expected classify error to succeed")
+	}
+	if code != string(acpruntime.ErrorCodeRunnerParseFailed) {
+		t.Fatalf("unexpected error code %q", code)
+	}
+	if !strings.Contains(message, "parse_stage=binding") {
+		t.Fatalf("expected parse_stage=binding in error message, got %q", message)
+	}
+}
+
 func TestBuildDirectPromptIncludesStepSpecificPolicies(t *testing.T) {
 	t.Parallel()
 
@@ -286,7 +362,7 @@ func TestBuildDirectPromptIncludesStepSpecificPolicies(t *testing.T) {
 		t.Fatalf("marshal task: %v", err)
 	}
 
-	prompt := buildDirectPrompt(raw, false)
+	prompt := buildDirectPrompt(raw, false, false)
 	if !strings.Contains(prompt, "STEP POLICY refresh.step1.collect") {
 		t.Fatalf("expected step1 policy block in prompt")
 	}
@@ -298,6 +374,6 @@ func TestBuildDirectPromptIncludesStepSpecificPolicies(t *testing.T) {
 	}
 }
 
-func validTaskResultJSON(runtimeName string, runtimeVersion string) string {
-	return fmt.Sprintf(`{"meta":{"task_id":"task-1","step_id":"init.step1.collect","runtime":{"name":"%s","version":"%s"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}`, runtimeName, runtimeVersion)
+func validTaskResultJSON(taskID string, stepID string, runtimeName string, runtimeVersion string) string {
+	return fmt.Sprintf(`{"meta":{"task_id":"%s","step_id":"%s","runtime":{"name":"%s","version":"%s"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}`, taskID, stepID, runtimeName, runtimeVersion)
 }

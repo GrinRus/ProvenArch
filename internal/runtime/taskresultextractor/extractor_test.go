@@ -96,5 +96,19 @@ func TestExtractReturnsErrorForInvalidOutput(t *testing.T) {
 
 	if _, err := Extract([]byte("this is not taskresult")); err == nil {
 		t.Fatalf("expected extraction error for invalid output")
+	} else if !strings.Contains(err.Error(), "unable to extract valid TaskResult JSON") {
+		t.Fatalf("expected top-level extraction context in error, got %v", err)
+	}
+}
+
+func TestExtractReturnsSpecificErrorForEmptyEnvelopeResult(t *testing.T) {
+	t.Parallel()
+
+	_, err := Extract([]byte(`{"type":"result","result":""}`))
+	if err == nil {
+		t.Fatalf("expected extraction error for empty envelope result")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "envelope result is empty") {
+		t.Fatalf("expected envelope-empty reason, got: %v", err)
 	}
 }
