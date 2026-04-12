@@ -21,7 +21,7 @@ func TestHeadlessRunnerUnavailableClassifiesAsRunnerUnavailable(t *testing.T) {
 		TaskID:       "task-1",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -112,7 +112,7 @@ echo '{"response":"not-json"}'
 		TaskID:       "task-1",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -152,7 +152,7 @@ echo 'first stderr detail' >&2
 		TaskID:       "task-1",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -210,7 +210,7 @@ sleep 10
 		TaskID:       "task-cancel",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -237,7 +237,7 @@ func TestHeadlessRunnerParsesTaskResultFromResponseField(t *testing.T) {
 		TaskID:       "task-1",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -264,7 +264,7 @@ func TestHeadlessRunnerParsesTaskResultFromJsonArrayResultMessage(t *testing.T) 
 		TaskID:       "task-1",
 		RunID:        "run-1",
 		StepID:       "init.step3.findings",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -291,7 +291,7 @@ func TestHeadlessRunnerParsesTaskResultFromQwenAssistantContentEvents(t *testing
 		TaskID:       "task-1",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -318,7 +318,7 @@ func TestHeadlessRunnerParsesTaskResultFromJsonObjectsStream(t *testing.T) {
 		TaskID:       "task-1",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -372,7 +372,7 @@ func TestBuildPromptIncludesStepSpecificPolicies(t *testing.T) {
 		TaskID:       "task-refresh",
 		RunID:        "run-1",
 		StepID:       "refresh.step3.findings",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	}
@@ -400,7 +400,7 @@ func TestBuildPromptRefreshStep1CollectIncludesNoWebSearchPolicy(t *testing.T) {
 		TaskID:       "task-refresh-step1",
 		RunID:        "run-1",
 		StepID:       "refresh.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	}

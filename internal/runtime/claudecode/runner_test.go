@@ -22,7 +22,7 @@ func TestFakeRunnerCollectStep(t *testing.T) {
 		TaskID:       "task-1",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service", "users-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -52,7 +52,7 @@ func TestFakeRunnerFindingsStep(t *testing.T) {
 		TaskID:       "task-2",
 		RunID:        "run-1",
 		StepID:       "init.step3.findings",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -75,7 +75,7 @@ func TestHeadlessRunnerUnavailableClassifiesAsRunnerUnavailable(t *testing.T) {
 		TaskID:       "task-1",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -150,7 +150,7 @@ func TestHeadlessRunnerLegacyPassthroughWhenArgsConfigured(t *testing.T) {
 		TaskID:       "task-legacy",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -187,7 +187,7 @@ JSON
 		TaskID:       "task-legacy-empty-args",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -219,7 +219,7 @@ JSON
 		TaskID:       "task-native-success",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -259,7 +259,7 @@ echo "This is not JSON"
 		TaskID:       "task-native-retry",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -301,7 +301,7 @@ JSON
 		TaskID:       "task-native-empty-retry",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -341,7 +341,7 @@ sleep 10
 		TaskID:       "task-cancel",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -394,7 +394,7 @@ func TestBuildDirectPromptIncludesStepSpecificPolicies(t *testing.T) {
 		TaskID:       "task-refresh",
 		RunID:        "run-1",
 		StepID:       "refresh.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	}
