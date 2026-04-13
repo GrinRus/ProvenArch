@@ -2,7 +2,7 @@
 
 > **Статус:** MVP beta foundation / runnable local pipeline baseline + strict contracts
 > **Принятый стек реализации:** Go (backend/orchestrator) + React/TypeScript UI (embedded), runtime анализа в MVP: **headless multi-provider** (`claude-code` default, `qwen-code` optional)
-> **Последняя ревизия:** 2026-04-10
+> **Последняя ревизия:** 2026-04-13
 
 ## Что это
 
@@ -173,6 +173,8 @@ acp init-workspace --workspace /path/to/arch-workspace --repos-file /path/to/rep
 - `repos: [...]`
 - или top-level массив записей `repos[]`
 
+Если `repos-file` содержит блок `runtime.profile.timeouts`, `init-workspace`/`serve --auto-init` переносят его в `workspace.yaml` (persisted timeout profile).
+
 ### 3.1) Read-only QA по артефактам workspace (опционально)
 
 ```bash
@@ -203,6 +205,65 @@ make quickstart-local WORKSPACE=/path/to/arch-workspace REPO_PATH=/path/to/payme
   - `ACP_QWEN_CMD` (default `qwen`)
 - direct `claude` режим: `ACP_CLAUDE_CMD=claude` (native one-shot invocation с envelope parse).
 - в `--runtime fake` provider проходит валидацию, но фактически не используется runner’ом.
+
+### 6.1) Runtime timeouts (persisted + effective)
+
+Timeout-конфиг хранится в `workspace.yaml` (`runtime.profile.timeouts`) и используется backend/full-run/frontend e2e.
+
+Balanced defaults:
+- `step_timeout_sec=1800`
+- `heartbeat_sec=30`
+- `pipeline_timeout_sec=2400`
+- `pipeline_kill_grace_sec=30`
+- `api_ready_timeout_sec=60`
+- `api_init_timeout_sec=120`
+- `ui_init_poll_timeout_sec=900`
+- `ui_cancel_poll_timeout_sec=420`
+
+Precedence:
+- `env > workspace.yaml > defaults`
+
+Каноничные env overrides:
+- `ACP_RUNTIME_STEP_TIMEOUT_SEC`
+- `ACP_RUNTIME_HEARTBEAT_SEC`
+- `ACP_PIPELINE_TIMEOUT_SEC`
+- `ACP_PIPELINE_KILL_GRACE_SEC`
+- `ACP_API_READY_TIMEOUT_SEC`
+- `ACP_API_INIT_TIMEOUT_SEC`
+- `ACP_UI_INIT_POLL_TIMEOUT_SEC`
+- `ACP_UI_CANCEL_POLL_TIMEOUT_SEC`
+
+Deprecated fallback aliases:
+- `READY_TIMEOUT_SEC`
+- `UI_E2E_INIT_TIMEOUT_SEC`
+- `UI_E2E_CANCEL_TIMEOUT_SEC`
+- full-run script aliases: `ACP_FULL_RUN_PIPELINE_TIMEOUT_SEC`, `ACP_FULL_RUN_PIPELINE_KILL_GRACE_SEC`
+
+API управления timeout-профилем:
+- `GET /api/runtime/timeouts` (persisted + effective + source)
+- `PUT /api/runtime/timeouts` (partial update persisted values)
+
+### 6.2) Runtime execution profile (persisted + effective)
+
+Execution-конфиг хранится в `workspace.yaml` (`runtime.profile.execution`) и управляет шардированием runtime-задач.
+
+Default values:
+- `strategy=sequential`
+- `max_parallel_tasks=1`
+- `failure_policy=best_effort`
+- `shard_discovery.mode=heuristics`
+
+Precedence:
+- `CLI > env > workspace.yaml > defaults`
+
+CLI overrides (ограниченный набор):
+- `--execution-strategy sequential|parallel`
+- `--max-parallel-tasks <n>`
+- `--failure-policy fail_fast|best_effort`
+
+API управления execution-профилем:
+- `GET /api/runtime/execution` (persisted + effective + source)
+- `PUT /api/runtime/execution` (partial update persisted values)
 
 ### 7) Поднимите dev environment
 
@@ -295,7 +356,7 @@ ACP_QWEN_CMD_BIN=qwen \
   - `/tmp/provenarch-test_arch_project/reports/quality_report_<batch-id>.md`
 - backend quality считается только по snapshot-артефактам (`snapshots/<run_id>/reports/*`), frontend smoke запускается на отдельной `frontend-workspace` копии и не мутирует backend baseline
 - batch evaluator добавляет semantic hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`; для multi-profile (`expected_repo_count >= 2`) обязателен `cross-repo` сигнал (`analysis:cross-repo-missing` при отсутствии)
-- в `run_matrix`/`quality_report` дополнительно фиксируются `artifact_source`, `semantic_hard_fail`, `off_topic_hits` и failure classes (`runtime_parse`, `runner_unavailable`, `infra_signal_terminated`, `infra_incomplete_cycle`, `summary_missing`)
+- в `run_matrix`/`quality_report` дополнительно фиксируются `artifact_source`, `semantic_hard_fail`, `off_topic_hits` и failure classes (`runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_signal_terminated`, `infra_incomplete_cycle`, `quality_gates_failed`, `summary_missing`)
 - direct `npm run --prefix ui e2e:live`: Playwright output default `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
 - `scripts/frontend-live-e2e.sh`: Playwright output сохраняется в `$OUTPUT_DIR/playwright-results`
 - frontend live e2e ожидает число resolved repos из `UI_E2E_EXPECTED_REPO_COUNT` (default `1`)

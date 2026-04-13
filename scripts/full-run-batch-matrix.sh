@@ -11,6 +11,7 @@ REPORTS_ROOT="${REPORTS_ROOT:-$E2E_TMP_ROOT/reports}"
 MATRIX_ROOT="${MATRIX_ROOT:-$E2E_TMP_ROOT/matrix/$MATRIX_ID}"
 ACP_CLAUDE_CMD_BIN="${ACP_CLAUDE_CMD_BIN:-claude}"
 ACP_QWEN_CMD_BIN="${ACP_QWEN_CMD_BIN:-qwen}"
+ACP_APPLY_TIMEOUTS_VIA_API="${ACP_APPLY_TIMEOUTS_VIA_API:-1}"
 
 log() {
   printf '[batch-matrix] %s\n' "$*" >&2
@@ -46,6 +47,9 @@ fi
 if [[ "$RUN_COUNT" != "5" ]]; then
   die "RUN_COUNT must be 5 for matrix mode (got '$RUN_COUNT')"
 fi
+if [[ "$ACP_APPLY_TIMEOUTS_VIA_API" != "0" && "$ACP_APPLY_TIMEOUTS_VIA_API" != "1" ]]; then
+  die "ACP_APPLY_TIMEOUTS_VIA_API must be 0 or 1, got '$ACP_APPLY_TIMEOUTS_VIA_API'"
+fi
 if [[ ! -x "$BATCH_SCRIPT" ]]; then
   die "batch script is unavailable: $BATCH_SCRIPT"
 fi
@@ -56,6 +60,7 @@ require_cmd "$ACP_CLAUDE_CMD_BIN"
 require_cmd "$ACP_QWEN_CMD_BIN"
 
 mkdir -p "$MATRIX_ROOT" "$REPORTS_ROOT"
+log "timeout controls: apply_via_api=$ACP_APPLY_TIMEOUTS_VIA_API step=${ACP_RUNTIME_STEP_TIMEOUT_SEC:-auto} heartbeat=${ACP_RUNTIME_HEARTBEAT_SEC:-auto} pipeline=${ACP_PIPELINE_TIMEOUT_SEC:-auto} kill_grace=${ACP_PIPELINE_KILL_GRACE_SEC:-auto} api_ready=${ACP_API_READY_TIMEOUT_SEC:-auto} api_init=${ACP_API_INIT_TIMEOUT_SEC:-auto} ui_init=${ACP_UI_INIT_POLL_TIMEOUT_SEC:-auto} ui_cancel=${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-auto}"
 
 PROFILES_TSV="$MATRIX_ROOT/profiles.tsv"
 RECORDS_JSONL="$MATRIX_ROOT/profile-runs.jsonl"
@@ -187,6 +192,15 @@ while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind; d
     REPORTS_ROOT="$REPORTS_ROOT" \
     ACP_CLAUDE_CMD_BIN="$ACP_CLAUDE_CMD_BIN" \
     ACP_QWEN_CMD_BIN="$ACP_QWEN_CMD_BIN" \
+    ACP_APPLY_TIMEOUTS_VIA_API="$ACP_APPLY_TIMEOUTS_VIA_API" \
+    ACP_RUNTIME_STEP_TIMEOUT_SEC="${ACP_RUNTIME_STEP_TIMEOUT_SEC:-}" \
+    ACP_RUNTIME_HEARTBEAT_SEC="${ACP_RUNTIME_HEARTBEAT_SEC:-}" \
+    ACP_PIPELINE_TIMEOUT_SEC="${ACP_PIPELINE_TIMEOUT_SEC:-}" \
+    ACP_PIPELINE_KILL_GRACE_SEC="${ACP_PIPELINE_KILL_GRACE_SEC:-}" \
+    ACP_API_READY_TIMEOUT_SEC="${ACP_API_READY_TIMEOUT_SEC:-}" \
+    ACP_API_INIT_TIMEOUT_SEC="${ACP_API_INIT_TIMEOUT_SEC:-}" \
+    ACP_UI_INIT_POLL_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-}" \
+    ACP_UI_CANCEL_POLL_TIMEOUT_SEC="${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-}" \
     "$BATCH_SCRIPT"
   ) >"$driver_log" 2>&1; then
     status="failed"
@@ -197,9 +211,10 @@ while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind; d
   run_matrix_tsv="$REPORTS_ROOT/run_matrix_${batch_id}.tsv"
   run_matrix_md="$REPORTS_ROOT/run_matrix_${batch_id}.md"
   frontend_matrix_md="$REPORTS_ROOT/frontend_e2e_matrix_${batch_id}.md"
+  frontend_cancel_matrix_md="$REPORTS_ROOT/frontend_cancel_e2e_matrix_${batch_id}.md"
   quality_report_md="$REPORTS_ROOT/quality_report_${batch_id}.md"
 
-  python3 - "$RECORDS_JSONL" "$profile_id" "$profile_slug" "$batch_id" "$source_kind" "$expected_repo_count" "$repos_file" "$status" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$quality_report_md" "$driver_log" <<'PY'
+  python3 - "$RECORDS_JSONL" "$profile_id" "$profile_slug" "$batch_id" "$source_kind" "$expected_repo_count" "$repos_file" "$status" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md" "$driver_log" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -216,8 +231,9 @@ payload = {
     "run_matrix_tsv": sys.argv[9],
     "run_matrix_md": sys.argv[10],
     "frontend_matrix_md": sys.argv[11],
-    "quality_report_md": sys.argv[12],
-    "driver_log": sys.argv[13],
+    "frontend_cancel_matrix_md": sys.argv[12],
+    "quality_report_md": sys.argv[13],
+    "driver_log": sys.argv[14],
 }
 with path.open("a", encoding="utf-8") as f:
     f.write(json.dumps(payload, ensure_ascii=True))
@@ -254,11 +270,17 @@ header = [
     "backend_total_runs",
     "runtime_parse_failures",
     "runner_unavailable_failures",
+    "runtime_timeout_failures",
     "infra_signal_terminated_failures",
     "infra_incomplete_cycle_failures",
+    "quality_gates_failed_failures",
     "summary_missing_failures",
+    "precheck_failed_failures",
+    "cancellation_like_failures",
     "frontend_qwen_status",
     "frontend_claude_status",
+    "frontend_cancel_qwen_status",
+    "frontend_cancel_claude_status",
     "run_matrix_tsv",
     "quality_report_md",
 ]
@@ -267,8 +289,8 @@ tsv_lines = ["\t".join(header)]
 md_lines = [
     "# Profile Matrix",
     "",
-    "| profile_id | batch_id | source_kind | expected_repo_count | status | backend_hard_pass | backend_total_runs | runtime_parse_failures | runner_unavailable_failures | infra_signal_terminated_failures | infra_incomplete_cycle_failures | summary_missing_failures | frontend_qwen | frontend_claude | run_matrix | quality_report |",
-    "|---|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|",
+    "| profile_id | batch_id | source_kind | expected_repo_count | status | backend_hard_pass | backend_total_runs | runtime_parse_failures | runner_unavailable_failures | runtime_timeout_failures | infra_signal_terminated_failures | infra_incomplete_cycle_failures | quality_gates_failed_failures | summary_missing_failures | precheck_failed_failures | cancellation_like_failures | frontend_qwen | frontend_claude | frontend_cancel_qwen | frontend_cancel_claude | run_matrix | quality_report |",
+    "|---|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|---|---|",
 ]
 
 def parse_backend_stats(tsv_path: Path) -> dict[str, int]:
@@ -277,9 +299,13 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, int]:
         "total": 0,
         "runtime_parse": 0,
         "runner_unavailable": 0,
+        "runtime_timeout": 0,
         "infra_signal_terminated": 0,
         "infra_incomplete_cycle": 0,
+        "quality_gates_failed": 0,
         "summary_missing": 0,
+        "precheck_failed": 0,
+        "cancellation_like": 0,
     }
     if not tsv_path.exists():
         return stats
@@ -291,9 +317,13 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, int]:
     hard_idx = index.get("hard_pass", 2)
     runtime_parse_idx = index.get("runtime_parse")
     runner_unavailable_idx = index.get("runner_unavailable")
+    runtime_timeout_idx = index.get("runtime_timeout")
     infra_signal_idx = index.get("infra_signal_terminated")
     infra_incomplete_idx = index.get("infra_incomplete_cycle")
+    quality_gates_failed_idx = index.get("quality_gates_failed")
     summary_missing_idx = index.get("summary_missing")
+    precheck_failed_idx = index.get("precheck_failed")
+    cancellation_like_idx = index.get("cancellation_like")
     for line in lines[1:]:
         parts = line.split("\t")
         if len(parts) <= hard_idx:
@@ -304,12 +334,20 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, int]:
             stats["runtime_parse"] += 1
         if runner_unavailable_idx is not None and len(parts) > runner_unavailable_idx and parts[runner_unavailable_idx] == "1":
             stats["runner_unavailable"] += 1
+        if runtime_timeout_idx is not None and len(parts) > runtime_timeout_idx and parts[runtime_timeout_idx] == "1":
+            stats["runtime_timeout"] += 1
         if infra_signal_idx is not None and len(parts) > infra_signal_idx and parts[infra_signal_idx] == "1":
             stats["infra_signal_terminated"] += 1
         if infra_incomplete_idx is not None and len(parts) > infra_incomplete_idx and parts[infra_incomplete_idx] == "1":
             stats["infra_incomplete_cycle"] += 1
+        if quality_gates_failed_idx is not None and len(parts) > quality_gates_failed_idx and parts[quality_gates_failed_idx] == "1":
+            stats["quality_gates_failed"] += 1
         if summary_missing_idx is not None and len(parts) > summary_missing_idx and parts[summary_missing_idx] == "1":
             stats["summary_missing"] += 1
+        if precheck_failed_idx is not None and len(parts) > precheck_failed_idx and parts[precheck_failed_idx] == "1":
+            stats["precheck_failed"] += 1
+        if cancellation_like_idx is not None and len(parts) > cancellation_like_idx and parts[cancellation_like_idx] == "1":
+            stats["cancellation_like"] += 1
     return stats
 
 def parse_frontend_status(path: Path, provider: str) -> str:
@@ -321,9 +359,12 @@ def parse_frontend_status(path: Path, provider: str) -> str:
 for rec in records:
     run_matrix_tsv = Path(rec["run_matrix_tsv"])
     frontend_matrix_md = Path(rec["frontend_matrix_md"])
+    frontend_cancel_matrix_md = Path(rec["frontend_cancel_matrix_md"])
     backend_stats = parse_backend_stats(run_matrix_tsv)
     frontend_qwen = parse_frontend_status(frontend_matrix_md, "qwen-code")
     frontend_claude = parse_frontend_status(frontend_matrix_md, "claude-code")
+    frontend_cancel_qwen = parse_frontend_status(frontend_cancel_matrix_md, "qwen-code")
+    frontend_cancel_claude = parse_frontend_status(frontend_cancel_matrix_md, "claude-code")
 
     tsv_lines.append(
         "\t".join(
@@ -337,11 +378,17 @@ for rec in records:
                 str(backend_stats["total"]),
                 str(backend_stats["runtime_parse"]),
                 str(backend_stats["runner_unavailable"]),
+                str(backend_stats["runtime_timeout"]),
                 str(backend_stats["infra_signal_terminated"]),
                 str(backend_stats["infra_incomplete_cycle"]),
+                str(backend_stats["quality_gates_failed"]),
                 str(backend_stats["summary_missing"]),
+                str(backend_stats["precheck_failed"]),
+                str(backend_stats["cancellation_like"]),
                 frontend_qwen,
                 frontend_claude,
+                frontend_cancel_qwen,
+                frontend_cancel_claude,
                 rec["run_matrix_tsv"],
                 rec["quality_report_md"],
             ]
@@ -352,8 +399,9 @@ for rec in records:
         "| "
         f"{rec['profile_id']} | {rec['batch_id']} | {rec['source_kind']} | {rec['expected_repo_count']} | {rec['status']} | "
         f"{backend_stats['hard']} | {backend_stats['total']} | {backend_stats['runtime_parse']} | {backend_stats['runner_unavailable']} | "
-        f"{backend_stats['infra_signal_terminated']} | {backend_stats['infra_incomplete_cycle']} | {backend_stats['summary_missing']} | "
-        f"{frontend_qwen} | {frontend_claude} | "
+        f"{backend_stats['runtime_timeout']} | {backend_stats['infra_signal_terminated']} | {backend_stats['infra_incomplete_cycle']} | {backend_stats['quality_gates_failed']} | {backend_stats['summary_missing']} | "
+        f"{backend_stats['precheck_failed']} | {backend_stats['cancellation_like']} | "
+        f"{frontend_qwen} | {frontend_claude} | {frontend_cancel_qwen} | {frontend_cancel_claude} | "
         f"{rec['run_matrix_md']} | {rec['quality_report_md']} |"
     )
 

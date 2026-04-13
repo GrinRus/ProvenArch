@@ -5,6 +5,7 @@
 Текущие baseline fixtures:
 - `fixtures/workspace/valid-path.yaml`
 - `fixtures/workspace/valid-git-url.yaml`
+- `fixtures/workspace/valid-with-runtime-timeouts.yaml`
 - `fixtures/workspace/invalid-both.yaml`
 - `fixtures/workspace/invalid-neither.yaml`
 - `fixtures/taskresult/normalized-top-level.json`

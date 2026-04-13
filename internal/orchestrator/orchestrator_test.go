@@ -736,6 +736,95 @@ func TestCancelRunActiveClassifiesRunnerKilledAsCanceled(t *testing.T) {
 	}
 }
 
+func TestRunAppliesRuntimeStepTimeoutFromWorkspaceManifest(t *testing.T) {
+	clearRuntimeTimeoutEnvForTest(t)
+
+	ws := createWorkspaceWithTimeouts(t, map[string]int{
+		"step_timeout_sec": 1,
+		"heartbeat_sec":    1,
+	})
+	service := NewService(
+		WithHistoryWorkspace(ws),
+		WithRunner(delayedRunner{delay: 2 * time.Second}),
+	)
+
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err == nil {
+		t.Fatalf("expected timeout error")
+	}
+	if info.Status != RunStatusFailed {
+		t.Fatalf("expected failed status, got %s", info.Status)
+	}
+	if !strings.Contains(strings.ToLower(info.Error), "timeout") {
+		t.Fatalf("expected timeout context in error, got %q", info.Error)
+	}
+}
+
+func TestRunEmitsRuntimeHeartbeatLogs(t *testing.T) {
+	clearRuntimeTimeoutEnvForTest(t)
+
+	ws := createWorkspaceWithTimeouts(t, map[string]int{
+		"step_timeout_sec": 5,
+		"heartbeat_sec":    1,
+	})
+	service := NewService(
+		WithHistoryWorkspace(ws),
+		WithRunner(delayedRunner{delay: 2200 * time.Millisecond}),
+	)
+
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run init: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
+	}
+	page, ok, err := service.GetRunLogs(info.RunID, 0, 500)
+	if err != nil {
+		t.Fatalf("get run logs: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected run logs page")
+	}
+	foundHeartbeat := false
+	for _, entry := range page.Items {
+		if entry.Message == "runtime task heartbeat" {
+			foundHeartbeat = true
+			break
+		}
+	}
+	if !foundHeartbeat {
+		t.Fatalf("expected runtime task heartbeat log entry")
+	}
+}
+
+func clearRuntimeTimeoutEnvForTest(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		acpruntime.RuntimeStepTimeoutEnv,
+		acpruntime.RuntimeHeartbeatEnv,
+		acpruntime.PipelineTimeoutEnv,
+		acpruntime.PipelineKillGraceEnv,
+		acpruntime.APIReadyTimeoutEnv,
+		acpruntime.APIInitTimeoutEnv,
+		acpruntime.UIInitPollTimeoutEnv,
+		acpruntime.UICancelPollTimeoutEnv,
+		acpruntime.ReadyTimeoutDeprecatedEnv,
+		acpruntime.UIInitDeprecatedEnv,
+		acpruntime.UICancelDeprecatedEnv,
+	} {
+		t.Setenv(key, "")
+	}
+}
+
 func TestNewServiceReconcilesStaleRunsAfterRestart(t *testing.T) {
 	t.Parallel()
 
@@ -1598,6 +1687,258 @@ func TestSemanticGuardAddsGenericFallbackFindingWhenNoServiceCandidate(t *testin
 	}
 }
 
+func TestSemanticGuardAddsFallbackCrossRepoEdgeForMultiScopeRefreshStep3(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure workspace layout: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/payments.md", []byte("# Domain: Payments\n\n- id: `payments`\n- repo_scope: `payments-service`\n")); err != nil {
+		t.Fatalf("write payments domain card: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/users.md", []byte("# Domain: Users\n\n- id: `users`\n- repo_scope: `users-service`\n")); err != nil {
+		t.Fatalf("write users domain card: %v", err)
+	}
+
+	service := NewService(WithRunner(refreshMissingFindingsRunner{}))
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run refresh pipeline: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
+	}
+	if !hasWarningPrefix(info.Warnings, "refresh.step3.findings: semantic_guard: added fallback cross-repo edge") {
+		t.Fatalf("expected fallback cross-repo edge warning in run warnings, got %#v", info.Warnings)
+	}
+
+	step3TaskrunCandidates, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step3-findings*.json"))
+	if err != nil {
+		t.Fatalf("glob step3 taskruns: %v", err)
+	}
+	step3Taskruns := make([]string, 0, len(step3TaskrunCandidates))
+	for _, candidate := range step3TaskrunCandidates {
+		if strings.Contains(candidate, "shard-summary") {
+			continue
+		}
+		step3Taskruns = append(step3Taskruns, candidate)
+	}
+	sort.Strings(step3Taskruns)
+	if len(step3Taskruns) == 0 {
+		t.Fatalf("expected refresh step3 taskrun file")
+	}
+	raw, err := os.ReadFile(step3Taskruns[len(step3Taskruns)-1])
+	if err != nil {
+		t.Fatalf("read step3 taskrun: %v", err)
+	}
+	var payload contracts.TaskResult
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal step3 taskrun payload: %v", err)
+	}
+	foundEdge := false
+	for _, op := range payload.Changeset {
+		if op.Op == "upsert_edge" && op.Edge != nil {
+			foundEdge = true
+			if strings.TrimSpace(op.Edge.From) == strings.TrimSpace(op.Edge.To) {
+				t.Fatalf("expected cross-repo edge with different endpoints, got %+v", op.Edge)
+			}
+			break
+		}
+	}
+	if !foundEdge {
+		t.Fatalf("expected fallback cross-repo upsert_edge in step3 taskrun, got %#v", payload.Changeset)
+	}
+}
+
+func TestSemanticGuardRemovesInvalidEvidenceAndDowngradesObservation(t *testing.T) {
+	t.Parallel()
+
+	ws := createMonolithWorkspace(t)
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure workspace layout: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/billing.md", []byte("# Domain: Billing\n\n- id: `billing`\n- repo_scope: `orders-monolith`\n")); err != nil {
+		t.Fatalf("write billing domain card: %v", err)
+	}
+
+	service := NewService(WithRunner(refreshInvalidEvidenceRunner{}))
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run refresh pipeline: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
+	}
+	if !hasWarningPrefix(info.Warnings, "refresh.step1.collect: semantic_guard: removed invalid evidence paths count=") {
+		t.Fatalf("expected invalid-evidence warning in run warnings, got %#v", info.Warnings)
+	}
+	if !hasWarningPrefix(info.Warnings, "refresh.step1.collect: semantic_guard: downgraded observation provenance to inference count=") {
+		t.Fatalf("expected observation downgrade warning in run warnings, got %#v", info.Warnings)
+	}
+
+	step1Taskruns, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step1-collect-domain-*.json"))
+	if err != nil {
+		t.Fatalf("glob step1 taskruns: %v", err)
+	}
+	if len(step1Taskruns) == 0 {
+		t.Fatalf("expected refresh step1 taskrun files")
+	}
+	raw, err := os.ReadFile(step1Taskruns[len(step1Taskruns)-1])
+	if err != nil {
+		t.Fatalf("read step1 taskrun: %v", err)
+	}
+	var payload contracts.TaskResult
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal step1 taskrun payload: %v", err)
+	}
+
+	for _, op := range payload.Changeset {
+		if op.Op != "upsert_entity" || op.Entity == nil {
+			continue
+		}
+		if strings.TrimSpace(op.Entity.Provenance.Kind) != "inference" {
+			t.Fatalf("expected entity provenance to be downgraded to inference, got %q", op.Entity.Provenance.Kind)
+		}
+		for _, evidence := range op.Entity.Provenance.Evidence {
+			if evidence.Path == "/" || evidence.Path == "." {
+				t.Fatalf("expected invalid evidence paths to be removed, got %+v", op.Entity.Provenance.Evidence)
+			}
+		}
+		return
+	}
+	t.Fatalf("expected at least one upsert_entity operation in step1 taskrun")
+}
+
+func TestSemanticGuardNormalizesMultiRepoMissingEdgeAndInvalidEvidence(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure workspace layout: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/payments.md", []byte("# Domain: Payments\n\n- id: `payments`\n- repo_scope: `payments-service`\n")); err != nil {
+		t.Fatalf("write payments domain card: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/users.md", []byte("# Domain: Users\n\n- id: `users`\n- repo_scope: `users-service`\n")); err != nil {
+		t.Fatalf("write users domain card: %v", err)
+	}
+
+	service := NewService(WithRunner(refreshMultiScopeNoEdgeInvalidEvidenceRunner{}))
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run refresh pipeline: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
+	}
+	if !hasWarningPrefix(info.Warnings, "refresh.step1.collect: semantic_guard: removed invalid evidence paths count=") {
+		t.Fatalf("expected invalid-evidence warning in run warnings, got %#v", info.Warnings)
+	}
+	if !hasWarningPrefix(info.Warnings, "refresh.step1.collect: semantic_guard: downgraded observation provenance to inference count=") {
+		t.Fatalf("expected observation downgrade warning in run warnings, got %#v", info.Warnings)
+	}
+	if !hasWarningPrefix(info.Warnings, "refresh.step3.findings: semantic_guard: added fallback cross-repo edge") {
+		t.Fatalf("expected fallback cross-repo edge warning in run warnings, got %#v", info.Warnings)
+	}
+
+	step1Taskruns, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step1-collect-domain-*.json"))
+	if err != nil {
+		t.Fatalf("glob step1 taskruns: %v", err)
+	}
+	if len(step1Taskruns) == 0 {
+		t.Fatalf("expected refresh step1 taskrun files")
+	}
+	step1Raw, err := os.ReadFile(step1Taskruns[len(step1Taskruns)-1])
+	if err != nil {
+		t.Fatalf("read step1 taskrun: %v", err)
+	}
+	var step1Payload contracts.TaskResult
+	if err := json.Unmarshal(step1Raw, &step1Payload); err != nil {
+		t.Fatalf("unmarshal step1 taskrun payload: %v", err)
+	}
+	step1Checked := false
+	for _, op := range step1Payload.Changeset {
+		if op.Op != "upsert_entity" || op.Entity == nil {
+			continue
+		}
+		step1Checked = true
+		if strings.TrimSpace(op.Entity.Provenance.Kind) != "inference" {
+			t.Fatalf("expected downgraded inference provenance, got %q", op.Entity.Provenance.Kind)
+		}
+		for _, evidence := range op.Entity.Provenance.Evidence {
+			if evidence.Path == "/" || evidence.Path == "." {
+				t.Fatalf("expected invalid evidence paths removed, got %+v", op.Entity.Provenance.Evidence)
+			}
+		}
+		break
+	}
+	if !step1Checked {
+		t.Fatalf("expected at least one upsert_entity in step1 payload")
+	}
+
+	step3TaskrunCandidates, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step3-findings*.json"))
+	if err != nil {
+		t.Fatalf("glob step3 taskruns: %v", err)
+	}
+	step3Taskruns := make([]string, 0, len(step3TaskrunCandidates))
+	for _, candidate := range step3TaskrunCandidates {
+		if strings.Contains(candidate, "shard-summary") {
+			continue
+		}
+		step3Taskruns = append(step3Taskruns, candidate)
+	}
+	sort.Strings(step3Taskruns)
+	if len(step3Taskruns) == 0 {
+		t.Fatalf("expected refresh step3 taskrun file")
+	}
+	step3Raw, err := os.ReadFile(step3Taskruns[len(step3Taskruns)-1])
+	if err != nil {
+		t.Fatalf("read step3 taskrun: %v", err)
+	}
+	var step3Payload contracts.TaskResult
+	if err := json.Unmarshal(step3Raw, &step3Payload); err != nil {
+		t.Fatalf("unmarshal step3 taskrun payload: %v", err)
+	}
+	foundEdge := false
+	for _, op := range step3Payload.Changeset {
+		if op.Op != "upsert_edge" || op.Edge == nil {
+			continue
+		}
+		foundEdge = true
+		if strings.TrimSpace(op.Edge.From) == "" || strings.TrimSpace(op.Edge.To) == "" {
+			t.Fatalf("expected edge endpoints to be non-empty, got %+v", op.Edge)
+		}
+		if strings.TrimSpace(op.Edge.From) == strings.TrimSpace(op.Edge.To) {
+			t.Fatalf("expected cross-repo edge between different entities, got %+v", op.Edge)
+		}
+		if len(op.Edge.Provenance.Evidence) < 2 {
+			t.Fatalf("expected fallback cross-repo edge to include evidence from two scopes, got %+v", op.Edge.Provenance.Evidence)
+		}
+		for _, evidence := range op.Edge.Provenance.Evidence {
+			if evidence.Path == "/" || evidence.Path == "." {
+				t.Fatalf("expected normalized edge evidence paths, got %+v", op.Edge.Provenance.Evidence)
+			}
+		}
+		break
+	}
+	if !foundEdge {
+		t.Fatalf("expected fallback upsert_edge in step3 payload, got %#v", step3Payload.Changeset)
+	}
+}
+
 type delayedRunner struct {
 	delay time.Duration
 }
@@ -1918,6 +2259,93 @@ func (refreshCollectCriticalOffTopicRunner) Run(ctx context.Context, task acprun
 
 func (refreshCollectCriticalOffTopicRunner) Preflight(context.Context) error { return nil }
 
+type refreshInvalidEvidenceRunner struct{}
+
+func (refreshInvalidEvidenceRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	base := claudecode.FakeRunner{}
+	result, err := base.Run(ctx, task)
+	if err != nil {
+		return acpruntime.Result{}, err
+	}
+	if task.StepID != "refresh.step1.collect" {
+		return result, nil
+	}
+
+	taskResult := result.TaskResult
+	for idx := range taskResult.Changeset {
+		if taskResult.Changeset[idx].Op != "upsert_entity" || taskResult.Changeset[idx].Entity == nil {
+			continue
+		}
+		taskResult.Changeset[idx].Entity.Provenance = contracts.Provenance{
+			Kind:       "observation",
+			Confidence: 0.82,
+			Evidence: []contracts.Evidence{
+				{Repo: "orders-monolith", Path: "/"},
+				{Repo: "orders-monolith", Path: "."},
+			},
+		}
+		break
+	}
+
+	raw, marshalErr := json.MarshalIndent(taskResult, "", "  ")
+	if marshalErr != nil {
+		return acpruntime.Result{}, marshalErr
+	}
+	result.TaskResult = taskResult
+	result.RawJSON = raw
+	return result, nil
+}
+
+func (refreshInvalidEvidenceRunner) Preflight(context.Context) error { return nil }
+
+type refreshMultiScopeNoEdgeInvalidEvidenceRunner struct{}
+
+func (refreshMultiScopeNoEdgeInvalidEvidenceRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	base := claudecode.FakeRunner{}
+	result, err := base.Run(ctx, task)
+	if err != nil {
+		return acpruntime.Result{}, err
+	}
+
+	taskResult := result.TaskResult
+	switch task.StepID {
+	case "refresh.step1.collect":
+		for idx := range taskResult.Changeset {
+			if taskResult.Changeset[idx].Op != "upsert_entity" || taskResult.Changeset[idx].Entity == nil {
+				continue
+			}
+			taskResult.Changeset[idx].Entity.Provenance = contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 0.82,
+				Evidence: []contracts.Evidence{
+					{Repo: "payments-service", Path: "/"},
+					{Repo: "users-service", Path: "."},
+				},
+			}
+			break
+		}
+	case "refresh.step3.findings":
+		withoutEdges := make([]contracts.Operation, 0, len(taskResult.Changeset))
+		for _, op := range taskResult.Changeset {
+			if op.Op == "upsert_edge" {
+				continue
+			}
+			withoutEdges = append(withoutEdges, op)
+		}
+		taskResult.Changeset = withoutEdges
+	}
+
+	raw, marshalErr := json.MarshalIndent(taskResult, "", "  ")
+	if marshalErr != nil {
+		return acpruntime.Result{}, marshalErr
+	}
+	result.TaskResult = taskResult
+	result.RawJSON = raw
+	return result, nil
+}
+
+func (refreshMultiScopeNoEdgeInvalidEvidenceRunner) Preflight(context.Context) error { return nil }
+
 type docArtifactRunner struct{}
 
 func (docArtifactRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
@@ -1960,6 +2388,12 @@ func createWorkspace(t *testing.T) workspace.Root {
 	if err := os.MkdirAll(repoB, 0o755); err != nil {
 		t.Fatalf("create users repo: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(repoA, "README.md"), []byte("# payments-service\n"), 0o644); err != nil {
+		t.Fatalf("write payments readme: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoB, "README.md"), []byte("# users-service\n"), 0o644); err != nil {
+		t.Fatalf("write users readme: %v", err)
+	}
 	manifest := `version: 1
 repos:
   - name: payments-service
@@ -1978,6 +2412,52 @@ repos:
 	return ws
 }
 
+func createWorkspaceWithTimeouts(t *testing.T, timeouts map[string]int) workspace.Root {
+	t.Helper()
+
+	root := t.TempDir()
+	repoA := filepath.Join(root, "repos", "payments-service")
+	repoB := filepath.Join(root, "repos", "users-service")
+	if err := os.MkdirAll(repoA, 0o755); err != nil {
+		t.Fatalf("create payments repo: %v", err)
+	}
+	if err := os.MkdirAll(repoB, 0o755); err != nil {
+		t.Fatalf("create users repo: %v", err)
+	}
+	manifest := strings.Builder{}
+	manifest.WriteString("version: 1\nrepos:\n")
+	manifest.WriteString("  - name: payments-service\n")
+	manifest.WriteString("    path: " + repoA + "\n")
+	manifest.WriteString("  - name: users-service\n")
+	manifest.WriteString("    path: " + repoB + "\n")
+	manifest.WriteString("runtime:\n")
+	manifest.WriteString("  profile:\n")
+	manifest.WriteString("    timeouts:\n")
+	for _, key := range []string{
+		"step_timeout_sec",
+		"heartbeat_sec",
+		"pipeline_timeout_sec",
+		"pipeline_kill_grace_sec",
+		"api_ready_timeout_sec",
+		"api_init_timeout_sec",
+		"ui_init_poll_timeout_sec",
+		"ui_cancel_poll_timeout_sec",
+	} {
+		if value, ok := timeouts[key]; ok && value > 0 {
+			manifest.WriteString(fmt.Sprintf("      %s: %d\n", key, value))
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "workspace.yaml"), []byte(manifest.String()), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	ws, err := workspace.Open(root)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+	return ws
+}
+
 func createMonolithWorkspace(t *testing.T) workspace.Root {
 	t.Helper()
 
@@ -1985,6 +2465,9 @@ func createMonolithWorkspace(t *testing.T) workspace.Root {
 	repo := filepath.Join(root, "repos", "orders-monolith")
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatalf("create monolith repo: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("# orders-monolith\n"), 0o644); err != nil {
+		t.Fatalf("write monolith readme: %v", err)
 	}
 	manifest := `version: 1
 repos:

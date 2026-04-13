@@ -124,8 +124,11 @@ type Task struct {
 	TaskID       string
 	RunID        string
 	StepID       string
+	ShardID      string
 	Workspace    string
+	RepoScope    string
 	RepoScopes   []string
+	PathScopes   []string
 	StartedAtUTC time.Time
 }
 

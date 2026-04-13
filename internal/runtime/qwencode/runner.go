@@ -14,6 +14,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/runnerdiag"
+	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultbinding"
 	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultextractor"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 )
@@ -64,15 +65,22 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 
 	args := append([]string(nil), r.Args...)
 	if len(args) == 0 {
-		args = []string{"--output-format", "json", "--yolo", "--channel", "CI", buildPrompt(taskPayload, false)}
+		args = buildDefaultQwenArgs(task, buildPrompt(taskPayload, false))
 	}
 
-	result, parseErr, runErr := runQwenCommand(ctx, command, args)
+	result, parseStage, parseErr, runErr := runQwenCommand(ctx, task, command, args)
 	if runErr != nil {
+		if len(r.Args) == 0 && isPromptFlagUnsupported(runErr) {
+			runErr = fmt.Errorf(
+				"%w (compatibility guard: current qwen command does not support --prompt in default mode; use explicit HeadlessRunner.Args for legacy positional prompt flow)",
+				runErr,
+			)
+		}
+		unavailableMessage := buildUnavailableFailureMessage(task, runErr, result)
 		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 			acpruntime.ProviderQwenCode,
 			acpruntime.ErrorCodeRunnerUnavailable,
-			fmt.Sprintf("%v: %s", ErrRunnerUnavailable, runErr),
+			fmt.Sprintf("%v: %s", ErrRunnerUnavailable, unavailableMessage),
 			result.Stdout,
 			result.Stderr,
 			runErr,
@@ -87,13 +95,14 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 	// Live qwen output can occasionally contain malformed tokens. Retry once with
 	// an explicitly stricter prompt before classifying as parse failure.
 	if len(r.Args) == 0 {
-		retryArgs := []string{"--output-format", "json", "--yolo", "--channel", "CI", buildPrompt(taskPayload, true)}
-		retryResult, retryParseErr, retryRunErr := runQwenCommand(ctx, command, retryArgs)
+		retryArgs := buildDefaultQwenArgs(task, buildPrompt(taskPayload, true))
+		retryResult, retryParseStage, retryParseErr, retryRunErr := runQwenCommand(ctx, task, command, retryArgs)
 		if retryRunErr != nil {
+			unavailableMessage := buildUnavailableFailureMessage(task, retryRunErr, retryResult)
 			return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 				acpruntime.ProviderQwenCode,
 				acpruntime.ErrorCodeRunnerUnavailable,
-				fmt.Sprintf("%v: %s", ErrRunnerUnavailable, retryRunErr),
+				fmt.Sprintf("%v: %s", ErrRunnerUnavailable, unavailableMessage),
 				retryResult.Stdout,
 				retryResult.Stderr,
 				retryRunErr,
@@ -103,12 +112,13 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 			return retryResult, nil
 		}
 		result = retryResult
+		parseStage = retryParseStage
 		parseErr = retryParseErr
 		finalStdout = retryResult.Stdout
 		finalStderr = retryResult.Stderr
 	}
 
-	parseFailureMessage := buildParseFailureMessage(task, parseErr, result)
+	parseFailureMessage := buildParseFailureMessage(task, parseStage, parseErr, result)
 	return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 		acpruntime.ProviderQwenCode,
 		acpruntime.ErrorCodeRunnerParseFailed,
@@ -119,17 +129,43 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 	)
 }
 
-func buildParseFailureMessage(task acpruntime.Task, parseErr error, result acpruntime.Result) string {
+func buildDefaultQwenArgs(task acpruntime.Task, prompt string) []string {
+	args := []string{"--output-format", "json", "--yolo", "--channel", "CI"}
+	workspace := strings.TrimSpace(task.Workspace)
+	if workspace != "" {
+		args = append(args, "--include-directories", workspace)
+	}
+	args = append(args, "--prompt", prompt)
+	return args
+}
+
+func isPromptFlagUnsupported(err error) bool {
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	if !strings.Contains(text, "--prompt") {
+		return false
+	}
+	return strings.Contains(text, "unknown option") ||
+		strings.Contains(text, "unknown argument") ||
+		strings.Contains(text, "unrecognized option") ||
+		strings.Contains(text, "invalid option")
+}
+
+func buildParseFailureMessage(task acpruntime.Task, parseStage string, parseErr error, result acpruntime.Result) string {
 	base := strings.TrimSpace(parseErr.Error())
 	if base == "" {
 		base = "unknown parse error"
 	}
+	stage := strings.TrimSpace(parseStage)
+	if stage == "" {
+		stage = "unknown"
+	}
 	artifacts, err := runnerdiag.WriteParseFailureArtifacts(task, acpruntime.ProviderQwenCode, result.Stdout, result.Stderr)
 	if err != nil {
-		return fmt.Sprintf("%s (raw_output_persist_failed=%v)", base, err)
+		return fmt.Sprintf("parse_stage=%s %s (raw_output_persist_failed=%v)", stage, base, err)
 	}
 	return fmt.Sprintf(
-		"%s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
+		"parse_stage=%s %s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
+		stage,
 		base,
 		artifacts.RelativeMetadataPath,
 		artifacts.Stdout.Bytes,
@@ -139,8 +175,32 @@ func buildParseFailureMessage(task acpruntime.Task, parseErr error, result acpru
 	)
 }
 
-func runQwenCommand(ctx context.Context, command string, args []string) (acpruntime.Result, error, error) {
+func buildUnavailableFailureMessage(task acpruntime.Task, runErr error, result acpruntime.Result) string {
+	base := strings.TrimSpace(runErr.Error())
+	if base == "" {
+		base = "unknown execution error"
+	}
+	artifacts, err := runnerdiag.WriteParseFailureArtifacts(task, acpruntime.ProviderQwenCode, result.Stdout, result.Stderr)
+	if err != nil {
+		return fmt.Sprintf("parse_stage=exec %s (raw_output_persist_failed=%v)", base, err)
+	}
+	return fmt.Sprintf(
+		"parse_stage=exec %s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
+		base,
+		artifacts.RelativeMetadataPath,
+		artifacts.Stdout.Bytes,
+		artifacts.Stdout.SHA256,
+		artifacts.Stderr.Bytes,
+		artifacts.Stderr.SHA256,
+	)
+}
+
+func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, args []string) (acpruntime.Result, string, error, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
+	workspace := strings.TrimSpace(task.Workspace)
+	if workspace != "" {
+		cmd.Dir = workspace
+	}
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -152,16 +212,12 @@ func runQwenCommand(ctx context.Context, command string, args []string) (acprunt
 			return acpruntime.Result{
 				Stdout: stdout.String(),
 				Stderr: stderr.String(),
-			}, nil, ctxErr
-		}
-		errText := strings.TrimSpace(stderr.String())
-		if errText == "" {
-			errText = err.Error()
+			}, "", nil, ctxErr
 		}
 		return acpruntime.Result{
 			Stdout: stdout.String(),
 			Stderr: stderr.String(),
-		}, nil, errors.New(errText)
+		}, "", nil, runnerdiag.BuildExecFailure(err, stdout.String(), stderr.String())
 	}
 
 	rawTaskResult, err := taskresultextractor.Extract(stdout.Bytes())
@@ -169,21 +225,27 @@ func runQwenCommand(ctx context.Context, command string, args []string) (acprunt
 		return acpruntime.Result{
 			Stdout: stdout.String(),
 			Stderr: stderr.String(),
-		}, err, nil
+		}, "extract", err, nil
 	}
 	taskResult, err := contracts.ParseTaskResult(rawTaskResult)
 	if err != nil {
 		return acpruntime.Result{
 			Stdout: stdout.String(),
 			Stderr: stderr.String(),
-		}, err, nil
+		}, "schema", err, nil
+	}
+	if err := taskresultbinding.Validate(task, taskResult, acpruntime.ProviderQwenCode); err != nil {
+		return acpruntime.Result{
+			Stdout: stdout.String(),
+			Stderr: stderr.String(),
+		}, "binding", err, nil
 	}
 	return acpruntime.Result{
 		TaskResult: taskResult,
 		RawJSON:    rawTaskResult,
 		Stdout:     stdout.String(),
 		Stderr:     stderr.String(),
-	}, nil, nil
+	}, "", nil, nil
 }
 
 func buildPrompt(taskPayload []byte, retry bool) string {
@@ -200,6 +262,11 @@ Task payload JSON:
 	if rawRepoScopes, err := json.Marshal(task.RepoScopes); err == nil {
 		repoScopesJSON = string(rawRepoScopes)
 	}
+	primaryRepoScope := primaryTaskRepoScope(task.RepoScope, task.RepoScopes)
+	pathScopesJSON := "[]"
+	if rawPathScopes, err := json.Marshal(task.PathScopes); err == nil {
+		pathScopesJSON = string(rawPathScopes)
+	}
 	stepPolicy := buildStepSpecificPolicy(task.StepID)
 	retryHint := ""
 	if retry {
@@ -208,6 +275,10 @@ Task payload JSON:
 			`Do not include non-ASCII symbols in numbers or timestamps.`,
 			`RFC3339 timestamps only (example: 2026-04-09T15:28:49Z).`,
 			`Decimals must be compact numeric literals (example: 0.7, not 0. 7).`,
+			`COMPACT JSON MODE: keep output concise and deterministic.`,
+			`- Limit changeset to the minimum actionable operations for this step.`,
+			`- Keep coverage.notes short (<=2 entries).`,
+			`- Avoid long prose in summary; keep a single sentence.`,
 		}, "\n")
 	}
 
@@ -238,13 +309,16 @@ Set meta fields exactly:
 - meta.runtime.name = %q
 - meta.started_at = %q
 - meta.workspace = %q
+- meta.shard_id = %q
+- meta.repo_scope = %q
 - meta.repo_scopes = %s
+- meta.path_scopes = %s
 
 Schema-valid template for this task (copy structure and field TYPES, then refine values with available evidence):
 %s
 
 Serialized runtime task JSON (context only):
-%s`, acpruntime.ProviderQwenCode, stepPolicy, retryHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderQwenCode, task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, repoScopesJSON, buildTaskResultTemplateJSON(task), strings.TrimSpace(string(taskPayload))))
+%s`, acpruntime.ProviderQwenCode, stepPolicy, retryHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderQwenCode, task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, task.ShardID, primaryRepoScope, repoScopesJSON, pathScopesJSON, buildTaskResultTemplateJSON(task), strings.TrimSpace(string(taskPayload))))
 }
 
 func buildTaskResultTemplateJSON(task acpruntime.Task) string {
@@ -270,7 +344,10 @@ func buildTaskResultTemplateJSON(task acpruntime.Task) string {
 			StartedAt:  task.StartedAtUTC.UTC().Format(time.RFC3339),
 			FinishedAt: task.StartedAtUTC.UTC().Add(2 * time.Second).Format(time.RFC3339),
 			Workspace:  task.Workspace,
+			ShardID:    task.ShardID,
+			RepoScope:  primaryTaskRepoScope(task.RepoScope, task.RepoScopes),
 			RepoScopes: append([]string(nil), task.RepoScopes...),
+			PathScopes: append([]string(nil), task.PathScopes...),
 		},
 		Summary:   "Task completed with contract-compliant output.",
 		Changeset: buildTemplateChangeset(task),
@@ -308,6 +385,8 @@ func buildStepSpecificPolicy(stepID string) string {
 			`STEP POLICY refresh.step3.findings:`,
 			`- If owner mapping is unresolved in evidence/coverage, include at least one add_finding operation.`,
 			`- Each finding must include rule_id, related_ids, and provenance.evidence[].`,
+			`- For observation provenance, evidence array MUST be non-empty.`,
+			`- If meta.repo_scopes has 2+ scopes, include at least one upsert_edge that links entities from different repo_scope values.`,
 			`- Include at least one question and at least three items in coverage.missing.`,
 		}, "\n")
 	default:
@@ -407,4 +486,16 @@ func humanizeScope(scope string) string {
 		return "Repository"
 	}
 	return name
+}
+
+func primaryTaskRepoScope(explicit string, scopes []string) string {
+	if value := strings.TrimSpace(explicit); value != "" {
+		return value
+	}
+	for _, scope := range scopes {
+		if value := strings.TrimSpace(scope); value != "" {
+			return value
+		}
+	}
+	return ""
 }

@@ -21,6 +21,9 @@
     },
     "docs": {
       "$ref": "#/$defs/docs"
+    },
+    "runtime": {
+      "$ref": "#/$defs/runtime"
     }
   },
   "$defs": {
@@ -41,6 +44,9 @@
         "git_url": {
           "type": "string",
           "minLength": 1
+        },
+        "analysis": {
+          "$ref": "#/$defs/repoAnalysis"
         },
         "ref": {
           "type": "string",
@@ -71,6 +77,26 @@
         }
       ]
     },
+    "repoAnalysis": {
+      "type": "object",
+      "properties": {
+        "include": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "docs": {
       "type": "object",
       "properties": {
@@ -78,6 +104,105 @@
           "type": "string",
           "minLength": 1,
           "default": "./docs/imports"
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "$ref": "#/$defs/runtimeProfile"
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtimeProfile": {
+      "type": "object",
+      "properties": {
+        "timeouts": {
+          "$ref": "#/$defs/runtimeTimeouts"
+        },
+        "execution": {
+          "$ref": "#/$defs/runtimeExecution"
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtimeTimeouts": {
+      "type": "object",
+      "properties": {
+        "step_timeout_sec": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "heartbeat_sec": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pipeline_timeout_sec": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pipeline_kill_grace_sec": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "api_ready_timeout_sec": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "api_init_timeout_sec": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "ui_init_poll_timeout_sec": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "ui_cancel_poll_timeout_sec": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtimeExecution": {
+      "type": "object",
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "sequential",
+            "parallel"
+          ]
+        },
+        "max_parallel_tasks": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "failure_policy": {
+          "type": "string",
+          "enum": [
+            "fail_fast",
+            "best_effort"
+          ]
+        },
+        "shard_discovery": {
+          "$ref": "#/$defs/runtimeShardDiscovery"
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtimeShardDiscovery": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "heuristics",
+            "semantic"
+          ]
         }
       },
       "additionalProperties": false

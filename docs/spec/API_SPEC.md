@@ -2,7 +2,7 @@
 
 Этот документ фиксирует фактический wire-contract HTTP API для local-first ACP standalone сервера.
 
-> MVP режим: `acp serve --workspace <abs-path> [--auto-init ... [--docs-imports-path <path>]]`.
+> MVP режим: `acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ... [--docs-imports-path <path>]]`.
 > Service работает с одним bound workspace на процесс.
 > Required CI/CD surface: CLI batch mode (`acp run ... --non-interactive`). API-trigger остаётся optional для trusted local/private deployment.
 
@@ -109,6 +109,159 @@ Body: отсутствует.
 **500**
 - `manifest_write_failed`
 - `manifest_reopen_failed`
+
+### GET `/api/runtime/timeouts`
+Возвращает timeout-конфиг для текущего workspace в трёх представлениях:
+- `persisted` — значения из `workspace.yaml` (`runtime.profile.timeouts`);
+- `effective` — значения после precedence-resolve (`env > workspace > defaults`);
+- `source` — источник каждого effective значения (`env|deprecated_env|workspace|default`).
+
+**200**
+```json
+{
+  "ok": true,
+  "persisted": {
+    "step_timeout_sec": 1800
+  },
+  "effective": {
+    "step_timeout_sec": 1800,
+    "heartbeat_sec": 30,
+    "pipeline_timeout_sec": 2400,
+    "pipeline_kill_grace_sec": 30,
+    "api_ready_timeout_sec": 60,
+    "api_init_timeout_sec": 120,
+    "ui_init_poll_timeout_sec": 900,
+    "ui_cancel_poll_timeout_sec": 420
+  },
+  "source": {
+    "step_timeout_sec": "workspace",
+    "heartbeat_sec": "default",
+    "pipeline_timeout_sec": "default",
+    "pipeline_kill_grace_sec": "default",
+    "api_ready_timeout_sec": "default",
+    "api_init_timeout_sec": "default",
+    "ui_init_poll_timeout_sec": "default",
+    "ui_cancel_poll_timeout_sec": "default"
+  }
+}
+```
+
+### PUT `/api/runtime/timeouts`
+Partial update persisted timeout-полей в `workspace.yaml`.
+
+**Request**
+```json
+{
+  "timeouts": {
+    "pipeline_timeout_sec": 3000,
+    "ui_init_poll_timeout_sec": 1200
+  }
+}
+```
+
+Правила:
+- payload должен содержать хотя бы одно поле в `timeouts`;
+- поддерживается partial update (изменяются только переданные поля);
+- каждое поле должно быть целым `> 0`.
+
+**200**
+```json
+{
+  "ok": true,
+  "persisted": {
+    "pipeline_timeout_sec": 3000,
+    "ui_init_poll_timeout_sec": 1200
+  },
+  "effective": {
+    "step_timeout_sec": 1800,
+    "heartbeat_sec": 30,
+    "pipeline_timeout_sec": 3000,
+    "pipeline_kill_grace_sec": 30,
+    "api_ready_timeout_sec": 60,
+    "api_init_timeout_sec": 120,
+    "ui_init_poll_timeout_sec": 1200,
+    "ui_cancel_poll_timeout_sec": 420
+  },
+  "source": {
+    "pipeline_timeout_sec": "workspace",
+    "ui_init_poll_timeout_sec": "workspace"
+  }
+}
+```
+
+**400**
+- `invalid_request_body`
+- `runtime_timeouts_empty`
+- `runtime_timeouts_invalid`
+
+**500**
+- `runtime_timeouts_render_failed`
+- `runtime_timeouts_write_failed`
+- `runtime_timeouts_reopen_failed`
+
+### GET `/api/runtime/execution`
+Возвращает execution-профиль для текущего workspace:
+- `persisted` — значения из `workspace.yaml` (`runtime.profile.execution`);
+- `effective` — значения после precedence-resolve (`CLI > env > workspace > defaults`);
+- `source` — источник каждого effective значения (`override|env|workspace|default`).
+
+**200**
+```json
+{
+  "ok": true,
+  "persisted": {
+    "strategy": "parallel",
+    "max_parallel_tasks": 4,
+    "failure_policy": "best_effort",
+    "shard_discovery_mode": "heuristics"
+  },
+  "effective": {
+    "strategy": "parallel",
+    "max_parallel_tasks": 4,
+    "failure_policy": "best_effort",
+    "shard_discovery_mode": "heuristics"
+  },
+  "source": {
+    "strategy": "workspace",
+    "max_parallel_tasks": "workspace",
+    "failure_policy": "workspace",
+    "shard_discovery_mode": "workspace"
+  }
+}
+```
+
+### PUT `/api/runtime/execution`
+Partial update persisted execution-полей в `workspace.yaml`.
+
+**Request**
+```json
+{
+  "execution": {
+    "strategy": "parallel",
+    "max_parallel_tasks": 6,
+    "failure_policy": "best_effort",
+    "shard_discovery_mode": "semantic"
+  }
+}
+```
+
+Правила:
+- payload должен содержать хотя бы одно поле в `execution`;
+- поддерживается partial update (изменяются только переданные поля);
+- `strategy` в `sequential|parallel`;
+- `max_parallel_tasks` должен быть целым `> 0`;
+- `failure_policy` в `fail_fast|best_effort`;
+- `shard_discovery_mode` в `heuristics|semantic`.
+
+**400**
+- `invalid_request_body`
+- `runtime_execution_empty`
+- `runtime_execution_invalid`
+
+**500**
+- `runtime_execution_render_failed`
+- `runtime_execution_write_failed`
+- `runtime_execution_reopen_failed`
 
 ## 3) Artifacts endpoints
 
@@ -256,6 +409,7 @@ Body: отсутствует.
 Для lifecycle сценариев используются дополнительные `error_code`:
 - `run_canceled` — run отменён пользователем;
 - `run_reconciled_after_restart` — stale `queued/running` run был reconciled в `failed` при старте сервиса после рестарта.
+- `run_partial_failed` — run завершён после `best_effort` shard execution, но один или более shard-ов завершились ошибкой.
 
 ### GET `/api/pipeline/runs?limit=<n>`
 Возвращает список запусков pipeline (queued/running/succeeded/failed), отсортированный по `started_at desc`.
@@ -311,7 +465,10 @@ Body: отсутствует.
       "fields": {
         "task_id": "task-run_20260403_001-init-step1-collect-payments-service",
         "provider": "claude-code",
+        "shard_id": "payments-service-services-api",
+        "repo_scope": "payments-service",
         "repo_scopes": ["payments-service"],
+        "path_scopes": ["services/api"],
         "stderr_snippet": "json parse error ... [truncated]"
       }
     }
@@ -417,10 +574,10 @@ Run-specific поверхность (не входит в strict deterministic g
 
 ## 8) Deployment boundary
 - `acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)`: explicit bootstrap.
-- `acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]`: local interactive и trusted local/private deployment.
+- `acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]`: local interactive и trusted local/private deployment.
 - bootstrap behavior: если workspace root не является git-репозиторием, ACP автоматически выполняет `git init` (без auto-commit/auto-push).
 - `serve` startup работает в lenient mode: сервис стартует без блокирующего repo preflight; readiness diagnostics доступны через `POST /api/workspace/validate`.
-- `acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--non-interactive]`.
+- `acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]`.
 - run logs retention knobs:
   - CLI flags: `--run-logs-ttl-hours`, `--run-logs-max-runs` (для `serve` и `run`)
   - env overrides: `ACP_RUN_LOGS_TTL_HOURS`, `ACP_RUN_LOGS_MAX_RUNS`
@@ -428,6 +585,18 @@ Run-specific поверхность (не входит в strict deterministic g
 - default runtime mode: `fake` (required deterministic CI surface), `headless` — opt-in.
 - default runtime provider: `claude-code`; fallback env `ACP_RUNTIME_PROVIDER`; CLI override `--runtime-provider`.
 - provider-specific command envs: `ACP_CLAUDE_CMD` и `ACP_QWEN_CMD`.
+- timeout control envs:
+  - `ACP_RUNTIME_STEP_TIMEOUT_SEC`
+  - `ACP_RUNTIME_HEARTBEAT_SEC`
+  - `ACP_PIPELINE_TIMEOUT_SEC`
+  - `ACP_PIPELINE_KILL_GRACE_SEC`
+  - `ACP_API_READY_TIMEOUT_SEC`
+  - `ACP_API_INIT_TIMEOUT_SEC`
+  - `ACP_UI_INIT_POLL_TIMEOUT_SEC`
+  - `ACP_UI_CANCEL_POLL_TIMEOUT_SEC`
+  - deprecated fallback aliases: `ACP_FULL_RUN_PIPELINE_TIMEOUT_SEC`, `ACP_FULL_RUN_PIPELINE_KILL_GRACE_SEC`, `READY_TIMEOUT_SEC`, `UI_E2E_INIT_TIMEOUT_SEC`, `UI_E2E_CANCEL_TIMEOUT_SEC`
+- timeout precedence: `env > workspace.yaml(runtime.profile.timeouts) > defaults`.
+- execution precedence: `CLI > env > workspace.yaml(runtime.profile.execution) > defaults`.
 - при `--runtime fake` provider value валидируется, но live provider command не выполняется.
 - GitHub/GitLab hooks/manual jobs для required CI/CD должны использовать CLI batch mode с deterministic defaults (`--runtime fake`).
 - API-trigger не должен превращаться в hosted control plane в рамках MVP.

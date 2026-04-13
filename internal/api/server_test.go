@@ -1004,6 +1004,414 @@ func TestWorkspaceManifestRoundTrip(t *testing.T) {
 	}
 }
 
+func TestRuntimeTimeoutsGetReturnsEffectiveDefaults(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Get(httpServer.URL + "/api/runtime/timeouts")
+	if err != nil {
+		t.Fatalf("GET /api/runtime/timeouts: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", response.StatusCode)
+	}
+
+	var payload struct {
+		OK        bool                            `json:"ok"`
+		Persisted workspace.RuntimeTimeoutsConfig `json:"persisted"`
+		Effective acpruntime.TimeoutValues        `json:"effective"`
+		Source    acpruntime.TimeoutSources       `json:"source"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode runtime timeouts payload: %v", err)
+	}
+	if !payload.OK {
+		t.Fatalf("expected ok=true")
+	}
+	if payload.Effective.StepTimeoutSec != acpruntime.DefaultRuntimeStepTimeoutSec {
+		t.Fatalf("expected default step timeout %d, got %d", acpruntime.DefaultRuntimeStepTimeoutSec, payload.Effective.StepTimeoutSec)
+	}
+	if payload.Source.StepTimeoutSec != acpruntime.TimeoutSourceDefault {
+		t.Fatalf("expected default source, got %s", payload.Source.StepTimeoutSec)
+	}
+}
+
+func TestRuntimeTimeoutsPutSupportsPartialUpdate(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	requestBody := `{"timeouts":{"step_timeout_sec":1200,"ui_cancel_poll_timeout_sec":555}}`
+	request, err := http.NewRequest(http.MethodPut, httpServer.URL+"/api/runtime/timeouts", strings.NewReader(requestBody))
+	if err != nil {
+		t.Fatalf("create PUT /api/runtime/timeouts request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("PUT /api/runtime/timeouts: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", response.StatusCode)
+	}
+
+	manifestResp, err := http.Get(httpServer.URL + "/api/workspace/manifest")
+	if err != nil {
+		t.Fatalf("GET /api/workspace/manifest: %v", err)
+	}
+	defer manifestResp.Body.Close()
+	var manifestPayload struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(manifestResp.Body).Decode(&manifestPayload); err != nil {
+		t.Fatalf("decode manifest payload: %v", err)
+	}
+	if !strings.Contains(manifestPayload.Content, "runtime:") || !strings.Contains(manifestPayload.Content, "step_timeout_sec: 1200") {
+		t.Fatalf("expected runtime timeout in manifest content, got:\n%s", manifestPayload.Content)
+	}
+	if !strings.Contains(manifestPayload.Content, "ui_cancel_poll_timeout_sec: 555") {
+		t.Fatalf("expected ui cancel timeout in manifest content, got:\n%s", manifestPayload.Content)
+	}
+}
+
+func TestRuntimeTimeoutsPutRejectsInvalidValues(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	requestBody := `{"timeouts":{"step_timeout_sec":0}}`
+	request, err := http.NewRequest(http.MethodPut, httpServer.URL+"/api/runtime/timeouts", strings.NewReader(requestBody))
+	if err != nil {
+		t.Fatalf("create PUT /api/runtime/timeouts request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("PUT /api/runtime/timeouts: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", response.StatusCode)
+	}
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	if payload.Error.Code != "runtime_timeouts_invalid" {
+		t.Fatalf("expected runtime_timeouts_invalid code, got %q", payload.Error.Code)
+	}
+}
+
+func TestRuntimeExecutionGetReturnsEffectiveDefaults(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Get(httpServer.URL + "/api/runtime/execution")
+	if err != nil {
+		t.Fatalf("GET /api/runtime/execution: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", response.StatusCode)
+	}
+
+	var payload struct {
+		OK        bool                        `json:"ok"`
+		Persisted map[string]any              `json:"persisted"`
+		Effective acpruntime.ExecutionValues  `json:"effective"`
+		Source    acpruntime.ExecutionSources `json:"source"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode runtime execution payload: %v", err)
+	}
+	if !payload.OK {
+		t.Fatalf("expected ok=true")
+	}
+	if payload.Effective.Strategy != acpruntime.DefaultExecutionStrategy {
+		t.Fatalf("expected default strategy %q, got %q", acpruntime.DefaultExecutionStrategy, payload.Effective.Strategy)
+	}
+	if payload.Effective.MaxParallel != acpruntime.DefaultExecutionMaxParallel {
+		t.Fatalf("expected default max_parallel_tasks %d, got %d", acpruntime.DefaultExecutionMaxParallel, payload.Effective.MaxParallel)
+	}
+	if payload.Source.Strategy != acpruntime.ExecutionSourceDefault {
+		t.Fatalf("expected default source, got %s", payload.Source.Strategy)
+	}
+}
+
+func TestRuntimeExecutionPutSupportsPartialUpdate(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	requestBody := `{"execution":{"strategy":"parallel","max_parallel_tasks":3,"failure_policy":"fail_fast","shard_discovery_mode":"semantic"}}`
+	request, err := http.NewRequest(http.MethodPut, httpServer.URL+"/api/runtime/execution", strings.NewReader(requestBody))
+	if err != nil {
+		t.Fatalf("create PUT /api/runtime/execution request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("PUT /api/runtime/execution: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", response.StatusCode)
+	}
+
+	manifestResp, err := http.Get(httpServer.URL + "/api/workspace/manifest")
+	if err != nil {
+		t.Fatalf("GET /api/workspace/manifest: %v", err)
+	}
+	defer manifestResp.Body.Close()
+	var manifestPayload struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(manifestResp.Body).Decode(&manifestPayload); err != nil {
+		t.Fatalf("decode manifest payload: %v", err)
+	}
+	if !strings.Contains(manifestPayload.Content, "runtime:") || !strings.Contains(manifestPayload.Content, "profile:") || !strings.Contains(manifestPayload.Content, "execution:") {
+		t.Fatalf("expected runtime.profile.execution in manifest content, got:\n%s", manifestPayload.Content)
+	}
+	if !strings.Contains(manifestPayload.Content, "strategy: parallel") {
+		t.Fatalf("expected execution strategy in manifest content, got:\n%s", manifestPayload.Content)
+	}
+	if !strings.Contains(manifestPayload.Content, "max_parallel_tasks: 3") {
+		t.Fatalf("expected max_parallel_tasks in manifest content, got:\n%s", manifestPayload.Content)
+	}
+	if !strings.Contains(manifestPayload.Content, "failure_policy: fail_fast") {
+		t.Fatalf("expected failure_policy in manifest content, got:\n%s", manifestPayload.Content)
+	}
+	if !strings.Contains(manifestPayload.Content, "mode: semantic") {
+		t.Fatalf("expected shard_discovery.mode in manifest content, got:\n%s", manifestPayload.Content)
+	}
+}
+
+func TestRuntimeExecutionPutRejectsInvalidValues(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	requestBody := `{"execution":{"max_parallel_tasks":0}}`
+	request, err := http.NewRequest(http.MethodPut, httpServer.URL+"/api/runtime/execution", strings.NewReader(requestBody))
+	if err != nil {
+		t.Fatalf("create PUT /api/runtime/execution request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("PUT /api/runtime/execution: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", response.StatusCode)
+	}
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	if payload.Error.Code != "runtime_execution_invalid" {
+		t.Fatalf("expected runtime_execution_invalid code, got %q", payload.Error.Code)
+	}
+}
+
+func TestPipelineRunReflectsSequentialVsParallelExecutionProfileInLogsAndShardArtifacts(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name        string
+		strategy    string
+		maxParallel int
+	}{
+		{name: "sequential", strategy: "sequential", maxParallel: 1},
+		{name: "parallel", strategy: "parallel", maxParallel: 3},
+	}
+
+	for _, testCase := range testCases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			repoPath := filepath.Join(root, "repos", "orders-monolith")
+			if err := os.MkdirAll(filepath.Join(repoPath, "services", "api"), 0o755); err != nil {
+				t.Fatalf("create api module dir: %v", err)
+			}
+			if err := os.MkdirAll(filepath.Join(repoPath, "services", "web"), 0o755); err != nil {
+				t.Fatalf("create web module dir: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(repoPath, "services", "api", "package.json"), []byte("{\"name\":\"api\"}\n"), 0o644); err != nil {
+				t.Fatalf("write api package.json: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(repoPath, "services", "web", "package.json"), []byte("{\"name\":\"web\"}\n"), 0o644); err != nil {
+				t.Fatalf("write web package.json: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(repoPath, "README.md"), []byte("# orders-monolith\n"), 0o644); err != nil {
+				t.Fatalf("write monolith readme: %v", err)
+			}
+
+			manifest := fmt.Sprintf(`version: 1
+repos:
+  - name: orders-monolith
+    path: %s
+runtime:
+  profile:
+    execution:
+      strategy: %s
+      max_parallel_tasks: %d
+      failure_policy: best_effort
+`, repoPath, testCase.strategy, testCase.maxParallel)
+			ws, err := workspace.Open(writeManifestRootWithRoot(t, root, manifest))
+			if err != nil {
+				t.Fatalf("open workspace: %v", err)
+			}
+			service := orchestrator.NewService(orchestrator.WithHistoryWorkspace(ws))
+			server := NewServer(ws, service)
+			httpServer := httptest.NewServer(server.Handler())
+			defer httpServer.Close()
+
+			response, err := http.Post(
+				httpServer.URL+"/api/pipeline/init",
+				"application/json",
+				bytes.NewBufferString(`{"trigger":"ui"}`),
+			)
+			if err != nil {
+				t.Fatalf("POST /api/pipeline/init: %v", err)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusAccepted {
+				t.Fatalf("expected status 202, got %d", response.StatusCode)
+			}
+			var startPayload struct {
+				RunID string `json:"run_id"`
+			}
+			if err := json.NewDecoder(response.Body).Decode(&startPayload); err != nil {
+				t.Fatalf("decode run start payload: %v", err)
+			}
+			if strings.TrimSpace(startPayload.RunID) == "" {
+				t.Fatalf("expected non-empty run_id")
+			}
+
+			runStatus := waitForRunTerminalStatus(t, httpServer.URL, startPayload.RunID, 8*time.Second)
+			if runStatus.Status != string(orchestrator.RunStatusSucceeded) {
+				t.Fatalf("expected succeeded status, got %q (%q)", runStatus.Status, runStatus.ErrorCode)
+			}
+
+			logsResp, err := http.Get(httpServer.URL + "/api/pipeline/runs/" + startPayload.RunID + "/logs?cursor=0&limit=500")
+			if err != nil {
+				t.Fatalf("GET run logs: %v", err)
+			}
+			defer logsResp.Body.Close()
+			if logsResp.StatusCode != http.StatusOK {
+				t.Fatalf("expected status 200 for logs, got %d", logsResp.StatusCode)
+			}
+			var logsPayload struct {
+				Items []struct {
+					StepID  string         `json:"step_id"`
+					Message string         `json:"message"`
+					Fields  map[string]any `json:"fields"`
+				} `json:"items"`
+			}
+			if err := json.NewDecoder(logsResp.Body).Decode(&logsPayload); err != nil {
+				t.Fatalf("decode run logs payload: %v", err)
+			}
+			foundStep1Prepared := false
+			for _, item := range logsPayload.Items {
+				if item.StepID != "init.step1.collect" || item.Message != "runtime shard execution prepared" {
+					continue
+				}
+				foundStep1Prepared = true
+				strategyValue, _ := item.Fields["strategy"].(string)
+				if strategyValue != testCase.strategy {
+					t.Fatalf("expected logs strategy %q, got %q", testCase.strategy, strategyValue)
+				}
+				maxParallelValue, ok := item.Fields["max_parallel"].(float64)
+				if !ok {
+					t.Fatalf("expected numeric max_parallel in logs fields, got %#v", item.Fields["max_parallel"])
+				}
+				if int(maxParallelValue) != testCase.maxParallel {
+					t.Fatalf("expected max_parallel=%d in logs, got %v", testCase.maxParallel, maxParallelValue)
+				}
+				break
+			}
+			if !foundStep1Prepared {
+				t.Fatalf("expected step1 shard execution log entry in run logs")
+			}
+
+			artifactsResp, err := http.Get(httpServer.URL + "/api/pipeline/runs/" + startPayload.RunID + "/artifacts")
+			if err != nil {
+				t.Fatalf("GET run artifacts: %v", err)
+			}
+			defer artifactsResp.Body.Close()
+			if artifactsResp.StatusCode != http.StatusOK {
+				t.Fatalf("expected status 200 for artifacts, got %d", artifactsResp.StatusCode)
+			}
+			var artifactsPayload struct {
+				Artifacts []orchestrator.Artifact `json:"artifacts"`
+			}
+			if err := json.NewDecoder(artifactsResp.Body).Decode(&artifactsPayload); err != nil {
+				t.Fatalf("decode artifacts payload: %v", err)
+			}
+			summaryPath := ""
+			for _, artifact := range artifactsPayload.Artifacts {
+				if strings.Contains(artifact.Path, "-init-step1-collect-shard-summary-") {
+					summaryPath = artifact.Path
+					break
+				}
+			}
+			if summaryPath == "" {
+				t.Fatalf("expected step1 shard summary artifact path in run artifacts")
+			}
+			summaryRaw, err := ws.ReadFile(summaryPath)
+			if err != nil {
+				t.Fatalf("read shard summary artifact %q: %v", summaryPath, err)
+			}
+			var summary struct {
+				Strategy    string `json:"strategy"`
+				MaxParallel int    `json:"max_parallel_tasks"`
+				Items       []struct {
+					PathScopes []string `json:"path_scopes"`
+				} `json:"items"`
+			}
+			if err := json.Unmarshal(summaryRaw, &summary); err != nil {
+				t.Fatalf("decode shard summary artifact %q: %v", summaryPath, err)
+			}
+			if summary.Strategy != testCase.strategy {
+				t.Fatalf("expected shard summary strategy %q, got %q", testCase.strategy, summary.Strategy)
+			}
+			if summary.MaxParallel != testCase.maxParallel {
+				t.Fatalf("expected shard summary max_parallel_tasks=%d, got %d", testCase.maxParallel, summary.MaxParallel)
+			}
+			if len(summary.Items) < 2 {
+				t.Fatalf("expected at least two shard summary items for monolith modules, got %d", len(summary.Items))
+			}
+		})
+	}
+}
+
 func TestArtifactsWriteEndpoint(t *testing.T) {
 	t.Parallel()
 
@@ -1292,8 +1700,8 @@ repos:
 	if runStatus.Status != string(orchestrator.RunStatusFailed) {
 		t.Fatalf("expected failed run status, got %q", runStatus.Status)
 	}
-	if runStatus.ErrorCode != "runner_parse_failed" {
-		t.Fatalf("expected runner_parse_failed, got %q", runStatus.ErrorCode)
+	if runStatus.ErrorCode != "run_partial_failed" {
+		t.Fatalf("expected run_partial_failed, got %q", runStatus.ErrorCode)
 	}
 }
 
@@ -1414,18 +1822,47 @@ func writeHeadlessRunnerStub(t *testing.T, runtimeName string) string {
 
 	path := filepath.Join(t.TempDir(), "headless-runner-stub.sh")
 	script := `#!/usr/bin/env bash
+set -eu
 TASK_PAYLOAD="$(cat)"
-TASK_PAYLOAD="$TASK_PAYLOAD" python3 - <<'PY'
+LAST_ARG=""
+for arg in "$@"; do
+  LAST_ARG="$arg"
+done
+TASK_PAYLOAD="$TASK_PAYLOAD" TASK_PROMPT="$LAST_ARG" python3 - <<'PY'
 import json
 import os
+import re
+import sys
 
 raw = os.environ.get("TASK_PAYLOAD", "").strip()
-task = json.loads(raw) if raw else {}
+prompt = os.environ.get("TASK_PROMPT", "")
+
+def first_non_empty(mapping, keys):
+    for key in keys:
+        value = mapping.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+def from_prompt(field):
+    match = re.search(r'"%s"\s*:\s*"([^"]+)"' % re.escape(field), prompt)
+    return match.group(1).strip() if match else ""
+
+task = {}
+if raw:
+    try:
+        task = json.loads(raw)
+    except Exception:
+        task = {}
+
+task_id = first_non_empty(task, ["task_id", "TaskID"]) or from_prompt("TaskID") or from_prompt("task_id") or "task"
+step_id = first_non_empty(task, ["step_id", "StepID"]) or from_prompt("StepID") or from_prompt("step_id") or "init.step1.collect"
+run_id = first_non_empty(task, ["run_id", "RunID"]) or from_prompt("RunID") or from_prompt("run_id")
 payload = {
     "meta": {
-        "task_id": task.get("task_id", "task"),
-        "step_id": task.get("step_id", "init.step1.collect"),
-        "run_id": task.get("run_id", ""),
+        "task_id": task_id,
+        "step_id": step_id,
+        "run_id": run_id,
         "runtime": {
             "name": "` + runtimeName + `",
             "version": "stub"

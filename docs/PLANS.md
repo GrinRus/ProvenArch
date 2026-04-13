@@ -49,6 +49,103 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 
 ### Plan ID
+EP-20260413-sharding-execution-profile
+
+### Context
+Нужно масштабировать runtime для больших монореп/мульти-репо: добавить управляемое shard-дробление с parallel execution внутри одного run, сохранить global single-run lock, и перенести runtime-конфиг в новый `runtime.profile` контракт.
+
+### Goals (must have)
+- [x] Ввести новый `workspace.yaml` контракт: `runtime.profile.timeouts`, `runtime.profile.execution`, `repos[].analysis.include/exclude`
+- [x] Добавить execution resolution (`defaults/workspace/env/CLI`) и CLI overrides (`--execution-strategy`, `--max-parallel-tasks`, `--failure-policy`)
+- [x] Реализовать shard planner + scheduler (sequential/parallel, best_effort/fail_fast) для runtime step1/step3
+- [x] Добавить per-shard taskruns + shard summary artifact + deterministic apply order
+- [x] Зафиксировать partial failure semantics (`run_partial_failed`) с агрегированными diagnostics
+- [x] Добавить API `GET/PUT /api/runtime/execution`
+- [x] Добавить UI panel для runtime execution profile (load/save/reset)
+- [x] Синхронизировать docs/examples/fixtures/tests и прогнать DoD (`make contracts/test/lint/build`)
+
+### Non-goals
+- [x] Изменение global queue policy (single active run + debounce)
+- [x] Добавление новых runtime providers beyond MVP (`claude-code`, `qwen-code`)
+- [x] Hosted/security-compliance расширения вне MVP
+
+### Approach
+1) Обновить schema/manifest/runtime resolution контракты.
+2) Интегрировать shard planning/scheduling в orchestrator runtime steps.
+3) Добавить API/UI surfaces для execution profile.
+4) Обновить regression suite + docs/spec/examples/fixtures, зафиксировать deterministic golden.
+
+### Files expected to change
+- `schemas/workspace.schema.json`
+- `internal/workspace/*`
+- `internal/runtime/*`
+- `internal/orchestrator/*`
+- `internal/api/*`
+- `cmd/acp/*`
+- `ui/src/*`
+- `docs/*`, `examples/*`, `fixtures/*`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены
+- [x] Схемы валидируются
+- [x] Документация обновлена
+
+### Risks
+- Breaking update `workspace.yaml` (`runtime.timeouts` -> `runtime.profile.timeouts`) без compatibility-layer.
+- Увеличение числа taskrun artifacts из-за sharding требует аккуратной фильтрации в тестах/интеграциях.
+
+### Progress log
+- 2026-04-13: Реализованы schema/manifest/runtime profile changes + execution resolver + CLI overrides.
+- 2026-04-13: Добавлены shard planner/scheduler, best-effort partial semantics и shard artifacts.
+- 2026-04-13: Добавлены API/UI execution profile surfaces, обновлены docs/examples/fixtures, пройдены `make contracts`, `make test`, `make lint`, `make build`.
+- 2026-04-13: Дозакрыт gap-аудит: добавлены unit/integration regression tests для planner filters/fallback, sequential-vs-parallel scheduler, deterministic apply order, `run_partial_failed`, synthetic large-monorepo + multi-repo shard scenarios; в shard-plan artifacts добавлен deterministic `semantic_graph` dump.
+- 2026-04-13: Дозакрыт контрактный и тестовый хвост: добавлен backward-compatible alias `meta.repo_scope` (в schema/runtime prompts/diagnostics), добавлены CLI/env precedence tests для execution profile и refresh step1/step3 sharding regression; повторно пройден DoD (`make contracts/test/lint/build`).
+- 2026-04-13: Добавлен отдельный fail-fast regression (`step` останавливается на первой shard error, без `run_partial_failed`), повторно перепроверены `go test ./...`, `make contracts`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260413-postfix-matrix-runtime-stability
+
+### Context
+После post-fix matrix остались падения в direct runtime (`qwen` invocation/`claude` parse), а также нечёткая классификация quality-vs-infra в batch отчётах. Дополнительно `cancel-refresh` frontend e2e флакал из-за transient banner-проверки.
+
+### Goals (must have)
+- [x] Перевести default `qwen` invocation на `--prompt` при `--include-directories`
+- [x] Усилить extractor/runtime diagnostics: явный `parse_stage`, точные причины envelope errors, richer unavailable message при пустом stderr
+- [x] Расширить `claude` retry для malformed envelope `result`
+- [x] Добавить отдельную batch/matrix классификацию `quality_gates_failed` (без смешивания с `infra_incomplete_cycle`)
+- [x] Стабилизировать frontend `cancel-refresh` e2e без зависимости от transient текста
+
+### Non-goals
+- [x] Изменение CLI/API/schema contracts
+- [x] Изменение набора runtime providers MVP
+
+### Approach
+1) Обновить runtime invocation/parsing (`qwencode`, `claudecode`, `taskresultextractor`, `runnerdiag`).
+2) Обновить batch/matrix quality classification (`full-run-batch-5x2`, `e2e_batch_report`, `full-run-batch-matrix`).
+3) Упростить `cancel-refresh` frontend live assertion до устойчивых run-state checks.
+4) Обновить docs + покрыть изменённое поведение unit/integration regression tests.
+
+### Files expected to change
+- `internal/runtime/{qwencode,claudecode,taskresultextractor,runnerdiag}/*`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/e2e_batch_report.py`
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/tests/test_e2e_batch_report.py`
+- `ui/e2e/live-flow.spec.ts`
+- `README.md`, `docs/LOCAL_FULL_RUN_AI_ADVENT.md`, `docs/TESTING_STRATEGY.md`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены
+- [x] Схемы/контракты не изменены
+- [x] Документация синхронизирована
+
+### Risks
+- Разные версии внешних CLI (`qwen`, `claude`) могут давать дополнительные carrier-форматы output; для них нужен регулярный regression run на trusted machine.
+
+### Progress log
+- 2026-04-13: Реализованы runtime/batch/frontend фиксы и добавлены regression tests для `--prompt`, parse-stage/schema path, quality-vs-infra classification и cancel-refresh stability.
+
+### Plan ID
 EP-20260413-trash-cleanup-safe-pass
 
 ### Context

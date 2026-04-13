@@ -18,14 +18,23 @@
    - `init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)` создаёт/обновляет `workspace.yaml`, bootstrap-ит fixed layout/baseline bundle и выполняет dry validation для первого старта
    - Раздаёт UI (embedded static assets из `ui/dist`)
    - Экспортирует API под `/api/*`
-   - `serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]` поднимает single-workspace-per-process service
+   - `serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]` поднимает single-workspace-per-process service
    - `serve --auto-init` bootstrap-ит workspace manifest/layout при отсутствии `workspace.yaml`
    - bootstrap (`init-workspace`/`serve --auto-init`) автоматически делает `git init` для workspace root при отсутствии `.git`
    - startup для `serve` lenient: без блокирующего repo preflight; readiness diagnostics доступны через `/api/workspace/validate`
    - Поддерживает batch/non-interactive режим для CI jobs
-   - `run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--non-interactive]`
+   - `run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]`
    - runtime selector process-scoped: `fake` default для required CI, `headless` opt-in
    - provider selector process-scoped: `--runtime-provider` > `ACP_RUNTIME_PROVIDER` > `claude-code`
+   - timeout control process/workspace-aware:
+     - persisted profile в `workspace.yaml.runtime.profile.timeouts`
+     - effective precedence: `env > workspace > defaults`
+     - canonical envs: `ACP_RUNTIME_*`, `ACP_PIPELINE_*`, `ACP_API_*`, `ACP_UI_*`
+     - deprecated aliases поддержаны для обратной совместимости (`READY_TIMEOUT_SEC`, `UI_E2E_*`, full-run `ACP_FULL_RUN_PIPELINE_*`)
+   - execution control process/workspace-aware:
+     - persisted profile в `workspace.yaml.runtime.profile.execution`
+     - effective precedence: `CLI > env > workspace > defaults`
+     - CLI overrides: `--execution-strategy`, `--max-parallel-tasks`, `--failure-policy`
    - Используется как локально, так и из SCM-triggered pipeline jobs/manual buttons
    - Internal API trigger остаётся optional trusted-mode capability, а не обязательной CI/CD поверхностью
    - Раздаёт embedded UI shell и API в одном процессе `acp serve`
@@ -45,6 +54,13 @@
    - Показывает `Run status` выбранного run с полным warnings list (`RunInfo.warnings`), `error_code` и `error`
    - Показывает `Runs: Logs` для выбранного run (`timestamp/level/step/domain/message`) с переключателем `line | line+fields` и quick actions `Copy logs`, `Download logs`, `Open taskrun artifact`
    - Поддерживает `Cancel selected run` для active run через `POST /api/pipeline/runs/<run_id>/cancel`
+   - Runtime Timeouts settings panel:
+     - load/save/reset через `GET/PUT /api/runtime/timeouts`
+     - показывает persisted/effective/source для каждого timeout поля
+   - Runtime Execution settings panel:
+     - load/save через `GET/PUT /api/runtime/execution`
+     - показывает persisted/effective/source для strategy/parallelism/failure/discovery
+   - live e2e poll timeout-ы берутся из effective config (`/api/runtime/timeouts`) с env override
    - Критичные UI-контролы для live e2e снабжены стабильными `data-testid` (`validate/run/status/artifacts/logs`)
 
 3) **Orchestrator (`internal/orchestrator`)** *(implemented baseline)*
@@ -62,6 +78,9 @@
    - Step1 repo binding: источник истины `repo_scope` в domain card; fallback только slug-match `domain_id` ↔ `repo.name`
    - Монолитный сценарий many-domains-to-one-repo поддержан через общий `repo_scope`; unknown scope фиксируется вопросом `q.domain.<id>.unknown-repo-scope`
    - Выполняет runtime collect-step per-domain и сохраняет отдельные raw taskruns в `reports/taskruns/*-step1-collect-domain-*.json`
+   - Runtime sharding planner (heuristics/semantic) materialize-ит deterministic shard-plan artifacts `reports/taskruns/*-shard-plan*.json` и shard-summary artifacts `reports/taskruns/*-shard-summary*.json`
+   - Scheduler поддерживает `sequential|parallel` execution с worker-pool (`max_parallel_tasks`) и `fail_fast|best_effort` failure-policy
+   - При `best_effort` downstream шаги продолжаются на partial model, но итог run фиксируется как `failed` с `error_code=run_partial_failed`
    - Вызывает runtime adapter
    - Валидирует TaskResult (schema)
    - Нормализует legacy `add_question` / `set_coverage` в canonical top-level form
@@ -78,6 +97,10 @@
    - Ведёт run-level logs в `reports/taskruns/logs/<run_id>.ndjson` с cursor query API (`GET /api/pipeline/runs/<run_id>/logs`)
    - При runtime/parse fail логирует structured diagnostics snippets (`stdout_snippet`/`stderr_snippet`) в `RunLogEntry.fields` (sanitize + truncate)
    - Пробрасывает `TaskResult.warnings` в run diagnostics (`RunInfo.Warnings`) и логирует warning events
+   - Runtime step execution:
+     - `executeRuntimeTask` выполняет runner под `context.WithTimeout(step_timeout_sec)`
+     - heartbeat-log `runtime task heartbeat` публикуется раз в `heartbeat_sec`
+     - timeout/cancel причины добавляются в error message без изменения `error_code` контракта
    - Materialize-ит per-run quality summary `reports/taskruns/<run_id>-quality.json` (signal metrics/runtime versions)
    - Run logs retention policy (TTL + max runs) запускается при старте сервиса, перед run и после run
    - (опционально) делает git commit
@@ -103,6 +126,7 @@
    - валидирует manifest по `schemas/workspace.schema.json`
    - поддерживает `docs/imports/index.yaml` как metadata index для imported docs
    - поддерживает repo entries с `path` или `git_url` + optional `ref`
+   - поддерживает optional persisted runtime profile в `runtime.profile` (`timeouts + execution`, см. `WORKSPACE_SPEC`)
    - verify `ref` для `path` source использует fallback (`ref` -> `origin/ref` -> `refs/remotes/origin/ref`) и выдаёт warning при `HEAD` mismatch
    - clone/fetch для `git_url` выполняет на той же машине через локальный `git` и текущий user/runner auth context
    - не хранит отдельные credentials внутри ACP
@@ -122,6 +146,13 @@
    - сохраняет `reports/coverage/*` для unknowns/questions
    - сохраняет `reports/agent-outputs/*`
    - формирует `reports/changelog/*` по итерациям
+
+9) **Runtime Profile API (`internal/api`)** *(implemented baseline)*
+   - `GET /api/runtime/timeouts`: persisted + effective + source
+   - `PUT /api/runtime/timeouts`: partial update persisted timeout profile, write-through в `workspace.yaml`
+   - `GET /api/runtime/execution`: persisted + effective + source
+   - `PUT /api/runtime/execution`: partial update persisted execution profile, write-through в `workspace.yaml`
+   - active run не прерывается при изменении timeout settings; новые значения применяются к следующим run
 
 ## Agent Topology Artifacts (MVP)
 - `charter/cards/domains/<domain-id>.md`

@@ -1,0 +1,17 @@
+version: 1
+repos:
+  - name: payments-service
+    path: /absolute/path/to/payments-service
+runtime:
+  profile:
+    timeouts:
+      step_timeout_sec: 1800
+      heartbeat_sec: 30
+      pipeline_timeout_sec: 2400
+      pipeline_kill_grace_sec: 30
+      api_ready_timeout_sec: 60
+      api_init_timeout_sec: 120
+      ui_init_poll_timeout_sec: 900
+      ui_cancel_poll_timeout_sec: 420
+docs:
+  imports_path: ./docs/imports

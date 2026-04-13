@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -64,7 +65,7 @@ func TestRunSubcommandHelpReturnsZero(t *testing.T) {
 	if code != exitCodeOK {
 		t.Fatalf("expected exit code %d, got %d", exitCodeOK, code)
 	}
-	if !strings.Contains(stderr.String(), "Usage: acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--non-interactive]") {
+	if !strings.Contains(stderr.String(), "Usage: acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]") {
 		t.Fatalf("expected run usage in stderr, got %q", stderr.String())
 	}
 }
@@ -587,6 +588,56 @@ func TestInitWorkspaceSupportsReposFile(t *testing.T) {
 	}
 }
 
+func TestInitWorkspaceReposFilePreservesRuntimeTimeouts(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspaceRoot := filepath.Join(root, "arch-workspace")
+	repoA := filepath.Join(root, "repos", "a")
+	if err := os.MkdirAll(repoA, 0o755); err != nil {
+		t.Fatalf("create repoA: %v", err)
+	}
+	reposFile := filepath.Join(root, "repos.yaml")
+	reposContent := `repos:
+  - name: repo-a
+    path: ` + repoA + `
+runtime:
+  profile:
+    timeouts:
+      step_timeout_sec: 777
+      ui_cancel_poll_timeout_sec: 333
+`
+	if err := os.WriteFile(reposFile, []byte(reposContent), 0o644); err != nil {
+		t.Fatalf("write repos file: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"init-workspace",
+		"--workspace", workspaceRoot,
+		"--repos-file", reposFile,
+	}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d: stderr=%q", exitCodeOK, code, stderr.String())
+	}
+
+	manifestContent, err := os.ReadFile(filepath.Join(workspaceRoot, "workspace.yaml"))
+	if err != nil {
+		t.Fatalf("read workspace manifest: %v", err)
+	}
+	manifestText := string(manifestContent)
+	if !strings.Contains(manifestText, "runtime:") {
+		t.Fatalf("expected runtime block in manifest, got %q", manifestText)
+	}
+	if !strings.Contains(manifestText, "step_timeout_sec: 777") {
+		t.Fatalf("expected step_timeout_sec from repos-file, got %q", manifestText)
+	}
+	if !strings.Contains(manifestText, "ui_cancel_poll_timeout_sec: 333") {
+		t.Fatalf("expected ui_cancel_poll_timeout_sec from repos-file, got %q", manifestText)
+	}
+}
+
 func TestServeAutoInitSupportsReposFile(t *testing.T) {
 	t.Parallel()
 
@@ -606,6 +657,11 @@ func TestServeAutoInitSupportsReposFile(t *testing.T) {
     path: ` + repoA + `
   - name: repo-b
     path: ` + repoB + `
+runtime:
+  profile:
+    timeouts:
+      step_timeout_sec: 1440
+      heartbeat_sec: 12
 `
 	if err := os.WriteFile(reposFile, []byte(reposContent), 0o644); err != nil {
 		t.Fatalf("write repos file: %v", err)
@@ -625,6 +681,17 @@ func TestServeAutoInitSupportsReposFile(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(workspacePath, "workspace.yaml")); err != nil {
 		t.Fatalf("expected workspace.yaml after auto-init repos-file: %v", err)
+	}
+	manifestContent, err := os.ReadFile(filepath.Join(workspacePath, "workspace.yaml"))
+	if err != nil {
+		t.Fatalf("read workspace manifest: %v", err)
+	}
+	manifestText := string(manifestContent)
+	if !strings.Contains(manifestText, "step_timeout_sec: 1440") {
+		t.Fatalf("expected runtime timeouts from repos-file in auto-init manifest, got %q", manifestText)
+	}
+	if !strings.Contains(manifestText, "heartbeat_sec: 12") {
+		t.Fatalf("expected runtime heartbeat from repos-file in auto-init manifest, got %q", manifestText)
 	}
 }
 
@@ -849,6 +916,65 @@ func TestRunHeadlessRuntimeProviderFlagOverridesEnv(t *testing.T) {
 	}
 }
 
+func TestServeDryRunExecutionUsesEnvOverridesWhenCLIUnset(t *testing.T) {
+	root := writeWorkspaceWithExecutionProfile(t, "sequential", 2, "fail_fast")
+	t.Setenv("ACP_EXECUTION_STRATEGY", "parallel")
+	t.Setenv("ACP_MAX_PARALLEL_TASKS", "5")
+	t.Setenv("ACP_FAILURE_POLICY", "best_effort")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"serve",
+		"--workspace", root,
+		"--runtime", "fake",
+		"--dry-run",
+	}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d: stderr=%q", exitCodeOK, code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "execution strategy: parallel") {
+		t.Fatalf("expected env execution strategy override, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "execution max_parallel_tasks: 5") {
+		t.Fatalf("expected env max_parallel_tasks override, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "execution failure_policy: best_effort") {
+		t.Fatalf("expected env failure_policy override, got %q", stdout.String())
+	}
+}
+
+func TestServeDryRunExecutionCLIOverridesBeatEnvAndWorkspace(t *testing.T) {
+	root := writeWorkspaceWithExecutionProfile(t, "parallel", 2, "fail_fast")
+	t.Setenv("ACP_EXECUTION_STRATEGY", "parallel")
+	t.Setenv("ACP_MAX_PARALLEL_TASKS", "5")
+	t.Setenv("ACP_FAILURE_POLICY", "fail_fast")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"serve",
+		"--workspace", root,
+		"--runtime", "fake",
+		"--execution-strategy", "sequential",
+		"--max-parallel-tasks", "7",
+		"--failure-policy", "best_effort",
+		"--dry-run",
+	}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d: stderr=%q", exitCodeOK, code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "execution strategy: sequential") {
+		t.Fatalf("expected CLI execution strategy override, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "execution max_parallel_tasks: 7") {
+		t.Fatalf("expected CLI max_parallel_tasks override, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "execution failure_policy: best_effort") {
+		t.Fatalf("expected CLI failure_policy override, got %q", stdout.String())
+	}
+}
+
 func TestEnsureWorkspaceGitRepositoryReturnsActionableErrorWhenGitMissing(t *testing.T) {
 	t.Setenv("PATH", "")
 	err := ensureWorkspaceGitRepository(t.TempDir())
@@ -886,24 +1012,79 @@ func writeWorkspace(t *testing.T) string {
 	return root
 }
 
+func writeWorkspaceWithExecutionProfile(t *testing.T, strategy string, maxParallel int, failurePolicy string) string {
+	t.Helper()
+
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "repos", "sample")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("create sample repo path: %v", err)
+	}
+	manifest := strings.Join([]string{
+		"version: 1",
+		"repos:",
+		"  - name: sample",
+		"    path: " + repoPath,
+		"runtime:",
+		"  profile:",
+		"    execution:",
+		"      strategy: " + strategy,
+		"      max_parallel_tasks: " + strconv.Itoa(maxParallel),
+		"      failure_policy: " + failurePolicy,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(root, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write workspace manifest: %v", err)
+	}
+	return root
+}
+
 func writeStubHeadlessRunner(t *testing.T, runtimeName string) string {
 	t.Helper()
 
 	path := filepath.Join(t.TempDir(), "stub-headless-runner.sh")
 	script := `#!/usr/bin/env bash
+set -eu
 TASK_PAYLOAD="$(cat)"
-TASK_PAYLOAD="$TASK_PAYLOAD" python3 - <<'PY'
+LAST_ARG=""
+for arg in "$@"; do
+  LAST_ARG="$arg"
+done
+TASK_PAYLOAD="$TASK_PAYLOAD" TASK_PROMPT="$LAST_ARG" python3 - <<'PY'
 import json
 import os
+import re
 import sys
 
 raw = os.environ.get("TASK_PAYLOAD", "").strip()
-task = json.loads(raw) if raw else {}
+prompt = os.environ.get("TASK_PROMPT", "")
+
+def first_non_empty(mapping, keys):
+    for key in keys:
+        value = mapping.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+def from_prompt(field):
+    match = re.search(r'"%s"\s*:\s*"([^"]+)"' % re.escape(field), prompt)
+    return match.group(1).strip() if match else ""
+
+task = {}
+if raw:
+    try:
+        task = json.loads(raw)
+    except Exception:
+        task = {}
+
+task_id = first_non_empty(task, ["task_id", "TaskID"]) or from_prompt("TaskID") or from_prompt("task_id") or "task"
+step_id = first_non_empty(task, ["step_id", "StepID"]) or from_prompt("StepID") or from_prompt("step_id") or "init.step1.collect"
+run_id = first_non_empty(task, ["run_id", "RunID"]) or from_prompt("RunID") or from_prompt("run_id")
 payload = {
     "meta": {
-        "task_id": task.get("task_id", "task"),
-        "step_id": task.get("step_id", "init.step1.collect"),
-        "run_id": task.get("run_id", ""),
+        "task_id": task_id,
+        "step_id": step_id,
+        "run_id": run_id,
         "runtime": {
             "name": "` + runtimeName + `",
             "version": "stub"

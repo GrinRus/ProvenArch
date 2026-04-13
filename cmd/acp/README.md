@@ -4,8 +4,8 @@ Go CLI entrypoint for ACP.
 
 Usage surface:
 - `acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports] [--force]` for first-time workspace bootstrap (`workspace.yaml` + fixed layout + baseline bundle + dry validation)
-- `acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]` for local UI/API bound to a single workspace per process
-- `acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--non-interactive]` for batch/non-interactive execution, including GitHub/GitLab CI jobs, hook-triggered workflows, and manual pipeline buttons
+- `acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]` for local UI/API bound to a single workspace per process
+- `acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]` for batch/non-interactive execution, including GitHub/GitLab CI jobs, hook-triggered workflows, and manual pipeline buttons
 - `acp qa --workspace <abs-path> --question "<text>"` for read-only Q&A over workspace artifacts
 
 Notes:

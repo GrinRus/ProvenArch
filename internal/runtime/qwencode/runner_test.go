@@ -21,7 +21,7 @@ func TestHeadlessRunnerUnavailableClassifiesAsRunnerUnavailable(t *testing.T) {
 		TaskID:       "task-1",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -37,6 +37,86 @@ func TestHeadlessRunnerUnavailableClassifiesAsRunnerUnavailable(t *testing.T) {
 	}
 	if !strings.Contains(message, "is unavailable") {
 		t.Fatalf("unexpected error message %q", message)
+	}
+}
+
+func TestHeadlessRunnerUnavailableIncludesStdoutExcerptWhenStderrEmpty(t *testing.T) {
+	t.Parallel()
+
+	commandPath := filepath.Join(t.TempDir(), "qwen-unavailable-stdout.sh")
+	script := `#!/bin/sh
+set -eu
+echo "qwen failed due to transient setup issue"
+exit 1
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write unavailable stub: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-unavailable-stdout",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    t.TempDir(),
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected runner unavailable error")
+	}
+	code, message, ok := acpruntime.ClassifyError(err)
+	if !ok {
+		t.Fatalf("expected classify error to succeed")
+	}
+	if code != string(acpruntime.ErrorCodeRunnerUnavailable) {
+		t.Fatalf("unexpected error code %q", code)
+	}
+	if !strings.Contains(message, "stdout_excerpt=") {
+		t.Fatalf("expected stdout excerpt in unavailable error message, got %q", message)
+	}
+	if !strings.Contains(message, "parse_stage=exec") || !strings.Contains(message, "raw_output=reports/taskruns/raw/") {
+		t.Fatalf("expected raw-output diagnostics in unavailable error message, got %q", message)
+	}
+}
+
+func TestHeadlessRunnerUnsupportedPromptFlagReportsCompatibilityGuard(t *testing.T) {
+	t.Parallel()
+
+	commandPath := filepath.Join(t.TempDir(), "qwen-unsupported-prompt.sh")
+	script := `#!/bin/sh
+set -eu
+echo "unknown option --prompt" >&2
+exit 1
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write unsupported-prompt stub: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-unsupported-prompt",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    t.TempDir(),
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected runner unavailable error")
+	}
+	code, message, ok := acpruntime.ClassifyError(err)
+	if !ok {
+		t.Fatalf("expected classify error to succeed")
+	}
+	if code != string(acpruntime.ErrorCodeRunnerUnavailable) {
+		t.Fatalf("unexpected error code %q", code)
+	}
+	if !strings.Contains(message, "compatibility guard") {
+		t.Fatalf("expected compatibility guard hint in error message, got %q", message)
+	}
+	if !strings.Contains(message, "HeadlessRunner.Args") {
+		t.Fatalf("expected legacy path hint in error message, got %q", message)
 	}
 }
 
@@ -72,12 +152,48 @@ func TestHeadlessRunnerInvalidTaskResultClassifiesAsParseFailed(t *testing.T) {
 	if !strings.Contains(message, "invalid taskresult") || !strings.Contains(message, "raw_output=reports/taskruns/raw/") {
 		t.Fatalf("unexpected error message %q", message)
 	}
+	if !strings.Contains(message, "parse_stage=") {
+		t.Fatalf("expected parse_stage marker in parse-fail message, got %q", message)
+	}
 	rawMetaFiles, globErr := filepath.Glob(filepath.Join(workspace, "reports", "taskruns", "raw", "*-meta.json"))
 	if globErr != nil {
 		t.Fatalf("glob raw output meta files: %v", globErr)
 	}
 	if len(rawMetaFiles) == 0 {
 		t.Fatalf("expected parse-fail raw output metadata in %s", filepath.Join(workspace, "reports", "taskruns", "raw"))
+	}
+}
+
+func TestHeadlessRunnerSchemaInvalidCandidateClassifiesAsSchemaStage(t *testing.T) {
+	t.Parallel()
+
+	runner := HeadlessRunner{
+		Command: "sh",
+		Args: []string{
+			"-c",
+			`printf '%s\n' '{"meta":{"task_id":"task-1"}}'`,
+		},
+	}
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-1",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    t.TempDir(),
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected parse-failed error")
+	}
+	code, message, ok := acpruntime.ClassifyError(err)
+	if !ok {
+		t.Fatalf("expected classify error to succeed")
+	}
+	if code != string(acpruntime.ErrorCodeRunnerParseFailed) {
+		t.Fatalf("unexpected error code %q", code)
+	}
+	if !strings.Contains(message, "parse_stage=schema") {
+		t.Fatalf("expected parse_stage=schema, got %q", message)
 	}
 }
 
@@ -109,7 +225,7 @@ echo '{"response":"not-json"}'
 		TaskID:       "task-1",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -118,6 +234,57 @@ echo '{"response":"not-json"}'
 	}
 	if result.TaskResult.Meta.Runtime.Name != "qwen-code" {
 		t.Fatalf("unexpected runtime name %q", result.TaskResult.Meta.Runtime.Name)
+	}
+}
+
+func TestHeadlessRunnerDefaultArgsUsePromptFlagForExecution(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	commandPath := filepath.Join(tempDir, "qwen-prompt-flag-stub.sh")
+	script := `#!/bin/sh
+set -eu
+has_prompt=0
+prompt_value=""
+expect_prompt_value=0
+for arg in "$@"; do
+  if [ "$expect_prompt_value" -eq 1 ]; then
+    prompt_value="$arg"
+    expect_prompt_value=0
+    continue
+  fi
+  if [ "$arg" = "--prompt" ]; then
+    has_prompt=1
+    expect_prompt_value=1
+    continue
+  fi
+done
+if [ "$has_prompt" -ne 1 ] || [ -z "$prompt_value" ]; then
+  echo "missing --prompt argument" >&2
+  exit 1
+fi
+cat <<'JSON'
+{"meta":{"task_id":"task-prompt-flag","step_id":"init.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}
+JSON
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write prompt-flag command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-prompt-flag",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    t.TempDir(),
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("expected default run to succeed with --prompt: %v", err)
+	}
+	if result.TaskResult.Meta.TaskID != "task-prompt-flag" {
+		t.Fatalf("unexpected task id %q", result.TaskResult.Meta.TaskID)
 	}
 }
 
@@ -149,7 +316,7 @@ echo 'first stderr detail' >&2
 		TaskID:       "task-1",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -207,7 +374,7 @@ sleep 10
 		TaskID:       "task-cancel",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -234,7 +401,7 @@ func TestHeadlessRunnerParsesTaskResultFromResponseField(t *testing.T) {
 		TaskID:       "task-1",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -261,7 +428,7 @@ func TestHeadlessRunnerParsesTaskResultFromJsonArrayResultMessage(t *testing.T) 
 		TaskID:       "task-1",
 		RunID:        "run-1",
 		StepID:       "init.step3.findings",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -288,7 +455,7 @@ func TestHeadlessRunnerParsesTaskResultFromQwenAssistantContentEvents(t *testing
 		TaskID:       "task-1",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -315,7 +482,7 @@ func TestHeadlessRunnerParsesTaskResultFromJsonObjectsStream(t *testing.T) {
 		TaskID:       "task-1",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
@@ -327,6 +494,41 @@ func TestHeadlessRunnerParsesTaskResultFromJsonObjectsStream(t *testing.T) {
 	}
 }
 
+func TestHeadlessRunnerBindingMismatchClassifiesAsParseFailed(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	runner := HeadlessRunner{
+		Command: "sh",
+		Args: []string{
+			"-c",
+			`printf '%s\n' '{"meta":{"task_id":"task-stale","step_id":"init.step1.collect","run_id":"run-stale","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}'`,
+		},
+	}
+
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-expected",
+		RunID:        "run-expected",
+		StepID:       "init.step1.collect",
+		Workspace:    workspace,
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected binding parse-failed error")
+	}
+	code, message, ok := acpruntime.ClassifyError(err)
+	if !ok {
+		t.Fatalf("expected classify error to succeed")
+	}
+	if code != string(acpruntime.ErrorCodeRunnerParseFailed) {
+		t.Fatalf("unexpected error code %q", code)
+	}
+	if !strings.Contains(message, "parse_stage=binding") {
+		t.Fatalf("expected parse_stage=binding in parse-fail message, got %q", message)
+	}
+}
+
 func TestBuildPromptIncludesStepSpecificPolicies(t *testing.T) {
 	t.Parallel()
 
@@ -334,7 +536,7 @@ func TestBuildPromptIncludesStepSpecificPolicies(t *testing.T) {
 		TaskID:       "task-refresh",
 		RunID:        "run-1",
 		StepID:       "refresh.step3.findings",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	}
@@ -362,7 +564,7 @@ func TestBuildPromptRefreshStep1CollectIncludesNoWebSearchPolicy(t *testing.T) {
 		TaskID:       "task-refresh-step1",
 		RunID:        "run-1",
 		StepID:       "refresh.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    t.TempDir(),
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	}
@@ -377,5 +579,29 @@ func TestBuildPromptRefreshStep1CollectIncludesNoWebSearchPolicy(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "Do NOT emit synthetic evidence paths such as search_source/*") {
 		t.Fatalf("expected synthetic evidence-path ban in step1 collect policy")
+	}
+}
+
+func TestBuildDefaultQwenArgsUsesPromptFlagWithIncludeDirectories(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		TaskID:       "task-args",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    "/tmp/workspace",
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	args := buildDefaultQwenArgs(task, "prompt-text")
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--include-directories /tmp/workspace") {
+		t.Fatalf("expected include-directories in args, got %q", joined)
+	}
+	if !strings.Contains(joined, "--prompt prompt-text") {
+		t.Fatalf("expected --prompt usage in args, got %q", joined)
+	}
+	if args[len(args)-2] != "--prompt" || args[len(args)-1] != "prompt-text" {
+		t.Fatalf("expected prompt to be appended as --prompt <value>, got %#v", args)
 	}
 }

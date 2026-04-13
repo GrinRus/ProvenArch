@@ -63,6 +63,9 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	listenAddress := fs.String("listen", "127.0.0.1:8080", "listen address for local API server")
 	runtimeMode := fs.String("runtime", "fake", "runtime mode: fake or headless")
 	runtimeProvider := fs.String("runtime-provider", "", "runtime provider for headless mode: claude-code or qwen-code (fallback: ACP_RUNTIME_PROVIDER)")
+	executionStrategy := fs.String("execution-strategy", "", "execution strategy override: sequential or parallel")
+	maxParallelTasks := fs.Int("max-parallel-tasks", 0, "execution max parallel tasks override (>0)")
+	failurePolicy := fs.String("failure-policy", "", "execution failure policy override: fail_fast or best_effort")
 	runLogsTTLHrs := fs.Int("run-logs-ttl-hours", envInt("ACP_RUN_LOGS_TTL_HOURS", 168), "run logs retention TTL in hours")
 	runLogsMaxRuns := fs.Int("run-logs-max-runs", envInt("ACP_RUN_LOGS_MAX_RUNS", 200), "maximum number of run log files to retain")
 	dryRun := fs.Bool("dry-run", false, "validate workspace and server wiring without starting listener")
@@ -74,7 +77,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	reposFile := fs.String("repos-file", "", "YAML file with repos[] entries for --auto-init")
 	docsImportsPath := fs.String("docs-imports-path", "./docs/imports", "docs imports path in workspace.yaml for --auto-init")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--listen 127.0.0.1:8080] [--dry-run] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]")
+		fmt.Fprintln(stderr, "Usage: acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--listen 127.0.0.1:8080] [--dry-run] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]")
 		fs.PrintDefaults()
 	}
 
@@ -95,6 +98,11 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	}
 	if *runLogsMaxRuns <= 0 {
 		fmt.Fprintln(stderr, "run logs validation failed: --run-logs-max-runs must be > 0")
+		return exitCodeValidation
+	}
+	executionOverrides, err := executionOverridesFromCLI(*executionStrategy, *maxParallelTasks, *failurePolicy)
+	if err != nil {
+		fmt.Fprintf(stderr, "execution validation failed: %v\n", err)
 		return exitCodeValidation
 	}
 
@@ -138,6 +146,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		orchestrator.WithRunner(runner),
 		orchestrator.WithHistoryWorkspace(ws),
 		orchestrator.WithRunLogsRetention(time.Duration(*runLogsTTLHrs)*time.Hour, *runLogsMaxRuns),
+		orchestrator.WithExecutionOverrides(executionOverrides),
 	)
 	if err := service.ValidateRuntime(context.Background()); err != nil {
 		printRunnerError(stderr, err)
@@ -149,6 +158,10 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "server configured for %s\n", *listenAddress)
 		fmt.Fprintf(stdout, "runtime mode: %s\n", mode)
 		fmt.Fprintf(stdout, "runtime provider: %s\n", provider)
+		executionResolved := service.ResolveExecutionProfile(ws.Manifest)
+		fmt.Fprintf(stdout, "execution strategy: %s\n", executionResolved.Effective.Strategy)
+		fmt.Fprintf(stdout, "execution max_parallel_tasks: %d\n", executionResolved.Effective.MaxParallel)
+		fmt.Fprintf(stdout, "execution failure_policy: %s\n", executionResolved.Effective.FailurePolicy)
 		if mode == acpruntime.RuntimeModeFake {
 			fmt.Fprintln(stdout, "runtime provider note: ignored in fake mode")
 		}
@@ -238,6 +251,7 @@ type workspaceInitConfig struct {
 	RepoRef         string
 	ReposFile       string
 	Repos           []workspace.RepoSource
+	Runtime         *workspace.RuntimeConfig
 	DocsImportsPath string
 	Force           bool
 	RequireRepo     bool
@@ -275,6 +289,7 @@ func createWorkspaceFromConfig(config workspaceInitConfig) (workspace.Root, erro
 		Version: 1,
 		Repos:   repos,
 		Docs:    workspace.DocsConfig{ImportsPath: normalized.DocsImportsPath},
+		Runtime: cloneRuntimeConfig(normalized.Runtime),
 	}
 
 	manifestContent, err := yaml.Marshal(manifest)
@@ -346,15 +361,17 @@ func normalizeWorkspaceInitConfig(config workspaceInitConfig) (workspaceInitConf
 	}
 
 	repos := []workspace.RepoSource{}
+	var runtimeConfig *workspace.RuntimeConfig
 	if reposFile != "" {
 		if repoName != "" || repoPath != "" || repoGitURL != "" || repoRef != "" {
 			return workspaceInitConfig{}, errors.New("set either --repos-file or single-repo flags (--repo-name + --repo-path|--repo-git-url)")
 		}
-		loadedRepos, err := loadRepoSourcesFromFile(reposFile)
+		loadedRepos, loadedRuntime, err := loadRepoSourcesAndRuntimeFromFile(reposFile)
 		if err != nil {
 			return workspaceInitConfig{}, err
 		}
 		repos = loadedRepos
+		runtimeConfig = loadedRuntime
 	}
 
 	if config.RequireRepo && len(repos) == 0 {
@@ -383,6 +400,7 @@ func normalizeWorkspaceInitConfig(config workspaceInitConfig) (workspaceInitConf
 		RepoRef:         repoRef,
 		ReposFile:       reposFile,
 		Repos:           repos,
+		Runtime:         runtimeConfig,
 		DocsImportsPath: importsPath,
 		Force:           config.Force,
 		RequireRepo:     config.RequireRepo,
@@ -397,11 +415,14 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 	pipelineName := fs.String("pipeline", "", "pipeline to run: init or refresh")
 	runtimeMode := fs.String("runtime", "fake", "runtime mode: fake or headless")
 	runtimeProvider := fs.String("runtime-provider", "", "runtime provider for headless mode: claude-code or qwen-code (fallback: ACP_RUNTIME_PROVIDER)")
+	executionStrategy := fs.String("execution-strategy", "", "execution strategy override: sequential or parallel")
+	maxParallelTasks := fs.Int("max-parallel-tasks", 0, "execution max parallel tasks override (>0)")
+	failurePolicy := fs.String("failure-policy", "", "execution failure policy override: fail_fast or best_effort")
 	runLogsTTLHrs := fs.Int("run-logs-ttl-hours", envInt("ACP_RUN_LOGS_TTL_HOURS", 168), "run logs retention TTL in hours")
 	runLogsMaxRuns := fs.Int("run-logs-max-runs", envInt("ACP_RUN_LOGS_MAX_RUNS", 200), "maximum number of run log files to retain")
 	nonInteractive := fs.Bool("non-interactive", false, "disable interactive prompts")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--non-interactive]")
+		fmt.Fprintln(stderr, "Usage: acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]")
 		fs.PrintDefaults()
 	}
 
@@ -422,6 +443,11 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 	}
 	if *runLogsMaxRuns <= 0 {
 		fmt.Fprintln(stderr, "run logs validation failed: --run-logs-max-runs must be > 0")
+		return exitCodeValidation
+	}
+	executionOverrides, err := executionOverridesFromCLI(*executionStrategy, *maxParallelTasks, *failurePolicy)
+	if err != nil {
+		fmt.Fprintf(stderr, "execution validation failed: %v\n", err)
 		return exitCodeValidation
 	}
 
@@ -466,6 +492,7 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 		orchestrator.WithRunner(runner),
 		orchestrator.WithHistoryWorkspace(ws),
 		orchestrator.WithRunLogsRetention(time.Duration(*runLogsTTLHrs)*time.Hour, *runLogsMaxRuns),
+		orchestrator.WithExecutionOverrides(executionOverrides),
 	)
 	if err := service.ValidateRuntime(context.Background()); err != nil {
 		printRunnerError(stderr, err)
@@ -490,6 +517,10 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "status: %s\n", runInfo.Status)
 	fmt.Fprintf(stdout, "runtime mode: %s\n", mode)
 	fmt.Fprintf(stdout, "runtime provider: %s\n", provider)
+	executionResolved := service.ResolveExecutionProfile(ws.Manifest)
+	fmt.Fprintf(stdout, "execution strategy: %s\n", executionResolved.Effective.Strategy)
+	fmt.Fprintf(stdout, "execution max_parallel_tasks: %d\n", executionResolved.Effective.MaxParallel)
+	fmt.Fprintf(stdout, "execution failure_policy: %s\n", executionResolved.Effective.FailurePolicy)
 	if mode == acpruntime.RuntimeModeFake {
 		fmt.Fprintln(stdout, "runtime provider note: ignored in fake mode")
 	}
@@ -571,8 +602,8 @@ func printRootUsage(w io.Writer) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]")
-	fmt.Fprintln(w, "  acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]")
-	fmt.Fprintln(w, "  acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--non-interactive]")
+	fmt.Fprintln(w, "  acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]")
+	fmt.Fprintln(w, "  acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]")
 	fmt.Fprintln(w, "  acp qa --workspace <abs-path> --question \"<text>\"")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Commands:")
@@ -619,6 +650,31 @@ func envInt(name string, fallback int) int {
 	return value
 }
 
+func executionOverridesFromCLI(strategy string, maxParallel int, failurePolicy string) (acpruntime.ExecutionOverrides, error) {
+	overrides := acpruntime.ExecutionOverrides{}
+	if trimmed := strings.TrimSpace(strategy); trimmed != "" {
+		normalized := strings.ToLower(trimmed)
+		if normalized != acpruntime.ExecutionStrategySequential && normalized != acpruntime.ExecutionStrategyParallel {
+			return acpruntime.ExecutionOverrides{}, fmt.Errorf("--execution-strategy must be one of: %s, %s", acpruntime.ExecutionStrategySequential, acpruntime.ExecutionStrategyParallel)
+		}
+		overrides.Strategy = &normalized
+	}
+	if maxParallel < 0 {
+		return acpruntime.ExecutionOverrides{}, errors.New("--max-parallel-tasks must be > 0 when set")
+	}
+	if maxParallel > 0 {
+		overrides.MaxParallel = &maxParallel
+	}
+	if trimmed := strings.TrimSpace(failurePolicy); trimmed != "" {
+		normalized := strings.ToLower(trimmed)
+		if normalized != acpruntime.ExecutionFailurePolicyFailFast && normalized != acpruntime.ExecutionFailurePolicyBestEffort {
+			return acpruntime.ExecutionOverrides{}, fmt.Errorf("--failure-policy must be one of: %s, %s", acpruntime.ExecutionFailurePolicyFailFast, acpruntime.ExecutionFailurePolicyBestEffort)
+		}
+		overrides.FailurePolicy = &normalized
+	}
+	return overrides, nil
+}
+
 func ensureWorkspaceGitRepository(workspacePath string) error {
 	gitDir := filepath.Join(workspacePath, ".git")
 	_, err := os.Stat(gitDir)
@@ -643,35 +699,43 @@ func ensureWorkspaceGitRepository(workspacePath string) error {
 }
 
 func loadRepoSourcesFromFile(rawPath string) ([]workspace.RepoSource, error) {
+	repos, _, err := loadRepoSourcesAndRuntimeFromFile(rawPath)
+	return repos, err
+}
+
+func loadRepoSourcesAndRuntimeFromFile(rawPath string) ([]workspace.RepoSource, *workspace.RuntimeConfig, error) {
 	path := strings.TrimSpace(rawPath)
 	if path == "" {
-		return nil, errors.New("repos file path is required")
+		return nil, nil, errors.New("repos file path is required")
 	}
 	absPath, err := filepath.Abs(path)
 	if err != nil {
-		return nil, fmt.Errorf("resolve --repos-file: %w", err)
+		return nil, nil, fmt.Errorf("resolve --repos-file: %w", err)
 	}
 	content, err := os.ReadFile(absPath)
 	if err != nil {
-		return nil, fmt.Errorf("read --repos-file %q: %w", absPath, err)
+		return nil, nil, fmt.Errorf("read --repos-file %q: %w", absPath, err)
 	}
 
 	var envelope struct {
-		Repos []workspace.RepoSource `yaml:"repos"`
+		Repos   []workspace.RepoSource   `yaml:"repos"`
+		Runtime *workspace.RuntimeConfig `yaml:"runtime"`
 	}
 	if err := yaml.Unmarshal(content, &envelope); err != nil {
-		return nil, fmt.Errorf("parse --repos-file %q: %w", absPath, err)
+		return nil, nil, fmt.Errorf("parse --repos-file %q: %w", absPath, err)
 	}
 	repos := envelope.Repos
+	runtimeConfig := cloneRuntimeConfig(envelope.Runtime)
 	if len(repos) == 0 {
 		var list []workspace.RepoSource
 		if err := yaml.Unmarshal(content, &list); err != nil {
-			return nil, fmt.Errorf("parse --repos-file %q: expected YAML with repos[] or array of repo entries", absPath)
+			return nil, nil, fmt.Errorf("parse --repos-file %q: expected YAML with repos[] or array of repo entries", absPath)
 		}
 		repos = list
+		runtimeConfig = nil
 	}
 	if len(repos) == 0 {
-		return nil, fmt.Errorf("--repos-file %q contains no repos", absPath)
+		return nil, nil, fmt.Errorf("--repos-file %q contains no repos", absPath)
 	}
 
 	baseDir := filepath.Dir(absPath)
@@ -680,10 +744,10 @@ func loadRepoSourcesFromFile(rawPath string) ([]workspace.RepoSource, error) {
 	for idx, repo := range repos {
 		item, normalizeErr := normalizeRepoSource(repo, baseDir, idx)
 		if normalizeErr != nil {
-			return nil, normalizeErr
+			return nil, nil, normalizeErr
 		}
 		if _, exists := seenNames[item.Name]; exists {
-			return nil, fmt.Errorf("--repos-file %q contains duplicate repo.name %q", absPath, item.Name)
+			return nil, nil, fmt.Errorf("--repos-file %q contains duplicate repo.name %q", absPath, item.Name)
 		}
 		seenNames[item.Name] = struct{}{}
 		normalized = append(normalized, item)
@@ -691,7 +755,63 @@ func loadRepoSourcesFromFile(rawPath string) ([]workspace.RepoSource, error) {
 	sort.Slice(normalized, func(i, j int) bool {
 		return normalized[i].Name < normalized[j].Name
 	})
-	return normalized, nil
+	return normalized, runtimeConfig, nil
+}
+
+func cloneRuntimeConfig(input *workspace.RuntimeConfig) *workspace.RuntimeConfig {
+	if input == nil {
+		return nil
+	}
+	var clonedTimeouts *workspace.RuntimeTimeoutsConfig
+	if input.Profile != nil && input.Profile.Timeouts != nil {
+		clonedTimeouts = &workspace.RuntimeTimeoutsConfig{
+			StepTimeoutSec:         cloneIntPointer(input.Profile.Timeouts.StepTimeoutSec),
+			HeartbeatSec:           cloneIntPointer(input.Profile.Timeouts.HeartbeatSec),
+			PipelineTimeoutSec:     cloneIntPointer(input.Profile.Timeouts.PipelineTimeoutSec),
+			PipelineKillGraceSec:   cloneIntPointer(input.Profile.Timeouts.PipelineKillGraceSec),
+			APIReadyTimeoutSec:     cloneIntPointer(input.Profile.Timeouts.APIReadyTimeoutSec),
+			APIInitTimeoutSec:      cloneIntPointer(input.Profile.Timeouts.APIInitTimeoutSec),
+			UIInitPollTimeoutSec:   cloneIntPointer(input.Profile.Timeouts.UIInitPollTimeoutSec),
+			UICancelPollTimeoutSec: cloneIntPointer(input.Profile.Timeouts.UICancelPollTimeoutSec),
+		}
+		if clonedTimeouts.IsZero() {
+			clonedTimeouts = nil
+		}
+	}
+	var clonedExecution *workspace.RuntimeExecutionConfig
+	if input.Profile != nil && input.Profile.Execution != nil {
+		clonedExecution = &workspace.RuntimeExecutionConfig{
+			Strategy:      strings.TrimSpace(input.Profile.Execution.Strategy),
+			MaxParallel:   cloneIntPointer(input.Profile.Execution.MaxParallel),
+			FailurePolicy: strings.TrimSpace(input.Profile.Execution.FailurePolicy),
+		}
+		if input.Profile.Execution.ShardDiscovery != nil {
+			clonedExecution.ShardDiscovery = &workspace.RuntimeShardDiscoveryConfig{
+				Mode: strings.TrimSpace(input.Profile.Execution.ShardDiscovery.Mode),
+			}
+		}
+		if clonedExecution.IsZero() {
+			clonedExecution = nil
+		}
+	}
+	cloned := &workspace.RuntimeConfig{
+		Profile: &workspace.RuntimeProfileConfig{
+			Timeouts:  clonedTimeouts,
+			Execution: clonedExecution,
+		},
+	}
+	if cloned.IsZero() {
+		return nil
+	}
+	return cloned
+}
+
+func cloneIntPointer(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	copied := *value
+	return &copied
 }
 
 func normalizeRepoSource(repo workspace.RepoSource, baseDir string, index int) (workspace.RepoSource, error) {

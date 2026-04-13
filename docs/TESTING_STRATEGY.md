@@ -75,6 +75,16 @@ Baseline scenario set:
   - `CancelRun` для pending run даёт immediate terminal `failed` + `error_code=run_canceled`
   - `CancelRun` для active run даёт cooperative cancel + `failed` + `error_code=run_canceled`, очередь продолжает работать
   - stale persisted `queued/running` run при старте сервиса reconciled в `failed` + `error_code=run_reconciled_after_restart`
+- runtime timeout control:
+  - persisted profile в `workspace.yaml.runtime.profile.timeouts`
+  - effective precedence `env > workspace > defaults`
+  - новые API endpoints `GET/PUT /api/runtime/timeouts`
+- runtime sharding control:
+  - heuristics planner (module markers + leaf-pruning) и `analysis.include/exclude` фильтры
+  - fallback warning + root shard `.` при пустом результате фильтров
+  - scheduler semantics `sequential|parallel` (`max_parallel_tasks`) и deterministic apply order
+  - `fail_fast` останавливает step/pipeline на первой shard error без перехода в downstream runtime steps
+  - `best_effort` partial shard failures: pipeline продолжается, но итоговый status `failed` + `error_code=run_partial_failed`
 - docs truth-sync gate проверяет:
   - согласованность runtime policy/Q&A boundary и ссылок на canonical stakeholder matrix;
   - отсутствие stale-маркеров в ключевых surfaces (`future`, `skeleton`, `placeholder`, устаревшие version-маркеры);
@@ -156,6 +166,10 @@ Implemented additional jobs:
 - missing owner / missing CI-CD evidence path
 - unresolved domain/team becomes question/finding, not new card
 - deterministic Step 1 enrichment включает `evidence_refs` в domain/team cards
+- sharded runtime regression:
+  - step1/step3 materialize per-shard taskruns + shard-plan/shard-summary artifacts
+  - parallel scheduler keeps deterministic merge/apply order despite out-of-order shard completion
+  - TaskResult shard metadata (`meta.shard_id`, `meta.repo_scopes`, `meta.path_scopes`) сохраняется в persisted taskruns
 
 ### Smoke tests
 - `acp run --workspace ... --pipeline init --runtime fake --non-interactive`
@@ -201,7 +215,7 @@ Implemented additional jobs:
   - multi-profile hard-fail: `analysis:cross-repo-missing` при `expected_repo_count >= 2` и отсутствии cross-repo сигнала
   - hard-pass учитывает semantic hard-fail и snapshot source validity
   - run artifacts default: `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/*`
-  - reports: `run_matrix_<batch-id>.md`, `frontend_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md` (+ fields `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, failure classes `runtime_parse/runner_unavailable/infra_signal_terminated/infra_incomplete_cycle/summary_missing`)
+  - reports: `run_matrix_<batch-id>.md`, `frontend_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md` (+ fields `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, failure classes `runtime_parse/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing`)
 - profile matrix regression (local official runbook, non-required CI):
   - `scripts/full-run-batch-matrix.sh`
   - `E2E_MATRIX_FILE` обязателен (`profiles[]`: `id`, `repos_file`, `expected_repo_count`, `source_kind`)
@@ -213,6 +227,7 @@ Implemented additional jobs:
   - `scripts/frontend-live-e2e.sh` (local)
   - direct `npm run e2e:live --prefix ui`: Playwright output default `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
   - `scripts/frontend-live-e2e.sh`: Playwright output в `$OUTPUT_DIR/playwright-results`
+  - `scripts/frontend-live-e2e.sh` читает effective UI poll timeouts из `GET /api/runtime/timeouts` (если env override не задан)
   - `UI_E2E_EXPECTED_REPO_COUNT` задаёт ожидаемое количество resolved repos (default `1`)
   - `UI_E2E_SCENARIO=init-inspect|cancel-refresh` переключает live flow:
     - `init-inspect`: validate -> run init -> inspect artifacts
@@ -240,6 +255,9 @@ Implemented additional jobs:
 - для schema validation в CI используется Draft 2020-12 compatible validator
 - основной backend test loop предполагает `go test`
 - UI smoke предполагает React test stack; конкретный framework выбирается при реализации UI
+- Balanced timeout defaults:
+  - step `1800s`, heartbeat `30s`, pipeline `2400s`, kill-grace `30s`
+  - api-ready `60s`, api-init `120s`, ui-init poll `900s`, ui-cancel poll `420s`
 
 ## 10) Developer entrypoints
 

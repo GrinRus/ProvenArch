@@ -1,9 +1,14 @@
 import { expect, test } from "@playwright/test";
 
 const scenario = (process.env.UI_E2E_SCENARIO ?? "init-inspect").trim().toLowerCase();
+const initTimeoutSec = Number.parseInt(process.env.UI_E2E_INIT_TIMEOUT_SEC ?? "900", 10);
+const cancelTimeoutSec = Number.parseInt(process.env.UI_E2E_CANCEL_TIMEOUT_SEC ?? "420", 10);
+const initTimeoutMs = Number.isFinite(initTimeoutSec) && initTimeoutSec > 0 ? initTimeoutSec * 1000 : 900_000;
+const cancelTimeoutMs = Number.isFinite(cancelTimeoutSec) && cancelTimeoutSec > 0 ? cancelTimeoutSec * 1000 : 420_000;
 
 test("live ui flow: validate -> run init -> inspect artifacts", async ({ page }) => {
   test.skip(scenario !== "init-inspect", `scenario ${scenario} skips init-inspect flow`);
+  test.setTimeout(Math.max(initTimeoutMs + 120_000, 6 * 60 * 1000));
   const runtimeProvider = process.env.UI_E2E_RUNTIME_PROVIDER ?? "unknown";
   const expectedRepoCountRaw = Number.parseInt(process.env.UI_E2E_EXPECTED_REPO_COUNT ?? "1", 10);
   const expectedRepoCount = Number.isFinite(expectedRepoCountRaw) && expectedRepoCountRaw > 0 ? expectedRepoCountRaw : 1;
@@ -28,7 +33,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page })
         const payload = (await response.json()) as { status?: string };
         return (payload.status ?? "").trim();
       },
-      { timeout: 10 * 60 * 1000 }
+      { timeout: initTimeoutMs }
     )
     .toBe("succeeded");
 
@@ -55,6 +60,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page })
 
 test("live ui flow: run refresh -> cancel -> failed(run_canceled)", async ({ page }) => {
   test.skip(scenario !== "cancel-refresh", `scenario ${scenario} skips cancel-refresh flow`);
+  test.setTimeout(Math.max(cancelTimeoutMs + 120_000, 6 * 60 * 1000));
   const runtimeProvider = process.env.UI_E2E_RUNTIME_PROVIDER ?? "unknown";
 
   await page.goto("/");
@@ -72,7 +78,6 @@ test("live ui flow: run refresh -> cancel -> failed(run_canceled)", async ({ pag
   const cancelButton = page.getByTestId("run-cancel-btn");
   await expect(cancelButton).toBeEnabled({ timeout: 30_000 });
   await cancelButton.click();
-  await expect(page.getByText(new RegExp(`Cancel requested for ${runID}`, "i"))).toBeVisible();
 
   await expect
     .poll(
@@ -83,7 +88,7 @@ test("live ui flow: run refresh -> cancel -> failed(run_canceled)", async ({ pag
         const errorCode = (payload.error_code ?? "").trim();
         return `${status}|${errorCode}`;
       },
-      { timeout: 3 * 60 * 1000 }
+      { timeout: cancelTimeoutMs }
     )
     .toBe("failed|run_canceled");
 

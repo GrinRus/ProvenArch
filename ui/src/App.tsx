@@ -112,6 +112,38 @@ type WizardContract = {
   rules: string[];
 };
 
+type RuntimeTimeoutKey =
+  | "step_timeout_sec"
+  | "heartbeat_sec"
+  | "pipeline_timeout_sec"
+  | "pipeline_kill_grace_sec"
+  | "api_ready_timeout_sec"
+  | "api_init_timeout_sec"
+  | "ui_init_poll_timeout_sec"
+  | "ui_cancel_poll_timeout_sec";
+
+type RuntimeTimeoutValues = Record<RuntimeTimeoutKey, number>;
+type RuntimeTimeoutSources = Record<RuntimeTimeoutKey, string>;
+
+type RuntimeTimeoutsResponse = {
+  ok: boolean;
+  persisted?: Partial<RuntimeTimeoutValues>;
+  effective?: Partial<RuntimeTimeoutValues>;
+  source?: Partial<RuntimeTimeoutSources>;
+};
+
+type RuntimeExecutionKey = "strategy" | "max_parallel_tasks" | "failure_policy" | "shard_discovery_mode";
+
+type RuntimeExecutionValues = Record<RuntimeExecutionKey, string | number>;
+type RuntimeExecutionSources = Record<RuntimeExecutionKey, string>;
+
+type RuntimeExecutionResponse = {
+  ok: boolean;
+  persisted?: Partial<RuntimeExecutionValues>;
+  effective?: Partial<RuntimeExecutionValues>;
+  source?: Partial<RuntimeExecutionSources>;
+};
+
 type EditableArtifactOption = {
   path: string;
   label: string;
@@ -147,6 +179,55 @@ const baselineEditorArtifacts: EditableArtifactOption[] = [
   { path: "skills/qa/prompts/system.md", label: "skills/qa/prompts/system.md" },
   { path: "skills/qa/prompts/task.md", label: "skills/qa/prompts/task.md" }
 ];
+
+const runtimeTimeoutKeys: RuntimeTimeoutKey[] = [
+  "step_timeout_sec",
+  "heartbeat_sec",
+  "pipeline_timeout_sec",
+  "pipeline_kill_grace_sec",
+  "api_ready_timeout_sec",
+  "api_init_timeout_sec",
+  "ui_init_poll_timeout_sec",
+  "ui_cancel_poll_timeout_sec",
+];
+
+const defaultRuntimeTimeoutValues: RuntimeTimeoutValues = {
+  step_timeout_sec: 1800,
+  heartbeat_sec: 30,
+  pipeline_timeout_sec: 2400,
+  pipeline_kill_grace_sec: 30,
+  api_ready_timeout_sec: 60,
+  api_init_timeout_sec: 120,
+  ui_init_poll_timeout_sec: 900,
+  ui_cancel_poll_timeout_sec: 420,
+};
+
+const runtimeTimeoutLabels: Record<RuntimeTimeoutKey, string> = {
+  step_timeout_sec: "runtime.profile.timeouts.step_timeout_sec",
+  heartbeat_sec: "runtime.profile.timeouts.heartbeat_sec",
+  pipeline_timeout_sec: "runtime.profile.timeouts.pipeline_timeout_sec",
+  pipeline_kill_grace_sec: "runtime.profile.timeouts.pipeline_kill_grace_sec",
+  api_ready_timeout_sec: "runtime.profile.timeouts.api_ready_timeout_sec",
+  api_init_timeout_sec: "runtime.profile.timeouts.api_init_timeout_sec",
+  ui_init_poll_timeout_sec: "runtime.profile.timeouts.ui_init_poll_timeout_sec",
+  ui_cancel_poll_timeout_sec: "runtime.profile.timeouts.ui_cancel_poll_timeout_sec",
+};
+
+const runtimeExecutionKeys: RuntimeExecutionKey[] = ["strategy", "max_parallel_tasks", "failure_policy", "shard_discovery_mode"];
+
+const defaultRuntimeExecutionValues: RuntimeExecutionValues = {
+  strategy: "sequential",
+  max_parallel_tasks: 1,
+  failure_policy: "best_effort",
+  shard_discovery_mode: "heuristics",
+};
+
+const runtimeExecutionLabels: Record<RuntimeExecutionKey, string> = {
+  strategy: "runtime.profile.execution.strategy",
+  max_parallel_tasks: "runtime.profile.execution.max_parallel_tasks",
+  failure_policy: "runtime.profile.execution.failure_policy",
+  shard_discovery_mode: "runtime.profile.execution.shard_discovery.mode",
+};
 
 const finalStatuses = new Set(["succeeded", "failed"]);
 const activeStatuses = new Set(["queued", "running"]);
@@ -206,6 +287,101 @@ function formatTimestamp(value?: string | null): string {
   return date.toISOString().replace("T", " ").replace(".000Z", " UTC");
 }
 
+function normalizeRuntimeTimeoutValues(
+  partial: Partial<RuntimeTimeoutValues> | undefined,
+  fallback: RuntimeTimeoutValues
+): RuntimeTimeoutValues {
+  const next = { ...fallback };
+  for (const key of runtimeTimeoutKeys) {
+    const raw = partial?.[key];
+    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+      next[key] = Math.floor(raw);
+    }
+  }
+  return next;
+}
+
+function runtimeTimeoutDraftFromValues(values: RuntimeTimeoutValues): Record<RuntimeTimeoutKey, string> {
+  const draft = {} as Record<RuntimeTimeoutKey, string>;
+  for (const key of runtimeTimeoutKeys) {
+    draft[key] = String(values[key]);
+  }
+  return draft;
+}
+
+function parseRuntimeTimeoutPatch(draft: Record<RuntimeTimeoutKey, string>): RuntimeTimeoutValues {
+  const patch = {} as RuntimeTimeoutValues;
+  for (const key of runtimeTimeoutKeys) {
+    const value = Number.parseInt((draft[key] ?? "").trim(), 10);
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new Error(`runtime timeout ${key} must be a positive integer`);
+    }
+    patch[key] = value;
+  }
+  return patch;
+}
+
+function normalizeRuntimeExecutionValues(
+  partial: Partial<RuntimeExecutionValues> | undefined,
+  fallback: RuntimeExecutionValues
+): RuntimeExecutionValues {
+  const strategyRaw = String(partial?.strategy ?? "").trim().toLowerCase();
+  const strategy = strategyRaw === "parallel" || strategyRaw === "sequential" ? strategyRaw : String(fallback.strategy);
+
+  const failureRaw = String(partial?.failure_policy ?? "").trim().toLowerCase();
+  const failurePolicy = failureRaw === "fail_fast" || failureRaw === "best_effort" ? failureRaw : String(fallback.failure_policy);
+
+  const shardRaw = String(partial?.shard_discovery_mode ?? "").trim().toLowerCase();
+  const shardMode = shardRaw === "semantic" || shardRaw === "heuristics" ? shardRaw : String(fallback.shard_discovery_mode);
+
+  const maxRaw = Number(partial?.max_parallel_tasks);
+  const maxParallel = Number.isFinite(maxRaw) && maxRaw > 0 ? Math.floor(maxRaw) : Number(fallback.max_parallel_tasks);
+
+  return {
+    strategy,
+    max_parallel_tasks: maxParallel,
+    failure_policy: failurePolicy,
+    shard_discovery_mode: shardMode,
+  };
+}
+
+type RuntimeExecutionDraft = Record<RuntimeExecutionKey, string>;
+
+function runtimeExecutionDraftFromValues(values: RuntimeExecutionValues): RuntimeExecutionDraft {
+  return {
+    strategy: String(values.strategy),
+    max_parallel_tasks: String(values.max_parallel_tasks),
+    failure_policy: String(values.failure_policy),
+    shard_discovery_mode: String(values.shard_discovery_mode),
+  };
+}
+
+function parseRuntimeExecutionPatch(draft: RuntimeExecutionDraft): RuntimeExecutionValues {
+  const strategy = draft.strategy.trim().toLowerCase();
+  if (strategy !== "sequential" && strategy !== "parallel") {
+    throw new Error("runtime execution strategy must be sequential or parallel");
+  }
+  const failurePolicy = draft.failure_policy.trim().toLowerCase();
+  if (failurePolicy !== "fail_fast" && failurePolicy !== "best_effort") {
+    throw new Error("runtime execution failure_policy must be fail_fast or best_effort");
+  }
+  const shardMode = draft.shard_discovery_mode.trim().toLowerCase();
+  if (shardMode !== "heuristics" && shardMode !== "semantic") {
+    throw new Error("runtime execution shard_discovery_mode must be heuristics or semantic");
+  }
+  const maxParallel = Number.parseInt(draft.max_parallel_tasks.trim(), 10);
+  if (!Number.isFinite(maxParallel) || maxParallel <= 0) {
+    throw new Error("runtime execution max_parallel_tasks must be a positive integer");
+  }
+
+  return {
+    strategy,
+    max_parallel_tasks: maxParallel,
+    failure_policy: failurePolicy,
+    shard_discovery_mode: shardMode,
+  };
+}
+
 function parseTimeOrMin(value?: string | null): number {
   if (!value) {
     return Number.NEGATIVE_INFINITY;
@@ -263,6 +439,21 @@ export default function App() {
   const [wizardNfr, setWizardNfr] = useState("availability, traceability");
   const [wizardRules, setWizardRules] = useState("no silent re-key, evidence-first findings");
   const [wizardStatus, setWizardStatus] = useState("");
+
+  const [runtimeTimeoutPersisted, setRuntimeTimeoutPersisted] = useState<Partial<RuntimeTimeoutValues>>({});
+  const [runtimeTimeoutEffective, setRuntimeTimeoutEffective] = useState<RuntimeTimeoutValues>(defaultRuntimeTimeoutValues);
+  const [runtimeTimeoutSource, setRuntimeTimeoutSource] = useState<Partial<RuntimeTimeoutSources>>({});
+  const [runtimeTimeoutDraft, setRuntimeTimeoutDraft] = useState<Record<RuntimeTimeoutKey, string>>(
+    runtimeTimeoutDraftFromValues(defaultRuntimeTimeoutValues)
+  );
+  const [runtimeTimeoutStatus, setRuntimeTimeoutStatus] = useState("");
+  const [runtimeExecutionPersisted, setRuntimeExecutionPersisted] = useState<Partial<RuntimeExecutionValues>>({});
+  const [runtimeExecutionEffective, setRuntimeExecutionEffective] = useState<RuntimeExecutionValues>(defaultRuntimeExecutionValues);
+  const [runtimeExecutionSource, setRuntimeExecutionSource] = useState<Partial<RuntimeExecutionSources>>({});
+  const [runtimeExecutionDraft, setRuntimeExecutionDraft] = useState<RuntimeExecutionDraft>(
+    runtimeExecutionDraftFromValues(defaultRuntimeExecutionValues)
+  );
+  const [runtimeExecutionStatus, setRuntimeExecutionStatus] = useState("");
 
   const [runId, setRunID] = useState<string | null>(null);
   const [runStatus, setRunStatus] = useState<RunStatusResponse | null>(null);
@@ -408,6 +599,8 @@ export default function App() {
 
     await loadTextArtifact(selectedEditorPath, setSelectedEditorContent);
     await loadWizardContract();
+    await loadRuntimeTimeouts();
+    await loadRuntimeExecution();
   }
 
   async function loadRunList(limit = 100): Promise<RunListItem[]> {
@@ -538,6 +731,126 @@ export default function App() {
       }
     } catch {
       // no-op: wizard contract is optional during bootstrap
+    }
+  }
+
+  async function loadRuntimeTimeouts() {
+    try {
+      const payload = await fetchJSON<RuntimeTimeoutsResponse>("/api/runtime/timeouts");
+      const nextEffective = normalizeRuntimeTimeoutValues(payload.effective, defaultRuntimeTimeoutValues);
+      const nextPersisted = payload.persisted ?? {};
+      const nextSource = payload.source ?? {};
+      setRuntimeTimeoutPersisted(nextPersisted);
+      setRuntimeTimeoutEffective(nextEffective);
+      setRuntimeTimeoutSource(nextSource);
+      setRuntimeTimeoutDraft(runtimeTimeoutDraftFromValues(nextEffective));
+    } catch {
+      setRuntimeTimeoutPersisted({});
+      setRuntimeTimeoutEffective(defaultRuntimeTimeoutValues);
+      setRuntimeTimeoutSource({});
+      setRuntimeTimeoutDraft(runtimeTimeoutDraftFromValues(defaultRuntimeTimeoutValues));
+    }
+  }
+
+  async function loadRuntimeExecution() {
+    try {
+      const payload = await fetchJSON<RuntimeExecutionResponse>("/api/runtime/execution");
+      const nextEffective = normalizeRuntimeExecutionValues(payload.effective, defaultRuntimeExecutionValues);
+      setRuntimeExecutionPersisted(payload.persisted ?? {});
+      setRuntimeExecutionEffective(nextEffective);
+      setRuntimeExecutionSource(payload.source ?? {});
+      setRuntimeExecutionDraft(runtimeExecutionDraftFromValues(nextEffective));
+    } catch {
+      setRuntimeExecutionPersisted({});
+      setRuntimeExecutionEffective(defaultRuntimeExecutionValues);
+      setRuntimeExecutionSource({});
+      setRuntimeExecutionDraft(runtimeExecutionDraftFromValues(defaultRuntimeExecutionValues));
+    }
+  }
+
+  function updateRuntimeTimeoutDraft(key: RuntimeTimeoutKey, value: string) {
+    setRuntimeTimeoutDraft((previous) => ({ ...previous, [key]: value }));
+  }
+
+  function updateRuntimeExecutionDraft(key: RuntimeExecutionKey, value: string) {
+    setRuntimeExecutionDraft((previous) => ({ ...previous, [key]: value }));
+  }
+
+  async function handleSaveRuntimeTimeouts() {
+    setBusy(true);
+    setError(null);
+    setRuntimeTimeoutStatus("");
+    try {
+      const patch = parseRuntimeTimeoutPatch(runtimeTimeoutDraft);
+      await fetchJSON<RuntimeTimeoutsResponse>("/api/runtime/timeouts", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ timeouts: patch }),
+      });
+      await loadRuntimeTimeouts();
+      setRuntimeTimeoutStatus("Runtime timeouts saved");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "failed to save runtime timeouts");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleResetRuntimeTimeouts() {
+    setBusy(true);
+    setError(null);
+    setRuntimeTimeoutStatus("");
+    try {
+      await fetchJSON<RuntimeTimeoutsResponse>("/api/runtime/timeouts", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ timeouts: defaultRuntimeTimeoutValues }),
+      });
+      await loadRuntimeTimeouts();
+      setRuntimeTimeoutStatus("Runtime timeouts reset to balanced defaults");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "failed to reset runtime timeouts");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSaveRuntimeExecution() {
+    setBusy(true);
+    setError(null);
+    setRuntimeExecutionStatus("");
+    try {
+      const patch = parseRuntimeExecutionPatch(runtimeExecutionDraft);
+      await fetchJSON<RuntimeExecutionResponse>("/api/runtime/execution", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ execution: patch }),
+      });
+      await loadRuntimeExecution();
+      setRuntimeExecutionStatus("Runtime execution profile saved");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "failed to save runtime execution profile");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleResetRuntimeExecution() {
+    setBusy(true);
+    setError(null);
+    setRuntimeExecutionStatus("");
+    try {
+      await fetchJSON<RuntimeExecutionResponse>("/api/runtime/execution", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ execution: defaultRuntimeExecutionValues }),
+      });
+      await loadRuntimeExecution();
+      setRuntimeExecutionStatus("Runtime execution profile reset to defaults");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "failed to reset runtime execution profile");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -1086,6 +1399,112 @@ export default function App() {
             ))}
           </div>
         ) : null}
+      </section>
+
+      <section className="panel" data-testid="runtime-timeouts-panel">
+        <h2>Setup: Runtime Timeouts</h2>
+        <p className="hint">Persisted in `workspace.yaml` (`runtime.profile.timeouts`) with precedence `env &gt; workspace &gt; defaults`.</p>
+        <div className="actions">
+          <button type="button" onClick={() => void loadRuntimeTimeouts()} disabled={busy}>
+            Reload runtime timeouts
+          </button>
+          <button type="button" onClick={() => void handleSaveRuntimeTimeouts()} disabled={busy} data-testid="runtime-timeouts-save-btn">
+            Save runtime timeouts
+          </button>
+          <button type="button" onClick={() => void handleResetRuntimeTimeouts()} disabled={busy}>
+            Reset balanced defaults
+          </button>
+        </div>
+        {runtimeTimeoutKeys.map((key) => (
+          <div key={`timeout-${key}`}>
+            <label htmlFor={`runtime-timeout-${key}`}>{runtimeTimeoutLabels[key]}</label>
+            <input
+              id={`runtime-timeout-${key}`}
+              data-testid={`runtime-timeout-input-${key}`}
+              value={runtimeTimeoutDraft[key]}
+              onChange={(event) => updateRuntimeTimeoutDraft(key, event.target.value)}
+            />
+            <p className="hint">
+              persisted: {runtimeTimeoutPersisted[key] ?? "-"} | effective: {runtimeTimeoutEffective[key]} | source: {runtimeTimeoutSource[key] ?? "default"}
+            </p>
+          </div>
+        ))}
+        {runtimeTimeoutStatus ? <p className="status ok">{runtimeTimeoutStatus}</p> : null}
+      </section>
+
+      <section className="panel" data-testid="runtime-execution-panel">
+        <h2>Setup: Runtime Execution</h2>
+        <p className="hint">Persisted in `workspace.yaml` (`runtime.profile.execution`) with precedence `CLI &gt; env &gt; workspace &gt; defaults`.</p>
+        <div className="actions">
+          <button type="button" onClick={() => void loadRuntimeExecution()} disabled={busy}>
+            Reload runtime execution
+          </button>
+          <button type="button" onClick={() => void handleSaveRuntimeExecution()} disabled={busy} data-testid="runtime-execution-save-btn">
+            Save runtime execution
+          </button>
+          <button type="button" onClick={() => void handleResetRuntimeExecution()} disabled={busy}>
+            Reset execution defaults
+          </button>
+        </div>
+
+        <label htmlFor="runtime-execution-strategy">{runtimeExecutionLabels.strategy}</label>
+        <select
+          id="runtime-execution-strategy"
+          data-testid="runtime-execution-strategy-select"
+          value={runtimeExecutionDraft.strategy}
+          onChange={(event) => updateRuntimeExecutionDraft("strategy", event.target.value)}
+        >
+          <option value="sequential">sequential</option>
+          <option value="parallel">parallel</option>
+        </select>
+        <p className="hint">
+          persisted: {String(runtimeExecutionPersisted.strategy ?? "-")} | effective: {String(runtimeExecutionEffective.strategy)} | source:{" "}
+          {runtimeExecutionSource.strategy ?? "default"}
+        </p>
+
+        <label htmlFor="runtime-execution-max-parallel">{runtimeExecutionLabels.max_parallel_tasks}</label>
+        <input
+          id="runtime-execution-max-parallel"
+          data-testid="runtime-execution-max-parallel-input"
+          value={runtimeExecutionDraft.max_parallel_tasks}
+          onChange={(event) => updateRuntimeExecutionDraft("max_parallel_tasks", event.target.value)}
+        />
+        <p className="hint">
+          persisted: {String(runtimeExecutionPersisted.max_parallel_tasks ?? "-")} | effective: {String(runtimeExecutionEffective.max_parallel_tasks)} | source:{" "}
+          {runtimeExecutionSource.max_parallel_tasks ?? "default"}
+        </p>
+
+        <label htmlFor="runtime-execution-failure">{runtimeExecutionLabels.failure_policy}</label>
+        <select
+          id="runtime-execution-failure"
+          data-testid="runtime-execution-failure-policy-select"
+          value={runtimeExecutionDraft.failure_policy}
+          onChange={(event) => updateRuntimeExecutionDraft("failure_policy", event.target.value)}
+        >
+          <option value="best_effort">best_effort</option>
+          <option value="fail_fast">fail_fast</option>
+        </select>
+        <p className="hint">
+          persisted: {String(runtimeExecutionPersisted.failure_policy ?? "-")} | effective: {String(runtimeExecutionEffective.failure_policy)} | source:{" "}
+          {runtimeExecutionSource.failure_policy ?? "default"}
+        </p>
+
+        <label htmlFor="runtime-execution-shard-mode">{runtimeExecutionLabels.shard_discovery_mode}</label>
+        <select
+          id="runtime-execution-shard-mode"
+          data-testid="runtime-execution-shard-mode-select"
+          value={runtimeExecutionDraft.shard_discovery_mode}
+          onChange={(event) => updateRuntimeExecutionDraft("shard_discovery_mode", event.target.value)}
+        >
+          <option value="heuristics">heuristics</option>
+          <option value="semantic">semantic</option>
+        </select>
+        <p className="hint">
+          persisted: {String(runtimeExecutionPersisted.shard_discovery_mode ?? "-")} | effective:{" "}
+          {String(runtimeExecutionEffective.shard_discovery_mode)} | source: {runtimeExecutionSource.shard_discovery_mode ?? "default"}
+        </p>
+
+        {runtimeExecutionStatus ? <p className="status ok">{runtimeExecutionStatus}</p> : null}
       </section>
 
       <section className="panel">

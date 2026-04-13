@@ -113,6 +113,37 @@ def parse_run_results(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def parse_backend_classifications(batch_root: Path) -> dict[tuple[str, int], dict[str, str]]:
+    path = batch_root / "backend-run-classifications.tsv"
+    if not path.exists():
+        return {}
+    lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if len(lines) <= 1:
+        return {}
+    header = lines[0].split("\t")
+    index = {name: idx for idx, name in enumerate(header)}
+    provider_idx = index.get("provider")
+    run_idx = index.get("run_index")
+    if provider_idx is None or run_idx is None:
+        return {}
+    result: dict[tuple[str, int], dict[str, str]] = {}
+    for line in lines[1:]:
+        parts = line.split("\t")
+        if len(parts) <= max(provider_idx, run_idx):
+            continue
+        provider = parts[provider_idx].strip()
+        try:
+            run_index = int(parts[run_idx].strip())
+        except Exception:
+            continue
+        row: dict[str, str] = {}
+        for name, idx in index.items():
+            if idx < len(parts):
+                row[name] = parts[idx].strip()
+        result[(provider, run_index)] = row
+    return result
+
+
 def parse_markdown_section_bullets(path: Path, section_title: str) -> list[str]:
     if not path.exists():
         return []
@@ -515,15 +546,25 @@ class RunEvaluation:
     failure_class: str = "none"
     runtime_parse: bool = False
     runner_unavailable: bool = False
+    runtime_timeout: bool = False
     infra_signal_terminated: bool = False
     infra_incomplete_cycle: bool = False
+    quality_gates_failed: bool = False
     summary_missing: bool = False
+    precheck_failed: bool = False
+    cancellation_like: bool = False
     issues: list[str] = field(default_factory=list)
     issue_details: list[str] = field(default_factory=list)
     error_codes: list[str] = field(default_factory=list)
 
 
-def evaluate_run(provider: str, run_index: int, run_dir: Path, preflight: dict[str, Any]) -> RunEvaluation:
+def evaluate_run(
+    provider: str,
+    run_index: int,
+    run_dir: Path,
+    preflight: dict[str, Any],
+    classification_row: dict[str, str] | None = None,
+) -> RunEvaluation:
     summary_path = run_dir / "session-summary.md"
     run_results_path = run_dir / "run-results.tsv"
     full_run_log = run_dir / "full-run.log"
@@ -535,6 +576,48 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path, preflight: dict[s
     issues: list[str] = []
     details: list[str] = []
     error_codes: list[str] = []
+    classification_row = classification_row or {}
+    classified_failure = str(classification_row.get("failure_class", "")).strip()
+    classified_subclass = str(classification_row.get("failure_subclass", "")).strip()
+    cancellation_like = str(classification_row.get("cancellation_like", "")).strip() in {"1", "true", "yes"}
+    if classified_subclass == "cancellation_like":
+        cancellation_like = True
+
+    if classified_failure == "precheck_failed":
+        issues.append("reliability:precheck-failed")
+        details.append(
+            f"reliability/precheck-failed -> failure_class={classified_failure} process_exit={classification_row.get('process_exit', '-')}"
+        )
+        precheck_log = run_dir.parent.parent / "precheck-make.log"
+        if precheck_log.exists():
+            details.append(f"reliability/precheck-failed -> precheck_log={precheck_log}")
+        return RunEvaluation(
+            provider=provider,
+            run_index=run_index,
+            run_dir=run_dir,
+            hard_pass=False,
+            reliability=0,
+            contract=0,
+            analysis=0,
+            total=0,
+            verdict=verdict(0),
+            artifact_source="precheck",
+            semantic_hard_fail=False,
+            off_topic_hits=0,
+            failure_class="precheck_failed",
+            runtime_parse=False,
+            runner_unavailable=False,
+            runtime_timeout=False,
+            infra_signal_terminated=False,
+            infra_incomplete_cycle=False,
+            quality_gates_failed=False,
+            summary_missing=False,
+            precheck_failed=True,
+            cancellation_like=cancellation_like,
+            issues=issues,
+            issue_details=details,
+            error_codes=[],
+        )
 
     summary_text = summary_path.read_text(encoding="utf-8") if summary_path.exists() else ""
     summary_missing = not summary_path.exists()
@@ -589,6 +672,8 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path, preflight: dict[s
     runtime_parse_hit = False
     runner_unavailable_hit = False
     runner_error_hit = False
+    parse_stages: set[str] = set()
+    raw_outputs: set[str] = set()
     for source_path in (summary_path, full_run_log):
         if not source_path.exists():
             continue
@@ -601,10 +686,16 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path, preflight: dict[s
             runtime_parse_hit = True
             runner_error_hit = True
             error_codes.append("runner_parse_failed")
+        parse_stages.update(match.group(1).strip() for match in re.finditer(r"parse_stage=([a-z_]+)", text))
+        raw_outputs.update(match.group(1).strip() for match in re.finditer(r"raw_output=([^\s)]+)", text))
     h3 = not runner_error_hit
     if not h3:
         issues.append("reliability:runner-errors")
         details.append(f"reliability/runner-errors -> {full_run_log}: detected {sorted(set(error_codes))}")
+        if parse_stages:
+            details.append(f"reliability/runner-errors -> parse_stages={sorted(parse_stages)}")
+        if raw_outputs:
+            details.append(f"reliability/runner-errors -> raw_outputs={sorted(raw_outputs)[:5]}")
     if runtime_parse_hit:
         issues.append("reliability:runtime-parse")
     if runner_unavailable_hit:
@@ -624,17 +715,24 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path, preflight: dict[s
     if summary_missing:
         reliability = max(0, reliability - 10)
 
+    runtime_timeout = failure_reason == "runtime_timeout" or termination_signal == "timeout"
     infra_signal_terminated = (
         failure_reason == "infra_signal_terminated"
         or (termination_signal not in {"", "none"} and termination_signal != "-")
     )
     infra_incomplete_cycle = failure_reason == "infra_incomplete_cycle"
+    quality_gates_failed = failure_reason == "quality" or quality_gates_value == "failed"
     if expected_runs > 0 and completed_runs != expected_runs:
         infra_incomplete_cycle = True
     if expected_headless_runs > 0 and completed_headless_runs != expected_headless_runs:
         infra_incomplete_cycle = True
     if running_runs_detected > 0:
         infra_incomplete_cycle = True
+    if runtime_timeout:
+        issues.append("reliability:runtime-timeout")
+        details.append(
+            f"reliability/runtime-timeout -> {summary_path}: failure_reason={failure_reason or '-'} termination_signal={termination_signal or '-'}"
+        )
     if infra_signal_terminated:
         issues.append("reliability:infra-signal-terminated")
         details.append(
@@ -645,6 +743,16 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path, preflight: dict[s
         details.append(
             f"reliability/infra-incomplete-cycle -> {summary_path}: expected_runs={expected_runs} completed_runs={completed_runs} "
             f"expected_headless_runs={expected_headless_runs} completed_headless_runs={completed_headless_runs} running_runs_detected={running_runs_detected}"
+        )
+    if quality_gates_failed:
+        issues.append("reliability:quality-gates-failed")
+        details.append(
+            f"reliability/quality-gates-failed -> {summary_path}: quality_gates={quality_gates_value or '-'} failure_reason={failure_reason or '-'}"
+        )
+    if cancellation_like:
+        issues.append("reliability:cancellation-like")
+        details.append(
+            f"reliability/cancellation-like -> failure_subclass={classified_subclass or '-'} process_exit={classification_row.get('process_exit', '-')}"
         )
 
     c1_runtime_name_ok = True
@@ -912,10 +1020,28 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path, preflight: dict[s
         failure_class = "runner_unavailable"
     elif runtime_parse_hit:
         failure_class = "runtime_parse"
+    elif runtime_timeout:
+        failure_class = "runtime_timeout"
+    elif quality_gates_failed:
+        failure_class = "quality_gates_failed"
     elif infra_signal_terminated:
         failure_class = "infra_signal_terminated"
     elif infra_incomplete_cycle:
         failure_class = "infra_incomplete_cycle"
+
+    if classified_failure and classified_failure != "none":
+        if failure_class != classified_failure:
+            details.append(
+                f"reliability/classifier-override -> summary_class={failure_class or 'none'} classifier_class={classified_failure}"
+            )
+        failure_class = classified_failure
+        runtime_parse_hit = runtime_parse_hit or classified_failure == "runtime_parse"
+        runner_unavailable_hit = runner_unavailable_hit or classified_failure == "runner_unavailable"
+        runtime_timeout = runtime_timeout or classified_failure == "runtime_timeout"
+        infra_signal_terminated = infra_signal_terminated or classified_failure == "infra_signal_terminated"
+        infra_incomplete_cycle = infra_incomplete_cycle or classified_failure == "infra_incomplete_cycle"
+        quality_gates_failed = quality_gates_failed or classified_failure == "quality_gates_failed"
+        summary_missing = summary_missing or classified_failure == "summary_missing"
 
     hard_pass = (
         h1
@@ -925,6 +1051,7 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path, preflight: dict[s
         and snapshot_ok
         and not semantic_hard_fail
         and not summary_missing
+        and not runtime_timeout
         and not infra_signal_terminated
         and not infra_incomplete_cycle
     )
@@ -951,9 +1078,13 @@ def evaluate_run(provider: str, run_index: int, run_dir: Path, preflight: dict[s
         failure_class=failure_class,
         runtime_parse=runtime_parse_hit,
         runner_unavailable=runner_unavailable_hit,
+        runtime_timeout=runtime_timeout,
         infra_signal_terminated=infra_signal_terminated,
         infra_incomplete_cycle=infra_incomplete_cycle,
+        quality_gates_failed=quality_gates_failed,
         summary_missing=summary_missing,
+        precheck_failed=False,
+        cancellation_like=cancellation_like,
         issues=sorted(set(issues)),
         issue_details=details,
         error_codes=sorted(set(error_codes)),
@@ -971,20 +1102,33 @@ def load_frontend_results(batch_root: Path) -> dict[str, dict[str, Any]]:
     return data
 
 
+def load_frontend_cancel_results(batch_root: Path) -> dict[str, dict[str, Any]]:
+    data: dict[str, dict[str, Any]] = {}
+    for provider in ("qwen-code", "claude-code"):
+        primary = batch_root / "frontend-cancel" / provider / "frontend-cancel-result.json"
+        fallback = batch_root / "frontend-cancel" / provider / "frontend-e2e-result.json"
+        path = primary if primary.exists() else fallback
+        if path.exists():
+            payload = read_json(path)
+            payload["path"] = str(path)
+            data[provider] = payload
+    return data
+
+
 def write_run_matrix(path: Path, runs: list[RunEvaluation]) -> None:
     lines = [
         "# Run Matrix",
         "",
-        "| provider | run | hard_pass | reliability | contract | analysis | total | verdict | artifact_source | semantic_hard_fail | failure_class | runtime_parse | runner_unavailable | infra_signal_terminated | infra_incomplete_cycle | summary_missing | off_topic_hits | init_signal | refresh_signal | refresh_findings | refresh_questions | refresh_cov_missing | issues |",
-        "|---|---:|---:|---:|---:|---:|---:|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+        "| provider | run | hard_pass | reliability | contract | analysis | total | verdict | artifact_source | semantic_hard_fail | failure_class | runtime_parse | runner_unavailable | runtime_timeout | infra_signal_terminated | infra_incomplete_cycle | quality_gates_failed | summary_missing | precheck_failed | cancellation_like | off_topic_hits | init_signal | refresh_signal | refresh_findings | refresh_questions | refresh_cov_missing | issues |",
+        "|---|---:|---:|---:|---:|---:|---:|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for item in runs:
         lines.append(
             "| "
             f"{item.provider} | {item.run_index} | {int(item.hard_pass)} | {item.reliability} | {item.contract} | "
             f"{item.analysis} | {item.total} | {item.verdict} | {item.artifact_source} | {int(item.semantic_hard_fail)} | {item.failure_class} | "
-            f"{int(item.runtime_parse)} | {int(item.runner_unavailable)} | {int(item.infra_signal_terminated)} | "
-            f"{int(item.infra_incomplete_cycle)} | {int(item.summary_missing)} | {item.off_topic_hits} | "
+            f"{int(item.runtime_parse)} | {int(item.runner_unavailable)} | {int(item.runtime_timeout)} | {int(item.infra_signal_terminated)} | "
+            f"{int(item.infra_incomplete_cycle)} | {int(item.quality_gates_failed)} | {int(item.summary_missing)} | {int(item.precheck_failed)} | {int(item.cancellation_like)} | {item.off_topic_hits} | "
             f"{item.init_signal} | {item.refresh_signal} | "
             f"{item.refresh_findings} | {item.refresh_questions} | {item.refresh_cov_missing} | "
             f"{', '.join(item.issues) if item.issues else '-'} |"
@@ -1013,8 +1157,29 @@ def write_frontend_matrix(path: Path, frontend: dict[str, dict[str, Any]]) -> No
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def write_frontend_cancel_matrix(path: Path, frontend_cancel: dict[str, dict[str, Any]]) -> None:
+    lines = [
+        "# Frontend Cancel E2E Matrix",
+        "",
+        "| provider | status | reason | scenario | workspace | runtime_command | server_log | playwright_log |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for provider in ("qwen-code", "claude-code"):
+        payload = frontend_cancel.get(provider)
+        if not payload:
+            lines.append(f"| {provider} | missing | missing_result | cancel-refresh | - | - | - | - |")
+            continue
+        lines.append(
+            "| "
+            f"{provider} | {payload.get('status', '-') } | {payload.get('reason', '-') } | "
+            f"{payload.get('scenario', '-') } | {payload.get('workspace', '-') } | "
+            f"{payload.get('runtime_command', '-') } | {payload.get('server_log', '-') } | {payload.get('playwright_log', '-') } |"
+        )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def provider_matrix_rows(
-    runs: list[RunEvaluation], frontend: dict[str, dict[str, Any]]
+    runs: list[RunEvaluation], frontend: dict[str, dict[str, Any]], frontend_cancel: dict[str, dict[str, Any]]
 ) -> list[dict[str, Any]]:
     grouped: dict[str, list[RunEvaluation]] = defaultdict(list)
     for run in runs:
@@ -1034,6 +1199,8 @@ def provider_matrix_rows(
             artifact_sources.update([item.artifact_source])
         frontend_status = frontend.get(provider, {}).get("status")
         frontend_pass_rate = 1.0 if frontend_status == "passed" else 0.0 if frontend_status else 0.0
+        frontend_cancel_status = frontend_cancel.get(provider, {}).get("status")
+        frontend_cancel_pass_rate = 1.0 if frontend_cancel_status == "passed" else 0.0 if frontend_cancel_status else 0.0
         rows.append(
             {
                 "provider": provider,
@@ -1053,13 +1220,18 @@ def provider_matrix_rows(
                 "semantic_hard_fail_runs": sum(1 for item in items if item.semantic_hard_fail),
                 "runtime_parse_failures": sum(1 for item in items if item.runtime_parse),
                 "runner_unavailable_failures": sum(1 for item in items if item.runner_unavailable),
+                "runtime_timeout_failures": sum(1 for item in items if item.runtime_timeout),
                 "infra_signal_terminated_failures": sum(1 for item in items if item.infra_signal_terminated),
                 "infra_incomplete_cycle_failures": sum(1 for item in items if item.infra_incomplete_cycle),
+                "quality_gates_failed_failures": sum(1 for item in items if item.quality_gates_failed),
                 "summary_missing_failures": sum(1 for item in items if item.summary_missing),
+                "precheck_failed_failures": sum(1 for item in items if item.precheck_failed),
+                "cancellation_like_failures": sum(1 for item in items if item.cancellation_like),
                 "error_codes": ", ".join(f"{code}={count}" for code, count in sorted(error_codes_counter.items())) or "-",
                 "issues_top": ", ".join(f"{name}={count}" for name, count in issues_counter.most_common(3)) or "-",
                 "artifact_sources": ", ".join(f"{name}={count}" for name, count in sorted(artifact_sources.items())) or "-",
                 "frontend_pass_rate": frontend_pass_rate,
+                "frontend_cancel_pass_rate": frontend_cancel_pass_rate,
             }
         )
     return rows
@@ -1070,9 +1242,10 @@ def write_quality_report(
     batch_id: str,
     runs: list[RunEvaluation],
     frontend: dict[str, dict[str, Any]],
+    frontend_cancel: dict[str, dict[str, Any]],
     preflight: dict[str, Any],
 ) -> None:
-    provider_rows = provider_matrix_rows(runs, frontend)
+    provider_rows = provider_matrix_rows(runs, frontend, frontend_cancel)
     hard_pass_all = sum(1 for run in runs if run.hard_pass)
     semantic_hard_fail_runs = sum(1 for run in runs if run.semantic_hard_fail)
     declared_meta = normalize_declared_repos_meta(preflight)
@@ -1107,10 +1280,14 @@ def write_quality_report(
         f"- qwen-code: {(frontend.get('qwen-code') or {}).get('status', 'missing')}",
         f"- claude-code: {(frontend.get('claude-code') or {}).get('status', 'missing')}",
         "",
+        "## Frontend Cancel Smoke Verdict",
+        f"- qwen-code: {(frontend_cancel.get('qwen-code') or {}).get('status', 'missing')} (reason: {(frontend_cancel.get('qwen-code') or {}).get('reason', '-')})",
+        f"- claude-code: {(frontend_cancel.get('claude-code') or {}).get('status', 'missing')} (reason: {(frontend_cancel.get('claude-code') or {}).get('reason', '-')})",
+        "",
         "## Provider Matrix",
         "",
-        "| provider | runs | pass_rate | avg_total | std_total | avg_reliability | avg_contract | avg_analysis | avg_refresh_signal | std_refresh_signal | avg_refresh_findings | avg_refresh_questions | avg_refresh_cov_missing | off_topic_hits | semantic_hard_fail_runs | runtime_parse_failures | runner_unavailable_failures | infra_signal_terminated_failures | infra_incomplete_cycle_failures | summary_missing_failures | artifact_sources | error_codes | frontend_live_pass_rate |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---:|",
+        "| provider | runs | pass_rate | avg_total | std_total | avg_reliability | avg_contract | avg_analysis | avg_refresh_signal | std_refresh_signal | avg_refresh_findings | avg_refresh_questions | avg_refresh_cov_missing | off_topic_hits | semantic_hard_fail_runs | runtime_parse_failures | runner_unavailable_failures | runtime_timeout_failures | infra_signal_terminated_failures | infra_incomplete_cycle_failures | quality_gates_failed_failures | summary_missing_failures | precheck_failed_failures | cancellation_like_failures | artifact_sources | error_codes | frontend_live_pass_rate | frontend_cancel_pass_rate |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---:|---:|",
     ]
     for row in provider_rows:
         lines.append(
@@ -1119,9 +1296,9 @@ def write_quality_report(
             f"{row['avg_reliability']:.2f} | {row['avg_contract']:.2f} | {row['avg_analysis']:.2f} | "
             f"{row['avg_signal']:.2f} | {row['std_signal']:.2f} | {row['avg_findings']:.2f} | {row['avg_questions']:.2f} | "
             f"{row['avg_cov_missing']:.2f} | {row['off_topic_hits']} | {row['semantic_hard_fail_runs']} | "
-            f"{row['runtime_parse_failures']} | {row['runner_unavailable_failures']} | {row['infra_signal_terminated_failures']} | "
-            f"{row['infra_incomplete_cycle_failures']} | {row['summary_missing_failures']} | "
-            f"{row['artifact_sources']} | {row['error_codes']} | {row['frontend_pass_rate']:.2f} |"
+            f"{row['runtime_parse_failures']} | {row['runner_unavailable_failures']} | {row['runtime_timeout_failures']} | {row['infra_signal_terminated_failures']} | "
+            f"{row['infra_incomplete_cycle_failures']} | {row['quality_gates_failed_failures']} | {row['summary_missing_failures']} | {row['precheck_failed_failures']} | {row['cancellation_like_failures']} | "
+            f"{row['artifact_sources']} | {row['error_codes']} | {row['frontend_pass_rate']:.2f} | {row['frontend_cancel_pass_rate']:.2f} |"
         )
 
     lines.extend(
@@ -1138,6 +1315,10 @@ def write_quality_report(
         lines.append("- Frontend live e2e прошёл для обоих провайдеров (`2/2`).")
     else:
         lines.append("- Frontend live e2e не полностью стабилен (`<2/2`).")
+    if all((frontend_cancel.get(provider) or {}).get("status") == "passed" for provider in ("qwen-code", "claude-code")):
+        lines.append("- Frontend cancel-refresh smoke прошёл для обоих провайдеров (`2/2`).")
+    else:
+        lines.append("- Frontend cancel-refresh smoke не полностью стабилен (`<2/2`) или был пропущен.")
     lines.append("- Контрактная совместимость runtime/report артефактов проверена автоматически для каждого run.")
 
     lines.extend(
@@ -1199,9 +1380,13 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
         "failure_class",
         "runtime_parse",
         "runner_unavailable",
+        "runtime_timeout",
         "infra_signal_terminated",
         "infra_incomplete_cycle",
+        "quality_gates_failed",
         "summary_missing",
+        "precheck_failed",
+        "cancellation_like",
         "off_topic_hits",
         "issues",
     ]
@@ -1228,9 +1413,13 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
                     run.failure_class,
                     str(int(run.runtime_parse)),
                     str(int(run.runner_unavailable)),
+                    str(int(run.runtime_timeout)),
                     str(int(run.infra_signal_terminated)),
                     str(int(run.infra_incomplete_cycle)),
+                    str(int(run.quality_gates_failed)),
                     str(int(run.summary_missing)),
+                    str(int(run.precheck_failed)),
+                    str(int(run.cancellation_like)),
                     str(run.off_topic_hits),
                     ",".join(run.issues),
                 ]
@@ -1252,28 +1441,41 @@ def main() -> int:
 
     preflight_path = batch_root / "preflight.json"
     preflight = read_json(preflight_path) if preflight_path.exists() else {}
+    classifications = parse_backend_classifications(batch_root)
 
     runs: list[RunEvaluation] = []
     for provider in ("qwen-code", "claude-code"):
         for run_index in range(1, 6):
             run_dir = batch_root / provider / f"run{run_index}"
-            runs.append(evaluate_run(provider, run_index, run_dir, preflight))
+            runs.append(
+                evaluate_run(
+                    provider,
+                    run_index,
+                    run_dir,
+                    preflight,
+                    classifications.get((provider, run_index)),
+                )
+            )
     runs.sort(key=lambda item: (item.provider, item.run_index))
 
     frontend = load_frontend_results(batch_root)
+    frontend_cancel = load_frontend_cancel_results(batch_root)
 
     run_matrix_path = reports_root / f"run_matrix_{args.batch_id}.md"
     frontend_matrix_path = reports_root / f"frontend_e2e_matrix_{args.batch_id}.md"
+    frontend_cancel_matrix_path = reports_root / f"frontend_cancel_e2e_matrix_{args.batch_id}.md"
     quality_report_path = reports_root / f"quality_report_{args.batch_id}.md"
     meta_tsv_path = reports_root / f"run_matrix_{args.batch_id}.tsv"
 
     write_run_matrix(run_matrix_path, runs)
     write_frontend_matrix(frontend_matrix_path, frontend)
-    write_quality_report(quality_report_path, args.batch_id, runs, frontend, preflight)
+    write_frontend_cancel_matrix(frontend_cancel_matrix_path, frontend_cancel)
+    write_quality_report(quality_report_path, args.batch_id, runs, frontend, frontend_cancel, preflight)
     write_meta_tsv(meta_tsv_path, runs)
 
     print(str(run_matrix_path))
     print(str(frontend_matrix_path))
+    print(str(frontend_cancel_matrix_path))
     print(str(quality_report_path))
     print(str(meta_tsv_path))
     return 0

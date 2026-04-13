@@ -39,6 +39,7 @@ Batch-only semantic hard-fail checks (в `scripts/e2e_batch_report.py`):
 
 - `PROVENARCH_ROOT` (default: текущий repo ProvenArch)
 - `TARGET_REPOS_FILE` (canonical: YAML с `repos[]`, как в `workspace.yaml`)
+  - если файл содержит `runtime.profile.timeouts`, `init-workspace` переносит профиль в `workspace.yaml`
 - legacy single inputs (backward compatibility):
   - `TARGET_REPO` (single path)
   - `TARGET_REPO_GIT_URL` + `TARGET_REPO_NAME` + `TARGET_REPO_REF` (single `git_url`, pinned ref required)
@@ -51,6 +52,24 @@ Batch-only semantic hard-fail checks (в `scripts/e2e_batch_report.py`):
 - `RUN_QUALITY_GATES` (`0/1`, default `1`)
 - `RUN_LOGS_TTL_HOURS` (default `168`)
 - `RUN_LOGS_MAX_RUNS` (default `200`)
+- timeout env overrides (canonical):
+  - `ACP_RUNTIME_STEP_TIMEOUT_SEC` (default `1800`)
+  - `ACP_RUNTIME_HEARTBEAT_SEC` (default `30`)
+  - `ACP_PIPELINE_TIMEOUT_SEC` (default `2400`)
+  - `ACP_PIPELINE_KILL_GRACE_SEC` (default `30`)
+  - `ACP_API_READY_TIMEOUT_SEC` (default `60`)
+  - `ACP_API_INIT_TIMEOUT_SEC` (default `120`)
+  - `ACP_UI_INIT_POLL_TIMEOUT_SEC` (default `900`)
+  - `ACP_UI_CANCEL_POLL_TIMEOUT_SEC` (default `420`)
+- deprecated fallback aliases:
+  - `ACP_FULL_RUN_PIPELINE_TIMEOUT_SEC`
+  - `ACP_FULL_RUN_PIPELINE_KILL_GRACE_SEC`
+  - `READY_TIMEOUT_SEC`
+  - `UI_E2E_INIT_TIMEOUT_SEC`
+  - `UI_E2E_CANCEL_TIMEOUT_SEC`
+
+Effective timeout precedence для full-run/batch/frontend live:
+- `env > workspace.yaml(runtime.profile.timeouts) > defaults`
 
 Batch/Frontend scripts:
 - `scripts/full-run-batch-5x2.sh`
@@ -144,7 +163,7 @@ Batch evaluator source-of-truth:
 - если snapshot недоступен, в отчёт попадает `artifact_source=workspace-fallback` и issue `reliability:snapshot-missing`;
 - frontend live e2e запускается на отдельной копии workspace (`frontend-workspace`) и не влияет на backend quality content score.
 - для multi-profile (`EXPECTED_REPO_COUNT >= 2`) batch hard-fail включает `analysis:cross-repo-missing`.
-- backend run-matrix дополнительно классифицирует failure classes: `runtime_parse`, `runner_unavailable`, `infra_signal_terminated`, `infra_incomplete_cycle`, `summary_missing`.
+- backend run-matrix дополнительно классифицирует failure classes: `runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_signal_terminated`, `infra_incomplete_cycle`, `quality_gates_failed`, `summary_missing`.
 
 При `runner_parse_failed` raw stdout/stderr сохраняются в:
 - `WORKSPACE/reports/taskruns/raw/*-stdout.log`
@@ -243,6 +262,7 @@ ACP_CLAUDE_CMD=claude \
 Output semantics:
 - direct `npm run --prefix ui e2e:live`: default `/tmp/provenarch-ui-e2e/test-results`, override `UI_E2E_OUTPUT_DIR`;
 - `scripts/frontend-live-e2e.sh`: output в `$OUTPUT_DIR/playwright-results`;
+- `scripts/frontend-live-e2e.sh` берёт poll timeouts из effective runtime config (`GET /api/runtime/timeouts`) с env override (`ACP_UI_INIT_POLL_TIMEOUT_SEC`/`ACP_UI_CANCEL_POLL_TIMEOUT_SEC`);
 - `UI_E2E_EXPECTED_REPO_COUNT` задаёт ожидаемое число resolved repos в live e2e (default `1`).
 - `UI_E2E_SCENARIO`:
   - `init-inspect` (default): validate -> run init -> inspect artifacts;
@@ -278,8 +298,10 @@ Output semantics:
   - для `qwen-code`: установить `qwen` или задать `ACP_QWEN_CMD=/abs/path/to/runner`.
 - Ошибки bootstrap (`workspace.yaml/.git/skills/subagents.yaml` не созданы):
   - проверить вывод `logs/init-workspace.log`.
-- API run timeout:
-  - проверить `logs/serve-fake.log` и `api-init-status.json`.
+- Timeout/зависание pipeline:
+  - проверить `session-summary.md` (`failure_reason=runtime_timeout`, `termination_signal=timeout`);
+  - проверить `full-run.log` на watchdog progress/TERM/KILL;
+  - сверить effective timeout values в summary и/или `GET /api/runtime/timeouts`.
 - Quality regression / zero-signal fail:
   - проверить `session-summary.md` (секция failure reason),
   - сравнить `snapshots/<run_id>/...` между последними run,
