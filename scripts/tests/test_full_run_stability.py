@@ -158,6 +158,9 @@ def create_full_run_stub_environment(root: Path) -> tuple[Path, Path, Path, Path
               if [[ -n "$runtime_version" ]]; then
                 runtime_key="${runtime_name}@${runtime_version}"
               fi
+              if [[ "${ACP_STUB_RUN_FORCE_EXIT_CODE:-0}" != "0" ]]; then
+                exit "${ACP_STUB_RUN_FORCE_EXIT_CODE}"
+              fi
 
               if [[ "${ACP_STUB_RUN_SLEEP:-0}" != "0" ]]; then
                 sleep "${ACP_STUB_RUN_SLEEP}"
@@ -260,20 +263,24 @@ def create_full_run_stub_environment(root: Path) -> tuple[Path, Path, Path, Path
               if [[ "${ACP_STUB_DISABLE_RUN_HISTORY:-0}" != "1" ]]; then
                 run_history="$workspace/reports/taskruns/run-history.json"
                 status="${ACP_STUB_RUN_HISTORY_STATUS:-succeeded}"
-                python3 - "$run_history" "$run_id" "$status" <<'PY'
+                history_mode="${ACP_STUB_RUN_HISTORY_MODE:-runs}"
+                python3 - "$run_history" "$run_id" "$status" "$history_mode" <<'PY'
             import json
             import os
             import sys
-            path, run_id, status = sys.argv[1:]
+            path, run_id, status, mode = sys.argv[1:]
             payload = {"runs": []}
             if os.path.exists(path):
                 with open(path, encoding="utf-8") as f:
                     payload = json.load(f)
-            items = payload.get("runs")
+            key = "items" if mode == "items" else "runs"
+            if mode == "items":
+                payload.setdefault("version", 1)
+            items = payload.get(key)
             if not isinstance(items, list):
                 items = []
             items.append({"run_id": run_id, "status": status})
-            payload["runs"] = items
+            payload[key] = items
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=True, indent=2)
                 f.write("\\n")
@@ -484,6 +491,87 @@ class FullRunStabilityIntegrationTests(unittest.TestCase):
             self.assertEqual("2", parse_summary_scalar(summary, "expected_headless_runs"))
             completed_runs = parse_summary_scalar(summary, "completed_runs")
             self.assertEqual("4", completed_runs)
+
+    def test_full_run_tracks_running_history_with_items_format(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, target_repo, tmp_root, repos_file = create_full_run_stub_environment(root)
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TMP_ROOT": str(tmp_root),
+                    "KEEP_TMP": "1",
+                    "ITERATIONS": "1",
+                    "RUN_QUALITY_GATES": "0",
+                    "TARGET_REPOS_FILE": str(repos_file),
+                    "ACP_RUNTIME_PROVIDER": "qwen-code",
+                    "ACP_QWEN_CMD": str(tools_dir / "qwen"),
+                    "ACP_STUB_SOURCE": str(root / "acp-stub.sh"),
+                    "ACP_STUB_TARGET_REPO": str(target_repo),
+                    "ACP_STUB_RUN_HISTORY_MODE": "items",
+                    "ACP_STUB_RUN_HISTORY_STATUS": "running",
+                    "ACP_APPLY_TIMEOUTS_VIA_API": "0",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(FULL_RUN_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+
+            summary_path = tmp_root / "session-summary.md"
+            self.assertTrue(summary_path.exists(), msg="session-summary.md is missing")
+            summary = summary_path.read_text(encoding="utf-8")
+            self.assertEqual("failed", parse_summary_scalar(summary, "result"))
+            self.assertEqual("infra_incomplete_cycle", parse_summary_scalar(summary, "failure_reason"))
+            self.assertNotEqual("0", parse_summary_scalar(summary, "running_runs_detected"))
+
+    def test_full_run_non_zero_pipeline_exit_keeps_pipeline_failure_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, target_repo, tmp_root, repos_file = create_full_run_stub_environment(root)
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TMP_ROOT": str(tmp_root),
+                    "KEEP_TMP": "1",
+                    "ITERATIONS": "1",
+                    "RUN_QUALITY_GATES": "0",
+                    "TARGET_REPOS_FILE": str(repos_file),
+                    "ACP_RUNTIME_PROVIDER": "qwen-code",
+                    "ACP_QWEN_CMD": str(tools_dir / "qwen"),
+                    "ACP_STUB_SOURCE": str(root / "acp-stub.sh"),
+                    "ACP_STUB_TARGET_REPO": str(target_repo),
+                    "ACP_STUB_RUN_FORCE_EXIT_CODE": "7",
+                    "ACP_APPLY_TIMEOUTS_VIA_API": "0",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(FULL_RUN_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+
+            summary_path = tmp_root / "session-summary.md"
+            self.assertTrue(summary_path.exists(), msg="session-summary.md is missing")
+            summary = summary_path.read_text(encoding="utf-8")
+            failure_reason = parse_summary_scalar(summary, "failure_reason")
+            self.assertIn("pipeline command failed for runtime=", failure_reason)
+            self.assertNotIn("missing run_id", failure_reason)
 
     def test_full_run_marks_signal_termination(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -821,6 +909,67 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
             )
             self.assertIn("precheck_failed=", result.stderr)
 
+    def test_batch_precheck_ignores_timeout_tuning_env(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            write_text(
+                provenarch_root / "Makefile",
+                textwrap.dedent(
+                    """\
+                    .PHONY: contracts test lint build
+                    contracts test lint build:
+                    \t@if [ -n "$$ACP_RUNTIME_STEP_TIMEOUT_SEC$$ACP_PIPELINE_TIMEOUT_SEC$$ACP_API_INIT_TIMEOUT_SEC$$READY_TIMEOUT_SEC$$UI_E2E_INIT_TIMEOUT_SEC$$UI_E2E_CANCEL_TIMEOUT_SEC" ]; then \
+                    \t\techo "timeout env leaked into precheck" >&2; \
+                    \t\texit 3; \
+                    \tfi
+                    """
+                ),
+            )
+            e2e_tmp_root = root / "e2e"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TARGET_REPO": str(target_repo),
+                    "BATCH_ID": "batch-precheck-timeout-env-isolation",
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "ACP_RUNTIME_STEP_TIMEOUT_SEC": "2700",
+                    "ACP_PIPELINE_TIMEOUT_SEC": "3600",
+                    "ACP_API_INIT_TIMEOUT_SEC": "180",
+                    "READY_TIMEOUT_SEC": "99",
+                    "UI_E2E_INIT_TIMEOUT_SEC": "100",
+                    "UI_E2E_CANCEL_TIMEOUT_SEC": "100",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+            classification_path = (
+                e2e_tmp_root / "runs" / "batch-precheck-timeout-env-isolation" / "backend-run-classifications.tsv"
+            )
+            self.assertTrue(classification_path.exists(), msg="backend-run-classifications.tsv is missing")
+            rows = [line for line in classification_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertGreaterEqual(len(rows), 2, msg="classification file must contain header + rows")
+            self.assertFalse(
+                any("\tprecheck_failed\t" in line for line in rows[1:]),
+                msg="expected timeout env to be isolated from precheck",
+            )
+            self.assertTrue(
+                any("\tinfra_incomplete_cycle\t" in line for line in rows[1:]),
+                msg="expected non-precheck run classification rows",
+            )
+
     def test_batch_classifies_signal_terminated_without_runner_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -890,6 +1039,86 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
             self.assertFalse(
                 any("\trunner_unavailable\t" in line for line in rows[1:]),
                 msg="runner_unavailable must not be reported for signal termination scenario",
+            )
+
+    def test_batch_prioritizes_runtime_parse_over_infra_incomplete_cycle(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            write_text(
+                provenarch_root / "scripts/full-run-ai-advent.sh",
+                textwrap.dedent(
+                    """\
+                    #!/usr/bin/env bash
+                    set -euo pipefail
+                    : "${TMP_ROOT:?TMP_ROOT is required}"
+                    provider="${ACP_RUNTIME_PROVIDER:-qwen-code}"
+                    mkdir -p "$TMP_ROOT/logs" "$TMP_ROOT/arch-workspace/reports/taskruns/raw"
+                    cat >"$TMP_ROOT/session-summary.md" <<'MD'
+                    # ProvenArch Full Run Session Summary
+
+                    - result: failed
+                    - quality_gates: passed
+                    - expected_runs: 4
+                    - completed_runs: 1
+                    - expected_headless_runs: 2
+                    - completed_headless_runs: 0
+                    - running_runs_detected: 0
+                    - failure_reason: infra_incomplete_cycle
+                    - termination_signal: none
+
+                    ## API Simulation
+                    - status: succeeded
+                    MD
+                    : >"$TMP_ROOT/run-results.tsv"
+                    raw_path="$TMP_ROOT/arch-workspace/reports/taskruns/raw/iter1-stdout.log"
+                    echo '{"not":"taskresult"}' >"$raw_path"
+                    cat >"$TMP_ROOT/logs/run-iter1-headless-${provider}-refresh.log" <<LOG
+                    run failed: error_code=runner_parse_failed parse_stage=schema raw_output=${raw_path}
+                    LOG
+                    echo "runner_parse_failed for ${provider}" >"$TMP_ROOT/full-run.log"
+                    exit 1
+                    """
+                ),
+                mode=0o755,
+            )
+            e2e_tmp_root = root / "e2e"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TARGET_REPO": str(target_repo),
+                    "BATCH_ID": "batch-runtime-parse-priority-test",
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+            classification_path = (
+                e2e_tmp_root / "runs" / "batch-runtime-parse-priority-test" / "backend-run-classifications.tsv"
+            )
+            self.assertTrue(classification_path.exists(), msg="backend-run-classifications.tsv is missing")
+            rows = [line for line in classification_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertGreaterEqual(len(rows), 2, msg="classification file must contain header + rows")
+            failure_classes = [line.split("\t")[2] for line in rows[1:]]
+            self.assertTrue(
+                any(item == "runtime_parse" for item in failure_classes),
+                msg="expected runtime_parse classification",
+            )
+            self.assertFalse(
+                any(item == "infra_incomplete_cycle" for item in failure_classes),
+                msg="runtime_parse must take priority over infra_incomplete_cycle",
             )
 
 

@@ -675,7 +675,9 @@ def evaluate_run(
     runner_error_hit = False
     parse_stages: set[str] = set()
     raw_outputs: set[str] = set()
-    for source_path in (summary_path, full_run_log):
+    runner_error_sources = [summary_path, full_run_log]
+    runner_error_sources.extend(sorted((run_dir / "logs").glob("run-iter*-*.log")))
+    for source_path in runner_error_sources:
         if not source_path.exists():
             continue
         text = source_path.read_text(encoding="utf-8")

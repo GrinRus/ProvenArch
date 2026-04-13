@@ -184,7 +184,9 @@ import sys
 
 path = sys.argv[1]
 payload = json.load(open(path, encoding='utf-8'))
-items = payload.get('runs')
+items = payload.get('items')
+if not isinstance(items, list):
+    items = payload.get('runs')
 if not isinstance(items, list):
     items = payload if isinstance(payload, list) else []
 running = 0
@@ -985,7 +987,9 @@ run_cli_pipeline() {
     fi
   done
   local run_exit=0
-  if ! wait "$run_pid"; then
+  if wait "$run_pid"; then
+    run_exit=0
+  else
     run_exit=$?
   fi
   kill "$watchdog_pid" >/dev/null 2>&1 || true

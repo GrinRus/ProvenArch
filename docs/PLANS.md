@@ -90,6 +90,7 @@ EP-20260413-postfix-matrix-runtime-stability
 
 ### Progress log
 - 2026-04-13: Реализованы runtime/batch/frontend фиксы и добавлены regression tests для `--prompt`, parse-stage/schema path, quality-vs-infra classification и cancel-refresh stability.
+- 2026-04-14: Дозакрыт integration gap `runtime_parse > infra_incomplete_cycle` (batch classifier priority) и выполнен повторный canary multi (`multi-path`/`multi-git_url`, `qwen`/`claude`) + frontend `cancel-refresh` single `2/2`.
 
 ### Plan ID
 EP-20260411-e2e-stability-hardening

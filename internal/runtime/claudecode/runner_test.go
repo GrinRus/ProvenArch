@@ -469,6 +469,37 @@ func TestHeadlessRunnerBindingMismatchClassifiesAsParseFailed(t *testing.T) {
 	}
 }
 
+func TestHeadlessRunnerRepairsLegacyEdgeAliasesBeforeSchemaValidation(t *testing.T) {
+	t.Parallel()
+
+	runner := HeadlessRunner{
+		Command: "sh",
+		Args: []string{
+			"-c",
+			`cat >/dev/null; echo '{"meta":{"task_id":"task-edge-repair","step_id":"refresh.step3.findings","run_id":"run-1","runtime":{"name":"claude-code","version":"claude-cli"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[{"op":"upsert_edge","edge":{"id":"edge.a.b","kind":"depends_on","source":"svc.a","target":"svc.b","provenance":{"kind":"inference","confidence":0.7,"evidence":[{"repo":"repo-a","path":"README.md"}]}}}]}'`,
+		},
+	}
+
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-edge-repair",
+		RunID:        "run-1",
+		StepID:       "refresh.step3.findings",
+		Workspace:    t.TempDir(),
+		RepoScopes:   []string{"repo-a", "repo-b"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("expected repaired edge aliases to pass: %v", err)
+	}
+	if len(result.TaskResult.Changeset) != 1 || result.TaskResult.Changeset[0].Edge == nil {
+		t.Fatalf("expected one edge op after repair, got %#v", result.TaskResult.Changeset)
+	}
+	edge := result.TaskResult.Changeset[0].Edge
+	if edge.Type != "depends_on" || edge.From != "svc.a" || edge.To != "svc.b" {
+		t.Fatalf("expected repaired edge fields, got %+v", edge)
+	}
+}
+
 func TestBuildDirectPromptIncludesStepSpecificPolicies(t *testing.T) {
 	t.Parallel()
 
@@ -500,6 +531,31 @@ func TestBuildDirectPromptIncludesStepSpecificPolicies(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "question IDs MUST use canonical form without numeric suffixes") {
 		t.Fatalf("expected canonical question-id policy in prompt")
+	}
+}
+
+func TestBuildDirectPromptRefreshStep3IncludesCanonicalEdgeContract(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		TaskID:       "task-refresh-step3",
+		RunID:        "run-1",
+		StepID:       "refresh.step3.findings",
+		Workspace:    t.TempDir(),
+		RepoScopes:   []string{"payments-service", "users-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	prompt := buildDirectPrompt(raw, false, false)
+	if !strings.Contains(prompt, "For upsert_edge use canonical keys only: edge.id, edge.type, edge.from, edge.to.") {
+		t.Fatalf("expected canonical upsert_edge key policy in prompt")
+	}
+	if !strings.Contains(prompt, "Forbidden edge aliases: edge.kind, edge.source, edge.target.") {
+		t.Fatalf("expected forbidden edge alias policy in prompt")
 	}
 }
 

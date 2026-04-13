@@ -70,10 +70,32 @@ test("live ui flow: run refresh -> cancel -> failed(run_canceled)", async ({ pag
   await expect(page.getByTestId("workspace-validate-result")).toBeVisible();
   await expect(page.getByText("Status: valid")).toBeVisible();
 
+  const previousRunID = ((await page.getByTestId("run-status-run-id").textContent()) ?? "").trim();
   await page.getByTestId("run-refresh-btn").click();
   await expect(page.getByTestId("run-status-panel")).toBeVisible();
-  const runID = ((await page.getByTestId("run-status-run-id").textContent()) ?? "").trim();
+
+  const runID = await test.step("wait for new refresh run id", async () => {
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      const currentRunID = ((await page.getByTestId("run-status-run-id").textContent()) ?? "").trim();
+      if (currentRunID !== "" && currentRunID !== previousRunID) {
+        return currentRunID;
+      }
+      await page.waitForTimeout(250);
+    }
+    throw new Error(`did not observe new refresh run id within timeout (previous=${previousRunID || "none"})`);
+  });
   expect(runID).not.toBe("");
+  await expect
+    .poll(
+      async () => {
+        const response = await page.request.get(`/api/pipeline/runs/${runID}`);
+        const payload = (await response.json()) as { status?: string };
+        return (payload.status ?? "").trim();
+      },
+      { timeout: 60_000 }
+    )
+    .toBe("running");
 
   const cancelButton = page.getByTestId("run-cancel-btn");
   await expect(cancelButton).toBeEnabled({ timeout: 30_000 });
