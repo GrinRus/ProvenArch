@@ -252,6 +252,7 @@ Default values:
 - `max_parallel_tasks=1`
 - `failure_policy=best_effort`
 - `shard_discovery.mode=heuristics`
+- `repo_selection=all`
 
 Precedence:
 - `CLI > env > workspace.yaml > defaults`
@@ -261,9 +262,20 @@ CLI overrides (ограниченный набор):
 - `--max-parallel-tasks <n>`
 - `--failure-policy fail_fast|best_effort`
 
+Env overrides:
+- `ACP_EXECUTION_STRATEGY`
+- `ACP_MAX_PARALLEL_TASKS`
+- `ACP_FAILURE_POLICY`
+- `ACP_SHARD_DISCOVERY_MODE`
+- `ACP_REPO_SELECTION`
+
 API управления execution-профилем:
 - `GET /api/runtime/execution` (persisted + effective + source)
 - `PUT /api/runtime/execution` (partial update persisted values)
+
+`repo_selection` policy:
+- `all`: анализируются все repos из `workspace.yaml`.
+- `backend_only`: исключаются только repos с `analysis.role=frontend`; `backend|mixed|unknown` остаются включёнными (для `unknown` validator пишет warning).
 
 ### 7) Поднимите dev environment
 

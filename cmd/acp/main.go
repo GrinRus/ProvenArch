@@ -162,6 +162,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "execution strategy: %s\n", executionResolved.Effective.Strategy)
 		fmt.Fprintf(stdout, "execution max_parallel_tasks: %d\n", executionResolved.Effective.MaxParallel)
 		fmt.Fprintf(stdout, "execution failure_policy: %s\n", executionResolved.Effective.FailurePolicy)
+		fmt.Fprintf(stdout, "execution repo_selection: %s\n", executionResolved.Effective.RepoSelection)
 		if mode == acpruntime.RuntimeModeFake {
 			fmt.Fprintln(stdout, "runtime provider note: ignored in fake mode")
 		}
@@ -223,9 +224,10 @@ func runInitWorkspace(args []string, stdout, stderr io.Writer) int {
 	}
 
 	report := ws.Validate(context.Background(), workspace.ValidateOptions{
-		ResolveRepos: true,
-		FetchGit:     false,
-		VerifyRefs:   true,
+		ResolveRepos:      true,
+		FetchGit:          false,
+		VerifyRefs:        true,
+		RepoSelectionMode: acpruntime.ResolveExecution(ws.Manifest, acpruntime.ExecutionOverrides{}).Effective.RepoSelection,
 	})
 	if !report.OK {
 		printValidationReport(stderr, report)
@@ -462,10 +464,12 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "pipeline validation failed: %v\n", err)
 		return exitCodeValidation
 	}
+	resolvedExecutionProfile := acpruntime.ResolveExecution(ws.Manifest, executionOverrides)
 	report := ws.Validate(context.Background(), workspace.ValidateOptions{
-		ResolveRepos: true,
-		FetchGit:     true,
-		VerifyRefs:   true,
+		ResolveRepos:      true,
+		FetchGit:          true,
+		VerifyRefs:        true,
+		RepoSelectionMode: resolvedExecutionProfile.Effective.RepoSelection,
 	})
 	if !report.OK {
 		printValidationReport(stderr, report)
@@ -521,6 +525,7 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "execution strategy: %s\n", executionResolved.Effective.Strategy)
 	fmt.Fprintf(stdout, "execution max_parallel_tasks: %d\n", executionResolved.Effective.MaxParallel)
 	fmt.Fprintf(stdout, "execution failure_policy: %s\n", executionResolved.Effective.FailurePolicy)
+	fmt.Fprintf(stdout, "execution repo_selection: %s\n", executionResolved.Effective.RepoSelection)
 	if mode == acpruntime.RuntimeModeFake {
 		fmt.Fprintln(stdout, "runtime provider note: ignored in fake mode")
 	}
@@ -784,6 +789,7 @@ func cloneRuntimeConfig(input *workspace.RuntimeConfig) *workspace.RuntimeConfig
 			Strategy:      strings.TrimSpace(input.Profile.Execution.Strategy),
 			MaxParallel:   cloneIntPointer(input.Profile.Execution.MaxParallel),
 			FailurePolicy: strings.TrimSpace(input.Profile.Execution.FailurePolicy),
+			RepoSelection: strings.TrimSpace(strings.ToLower(input.Profile.Execution.RepoSelection)),
 		}
 		if input.Profile.Execution.ShardDiscovery != nil {
 			clonedExecution.ShardDiscovery = &workspace.RuntimeShardDiscoveryConfig{

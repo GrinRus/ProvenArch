@@ -49,6 +49,55 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 
 ### Plan ID
+EP-20260413-backend-repo-selection-hardening
+
+### Context
+Нужно укрепить backend-focused selection в multi-repo/monorepo: синхронизировать `repo_scope` resolver между runtime и enrich, добавить explicit frontend/backend policy, убрать `git_url` cache collisions и повысить диагностируемость.
+
+### Goals (must have)
+- [x] Единый resolver `repo_scope` для step1.collect + enrich
+- [x] Проверка mismatch filename `<domain-id>.md` vs `- id:` с high-priority question, без изменения filename-based runtime id
+- [x] Контракт `workspace.yaml`: `repos[].analysis.role` + `runtime.profile.execution.repo_selection`
+- [x] Effective selection policy `all|backend_only` + skip domain tasks при excluded scope
+- [x] Применение effective scopes к runtime шагам (step1/step2/step3/step4) и shard planning
+- [x] `git_url` cache key `slug+hash(source)` + legacy fallback warning
+- [x] API/UI surfaces: execution `repo_selection`, validate decisions (`effective_role`, `included/excluded`, `reason`)
+- [x] Артефакт `reports/taskruns/<run_id>-repo-selection-summary.json`
+- [x] Unit/integration/regression tests + docs/schema/examples sync
+
+### Non-goals
+- [x] Изменение default поведения для существующих пользователей (`repo_selection` default остаётся `all`)
+- [x] Добавление новых runtime providers beyond MVP
+
+### Approach
+1) Обновить workspace/runtime contracts и selection evaluator.
+2) Привязать selection к orchestrator domain/runtime execution path.
+3) Укрепить resolver/cache diagnostics и добавить repo-selection summary artifact.
+4) Обновить API/UI surfaces и тесты.
+5) Синхронизировать docs/spec/examples.
+
+### Files expected to change
+- `internal/workspace/*`
+- `internal/runtime/*`
+- `internal/orchestrator/*`
+- `internal/api/*`
+- `ui/src/*`
+- `schemas/workspace.schema.json`
+- `docs/*`, `README.md`, `examples/workspace.example.yaml`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены
+- [x] Схемы валидируются
+- [x] Документация обновлена
+
+### Risks
+- `backend_only` при пустом selected scope может unintentionally скрыть анализ; mitigated explicit questions/warnings + summary artifact.
+- Legacy git cache fallback может задержать миграцию на hashed key; mitigated warning diagnostics.
+
+### Progress log
+- 2026-04-13: Реализованы repo-selection policy hardening, unified domain repo_scope resolver, git_url cache-key migration fallback, API/UI wiring, summary artifact и regression suite.
+
+### Plan ID
 EP-20260413-sharding-execution-profile
 
 ### Context

@@ -7,9 +7,13 @@ repos:
   # configured through `workspace.yaml`.
   - name: payments-service
     path: /absolute/path/to/payments-service
+    analysis:
+      role: backend
   - name: users-service
     git_url: https://gitlab.example.com/platform/users-service.git
     ref: main
+    analysis:
+      role: backend
 docs:
   imports_path: ./docs/imports
 runtime:
@@ -28,5 +32,7 @@ runtime:
       strategy: sequential
       max_parallel_tasks: 1
       failure_policy: best_effort
+      # all|backend_only (default all)
+      repo_selection: all
       shard_discovery:
         mode: heuristics
