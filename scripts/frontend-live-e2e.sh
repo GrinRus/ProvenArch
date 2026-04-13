@@ -202,13 +202,23 @@ started_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 mkdir -p "$PLAYWRIGHT_RESULTS_DIR"
 
 log "starting ACP server (provider=$RUNTIME_PROVIDER listen=$LISTEN)"
-env "${server_env[@]}" "$ACP_BIN" serve \
-  --workspace "$WORKSPACE" \
-  --runtime headless \
-  --runtime-provider "$RUNTIME_PROVIDER" \
-  --listen "$LISTEN" \
-  --run-logs-ttl-hours "$RUN_LOGS_TTL_HOURS" \
-  --run-logs-max-runs "$RUN_LOGS_MAX_RUNS" >"$SERVER_LOG" 2>&1 &
+if [[ "${#server_env[@]}" -gt 0 ]]; then
+  env "${server_env[@]}" "$ACP_BIN" serve \
+    --workspace "$WORKSPACE" \
+    --runtime headless \
+    --runtime-provider "$RUNTIME_PROVIDER" \
+    --listen "$LISTEN" \
+    --run-logs-ttl-hours "$RUN_LOGS_TTL_HOURS" \
+    --run-logs-max-runs "$RUN_LOGS_MAX_RUNS" >"$SERVER_LOG" 2>&1 &
+else
+  "$ACP_BIN" serve \
+    --workspace "$WORKSPACE" \
+    --runtime headless \
+    --runtime-provider "$RUNTIME_PROVIDER" \
+    --listen "$LISTEN" \
+    --run-logs-ttl-hours "$RUN_LOGS_TTL_HOURS" \
+    --run-logs-max-runs "$RUN_LOGS_MAX_RUNS" >"$SERVER_LOG" 2>&1 &
+fi
 SERVER_PID="$!"
 
 if ! wait_for_health "$BASE_URL"; then
@@ -218,6 +228,7 @@ resolve_ui_poll_timeouts
 log "effective UI polling timeouts: init=${UI_E2E_INIT_TIMEOUT_SEC}s cancel=${UI_E2E_CANCEL_TIMEOUT_SEC}s"
 
 status="passed"
+reason="ok"
 if ! (
   cd "$PROVENARCH_ROOT"
   UI_E2E_BASE_URL="$BASE_URL" \
@@ -230,6 +241,7 @@ if ! (
   npm run --prefix ui e2e:live
 ) >"$PLAYWRIGHT_LOG" 2>&1; then
   status="failed"
+  reason="playwright_failed"
 fi
 
 finished_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
@@ -243,6 +255,7 @@ export FRONTEND_E2E_RUNTIME_CMD="$runtime_cmd"
 export FRONTEND_E2E_SCENARIO="$UI_E2E_SCENARIO"
 export FRONTEND_E2E_SERVER_LOG="$SERVER_LOG"
 export FRONTEND_E2E_PLAYWRIGHT_LOG="$PLAYWRIGHT_LOG"
+export FRONTEND_E2E_REASON="$reason"
 python3 - "$RESULT_JSON" <<'PY'
 import json
 import os
@@ -258,6 +271,7 @@ payload = {
     "workspace": os.environ.get("FRONTEND_E2E_WORKSPACE"),
     "runtime_command": os.environ.get("FRONTEND_E2E_RUNTIME_CMD"),
     "scenario": os.environ.get("FRONTEND_E2E_SCENARIO"),
+    "reason": os.environ.get("FRONTEND_E2E_REASON", "unknown"),
     "server_log": os.environ.get("FRONTEND_E2E_SERVER_LOG"),
     "playwright_log": os.environ.get("FRONTEND_E2E_PLAYWRIGHT_LOG"),
 }

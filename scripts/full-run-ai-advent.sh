@@ -16,6 +16,7 @@ ITERATIONS="${ITERATIONS:-1}"
 RUN_QUALITY_GATES="${RUN_QUALITY_GATES:-1}"
 RUN_LOGS_TTL_HOURS="${RUN_LOGS_TTL_HOURS:-168}"
 RUN_LOGS_MAX_RUNS="${RUN_LOGS_MAX_RUNS:-200}"
+APPLY_TIMEOUTS_VIA_API="${ACP_APPLY_TIMEOUTS_VIA_API:-1}"
 
 RUNTIME_STEP_TIMEOUT_SEC="${ACP_RUNTIME_STEP_TIMEOUT_SEC:-}"
 RUNTIME_HEARTBEAT_SEC="${ACP_RUNTIME_HEARTBEAT_SEC:-}"
@@ -59,6 +60,16 @@ RUNNING_RUNS_DETECTED=0
 RUNNING_RUNS_BASELINE=0
 RUNNING_RUNS_HEADLESS=0
 SUMMARY_RESULT=""
+LAST_PIPELINE_STAGE="not_started"
+LAST_RUNTIME_PROVIDER="unset"
+TIMEOUTS_API_APPLY_BASELINE_STATUS="not_applied"
+TIMEOUTS_API_APPLY_BASELINE_EFFECTIVE=""
+TIMEOUTS_API_APPLY_BASELINE_SOURCE=""
+TIMEOUTS_API_APPLY_BASELINE_JSON=""
+TIMEOUTS_API_APPLY_HEADLESS_STATUS="not_applied"
+TIMEOUTS_API_APPLY_HEADLESS_EFFECTIVE=""
+TIMEOUTS_API_APPLY_HEADLESS_SOURCE=""
+TIMEOUTS_API_APPLY_HEADLESS_JSON=""
 
 if [[ ! "$ITERATIONS" =~ ^[1-9][0-9]*$ ]]; then
   echo "ITERATIONS must be a positive integer, got: $ITERATIONS" >&2
@@ -70,6 +81,10 @@ if [[ "$KEEP_TMP" != "0" && "$KEEP_TMP" != "1" ]]; then
 fi
 if [[ "$RUN_QUALITY_GATES" != "0" && "$RUN_QUALITY_GATES" != "1" ]]; then
   echo "RUN_QUALITY_GATES must be 0 or 1, got: $RUN_QUALITY_GATES" >&2
+  exit 1
+fi
+if [[ "$APPLY_TIMEOUTS_VIA_API" != "0" && "$APPLY_TIMEOUTS_VIA_API" != "1" ]]; then
+  echo "ACP_APPLY_TIMEOUTS_VIA_API must be 0 or 1, got: $APPLY_TIMEOUTS_VIA_API" >&2
   exit 1
 fi
 if [[ ! "$RUN_LOGS_TTL_HOURS" =~ ^[1-9][0-9]*$ ]]; then
@@ -112,7 +127,10 @@ mkdir -p "$LOG_DIR" "$SNAPSHOT_DIR"
 
 # Keep original stdio for user-facing progress, but avoid tee/process-substitution
 # in the critical path. All script output is persisted to FULL_RUN_LOG.
-exec 3>&1 4>&2
+exec 4>&2
+if [[ ! -t 4 ]]; then
+  exec 4>/dev/null
+fi
 exec >>"$FULL_RUN_LOG" 2>&1
 
 log() {
@@ -150,7 +168,7 @@ on_termination_signal() {
   local signal_name="$1"
   TERMINATION_SIGNAL="$signal_name"
   FAILURE_REASON="infra_signal_terminated"
-  log "received termination signal: $signal_name"
+  log "received termination signal: $signal_name (last_pipeline_stage=$LAST_PIPELINE_STAGE last_runtime_provider=$LAST_RUNTIME_PROVIDER)"
   exit 1
 }
 
@@ -537,6 +555,106 @@ PY
   READY_TIMEOUT_SEC="$API_READY_TIMEOUT_SEC"
 }
 
+apply_runtime_timeouts_via_api() {
+  local workspace_label="$1"
+  local workspace_path="$2"
+  local api_base="$3"
+  local payload_path="$TMP_ROOT/runtime-timeouts-${workspace_label}-payload.json"
+  local put_response_path="$TMP_ROOT/runtime-timeouts-${workspace_label}-put-response.json"
+  local get_response_path="$TMP_ROOT/runtime-timeouts-${workspace_label}-get-response.json"
+
+  cat >"$payload_path" <<EOF
+{"timeouts":{"step_timeout_sec":${RUNTIME_STEP_TIMEOUT_SEC},"heartbeat_sec":${RUNTIME_HEARTBEAT_SEC},"pipeline_timeout_sec":${PIPELINE_TIMEOUT_SEC},"pipeline_kill_grace_sec":${PIPELINE_KILL_GRACE_SEC},"api_ready_timeout_sec":${API_READY_TIMEOUT_SEC},"api_init_timeout_sec":${API_INIT_TIMEOUT_SEC},"ui_init_poll_timeout_sec":${UI_INIT_POLL_TIMEOUT_SEC},"ui_cancel_poll_timeout_sec":${UI_CANCEL_POLL_TIMEOUT_SEC}}}
+EOF
+
+  if ! curl -fsS -X PUT \
+    -H 'Content-Type: application/json' \
+    --data @"$payload_path" \
+    "$api_base/api/runtime/timeouts" >"$put_response_path"; then
+    die "failed to PUT /api/runtime/timeouts for workspace=$workspace_label path=$workspace_path"
+  fi
+
+  if ! curl -fsS "$api_base/api/runtime/timeouts" >"$get_response_path"; then
+    die "failed to GET /api/runtime/timeouts for workspace=$workspace_label path=$workspace_path"
+  fi
+
+  local parsed
+  if ! parsed="$(python3 - "$get_response_path" "$workspace_label" \
+    "$RUNTIME_STEP_TIMEOUT_SEC" "$RUNTIME_HEARTBEAT_SEC" "$PIPELINE_TIMEOUT_SEC" "$PIPELINE_KILL_GRACE_SEC" \
+    "$API_READY_TIMEOUT_SEC" "$API_INIT_TIMEOUT_SEC" "$UI_INIT_POLL_TIMEOUT_SEC" "$UI_CANCEL_POLL_TIMEOUT_SEC" <<'PY'
+import json
+import sys
+
+payload_path = sys.argv[1]
+workspace_label = sys.argv[2]
+keys = [
+    "step_timeout_sec",
+    "heartbeat_sec",
+    "pipeline_timeout_sec",
+    "pipeline_kill_grace_sec",
+    "api_ready_timeout_sec",
+    "api_init_timeout_sec",
+    "ui_init_poll_timeout_sec",
+    "ui_cancel_poll_timeout_sec",
+]
+expected = {key: int(value) for key, value in zip(keys, sys.argv[3:11])}
+payload = json.load(open(payload_path, encoding="utf-8"))
+effective = payload.get("effective") or {}
+persisted = payload.get("persisted") or {}
+source = payload.get("source") or {}
+
+effective_pairs = []
+source_pairs = []
+for key in keys:
+    if key not in effective:
+        raise SystemExit(f"runtime timeouts API ({workspace_label}) missing effective.{key}")
+    if key not in persisted:
+        raise SystemExit(f"runtime timeouts API ({workspace_label}) missing persisted.{key}")
+    try:
+        effective_value = int(effective[key])
+        persisted_value = int(persisted[key])
+    except Exception as exc:  # pragma: no cover
+        raise SystemExit(f"runtime timeouts API ({workspace_label}) invalid numeric value for {key}: {exc}")
+    expected_value = expected[key]
+    if effective_value != expected_value:
+        raise SystemExit(
+            f"runtime timeouts API ({workspace_label}) effective mismatch for {key}: expected={expected_value} got={effective_value}"
+        )
+    if persisted_value != expected_value:
+        raise SystemExit(
+            f"runtime timeouts API ({workspace_label}) persisted mismatch for {key}: expected={expected_value} got={persisted_value}"
+        )
+    effective_pairs.append(f"{key}={effective_value}")
+    source_pairs.append(f"{key}:{source.get(key, 'unknown')}")
+
+print("effective\t" + ",".join(effective_pairs))
+print("source\t" + ",".join(source_pairs))
+PY
+)"; then
+    die "runtime timeouts API validation failed for workspace=$workspace_label path=$workspace_path (see $get_response_path)"
+  fi
+
+  local effective_line source_line
+  effective_line="$(echo "$parsed" | awk -F'\t' '$1=="effective" {print $2}' | tail -n1)"
+  source_line="$(echo "$parsed" | awk -F'\t' '$1=="source" {print $2}' | tail -n1)"
+  if [[ -z "$effective_line" || -z "$source_line" ]]; then
+    die "runtime timeouts API validation returned empty result for workspace=$workspace_label"
+  fi
+
+  log "runtime timeouts applied via API workspace=$workspace_label path=$workspace_path effective={$effective_line} source={$source_line}"
+  if [[ "$workspace_label" == "baseline" ]]; then
+    TIMEOUTS_API_APPLY_BASELINE_STATUS="applied"
+    TIMEOUTS_API_APPLY_BASELINE_EFFECTIVE="$effective_line"
+    TIMEOUTS_API_APPLY_BASELINE_SOURCE="$source_line"
+    TIMEOUTS_API_APPLY_BASELINE_JSON="$get_response_path"
+  else
+    TIMEOUTS_API_APPLY_HEADLESS_STATUS="applied"
+    TIMEOUTS_API_APPLY_HEADLESS_EFFECTIVE="$effective_line"
+    TIMEOUTS_API_APPLY_HEADLESS_SOURCE="$source_line"
+    TIMEOUTS_API_APPLY_HEADLESS_JSON="$get_response_path"
+  fi
+}
+
 allocate_free_port() {
   python3 - <<'PY'
 import socket
@@ -814,6 +932,12 @@ run_cli_pipeline() {
   if [[ "$runtime_mode" == "headless" ]]; then
     runtime_label="${runtime_mode}:${runtime_provider}"
   fi
+  LAST_PIPELINE_STAGE="iteration=${iteration} runtime=${runtime_label} pipeline=${pipeline}"
+  if [[ "$runtime_mode" == "headless" ]]; then
+    LAST_RUNTIME_PROVIDER="$runtime_provider"
+  else
+    LAST_RUNTIME_PROVIDER="fake"
+  fi
 
   local output_path="$LOG_DIR/run-iter${iteration}-${runtime_mode}-${runtime_provider}-${pipeline}.log"
   local quality_path
@@ -1002,12 +1126,35 @@ write_summary() {
     echo "- api_init_timeout_sec: $API_INIT_TIMEOUT_SEC"
     echo "- ui_init_poll_timeout_sec: $UI_INIT_POLL_TIMEOUT_SEC"
     echo "- ui_cancel_poll_timeout_sec: $UI_CANCEL_POLL_TIMEOUT_SEC"
+    echo "- apply_timeouts_via_api: $APPLY_TIMEOUTS_VIA_API"
+    echo "- timeouts_api_apply_baseline_status: $TIMEOUTS_API_APPLY_BASELINE_STATUS"
+    if [[ -n "$TIMEOUTS_API_APPLY_BASELINE_EFFECTIVE" ]]; then
+      echo "- timeouts_api_apply_baseline_effective: $TIMEOUTS_API_APPLY_BASELINE_EFFECTIVE"
+    fi
+    if [[ -n "$TIMEOUTS_API_APPLY_BASELINE_SOURCE" ]]; then
+      echo "- timeouts_api_apply_baseline_source: $TIMEOUTS_API_APPLY_BASELINE_SOURCE"
+    fi
+    if [[ -n "$TIMEOUTS_API_APPLY_BASELINE_JSON" ]]; then
+      echo "- timeouts_api_apply_baseline_json: $TIMEOUTS_API_APPLY_BASELINE_JSON"
+    fi
+    echo "- timeouts_api_apply_headless_status: $TIMEOUTS_API_APPLY_HEADLESS_STATUS"
+    if [[ -n "$TIMEOUTS_API_APPLY_HEADLESS_EFFECTIVE" ]]; then
+      echo "- timeouts_api_apply_headless_effective: $TIMEOUTS_API_APPLY_HEADLESS_EFFECTIVE"
+    fi
+    if [[ -n "$TIMEOUTS_API_APPLY_HEADLESS_SOURCE" ]]; then
+      echo "- timeouts_api_apply_headless_source: $TIMEOUTS_API_APPLY_HEADLESS_SOURCE"
+    fi
+    if [[ -n "$TIMEOUTS_API_APPLY_HEADLESS_JSON" ]]; then
+      echo "- timeouts_api_apply_headless_json: $TIMEOUTS_API_APPLY_HEADLESS_JSON"
+    fi
     echo "- keep_tmp: $KEEP_TMP"
     echo "- expected_runs: $EXPECTED_RUNS"
     echo "- completed_runs: $COMPLETED_RUNS"
     echo "- expected_headless_runs: $EXPECTED_HEADLESS_RUNS"
     echo "- completed_headless_runs: $COMPLETED_HEADLESS_RUNS"
     echo "- running_runs_detected: $RUNNING_RUNS_DETECTED"
+    echo "- last_pipeline_stage: $LAST_PIPELINE_STAGE"
+    echo "- last_runtime_provider: $LAST_RUNTIME_PROVIDER"
     if [[ -n "$TERMINATION_SIGNAL" ]]; then
       echo "- termination_signal: $TERMINATION_SIGNAL"
     else
@@ -1213,6 +1360,14 @@ if ! wait_for_health "$API_BASE"; then
   die "ACP API did not become healthy in ${READY_TIMEOUT_SEC}s (see $SERVER_LOG)"
 fi
 
+if [[ "$APPLY_TIMEOUTS_VIA_API" == "1" ]]; then
+  log "apply runtime timeouts via API for workspace=baseline"
+  apply_runtime_timeouts_via_api "baseline" "$WORKSPACE_BASELINE" "$API_BASE"
+else
+  log "runtime timeouts API apply disabled for workspace=baseline (ACP_APPLY_TIMEOUTS_VIA_API=0)"
+  TIMEOUTS_API_APPLY_BASELINE_STATUS="skipped"
+fi
+
 log "POST /api/workspace/validate"
 curl -fsS -X POST "$API_BASE/api/workspace/validate" > "$VALIDATE_JSON"
 python3 - "$VALIDATE_JSON" "$TARGET_REPOS_META_JSON" <<'PY'
@@ -1313,6 +1468,29 @@ if [[ ! -d "$WORKSPACE_HEADLESS/.git" ]]; then
   die "headless workspace bootstrap failed: missing $WORKSPACE_HEADLESS/.git"
 fi
 
+resolve_effective_timeouts_from_workspace "$WORKSPACE_HEADLESS"
+if [[ "$APPLY_TIMEOUTS_VIA_API" == "1" ]]; then
+  log "start temporary API server for timeout apply workspace=headless"
+  HEADLESS_API_PORT="$(allocate_free_port)"
+  HEADLESS_API_BASE="http://127.0.0.1:${HEADLESS_API_PORT}"
+  HEADLESS_SERVER_LOG="$LOG_DIR/serve-headless-timeouts.log"
+  "$ACP_BIN" serve \
+    --workspace "$WORKSPACE_HEADLESS" \
+    --runtime fake \
+    --listen "127.0.0.1:${HEADLESS_API_PORT}" \
+    --run-logs-ttl-hours "$RUN_LOGS_TTL_HOURS" \
+    --run-logs-max-runs "$RUN_LOGS_MAX_RUNS" >"$HEADLESS_SERVER_LOG" 2>&1 &
+  SERVER_PID="$!"
+  if ! wait_for_health "$HEADLESS_API_BASE"; then
+    die "headless timeout API did not become healthy in ${READY_TIMEOUT_SEC}s (see $HEADLESS_SERVER_LOG)"
+  fi
+  apply_runtime_timeouts_via_api "headless" "$WORKSPACE_HEADLESS" "$HEADLESS_API_BASE"
+  stop_server
+else
+  log "runtime timeouts API apply disabled for workspace=headless (ACP_APPLY_TIMEOUTS_VIA_API=0)"
+  TIMEOUTS_API_APPLY_HEADLESS_STATUS="skipped"
+fi
+
 log "run runtime cycles: fake + headless(provider=$HEADLESS_PROVIDER)"
 prev_fake_init_signal=""
 prev_fake_refresh_signal=""
@@ -1348,6 +1526,13 @@ if [[ "$RUN_QUALITY_GATES" == "1" ]]; then
     cd "$PROVENARCH_ROOT"
     # Run project gates with neutral runtime env so defaults in tests are stable.
     env -u ACP_RUNTIME_PROVIDER -u ACP_QWEN_CMD -u ACP_CLAUDE_CMD \
+      -u ACP_APPLY_TIMEOUTS_VIA_API \
+      -u ACP_RUNTIME_STEP_TIMEOUT_SEC -u ACP_RUNTIME_HEARTBEAT_SEC \
+      -u ACP_PIPELINE_TIMEOUT_SEC -u ACP_PIPELINE_KILL_GRACE_SEC \
+      -u ACP_API_READY_TIMEOUT_SEC -u ACP_API_INIT_TIMEOUT_SEC \
+      -u ACP_UI_INIT_POLL_TIMEOUT_SEC -u ACP_UI_CANCEL_POLL_TIMEOUT_SEC \
+      -u ACP_FULL_RUN_PIPELINE_TIMEOUT_SEC -u ACP_FULL_RUN_PIPELINE_KILL_GRACE_SEC \
+      -u READY_TIMEOUT_SEC -u UI_E2E_INIT_TIMEOUT_SEC -u UI_E2E_CANCEL_TIMEOUT_SEC \
       make contracts test lint build >"$QUALITY_LOG" 2>&1
   ); then
     QUALITY_GATES_STATUS="failed"

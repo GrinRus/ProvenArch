@@ -76,10 +76,11 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 				runErr,
 			)
 		}
+		unavailableMessage := buildUnavailableFailureMessage(task, runErr, result)
 		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 			acpruntime.ProviderQwenCode,
 			acpruntime.ErrorCodeRunnerUnavailable,
-			fmt.Sprintf("%v: %s", ErrRunnerUnavailable, runErr),
+			fmt.Sprintf("%v: %s", ErrRunnerUnavailable, unavailableMessage),
 			result.Stdout,
 			result.Stderr,
 			runErr,
@@ -97,10 +98,11 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 		retryArgs := buildDefaultQwenArgs(task, buildPrompt(taskPayload, true))
 		retryResult, retryParseStage, retryParseErr, retryRunErr := runQwenCommand(ctx, task, command, retryArgs)
 		if retryRunErr != nil {
+			unavailableMessage := buildUnavailableFailureMessage(task, retryRunErr, retryResult)
 			return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 				acpruntime.ProviderQwenCode,
 				acpruntime.ErrorCodeRunnerUnavailable,
-				fmt.Sprintf("%v: %s", ErrRunnerUnavailable, retryRunErr),
+				fmt.Sprintf("%v: %s", ErrRunnerUnavailable, unavailableMessage),
 				retryResult.Stdout,
 				retryResult.Stderr,
 				retryRunErr,
@@ -164,6 +166,26 @@ func buildParseFailureMessage(task acpruntime.Task, parseStage string, parseErr 
 	return fmt.Sprintf(
 		"parse_stage=%s %s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
 		stage,
+		base,
+		artifacts.RelativeMetadataPath,
+		artifacts.Stdout.Bytes,
+		artifacts.Stdout.SHA256,
+		artifacts.Stderr.Bytes,
+		artifacts.Stderr.SHA256,
+	)
+}
+
+func buildUnavailableFailureMessage(task acpruntime.Task, runErr error, result acpruntime.Result) string {
+	base := strings.TrimSpace(runErr.Error())
+	if base == "" {
+		base = "unknown execution error"
+	}
+	artifacts, err := runnerdiag.WriteParseFailureArtifacts(task, acpruntime.ProviderQwenCode, result.Stdout, result.Stderr)
+	if err != nil {
+		return fmt.Sprintf("parse_stage=exec %s (raw_output_persist_failed=%v)", base, err)
+	}
+	return fmt.Sprintf(
+		"parse_stage=exec %s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
 		base,
 		artifacts.RelativeMetadataPath,
 		artifacts.Stdout.Bytes,

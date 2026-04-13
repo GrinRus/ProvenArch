@@ -79,10 +79,11 @@ func isNativeDirectClaudeCommand(command string) bool {
 func runLegacyPassthrough(ctx context.Context, command string, args []string, task acpruntime.Task, taskPayload []byte) (acpruntime.Result, error) {
 	result, parseStage, parseErr, runErr := runClaudeCommand(ctx, task, command, append([]string(nil), args...), taskPayload)
 	if runErr != nil {
+		unavailableMessage := buildUnavailableFailureMessage(task, runErr, result)
 		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 			acpruntime.ProviderClaudeCode,
 			acpruntime.ErrorCodeRunnerUnavailable,
-			fmt.Sprintf("%v: %s", ErrRunnerUnavailable, runErr),
+			fmt.Sprintf("%v: %s", ErrRunnerUnavailable, unavailableMessage),
 			result.Stdout,
 			result.Stderr,
 			runErr,
@@ -106,10 +107,11 @@ func runNativeDirectClaude(ctx context.Context, command string, task acpruntime.
 	args := buildNativeDirectClaudeArgs(task, buildDirectPrompt(taskPayload, false, false))
 	result, parseStage, parseErr, runErr := runClaudeCommand(ctx, task, command, args, nil)
 	if runErr != nil {
+		unavailableMessage := buildUnavailableFailureMessage(task, runErr, result)
 		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 			acpruntime.ProviderClaudeCode,
 			acpruntime.ErrorCodeRunnerUnavailable,
-			fmt.Sprintf("%v: %s", ErrRunnerUnavailable, runErr),
+			fmt.Sprintf("%v: %s", ErrRunnerUnavailable, unavailableMessage),
 			result.Stdout,
 			result.Stderr,
 			runErr,
@@ -129,10 +131,11 @@ func runNativeDirectClaude(ctx context.Context, command string, task acpruntime.
 	)
 	retryResult, retryParseStage, retryParseErr, retryRunErr := runClaudeCommand(ctx, task, command, retryArgs, nil)
 	if retryRunErr != nil {
+		unavailableMessage := buildUnavailableFailureMessage(task, retryRunErr, retryResult)
 		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 			acpruntime.ProviderClaudeCode,
 			acpruntime.ErrorCodeRunnerUnavailable,
-			fmt.Sprintf("%v: %s", ErrRunnerUnavailable, retryRunErr),
+			fmt.Sprintf("%v: %s", ErrRunnerUnavailable, unavailableMessage),
 			retryResult.Stdout,
 			retryResult.Stderr,
 			retryRunErr,
@@ -193,6 +196,26 @@ func buildParseFailureMessage(task acpruntime.Task, parseStage string, parseErr 
 	return fmt.Sprintf(
 		"parse_stage=%s %s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
 		stage,
+		base,
+		artifacts.RelativeMetadataPath,
+		artifacts.Stdout.Bytes,
+		artifacts.Stdout.SHA256,
+		artifacts.Stderr.Bytes,
+		artifacts.Stderr.SHA256,
+	)
+}
+
+func buildUnavailableFailureMessage(task acpruntime.Task, runErr error, result acpruntime.Result) string {
+	base := strings.TrimSpace(runErr.Error())
+	if base == "" {
+		base = "unknown execution error"
+	}
+	artifacts, err := runnerdiag.WriteParseFailureArtifacts(task, acpruntime.ProviderClaudeCode, result.Stdout, result.Stderr)
+	if err != nil {
+		return fmt.Sprintf("parse_stage=exec %s (raw_output_persist_failed=%v)", base, err)
+	}
+	return fmt.Sprintf(
+		"parse_stage=exec %s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
 		base,
 		artifacts.RelativeMetadataPath,
 		artifacts.Stdout.Bytes,
@@ -381,6 +404,10 @@ func buildStepSpecificDirectPolicy(stepID string) string {
 			`STEP POLICY refresh.step1.collect:`,
 			`- Allowed upsert_entity types: service, datastore, integration, external.system, team, domain, api, component.`,
 			`- Forbidden placeholder entity types: runtime_provider, runtime, metadata.`,
+			`- Analyze only repository/workspace artifacts; do NOT perform web search or external browsing.`,
+			`- Every provenance.evidence.path must resolve to an existing file in workspace/repo scope.`,
+			`- Do NOT emit synthetic evidence paths such as search_source/*, search_query/*, search_config/*.`,
+			`- Do NOT introduce unrelated incident domains (for example bidding/tender/power-system topics) unless explicitly present in repository evidence.`,
 			`- If evidence is incomplete, capture gap via coverage.missing instead of synthetic placeholder entities.`,
 			`- Include at least one question and at least three items in coverage.missing.`,
 		}, "\n")
@@ -391,6 +418,8 @@ func buildStepSpecificDirectPolicy(stepID string) string {
 			`- Each finding must include rule_id, related_ids, and provenance.evidence[].`,
 			`- For observation provenance, evidence array MUST be non-empty.`,
 			`- If meta.repo_scopes has 2+ scopes, include at least one upsert_edge that links entities from different repo_scope values.`,
+			`- Every provenance.evidence.path must resolve to an existing file in workspace/repo scope.`,
+			`- Do NOT emit synthetic evidence paths such as search_source/*, search_query/*, search_config/*.`,
 			`- Include at least one question and at least three items in coverage.missing.`,
 		}, "\n")
 	default:

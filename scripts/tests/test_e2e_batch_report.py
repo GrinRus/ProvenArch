@@ -888,6 +888,72 @@ class EvaluateRunTests(unittest.TestCase):
             self.assertFalse(result.infra_incomplete_cycle)
             self.assertIn("reliability:runtime-timeout", result.issues)
 
+    def test_classifies_precheck_failed_from_backend_classification(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            run_dir = root / "batch/qwen-code/run1"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            result = report.evaluate_run(
+                "qwen-code",
+                1,
+                run_dir,
+                {},
+                {"failure_class": "precheck_failed", "process_exit": "2"},
+            )
+            self.assertFalse(result.hard_pass)
+            self.assertEqual("precheck_failed", result.failure_class)
+            self.assertTrue(result.precheck_failed)
+            self.assertIn("reliability:precheck-failed", result.issues)
+            self.assertEqual("precheck", result.artifact_source)
+
+    def test_marks_cancellation_like_subclass_from_classification(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            target_repo = root / "target-repo"
+            write_text(target_repo / "README.md", "# demo\n")
+
+            run_dir = root / "batch/claude-code/run1"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            write_text(
+                run_dir / "session-summary.md",
+                "\n".join(
+                    [
+                        "# ProvenArch Full Run Session Summary",
+                        "",
+                        "- result: failed",
+                        "- quality_gates: passed",
+                        "- expected_runs: 4",
+                        "- completed_runs: 4",
+                        "- expected_headless_runs: 2",
+                        "- completed_headless_runs: 2",
+                        "- running_runs_detected: 0",
+                        "- failure_reason: runner_unavailable",
+                        "",
+                        "## API Simulation",
+                        "- status: succeeded",
+                        "",
+                    ]
+                ),
+            )
+            write_text(run_dir / "full-run.log", "runner_unavailable: FatalCancellationError code=130\n")
+            write_text(run_dir / "run-results.tsv", "")
+
+            result = report.evaluate_run(
+                "claude-code",
+                1,
+                run_dir,
+                {"target_repo": str(target_repo)},
+                {
+                    "failure_class": "runner_unavailable",
+                    "failure_subclass": "cancellation_like",
+                    "cancellation_like": "1",
+                    "process_exit": "130",
+                },
+            )
+            self.assertEqual("runner_unavailable", result.failure_class)
+            self.assertTrue(result.cancellation_like)
+            self.assertIn("reliability:cancellation-like", result.issues)
+
 
 if __name__ == "__main__":
     unittest.main()

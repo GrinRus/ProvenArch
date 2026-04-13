@@ -8,6 +8,7 @@ const cancelTimeoutMs = Number.isFinite(cancelTimeoutSec) && cancelTimeoutSec > 
 
 test("live ui flow: validate -> run init -> inspect artifacts", async ({ page }) => {
   test.skip(scenario !== "init-inspect", `scenario ${scenario} skips init-inspect flow`);
+  test.setTimeout(Math.max(initTimeoutMs + 120_000, 6 * 60 * 1000));
   const runtimeProvider = process.env.UI_E2E_RUNTIME_PROVIDER ?? "unknown";
   const expectedRepoCountRaw = Number.parseInt(process.env.UI_E2E_EXPECTED_REPO_COUNT ?? "1", 10);
   const expectedRepoCount = Number.isFinite(expectedRepoCountRaw) && expectedRepoCountRaw > 0 ? expectedRepoCountRaw : 1;
@@ -59,6 +60,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page })
 
 test("live ui flow: run refresh -> cancel -> failed(run_canceled)", async ({ page }) => {
   test.skip(scenario !== "cancel-refresh", `scenario ${scenario} skips cancel-refresh flow`);
+  test.setTimeout(Math.max(cancelTimeoutMs + 120_000, 6 * 60 * 1000));
   const runtimeProvider = process.env.UI_E2E_RUNTIME_PROVIDER ?? "unknown";
 
   await page.goto("/");

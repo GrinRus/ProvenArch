@@ -75,6 +75,9 @@ exit 1
 	if !strings.Contains(message, "stdout_excerpt=") {
 		t.Fatalf("expected stdout excerpt in unavailable error message, got %q", message)
 	}
+	if !strings.Contains(message, "parse_stage=exec") || !strings.Contains(message, "raw_output=reports/taskruns/raw/") {
+		t.Fatalf("expected raw-output diagnostics in unavailable error message, got %q", message)
+	}
 }
 
 func TestHeadlessRunnerUnsupportedPromptFlagReportsCompatibilityGuard(t *testing.T) {

@@ -383,6 +383,7 @@ class FullRunStabilityIntegrationTests(unittest.TestCase):
                     "ACP_QWEN_CMD": str(tools_dir / "qwen"),
                     "ACP_STUB_SOURCE": str(root / "acp-stub.sh"),
                     "ACP_STUB_TARGET_REPO": str(target_repo),
+                    "ACP_APPLY_TIMEOUTS_VIA_API": "0",
                     "PATH": f"{tools_dir}:{env.get('PATH', '')}",
                 }
             )
@@ -459,6 +460,7 @@ class FullRunStabilityIntegrationTests(unittest.TestCase):
                     "ACP_STUB_SOURCE": str(root / "acp-stub.sh"),
                     "ACP_STUB_TARGET_REPO": str(target_repo),
                     "ACP_STUB_DISABLE_RUN_HISTORY": "1",
+                    "ACP_APPLY_TIMEOUTS_VIA_API": "0",
                     "PATH": f"{tools_dir}:{env.get('PATH', '')}",
                 }
             )
@@ -501,6 +503,7 @@ class FullRunStabilityIntegrationTests(unittest.TestCase):
                     "ACP_STUB_SOURCE": str(root / "acp-stub.sh"),
                     "ACP_STUB_TARGET_REPO": str(target_repo),
                     "ACP_STUB_RUN_SLEEP": "30",
+                    "ACP_APPLY_TIMEOUTS_VIA_API": "0",
                     "PATH": f"{tools_dir}:{env.get('PATH', '')}",
                 }
             )
@@ -769,6 +772,125 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
                 msg="expected infra_incomplete_cycle classification for incomplete run results",
             )
             self.assertIn("infra_incomplete_cycle=", result.stderr)
+
+    def test_batch_records_precheck_failed_when_dod_precheck_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            write_text(
+                provenarch_root / "Makefile",
+                textwrap.dedent(
+                    """\
+                    .PHONY: contracts test lint build
+                    contracts test lint build:
+                    \t@echo "forced precheck fail" >&2
+                    \t@exit 2
+                    """
+                ),
+            )
+            e2e_tmp_root = root / "e2e"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TARGET_REPO": str(target_repo),
+                    "BATCH_ID": "batch-precheck-fail-test",
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+            classification_path = e2e_tmp_root / "runs" / "batch-precheck-fail-test" / "backend-run-classifications.tsv"
+            self.assertTrue(classification_path.exists(), msg="backend-run-classifications.tsv is missing")
+            rows = [line for line in classification_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertGreaterEqual(len(rows), 11, msg="expected 10 precheck_failed rows + header")
+            self.assertTrue(
+                all("\tprecheck_failed\t" in line for line in rows[1:]),
+                msg="expected all classification rows to be precheck_failed",
+            )
+            self.assertIn("precheck_failed=", result.stderr)
+
+    def test_batch_classifies_signal_terminated_without_runner_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            write_text(
+                provenarch_root / "scripts/full-run-ai-advent.sh",
+                textwrap.dedent(
+                    """\
+                    #!/usr/bin/env bash
+                    set -euo pipefail
+                    : "${TMP_ROOT:?TMP_ROOT is required}"
+                    mkdir -p "$TMP_ROOT"
+                    cat >"$TMP_ROOT/session-summary.md" <<'MD'
+                    # ProvenArch Full Run Session Summary
+
+                    - result: failed
+                    - quality_gates: passed
+                    - expected_runs: 4
+                    - completed_runs: 4
+                    - expected_headless_runs: 2
+                    - completed_headless_runs: 2
+                    - running_runs_detected: 0
+                    - failure_reason: infra_signal_terminated
+                    - termination_signal: TERM
+
+                    ## API Simulation
+                    - status: succeeded
+                    MD
+                    : >"$TMP_ROOT/run-results.tsv"
+                    echo "signal terminated" >"$TMP_ROOT/full-run.log"
+                    exit 1
+                    """
+                ),
+                mode=0o755,
+            )
+            e2e_tmp_root = root / "e2e"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TARGET_REPO": str(target_repo),
+                    "BATCH_ID": "batch-signal-term-test",
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+            classification_path = e2e_tmp_root / "runs" / "batch-signal-term-test" / "backend-run-classifications.tsv"
+            self.assertTrue(classification_path.exists(), msg="backend-run-classifications.tsv is missing")
+            rows = [line for line in classification_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertGreaterEqual(len(rows), 2, msg="classification file must contain header + rows")
+            self.assertTrue(
+                any("\tinfra_signal_terminated\t" in line for line in rows[1:]),
+                msg="expected infra_signal_terminated classification",
+            )
+            self.assertFalse(
+                any("\trunner_unavailable\t" in line for line in rows[1:]),
+                msg="runner_unavailable must not be reported for signal termination scenario",
+            )
 
 
 if __name__ == "__main__":

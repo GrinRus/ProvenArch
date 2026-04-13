@@ -129,6 +129,9 @@ exit 1
 	if !strings.Contains(message, "stdout_excerpt=") {
 		t.Fatalf("expected stdout excerpt in unavailable error message, got %q", message)
 	}
+	if !strings.Contains(message, "parse_stage=exec") || !strings.Contains(message, "raw_output=reports/taskruns/raw/") {
+		t.Fatalf("expected raw-output diagnostics in unavailable error message, got %q", message)
+	}
 }
 
 func TestHeadlessRunnerInvalidTaskResultClassifiesAsParseFailed(t *testing.T) {
@@ -488,6 +491,12 @@ func TestBuildDirectPromptIncludesStepSpecificPolicies(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "Forbidden placeholder entity types: runtime_provider, runtime, metadata.") {
 		t.Fatalf("expected forbidden runtime placeholder policy in prompt")
+	}
+	if !strings.Contains(prompt, "do NOT perform web search or external browsing") {
+		t.Fatalf("expected explicit web-search prohibition in step1 policy")
+	}
+	if !strings.Contains(prompt, "Do NOT emit synthetic evidence paths such as search_source/*, search_query/*, search_config/*.") {
+		t.Fatalf("expected explicit synthetic evidence-path prohibition in step1 policy")
 	}
 	if !strings.Contains(prompt, "question IDs MUST use canonical form without numeric suffixes") {
 		t.Fatalf("expected canonical question-id policy in prompt")
