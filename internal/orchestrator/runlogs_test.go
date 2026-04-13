@@ -67,7 +67,7 @@ func TestRunWritesQualitySummaryAndQueryableLogs(t *testing.T) {
 		t.Fatalf("expected runtime versions in quality summary")
 	}
 
-	page, ok, err := service.GetRunLogs(info.RunID, 0, 10)
+	page, ok, err := service.GetRunLogs(info.RunID, 0, 500)
 	if err != nil {
 		t.Fatalf("get run logs: %v", err)
 	}

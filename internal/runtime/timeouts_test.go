@@ -30,9 +30,11 @@ func TestResolveTimeoutsUsesWorkspaceValues(t *testing.T) {
 	heartbeat := 22
 	manifest := workspace.Manifest{
 		Runtime: &workspace.RuntimeConfig{
-			Timeouts: &workspace.RuntimeTimeoutsConfig{
-				StepTimeoutSec: &step,
-				HeartbeatSec:   &heartbeat,
+			Profile: &workspace.RuntimeProfileConfig{
+				Timeouts: &workspace.RuntimeTimeoutsConfig{
+					StepTimeoutSec: &step,
+					HeartbeatSec:   &heartbeat,
+				},
 			},
 		},
 	}
@@ -57,8 +59,10 @@ func TestResolveTimeoutsCanonicalEnvOverridesWorkspace(t *testing.T) {
 	step := 100
 	manifest := workspace.Manifest{
 		Runtime: &workspace.RuntimeConfig{
-			Timeouts: &workspace.RuntimeTimeoutsConfig{
-				StepTimeoutSec: &step,
+			Profile: &workspace.RuntimeProfileConfig{
+				Timeouts: &workspace.RuntimeTimeoutsConfig{
+					StepTimeoutSec: &step,
+				},
 			},
 		},
 	}

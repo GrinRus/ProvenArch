@@ -262,6 +262,11 @@ Task payload JSON:
 	if rawRepoScopes, err := json.Marshal(task.RepoScopes); err == nil {
 		repoScopesJSON = string(rawRepoScopes)
 	}
+	primaryRepoScope := primaryTaskRepoScope(task.RepoScope, task.RepoScopes)
+	pathScopesJSON := "[]"
+	if rawPathScopes, err := json.Marshal(task.PathScopes); err == nil {
+		pathScopesJSON = string(rawPathScopes)
+	}
 	stepPolicy := buildStepSpecificPolicy(task.StepID)
 	retryHint := ""
 	if retry {
@@ -304,13 +309,16 @@ Set meta fields exactly:
 - meta.runtime.name = %q
 - meta.started_at = %q
 - meta.workspace = %q
+- meta.shard_id = %q
+- meta.repo_scope = %q
 - meta.repo_scopes = %s
+- meta.path_scopes = %s
 
 Schema-valid template for this task (copy structure and field TYPES, then refine values with available evidence):
 %s
 
 Serialized runtime task JSON (context only):
-%s`, acpruntime.ProviderQwenCode, stepPolicy, retryHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderQwenCode, task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, repoScopesJSON, buildTaskResultTemplateJSON(task), strings.TrimSpace(string(taskPayload))))
+%s`, acpruntime.ProviderQwenCode, stepPolicy, retryHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderQwenCode, task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, task.ShardID, primaryRepoScope, repoScopesJSON, pathScopesJSON, buildTaskResultTemplateJSON(task), strings.TrimSpace(string(taskPayload))))
 }
 
 func buildTaskResultTemplateJSON(task acpruntime.Task) string {
@@ -336,7 +344,10 @@ func buildTaskResultTemplateJSON(task acpruntime.Task) string {
 			StartedAt:  task.StartedAtUTC.UTC().Format(time.RFC3339),
 			FinishedAt: task.StartedAtUTC.UTC().Add(2 * time.Second).Format(time.RFC3339),
 			Workspace:  task.Workspace,
+			ShardID:    task.ShardID,
+			RepoScope:  primaryTaskRepoScope(task.RepoScope, task.RepoScopes),
 			RepoScopes: append([]string(nil), task.RepoScopes...),
+			PathScopes: append([]string(nil), task.PathScopes...),
 		},
 		Summary:   "Task completed with contract-compliant output.",
 		Changeset: buildTemplateChangeset(task),
@@ -475,4 +486,16 @@ func humanizeScope(scope string) string {
 		return "Repository"
 	}
 	return name
+}
+
+func primaryTaskRepoScope(explicit string, scopes []string) string {
+	if value := strings.TrimSpace(explicit); value != "" {
+		return value
+	}
+	for _, scope := range scopes {
+		if value := strings.TrimSpace(scope); value != "" {
+			return value
+		}
+	}
+	return ""
 }

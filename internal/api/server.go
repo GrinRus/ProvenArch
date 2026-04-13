@@ -40,6 +40,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/workspace/validate", s.handleWorkspaceValidate)
 	mux.HandleFunc("/api/workspace/manifest", s.handleWorkspaceManifest)
 	mux.HandleFunc("/api/runtime/timeouts", s.handleRuntimeTimeouts)
+	mux.HandleFunc("/api/runtime/execution", s.handleRuntimeExecution)
 	mux.HandleFunc("/api/artifacts", s.handleArtifacts)
 	mux.HandleFunc("/api/artifacts/write", s.handleArtifactsWrite)
 	mux.HandleFunc("/api/git/commit", s.handleGitCommit)
@@ -210,12 +211,18 @@ func (s *Server) handleRuntimeTimeouts(writer http.ResponseWriter, request *http
 		if manifest.Runtime == nil {
 			manifest.Runtime = &workspace.RuntimeConfig{}
 		}
-		if manifest.Runtime.Timeouts == nil {
-			manifest.Runtime.Timeouts = &workspace.RuntimeTimeoutsConfig{}
+		if manifest.Runtime.Profile == nil {
+			manifest.Runtime.Profile = &workspace.RuntimeProfileConfig{}
 		}
-		mergeRuntimeTimeoutPatch(manifest.Runtime.Timeouts, payload.Timeouts)
-		if manifest.Runtime.Timeouts.IsZero() {
-			manifest.Runtime.Timeouts = nil
+		if manifest.Runtime.Profile.Timeouts == nil {
+			manifest.Runtime.Profile.Timeouts = &workspace.RuntimeTimeoutsConfig{}
+		}
+		mergeRuntimeTimeoutPatch(manifest.Runtime.Profile.Timeouts, payload.Timeouts)
+		if manifest.Runtime.Profile.Timeouts.IsZero() {
+			manifest.Runtime.Profile.Timeouts = nil
+		}
+		if manifest.Runtime.Profile.IsZero() {
+			manifest.Runtime.Profile = nil
 		}
 		if manifest.Runtime.IsZero() {
 			manifest.Runtime = nil
@@ -297,6 +304,183 @@ func mergeRuntimeTimeoutPatch(dst *workspace.RuntimeTimeoutsConfig, patch worksp
 	}
 	if patch.UICancelPollTimeoutSec != nil {
 		dst.UICancelPollTimeoutSec = patch.UICancelPollTimeoutSec
+	}
+}
+
+type runtimeExecutionPatch struct {
+	Strategy           *string `json:"strategy"`
+	MaxParallelTasks   *int    `json:"max_parallel_tasks"`
+	FailurePolicy      *string `json:"failure_policy"`
+	ShardDiscoveryMode *string `json:"shard_discovery_mode"`
+}
+
+func (patch runtimeExecutionPatch) IsZero() bool {
+	return patch.Strategy == nil &&
+		patch.MaxParallelTasks == nil &&
+		patch.FailurePolicy == nil &&
+		patch.ShardDiscoveryMode == nil
+}
+
+func (s *Server) handleRuntimeExecution(writer http.ResponseWriter, request *http.Request) {
+	switch request.Method {
+	case http.MethodGet:
+		ws := s.getWorkspace()
+		resolved := s.service.ResolveExecutionProfile(ws.Manifest)
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"ok":        true,
+			"persisted": runtimeExecutionPersistedPayload(resolved.Persisted),
+			"effective": runtimeExecutionEffectivePayload(resolved.Effective),
+			"source":    runtimeExecutionSourcePayload(resolved.Source),
+		})
+	case http.MethodPut:
+		var payload struct {
+			Execution runtimeExecutionPatch `json:"execution"`
+		}
+		if err := decodeStrictJSON(request, &payload); err != nil {
+			writeError(writer, http.StatusBadRequest, "invalid_request_body", "invalid request body")
+			return
+		}
+		if payload.Execution.IsZero() {
+			writeError(writer, http.StatusBadRequest, "runtime_execution_empty", "execution payload must include at least one field")
+			return
+		}
+		if err := validateRuntimeExecutionPatch(payload.Execution); err != nil {
+			writeError(writer, http.StatusBadRequest, "runtime_execution_invalid", err.Error())
+			return
+		}
+
+		ws := s.getWorkspace()
+		manifest := ws.Manifest
+		if manifest.Runtime == nil {
+			manifest.Runtime = &workspace.RuntimeConfig{}
+		}
+		if manifest.Runtime.Profile == nil {
+			manifest.Runtime.Profile = &workspace.RuntimeProfileConfig{}
+		}
+		if manifest.Runtime.Profile.Execution == nil {
+			manifest.Runtime.Profile.Execution = &workspace.RuntimeExecutionConfig{}
+		}
+		mergeRuntimeExecutionPatch(manifest.Runtime.Profile.Execution, payload.Execution)
+		if manifest.Runtime.Profile.Execution.IsZero() {
+			manifest.Runtime.Profile.Execution = nil
+		}
+		if manifest.Runtime.Profile.IsZero() {
+			manifest.Runtime.Profile = nil
+		}
+		if manifest.Runtime.IsZero() {
+			manifest.Runtime = nil
+		}
+
+		rawManifest, err := workspace.RenderManifest(manifest)
+		if err != nil {
+			writeError(writer, http.StatusInternalServerError, "runtime_execution_render_failed", err.Error())
+			return
+		}
+		if err := ws.WriteFile(workspace.ManifestFileName, rawManifest); err != nil {
+			writeError(writer, http.StatusInternalServerError, "runtime_execution_write_failed", err.Error())
+			return
+		}
+		reopened, err := workspace.Open(ws.Path)
+		if err != nil {
+			writeError(writer, http.StatusInternalServerError, "runtime_execution_reopen_failed", err.Error())
+			return
+		}
+		s.setWorkspace(reopened)
+		resolved := s.service.ResolveExecutionProfile(reopened.Manifest)
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"ok":        true,
+			"persisted": runtimeExecutionPersistedPayload(resolved.Persisted),
+			"effective": runtimeExecutionEffectivePayload(resolved.Effective),
+			"source":    runtimeExecutionSourcePayload(resolved.Source),
+		})
+	default:
+		writeMethodNotAllowed(writer, http.MethodGet+", "+http.MethodPut)
+	}
+}
+
+func validateRuntimeExecutionPatch(patch runtimeExecutionPatch) error {
+	if patch.Strategy != nil {
+		value := strings.TrimSpace(strings.ToLower(*patch.Strategy))
+		if value != acpruntime.ExecutionStrategySequential && value != acpruntime.ExecutionStrategyParallel {
+			return fmt.Errorf("strategy must be one of: %s, %s", acpruntime.ExecutionStrategySequential, acpruntime.ExecutionStrategyParallel)
+		}
+	}
+	if patch.MaxParallelTasks != nil && *patch.MaxParallelTasks <= 0 {
+		return errors.New("max_parallel_tasks must be > 0")
+	}
+	if patch.FailurePolicy != nil {
+		value := strings.TrimSpace(strings.ToLower(*patch.FailurePolicy))
+		if value != acpruntime.ExecutionFailurePolicyFailFast && value != acpruntime.ExecutionFailurePolicyBestEffort {
+			return fmt.Errorf("failure_policy must be one of: %s, %s", acpruntime.ExecutionFailurePolicyFailFast, acpruntime.ExecutionFailurePolicyBestEffort)
+		}
+	}
+	if patch.ShardDiscoveryMode != nil {
+		value := strings.TrimSpace(strings.ToLower(*patch.ShardDiscoveryMode))
+		if value != acpruntime.ExecutionShardDiscoveryHeuristics && value != acpruntime.ExecutionShardDiscoverySemantic {
+			return fmt.Errorf("shard_discovery_mode must be one of: %s, %s", acpruntime.ExecutionShardDiscoveryHeuristics, acpruntime.ExecutionShardDiscoverySemantic)
+		}
+	}
+	return nil
+}
+
+func mergeRuntimeExecutionPatch(dst *workspace.RuntimeExecutionConfig, patch runtimeExecutionPatch) {
+	if dst == nil {
+		return
+	}
+	if patch.Strategy != nil {
+		value := strings.TrimSpace(strings.ToLower(*patch.Strategy))
+		dst.Strategy = value
+	}
+	if patch.MaxParallelTasks != nil {
+		dst.MaxParallel = patch.MaxParallelTasks
+	}
+	if patch.FailurePolicy != nil {
+		value := strings.TrimSpace(strings.ToLower(*patch.FailurePolicy))
+		dst.FailurePolicy = value
+	}
+	if patch.ShardDiscoveryMode != nil {
+		value := strings.TrimSpace(strings.ToLower(*patch.ShardDiscoveryMode))
+		if dst.ShardDiscovery == nil {
+			dst.ShardDiscovery = &workspace.RuntimeShardDiscoveryConfig{}
+		}
+		dst.ShardDiscovery.Mode = value
+	}
+}
+
+func runtimeExecutionPersistedPayload(persisted workspace.RuntimeExecutionConfig) map[string]any {
+	payload := map[string]any{}
+	if value := strings.TrimSpace(persisted.Strategy); value != "" {
+		payload["strategy"] = value
+	}
+	if persisted.MaxParallel != nil {
+		payload["max_parallel_tasks"] = *persisted.MaxParallel
+	}
+	if value := strings.TrimSpace(persisted.FailurePolicy); value != "" {
+		payload["failure_policy"] = value
+	}
+	if persisted.ShardDiscovery != nil {
+		if value := strings.TrimSpace(persisted.ShardDiscovery.Mode); value != "" {
+			payload["shard_discovery_mode"] = value
+		}
+	}
+	return payload
+}
+
+func runtimeExecutionEffectivePayload(effective acpruntime.ExecutionValues) map[string]any {
+	return map[string]any{
+		"strategy":             effective.Strategy,
+		"max_parallel_tasks":   effective.MaxParallel,
+		"failure_policy":       effective.FailurePolicy,
+		"shard_discovery_mode": effective.ShardMode,
+	}
+}
+
+func runtimeExecutionSourcePayload(source acpruntime.ExecutionSources) map[string]any {
+	return map[string]any{
+		"strategy":             source.Strategy,
+		"max_parallel_tasks":   source.MaxParallel,
+		"failure_policy":       source.FailurePolicy,
+		"shard_discovery_mode": source.ShardMode,
 	}
 }
 

@@ -1717,10 +1717,18 @@ func TestSemanticGuardAddsFallbackCrossRepoEdgeForMultiScopeRefreshStep3(t *test
 		t.Fatalf("expected fallback cross-repo edge warning in run warnings, got %#v", info.Warnings)
 	}
 
-	step3Taskruns, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step3-findings.json"))
+	step3TaskrunCandidates, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step3-findings*.json"))
 	if err != nil {
 		t.Fatalf("glob step3 taskruns: %v", err)
 	}
+	step3Taskruns := make([]string, 0, len(step3TaskrunCandidates))
+	for _, candidate := range step3TaskrunCandidates {
+		if strings.Contains(candidate, "shard-summary") {
+			continue
+		}
+		step3Taskruns = append(step3Taskruns, candidate)
+	}
+	sort.Strings(step3Taskruns)
 	if len(step3Taskruns) == 0 {
 		t.Fatalf("expected refresh step3 taskrun file")
 	}
@@ -1881,10 +1889,18 @@ func TestSemanticGuardNormalizesMultiRepoMissingEdgeAndInvalidEvidence(t *testin
 		t.Fatalf("expected at least one upsert_entity in step1 payload")
 	}
 
-	step3Taskruns, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step3-findings.json"))
+	step3TaskrunCandidates, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step3-findings*.json"))
 	if err != nil {
 		t.Fatalf("glob step3 taskruns: %v", err)
 	}
+	step3Taskruns := make([]string, 0, len(step3TaskrunCandidates))
+	for _, candidate := range step3TaskrunCandidates {
+		if strings.Contains(candidate, "shard-summary") {
+			continue
+		}
+		step3Taskruns = append(step3Taskruns, candidate)
+	}
+	sort.Strings(step3Taskruns)
 	if len(step3Taskruns) == 0 {
 		t.Fatalf("expected refresh step3 taskrun file")
 	}
@@ -2415,7 +2431,8 @@ func createWorkspaceWithTimeouts(t *testing.T, timeouts map[string]int) workspac
 	manifest.WriteString("  - name: users-service\n")
 	manifest.WriteString("    path: " + repoB + "\n")
 	manifest.WriteString("runtime:\n")
-	manifest.WriteString("  timeouts:\n")
+	manifest.WriteString("  profile:\n")
+	manifest.WriteString("    timeouts:\n")
 	for _, key := range []string{
 		"step_timeout_sec",
 		"heartbeat_sec",
@@ -2427,7 +2444,7 @@ func createWorkspaceWithTimeouts(t *testing.T, timeouts map[string]int) workspac
 		"ui_cancel_poll_timeout_sec",
 	} {
 		if value, ok := timeouts[key]; ok && value > 0 {
-			manifest.WriteString(fmt.Sprintf("    %s: %d\n", key, value))
+			manifest.WriteString(fmt.Sprintf("      %s: %d\n", key, value))
 		}
 	}
 

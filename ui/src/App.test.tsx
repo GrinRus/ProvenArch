@@ -342,6 +342,93 @@ describe("App", () => {
     expect(saveInit.body).toContain('"step_timeout_sec":1500');
   });
 
+  it("loads and saves runtime execution profile via API", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+      const runLogsResponse = maybeRunLogsResponse(method, url);
+      if (runLogsResponse) {
+        return runLogsResponse;
+      }
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        return jsonResponse({ items: [] });
+      }
+      if (method === "GET" && url === "/api/workspace/manifest") {
+        return jsonResponse({
+          content: "version: 1\nrepos:\n  - name: payments-service\n    path: /tmp/payments-service\n"
+        });
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Foverview.md") {
+        return textResponse("# Charter\n");
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Fwizard%2Fstep0-contract.json") {
+        return textResponse("not found", 404);
+      }
+      if (method === "GET" && url === "/api/runtime/execution") {
+        return jsonResponse({
+          ok: true,
+          persisted: {
+            strategy: "sequential",
+            max_parallel_tasks: 1,
+            failure_policy: "best_effort",
+            shard_discovery_mode: "heuristics"
+          },
+          effective: {
+            strategy: "sequential",
+            max_parallel_tasks: 1,
+            failure_policy: "best_effort",
+            shard_discovery_mode: "heuristics"
+          },
+          source: {
+            strategy: "workspace",
+            max_parallel_tasks: "workspace",
+            failure_policy: "workspace",
+            shard_discovery_mode: "workspace"
+          }
+        });
+      }
+      if (method === "PUT" && url === "/api/runtime/execution") {
+        return jsonResponse({ ok: true });
+      }
+
+      return jsonResponse(
+        {
+          error: {
+            code: "not_found",
+            message: `unhandled request: ${method} ${url}`
+          }
+        },
+        404
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    const strategySelect = await screen.findByTestId("runtime-execution-strategy-select");
+    fireEvent.change(strategySelect, { target: { value: "parallel" } });
+    const maxParallelInput = screen.getByTestId("runtime-execution-max-parallel-input");
+    fireEvent.change(maxParallelInput, { target: { value: "3" } });
+    const failurePolicySelect = screen.getByTestId("runtime-execution-failure-policy-select");
+    fireEvent.change(failurePolicySelect, { target: { value: "fail_fast" } });
+    const shardModeSelect = screen.getByTestId("runtime-execution-shard-mode-select");
+    fireEvent.change(shardModeSelect, { target: { value: "semantic" } });
+
+    fireEvent.click(screen.getByTestId("runtime-execution-save-btn"));
+    await screen.findByText("Runtime execution profile saved");
+
+    const saveCalls = fetchMock.mock.calls.filter(
+      (call) => call[0] === "/api/runtime/execution" && ((call[1] as RequestInit | undefined)?.method ?? "").toUpperCase() === "PUT"
+    );
+    expect(saveCalls.length).toBe(1);
+    const [, saveInit] = saveCalls[0] as [RequestInfo | URL, RequestInit];
+    expect(saveInit.body).toContain('"strategy":"parallel"');
+    expect(saveInit.body).toContain('"max_parallel_tasks":3');
+    expect(saveInit.body).toContain('"failure_policy":"fail_fast"');
+    expect(saveInit.body).toContain('"shard_discovery_mode":"semantic"');
+  });
+
   it("does not start polling loop when there are no active runs", async () => {
     vi.useFakeTimers();
 

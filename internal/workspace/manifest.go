@@ -22,10 +22,16 @@ type Manifest struct {
 }
 
 type RepoSource struct {
-	Name   string `yaml:"name" json:"name"`
-	Path   string `yaml:"path,omitempty" json:"path,omitempty"`
-	GitURL string `yaml:"git_url,omitempty" json:"git_url,omitempty"`
-	Ref    string `yaml:"ref,omitempty" json:"ref,omitempty"`
+	Name     string              `yaml:"name" json:"name"`
+	Path     string              `yaml:"path,omitempty" json:"path,omitempty"`
+	GitURL   string              `yaml:"git_url,omitempty" json:"git_url,omitempty"`
+	Ref      string              `yaml:"ref,omitempty" json:"ref,omitempty"`
+	Analysis *RepoAnalysisConfig `yaml:"analysis,omitempty" json:"analysis,omitempty"`
+}
+
+type RepoAnalysisConfig struct {
+	Include []string `yaml:"include,omitempty" json:"include,omitempty"`
+	Exclude []string `yaml:"exclude,omitempty" json:"exclude,omitempty"`
 }
 
 type DocsConfig struct {
@@ -33,7 +39,23 @@ type DocsConfig struct {
 }
 
 type RuntimeConfig struct {
-	Timeouts *RuntimeTimeoutsConfig `yaml:"timeouts,omitempty" json:"timeouts,omitempty"`
+	Profile *RuntimeProfileConfig `yaml:"profile,omitempty" json:"profile,omitempty"`
+}
+
+type RuntimeProfileConfig struct {
+	Timeouts  *RuntimeTimeoutsConfig  `yaml:"timeouts,omitempty" json:"timeouts,omitempty"`
+	Execution *RuntimeExecutionConfig `yaml:"execution,omitempty" json:"execution,omitempty"`
+}
+
+type RuntimeExecutionConfig struct {
+	Strategy       string                       `yaml:"strategy,omitempty" json:"strategy,omitempty"`
+	MaxParallel    *int                         `yaml:"max_parallel_tasks,omitempty" json:"max_parallel_tasks,omitempty"`
+	FailurePolicy  string                       `yaml:"failure_policy,omitempty" json:"failure_policy,omitempty"`
+	ShardDiscovery *RuntimeShardDiscoveryConfig `yaml:"shard_discovery,omitempty" json:"shard_discovery,omitempty"`
+}
+
+type RuntimeShardDiscoveryConfig struct {
+	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
 }
 
 type RuntimeTimeoutsConfig struct {
@@ -61,8 +83,30 @@ func (cfg *RuntimeTimeoutsConfig) IsZero() bool {
 		cfg.UICancelPollTimeoutSec == nil
 }
 
+func (cfg *RuntimeExecutionConfig) IsZero() bool {
+	if cfg == nil {
+		return true
+	}
+	return strings.TrimSpace(cfg.Strategy) == "" &&
+		cfg.MaxParallel == nil &&
+		strings.TrimSpace(cfg.FailurePolicy) == "" &&
+		(cfg.ShardDiscovery == nil || strings.TrimSpace(cfg.ShardDiscovery.Mode) == "")
+}
+
+func (cfg *RuntimeProfileConfig) IsZero() bool {
+	if cfg == nil {
+		return true
+	}
+	return (cfg.Timeouts == nil || cfg.Timeouts.IsZero()) &&
+		(cfg.Execution == nil || cfg.Execution.IsZero())
+}
+
 func (cfg *RuntimeConfig) IsZero() bool {
-	return cfg == nil || cfg.Timeouts == nil || cfg.Timeouts.IsZero()
+	return cfg == nil || cfg.Profile == nil || cfg.Profile.IsZero()
+}
+
+func (cfg *RepoAnalysisConfig) IsZero() bool {
+	return cfg == nil || (len(cfg.Include) == 0 && len(cfg.Exclude) == 0)
 }
 
 func LoadManifest(path string) (Manifest, error) {
@@ -100,12 +144,41 @@ func ParseManifest(raw []byte) (Manifest, error) {
 }
 
 func applyManifestDefaults(manifest *Manifest) {
+	for idx := range manifest.Repos {
+		manifest.Repos[idx].Name = strings.TrimSpace(manifest.Repos[idx].Name)
+		manifest.Repos[idx].Path = strings.TrimSpace(manifest.Repos[idx].Path)
+		manifest.Repos[idx].GitURL = strings.TrimSpace(manifest.Repos[idx].GitURL)
+		manifest.Repos[idx].Ref = strings.TrimSpace(manifest.Repos[idx].Ref)
+		if manifest.Repos[idx].Analysis != nil {
+			manifest.Repos[idx].Analysis.Include = normalizeOrderedUniqueStrings(manifest.Repos[idx].Analysis.Include)
+			manifest.Repos[idx].Analysis.Exclude = normalizeOrderedUniqueStrings(manifest.Repos[idx].Analysis.Exclude)
+			if manifest.Repos[idx].Analysis.IsZero() {
+				manifest.Repos[idx].Analysis = nil
+			}
+		}
+	}
+
 	if strings.TrimSpace(manifest.Docs.ImportsPath) == "" {
 		manifest.Docs.ImportsPath = "./docs/imports"
 	}
 	if manifest.Runtime != nil {
-		if manifest.Runtime.Timeouts != nil && manifest.Runtime.Timeouts.IsZero() {
-			manifest.Runtime.Timeouts = nil
+		if manifest.Runtime.Profile != nil {
+			if manifest.Runtime.Profile.Timeouts != nil && manifest.Runtime.Profile.Timeouts.IsZero() {
+				manifest.Runtime.Profile.Timeouts = nil
+			}
+			if manifest.Runtime.Profile.Execution != nil {
+				manifest.Runtime.Profile.Execution.Strategy = strings.TrimSpace(manifest.Runtime.Profile.Execution.Strategy)
+				manifest.Runtime.Profile.Execution.FailurePolicy = strings.TrimSpace(manifest.Runtime.Profile.Execution.FailurePolicy)
+				if manifest.Runtime.Profile.Execution.ShardDiscovery != nil {
+					manifest.Runtime.Profile.Execution.ShardDiscovery.Mode = strings.TrimSpace(manifest.Runtime.Profile.Execution.ShardDiscovery.Mode)
+				}
+				if manifest.Runtime.Profile.Execution.IsZero() {
+					manifest.Runtime.Profile.Execution = nil
+				}
+			}
+			if manifest.Runtime.Profile.IsZero() {
+				manifest.Runtime.Profile = nil
+			}
 		}
 		if manifest.Runtime.IsZero() {
 			manifest.Runtime = nil
@@ -143,28 +216,60 @@ func validateManifest(manifest Manifest) error {
 		case !hasPath && !hasGitURL:
 			problems = append(problems, fmt.Sprintf("%s must contain exactly one of path or git_url", indexLabel))
 		}
+		if repo.Analysis != nil {
+			for idx, include := range repo.Analysis.Include {
+				if strings.TrimSpace(include) == "" {
+					problems = append(problems, fmt.Sprintf("%s.analysis.include[%d] must not be empty", indexLabel, idx))
+				}
+			}
+			for idx, exclude := range repo.Analysis.Exclude {
+				if strings.TrimSpace(exclude) == "" {
+					problems = append(problems, fmt.Sprintf("%s.analysis.exclude[%d] must not be empty", indexLabel, idx))
+				}
+			}
+		}
 	}
 
 	if strings.TrimSpace(manifest.Docs.ImportsPath) == "" {
 		problems = append(problems, "docs.imports_path must not be empty")
 	}
-	if manifest.Runtime != nil && manifest.Runtime.Timeouts != nil {
-		timeoutChecks := []struct {
-			name  string
-			value *int
-		}{
-			{name: "runtime.timeouts.step_timeout_sec", value: manifest.Runtime.Timeouts.StepTimeoutSec},
-			{name: "runtime.timeouts.heartbeat_sec", value: manifest.Runtime.Timeouts.HeartbeatSec},
-			{name: "runtime.timeouts.pipeline_timeout_sec", value: manifest.Runtime.Timeouts.PipelineTimeoutSec},
-			{name: "runtime.timeouts.pipeline_kill_grace_sec", value: manifest.Runtime.Timeouts.PipelineKillGraceSec},
-			{name: "runtime.timeouts.api_ready_timeout_sec", value: manifest.Runtime.Timeouts.APIReadyTimeoutSec},
-			{name: "runtime.timeouts.api_init_timeout_sec", value: manifest.Runtime.Timeouts.APIInitTimeoutSec},
-			{name: "runtime.timeouts.ui_init_poll_timeout_sec", value: manifest.Runtime.Timeouts.UIInitPollTimeoutSec},
-			{name: "runtime.timeouts.ui_cancel_poll_timeout_sec", value: manifest.Runtime.Timeouts.UICancelPollTimeoutSec},
+	if manifest.Runtime != nil && manifest.Runtime.Profile != nil {
+		if manifest.Runtime.Profile.Timeouts != nil {
+			timeoutChecks := []struct {
+				name  string
+				value *int
+			}{
+				{name: "runtime.profile.timeouts.step_timeout_sec", value: manifest.Runtime.Profile.Timeouts.StepTimeoutSec},
+				{name: "runtime.profile.timeouts.heartbeat_sec", value: manifest.Runtime.Profile.Timeouts.HeartbeatSec},
+				{name: "runtime.profile.timeouts.pipeline_timeout_sec", value: manifest.Runtime.Profile.Timeouts.PipelineTimeoutSec},
+				{name: "runtime.profile.timeouts.pipeline_kill_grace_sec", value: manifest.Runtime.Profile.Timeouts.PipelineKillGraceSec},
+				{name: "runtime.profile.timeouts.api_ready_timeout_sec", value: manifest.Runtime.Profile.Timeouts.APIReadyTimeoutSec},
+				{name: "runtime.profile.timeouts.api_init_timeout_sec", value: manifest.Runtime.Profile.Timeouts.APIInitTimeoutSec},
+				{name: "runtime.profile.timeouts.ui_init_poll_timeout_sec", value: manifest.Runtime.Profile.Timeouts.UIInitPollTimeoutSec},
+				{name: "runtime.profile.timeouts.ui_cancel_poll_timeout_sec", value: manifest.Runtime.Profile.Timeouts.UICancelPollTimeoutSec},
+			}
+			for _, check := range timeoutChecks {
+				if check.value != nil && *check.value <= 0 {
+					problems = append(problems, fmt.Sprintf("%s must be > 0", check.name))
+				}
+			}
 		}
-		for _, check := range timeoutChecks {
-			if check.value != nil && *check.value <= 0 {
-				problems = append(problems, fmt.Sprintf("%s must be > 0", check.name))
+		if manifest.Runtime.Profile.Execution != nil {
+			execution := manifest.Runtime.Profile.Execution
+			if strategy := strings.TrimSpace(execution.Strategy); strategy != "" && strategy != "sequential" && strategy != "parallel" {
+				problems = append(problems, "runtime.profile.execution.strategy must be one of: sequential, parallel")
+			}
+			if execution.MaxParallel != nil && *execution.MaxParallel <= 0 {
+				problems = append(problems, "runtime.profile.execution.max_parallel_tasks must be > 0")
+			}
+			if policy := strings.TrimSpace(execution.FailurePolicy); policy != "" && policy != "fail_fast" && policy != "best_effort" {
+				problems = append(problems, "runtime.profile.execution.failure_policy must be one of: fail_fast, best_effort")
+			}
+			if execution.ShardDiscovery != nil {
+				mode := strings.TrimSpace(execution.ShardDiscovery.Mode)
+				if mode != "" && mode != "heuristics" && mode != "semantic" {
+					problems = append(problems, "runtime.profile.execution.shard_discovery.mode must be one of: heuristics, semantic")
+				}
 			}
 		}
 	}
@@ -232,4 +337,27 @@ func normalizeYAMLValue(value any) any {
 	default:
 		return typed
 	}
+}
+
+func normalizeOrderedUniqueStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

@@ -1,4 +1,4 @@
-# Спецификация workspace manifest (MVP v0)
+# Спецификация workspace manifest (MVP v1 contract)
 
 Этот документ фиксирует канонический контракт `workspace.yaml` для ACP MVP.
 
@@ -7,7 +7,7 @@
 - человеко-читаемое описание: этот файл
 - machine-readable контракт: `schemas/workspace.schema.json`
 
-`workspace.yaml` описывает repo sources, imports path и persisted runtime timeouts.
+`workspace.yaml` описывает repo sources, manual analysis overrides, imports path и persisted runtime profile.
 Layout `charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/` не конфигурируется через manifest и считается fixed MVP convention.
 
 ## 2) Top-level shape
@@ -33,6 +33,9 @@ Layout `charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/` не �
   - `path`
   - `git_url`
 - `ref` optional
+- `analysis` optional:
+  - `include[]` glob-паттерны shard include
+  - `exclude[]` glob-паттерны shard exclude
 
 Правила:
 - `name` используется как stable repo scope identifier в `TaskResult.meta.repo_scopes[]`, warnings и evidence references
@@ -58,17 +61,23 @@ Default:
 `imports_path` указывает только папку raw imports.
 Пути `docs/rfcs/`, `docs/meetings/`, `docs/decisions/` считаются фиксированной частью workspace layout и не конфигурируются через manifest.
 
-## 5) `runtime.timeouts`
+## 5) `runtime.profile`
 
-Поддерживаемый optional блок:
-- `runtime.timeouts.step_timeout_sec`
-- `runtime.timeouts.heartbeat_sec`
-- `runtime.timeouts.pipeline_timeout_sec`
-- `runtime.timeouts.pipeline_kill_grace_sec`
-- `runtime.timeouts.api_ready_timeout_sec`
-- `runtime.timeouts.api_init_timeout_sec`
-- `runtime.timeouts.ui_init_poll_timeout_sec`
-- `runtime.timeouts.ui_cancel_poll_timeout_sec`
+Поддерживается optional блок `runtime.profile`:
+- `runtime.profile.timeouts`
+- `runtime.profile.execution`
+
+### 5.1) `runtime.profile.timeouts`
+
+Поддерживаемые optional поля:
+- `step_timeout_sec`
+- `heartbeat_sec`
+- `pipeline_timeout_sec`
+- `pipeline_kill_grace_sec`
+- `api_ready_timeout_sec`
+- `api_init_timeout_sec`
+- `ui_init_poll_timeout_sec`
+- `ui_cancel_poll_timeout_sec`
 
 Ограничения:
 - каждое поле optional;
@@ -81,6 +90,23 @@ Default:
 Balanced defaults (если поле не задано и env override отсутствует):
 - `1800/30/2400/30/60/120/900/420` (в порядке полей выше).
 
+### 5.2) `runtime.profile.execution`
+
+Поддерживаемые optional поля:
+- `strategy`: `sequential|parallel`
+- `max_parallel_tasks`: integer `> 0`
+- `failure_policy`: `fail_fast|best_effort`
+- `shard_discovery.mode`: `heuristics|semantic`
+
+Default values:
+- `strategy=sequential`
+- `max_parallel_tasks=1`
+- `failure_policy=best_effort`
+- `shard_discovery.mode=heuristics`
+
+Effective precedence:
+- `CLI > env > workspace.yaml > defaults`
+
 ## 6) Пример
 
 ```yaml
@@ -88,21 +114,33 @@ version: 1
 repos:
   - name: payments-service
     path: /absolute/path/to/payments-service
+    analysis:
+      include:
+        - services/**
+      exclude:
+        - services/legacy/**
   - name: users-service
     git_url: https://gitlab.example.com/platform/users-service.git
     ref: main
 docs:
   imports_path: ./docs/imports
 runtime:
-  timeouts:
-    step_timeout_sec: 1800
-    heartbeat_sec: 30
-    pipeline_timeout_sec: 2400
-    pipeline_kill_grace_sec: 30
-    api_ready_timeout_sec: 60
-    api_init_timeout_sec: 120
-    ui_init_poll_timeout_sec: 900
-    ui_cancel_poll_timeout_sec: 420
+  profile:
+    timeouts:
+      step_timeout_sec: 1800
+      heartbeat_sec: 30
+      pipeline_timeout_sec: 2400
+      pipeline_kill_grace_sec: 30
+      api_ready_timeout_sec: 60
+      api_init_timeout_sec: 120
+      ui_init_poll_timeout_sec: 900
+      ui_cancel_poll_timeout_sec: 420
+    execution:
+      strategy: parallel
+      max_parallel_tasks: 4
+      failure_policy: best_effort
+      shard_discovery:
+        mode: heuristics
 ```
 
 ## 7) Validation expectations
@@ -114,7 +152,13 @@ Manifest считается невалидным, если:
 - запись repo не содержит `name`
 - запись repo содержит одновременно `path` и `git_url`
 - запись repo не содержит ни `path`, ни `git_url`
-- любое значение `runtime.timeouts.* <= 0`
+- `analysis.include[]`/`analysis.exclude[]` содержит пустые элементы
+- любое значение `runtime.profile.timeouts.* <= 0`
+- `runtime.profile.execution.max_parallel_tasks <= 0`
+- `runtime.profile.execution.strategy` не в `sequential|parallel`
+- `runtime.profile.execution.failure_policy` не в `fail_fast|best_effort`
+- `runtime.profile.execution.shard_discovery.mode` не в `heuristics|semantic`
+- manifest пытается использовать legacy path `runtime.timeouts` (breaking change, intentional)
 - manifest пытается конфигурировать workspace layout beyond supported fields
 
 Дополнительные runtime diagnostics для `POST /api/workspace/validate`:

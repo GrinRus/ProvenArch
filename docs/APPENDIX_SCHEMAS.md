@@ -23,13 +23,21 @@
   - required `name`
   - ровно одно из `path | git_url`
   - optional `ref`
+  - optional `analysis.include[] | analysis.exclude[]` (glob overrides для shard planner)
 - `repo.name` значения должны быть уникальными; это semantic validation rule workspace validator-а поверх JSON Schema
 - `docs.imports_path` optional, default `./docs/imports`
-- `runtime.timeouts.*` optional persisted timeout profile:
+- `runtime.profile.timeouts.*` optional persisted timeout profile:
   - `step_timeout_sec`, `heartbeat_sec`, `pipeline_timeout_sec`, `pipeline_kill_grace_sec`
   - `api_ready_timeout_sec`, `api_init_timeout_sec`, `ui_init_poll_timeout_sec`, `ui_cancel_poll_timeout_sec`
   - если поле задано, значение должно быть integer `> 0`
-- timeout precedence в runtime execution/e2e scripts: `env > workspace.yaml(runtime.timeouts) > defaults`
+- `runtime.profile.execution.*` optional persisted execution profile:
+  - `strategy: sequential|parallel`
+  - `max_parallel_tasks > 0`
+  - `failure_policy: fail_fast|best_effort`
+  - `shard_discovery.mode: heuristics|semantic`
+- precedence:
+  - timeouts: `env > workspace.yaml(runtime.profile.timeouts) > defaults`
+  - execution: `CLI > env > workspace.yaml(runtime.profile.execution) > defaults`
 
 ### Важное ограничение
 `workspace.yaml` не конфигурирует workspace layout beyond repo sources и imports path.
@@ -63,10 +71,15 @@
   - `finished_at`
   - `run_id`
   - `workspace`
+  - `shard_id`
+  - `repo_scope`
   - `repo_scopes[]`
+  - `path_scopes[]`
 
 > Политика MVP: `runtime.name` остаётся provider-aware (`claude-code` или `qwen-code` для headless, `claude-code` для fake baseline), при этом схема по-прежнему требует только непустую строку.
+> `repo_scope` — primary repo context shard-а (удобен для prompt/diagnostics и обратной совместимости single-scope шагов).
 > `repo_scopes[]` соответствует repo entries, заданным в `workspace.yaml`, и использует их `name`.
+> `shard_id`/`path_scopes[]` используются runtime shard planner/scheduler для per-shard диагностики и воспроизводимости taskrun-артефактов.
 
 ### Changeset operations (MVP)
 - `upsert_entity`

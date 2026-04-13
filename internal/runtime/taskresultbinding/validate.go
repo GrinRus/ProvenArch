@@ -27,6 +27,11 @@ func Validate(task acpruntime.Task, result contracts.TaskResult, provider acprun
 	if gotRunID != "" && gotRunID != expectedRunID {
 		problems = append(problems, fmt.Sprintf("meta.run_id=%q expected %q", result.Meta.RunID, expectedRunID))
 	}
+	expectedRepoScope := primaryRepoScope(task.RepoScope, task.RepoScopes)
+	gotRepoScope := strings.TrimSpace(result.Meta.RepoScope)
+	if gotRepoScope != "" && expectedRepoScope != "" && gotRepoScope != expectedRepoScope {
+		problems = append(problems, fmt.Sprintf("meta.repo_scope=%q expected %q", result.Meta.RepoScope, expectedRepoScope))
+	}
 
 	expectedRuntimeName := string(provider)
 	if strings.TrimSpace(result.Meta.Runtime.Name) != expectedRuntimeName {
@@ -37,4 +42,16 @@ func Validate(task acpruntime.Task, result contracts.TaskResult, provider acprun
 		return fmt.Errorf("taskresult binding mismatch: %s", strings.Join(problems, "; "))
 	}
 	return nil
+}
+
+func primaryRepoScope(explicit string, scopes []string) string {
+	if value := strings.TrimSpace(explicit); value != "" {
+		return value
+	}
+	for _, scope := range scopes {
+		if value := strings.TrimSpace(scope); value != "" {
+			return value
+		}
+	}
+	return ""
 }
