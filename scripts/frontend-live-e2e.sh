@@ -108,7 +108,7 @@ PY
     UI_E2E_CANCEL_TIMEOUT_SEC="$DEFAULT_UI_E2E_CANCEL_TIMEOUT_SEC"
   fi
 }
-
+# shellcheck disable=SC2329
 cleanup() {
   if [[ -n "$SERVER_PID" ]]; then
     kill "$SERVER_PID" >/dev/null 2>&1 || true
