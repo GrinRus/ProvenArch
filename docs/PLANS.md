@@ -49,6 +49,49 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 
 ### Plan ID
+EP-20260413-postfix-matrix-runtime-stability
+
+### Context
+После post-fix matrix остались падения в direct runtime (`qwen` invocation/`claude` parse), а также нечёткая классификация quality-vs-infra в batch отчётах. Дополнительно `cancel-refresh` frontend e2e флакал из-за transient banner-проверки.
+
+### Goals (must have)
+- [x] Перевести default `qwen` invocation на `--prompt` при `--include-directories`
+- [x] Усилить extractor/runtime diagnostics: явный `parse_stage`, точные причины envelope errors, richer unavailable message при пустом stderr
+- [x] Расширить `claude` retry для malformed envelope `result`
+- [x] Добавить отдельную batch/matrix классификацию `quality_gates_failed` (без смешивания с `infra_incomplete_cycle`)
+- [x] Стабилизировать frontend `cancel-refresh` e2e без зависимости от transient текста
+
+### Non-goals
+- [x] Изменение CLI/API/schema contracts
+- [x] Изменение набора runtime providers MVP
+
+### Approach
+1) Обновить runtime invocation/parsing (`qwencode`, `claudecode`, `taskresultextractor`, `runnerdiag`).
+2) Обновить batch/matrix quality classification (`full-run-batch-5x2`, `e2e_batch_report`, `full-run-batch-matrix`).
+3) Упростить `cancel-refresh` frontend live assertion до устойчивых run-state checks.
+4) Обновить docs + покрыть изменённое поведение unit/integration regression tests.
+
+### Files expected to change
+- `internal/runtime/{qwencode,claudecode,taskresultextractor,runnerdiag}/*`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/e2e_batch_report.py`
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/tests/test_e2e_batch_report.py`
+- `ui/e2e/live-flow.spec.ts`
+- `README.md`, `docs/LOCAL_FULL_RUN_AI_ADVENT.md`, `docs/TESTING_STRATEGY.md`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены
+- [x] Схемы/контракты не изменены
+- [x] Документация синхронизирована
+
+### Risks
+- Разные версии внешних CLI (`qwen`, `claude`) могут давать дополнительные carrier-форматы output; для них нужен регулярный regression run на trusted machine.
+
+### Progress log
+- 2026-04-13: Реализованы runtime/batch/frontend фиксы и добавлены regression tests для `--prompt`, parse-stage/schema path, quality-vs-infra classification и cancel-refresh stability.
+
+### Plan ID
 EP-20260411-e2e-stability-hardening
 
 ### Context

@@ -70,6 +70,12 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 
 	result, parseStage, parseErr, runErr := runQwenCommand(ctx, task, command, args)
 	if runErr != nil {
+		if len(r.Args) == 0 && isPromptFlagUnsupported(runErr) {
+			runErr = fmt.Errorf(
+				"%w (compatibility guard: current qwen command does not support --prompt in default mode; use explicit HeadlessRunner.Args for legacy positional prompt flow)",
+				runErr,
+			)
+		}
 		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 			acpruntime.ProviderQwenCode,
 			acpruntime.ErrorCodeRunnerUnavailable,
@@ -127,8 +133,19 @@ func buildDefaultQwenArgs(task acpruntime.Task, prompt string) []string {
 	if workspace != "" {
 		args = append(args, "--include-directories", workspace)
 	}
-	args = append(args, prompt)
+	args = append(args, "--prompt", prompt)
 	return args
+}
+
+func isPromptFlagUnsupported(err error) bool {
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	if !strings.Contains(text, "--prompt") {
+		return false
+	}
+	return strings.Contains(text, "unknown option") ||
+		strings.Contains(text, "unknown argument") ||
+		strings.Contains(text, "unrecognized option") ||
+		strings.Contains(text, "invalid option")
 }
 
 func buildParseFailureMessage(task acpruntime.Task, parseStage string, parseErr error, result acpruntime.Result) string {
@@ -175,14 +192,10 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 				Stderr: stderr.String(),
 			}, "", nil, ctxErr
 		}
-		errText := strings.TrimSpace(stderr.String())
-		if errText == "" {
-			errText = err.Error()
-		}
 		return acpruntime.Result{
 			Stdout: stdout.String(),
 			Stderr: stderr.String(),
-		}, "", nil, errors.New(errText)
+		}, "", nil, runnerdiag.BuildExecFailure(err, stdout.String(), stderr.String())
 	}
 
 	rawTaskResult, err := taskresultextractor.Extract(stdout.Bytes())

@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-
-	"github.com/GrinRus/ProvenArch/internal/contracts"
 )
 
 var ansiEscapePattern = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
@@ -19,22 +17,22 @@ func Extract(raw []byte) ([]byte, error) {
 	if len(trimmed) == 0 {
 		return nil, errors.New("empty stdout")
 	}
-	if _, err := contracts.ParseTaskResult(trimmed); err == nil {
-		return trimmed, nil
+
+	var bestErr error
+	if parsed, parseErr := parseFromJSON(trimmed); parseErr == nil {
+		return parsed, nil
 	} else {
-		bestErr := fmt.Errorf("schema validation failed for raw stdout: %w", err)
-		if parsed, parseErr := parseFromJSON(trimmed); parseErr == nil {
-			return parsed, nil
-		} else {
-			bestErr = preferExtractError(bestErr, parseErr)
-		}
-		if parsed, parseErr := parseFromText(string(trimmed)); parseErr == nil {
-			return parsed, nil
-		} else {
-			bestErr = preferExtractError(bestErr, parseErr)
-		}
-		return nil, fmt.Errorf("unable to extract valid TaskResult JSON from runner output: %w", bestErr)
+		bestErr = preferExtractError(bestErr, parseErr)
 	}
+	if parsed, parseErr := parseFromText(string(trimmed)); parseErr == nil {
+		return parsed, nil
+	} else {
+		bestErr = preferExtractError(bestErr, parseErr)
+	}
+	if bestErr == nil {
+		bestErr = errors.New("unknown extraction error")
+	}
+	return nil, fmt.Errorf("unable to extract valid TaskResult JSON from runner output: %w", bestErr)
 }
 
 func parseFromJSON(raw []byte) ([]byte, error) {
@@ -58,43 +56,43 @@ func parseCandidate(value any) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if _, err := contracts.ParseTaskResult(raw); err == nil {
+		if looksLikeTaskResultObject(typed) {
 			return raw, nil
-		} else {
-			bestErr := fmt.Errorf("taskresult schema validation failed: %w", err)
-			priorityKeys := []string{"result", "response", "message", "content", "text"}
-			seen := map[string]struct{}{}
-			for _, key := range priorityKeys {
-				seen[key] = struct{}{}
-				nested, ok := typed[key]
-				if !ok {
+		}
+
+		bestErr := errors.New("taskresult candidate object is missing top-level keys")
+		priorityKeys := []string{"result", "response", "message", "content", "text"}
+		seen := map[string]struct{}{}
+		for _, key := range priorityKeys {
+			seen[key] = struct{}{}
+			nested, ok := typed[key]
+			if !ok {
+				continue
+			}
+			if key == "result" {
+				if resultValue, isString := nested.(string); isString && strings.TrimSpace(resultValue) == "" {
+					bestErr = preferExtractError(bestErr, errors.New("envelope result is empty"))
 					continue
 				}
-				if key == "result" {
-					if resultValue, isString := nested.(string); isString && strings.TrimSpace(resultValue) == "" {
-						bestErr = preferExtractError(bestErr, errors.New("envelope result is empty"))
-						continue
-					}
-				}
-				if parsed, nestedErr := parseCandidate(nested); nestedErr == nil {
-					return parsed, nil
-				} else {
-					bestErr = preferExtractError(bestErr, fmt.Errorf("envelope key %q: %w", key, nestedErr))
-				}
 			}
-			for key, nested := range typed {
-				if _, ok := seen[key]; ok {
-					continue
-				}
-				if parsed, nestedErr := parseCandidate(nested); nestedErr == nil {
-					return parsed, nil
-				} else {
-					bestErr = preferExtractError(bestErr, fmt.Errorf("object key %q: %w", key, nestedErr))
-				}
+			if parsed, nestedErr := parseCandidate(nested); nestedErr == nil {
+				return parsed, nil
+			} else {
+				bestErr = preferExtractError(bestErr, fmt.Errorf("envelope key %q: %w", key, nestedErr))
 			}
-			if bestErr != nil {
-				return nil, bestErr
+		}
+		for key, nested := range typed {
+			if _, ok := seen[key]; ok {
+				continue
 			}
+			if parsed, nestedErr := parseCandidate(nested); nestedErr == nil {
+				return parsed, nil
+			} else {
+				bestErr = preferExtractError(bestErr, fmt.Errorf("object key %q: %w", key, nestedErr))
+			}
+		}
+		if bestErr != nil {
+			return nil, bestErr
 		}
 	case []any:
 		var bestErr error
@@ -303,6 +301,9 @@ func preferExtractError(current error, candidate error) error {
 	if strings.Contains(candidateText, "envelope result is empty") {
 		return candidate
 	}
+	if strings.Contains(candidateText, "envelope key \"result\"") {
+		return candidate
+	}
 	if strings.Contains(currentText, "unsupported candidate value") {
 		return candidate
 	}
@@ -313,4 +314,17 @@ func preferExtractError(current error, candidate error) error {
 		return candidate
 	}
 	return current
+}
+
+func looksLikeTaskResultObject(value map[string]any) bool {
+	if value == nil {
+		return false
+	}
+	if _, ok := value["meta"]; ok {
+		return true
+	}
+	if _, ok := value["changeset"]; ok {
+		return true
+	}
+	return false
 }

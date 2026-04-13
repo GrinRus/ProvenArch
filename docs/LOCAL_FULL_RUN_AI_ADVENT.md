@@ -144,7 +144,7 @@ Batch evaluator source-of-truth:
 - если snapshot недоступен, в отчёт попадает `artifact_source=workspace-fallback` и issue `reliability:snapshot-missing`;
 - frontend live e2e запускается на отдельной копии workspace (`frontend-workspace`) и не влияет на backend quality content score.
 - для multi-profile (`EXPECTED_REPO_COUNT >= 2`) batch hard-fail включает `analysis:cross-repo-missing`.
-- backend run-matrix дополнительно классифицирует failure classes: `runtime_parse`, `runner_unavailable`, `infra_signal_terminated`, `infra_incomplete_cycle`, `summary_missing`.
+- backend run-matrix дополнительно классифицирует failure classes: `runtime_parse`, `runner_unavailable`, `infra_signal_terminated`, `infra_incomplete_cycle`, `quality_gates_failed`, `summary_missing`.
 
 При `runner_parse_failed` raw stdout/stderr сохраняются в:
 - `WORKSPACE/reports/taskruns/raw/*-stdout.log`

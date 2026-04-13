@@ -810,6 +810,44 @@ class EvaluateRunTests(unittest.TestCase):
             self.assertTrue(result.summary_missing)
             self.assertIn("reliability:summary-missing", result.issues)
 
+    def test_classifies_quality_gates_failed(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            target_repo = root / "target-repo"
+            write_text(target_repo / "README.md", "# demo\n")
+
+            run_dir = root / "batch/claude-code/run1"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            write_text(
+                run_dir / "session-summary.md",
+                "\n".join(
+                    [
+                        "# ProvenArch Full Run Session Summary",
+                        "",
+                        "- result: failed",
+                        "- quality_gates: failed",
+                        "- expected_runs: 4",
+                        "- completed_runs: 4",
+                        "- expected_headless_runs: 2",
+                        "- completed_headless_runs: 2",
+                        "- running_runs_detected: 0",
+                        "- failure_reason: quality",
+                        "",
+                        "## API Simulation",
+                        "- status: succeeded",
+                        "",
+                    ]
+                ),
+            )
+            write_text(run_dir / "full-run.log", "")
+            write_text(run_dir / "run-results.tsv", "")
+
+            result = report.evaluate_run("claude-code", 1, run_dir, {"target_repo": str(target_repo)})
+            self.assertFalse(result.hard_pass)
+            self.assertEqual("quality_gates_failed", result.failure_class)
+            self.assertTrue(result.quality_gates_failed)
+            self.assertIn("reliability:quality-gates-failed", result.issues)
+
 
 if __name__ == "__main__":
     unittest.main()

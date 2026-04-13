@@ -256,6 +256,7 @@ header = [
     "runner_unavailable_failures",
     "infra_signal_terminated_failures",
     "infra_incomplete_cycle_failures",
+    "quality_gates_failed_failures",
     "summary_missing_failures",
     "frontend_qwen_status",
     "frontend_claude_status",
@@ -267,8 +268,8 @@ tsv_lines = ["\t".join(header)]
 md_lines = [
     "# Profile Matrix",
     "",
-    "| profile_id | batch_id | source_kind | expected_repo_count | status | backend_hard_pass | backend_total_runs | runtime_parse_failures | runner_unavailable_failures | infra_signal_terminated_failures | infra_incomplete_cycle_failures | summary_missing_failures | frontend_qwen | frontend_claude | run_matrix | quality_report |",
-    "|---|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|",
+    "| profile_id | batch_id | source_kind | expected_repo_count | status | backend_hard_pass | backend_total_runs | runtime_parse_failures | runner_unavailable_failures | infra_signal_terminated_failures | infra_incomplete_cycle_failures | quality_gates_failed_failures | summary_missing_failures | frontend_qwen | frontend_claude | run_matrix | quality_report |",
+    "|---|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|",
 ]
 
 def parse_backend_stats(tsv_path: Path) -> dict[str, int]:
@@ -279,6 +280,7 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, int]:
         "runner_unavailable": 0,
         "infra_signal_terminated": 0,
         "infra_incomplete_cycle": 0,
+        "quality_gates_failed": 0,
         "summary_missing": 0,
     }
     if not tsv_path.exists():
@@ -293,6 +295,7 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, int]:
     runner_unavailable_idx = index.get("runner_unavailable")
     infra_signal_idx = index.get("infra_signal_terminated")
     infra_incomplete_idx = index.get("infra_incomplete_cycle")
+    quality_gates_failed_idx = index.get("quality_gates_failed")
     summary_missing_idx = index.get("summary_missing")
     for line in lines[1:]:
         parts = line.split("\t")
@@ -308,6 +311,8 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, int]:
             stats["infra_signal_terminated"] += 1
         if infra_incomplete_idx is not None and len(parts) > infra_incomplete_idx and parts[infra_incomplete_idx] == "1":
             stats["infra_incomplete_cycle"] += 1
+        if quality_gates_failed_idx is not None and len(parts) > quality_gates_failed_idx and parts[quality_gates_failed_idx] == "1":
+            stats["quality_gates_failed"] += 1
         if summary_missing_idx is not None and len(parts) > summary_missing_idx and parts[summary_missing_idx] == "1":
             stats["summary_missing"] += 1
     return stats
@@ -339,6 +344,7 @@ for rec in records:
                 str(backend_stats["runner_unavailable"]),
                 str(backend_stats["infra_signal_terminated"]),
                 str(backend_stats["infra_incomplete_cycle"]),
+                str(backend_stats["quality_gates_failed"]),
                 str(backend_stats["summary_missing"]),
                 frontend_qwen,
                 frontend_claude,
@@ -352,7 +358,7 @@ for rec in records:
         "| "
         f"{rec['profile_id']} | {rec['batch_id']} | {rec['source_kind']} | {rec['expected_repo_count']} | {rec['status']} | "
         f"{backend_stats['hard']} | {backend_stats['total']} | {backend_stats['runtime_parse']} | {backend_stats['runner_unavailable']} | "
-        f"{backend_stats['infra_signal_terminated']} | {backend_stats['infra_incomplete_cycle']} | {backend_stats['summary_missing']} | "
+        f"{backend_stats['infra_signal_terminated']} | {backend_stats['infra_incomplete_cycle']} | {backend_stats['quality_gates_failed']} | {backend_stats['summary_missing']} | "
         f"{frontend_qwen} | {frontend_claude} | "
         f"{rec['run_matrix_md']} | {rec['quality_report_md']} |"
     )

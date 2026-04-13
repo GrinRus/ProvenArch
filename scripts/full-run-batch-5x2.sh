@@ -24,6 +24,7 @@ RUNTIME_PARSE_FAILURES=0
 RUNNER_UNAVAILABLE_FAILURES=0
 INFRA_SIGNAL_TERMINATED_FAILURES=0
 INFRA_INCOMPLETE_CYCLE_FAILURES=0
+QUALITY_GATES_FAILED_FAILURES=0
 SUMMARY_MISSING_FAILURES=0
 OTHER_FAILURES=0
 LAST_RUN_FAILURE_CLASS="none"
@@ -86,6 +87,7 @@ classify_run_failure() {
   local termination_signal=""
   local run_count=0
   local run_class="none"
+  local quality_gates_status=""
 
   if [[ ! -f "$summary_path" ]]; then
     run_class="summary_missing"
@@ -93,6 +95,7 @@ classify_run_failure() {
     failure_reason="summary_missing"
   else
     summary_result="$(summary_scalar "$summary_path" "result" | awk '{print $1}')"
+    quality_gates_status="$(summary_scalar "$summary_path" "quality_gates" | awk '{print $1}')"
     failure_reason="$(summary_scalar "$summary_path" "failure_reason" | awk '{print $1}')"
     expected_runs="$(summary_scalar "$summary_path" "expected_runs" | awk '{print $1}')"
     completed_runs="$(summary_scalar "$summary_path" "completed_runs" | awk '{print $1}')"
@@ -118,6 +121,12 @@ classify_run_failure() {
       run_class="infra_signal_terminated"
     elif [[ "$termination_signal" != "" && "$termination_signal" != "none" ]]; then
       run_class="infra_signal_terminated"
+    fi
+  fi
+
+  if [[ "$run_class" == "none" ]]; then
+    if [[ "$failure_reason" == "quality" || "$quality_gates_status" == "failed" ]]; then
+      run_class="quality_gates_failed"
     fi
   fi
 
@@ -206,6 +215,9 @@ increment_failure_class_counter() {
       ;;
     infra_incomplete_cycle)
       INFRA_INCOMPLETE_CYCLE_FAILURES=$((INFRA_INCOMPLETE_CYCLE_FAILURES + 1))
+      ;;
+    quality_gates_failed)
+      QUALITY_GATES_FAILED_FAILURES=$((QUALITY_GATES_FAILED_FAILURES + 1))
       ;;
     summary_missing)
       SUMMARY_MISSING_FAILURES=$((SUMMARY_MISSING_FAILURES + 1))
@@ -547,10 +559,10 @@ log "generating quality reports for batch=$BATCH_ID"
 log "report paths:"
 cat "$BATCH_ROOT/report-paths.txt"
 
-log "backend failure classes: runtime_parse=$RUNTIME_PARSE_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES other=$OTHER_FAILURES"
+log "backend failure classes: runtime_parse=$RUNTIME_PARSE_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES other=$OTHER_FAILURES"
 
 if [[ "$failed_runs" -ne 0 || "$frontend_failures" -ne 0 ]]; then
-  die "batch completed with failures: full_run_failed=$failed_runs frontend_failed=$frontend_failures runtime_parse=$RUNTIME_PARSE_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES other=$OTHER_FAILURES"
+  die "batch completed with failures: full_run_failed=$failed_runs frontend_failed=$frontend_failures runtime_parse=$RUNTIME_PARSE_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES other=$OTHER_FAILURES"
 fi
 
 log "batch completed successfully"

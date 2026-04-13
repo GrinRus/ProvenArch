@@ -94,6 +94,43 @@ func TestHeadlessRunnerUnavailableClassifiesAsRunnerUnavailable(t *testing.T) {
 	}
 }
 
+func TestHeadlessRunnerUnavailableIncludesStdoutExcerptWhenStderrEmpty(t *testing.T) {
+	t.Parallel()
+
+	commandPath := filepath.Join(t.TempDir(), "claude-unavailable-stdout.sh")
+	script := `#!/bin/sh
+set -eu
+echo "claude failed before writing stderr"
+exit 1
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write unavailable stub: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-unavailable-stdout",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    t.TempDir(),
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected runner unavailable error")
+	}
+	code, message, ok := acpruntime.ClassifyError(err)
+	if !ok {
+		t.Fatalf("expected classify error to succeed")
+	}
+	if code != string(acpruntime.ErrorCodeRunnerUnavailable) {
+		t.Fatalf("unexpected error code %q", code)
+	}
+	if !strings.Contains(message, "stdout_excerpt=") {
+		t.Fatalf("expected stdout excerpt in unavailable error message, got %q", message)
+	}
+}
+
 func TestHeadlessRunnerInvalidTaskResultClassifiesAsParseFailed(t *testing.T) {
 	t.Parallel()
 
@@ -282,7 +319,7 @@ last_arg=""
 for arg in "$@"; do
   last_arg="$arg"
 done
-if echo "$last_arg" | grep -q "NON-EMPTY RESULT ONLY JSON MODE"; then
+	if echo "$last_arg" | grep -q "STRICT RESULT JSON MODE"; then
   cat <<'JSON'
 {"result":"{\"meta\":{\"task_id\":\"task-native-empty-retry\",\"step_id\":\"init.step1.collect\",\"runtime\":{\"name\":\"claude-code\",\"version\":\"claude-cli\"},\"started_at\":\"2026-04-03T12:00:00Z\"},\"summary\":\"ok\",\"changeset\":[]}"}
 JSON
@@ -309,6 +346,48 @@ JSON
 		t.Fatalf("expected empty-envelope retry run to succeed: %v", err)
 	}
 	if result.TaskResult.Meta.TaskID != "task-native-empty-retry" {
+		t.Fatalf("unexpected task id %q", result.TaskResult.Meta.TaskID)
+	}
+}
+
+func TestHeadlessRunnerNativeDirectClaudeRetriesOnMalformedEnvelopeResult(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	commandPath := filepath.Join(tempDir, "claude")
+	script := `#!/bin/sh
+set -eu
+last_arg=""
+for arg in "$@"; do
+  last_arg="$arg"
+done
+if echo "$last_arg" | grep -q "STRICT RESULT JSON MODE"; then
+  cat <<'JSON'
+{"meta":{"task_id":"task-native-malformed-retry","step_id":"init.step1.collect","runtime":{"name":"claude-code","version":"claude-cli"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}
+JSON
+  exit 0
+fi
+cat <<'JSON'
+{"result":"{\"meta\":{\"task_id\":\"task-native-malformed-retry\",\"step_id\":\"init.step1.collect\",\"runtime\":{\"name\":\"claude-code\",\"version\":\"claude-cli\"},\"started_at\":\"2026-04-03T12:00:00Z\"},\"summary\":\"broken\",\"changeset\":[]"}
+JSON
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write claude malformed-result retry command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-native-malformed-retry",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    t.TempDir(),
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("expected malformed-envelope retry run to succeed: %v", err)
+	}
+	if result.TaskResult.Meta.TaskID != "task-native-malformed-retry" {
 		t.Fatalf("unexpected task id %q", result.TaskResult.Meta.TaskID)
 	}
 }

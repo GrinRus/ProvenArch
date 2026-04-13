@@ -72,7 +72,6 @@ test("live ui flow: run refresh -> cancel -> failed(run_canceled)", async ({ pag
   const cancelButton = page.getByTestId("run-cancel-btn");
   await expect(cancelButton).toBeEnabled({ timeout: 30_000 });
   await cancelButton.click();
-  await expect(page.getByText(new RegExp(`Cancel requested for ${runID}`, "i"))).toBeVisible();
 
   await expect
     .poll(

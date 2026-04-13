@@ -121,7 +121,11 @@ func runNativeDirectClaude(ctx context.Context, command string, task acpruntime.
 
 	retryArgs := buildNativeDirectClaudeArgs(
 		task,
-		buildDirectPrompt(taskPayload, true, parseStage == "extract" && isEnvelopeResultEmptyError(parseErr)),
+		buildDirectPrompt(
+			taskPayload,
+			true,
+			parseStage == "extract" && (isEnvelopeResultEmptyError(parseErr) || isEnvelopeResultMalformedError(parseErr)),
+		),
 	)
 	retryResult, retryParseStage, retryParseErr, retryRunErr := runClaudeCommand(ctx, task, command, retryArgs, nil)
 	if retryRunErr != nil {
@@ -161,6 +165,16 @@ func buildNativeDirectClaudeArgs(task acpruntime.Task, prompt string) []string {
 
 func isEnvelopeResultEmptyError(err error) bool {
 	return strings.Contains(strings.ToLower(strings.TrimSpace(err.Error())), "envelope result is empty")
+}
+
+func isEnvelopeResultMalformedError(err error) bool {
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	if !strings.Contains(text, "envelope key \"result\"") {
+		return false
+	}
+	return strings.Contains(text, "string candidate parse failed") ||
+		strings.Contains(text, "invalid character") ||
+		strings.Contains(text, "unexpected end of json input")
 }
 
 func buildParseFailureMessage(task acpruntime.Task, parseStage string, parseErr error, result acpruntime.Result) string {
@@ -210,14 +224,10 @@ func runClaudeCommand(ctx context.Context, task acpruntime.Task, command string,
 				Stderr: stderr.String(),
 			}, "", nil, ctxErr
 		}
-		errText := strings.TrimSpace(stderr.String())
-		if errText == "" {
-			errText = err.Error()
-		}
 		return acpruntime.Result{
 			Stdout: stdout.String(),
 			Stderr: stderr.String(),
-		}, "", nil, errors.New(errText)
+		}, "", nil, runnerdiag.BuildExecFailure(err, stdout.String(), stderr.String())
 	}
 
 	raw, err := taskresultextractor.Extract(stdout.Bytes())
@@ -277,9 +287,10 @@ Task payload JSON:
 	nonEmptyResultHint := ""
 	if requireNonEmptyResult {
 		nonEmptyResultHint = strings.Join([]string{
-			`NON-EMPTY RESULT ONLY JSON MODE:`,
-			`- If using envelope fields like "result", value MUST be non-empty valid JSON object string.`,
-			`- Do NOT emit empty "result": "".`,
+			`STRICT RESULT JSON MODE:`,
+			`- If using envelope fields like "result", value MUST be a non-empty valid JSON object string.`,
+			`- Do NOT emit empty or malformed "result" payload.`,
+			`- Prefer returning a direct TaskResult JSON object (without envelope wrappers).`,
 		}, "\n")
 	}
 

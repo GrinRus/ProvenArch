@@ -35,6 +35,19 @@ func TestExtractFromEnvelopeResultString(t *testing.T) {
 	}
 }
 
+func TestExtractFromEnvelopeResultStringWithSummaryField(t *testing.T) {
+	t.Parallel()
+
+	input := `{"summary":"runner envelope","result":` + strconv.Quote(validTaskResultJSON) + `}`
+	parsed, err := Extract([]byte(input))
+	if err != nil {
+		t.Fatalf("extract envelope with summary field: %v", err)
+	}
+	if _, err := contracts.ParseTaskResult(parsed); err != nil {
+		t.Fatalf("parsed output must be valid taskresult: %v", err)
+	}
+}
+
 func TestExtractFromJSONArrayEvents(t *testing.T) {
 	t.Parallel()
 
@@ -110,5 +123,18 @@ func TestExtractReturnsSpecificErrorForEmptyEnvelopeResult(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(err.Error()), "envelope result is empty") {
 		t.Fatalf("expected envelope-empty reason, got: %v", err)
+	}
+}
+
+func TestExtractReturnsCandidateObjectEvenWhenSchemaInvalid(t *testing.T) {
+	t.Parallel()
+
+	input := `{"meta":{"task_id":"task-1"}}`
+	parsed, err := Extract([]byte(input))
+	if err != nil {
+		t.Fatalf("expected extractor to return candidate object for schema validation stage, got %v", err)
+	}
+	if _, err := contracts.ParseTaskResult(parsed); err == nil {
+		t.Fatalf("expected schema validation to fail for extracted candidate")
 	}
 }
