@@ -15,9 +15,10 @@ import (
 )
 
 type Manifest struct {
-	Version int          `yaml:"version" json:"version"`
-	Repos   []RepoSource `yaml:"repos" json:"repos"`
-	Docs    DocsConfig   `yaml:"docs" json:"docs"`
+	Version int            `yaml:"version" json:"version"`
+	Repos   []RepoSource   `yaml:"repos" json:"repos"`
+	Docs    DocsConfig     `yaml:"docs" json:"docs"`
+	Runtime *RuntimeConfig `yaml:"runtime,omitempty" json:"runtime,omitempty"`
 }
 
 type RepoSource struct {
@@ -29,6 +30,39 @@ type RepoSource struct {
 
 type DocsConfig struct {
 	ImportsPath string `yaml:"imports_path,omitempty" json:"imports_path,omitempty"`
+}
+
+type RuntimeConfig struct {
+	Timeouts *RuntimeTimeoutsConfig `yaml:"timeouts,omitempty" json:"timeouts,omitempty"`
+}
+
+type RuntimeTimeoutsConfig struct {
+	StepTimeoutSec         *int `yaml:"step_timeout_sec,omitempty" json:"step_timeout_sec,omitempty"`
+	HeartbeatSec           *int `yaml:"heartbeat_sec,omitempty" json:"heartbeat_sec,omitempty"`
+	PipelineTimeoutSec     *int `yaml:"pipeline_timeout_sec,omitempty" json:"pipeline_timeout_sec,omitempty"`
+	PipelineKillGraceSec   *int `yaml:"pipeline_kill_grace_sec,omitempty" json:"pipeline_kill_grace_sec,omitempty"`
+	APIReadyTimeoutSec     *int `yaml:"api_ready_timeout_sec,omitempty" json:"api_ready_timeout_sec,omitempty"`
+	APIInitTimeoutSec      *int `yaml:"api_init_timeout_sec,omitempty" json:"api_init_timeout_sec,omitempty"`
+	UIInitPollTimeoutSec   *int `yaml:"ui_init_poll_timeout_sec,omitempty" json:"ui_init_poll_timeout_sec,omitempty"`
+	UICancelPollTimeoutSec *int `yaml:"ui_cancel_poll_timeout_sec,omitempty" json:"ui_cancel_poll_timeout_sec,omitempty"`
+}
+
+func (cfg *RuntimeTimeoutsConfig) IsZero() bool {
+	if cfg == nil {
+		return true
+	}
+	return cfg.StepTimeoutSec == nil &&
+		cfg.HeartbeatSec == nil &&
+		cfg.PipelineTimeoutSec == nil &&
+		cfg.PipelineKillGraceSec == nil &&
+		cfg.APIReadyTimeoutSec == nil &&
+		cfg.APIInitTimeoutSec == nil &&
+		cfg.UIInitPollTimeoutSec == nil &&
+		cfg.UICancelPollTimeoutSec == nil
+}
+
+func (cfg *RuntimeConfig) IsZero() bool {
+	return cfg == nil || cfg.Timeouts == nil || cfg.Timeouts.IsZero()
 }
 
 func LoadManifest(path string) (Manifest, error) {
@@ -69,6 +103,14 @@ func applyManifestDefaults(manifest *Manifest) {
 	if strings.TrimSpace(manifest.Docs.ImportsPath) == "" {
 		manifest.Docs.ImportsPath = "./docs/imports"
 	}
+	if manifest.Runtime != nil {
+		if manifest.Runtime.Timeouts != nil && manifest.Runtime.Timeouts.IsZero() {
+			manifest.Runtime.Timeouts = nil
+		}
+		if manifest.Runtime.IsZero() {
+			manifest.Runtime = nil
+		}
+	}
 }
 
 func validateManifest(manifest Manifest) error {
@@ -106,12 +148,42 @@ func validateManifest(manifest Manifest) error {
 	if strings.TrimSpace(manifest.Docs.ImportsPath) == "" {
 		problems = append(problems, "docs.imports_path must not be empty")
 	}
+	if manifest.Runtime != nil && manifest.Runtime.Timeouts != nil {
+		timeoutChecks := []struct {
+			name  string
+			value *int
+		}{
+			{name: "runtime.timeouts.step_timeout_sec", value: manifest.Runtime.Timeouts.StepTimeoutSec},
+			{name: "runtime.timeouts.heartbeat_sec", value: manifest.Runtime.Timeouts.HeartbeatSec},
+			{name: "runtime.timeouts.pipeline_timeout_sec", value: manifest.Runtime.Timeouts.PipelineTimeoutSec},
+			{name: "runtime.timeouts.pipeline_kill_grace_sec", value: manifest.Runtime.Timeouts.PipelineKillGraceSec},
+			{name: "runtime.timeouts.api_ready_timeout_sec", value: manifest.Runtime.Timeouts.APIReadyTimeoutSec},
+			{name: "runtime.timeouts.api_init_timeout_sec", value: manifest.Runtime.Timeouts.APIInitTimeoutSec},
+			{name: "runtime.timeouts.ui_init_poll_timeout_sec", value: manifest.Runtime.Timeouts.UIInitPollTimeoutSec},
+			{name: "runtime.timeouts.ui_cancel_poll_timeout_sec", value: manifest.Runtime.Timeouts.UICancelPollTimeoutSec},
+		}
+		for _, check := range timeoutChecks {
+			if check.value != nil && *check.value <= 0 {
+				problems = append(problems, fmt.Sprintf("%s must be > 0", check.name))
+			}
+		}
+	}
 
 	if len(problems) == 0 {
 		return nil
 	}
 	sort.Strings(problems)
 	return fmt.Errorf("workspace manifest is invalid: %s", strings.Join(problems, "; "))
+}
+
+func RenderManifest(manifest Manifest) ([]byte, error) {
+	normalized := manifest
+	applyManifestDefaults(&normalized)
+	raw, err := yaml.Marshal(normalized)
+	if err != nil {
+		return nil, fmt.Errorf("serialize manifest: %w", err)
+	}
+	return raw, nil
 }
 
 func parseYAMLPayload(raw []byte) (any, error) {

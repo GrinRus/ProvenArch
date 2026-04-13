@@ -254,6 +254,7 @@ header = [
     "backend_total_runs",
     "runtime_parse_failures",
     "runner_unavailable_failures",
+    "runtime_timeout_failures",
     "infra_signal_terminated_failures",
     "infra_incomplete_cycle_failures",
     "quality_gates_failed_failures",
@@ -268,8 +269,8 @@ tsv_lines = ["\t".join(header)]
 md_lines = [
     "# Profile Matrix",
     "",
-    "| profile_id | batch_id | source_kind | expected_repo_count | status | backend_hard_pass | backend_total_runs | runtime_parse_failures | runner_unavailable_failures | infra_signal_terminated_failures | infra_incomplete_cycle_failures | quality_gates_failed_failures | summary_missing_failures | frontend_qwen | frontend_claude | run_matrix | quality_report |",
-    "|---|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|",
+    "| profile_id | batch_id | source_kind | expected_repo_count | status | backend_hard_pass | backend_total_runs | runtime_parse_failures | runner_unavailable_failures | runtime_timeout_failures | infra_signal_terminated_failures | infra_incomplete_cycle_failures | quality_gates_failed_failures | summary_missing_failures | frontend_qwen | frontend_claude | run_matrix | quality_report |",
+    "|---|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|",
 ]
 
 def parse_backend_stats(tsv_path: Path) -> dict[str, int]:
@@ -278,6 +279,7 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, int]:
         "total": 0,
         "runtime_parse": 0,
         "runner_unavailable": 0,
+        "runtime_timeout": 0,
         "infra_signal_terminated": 0,
         "infra_incomplete_cycle": 0,
         "quality_gates_failed": 0,
@@ -293,6 +295,7 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, int]:
     hard_idx = index.get("hard_pass", 2)
     runtime_parse_idx = index.get("runtime_parse")
     runner_unavailable_idx = index.get("runner_unavailable")
+    runtime_timeout_idx = index.get("runtime_timeout")
     infra_signal_idx = index.get("infra_signal_terminated")
     infra_incomplete_idx = index.get("infra_incomplete_cycle")
     quality_gates_failed_idx = index.get("quality_gates_failed")
@@ -307,6 +310,8 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, int]:
             stats["runtime_parse"] += 1
         if runner_unavailable_idx is not None and len(parts) > runner_unavailable_idx and parts[runner_unavailable_idx] == "1":
             stats["runner_unavailable"] += 1
+        if runtime_timeout_idx is not None and len(parts) > runtime_timeout_idx and parts[runtime_timeout_idx] == "1":
+            stats["runtime_timeout"] += 1
         if infra_signal_idx is not None and len(parts) > infra_signal_idx and parts[infra_signal_idx] == "1":
             stats["infra_signal_terminated"] += 1
         if infra_incomplete_idx is not None and len(parts) > infra_incomplete_idx and parts[infra_incomplete_idx] == "1":
@@ -342,6 +347,7 @@ for rec in records:
                 str(backend_stats["total"]),
                 str(backend_stats["runtime_parse"]),
                 str(backend_stats["runner_unavailable"]),
+                str(backend_stats["runtime_timeout"]),
                 str(backend_stats["infra_signal_terminated"]),
                 str(backend_stats["infra_incomplete_cycle"]),
                 str(backend_stats["quality_gates_failed"]),
@@ -358,7 +364,7 @@ for rec in records:
         "| "
         f"{rec['profile_id']} | {rec['batch_id']} | {rec['source_kind']} | {rec['expected_repo_count']} | {rec['status']} | "
         f"{backend_stats['hard']} | {backend_stats['total']} | {backend_stats['runtime_parse']} | {backend_stats['runner_unavailable']} | "
-        f"{backend_stats['infra_signal_terminated']} | {backend_stats['infra_incomplete_cycle']} | {backend_stats['quality_gates_failed']} | {backend_stats['summary_missing']} | "
+        f"{backend_stats['runtime_timeout']} | {backend_stats['infra_signal_terminated']} | {backend_stats['infra_incomplete_cycle']} | {backend_stats['quality_gates_failed']} | {backend_stats['summary_missing']} | "
         f"{frontend_qwen} | {frontend_claude} | "
         f"{rec['run_matrix_md']} | {rec['quality_report_md']} |"
     )

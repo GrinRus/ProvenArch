@@ -587,6 +587,55 @@ func TestInitWorkspaceSupportsReposFile(t *testing.T) {
 	}
 }
 
+func TestInitWorkspaceReposFilePreservesRuntimeTimeouts(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspaceRoot := filepath.Join(root, "arch-workspace")
+	repoA := filepath.Join(root, "repos", "a")
+	if err := os.MkdirAll(repoA, 0o755); err != nil {
+		t.Fatalf("create repoA: %v", err)
+	}
+	reposFile := filepath.Join(root, "repos.yaml")
+	reposContent := `repos:
+  - name: repo-a
+    path: ` + repoA + `
+runtime:
+  timeouts:
+    step_timeout_sec: 777
+    ui_cancel_poll_timeout_sec: 333
+`
+	if err := os.WriteFile(reposFile, []byte(reposContent), 0o644); err != nil {
+		t.Fatalf("write repos file: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"init-workspace",
+		"--workspace", workspaceRoot,
+		"--repos-file", reposFile,
+	}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d: stderr=%q", exitCodeOK, code, stderr.String())
+	}
+
+	manifestContent, err := os.ReadFile(filepath.Join(workspaceRoot, "workspace.yaml"))
+	if err != nil {
+		t.Fatalf("read workspace manifest: %v", err)
+	}
+	manifestText := string(manifestContent)
+	if !strings.Contains(manifestText, "runtime:") {
+		t.Fatalf("expected runtime block in manifest, got %q", manifestText)
+	}
+	if !strings.Contains(manifestText, "step_timeout_sec: 777") {
+		t.Fatalf("expected step_timeout_sec from repos-file, got %q", manifestText)
+	}
+	if !strings.Contains(manifestText, "ui_cancel_poll_timeout_sec: 333") {
+		t.Fatalf("expected ui_cancel_poll_timeout_sec from repos-file, got %q", manifestText)
+	}
+}
+
 func TestServeAutoInitSupportsReposFile(t *testing.T) {
 	t.Parallel()
 
@@ -606,6 +655,10 @@ func TestServeAutoInitSupportsReposFile(t *testing.T) {
     path: ` + repoA + `
   - name: repo-b
     path: ` + repoB + `
+runtime:
+  timeouts:
+    step_timeout_sec: 1440
+    heartbeat_sec: 12
 `
 	if err := os.WriteFile(reposFile, []byte(reposContent), 0o644); err != nil {
 		t.Fatalf("write repos file: %v", err)
@@ -625,6 +678,17 @@ func TestServeAutoInitSupportsReposFile(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(workspacePath, "workspace.yaml")); err != nil {
 		t.Fatalf("expected workspace.yaml after auto-init repos-file: %v", err)
+	}
+	manifestContent, err := os.ReadFile(filepath.Join(workspacePath, "workspace.yaml"))
+	if err != nil {
+		t.Fatalf("read workspace manifest: %v", err)
+	}
+	manifestText := string(manifestContent)
+	if !strings.Contains(manifestText, "step_timeout_sec: 1440") {
+		t.Fatalf("expected runtime timeouts from repos-file in auto-init manifest, got %q", manifestText)
+	}
+	if !strings.Contains(manifestText, "heartbeat_sec: 12") {
+		t.Fatalf("expected runtime heartbeat from repos-file in auto-init manifest, got %q", manifestText)
 	}
 }
 

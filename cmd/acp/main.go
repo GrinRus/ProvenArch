@@ -238,6 +238,7 @@ type workspaceInitConfig struct {
 	RepoRef         string
 	ReposFile       string
 	Repos           []workspace.RepoSource
+	Runtime         *workspace.RuntimeConfig
 	DocsImportsPath string
 	Force           bool
 	RequireRepo     bool
@@ -275,6 +276,7 @@ func createWorkspaceFromConfig(config workspaceInitConfig) (workspace.Root, erro
 		Version: 1,
 		Repos:   repos,
 		Docs:    workspace.DocsConfig{ImportsPath: normalized.DocsImportsPath},
+		Runtime: cloneRuntimeConfig(normalized.Runtime),
 	}
 
 	manifestContent, err := yaml.Marshal(manifest)
@@ -346,15 +348,17 @@ func normalizeWorkspaceInitConfig(config workspaceInitConfig) (workspaceInitConf
 	}
 
 	repos := []workspace.RepoSource{}
+	var runtimeConfig *workspace.RuntimeConfig
 	if reposFile != "" {
 		if repoName != "" || repoPath != "" || repoGitURL != "" || repoRef != "" {
 			return workspaceInitConfig{}, errors.New("set either --repos-file or single-repo flags (--repo-name + --repo-path|--repo-git-url)")
 		}
-		loadedRepos, err := loadRepoSourcesFromFile(reposFile)
+		loadedRepos, loadedRuntime, err := loadRepoSourcesAndRuntimeFromFile(reposFile)
 		if err != nil {
 			return workspaceInitConfig{}, err
 		}
 		repos = loadedRepos
+		runtimeConfig = loadedRuntime
 	}
 
 	if config.RequireRepo && len(repos) == 0 {
@@ -383,6 +387,7 @@ func normalizeWorkspaceInitConfig(config workspaceInitConfig) (workspaceInitConf
 		RepoRef:         repoRef,
 		ReposFile:       reposFile,
 		Repos:           repos,
+		Runtime:         runtimeConfig,
 		DocsImportsPath: importsPath,
 		Force:           config.Force,
 		RequireRepo:     config.RequireRepo,
@@ -643,35 +648,43 @@ func ensureWorkspaceGitRepository(workspacePath string) error {
 }
 
 func loadRepoSourcesFromFile(rawPath string) ([]workspace.RepoSource, error) {
+	repos, _, err := loadRepoSourcesAndRuntimeFromFile(rawPath)
+	return repos, err
+}
+
+func loadRepoSourcesAndRuntimeFromFile(rawPath string) ([]workspace.RepoSource, *workspace.RuntimeConfig, error) {
 	path := strings.TrimSpace(rawPath)
 	if path == "" {
-		return nil, errors.New("repos file path is required")
+		return nil, nil, errors.New("repos file path is required")
 	}
 	absPath, err := filepath.Abs(path)
 	if err != nil {
-		return nil, fmt.Errorf("resolve --repos-file: %w", err)
+		return nil, nil, fmt.Errorf("resolve --repos-file: %w", err)
 	}
 	content, err := os.ReadFile(absPath)
 	if err != nil {
-		return nil, fmt.Errorf("read --repos-file %q: %w", absPath, err)
+		return nil, nil, fmt.Errorf("read --repos-file %q: %w", absPath, err)
 	}
 
 	var envelope struct {
-		Repos []workspace.RepoSource `yaml:"repos"`
+		Repos   []workspace.RepoSource   `yaml:"repos"`
+		Runtime *workspace.RuntimeConfig `yaml:"runtime"`
 	}
 	if err := yaml.Unmarshal(content, &envelope); err != nil {
-		return nil, fmt.Errorf("parse --repos-file %q: %w", absPath, err)
+		return nil, nil, fmt.Errorf("parse --repos-file %q: %w", absPath, err)
 	}
 	repos := envelope.Repos
+	runtimeConfig := cloneRuntimeConfig(envelope.Runtime)
 	if len(repos) == 0 {
 		var list []workspace.RepoSource
 		if err := yaml.Unmarshal(content, &list); err != nil {
-			return nil, fmt.Errorf("parse --repos-file %q: expected YAML with repos[] or array of repo entries", absPath)
+			return nil, nil, fmt.Errorf("parse --repos-file %q: expected YAML with repos[] or array of repo entries", absPath)
 		}
 		repos = list
+		runtimeConfig = nil
 	}
 	if len(repos) == 0 {
-		return nil, fmt.Errorf("--repos-file %q contains no repos", absPath)
+		return nil, nil, fmt.Errorf("--repos-file %q contains no repos", absPath)
 	}
 
 	baseDir := filepath.Dir(absPath)
@@ -680,10 +693,10 @@ func loadRepoSourcesFromFile(rawPath string) ([]workspace.RepoSource, error) {
 	for idx, repo := range repos {
 		item, normalizeErr := normalizeRepoSource(repo, baseDir, idx)
 		if normalizeErr != nil {
-			return nil, normalizeErr
+			return nil, nil, normalizeErr
 		}
 		if _, exists := seenNames[item.Name]; exists {
-			return nil, fmt.Errorf("--repos-file %q contains duplicate repo.name %q", absPath, item.Name)
+			return nil, nil, fmt.Errorf("--repos-file %q contains duplicate repo.name %q", absPath, item.Name)
 		}
 		seenNames[item.Name] = struct{}{}
 		normalized = append(normalized, item)
@@ -691,7 +704,44 @@ func loadRepoSourcesFromFile(rawPath string) ([]workspace.RepoSource, error) {
 	sort.Slice(normalized, func(i, j int) bool {
 		return normalized[i].Name < normalized[j].Name
 	})
-	return normalized, nil
+	return normalized, runtimeConfig, nil
+}
+
+func cloneRuntimeConfig(input *workspace.RuntimeConfig) *workspace.RuntimeConfig {
+	if input == nil {
+		return nil
+	}
+	var clonedTimeouts *workspace.RuntimeTimeoutsConfig
+	if input.Timeouts != nil {
+		clonedTimeouts = &workspace.RuntimeTimeoutsConfig{
+			StepTimeoutSec:         cloneIntPointer(input.Timeouts.StepTimeoutSec),
+			HeartbeatSec:           cloneIntPointer(input.Timeouts.HeartbeatSec),
+			PipelineTimeoutSec:     cloneIntPointer(input.Timeouts.PipelineTimeoutSec),
+			PipelineKillGraceSec:   cloneIntPointer(input.Timeouts.PipelineKillGraceSec),
+			APIReadyTimeoutSec:     cloneIntPointer(input.Timeouts.APIReadyTimeoutSec),
+			APIInitTimeoutSec:      cloneIntPointer(input.Timeouts.APIInitTimeoutSec),
+			UIInitPollTimeoutSec:   cloneIntPointer(input.Timeouts.UIInitPollTimeoutSec),
+			UICancelPollTimeoutSec: cloneIntPointer(input.Timeouts.UICancelPollTimeoutSec),
+		}
+		if clonedTimeouts.IsZero() {
+			clonedTimeouts = nil
+		}
+	}
+	cloned := &workspace.RuntimeConfig{
+		Timeouts: clonedTimeouts,
+	}
+	if cloned.IsZero() {
+		return nil
+	}
+	return cloned
+}
+
+func cloneIntPointer(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	copied := *value
+	return &copied
 }
 
 func normalizeRepoSource(repo workspace.RepoSource, baseDir string, index int) (workspace.RepoSource, error) {

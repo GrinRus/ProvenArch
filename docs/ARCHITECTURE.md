@@ -26,6 +26,11 @@
    - `run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--non-interactive]`
    - runtime selector process-scoped: `fake` default для required CI, `headless` opt-in
    - provider selector process-scoped: `--runtime-provider` > `ACP_RUNTIME_PROVIDER` > `claude-code`
+   - timeout control process/workspace-aware:
+     - persisted profile в `workspace.yaml.runtime.timeouts`
+     - effective precedence: `env > workspace > defaults`
+     - canonical envs: `ACP_RUNTIME_*`, `ACP_PIPELINE_*`, `ACP_API_*`, `ACP_UI_*`
+     - deprecated aliases поддержаны для обратной совместимости (`READY_TIMEOUT_SEC`, `UI_E2E_*`, full-run `ACP_FULL_RUN_PIPELINE_*`)
    - Используется как локально, так и из SCM-triggered pipeline jobs/manual buttons
    - Internal API trigger остаётся optional trusted-mode capability, а не обязательной CI/CD поверхностью
    - Раздаёт embedded UI shell и API в одном процессе `acp serve`
@@ -45,6 +50,10 @@
    - Показывает `Run status` выбранного run с полным warnings list (`RunInfo.warnings`), `error_code` и `error`
    - Показывает `Runs: Logs` для выбранного run (`timestamp/level/step/domain/message`) с переключателем `line | line+fields` и quick actions `Copy logs`, `Download logs`, `Open taskrun artifact`
    - Поддерживает `Cancel selected run` для active run через `POST /api/pipeline/runs/<run_id>/cancel`
+   - Runtime Timeouts settings panel:
+     - load/save/reset через `GET/PUT /api/runtime/timeouts`
+     - показывает persisted/effective/source для каждого timeout поля
+   - live e2e poll timeout-ы берутся из effective config (`/api/runtime/timeouts`) с env override
    - Критичные UI-контролы для live e2e снабжены стабильными `data-testid` (`validate/run/status/artifacts/logs`)
 
 3) **Orchestrator (`internal/orchestrator`)** *(implemented baseline)*
@@ -78,6 +87,10 @@
    - Ведёт run-level logs в `reports/taskruns/logs/<run_id>.ndjson` с cursor query API (`GET /api/pipeline/runs/<run_id>/logs`)
    - При runtime/parse fail логирует structured diagnostics snippets (`stdout_snippet`/`stderr_snippet`) в `RunLogEntry.fields` (sanitize + truncate)
    - Пробрасывает `TaskResult.warnings` в run diagnostics (`RunInfo.Warnings`) и логирует warning events
+   - Runtime step execution:
+     - `executeRuntimeTask` выполняет runner под `context.WithTimeout(step_timeout_sec)`
+     - heartbeat-log `runtime task heartbeat` публикуется раз в `heartbeat_sec`
+     - timeout/cancel причины добавляются в error message без изменения `error_code` контракта
    - Materialize-ит per-run quality summary `reports/taskruns/<run_id>-quality.json` (signal metrics/runtime versions)
    - Run logs retention policy (TTL + max runs) запускается при старте сервиса, перед run и после run
    - (опционально) делает git commit
@@ -103,6 +116,7 @@
    - валидирует manifest по `schemas/workspace.schema.json`
    - поддерживает `docs/imports/index.yaml` как metadata index для imported docs
    - поддерживает repo entries с `path` или `git_url` + optional `ref`
+   - поддерживает optional persisted timeout profile в `runtime.timeouts` (см. `WORKSPACE_SPEC`)
    - verify `ref` для `path` source использует fallback (`ref` -> `origin/ref` -> `refs/remotes/origin/ref`) и выдаёт warning при `HEAD` mismatch
    - clone/fetch для `git_url` выполняет на той же машине через локальный `git` и текущий user/runner auth context
    - не хранит отдельные credentials внутри ACP
@@ -122,6 +136,11 @@
    - сохраняет `reports/coverage/*` для unknowns/questions
    - сохраняет `reports/agent-outputs/*`
    - формирует `reports/changelog/*` по итерациям
+
+9) **Timeout Management API (`internal/api`)** *(implemented baseline)*
+   - `GET /api/runtime/timeouts`: persisted + effective + source
+   - `PUT /api/runtime/timeouts`: partial update persisted timeout profile, write-through в `workspace.yaml`
+   - active run не прерывается при изменении timeout settings; новые значения применяются к следующим run
 
 ## Agent Topology Artifacts (MVP)
 - `charter/cards/domains/<domain-id>.md`

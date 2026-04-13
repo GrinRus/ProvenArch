@@ -324,6 +324,13 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		runtimeStepMetrics: []runtimeStepQuality{},
 		runtimeVersions:    map[string]struct{}{},
 	}
+	resolvedTimeouts := acpruntime.ResolveTimeouts(request.Workspace.Manifest)
+	if resolvedTimeouts.Effective.StepTimeoutSec > 0 {
+		execution.runtimeStepTimeout = time.Duration(resolvedTimeouts.Effective.StepTimeoutSec) * time.Second
+	}
+	if resolvedTimeouts.Effective.HeartbeatSec > 0 {
+		execution.runtimeHeartbeatInterval = time.Duration(resolvedTimeouts.Effective.HeartbeatSec) * time.Second
+	}
 	execution.onLog = func(entry RunLogEntry) {
 		if strings.TrimSpace(entry.StepID) == "" {
 			entry.StepID = execution.stepStatus.CurrentStep
@@ -964,26 +971,28 @@ func (s *Service) isCancelRequested(runID string) bool {
 }
 
 type pipelineExecution struct {
-	runID              string
-	pipeline           Pipeline
-	startedAt          time.Time
-	workspace          workspace.Root
-	runner             acpruntime.Runner
-	store              model.Store
-	compiler           reports.Compiler
-	clock              func() time.Time
-	artifacts          []Artifact
-	artifactIndex      map[string]int
-	findings           []contracts.Finding
-	questions          []contracts.Question
-	coverage           *contracts.Coverage
-	domainRuns         map[string]domainRunSummary
-	stepStatus         RunInfo
-	onStep             func(stepID string)
-	onLog              func(entry RunLogEntry)
-	warnings           []string
-	runtimeStepMetrics []runtimeStepQuality
-	runtimeVersions    map[string]struct{}
+	runID                    string
+	pipeline                 Pipeline
+	startedAt                time.Time
+	workspace                workspace.Root
+	runner                   acpruntime.Runner
+	store                    model.Store
+	compiler                 reports.Compiler
+	clock                    func() time.Time
+	artifacts                []Artifact
+	artifactIndex            map[string]int
+	findings                 []contracts.Finding
+	questions                []contracts.Question
+	coverage                 *contracts.Coverage
+	domainRuns               map[string]domainRunSummary
+	stepStatus               RunInfo
+	onStep                   func(stepID string)
+	onLog                    func(entry RunLogEntry)
+	warnings                 []string
+	runtimeStepMetrics       []runtimeStepQuality
+	runtimeVersions          map[string]struct{}
+	runtimeStepTimeout       time.Duration
+	runtimeHeartbeatInterval time.Duration
 }
 
 type runtimeTaskExecution struct {
@@ -1271,8 +1280,39 @@ func (e *pipelineExecution) executeRuntimeTask(
 		"repo_scopes": task.RepoScopes,
 	})
 
-	result, err := e.runner.Run(ctx, task)
+	taskCtx := ctx
+	cancel := func() {}
+	if e.runtimeStepTimeout > 0 {
+		taskCtx, cancel = context.WithTimeout(ctx, e.runtimeStepTimeout)
+	}
+	defer cancel()
+
+	heartbeatStop := make(chan struct{})
+	if e.runtimeHeartbeatInterval > 0 {
+		heartbeatTicker := time.NewTicker(e.runtimeHeartbeatInterval)
+		startedAt := e.clock().UTC()
+		go func() {
+			defer heartbeatTicker.Stop()
+			for {
+				select {
+				case <-heartbeatStop:
+					return
+				case <-heartbeatTicker.C:
+					e.logInfo(stepID, domainID, "runtime task heartbeat", map[string]any{
+						"task_id":     task.TaskID,
+						"repo_scopes": task.RepoScopes,
+						"elapsed_sec": int(time.Since(startedAt).Seconds()),
+					})
+				}
+			}
+		}()
+	}
+	result, err := e.runner.Run(taskCtx, task)
+	close(heartbeatStop)
 	if err != nil {
+		if errors.Is(taskCtx.Err(), context.DeadlineExceeded) {
+			err = fmt.Errorf("runtime task timeout after %ds: %w", int(e.runtimeStepTimeout.Seconds()), err)
+		}
 		e.logError(stepID, domainID, "runtime task failed", runtimeFailureLogFields(task, err, "", ""))
 		return runtimeTaskExecution{}, err
 	}

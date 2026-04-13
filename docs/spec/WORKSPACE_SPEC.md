@@ -7,7 +7,7 @@
 - человеко-читаемое описание: этот файл
 - machine-readable контракт: `schemas/workspace.schema.json`
 
-`workspace.yaml` описывает только repo sources и imports path.
+`workspace.yaml` описывает repo sources, imports path и persisted runtime timeouts.
 Layout `charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/` не конфигурируется через manifest и считается fixed MVP convention.
 
 ## 2) Top-level shape
@@ -18,6 +18,7 @@ Layout `charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/` не �
 
 Опциональные поля:
 - `docs`
+- `runtime`
 
 Текущий MVP поддерживает только:
 - `version: 1`
@@ -57,7 +58,30 @@ Default:
 `imports_path` указывает только папку raw imports.
 Пути `docs/rfcs/`, `docs/meetings/`, `docs/decisions/` считаются фиксированной частью workspace layout и не конфигурируются через manifest.
 
-## 5) Пример
+## 5) `runtime.timeouts`
+
+Поддерживаемый optional блок:
+- `runtime.timeouts.step_timeout_sec`
+- `runtime.timeouts.heartbeat_sec`
+- `runtime.timeouts.pipeline_timeout_sec`
+- `runtime.timeouts.pipeline_kill_grace_sec`
+- `runtime.timeouts.api_ready_timeout_sec`
+- `runtime.timeouts.api_init_timeout_sec`
+- `runtime.timeouts.ui_init_poll_timeout_sec`
+- `runtime.timeouts.ui_cancel_poll_timeout_sec`
+
+Ограничения:
+- каждое поле optional;
+- если поле задано, значение должно быть целым `> 0`.
+
+Назначение:
+- persisted source-of-truth для timeout-профиля workspace;
+- effective значения резолвятся с precedence: `env > workspace.yaml > defaults`.
+
+Balanced defaults (если поле не задано и env override отсутствует):
+- `1800/30/2400/30/60/120/900/420` (в порядке полей выше).
+
+## 6) Пример
 
 ```yaml
 version: 1
@@ -69,9 +93,19 @@ repos:
     ref: main
 docs:
   imports_path: ./docs/imports
+runtime:
+  timeouts:
+    step_timeout_sec: 1800
+    heartbeat_sec: 30
+    pipeline_timeout_sec: 2400
+    pipeline_kill_grace_sec: 30
+    api_ready_timeout_sec: 60
+    api_init_timeout_sec: 120
+    ui_init_poll_timeout_sec: 900
+    ui_cancel_poll_timeout_sec: 420
 ```
 
-## 6) Validation expectations
+## 7) Validation expectations
 
 Manifest считается невалидным, если:
 - отсутствует `version`
@@ -80,6 +114,7 @@ Manifest считается невалидным, если:
 - запись repo не содержит `name`
 - запись repo содержит одновременно `path` и `git_url`
 - запись repo не содержит ни `path`, ни `git_url`
+- любое значение `runtime.timeouts.* <= 0`
 - manifest пытается конфигурировать workspace layout beyond supported fields
 
 Дополнительные runtime diagnostics для `POST /api/workspace/validate`:

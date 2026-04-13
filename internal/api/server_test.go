@@ -1004,6 +1004,117 @@ func TestWorkspaceManifestRoundTrip(t *testing.T) {
 	}
 }
 
+func TestRuntimeTimeoutsGetReturnsEffectiveDefaults(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Get(httpServer.URL + "/api/runtime/timeouts")
+	if err != nil {
+		t.Fatalf("GET /api/runtime/timeouts: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", response.StatusCode)
+	}
+
+	var payload struct {
+		OK        bool                            `json:"ok"`
+		Persisted workspace.RuntimeTimeoutsConfig `json:"persisted"`
+		Effective acpruntime.TimeoutValues        `json:"effective"`
+		Source    acpruntime.TimeoutSources       `json:"source"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode runtime timeouts payload: %v", err)
+	}
+	if !payload.OK {
+		t.Fatalf("expected ok=true")
+	}
+	if payload.Effective.StepTimeoutSec != acpruntime.DefaultRuntimeStepTimeoutSec {
+		t.Fatalf("expected default step timeout %d, got %d", acpruntime.DefaultRuntimeStepTimeoutSec, payload.Effective.StepTimeoutSec)
+	}
+	if payload.Source.StepTimeoutSec != acpruntime.TimeoutSourceDefault {
+		t.Fatalf("expected default source, got %s", payload.Source.StepTimeoutSec)
+	}
+}
+
+func TestRuntimeTimeoutsPutSupportsPartialUpdate(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	requestBody := `{"timeouts":{"step_timeout_sec":1200,"ui_cancel_poll_timeout_sec":555}}`
+	request, err := http.NewRequest(http.MethodPut, httpServer.URL+"/api/runtime/timeouts", strings.NewReader(requestBody))
+	if err != nil {
+		t.Fatalf("create PUT /api/runtime/timeouts request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("PUT /api/runtime/timeouts: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", response.StatusCode)
+	}
+
+	manifestResp, err := http.Get(httpServer.URL + "/api/workspace/manifest")
+	if err != nil {
+		t.Fatalf("GET /api/workspace/manifest: %v", err)
+	}
+	defer manifestResp.Body.Close()
+	var manifestPayload struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(manifestResp.Body).Decode(&manifestPayload); err != nil {
+		t.Fatalf("decode manifest payload: %v", err)
+	}
+	if !strings.Contains(manifestPayload.Content, "runtime:") || !strings.Contains(manifestPayload.Content, "step_timeout_sec: 1200") {
+		t.Fatalf("expected runtime timeout in manifest content, got:\n%s", manifestPayload.Content)
+	}
+	if !strings.Contains(manifestPayload.Content, "ui_cancel_poll_timeout_sec: 555") {
+		t.Fatalf("expected ui cancel timeout in manifest content, got:\n%s", manifestPayload.Content)
+	}
+}
+
+func TestRuntimeTimeoutsPutRejectsInvalidValues(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	requestBody := `{"timeouts":{"step_timeout_sec":0}}`
+	request, err := http.NewRequest(http.MethodPut, httpServer.URL+"/api/runtime/timeouts", strings.NewReader(requestBody))
+	if err != nil {
+		t.Fatalf("create PUT /api/runtime/timeouts request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("PUT /api/runtime/timeouts: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", response.StatusCode)
+	}
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	if payload.Error.Code != "runtime_timeouts_invalid" {
+		t.Fatalf("expected runtime_timeouts_invalid code, got %q", payload.Error.Code)
+	}
+}
+
 func TestArtifactsWriteEndpoint(t *testing.T) {
 	t.Parallel()
 

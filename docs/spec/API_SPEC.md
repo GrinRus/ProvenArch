@@ -110,6 +110,95 @@ Body: отсутствует.
 - `manifest_write_failed`
 - `manifest_reopen_failed`
 
+### GET `/api/runtime/timeouts`
+Возвращает timeout-конфиг для текущего workspace в трёх представлениях:
+- `persisted` — значения из `workspace.yaml` (`runtime.timeouts`);
+- `effective` — значения после precedence-resolve (`env > workspace > defaults`);
+- `source` — источник каждого effective значения (`env|deprecated_env|workspace|default`).
+
+**200**
+```json
+{
+  "ok": true,
+  "persisted": {
+    "step_timeout_sec": 1800
+  },
+  "effective": {
+    "step_timeout_sec": 1800,
+    "heartbeat_sec": 30,
+    "pipeline_timeout_sec": 2400,
+    "pipeline_kill_grace_sec": 30,
+    "api_ready_timeout_sec": 60,
+    "api_init_timeout_sec": 120,
+    "ui_init_poll_timeout_sec": 900,
+    "ui_cancel_poll_timeout_sec": 420
+  },
+  "source": {
+    "step_timeout_sec": "workspace",
+    "heartbeat_sec": "default",
+    "pipeline_timeout_sec": "default",
+    "pipeline_kill_grace_sec": "default",
+    "api_ready_timeout_sec": "default",
+    "api_init_timeout_sec": "default",
+    "ui_init_poll_timeout_sec": "default",
+    "ui_cancel_poll_timeout_sec": "default"
+  }
+}
+```
+
+### PUT `/api/runtime/timeouts`
+Partial update persisted timeout-полей в `workspace.yaml`.
+
+**Request**
+```json
+{
+  "timeouts": {
+    "pipeline_timeout_sec": 3000,
+    "ui_init_poll_timeout_sec": 1200
+  }
+}
+```
+
+Правила:
+- payload должен содержать хотя бы одно поле в `timeouts`;
+- поддерживается partial update (изменяются только переданные поля);
+- каждое поле должно быть целым `> 0`.
+
+**200**
+```json
+{
+  "ok": true,
+  "persisted": {
+    "pipeline_timeout_sec": 3000,
+    "ui_init_poll_timeout_sec": 1200
+  },
+  "effective": {
+    "step_timeout_sec": 1800,
+    "heartbeat_sec": 30,
+    "pipeline_timeout_sec": 3000,
+    "pipeline_kill_grace_sec": 30,
+    "api_ready_timeout_sec": 60,
+    "api_init_timeout_sec": 120,
+    "ui_init_poll_timeout_sec": 1200,
+    "ui_cancel_poll_timeout_sec": 420
+  },
+  "source": {
+    "pipeline_timeout_sec": "workspace",
+    "ui_init_poll_timeout_sec": "workspace"
+  }
+}
+```
+
+**400**
+- `invalid_request_body`
+- `runtime_timeouts_empty`
+- `runtime_timeouts_invalid`
+
+**500**
+- `runtime_timeouts_render_failed`
+- `runtime_timeouts_write_failed`
+- `runtime_timeouts_reopen_failed`
+
 ## 3) Artifacts endpoints
 
 ### GET `/api/artifacts?path=<relative>`
@@ -428,6 +517,17 @@ Run-specific поверхность (не входит в strict deterministic g
 - default runtime mode: `fake` (required deterministic CI surface), `headless` — opt-in.
 - default runtime provider: `claude-code`; fallback env `ACP_RUNTIME_PROVIDER`; CLI override `--runtime-provider`.
 - provider-specific command envs: `ACP_CLAUDE_CMD` и `ACP_QWEN_CMD`.
+- timeout control envs:
+  - `ACP_RUNTIME_STEP_TIMEOUT_SEC`
+  - `ACP_RUNTIME_HEARTBEAT_SEC`
+  - `ACP_PIPELINE_TIMEOUT_SEC`
+  - `ACP_PIPELINE_KILL_GRACE_SEC`
+  - `ACP_API_READY_TIMEOUT_SEC`
+  - `ACP_API_INIT_TIMEOUT_SEC`
+  - `ACP_UI_INIT_POLL_TIMEOUT_SEC`
+  - `ACP_UI_CANCEL_POLL_TIMEOUT_SEC`
+  - deprecated fallback aliases: `ACP_FULL_RUN_PIPELINE_TIMEOUT_SEC`, `ACP_FULL_RUN_PIPELINE_KILL_GRACE_SEC`, `READY_TIMEOUT_SEC`, `UI_E2E_INIT_TIMEOUT_SEC`, `UI_E2E_CANCEL_TIMEOUT_SEC`
+- timeout precedence: `env > workspace.yaml(runtime.timeouts) > defaults`.
 - при `--runtime fake` provider value валидируется, но live provider command не выполняется.
 - GitHub/GitLab hooks/manual jobs для required CI/CD должны использовать CLI batch mode с deterministic defaults (`--runtime fake`).
 - API-trigger не должен превращаться в hosted control plane в рамках MVP.

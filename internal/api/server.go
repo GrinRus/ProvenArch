@@ -39,6 +39,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/health", s.handleHealth)
 	mux.HandleFunc("/api/workspace/validate", s.handleWorkspaceValidate)
 	mux.HandleFunc("/api/workspace/manifest", s.handleWorkspaceManifest)
+	mux.HandleFunc("/api/runtime/timeouts", s.handleRuntimeTimeouts)
 	mux.HandleFunc("/api/artifacts", s.handleArtifacts)
 	mux.HandleFunc("/api/artifacts/write", s.handleArtifactsWrite)
 	mux.HandleFunc("/api/git/commit", s.handleGitCommit)
@@ -173,6 +174,129 @@ func (s *Server) handleWorkspaceManifest(writer http.ResponseWriter, request *ht
 		writeJSON(writer, http.StatusOK, map[string]any{"ok": true})
 	default:
 		writeMethodNotAllowed(writer, http.MethodGet+", "+http.MethodPut)
+	}
+}
+
+func (s *Server) handleRuntimeTimeouts(writer http.ResponseWriter, request *http.Request) {
+	switch request.Method {
+	case http.MethodGet:
+		ws := s.getWorkspace()
+		resolved := acpruntime.ResolveTimeouts(ws.Manifest)
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"ok":        true,
+			"persisted": resolved.Persisted,
+			"effective": resolved.Effective,
+			"source":    resolved.Source,
+		})
+	case http.MethodPut:
+		var payload struct {
+			Timeouts workspace.RuntimeTimeoutsConfig `json:"timeouts"`
+		}
+		if err := decodeStrictJSON(request, &payload); err != nil {
+			writeError(writer, http.StatusBadRequest, "invalid_request_body", "invalid request body")
+			return
+		}
+		if payload.Timeouts.IsZero() {
+			writeError(writer, http.StatusBadRequest, "runtime_timeouts_empty", "timeouts payload must include at least one field")
+			return
+		}
+		if err := validateRuntimeTimeoutPatch(payload.Timeouts); err != nil {
+			writeError(writer, http.StatusBadRequest, "runtime_timeouts_invalid", err.Error())
+			return
+		}
+
+		ws := s.getWorkspace()
+		manifest := ws.Manifest
+		if manifest.Runtime == nil {
+			manifest.Runtime = &workspace.RuntimeConfig{}
+		}
+		if manifest.Runtime.Timeouts == nil {
+			manifest.Runtime.Timeouts = &workspace.RuntimeTimeoutsConfig{}
+		}
+		mergeRuntimeTimeoutPatch(manifest.Runtime.Timeouts, payload.Timeouts)
+		if manifest.Runtime.Timeouts.IsZero() {
+			manifest.Runtime.Timeouts = nil
+		}
+		if manifest.Runtime.IsZero() {
+			manifest.Runtime = nil
+		}
+
+		rawManifest, err := workspace.RenderManifest(manifest)
+		if err != nil {
+			writeError(writer, http.StatusInternalServerError, "runtime_timeouts_render_failed", err.Error())
+			return
+		}
+		if err := ws.WriteFile(workspace.ManifestFileName, rawManifest); err != nil {
+			writeError(writer, http.StatusInternalServerError, "runtime_timeouts_write_failed", err.Error())
+			return
+		}
+		reopened, err := workspace.Open(ws.Path)
+		if err != nil {
+			writeError(writer, http.StatusInternalServerError, "runtime_timeouts_reopen_failed", err.Error())
+			return
+		}
+		s.setWorkspace(reopened)
+		resolved := acpruntime.ResolveTimeouts(reopened.Manifest)
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"ok":        true,
+			"persisted": resolved.Persisted,
+			"effective": resolved.Effective,
+			"source":    resolved.Source,
+		})
+	default:
+		writeMethodNotAllowed(writer, http.MethodGet+", "+http.MethodPut)
+	}
+}
+
+func validateRuntimeTimeoutPatch(patch workspace.RuntimeTimeoutsConfig) error {
+	checks := []struct {
+		name  string
+		value *int
+	}{
+		{name: "step_timeout_sec", value: patch.StepTimeoutSec},
+		{name: "heartbeat_sec", value: patch.HeartbeatSec},
+		{name: "pipeline_timeout_sec", value: patch.PipelineTimeoutSec},
+		{name: "pipeline_kill_grace_sec", value: patch.PipelineKillGraceSec},
+		{name: "api_ready_timeout_sec", value: patch.APIReadyTimeoutSec},
+		{name: "api_init_timeout_sec", value: patch.APIInitTimeoutSec},
+		{name: "ui_init_poll_timeout_sec", value: patch.UIInitPollTimeoutSec},
+		{name: "ui_cancel_poll_timeout_sec", value: patch.UICancelPollTimeoutSec},
+	}
+	for _, check := range checks {
+		if check.value != nil && *check.value <= 0 {
+			return fmt.Errorf("%s must be > 0", check.name)
+		}
+	}
+	return nil
+}
+
+func mergeRuntimeTimeoutPatch(dst *workspace.RuntimeTimeoutsConfig, patch workspace.RuntimeTimeoutsConfig) {
+	if dst == nil {
+		return
+	}
+	if patch.StepTimeoutSec != nil {
+		dst.StepTimeoutSec = patch.StepTimeoutSec
+	}
+	if patch.HeartbeatSec != nil {
+		dst.HeartbeatSec = patch.HeartbeatSec
+	}
+	if patch.PipelineTimeoutSec != nil {
+		dst.PipelineTimeoutSec = patch.PipelineTimeoutSec
+	}
+	if patch.PipelineKillGraceSec != nil {
+		dst.PipelineKillGraceSec = patch.PipelineKillGraceSec
+	}
+	if patch.APIReadyTimeoutSec != nil {
+		dst.APIReadyTimeoutSec = patch.APIReadyTimeoutSec
+	}
+	if patch.APIInitTimeoutSec != nil {
+		dst.APIInitTimeoutSec = patch.APIInitTimeoutSec
+	}
+	if patch.UIInitPollTimeoutSec != nil {
+		dst.UIInitPollTimeoutSec = patch.UIInitPollTimeoutSec
+	}
+	if patch.UICancelPollTimeoutSec != nil {
+		dst.UICancelPollTimeoutSec = patch.UICancelPollTimeoutSec
 	}
 }
 

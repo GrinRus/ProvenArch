@@ -269,6 +269,79 @@ describe("App", () => {
     );
   });
 
+  it("loads and saves runtime timeouts via API", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+      const runLogsResponse = maybeRunLogsResponse(method, url);
+      if (runLogsResponse) {
+        return runLogsResponse;
+      }
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        return jsonResponse({ items: [] });
+      }
+      if (method === "GET" && url === "/api/workspace/manifest") {
+        return jsonResponse({
+          content: "version: 1\nrepos:\n  - name: payments-service\n    path: /tmp/payments-service\n"
+        });
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Foverview.md") {
+        return textResponse("# Charter\n");
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Fwizard%2Fstep0-contract.json") {
+        return textResponse("not found", 404);
+      }
+      if (method === "GET" && url === "/api/runtime/timeouts") {
+        return jsonResponse({
+          ok: true,
+          persisted: { step_timeout_sec: 1800 },
+          effective: {
+            step_timeout_sec: 1800,
+            heartbeat_sec: 30,
+            pipeline_timeout_sec: 2400,
+            pipeline_kill_grace_sec: 30,
+            api_ready_timeout_sec: 60,
+            api_init_timeout_sec: 120,
+            ui_init_poll_timeout_sec: 900,
+            ui_cancel_poll_timeout_sec: 420
+          },
+          source: {
+            step_timeout_sec: "workspace"
+          }
+        });
+      }
+      if (method === "PUT" && url === "/api/runtime/timeouts") {
+        return jsonResponse({ ok: true });
+      }
+
+      return jsonResponse(
+        {
+          error: {
+            code: "not_found",
+            message: `unhandled request: ${method} ${url}`
+          }
+        },
+        404
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    const stepInput = await screen.findByTestId("runtime-timeout-input-step_timeout_sec");
+    fireEvent.change(stepInput, { target: { value: "1500" } });
+    fireEvent.click(screen.getByTestId("runtime-timeouts-save-btn"));
+    await screen.findByText("Runtime timeouts saved");
+
+    const saveCalls = fetchMock.mock.calls.filter(
+      (call) => call[0] === "/api/runtime/timeouts" && ((call[1] as RequestInit | undefined)?.method ?? "").toUpperCase() === "PUT"
+    );
+    expect(saveCalls.length).toBe(1);
+    const [, saveInit] = saveCalls[0] as [RequestInfo | URL, RequestInit];
+    expect(saveInit.body).toContain('"step_timeout_sec":1500');
+  });
+
   it("does not start polling loop when there are no active runs", async () => {
     vi.useFakeTimers();
 

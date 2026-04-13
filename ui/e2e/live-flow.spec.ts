@@ -1,6 +1,10 @@
 import { expect, test } from "@playwright/test";
 
 const scenario = (process.env.UI_E2E_SCENARIO ?? "init-inspect").trim().toLowerCase();
+const initTimeoutSec = Number.parseInt(process.env.UI_E2E_INIT_TIMEOUT_SEC ?? "900", 10);
+const cancelTimeoutSec = Number.parseInt(process.env.UI_E2E_CANCEL_TIMEOUT_SEC ?? "420", 10);
+const initTimeoutMs = Number.isFinite(initTimeoutSec) && initTimeoutSec > 0 ? initTimeoutSec * 1000 : 900_000;
+const cancelTimeoutMs = Number.isFinite(cancelTimeoutSec) && cancelTimeoutSec > 0 ? cancelTimeoutSec * 1000 : 420_000;
 
 test("live ui flow: validate -> run init -> inspect artifacts", async ({ page }) => {
   test.skip(scenario !== "init-inspect", `scenario ${scenario} skips init-inspect flow`);
@@ -28,7 +32,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page })
         const payload = (await response.json()) as { status?: string };
         return (payload.status ?? "").trim();
       },
-      { timeout: 10 * 60 * 1000 }
+      { timeout: initTimeoutMs }
     )
     .toBe("succeeded");
 
@@ -82,7 +86,7 @@ test("live ui flow: run refresh -> cancel -> failed(run_canceled)", async ({ pag
         const errorCode = (payload.error_code ?? "").trim();
         return `${status}|${errorCode}`;
       },
-      { timeout: 3 * 60 * 1000 }
+      { timeout: cancelTimeoutMs }
     )
     .toBe("failed|run_canceled");
 

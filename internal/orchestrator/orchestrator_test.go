@@ -736,6 +736,95 @@ func TestCancelRunActiveClassifiesRunnerKilledAsCanceled(t *testing.T) {
 	}
 }
 
+func TestRunAppliesRuntimeStepTimeoutFromWorkspaceManifest(t *testing.T) {
+	clearRuntimeTimeoutEnvForTest(t)
+
+	ws := createWorkspaceWithTimeouts(t, map[string]int{
+		"step_timeout_sec": 1,
+		"heartbeat_sec":    1,
+	})
+	service := NewService(
+		WithHistoryWorkspace(ws),
+		WithRunner(delayedRunner{delay: 2 * time.Second}),
+	)
+
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err == nil {
+		t.Fatalf("expected timeout error")
+	}
+	if info.Status != RunStatusFailed {
+		t.Fatalf("expected failed status, got %s", info.Status)
+	}
+	if !strings.Contains(strings.ToLower(info.Error), "timeout") {
+		t.Fatalf("expected timeout context in error, got %q", info.Error)
+	}
+}
+
+func TestRunEmitsRuntimeHeartbeatLogs(t *testing.T) {
+	clearRuntimeTimeoutEnvForTest(t)
+
+	ws := createWorkspaceWithTimeouts(t, map[string]int{
+		"step_timeout_sec": 5,
+		"heartbeat_sec":    1,
+	})
+	service := NewService(
+		WithHistoryWorkspace(ws),
+		WithRunner(delayedRunner{delay: 2200 * time.Millisecond}),
+	)
+
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run init: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
+	}
+	page, ok, err := service.GetRunLogs(info.RunID, 0, 500)
+	if err != nil {
+		t.Fatalf("get run logs: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected run logs page")
+	}
+	foundHeartbeat := false
+	for _, entry := range page.Items {
+		if entry.Message == "runtime task heartbeat" {
+			foundHeartbeat = true
+			break
+		}
+	}
+	if !foundHeartbeat {
+		t.Fatalf("expected runtime task heartbeat log entry")
+	}
+}
+
+func clearRuntimeTimeoutEnvForTest(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		acpruntime.RuntimeStepTimeoutEnv,
+		acpruntime.RuntimeHeartbeatEnv,
+		acpruntime.PipelineTimeoutEnv,
+		acpruntime.PipelineKillGraceEnv,
+		acpruntime.APIReadyTimeoutEnv,
+		acpruntime.APIInitTimeoutEnv,
+		acpruntime.UIInitPollTimeoutEnv,
+		acpruntime.UICancelPollTimeoutEnv,
+		acpruntime.ReadyTimeoutDeprecatedEnv,
+		acpruntime.UIInitDeprecatedEnv,
+		acpruntime.UICancelDeprecatedEnv,
+	} {
+		t.Setenv(key, "")
+	}
+}
+
 func TestNewServiceReconcilesStaleRunsAfterRestart(t *testing.T) {
 	t.Parallel()
 
@@ -2139,6 +2228,51 @@ repos:
 		t.Fatalf("write manifest: %v", err)
 	}
 
+	ws, err := workspace.Open(root)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+	return ws
+}
+
+func createWorkspaceWithTimeouts(t *testing.T, timeouts map[string]int) workspace.Root {
+	t.Helper()
+
+	root := t.TempDir()
+	repoA := filepath.Join(root, "repos", "payments-service")
+	repoB := filepath.Join(root, "repos", "users-service")
+	if err := os.MkdirAll(repoA, 0o755); err != nil {
+		t.Fatalf("create payments repo: %v", err)
+	}
+	if err := os.MkdirAll(repoB, 0o755); err != nil {
+		t.Fatalf("create users repo: %v", err)
+	}
+	manifest := strings.Builder{}
+	manifest.WriteString("version: 1\nrepos:\n")
+	manifest.WriteString("  - name: payments-service\n")
+	manifest.WriteString("    path: " + repoA + "\n")
+	manifest.WriteString("  - name: users-service\n")
+	manifest.WriteString("    path: " + repoB + "\n")
+	manifest.WriteString("runtime:\n")
+	manifest.WriteString("  timeouts:\n")
+	for _, key := range []string{
+		"step_timeout_sec",
+		"heartbeat_sec",
+		"pipeline_timeout_sec",
+		"pipeline_kill_grace_sec",
+		"api_ready_timeout_sec",
+		"api_init_timeout_sec",
+		"ui_init_poll_timeout_sec",
+		"ui_cancel_poll_timeout_sec",
+	} {
+		if value, ok := timeouts[key]; ok && value > 0 {
+			manifest.WriteString(fmt.Sprintf("    %s: %d\n", key, value))
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "workspace.yaml"), []byte(manifest.String()), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
 	ws, err := workspace.Open(root)
 	if err != nil {
 		t.Fatalf("open workspace: %v", err)

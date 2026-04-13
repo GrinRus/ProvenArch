@@ -14,6 +14,7 @@
   - `repos`
 - optional:
   - `docs`
+  - `runtime`
 
 ### MVP constraints
 - сейчас поддерживается только `version: 1`
@@ -24,6 +25,11 @@
   - optional `ref`
 - `repo.name` значения должны быть уникальными; это semantic validation rule workspace validator-а поверх JSON Schema
 - `docs.imports_path` optional, default `./docs/imports`
+- `runtime.timeouts.*` optional persisted timeout profile:
+  - `step_timeout_sec`, `heartbeat_sec`, `pipeline_timeout_sec`, `pipeline_kill_grace_sec`
+  - `api_ready_timeout_sec`, `api_init_timeout_sec`, `ui_init_poll_timeout_sec`, `ui_cancel_poll_timeout_sec`
+  - если поле задано, значение должно быть integer `> 0`
+- timeout precedence в runtime execution/e2e scripts: `env > workspace.yaml(runtime.timeouts) > defaults`
 
 ### Важное ограничение
 `workspace.yaml` не конфигурирует workspace layout beyond repo sources и imports path.

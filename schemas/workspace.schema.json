@@ -21,6 +21,9 @@
     },
     "docs": {
       "$ref": "#/$defs/docs"
+    },
+    "runtime": {
+      "$ref": "#/$defs/runtime"
     }
   },
   "$defs": {
@@ -78,6 +81,53 @@
           "type": "string",
           "minLength": 1,
           "default": "./docs/imports"
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "timeouts": {
+          "$ref": "#/$defs/runtimeTimeouts"
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtimeTimeouts": {
+      "type": "object",
+      "properties": {
+        "step_timeout_sec": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "heartbeat_sec": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pipeline_timeout_sec": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pipeline_kill_grace_sec": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "api_ready_timeout_sec": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "api_init_timeout_sec": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "ui_init_poll_timeout_sec": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "ui_cancel_poll_timeout_sec": {
+          "type": "integer",
+          "minimum": 1
         }
       },
       "additionalProperties": false

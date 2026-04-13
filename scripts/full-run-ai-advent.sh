@@ -14,9 +14,27 @@ TMP_ROOT="${TMP_ROOT:-}"
 KEEP_TMP="${KEEP_TMP:-0}"
 ITERATIONS="${ITERATIONS:-1}"
 RUN_QUALITY_GATES="${RUN_QUALITY_GATES:-1}"
-READY_TIMEOUT_SEC="${READY_TIMEOUT_SEC:-60}"
 RUN_LOGS_TTL_HOURS="${RUN_LOGS_TTL_HOURS:-168}"
 RUN_LOGS_MAX_RUNS="${RUN_LOGS_MAX_RUNS:-200}"
+
+RUNTIME_STEP_TIMEOUT_SEC="${ACP_RUNTIME_STEP_TIMEOUT_SEC:-}"
+RUNTIME_HEARTBEAT_SEC="${ACP_RUNTIME_HEARTBEAT_SEC:-}"
+PIPELINE_TIMEOUT_SEC="${ACP_PIPELINE_TIMEOUT_SEC:-${ACP_FULL_RUN_PIPELINE_TIMEOUT_SEC:-}}"
+PIPELINE_KILL_GRACE_SEC="${ACP_PIPELINE_KILL_GRACE_SEC:-${ACP_FULL_RUN_PIPELINE_KILL_GRACE_SEC:-}}"
+API_READY_TIMEOUT_SEC="${ACP_API_READY_TIMEOUT_SEC:-}"
+API_INIT_TIMEOUT_SEC="${ACP_API_INIT_TIMEOUT_SEC:-}"
+UI_INIT_POLL_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-}"
+UI_CANCEL_POLL_TIMEOUT_SEC="${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-}"
+READY_TIMEOUT_SEC="${READY_TIMEOUT_SEC:-}"
+
+DEFAULT_RUNTIME_STEP_TIMEOUT_SEC=1800
+DEFAULT_RUNTIME_HEARTBEAT_SEC=30
+DEFAULT_PIPELINE_TIMEOUT_SEC=2400
+DEFAULT_PIPELINE_KILL_GRACE_SEC=30
+DEFAULT_API_READY_TIMEOUT_SEC=60
+DEFAULT_API_INIT_TIMEOUT_SEC=120
+DEFAULT_UI_INIT_POLL_TIMEOUT_SEC=900
+DEFAULT_UI_CANCEL_POLL_TIMEOUT_SEC=420
 
 CREATED_TMP=0
 SERVER_PID=""
@@ -118,7 +136,9 @@ require_cmd() {
 }
 
 die() {
-  FAILURE_REASON="$1"
+  if [[ -z "$FAILURE_REASON" || "$FAILURE_REASON" == "unknown" ]]; then
+    FAILURE_REASON="$1"
+  fi
   local line
   line="[full-run][error] $1"
   echo "$line"
@@ -405,6 +425,116 @@ meta = {
 meta_path.parent.mkdir(parents=True, exist_ok=True)
 meta_path.write_text(json.dumps(meta, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 PY
+}
+
+resolve_effective_timeouts_from_workspace() {
+  local workspace_path="$1"
+  local manifest_path="$workspace_path/workspace.yaml"
+  if [[ ! -f "$manifest_path" ]]; then
+    die "workspace manifest is missing for timeout resolution: $manifest_path"
+  fi
+  local resolved_lines
+  resolved_lines="$(python3 - "$manifest_path" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+try:
+    import yaml  # type: ignore
+except Exception as exc:
+    raise SystemExit(f"PyYAML is required for timeout resolution: {exc}")
+
+manifest_path = Path(sys.argv[1]).resolve()
+payload = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+runtime = payload.get("runtime") if isinstance(payload, dict) else {}
+timeouts = runtime.get("timeouts") if isinstance(runtime, dict) else {}
+if not isinstance(timeouts, dict):
+    timeouts = {}
+
+DEFAULTS = {
+    "step_timeout_sec": 1800,
+    "heartbeat_sec": 30,
+    "pipeline_timeout_sec": 2400,
+    "pipeline_kill_grace_sec": 30,
+    "api_ready_timeout_sec": 60,
+    "api_init_timeout_sec": 120,
+    "ui_init_poll_timeout_sec": 900,
+    "ui_cancel_poll_timeout_sec": 420,
+}
+CANONICAL = {
+    "step_timeout_sec": "ACP_RUNTIME_STEP_TIMEOUT_SEC",
+    "heartbeat_sec": "ACP_RUNTIME_HEARTBEAT_SEC",
+    "pipeline_timeout_sec": "ACP_PIPELINE_TIMEOUT_SEC",
+    "pipeline_kill_grace_sec": "ACP_PIPELINE_KILL_GRACE_SEC",
+    "api_ready_timeout_sec": "ACP_API_READY_TIMEOUT_SEC",
+    "api_init_timeout_sec": "ACP_API_INIT_TIMEOUT_SEC",
+    "ui_init_poll_timeout_sec": "ACP_UI_INIT_POLL_TIMEOUT_SEC",
+    "ui_cancel_poll_timeout_sec": "ACP_UI_CANCEL_POLL_TIMEOUT_SEC",
+}
+DEPRECATED = {
+    "pipeline_timeout_sec": ["ACP_FULL_RUN_PIPELINE_TIMEOUT_SEC"],
+    "pipeline_kill_grace_sec": ["ACP_FULL_RUN_PIPELINE_KILL_GRACE_SEC"],
+    "api_ready_timeout_sec": ["READY_TIMEOUT_SEC"],
+    "ui_init_poll_timeout_sec": ["UI_E2E_INIT_TIMEOUT_SEC"],
+    "ui_cancel_poll_timeout_sec": ["UI_E2E_CANCEL_TIMEOUT_SEC"],
+}
+
+def parse_positive(raw: str):
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    if value <= 0:
+        return None
+    return value
+
+for key in (
+    "step_timeout_sec",
+    "heartbeat_sec",
+    "pipeline_timeout_sec",
+    "pipeline_kill_grace_sec",
+    "api_ready_timeout_sec",
+    "api_init_timeout_sec",
+    "ui_init_poll_timeout_sec",
+    "ui_cancel_poll_timeout_sec",
+):
+    value = None
+    canonical_env = CANONICAL[key]
+    env_value = parse_positive(os.environ.get(canonical_env, ""))
+    if env_value is not None:
+        value = env_value
+    if value is None:
+        for alias in DEPRECATED.get(key, []):
+            alias_value = parse_positive(os.environ.get(alias, ""))
+            if alias_value is not None:
+                value = alias_value
+                break
+    if value is None:
+        persisted_value = timeouts.get(key)
+        if isinstance(persisted_value, int) and persisted_value > 0:
+            value = persisted_value
+    if value is None:
+        value = DEFAULTS[key]
+    print(f"{key}={value}")
+PY
+)"
+  while IFS='=' read -r key value; do
+    [[ -z "$key" ]] && continue
+    case "$key" in
+      step_timeout_sec) RUNTIME_STEP_TIMEOUT_SEC="$value" ;;
+      heartbeat_sec) RUNTIME_HEARTBEAT_SEC="$value" ;;
+      pipeline_timeout_sec) PIPELINE_TIMEOUT_SEC="$value" ;;
+      pipeline_kill_grace_sec) PIPELINE_KILL_GRACE_SEC="$value" ;;
+      api_ready_timeout_sec) API_READY_TIMEOUT_SEC="$value" ;;
+      api_init_timeout_sec) API_INIT_TIMEOUT_SEC="$value" ;;
+      ui_init_poll_timeout_sec) UI_INIT_POLL_TIMEOUT_SEC="$value" ;;
+      ui_cancel_poll_timeout_sec) UI_CANCEL_POLL_TIMEOUT_SEC="$value" ;;
+    esac
+  done <<<"$resolved_lines"
+  READY_TIMEOUT_SEC="$API_READY_TIMEOUT_SEC"
 }
 
 allocate_free_port() {
@@ -704,7 +834,48 @@ run_cli_pipeline() {
     run_cmd+=(--runtime-provider "$runtime_provider")
   fi
 
-  if ! "${run_cmd[@]}" >"$output_path" 2>&1; then
+  local timeout_flag="$TMP_ROOT/.pipeline-timeout-${iteration}-${runtime_mode}-${runtime_provider}-${pipeline}.flag"
+  rm -f "$timeout_flag"
+  local run_started_at="$SECONDS"
+  "${run_cmd[@]}" >"$output_path" 2>&1 &
+  local run_pid=$!
+  (
+    sleep "$PIPELINE_TIMEOUT_SEC"
+    if kill -0 "$run_pid" >/dev/null 2>&1; then
+      echo "timeout" >"$timeout_flag"
+      kill -TERM "$run_pid" >/dev/null 2>&1 || true
+      sleep "$PIPELINE_KILL_GRACE_SEC"
+      if kill -0 "$run_pid" >/dev/null 2>&1; then
+        kill -KILL "$run_pid" >/dev/null 2>&1 || true
+      fi
+    fi
+  ) &
+  local watchdog_pid=$!
+  local last_progress_emit=-1
+  while kill -0 "$run_pid" >/dev/null 2>&1; do
+    sleep 1
+    local elapsed_sec=$((SECONDS - run_started_at))
+    if (( RUNTIME_HEARTBEAT_SEC > 0 )) && (( elapsed_sec > 0 )) && (( elapsed_sec % RUNTIME_HEARTBEAT_SEC == 0 )) && (( elapsed_sec != last_progress_emit )); then
+      log "pipeline progress: iteration=$iteration runtime=$runtime_label pipeline=$pipeline elapsed_sec=$elapsed_sec timeout_sec=$PIPELINE_TIMEOUT_SEC"
+      last_progress_emit="$elapsed_sec"
+    fi
+  done
+  local run_exit=0
+  if ! wait "$run_pid"; then
+    run_exit=$?
+  fi
+  kill "$watchdog_pid" >/dev/null 2>&1 || true
+  wait "$watchdog_pid" >/dev/null 2>&1 || true
+
+  if [[ -f "$timeout_flag" ]]; then
+    rm -f "$timeout_flag"
+    FAILURE_REASON="runtime_timeout"
+    TERMINATION_SIGNAL="timeout"
+    die "pipeline timed out after ${PIPELINE_TIMEOUT_SEC}s (grace ${PIPELINE_KILL_GRACE_SEC}s): runtime=$runtime_label pipeline=$pipeline (see $output_path)"
+  fi
+  rm -f "$timeout_flag"
+
+  if [[ "$run_exit" -ne 0 ]]; then
     echo "pipeline failed: runtime=$runtime_label pipeline=$pipeline (see $output_path)" >&2
     tail -n 120 "$output_path" >&2 || true
     die "pipeline command failed for runtime=$runtime_label pipeline=$pipeline"
@@ -823,6 +994,14 @@ write_summary() {
     echo "- iterations: $ITERATIONS"
     echo "- run_logs_ttl_hours: $RUN_LOGS_TTL_HOURS"
     echo "- run_logs_max_runs: $RUN_LOGS_MAX_RUNS"
+    echo "- runtime_step_timeout_sec: $RUNTIME_STEP_TIMEOUT_SEC"
+    echo "- runtime_heartbeat_sec: $RUNTIME_HEARTBEAT_SEC"
+    echo "- pipeline_timeout_sec: $PIPELINE_TIMEOUT_SEC"
+    echo "- pipeline_kill_grace_sec: $PIPELINE_KILL_GRACE_SEC"
+    echo "- api_ready_timeout_sec: $API_READY_TIMEOUT_SEC"
+    echo "- api_init_timeout_sec: $API_INIT_TIMEOUT_SEC"
+    echo "- ui_init_poll_timeout_sec: $UI_INIT_POLL_TIMEOUT_SEC"
+    echo "- ui_cancel_poll_timeout_sec: $UI_CANCEL_POLL_TIMEOUT_SEC"
     echo "- keep_tmp: $KEEP_TMP"
     echo "- expected_runs: $EXPECTED_RUNS"
     echo "- completed_runs: $COMPLETED_RUNS"
@@ -1014,6 +1193,9 @@ if [[ ! -f "$WORKSPACE_BASELINE/skills/subagents.yaml" ]]; then
   die "workspace bootstrap failed: missing baseline bundle artifact skills/subagents.yaml"
 fi
 
+resolve_effective_timeouts_from_workspace "$WORKSPACE_BASELINE"
+log "resolved timeout config: step=${RUNTIME_STEP_TIMEOUT_SEC}s heartbeat=${RUNTIME_HEARTBEAT_SEC}s pipeline=${PIPELINE_TIMEOUT_SEC}s kill_grace=${PIPELINE_KILL_GRACE_SEC}s api_ready=${API_READY_TIMEOUT_SEC}s api_init=${API_INIT_TIMEOUT_SEC}s ui_init=${UI_INIT_POLL_TIMEOUT_SEC}s ui_cancel=${UI_CANCEL_POLL_TIMEOUT_SEC}s"
+
 API_PORT="$(allocate_free_port)"
 API_BASE="http://127.0.0.1:${API_PORT}"
 SERVER_LOG="$LOG_DIR/serve-fake.log"
@@ -1063,7 +1245,9 @@ PY
 )"
 
 init_status=""
-for _ in $(seq 1 240); do
+api_init_deadline=$((SECONDS + API_INIT_TIMEOUT_SEC))
+last_api_init_progress=0
+while (( SECONDS < api_init_deadline )); do
   curl -fsS "$API_BASE/api/pipeline/runs/$API_INIT_RUN_ID" > "$API_INIT_STATUS_JSON"
   init_status="$(python3 - "$API_INIT_STATUS_JSON" <<'PY'
 import json
@@ -1078,6 +1262,11 @@ PY
   if [[ "$init_status" == "failed" ]]; then
     API_INIT_FINAL_STATUS="$init_status"
     die "API init run failed (see $API_INIT_STATUS_JSON and $SERVER_LOG)"
+  fi
+  api_init_elapsed=$((API_INIT_TIMEOUT_SEC - (api_init_deadline - SECONDS)))
+  if (( RUNTIME_HEARTBEAT_SEC > 0 )) && (( api_init_elapsed > 0 )) && (( api_init_elapsed % RUNTIME_HEARTBEAT_SEC == 0 )) && (( api_init_elapsed != last_api_init_progress )); then
+    log "api init progress: run_id=$API_INIT_RUN_ID status=$init_status elapsed_sec=$api_init_elapsed timeout_sec=$API_INIT_TIMEOUT_SEC"
+    last_api_init_progress="$api_init_elapsed"
   fi
   sleep 0.25
 done
@@ -1162,6 +1351,7 @@ if [[ "$RUN_QUALITY_GATES" == "1" ]]; then
       make contracts test lint build >"$QUALITY_LOG" 2>&1
   ); then
     QUALITY_GATES_STATUS="failed"
+    FAILURE_REASON="quality"
     die "quality gates failed (see $QUALITY_LOG)"
   fi
   QUALITY_GATES_STATUS="passed"

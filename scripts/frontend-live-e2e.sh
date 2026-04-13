@@ -5,7 +5,7 @@ PROVENARCH_ROOT="${PROVENARCH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && 
 ACP_BIN="${ACP_BIN:-$PROVENARCH_ROOT/bin/acp}"
 WORKSPACE="${WORKSPACE:-}"
 RUNTIME_PROVIDER="${RUNTIME_PROVIDER:-}"
-READY_TIMEOUT_SEC="${READY_TIMEOUT_SEC:-120}"
+API_READY_TIMEOUT_SEC="${ACP_API_READY_TIMEOUT_SEC:-${READY_TIMEOUT_SEC:-120}}"
 RUN_LOGS_TTL_HOURS="${RUN_LOGS_TTL_HOURS:-168}"
 RUN_LOGS_MAX_RUNS="${RUN_LOGS_MAX_RUNS:-200}"
 OUTPUT_DIR="${OUTPUT_DIR:-}"
@@ -13,6 +13,11 @@ LISTEN="${LISTEN:-}"
 UI_E2E_EXPECTED_REPO_COUNT="${UI_E2E_EXPECTED_REPO_COUNT:-1}"
 UI_E2E_SCENARIO="${UI_E2E_SCENARIO:-init-inspect}"
 UI_E2E_CANCEL_STUB_SLEEP_SEC="${UI_E2E_CANCEL_STUB_SLEEP_SEC:-90}"
+UI_E2E_INIT_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-${UI_E2E_INIT_TIMEOUT_SEC:-}}"
+UI_E2E_CANCEL_TIMEOUT_SEC="${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-${UI_E2E_CANCEL_TIMEOUT_SEC:-}}"
+
+DEFAULT_UI_E2E_INIT_TIMEOUT_SEC=900
+DEFAULT_UI_E2E_CANCEL_TIMEOUT_SEC=420
 
 SERVER_PID=""
 BASE_URL=""
@@ -45,7 +50,7 @@ PY
 
 wait_for_health() {
   local api_base="$1"
-  local deadline=$((SECONDS + READY_TIMEOUT_SEC))
+  local deadline=$((SECONDS + API_READY_TIMEOUT_SEC))
   while (( SECONDS < deadline )); do
     if curl -fsS "$api_base/api/health" >/dev/null 2>&1; then
       return 0
@@ -53,6 +58,55 @@ wait_for_health() {
     sleep 0.25
   done
   return 1
+}
+
+resolve_ui_poll_timeouts() {
+  local payload
+  payload="$(curl -fsS "$BASE_URL/api/runtime/timeouts" 2>/dev/null || true)"
+  if [[ -n "$payload" ]]; then
+    local resolved
+    resolved="$(python3 - "$payload" <<'PY'
+import json
+import sys
+
+raw = sys.argv[1]
+try:
+    payload = json.loads(raw)
+except Exception:
+    payload = {}
+effective = payload.get("effective") if isinstance(payload, dict) else {}
+if not isinstance(effective, dict):
+    effective = {}
+init_value = effective.get("ui_init_poll_timeout_sec")
+cancel_value = effective.get("ui_cancel_poll_timeout_sec")
+if isinstance(init_value, int) and init_value > 0:
+    print(f"init={init_value}")
+if isinstance(cancel_value, int) and cancel_value > 0:
+    print(f"cancel={cancel_value}")
+PY
+)"
+    while IFS='=' read -r key value; do
+      [[ -z "$key" ]] && continue
+      case "$key" in
+        init)
+          if [[ -z "$UI_E2E_INIT_TIMEOUT_SEC" ]]; then
+            UI_E2E_INIT_TIMEOUT_SEC="$value"
+          fi
+          ;;
+        cancel)
+          if [[ -z "$UI_E2E_CANCEL_TIMEOUT_SEC" ]]; then
+            UI_E2E_CANCEL_TIMEOUT_SEC="$value"
+          fi
+          ;;
+      esac
+    done <<<"$resolved"
+  fi
+  if [[ -z "$UI_E2E_INIT_TIMEOUT_SEC" ]]; then
+    UI_E2E_INIT_TIMEOUT_SEC="$DEFAULT_UI_E2E_INIT_TIMEOUT_SEC"
+  fi
+  if [[ -z "$UI_E2E_CANCEL_TIMEOUT_SEC" ]]; then
+    UI_E2E_CANCEL_TIMEOUT_SEC="$DEFAULT_UI_E2E_CANCEL_TIMEOUT_SEC"
+  fi
 }
 
 cleanup() {
@@ -158,8 +212,10 @@ env "${server_env[@]}" "$ACP_BIN" serve \
 SERVER_PID="$!"
 
 if ! wait_for_health "$BASE_URL"; then
-  die "ACP server did not become healthy in ${READY_TIMEOUT_SEC}s (see $SERVER_LOG)"
+  die "ACP server did not become healthy in ${API_READY_TIMEOUT_SEC}s (see $SERVER_LOG)"
 fi
+resolve_ui_poll_timeouts
+log "effective UI polling timeouts: init=${UI_E2E_INIT_TIMEOUT_SEC}s cancel=${UI_E2E_CANCEL_TIMEOUT_SEC}s"
 
 status="passed"
 if ! (
@@ -168,6 +224,8 @@ if ! (
   UI_E2E_RUNTIME_PROVIDER="$RUNTIME_PROVIDER" \
   UI_E2E_SCENARIO="$UI_E2E_SCENARIO" \
   UI_E2E_EXPECTED_REPO_COUNT="$UI_E2E_EXPECTED_REPO_COUNT" \
+  UI_E2E_INIT_TIMEOUT_SEC="$UI_E2E_INIT_TIMEOUT_SEC" \
+  UI_E2E_CANCEL_TIMEOUT_SEC="$UI_E2E_CANCEL_TIMEOUT_SEC" \
   UI_E2E_OUTPUT_DIR="$PLAYWRIGHT_RESULTS_DIR" \
   npm run --prefix ui e2e:live
 ) >"$PLAYWRIGHT_LOG" 2>&1; then
