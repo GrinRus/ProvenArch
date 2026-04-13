@@ -49,6 +49,55 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 
 ### Plan ID
+EP-20260413-trash-cleanup-safe-pass
+
+### Context
+Нужен безопасный cleanup репозитория: удалить только доказанный мусор без риска скрытых регрессий и без изменения API/контрактов.
+
+### Goals (must have)
+- [x] Удалить неиспользуемые импорты в Python scripts/tests
+- [x] Удалить unreferenced исторические review-документы
+- [x] Зафиксировать, что policy-tracked generated surface и legacy compatibility не удаляются в этом slice
+- [x] Подготовить owner follow-up для спорных cleanup-пунктов
+
+### Non-goals
+- [x] Изменение public API/CLI wire-contracts
+- [x] Изменение `schemas/*` и `docs/spec/*` контрактов
+- [x] Рефакторинг/дедупликация scenario readable fixtures
+
+### Approach
+1) Применить только high-confidence удаления (`unused imports`, unreferenced historical docs).
+2) Прогнать quality gates (`ruff`, `go test`, `go vet`, UI tests/typecheck, `shellcheck`).
+3) Зафиксировать cleanup changelog и owner follow-up в docs.
+
+### Files expected to change
+- `scripts/e2e_batch_report.py`
+- `scripts/tests/test_full_run_stability.py`
+- `docs/reviews/*` (remove)
+- `docs/BACKLOG.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] `ruff check --select F401,F841 scripts` не показывает новых нарушений
+- [x] `go test ./...` зелёный
+- [x] `go vet ./...` зелёный
+- [x] `npm --prefix ui run test -- --run` зелёный
+- [x] `npm --prefix ui run typecheck` зелёный
+- [x] `shellcheck scripts/*.sh` без block-level проблем
+
+### Risks
+- Удаление исторических docs может убрать контекст прошлых решений; mitigated через запись cleanup/follow-up в operational docs.
+- Часть кандидатов на cleanup может использоваться неявно; такие пункты оставлены в owner follow-up и не удаляются.
+
+### Progress log
+- 2026-04-13: Удалены `unused import` в `scripts/e2e_batch_report.py` (`math`) и `scripts/tests/test_full_run_stability.py` (`json`).
+- 2026-04-13: Удалены unreferenced historical docs: `docs/reviews/CONSISTENCY_AUDIT_2026-03-30.md`, `docs/reviews/DOCS_HISTORY_AND_GAPS_2026-03-30.md`.
+- 2026-04-13: Подтверждён cleanup boundary: `internal/api/ui_dist/*`, `fixtures/scenarios/*/golden/readable/*`, legacy full-run inputs и core CLI/runtime/schema surfaces не удаляются в этом slice.
+- 2026-04-13: Создан owner follow-up для спорных cleanup-кандидатов в `docs/BACKLOG.md`.
+
+---
+
+### Plan ID
 EP-20260411-e2e-stability-hardening
 
 ### Context
