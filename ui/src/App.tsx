@@ -14,7 +14,25 @@ type ValidateResponse = {
   workspace: string;
   warnings?: Diagnostic[];
   errors?: Diagnostic[];
-  resolved_repos?: Array<{ name: string; source: string; path: string; ref?: string }>;
+  repo_selection_mode?: string;
+  selected_repo_scopes?: string[];
+  repo_selection?: Array<{
+    name: string;
+    declared_role?: string;
+    effective_role: string;
+    included: boolean;
+    reason: string;
+  }>;
+  resolved_repos?: Array<{
+    name: string;
+    source: string;
+    path: string;
+    ref?: string;
+    declared_role?: string;
+    effective_role?: string;
+    included?: boolean;
+    selection_reason?: string;
+  }>;
 };
 
 type RunStartResponse = {
@@ -132,7 +150,7 @@ type RuntimeTimeoutsResponse = {
   source?: Partial<RuntimeTimeoutSources>;
 };
 
-type RuntimeExecutionKey = "strategy" | "max_parallel_tasks" | "failure_policy" | "shard_discovery_mode";
+type RuntimeExecutionKey = "strategy" | "max_parallel_tasks" | "failure_policy" | "shard_discovery_mode" | "repo_selection";
 
 type RuntimeExecutionValues = Record<RuntimeExecutionKey, string | number>;
 type RuntimeExecutionSources = Record<RuntimeExecutionKey, string>;
@@ -213,13 +231,14 @@ const runtimeTimeoutLabels: Record<RuntimeTimeoutKey, string> = {
   ui_cancel_poll_timeout_sec: "runtime.profile.timeouts.ui_cancel_poll_timeout_sec",
 };
 
-const runtimeExecutionKeys: RuntimeExecutionKey[] = ["strategy", "max_parallel_tasks", "failure_policy", "shard_discovery_mode"];
+const runtimeExecutionKeys: RuntimeExecutionKey[] = ["strategy", "max_parallel_tasks", "failure_policy", "shard_discovery_mode", "repo_selection"];
 
 const defaultRuntimeExecutionValues: RuntimeExecutionValues = {
   strategy: "sequential",
   max_parallel_tasks: 1,
   failure_policy: "best_effort",
   shard_discovery_mode: "heuristics",
+  repo_selection: "all",
 };
 
 const runtimeExecutionLabels: Record<RuntimeExecutionKey, string> = {
@@ -227,6 +246,7 @@ const runtimeExecutionLabels: Record<RuntimeExecutionKey, string> = {
   max_parallel_tasks: "runtime.profile.execution.max_parallel_tasks",
   failure_policy: "runtime.profile.execution.failure_policy",
   shard_discovery_mode: "runtime.profile.execution.shard_discovery.mode",
+  repo_selection: "runtime.profile.execution.repo_selection",
 };
 
 const finalStatuses = new Set(["succeeded", "failed"]);
@@ -334,6 +354,9 @@ function normalizeRuntimeExecutionValues(
   const shardRaw = String(partial?.shard_discovery_mode ?? "").trim().toLowerCase();
   const shardMode = shardRaw === "semantic" || shardRaw === "heuristics" ? shardRaw : String(fallback.shard_discovery_mode);
 
+  const repoSelectionRaw = String(partial?.repo_selection ?? "").trim().toLowerCase();
+  const repoSelection = repoSelectionRaw === "backend_only" || repoSelectionRaw === "all" ? repoSelectionRaw : String(fallback.repo_selection);
+
   const maxRaw = Number(partial?.max_parallel_tasks);
   const maxParallel = Number.isFinite(maxRaw) && maxRaw > 0 ? Math.floor(maxRaw) : Number(fallback.max_parallel_tasks);
 
@@ -342,6 +365,7 @@ function normalizeRuntimeExecutionValues(
     max_parallel_tasks: maxParallel,
     failure_policy: failurePolicy,
     shard_discovery_mode: shardMode,
+    repo_selection: repoSelection,
   };
 }
 
@@ -353,6 +377,7 @@ function runtimeExecutionDraftFromValues(values: RuntimeExecutionValues): Runtim
     max_parallel_tasks: String(values.max_parallel_tasks),
     failure_policy: String(values.failure_policy),
     shard_discovery_mode: String(values.shard_discovery_mode),
+    repo_selection: String(values.repo_selection),
   };
 }
 
@@ -369,6 +394,10 @@ function parseRuntimeExecutionPatch(draft: RuntimeExecutionDraft): RuntimeExecut
   if (shardMode !== "heuristics" && shardMode !== "semantic") {
     throw new Error("runtime execution shard_discovery_mode must be heuristics or semantic");
   }
+  const repoSelection = draft.repo_selection.trim().toLowerCase();
+  if (repoSelection !== "all" && repoSelection !== "backend_only") {
+    throw new Error("runtime execution repo_selection must be all or backend_only");
+  }
   const maxParallel = Number.parseInt(draft.max_parallel_tasks.trim(), 10);
   if (!Number.isFinite(maxParallel) || maxParallel <= 0) {
     throw new Error("runtime execution max_parallel_tasks must be a positive integer");
@@ -379,6 +408,7 @@ function parseRuntimeExecutionPatch(draft: RuntimeExecutionDraft): RuntimeExecut
     max_parallel_tasks: maxParallel,
     failure_policy: failurePolicy,
     shard_discovery_mode: shardMode,
+    repo_selection: repoSelection,
   };
 }
 
@@ -1372,6 +1402,16 @@ export default function App() {
               Workspace: <code>{validateResult.workspace}</code>
             </p>
             <p>Status: {validateResult.ok ? "valid" : "invalid"}</p>
+            {validateResult.repo_selection_mode ? (
+              <p>
+                Repo selection mode: <code>{validateResult.repo_selection_mode}</code>
+              </p>
+            ) : null}
+            {(validateResult.selected_repo_scopes ?? []).length > 0 ? (
+              <p>
+                Selected repo scopes: <code>{(validateResult.selected_repo_scopes ?? []).join(", ")}</code>
+              </p>
+            ) : null}
 
             {(validateResult.resolved_repos ?? []).length > 0 ? (
               <div className="repo-summary">
@@ -1381,6 +1421,22 @@ export default function App() {
                     <li key={`resolved-${repo.name}-${repo.path}`}>
                       <code>{repo.name}</code> ({repo.source}) {repo.path}
                       {repo.ref ? ` @ ${repo.ref}` : ""}
+                      {repo.effective_role ? ` | role=${repo.effective_role}` : ""}
+                      {typeof repo.included === "boolean" ? ` | ${repo.included ? "included" : "excluded"}` : ""}
+                      {repo.selection_reason ? ` | reason: ${repo.selection_reason}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {(validateResult.repo_selection ?? []).length > 0 ? (
+              <div className="repo-summary">
+                <p className="hint">Repo selection decisions</p>
+                <ul>
+                  {(validateResult.repo_selection ?? []).map((decision) => (
+                    <li key={`repo-selection-${decision.name}`}>
+                      <code>{decision.name}</code> role={decision.effective_role} {decision.included ? "included" : "excluded"} ({decision.reason})
                     </li>
                   ))}
                 </ul>
@@ -1502,6 +1558,21 @@ export default function App() {
         <p className="hint">
           persisted: {String(runtimeExecutionPersisted.shard_discovery_mode ?? "-")} | effective:{" "}
           {String(runtimeExecutionEffective.shard_discovery_mode)} | source: {runtimeExecutionSource.shard_discovery_mode ?? "default"}
+        </p>
+
+        <label htmlFor="runtime-execution-repo-selection">{runtimeExecutionLabels.repo_selection}</label>
+        <select
+          id="runtime-execution-repo-selection"
+          data-testid="runtime-execution-repo-selection-select"
+          value={runtimeExecutionDraft.repo_selection}
+          onChange={(event) => updateRuntimeExecutionDraft("repo_selection", event.target.value)}
+        >
+          <option value="all">all</option>
+          <option value="backend_only">backend_only</option>
+        </select>
+        <p className="hint">
+          persisted: {String(runtimeExecutionPersisted.repo_selection ?? "-")} | effective: {String(runtimeExecutionEffective.repo_selection)} | source:{" "}
+          {runtimeExecutionSource.repo_selection ?? "default"}
         </p>
 
         {runtimeExecutionStatus ? <p className="status ok">{runtimeExecutionStatus}</p> : null}

@@ -32,6 +32,7 @@ type RepoSource struct {
 type RepoAnalysisConfig struct {
 	Include []string `yaml:"include,omitempty" json:"include,omitempty"`
 	Exclude []string `yaml:"exclude,omitempty" json:"exclude,omitempty"`
+	Role    string   `yaml:"role,omitempty" json:"role,omitempty"`
 }
 
 type DocsConfig struct {
@@ -52,6 +53,7 @@ type RuntimeExecutionConfig struct {
 	MaxParallel    *int                         `yaml:"max_parallel_tasks,omitempty" json:"max_parallel_tasks,omitempty"`
 	FailurePolicy  string                       `yaml:"failure_policy,omitempty" json:"failure_policy,omitempty"`
 	ShardDiscovery *RuntimeShardDiscoveryConfig `yaml:"shard_discovery,omitempty" json:"shard_discovery,omitempty"`
+	RepoSelection  string                       `yaml:"repo_selection,omitempty" json:"repo_selection,omitempty"`
 }
 
 type RuntimeShardDiscoveryConfig struct {
@@ -68,6 +70,18 @@ type RuntimeTimeoutsConfig struct {
 	UIInitPollTimeoutSec   *int `yaml:"ui_init_poll_timeout_sec,omitempty" json:"ui_init_poll_timeout_sec,omitempty"`
 	UICancelPollTimeoutSec *int `yaml:"ui_cancel_poll_timeout_sec,omitempty" json:"ui_cancel_poll_timeout_sec,omitempty"`
 }
+
+const (
+	RepoRoleBackend  = "backend"
+	RepoRoleFrontend = "frontend"
+	RepoRoleMixed    = "mixed"
+	RepoRoleUnknown  = "unknown"
+)
+
+const (
+	RepoSelectionAll         = "all"
+	RepoSelectionBackendOnly = "backend_only"
+)
 
 func (cfg *RuntimeTimeoutsConfig) IsZero() bool {
 	if cfg == nil {
@@ -90,7 +104,8 @@ func (cfg *RuntimeExecutionConfig) IsZero() bool {
 	return strings.TrimSpace(cfg.Strategy) == "" &&
 		cfg.MaxParallel == nil &&
 		strings.TrimSpace(cfg.FailurePolicy) == "" &&
-		(cfg.ShardDiscovery == nil || strings.TrimSpace(cfg.ShardDiscovery.Mode) == "")
+		(cfg.ShardDiscovery == nil || strings.TrimSpace(cfg.ShardDiscovery.Mode) == "") &&
+		strings.TrimSpace(cfg.RepoSelection) == ""
 }
 
 func (cfg *RuntimeProfileConfig) IsZero() bool {
@@ -106,7 +121,7 @@ func (cfg *RuntimeConfig) IsZero() bool {
 }
 
 func (cfg *RepoAnalysisConfig) IsZero() bool {
-	return cfg == nil || (len(cfg.Include) == 0 && len(cfg.Exclude) == 0)
+	return cfg == nil || (len(cfg.Include) == 0 && len(cfg.Exclude) == 0 && strings.TrimSpace(cfg.Role) == "")
 }
 
 func LoadManifest(path string) (Manifest, error) {
@@ -152,6 +167,7 @@ func applyManifestDefaults(manifest *Manifest) {
 		if manifest.Repos[idx].Analysis != nil {
 			manifest.Repos[idx].Analysis.Include = normalizeOrderedUniqueStrings(manifest.Repos[idx].Analysis.Include)
 			manifest.Repos[idx].Analysis.Exclude = normalizeOrderedUniqueStrings(manifest.Repos[idx].Analysis.Exclude)
+			manifest.Repos[idx].Analysis.Role = strings.TrimSpace(strings.ToLower(manifest.Repos[idx].Analysis.Role))
 			if manifest.Repos[idx].Analysis.IsZero() {
 				manifest.Repos[idx].Analysis = nil
 			}
@@ -169,6 +185,7 @@ func applyManifestDefaults(manifest *Manifest) {
 			if manifest.Runtime.Profile.Execution != nil {
 				manifest.Runtime.Profile.Execution.Strategy = strings.TrimSpace(manifest.Runtime.Profile.Execution.Strategy)
 				manifest.Runtime.Profile.Execution.FailurePolicy = strings.TrimSpace(manifest.Runtime.Profile.Execution.FailurePolicy)
+				manifest.Runtime.Profile.Execution.RepoSelection = strings.TrimSpace(strings.ToLower(manifest.Runtime.Profile.Execution.RepoSelection))
 				if manifest.Runtime.Profile.Execution.ShardDiscovery != nil {
 					manifest.Runtime.Profile.Execution.ShardDiscovery.Mode = strings.TrimSpace(manifest.Runtime.Profile.Execution.ShardDiscovery.Mode)
 				}
@@ -227,6 +244,13 @@ func validateManifest(manifest Manifest) error {
 					problems = append(problems, fmt.Sprintf("%s.analysis.exclude[%d] must not be empty", indexLabel, idx))
 				}
 			}
+			if role := strings.TrimSpace(strings.ToLower(repo.Analysis.Role)); role != "" &&
+				role != RepoRoleBackend &&
+				role != RepoRoleFrontend &&
+				role != RepoRoleMixed &&
+				role != RepoRoleUnknown {
+				problems = append(problems, "analysis.role must be one of: backend, frontend, mixed, unknown")
+			}
 		}
 	}
 
@@ -270,6 +294,11 @@ func validateManifest(manifest Manifest) error {
 				if mode != "" && mode != "heuristics" && mode != "semantic" {
 					problems = append(problems, "runtime.profile.execution.shard_discovery.mode must be one of: heuristics, semantic")
 				}
+			}
+			if repoSelection := strings.TrimSpace(strings.ToLower(execution.RepoSelection)); repoSelection != "" &&
+				repoSelection != RepoSelectionAll &&
+				repoSelection != RepoSelectionBackendOnly {
+				problems = append(problems, "runtime.profile.execution.repo_selection must be one of: all, backend_only")
 			}
 		}
 	}

@@ -36,6 +36,7 @@ Layout `charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/` не �
 - `analysis` optional:
   - `include[]` glob-паттерны shard include
   - `exclude[]` glob-паттерны shard exclude
+  - `role` optional enum: `backend|frontend|mixed|unknown`
 
 Правила:
 - `name` используется как stable repo scope identifier в `TaskResult.meta.repo_scopes[]`, warnings и evidence references
@@ -44,6 +45,7 @@ Layout `charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/` не �
 - `path` означает локально доступный checkout
 - `git_url` означает remote source, который ACP разрешает через локальный `git` context пользователя/runner
 - `ref` задаёт желаемую ветку/тег/sha, если repo source поддерживает checkout/fetch semantics
+- `analysis.role` используется runtime repo-selection policy для явного учёта frontend/backend контекста
 - для `path`-source ACP не делает checkout (non-mutating policy в пользовательском репозитории)
 - verify `ref` для `path`-source использует fallback-резолвинг: `<ref>` -> `origin/<ref>` -> `refs/remotes/origin/<ref>`
 - при fallback/расхождении с `HEAD` validator возвращает warnings (не блокирующие), а не изменяет checkout
@@ -97,15 +99,22 @@ Balanced defaults (если поле не задано и env override отсу�
 - `max_parallel_tasks`: integer `> 0`
 - `failure_policy`: `fail_fast|best_effort`
 - `shard_discovery.mode`: `heuristics|semantic`
+- `repo_selection`: `all|backend_only`
 
 Default values:
 - `strategy=sequential`
 - `max_parallel_tasks=1`
 - `failure_policy=best_effort`
 - `shard_discovery.mode=heuristics`
+- `repo_selection=all`
 
 Effective precedence:
 - `CLI > env > workspace.yaml > defaults`
+
+`repo_selection` поведение:
+- `all`: включаются все repos.
+- `backend_only`: исключаются только repos с `analysis.role=frontend`; `backend|mixed|unknown` остаются включёнными.
+- для `analysis.role=unknown` при `backend_only` validator добавляет warning `workspace.repo.selection.role_unknown`.
 
 ## 6) Пример
 
@@ -139,6 +148,7 @@ runtime:
       strategy: parallel
       max_parallel_tasks: 4
       failure_policy: best_effort
+      repo_selection: backend_only
       shard_discovery:
         mode: heuristics
 ```
@@ -153,11 +163,13 @@ Manifest считается невалидным, если:
 - запись repo содержит одновременно `path` и `git_url`
 - запись repo не содержит ни `path`, ни `git_url`
 - `analysis.include[]`/`analysis.exclude[]` содержит пустые элементы
+- `analysis.role` не в `backend|frontend|mixed|unknown`
 - любое значение `runtime.profile.timeouts.* <= 0`
 - `runtime.profile.execution.max_parallel_tasks <= 0`
 - `runtime.profile.execution.strategy` не в `sequential|parallel`
 - `runtime.profile.execution.failure_policy` не в `fail_fast|best_effort`
 - `runtime.profile.execution.shard_discovery.mode` не в `heuristics|semantic`
+- `runtime.profile.execution.repo_selection` не в `all|backend_only`
 - manifest пытается использовать legacy path `runtime.timeouts` (breaking change, intentional)
 - manifest пытается конфигурировать workspace layout beyond supported fields
 

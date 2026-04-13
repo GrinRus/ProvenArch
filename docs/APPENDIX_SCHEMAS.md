@@ -24,6 +24,7 @@
   - ровно одно из `path | git_url`
   - optional `ref`
   - optional `analysis.include[] | analysis.exclude[]` (glob overrides для shard planner)
+  - optional `analysis.role` (`backend|frontend|mixed|unknown`)
 - `repo.name` значения должны быть уникальными; это semantic validation rule workspace validator-а поверх JSON Schema
 - `docs.imports_path` optional, default `./docs/imports`
 - `runtime.profile.timeouts.*` optional persisted timeout profile:
@@ -35,9 +36,15 @@
   - `max_parallel_tasks > 0`
   - `failure_policy: fail_fast|best_effort`
   - `shard_discovery.mode: heuristics|semantic`
+  - `repo_selection: all|backend_only`
 - precedence:
   - timeouts: `env > workspace.yaml(runtime.profile.timeouts) > defaults`
   - execution: `CLI > env > workspace.yaml(runtime.profile.execution) > defaults`
+
+`repo_selection` policy в MVP:
+- `all`: включаются все repos.
+- `backend_only`: исключаются только repos с `analysis.role=frontend`.
+- `analysis.role=unknown` остаётся включённым и даёт warning `workspace.repo.selection.role_unknown`.
 
 ### Важное ограничение
 `workspace.yaml` не конфигурирует workspace layout beyond repo sources и imports path.

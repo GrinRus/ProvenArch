@@ -289,10 +289,12 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		_ = s.cleanupRunLogs()
 		return failedInfo, nil, err
 	}
+	resolvedExecution := s.ResolveExecutionProfile(request.Workspace.Manifest)
 	validation := request.Workspace.Validate(ctx, workspace.ValidateOptions{
-		ResolveRepos: true,
-		FetchGit:     true,
-		VerifyRefs:   true,
+		ResolveRepos:      true,
+		FetchGit:          true,
+		VerifyRefs:        true,
+		RepoSelectionMode: resolvedExecution.Effective.RepoSelection,
 	})
 	if !validation.OK {
 		finishedAt := s.clock().UTC()
@@ -336,6 +338,12 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		runtimeStepMetrics: []runtimeStepQuality{},
 		runtimeVersions:    map[string]struct{}{},
 		resolvedRepoPaths:  map[string]string{},
+		repoSelectionMode:  validation.RepoSelectionMode,
+		selectedRepoScopes: append([]string(nil), validation.SelectedRepoScopes...),
+		repoSelection:      append([]workspace.RepoSelectionDecision(nil), validation.RepoSelection...),
+	}
+	if len(execution.selectedRepoScopes) == 0 && execution.repoSelectionMode == workspace.RepoSelectionAll {
+		execution.selectedRepoScopes = collectRepoScopes(request.Workspace.Manifest.Repos)
 	}
 	for _, resolvedRepo := range validation.ResolvedRepos {
 		name := strings.TrimSpace(resolvedRepo.Name)
@@ -346,7 +354,6 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		execution.resolvedRepoPaths[name] = path
 	}
 	resolvedTimeouts := acpruntime.ResolveTimeouts(request.Workspace.Manifest)
-	resolvedExecution := s.ResolveExecutionProfile(request.Workspace.Manifest)
 	execution.executionProfile = resolvedExecution.Effective
 	if resolvedTimeouts.Effective.StepTimeoutSec > 0 {
 		execution.runtimeStepTimeout = time.Duration(resolvedTimeouts.Effective.StepTimeoutSec) * time.Second
@@ -365,9 +372,37 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		"max_parallel":     execution.executionProfile.MaxParallel,
 		"failure_policy":   execution.executionProfile.FailurePolicy,
 		"shard_discovery":  execution.executionProfile.ShardMode,
+		"repo_selection":   execution.executionProfile.RepoSelection,
+		"selected_scopes":  append([]string(nil), execution.selectedRepoScopes...),
 		"timeout_step_sec": resolvedTimeouts.Effective.StepTimeoutSec,
 		"timeout_hb_sec":   resolvedTimeouts.Effective.HeartbeatSec,
 	})
+	for _, diagnostic := range validation.Warnings {
+		if diagnostic.Code != "workspace.repo.selection.role_unknown" {
+			continue
+		}
+		execution.addWarning(fmt.Sprintf("%s: %s", diagnostic.Code, diagnostic.Message))
+	}
+	if err := execution.persistRepoSelectionSummary(); err != nil {
+		finishedAt := s.clock().UTC()
+		failedInfo := initialInfo
+		failedInfo.Status = RunStatusFailed
+		failedInfo.Error = fmt.Sprintf("persist repo selection summary: %v", err)
+		failedInfo.FinishedAt = &finishedAt
+		s.storeRun(runRecord{
+			info: failedInfo,
+		})
+		s.appendRunLog(runID, RunLogEntry{
+			Timestamp: finishedAt,
+			Level:     RunLogLevelError,
+			Message:   "run failed: persist repo selection summary",
+			Fields: map[string]any{
+				"error": failedInfo.Error,
+			},
+		})
+		_ = s.cleanupRunLogs()
+		return failedInfo, nil, err
+	}
 	execution.onStep = func(stepID string) {
 		progress := initialInfo
 		progress.Status = RunStatusRunning
@@ -1053,6 +1088,9 @@ type pipelineExecution struct {
 	executionProfile         acpruntime.ExecutionValues
 	partialFailures          []runtimeShardFailure
 	resolvedRepoPaths        map[string]string
+	repoSelectionMode        string
+	selectedRepoScopes       []string
+	repoSelection            []workspace.RepoSelectionDecision
 }
 
 type runtimeTaskExecution struct {
@@ -1154,8 +1192,16 @@ func (e *pipelineExecution) runRuntimeStep(ctx context.Context, stepID string) e
 			return err
 		}
 	} else {
-		if _, err := e.executeRuntimeTasksSharded(ctx, stepID, "", collectRepoScopes(e.workspace.Manifest.Repos), ""); err != nil {
-			return err
+		if len(normalizeOrderedUniqueStrings(e.selectedRepoScopes)) == 0 {
+			e.addWarning(fmt.Sprintf("%s: runtime step skipped because repo_selection=%q selected zero repo scopes", stepID, e.repoSelectionMode))
+			e.logWarn(stepID, "", "runtime step skipped", map[string]any{
+				"repo_selection_mode": e.repoSelectionMode,
+				"selected_scopes":     append([]string(nil), e.selectedRepoScopes...),
+			})
+		} else {
+			if _, err := e.executeRuntimeTasksSharded(ctx, stepID, "", append([]string(nil), e.selectedRepoScopes...), ""); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1204,13 +1250,31 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 	domainEnvelopes := make([]reports.DomainTaskEnvelope, 0, len(domainIDs))
 	for _, domainID := range domainIDs {
 		e.logInfo(stepID, domainID, "domain collect start", nil)
-		repoScope, declaredRepoScope, hasDeclaredRepoScope, err := resolveRepoScopeForDomainCard(e.workspace, domainID, e.workspace.Manifest.Repos)
+		scopeResolution, err := resolveRepoScopeForDomainCard(e.workspace, domainID, e.workspace.Manifest.Repos)
 		if err != nil {
 			return err
 		}
+		repoScope := strings.TrimSpace(scopeResolution.RepoScope)
+		declaredRepoScope := strings.TrimSpace(scopeResolution.DeclaredRepoScope)
+		hasDeclaredRepoScope := scopeResolution.HasDeclaredRepoScope
 		unresolved := []string{}
-		if hasDeclaredRepoScope && declaredRepoScope != "" && strings.TrimSpace(repoScope) == "" {
-			unresolved = append(unresolved, "repo_scope")
+		if scopeResolution.DomainIDMismatch {
+			declaredDomainID := strings.TrimSpace(scopeResolution.DeclaredDomainID)
+			questionID := fmt.Sprintf("q.domain.%s.id-mismatch", slugutil.Slugify(domainID))
+			e.questions = mergeQuestions(e.questions, []contracts.Question{
+				{
+					ID:       questionID,
+					Text:     fmt.Sprintf("Canonical domain card filename %q conflicts with declared id %q; runtime keeps filename as canonical id for deterministic artifacts", domainID, declaredDomainID),
+					Priority: "high",
+				},
+			})
+			e.logWarn(stepID, domainID, "domain card id mismatch", map[string]any{
+				"filename_domain_id": domainID,
+				"declared_domain_id": declaredDomainID,
+			})
+		}
+		if hasDeclaredRepoScope && declaredRepoScope != "" && !scopeResolution.DeclaredRepoScopeKnown {
+			unresolved = appendUniqueStrings(unresolved, "repo_scope")
 			e.questions = mergeQuestions(e.questions, []contracts.Question{
 				{
 					ID:       fmt.Sprintf("q.domain.%s.unknown-repo-scope", slugutil.Slugify(domainID)),
@@ -1219,7 +1283,7 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 				},
 			})
 		} else if strings.TrimSpace(repoScope) == "" {
-			unresolved = append(unresolved, "repo_scope")
+			unresolved = appendUniqueStrings(unresolved, "repo_scope")
 			e.questions = mergeQuestions(e.questions, []contracts.Question{
 				{
 					ID:       fmt.Sprintf("q.domain.%s.missing-repo-scope", slugutil.Slugify(domainID)),
@@ -1227,6 +1291,51 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 					Priority: "high",
 				},
 			})
+		}
+		skipReason := ""
+		if repoScope != "" && !e.isRepoScopeSelected(repoScope) {
+			unresolved = appendUniqueStrings(unresolved, "repo_scope")
+			questionText := fmt.Sprintf(
+				"Canonical domain %q repo_scope %q is excluded by runtime repo_selection=%q; domain task is skipped",
+				domainID,
+				repoScope,
+				e.repoSelectionMode,
+			)
+			if hasDeclaredRepoScope && scopeResolution.DeclaredRepoScopeKnown {
+				questionText = fmt.Sprintf(
+					"Canonical domain %q declares repo_scope %q, but it is excluded by runtime repo_selection=%q; domain task is skipped",
+					domainID,
+					declaredRepoScope,
+					e.repoSelectionMode,
+				)
+			} else if hasDeclaredRepoScope {
+				questionText = fmt.Sprintf(
+					"Canonical domain %q declares unknown repo_scope %q; resolved fallback repo_scope %q is excluded by runtime repo_selection=%q; domain task is skipped",
+					domainID,
+					declaredRepoScope,
+					repoScope,
+					e.repoSelectionMode,
+				)
+			}
+			e.questions = mergeQuestions(e.questions, []contracts.Question{
+				{
+					ID:       fmt.Sprintf("q.domain.%s.repo-scope-excluded-by-selection", slugutil.Slugify(domainID)),
+					Text:     questionText,
+					Priority: "high",
+				},
+			})
+			skipReason = fmt.Sprintf("repo_scope %q excluded by runtime repo_selection=%q", repoScope, e.repoSelectionMode)
+		}
+		if skipReason == "" && len(normalizeOrderedUniqueStrings(e.selectedRepoScopes)) == 0 {
+			unresolved = appendUniqueStrings(unresolved, "repo_scope")
+			e.questions = mergeQuestions(e.questions, []contracts.Question{
+				{
+					ID:       fmt.Sprintf("q.domain.%s.repo-selection-empty", slugutil.Slugify(domainID)),
+					Text:     fmt.Sprintf("Canonical domain %q is skipped because runtime repo_selection=%q selected zero repo scopes", domainID, e.repoSelectionMode),
+					Priority: "high",
+				},
+			})
+			skipReason = fmt.Sprintf("runtime repo_selection=%q selected zero repo scopes", e.repoSelectionMode)
 		}
 		envelopePath := fmt.Sprintf("reports/agent-outputs/domains/%s.task-envelope.json", sanitizeDomainArtifactSlug(domainID))
 		outputPath := fmt.Sprintf("reports/agent-outputs/domains/%s.md", domainID)
@@ -1248,13 +1357,22 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 		domainEnvelopes = append(domainEnvelopes, envelope)
 
 		domainScopes := []string{}
-		if strings.TrimSpace(repoScope) != "" {
+		if strings.TrimSpace(repoScope) != "" && skipReason == "" {
 			domainScopes = append(domainScopes, repoScope)
 		}
 		partialFailuresBefore := len(e.partialFailures)
-		executions, err := e.executeRuntimeTasksSharded(ctx, stepID, domainID, domainScopes, "domain-"+sanitizeDomainArtifactSlug(domainID))
-		if err != nil {
-			return err
+		executions := []runtimeTaskExecution{}
+		if skipReason == "" {
+			executions, err = e.executeRuntimeTasksSharded(ctx, stepID, domainID, domainScopes, "domain-"+sanitizeDomainArtifactSlug(domainID))
+			if err != nil {
+				return err
+			}
+		} else {
+			e.logWarn(stepID, domainID, "domain collect skipped", map[string]any{
+				"repo_scope":       repoScope,
+				"repo_selection":   e.repoSelectionMode,
+				"selection_reason": skipReason,
+			})
 		}
 		partialFailuresAfter := len(e.partialFailures)
 		domainFailedShards := partialFailuresAfter - partialFailuresBefore
@@ -1280,6 +1398,9 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 		runtimeSummary := strings.Join(normalizeOrderedUniqueStrings(summaries), " | ")
 		if runtimeSummary == "" {
 			runtimeSummary = "none"
+		}
+		if skipReason != "" {
+			runtimeSummary = "skipped: " + skipReason
 		}
 		if domainTotalShards > 1 || domainFailedShards > 0 {
 			runtimeSummary = fmt.Sprintf(
@@ -1930,6 +2051,48 @@ func collectRepoScopes(repos []workspace.RepoSource) []string {
 	}
 	sort.Strings(scopes)
 	return scopes
+}
+
+func appendUniqueStrings(values []string, additions ...string) []string {
+	out := append([]string(nil), values...)
+	seen := map[string]struct{}{}
+	for _, value := range out {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+	}
+	for _, candidate := range additions {
+		trimmed := strings.TrimSpace(candidate)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func (e *pipelineExecution) isRepoScopeSelected(scope string) bool {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return false
+	}
+	selected := normalizeOrderedUniqueStrings(e.selectedRepoScopes)
+	if len(selected) == 0 {
+		mode := workspace.CanonicalRepoSelectionMode(e.repoSelectionMode)
+		return mode == workspace.RepoSelectionAll
+	}
+	for _, candidate := range selected {
+		if candidate == scope {
+			return true
+		}
+	}
+	return false
 }
 
 func primaryRepoScope(scopes []string) string {
@@ -2592,9 +2755,9 @@ func (e *pipelineExecution) ensureOwnerGapFallback(domainID string, task acprunt
 func (e *pipelineExecution) ensureCrossRepoEdgeFallback(domainID string, task acpruntime.Task, normalized contracts.TaskResult) contracts.TaskResult {
 	scopes := normalizeOrderedUniqueStrings(task.RepoScopes)
 	if len(scopes) < 2 {
-		allScopes := collectRepoScopes(e.workspace.Manifest.Repos)
-		if len(allScopes) >= 2 {
-			scopes = allScopes
+		selectedScopes := normalizeOrderedUniqueStrings(e.selectedRepoScopes)
+		if len(selectedScopes) >= 2 {
+			scopes = selectedScopes
 		}
 	}
 	if len(scopes) < 2 {
@@ -3111,23 +3274,53 @@ func repoScopeForDomain(domainID string, repos []workspace.RepoSource) string {
 	return ""
 }
 
-func resolveRepoScopeForDomainCard(ws workspace.Root, domainID string, repos []workspace.RepoSource) (repoScope string, declaredRepoScope string, hasDeclaredRepoScope bool, err error) {
+type domainRepoScopeResolution struct {
+	DomainFileID           string
+	DeclaredDomainID       string
+	HasDeclaredDomainID    bool
+	DomainIDMismatch       bool
+	RepoScope              string
+	DeclaredRepoScope      string
+	HasDeclaredRepoScope   bool
+	DeclaredRepoScopeKnown bool
+}
+
+func resolveRepoScopeForDomainCard(ws workspace.Root, domainID string, repos []workspace.RepoSource) (domainRepoScopeResolution, error) {
 	cardPath := fmt.Sprintf("charter/cards/domains/%s.md", domainID)
 	contentBytes, err := ws.ReadFile(cardPath)
 	if err != nil {
-		return "", "", false, err
+		return domainRepoScopeResolution{}, err
 	}
-	content := normalizeLineEndings(string(contentBytes))
-	declaredRepoScope = strings.TrimSpace(extractCardField(content, "repo_scope"))
-	if declaredRepoScope != "" {
-		hasDeclaredRepoScope = true
-		if repoScopeExists(declaredRepoScope, repos) {
-			return declaredRepoScope, declaredRepoScope, true, nil
+	return resolveRepoScopeForDomainCardContent(domainID, normalizeLineEndings(string(contentBytes)), repos), nil
+}
+
+func resolveRepoScopeForDomainCardContent(domainID string, content string, repos []workspace.RepoSource) domainRepoScopeResolution {
+	resolution := domainRepoScopeResolution{
+		DomainFileID: strings.TrimSpace(domainID),
+	}
+	declaredDomainID := strings.TrimSpace(extractCardField(content, "id"))
+	if declaredDomainID != "" {
+		resolution.DeclaredDomainID = declaredDomainID
+		resolution.HasDeclaredDomainID = true
+		if slugutil.Slugify(declaredDomainID) != slugutil.Slugify(domainID) {
+			resolution.DomainIDMismatch = true
 		}
-		return "", declaredRepoScope, true, nil
 	}
-	repoScope = strings.TrimSpace(repoScopeForDomain(domainID, repos))
-	return repoScope, "", false, nil
+
+	declaredRepoScope := strings.TrimSpace(extractCardField(content, "repo_scope"))
+	if declaredRepoScope != "" {
+		resolution.DeclaredRepoScope = declaredRepoScope
+		resolution.HasDeclaredRepoScope = true
+		if repoScopeExists(declaredRepoScope, repos) {
+			resolution.DeclaredRepoScopeKnown = true
+			resolution.RepoScope = declaredRepoScope
+			return resolution
+		}
+	}
+	if strings.TrimSpace(resolution.RepoScope) == "" {
+		resolution.RepoScope = strings.TrimSpace(repoScopeForDomain(domainID, repos))
+	}
+	return resolution
 }
 
 func repoScopeExists(scope string, repos []workspace.RepoSource) bool {
@@ -3209,10 +3402,8 @@ func (e *pipelineExecution) enrichDomainCards(domainIDs []string, entities []con
 		}
 		content := normalizeLineEndings(string(contentBytes))
 
-		repoScope := strings.TrimSpace(repoScopeForDomain(domainID, e.workspace.Manifest.Repos))
-		if repoScope == "" {
-			repoScope = strings.TrimSpace(extractCardField(content, "repo_scope"))
-		}
+		scopeResolution := resolveRepoScopeForDomainCardContent(domainID, content, e.workspace.Manifest.Repos)
+		repoScope := strings.TrimSpace(scopeResolution.RepoScope)
 
 		relatedEntities := collectDomainEntities(domainID, repoScope, entities)
 		relatedEntitySet := map[string]struct{}{}

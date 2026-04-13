@@ -43,13 +43,28 @@ Body: отсутствует.
 {
   "ok": true,
   "workspace": "/abs/path/to/arch-workspace",
+  "repo_selection_mode": "all",
+  "selected_repo_scopes": ["payments-service"],
+  "repo_selection": [
+    {
+      "name": "payments-service",
+      "declared_role": "backend",
+      "effective_role": "backend",
+      "included": true,
+      "reason": "included by repo_selection=all"
+    }
+  ],
   "warnings": [],
   "resolved_repos": [
     {
       "name": "payments-service",
       "source": "path",
       "path": "/abs/path/to/payments-service",
-      "ref": "main"
+      "ref": "main",
+      "declared_role": "backend",
+      "effective_role": "backend",
+      "included": true,
+      "selection_reason": "included by repo_selection=all"
     }
   ]
 }
@@ -60,6 +75,17 @@ Body: отсутствует.
 {
   "ok": false,
   "workspace": "/abs/path/to/arch-workspace",
+  "repo_selection_mode": "backend_only",
+  "selected_repo_scopes": ["payments-service"],
+  "repo_selection": [
+    {
+      "name": "web-frontend",
+      "declared_role": "frontend",
+      "effective_role": "frontend",
+      "included": false,
+      "reason": "excluded by repo_selection=backend_only (effective_role=frontend)"
+    }
+  ],
   "error": {
     "code": "workspace_validation_failed",
     "message": "workspace validation failed"
@@ -79,6 +105,7 @@ Body: отсутствует.
 - `workspace.repo.ref.invalid` (error, для `path` source)
 - `workspace.repo.ref.resolved_via_remote` (warning, `ref` разрешён через `origin/*`)
 - `workspace.repo.ref.head_mismatch` (warning, локальный `HEAD` отличается от ожидаемого `ref`)
+- `workspace.repo.selection.role_unknown` (warning, `analysis.role=unknown` остался включён при `repo_selection=backend_only`)
 
 ### GET `/api/workspace/manifest`
 Возвращает текущее содержимое `workspace.yaml`.
@@ -213,19 +240,22 @@ Partial update persisted timeout-полей в `workspace.yaml`.
     "strategy": "parallel",
     "max_parallel_tasks": 4,
     "failure_policy": "best_effort",
-    "shard_discovery_mode": "heuristics"
+    "shard_discovery_mode": "heuristics",
+    "repo_selection": "all"
   },
   "effective": {
     "strategy": "parallel",
     "max_parallel_tasks": 4,
     "failure_policy": "best_effort",
-    "shard_discovery_mode": "heuristics"
+    "shard_discovery_mode": "heuristics",
+    "repo_selection": "all"
   },
   "source": {
     "strategy": "workspace",
     "max_parallel_tasks": "workspace",
     "failure_policy": "workspace",
-    "shard_discovery_mode": "workspace"
+    "shard_discovery_mode": "workspace",
+    "repo_selection": "workspace"
   }
 }
 ```
@@ -240,7 +270,8 @@ Partial update persisted execution-полей в `workspace.yaml`.
     "strategy": "parallel",
     "max_parallel_tasks": 6,
     "failure_policy": "best_effort",
-    "shard_discovery_mode": "semantic"
+    "shard_discovery_mode": "semantic",
+    "repo_selection": "backend_only"
   }
 }
 ```
@@ -252,6 +283,7 @@ Partial update persisted execution-полей в `workspace.yaml`.
 - `max_parallel_tasks` должен быть целым `> 0`;
 - `failure_policy` в `fail_fast|best_effort`;
 - `shard_discovery_mode` в `heuristics|semantic`.
+- `repo_selection` в `all|backend_only`.
 
 **400**
 - `invalid_request_body`
@@ -597,6 +629,7 @@ Run-specific поверхность (не входит в strict deterministic g
   - deprecated fallback aliases: `ACP_FULL_RUN_PIPELINE_TIMEOUT_SEC`, `ACP_FULL_RUN_PIPELINE_KILL_GRACE_SEC`, `READY_TIMEOUT_SEC`, `UI_E2E_INIT_TIMEOUT_SEC`, `UI_E2E_CANCEL_TIMEOUT_SEC`
 - timeout precedence: `env > workspace.yaml(runtime.profile.timeouts) > defaults`.
 - execution precedence: `CLI > env > workspace.yaml(runtime.profile.execution) > defaults`.
+- execution env overrides: `ACP_EXECUTION_STRATEGY`, `ACP_MAX_PARALLEL_TASKS`, `ACP_FAILURE_POLICY`, `ACP_SHARD_DISCOVERY_MODE`, `ACP_REPO_SELECTION`.
 - при `--runtime fake` provider value валидируется, но live provider command не выполняется.
 - GitHub/GitLab hooks/manual jobs для required CI/CD должны использовать CLI batch mode с deterministic defaults (`--runtime fake`).
 - API-trigger не должен превращаться в hosted control plane в рамках MVP.

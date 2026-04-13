@@ -93,6 +93,15 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "backend",
+            "frontend",
+            "mixed",
+            "unknown"
+          ]
         }
       },
       "additionalProperties": false
@@ -186,6 +195,13 @@
           "enum": [
             "fail_fast",
             "best_effort"
+          ]
+        },
+        "repo_selection": {
+          "type": "string",
+          "enum": [
+            "all",
+            "backend_only"
           ]
         },
         "shard_discovery": {

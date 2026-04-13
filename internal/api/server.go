@@ -104,10 +104,12 @@ func (s *Server) handleWorkspaceValidate(writer http.ResponseWriter, request *ht
 	}
 
 	ws := s.getWorkspace()
+	resolvedExecution := s.service.ResolveExecutionProfile(ws.Manifest)
 	report := ws.Validate(request.Context(), workspace.ValidateOptions{
-		ResolveRepos: true,
-		FetchGit:     false,
-		VerifyRefs:   true,
+		ResolveRepos:      true,
+		FetchGit:          false,
+		VerifyRefs:        true,
+		RepoSelectionMode: resolvedExecution.Effective.RepoSelection,
 	})
 	if !report.OK {
 		writeJSON(writer, http.StatusBadRequest, map[string]any{
@@ -117,17 +119,23 @@ func (s *Server) handleWorkspaceValidate(writer http.ResponseWriter, request *ht
 				"code":    "workspace_validation_failed",
 				"message": "workspace validation failed",
 			},
-			"errors":         report.Errors,
-			"warnings":       report.Warnings,
-			"resolved_repos": report.ResolvedRepos,
+			"errors":               report.Errors,
+			"warnings":             report.Warnings,
+			"resolved_repos":       report.ResolvedRepos,
+			"repo_selection_mode":  report.RepoSelectionMode,
+			"selected_repo_scopes": report.SelectedRepoScopes,
+			"repo_selection":       report.RepoSelection,
 		})
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{
-		"ok":             true,
-		"workspace":      ws.Path,
-		"warnings":       report.Warnings,
-		"resolved_repos": report.ResolvedRepos,
+		"ok":                   true,
+		"workspace":            ws.Path,
+		"warnings":             report.Warnings,
+		"resolved_repos":       report.ResolvedRepos,
+		"repo_selection_mode":  report.RepoSelectionMode,
+		"selected_repo_scopes": report.SelectedRepoScopes,
+		"repo_selection":       report.RepoSelection,
 	})
 }
 
@@ -312,13 +320,15 @@ type runtimeExecutionPatch struct {
 	MaxParallelTasks   *int    `json:"max_parallel_tasks"`
 	FailurePolicy      *string `json:"failure_policy"`
 	ShardDiscoveryMode *string `json:"shard_discovery_mode"`
+	RepoSelection      *string `json:"repo_selection"`
 }
 
 func (patch runtimeExecutionPatch) IsZero() bool {
 	return patch.Strategy == nil &&
 		patch.MaxParallelTasks == nil &&
 		patch.FailurePolicy == nil &&
-		patch.ShardDiscoveryMode == nil
+		patch.ShardDiscoveryMode == nil &&
+		patch.RepoSelection == nil
 }
 
 func (s *Server) handleRuntimeExecution(writer http.ResponseWriter, request *http.Request) {
@@ -420,6 +430,12 @@ func validateRuntimeExecutionPatch(patch runtimeExecutionPatch) error {
 			return fmt.Errorf("shard_discovery_mode must be one of: %s, %s", acpruntime.ExecutionShardDiscoveryHeuristics, acpruntime.ExecutionShardDiscoverySemantic)
 		}
 	}
+	if patch.RepoSelection != nil {
+		value := strings.TrimSpace(strings.ToLower(*patch.RepoSelection))
+		if value != workspace.RepoSelectionAll && value != workspace.RepoSelectionBackendOnly {
+			return fmt.Errorf("repo_selection must be one of: %s, %s", workspace.RepoSelectionAll, workspace.RepoSelectionBackendOnly)
+		}
+	}
 	return nil
 }
 
@@ -445,6 +461,10 @@ func mergeRuntimeExecutionPatch(dst *workspace.RuntimeExecutionConfig, patch run
 		}
 		dst.ShardDiscovery.Mode = value
 	}
+	if patch.RepoSelection != nil {
+		value := strings.TrimSpace(strings.ToLower(*patch.RepoSelection))
+		dst.RepoSelection = value
+	}
 }
 
 func runtimeExecutionPersistedPayload(persisted workspace.RuntimeExecutionConfig) map[string]any {
@@ -463,6 +483,9 @@ func runtimeExecutionPersistedPayload(persisted workspace.RuntimeExecutionConfig
 			payload["shard_discovery_mode"] = value
 		}
 	}
+	if value := strings.TrimSpace(persisted.RepoSelection); value != "" {
+		payload["repo_selection"] = value
+	}
 	return payload
 }
 
@@ -472,6 +495,7 @@ func runtimeExecutionEffectivePayload(effective acpruntime.ExecutionValues) map[
 		"max_parallel_tasks":   effective.MaxParallel,
 		"failure_policy":       effective.FailurePolicy,
 		"shard_discovery_mode": effective.ShardMode,
+		"repo_selection":       effective.RepoSelection,
 	}
 }
 
@@ -481,6 +505,7 @@ func runtimeExecutionSourcePayload(source acpruntime.ExecutionSources) map[strin
 		"max_parallel_tasks":   source.MaxParallel,
 		"failure_policy":       source.FailurePolicy,
 		"shard_discovery_mode": source.ShardMode,
+		"repo_selection":       source.RepoSelection,
 	}
 }
 

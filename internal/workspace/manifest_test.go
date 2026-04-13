@@ -95,6 +95,52 @@ runtime:
 	}
 }
 
+func TestOpenRejectsManifestWithInvalidRepoAnalysisRole(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeManifestFile(t, root, `
+version: 1
+repos:
+  - name: payments
+    path: /tmp/payments
+    analysis:
+      role: data
+`)
+
+	_, err := Open(root)
+	if err == nil {
+		t.Fatalf("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "analysis.role must be one of: backend, frontend, mixed, unknown") {
+		t.Fatalf("expected analysis.role validation error, got %v", err)
+	}
+}
+
+func TestOpenRejectsManifestWithInvalidRepoSelection(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeManifestFile(t, root, `
+version: 1
+repos:
+  - name: payments
+    path: /tmp/payments
+runtime:
+  profile:
+    execution:
+      repo_selection: backend
+`)
+
+	_, err := Open(root)
+	if err == nil {
+		t.Fatalf("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "runtime.profile.execution.repo_selection must be one of: all, backend_only") {
+		t.Fatalf("expected repo_selection validation error, got %v", err)
+	}
+}
+
 func TestRenderManifestIncludesRuntimeTimeouts(t *testing.T) {
 	t.Parallel()
 

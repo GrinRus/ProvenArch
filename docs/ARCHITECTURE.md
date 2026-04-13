@@ -35,6 +35,7 @@
      - persisted profile в `workspace.yaml.runtime.profile.execution`
      - effective precedence: `CLI > env > workspace > defaults`
      - CLI overrides: `--execution-strategy`, `--max-parallel-tasks`, `--failure-policy`
+     - repo filtering policy: `runtime.profile.execution.repo_selection` (`all|backend_only`) + `repos[].analysis.role`
    - Используется как локально, так и из SCM-triggered pipeline jobs/manual buttons
    - Internal API trigger остаётся optional trusted-mode capability, а не обязательной CI/CD поверхностью
    - Раздаёт embedded UI shell и API в одном процессе `acp serve`
@@ -76,7 +77,10 @@
    - Оркестрирует domain-first слой агентов
    - Materialize-ит per-domain execution contracts (`reports/agent-outputs/domains/*.task-envelope.json`) для canonical domain cards
    - Step1 repo binding: источник истины `repo_scope` в domain card; fallback только slug-match `domain_id` ↔ `repo.name`
+   - Runtime step1 и enrich domain cards используют общий resolver `repo_scope` (declared -> slug fallback -> empty)
+   - Проверяет согласованность canonical domain card: filename `<domain-id>.md` vs поле `- id:`; mismatch фиксируется high-priority question, runtime остаётся filename-based
    - Монолитный сценарий many-domains-to-one-repo поддержан через общий `repo_scope`; unknown scope фиксируется вопросом `q.domain.<id>.unknown-repo-scope`
+   - Если `repo_scope` домена исключён policy `repo_selection`, domain runtime task пропускается и фиксируется high-priority question
    - Выполняет runtime collect-step per-domain и сохраняет отдельные raw taskruns в `reports/taskruns/*-step1-collect-domain-*.json`
    - Runtime sharding planner (heuristics/semantic) materialize-ит deterministic shard-plan artifacts `reports/taskruns/*-shard-plan*.json` и shard-summary artifacts `reports/taskruns/*-shard-summary*.json`
    - Scheduler поддерживает `sequential|parallel` execution с worker-pool (`max_parallel_tasks`) и `fail_fast|best_effort` failure-policy
@@ -102,6 +106,7 @@
      - heartbeat-log `runtime task heartbeat` публикуется раз в `heartbeat_sec`
      - timeout/cancel причины добавляются в error message без изменения `error_code` контракта
    - Materialize-ит per-run quality summary `reports/taskruns/<run_id>-quality.json` (signal metrics/runtime versions)
+   - Materialize-ит per-run repo selection summary `reports/taskruns/<run_id>-repo-selection-summary.json` (mode + selected scopes + include/exclude reasons)
    - Run logs retention policy (TTL + max runs) запускается при старте сервиса, перед run и после run
    - (опционально) делает git commit
 
@@ -126,9 +131,11 @@
    - валидирует manifest по `schemas/workspace.schema.json`
    - поддерживает `docs/imports/index.yaml` как metadata index для imported docs
    - поддерживает repo entries с `path` или `git_url` + optional `ref`
+   - поддерживает optional `repos[].analysis.role` (`backend|frontend|mixed|unknown`) для runtime repo-selection policy
    - поддерживает optional persisted runtime profile в `runtime.profile` (`timeouts + execution`, см. `WORKSPACE_SPEC`)
    - verify `ref` для `path` source использует fallback (`ref` -> `origin/ref` -> `refs/remotes/origin/ref`) и выдаёт warning при `HEAD` mismatch
    - clone/fetch для `git_url` выполняет на той же машине через локальный `git` и текущий user/runner auth context
+   - git_url cache key использует `slug(repo.name)+hash(git_url)`; legacy slug-only cache path поддержан через fallback warning
    - не хранит отдельные credentials внутри ACP
    - safe path joins (никогда не читаем вне workspace root)
    - `POST /api/workspace/validate` даёт pre-run readiness diagnostics по layout (`missing/will create on run`, `not_dir`, `unreadable`)
