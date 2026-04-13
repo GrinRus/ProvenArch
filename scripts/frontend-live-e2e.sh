@@ -55,6 +55,7 @@ wait_for_health() {
   return 1
 }
 
+# shellcheck disable=SC2329
 cleanup() {
   if [[ -n "$SERVER_PID" ]]; then
     kill "$SERVER_PID" >/dev/null 2>&1 || true
