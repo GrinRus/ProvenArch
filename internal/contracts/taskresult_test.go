@@ -89,6 +89,41 @@ func TestParseTaskResultAllowsNestedAdditionalProperties(t *testing.T) {
 	}
 }
 
+func TestParseTaskResultPreservesShardMetadata(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{
+		"meta":{
+			"task_id":"t1",
+			"step_id":"init.step1.collect",
+			"runtime":{"name":"claude-code"},
+			"started_at":"2026-04-03T10:00:00Z",
+			"shard_id":"orders-monolith-services-api",
+			"repo_scope":"orders-monolith",
+			"repo_scopes":["orders-monolith"],
+			"path_scopes":["services/api"]
+		},
+		"summary":"ok",
+		"changeset":[
+			{"op":"upsert_entity","entity":{"id":"svc.a","type":"service","name":"A","provenance":{"kind":"observation","confidence":0.8,"evidence":[{"repo":"orders-monolith","path":"services/api/README.md"}]}}}
+		]
+	}`)
+
+	parsed, err := ParseTaskResult(raw)
+	if err != nil {
+		t.Fatalf("parse taskresult with shard metadata: %v", err)
+	}
+	if parsed.Meta.ShardID != "orders-monolith-services-api" {
+		t.Fatalf("expected shard_id to be preserved, got %q", parsed.Meta.ShardID)
+	}
+	if parsed.Meta.RepoScope != "orders-monolith" {
+		t.Fatalf("expected repo_scope to be preserved, got %q", parsed.Meta.RepoScope)
+	}
+	if len(parsed.Meta.PathScopes) != 1 || parsed.Meta.PathScopes[0] != "services/api" {
+		t.Fatalf("expected path_scopes to be preserved, got %v", parsed.Meta.PathScopes)
+	}
+}
+
 func TestParseTaskResultRejectsUnknownTopLevelField(t *testing.T) {
 	t.Parallel()
 

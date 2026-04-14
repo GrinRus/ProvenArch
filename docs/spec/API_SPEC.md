@@ -2,7 +2,7 @@
 
 Этот документ фиксирует фактический wire-contract HTTP API для local-first ACP standalone сервера.
 
-> MVP режим: `acp serve --workspace <abs-path> [--auto-init ... [--docs-imports-path <path>]]`.
+> MVP режим: `acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ... [--docs-imports-path <path>]]`.
 > Service работает с одним bound workspace на процесс.
 > Required CI/CD surface: CLI batch mode (`acp run ... --non-interactive`). API-trigger остаётся optional для trusted local/private deployment.
 
@@ -43,13 +43,28 @@ Body: отсутствует.
 {
   "ok": true,
   "workspace": "/abs/path/to/arch-workspace",
+  "repo_selection_mode": "all",
+  "selected_repo_scopes": ["payments-service"],
+  "repo_selection": [
+    {
+      "name": "payments-service",
+      "declared_role": "backend",
+      "effective_role": "backend",
+      "included": true,
+      "reason": "included by repo_selection=all"
+    }
+  ],
   "warnings": [],
   "resolved_repos": [
     {
       "name": "payments-service",
       "source": "path",
       "path": "/abs/path/to/payments-service",
-      "ref": "main"
+      "ref": "main",
+      "declared_role": "backend",
+      "effective_role": "backend",
+      "included": true,
+      "selection_reason": "included by repo_selection=all"
     }
   ]
 }
@@ -60,6 +75,17 @@ Body: отсутствует.
 {
   "ok": false,
   "workspace": "/abs/path/to/arch-workspace",
+  "repo_selection_mode": "backend_only",
+  "selected_repo_scopes": ["payments-service"],
+  "repo_selection": [
+    {
+      "name": "web-frontend",
+      "declared_role": "frontend",
+      "effective_role": "frontend",
+      "included": false,
+      "reason": "excluded by repo_selection=backend_only (effective_role=frontend)"
+    }
+  ],
   "error": {
     "code": "workspace_validation_failed",
     "message": "workspace validation failed"
@@ -79,6 +105,7 @@ Body: отсутствует.
 - `workspace.repo.ref.invalid` (error, для `path` source)
 - `workspace.repo.ref.resolved_via_remote` (warning, `ref` разрешён через `origin/*`)
 - `workspace.repo.ref.head_mismatch` (warning, локальный `HEAD` отличается от ожидаемого `ref`)
+- `workspace.repo.selection.role_unknown` (warning, `analysis.role=unknown` остался включён при `repo_selection=backend_only`)
 
 ### GET `/api/workspace/manifest`
 Возвращает текущее содержимое `workspace.yaml`.
@@ -112,7 +139,7 @@ Body: отсутствует.
 
 ### GET `/api/runtime/timeouts`
 Возвращает timeout-конфиг для текущего workspace в трёх представлениях:
-- `persisted` — значения из `workspace.yaml` (`runtime.timeouts`);
+- `persisted` — значения из `workspace.yaml` (`runtime.profile.timeouts`);
 - `effective` — значения после precedence-resolve (`env > workspace > defaults`);
 - `source` — источник каждого effective значения (`env|deprecated_env|workspace|default`).
 
@@ -198,6 +225,75 @@ Partial update persisted timeout-полей в `workspace.yaml`.
 - `runtime_timeouts_render_failed`
 - `runtime_timeouts_write_failed`
 - `runtime_timeouts_reopen_failed`
+
+### GET `/api/runtime/execution`
+Возвращает execution-профиль для текущего workspace:
+- `persisted` — значения из `workspace.yaml` (`runtime.profile.execution`);
+- `effective` — значения после precedence-resolve (`CLI > env > workspace > defaults`);
+- `source` — источник каждого effective значения (`override|env|workspace|default`).
+
+**200**
+```json
+{
+  "ok": true,
+  "persisted": {
+    "strategy": "parallel",
+    "max_parallel_tasks": 4,
+    "failure_policy": "best_effort",
+    "shard_discovery_mode": "heuristics",
+    "repo_selection": "all"
+  },
+  "effective": {
+    "strategy": "parallel",
+    "max_parallel_tasks": 4,
+    "failure_policy": "best_effort",
+    "shard_discovery_mode": "heuristics",
+    "repo_selection": "all"
+  },
+  "source": {
+    "strategy": "workspace",
+    "max_parallel_tasks": "workspace",
+    "failure_policy": "workspace",
+    "shard_discovery_mode": "workspace",
+    "repo_selection": "workspace"
+  }
+}
+```
+
+### PUT `/api/runtime/execution`
+Partial update persisted execution-полей в `workspace.yaml`.
+
+**Request**
+```json
+{
+  "execution": {
+    "strategy": "parallel",
+    "max_parallel_tasks": 6,
+    "failure_policy": "best_effort",
+    "shard_discovery_mode": "semantic",
+    "repo_selection": "backend_only"
+  }
+}
+```
+
+Правила:
+- payload должен содержать хотя бы одно поле в `execution`;
+- поддерживается partial update (изменяются только переданные поля);
+- `strategy` в `sequential|parallel`;
+- `max_parallel_tasks` должен быть целым `> 0`;
+- `failure_policy` в `fail_fast|best_effort`;
+- `shard_discovery_mode` в `heuristics|semantic`.
+- `repo_selection` в `all|backend_only`.
+
+**400**
+- `invalid_request_body`
+- `runtime_execution_empty`
+- `runtime_execution_invalid`
+
+**500**
+- `runtime_execution_render_failed`
+- `runtime_execution_write_failed`
+- `runtime_execution_reopen_failed`
 
 ## 3) Artifacts endpoints
 
@@ -345,6 +441,7 @@ Partial update persisted timeout-полей в `workspace.yaml`.
 Для lifecycle сценариев используются дополнительные `error_code`:
 - `run_canceled` — run отменён пользователем;
 - `run_reconciled_after_restart` — stale `queued/running` run был reconciled в `failed` при старте сервиса после рестарта.
+- `run_partial_failed` — run завершён после `best_effort` shard execution, но один или более shard-ов завершились ошибкой.
 
 ### GET `/api/pipeline/runs?limit=<n>`
 Возвращает список запусков pipeline (queued/running/succeeded/failed), отсортированный по `started_at desc`.
@@ -400,7 +497,10 @@ Partial update persisted timeout-полей в `workspace.yaml`.
       "fields": {
         "task_id": "task-run_20260403_001-init-step1-collect-payments-service",
         "provider": "claude-code",
+        "shard_id": "payments-service-services-api",
+        "repo_scope": "payments-service",
         "repo_scopes": ["payments-service"],
+        "path_scopes": ["services/api"],
         "stderr_snippet": "json parse error ... [truncated]"
       }
     }
@@ -506,10 +606,10 @@ Run-specific поверхность (не входит в strict deterministic g
 
 ## 8) Deployment boundary
 - `acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)`: explicit bootstrap.
-- `acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]`: local interactive и trusted local/private deployment.
+- `acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]`: local interactive и trusted local/private deployment.
 - bootstrap behavior: если workspace root не является git-репозиторием, ACP автоматически выполняет `git init` (без auto-commit/auto-push).
 - `serve` startup работает в lenient mode: сервис стартует без блокирующего repo preflight; readiness diagnostics доступны через `POST /api/workspace/validate`.
-- `acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--non-interactive]`.
+- `acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]`.
 - run logs retention knobs:
   - CLI flags: `--run-logs-ttl-hours`, `--run-logs-max-runs` (для `serve` и `run`)
   - env overrides: `ACP_RUN_LOGS_TTL_HOURS`, `ACP_RUN_LOGS_MAX_RUNS`
@@ -527,7 +627,9 @@ Run-specific поверхность (не входит в strict deterministic g
   - `ACP_UI_INIT_POLL_TIMEOUT_SEC`
   - `ACP_UI_CANCEL_POLL_TIMEOUT_SEC`
   - deprecated fallback aliases: `ACP_FULL_RUN_PIPELINE_TIMEOUT_SEC`, `ACP_FULL_RUN_PIPELINE_KILL_GRACE_SEC`, `READY_TIMEOUT_SEC`, `UI_E2E_INIT_TIMEOUT_SEC`, `UI_E2E_CANCEL_TIMEOUT_SEC`
-- timeout precedence: `env > workspace.yaml(runtime.timeouts) > defaults`.
+- timeout precedence: `env > workspace.yaml(runtime.profile.timeouts) > defaults`.
+- execution precedence: `CLI > env > workspace.yaml(runtime.profile.execution) > defaults`.
+- execution env overrides: `ACP_EXECUTION_STRATEGY`, `ACP_MAX_PARALLEL_TASKS`, `ACP_FAILURE_POLICY`, `ACP_SHARD_DISCOVERY_MODE`, `ACP_REPO_SELECTION`.
 - при `--runtime fake` provider value валидируется, но live provider command не выполняется.
 - GitHub/GitLab hooks/manual jobs для required CI/CD должны использовать CLI batch mode с deterministic defaults (`--runtime fake`).
 - API-trigger не должен превращаться в hosted control plane в рамках MVP.

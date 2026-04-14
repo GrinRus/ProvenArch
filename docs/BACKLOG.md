@@ -221,5 +221,15 @@ Suggested PR slices:
 - Risk: medium (влияние на review diffability и developer UX)
 - Next step: собрать usage evidence, затем принять решение retain/remove отдельным PR
 
+2) Owner confirmation для cleanup-кандидатов с неявным usage risk
+- Scope:
+  - `.codex/model_instructions.md` (possible tooling integration)
+  - `docs/ai/AI_NATIVE_WORKFLOW.md` (orphan-doc candidate)
+  - `ui/README.md` (low-value duplicate candidate)
+  - duplicated readable scenario fixtures (possible dedupe, policy-sensitive)
+- Owner: ACP maintainers + docs owner + tooling owner
+- Risk: medium/high (риск удалить скрыто используемые файлы или ухудшить regression/review UX)
+- Next step: подтвердить explicit ownership и usage contracts, затем принять retain/remove/dedupe решение отдельным PR.
+
 Resolved (2026-04-05):
 - `slugify` дедупликация между подсистемами выполнена через `internal/slugutil` + regression tests.

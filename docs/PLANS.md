@@ -49,6 +49,109 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 
 ### Plan ID
+EP-20260413-backend-repo-selection-hardening
+
+### Context
+Нужно укрепить backend-focused selection в multi-repo/monorepo: синхронизировать `repo_scope` resolver между runtime и enrich, добавить explicit frontend/backend policy, убрать `git_url` cache collisions и повысить диагностируемость.
+
+### Goals (must have)
+- [x] Единый resolver `repo_scope` для step1.collect + enrich
+- [x] Проверка mismatch filename `<domain-id>.md` vs `- id:` с high-priority question, без изменения filename-based runtime id
+- [x] Контракт `workspace.yaml`: `repos[].analysis.role` + `runtime.profile.execution.repo_selection`
+- [x] Effective selection policy `all|backend_only` + skip domain tasks при excluded scope
+- [x] Применение effective scopes к runtime шагам (step1/step2/step3/step4) и shard planning
+- [x] `git_url` cache key `slug+hash(source)` + legacy fallback warning
+- [x] API/UI surfaces: execution `repo_selection`, validate decisions (`effective_role`, `included/excluded`, `reason`)
+- [x] Артефакт `reports/taskruns/<run_id>-repo-selection-summary.json`
+- [x] Unit/integration/regression tests + docs/schema/examples sync
+
+### Non-goals
+- [x] Изменение default поведения для существующих пользователей (`repo_selection` default остаётся `all`)
+- [x] Добавление новых runtime providers beyond MVP
+
+### Approach
+1) Обновить workspace/runtime contracts и selection evaluator.
+2) Привязать selection к orchestrator domain/runtime execution path.
+3) Укрепить resolver/cache diagnostics и добавить repo-selection summary artifact.
+4) Обновить API/UI surfaces и тесты.
+5) Синхронизировать docs/spec/examples.
+
+### Files expected to change
+- `internal/workspace/*`
+- `internal/runtime/*`
+- `internal/orchestrator/*`
+- `internal/api/*`
+- `ui/src/*`
+- `schemas/workspace.schema.json`
+- `docs/*`, `README.md`, `examples/workspace.example.yaml`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены
+- [x] Схемы валидируются
+- [x] Документация обновлена
+
+### Risks
+- `backend_only` при пустом selected scope может unintentionally скрыть анализ; mitigated explicit questions/warnings + summary artifact.
+- Legacy git cache fallback может задержать миграцию на hashed key; mitigated warning diagnostics.
+
+### Progress log
+- 2026-04-13: Реализованы repo-selection policy hardening, unified domain repo_scope resolver, git_url cache-key migration fallback, API/UI wiring, summary artifact и regression suite.
+
+### Plan ID
+EP-20260413-sharding-execution-profile
+
+### Context
+Нужно масштабировать runtime для больших монореп/мульти-репо: добавить управляемое shard-дробление с parallel execution внутри одного run, сохранить global single-run lock, и перенести runtime-конфиг в новый `runtime.profile` контракт.
+
+### Goals (must have)
+- [x] Ввести новый `workspace.yaml` контракт: `runtime.profile.timeouts`, `runtime.profile.execution`, `repos[].analysis.include/exclude`
+- [x] Добавить execution resolution (`defaults/workspace/env/CLI`) и CLI overrides (`--execution-strategy`, `--max-parallel-tasks`, `--failure-policy`)
+- [x] Реализовать shard planner + scheduler (sequential/parallel, best_effort/fail_fast) для runtime step1/step3
+- [x] Добавить per-shard taskruns + shard summary artifact + deterministic apply order
+- [x] Зафиксировать partial failure semantics (`run_partial_failed`) с агрегированными diagnostics
+- [x] Добавить API `GET/PUT /api/runtime/execution`
+- [x] Добавить UI panel для runtime execution profile (load/save/reset)
+- [x] Синхронизировать docs/examples/fixtures/tests и прогнать DoD (`make contracts/test/lint/build`)
+
+### Non-goals
+- [x] Изменение global queue policy (single active run + debounce)
+- [x] Добавление новых runtime providers beyond MVP (`claude-code`, `qwen-code`)
+- [x] Hosted/security-compliance расширения вне MVP
+
+### Approach
+1) Обновить schema/manifest/runtime resolution контракты.
+2) Интегрировать shard planning/scheduling в orchestrator runtime steps.
+3) Добавить API/UI surfaces для execution profile.
+4) Обновить regression suite + docs/spec/examples/fixtures, зафиксировать deterministic golden.
+
+### Files expected to change
+- `schemas/workspace.schema.json`
+- `internal/workspace/*`
+- `internal/runtime/*`
+- `internal/orchestrator/*`
+- `internal/api/*`
+- `cmd/acp/*`
+- `ui/src/*`
+- `docs/*`, `examples/*`, `fixtures/*`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены
+- [x] Схемы валидируются
+- [x] Документация обновлена
+
+### Risks
+- Breaking update `workspace.yaml` (`runtime.timeouts` -> `runtime.profile.timeouts`) без compatibility-layer.
+- Увеличение числа taskrun artifacts из-за sharding требует аккуратной фильтрации в тестах/интеграциях.
+
+### Progress log
+- 2026-04-13: Реализованы schema/manifest/runtime profile changes + execution resolver + CLI overrides.
+- 2026-04-13: Добавлены shard planner/scheduler, best-effort partial semantics и shard artifacts.
+- 2026-04-13: Добавлены API/UI execution profile surfaces, обновлены docs/examples/fixtures, пройдены `make contracts`, `make test`, `make lint`, `make build`.
+- 2026-04-13: Дозакрыт gap-аудит: добавлены unit/integration regression tests для planner filters/fallback, sequential-vs-parallel scheduler, deterministic apply order, `run_partial_failed`, synthetic large-monorepo + multi-repo shard scenarios; в shard-plan artifacts добавлен deterministic `semantic_graph` dump.
+- 2026-04-13: Дозакрыт контрактный и тестовый хвост: добавлен backward-compatible alias `meta.repo_scope` (в schema/runtime prompts/diagnostics), добавлены CLI/env precedence tests для execution profile и refresh step1/step3 sharding regression; повторно пройден DoD (`make contracts/test/lint/build`).
+- 2026-04-13: Добавлен отдельный fail-fast regression (`step` останавливается на первой shard error, без `run_partial_failed`), повторно перепроверены `go test ./...`, `make contracts`, `make lint`, `make build`.
+
+### Plan ID
 EP-20260413-postfix-matrix-runtime-stability
 
 ### Context
@@ -91,6 +194,55 @@ EP-20260413-postfix-matrix-runtime-stability
 ### Progress log
 - 2026-04-13: Реализованы runtime/batch/frontend фиксы и добавлены regression tests для `--prompt`, parse-stage/schema path, quality-vs-infra classification и cancel-refresh stability.
 - 2026-04-14: Дозакрыт integration gap `runtime_parse > infra_incomplete_cycle` (batch classifier priority) и выполнен повторный canary multi (`multi-path`/`multi-git_url`, `qwen`/`claude`) + frontend `cancel-refresh` single `2/2`.
+
+### Plan ID
+EP-20260413-trash-cleanup-safe-pass
+
+### Context
+Нужен безопасный cleanup репозитория: удалить только доказанный мусор без риска скрытых регрессий и без изменения API/контрактов.
+
+### Goals (must have)
+- [x] Удалить неиспользуемые импорты в Python scripts/tests
+- [x] Удалить unreferenced исторические review-документы
+- [x] Зафиксировать, что policy-tracked generated surface и legacy compatibility не удаляются в этом slice
+- [x] Подготовить owner follow-up для спорных cleanup-пунктов
+
+### Non-goals
+- [x] Изменение public API/CLI wire-contracts
+- [x] Изменение `schemas/*` и `docs/spec/*` контрактов
+- [x] Рефакторинг/дедупликация scenario readable fixtures
+
+### Approach
+1) Применить только high-confidence удаления (`unused imports`, unreferenced historical docs).
+2) Прогнать quality gates (`ruff`, `go test`, `go vet`, UI tests/typecheck, `shellcheck`).
+3) Зафиксировать cleanup changelog и owner follow-up в docs.
+
+### Files expected to change
+- `scripts/e2e_batch_report.py`
+- `scripts/tests/test_full_run_stability.py`
+- `docs/reviews/*` (remove)
+- `docs/BACKLOG.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] `ruff check --select F401,F841 scripts` не показывает новых нарушений
+- [x] `go test ./...` зелёный
+- [x] `go vet ./...` зелёный
+- [x] `npm --prefix ui run test -- --run` зелёный
+- [x] `npm --prefix ui run typecheck` зелёный
+- [x] `shellcheck scripts/*.sh` без block-level проблем
+
+### Risks
+- Удаление исторических docs может убрать контекст прошлых решений; mitigated через запись cleanup/follow-up в operational docs.
+- Часть кандидатов на cleanup может использоваться неявно; такие пункты оставлены в owner follow-up и не удаляются.
+
+### Progress log
+- 2026-04-13: Удалены `unused import` в `scripts/e2e_batch_report.py` (`math`) и `scripts/tests/test_full_run_stability.py` (`json`).
+- 2026-04-13: Удалены unreferenced historical docs: `docs/reviews/CONSISTENCY_AUDIT_2026-03-30.md`, `docs/reviews/DOCS_HISTORY_AND_GAPS_2026-03-30.md`.
+- 2026-04-13: Подтверждён cleanup boundary: `internal/api/ui_dist/*`, `fixtures/scenarios/*/golden/readable/*`, legacy full-run inputs и core CLI/runtime/schema surfaces не удаляются в этом slice.
+- 2026-04-13: Создан owner follow-up для спорных cleanup-кандидатов в `docs/BACKLOG.md`.
+
+---
 
 ### Plan ID
 EP-20260411-e2e-stability-hardening

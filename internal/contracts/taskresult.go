@@ -28,7 +28,10 @@ type Meta struct {
 	StartedAt  string      `json:"started_at"`
 	FinishedAt string      `json:"finished_at,omitempty"`
 	Workspace  string      `json:"workspace,omitempty"`
+	ShardID    string      `json:"shard_id,omitempty"`
+	RepoScope  string      `json:"repo_scope,omitempty"`
 	RepoScopes []string    `json:"repo_scopes,omitempty"`
+	PathScopes []string    `json:"path_scopes,omitempty"`
 }
 
 type RuntimeMeta struct {

@@ -173,7 +173,7 @@ acp init-workspace --workspace /path/to/arch-workspace --repos-file /path/to/rep
 - `repos: [...]`
 - или top-level массив записей `repos[]`
 
-Если `repos-file` содержит блок `runtime.timeouts`, `init-workspace`/`serve --auto-init` переносят его в `workspace.yaml` (persisted timeout profile).
+Если `repos-file` содержит блок `runtime.profile.timeouts`, `init-workspace`/`serve --auto-init` переносят его в `workspace.yaml` (persisted timeout profile).
 
 ### 3.1) Read-only QA по артефактам workspace (опционально)
 
@@ -208,7 +208,7 @@ make quickstart-local WORKSPACE=/path/to/arch-workspace REPO_PATH=/path/to/payme
 
 ### 6.1) Runtime timeouts (persisted + effective)
 
-Timeout-конфиг хранится в `workspace.yaml` (`runtime.timeouts`) и используется backend/full-run/frontend e2e.
+Timeout-конфиг хранится в `workspace.yaml` (`runtime.profile.timeouts`) и используется backend/full-run/frontend e2e.
 
 Balanced defaults:
 - `step_timeout_sec=1800`
@@ -242,6 +242,40 @@ Deprecated fallback aliases:
 API управления timeout-профилем:
 - `GET /api/runtime/timeouts` (persisted + effective + source)
 - `PUT /api/runtime/timeouts` (partial update persisted values)
+
+### 6.2) Runtime execution profile (persisted + effective)
+
+Execution-конфиг хранится в `workspace.yaml` (`runtime.profile.execution`) и управляет шардированием runtime-задач.
+
+Default values:
+- `strategy=sequential`
+- `max_parallel_tasks=1`
+- `failure_policy=best_effort`
+- `shard_discovery.mode=heuristics`
+- `repo_selection=all`
+
+Precedence:
+- `CLI > env > workspace.yaml > defaults`
+
+CLI overrides (ограниченный набор):
+- `--execution-strategy sequential|parallel`
+- `--max-parallel-tasks <n>`
+- `--failure-policy fail_fast|best_effort`
+
+Env overrides:
+- `ACP_EXECUTION_STRATEGY`
+- `ACP_MAX_PARALLEL_TASKS`
+- `ACP_FAILURE_POLICY`
+- `ACP_SHARD_DISCOVERY_MODE`
+- `ACP_REPO_SELECTION`
+
+API управления execution-профилем:
+- `GET /api/runtime/execution` (persisted + effective + source)
+- `PUT /api/runtime/execution` (partial update persisted values)
+
+`repo_selection` policy:
+- `all`: анализируются все repos из `workspace.yaml`.
+- `backend_only`: исключаются только repos с `analysis.role=frontend`; `backend|mixed|unknown` остаются включёнными (для `unknown` validator пишет warning).
 
 ### 7) Поднимите dev environment
 

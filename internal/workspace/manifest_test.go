@@ -58,16 +58,86 @@ repos:
   - name: payments
     path: /tmp/payments
 runtime:
-  timeouts:
-    step_timeout_sec: 0
+  profile:
+    timeouts:
+      step_timeout_sec: 0
 `)
 
 	_, err := Open(root)
 	if err == nil {
 		t.Fatalf("expected validation error")
 	}
-	if !strings.Contains(err.Error(), "runtime.timeouts.step_timeout_sec must be > 0") {
+	if !strings.Contains(err.Error(), "runtime.profile.timeouts.step_timeout_sec must be > 0") {
 		t.Fatalf("expected runtime timeout validation error, got %v", err)
+	}
+}
+
+func TestOpenRejectsLegacyRuntimeTimeoutsShape(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeManifestFile(t, root, `
+version: 1
+repos:
+  - name: payments
+    path: /tmp/payments
+runtime:
+  timeouts:
+    step_timeout_sec: 10
+`)
+
+	_, err := Open(root)
+	if err == nil {
+		t.Fatalf("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "additionalProperties 'timeouts' not allowed") {
+		t.Fatalf("expected schema rejection for legacy runtime.timeouts shape, got %v", err)
+	}
+}
+
+func TestOpenRejectsManifestWithInvalidRepoAnalysisRole(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeManifestFile(t, root, `
+version: 1
+repos:
+  - name: payments
+    path: /tmp/payments
+    analysis:
+      role: data
+`)
+
+	_, err := Open(root)
+	if err == nil {
+		t.Fatalf("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "analysis.role must be one of: backend, frontend, mixed, unknown") {
+		t.Fatalf("expected analysis.role validation error, got %v", err)
+	}
+}
+
+func TestOpenRejectsManifestWithInvalidRepoSelection(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeManifestFile(t, root, `
+version: 1
+repos:
+  - name: payments
+    path: /tmp/payments
+runtime:
+  profile:
+    execution:
+      repo_selection: backend
+`)
+
+	_, err := Open(root)
+	if err == nil {
+		t.Fatalf("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "runtime.profile.execution.repo_selection must be one of: all, backend_only") {
+		t.Fatalf("expected repo_selection validation error, got %v", err)
 	}
 }
 
@@ -82,9 +152,11 @@ func TestRenderManifestIncludesRuntimeTimeouts(t *testing.T) {
 			{Name: "payments", Path: "/tmp/payments"},
 		},
 		Runtime: &RuntimeConfig{
-			Timeouts: &RuntimeTimeoutsConfig{
-				StepTimeoutSec:     &step,
-				PipelineTimeoutSec: &pipeline,
+			Profile: &RuntimeProfileConfig{
+				Timeouts: &RuntimeTimeoutsConfig{
+					StepTimeoutSec:     &step,
+					PipelineTimeoutSec: &pipeline,
+				},
 			},
 		},
 	})
@@ -92,7 +164,7 @@ func TestRenderManifestIncludesRuntimeTimeouts(t *testing.T) {
 		t.Fatalf("render manifest: %v", err)
 	}
 	text := string(raw)
-	if !strings.Contains(text, "runtime:") || !strings.Contains(text, "timeouts:") {
+	if !strings.Contains(text, "runtime:") || !strings.Contains(text, "profile:") || !strings.Contains(text, "timeouts:") {
 		t.Fatalf("expected runtime timeout section, got:\n%s", text)
 	}
 	if !strings.Contains(text, "step_timeout_sec: 1800") {

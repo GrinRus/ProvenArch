@@ -88,7 +88,10 @@ func WriteParseFailureArtifacts(task acpruntime.Task, provider acpruntime.Provid
 			"run_id":      task.RunID,
 			"step_id":     task.StepID,
 			"workspace":   absWorkspace,
+			"shard_id":    task.ShardID,
+			"repo_scope":  primaryRepoScope(task.RepoScope, task.RepoScopes),
 			"repo_scopes": append([]string(nil), task.RepoScopes...),
+			"path_scopes": append([]string(nil), task.PathScopes...),
 		},
 		"stdout": map[string]any{
 			"path":          stdoutArtifact.Path,
@@ -161,4 +164,16 @@ func safePathPart(value string) string {
 		cleaned = cleaned[:96]
 	}
 	return cleaned
+}
+
+func primaryRepoScope(explicit string, scopes []string) string {
+	if value := strings.TrimSpace(explicit); value != "" {
+		return value
+	}
+	for _, scope := range scopes {
+		if value := strings.TrimSpace(scope); value != "" {
+			return value
+		}
+	}
+	return ""
 }

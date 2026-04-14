@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -64,7 +65,7 @@ func TestRunSubcommandHelpReturnsZero(t *testing.T) {
 	if code != exitCodeOK {
 		t.Fatalf("expected exit code %d, got %d", exitCodeOK, code)
 	}
-	if !strings.Contains(stderr.String(), "Usage: acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--non-interactive]") {
+	if !strings.Contains(stderr.String(), "Usage: acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]") {
 		t.Fatalf("expected run usage in stderr, got %q", stderr.String())
 	}
 }
@@ -601,9 +602,10 @@ func TestInitWorkspaceReposFilePreservesRuntimeTimeouts(t *testing.T) {
   - name: repo-a
     path: ` + repoA + `
 runtime:
-  timeouts:
-    step_timeout_sec: 777
-    ui_cancel_poll_timeout_sec: 333
+  profile:
+    timeouts:
+      step_timeout_sec: 777
+      ui_cancel_poll_timeout_sec: 333
 `
 	if err := os.WriteFile(reposFile, []byte(reposContent), 0o644); err != nil {
 		t.Fatalf("write repos file: %v", err)
@@ -656,9 +658,10 @@ func TestServeAutoInitSupportsReposFile(t *testing.T) {
   - name: repo-b
     path: ` + repoB + `
 runtime:
-  timeouts:
-    step_timeout_sec: 1440
-    heartbeat_sec: 12
+  profile:
+    timeouts:
+      step_timeout_sec: 1440
+      heartbeat_sec: 12
 `
 	if err := os.WriteFile(reposFile, []byte(reposContent), 0o644); err != nil {
 		t.Fatalf("write repos file: %v", err)
@@ -913,6 +916,65 @@ func TestRunHeadlessRuntimeProviderFlagOverridesEnv(t *testing.T) {
 	}
 }
 
+func TestServeDryRunExecutionUsesEnvOverridesWhenCLIUnset(t *testing.T) {
+	root := writeWorkspaceWithExecutionProfile(t, "sequential", 2, "fail_fast")
+	t.Setenv("ACP_EXECUTION_STRATEGY", "parallel")
+	t.Setenv("ACP_MAX_PARALLEL_TASKS", "5")
+	t.Setenv("ACP_FAILURE_POLICY", "best_effort")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"serve",
+		"--workspace", root,
+		"--runtime", "fake",
+		"--dry-run",
+	}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d: stderr=%q", exitCodeOK, code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "execution strategy: parallel") {
+		t.Fatalf("expected env execution strategy override, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "execution max_parallel_tasks: 5") {
+		t.Fatalf("expected env max_parallel_tasks override, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "execution failure_policy: best_effort") {
+		t.Fatalf("expected env failure_policy override, got %q", stdout.String())
+	}
+}
+
+func TestServeDryRunExecutionCLIOverridesBeatEnvAndWorkspace(t *testing.T) {
+	root := writeWorkspaceWithExecutionProfile(t, "parallel", 2, "fail_fast")
+	t.Setenv("ACP_EXECUTION_STRATEGY", "parallel")
+	t.Setenv("ACP_MAX_PARALLEL_TASKS", "5")
+	t.Setenv("ACP_FAILURE_POLICY", "fail_fast")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"serve",
+		"--workspace", root,
+		"--runtime", "fake",
+		"--execution-strategy", "sequential",
+		"--max-parallel-tasks", "7",
+		"--failure-policy", "best_effort",
+		"--dry-run",
+	}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d: stderr=%q", exitCodeOK, code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "execution strategy: sequential") {
+		t.Fatalf("expected CLI execution strategy override, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "execution max_parallel_tasks: 7") {
+		t.Fatalf("expected CLI max_parallel_tasks override, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "execution failure_policy: best_effort") {
+		t.Fatalf("expected CLI failure_policy override, got %q", stdout.String())
+	}
+}
+
 func TestEnsureWorkspaceGitRepositoryReturnsActionableErrorWhenGitMissing(t *testing.T) {
 	t.Setenv("PATH", "")
 	err := ensureWorkspaceGitRepository(t.TempDir())
@@ -945,6 +1007,33 @@ func writeWorkspace(t *testing.T) string {
 	manifestPath := filepath.Join(root, "workspace.yaml")
 	manifest := "version: 1\nrepos:\n  - name: sample\n    path: " + repoPath + "\n"
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write workspace manifest: %v", err)
+	}
+	return root
+}
+
+func writeWorkspaceWithExecutionProfile(t *testing.T, strategy string, maxParallel int, failurePolicy string) string {
+	t.Helper()
+
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "repos", "sample")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("create sample repo path: %v", err)
+	}
+	manifest := strings.Join([]string{
+		"version: 1",
+		"repos:",
+		"  - name: sample",
+		"    path: " + repoPath,
+		"runtime:",
+		"  profile:",
+		"    execution:",
+		"      strategy: " + strategy,
+		"      max_parallel_tasks: " + strconv.Itoa(maxParallel),
+		"      failure_policy: " + failurePolicy,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(root, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
 		t.Fatalf("write workspace manifest: %v", err)
 	}
 	return root

@@ -76,9 +76,15 @@ Baseline scenario set:
   - `CancelRun` для active run даёт cooperative cancel + `failed` + `error_code=run_canceled`, очередь продолжает работать
   - stale persisted `queued/running` run при старте сервиса reconciled в `failed` + `error_code=run_reconciled_after_restart`
 - runtime timeout control:
-  - persisted profile в `workspace.yaml.runtime.timeouts`
+  - persisted profile в `workspace.yaml.runtime.profile.timeouts`
   - effective precedence `env > workspace > defaults`
   - новые API endpoints `GET/PUT /api/runtime/timeouts`
+- runtime sharding control:
+  - heuristics planner (module markers + leaf-pruning) и `analysis.include/exclude` фильтры
+  - fallback warning + root shard `.` при пустом результате фильтров
+  - scheduler semantics `sequential|parallel` (`max_parallel_tasks`) и deterministic apply order
+  - `fail_fast` останавливает step/pipeline на первой shard error без перехода в downstream runtime steps
+  - `best_effort` partial shard failures: pipeline продолжается, но итоговый status `failed` + `error_code=run_partial_failed`
 - docs truth-sync gate проверяет:
   - согласованность runtime policy/Q&A boundary и ссылок на canonical stakeholder matrix;
   - отсутствие stale-маркеров в ключевых surfaces (`future`, `skeleton`, `placeholder`, устаревшие version-маркеры);
@@ -160,6 +166,10 @@ Implemented additional jobs:
 - missing owner / missing CI-CD evidence path
 - unresolved domain/team becomes question/finding, not new card
 - deterministic Step 1 enrichment включает `evidence_refs` в domain/team cards
+- sharded runtime regression:
+  - step1/step3 materialize per-shard taskruns + shard-plan/shard-summary artifacts
+  - parallel scheduler keeps deterministic merge/apply order despite out-of-order shard completion
+  - TaskResult shard metadata (`meta.shard_id`, `meta.repo_scopes`, `meta.path_scopes`) сохраняется в persisted taskruns
 
 ### Smoke tests
 - `acp run --workspace ... --pipeline init --runtime fake --non-interactive`

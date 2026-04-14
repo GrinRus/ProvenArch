@@ -91,8 +91,8 @@ func DefaultTimeouts() TimeoutValues {
 
 func resolveTimeoutsWithLookup(manifest workspace.Manifest, lookup envLookup) TimeoutResolution {
 	persisted := workspace.RuntimeTimeoutsConfig{}
-	if manifest.Runtime != nil && manifest.Runtime.Timeouts != nil {
-		persisted = *manifest.Runtime.Timeouts
+	if manifest.Runtime != nil && manifest.Runtime.Profile != nil && manifest.Runtime.Profile.Timeouts != nil {
+		persisted = *manifest.Runtime.Profile.Timeouts
 	}
 
 	effective := DefaultTimeouts()

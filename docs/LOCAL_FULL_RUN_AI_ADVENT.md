@@ -39,7 +39,7 @@ Batch-only semantic hard-fail checks (в `scripts/e2e_batch_report.py`):
 
 - `PROVENARCH_ROOT` (default: текущий repo ProvenArch)
 - `TARGET_REPOS_FILE` (canonical: YAML с `repos[]`, как в `workspace.yaml`)
-  - если файл содержит `runtime.timeouts`, `init-workspace` переносит профиль в `workspace.yaml`
+  - если файл содержит `runtime.profile.timeouts`, `init-workspace` переносит профиль в `workspace.yaml`
 - legacy single inputs (backward compatibility):
   - `TARGET_REPO` (single path)
   - `TARGET_REPO_GIT_URL` + `TARGET_REPO_NAME` + `TARGET_REPO_REF` (single `git_url`, pinned ref required)
@@ -69,7 +69,7 @@ Batch-only semantic hard-fail checks (в `scripts/e2e_batch_report.py`):
   - `UI_E2E_CANCEL_TIMEOUT_SEC`
 
 Effective timeout precedence для full-run/batch/frontend live:
-- `env > workspace.yaml(runtime.timeouts) > defaults`
+- `env > workspace.yaml(runtime.profile.timeouts) > defaults`
 
 Batch/Frontend scripts:
 - `scripts/full-run-batch-5x2.sh`

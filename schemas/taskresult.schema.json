@@ -56,7 +56,19 @@
         "workspace": {
           "type": "string"
         },
+        "shard_id": {
+          "type": "string"
+        },
+        "repo_scope": {
+          "type": "string"
+        },
         "repo_scopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "path_scopes": {
           "type": "array",
           "items": {
             "type": "string"

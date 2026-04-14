@@ -2,6 +2,8 @@ package workspace
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,10 +12,14 @@ import (
 )
 
 type ResolvedRepo struct {
-	Name   string `json:"name"`
-	Source string `json:"source"`
-	Path   string `json:"path"`
-	Ref    string `json:"ref,omitempty"`
+	Name            string `json:"name"`
+	Source          string `json:"source"`
+	Path            string `json:"path"`
+	Ref             string `json:"ref,omitempty"`
+	DeclaredRole    string `json:"declared_role,omitempty"`
+	EffectiveRole   string `json:"effective_role,omitempty"`
+	Included        *bool  `json:"included,omitempty"`
+	SelectionReason string `json:"selection_reason,omitempty"`
 }
 
 type ResolveOptions struct {
@@ -193,7 +199,7 @@ func (r Root) resolveGitURLRepo(ctx context.Context, gitExec GitExecutor, repo R
 		}}
 	}
 
-	cacheDir, err := r.resolveRepoCacheDir(repo.Name)
+	cacheDir, legacyCacheDir, err := r.resolveRepoCacheDir(repo.Name, repo.GitURL)
 	if err != nil {
 		return ResolvedRepo{}, []Diagnostic{{
 			Level:      DiagnosticError,
@@ -203,61 +209,75 @@ func (r Root) resolveGitURLRepo(ctx context.Context, gitExec GitExecutor, repo R
 			Suggestion: "Ensure workspace path is valid and writable",
 		}}
 	}
+	effectiveCacheDir := cacheDir
+	repoDiagnostics := []Diagnostic{}
+	if fallbackPath, ok := resolveLegacyRepoCacheFallback(cacheDir, legacyCacheDir); ok {
+		effectiveCacheDir = fallbackPath
+		repoDiagnostics = append(repoDiagnostics, Diagnostic{
+			Level:      DiagnosticWarning,
+			Code:       "workspace.repo.cache.legacy_fallback",
+			Repo:       repo.Name,
+			Path:       fallbackPath,
+			Message:    fmt.Sprintf("using legacy git_url cache path %q because new cache key path %q is not materialized", fallbackPath, cacheDir),
+			Suggestion: "Run one fetch cycle to migrate this cache entry to the hashed cache key",
+		})
+	}
 
 	if !options.FetchGit {
-		return ResolvedRepo{Name: repo.Name, Source: "git_url", Path: cacheDir, Ref: repo.Ref}, []Diagnostic{{
+		repoDiagnostics = append(repoDiagnostics, Diagnostic{
 			Level:      DiagnosticWarning,
 			Code:       "workspace.repo.git_url.dry_unresolved",
 			Repo:       repo.Name,
-			Path:       cacheDir,
+			Path:       effectiveCacheDir,
 			Message:    "git_url source was not fetched in dry validation mode",
 			Suggestion: "Run pipeline execution to materialize and verify git_url sources",
-		}}
+		})
+		return ResolvedRepo{Name: repo.Name, Source: "git_url", Path: effectiveCacheDir, Ref: repo.Ref}, repoDiagnostics
 	}
 
-	if err := os.MkdirAll(filepath.Dir(cacheDir), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(effectiveCacheDir), 0o755); err != nil {
 		return ResolvedRepo{}, []Diagnostic{{
 			Level:      DiagnosticError,
 			Code:       "workspace.repo.cache.mkdir_failed",
 			Repo:       repo.Name,
-			Path:       cacheDir,
+			Path:       effectiveCacheDir,
 			Message:    fmt.Sprintf("cannot create repo cache directory: %v", err),
 			Suggestion: "Fix filesystem permissions for workspace cache",
 		}}
 	}
 
 	repoExists := false
-	if info, statErr := os.Stat(filepath.Join(cacheDir, ".git")); statErr == nil && info.IsDir() {
+	if info, statErr := os.Stat(filepath.Join(effectiveCacheDir, ".git")); statErr == nil && info.IsDir() {
 		repoExists = true
 	}
 	if repoExists {
-		if _, err := gitExec.Run(ctx, cacheDir, "remote", "set-url", "origin", strings.TrimSpace(repo.GitURL)); err != nil {
+		if _, err := gitExec.Run(ctx, effectiveCacheDir, "remote", "set-url", "origin", strings.TrimSpace(repo.GitURL)); err != nil {
 			return ResolvedRepo{}, []Diagnostic{{
 				Level:      DiagnosticError,
 				Code:       "workspace.repo.git_url.remote_failed",
 				Repo:       repo.Name,
-				Path:       cacheDir,
+				Path:       effectiveCacheDir,
 				Message:    err.Error(),
 				Suggestion: "Verify git_url and repository permissions",
 			}}
 		}
-		if _, err := gitExec.Run(ctx, cacheDir, "fetch", "--prune", "origin"); err != nil {
+		if _, err := gitExec.Run(ctx, effectiveCacheDir, "fetch", "--prune", "origin"); err != nil {
 			return ResolvedRepo{}, []Diagnostic{{
 				Level:      DiagnosticError,
 				Code:       "workspace.repo.git_url.fetch_failed",
 				Repo:       repo.Name,
-				Path:       cacheDir,
+				Path:       effectiveCacheDir,
 				Message:    err.Error(),
 				Suggestion: "Check network access and git auth for this source",
 			}}
 		}
 	} else {
-		if _, err := gitExec.Run(ctx, "", "clone", strings.TrimSpace(repo.GitURL), cacheDir); err != nil {
+		if _, err := gitExec.Run(ctx, "", "clone", strings.TrimSpace(repo.GitURL), effectiveCacheDir); err != nil {
 			return ResolvedRepo{}, []Diagnostic{{
 				Level:      DiagnosticError,
 				Code:       "workspace.repo.git_url.clone_failed",
 				Repo:       repo.Name,
-				Path:       cacheDir,
+				Path:       effectiveCacheDir,
 				Message:    err.Error(),
 				Suggestion: "Check git_url and git auth context for this runner",
 			}}
@@ -265,13 +285,13 @@ func (r Root) resolveGitURLRepo(ctx context.Context, gitExec GitExecutor, repo R
 	}
 
 	if options.VerifyRefs && strings.TrimSpace(repo.Ref) != "" {
-		if _, err := gitExec.Run(ctx, cacheDir, "rev-parse", "--verify", strings.TrimSpace(repo.Ref)+"^{commit}"); err != nil {
-			if _, checkoutErr := gitExec.Run(ctx, cacheDir, "checkout", "--force", strings.TrimSpace(repo.Ref)); checkoutErr != nil {
+		if _, err := gitExec.Run(ctx, effectiveCacheDir, "rev-parse", "--verify", strings.TrimSpace(repo.Ref)+"^{commit}"); err != nil {
+			if _, checkoutErr := gitExec.Run(ctx, effectiveCacheDir, "checkout", "--force", strings.TrimSpace(repo.Ref)); checkoutErr != nil {
 				return ResolvedRepo{}, []Diagnostic{{
 					Level:      DiagnosticError,
 					Code:       "workspace.repo.git_url.ref_invalid",
 					Repo:       repo.Name,
-					Path:       cacheDir,
+					Path:       effectiveCacheDir,
 					Message:    fmt.Sprintf("cannot checkout ref %q: %v", repo.Ref, checkoutErr),
 					Suggestion: "Use an existing branch/tag/commit in workspace.yaml",
 				}}
@@ -280,40 +300,78 @@ func (r Root) resolveGitURLRepo(ctx context.Context, gitExec GitExecutor, repo R
 	}
 
 	if strings.TrimSpace(repo.Ref) != "" {
-		if _, err := gitExec.Run(ctx, cacheDir, "checkout", "--force", strings.TrimSpace(repo.Ref)); err != nil {
+		if _, err := gitExec.Run(ctx, effectiveCacheDir, "checkout", "--force", strings.TrimSpace(repo.Ref)); err != nil {
 			return ResolvedRepo{}, []Diagnostic{{
 				Level:      DiagnosticError,
 				Code:       "workspace.repo.git_url.checkout_failed",
 				Repo:       repo.Name,
-				Path:       cacheDir,
+				Path:       effectiveCacheDir,
 				Message:    err.Error(),
 				Suggestion: "Ensure the requested ref exists and can be checked out",
 			}}
 		}
 	}
 
-	if _, err := gitExec.Run(ctx, cacheDir, "rev-parse", "--verify", "HEAD"); err != nil {
+	if _, err := gitExec.Run(ctx, effectiveCacheDir, "rev-parse", "--verify", "HEAD"); err != nil {
 		return ResolvedRepo{}, []Diagnostic{{
 			Level:      DiagnosticError,
 			Code:       "workspace.repo.git_url.invalid_head",
 			Repo:       repo.Name,
-			Path:       cacheDir,
+			Path:       effectiveCacheDir,
 			Message:    err.Error(),
 			Suggestion: "Ensure repository is cloned and has a valid HEAD",
 		}}
 	}
 
-	return ResolvedRepo{Name: repo.Name, Source: "git_url", Path: cacheDir, Ref: repo.Ref}, nil
+	return ResolvedRepo{Name: repo.Name, Source: "git_url", Path: effectiveCacheDir, Ref: repo.Ref}, repoDiagnostics
 }
 
-func (r Root) resolveRepoCacheDir(repoName string) (string, error) {
+func (r Root) resolveRepoCacheDir(repoName string, source string) (string, string, error) {
 	slug := repoCacheSlug(repoName)
-	relPath := filepath.Join(".acp", "repos", slug)
-	absPath, err := r.Resolve(relPath)
-	if err != nil {
-		return "", err
+	sourceHash := repoCacheSourceHash(source)
+	cacheSlug := slug
+	if sourceHash != "" {
+		cacheSlug = cacheSlug + "-" + sourceHash
 	}
-	return absPath, nil
+	absPath, err := r.Resolve(filepath.Join(".acp", "repos", cacheSlug))
+	if err != nil {
+		return "", "", err
+	}
+	legacyAbsPath, err := r.Resolve(filepath.Join(".acp", "repos", slug))
+	if err != nil {
+		return "", "", err
+	}
+	if legacyAbsPath == absPath {
+		legacyAbsPath = ""
+	}
+	return absPath, legacyAbsPath, nil
+}
+
+func resolveLegacyRepoCacheFallback(primaryPath string, legacyPath string) (string, bool) {
+	primaryPath = strings.TrimSpace(primaryPath)
+	legacyPath = strings.TrimSpace(legacyPath)
+	if primaryPath == "" || legacyPath == "" || primaryPath == legacyPath {
+		return "", false
+	}
+	if hasGitRepoMetadata(primaryPath) {
+		return "", false
+	}
+	if !hasGitRepoMetadata(legacyPath) {
+		return "", false
+	}
+	return legacyPath, true
+}
+
+func hasGitRepoMetadata(path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(path, ".git"))
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
 }
 
 func repoCacheSlug(name string) string {
@@ -342,6 +400,19 @@ func repoCacheSlug(name string) string {
 		return "unknown"
 	}
 	return slug
+}
+
+func repoCacheSourceHash(source string) string {
+	trimmed := strings.TrimSpace(source)
+	if trimmed == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(trimmed))
+	encoded := hex.EncodeToString(sum[:])
+	if len(encoded) <= 12 {
+		return encoded
+	}
+	return encoded[:12]
 }
 
 func resolvePathRepoRef(ctx context.Context, gitExec GitExecutor, repoPath string, requestedRef string) (string, []Diagnostic, error) {

@@ -1445,6 +1445,331 @@ func TestRefreshStep1UnknownDeclaredRepoScopeWritesQuestion(t *testing.T) {
 	}
 }
 
+func TestResolveRepoScopeForDomainCardContentDeclaredUnknownFallsBackToSlug(t *testing.T) {
+	t.Parallel()
+
+	repos := []workspace.RepoSource{
+		{Name: "billing", Path: "./repos/billing"},
+	}
+	content := "# Domain: Billing\n\n- id: `billing`\n- repo_scope: `unknown-scope`\n"
+
+	resolution := resolveRepoScopeForDomainCardContent("billing", content, repos)
+	if !resolution.HasDeclaredRepoScope {
+		t.Fatalf("expected declared repo_scope to be detected")
+	}
+	if resolution.DeclaredRepoScopeKnown {
+		t.Fatalf("expected declared repo_scope to be unknown")
+	}
+	if resolution.RepoScope != "billing" {
+		t.Fatalf("expected slug fallback repo_scope billing, got %q", resolution.RepoScope)
+	}
+}
+
+func TestRefreshStep1RepoScopeResolverIsConsistentForRuntimeAndEnrich(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure workspace layout: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/payments.md", []byte("# Domain: Payments\n\n- id: `payments`\n- repo_scope: `users-service`\n")); err != nil {
+		t.Fatalf("write payments domain card: %v", err)
+	}
+
+	runner := &trackingRunner{}
+	service := NewService(WithRunner(runner))
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run refresh pipeline: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
+	}
+
+	collectTasks := runner.tasksForStep("refresh.step1.collect")
+	if len(collectTasks) != 1 {
+		t.Fatalf("expected one domain collect task, got %d", len(collectTasks))
+	}
+	if len(collectTasks[0].RepoScopes) != 1 || collectTasks[0].RepoScopes[0] != "users-service" {
+		t.Fatalf("expected runtime step1 to use declared repo_scope users-service, got %+v", collectTasks[0].RepoScopes)
+	}
+
+	cardBytes, err := os.ReadFile(filepath.Join(ws.Path, "charter/cards/domains/payments.md"))
+	if err != nil {
+		t.Fatalf("read enriched domain card: %v", err)
+	}
+	cardText := string(cardBytes)
+	if !strings.Contains(cardText, "## Derived (ACP Step1)") {
+		t.Fatalf("expected derived section in domain card, got %q", cardText)
+	}
+	if !strings.Contains(cardText, "- repo_scope: `users-service`") {
+		t.Fatalf("expected enrich to use same resolved repo_scope users-service, got %q", cardText)
+	}
+}
+
+func TestRefreshStep1DomainCardIDMismatchAddsQuestionAndKeepsFilenameDomainID(t *testing.T) {
+	t.Parallel()
+
+	ws := createMonolithWorkspace(t)
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure workspace layout: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/billing.md", []byte("# Domain: Billing\n\n- id: `payments`\n- repo_scope: `orders-monolith`\n")); err != nil {
+		t.Fatalf("write billing domain card: %v", err)
+	}
+
+	service := NewService(WithRunner(step3ParseFailureRunner{}))
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err == nil {
+		t.Fatalf("expected refresh run to fail at step3")
+	}
+	if info.Status != RunStatusFailed {
+		t.Fatalf("expected failed status, got %s", info.Status)
+	}
+
+	questionsReport, err := os.ReadFile(filepath.Join(ws.Path, "reports/coverage/open-questions.md"))
+	if err != nil {
+		t.Fatalf("read open questions report: %v", err)
+	}
+	if !strings.Contains(string(questionsReport), "q.domain.billing.id-mismatch") {
+		t.Fatalf("expected id mismatch question in coverage report, got %q", string(questionsReport))
+	}
+
+	if _, err := os.Stat(filepath.Join(ws.Path, "reports/agent-outputs/domains/billing.md")); err != nil {
+		t.Fatalf("expected domain output to keep filename-based domain id, stat failed: %v", err)
+	}
+}
+
+func TestRefreshBackendOnlySkipsFrontendDomainAndWritesRepoSelectionSummary(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	backendA := filepath.Join(root, "repos", "payments-service")
+	backendB := filepath.Join(root, "repos", "users-service")
+	frontend := filepath.Join(root, "repos", "web-frontend")
+	for _, repoPath := range []string{backendA, backendB, frontend} {
+		if err := os.MkdirAll(repoPath, 0o755); err != nil {
+			t.Fatalf("create repo path %q: %v", repoPath, err)
+		}
+		if err := os.WriteFile(filepath.Join(repoPath, "README.md"), []byte("# repo\n"), 0o644); err != nil {
+			t.Fatalf("write readme %q: %v", repoPath, err)
+		}
+	}
+	manifest := workspace.Manifest{
+		Version: 1,
+		Repos: []workspace.RepoSource{
+			{Name: "payments-service", Path: backendA, Analysis: &workspace.RepoAnalysisConfig{Role: workspace.RepoRoleBackend}},
+			{Name: "users-service", Path: backendB, Analysis: &workspace.RepoAnalysisConfig{Role: workspace.RepoRoleBackend}},
+			{Name: "web-frontend", Path: frontend, Analysis: &workspace.RepoAnalysisConfig{Role: workspace.RepoRoleFrontend}},
+		},
+		Runtime: &workspace.RuntimeConfig{
+			Profile: &workspace.RuntimeProfileConfig{
+				Execution: &workspace.RuntimeExecutionConfig{RepoSelection: workspace.RepoSelectionBackendOnly},
+			},
+		},
+	}
+	manifestRaw, err := workspace.RenderManifest(manifest)
+	if err != nil {
+		t.Fatalf("render manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, workspace.ManifestFileName), manifestRaw, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	ws, err := workspace.Open(root)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure workspace layout: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/payments.md", []byte("# Domain: Payments\n\n- id: `payments`\n- repo_scope: `payments-service`\n")); err != nil {
+		t.Fatalf("write payments domain card: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/users.md", []byte("# Domain: Users\n\n- id: `users`\n- repo_scope: `users-service`\n")); err != nil {
+		t.Fatalf("write users domain card: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/web.md", []byte("# Domain: Web\n\n- id: `web`\n- repo_scope: `web-frontend`\n")); err != nil {
+		t.Fatalf("write web domain card: %v", err)
+	}
+
+	runner := &trackingRunner{}
+	service := NewService(WithRunner(runner))
+	info, artifacts, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run refresh pipeline: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
+	}
+
+	collectTasks := runner.tasksForStep("refresh.step1.collect")
+	if len(collectTasks) != 2 {
+		t.Fatalf("expected two backend domain collect tasks, got %d", len(collectTasks))
+	}
+	for _, task := range collectTasks {
+		if containsString(task.RepoScopes, "web-frontend") {
+			t.Fatalf("frontend scope must be excluded from step1 collect tasks, got %+v", task.RepoScopes)
+		}
+	}
+	step3Tasks := runner.tasksForStep("refresh.step3.findings")
+	if len(step3Tasks) == 0 {
+		t.Fatalf("expected step3 findings tasks")
+	}
+	for _, task := range step3Tasks {
+		if containsString(task.RepoScopes, "web-frontend") {
+			t.Fatalf("frontend scope must be excluded from step3 tasks, got %+v", task.RepoScopes)
+		}
+	}
+
+	questionsReport, err := os.ReadFile(filepath.Join(ws.Path, "reports/coverage/open-questions.md"))
+	if err != nil {
+		t.Fatalf("read open questions report: %v", err)
+	}
+	if !strings.Contains(string(questionsReport), "q.domain.web.repo-scope-excluded-by-selection") {
+		t.Fatalf("expected repo-scope-excluded question for web domain, got %q", string(questionsReport))
+	}
+
+	summaryPath := filepath.Join(ws.Path, "reports", "taskruns", info.RunID+"-repo-selection-summary.json")
+	var summary struct {
+		RepoSelectionMode  string   `json:"repo_selection_mode"`
+		SelectedRepoScopes []string `json:"selected_repo_scopes"`
+		Decisions          []struct {
+			Name     string `json:"name"`
+			Included bool   `json:"included"`
+		} `json:"decisions"`
+	}
+	summaryBytes, err := os.ReadFile(summaryPath)
+	if err != nil {
+		t.Fatalf("read repo selection summary: %v", err)
+	}
+	if err := json.Unmarshal(summaryBytes, &summary); err != nil {
+		t.Fatalf("decode repo selection summary: %v", err)
+	}
+	if summary.RepoSelectionMode != workspace.RepoSelectionBackendOnly {
+		t.Fatalf("expected backend_only mode in repo selection summary, got %q", summary.RepoSelectionMode)
+	}
+	if containsString(summary.SelectedRepoScopes, "web-frontend") {
+		t.Fatalf("frontend scope must not be present in selected_repo_scopes, got %+v", summary.SelectedRepoScopes)
+	}
+	frontendDecisionFound := false
+	for _, decision := range summary.Decisions {
+		if decision.Name == "web-frontend" {
+			frontendDecisionFound = true
+			if decision.Included {
+				t.Fatalf("frontend decision must be excluded, got %+v", decision)
+			}
+		}
+	}
+	if !frontendDecisionFound {
+		t.Fatalf("expected web-frontend decision in repo selection summary, got %+v", summary.Decisions)
+	}
+
+	repoSelectionArtifactPath := "reports/taskruns/" + info.RunID + "-repo-selection-summary.json"
+	foundArtifact := false
+	for _, artifact := range artifacts {
+		if artifact.Path == repoSelectionArtifactPath {
+			foundArtifact = true
+			break
+		}
+	}
+	if !foundArtifact {
+		t.Fatalf("expected repo selection summary artifact %q in run artifacts", repoSelectionArtifactPath)
+	}
+}
+
+func TestRefreshBackendOnlyExcludedQuestionUsesDeclaredUnknownRepoScopeDetails(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	frontend := filepath.Join(root, "repos", "billing")
+	if err := os.MkdirAll(frontend, 0o755); err != nil {
+		t.Fatalf("create frontend repo path: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(frontend, "README.md"), []byte("# billing\n"), 0o644); err != nil {
+		t.Fatalf("write frontend readme: %v", err)
+	}
+
+	manifest := workspace.Manifest{
+		Version: 1,
+		Repos: []workspace.RepoSource{
+			{Name: "billing", Path: frontend, Analysis: &workspace.RepoAnalysisConfig{Role: workspace.RepoRoleFrontend}},
+		},
+		Runtime: &workspace.RuntimeConfig{
+			Profile: &workspace.RuntimeProfileConfig{
+				Execution: &workspace.RuntimeExecutionConfig{RepoSelection: workspace.RepoSelectionBackendOnly},
+			},
+		},
+	}
+	manifestRaw, err := workspace.RenderManifest(manifest)
+	if err != nil {
+		t.Fatalf("render manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, workspace.ManifestFileName), manifestRaw, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	ws, err := workspace.Open(root)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure workspace layout: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/billing.md", []byte("# Domain: Billing\n\n- id: `billing`\n- repo_scope: `unknown-scope`\n")); err != nil {
+		t.Fatalf("write billing domain card: %v", err)
+	}
+
+	runner := &trackingRunner{}
+	service := NewService(WithRunner(runner))
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run refresh pipeline: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
+	}
+
+	questionsReport, err := os.ReadFile(filepath.Join(ws.Path, "reports/coverage/open-questions.md"))
+	if err != nil {
+		t.Fatalf("read open questions report: %v", err)
+	}
+	text := string(questionsReport)
+	if !strings.Contains(text, "q.domain.billing.repo-scope-excluded-by-selection") {
+		t.Fatalf("expected excluded-by-selection question, got %q", text)
+	}
+	if !strings.Contains(text, "declares unknown repo_scope \"unknown-scope\"; resolved fallback repo_scope \"billing\" is excluded") {
+		t.Fatalf("expected excluded question to mention declared unknown + fallback scope, got %q", text)
+	}
+}
+
+func TestIsRepoScopeSelectedDefaultsToAllWhenModeEmpty(t *testing.T) {
+	t.Parallel()
+
+	execution := pipelineExecution{
+		repoSelectionMode:  "",
+		selectedRepoScopes: nil,
+	}
+	if !execution.isRepoScopeSelected("orders-monolith") {
+		t.Fatalf("expected empty repoSelectionMode to default to all")
+	}
+}
+
 func TestSemanticGuardDropsRuntimeProviderEntityInRefreshStep1Collect(t *testing.T) {
 	t.Parallel()
 
@@ -1717,10 +2042,18 @@ func TestSemanticGuardAddsFallbackCrossRepoEdgeForMultiScopeRefreshStep3(t *test
 		t.Fatalf("expected fallback cross-repo edge warning in run warnings, got %#v", info.Warnings)
 	}
 
-	step3Taskruns, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step3-findings.json"))
+	step3TaskrunCandidates, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step3-findings*.json"))
 	if err != nil {
 		t.Fatalf("glob step3 taskruns: %v", err)
 	}
+	step3Taskruns := make([]string, 0, len(step3TaskrunCandidates))
+	for _, candidate := range step3TaskrunCandidates {
+		if strings.Contains(candidate, "shard-summary") {
+			continue
+		}
+		step3Taskruns = append(step3Taskruns, candidate)
+	}
+	sort.Strings(step3Taskruns)
 	if len(step3Taskruns) == 0 {
 		t.Fatalf("expected refresh step3 taskrun file")
 	}
@@ -1881,10 +2214,18 @@ func TestSemanticGuardNormalizesMultiRepoMissingEdgeAndInvalidEvidence(t *testin
 		t.Fatalf("expected at least one upsert_entity in step1 payload")
 	}
 
-	step3Taskruns, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step3-findings.json"))
+	step3TaskrunCandidates, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step3-findings*.json"))
 	if err != nil {
 		t.Fatalf("glob step3 taskruns: %v", err)
 	}
+	step3Taskruns := make([]string, 0, len(step3TaskrunCandidates))
+	for _, candidate := range step3TaskrunCandidates {
+		if strings.Contains(candidate, "shard-summary") {
+			continue
+		}
+		step3Taskruns = append(step3Taskruns, candidate)
+	}
+	sort.Strings(step3Taskruns)
 	if len(step3Taskruns) == 0 {
 		t.Fatalf("expected refresh step3 taskrun file")
 	}
@@ -2415,7 +2756,8 @@ func createWorkspaceWithTimeouts(t *testing.T, timeouts map[string]int) workspac
 	manifest.WriteString("  - name: users-service\n")
 	manifest.WriteString("    path: " + repoB + "\n")
 	manifest.WriteString("runtime:\n")
-	manifest.WriteString("  timeouts:\n")
+	manifest.WriteString("  profile:\n")
+	manifest.WriteString("    timeouts:\n")
 	for _, key := range []string{
 		"step_timeout_sec",
 		"heartbeat_sec",
@@ -2427,7 +2769,7 @@ func createWorkspaceWithTimeouts(t *testing.T, timeouts map[string]int) workspac
 		"ui_cancel_poll_timeout_sec",
 	} {
 		if value, ok := timeouts[key]; ok && value > 0 {
-			manifest.WriteString(fmt.Sprintf("    %s: %d\n", key, value))
+			manifest.WriteString(fmt.Sprintf("      %s: %d\n", key, value))
 		}
 	}
 

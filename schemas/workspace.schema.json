@@ -45,6 +45,9 @@
           "type": "string",
           "minLength": 1
         },
+        "analysis": {
+          "$ref": "#/$defs/repoAnalysis"
+        },
         "ref": {
           "type": "string",
           "minLength": 1
@@ -74,6 +77,35 @@
         }
       ]
     },
+    "repoAnalysis": {
+      "type": "object",
+      "properties": {
+        "include": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "backend",
+            "frontend",
+            "mixed",
+            "unknown"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "docs": {
       "type": "object",
       "properties": {
@@ -88,8 +120,20 @@
     "runtime": {
       "type": "object",
       "properties": {
+        "profile": {
+          "$ref": "#/$defs/runtimeProfile"
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtimeProfile": {
+      "type": "object",
+      "properties": {
         "timeouts": {
           "$ref": "#/$defs/runtimeTimeouts"
+        },
+        "execution": {
+          "$ref": "#/$defs/runtimeExecution"
         }
       },
       "additionalProperties": false
@@ -128,6 +172,53 @@
         "ui_cancel_poll_timeout_sec": {
           "type": "integer",
           "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtimeExecution": {
+      "type": "object",
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "sequential",
+            "parallel"
+          ]
+        },
+        "max_parallel_tasks": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "failure_policy": {
+          "type": "string",
+          "enum": [
+            "fail_fast",
+            "best_effort"
+          ]
+        },
+        "repo_selection": {
+          "type": "string",
+          "enum": [
+            "all",
+            "backend_only"
+          ]
+        },
+        "shard_discovery": {
+          "$ref": "#/$defs/runtimeShardDiscovery"
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtimeShardDiscovery": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "heuristics",
+            "semantic"
+          ]
         }
       },
       "additionalProperties": false

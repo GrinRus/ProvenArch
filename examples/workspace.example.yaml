@@ -7,19 +7,32 @@ repos:
   # configured through `workspace.yaml`.
   - name: payments-service
     path: /absolute/path/to/payments-service
+    analysis:
+      role: backend
   - name: users-service
     git_url: https://gitlab.example.com/platform/users-service.git
     ref: main
+    analysis:
+      role: backend
 docs:
   imports_path: ./docs/imports
 runtime:
-  timeouts:
-    # Optional persisted timeout profile (effective precedence: env > workspace > defaults).
-    step_timeout_sec: 1800
-    heartbeat_sec: 30
-    pipeline_timeout_sec: 2400
-    pipeline_kill_grace_sec: 30
-    api_ready_timeout_sec: 60
-    api_init_timeout_sec: 120
-    ui_init_poll_timeout_sec: 900
-    ui_cancel_poll_timeout_sec: 420
+  profile:
+    timeouts:
+      # Optional persisted timeout profile (effective precedence: env > workspace > defaults).
+      step_timeout_sec: 1800
+      heartbeat_sec: 30
+      pipeline_timeout_sec: 2400
+      pipeline_kill_grace_sec: 30
+      api_ready_timeout_sec: 60
+      api_init_timeout_sec: 120
+      ui_init_poll_timeout_sec: 900
+      ui_cancel_poll_timeout_sec: 420
+    execution:
+      strategy: sequential
+      max_parallel_tasks: 1
+      failure_policy: best_effort
+      # all|backend_only (default all)
+      repo_selection: all
+      shard_discovery:
+        mode: heuristics
