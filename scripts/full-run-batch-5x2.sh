@@ -963,7 +963,7 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
     write_frontend_status_json \
       "$output_dir/frontend-e2e-result.json" \
       "$provider" \
-      "init-inspect" \
+      "init-inspect-service-first" \
       "skipped" \
       "frontend_mode_${BATCH_FRONTEND_MODE}_selection_${SELECTED_RUN_INDEXES_CSV}" \
       "$output_dir/frontend-workspace" \
@@ -993,7 +993,7 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
     write_frontend_status_json \
       "$output_dir/frontend-e2e-result.json" \
       "$provider" \
-      "init-inspect" \
+      "init-inspect-service-first" \
       "failed" \
       "backend_workspace_missing" \
       "$workspace" \

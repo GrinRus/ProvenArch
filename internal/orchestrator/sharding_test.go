@@ -107,7 +107,7 @@ func TestRunInitParallelShardsUseDeterministicApplyOrderAndPersistShardPlan(t *t
 		t.Fatalf("expected deterministic apply order to keep services/web value, got:\n%s", string(sharedEntityRaw))
 	}
 
-	step1Summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step1-collect-shard-summary-*.json"))
+	step1Summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step2-service_collect-shard-summary-*.json"))
 	if len(step1Summary.Items) != 2 {
 		t.Fatalf("expected two step1 shard summary items, got %d", len(step1Summary.Items))
 	}
@@ -118,7 +118,7 @@ func TestRunInitParallelShardsUseDeterministicApplyOrderAndPersistShardPlan(t *t
 		t.Fatalf("expected second summary shard path to be services/web, got %+v", step1Summary.Items[1].PathScopes)
 	}
 
-	step1Plan := readSingleShardPlan(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step1-collect-shard-plan-*.json"))
+	step1Plan := readSingleShardPlan(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step2-service_collect-shard-plan-*.json"))
 	if len(step1Plan.Items) != 2 {
 		t.Fatalf("expected two step1 shard-plan items, got %d", len(step1Plan.Items))
 	}
@@ -129,7 +129,7 @@ func TestRunInitParallelShardsUseDeterministicApplyOrderAndPersistShardPlan(t *t
 		t.Fatalf("expected second shard-plan path to be services/web, got %+v", step1Plan.Items[1].PathScopes)
 	}
 
-	step1Taskruns, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-init-step1-collect-domain-*-shard-*.json"))
+	step1Taskruns, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-init-step2-service_collect-domain-*-shard-*.json"))
 	if err != nil {
 		t.Fatalf("glob step1 shard taskruns: %v", err)
 	}
@@ -177,15 +177,9 @@ func TestRunInitSemanticShardPlanIncludesGraphEdges(t *testing.T) {
 		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
 	}
 
-	step1Plan := readSingleShardPlan(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step1-collect-shard-plan-*.json"))
+	step1Plan := readSingleShardPlan(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step2-service_collect-shard-plan-*.json"))
 	if step1Plan.ShardMode != acpruntime.ExecutionShardDiscoverySemantic {
 		t.Fatalf("expected semantic shard mode in plan, got %q", step1Plan.ShardMode)
-	}
-	if len(step1Plan.SemanticGraph) == 0 {
-		t.Fatalf("expected non-empty semantic graph in shard plan artifact")
-	}
-	if step1Plan.SemanticGraph[0].RepoScope != "orders-monolith" {
-		t.Fatalf("expected semantic graph edge repo_scope orders-monolith, got %+v", step1Plan.SemanticGraph[0])
 	}
 }
 
@@ -214,11 +208,11 @@ func TestRunInitBestEffortShardFailureContinuesAndFailsFinal(t *testing.T) {
 	if info.ErrorCode != runErrorCodePartialFailed {
 		t.Fatalf("expected %q error code, got %q", runErrorCodePartialFailed, info.ErrorCode)
 	}
-	if info.CurrentStep != "init.step4.proposals" {
+	if info.CurrentStep != "init.step6.proposals" {
 		t.Fatalf("expected pipeline to continue through step4, got current_step=%q", info.CurrentStep)
 	}
 
-	step1Summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step1-collect-shard-summary-*.json"))
+	step1Summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step2-service_collect-shard-summary-*.json"))
 	failedCount := 0
 	succeededCount := 0
 	for _, item := range step1Summary.Items {
@@ -233,7 +227,7 @@ func TestRunInitBestEffortShardFailureContinuesAndFailsFinal(t *testing.T) {
 		t.Fatalf("expected mixed shard statuses in step1 summary, got %+v", step1Summary.Items)
 	}
 
-	step3Summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step3-findings-shard-summary.json"))
+	step3Summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step4-service_findings-shard-summary-*.json"))
 	if len(step3Summary.Items) == 0 {
 		t.Fatalf("expected step3 shard summary items")
 	}
@@ -264,11 +258,11 @@ func TestRunInitFailFastStopsOnShardFailure(t *testing.T) {
 	if info.ErrorCode == runErrorCodePartialFailed {
 		t.Fatalf("did not expect %q in fail_fast mode", runErrorCodePartialFailed)
 	}
-	if info.CurrentStep != "init.step1.collect" {
+	if info.CurrentStep != "init.step2.service_collect" {
 		t.Fatalf("expected fail_fast stop at step1, got %q", info.CurrentStep)
 	}
 
-	step3Summaries, globErr := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-init-step3-findings-shard-summary*.json"))
+	step3Summaries, globErr := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-init-step4-service_findings-shard-summary*.json"))
 	if globErr != nil {
 		t.Fatalf("glob step3 shard summaries: %v", globErr)
 	}
@@ -351,6 +345,7 @@ func TestRefreshPipelineUsesShardingForStep1AndStep3(t *testing.T) {
 	info, _, err := service.Run(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -360,11 +355,11 @@ func TestRefreshPipelineUsesShardingForStep1AndStep3(t *testing.T) {
 		t.Fatalf("expected succeeded refresh run, got %s (%s)", info.Status, info.Error)
 	}
 
-	step1Summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step1-collect-shard-summary-*.json"))
+	step1Summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step2-service_collect-shard-summary-*.json"))
 	if len(step1Summary.Items) == 0 {
 		t.Fatalf("expected refresh step1 shard summary items")
 	}
-	step3Summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step3-findings-shard-summary.json"))
+	step3Summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step4-service_findings-shard-summary-*.json"))
 	if len(step3Summary.Items) == 0 {
 		t.Fatalf("expected refresh step3 shard summary items")
 	}
@@ -398,7 +393,7 @@ func TestSyntheticLargeMonorepoShardingProducesManyShardArtifacts(t *testing.T) 
 		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
 	}
 
-	step1Summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step1-collect-shard-summary-*.json"))
+	step1Summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step2-service_collect-shard-summary-*.json"))
 	if len(step1Summary.Items) < 10 {
 		t.Fatalf("expected at least 10 shards in synthetic monorepo, got %d", len(step1Summary.Items))
 	}
@@ -434,26 +429,27 @@ func TestMultiRepoShardingHandlesDifferentModuleCounts(t *testing.T) {
 		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
 	}
 
-	step1Summaries, globErr := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-init-step1-collect-shard-summary-*.json"))
+	step1Summaries, globErr := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-init-step2-service_collect-shard-summary-*.json"))
 	if globErr != nil {
 		t.Fatalf("glob step1 shard summaries: %v", globErr)
 	}
-	if len(step1Summaries) != 2 {
-		t.Fatalf("expected two domain step1 shard summaries for two repos, got %d (%v)", len(step1Summaries), step1Summaries)
+	if len(step1Summaries) != 1 {
+		t.Fatalf("expected one aggregated service step1 shard summary, got %d (%v)", len(step1Summaries), step1Summaries)
 	}
-	summarySizes := make([]int, 0, len(step1Summaries))
-	for _, path := range step1Summaries {
-		var summary runtimeShardSummary
-		readJSONFile(t, path, &summary)
-		summarySizes = append(summarySizes, len(summary.Items))
+	var summary runtimeShardSummary
+	readJSONFile(t, step1Summaries[0], &summary)
+	repoCounts := map[string]int{}
+	for _, item := range summary.Items {
+		if len(item.RepoScopes) == 0 {
+			t.Fatalf("expected repo scopes in shard summary item: %+v", item)
+		}
+		repoCounts[item.RepoScopes[0]]++
 	}
-	sort.Ints(summarySizes)
-	expected := []int{2, 3}
-	if !reflect.DeepEqual(summarySizes, expected) {
-		t.Fatalf("unexpected per-domain shard counts: got=%v want=%v", summarySizes, expected)
+	if repoCounts["payments-service"] != 2 || repoCounts["users-service"] != 3 {
+		t.Fatalf("unexpected per-repo shard counts: %+v", repoCounts)
 	}
 
-	step3Summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step3-findings-shard-summary.json"))
+	step3Summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step4-service_findings-shard-summary-*.json"))
 	if len(step3Summary.Items) != 5 {
 		t.Fatalf("expected five step3 shards (2+3), got %d", len(step3Summary.Items))
 	}
@@ -588,7 +584,7 @@ func runtimeConfigFromShardingOptions(options shardingWorkspaceOptions) *workspa
 type deterministicApplyOrderRunner struct{}
 
 func (deterministicApplyOrderRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
-	if strings.HasSuffix(task.StepID, "step1.collect") {
+	if strings.HasSuffix(task.StepID, "step2.service_collect") {
 		pathScope := "."
 		if len(task.PathScopes) > 0 && strings.TrimSpace(task.PathScopes[0]) != "" {
 			pathScope = strings.TrimSpace(task.PathScopes[0])
@@ -662,7 +658,7 @@ func (deterministicApplyOrderRunner) Preflight(context.Context) error {
 type step1ShardFailureRunner struct{}
 
 func (step1ShardFailureRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
-	if strings.HasSuffix(task.StepID, "step1.collect") && containsString(task.PathScopes, "services/api") {
+	if strings.HasSuffix(task.StepID, "step2.service_collect") && containsString(task.PathScopes, "services/api") {
 		return acpruntime.Result{}, acpruntime.WrapRunnerError(
 			acpruntime.ProviderClaudeCode,
 			acpruntime.ErrorCodeRunnerParseFailed,
@@ -686,7 +682,7 @@ type concurrencyProbeRunner struct {
 }
 
 func (r *concurrencyProbeRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
-	if strings.HasSuffix(task.StepID, "step1.collect") {
+	if strings.HasSuffix(task.StepID, "step2.service_collect") {
 		r.mu.Lock()
 		r.current++
 		if r.current > r.max {

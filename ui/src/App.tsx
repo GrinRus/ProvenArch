@@ -234,8 +234,8 @@ const runtimeTimeoutLabels: Record<RuntimeTimeoutKey, string> = {
 const runtimeExecutionKeys: RuntimeExecutionKey[] = ["strategy", "max_parallel_tasks", "failure_policy", "shard_discovery_mode", "repo_selection"];
 
 const defaultRuntimeExecutionValues: RuntimeExecutionValues = {
-  strategy: "sequential",
-  max_parallel_tasks: 1,
+  strategy: "parallel",
+  max_parallel_tasks: 3,
   failure_policy: "best_effort",
   shard_discovery_mode: "heuristics",
   repo_selection: "all",
@@ -498,6 +498,7 @@ export default function App() {
   const [runLogsViewMode, setRunLogsViewMode] = useState<"line" | "line+fields">("line");
   const [runActionStatus, setRunActionStatus] = useState("");
   const [cancelBusy, setCancelBusy] = useState(false);
+  const [refreshMode, setRefreshMode] = useState<"incremental" | "full">("incremental");
 
   const [coverageSummary, setCoverageSummary] = useState<string>("");
   const [openQuestions, setOpenQuestions] = useState<string>("");
@@ -1073,10 +1074,18 @@ export default function App() {
     setSelectedArtifactContent("");
     resetRunLogs();
     try {
+      const requestBody: Record<string, unknown> = {
+        trigger: "ui",
+        commit: false,
+        create_proposal_branch: false,
+      };
+      if (pipeline === "refresh") {
+        requestBody.refresh_mode = refreshMode;
+      }
       const payload = await fetchJSON<RunStartResponse>(`/api/pipeline/${pipeline}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ trigger: "ui", commit: false, create_proposal_branch: false })
+        body: JSON.stringify(requestBody)
       });
       setRunList((previous) => [
         {
@@ -1416,7 +1425,7 @@ export default function App() {
             {(validateResult.resolved_repos ?? []).length > 0 ? (
               <div className="repo-summary">
                 <p className="hint">Resolved repos</p>
-                <ul>
+                <ul data-testid="workspace-resolved-repos-list">
                   {(validateResult.resolved_repos ?? []).map((repo) => (
                     <li key={`resolved-${repo.name}-${repo.path}`}>
                       <code>{repo.name}</code> ({repo.source}) {repo.path}
@@ -1633,6 +1642,17 @@ export default function App() {
 
       <section className="panel" data-testid="runs-control-panel">
         <h2>Runs: Pipeline Control</h2>
+        <label htmlFor="run-refresh-mode">Refresh mode</label>
+        <select
+          id="run-refresh-mode"
+          data-testid="run-refresh-mode-select"
+          value={refreshMode}
+          onChange={(event) => setRefreshMode(event.target.value as "incremental" | "full")}
+          disabled={busy}
+        >
+          <option value="incremental">incremental</option>
+          <option value="full">full</option>
+        </select>
         <div className="actions">
           <button type="button" onClick={() => void handleRunPipeline("init")} disabled={busy} data-testid="run-init-btn">
             Run init

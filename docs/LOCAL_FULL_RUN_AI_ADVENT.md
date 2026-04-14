@@ -292,7 +292,9 @@ Output semantics:
 - `scripts/frontend-live-e2e.sh` берёт poll timeouts из effective runtime config (`GET /api/runtime/timeouts`) с env override (`ACP_UI_INIT_POLL_TIMEOUT_SEC`/`ACP_UI_CANCEL_POLL_TIMEOUT_SEC`);
 - `UI_E2E_EXPECTED_REPO_COUNT` задаёт ожидаемое число resolved repos в live e2e (default `1`).
 - `UI_E2E_SCENARIO`:
-  - `init-inspect` (default): validate -> run init -> inspect artifacts;
+  - `init-inspect-service-first` (default): validate -> run init -> inspect artifacts + service-first checks;
+  - `refresh-incremental`: validate -> run refresh(incremental) + service-first checks;
+  - `refresh-full`: validate -> run refresh(full) + service-first checks;
   - `cancel-refresh`: validate -> run refresh -> cancel selected run -> verify `failed + run_canceled`.
 - для `UI_E2E_SCENARIO=cancel-refresh` script использует controlled slow stub runner;
   длительность задаётся `UI_E2E_CANCEL_STUB_SLEEP_SEC` (default `90`).

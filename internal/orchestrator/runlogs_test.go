@@ -390,7 +390,7 @@ type syntheticMixedVersionRunner struct{}
 
 func (syntheticMixedVersionRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
 	runtime := map[string]any{"name": "synthetic-headless"}
-	if task.StepID == "init.step3.findings" {
+	if task.StepID == "init.step4.service_findings" {
 		runtime["version"] = "v1"
 	}
 	payload := map[string]any{

@@ -772,12 +772,12 @@ mock_flag = 1 if ('mock' in runtime_lower or 'fake' in runtime_lower) else 0
 signal_components = changeset + findings + questions + coverage_observed + coverage_missing + entity_upserts + edge_upserts
 zero_signal = 1 if signal_components == 0 else 0
 
-domain_collect_steps = 0
+service_collect_steps = 0
 for step in steps:
     step_id = str(step.get('step_id', ''))
     domain_id = str(step.get('domain_id', '')).strip()
-    if 'step1.collect' in step_id and domain_id:
-        domain_collect_steps += 1
+    if 'step2.service_collect' in step_id and domain_id:
+        service_collect_steps += 1
 
 status = str(payload.get('status', ''))
 print("\t".join([
@@ -789,7 +789,7 @@ print("\t".join([
     str(coverage_observed),
     str(coverage_missing),
     str(warnings),
-    str(domain_collect_steps),
+    str(service_collect_steps),
     str(mock_flag),
     str(zero_signal),
     runtime_blob,
@@ -901,8 +901,8 @@ if len(question_texts) != len(set(question_texts)):
     print(f"semantic quality failed for run {run_id}: duplicate open-question texts after normalization")
     sys.exit(5)
 
-critical_marker = "semantic_guard: critical_off_topic_drift in refresh.step1.collect"
-taskrun_glob = os.path.join(workspace, "reports", "taskruns", f"{run_id}-refresh-step1-collect-*.json")
+critical_marker = "semantic_guard: critical_off_topic_drift in refresh.step2.service_collect"
+taskrun_glob = os.path.join(workspace, "reports", "taskruns", f"{run_id}-refresh-step2-service_collect-*.json")
 for taskrun_path in sorted(glob.glob(taskrun_glob)):
     try:
         payload = json.load(open(taskrun_path, encoding="utf-8"))

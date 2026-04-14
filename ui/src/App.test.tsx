@@ -198,6 +198,109 @@ describe("App", () => {
     });
   });
 
+  it("sends selected refresh mode in refresh run request", async () => {
+    let runStarted = false;
+    let refreshRequestBody: Record<string, unknown> | null = null;
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+      const runLogsResponse = maybeRunLogsResponse(method, url);
+      if (runLogsResponse) {
+        return runLogsResponse;
+      }
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        if (!runStarted) {
+          return jsonResponse({ items: [] });
+        }
+        return jsonResponse({
+          items: [
+            {
+              run_id: "run-refresh",
+              pipeline: "refresh",
+              status: "succeeded",
+              started_at: "2026-04-03T12:00:00Z",
+              finished_at: "2026-04-03T12:00:02Z",
+              warnings: [],
+              error_code: null,
+              error: null
+            }
+          ]
+        });
+      }
+      if (method === "GET" && url === "/api/workspace/manifest") {
+        return jsonResponse({
+          content: "version: 1\nrepos:\n  - name: payments-service\n    path: /tmp/payments-service\n"
+        });
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Foverview.md") {
+        return textResponse("# Charter\n");
+      }
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Fwizard%2Fstep0-contract.json") {
+        return textResponse("not found", 404);
+      }
+      if (method === "POST" && url === "/api/pipeline/refresh") {
+        runStarted = true;
+        if (typeof init?.body === "string") {
+          refreshRequestBody = JSON.parse(init.body) as Record<string, unknown>;
+        }
+        return jsonResponse({ run_id: "run-refresh", status: "queued", refresh_mode: "full" });
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-refresh") {
+        return jsonResponse({
+          run_id: "run-refresh",
+          pipeline: "refresh",
+          status: "succeeded",
+          started_at: "2026-04-03T12:00:00Z",
+          finished_at: "2026-04-03T12:00:02Z",
+          current_step: "refresh.step6.proposals",
+          warnings: [],
+          error_code: null,
+          error: null
+        });
+      }
+      if (method === "GET" && url === "/api/pipeline/runs/run-refresh/artifacts") {
+        return jsonResponse({ run_id: "run-refresh", artifacts: [] });
+      }
+      if (method === "GET" && url === "/api/artifacts?path=reports%2Fcoverage%2Fsummary.md") {
+        return textResponse("Coverage: 90%\n");
+      }
+      if (method === "GET" && url === "/api/artifacts?path=reports%2Fcoverage%2Fopen-questions.md") {
+        return textResponse("- none\n");
+      }
+
+      return jsonResponse(
+        {
+          error: {
+            code: "not_found",
+            message: `unhandled request: ${method} ${url}`
+          }
+        },
+        404
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    await screen.findByTestId("run-refresh-mode-select");
+    fireEvent.change(screen.getByTestId("run-refresh-mode-select"), { target: { value: "full" } });
+    fireEvent.click(screen.getByTestId("run-refresh-btn"));
+
+    await screen.findByText(/Pipeline:\s*refresh/i);
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/pipeline/refresh", expect.any(Object));
+    });
+
+    expect(refreshRequestBody).not.toBeNull();
+    if (refreshRequestBody === null) {
+      throw new Error("refresh request body was not captured");
+    }
+    expect(refreshRequestBody["refresh_mode"]).toBe("full");
+    expect(refreshRequestBody["trigger"]).toBe("ui");
+  });
+
   it("edits selected baseline artifact and saves through write endpoint", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
@@ -551,7 +654,7 @@ describe("App", () => {
           status: "failed",
           started_at: "2026-04-03T11:59:00Z",
           finished_at: "2026-04-03T11:59:04Z",
-          current_step: "refresh.step3.findings",
+          current_step: "refresh.step4.service_findings",
           warnings: ["repo source warning"],
           error_code: "runner_parse_failed",
           error: "synthetic parse failure"
@@ -799,7 +902,7 @@ describe("App", () => {
               status: "succeeded",
               started_at: "2026-04-03T12:00:00Z",
               finished_at: "2026-04-03T12:00:02Z",
-              warnings: ["init.step1.collect: synthetic runtime warning"],
+              warnings: ["init.step2.service_collect: synthetic runtime warning"],
               error_code: null,
               error: null
             }
@@ -825,7 +928,7 @@ describe("App", () => {
           started_at: "2026-04-03T12:00:00Z",
           finished_at: "2026-04-03T12:00:02Z",
           current_step: null,
-          warnings: ["init.step1.collect: synthetic runtime warning"],
+          warnings: ["init.step2.service_collect: synthetic runtime warning"],
           error_code: null,
           error: null
         });
@@ -850,7 +953,7 @@ describe("App", () => {
               cursor: 0,
               timestamp: "2026-04-03T12:00:00Z",
               level: "info",
-              step_id: "init.step1.collect",
+              step_id: "init.step2.service_collect",
               domain_id: "payments-service",
               message: "runtime task started"
             },
@@ -858,7 +961,7 @@ describe("App", () => {
               cursor: 1,
               timestamp: "2026-04-03T12:00:01Z",
               level: "warning",
-              step_id: "init.step1.collect",
+              step_id: "init.step2.service_collect",
               domain_id: "payments-service",
               message: "runtime warning",
               taskrun_path: "reports/taskruns/run-log-step1.json",
@@ -1058,7 +1161,7 @@ describe("App", () => {
           status: "running",
           started_at: "2026-04-03T12:03:00Z",
           finished_at: null,
-          current_step: "refresh.step1.collect",
+          current_step: "refresh.step2.service_collect",
           warnings: ["newest active run"],
           error_code: null,
           error: null
@@ -1071,7 +1174,7 @@ describe("App", () => {
           status: "running",
           started_at: "2026-04-03T12:01:00Z",
           finished_at: null,
-          current_step: "refresh.step0.prepare",
+          current_step: "refresh.step1.service_inventory",
           warnings: ["older active run"],
           error_code: null,
           error: null
@@ -1183,7 +1286,7 @@ describe("App", () => {
           status: canceled ? "failed" : "running",
           started_at: "2026-04-03T12:01:00Z",
           finished_at: canceled ? "2026-04-03T12:01:09Z" : null,
-          current_step: canceled ? "refresh.step1.collect" : "refresh.step1.collect",
+          current_step: canceled ? "refresh.step2.service_collect" : "refresh.step2.service_collect",
           warnings: canceled ? ["user canceled run"] : [],
           error_code: canceled ? "run_canceled" : null,
           error: canceled ? "run canceled by request" : null
@@ -1220,7 +1323,7 @@ describe("App", () => {
                 cursor: 1,
                 timestamp: "2026-04-03T12:01:09Z",
                 level: "error",
-                step_id: "refresh.step3.findings",
+                step_id: "refresh.step4.service_findings",
                 message: "run failed",
                 fields: {
                   error_code: "run_canceled",
@@ -1333,7 +1436,7 @@ describe("App", () => {
           status: "running",
           started_at: "2026-04-03T12:01:00Z",
           finished_at: null,
-          current_step: "refresh.step1.collect",
+          current_step: "refresh.step2.service_collect",
           warnings: [],
           error_code: null,
           error: null
@@ -1453,7 +1556,7 @@ describe("App", () => {
           status: "running",
           started_at: "2026-04-03T12:01:00Z",
           finished_at: null,
-          current_step: "refresh.step1.collect",
+          current_step: "refresh.step2.service_collect",
           warnings: [],
           error_code: null,
           error: null

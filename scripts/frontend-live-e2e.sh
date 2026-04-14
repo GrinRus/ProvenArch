@@ -11,7 +11,7 @@ RUN_LOGS_MAX_RUNS="${RUN_LOGS_MAX_RUNS:-200}"
 OUTPUT_DIR="${OUTPUT_DIR:-}"
 LISTEN="${LISTEN:-}"
 UI_E2E_EXPECTED_REPO_COUNT="${UI_E2E_EXPECTED_REPO_COUNT:-1}"
-UI_E2E_SCENARIO="${UI_E2E_SCENARIO:-init-inspect}"
+UI_E2E_SCENARIO="${UI_E2E_SCENARIO:-init-inspect-service-first}"
 UI_E2E_CANCEL_STUB_SLEEP_SEC="${UI_E2E_CANCEL_STUB_SLEEP_SEC:-90}"
 UI_E2E_INIT_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-${UI_E2E_INIT_TIMEOUT_SEC:-}}"
 UI_E2E_CANCEL_TIMEOUT_SEC="${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-${UI_E2E_CANCEL_TIMEOUT_SEC:-}}"
@@ -138,10 +138,10 @@ else
 fi
 
 case "$UI_E2E_SCENARIO" in
-  init-inspect|cancel-refresh)
+  init-inspect-service-first|init-inspect|refresh-incremental|refresh-full|cancel-refresh)
     ;;
   *)
-    die "unsupported UI_E2E_SCENARIO '$UI_E2E_SCENARIO' (allowed: init-inspect, cancel-refresh)"
+    die "unsupported UI_E2E_SCENARIO '$UI_E2E_SCENARIO' (allowed: init-inspect-service-first, refresh-incremental, refresh-full, cancel-refresh)"
     ;;
 esac
 
@@ -172,7 +172,7 @@ set -Eeuo pipefail
 trap 'exit 130' TERM INT HUP PIPE
 sleep ${UI_E2E_CANCEL_STUB_SLEEP_SEC}
 cat <<'JSON'
-{"meta":{"task_id":"task-stub","step_id":"refresh.step1.collect","runtime":{"name":"${RUNTIME_PROVIDER}","version":"cancel-stub"},"started_at":"2026-04-12T00:00:00Z"},"summary":"stub completion (unexpected in cancel scenario)","changeset":[]}
+{"meta":{"task_id":"task-stub","step_id":"refresh.step2.service_collect","runtime":{"name":"${RUNTIME_PROVIDER}","version":"cancel-stub"},"started_at":"2026-04-12T00:00:00Z"},"summary":"stub completion (unexpected in cancel scenario)","changeset":[]}
 JSON
 EOF
   chmod +x "$stub_runner"

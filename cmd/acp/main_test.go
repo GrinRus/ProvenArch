@@ -65,7 +65,7 @@ func TestRunSubcommandHelpReturnsZero(t *testing.T) {
 	if code != exitCodeOK {
 		t.Fatalf("expected exit code %d, got %d", exitCodeOK, code)
 	}
-	if !strings.Contains(stderr.String(), "Usage: acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]") {
+	if !strings.Contains(stderr.String(), "Usage: acp run --workspace <abs-path> --pipeline init|refresh [--refresh-mode incremental|full] [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]") {
 		t.Fatalf("expected run usage in stderr, got %q", stderr.String())
 	}
 }
@@ -377,6 +377,50 @@ func TestRunPipelineRejectsInvalidPipeline(t *testing.T) {
 	}
 }
 
+func TestRunPipelineRejectsInvalidRefreshMode(t *testing.T) {
+	t.Parallel()
+
+	root := writeWorkspace(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"run",
+		"--workspace", root,
+		"--pipeline", "refresh",
+		"--refresh-mode", "delta",
+		"--non-interactive",
+	}, &stdout, &stderr)
+	if code != exitCodeValidation {
+		t.Fatalf("expected exit code %d, got %d", exitCodeValidation, code)
+	}
+	if !strings.Contains(stderr.String(), "unsupported refresh mode") {
+		t.Fatalf("expected refresh-mode validation error, got %q", stderr.String())
+	}
+}
+
+func TestRunPipelineInitWarnsRefreshModeIgnored(t *testing.T) {
+	t.Parallel()
+
+	root := writeWorkspace(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"run",
+		"--workspace", root,
+		"--pipeline", "init",
+		"--refresh-mode", "full",
+		"--non-interactive",
+	}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d", exitCodeOK, code)
+	}
+	if !strings.Contains(stderr.String(), "warning: --refresh-mode=full is ignored for init pipeline") {
+		t.Fatalf("expected init warning about ignored refresh mode, got %q", stderr.String())
+	}
+}
+
 func TestRunPipelineBootstrapSkeleton(t *testing.T) {
 	t.Parallel()
 
@@ -399,6 +443,34 @@ func TestRunPipelineBootstrapSkeleton(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "runtime provider note: ignored in fake mode") {
 		t.Fatalf("expected fake runtime provider note, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "refresh_mode: incremental") {
+		t.Fatalf("expected default refresh mode output, got %q", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr, got %q", stderr.String())
+	}
+}
+
+func TestRunPipelineRefreshPrintsExplicitRefreshMode(t *testing.T) {
+	t.Parallel()
+
+	root := writeWorkspace(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"run",
+		"--workspace", root,
+		"--pipeline", "refresh",
+		"--refresh-mode", "full",
+		"--non-interactive",
+	}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d", exitCodeOK, code)
+	}
+	if !strings.Contains(stdout.String(), "refresh_mode: full") {
+		t.Fatalf("expected explicit refresh mode output, got %q", stdout.String())
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("expected empty stderr, got %q", stderr.String())
@@ -1078,7 +1150,7 @@ if raw:
         task = {}
 
 task_id = first_non_empty(task, ["task_id", "TaskID"]) or from_prompt("TaskID") or from_prompt("task_id") or "task"
-step_id = first_non_empty(task, ["step_id", "StepID"]) or from_prompt("StepID") or from_prompt("step_id") or "init.step1.collect"
+step_id = first_non_empty(task, ["step_id", "StepID"]) or from_prompt("StepID") or from_prompt("step_id") or "init.step2.service_collect"
 run_id = first_non_empty(task, ["run_id", "RunID"]) or from_prompt("RunID") or from_prompt("run_id")
 payload = {
     "meta": {

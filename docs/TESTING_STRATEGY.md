@@ -124,7 +124,8 @@ Implemented additional jobs:
   - `TestDeterministicSnapshotScopeExcludesRunSpecificArtifacts`
 - `smoke-cli`
   - `acp run --workspace ... --pipeline init --runtime fake --non-interactive`
-  - `acp run --workspace ... --pipeline refresh --runtime fake --non-interactive`
+  - `acp run --workspace ... --pipeline refresh --refresh-mode incremental --runtime fake --non-interactive`
+  - `acp run --workspace ... --pipeline refresh --refresh-mode full --runtime fake --non-interactive`
   - deterministic fake runner only
 - `smoke-api`
   - `acp serve --workspace ... --runtime fake`
@@ -156,24 +157,26 @@ Implemented additional jobs:
 ### Golden tests
 - entity/edge file materialization
 - stable slug normalization and collision handling
-- Step 2 `reports/as-is/*`
-- Step 3 findings materialization
-- Step 4 proposals/changelog determinism
+- Step 3 `reports/as-is/*`
+- Step 4 findings materialization
+- Step 6 proposals/changelog determinism
 
 ### Scenario integration tests
 - one-service happy path
 - multi-repo dependency extraction
 - missing owner / missing CI-CD evidence path
 - unresolved domain/team becomes question/finding, not new card
-- deterministic Step 1 enrichment включает `evidence_refs` в domain/team cards
+- deterministic Step 2 enrichment включает `evidence_refs` в domain/team cards
 - sharded runtime regression:
-  - step1/step3 materialize per-shard taskruns + shard-plan/shard-summary artifacts
+  - step2/step4 materialize per-shard taskruns + shard-plan/shard-summary artifacts
   - parallel scheduler keeps deterministic merge/apply order despite out-of-order shard completion
   - TaskResult shard metadata (`meta.shard_id`, `meta.repo_scopes`, `meta.path_scopes`) сохраняется в persisted taskruns
+  - global-review выполняется ровно 1 раз (`step5.global_review`)
 
 ### Smoke tests
 - `acp run --workspace ... --pipeline init --runtime fake --non-interactive`
-- `acp run --workspace ... --pipeline refresh --runtime fake --non-interactive`
+- `acp run --workspace ... --pipeline refresh --refresh-mode incremental --runtime fake --non-interactive`
+- `acp run --workspace ... --pipeline refresh --refresh-mode full --runtime fake --non-interactive`
 - `acp serve --workspace ... --runtime fake`
 - `/api/workspace/validate` без request body
 - pipeline endpoints не принимают `workspace_path`
@@ -229,8 +232,10 @@ Implemented additional jobs:
   - `scripts/frontend-live-e2e.sh`: Playwright output в `$OUTPUT_DIR/playwright-results`
   - `scripts/frontend-live-e2e.sh` читает effective UI poll timeouts из `GET /api/runtime/timeouts` (если env override не задан)
   - `UI_E2E_EXPECTED_REPO_COUNT` задаёт ожидаемое количество resolved repos (default `1`)
-  - `UI_E2E_SCENARIO=init-inspect|cancel-refresh` переключает live flow:
-    - `init-inspect`: validate -> run init -> inspect artifacts
+  - `UI_E2E_SCENARIO=init-inspect-service-first|refresh-incremental|refresh-full|cancel-refresh` переключает live flow:
+    - `init-inspect-service-first`: validate -> run init -> inspect artifacts + service-first checks
+    - `refresh-incremental`: validate -> run refresh(incremental) + service-first checks
+    - `refresh-full`: validate -> run refresh(full) + service-first checks
     - `cancel-refresh`: validate -> run refresh -> cancel selected run -> expect `failed + run_canceled`
   - `UI_E2E_CANCEL_STUB_SLEEP_SEC` задаёт длительность controlled slow stub runner для `cancel-refresh`
   - `ui/e2e/live-flow.spec.ts` + `npm run e2e:live --prefix ui`

@@ -257,6 +257,7 @@ func TestStartAsyncRunRegistersAndCompletesRun(t *testing.T) {
 	runID, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -270,7 +271,7 @@ func TestStartAsyncRunRegistersAndCompletesRun(t *testing.T) {
 	if info.Status != RunStatusSucceeded {
 		t.Fatalf("expected async run success, got status=%s error=%s", info.Status, info.Error)
 	}
-	if info.CurrentStep != "refresh.step4.proposals" {
+	if info.CurrentStep != "refresh.step6.proposals" {
 		t.Fatalf("expected final current_step to point to last step, got %q", info.CurrentStep)
 	}
 }
@@ -328,6 +329,7 @@ func TestRunHistoryPersistsAndLoadsAcrossServiceRestart(t *testing.T) {
 	runInfo, _, err := service.Run(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -417,6 +419,7 @@ func TestRunHistoryAsyncTransitionsQueuedRunningFinal(t *testing.T) {
 	run1, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -425,6 +428,7 @@ func TestRunHistoryAsyncTransitionsQueuedRunningFinal(t *testing.T) {
 	run2, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -491,6 +495,7 @@ func TestStartAsyncRunDebounceLastEventWins(t *testing.T) {
 	run1, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -499,6 +504,7 @@ func TestStartAsyncRunDebounceLastEventWins(t *testing.T) {
 	run2, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -507,6 +513,7 @@ func TestStartAsyncRunDebounceLastEventWins(t *testing.T) {
 	run3, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -545,6 +552,7 @@ func TestStartAsyncRunRejectsWhenPendingOutsideDebounceWindow(t *testing.T) {
 	run1, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -553,6 +561,7 @@ func TestStartAsyncRunRejectsWhenPendingOutsideDebounceWindow(t *testing.T) {
 	run2, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -564,6 +573,7 @@ func TestStartAsyncRunRejectsWhenPendingOutsideDebounceWindow(t *testing.T) {
 	rejectedRunID, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err == nil {
@@ -601,6 +611,7 @@ func TestCancelRunPendingImmediateFailure(t *testing.T) {
 	run1, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -609,6 +620,7 @@ func TestCancelRunPendingImmediateFailure(t *testing.T) {
 	run2, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -653,6 +665,7 @@ func TestCancelRunActiveCooperativeAndQueueContinues(t *testing.T) {
 	run1, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -661,6 +674,7 @@ func TestCancelRunActiveCooperativeAndQueueContinues(t *testing.T) {
 	run2, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -706,6 +720,7 @@ func TestCancelRunActiveClassifiesRunnerKilledAsCanceled(t *testing.T) {
 	runID, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -850,7 +865,7 @@ func TestNewServiceReconcilesStaleRunsAfterRestart(t *testing.T) {
 			Pipeline:    string(PipelineRefresh),
 			Status:      RunStatusRunning,
 			StartedAt:   baseTime.Add(-3 * time.Minute),
-			CurrentStep: "refresh.step1.collect",
+			CurrentStep: "refresh.step2.service_collect",
 		},
 	})
 	service.storeRun(runRecord{
@@ -859,7 +874,7 @@ func TestNewServiceReconcilesStaleRunsAfterRestart(t *testing.T) {
 			Pipeline:    string(PipelineInit),
 			Status:      RunStatusSucceeded,
 			StartedAt:   baseTime.Add(-5 * time.Minute),
-			CurrentStep: "init.step4.proposals",
+			CurrentStep: "init.step6.proposals",
 		},
 	})
 
@@ -938,6 +953,7 @@ func TestRuntimeFailureLogsIncludeSanitizedSnippets(t *testing.T) {
 	info, _, err := service.Run(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err == nil {
@@ -995,6 +1011,7 @@ func TestRuntimeParseFailureLogsIncludeSanitizedSnippets(t *testing.T) {
 	info, _, err := service.Run(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err == nil {
@@ -1174,7 +1191,7 @@ func TestInitStep1ExecutesPerCanonicalDomainAndMaterializesDomainTaskruns(t *tes
 		t.Fatalf("expected canonical domain cards to exist after init")
 	}
 
-	collectTasks := runner.tasksForStep("init.step1.collect")
+	collectTasks := runner.tasksForStep("init.step2.service_collect")
 	if len(collectTasks) != len(domainIDs) {
 		t.Fatalf("expected %d step1 runtime executions, got %d", len(domainIDs), len(collectTasks))
 	}
@@ -1197,16 +1214,17 @@ func TestInitStep1ExecutesPerCanonicalDomainAndMaterializesDomainTaskruns(t *tes
 		}
 	}
 
-	for _, domainID := range domainIDs {
-		taskrunPath := filepath.Join(
-			ws.Path,
-			"reports",
-			"taskruns",
-			fmt.Sprintf("%s-init-step1-collect-domain-%s.json", info.RunID, sanitizeDomainArtifactSlug(domainID)),
-		)
+	taskrunPaths, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-init-step2-service_collect-domain-service-*.json"))
+	if err != nil {
+		t.Fatalf("glob step2 service taskruns: %v", err)
+	}
+	if len(taskrunPaths) == 0 {
+		t.Fatalf("expected non-empty step2 service taskruns")
+	}
+	for _, taskrunPath := range taskrunPaths {
 		taskrun, readErr := os.ReadFile(taskrunPath)
 		if readErr != nil {
-			t.Fatalf("read per-domain taskrun %s: %v", taskrunPath, readErr)
+			t.Fatalf("read service taskrun %s: %v", taskrunPath, readErr)
 		}
 		var payload struct {
 			Meta struct {
@@ -1214,12 +1232,14 @@ func TestInitStep1ExecutesPerCanonicalDomainAndMaterializesDomainTaskruns(t *tes
 			} `json:"meta"`
 		}
 		if err := json.Unmarshal(taskrun, &payload); err != nil {
-			t.Fatalf("decode per-domain taskrun %s: %v", taskrunPath, err)
+			t.Fatalf("decode service taskrun %s: %v", taskrunPath, err)
 		}
-		if payload.Meta.StepID != "init.step1.collect" {
-			t.Fatalf("expected per-domain taskrun step id init.step1.collect, got %q", payload.Meta.StepID)
+		if payload.Meta.StepID != "init.step2.service_collect" {
+			t.Fatalf("expected service taskrun step id init.step2.service_collect, got %q", payload.Meta.StepID)
 		}
+	}
 
+	for _, domainID := range domainIDs {
 		domainOutputPath := filepath.Join(ws.Path, "reports", "agent-outputs", "domains", fmt.Sprintf("%s.md", domainID))
 		if _, statErr := os.Stat(domainOutputPath); statErr != nil {
 			t.Fatalf("expected domain output %s: %v", domainOutputPath, statErr)
@@ -1288,6 +1308,7 @@ func TestRefreshStep1MissingCanonicalDomainsWritesQuestionWithoutAutoCreate(t *t
 	info, _, err := service.Run(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err == nil {
@@ -1339,6 +1360,7 @@ func TestRefreshStep1MissingRepoScopeWritesQuestion(t *testing.T) {
 	info, _, err := service.Run(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err == nil {
@@ -1376,6 +1398,7 @@ func TestRefreshStep1UsesDeclaredRepoScopeForMonolithDomain(t *testing.T) {
 	info, _, err := service.Run(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -1385,9 +1408,9 @@ func TestRefreshStep1UsesDeclaredRepoScopeForMonolithDomain(t *testing.T) {
 		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
 	}
 
-	collectTasks := runner.tasksForStep("refresh.step1.collect")
-	if len(collectTasks) != 2 {
-		t.Fatalf("expected two domain collect tasks, got %d", len(collectTasks))
+	collectTasks := runner.tasksForStep("refresh.step2.service_collect")
+	if len(collectTasks) != 1 {
+		t.Fatalf("expected one service collect task for monolith repo, got %d", len(collectTasks))
 	}
 	for _, task := range collectTasks {
 		if len(task.RepoScopes) != 1 || task.RepoScopes[0] != "orders-monolith" {
@@ -1423,6 +1446,7 @@ func TestRefreshStep1UnknownDeclaredRepoScopeWritesQuestion(t *testing.T) {
 	info, _, err := service.Run(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err == nil {
@@ -1481,6 +1505,7 @@ func TestRefreshStep1RepoScopeResolverIsConsistentForRuntimeAndEnrich(t *testing
 	info, _, err := service.Run(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -1490,12 +1515,19 @@ func TestRefreshStep1RepoScopeResolverIsConsistentForRuntimeAndEnrich(t *testing
 		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
 	}
 
-	collectTasks := runner.tasksForStep("refresh.step1.collect")
-	if len(collectTasks) != 1 {
-		t.Fatalf("expected one domain collect task, got %d", len(collectTasks))
+	collectTasks := runner.tasksForStep("refresh.step2.service_collect")
+	if len(collectTasks) != 2 {
+		t.Fatalf("expected two service collect tasks (one per repo), got %d", len(collectTasks))
 	}
-	if len(collectTasks[0].RepoScopes) != 1 || collectTasks[0].RepoScopes[0] != "users-service" {
-		t.Fatalf("expected runtime step1 to use declared repo_scope users-service, got %+v", collectTasks[0].RepoScopes)
+	hasUsersScope := false
+	for _, task := range collectTasks {
+		if len(task.RepoScopes) == 1 && task.RepoScopes[0] == "users-service" {
+			hasUsersScope = true
+			break
+		}
+	}
+	if !hasUsersScope {
+		t.Fatalf("expected at least one service collect task for users-service, got %+v", collectTasks)
 	}
 
 	cardBytes, err := os.ReadFile(filepath.Join(ws.Path, "charter/cards/domains/payments.md"))
@@ -1526,6 +1558,7 @@ func TestRefreshStep1DomainCardIDMismatchAddsQuestionAndKeepsFilenameDomainID(t 
 	info, _, err := service.Run(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err == nil {
@@ -1605,6 +1638,7 @@ func TestRefreshBackendOnlySkipsFrontendDomainAndWritesRepoSelectionSummary(t *t
 	info, artifacts, err := service.Run(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -1614,7 +1648,7 @@ func TestRefreshBackendOnlySkipsFrontendDomainAndWritesRepoSelectionSummary(t *t
 		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
 	}
 
-	collectTasks := runner.tasksForStep("refresh.step1.collect")
+	collectTasks := runner.tasksForStep("refresh.step2.service_collect")
 	if len(collectTasks) != 2 {
 		t.Fatalf("expected two backend domain collect tasks, got %d", len(collectTasks))
 	}
@@ -1623,7 +1657,7 @@ func TestRefreshBackendOnlySkipsFrontendDomainAndWritesRepoSelectionSummary(t *t
 			t.Fatalf("frontend scope must be excluded from step1 collect tasks, got %+v", task.RepoScopes)
 		}
 	}
-	step3Tasks := runner.tasksForStep("refresh.step3.findings")
+	step3Tasks := runner.tasksForStep("refresh.step4.service_findings")
 	if len(step3Tasks) == 0 {
 		t.Fatalf("expected step3 findings tasks")
 	}
@@ -1736,6 +1770,7 @@ func TestRefreshBackendOnlyExcludedQuestionUsesDeclaredUnknownRepoScopeDetails(t
 	info, _, err := service.Run(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -1785,6 +1820,7 @@ func TestSemanticGuardDropsRuntimeProviderEntityInRefreshStep1Collect(t *testing
 	info, _, err := service.Run(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -1793,7 +1829,7 @@ func TestSemanticGuardDropsRuntimeProviderEntityInRefreshStep1Collect(t *testing
 	if info.Status != RunStatusSucceeded {
 		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
 	}
-	if !hasWarningPrefix(info.Warnings, "refresh.step1.collect: semantic_guard: dropped refresh.step1.collect entity types") {
+	if !hasWarningPrefix(info.Warnings, "refresh.step2.service_collect: semantic_guard: dropped refresh.step2.service_collect entity types") {
 		t.Fatalf("expected semantic guard warning in run warnings, got %#v", info.Warnings)
 	}
 
@@ -1823,6 +1859,7 @@ func TestSemanticGuardDropsOffTopicArtifactsInRefreshStep1Collect(t *testing.T) 
 	info, _, err := service.Run(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -1831,12 +1868,12 @@ func TestSemanticGuardDropsOffTopicArtifactsInRefreshStep1Collect(t *testing.T) 
 	if info.Status != RunStatusSucceeded {
 		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
 	}
-	if !hasWarningPrefix(info.Warnings, "refresh.step1.collect: semantic_guard: dropped refresh.step1.collect off-topic artifacts") {
+	if !hasWarningPrefix(info.Warnings, "refresh.step2.service_collect: semantic_guard: dropped refresh.step2.service_collect off-topic artifacts") {
 		t.Fatalf("expected off-topic semantic guard warning in run warnings, got %#v", info.Warnings)
 	}
 
 	taskrunsDir := filepath.Join(ws.Path, "reports", "taskruns")
-	step1Taskruns, err := filepath.Glob(filepath.Join(taskrunsDir, "*-refresh-step1-collect-domain-*.json"))
+	step1Taskruns, err := filepath.Glob(filepath.Join(taskrunsDir, "*-refresh-step2-service_collect-domain-*.json"))
 	if err != nil {
 		t.Fatalf("glob refresh step1 taskruns: %v", err)
 	}
@@ -1891,6 +1928,7 @@ func TestSemanticGuardMarksCriticalOffTopicDriftInRefreshStep1Collect(t *testing
 	info, _, err := service.Run(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -1899,12 +1937,12 @@ func TestSemanticGuardMarksCriticalOffTopicDriftInRefreshStep1Collect(t *testing
 	if info.Status != RunStatusSucceeded {
 		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
 	}
-	if !hasWarningPrefix(info.Warnings, "refresh.step1.collect: semantic_guard: critical_off_topic_drift in refresh.step1.collect") {
+	if !hasWarningPrefix(info.Warnings, "refresh.step2.service_collect: semantic_guard: critical_off_topic_drift in refresh.step2.service_collect") {
 		t.Fatalf("expected critical off-topic drift warning in run warnings, got %#v", info.Warnings)
 	}
 
 	taskrunsDir := filepath.Join(ws.Path, "reports", "taskruns")
-	step1Taskruns, err := filepath.Glob(filepath.Join(taskrunsDir, "*-refresh-step1-collect-domain-*.json"))
+	step1Taskruns, err := filepath.Glob(filepath.Join(taskrunsDir, "*-refresh-step2-service_collect-domain-*.json"))
 	if err != nil {
 		t.Fatalf("glob refresh step1 taskruns: %v", err)
 	}
@@ -1922,7 +1960,7 @@ func TestSemanticGuardMarksCriticalOffTopicDriftInRefreshStep1Collect(t *testing
 	}
 	foundCriticalWarning := false
 	for _, warning := range payload.Warnings {
-		if strings.Contains(warning, "semantic_guard: critical_off_topic_drift in refresh.step1.collect") {
+		if strings.Contains(warning, "semantic_guard: critical_off_topic_drift in refresh.step2.service_collect") {
 			foundCriticalWarning = true
 			break
 		}
@@ -1947,6 +1985,7 @@ func TestSemanticGuardAddsFallbackFindingForOwnerGapInRefreshStep3(t *testing.T)
 	info, _, err := service.Run(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -1955,7 +1994,7 @@ func TestSemanticGuardAddsFallbackFindingForOwnerGapInRefreshStep3(t *testing.T)
 	if info.Status != RunStatusSucceeded {
 		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
 	}
-	if !hasWarningPrefix(info.Warnings, "refresh.step3.findings: semantic_guard: added fallback owner-mapping finding") {
+	if !hasWarningPrefix(info.Warnings, "refresh.step4.service_findings: semantic_guard: added fallback owner-mapping finding") {
 		t.Fatalf("expected fallback-finding warning in run warnings, got %#v", info.Warnings)
 	}
 
@@ -1987,6 +2026,7 @@ func TestSemanticGuardAddsGenericFallbackFindingWhenNoServiceCandidate(t *testin
 	info, _, err := service.Run(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -1995,7 +2035,7 @@ func TestSemanticGuardAddsGenericFallbackFindingWhenNoServiceCandidate(t *testin
 	if info.Status != RunStatusSucceeded {
 		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
 	}
-	if !hasWarningPrefix(info.Warnings, "refresh.step3.findings: semantic_guard: added fallback owner-mapping finding") {
+	if !hasWarningPrefix(info.Warnings, "refresh.step4.service_findings: semantic_guard: added fallback owner-mapping finding") {
 		t.Fatalf("expected fallback-finding warning in run warnings, got %#v", info.Warnings)
 	}
 
@@ -2030,6 +2070,7 @@ func TestSemanticGuardAddsFallbackCrossRepoEdgeForMultiScopeRefreshStep3(t *test
 	info, _, err := service.Run(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -2038,11 +2079,11 @@ func TestSemanticGuardAddsFallbackCrossRepoEdgeForMultiScopeRefreshStep3(t *test
 	if info.Status != RunStatusSucceeded {
 		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
 	}
-	if !hasWarningPrefix(info.Warnings, "refresh.step3.findings: semantic_guard: added fallback cross-repo edge") {
+	if !hasWarningPrefix(info.Warnings, "refresh.step4.service_findings: semantic_guard: added fallback cross-repo edge") {
 		t.Fatalf("expected fallback cross-repo edge warning in run warnings, got %#v", info.Warnings)
 	}
 
-	step3TaskrunCandidates, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step3-findings*.json"))
+	step3TaskrunCandidates, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step4-service_findings*.json"))
 	if err != nil {
 		t.Fatalf("glob step3 taskruns: %v", err)
 	}
@@ -2053,30 +2094,34 @@ func TestSemanticGuardAddsFallbackCrossRepoEdgeForMultiScopeRefreshStep3(t *test
 		}
 		step3Taskruns = append(step3Taskruns, candidate)
 	}
-	sort.Strings(step3Taskruns)
 	if len(step3Taskruns) == 0 {
 		t.Fatalf("expected refresh step3 taskrun file")
 	}
-	raw, err := os.ReadFile(step3Taskruns[len(step3Taskruns)-1])
-	if err != nil {
-		t.Fatalf("read step3 taskrun: %v", err)
-	}
-	var payload contracts.TaskResult
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		t.Fatalf("unmarshal step3 taskrun payload: %v", err)
-	}
 	foundEdge := false
-	for _, op := range payload.Changeset {
-		if op.Op == "upsert_edge" && op.Edge != nil {
-			foundEdge = true
-			if strings.TrimSpace(op.Edge.From) == strings.TrimSpace(op.Edge.To) {
-				t.Fatalf("expected cross-repo edge with different endpoints, got %+v", op.Edge)
+	for _, path := range step3Taskruns {
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatalf("read step3 taskrun %s: %v", path, readErr)
+		}
+		var payload contracts.TaskResult
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("unmarshal step3 taskrun payload %s: %v", path, err)
+		}
+		for _, op := range payload.Changeset {
+			if op.Op == "upsert_edge" && op.Edge != nil {
+				foundEdge = true
+				if strings.TrimSpace(op.Edge.From) == strings.TrimSpace(op.Edge.To) {
+					t.Fatalf("expected cross-repo edge with different endpoints, got %+v", op.Edge)
+				}
+				break
 			}
+		}
+		if foundEdge {
 			break
 		}
 	}
 	if !foundEdge {
-		t.Fatalf("expected fallback cross-repo upsert_edge in step3 taskrun, got %#v", payload.Changeset)
+		t.Fatalf("expected fallback cross-repo upsert_edge in refresh step3 taskruns")
 	}
 }
 
@@ -2095,6 +2140,7 @@ func TestSemanticGuardRemovesInvalidEvidenceAndDowngradesObservation(t *testing.
 	info, _, err := service.Run(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -2103,14 +2149,14 @@ func TestSemanticGuardRemovesInvalidEvidenceAndDowngradesObservation(t *testing.
 	if info.Status != RunStatusSucceeded {
 		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
 	}
-	if !hasWarningPrefix(info.Warnings, "refresh.step1.collect: semantic_guard: removed invalid evidence paths count=") {
+	if !hasWarningPrefix(info.Warnings, "refresh.step2.service_collect: semantic_guard: removed invalid evidence paths count=") {
 		t.Fatalf("expected invalid-evidence warning in run warnings, got %#v", info.Warnings)
 	}
-	if !hasWarningPrefix(info.Warnings, "refresh.step1.collect: semantic_guard: downgraded observation provenance to inference count=") {
+	if !hasWarningPrefix(info.Warnings, "refresh.step2.service_collect: semantic_guard: downgraded observation provenance to inference count=") {
 		t.Fatalf("expected observation downgrade warning in run warnings, got %#v", info.Warnings)
 	}
 
-	step1Taskruns, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step1-collect-domain-*.json"))
+	step1Taskruns, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step2-service_collect-domain-*.json"))
 	if err != nil {
 		t.Fatalf("glob step1 taskruns: %v", err)
 	}
@@ -2161,6 +2207,7 @@ func TestSemanticGuardNormalizesMultiRepoMissingEdgeAndInvalidEvidence(t *testin
 	info, _, err := service.Run(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
+		RefreshMode:    RefreshModeFull,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -2169,17 +2216,17 @@ func TestSemanticGuardNormalizesMultiRepoMissingEdgeAndInvalidEvidence(t *testin
 	if info.Status != RunStatusSucceeded {
 		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
 	}
-	if !hasWarningPrefix(info.Warnings, "refresh.step1.collect: semantic_guard: removed invalid evidence paths count=") {
+	if !hasWarningPrefix(info.Warnings, "refresh.step2.service_collect: semantic_guard: removed invalid evidence paths count=") {
 		t.Fatalf("expected invalid-evidence warning in run warnings, got %#v", info.Warnings)
 	}
-	if !hasWarningPrefix(info.Warnings, "refresh.step1.collect: semantic_guard: downgraded observation provenance to inference count=") {
+	if !hasWarningPrefix(info.Warnings, "refresh.step2.service_collect: semantic_guard: downgraded observation provenance to inference count=") {
 		t.Fatalf("expected observation downgrade warning in run warnings, got %#v", info.Warnings)
 	}
-	if !hasWarningPrefix(info.Warnings, "refresh.step3.findings: semantic_guard: added fallback cross-repo edge") {
+	if !hasWarningPrefix(info.Warnings, "refresh.step4.service_findings: semantic_guard: added fallback cross-repo edge") {
 		t.Fatalf("expected fallback cross-repo edge warning in run warnings, got %#v", info.Warnings)
 	}
 
-	step1Taskruns, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step1-collect-domain-*.json"))
+	step1Taskruns, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step2-service_collect-domain-*.json"))
 	if err != nil {
 		t.Fatalf("glob step1 taskruns: %v", err)
 	}
@@ -2214,7 +2261,7 @@ func TestSemanticGuardNormalizesMultiRepoMissingEdgeAndInvalidEvidence(t *testin
 		t.Fatalf("expected at least one upsert_entity in step1 payload")
 	}
 
-	step3TaskrunCandidates, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step3-findings*.json"))
+	step3TaskrunCandidates, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step4-service_findings*.json"))
 	if err != nil {
 		t.Fatalf("glob step3 taskruns: %v", err)
 	}
@@ -2225,42 +2272,46 @@ func TestSemanticGuardNormalizesMultiRepoMissingEdgeAndInvalidEvidence(t *testin
 		}
 		step3Taskruns = append(step3Taskruns, candidate)
 	}
-	sort.Strings(step3Taskruns)
 	if len(step3Taskruns) == 0 {
 		t.Fatalf("expected refresh step3 taskrun file")
 	}
-	step3Raw, err := os.ReadFile(step3Taskruns[len(step3Taskruns)-1])
-	if err != nil {
-		t.Fatalf("read step3 taskrun: %v", err)
-	}
-	var step3Payload contracts.TaskResult
-	if err := json.Unmarshal(step3Raw, &step3Payload); err != nil {
-		t.Fatalf("unmarshal step3 taskrun payload: %v", err)
-	}
 	foundEdge := false
-	for _, op := range step3Payload.Changeset {
-		if op.Op != "upsert_edge" || op.Edge == nil {
-			continue
+	for _, path := range step3Taskruns {
+		step3Raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatalf("read step3 taskrun %s: %v", path, readErr)
 		}
-		foundEdge = true
-		if strings.TrimSpace(op.Edge.From) == "" || strings.TrimSpace(op.Edge.To) == "" {
-			t.Fatalf("expected edge endpoints to be non-empty, got %+v", op.Edge)
+		var step3Payload contracts.TaskResult
+		if err := json.Unmarshal(step3Raw, &step3Payload); err != nil {
+			t.Fatalf("unmarshal step3 taskrun payload %s: %v", path, err)
 		}
-		if strings.TrimSpace(op.Edge.From) == strings.TrimSpace(op.Edge.To) {
-			t.Fatalf("expected cross-repo edge between different entities, got %+v", op.Edge)
-		}
-		if len(op.Edge.Provenance.Evidence) < 2 {
-			t.Fatalf("expected fallback cross-repo edge to include evidence from two scopes, got %+v", op.Edge.Provenance.Evidence)
-		}
-		for _, evidence := range op.Edge.Provenance.Evidence {
-			if evidence.Path == "/" || evidence.Path == "." {
-				t.Fatalf("expected normalized edge evidence paths, got %+v", op.Edge.Provenance.Evidence)
+		for _, op := range step3Payload.Changeset {
+			if op.Op != "upsert_edge" || op.Edge == nil {
+				continue
 			}
+			foundEdge = true
+			if strings.TrimSpace(op.Edge.From) == "" || strings.TrimSpace(op.Edge.To) == "" {
+				t.Fatalf("expected edge endpoints to be non-empty, got %+v", op.Edge)
+			}
+			if strings.TrimSpace(op.Edge.From) == strings.TrimSpace(op.Edge.To) {
+				t.Fatalf("expected cross-repo edge between different entities, got %+v", op.Edge)
+			}
+			if len(op.Edge.Provenance.Evidence) < 2 {
+				t.Fatalf("expected fallback cross-repo edge to include evidence from two scopes, got %+v", op.Edge.Provenance.Evidence)
+			}
+			for _, evidence := range op.Edge.Provenance.Evidence {
+				if evidence.Path == "/" || evidence.Path == "." {
+					t.Fatalf("expected normalized edge evidence paths, got %+v", op.Edge.Provenance.Evidence)
+				}
+			}
+			break
 		}
-		break
+		if foundEdge {
+			break
+		}
 	}
 	if !foundEdge {
-		t.Fatalf("expected fallback upsert_edge in step3 payload, got %#v", step3Payload.Changeset)
+		t.Fatalf("expected fallback upsert_edge in refresh step3 taskruns")
 	}
 }
 
@@ -2361,7 +2412,7 @@ func buildLongSnippet(prefix string) string {
 type step3ParseFailureRunner struct{}
 
 func (step3ParseFailureRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
-	if strings.HasSuffix(task.StepID, "step3.findings") {
+	if strings.HasSuffix(task.StepID, "step4.service_findings") {
 		return acpruntime.Result{}, acpruntime.WrapRunnerError(
 			acpruntime.ProviderClaudeCode,
 			acpruntime.ErrorCodeRunnerParseFailed,
@@ -2384,7 +2435,7 @@ func (refreshCollectNoiseRunner) Run(ctx context.Context, task acpruntime.Task) 
 	if err != nil {
 		return acpruntime.Result{}, err
 	}
-	if task.StepID != "refresh.step1.collect" {
+	if task.StepID != "refresh.step2.service_collect" {
 		return result, nil
 	}
 
@@ -2424,7 +2475,7 @@ func (refreshMissingFindingsRunner) Run(ctx context.Context, task acpruntime.Tas
 	if err != nil {
 		return acpruntime.Result{}, err
 	}
-	if task.StepID != "refresh.step3.findings" {
+	if task.StepID != "refresh.step4.service_findings" {
 		return result, nil
 	}
 
@@ -2458,7 +2509,7 @@ func (refreshNoServiceMissingFindingsRunner) Run(ctx context.Context, task acpru
 	if err != nil {
 		return acpruntime.Result{}, err
 	}
-	if task.StepID != "refresh.step1.collect" && task.StepID != "refresh.step3.findings" {
+	if task.StepID != "refresh.step2.service_collect" && task.StepID != "refresh.step4.service_findings" {
 		return result, nil
 	}
 
@@ -2492,7 +2543,7 @@ func (refreshCollectOffTopicRunner) Run(ctx context.Context, task acpruntime.Tas
 	if err != nil {
 		return acpruntime.Result{}, err
 	}
-	if task.StepID != "refresh.step1.collect" {
+	if task.StepID != "refresh.step2.service_collect" {
 		return result, nil
 	}
 
@@ -2540,7 +2591,7 @@ func (refreshCollectCriticalOffTopicRunner) Run(ctx context.Context, task acprun
 	if err != nil {
 		return acpruntime.Result{}, err
 	}
-	if task.StepID != "refresh.step1.collect" {
+	if task.StepID != "refresh.step2.service_collect" {
 		return result, nil
 	}
 
@@ -2592,7 +2643,7 @@ func (refreshInvalidEvidenceRunner) Run(ctx context.Context, task acpruntime.Tas
 	if err != nil {
 		return acpruntime.Result{}, err
 	}
-	if task.StepID != "refresh.step1.collect" {
+	if task.StepID != "refresh.step2.service_collect" {
 		return result, nil
 	}
 
@@ -2634,7 +2685,7 @@ func (refreshMultiScopeNoEdgeInvalidEvidenceRunner) Run(ctx context.Context, tas
 
 	taskResult := result.TaskResult
 	switch task.StepID {
-	case "refresh.step1.collect":
+	case "refresh.step2.service_collect":
 		for idx := range taskResult.Changeset {
 			if taskResult.Changeset[idx].Op != "upsert_entity" || taskResult.Changeset[idx].Entity == nil {
 				continue
@@ -2649,7 +2700,7 @@ func (refreshMultiScopeNoEdgeInvalidEvidenceRunner) Run(ctx context.Context, tas
 			}
 			break
 		}
-	case "refresh.step3.findings":
+	case "refresh.step4.service_findings":
 		withoutEdges := make([]contracts.Operation, 0, len(taskResult.Changeset))
 		for _, op := range taskResult.Changeset {
 			if op.Op == "upsert_edge" {
@@ -2679,7 +2730,7 @@ func (docArtifactRunner) Run(ctx context.Context, task acpruntime.Task) (acprunt
 	if err != nil {
 		return acpruntime.Result{}, err
 	}
-	if strings.HasSuffix(task.StepID, "step1.collect") {
+	if strings.HasSuffix(task.StepID, "step2.service_collect") {
 		taskResult := result.TaskResult
 		taskResult.Changeset = append(taskResult.Changeset, contracts.Operation{
 			Op: "add_doc_artifact",
