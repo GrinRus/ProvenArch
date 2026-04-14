@@ -3,6 +3,8 @@
 Этот runbook описывает воспроизводимый полный прогон ProvenArch «как пользователь» в временном `tmp` workspace (`/tmp`) против целевого репозитория.
 
 Сценарий используется и для первого локального запуска, и для итеративного цикла улучшений backend/frontend.
+Для pre-release решения по принципу strict gate (`PASS|FAIL`) используйте отдельный агентский runbook:
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
 
 ## 1) Что проверяет сценарий
 
@@ -82,6 +84,13 @@ Batch/Frontend scripts:
     - `PROFILE_ID`
     - `PROFILE_SOURCE_KIND` (`path|git_url`)
     - `EXPECTED_REPO_COUNT`
+    - `SWEEP_ID`
+  - execution profile env (обычно выставляются matrix sweep'ом):
+    - `ACP_EXECUTION_STRATEGY`
+    - `ACP_MAX_PARALLEL_TASKS`
+    - `ACP_FAILURE_POLICY`
+    - `ACP_SHARD_DISCOVERY_MODE`
+    - `ACP_REPO_SELECTION`
   - `E2E_TMP_ROOT` (default `/tmp/provenarch-test_arch_project`)
   - `BATCH_ROOT` (default `${E2E_TMP_ROOT}/runs/${BATCH_ID}`)
   - `REPORTS_ROOT` (default `${E2E_TMP_ROOT}/reports`)
@@ -93,12 +102,14 @@ Batch/Frontend scripts:
     - `BATCH_SKIP_PRECHECK` (`0|1`; default `0`)
     - `BATCH_FRONTEND_MODE` (`auto|always|never`; default `auto`)
 - `scripts/full-run-batch-matrix.sh`
-  - `E2E_MATRIX_FILE` (required; YAML `profiles[]`)
+  - `E2E_MATRIX_FILE` (required; YAML `profiles[]`, optional `sweeps[]`)
   - обязательные профили: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
+  - если `sweeps[]` отсутствует -> implicit `baseline` sweep
+  - release-ready sweeps: `baseline`, `scale-backend`
   - `repos_file` в matrix-профилях: относительные пути резолвятся от директории `E2E_MATRIX_FILE`
   - `MATRIX_ID` (default `matrix-<UTC timestamp>`)
   - `MATRIX_ROOT` (default `${E2E_TMP_ROOT}/matrix/${MATRIX_ID}`)
-  - профильный запуск делегируется в `full-run-batch-5x2.sh` (каждый профиль = отдельный batch)
+  - профильный запуск делегируется в `full-run-batch-5x2.sh` (`profiles × sweeps`)
 - `scripts/frontend-live-e2e.sh`
   - `WORKSPACE` (required)
   - `RUNTIME_PROVIDER` (required: `claude-code|qwen-code`)
@@ -136,7 +147,7 @@ ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
 ./scripts/full-run-batch-5x2.sh
 
-# Вариант 7: matrix 4 профиля (single+multi, path+git_url)
+# Вариант 7: matrix 4 профиля × sweeps (single+multi, path+git_url)
 E2E_MATRIX_FILE=/abs/path/to/e2e-matrix.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
@@ -166,6 +177,8 @@ wait
 - в shard-режиме требуются runtime-бинари только выбранных провайдеров (`BATCH_PROVIDER_FILTER`).
 
 `full-run-batch-matrix.sh` — официальный локальный (trusted machine) runbook и не входит в required CI gates.
+Если цель запуска — release verdict, используйте критерии и формат решения из:
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
 
 Script всегда формирует:
 - `TMP_ROOT/full-run.log`
@@ -182,15 +195,22 @@ Script всегда формирует:
 
 Для batch-скрипта отчёты сохраняются в:
 - `/tmp/provenarch-test_arch_project/reports/run_matrix_<batch-id>.md`
+- `/tmp/provenarch-test_arch_project/reports/run_matrix_<batch-id>.tsv`
 - `/tmp/provenarch-test_arch_project/reports/frontend_e2e_matrix_<batch-id>.md`
+- `/tmp/provenarch-test_arch_project/reports/frontend_cancel_e2e_matrix_<batch-id>.md`
 - `/tmp/provenarch-test_arch_project/reports/quality_report_<batch-id>.md`
+- `/tmp/provenarch-test_arch_project/reports/profile_matrix_<matrix-id>.md`
+- `/tmp/provenarch-test_arch_project/reports/profile_matrix_<matrix-id>.tsv`
+- `/tmp/provenarch-test_arch_project/reports/release_verdict_<matrix-id>.md`
+- `/tmp/provenarch-test_arch_project/reports/release_verdict_<matrix-id>.json`
 
 Batch evaluator source-of-truth:
 - backend quality берётся из snapshot-артефактов `snapshots/<run_id>/reports/*`;
 - если snapshot недоступен, в отчёт попадает `artifact_source=workspace-fallback` и issue `reliability:snapshot-missing`;
 - frontend live e2e запускается на отдельной копии workspace (`frontend-workspace`) и не влияет на backend quality content score.
 - для multi-profile (`EXPECTED_REPO_COUNT >= 2`) batch hard-fail включает `analysis:cross-repo-missing`.
-- backend run-matrix дополнительно классифицирует failure classes: `runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_signal_terminated`, `infra_incomplete_cycle`, `quality_gates_failed`, `summary_missing`.
+- backend run-matrix дополнительно классифицирует failure classes: `runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_signal_terminated`, `infra_incomplete_cycle`, `quality_gates_failed`, `summary_missing`, `precheck_failed`.
+- runtime flow checks в evaluator: `runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:repo-selection`, `runtime:execution-semantics`, `runtime_flow_failed`.
 
 При `runner_parse_failed` raw stdout/stderr сохраняются в:
 - `WORKSPACE/reports/taskruns/raw/*-stdout.log`

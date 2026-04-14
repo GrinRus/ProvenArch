@@ -24,8 +24,12 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page })
   await page.getByTestId("workspace-validate-btn").click();
   await expect(page.getByTestId("workspace-validate-result")).toBeVisible();
   await expect(page.getByText("Status: valid")).toBeVisible();
-  const resolvedRepoRows = page.getByTestId("workspace-validate-result").locator(".repo-summary ul li");
+  const resolvedRepoRows = page.getByTestId("workspace-validate-resolved-repos").locator("li");
   await expect(resolvedRepoRows).toHaveCount(expectedRepoCount);
+  const repoSelectionRows = page.getByTestId("workspace-validate-repo-selection").locator("li");
+  await expect
+    .poll(async () => repoSelectionRows.count())
+    .toBeGreaterThan(0);
 
   await page.getByTestId("tab-runs").click();
   await page.getByTestId("run-init-btn").click();

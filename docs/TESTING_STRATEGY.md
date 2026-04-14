@@ -9,6 +9,9 @@
 - Любые изменения schema/spec/examples должны сопровождаться обновлением fixtures и golden outputs в том же PR.
 - Synthetic fixtures считаются baseline regression surface.
 - Live headless providers проверяются только optional smoke на trusted machine/runner и не блокируют merge.
+- Отдельно от merge-gates используется manual pre-release live gate:
+  - `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+  - verdict `PASS|FAIL` с policy strict zero-failure.
 
 ## 2) Тестовая пирамида MVP
 
@@ -218,16 +221,25 @@ Implemented additional jobs:
   - backend quality source-of-truth: snapshot reports (`snapshots/<run_id>/reports/*`), fallback помечается как `reliability:snapshot-missing`
   - semantic hard-fail checks в batch evaluator: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`
   - multi-profile hard-fail: `analysis:cross-repo-missing` при `expected_repo_count >= 2` и отсутствии cross-repo сигнала
+  - runtime-flow hard-fail checks: `runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:repo-selection`, `runtime:execution-semantics`, `runtime_flow_failed`
   - hard-pass учитывает semantic hard-fail и snapshot source validity
   - run artifacts default: `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/*`
-  - reports: `run_matrix_<batch-id>.md`, `frontend_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md` (+ fields `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, failure classes `runtime_parse/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing`)
+  - reports: `run_matrix_<batch-id>.md/.tsv`, `frontend_e2e_matrix_<batch-id>.md`, `frontend_cancel_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md` (+ fields `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, runtime-flow checks, failure classes `runtime_parse/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing/precheck_failed`)
 - profile matrix regression (local official runbook, non-required CI):
   - `scripts/full-run-batch-matrix.sh`
   - `E2E_MATRIX_FILE` обязателен (`profiles[]`: `id`, `repos_file`, `expected_repo_count`, `source_kind`)
+  - `sweeps[]` optional (если отсутствует -> implicit `baseline`)
+  - release-ready sweep set: `baseline` + `scale-backend`
   - относительные `repos_file` пути резолвятся от директории `E2E_MATRIX_FILE`
   - официальные профили: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
   - для `source_kind=git_url` refs должны быть pinned
-  - агрегированный отчёт: `profile_matrix_<matrix-id>.md` + `profile_matrix_<matrix-id>.tsv`
+  - агрегированные отчёты: `profile_matrix_<matrix-id>.md/.tsv`, `release_verdict_<matrix-id>.md/.json`
+- release live harness (manual pre-release gate, no wrapper):
+  - source-of-truth runbook: `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+  - использует текущий matrix контур (`full-run-batch-matrix.sh` + `full-run-batch-5x2.sh` + `e2e_batch_report.py`)
+  - release-mode guard (auto при `MATRIX_ID=release-*`) блокирует diagnostic timeout overrides; debug bypass только через `E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES=1`
+  - обязательны оба провайдера (`qwen-code`, `claude-code`) и оба frontend сценария (`init-inspect`, `cancel-refresh`)
+  - strict acceptance: только `PASS`, любое нарушение quality/failure-class критериев = `RELEASE BLOCKED`
 - optional frontend live smoke:
   - `scripts/frontend-live-e2e.sh` (local)
   - direct `npm run e2e:live --prefix ui`: Playwright output default `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
@@ -238,6 +250,7 @@ Implemented additional jobs:
     - `init-inspect`: validate -> run init -> inspect artifacts
     - `cancel-refresh`: validate -> run refresh -> cancel selected run -> expect `failed + run_canceled`
   - `UI_E2E_CANCEL_STUB_SLEEP_SEC` задаёт длительность controlled slow stub runner для `cancel-refresh`
+  - cancel preflight guard: `UI_E2E_CANCEL_TIMEOUT_SEC >= UI_E2E_CANCEL_STUB_SLEEP_SEC + UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC`; при нарушении сценарий fail-fast до Playwright
   - `ui/e2e/live-flow.spec.ts` + `npm run e2e:live --prefix ui`
   - batch shard controls (`scripts/full-run-batch-5x2.sh`):
     - `BATCH_PROVIDER_FILTER` (`all` или CSV `qwen-code,claude-code`)
@@ -252,6 +265,7 @@ Implemented additional jobs:
 - любое изменение schema/spec/examples требует update fixtures/golden в том же PR
 - live headless provider smoke не блокирует merge; для обязательного CI используется только `contracts`, `backend`, `ui`, `golden`, `smoke-cli`, `smoke-api`, `ui-smoke`
 - workflow `ui-live-smoke-optional` запускается только вручную (`workflow_dispatch`) и не является required gate
+- release gate выполняется вручную перед релизом на trusted машине по `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
 - scenario fixtures и golden outputs считаются канонической regression surface до появления production-scale test corpus
 - optional readable golden export доступен для review-diff:
   - `ACP_EXPORT_SCENARIO_GOLDEN=1 go test ./internal/orchestrator -run TestScenarioFixturesDeterministicInitPipeline -count=1`
