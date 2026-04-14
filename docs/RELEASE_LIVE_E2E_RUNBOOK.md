@@ -41,6 +41,62 @@
 - `examples/e2e-matrix.example.yaml`
 - `examples/repos/*.repos.yaml`
 
+### 3.1) GitHub catalog для выбора target repos (3 monorepo + 3 multi-repo)
+
+Причина: release matrix выше использует 4 fixed-профиля (`single-path`, `single-git_url`, `multi-path`, `multi-git_url`), поэтому для GitHub-only сценария выбор делается через `repos_file`:
+- `single-path`/`single-git_url`: выбрать один monorepo;
+- `multi-path`/`multi-git_url`: выбрать один multi-repo проект (2+ repos).
+
+Pinned presets (commit SHA) добавлены в:
+- `examples/repos/github/mono-ftgo-application.repos.yaml`
+- `examples/repos/github/mono-posthog.repos.yaml`
+- `examples/repos/github/mono-bank-of-anthos.repos.yaml`
+- `examples/repos/github/multi-sentry-ecosystem.repos.yaml`
+- `examples/repos/github/multi-openstack-ecosystem.repos.yaml`
+- `examples/repos/github/multi-openedx-ecosystem.repos.yaml`
+
+Monorepo выбор (single):
+- `microservices-patterns/ftgo-application` (`master`, pinned SHA в preset)
+- `posthog/posthog` (`master`, pinned SHA в preset)
+- `GoogleCloudPlatform/bank-of-anthos` (`main`, pinned SHA в preset)
+
+Multi-repo выбор (multi):
+- Sentry ecosystem: `getsentry/sentry`, `getsentry/self-hosted`, `getsentry/snuba`, `getsentry/relay`, `getsentry/symbolicator`
+- OpenStack ecosystem: `openstack/openstack`, `openstack/nova`, `openstack/neutron`, `openstack/cinder`, `openstack/keystone`
+- Open edX ecosystem: `openedx/openedx-platform`, `openedx/frontend-platform`, `openedx/course-discovery`, `openedx/credentials`, `openedx/devstack`
+
+Примечание по Open edX:
+- в preset используется canonical `git_url` для devstack: `openedx-unsupported/devstack` (репозиторий `openedx/devstack` редиректит туда).
+
+Пример wiring в release matrix:
+
+```yaml
+profiles:
+  - id: single-path
+    source_kind: path
+    expected_repo_count: 1
+    repos_file: /abs/path/to/local-clones/mono-ftgo-application.path.repos.yaml
+  - id: single-git_url
+    source_kind: git_url
+    expected_repo_count: 1
+    repos_file: ./examples/repos/github/mono-posthog.repos.yaml
+  - id: multi-path
+    source_kind: path
+    expected_repo_count: 5
+    repos_file: /abs/path/to/local-clones/multi-openedx.path.repos.yaml
+  - id: multi-git_url
+    source_kind: git_url
+    expected_repo_count: 5
+    repos_file: ./examples/repos/github/multi-sentry-ecosystem.repos.yaml
+```
+
+Важно:
+- для `git_url` использовать только pinned `ref` (commit SHA);
+- для `path` использовать локальные checkout тех же репозиториев на тех же SHA;
+- перед релизным прогоном при необходимости обновить SHA в preset-файлах отдельным коммитом (без изменения harness логики).
+- запасной monorepo-кандидат: `GoogleCloudPlatform/microservices-demo` (если нужно заменить `bank-of-anthos`).
+- рекомендуемый first-run набор: `posthog/posthog` + `microservices-patterns/ftgo-application` + `getsentry/*` + `Open edX ecosystem`.
+
 ## 4) Порядок запуска
 
 1. Preflight ACP quality:

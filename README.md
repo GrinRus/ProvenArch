@@ -366,6 +366,12 @@ ACP_QWEN_CMD_BIN=qwen \
   - `scale-backend`: `strategy=parallel`, `max_parallel_tasks=4`, `failure_policy=best_effort`, `shard_discovery_mode=semantic`, `repo_selection=backend_only`
 
 Готовый шаблон: `examples/e2e-matrix.example.yaml` (+ `examples/repos/*.repos.yaml`).
+GitHub target catalog для release выбора (`3` monorepo + `3` multi-repo ecosystems):
+- `examples/repos/github/mono-*.repos.yaml`
+- `examples/repos/github/multi-*-ecosystem.repos.yaml`
+- source-of-truth по выбору и wiring: `docs/RELEASE_LIVE_E2E_RUNBOOK.md` (section `3.1`)
+- рекомендуемый first-run набор: `posthog/posthog`, `microservices-patterns/ftgo-application`, `sentry ecosystem`, `open edX ecosystem`
+- расширенный набор для второго прохода: `bank-of-anthos` и `openstack ecosystem`
 
 Скрипт сохраняет:
 - run artifacts (default): `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/...`

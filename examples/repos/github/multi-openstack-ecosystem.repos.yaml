@@ -1,0 +1,19 @@
+version: 1
+repos:
+  - name: openstack
+    git_url: https://github.com/openstack/openstack.git
+    ref: 32e939e38f8ff7f91d593e3be94240590afd4db2
+  - name: nova
+    git_url: https://github.com/openstack/nova.git
+    ref: b8340c9361b2a2e9473ba4e8abaabc372360c6ee
+  - name: neutron
+    git_url: https://github.com/openstack/neutron.git
+    ref: f27e72c44246a3281f882201f91c88896e2adbe6
+  - name: cinder
+    git_url: https://github.com/openstack/cinder.git
+    ref: 04f5a13c0376859711e69f3916409cb40f700e0f
+  - name: keystone
+    git_url: https://github.com/openstack/keystone.git
+    ref: 80d5b7bf50448073223723cf1f6001a367695e80
+docs:
+  imports_path: ./docs/imports
