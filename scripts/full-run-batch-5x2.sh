@@ -37,6 +37,21 @@ LAST_RUN_CANCELLATION_LIKE=0
 PRECHECK_FAILURE_RECORDED=0
 FRONTEND_CANCEL_FAILURES=0
 FRONTEND_CANCEL_SKIPPED=0
+TIMEOUT_PRECHECK_UNSET_KEYS=(
+  ACP_RUNTIME_STEP_TIMEOUT_SEC
+  ACP_RUNTIME_HEARTBEAT_SEC
+  ACP_PIPELINE_TIMEOUT_SEC
+  ACP_PIPELINE_KILL_GRACE_SEC
+  ACP_API_READY_TIMEOUT_SEC
+  ACP_API_INIT_TIMEOUT_SEC
+  ACP_UI_INIT_POLL_TIMEOUT_SEC
+  ACP_UI_CANCEL_POLL_TIMEOUT_SEC
+  ACP_FULL_RUN_PIPELINE_TIMEOUT_SEC
+  ACP_FULL_RUN_PIPELINE_KILL_GRACE_SEC
+  READY_TIMEOUT_SEC
+  UI_E2E_INIT_TIMEOUT_SEC
+  UI_E2E_CANCEL_TIMEOUT_SEC
+)
 
 log() {
   printf '[batch-5x2] %s\n' "$*" >&2
@@ -97,12 +112,14 @@ write_frontend_status_json() {
   local workspace="$6"
   local output_dir="$7"
   local runtime_command="$8"
-  python3 - "$path" "$provider" "$scenario" "$status" "$reason" "$workspace" "$output_dir" "$runtime_command" <<'PY'
+  local server_log="${9:-}"
+  local playwright_log="${10:-}"
+  python3 - "$path" "$provider" "$scenario" "$status" "$reason" "$workspace" "$output_dir" "$runtime_command" "$server_log" "$playwright_log" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 
-path, provider, scenario, status, reason, workspace, output_dir, runtime_command = sys.argv[1:]
+path, provider, scenario, status, reason, workspace, output_dir, runtime_command, server_log, playwright_log = sys.argv[1:]
 payload = {
     "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "finished_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -113,11 +130,22 @@ payload = {
     "workspace": workspace,
     "output_dir": output_dir,
     "runtime_command": runtime_command,
+    "server_log": server_log or "-",
+    "playwright_log": playwright_log or "-",
 }
 with open(path, "w", encoding="utf-8") as f:
     json.dump(payload, f, ensure_ascii=True, indent=2)
     f.write("\n")
 PY
+}
+
+run_dod_precheck_make() {
+  local -a env_cmd=("env")
+  local key
+  for key in "${TIMEOUT_PRECHECK_UNSET_KEYS[@]}"; do
+    env_cmd+=("-u" "$key")
+  done
+  "${env_cmd[@]}" make contracts test lint build
 }
 
 classify_run_failure() {
@@ -143,6 +171,13 @@ classify_run_failure() {
   local run_subclass="none"
   local cancellation_like=0
   local quality_gates_status=""
+  local -a classify_log_paths=("$summary_path" "$full_log_path" "$batch_driver_log")
+  local iter_log
+  if [[ -d "$run_dir/logs" ]]; then
+    while IFS= read -r iter_log; do
+      classify_log_paths+=("$iter_log")
+    done < <(find "$run_dir/logs" -maxdepth 1 -type f -name 'run-iter*-*.log' | LC_ALL=C sort)
+  fi
 
   if [[ ! -f "$summary_path" ]]; then
     run_class="summary_missing"
@@ -164,10 +199,10 @@ classify_run_failure() {
     run_count="$(awk 'NF { count++ } END { print count+0 }' "$run_results_path")"
   fi
 
-  if [[ "$run_class" == "none" ]] && contains_in_files "runner_unavailable" "$summary_path" "$full_log_path" "$batch_driver_log"; then
+  if [[ "$run_class" == "none" ]] && contains_in_files "runner_unavailable" "${classify_log_paths[@]}"; then
     run_class="runner_unavailable"
   fi
-  if [[ "$run_class" == "none" ]] && contains_in_files "runner_parse_failed" "$summary_path" "$full_log_path" "$batch_driver_log"; then
+  if [[ "$run_class" == "none" ]] && contains_in_files "runner_parse_failed" "${classify_log_paths[@]}"; then
     run_class="runtime_parse"
   fi
 
@@ -220,7 +255,7 @@ classify_run_failure() {
     run_class="infra_incomplete_cycle"
   fi
 
-  if contains_regex_in_files "FatalCancellationError|code[=: ]130" "$summary_path" "$full_log_path" "$batch_driver_log"; then
+  if contains_regex_in_files "FatalCancellationError|code[=: ]130" "${classify_log_paths[@]}"; then
     cancellation_like=1
     run_subclass="cancellation_like"
   fi
@@ -696,7 +731,7 @@ log "preflight timeout profile: apply_via_api=$ACP_APPLY_TIMEOUTS_VIA_API $TIMEO
 log "running DoD precheck: make contracts test lint build"
 if ! (
   cd "$PROVENARCH_ROOT"
-  make contracts test lint build >"$BATCH_ROOT/precheck-make.log" 2>&1
+  run_dod_precheck_make >"$BATCH_ROOT/precheck-make.log" 2>&1
 ); then
   finalize_precheck_failure "make contracts test lint build failed (see $BATCH_ROOT/precheck-make.log)"
 fi
@@ -849,15 +884,21 @@ for provider in qwen-code claude-code; do
     ./scripts/frontend-live-e2e.sh
   ) >"$cancel_output_dir/driver.log" 2>&1; then
     FRONTEND_CANCEL_FAILURES=$((FRONTEND_CANCEL_FAILURES + 1))
-    write_frontend_status_json \
-      "$cancel_output_dir/frontend-cancel-result.json" \
-      "$provider" \
-      "cancel-refresh" \
-      "failed" \
-      "frontend_live_e2e_failed" \
-      "$frontend_workspace" \
-      "$cancel_output_dir" \
-      "$runtime_cmd"
+    if [[ -f "$cancel_output_dir/frontend-e2e-result.json" ]]; then
+      cp "$cancel_output_dir/frontend-e2e-result.json" "$cancel_output_dir/frontend-cancel-result.json"
+    else
+      write_frontend_status_json \
+        "$cancel_output_dir/frontend-cancel-result.json" \
+        "$provider" \
+        "cancel-refresh" \
+        "failed" \
+        "frontend_live_e2e_failed" \
+        "$frontend_workspace" \
+        "$cancel_output_dir" \
+        "$runtime_cmd" \
+        "$cancel_output_dir/server.log" \
+        "$cancel_output_dir/playwright.log"
+    fi
     log "frontend cancel smoke failed provider=$provider (see $cancel_output_dir/driver.log)"
     continue
   fi

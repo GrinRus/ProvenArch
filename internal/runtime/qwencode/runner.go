@@ -16,6 +16,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/runtime/runnerdiag"
 	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultbinding"
 	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultextractor"
+	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultrepair"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 )
 
@@ -227,6 +228,7 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 			Stderr: stderr.String(),
 		}, "extract", err, nil
 	}
+	rawTaskResult = taskresultrepair.RepairEdgeAliases(rawTaskResult)
 	taskResult, err := contracts.ParseTaskResult(rawTaskResult)
 	if err != nil {
 		return acpruntime.Result{
@@ -387,6 +389,9 @@ func buildStepSpecificPolicy(stepID string) string {
 			`- Each finding must include rule_id, related_ids, and provenance.evidence[].`,
 			`- For observation provenance, evidence array MUST be non-empty.`,
 			`- If meta.repo_scopes has 2+ scopes, include at least one upsert_edge that links entities from different repo_scope values.`,
+			`- For upsert_edge use canonical keys only: edge.id, edge.type, edge.from, edge.to.`,
+			`- Forbidden edge aliases: edge.kind, edge.source, edge.target.`,
+			`- Minimal valid upsert_edge example: {"op":"upsert_edge","edge":{"id":"edge.cross.scope","type":"depends_on","from":"svc.a","to":"svc.b","provenance":{"kind":"inference","confidence":0.6,"evidence":[{"repo":"scope-a","path":"README.md"},{"repo":"scope-b","path":"README.md"}]}}}`,
 			`- Include at least one question and at least three items in coverage.missing.`,
 		}, "\n")
 	default:

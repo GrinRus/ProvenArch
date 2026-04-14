@@ -1031,7 +1031,7 @@ func TestWorkspaceManifestRoundTrip(t *testing.T) {
 }
 
 func TestRuntimeTimeoutsGetReturnsEffectiveDefaults(t *testing.T) {
-	t.Parallel()
+	clearRuntimeTimeoutEnvForTest(t)
 
 	server := newTestServer(t)
 	httpServer := httptest.NewServer(server.Handler())
@@ -1067,7 +1067,7 @@ func TestRuntimeTimeoutsGetReturnsEffectiveDefaults(t *testing.T) {
 }
 
 func TestRuntimeTimeoutsPutSupportsPartialUpdate(t *testing.T) {
-	t.Parallel()
+	clearRuntimeTimeoutEnvForTest(t)
 
 	server := newTestServer(t)
 	httpServer := httptest.NewServer(server.Handler())
@@ -1108,7 +1108,7 @@ func TestRuntimeTimeoutsPutSupportsPartialUpdate(t *testing.T) {
 }
 
 func TestRuntimeTimeoutsPutRejectsInvalidValues(t *testing.T) {
-	t.Parallel()
+	clearRuntimeTimeoutEnvForTest(t)
 
 	server := newTestServer(t)
 	httpServer := httptest.NewServer(server.Handler())
@@ -1138,6 +1138,28 @@ func TestRuntimeTimeoutsPutRejectsInvalidValues(t *testing.T) {
 	}
 	if payload.Error.Code != "runtime_timeouts_invalid" {
 		t.Fatalf("expected runtime_timeouts_invalid code, got %q", payload.Error.Code)
+	}
+}
+
+func clearRuntimeTimeoutEnvForTest(t *testing.T) {
+	t.Helper()
+	keys := []string{
+		"ACP_RUNTIME_STEP_TIMEOUT_SEC",
+		"ACP_RUNTIME_HEARTBEAT_SEC",
+		"ACP_PIPELINE_TIMEOUT_SEC",
+		"ACP_PIPELINE_KILL_GRACE_SEC",
+		"ACP_API_READY_TIMEOUT_SEC",
+		"ACP_API_INIT_TIMEOUT_SEC",
+		"ACP_UI_INIT_POLL_TIMEOUT_SEC",
+		"ACP_UI_CANCEL_POLL_TIMEOUT_SEC",
+		"ACP_FULL_RUN_PIPELINE_TIMEOUT_SEC",
+		"ACP_FULL_RUN_PIPELINE_KILL_GRACE_SEC",
+		"READY_TIMEOUT_SEC",
+		"UI_E2E_INIT_TIMEOUT_SEC",
+		"UI_E2E_CANCEL_TIMEOUT_SEC",
+	}
+	for _, key := range keys {
+		t.Setenv(key, "")
 	}
 }
 
@@ -1444,8 +1466,8 @@ runtime:
 				t.Fatalf("expected at least two shard summary items for monolith modules, got %d", len(summary.Items))
 			}
 		})
+		}
 	}
-}
 
 func TestArtifactsWriteEndpoint(t *testing.T) {
 	t.Parallel()
