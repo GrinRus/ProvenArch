@@ -12,6 +12,7 @@
     "e2e:live": "playwright test -c playwright.live.config.ts"
   },
   "dependencies": {
+    "mermaid": "^11.14.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },

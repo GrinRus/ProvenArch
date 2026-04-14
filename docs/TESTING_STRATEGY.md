@@ -28,7 +28,7 @@
 
 ### Golden/regression tests
 - model store materialization
-- compiler outputs (`reports/as-is/*`, findings, proposals, changelog)
+- compiler outputs (`reports/as-is/*`, `reports/diagrams/*`, findings, proposals, changelog)
 - deterministic comparisons against recorded golden outputs
 - hash-based snapshot compare against `fixtures/scenarios/*/golden/snapshot.sha256`
 
@@ -184,6 +184,7 @@ Implemented additional jobs:
   - `GET /api/pipeline/runs/<run_id>/logs?cursor=<n>&limit=<n>`
   - pagination + invalid params + run_not_found
   - structured failure diagnostics в `fields` (`stdout_snippet`/`stderr_snippet`, `task_id`, `provider`, counters)
+  - mixed wire-shape (`kind=event|runtime_output`, optional `stream=stdout|stderr`)
 - run cancel endpoint:
   - `POST /api/pipeline/runs/<run_id>/cancel`
   - happy-path `202`, `404 run_not_found`, `409 run_not_cancelable`, `400 invalid_request_body`
@@ -192,7 +193,11 @@ Implemented additional jobs:
   - log panel render (`Runs: Logs`)
   - log polling/append without duplicates
   - view toggle `line | line+fields`
+  - mode toggle `event timeline | raw agent stream | all`
   - quick action `Open taskrun artifact`
+- UI results diagrams surface:
+  - navigation `Results -> Diagrams`
+  - diagram artifact listing and Mermaid preview render
 - UI run lifecycle operability:
   - bootstrap auto-select newest active run
   - если выбранный run исчезает из list endpoint, UI очищает stale run details/logs и не auto-switch-ится на другой run
@@ -292,3 +297,10 @@ Implemented additional jobs:
 - `./scripts/full-run-batch-5x2.sh`
 - `./scripts/full-run-batch-matrix.sh`
 - `./scripts/frontend-live-e2e.sh`
+- runtime live log seam:
+  - mixed `event` + `runtime_output` entries в run logs
+  - `runtime_output.stream` (`stdout|stderr`) сохраняется и не ломает pagination
+  - hard-cap truncation marker фиксируется как `fields.output_truncated=true`
+- Step 2 diagram compiler regression:
+  - deterministic C4 artifacts + stable index ordering
+  - strict evidence gap markers (`Gap:*`) при недостатке данных

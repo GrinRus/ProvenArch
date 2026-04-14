@@ -82,6 +82,7 @@ Q&A API follow-up в baseline зарезервирован как read-only endp
 Bundle bootstrap policy:
 - `init-workspace` и `serve --auto-init` создают baseline artifacts по стратегии create-if-missing;
 - существующие пользовательские правки в baseline файлах не перезаписываются.
+- baseline prompt defaults структурированы по обязательным секциям (`Goal`, `Inputs`, `Required Output Shape`, `Evidence Policy`, `Forbidden Behavior`, `Fallback When Unknown`) и покрыты quality-тестом на минимальную насыщенность.
 
 ---
 
@@ -137,7 +138,8 @@ acp run --workspace /path/to/arch-workspace --pipeline init --runtime fake --non
 ```
 
 После запуска UI отображает dashboard со всеми run'ами (`queued/running/succeeded/failed`), включая уже завершённые запуски.
-Для operability UI автоматически выбирает newest active run (или первый из списка), показывает полный warnings list выбранного run, позволяет переключать log view `line/line+fields` и поддерживает `Cancel selected run`.
+Для operability UI автоматически выбирает newest active run (или первый из списка), показывает полный warnings list выбранного run, поддерживает top-level navigation `Setup / Baseline / Runs / Results / Settings`, в `Runs: Logs` позволяет переключать `event timeline | raw agent stream | all` и `line | line+fields`, и поддерживает `Cancel selected run`.
+`Results` включает отдельную поверхность `Diagrams` для `reports/diagrams/*` (Mermaid preview + index).
 История сохраняется в workspace: `reports/taskruns/run-history.json`.
 
 ### 3) Альтернативный явный bootstrap через `init-workspace`
@@ -584,8 +586,11 @@ UI в MVP должен покрывать минимум:
 - настройку `repos[]` (multi-repo) для локальных папок и GitHub/GitLab URL;
 - baseline-wide редактор `charter/*` + `skills/*` (prompt packs, `subagents.yaml`, skill prompts);
 - запуск pipeline (init/update);
-- явные секции `Setup / Baseline / Runs / Results`;
-- просмотр результатов (`as-is`, findings, proposals) и repo validation overview (`resolved_repos` + diagnostics по repo);
+- явные top-level секции `Setup / Baseline / Runs / Results / Settings`;
+- `Settings` как отдельная вкладка для runtime profile (`timeouts` + `execution`);
+- `Runs: Logs` с dual stream surface (`event timeline` + `raw agent stream`) и quick actions;
+- `Results` с отдельной вкладкой `Diagrams` (filter/open/preview C4 Mermaid artifacts);
+- просмотр остальных результатов (`as-is`, findings, proposals) и repo validation overview (`resolved_repos` + diagnostics по repo);
 - просмотр coverage/questions по недостающим данным;
 - вызовы backend через `/api/*` (см. `docs/spec/API_SPEC.md`).
 
