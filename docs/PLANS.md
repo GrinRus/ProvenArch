@@ -49,6 +49,52 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 
 ### Plan ID
+EP-20260414-batch-parallel-shards
+
+### Context
+`scripts/full-run-batch-5x2.sh` выполняет backend/frontend циклы строго последовательно (`2 providers x 5 runs`), что делает локальный trusted-machine re-audit слишком долгим. Нужен безопасный split-run режим для параллельного запуска независимых shard-процессов без изменения default `5x2` контракта.
+
+### Goals (must have)
+- [x] Добавить shard selector по provider (`BATCH_PROVIDER_FILTER`) и run index (`BATCH_RUN_SELECTION`)
+- [x] Добавить `BATCH_SKIP_PRECHECK` для secondary shard'ов
+- [x] Добавить frontend execution mode (`BATCH_FRONTEND_MODE=auto|always|never`) с auto-skip без `run1`
+- [x] Сохранить backward-compatible default поведение (`all providers`, `runs 1..5`, precheck enabled)
+- [x] Обновить integration tests и документацию runbook/testing strategy
+
+### Non-goals
+- [x] Изменение quality rubric/report contracts (`scripts/e2e_batch_report.py`)
+- [x] Изменение required CI gate policy (live smoke остаётся optional)
+- [x] Изменение набора runtime providers beyond MVP
+
+### Approach
+1) Расширить `full-run-batch-5x2.sh` валидируемыми shard/env controls и перевести все loops на resolved selections.
+2) Сделать deterministic frontend skip semantics для shard'ов без `run1` (без ложного `frontend_failed`).
+3) Добавить regression tests для precheck-classification subset и frontend auto-skip semantics.
+4) Синхронизировать `README`, `LOCAL_FULL_RUN_AI_ADVENT`, `TESTING_STRATEGY`.
+
+### Files expected to change
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/tests/test_full_run_stability.py`
+- `README.md`
+- `docs/LOCAL_FULL_RUN_AI_ADVENT.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены
+- [x] Схемы/контракты не изменены
+- [x] Документация обновлена
+
+### Risks
+- Неправильный shard selection может создавать неполные локальные отчёты; mitigated explicit env docs + явный `skipped` статус frontend smoke.
+- Параллельные shard'ы с одинаковым `BATCH_ID` будут конфликтовать по output paths; mitigated runbook рекомендацией задавать уникальный `BATCH_ID`.
+
+### Progress log
+- 2026-04-14: Добавлены `BATCH_PROVIDER_FILTER`, `BATCH_RUN_SELECTION`, `BATCH_SKIP_PRECHECK`, `BATCH_FRONTEND_MODE` в `full-run-batch-5x2.sh`; loops переведены на resolved shard sets.
+- 2026-04-14: Добавлены integration tests для shard precheck classification и frontend auto-skip без `run1`; обновлены README/runbook/testing docs.
+- 2026-04-14: Добавлены негативные regression tests для invalid provider/run shard selection, `BATCH_SKIP_PRECHECK` bypass и `BATCH_FRONTEND_MODE=never`; в runbooks явно зафиксированы `unique BATCH_ID` и рекомендация single-precheck shard.
+
+### Plan ID
 EP-20260413-backend-repo-selection-hardening
 
 ### Context

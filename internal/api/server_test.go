@@ -1466,8 +1466,8 @@ runtime:
 				t.Fatalf("expected at least two shard summary items for monolith modules, got %d", len(summary.Items))
 			}
 		})
-		}
 	}
+}
 
 func TestArtifactsWriteEndpoint(t *testing.T) {
 	t.Parallel()

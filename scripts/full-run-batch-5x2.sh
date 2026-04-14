@@ -15,12 +15,21 @@ RUN_COUNT="${RUN_COUNT:-5}"
 ACP_CLAUDE_CMD_BIN="${ACP_CLAUDE_CMD_BIN:-claude}"
 ACP_QWEN_CMD_BIN="${ACP_QWEN_CMD_BIN:-qwen}"
 ACP_APPLY_TIMEOUTS_VIA_API="${ACP_APPLY_TIMEOUTS_VIA_API:-1}"
+BATCH_PROVIDER_FILTER="${BATCH_PROVIDER_FILTER:-all}"
+BATCH_RUN_SELECTION="${BATCH_RUN_SELECTION:-all}"
+BATCH_SKIP_PRECHECK="${BATCH_SKIP_PRECHECK:-0}"
+BATCH_FRONTEND_MODE="${BATCH_FRONTEND_MODE:-auto}"
 E2E_TMP_ROOT="${E2E_TMP_ROOT:-/tmp/provenarch-test_arch_project}"
 BATCH_ROOT="${BATCH_ROOT:-$E2E_TMP_ROOT/runs/$BATCH_ID}"
 REPORTS_ROOT="${REPORTS_ROOT:-$E2E_TMP_ROOT/reports}"
 RESOLVED_TARGET_REPOS_FILE=""
 DECLARED_REPOS_JSON=""
 RUN_CLASSIFICATIONS_TSV=""
+declare -a ALL_PROVIDERS=("qwen-code" "claude-code")
+declare -a SELECTED_PROVIDERS=()
+declare -a SELECTED_RUN_INDEXES=()
+SELECTED_PROVIDERS_CSV=""
+SELECTED_RUN_INDEXES_CSV=""
 RUNTIME_PARSE_FAILURES=0
 RUNNER_UNAVAILABLE_FAILURES=0
 INFRA_SIGNAL_TERMINATED_FAILURES=0
@@ -67,6 +76,133 @@ require_cmd() {
   if ! command -v "$cmd" >/dev/null 2>&1; then
     die "required command is unavailable: $cmd"
   fi
+}
+
+array_contains() {
+  local needle="$1"
+  shift
+  local item
+  for item in "$@"; do
+    if [[ "$item" == "$needle" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+run_index_selected() {
+  local run_index="$1"
+  array_contains "$run_index" "${SELECTED_RUN_INDEXES[@]-}"
+}
+
+provider_selected() {
+  local provider="$1"
+  array_contains "$provider" "${SELECTED_PROVIDERS[@]-}"
+}
+
+resolve_selected_providers() {
+  local filter_raw="${BATCH_PROVIDER_FILTER:-all}"
+  local filter
+  filter="$(echo "$filter_raw" | tr -d '[:space:]')"
+  if [[ -z "$filter" || "$filter" == "all" ]]; then
+    SELECTED_PROVIDERS=("${ALL_PROVIDERS[@]}")
+  else
+    SELECTED_PROVIDERS=()
+    local token
+    IFS=',' read -r -a tokens <<<"$filter"
+    for token in "${tokens[@]}"; do
+      [[ -z "$token" ]] && continue
+      case "$token" in
+        qwen-code|claude-code)
+          if ! array_contains "$token" "${SELECTED_PROVIDERS[@]-}"; then
+            SELECTED_PROVIDERS+=("$token")
+          fi
+          ;;
+        *)
+          die "BATCH_PROVIDER_FILTER contains unsupported provider '$token' (allowed: qwen-code, claude-code, all)"
+          ;;
+      esac
+    done
+  fi
+  if [[ "${#SELECTED_PROVIDERS[@]}" -eq 0 ]]; then
+    die "BATCH_PROVIDER_FILTER resolved to an empty provider set"
+  fi
+  SELECTED_PROVIDERS_CSV="$(IFS=,; echo "${SELECTED_PROVIDERS[*]}")"
+}
+
+resolve_selected_run_indexes() {
+  local selection_raw="${BATCH_RUN_SELECTION:-all}"
+  local resolved_indexes
+  resolved_indexes="$(python3 - "$RUN_COUNT" "$selection_raw" <<'PY'
+import sys
+
+try:
+    run_count = int((sys.argv[1] or "").strip())
+except Exception:
+    raise SystemExit("RUN_COUNT must be a positive integer")
+
+selection = (sys.argv[2] or "").strip().lower()
+if selection in {"", "all"}:
+    print("\n".join(str(i) for i in range(1, run_count + 1)))
+    raise SystemExit(0)
+
+values = set()
+for token in [part.strip() for part in selection.split(",") if part.strip()]:
+    if "-" in token:
+        left, right = token.split("-", 1)
+        try:
+            start = int(left)
+            end = int(right)
+        except Exception:
+            raise SystemExit(f"invalid run range token: {token}")
+        if start > end:
+            raise SystemExit(f"invalid descending run range token: {token}")
+        for value in range(start, end + 1):
+            values.add(value)
+    else:
+        try:
+            values.add(int(token))
+        except Exception:
+            raise SystemExit(f"invalid run token: {token}")
+
+if not values:
+    raise SystemExit("BATCH_RUN_SELECTION resolved to an empty run set")
+
+for value in sorted(values):
+    if value < 1 or value > run_count:
+        raise SystemExit(f"run index out of bounds: {value} (RUN_COUNT={run_count})")
+
+print("\n".join(str(value) for value in sorted(values)))
+PY
+)"
+  SELECTED_RUN_INDEXES=()
+  local run_index
+  while IFS= read -r run_index; do
+    [[ -z "$run_index" ]] && continue
+    SELECTED_RUN_INDEXES+=("$run_index")
+  done <<<"$resolved_indexes"
+  if [[ "${#SELECTED_RUN_INDEXES[@]}" -eq 0 ]]; then
+    die "BATCH_RUN_SELECTION resolved to an empty run set"
+  fi
+  SELECTED_RUN_INDEXES_CSV="$(IFS=,; echo "${SELECTED_RUN_INDEXES[*]}")"
+}
+
+should_run_frontend_for_selection() {
+  case "$BATCH_FRONTEND_MODE" in
+    never)
+      return 1
+      ;;
+    always)
+      return 0
+      ;;
+    auto)
+      run_index_selected "1"
+      return $?
+      ;;
+    *)
+      die "BATCH_FRONTEND_MODE must be auto|always|never (got '$BATCH_FRONTEND_MODE')"
+      ;;
+  esac
 }
 
 summary_scalar() {
@@ -352,8 +488,8 @@ record_precheck_failed_classifications() {
   fi
   local provider
   local run_index
-  for provider in qwen-code claude-code; do
-    for run_index in $(seq 1 "$RUN_COUNT"); do
+  for provider in "${SELECTED_PROVIDERS[@]}"; do
+    for run_index in "${SELECTED_RUN_INDEXES[@]}"; do
       printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
         "$provider" \
         "$run_index" \
@@ -551,6 +687,16 @@ fi
 if [[ "$ACP_APPLY_TIMEOUTS_VIA_API" != "0" && "$ACP_APPLY_TIMEOUTS_VIA_API" != "1" ]]; then
   die "ACP_APPLY_TIMEOUTS_VIA_API must be 0 or 1, got '$ACP_APPLY_TIMEOUTS_VIA_API'"
 fi
+if [[ "$BATCH_SKIP_PRECHECK" != "0" && "$BATCH_SKIP_PRECHECK" != "1" ]]; then
+  die "BATCH_SKIP_PRECHECK must be 0 or 1, got '$BATCH_SKIP_PRECHECK'"
+fi
+case "$BATCH_FRONTEND_MODE" in
+  auto|always|never)
+    ;;
+  *)
+    die "BATCH_FRONTEND_MODE must be auto|always|never (got '$BATCH_FRONTEND_MODE')"
+    ;;
+esac
 
 require_cmd git
 require_cmd go
@@ -558,8 +704,14 @@ require_cmd npm
 require_cmd make
 require_cmd python3
 require_cmd curl
-require_cmd "$ACP_CLAUDE_CMD_BIN"
-require_cmd "$ACP_QWEN_CMD_BIN"
+resolve_selected_providers
+resolve_selected_run_indexes
+if provider_selected "claude-code"; then
+  require_cmd "$ACP_CLAUDE_CMD_BIN"
+fi
+if provider_selected "qwen-code"; then
+  require_cmd "$ACP_QWEN_CMD_BIN"
+fi
 
 mkdir -p "$BATCH_ROOT" "$REPORTS_ROOT"
 prepare_target_repos_file
@@ -569,10 +721,18 @@ echo -e "provider\trun_index\tfailure_class\tprocess_exit\tsummary_result\tfailu
 
 PROVENARCH_SHA="$(git -C "$PROVENARCH_ROOT" rev-parse HEAD)"
 PROVENARCH_BRANCH="$(git -C "$PROVENARCH_ROOT" rev-parse --abbrev-ref HEAD)"
-CLAUDE_PATH="$(command -v "$ACP_CLAUDE_CMD_BIN")"
-QWEN_PATH="$(command -v "$ACP_QWEN_CMD_BIN")"
-CLAUDE_VERSION="$("$ACP_CLAUDE_CMD_BIN" --version | head -n1 | tr -d '\r')"
-QWEN_VERSION="$("$ACP_QWEN_CMD_BIN" --version | head -n1 | tr -d '\r')"
+CLAUDE_PATH="not-selected"
+QWEN_PATH="not-selected"
+CLAUDE_VERSION="not-selected"
+QWEN_VERSION="not-selected"
+if provider_selected "claude-code"; then
+  CLAUDE_PATH="$(command -v "$ACP_CLAUDE_CMD_BIN")"
+  CLAUDE_VERSION="$("$ACP_CLAUDE_CMD_BIN" --version | head -n1 | tr -d '\r')"
+fi
+if provider_selected "qwen-code"; then
+  QWEN_PATH="$(command -v "$ACP_QWEN_CMD_BIN")"
+  QWEN_VERSION="$("$ACP_QWEN_CMD_BIN" --version | head -n1 | tr -d '\r')"
+fi
 GENERATED_AT_UTC="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 DECLARED_REPOS_JSON_ESCAPED="$(python3 - "$DECLARED_REPOS_JSON" <<'PY'
 import json
@@ -728,26 +888,31 @@ PY
 log "target repos input: file=$RESOLVED_TARGET_REPOS_FILE profile_id=${PROFILE_ID:-adhoc} source_kind=${PROFILE_SOURCE_KIND:-mixed} expected_repo_count=$EXPECTED_REPO_COUNT_RESOLVED"
 log "preflight versions: claude='$CLAUDE_VERSION' qwen='$QWEN_VERSION'"
 log "preflight timeout profile: apply_via_api=$ACP_APPLY_TIMEOUTS_VIA_API $TIMEOUT_PROFILE_LINE"
-log "running DoD precheck: make contracts test lint build"
-if ! (
-  cd "$PROVENARCH_ROOT"
-  run_dod_precheck_make >"$BATCH_ROOT/precheck-make.log" 2>&1
-); then
-  finalize_precheck_failure "make contracts test lint build failed (see $BATCH_ROOT/precheck-make.log)"
-fi
+log "batch shard selection: providers=$SELECTED_PROVIDERS_CSV runs=$SELECTED_RUN_INDEXES_CSV skip_precheck=$BATCH_SKIP_PRECHECK frontend_mode=$BATCH_FRONTEND_MODE"
+if [[ "$BATCH_SKIP_PRECHECK" == "1" ]]; then
+  log "skipping DoD/UI precheck (BATCH_SKIP_PRECHECK=1)"
+else
+  log "running DoD precheck: make contracts test lint build"
+  if ! (
+    cd "$PROVENARCH_ROOT"
+    run_dod_precheck_make >"$BATCH_ROOT/precheck-make.log" 2>&1
+  ); then
+    finalize_precheck_failure "make contracts test lint build failed (see $BATCH_ROOT/precheck-make.log)"
+  fi
 
-log "installing UI dependencies and Playwright browser"
-if ! (
-  cd "$PROVENARCH_ROOT"
-  npm ci --prefix ui >"$BATCH_ROOT/precheck-ui-npm.log" 2>&1
-  npm exec --prefix ui playwright install chromium >"$BATCH_ROOT/precheck-playwright.log" 2>&1
-); then
-  finalize_precheck_failure "UI precheck failed (see $BATCH_ROOT/precheck-ui-npm.log and $BATCH_ROOT/precheck-playwright.log)"
+  log "installing UI dependencies and Playwright browser"
+  if ! (
+    cd "$PROVENARCH_ROOT"
+    npm ci --prefix ui >"$BATCH_ROOT/precheck-ui-npm.log" 2>&1
+    npm exec --prefix ui playwright install chromium >"$BATCH_ROOT/precheck-playwright.log" 2>&1
+  ); then
+    finalize_precheck_failure "UI precheck failed (see $BATCH_ROOT/precheck-ui-npm.log and $BATCH_ROOT/precheck-playwright.log)"
+  fi
 fi
 
 failed_runs=0
-for provider in qwen-code claude-code; do
-  for i in $(seq 1 "$RUN_COUNT"); do
+for provider in "${SELECTED_PROVIDERS[@]}"; do
+  for i in "${SELECTED_RUN_INDEXES[@]}"; do
     run_dir="$BATCH_ROOT/$provider/run${i}"
     mkdir -p "$run_dir"
     log "full-run provider=$provider run=$i tmp_root=$run_dir"
@@ -787,7 +952,27 @@ for provider in qwen-code claude-code; do
 done
 
 frontend_failures=0
-for provider in qwen-code claude-code; do
+for provider in "${SELECTED_PROVIDERS[@]}"; do
+  if ! should_run_frontend_for_selection; then
+    output_dir="$BATCH_ROOT/frontend/$provider"
+    mkdir -p "$output_dir"
+    runtime_cmd="$ACP_QWEN_CMD_BIN"
+    if [[ "$provider" == "claude-code" ]]; then
+      runtime_cmd="$ACP_CLAUDE_CMD_BIN"
+    fi
+    write_frontend_status_json \
+      "$output_dir/frontend-e2e-result.json" \
+      "$provider" \
+      "init-inspect" \
+      "skipped" \
+      "frontend_mode_${BATCH_FRONTEND_MODE}_selection_${SELECTED_RUN_INDEXES_CSV}" \
+      "$output_dir/frontend-workspace" \
+      "$output_dir" \
+      "$runtime_cmd"
+    log "frontend live e2e skipped provider=$provider mode=$BATCH_FRONTEND_MODE runs=$SELECTED_RUN_INDEXES_CSV"
+    continue
+  fi
+
   backend_run_dir="$BATCH_ROOT/$provider/run1"
   workspace="$backend_run_dir/arch-workspace"
   output_dir="$BATCH_ROOT/frontend/$provider"
@@ -845,14 +1030,29 @@ for provider in qwen-code claude-code; do
   fi
 done
 
-for provider in qwen-code claude-code; do
+for provider in "${SELECTED_PROVIDERS[@]}"; do
   cancel_output_dir="$BATCH_ROOT/frontend-cancel/$provider"
-  frontend_workspace="$BATCH_ROOT/frontend/$provider/frontend-workspace"
   mkdir -p "$cancel_output_dir"
   runtime_cmd="$ACP_QWEN_CMD_BIN"
   if [[ "$provider" == "claude-code" ]]; then
     runtime_cmd="$ACP_CLAUDE_CMD_BIN"
   fi
+  if ! should_run_frontend_for_selection; then
+    FRONTEND_CANCEL_SKIPPED=$((FRONTEND_CANCEL_SKIPPED + 1))
+    write_frontend_status_json \
+      "$cancel_output_dir/frontend-cancel-result.json" \
+      "$provider" \
+      "cancel-refresh" \
+      "skipped" \
+      "frontend_mode_${BATCH_FRONTEND_MODE}_selection_${SELECTED_RUN_INDEXES_CSV}" \
+      "$BATCH_ROOT/frontend/$provider/frontend-workspace" \
+      "$cancel_output_dir" \
+      "$runtime_cmd"
+    log "frontend cancel smoke skipped provider=$provider mode=$BATCH_FRONTEND_MODE runs=$SELECTED_RUN_INDEXES_CSV"
+    continue
+  fi
+
+  frontend_workspace="$BATCH_ROOT/frontend/$provider/frontend-workspace"
 
   if [[ ! -d "$frontend_workspace" ]]; then
     FRONTEND_CANCEL_SKIPPED=$((FRONTEND_CANCEL_SKIPPED + 1))
