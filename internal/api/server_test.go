@@ -1553,7 +1553,7 @@ runtime:
 			}
 			foundStep1Prepared := false
 			for _, item := range logsPayload.Items {
-				if item.StepID != "init.step1.collect" || item.Message != "runtime shard execution prepared" {
+				if item.StepID != "init.step2.service_collect" || item.Message != "runtime shard execution prepared" {
 					continue
 				}
 				foundStep1Prepared = true
@@ -1590,7 +1590,7 @@ runtime:
 			}
 			summaryPath := ""
 			for _, artifact := range artifactsPayload.Artifacts {
-				if strings.Contains(artifact.Path, "-init-step1-collect-shard-summary-") {
+				if strings.Contains(artifact.Path, "-init-step2-service_collect-shard-summary-") {
 					summaryPath = artifact.Path
 					break
 				}
@@ -1710,6 +1710,118 @@ func TestPipelineStartRejectsInvalidBody(t *testing.T) {
 	if payload.Error.Code != "invalid_request_body" {
 		t.Fatalf("expected invalid_request_body code, got %q", payload.Error.Code)
 	}
+}
+
+func TestPipelineRefreshRejectsInvalidRefreshMode(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Post(
+		httpServer.URL+"/api/pipeline/refresh",
+		"application/json",
+		bytes.NewBufferString(`{"trigger":"manual","refresh_mode":"delta"}`),
+	)
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/refresh invalid refresh mode: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", response.StatusCode)
+	}
+
+	var payload struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	if payload.Error.Code != "refresh_mode_invalid" {
+		t.Fatalf("expected refresh_mode_invalid code, got %q", payload.Error.Code)
+	}
+}
+
+func TestPipelineRefreshUsesDefaultIncrementalRefreshMode(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Post(
+		httpServer.URL+"/api/pipeline/refresh",
+		"application/json",
+		bytes.NewBufferString(`{"trigger":"manual"}`),
+	)
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/refresh default refresh mode: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", response.StatusCode)
+	}
+	var payload struct {
+		RunID       string `json:"run_id"`
+		Status      string `json:"status"`
+		RefreshMode string `json:"refresh_mode"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response payload: %v", err)
+	}
+	if strings.TrimSpace(payload.RunID) == "" {
+		t.Fatalf("expected non-empty run_id")
+	}
+	if payload.Status != "started" {
+		t.Fatalf("expected status started, got %q", payload.Status)
+	}
+	if payload.RefreshMode != "incremental" {
+		t.Fatalf("expected refresh_mode=incremental, got %q", payload.RefreshMode)
+	}
+	waitForRunTerminalStatus(t, httpServer.URL, payload.RunID, 5*time.Second)
+}
+
+func TestPipelineInitIgnoresRefreshModeWithWarning(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Post(
+		httpServer.URL+"/api/pipeline/init",
+		"application/json",
+		bytes.NewBufferString(`{"trigger":"ui","refresh_mode":"full"}`),
+	)
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/init with refresh mode: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", response.StatusCode)
+	}
+	var payload struct {
+		RunID       string   `json:"run_id"`
+		RefreshMode string   `json:"refresh_mode"`
+		Warnings    []string `json:"warnings"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response payload: %v", err)
+	}
+	if payload.RefreshMode != "incremental" {
+		t.Fatalf("expected init response refresh_mode=incremental, got %q", payload.RefreshMode)
+	}
+	if len(payload.Warnings) == 0 || !containsSubstring(payload.Warnings, "ignored for init pipeline") {
+		t.Fatalf("expected init warning about ignored refresh_mode, got %v", payload.Warnings)
+	}
+	waitForRunTerminalStatus(t, httpServer.URL, payload.RunID, 5*time.Second)
 }
 
 func TestPipelineStartRejectsUnsupportedTrigger(t *testing.T) {
@@ -2069,7 +2181,7 @@ if raw:
         task = {}
 
 task_id = first_non_empty(task, ["task_id", "TaskID"]) or from_prompt("TaskID") or from_prompt("task_id") or "task"
-step_id = first_non_empty(task, ["step_id", "StepID"]) or from_prompt("StepID") or from_prompt("step_id") or "init.step1.collect"
+step_id = first_non_empty(task, ["step_id", "StepID"]) or from_prompt("StepID") or from_prompt("step_id") or "init.step2.service_collect"
 run_id = first_non_empty(task, ["run_id", "RunID"]) or from_prompt("RunID") or from_prompt("run_id")
 payload = {
     "meta": {
@@ -2121,6 +2233,16 @@ func runGitTestCommand(t *testing.T, dir string, args ...string) {
 	if err != nil {
 		t.Fatalf("git %s failed: %v (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
 	}
+}
+
+func containsSubstring(values []string, needle string) bool {
+	target := strings.TrimSpace(needle)
+	for _, value := range values {
+		if strings.Contains(strings.TrimSpace(value), target) {
+			return true
+		}
+	}
+	return false
 }
 
 type runStatusPayload struct {
@@ -2176,7 +2298,25 @@ func (unavailableRunner) Preflight(context.Context) error {
 
 type parseFailureRunner struct{}
 
-func (parseFailureRunner) Run(context.Context, acpruntime.Task) (acpruntime.Result, error) {
+func (parseFailureRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	if strings.HasSuffix(task.StepID, "step2.service_collect") {
+		return acpruntime.Result{}, acpruntime.WrapRunnerError(
+			acpruntime.ProviderClaudeCode,
+			acpruntime.ErrorCodeRunnerParseFailed,
+			"runner returned invalid taskresult in test",
+			nil,
+		)
+	}
+	return claudecode.FakeRunner{}.Run(ctx, task)
+}
+
+func (parseFailureRunner) Preflight(context.Context) error {
+	return nil
+}
+
+type parseFailureAlwaysRunner struct{}
+
+func (parseFailureAlwaysRunner) Run(context.Context, acpruntime.Task) (acpruntime.Result, error) {
 	return acpruntime.Result{}, acpruntime.WrapRunnerError(
 		acpruntime.ProviderClaudeCode,
 		acpruntime.ErrorCodeRunnerParseFailed,
@@ -2185,7 +2325,7 @@ func (parseFailureRunner) Run(context.Context, acpruntime.Task) (acpruntime.Resu
 	)
 }
 
-func (parseFailureRunner) Preflight(context.Context) error {
+func (parseFailureAlwaysRunner) Preflight(context.Context) error {
 	return nil
 }
 

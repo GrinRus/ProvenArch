@@ -49,6 +49,72 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 
 ### Plan ID
+EP-20260414-service-first-pipeline-v2
+
+### Context
+Нужно перевести ACP на service-first execution: deterministic inventory/sharding, runtime fan-out по сервисам, incremental/full refresh, отдельный global-review runtime step и новый canonical step contract (`step1..step6`). Дополнительно требуется синхронизировать CLI/API/UI, обновить live e2e сценарии и закрыть тестовый контур.
+
+### Goals (must have)
+- [x] Внедрить новые canonical step IDs (`service_inventory`, `service_collect`, `asis_docs`, `service_findings`, `global_review`, `proposals`)
+- [x] Реализовать service inventory planner (markers, leaf-pruning, fallback `.`, deterministic service/shard IDs)
+- [x] Реализовать chunking policy для больших сервисов (`>500 files`/`>8MB` -> чанки до `200 files`/`3MB`, cap `8`)
+- [x] Перевести runtime fan-out на service shards в `step2/step4`
+- [x] Добавить `step5.global_review` (single runtime task per run) + architect summary aggregation
+- [x] Добавить `refresh_mode` в CLI/API/UI (`incremental` default, `full` explicit)
+- [x] Включить execution defaults `parallel + max_parallel_tasks=3` (precedence: `CLI > env > workspace > defaults`)
+- [x] Обновить фикстуры/golden/scenario tests под новые step IDs и service-first artifacts
+- [x] Обновить live e2e сценарии (`init-inspect-service-first`, `refresh-incremental`, `refresh-full`, `cancel-refresh`) и runbook/scripts
+- [x] Синхронизировать документацию (`README`, `ARCHITECTURE`, `PIPELINE_SPEC`, `API_SPEC`, `WORKSPACE_SPEC`, `TESTING_STRATEGY`, `PLANS`)
+
+### Non-goals
+- [x] Mixed providers в одном run (остаётся process-scoped provider)
+- [x] Manual service overrides в manifest/cards
+- [x] Изменение `workspace.schema.json` в этом slice
+
+### Approach
+1) Обновить orchestrator step contract и runtime execution flow.
+2) Добавить service inventory snapshot/incremental selector + per-repo fallback-to-full.
+3) Реализовать service-level collect/findings fan-out и global-review aggregation.
+4) Синхронизировать CLI/API/UI surfaces (`refresh_mode`, new steps, defaults).
+5) Перепривязать unit/integration/golden/e2e tests к новой модели и артефактам.
+6) Обновить runbooks/docs и зафиксировать новый operational contract.
+
+### Files expected to change
+- `internal/orchestrator/*`
+- `internal/runtime/*`
+- `internal/api/*`
+- `cmd/acp/*`
+- `ui/src/*`
+- `ui/e2e/live-flow.spec.ts`
+- `scripts/frontend-live-e2e.sh`
+- `scripts/full-run-batch-5x2.sh`
+- `fixtures/scenarios/*`
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/spec/PIPELINE_SPEC.md`
+- `docs/spec/API_SPEC.md`
+- `docs/spec/WORKSPACE_SPEC.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/LOCAL_FULL_RUN_AI_ADVENT.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены (unit + integration + golden + live e2e specs)
+- [x] Контракты шагов и API/CLI/UI синхронизированы
+- [x] Документация и runbooks обновлены
+
+### Risks
+- Migration risk для клиентов, ожидающих старые step IDs; mitigated through docs/test updates в этом же slice.
+- Incremental refresh может выбрать 0 services при отсутствии diff; mitigated warning diagnostics + explicit `full` mode.
+
+### Progress log
+- 2026-04-14: Реализованы service inventory planner, service-level runtime fan-out, global-review step и новые canonical step IDs.
+- 2026-04-14: Добавлены `refresh_mode` surfaces в CLI/API/UI, execution defaults переключены на `parallel/3`.
+- 2026-04-14: Обновлены orchestrator/api/cmd/ui tests, scenario fixtures/golden и live e2e flows/scripts под service-first contract.
+- 2026-04-14: Синхронизированы README/spec/architecture/testing/runbook документы.
+- 2026-04-15: Выполнен детальный post-audit: добавлены исчерпывающие unit/integration/API/CLI/UI контрактные тесты для service-first v2, зафиксирован и исправлен баг incremental selector (`git status --porcelain` path parse), подтверждён зелёный DoD (`make contracts/test/lint/build`).
+
+### Plan ID
 EP-20260414-batch-parallel-shards
 
 ### Context

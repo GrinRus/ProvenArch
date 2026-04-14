@@ -250,8 +250,8 @@ API управления timeout-профилем:
 Execution-конфиг хранится в `workspace.yaml` (`runtime.profile.execution`) и управляет шардированием runtime-задач.
 
 Default values:
-- `strategy=sequential`
-- `max_parallel_tasks=1`
+- `strategy=parallel`
+- `max_parallel_tasks=3`
 - `failure_policy=best_effort`
 - `shard_discovery.mode=heuristics`
 - `repo_selection=all`
@@ -425,7 +425,9 @@ GitHub target catalog для release выбора (`3` monorepo + `3` multi-repo
 - `scripts/frontend-live-e2e.sh`: Playwright output сохраняется в `$OUTPUT_DIR/playwright-results`
 - frontend live e2e ожидает число resolved repos из `UI_E2E_EXPECTED_REPO_COUNT` (default `1`)
 - `UI_E2E_SCENARIO` переключает live flow:
-  - `init-inspect` (default): validate -> run init -> inspect artifacts
+  - `init-inspect-service-first` (default): validate -> run init -> inspect service-first artifacts (`step1..step6`)
+  - `refresh-incremental`: validate -> run refresh (incremental) -> verify partial fan-out
+  - `refresh-full`: validate -> run refresh (full) -> verify full fan-out
   - `cancel-refresh`: validate -> run refresh -> cancel selected run -> expect `failed + run_canceled`
 - `UI_E2E_CANCEL_STUB_SLEEP_SEC` задаёт длительность controlled slow stub runner для сценария `cancel-refresh`
 - при shard-режиме `BATCH_FRONTEND_MODE=auto` frontend smoke помечается `skipped`, если `run1` не входит в `BATCH_RUN_SELECTION`
@@ -555,10 +557,12 @@ MVP canonical runtime shape:
 
 ### Init pipeline
 0. Charter (wizard)
-1. Collect context
-2. As-is docs
-3. Findings
-4. Proposals
+1. Service inventory (planner + snapshot)
+2. Service collect (runtime fan-out by service shards)
+3. As-is docs
+4. Service findings (runtime fan-out by service shards)
+5. Global review (single runtime aggregation)
+6. Proposals
 
 ### Continuous loop (manual)
 - обновление локальных репозиториев/документов

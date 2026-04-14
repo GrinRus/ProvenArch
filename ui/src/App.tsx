@@ -1,8 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { MermaidPreview } from "./components/MermaidPreview";
-import { TabNav, type TabOption } from "./components/TabNav";
-
 type Diagnostic = {
   level: "error" | "warning";
   code: string;
@@ -91,8 +88,6 @@ type RunLogEntry = {
   cursor: number;
   timestamp: string;
   level: "info" | "warning" | "error";
-  kind?: "event" | "runtime_output";
-  stream?: "stdout" | "stderr";
   step_id?: string;
   domain_id?: string;
   message: string;
@@ -239,8 +234,8 @@ const runtimeTimeoutLabels: Record<RuntimeTimeoutKey, string> = {
 const runtimeExecutionKeys: RuntimeExecutionKey[] = ["strategy", "max_parallel_tasks", "failure_policy", "shard_discovery_mode", "repo_selection"];
 
 const defaultRuntimeExecutionValues: RuntimeExecutionValues = {
-  strategy: "sequential",
-  max_parallel_tasks: 1,
+  strategy: "parallel",
+  max_parallel_tasks: 3,
   failure_policy: "best_effort",
   shard_discovery_mode: "heuristics",
   repo_selection: "all",
@@ -258,24 +253,6 @@ const finalStatuses = new Set(["succeeded", "failed"]);
 const activeStatuses = new Set(["queued", "running"]);
 const runLogsPageLimit = 200;
 let guidedRepoSeed = 0;
-
-type TopTab = "setup" | "baseline" | "runs" | "results" | "settings";
-type ResultsTab = "coverage" | "artifacts" | "diagrams";
-type RunLogsMode = "events" | "raw" | "all";
-
-const topTabOptions: Array<TabOption<TopTab>> = [
-  { id: "setup", label: "Setup", testId: "tab-setup" },
-  { id: "baseline", label: "Baseline", testId: "tab-baseline" },
-  { id: "runs", label: "Runs", testId: "tab-runs" },
-  { id: "results", label: "Results", testId: "tab-results" },
-  { id: "settings", label: "Settings", testId: "tab-settings" },
-];
-
-const resultsTabOptions: Array<TabOption<ResultsTab>> = [
-  { id: "coverage", label: "Coverage", testId: "results-tab-coverage" },
-  { id: "artifacts", label: "Artifacts", testId: "results-tab-artifacts" },
-  { id: "diagrams", label: "Diagrams", testId: "results-tab-diagrams" },
-];
 
 function makeGuidedRepo(partial?: Partial<GuidedRepo>): GuidedRepo {
   guidedRepoSeed += 1;
@@ -469,8 +446,6 @@ function pickBootstrapRun(items: RunListItem[]): RunListItem | null {
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<TopTab>("setup");
-  const [resultsTab, setResultsTab] = useState<ResultsTab>("coverage");
   const [validateResult, setValidateResult] = useState<ValidateResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -521,9 +496,9 @@ export default function App() {
   const [runLogsEOF, setRunLogsEOF] = useState(false);
   const [runLogsStatus, setRunLogsStatus] = useState("");
   const [runLogsViewMode, setRunLogsViewMode] = useState<"line" | "line+fields">("line");
-  const [runLogsMode, setRunLogsMode] = useState<RunLogsMode>("all");
   const [runActionStatus, setRunActionStatus] = useState("");
   const [cancelBusy, setCancelBusy] = useState(false);
+  const [refreshMode, setRefreshMode] = useState<"incremental" | "full">("incremental");
 
   const [coverageSummary, setCoverageSummary] = useState<string>("");
   const [openQuestions, setOpenQuestions] = useState<string>("");
@@ -573,38 +548,6 @@ export default function App() {
     }
     return Array.from(paths).sort((left, right) => left.localeCompare(right));
   }, [runLogs]);
-  const filteredRunLogs = useMemo(() => {
-    if (runLogsMode === "all") {
-      return runLogs;
-    }
-    if (runLogsMode === "events") {
-      return runLogs.filter((entry) => (entry.kind ?? "event") !== "runtime_output");
-    }
-    return runLogs.filter((entry) => (entry.kind ?? "event") === "runtime_output");
-  }, [runLogs, runLogsMode]);
-  const diagramArtifacts = useMemo(() => {
-    return artifacts
-      .filter((artifact) => artifact.kind === "diagram" || artifact.kind === "diagram-index" || artifact.path.startsWith("reports/diagrams/"))
-      .sort((left, right) => left.path.localeCompare(right.path));
-  }, [artifacts]);
-  const nonDiagramArtifacts = useMemo(() => {
-    return artifacts
-      .filter((artifact) => !(artifact.kind === "diagram" || artifact.kind === "diagram-index" || artifact.path.startsWith("reports/diagrams/")))
-      .sort((left, right) => left.path.localeCompare(right.path));
-  }, [artifacts]);
-  const selectedArtifactIsMermaid = useMemo(() => {
-    if (!selectedArtifact) {
-      return false;
-    }
-    if (selectedArtifact.endsWith(".mmd")) {
-      return true;
-    }
-    const text = selectedArtifactContent.trim();
-    if (text.startsWith("flowchart") || text.startsWith("graph") || text.startsWith("sequenceDiagram") || text.startsWith("classDiagram")) {
-      return true;
-    }
-    return text.includes("```mermaid");
-  }, [selectedArtifact, selectedArtifactContent]);
   const selectedRunListItem = useMemo(() => {
     if (!runId) {
       return null;
@@ -631,7 +574,7 @@ export default function App() {
   }, [hasActiveRuns, selectedRunIsActive, runId, runLogsEOF]);
   const runLogsRendered = useMemo(() => {
     const includeFields = runLogsViewMode === "line+fields";
-    return filteredRunLogs
+    return runLogs
       .map((entry) => {
         const line = formatRunLogLine(entry);
         if (!includeFields) {
@@ -647,7 +590,7 @@ export default function App() {
         return `${line}\n${serialized}`;
       })
       .join(includeFields ? "\n\n" : "\n");
-  }, [filteredRunLogs, runLogsViewMode]);
+  }, [runLogs, runLogsViewMode]);
 
   useEffect(() => {
     void bootstrapEditorData();
@@ -1131,10 +1074,18 @@ export default function App() {
     setSelectedArtifactContent("");
     resetRunLogs();
     try {
+      const requestBody: Record<string, unknown> = {
+        trigger: "ui",
+        commit: false,
+        create_proposal_branch: false,
+      };
+      if (pipeline === "refresh") {
+        requestBody.refresh_mode = refreshMode;
+      }
       const payload = await fetchJSON<RunStartResponse>(`/api/pipeline/${pipeline}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ trigger: "ui", commit: false, create_proposal_branch: false })
+        body: JSON.stringify(requestBody)
       });
       setRunList((previous) => [
         {
@@ -1274,13 +1225,9 @@ export default function App() {
   }
 
   function formatRunLogLine(entry: RunLogEntry): string {
-    const kind = entry.kind ?? "event";
-    const stream = entry.stream ? `[${entry.stream.toUpperCase()}]` : "";
     const parts = [
       entry.timestamp,
       entry.level.toUpperCase(),
-      kind === "runtime_output" ? "[RAW]" : "[EVENT]",
-      stream,
       entry.step_id ? `[${entry.step_id}]` : "",
       entry.domain_id ? `(${entry.domain_id})` : "",
       entry.message
@@ -1289,10 +1236,10 @@ export default function App() {
   }
 
   async function handleCopyRunLogs() {
-    if (filteredRunLogs.length === 0) {
+    if (runLogs.length === 0) {
       return;
     }
-    const text = filteredRunLogs.map((entry) => formatRunLogLine(entry)).join("\n");
+    const text = runLogs.map((entry) => formatRunLogLine(entry)).join("\n");
     if (!navigator.clipboard || !navigator.clipboard.writeText) {
       setRunLogsStatus("Clipboard API is not available in this browser context.");
       return;
@@ -1309,10 +1256,10 @@ export default function App() {
   }
 
   function handleDownloadRunLogs() {
-    if (filteredRunLogs.length === 0 || !runId) {
+    if (runLogs.length === 0 || !runId) {
       return;
     }
-    const text = filteredRunLogs.map((entry) => formatRunLogLine(entry)).join("\n");
+    const text = runLogs.map((entry) => formatRunLogLine(entry)).join("\n");
     const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -1367,611 +1314,550 @@ export default function App() {
         <p className="eyebrow">ACP Beta Surface</p>
         <h1>Local-first architecture control plane</h1>
         <p className="lead">
-          Validate workspace, tune settings, edit baseline prompts, run init/refresh pipelines, inspect logs, diagrams,
-          and artifacts, then commit workspace updates.
+          Validate workspace, edit charter/skills baseline bundle, run init/refresh pipeline, inspect artifacts and
+          coverage, then commit workspace updates.
         </p>
       </section>
 
-      <TabNav value={activeTab} onChange={setActiveTab} options={topTabOptions} testId="top-tabs" />
-
-      {activeTab === "setup" ? (
-        <>
-          <section className="panel" data-testid="workspace-panel">
-            <h2>Setup: Workspace</h2>
-            <p className="hint">Guided setup writes a valid multi-repo `workspace.yaml` draft.</p>
-            {guidedRepos.map((repo, index) => (
-              <div className="repo-card" key={repo.id}>
-                <div className="repo-card-head">
-                  <h3>Repo {index + 1}</h3>
-                  <button type="button" className="inline-danger" onClick={() => handleRemoveGuidedRepo(repo.id)} disabled={busy || guidedRepos.length <= 1}>
-                    Remove
-                  </button>
-                </div>
-
-                <label htmlFor={`guidedRepoName-${repo.id}`}>Repo name</label>
-                <input
-                  id={`guidedRepoName-${repo.id}`}
-                  value={repo.name}
-                  onChange={(event) => updateGuidedRepo(repo.id, { name: event.target.value })}
-                />
-
-                <label htmlFor={`guidedRepoMode-${repo.id}`}>Repo source type</label>
-                <select
-                  id={`guidedRepoMode-${repo.id}`}
-                  value={repo.mode}
-                  onChange={(event) => updateGuidedRepo(repo.id, { mode: event.target.value as RepoSourceMode })}
-                >
-                  <option value="path">path</option>
-                  <option value="git_url">git_url</option>
-                </select>
-
-                {repo.mode === "path" ? (
-                  <>
-                    <label htmlFor={`guidedRepoPath-${repo.id}`}>path</label>
-                    <input
-                      id={`guidedRepoPath-${repo.id}`}
-                      value={repo.path}
-                      onChange={(event) => updateGuidedRepo(repo.id, { path: event.target.value })}
-                    />
-                  </>
-                ) : (
-                  <>
-                    <label htmlFor={`guidedRepoGitURL-${repo.id}`}>git_url</label>
-                    <input
-                      id={`guidedRepoGitURL-${repo.id}`}
-                      value={repo.git_url}
-                      onChange={(event) => updateGuidedRepo(repo.id, { git_url: event.target.value })}
-                    />
-                  </>
-                )}
-
-                <label htmlFor={`guidedRepoRef-${repo.id}`}>ref (optional)</label>
-                <input
-                  id={`guidedRepoRef-${repo.id}`}
-                  value={repo.ref}
-                  onChange={(event) => updateGuidedRepo(repo.id, { ref: event.target.value })}
-                  placeholder="Leave empty to use current checkout"
-                />
-              </div>
-            ))}
-
-            <label htmlFor="guidedDocsImportsPath">docs.imports_path</label>
-            <input id="guidedDocsImportsPath" value={guidedDocsImportsPath} onChange={(event) => setGuidedDocsImportsPath(event.target.value)} />
-
-            <div className="actions">
-              <button type="button" onClick={handleAddGuidedRepo} disabled={busy}>
-                Add repo
-              </button>
-              <button type="button" onClick={handleApplyGuidedWorkspaceSetup} disabled={busy}>
-                Apply guided workspace form
+      <section className="panel" data-testid="workspace-panel">
+        <h2>Setup: Workspace</h2>
+        <p className="hint">Guided setup writes a valid multi-repo `workspace.yaml` draft.</p>
+        {guidedRepos.map((repo, index) => (
+          <div className="repo-card" key={repo.id}>
+            <div className="repo-card-head">
+              <h3>Repo {index + 1}</h3>
+              <button type="button" className="inline-danger" onClick={() => handleRemoveGuidedRepo(repo.id)} disabled={busy || guidedRepos.length <= 1}>
+                Remove
               </button>
             </div>
 
-            <p className="hint">`workspace.yaml` editor (path/git_url sources)</p>
-            <textarea value={manifestContent} onChange={(event) => setManifestContent(event.target.value)} rows={12} />
-            <div className="actions">
-              <button type="button" onClick={() => void handleSaveManifest()} disabled={busy} data-testid="workspace-save-btn">
-                Save workspace.yaml
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleValidateWorkspace()}
-                disabled={busy}
-                data-testid="workspace-validate-btn"
-              >
-                Validate workspace
-              </button>
-            </div>
-            {validateResult ? (
-              <div className="status-block" data-testid="workspace-validate-result">
-                <p>
-                  Workspace: <code>{validateResult.workspace}</code>
-                </p>
-                <p>Status: {validateResult.ok ? "valid" : "invalid"}</p>
-                {validateResult.repo_selection_mode ? (
-                  <p>
-                    Repo selection mode: <code>{validateResult.repo_selection_mode}</code>
-                  </p>
-                ) : null}
-                {(validateResult.selected_repo_scopes ?? []).length > 0 ? (
-                  <p>
-                    Selected repo scopes: <code>{(validateResult.selected_repo_scopes ?? []).join(", ")}</code>
-                  </p>
-                ) : null}
-
-                {(validateResult.resolved_repos ?? []).length > 0 ? (
-                  <div className="repo-summary" data-testid="workspace-validate-resolved-repos">
-                    <p className="hint">Resolved repos</p>
-                    <ul>
-                      {(validateResult.resolved_repos ?? []).map((repo) => (
-                        <li key={`resolved-${repo.name}-${repo.path}`}>
-                          <code>{repo.name}</code> ({repo.source}) {repo.path}
-                          {repo.ref ? ` @ ${repo.ref}` : ""}
-                          {repo.effective_role ? ` | role=${repo.effective_role}` : ""}
-                          {typeof repo.included === "boolean" ? ` | ${repo.included ? "included" : "excluded"}` : ""}
-                          {repo.selection_reason ? ` | reason: ${repo.selection_reason}` : ""}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-
-                {(validateResult.repo_selection ?? []).length > 0 ? (
-                  <div className="repo-summary" data-testid="workspace-validate-repo-selection">
-                    <p className="hint">Repo selection decisions</p>
-                    <ul>
-                      {(validateResult.repo_selection ?? []).map((decision) => (
-                        <li key={`repo-selection-${decision.name}`}>
-                          <code>{decision.name}</code> role={decision.effective_role} {decision.included ? "included" : "excluded"} ({decision.reason})
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-
-                {validationDiagnosticsByRepo.map(([repoKey, diagnostics]) => (
-                  <div key={`diag-group-${repoKey}`} className="repo-summary">
-                    <p className="hint">{repoKey === "__workspace__" ? "Workspace diagnostics" : `Diagnostics for ${repoKey}`}</p>
-                    {diagnostics.map((diagnostic, index) => (
-                      <p className={diagnostic.level === "error" ? "status err" : "status warn"} key={`${repoKey}-${diagnostic.code}-${diagnostic.message}-${index}`}>
-                        {diagnostic.level === "error" ? "Error" : "Warning"} [{diagnostic.code}]: {diagnostic.message}
-                      </p>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </section>
-
-          <section className="panel">
-            <h2>Setup: Step 0 Wizard Contract</h2>
-            <p className="hint">Structured contract persisted as `charter/wizard/step0-contract.json`.</p>
-
-            <label htmlFor="wizardProjectName">Project name</label>
-            <input id="wizardProjectName" value={wizardProjectName} onChange={(event) => setWizardProjectName(event.target.value)} />
-
-            <label htmlFor="wizardScope">Scope</label>
-            <textarea id="wizardScope" value={wizardScope} onChange={(event) => setWizardScope(event.target.value)} rows={3} />
-
-            <label htmlFor="wizardNfr">NFR priorities (comma/newline)</label>
-            <textarea id="wizardNfr" value={wizardNfr} onChange={(event) => setWizardNfr(event.target.value)} rows={3} />
-
-            <label htmlFor="wizardRules">Rules (comma/newline)</label>
-            <textarea id="wizardRules" value={wizardRules} onChange={(event) => setWizardRules(event.target.value)} rows={3} />
-
-            <button type="button" onClick={() => void handleSaveStep0WizardContract()} disabled={busy}>
-              Save Step 0 wizard contract
-            </button>
-
-            {wizardStatus ? <p className="status ok">{wizardStatus}</p> : null}
-          </section>
-        </>
-      ) : null}
-
-      {activeTab === "settings" ? (
-        <>
-          <section className="panel" data-testid="runtime-timeouts-panel">
-            <h2>Settings: Runtime Timeouts</h2>
-            <p className="hint">Persisted in `workspace.yaml` (`runtime.profile.timeouts`) with precedence `env &gt; workspace &gt; defaults`.</p>
-            <div className="actions">
-              <button type="button" onClick={() => void loadRuntimeTimeouts()} disabled={busy}>
-                Reload runtime timeouts
-              </button>
-              <button type="button" onClick={() => void handleSaveRuntimeTimeouts()} disabled={busy} data-testid="runtime-timeouts-save-btn">
-                Save runtime timeouts
-              </button>
-              <button type="button" onClick={() => void handleResetRuntimeTimeouts()} disabled={busy}>
-                Reset balanced defaults
-              </button>
-            </div>
-            {runtimeTimeoutKeys.map((key) => (
-              <div key={`timeout-${key}`}>
-                <label htmlFor={`runtime-timeout-${key}`}>{runtimeTimeoutLabels[key]}</label>
-                <input
-                  id={`runtime-timeout-${key}`}
-                  data-testid={`runtime-timeout-input-${key}`}
-                  value={runtimeTimeoutDraft[key]}
-                  onChange={(event) => updateRuntimeTimeoutDraft(key, event.target.value)}
-                />
-                <p className="hint">
-                  persisted: {runtimeTimeoutPersisted[key] ?? "-"} | effective: {runtimeTimeoutEffective[key]} | source: {runtimeTimeoutSource[key] ?? "default"}
-                </p>
-              </div>
-            ))}
-            {runtimeTimeoutStatus ? <p className="status ok">{runtimeTimeoutStatus}</p> : null}
-          </section>
-
-          <section className="panel" data-testid="runtime-execution-panel">
-            <h2>Settings: Runtime Execution</h2>
-            <p className="hint">Persisted in `workspace.yaml` (`runtime.profile.execution`) with precedence `CLI &gt; env &gt; workspace &gt; defaults`.</p>
-            <div className="actions">
-              <button type="button" onClick={() => void loadRuntimeExecution()} disabled={busy}>
-                Reload runtime execution
-              </button>
-              <button type="button" onClick={() => void handleSaveRuntimeExecution()} disabled={busy} data-testid="runtime-execution-save-btn">
-                Save runtime execution
-              </button>
-              <button type="button" onClick={() => void handleResetRuntimeExecution()} disabled={busy}>
-                Reset execution defaults
-              </button>
-            </div>
-
-            <label htmlFor="runtime-execution-strategy">{runtimeExecutionLabels.strategy}</label>
-            <select
-              id="runtime-execution-strategy"
-              data-testid="runtime-execution-strategy-select"
-              value={runtimeExecutionDraft.strategy}
-              onChange={(event) => updateRuntimeExecutionDraft("strategy", event.target.value)}
-            >
-              <option value="sequential">sequential</option>
-              <option value="parallel">parallel</option>
-            </select>
-            <p className="hint">
-              persisted: {String(runtimeExecutionPersisted.strategy ?? "-")} | effective: {String(runtimeExecutionEffective.strategy)} | source:{" "}
-              {runtimeExecutionSource.strategy ?? "default"}
-            </p>
-
-            <label htmlFor="runtime-execution-max-parallel">{runtimeExecutionLabels.max_parallel_tasks}</label>
+            <label htmlFor={`guidedRepoName-${repo.id}`}>Repo name</label>
             <input
-              id="runtime-execution-max-parallel"
-              data-testid="runtime-execution-max-parallel-input"
-              value={runtimeExecutionDraft.max_parallel_tasks}
-              onChange={(event) => updateRuntimeExecutionDraft("max_parallel_tasks", event.target.value)}
+              id={`guidedRepoName-${repo.id}`}
+              value={repo.name}
+              onChange={(event) => updateGuidedRepo(repo.id, { name: event.target.value })}
             />
-            <p className="hint">
-              persisted: {String(runtimeExecutionPersisted.max_parallel_tasks ?? "-")} | effective: {String(runtimeExecutionEffective.max_parallel_tasks)} | source:{" "}
-              {runtimeExecutionSource.max_parallel_tasks ?? "default"}
-            </p>
 
-            <label htmlFor="runtime-execution-failure">{runtimeExecutionLabels.failure_policy}</label>
+            <label htmlFor={`guidedRepoMode-${repo.id}`}>Repo source type</label>
             <select
-              id="runtime-execution-failure"
-              data-testid="runtime-execution-failure-policy-select"
-              value={runtimeExecutionDraft.failure_policy}
-              onChange={(event) => updateRuntimeExecutionDraft("failure_policy", event.target.value)}
+              id={`guidedRepoMode-${repo.id}`}
+              value={repo.mode}
+              onChange={(event) => updateGuidedRepo(repo.id, { mode: event.target.value as RepoSourceMode })}
             >
-              <option value="best_effort">best_effort</option>
-              <option value="fail_fast">fail_fast</option>
+              <option value="path">path</option>
+              <option value="git_url">git_url</option>
             </select>
-            <p className="hint">
-              persisted: {String(runtimeExecutionPersisted.failure_policy ?? "-")} | effective: {String(runtimeExecutionEffective.failure_policy)} | source:{" "}
-              {runtimeExecutionSource.failure_policy ?? "default"}
-            </p>
 
-            <label htmlFor="runtime-execution-shard-mode">{runtimeExecutionLabels.shard_discovery_mode}</label>
-            <select
-              id="runtime-execution-shard-mode"
-              data-testid="runtime-execution-shard-mode-select"
-              value={runtimeExecutionDraft.shard_discovery_mode}
-              onChange={(event) => updateRuntimeExecutionDraft("shard_discovery_mode", event.target.value)}
-            >
-              <option value="heuristics">heuristics</option>
-              <option value="semantic">semantic</option>
-            </select>
-            <p className="hint">
-              persisted: {String(runtimeExecutionPersisted.shard_discovery_mode ?? "-")} | effective:{" "}
-              {String(runtimeExecutionEffective.shard_discovery_mode)} | source: {runtimeExecutionSource.shard_discovery_mode ?? "default"}
-            </p>
+            {repo.mode === "path" ? (
+              <>
+                <label htmlFor={`guidedRepoPath-${repo.id}`}>path</label>
+                <input
+                  id={`guidedRepoPath-${repo.id}`}
+                  value={repo.path}
+                  onChange={(event) => updateGuidedRepo(repo.id, { path: event.target.value })}
+                />
+              </>
+            ) : (
+              <>
+                <label htmlFor={`guidedRepoGitURL-${repo.id}`}>git_url</label>
+                <input
+                  id={`guidedRepoGitURL-${repo.id}`}
+                  value={repo.git_url}
+                  onChange={(event) => updateGuidedRepo(repo.id, { git_url: event.target.value })}
+                />
+              </>
+            )}
 
-            <label htmlFor="runtime-execution-repo-selection">{runtimeExecutionLabels.repo_selection}</label>
-            <select
-              id="runtime-execution-repo-selection"
-              data-testid="runtime-execution-repo-selection-select"
-              value={runtimeExecutionDraft.repo_selection}
-              onChange={(event) => updateRuntimeExecutionDraft("repo_selection", event.target.value)}
-            >
-              <option value="all">all</option>
-              <option value="backend_only">backend_only</option>
-            </select>
-            <p className="hint">
-              persisted: {String(runtimeExecutionPersisted.repo_selection ?? "-")} | effective: {String(runtimeExecutionEffective.repo_selection)} | source:{" "}
-              {runtimeExecutionSource.repo_selection ?? "default"}
-            </p>
-
-            {runtimeExecutionStatus ? <p className="status ok">{runtimeExecutionStatus}</p> : null}
-          </section>
-        </>
-      ) : null}
-
-      {activeTab === "baseline" ? (
-        <>
-          <section className="panel">
-            <h2>Baseline: Editors</h2>
-            <p className="hint">Editable baseline files from `charter/*` and `skills/*`.</p>
-            <label htmlFor="baselineArtifactSelect">Select artifact</label>
-            <select
-              id="baselineArtifactSelect"
-              value={selectedEditorPath}
-              onChange={(event) => {
-                void handleEditorSelectionChange(event.target.value);
-              }}
-            >
-              {baselineEditorArtifacts.map((artifact) => (
-                <option key={artifact.path} value={artifact.path}>
-                  {artifact.label}
-                </option>
-              ))}
-            </select>
-            <label htmlFor="baselineArtifactEditor">{selectedEditorPath}</label>
-            <textarea
-              id="baselineArtifactEditor"
-              value={selectedEditorContent}
-              onChange={(event) => setSelectedEditorContent(event.target.value)}
-              rows={10}
+            <label htmlFor={`guidedRepoRef-${repo.id}`}>ref (optional)</label>
+            <input
+              id={`guidedRepoRef-${repo.id}`}
+              value={repo.ref}
+              onChange={(event) => updateGuidedRepo(repo.id, { ref: event.target.value })}
+              placeholder="Leave empty to use current checkout"
             />
-            <button type="button" onClick={() => void handleSaveSelectedEditorArtifact()} disabled={busy}>
-              Save selected baseline artifact
-            </button>
-            {editorStatus ? <p className="status ok">{editorStatus}</p> : null}
-          </section>
+          </div>
+        ))}
 
-          <section className="panel">
-            <h2>Baseline: Git Helper Actions</h2>
-            <label htmlFor="gitMessage">Commit message</label>
-            <input id="gitMessage" value={gitMessage} onChange={(event) => setGitMessage(event.target.value)} />
-            <button type="button" onClick={() => void handleGitCommit()} disabled={busy}>
-              Commit workspace changes
-            </button>
+        <label htmlFor="guidedDocsImportsPath">docs.imports_path</label>
+        <input id="guidedDocsImportsPath" value={guidedDocsImportsPath} onChange={(event) => setGuidedDocsImportsPath(event.target.value)} />
 
-            <label htmlFor="proposalBranch">Proposal branch</label>
-            <input id="proposalBranch" value={proposalBranch} onChange={(event) => setProposalBranch(event.target.value)} />
-            <button type="button" onClick={() => void handleCreateProposalBranch()} disabled={busy}>
-              Create/Switch proposal branch
-            </button>
+        <div className="actions">
+          <button type="button" onClick={handleAddGuidedRepo} disabled={busy}>
+            Add repo
+          </button>
+          <button type="button" onClick={handleApplyGuidedWorkspaceSetup} disabled={busy}>
+            Apply guided workspace form
+          </button>
+        </div>
 
-            {gitStatus ? <p className="status ok">{gitStatus}</p> : null}
-          </section>
-        </>
-      ) : null}
+        <p className="hint">`workspace.yaml` editor (path/git_url sources)</p>
+        <textarea value={manifestContent} onChange={(event) => setManifestContent(event.target.value)} rows={12} />
+        <div className="actions">
+          <button type="button" onClick={() => void handleSaveManifest()} disabled={busy} data-testid="workspace-save-btn">
+            Save workspace.yaml
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleValidateWorkspace()}
+            disabled={busy}
+            data-testid="workspace-validate-btn"
+          >
+            Validate workspace
+          </button>
+        </div>
+        {validateResult ? (
+          <div className="status-block" data-testid="workspace-validate-result">
+            <p>
+              Workspace: <code>{validateResult.workspace}</code>
+            </p>
+            <p>Status: {validateResult.ok ? "valid" : "invalid"}</p>
+            {validateResult.repo_selection_mode ? (
+              <p>
+                Repo selection mode: <code>{validateResult.repo_selection_mode}</code>
+              </p>
+            ) : null}
+            {(validateResult.selected_repo_scopes ?? []).length > 0 ? (
+              <p>
+                Selected repo scopes: <code>{(validateResult.selected_repo_scopes ?? []).join(", ")}</code>
+              </p>
+            ) : null}
 
-      {activeTab === "runs" ? (
-        <>
-          <section className="panel" data-testid="runs-control-panel">
-            <h2>Runs: Pipeline Control</h2>
-            <div className="actions">
-              <button type="button" onClick={() => void handleRunPipeline("init")} disabled={busy} data-testid="run-init-btn">
-                Run init
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleRunPipeline("refresh")}
-                disabled={busy}
-                data-testid="run-refresh-btn"
-              >
-                Run refresh
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleCancelSelectedRun()}
-                disabled={busy || cancelBusy || !runId || !selectedRunIsActive}
-                data-testid="run-cancel-btn"
-              >
-                Cancel selected run
-              </button>
-            </div>
-            {runActionStatus ? <p className="status warn">{runActionStatus}</p> : null}
-
-            {runStatus ? (
-              <div className="status-block" data-testid="run-status-panel">
-                <p>
-                  Run <code data-testid="run-status-run-id">{runStatus.run_id}</code> status:{" "}
-                  <strong data-testid="run-status-value">{runStatus.status}</strong>
-                </p>
-                <p>Pipeline: {runStatus.pipeline}</p>
-                {runStatus.current_step ? <p>Current step: {runStatus.current_step}</p> : null}
-                {runStatus.error_code ? <p className="status warn">Error code: {runStatus.error_code}</p> : null}
-                {runStatus.error ? <p className="status err">Error: {runStatus.error}</p> : null}
-                {selectedRunWarnings.length > 0 ? (
-                  <div data-testid="run-status-warnings">
-                    <p className="hint">Warnings ({selectedRunWarnings.length})</p>
-                    <ul>
-                      {selectedRunWarnings.map((warning, index) => (
-                        <li key={`run-warning-${index}-${warning}`}>{warning}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : (
-                  <p data-testid="run-status-warnings-empty">Warnings: none</p>
-                )}
+            {(validateResult.resolved_repos ?? []).length > 0 ? (
+              <div className="repo-summary">
+                <p className="hint">Resolved repos</p>
+                <ul data-testid="workspace-resolved-repos-list">
+                  {(validateResult.resolved_repos ?? []).map((repo) => (
+                    <li key={`resolved-${repo.name}-${repo.path}`}>
+                      <code>{repo.name}</code> ({repo.source}) {repo.path}
+                      {repo.ref ? ` @ ${repo.ref}` : ""}
+                      {repo.effective_role ? ` | role=${repo.effective_role}` : ""}
+                      {typeof repo.included === "boolean" ? ` | ${repo.included ? "included" : "excluded"}` : ""}
+                      {repo.selection_reason ? ` | reason: ${repo.selection_reason}` : ""}
+                    </li>
+                  ))}
+                </ul>
               </div>
             ) : null}
-          </section>
 
-          <section className="panel" data-testid="runs-history-panel">
-            <h2>Runs: History</h2>
-            <p className="hint">
-              Running: {runCounters.running} | Succeeded: {runCounters.succeeded} | Failed: {runCounters.failed}
-            </p>
-            {runList.length === 0 ? (
-              <p>No runs yet.</p>
-            ) : (
-              <div className="run-table-wrap">
-                <table className="run-table" data-testid="runs-history-table">
-                  <thead>
-                    <tr>
-                      <th>Run ID</th>
-                      <th>Status</th>
-                      <th>Pipeline</th>
-                      <th>Started</th>
-                      <th>Finished</th>
-                      <th>Error code</th>
-                      <th>Warnings</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {runList.map((run) => (
-                      <tr
-                        key={run.run_id}
-                        className={runId === run.run_id ? "selected" : ""}
-                        onClick={() => void handleSelectRun(run.run_id)}
-                      >
-                        <td>
-                          <button
-                            type="button"
-                            className="link-button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void handleSelectRun(run.run_id);
-                            }}
-                          >
-                            {run.run_id}
-                          </button>
-                        </td>
-                        <td>{run.status}</td>
-                        <td>{run.pipeline}</td>
-                        <td>{formatTimestamp(run.started_at)}</td>
-                        <td>{formatTimestamp(run.finished_at)}</td>
-                        <td>{run.error_code || "-"}</td>
-                        <td>{run.warnings?.length ?? 0}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            {(validateResult.repo_selection ?? []).length > 0 ? (
+              <div className="repo-summary">
+                <p className="hint">Repo selection decisions</p>
+                <ul>
+                  {(validateResult.repo_selection ?? []).map((decision) => (
+                    <li key={`repo-selection-${decision.name}`}>
+                      <code>{decision.name}</code> role={decision.effective_role} {decision.included ? "included" : "excluded"} ({decision.reason})
+                    </li>
+                  ))}
+                </ul>
               </div>
-            )}
-          </section>
+            ) : null}
 
-          <section className="panel" data-testid="runs-logs-panel">
-            <h2>Runs: Logs</h2>
-            <div className="actions">
-              <label htmlFor="runLogsMode">Mode</label>
-              <select
-                id="runLogsMode"
-                value={runLogsMode}
-                onChange={(event) => setRunLogsMode(event.target.value as RunLogsMode)}
-                className="inline-select"
-                data-testid="run-logs-mode-select"
-              >
-                <option value="all">all</option>
-                <option value="events">event timeline</option>
-                <option value="raw">raw agent stream</option>
-              </select>
-              <label htmlFor="runLogsViewMode">View</label>
-              <select
-                id="runLogsViewMode"
-                value={runLogsViewMode}
-                onChange={(event) => setRunLogsViewMode(event.target.value as "line" | "line+fields")}
-                className="inline-select"
-                data-testid="run-logs-view-select"
-              >
-                <option value="line">line</option>
-                <option value="line+fields">line+fields</option>
-              </select>
-              <button
-                type="button"
-                onClick={() => void handleCopyRunLogs()}
-                disabled={filteredRunLogs.length === 0}
-                data-testid="run-logs-copy-btn"
-              >
-                Copy logs
-              </button>
-              <button
-                type="button"
-                onClick={() => handleDownloadRunLogs()}
-                disabled={filteredRunLogs.length === 0 || !runId}
-                data-testid="run-logs-download-btn"
-              >
-                Download logs
-              </button>
-            </div>
-            {runLogsStatus ? <p className="status ok">{runLogsStatus}</p> : null}
-            {runLogTaskrunPaths.length > 0 ? (
-              <div className="actions">
-                {runLogTaskrunPaths.map((path) => (
-                  <button key={`taskrun-log-open-${path}`} type="button" onClick={() => void handleOpenArtifact(path)}>
-                    Open taskrun artifact: {path}
-                  </button>
+            {validationDiagnosticsByRepo.map(([repoKey, diagnostics]) => (
+              <div key={`diag-group-${repoKey}`} className="repo-summary">
+                <p className="hint">{repoKey === "__workspace__" ? "Workspace diagnostics" : `Diagnostics for ${repoKey}`}</p>
+                {diagnostics.map((diagnostic, index) => (
+                  <p className={diagnostic.level === "error" ? "status err" : "status warn"} key={`${repoKey}-${diagnostic.code}-${diagnostic.message}-${index}`}>
+                    {diagnostic.level === "error" ? "Error" : "Warning"} [{diagnostic.code}]: {diagnostic.message}
+                  </p>
                 ))}
               </div>
-            ) : null}
-            {filteredRunLogs.length === 0 ? (
-              <p>No run logs yet.</p>
-            ) : (
-              <pre data-testid="run-logs-content">{runLogsRendered}</pre>
-            )}
-          </section>
-        </>
-      ) : null}
+            ))}
+          </div>
+        ) : null}
+      </section>
 
-      {activeTab === "results" ? (
-        <>
-          <TabNav value={resultsTab} onChange={setResultsTab} options={resultsTabOptions} testId="results-tabs" />
+      <section className="panel" data-testid="runtime-timeouts-panel">
+        <h2>Setup: Runtime Timeouts</h2>
+        <p className="hint">Persisted in `workspace.yaml` (`runtime.profile.timeouts`) with precedence `env &gt; workspace &gt; defaults`.</p>
+        <div className="actions">
+          <button type="button" onClick={() => void loadRuntimeTimeouts()} disabled={busy}>
+            Reload runtime timeouts
+          </button>
+          <button type="button" onClick={() => void handleSaveRuntimeTimeouts()} disabled={busy} data-testid="runtime-timeouts-save-btn">
+            Save runtime timeouts
+          </button>
+          <button type="button" onClick={() => void handleResetRuntimeTimeouts()} disabled={busy}>
+            Reset balanced defaults
+          </button>
+        </div>
+        {runtimeTimeoutKeys.map((key) => (
+          <div key={`timeout-${key}`}>
+            <label htmlFor={`runtime-timeout-${key}`}>{runtimeTimeoutLabels[key]}</label>
+            <input
+              id={`runtime-timeout-${key}`}
+              data-testid={`runtime-timeout-input-${key}`}
+              value={runtimeTimeoutDraft[key]}
+              onChange={(event) => updateRuntimeTimeoutDraft(key, event.target.value)}
+            />
+            <p className="hint">
+              persisted: {runtimeTimeoutPersisted[key] ?? "-"} | effective: {runtimeTimeoutEffective[key]} | source: {runtimeTimeoutSource[key] ?? "default"}
+            </p>
+          </div>
+        ))}
+        {runtimeTimeoutStatus ? <p className="status ok">{runtimeTimeoutStatus}</p> : null}
+      </section>
 
-          {resultsTab === "coverage" ? (
-            <section className="panel" data-testid="results-coverage-panel">
-              <h2>Results: Coverage & Questions</h2>
-              <div className="columns">
-                <div>
-                  <h3>Coverage Summary</h3>
-                  <pre data-testid="coverage-summary-content">{coverageSummary || "No coverage summary yet."}</pre>
-                </div>
-                <div>
-                  <h3>Open Questions</h3>
-                  <pre data-testid="open-questions-content">{openQuestions || "No open questions yet."}</pre>
-                </div>
+      <section className="panel" data-testid="runtime-execution-panel">
+        <h2>Setup: Runtime Execution</h2>
+        <p className="hint">Persisted in `workspace.yaml` (`runtime.profile.execution`) with precedence `CLI &gt; env &gt; workspace &gt; defaults`.</p>
+        <div className="actions">
+          <button type="button" onClick={() => void loadRuntimeExecution()} disabled={busy}>
+            Reload runtime execution
+          </button>
+          <button type="button" onClick={() => void handleSaveRuntimeExecution()} disabled={busy} data-testid="runtime-execution-save-btn">
+            Save runtime execution
+          </button>
+          <button type="button" onClick={() => void handleResetRuntimeExecution()} disabled={busy}>
+            Reset execution defaults
+          </button>
+        </div>
+
+        <label htmlFor="runtime-execution-strategy">{runtimeExecutionLabels.strategy}</label>
+        <select
+          id="runtime-execution-strategy"
+          data-testid="runtime-execution-strategy-select"
+          value={runtimeExecutionDraft.strategy}
+          onChange={(event) => updateRuntimeExecutionDraft("strategy", event.target.value)}
+        >
+          <option value="sequential">sequential</option>
+          <option value="parallel">parallel</option>
+        </select>
+        <p className="hint">
+          persisted: {String(runtimeExecutionPersisted.strategy ?? "-")} | effective: {String(runtimeExecutionEffective.strategy)} | source:{" "}
+          {runtimeExecutionSource.strategy ?? "default"}
+        </p>
+
+        <label htmlFor="runtime-execution-max-parallel">{runtimeExecutionLabels.max_parallel_tasks}</label>
+        <input
+          id="runtime-execution-max-parallel"
+          data-testid="runtime-execution-max-parallel-input"
+          value={runtimeExecutionDraft.max_parallel_tasks}
+          onChange={(event) => updateRuntimeExecutionDraft("max_parallel_tasks", event.target.value)}
+        />
+        <p className="hint">
+          persisted: {String(runtimeExecutionPersisted.max_parallel_tasks ?? "-")} | effective: {String(runtimeExecutionEffective.max_parallel_tasks)} | source:{" "}
+          {runtimeExecutionSource.max_parallel_tasks ?? "default"}
+        </p>
+
+        <label htmlFor="runtime-execution-failure">{runtimeExecutionLabels.failure_policy}</label>
+        <select
+          id="runtime-execution-failure"
+          data-testid="runtime-execution-failure-policy-select"
+          value={runtimeExecutionDraft.failure_policy}
+          onChange={(event) => updateRuntimeExecutionDraft("failure_policy", event.target.value)}
+        >
+          <option value="best_effort">best_effort</option>
+          <option value="fail_fast">fail_fast</option>
+        </select>
+        <p className="hint">
+          persisted: {String(runtimeExecutionPersisted.failure_policy ?? "-")} | effective: {String(runtimeExecutionEffective.failure_policy)} | source:{" "}
+          {runtimeExecutionSource.failure_policy ?? "default"}
+        </p>
+
+        <label htmlFor="runtime-execution-shard-mode">{runtimeExecutionLabels.shard_discovery_mode}</label>
+        <select
+          id="runtime-execution-shard-mode"
+          data-testid="runtime-execution-shard-mode-select"
+          value={runtimeExecutionDraft.shard_discovery_mode}
+          onChange={(event) => updateRuntimeExecutionDraft("shard_discovery_mode", event.target.value)}
+        >
+          <option value="heuristics">heuristics</option>
+          <option value="semantic">semantic</option>
+        </select>
+        <p className="hint">
+          persisted: {String(runtimeExecutionPersisted.shard_discovery_mode ?? "-")} | effective:{" "}
+          {String(runtimeExecutionEffective.shard_discovery_mode)} | source: {runtimeExecutionSource.shard_discovery_mode ?? "default"}
+        </p>
+
+        <label htmlFor="runtime-execution-repo-selection">{runtimeExecutionLabels.repo_selection}</label>
+        <select
+          id="runtime-execution-repo-selection"
+          data-testid="runtime-execution-repo-selection-select"
+          value={runtimeExecutionDraft.repo_selection}
+          onChange={(event) => updateRuntimeExecutionDraft("repo_selection", event.target.value)}
+        >
+          <option value="all">all</option>
+          <option value="backend_only">backend_only</option>
+        </select>
+        <p className="hint">
+          persisted: {String(runtimeExecutionPersisted.repo_selection ?? "-")} | effective: {String(runtimeExecutionEffective.repo_selection)} | source:{" "}
+          {runtimeExecutionSource.repo_selection ?? "default"}
+        </p>
+
+        {runtimeExecutionStatus ? <p className="status ok">{runtimeExecutionStatus}</p> : null}
+      </section>
+
+      <section className="panel">
+        <h2>Setup: Step 0 Wizard Contract</h2>
+        <p className="hint">Structured contract persisted as `charter/wizard/step0-contract.json`.</p>
+
+        <label htmlFor="wizardProjectName">Project name</label>
+        <input id="wizardProjectName" value={wizardProjectName} onChange={(event) => setWizardProjectName(event.target.value)} />
+
+        <label htmlFor="wizardScope">Scope</label>
+        <textarea id="wizardScope" value={wizardScope} onChange={(event) => setWizardScope(event.target.value)} rows={3} />
+
+        <label htmlFor="wizardNfr">NFR priorities (comma/newline)</label>
+        <textarea id="wizardNfr" value={wizardNfr} onChange={(event) => setWizardNfr(event.target.value)} rows={3} />
+
+        <label htmlFor="wizardRules">Rules (comma/newline)</label>
+        <textarea id="wizardRules" value={wizardRules} onChange={(event) => setWizardRules(event.target.value)} rows={3} />
+
+        <button type="button" onClick={() => void handleSaveStep0WizardContract()} disabled={busy}>
+          Save Step 0 wizard contract
+        </button>
+
+        {wizardStatus ? <p className="status ok">{wizardStatus}</p> : null}
+      </section>
+
+      <section className="panel">
+        <h2>Baseline: Editors</h2>
+        <p className="hint">Editable baseline files from `charter/*` and `skills/*`.</p>
+        <label htmlFor="baselineArtifactSelect">Select artifact</label>
+        <select
+          id="baselineArtifactSelect"
+          value={selectedEditorPath}
+          onChange={(event) => {
+            void handleEditorSelectionChange(event.target.value);
+          }}
+        >
+          {baselineEditorArtifacts.map((artifact) => (
+            <option key={artifact.path} value={artifact.path}>
+              {artifact.label}
+            </option>
+          ))}
+        </select>
+        <label htmlFor="baselineArtifactEditor">{selectedEditorPath}</label>
+        <textarea
+          id="baselineArtifactEditor"
+          value={selectedEditorContent}
+          onChange={(event) => setSelectedEditorContent(event.target.value)}
+          rows={10}
+        />
+        <button type="button" onClick={() => void handleSaveSelectedEditorArtifact()} disabled={busy}>
+          Save selected baseline artifact
+        </button>
+        {editorStatus ? <p className="status ok">{editorStatus}</p> : null}
+      </section>
+
+      <section className="panel" data-testid="runs-control-panel">
+        <h2>Runs: Pipeline Control</h2>
+        <label htmlFor="run-refresh-mode">Refresh mode</label>
+        <select
+          id="run-refresh-mode"
+          data-testid="run-refresh-mode-select"
+          value={refreshMode}
+          onChange={(event) => setRefreshMode(event.target.value as "incremental" | "full")}
+          disabled={busy}
+        >
+          <option value="incremental">incremental</option>
+          <option value="full">full</option>
+        </select>
+        <div className="actions">
+          <button type="button" onClick={() => void handleRunPipeline("init")} disabled={busy} data-testid="run-init-btn">
+            Run init
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleRunPipeline("refresh")}
+            disabled={busy}
+            data-testid="run-refresh-btn"
+          >
+            Run refresh
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleCancelSelectedRun()}
+            disabled={busy || cancelBusy || !runId || !selectedRunIsActive}
+            data-testid="run-cancel-btn"
+          >
+            Cancel selected run
+          </button>
+        </div>
+        {runActionStatus ? <p className="status warn">{runActionStatus}</p> : null}
+
+        {runStatus ? (
+          <div className="status-block" data-testid="run-status-panel">
+            <p>
+              Run <code data-testid="run-status-run-id">{runStatus.run_id}</code> status:{" "}
+              <strong data-testid="run-status-value">{runStatus.status}</strong>
+            </p>
+            <p>Pipeline: {runStatus.pipeline}</p>
+            {runStatus.current_step ? <p>Current step: {runStatus.current_step}</p> : null}
+            {runStatus.error_code ? <p className="status warn">Error code: {runStatus.error_code}</p> : null}
+            {runStatus.error ? <p className="status err">Error: {runStatus.error}</p> : null}
+            {selectedRunWarnings.length > 0 ? (
+              <div data-testid="run-status-warnings">
+                <p className="hint">Warnings ({selectedRunWarnings.length})</p>
+                <ul>
+                  {selectedRunWarnings.map((warning, index) => (
+                    <li key={`run-warning-${index}-${warning}`}>{warning}</li>
+                  ))}
+                </ul>
               </div>
-            </section>
-          ) : null}
+            ) : (
+              <p data-testid="run-status-warnings-empty">Warnings: none</p>
+            )}
+          </div>
+        ) : null}
+      </section>
 
-          {resultsTab === "artifacts" ? (
-            <section className="panel" data-testid="results-artifacts-panel">
-              <h2>Results: Run Artifacts</h2>
-              {nonDiagramArtifacts.length === 0 ? (
-                <p>No non-diagram artifacts yet.</p>
-              ) : (
-                <div className="columns">
-                  <ul data-testid="run-artifacts-list">
-                    {nonDiagramArtifacts.map((artifact) => (
-                      <li key={`${artifact.kind}-${artifact.path}`}>
-                        <button type="button" className="link-button" onClick={() => void handleOpenArtifact(artifact.path)}>
-                          {artifact.path}
-                        </button>{" "}
-                        ({artifact.kind})
-                      </li>
-                    ))}
-                  </ul>
-                  <div data-testid="run-artifact-content-panel">
-                    <h3 data-testid="run-artifact-selected-path">{selectedArtifact || "Artifact Content"}</h3>
-                    <pre data-testid="run-artifact-content">{selectedArtifactContent || "Select artifact to inspect."}</pre>
-                  </div>
-                </div>
-              )}
-            </section>
-          ) : null}
+      <section className="panel" data-testid="runs-history-panel">
+        <h2>Runs: History</h2>
+        <p className="hint">
+          Running: {runCounters.running} | Succeeded: {runCounters.succeeded} | Failed: {runCounters.failed}
+        </p>
+        {runList.length === 0 ? (
+          <p>No runs yet.</p>
+        ) : (
+          <div className="run-table-wrap">
+            <table className="run-table" data-testid="runs-history-table">
+              <thead>
+                <tr>
+                  <th>Run ID</th>
+                  <th>Status</th>
+                  <th>Pipeline</th>
+                  <th>Started</th>
+                  <th>Finished</th>
+                  <th>Error code</th>
+                  <th>Warnings</th>
+                </tr>
+              </thead>
+              <tbody>
+                {runList.map((run) => (
+                  <tr
+                    key={run.run_id}
+                    className={runId === run.run_id ? "selected" : ""}
+                    onClick={() => void handleSelectRun(run.run_id)}
+                  >
+                    <td>
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleSelectRun(run.run_id);
+                        }}
+                      >
+                        {run.run_id}
+                      </button>
+                    </td>
+                    <td>{run.status}</td>
+                    <td>{run.pipeline}</td>
+                    <td>{formatTimestamp(run.started_at)}</td>
+                    <td>{formatTimestamp(run.finished_at)}</td>
+                    <td>{run.error_code || "-"}</td>
+                    <td>{run.warnings?.length ?? 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
-          {resultsTab === "diagrams" ? (
-            <section className="panel" data-testid="results-diagrams-panel">
-              <h2>Results: Diagrams</h2>
-              {diagramArtifacts.length === 0 ? (
-                <p>No diagram artifacts yet.</p>
-              ) : (
-                <div className="columns">
-                  <ul data-testid="run-diagrams-list">
-                    {diagramArtifacts.map((artifact) => (
-                      <li key={`${artifact.kind}-${artifact.path}`}>
-                        <button type="button" className="link-button" onClick={() => void handleOpenArtifact(artifact.path)}>
-                          {artifact.path}
-                        </button>{" "}
-                        ({artifact.kind})
-                      </li>
-                    ))}
-                  </ul>
-                  <div data-testid="run-diagram-content-panel">
-                    <h3 data-testid="run-diagram-selected-path">{selectedArtifact || "Diagram Preview"}</h3>
-                    {selectedArtifactIsMermaid ? (
-                      <MermaidPreview source={selectedArtifactContent} title={selectedArtifact || "diagram"} />
-                    ) : (
-                      <pre data-testid="run-diagram-content">
-                        {selectedArtifactContent || "Select a `.mmd` diagram artifact to preview."}
-                      </pre>
-                    )}
-                  </div>
-                </div>
-              )}
-            </section>
-          ) : null}
-        </>
-      ) : null}
+      <section className="panel" data-testid="runs-logs-panel">
+        <h2>Runs: Logs</h2>
+        <div className="actions">
+          <label htmlFor="runLogsViewMode">View</label>
+          <select
+            id="runLogsViewMode"
+            value={runLogsViewMode}
+            onChange={(event) => setRunLogsViewMode(event.target.value as "line" | "line+fields")}
+            className="inline-select"
+            data-testid="run-logs-view-select"
+          >
+            <option value="line">line</option>
+            <option value="line+fields">line+fields</option>
+          </select>
+          <button
+            type="button"
+            onClick={() => void handleCopyRunLogs()}
+            disabled={runLogs.length === 0}
+            data-testid="run-logs-copy-btn"
+          >
+            Copy logs
+          </button>
+          <button
+            type="button"
+            onClick={() => handleDownloadRunLogs()}
+            disabled={runLogs.length === 0 || !runId}
+            data-testid="run-logs-download-btn"
+          >
+            Download logs
+          </button>
+        </div>
+        {runLogsStatus ? <p className="status ok">{runLogsStatus}</p> : null}
+        {runLogTaskrunPaths.length > 0 ? (
+          <div className="actions">
+            {runLogTaskrunPaths.map((path) => (
+              <button key={`taskrun-log-open-${path}`} type="button" onClick={() => void handleOpenArtifact(path)}>
+                Open taskrun artifact: {path}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {runLogs.length === 0 ? (
+          <p>No run logs yet.</p>
+        ) : (
+          <pre data-testid="run-logs-content">{runLogsRendered}</pre>
+        )}
+      </section>
+
+      <section className="panel" data-testid="results-coverage-panel">
+        <h2>Results: Coverage & Questions</h2>
+        <div className="columns">
+          <div>
+            <h3>Coverage Summary</h3>
+            <pre data-testid="coverage-summary-content">{coverageSummary || "No coverage summary yet."}</pre>
+          </div>
+          <div>
+            <h3>Open Questions</h3>
+            <pre data-testid="open-questions-content">{openQuestions || "No open questions yet."}</pre>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel" data-testid="results-artifacts-panel">
+        <h2>Results: Run Artifacts</h2>
+        {artifacts.length === 0 ? (
+          <p>No artifacts yet.</p>
+        ) : (
+          <div className="columns">
+            <ul data-testid="run-artifacts-list">
+              {artifacts.map((artifact) => (
+                <li key={`${artifact.kind}-${artifact.path}`}>
+                  <button type="button" className="link-button" onClick={() => void handleOpenArtifact(artifact.path)}>
+                    {artifact.path}
+                  </button>{" "}
+                  ({artifact.kind})
+                </li>
+              ))}
+            </ul>
+            <div data-testid="run-artifact-content-panel">
+              <h3 data-testid="run-artifact-selected-path">{selectedArtifact || "Artifact Content"}</h3>
+              <pre data-testid="run-artifact-content">{selectedArtifactContent || "Select artifact to inspect."}</pre>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="panel">
+        <h2>Baseline: Git Helper Actions</h2>
+        <label htmlFor="gitMessage">Commit message</label>
+        <input id="gitMessage" value={gitMessage} onChange={(event) => setGitMessage(event.target.value)} />
+        <button type="button" onClick={() => void handleGitCommit()} disabled={busy}>
+          Commit workspace changes
+        </button>
+
+        <label htmlFor="proposalBranch">Proposal branch</label>
+        <input id="proposalBranch" value={proposalBranch} onChange={(event) => setProposalBranch(event.target.value)} />
+        <button type="button" onClick={() => void handleCreateProposalBranch()} disabled={busy}>
+          Create/Switch proposal branch
+        </button>
+
+        {gitStatus ? <p className="status ok">{gitStatus}</p> : null}
+      </section>
 
       {error ? <p className="status err">Error: {error}</p> : null}
     </main>

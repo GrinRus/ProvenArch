@@ -548,9 +548,9 @@ func buildDirectTaskResultTemplateJSON(task acpruntime.Task) string {
 
 func buildStepSpecificDirectPolicy(stepID string) string {
 	switch stepID {
-	case "refresh.step1.collect":
+	case "refresh.step2.service_collect", "refresh.step1.collect":
 		return strings.Join([]string{
-			`STEP POLICY refresh.step1.collect:`,
+			fmt.Sprintf(`STEP POLICY %s:`, stepID),
 			`- Allowed upsert_entity types: service, datastore, integration, external.system, team, domain, api, component.`,
 			`- Forbidden placeholder entity types: runtime_provider, runtime, metadata.`,
 			`- Analyze only repository/workspace artifacts; do NOT perform web search or external browsing.`,
@@ -560,9 +560,9 @@ func buildStepSpecificDirectPolicy(stepID string) string {
 			`- If evidence is incomplete, capture gap via coverage.missing instead of synthetic placeholder entities.`,
 			`- Include at least one question and at least three items in coverage.missing.`,
 		}, "\n")
-	case "refresh.step3.findings":
+	case "refresh.step4.service_findings", "refresh.step3.findings":
 		return strings.Join([]string{
-			`STEP POLICY refresh.step3.findings:`,
+			fmt.Sprintf(`STEP POLICY %s:`, stepID),
 			`- If owner mapping is unresolved in evidence/coverage, include at least one add_finding operation.`,
 			`- Each finding must include rule_id, related_ids, and provenance.evidence[].`,
 			`- For observation provenance, evidence array MUST be non-empty.`,
@@ -589,7 +589,7 @@ func buildDirectTemplateChangeset(task acpruntime.Task) []contracts.Operation {
 	}
 	changes := make([]contracts.Operation, 0, len(scopes))
 	switch task.StepID {
-	case "init.step3.findings", "refresh.step3.findings":
+	case "init.step4.service_findings", "refresh.step4.service_findings", "init.step3.findings", "refresh.step3.findings":
 		for _, scope := range scopes {
 			scope = strings.TrimSpace(scope)
 			if scope == "" {
@@ -662,7 +662,7 @@ func (FakeRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Resul
 	sort.Strings(repoScopes)
 
 	switch task.StepID {
-	case "init.step1.collect", "refresh.step1.collect":
+	case "init.step2.service_collect", "refresh.step2.service_collect", "init.step1.collect", "refresh.step1.collect":
 		result := contracts.TaskResult{
 			Meta: contracts.Meta{
 				TaskID:     task.TaskID,
@@ -687,7 +687,7 @@ func (FakeRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Resul
 			},
 		}
 		return marshalResult(result)
-	case "init.step3.findings", "refresh.step3.findings":
+	case "init.step4.service_findings", "refresh.step4.service_findings", "init.step3.findings", "refresh.step3.findings":
 		result := contracts.TaskResult{
 			Meta: contracts.Meta{
 				TaskID:     task.TaskID,
@@ -704,6 +704,30 @@ func (FakeRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Resul
 			},
 			Summary:   "Fake findings completed",
 			Changeset: makeFindingsChangeset(repoScopes),
+		}
+		return marshalResult(result)
+	case "init.step5.global_review", "refresh.step5.global_review":
+		result := contracts.TaskResult{
+			Meta: contracts.Meta{
+				TaskID:     task.TaskID,
+				StepID:     task.StepID,
+				RunID:      task.RunID,
+				Runtime:    contracts.RuntimeMeta{Name: "claude-code", Version: "fake"},
+				StartedAt:  task.StartedAtUTC.UTC().Format(time.RFC3339),
+				FinishedAt: task.StartedAtUTC.UTC().Add(1 * time.Second).Format(time.RFC3339),
+				Workspace:  task.Workspace,
+				ShardID:    task.ShardID,
+				RepoScope:  primaryTaskRepoScope(task.RepoScope, repoScopes),
+				RepoScopes: repoScopes,
+				PathScopes: append([]string(nil), task.PathScopes...),
+			},
+			Summary:   "Fake global review completed",
+			Changeset: []contracts.Operation{},
+			Questions: []contracts.Question{},
+			Coverage: &contracts.Coverage{
+				Observed: []string{"global review"},
+				Missing:  []string{"owner mappings"},
+			},
 		}
 		return marshalResult(result)
 	default:

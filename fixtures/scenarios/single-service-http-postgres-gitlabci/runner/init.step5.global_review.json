@@ -1,0 +1,123 @@
+{
+  "meta": {
+    "task_id": "task-20260330-0001",
+    "step_id": "init.step5.global_review",
+    "runtime": {
+      "name": "claude-code",
+      "version": "unknown"
+    },
+    "started_at": "2026-03-30T10:15:00Z",
+    "finished_at": "2026-03-30T10:17:30Z",
+    "repo_scopes": [
+      "payments-service"
+    ]
+  },
+  "summary": "Global review synthesized for scenario fixture.",
+  "changeset": [
+    {
+      "op": "upsert_entity",
+      "entity": {
+        "id": "svc.payments",
+        "type": "service",
+        "name": "Payments Service",
+        "aliases": [
+          "payment-api",
+          "payments-api"
+        ],
+        "provenance": {
+          "kind": "observation",
+          "confidence": 0.92,
+          "evidence": [
+            {
+              "repo": "payments-service",
+              "ref": "main@abc123",
+              "path": "cmd/payments/main.go",
+              "lines": {
+                "start": 1,
+                "end": 40
+              },
+              "excerpt_hash": "sha256:deadbeef"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "upsert_edge",
+      "edge": {
+        "id": "edge.svc.payments.calls.svc.users",
+        "type": "calls",
+        "from": "svc.payments",
+        "to": "svc.users",
+        "provenance": {
+          "kind": "inference",
+          "confidence": 0.62,
+          "evidence": [
+            {
+              "repo": "payments-service",
+              "ref": "main@abc123",
+              "path": "internal/clients/users_client.go",
+              "lines": {
+                "start": 10,
+                "end": 88
+              },
+              "excerpt_hash": "sha256:cafebabe"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "add_finding",
+      "finding": {
+        "id": "finding.missing-owner.svc.payments",
+        "severity": "medium",
+        "title": "Missing owner for service",
+        "description": "No CODEOWNERS match found for svc.payments. Add owner_team_id or team mapping.",
+        "rule_id": "rule.owner.required",
+        "related_ids": [
+          "svc.payments"
+        ],
+        "provenance": {
+          "kind": "inference",
+          "confidence": 0.74,
+          "evidence": []
+        }
+      }
+    }
+  ],
+  "coverage": {
+    "observed": [
+      "service",
+      "http routes",
+      "client code"
+    ],
+    "missing": [
+      "k8s manifests",
+      "openapi spec",
+      "gitlab-ci pipeline definition"
+    ],
+    "notes": [
+      "No helm/ or k8s/ directories found in repo.",
+      "No .gitlab-ci.yml found in analysed checkout."
+    ]
+  },
+  "questions": [
+    {
+      "id": "q.owner.svc.payments",
+      "text": "Who owns Payments Service? (team name or CODEOWNERS mapping)",
+      "priority": "high",
+      "related_ids": [
+        "svc.payments"
+      ]
+    },
+    {
+      "id": "q.cicd.svc.payments",
+      "text": "Where is the CI/CD pipeline for Payments Service defined? (.gitlab-ci.yml, include, shared template, or external project)",
+      "priority": "high",
+      "related_ids": [
+        "svc.payments"
+      ]
+    }
+  ]
+}

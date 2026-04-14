@@ -76,8 +76,9 @@ func runScenarioAndSnapshot(t *testing.T, sourceRoot string, exportReadable bool
 
 	runner := claudecode.RecordedRunner{
 		ByStep: map[string]string{
-			"init.step1.collect":  filepath.Join(workspaceRoot, "runner", "init.step1.collect.json"),
-			"init.step3.findings": filepath.Join(workspaceRoot, "runner", "init.step3.findings.json"),
+			"init.step2.service_collect":  filepath.Join(workspaceRoot, "runner", "init.step2.service_collect.json"),
+			"init.step4.service_findings": filepath.Join(workspaceRoot, "runner", "init.step4.service_findings.json"),
+			"init.step5.global_review":    filepath.Join(workspaceRoot, "runner", "init.step5.global_review.json"),
 		},
 	}
 	fixedClock := func() time.Time {
@@ -253,8 +254,9 @@ func TestScenarioFixtureLayoutExists(t *testing.T) {
 			root := filepath.Join("..", "..", "fixtures", "scenarios", scenario)
 			for _, rel := range []string{
 				"workspace/workspace.yaml",
-				"runner/init.step1.collect.json",
-				"runner/init.step3.findings.json",
+				"runner/init.step2.service_collect.json",
+				"runner/init.step4.service_findings.json",
+				"runner/init.step5.global_review.json",
 				"golden/README.md",
 				"golden/snapshot.sha256",
 			} {
@@ -276,8 +278,9 @@ func TestScenarioRunnerFixturesContractAndSemantics(t *testing.T) {
 		"missing-owner-and-missing-cicd",
 	}
 	stepExpectations := map[string]string{
-		"runner/init.step1.collect.json":  "init.step1.collect",
-		"runner/init.step3.findings.json": "init.step3.findings",
+		"runner/init.step2.service_collect.json":  "init.step2.service_collect",
+		"runner/init.step4.service_findings.json": "init.step4.service_findings",
+		"runner/init.step5.global_review.json":    "init.step5.global_review",
 	}
 
 	for _, scenario := range scenarios {
@@ -340,8 +343,9 @@ func TestScenarioDomainTaskEnvelopesDeterministic(t *testing.T) {
 
 			runner := claudecode.RecordedRunner{
 				ByStep: map[string]string{
-					"init.step1.collect":  filepath.Join(workspaceRoot, "runner", "init.step1.collect.json"),
-					"init.step3.findings": filepath.Join(workspaceRoot, "runner", "init.step3.findings.json"),
+					"init.step2.service_collect":  filepath.Join(workspaceRoot, "runner", "init.step2.service_collect.json"),
+					"init.step4.service_findings": filepath.Join(workspaceRoot, "runner", "init.step4.service_findings.json"),
+					"init.step5.global_review":    filepath.Join(workspaceRoot, "runner", "init.step5.global_review.json"),
 				},
 			}
 			service := NewService(
@@ -383,23 +387,17 @@ func TestScenarioDomainTaskEnvelopesDeterministic(t *testing.T) {
 				}
 			}
 
-			taskrunPaths, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-init-step1-collect-domain-*.json"))
+			taskrunPaths, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-init-step2-service_collect-domain-service-*.json"))
 			if err != nil {
 				t.Fatalf("glob per-domain taskruns: %v", err)
 			}
-			if len(taskrunPaths) != len(domainIDs) {
-				t.Fatalf("expected %d per-domain taskruns, got %d (%v)", len(domainIDs), len(taskrunPaths), taskrunPaths)
+			if len(taskrunPaths) == 0 {
+				t.Fatalf("expected non-empty service taskruns for step2 collect")
 			}
-			for _, domainID := range domainIDs {
-				path := filepath.Join(
-					ws.Path,
-					"reports",
-					"taskruns",
-					fmt.Sprintf("%s-init-step1-collect-domain-%s.json", runInfo.RunID, sanitizeDomainArtifactSlug(domainID)),
-				)
+			for _, path := range taskrunPaths {
 				content, err := os.ReadFile(path)
 				if err != nil {
-					t.Fatalf("read per-domain taskrun %s: %v", path, err)
+					t.Fatalf("read service taskrun %s: %v", path, err)
 				}
 				var payload struct {
 					Meta struct {
@@ -407,10 +405,10 @@ func TestScenarioDomainTaskEnvelopesDeterministic(t *testing.T) {
 					} `json:"meta"`
 				}
 				if err := json.Unmarshal(content, &payload); err != nil {
-					t.Fatalf("decode per-domain taskrun %s: %v", path, err)
+					t.Fatalf("decode service taskrun %s: %v", path, err)
 				}
-				if payload.Meta.StepID != "init.step1.collect" {
-					t.Fatalf("expected per-domain taskrun step id init.step1.collect, got %q", payload.Meta.StepID)
+				if payload.Meta.StepID != "init.step2.service_collect" {
+					t.Fatalf("expected service taskrun step id init.step2.service_collect, got %q", payload.Meta.StepID)
 				}
 			}
 		})

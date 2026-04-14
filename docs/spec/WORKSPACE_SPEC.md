@@ -102,8 +102,8 @@ Balanced defaults (если поле не задано и env override отсу�
 - `repo_selection`: `all|backend_only`
 
 Default values:
-- `strategy=sequential`
-- `max_parallel_tasks=1`
+- `strategy=parallel`
+- `max_parallel_tasks=3`
 - `failure_policy=best_effort`
 - `shard_discovery.mode=heuristics`
 - `repo_selection=all`

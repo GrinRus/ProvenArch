@@ -23,7 +23,7 @@
    - bootstrap (`init-workspace`/`serve --auto-init`) автоматически делает `git init` для workspace root при отсутствии `.git`
    - startup для `serve` lenient: без блокирующего repo preflight; readiness diagnostics доступны через `/api/workspace/validate`
    - Поддерживает batch/non-interactive режим для CI jobs
-   - `run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]`
+   - `run --workspace <abs-path> --pipeline init|refresh [--refresh-mode incremental|full] [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]`
    - runtime selector process-scoped: `fake` default для required CI, `headless` opt-in
    - provider selector process-scoped: `--runtime-provider` > `ACP_RUNTIME_PROVIDER` > `claude-code`
    - timeout control process/workspace-aware:
@@ -76,21 +76,31 @@
    - Работает с единым central workspace (`arch-workspace`) как корнем артефактов MVP
    - Валидирует `workspace.yaml` по `schemas/workspace.schema.json`
    - Разрешает repo sources (`path`/`git_url`) в локальные checkout перед анализом через системный `git` текущего пользователя/runner
-   - Оркестрирует domain-first слой агентов
-   - Materialize-ит per-domain execution contracts (`reports/agent-outputs/domains/*.task-envelope.json`) для canonical domain cards
-   - Step1 repo binding: источник истины `repo_scope` в domain card; fallback только slug-match `domain_id` ↔ `repo.name`
-   - Runtime step1 и enrich domain cards используют общий resolver `repo_scope` (declared -> slug fallback -> empty)
-   - Проверяет согласованность canonical domain card: filename `<domain-id>.md` vs поле `- id:`; mismatch фиксируется high-priority question, runtime остаётся filename-based
-   - Монолитный сценарий many-domains-to-one-repo поддержан через общий `repo_scope`; unknown scope фиксируется вопросом `q.domain.<id>.unknown-repo-scope`
-   - Если `repo_scope` домена исключён policy `repo_selection`, domain runtime task пропускается и фиксируется high-priority question
-   - Выполняет runtime collect-step per-domain и сохраняет отдельные raw taskruns в `reports/taskruns/*-step1-collect-domain-*.json`
+   - Оркестрирует service-first pipeline:
+     - `step1.service_inventory` (deterministic planner)
+     - `step2.service_collect` (runtime fan-out по service shards)
+     - `step3.asis_docs` (compiler)
+     - `step4.service_findings` (runtime fan-out по service shards)
+     - `step5.global_review` (single runtime aggregation task per run)
+     - `step6.proposals` (compiler/changelog)
+   - Service inventory planner:
+     - marker-based service roots + leaf-pruning + fallback `.`
+     - deterministic chunking для больших сервисов (`>500 files` или `>8MB` → chunks до `200 files`/`3MB`, cap `8`)
+     - artifacts: `*-service-inventory-plan.json`, `*-service-inventory-summary.json`, stable snapshot `service-inventory-latest.json`
+   - Refresh modes:
+     - default `incremental` (previous snapshot + git diff + untracked/modified)
+     - explicit `full` через CLI/API/UI
+     - per-repo fallback to full при недоступном snapshot/git + warning diagnostics
+   - Runtime шаги `step2/step4` сохраняют raw taskruns per service shard в `reports/taskruns/*-service_collect-domain-service-*.json` и `*-service_findings-domain-service-*.json`
+   - Domain outputs остаются source-of-truth в `reports/agent-outputs/domains/*`, строятся детерминированно из service artifacts
+   - Проверяет согласованность canonical domain card (`filename` vs `- id`) и repo_scope-resolver (`declared -> slug fallback -> empty`) с high-priority questions на mismatch/unknown/excluded
    - Runtime sharding planner (heuristics/semantic) materialize-ит deterministic shard-plan artifacts `reports/taskruns/*-shard-plan*.json` и shard-summary artifacts `reports/taskruns/*-shard-summary*.json`
    - Scheduler поддерживает `sequential|parallel` execution с worker-pool (`max_parallel_tasks`) и `fail_fast|best_effort` failure-policy
    - При `best_effort` downstream шаги продолжаются на partial model, но итог run фиксируется как `failed` с `error_code=run_partial_failed`
    - Вызывает runtime adapter
    - Валидирует TaskResult (schema)
    - Нормализует legacy `add_question` / `set_coverage` в canonical top-level form
-   - Применяет semantic guard для refresh-taskruns: фильтрует placeholder/off-topic артефакты в `refresh.step1.collect`, добавляет deterministic fallback finding при owner-gap в `refresh.step3.findings`, канонизирует/дедуплицирует coverage/question semantics
+   - Применяет semantic guard для refresh-taskruns: фильтрует placeholder/off-topic артефакты в `refresh.step2.service_collect`, добавляет deterministic fallback finding/edge в `refresh.step4.service_findings`, канонизирует/дедуплицирует coverage/question semantics
    - Применяет changeset к модели workspace
    - Не auto-create/rename canonical domain/team cards
    - Триггерит генерацию отчётов
@@ -187,10 +197,12 @@
 
 ## Pipeline (MVP)
 0) Конституция (charter)
-1) Collect context
-2) As-is docs
-3) Findings (gaps/anti-patterns)
-4) Proposals (improvements)
+1) Service inventory (planner + snapshot)
+2) Service collect (runtime fan-out)
+3) As-is docs
+4) Service findings (runtime fan-out)
+5) Global review (single runtime aggregation)
+6) Proposals (improvements)
 
 On-demand capability:
 - Q&A агент использует `charter/cards + model + reports + docs/imports`; в beta доступен как internal service + CLI `acp qa` без публичного API endpoint.

@@ -32,6 +32,13 @@ const (
 	PipelineRefresh Pipeline = "refresh"
 )
 
+type RefreshMode string
+
+const (
+	RefreshModeIncremental RefreshMode = "incremental"
+	RefreshModeFull        RefreshMode = "full"
+)
+
 const (
 	runHistoryPath      = "reports/taskruns/run-history.json"
 	runHistoryVersion   = 1
@@ -117,6 +124,7 @@ type Artifact struct {
 type RunRequest struct {
 	Workspace      workspace.Root
 	Pipeline       Pipeline
+	RefreshMode    RefreshMode
 	NonInteractive bool
 }
 
@@ -218,6 +226,19 @@ func ParsePipeline(value string) (Pipeline, error) {
 	}
 }
 
+func ParseRefreshMode(value string) (RefreshMode, error) {
+	normalized := strings.TrimSpace(strings.ToLower(value))
+	if normalized == "" {
+		return RefreshModeIncremental, nil
+	}
+	switch RefreshMode(normalized) {
+	case RefreshModeIncremental, RefreshModeFull:
+		return RefreshMode(normalized), nil
+	default:
+		return "", fmt.Errorf("unsupported refresh mode %q (allowed: %s, %s)", value, RefreshModeIncremental, RefreshModeFull)
+	}
+}
+
 func (s *Service) ResolveExecutionProfile(manifest workspace.Manifest) acpruntime.ExecutionResolution {
 	return acpruntime.ResolveExecution(manifest, s.executionOverrides)
 }
@@ -237,6 +258,10 @@ func (s *Service) ValidateRuntime(ctx context.Context) error {
 func (s *Service) runWithID(ctx context.Context, request RunRequest, runID string) (RunInfo, []Artifact, error) {
 	_ = s.cleanupRunLogs()
 	now := s.clock().UTC()
+	refreshMode := request.RefreshMode
+	if refreshMode == "" {
+		refreshMode = RefreshModeIncremental
+	}
 	initialInfo := RunInfo{
 		RunID:     runID,
 		Pipeline:  string(request.Pipeline),
@@ -249,7 +274,8 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		Level:     RunLogLevelInfo,
 		Message:   "run started",
 		Fields: map[string]any{
-			"pipeline": string(request.Pipeline),
+			"pipeline":     string(request.Pipeline),
+			"refresh_mode": string(refreshMode),
 		},
 	})
 	if err := s.ValidateRuntime(ctx); err != nil {
@@ -341,6 +367,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		repoSelectionMode:  validation.RepoSelectionMode,
 		selectedRepoScopes: append([]string(nil), validation.SelectedRepoScopes...),
 		repoSelection:      append([]workspace.RepoSelectionDecision(nil), validation.RepoSelection...),
+		refreshMode:        refreshMode,
 	}
 	if len(execution.selectedRepoScopes) == 0 && execution.repoSelectionMode == workspace.RepoSelectionAll {
 		execution.selectedRepoScopes = collectRepoScopes(request.Workspace.Manifest.Repos)
@@ -367,6 +394,9 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		}
 		s.appendRunLog(runID, entry)
 	}
+	if request.Pipeline == PipelineInit && strings.TrimSpace(string(request.RefreshMode)) != "" {
+		execution.addWarning(fmt.Sprintf("refresh_mode=%q is ignored for init pipeline", request.RefreshMode))
+	}
 	execution.logInfo("", "", "runtime execution profile resolved", map[string]any{
 		"strategy":         execution.executionProfile.Strategy,
 		"max_parallel":     execution.executionProfile.MaxParallel,
@@ -374,6 +404,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		"shard_discovery":  execution.executionProfile.ShardMode,
 		"repo_selection":   execution.executionProfile.RepoSelection,
 		"selected_scopes":  append([]string(nil), execution.selectedRepoScopes...),
+		"refresh_mode":     string(refreshMode),
 		"timeout_step_sec": resolvedTimeouts.Effective.StepTimeoutSec,
 		"timeout_hb_sec":   resolvedTimeouts.Effective.HeartbeatSec,
 	})
@@ -1091,6 +1122,12 @@ type pipelineExecution struct {
 	repoSelectionMode        string
 	selectedRepoScopes       []string
 	repoSelection            []workspace.RepoSelectionDecision
+	refreshMode              RefreshMode
+	servicePlan              serviceInventoryPlan
+	serviceCollectRuns       []serviceRuntimeRun
+	serviceFindingRuns       []serviceRuntimeRun
+	globalReviewInputPath    string
+	globalUnresolvedServices []string
 }
 
 type runtimeTaskExecution struct {
@@ -1127,6 +1164,19 @@ type domainRunSummary struct {
 	Unresolved     []string
 }
 
+type serviceRuntimeRun struct {
+	RepoScope      string
+	ServiceID      string
+	ServiceRoot    string
+	ShardID        string
+	PathScopes     []string
+	TaskRunPath    string
+	RuntimeSummary string
+	QuestionIDs    []string
+	FindingIDs     []string
+	Apply          model.ApplyReport
+}
+
 func (e *pipelineExecution) run(ctx context.Context) error {
 	stepIDs := stepIDsForPipeline(e.pipeline)
 	for _, stepID := range stepIDs {
@@ -1150,13 +1200,17 @@ func (e *pipelineExecution) runStep(ctx context.Context, stepID string) error {
 	switch stepID {
 	case "init.step0.constitution":
 		return e.runStepConstitution()
-	case "init.step1.collect", "refresh.step1.collect":
-		return e.runRuntimeStep(ctx, stepID)
-	case "init.step2.asis_docs", "refresh.step2.asis_docs":
+	case "init.step1.service_inventory", "refresh.step1.service_inventory":
+		return e.runStepServiceInventory(ctx)
+	case "init.step2.service_collect", "refresh.step2.service_collect":
+		return e.runStepServiceCollect(ctx, stepID)
+	case "init.step3.asis_docs", "refresh.step3.asis_docs":
 		return e.runStepAsIs()
-	case "init.step3.findings", "refresh.step3.findings":
-		return e.runRuntimeStep(ctx, stepID)
-	case "init.step4.proposals", "refresh.step4.proposals":
+	case "init.step4.service_findings", "refresh.step4.service_findings":
+		return e.runStepServiceFindings(ctx, stepID)
+	case "init.step5.global_review", "refresh.step5.global_review":
+		return e.runStepGlobalReview(ctx, stepID)
+	case "init.step6.proposals", "refresh.step6.proposals":
 		return e.runStepProposals()
 	default:
 		return fmt.Errorf("unsupported step %q", stepID)
@@ -1842,17 +1896,21 @@ func stepIDsForPipeline(pipeline Pipeline) []string {
 	case PipelineInit:
 		return []string{
 			"init.step0.constitution",
-			"init.step1.collect",
-			"init.step2.asis_docs",
-			"init.step3.findings",
-			"init.step4.proposals",
+			"init.step1.service_inventory",
+			"init.step2.service_collect",
+			"init.step3.asis_docs",
+			"init.step4.service_findings",
+			"init.step5.global_review",
+			"init.step6.proposals",
 		}
 	case PipelineRefresh:
 		return []string{
-			"refresh.step1.collect",
-			"refresh.step2.asis_docs",
-			"refresh.step3.findings",
-			"refresh.step4.proposals",
+			"refresh.step1.service_inventory",
+			"refresh.step2.service_collect",
+			"refresh.step3.asis_docs",
+			"refresh.step4.service_findings",
+			"refresh.step5.global_review",
+			"refresh.step6.proposals",
 		}
 	default:
 		return nil
@@ -2568,7 +2626,7 @@ func entitySemanticText(entity *contracts.Entity) string {
 }
 
 func (e *pipelineExecution) applySemanticGuards(stepID string, domainID string, task acpruntime.Task, normalized contracts.TaskResult) contracts.TaskResult {
-	if stepID == "refresh.step1.collect" {
+	if stepID == "refresh.step2.service_collect" || stepID == "refresh.step1.collect" {
 		filtered := make([]contracts.Operation, 0, len(normalized.Changeset))
 		droppedByType := map[string]int{}
 		droppedOffTopicEntities := 0
@@ -2599,7 +2657,7 @@ func (e *pipelineExecution) applySemanticGuards(stepID string, domainID string, 
 			sort.Strings(parts)
 			normalized.Warnings = append(
 				normalized.Warnings,
-				fmt.Sprintf("semantic_guard: dropped refresh.step1.collect entity types [%s]", strings.Join(parts, ", ")),
+				fmt.Sprintf("semantic_guard: dropped %s entity types [%s]", stepID, strings.Join(parts, ", ")),
 			)
 		} else {
 			normalized.Changeset = filtered
@@ -2621,7 +2679,8 @@ func (e *pipelineExecution) applySemanticGuards(stepID string, domainID string, 
 			normalized.Warnings = append(
 				normalized.Warnings,
 				fmt.Sprintf(
-					"semantic_guard: dropped refresh.step1.collect off-topic artifacts entities=%d questions=%d terms=[%s]",
+					"semantic_guard: dropped %s off-topic artifacts entities=%d questions=%d terms=[%s]",
+					stepID,
 					droppedOffTopicEntities,
 					droppedOffTopicQuestions,
 					strings.Join(dedupeSemanticStrings(droppedOffTopicTerms), ", "),
@@ -2630,13 +2689,13 @@ func (e *pipelineExecution) applySemanticGuards(stepID string, domainID string, 
 			if len(normalized.Changeset) == 0 {
 				normalized.Warnings = append(
 					normalized.Warnings,
-					"semantic_guard: critical_off_topic_drift in refresh.step1.collect",
+					fmt.Sprintf("semantic_guard: critical_off_topic_drift in %s", stepID),
 				)
 			}
 		}
 	}
 
-	if stepID == "refresh.step3.findings" {
+	if stepID == "refresh.step4.service_findings" || stepID == "refresh.step3.findings" {
 		normalized = e.ensureOwnerGapFallback(domainID, task, normalized)
 		normalized = e.ensureCrossRepoEdgeFallback(domainID, task, normalized)
 	}
@@ -2914,7 +2973,10 @@ func (e *pipelineExecution) ensureCrossRepoEdgeFallback(domainID string, task ac
 }
 
 func (e *pipelineExecution) applyEvidencePathSemanticGuard(stepID string, task acpruntime.Task, normalized contracts.TaskResult) contracts.TaskResult {
-	if stepID != "refresh.step1.collect" && stepID != "refresh.step3.findings" {
+	if stepID != "refresh.step2.service_collect" &&
+		stepID != "refresh.step4.service_findings" &&
+		stepID != "refresh.step1.collect" &&
+		stepID != "refresh.step3.findings" {
 		return normalized
 	}
 
