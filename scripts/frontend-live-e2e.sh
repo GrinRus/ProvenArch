@@ -15,6 +15,7 @@ UI_E2E_SCENARIO="${UI_E2E_SCENARIO:-init-inspect-service-first}"
 UI_E2E_CANCEL_STUB_SLEEP_SEC="${UI_E2E_CANCEL_STUB_SLEEP_SEC:-90}"
 UI_E2E_INIT_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-${UI_E2E_INIT_TIMEOUT_SEC:-}}"
 UI_E2E_CANCEL_TIMEOUT_SEC="${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-${UI_E2E_CANCEL_TIMEOUT_SEC:-}}"
+UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC="${UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC:-30}"
 
 DEFAULT_UI_E2E_INIT_TIMEOUT_SEC=900
 DEFAULT_UI_E2E_CANCEL_TIMEOUT_SEC=420
@@ -36,6 +37,20 @@ require_cmd() {
   if ! command -v "$cmd" >/dev/null 2>&1; then
     die "required command is unavailable: $cmd"
   fi
+}
+
+parse_positive_int_or_die() {
+  local raw="$1"
+  local name="$2"
+  local numeric
+  if [[ ! "$raw" =~ ^[0-9]+$ ]]; then
+    die "$name must be a positive integer, got '$raw'"
+  fi
+  numeric=$((10#$raw))
+  if (( numeric <= 0 )); then
+    die "$name must be > 0, got '$raw'"
+  fi
+  printf '%s' "$numeric"
 }
 
 allocate_free_port() {
@@ -226,6 +241,16 @@ if ! wait_for_health "$BASE_URL"; then
 fi
 resolve_ui_poll_timeouts
 log "effective UI polling timeouts: init=${UI_E2E_INIT_TIMEOUT_SEC}s cancel=${UI_E2E_CANCEL_TIMEOUT_SEC}s"
+if [[ "$UI_E2E_SCENARIO" == "cancel-refresh" ]]; then
+  cancel_timeout_sec="$(parse_positive_int_or_die "$UI_E2E_CANCEL_TIMEOUT_SEC" "UI_E2E_CANCEL_TIMEOUT_SEC")"
+  cancel_stub_sleep_sec="$(parse_positive_int_or_die "$UI_E2E_CANCEL_STUB_SLEEP_SEC" "UI_E2E_CANCEL_STUB_SLEEP_SEC")"
+  cancel_margin_sec="$(parse_positive_int_or_die "$UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC" "UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC")"
+  min_cancel_timeout_sec=$((cancel_stub_sleep_sec + cancel_margin_sec))
+  log "cancel-refresh timeout guard: timeout=${cancel_timeout_sec}s stub_sleep=${cancel_stub_sleep_sec}s margin=${cancel_margin_sec}s min_required=${min_cancel_timeout_sec}s"
+  if (( cancel_timeout_sec < min_cancel_timeout_sec )); then
+    die "cancel-refresh preflight failed: UI_E2E_CANCEL_TIMEOUT_SEC=${cancel_timeout_sec}s must be >= ${min_cancel_timeout_sec}s (UI_E2E_CANCEL_STUB_SLEEP_SEC=${cancel_stub_sleep_sec}s + margin=${cancel_margin_sec}s)"
+  fi
+fi
 
 status="passed"
 reason="ok"

@@ -1,14 +1,17 @@
 package qwencode
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
@@ -205,10 +208,54 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return acpruntime.Result{}, "", nil, err
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return acpruntime.Result{}, "", nil, err
+	}
 
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Start(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return acpruntime.Result{}, "", nil, ctxErr
+		}
+		return acpruntime.Result{}, "", nil, err
+	}
+
+	var streamErr error
+	var streamErrMu sync.Mutex
+	captureErr := func(captureErr error) {
+		if captureErr == nil {
+			return
+		}
+		streamErrMu.Lock()
+		defer streamErrMu.Unlock()
+		if streamErr == nil {
+			streamErr = captureErr
+		}
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		captureErr(captureCommandStream(stdoutPipe, &stdout, task, acpruntime.OutputStreamStdout))
+	}()
+	go func() {
+		defer wg.Done()
+		captureErr(captureCommandStream(stderrPipe, &stderr, task, acpruntime.OutputStreamStderr))
+	}()
+
+	// Drain both output streams before waiting to avoid racy early pipe closes
+	// that can truncate stdout/stderr under parallel test/process scheduling.
+	wg.Wait()
+	waitErr := cmd.Wait()
+	if waitErr == nil && streamErr != nil {
+		waitErr = streamErr
+	}
+	if waitErr != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return acpruntime.Result{
 				Stdout: stdout.String(),
@@ -218,7 +265,7 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 		return acpruntime.Result{
 			Stdout: stdout.String(),
 			Stderr: stderr.String(),
-		}, "", nil, runnerdiag.BuildExecFailure(err, stdout.String(), stderr.String())
+		}, "", nil, runnerdiag.BuildExecFailure(waitErr, stdout.String(), stderr.String())
 	}
 
 	rawTaskResult, err := taskresultextractor.Extract(stdout.Bytes())
@@ -248,6 +295,95 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 		Stdout:     stdout.String(),
 		Stderr:     stderr.String(),
 	}, "", nil, nil
+}
+
+type streamedOutputBudget struct {
+	forwardedBytes int
+	truncated      bool
+}
+
+func captureCommandStream(reader io.Reader, sink *bytes.Buffer, task acpruntime.Task, stream acpruntime.OutputStream) error {
+	if sink == nil {
+		return errors.New("capture sink is nil")
+	}
+	bufReader := bufio.NewReader(reader)
+	budget := &streamedOutputBudget{}
+	for {
+		part, err := bufReader.ReadString('\n')
+		if len(part) > 0 {
+			sink.WriteString(part)
+			forwardStreamOutput(task, stream, part, budget)
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			if isPipeClosedErr(err) {
+				return nil
+			}
+			return err
+		}
+	}
+}
+
+func isPipeClosedErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, os.ErrClosed) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "file already closed")
+}
+
+func forwardStreamOutput(task acpruntime.Task, stream acpruntime.OutputStream, chunk string, budget *streamedOutputBudget) {
+	if task.OnOutput == nil || budget == nil {
+		return
+	}
+	normalized := strings.ReplaceAll(chunk, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	lines := strings.Split(normalized, "\n")
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		if budget.truncated {
+			continue
+		}
+		lineBytes := len([]byte(line))
+		nextBytes := budget.forwardedBytes + lineBytes
+		if nextBytes <= acpruntime.RuntimeOutputStreamHardCapBytes {
+			budget.forwardedBytes = nextBytes
+			task.OnOutput(acpruntime.OutputChunk{
+				Stream: stream,
+				Text:   line,
+			})
+			continue
+		}
+		remaining := acpruntime.RuntimeOutputStreamHardCapBytes - budget.forwardedBytes
+		if remaining > 0 {
+			trimmed := line
+			if len([]byte(trimmed)) > remaining {
+				trimmedBytes := []byte(trimmed)
+				if remaining < len(trimmedBytes) {
+					trimmed = string(trimmedBytes[:remaining])
+				}
+			}
+			trimmed = strings.TrimSpace(trimmed)
+			if trimmed != "" {
+				task.OnOutput(acpruntime.OutputChunk{
+					Stream: stream,
+					Text:   trimmed,
+				})
+			}
+		}
+		budget.truncated = true
+		task.OnOutput(acpruntime.OutputChunk{
+			Stream:    stream,
+			Truncated: true,
+			Text:      fmt.Sprintf("%s output truncated after %d bytes (internal safeguard)", stream, acpruntime.RuntimeOutputStreamHardCapBytes),
+		})
+	}
 }
 
 func buildPrompt(taskPayload []byte, retry bool) string {

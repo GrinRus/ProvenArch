@@ -248,8 +248,14 @@ Outputs:
 - `reports/as-is/integrations.md`
 - `reports/as-is/datastores.md`
 - `reports/as-is/ci-cd.md`
+- `reports/diagrams/c4-context.mmd`
+- `reports/diagrams/c4-container.mmd`
+- `reports/diagrams/components/<service-id>.mmd`
+- `reports/diagrams/code/<service-id>.mmd`
+- `reports/diagrams/index.md`
 
 > В MVP это детерминированная компиляция из модели.
+> C4 generation policy: strict evidence-first. Если данных недостаточно, диаграммы не выдумывают узлы и содержат явные `Gap:*` маркеры.
 
 ### Step 4 — Service findings (runtime step)
 Inputs:

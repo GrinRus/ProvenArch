@@ -3,6 +3,7 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -54,6 +55,55 @@ func TestEnsureBaselineBundleDoesNotOverwriteExistingFiles(t *testing.T) {
 	}
 	if string(content) != customPrompt {
 		t.Fatalf("expected custom prompt pack to stay unchanged, got %q", string(content))
+	}
+}
+
+func TestEnsureBaselineBundleSeedsStructuredPromptDefaults(t *testing.T) {
+	t.Parallel()
+
+	ws := writeBaselineWorkspace(t)
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure layout: %v", err)
+	}
+	if err := ws.EnsureBaselineBundle(); err != nil {
+		t.Fatalf("ensure baseline bundle: %v", err)
+	}
+
+	requiredSections := []string{
+		"## Goal",
+		"## Inputs",
+		"## Required Output Shape",
+		"## Evidence Policy",
+		"## Forbidden Behavior",
+		"## Fallback When Unknown",
+	}
+
+	promptPaths := make([]string, 0, len(baselinePromptPacks)+len(baselineSkillIDs)*2)
+	for pack := range baselinePromptPacks {
+		promptPaths = append(promptPaths, filepath.Join("skills", "prompt-packs", pack+".md"))
+	}
+	for _, skill := range baselineSkillIDs {
+		promptPaths = append(promptPaths,
+			filepath.Join("skills", skill, "prompts", "system.md"),
+			filepath.Join("skills", skill, "prompts", "task.md"),
+		)
+	}
+	sort.Strings(promptPaths)
+
+	for _, rel := range promptPaths {
+		content, err := os.ReadFile(filepath.Join(ws.Path, rel))
+		if err != nil {
+			t.Fatalf("read prompt %s: %v", rel, err)
+		}
+		body := string(content)
+		for _, section := range requiredSections {
+			if !strings.Contains(body, section) {
+				t.Fatalf("prompt %s missing required section %q", rel, section)
+			}
+		}
+		if words := len(strings.Fields(body)); words < 70 {
+			t.Fatalf("prompt %s is too short: %d words", rel, words)
+		}
 	}
 }
 

@@ -153,7 +153,18 @@ def make_quality_payload(
     }
 
 
-def make_step_payload(provider: str, run_id: str, step_id: str, evidence_path: str, summary: str = "ok") -> dict:
+def make_step_payload(
+    provider: str,
+    run_id: str,
+    step_id: str,
+    evidence_path: str,
+    summary: str = "ok",
+    shard_id: str = "workspace-root",
+    repo_scopes: list[str] | None = None,
+    path_scopes: list[str] | None = None,
+) -> dict:
+    repo_scopes = repo_scopes or ["repo-main"]
+    path_scopes = path_scopes or ["."]
     return {
         "meta": {
             "task_id": f"task-{run_id}-{step_id}",
@@ -161,6 +172,9 @@ def make_step_payload(provider: str, run_id: str, step_id: str, evidence_path: s
             "step_id": step_id,
             "runtime": {"name": provider, "version": "1.2.3"},
             "started_at": "2026-04-10T10:00:00Z",
+            "shard_id": shard_id,
+            "repo_scopes": repo_scopes,
+            "path_scopes": path_scopes,
         },
         "summary": summary,
         "changeset": [
@@ -219,6 +233,84 @@ def write_analysis_reports(reports_root: Path, *, findings_text: str) -> None:
         reports_root / "coverage/open-questions.md",
         "\n".join(["# Open Questions", "", "- `q.owner.1` Who is the owning team for orders service?", ""]),
     )
+
+
+def make_shard_plan_payload(
+    run_id: str,
+    step_id: str,
+    strategy: str,
+    max_parallel_tasks: int,
+    failure_policy: str,
+    shard_discovery_mode: str,
+) -> dict:
+    return {
+        "version": 1,
+        "run_id": run_id,
+        "step_id": step_id,
+        "strategy": strategy,
+        "max_parallel_tasks": max_parallel_tasks,
+        "failure_policy": failure_policy,
+        "shard_discovery_mode": shard_discovery_mode,
+        "items": [
+            {
+                "sort_key": "repo-main:.",
+                "shard_id": "workspace-root",
+                "repo_scopes": ["repo-main"],
+                "path_scopes": ["."],
+            }
+        ],
+    }
+
+
+def make_shard_summary_payload(
+    run_id: str,
+    step_id: str,
+    strategy: str,
+    max_parallel_tasks: int,
+    failure_policy: str,
+    shard_discovery_mode: str,
+) -> dict:
+    return {
+        "version": 1,
+        "run_id": run_id,
+        "step_id": step_id,
+        "strategy": strategy,
+        "max_parallel_tasks": max_parallel_tasks,
+        "failure_policy": failure_policy,
+        "shard_discovery_mode": shard_discovery_mode,
+        "generated_at": "2026-04-10T10:00:00Z",
+        "items": [
+            {
+                "shard_id": "workspace-root",
+                "repo_scopes": ["repo-main"],
+                "path_scopes": ["."],
+                "status": "succeeded",
+                "task_id": f"task-{run_id}",
+                "taskrun_path": f"reports/taskruns/{run_id}-step.json",
+            }
+        ],
+    }
+
+
+def make_execution_preflight(
+    *,
+    strategy: str = "sequential",
+    max_parallel_tasks: int = 1,
+    failure_policy: str = "best_effort",
+    shard_discovery_mode: str = "heuristics",
+    repo_selection: str = "all",
+) -> dict:
+    return {
+        "execution_profile": {
+            "effective": {
+                "strategy": strategy,
+                "max_parallel_tasks": max_parallel_tasks,
+                "failure_policy": failure_policy,
+                "shard_discovery_mode": shard_discovery_mode,
+                "repo_selection": repo_selection,
+            }
+        }
+    }
 
 
 class EvaluateRunTests(unittest.TestCase):
@@ -953,6 +1045,234 @@ class EvaluateRunTests(unittest.TestCase):
             self.assertEqual("runner_unavailable", result.failure_class)
             self.assertTrue(result.cancellation_like)
             self.assertIn("reliability:cancellation-like", result.issues)
+
+    def test_runtime_flow_checks_fail_without_shard_and_repo_selection_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            target_repo = root / "target-repo"
+            write_text(target_repo / "README.md", "# demo\n")
+
+            run_dir = root / "batch/qwen-code/run1"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            make_session_summary(run_dir / "session-summary.md")
+            write_text(run_dir / "full-run.log", "")
+
+            init_id = "run_init_flow_fail"
+            refresh_id = "run_refresh_flow_fail"
+            runtime_versions = "qwen-code@1.2.3"
+            write_text(
+                run_dir / "run-results.tsv",
+                "\n".join(
+                    [
+                        make_run_results_line("qwen-code", "init", init_id, 11, 2, 1, 1, 2, 2, 0, runtime_versions),
+                        make_run_results_line("qwen-code", "refresh", refresh_id, 12, 2, 1, 1, 2, 2, 0, runtime_versions),
+                    ]
+                )
+                + "\n",
+            )
+
+            init_reports = run_dir / "snapshots" / init_id / "reports"
+            refresh_reports = run_dir / "snapshots" / refresh_id / "reports"
+            write_json(
+                init_reports / "taskruns" / f"{init_id}-quality.json",
+                make_quality_payload(init_id, "init", "qwen-code", 11, 2, 1, 1, 2, 2, 0, "1.2.3", ["init.step1.collect"]),
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-quality.json",
+                make_quality_payload(
+                    refresh_id,
+                    "refresh",
+                    "qwen-code",
+                    12,
+                    2,
+                    1,
+                    1,
+                    2,
+                    2,
+                    0,
+                    "1.2.3",
+                    ["refresh.step1.collect", "refresh.step3.findings"],
+                ),
+            )
+            write_json(
+                init_reports / "taskruns" / f"{init_id}-init-step1-collect-domain-main.json",
+                make_step_payload("qwen-code", init_id, "init.step1.collect", "README.md"),
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-refresh-step1-collect-domain-main.json",
+                make_step_payload("qwen-code", refresh_id, "refresh.step1.collect", "README.md"),
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-refresh-step3-findings.json",
+                make_step_payload("qwen-code", refresh_id, "refresh.step3.findings", "README.md"),
+            )
+            write_analysis_reports(
+                refresh_reports,
+                findings_text="\n".join(
+                    [
+                        "# Findings",
+                        "",
+                        "## Missing Owner Mapping",
+                        "- Severity: medium",
+                        "- Description: Ownership is partially unknown.",
+                        "",
+                    ]
+                ),
+            )
+
+            preflight = {"target_repo": str(target_repo)}
+            preflight.update(
+                make_execution_preflight(
+                    strategy="parallel",
+                    max_parallel_tasks=4,
+                    failure_policy="best_effort",
+                    shard_discovery_mode="semantic",
+                    repo_selection="backend_only",
+                )
+            )
+
+            result = report.evaluate_run("qwen-code", 1, run_dir, preflight)
+            self.assertFalse(result.hard_pass)
+            self.assertTrue(result.runtime_flow_failed)
+            self.assertIn("runtime:shard-artifacts", result.issues)
+            self.assertIn("runtime:repo-selection", result.issues)
+            self.assertIn("reliability:runtime-flow-failed", result.issues)
+
+    def test_runtime_flow_checks_pass_with_shard_and_repo_selection_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            target_repo = root / "target-repo"
+            write_text(target_repo / "README.md", "# demo\n")
+
+            run_dir = root / "batch/claude-code/run1"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            make_session_summary(run_dir / "session-summary.md")
+            write_text(run_dir / "full-run.log", "")
+
+            init_id = "run_init_flow_ok"
+            refresh_id = "run_refresh_flow_ok"
+            runtime_versions = "claude-code@1.2.3"
+            write_text(
+                run_dir / "run-results.tsv",
+                "\n".join(
+                    [
+                        make_run_results_line("claude-code", "init", init_id, 11, 2, 1, 1, 2, 2, 0, runtime_versions),
+                        make_run_results_line("claude-code", "refresh", refresh_id, 12, 2, 1, 1, 2, 2, 0, runtime_versions),
+                    ]
+                )
+                + "\n",
+            )
+
+            init_reports = run_dir / "snapshots" / init_id / "reports"
+            refresh_reports = run_dir / "snapshots" / refresh_id / "reports"
+            write_json(
+                init_reports / "taskruns" / f"{init_id}-quality.json",
+                make_quality_payload(init_id, "init", "claude-code", 11, 2, 1, 1, 2, 2, 0, "1.2.3", ["init.step1.collect"]),
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-quality.json",
+                make_quality_payload(
+                    refresh_id,
+                    "refresh",
+                    "claude-code",
+                    12,
+                    2,
+                    1,
+                    1,
+                    2,
+                    2,
+                    0,
+                    "1.2.3",
+                    ["refresh.step1.collect", "refresh.step3.findings"],
+                ),
+            )
+            write_json(
+                init_reports / "taskruns" / f"{init_id}-init-step1-collect-domain-main.json",
+                make_step_payload("claude-code", init_id, "init.step1.collect", "README.md"),
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-refresh-step1-collect-domain-main.json",
+                make_step_payload("claude-code", refresh_id, "refresh.step1.collect", "README.md"),
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-refresh-step3-findings.json",
+                make_step_payload("claude-code", refresh_id, "refresh.step3.findings", "README.md"),
+            )
+
+            write_json(
+                init_reports / "taskruns" / f"{init_id}-init-step1-collect-shard-plan-domain-main.json",
+                make_shard_plan_payload(init_id, "init.step1.collect", "sequential", 1, "best_effort", "heuristics"),
+            )
+            write_json(
+                init_reports / "taskruns" / f"{init_id}-init-step1-collect-shard-summary-domain-main.json",
+                make_shard_summary_payload(init_id, "init.step1.collect", "sequential", 1, "best_effort", "heuristics"),
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-refresh-step1-collect-shard-plan-domain-main.json",
+                make_shard_plan_payload(refresh_id, "refresh.step1.collect", "sequential", 1, "best_effort", "heuristics"),
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-refresh-step1-collect-shard-summary-domain-main.json",
+                make_shard_summary_payload(refresh_id, "refresh.step1.collect", "sequential", 1, "best_effort", "heuristics"),
+            )
+            write_json(
+                init_reports / "taskruns" / f"{init_id}-repo-selection-summary.json",
+                {
+                    "version": 1,
+                    "run_id": init_id,
+                    "pipeline": "init",
+                    "repo_selection_mode": "all",
+                    "selected_repo_scopes": ["repo-main"],
+                    "decisions": [
+                        {"name": "repo-main", "effective_role": "backend", "included": True, "reason": "included by repo_selection=all"}
+                    ],
+                },
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-repo-selection-summary.json",
+                {
+                    "version": 1,
+                    "run_id": refresh_id,
+                    "pipeline": "refresh",
+                    "repo_selection_mode": "all",
+                    "selected_repo_scopes": ["repo-main"],
+                    "decisions": [
+                        {"name": "repo-main", "effective_role": "backend", "included": True, "reason": "included by repo_selection=all"}
+                    ],
+                },
+            )
+
+            write_analysis_reports(
+                refresh_reports,
+                findings_text="\n".join(
+                    [
+                        "# Findings",
+                        "",
+                        "## Missing Owner Mapping",
+                        "- Severity: medium",
+                        "- Description: Ownership is partially unknown.",
+                        "",
+                    ]
+                ),
+            )
+
+            preflight = {"target_repo": str(target_repo)}
+            preflight.update(
+                make_execution_preflight(
+                    strategy="sequential",
+                    max_parallel_tasks=1,
+                    failure_policy="best_effort",
+                    shard_discovery_mode="heuristics",
+                    repo_selection="all",
+                )
+            )
+
+            result = report.evaluate_run("claude-code", 1, run_dir, preflight)
+            self.assertTrue(result.hard_pass)
+            self.assertFalse(result.runtime_flow_failed)
+            self.assertNotIn("runtime:shard-artifacts", result.issues)
+            self.assertNotIn("runtime:repo-selection", result.issues)
+            self.assertNotIn("runtime:execution-semantics", result.issues)
 
 
 if __name__ == "__main__":

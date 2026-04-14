@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -412,3 +413,163 @@ func (syntheticMixedVersionRunner) Run(_ context.Context, task acpruntime.Task) 
 }
 
 func (syntheticMixedVersionRunner) Preflight(context.Context) error { return nil }
+
+func TestRunLogsIncludeMixedEventAndRuntimeOutputEntries(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	service := NewService(
+		WithHistoryWorkspace(ws),
+		WithRunner(syntheticRuntimeStreamRunner{}),
+	)
+
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run init pipeline with runtime stream runner: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded run status, got %s", info.Status)
+	}
+
+	page, ok, err := service.GetRunLogs(info.RunID, 0, 500)
+	if err != nil {
+		t.Fatalf("get run logs: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected run logs for run %q", info.RunID)
+	}
+
+	hasEvent := false
+	hasRawStdout := false
+	hasRawStderr := false
+	hasTruncatedEvent := false
+	for _, entry := range page.Items {
+		switch entry.Kind {
+		case RunLogKindEvent:
+			hasEvent = true
+		case RunLogKindRuntimeOutput:
+			if entry.Stream == "stdout" {
+				hasRawStdout = true
+			}
+			if entry.Stream == "stderr" {
+				hasRawStderr = true
+			}
+			if truncated, ok := entry.Fields["output_truncated"].(bool); ok && truncated {
+				hasTruncatedEvent = true
+			}
+		}
+	}
+	if !hasEvent {
+		t.Fatalf("expected event entries in run logs")
+	}
+	if !hasRawStdout || !hasRawStderr {
+		t.Fatalf("expected raw runtime stdout+stderr entries in run logs")
+	}
+	if !hasTruncatedEvent {
+		t.Fatalf("expected truncated runtime output entry in run logs")
+	}
+}
+
+func TestRunLogsPaginationWorksWithMixedEventAndRuntimeEntries(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	service := NewService(
+		WithHistoryWorkspace(ws),
+		WithRunner(syntheticRuntimeStreamRunner{}),
+	)
+
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run init pipeline with runtime stream runner: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded run status, got %s", info.Status)
+	}
+
+	cursor := 0
+	collected := []RunLogEntry{}
+	for pageIdx := 0; pageIdx < 25; pageIdx++ {
+		page, ok, err := service.GetRunLogs(info.RunID, cursor, 2)
+		if err != nil {
+			t.Fatalf("get run logs page %d: %v", pageIdx, err)
+		}
+		if !ok {
+			t.Fatalf("expected run logs for run %q on page %d", info.RunID, pageIdx)
+		}
+		for _, item := range page.Items {
+			if item.Cursor < cursor {
+				t.Fatalf("expected cursor >= %d, got %d", cursor, item.Cursor)
+			}
+			collected = append(collected, item)
+		}
+		if page.EOF {
+			break
+		}
+		if page.NextCursor <= cursor {
+			t.Fatalf("expected next cursor to move forward, got cursor=%d next=%d", cursor, page.NextCursor)
+		}
+		cursor = page.NextCursor
+	}
+
+	hasEvent := false
+	hasRaw := false
+	for _, entry := range collected {
+		if entry.Kind == RunLogKindEvent {
+			hasEvent = true
+		}
+		if entry.Kind == RunLogKindRuntimeOutput {
+			hasRaw = true
+		}
+	}
+	if !hasEvent || !hasRaw {
+		t.Fatalf("expected both event and runtime_output entries across paginated logs")
+	}
+}
+
+type syntheticRuntimeStreamRunner struct{}
+
+func (syntheticRuntimeStreamRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	if task.OnOutput != nil {
+		task.OnOutput(acpruntime.OutputChunk{
+			Stream: acpruntime.OutputStreamStdout,
+			Text:   fmt.Sprintf("raw stdout from %s", task.StepID),
+		})
+		task.OnOutput(acpruntime.OutputChunk{
+			Stream: acpruntime.OutputStreamStderr,
+			Text:   fmt.Sprintf("raw stderr from %s", task.StepID),
+		})
+		task.OnOutput(acpruntime.OutputChunk{
+			Stream:    acpruntime.OutputStreamStdout,
+			Truncated: true,
+			Text:      "stdout output truncated after cap (synthetic)",
+		})
+	}
+
+	payload := map[string]any{
+		"meta": map[string]any{
+			"task_id":    task.TaskID,
+			"step_id":    task.StepID,
+			"run_id":     task.RunID,
+			"runtime":    map[string]any{"name": "synthetic-headless", "version": "v1"},
+			"started_at": task.StartedAtUTC.Format(time.RFC3339),
+		},
+		"summary":   "synthetic stream success",
+		"changeset": []any{},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return acpruntime.Result{}, err
+	}
+	return acpruntime.Result{RawJSON: raw}, nil
+}
+
+func (syntheticRuntimeStreamRunner) Preflight(context.Context) error { return nil }

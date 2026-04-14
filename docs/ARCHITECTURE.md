@@ -48,12 +48,14 @@
    - Guided setup поддерживает multi-repo (`repos[]`) с add/remove rows и optional `ref`
    - Показывает repo overview в validate surface: `resolved_repos` + diagnostics, сгруппированные по repo
    - Редактирует baseline bundle artifacts через guided selector (`charter/*`, `skills/*`, prompt packs, `skills/subagents.yaml`)
-   - UI разбит на явные секции `Setup / Baseline / Runs / Results`
+   - UI разбит на top-level tabs `Setup / Baseline / Runs / Results / Settings`
+   - Runtime profile (`timeouts` + `execution`) полностью вынесен в вкладку `Settings`
    - Показывает run dashboard (queued/running/succeeded/failed), включая завершённые run'ы из persisted history
    - При bootstrap авто-выбирает newest active run (`queued/running`), иначе первый run в history; после ручного выбора run auto-switch не выполняется
    - Если выбранный run исчезает из history (например, retention/restart race), UI очищает stale `Run status`/logs для этого run и не auto-switch-ится на другой run
    - Показывает `Run status` выбранного run с полным warnings list (`RunInfo.warnings`), `error_code` и `error`
-   - Показывает `Runs: Logs` для выбранного run (`timestamp/level/step/domain/message`) с переключателем `line | line+fields` и quick actions `Copy logs`, `Download logs`, `Open taskrun artifact`
+   - Показывает `Runs: Logs` для выбранного run (`timestamp/level/step/domain/message`) с dual-view `event timeline | raw agent stream | all`, переключателем `line | line+fields` и quick actions `Copy logs`, `Download logs`, `Open taskrun artifact`
+   - `Results` включает sub-tabs `Coverage / Artifacts / Diagrams`, где `Diagrams` рендерит Mermaid previews для `reports/diagrams/*`
    - Поддерживает `Cancel selected run` для active run через `POST /api/pipeline/runs/<run_id>/cancel`
    - Runtime Timeouts settings panel:
      - load/save/reset через `GET/PUT /api/runtime/timeouts`
@@ -109,6 +111,8 @@
    - На старте сервиса делает reconciliation stale persisted run (`queued/running`) в `failed` с `error_code=run_reconciled_after_restart`
    - Ведёт persisted run history в `reports/taskruns/run-history.json` (versioned index, retention 500)
    - Ведёт run-level logs в `reports/taskruns/logs/<run_id>.ndjson` с cursor query API (`GET /api/pipeline/runs/<run_id>/logs`)
+   - Runtime seam поддерживает live forwarding stdout/stderr от headless providers в run logs (`kind=runtime_output`, `stream=stdout|stderr`), event stream и raw stream сосуществуют
+   - Internal safeguard ограничивает raw runtime stream hard-cap и публикует явный truncation marker (`fields.output_truncated=true`)
    - При runtime/parse fail логирует structured diagnostics snippets (`stdout_snippet`/`stderr_snippet`) в `RunLogEntry.fields` (sanitize + truncate)
    - Пробрасывает `TaskResult.warnings` в run diagnostics (`RunInfo.Warnings`) и логирует warning events
    - Runtime step execution:
@@ -160,6 +164,8 @@
 
 8) **Reports (`internal/reports`)** *(implemented baseline)*
    - генерирует `reports/as-is/*`, включая per-service dossiers, integrations/datastores/ci-cd views
+   - в Step 2 дополнительно генерирует evidence-first C4 Mermaid set: `Context`, `Container`, per-service `Component`, per-service `Code`
+   - materialize-ит индекс диаграмм `reports/diagrams/index.md` для UI filtering/open flow
    - сохраняет `reports/coverage/*` для unknowns/questions
    - сохраняет `reports/agent-outputs/*`
    - формирует `reports/changelog/*` по итерациям

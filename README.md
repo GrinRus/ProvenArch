@@ -82,6 +82,7 @@ Q&A API follow-up в baseline зарезервирован как read-only endp
 Bundle bootstrap policy:
 - `init-workspace` и `serve --auto-init` создают baseline artifacts по стратегии create-if-missing;
 - существующие пользовательские правки в baseline файлах не перезаписываются.
+- baseline prompt defaults структурированы по обязательным секциям (`Goal`, `Inputs`, `Required Output Shape`, `Evidence Policy`, `Forbidden Behavior`, `Fallback When Unknown`) и покрыты quality-тестом на минимальную насыщенность.
 
 ---
 
@@ -137,7 +138,8 @@ acp run --workspace /path/to/arch-workspace --pipeline init --runtime fake --non
 ```
 
 После запуска UI отображает dashboard со всеми run'ами (`queued/running/succeeded/failed`), включая уже завершённые запуски.
-Для operability UI автоматически выбирает newest active run (или первый из списка), показывает полный warnings list выбранного run, позволяет переключать log view `line/line+fields` и поддерживает `Cancel selected run`.
+Для operability UI автоматически выбирает newest active run (или первый из списка), показывает полный warnings list выбранного run, поддерживает top-level navigation `Setup / Baseline / Runs / Results / Settings`, в `Runs: Logs` позволяет переключать `event timeline | raw agent stream | all` и `line | line+fields`, и поддерживает `Cancel selected run`.
+`Results` включает отдельную поверхность `Diagrams` для `reports/diagrams/*` (Mermaid preview + index).
 История сохраняется в workspace: `reports/taskruns/run-history.json`.
 
 ### 3) Альтернативный явный bootstrap через `init-workspace`
@@ -292,6 +294,7 @@ Root entrypoints:
 
 Готовый runbook и script:
 - [docs/LOCAL_FULL_RUN_AI_ADVENT.md](docs/LOCAL_FULL_RUN_AI_ADVENT.md)
+- [docs/RELEASE_LIVE_E2E_RUNBOOK.md](docs/RELEASE_LIVE_E2E_RUNBOOK.md) — агентский pre-release live gate (`PASS|FAIL`, strict zero-failure)
 - `scripts/full-run-ai-advent.sh`
 - `scripts/full-run-batch-5x2.sh` (batch `5x2` + frontend live e2e + quality report aggregation)
 - `scripts/full-run-batch-matrix.sh` (multi-profile matrix orchestrator over `full-run-batch-5x2.sh`)
@@ -304,9 +307,7 @@ TARGET_REPOS_FILE=/abs/path/to/repos.yaml ./scripts/full-run-ai-advent.sh
 ```
 
 Канонический input для full-run/batch: `TARGET_REPOS_FILE` (`repos[]` в формате `workspace.yaml`).
-Legacy compatibility сохранена:
-- `TARGET_REPO=/path/to/repo` (single-path)
-- `TARGET_REPO_GIT_URL + TARGET_REPO_NAME + TARGET_REPO_REF` (single-git_url)
+Legacy env-входы (`TARGET_REPO*`) удалены: при их задании script завершится fail-fast.
 
 Script делает strict полный цикл:
 - API simulation + runtime `fake + headless`;
@@ -372,7 +373,7 @@ Shard controls:
 - для параллельных shard-процессов используйте разные `BATCH_ID` (иначе конфликт output paths)
 - рекомендуемый split: один shard с `BATCH_SKIP_PRECHECK=0`, остальные shard'ы с `BATCH_SKIP_PRECHECK=1`
 
-Matrix runbook `4` профиля (`single-path`, `single-git_url`, `multi-path`, `multi-git_url`):
+Matrix runbook `4` профиля (`single-path`, `single-git_url`, `multi-path`, `multi-git_url`) × sweep-профили:
 
 ```bash
 E2E_MATRIX_FILE=/abs/path/to/e2e-matrix.yaml \
@@ -381,7 +382,8 @@ ACP_QWEN_CMD_BIN=qwen \
 ./scripts/full-run-batch-matrix.sh
 ```
 
-`E2E_MATRIX_FILE` поддерживает `profiles[]`:
+`E2E_MATRIX_FILE` поддерживает:
+- `profiles[]`:
 - `id`
 - `repos_file`
 - `expected_repo_count`
@@ -389,18 +391,36 @@ ACP_QWEN_CMD_BIN=qwen \
 - обязательный набор профилей: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
 - для `git_url` профилей refs должны быть pinned в `repos_file`
 - относительные пути `repos_file` резолвятся относительно директории `E2E_MATRIX_FILE`
+- `sweeps[]` (optional, backward-compatible):
+- если `sweeps[]` отсутствует -> implicit `baseline` sweep
+- release-ready sweep set:
+  - `baseline`: `strategy=sequential`, `max_parallel_tasks=1`, `failure_policy=best_effort`, `shard_discovery_mode=heuristics`, `repo_selection=all`
+  - `scale-backend`: `strategy=parallel`, `max_parallel_tasks=4`, `failure_policy=best_effort`, `shard_discovery_mode=semantic`, `repo_selection=backend_only`
 
-Готовый шаблон: `examples/e2e-matrix.example.yaml` (+ `examples/repos/*.repos.yaml`).
+Готовый шаблон: `examples/e2e-matrix.example.yaml` (+ curated profile presets в `examples/repos/curated/*.repos.yaml` и pinned GitHub presets в `examples/repos/github/*.repos.yaml`).
+GitHub target catalog для release выбора (`3` monorepo + `3` multi-repo ecosystems):
+- `examples/repos/github/mono-*.repos.yaml`
+- `examples/repos/github/multi-*-ecosystem.repos.yaml`
+- source-of-truth по выбору и wiring: `docs/RELEASE_LIVE_E2E_RUNBOOK.md` (section `3.1`)
+- рекомендуемый first-run набор: `posthog/posthog`, `microservices-patterns/ftgo-application`, `getsentry/*`, `Open edX ecosystem`
+- расширенный набор для второго прохода: `GoogleCloudPlatform/bank-of-anthos` и `OpenStack ecosystem`
 
 Скрипт сохраняет:
 - run artifacts (default): `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/...`
 - quality reports:
   - `/tmp/provenarch-test_arch_project/reports/run_matrix_<batch-id>.md`
+  - `/tmp/provenarch-test_arch_project/reports/run_matrix_<batch-id>.tsv`
   - `/tmp/provenarch-test_arch_project/reports/frontend_e2e_matrix_<batch-id>.md`
+  - `/tmp/provenarch-test_arch_project/reports/frontend_cancel_e2e_matrix_<batch-id>.md`
   - `/tmp/provenarch-test_arch_project/reports/quality_report_<batch-id>.md`
+- matrix+release artifacts:
+  - `/tmp/provenarch-test_arch_project/reports/profile_matrix_<matrix-id>.md`
+  - `/tmp/provenarch-test_arch_project/reports/profile_matrix_<matrix-id>.tsv`
+  - `/tmp/provenarch-test_arch_project/reports/release_verdict_<matrix-id>.md`
+  - `/tmp/provenarch-test_arch_project/reports/release_verdict_<matrix-id>.json`
 - backend quality считается только по snapshot-артефактам (`snapshots/<run_id>/reports/*`), frontend smoke запускается на отдельной `frontend-workspace` копии и не мутирует backend baseline
 - batch evaluator добавляет semantic hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`; для multi-profile (`expected_repo_count >= 2`) обязателен `cross-repo` сигнал (`analysis:cross-repo-missing` при отсутствии)
-- в `run_matrix`/`quality_report` дополнительно фиксируются `artifact_source`, `semantic_hard_fail`, `off_topic_hits` и failure classes (`runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_signal_terminated`, `infra_incomplete_cycle`, `quality_gates_failed`, `summary_missing`)
+- в `run_matrix`/`quality_report` дополнительно фиксируются `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, runtime flow checks (`runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:repo-selection`, `runtime:execution-semantics`, `runtime_flow_failed`) и failure classes (`runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_signal_terminated`, `infra_incomplete_cycle`, `quality_gates_failed`, `summary_missing`, `precheck_failed`)
 - direct `npm run --prefix ui e2e:live`: Playwright output default `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
 - `scripts/frontend-live-e2e.sh`: Playwright output сохраняется в `$OUTPUT_DIR/playwright-results`
 - frontend live e2e ожидает число resolved repos из `UI_E2E_EXPECTED_REPO_COUNT` (default `1`)
@@ -412,8 +432,10 @@ ACP_QWEN_CMD_BIN=qwen \
 - `UI_E2E_CANCEL_STUB_SLEEP_SEC` задаёт длительность controlled slow stub runner для сценария `cancel-refresh`
 - при shard-режиме `BATCH_FRONTEND_MODE=auto` frontend smoke помечается `skipped`, если `run1` не входит в `BATCH_RUN_SELECTION`
 
-`TARGET_REPOS_FILE` — основной batch-контракт; single legacy env поддерживаются для обратной совместимости.
+`TARGET_REPOS_FILE` — единственный поддерживаемый batch/full-run контракт.
 Full matrix (`full-run-batch-matrix.sh`) — локальный trusted-machine runbook, не required CI gate.
+Для release decision используйте агентский runbook:
+- [docs/RELEASE_LIVE_E2E_RUNBOOK.md](docs/RELEASE_LIVE_E2E_RUNBOOK.md)
 
 Repo CI по умолчанию живёт в GitHub Actions:
 - `contracts`
@@ -566,8 +588,11 @@ UI в MVP должен покрывать минимум:
 - настройку `repos[]` (multi-repo) для локальных папок и GitHub/GitLab URL;
 - baseline-wide редактор `charter/*` + `skills/*` (prompt packs, `subagents.yaml`, skill prompts);
 - запуск pipeline (init/update);
-- явные секции `Setup / Baseline / Runs / Results`;
-- просмотр результатов (`as-is`, findings, proposals) и repo validation overview (`resolved_repos` + diagnostics по repo);
+- явные top-level секции `Setup / Baseline / Runs / Results / Settings`;
+- `Settings` как отдельная вкладка для runtime profile (`timeouts` + `execution`);
+- `Runs: Logs` с dual stream surface (`event timeline` + `raw agent stream`) и quick actions;
+- `Results` с отдельной вкладкой `Diagrams` (filter/open/preview C4 Mermaid artifacts);
+- просмотр остальных результатов (`as-is`, findings, proposals) и repo validation overview (`resolved_repos` + diagnostics по repo);
 - просмотр coverage/questions по недостающим данным;
 - вызовы backend через `/api/*` (см. `docs/spec/API_SPEC.md`).
 

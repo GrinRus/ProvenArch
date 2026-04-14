@@ -230,7 +230,6 @@ func TestMultiRepoE2EDocsAreConsistent(t *testing.T) {
 		},
 		"docs/LOCAL_FULL_RUN_AI_ADVENT.md": {
 			"TARGET_REPOS_FILE",
-			"TARGET_REPO_GIT_URL",
 			"E2E_MATRIX_FILE",
 			"single-path",
 			"single-git_url",
@@ -248,6 +247,14 @@ func TestMultiRepoE2EDocsAreConsistent(t *testing.T) {
 			"multi-path",
 			"multi-git_url",
 			"UI_E2E_EXPECTED_REPO_COUNT",
+		},
+		"docs/RELEASE_LIVE_E2E_RUNBOOK.md": {
+			"examples/repos/curated",
+			"examples/repos/github",
+			"posthog/posthog",
+			"microservices-patterns/ftgo-application",
+			"getsentry/*",
+			"open edx ecosystem",
 		},
 	}
 

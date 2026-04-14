@@ -161,6 +161,98 @@ EP-20260414-batch-parallel-shards
 - 2026-04-14: Добавлены негативные regression tests для invalid provider/run shard selection, `BATCH_SKIP_PRECHECK` bypass и `BATCH_FRONTEND_MODE=never`; в runbooks явно зафиксированы `unique BATCH_ID` и рекомендация single-precheck shard.
 
 ### Plan ID
+EP-20260414-full-live-matrix-harness-strict-gate
+
+### Context
+Нужно реализовать full live matrix harness как manual pre-release gate без нового wrapper-скрипта: добавить `profiles × sweeps` orchestration, strict release verdict (`PASS|FAIL`) и явный flow проверки новой функциональности (sharding/repo-selection/execution semantics) с блокирующими критериями.
+
+### Goals (must have)
+- [x] Расширить matrix contract optional `sweeps[]` с backward compatibility и implicit baseline sweep
+- [x] Запускать `profiles × sweeps` в `full-run-batch-matrix.sh` и расширить `profile_matrix` execution-контекстом
+- [x] Сгенерировать `release_verdict_<matrix-id>.md/.json` и сделать strict gate non-zero на blocking violations
+- [x] Добавить post-run checks новой функциональности в batch/report поток так, чтобы нарушения попадали в `issues`/failure classes
+- [x] Обновить matrix example + runbook/docs ссылки (`README`, `TESTING_STRATEGY`, `LOCAL_FULL_RUN_AI_ADVENT`)
+- [x] Добавить/обновить unit+integration tests для sweeps, strict gate и verdict artifacts
+
+### Non-goals
+- [x] Добавление product API/schemas (`/api/*`, `schemas/*`)
+- [x] Добавление нового wrapper entrypoint поверх matrix
+- [x] Перевод manual gate в required CI merge gate
+
+### Approach
+1) Обновить `full-run-batch-matrix.sh`: parser `profiles+sweeps`, orchestration `profiles × sweeps`, strict evaluator, verdict artifacts.
+2) Расширить `e2e_batch_report.py`/`full-run-batch-5x2.sh` пост-проверками sharding/repo-selection/execution semantics.
+3) Добавить regression tests для matrix harness и report-level checks.
+4) Синхронизировать runbook/examples и связанные docs.
+
+### Files expected to change
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/e2e_batch_report.py`
+- `scripts/tests/test_full_run_stability.py`
+- `scripts/tests/test_e2e_batch_report.py`
+- `examples/e2e-matrix.example.yaml`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `README.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/LOCAL_FULL_RUN_AI_ADVENT.md`
+
+### Acceptance criteria
+- [x] Tests updated/added for sweeps parsing + strict gate pass/fail
+- [x] `release_verdict_<matrix-id>.md/.json` generated and linked from matrix results
+- [x] Matrix run fails with non-zero exit on any strict blocking condition
+- [x] Docs are synchronized with implemented harness behavior
+
+### Risks
+- Возможна регрессия обратной совместимости для старого `E2E_MATRIX_FILE` без `sweeps[]`; mitigated через explicit fallback и тесты.
+- Усиление strict gate может вскрыть новые flaky-surface в live runs; mitigated через детализированные failure reasons и evidence links в verdict.
+
+### Progress log
+- 2026-04-14: Создан план реализации full live matrix harness strict gate.
+- 2026-04-14: Реализованы `profiles × sweeps`, strict release verdict artifacts (`release_verdict_<matrix-id>.md/.json`), runtime-flow checks (sharding/repo-selection/execution semantics), обновлены примеры/доки, добавлены regression tests (`test_e2e_batch_report`, `test_full_run_stability`).
+
+### Plan ID
+EP-20260414-release-live-e2e-agent-runbook
+
+### Context
+Нужно зафиксировать pre-release live harness без нового wrapper-скрипта: агент должен запускать существующий matrix контур напрямую, оценивать новую функциональность (sharding/repo-selection/execution-timeouts/lifecycle) и выносить строгий `PASS|FAIL`.
+
+### Goals (must have)
+- [x] Добавить отдельный runbook для агента с пошаговым запуском matrix/live frontend
+- [x] Зафиксировать strict release acceptance критерии и блокирующие failure classes
+- [x] Описать flow проверки новой функциональности через существующие артефакты harness
+- [x] Синхронизировать ссылки в ключевых docs (`README`, `TESTING_STRATEGY`, `LOCAL_FULL_RUN_AI_ADVENT`)
+
+### Non-goals
+- [x] Добавление нового wrapper/оркестратор-скрипта поверх matrix
+- [x] Изменение public API/schema contracts
+- [x] Изменение required CI merge-gates
+
+### Approach
+1) Создать документ `docs/RELEASE_LIVE_E2E_RUNBOOK.md` как source-of-truth для manual pre-release gate.
+2) Привязать runbook к существующим entrypoints (`full-run-batch-matrix.sh`, `full-run-batch-5x2.sh`, `e2e_batch_report.py`).
+3) Зафиксировать strict verdict policy (`PASS|FAIL`) и минимальный формат evidence.
+4) Обновить связанные документы, чтобы исключить расхождения по статусу live-gates.
+
+### Files expected to change
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `README.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/LOCAL_FULL_RUN_AI_ADVENT.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Тесты/контракты не требуют изменения
+- [x] Документация синхронизирована между README/docs runbooks/testing strategy
+- [x] Явно зафиксировано, что release live gate manual и не равен required CI merge gate
+
+### Risks
+- Возможна путаница между optional live smoke и strict pre-release gate; mitigated отдельным source-of-truth runbook и явными ссылками из основных docs.
+
+### Progress log
+- 2026-04-14: Добавлен `docs/RELEASE_LIVE_E2E_RUNBOOK.md`, синхронизированы `README.md`, `docs/TESTING_STRATEGY.md`, `docs/LOCAL_FULL_RUN_AI_ADVENT.md`.
+
+### Plan ID
 EP-20260413-backend-repo-selection-hardening
 
 ### Context
@@ -889,6 +981,36 @@ EP-20260411-orchestrator-runner-frontend-operability
 ### Progress log
 - 2026-04-11: План создан на основе code-level аудита orchestrator/runtime/UI run-flow, логирования и restart behavior.
 - 2026-04-12: Реализованы orchestrator cancel/reconciliation, API cancel endpoint, structured runtime diagnostics snippets в run logs, UI auto-select + warnings + log fields view + cancel flow, добавлены unit/API/UI тесты и docs sync.
+
+---
+
+## EP-20260414-runtime-streaming-ux-c4-prompts
+
+### Context
+- Требуется закрыть 5 пользовательских болей: raw runtime logs в `Runs: Logs`, non-single-page UX с переносом settings, рендер C4 диаграмм, качество baseline prompts, общий UX redesign.
+- Ограничения: не менять `TaskResult` schema и runtime provider list (`claude-code|qwen-code`) в MVP.
+
+### Slice Plan
+1. **Slice A (runtime stream):** live forwarding stdout/stderr в run logs, совместное существование event/raw stream, hard-cap safeguard + truncation marker.
+2. **Slice B (reports/C4):** Step 2 materialize full C4 Mermaid set (`Context/Container/Component/Code`) + `reports/diagrams/index.md`, strict evidence-first gaps.
+3. **Slice C (frontend UX):** top tabs `Setup/Baseline/Runs/Results/Settings`, settings relocation, `Results -> Diagrams`, `Runs: Logs` dual mode.
+4. **Slice D (baseline prompts):** rewrite prompt packs + skill prompts в структурированные deterministic defaults, quality guard tests against short placeholders.
+
+### Contract/Surface Changes
+- `GET /api/pipeline/runs/<run_id>/logs` wire shape расширен полями `kind` и `stream`.
+- Step 2 artifacts расширены `reports/diagrams/*` и artifact kinds `diagram`, `diagram-index`.
+- UI surface intentionally breaking (updated tab/navigation + selectors in tests).
+
+### Progress Log
+- 2026-04-14: Slice A реализован (runtime `OnOutput` seam, provider stream forwarding, orchestrator raw log entries + truncation event).
+- 2026-04-14: Slice B реализован (compiler `CompileC4Diagrams`, Step2 wiring, diagrams index/materialization, deterministic tests).
+- 2026-04-14: Slice C реализован (tabbed UX, settings relocation, logs dual-mode, diagrams preview, Vitest+Playwright updates).
+- 2026-04-14: Slice D реализован (structured prompt defaults rewrite + quality tests, create-if-missing policy сохранена).
+
+### Verification
+- Backend: `go test ./internal/runtime/... ./internal/orchestrator ./internal/api ./internal/reports ./internal/workspace`
+- Frontend: `npm --prefix ui run typecheck`, `npm --prefix ui run test -- --run`
+- DoD gates: `make contracts`, `make test`, `make lint`, `make build`
 
 ---
 

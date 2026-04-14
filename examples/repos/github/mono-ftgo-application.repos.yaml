@@ -1,0 +1,7 @@
+version: 1
+repos:
+  - name: ftgo-application
+    git_url: https://github.com/microservices-patterns/ftgo-application.git
+    ref: 558dfc53b11d30a5f1d995c0c6d58d5106c28189
+docs:
+  imports_path: ./docs/imports
