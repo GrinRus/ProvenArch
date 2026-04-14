@@ -391,6 +391,12 @@ ACP_QWEN_CMD_BIN=qwen \
 - относительные пути `repos_file` резолвятся относительно директории `E2E_MATRIX_FILE`
 
 Готовый шаблон: `examples/e2e-matrix.example.yaml` (+ `examples/repos/*.repos.yaml`).
+GitHub target catalog для release выбора (`3` monorepo + `3` multi-repo ecosystems):
+- `examples/repos/github/mono-*.repos.yaml`
+- `examples/repos/github/multi-*-ecosystem.repos.yaml`
+- source-of-truth по выбору и wiring: `docs/RELEASE_LIVE_E2E_RUNBOOK.md` (section `3.1`)
+- рекомендуемый first-run набор: `posthog/posthog`, `microservices-patterns/ftgo-application`, `sentry ecosystem`, `open edX ecosystem`
+- расширенный набор для второго прохода: `bank-of-anthos` и `openstack ecosystem`
 
 Скрипт сохраняет:
 - run artifacts (default): `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/...`
