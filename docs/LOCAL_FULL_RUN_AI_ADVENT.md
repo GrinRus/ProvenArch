@@ -42,9 +42,7 @@ Batch-only semantic hard-fail checks (в `scripts/e2e_batch_report.py`):
 - `PROVENARCH_ROOT` (default: текущий repo ProvenArch)
 - `TARGET_REPOS_FILE` (canonical: YAML с `repos[]`, как в `workspace.yaml`)
   - если файл содержит `runtime.profile.timeouts`, `init-workspace` переносит профиль в `workspace.yaml`
-- legacy single inputs (backward compatibility):
-  - `TARGET_REPO` (single path)
-  - `TARGET_REPO_GIT_URL` + `TARGET_REPO_NAME` + `TARGET_REPO_REF` (single `git_url`, pinned ref required)
+- `TARGET_REPO*` legacy env не поддерживаются (fail-fast, используйте только `TARGET_REPOS_FILE`)
 - `TMP_ROOT` (default: auto `mktemp -d -t provenarch-ai-advent.XXXXXX`)
 - `ACP_RUNTIME_PROVIDER` (headless provider: `claude-code` default или `qwen-code`)
 - `ACP_CLAUDE_CMD` (команда для provider `claude-code`; default `claude-code`, поддержан direct `claude` без wrapper)
@@ -76,10 +74,7 @@ Effective timeout precedence для full-run/batch/frontend live:
 Batch/Frontend scripts:
 - `scripts/full-run-batch-5x2.sh`
   - `BATCH_ID` (default `batch-<UTC timestamp>`)
-  - `TARGET_REPOS_FILE` (canonical; основной вход)
-  - legacy compatibility:
-    - `TARGET_REPO` (single path)
-    - `TARGET_REPO_GIT_URL` + `TARGET_REPO_NAME` + `TARGET_REPO_REF` (single `git_url`)
+  - `TARGET_REPOS_FILE` (единственный поддерживаемый вход)
   - optional profile metadata:
     - `PROFILE_ID`
     - `PROFILE_SOURCE_KIND` (`path|git_url`)
@@ -179,6 +174,8 @@ wait
 `full-run-batch-matrix.sh` — официальный локальный (trusted machine) runbook и не входит в required CI gates.
 Если цель запуска — release verdict, используйте критерии и формат решения из:
 - `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- главная очередь first-run: `posthog/posthog`, `microservices-patterns/ftgo-application`, `getsentry/*`, `Open edX ecosystem`
+- второй проход: `GoogleCloudPlatform/bank-of-anthos`, `OpenStack ecosystem`
 
 Script всегда формирует:
 - `TMP_ROOT/full-run.log`

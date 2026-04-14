@@ -1,0 +1,20 @@
+version: 1
+repos:
+  - name: sentry
+    git_url: https://github.com/getsentry/sentry.git
+    ref: 28b349e2bb8adc84f657429dac7f615b325d7ef0
+  - name: self-hosted
+    git_url: https://github.com/getsentry/self-hosted.git
+    ref: 8728919e080836c53724f277d4d36cc310fc5011
+  - name: snuba
+    git_url: https://github.com/getsentry/snuba.git
+    ref: ec4265b03f0e0b888db8eb4530ecfc9df04ab1e4
+  - name: relay
+    git_url: https://github.com/getsentry/relay.git
+    ref: 63bfcab59f7b58cf405ed288b4cad1f1cce210b7
+  - name: symbolicator
+    git_url: https://github.com/getsentry/symbolicator.git
+    ref: 47292444d5c1fb4faef594189429d845137c931e
+
+docs:
+  imports_path: ./docs/imports

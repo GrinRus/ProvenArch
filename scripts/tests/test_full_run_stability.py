@@ -451,6 +451,58 @@ class FullRunStabilityIntegrationTests(unittest.TestCase):
                     msg=f"headless quality summary leaked fake runtime markers: {runtime_versions}",
                 )
 
+    def test_full_run_accepts_git_url_repos_file(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, target_repo, tmp_root, repos_file = create_full_run_stub_environment(root)
+            repos_file.write_text(
+                textwrap.dedent(
+                    """\
+                    version: 1
+                    repos:
+                      - name: posthog
+                        git_url: https://github.com/posthog/posthog.git
+                        ref: 14d29a548d63665d60b506cf13bd5cfb2de7c743
+                    docs:
+                      imports_path: ./docs/imports
+                    """
+                ),
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TMP_ROOT": str(tmp_root),
+                    "KEEP_TMP": "1",
+                    "ITERATIONS": "1",
+                    "RUN_QUALITY_GATES": "0",
+                    "TARGET_REPOS_FILE": str(repos_file),
+                    "PROFILE_SOURCE_KIND": "git_url",
+                    "EXPECTED_REPO_COUNT": "1",
+                    "ACP_RUNTIME_PROVIDER": "qwen-code",
+                    "ACP_QWEN_CMD": str(tools_dir / "qwen"),
+                    "ACP_STUB_SOURCE": str(root / "acp-stub.sh"),
+                    "ACP_STUB_TARGET_REPO": str(target_repo),
+                    "ACP_APPLY_TIMEOUTS_VIA_API": "0",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(FULL_RUN_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertEqual(0, result.returncode, msg=result.stdout + "\n" + result.stderr)
+            summary_path = tmp_root / "session-summary.md"
+            summary = summary_path.read_text(encoding="utf-8")
+            self.assertEqual("passed", parse_summary_scalar(summary, "result"))
+            self.assertEqual("repos-file", parse_summary_scalar(summary, "target_input_mode"))
+
     def test_full_run_marks_incomplete_cycle(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -633,15 +685,89 @@ class FullRunStabilityIntegrationTests(unittest.TestCase):
             self.assertEqual("infra_signal_terminated", parse_summary_scalar(summary, "failure_reason"))
             self.assertIn(parse_summary_scalar(summary, "termination_signal"), {"TERM", "SIGTERM"})
 
+    def test_full_run_rejects_legacy_target_repo_env(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, _target_repo, tmp_root, repos_file = create_full_run_stub_environment(root)
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TMP_ROOT": str(tmp_root),
+                    "TARGET_REPOS_FILE": str(repos_file),
+                    "TARGET_REPO": str(root / "legacy-input"),
+                    "ACP_RUNTIME_PROVIDER": "qwen-code",
+                    "ACP_QWEN_CMD": str(tools_dir / "qwen"),
+                    "ACP_STUB_SOURCE": str(root / "acp-stub.sh"),
+                    "ACP_APPLY_TIMEOUTS_VIA_API": "0",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(FULL_RUN_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertNotEqual(0, result.returncode, msg=result.stdout + "\n" + result.stderr)
+            full_run_log = (tmp_root / "full-run.log").read_text(encoding="utf-8", errors="ignore")
+            self.assertIn("legacy target input env (TARGET_REPO*) is no longer supported", full_run_log)
 
-def create_batch_stub_environment(root: Path) -> tuple[Path, Path, Path]:
+    def test_full_run_requires_target_repos_file(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, _target_repo, tmp_root, _repos_file = create_full_run_stub_environment(root)
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TMP_ROOT": str(tmp_root),
+                    "ACP_RUNTIME_PROVIDER": "qwen-code",
+                    "ACP_QWEN_CMD": str(tools_dir / "qwen"),
+                    "ACP_STUB_SOURCE": str(root / "acp-stub.sh"),
+                    "ACP_APPLY_TIMEOUTS_VIA_API": "0",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(FULL_RUN_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertNotEqual(0, result.returncode, msg=result.stdout + "\n" + result.stderr)
+            full_run_log = (tmp_root / "full-run.log").read_text(encoding="utf-8", errors="ignore")
+            self.assertIn("missing target input: set TARGET_REPOS_FILE (repos[] YAML)", full_run_log)
+
+
+def create_batch_stub_environment(root: Path) -> tuple[Path, Path, Path, Path]:
     provenarch_root = root / "batch-root"
     tools_dir = root / "tools"
     target_repo = root / "target-repo"
+    repos_file = root / "inputs" / "repos.yaml"
     scripts_dir = provenarch_root / "scripts"
     reports_py = scripts_dir / "e2e_batch_report.py"
 
     write_text(target_repo / "README.md", "# target\n")
+    write_text(
+        repos_file,
+        textwrap.dedent(
+            f"""\
+            version: 1
+            repos:
+              - name: target-repo
+                path: {target_repo}
+            docs:
+              imports_path: ./docs/imports
+            """
+        ),
+    )
     scripts_dir.mkdir(parents=True, exist_ok=True)
 
     write_text(
@@ -821,7 +947,7 @@ def create_batch_stub_environment(root: Path) -> tuple[Path, Path, Path]:
         mode=0o755,
     )
 
-    return provenarch_root, tools_dir, target_repo
+    return provenarch_root, tools_dir, target_repo, repos_file
 
 
 def create_matrix_stub_environment(root: Path) -> tuple[Path, Path, Path, Path]:
@@ -1486,16 +1612,121 @@ class MatrixHarnessIntegrationTests(unittest.TestCase):
 
 
 class BatchPostRunValidationIntegrationTests(unittest.TestCase):
-    def test_batch_marks_incomplete_cycle_even_when_full_run_exit_zero(self) -> None:
+    def test_batch_rejects_legacy_target_repo_env(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            provenarch_root, tools_dir, _target_repo, repos_file = create_batch_stub_environment(root)
             e2e_tmp_root = root / "e2e"
             env = os.environ.copy()
             env.update(
                 {
                     "PROVENARCH_ROOT": str(provenarch_root),
-                    "TARGET_REPO": str(target_repo),
+                    "TARGET_REPOS_FILE": str(repos_file),
+                    "TARGET_REPO": str(root / "legacy-input"),
+                    "BATCH_ID": "batch-legacy-input-rejected",
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+            self.assertIn("legacy target input env (TARGET_REPO*) is no longer supported", result.stderr)
+
+    def test_batch_requires_target_repos_file(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, _target_repo, _repos_file = create_batch_stub_environment(root)
+            e2e_tmp_root = root / "e2e"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "BATCH_ID": "batch-missing-repos-file",
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+            self.assertIn("missing target input: set TARGET_REPOS_FILE (repos[] YAML)", result.stderr)
+
+    def test_batch_accepts_git_url_repos_file(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, _target_repo, repos_file = create_batch_stub_environment(root)
+            repos_file.write_text(
+                textwrap.dedent(
+                    """\
+                    version: 1
+                    repos:
+                      - name: posthog
+                        git_url: https://github.com/posthog/posthog.git
+                        ref: 14d29a548d63665d60b506cf13bd5cfb2de7c743
+                    docs:
+                      imports_path: ./docs/imports
+                    """
+                ),
+                encoding="utf-8",
+            )
+            e2e_tmp_root = root / "e2e"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TARGET_REPOS_FILE": str(repos_file),
+                    "PROFILE_SOURCE_KIND": "git_url",
+                    "EXPECTED_REPO_COUNT": "1",
+                    "BATCH_ID": "batch-git-url-input",
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+            self.assertNotIn("missing target input", result.stderr)
+            self.assertNotIn("legacy target input env", result.stderr)
+            self.assertIn("target repos input: file=", result.stderr)
+
+    def test_batch_marks_incomplete_cycle_even_when_full_run_exit_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, _target_repo, repos_file = create_batch_stub_environment(root)
+            e2e_tmp_root = root / "e2e"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TARGET_REPOS_FILE": str(repos_file),
                     "BATCH_ID": "batch-stability-test",
                     "E2E_TMP_ROOT": str(e2e_tmp_root),
                     "ACP_CLAUDE_CMD_BIN": "claude",
@@ -1527,7 +1758,7 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
     def test_batch_records_precheck_failed_when_dod_precheck_fails(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            provenarch_root, tools_dir, _target_repo, repos_file = create_batch_stub_environment(root)
             write_text(
                 provenarch_root / "Makefile",
                 textwrap.dedent(
@@ -1544,7 +1775,7 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
             env.update(
                 {
                     "PROVENARCH_ROOT": str(provenarch_root),
-                    "TARGET_REPO": str(target_repo),
+                    "TARGET_REPOS_FILE": str(repos_file),
                     "BATCH_ID": "batch-precheck-fail-test",
                     "E2E_TMP_ROOT": str(e2e_tmp_root),
                     "ACP_CLAUDE_CMD_BIN": "claude",
@@ -1575,7 +1806,7 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
     def test_batch_precheck_failed_respects_shard_selection(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            provenarch_root, tools_dir, _target_repo, repos_file = create_batch_stub_environment(root)
             write_text(
                 provenarch_root / "Makefile",
                 textwrap.dedent(
@@ -1592,7 +1823,7 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
             env.update(
                 {
                     "PROVENARCH_ROOT": str(provenarch_root),
-                    "TARGET_REPO": str(target_repo),
+                    "TARGET_REPOS_FILE": str(repos_file),
                     "BATCH_ID": "batch-precheck-shard-selection",
                     "E2E_TMP_ROOT": str(e2e_tmp_root),
                     "ACP_CLAUDE_CMD_BIN": "claude",
@@ -1624,7 +1855,7 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
     def test_batch_precheck_ignores_timeout_tuning_env(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            provenarch_root, tools_dir, _target_repo, repos_file = create_batch_stub_environment(root)
             write_text(
                 provenarch_root / "Makefile",
                 textwrap.dedent(
@@ -1643,7 +1874,7 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
             env.update(
                 {
                     "PROVENARCH_ROOT": str(provenarch_root),
-                    "TARGET_REPO": str(target_repo),
+                    "TARGET_REPOS_FILE": str(repos_file),
                     "BATCH_ID": "batch-precheck-timeout-env-isolation",
                     "E2E_TMP_ROOT": str(e2e_tmp_root),
                     "ACP_CLAUDE_CMD_BIN": "claude",
@@ -1685,7 +1916,7 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
     def test_batch_precheck_ignores_execution_profile_env(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            provenarch_root, tools_dir, _target_repo, repos_file = create_batch_stub_environment(root)
             write_text(
                 provenarch_root / "Makefile",
                 textwrap.dedent(
@@ -1704,7 +1935,7 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
             env.update(
                 {
                     "PROVENARCH_ROOT": str(provenarch_root),
-                    "TARGET_REPO": str(target_repo),
+                    "TARGET_REPOS_FILE": str(repos_file),
                     "BATCH_ID": "batch-precheck-execution-env-isolation",
                     "E2E_TMP_ROOT": str(e2e_tmp_root),
                     "ACP_CLAUDE_CMD_BIN": "claude",
@@ -1746,13 +1977,13 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
     def test_batch_frontend_auto_mode_skips_when_run1_not_selected(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            provenarch_root, tools_dir, _target_repo, repos_file = create_batch_stub_environment(root)
             e2e_tmp_root = root / "e2e"
             env = os.environ.copy()
             env.update(
                 {
                     "PROVENARCH_ROOT": str(provenarch_root),
-                    "TARGET_REPO": str(target_repo),
+                    "TARGET_REPOS_FILE": str(repos_file),
                     "BATCH_ID": "batch-frontend-auto-skip",
                     "E2E_TMP_ROOT": str(e2e_tmp_root),
                     "ACP_CLAUDE_CMD_BIN": "claude",
@@ -1799,12 +2030,12 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
     def test_batch_rejects_unknown_provider_filter(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            provenarch_root, tools_dir, _target_repo, repos_file = create_batch_stub_environment(root)
             env = os.environ.copy()
             env.update(
                 {
                     "PROVENARCH_ROOT": str(provenarch_root),
-                    "TARGET_REPO": str(target_repo),
+                    "TARGET_REPOS_FILE": str(repos_file),
                     "BATCH_ID": "batch-invalid-provider-filter",
                     "ACP_CLAUDE_CMD_BIN": "claude",
                     "ACP_QWEN_CMD_BIN": "qwen",
@@ -1827,13 +2058,13 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
     def test_batch_provider_filter_does_not_require_unselected_runtime_binary(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            provenarch_root, tools_dir, _target_repo, repos_file = create_batch_stub_environment(root)
             e2e_tmp_root = root / "e2e"
             env = os.environ.copy()
             env.update(
                 {
                     "PROVENARCH_ROOT": str(provenarch_root),
-                    "TARGET_REPO": str(target_repo),
+                    "TARGET_REPOS_FILE": str(repos_file),
                     "BATCH_ID": "batch-provider-filter-runtime-binary",
                     "E2E_TMP_ROOT": str(e2e_tmp_root),
                     "ACP_CLAUDE_CMD_BIN": "missing-claude-bin",
@@ -1869,12 +2100,12 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
     def test_batch_rejects_out_of_bounds_run_selection(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            provenarch_root, tools_dir, _target_repo, repos_file = create_batch_stub_environment(root)
             env = os.environ.copy()
             env.update(
                 {
                     "PROVENARCH_ROOT": str(provenarch_root),
-                    "TARGET_REPO": str(target_repo),
+                    "TARGET_REPOS_FILE": str(repos_file),
                     "BATCH_ID": "batch-invalid-run-selection",
                     "ACP_CLAUDE_CMD_BIN": "claude",
                     "ACP_QWEN_CMD_BIN": "qwen",
@@ -1897,7 +2128,7 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
     def test_batch_skip_precheck_bypasses_failing_makefile(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            provenarch_root, tools_dir, _target_repo, repos_file = create_batch_stub_environment(root)
             write_text(
                 provenarch_root / "Makefile",
                 textwrap.dedent(
@@ -1914,7 +2145,7 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
             env.update(
                 {
                     "PROVENARCH_ROOT": str(provenarch_root),
-                    "TARGET_REPO": str(target_repo),
+                    "TARGET_REPOS_FILE": str(repos_file),
                     "BATCH_ID": "batch-skip-precheck",
                     "E2E_TMP_ROOT": str(e2e_tmp_root),
                     "ACP_CLAUDE_CMD_BIN": "claude",
@@ -1943,13 +2174,13 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
     def test_batch_frontend_never_mode_marks_both_smokes_skipped(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            provenarch_root, tools_dir, _target_repo, repos_file = create_batch_stub_environment(root)
             e2e_tmp_root = root / "e2e"
             env = os.environ.copy()
             env.update(
                 {
                     "PROVENARCH_ROOT": str(provenarch_root),
-                    "TARGET_REPO": str(target_repo),
+                    "TARGET_REPOS_FILE": str(repos_file),
                     "BATCH_ID": "batch-frontend-never-skip",
                     "E2E_TMP_ROOT": str(e2e_tmp_root),
                     "ACP_CLAUDE_CMD_BIN": "claude",
@@ -1995,7 +2226,7 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
     def test_batch_classifies_signal_terminated_without_runner_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            provenarch_root, tools_dir, _target_repo, repos_file = create_batch_stub_environment(root)
             write_text(
                 provenarch_root / "scripts/full-run-ai-advent.sh",
                 textwrap.dedent(
@@ -2032,7 +2263,7 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
             env.update(
                 {
                     "PROVENARCH_ROOT": str(provenarch_root),
-                    "TARGET_REPO": str(target_repo),
+                    "TARGET_REPOS_FILE": str(repos_file),
                     "BATCH_ID": "batch-signal-term-test",
                     "E2E_TMP_ROOT": str(e2e_tmp_root),
                     "ACP_CLAUDE_CMD_BIN": "claude",
@@ -2066,7 +2297,7 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
     def test_batch_prioritizes_runtime_parse_over_infra_incomplete_cycle(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            provenarch_root, tools_dir, _target_repo, repos_file = create_batch_stub_environment(root)
             write_text(
                 provenarch_root / "scripts/full-run-ai-advent.sh",
                 textwrap.dedent(
@@ -2109,7 +2340,7 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
             env.update(
                 {
                     "PROVENARCH_ROOT": str(provenarch_root),
-                    "TARGET_REPO": str(target_repo),
+                    "TARGET_REPOS_FILE": str(repos_file),
                     "BATCH_ID": "batch-runtime-parse-priority-test",
                     "E2E_TMP_ROOT": str(e2e_tmp_root),
                     "ACP_CLAUDE_CMD_BIN": "claude",
