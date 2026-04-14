@@ -281,8 +281,10 @@ func runClaudeCommand(ctx context.Context, task acpruntime.Task, command string,
 		captureErr(captureCommandStream(stderrPipe, &stderr, task, acpruntime.OutputStreamStderr))
 	}()
 
-	waitErr := cmd.Wait()
+	// Drain both output streams before waiting to avoid racy early pipe closes
+	// that can truncate stdout/stderr under parallel test/process scheduling.
 	wg.Wait()
+	waitErr := cmd.Wait()
 	if waitErr == nil && streamErr != nil {
 		waitErr = streamErr
 	}
