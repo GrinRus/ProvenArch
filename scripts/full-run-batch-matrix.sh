@@ -12,13 +12,28 @@ MATRIX_ROOT="${MATRIX_ROOT:-$E2E_TMP_ROOT/matrix/$MATRIX_ID}"
 ACP_CLAUDE_CMD_BIN="${ACP_CLAUDE_CMD_BIN:-claude}"
 ACP_QWEN_CMD_BIN="${ACP_QWEN_CMD_BIN:-qwen}"
 ACP_APPLY_TIMEOUTS_VIA_API="${ACP_APPLY_TIMEOUTS_VIA_API:-1}"
+E2E_MATRIX_RELEASE_MODE="${E2E_MATRIX_RELEASE_MODE:-auto}"
+E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES="${E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES:-0}"
+MATRIX_DRIVER_LOG="${MATRIX_DRIVER_LOG:-$MATRIX_ROOT/driver.log}"
 
 log() {
-  printf '[batch-matrix] %s\n' "$*" >&2
+  local line
+  line="[batch-matrix] $*"
+  printf '%s\n' "$line" >&2
+  if [[ -n "${MATRIX_DRIVER_LOG:-}" ]]; then
+    mkdir -p "$(dirname "$MATRIX_DRIVER_LOG")"
+    printf '%s\n' "$line" >>"$MATRIX_DRIVER_LOG"
+  fi
 }
 
 die() {
-  echo "[batch-matrix][error] $*" >&2
+  local line
+  line="[batch-matrix][error] $*"
+  echo "$line" >&2
+  if [[ -n "${MATRIX_DRIVER_LOG:-}" ]]; then
+    mkdir -p "$(dirname "$MATRIX_DRIVER_LOG")"
+    printf '%s\n' "$line" >>"$MATRIX_DRIVER_LOG"
+  fi
   exit 1
 }
 
@@ -27,6 +42,44 @@ require_cmd() {
   if ! command -v "$cmd" >/dev/null 2>&1; then
     die "required command is unavailable: $cmd"
   fi
+}
+
+normalize_release_mode() {
+  local raw="${1:-auto}"
+  case "$raw" in
+    auto)
+      if [[ "$MATRIX_ID" == release-* ]]; then
+        printf '1'
+      else
+        printf '0'
+      fi
+      ;;
+    1|true|TRUE|yes|YES|on|ON)
+      printf '1'
+      ;;
+    0|false|FALSE|no|NO|off|OFF)
+      printf '0'
+      ;;
+    *)
+      die "E2E_MATRIX_RELEASE_MODE must be auto|0|1 (or boolean aliases), got '$raw'"
+      ;;
+  esac
+}
+
+normalize_binary_flag() {
+  local raw="$1"
+  local name="$2"
+  case "$raw" in
+    1|true|TRUE|yes|YES|on|ON)
+      printf '1'
+      ;;
+    0|false|FALSE|no|NO|off|OFF|"")
+      printf '0'
+      ;;
+    *)
+      die "$name must be 0|1 (or boolean aliases), got '$raw'"
+      ;;
+  esac
 }
 
 slugify() {
@@ -60,7 +113,44 @@ require_cmd "$ACP_CLAUDE_CMD_BIN"
 require_cmd "$ACP_QWEN_CMD_BIN"
 
 mkdir -p "$MATRIX_ROOT" "$REPORTS_ROOT"
+mkdir -p "$(dirname "$MATRIX_DRIVER_LOG")"
+: > "$MATRIX_DRIVER_LOG"
+
+RELEASE_MODE="$(normalize_release_mode "$E2E_MATRIX_RELEASE_MODE")"
+ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES="$(normalize_binary_flag "$E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES" "E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES")"
+
+DIAGNOSTIC_TIMEOUT_ENV_KEYS=(
+  ACP_RUNTIME_STEP_TIMEOUT_SEC
+  ACP_RUNTIME_HEARTBEAT_SEC
+  ACP_PIPELINE_TIMEOUT_SEC
+  ACP_PIPELINE_KILL_GRACE_SEC
+  ACP_API_READY_TIMEOUT_SEC
+  ACP_API_INIT_TIMEOUT_SEC
+  ACP_UI_INIT_POLL_TIMEOUT_SEC
+  ACP_UI_CANCEL_POLL_TIMEOUT_SEC
+  ACP_FULL_RUN_PIPELINE_TIMEOUT_SEC
+  ACP_FULL_RUN_PIPELINE_KILL_GRACE_SEC
+  READY_TIMEOUT_SEC
+  UI_E2E_INIT_TIMEOUT_SEC
+  UI_E2E_CANCEL_TIMEOUT_SEC
+)
+
+DIAGNOSTIC_TIMEOUT_OVERRIDES=()
+for key in "${DIAGNOSTIC_TIMEOUT_ENV_KEYS[@]}"; do
+  value="${!key:-}"
+  if [[ -n "$value" ]]; then
+    DIAGNOSTIC_TIMEOUT_OVERRIDES+=("$key=$value")
+  fi
+done
+
 log "timeout controls: apply_via_api=$ACP_APPLY_TIMEOUTS_VIA_API step=${ACP_RUNTIME_STEP_TIMEOUT_SEC:-auto} heartbeat=${ACP_RUNTIME_HEARTBEAT_SEC:-auto} pipeline=${ACP_PIPELINE_TIMEOUT_SEC:-auto} kill_grace=${ACP_PIPELINE_KILL_GRACE_SEC:-auto} api_ready=${ACP_API_READY_TIMEOUT_SEC:-auto} api_init=${ACP_API_INIT_TIMEOUT_SEC:-auto} ui_init=${ACP_UI_INIT_POLL_TIMEOUT_SEC:-auto} ui_cancel=${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-auto}"
+log "release guard: mode=$RELEASE_MODE matrix_id=$MATRIX_ID allow_diagnostic_timeout_overrides=$ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES overrides_detected=${#DIAGNOSTIC_TIMEOUT_OVERRIDES[@]}"
+if [[ "${#DIAGNOSTIC_TIMEOUT_OVERRIDES[@]}" -gt 0 ]]; then
+  log "diagnostic timeout overrides: ${DIAGNOSTIC_TIMEOUT_OVERRIDES[*]}"
+fi
+if [[ "$RELEASE_MODE" == "1" && "$ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES" != "1" && "${#DIAGNOSTIC_TIMEOUT_OVERRIDES[@]}" -gt 0 ]]; then
+  die "release guard blocked diagnostic timeout overrides; clear env or set E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES=1 for explicit debug-only override"
+fi
 
 COMBINATIONS_TSV="$MATRIX_ROOT/profile-sweep-combinations.tsv"
 RECORDS_JSONL="$MATRIX_ROOT/profile-runs.jsonl"

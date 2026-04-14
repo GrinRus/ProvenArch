@@ -1414,7 +1414,7 @@ export default function App() {
             ) : null}
 
             {(validateResult.resolved_repos ?? []).length > 0 ? (
-              <div className="repo-summary">
+              <div className="repo-summary" data-testid="workspace-validate-resolved-repos">
                 <p className="hint">Resolved repos</p>
                 <ul>
                   {(validateResult.resolved_repos ?? []).map((repo) => (
@@ -1431,7 +1431,7 @@ export default function App() {
             ) : null}
 
             {(validateResult.repo_selection ?? []).length > 0 ? (
-              <div className="repo-summary">
+              <div className="repo-summary" data-testid="workspace-validate-repo-selection">
                 <p className="hint">Repo selection decisions</p>
                 <ul>
                   {(validateResult.repo_selection ?? []).map((decision) => (

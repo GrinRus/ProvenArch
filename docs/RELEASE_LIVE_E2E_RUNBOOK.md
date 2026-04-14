@@ -9,6 +9,7 @@
 - Product API/schema contracts не меняются.
 - Gate режим: manual pre-release, не required CI merge gate.
 - Verdict policy: strict zero-failure (`PASS|FAIL`).
+- В release-mode matrix harness включает timeout safety guard: диагностические timeout override запрещены по умолчанию.
 
 ## 2) Prerequisites
 
@@ -54,11 +55,19 @@ npm exec --prefix ui playwright install chromium
 
 ```bash
 E2E_MATRIX_FILE=/abs/path/to/e2e-matrix.release.yaml \
+MATRIX_ID=release-$(date -u +%Y%m%dT%H%M%SZ) \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
 ACP_APPLY_TIMEOUTS_VIA_API=1 \
 ./scripts/full-run-batch-matrix.sh
 ```
+
+Release guard rules:
+- Не задавать diagnostic timeout env для релизного запуска:
+  - `ACP_RUNTIME_*`, `ACP_PIPELINE_*`, `ACP_API_*`, `ACP_UI_*`, `READY_TIMEOUT_SEC`, `UI_E2E_*_TIMEOUT_SEC`.
+- Если нужен диагностический прогон с override, явно включать:
+  - `E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES=1`
+  - Такой прогон не использовать как release verdict.
 
 3. Сбор артефактов из:
 - `/tmp/provenarch-test_arch_project/reports/`
@@ -121,6 +130,7 @@ Blocking signals:
 Проверяем:
 - `ACP_APPLY_TIMEOUTS_VIA_API=1` применяет timeout profile без ошибок;
 - precedence `env > workspace > defaults` отражается в preflight/runtime surfaces;
+- в release-mode не используются diagnostic timeout overrides (guard fail-fast до batch start);
 - отсутствуют ложные timeout failures.
 
 Blocking signals:
@@ -131,6 +141,7 @@ Blocking signals:
 Проверяем:
 - frontend `init-inspect` = `passed` для `qwen-code` и `claude-code`;
 - frontend `cancel-refresh` = `passed` для `qwen-code` и `claude-code`;
+- preflight cancel-timeout guard соблюдён: `UI_E2E_CANCEL_TIMEOUT_SEC >= UI_E2E_CANCEL_STUB_SLEEP_SEC + UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC`;
 - cancel сценарий завершается `failed + run_canceled`.
 
 Blocking signals:
@@ -146,6 +157,14 @@ Zero tolerance:
 - `infra_incomplete_cycle`
 - `quality_gates_failed`
 - `precheck_failed`
+
+### 6.7 Triage rule for runtime timeout/infra signals
+
+Если в любом `profile+sweep` появляются `runtime_timeout` или `infra_*`:
+- считать это blocking runtime incident для релизного verdict;
+- сначала проверить `driver.log` (matrix + batch), затем `session-summary.md` и `full-run.log` в `runs/<batch-id>/<provider>/runN/`;
+- отделить induced failures (например, debug timeout override) от реальной runtime/provider деградации;
+- для release decision использовать только прогон без diagnostic timeout overrides.
 
 ## 7) Strict release acceptance
 

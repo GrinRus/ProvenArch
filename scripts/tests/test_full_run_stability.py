@@ -1093,6 +1093,119 @@ def create_matrix_stub_environment(root: Path) -> tuple[Path, Path, Path, Path]:
 
 
 class MatrixHarnessIntegrationTests(unittest.TestCase):
+    def test_matrix_supports_custom_driver_log_path(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            harness_root, tools_dir, matrix_with_sweeps, _matrix_without_sweeps = create_matrix_stub_environment(root)
+            e2e_tmp_root = root / "e2e-custom-driver-log"
+            matrix_id = "matrix-custom-driver-log"
+            custom_driver_log = root / "custom" / "logs" / "matrix-driver.log"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "BATCH_SCRIPT": str(harness_root / "scripts/full-run-batch-5x2.sh"),
+                    "E2E_MATRIX_FILE": str(matrix_with_sweeps),
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "MATRIX_ID": matrix_id,
+                    "MATRIX_DRIVER_LOG": str(custom_driver_log),
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                ["bash", str(MATRIX_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertEqual(0, result.returncode, msg=result.stdout + "\n" + result.stderr)
+            self.assertTrue(custom_driver_log.exists(), msg="custom matrix driver log is missing")
+            self.assertIn(
+                "running profile=single-path sweep=baseline",
+                custom_driver_log.read_text(encoding="utf-8"),
+            )
+
+    def test_matrix_release_guard_blocks_diagnostic_timeout_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            harness_root, tools_dir, matrix_with_sweeps, _matrix_without_sweeps = create_matrix_stub_environment(root)
+            e2e_tmp_root = root / "e2e-release-guard-block"
+            matrix_id = "release-guard-block"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "BATCH_SCRIPT": str(harness_root / "scripts/full-run-batch-5x2.sh"),
+                    "E2E_MATRIX_FILE": str(matrix_with_sweeps),
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "MATRIX_ID": matrix_id,
+                    "ACP_RUNTIME_STEP_TIMEOUT_SEC": "8",
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                ["bash", str(MATRIX_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(0, result.returncode, msg=result.stdout + "\n" + result.stderr)
+            self.assertIn("release guard blocked diagnostic timeout overrides", result.stderr)
+
+            verdict_json = e2e_tmp_root / "reports" / f"release_verdict_{matrix_id}.json"
+            self.assertFalse(verdict_json.exists(), msg="release verdict should not be generated after guard fail-fast")
+
+            matrix_driver_log = e2e_tmp_root / "matrix" / matrix_id / "driver.log"
+            self.assertTrue(matrix_driver_log.exists(), msg="matrix driver log is missing")
+            driver_text = matrix_driver_log.read_text(encoding="utf-8")
+            self.assertIn("release guard: mode=1", driver_text)
+            self.assertIn("ACP_RUNTIME_STEP_TIMEOUT_SEC=8", driver_text)
+
+    def test_matrix_release_guard_allows_debug_override(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            harness_root, tools_dir, matrix_with_sweeps, _matrix_without_sweeps = create_matrix_stub_environment(root)
+            e2e_tmp_root = root / "e2e-release-guard-allow"
+            matrix_id = "release-guard-allow"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "BATCH_SCRIPT": str(harness_root / "scripts/full-run-batch-5x2.sh"),
+                    "E2E_MATRIX_FILE": str(matrix_with_sweeps),
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "MATRIX_ID": matrix_id,
+                    "ACP_RUNTIME_STEP_TIMEOUT_SEC": "8",
+                    "E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES": "1",
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                ["bash", str(MATRIX_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertEqual(0, result.returncode, msg=result.stdout + "\n" + result.stderr)
+
+            verdict_json = e2e_tmp_root / "reports" / f"release_verdict_{matrix_id}.json"
+            self.assertTrue(verdict_json.exists(), msg="release verdict json is missing")
+            payload = json.loads(verdict_json.read_text(encoding="utf-8"))
+            self.assertEqual("PASS", payload.get("verdict"))
+            self.assertEqual("RELEASE READY", payload.get("release_state"))
+
     def test_matrix_profiles_times_sweeps_and_pass_verdict(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -1513,6 +1626,67 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
             self.assertFalse(
                 any("\tprecheck_failed\t" in line for line in rows[1:]),
                 msg="expected timeout env to be isolated from precheck",
+            )
+            self.assertTrue(
+                any("\tinfra_incomplete_cycle\t" in line for line in rows[1:]),
+                msg="expected non-precheck run classification rows",
+            )
+
+    def test_batch_precheck_ignores_execution_profile_env(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            write_text(
+                provenarch_root / "Makefile",
+                textwrap.dedent(
+                    """\
+                    .PHONY: contracts test lint build
+                    contracts test lint build:
+                    \t@if [ -n "$$ACP_EXECUTION_STRATEGY$$ACP_MAX_PARALLEL_TASKS$$ACP_FAILURE_POLICY$$ACP_SHARD_DISCOVERY_MODE$$ACP_REPO_SELECTION$$SWEEP_ID" ]; then \
+                    \t\techo "execution profile env leaked into precheck" >&2; \
+                    \t\texit 3; \
+                    \tfi
+                    """
+                ),
+            )
+            e2e_tmp_root = root / "e2e"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TARGET_REPO": str(target_repo),
+                    "BATCH_ID": "batch-precheck-execution-env-isolation",
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "ACP_EXECUTION_STRATEGY": "parallel",
+                    "ACP_MAX_PARALLEL_TASKS": "4",
+                    "ACP_FAILURE_POLICY": "best_effort",
+                    "ACP_SHARD_DISCOVERY_MODE": "semantic",
+                    "ACP_REPO_SELECTION": "backend_only",
+                    "SWEEP_ID": "scale-backend",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+            classification_path = (
+                e2e_tmp_root / "runs" / "batch-precheck-execution-env-isolation" / "backend-run-classifications.tsv"
+            )
+            self.assertTrue(classification_path.exists(), msg="backend-run-classifications.tsv is missing")
+            rows = [line for line in classification_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertGreaterEqual(len(rows), 2, msg="classification file must contain header + rows")
+            self.assertFalse(
+                any("\tprecheck_failed\t" in line for line in rows[1:]),
+                msg="expected execution profile env to be isolated from precheck",
             )
             self.assertTrue(
                 any("\tinfra_incomplete_cycle\t" in line for line in rows[1:]),
