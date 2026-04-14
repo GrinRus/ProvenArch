@@ -1,0 +1,15 @@
+version: 1
+repos:
+  - name: openedx-platform
+    path: /absolute/path/to/openedx/openedx-platform
+  - name: frontend-platform
+    path: /absolute/path/to/openedx/frontend-platform
+  - name: course-discovery
+    path: /absolute/path/to/openedx/course-discovery
+  - name: credentials
+    path: /absolute/path/to/openedx/credentials
+  - name: devstack
+    path: /absolute/path/to/openedx/devstack
+
+docs:
+  imports_path: ./docs/imports

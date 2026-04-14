@@ -307,9 +307,7 @@ TARGET_REPOS_FILE=/abs/path/to/repos.yaml ./scripts/full-run-ai-advent.sh
 ```
 
 Канонический input для full-run/batch: `TARGET_REPOS_FILE` (`repos[]` в формате `workspace.yaml`).
-Legacy compatibility сохранена:
-- `TARGET_REPO=/path/to/repo` (single-path)
-- `TARGET_REPO_GIT_URL + TARGET_REPO_NAME + TARGET_REPO_REF` (single-git_url)
+Legacy env-входы (`TARGET_REPO*`) удалены: при их задании script завершится fail-fast.
 
 Script делает strict полный цикл:
 - API simulation + runtime `fake + headless`;
@@ -399,13 +397,13 @@ ACP_QWEN_CMD_BIN=qwen \
   - `baseline`: `strategy=sequential`, `max_parallel_tasks=1`, `failure_policy=best_effort`, `shard_discovery_mode=heuristics`, `repo_selection=all`
   - `scale-backend`: `strategy=parallel`, `max_parallel_tasks=4`, `failure_policy=best_effort`, `shard_discovery_mode=semantic`, `repo_selection=backend_only`
 
-Готовый шаблон: `examples/e2e-matrix.example.yaml` (+ `examples/repos/*.repos.yaml`).
+Готовый шаблон: `examples/e2e-matrix.example.yaml` (+ curated profile presets в `examples/repos/curated/*.repos.yaml` и pinned GitHub presets в `examples/repos/github/*.repos.yaml`).
 GitHub target catalog для release выбора (`3` monorepo + `3` multi-repo ecosystems):
 - `examples/repos/github/mono-*.repos.yaml`
 - `examples/repos/github/multi-*-ecosystem.repos.yaml`
 - source-of-truth по выбору и wiring: `docs/RELEASE_LIVE_E2E_RUNBOOK.md` (section `3.1`)
-- рекомендуемый first-run набор: `posthog/posthog`, `microservices-patterns/ftgo-application`, `sentry ecosystem`, `open edX ecosystem`
-- расширенный набор для второго прохода: `bank-of-anthos` и `openstack ecosystem`
+- рекомендуемый first-run набор: `posthog/posthog`, `microservices-patterns/ftgo-application`, `getsentry/*`, `Open edX ecosystem`
+- расширенный набор для второго прохода: `GoogleCloudPlatform/bank-of-anthos` и `OpenStack ecosystem`
 
 Скрипт сохраняет:
 - run artifacts (default): `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/...`
@@ -432,7 +430,7 @@ GitHub target catalog для release выбора (`3` monorepo + `3` multi-repo
 - `UI_E2E_CANCEL_STUB_SLEEP_SEC` задаёт длительность controlled slow stub runner для сценария `cancel-refresh`
 - при shard-режиме `BATCH_FRONTEND_MODE=auto` frontend smoke помечается `skipped`, если `run1` не входит в `BATCH_RUN_SELECTION`
 
-`TARGET_REPOS_FILE` — основной batch-контракт; single legacy env поддерживаются для обратной совместимости.
+`TARGET_REPOS_FILE` — единственный поддерживаемый batch/full-run контракт.
 Full matrix (`full-run-batch-matrix.sh`) — локальный trusted-machine runbook, не required CI gate.
 Для release decision используйте агентский runbook:
 - [docs/RELEASE_LIVE_E2E_RUNBOOK.md](docs/RELEASE_LIVE_E2E_RUNBOOK.md)

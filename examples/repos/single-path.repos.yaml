@@ -1,6 +1,0 @@
-version: 1
-repos:
-  - name: app-main
-    path: /absolute/path/to/app-main
-docs:
-  imports_path: ./docs/imports

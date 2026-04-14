@@ -2,11 +2,7 @@
 set -Eeuo pipefail
 
 PROVENARCH_ROOT="${PROVENARCH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-TARGET_REPO="${TARGET_REPO:-}"
 TARGET_REPOS_FILE="${TARGET_REPOS_FILE:-}"
-TARGET_REPO_GIT_URL="${TARGET_REPO_GIT_URL:-}"
-TARGET_REPO_NAME="${TARGET_REPO_NAME:-}"
-TARGET_REPO_REF="${TARGET_REPO_REF:-}"
 PROFILE_ID="${PROFILE_ID:-}"
 PROFILE_SOURCE_KIND="${PROFILE_SOURCE_KIND:-}"
 EXPECTED_REPO_COUNT="${EXPECTED_REPO_COUNT:-}"
@@ -277,61 +273,17 @@ slugify() {
 }
 
 prepare_target_repos_file() {
-  local generated_dir="$TMP_ROOT/generated-inputs"
-  mkdir -p "$generated_dir"
-
-  if [[ -n "$TARGET_REPOS_FILE" ]]; then
-    if [[ ! -f "$TARGET_REPOS_FILE" ]]; then
-      die "TARGET_REPOS_FILE does not exist: $TARGET_REPOS_FILE"
-    fi
-    TARGET_INPUT_MODE="repos-file"
-    RESOLVED_TARGET_REPOS_FILE="$(cd "$(dirname "$TARGET_REPOS_FILE")" && pwd)/$(basename "$TARGET_REPOS_FILE")"
-    return 0
+  if [[ -n "${TARGET_REPO:-}" || -n "${TARGET_REPO_GIT_URL:-}" || -n "${TARGET_REPO_NAME:-}" || -n "${TARGET_REPO_REF:-}" ]]; then
+    die "legacy target input env (TARGET_REPO*) is no longer supported; use TARGET_REPOS_FILE with repos[]"
   fi
-
-  if [[ -n "$TARGET_REPO" ]]; then
-    if [[ ! -d "$TARGET_REPO" ]]; then
-      die "TARGET_REPO does not exist: $TARGET_REPO"
-    fi
-    local repo_abs
-    repo_abs="$(cd "$TARGET_REPO" && pwd)"
-    local repo_name
-    repo_name="$(basename "$repo_abs")"
-    TARGET_INPUT_MODE="legacy-single-path"
-    RESOLVED_TARGET_REPOS_FILE="$generated_dir/legacy-single-path.repos.yaml"
-    cat >"$RESOLVED_TARGET_REPOS_FILE" <<EOF
-version: 1
-repos:
-  - name: ${repo_name}
-    path: ${repo_abs}
-docs:
-  imports_path: ./docs/imports
-EOF
-    return 0
+  if [[ -z "$TARGET_REPOS_FILE" ]]; then
+    die "missing target input: set TARGET_REPOS_FILE (repos[] YAML)"
   fi
-
-  if [[ -n "$TARGET_REPO_GIT_URL" ]]; then
-    if [[ -z "$TARGET_REPO_NAME" ]]; then
-      die "TARGET_REPO_NAME is required when TARGET_REPO_GIT_URL is set"
-    fi
-    if [[ -z "$TARGET_REPO_REF" ]]; then
-      die "TARGET_REPO_REF is required when TARGET_REPO_GIT_URL is set (pinned ref policy)"
-    fi
-    TARGET_INPUT_MODE="legacy-single-git-url"
-    RESOLVED_TARGET_REPOS_FILE="$generated_dir/legacy-single-git-url.repos.yaml"
-    cat >"$RESOLVED_TARGET_REPOS_FILE" <<EOF
-version: 1
-repos:
-  - name: ${TARGET_REPO_NAME}
-    git_url: ${TARGET_REPO_GIT_URL}
-    ref: ${TARGET_REPO_REF}
-docs:
-  imports_path: ./docs/imports
-EOF
-    return 0
+  if [[ ! -f "$TARGET_REPOS_FILE" ]]; then
+    die "TARGET_REPOS_FILE does not exist: $TARGET_REPOS_FILE"
   fi
-
-  die "missing target input: set TARGET_REPOS_FILE (canonical) or legacy TARGET_REPO / TARGET_REPO_GIT_URL+TARGET_REPO_NAME+TARGET_REPO_REF"
+  TARGET_INPUT_MODE="repos-file"
+  RESOLVED_TARGET_REPOS_FILE="$(cd "$(dirname "$TARGET_REPOS_FILE")" && pwd)/$(basename "$TARGET_REPOS_FILE")"
 }
 
 validate_target_repos_file() {
@@ -1102,14 +1054,6 @@ write_summary() {
     echo "- provenarch_root: $PROVENARCH_ROOT"
     echo "- target_input_mode: ${TARGET_INPUT_MODE:-unknown}"
     echo "- target_repos_file: ${RESOLVED_TARGET_REPOS_FILE:-unset}"
-    if [[ -n "$TARGET_REPO" ]]; then
-      echo "- target_repo_legacy_path: $TARGET_REPO"
-    fi
-    if [[ -n "$TARGET_REPO_GIT_URL" ]]; then
-      echo "- target_repo_legacy_git_url: $TARGET_REPO_GIT_URL"
-      echo "- target_repo_legacy_name: ${TARGET_REPO_NAME:-unset}"
-      echo "- target_repo_legacy_ref: ${TARGET_REPO_REF:-unset}"
-    fi
     echo "- profile_id: ${PROFILE_ID:-adhoc}"
     echo "- profile_source_kind: ${PROFILE_SOURCE_KIND:-mixed}"
     echo "- expected_repo_count: ${EXPECTED_REPO_COUNT:-auto}"

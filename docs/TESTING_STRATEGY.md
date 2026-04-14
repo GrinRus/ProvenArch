@@ -214,8 +214,7 @@ Implemented additional jobs:
   - при parse-fail runtime сохраняет raw-output diagnostics в `reports/taskruns/raw/*` (stdout/stderr/meta with checksum)
 - batch regression `5x2` + frontend live e2e:
   - `scripts/full-run-batch-5x2.sh`
-  - canonical input: `TARGET_REPOS_FILE` (`repos[]` format)
-  - legacy compatibility: `TARGET_REPO` или `TARGET_REPO_GIT_URL+TARGET_REPO_NAME+TARGET_REPO_REF`
+  - canonical input: `TARGET_REPOS_FILE` (`repos[]` format, единственный поддерживаемый контракт)
   - direct-only runtime commands (`claude`, `qwen`)
   - frontend live e2e работает на отдельной `frontend-workspace` копии run snapshot, не мутируя backend baseline
   - backend quality source-of-truth: snapshot reports (`snapshots/<run_id>/reports/*`), fallback помечается как `reliability:snapshot-missing`
@@ -234,6 +233,9 @@ Implemented additional jobs:
   - официальные профили: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
   - для `source_kind=git_url` refs должны быть pinned
   - агрегированные отчёты: `profile_matrix_<matrix-id>.md/.tsv`, `release_verdict_<matrix-id>.md/.json`
+  - curated release queue:
+    - first-run: `posthog/posthog`, `microservices-patterns/ftgo-application`, `getsentry/*`, `Open edX ecosystem`
+    - second-pass: `GoogleCloudPlatform/bank-of-anthos`, `OpenStack ecosystem`
 - release live harness (manual pre-release gate, no wrapper):
   - source-of-truth runbook: `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
   - использует текущий matrix контур (`full-run-batch-matrix.sh` + `full-run-batch-5x2.sh` + `e2e_batch_report.py`)

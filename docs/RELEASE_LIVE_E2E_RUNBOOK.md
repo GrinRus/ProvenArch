@@ -39,7 +39,8 @@
 
 Готовый шаблон:
 - `examples/e2e-matrix.example.yaml`
-- `examples/repos/*.repos.yaml`
+- curated profile presets: `examples/repos/curated/*.repos.yaml`
+- pinned GitHub presets: `examples/repos/github/*.repos.yaml`
 
 ### 3.1) GitHub catalog для выбора target repos (3 monorepo + 3 multi-repo)
 
@@ -96,6 +97,7 @@ profiles:
 - перед релизным прогоном при необходимости обновить SHA в preset-файлах отдельным коммитом (без изменения harness логики).
 - запасной monorepo-кандидат: `GoogleCloudPlatform/microservices-demo` (если нужно заменить `bank-of-anthos`).
 - рекомендуемый first-run набор: `posthog/posthog` + `microservices-patterns/ftgo-application` + `getsentry/*` + `Open edX ecosystem`.
+- рекомендуемый second-pass набор: `GoogleCloudPlatform/bank-of-anthos` + `OpenStack ecosystem`.
 
 ## 4) Порядок запуска
 
