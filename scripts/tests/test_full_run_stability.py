@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import os
 import signal
 import subprocess
@@ -13,6 +14,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FULL_RUN_SCRIPT = REPO_ROOT / "scripts" / "full-run-ai-advent.sh"
 BATCH_SCRIPT = REPO_ROOT / "scripts" / "full-run-batch-5x2.sh"
+MATRIX_SCRIPT = REPO_ROOT / "scripts" / "full-run-batch-matrix.sh"
 
 
 def write_text(path: Path, content: str, mode: int = 0o644) -> None:
@@ -819,6 +821,554 @@ def create_batch_stub_environment(root: Path) -> tuple[Path, Path, Path]:
     )
 
     return provenarch_root, tools_dir, target_repo
+
+
+def create_matrix_stub_environment(root: Path) -> tuple[Path, Path, Path, Path]:
+    harness_root = root / "matrix-harness-root"
+    tools_dir = root / "tools"
+    target_repo = root / "target-repo"
+    scripts_dir = harness_root / "scripts"
+    inputs_dir = root / "inputs"
+    repos_dir = inputs_dir / "repos"
+
+    write_text(target_repo / "README.md", "# matrix target\n")
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    repos_dir.mkdir(parents=True, exist_ok=True)
+
+    write_text(
+        scripts_dir / "full-run-batch-5x2.sh",
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            set -euo pipefail
+
+            : "${BATCH_ID:?BATCH_ID is required}"
+            : "${REPORTS_ROOT:?REPORTS_ROOT is required}"
+            sweep_id="${SWEEP_ID:-baseline}"
+            mode="${MATRIX_STUB_MODE:-pass}"
+
+            mkdir -p "$REPORTS_ROOT"
+            run_matrix_tsv="$REPORTS_ROOT/run_matrix_${BATCH_ID}.tsv"
+            run_matrix_md="$REPORTS_ROOT/run_matrix_${BATCH_ID}.md"
+            frontend_md="$REPORTS_ROOT/frontend_e2e_matrix_${BATCH_ID}.md"
+            frontend_cancel_md="$REPORTS_ROOT/frontend_cancel_e2e_matrix_${BATCH_ID}.md"
+            quality_md="$REPORTS_ROOT/quality_report_${BATCH_ID}.md"
+
+            echo -e "provider\\trun\\thard_pass\\treliability\\tcontract\\tanalysis\\ttotal\\tverdict\\tinit_signal\\trefresh_signal\\trefresh_findings\\trefresh_questions\\trefresh_cov_missing\\tartifact_source\\tsemantic_hard_fail\\tfailure_class\\truntime_parse\\trunner_unavailable\\truntime_timeout\\tinfra_signal_terminated\\tinfra_incomplete_cycle\\tquality_gates_failed\\tsummary_missing\\tprecheck_failed\\truntime_flow_failed\\tcancellation_like\\toff_topic_hits\\tissues" >"$run_matrix_tsv"
+            for provider in qwen-code claude-code; do
+              for run_index in 1 2 3 4 5; do
+                hard_pass=1
+                artifact_source="snapshot"
+                semantic_hard_fail=0
+                failure_class="none"
+                runtime_parse=0
+                runner_unavailable=0
+                runtime_timeout=0
+                infra_signal_terminated=0
+                infra_incomplete_cycle=0
+                quality_gates_failed=0
+                summary_missing=0
+                precheck_failed=0
+                runtime_flow_failed=0
+                cancellation_like=0
+                off_topic_hits=0
+                issues="-"
+                if [[ "$mode" == "fail" && "$sweep_id" == "scale-backend" && "$provider" == "qwen-code" && "$run_index" == "1" ]]; then
+                  hard_pass=0
+                  artifact_source="workspace-fallback"
+                  semantic_hard_fail=1
+                  failure_class="runtime_flow_failed"
+                  runtime_flow_failed=1
+                  issues="analysis:evidence-scope,runtime:execution-semantics,reliability:runtime-flow-failed"
+                fi
+                if [[ "$mode" == "fail-cross-repo" && "$sweep_id" == "baseline" && "$provider" == "claude-code" && "$run_index" == "2" ]]; then
+                  hard_pass=0
+                  semantic_hard_fail=1
+                  failure_class="runtime_flow_failed"
+                  runtime_flow_failed=1
+                  issues="analysis:cross-repo-missing,runtime:repo-selection,reliability:runtime-flow-failed"
+                fi
+                echo -e "${provider}\\t${run_index}\\t${hard_pass}\\t40\\t20\\t40\\t100\\tExcellent\\t9\\t9\\t1\\t1\\t1\\t${artifact_source}\\t${semantic_hard_fail}\\t${failure_class}\\t${runtime_parse}\\t${runner_unavailable}\\t${runtime_timeout}\\t${infra_signal_terminated}\\t${infra_incomplete_cycle}\\t${quality_gates_failed}\\t${summary_missing}\\t${precheck_failed}\\t${runtime_flow_failed}\\t${cancellation_like}\\t${off_topic_hits}\\t${issues}" >>"$run_matrix_tsv"
+              done
+            done
+
+            cat >"$run_matrix_md" <<'MD'
+            # Run Matrix
+            MD
+            cat >"$frontend_md" <<'MD'
+            # Frontend Live E2E Matrix
+
+            | provider | status | base_url | workspace | runtime_command | server_log | playwright_log |
+            |---|---|---|---|---|---|---|
+            | qwen-code | STATUS_QWEN_LIVE | - | - | qwen | - | - |
+            | claude-code | passed | - | - | claude | - | - |
+            MD
+            if [[ "$mode" == "fail-frontend-live" ]]; then
+              sed -i.bak 's/STATUS_QWEN_LIVE/failed/g' "$frontend_md"
+            else
+              sed -i.bak 's/STATUS_QWEN_LIVE/passed/g' "$frontend_md"
+            fi
+            rm -f "$frontend_md.bak"
+            cat >"$frontend_cancel_md" <<'MD'
+            # Frontend Cancel E2E Matrix
+
+            | provider | status | reason | scenario | workspace | runtime_command | server_log | playwright_log |
+            |---|---|---|---|---|---|---|---|
+            | qwen-code | STATUS_QWEN_CANCEL | - | cancel-refresh | - | qwen | - | - |
+            | claude-code | passed | - | cancel-refresh | - | claude | - | - |
+            MD
+            if [[ "$mode" == "fail-frontend-cancel" ]]; then
+              sed -i.bak 's/STATUS_QWEN_CANCEL/failed/g' "$frontend_cancel_md"
+            else
+              sed -i.bak 's/STATUS_QWEN_CANCEL/passed/g' "$frontend_cancel_md"
+            fi
+            rm -f "$frontend_cancel_md.bak"
+            cat >"$quality_md" <<'MD'
+            # Quality Report
+            MD
+
+            exit 0
+            """
+        ),
+        mode=0o755,
+    )
+
+    write_text(
+        tools_dir / "claude",
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            if [[ "${1:-}" == "--version" ]]; then
+              echo "claude 2.1.85"
+              exit 0
+            fi
+            exit 0
+            """
+        ),
+        mode=0o755,
+    )
+    write_text(
+        tools_dir / "qwen",
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            if [[ "${1:-}" == "--version" ]]; then
+              echo "qwen 1.0.0"
+              exit 0
+            fi
+            exit 0
+            """
+        ),
+        mode=0o755,
+    )
+
+    write_text(
+        repos_dir / "single-path.repos.yaml",
+        textwrap.dedent(
+            f"""\
+            version: 1
+            repos:
+              - name: target-repo
+                path: {target_repo}
+            docs:
+              imports_path: ./docs/imports
+            """
+        ),
+    )
+    write_text(
+        repos_dir / "single-git-url.repos.yaml",
+        textwrap.dedent(
+            """\
+            version: 1
+            repos:
+              - name: target-repo
+                git_url: https://example.com/target-repo.git
+                ref: 3b6f7b1
+            docs:
+              imports_path: ./docs/imports
+            """
+        ),
+    )
+    write_text(
+        repos_dir / "multi-path.repos.yaml",
+        textwrap.dedent(
+            f"""\
+            version: 1
+            repos:
+              - name: target-a
+                path: {target_repo}
+              - name: target-b
+                path: {target_repo}
+            docs:
+              imports_path: ./docs/imports
+            """
+        ),
+    )
+    write_text(
+        repos_dir / "multi-git-url.repos.yaml",
+        textwrap.dedent(
+            """\
+            version: 1
+            repos:
+              - name: target-a
+                git_url: https://example.com/target-a.git
+                ref: 3b6f7b1
+              - name: target-b
+                git_url: https://example.com/target-b.git
+                ref: 3b6f7b1
+            docs:
+              imports_path: ./docs/imports
+            """
+        ),
+    )
+
+    matrix_with_sweeps = inputs_dir / "e2e-matrix-with-sweeps.yaml"
+    write_text(
+        matrix_with_sweeps,
+        textwrap.dedent(
+            """\
+            version: 1
+            sweeps:
+              - id: baseline
+                strategy: sequential
+                max_parallel_tasks: 1
+                failure_policy: best_effort
+                shard_discovery_mode: heuristics
+                repo_selection: all
+              - id: scale-backend
+                strategy: parallel
+                max_parallel_tasks: 4
+                failure_policy: best_effort
+                shard_discovery_mode: semantic
+                repo_selection: backend_only
+            profiles:
+              - id: single-path
+                source_kind: path
+                expected_repo_count: 1
+                repos_file: ./repos/single-path.repos.yaml
+              - id: single-git_url
+                source_kind: git_url
+                expected_repo_count: 1
+                repos_file: ./repos/single-git-url.repos.yaml
+              - id: multi-path
+                source_kind: path
+                expected_repo_count: 2
+                repos_file: ./repos/multi-path.repos.yaml
+              - id: multi-git_url
+                source_kind: git_url
+                expected_repo_count: 2
+                repos_file: ./repos/multi-git-url.repos.yaml
+            """
+        ),
+    )
+
+    matrix_without_sweeps = inputs_dir / "e2e-matrix-no-sweeps.yaml"
+    write_text(
+        matrix_without_sweeps,
+        textwrap.dedent(
+            """\
+            version: 1
+            profiles:
+              - id: single-path
+                source_kind: path
+                expected_repo_count: 1
+                repos_file: ./repos/single-path.repos.yaml
+              - id: single-git_url
+                source_kind: git_url
+                expected_repo_count: 1
+                repos_file: ./repos/single-git-url.repos.yaml
+              - id: multi-path
+                source_kind: path
+                expected_repo_count: 2
+                repos_file: ./repos/multi-path.repos.yaml
+              - id: multi-git_url
+                source_kind: git_url
+                expected_repo_count: 2
+                repos_file: ./repos/multi-git-url.repos.yaml
+            """
+        ),
+    )
+
+    return harness_root, tools_dir, matrix_with_sweeps, matrix_without_sweeps
+
+
+class MatrixHarnessIntegrationTests(unittest.TestCase):
+    def test_matrix_profiles_times_sweeps_and_pass_verdict(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            harness_root, tools_dir, matrix_with_sweeps, _matrix_without_sweeps = create_matrix_stub_environment(root)
+            e2e_tmp_root = root / "e2e-pass"
+            matrix_id = "matrix-pass"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "BATCH_SCRIPT": str(harness_root / "scripts/full-run-batch-5x2.sh"),
+                    "E2E_MATRIX_FILE": str(matrix_with_sweeps),
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "MATRIX_ID": matrix_id,
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                ["bash", str(MATRIX_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertEqual(0, result.returncode, msg=result.stdout + "\n" + result.stderr)
+
+            profile_matrix_tsv = e2e_tmp_root / "reports" / f"profile_matrix_{matrix_id}.tsv"
+            self.assertTrue(profile_matrix_tsv.exists(), msg="profile_matrix TSV is missing")
+            rows = [line for line in profile_matrix_tsv.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(9, len(rows), msg="expected header + 8 profile×sweep rows")
+            self.assertIn("\tsweep_id\t", rows[0])
+
+            verdict_json = e2e_tmp_root / "reports" / f"release_verdict_{matrix_id}.json"
+            self.assertTrue(verdict_json.exists(), msg="release verdict json is missing")
+            payload = json.loads(verdict_json.read_text(encoding="utf-8"))
+            self.assertEqual("PASS", payload.get("verdict"))
+            self.assertEqual("RELEASE READY", payload.get("release_state"))
+            self.assertEqual(8, payload.get("profile_sweep_runs"))
+            self.assertEqual(0, payload.get("strict_fail_runs"))
+
+    def test_matrix_blocks_release_on_strict_violation(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            harness_root, tools_dir, matrix_with_sweeps, _matrix_without_sweeps = create_matrix_stub_environment(root)
+            e2e_tmp_root = root / "e2e-fail"
+            matrix_id = "matrix-fail"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "BATCH_SCRIPT": str(harness_root / "scripts/full-run-batch-5x2.sh"),
+                    "E2E_MATRIX_FILE": str(matrix_with_sweeps),
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "MATRIX_ID": matrix_id,
+                    "MATRIX_STUB_MODE": "fail",
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                ["bash", str(MATRIX_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(0, result.returncode, msg=result.stdout + "\n" + result.stderr)
+
+            verdict_json = e2e_tmp_root / "reports" / f"release_verdict_{matrix_id}.json"
+            self.assertTrue(verdict_json.exists(), msg="release verdict json is missing")
+            payload = json.loads(verdict_json.read_text(encoding="utf-8"))
+            self.assertEqual("FAIL", payload.get("verdict"))
+            self.assertEqual("RELEASE BLOCKED", payload.get("release_state"))
+            self.assertGreater(int(payload.get("strict_fail_runs", 0)), 0)
+
+            records = payload.get("records") or []
+            failing = [item for item in records if item.get("strict_status") == "failed"]
+            self.assertTrue(failing, msg="expected failing strict records in verdict")
+            self.assertTrue(
+                any(
+                    any("analysis:evidence-scope" in reason for reason in (item.get("blocking_reasons") or []))
+                    for item in failing
+                ),
+                msg="expected strict blockers to include analysis:evidence-scope",
+            )
+            self.assertTrue(
+                any(
+                    any("backend_hard_pass=" in reason for reason in (item.get("blocking_reasons") or []))
+                    for item in failing
+                ),
+                msg="expected strict blockers to include backend_hard_pass",
+            )
+            self.assertTrue(
+                any(
+                    any("artifact_source_non_snapshot=" in reason for reason in (item.get("blocking_reasons") or []))
+                    for item in failing
+                ),
+                msg="expected strict blockers to include artifact_source_non_snapshot",
+            )
+            self.assertTrue(
+                any(
+                    any("semantic_hard_fail=" in reason for reason in (item.get("blocking_reasons") or []))
+                    for item in failing
+                ),
+                msg="expected strict blockers to include semantic_hard_fail",
+            )
+
+    def test_matrix_uses_implicit_baseline_sweep_when_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            harness_root, tools_dir, _matrix_with_sweeps, matrix_without_sweeps = create_matrix_stub_environment(root)
+            e2e_tmp_root = root / "e2e-implicit"
+            matrix_id = "matrix-implicit"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "BATCH_SCRIPT": str(harness_root / "scripts/full-run-batch-5x2.sh"),
+                    "E2E_MATRIX_FILE": str(matrix_without_sweeps),
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "MATRIX_ID": matrix_id,
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                ["bash", str(MATRIX_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertEqual(0, result.returncode, msg=result.stdout + "\n" + result.stderr)
+
+            profile_matrix_tsv = e2e_tmp_root / "reports" / f"profile_matrix_{matrix_id}.tsv"
+            self.assertTrue(profile_matrix_tsv.exists(), msg="profile_matrix TSV is missing")
+            rows = [line for line in profile_matrix_tsv.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(5, len(rows), msg="expected header + 4 profile rows with implicit baseline sweep")
+            header = rows[0].split("\t")
+            sweep_idx = header.index("sweep_id")
+            for row in rows[1:]:
+                parts = row.split("\t")
+                self.assertEqual("baseline", parts[sweep_idx], msg=f"expected implicit baseline sweep row, got: {row}")
+
+    def test_matrix_blocks_release_on_frontend_cancel_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            harness_root, tools_dir, matrix_with_sweeps, _matrix_without_sweeps = create_matrix_stub_environment(root)
+            e2e_tmp_root = root / "e2e-cancel-fail"
+            matrix_id = "matrix-cancel-fail"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "BATCH_SCRIPT": str(harness_root / "scripts/full-run-batch-5x2.sh"),
+                    "E2E_MATRIX_FILE": str(matrix_with_sweeps),
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "MATRIX_ID": matrix_id,
+                    "MATRIX_STUB_MODE": "fail-frontend-cancel",
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                ["bash", str(MATRIX_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(0, result.returncode, msg=result.stdout + "\n" + result.stderr)
+
+            verdict_json = e2e_tmp_root / "reports" / f"release_verdict_{matrix_id}.json"
+            payload = json.loads(verdict_json.read_text(encoding="utf-8"))
+            failing = [item for item in (payload.get("records") or []) if item.get("strict_status") == "failed"]
+            self.assertTrue(failing, msg="expected failing strict records in verdict")
+            self.assertTrue(
+                any(
+                    any("frontend_cancel_qwen_status=failed" in reason for reason in (item.get("blocking_reasons") or []))
+                    for item in failing
+                ),
+                msg="expected strict blockers to include failed frontend cancel status",
+            )
+
+    def test_matrix_blocks_release_on_frontend_live_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            harness_root, tools_dir, matrix_with_sweeps, _matrix_without_sweeps = create_matrix_stub_environment(root)
+            e2e_tmp_root = root / "e2e-live-fail"
+            matrix_id = "matrix-live-fail"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "BATCH_SCRIPT": str(harness_root / "scripts/full-run-batch-5x2.sh"),
+                    "E2E_MATRIX_FILE": str(matrix_with_sweeps),
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "MATRIX_ID": matrix_id,
+                    "MATRIX_STUB_MODE": "fail-frontend-live",
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                ["bash", str(MATRIX_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(0, result.returncode, msg=result.stdout + "\n" + result.stderr)
+
+            verdict_json = e2e_tmp_root / "reports" / f"release_verdict_{matrix_id}.json"
+            payload = json.loads(verdict_json.read_text(encoding="utf-8"))
+            failing = [item for item in (payload.get("records") or []) if item.get("strict_status") == "failed"]
+            self.assertTrue(failing, msg="expected failing strict records in verdict")
+            self.assertTrue(
+                any(
+                    any("frontend_qwen_status=failed" in reason for reason in (item.get("blocking_reasons") or []))
+                    for item in failing
+                ),
+                msg="expected strict blockers to include failed frontend live status",
+            )
+
+    def test_matrix_blocks_release_on_cross_repo_missing_issue(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            harness_root, tools_dir, matrix_with_sweeps, _matrix_without_sweeps = create_matrix_stub_environment(root)
+            e2e_tmp_root = root / "e2e-cross-repo-fail"
+            matrix_id = "matrix-cross-repo-fail"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "BATCH_SCRIPT": str(harness_root / "scripts/full-run-batch-5x2.sh"),
+                    "E2E_MATRIX_FILE": str(matrix_with_sweeps),
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "MATRIX_ID": matrix_id,
+                    "MATRIX_STUB_MODE": "fail-cross-repo",
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                ["bash", str(MATRIX_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(0, result.returncode, msg=result.stdout + "\n" + result.stderr)
+
+            verdict_json = e2e_tmp_root / "reports" / f"release_verdict_{matrix_id}.json"
+            payload = json.loads(verdict_json.read_text(encoding="utf-8"))
+            failing = [item for item in (payload.get("records") or []) if item.get("strict_status") == "failed"]
+            self.assertTrue(failing, msg="expected failing strict records in verdict")
+            self.assertTrue(
+                any(
+                    any("analysis:cross-repo-missing" in reason for reason in (item.get("blocking_reasons") or []))
+                    for item in failing
+                ),
+                msg="expected strict blockers to include analysis:cross-repo-missing",
+            )
 
 
 class BatchPostRunValidationIntegrationTests(unittest.TestCase):

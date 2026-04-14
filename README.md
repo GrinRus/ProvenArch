@@ -292,6 +292,7 @@ Root entrypoints:
 
 Готовый runbook и script:
 - [docs/LOCAL_FULL_RUN_AI_ADVENT.md](docs/LOCAL_FULL_RUN_AI_ADVENT.md)
+- [docs/RELEASE_LIVE_E2E_RUNBOOK.md](docs/RELEASE_LIVE_E2E_RUNBOOK.md) — агентский pre-release live gate (`PASS|FAIL`, strict zero-failure)
 - `scripts/full-run-ai-advent.sh`
 - `scripts/full-run-batch-5x2.sh` (batch `5x2` + frontend live e2e + quality report aggregation)
 - `scripts/full-run-batch-matrix.sh` (multi-profile matrix orchestrator over `full-run-batch-5x2.sh`)
@@ -340,7 +341,7 @@ ACP_QWEN_CMD_BIN=qwen \
 ./scripts/full-run-batch-5x2.sh
 ```
 
-Matrix runbook `4` профиля (`single-path`, `single-git_url`, `multi-path`, `multi-git_url`):
+Matrix runbook `4` профиля (`single-path`, `single-git_url`, `multi-path`, `multi-git_url`) × sweep-профили:
 
 ```bash
 E2E_MATRIX_FILE=/abs/path/to/e2e-matrix.yaml \
@@ -349,7 +350,8 @@ ACP_QWEN_CMD_BIN=qwen \
 ./scripts/full-run-batch-matrix.sh
 ```
 
-`E2E_MATRIX_FILE` поддерживает `profiles[]`:
+`E2E_MATRIX_FILE` поддерживает:
+- `profiles[]`:
 - `id`
 - `repos_file`
 - `expected_repo_count`
@@ -357,6 +359,11 @@ ACP_QWEN_CMD_BIN=qwen \
 - обязательный набор профилей: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
 - для `git_url` профилей refs должны быть pinned в `repos_file`
 - относительные пути `repos_file` резолвятся относительно директории `E2E_MATRIX_FILE`
+- `sweeps[]` (optional, backward-compatible):
+- если `sweeps[]` отсутствует -> implicit `baseline` sweep
+- release-ready sweep set:
+  - `baseline`: `strategy=sequential`, `max_parallel_tasks=1`, `failure_policy=best_effort`, `shard_discovery_mode=heuristics`, `repo_selection=all`
+  - `scale-backend`: `strategy=parallel`, `max_parallel_tasks=4`, `failure_policy=best_effort`, `shard_discovery_mode=semantic`, `repo_selection=backend_only`
 
 Готовый шаблон: `examples/e2e-matrix.example.yaml` (+ `examples/repos/*.repos.yaml`).
 
@@ -364,11 +371,18 @@ ACP_QWEN_CMD_BIN=qwen \
 - run artifacts (default): `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/...`
 - quality reports:
   - `/tmp/provenarch-test_arch_project/reports/run_matrix_<batch-id>.md`
+  - `/tmp/provenarch-test_arch_project/reports/run_matrix_<batch-id>.tsv`
   - `/tmp/provenarch-test_arch_project/reports/frontend_e2e_matrix_<batch-id>.md`
+  - `/tmp/provenarch-test_arch_project/reports/frontend_cancel_e2e_matrix_<batch-id>.md`
   - `/tmp/provenarch-test_arch_project/reports/quality_report_<batch-id>.md`
+- matrix+release artifacts:
+  - `/tmp/provenarch-test_arch_project/reports/profile_matrix_<matrix-id>.md`
+  - `/tmp/provenarch-test_arch_project/reports/profile_matrix_<matrix-id>.tsv`
+  - `/tmp/provenarch-test_arch_project/reports/release_verdict_<matrix-id>.md`
+  - `/tmp/provenarch-test_arch_project/reports/release_verdict_<matrix-id>.json`
 - backend quality считается только по snapshot-артефактам (`snapshots/<run_id>/reports/*`), frontend smoke запускается на отдельной `frontend-workspace` копии и не мутирует backend baseline
 - batch evaluator добавляет semantic hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`; для multi-profile (`expected_repo_count >= 2`) обязателен `cross-repo` сигнал (`analysis:cross-repo-missing` при отсутствии)
-- в `run_matrix`/`quality_report` дополнительно фиксируются `artifact_source`, `semantic_hard_fail`, `off_topic_hits` и failure classes (`runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_signal_terminated`, `infra_incomplete_cycle`, `quality_gates_failed`, `summary_missing`)
+- в `run_matrix`/`quality_report` дополнительно фиксируются `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, runtime flow checks (`runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:repo-selection`, `runtime:execution-semantics`, `runtime_flow_failed`) и failure classes (`runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_signal_terminated`, `infra_incomplete_cycle`, `quality_gates_failed`, `summary_missing`, `precheck_failed`)
 - direct `npm run --prefix ui e2e:live`: Playwright output default `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
 - `scripts/frontend-live-e2e.sh`: Playwright output сохраняется в `$OUTPUT_DIR/playwright-results`
 - frontend live e2e ожидает число resolved repos из `UI_E2E_EXPECTED_REPO_COUNT` (default `1`)
@@ -379,6 +393,8 @@ ACP_QWEN_CMD_BIN=qwen \
 
 `TARGET_REPOS_FILE` — основной batch-контракт; single legacy env поддерживаются для обратной совместимости.
 Full matrix (`full-run-batch-matrix.sh`) — локальный trusted-machine runbook, не required CI gate.
+Для release decision используйте агентский runbook:
+- [docs/RELEASE_LIVE_E2E_RUNBOOK.md](docs/RELEASE_LIVE_E2E_RUNBOOK.md)
 
 Repo CI по умолчанию живёт в GitHub Actions:
 - `contracts`

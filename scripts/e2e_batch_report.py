@@ -60,6 +60,13 @@ SYNTHETIC_EVIDENCE_PREFIXES = (
     "browser/",
 )
 
+RUNTIME_FLOW_ISSUE_TAGS = (
+    "runtime:shard-artifacts",
+    "runtime:shard-metadata",
+    "runtime:repo-selection",
+    "runtime:execution-semantics",
+)
+
 
 def normalize_text(value: str) -> str:
     cleaned = value.strip().lower().replace("_", " ").replace("-", " ")
@@ -189,6 +196,60 @@ def parse_headless_rows(rows: list[dict[str, Any]], provider: str) -> dict[str, 
         if pipeline in ("init", "refresh"):
             result[pipeline] = row
     return result
+
+
+def normalize_execution_profile(preflight: dict[str, Any]) -> dict[str, Any] | None:
+    payload = preflight.get("execution_profile")
+    if not isinstance(payload, dict):
+        return None
+    effective = payload.get("effective")
+    if not isinstance(effective, dict):
+        return None
+
+    defaults = {
+        "strategy": "sequential",
+        "max_parallel_tasks": 1,
+        "failure_policy": "best_effort",
+        "shard_discovery_mode": "heuristics",
+        "repo_selection": "all",
+    }
+    allowed = {
+        "strategy": {"sequential", "parallel"},
+        "failure_policy": {"fail_fast", "best_effort"},
+        "shard_discovery_mode": {"heuristics", "semantic"},
+        "repo_selection": {"all", "backend_only"},
+    }
+
+    strategy_raw = str(effective.get("strategy", defaults["strategy"])).strip()
+    strategy = strategy_raw if strategy_raw in allowed["strategy"] else defaults["strategy"]
+    max_parallel_raw = effective.get("max_parallel_tasks", defaults["max_parallel_tasks"])
+    try:
+        max_parallel = int(max_parallel_raw)
+    except Exception:
+        max_parallel = defaults["max_parallel_tasks"]
+    if max_parallel <= 0:
+        max_parallel = defaults["max_parallel_tasks"]
+    if strategy != "parallel":
+        max_parallel = 1
+
+    failure_policy_raw = str(effective.get("failure_policy", defaults["failure_policy"])).strip()
+    failure_policy = (
+        failure_policy_raw if failure_policy_raw in allowed["failure_policy"] else defaults["failure_policy"]
+    )
+    shard_mode_raw = str(effective.get("shard_discovery_mode", defaults["shard_discovery_mode"])).strip()
+    shard_mode = shard_mode_raw if shard_mode_raw in allowed["shard_discovery_mode"] else defaults["shard_discovery_mode"]
+    repo_selection_raw = str(effective.get("repo_selection", defaults["repo_selection"])).strip()
+    repo_selection = (
+        repo_selection_raw if repo_selection_raw in allowed["repo_selection"] else defaults["repo_selection"]
+    )
+
+    return {
+        "strategy": strategy,
+        "max_parallel_tasks": max_parallel,
+        "failure_policy": failure_policy,
+        "shard_discovery_mode": shard_mode,
+        "repo_selection": repo_selection,
+    }
 
 
 def normalize_declared_repos_meta(preflight: dict[str, Any]) -> dict[str, Any]:
@@ -510,6 +571,200 @@ def parse_overview_counts(path: Path) -> dict[str, int]:
     return counts
 
 
+def collect_runtime_taskrun_payloads(taskruns_root: Path, run_id: str, pipeline: str) -> list[tuple[Path, dict[str, Any]]]:
+    candidates = sorted(taskruns_root.glob(f"{run_id}-{pipeline}-*.json"))
+    result: list[tuple[Path, dict[str, Any]]] = []
+    for candidate in candidates:
+        name = candidate.name
+        if "-shard-plan" in name or "-shard-summary" in name or name.endswith("-quality.json"):
+            continue
+        try:
+            payload = read_json(candidate)
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        meta = payload.get("meta")
+        if not isinstance(meta, dict):
+            continue
+        step_id = str(meta.get("step_id", "")).strip()
+        if step_id and not step_id.startswith(f"{pipeline}."):
+            continue
+        result.append((candidate, payload))
+    return result
+
+
+def evaluate_runtime_flow_checks(
+    run_dir: Path,
+    workspace: Path,
+    headless_rows: dict[str, dict[str, Any]],
+    expected_execution: dict[str, Any],
+    summary_text: str,
+    full_run_log_text: str,
+) -> tuple[set[str], list[str]]:
+    issues: set[str] = set()
+    details: list[str] = []
+    inspected_run_ids: set[str] = set()
+
+    for pipeline in ("init", "refresh"):
+        row = headless_rows.get(pipeline)
+        if not row:
+            issues.add("runtime:shard-artifacts")
+            details.append(f"runtime/shard-artifacts -> missing headless {pipeline} row in run-results.tsv")
+            continue
+
+        run_id = str(row.get("run_id", "")).strip()
+        if not run_id:
+            issues.add("runtime:shard-artifacts")
+            details.append(f"runtime/shard-artifacts -> {pipeline} row has empty run_id")
+            continue
+
+        reports_root, _ = resolve_reports_root(run_dir, run_id)
+        taskruns_root = reports_root / "taskruns"
+        plan_files = sorted(taskruns_root.glob(f"{run_id}-{pipeline}-*-shard-plan*.json"))
+        summary_files = sorted(taskruns_root.glob(f"{run_id}-{pipeline}-*-shard-summary*.json"))
+        runtime_taskruns = collect_runtime_taskrun_payloads(taskruns_root, run_id, pipeline)
+
+        if not plan_files:
+            issues.add("runtime:shard-artifacts")
+            details.append(f"runtime/shard-artifacts -> missing shard-plan for run_id={run_id} pipeline={pipeline}")
+        if not summary_files:
+            issues.add("runtime:shard-artifacts")
+            details.append(f"runtime/shard-artifacts -> missing shard-summary for run_id={run_id} pipeline={pipeline}")
+        if not runtime_taskruns:
+            issues.add("runtime:shard-artifacts")
+            details.append(f"runtime/shard-artifacts -> missing per-shard taskruns for run_id={run_id} pipeline={pipeline}")
+
+        missing_shard_meta = []
+        for taskrun_path, payload in runtime_taskruns:
+            meta = payload.get("meta") or {}
+            shard_id = str(meta.get("shard_id", "")).strip()
+            repo_scopes = meta.get("repo_scopes")
+            path_scopes = meta.get("path_scopes")
+            if (
+                not shard_id
+                or not isinstance(repo_scopes, list)
+                or not isinstance(path_scopes, list)
+                or len(repo_scopes) == 0
+                or len(path_scopes) == 0
+            ):
+                missing_shard_meta.append(taskrun_path)
+        if missing_shard_meta:
+            issues.add("runtime:shard-metadata")
+            for path in missing_shard_meta[:8]:
+                details.append(f"runtime/shard-metadata -> {path}: require meta.shard_id/meta.repo_scopes/meta.path_scopes")
+            if len(missing_shard_meta) > 8:
+                details.append(f"runtime/shard-metadata -> +{len(missing_shard_meta) - 8} additional taskruns with missing shard metadata")
+
+        for artifact_path in [*plan_files, *summary_files]:
+            try:
+                payload = read_json(artifact_path)
+            except Exception as exc:
+                issues.add("runtime:execution-semantics")
+                details.append(f"runtime/execution-semantics -> {artifact_path}: invalid json ({exc})")
+                continue
+
+            strategy = str(payload.get("strategy", "")).strip() or "sequential"
+            max_parallel = payload.get("max_parallel_tasks", 1)
+            failure_policy = str(payload.get("failure_policy", "")).strip() or "best_effort"
+            shard_mode = str(payload.get("shard_discovery_mode", "")).strip() or "heuristics"
+            try:
+                max_parallel_int = int(max_parallel)
+            except Exception:
+                max_parallel_int = 0
+
+            mismatches: list[str] = []
+            if strategy != expected_execution["strategy"]:
+                mismatches.append(f"strategy expected={expected_execution['strategy']} got={strategy}")
+            if max_parallel_int != int(expected_execution["max_parallel_tasks"]):
+                mismatches.append(
+                    f"max_parallel_tasks expected={expected_execution['max_parallel_tasks']} got={max_parallel_int}"
+                )
+            if failure_policy != expected_execution["failure_policy"]:
+                mismatches.append(f"failure_policy expected={expected_execution['failure_policy']} got={failure_policy}")
+            if shard_mode != expected_execution["shard_discovery_mode"]:
+                mismatches.append(
+                    f"shard_discovery_mode expected={expected_execution['shard_discovery_mode']} got={shard_mode}"
+                )
+            if mismatches:
+                issues.add("runtime:execution-semantics")
+                details.append(f"runtime/execution-semantics -> {artifact_path}: {'; '.join(mismatches)}")
+
+        summary_has_failed_items = False
+        for summary_path in summary_files:
+            try:
+                payload = read_json(summary_path)
+            except Exception:
+                continue
+            items = payload.get("items")
+            if not isinstance(items, list):
+                continue
+            if any(str(item.get("status", "")).strip() == "failed" for item in items if isinstance(item, dict)):
+                summary_has_failed_items = True
+                break
+        if summary_has_failed_items:
+            summary_blob = (summary_text + "\n" + full_run_log_text).lower()
+            if expected_execution["failure_policy"] == "best_effort":
+                if "run_partial_failed" not in summary_blob:
+                    issues.add("runtime:execution-semantics")
+                    details.append(
+                        f"runtime/execution-semantics -> run_id={run_id} has failed shard items under best_effort but missing run_partial_failed signal"
+                    )
+            else:
+                issues.add("runtime:execution-semantics")
+                details.append(
+                    f"runtime/execution-semantics -> run_id={run_id} has failed shard items while failure_policy={expected_execution['failure_policy']}"
+                )
+
+        if run_id in inspected_run_ids:
+            continue
+        inspected_run_ids.add(run_id)
+
+        repo_selection_path = taskruns_root / f"{run_id}-repo-selection-summary.json"
+        if not repo_selection_path.exists():
+            issues.add("runtime:repo-selection")
+            details.append(f"runtime/repo-selection -> missing {repo_selection_path}")
+            continue
+        try:
+            repo_selection_payload = read_json(repo_selection_path)
+        except Exception as exc:
+            issues.add("runtime:repo-selection")
+            details.append(f"runtime/repo-selection -> invalid json {repo_selection_path} ({exc})")
+            continue
+
+        mode = str(repo_selection_payload.get("repo_selection_mode", "")).strip()
+        if mode != expected_execution["repo_selection"]:
+            issues.add("runtime:repo-selection")
+            details.append(
+                f"runtime/repo-selection -> {repo_selection_path}: expected mode={expected_execution['repo_selection']} got={mode or '-'}"
+            )
+
+        decisions = repo_selection_payload.get("decisions")
+        if not isinstance(decisions, list) or not decisions:
+            issues.add("runtime:repo-selection")
+            details.append(f"runtime/repo-selection -> {repo_selection_path}: missing decisions[]")
+            continue
+
+        for item in decisions:
+            if not isinstance(item, dict):
+                continue
+            reason = str(item.get("reason", "")).strip()
+            if not reason:
+                issues.add("runtime:repo-selection")
+                details.append(
+                    f"runtime/repo-selection -> {repo_selection_path}: empty decision reason for repo={item.get('name', '-')}"
+                )
+            role = normalize_text(str(item.get("effective_role", "")).strip())
+            included = bool(item.get("included", False))
+            if expected_execution["repo_selection"] == "backend_only" and role == "frontend" and included:
+                issues.add("runtime:repo-selection")
+                details.append(
+                    f"runtime/repo-selection -> {repo_selection_path}: frontend repo included under backend_only (repo={item.get('name', '-')})"
+                )
+
+    return issues, details
+
+
 def bool_score(value: bool, weight: int) -> int:
     return weight if value else 0
 
@@ -552,6 +807,7 @@ class RunEvaluation:
     quality_gates_failed: bool = False
     summary_missing: bool = False
     precheck_failed: bool = False
+    runtime_flow_failed: bool = False
     cancellation_like: bool = False
     issues: list[str] = field(default_factory=list)
     issue_details: list[str] = field(default_factory=list)
@@ -572,6 +828,7 @@ def evaluate_run(
     declared_meta = normalize_declared_repos_meta(preflight)
     expected_repo_count = int(declared_meta.get("expected_repo_count", 1))
     repo_roots = collect_repo_roots(run_dir, declared_meta)
+    expected_execution = normalize_execution_profile(preflight)
 
     issues: list[str] = []
     details: list[str] = []
@@ -613,6 +870,7 @@ def evaluate_run(
             quality_gates_failed=False,
             summary_missing=False,
             precheck_failed=True,
+            runtime_flow_failed=False,
             cancellation_like=cancellation_like,
             issues=issues,
             issue_details=details,
@@ -620,6 +878,7 @@ def evaluate_run(
         )
 
     summary_text = summary_path.read_text(encoding="utf-8") if summary_path.exists() else ""
+    full_run_log_text = full_run_log.read_text(encoding="utf-8") if full_run_log.exists() else ""
     summary_missing = not summary_path.exists()
     result_value = first_token(parse_markdown_scalar(summary_text, "result")) if summary_text else ""
     quality_gates_value = first_token(parse_markdown_scalar(summary_text, "quality_gates")) if summary_text else ""
@@ -998,6 +1257,22 @@ def evaluate_run(
     if semantic_hard_fail:
         issues.append("reliability:semantic-hard-fail")
 
+    runtime_flow_failed = False
+    if expected_execution is not None:
+        runtime_flow_issues, runtime_flow_details = evaluate_runtime_flow_checks(
+            run_dir,
+            workspace,
+            headless_rows,
+            expected_execution,
+            summary_text,
+            full_run_log_text,
+        )
+        if runtime_flow_issues:
+            runtime_flow_failed = True
+            issues.extend(sorted(runtime_flow_issues))
+            issues.append("reliability:runtime-flow-failed")
+            details.extend(runtime_flow_details)
+
     if snapshot_semantic_fallback_used and snapshot_ok:
         snapshot_ok = False
         if "reliability:snapshot-missing" not in issues:
@@ -1030,6 +1305,8 @@ def evaluate_run(
         failure_class = "infra_signal_terminated"
     elif infra_incomplete_cycle:
         failure_class = "infra_incomplete_cycle"
+    elif runtime_flow_failed:
+        failure_class = "runtime_flow_failed"
 
     if classified_failure and classified_failure != "none":
         if failure_class != classified_failure:
@@ -1052,6 +1329,7 @@ def evaluate_run(
         and h4
         and snapshot_ok
         and not semantic_hard_fail
+        and not runtime_flow_failed
         and not summary_missing
         and not runtime_timeout
         and not infra_signal_terminated
@@ -1086,6 +1364,7 @@ def evaluate_run(
         quality_gates_failed=quality_gates_failed,
         summary_missing=summary_missing,
         precheck_failed=False,
+        runtime_flow_failed=runtime_flow_failed,
         cancellation_like=cancellation_like,
         issues=sorted(set(issues)),
         issue_details=details,
@@ -1121,8 +1400,8 @@ def write_run_matrix(path: Path, runs: list[RunEvaluation]) -> None:
     lines = [
         "# Run Matrix",
         "",
-        "| provider | run | hard_pass | reliability | contract | analysis | total | verdict | artifact_source | semantic_hard_fail | failure_class | runtime_parse | runner_unavailable | runtime_timeout | infra_signal_terminated | infra_incomplete_cycle | quality_gates_failed | summary_missing | precheck_failed | cancellation_like | off_topic_hits | init_signal | refresh_signal | refresh_findings | refresh_questions | refresh_cov_missing | issues |",
-        "|---|---:|---:|---:|---:|---:|---:|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+        "| provider | run | hard_pass | reliability | contract | analysis | total | verdict | artifact_source | semantic_hard_fail | failure_class | runtime_parse | runner_unavailable | runtime_timeout | infra_signal_terminated | infra_incomplete_cycle | quality_gates_failed | summary_missing | precheck_failed | runtime_flow_failed | cancellation_like | off_topic_hits | init_signal | refresh_signal | refresh_findings | refresh_questions | refresh_cov_missing | issues |",
+        "|---|---:|---:|---:|---:|---:|---:|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for item in runs:
         lines.append(
@@ -1130,7 +1409,7 @@ def write_run_matrix(path: Path, runs: list[RunEvaluation]) -> None:
             f"{item.provider} | {item.run_index} | {int(item.hard_pass)} | {item.reliability} | {item.contract} | "
             f"{item.analysis} | {item.total} | {item.verdict} | {item.artifact_source} | {int(item.semantic_hard_fail)} | {item.failure_class} | "
             f"{int(item.runtime_parse)} | {int(item.runner_unavailable)} | {int(item.runtime_timeout)} | {int(item.infra_signal_terminated)} | "
-            f"{int(item.infra_incomplete_cycle)} | {int(item.quality_gates_failed)} | {int(item.summary_missing)} | {int(item.precheck_failed)} | {int(item.cancellation_like)} | {item.off_topic_hits} | "
+            f"{int(item.infra_incomplete_cycle)} | {int(item.quality_gates_failed)} | {int(item.summary_missing)} | {int(item.precheck_failed)} | {int(item.runtime_flow_failed)} | {int(item.cancellation_like)} | {item.off_topic_hits} | "
             f"{item.init_signal} | {item.refresh_signal} | "
             f"{item.refresh_findings} | {item.refresh_questions} | {item.refresh_cov_missing} | "
             f"{', '.join(item.issues) if item.issues else '-'} |"
@@ -1228,6 +1507,7 @@ def provider_matrix_rows(
                 "quality_gates_failed_failures": sum(1 for item in items if item.quality_gates_failed),
                 "summary_missing_failures": sum(1 for item in items if item.summary_missing),
                 "precheck_failed_failures": sum(1 for item in items if item.precheck_failed),
+                "runtime_flow_failed_failures": sum(1 for item in items if item.runtime_flow_failed),
                 "cancellation_like_failures": sum(1 for item in items if item.cancellation_like),
                 "error_codes": ", ".join(f"{code}={count}" for code, count in sorted(error_codes_counter.items())) or "-",
                 "issues_top": ", ".join(f"{name}={count}" for name, count in issues_counter.most_common(3)) or "-",
@@ -1250,6 +1530,7 @@ def write_quality_report(
     provider_rows = provider_matrix_rows(runs, frontend, frontend_cancel)
     hard_pass_all = sum(1 for run in runs if run.hard_pass)
     semantic_hard_fail_runs = sum(1 for run in runs if run.semantic_hard_fail)
+    runtime_flow_failed_runs = sum(1 for run in runs if run.runtime_flow_failed)
     declared_meta = normalize_declared_repos_meta(preflight)
     declared_repos = declared_meta.get("declared_repos") or []
     issue_counter = Counter()
@@ -1275,6 +1556,7 @@ def write_quality_report(
         "## Backend Quality Verdict (source-of-truth)",
         f"- hard_pass_runs: {hard_pass_all}/{len(runs)}",
         f"- semantic_hard_fail_runs: {semantic_hard_fail_runs}/{len(runs)}",
+        f"- runtime_flow_failed_runs: {runtime_flow_failed_runs}/{len(runs)}",
         f"- artifact_source_snapshot_runs: {snapshot_runs}/{len(runs)}",
         f"- artifact_source_workspace_fallback_runs: {workspace_fallback_runs}/{len(runs)}",
         "",
@@ -1288,8 +1570,8 @@ def write_quality_report(
         "",
         "## Provider Matrix",
         "",
-        "| provider | runs | pass_rate | avg_total | std_total | avg_reliability | avg_contract | avg_analysis | avg_refresh_signal | std_refresh_signal | avg_refresh_findings | avg_refresh_questions | avg_refresh_cov_missing | off_topic_hits | semantic_hard_fail_runs | runtime_parse_failures | runner_unavailable_failures | runtime_timeout_failures | infra_signal_terminated_failures | infra_incomplete_cycle_failures | quality_gates_failed_failures | summary_missing_failures | precheck_failed_failures | cancellation_like_failures | artifact_sources | error_codes | frontend_live_pass_rate | frontend_cancel_pass_rate |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---:|---:|",
+        "| provider | runs | pass_rate | avg_total | std_total | avg_reliability | avg_contract | avg_analysis | avg_refresh_signal | std_refresh_signal | avg_refresh_findings | avg_refresh_questions | avg_refresh_cov_missing | off_topic_hits | semantic_hard_fail_runs | runtime_parse_failures | runner_unavailable_failures | runtime_timeout_failures | infra_signal_terminated_failures | infra_incomplete_cycle_failures | quality_gates_failed_failures | summary_missing_failures | precheck_failed_failures | runtime_flow_failed_failures | cancellation_like_failures | artifact_sources | error_codes | frontend_live_pass_rate | frontend_cancel_pass_rate |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---:|---:|",
     ]
     for row in provider_rows:
         lines.append(
@@ -1299,7 +1581,7 @@ def write_quality_report(
             f"{row['avg_signal']:.2f} | {row['std_signal']:.2f} | {row['avg_findings']:.2f} | {row['avg_questions']:.2f} | "
             f"{row['avg_cov_missing']:.2f} | {row['off_topic_hits']} | {row['semantic_hard_fail_runs']} | "
             f"{row['runtime_parse_failures']} | {row['runner_unavailable_failures']} | {row['runtime_timeout_failures']} | {row['infra_signal_terminated_failures']} | "
-            f"{row['infra_incomplete_cycle_failures']} | {row['quality_gates_failed_failures']} | {row['summary_missing_failures']} | {row['precheck_failed_failures']} | {row['cancellation_like_failures']} | "
+            f"{row['infra_incomplete_cycle_failures']} | {row['quality_gates_failed_failures']} | {row['summary_missing_failures']} | {row['precheck_failed_failures']} | {row['runtime_flow_failed_failures']} | {row['cancellation_like_failures']} | "
             f"{row['artifact_sources']} | {row['error_codes']} | {row['frontend_pass_rate']:.2f} | {row['frontend_cancel_pass_rate']:.2f} |"
         )
 
@@ -1388,6 +1670,7 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
         "quality_gates_failed",
         "summary_missing",
         "precheck_failed",
+        "runtime_flow_failed",
         "cancellation_like",
         "off_topic_hits",
         "issues",
@@ -1421,6 +1704,7 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
                     str(int(run.quality_gates_failed)),
                     str(int(run.summary_missing)),
                     str(int(run.precheck_failed)),
+                    str(int(run.runtime_flow_failed)),
                     str(int(run.cancellation_like)),
                     str(run.off_topic_hits),
                     ",".join(run.issues),
