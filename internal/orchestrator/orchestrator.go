@@ -1511,6 +1511,9 @@ func (e *pipelineExecution) runRuntimeTaskNormalized(
 		RepoScopes:   append([]string(nil), repoScopes...),
 		PathScopes:   append([]string(nil), pathScopes...),
 		StartedAtUTC: e.clock().UTC(),
+		OnOutput: func(chunk acpruntime.OutputChunk) {
+			e.logRuntimeOutput(stepID, domainID, chunk)
+		},
 	}
 	e.logInfo(stepID, domainID, "runtime task started", map[string]any{
 		"task_id":     task.TaskID,
@@ -1790,10 +1793,15 @@ func (e *pipelineExecution) runStepAsIs() error {
 		return err
 	}
 	e.addArtifacts(toOrchestratorArtifacts(artifacts)...)
+	diagramArtifacts, err := e.compiler.CompileC4Diagrams(entities, edges)
+	if err != nil {
+		return err
+	}
+	e.addArtifacts(toOrchestratorArtifacts(diagramArtifacts)...)
 	e.logInfo(e.stepStatus.CurrentStep, "", "as-is reports compiled", map[string]any{
 		"entities":  len(entities),
 		"edges":     len(edges),
-		"artifacts": len(artifacts),
+		"artifacts": len(artifacts) + len(diagramArtifacts),
 	})
 	return nil
 }
@@ -2170,6 +2178,31 @@ func (e *pipelineExecution) logWarn(stepID string, domainID string, message stri
 
 func (e *pipelineExecution) logError(stepID string, domainID string, message string, fields map[string]any) {
 	e.logRunEvent(RunLogLevelError, stepID, domainID, message, fields)
+}
+
+func (e *pipelineExecution) logRuntimeOutput(stepID string, domainID string, chunk acpruntime.OutputChunk) {
+	message := strings.TrimRight(chunk.Text, "\r\n")
+	if strings.TrimSpace(message) == "" {
+		return
+	}
+	entry := RunLogEntry{
+		Timestamp: e.clock().UTC(),
+		Level:     RunLogLevelInfo,
+		Kind:      RunLogKindRuntimeOutput,
+		Stream:    strings.TrimSpace(string(chunk.Stream)),
+		StepID:    strings.TrimSpace(stepID),
+		DomainID:  strings.TrimSpace(domainID),
+		Message:   message,
+	}
+	if chunk.Truncated {
+		entry.Fields = map[string]any{
+			"output_truncated": true,
+			"stream":           entry.Stream,
+		}
+	}
+	if e.onLog != nil {
+		e.onLog(entry)
+	}
 }
 
 func (e *pipelineExecution) logRunEvent(level RunLogLevel, stepID string, domainID string, message string, fields map[string]any) {

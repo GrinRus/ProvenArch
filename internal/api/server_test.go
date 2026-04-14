@@ -458,6 +458,162 @@ func TestPipelineRunLogsEndpointSupportsPagination(t *testing.T) {
 	}
 }
 
+func TestPipelineRunLogsEndpointIncludesRuntimeOutputWireShape(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServerWithRunner(t, streamingRunLogsRunner{})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Post(httpServer.URL+"/api/pipeline/init", "application/json", bytes.NewBufferString(`{"trigger":"ui"}`))
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/init: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", response.StatusCode)
+	}
+
+	var started struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&started); err != nil {
+		t.Fatalf("decode start response: %v", err)
+	}
+	if strings.TrimSpace(started.RunID) == "" {
+		t.Fatalf("expected non-empty run_id")
+	}
+
+	runStatus := waitForRunTerminalStatus(t, httpServer.URL, started.RunID, 8*time.Second)
+	if runStatus.Status != string(orchestrator.RunStatusSucceeded) {
+		t.Fatalf("expected async run success, got status=%q error_code=%q", runStatus.Status, runStatus.ErrorCode)
+	}
+
+	logResp, err := http.Get(httpServer.URL + "/api/pipeline/runs/" + started.RunID + "/logs?cursor=0&limit=500")
+	if err != nil {
+		t.Fatalf("GET /api/pipeline/runs/<id>/logs: %v", err)
+	}
+	defer logResp.Body.Close()
+	if logResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", logResp.StatusCode)
+	}
+
+	var payload struct {
+		Items []struct {
+			Kind   string         `json:"kind"`
+			Stream string         `json:"stream,omitempty"`
+			Fields map[string]any `json:"fields,omitempty"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(logResp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode logs payload: %v", err)
+	}
+	if len(payload.Items) == 0 {
+		t.Fatalf("expected non-empty logs payload")
+	}
+
+	hasEvent := false
+	hasStdoutRaw := false
+	hasStderrRaw := false
+	hasTruncated := false
+	for _, item := range payload.Items {
+		if item.Kind == "event" {
+			hasEvent = true
+		}
+		if item.Kind == "runtime_output" && item.Stream == "stdout" {
+			hasStdoutRaw = true
+			if truncated, ok := item.Fields["output_truncated"].(bool); ok && truncated {
+				hasTruncated = true
+			}
+		}
+		if item.Kind == "runtime_output" && item.Stream == "stderr" {
+			hasStderrRaw = true
+		}
+	}
+	if !hasEvent {
+		t.Fatalf("expected event logs in mixed wire-shape")
+	}
+	if !hasStdoutRaw || !hasStderrRaw {
+		t.Fatalf("expected runtime_output logs for stdout+stderr")
+	}
+	if !hasTruncated {
+		t.Fatalf("expected truncation marker with fields.output_truncated=true")
+	}
+}
+
+func TestPipelineRunLogsEndpointStreamFieldContract(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServerWithRunner(t, streamingRunLogsRunner{})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Post(httpServer.URL+"/api/pipeline/init", "application/json", bytes.NewBufferString(`{"trigger":"ui"}`))
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/init: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", response.StatusCode)
+	}
+
+	var started struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&started); err != nil {
+		t.Fatalf("decode start response: %v", err)
+	}
+	runStatus := waitForRunTerminalStatus(t, httpServer.URL, started.RunID, 8*time.Second)
+	if runStatus.Status != string(orchestrator.RunStatusSucceeded) {
+		t.Fatalf("expected async run success, got status=%q error_code=%q", runStatus.Status, runStatus.ErrorCode)
+	}
+
+	logResp, err := http.Get(httpServer.URL + "/api/pipeline/runs/" + started.RunID + "/logs?cursor=0&limit=500")
+	if err != nil {
+		t.Fatalf("GET /api/pipeline/runs/<id>/logs: %v", err)
+	}
+	defer logResp.Body.Close()
+	if logResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", logResp.StatusCode)
+	}
+
+	var payload struct {
+		Items []struct {
+			Kind   string `json:"kind"`
+			Stream string `json:"stream,omitempty"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(logResp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode logs payload: %v", err)
+	}
+	if len(payload.Items) == 0 {
+		t.Fatalf("expected non-empty logs payload")
+	}
+
+	seenEvent := false
+	seenRuntime := false
+	for _, item := range payload.Items {
+		switch item.Kind {
+		case "event":
+			seenEvent = true
+			if strings.TrimSpace(item.Stream) != "" {
+				t.Fatalf("expected empty stream for event entries, got %q", item.Stream)
+			}
+		case "runtime_output":
+			seenRuntime = true
+			if item.Stream != "stdout" && item.Stream != "stderr" {
+				t.Fatalf("expected runtime_output stream stdout|stderr, got %q", item.Stream)
+			}
+		}
+	}
+	if !seenEvent {
+		t.Fatalf("expected at least one event log entry")
+	}
+	if !seenRuntime {
+		t.Fatalf("expected at least one runtime_output entry")
+	}
+}
+
 func TestPipelineRunLogsEndpointValidatesParams(t *testing.T) {
 	t.Parallel()
 
@@ -2047,5 +2203,46 @@ func (r cancellableDelayedRunner) Run(ctx context.Context, task acpruntime.Task)
 }
 
 func (cancellableDelayedRunner) Preflight(context.Context) error {
+	return nil
+}
+
+type streamingRunLogsRunner struct{}
+
+func (streamingRunLogsRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	if task.OnOutput != nil {
+		task.OnOutput(acpruntime.OutputChunk{
+			Stream: acpruntime.OutputStreamStdout,
+			Text:   "stream stdout line",
+		})
+		task.OnOutput(acpruntime.OutputChunk{
+			Stream: acpruntime.OutputStreamStderr,
+			Text:   "stream stderr line",
+		})
+		task.OnOutput(acpruntime.OutputChunk{
+			Stream:    acpruntime.OutputStreamStdout,
+			Truncated: true,
+			Text:      "stdout output truncated after cap (synthetic)",
+		})
+	}
+
+	payload := map[string]any{
+		"meta": map[string]any{
+			"task_id":    task.TaskID,
+			"step_id":    task.StepID,
+			"run_id":     task.RunID,
+			"runtime":    map[string]any{"name": "streaming-test-runner", "version": "v1"},
+			"started_at": task.StartedAtUTC.Format(time.RFC3339),
+		},
+		"summary":   "synthetic streaming success",
+		"changeset": []any{},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return acpruntime.Result{}, err
+	}
+	return acpruntime.Result{RawJSON: raw}, nil
+}
+
+func (streamingRunLogsRunner) Preflight(context.Context) error {
 	return nil
 }

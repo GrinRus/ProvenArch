@@ -120,6 +120,7 @@ Conflict policy:
 ### Ограничение контракта
 Операции `write_file(content)` в TaskResult нет.
 Поэтому генерация `reports/as-is/*` и упаковка `proposals/*` в MVP реализуются orchestrator/compiler шагами (см. `docs/spec/PIPELINE_SPEC.md`).
+Дополнительно Step 2 materialize-ит `reports/diagrams/*` (C4 Mermaid set) как compiler outputs; это не расширяет `TaskResult` schema.
 
 `add_doc_artifact` в MVP:
 - metadata registration op

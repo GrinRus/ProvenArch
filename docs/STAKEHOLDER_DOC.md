@@ -278,8 +278,12 @@ arch-workspace/
    - wizard для “Конституции”  
    - настройка источников репозиториев (`path` или `git_url`)  
    - редактор baseline skills/prompts (с версионированием через git)  
+   - top-level tabs: `Setup / Baseline / Runs / Results / Settings`  
+   - runtime profile (`timeouts` + `execution`) в отдельной вкладке `Settings`  
    - запуск пайплайнов (init / update / report)  
-   - просмотр результатов (as‑is docs, findings, proposals)
+   - `Runs: Logs` с dual-view (`event timeline` + `raw agent stream`)  
+   - `Results -> Diagrams` для C4 Mermaid artifacts (filter/open/preview)  
+   - просмотр остальных результатов (as‑is docs, findings, proposals)
 
 3) **Orchestrator (локальный сервис, Go)**  
    - управляет шагами pipeline  
@@ -411,6 +415,8 @@ Wizard из блоков-шаблонов:
 - datastores и storage footprint  
 - как устроен CI/CD в каждом сервисе  
 - “что важно знать” (onboarding)
+- full C4 Mermaid set (`Context`, `Container`, per-service `Component`, per-service `Code`) + `reports/diagrams/index.md`
+- strict evidence policy: если данных недостаточно, диаграммы показывают явные `Gap:*` маркеры, без выдуманных узлов
 
 ### 9.3. Шаг 3 — Провалы и анти‑паттерны
 - findings с severity, объяснением и ссылками на evidence  

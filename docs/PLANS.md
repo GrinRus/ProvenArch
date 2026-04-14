@@ -826,6 +826,36 @@ EP-20260411-orchestrator-runner-frontend-operability
 
 ---
 
+## EP-20260414-runtime-streaming-ux-c4-prompts
+
+### Context
+- Требуется закрыть 5 пользовательских болей: raw runtime logs в `Runs: Logs`, non-single-page UX с переносом settings, рендер C4 диаграмм, качество baseline prompts, общий UX redesign.
+- Ограничения: не менять `TaskResult` schema и runtime provider list (`claude-code|qwen-code`) в MVP.
+
+### Slice Plan
+1. **Slice A (runtime stream):** live forwarding stdout/stderr в run logs, совместное существование event/raw stream, hard-cap safeguard + truncation marker.
+2. **Slice B (reports/C4):** Step 2 materialize full C4 Mermaid set (`Context/Container/Component/Code`) + `reports/diagrams/index.md`, strict evidence-first gaps.
+3. **Slice C (frontend UX):** top tabs `Setup/Baseline/Runs/Results/Settings`, settings relocation, `Results -> Diagrams`, `Runs: Logs` dual mode.
+4. **Slice D (baseline prompts):** rewrite prompt packs + skill prompts в структурированные deterministic defaults, quality guard tests against short placeholders.
+
+### Contract/Surface Changes
+- `GET /api/pipeline/runs/<run_id>/logs` wire shape расширен полями `kind` и `stream`.
+- Step 2 artifacts расширены `reports/diagrams/*` и artifact kinds `diagram`, `diagram-index`.
+- UI surface intentionally breaking (updated tab/navigation + selectors in tests).
+
+### Progress Log
+- 2026-04-14: Slice A реализован (runtime `OnOutput` seam, provider stream forwarding, orchestrator raw log entries + truncation event).
+- 2026-04-14: Slice B реализован (compiler `CompileC4Diagrams`, Step2 wiring, diagrams index/materialization, deterministic tests).
+- 2026-04-14: Slice C реализован (tabbed UX, settings relocation, logs dual-mode, diagrams preview, Vitest+Playwright updates).
+- 2026-04-14: Slice D реализован (structured prompt defaults rewrite + quality tests, create-if-missing policy сохранена).
+
+### Verification
+- Backend: `go test ./internal/runtime/... ./internal/orchestrator ./internal/api ./internal/reports ./internal/workspace`
+- Frontend: `npm --prefix ui run typecheck`, `npm --prefix ui run test -- --run`
+- DoD gates: `make contracts`, `make test`, `make lint`, `make build`
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.
