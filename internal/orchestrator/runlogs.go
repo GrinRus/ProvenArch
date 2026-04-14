@@ -12,18 +12,26 @@ import (
 	"time"
 )
 
+const maxRunLogLineBytes = 8 * 1024 * 1024
+
 type RunLogLevel string
+type RunLogKind string
 
 const (
 	RunLogLevelInfo    RunLogLevel = "info"
 	RunLogLevelWarning RunLogLevel = "warning"
 	RunLogLevelError   RunLogLevel = "error"
+
+	RunLogKindEvent         RunLogKind = "event"
+	RunLogKindRuntimeOutput RunLogKind = "runtime_output"
 )
 
 type RunLogEntry struct {
 	Cursor      int            `json:"cursor"`
 	Timestamp   time.Time      `json:"timestamp"`
 	Level       RunLogLevel    `json:"level"`
+	Kind        RunLogKind     `json:"kind,omitempty"`
+	Stream      string         `json:"stream,omitempty"`
 	StepID      string         `json:"step_id,omitempty"`
 	DomainID    string         `json:"domain_id,omitempty"`
 	Message     string         `json:"message"`
@@ -45,18 +53,33 @@ func (s *Service) appendRunLog(runID string, entry RunLogEntry) {
 	if strings.TrimSpace(runID) == "" {
 		return
 	}
-	entry.Message = strings.TrimSpace(entry.Message)
-	if entry.Message == "" {
-		return
-	}
 	if entry.Level == "" {
 		entry.Level = RunLogLevelInfo
+	}
+	if entry.Kind == "" {
+		entry.Kind = RunLogKindEvent
+	}
+	message := entry.Message
+	if entry.Kind == RunLogKindRuntimeOutput {
+		if strings.TrimSpace(message) == "" {
+			return
+		}
+		entry.Message = strings.TrimRight(message, "\r\n")
+	} else {
+		entry.Message = strings.TrimSpace(message)
+		if entry.Message == "" {
+			return
+		}
 	}
 	if entry.Timestamp.IsZero() {
 		entry.Timestamp = s.clock().UTC()
 	}
 	entry.StepID = strings.TrimSpace(entry.StepID)
 	entry.DomainID = strings.TrimSpace(entry.DomainID)
+	entry.Stream = strings.TrimSpace(strings.ToLower(entry.Stream))
+	if entry.Stream != "stdout" && entry.Stream != "stderr" {
+		entry.Stream = ""
+	}
 	entry.TaskrunPath = strings.TrimSpace(entry.TaskrunPath)
 
 	path, err := s.resolveRunLogPath(runID)
@@ -107,6 +130,7 @@ func (s *Service) queryRunLogs(runID string, cursor int, limit int) (RunLogPage,
 	}
 
 	scanner := bufio.NewScanner(strings.NewReader(string(content)))
+	scanner.Buffer(make([]byte, 0, 64*1024), maxRunLogLineBytes)
 	items := make([]RunLogEntry, 0, limit)
 	lineIndex := 0
 	hasMore := false

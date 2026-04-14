@@ -105,6 +105,7 @@ func runScenarioAndSnapshot(t *testing.T, sourceRoot string, exportReadable bool
 
 	required := []string{
 		"reports/as-is/overview.md",
+		"reports/diagrams/c4-context.mmd",
 		"reports/findings/findings.md",
 		"reports/coverage/summary.md",
 		"reports/coverage/open-questions.md",
@@ -130,6 +131,7 @@ func snapshotDeterministicOutputs(t *testing.T, workspacePath string) map[string
 		"charter",
 		"model",
 		"reports/as-is",
+		"reports/diagrams",
 		"reports/findings",
 		"reports/coverage",
 		"reports/agent-outputs",

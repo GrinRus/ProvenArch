@@ -24,6 +24,19 @@ const (
 
 const RuntimeProviderEnv = "ACP_RUNTIME_PROVIDER"
 
+type OutputStream string
+
+const (
+	OutputStreamStdout OutputStream = "stdout"
+	OutputStreamStderr OutputStream = "stderr"
+)
+
+const (
+	// RuntimeOutputStreamHardCapBytes is an internal safeguard against
+	// unbounded live stream forwarding. It does not alter parser behavior.
+	RuntimeOutputStreamHardCapBytes = 4 * 1024 * 1024
+)
+
 func ParseProvider(value string) (Provider, error) {
 	normalized := strings.TrimSpace(strings.ToLower(value))
 	switch normalized {
@@ -130,6 +143,13 @@ type Task struct {
 	RepoScopes   []string
 	PathScopes   []string
 	StartedAtUTC time.Time
+	OnOutput     func(OutputChunk) `json:"-"`
+}
+
+type OutputChunk struct {
+	Stream    OutputStream
+	Text      string
+	Truncated bool
 }
 
 type Result struct {

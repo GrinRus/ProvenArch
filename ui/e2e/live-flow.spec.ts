@@ -16,12 +16,18 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page })
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Local-first architecture control plane" })).toBeVisible();
 
+  await page.getByTestId("tab-settings").click();
+  await expect(page.getByRole("heading", { name: "Settings: Runtime Timeouts" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Settings: Runtime Execution" })).toBeVisible();
+
+  await page.getByTestId("tab-setup").click();
   await page.getByTestId("workspace-validate-btn").click();
   await expect(page.getByTestId("workspace-validate-result")).toBeVisible();
   await expect(page.getByText("Status: valid")).toBeVisible();
   const resolvedRepoRows = page.getByTestId("workspace-validate-result").locator(".repo-summary ul li");
   await expect(resolvedRepoRows).toHaveCount(expectedRepoCount);
 
+  await page.getByTestId("tab-runs").click();
   await page.getByTestId("run-init-btn").click();
   await expect(page.getByTestId("run-status-panel")).toBeVisible();
   const runID = ((await page.getByTestId("run-status-run-id").textContent()) ?? "").trim();
@@ -41,6 +47,67 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page })
   await expect(selectedRunButton).toBeVisible();
   await selectedRunButton.click();
 
+  await page.getByTestId("run-logs-mode-select").selectOption("events");
+  const logsContent = page.getByTestId("run-logs-content");
+  await expect
+    .poll(async () => (await logsContent.textContent()) ?? "", { timeout: 30_000 })
+    .toContain("[EVENT]");
+
+  await page.getByTestId("run-logs-mode-select").selectOption("raw");
+  await expect
+    .poll(
+      async () => {
+        const hasLogsContent = (await logsContent.count()) > 0;
+        const content = hasLogsContent ? ((await logsContent.textContent()) ?? "") : "";
+        const noLogsVisible = (await page.getByText("No run logs yet.").count()) > 0;
+        return content.includes("[RAW]") || noLogsVisible;
+      },
+      { timeout: 30_000 }
+    )
+    .toBe(true);
+
+  await page.getByTestId("run-logs-mode-select").selectOption("all");
+
+  await page.getByTestId("tab-results").click();
+  await page.getByTestId("results-tab-diagrams").click();
+  const diagramButtons = page.getByTestId("run-diagrams-list").locator("button.link-button");
+  await expect(diagramButtons.first()).toBeVisible();
+
+  const c4ContextButton = page.getByRole("button", { name: /reports\/diagrams\/c4-context\.mmd/i });
+  if ((await c4ContextButton.count()) > 0) {
+    await c4ContextButton.first().click();
+  } else {
+    await diagramButtons.first().click();
+  }
+
+  const diagramPanel = page.getByTestId("run-diagram-content-panel");
+  await expect(diagramPanel).toBeVisible();
+  const selectedDiagramPath = page.getByTestId("run-diagram-selected-path");
+  await expect
+    .poll(async () => ((await selectedDiagramPath.textContent()) ?? "").trim(), { timeout: 30_000 })
+    .toMatch(/reports\/diagrams\//i);
+
+  await expect
+    .poll(
+      async () => {
+        const svgVisible = (await diagramPanel.locator(".diagram-svg svg").count()) > 0;
+        const renderingVisible = (await diagramPanel.getByText(/Rendering/i).count()) > 0;
+        const renderErrorVisible = (await diagramPanel.getByText(/Diagram render error:/i).count()) > 0;
+        const plainTextLocator = page.getByTestId("run-diagram-content");
+        const plainText =
+          (await plainTextLocator.count()) > 0 ? (((await plainTextLocator.textContent()) ?? "").trim()) : "";
+        return (
+          svgVisible ||
+          renderingVisible ||
+          renderErrorVisible ||
+          (plainText !== "" && !/^Select a `\.mmd` diagram artifact to preview\.$/.test(plainText))
+        );
+      },
+      { timeout: 30_000 }
+    )
+    .toBe(true);
+
+  await page.getByTestId("results-tab-artifacts").click();
   const firstArtifactButton = page.getByTestId("results-artifacts-panel").locator("button.link-button").first();
   await expect(firstArtifactButton).toBeVisible();
   await firstArtifactButton.click();
@@ -70,7 +137,10 @@ test("live ui flow: run refresh -> cancel -> failed(run_canceled)", async ({ pag
   await expect(page.getByTestId("workspace-validate-result")).toBeVisible();
   await expect(page.getByText("Status: valid")).toBeVisible();
 
-  const previousRunID = ((await page.getByTestId("run-status-run-id").textContent()) ?? "").trim();
+  await page.getByTestId("tab-runs").click();
+  const previousRunIDLocator = page.getByTestId("run-status-run-id");
+  const previousRunID =
+    (await previousRunIDLocator.count()) > 0 ? ((await previousRunIDLocator.first().textContent()) ?? "").trim() : "";
   await page.getByTestId("run-refresh-btn").click();
   await expect(page.getByTestId("run-status-panel")).toBeVisible();
 

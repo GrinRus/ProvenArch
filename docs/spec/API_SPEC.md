@@ -490,6 +490,7 @@ Partial update persisted execution-полей в `workspace.yaml`.
       "cursor": 0,
       "timestamp": "2026-04-03T12:00:00Z",
       "level": "info",
+      "kind": "event",
       "step_id": "init.step1.collect",
       "domain_id": "payments-service",
       "message": "runtime task started",
@@ -503,12 +504,37 @@ Partial update persisted execution-полей в `workspace.yaml`.
         "path_scopes": ["services/api"],
         "stderr_snippet": "json parse error ... [truncated]"
       }
+    },
+    {
+      "cursor": 1,
+      "timestamp": "2026-04-03T12:00:01Z",
+      "level": "info",
+      "kind": "runtime_output",
+      "stream": "stdout",
+      "step_id": "init.step1.collect",
+      "domain_id": "payments-service",
+      "message": "Agent runtime line from stdout",
+      "fields": {
+        "output_truncated": false
+      }
     }
   ],
-  "next_cursor": 1,
+  "next_cursor": 2,
   "eof": false
 }
 ```
+
+`items[].kind`:
+- `event` — orchestrator lifecycle/event logs (default when field is omitted in legacy entries)
+- `runtime_output` — raw runtime stdout/stderr stream forwarded during task execution
+
+`items[].stream`:
+- optional; only for `kind=runtime_output`
+- values: `stdout`, `stderr`
+
+`output_truncated` policy:
+- внутренний hard-cap safeguard применяется к raw runtime stream;
+- при срабатывании публикуется `runtime_output` entry с `fields.output_truncated=true`.
 
 **400**
 - `invalid_cursor`
