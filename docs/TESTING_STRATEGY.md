@@ -247,6 +247,12 @@ Implemented additional jobs:
   - `UI_E2E_CANCEL_STUB_SLEEP_SEC` задаёт длительность controlled slow stub runner для `cancel-refresh`
   - cancel preflight guard: `UI_E2E_CANCEL_TIMEOUT_SEC >= UI_E2E_CANCEL_STUB_SLEEP_SEC + UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC`; при нарушении сценарий fail-fast до Playwright
   - `ui/e2e/live-flow.spec.ts` + `npm run e2e:live --prefix ui`
+  - batch shard controls (`scripts/full-run-batch-5x2.sh`):
+    - `BATCH_PROVIDER_FILTER` (`all` или CSV `qwen-code,claude-code`)
+    - `BATCH_RUN_SELECTION` (`all`, CSV `1,3,5` или диапазоны `1-3,5`)
+    - `BATCH_SKIP_PRECHECK=1` для secondary shard'ов
+    - `BATCH_FRONTEND_MODE=auto|always|never` (default `auto`, auto-skip frontend если `run1` не выбран)
+    - параллельные shard-процессы должны использовать разные `BATCH_ID`
 
 ## 8) Acceptance для testing strategy
 

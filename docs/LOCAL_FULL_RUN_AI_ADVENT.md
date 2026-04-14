@@ -96,6 +96,11 @@ Batch/Frontend scripts:
   - `REPORTS_ROOT` (default `${E2E_TMP_ROOT}/reports`)
   - `ACP_CLAUDE_CMD_BIN` (default `claude`, direct binary)
   - `ACP_QWEN_CMD_BIN` (default `qwen`, direct binary)
+  - shard controls:
+    - `BATCH_PROVIDER_FILTER` (`all` или CSV `qwen-code,claude-code`)
+    - `BATCH_RUN_SELECTION` (`all`, CSV `1,3,5` или диапазоны `1-3,5`)
+    - `BATCH_SKIP_PRECHECK` (`0|1`; default `0`)
+    - `BATCH_FRONTEND_MODE` (`auto|always|never`; default `auto`)
 - `scripts/full-run-batch-matrix.sh`
   - `E2E_MATRIX_FILE` (required; YAML `profiles[]`, optional `sweeps[]`)
   - обязательные профили: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
@@ -147,7 +152,29 @@ E2E_MATRIX_FILE=/abs/path/to/e2e-matrix.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
 ./scripts/full-run-batch-matrix.sh
+
+# Вариант 8: параллельные shard-runs (по провайдерам)
+TARGET_REPOS_FILE=/abs/path/to/repos.yaml \
+ACP_CLAUDE_CMD_BIN=claude \
+ACP_QWEN_CMD_BIN=qwen \
+BATCH_ID=batch-qwen \
+BATCH_PROVIDER_FILTER=qwen-code \
+./scripts/full-run-batch-5x2.sh &
+
+TARGET_REPOS_FILE=/abs/path/to/repos.yaml \
+ACP_CLAUDE_CMD_BIN=claude \
+ACP_QWEN_CMD_BIN=qwen \
+BATCH_ID=batch-claude \
+BATCH_PROVIDER_FILTER=claude-code \
+./scripts/full-run-batch-5x2.sh &
+
+wait
 ```
+
+Правила shard-run:
+- параллельные shard-процессы обязаны использовать разные `BATCH_ID`;
+- precheck рекомендуется выполнять только в одном shard (`BATCH_SKIP_PRECHECK=0`), для остальных shard'ов использовать `BATCH_SKIP_PRECHECK=1`.
+- в shard-режиме требуются runtime-бинари только выбранных провайдеров (`BATCH_PROVIDER_FILTER`).
 
 `full-run-batch-matrix.sh` — официальный локальный (trusted machine) runbook и не входит в required CI gates.
 Если цель запуска — release verdict, используйте критерии и формат решения из:
@@ -289,6 +316,7 @@ Output semantics:
   - `cancel-refresh`: validate -> run refresh -> cancel selected run -> verify `failed + run_canceled`.
 - для `UI_E2E_SCENARIO=cancel-refresh` script использует controlled slow stub runner;
   длительность задаётся `UI_E2E_CANCEL_STUB_SLEEP_SEC` (default `90`).
+- при `BATCH_FRONTEND_MODE=auto` frontend smoke помечается `skipped`, если `run1` не входит в `BATCH_RUN_SELECTION`.
 
 ## 6) Continuous Improvement Loop (balanced backend/frontend)
 

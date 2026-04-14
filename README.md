@@ -341,6 +341,38 @@ ACP_QWEN_CMD_BIN=qwen \
 ./scripts/full-run-batch-5x2.sh
 ```
 
+Параллельный shard-run (например, по провайдерам):
+
+```bash
+TARGET_REPOS_FILE=/abs/path/to/repos.yaml \
+ACP_CLAUDE_CMD_BIN=claude \
+ACP_QWEN_CMD_BIN=qwen \
+BATCH_ID=batch-qwen \
+BATCH_PROVIDER_FILTER=qwen-code \
+./scripts/full-run-batch-5x2.sh &
+
+TARGET_REPOS_FILE=/abs/path/to/repos.yaml \
+ACP_CLAUDE_CMD_BIN=claude \
+ACP_QWEN_CMD_BIN=qwen \
+BATCH_ID=batch-claude \
+BATCH_PROVIDER_FILTER=claude-code \
+./scripts/full-run-batch-5x2.sh &
+
+wait
+```
+
+Shard controls:
+- `BATCH_PROVIDER_FILTER`: `all` (default) или CSV из `qwen-code,claude-code`
+- `BATCH_RUN_SELECTION`: `all` (default), CSV (`1,3,5`) или диапазоны (`1-3,5`)
+- `BATCH_SKIP_PRECHECK`: `0|1` (default `0`); полезно для secondary shard'ов
+- `BATCH_FRONTEND_MODE`: `auto|always|never` (default `auto`)
+  - `auto`: frontend smoke выполняется только если в `BATCH_RUN_SELECTION` есть `run1`
+  - `always`: всегда запускать frontend smoke (требует `run1` workspace)
+  - `never`: полностью пропускать frontend smoke
+- в shard-режиме требуются бинари только выбранных провайдеров из `BATCH_PROVIDER_FILTER`
+- для параллельных shard-процессов используйте разные `BATCH_ID` (иначе конфликт output paths)
+- рекомендуемый split: один shard с `BATCH_SKIP_PRECHECK=0`, остальные shard'ы с `BATCH_SKIP_PRECHECK=1`
+
 Matrix runbook `4` профиля (`single-path`, `single-git_url`, `multi-path`, `multi-git_url`) × sweep-профили:
 
 ```bash
@@ -396,6 +428,7 @@ GitHub target catalog для release выбора (`3` monorepo + `3` multi-repo
   - `init-inspect` (default): validate -> run init -> inspect artifacts
   - `cancel-refresh`: validate -> run refresh -> cancel selected run -> expect `failed + run_canceled`
 - `UI_E2E_CANCEL_STUB_SLEEP_SEC` задаёт длительность controlled slow stub runner для сценария `cancel-refresh`
+- при shard-режиме `BATCH_FRONTEND_MODE=auto` frontend smoke помечается `skipped`, если `run1` не входит в `BATCH_RUN_SELECTION`
 
 `TARGET_REPOS_FILE` — основной batch-контракт; single legacy env поддерживаются для обратной совместимости.
 Full matrix (`full-run-batch-matrix.sh`) — локальный trusted-machine runbook, не required CI gate.

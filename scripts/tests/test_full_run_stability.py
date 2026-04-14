@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import json
 import signal
 import subprocess
 import tempfile
@@ -1571,6 +1572,55 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
             )
             self.assertIn("precheck_failed=", result.stderr)
 
+    def test_batch_precheck_failed_respects_shard_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            write_text(
+                provenarch_root / "Makefile",
+                textwrap.dedent(
+                    """\
+                    .PHONY: contracts test lint build
+                    contracts test lint build:
+                    \t@echo "forced precheck fail for shard selection test" >&2
+                    \t@exit 2
+                    """
+                ),
+            )
+            e2e_tmp_root = root / "e2e"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TARGET_REPO": str(target_repo),
+                    "BATCH_ID": "batch-precheck-shard-selection",
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "BATCH_PROVIDER_FILTER": "qwen-code",
+                    "BATCH_RUN_SELECTION": "2,4",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+            classification_path = e2e_tmp_root / "runs" / "batch-precheck-shard-selection" / "backend-run-classifications.tsv"
+            self.assertTrue(classification_path.exists(), msg="backend-run-classifications.tsv is missing")
+            rows = [line for line in classification_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(len(rows), 3, msg="expected header + 2 shard rows")
+            payload_rows = [line.split("\t") for line in rows[1:]]
+            self.assertEqual({"qwen-code"}, {item[0] for item in payload_rows})
+            self.assertEqual({"2", "4"}, {item[1] for item in payload_rows})
+            self.assertTrue(all(item[2] == "precheck_failed" for item in payload_rows))
+
     def test_batch_precheck_ignores_timeout_tuning_env(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -1692,6 +1742,255 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
                 any("\tinfra_incomplete_cycle\t" in line for line in rows[1:]),
                 msg="expected non-precheck run classification rows",
             )
+
+    def test_batch_frontend_auto_mode_skips_when_run1_not_selected(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            e2e_tmp_root = root / "e2e"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TARGET_REPO": str(target_repo),
+                    "BATCH_ID": "batch-frontend-auto-skip",
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "BATCH_PROVIDER_FILTER": "claude-code",
+                    "BATCH_RUN_SELECTION": "2",
+                    "BATCH_FRONTEND_MODE": "auto",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+            frontend_result_path = (
+                e2e_tmp_root / "runs" / "batch-frontend-auto-skip" / "frontend" / "claude-code" / "frontend-e2e-result.json"
+            )
+            self.assertTrue(frontend_result_path.exists(), msg="frontend-e2e-result.json is missing")
+            frontend_result = json.loads(frontend_result_path.read_text(encoding="utf-8"))
+            self.assertEqual("skipped", frontend_result.get("status"))
+            self.assertIn("frontend_mode_auto", str(frontend_result.get("reason", "")))
+
+            cancel_result_path = (
+                e2e_tmp_root
+                / "runs"
+                / "batch-frontend-auto-skip"
+                / "frontend-cancel"
+                / "claude-code"
+                / "frontend-cancel-result.json"
+            )
+            self.assertTrue(cancel_result_path.exists(), msg="frontend-cancel-result.json is missing")
+            cancel_result = json.loads(cancel_result_path.read_text(encoding="utf-8"))
+            self.assertEqual("skipped", cancel_result.get("status"))
+            self.assertIn("frontend_mode_auto", str(cancel_result.get("reason", "")))
+            self.assertIn("frontend_failed=0", result.stderr)
+            self.assertIn("frontend_cancel_skipped=1", result.stderr)
+
+    def test_batch_rejects_unknown_provider_filter(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TARGET_REPO": str(target_repo),
+                    "BATCH_ID": "batch-invalid-provider-filter",
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "BATCH_PROVIDER_FILTER": "qwen-code,unknown-provider",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+            self.assertIn("unsupported provider", result.stderr)
+
+    def test_batch_provider_filter_does_not_require_unselected_runtime_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            e2e_tmp_root = root / "e2e"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TARGET_REPO": str(target_repo),
+                    "BATCH_ID": "batch-provider-filter-runtime-binary",
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "ACP_CLAUDE_CMD_BIN": "missing-claude-bin",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "BATCH_PROVIDER_FILTER": "qwen-code",
+                    "BATCH_RUN_SELECTION": "1",
+                    "BATCH_SKIP_PRECHECK": "1",
+                    "BATCH_FRONTEND_MODE": "never",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+            self.assertNotIn("required command is unavailable: missing-claude-bin", result.stderr)
+            classification_path = (
+                e2e_tmp_root / "runs" / "batch-provider-filter-runtime-binary" / "backend-run-classifications.tsv"
+            )
+            self.assertTrue(classification_path.exists(), msg="backend-run-classifications.tsv is missing")
+            rows = [line for line in classification_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(len(rows), 2, msg="expected header + one run row")
+            payload = rows[1].split("\t")
+            self.assertEqual("qwen-code", payload[0])
+            self.assertEqual("1", payload[1])
+
+    def test_batch_rejects_out_of_bounds_run_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TARGET_REPO": str(target_repo),
+                    "BATCH_ID": "batch-invalid-run-selection",
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "BATCH_RUN_SELECTION": "1-6",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+            self.assertIn("run index out of bounds", result.stderr)
+
+    def test_batch_skip_precheck_bypasses_failing_makefile(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            write_text(
+                provenarch_root / "Makefile",
+                textwrap.dedent(
+                    """\
+                    .PHONY: contracts test lint build
+                    contracts test lint build:
+                    \t@echo "forced precheck fail that must be skipped" >&2
+                    \t@exit 7
+                    """
+                ),
+            )
+            e2e_tmp_root = root / "e2e"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TARGET_REPO": str(target_repo),
+                    "BATCH_ID": "batch-skip-precheck",
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "BATCH_PROVIDER_FILTER": "qwen-code",
+                    "BATCH_RUN_SELECTION": "1",
+                    "BATCH_SKIP_PRECHECK": "1",
+                    "BATCH_FRONTEND_MODE": "never",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+            self.assertIn("skipping DoD/UI precheck", result.stderr)
+            self.assertNotIn("batch precheck failed", result.stderr)
+            self.assertIn("precheck_failed=0", result.stderr)
+
+    def test_batch_frontend_never_mode_marks_both_smokes_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, target_repo = create_batch_stub_environment(root)
+            e2e_tmp_root = root / "e2e"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TARGET_REPO": str(target_repo),
+                    "BATCH_ID": "batch-frontend-never-skip",
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "BATCH_PROVIDER_FILTER": "claude-code",
+                    "BATCH_RUN_SELECTION": "1",
+                    "BATCH_FRONTEND_MODE": "never",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+            frontend_result_path = (
+                e2e_tmp_root / "runs" / "batch-frontend-never-skip" / "frontend" / "claude-code" / "frontend-e2e-result.json"
+            )
+            cancel_result_path = (
+                e2e_tmp_root
+                / "runs"
+                / "batch-frontend-never-skip"
+                / "frontend-cancel"
+                / "claude-code"
+                / "frontend-cancel-result.json"
+            )
+            self.assertTrue(frontend_result_path.exists(), msg="frontend-e2e-result.json is missing")
+            self.assertTrue(cancel_result_path.exists(), msg="frontend-cancel-result.json is missing")
+            frontend_result = json.loads(frontend_result_path.read_text(encoding="utf-8"))
+            cancel_result = json.loads(cancel_result_path.read_text(encoding="utf-8"))
+            self.assertEqual("skipped", frontend_result.get("status"))
+            self.assertEqual("skipped", cancel_result.get("status"))
+            self.assertIn("frontend_mode_never", str(frontend_result.get("reason", "")))
+            self.assertIn("frontend_mode_never", str(cancel_result.get("reason", "")))
+            self.assertIn("frontend_failed=0", result.stderr)
+            self.assertIn("frontend_cancel_skipped=1", result.stderr)
 
     def test_batch_classifies_signal_terminated_without_runner_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as td:
