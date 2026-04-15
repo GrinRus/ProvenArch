@@ -2,26 +2,28 @@
 set -Eeuo pipefail
 
 PROVENARCH_ROOT="${PROVENARCH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+# shellcheck source=scripts/legacy-env-guard.sh
+source "$PROVENARCH_ROOT/scripts/legacy-env-guard.sh"
+# shellcheck source=scripts/frontend-status-reasons.sh
+source "$PROVENARCH_ROOT/scripts/frontend-status-reasons.sh"
 ACP_BIN="${ACP_BIN:-$PROVENARCH_ROOT/bin/acp}"
 WORKSPACE="${WORKSPACE:-}"
 RUNTIME_PROVIDER="${RUNTIME_PROVIDER:-}"
-API_READY_TIMEOUT_SEC="${ACP_API_READY_TIMEOUT_SEC:-${READY_TIMEOUT_SEC:-120}}"
+API_READY_TIMEOUT_SEC="${ACP_API_READY_TIMEOUT_SEC:-120}"
 RUN_LOGS_TTL_HOURS="${RUN_LOGS_TTL_HOURS:-168}"
 RUN_LOGS_MAX_RUNS="${RUN_LOGS_MAX_RUNS:-200}"
 OUTPUT_DIR="${OUTPUT_DIR:-}"
 LISTEN="${LISTEN:-}"
 UI_E2E_EXPECTED_REPO_COUNT="${UI_E2E_EXPECTED_REPO_COUNT:-1}"
-UI_E2E_EXPECTED_STRATEGY="${UI_E2E_EXPECTED_STRATEGY:-${ACP_EXECUTION_STRATEGY:-}}"
-UI_E2E_EXPECTED_MAX_PARALLEL_TASKS="${UI_E2E_EXPECTED_MAX_PARALLEL_TASKS:-${ACP_MAX_PARALLEL_TASKS:-}}"
-UI_E2E_SCENARIO="${UI_E2E_SCENARIO:-init-inspect-service-first}"
+UI_E2E_SCENARIO="${UI_E2E_SCENARIO:-init-inspect}"
 UI_E2E_CANCEL_STUB_SLEEP_SEC="${UI_E2E_CANCEL_STUB_SLEEP_SEC:-90}"
-UI_E2E_INIT_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-${UI_E2E_INIT_TIMEOUT_SEC:-}}"
-UI_E2E_CANCEL_TIMEOUT_SEC="${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-${UI_E2E_CANCEL_TIMEOUT_SEC:-}}"
+UI_INIT_POLL_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-}"
+UI_CANCEL_POLL_TIMEOUT_SEC="${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-}"
 UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC="${UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC:-30}"
-UI_E2E_HEADED="${UI_E2E_HEADED:-0}"
+FRONTEND_RESULT_FILENAME="${FRONTEND_RESULT_FILENAME:-frontend-e2e-result.json}"
 
-DEFAULT_UI_E2E_INIT_TIMEOUT_SEC=900
-DEFAULT_UI_E2E_CANCEL_TIMEOUT_SEC=420
+DEFAULT_UI_INIT_POLL_TIMEOUT_SEC=900
+DEFAULT_UI_CANCEL_POLL_TIMEOUT_SEC=420
 
 SERVER_PID=""
 BASE_URL=""
@@ -54,22 +56,6 @@ parse_positive_int_or_die() {
     die "$name must be > 0, got '$raw'"
   fi
   printf '%s' "$numeric"
-}
-
-parse_binary_flag_or_die() {
-  local raw="$1"
-  local name="$2"
-  case "$raw" in
-    1|true|TRUE|yes|YES|on|ON)
-      printf '1'
-      ;;
-    0|false|FALSE|no|NO|off|OFF|"")
-      printf '0'
-      ;;
-    *)
-      die "$name must be 0|1 (or boolean aliases), got '$raw'"
-      ;;
-  esac
 }
 
 allocate_free_port() {
@@ -123,23 +109,23 @@ PY
       [[ -z "$key" ]] && continue
       case "$key" in
         init)
-          if [[ -z "$UI_E2E_INIT_TIMEOUT_SEC" ]]; then
-            UI_E2E_INIT_TIMEOUT_SEC="$value"
+          if [[ -z "$UI_INIT_POLL_TIMEOUT_SEC" ]]; then
+            UI_INIT_POLL_TIMEOUT_SEC="$value"
           fi
           ;;
         cancel)
-          if [[ -z "$UI_E2E_CANCEL_TIMEOUT_SEC" ]]; then
-            UI_E2E_CANCEL_TIMEOUT_SEC="$value"
+          if [[ -z "$UI_CANCEL_POLL_TIMEOUT_SEC" ]]; then
+            UI_CANCEL_POLL_TIMEOUT_SEC="$value"
           fi
           ;;
       esac
     done <<<"$resolved"
   fi
-  if [[ -z "$UI_E2E_INIT_TIMEOUT_SEC" ]]; then
-    UI_E2E_INIT_TIMEOUT_SEC="$DEFAULT_UI_E2E_INIT_TIMEOUT_SEC"
+  if [[ -z "$UI_INIT_POLL_TIMEOUT_SEC" ]]; then
+    UI_INIT_POLL_TIMEOUT_SEC="$DEFAULT_UI_INIT_POLL_TIMEOUT_SEC"
   fi
-  if [[ -z "$UI_E2E_CANCEL_TIMEOUT_SEC" ]]; then
-    UI_E2E_CANCEL_TIMEOUT_SEC="$DEFAULT_UI_E2E_CANCEL_TIMEOUT_SEC"
+  if [[ -z "$UI_CANCEL_POLL_TIMEOUT_SEC" ]]; then
+    UI_CANCEL_POLL_TIMEOUT_SEC="$DEFAULT_UI_CANCEL_POLL_TIMEOUT_SEC"
   fi
 }
 # shellcheck disable=SC2329
@@ -172,16 +158,17 @@ else
 fi
 
 case "$UI_E2E_SCENARIO" in
-  init-inspect-service-first|init-inspect|refresh-incremental|refresh-full|cancel-refresh)
+  init-inspect|cancel-refresh)
     ;;
   *)
-    die "unsupported UI_E2E_SCENARIO '$UI_E2E_SCENARIO' (allowed: init-inspect-service-first, refresh-incremental, refresh-full, cancel-refresh)"
+    die "unsupported UI_E2E_SCENARIO '$UI_E2E_SCENARIO' (allowed: init-inspect, cancel-refresh)"
     ;;
 esac
 
 require_cmd curl
 require_cmd python3
 require_cmd npm
+acp_ensure_no_legacy_env_set die
 
 runtime_cmd=""
 declare -a server_env
@@ -206,7 +193,7 @@ set -Eeuo pipefail
 trap 'exit 130' TERM INT HUP PIPE
 sleep ${UI_E2E_CANCEL_STUB_SLEEP_SEC}
 cat <<'JSON'
-{"meta":{"task_id":"task-stub","step_id":"refresh.step2.service_collect","runtime":{"name":"${RUNTIME_PROVIDER}","version":"cancel-stub"},"started_at":"2026-04-12T00:00:00Z"},"summary":"stub completion (unexpected in cancel scenario)","changeset":[]}
+{"meta":{"task_id":"task-stub","step_id":"refresh.step1.collect","runtime":{"name":"${RUNTIME_PROVIDER}","version":"cancel-stub"},"started_at":"2026-04-12T00:00:00Z"},"summary":"stub completion (unexpected in cancel scenario)","changeset":[]}
 JSON
 EOF
   chmod +x "$stub_runner"
@@ -222,7 +209,6 @@ EOF
 fi
 
 require_cmd "$runtime_cmd"
-UI_E2E_HEADED="$(parse_binary_flag_or_die "$UI_E2E_HEADED" "UI_E2E_HEADED")"
 
 if [[ -z "$LISTEN" ]]; then
   port="$(allocate_free_port)"
@@ -232,7 +218,10 @@ BASE_URL="http://${LISTEN}"
 SERVER_LOG="$OUTPUT_DIR/serve-${RUNTIME_PROVIDER}.log"
 PLAYWRIGHT_LOG="$OUTPUT_DIR/playwright-${RUNTIME_PROVIDER}.log"
 PLAYWRIGHT_RESULTS_DIR="$OUTPUT_DIR/playwright-results"
-RESULT_JSON="$OUTPUT_DIR/frontend-e2e-result.json"
+if [[ -z "$FRONTEND_RESULT_FILENAME" || "$FRONTEND_RESULT_FILENAME" == */* ]]; then
+  die "FRONTEND_RESULT_FILENAME must be a non-empty file name without '/'"
+fi
+RESULT_JSON="$OUTPUT_DIR/$FRONTEND_RESULT_FILENAME"
 started_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 mkdir -p "$PLAYWRIGHT_RESULTS_DIR"
 
@@ -260,40 +249,33 @@ if ! wait_for_health "$BASE_URL"; then
   die "ACP server did not become healthy in ${API_READY_TIMEOUT_SEC}s (see $SERVER_LOG)"
 fi
 resolve_ui_poll_timeouts
-log "effective UI polling timeouts: init=${UI_E2E_INIT_TIMEOUT_SEC}s cancel=${UI_E2E_CANCEL_TIMEOUT_SEC}s"
+log "effective UI polling timeouts: init=${UI_INIT_POLL_TIMEOUT_SEC}s cancel=${UI_CANCEL_POLL_TIMEOUT_SEC}s"
 if [[ "$UI_E2E_SCENARIO" == "cancel-refresh" ]]; then
-  cancel_timeout_sec="$(parse_positive_int_or_die "$UI_E2E_CANCEL_TIMEOUT_SEC" "UI_E2E_CANCEL_TIMEOUT_SEC")"
+  cancel_timeout_sec="$(parse_positive_int_or_die "$UI_CANCEL_POLL_TIMEOUT_SEC" "ACP_UI_CANCEL_POLL_TIMEOUT_SEC")"
   cancel_stub_sleep_sec="$(parse_positive_int_or_die "$UI_E2E_CANCEL_STUB_SLEEP_SEC" "UI_E2E_CANCEL_STUB_SLEEP_SEC")"
   cancel_margin_sec="$(parse_positive_int_or_die "$UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC" "UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC")"
   min_cancel_timeout_sec=$((cancel_stub_sleep_sec + cancel_margin_sec))
   log "cancel-refresh timeout guard: timeout=${cancel_timeout_sec}s stub_sleep=${cancel_stub_sleep_sec}s margin=${cancel_margin_sec}s min_required=${min_cancel_timeout_sec}s"
   if (( cancel_timeout_sec < min_cancel_timeout_sec )); then
-    die "cancel-refresh preflight failed: UI_E2E_CANCEL_TIMEOUT_SEC=${cancel_timeout_sec}s must be >= ${min_cancel_timeout_sec}s (UI_E2E_CANCEL_STUB_SLEEP_SEC=${cancel_stub_sleep_sec}s + margin=${cancel_margin_sec}s)"
+    die "cancel-refresh preflight failed: ACP_UI_CANCEL_POLL_TIMEOUT_SEC=${cancel_timeout_sec}s must be >= ${min_cancel_timeout_sec}s (UI_E2E_CANCEL_STUB_SLEEP_SEC=${cancel_stub_sleep_sec}s + margin=${cancel_margin_sec}s)"
   fi
 fi
 
 status="passed"
-reason="ok"
-declare -a playwright_cmd
-playwright_cmd=(npm run --prefix ui e2e:live)
-if [[ "$UI_E2E_HEADED" == "1" ]]; then
-  playwright_cmd+=(-- --headed)
-fi
+reason="$ACP_FRONTEND_REASON_OK"
 if ! (
   cd "$PROVENARCH_ROOT"
   UI_E2E_BASE_URL="$BASE_URL" \
   UI_E2E_RUNTIME_PROVIDER="$RUNTIME_PROVIDER" \
   UI_E2E_SCENARIO="$UI_E2E_SCENARIO" \
   UI_E2E_EXPECTED_REPO_COUNT="$UI_E2E_EXPECTED_REPO_COUNT" \
-  UI_E2E_EXPECTED_STRATEGY="$UI_E2E_EXPECTED_STRATEGY" \
-  UI_E2E_EXPECTED_MAX_PARALLEL_TASKS="$UI_E2E_EXPECTED_MAX_PARALLEL_TASKS" \
-  UI_E2E_INIT_TIMEOUT_SEC="$UI_E2E_INIT_TIMEOUT_SEC" \
-  UI_E2E_CANCEL_TIMEOUT_SEC="$UI_E2E_CANCEL_TIMEOUT_SEC" \
+  ACP_UI_INIT_POLL_TIMEOUT_SEC="$UI_INIT_POLL_TIMEOUT_SEC" \
+  ACP_UI_CANCEL_POLL_TIMEOUT_SEC="$UI_CANCEL_POLL_TIMEOUT_SEC" \
   UI_E2E_OUTPUT_DIR="$PLAYWRIGHT_RESULTS_DIR" \
-  "${playwright_cmd[@]}"
+  npm run --prefix ui e2e:live
 ) >"$PLAYWRIGHT_LOG" 2>&1; then
   status="failed"
-  reason="playwright_failed"
+  reason="$ACP_FRONTEND_REASON_PLAYWRIGHT_FAILED"
 fi
 
 finished_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
@@ -305,10 +287,10 @@ export FRONTEND_E2E_BASE_URL="$BASE_URL"
 export FRONTEND_E2E_WORKSPACE="$WORKSPACE"
 export FRONTEND_E2E_RUNTIME_CMD="$runtime_cmd"
 export FRONTEND_E2E_SCENARIO="$UI_E2E_SCENARIO"
-export FRONTEND_E2E_HEADED="$UI_E2E_HEADED"
 export FRONTEND_E2E_SERVER_LOG="$SERVER_LOG"
 export FRONTEND_E2E_PLAYWRIGHT_LOG="$PLAYWRIGHT_LOG"
 export FRONTEND_E2E_REASON="$reason"
+acp_frontend_reason_validate "$FRONTEND_E2E_REASON" die
 python3 - "$RESULT_JSON" <<'PY'
 import json
 import os
@@ -324,7 +306,6 @@ payload = {
     "workspace": os.environ.get("FRONTEND_E2E_WORKSPACE"),
     "runtime_command": os.environ.get("FRONTEND_E2E_RUNTIME_CMD"),
     "scenario": os.environ.get("FRONTEND_E2E_SCENARIO"),
-    "headed": os.environ.get("FRONTEND_E2E_HEADED") == "1",
     "reason": os.environ.get("FRONTEND_E2E_REASON", "unknown"),
     "server_log": os.environ.get("FRONTEND_E2E_SERVER_LOG"),
     "playwright_log": os.environ.get("FRONTEND_E2E_PLAYWRIGHT_LOG"),

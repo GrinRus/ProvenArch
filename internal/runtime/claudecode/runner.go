@@ -21,7 +21,6 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/runtime/runnerdiag"
 	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultbinding"
 	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultextractor"
-	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultrepair"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 )
 
@@ -69,7 +68,7 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 		return acpruntime.Result{}, fmt.Errorf("marshal runner task: %w", err)
 	}
 	if len(r.Args) > 0 || !isNativeDirectClaudeCommand(command) {
-		return runLegacyPassthrough(ctx, command, r.Args, task, taskPayload)
+		return runStdinPassthrough(ctx, command, r.Args, task, taskPayload)
 	}
 
 	return runNativeDirectClaude(ctx, command, task, taskPayload)
@@ -80,7 +79,7 @@ func isNativeDirectClaudeCommand(command string) bool {
 	return base == "claude" || base == "claude.exe"
 }
 
-func runLegacyPassthrough(ctx context.Context, command string, args []string, task acpruntime.Task, taskPayload []byte) (acpruntime.Result, error) {
+func runStdinPassthrough(ctx context.Context, command string, args []string, task acpruntime.Task, taskPayload []byte) (acpruntime.Result, error) {
 	result, parseStage, parseErr, runErr := runClaudeCommand(ctx, task, command, append([]string(nil), args...), taskPayload)
 	if runErr != nil {
 		unavailableMessage := buildUnavailableFailureMessage(task, runErr, result)
@@ -308,7 +307,6 @@ func runClaudeCommand(ctx context.Context, task acpruntime.Task, command string,
 			Stderr: stderr.String(),
 		}, "extract", err, nil
 	}
-	raw = taskresultrepair.RepairEdgeAliases(raw)
 	taskResult, err := contracts.ParseTaskResult(raw)
 	if err != nil {
 		return acpruntime.Result{
@@ -548,9 +546,9 @@ func buildDirectTaskResultTemplateJSON(task acpruntime.Task) string {
 
 func buildStepSpecificDirectPolicy(stepID string) string {
 	switch stepID {
-	case "refresh.step2.service_collect", "refresh.step1.collect":
+	case "refresh.step1.collect":
 		return strings.Join([]string{
-			fmt.Sprintf(`STEP POLICY %s:`, stepID),
+			`STEP POLICY refresh.step1.collect:`,
 			`- Allowed upsert_entity types: service, datastore, integration, external.system, team, domain, api, component.`,
 			`- Forbidden placeholder entity types: runtime_provider, runtime, metadata.`,
 			`- Analyze only repository/workspace artifacts; do NOT perform web search or external browsing.`,
@@ -560,9 +558,9 @@ func buildStepSpecificDirectPolicy(stepID string) string {
 			`- If evidence is incomplete, capture gap via coverage.missing instead of synthetic placeholder entities.`,
 			`- Include at least one question and at least three items in coverage.missing.`,
 		}, "\n")
-	case "refresh.step4.service_findings", "refresh.step3.findings":
+	case "refresh.step3.findings":
 		return strings.Join([]string{
-			fmt.Sprintf(`STEP POLICY %s:`, stepID),
+			`STEP POLICY refresh.step3.findings:`,
 			`- If owner mapping is unresolved in evidence/coverage, include at least one add_finding operation.`,
 			`- Each finding must include rule_id, related_ids, and provenance.evidence[].`,
 			`- For observation provenance, evidence array MUST be non-empty.`,
@@ -589,7 +587,7 @@ func buildDirectTemplateChangeset(task acpruntime.Task) []contracts.Operation {
 	}
 	changes := make([]contracts.Operation, 0, len(scopes))
 	switch task.StepID {
-	case "init.step4.service_findings", "refresh.step4.service_findings", "init.step3.findings", "refresh.step3.findings":
+	case "init.step3.findings", "refresh.step3.findings":
 		for _, scope := range scopes {
 			scope = strings.TrimSpace(scope)
 			if scope == "" {
@@ -662,7 +660,7 @@ func (FakeRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Resul
 	sort.Strings(repoScopes)
 
 	switch task.StepID {
-	case "init.step2.service_collect", "refresh.step2.service_collect", "init.step1.collect", "refresh.step1.collect":
+	case "init.step1.collect", "refresh.step1.collect":
 		result := contracts.TaskResult{
 			Meta: contracts.Meta{
 				TaskID:     task.TaskID,
@@ -687,7 +685,7 @@ func (FakeRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Resul
 			},
 		}
 		return marshalResult(result)
-	case "init.step4.service_findings", "refresh.step4.service_findings", "init.step3.findings", "refresh.step3.findings":
+	case "init.step3.findings", "refresh.step3.findings":
 		result := contracts.TaskResult{
 			Meta: contracts.Meta{
 				TaskID:     task.TaskID,
@@ -704,30 +702,6 @@ func (FakeRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Resul
 			},
 			Summary:   "Fake findings completed",
 			Changeset: makeFindingsChangeset(repoScopes),
-		}
-		return marshalResult(result)
-	case "init.step5.global_review", "refresh.step5.global_review":
-		result := contracts.TaskResult{
-			Meta: contracts.Meta{
-				TaskID:     task.TaskID,
-				StepID:     task.StepID,
-				RunID:      task.RunID,
-				Runtime:    contracts.RuntimeMeta{Name: "claude-code", Version: "fake"},
-				StartedAt:  task.StartedAtUTC.UTC().Format(time.RFC3339),
-				FinishedAt: task.StartedAtUTC.UTC().Add(1 * time.Second).Format(time.RFC3339),
-				Workspace:  task.Workspace,
-				ShardID:    task.ShardID,
-				RepoScope:  primaryTaskRepoScope(task.RepoScope, repoScopes),
-				RepoScopes: repoScopes,
-				PathScopes: append([]string(nil), task.PathScopes...),
-			},
-			Summary:   "Fake global review completed",
-			Changeset: []contracts.Operation{},
-			Questions: []contracts.Question{},
-			Coverage: &contracts.Coverage{
-				Observed: []string{"global review"},
-				Missing:  []string{"owner mappings"},
-			},
 		}
 		return marshalResult(result)
 	default:

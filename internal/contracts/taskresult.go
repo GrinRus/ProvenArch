@@ -47,8 +47,6 @@ type Operation struct {
 	EdgeID      string       `json:"edge_id,omitempty"`
 	Finding     *Finding     `json:"finding,omitempty"`
 	DocArtifact *DocArtifact `json:"doc_artifact,omitempty"`
-	Question    *Question    `json:"question,omitempty"`
-	Coverage    *Coverage    `json:"coverage,omitempty"`
 	Reason      string       `json:"reason,omitempty"`
 	TargetPath  string       `json:"target_path,omitempty"`
 }
@@ -137,8 +135,6 @@ var supportedOps = map[string]struct{}{
 	"remove_edge":      {},
 	"add_finding":      {},
 	"add_doc_artifact": {},
-	"add_question":     {},
-	"set_coverage":     {},
 }
 
 func ParseTaskResult(raw []byte) (TaskResult, error) {
@@ -175,36 +171,7 @@ func NormalizeTaskResult(result TaskResult) TaskResult {
 		orderedQuestionIDs = append(orderedQuestionIDs, question.ID)
 	}
 
-	coverage := normalized.Coverage
-	if coverage == nil {
-		coverage = &Coverage{}
-	}
-
-	filteredChangeset := make([]Operation, 0, len(result.Changeset))
-	for _, op := range result.Changeset {
-		switch op.Op {
-		case "add_question":
-			if op.Question == nil || strings.TrimSpace(op.Question.ID) == "" {
-				continue
-			}
-			if _, exists := questionsByID[op.Question.ID]; exists {
-				continue
-			}
-			questionsByID[op.Question.ID] = *op.Question
-			orderedQuestionIDs = append(orderedQuestionIDs, op.Question.ID)
-		case "set_coverage":
-			if op.Coverage == nil {
-				continue
-			}
-			coverage.Observed = uniquePreserveOrder(append(coverage.Observed, op.Coverage.Observed...))
-			coverage.Missing = uniquePreserveOrder(append(coverage.Missing, op.Coverage.Missing...))
-			coverage.Notes = uniquePreserveOrder(append(coverage.Notes, op.Coverage.Notes...))
-		default:
-			filteredChangeset = append(filteredChangeset, op)
-		}
-	}
-
-	normalized.Changeset = filteredChangeset
+	normalized.Changeset = append([]Operation(nil), result.Changeset...)
 
 	normalizedQuestions := make([]Question, 0, len(orderedQuestionIDs))
 	for _, id := range orderedQuestionIDs {
@@ -212,13 +179,17 @@ func NormalizeTaskResult(result TaskResult) TaskResult {
 	}
 	normalized.Questions = normalizedQuestions
 
-	coverage.Observed = uniquePreserveOrder(coverage.Observed)
-	coverage.Missing = uniquePreserveOrder(coverage.Missing)
-	coverage.Notes = uniquePreserveOrder(coverage.Notes)
-	if len(coverage.Observed) == 0 && len(coverage.Missing) == 0 && len(coverage.Notes) == 0 {
-		normalized.Coverage = nil
-	} else {
-		normalized.Coverage = coverage
+	if normalized.Coverage != nil {
+		coverage := &Coverage{
+			Observed: uniquePreserveOrder(normalized.Coverage.Observed),
+			Missing:  uniquePreserveOrder(normalized.Coverage.Missing),
+			Notes:    uniquePreserveOrder(normalized.Coverage.Notes),
+		}
+		if len(coverage.Observed) == 0 && len(coverage.Missing) == 0 && len(coverage.Notes) == 0 {
+			normalized.Coverage = nil
+		} else {
+			normalized.Coverage = coverage
+		}
 	}
 
 	return normalized
@@ -292,18 +263,6 @@ func validateTaskResult(result TaskResult) error {
 				strings.TrimSpace(op.DocArtifact.Title) == "" ||
 				strings.TrimSpace(op.DocArtifact.Path) == "" {
 				problems = append(problems, label+" doc_artifact requires id, kind, title, path")
-			}
-		case "add_question":
-			if op.Question == nil {
-				problems = append(problems, label+" requires question")
-				continue
-			}
-			if strings.TrimSpace(op.Question.ID) == "" || strings.TrimSpace(op.Question.Text) == "" {
-				problems = append(problems, label+" question requires id and text")
-			}
-		case "set_coverage":
-			if op.Coverage == nil {
-				problems = append(problems, label+" requires coverage")
 			}
 		}
 	}

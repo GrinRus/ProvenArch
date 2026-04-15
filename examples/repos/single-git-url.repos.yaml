@@ -1,0 +1,8 @@
+# Example only: replace `git_url` and `ref` with a real repository and pinned commit.
+version: 1
+repos:
+  - name: app-main
+    git_url: https://github.com/example-org/app-main.git
+    ref: 2c54b8f1c6d8a8f9e6f2f4e6f0d5c7b8a9e1d2f3
+docs:
+  imports_path: ./docs/imports

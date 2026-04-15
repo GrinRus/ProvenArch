@@ -414,9 +414,7 @@
             "upsert_edge",
             "remove_edge",
             "add_finding",
-            "add_doc_artifact",
-            "add_question",
-            "set_coverage"
+            "add_doc_artifact"
           ]
         },
         "entity": {
@@ -436,12 +434,6 @@
         },
         "doc_artifact": {
           "$ref": "#/$defs/doc_artifact"
-        },
-        "question": {
-          "$ref": "#/$defs/question"
-        },
-        "coverage": {
-          "$ref": "#/$defs/coverage"
         },
         "reason": {
           "type": "string"
@@ -533,34 +525,6 @@
           "then": {
             "required": [
               "doc_artifact"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "op": {
-                "const": "add_question"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "question"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "op": {
-                "const": "set_coverage"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "coverage"
             ]
           }
         }

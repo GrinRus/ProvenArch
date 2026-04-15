@@ -42,7 +42,7 @@ Batch-only semantic hard-fail checks (в `scripts/e2e_batch_report.py`):
 - `PROVENARCH_ROOT` (default: текущий repo ProvenArch)
 - `TARGET_REPOS_FILE` (canonical: YAML с `repos[]`, как в `workspace.yaml`)
   - если файл содержит `runtime.profile.timeouts`, `init-workspace` переносит профиль в `workspace.yaml`
-- `TARGET_REPO*` legacy env не поддерживаются (fail-fast, используйте только `TARGET_REPOS_FILE`)
+- legacy single inputs запрещены: script делает fail-fast с migration hint на `TARGET_REPOS_FILE`
 - `TMP_ROOT` (default: auto `mktemp -d -t provenarch-ai-advent.XXXXXX`)
 - `ACP_RUNTIME_PROVIDER` (headless provider: `claude-code` default или `qwen-code`)
 - `ACP_CLAUDE_CMD` (команда для provider `claude-code`; default `claude-code`, поддержан direct `claude` без wrapper)
@@ -61,12 +61,7 @@ Batch-only semantic hard-fail checks (в `scripts/e2e_batch_report.py`):
   - `ACP_API_INIT_TIMEOUT_SEC` (default `120`)
   - `ACP_UI_INIT_POLL_TIMEOUT_SEC` (default `900`)
   - `ACP_UI_CANCEL_POLL_TIMEOUT_SEC` (default `420`)
-- deprecated fallback aliases:
-  - `ACP_FULL_RUN_PIPELINE_TIMEOUT_SEC`
-  - `ACP_FULL_RUN_PIPELINE_KILL_GRACE_SEC`
-  - `READY_TIMEOUT_SEC`
-  - `UI_E2E_INIT_TIMEOUT_SEC`
-  - `UI_E2E_CANCEL_TIMEOUT_SEC`
+- deprecated timeout aliases запрещены: script делает fail-fast с migration hint
 
 Effective timeout precedence для full-run/batch/frontend live:
 - `env > workspace.yaml(runtime.profile.timeouts) > defaults`
@@ -74,10 +69,10 @@ Effective timeout precedence для full-run/batch/frontend live:
 Batch/Frontend scripts:
 - `scripts/full-run-batch-5x2.sh`
   - `BATCH_ID` (default `batch-<UTC timestamp>`)
-  - `TARGET_REPOS_FILE` (единственный поддерживаемый вход)
+  - `TARGET_REPOS_FILE` (canonical; единственный вход)
   - optional profile metadata:
     - `PROFILE_ID`
-    - `PROFILE_SOURCE_KIND` (`path|git_url`)
+    - `PROFILE_SOURCE_KIND` (`path|git_url`, optional: если не задан, auto-detect из `TARGET_REPOS_FILE`)
     - `EXPECTED_REPO_COUNT`
     - `SWEEP_ID`
   - execution profile env (обычно выставляются matrix sweep'ом):
@@ -201,8 +196,6 @@ wait
 `full-run-batch-matrix.sh` — официальный локальный (trusted machine) runbook и не входит в required CI gates.
 Если цель запуска — release verdict, используйте критерии и формат решения из:
 - `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
-- главная очередь first-run: `posthog/posthog`, `microservices-patterns/ftgo-application`, `getsentry/*`, `Open edX ecosystem`
-- второй проход: `GoogleCloudPlatform/bank-of-anthos`, `OpenStack ecosystem`
 
 Script всегда формирует:
 - `TMP_ROOT/full-run.log`
@@ -231,7 +224,7 @@ Script всегда формирует:
 
 Batch evaluator source-of-truth:
 - backend quality берётся из snapshot-артефактов `snapshots/<run_id>/reports/*`;
-- если snapshot недоступен, в отчёт попадает `artifact_source=workspace-fallback` и issue `reliability:snapshot-missing`;
+- если snapshot недоступен, evaluator фиксирует issue `reliability:snapshot-missing` (без fallback к `arch-workspace/reports`);
 - frontend live e2e запускается на отдельной копии workspace (`frontend-workspace`) и не влияет на backend quality content score.
 - frontend/cancel matrix формируются в run-level формате (`provider + run_index`), strict matrix gate блокирует любой init run-status != `passed`.
 - `documentation_audit_<batch-id>.md` обязателен для strict verdict (`auto_status=passed` и `manual_status=passed`).
@@ -339,9 +332,7 @@ Output semantics:
 - `scripts/frontend-live-e2e.sh` берёт poll timeouts из effective runtime config (`GET /api/runtime/timeouts`) с env override (`ACP_UI_INIT_POLL_TIMEOUT_SEC`/`ACP_UI_CANCEL_POLL_TIMEOUT_SEC`);
 - `UI_E2E_EXPECTED_REPO_COUNT` задаёт ожидаемое число resolved repos в live e2e (default `1`).
 - `UI_E2E_SCENARIO`:
-  - `init-inspect-service-first` (default): validate -> run init -> inspect artifacts + service-first checks;
-  - `refresh-incremental`: validate -> run refresh(incremental) + service-first checks;
-  - `refresh-full`: validate -> run refresh(full) + service-first checks;
+  - `init-inspect` (default): validate -> run init -> inspect artifacts;
   - `cancel-refresh`: validate -> run refresh -> cancel selected run -> verify `failed + run_canceled`.
 - для `UI_E2E_SCENARIO=cancel-refresh` script использует controlled slow stub runner;
   длительность задаётся `UI_E2E_CANCEL_STUB_SLEEP_SEC` (default `90`).

@@ -34,4 +34,9 @@ done
 
 ajv validate --spec=draft2020 -c ajv-formats -s schemas/taskresult.schema.json -d examples/taskresult.example.json
 ajv validate --spec=draft2020 -c ajv-formats -s schemas/taskresult.schema.json -d fixtures/taskresult/normalized-top-level.json
-ajv validate --spec=draft2020 -c ajv-formats -s schemas/taskresult.schema.json -d fixtures/taskresult/mixed-legacy.json
+if ajv validate --spec=draft2020 -c ajv-formats -s schemas/taskresult.schema.json -d fixtures/taskresult/mixed-legacy.json >/tmp/acp-taskresult-invalid.log 2>&1; then
+  echo "Expected invalid fixture to fail: fixtures/taskresult/mixed-legacy.json"
+  cat /tmp/acp-taskresult-invalid.log
+  exit 1
+fi
+echo "fixtures/taskresult/mixed-legacy.json invalid as expected"

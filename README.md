@@ -235,12 +235,6 @@ Precedence:
 - `ACP_UI_INIT_POLL_TIMEOUT_SEC`
 - `ACP_UI_CANCEL_POLL_TIMEOUT_SEC`
 
-Deprecated fallback aliases:
-- `READY_TIMEOUT_SEC`
-- `UI_E2E_INIT_TIMEOUT_SEC`
-- `UI_E2E_CANCEL_TIMEOUT_SEC`
-- full-run script aliases: `ACP_FULL_RUN_PIPELINE_TIMEOUT_SEC`, `ACP_FULL_RUN_PIPELINE_KILL_GRACE_SEC`
-
 API управления timeout-профилем:
 - `GET /api/runtime/timeouts` (persisted + effective + source)
 - `PUT /api/runtime/timeouts` (partial update persisted values)
@@ -250,8 +244,8 @@ API управления timeout-профилем:
 Execution-конфиг хранится в `workspace.yaml` (`runtime.profile.execution`) и управляет шардированием runtime-задач.
 
 Default values:
-- `strategy=parallel`
-- `max_parallel_tasks=3`
+- `strategy=sequential`
+- `max_parallel_tasks=1`
 - `failure_policy=best_effort`
 - `shard_discovery.mode=heuristics`
 - `repo_selection=all`
@@ -307,7 +301,7 @@ TARGET_REPOS_FILE=/abs/path/to/repos.yaml ./scripts/full-run-ai-advent.sh
 ```
 
 Канонический input для full-run/batch: `TARGET_REPOS_FILE` (`repos[]` в формате `workspace.yaml`).
-Legacy env-входы (`TARGET_REPO*`) удалены: при их задании script завершится fail-fast.
+Legacy single-repo inputs и deprecated timeout aliases удалены: при их использовании full-run/batch/frontend scripts завершаются fail-fast с migration hint.
 
 Script делает strict полный цикл:
 - API simulation + runtime `fake + headless`;
@@ -365,13 +359,10 @@ Shard controls:
 - `BATCH_PROVIDER_FILTER`: `all` (default) или CSV из `qwen-code,claude-code`
 - `BATCH_RUN_SELECTION`: `all` (default), CSV (`1,3,5`) или диапазоны (`1-3,5`)
 - `BATCH_SKIP_PRECHECK`: `0|1` (default `0`); полезно для secondary shard'ов
-- `BATCH_FRONTEND_MODE`: `auto|always|never|per_run` (default `auto`)
-  - `auto`: frontend init smoke выполняется только если в `BATCH_RUN_SELECTION` есть `run1`
-  - `always`: frontend init smoke выполняется один раз на provider (run1 workspace)
-  - `never`: frontend init smoke полностью пропускается
-  - `per_run`: frontend init smoke запускается для каждого выбранного backend run (`provider x runN`)
-- `BATCH_FRONTEND_CANCEL_MODE`: `once_per_provider|per_run|never` (default `once_per_provider`)
-- `UI_E2E_HEADED`: `0|1` (default `0`), при `1` Playwright запускается с `--headed`
+- `BATCH_FRONTEND_MODE`: `auto|always|never` (default `auto`)
+  - `auto`: frontend smoke выполняется только если в `BATCH_RUN_SELECTION` есть `run1`
+  - `always`: всегда запускать frontend smoke (требует `run1` workspace)
+  - `never`: полностью пропускать frontend smoke
 - в shard-режиме требуются бинари только выбранных провайдеров из `BATCH_PROVIDER_FILTER`
 - для параллельных shard-процессов используйте разные `BATCH_ID` (иначе конфликт output paths)
 - рекомендуемый split: один shard с `BATCH_SKIP_PRECHECK=0`, остальные shard'ы с `BATCH_SKIP_PRECHECK=1`
@@ -394,26 +385,19 @@ ACP_QWEN_CMD_BIN=qwen \
 - обязательный набор профилей: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
 - для `git_url` профилей refs должны быть pinned в `repos_file`
 - относительные пути `repos_file` резолвятся относительно директории `E2E_MATRIX_FILE`
-- `sweeps[]` (optional, backward-compatible):
+- `sweeps[]` (optional):
 - если `sweeps[]` отсутствует -> implicit `baseline` sweep
 - release-ready sweep set:
   - `baseline`: `strategy=sequential`, `max_parallel_tasks=1`, `failure_policy=best_effort`, `shard_discovery_mode=heuristics`, `repo_selection=all`
   - `scale-backend`: `strategy=parallel`, `max_parallel_tasks=4`, `failure_policy=best_effort`, `shard_discovery_mode=semantic`, `repo_selection=backend_only`
 
-Готовые matrix-конфиги:
-- `examples/e2e-matrix.example.yaml`
-- `examples/e2e-matrix.release-wave1.yaml`
-- `examples/e2e-matrix.release-wave2.yaml`
-
-Preset-наборы:
-- curated path presets: `examples/repos/curated/*.repos.yaml`
-- pinned GitHub presets: `examples/repos/github/*.repos.yaml`
+Готовый шаблон: `examples/e2e-matrix.example.yaml` (+ `examples/repos/*.repos.yaml`).
 GitHub target catalog для release выбора (`3` monorepo + `3` multi-repo ecosystems):
 - `examples/repos/github/mono-*.repos.yaml`
 - `examples/repos/github/multi-*-ecosystem.repos.yaml`
 - source-of-truth по выбору и wiring: `docs/RELEASE_LIVE_E2E_RUNBOOK.md` (section `3.1`)
-- рекомендуемый first-run набор: `posthog/posthog`, `microservices-patterns/ftgo-application`, `getsentry/*`, `Open edX ecosystem`
-- расширенный набор для второго прохода: `GoogleCloudPlatform/bank-of-anthos` и `OpenStack ecosystem`
+- рекомендуемый first-run набор: `posthog/posthog`, `microservices-patterns/ftgo-application`, `sentry ecosystem`, `open edX ecosystem`
+- расширенный набор для второго прохода: `bank-of-anthos` и `openstack ecosystem`
 
 Скрипт сохраняет:
 - run artifacts (default): `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/...`
@@ -423,7 +407,6 @@ GitHub target catalog для release выбора (`3` monorepo + `3` multi-repo
   - `/tmp/provenarch-test_arch_project/reports/frontend_e2e_matrix_<batch-id>.md`
   - `/tmp/provenarch-test_arch_project/reports/frontend_cancel_e2e_matrix_<batch-id>.md`
   - `/tmp/provenarch-test_arch_project/reports/quality_report_<batch-id>.md`
-  - `/tmp/provenarch-test_arch_project/reports/documentation_audit_<batch-id>.md`
 - matrix+release artifacts:
   - `/tmp/provenarch-test_arch_project/reports/profile_matrix_<matrix-id>.md`
   - `/tmp/provenarch-test_arch_project/reports/profile_matrix_<matrix-id>.tsv`
@@ -432,24 +415,16 @@ GitHub target catalog для release выбора (`3` monorepo + `3` multi-repo
 - backend quality считается только по snapshot-артефактам (`snapshots/<run_id>/reports/*`), frontend smoke запускается на отдельной `frontend-workspace` копии и не мутирует backend baseline
 - batch evaluator добавляет semantic hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`; для multi-profile (`expected_repo_count >= 2`) обязателен `cross-repo` сигнал (`analysis:cross-repo-missing` при отсутствии)
 - в `run_matrix`/`quality_report` дополнительно фиксируются `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, runtime flow checks (`runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:repo-selection`, `runtime:execution-semantics`, `runtime_flow_failed`) и failure classes (`runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_signal_terminated`, `infra_incomplete_cycle`, `quality_gates_failed`, `summary_missing`, `precheck_failed`)
-- `frontend_e2e_matrix`/`frontend_cancel_e2e_matrix` формируются в run-level формате (`provider + run`), strict gate блокируется при любом init run-status != `passed`
-- `documentation_audit_<batch-id>.md` содержит auto rubric + manual checklist + implementation audit; strict gate блокируется при `auto_status != passed` или `manual_status != passed`
 - direct `npm run --prefix ui e2e:live`: Playwright output default `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
 - `scripts/frontend-live-e2e.sh`: Playwright output сохраняется в `$OUTPUT_DIR/playwright-results`
 - frontend live e2e ожидает число resolved repos из `UI_E2E_EXPECTED_REPO_COUNT` (default `1`)
 - `UI_E2E_SCENARIO` переключает live flow:
-  - `init-inspect-service-first` (default): validate -> run init -> inspect service-first artifacts (`step1..step6`)
-  - `refresh-incremental`: validate -> run refresh (incremental) -> verify partial fan-out
-  - `refresh-full`: validate -> run refresh (full) -> verify full fan-out
+  - `init-inspect` (default): validate -> run init -> inspect artifacts
   - `cancel-refresh`: validate -> run refresh -> cancel selected run -> expect `failed + run_canceled`
 - `UI_E2E_CANCEL_STUB_SLEEP_SEC` задаёт длительность controlled slow stub runner для сценария `cancel-refresh`
-- в release matrix рекомендуется:
-  - `BATCH_FRONTEND_MODE=per_run`
-  - `BATCH_FRONTEND_CANCEL_MODE=once_per_provider`
-  - `UI_E2E_HEADED=1`
 - при shard-режиме `BATCH_FRONTEND_MODE=auto` frontend smoke помечается `skipped`, если `run1` не входит в `BATCH_RUN_SELECTION`
 
-`TARGET_REPOS_FILE` — единственный поддерживаемый batch/full-run контракт.
+`TARGET_REPOS_FILE` — единственный batch/full-run input-контракт; legacy single env не поддерживаются.
 Full matrix (`full-run-batch-matrix.sh`) — локальный trusted-machine runbook, не required CI gate.
 Для release decision используйте агентский runbook:
 - [docs/RELEASE_LIVE_E2E_RUNBOOK.md](docs/RELEASE_LIVE_E2E_RUNBOOK.md)
@@ -461,8 +436,6 @@ Repo CI по умолчанию живёт в GitHub Actions:
 - `golden`
 - `smoke-cli`
 - `smoke-api`
-- `ui-smoke`
-- `ui-live-smoke-optional` (workflow_dispatch, не required gate)
 
 ---
 
@@ -539,7 +512,6 @@ Orchestrator принимает выход runtime **только** как TaskR
 
 MVP canonical runtime shape:
 - `questions[]` и `coverage` пишутся на top-level
-- legacy operation forms `add_question` / `set_coverage` допускаются только для backward-compatible normalization внутри orchestrator
 - `add_doc_artifact` трактуется как metadata registration op, а не как content write op
 
 ### Changeset operations (MVP)
@@ -549,8 +521,6 @@ MVP canonical runtime shape:
 - `remove_edge`
 - `add_finding`
 - `add_doc_artifact`
-- `add_question`
-- `set_coverage`
 
 ### Evidence format (MVP)
 
@@ -574,12 +544,10 @@ MVP canonical runtime shape:
 
 ### Init pipeline
 0. Charter (wizard)
-1. Service inventory (planner + snapshot)
-2. Service collect (runtime fan-out by service shards)
-3. As-is docs
-4. Service findings (runtime fan-out by service shards)
-5. Global review (single runtime aggregation)
-6. Proposals
+1. Collect context
+2. As-is docs
+3. Findings
+4. Proposals
 
 ### Continuous loop (manual)
 - обновление локальных репозиториев/документов

@@ -19,7 +19,6 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/runtime/runnerdiag"
 	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultbinding"
 	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultextractor"
-	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultrepair"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 )
 
@@ -74,12 +73,6 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 
 	result, parseStage, parseErr, runErr := runQwenCommand(ctx, task, command, args)
 	if runErr != nil {
-		if len(r.Args) == 0 && isPromptFlagUnsupported(runErr) {
-			runErr = fmt.Errorf(
-				"%w (compatibility guard: current qwen command does not support --prompt in default mode; use explicit HeadlessRunner.Args for legacy positional prompt flow)",
-				runErr,
-			)
-		}
 		unavailableMessage := buildUnavailableFailureMessage(task, runErr, result)
 		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 			acpruntime.ProviderQwenCode,
@@ -141,17 +134,6 @@ func buildDefaultQwenArgs(task acpruntime.Task, prompt string) []string {
 	}
 	args = append(args, "--prompt", prompt)
 	return args
-}
-
-func isPromptFlagUnsupported(err error) bool {
-	text := strings.ToLower(strings.TrimSpace(err.Error()))
-	if !strings.Contains(text, "--prompt") {
-		return false
-	}
-	return strings.Contains(text, "unknown option") ||
-		strings.Contains(text, "unknown argument") ||
-		strings.Contains(text, "unrecognized option") ||
-		strings.Contains(text, "invalid option")
 }
 
 func buildParseFailureMessage(task acpruntime.Task, parseStage string, parseErr error, result acpruntime.Result) string {
@@ -275,7 +257,6 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 			Stderr: stderr.String(),
 		}, "extract", err, nil
 	}
-	rawTaskResult = taskresultrepair.RepairEdgeAliases(rawTaskResult)
 	taskResult, err := contracts.ParseTaskResult(rawTaskResult)
 	if err != nil {
 		return acpruntime.Result{
@@ -506,9 +487,9 @@ func buildTaskResultTemplateJSON(task acpruntime.Task) string {
 
 func buildStepSpecificPolicy(stepID string) string {
 	switch stepID {
-	case "refresh.step2.service_collect", "refresh.step1.collect":
+	case "refresh.step1.collect":
 		return strings.Join([]string{
-			fmt.Sprintf(`STEP POLICY %s:`, stepID),
+			`STEP POLICY refresh.step1.collect:`,
 			`- Allowed upsert_entity types: service, datastore, integration, external.system, team, domain, api, component.`,
 			`- Forbidden placeholder entity types: runtime_provider, runtime, metadata.`,
 			`- Analyze only repository/workspace artifacts; do NOT perform web search or external browsing.`,
@@ -518,9 +499,9 @@ func buildStepSpecificPolicy(stepID string) string {
 			`- If evidence is incomplete, capture gap via coverage.missing instead of synthetic placeholder entities.`,
 			`- Include at least one question and at least three items in coverage.missing.`,
 		}, "\n")
-	case "refresh.step4.service_findings", "refresh.step3.findings":
+	case "refresh.step3.findings":
 		return strings.Join([]string{
-			fmt.Sprintf(`STEP POLICY %s:`, stepID),
+			`STEP POLICY refresh.step3.findings:`,
 			`- If owner mapping is unresolved in evidence/coverage, include at least one add_finding operation.`,
 			`- Each finding must include rule_id, related_ids, and provenance.evidence[].`,
 			`- For observation provenance, evidence array MUST be non-empty.`,
@@ -545,7 +526,7 @@ func buildTemplateChangeset(task acpruntime.Task) []contracts.Operation {
 	}
 	changes := make([]contracts.Operation, 0, len(scopes))
 	switch task.StepID {
-	case "init.step4.service_findings", "refresh.step4.service_findings", "init.step3.findings", "refresh.step3.findings":
+	case "init.step3.findings", "refresh.step3.findings":
 		for _, scope := range scopes {
 			scope = strings.TrimSpace(scope)
 			if scope == "" {

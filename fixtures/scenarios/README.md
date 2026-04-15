@@ -1,4 +1,4 @@
-# Scenario Fixtures (planned)
+# Scenario Fixtures
 
 Этот каталог фиксирует baseline scenario surface для integration/golden tests.
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
@@ -67,6 +66,10 @@ RUNTIME_FLOW_ISSUE_TAGS = (
     "runtime:repo-selection",
     "runtime:execution-semantics",
 )
+
+FRONTEND_PROVIDERS = ("qwen-code", "claude-code")
+FRONTEND_LIVE_RESULT_FILENAME = "frontend-e2e-result.json"
+FRONTEND_CANCEL_RESULT_FILENAME = "frontend-cancel-result.json"
 
 
 def normalize_text(value: str) -> str:
@@ -272,16 +275,19 @@ def normalize_declared_repos_meta(preflight: dict[str, Any]) -> dict[str, Any]:
                 "expected_repo_count": expected_count,
                 "declared_repos": declared,
             }
-    target_repo = preflight.get("target_repo")
-    declared: list[dict[str, Any]] = []
-    if target_repo:
-        declared.append({"name": "target-repo", "source": "path", "path": str(target_repo), "ref": ""})
+    expected = preflight.get("expected_repo_count", 0)
+    try:
+        expected_count = int(expected)
+    except Exception:
+        expected_count = 0
+    if expected_count < 0:
+        expected_count = 0
     return {
         "target_repos_file": str(preflight.get("target_repos_file", "-")),
-        "profile_id": str(preflight.get("profile_id", "legacy")),
+        "profile_id": str(preflight.get("profile_id", "adhoc")),
         "profile_source_kind": str(preflight.get("profile_source_kind", "mixed")),
-        "expected_repo_count": len(declared) if declared else 1,
-        "declared_repos": declared,
+        "expected_repo_count": expected_count,
+        "declared_repos": [],
     }
 
 
@@ -320,7 +326,7 @@ def collect_repo_roots(run_dir: Path, declared_meta: dict[str, Any]) -> list[Pat
     if roots:
         return roots
     declared = declared_meta.get("declared_repos") or []
-    fallback: list[Path] = []
+    declared_roots: list[Path] = []
     for item in declared:
         if not isinstance(item, dict):
             continue
@@ -331,10 +337,10 @@ def collect_repo_roots(run_dir: Path, declared_meta: dict[str, Any]) -> list[Pat
             continue
         path_obj = Path(raw_path).expanduser().resolve()
         if path_obj.exists() and path_obj.is_dir():
-            fallback.append(path_obj)
+            declared_roots.append(path_obj)
     deduped: list[Path] = []
     seen: set[str] = set()
-    for root in fallback:
+    for root in declared_roots:
         key = str(root)
         if key in seen:
             continue
@@ -345,9 +351,7 @@ def collect_repo_roots(run_dir: Path, declared_meta: dict[str, Any]) -> list[Pat
 
 def resolve_reports_root(run_dir: Path, run_id: str) -> tuple[Path, str]:
     snapshot_reports = run_dir / "snapshots" / run_id / "reports"
-    if snapshot_reports.exists():
-        return snapshot_reports, "snapshot"
-    return run_dir / "arch-workspace" / "reports", "workspace-fallback"
+    return snapshot_reports, "snapshot"
 
 
 def resolve_quality_json(run_dir: Path, row: dict[str, Any]) -> tuple[Path, str]:
@@ -358,8 +362,7 @@ def resolve_quality_json(run_dir: Path, row: dict[str, Any]) -> tuple[Path, str]
 
 def resolve_step_taskrun_files(run_dir: Path, run_id: str, pipeline: str) -> tuple[list[Path], str]:
     reports_root, source = resolve_reports_root(run_dir, run_id)
-    runtime_taskruns = collect_runtime_taskrun_payloads(reports_root / "taskruns", run_id, pipeline)
-    files = [path for path, _ in runtime_taskruns]
+    files = sorted((reports_root / "taskruns").glob(f"{run_id}-{pipeline}-*.json"))
     return files, source
 
 
@@ -658,41 +661,6 @@ def evaluate_runtime_flow_checks(
             if len(missing_shard_meta) > 8:
                 details.append(f"runtime/shard-metadata -> +{len(missing_shard_meta) - 8} additional taskruns with missing shard metadata")
 
-        service_inventory_plan_path = taskruns_root / f"{run_id}-service-inventory-plan.json"
-        if service_inventory_plan_path.exists():
-            try:
-                service_inventory_payload = read_json(service_inventory_plan_path)
-            except Exception as exc:
-                issues.add("runtime:empty-service-inventory")
-                details.append(
-                    f"runtime/empty-service-inventory -> invalid json {service_inventory_plan_path} ({exc})"
-                )
-            else:
-                services = service_inventory_payload.get("services")
-                selected_shards = service_inventory_payload.get("selected_shards")
-                if isinstance(services, list) and isinstance(selected_shards, list):
-                    services_total = len(services)
-                    selected_total = len(selected_shards)
-                    if services_total == 1 and selected_total == 1:
-                        service0 = services[0] if isinstance(services[0], dict) else {}
-                        file_count_raw = service0.get("file_count", 0)
-                        source_bytes_raw = service0.get("source_bytes", 0)
-                        try:
-                            file_count = int(file_count_raw)
-                        except Exception:
-                            file_count = 0
-                        try:
-                            source_bytes = int(source_bytes_raw)
-                        except Exception:
-                            source_bytes = 0
-                        if file_count <= 0 and source_bytes <= 0:
-                            issues.add("runtime:empty-service-inventory")
-                            details.append(
-                                "runtime/empty-service-inventory -> "
-                                f"{service_inventory_plan_path}: selected_shards={selected_total} "
-                                f"services_total={services_total} file_count={file_count} source_bytes={source_bytes}"
-                            )
-
         for artifact_path in [*plan_files, *summary_files]:
             try:
                 payload = read_json(artifact_path)
@@ -934,17 +902,15 @@ def evaluate_run(
     refresh_row = headless_rows.get("refresh")
 
     snapshot_ok = True
-    snapshot_semantic_fallback_used = False
     artifact_source = "snapshot"
     for row in (init_row, refresh_row):
         if not row:
             continue
         run_id = str(row.get("run_id", "")).strip()
-        reports_root, source = resolve_reports_root(run_dir, run_id)
-        if source != "snapshot":
+        reports_root = run_dir / "snapshots" / run_id / "reports"
+        if not reports_root.exists():
             snapshot_ok = False
-            artifact_source = "workspace-fallback"
-            details.append(f"reliability/snapshot-missing -> {run_dir / 'snapshots' / run_id}: fallback={reports_root}")
+            details.append(f"reliability/snapshot-missing -> missing {reports_root}")
 
     if summary_missing:
         issues.append("reliability:summary-missing")
@@ -1065,9 +1031,7 @@ def evaluate_run(
             continue
         pipeline = str(row["pipeline"])
         run_id = str(row["run_id"])
-        quality_path, quality_source = resolve_quality_json(run_dir, row)
-        if quality_source != "snapshot":
-            artifact_source = "workspace-fallback"
+        quality_path, _ = resolve_quality_json(run_dir, row)
         if not quality_path.exists():
             c2_runtime_versions_ok = False
             c3_metrics_ok = False
@@ -1152,9 +1116,7 @@ def evaluate_run(
     analysis_run_id = str((refresh_row or init_row or {}).get("run_id", "")).strip()
     analysis_reports_root = workspace / "reports"
     if analysis_run_id:
-        analysis_reports_root, analysis_source = resolve_reports_root(run_dir, analysis_run_id)
-        if analysis_source != "snapshot":
-            artifact_source = "workspace-fallback"
+        analysis_reports_root, _ = resolve_reports_root(run_dir, analysis_run_id)
     findings_path = analysis_reports_root / "findings/findings.md"
     overview_path = analysis_reports_root / "as-is/overview.md"
     coverage_path = analysis_reports_root / "coverage/summary.md"
@@ -1219,18 +1181,7 @@ def evaluate_run(
     refresh_step_files: list[Path] = []
     if refresh_row:
         refresh_run_id = str(refresh_row.get("run_id", ""))
-        refresh_step_files, refresh_source = resolve_step_taskrun_files(run_dir, refresh_run_id, "refresh")
-        if refresh_source != "snapshot":
-            artifact_source = "workspace-fallback"
-        if not refresh_step_files:
-            fallback_glob = sorted((workspace / "reports" / "taskruns").glob(f"{refresh_run_id}-refresh-*.json"))
-            if fallback_glob:
-                refresh_step_files = fallback_glob
-                snapshot_semantic_fallback_used = True
-                artifact_source = "workspace-fallback"
-                details.append(
-                    f"reliability/snapshot-missing -> missing refresh step taskruns in snapshot, fallback to workspace reports for run_id={refresh_run_id}"
-                )
+        refresh_step_files, _ = resolve_step_taskrun_files(run_dir, refresh_run_id, "refresh")
 
     if refresh_step_files:
         non_power_target = not is_power_target(repo_roots, declared_meta)
@@ -1309,12 +1260,6 @@ def evaluate_run(
             issues.extend(sorted(runtime_flow_issues))
             issues.append("reliability:runtime-flow-failed")
             details.extend(runtime_flow_details)
-
-    if snapshot_semantic_fallback_used and snapshot_ok:
-        snapshot_ok = False
-        if "reliability:snapshot-missing" not in issues:
-            issues.append("reliability:snapshot-missing")
-        reliability = max(0, reliability - 10)
 
     if not overview_ok:
         issues.append("analysis:overview")
@@ -1409,107 +1354,26 @@ def evaluate_run(
     )
 
 
-def _load_frontend_provider_runs(
-    provider_root: Path, primary_file: str, fallback_file: str | None = None
-) -> dict[int, dict[str, Any]]:
-    rows: dict[int, dict[str, Any]] = {}
-    for run_dir in sorted(provider_root.glob("run*")):
-        if not run_dir.is_dir():
-            continue
-        match = re.fullmatch(r"run(\d+)", run_dir.name)
-        if not match:
-            continue
-        run_index = int(match.group(1))
-        candidate = run_dir / primary_file
-        if not candidate.exists() and fallback_file:
-            candidate = run_dir / fallback_file
-        if not candidate.exists():
-            continue
-        payload = read_json(candidate)
-        payload["path"] = str(candidate)
-        payload["run_index"] = run_index
-        rows[run_index] = payload
-
-    if rows:
-        return rows
-
-    legacy_primary = provider_root / primary_file
-    legacy_fallback = provider_root / fallback_file if fallback_file else None
-    legacy_path = legacy_primary if legacy_primary.exists() else legacy_fallback
-    if legacy_path and legacy_path.exists():
-        payload = read_json(legacy_path)
-        payload["path"] = str(legacy_path)
-        try:
-            run_index = int(payload.get("run_index", 1))
-        except Exception:
-            run_index = 1
-        payload["run_index"] = run_index
-        rows[run_index] = payload
-    return rows
-
-
-def load_frontend_results(batch_root: Path) -> dict[str, dict[int, dict[str, Any]]]:
-    data: dict[str, dict[int, dict[str, Any]]] = {}
-    for provider in ("qwen-code", "claude-code"):
-        provider_root = batch_root / "frontend" / provider
-        data[provider] = _load_frontend_provider_runs(provider_root, "frontend-e2e-result.json")
+def load_frontend_results(batch_root: Path) -> dict[str, dict[str, Any]]:
+    data: dict[str, dict[str, Any]] = {}
+    for provider in FRONTEND_PROVIDERS:
+        path = batch_root / "frontend" / provider / FRONTEND_LIVE_RESULT_FILENAME
+        if path.exists():
+            payload = read_json(path)
+            payload["path"] = str(path)
+            data[provider] = payload
     return data
 
 
-def load_frontend_cancel_results(batch_root: Path) -> dict[str, dict[int, dict[str, Any]]]:
-    data: dict[str, dict[int, dict[str, Any]]] = {}
-    for provider in ("qwen-code", "claude-code"):
-        provider_root = batch_root / "frontend-cancel" / provider
-        data[provider] = _load_frontend_provider_runs(
-            provider_root, "frontend-cancel-result.json", "frontend-e2e-result.json"
-        )
+def load_frontend_cancel_results(batch_root: Path) -> dict[str, dict[str, Any]]:
+    data: dict[str, dict[str, Any]] = {}
+    for provider in FRONTEND_PROVIDERS:
+        path = batch_root / "frontend-cancel" / provider / FRONTEND_CANCEL_RESULT_FILENAME
+        if path.exists():
+            payload = read_json(path)
+            payload["path"] = str(path)
+            data[provider] = payload
     return data
-
-
-def summarize_frontend_runs(rows: dict[int, dict[str, Any]], expected_runs: int | None = None) -> dict[str, Any]:
-    statuses = []
-    for run_index in sorted(rows):
-        payload = rows[run_index]
-        statuses.append(str(payload.get("status", "missing")).strip() or "missing")
-
-    total = len(statuses)
-    passed = sum(1 for status in statuses if status == "passed")
-    if expected_runs is None:
-        denominator = total
-        missing = 0
-    else:
-        denominator = max(total, expected_runs)
-        missing = max(0, expected_runs - total)
-    pass_rate = (passed / denominator) if denominator > 0 else 0.0
-
-    status = "missing"
-    if denominator > 0:
-        if passed == denominator:
-            status = "passed"
-        elif total == 0:
-            status = "missing"
-        else:
-            status = "failed"
-
-    non_passed: list[tuple[int, str]] = []
-    for run_index in sorted(rows):
-        item_status = str(rows[run_index].get("status", "missing")).strip() or "missing"
-        if item_status != "passed":
-            non_passed.append((run_index, item_status))
-    if expected_runs is not None:
-        for run_index in range(1, expected_runs + 1):
-            if run_index not in rows:
-                non_passed.append((run_index, "missing"))
-
-    return {
-        "status": status,
-        "passed": passed,
-        "total": denominator,
-        "present_rows": total,
-        "missing_rows": missing,
-        "pass_rate": pass_rate,
-        "non_passed": non_passed,
-    }
 
 
 def write_run_matrix(path: Path, runs: list[RunEvaluation]) -> None:
@@ -1533,63 +1397,71 @@ def write_run_matrix(path: Path, runs: list[RunEvaluation]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def write_frontend_matrix(path: Path, frontend: dict[str, dict[int, dict[str, Any]]]) -> None:
+def write_frontend_matrix(path: Path, frontend: dict[str, dict[str, Any]]) -> None:
     lines = [
         "# Frontend Live E2E Matrix",
         "",
-        "| provider | run | status | reason | scenario | headed | base_url | workspace | runtime_command | server_log | playwright_log |",
-        "|---|---:|---|---|---|---|---|---|---|---|---|",
+        "| provider | status | base_url | workspace | runtime_command | server_log | playwright_log |",
+        "|---|---|---|---|---|---|---|",
     ]
-    for provider in ("qwen-code", "claude-code"):
-        provider_rows = frontend.get(provider, {})
-        if not provider_rows:
-            lines.append(f"| {provider} | - | missing | missing_result | init-inspect-service-first | - | - | - | - | - | - |")
+    for provider in FRONTEND_PROVIDERS:
+        payload = frontend.get(provider)
+        if not payload:
+            lines.append(f"| {provider} | missing | - | - | - | - | - |")
             continue
-        for run_index in sorted(provider_rows):
-            payload = provider_rows[run_index]
-            lines.append(
-                "| "
-                f"{provider} | {run_index} | {payload.get('status', '-') } | {payload.get('reason', '-') } | {payload.get('scenario', '-') } | "
-                f"{payload.get('headed', '-') } | {payload.get('base_url', '-')} | {payload.get('workspace', '-')} | {payload.get('runtime_command', '-')} | "
-                f"{payload.get('server_log', '-')} | {payload.get('playwright_log', '-')} |"
-            )
+        lines.append(
+            "| "
+            f"{provider} | {payload.get('status', '-') } | {payload.get('base_url', '-')} | "
+            f"{payload.get('workspace', '-')} | {payload.get('runtime_command', '-')} | "
+            f"{payload.get('server_log', '-')} | {payload.get('playwright_log', '-')} |"
+        )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def write_frontend_cancel_matrix(path: Path, frontend_cancel: dict[str, dict[int, dict[str, Any]]]) -> None:
+def write_frontend_cancel_matrix(path: Path, frontend_cancel: dict[str, dict[str, Any]]) -> None:
     lines = [
         "# Frontend Cancel E2E Matrix",
         "",
-        "| provider | run | status | reason | scenario | headed | workspace | runtime_command | server_log | playwright_log |",
-        "|---|---:|---|---|---|---|---|---|---|---|",
+        "| provider | status | reason | scenario | workspace | runtime_command | server_log | playwright_log |",
+        "|---|---|---|---|---|---|---|---|",
     ]
-    for provider in ("qwen-code", "claude-code"):
-        provider_rows = frontend_cancel.get(provider, {})
-        if not provider_rows:
-            lines.append(f"| {provider} | - | missing | missing_result | cancel-refresh | - | - | - | - | - |")
+    for provider in FRONTEND_PROVIDERS:
+        payload = frontend_cancel.get(provider)
+        if not payload:
+            lines.append(f"| {provider} | missing | missing_result | cancel-refresh | - | - | - | - |")
             continue
-        for run_index in sorted(provider_rows):
-            payload = provider_rows[run_index]
-            lines.append(
-                "| "
-                f"{provider} | {run_index} | {payload.get('status', '-') } | {payload.get('reason', '-') } | "
-                f"{payload.get('scenario', '-') } | {payload.get('headed', '-') } | {payload.get('workspace', '-') } | "
-                f"{payload.get('runtime_command', '-') } | {payload.get('server_log', '-') } | {payload.get('playwright_log', '-') } |"
-            )
+        lines.append(
+            "| "
+            f"{provider} | {payload.get('status', '-') } | {payload.get('reason', '-') } | "
+            f"{payload.get('scenario', '-') } | {payload.get('workspace', '-') } | "
+            f"{payload.get('runtime_command', '-') } | {payload.get('server_log', '-') } | {payload.get('playwright_log', '-') } |"
+        )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def frontend_live_verdict_lines(frontend: dict[str, dict[str, Any]]) -> list[str]:
+    return [f"- {provider}: {(frontend.get(provider) or {}).get('status', 'missing')}" for provider in FRONTEND_PROVIDERS]
+
+
+def frontend_cancel_verdict_lines(frontend_cancel: dict[str, dict[str, Any]]) -> list[str]:
+    lines: list[str] = []
+    for provider in FRONTEND_PROVIDERS:
+        payload = frontend_cancel.get(provider) or {}
+        status = payload.get("status", "missing")
+        reason = payload.get("reason", "-")
+        lines.append(f"- {provider}: {status} (reason: {reason})")
+    return lines
+
+
 def provider_matrix_rows(
-    runs: list[RunEvaluation],
-    frontend: dict[str, dict[int, dict[str, Any]]],
-    frontend_cancel: dict[str, dict[int, dict[str, Any]]],
+    runs: list[RunEvaluation], frontend: dict[str, dict[str, Any]], frontend_cancel: dict[str, dict[str, Any]]
 ) -> list[dict[str, Any]]:
     grouped: dict[str, list[RunEvaluation]] = defaultdict(list)
     for run in runs:
         grouped[run.provider].append(run)
 
     rows: list[dict[str, Any]] = []
-    for provider in ("qwen-code", "claude-code"):
+    for provider in FRONTEND_PROVIDERS:
         items = grouped.get(provider, [])
         totals = [item.total for item in items]
         refresh_signals = [item.refresh_signal for item in items]
@@ -1600,8 +1472,10 @@ def provider_matrix_rows(
             issues_counter.update(item.issues)
             error_codes_counter.update(item.error_codes)
             artifact_sources.update([item.artifact_source])
-        frontend_summary = summarize_frontend_runs(frontend.get(provider, {}), expected_runs=5)
-        frontend_cancel_summary = summarize_frontend_runs(frontend_cancel.get(provider, {}))
+        frontend_status = frontend.get(provider, {}).get("status")
+        frontend_pass_rate = 1.0 if frontend_status == "passed" else 0.0 if frontend_status else 0.0
+        frontend_cancel_status = frontend_cancel.get(provider, {}).get("status")
+        frontend_cancel_pass_rate = 1.0 if frontend_cancel_status == "passed" else 0.0 if frontend_cancel_status else 0.0
         rows.append(
             {
                 "provider": provider,
@@ -1632,14 +1506,8 @@ def provider_matrix_rows(
                 "error_codes": ", ".join(f"{code}={count}" for code, count in sorted(error_codes_counter.items())) or "-",
                 "issues_top": ", ".join(f"{name}={count}" for name, count in issues_counter.most_common(3)) or "-",
                 "artifact_sources": ", ".join(f"{name}={count}" for name, count in sorted(artifact_sources.items())) or "-",
-                "frontend_status": frontend_summary["status"],
-                "frontend_passed": frontend_summary["passed"],
-                "frontend_total": frontend_summary["total"],
-                "frontend_pass_rate": frontend_summary["pass_rate"],
-                "frontend_cancel_status": frontend_cancel_summary["status"],
-                "frontend_cancel_passed": frontend_cancel_summary["passed"],
-                "frontend_cancel_total": frontend_cancel_summary["total"],
-                "frontend_cancel_pass_rate": frontend_cancel_summary["pass_rate"],
+                "frontend_pass_rate": frontend_pass_rate,
+                "frontend_cancel_pass_rate": frontend_cancel_pass_rate,
             }
         )
     return rows
@@ -1649,8 +1517,8 @@ def write_quality_report(
     path: Path,
     batch_id: str,
     runs: list[RunEvaluation],
-    frontend: dict[str, dict[int, dict[str, Any]]],
-    frontend_cancel: dict[str, dict[int, dict[str, Any]]],
+    frontend: dict[str, dict[str, Any]],
+    frontend_cancel: dict[str, dict[str, Any]],
     preflight: dict[str, Any],
 ) -> None:
     provider_rows = provider_matrix_rows(runs, frontend, frontend_cancel)
@@ -1663,15 +1531,6 @@ def write_quality_report(
     for run in runs:
         issue_counter.update(run.issues)
     snapshot_runs = sum(1 for run in runs if run.artifact_source == "snapshot")
-    workspace_fallback_runs = len(runs) - snapshot_runs
-    frontend_summaries = {
-        provider: summarize_frontend_runs(frontend.get(provider, {}), expected_runs=5)
-        for provider in ("qwen-code", "claude-code")
-    }
-    frontend_cancel_summaries = {
-        provider: summarize_frontend_runs(frontend_cancel.get(provider, {}))
-        for provider in ("qwen-code", "claude-code")
-    }
 
     lines = [
         f"# Quality Report: {batch_id}",
@@ -1692,15 +1551,12 @@ def write_quality_report(
         f"- semantic_hard_fail_runs: {semantic_hard_fail_runs}/{len(runs)}",
         f"- runtime_flow_failed_runs: {runtime_flow_failed_runs}/{len(runs)}",
         f"- artifact_source_snapshot_runs: {snapshot_runs}/{len(runs)}",
-        f"- artifact_source_workspace_fallback_runs: {workspace_fallback_runs}/{len(runs)}",
         "",
         "## Frontend Live Smoke Verdict",
-        f"- qwen-code: {frontend_summaries['qwen-code']['status']} ({frontend_summaries['qwen-code']['passed']}/{frontend_summaries['qwen-code']['total']})",
-        f"- claude-code: {frontend_summaries['claude-code']['status']} ({frontend_summaries['claude-code']['passed']}/{frontend_summaries['claude-code']['total']})",
+        *frontend_live_verdict_lines(frontend),
         "",
         "## Frontend Cancel Smoke Verdict",
-        f"- qwen-code: {frontend_cancel_summaries['qwen-code']['status']} ({frontend_cancel_summaries['qwen-code']['passed']}/{frontend_cancel_summaries['qwen-code']['total']})",
-        f"- claude-code: {frontend_cancel_summaries['claude-code']['status']} ({frontend_cancel_summaries['claude-code']['passed']}/{frontend_cancel_summaries['claude-code']['total']})",
+        *frontend_cancel_verdict_lines(frontend_cancel),
         "",
         "## Provider Matrix",
         "",
@@ -1729,11 +1585,11 @@ def write_quality_report(
         lines.append("- Все `10/10` backend full-runs прошли hard-gates без падений pipeline и signal regression.")
     else:
         lines.append("- Часть run прошла hard-gates, но есть деградации стабильности (см. matrix).")
-    if all(frontend_summaries[provider]["status"] == "passed" for provider in ("qwen-code", "claude-code")):
+    if all((frontend.get(provider) or {}).get("status") == "passed" for provider in FRONTEND_PROVIDERS):
         lines.append("- Frontend live e2e прошёл для обоих провайдеров (`2/2`).")
     else:
         lines.append("- Frontend live e2e не полностью стабилен (`<2/2`).")
-    if all(frontend_cancel_summaries[provider]["status"] == "passed" for provider in ("qwen-code", "claude-code")):
+    if all((frontend_cancel.get(provider) or {}).get("status") == "passed" for provider in FRONTEND_PROVIDERS):
         lines.append("- Frontend cancel-refresh smoke прошёл для обоих провайдеров (`2/2`).")
     else:
         lines.append("- Frontend cancel-refresh smoke не полностью стабилен (`<2/2`) или был пропущен.")
@@ -1775,227 +1631,6 @@ def write_quality_report(
             "- P1: расширить semantic quality rubric на richer evidence density в findings (rule/evidence refs) и cross-doc consistency checks.",
         ]
     )
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def evaluate_documentation_run(run: RunEvaluation) -> dict[str, Any]:
-    rows = parse_run_results(run.run_dir / "run-results.tsv")
-    headless_rows = parse_headless_rows(rows, run.provider)
-    analysis_row = headless_rows.get("refresh") or headless_rows.get("init")
-    analysis_run_id = str((analysis_row or {}).get("run_id", "")).strip()
-
-    reports_root = run.run_dir / "arch-workspace" / "reports"
-    if analysis_run_id:
-        reports_root, _ = resolve_reports_root(run.run_dir, analysis_run_id)
-
-    checks = {
-        "as_is_ok": (reports_root / "as-is/overview.md").exists(),
-        "findings_ok": (reports_root / "findings/findings.md").exists(),
-        "coverage_ok": (reports_root / "coverage/summary.md").exists(),
-        "open_questions_ok": (reports_root / "coverage/open-questions.md").exists(),
-        "service_inventory_ok": True,
-        "global_review_ok": True,
-        "evidence_scope_ok": "analysis:evidence-scope" not in run.issues,
-        "cross_doc_ok": "analysis:cross-doc" not in run.issues,
-    }
-    details: list[str] = []
-
-    if not analysis_run_id:
-        checks["as_is_ok"] = False
-        checks["findings_ok"] = False
-        checks["coverage_ok"] = False
-        checks["open_questions_ok"] = False
-        details.append("missing init/refresh run_id in run-results.tsv")
-
-    for pipeline in ("init", "refresh"):
-        row = headless_rows.get(pipeline)
-        if not row:
-            checks["service_inventory_ok"] = False
-            checks["global_review_ok"] = False
-            details.append(f"missing headless {pipeline} row in run-results.tsv")
-            continue
-
-        run_id = str(row.get("run_id", "")).strip()
-        if not run_id:
-            checks["service_inventory_ok"] = False
-            checks["global_review_ok"] = False
-            details.append(f"empty run_id for pipeline={pipeline}")
-            continue
-
-        pipeline_reports_root, _ = resolve_reports_root(run.run_dir, run_id)
-        taskruns_root = pipeline_reports_root / "taskruns"
-        plan_path = taskruns_root / f"{run_id}-service-inventory-plan.json"
-        if not plan_path.exists():
-            checks["service_inventory_ok"] = False
-            details.append(f"missing {plan_path}")
-
-        global_input_path = taskruns_root / f"{run_id}-global-review-input.json"
-        if not global_input_path.exists():
-            checks["global_review_ok"] = False
-            details.append(f"missing {global_input_path}")
-
-        global_outputs = [
-            path
-            for path in sorted(taskruns_root.glob(f"{run_id}-*global-review*.json"))
-            if path.name != f"{run_id}-global-review-input.json"
-        ]
-        if not global_outputs:
-            checks["global_review_ok"] = False
-            details.append(f"missing runtime global-review taskrun for run_id={run_id}")
-
-    status = all(checks.values())
-    return {
-        "provider": run.provider,
-        "run_index": run.run_index,
-        "status": status,
-        **checks,
-        "details": details,
-    }
-
-
-def write_documentation_audit_report(
-    path: Path,
-    batch_id: str,
-    runs: list[RunEvaluation],
-    frontend: dict[str, dict[int, dict[str, Any]]],
-    frontend_cancel: dict[str, dict[int, dict[str, Any]]],
-    preflight: dict[str, Any],
-) -> None:
-    run_checks = [evaluate_documentation_run(run) for run in runs]
-    auto_status = "passed" if all(item["status"] for item in run_checks) else "failed"
-
-    manual_status = str(os.environ.get("DOCUMENTATION_AUDIT_MANUAL_STATUS", "pending")).strip().lower()
-    if manual_status not in {"pending", "passed", "failed"}:
-        manual_status = "pending"
-    manual_notes = str(os.environ.get("DOCUMENTATION_AUDIT_MANUAL_NOTES", "")).strip() or "-"
-
-    issues_counter = Counter()
-    for run in runs:
-        issues_counter.update(run.issues)
-
-    frontend_summary = {
-        provider: summarize_frontend_runs(frontend.get(provider, {}), expected_runs=5)
-        for provider in ("qwen-code", "claude-code")
-    }
-    frontend_cancel_summary = {
-        provider: summarize_frontend_runs(frontend_cancel.get(provider, {}))
-        for provider in ("qwen-code", "claude-code")
-    }
-
-    implementation_checks = [
-        (
-            "service-first step contract",
-            "service-inventory plan + global-review artifacts exist for init/refresh",
-            all(item["service_inventory_ok"] and item["global_review_ok"] for item in run_checks),
-            "reports/taskruns/<run_id>-service-inventory-plan.json + <run_id>-global-review-input.json",
-        ),
-        (
-            "runtime shard artifacts/metadata",
-            "no runtime:shard-artifacts/runtime:shard-metadata issues",
-            issues_counter["runtime:shard-artifacts"] == 0 and issues_counter["runtime:shard-metadata"] == 0,
-            "run_matrix issues runtime:shard-artifacts/runtime:shard-metadata",
-        ),
-        (
-            "repo selection semantics",
-            "no runtime:repo-selection issues",
-            issues_counter["runtime:repo-selection"] == 0,
-            "run_matrix issues runtime:repo-selection",
-        ),
-        (
-            "execution profile semantics",
-            "no runtime:execution-semantics issues",
-            issues_counter["runtime:execution-semantics"] == 0,
-            "run_matrix issues runtime:execution-semantics",
-        ),
-        (
-            "timeout precedence/guard",
-            "no runtime_timeout/precheck_failed in run matrix",
-            all(not run.runtime_timeout and not run.precheck_failed for run in runs),
-            "run_matrix runtime_timeout/precheck_failed columns",
-        ),
-        (
-            "cancel lifecycle",
-            "frontend cancel smoke passed for both providers",
-            all(frontend_cancel_summary[provider]["status"] == "passed" for provider in ("qwen-code", "claude-code")),
-            "frontend_cancel_e2e_matrix statuses",
-        ),
-        (
-            "semantic hard-fail checks",
-            "no semantic_hard_fail/off-topic/evidence-scope failures",
-            (
-                all(not run.semantic_hard_fail and run.off_topic_hits == 0 for run in runs)
-                and issues_counter["analysis:evidence-scope"] == 0
-            ),
-            "run_matrix semantic_hard_fail/off_topic_hits + issues",
-        ),
-        (
-            "snapshot-only baseline",
-            "all runs use artifact_source=snapshot",
-            all(run.artifact_source == "snapshot" for run in runs),
-            "run_matrix artifact_source column",
-        ),
-    ]
-    implementation_status = "passed" if all(item[2] for item in implementation_checks) else "failed"
-    if implementation_status != "passed":
-        auto_status = "failed"
-
-    lines = [
-        f"# Documentation Audit: {batch_id}",
-        "",
-        "## Status",
-        f"- auto_status: {auto_status}",
-        f"- manual_status: {manual_status}",
-        f"- implementation_audit_status: {implementation_status}",
-        f"- generated_at_utc: {preflight.get('generated_at_utc', '-')}",
-        f"- manual_notes: {manual_notes}",
-        "",
-        "## Auto Rubric",
-        "| provider | run | as-is | findings | coverage | open-questions | service-inventory | global-review | evidence-scope | cross-doc | status |",
-        "|---|---:|---|---|---|---|---|---|---|---|---|",
-    ]
-    for item in run_checks:
-        lines.append(
-            "| "
-            f"{item['provider']} | {item['run_index']} | "
-            f"{'ok' if item['as_is_ok'] else 'fail'} | {'ok' if item['findings_ok'] else 'fail'} | "
-            f"{'ok' if item['coverage_ok'] else 'fail'} | {'ok' if item['open_questions_ok'] else 'fail'} | "
-            f"{'ok' if item['service_inventory_ok'] else 'fail'} | {'ok' if item['global_review_ok'] else 'fail'} | "
-            f"{'ok' if item['evidence_scope_ok'] else 'fail'} | {'ok' if item['cross_doc_ok'] else 'fail'} | "
-            f"{'passed' if item['status'] else 'failed'} |"
-        )
-        for detail in item["details"]:
-            lines.append(f"- {item['provider']} run{item['run_index']}: {detail}")
-
-    lines.extend(
-        [
-            "",
-            "## Frontend Coverage",
-            f"- qwen-code init: {frontend_summary['qwen-code']['status']} ({frontend_summary['qwen-code']['passed']}/{frontend_summary['qwen-code']['total']})",
-            f"- claude-code init: {frontend_summary['claude-code']['status']} ({frontend_summary['claude-code']['passed']}/{frontend_summary['claude-code']['total']})",
-            f"- qwen-code cancel: {frontend_cancel_summary['qwen-code']['status']} ({frontend_cancel_summary['qwen-code']['passed']}/{frontend_cancel_summary['qwen-code']['total']})",
-            f"- claude-code cancel: {frontend_cancel_summary['claude-code']['status']} ({frontend_cancel_summary['claude-code']['passed']}/{frontend_cancel_summary['claude-code']['total']})",
-            "",
-            "## Implementation Audit (Traceability)",
-            "| Feature | PASS Criterion | Status | Evidence |",
-            "|---|---|---|---|",
-        ]
-    )
-    for feature, criterion, status, evidence in implementation_checks:
-        lines.append(f"| {feature} | {criterion} | {'passed' if status else 'failed'} | {evidence} |")
-
-    checkbox = "x" if manual_status == "passed" else " "
-    lines.extend(
-        [
-            "",
-            "## Manual Checklist",
-            "- Обновите status через env `DOCUMENTATION_AUDIT_MANUAL_STATUS=passed` после ручного review.",
-        ]
-    )
-    for run in runs:
-        lines.append(
-            f"- [{checkbox}] {run.provider} run{run.run_index}: визуально проверены UI flow, as-is/findings/coverage/open-questions и связность артефактов."
-        )
-
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -2085,7 +1720,7 @@ def main() -> int:
     classifications = parse_backend_classifications(batch_root)
 
     runs: list[RunEvaluation] = []
-    for provider in ("qwen-code", "claude-code"):
+    for provider in FRONTEND_PROVIDERS:
         for run_index in range(1, 6):
             run_dir = batch_root / provider / f"run{run_index}"
             runs.append(
@@ -2106,23 +1741,18 @@ def main() -> int:
     frontend_matrix_path = reports_root / f"frontend_e2e_matrix_{args.batch_id}.md"
     frontend_cancel_matrix_path = reports_root / f"frontend_cancel_e2e_matrix_{args.batch_id}.md"
     quality_report_path = reports_root / f"quality_report_{args.batch_id}.md"
-    documentation_audit_path = reports_root / f"documentation_audit_{args.batch_id}.md"
     meta_tsv_path = reports_root / f"run_matrix_{args.batch_id}.tsv"
 
     write_run_matrix(run_matrix_path, runs)
     write_frontend_matrix(frontend_matrix_path, frontend)
     write_frontend_cancel_matrix(frontend_cancel_matrix_path, frontend_cancel)
     write_quality_report(quality_report_path, args.batch_id, runs, frontend, frontend_cancel, preflight)
-    write_documentation_audit_report(
-        documentation_audit_path, args.batch_id, runs, frontend, frontend_cancel, preflight
-    )
     write_meta_tsv(meta_tsv_path, runs)
 
     print(str(run_matrix_path))
     print(str(frontend_matrix_path))
     print(str(frontend_cancel_matrix_path))
     print(str(quality_report_path))
-    print(str(documentation_audit_path))
     print(str(meta_tsv_path))
     return 0
 

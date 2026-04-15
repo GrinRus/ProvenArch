@@ -175,19 +175,19 @@ func TestHeadlessRunnerInvalidTaskResultClassifiesAsParseFailed(t *testing.T) {
 	}
 }
 
-func TestHeadlessRunnerLegacyPassthroughWhenArgsConfigured(t *testing.T) {
+func TestHeadlessRunnerStdinPassthroughWhenArgsConfigured(t *testing.T) {
 	t.Parallel()
 
 	runner := HeadlessRunner{
 		Command: "sh",
 		Args: []string{
 			"-c",
-			fmt.Sprintf("cat >/dev/null; echo '%s'", validTaskResultJSON("task-legacy", "init.step1.collect", "claude-code", "legacy-test")),
+			fmt.Sprintf("cat >/dev/null; echo '%s'", validTaskResultJSON("task-passthrough", "init.step1.collect", "claude-code", "passthrough-test")),
 		},
 	}
 
 	result, err := runner.Run(context.Background(), acpruntime.Task{
-		TaskID:       "task-legacy",
+		TaskID:       "task-passthrough",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
 		Workspace:    t.TempDir(),
@@ -195,14 +195,14 @@ func TestHeadlessRunnerLegacyPassthroughWhenArgsConfigured(t *testing.T) {
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
-		t.Fatalf("run legacy passthrough: %v", err)
+		t.Fatalf("run stdin passthrough: %v", err)
 	}
 	if result.TaskResult.Meta.Runtime.Name != "claude-code" {
 		t.Fatalf("unexpected runtime name %q", result.TaskResult.Meta.Runtime.Name)
 	}
 }
 
-func TestHeadlessRunnerUsesLegacyModeForNonClaudeCommandWithEmptyArgs(t *testing.T) {
+func TestHeadlessRunnerUsesStdinPassthroughForNonClaudeCommandWithEmptyArgs(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
@@ -215,7 +215,7 @@ if [ -z "$input" ]; then
   exit 1
 fi
 cat <<'JSON'
-{"meta":{"task_id":"task-legacy-empty-args","step_id":"init.step1.collect","runtime":{"name":"claude-code","version":"legacy"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}
+{"meta":{"task_id":"task-passthrough-empty-args","step_id":"init.step1.collect","runtime":{"name":"claude-code","version":"passthrough"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}
 JSON
 `
 	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
@@ -224,7 +224,7 @@ JSON
 
 	runner := HeadlessRunner{Command: commandPath}
 	result, err := runner.Run(context.Background(), acpruntime.Task{
-		TaskID:       "task-legacy-empty-args",
+		TaskID:       "task-passthrough-empty-args",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
 		Workspace:    t.TempDir(),
@@ -232,10 +232,10 @@ JSON
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
-		t.Fatalf("expected legacy mode success: %v", err)
+		t.Fatalf("expected stdin passthrough success: %v", err)
 	}
-	if result.TaskResult.Meta.Runtime.Version != "legacy" {
-		t.Fatalf("expected legacy runtime version, got %q", result.TaskResult.Meta.Runtime.Version)
+	if result.TaskResult.Meta.Runtime.Version != "passthrough" {
+		t.Fatalf("expected passthrough runtime version, got %q", result.TaskResult.Meta.Runtime.Version)
 	}
 }
 
@@ -443,7 +443,7 @@ func TestHeadlessRunnerBindingMismatchClassifiesAsParseFailed(t *testing.T) {
 		Command: "sh",
 		Args: []string{
 			"-c",
-			`cat >/dev/null; echo '{"meta":{"task_id":"task-stale","step_id":"init.step1.collect","run_id":"run-stale","runtime":{"name":"claude-code","version":"legacy"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}'`,
+			`cat >/dev/null; echo '{"meta":{"task_id":"task-stale","step_id":"init.step1.collect","run_id":"run-stale","runtime":{"name":"claude-code","version":"stale-meta"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}'`,
 		},
 	}
 	_, err := runner.Run(context.Background(), acpruntime.Task{
@@ -469,7 +469,7 @@ func TestHeadlessRunnerBindingMismatchClassifiesAsParseFailed(t *testing.T) {
 	}
 }
 
-func TestHeadlessRunnerRepairsLegacyEdgeAliasesBeforeSchemaValidation(t *testing.T) {
+func TestHeadlessRunnerRejectsDeprecatedEdgeAliasesOnSchemaValidation(t *testing.T) {
 	t.Parallel()
 
 	runner := HeadlessRunner{
@@ -480,7 +480,7 @@ func TestHeadlessRunnerRepairsLegacyEdgeAliasesBeforeSchemaValidation(t *testing
 		},
 	}
 
-	result, err := runner.Run(context.Background(), acpruntime.Task{
+	_, err := runner.Run(context.Background(), acpruntime.Task{
 		TaskID:       "task-edge-repair",
 		RunID:        "run-1",
 		StepID:       "refresh.step3.findings",
@@ -488,15 +488,18 @@ func TestHeadlessRunnerRepairsLegacyEdgeAliasesBeforeSchemaValidation(t *testing
 		RepoScopes:   []string{"repo-a", "repo-b"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
-	if err != nil {
-		t.Fatalf("expected repaired edge aliases to pass: %v", err)
+	if err == nil {
+		t.Fatalf("expected parse-failed error for deprecated edge aliases")
 	}
-	if len(result.TaskResult.Changeset) != 1 || result.TaskResult.Changeset[0].Edge == nil {
-		t.Fatalf("expected one edge op after repair, got %#v", result.TaskResult.Changeset)
+	code, message, ok := acpruntime.ClassifyError(err)
+	if !ok {
+		t.Fatalf("expected classify error to succeed")
 	}
-	edge := result.TaskResult.Changeset[0].Edge
-	if edge.Type != "depends_on" || edge.From != "svc.a" || edge.To != "svc.b" {
-		t.Fatalf("expected repaired edge fields, got %+v", edge)
+	if code != string(acpruntime.ErrorCodeRunnerParseFailed) {
+		t.Fatalf("unexpected error code %q", code)
+	}
+	if !strings.Contains(message, "parse_stage=schema") {
+		t.Fatalf("expected parse_stage=schema, got %q", message)
 	}
 }
 

@@ -23,15 +23,14 @@
    - bootstrap (`init-workspace`/`serve --auto-init`) автоматически делает `git init` для workspace root при отсутствии `.git`
    - startup для `serve` lenient: без блокирующего repo preflight; readiness diagnostics доступны через `/api/workspace/validate`
    - Поддерживает batch/non-interactive режим для CI jobs
-   - `run --workspace <abs-path> --pipeline init|refresh [--refresh-mode incremental|full] [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]`
+   - `run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]`
    - runtime selector process-scoped: `fake` default для required CI, `headless` opt-in
    - provider selector process-scoped: `--runtime-provider` > `ACP_RUNTIME_PROVIDER` > `claude-code`
-   - timeout control process/workspace-aware:
-     - persisted profile в `workspace.yaml.runtime.profile.timeouts`
-     - effective precedence: `env > workspace > defaults`
-     - canonical envs: `ACP_RUNTIME_*`, `ACP_PIPELINE_*`, `ACP_API_*`, `ACP_UI_*`
-     - deprecated aliases поддержаны для обратной совместимости (`READY_TIMEOUT_SEC`, `UI_E2E_*`, full-run `ACP_FULL_RUN_PIPELINE_*`)
-   - execution control process/workspace-aware:
+	   - timeout control process/workspace-aware:
+	     - persisted profile в `workspace.yaml.runtime.profile.timeouts`
+	     - effective precedence: `env > workspace > defaults`
+	     - canonical envs: `ACP_RUNTIME_*`, `ACP_PIPELINE_*`, `ACP_API_*`, `ACP_UI_*`
+	   - execution control process/workspace-aware:
      - persisted profile в `workspace.yaml.runtime.profile.execution`
      - effective precedence: `CLI > env > workspace > defaults`
      - CLI overrides: `--execution-strategy`, `--max-parallel-tasks`, `--failure-policy`
@@ -76,31 +75,21 @@
    - Работает с единым central workspace (`arch-workspace`) как корнем артефактов MVP
    - Валидирует `workspace.yaml` по `schemas/workspace.schema.json`
    - Разрешает repo sources (`path`/`git_url`) в локальные checkout перед анализом через системный `git` текущего пользователя/runner
-   - Оркестрирует service-first pipeline:
-     - `step1.service_inventory` (deterministic planner)
-     - `step2.service_collect` (runtime fan-out по service shards)
-     - `step3.asis_docs` (compiler)
-     - `step4.service_findings` (runtime fan-out по service shards)
-     - `step5.global_review` (single runtime aggregation task per run)
-     - `step6.proposals` (compiler/changelog)
-   - Service inventory planner:
-     - marker-based service roots + leaf-pruning + fallback `.`
-     - deterministic chunking для больших сервисов (`>500 files` или `>8MB` → chunks до `200 files`/`3MB`, cap `8`)
-     - artifacts: `*-service-inventory-plan.json`, `*-service-inventory-summary.json`, stable snapshot `service-inventory-latest.json`
-   - Refresh modes:
-     - default `incremental` (previous snapshot + git diff + untracked/modified)
-     - explicit `full` через CLI/API/UI
-     - per-repo fallback to full при недоступном snapshot/git + warning diagnostics
-   - Runtime шаги `step2/step4` сохраняют raw taskruns per service shard в `reports/taskruns/*-service_collect-domain-service-*.json` и `*-service_findings-domain-service-*.json`
-   - Domain outputs остаются source-of-truth в `reports/agent-outputs/domains/*`, строятся детерминированно из service artifacts
-   - Проверяет согласованность canonical domain card (`filename` vs `- id`) и repo_scope-resolver (`declared -> slug fallback -> empty`) с high-priority questions на mismatch/unknown/excluded
+   - Оркестрирует domain-first слой агентов
+   - Materialize-ит per-domain execution contracts (`reports/agent-outputs/domains/*.task-envelope.json`) для canonical domain cards
+   - Step1 repo binding: источник истины `repo_scope` в domain card; fallback только slug-match `domain_id` ↔ `repo.name`
+   - Runtime step1 и enrich domain cards используют общий resolver `repo_scope` (declared -> slug fallback -> empty)
+   - Проверяет согласованность canonical domain card: filename `<domain-id>.md` vs поле `- id:`; mismatch фиксируется high-priority question, runtime остаётся filename-based
+   - Монолитный сценарий many-domains-to-one-repo поддержан через общий `repo_scope`; unknown scope фиксируется вопросом `q.domain.<id>.unknown-repo-scope`
+   - Если `repo_scope` домена исключён policy `repo_selection`, domain runtime task пропускается и фиксируется high-priority question
+   - Выполняет runtime collect-step per-domain и сохраняет отдельные raw taskruns в `reports/taskruns/*-step1-collect-domain-*.json`
    - Runtime sharding planner (heuristics/semantic) materialize-ит deterministic shard-plan artifacts `reports/taskruns/*-shard-plan*.json` и shard-summary artifacts `reports/taskruns/*-shard-summary*.json`
    - Scheduler поддерживает `sequential|parallel` execution с worker-pool (`max_parallel_tasks`) и `fail_fast|best_effort` failure-policy
    - При `best_effort` downstream шаги продолжаются на partial model, но итог run фиксируется как `failed` с `error_code=run_partial_failed`
    - Вызывает runtime adapter
    - Валидирует TaskResult (schema)
-   - Нормализует legacy `add_question` / `set_coverage` в canonical top-level form
-   - Применяет semantic guard для refresh-taskruns: фильтрует placeholder/off-topic артефакты в `refresh.step2.service_collect`, добавляет deterministic fallback finding/edge в `refresh.step4.service_findings`, канонизирует/дедуплицирует coverage/question semantics
+   - Нормализует canonical top-level `questions`/`coverage` (dedupe/canonicalization) без ingestion из legacy operations
+   - Применяет semantic guard для refresh-taskruns: фильтрует placeholder/off-topic артефакты в `refresh.step1.collect`, добавляет deterministic fallback finding при owner-gap в `refresh.step3.findings`, канонизирует/дедуплицирует coverage/question semantics
    - Применяет changeset к модели workspace
    - Не auto-create/rename canonical domain/team cards
    - Триггерит генерацию отчётов
@@ -149,7 +138,7 @@
    - поддерживает optional persisted runtime profile в `runtime.profile` (`timeouts + execution`, см. `WORKSPACE_SPEC`)
    - verify `ref` для `path` source использует fallback (`ref` -> `origin/ref` -> `refs/remotes/origin/ref`) и выдаёт warning при `HEAD` mismatch
    - clone/fetch для `git_url` выполняет на той же машине через локальный `git` и текущий user/runner auth context
-   - git_url cache key использует `slug(repo.name)+hash(git_url)`; legacy slug-only cache path поддержан через fallback warning
+   - git_url cache key использует только `slug(repo.name)+hash(git_url)` (legacy slug-only cache fallback удалён из active behavior)
    - не хранит отдельные credentials внутри ACP
    - safe path joins (никогда не читаем вне workspace root)
    - `POST /api/workspace/validate` даёт pre-run readiness diagnostics по layout (`missing/will create on run`, `not_dir`, `unreadable`)
@@ -197,12 +186,10 @@
 
 ## Pipeline (MVP)
 0) Конституция (charter)
-1) Service inventory (planner + snapshot)
-2) Service collect (runtime fan-out)
-3) As-is docs
-4) Service findings (runtime fan-out)
-5) Global review (single runtime aggregation)
-6) Proposals (improvements)
+1) Collect context
+2) As-is docs
+3) Findings (gaps/anti-patterns)
+4) Proposals (improvements)
 
 On-demand capability:
 - Q&A агент использует `charter/cards + model + reports + docs/imports`; в beta доступен как internal service + CLI `acp qa` без публичного API endpoint.

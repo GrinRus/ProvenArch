@@ -80,40 +80,51 @@ func TestResolveTimeoutsCanonicalEnvOverridesWorkspace(t *testing.T) {
 	}
 }
 
-func TestResolveTimeoutsDeprecatedEnvFallback(t *testing.T) {
+func TestResolveTimeoutsIgnoresLegacyTimeoutAliases(t *testing.T) {
 	t.Parallel()
 
-	resolved := resolveTimeoutsWithLookup(workspace.Manifest{}, func(name string) (string, bool) {
-		if name == ReadyTimeoutDeprecatedEnv {
-			return "77", true
-		}
-		return "", false
-	})
-	if resolved.Effective.APIReadyTimeoutSec != 77 {
-		t.Fatalf("expected deprecated env value 77, got %d", resolved.Effective.APIReadyTimeoutSec)
+	apiReady := 55
+	uiInit := 333
+	uiCancel := 444
+	manifest := workspace.Manifest{
+		Runtime: &workspace.RuntimeConfig{
+			Profile: &workspace.RuntimeProfileConfig{
+				Timeouts: &workspace.RuntimeTimeoutsConfig{
+					APIReadyTimeoutSec:     &apiReady,
+					UIInitPollTimeoutSec:   &uiInit,
+					UICancelPollTimeoutSec: &uiCancel,
+				},
+			},
+		},
 	}
-	if resolved.Source.APIReadyTimeoutSec != TimeoutSourceDeprecatedEnv {
-		t.Fatalf("expected deprecated env source, got %s", resolved.Source.APIReadyTimeoutSec)
-	}
-}
-
-func TestResolveTimeoutsCanonicalEnvBeatsDeprecatedAlias(t *testing.T) {
-	t.Parallel()
-
-	resolved := resolveTimeoutsWithLookup(workspace.Manifest{}, func(name string) (string, bool) {
+	resolved := resolveTimeoutsWithLookup(manifest, func(name string) (string, bool) {
 		switch name {
-		case APIReadyTimeoutEnv:
-			return "88", true
-		case ReadyTimeoutDeprecatedEnv:
-			return "99", true
+		case "READY_TIMEOUT_SEC":
+			return "77", true
+		case "UI_E2E_INIT_TIMEOUT_SEC":
+			return "888", true
+		case "UI_E2E_CANCEL_TIMEOUT_SEC":
+			return "999", true
 		default:
 			return "", false
 		}
 	})
-	if resolved.Effective.APIReadyTimeoutSec != 88 {
-		t.Fatalf("expected canonical env value 88, got %d", resolved.Effective.APIReadyTimeoutSec)
+	if resolved.Effective.APIReadyTimeoutSec != apiReady {
+		t.Fatalf("expected workspace api ready timeout %d, got %d", apiReady, resolved.Effective.APIReadyTimeoutSec)
 	}
-	if resolved.Source.APIReadyTimeoutSec != TimeoutSourceEnv {
-		t.Fatalf("expected env source, got %s", resolved.Source.APIReadyTimeoutSec)
+	if resolved.Effective.UIInitPollTimeoutSec != uiInit {
+		t.Fatalf("expected workspace ui init timeout %d, got %d", uiInit, resolved.Effective.UIInitPollTimeoutSec)
+	}
+	if resolved.Effective.UICancelPollTimeoutSec != uiCancel {
+		t.Fatalf("expected workspace ui cancel timeout %d, got %d", uiCancel, resolved.Effective.UICancelPollTimeoutSec)
+	}
+	if resolved.Source.APIReadyTimeoutSec != TimeoutSourceWorkspace {
+		t.Fatalf("expected workspace source for api ready timeout, got %s", resolved.Source.APIReadyTimeoutSec)
+	}
+	if resolved.Source.UIInitPollTimeoutSec != TimeoutSourceWorkspace {
+		t.Fatalf("expected workspace source for ui init timeout, got %s", resolved.Source.UIInitPollTimeoutSec)
+	}
+	if resolved.Source.UICancelPollTimeoutSec != TimeoutSourceWorkspace {
+		t.Fatalf("expected workspace source for ui cancel timeout, got %s", resolved.Source.UICancelPollTimeoutSec)
 	}
 }

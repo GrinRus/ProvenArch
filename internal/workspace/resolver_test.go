@@ -300,29 +300,23 @@ repos:
 		t.Fatalf("open workspace: %v", err)
 	}
 
-	firstPath, firstLegacyPath, err := ws.resolveRepoCacheDir("payments-service", "https://git.example.com/platform/payments.git")
+	firstPath, err := ws.resolveRepoCacheDir("payments-service", "https://git.example.com/platform/payments.git")
 	if err != nil {
 		t.Fatalf("resolve first cache dir: %v", err)
 	}
-	secondPath, secondLegacyPath, err := ws.resolveRepoCacheDir("payments-service", "https://git.example.com/platform/payments-2.git")
+	secondPath, err := ws.resolveRepoCacheDir("payments-service", "https://git.example.com/platform/payments-2.git")
 	if err != nil {
 		t.Fatalf("resolve second cache dir: %v", err)
 	}
 	if firstPath == secondPath {
 		t.Fatalf("expected different cache paths for different git_url sources, got %q", firstPath)
 	}
-	if firstLegacyPath == "" || secondLegacyPath == "" {
-		t.Fatalf("expected non-empty legacy fallback path")
-	}
-	if firstLegacyPath != secondLegacyPath {
-		t.Fatalf("expected stable legacy path, got first=%q second=%q", firstLegacyPath, secondLegacyPath)
-	}
 	if !strings.Contains(filepath.Base(firstPath), "payments-service-") {
 		t.Fatalf("expected hashed cache key suffix, got %q", firstPath)
 	}
 }
 
-func TestResolveRepoSourcesGitURLDryModeUsesLegacyCacheFallback(t *testing.T) {
+func TestResolveRepoSourcesGitURLDryModeUsesHashedCachePath(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -337,9 +331,13 @@ repos:
 		t.Fatalf("open workspace: %v", err)
 	}
 
-	_, legacyPath, err := ws.resolveRepoCacheDir("source-repo", "https://git.example.com/platform/source-repo.git")
+	cachePath, err := ws.resolveRepoCacheDir("source-repo", "https://git.example.com/platform/source-repo.git")
 	if err != nil {
 		t.Fatalf("resolve cache dir: %v", err)
+	}
+	legacyPath, err := ws.Resolve(filepath.Join(".acp", "repos", repoCacheSlug("source-repo")))
+	if err != nil {
+		t.Fatalf("resolve legacy cache dir: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(legacyPath, ".git"), 0o755); err != nil {
 		t.Fatalf("create legacy .git dir: %v", err)
@@ -353,18 +351,18 @@ repos:
 	if len(resolved) != 1 {
 		t.Fatalf("expected one resolved repo, got %d", len(resolved))
 	}
-	if resolved[0].Path != legacyPath {
-		t.Fatalf("expected legacy fallback path %q, got %q", legacyPath, resolved[0].Path)
+	if resolved[0].Path != cachePath {
+		t.Fatalf("expected hashed cache path %q, got %q", cachePath, resolved[0].Path)
 	}
-	if !hasResolverDiagnosticCode(diagnostics, "workspace.repo.cache.legacy_fallback") {
-		t.Fatalf("expected legacy fallback warning, got %+v", diagnostics)
+	if hasResolverDiagnosticCode(diagnostics, "workspace.repo.cache.legacy_fallback") {
+		t.Fatalf("did not expect legacy fallback warning, got %+v", diagnostics)
 	}
 	if !hasResolverDiagnosticCode(diagnostics, "workspace.repo.git_url.dry_unresolved") {
 		t.Fatalf("expected dry unresolved warning, got %+v", diagnostics)
 	}
 }
 
-func TestResolveRepoSourcesGitURLFetchUsesLegacyCacheFallbackDirForGitCalls(t *testing.T) {
+func TestResolveRepoSourcesGitURLFetchUsesHashedCachePathForGitCalls(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -379,9 +377,13 @@ repos:
 		t.Fatalf("open workspace: %v", err)
 	}
 
-	_, legacyPath, err := ws.resolveRepoCacheDir("source-repo", "https://git.example.com/platform/source-repo.git")
+	cachePath, err := ws.resolveRepoCacheDir("source-repo", "https://git.example.com/platform/source-repo.git")
 	if err != nil {
 		t.Fatalf("resolve cache dir: %v", err)
+	}
+	legacyPath, err := ws.Resolve(filepath.Join(".acp", "repos", repoCacheSlug("source-repo")))
+	if err != nil {
+		t.Fatalf("resolve legacy cache dir: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(legacyPath, ".git"), 0o755); err != nil {
 		t.Fatalf("create legacy .git dir: %v", err)
@@ -396,18 +398,18 @@ repos:
 	if len(resolved) != 1 {
 		t.Fatalf("expected one resolved repo, got %d", len(resolved))
 	}
-	if resolved[0].Path != legacyPath {
-		t.Fatalf("expected legacy fallback path %q, got %q", legacyPath, resolved[0].Path)
+	if resolved[0].Path != cachePath {
+		t.Fatalf("expected hashed cache path %q, got %q", cachePath, resolved[0].Path)
 	}
-	if !hasResolverDiagnosticCode(diagnostics, "workspace.repo.cache.legacy_fallback") {
-		t.Fatalf("expected legacy fallback warning, got %+v", diagnostics)
+	if hasResolverDiagnosticCode(diagnostics, "workspace.repo.cache.legacy_fallback") {
+		t.Fatalf("did not expect legacy fallback warning, got %+v", diagnostics)
 	}
 	if len(gitExec.callDirs) == 0 {
 		t.Fatalf("expected git calls to be executed")
 	}
 	for _, dir := range gitExec.callDirs {
-		if dir != legacyPath {
-			t.Fatalf("expected git call dir %q, got %q", legacyPath, dir)
+		if dir != cachePath {
+			t.Fatalf("expected git call dir %q, got %q", cachePath, dir)
 		}
 	}
 }

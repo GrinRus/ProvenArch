@@ -31,8 +31,8 @@ const (
 )
 
 const (
-	DefaultExecutionStrategy      = ExecutionStrategyParallel
-	DefaultExecutionMaxParallel   = 3
+	DefaultExecutionStrategy      = ExecutionStrategySequential
+	DefaultExecutionMaxParallel   = 1
 	DefaultExecutionFailurePolicy = ExecutionFailurePolicyBestEffort
 	DefaultExecutionShardMode     = ExecutionShardDiscoveryHeuristics
 	DefaultExecutionRepoSelection = ExecutionRepoSelectionAll

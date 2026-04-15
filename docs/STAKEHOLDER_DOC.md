@@ -545,7 +545,7 @@ flowchart TD
 - `write_file` в MVP не добавляется; Step 2 и Step 4 остаются compiler/orchestrator steps.
 - Observation без evidence запрещён policy и examples.
 - Canonical MVP shape: runtime по умолчанию пишет `questions[]` и `coverage` на top-level.
-- `add_question` и `set_coverage` допускаются только как legacy-compatible forms, которые orchestrator нормализует перед persistence.
+- Legacy operations `add_question` и `set_coverage` удалены из active contract; принимается только canonical top-level representation.
 - `add_doc_artifact` трактуется как metadata registration op, а не как content write op.
 
 ### 13.3. Skills/prompts editing через UI

@@ -4,26 +4,17 @@ ACP — **AI-native** и **spec-first** проект.
 
 ## Start here
 1) Прочитайте `AGENTS.md`
-2) Прочитайте `docs/ARCHITECTURE.md`
-3) Относитесь к `schemas/taskresult.schema.json` как к контракту
+2) Прочитайте `README.md` и `docs/ARCHITECTURE.md`
+3) Относитесь к `schemas/taskresult.schema.json` и `docs/spec/*` как к контрактам
 
 ## Local bootstrap
 - Требуемый стек: Go 1.20.x, Node 22.21.1, npm 10.x, Git
-- Установите зависимости:
-  - `make bootstrap`
-- Прогоните обязательные проверки:
+- Установите зависимости: `make bootstrap`
+- Прогоните DoD-проверки:
   - `make contracts`
   - `make test`
   - `make lint`
   - `make build`
-
-## Repo CI
-- GitHub Actions является canonical repo CI для самого ACP репозитория
-- Required jobs:
-  - `contracts`
-  - `backend`
-  - `ui`
-- Эти jobs не используют live Claude Code, live GitHub/GitLab API и реальные пользовательские репозитории
 
 ## ADRs
 Пишите ADR, если:
@@ -33,8 +24,9 @@ ACP — **AI-native** и **spec-first** проект.
 
 См. `docs/adr/`.
 
+## Canonical references
+- Repo CI и required jobs: `README.md` + `docs/TESTING_STRATEGY.md`
+- Планирование крупных slice: `docs/PLANS.md`
+
 ## Planning
 Используйте `docs/PLANS.md` для многосоставных задач.
-
-## Branching
-- feat/<slug>, fix/<slug>, chore/<slug>, proposal/<slug>

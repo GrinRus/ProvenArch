@@ -9,17 +9,14 @@ import (
 )
 
 const (
-	RuntimeStepTimeoutEnv     = "ACP_RUNTIME_STEP_TIMEOUT_SEC"
-	RuntimeHeartbeatEnv       = "ACP_RUNTIME_HEARTBEAT_SEC"
-	PipelineTimeoutEnv        = "ACP_PIPELINE_TIMEOUT_SEC"
-	PipelineKillGraceEnv      = "ACP_PIPELINE_KILL_GRACE_SEC"
-	APIReadyTimeoutEnv        = "ACP_API_READY_TIMEOUT_SEC"
-	APIInitTimeoutEnv         = "ACP_API_INIT_TIMEOUT_SEC"
-	UIInitPollTimeoutEnv      = "ACP_UI_INIT_POLL_TIMEOUT_SEC"
-	UICancelPollTimeoutEnv    = "ACP_UI_CANCEL_POLL_TIMEOUT_SEC"
-	ReadyTimeoutDeprecatedEnv = "READY_TIMEOUT_SEC"
-	UIInitDeprecatedEnv       = "UI_E2E_INIT_TIMEOUT_SEC"
-	UICancelDeprecatedEnv     = "UI_E2E_CANCEL_TIMEOUT_SEC"
+	RuntimeStepTimeoutEnv  = "ACP_RUNTIME_STEP_TIMEOUT_SEC"
+	RuntimeHeartbeatEnv    = "ACP_RUNTIME_HEARTBEAT_SEC"
+	PipelineTimeoutEnv     = "ACP_PIPELINE_TIMEOUT_SEC"
+	PipelineKillGraceEnv   = "ACP_PIPELINE_KILL_GRACE_SEC"
+	APIReadyTimeoutEnv     = "ACP_API_READY_TIMEOUT_SEC"
+	APIInitTimeoutEnv      = "ACP_API_INIT_TIMEOUT_SEC"
+	UIInitPollTimeoutEnv   = "ACP_UI_INIT_POLL_TIMEOUT_SEC"
+	UICancelPollTimeoutEnv = "ACP_UI_CANCEL_POLL_TIMEOUT_SEC"
 )
 
 const (
@@ -36,10 +33,9 @@ const (
 type TimeoutSource string
 
 const (
-	TimeoutSourceDefault       TimeoutSource = "default"
-	TimeoutSourceWorkspace     TimeoutSource = "workspace"
-	TimeoutSourceEnv           TimeoutSource = "env"
-	TimeoutSourceDeprecatedEnv TimeoutSource = "deprecated_env"
+	TimeoutSourceDefault   TimeoutSource = "default"
+	TimeoutSourceWorkspace TimeoutSource = "workspace"
+	TimeoutSourceEnv       TimeoutSource = "env"
 )
 
 type TimeoutValues struct {
@@ -107,14 +103,14 @@ func resolveTimeoutsWithLookup(manifest workspace.Manifest, lookup envLookup) Ti
 		UICancelPollTimeoutSec: TimeoutSourceDefault,
 	}
 
-	effective.StepTimeoutSec, source.StepTimeoutSec = resolveIntTimeout(persisted.StepTimeoutSec, RuntimeStepTimeoutEnv, nil, DefaultRuntimeStepTimeoutSec, lookup)
-	effective.HeartbeatSec, source.HeartbeatSec = resolveIntTimeout(persisted.HeartbeatSec, RuntimeHeartbeatEnv, nil, DefaultRuntimeHeartbeatSec, lookup)
-	effective.PipelineTimeoutSec, source.PipelineTimeoutSec = resolveIntTimeout(persisted.PipelineTimeoutSec, PipelineTimeoutEnv, nil, DefaultPipelineTimeoutSec, lookup)
-	effective.PipelineKillGraceSec, source.PipelineKillGraceSec = resolveIntTimeout(persisted.PipelineKillGraceSec, PipelineKillGraceEnv, nil, DefaultPipelineKillGraceSec, lookup)
-	effective.APIReadyTimeoutSec, source.APIReadyTimeoutSec = resolveIntTimeout(persisted.APIReadyTimeoutSec, APIReadyTimeoutEnv, []string{ReadyTimeoutDeprecatedEnv}, DefaultAPIReadyTimeoutSec, lookup)
-	effective.APIInitTimeoutSec, source.APIInitTimeoutSec = resolveIntTimeout(persisted.APIInitTimeoutSec, APIInitTimeoutEnv, nil, DefaultAPIInitTimeoutSec, lookup)
-	effective.UIInitPollTimeoutSec, source.UIInitPollTimeoutSec = resolveIntTimeout(persisted.UIInitPollTimeoutSec, UIInitPollTimeoutEnv, []string{UIInitDeprecatedEnv}, DefaultUIInitPollTimeoutSec, lookup)
-	effective.UICancelPollTimeoutSec, source.UICancelPollTimeoutSec = resolveIntTimeout(persisted.UICancelPollTimeoutSec, UICancelPollTimeoutEnv, []string{UICancelDeprecatedEnv}, DefaultUICancelPollTimeoutSec, lookup)
+	effective.StepTimeoutSec, source.StepTimeoutSec = resolveIntTimeout(persisted.StepTimeoutSec, RuntimeStepTimeoutEnv, DefaultRuntimeStepTimeoutSec, lookup)
+	effective.HeartbeatSec, source.HeartbeatSec = resolveIntTimeout(persisted.HeartbeatSec, RuntimeHeartbeatEnv, DefaultRuntimeHeartbeatSec, lookup)
+	effective.PipelineTimeoutSec, source.PipelineTimeoutSec = resolveIntTimeout(persisted.PipelineTimeoutSec, PipelineTimeoutEnv, DefaultPipelineTimeoutSec, lookup)
+	effective.PipelineKillGraceSec, source.PipelineKillGraceSec = resolveIntTimeout(persisted.PipelineKillGraceSec, PipelineKillGraceEnv, DefaultPipelineKillGraceSec, lookup)
+	effective.APIReadyTimeoutSec, source.APIReadyTimeoutSec = resolveIntTimeout(persisted.APIReadyTimeoutSec, APIReadyTimeoutEnv, DefaultAPIReadyTimeoutSec, lookup)
+	effective.APIInitTimeoutSec, source.APIInitTimeoutSec = resolveIntTimeout(persisted.APIInitTimeoutSec, APIInitTimeoutEnv, DefaultAPIInitTimeoutSec, lookup)
+	effective.UIInitPollTimeoutSec, source.UIInitPollTimeoutSec = resolveIntTimeout(persisted.UIInitPollTimeoutSec, UIInitPollTimeoutEnv, DefaultUIInitPollTimeoutSec, lookup)
+	effective.UICancelPollTimeoutSec, source.UICancelPollTimeoutSec = resolveIntTimeout(persisted.UICancelPollTimeoutSec, UICancelPollTimeoutEnv, DefaultUICancelPollTimeoutSec, lookup)
 
 	return TimeoutResolution{
 		Persisted: persisted,
@@ -126,17 +122,11 @@ func resolveTimeoutsWithLookup(manifest workspace.Manifest, lookup envLookup) Ti
 func resolveIntTimeout(
 	persisted *int,
 	canonicalEnv string,
-	deprecatedEnvs []string,
 	defaultValue int,
 	lookup envLookup,
 ) (int, TimeoutSource) {
 	if value, ok := readPositiveIntEnv(canonicalEnv, lookup); ok {
 		return value, TimeoutSourceEnv
-	}
-	for _, alias := range deprecatedEnvs {
-		if value, ok := readPositiveIntEnv(alias, lookup); ok {
-			return value, TimeoutSourceDeprecatedEnv
-		}
 	}
 	if persisted != nil && *persisted > 0 {
 		return *persisted, TimeoutSourceWorkspace

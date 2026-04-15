@@ -199,7 +199,7 @@ func (r Root) resolveGitURLRepo(ctx context.Context, gitExec GitExecutor, repo R
 		}}
 	}
 
-	cacheDir, legacyCacheDir, err := r.resolveRepoCacheDir(repo.Name, repo.GitURL)
+	cacheDir, err := r.resolveRepoCacheDir(repo.Name, repo.GitURL)
 	if err != nil {
 		return ResolvedRepo{}, []Diagnostic{{
 			Level:      DiagnosticError,
@@ -211,17 +211,6 @@ func (r Root) resolveGitURLRepo(ctx context.Context, gitExec GitExecutor, repo R
 	}
 	effectiveCacheDir := cacheDir
 	repoDiagnostics := []Diagnostic{}
-	if fallbackPath, ok := resolveLegacyRepoCacheFallback(cacheDir, legacyCacheDir); ok {
-		effectiveCacheDir = fallbackPath
-		repoDiagnostics = append(repoDiagnostics, Diagnostic{
-			Level:      DiagnosticWarning,
-			Code:       "workspace.repo.cache.legacy_fallback",
-			Repo:       repo.Name,
-			Path:       fallbackPath,
-			Message:    fmt.Sprintf("using legacy git_url cache path %q because new cache key path %q is not materialized", fallbackPath, cacheDir),
-			Suggestion: "Run one fetch cycle to migrate this cache entry to the hashed cache key",
-		})
-	}
 
 	if !options.FetchGit {
 		repoDiagnostics = append(repoDiagnostics, Diagnostic{
@@ -326,7 +315,7 @@ func (r Root) resolveGitURLRepo(ctx context.Context, gitExec GitExecutor, repo R
 	return ResolvedRepo{Name: repo.Name, Source: "git_url", Path: effectiveCacheDir, Ref: repo.Ref}, repoDiagnostics
 }
 
-func (r Root) resolveRepoCacheDir(repoName string, source string) (string, string, error) {
+func (r Root) resolveRepoCacheDir(repoName string, source string) (string, error) {
 	slug := repoCacheSlug(repoName)
 	sourceHash := repoCacheSourceHash(source)
 	cacheSlug := slug
@@ -335,43 +324,9 @@ func (r Root) resolveRepoCacheDir(repoName string, source string) (string, strin
 	}
 	absPath, err := r.Resolve(filepath.Join(".acp", "repos", cacheSlug))
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
-	legacyAbsPath, err := r.Resolve(filepath.Join(".acp", "repos", slug))
-	if err != nil {
-		return "", "", err
-	}
-	if legacyAbsPath == absPath {
-		legacyAbsPath = ""
-	}
-	return absPath, legacyAbsPath, nil
-}
-
-func resolveLegacyRepoCacheFallback(primaryPath string, legacyPath string) (string, bool) {
-	primaryPath = strings.TrimSpace(primaryPath)
-	legacyPath = strings.TrimSpace(legacyPath)
-	if primaryPath == "" || legacyPath == "" || primaryPath == legacyPath {
-		return "", false
-	}
-	if hasGitRepoMetadata(primaryPath) {
-		return "", false
-	}
-	if !hasGitRepoMetadata(legacyPath) {
-		return "", false
-	}
-	return legacyPath, true
-}
-
-func hasGitRepoMetadata(path string) bool {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return false
-	}
-	info, err := os.Stat(filepath.Join(path, ".git"))
-	if err != nil {
-		return false
-	}
-	return info.IsDir()
+	return absPath, nil
 }
 
 func repoCacheSlug(name string) string {

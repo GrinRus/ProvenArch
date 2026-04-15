@@ -25,7 +25,7 @@ Suggested PR slices:
 Acceptance:
 - `schemas/taskresult.schema.json` зафиксирована как контракт
 - orchestrator валидирует TaskResult до применения изменений
-- orchestrator нормализует legacy `add_question` / `set_coverage` в canonical top-level `questions` / `coverage`
+- orchestrator работает с canonical top-level `questions` / `coverage`; legacy ops отклоняются contract validation
 - невалидный TaskResult отклоняется с понятной ошибкой
 - semantic tests покрывают `observation without evidence`, mixed normalized forms и explicit error surfacing
 
@@ -223,9 +223,6 @@ Suggested PR slices:
 
 2) Owner confirmation для cleanup-кандидатов с неявным usage risk
 - Scope:
-  - `.codex/model_instructions.md` (possible tooling integration)
-  - `docs/ai/AI_NATIVE_WORKFLOW.md` (orphan-doc candidate)
-  - `ui/README.md` (low-value duplicate candidate)
   - duplicated readable scenario fixtures (possible dedupe, policy-sensitive)
 - Owner: ACP maintainers + docs owner + tooling owner
 - Risk: medium/high (риск удалить скрыто используемые файлы или ухудшить regression/review UX)
@@ -233,3 +230,4 @@ Suggested PR slices:
 
 Resolved (2026-04-05):
 - `slugify` дедупликация между подсистемами выполнена через `internal/slugutil` + regression tests.
+- `.codex/model_instructions.md` удалён из tracked surface в cleanup-срезе.
