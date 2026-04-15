@@ -80,7 +80,7 @@ exit 1
 	}
 }
 
-func TestHeadlessRunnerUnsupportedPromptFlagReportsCompatibilityGuard(t *testing.T) {
+func TestHeadlessRunnerUnsupportedPromptFlagClassifiesAsRunnerUnavailable(t *testing.T) {
 	t.Parallel()
 
 	commandPath := filepath.Join(t.TempDir(), "qwen-unsupported-prompt.sh")
@@ -112,11 +112,8 @@ exit 1
 	if code != string(acpruntime.ErrorCodeRunnerUnavailable) {
 		t.Fatalf("unexpected error code %q", code)
 	}
-	if !strings.Contains(message, "compatibility guard") {
-		t.Fatalf("expected compatibility guard hint in error message, got %q", message)
-	}
-	if !strings.Contains(message, "HeadlessRunner.Args") {
-		t.Fatalf("expected legacy path hint in error message, got %q", message)
+	if !strings.Contains(message, "runner is unavailable") {
+		t.Fatalf("expected runner unavailable marker in error message, got %q", message)
 	}
 }
 
@@ -197,7 +194,7 @@ func TestHeadlessRunnerSchemaInvalidCandidateClassifiesAsSchemaStage(t *testing.
 	}
 }
 
-func TestHeadlessRunnerRepairsLegacyEdgeAliasesBeforeSchemaValidation(t *testing.T) {
+func TestHeadlessRunnerRejectsDeprecatedEdgeAliasesOnSchemaValidation(t *testing.T) {
 	t.Parallel()
 
 	runner := HeadlessRunner{
@@ -207,7 +204,7 @@ func TestHeadlessRunnerRepairsLegacyEdgeAliasesBeforeSchemaValidation(t *testing
 			`printf '%s\n' '{"meta":{"task_id":"task-edge-repair","step_id":"refresh.step3.findings","run_id":"run-1","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[{"op":"upsert_edge","edge":{"id":"edge.a.b","kind":"depends_on","source":"svc.a","target":"svc.b","provenance":{"kind":"inference","confidence":0.7,"evidence":[{"repo":"repo-a","path":"README.md"}]}}}]}'`,
 		},
 	}
-	result, err := runner.Run(context.Background(), acpruntime.Task{
+	_, err := runner.Run(context.Background(), acpruntime.Task{
 		TaskID:       "task-edge-repair",
 		RunID:        "run-1",
 		StepID:       "refresh.step3.findings",
@@ -215,15 +212,18 @@ func TestHeadlessRunnerRepairsLegacyEdgeAliasesBeforeSchemaValidation(t *testing
 		RepoScopes:   []string{"repo-a", "repo-b"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
-	if err != nil {
-		t.Fatalf("expected repaired edge aliases to pass: %v", err)
+	if err == nil {
+		t.Fatalf("expected parse-failed error for deprecated edge aliases")
 	}
-	if len(result.TaskResult.Changeset) != 1 || result.TaskResult.Changeset[0].Edge == nil {
-		t.Fatalf("expected one edge op after repair, got %#v", result.TaskResult.Changeset)
+	code, message, ok := acpruntime.ClassifyError(err)
+	if !ok {
+		t.Fatalf("expected classify error to succeed")
 	}
-	edge := result.TaskResult.Changeset[0].Edge
-	if edge.Type != "depends_on" || edge.From != "svc.a" || edge.To != "svc.b" {
-		t.Fatalf("expected repaired edge fields, got %+v", edge)
+	if code != string(acpruntime.ErrorCodeRunnerParseFailed) {
+		t.Fatalf("unexpected error code %q", code)
+	}
+	if !strings.Contains(message, "parse_stage=schema") {
+		t.Fatalf("expected parse_stage=schema, got %q", message)
 	}
 }
 

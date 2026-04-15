@@ -437,7 +437,7 @@ func (e *pipelineExecution) persistShardSummary(stepID string, domainID string, 
 
 func shardTaskrunPath(runID string, stepID string, domainID string, shardID string, singleShard bool) string {
 	if singleShard {
-		return legacyTaskrunPath(runID, stepID, domainID)
+		return singleShardTaskrunPath(runID, stepID, domainID)
 	}
 	stepSlug := strings.ReplaceAll(stepID, ".", "-")
 	shardSlug := sanitizeDomainArtifactSlug(shardID)
@@ -450,7 +450,7 @@ func shardTaskrunPath(runID string, stepID string, domainID string, shardID stri
 	return fmt.Sprintf("reports/taskruns/%s-%s-shard-%s.json", runID, stepSlug, shardSlug)
 }
 
-func legacyTaskrunPath(runID string, stepID string, domainID string) string {
+func singleShardTaskrunPath(runID string, stepID string, domainID string) string {
 	stepSlug := strings.ReplaceAll(stepID, ".", "-")
 	if strings.TrimSpace(domainID) != "" {
 		return fmt.Sprintf("reports/taskruns/%s-%s-domain-%s.json", runID, stepSlug, sanitizeDomainArtifactSlug(domainID))

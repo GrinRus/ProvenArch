@@ -22,7 +22,7 @@
 
 ### Semantic validator tests
 - правила, которые не выражаются чистой JSON Schema
-- deterministic normalization legacy `questions/coverage`
+- deterministic canonicalization top-level `questions/coverage`
 - stable ID normalization и collision rules
 - ownership/card linkage constraints
 
@@ -64,7 +64,8 @@ Baseline scenario set:
 
 - duplicate `repo.name` rejected
 - unsupported manifest fields rejected
-- mixed top-level `questions/coverage` + legacy ops normalize deterministically
+- top-level `questions/coverage` canonicalize deterministically
+- legacy `add_question` / `set_coverage` rejected contract validation
 - `observation` without evidence rejected
 - `add_doc_artifact` не используется как content write path
 - `owner_team_id` должен ссылаться на существующий `team.<slug>`
@@ -127,27 +128,20 @@ Implemented additional jobs:
   - `TestDeterministicSnapshotScopeExcludesRunSpecificArtifacts`
 - `smoke-cli`
   - `acp run --workspace ... --pipeline init --runtime fake --non-interactive`
-  - `acp run --workspace ... --pipeline refresh --refresh-mode incremental --runtime fake --non-interactive`
-  - `acp run --workspace ... --pipeline refresh --refresh-mode full --runtime fake --non-interactive`
+  - `acp run --workspace ... --pipeline refresh --runtime fake --non-interactive`
   - deterministic fake runner only
 - `smoke-api`
   - `acp serve --workspace ... --runtime fake`
   - `/api/workspace/validate`
   - pipeline status/artifacts/logs endpoints
   - dynamic free port + explicit fail on run polling timeout
-- `ui-smoke`
-  - workspace setup
-  - baseline editor save (`charter/*`/`skills/*`)
-  - validate
-  - run pipeline
-  - results viewer
 ## 7) Базовый набор тестов
 
 ### Contract tests
 - valid `workspace.yaml`
 - invalid `workspace.yaml`
 - valid canonical TaskResult
-- valid legacy-compatible TaskResult with normalization
+- invalid legacy TaskResult operations (`add_question` / `set_coverage`)
 - invalid TaskResult with schema violations
 
 ### Semantic tests
@@ -155,31 +149,29 @@ Implemented additional jobs:
 - unsupported manifest fields
 - `observation` without evidence
 - unknown `owner_team_id`
-- mixed top-level and legacy coverage/questions merge
+- canonical top-level coverage/questions dedupe
 
 ### Golden tests
 - entity/edge file materialization
 - stable slug normalization and collision handling
-- Step 3 `reports/as-is/*`
-- Step 4 findings materialization
-- Step 6 proposals/changelog determinism
+- Step 2 `reports/as-is/*`
+- Step 3 findings materialization
+- Step 4 proposals/changelog determinism
 
 ### Scenario integration tests
 - one-service happy path
 - multi-repo dependency extraction
 - missing owner / missing CI-CD evidence path
 - unresolved domain/team becomes question/finding, not new card
-- deterministic Step 2 enrichment включает `evidence_refs` в domain/team cards
+- deterministic Step 1 enrichment включает `evidence_refs` в domain/team cards
 - sharded runtime regression:
-  - step2/step4 materialize per-shard taskruns + shard-plan/shard-summary artifacts
+  - step1/step3 materialize per-shard taskruns + shard-plan/shard-summary artifacts
   - parallel scheduler keeps deterministic merge/apply order despite out-of-order shard completion
   - TaskResult shard metadata (`meta.shard_id`, `meta.repo_scopes`, `meta.path_scopes`) сохраняется в persisted taskruns
-  - global-review выполняется ровно 1 раз (`step5.global_review`)
 
 ### Smoke tests
 - `acp run --workspace ... --pipeline init --runtime fake --non-interactive`
-- `acp run --workspace ... --pipeline refresh --refresh-mode incremental --runtime fake --non-interactive`
-- `acp run --workspace ... --pipeline refresh --refresh-mode full --runtime fake --non-interactive`
+- `acp run --workspace ... --pipeline refresh --runtime fake --non-interactive`
 - `acp serve --workspace ... --runtime fake`
 - `/api/workspace/validate` без request body
 - pipeline endpoints не принимают `workspace_path`
@@ -217,10 +209,11 @@ Implemented additional jobs:
   - при parse-fail runtime сохраняет raw-output diagnostics в `reports/taskruns/raw/*` (stdout/stderr/meta with checksum)
 - batch regression `5x2` + frontend live e2e:
   - `scripts/full-run-batch-5x2.sh`
-  - canonical input: `TARGET_REPOS_FILE` (`repos[]` format, единственный поддерживаемый контракт)
+  - canonical input: `TARGET_REPOS_FILE` (`repos[]` format)
+  - legacy single-repo inputs запрещены (fail-fast c migration hint)
   - direct-only runtime commands (`claude`, `qwen`)
   - frontend live e2e работает на отдельной `frontend-workspace` копии run snapshot, не мутируя backend baseline
-  - backend quality source-of-truth: snapshot reports (`snapshots/<run_id>/reports/*`), fallback помечается как `reliability:snapshot-missing`
+  - backend quality source-of-truth: только snapshot reports (`snapshots/<run_id>/reports/*`), при отсутствии snapshot фиксируется `reliability:snapshot-missing` (без workspace fallback)
   - semantic hard-fail checks в batch evaluator: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`
   - multi-profile hard-fail: `analysis:cross-repo-missing` при `expected_repo_count >= 2` и отсутствии cross-repo сигнала
   - runtime-flow hard-fail checks: `runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:repo-selection`, `runtime:execution-semantics`, `runtime_flow_failed`
@@ -236,9 +229,6 @@ Implemented additional jobs:
   - официальные профили: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
   - для `source_kind=git_url` refs должны быть pinned
   - агрегированные отчёты: `profile_matrix_<matrix-id>.md/.tsv`, `release_verdict_<matrix-id>.md/.json`
-  - curated release queue:
-    - first-run: `posthog/posthog`, `microservices-patterns/ftgo-application`, `getsentry/*`, `Open edX ecosystem`
-    - second-pass: `GoogleCloudPlatform/bank-of-anthos`, `OpenStack ecosystem`
 - release live harness (manual pre-release gate, no wrapper):
   - source-of-truth runbook: `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
   - использует текущий matrix контур (`full-run-batch-matrix.sh` + `full-run-batch-5x2.sh` + `e2e_batch_report.py`)
@@ -253,13 +243,11 @@ Implemented additional jobs:
   - `scripts/frontend-live-e2e.sh`: Playwright output в `$OUTPUT_DIR/playwright-results`
   - `scripts/frontend-live-e2e.sh` читает effective UI poll timeouts из `GET /api/runtime/timeouts` (если env override не задан)
   - `UI_E2E_EXPECTED_REPO_COUNT` задаёт ожидаемое количество resolved repos (default `1`)
-  - `UI_E2E_SCENARIO=init-inspect-service-first|refresh-incremental|refresh-full|cancel-refresh` переключает live flow:
-    - `init-inspect-service-first`: validate -> run init -> inspect artifacts + service-first checks
-    - `refresh-incremental`: validate -> run refresh(incremental) + service-first checks
-    - `refresh-full`: validate -> run refresh(full) + service-first checks
+  - `UI_E2E_SCENARIO=init-inspect|cancel-refresh` переключает live flow:
+    - `init-inspect`: validate -> run init -> inspect artifacts
     - `cancel-refresh`: validate -> run refresh -> cancel selected run -> expect `failed + run_canceled`
   - `UI_E2E_CANCEL_STUB_SLEEP_SEC` задаёт длительность controlled slow stub runner для `cancel-refresh`
-  - cancel preflight guard: `UI_E2E_CANCEL_TIMEOUT_SEC >= UI_E2E_CANCEL_STUB_SLEEP_SEC + UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC`; при нарушении сценарий fail-fast до Playwright
+  - cancel preflight guard: `ACP_UI_CANCEL_POLL_TIMEOUT_SEC >= UI_E2E_CANCEL_STUB_SLEEP_SEC + UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC`; при нарушении сценарий fail-fast до Playwright
   - `ui/e2e/live-flow.spec.ts` + `npm run e2e:live --prefix ui`
   - batch shard controls (`scripts/full-run-batch-5x2.sh`):
     - `BATCH_PROVIDER_FILTER` (`all` или CSV `qwen-code,claude-code`)
@@ -274,8 +262,7 @@ Implemented additional jobs:
 
 - любой required CI run проходит без live network dependencies
 - любое изменение schema/spec/examples требует update fixtures/golden в том же PR
-- live headless provider smoke не блокирует merge; для обязательного CI используется только `contracts`, `backend`, `ui`, `golden`, `smoke-cli`, `smoke-api`, `ui-smoke`
-- workflow `ui-live-smoke-optional` запускается только вручную (`workflow_dispatch`) и не является required gate
+- live headless provider smoke не блокирует merge; для обязательного CI используется только `contracts`, `backend`, `ui`, `golden`, `smoke-cli`, `smoke-api`
 - release gate выполняется вручную перед релизом на trusted машине по `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
 - scenario fixtures и golden outputs считаются канонической regression surface до появления production-scale test corpus
 - optional readable golden export доступен для review-diff:

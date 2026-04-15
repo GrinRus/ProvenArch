@@ -655,7 +655,6 @@ type pipelineRequest struct {
 	Commit               bool   `json:"commit"`
 	CreateProposalBranch bool   `json:"create_proposal_branch"`
 	Trigger              string `json:"trigger"`
-	RefreshMode          string `json:"refresh_mode"`
 }
 
 var supportedTriggers = map[string]struct{}{
@@ -701,20 +700,10 @@ func (s *Server) handlePipelineStart(writer http.ResponseWriter, request *http.R
 		writeError(writer, http.StatusNotImplemented, "not_supported", "commit/create_proposal_branch is not supported in this slice")
 		return
 	}
-	refreshMode := orchestrator.RefreshModeIncremental
-	if pipeline == orchestrator.PipelineRefresh {
-		parsedMode, err := orchestrator.ParseRefreshMode(body.RefreshMode)
-		if err != nil {
-			writeError(writer, http.StatusBadRequest, "refresh_mode_invalid", err.Error())
-			return
-		}
-		refreshMode = parsedMode
-	}
 
 	runID, err := s.service.StartAsyncRun(context.Background(), orchestrator.RunRequest{
 		Workspace:      s.getWorkspace(),
 		Pipeline:       pipeline,
-		RefreshMode:    refreshMode,
 		NonInteractive: true,
 	})
 	if err != nil {
@@ -726,15 +715,10 @@ func (s *Server) handlePipelineStart(writer http.ResponseWriter, request *http.R
 		return
 	}
 
-	payload := map[string]any{
-		"run_id":       runID,
-		"status":       "started",
-		"refresh_mode": string(refreshMode),
-	}
-	if pipeline == orchestrator.PipelineInit && strings.TrimSpace(body.RefreshMode) != "" {
-		payload["warnings"] = []string{fmt.Sprintf("refresh_mode=%q is ignored for init pipeline", strings.TrimSpace(body.RefreshMode))}
-	}
-	writeJSON(writer, http.StatusAccepted, payload)
+	writeJSON(writer, http.StatusAccepted, map[string]any{
+		"run_id": runID,
+		"status": "started",
+	})
 }
 
 func (s *Server) handlePipelineRuns(writer http.ResponseWriter, request *http.Request) {

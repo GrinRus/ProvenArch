@@ -125,27 +125,16 @@ Bundle поставляется вместе с продуктом, хранит
 
 ### Init pipeline
 - `init.step0.constitution`
-- `init.step1.service_inventory`
-- `init.step2.service_collect`
-- `init.step3.asis_docs`
-- `init.step4.service_findings`
-- `init.step5.global_review`
-- `init.step6.proposals`
+- `init.step1.collect`
+- `init.step2.asis_docs`
+- `init.step3.findings`
+- `init.step4.proposals`
 
 ### Refresh pipeline (manual)
-- `refresh.step1.service_inventory`
-- `refresh.step2.service_collect`
-- `refresh.step3.asis_docs`
-- `refresh.step4.service_findings`
-- `refresh.step5.global_review`
-- `refresh.step6.proposals`
-
-### Refresh mode
-- default mode: `incremental`
-- explicit mode: `full`
-- CLI: `acp run --pipeline refresh --refresh-mode incremental|full`
-- API: `POST /api/pipeline/refresh` поле `refresh_mode`
-- UI: selector `Refresh mode`
+- `refresh.step1.collect`
+- `refresh.step2.asis_docs`
+- `refresh.step3.findings`
+- `refresh.step4.proposals`
 
 ## TaskResult semantics (MVP)
 
@@ -154,16 +143,10 @@ Canonical MVP runtime shape:
 - `coverage` пишется на top-level
 - `changeset` содержит model/findings/doc metadata operations
 
-Legacy-compatible forms:
-- `add_question`
-- `set_coverage`
-
-Orchestrator normalization policy:
-- operation-form `add_question` и `set_coverage` нормализуются в canonical top-level representation до persistence/materialization
-- если в одном TaskResult присутствуют и top-level поля, и operation-form:
-  - source of truth для persisted artifacts — merged result after normalization
-  - duplicate questions dedupe по canonical `id` и нормализованному `text`
-  - coverage merge для `observed`, `missing`, `notes` использует semantic canonicalization (`snake_case`/`kebab-case`/spaced variants) с дедупликацией по нормализованной форме
+Canonical-only operations policy:
+- `changeset[].op` поддерживает только canonical operations из schema-contract.
+- legacy operations `add_question` / `set_coverage` отклоняются contract validation.
+- orchestrator canonicalize-ит только top-level `questions[]` и `coverage` (dedupe + stable ordering).
 
 `add_doc_artifact` в MVP:
 - трактуется только как metadata registration op
@@ -191,32 +174,23 @@ Step 0 materialization policy:
 - если contract отсутствует/невалиден, применяется baseline fallback materialization;
 - fallback фиксируется warning-сообщением в run diagnostics (`GET /api/pipeline/runs/<run_id>.warnings`).
 
-### Step 1 — Service inventory (planner step)
+### Step 1 — Collect context (runtime step)
 Inputs:
 - `workspace.yaml` из корня central `arch-workspace`
 - локальные checkout репозиториев, полученные из `path` и/или local git resolution of `git_url` на той же машине
-Planner policy:
-- marker-based roots: `go.mod`, `package.json`, `pyproject.toml`, `Cargo.toml`, `pom.xml`, `build.gradle`, `settings.gradle`, `module.bazel`, `WORKSPACE|workspace`
-- leaf-pruning корневых путей
-- fallback root `.` при пустом детекте
-- large-service split: если сервис `>500` source files или `>8MB`, деление на чанки до `200` files или `3MB`, максимум `8` чанков/сервис
-- deterministic order: `repo_scope -> service_id -> shard_id`
+- `docs/imports/index.yaml` (если есть) + `docs/imports/*`
+- `docs/imports/*`, `docs/rfcs/*`, `docs/meetings/*`, `docs/decisions/*`
+- `charter/*`
+- `skills/*`
 
-Artifacts:
-- `reports/taskruns/<run_id>-service-inventory-plan.json`
-- `reports/taskruns/<run_id>-service-inventory-summary.json`
-- stable snapshot: `reports/taskruns/service-inventory-latest.json`
-
-Refresh policy:
-- `incremental`: previous snapshot + `git diff <prev_head>...HEAD` + untracked/modified files; запускаются только changed/new сервисы
-- `full`: запускаются все сервисы
-- removed сервисы фиксируются как question/finding
-- если snapshot/git недоступен по repo: fallback на full только для этого repo + warning
-
-### Step 2 — Service collect (runtime step)
-Runtime fan-out:
-- отдельный runtime task на каждый `service_shard`
-- provider process-scoped на run (`claude-code` или `qwen-code`, без mixed providers внутри одного run)
+Runtime focuses on:
+- arbitrary stacks через выбранный headless provider (`claude-code|qwen-code`) + baseline skill/prompt bundle, без фиксированного whitelist parser implementations в MVP
+- service topology и entrypoints
+- interfaces (HTTP/gRPC/events)
+- external systems/integrations
+- datastores и storage usage
+- CI/CD evidence (`.gitlab-ci.yml`, Dockerfile, deploy manifests, helm/k8s, scripts)
+- ownership hints и явные unknowns
 
 Runtime output (TaskResult):
 - `changeset`: `upsert_entity`, `upsert_edge`, optional `add_doc_artifact`
@@ -224,17 +198,22 @@ Runtime output (TaskResult):
 - optional top-level `coverage`
 
 Orchestrator applies:
-- валидирует/нормализует TaskResult
+- валидирует TaskResult schema
+- нормализует top-level `questions`/`coverage` в canonical representation
+- выполняет runtime `init.step1.collect`/`refresh.step1.collect` отдельно для каждой canonical domain card (`charter/cards/domains/*`)
+- materialize-ит отдельный raw taskrun на каждый домен в `reports/taskruns/*-step1-collect-domain-<domain>.json`
 - обновляет `model/*`
-- сохраняет raw taskruns per service shard в `reports/taskruns/*-step2-service_collect-domain-service-*.json`
-- формирует `reports/coverage/summary.md` и `reports/coverage/open-questions.md`
-- агрегирует service results в domain outputs (`reports/agent-outputs/domains/*`) и enrich canonical cards
-- domain mapping policy:
-  - single-domain-per-repo: direct map
-  - multi-domain-per-repo: token match (`domain_id` vs `service_id/service_root`)
-  - ambiguous/no-domain: unresolved question + global bucket
+- сохраняет taskrun under `reports/taskruns/*`
+- формирует `reports/coverage/summary.md`
+- формирует `reports/coverage/open-questions.md`
+- enrich существующие `charter/cards/domains/*` и `charter/cards/teams/*` через детерминированную секцию `## Derived (ACP Step1)`:
+  - related model IDs / findings / questions
+  - coverage missing summary
+  - evidence refs (для domain и team cards)
+- не создаёт и не переименовывает canonical cards автоматически
+- сохраняет outputs domain-агентов в `reports/agent-outputs/domains/*`
 
-### Step 3 — As-is docs (compiler step in MVP)
+### Step 2 — As-is docs (compiler step in MVP)
 Inputs:
 - `model/*`
 - `charter/*`
@@ -257,7 +236,7 @@ Outputs:
 > В MVP это детерминированная компиляция из модели.
 > C4 generation policy: strict evidence-first. Если данных недостаточно, диаграммы не выдумывают узлы и содержат явные `Gap:*` маркеры.
 
-### Step 4 — Service findings (runtime step)
+### Step 3 — Findings (runtime step)
 Inputs:
 - `model/*`
 - `charter/rules.yaml`
@@ -267,25 +246,14 @@ Runtime output (TaskResult):
 - `changeset`: `add_finding`
 - optional top-level `questions`
 - optional top-level `coverage`
-- legacy-compatible `add_question` / `set_coverage` допустимы, но не являются canonical MVP form
 
 Orchestrator applies:
-- нормализует legacy question/coverage ops в canonical top-level representation
+- нормализует top-level `questions`/`coverage` в canonical representation
 - обновляет `reports/findings/*`
+- обновляет `reports/agent-outputs/architect/summary.md` через детерминированную агрегацию фактических domain outputs
 - materializes critical unknowns как findings, если отсутствуют owner/integration/database/CI-CD evidence
 
-### Step 5 — Global review (runtime step)
-Inputs:
-- service-level taskruns из `step2.service_collect` и `step4.service_findings`
-- unresolved/ambiguous bucket
-
-Outputs:
-- `reports/agent-outputs/architect/summary.md`
-- `reports/taskruns/<run_id>-global-review-input.json`
-- `reports/taskruns/<run_id>-<step>-global-review.json`
-- run-level aggregate counters (в summary)
-
-### Step 6 — Proposals (compiler/templates in MVP)
+### Step 4 — Proposals (compiler/templates in MVP)
 Inputs:
 - `model/*`
 - `reports/findings/*`
@@ -335,7 +303,7 @@ Outputs:
 - один и тот же pipeline должен быть воспроизводим локально и в GitHub/GitLab CI/CD trigger mode
 
 ## CI/CD trigger modes (MVP)
-- Required MVP integration surface: `acp run --workspace ... --pipeline ... --refresh-mode incremental|full --non-interactive` (для `refresh`; для `init` флаг игнорируется).
+- Required MVP integration surface: `acp run --workspace ... --pipeline ... --non-interactive`.
 - SCM hook mode: GitHub/GitLab webhook инициирует native pipeline/job, который запускает ACP batch mode.
 - Default auto-trigger: `push` в default branch.
 - `merge request` / `pull request` updates в MVP идут как manual/preview trigger, а не auto-write trigger.

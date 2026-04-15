@@ -415,7 +415,6 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 
 	workspacePath := fs.String("workspace", "", "absolute path to arch-workspace")
 	pipelineName := fs.String("pipeline", "", "pipeline to run: init or refresh")
-	refreshModeFlag := fs.String("refresh-mode", "", "refresh mode (refresh pipeline only): incremental or full")
 	runtimeMode := fs.String("runtime", "fake", "runtime mode: fake or headless")
 	runtimeProvider := fs.String("runtime-provider", "", "runtime provider for headless mode: claude-code or qwen-code (fallback: ACP_RUNTIME_PROVIDER)")
 	executionStrategy := fs.String("execution-strategy", "", "execution strategy override: sequential or parallel")
@@ -425,7 +424,7 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 	runLogsMaxRuns := fs.Int("run-logs-max-runs", envInt("ACP_RUN_LOGS_MAX_RUNS", 200), "maximum number of run log files to retain")
 	nonInteractive := fs.Bool("non-interactive", false, "disable interactive prompts")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: acp run --workspace <abs-path> --pipeline init|refresh [--refresh-mode incremental|full] [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]")
+		fmt.Fprintln(stderr, "Usage: acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]")
 		fs.PrintDefaults()
 	}
 
@@ -464,14 +463,6 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "pipeline validation failed: %v\n", err)
 		return exitCodeValidation
-	}
-	refreshMode, err := orchestrator.ParseRefreshMode(*refreshModeFlag)
-	if err != nil {
-		fmt.Fprintf(stderr, "pipeline validation failed: %v\n", err)
-		return exitCodeValidation
-	}
-	if pipeline == orchestrator.PipelineInit && strings.TrimSpace(*refreshModeFlag) != "" {
-		fmt.Fprintf(stderr, "warning: --refresh-mode=%s is ignored for init pipeline\n", refreshMode)
 	}
 	resolvedExecutionProfile := acpruntime.ResolveExecution(ws.Manifest, executionOverrides)
 	report := ws.Validate(context.Background(), workspace.ValidateOptions{
@@ -514,7 +505,6 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 	runInfo, artifacts, err := service.Run(context.Background(), orchestrator.RunRequest{
 		Workspace:      ws,
 		Pipeline:       pipeline,
-		RefreshMode:    refreshMode,
 		NonInteractive: *nonInteractive,
 	})
 	if err != nil {
@@ -528,9 +518,6 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "workspace: %s\n", ws.Path)
 	fmt.Fprintf(stdout, "run_id: %s\n", runInfo.RunID)
 	fmt.Fprintf(stdout, "pipeline: %s\n", runInfo.Pipeline)
-	if pipeline == orchestrator.PipelineRefresh {
-		fmt.Fprintf(stdout, "refresh_mode: %s\n", refreshMode)
-	}
 	fmt.Fprintf(stdout, "status: %s\n", runInfo.Status)
 	fmt.Fprintf(stdout, "runtime mode: %s\n", mode)
 	fmt.Fprintf(stdout, "runtime provider: %s\n", provider)
@@ -621,7 +608,7 @@ func printRootUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]")
 	fmt.Fprintln(w, "  acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]")
-	fmt.Fprintln(w, "  acp run --workspace <abs-path> --pipeline init|refresh [--refresh-mode incremental|full] [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]")
+	fmt.Fprintln(w, "  acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]")
 	fmt.Fprintln(w, "  acp qa --workspace <abs-path> --question \"<text>\"")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Commands:")

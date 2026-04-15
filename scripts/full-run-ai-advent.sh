@@ -2,9 +2,18 @@
 set -Eeuo pipefail
 
 PROVENARCH_ROOT="${PROVENARCH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+# shellcheck source=scripts/legacy-env-guard.sh
+source "$PROVENARCH_ROOT/scripts/legacy-env-guard.sh"
+# shellcheck source=scripts/repos-meta-fields.sh
+source "$PROVENARCH_ROOT/scripts/repos-meta-fields.sh"
+# shellcheck source=scripts/timeout-env-keys.sh
+source "$PROVENARCH_ROOT/scripts/timeout-env-keys.sh"
+# shellcheck source=scripts/execution-env-keys.sh
+source "$PROVENARCH_ROOT/scripts/execution-env-keys.sh"
 TARGET_REPOS_FILE="${TARGET_REPOS_FILE:-}"
 PROFILE_ID="${PROFILE_ID:-}"
 PROFILE_SOURCE_KIND="${PROFILE_SOURCE_KIND:-}"
+PROFILE_SOURCE_KIND_EFFECTIVE="mixed"
 EXPECTED_REPO_COUNT="${EXPECTED_REPO_COUNT:-}"
 TMP_ROOT="${TMP_ROOT:-}"
 KEEP_TMP="${KEEP_TMP:-0}"
@@ -16,22 +25,12 @@ APPLY_TIMEOUTS_VIA_API="${ACP_APPLY_TIMEOUTS_VIA_API:-1}"
 
 RUNTIME_STEP_TIMEOUT_SEC="${ACP_RUNTIME_STEP_TIMEOUT_SEC:-}"
 RUNTIME_HEARTBEAT_SEC="${ACP_RUNTIME_HEARTBEAT_SEC:-}"
-PIPELINE_TIMEOUT_SEC="${ACP_PIPELINE_TIMEOUT_SEC:-${ACP_FULL_RUN_PIPELINE_TIMEOUT_SEC:-}}"
-PIPELINE_KILL_GRACE_SEC="${ACP_PIPELINE_KILL_GRACE_SEC:-${ACP_FULL_RUN_PIPELINE_KILL_GRACE_SEC:-}}"
+PIPELINE_TIMEOUT_SEC="${ACP_PIPELINE_TIMEOUT_SEC:-}"
+PIPELINE_KILL_GRACE_SEC="${ACP_PIPELINE_KILL_GRACE_SEC:-}"
 API_READY_TIMEOUT_SEC="${ACP_API_READY_TIMEOUT_SEC:-}"
 API_INIT_TIMEOUT_SEC="${ACP_API_INIT_TIMEOUT_SEC:-}"
 UI_INIT_POLL_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-}"
 UI_CANCEL_POLL_TIMEOUT_SEC="${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-}"
-READY_TIMEOUT_SEC="${READY_TIMEOUT_SEC:-}"
-
-DEFAULT_RUNTIME_STEP_TIMEOUT_SEC=1800
-DEFAULT_RUNTIME_HEARTBEAT_SEC=30
-DEFAULT_PIPELINE_TIMEOUT_SEC=2400
-DEFAULT_PIPELINE_KILL_GRACE_SEC=30
-DEFAULT_API_READY_TIMEOUT_SEC=60
-DEFAULT_API_INIT_TIMEOUT_SEC=120
-DEFAULT_UI_INIT_POLL_TIMEOUT_SEC=900
-DEFAULT_UI_CANCEL_POLL_TIMEOUT_SEC=420
 
 CREATED_TMP=0
 SERVER_PID=""
@@ -44,10 +43,10 @@ QUALITY_GATES_STATUS="not_run"
 LAST_SIGNAL=""
 HEADLESS_PROVIDER=""
 HEADLESS_CMD=""
-TARGET_INPUT_MODE=""
 TARGET_PROFILE="generic"
 RESOLVED_TARGET_REPOS_FILE=""
 TARGET_REPOS_META_JSON=""
+EXPECTED_REPO_COUNT_RESOLVED=0
 EXPECTED_RUNS=0
 COMPLETED_RUNS=0
 EXPECTED_HEADLESS_RUNS=0
@@ -91,6 +90,9 @@ if [[ ! "$RUN_LOGS_MAX_RUNS" =~ ^[1-9][0-9]*$ ]]; then
   echo "RUN_LOGS_MAX_RUNS must be a positive integer, got: $RUN_LOGS_MAX_RUNS" >&2
   exit 1
 fi
+if ! acp_ensure_no_legacy_env_set; then
+  exit 1
+fi
 EXPECTED_RUNS=$((ITERATIONS * 4))
 EXPECTED_HEADLESS_RUNS=$((ITERATIONS * 2))
 
@@ -103,8 +105,6 @@ fi
 
 WORKSPACE_HEADLESS="$TMP_ROOT/arch-workspace"
 WORKSPACE_BASELINE="$TMP_ROOT/arch-workspace-baseline"
-# Keep legacy alias for compatibility in older helper code paths.
-WORKSPACE="$WORKSPACE_HEADLESS"
 LOG_DIR="$TMP_ROOT/logs"
 SNAPSHOT_DIR="$TMP_ROOT/snapshots"
 SUMMARY_PATH="$TMP_ROOT/session-summary.md"
@@ -273,130 +273,44 @@ slugify() {
 }
 
 prepare_target_repos_file() {
-  if [[ -n "${TARGET_REPO:-}" || -n "${TARGET_REPO_GIT_URL:-}" || -n "${TARGET_REPO_NAME:-}" || -n "${TARGET_REPO_REF:-}" ]]; then
-    die "legacy target input env (TARGET_REPO*) is no longer supported; use TARGET_REPOS_FILE with repos[]"
+  if [[ -n "$TARGET_REPOS_FILE" ]]; then
+    if [[ ! -f "$TARGET_REPOS_FILE" ]]; then
+      die "TARGET_REPOS_FILE does not exist: $TARGET_REPOS_FILE"
+    fi
+    RESOLVED_TARGET_REPOS_FILE="$(cd "$(dirname "$TARGET_REPOS_FILE")" && pwd)/$(basename "$TARGET_REPOS_FILE")"
+    return 0
   fi
-  if [[ -z "$TARGET_REPOS_FILE" ]]; then
-    die "missing target input: set TARGET_REPOS_FILE (repos[] YAML)"
-  fi
-  if [[ ! -f "$TARGET_REPOS_FILE" ]]; then
-    die "TARGET_REPOS_FILE does not exist: $TARGET_REPOS_FILE"
-  fi
-  TARGET_INPUT_MODE="repos-file"
-  RESOLVED_TARGET_REPOS_FILE="$(cd "$(dirname "$TARGET_REPOS_FILE")" && pwd)/$(basename "$TARGET_REPOS_FILE")"
+
+  die "missing target input: set TARGET_REPOS_FILE=/abs/path/to/repos.yaml"
 }
 
 validate_target_repos_file() {
   TARGET_REPOS_META_JSON="$TMP_ROOT/target-repos-meta.json"
-  python3 - "$RESOLVED_TARGET_REPOS_FILE" "$EXPECTED_REPO_COUNT" "$PROFILE_SOURCE_KIND" "$PROFILE_ID" "$TARGET_REPOS_META_JSON" <<'PY'
-import json
-import os
-import sys
-from pathlib import Path
-
-try:
-    import yaml  # type: ignore
-except Exception as exc:  # pragma: no cover
-    raise SystemExit(f"PyYAML is required for parsing repos file: {exc}")
-
-repos_file = Path(sys.argv[1]).resolve()
-expected_raw = (sys.argv[2] or "").strip()
-source_kind = (sys.argv[3] or "").strip()
-profile_id = (sys.argv[4] or "").strip()
-meta_path = Path(sys.argv[5]).resolve()
-
-allowed_kinds = {"", "path", "git_url"}
-if source_kind not in allowed_kinds:
-    raise SystemExit(f"PROFILE_SOURCE_KIND must be one of path|git_url, got: {source_kind}")
-
-payload = yaml.safe_load(repos_file.read_text(encoding="utf-8"))
-if isinstance(payload, list):
-    repos = payload
-elif isinstance(payload, dict):
-    repos = payload.get("repos")
-else:
-    repos = None
-
-if not isinstance(repos, list) or not repos:
-    raise SystemExit(f"repos file {repos_file} must contain non-empty repos[]")
-
-declared = []
-for idx, item in enumerate(repos, start=1):
-    if not isinstance(item, dict):
-        raise SystemExit(f"repos[{idx}] must be an object")
-    name = str(item.get("name", "")).strip()
-    if not name:
-        raise SystemExit(f"repos[{idx}] is missing name")
-    path_raw = str(item.get("path", "")).strip()
-    git_url = str(item.get("git_url", "")).strip()
-    has_path = bool(path_raw)
-    has_git = bool(git_url)
-    if has_path == has_git:
-        raise SystemExit(f"repos[{idx}] must set exactly one of path or git_url")
-    ref = str(item.get("ref", "")).strip()
-    if has_path:
-        source = "path"
-        path_value = Path(path_raw)
-        abs_path = (repos_file.parent / path_value).resolve() if not path_value.is_absolute() else path_value.resolve()
-        if not abs_path.exists():
-            raise SystemExit(f"repos[{idx}] path does not exist: {abs_path}")
-        if not abs_path.is_dir():
-            raise SystemExit(f"repos[{idx}] path is not a directory: {abs_path}")
-        entry = {
-            "name": name,
-            "source": source,
-            "path": str(abs_path),
-            "ref": ref,
-        }
-    else:
-        source = "git_url"
-        entry = {
-            "name": name,
-            "source": source,
-            "git_url": git_url,
-            "ref": ref,
-        }
-    if source_kind == "path" and source != "path":
-        raise SystemExit(f"profile source_kind=path but repos[{idx}] uses git_url")
-    if source_kind == "git_url":
-        if source != "git_url":
-            raise SystemExit(f"profile source_kind=git_url but repos[{idx}] uses path")
-        if not ref:
-            raise SystemExit(f"repos[{idx}] git_url entry must have pinned ref for source_kind=git_url")
-    declared.append(entry)
-
-if expected_raw:
-    try:
-        expected_count = int(expected_raw)
-    except ValueError:
-        raise SystemExit(f"EXPECTED_REPO_COUNT must be an integer, got: {expected_raw}")
-    if expected_count <= 0:
-        raise SystemExit(f"EXPECTED_REPO_COUNT must be > 0, got: {expected_count}")
-    if len(declared) != expected_count:
-        raise SystemExit(f"expected {expected_count} repos but got {len(declared)} in {repos_file}")
-else:
-    expected_count = len(declared)
-
-target_profile = "generic"
-for repo in declared:
-    haystack = " ".join(
-        part for part in [repo.get("name", ""), repo.get("path", ""), repo.get("git_url", ""), repo.get("ref", "")] if part
-    ).lower()
-    if "ai_advent_challenge_new" in haystack:
-        target_profile = "ai-advent"
-        break
-
-meta = {
-    "repos_file": str(repos_file),
-    "profile_id": profile_id or "adhoc",
-    "profile_source_kind": source_kind or "mixed",
-    "expected_repo_count": expected_count,
-    "target_profile": target_profile,
-    "declared_repos": declared,
+  python3 "$PROVENARCH_ROOT/scripts/resolve-repos-meta.py" \
+    --repos-file "$RESOLVED_TARGET_REPOS_FILE" \
+    --expected-repo-count "$EXPECTED_REPO_COUNT" \
+    --source-kind "$PROFILE_SOURCE_KIND" \
+    --profile-id "$PROFILE_ID" \
+    --out "$TARGET_REPOS_META_JSON"
 }
-meta_path.parent.mkdir(parents=True, exist_ok=True)
-meta_path.write_text(json.dumps(meta, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
-PY
+
+read_target_repos_meta() {
+  local key
+  local value
+  local resolved_target_profile="generic"
+  local resolved_source_kind="mixed"
+  local resolved_expected_count="0"
+  while IFS='=' read -r key value; do
+    case "$key" in
+      target_profile) resolved_target_profile="$value" ;;
+      profile_source_kind) resolved_source_kind="$value" ;;
+      expected_repo_count) resolved_expected_count="$value" ;;
+    esac
+  done < <(acp_read_repos_meta_fields "$TARGET_REPOS_META_JSON")
+
+  TARGET_PROFILE="${resolved_target_profile:-generic}"
+  PROFILE_SOURCE_KIND_EFFECTIVE="${resolved_source_kind:-mixed}"
+  EXPECTED_REPO_COUNT_RESOLVED="${resolved_expected_count:-0}"
 }
 
 resolve_effective_timeouts_from_workspace() {
@@ -406,93 +320,9 @@ resolve_effective_timeouts_from_workspace() {
     die "workspace manifest is missing for timeout resolution: $manifest_path"
   fi
   local resolved_lines
-  resolved_lines="$(python3 - "$manifest_path" <<'PY'
-import os
-import sys
-from pathlib import Path
-
-try:
-    import yaml  # type: ignore
-except Exception as exc:
-    raise SystemExit(f"PyYAML is required for timeout resolution: {exc}")
-
-manifest_path = Path(sys.argv[1]).resolve()
-payload = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
-runtime = payload.get("runtime") if isinstance(payload, dict) else {}
-timeouts = runtime.get("timeouts") if isinstance(runtime, dict) else {}
-if not isinstance(timeouts, dict):
-    timeouts = {}
-
-DEFAULTS = {
-    "step_timeout_sec": 1800,
-    "heartbeat_sec": 30,
-    "pipeline_timeout_sec": 2400,
-    "pipeline_kill_grace_sec": 30,
-    "api_ready_timeout_sec": 60,
-    "api_init_timeout_sec": 120,
-    "ui_init_poll_timeout_sec": 900,
-    "ui_cancel_poll_timeout_sec": 420,
-}
-CANONICAL = {
-    "step_timeout_sec": "ACP_RUNTIME_STEP_TIMEOUT_SEC",
-    "heartbeat_sec": "ACP_RUNTIME_HEARTBEAT_SEC",
-    "pipeline_timeout_sec": "ACP_PIPELINE_TIMEOUT_SEC",
-    "pipeline_kill_grace_sec": "ACP_PIPELINE_KILL_GRACE_SEC",
-    "api_ready_timeout_sec": "ACP_API_READY_TIMEOUT_SEC",
-    "api_init_timeout_sec": "ACP_API_INIT_TIMEOUT_SEC",
-    "ui_init_poll_timeout_sec": "ACP_UI_INIT_POLL_TIMEOUT_SEC",
-    "ui_cancel_poll_timeout_sec": "ACP_UI_CANCEL_POLL_TIMEOUT_SEC",
-}
-DEPRECATED = {
-    "pipeline_timeout_sec": ["ACP_FULL_RUN_PIPELINE_TIMEOUT_SEC"],
-    "pipeline_kill_grace_sec": ["ACP_FULL_RUN_PIPELINE_KILL_GRACE_SEC"],
-    "api_ready_timeout_sec": ["READY_TIMEOUT_SEC"],
-    "ui_init_poll_timeout_sec": ["UI_E2E_INIT_TIMEOUT_SEC"],
-    "ui_cancel_poll_timeout_sec": ["UI_E2E_CANCEL_TIMEOUT_SEC"],
-}
-
-def parse_positive(raw: str):
-    raw = (raw or "").strip()
-    if not raw:
-        return None
-    try:
-        value = int(raw)
-    except ValueError:
-        return None
-    if value <= 0:
-        return None
-    return value
-
-for key in (
-    "step_timeout_sec",
-    "heartbeat_sec",
-    "pipeline_timeout_sec",
-    "pipeline_kill_grace_sec",
-    "api_ready_timeout_sec",
-    "api_init_timeout_sec",
-    "ui_init_poll_timeout_sec",
-    "ui_cancel_poll_timeout_sec",
-):
-    value = None
-    canonical_env = CANONICAL[key]
-    env_value = parse_positive(os.environ.get(canonical_env, ""))
-    if env_value is not None:
-        value = env_value
-    if value is None:
-        for alias in DEPRECATED.get(key, []):
-            alias_value = parse_positive(os.environ.get(alias, ""))
-            if alias_value is not None:
-                value = alias_value
-                break
-    if value is None:
-        persisted_value = timeouts.get(key)
-        if isinstance(persisted_value, int) and persisted_value > 0:
-            value = persisted_value
-    if value is None:
-        value = DEFAULTS[key]
-    print(f"{key}={value}")
-PY
-)"
+  resolved_lines="$(python3 "$PROVENARCH_ROOT/scripts/resolve-timeout-profile.py" \
+    --workspace-manifest "$manifest_path" \
+    --format kv)"
   while IFS='=' read -r key value; do
     [[ -z "$key" ]] && continue
     case "$key" in
@@ -506,7 +336,6 @@ PY
       ui_cancel_poll_timeout_sec) UI_CANCEL_POLL_TIMEOUT_SEC="$value" ;;
     esac
   done <<<"$resolved_lines"
-  READY_TIMEOUT_SEC="$API_READY_TIMEOUT_SEC"
 }
 
 apply_runtime_timeouts_via_api() {
@@ -622,7 +451,7 @@ PY
 wait_for_health() {
   local api_base="$1"
   local deadline
-  deadline=$((SECONDS + READY_TIMEOUT_SEC))
+  deadline=$((SECONDS + API_READY_TIMEOUT_SEC))
   while (( SECONDS < deadline )); do
     if curl -fsS "$api_base/api/health" >/dev/null 2>&1; then
       return 0
@@ -724,12 +553,12 @@ mock_flag = 1 if ('mock' in runtime_lower or 'fake' in runtime_lower) else 0
 signal_components = changeset + findings + questions + coverage_observed + coverage_missing + entity_upserts + edge_upserts
 zero_signal = 1 if signal_components == 0 else 0
 
-service_collect_steps = 0
+domain_collect_steps = 0
 for step in steps:
     step_id = str(step.get('step_id', ''))
     domain_id = str(step.get('domain_id', '')).strip()
-    if 'step2.service_collect' in step_id and domain_id:
-        service_collect_steps += 1
+    if 'step1.collect' in step_id and domain_id:
+        domain_collect_steps += 1
 
 status = str(payload.get('status', ''))
 print("\t".join([
@@ -741,7 +570,7 @@ print("\t".join([
     str(coverage_observed),
     str(coverage_missing),
     str(warnings),
-    str(service_collect_steps),
+    str(domain_collect_steps),
     str(mock_flag),
     str(zero_signal),
     runtime_blob,
@@ -853,8 +682,8 @@ if len(question_texts) != len(set(question_texts)):
     print(f"semantic quality failed for run {run_id}: duplicate open-question texts after normalization")
     sys.exit(5)
 
-critical_marker = "semantic_guard: critical_off_topic_drift in refresh.step2.service_collect"
-taskrun_glob = os.path.join(workspace, "reports", "taskruns", f"{run_id}-refresh-step2-service_collect-*.json")
+critical_marker = "semantic_guard: critical_off_topic_drift in refresh.step1.collect"
+taskrun_glob = os.path.join(workspace, "reports", "taskruns", f"{run_id}-refresh-step1-collect-*.json")
 for taskrun_path in sorted(glob.glob(taskrun_glob)):
     try:
         payload = json.load(open(taskrun_path, encoding="utf-8"))
@@ -1052,11 +881,11 @@ write_summary() {
     echo "- generated_at: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
     echo "- result: $result"
     echo "- provenarch_root: $PROVENARCH_ROOT"
-    echo "- target_input_mode: ${TARGET_INPUT_MODE:-unknown}"
+    echo "- target_input_mode: repos-file"
     echo "- target_repos_file: ${RESOLVED_TARGET_REPOS_FILE:-unset}"
     echo "- profile_id: ${PROFILE_ID:-adhoc}"
-    echo "- profile_source_kind: ${PROFILE_SOURCE_KIND:-mixed}"
-    echo "- expected_repo_count: ${EXPECTED_REPO_COUNT:-auto}"
+    echo "- profile_source_kind: $PROFILE_SOURCE_KIND_EFFECTIVE"
+    echo "- expected_repo_count: $EXPECTED_REPO_COUNT_RESOLVED"
     echo "- target_profile: $TARGET_PROFILE"
     echo "- workspace_baseline: $WORKSPACE_BASELINE"
     echo "- workspace_headless: $WORKSPACE_HEADLESS"
@@ -1235,14 +1064,15 @@ fi
 
 prepare_target_repos_file
 validate_target_repos_file
-TARGET_PROFILE="$(python3 - "$TARGET_REPOS_META_JSON" <<'PY'
-import json
-import sys
-payload = json.load(open(sys.argv[1], encoding='utf-8'))
-print(payload.get("target_profile", "generic"))
-PY
-)"
-log "target input resolved: mode=$TARGET_INPUT_MODE repos_file=$RESOLVED_TARGET_REPOS_FILE profile=$TARGET_PROFILE"
+read_target_repos_meta
+case "$PROFILE_SOURCE_KIND_EFFECTIVE" in
+  path|git_url|mixed)
+    ;;
+  *)
+    die "invalid target repos metadata profile_source_kind '$PROFILE_SOURCE_KIND_EFFECTIVE' (expected path|git_url|mixed)"
+    ;;
+esac
+log "target input resolved: mode=repos-file repos_file=$RESOLVED_TARGET_REPOS_FILE profile=$TARGET_PROFILE"
 
 HEADLESS_PROVIDER="${ACP_RUNTIME_PROVIDER:-claude-code}"
 case "$HEADLESS_PROVIDER" in
@@ -1305,7 +1135,7 @@ log "start API server for validate/init simulation"
 SERVER_PID="$!"
 
 if ! wait_for_health "$API_BASE"; then
-  die "ACP API did not become healthy in ${READY_TIMEOUT_SEC}s (see $SERVER_LOG)"
+  die "ACP API did not become healthy in ${API_READY_TIMEOUT_SEC}s (see $SERVER_LOG)"
 fi
 
 if [[ "$APPLY_TIMEOUTS_VIA_API" == "1" ]]; then
@@ -1318,7 +1148,7 @@ fi
 
 log "POST /api/workspace/validate"
 curl -fsS -X POST "$API_BASE/api/workspace/validate" > "$VALIDATE_JSON"
-python3 - "$VALIDATE_JSON" "$TARGET_REPOS_META_JSON" <<'PY'
+python3 - "$VALIDATE_JSON" "$EXPECTED_REPO_COUNT_RESOLVED" <<'PY'
 import json
 import sys
 payload = json.load(open(sys.argv[1], encoding='utf-8'))
@@ -1327,8 +1157,7 @@ if not payload.get('ok'):
 resolved = payload.get('resolved_repos') or []
 if not resolved:
     raise SystemExit('workspace validate returned empty resolved_repos')
-meta = json.load(open(sys.argv[2], encoding='utf-8'))
-expected_count = int(meta.get('expected_repo_count', len(resolved)))
+expected_count = int(sys.argv[2])
 if len(resolved) != expected_count:
     raise SystemExit(f"workspace validate resolved_repos count mismatch: expected={expected_count} got={len(resolved)}")
 print(f"resolved_repos={len(resolved)}")
@@ -1430,7 +1259,7 @@ if [[ "$APPLY_TIMEOUTS_VIA_API" == "1" ]]; then
     --run-logs-max-runs "$RUN_LOGS_MAX_RUNS" >"$HEADLESS_SERVER_LOG" 2>&1 &
   SERVER_PID="$!"
   if ! wait_for_health "$HEADLESS_API_BASE"; then
-    die "headless timeout API did not become healthy in ${READY_TIMEOUT_SEC}s (see $HEADLESS_SERVER_LOG)"
+    die "headless timeout API did not become healthy in ${API_READY_TIMEOUT_SEC}s (see $HEADLESS_SERVER_LOG)"
   fi
   apply_runtime_timeouts_via_api "headless" "$WORKSPACE_HEADLESS" "$HEADLESS_API_BASE"
   stop_server
@@ -1473,17 +1302,14 @@ if [[ "$RUN_QUALITY_GATES" == "1" ]]; then
   if ! (
     cd "$PROVENARCH_ROOT"
     # Run project gates with neutral runtime env so defaults in tests are stable.
-    env -u ACP_RUNTIME_PROVIDER -u ACP_QWEN_CMD -u ACP_CLAUDE_CMD \
-      -u ACP_APPLY_TIMEOUTS_VIA_API \
-      -u ACP_RUNTIME_STEP_TIMEOUT_SEC -u ACP_RUNTIME_HEARTBEAT_SEC \
-      -u ACP_PIPELINE_TIMEOUT_SEC -u ACP_PIPELINE_KILL_GRACE_SEC \
-      -u ACP_API_READY_TIMEOUT_SEC -u ACP_API_INIT_TIMEOUT_SEC \
-      -u ACP_UI_INIT_POLL_TIMEOUT_SEC -u ACP_UI_CANCEL_POLL_TIMEOUT_SEC \
-      -u ACP_FULL_RUN_PIPELINE_TIMEOUT_SEC -u ACP_FULL_RUN_PIPELINE_KILL_GRACE_SEC \
-      -u ACP_EXECUTION_STRATEGY -u ACP_MAX_PARALLEL_TASKS -u ACP_FAILURE_POLICY \
-      -u ACP_SHARD_DISCOVERY_MODE -u ACP_REPO_SELECTION -u SWEEP_ID \
-      -u READY_TIMEOUT_SEC -u UI_E2E_INIT_TIMEOUT_SEC -u UI_E2E_CANCEL_TIMEOUT_SEC \
-      make contracts test lint build >"$QUALITY_LOG" 2>&1
+    quality_env_cmd=("env" "-u" "ACP_RUNTIME_PROVIDER" "-u" "ACP_QWEN_CMD" "-u" "ACP_CLAUDE_CMD" "-u" "ACP_APPLY_TIMEOUTS_VIA_API")
+    for key in "${ACP_TIMEOUT_ENV_KEYS[@]}"; do
+      quality_env_cmd+=("-u" "$key")
+    done
+    for key in "${ACP_EXECUTION_ENV_KEYS[@]}"; do
+      quality_env_cmd+=("-u" "$key")
+    done
+    "${quality_env_cmd[@]}" make contracts test lint build >"$QUALITY_LOG" 2>&1
   ); then
     QUALITY_GATES_STATUS="failed"
     FAILURE_REASON="quality"

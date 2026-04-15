@@ -1,0 +1,9 @@
+# Example only: replace `path` values with real local repository directories before running.
+version: 1
+repos:
+  - name: app-main
+    path: /absolute/path/to/app-main
+  - name: app-shared
+    path: /absolute/path/to/app-shared
+docs:
+  imports_path: ./docs/imports

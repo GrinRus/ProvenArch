@@ -23,29 +23,16 @@ func TestParseTaskResultFromFixture(t *testing.T) {
 	}
 }
 
-func TestNormalizeTaskResultMergesLegacyQuestionCoverageForms(t *testing.T) {
+func TestParseTaskResultRejectsLegacyQuestionCoverageOps(t *testing.T) {
 	t.Parallel()
 
 	raw := readFixtureFile(t, "../../fixtures/taskresult/mixed-legacy.json")
-	result, err := ParseTaskResult(raw)
-	if err != nil {
-		t.Fatalf("parse taskresult: %v", err)
+	_, err := ParseTaskResult(raw)
+	if err == nil {
+		t.Fatalf("expected parse error for legacy ops")
 	}
-
-	normalized := NormalizeTaskResult(result)
-	for _, op := range normalized.Changeset {
-		if op.Op == "add_question" || op.Op == "set_coverage" {
-			t.Fatalf("expected legacy ops to be removed from changeset, got %q", op.Op)
-		}
-	}
-	if len(normalized.Questions) != 2 {
-		t.Fatalf("expected 2 deduplicated questions, got %d", len(normalized.Questions))
-	}
-	if normalized.Coverage == nil {
-		t.Fatalf("expected merged coverage")
-	}
-	if !contains(normalized.Coverage.Missing, "owners") || !contains(normalized.Coverage.Missing, "ci-cd") {
-		t.Fatalf("expected merged coverage.missing, got %+v", normalized.Coverage.Missing)
+	if !strings.Contains(err.Error(), "taskresult is invalid") {
+		t.Fatalf("expected schema validation error, got %v", err)
 	}
 }
 

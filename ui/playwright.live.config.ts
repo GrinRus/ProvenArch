@@ -2,8 +2,8 @@ import { defineConfig } from "@playwright/test";
 
 const baseURL = process.env.UI_E2E_BASE_URL ?? "http://127.0.0.1:18080";
 const outputDir = process.env.UI_E2E_OUTPUT_DIR ?? "/tmp/provenarch-ui-e2e/test-results";
-const initTimeoutSecRaw = Number.parseInt(process.env.UI_E2E_INIT_TIMEOUT_SEC ?? "900", 10);
-const cancelTimeoutSecRaw = Number.parseInt(process.env.UI_E2E_CANCEL_TIMEOUT_SEC ?? "420", 10);
+const initTimeoutSecRaw = Number.parseInt(process.env.ACP_UI_INIT_POLL_TIMEOUT_SEC ?? "900", 10);
+const cancelTimeoutSecRaw = Number.parseInt(process.env.ACP_UI_CANCEL_POLL_TIMEOUT_SEC ?? "420", 10);
 const initTimeoutSec = Number.isFinite(initTimeoutSecRaw) && initTimeoutSecRaw > 0 ? initTimeoutSecRaw : 900;
 const cancelTimeoutSec = Number.isFinite(cancelTimeoutSecRaw) && cancelTimeoutSecRaw > 0 ? cancelTimeoutSecRaw : 420;
 const testTimeoutSec = Math.max(360, initTimeoutSec + 120, cancelTimeoutSec + 120);

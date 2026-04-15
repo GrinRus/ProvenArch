@@ -141,7 +141,7 @@ Body: отсутствует.
 Возвращает timeout-конфиг для текущего workspace в трёх представлениях:
 - `persisted` — значения из `workspace.yaml` (`runtime.profile.timeouts`);
 - `effective` — значения после precedence-resolve (`env > workspace > defaults`);
-- `source` — источник каждого effective значения (`env|deprecated_env|workspace|default`).
+- `source` — источник каждого effective значения (`env|workspace|default`).
 
 **200**
 ```json
@@ -346,8 +346,7 @@ Partial update persisted execution-полей в `workspace.yaml`.
 {
   "commit": false,
   "create_proposal_branch": false,
-  "trigger": "ui",
-  "refresh_mode": "incremental"
+  "trigger": "ui"
 }
 ```
 
@@ -361,22 +360,18 @@ Partial update persisted execution-полей в `workspace.yaml`.
 - при пустом body используются defaults (`trigger` по endpoint, flags=false)
 - `commit=true` или `create_proposal_branch=true` в этом slice возвращают `501 not_supported`
 - runtime mode/provider фиксируются конфигурацией процесса (`acp serve --runtime ... --runtime-provider ...`) и не задаются per-request.
-- `refresh_mode` поддерживает только `incremental|full` и используется только для `POST /api/pipeline/refresh`.
-- `POST /api/pipeline/init` игнорирует `refresh_mode` и возвращает warning.
 
 **202**
 ```json
 {
   "run_id": "run_20260403_001",
-  "status": "started",
-  "refresh_mode": "incremental"
+  "status": "started"
 }
 ```
 
 **400**
 - `invalid_request_body`
 - `trigger_unsupported`
-- `refresh_mode_invalid`
 - `run_start_failed`
 
 **503**
@@ -427,7 +422,7 @@ Partial update persisted execution-полей в `workspace.yaml`.
   "status": "running",
   "started_at": "2026-04-03T12:00:00Z",
   "finished_at": null,
-  "current_step": "init.step2.service_collect",
+  "current_step": "init.step1.collect",
   "warnings": [],
   "error_code": null,
   "error": null
@@ -464,7 +459,7 @@ Partial update persisted execution-полей в `workspace.yaml`.
       "status": "succeeded",
       "started_at": "2026-04-03T12:00:00Z",
       "finished_at": "2026-04-03T12:00:02Z",
-      "current_step": "init.step6.proposals",
+      "current_step": "init.step4.proposals",
       "warnings": [],
       "error_code": null,
       "error": null
@@ -495,25 +490,51 @@ Partial update persisted execution-полей в `workspace.yaml`.
       "cursor": 0,
       "timestamp": "2026-04-03T12:00:00Z",
       "level": "info",
-      "step_id": "init.step2.service_collect",
-      "domain_id": "svc.payments-service-root",
+      "kind": "event",
+      "step_id": "init.step1.collect",
+      "domain_id": "payments-service",
       "message": "runtime task started",
-      "taskrun_path": "reports/taskruns/run_20260403_001-init-step2-service_collect-domain-service-svc-payments-service-root-shard-svc-payments-service-root-s1.json",
+      "taskrun_path": "reports/taskruns/run_20260403_001-step1-collect-domain-payments-service.json",
       "fields": {
-        "task_id": "task-run_20260403_001-init-step2-service_collect-svc-payments-service-root-svc-payments-service-root-s1",
+        "task_id": "task-run_20260403_001-init-step1-collect-payments-service",
         "provider": "claude-code",
-        "shard_id": "svc.payments-service-root-s1",
+        "shard_id": "payments-service-services-api",
         "repo_scope": "payments-service",
         "repo_scopes": ["payments-service"],
-        "path_scopes": ["."],
+        "path_scopes": ["services/api"],
         "stderr_snippet": "json parse error ... [truncated]"
+      }
+    },
+    {
+      "cursor": 1,
+      "timestamp": "2026-04-03T12:00:01Z",
+      "level": "info",
+      "kind": "runtime_output",
+      "stream": "stdout",
+      "step_id": "init.step1.collect",
+      "domain_id": "payments-service",
+      "message": "Agent runtime line from stdout",
+      "fields": {
+        "output_truncated": false
       }
     }
   ],
-  "next_cursor": 1,
+  "next_cursor": 2,
   "eof": false
 }
 ```
+
+`items[].kind`:
+- `event` — orchestrator lifecycle/event logs (default when field is omitted)
+- `runtime_output` — raw runtime stdout/stderr stream forwarded during task execution
+
+`items[].stream`:
+- optional; only for `kind=runtime_output`
+- values: `stdout`, `stderr`
+
+`output_truncated` policy:
+- внутренний hard-cap safeguard применяется к raw runtime stream;
+- при срабатывании публикуется `runtime_output` entry с `fields.output_truncated=true`.
 
 **400**
 - `invalid_cursor`
@@ -614,7 +635,7 @@ Run-specific поверхность (не входит в strict deterministic g
 - `acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]`: local interactive и trusted local/private deployment.
 - bootstrap behavior: если workspace root не является git-репозиторием, ACP автоматически выполняет `git init` (без auto-commit/auto-push).
 - `serve` startup работает в lenient mode: сервис стартует без блокирующего repo preflight; readiness diagnostics доступны через `POST /api/workspace/validate`.
-- `acp run --workspace <abs-path> --pipeline init|refresh [--refresh-mode incremental|full] [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]`.
+- `acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]`.
 - run logs retention knobs:
   - CLI flags: `--run-logs-ttl-hours`, `--run-logs-max-runs` (для `serve` и `run`)
   - env overrides: `ACP_RUN_LOGS_TTL_HOURS`, `ACP_RUN_LOGS_MAX_RUNS`
@@ -631,7 +652,6 @@ Run-specific поверхность (не входит в strict deterministic g
   - `ACP_API_INIT_TIMEOUT_SEC`
   - `ACP_UI_INIT_POLL_TIMEOUT_SEC`
   - `ACP_UI_CANCEL_POLL_TIMEOUT_SEC`
-  - deprecated fallback aliases: `ACP_FULL_RUN_PIPELINE_TIMEOUT_SEC`, `ACP_FULL_RUN_PIPELINE_KILL_GRACE_SEC`, `READY_TIMEOUT_SEC`, `UI_E2E_INIT_TIMEOUT_SEC`, `UI_E2E_CANCEL_TIMEOUT_SEC`
 - timeout precedence: `env > workspace.yaml(runtime.profile.timeouts) > defaults`.
 - execution precedence: `CLI > env > workspace.yaml(runtime.profile.execution) > defaults`.
 - execution env overrides: `ACP_EXECUTION_STRATEGY`, `ACP_MAX_PARALLEL_TASKS`, `ACP_FAILURE_POLICY`, `ACP_SHARD_DISCOVERY_MODE`, `ACP_REPO_SELECTION`.

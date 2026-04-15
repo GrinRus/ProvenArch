@@ -95,18 +95,15 @@
 - `remove_edge`
 - `add_finding`
 - `add_doc_artifact`
-- `add_question`
-- `set_coverage`
 
 ### Canonical MVP semantics
 - runtime по умолчанию пишет `questions[]` и `coverage` на top-level
-- `add_question` и `set_coverage` считаются legacy-compatible forms
-- orchestrator обязан нормализовать legacy forms в canonical top-level representation до persistence/materialization
+- `changeset[].op` поддерживает только canonical operations из schema
+- legacy forms `add_question` и `set_coverage` отклоняются на contract validation
 
 Conflict policy:
-- если top-level и operation-form присутствуют одновременно, persisted source of truth — merged normalized result
 - duplicate questions dedupe по canonical `id` и нормализованному `text`
-- `coverage.observed`, `coverage.missing`, `coverage.notes` merge-ятся после semantic canonicalization (snake/kebab/spaced variants) и дедупликации по нормализованной форме
+- `coverage.observed`, `coverage.missing`, `coverage.notes` canonicalize-ятся (snake/kebab/spaced variants) с дедупликацией по нормализованной форме
 
 ### Provenance и evidence
 - `provenance.kind`: `observation | inference | assertion`
