@@ -1,0 +1,8 @@
+version: 1
+repos:
+  - name: bank-of-anthos
+    path: /absolute/path/to/GoogleCloudPlatform/bank-of-anthos
+    ref: 7f0589c7aaf0e009aacb4cd9e2e8f26bd30061e1
+
+docs:
+  imports_path: ./docs/imports

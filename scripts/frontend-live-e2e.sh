@@ -11,11 +11,14 @@ RUN_LOGS_MAX_RUNS="${RUN_LOGS_MAX_RUNS:-200}"
 OUTPUT_DIR="${OUTPUT_DIR:-}"
 LISTEN="${LISTEN:-}"
 UI_E2E_EXPECTED_REPO_COUNT="${UI_E2E_EXPECTED_REPO_COUNT:-1}"
+UI_E2E_EXPECTED_STRATEGY="${UI_E2E_EXPECTED_STRATEGY:-${ACP_EXECUTION_STRATEGY:-}}"
+UI_E2E_EXPECTED_MAX_PARALLEL_TASKS="${UI_E2E_EXPECTED_MAX_PARALLEL_TASKS:-${ACP_MAX_PARALLEL_TASKS:-}}"
 UI_E2E_SCENARIO="${UI_E2E_SCENARIO:-init-inspect-service-first}"
 UI_E2E_CANCEL_STUB_SLEEP_SEC="${UI_E2E_CANCEL_STUB_SLEEP_SEC:-90}"
 UI_E2E_INIT_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-${UI_E2E_INIT_TIMEOUT_SEC:-}}"
 UI_E2E_CANCEL_TIMEOUT_SEC="${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-${UI_E2E_CANCEL_TIMEOUT_SEC:-}}"
 UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC="${UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC:-30}"
+UI_E2E_HEADED="${UI_E2E_HEADED:-0}"
 
 DEFAULT_UI_E2E_INIT_TIMEOUT_SEC=900
 DEFAULT_UI_E2E_CANCEL_TIMEOUT_SEC=420
@@ -51,6 +54,22 @@ parse_positive_int_or_die() {
     die "$name must be > 0, got '$raw'"
   fi
   printf '%s' "$numeric"
+}
+
+parse_binary_flag_or_die() {
+  local raw="$1"
+  local name="$2"
+  case "$raw" in
+    1|true|TRUE|yes|YES|on|ON)
+      printf '1'
+      ;;
+    0|false|FALSE|no|NO|off|OFF|"")
+      printf '0'
+      ;;
+    *)
+      die "$name must be 0|1 (or boolean aliases), got '$raw'"
+      ;;
+  esac
 }
 
 allocate_free_port() {
@@ -203,6 +222,7 @@ EOF
 fi
 
 require_cmd "$runtime_cmd"
+UI_E2E_HEADED="$(parse_binary_flag_or_die "$UI_E2E_HEADED" "UI_E2E_HEADED")"
 
 if [[ -z "$LISTEN" ]]; then
   port="$(allocate_free_port)"
@@ -254,16 +274,23 @@ fi
 
 status="passed"
 reason="ok"
+declare -a playwright_cmd
+playwright_cmd=(npm run --prefix ui e2e:live)
+if [[ "$UI_E2E_HEADED" == "1" ]]; then
+  playwright_cmd+=(-- --headed)
+fi
 if ! (
   cd "$PROVENARCH_ROOT"
   UI_E2E_BASE_URL="$BASE_URL" \
   UI_E2E_RUNTIME_PROVIDER="$RUNTIME_PROVIDER" \
   UI_E2E_SCENARIO="$UI_E2E_SCENARIO" \
   UI_E2E_EXPECTED_REPO_COUNT="$UI_E2E_EXPECTED_REPO_COUNT" \
+  UI_E2E_EXPECTED_STRATEGY="$UI_E2E_EXPECTED_STRATEGY" \
+  UI_E2E_EXPECTED_MAX_PARALLEL_TASKS="$UI_E2E_EXPECTED_MAX_PARALLEL_TASKS" \
   UI_E2E_INIT_TIMEOUT_SEC="$UI_E2E_INIT_TIMEOUT_SEC" \
   UI_E2E_CANCEL_TIMEOUT_SEC="$UI_E2E_CANCEL_TIMEOUT_SEC" \
   UI_E2E_OUTPUT_DIR="$PLAYWRIGHT_RESULTS_DIR" \
-  npm run --prefix ui e2e:live
+  "${playwright_cmd[@]}"
 ) >"$PLAYWRIGHT_LOG" 2>&1; then
   status="failed"
   reason="playwright_failed"
@@ -278,6 +305,7 @@ export FRONTEND_E2E_BASE_URL="$BASE_URL"
 export FRONTEND_E2E_WORKSPACE="$WORKSPACE"
 export FRONTEND_E2E_RUNTIME_CMD="$runtime_cmd"
 export FRONTEND_E2E_SCENARIO="$UI_E2E_SCENARIO"
+export FRONTEND_E2E_HEADED="$UI_E2E_HEADED"
 export FRONTEND_E2E_SERVER_LOG="$SERVER_LOG"
 export FRONTEND_E2E_PLAYWRIGHT_LOG="$PLAYWRIGHT_LOG"
 export FRONTEND_E2E_REASON="$reason"
@@ -296,6 +324,7 @@ payload = {
     "workspace": os.environ.get("FRONTEND_E2E_WORKSPACE"),
     "runtime_command": os.environ.get("FRONTEND_E2E_RUNTIME_CMD"),
     "scenario": os.environ.get("FRONTEND_E2E_SCENARIO"),
+    "headed": os.environ.get("FRONTEND_E2E_HEADED") == "1",
     "reason": os.environ.get("FRONTEND_E2E_REASON", "unknown"),
     "server_log": os.environ.get("FRONTEND_E2E_SERVER_LOG"),
     "playwright_log": os.environ.get("FRONTEND_E2E_PLAYWRIGHT_LOG"),

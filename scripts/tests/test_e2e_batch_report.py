@@ -292,6 +292,57 @@ def make_shard_summary_payload(
     }
 
 
+def make_service_inventory_plan_payload(
+    run_id: str,
+    pipeline: str,
+    *,
+    file_count: int,
+    source_bytes: int,
+    selected_shards: int = 1,
+) -> dict:
+    return {
+        "version": 1,
+        "run_id": run_id,
+        "pipeline": pipeline,
+        "mode": "full",
+        "generated_at": "2026-04-10T10:00:00Z",
+        "services": [
+            {
+                "repo_scope": "repo-main",
+                "service_id": "repo-main.workspace-root",
+                "service_root": ".",
+                "file_count": file_count,
+                "source_bytes": source_bytes,
+                "shards": [
+                    {
+                        "repo_scope": "repo-main",
+                        "service_id": "repo-main.workspace-root",
+                        "service_root": ".",
+                        "shard_id": "workspace-root",
+                        "sort_key": "repo-main:.",
+                        "path_scopes": ["."],
+                        "file_count": file_count,
+                        "source_bytes": source_bytes,
+                    }
+                ],
+            }
+        ],
+        "selected_shards": [
+            {
+                "repo_scope": "repo-main",
+                "service_id": "repo-main.workspace-root",
+                "service_root": ".",
+                "shard_id": f"workspace-root-{idx}",
+                "sort_key": "repo-main:.",
+                "path_scopes": ["."],
+                "file_count": file_count,
+                "source_bytes": source_bytes,
+            }
+            for idx in range(1, selected_shards + 1)
+        ],
+    }
+
+
 def make_execution_preflight(
     *,
     strategy: str = "sequential",
@@ -1273,6 +1324,261 @@ class EvaluateRunTests(unittest.TestCase):
             self.assertNotIn("runtime:shard-artifacts", result.issues)
             self.assertNotIn("runtime:repo-selection", result.issues)
             self.assertNotIn("runtime:execution-semantics", result.issues)
+
+    def test_runtime_flow_flags_empty_service_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            target_repo = root / "target-repo"
+            write_text(target_repo / "README.md", "# demo\n")
+
+            run_dir = root / "batch/qwen-code/run1"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            make_session_summary(run_dir / "session-summary.md")
+            write_text(run_dir / "full-run.log", "")
+
+            init_id = "run_init_empty_inventory"
+            refresh_id = "run_refresh_empty_inventory"
+            runtime_versions = "qwen-code@1.2.3"
+            write_text(
+                run_dir / "run-results.tsv",
+                "\n".join(
+                    [
+                        make_run_results_line("qwen-code", "init", init_id, 10, 2, 1, 1, 2, 2, 0, runtime_versions),
+                        make_run_results_line("qwen-code", "refresh", refresh_id, 10, 2, 1, 1, 2, 2, 0, runtime_versions),
+                    ]
+                )
+                + "\n",
+            )
+
+            init_reports = run_dir / "snapshots" / init_id / "reports"
+            refresh_reports = run_dir / "snapshots" / refresh_id / "reports"
+            write_json(
+                init_reports / "taskruns" / f"{init_id}-quality.json",
+                make_quality_payload(init_id, "init", "qwen-code", 10, 2, 1, 1, 2, 2, 0, "1.2.3", ["init.step1.collect"]),
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-quality.json",
+                make_quality_payload(
+                    refresh_id,
+                    "refresh",
+                    "qwen-code",
+                    10,
+                    2,
+                    1,
+                    1,
+                    2,
+                    2,
+                    0,
+                    "1.2.3",
+                    ["refresh.step1.collect", "refresh.step3.findings"],
+                ),
+            )
+            write_json(
+                init_reports / "taskruns" / f"{init_id}-init-step1-collect-domain-main.json",
+                make_step_payload("qwen-code", init_id, "init.step1.collect", "README.md"),
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-refresh-step1-collect-domain-main.json",
+                make_step_payload("qwen-code", refresh_id, "refresh.step1.collect", "README.md"),
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-refresh-step3-findings.json",
+                make_step_payload("qwen-code", refresh_id, "refresh.step3.findings", "README.md"),
+            )
+            write_json(
+                init_reports / "taskruns" / f"{init_id}-init-step1-collect-shard-plan-domain-main.json",
+                make_shard_plan_payload(init_id, "init.step1.collect", "sequential", 1, "best_effort", "heuristics"),
+            )
+            write_json(
+                init_reports / "taskruns" / f"{init_id}-init-step1-collect-shard-summary-domain-main.json",
+                make_shard_summary_payload(init_id, "init.step1.collect", "sequential", 1, "best_effort", "heuristics"),
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-refresh-step1-collect-shard-plan-domain-main.json",
+                make_shard_plan_payload(refresh_id, "refresh.step1.collect", "sequential", 1, "best_effort", "heuristics"),
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-refresh-step1-collect-shard-summary-domain-main.json",
+                make_shard_summary_payload(refresh_id, "refresh.step1.collect", "sequential", 1, "best_effort", "heuristics"),
+            )
+            write_json(
+                init_reports / "taskruns" / f"{init_id}-service-inventory-plan.json",
+                make_service_inventory_plan_payload(init_id, "init", file_count=0, source_bytes=0, selected_shards=1),
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-service-inventory-plan.json",
+                make_service_inventory_plan_payload(refresh_id, "refresh", file_count=0, source_bytes=0, selected_shards=1),
+            )
+            write_json(
+                init_reports / "taskruns" / f"{init_id}-repo-selection-summary.json",
+                {
+                    "version": 1,
+                    "run_id": init_id,
+                    "pipeline": "init",
+                    "repo_selection_mode": "all",
+                    "selected_repo_scopes": ["repo-main"],
+                    "decisions": [{"name": "repo-main", "effective_role": "backend", "included": True, "reason": "included"}],
+                },
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-repo-selection-summary.json",
+                {
+                    "version": 1,
+                    "run_id": refresh_id,
+                    "pipeline": "refresh",
+                    "repo_selection_mode": "all",
+                    "selected_repo_scopes": ["repo-main"],
+                    "decisions": [{"name": "repo-main", "effective_role": "backend", "included": True, "reason": "included"}],
+                },
+            )
+            write_analysis_reports(
+                refresh_reports,
+                findings_text="\n".join(
+                    [
+                        "# Findings",
+                        "",
+                        "## Missing Owner Mapping",
+                        "- Severity: medium",
+                        "- Description: Ownership is partially unknown.",
+                        "",
+                    ]
+                ),
+            )
+
+            preflight = {"target_repo": str(target_repo)}
+            preflight.update(make_execution_preflight())
+            result = report.evaluate_run("qwen-code", 1, run_dir, preflight)
+            self.assertFalse(result.hard_pass)
+            self.assertTrue(result.runtime_flow_failed)
+            self.assertIn("runtime:empty-service-inventory", result.issues)
+            self.assertIn("reliability:runtime-flow-failed", result.issues)
+
+    def test_runtime_flow_allows_single_service_when_non_empty_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            target_repo = root / "target-repo"
+            write_text(target_repo / "README.md", "# demo\n")
+
+            run_dir = root / "batch/qwen-code/run1"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            make_session_summary(run_dir / "session-summary.md")
+            write_text(run_dir / "full-run.log", "")
+
+            init_id = "run_init_valid_inventory"
+            refresh_id = "run_refresh_valid_inventory"
+            runtime_versions = "qwen-code@1.2.3"
+            write_text(
+                run_dir / "run-results.tsv",
+                "\n".join(
+                    [
+                        make_run_results_line("qwen-code", "init", init_id, 10, 2, 1, 1, 2, 2, 0, runtime_versions),
+                        make_run_results_line("qwen-code", "refresh", refresh_id, 10, 2, 1, 1, 2, 2, 0, runtime_versions),
+                    ]
+                )
+                + "\n",
+            )
+
+            init_reports = run_dir / "snapshots" / init_id / "reports"
+            refresh_reports = run_dir / "snapshots" / refresh_id / "reports"
+            write_json(
+                init_reports / "taskruns" / f"{init_id}-quality.json",
+                make_quality_payload(init_id, "init", "qwen-code", 10, 2, 1, 1, 2, 2, 0, "1.2.3", ["init.step1.collect"]),
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-quality.json",
+                make_quality_payload(
+                    refresh_id,
+                    "refresh",
+                    "qwen-code",
+                    10,
+                    2,
+                    1,
+                    1,
+                    2,
+                    2,
+                    0,
+                    "1.2.3",
+                    ["refresh.step1.collect", "refresh.step3.findings"],
+                ),
+            )
+            write_json(
+                init_reports / "taskruns" / f"{init_id}-init-step1-collect-domain-main.json",
+                make_step_payload("qwen-code", init_id, "init.step1.collect", "README.md"),
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-refresh-step1-collect-domain-main.json",
+                make_step_payload("qwen-code", refresh_id, "refresh.step1.collect", "README.md"),
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-refresh-step3-findings.json",
+                make_step_payload("qwen-code", refresh_id, "refresh.step3.findings", "README.md"),
+            )
+            write_json(
+                init_reports / "taskruns" / f"{init_id}-init-step1-collect-shard-plan-domain-main.json",
+                make_shard_plan_payload(init_id, "init.step1.collect", "sequential", 1, "best_effort", "heuristics"),
+            )
+            write_json(
+                init_reports / "taskruns" / f"{init_id}-init-step1-collect-shard-summary-domain-main.json",
+                make_shard_summary_payload(init_id, "init.step1.collect", "sequential", 1, "best_effort", "heuristics"),
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-refresh-step1-collect-shard-plan-domain-main.json",
+                make_shard_plan_payload(refresh_id, "refresh.step1.collect", "sequential", 1, "best_effort", "heuristics"),
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-refresh-step1-collect-shard-summary-domain-main.json",
+                make_shard_summary_payload(refresh_id, "refresh.step1.collect", "sequential", 1, "best_effort", "heuristics"),
+            )
+            write_json(
+                init_reports / "taskruns" / f"{init_id}-service-inventory-plan.json",
+                make_service_inventory_plan_payload(init_id, "init", file_count=4, source_bytes=4096, selected_shards=1),
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-service-inventory-plan.json",
+                make_service_inventory_plan_payload(refresh_id, "refresh", file_count=3, source_bytes=1024, selected_shards=1),
+            )
+            write_json(
+                init_reports / "taskruns" / f"{init_id}-repo-selection-summary.json",
+                {
+                    "version": 1,
+                    "run_id": init_id,
+                    "pipeline": "init",
+                    "repo_selection_mode": "all",
+                    "selected_repo_scopes": ["repo-main"],
+                    "decisions": [{"name": "repo-main", "effective_role": "backend", "included": True, "reason": "included"}],
+                },
+            )
+            write_json(
+                refresh_reports / "taskruns" / f"{refresh_id}-repo-selection-summary.json",
+                {
+                    "version": 1,
+                    "run_id": refresh_id,
+                    "pipeline": "refresh",
+                    "repo_selection_mode": "all",
+                    "selected_repo_scopes": ["repo-main"],
+                    "decisions": [{"name": "repo-main", "effective_role": "backend", "included": True, "reason": "included"}],
+                },
+            )
+            write_analysis_reports(
+                refresh_reports,
+                findings_text="\n".join(
+                    [
+                        "# Findings",
+                        "",
+                        "## Missing Owner Mapping",
+                        "- Severity: medium",
+                        "- Description: Ownership is partially unknown.",
+                        "",
+                    ]
+                ),
+            )
+
+            preflight = {"target_repo": str(target_repo)}
+            preflight.update(make_execution_preflight())
+            result = report.evaluate_run("qwen-code", 1, run_dir, preflight)
+            self.assertTrue(result.hard_pass)
+            self.assertFalse(result.runtime_flow_failed)
+            self.assertNotIn("runtime:empty-service-inventory", result.issues)
 
 
 if __name__ == "__main__":

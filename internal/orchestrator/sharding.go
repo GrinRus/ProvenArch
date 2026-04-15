@@ -83,6 +83,11 @@ type runtimeShardPlanGraphEdge struct {
 	Reason    string `json:"reason"`
 }
 
+type heuristicShardDiscoveryResult struct {
+	Paths             []string
+	FallbackNoMarkers bool
+}
+
 var shardModuleMarkerFiles = map[string]struct{}{
 	"go.mod":          {},
 	"package.json":    {},
@@ -610,6 +615,7 @@ func buildShardID(scope string, pathScopes []string) string {
 }
 
 func (e *pipelineExecution) planScopePaths(scope string) ([]string, []string) {
+	warnings := []string{}
 	repo, ok := lookupManifestRepo(e.workspace.Manifest.Repos, scope)
 	if !ok {
 		return []string{"."}, []string{fmt.Sprintf("repo scope %q is not present in workspace manifest; fallback shard='.'", scope)}
@@ -626,15 +632,22 @@ func (e *pipelineExecution) planScopePaths(scope string) ([]string, []string) {
 		return []string{"."}, []string{fmt.Sprintf("repo scope %q has no local path for shard discovery; fallback shard='.'", scope)}
 	}
 
-	paths, err := discoverHeuristicShardPaths(repoPath)
+	discovery, err := discoverHeuristicShardPathsWithMeta(repoPath)
 	if err != nil {
 		return []string{"."}, []string{fmt.Sprintf("repo scope %q shard discovery failed (%v); fallback shard='.'", scope, err)}
+	}
+	paths := discovery.Paths
+	if discovery.FallbackNoMarkers {
+		warnings = append(
+			warnings,
+			fmt.Sprintf("repo scope %q shard discovery found zero module markers; heuristic fallback shard='.'", scope),
+		)
 	}
 	filtered := applyRepoAnalysisFilters(paths, repo.Analysis)
 	if len(filtered) == 0 {
 		return []string{"."}, []string{fmt.Sprintf("repo scope %q analysis filters produced zero shards; fallback shard='.'", scope)}
 	}
-	return filtered, nil
+	return filtered, warnings
 }
 
 func lookupManifestRepo(repos []workspace.RepoSource, name string) (workspace.RepoSource, bool) {
@@ -648,16 +661,24 @@ func lookupManifestRepo(repos []workspace.RepoSource, name string) (workspace.Re
 }
 
 func discoverHeuristicShardPaths(repoPath string) ([]string, error) {
-	root := strings.TrimSpace(repoPath)
-	if root == "" {
-		return []string{"."}, nil
-	}
-	info, err := os.Stat(root)
+	result, err := discoverHeuristicShardPathsWithMeta(repoPath)
 	if err != nil {
 		return nil, err
 	}
+	return result.Paths, nil
+}
+
+func discoverHeuristicShardPathsWithMeta(repoPath string) (heuristicShardDiscoveryResult, error) {
+	root := strings.TrimSpace(repoPath)
+	if root == "" {
+		return heuristicShardDiscoveryResult{Paths: []string{"."}}, nil
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return heuristicShardDiscoveryResult{}, err
+	}
 	if !info.IsDir() {
-		return nil, fmt.Errorf("repo path %q is not a directory", root)
+		return heuristicShardDiscoveryResult{}, fmt.Errorf("repo path %q is not a directory", root)
 	}
 
 	candidates := map[string]struct{}{}
@@ -690,16 +711,19 @@ func discoverHeuristicShardPaths(repoPath string) ([]string, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return heuristicShardDiscoveryResult{}, err
 	}
 	if len(candidates) == 0 {
-		return []string{"."}, nil
+		return heuristicShardDiscoveryResult{
+			Paths:             []string{"."},
+			FallbackNoMarkers: true,
+		}, nil
 	}
 	paths := make([]string, 0, len(candidates))
 	for candidate := range candidates {
 		paths = append(paths, candidate)
 	}
-	return pruneParentShardPaths(paths), nil
+	return heuristicShardDiscoveryResult{Paths: pruneParentShardPaths(paths)}, nil
 }
 
 func pruneParentShardPaths(paths []string) []string {

@@ -49,6 +49,7 @@ def create_full_run_stub_environment(root: Path) -> tuple[Path, Path, Path, Path
             repos:
               - name: target-repo
                 path: {target_repo}
+                ref: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
             docs:
               imports_path: ./docs/imports
             """
@@ -745,6 +746,68 @@ class FullRunStabilityIntegrationTests(unittest.TestCase):
             full_run_log = (tmp_root / "full-run.log").read_text(encoding="utf-8", errors="ignore")
             self.assertIn("missing target input: set TARGET_REPOS_FILE (repos[] YAML)", full_run_log)
 
+    def test_full_run_quality_gates_unset_execution_profile_env(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, target_repo, tmp_root, repos_file = create_full_run_stub_environment(root)
+            write_text(
+                provenarch_root / "Makefile",
+                textwrap.dedent(
+                    """\
+                    .PHONY: build contracts test lint
+                    build:
+                    \tmkdir -p bin
+                    \tcp "$(ACP_STUB_SOURCE)" bin/acp
+                    \tchmod +x bin/acp
+                    contracts test lint:
+                    \t@if [ -n "$$ACP_EXECUTION_STRATEGY$$ACP_MAX_PARALLEL_TASKS$$ACP_FAILURE_POLICY$$ACP_SHARD_DISCOVERY_MODE$$ACP_REPO_SELECTION$$SWEEP_ID" ]; then \
+                    \t\techo "execution profile env leaked into quality gates" >&2; \
+                    \t\texit 9; \
+                    \tfi
+                    \t@:
+                    """
+                ),
+            )
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TMP_ROOT": str(tmp_root),
+                    "KEEP_TMP": "1",
+                    "ITERATIONS": "1",
+                    "RUN_QUALITY_GATES": "1",
+                    "TARGET_REPOS_FILE": str(repos_file),
+                    "ACP_RUNTIME_PROVIDER": "qwen-code",
+                    "ACP_QWEN_CMD": str(tools_dir / "qwen"),
+                    "ACP_STUB_SOURCE": str(root / "acp-stub.sh"),
+                    "ACP_STUB_TARGET_REPO": str(target_repo),
+                    "ACP_APPLY_TIMEOUTS_VIA_API": "0",
+                    "ACP_EXECUTION_STRATEGY": "parallel",
+                    "ACP_MAX_PARALLEL_TASKS": "4",
+                    "ACP_FAILURE_POLICY": "best_effort",
+                    "ACP_SHARD_DISCOVERY_MODE": "semantic",
+                    "ACP_REPO_SELECTION": "backend_only",
+                    "SWEEP_ID": "scale-backend",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(FULL_RUN_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertEqual(0, result.returncode, msg=result.stdout + "\n" + result.stderr)
+            quality_log = tmp_root / "quality-gates.log"
+            self.assertTrue(quality_log.exists(), msg="quality-gates.log is missing")
+            self.assertNotIn(
+                "execution profile env leaked into quality gates",
+                quality_log.read_text(encoding="utf-8", errors="ignore"),
+            )
+
 
 def create_batch_stub_environment(root: Path) -> tuple[Path, Path, Path, Path]:
     provenarch_root = root / "batch-root"
@@ -763,6 +826,7 @@ def create_batch_stub_environment(root: Path) -> tuple[Path, Path, Path, Path]:
             repos:
               - name: target-repo
                 path: {target_repo}
+                ref: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
             docs:
               imports_path: ./docs/imports
             """
@@ -804,7 +868,7 @@ def create_batch_stub_environment(root: Path) -> tuple[Path, Path, Path, Path]:
             - status: succeeded
             MD
             runtime_provider="${ACP_RUNTIME_PROVIDER:-qwen-code}"
-            printf '1\theadless\t%s\tinit\trun-stub\tsucceeded\t5\t1\t1\t1\t1\t1\t0\t%s@test\t%s\t%s\n' \
+            printf '1\theadless\t%s\tinit\trun-stub\tsucceeded\t5\t1\t1\t1\t1\t1\t0\t%s@test\t%s\t%s\\n' \
               "$runtime_provider" "$runtime_provider" "$TMP_ROOT/arch-workspace/reports/taskruns/run-stub-quality.json" "$TMP_ROOT/logs/stub.log" >"$TMP_ROOT/run-results.tsv"
             cat >"$TMP_ROOT/arch-workspace/reports/taskruns/run-stub-quality.json" <<'JSON'
             {"status":"succeeded","totals":{"signal_score":5,"changeset_ops":1,"findings_added":1,"questions_count":1,"coverage_observed":1,"coverage_missing":1,"warnings_count":0},"runtime_versions":["qwen-code@test"],"steps":[{"step_id":"init.step1.collect","runtime_name":"qwen-code","runtime_version":"test","domain_id":"domain-main"}]}
@@ -841,6 +905,10 @@ def create_batch_stub_environment(root: Path) -> tuple[Path, Path, Path, Path]:
             set -euo pipefail
             : "${OUTPUT_DIR:?OUTPUT_DIR is required}"
             mkdir -p "$OUTPUT_DIR"
+            if [[ -n "${FRONTEND_STUB_LOG:-}" ]]; then
+              mkdir -p "$(dirname "$FRONTEND_STUB_LOG")"
+              printf '%s\t%s\t%s\t%s\n' "${RUNTIME_PROVIDER:-unknown}" "${UI_E2E_SCENARIO:-init-inspect-service-first}" "${UI_E2E_HEADED:-0}" "$OUTPUT_DIR" >>"$FRONTEND_STUB_LOG"
+            fi
             cat >"$OUTPUT_DIR/frontend-e2e-result.json" <<'JSON'
             {"status":"passed","runtime_provider":"stub"}
             JSON
@@ -894,7 +962,25 @@ def create_batch_stub_environment(root: Path) -> tuple[Path, Path, Path, Path]:
             #!/usr/bin/env bash
             set -euo pipefail
             if [[ "$*" == *"rev-parse HEAD"* ]]; then
-              echo "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+              echo "${GIT_STUB_HEAD:-deadbeefdeadbeefdeadbeefdeadbeefdeadbeef}"
+              exit 0
+            fi
+            if [[ "$*" == *"rev-parse "* && "$*" == *"^{commit}"* ]]; then
+              echo "${GIT_STUB_REF_HEAD:-deadbeefdeadbeefdeadbeefdeadbeefdeadbeef}"
+              exit 0
+            fi
+            if [[ "$*" == *"status --porcelain"* ]]; then
+              git_stub_status="${GIT_STUB_STATUS-}"
+              if [[ -n "$git_stub_status" ]]; then
+                printf '%s\n' "$git_stub_status"
+              fi
+              exit 0
+            fi
+            if [[ "$*" == *"ls-files"* ]]; then
+              git_stub_ls_files="${GIT_STUB_LS_FILES-README.md}"
+              if [[ -n "$git_stub_ls_files" ]]; then
+                printf '%s\n' "$git_stub_ls_files"
+              fi
               exit 0
             fi
             if [[ "$*" == *"rev-parse --abbrev-ref HEAD"* ]]; then
@@ -904,7 +990,7 @@ def create_batch_stub_environment(root: Path) -> tuple[Path, Path, Path, Path]:
             echo "git-stub"
             exit 0
             """
-        ),
+        ).lstrip(),
         mode=0o755,
     )
     write_text(
@@ -973,6 +1059,35 @@ def create_matrix_stub_environment(root: Path) -> tuple[Path, Path, Path, Path]:
             : "${REPORTS_ROOT:?REPORTS_ROOT is required}"
             sweep_id="${SWEEP_ID:-baseline}"
             mode="${MATRIX_STUB_MODE:-pass}"
+            obs_dir="${MATRIX_PARALLEL_OBS_DIR:-}"
+            lock_dir=""
+
+            if [[ -n "$obs_dir" ]]; then
+              mkdir -p "$obs_dir"
+              lock_dir="$obs_dir/.lock"
+              while ! mkdir "$lock_dir" 2>/dev/null; do sleep 0.01; done
+              active="$(cat "$obs_dir/active" 2>/dev/null || echo 0)"
+              active=$((active + 1))
+              echo "$active" >"$obs_dir/active"
+              max_active="$(cat "$obs_dir/max" 2>/dev/null || echo 0)"
+              if (( active > max_active )); then
+                echo "$active" >"$obs_dir/max"
+              fi
+              rmdir "$lock_dir"
+              trap '
+                while ! mkdir "$lock_dir" 2>/dev/null; do sleep 0.01; done
+                active="$(cat "$obs_dir/active" 2>/dev/null || echo 0)"
+                if (( active > 0 )); then
+                  active=$((active - 1))
+                fi
+                echo "$active" >"$obs_dir/active"
+                rmdir "$lock_dir"
+              ' EXIT
+            fi
+
+            if [[ -n "${MATRIX_STUB_SLEEP_SEC:-}" ]]; then
+              sleep "${MATRIX_STUB_SLEEP_SEC}"
+            fi
 
             mkdir -p "$REPORTS_ROOT"
             run_matrix_tsv="$REPORTS_ROOT/run_matrix_${BATCH_ID}.tsv"
@@ -980,6 +1095,7 @@ def create_matrix_stub_environment(root: Path) -> tuple[Path, Path, Path, Path]:
             frontend_md="$REPORTS_ROOT/frontend_e2e_matrix_${BATCH_ID}.md"
             frontend_cancel_md="$REPORTS_ROOT/frontend_cancel_e2e_matrix_${BATCH_ID}.md"
             quality_md="$REPORTS_ROOT/quality_report_${BATCH_ID}.md"
+            documentation_audit_md="$REPORTS_ROOT/documentation_audit_${BATCH_ID}.md"
 
             echo -e "provider\\trun\\thard_pass\\treliability\\tcontract\\tanalysis\\ttotal\\tverdict\\tinit_signal\\trefresh_signal\\trefresh_findings\\trefresh_questions\\trefresh_cov_missing\\tartifact_source\\tsemantic_hard_fail\\tfailure_class\\truntime_parse\\trunner_unavailable\\truntime_timeout\\tinfra_signal_terminated\\tinfra_incomplete_cycle\\tquality_gates_failed\\tsummary_missing\\tprecheck_failed\\truntime_flow_failed\\tcancellation_like\\toff_topic_hits\\tissues" >"$run_matrix_tsv"
             for provider in qwen-code claude-code; do
@@ -1025,33 +1141,52 @@ def create_matrix_stub_environment(root: Path) -> tuple[Path, Path, Path, Path]:
             cat >"$frontend_md" <<'MD'
             # Frontend Live E2E Matrix
 
-            | provider | status | base_url | workspace | runtime_command | server_log | playwright_log |
-            |---|---|---|---|---|---|---|
-            | qwen-code | STATUS_QWEN_LIVE | - | - | qwen | - | - |
-            | claude-code | passed | - | - | claude | - | - |
+            | provider | run | status | reason | scenario | headed | base_url | workspace | runtime_command | server_log | playwright_log |
+            |---|---:|---|---|---|---|---|---|---|---|---|
             MD
-            if [[ "$mode" == "fail-frontend-live" ]]; then
-              sed -i.bak 's/STATUS_QWEN_LIVE/failed/g' "$frontend_md"
-            else
-              sed -i.bak 's/STATUS_QWEN_LIVE/passed/g' "$frontend_md"
-            fi
-            rm -f "$frontend_md.bak"
+            for provider in qwen-code claude-code; do
+              for run_index in 1 2 3 4 5; do
+                live_status="passed"
+                if [[ "$mode" == "fail-frontend-live" && "$provider" == "qwen-code" && "$run_index" == "1" ]]; then
+                  live_status="failed"
+                fi
+                runtime_cmd="qwen"
+                if [[ "$provider" == "claude-code" ]]; then
+                  runtime_cmd="claude"
+                fi
+                echo "| ${provider} | ${run_index} | ${live_status} | - | init-inspect-service-first | true | - | - | ${runtime_cmd} | - | - |" >>"$frontend_md"
+              done
+            done
             cat >"$frontend_cancel_md" <<'MD'
             # Frontend Cancel E2E Matrix
 
-            | provider | status | reason | scenario | workspace | runtime_command | server_log | playwright_log |
-            |---|---|---|---|---|---|---|---|
-            | qwen-code | STATUS_QWEN_CANCEL | - | cancel-refresh | - | qwen | - | - |
-            | claude-code | passed | - | cancel-refresh | - | claude | - | - |
+            | provider | run | status | reason | scenario | headed | workspace | runtime_command | server_log | playwright_log |
+            |---|---:|---|---|---|---|---|---|---|---|
             MD
+            cancel_qwen_status="passed"
             if [[ "$mode" == "fail-frontend-cancel" ]]; then
-              sed -i.bak 's/STATUS_QWEN_CANCEL/failed/g' "$frontend_cancel_md"
-            else
-              sed -i.bak 's/STATUS_QWEN_CANCEL/passed/g' "$frontend_cancel_md"
+              cancel_qwen_status="failed"
             fi
-            rm -f "$frontend_cancel_md.bak"
+            echo "| qwen-code | 1 | ${cancel_qwen_status} | - | cancel-refresh | true | - | qwen | - | - |" >>"$frontend_cancel_md"
+            echo "| claude-code | 1 | passed | - | cancel-refresh | true | - | claude | - | - |" >>"$frontend_cancel_md"
             cat >"$quality_md" <<'MD'
             # Quality Report
+            MD
+            doc_auto_status="passed"
+            doc_manual_status="passed"
+            doc_impl_status="passed"
+            if [[ "$mode" == "fail-doc-auto" ]]; then
+              doc_auto_status="failed"
+            fi
+            if [[ "$mode" == "fail-doc-manual" ]]; then
+              doc_manual_status="pending"
+            fi
+            cat >"$documentation_audit_md" <<MD
+            # Documentation Audit
+
+            - auto_status: ${doc_auto_status}
+            - manual_status: ${doc_manual_status}
+            - implementation_audit_status: ${doc_impl_status}
             MD
 
             exit 0
@@ -1220,6 +1355,37 @@ def create_matrix_stub_environment(root: Path) -> tuple[Path, Path, Path, Path]:
 
 
 class MatrixHarnessIntegrationTests(unittest.TestCase):
+    def test_matrix_rejects_invalid_max_parallel_combinations(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            harness_root, tools_dir, matrix_with_sweeps, _matrix_without_sweeps = create_matrix_stub_environment(root)
+            e2e_tmp_root = root / "e2e-invalid-matrix-parallel"
+            matrix_id = "matrix-invalid-parallel"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "BATCH_SCRIPT": str(harness_root / "scripts/full-run-batch-5x2.sh"),
+                    "E2E_MATRIX_FILE": str(matrix_with_sweeps),
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "MATRIX_ID": matrix_id,
+                    "MATRIX_MAX_PARALLEL_COMBINATIONS": "0",
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                ["bash", str(MATRIX_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(0, result.returncode, msg=result.stdout + "\n" + result.stderr)
+            self.assertIn("MATRIX_MAX_PARALLEL_COMBINATIONS must be a positive integer", result.stderr)
+
     def test_matrix_supports_custom_driver_log_path(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -1376,6 +1542,42 @@ class MatrixHarnessIntegrationTests(unittest.TestCase):
             self.assertEqual(8, payload.get("profile_sweep_runs"))
             self.assertEqual(0, payload.get("strict_fail_runs"))
 
+    def test_matrix_parallelism_respects_max_parallel_combinations(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            harness_root, tools_dir, matrix_with_sweeps, _matrix_without_sweeps = create_matrix_stub_environment(root)
+            e2e_tmp_root = root / "e2e-matrix-parallel"
+            matrix_id = "matrix-parallel-limit"
+            obs_dir = root / "matrix-parallel-observability"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "BATCH_SCRIPT": str(harness_root / "scripts/full-run-batch-5x2.sh"),
+                    "E2E_MATRIX_FILE": str(matrix_with_sweeps),
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "MATRIX_ID": matrix_id,
+                    "MATRIX_MAX_PARALLEL_COMBINATIONS": "2",
+                    "MATRIX_STUB_SLEEP_SEC": "0.6",
+                    "MATRIX_PARALLEL_OBS_DIR": str(obs_dir),
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                ["bash", str(MATRIX_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertEqual(0, result.returncode, msg=result.stdout + "\n" + result.stderr)
+            max_parallel = int((obs_dir / "max").read_text(encoding="utf-8").strip())
+            self.assertGreaterEqual(max_parallel, 2, msg="expected matrix combinations to overlap")
+            self.assertLessEqual(max_parallel, 2, msg="matrix combinations exceeded configured parallel bound")
+
     def test_matrix_blocks_release_on_strict_violation(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -1520,7 +1722,10 @@ class MatrixHarnessIntegrationTests(unittest.TestCase):
             self.assertTrue(failing, msg="expected failing strict records in verdict")
             self.assertTrue(
                 any(
-                    any("frontend_cancel_qwen_status=failed" in reason for reason in (item.get("blocking_reasons") or []))
+                    any(
+                        "frontend_cancel_qwen-code_status=failed" in reason
+                        for reason in (item.get("blocking_reasons") or [])
+                    )
                     for item in failing
                 ),
                 msg="expected strict blockers to include failed frontend cancel status",
@@ -1562,10 +1767,55 @@ class MatrixHarnessIntegrationTests(unittest.TestCase):
             self.assertTrue(failing, msg="expected failing strict records in verdict")
             self.assertTrue(
                 any(
-                    any("frontend_qwen_status=failed" in reason for reason in (item.get("blocking_reasons") or []))
+                    any("frontend_init_non_passed=" in reason for reason in (item.get("blocking_reasons") or []))
                     for item in failing
                 ),
                 msg="expected strict blockers to include failed frontend live status",
+            )
+
+    def test_matrix_blocks_release_on_documentation_audit_manual_pending(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            harness_root, tools_dir, matrix_with_sweeps, _matrix_without_sweeps = create_matrix_stub_environment(root)
+            e2e_tmp_root = root / "e2e-doc-manual-pending"
+            matrix_id = "matrix-doc-manual-pending"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "BATCH_SCRIPT": str(harness_root / "scripts/full-run-batch-5x2.sh"),
+                    "E2E_MATRIX_FILE": str(matrix_with_sweeps),
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "MATRIX_ID": matrix_id,
+                    "MATRIX_STUB_MODE": "fail-doc-manual",
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                ["bash", str(MATRIX_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(0, result.returncode, msg=result.stdout + "\n" + result.stderr)
+
+            verdict_json = e2e_tmp_root / "reports" / f"release_verdict_{matrix_id}.json"
+            payload = json.loads(verdict_json.read_text(encoding="utf-8"))
+            failing = [item for item in (payload.get("records") or []) if item.get("strict_status") == "failed"]
+            self.assertTrue(failing, msg="expected failing strict records in verdict")
+            self.assertTrue(
+                any(
+                    any(
+                        "documentation_audit_manual_status=pending" in reason
+                        for reason in (item.get("blocking_reasons") or [])
+                    )
+                    for item in failing
+                ),
+                msg="expected strict blockers to include pending documentation audit manual status",
             )
 
     def test_matrix_blocks_release_on_cross_repo_missing_issue(self) -> None:
@@ -1669,6 +1919,62 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
             self.assertIn("missing target input: set TARGET_REPOS_FILE (repos[] YAML)", result.stderr)
+
+    def test_batch_rejects_invalid_max_parallel_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, _target_repo, repos_file = create_batch_stub_environment(root)
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TARGET_REPOS_FILE": str(repos_file),
+                    "BATCH_ID": "batch-invalid-max-parallel-runs",
+                    "BATCH_MAX_PARALLEL_RUNS": "0",
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+            self.assertIn("BATCH_MAX_PARALLEL_RUNS must be a positive integer", result.stderr)
+
+    def test_batch_rejects_invalid_frontend_max_parallel(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, _target_repo, repos_file = create_batch_stub_environment(root)
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TARGET_REPOS_FILE": str(repos_file),
+                    "BATCH_ID": "batch-invalid-frontend-max-parallel",
+                    "BATCH_FRONTEND_MAX_PARALLEL": "0",
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+            self.assertIn("BATCH_FRONTEND_MAX_PARALLEL must be a positive integer", result.stderr)
 
     def test_batch_accepts_git_url_repos_file(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -1802,6 +2108,112 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
                 msg="expected all classification rows to be precheck_failed",
             )
             self.assertIn("precheck_failed=", result.stderr)
+
+    def test_batch_path_precheck_fails_on_dirty_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, _target_repo, repos_file = create_batch_stub_environment(root)
+            e2e_tmp_root = root / "e2e"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TARGET_REPOS_FILE": str(repos_file),
+                    "BATCH_ID": "batch-path-precheck-dirty",
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "GIT_STUB_STATUS": " M README.md",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+            self.assertIn("path repo health check failed", result.stderr)
+            self.assertIn("uncommitted changes", result.stderr)
+            classification_path = e2e_tmp_root / "runs" / "batch-path-precheck-dirty" / "backend-run-classifications.tsv"
+            rows = [line for line in classification_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertGreaterEqual(len(rows), 11, msg="expected precheck_failed rows")
+            self.assertTrue(all("\tprecheck_failed\t" in line for line in rows[1:]))
+
+    def test_batch_path_precheck_fails_on_head_ref_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, _target_repo, repos_file = create_batch_stub_environment(root)
+            e2e_tmp_root = root / "e2e"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TARGET_REPOS_FILE": str(repos_file),
+                    "BATCH_ID": "batch-path-precheck-mismatch",
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "GIT_STUB_HEAD": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "GIT_STUB_REF_HEAD": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+            self.assertIn("path repo health check failed", result.stderr)
+            self.assertIn("pinned_ref=", result.stderr)
+            classification_path = e2e_tmp_root / "runs" / "batch-path-precheck-mismatch" / "backend-run-classifications.tsv"
+            rows = [line for line in classification_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertGreaterEqual(len(rows), 11, msg="expected precheck_failed rows")
+            self.assertTrue(all("\tprecheck_failed\t" in line for line in rows[1:]))
+
+    def test_batch_path_precheck_fails_on_zero_tracked_files(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, _target_repo, repos_file = create_batch_stub_environment(root)
+            e2e_tmp_root = root / "e2e"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TARGET_REPOS_FILE": str(repos_file),
+                    "BATCH_ID": "batch-path-precheck-empty-index",
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "GIT_STUB_LS_FILES": "",
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+            self.assertIn("path repo health check failed", result.stderr)
+            self.assertIn("zero tracked files", result.stderr)
+            classification_path = e2e_tmp_root / "runs" / "batch-path-precheck-empty-index" / "backend-run-classifications.tsv"
+            rows = [line for line in classification_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertGreaterEqual(len(rows), 11, msg="expected precheck_failed rows")
+            self.assertTrue(all("\tprecheck_failed\t" in line for line in rows[1:]))
 
     def test_batch_precheck_failed_respects_shard_selection(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2222,6 +2634,178 @@ class BatchPostRunValidationIntegrationTests(unittest.TestCase):
             self.assertIn("frontend_mode_never", str(cancel_result.get("reason", "")))
             self.assertIn("frontend_failed=0", result.stderr)
             self.assertIn("frontend_cancel_skipped=1", result.stderr)
+
+    def test_batch_frontend_per_run_mode_propagates_headed_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, _target_repo, repos_file = create_batch_stub_environment(root)
+            e2e_tmp_root = root / "e2e"
+            frontend_stub_log = root / "frontend-stub.log"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TARGET_REPOS_FILE": str(repos_file),
+                    "BATCH_ID": "batch-frontend-per-run",
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "BATCH_PROVIDER_FILTER": "claude-code",
+                    "BATCH_RUN_SELECTION": "1,3",
+                    "BATCH_FRONTEND_MODE": "per_run",
+                    "BATCH_FRONTEND_CANCEL_MODE": "once_per_provider",
+                    "UI_E2E_HEADED": "1",
+                    "FRONTEND_STUB_LOG": str(frontend_stub_log),
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout + "\n" + result.stderr)
+            self.assertTrue(frontend_stub_log.exists(), msg="frontend stub log is missing")
+            rows = [line for line in frontend_stub_log.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(3, len(rows), msg="expected 2 init-inspect calls + 1 cancel-refresh call")
+            init_calls = [line for line in rows if "\tinit-inspect-service-first\t" in line]
+            cancel_calls = [line for line in rows if "\tcancel-refresh\t" in line]
+            self.assertEqual(2, len(init_calls), msg="expected init-inspect frontend run for each selected run")
+            self.assertEqual(1, len(cancel_calls), msg="expected single cancel run for once_per_provider mode")
+            self.assertTrue(all("\t1\t" in line for line in rows), msg="expected UI_E2E_HEADED=1 for every frontend call")
+
+    def test_batch_backend_parallelism_respects_max_parallel_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provenarch_root, tools_dir, _target_repo, repos_file = create_batch_stub_environment(root)
+            write_text(
+                provenarch_root / "scripts/full-run-ai-advent.sh",
+                textwrap.dedent(
+                    """\
+                    #!/usr/bin/env bash
+                    set -euo pipefail
+                    : "${TMP_ROOT:?TMP_ROOT is required}"
+                    : "${BATCH_PARALLEL_OBS_DIR:?BATCH_PARALLEL_OBS_DIR is required}"
+                    mkdir -p "$TMP_ROOT/arch-workspace/reports/as-is" "$TMP_ROOT/arch-workspace/reports/findings" "$TMP_ROOT/arch-workspace/reports/coverage" "$TMP_ROOT/arch-workspace/reports/taskruns" "$TMP_ROOT/logs" "$BATCH_PARALLEL_OBS_DIR"
+
+                    lock="$BATCH_PARALLEL_OBS_DIR/.lock"
+                    while ! mkdir "$lock" 2>/dev/null; do sleep 0.01; done
+                    active="$(cat "$BATCH_PARALLEL_OBS_DIR/active" 2>/dev/null || echo 0)"
+                    active=$((active + 1))
+                    echo "$active" >"$BATCH_PARALLEL_OBS_DIR/active"
+                    max_active="$(cat "$BATCH_PARALLEL_OBS_DIR/max" 2>/dev/null || echo 0)"
+                    if (( active > max_active )); then
+                      echo "$active" >"$BATCH_PARALLEL_OBS_DIR/max"
+                    fi
+                    rmdir "$lock"
+
+                    sleep 0.8
+
+                    while ! mkdir "$lock" 2>/dev/null; do sleep 0.01; done
+                    active="$(cat "$BATCH_PARALLEL_OBS_DIR/active" 2>/dev/null || echo 0)"
+                    if (( active > 0 )); then
+                      active=$((active - 1))
+                    fi
+                    echo "$active" >"$BATCH_PARALLEL_OBS_DIR/active"
+                    rmdir "$lock"
+
+                    runtime_provider="${ACP_RUNTIME_PROVIDER:-qwen-code}"
+                    cat >"$TMP_ROOT/session-summary.md" <<'MD'
+                    # ProvenArch Full Run Session Summary
+
+                    - result: passed
+                    - quality_gates: passed
+                    - expected_runs: 1
+                    - completed_runs: 1
+                    - expected_headless_runs: 1
+                    - completed_headless_runs: 1
+                    - running_runs_detected: 0
+                    - failure_reason: none
+                    - termination_signal: none
+
+                    ## API Simulation
+                    - status: succeeded
+                    MD
+                    printf '1\theadless\t%s\tinit\trun-stub\tsucceeded\t5\t1\t1\t1\t1\t1\t0\t%s@test\t%s\t%s\\n' \
+                      "$runtime_provider" "$runtime_provider" "$TMP_ROOT/arch-workspace/reports/taskruns/run-stub-quality.json" "$TMP_ROOT/logs/stub.log" >"$TMP_ROOT/run-results.tsv"
+                    cat >"$TMP_ROOT/arch-workspace/reports/taskruns/run-stub-quality.json" <<'JSON'
+                    {"status":"succeeded","totals":{"signal_score":5,"changeset_ops":1,"findings_added":1,"questions_count":1,"coverage_observed":1,"coverage_missing":1,"warnings_count":0},"runtime_versions":["qwen-code@test"],"steps":[{"step_id":"init.step1.collect","runtime_name":"qwen-code","runtime_version":"test","domain_id":"domain-main"}]}
+                    JSON
+                    cat >"$TMP_ROOT/arch-workspace/reports/as-is/overview.md" <<'MD'
+                    # Overview
+                    - services: 1
+                    MD
+                    cat >"$TMP_ROOT/arch-workspace/reports/findings/findings.md" <<'MD'
+                    # Findings
+                    ## Finding
+                    - Severity: medium
+                    - Description: stub
+                    MD
+                    cat >"$TMP_ROOT/arch-workspace/reports/coverage/summary.md" <<'MD'
+                    # Coverage
+                    ## Missing
+                    - owner mappings
+                    MD
+                    cat >"$TMP_ROOT/arch-workspace/reports/coverage/open-questions.md" <<'MD'
+                    # Open Questions
+                    - `q.stub` stub?
+                    MD
+                    exit 0
+                    """
+                ),
+                mode=0o755,
+            )
+
+            e2e_tmp_root = root / "e2e"
+            obs_dir = root / "parallel-observability"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROVENARCH_ROOT": str(provenarch_root),
+                    "TARGET_REPOS_FILE": str(repos_file),
+                    "BATCH_ID": "batch-backend-parallelism",
+                    "E2E_TMP_ROOT": str(e2e_tmp_root),
+                    "ACP_CLAUDE_CMD_BIN": "claude",
+                    "ACP_QWEN_CMD_BIN": "qwen",
+                    "BATCH_PROVIDER_FILTER": "qwen-code",
+                    "BATCH_RUN_SELECTION": "1,2,3",
+                    "BATCH_MAX_PARALLEL_RUNS": "2",
+                    "BATCH_SKIP_PRECHECK": "1",
+                    "BATCH_FRONTEND_MODE": "never",
+                    "BATCH_PARALLEL_OBS_DIR": str(obs_dir),
+                    "PATH": f"{tools_dir}:{env.get('PATH', '')}",
+                }
+            )
+            result = subprocess.run(
+                [str(BATCH_SCRIPT)],
+                env=env,
+                cwd=str(REPO_ROOT),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertEqual(0, result.returncode, msg=result.stdout + "\n" + result.stderr)
+            max_parallel = int((obs_dir / "max").read_text(encoding="utf-8").strip())
+            self.assertGreaterEqual(max_parallel, 2, msg="expected parallel backend workers to overlap")
+            self.assertLessEqual(max_parallel, 2, msg="backend workers exceeded configured max parallel bound")
+            for run_idx in ("1", "2", "3"):
+                failure_path = (
+                    e2e_tmp_root
+                    / "runs"
+                    / "batch-backend-parallelism"
+                    / "qwen-code"
+                    / f"run{run_idx}"
+                    / "failure-class.json"
+                )
+                self.assertTrue(failure_path.exists(), msg=f"failure-class artifact missing for run{run_idx}")
+                payload = json.loads(failure_path.read_text(encoding="utf-8"))
+                self.assertEqual("none", payload.get("failure_class"))
+                self.assertEqual(int(run_idx), int(payload.get("run_index", -1)))
 
     def test_batch_classifies_signal_terminated_without_runner_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as td:

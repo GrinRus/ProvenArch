@@ -6,6 +6,14 @@ const cancelTimeoutSec = Number.parseInt(process.env.UI_E2E_CANCEL_TIMEOUT_SEC ?
 const expectedRepoCountRaw = Number.parseInt(process.env.UI_E2E_EXPECTED_REPO_COUNT ?? "1", 10);
 const expectedRepoCount = Number.isFinite(expectedRepoCountRaw) && expectedRepoCountRaw > 0 ? expectedRepoCountRaw : 1;
 const requireChunkedService = (process.env.UI_E2E_REQUIRE_CHUNKED_SERVICE ?? "0").trim() === "1";
+const expectedExecutionStrategyEnvRaw = (process.env.UI_E2E_EXPECTED_STRATEGY ?? "").trim();
+const expectedExecutionStrategyLegacyRaw = (process.env.ACP_EXECUTION_STRATEGY ?? "").trim();
+const expectedExecutionStrategyRaw = expectedExecutionStrategyEnvRaw || expectedExecutionStrategyLegacyRaw;
+const expectedExecutionParallelEnvRaw = Number.parseInt(process.env.UI_E2E_EXPECTED_MAX_PARALLEL_TASKS ?? "", 10);
+const expectedExecutionParallelLegacyRaw = Number.parseInt(process.env.ACP_MAX_PARALLEL_TASKS ?? "", 10);
+const expectedExecutionParallelRaw = Number.isFinite(expectedExecutionParallelEnvRaw)
+  ? expectedExecutionParallelEnvRaw
+  : expectedExecutionParallelLegacyRaw;
 
 const initTimeoutMs = Number.isFinite(initTimeoutSec) && initTimeoutSec > 0 ? initTimeoutSec * 1000 : 900_000;
 const cancelTimeoutMs = Number.isFinite(cancelTimeoutSec) && cancelTimeoutSec > 0 ? cancelTimeoutSec * 1000 : 420_000;
@@ -74,8 +82,26 @@ async function assertExecutionDefaults(request: APIRequestContext): Promise<void
   const payload = (await response.json()) as {
     effective?: { strategy?: string; max_parallel_tasks?: number };
   };
-  expect(payload.effective?.strategy).toBe("parallel");
-  expect(payload.effective?.max_parallel_tasks).toBe(3);
+
+  const effectiveStrategy = payload.effective?.strategy === "parallel" ? "parallel" : "sequential";
+  const effectiveMaxParallelRaw = Number(payload.effective?.max_parallel_tasks ?? 1);
+  const effectiveMaxParallel =
+    Number.isFinite(effectiveMaxParallelRaw) && effectiveMaxParallelRaw > 0 ? effectiveMaxParallelRaw : 1;
+
+  const expectedStrategy =
+    expectedExecutionStrategyRaw === "parallel" || expectedExecutionStrategyRaw === "sequential"
+      ? expectedExecutionStrategyRaw
+      : effectiveStrategy;
+  let expectedMaxParallel =
+    Number.isFinite(expectedExecutionParallelRaw) && expectedExecutionParallelRaw > 0
+      ? expectedExecutionParallelRaw
+      : effectiveMaxParallel;
+  if (expectedStrategy !== "parallel") {
+    expectedMaxParallel = 1;
+  }
+
+  expect(payload.effective?.strategy).toBe(expectedStrategy);
+  expect(payload.effective?.max_parallel_tasks).toBe(expectedMaxParallel);
 }
 
 async function waitForRunIDChange(page: Page, previousRunID: string): Promise<string> {

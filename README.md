@@ -365,10 +365,13 @@ Shard controls:
 - `BATCH_PROVIDER_FILTER`: `all` (default) или CSV из `qwen-code,claude-code`
 - `BATCH_RUN_SELECTION`: `all` (default), CSV (`1,3,5`) или диапазоны (`1-3,5`)
 - `BATCH_SKIP_PRECHECK`: `0|1` (default `0`); полезно для secondary shard'ов
-- `BATCH_FRONTEND_MODE`: `auto|always|never` (default `auto`)
-  - `auto`: frontend smoke выполняется только если в `BATCH_RUN_SELECTION` есть `run1`
-  - `always`: всегда запускать frontend smoke (требует `run1` workspace)
-  - `never`: полностью пропускать frontend smoke
+- `BATCH_FRONTEND_MODE`: `auto|always|never|per_run` (default `auto`)
+  - `auto`: frontend init smoke выполняется только если в `BATCH_RUN_SELECTION` есть `run1`
+  - `always`: frontend init smoke выполняется один раз на provider (run1 workspace)
+  - `never`: frontend init smoke полностью пропускается
+  - `per_run`: frontend init smoke запускается для каждого выбранного backend run (`provider x runN`)
+- `BATCH_FRONTEND_CANCEL_MODE`: `once_per_provider|per_run|never` (default `once_per_provider`)
+- `UI_E2E_HEADED`: `0|1` (default `0`), при `1` Playwright запускается с `--headed`
 - в shard-режиме требуются бинари только выбранных провайдеров из `BATCH_PROVIDER_FILTER`
 - для параллельных shard-процессов используйте разные `BATCH_ID` (иначе конфликт output paths)
 - рекомендуемый split: один shard с `BATCH_SKIP_PRECHECK=0`, остальные shard'ы с `BATCH_SKIP_PRECHECK=1`
@@ -397,7 +400,14 @@ ACP_QWEN_CMD_BIN=qwen \
   - `baseline`: `strategy=sequential`, `max_parallel_tasks=1`, `failure_policy=best_effort`, `shard_discovery_mode=heuristics`, `repo_selection=all`
   - `scale-backend`: `strategy=parallel`, `max_parallel_tasks=4`, `failure_policy=best_effort`, `shard_discovery_mode=semantic`, `repo_selection=backend_only`
 
-Готовый шаблон: `examples/e2e-matrix.example.yaml` (+ curated profile presets в `examples/repos/curated/*.repos.yaml` и pinned GitHub presets в `examples/repos/github/*.repos.yaml`).
+Готовые matrix-конфиги:
+- `examples/e2e-matrix.example.yaml`
+- `examples/e2e-matrix.release-wave1.yaml`
+- `examples/e2e-matrix.release-wave2.yaml`
+
+Preset-наборы:
+- curated path presets: `examples/repos/curated/*.repos.yaml`
+- pinned GitHub presets: `examples/repos/github/*.repos.yaml`
 GitHub target catalog для release выбора (`3` monorepo + `3` multi-repo ecosystems):
 - `examples/repos/github/mono-*.repos.yaml`
 - `examples/repos/github/multi-*-ecosystem.repos.yaml`
@@ -413,6 +423,7 @@ GitHub target catalog для release выбора (`3` monorepo + `3` multi-repo
   - `/tmp/provenarch-test_arch_project/reports/frontend_e2e_matrix_<batch-id>.md`
   - `/tmp/provenarch-test_arch_project/reports/frontend_cancel_e2e_matrix_<batch-id>.md`
   - `/tmp/provenarch-test_arch_project/reports/quality_report_<batch-id>.md`
+  - `/tmp/provenarch-test_arch_project/reports/documentation_audit_<batch-id>.md`
 - matrix+release artifacts:
   - `/tmp/provenarch-test_arch_project/reports/profile_matrix_<matrix-id>.md`
   - `/tmp/provenarch-test_arch_project/reports/profile_matrix_<matrix-id>.tsv`
@@ -421,6 +432,8 @@ GitHub target catalog для release выбора (`3` monorepo + `3` multi-repo
 - backend quality считается только по snapshot-артефактам (`snapshots/<run_id>/reports/*`), frontend smoke запускается на отдельной `frontend-workspace` копии и не мутирует backend baseline
 - batch evaluator добавляет semantic hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`; для multi-profile (`expected_repo_count >= 2`) обязателен `cross-repo` сигнал (`analysis:cross-repo-missing` при отсутствии)
 - в `run_matrix`/`quality_report` дополнительно фиксируются `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, runtime flow checks (`runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:repo-selection`, `runtime:execution-semantics`, `runtime_flow_failed`) и failure classes (`runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_signal_terminated`, `infra_incomplete_cycle`, `quality_gates_failed`, `summary_missing`, `precheck_failed`)
+- `frontend_e2e_matrix`/`frontend_cancel_e2e_matrix` формируются в run-level формате (`provider + run`), strict gate блокируется при любом init run-status != `passed`
+- `documentation_audit_<batch-id>.md` содержит auto rubric + manual checklist + implementation audit; strict gate блокируется при `auto_status != passed` или `manual_status != passed`
 - direct `npm run --prefix ui e2e:live`: Playwright output default `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
 - `scripts/frontend-live-e2e.sh`: Playwright output сохраняется в `$OUTPUT_DIR/playwright-results`
 - frontend live e2e ожидает число resolved repos из `UI_E2E_EXPECTED_REPO_COUNT` (default `1`)
@@ -430,6 +443,10 @@ GitHub target catalog для release выбора (`3` monorepo + `3` multi-repo
   - `refresh-full`: validate -> run refresh (full) -> verify full fan-out
   - `cancel-refresh`: validate -> run refresh -> cancel selected run -> expect `failed + run_canceled`
 - `UI_E2E_CANCEL_STUB_SLEEP_SEC` задаёт длительность controlled slow stub runner для сценария `cancel-refresh`
+- в release matrix рекомендуется:
+  - `BATCH_FRONTEND_MODE=per_run`
+  - `BATCH_FRONTEND_CANCEL_MODE=once_per_provider`
+  - `UI_E2E_HEADED=1`
 - при shard-режиме `BATCH_FRONTEND_MODE=auto` frontend smoke помечается `skipped`, если `run1` не входит в `BATCH_RUN_SELECTION`
 
 `TARGET_REPOS_FILE` — единственный поддерживаемый batch/full-run контракт.

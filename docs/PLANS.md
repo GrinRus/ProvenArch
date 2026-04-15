@@ -49,6 +49,63 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 
 ### Plan ID
+EP-20260415-release-live-matrix-per-run-doc-audit
+
+### Context
+Нужно довести pre-release live gate до двухволнового сценария с обязательным frontend-наблюдением на каждый backend run, run-level strict проверкой frontend статусов и отдельным quality gate по документации/implementation traceability.
+
+### Goals (must have)
+- [x] Добавить `BATCH_FRONTEND_MODE=per_run` + run-scoped frontend artifacts/reporting
+- [x] Добавить `BATCH_FRONTEND_CANCEL_MODE=once_per_provider|per_run|never`
+- [x] Добавить `UI_E2E_HEADED=0|1` в frontend e2e wrapper
+- [x] Перевести frontend matrix aggregation на run-level (`provider + run_index`)
+- [x] Добавить `documentation_audit_<batch-id>.md` (auto rubric + manual checklist + implementation audit)
+- [x] Добавить strict blockers в matrix verdict для frontend run-level non-passed и documentation audit auto/manual non-passed
+- [x] Обновить runbook/docs/examples под двухволновой release flow и pinned path presets
+
+### Non-goals
+- [x] Изменение product API/schema contracts (`/api/*`, `schemas/*`)
+- [x] Добавление нового wrapper-скрипта поверх matrix harness
+- [x] Изменение required CI merge gate policy
+
+### Approach
+1) Расширить `full-run-batch-5x2.sh` run-level frontend orchestration и cancel-mode semantics.
+2) Обновить `frontend-live-e2e.sh` для headed mode.
+3) Переписать `e2e_batch_report.py` frontend aggregation + documentation audit artifact.
+4) Расширить `full-run-batch-matrix.sh` strict verdict parser/blockers.
+5) Добавить regression tests и синхронизировать runbooks/examples/README/testing docs.
+
+### Files expected to change
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/frontend-live-e2e.sh`
+- `scripts/e2e_batch_report.py`
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/tests/test_full_run_stability.py`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/LOCAL_FULL_RUN_AI_ADVENT.md`
+- `docs/TESTING_STRATEGY.md`
+- `README.md`
+- `examples/e2e-matrix.release-wave1.yaml`
+- `examples/e2e-matrix.release-wave2.yaml`
+- `examples/repos/curated/*.repos.yaml`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены
+- [x] Контракты harness/report синхронизированы
+- [x] Документация и runbooks синхронизированы
+
+### Risks
+- Ужесточение strict gate может блокировать release при частично выполненном manual documentation audit; mitigated через явный `DOCUMENTATION_AUDIT_MANUAL_STATUS` contract.
+- Per-run frontend smoke увеличивает время release gate; mitigated run-level artifacts + headed наблюдение без пауз.
+
+### Progress log
+- 2026-04-15: Реализованы `BATCH_FRONTEND_MODE=per_run`, `BATCH_FRONTEND_CANCEL_MODE`, run-scoped frontend/cancel artifacts и headed pass-through.
+- 2026-04-15: Добавлен `documentation_audit_<batch-id>.md` (auto/manual/implementation) и strict blockers в matrix verdict.
+- 2026-04-15: Обновлены regression tests (`test_full_run_stability`) для per-run frontend/headed и documentation audit strict block.
+- 2026-04-15: Синхронизированы `README`, `RELEASE_LIVE_E2E_RUNBOOK`, `LOCAL_FULL_RUN_AI_ADVENT`, `TESTING_STRATEGY`; добавлены wave1/wave2 matrix examples и path presets с pinned refs.
+
+### Plan ID
 EP-20260414-service-first-pipeline-v2
 
 ### Context
@@ -1035,3 +1092,26 @@ EP-20260411-orchestrator-runner-frontend-operability
 | 12–13 | out of MVP | Вне текущего beta scope |
 | 14 CI trigger mode | done (beta baseline) | CLI batch required, smoke/golden/ui-smoke jobs без live network deps |
 | 15 Domain/baseline pack hardening | done (beta baseline) | Baseline skills/prompts wired и versioned в workspace |
+
+---
+
+## EP-20260415-parallel-matrix-and-path-guardrails
+
+### Context
+- Live matrix прогоны в release-wave режиме выполнялись слишком долго из-за строго последовательного исполнения profile+sweep и provider×run.
+- В evidence обнаружились дефекты path-checkout (`selected_shards=1` при пустом/грязном worktree и HEAD mismatch относительно pinned ref).
+- Требуется отличать валидный single-shard от дефектного пустого inventory и блокировать release на таких состояниях.
+
+### Goals
+- [x] Добавить bounded parallelism в matrix harness (`MATRIX_MAX_PARALLEL_COMBINATIONS`).
+- [x] Добавить bounded parallelism в batch backend runs (`BATCH_MAX_PARALLEL_RUNS`).
+- [x] Ввести fail-fast guardrails для `source=path`: pinned ref match, clean checkout, non-empty tracked files.
+- [x] Добавить runtime-flow issue `runtime:empty-service-inventory` для дефектного single-shard пустого inventory.
+- [x] Исправить false-positive `contract/runtime-name` на shard-plan/shard-summary artifacts.
+- [x] Изолировать `make contracts test lint build` в `full-run-ai-advent.sh` от execution/sweep env leakage.
+- [x] Добавить frontend per-provider concurrency guard (`BATCH_FRONTEND_MAX_PARALLEL`, default `1`) с сохранением run-scoped artifacts.
+- [x] Обновить runbook и тесты под новую модель, включая live-monitoring и процедуру controlled stop + failed evidence.
+
+### Verification
+- `python3 -m pytest scripts/tests/test_full_run_stability.py scripts/tests/test_e2e_batch_report.py`
+- `go test ./internal/orchestrator`
