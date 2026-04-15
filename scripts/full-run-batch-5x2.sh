@@ -19,8 +19,12 @@ ACP_SHARD_DISCOVERY_MODE="${ACP_SHARD_DISCOVERY_MODE:-}"
 ACP_REPO_SELECTION="${ACP_REPO_SELECTION:-}"
 BATCH_PROVIDER_FILTER="${BATCH_PROVIDER_FILTER:-all}"
 BATCH_RUN_SELECTION="${BATCH_RUN_SELECTION:-all}"
+BATCH_MAX_PARALLEL_RUNS="${BATCH_MAX_PARALLEL_RUNS:-2}"
 BATCH_SKIP_PRECHECK="${BATCH_SKIP_PRECHECK:-0}"
 BATCH_FRONTEND_MODE="${BATCH_FRONTEND_MODE:-auto}"
+BATCH_FRONTEND_CANCEL_MODE="${BATCH_FRONTEND_CANCEL_MODE:-once_per_provider}"
+BATCH_FRONTEND_MAX_PARALLEL="${BATCH_FRONTEND_MAX_PARALLEL:-1}"
+UI_E2E_HEADED="${UI_E2E_HEADED:-0}"
 E2E_TMP_ROOT="${E2E_TMP_ROOT:-/tmp/provenarch-test_arch_project}"
 BATCH_ROOT="${BATCH_ROOT:-$E2E_TMP_ROOT/runs/$BATCH_ID}"
 REPORTS_ROOT="${REPORTS_ROOT:-$E2E_TMP_ROOT/reports}"
@@ -48,6 +52,10 @@ LAST_RUN_CANCELLATION_LIKE=0
 PRECHECK_FAILURE_RECORDED=0
 FRONTEND_CANCEL_FAILURES=0
 FRONTEND_CANCEL_SKIPPED=0
+declare -a BACKEND_ACTIVE_PIDS=()
+declare -a BACKEND_ACTIVE_LABELS=()
+declare -a FRONTEND_ACTIVE_PIDS=()
+declare -a FRONTEND_ACTIVE_LABELS=()
 TIMEOUT_PRECHECK_UNSET_KEYS=(
   ACP_RUNTIME_STEP_TIMEOUT_SEC
   ACP_RUNTIME_HEARTBEAT_SEC
@@ -195,22 +203,68 @@ PY
   SELECTED_RUN_INDEXES_CSV="$(IFS=,; echo "${SELECTED_RUN_INDEXES[*]}")"
 }
 
-should_run_frontend_for_selection() {
+resolve_frontend_run_indexes() {
   case "$BATCH_FRONTEND_MODE" in
     never)
-      return 1
+      return 0
       ;;
     always)
+      printf '1\n'
       return 0
       ;;
     auto)
-      run_index_selected "1"
-      return $?
+      if run_index_selected "1"; then
+        printf '1\n'
+      fi
+      return 0
+      ;;
+    per_run)
+      local run_index
+      for run_index in "${SELECTED_RUN_INDEXES[@]}"; do
+        printf '%s\n' "$run_index"
+      done
+      return 0
       ;;
     *)
-      die "BATCH_FRONTEND_MODE must be auto|always|never (got '$BATCH_FRONTEND_MODE')"
+      die "BATCH_FRONTEND_MODE must be auto|always|never|per_run (got '$BATCH_FRONTEND_MODE')"
       ;;
   esac
+}
+
+resolve_cancel_run_indexes() {
+  case "$BATCH_FRONTEND_CANCEL_MODE" in
+    never)
+      return 0
+      ;;
+    once_per_provider)
+      local frontend_indexes=()
+      local run_index
+      while IFS= read -r run_index; do
+        [[ -z "$run_index" ]] && continue
+        frontend_indexes+=("$run_index")
+      done < <(resolve_frontend_run_indexes)
+      if [[ "${#frontend_indexes[@]}" -gt 0 ]]; then
+        printf '%s\n' "${frontend_indexes[0]}"
+      fi
+      return 0
+      ;;
+    per_run)
+      resolve_frontend_run_indexes
+      return 0
+      ;;
+    *)
+      die "BATCH_FRONTEND_CANCEL_MODE must be once_per_provider|per_run|never (got '$BATCH_FRONTEND_CANCEL_MODE')"
+      ;;
+  esac
+}
+
+runtime_cmd_for_provider() {
+  local provider="$1"
+  if [[ "$provider" == "claude-code" ]]; then
+    printf '%s' "$ACP_CLAUDE_CMD_BIN"
+    return 0
+  fi
+  printf '%s' "$ACP_QWEN_CMD_BIN"
 }
 
 summary_scalar() {
@@ -220,7 +274,7 @@ summary_scalar() {
     printf ''
     return 0
   fi
-  sed -n "s/^- ${key}: //p" "$summary_path" | tail -n1 | tr -d '\r'
+  sed -n "s/^[[:space:]]*- ${key}: //p" "$summary_path" | tail -n1 | tr -d '\r'
 }
 
 contains_in_files() {
@@ -258,12 +312,19 @@ write_frontend_status_json() {
   local runtime_command="$8"
   local server_log="${9:-}"
   local playwright_log="${10:-}"
-  python3 - "$path" "$provider" "$scenario" "$status" "$reason" "$workspace" "$output_dir" "$runtime_command" "$server_log" "$playwright_log" <<'PY'
+  local run_index="${11:-}"
+  python3 - "$path" "$provider" "$scenario" "$status" "$reason" "$workspace" "$output_dir" "$runtime_command" "$server_log" "$playwright_log" "$run_index" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 
-path, provider, scenario, status, reason, workspace, output_dir, runtime_command, server_log, playwright_log = sys.argv[1:]
+path, provider, scenario, status, reason, workspace, output_dir, runtime_command, server_log, playwright_log, run_index = sys.argv[1:]
+run_index_value = None
+if run_index.strip():
+    try:
+        run_index_value = int(run_index)
+    except Exception:
+        run_index_value = None
 payload = {
     "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "finished_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -276,6 +337,7 @@ payload = {
     "runtime_command": runtime_command,
     "server_log": server_log or "-",
     "playwright_log": playwright_log or "-",
+    "run_index": run_index_value,
 }
 with open(path, "w", encoding="utf-8") as f:
     json.dump(payload, f, ensure_ascii=True, indent=2)
@@ -290,6 +352,406 @@ run_dod_precheck_make() {
     env_cmd+=("-u" "$key")
   done
   "${env_cmd[@]}" make contracts test lint build
+}
+
+path_repo_health_precheck() {
+  local reason=""
+  reason="$(python3 - "$DECLARED_REPOS_JSON" "$GIT_BIN" <<'PY'
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+declared_path = Path(sys.argv[1]).resolve()
+git_bin = Path(sys.argv[2]).resolve()
+payload = json.loads(declared_path.read_text(encoding="utf-8"))
+declared = payload.get("declared_repos") or []
+
+def run_git(repo_path: Path, *args: str) -> str:
+    completed = subprocess.run(
+        [str(git_bin), "-C", str(repo_path), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        stderr = (completed.stderr or "").strip()
+        stdout = (completed.stdout or "").strip()
+        detail = stderr or stdout or "git command failed"
+        raise RuntimeError(detail)
+    return (completed.stdout or "").strip()
+
+for item in declared:
+    if not isinstance(item, dict):
+        continue
+    source = str(item.get("source", "")).strip()
+    if source != "path":
+        continue
+
+    name = str(item.get("name", "")).strip() or "<unknown>"
+    repo_path_raw = str(item.get("path", "")).strip()
+    repo_ref = str(item.get("ref", "")).strip()
+    if not repo_path_raw:
+        print(f"path repo health check failed: repo={name} source=path has empty path")
+        raise SystemExit(1)
+
+    repo_path = Path(repo_path_raw).expanduser().resolve()
+    if not repo_path.is_dir():
+        print(f"path repo health check failed: repo={name} path={repo_path} is not a directory")
+        raise SystemExit(1)
+    if not repo_ref:
+        print(f"path repo health check failed: repo={name} path={repo_path} missing pinned ref")
+        raise SystemExit(1)
+
+    try:
+        current_head = run_git(repo_path, "rev-parse", "HEAD")
+    except RuntimeError as exc:
+        print(f"path repo health check failed: repo={name} path={repo_path} git rev-parse HEAD failed ({exc})")
+        raise SystemExit(1)
+    try:
+        expected_head = run_git(repo_path, "rev-parse", f"{repo_ref}^{{commit}}")
+    except RuntimeError as exc:
+        print(
+            f"path repo health check failed: repo={name} path={repo_path} pinned ref {repo_ref!r} does not resolve ({exc})"
+        )
+        raise SystemExit(1)
+    if current_head != expected_head:
+        print(
+            f"path repo health check failed: repo={name} path={repo_path} head={current_head} pinned_ref={repo_ref} resolved_ref={expected_head}"
+        )
+        raise SystemExit(1)
+
+    try:
+        porcelain = run_git(repo_path, "status", "--porcelain")
+    except RuntimeError as exc:
+        print(f"path repo health check failed: repo={name} path={repo_path} git status failed ({exc})")
+        raise SystemExit(1)
+    if porcelain.strip():
+        print(f"path repo health check failed: repo={name} path={repo_path} has uncommitted changes")
+        raise SystemExit(1)
+
+    try:
+        tracked = run_git(repo_path, "ls-files")
+    except RuntimeError as exc:
+        print(f"path repo health check failed: repo={name} path={repo_path} git ls-files failed ({exc})")
+        raise SystemExit(1)
+    tracked_count = sum(1 for line in tracked.splitlines() if line.strip())
+    if tracked_count <= 0:
+        print(f"path repo health check failed: repo={name} path={repo_path} has zero tracked files")
+        raise SystemExit(1)
+
+print("ok")
+PY
+)"
+  if [[ "$reason" != "ok" ]]; then
+    printf '%s' "$reason"
+    return 1
+  fi
+  return 0
+}
+
+drop_backend_active_worker() {
+  local drop_idx="$1"
+  local -a next_pids
+  local -a next_labels
+  next_pids=()
+  next_labels=()
+  local idx
+  for idx in "${!BACKEND_ACTIVE_PIDS[@]}"; do
+    if [[ "$idx" == "$drop_idx" ]]; then
+      continue
+    fi
+    next_pids+=("${BACKEND_ACTIVE_PIDS[$idx]}")
+    next_labels+=("${BACKEND_ACTIVE_LABELS[$idx]}")
+  done
+  BACKEND_ACTIVE_PIDS=()
+  BACKEND_ACTIVE_LABELS=()
+  if [[ "${#next_pids[@]}" -gt 0 ]]; then
+    BACKEND_ACTIVE_PIDS=("${next_pids[@]}")
+    BACKEND_ACTIVE_LABELS=("${next_labels[@]}")
+  fi
+}
+
+wait_for_backend_worker_slot() {
+  local idx
+  local pid
+  local label
+  local exit_code
+  while true; do
+    for idx in "${!BACKEND_ACTIVE_PIDS[@]}"; do
+      pid="${BACKEND_ACTIVE_PIDS[$idx]}"
+      if ! kill -0 "$pid" >/dev/null 2>&1; then
+        if wait "$pid"; then
+          exit_code=0
+        else
+          exit_code=$?
+        fi
+        label="${BACKEND_ACTIVE_LABELS[$idx]}"
+        drop_backend_active_worker "$idx"
+        if [[ "$exit_code" -ne 0 ]]; then
+          log "backend worker wrapper failed worker=$label exit=$exit_code"
+        fi
+        return 0
+      fi
+    done
+    sleep 0.2
+  done
+}
+
+wait_for_all_backend_workers() {
+  while [[ "${#BACKEND_ACTIVE_PIDS[@]}" -gt 0 ]]; do
+    wait_for_backend_worker_slot
+  done
+}
+
+launch_backend_worker() {
+  local provider="$1"
+  local run_index="$2"
+  local run_dir="$3"
+  mkdir -p "$run_dir"
+  log "full-run provider=$provider run=$run_index tmp_root=$run_dir"
+  (
+    set +e
+    process_exit=0
+    (
+      cd "$PROVENARCH_ROOT"
+      TARGET_REPOS_FILE="$RESOLVED_TARGET_REPOS_FILE" \
+      TMP_ROOT="$run_dir" \
+      KEEP_TMP=1 \
+      ITERATIONS=1 \
+      RUN_QUALITY_GATES=1 \
+      PROFILE_ID="${PROFILE_ID:-adhoc}" \
+      PROFILE_SOURCE_KIND="${PROFILE_SOURCE_KIND:-mixed}" \
+      EXPECTED_REPO_COUNT="$EXPECTED_REPO_COUNT_RESOLVED" \
+      ACP_RUNTIME_PROVIDER="$provider" \
+      ACP_CLAUDE_CMD="$ACP_CLAUDE_CMD_BIN" \
+      ACP_QWEN_CMD="$ACP_QWEN_CMD_BIN" \
+      ACP_APPLY_TIMEOUTS_VIA_API="$ACP_APPLY_TIMEOUTS_VIA_API" \
+      SWEEP_ID="${SWEEP_ID:-baseline}" \
+      ACP_RUNTIME_STEP_TIMEOUT_SEC="${ACP_RUNTIME_STEP_TIMEOUT_SEC:-}" \
+      ACP_RUNTIME_HEARTBEAT_SEC="${ACP_RUNTIME_HEARTBEAT_SEC:-}" \
+      ACP_PIPELINE_TIMEOUT_SEC="${ACP_PIPELINE_TIMEOUT_SEC:-}" \
+      ACP_PIPELINE_KILL_GRACE_SEC="${ACP_PIPELINE_KILL_GRACE_SEC:-}" \
+      ACP_API_READY_TIMEOUT_SEC="${ACP_API_READY_TIMEOUT_SEC:-}" \
+      ACP_API_INIT_TIMEOUT_SEC="${ACP_API_INIT_TIMEOUT_SEC:-}" \
+      ACP_UI_INIT_POLL_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-}" \
+      ACP_UI_CANCEL_POLL_TIMEOUT_SEC="${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-}" \
+      ACP_EXECUTION_STRATEGY="${ACP_EXECUTION_STRATEGY:-}" \
+      ACP_MAX_PARALLEL_TASKS="${ACP_MAX_PARALLEL_TASKS:-}" \
+      ACP_FAILURE_POLICY="${ACP_FAILURE_POLICY:-}" \
+      ACP_SHARD_DISCOVERY_MODE="${ACP_SHARD_DISCOVERY_MODE:-}" \
+      ACP_REPO_SELECTION="${ACP_REPO_SELECTION:-}" \
+      ./scripts/full-run-ai-advent.sh
+    ) >"$run_dir/batch-driver.log" 2>&1
+    process_exit=$?
+    printf '%s\n' "$process_exit" >"$run_dir/process-exit.txt"
+    exit 0
+  ) &
+  BACKEND_ACTIVE_PIDS+=("$!")
+  BACKEND_ACTIVE_LABELS+=("${provider}/run${run_index}")
+}
+
+read_frontend_result_status() {
+  local result_path="$1"
+  if [[ ! -f "$result_path" ]]; then
+    printf 'missing'
+    return 0
+  fi
+  python3 - "$result_path" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+try:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    print("invalid")
+    raise SystemExit(0)
+if not isinstance(payload, dict):
+    print("invalid")
+    raise SystemExit(0)
+status = str(payload.get("status", "")).strip().lower()
+print(status or "missing")
+PY
+}
+
+drop_frontend_active_worker() {
+  local drop_idx="$1"
+  local -a next_pids
+  local -a next_labels
+  next_pids=()
+  next_labels=()
+  local idx
+  for idx in "${!FRONTEND_ACTIVE_PIDS[@]}"; do
+    if [[ "$idx" == "$drop_idx" ]]; then
+      continue
+    fi
+    next_pids+=("${FRONTEND_ACTIVE_PIDS[$idx]}")
+    next_labels+=("${FRONTEND_ACTIVE_LABELS[$idx]}")
+  done
+  FRONTEND_ACTIVE_PIDS=()
+  FRONTEND_ACTIVE_LABELS=()
+  if [[ "${#next_pids[@]}" -gt 0 ]]; then
+    FRONTEND_ACTIVE_PIDS=("${next_pids[@]}")
+    FRONTEND_ACTIVE_LABELS=("${next_labels[@]}")
+  fi
+}
+
+wait_for_frontend_worker_slot() {
+  local idx
+  local pid
+  local label
+  local exit_code
+  while true; do
+    for idx in "${!FRONTEND_ACTIVE_PIDS[@]}"; do
+      pid="${FRONTEND_ACTIVE_PIDS[$idx]}"
+      if ! kill -0 "$pid" >/dev/null 2>&1; then
+        if wait "$pid"; then
+          exit_code=0
+        else
+          exit_code=$?
+        fi
+        label="${FRONTEND_ACTIVE_LABELS[$idx]}"
+        drop_frontend_active_worker "$idx"
+        if [[ "$exit_code" -ne 0 ]]; then
+          log "frontend worker wrapper failed worker=$label exit=$exit_code"
+        fi
+        return 0
+      fi
+    done
+    sleep 0.2
+  done
+}
+
+wait_for_all_frontend_workers() {
+  while [[ "${#FRONTEND_ACTIVE_PIDS[@]}" -gt 0 ]]; do
+    wait_for_frontend_worker_slot
+  done
+}
+
+run_frontend_live_for_run() {
+  local provider="$1"
+  local run_index="$2"
+  local frontend_root="$3"
+  local runtime_cmd="$4"
+  local backend_run_dir="$BATCH_ROOT/$provider/run${run_index}"
+  local workspace="$backend_run_dir/arch-workspace"
+  local output_dir="$frontend_root/run${run_index}"
+  local frontend_workspace="$output_dir/frontend-workspace"
+  local run_results_path="$backend_run_dir/run-results.tsv"
+  local refresh_run_id=""
+  local snapshot_reports=""
+  local frontend_source="workspace-fallback"
+  local result_status=""
+
+  mkdir -p "$output_dir"
+  if [[ -f "$run_results_path" ]]; then
+    refresh_run_id="$(awk -F'\t' '$2=="headless" && $4=="refresh" {print $5}' "$run_results_path" | tail -n1)"
+  fi
+  if [[ -n "$refresh_run_id" ]]; then
+    snapshot_reports="$backend_run_dir/snapshots/$refresh_run_id/reports"
+  fi
+
+  if [[ ! -d "$workspace" ]]; then
+    write_frontend_status_json \
+      "$output_dir/frontend-e2e-result.json" \
+      "$provider" \
+      "init-inspect-service-first" \
+      "failed" \
+      "backend_workspace_missing" \
+      "$workspace" \
+      "$output_dir" \
+      "$runtime_cmd" \
+      "" \
+      "" \
+      "$run_index"
+    log "frontend e2e failed provider=$provider run=$run_index reason=backend_workspace_missing (workspace=$workspace)"
+    return 1
+  fi
+
+  rm -rf "$frontend_workspace"
+  cp -a "$workspace" "$frontend_workspace"
+  if [[ -d "$snapshot_reports" ]]; then
+    rm -rf "$frontend_workspace/reports"
+    cp -a "$snapshot_reports" "$frontend_workspace/reports"
+    frontend_source="snapshot"
+  fi
+
+  log "frontend live e2e provider=$provider run=$run_index workspace=$frontend_workspace artifact_source=$frontend_source refresh_run_id=${refresh_run_id:-unknown}"
+  if ! (
+    cd "$PROVENARCH_ROOT"
+    WORKSPACE="$frontend_workspace" \
+    RUNTIME_PROVIDER="$provider" \
+    OUTPUT_DIR="$output_dir" \
+    UI_E2E_EXPECTED_REPO_COUNT="$EXPECTED_REPO_COUNT_RESOLVED" \
+    UI_E2E_HEADED="$UI_E2E_HEADED" \
+    ACP_CLAUDE_CMD="$ACP_CLAUDE_CMD_BIN" \
+    ACP_QWEN_CMD="$ACP_QWEN_CMD_BIN" \
+    ACP_UI_INIT_POLL_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-}" \
+    ACP_UI_CANCEL_POLL_TIMEOUT_SEC="${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-}" \
+    ACP_EXECUTION_STRATEGY="${ACP_EXECUTION_STRATEGY:-}" \
+    ACP_MAX_PARALLEL_TASKS="${ACP_MAX_PARALLEL_TASKS:-}" \
+    ACP_FAILURE_POLICY="${ACP_FAILURE_POLICY:-}" \
+    ACP_SHARD_DISCOVERY_MODE="${ACP_SHARD_DISCOVERY_MODE:-}" \
+    ACP_REPO_SELECTION="${ACP_REPO_SELECTION:-}" \
+    ./scripts/frontend-live-e2e.sh
+  ); then
+    log "frontend e2e failed provider=$provider run=$run_index"
+  fi
+
+  if [[ ! -f "$output_dir/frontend-e2e-result.json" ]]; then
+    write_frontend_status_json \
+      "$output_dir/frontend-e2e-result.json" \
+      "$provider" \
+      "init-inspect-service-first" \
+      "failed" \
+      "frontend_live_e2e_failed" \
+      "$frontend_workspace" \
+      "$output_dir" \
+      "$runtime_cmd" \
+      "$output_dir/server.log" \
+      "$output_dir/playwright.log" \
+      "$run_index"
+  fi
+
+  python3 - "$output_dir/frontend-e2e-result.json" "$run_index" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+run_index = int(sys.argv[2])
+try:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    payload = {"status": "failed", "reason": "frontend_result_invalid_json"}
+if not isinstance(payload, dict):
+    payload = {"status": "failed", "reason": "frontend_result_not_object"}
+payload["run_index"] = run_index
+path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+PY
+
+  result_status="$(read_frontend_result_status "$output_dir/frontend-e2e-result.json")"
+  [[ "$result_status" == "passed" ]]
+}
+
+launch_frontend_worker() {
+  local provider="$1"
+  local run_index="$2"
+  local frontend_root="$3"
+  local runtime_cmd="$4"
+  local output_dir="$frontend_root/run${run_index}"
+  mkdir -p "$output_dir"
+  (
+    set +e
+    run_frontend_live_for_run "$provider" "$run_index" "$frontend_root" "$runtime_cmd" >"$output_dir/driver.log" 2>&1
+    worker_exit=$?
+    printf '%s\n' "$worker_exit" >"$output_dir/frontend-worker-exit.txt"
+    exit 0
+  ) &
+  FRONTEND_ACTIVE_PIDS+=("$!")
+  FRONTEND_ACTIVE_LABELS+=("${provider}/run${run_index}")
 }
 
 classify_run_failure() {
@@ -445,6 +907,48 @@ classify_run_failure() {
     "$run_subclass" \
     "$cancellation_like" >>"$RUN_CLASSIFICATIONS_TSV"
 
+  python3 - "$run_dir/failure-class.json" \
+    "$provider" \
+    "$run_index" \
+    "$run_class" \
+    "$run_subclass" \
+    "$cancellation_like" \
+    "$process_exit" \
+    "$summary_result" \
+    "$failure_reason" \
+    "$termination_signal" \
+    "$expected_runs" \
+    "$completed_runs" \
+    "$expected_headless_runs" \
+    "$completed_headless_runs" \
+    "$running_runs_detected" \
+    "$run_count" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1]).resolve()
+payload = {
+    "provider": sys.argv[2],
+    "run_index": int(sys.argv[3]),
+    "failure_class": sys.argv[4],
+    "failure_subclass": sys.argv[5],
+    "cancellation_like": sys.argv[6] == "1",
+    "process_exit": int(sys.argv[7]),
+    "summary_result": sys.argv[8],
+    "failure_reason": sys.argv[9],
+    "termination_signal": sys.argv[10],
+    "expected_runs": sys.argv[11],
+    "completed_runs": sys.argv[12],
+    "expected_headless_runs": sys.argv[13],
+    "completed_headless_runs": sys.argv[14],
+    "running_runs_detected": sys.argv[15],
+    "run_results_rows": int(sys.argv[16]),
+}
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+PY
+
   LAST_RUN_FAILURE_CLASS="$run_class"
   LAST_RUN_FAILURE_SUBCLASS="$run_subclass"
   LAST_RUN_CANCELLATION_LIKE="$cancellation_like"
@@ -498,6 +1002,8 @@ record_precheck_failed_classifications() {
   local run_index
   for provider in "${SELECTED_PROVIDERS[@]}"; do
     for run_index in "${SELECTED_RUN_INDEXES[@]}"; do
+      local run_dir="$BATCH_ROOT/$provider/run${run_index}"
+      mkdir -p "$run_dir"
       printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
         "$provider" \
         "$run_index" \
@@ -514,6 +1020,32 @@ record_precheck_failed_classifications() {
         "0" \
         "none" \
         "0" >>"$RUN_CLASSIFICATIONS_TSV"
+      python3 - "$run_dir/failure-class.json" "$provider" "$run_index" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1]).resolve()
+payload = {
+    "provider": sys.argv[2],
+    "run_index": int(sys.argv[3]),
+    "failure_class": "precheck_failed",
+    "failure_subclass": "none",
+    "cancellation_like": False,
+    "process_exit": 1,
+    "summary_result": "precheck_failed",
+    "failure_reason": "precheck_failed",
+    "termination_signal": "none",
+    "expected_runs": "-",
+    "completed_runs": "-",
+    "expected_headless_runs": "-",
+    "completed_headless_runs": "-",
+    "running_runs_detected": "-",
+    "run_results_rows": 0,
+}
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+PY
       increment_failure_class_counter "precheck_failed" "none" "0"
     done
   done
@@ -668,14 +1200,27 @@ fi
 if [[ -n "$ACP_REPO_SELECTION" && "$ACP_REPO_SELECTION" != "all" && "$ACP_REPO_SELECTION" != "backend_only" ]]; then
   die "ACP_REPO_SELECTION must be all|backend_only (or empty), got '$ACP_REPO_SELECTION'"
 fi
+if [[ ! "$BATCH_MAX_PARALLEL_RUNS" =~ ^[1-9][0-9]*$ ]]; then
+  die "BATCH_MAX_PARALLEL_RUNS must be a positive integer, got '$BATCH_MAX_PARALLEL_RUNS'"
+fi
+if [[ ! "$BATCH_FRONTEND_MAX_PARALLEL" =~ ^[1-9][0-9]*$ ]]; then
+  die "BATCH_FRONTEND_MAX_PARALLEL must be a positive integer, got '$BATCH_FRONTEND_MAX_PARALLEL'"
+fi
 if [[ "$BATCH_SKIP_PRECHECK" != "0" && "$BATCH_SKIP_PRECHECK" != "1" ]]; then
   die "BATCH_SKIP_PRECHECK must be 0 or 1, got '$BATCH_SKIP_PRECHECK'"
 fi
 case "$BATCH_FRONTEND_MODE" in
-  auto|always|never)
+  auto|always|never|per_run)
     ;;
   *)
-    die "BATCH_FRONTEND_MODE must be auto|always|never (got '$BATCH_FRONTEND_MODE')"
+    die "BATCH_FRONTEND_MODE must be auto|always|never|per_run (got '$BATCH_FRONTEND_MODE')"
+    ;;
+esac
+case "$BATCH_FRONTEND_CANCEL_MODE" in
+  once_per_provider|per_run|never)
+    ;;
+  *)
+    die "BATCH_FRONTEND_CANCEL_MODE must be once_per_provider|per_run|never (got '$BATCH_FRONTEND_CANCEL_MODE')"
     ;;
 esac
 
@@ -693,6 +1238,7 @@ fi
 if provider_selected "qwen-code"; then
   require_cmd "$ACP_QWEN_CMD_BIN"
 fi
+GIT_BIN="$(command -v git)"
 
 mkdir -p "$BATCH_ROOT" "$REPORTS_ROOT"
 prepare_target_repos_file
@@ -908,6 +1454,8 @@ export BATCH_PRE_TIMEOUT_PROFILE_JSON="$TIMEOUT_PROFILE_JSON"
 export BATCH_PRE_APPLY_TIMEOUTS_VIA_API="$ACP_APPLY_TIMEOUTS_VIA_API"
 export BATCH_PRE_EXECUTION_PROFILE_JSON="$EXECUTION_PROFILE_JSON"
 export BATCH_PRE_SWEEP_ID="$SWEEP_ID"
+export BATCH_PRE_MAX_PARALLEL_RUNS="$BATCH_MAX_PARALLEL_RUNS"
+export BATCH_PRE_FRONTEND_MAX_PARALLEL="$BATCH_FRONTEND_MAX_PARALLEL"
 
 python3 - "$BATCH_ROOT/preflight.json" <<'PY'
 import json
@@ -924,6 +1472,8 @@ payload = {
     "apply_timeouts_via_api": os.environ["BATCH_PRE_APPLY_TIMEOUTS_VIA_API"] == "1",
     "timeout_profile": json.loads(os.environ["BATCH_PRE_TIMEOUT_PROFILE_JSON"]),
     "execution_profile": json.loads(os.environ["BATCH_PRE_EXECUTION_PROFILE_JSON"]),
+    "batch_max_parallel_runs": int(os.environ.get("BATCH_PRE_MAX_PARALLEL_RUNS", "1")),
+    "batch_frontend_max_parallel": int(os.environ.get("BATCH_PRE_FRONTEND_MAX_PARALLEL", "1")),
     "sweep_id": os.environ.get("BATCH_PRE_SWEEP_ID", "baseline") or "baseline",
     "runtimes": {
         "claude": {
@@ -953,7 +1503,12 @@ log "target repos input: file=$RESOLVED_TARGET_REPOS_FILE profile_id=${PROFILE_I
 log "preflight versions: claude='$CLAUDE_VERSION' qwen='$QWEN_VERSION'"
 log "preflight timeout profile: apply_via_api=$ACP_APPLY_TIMEOUTS_VIA_API $TIMEOUT_PROFILE_LINE"
 log "preflight execution profile: sweep_id=${SWEEP_ID:-baseline} $EXECUTION_PROFILE_LINE"
-log "batch shard selection: providers=$SELECTED_PROVIDERS_CSV runs=$SELECTED_RUN_INDEXES_CSV skip_precheck=$BATCH_SKIP_PRECHECK frontend_mode=$BATCH_FRONTEND_MODE"
+log "batch shard selection: providers=$SELECTED_PROVIDERS_CSV runs=$SELECTED_RUN_INDEXES_CSV backend_max_parallel_runs=$BATCH_MAX_PARALLEL_RUNS frontend_max_parallel_runs=$BATCH_FRONTEND_MAX_PARALLEL skip_precheck=$BATCH_SKIP_PRECHECK frontend_mode=$BATCH_FRONTEND_MODE frontend_cancel_mode=$BATCH_FRONTEND_CANCEL_MODE ui_e2e_headed=$UI_E2E_HEADED"
+path_repo_precheck_reason=""
+if ! path_repo_precheck_reason="$(path_repo_health_precheck)"; then
+  finalize_precheck_failure "$path_repo_precheck_reason"
+fi
+log "path repo health precheck: passed"
 if [[ "$BATCH_SKIP_PRECHECK" == "1" ]]; then
   log "skipping DoD/UI precheck (BATCH_SKIP_PRECHECK=1)"
 else
@@ -979,41 +1534,26 @@ failed_runs=0
 for provider in "${SELECTED_PROVIDERS[@]}"; do
   for i in "${SELECTED_RUN_INDEXES[@]}"; do
     run_dir="$BATCH_ROOT/$provider/run${i}"
-    mkdir -p "$run_dir"
-    log "full-run provider=$provider run=$i tmp_root=$run_dir"
-    process_exit=0
-    (
-      cd "$PROVENARCH_ROOT"
-      TARGET_REPOS_FILE="$RESOLVED_TARGET_REPOS_FILE" \
-      TMP_ROOT="$run_dir" \
-      KEEP_TMP=1 \
-      ITERATIONS=1 \
-      RUN_QUALITY_GATES=1 \
-      PROFILE_ID="${PROFILE_ID:-adhoc}" \
-      PROFILE_SOURCE_KIND="${PROFILE_SOURCE_KIND:-mixed}" \
-      EXPECTED_REPO_COUNT="$EXPECTED_REPO_COUNT_RESOLVED" \
-      ACP_RUNTIME_PROVIDER="$provider" \
-      ACP_CLAUDE_CMD="$ACP_CLAUDE_CMD_BIN" \
-      ACP_QWEN_CMD="$ACP_QWEN_CMD_BIN" \
-      ACP_APPLY_TIMEOUTS_VIA_API="$ACP_APPLY_TIMEOUTS_VIA_API" \
-      SWEEP_ID="${SWEEP_ID:-baseline}" \
-      ACP_RUNTIME_STEP_TIMEOUT_SEC="${ACP_RUNTIME_STEP_TIMEOUT_SEC:-}" \
-      ACP_RUNTIME_HEARTBEAT_SEC="${ACP_RUNTIME_HEARTBEAT_SEC:-}" \
-      ACP_PIPELINE_TIMEOUT_SEC="${ACP_PIPELINE_TIMEOUT_SEC:-}" \
-      ACP_PIPELINE_KILL_GRACE_SEC="${ACP_PIPELINE_KILL_GRACE_SEC:-}" \
-      ACP_API_READY_TIMEOUT_SEC="${ACP_API_READY_TIMEOUT_SEC:-}" \
-      ACP_API_INIT_TIMEOUT_SEC="${ACP_API_INIT_TIMEOUT_SEC:-}" \
-      ACP_UI_INIT_POLL_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-}" \
-      ACP_UI_CANCEL_POLL_TIMEOUT_SEC="${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-}" \
-      ACP_EXECUTION_STRATEGY="${ACP_EXECUTION_STRATEGY:-}" \
-      ACP_MAX_PARALLEL_TASKS="${ACP_MAX_PARALLEL_TASKS:-}" \
-      ACP_FAILURE_POLICY="${ACP_FAILURE_POLICY:-}" \
-      ACP_SHARD_DISCOVERY_MODE="${ACP_SHARD_DISCOVERY_MODE:-}" \
-      ACP_REPO_SELECTION="${ACP_REPO_SELECTION:-}" \
-      ./scripts/full-run-ai-advent.sh
-    ) >"$run_dir/batch-driver.log" 2>&1 || process_exit=$?
+    launch_backend_worker "$provider" "$i" "$run_dir"
+    while [[ "${#BACKEND_ACTIVE_PIDS[@]}" -ge "$BATCH_MAX_PARALLEL_RUNS" ]]; do
+      wait_for_backend_worker_slot
+    done
+  done
+done
 
-    classify_run_failure "$provider" "$i" "$run_dir" "$process_exit"
+wait_for_all_backend_workers
+
+for provider in "${SELECTED_PROVIDERS[@]}"; do
+  for i in "${SELECTED_RUN_INDEXES[@]}"; do
+    run_dir="$BATCH_ROOT/$provider/run${i}"
+    process_exit_raw="1"
+    if [[ -f "$run_dir/process-exit.txt" ]]; then
+      process_exit_raw="$(tr -d '\r\n' <"$run_dir/process-exit.txt")"
+    fi
+    if [[ ! "$process_exit_raw" =~ ^[0-9]+$ ]]; then
+      process_exit_raw="1"
+    fi
+    classify_run_failure "$provider" "$i" "$run_dir" "$process_exit_raw"
     if [[ "$LAST_RUN_FAILURE_CLASS" != "none" ]]; then
       failed_runs=$((failed_runs + 1))
       increment_failure_class_counter "$LAST_RUN_FAILURE_CLASS" "$LAST_RUN_FAILURE_SUBCLASS" "$LAST_RUN_CANCELLATION_LIKE"
@@ -1024,168 +1564,187 @@ done
 
 frontend_failures=0
 for provider in "${SELECTED_PROVIDERS[@]}"; do
-  if ! should_run_frontend_for_selection; then
-    output_dir="$BATCH_ROOT/frontend/$provider"
-    mkdir -p "$output_dir"
-    runtime_cmd="$ACP_QWEN_CMD_BIN"
-    if [[ "$provider" == "claude-code" ]]; then
-      runtime_cmd="$ACP_CLAUDE_CMD_BIN"
-    fi
+  frontend_root="$BATCH_ROOT/frontend/$provider"
+  mkdir -p "$frontend_root"
+  runtime_cmd="$(runtime_cmd_for_provider "$provider")"
+
+  frontend_run_indexes=()
+  while IFS= read -r run_index; do
+    [[ -z "$run_index" ]] && continue
+    frontend_run_indexes+=("$run_index")
+  done < <(resolve_frontend_run_indexes)
+
+  if [[ "${#frontend_run_indexes[@]}" -eq 0 ]]; then
     write_frontend_status_json \
-      "$output_dir/frontend-e2e-result.json" \
+      "$frontend_root/frontend-e2e-result.json" \
       "$provider" \
       "init-inspect-service-first" \
       "skipped" \
       "frontend_mode_${BATCH_FRONTEND_MODE}_selection_${SELECTED_RUN_INDEXES_CSV}" \
-      "$output_dir/frontend-workspace" \
-      "$output_dir" \
+      "$frontend_root/frontend-workspace" \
+      "$frontend_root" \
       "$runtime_cmd"
     log "frontend live e2e skipped provider=$provider mode=$BATCH_FRONTEND_MODE runs=$SELECTED_RUN_INDEXES_CSV"
     continue
   fi
 
-  backend_run_dir="$BATCH_ROOT/$provider/run1"
-  workspace="$backend_run_dir/arch-workspace"
-  output_dir="$BATCH_ROOT/frontend/$provider"
-  frontend_workspace="$output_dir/frontend-workspace"
-  run_results_path="$backend_run_dir/run-results.tsv"
-  refresh_run_id=""
-  snapshot_reports=""
-  mkdir -p "$output_dir"
-  if [[ -f "$run_results_path" ]]; then
-    refresh_run_id="$(awk -F'\t' '$2=="headless" && $4=="refresh" {print $5}' "$run_results_path" | tail -n1)"
-  fi
-  if [[ -n "$refresh_run_id" ]]; then
-    snapshot_reports="$backend_run_dir/snapshots/$refresh_run_id/reports"
-  fi
+  first_frontend_result=""
+  FRONTEND_ACTIVE_PIDS=()
+  FRONTEND_ACTIVE_LABELS=()
+  for run_index in "${frontend_run_indexes[@]}"; do
+    launch_frontend_worker "$provider" "$run_index" "$frontend_root" "$runtime_cmd"
+    while [[ "${#FRONTEND_ACTIVE_PIDS[@]}" -ge "$BATCH_FRONTEND_MAX_PARALLEL" ]]; do
+      wait_for_frontend_worker_slot
+    done
+  done
+  wait_for_all_frontend_workers
 
-  if [[ ! -d "$workspace" ]]; then
-    frontend_failures=$((frontend_failures + 1))
-    write_frontend_status_json \
-      "$output_dir/frontend-e2e-result.json" \
-      "$provider" \
-      "init-inspect-service-first" \
-      "failed" \
-      "backend_workspace_missing" \
-      "$workspace" \
-      "$output_dir" \
-      "${ACP_CLAUDE_CMD_BIN}/${ACP_QWEN_CMD_BIN}"
-    log "frontend e2e failed provider=$provider reason=backend_workspace_missing (workspace=$workspace)"
-    continue
-  fi
+  for run_index in "${frontend_run_indexes[@]}"; do
+    result_path="$frontend_root/run${run_index}/frontend-e2e-result.json"
+    if [[ -z "$first_frontend_result" && -f "$result_path" ]]; then
+      first_frontend_result="$result_path"
+    fi
+    status="$(read_frontend_result_status "$result_path")"
+    if [[ "$status" != "passed" ]]; then
+      frontend_failures=$((frontend_failures + 1))
+      log "frontend e2e non-passed provider=$provider run=$run_index status=$status (see $frontend_root/run${run_index}/driver.log)"
+    fi
+  done
 
-  rm -rf "$frontend_workspace"
-  cp -a "$workspace" "$frontend_workspace"
-  frontend_source="workspace-fallback"
-  if [[ -d "$snapshot_reports" ]]; then
-    rm -rf "$frontend_workspace/reports"
-    cp -a "$snapshot_reports" "$frontend_workspace/reports"
-    frontend_source="snapshot"
-  fi
-
-  log "frontend live e2e provider=$provider workspace=$frontend_workspace artifact_source=$frontend_source refresh_run_id=${refresh_run_id:-unknown}"
-  if ! (
-    cd "$PROVENARCH_ROOT"
-    WORKSPACE="$frontend_workspace" \
-    RUNTIME_PROVIDER="$provider" \
-    OUTPUT_DIR="$output_dir" \
-    UI_E2E_EXPECTED_REPO_COUNT="$EXPECTED_REPO_COUNT_RESOLVED" \
-    ACP_CLAUDE_CMD="$ACP_CLAUDE_CMD_BIN" \
-    ACP_QWEN_CMD="$ACP_QWEN_CMD_BIN" \
-    ACP_UI_INIT_POLL_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-}" \
-    ACP_UI_CANCEL_POLL_TIMEOUT_SEC="${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-}" \
-    ACP_EXECUTION_STRATEGY="${ACP_EXECUTION_STRATEGY:-}" \
-    ACP_MAX_PARALLEL_TASKS="${ACP_MAX_PARALLEL_TASKS:-}" \
-    ACP_FAILURE_POLICY="${ACP_FAILURE_POLICY:-}" \
-    ACP_SHARD_DISCOVERY_MODE="${ACP_SHARD_DISCOVERY_MODE:-}" \
-    ACP_REPO_SELECTION="${ACP_REPO_SELECTION:-}" \
-    ./scripts/frontend-live-e2e.sh
-  ) >"$output_dir/driver.log" 2>&1; then
-    frontend_failures=$((frontend_failures + 1))
-    log "frontend e2e failed provider=$provider (see $output_dir/driver.log)"
+  if [[ -n "$first_frontend_result" && -f "$first_frontend_result" ]]; then
+    cp "$first_frontend_result" "$frontend_root/frontend-e2e-result.json"
   fi
 done
 
 for provider in "${SELECTED_PROVIDERS[@]}"; do
-  cancel_output_dir="$BATCH_ROOT/frontend-cancel/$provider"
-  mkdir -p "$cancel_output_dir"
-  runtime_cmd="$ACP_QWEN_CMD_BIN"
-  if [[ "$provider" == "claude-code" ]]; then
-    runtime_cmd="$ACP_CLAUDE_CMD_BIN"
-  fi
-  if ! should_run_frontend_for_selection; then
+  cancel_root="$BATCH_ROOT/frontend-cancel/$provider"
+  mkdir -p "$cancel_root"
+  runtime_cmd="$(runtime_cmd_for_provider "$provider")"
+
+  cancel_run_indexes=()
+  while IFS= read -r run_index; do
+    [[ -z "$run_index" ]] && continue
+    cancel_run_indexes+=("$run_index")
+  done < <(resolve_cancel_run_indexes)
+
+  if [[ "${#cancel_run_indexes[@]}" -eq 0 ]]; then
     FRONTEND_CANCEL_SKIPPED=$((FRONTEND_CANCEL_SKIPPED + 1))
     write_frontend_status_json \
-      "$cancel_output_dir/frontend-cancel-result.json" \
+      "$cancel_root/frontend-cancel-result.json" \
       "$provider" \
       "cancel-refresh" \
       "skipped" \
-      "frontend_mode_${BATCH_FRONTEND_MODE}_selection_${SELECTED_RUN_INDEXES_CSV}" \
+      "frontend_mode_${BATCH_FRONTEND_MODE}_frontend_cancel_mode_${BATCH_FRONTEND_CANCEL_MODE}_selection_${SELECTED_RUN_INDEXES_CSV}" \
       "$BATCH_ROOT/frontend/$provider/frontend-workspace" \
-      "$cancel_output_dir" \
+      "$cancel_root" \
       "$runtime_cmd"
-    log "frontend cancel smoke skipped provider=$provider mode=$BATCH_FRONTEND_MODE runs=$SELECTED_RUN_INDEXES_CSV"
+    log "frontend cancel smoke skipped provider=$provider cancel_mode=$BATCH_FRONTEND_CANCEL_MODE runs=$SELECTED_RUN_INDEXES_CSV"
     continue
   fi
 
-  frontend_workspace="$BATCH_ROOT/frontend/$provider/frontend-workspace"
-
-  if [[ ! -d "$frontend_workspace" ]]; then
-    FRONTEND_CANCEL_SKIPPED=$((FRONTEND_CANCEL_SKIPPED + 1))
-    write_frontend_status_json \
-      "$cancel_output_dir/frontend-cancel-result.json" \
-      "$provider" \
-      "cancel-refresh" \
-      "skipped" \
-      "frontend_workspace_missing" \
-      "$frontend_workspace" \
-      "$cancel_output_dir" \
-      "$runtime_cmd"
-    log "frontend cancel smoke skipped provider=$provider reason=frontend_workspace_missing"
-    continue
-  fi
-
-  log "frontend cancel smoke provider=$provider workspace=$frontend_workspace"
-  if ! (
-    cd "$PROVENARCH_ROOT"
-    WORKSPACE="$frontend_workspace" \
-    RUNTIME_PROVIDER="$provider" \
-    OUTPUT_DIR="$cancel_output_dir" \
-    UI_E2E_SCENARIO="cancel-refresh" \
-    UI_E2E_EXPECTED_REPO_COUNT="$EXPECTED_REPO_COUNT_RESOLVED" \
-    ACP_CLAUDE_CMD="$ACP_CLAUDE_CMD_BIN" \
-    ACP_QWEN_CMD="$ACP_QWEN_CMD_BIN" \
-    ACP_UI_INIT_POLL_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-}" \
-    ACP_UI_CANCEL_POLL_TIMEOUT_SEC="${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-}" \
-    ACP_EXECUTION_STRATEGY="${ACP_EXECUTION_STRATEGY:-}" \
-    ACP_MAX_PARALLEL_TASKS="${ACP_MAX_PARALLEL_TASKS:-}" \
-    ACP_FAILURE_POLICY="${ACP_FAILURE_POLICY:-}" \
-    ACP_SHARD_DISCOVERY_MODE="${ACP_SHARD_DISCOVERY_MODE:-}" \
-    ACP_REPO_SELECTION="${ACP_REPO_SELECTION:-}" \
-    ./scripts/frontend-live-e2e.sh
-  ) >"$cancel_output_dir/driver.log" 2>&1; then
-    FRONTEND_CANCEL_FAILURES=$((FRONTEND_CANCEL_FAILURES + 1))
-    if [[ -f "$cancel_output_dir/frontend-e2e-result.json" ]]; then
-      cp "$cancel_output_dir/frontend-e2e-result.json" "$cancel_output_dir/frontend-cancel-result.json"
+  first_cancel_result=""
+  for run_index in "${cancel_run_indexes[@]}"; do
+    if [[ "$BATCH_FRONTEND_CANCEL_MODE" == "per_run" ]]; then
+      cancel_output_dir="$cancel_root/run${run_index}"
     else
+      cancel_output_dir="$cancel_root"
+    fi
+    mkdir -p "$cancel_output_dir"
+
+    frontend_workspace="$BATCH_ROOT/frontend/$provider/run${run_index}/frontend-workspace"
+    if [[ ! -d "$frontend_workspace" ]]; then
+      FRONTEND_CANCEL_SKIPPED=$((FRONTEND_CANCEL_SKIPPED + 1))
       write_frontend_status_json \
         "$cancel_output_dir/frontend-cancel-result.json" \
         "$provider" \
         "cancel-refresh" \
-        "failed" \
-        "frontend_live_e2e_failed" \
+        "skipped" \
+        "frontend_workspace_missing" \
         "$frontend_workspace" \
         "$cancel_output_dir" \
         "$runtime_cmd" \
-        "$cancel_output_dir/server.log" \
-        "$cancel_output_dir/playwright.log"
+        "" \
+        "" \
+        "$run_index"
+      log "frontend cancel smoke skipped provider=$provider run=$run_index reason=frontend_workspace_missing"
+      if [[ -z "$first_cancel_result" ]]; then
+        first_cancel_result="$cancel_output_dir/frontend-cancel-result.json"
+      fi
+      continue
     fi
-    log "frontend cancel smoke failed provider=$provider (see $cancel_output_dir/driver.log)"
-    continue
-  fi
 
-  if [[ ! -f "$cancel_output_dir/frontend-cancel-result.json" ]] && [[ -f "$cancel_output_dir/frontend-e2e-result.json" ]]; then
-    cp "$cancel_output_dir/frontend-e2e-result.json" "$cancel_output_dir/frontend-cancel-result.json"
+    log "frontend cancel smoke provider=$provider run=$run_index workspace=$frontend_workspace"
+    if ! (
+      cd "$PROVENARCH_ROOT"
+      WORKSPACE="$frontend_workspace" \
+      RUNTIME_PROVIDER="$provider" \
+      OUTPUT_DIR="$cancel_output_dir" \
+      UI_E2E_SCENARIO="cancel-refresh" \
+      UI_E2E_EXPECTED_REPO_COUNT="$EXPECTED_REPO_COUNT_RESOLVED" \
+      UI_E2E_HEADED="$UI_E2E_HEADED" \
+      ACP_CLAUDE_CMD="$ACP_CLAUDE_CMD_BIN" \
+      ACP_QWEN_CMD="$ACP_QWEN_CMD_BIN" \
+      ACP_UI_INIT_POLL_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-}" \
+      ACP_UI_CANCEL_POLL_TIMEOUT_SEC="${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-}" \
+      ACP_EXECUTION_STRATEGY="${ACP_EXECUTION_STRATEGY:-}" \
+      ACP_MAX_PARALLEL_TASKS="${ACP_MAX_PARALLEL_TASKS:-}" \
+      ACP_FAILURE_POLICY="${ACP_FAILURE_POLICY:-}" \
+      ACP_SHARD_DISCOVERY_MODE="${ACP_SHARD_DISCOVERY_MODE:-}" \
+      ACP_REPO_SELECTION="${ACP_REPO_SELECTION:-}" \
+      ./scripts/frontend-live-e2e.sh
+    ) >"$cancel_output_dir/driver.log" 2>&1; then
+      FRONTEND_CANCEL_FAILURES=$((FRONTEND_CANCEL_FAILURES + 1))
+      if [[ -f "$cancel_output_dir/frontend-e2e-result.json" ]]; then
+        cp "$cancel_output_dir/frontend-e2e-result.json" "$cancel_output_dir/frontend-cancel-result.json"
+      else
+        write_frontend_status_json \
+          "$cancel_output_dir/frontend-cancel-result.json" \
+          "$provider" \
+          "cancel-refresh" \
+          "failed" \
+          "frontend_live_e2e_failed" \
+          "$frontend_workspace" \
+          "$cancel_output_dir" \
+          "$runtime_cmd" \
+          "$cancel_output_dir/server.log" \
+          "$cancel_output_dir/playwright.log" \
+          "$run_index"
+      fi
+      log "frontend cancel smoke failed provider=$provider run=$run_index (see $cancel_output_dir/driver.log)"
+      if [[ -z "$first_cancel_result" ]]; then
+        first_cancel_result="$cancel_output_dir/frontend-cancel-result.json"
+      fi
+      continue
+    fi
+
+    if [[ ! -f "$cancel_output_dir/frontend-cancel-result.json" ]] && [[ -f "$cancel_output_dir/frontend-e2e-result.json" ]]; then
+      cp "$cancel_output_dir/frontend-e2e-result.json" "$cancel_output_dir/frontend-cancel-result.json"
+    fi
+    if [[ -f "$cancel_output_dir/frontend-cancel-result.json" ]]; then
+      python3 - "$cancel_output_dir/frontend-cancel-result.json" "$run_index" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+run_index = int(sys.argv[2])
+try:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    payload = {"status": "failed", "reason": "frontend_result_invalid_json"}
+if not isinstance(payload, dict):
+    payload = {"status": "failed", "reason": "frontend_result_not_object"}
+payload["run_index"] = run_index
+path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+PY
+      if [[ -z "$first_cancel_result" ]]; then
+        first_cancel_result="$cancel_output_dir/frontend-cancel-result.json"
+      fi
+    fi
+  done
+
+  if [[ -n "$first_cancel_result" && -f "$first_cancel_result" && ! -f "$cancel_root/frontend-cancel-result.json" ]]; then
+    cp "$first_cancel_result" "$cancel_root/frontend-cancel-result.json"
   fi
 done
 

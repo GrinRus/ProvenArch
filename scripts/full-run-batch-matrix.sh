@@ -14,7 +14,11 @@ ACP_QWEN_CMD_BIN="${ACP_QWEN_CMD_BIN:-qwen}"
 ACP_APPLY_TIMEOUTS_VIA_API="${ACP_APPLY_TIMEOUTS_VIA_API:-1}"
 E2E_MATRIX_RELEASE_MODE="${E2E_MATRIX_RELEASE_MODE:-auto}"
 E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES="${E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES:-0}"
+MATRIX_MAX_PARALLEL_COMBINATIONS="${MATRIX_MAX_PARALLEL_COMBINATIONS:-2}"
+BATCH_FRONTEND_MAX_PARALLEL="${BATCH_FRONTEND_MAX_PARALLEL:-1}"
 MATRIX_DRIVER_LOG="${MATRIX_DRIVER_LOG:-$MATRIX_ROOT/driver.log}"
+declare -a MATRIX_ACTIVE_PIDS=()
+declare -a MATRIX_ACTIVE_LABELS=()
 
 log() {
   local line
@@ -106,6 +110,12 @@ fi
 if [[ ! -x "$BATCH_SCRIPT" ]]; then
   die "batch script is unavailable: $BATCH_SCRIPT"
 fi
+if [[ ! "$MATRIX_MAX_PARALLEL_COMBINATIONS" =~ ^[1-9][0-9]*$ ]]; then
+  die "MATRIX_MAX_PARALLEL_COMBINATIONS must be a positive integer, got '$MATRIX_MAX_PARALLEL_COMBINATIONS'"
+fi
+if [[ ! "$BATCH_FRONTEND_MAX_PARALLEL" =~ ^[1-9][0-9]*$ ]]; then
+  die "BATCH_FRONTEND_MAX_PARALLEL must be a positive integer, got '$BATCH_FRONTEND_MAX_PARALLEL'"
+fi
 
 require_cmd bash
 require_cmd python3
@@ -145,6 +155,7 @@ done
 
 log "timeout controls: apply_via_api=$ACP_APPLY_TIMEOUTS_VIA_API step=${ACP_RUNTIME_STEP_TIMEOUT_SEC:-auto} heartbeat=${ACP_RUNTIME_HEARTBEAT_SEC:-auto} pipeline=${ACP_PIPELINE_TIMEOUT_SEC:-auto} kill_grace=${ACP_PIPELINE_KILL_GRACE_SEC:-auto} api_ready=${ACP_API_READY_TIMEOUT_SEC:-auto} api_init=${ACP_API_INIT_TIMEOUT_SEC:-auto} ui_init=${ACP_UI_INIT_POLL_TIMEOUT_SEC:-auto} ui_cancel=${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-auto}"
 log "release guard: mode=$RELEASE_MODE matrix_id=$MATRIX_ID allow_diagnostic_timeout_overrides=$ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES overrides_detected=${#DIAGNOSTIC_TIMEOUT_OVERRIDES[@]}"
+log "matrix parallelism: max_parallel_combinations=$MATRIX_MAX_PARALLEL_COMBINATIONS frontend_max_parallel_runs=$BATCH_FRONTEND_MAX_PARALLEL"
 if [[ "${#DIAGNOSTIC_TIMEOUT_OVERRIDES[@]}" -gt 0 ]]; then
   log "diagnostic timeout overrides: ${DIAGNOSTIC_TIMEOUT_OVERRIDES[*]}"
 fi
@@ -154,7 +165,9 @@ fi
 
 COMBINATIONS_TSV="$MATRIX_ROOT/profile-sweep-combinations.tsv"
 RECORDS_JSONL="$MATRIX_ROOT/profile-runs.jsonl"
-: > "$RECORDS_JSONL"
+MATRIX_RECORDS_DIR="$MATRIX_ROOT/records"
+mkdir -p "$MATRIX_RECORDS_DIR"
+: >"$RECORDS_JSONL"
 
 python3 - "$E2E_MATRIX_FILE" "$COMBINATIONS_TSV" <<'PY'
 import sys
@@ -361,94 +374,214 @@ out_path.parent.mkdir(parents=True, exist_ok=True)
 out_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
 PY
 
-while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sweep_id sweep_strategy sweep_max_parallel sweep_failure_policy sweep_shard_mode sweep_repo_selection; do
-  [[ -z "$profile_id" ]] && continue
-
-  profile_slug="$(slugify "$profile_id")"
-  sweep_slug="$(slugify "$sweep_id")"
-  batch_id="${MATRIX_ID}-${profile_slug}-${sweep_slug}"
-  profile_root="$MATRIX_ROOT/profiles/$profile_slug/$sweep_slug"
-  driver_log="$profile_root/driver.log"
-  mkdir -p "$profile_root"
-
-  log "running profile=$profile_id sweep=$sweep_id source_kind=$source_kind expected_repo_count=$expected_repo_count batch_id=$batch_id"
-  status="passed"
-  if ! (
-    cd "$PROVENARCH_ROOT"
-    BATCH_ID="$batch_id" \
-    RUN_COUNT="$RUN_COUNT" \
-    TARGET_REPOS_FILE="$repos_file" \
-    PROFILE_ID="$profile_id" \
-    PROFILE_SOURCE_KIND="$source_kind" \
-    EXPECTED_REPO_COUNT="$expected_repo_count" \
-    SWEEP_ID="$sweep_id" \
-    E2E_TMP_ROOT="$E2E_TMP_ROOT" \
-    REPORTS_ROOT="$REPORTS_ROOT" \
-    ACP_CLAUDE_CMD_BIN="$ACP_CLAUDE_CMD_BIN" \
-    ACP_QWEN_CMD_BIN="$ACP_QWEN_CMD_BIN" \
-    ACP_APPLY_TIMEOUTS_VIA_API="$ACP_APPLY_TIMEOUTS_VIA_API" \
-    ACP_RUNTIME_STEP_TIMEOUT_SEC="${ACP_RUNTIME_STEP_TIMEOUT_SEC:-}" \
-    ACP_RUNTIME_HEARTBEAT_SEC="${ACP_RUNTIME_HEARTBEAT_SEC:-}" \
-    ACP_PIPELINE_TIMEOUT_SEC="${ACP_PIPELINE_TIMEOUT_SEC:-}" \
-    ACP_PIPELINE_KILL_GRACE_SEC="${ACP_PIPELINE_KILL_GRACE_SEC:-}" \
-    ACP_API_READY_TIMEOUT_SEC="${ACP_API_READY_TIMEOUT_SEC:-}" \
-    ACP_API_INIT_TIMEOUT_SEC="${ACP_API_INIT_TIMEOUT_SEC:-}" \
-    ACP_UI_INIT_POLL_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-}" \
-    ACP_UI_CANCEL_POLL_TIMEOUT_SEC="${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-}" \
-    ACP_EXECUTION_STRATEGY="$sweep_strategy" \
-    ACP_MAX_PARALLEL_TASKS="$sweep_max_parallel" \
-    ACP_FAILURE_POLICY="$sweep_failure_policy" \
-    ACP_SHARD_DISCOVERY_MODE="$sweep_shard_mode" \
-    ACP_REPO_SELECTION="$sweep_repo_selection" \
-    "$BATCH_SCRIPT"
-  ) >"$driver_log" 2>&1; then
-    status="failed"
-    log "profile+sweep failed: profile=$profile_id sweep=$sweep_id (see $driver_log)"
+drop_matrix_active_worker() {
+  local drop_idx="$1"
+  local -a next_pids
+  local -a next_labels
+  next_pids=()
+  next_labels=()
+  local idx
+  for idx in "${!MATRIX_ACTIVE_PIDS[@]}"; do
+    if [[ "$idx" == "$drop_idx" ]]; then
+      continue
+    fi
+    next_pids+=("${MATRIX_ACTIVE_PIDS[$idx]}")
+    next_labels+=("${MATRIX_ACTIVE_LABELS[$idx]}")
+  done
+  MATRIX_ACTIVE_PIDS=()
+  MATRIX_ACTIVE_LABELS=()
+  if [[ "${#next_pids[@]}" -gt 0 ]]; then
+    MATRIX_ACTIVE_PIDS=("${next_pids[@]}")
+    MATRIX_ACTIVE_LABELS=("${next_labels[@]}")
   fi
+}
 
-  run_matrix_tsv="$REPORTS_ROOT/run_matrix_${batch_id}.tsv"
-  run_matrix_md="$REPORTS_ROOT/run_matrix_${batch_id}.md"
-  frontend_matrix_md="$REPORTS_ROOT/frontend_e2e_matrix_${batch_id}.md"
-  frontend_cancel_matrix_md="$REPORTS_ROOT/frontend_cancel_e2e_matrix_${batch_id}.md"
-  quality_report_md="$REPORTS_ROOT/quality_report_${batch_id}.md"
+wait_for_matrix_worker_slot() {
+  local idx
+  local pid
+  local label
+  local exit_code
+  while true; do
+    for idx in "${!MATRIX_ACTIVE_PIDS[@]}"; do
+      pid="${MATRIX_ACTIVE_PIDS[$idx]}"
+      if ! kill -0 "$pid" >/dev/null 2>&1; then
+        if wait "$pid"; then
+          exit_code=0
+        else
+          exit_code=$?
+        fi
+        label="${MATRIX_ACTIVE_LABELS[$idx]}"
+        drop_matrix_active_worker "$idx"
+        if [[ "$exit_code" -ne 0 ]]; then
+          die "matrix worker failed unexpectedly worker=$label exit=$exit_code"
+        fi
+        return 0
+      fi
+    done
+    sleep 0.2
+  done
+}
 
-  python3 - "$RECORDS_JSONL" \
-    "$profile_id" "$profile_slug" "$batch_id" "$source_kind" "$expected_repo_count" "$repos_file" "$status" \
-    "$sweep_id" "$sweep_strategy" "$sweep_max_parallel" "$sweep_failure_policy" "$sweep_shard_mode" "$sweep_repo_selection" \
-    "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md" "$driver_log" <<'PY'
+wait_for_all_matrix_workers() {
+  while [[ "${#MATRIX_ACTIVE_PIDS[@]}" -gt 0 ]]; do
+    wait_for_matrix_worker_slot
+  done
+}
+
+launch_matrix_worker() {
+  local combination_index="$1"
+  local profile_id="$2"
+  local repos_file="$3"
+  local expected_repo_count="$4"
+  local source_kind="$5"
+  local sweep_id="$6"
+  local sweep_strategy="$7"
+  local sweep_max_parallel="$8"
+  local sweep_failure_policy="$9"
+  local sweep_shard_mode="${10}"
+  local sweep_repo_selection="${11}"
+  local profile_slug="${12}"
+  local sweep_slug="${13}"
+
+  local batch_id="${MATRIX_ID}-${profile_slug}-${sweep_slug}"
+  local profile_root="$MATRIX_ROOT/profiles/$profile_slug/$sweep_slug"
+  local driver_log="$profile_root/driver.log"
+  local record_file=""
+  record_file="$MATRIX_RECORDS_DIR/$(printf '%03d' "$combination_index")-${profile_slug}-${sweep_slug}.json"
+
+  mkdir -p "$profile_root"
+  log "running profile=$profile_id sweep=$sweep_id source_kind=$source_kind expected_repo_count=$expected_repo_count batch_id=$batch_id"
+
+  (
+    set +e
+    status="passed"
+    if ! (
+      cd "$PROVENARCH_ROOT"
+      BATCH_ID="$batch_id" \
+      RUN_COUNT="$RUN_COUNT" \
+      TARGET_REPOS_FILE="$repos_file" \
+      PROFILE_ID="$profile_id" \
+      PROFILE_SOURCE_KIND="$source_kind" \
+      EXPECTED_REPO_COUNT="$expected_repo_count" \
+      SWEEP_ID="$sweep_id" \
+      E2E_TMP_ROOT="$E2E_TMP_ROOT" \
+      REPORTS_ROOT="$REPORTS_ROOT" \
+      ACP_CLAUDE_CMD_BIN="$ACP_CLAUDE_CMD_BIN" \
+      ACP_QWEN_CMD_BIN="$ACP_QWEN_CMD_BIN" \
+      ACP_APPLY_TIMEOUTS_VIA_API="$ACP_APPLY_TIMEOUTS_VIA_API" \
+      ACP_RUNTIME_STEP_TIMEOUT_SEC="${ACP_RUNTIME_STEP_TIMEOUT_SEC:-}" \
+      ACP_RUNTIME_HEARTBEAT_SEC="${ACP_RUNTIME_HEARTBEAT_SEC:-}" \
+      ACP_PIPELINE_TIMEOUT_SEC="${ACP_PIPELINE_TIMEOUT_SEC:-}" \
+      ACP_PIPELINE_KILL_GRACE_SEC="${ACP_PIPELINE_KILL_GRACE_SEC:-}" \
+      ACP_API_READY_TIMEOUT_SEC="${ACP_API_READY_TIMEOUT_SEC:-}" \
+      ACP_API_INIT_TIMEOUT_SEC="${ACP_API_INIT_TIMEOUT_SEC:-}" \
+      ACP_UI_INIT_POLL_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-}" \
+      ACP_UI_CANCEL_POLL_TIMEOUT_SEC="${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-}" \
+      ACP_EXECUTION_STRATEGY="$sweep_strategy" \
+      ACP_MAX_PARALLEL_TASKS="$sweep_max_parallel" \
+      ACP_FAILURE_POLICY="$sweep_failure_policy" \
+      ACP_SHARD_DISCOVERY_MODE="$sweep_shard_mode" \
+      ACP_REPO_SELECTION="$sweep_repo_selection" \
+      BATCH_FRONTEND_MAX_PARALLEL="$BATCH_FRONTEND_MAX_PARALLEL" \
+      "$BATCH_SCRIPT"
+    ) >"$driver_log" 2>&1; then
+      status="failed"
+      log "profile+sweep failed: profile=$profile_id sweep=$sweep_id (see $driver_log)"
+    fi
+
+    run_matrix_tsv="$REPORTS_ROOT/run_matrix_${batch_id}.tsv"
+    run_matrix_md="$REPORTS_ROOT/run_matrix_${batch_id}.md"
+    frontend_matrix_md="$REPORTS_ROOT/frontend_e2e_matrix_${batch_id}.md"
+    frontend_cancel_matrix_md="$REPORTS_ROOT/frontend_cancel_e2e_matrix_${batch_id}.md"
+    quality_report_md="$REPORTS_ROOT/quality_report_${batch_id}.md"
+    documentation_audit_md="$REPORTS_ROOT/documentation_audit_${batch_id}.md"
+
+    python3 - "$record_file" \
+      "$combination_index" \
+      "$profile_id" "$profile_slug" "$batch_id" "$source_kind" "$expected_repo_count" "$repos_file" "$status" \
+      "$sweep_id" "$sweep_strategy" "$sweep_max_parallel" "$sweep_failure_policy" "$sweep_shard_mode" "$sweep_repo_selection" \
+      "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md" "$documentation_audit_md" "$driver_log" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 path = Path(sys.argv[1]).resolve()
 payload = {
-    "profile_id": sys.argv[2],
-    "profile_slug": sys.argv[3],
-    "batch_id": sys.argv[4],
-    "source_kind": sys.argv[5],
-    "expected_repo_count": int(sys.argv[6]),
-    "repos_file": sys.argv[7],
-    "status": sys.argv[8],
-    "sweep_id": sys.argv[9],
+    "combination_index": int(sys.argv[2]),
+    "profile_id": sys.argv[3],
+    "profile_slug": sys.argv[4],
+    "batch_id": sys.argv[5],
+    "source_kind": sys.argv[6],
+    "expected_repo_count": int(sys.argv[7]),
+    "repos_file": sys.argv[8],
+    "status": sys.argv[9],
+    "sweep_id": sys.argv[10],
     "execution": {
-        "strategy": sys.argv[10],
-        "max_parallel_tasks": int(sys.argv[11]),
-        "failure_policy": sys.argv[12],
-        "shard_discovery_mode": sys.argv[13],
-        "repo_selection": sys.argv[14],
+        "strategy": sys.argv[11],
+        "max_parallel_tasks": int(sys.argv[12]),
+        "failure_policy": sys.argv[13],
+        "shard_discovery_mode": sys.argv[14],
+        "repo_selection": sys.argv[15],
     },
-    "run_matrix_tsv": sys.argv[15],
-    "run_matrix_md": sys.argv[16],
-    "frontend_matrix_md": sys.argv[17],
-    "frontend_cancel_matrix_md": sys.argv[18],
-    "quality_report_md": sys.argv[19],
-    "driver_log": sys.argv[20],
+    "run_matrix_tsv": sys.argv[16],
+    "run_matrix_md": sys.argv[17],
+    "frontend_matrix_md": sys.argv[18],
+    "frontend_cancel_matrix_md": sys.argv[19],
+    "quality_report_md": sys.argv[20],
+    "documentation_audit_md": sys.argv[21],
+    "driver_log": sys.argv[22],
 }
-with path.open("a", encoding="utf-8") as f:
-    f.write(json.dumps(payload, ensure_ascii=True))
-    f.write("\n")
+path.write_text(json.dumps(payload, ensure_ascii=True) + "\n", encoding="utf-8")
 PY
+    exit 0
+  ) &
+
+  MATRIX_ACTIVE_PIDS+=("$!")
+  MATRIX_ACTIVE_LABELS+=("${profile_id}/${sweep_id}")
+}
+
+combination_index=0
+while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sweep_id sweep_strategy sweep_max_parallel sweep_failure_policy sweep_shard_mode sweep_repo_selection; do
+  [[ -z "$profile_id" ]] && continue
+  combination_index=$((combination_index + 1))
+  profile_slug="$(slugify "$profile_id")"
+  sweep_slug="$(slugify "$sweep_id")"
+
+  launch_matrix_worker \
+    "$combination_index" \
+    "$profile_id" "$repos_file" "$expected_repo_count" "$source_kind" "$sweep_id" \
+    "$sweep_strategy" "$sweep_max_parallel" "$sweep_failure_policy" "$sweep_shard_mode" "$sweep_repo_selection" \
+    "$profile_slug" "$sweep_slug"
+
+  while [[ "${#MATRIX_ACTIVE_PIDS[@]}" -ge "$MATRIX_MAX_PARALLEL_COMBINATIONS" ]]; do
+    wait_for_matrix_worker_slot
+  done
 done < "$COMBINATIONS_TSV"
+
+wait_for_all_matrix_workers
+
+python3 - "$MATRIX_RECORDS_DIR" "$RECORDS_JSONL" "$combination_index" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+records_dir = Path(sys.argv[1]).resolve()
+records_jsonl = Path(sys.argv[2]).resolve()
+expected_count = int(sys.argv[3])
+record_files = sorted(records_dir.glob("*.json"))
+if len(record_files) != expected_count:
+    raise SystemExit(f"matrix records count mismatch: expected={expected_count} got={len(record_files)} in {records_dir}")
+
+records = []
+for path in record_files:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    records.append(payload)
+records.sort(key=lambda item: int(item.get("combination_index", 0)))
+with records_jsonl.open("w", encoding="utf-8") as out:
+    for payload in records:
+        out.write(json.dumps(payload, ensure_ascii=True))
+        out.write("\n")
+PY
 
 MATRIX_REPORT_MD="$REPORTS_ROOT/profile_matrix_${MATRIX_ID}.md"
 MATRIX_REPORT_TSV="$REPORTS_ROOT/profile_matrix_${MATRIX_ID}.tsv"
@@ -481,12 +614,93 @@ if not records:
     raise SystemExit(f"no matrix records found in {records_path}")
 
 
-def parse_frontend_status(path: Path, provider: str) -> str:
+def parse_frontend_matrix(path: Path, expected_runs: int | None = None) -> dict[str, object]:
+    result: dict[str, object] = {
+        "rows": [],
+        "non_passed_rows": [],
+        "by_provider": {
+            "qwen-code": {"status": "missing", "passed": 0, "total": 0},
+            "claude-code": {"status": "missing", "passed": 0, "total": 0},
+        },
+    }
     if not path.exists():
-        return "missing"
+        return result
+
+    lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    row_entries: list[dict[str, object]] = []
+    has_run_dimension = False
+    for line in lines:
+        if not line.startswith("|"):
+            continue
+        columns = [item.strip() for item in line.split("|")]
+        if len(columns) < 4:
+            continue
+        provider = columns[1]
+        run_raw = columns[2] if len(columns) > 2 else "-"
+        status = columns[3] if len(columns) > 3 else "missing"
+        if provider not in {"qwen-code", "claude-code"}:
+            continue
+        run_index = None
+        if run_raw in {"passed", "failed", "skipped", "missing"}:
+            status = run_raw
+            run_index = 1
+        elif run_raw and run_raw != "-":
+            try:
+                run_index = int(run_raw)
+                has_run_dimension = True
+            except Exception:
+                run_index = None
+        elif run_raw == "-":
+            run_index = 1
+        entry = {"provider": provider, "run_index": run_index, "status": status}
+        row_entries.append(entry)
+        if status != "passed":
+            result["non_passed_rows"].append(entry)
+
+    result["rows"] = row_entries
+
+    for provider in ("qwen-code", "claude-code"):
+        provider_rows = [item for item in row_entries if item["provider"] == provider]
+        total = len(provider_rows)
+        passed = sum(1 for item in provider_rows if str(item.get("status", "")).strip() == "passed")
+        summary_status = "missing"
+        if total > 0:
+            summary_status = "passed" if passed == total else "failed"
+        if has_run_dimension and expected_runs is not None and expected_runs > total:
+            summary_status = "failed" if total > 0 else "missing"
+        result["by_provider"][provider] = {"status": summary_status, "passed": passed, "total": total}
+
+    if has_run_dimension and expected_runs is not None:
+        for provider in ("qwen-code", "claude-code"):
+            provider_rows = [item for item in row_entries if item["provider"] == provider]
+            provider_run_indexes = {
+                int(item["run_index"])
+                for item in provider_rows
+                if isinstance(item.get("run_index"), int)
+            }
+            for run_index in range(1, expected_runs + 1):
+                if run_index not in provider_run_indexes:
+                    result["non_passed_rows"].append(
+                        {"provider": provider, "run_index": run_index, "status": "missing"}
+                    )
+
+    return result
+
+
+def parse_documentation_audit(path: Path) -> dict[str, str]:
+    result = {
+        "auto_status": "missing",
+        "manual_status": "missing",
+        "implementation_audit_status": "missing",
+    }
+    if not path.exists():
+        return result
     text = path.read_text(encoding="utf-8")
-    match = re.search(rf"^\|\s*{re.escape(provider)}\s*\|\s*([^|]+)\|", text, flags=re.MULTILINE)
-    return match.group(1).strip() if match else "missing"
+    for key in ("auto_status", "manual_status", "implementation_audit_status"):
+        match = re.search(rf"^- {re.escape(key)}:\s*(.+)$", text, flags=re.MULTILINE)
+        if match:
+            result[key] = match.group(1).strip()
+    return result
 
 
 def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
@@ -583,7 +797,13 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
     return stats
 
 
-def strict_blockers(rec: dict[str, object], stats: dict[str, object], frontend: dict[str, str]) -> list[str]:
+def strict_blockers(
+    rec: dict[str, object],
+    stats: dict[str, object],
+    frontend_init: dict[str, object],
+    frontend_cancel: dict[str, object],
+    documentation_audit: dict[str, str],
+) -> list[str]:
     reasons: list[str] = []
 
     if str(rec.get("status", "")).strip() != "passed":
@@ -625,9 +845,45 @@ def strict_blockers(rec: dict[str, object], stats: dict[str, object], frontend: 
             f"issue_hits:{stats['runtime_flow_issue_hits']} runtime_flow_failed:{stats['runtime_flow_failed']} (expected 0)"
         )
 
-    for key, value in frontend.items():
-        if value != "passed":
-            reasons.append(f"{key}={value} (expected passed)")
+    init_non_passed = frontend_init.get("non_passed_rows")
+    if isinstance(init_non_passed, list) and init_non_passed:
+        sample = []
+        for item in init_non_passed[:6]:
+            if not isinstance(item, dict):
+                continue
+            sample.append(
+                f"{item.get('provider', '-')}#run{item.get('run_index', '-')}={item.get('status', 'missing')}"
+            )
+        reasons.append(
+            f"frontend_init_non_passed={len(init_non_passed)} (expected 0); sample={', '.join(sample) if sample else '-'}"
+        )
+
+    init_by_provider = frontend_init.get("by_provider")
+    if isinstance(init_by_provider, dict):
+        for provider in ("qwen-code", "claude-code"):
+            payload = init_by_provider.get(provider)
+            if not isinstance(payload, dict):
+                reasons.append(f"frontend_init_{provider}_status=missing (expected passed)")
+                continue
+            status = str(payload.get("status", "missing")).strip() or "missing"
+            if status != "passed":
+                reasons.append(f"frontend_init_{provider}_status={status} (expected passed)")
+
+    cancel_by_provider = frontend_cancel.get("by_provider")
+    if isinstance(cancel_by_provider, dict):
+        for provider in ("qwen-code", "claude-code"):
+            payload = cancel_by_provider.get(provider)
+            if not isinstance(payload, dict):
+                reasons.append(f"frontend_cancel_{provider}_status=missing (expected passed)")
+                continue
+            status = str(payload.get("status", "missing")).strip() or "missing"
+            if status != "passed":
+                reasons.append(f"frontend_cancel_{provider}_status={status} (expected passed)")
+
+    if documentation_audit.get("auto_status") != "passed":
+        reasons.append(f"documentation_audit_auto_status={documentation_audit.get('auto_status', 'missing')} (expected passed)")
+    if documentation_audit.get("manual_status") != "passed":
+        reasons.append(f"documentation_audit_manual_status={documentation_audit.get('manual_status', 'missing')} (expected passed)")
 
     return reasons
 
@@ -662,21 +918,26 @@ header = [
     "evidence_scope_hits",
     "cross_repo_missing_hits",
     "runtime_flow_issue_hits",
-    "frontend_qwen_status",
-    "frontend_claude_status",
+    "frontend_init_non_passed_rows",
+    "frontend_init_qwen_status",
+    "frontend_init_claude_status",
     "frontend_cancel_qwen_status",
     "frontend_cancel_claude_status",
+    "documentation_audit_auto_status",
+    "documentation_audit_manual_status",
+    "documentation_audit_implementation_status",
     "blocking_reasons",
     "run_matrix_tsv",
     "quality_report_md",
+    "documentation_audit_md",
 ]
 
 tsv_lines = ["\t".join(header)]
 md_lines = [
     "# Profile Matrix",
     "",
-    "| profile_id | sweep_id | batch_id | status | strict | backend_hard/total | semantic_hard_fail | off_topic_hits | artifact_non_snapshot | evidence_scope | cross_repo_missing | runtime_flow | frontend init (qwen/claude) | frontend cancel (qwen/claude) | blockers | run_matrix | quality_report |",
-    "|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|---|",
+    "| profile_id | sweep_id | batch_id | status | strict | backend_hard/total | semantic_hard_fail | off_topic_hits | artifact_non_snapshot | evidence_scope | cross_repo_missing | runtime_flow | frontend init non-passed | frontend init (qwen/claude) | frontend cancel (qwen/claude) | documentation audit (auto/manual/impl) | blockers | run_matrix | quality_report | documentation_audit |",
+    "|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|---|---|---|",
 ]
 
 verdict_records: list[dict[str, object]] = []
@@ -686,16 +947,14 @@ for rec in records:
     run_matrix_tsv = Path(str(rec["run_matrix_tsv"]))
     frontend_matrix_md = Path(str(rec["frontend_matrix_md"]))
     frontend_cancel_matrix_md = Path(str(rec["frontend_cancel_matrix_md"]))
+    documentation_audit_md = Path(str(rec["documentation_audit_md"]))
 
     stats = parse_backend_stats(run_matrix_tsv)
-    frontend_statuses = {
-        "frontend_qwen_status": parse_frontend_status(frontend_matrix_md, "qwen-code"),
-        "frontend_claude_status": parse_frontend_status(frontend_matrix_md, "claude-code"),
-        "frontend_cancel_qwen_status": parse_frontend_status(frontend_cancel_matrix_md, "qwen-code"),
-        "frontend_cancel_claude_status": parse_frontend_status(frontend_cancel_matrix_md, "claude-code"),
-    }
+    frontend_init = parse_frontend_matrix(frontend_matrix_md, expected_runs=5)
+    frontend_cancel = parse_frontend_matrix(frontend_cancel_matrix_md)
+    documentation_audit = parse_documentation_audit(documentation_audit_md)
 
-    blockers = strict_blockers(rec, stats, frontend_statuses)
+    blockers = strict_blockers(rec, stats, frontend_init, frontend_cancel, documentation_audit)
     strict_status = "passed" if not blockers else "failed"
     if blockers:
         strict_fail_count += 1
@@ -706,6 +965,17 @@ for rec in records:
     execution_failure_policy = str((execution or {}).get("failure_policy", "-"))
     execution_shard_mode = str((execution or {}).get("shard_discovery_mode", "-"))
     execution_repo_selection = str((execution or {}).get("repo_selection", "-"))
+
+    init_non_passed_rows = frontend_init.get("non_passed_rows")
+    init_non_passed_count = len(init_non_passed_rows) if isinstance(init_non_passed_rows, list) else 0
+    init_by_provider = frontend_init.get("by_provider") if isinstance(frontend_init.get("by_provider"), dict) else {}
+    cancel_by_provider = (
+        frontend_cancel.get("by_provider") if isinstance(frontend_cancel.get("by_provider"), dict) else {}
+    )
+    frontend_init_qwen_status = str((init_by_provider.get("qwen-code") or {}).get("status", "missing"))
+    frontend_init_claude_status = str((init_by_provider.get("claude-code") or {}).get("status", "missing"))
+    frontend_cancel_qwen_status = str((cancel_by_provider.get("qwen-code") or {}).get("status", "missing"))
+    frontend_cancel_claude_status = str((cancel_by_provider.get("claude-code") or {}).get("status", "missing"))
 
     tsv_lines.append(
         "\t".join(
@@ -739,13 +1009,18 @@ for rec in records:
                 str(stats["evidence_scope_hits"]),
                 str(stats["cross_repo_missing_hits"]),
                 str(stats["runtime_flow_issue_hits"]),
-                frontend_statuses["frontend_qwen_status"],
-                frontend_statuses["frontend_claude_status"],
-                frontend_statuses["frontend_cancel_qwen_status"],
-                frontend_statuses["frontend_cancel_claude_status"],
+                str(init_non_passed_count),
+                frontend_init_qwen_status,
+                frontend_init_claude_status,
+                frontend_cancel_qwen_status,
+                frontend_cancel_claude_status,
+                documentation_audit["auto_status"],
+                documentation_audit["manual_status"],
+                documentation_audit["implementation_audit_status"],
                 "; ".join(blockers) if blockers else "-",
                 str(rec["run_matrix_tsv"]),
                 str(rec["quality_report_md"]),
+                str(rec["documentation_audit_md"]),
             ]
         )
     )
@@ -756,9 +1031,11 @@ for rec in records:
         f"{stats['hard']}/{stats['total']} | {stats['semantic_hard_fail']} | {stats['off_topic_hits']} | {stats['artifact_non_snapshot']} | "
         f"{stats['evidence_scope_hits']} | {stats['cross_repo_missing_hits']} | "
         f"{int(stats['runtime_flow_failed']) + int(stats['runtime_flow_issue_hits'])} | "
-        f"{frontend_statuses['frontend_qwen_status']}/{frontend_statuses['frontend_claude_status']} | "
-        f"{frontend_statuses['frontend_cancel_qwen_status']}/{frontend_statuses['frontend_cancel_claude_status']} | "
-        f"{'; '.join(blockers) if blockers else '-'} | {rec['run_matrix_md']} | {rec['quality_report_md']} |"
+        f"{init_non_passed_count} | "
+        f"{frontend_init_qwen_status}/{frontend_init_claude_status} | "
+        f"{frontend_cancel_qwen_status}/{frontend_cancel_claude_status} | "
+        f"{documentation_audit['auto_status']}/{documentation_audit['manual_status']}/{documentation_audit['implementation_audit_status']} | "
+        f"{'; '.join(blockers) if blockers else '-'} | {rec['run_matrix_md']} | {rec['quality_report_md']} | {rec['documentation_audit_md']} |"
     )
 
     verdict_records.append(
@@ -795,13 +1072,18 @@ for rec in records:
                 "cross_repo_missing_hits": int(stats["cross_repo_missing_hits"]),
                 "runtime_flow_issue_hits": int(stats["runtime_flow_issue_hits"]),
             },
-            "frontend": frontend_statuses,
+            "frontend": {
+                "init": frontend_init,
+                "cancel": frontend_cancel,
+            },
+            "documentation_audit": documentation_audit,
             "artifacts": {
                 "run_matrix_tsv": rec["run_matrix_tsv"],
                 "run_matrix_md": rec["run_matrix_md"],
                 "frontend_matrix_md": rec["frontend_matrix_md"],
                 "frontend_cancel_matrix_md": rec["frontend_cancel_matrix_md"],
                 "quality_report_md": rec["quality_report_md"],
+                "documentation_audit_md": rec["documentation_audit_md"],
                 "driver_log": rec["driver_log"],
             },
         }
@@ -843,6 +1125,7 @@ else:
         verdict_lines.append(f"  - quality_report: {artifacts['quality_report_md']}")
         verdict_lines.append(f"  - frontend_matrix: {artifacts['frontend_matrix_md']}")
         verdict_lines.append(f"  - frontend_cancel_matrix: {artifacts['frontend_cancel_matrix_md']}")
+        verdict_lines.append(f"  - documentation_audit: {artifacts['documentation_audit_md']}")
 
 verdict_payload = {
     "matrix_id": matrix_id,

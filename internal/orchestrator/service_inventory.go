@@ -483,18 +483,29 @@ func serviceMatchesChangedPaths(service serviceInventoryService, changedPaths []
 
 func (e *pipelineExecution) discoverServicesForScope(scope string, repoPath string, idSeq map[string]int) ([]serviceInventoryService, []string, error) {
 	repo, _ := lookupManifestRepo(e.workspace.Manifest.Repos, scope)
-	roots, err := discoverHeuristicShardPaths(repoPath)
+	discovery, err := discoverHeuristicShardPathsWithMeta(repoPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("discover service roots for %q: %w", scope, err)
+	}
+	roots := discovery.Paths
+	warnings := []string{}
+	if discovery.FallbackNoMarkers {
+		warnings = append(
+			warnings,
+			fmt.Sprintf("repo scope %q service inventory discovered zero module markers; fallback service_root='.'", scope),
+		)
 	}
 	roots = applyRepoAnalysisFilters(roots, repo.Analysis)
 	if len(roots) == 0 {
 		roots = []string{"."}
+		warnings = append(
+			warnings,
+			fmt.Sprintf("repo scope %q analysis filters produced zero service roots; fallback service_root='.'", scope),
+		)
 	}
 	roots = pruneParentShardPaths(roots)
 	roots = normalizeAndSortShardPaths(roots)
 
-	warnings := []string{}
 	services := make([]serviceInventoryService, 0, len(roots))
 	for _, root := range roots {
 		sourceFiles, err := collectServiceSourceFiles(repoPath, root)
