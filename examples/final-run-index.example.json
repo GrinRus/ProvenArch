@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "run_id": "run-123",
+  "pipeline": "init",
+  "generated_at": "2026-04-16T12:00:00Z",
+  "citation_index_path": "reports/taskruns/run-123/staging/final/citation-index.json",
+  "canonical_documents": [
+    {
+      "id": "doc.report.agent-outputs-domains-payments-md",
+      "kind": "agent-output",
+      "title": "payments",
+      "canonical_path": "reports/agent-outputs/domains/payments.md",
+      "staged_path": "reports/taskruns/run-123/staging/final/reports/agent-outputs/domains/payments.md",
+      "topics": [
+        "domain.payments"
+      ],
+      "citation_ids": [
+        "cite.entity.svc-payments-service.1"
+      ],
+      "source_shards": [
+        "payments-service"
+      ],
+      "status": "staged"
+    }
+  ],
+  "topics": [
+    {
+      "id": "domain.payments",
+      "document_ids": [
+        "doc.report.agent-outputs-domains-payments-md"
+      ]
+    }
+  ],
+  "compatibility": {
+    "coverage": {
+      "observed": [
+        "services"
+      ],
+      "missing": [
+        "owner mappings"
+      ],
+      "notes": [
+        "example only"
+      ]
+    },
+    "questions": [
+      {
+        "id": "q.owner.payments",
+        "text": "Who owns payments-service?",
+        "priority": "high"
+      }
+    ],
+    "entities": [
+      {
+        "id": "svc.payments-service",
+        "type": "service",
+        "name": "Payments Service",
+        "provenance": {
+          "kind": "observation",
+          "confidence": 0.8,
+          "evidence": [
+            {
+              "repo": "payments-service",
+              "path": "README.md"
+            }
+          ]
+        }
+      }
+    ],
+    "edges": [],
+    "findings": []
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "run_id": "run-123",
+  "step_id": "init.step1.collect",
+  "shard_id": "payments-service",
+  "domain_id": "payments",
+  "agent_role": "shard-analyst",
+  "artifact_root": "/tmp/acp/reports/taskruns/run-123/staging/shards/payments-service",
+  "repo_scopes": [
+    "payments-service"
+  ],
+  "path_scopes": [
+    "."
+  ],
+  "summary": "Collected payments-service shard.",
+  "documents": [
+    {
+      "id": "doc.domain.payments",
+      "kind": "agent-output",
+      "title": "Domain dossier: payments",
+      "path": "domain-report.md",
+      "canonical_path": "reports/agent-outputs/domains/payments.md",
+      "topics": [
+        "domain.payments"
+      ],
+      "citation_ids": [
+        "cite.entity.svc-payments-service.1"
+      ],
+      "status": "staged"
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.entity.svc-payments-service.1",
+      "repo": "payments-service",
+      "path": "README.md",
+      "claim_ids": [
+        "claim.entity.svc-payments-service.1"
+      ],
+      "document_ids": [
+        "doc.domain.payments"
+      ]
+    }
+  ],
+  "compatibility": {
+    "coverage": {
+      "observed": [
+        "services"
+      ],
+      "missing": [
+        "owner mappings"
+      ],
+      "notes": [
+        "example only"
+      ]
+    },
+    "questions": [
+      {
+        "id": "q.owner.payments",
+        "text": "Who owns payments-service?",
+        "priority": "high"
+      }
+    ],
+    "entities": [
+      {
+        "id": "svc.payments-service",
+        "type": "service",
+        "name": "Payments Service",
+        "provenance": {
+          "kind": "observation",
+          "confidence": 0.8,
+          "evidence": [
+            {
+              "repo": "payments-service",
+              "path": "README.md"
+            }
+          ]
+        }
+      }
+    ],
+    "edges": [],
+    "findings": []
+  }
+}

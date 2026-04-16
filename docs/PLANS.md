@@ -49,6 +49,51 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 
 ### Plan ID
+EP-20260416-doc-first-runtime-pipeline
+
+### Context
+Нужно перевести ACP с model-first применения `TaskResult` на docs-first staged runtime pipeline: shard writers пишут только в run-scoped staging surface, orchestrator собирает/проверяет staged artifacts, а promotion в canonical `reports/*` и `proposals/*` выполняется только после validator verdict.
+
+### Goals (must have)
+- [x] Ввести staged runtime contracts (`shard pack manifest`, `final run index`, `citation index`, `validator verdict`)
+- [x] Добавить explicit `read_context_roots` / `write_root` / `artifact_root` в runtime task metadata
+- [x] Перевести orchestrator steps `step1.collect` и `step3.findings` на docs-first artifacts вместо primary `TaskResult` application
+- [x] Сохранить `model/*` только как derived compatibility layer
+- [x] Синхронизировать schemas/docs/tests/fixtures
+
+### Non-goals
+- [x] Не менять provider list (`claude-code`, `qwen-code`)
+- [x] Не разрешать runtime запись в `workspace.yaml`, `schemas/*`, `docs/spec/*`, `charter/*` или user repos
+
+### Approach
+1) Добавить новые schema/contracts и staged runtime task metadata.
+2) На `step1.collect` materialize-ить shard packs в `reports/taskruns/<run_id>/staging/shards/*`.
+3) Собрать staged final set + indexes, прогнать validator verdict и only-then promote canonical outputs.
+4) Держать `model/*` как derived extraction из final index/citations для compatibility.
+
+### Files expected to change
+- `internal/contracts/*`
+- `internal/runtime/*`
+- `internal/orchestrator/*`
+- `internal/reports/*`
+- `schemas/*`
+- `fixtures/scenarios/*`
+- `README.md`
+- `docs/*`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены
+- [x] Схемы валидируются
+- [x] Документация обновлена
+
+### Risks
+- Переход задевает почти все pipeline fixtures и scenario golden outputs; риск регрессий в compatibility surface (`model/*`, diagrams, UI results) нужно страховать derived extraction и scenario tests.
+
+### Progress log
+- 2026-04-16: старт исполнения docs-first staged runtime slice.
+- 2026-04-16: primary path переведён на runtime-authored staged docs; compiler layer оставлен как compatibility fallback для отсутствующих surfaces, добавлены path policy guard и docflow negative tests.
+
+### Plan ID
 EP-20260416-structural-sharding-reset
 
 ### Context

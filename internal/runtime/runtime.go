@@ -134,16 +134,21 @@ func ClassifyError(err error) (code string, message string, ok bool) {
 }
 
 type Task struct {
-	TaskID       string
-	RunID        string
-	StepID       string
-	ShardID      string
-	Workspace    string
-	RepoScope    string
-	RepoScopes   []string
-	PathScopes   []string
-	StartedAtUTC time.Time
-	OnOutput     func(OutputChunk) `json:"-"`
+	TaskID           string
+	RunID            string
+	StepID           string
+	ShardID          string
+	DomainID         string
+	Workspace        string
+	ArtifactRoot     string
+	WriteRoot        string
+	ReadContextRoots []string
+	AgentRole        string
+	RepoScope        string
+	RepoScopes       []string
+	PathScopes       []string
+	StartedAtUTC     time.Time
+	OnOutput         func(OutputChunk) `json:"-"`
 }
 
 type OutputChunk struct {

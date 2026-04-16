@@ -22,11 +22,6 @@ type headlessResolvedRepo struct {
 // repository directories relevant to the current task, so headless providers
 // can inspect source evidence instead of only ACP-generated workspace files.
 func ResolveHeadlessIncludeDirectories(task Task) []string {
-	workspace := strings.TrimSpace(task.Workspace)
-	if workspace == "" {
-		return nil
-	}
-
 	dirs := make([]string, 0, 4)
 	seen := map[string]struct{}{}
 	addDir := func(path string) {
@@ -44,6 +39,18 @@ func ResolveHeadlessIncludeDirectories(task Task) []string {
 		}
 		seen[cleaned] = struct{}{}
 		dirs = append(dirs, cleaned)
+	}
+
+	for _, path := range task.ReadContextRoots {
+		addDir(path)
+	}
+	if len(dirs) > 0 {
+		return dirs
+	}
+
+	workspace := strings.TrimSpace(task.Workspace)
+	if workspace == "" {
+		return nil
 	}
 
 	addDir(workspace)

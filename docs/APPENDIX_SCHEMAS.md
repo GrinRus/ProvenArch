@@ -52,7 +52,7 @@ Sharding policy в MVP:
 ## 2) TaskResult JSON Schema
 
 - **Source of truth:** `schemas/taskresult.schema.json`
-- Контракт между **orchestrator** и **runtime** (MVP runtime: headless providers `claude-code|qwen-code` + fake baseline).
+- Compatibility-контракт между **orchestrator** и **runtime** (MVP runtime: headless providers `claude-code|qwen-code` + fake baseline).
 - Orchestrator обязан валидировать TaskResult до применения изменений.
 
 ### Top-level поля
@@ -113,21 +113,94 @@ Conflict policy:
   - optional `ref`
   - optional `lines` в формате объекта `{ "start": <int>, "end": <int> }`
 
-### Ограничение контракта
-Операции `write_file(content)` в TaskResult нет.
-Поэтому генерация `reports/as-is/*` и упаковка `proposals/*` в MVP реализуются orchestrator/compiler шагами (см. `docs/spec/PIPELINE_SPEC.md`).
-Дополнительно Step 2 materialize-ит `reports/diagrams/*` (C4 Mermaid set) как compiler outputs; это не расширяет `TaskResult` schema.
+### Ограничение compatibility-контракта
+`TaskResult` не поддерживает `write_file(content)` и не является primary writer surface.
 
-`add_doc_artifact` в MVP:
-- metadata registration op
-- не содержит content payload
-- не инициирует свободную запись файлов runtime’ом
-- может ссылаться только на уже существующий или позднее materialized orchestrator artifact
-- не является required dependency path для обязательных outputs Step 1 или Step 3
+Primary docs-first path:
+- runtime пишет authored docs только в run-scoped `write_root`
+- каноника живёт в staged/promoted doc set + `final-run-index` + `citation-index`
+- `validator-verdict` является release gate
 
-Фиксация unknowns происходит через `questions`, `coverage` и subsequent findings, а не через свободную запись произвольных файлов runtime.
+`TaskResult` в MVP:
+- compatibility envelope для semantic guards/derived model/taskrun diagnostics
+- `add_doc_artifact` остаётся metadata registration op без content payload
+- не заменяет runtime-authored docs-first artifact pack
 
-## 3) Model conventions
+## 3) Shard Pack Manifest Schema
+
+- **Source of truth:** `schemas/shard-pack-manifest.schema.json`
+- Primary runtime output для `step1.collect`
+
+Top-level required fields:
+- `version`
+- `run_id`
+- `step_id`
+- `shard_id`
+- `agent_role`
+- `artifact_root`
+- `documents[]`
+- `citations[]`
+- `compatibility`
+
+Semantic role:
+- описывает authored shard docs внутри shard staging root
+- связывает документы с canonical stable paths, topics и citation ids
+- несёт compatibility snapshot для derived model layer
+
+## 4) Final Run Index Schema
+
+- **Source of truth:** `schemas/final-run-index.schema.json`
+- Aggregator/orchestrator output для staged final set
+
+Required fields:
+- `version`
+- `run_id`
+- `pipeline`
+- `generated_at`
+- `citation_index_path`
+- `canonical_documents[]`
+- `topics[]`
+- `compatibility`
+
+Semantic role:
+- canonical machine-readable index для UI/API/results surfaces
+- перечисляет stable docs, staged paths, topics, citation bindings и source shards
+
+## 5) Citation Index Schema
+
+- **Source of truth:** `schemas/citation-index.schema.json`
+- Required machine-readable evidence layer для docs-first pipeline
+
+Required fields:
+- `version`
+- `run_id`
+- `generated_at`
+- `citations[]`
+
+Semantic role:
+- нормализует citation ids / claim ids / document ids
+- даёт deterministic bridge между authored docs и evidence-backed claims
+
+## 6) Validator Verdict Schema
+
+- **Source of truth:** `schemas/validator-verdict.schema.json`
+- Primary runtime output для `step3.findings` / validator phase
+
+Required fields:
+- `version`
+- `run_id`
+- `generated_at`
+- `verdict`
+- `checked_paths[]`
+
+Allowed `verdict` values:
+- `PASS`
+- `FAIL`
+
+Semantic role:
+- canonical gate для promotion staged final set в стабильные `reports/*` и `proposals/*`
+- validator может фиксировать только technical/index/reference issues, а не переписывать authored смысл документов
+## 7) Model conventions
 
 - **Source of truth:** `docs/spec/MODEL_SPEC.md`
 - Каноническая модель хранится как entity-per-file:
@@ -136,14 +209,14 @@ Conflict policy:
 - Stable ID patterns и normalization rules зафиксированы в `MODEL_SPEC`.
 - Канонические patterns в MVP: `svc.<slug>`, `team.<slug>`, `repo.<slug>`, `ext.<slug>`, `db.<engine>.<slug>`, `api.http.<service-slug>.<method>.<path-slug>`, `api.grpc.<service-slug>.<service>.<method>`, `topic.<slug>`, `edge.<from>.<type>.<to>`.
 
-## 4) Charter и skills conventions
+## 8) Charter и skills conventions
 
 - **Source of truth:** `docs/spec/PIPELINE_SPEC.md`
 - Charter хранится в `charter/`.
-- Cards `charter/cards/domains/*` и `charter/cards/teams/*` являются canonical human-owned source of truth.
+- Cards `charter/cards/domains/*` и `charter/cards/teams/*` являются canonical human-owned source of truth; runtime pipeline не пишет в них напрямую.
 - Skills хранятся в `skills/` в версионируемом формате (manifest + prompts + templates).
 
-## 5) Изменения схем/контрактов
+## 9) Изменения схем/контрактов
 
 Любые изменения в `schemas/` и контрактах сопровождаются:
 - обновлением `docs/spec/*` и `docs/APPENDIX_SCHEMAS.md`

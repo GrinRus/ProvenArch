@@ -1,0 +1,10 @@
+flowchart LR
+  System["Workspace System"]
+  SystemNote["Evidence-backed services: 1"]
+  System --- SystemNote
+  GapExternal["Gap: no evidence-backed external systems"]
+  System -.-> GapExternal
+  GapActors["Gap: no evidence-backed actors"]
+  GapActors -.-> System
+  GapRelations["Gap: no evidence-backed relationships"]
+  System -.-> GapRelations
