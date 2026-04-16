@@ -1920,6 +1920,93 @@ func (e *pipelineExecution) replayRuntimeTaskExecution(
 	}
 	e.runtimeVersions[runtimeKey] = struct{}{}
 
+	if len(normalized.Warnings) > 0 {
+		for _, runtimeWarning := range normalized.Warnings {
+			warningText := strings.TrimSpace(runtimeWarning)
+			if warningText == "" {
+				continue
+			}
+			prefixedWarning := warningText
+			if strings.TrimSpace(stepID) != "" {
+				prefixedWarning = fmt.Sprintf("%s: %s", stepID, warningText)
+			}
+			e.addWarning(prefixedWarning)
+			e.logWarn(stepID, domainID, "runtime warning", map[string]any{
+				"warning": warningText,
+			})
+		}
+	}
+
+	if strings.HasSuffix(stepID, "step1.collect") {
+		manifest, manifestRaw, err := loadShardPackManifestFromRoot(task.WriteRoot)
+		if err != nil {
+			if fallbackErr := claudecode.PersistCompatibilityDocflowArtifacts(task, normalized); fallbackErr == nil {
+				manifest, manifestRaw, err = loadShardPackManifestFromRoot(task.WriteRoot)
+			}
+		}
+		if err != nil {
+			e.logError(stepID, domainID, "shard pack manifest load failed", map[string]any{
+				"task_id": task.TaskID,
+				"error":   strings.TrimSpace(err.Error()),
+			})
+			return runtimeTaskExecution{}, err
+		}
+		e.shardPacks = append(e.shardPacks, manifest)
+		manifestPath := path.Join(task.ArtifactRoot, shardPackManifestFile)
+		e.addArtifacts(Artifact{
+			Path:  manifestPath,
+			Kind:  "taskrun",
+			Label: "Shard Pack Manifest",
+		})
+		coverage := &manifest.Compatibility.Coverage
+		e.runtimeStepMetrics = append(e.runtimeStepMetrics, runtimeStepQuality{
+			StepID:           stepID,
+			DomainID:         domainID,
+			RuntimeName:      runtimeName,
+			RuntimeVersion:   runtimeVersion,
+			RepoScopes:       append([]string(nil), task.RepoScopes...),
+			ChangesetOps:     len(manifest.Compatibility.Entities) + len(manifest.Compatibility.Edges) + len(manifest.Compatibility.Findings),
+			EntityUpserts:    len(manifest.Compatibility.Entities),
+			EdgeUpserts:      len(manifest.Compatibility.Edges),
+			FindingsAdded:    len(manifest.Compatibility.Findings),
+			QuestionsCount:   len(manifest.Compatibility.Questions),
+			CoverageObserved: countCoverageObserved(coverage),
+			CoverageMissing:  countCoverageMissing(coverage),
+			WarningsCount:    len(normalized.Warnings),
+		})
+		e.logInfo(stepID, domainID, "runtime shard pack replayed from persisted taskrun", map[string]any{
+			"task_id":         task.TaskID,
+			"shard_id":        task.ShardID,
+			"artifact_root":   task.ArtifactRoot,
+			"manifest_path":   manifestPath,
+			"documents":       len(manifest.Documents),
+			"citations":       len(manifest.Citations),
+			"compat_entities": len(manifest.Compatibility.Entities),
+			"compat_edges":    len(manifest.Compatibility.Edges),
+			"compat_findings": len(manifest.Compatibility.Findings),
+		})
+		e.logInfo(stepID, domainID, "runtime task replayed from persisted taskrun", map[string]any{
+			"task_id":          task.TaskID,
+			"shard_id":         task.ShardID,
+			"repo_scope":       task.RepoScope,
+			"runtime_name":     runtimeName,
+			"runtime_version":  runtimeVersion,
+			"changeset_ops":    len(normalized.Changeset),
+			"entity_upserts":   len(manifest.Compatibility.Entities),
+			"edge_upserts":     len(manifest.Compatibility.Edges),
+			"findings_added":   len(manifest.Compatibility.Findings),
+			"questions_count":  len(manifest.Compatibility.Questions),
+			"coverage_missing": countCoverageMissing(coverage),
+			"warnings_count":   len(normalized.Warnings),
+		})
+		return runtimeTaskExecution{
+			RawJSON:       manifestRaw,
+			Normalized:    normalized,
+			Apply:         synthesizeApplyReport(normalized),
+			ShardManifest: &manifest,
+		}, nil
+	}
+
 	applyReport := synthesizeApplyReport(normalized)
 	if len(applyReport.DocArtifacts) > 0 {
 		docArtifacts, err := e.compiler.WriteDocArtifacts(applyReport.DocArtifacts)
@@ -2138,72 +2225,20 @@ func (e *pipelineExecution) runStepValidator(ctx context.Context, stepID string)
 		})
 		return nil
 	}
-	plans, _, _ := e.planRuntimeShards(append([]string(nil), e.selectedRepoScopes...))
-	if len(plans) == 0 {
-		plans = []runtimeShardPlan{{
-			SortKey:     "workspace:.",
-			ShardID:     "workspace-root",
-			RepoScopes:  append([]string(nil), e.selectedRepoScopes...),
-			PathScopes:  []string{"."},
-			PrimaryRepo: "workspace",
-		}}
+
+	selectedScopes := normalizeOrderedUniqueStrings(e.selectedRepoScopes)
+	if len(selectedScopes) == 0 {
+		e.addWarning(fmt.Sprintf("%s: validator step skipped because repo_selection=%q selected zero repo scopes", stepID, e.repoSelectionMode))
+		e.logWarn(stepID, "", "validator step skipped", map[string]any{
+			"repo_selection_mode": e.repoSelectionMode,
+			"selected_scopes":     append([]string(nil), e.selectedRepoScopes...),
+		})
+		return nil
 	}
-	buildValidatorSummaryItems := func(status string, taskID string, taskRun string, err error) []runtimeShardSummaryEntry {
-		items := make([]runtimeShardSummaryEntry, 0, len(plans))
-		message := ""
-		if err != nil {
-			message = strings.TrimSpace(err.Error())
-		}
-		for _, plan := range plans {
-			items = append(items, runtimeShardSummaryEntry{
-				ShardID:    plan.ShardID,
-				RepoScopes: append([]string(nil), plan.RepoScopes...),
-				PathScopes: append([]string(nil), plan.PathScopes...),
-				Status:     status,
-				TaskID:     taskID,
-				TaskRun:    taskRun,
-				Error:      message,
-			})
-		}
-		return items
-	}
-	prepared, err := e.runRuntimeTaskNormalized(ctx, stepID, "validator", append([]string(nil), e.selectedRepoScopes...), nil, "", "validator")
-	if err != nil {
-		_ = e.persistShardSummary(stepID, "", buildValidatorSummaryItems("failed", "", "", err))
-		e.recordRuntimeStepOutcome(stepID, runtimeShardOutcome{PlannedShards: 1, FailedShards: 1})
-		if strings.TrimSpace(e.executionProfile.FailurePolicy) == acpruntime.ExecutionFailurePolicyBestEffort {
-			e.registerPartialShardFailure(stepID, "", runtimeShardPlan{
-				ShardID:    "validator",
-				RepoScopes: append([]string(nil), e.selectedRepoScopes...),
-			}, err)
-			return nil
-		}
-		return err
-	}
-	execution, err := e.applyRuntimeTaskExecution(stepID, "", prepared)
-	if err != nil {
-		_ = e.persistShardSummary(stepID, "", buildValidatorSummaryItems("failed", prepared.Task.TaskID, "", err))
-		e.recordRuntimeStepOutcome(stepID, runtimeShardOutcome{PlannedShards: 1, FailedShards: 1})
-		if strings.TrimSpace(e.executionProfile.FailurePolicy) == acpruntime.ExecutionFailurePolicyBestEffort {
-			e.registerPartialShardFailure(stepID, "", runtimeShardPlan{
-				ShardID:    "validator",
-				RepoScopes: append([]string(nil), e.selectedRepoScopes...),
-			}, err)
-			return nil
-		}
-		return err
-	}
-	taskrunPath := shardTaskrunPath(e.runID, stepID, "", "validator", true)
-	taskrunLabel := shardTaskrunLabel(stepID, "", "validator", true)
-	if err := e.persistTaskRun(taskrunPath, taskrunLabel, prepared.NormalizedRaw); err != nil {
-		return err
-	}
-	if err := e.persistShardSummary(stepID, "", buildValidatorSummaryItems("succeeded", prepared.Task.TaskID, taskrunPath, nil)); err != nil {
-		return err
-	}
-	_ = execution
-	e.recordRuntimeStepOutcome(stepID, runtimeShardOutcome{PlannedShards: 1, SucceededShards: 1})
-	return nil
+
+	_, outcome, err := e.executeRuntimeTasksSharded(ctx, stepID, "", append([]string(nil), selectedScopes...), "")
+	e.recordRuntimeStepOutcome(stepID, outcome)
+	return err
 }
 
 func (e *pipelineExecution) runStepProposals() error {
