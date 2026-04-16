@@ -17,6 +17,7 @@ contracts:
 
 test: contracts
 	$(GO) test ./...
+	python3 -m unittest discover -s scripts/tests -p '*_test.py'
 	$(NPM) run test --prefix $(UI_DIR) -- --run
 
 test-stress:

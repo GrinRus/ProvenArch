@@ -44,7 +44,8 @@ func NewCompiler(ws workspace.Root) Compiler {
 	return Compiler{workspace: ws}
 }
 
-func (c Compiler) CompileAsIs(entities []contracts.Entity, edges []contracts.Edge) ([]Artifact, error) {
+func (c Compiler) CompileAsIs(entities []contracts.Entity, edges []contracts.Edge, renderCtx ReportRenderContext) ([]Artifact, error) {
+	renderCtx = NormalizeReportRenderContext(renderCtx)
 	var artifacts []Artifact
 
 	serviceEntities := filterEntitiesByType(entities, "service")
@@ -53,6 +54,7 @@ func (c Compiler) CompileAsIs(entities []contracts.Entity, edges []contracts.Edg
 
 	overview := strings.Builder{}
 	overview.WriteString("# As-Is Overview\n\n")
+	writeAnalysisBanner(&overview, renderCtx)
 	overview.WriteString(fmt.Sprintf("- Services: %d\n", len(serviceEntities)))
 	overview.WriteString(fmt.Sprintf("- Dependencies (edges): %d\n", len(edges)))
 	overview.WriteString(fmt.Sprintf("- External systems: %d\n", len(externalEntities)))
@@ -68,8 +70,10 @@ func (c Compiler) CompileAsIs(entities []contracts.Entity, edges []contracts.Edg
 
 	serviceCatalog := strings.Builder{}
 	serviceCatalog.WriteString("# Service Catalog\n\n")
+	writeAnalysisBanner(&serviceCatalog, renderCtx)
 	if len(serviceEntities) == 0 {
-		serviceCatalog.WriteString("No services found.\n")
+		serviceCatalog.WriteString(emptyEvidenceMessage("services", renderCtx.Collect.Status))
+		serviceCatalog.WriteString("\n")
 	} else {
 		serviceCatalog.WriteString("| ID | Name |\n|---|---|\n")
 		for _, entity := range serviceEntities {
@@ -88,6 +92,7 @@ func (c Compiler) CompileAsIs(entities []contracts.Entity, edges []contracts.Edg
 	for _, service := range serviceEntities {
 		content := strings.Builder{}
 		content.WriteString(fmt.Sprintf("# %s\n\n", service.Name))
+		writeAnalysisBanner(&content, renderCtx)
 		content.WriteString(fmt.Sprintf("- ID: `%s`\n", service.ID))
 		content.WriteString(fmt.Sprintf("- Type: `%s`\n", service.Type))
 		if service.OwnerTeamID != "" {
@@ -112,8 +117,10 @@ func (c Compiler) CompileAsIs(entities []contracts.Entity, edges []contracts.Edg
 
 	integrations := strings.Builder{}
 	integrations.WriteString("# Integrations\n\n")
+	writeAnalysisBanner(&integrations, renderCtx)
 	if len(externalEntities) == 0 {
-		integrations.WriteString("No external systems found.\n")
+		integrations.WriteString(emptyEvidenceMessage("external systems", renderCtx.Collect.Status))
+		integrations.WriteString("\n")
 	} else {
 		for _, ext := range externalEntities {
 			integrations.WriteString(fmt.Sprintf("- `%s` %s\n", ext.ID, ext.Name))
@@ -130,8 +137,10 @@ func (c Compiler) CompileAsIs(entities []contracts.Entity, edges []contracts.Edg
 
 	datastores := strings.Builder{}
 	datastores.WriteString("# Datastores\n\n")
+	writeAnalysisBanner(&datastores, renderCtx)
 	if len(datastoreEntities) == 0 {
-		datastores.WriteString("No datastores found.\n")
+		datastores.WriteString(emptyEvidenceMessage("datastores", renderCtx.Collect.Status))
+		datastores.WriteString("\n")
 	} else {
 		for _, db := range datastoreEntities {
 			datastores.WriteString(fmt.Sprintf("- `%s` %s\n", db.ID, db.Name))
@@ -146,7 +155,11 @@ func (c Compiler) CompileAsIs(entities []contracts.Entity, edges []contracts.Edg
 		Label: "Datastores",
 	})
 
-	ciCD := "# CI/CD\n\nCI/CD evidence is surfaced through coverage and findings artifacts.\n"
+	ciCDBuilder := strings.Builder{}
+	ciCDBuilder.WriteString("# CI/CD\n\n")
+	writeAnalysisBanner(&ciCDBuilder, renderCtx)
+	ciCDBuilder.WriteString("CI/CD evidence is surfaced through coverage and findings artifacts.\n")
+	ciCD := ciCDBuilder.String()
 	if err := c.workspace.WriteFile("reports/as-is/ci-cd.md", []byte(ciCD)); err != nil {
 		return nil, err
 	}
@@ -160,24 +173,28 @@ func (c Compiler) CompileAsIs(entities []contracts.Entity, edges []contracts.Edg
 	return artifacts, nil
 }
 
-func (c Compiler) WriteCoverage(coverage *contracts.Coverage, questions []contracts.Question) ([]Artifact, error) {
+func (c Compiler) WriteCoverage(coverage *contracts.Coverage, questions []contracts.Question, renderCtx ReportRenderContext) ([]Artifact, error) {
+	renderCtx = NormalizeReportRenderContext(renderCtx)
 	if coverage == nil {
 		coverage = &contracts.Coverage{}
 	}
 
 	summary := strings.Builder{}
 	summary.WriteString("# Coverage Summary\n\n")
-	writeStringList(&summary, "Observed", coverage.Observed)
-	writeStringList(&summary, "Missing", coverage.Missing)
-	writeStringList(&summary, "Notes", coverage.Notes)
+	writeAnalysisBanner(&summary, renderCtx)
+	writeStringListWithFallback(&summary, "Observed", coverage.Observed, coverageFallback("observed", renderCtx))
+	writeStringListWithFallback(&summary, "Missing", coverage.Missing, coverageFallback("missing", renderCtx))
+	writeStringListWithFallback(&summary, "Notes", coverage.Notes, coverageFallback("notes", renderCtx))
 	if err := c.workspace.WriteFile("reports/coverage/summary.md", []byte(summary.String())); err != nil {
 		return nil, err
 	}
 
 	questionsReport := strings.Builder{}
 	questionsReport.WriteString("# Open Questions\n\n")
+	writeAnalysisBanner(&questionsReport, renderCtx)
 	if len(questions) == 0 {
-		questionsReport.WriteString("No open questions.\n")
+		questionsReport.WriteString(openQuestionsFallback(renderCtx))
+		questionsReport.WriteString("\n")
 	} else {
 		sort.Slice(questions, func(i, j int) bool { return questions[i].ID < questions[j].ID })
 		for _, question := range questions {
@@ -195,13 +212,16 @@ func (c Compiler) WriteCoverage(coverage *contracts.Coverage, questions []contra
 	return artifacts, nil
 }
 
-func (c Compiler) WriteFindings(findings []contracts.Finding) ([]Artifact, error) {
+func (c Compiler) WriteFindings(findings []contracts.Finding, renderCtx ReportRenderContext) ([]Artifact, error) {
+	renderCtx = NormalizeReportRenderContext(renderCtx)
 	sort.Slice(findings, func(i, j int) bool { return findings[i].ID < findings[j].ID })
 
 	content := strings.Builder{}
 	content.WriteString("# Findings\n\n")
+	writeAnalysisBanner(&content, renderCtx)
 	if len(findings) == 0 {
-		content.WriteString("No findings reported.\n")
+		content.WriteString(findingsFallback(renderCtx))
+		content.WriteString("\n")
 	} else {
 		for _, finding := range findings {
 			content.WriteString(fmt.Sprintf("## %s\n\n", finding.Title))
@@ -278,14 +298,18 @@ func (c Compiler) WriteDocArtifacts(artifactsInput []contracts.DocArtifact) ([]A
 	}, nil
 }
 
-func (c Compiler) CompileProposals(findings []contracts.Finding) ([]Artifact, error) {
+func (c Compiler) CompileProposals(findings []contracts.Finding, renderCtx ReportRenderContext) ([]Artifact, error) {
+	renderCtx = NormalizeReportRenderContext(renderCtx)
 	proposalID := fmt.Sprintf("proposal-%s", proposalSlugFromFindings(findings))
 	baseDir := fmt.Sprintf("proposals/%s", proposalID)
 
 	proposalBody := strings.Builder{}
 	proposalBody.WriteString("# Improvement Proposal\n\n")
+	writeAnalysisBanner(&proposalBody, renderCtx)
 	proposalBody.WriteString("This proposal is generated from findings and baseline charter constraints.\n\n")
-	if len(findings) == 0 {
+	if len(findings) == 0 && renderCtx.IsIncomplete() {
+		proposalBody.WriteString("Proposal generation incomplete because no reliable findings set was produced.\n")
+	} else if len(findings) == 0 {
 		proposalBody.WriteString("No findings available. Keep monitoring coverage and refresh pipeline.\n")
 	} else {
 		proposalBody.WriteString("## Findings addressed\n\n")
@@ -294,31 +318,49 @@ func (c Compiler) CompileProposals(findings []contracts.Finding) ([]Artifact, er
 		}
 	}
 
-	files := map[string]string{
-		baseDir + "/proposal.md": proposalBody.String(),
-		baseDir + "/ADR.md": `# ADR Draft
-
-## Context
+	adrBody := strings.Builder{}
+	adrBody.WriteString("# ADR Draft\n\n")
+	writeAnalysisBanner(&adrBody, renderCtx)
+	if renderCtx.IsIncomplete() {
+		adrBody.WriteString("This draft is triage-only because analysis did not complete.\n\n")
+	}
+	adrBody.WriteString(`## Context
 Generated by ACP proposals compiler from current findings set.
 
 ## Decision
 Approve the selected remediation scope from proposal.md during architecture review.
-`,
-		baseDir + "/RFC.md": `# RFC Draft
+`)
 
-## Problem
+	rfcBody := strings.Builder{}
+	rfcBody.WriteString("# RFC Draft\n\n")
+	writeAnalysisBanner(&rfcBody, renderCtx)
+	if renderCtx.IsIncomplete() {
+		rfcBody.WriteString("This draft is triage-only because analysis did not complete.\n\n")
+	}
+	rfcBody.WriteString(`## Problem
 Captured by ACP findings and coverage outputs.
 
 ## Proposal
 Decompose approved findings into phased implementation tasks with owners and rollout windows.
-`,
-		baseDir + "/migration-checklist.md": `# Migration Checklist
+`)
 
-- [ ] Confirm owners
+	checklistBody := strings.Builder{}
+	checklistBody.WriteString("# Migration Checklist\n\n")
+	writeAnalysisBanner(&checklistBody, renderCtx)
+	if renderCtx.IsIncomplete() {
+		checklistBody.WriteString("This checklist is triage-only because analysis did not complete.\n\n")
+	}
+	checklistBody.WriteString(`- [ ] Confirm owners
 - [ ] Confirm CI/CD impact
 - [ ] Define rollout steps
 - [ ] Validate regressions in synthetic scenarios
-`,
+`)
+
+	files := map[string]string{
+		baseDir + "/proposal.md":            proposalBody.String(),
+		baseDir + "/ADR.md":                 adrBody.String(),
+		baseDir + "/RFC.md":                 rfcBody.String(),
+		baseDir + "/migration-checklist.md": checklistBody.String(),
 	}
 
 	var artifacts []Artifact
@@ -411,9 +453,12 @@ func (c Compiler) WriteDomainTaskEnvelopes(envelopes []DomainTaskEnvelope) ([]Ar
 	return artifacts, nil
 }
 
-func (c Compiler) WriteArchitectSummary(summary string) ([]Artifact, error) {
+func (c Compiler) WriteArchitectSummary(summary string, renderCtx ReportRenderContext) ([]Artifact, error) {
 	path := "reports/agent-outputs/architect/summary.md"
-	if err := c.workspace.WriteFile(path, []byte(summary)); err != nil {
+	content := strings.Builder{}
+	writeAnalysisBanner(&content, renderCtx)
+	content.WriteString(summary)
+	if err := c.workspace.WriteFile(path, []byte(content.String())); err != nil {
 		return nil, err
 	}
 	return []Artifact{
@@ -473,6 +518,116 @@ func writeStringList(builder *strings.Builder, title string, values []string) {
 		builder.WriteString(fmt.Sprintf("- %s\n", value))
 	}
 	builder.WriteString("\n")
+}
+
+func writeStringListWithFallback(builder *strings.Builder, title string, values []string, fallback string) {
+	builder.WriteString(fmt.Sprintf("## %s\n\n", title))
+	if len(values) == 0 {
+		builder.WriteString(strings.TrimSpace(fallback))
+		builder.WriteString("\n\n")
+		return
+	}
+	for _, value := range values {
+		builder.WriteString(fmt.Sprintf("- %s\n", value))
+	}
+	builder.WriteString("\n")
+}
+
+func writeAnalysisBanner(builder *strings.Builder, renderCtx ReportRenderContext) {
+	renderCtx = NormalizeReportRenderContext(renderCtx)
+	if !renderCtx.IsIncomplete() {
+		return
+	}
+	builder.WriteString("> ")
+	builder.WriteString(analysisBannerHeadline(renderCtx))
+	builder.WriteString("\n")
+	builder.WriteString(fmt.Sprintf("> Collect status: %s (planned=%d succeeded=%d failed=%d)\n",
+		renderCtx.Collect.Status,
+		renderCtx.Collect.PlannedShards,
+		renderCtx.Collect.SucceededShards,
+		renderCtx.Collect.FailedShards,
+	))
+	builder.WriteString(fmt.Sprintf("> Findings status: %s (planned=%d succeeded=%d failed=%d)\n",
+		renderCtx.Findings.Status,
+		renderCtx.Findings.PlannedShards,
+		renderCtx.Findings.SucceededShards,
+		renderCtx.Findings.FailedShards,
+	))
+	if len(renderCtx.Reasons) > 0 {
+		builder.WriteString(fmt.Sprintf("> Reasons: %s\n", strings.Join(renderCtx.Reasons, ", ")))
+	}
+	builder.WriteString("\n")
+}
+
+func analysisBannerHeadline(renderCtx ReportRenderContext) string {
+	renderCtx = NormalizeReportRenderContext(renderCtx)
+	if renderCtx.Collect.Status == EvidenceStatusPartial || renderCtx.Findings.Status == EvidenceStatusPartial {
+		if renderCtx.Collect.Status != EvidenceStatusUnusable && renderCtx.Findings.Status != EvidenceStatusUnusable && renderCtx.Findings.Status != EvidenceStatusSkipped {
+			return "Partial analysis. Some shards failed; downstream content may be incomplete."
+		}
+		return "Analysis incomplete. Some shards failed; downstream content may be incomplete."
+	}
+	return "Analysis incomplete."
+}
+
+func emptyEvidenceMessage(subject string, status EvidenceStatus) string {
+	switch status {
+	case EvidenceStatusUnusable:
+		return fmt.Sprintf("No evidence-backed %s were materialized because analysis did not complete.", subject)
+	case EvidenceStatusPartial:
+		return fmt.Sprintf("No evidence-backed %s were materialized from completed shards; analysis is partial and some shards failed.", subject)
+	default:
+		return fmt.Sprintf("No %s found.", subject)
+	}
+}
+
+func coverageFallback(section string, renderCtx ReportRenderContext) string {
+	switch section {
+	case "observed":
+		switch renderCtx.Collect.Status {
+		case EvidenceStatusUnusable:
+			return "Unavailable due to incomplete analysis."
+		case EvidenceStatusPartial:
+			return "May be incomplete because some shards failed."
+		}
+	case "missing":
+		switch renderCtx.Collect.Status {
+		case EvidenceStatusUnusable:
+			return "Unknown due to incomplete analysis."
+		case EvidenceStatusPartial:
+			return "May be incomplete because some shards failed."
+		}
+	case "notes":
+		if renderCtx.IsIncomplete() {
+			return "Analysis incomplete. See banner above."
+		}
+	}
+	return "None."
+}
+
+func openQuestionsFallback(renderCtx ReportRenderContext) string {
+	switch renderCtx.Collect.Status {
+	case EvidenceStatusUnusable:
+		return "Open questions unavailable due to incomplete analysis."
+	case EvidenceStatusPartial:
+		return "Open questions may be incomplete because some shards failed."
+	default:
+		return "No open questions."
+	}
+}
+
+func findingsFallback(renderCtx ReportRenderContext) string {
+	switch renderCtx.Findings.Status {
+	case EvidenceStatusUnusable, EvidenceStatusSkipped:
+		return "Findings unavailable because analysis did not complete."
+	case EvidenceStatusPartial:
+		return "Findings may be incomplete because some shards failed."
+	default:
+		if renderCtx.IsIncomplete() {
+			return "Findings may be incomplete because analysis did not complete."
+		}
+		return "No findings reported."
+	}
 }
 
 func uniqueSorted(values []string) []string {

@@ -313,6 +313,7 @@ Script делает strict полный цикл:
 - per-run snapshots в `TMP_ROOT/snapshots/<run_id>/...`;
 - гарантированные debug artifacts: `TMP_ROOT/full-run.log` и `TMP_ROOT/session-summary.md` даже при раннем fail.
 - при `runner_parse_failed` runtime сохраняет raw-output evidence в `reports/taskruns/raw/*` (stdout/stderr + checksums + meta).
+- `reports/taskruns/<run_id>-quality.json` хранит `evidence_state` (`collect/findings/report_mode/reasons`); если `report_mode=incomplete`, generated markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) помечаются banner/triage-only wording и не означают "сервисов/проблем нет".
 
 Если нужно сохранить временный workspace для ручного анализа:
 

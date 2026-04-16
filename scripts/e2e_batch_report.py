@@ -70,6 +70,18 @@ RUNTIME_FLOW_ISSUE_TAGS = (
 FRONTEND_PROVIDERS = ("qwen-code", "claude-code")
 FRONTEND_LIVE_RESULT_FILENAME = "frontend-e2e-result.json"
 FRONTEND_CANCEL_RESULT_FILENAME = "frontend-cancel-result.json"
+FAILURE_CLASS_PRECEDENCE = {
+    "summary_missing": 0,
+    "runner_unavailable": 1,
+    "runtime_parse": 2,
+    "runtime_timeout": 3,
+    "infra_signal_terminated": 4,
+    "quality_gates_failed": 5,
+    "infra_incomplete_cycle": 6,
+    "runtime_flow_failed": 7,
+    "precheck_failed": 8,
+    "none": 99,
+}
 
 
 def normalize_text(value: str) -> str:
@@ -80,6 +92,14 @@ def normalize_text(value: str) -> str:
 def read_json(path: Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as f:
         return json.load(f)
+
+
+def read_text_file(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+def failure_class_rank(value: str) -> int:
+    return FAILURE_CLASS_PRECEDENCE.get((value or "").strip(), 98)
 
 
 def parse_markdown_scalar(text: str, key: str) -> str:
@@ -108,7 +128,7 @@ def parse_run_results(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     if not path.exists():
         return rows
-    for raw in path.read_text(encoding="utf-8").splitlines():
+    for raw in read_text_file(path).splitlines():
         if not raw.strip():
             continue
         parts = raw.split("\t")
@@ -128,7 +148,7 @@ def parse_backend_classifications(batch_root: Path) -> dict[tuple[str, int], dic
     path = batch_root / "backend-run-classifications.tsv"
     if not path.exists():
         return {}
-    lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    lines = [line for line in read_text_file(path).splitlines() if line.strip()]
     if len(lines) <= 1:
         return {}
     header = lines[0].split("\t")
@@ -158,7 +178,7 @@ def parse_backend_classifications(batch_root: Path) -> dict[tuple[str, int], dic
 def parse_markdown_section_bullets(path: Path, section_title: str) -> list[str]:
     if not path.exists():
         return []
-    lines = path.read_text(encoding="utf-8").splitlines()
+    lines = read_text_file(path).splitlines()
     bullets: list[str] = []
     in_section = False
     for line in lines:
@@ -175,7 +195,7 @@ def parse_open_questions(path: Path) -> tuple[list[str], list[str]]:
         return [], []
     ids: list[str] = []
     texts: list[str] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in read_text_file(path).splitlines():
         line = line.strip()
         if not line.startswith("- "):
             continue
@@ -187,6 +207,32 @@ def parse_open_questions(path: Path) -> tuple[list[str], list[str]]:
         else:
             texts.append(payload)
     return ids, texts
+
+
+def report_has_incomplete_banner(text: str) -> bool:
+    return "Analysis incomplete." in text or "Partial analysis. Some shards failed; downstream content may be incomplete." in text
+
+
+def findings_has_incomplete_fallback(text: str) -> bool:
+    return "Findings unavailable because analysis did not complete." in text or "Findings may be incomplete because some shards failed." in text
+
+
+def coverage_has_incomplete_fallback(text: str) -> bool:
+    markers = (
+        "Unavailable due to incomplete analysis.",
+        "Unknown due to incomplete analysis.",
+        "May be incomplete because some shards failed.",
+        "Analysis incomplete. See banner above.",
+    )
+    return any(marker in text for marker in markers)
+
+
+def open_questions_has_incomplete_fallback(text: str) -> bool:
+    markers = (
+        "Open questions unavailable due to incomplete analysis.",
+        "Open questions may be incomplete because some shards failed.",
+    )
+    return any(marker in text for marker in markers)
 
 
 def parse_headless_rows(rows: list[dict[str, Any]], provider: str) -> dict[str, dict[str, Any]]:
@@ -882,8 +928,8 @@ def evaluate_run(
             error_codes=[],
         )
 
-    summary_text = summary_path.read_text(encoding="utf-8") if summary_path.exists() else ""
-    full_run_log_text = full_run_log.read_text(encoding="utf-8") if full_run_log.exists() else ""
+    summary_text = read_text_file(summary_path) if summary_path.exists() else ""
+    full_run_log_text = read_text_file(full_run_log) if full_run_log.exists() else ""
     summary_missing = not summary_path.exists()
     result_value = first_token(parse_markdown_scalar(summary_text, "result")) if summary_text else ""
     quality_gates_value = first_token(parse_markdown_scalar(summary_text, "quality_gates")) if summary_text else ""
@@ -938,10 +984,14 @@ def evaluate_run(
     raw_outputs: set[str] = set()
     runner_error_sources = [summary_path, full_run_log]
     runner_error_sources.extend(sorted((run_dir / "logs").glob("run-iter*-*.log")))
+    runner_error_sources.extend(sorted((workspace / "reports" / "taskruns" / "logs").glob("*.ndjson")))
+    runner_error_sources.extend(
+        sorted(path for path in (workspace / "reports" / "taskruns" / "raw").rglob("*") if path.is_file())
+    )
     for source_path in runner_error_sources:
         if not source_path.exists():
             continue
-        text = source_path.read_text(encoding="utf-8")
+        text = read_text_file(source_path)
         if "runner_unavailable" in text:
             runner_unavailable_hit = True
             runner_error_hit = True
@@ -1117,6 +1167,23 @@ def evaluate_run(
     analysis_reports_root = workspace / "reports"
     if analysis_run_id:
         analysis_reports_root, _ = resolve_reports_root(run_dir, analysis_run_id)
+    analysis_report_mode = ""
+    analysis_collect_status = ""
+    analysis_findings_status = ""
+    analysis_quality_row = refresh_row or init_row
+    if analysis_quality_row:
+        analysis_quality_path, _ = resolve_quality_json(run_dir, analysis_quality_row)
+        if analysis_quality_path.exists():
+            analysis_quality_payload = read_json(analysis_quality_path)
+            evidence_state = analysis_quality_payload.get("evidence_state") or {}
+            if isinstance(evidence_state, dict):
+                analysis_report_mode = str(evidence_state.get("report_mode", "")).strip()
+                collect_state = evidence_state.get("collect") or {}
+                findings_state = evidence_state.get("findings") or {}
+                if isinstance(collect_state, dict):
+                    analysis_collect_status = str(collect_state.get("status", "")).strip()
+                if isinstance(findings_state, dict):
+                    analysis_findings_status = str(findings_state.get("status", "")).strip()
     findings_path = analysis_reports_root / "findings/findings.md"
     overview_path = analysis_reports_root / "as-is/overview.md"
     coverage_path = analysis_reports_root / "coverage/summary.md"
@@ -1128,27 +1195,38 @@ def evaluate_run(
     questions_ok = False
 
     if overview_path.exists():
-        non_empty_lines = [line for line in overview_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        overview_text = read_text_file(overview_path)
+        non_empty_lines = [line for line in overview_text.splitlines() if line.strip()]
         placeholder_hit = any("no " in line.lower() and " yet" in line.lower() for line in non_empty_lines)
-        overview_ok = len(non_empty_lines) >= 4 and not placeholder_hit
+        if analysis_report_mode == "incomplete":
+            overview_ok = report_has_incomplete_banner(overview_text)
+        else:
+            overview_ok = len(non_empty_lines) >= 4 and not placeholder_hit
         if not overview_ok:
             details.append(
-                f"analysis/overview -> {overview_path}: non_empty_lines={len(non_empty_lines)} placeholder={int(placeholder_hit)}"
+                f"analysis/overview -> {overview_path}: non_empty_lines={len(non_empty_lines)} placeholder={int(placeholder_hit)} "
+                f"report_mode={analysis_report_mode or 'normal'} collect_status={analysis_collect_status or '-'}"
             )
     else:
         details.append(f"analysis/overview -> missing {overview_path}")
 
-    findings_text = findings_path.read_text(encoding="utf-8") if findings_path.exists() else ""
+    findings_text = read_text_file(findings_path) if findings_path.exists() else ""
     findings_text_lower = findings_text.lower()
     has_finding_heading = "## " in findings_text
     has_severity = "- Severity:" in findings_text
     has_description = "- Description:" in findings_text
     has_empty_marker = "No findings reported." in findings_text
-    findings_ok = has_finding_heading and has_severity and has_description and not has_empty_marker
+    if analysis_report_mode == "incomplete":
+        findings_ok = report_has_incomplete_banner(findings_text) and (
+            (has_finding_heading and has_severity and has_description) or findings_has_incomplete_fallback(findings_text)
+        )
+    else:
+        findings_ok = has_finding_heading and has_severity and has_description and not has_empty_marker
     if not findings_ok:
         details.append(
             f"analysis/findings -> {findings_path}: heading={int(has_finding_heading)} severity={int(has_severity)} "
-            f"description={int(has_description)} empty_marker={int(has_empty_marker)}"
+            f"description={int(has_description)} empty_marker={int(has_empty_marker)} report_mode={analysis_report_mode or 'normal'} "
+            f"findings_status={analysis_findings_status or '-'}"
         )
 
     missing_terms_raw = parse_markdown_section_bullets(coverage_path, "Missing")
@@ -1157,21 +1235,39 @@ def evaluate_run(
     notes_raw = parse_markdown_section_bullets(coverage_path, "Notes")
     notes_norm = [normalize_text(note) for note in notes_raw]
     notes_dupes = len(notes_norm) != len(set(notes_norm))
-    coverage_ok = len(missing_terms) > 0 and not missing_dupes and not notes_dupes
+    coverage_text = read_text_file(coverage_path) if coverage_path.exists() else ""
+    coverage_substantive_ok = len(missing_terms) > 0 and not missing_dupes and not notes_dupes
+    if analysis_report_mode == "incomplete":
+        coverage_ok = report_has_incomplete_banner(coverage_text) and (
+            coverage_substantive_ok or coverage_has_incomplete_fallback(coverage_text)
+        )
+    else:
+        coverage_ok = coverage_substantive_ok
     if not coverage_ok:
         details.append(
-            f"analysis/coverage -> {coverage_path}: missing={len(missing_terms)} missing_dupes={int(missing_dupes)} notes_dupes={int(notes_dupes)}"
+            f"analysis/coverage -> {coverage_path}: missing={len(missing_terms)} missing_dupes={int(missing_dupes)} notes_dupes={int(notes_dupes)} "
+            f"report_mode={analysis_report_mode or 'normal'} collect_status={analysis_collect_status or '-'}"
         )
 
+    questions_text = read_text_file(questions_path) if questions_path.exists() else ""
     _question_ids, question_texts = parse_open_questions(questions_path)
     question_texts_norm = [normalize_text(text) for text in question_texts if text.strip()]
     question_dupes = len(question_texts_norm) != len(set(question_texts_norm))
-    questions_ok = len(question_texts_norm) > 0 and not question_dupes
+    questions_substantive_ok = len(question_texts_norm) > 0 and not question_dupes
+    if analysis_report_mode == "incomplete":
+        questions_ok = report_has_incomplete_banner(questions_text) and (
+            questions_substantive_ok or open_questions_has_incomplete_fallback(questions_text)
+        )
+    else:
+        questions_ok = questions_substantive_ok
     if not questions_ok:
-        details.append(f"analysis/questions -> {questions_path}: count={len(question_texts_norm)} dupes={int(question_dupes)}")
+        details.append(
+            f"analysis/questions -> {questions_path}: count={len(question_texts_norm)} dupes={int(question_dupes)} "
+            f"report_mode={analysis_report_mode or 'normal'} collect_status={analysis_collect_status or '-'}"
+        )
 
     owner_gap = any(term in {"owner mappings", "owner mapping", "owner team mappings", "owner team mapping"} for term in missing_terms)
-    if owner_gap and has_empty_marker:
+    if analysis_report_mode != "incomplete" and owner_gap and has_empty_marker:
         findings_ok = False
         details.append(f"analysis/findings-owner-gap -> {findings_path}: owner gap exists in {coverage_path}, findings are empty")
 
@@ -1281,10 +1377,10 @@ def evaluate_run(
         failure_class = "runtime_parse"
     elif runtime_timeout:
         failure_class = "runtime_timeout"
-    elif quality_gates_failed:
-        failure_class = "quality_gates_failed"
     elif infra_signal_terminated:
         failure_class = "infra_signal_terminated"
+    elif quality_gates_failed:
+        failure_class = "quality_gates_failed"
     elif infra_incomplete_cycle:
         failure_class = "infra_incomplete_cycle"
     elif runtime_flow_failed:
@@ -1295,7 +1391,8 @@ def evaluate_run(
             details.append(
                 f"reliability/classifier-override -> summary_class={failure_class or 'none'} classifier_class={classified_failure}"
             )
-        failure_class = classified_failure
+        if failure_class == "none" or failure_class_rank(classified_failure) < failure_class_rank(failure_class):
+            failure_class = classified_failure
         runtime_parse_hit = runtime_parse_hit or classified_failure == "runtime_parse"
         runner_unavailable_hit = runner_unavailable_hit or classified_failure == "runner_unavailable"
         runtime_timeout = runtime_timeout or classified_failure == "runtime_timeout"

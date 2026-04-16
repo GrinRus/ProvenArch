@@ -48,9 +48,51 @@ EP-YYYYMMDD-<slug>
 
 ## Active Plans
 
+### Plan ID
+EP-20260416-zero-signal-hardening
+
+### Context
+Нужно убрать ложную семантику empty reports после shard/runtime сбоев и поднять первичный runtime incident в batch triage, не меняя public TaskResult schema.
+
+### Goals (must have)
+- [x] Поднять shard outcomes в run-level `evidence_state`
+- [x] Перевести markdown artifacts на explicit incomplete/partial semantics
+- [x] Исправить batch failure attribution для raw `runner_parse_failed`
+- [x] Добавить regression tests и синхронизировать docs
+
+### Non-goals
+- [x] Не менять public `schemas/taskresult.schema.json`
+- [x] Не менять UI code
+
+### Approach
+1) Расширить orchestrator quality/report context на основе shard outcomes.
+2) Сменить compiler semantics для `as-is/findings/coverage/proposals/agent-outputs`.
+3) Обновить harness triage precedence и добавить script-level fixtures.
+
+### Files expected to change
+- `internal/orchestrator/*`
+- `internal/reports/*`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/e2e_batch_report.py`
+- `scripts/tests/*`
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/TESTING_STRATEGY.md`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены
+- [x] Схемы валидируются
+- [x] Документация обновлена
+
+### Risks
+- `make build` в основном дереве затрагивает уже грязный `internal/api/ui_dist/*`; build verification безопасно выполнять в изолированной временной копии.
+
+### Progress log
+- 2026-04-16: реализованы `evidence_state`, incomplete/partial report semantics, batch failure precedence, regression tests и docs sync.
+
 ### Archived
 - Completed historical plans moved to `docs/archive/PLANS_ARCHIVE_2026-04.md` (archived on 2026-04-15).
-- Сейчас открытых active plans нет; добавляйте новый план из шаблона выше.
 
 ---
 

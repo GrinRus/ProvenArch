@@ -350,11 +350,22 @@ classify_run_failure() {
   local cancellation_like=0
   local quality_gates_status=""
   local -a classify_log_paths=("$summary_path" "$full_log_path" "$batch_driver_log")
+  local workspace="$run_dir/arch-workspace"
   local iter_log
   if [[ -d "$run_dir/logs" ]]; then
     while IFS= read -r iter_log; do
       classify_log_paths+=("$iter_log")
     done < <(find "$run_dir/logs" -maxdepth 1 -type f -name 'run-iter*-*.log' | LC_ALL=C sort)
+  fi
+  if [[ -d "$workspace/reports/taskruns/logs" ]]; then
+    while IFS= read -r iter_log; do
+      classify_log_paths+=("$iter_log")
+    done < <(find "$workspace/reports/taskruns/logs" -maxdepth 1 -type f -name '*.ndjson' | LC_ALL=C sort)
+  fi
+  if [[ -d "$workspace/reports/taskruns/raw" ]]; then
+    while IFS= read -r iter_log; do
+      classify_log_paths+=("$iter_log")
+    done < <(find "$workspace/reports/taskruns/raw" -type f | LC_ALL=C sort)
   fi
 
   if [[ ! -f "$summary_path" ]]; then

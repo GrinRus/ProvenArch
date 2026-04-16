@@ -110,7 +110,9 @@ Implemented required jobs:
   - parse examples/fixtures
 - `backend`
   - `go test ./...`
+  - `python3 -m unittest discover -s scripts/tests -p '*_test.py'`
   - includes docs-consistency gate (`internal/docsync`) для truth-sync/stale-marker/CLI-docs parity checks
+  - includes harness regression fixtures for batch failure classification (`scripts/tests/*`)
   - `make test-stress` (coordinator debounce/queue regression loop)
   - `go build ./cmd/acp`
 - `ui`
