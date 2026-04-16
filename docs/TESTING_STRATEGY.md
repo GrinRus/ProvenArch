@@ -225,9 +225,10 @@ Implemented additional jobs:
 - profile matrix regression (local official runbook, non-required CI):
   - `scripts/full-run-batch-matrix.sh`
   - `E2E_MATRIX_FILE` обязателен (`profiles[]`: `id`, `repos_file`, `expected_repo_count`, `source_kind`)
-  - `sweeps[]` optional (если отсутствует -> implicit `baseline`)
+  - `sweeps[]` optional (если отсутствует -> implicit `baseline` только для non-release/diagnostic)
   - release-ready sweep set: `baseline` + `parallel-default`
   - matrix invariant: для одного `profile_id` shard-plan должен совпадать между `baseline` и `parallel-default`
+  - release-mode (`MATRIX_ID=release-*` или `E2E_MATRIX_RELEASE_MODE=1`) требует explicit `sweeps[]` с ровно `baseline` + `parallel-default`; missing/extra sweep блокирует matrix до batch stage
   - относительные `repos_file` пути резолвятся от директории `E2E_MATRIX_FILE`
   - официальные профили: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
   - для `source_kind=git_url` refs должны быть pinned

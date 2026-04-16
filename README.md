@@ -389,15 +389,16 @@ ACP_QWEN_CMD_BIN=qwen \
 - для `git_url` профилей refs должны быть pinned в `repos_file`
 - относительные пути `repos_file` резолвятся относительно директории `E2E_MATRIX_FILE`
 - `sweeps[]` (optional):
-- если `sweeps[]` отсутствует -> implicit `baseline` sweep
+- если `sweeps[]` отсутствует -> implicit `baseline` sweep (только non-release/diagnostic)
 - release-ready sweep set:
   - `baseline`: `strategy=sequential`, `max_parallel_tasks=1`, `failure_policy=best_effort`, `shard_discovery_mode=heuristics`
   - `parallel-default`: `strategy=parallel`, `max_parallel_tasks=4`, `failure_policy=best_effort`, `shard_discovery_mode=heuristics`
+- для release-mode (`MATRIX_ID=release-*` или `E2E_MATRIX_RELEASE_MODE=1`) `sweeps[]` обязателен и должен содержать ровно `baseline` + `parallel-default`; любое отклонение блокирует запуск matrix до batch stage
 - release-mode (`MATRIX_ID=release-*`) автоматически включает frontend defaults:
   - `BATCH_FRONTEND_MODE=per_run`
   - `BATCH_FRONTEND_CANCEL_MODE=once_per_provider`
   - `UI_E2E_HEADED=1`
-- matrix acceptance дополнительно проверяет invariant: для одного `profile_id` sweep'ы `baseline` и `parallel-default` должны давать одинаковый shard-plan; отличаться могут только schedule/concurrency и duration
+- matrix acceptance дополнительно проверяет invariant: для одного `profile_id` sweep'ы `baseline` и `parallel-default` должны давать одинаковый shard-plan; в release-mode любой `shard_plan_invariant != passed` считается blocking
 
 Готовый шаблон: `examples/e2e-matrix.example.yaml` (+ `examples/repos/*.repos.yaml`).
 GitHub target catalog для release выбора (`3` monorepo + `3` multi-repo ecosystems):

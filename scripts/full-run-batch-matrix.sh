@@ -211,7 +211,7 @@ COMBINATIONS_TSV="$MATRIX_ROOT/profile-sweep-combinations.tsv"
 RECORDS_JSONL="$MATRIX_ROOT/profile-runs.jsonl"
 : > "$RECORDS_JSONL"
 
-python3 - "$E2E_MATRIX_FILE" "$COMBINATIONS_TSV" <<'PY'
+python3 - "$E2E_MATRIX_FILE" "$COMBINATIONS_TSV" "$RELEASE_MODE" <<'PY'
 import sys
 from pathlib import Path
 
@@ -222,6 +222,8 @@ except Exception as exc:
 
 matrix_path = Path(sys.argv[1]).resolve()
 out_path = Path(sys.argv[2]).resolve()
+release_mode_raw = str(sys.argv[3]).strip().lower()
+release_mode = release_mode_raw in {"1", "true", "yes", "on"}
 payload = yaml.safe_load(matrix_path.read_text(encoding="utf-8"))
 
 if isinstance(payload, dict):
@@ -318,6 +320,7 @@ allowed = {
     "failure_policy": {"fail_fast", "best_effort"},
     "shard_discovery_mode": {"heuristics", "semantic"},
 }
+required_release_sweeps = ("baseline", "parallel-default")
 
 default_sweep = {
     "id": "baseline",
@@ -328,6 +331,10 @@ default_sweep = {
 }
 
 sweep_rows: list[dict[str, object]] = []
+if release_mode and (not isinstance(sweeps, list) or not sweeps):
+    raise SystemExit(
+        "release-mode requires explicit sweeps[] with exactly these ids: baseline, parallel-default"
+    )
 if not isinstance(sweeps, list) or not sweeps:
     sweep_rows = [default_sweep]
 else:
@@ -380,6 +387,28 @@ else:
                 "failure_policy": failure_policy,
                 "shard_discovery_mode": shard_mode,
             }
+        )
+
+if release_mode:
+    observed_sweep_ids = {str(item["id"]).strip() for item in sweep_rows}
+    required_sweep_ids = set(required_release_sweeps)
+    missing_sweeps = sorted(required_sweep_ids - observed_sweep_ids)
+    extra_sweeps = sorted(observed_sweep_ids - required_sweep_ids)
+    if missing_sweeps:
+        raise SystemExit(
+            "release-mode sweeps[] is missing required ids: " + ", ".join(missing_sweeps)
+        )
+    if extra_sweeps:
+        raise SystemExit(
+            "release-mode sweeps[] contains unsupported ids: " + ", ".join(extra_sweeps)
+        )
+    expected_release_combinations = len(required_profiles) * len(required_release_sweeps)
+    observed_release_combinations = len(profile_rows) * len(sweep_rows)
+    if observed_release_combinations != expected_release_combinations:
+        raise SystemExit(
+            "release-mode requires full profile×sweep matrix: "
+            f"expected {expected_release_combinations} combinations "
+            f"(4 profiles × 2 sweeps), got {observed_release_combinations}"
         )
 
 rows: list[str] = []
@@ -447,10 +476,15 @@ while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sw
     if [[ -n "$UI_E2E_HEADED" ]]; then
       EXTRA_BATCH_ENV_ASSIGNMENTS+=("UI_E2E_HEADED=$UI_E2E_HEADED")
     fi
+    BATCH_ENV_ASSIGNMENTS=(
+      "${ACP_TIMEOUT_ENV_ASSIGNMENTS[@]}"
+      "${ACP_EXECUTION_ENV_ASSIGNMENTS[@]}"
+    )
+    if [[ "${#EXTRA_BATCH_ENV_ASSIGNMENTS[@]}" -gt 0 ]]; then
+      BATCH_ENV_ASSIGNMENTS+=("${EXTRA_BATCH_ENV_ASSIGNMENTS[@]}")
+    fi
     env \
-      "${ACP_TIMEOUT_ENV_ASSIGNMENTS[@]}" \
-      "${ACP_EXECUTION_ENV_ASSIGNMENTS[@]}" \
-      "${EXTRA_BATCH_ENV_ASSIGNMENTS[@]}" \
+      "${BATCH_ENV_ASSIGNMENTS[@]}" \
       "BATCH_ID=$batch_id" \
       "BATCH_ROOT=$batch_root" \
       "RUN_COUNT=$RUN_COUNT" \
@@ -519,7 +553,7 @@ MATRIX_REPORT_TSV="$REPORTS_ROOT/profile_matrix_${MATRIX_ID}.tsv"
 VERDICT_MD="$REPORTS_ROOT/release_verdict_${MATRIX_ID}.md"
 VERDICT_JSON="$REPORTS_ROOT/release_verdict_${MATRIX_ID}.json"
 
-python3 - "$RECORDS_JSONL" "$MATRIX_REPORT_MD" "$MATRIX_REPORT_TSV" "$VERDICT_MD" "$VERDICT_JSON" "$MATRIX_ID" <<'PY'
+python3 - "$RECORDS_JSONL" "$MATRIX_REPORT_MD" "$MATRIX_REPORT_TSV" "$VERDICT_MD" "$VERDICT_JSON" "$MATRIX_ID" "$RELEASE_MODE" <<'PY'
 import json
 import re
 import sys
@@ -533,6 +567,7 @@ out_tsv = Path(sys.argv[3]).resolve()
 verdict_md = Path(sys.argv[4]).resolve()
 verdict_json = Path(sys.argv[5]).resolve()
 matrix_id = sys.argv[6]
+release_mode = str(sys.argv[7]).strip() == "1"
 
 records = []
 for line in records_path.read_text(encoding="utf-8").splitlines():
@@ -543,6 +578,9 @@ for line in records_path.read_text(encoding="utf-8").splitlines():
 
 if not records:
     raise SystemExit(f"no matrix records found in {records_path}")
+
+required_release_profiles = ("single-path", "single-git_url", "multi-path", "multi-git_url")
+required_release_sweeps = ("baseline", "parallel-default")
 
 
 def parse_frontend_status(path: Path, provider: str) -> str:
@@ -711,7 +749,13 @@ def collect_batch_shard_plan_signature(batch_root: Path) -> tuple[str | None, li
     return json.dumps(entries, ensure_ascii=True, sort_keys=True), []
 
 
-def strict_blockers(rec: dict[str, object], stats: dict[str, object], frontend: dict[str, str]) -> list[str]:
+def strict_blockers(
+    rec: dict[str, object],
+    stats: dict[str, object],
+    frontend: dict[str, str],
+    shard_plan_invariant: str,
+    release_mode: bool,
+) -> list[str]:
     reasons: list[str] = []
 
     if str(rec.get("status", "")).strip() != "passed":
@@ -756,6 +800,8 @@ def strict_blockers(rec: dict[str, object], stats: dict[str, object], frontend: 
     for key, value in frontend.items():
         if value != "passed":
             reasons.append(f"{key}={value} (expected passed)")
+    if release_mode and shard_plan_invariant != "passed":
+        reasons.append(f"shard_plan_invariant={shard_plan_invariant} (release requires passed)")
 
     return reasons
 
@@ -862,6 +908,52 @@ md_lines = [
 
 invariant_status_by_batch, invariant_blockers_by_batch = shard_plan_invariant_status(records)
 
+observed_sweeps = sorted({str(rec.get("sweep_id", "baseline")).strip() for rec in records})
+observed_profiles = sorted({str(rec.get("profile_id", "")).strip() for rec in records if str(rec.get("profile_id", "")).strip()})
+observed_pairs = {
+    (str(rec.get("profile_id", "")).strip(), str(rec.get("sweep_id", "baseline")).strip())
+    for rec in records
+    if str(rec.get("profile_id", "")).strip()
+}
+invariant_statuses = [invariant_status_by_batch.get(str(rec.get("batch_id", "")), "not_compared") for rec in records]
+invariant_status_counts = Counter(invariant_statuses)
+invariant_aggregate_status = "passed" if invariant_statuses and all(status == "passed" for status in invariant_statuses) else "failed"
+
+release_contract_blockers: list[str] = []
+required_sweeps: list[str] = []
+expected_profile_sweep_runs = len(records)
+observed_profile_sweep_runs = len(observed_pairs)
+missing_profile_sweep_pairs: list[str] = []
+extra_profile_sweep_pairs: list[str] = []
+if release_mode:
+    required_sweeps = list(required_release_sweeps)
+    required_sweep_set = set(required_sweeps)
+    observed_sweep_set = set(observed_sweeps)
+    missing_sweeps = sorted(required_sweep_set - observed_sweep_set)
+    extra_sweeps = sorted(observed_sweep_set - required_sweep_set)
+    if missing_sweeps:
+        release_contract_blockers.append("missing_sweeps=" + ",".join(missing_sweeps))
+    if extra_sweeps:
+        release_contract_blockers.append("extra_sweeps=" + ",".join(extra_sweeps))
+
+    expected_pairs = {
+        (profile_id, sweep_id)
+        for profile_id in required_release_profiles
+        for sweep_id in required_release_sweeps
+    }
+    expected_profile_sweep_runs = len(expected_pairs)
+    missing_profile_sweep_pairs = sorted(f"{profile}/{sweep}" for profile, sweep in expected_pairs - observed_pairs)
+    extra_profile_sweep_pairs = sorted(f"{profile}/{sweep}" for profile, sweep in observed_pairs - expected_pairs)
+    observed_profile_sweep_runs = len(observed_pairs)
+    if missing_profile_sweep_pairs:
+        release_contract_blockers.append("missing_profile_sweep_pairs=" + ",".join(missing_profile_sweep_pairs))
+    if extra_profile_sweep_pairs:
+        release_contract_blockers.append("extra_profile_sweep_pairs=" + ",".join(extra_profile_sweep_pairs))
+    if invariant_aggregate_status != "passed":
+        release_contract_blockers.append(f"shard_plan_invariant_status={invariant_aggregate_status}")
+
+release_contract_status = "passed" if not release_contract_blockers else "failed"
+
 verdict_records: list[dict[str, object]] = []
 strict_fail_count = 0
 
@@ -878,9 +970,9 @@ for rec in records:
         "frontend_cancel_claude_status": parse_frontend_status(frontend_cancel_matrix_md, "claude-code"),
     }
 
-    blockers = strict_blockers(rec, stats, frontend_statuses)
-    blockers.extend(invariant_blockers_by_batch.get(str(rec["batch_id"]), []))
     shard_plan_invariant = invariant_status_by_batch.get(str(rec["batch_id"]), "not_compared")
+    blockers = strict_blockers(rec, stats, frontend_statuses, shard_plan_invariant, release_mode)
+    blockers.extend(invariant_blockers_by_batch.get(str(rec["batch_id"]), []))
     strict_status = "passed" if not blockers else "failed"
     if blockers:
         strict_fail_count += 1
@@ -992,7 +1084,8 @@ for rec in records:
         }
     )
 
-verdict = "PASS" if strict_fail_count == 0 else "FAIL"
+release_contract_failed = release_mode and release_contract_status != "passed"
+verdict = "PASS" if strict_fail_count == 0 and not release_contract_failed else "FAIL"
 release_state = "RELEASE READY" if verdict == "PASS" else "RELEASE BLOCKED"
 
 out_md.parent.mkdir(parents=True, exist_ok=True)
@@ -1008,11 +1101,13 @@ verdict_lines = [
     f"- profile_sweep_runs: {len(verdict_records)}",
     f"- strict_pass_runs: {len(verdict_records) - strict_fail_count}",
     f"- strict_fail_runs: {strict_fail_count}",
+    f"- release_mode: {'1' if release_mode else '0'}",
+    f"- release_contract_status: {release_contract_status}",
     "",
     "## Blocking Items",
 ]
 
-if strict_fail_count == 0:
+if strict_fail_count == 0 and not release_contract_failed:
     verdict_lines.append("- none")
 else:
     for item in verdict_records:
@@ -1028,6 +1123,23 @@ else:
         verdict_lines.append(f"  - quality_report: {artifacts['quality_report_md']}")
         verdict_lines.append(f"  - frontend_matrix: {artifacts['frontend_matrix_md']}")
         verdict_lines.append(f"  - frontend_cancel_matrix: {artifacts['frontend_cancel_matrix_md']}")
+    if release_contract_failed:
+        verdict_lines.append("- release_contract:")
+        for blocker in release_contract_blockers:
+            verdict_lines.append(f"  - {blocker}")
+
+verdict_lines.extend(
+    [
+        "",
+        "## Release Contract",
+        f"- required_sweeps: {', '.join(required_sweeps) if required_sweeps else '-'}",
+        f"- observed_sweeps: {', '.join(observed_sweeps) if observed_sweeps else '-'}",
+        f"- expected_profile_sweep_runs: {expected_profile_sweep_runs}",
+        f"- observed_profile_sweep_runs: {observed_profile_sweep_runs}",
+        f"- shard_plan_invariant_status: {invariant_aggregate_status}",
+        f"- contract_status: {release_contract_status}",
+    ]
+)
 
 verdict_payload = {
     "matrix_id": matrix_id,
@@ -1037,6 +1149,21 @@ verdict_payload = {
     "profile_sweep_runs": len(verdict_records),
     "strict_pass_runs": len(verdict_records) - strict_fail_count,
     "strict_fail_runs": strict_fail_count,
+    "release_contract": {
+        "mode": "release" if release_mode else "non-release",
+        "required_sweeps": required_sweeps,
+        "observed_sweeps": observed_sweeps,
+        "expected_profile_sweep_runs": expected_profile_sweep_runs,
+        "observed_profile_sweep_runs": observed_profile_sweep_runs,
+        "required_profiles": list(required_release_profiles) if release_mode else [],
+        "observed_profiles": observed_profiles,
+        "missing_profile_sweep_pairs": missing_profile_sweep_pairs,
+        "extra_profile_sweep_pairs": extra_profile_sweep_pairs,
+        "shard_plan_invariant_status": invariant_aggregate_status,
+        "shard_plan_invariant_counts": dict(invariant_status_counts),
+        "contract_status": release_contract_status,
+        "blocking_reasons": release_contract_blockers,
+    },
     "records": verdict_records,
 }
 
