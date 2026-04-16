@@ -132,7 +132,7 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 	domainID string,
 	repoScopes []string,
 	taskSuffixPrefix string,
-) ([]runtimeTaskExecution, error) {
+) ([]runtimeTaskExecution, runtimeShardOutcome, error) {
 	plans, plannerWarnings, semanticGraph := e.planRuntimeShards(repoScopes)
 	for _, warning := range plannerWarnings {
 		message := strings.TrimSpace(warning)
@@ -170,7 +170,7 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 	bestEffort := failurePolicy == "best_effort"
 
 	if err := e.persistShardPlan(stepID, domainID, plans, plannerWarnings, semanticGraph, strategy, maxParallel, failurePolicy); err != nil {
-		return nil, err
+		return nil, runtimeShardOutcome{}, err
 	}
 
 	e.logInfo(stepID, domainID, "runtime shard execution prepared", map[string]any{
@@ -182,13 +182,18 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 	})
 
 	results := make([]runtimeShardRunResult, len(plans))
+	for idx, plan := range plans {
+		results[idx].Plan = plan
+	}
+	var terminalErr error
 	if maxParallel <= 1 || len(plans) <= 1 {
 		for idx, plan := range plans {
 			taskSuffix := buildShardTaskSuffix(taskSuffixPrefix, plan.ShardID)
 			prepared, err := e.runRuntimeTaskNormalized(ctx, stepID, taskSuffix, plan.RepoScopes, plan.PathScopes, domainID, plan.ShardID)
 			results[idx] = runtimeShardRunResult{Plan: plan, Prepared: prepared, Err: err}
 			if err != nil && !bestEffort {
-				return nil, err
+				terminalErr = err
+				break
 			}
 		}
 	} else {
@@ -224,16 +229,29 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 		}
 		wg.Wait()
 		if firstErr != nil {
-			return nil, firstErr
+			terminalErr = firstErr
 		}
 	}
 
 	executions := make([]runtimeTaskExecution, 0, len(plans))
 	summary := make([]runtimeShardSummaryEntry, 0, len(plans))
+	outcome := runtimeShardOutcome{PlannedShards: len(plans)}
 
 	singleShard := len(plans) == 1
 	for _, result := range results {
+		if result.Err == nil && result.Prepared.Task.TaskID == "" && terminalErr != nil && !bestEffort {
+			outcome.FailedShards++
+			summary = append(summary, runtimeShardSummaryEntry{
+				ShardID:    result.Plan.ShardID,
+				RepoScopes: append([]string(nil), result.Plan.RepoScopes...),
+				PathScopes: append([]string(nil), result.Plan.PathScopes...),
+				Status:     "failed",
+				Error:      "shard not executed because fail_fast aborted remaining work",
+			})
+			continue
+		}
 		if result.Err != nil {
+			outcome.FailedShards++
 			summary = append(summary, runtimeShardSummaryEntry{
 				ShardID:    result.Plan.ShardID,
 				RepoScopes: append([]string(nil), result.Plan.RepoScopes...),
@@ -245,11 +263,15 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 				e.registerPartialShardFailure(stepID, domainID, result.Plan, result.Err)
 				continue
 			}
-			return nil, result.Err
+			if terminalErr == nil {
+				terminalErr = result.Err
+			}
+			continue
 		}
 
 		execution, err := e.applyRuntimeTaskExecution(stepID, domainID, result.Prepared)
 		if err != nil {
+			outcome.FailedShards++
 			summary = append(summary, runtimeShardSummaryEntry{
 				ShardID:    result.Plan.ShardID,
 				RepoScopes: append([]string(nil), result.Plan.RepoScopes...),
@@ -262,13 +284,16 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 				e.registerPartialShardFailure(stepID, domainID, result.Plan, err)
 				continue
 			}
-			return nil, err
+			if terminalErr == nil {
+				terminalErr = err
+			}
+			continue
 		}
 
 		taskrunPath := shardTaskrunPath(e.runID, stepID, domainID, result.Plan.ShardID, singleShard)
 		taskrunLabel := shardTaskrunLabel(stepID, domainID, result.Plan.ShardID, singleShard)
 		if err := e.persistTaskRun(taskrunPath, taskrunLabel, result.Prepared.NormalizedRaw); err != nil {
-			return nil, err
+			return nil, runtimeShardOutcome{}, err
 		}
 		summary = append(summary, runtimeShardSummaryEntry{
 			ShardID:    result.Plan.ShardID,
@@ -278,13 +303,17 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 			TaskID:     result.Prepared.Task.TaskID,
 			TaskRun:    taskrunPath,
 		})
+		outcome.SucceededShards++
 		executions = append(executions, execution)
 	}
 
 	if err := e.persistShardSummary(stepID, domainID, summary); err != nil {
-		return nil, err
+		return nil, runtimeShardOutcome{}, err
 	}
-	return executions, nil
+	if terminalErr != nil {
+		return nil, outcome, terminalErr
+	}
+	return executions, outcome, nil
 }
 
 func (e *pipelineExecution) registerPartialShardFailure(stepID string, domainID string, plan runtimeShardPlan, err error) {

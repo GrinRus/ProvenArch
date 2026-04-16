@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/GrinRus/ProvenArch/internal/reports"
 )
 
 type runtimeStepQuality struct {
@@ -37,17 +39,18 @@ type runQualityTotals struct {
 }
 
 type runQualitySummary struct {
-	Version         int                  `json:"version"`
-	RunID           string               `json:"run_id"`
-	Pipeline        string               `json:"pipeline"`
-	Status          RunStatus            `json:"status"`
-	ErrorCode       string               `json:"error_code,omitempty"`
-	Error           string               `json:"error,omitempty"`
-	GeneratedAt     string               `json:"generated_at"`
-	RuntimeVersions []string             `json:"runtime_versions"`
-	RunWarnings     []string             `json:"run_warnings,omitempty"`
-	Totals          runQualityTotals     `json:"totals"`
-	Steps           []runtimeStepQuality `json:"steps"`
+	Version         int                         `json:"version"`
+	RunID           string                      `json:"run_id"`
+	Pipeline        string                      `json:"pipeline"`
+	Status          RunStatus                   `json:"status"`
+	ErrorCode       string                      `json:"error_code,omitempty"`
+	Error           string                      `json:"error,omitempty"`
+	GeneratedAt     string                      `json:"generated_at"`
+	RuntimeVersions []string                    `json:"runtime_versions"`
+	RunWarnings     []string                    `json:"run_warnings,omitempty"`
+	EvidenceState   reports.ReportRenderContext `json:"evidence_state"`
+	Totals          runQualityTotals            `json:"totals"`
+	Steps           []runtimeStepQuality        `json:"steps"`
 }
 
 func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode string, errorMessage string) (Artifact, error) {
@@ -89,6 +92,7 @@ func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode s
 		GeneratedAt:     e.clock().UTC().Format(time.RFC3339),
 		RuntimeVersions: versions,
 		RunWarnings:     append([]string(nil), e.warnings...),
+		EvidenceState:   e.terminalRenderContext(status),
 		Totals:          totals,
 		Steps:           steps,
 	}

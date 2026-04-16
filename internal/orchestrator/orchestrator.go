@@ -341,6 +341,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		repoSelectionMode:  validation.RepoSelectionMode,
 		selectedRepoScopes: append([]string(nil), validation.SelectedRepoScopes...),
 		repoSelection:      append([]workspace.RepoSelectionDecision(nil), validation.RepoSelection...),
+		reportContext:      reports.DefaultReportRenderContext(),
 	}
 	if len(execution.selectedRepoScopes) == 0 && execution.repoSelectionMode == workspace.RepoSelectionAll {
 		execution.selectedRepoScopes = collectRepoScopes(request.Workspace.Manifest.Repos)
@@ -1091,6 +1092,10 @@ type pipelineExecution struct {
 	repoSelectionMode        string
 	selectedRepoScopes       []string
 	repoSelection            []workspace.RepoSelectionDecision
+	collectOutcome           runtimeShardOutcome
+	findingsOutcome          runtimeShardOutcome
+	findingsSkipped          bool
+	reportContext            reports.ReportRenderContext
 }
 
 type runtimeTaskExecution struct {
@@ -1192,33 +1197,43 @@ func (e *pipelineExecution) runRuntimeStep(ctx context.Context, stepID string) e
 			return err
 		}
 	} else {
-		if len(normalizeOrderedUniqueStrings(e.selectedRepoScopes)) == 0 {
+		if strings.HasSuffix(stepID, "step3.findings") && e.shouldSkipFindingsRuntime() {
+			e.markFindingsSkipped("findings_skipped_due_to_unusable_collect")
+			e.addWarning(fmt.Sprintf("%s: runtime step skipped because collect evidence is unusable", stepID))
+			e.logWarn(stepID, "", "runtime step skipped", map[string]any{
+				"reason":         "collect evidence is unusable",
+				"collect_status": e.renderContext().Collect.Status,
+			})
+		} else if len(normalizeOrderedUniqueStrings(e.selectedRepoScopes)) == 0 {
 			e.addWarning(fmt.Sprintf("%s: runtime step skipped because repo_selection=%q selected zero repo scopes", stepID, e.repoSelectionMode))
 			e.logWarn(stepID, "", "runtime step skipped", map[string]any{
 				"repo_selection_mode": e.repoSelectionMode,
 				"selected_scopes":     append([]string(nil), e.selectedRepoScopes...),
 			})
 		} else {
-			if _, err := e.executeRuntimeTasksSharded(ctx, stepID, "", append([]string(nil), e.selectedRepoScopes...), ""); err != nil {
+			_, outcome, err := e.executeRuntimeTasksSharded(ctx, stepID, "", append([]string(nil), e.selectedRepoScopes...), "")
+			e.recordRuntimeStepOutcome(stepID, outcome)
+			if err != nil {
 				return err
 			}
 		}
 	}
 
-	coverageArtifacts, err := e.compiler.WriteCoverage(e.coverage, e.questions)
+	renderCtx := e.renderContext()
+	coverageArtifacts, err := e.compiler.WriteCoverage(e.coverage, e.questions, renderCtx)
 	if err != nil {
 		return err
 	}
 	e.addArtifacts(toOrchestratorArtifacts(coverageArtifacts)...)
 
 	if strings.HasSuffix(stepID, "step3.findings") {
-		findingArtifacts, err := e.compiler.WriteFindings(e.findings)
+		findingArtifacts, err := e.compiler.WriteFindings(e.findings, renderCtx)
 		if err != nil {
 			return err
 		}
 		e.addArtifacts(toOrchestratorArtifacts(findingArtifacts)...)
 
-		architectArtifacts, err := e.compiler.WriteArchitectSummary(e.renderArchitectSummary())
+		architectArtifacts, err := e.compiler.WriteArchitectSummary(e.renderArchitectSummary(), renderCtx)
 		if err != nil {
 			return err
 		}
@@ -1362,8 +1377,10 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 		}
 		partialFailuresBefore := len(e.partialFailures)
 		executions := []runtimeTaskExecution{}
+		outcome := runtimeShardOutcome{}
 		if skipReason == "" {
-			executions, err = e.executeRuntimeTasksSharded(ctx, stepID, domainID, domainScopes, "domain-"+sanitizeDomainArtifactSlug(domainID))
+			executions, outcome, err = e.executeRuntimeTasksSharded(ctx, stepID, domainID, domainScopes, "domain-"+sanitizeDomainArtifactSlug(domainID))
+			e.recordRuntimeStepOutcome(stepID, outcome)
 			if err != nil {
 				return err
 			}
@@ -1378,6 +1395,9 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 		domainFailedShards := partialFailuresAfter - partialFailuresBefore
 		if domainFailedShards < 0 {
 			domainFailedShards = 0
+		}
+		if outcome.FailedShards > 0 {
+			domainFailedShards = outcome.FailedShards
 		}
 		aggregatedApply := model.ApplyReport{}
 		aggregatedQuestions := make([]contracts.Question, 0, len(executions))
@@ -1394,7 +1414,10 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 		}
 		questionIDs := extractQuestionIDs(aggregatedQuestions)
 		findingIDs := extractFindingIDs(aggregatedApply.Findings)
-		domainTotalShards := len(executions) + domainFailedShards
+		domainTotalShards := outcome.PlannedShards
+		if domainTotalShards == 0 {
+			domainTotalShards = len(executions) + domainFailedShards
+		}
 		runtimeSummary := strings.Join(normalizeOrderedUniqueStrings(summaries), " | ")
 		if runtimeSummary == "" {
 			runtimeSummary = "none"
@@ -1407,7 +1430,7 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 				"%s [shards_total=%d succeeded=%d failed=%d]",
 				runtimeSummary,
 				domainTotalShards,
-				len(executions),
+				outcome.SucceededShards,
 				domainFailedShards,
 			)
 		}
@@ -1788,7 +1811,7 @@ func (e *pipelineExecution) runStepAsIs() error {
 	if err != nil {
 		return err
 	}
-	artifacts, err := e.compiler.CompileAsIs(entities, edges)
+	artifacts, err := e.compiler.CompileAsIs(entities, edges, e.renderContext())
 	if err != nil {
 		return err
 	}
@@ -1810,7 +1833,7 @@ func (e *pipelineExecution) runStepProposals() error {
 	e.logInfo(e.stepStatus.CurrentStep, "", "compiling proposals", map[string]any{
 		"findings": len(e.findings),
 	})
-	artifacts, err := e.compiler.CompileProposals(e.findings)
+	artifacts, err := e.compiler.CompileProposals(e.findings, e.renderContext())
 	if err != nil {
 		return err
 	}

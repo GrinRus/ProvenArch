@@ -85,7 +85,7 @@
    - Выполняет runtime collect-step per-domain и сохраняет отдельные raw taskruns в `reports/taskruns/*-step1-collect-domain-*.json`
    - Runtime sharding planner (heuristics/semantic) materialize-ит deterministic shard-plan artifacts `reports/taskruns/*-shard-plan*.json` и shard-summary artifacts `reports/taskruns/*-shard-summary*.json`
    - Scheduler поддерживает `sequential|parallel` execution с worker-pool (`max_parallel_tasks`) и `fail_fast|best_effort` failure-policy
-   - При `best_effort` downstream шаги продолжаются на partial model, но итог run фиксируется как `failed` с `error_code=run_partial_failed`
+   - При `best_effort` downstream шаги продолжаются на partial model, но итог run фиксируется как `failed` с `error_code=run_partial_failed`; если `step1.collect` становится `unusable`, live `step3.findings` не выполняется, а downstream markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) materialize-ятся в `report_mode=incomplete` с явным banner/triage-only wording
    - Вызывает runtime adapter
    - Валидирует TaskResult (schema)
    - Нормализует canonical top-level `questions`/`coverage` (dedupe/canonicalization) без ingestion из legacy operations
@@ -108,7 +108,7 @@
      - `executeRuntimeTask` выполняет runner под `context.WithTimeout(step_timeout_sec)`
      - heartbeat-log `runtime task heartbeat` публикуется раз в `heartbeat_sec`
      - timeout/cancel причины добавляются в error message без изменения `error_code` контракта
-   - Materialize-ит per-run quality summary `reports/taskruns/<run_id>-quality.json` (signal metrics/runtime versions)
+   - Materialize-ит per-run quality summary `reports/taskruns/<run_id>-quality.json` (signal metrics/runtime versions + `evidence_state.collect/findings/report_mode/reasons`)
    - Materialize-ит per-run repo selection summary `reports/taskruns/<run_id>-repo-selection-summary.json` (mode + selected scopes + include/exclude reasons)
    - Run logs retention policy (TTL + max runs) запускается при старте сервиса, перед run и после run
    - (опционально) делает git commit

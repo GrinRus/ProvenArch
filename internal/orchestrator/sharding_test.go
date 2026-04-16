@@ -239,6 +239,211 @@ func TestRunInitBestEffortShardFailureContinuesAndFailsFinal(t *testing.T) {
 	}
 }
 
+func TestRunInitAllStep1ShardsFailedMarksEvidenceUnusableAndSkipsFindingsRuntime(t *testing.T) {
+	t.Parallel()
+
+	ws := createShardingWorkspace(t, shardingWorkspaceOptions{
+		Strategy:      acpruntime.ExecutionStrategyParallel,
+		MaxParallel:   2,
+		FailurePolicy: acpruntime.ExecutionFailurePolicyBestEffort,
+		ShardMode:     acpruntime.ExecutionShardDiscoveryHeuristics,
+	})
+	service := NewService(WithRunner(allStep1ShardFailureRunner{}))
+
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err == nil {
+		t.Fatalf("expected run error due to unusable collect evidence")
+	}
+	if info.Status != RunStatusFailed {
+		t.Fatalf("expected failed status, got %s", info.Status)
+	}
+	if info.ErrorCode != runErrorCodePartialFailed {
+		t.Fatalf("expected %q error code, got %q", runErrorCodePartialFailed, info.ErrorCode)
+	}
+	if info.CurrentStep != "init.step4.proposals" {
+		t.Fatalf("expected pipeline to continue through step4, got %q", info.CurrentStep)
+	}
+
+	quality := readRunQualitySummary(t, ws, info.RunID)
+	if quality.EvidenceState.Collect.Status != "unusable" {
+		t.Fatalf("expected collect evidence unusable, got %+v", quality.EvidenceState.Collect)
+	}
+	if quality.EvidenceState.Findings.Status != "skipped" {
+		t.Fatalf("expected findings evidence skipped, got %+v", quality.EvidenceState.Findings)
+	}
+	if quality.EvidenceState.ReportMode != "incomplete" {
+		t.Fatalf("expected incomplete report mode, got %+v", quality.EvidenceState)
+	}
+
+	step3Summaries, globErr := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-init-step3-findings-shard-summary*.json"))
+	if globErr != nil {
+		t.Fatalf("glob step3 shard summaries: %v", globErr)
+	}
+	if len(step3Summaries) != 0 {
+		t.Fatalf("expected no step3 shard summary artifacts when findings runtime is skipped, got %v", step3Summaries)
+	}
+
+	serviceCatalog := mustReadFile(t, filepath.Join(ws.Path, "reports/as-is/service-catalog.md"))
+	if !strings.Contains(serviceCatalog, "Analysis incomplete.") {
+		t.Fatalf("expected incomplete-analysis banner in service catalog, got:\n%s", serviceCatalog)
+	}
+	if !strings.Contains(serviceCatalog, "No evidence-backed services were materialized because analysis did not complete.") {
+		t.Fatalf("expected unusable collect empty-state, got:\n%s", serviceCatalog)
+	}
+	if strings.Contains(serviceCatalog, "No services found.") {
+		t.Fatalf("did not expect misleading service empty-state, got:\n%s", serviceCatalog)
+	}
+
+	coverageSummary := mustReadFile(t, filepath.Join(ws.Path, "reports/coverage/summary.md"))
+	if !strings.Contains(coverageSummary, "Unknown due to incomplete analysis.") {
+		t.Fatalf("expected incomplete coverage wording, got:\n%s", coverageSummary)
+	}
+	openQuestions := mustReadFile(t, filepath.Join(ws.Path, "reports/coverage/open-questions.md"))
+	if !strings.Contains(openQuestions, "Open questions unavailable due to incomplete analysis.") {
+		t.Fatalf("expected incomplete questions wording, got:\n%s", openQuestions)
+	}
+
+	findingsReport := mustReadFile(t, filepath.Join(ws.Path, "reports/findings/findings.md"))
+	if !strings.Contains(findingsReport, "Findings unavailable because analysis did not complete.") {
+		t.Fatalf("expected incomplete findings wording, got:\n%s", findingsReport)
+	}
+
+	proposal := mustReadFile(t, filepath.Join(ws.Path, "proposals/proposal-baseline/proposal.md"))
+	if !strings.Contains(proposal, "Proposal generation incomplete because no reliable findings set was produced.") {
+		t.Fatalf("expected incomplete proposal wording, got:\n%s", proposal)
+	}
+
+	architectSummary := mustReadFile(t, filepath.Join(ws.Path, "reports/agent-outputs/architect/summary.md"))
+	if !strings.Contains(architectSummary, "Analysis incomplete.") {
+		t.Fatalf("expected incomplete-analysis banner in architect summary, got:\n%s", architectSummary)
+	}
+}
+
+func TestRunInitPartialCollectMarksArtifactsIncompleteAndKeepsMaterializedData(t *testing.T) {
+	t.Parallel()
+
+	ws := createShardingWorkspace(t, shardingWorkspaceOptions{
+		Strategy:      acpruntime.ExecutionStrategyParallel,
+		MaxParallel:   2,
+		FailurePolicy: acpruntime.ExecutionFailurePolicyBestEffort,
+		ShardMode:     acpruntime.ExecutionShardDiscoveryHeuristics,
+	})
+	service := NewService(WithRunner(step1ShardFailureRunner{}))
+
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err == nil {
+		t.Fatalf("expected run error due to partial shard failure")
+	}
+	if info.ErrorCode != runErrorCodePartialFailed {
+		t.Fatalf("expected %q error code, got %q", runErrorCodePartialFailed, info.ErrorCode)
+	}
+
+	quality := readRunQualitySummary(t, ws, info.RunID)
+	if quality.EvidenceState.Collect.Status != "partial" {
+		t.Fatalf("expected collect evidence partial, got %+v", quality.EvidenceState.Collect)
+	}
+	if quality.EvidenceState.ReportMode != "incomplete" {
+		t.Fatalf("expected incomplete report mode, got %+v", quality.EvidenceState)
+	}
+
+	serviceCatalog := mustReadFile(t, filepath.Join(ws.Path, "reports/as-is/service-catalog.md"))
+	if !strings.Contains(serviceCatalog, "Partial analysis. Some shards failed; downstream content may be incomplete.") {
+		t.Fatalf("expected partial-analysis banner in service catalog, got:\n%s", serviceCatalog)
+	}
+	if !strings.Contains(serviceCatalog, "svc.orders-monolith") {
+		t.Fatalf("expected materialized service data to remain in partial analysis, got:\n%s", serviceCatalog)
+	}
+	if strings.Contains(serviceCatalog, "No evidence-backed services were materialized") {
+		t.Fatalf("did not expect unusable collect empty-state for partial analysis, got:\n%s", serviceCatalog)
+	}
+
+	findingsReport := mustReadFile(t, filepath.Join(ws.Path, "reports/findings/findings.md"))
+	if !strings.Contains(findingsReport, "Partial analysis. Some shards failed; downstream content may be incomplete.") {
+		t.Fatalf("expected partial-analysis banner in findings report, got:\n%s", findingsReport)
+	}
+
+	serviceDetails := mustReadFile(t, filepath.Join(ws.Path, "reports/as-is/services/svc.orders-monolith.md"))
+	if !strings.Contains(serviceDetails, "Partial analysis. Some shards failed; downstream content may be incomplete.") {
+		t.Fatalf("expected partial-analysis banner in per-service report, got:\n%s", serviceDetails)
+	}
+}
+
+func TestRunInitStep3AllShardsFailedKeepsAsIsButMarksFindingsUnusable(t *testing.T) {
+	t.Parallel()
+
+	ws := createShardingWorkspace(t, shardingWorkspaceOptions{
+		Strategy:      acpruntime.ExecutionStrategyParallel,
+		MaxParallel:   2,
+		FailurePolicy: acpruntime.ExecutionFailurePolicyBestEffort,
+		ShardMode:     acpruntime.ExecutionShardDiscoveryHeuristics,
+	})
+	service := NewService(WithRunner(step3ParseFailureRunner{}))
+
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err == nil {
+		t.Fatalf("expected run error due to findings shard failures")
+	}
+	if info.ErrorCode != runErrorCodePartialFailed {
+		t.Fatalf("expected %q error code, got %q", runErrorCodePartialFailed, info.ErrorCode)
+	}
+
+	quality := readRunQualitySummary(t, ws, info.RunID)
+	if quality.EvidenceState.Collect.Status != "usable" {
+		t.Fatalf("expected collect evidence usable, got %+v", quality.EvidenceState.Collect)
+	}
+	if quality.EvidenceState.Findings.Status != "unusable" {
+		t.Fatalf("expected findings evidence unusable, got %+v", quality.EvidenceState.Findings)
+	}
+	if quality.EvidenceState.ReportMode != "incomplete" {
+		t.Fatalf("expected incomplete report mode, got %+v", quality.EvidenceState)
+	}
+
+	step3Summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step3-findings-shard-summary.json"))
+	if len(step3Summary.Items) == 0 {
+		t.Fatalf("expected step3 shard summary items")
+	}
+	for _, item := range step3Summary.Items {
+		if item.Status != "failed" {
+			t.Fatalf("expected all step3 shard summary items failed, got %+v", step3Summary.Items)
+		}
+	}
+
+	serviceCatalog := mustReadFile(t, filepath.Join(ws.Path, "reports/as-is/service-catalog.md"))
+	if !strings.Contains(serviceCatalog, "svc.orders-monolith") {
+		t.Fatalf("expected as-is artifacts from successful collect step, got:\n%s", serviceCatalog)
+	}
+	if strings.Contains(serviceCatalog, "No evidence-backed services were materialized") {
+		t.Fatalf("did not expect unusable collect empty-state, got:\n%s", serviceCatalog)
+	}
+
+	findingsReport := mustReadFile(t, filepath.Join(ws.Path, "reports/findings/findings.md"))
+	if !strings.Contains(findingsReport, "Findings unavailable because analysis did not complete.") {
+		t.Fatalf("expected incomplete findings wording, got:\n%s", findingsReport)
+	}
+
+	proposal := mustReadFile(t, filepath.Join(ws.Path, "proposals/proposal-baseline/proposal.md"))
+	if !strings.Contains(proposal, "Proposal generation incomplete because no reliable findings set was produced.") {
+		t.Fatalf("expected incomplete proposal wording, got:\n%s", proposal)
+	}
+
+	adrDraft := mustReadFile(t, filepath.Join(ws.Path, "proposals/proposal-baseline/ADR.md"))
+	if !strings.Contains(adrDraft, "This draft is triage-only because analysis did not complete.") {
+		t.Fatalf("expected triage-only note in ADR draft, got:\n%s", adrDraft)
+	}
+}
+
 func TestRunInitFailFastStopsOnShardFailure(t *testing.T) {
 	t.Parallel()
 
@@ -266,6 +471,20 @@ func TestRunInitFailFastStopsOnShardFailure(t *testing.T) {
 	}
 	if info.CurrentStep != "init.step1.collect" {
 		t.Fatalf("expected fail_fast stop at step1, got %q", info.CurrentStep)
+	}
+
+	quality := readRunQualitySummary(t, ws, info.RunID)
+	if quality.EvidenceState.Collect.Status == "usable" {
+		t.Fatalf("expected non-usable collect evidence after fail_fast step1 abort, got %+v", quality.EvidenceState.Collect)
+	}
+	if quality.EvidenceState.Collect.PlannedShards == 0 {
+		t.Fatalf("expected collect shard outcome to be preserved after fail_fast abort, got %+v", quality.EvidenceState.Collect)
+	}
+	if quality.EvidenceState.Findings.Status != "skipped" {
+		t.Fatalf("expected findings evidence skipped after pipeline abort, got %+v", quality.EvidenceState.Findings)
+	}
+	if quality.EvidenceState.ReportMode != "incomplete" {
+		t.Fatalf("expected incomplete report mode after pipeline abort, got %+v", quality.EvidenceState)
 	}
 
 	step3Summaries, globErr := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-init-step3-findings-shard-summary*.json"))
@@ -677,6 +896,24 @@ func (step1ShardFailureRunner) Preflight(context.Context) error {
 	return nil
 }
 
+type allStep1ShardFailureRunner struct{}
+
+func (allStep1ShardFailureRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	if strings.HasSuffix(task.StepID, "step1.collect") {
+		return acpruntime.Result{}, acpruntime.WrapRunnerError(
+			acpruntime.ProviderClaudeCode,
+			acpruntime.ErrorCodeRunnerParseFailed,
+			"synthetic shard parse failure on all collect shards",
+			errors.New("synthetic shard parse failure"),
+		)
+	}
+	return claudecode.FakeRunner{}.Run(ctx, task)
+}
+
+func (allStep1ShardFailureRunner) Preflight(context.Context) error {
+	return nil
+}
+
 type concurrencyProbeRunner struct {
 	delay time.Duration
 
@@ -767,6 +1004,56 @@ func readJSONFile(t *testing.T, path string, dst any) {
 	if err := json.Unmarshal(content, dst); err != nil {
 		t.Fatalf("decode %s: %v", path, err)
 	}
+}
+
+func mustReadFile(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(content)
+}
+
+func readRunQualitySummary(t *testing.T, ws workspace.Root, runID string) struct {
+	EvidenceState struct {
+		Collect struct {
+			Status          string `json:"status"`
+			PlannedShards   int    `json:"planned_shards"`
+			SucceededShards int    `json:"succeeded_shards"`
+			FailedShards    int    `json:"failed_shards"`
+		} `json:"collect"`
+		Findings struct {
+			Status          string `json:"status"`
+			PlannedShards   int    `json:"planned_shards"`
+			SucceededShards int    `json:"succeeded_shards"`
+			FailedShards    int    `json:"failed_shards"`
+		} `json:"findings"`
+		ReportMode string   `json:"report_mode"`
+		Reasons    []string `json:"reasons"`
+	} `json:"evidence_state"`
+} {
+	t.Helper()
+	var summary struct {
+		EvidenceState struct {
+			Collect struct {
+				Status          string `json:"status"`
+				PlannedShards   int    `json:"planned_shards"`
+				SucceededShards int    `json:"succeeded_shards"`
+				FailedShards    int    `json:"failed_shards"`
+			} `json:"collect"`
+			Findings struct {
+				Status          string `json:"status"`
+				PlannedShards   int    `json:"planned_shards"`
+				SucceededShards int    `json:"succeeded_shards"`
+				FailedShards    int    `json:"failed_shards"`
+			} `json:"findings"`
+			ReportMode string   `json:"report_mode"`
+			Reasons    []string `json:"reasons"`
+		} `json:"evidence_state"`
+	}
+	readJSONFile(t, filepath.Join(ws.Path, "reports", "taskruns", runID+"-quality.json"), &summary)
+	return summary
 }
 
 func containsWarning(warnings []string, needle string) bool {

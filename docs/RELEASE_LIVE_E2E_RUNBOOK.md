@@ -214,12 +214,16 @@ Zero tolerance:
 - `quality_gates_failed`
 - `precheck_failed`
 
+Дополнительно:
+- если run завершился `run_partial_failed` и `reports/taskruns/<run_id>-quality.json.evidence_state.report_mode=incomplete`, generated markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) читать только как triage-only artifacts; banner/triage-only wording обязаны явно указывать на incomplete analysis, а не имитировать пустой успешный verdict.
+
 ### 6.7 Triage rule for runtime timeout/infra signals
 
 Если в любом `profile+sweep` появляются `runtime_timeout` или `infra_*`:
 - считать это blocking runtime incident для релизного verdict;
-- сначала проверить `driver.log` (matrix + batch), затем `session-summary.md` и `full-run.log` в `runs/<batch-id>/<provider>/runN/`;
+- сначала проверить `driver.log` (matrix + batch), затем `session-summary.md` и `full-run.log` в `runs/<batch-id>/<provider>/runN/`, затем `arch-workspace/reports/taskruns/logs/*.ndjson` и `reports/taskruns/raw/*` для первичного runtime signal;
 - отделить induced failures (например, debug timeout override) от реальной runtime/provider деградации;
+- если raw/taskrun logs показывают `runner_parse_failed` или `runner_unavailable`, считать их primary failure class даже если `session-summary.md` дополнительно фиксирует `infra_incomplete_cycle`;
 - для release decision использовать только прогон без diagnostic timeout overrides.
 
 ## 7) Strict release acceptance
