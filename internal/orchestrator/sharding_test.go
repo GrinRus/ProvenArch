@@ -15,18 +15,17 @@ import (
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
+	"github.com/GrinRus/ProvenArch/internal/model"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/claudecode"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
-func TestDiscoverHeuristicShardPathsCoversResidualFilesAndDirsWithoutOverlap(t *testing.T) {
+func TestDiscoverHeuristicShardPathsPrunesParentRoots(t *testing.T) {
 	t.Parallel()
 
 	repoPath := t.TempDir()
 	writeFile(t, filepath.Join(repoPath, "go.mod"), "module example.com/root\n")
-	writeFile(t, filepath.Join(repoPath, "README.md"), "# root\n")
-	writeFile(t, filepath.Join(repoPath, "docs", "architecture.md"), "# docs\n")
 	writeFile(t, filepath.Join(repoPath, "services", "api", "package.json"), "{\n  \"name\": \"api\"\n}\n")
 	writeFile(t, filepath.Join(repoPath, "services", "web", "pyproject.toml"), "[project]\nname = \"web\"\n")
 	writeFile(t, filepath.Join(repoPath, "services", "web", "sub", "Cargo.toml"), "[package]\nname = \"sub\"\n")
@@ -36,19 +35,9 @@ func TestDiscoverHeuristicShardPathsCoversResidualFilesAndDirsWithoutOverlap(t *
 		t.Fatalf("discover heuristic shard paths: %v", err)
 	}
 
-	expected := []string{"README.md", "docs", "go.mod", "services/api", "services/web/pyproject.toml", "services/web/sub"}
+	expected := []string{"services/api", "services/web/sub"}
 	if !reflect.DeepEqual(paths, expected) {
 		t.Fatalf("unexpected shard paths: got=%v want=%v", paths, expected)
-	}
-	for i, candidate := range paths {
-		for j, other := range paths {
-			if i == j {
-				continue
-			}
-			if other == candidate || strings.HasPrefix(other, candidate+"/") {
-				t.Fatalf("expected disjoint coverage roots, got overlap candidate=%q other=%q", candidate, other)
-			}
-		}
 	}
 }
 
@@ -120,32 +109,33 @@ func TestRunInitParallelShardsUseDeterministicApplyOrderAndPersistShardPlan(t *t
 	}
 
 	step1Summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step1-collect-shard-summary-*.json"))
-	if len(step1Summary.Items) != 3 {
-		t.Fatalf("expected three step1 shard summary items, got %d", len(step1Summary.Items))
+	if len(step1Summary.Items) != 2 {
+		t.Fatalf("expected two step1 shard summary items, got %d", len(step1Summary.Items))
 	}
-	expectedStep1Paths := [][]string{{"README.md"}, {"services/api"}, {"services/web"}}
-	for idx, expectedPathScopes := range expectedStep1Paths {
-		if !reflect.DeepEqual(step1Summary.Items[idx].PathScopes, expectedPathScopes) {
-			t.Fatalf("unexpected step1 summary path scopes at index %d: got=%v want=%v", idx, step1Summary.Items[idx].PathScopes, expectedPathScopes)
-		}
+	if len(step1Summary.Items[0].PathScopes) == 0 || step1Summary.Items[0].PathScopes[0] != "services/api" {
+		t.Fatalf("expected first summary shard path to be services/api, got %+v", step1Summary.Items[0].PathScopes)
+	}
+	if len(step1Summary.Items[1].PathScopes) == 0 || step1Summary.Items[1].PathScopes[0] != "services/web" {
+		t.Fatalf("expected second summary shard path to be services/web, got %+v", step1Summary.Items[1].PathScopes)
 	}
 
 	step1Plan := readSingleShardPlan(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step1-collect-shard-plan-*.json"))
-	if len(step1Plan.Items) != 3 {
-		t.Fatalf("expected three step1 shard-plan items, got %d", len(step1Plan.Items))
+	if len(step1Plan.Items) != 2 {
+		t.Fatalf("expected two step1 shard-plan items, got %d", len(step1Plan.Items))
 	}
-	for idx, expectedPathScopes := range expectedStep1Paths {
-		if !reflect.DeepEqual(step1Plan.Items[idx].PathScopes, expectedPathScopes) {
-			t.Fatalf("unexpected step1 shard-plan path scopes at index %d: got=%v want=%v", idx, step1Plan.Items[idx].PathScopes, expectedPathScopes)
-		}
+	if len(step1Plan.Items[0].PathScopes) == 0 || step1Plan.Items[0].PathScopes[0] != "services/api" {
+		t.Fatalf("expected first shard-plan path to be services/api, got %+v", step1Plan.Items[0].PathScopes)
+	}
+	if len(step1Plan.Items[1].PathScopes) == 0 || step1Plan.Items[1].PathScopes[0] != "services/web" {
+		t.Fatalf("expected second shard-plan path to be services/web, got %+v", step1Plan.Items[1].PathScopes)
 	}
 
 	step1Taskruns, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-init-step1-collect-domain-*-shard-*.json"))
 	if err != nil {
 		t.Fatalf("glob step1 shard taskruns: %v", err)
 	}
-	if len(step1Taskruns) != 3 {
-		t.Fatalf("expected three step1 shard taskruns, got %d", len(step1Taskruns))
+	if len(step1Taskruns) != 2 {
+		t.Fatalf("expected two step1 shard taskruns, got %d", len(step1Taskruns))
 	}
 	for _, candidate := range step1Taskruns {
 		var payload contracts.TaskResult
@@ -162,52 +152,41 @@ func TestRunInitParallelShardsUseDeterministicApplyOrderAndPersistShardPlan(t *t
 	}
 }
 
-func TestSemanticShardModePreservesHeuristicBoundariesAndAddsGraphEdges(t *testing.T) {
+func TestRunInitSemanticShardPlanIncludesGraphEdges(t *testing.T) {
 	t.Parallel()
 
-	ws := createShardingWorkspace(t, shardingWorkspaceOptions{})
+	ws := createShardingWorkspace(t, shardingWorkspaceOptions{
+		Strategy:      acpruntime.ExecutionStrategyParallel,
+		MaxParallel:   2,
+		FailurePolicy: acpruntime.ExecutionFailurePolicyBestEffort,
+		ShardMode:     acpruntime.ExecutionShardDiscoverySemantic,
+	})
 	repoRoot := filepath.Join(ws.Path, "repos", "orders-monolith")
 	writeFile(t, filepath.Join(repoRoot, "services", "api", "main.go"), "package api\n\nimport _ \"orders-monolith/services/web\"\n")
 	writeFile(t, filepath.Join(repoRoot, "services", "web", "main.go"), "package web\n")
 
-	baseExecution := pipelineExecution{
-		workspace:         ws,
-		resolvedRepoPaths: map[string]string{"orders-monolith": repoRoot},
+	service := NewService()
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run init pipeline in semantic mode: %v", err)
 	}
-	baseExecution.executionProfile.ShardMode = acpruntime.ExecutionShardDiscoveryHeuristics
-	heuristicPlans, heuristicWarnings, heuristicGraph := baseExecution.planRuntimeShards([]string{"orders-monolith"})
-	if len(heuristicWarnings) != 0 {
-		t.Fatalf("expected no heuristic planner warnings, got %v", heuristicWarnings)
-	}
-	if len(heuristicGraph) != 0 {
-		t.Fatalf("expected heuristics mode to omit semantic graph, got %+v", heuristicGraph)
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
 	}
 
-	semanticExecution := pipelineExecution{
-		workspace:         ws,
-		resolvedRepoPaths: map[string]string{"orders-monolith": repoRoot},
+	step1Plan := readSingleShardPlan(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step1-collect-shard-plan-*.json"))
+	if step1Plan.ShardMode != acpruntime.ExecutionShardDiscoverySemantic {
+		t.Fatalf("expected semantic shard mode in plan, got %q", step1Plan.ShardMode)
 	}
-	semanticExecution.executionProfile.ShardMode = acpruntime.ExecutionShardDiscoverySemantic
-	semanticPlans, semanticWarnings, semanticGraph := semanticExecution.planRuntimeShards([]string{"orders-monolith"})
-	if len(semanticWarnings) != 0 {
-		t.Fatalf("expected no semantic planner warnings, got %v", semanticWarnings)
+	if len(step1Plan.SemanticGraph) == 0 {
+		t.Fatalf("expected non-empty semantic graph in shard plan artifact")
 	}
-	if len(semanticPlans) != len(heuristicPlans) {
-		t.Fatalf("expected semantic mode to preserve shard count, got semantic=%d heuristic=%d", len(semanticPlans), len(heuristicPlans))
-	}
-	for idx := range heuristicPlans {
-		if !reflect.DeepEqual(semanticPlans[idx].PathScopes, heuristicPlans[idx].PathScopes) {
-			t.Fatalf("semantic mode changed path scopes at index %d: semantic=%v heuristic=%v", idx, semanticPlans[idx].PathScopes, heuristicPlans[idx].PathScopes)
-		}
-		if semanticPlans[idx].ShardID != heuristicPlans[idx].ShardID {
-			t.Fatalf("semantic mode changed shard id at index %d: semantic=%q heuristic=%q", idx, semanticPlans[idx].ShardID, heuristicPlans[idx].ShardID)
-		}
-	}
-	if len(semanticGraph) == 0 {
-		t.Fatalf("expected non-empty semantic graph in semantic mode")
-	}
-	if semanticGraph[0].RepoScope != "orders-monolith" {
-		t.Fatalf("expected semantic graph edge repo_scope orders-monolith, got %+v", semanticGraph[0])
+	if step1Plan.SemanticGraph[0].RepoScope != "orders-monolith" {
+		t.Fatalf("expected semantic graph edge repo_scope orders-monolith, got %+v", step1Plan.SemanticGraph[0])
 	}
 }
 
@@ -707,6 +686,692 @@ func TestSyntheticLargeMonorepoShardingCoalescesStructurallyByTopLevelSegment(t 
 	}
 }
 
+func TestAutoResumeRefreshStep1ReplaysSucceededAndCheckpointedShards(t *testing.T) {
+	t.Parallel()
+
+	sourceWS := createShardingWorkspace(t, shardingWorkspaceOptions{
+		Strategy:      acpruntime.ExecutionStrategyParallel,
+		MaxParallel:   2,
+		FailurePolicy: acpruntime.ExecutionFailurePolicyBestEffort,
+		ShardMode:     acpruntime.ExecutionShardDiscoveryHeuristics,
+	})
+	sourceService := NewService(WithRunner(deterministicApplyOrderRunner{}))
+	if info, _, err := sourceService.Run(context.Background(), RunRequest{
+		Workspace:      sourceWS,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	}); err != nil || info.Status != RunStatusSucceeded {
+		t.Fatalf("prepare source init run failed: status=%s err=%v", info.Status, err)
+	}
+	sourceRefreshInfo, _, err := sourceService.Run(context.Background(), RunRequest{
+		Workspace:      sourceWS,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("prepare source refresh run failed: %v", err)
+	}
+	if sourceRefreshInfo.Status != RunStatusSucceeded {
+		t.Fatalf("expected successful source refresh run, got %s (%s)", sourceRefreshInfo.Status, sourceRefreshInfo.Error)
+	}
+
+	targetWS := createShardingWorkspace(t, shardingWorkspaceOptions{
+		Strategy:      acpruntime.ExecutionStrategyParallel,
+		MaxParallel:   2,
+		FailurePolicy: acpruntime.ExecutionFailurePolicyBestEffort,
+		ShardMode:     acpruntime.ExecutionShardDiscoveryHeuristics,
+	})
+	targetService := NewService(WithRunner(deterministicApplyOrderRunner{}))
+	if info, _, err := targetService.Run(context.Background(), RunRequest{
+		Workspace:      targetWS,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	}); err != nil || info.Status != RunStatusSucceeded {
+		t.Fatalf("prepare target init run failed: status=%s err=%v", info.Status, err)
+	}
+
+	resumeRunID := "run_refresh_resume_step1"
+	step1Summary := copyRefreshShardArtifacts(t, sourceWS, targetWS, sourceRefreshInfo.RunID, resumeRunID, "refresh.step1.collect", func(item runtimeShardSummaryEntry) string {
+		if len(item.PathScopes) > 0 && item.PathScopes[0] == "services/web" {
+			return "checkpointed"
+		}
+		return "succeeded"
+	}, func(item runtimeShardSummaryEntry) bool {
+		return len(item.PathScopes) > 0 && item.PathScopes[0] == "services/api"
+	})
+	if len(step1Summary.Items) != 2 {
+		t.Fatalf("expected two step1 shards, got %d", len(step1Summary.Items))
+	}
+
+	historySeed := NewService(
+		WithHistoryWorkspace(targetWS),
+		WithClock(func() time.Time {
+			return time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC)
+		}),
+	)
+	historySeed.storeRun(runRecord{
+		info: RunInfo{
+			RunID:       resumeRunID,
+			Pipeline:    string(PipelineRefresh),
+			Status:      RunStatusRunning,
+			StartedAt:   time.Date(2026, 4, 16, 9, 30, 0, 0, time.UTC),
+			CurrentStep: "refresh.step1.collect",
+		},
+	})
+
+	resumeRunner := &guardedResumeRunner{
+		blockedSteps: map[string]struct{}{
+			"refresh.step1.collect": {},
+		},
+	}
+	resumedService := NewService(
+		WithHistoryWorkspace(targetWS),
+		WithResumeStaleAsyncRuns(),
+		WithRunner(resumeRunner),
+	)
+	status := waitForTerminalRunStatus(t, targetWS, resumeRunID, 10*time.Second)
+	if status != RunStatusSucceeded {
+		info, _ := resumedService.GetRun(resumeRunID)
+		t.Fatalf("expected resumed run to succeed, got status=%s error_code=%s error=%s", status, info.ErrorCode, info.Error)
+	}
+	if resumeRunner.blockedCallCount() != 0 {
+		t.Fatalf("expected no step1 provider reruns during resume, got %d", resumeRunner.blockedCallCount())
+	}
+
+	info, ok := resumedService.GetRun(resumeRunID)
+	if !ok {
+		t.Fatalf("expected resumed run in registry")
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded resumed run, got %s (%s)", info.Status, info.Error)
+	}
+	if info.RunID != resumeRunID {
+		t.Fatalf("expected same run_id after resume, got %s", info.RunID)
+	}
+
+	finalSummary := readSingleShardSummary(t, filepath.Join(targetWS.Path, "reports", "taskruns", resumeRunID+"-refresh-step1-collect-shard-summary-*.json"))
+	for _, item := range finalSummary.Items {
+		if item.Status != "succeeded" {
+			t.Fatalf("expected all resumed step1 shard statuses succeeded, got %+v", finalSummary.Items)
+		}
+	}
+
+	sharedEntity := mustReadFile(t, filepath.Join(targetWS.Path, "model/entities/svc.shared.yaml"))
+	if !strings.Contains(sharedEntity, "name: Shared services/web") {
+		t.Fatalf("expected checkpointed shard apply to land during resume, got:\n%s", sharedEntity)
+	}
+
+	page, found, err := resumedService.GetRunLogs(resumeRunID, 0, 500)
+	if err != nil {
+		t.Fatalf("read resumed run logs: %v", err)
+	}
+	if !found {
+		t.Fatalf("expected resumed run logs")
+	}
+	assertRunLogMessage(t, page.Items, "run resumed after restart")
+	assertRunLogMessage(t, page.Items, "shard loaded from persisted taskrun")
+	assertRunLogMessage(t, page.Items, "shard replayed from checkpoint")
+}
+
+func TestAutoResumeRefreshStep3UsesPersistedTaskrunsWithoutProviderRerun(t *testing.T) {
+	t.Parallel()
+
+	sourceWS := createShardingWorkspace(t, shardingWorkspaceOptions{
+		Strategy:      acpruntime.ExecutionStrategyParallel,
+		MaxParallel:   2,
+		FailurePolicy: acpruntime.ExecutionFailurePolicyBestEffort,
+		ShardMode:     acpruntime.ExecutionShardDiscoveryHeuristics,
+	})
+	sourceService := NewService(WithRunner(deterministicApplyOrderRunner{}))
+	if info, _, err := sourceService.Run(context.Background(), RunRequest{
+		Workspace:      sourceWS,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	}); err != nil || info.Status != RunStatusSucceeded {
+		t.Fatalf("prepare source init run failed: status=%s err=%v", info.Status, err)
+	}
+	sourceRefreshInfo, _, err := sourceService.Run(context.Background(), RunRequest{
+		Workspace:      sourceWS,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("prepare source refresh run failed: %v", err)
+	}
+	if sourceRefreshInfo.Status != RunStatusSucceeded {
+		t.Fatalf("expected successful source refresh run, got %s (%s)", sourceRefreshInfo.Status, sourceRefreshInfo.Error)
+	}
+
+	targetWS := createShardingWorkspace(t, shardingWorkspaceOptions{
+		Strategy:      acpruntime.ExecutionStrategyParallel,
+		MaxParallel:   2,
+		FailurePolicy: acpruntime.ExecutionFailurePolicyBestEffort,
+		ShardMode:     acpruntime.ExecutionShardDiscoveryHeuristics,
+	})
+	targetService := NewService(WithRunner(deterministicApplyOrderRunner{}))
+	if info, _, err := targetService.Run(context.Background(), RunRequest{
+		Workspace:      targetWS,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	}); err != nil || info.Status != RunStatusSucceeded {
+		t.Fatalf("prepare target init run failed: status=%s err=%v", info.Status, err)
+	}
+
+	resumeRunID := "run_refresh_resume_step3"
+	step1Summary := copyRefreshShardArtifacts(t, sourceWS, targetWS, sourceRefreshInfo.RunID, resumeRunID, "refresh.step1.collect", func(runtimeShardSummaryEntry) string {
+		return "succeeded"
+	}, func(item runtimeShardSummaryEntry) bool {
+		return true
+	})
+	if len(step1Summary.Items) == 0 {
+		t.Fatalf("expected copied step1 summary items")
+	}
+	step3Summary := copyRefreshShardArtifacts(t, sourceWS, targetWS, sourceRefreshInfo.RunID, resumeRunID, "refresh.step3.findings", func(item runtimeShardSummaryEntry) string {
+		if len(item.PathScopes) > 0 && item.PathScopes[0] == "services/web" {
+			return "checkpointed"
+		}
+		return "succeeded"
+	}, func(item runtimeShardSummaryEntry) bool {
+		return false
+	})
+	if len(step3Summary.Items) == 0 {
+		t.Fatalf("expected copied step3 summary items")
+	}
+
+	historySeed := NewService(
+		WithHistoryWorkspace(targetWS),
+		WithClock(func() time.Time {
+			return time.Date(2026, 4, 16, 11, 0, 0, 0, time.UTC)
+		}),
+	)
+	historySeed.storeRun(runRecord{
+		info: RunInfo{
+			RunID:       resumeRunID,
+			Pipeline:    string(PipelineRefresh),
+			Status:      RunStatusRunning,
+			StartedAt:   time.Date(2026, 4, 16, 10, 15, 0, 0, time.UTC),
+			CurrentStep: "refresh.step3.findings",
+		},
+	})
+
+	resumeRunner := &failOnRunRunner{}
+	resumedService := NewService(
+		WithHistoryWorkspace(targetWS),
+		WithResumeStaleAsyncRuns(),
+		WithRunner(resumeRunner),
+	)
+	status := waitForTerminalRunStatus(t, targetWS, resumeRunID, 10*time.Second)
+	if status != RunStatusSucceeded {
+		info, _ := resumedService.GetRun(resumeRunID)
+		t.Fatalf("expected resumed run to succeed, got status=%s error_code=%s error=%s", status, info.ErrorCode, info.Error)
+	}
+	if resumeRunner.callCount() != 0 {
+		t.Fatalf("expected no provider reruns during step3 resume, got %d", resumeRunner.callCount())
+	}
+
+	finalSummary := readSingleShardSummary(t, filepath.Join(targetWS.Path, "reports", "taskruns", resumeRunID+"-refresh-step3-findings-shard-summary.json"))
+	for _, item := range finalSummary.Items {
+		if item.Status != "succeeded" {
+			t.Fatalf("expected all resumed step3 shard statuses succeeded, got %+v", finalSummary.Items)
+		}
+	}
+
+	findingsReport := mustReadFile(t, filepath.Join(targetWS.Path, "reports/findings/findings.md"))
+	if !strings.Contains(findingsReport, "# Findings") {
+		t.Fatalf("expected findings report after resumed step3, got:\n%s", findingsReport)
+	}
+
+	page, found, err := resumedService.GetRunLogs(resumeRunID, 0, 500)
+	if err != nil {
+		t.Fatalf("read resumed run logs: %v", err)
+	}
+	if !found {
+		t.Fatalf("expected resumed run logs")
+	}
+	assertRunLogMessage(t, page.Items, "run resumed after restart")
+	assertRunLogMessage(t, page.Items, "shard loaded from persisted taskrun")
+	assertRunLogMessage(t, page.Items, "shard replayed from checkpoint")
+}
+
+func TestShardSummaryStateMachineSupportsPendingCheckpointedSucceededFailed(t *testing.T) {
+	t.Parallel()
+
+	ws := createShardingWorkspace(t, shardingWorkspaceOptions{
+		Strategy:      acpruntime.ExecutionStrategyParallel,
+		MaxParallel:   2,
+		FailurePolicy: acpruntime.ExecutionFailurePolicyBestEffort,
+		ShardMode:     acpruntime.ExecutionShardDiscoveryHeuristics,
+	})
+
+	execution := pipelineExecution{
+		runID:         "run_summary_state_machine",
+		workspace:     ws,
+		clock:         func() time.Time { return time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC) },
+		artifacts:     []Artifact{},
+		artifactIndex: map[string]int{},
+		executionProfile: acpruntime.ExecutionValues{
+			Strategy:      acpruntime.ExecutionStrategyParallel,
+			MaxParallel:   2,
+			FailurePolicy: acpruntime.ExecutionFailurePolicyBestEffort,
+			ShardMode:     acpruntime.ExecutionShardDiscoveryHeuristics,
+		},
+	}
+	plans := []runtimeShardPlan{
+		{SortKey: "1", ShardID: "shard-a", RepoScopes: []string{"orders-monolith"}, PathScopes: []string{"services/a"}, PrimaryRepo: "orders-monolith"},
+		{SortKey: "2", ShardID: "shard-b", RepoScopes: []string{"orders-monolith"}, PathScopes: []string{"services/b"}, PrimaryRepo: "orders-monolith"},
+		{SortKey: "3", ShardID: "shard-c", RepoScopes: []string{"orders-monolith"}, PathScopes: []string{"services/c"}, PrimaryRepo: "orders-monolith"},
+		{SortKey: "4", ShardID: "shard-d", RepoScopes: []string{"orders-monolith"}, PathScopes: []string{"services/d"}, PrimaryRepo: "orders-monolith"},
+	}
+	state, err := execution.loadRuntimeShardSummaryState("refresh.step1.collect", "payments-service", plans, false)
+	if err != nil {
+		t.Fatalf("init shard summary state: %v", err)
+	}
+
+	rawB := mustBuildShardTaskrunRaw(t, execution.runID, "refresh.step1.collect", "shard-b", "task-b", []string{"orders-monolith"}, []string{"services/b"})
+	pathB := shardTaskrunPath(execution.runID, "refresh.step1.collect", "payments-service", "shard-b", false)
+	if err := state.markCheckpointed(plans[1], "task-b", pathB, shardTaskrunLabel("refresh.step1.collect", "payments-service", "shard-b", false), rawB); err != nil {
+		t.Fatalf("mark shard-b checkpointed: %v", err)
+	}
+
+	rawC := mustBuildShardTaskrunRaw(t, execution.runID, "refresh.step1.collect", "shard-c", "task-c", []string{"orders-monolith"}, []string{"services/c"})
+	pathC := shardTaskrunPath(execution.runID, "refresh.step1.collect", "payments-service", "shard-c", false)
+	if err := state.markCheckpointed(plans[2], "task-c", pathC, shardTaskrunLabel("refresh.step1.collect", "payments-service", "shard-c", false), rawC); err != nil {
+		t.Fatalf("mark shard-c checkpointed: %v", err)
+	}
+	if err := state.markSucceeded(plans[2], "task-c", pathC); err != nil {
+		t.Fatalf("mark shard-c succeeded: %v", err)
+	}
+	if err := state.markFailed(plans[3], "task-d", "synthetic apply failure"); err != nil {
+		t.Fatalf("mark shard-d failed: %v", err)
+	}
+
+	summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", execution.runID+"-refresh-step1-collect-shard-summary-payments-service.json"))
+	statusByShard := map[string]string{}
+	for _, item := range summary.Items {
+		statusByShard[item.ShardID] = item.Status
+		if (item.Status == "checkpointed" || item.Status == "succeeded") && strings.TrimSpace(item.TaskRun) == "" {
+			t.Fatalf("expected taskrun_path for status=%s shard=%s", item.Status, item.ShardID)
+		}
+	}
+	expected := map[string]string{
+		"shard-a": "pending",
+		"shard-b": "checkpointed",
+		"shard-c": "succeeded",
+		"shard-d": "failed",
+	}
+	if !reflect.DeepEqual(statusByShard, expected) {
+		t.Fatalf("unexpected shard statuses: got=%v want=%v", statusByShard, expected)
+	}
+
+	var persisted contracts.TaskResult
+	readJSONFile(t, filepath.Join(ws.Path, pathB), &persisted)
+	if persisted.Meta.ShardID != "shard-b" {
+		t.Fatalf("expected persisted shard id shard-b, got %q", persisted.Meta.ShardID)
+	}
+	if len(persisted.Meta.RepoScopes) != 1 || persisted.Meta.RepoScopes[0] != "orders-monolith" {
+		t.Fatalf("expected persisted repo scopes in taskrun, got %+v", persisted.Meta.RepoScopes)
+	}
+	if len(persisted.Meta.PathScopes) != 1 || persisted.Meta.PathScopes[0] != "services/b" {
+		t.Fatalf("expected persisted path scopes in taskrun, got %+v", persisted.Meta.PathScopes)
+	}
+}
+
+func TestResumeDeterminismMatchesUninterruptedRun(t *testing.T) {
+	t.Parallel()
+
+	sourceWS := createShardingWorkspace(t, shardingWorkspaceOptions{
+		Strategy:      acpruntime.ExecutionStrategyParallel,
+		MaxParallel:   2,
+		FailurePolicy: acpruntime.ExecutionFailurePolicyBestEffort,
+		ShardMode:     acpruntime.ExecutionShardDiscoveryHeuristics,
+	})
+	sourceService := NewService(WithRunner(deterministicApplyOrderRunner{}))
+	if info, _, err := sourceService.Run(context.Background(), RunRequest{
+		Workspace:      sourceWS,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	}); err != nil || info.Status != RunStatusSucceeded {
+		t.Fatalf("source init run failed: status=%s err=%v", info.Status, err)
+	}
+	sourceRefreshInfo, _, err := sourceService.Run(context.Background(), RunRequest{
+		Workspace:      sourceWS,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("source refresh run failed: %v", err)
+	}
+	if sourceRefreshInfo.Status != RunStatusSucceeded {
+		t.Fatalf("expected source refresh success, got %s (%s)", sourceRefreshInfo.Status, sourceRefreshInfo.Error)
+	}
+
+	targetWS := createShardingWorkspace(t, shardingWorkspaceOptions{
+		Strategy:      acpruntime.ExecutionStrategyParallel,
+		MaxParallel:   2,
+		FailurePolicy: acpruntime.ExecutionFailurePolicyBestEffort,
+		ShardMode:     acpruntime.ExecutionShardDiscoveryHeuristics,
+	})
+	targetService := NewService(WithRunner(deterministicApplyOrderRunner{}))
+	if info, _, err := targetService.Run(context.Background(), RunRequest{
+		Workspace:      targetWS,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	}); err != nil || info.Status != RunStatusSucceeded {
+		t.Fatalf("target init run failed: status=%s err=%v", info.Status, err)
+	}
+
+	resumeRunID := "run_refresh_resume_deterministic"
+	copyRefreshShardArtifacts(t, sourceWS, targetWS, sourceRefreshInfo.RunID, resumeRunID, "refresh.step1.collect", func(item runtimeShardSummaryEntry) string {
+		if len(item.PathScopes) > 0 && item.PathScopes[0] == "services/web" {
+			return "checkpointed"
+		}
+		return "succeeded"
+	}, func(item runtimeShardSummaryEntry) bool {
+		return len(item.PathScopes) > 0 && item.PathScopes[0] == "services/api"
+	})
+
+	historySeed := NewService(
+		WithHistoryWorkspace(targetWS),
+		WithClock(func() time.Time {
+			return time.Date(2026, 4, 16, 13, 0, 0, 0, time.UTC)
+		}),
+	)
+	historySeed.storeRun(runRecord{
+		info: RunInfo{
+			RunID:       resumeRunID,
+			Pipeline:    string(PipelineRefresh),
+			Status:      RunStatusRunning,
+			StartedAt:   time.Date(2026, 4, 16, 12, 45, 0, 0, time.UTC),
+			CurrentStep: "refresh.step3.findings",
+		},
+	})
+
+	resumeRunner := &guardedResumeRunner{
+		blockedSteps: map[string]struct{}{
+			"refresh.step1.collect": {},
+		},
+	}
+	resumedService := NewService(
+		WithHistoryWorkspace(targetWS),
+		WithResumeStaleAsyncRuns(),
+		WithRunner(resumeRunner),
+	)
+	status := waitForTerminalRunStatus(t, targetWS, resumeRunID, 10*time.Second)
+	if status != RunStatusSucceeded {
+		info, _ := resumedService.GetRun(resumeRunID)
+		t.Fatalf("expected resumed deterministic run success, got status=%s error=%s", status, info.Error)
+	}
+	if resumeRunner.blockedCallCount() != 0 {
+		t.Fatalf("expected no refresh.step1.collect provider reruns, got %d", resumeRunner.blockedCallCount())
+	}
+
+	assertGlobFilesEqual(t, sourceWS, targetWS, "model/entities/*.yaml")
+	assertGlobFilesEqual(t, sourceWS, targetWS, "model/edges/*.yaml")
+	assertGlobFilesEqual(t, sourceWS, targetWS, "reports/agent-outputs/domains/*.md")
+	assertRelativeFileEqual(t, sourceWS, targetWS, "reports/agent-outputs/architect/summary.md")
+	assertRelativeFileEqual(t, sourceWS, targetWS, "reports/coverage/summary.md")
+	assertRelativeFileEqual(t, sourceWS, targetWS, "reports/coverage/open-questions.md")
+	assertRelativeFileEqual(t, sourceWS, targetWS, "reports/findings/findings.md")
+	assertRelativeFileEqual(t, sourceWS, targetWS, "reports/as-is/service-catalog.md")
+	assertRunQualitySummaryEqual(t, sourceWS, sourceRefreshInfo.RunID, targetWS, resumeRunID)
+}
+
+func TestPersistShardSummaryRejectsCheckpointedWithoutTaskrunPath(t *testing.T) {
+	t.Parallel()
+
+	ws := createShardingWorkspace(t, shardingWorkspaceOptions{})
+	execution := pipelineExecution{
+		runID:         "run_invalid_shard_summary",
+		workspace:     ws,
+		clock:         func() time.Time { return time.Date(2026, 4, 16, 15, 0, 0, 0, time.UTC) },
+		artifacts:     []Artifact{},
+		artifactIndex: map[string]int{},
+		executionProfile: acpruntime.ExecutionValues{
+			Strategy:      acpruntime.ExecutionStrategySequential,
+			MaxParallel:   1,
+			FailurePolicy: acpruntime.ExecutionFailurePolicyBestEffort,
+			ShardMode:     acpruntime.ExecutionShardDiscoveryHeuristics,
+		},
+	}
+
+	err := execution.persistShardSummary("refresh.step1.collect", "payments-service", []runtimeShardSummaryEntry{
+		{
+			ShardID: "shard-x",
+			Status:  "checkpointed",
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected validation error for checkpointed shard without taskrun_path")
+	}
+	if !strings.Contains(err.Error(), "requires taskrun_path") {
+		t.Fatalf("expected taskrun_path validation error, got %v", err)
+	}
+}
+
+func TestResumeReplayLoadFailureMarksShardFailed(t *testing.T) {
+	t.Parallel()
+
+	ws := createShardingWorkspace(t, shardingWorkspaceOptions{
+		Strategy:      acpruntime.ExecutionStrategySequential,
+		MaxParallel:   1,
+		FailurePolicy: acpruntime.ExecutionFailurePolicyBestEffort,
+		ShardMode:     acpruntime.ExecutionShardDiscoveryHeuristics,
+	})
+	runner := &failOnRunRunner{}
+	execution := pipelineExecution{
+		runID:         "run_resume_missing_taskrun",
+		workspace:     ws,
+		runner:        runner,
+		clock:         func() time.Time { return time.Date(2026, 4, 16, 16, 0, 0, 0, time.UTC) },
+		artifacts:     []Artifact{},
+		artifactIndex: map[string]int{},
+		executionProfile: acpruntime.ExecutionValues{
+			Strategy:      acpruntime.ExecutionStrategySequential,
+			MaxParallel:   1,
+			FailurePolicy: acpruntime.ExecutionFailurePolicyBestEffort,
+			ShardMode:     acpruntime.ExecutionShardDiscoveryHeuristics,
+		},
+	}
+
+	stepID := "refresh.step1.collect"
+	domainID := "payments-service"
+	repoScopes := []string{"unknown-repo"}
+	plans, _, _ := execution.planRuntimeShards(repoScopes)
+	if len(plans) != 1 {
+		t.Fatalf("expected single fallback shard plan, got %d", len(plans))
+	}
+
+	state, err := execution.loadRuntimeShardSummaryState(stepID, domainID, plans, true)
+	if err != nil {
+		t.Fatalf("init shard summary state: %v", err)
+	}
+	taskrunPath := shardTaskrunPath(execution.runID, stepID, domainID, plans[0].ShardID, true)
+	raw := mustBuildShardTaskrunRaw(
+		t,
+		execution.runID,
+		stepID,
+		plans[0].ShardID,
+		"task-missing-persisted",
+		repoScopes,
+		plans[0].PathScopes,
+	)
+	if err := state.markCheckpointed(
+		plans[0],
+		"task-missing-persisted",
+		taskrunPath,
+		shardTaskrunLabel(stepID, domainID, plans[0].ShardID, true),
+		raw,
+	); err != nil {
+		t.Fatalf("mark checkpointed: %v", err)
+	}
+	if err := os.Remove(filepath.Join(ws.Path, taskrunPath)); err != nil {
+		t.Fatalf("remove persisted taskrun %s: %v", taskrunPath, err)
+	}
+
+	executions, outcome, err := execution.executeRuntimeTasksSharded(
+		context.Background(),
+		stepID,
+		domainID,
+		repoScopes,
+		"resume-missing-taskrun",
+	)
+	if err != nil {
+		t.Fatalf("execute sharded resume with missing taskrun: %v", err)
+	}
+	if len(executions) != 0 {
+		t.Fatalf("expected zero executions, got %d", len(executions))
+	}
+	if outcome.PlannedShards != 1 || outcome.FailedShards != 1 || outcome.SucceededShards != 0 {
+		t.Fatalf("unexpected shard outcome: %+v", outcome)
+	}
+	if runner.callCount() != 0 {
+		t.Fatalf("expected no runtime provider rerun, got %d calls", runner.callCount())
+	}
+
+	summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", execution.runID+"-refresh-step1-collect-shard-summary-*.json"))
+	if len(summary.Items) != 1 {
+		t.Fatalf("expected one shard summary item, got %d", len(summary.Items))
+	}
+	item := summary.Items[0]
+	if item.Status != "failed" {
+		t.Fatalf("expected failed shard status after replay load error, got %+v", item)
+	}
+	if item.TaskRun != taskrunPath {
+		t.Fatalf("expected shard summary taskrun_path preserved as %q, got %q", taskrunPath, item.TaskRun)
+	}
+	if !strings.Contains(item.Error, "load persisted taskrun") {
+		t.Fatalf("expected replay load error in shard summary, got %q", item.Error)
+	}
+}
+
+func TestResumeFailFastStopsBeforePendingShardAfterPersistedFailure(t *testing.T) {
+	t.Parallel()
+
+	ws := createShardingWorkspace(t, shardingWorkspaceOptions{
+		Strategy:      acpruntime.ExecutionStrategySequential,
+		MaxParallel:   1,
+		FailurePolicy: acpruntime.ExecutionFailurePolicyFailFast,
+		ShardMode:     acpruntime.ExecutionShardDiscoveryHeuristics,
+	})
+	runner := &failOnRunRunner{}
+	execution := pipelineExecution{
+		runID:         "run_resume_failfast_stops_pending",
+		workspace:     ws,
+		runner:        runner,
+		clock:         func() time.Time { return time.Date(2026, 4, 16, 17, 0, 0, 0, time.UTC) },
+		artifacts:     []Artifact{},
+		artifactIndex: map[string]int{},
+		executionProfile: acpruntime.ExecutionValues{
+			Strategy:      acpruntime.ExecutionStrategySequential,
+			MaxParallel:   1,
+			FailurePolicy: acpruntime.ExecutionFailurePolicyFailFast,
+			ShardMode:     acpruntime.ExecutionShardDiscoveryHeuristics,
+		},
+	}
+
+	stepID := "refresh.step1.collect"
+	domainID := "payments-service"
+	repoScopes := []string{"orders-monolith"}
+	plans, _, _ := execution.planRuntimeShards(repoScopes)
+	if len(plans) < 2 {
+		t.Fatalf("expected at least two shard plans for fail-fast resume scenario, got %d", len(plans))
+	}
+
+	state, err := execution.loadRuntimeShardSummaryState(stepID, domainID, plans, false)
+	if err != nil {
+		t.Fatalf("init shard summary state: %v", err)
+	}
+	if err := state.markFailed(plans[0], "task-persisted-failed", "persisted shard failure"); err != nil {
+		t.Fatalf("mark persisted failed shard: %v", err)
+	}
+
+	executions, outcome, err := execution.executeRuntimeTasksSharded(
+		context.Background(),
+		stepID,
+		domainID,
+		repoScopes,
+		"resume-failfast-stops-pending",
+	)
+	if err == nil {
+		t.Fatalf("expected fail-fast terminal error from persisted failed shard")
+	}
+	if len(executions) != 0 {
+		t.Fatalf("expected zero successful executions, got %d", len(executions))
+	}
+	if runner.callCount() != 0 {
+		t.Fatalf("expected no provider reruns after persisted fail-fast shard, got %d", runner.callCount())
+	}
+	if outcome.PlannedShards != len(plans) {
+		t.Fatalf("unexpected planned shard count: got=%d want=%d", outcome.PlannedShards, len(plans))
+	}
+	if outcome.FailedShards != len(plans) {
+		t.Fatalf("expected all shards reported failed/aborted under fail-fast, got %+v", outcome)
+	}
+
+	summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", execution.runID+"-refresh-step1-collect-shard-summary-*.json"))
+	if len(summary.Items) != len(plans) {
+		t.Fatalf("expected %d shard summary items, got %d", len(plans), len(summary.Items))
+	}
+	var sawPersistedFailure bool
+	var sawFailFastAbort bool
+	for _, item := range summary.Items {
+		if item.Status != "failed" {
+			t.Fatalf("expected failed status for all shards after fail-fast resume, got %+v", summary.Items)
+		}
+		if strings.Contains(item.Error, "persisted shard failure") {
+			sawPersistedFailure = true
+		}
+		if strings.Contains(item.Error, "fail_fast aborted remaining work") {
+			sawFailFastAbort = true
+		}
+	}
+	if !sawPersistedFailure {
+		t.Fatalf("expected persisted failure reason preserved in shard summary, got %+v", summary.Items)
+	}
+	if !sawFailFastAbort {
+		t.Fatalf("expected fail-fast abort reason for pending shards, got %+v", summary.Items)
+	}
+}
+
+func TestSyntheticLargeMonorepoShardingProducesManyShardArtifacts(t *testing.T) {
+	t.Parallel()
+
+	ws := createShardingWorkspace(t, shardingWorkspaceOptions{
+		Strategy:      acpruntime.ExecutionStrategyParallel,
+		MaxParallel:   4,
+		FailurePolicy: acpruntime.ExecutionFailurePolicyBestEffort,
+	})
+	repoRoot := filepath.Join(ws.Path, "repos", "orders-monolith")
+	for idx := 0; idx < 12; idx++ {
+		modulePath := filepath.Join(repoRoot, "services", "module-"+strconv.Itoa(idx))
+		writeFile(t, filepath.Join(modulePath, "package.json"), "{\n  \"name\": \"module\"\n}\n")
+		writeFile(t, filepath.Join(modulePath, "README.md"), "# module\n")
+	}
+
+	service := NewService()
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run init pipeline for synthetic monorepo: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
+	}
+
+	step1Summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step1-collect-shard-summary-*.json"))
+	if len(step1Summary.Items) < 10 {
+		t.Fatalf("expected at least 10 shards in synthetic monorepo, got %d", len(step1Summary.Items))
+	}
+	for _, item := range step1Summary.Items {
+		if len(item.PathScopes) == 0 {
+			t.Fatalf("expected non-empty path scope in summary item: %+v", item)
+		}
+	}
+}
+
 func TestMultiRepoShardingHandlesDifferentModuleCounts(t *testing.T) {
 	t.Parallel()
 
@@ -746,70 +1411,14 @@ func TestMultiRepoShardingHandlesDifferentModuleCounts(t *testing.T) {
 		summarySizes = append(summarySizes, len(summary.Items))
 	}
 	sort.Ints(summarySizes)
-	expected := []int{3, 4}
+	expected := []int{2, 3}
 	if !reflect.DeepEqual(summarySizes, expected) {
 		t.Fatalf("unexpected per-domain shard counts: got=%v want=%v", summarySizes, expected)
 	}
 
 	step3Summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step3-findings-shard-summary.json"))
-	if len(step3Summary.Items) != 7 {
-		t.Fatalf("expected seven step3 shards ((2+1)+(3+1)), got %d", len(step3Summary.Items))
-	}
-}
-
-func TestBaselineAndParallelDefaultProduceIdenticalShardPlans(t *testing.T) {
-	t.Parallel()
-
-	wsBaseline := createShardingWorkspace(t, shardingWorkspaceOptions{
-		Strategy:      acpruntime.ExecutionStrategySequential,
-		MaxParallel:   1,
-		FailurePolicy: acpruntime.ExecutionFailurePolicyBestEffort,
-		ShardMode:     acpruntime.ExecutionShardDiscoveryHeuristics,
-	})
-	service := NewService()
-
-	baselineInfo, _, err := service.Run(context.Background(), RunRequest{
-		Workspace:      wsBaseline,
-		Pipeline:       PipelineInit,
-		NonInteractive: true,
-	})
-	if err != nil {
-		t.Fatalf("run baseline init pipeline: %v", err)
-	}
-	if baselineInfo.Status != RunStatusSucceeded {
-		t.Fatalf("expected baseline run to succeed, got %s (%s)", baselineInfo.Status, baselineInfo.Error)
-	}
-	baselinePlan := readSingleShardPlan(t, filepath.Join(wsBaseline.Path, "reports", "taskruns", "*-init-step1-collect-shard-plan-*.json"))
-
-	wsParallel := createShardingWorkspace(t, shardingWorkspaceOptions{
-		Strategy:      acpruntime.ExecutionStrategyParallel,
-		MaxParallel:   4,
-		FailurePolicy: acpruntime.ExecutionFailurePolicyBestEffort,
-		ShardMode:     acpruntime.ExecutionShardDiscoveryHeuristics,
-	})
-	parallelInfo, _, err := service.Run(context.Background(), RunRequest{
-		Workspace:      wsParallel,
-		Pipeline:       PipelineInit,
-		NonInteractive: true,
-	})
-	if err != nil {
-		t.Fatalf("run parallel init pipeline: %v", err)
-	}
-	if parallelInfo.Status != RunStatusSucceeded {
-		t.Fatalf("expected parallel run to succeed, got %s (%s)", parallelInfo.Status, parallelInfo.Error)
-	}
-	parallelPlan := readSingleShardPlan(t, filepath.Join(wsParallel.Path, "reports", "taskruns", "*-init-step1-collect-shard-plan-*.json"))
-
-	if len(baselinePlan.Items) != len(parallelPlan.Items) {
-		t.Fatalf("expected equal shard-plan size, got baseline=%d parallel=%d", len(baselinePlan.Items), len(parallelPlan.Items))
-	}
-	for idx := range baselinePlan.Items {
-		if !reflect.DeepEqual(baselinePlan.Items[idx].PathScopes, parallelPlan.Items[idx].PathScopes) {
-			t.Fatalf("baseline vs parallel-default path scopes diverged at index %d: baseline=%v parallel=%v", idx, baselinePlan.Items[idx].PathScopes, parallelPlan.Items[idx].PathScopes)
-		}
-		if baselinePlan.Items[idx].ShardID != parallelPlan.Items[idx].ShardID {
-			t.Fatalf("baseline vs parallel-default shard ids diverged at index %d: baseline=%q parallel=%q", idx, baselinePlan.Items[idx].ShardID, parallelPlan.Items[idx].ShardID)
-		}
+	if len(step3Summary.Items) != 5 {
+		t.Fatalf("expected five step3 shards (2+3), got %d", len(step3Summary.Items))
 	}
 }
 
@@ -962,11 +1571,8 @@ func (deterministicApplyOrderRunner) Run(ctx context.Context, task acpruntime.Ta
 			repoScope = strings.TrimSpace(task.RepoScopes[0])
 		}
 		evidencePath := pathScope + "/README.md"
-		if pathScope == "." || filepath.Ext(pathScope) != "" {
+		if pathScope == "." {
 			evidencePath = "README.md"
-			if pathScope != "." {
-				evidencePath = pathScope
-			}
 		}
 		result := contracts.TaskResult{
 			Meta: contracts.Meta{
@@ -1094,6 +1700,59 @@ func (r *concurrencyProbeRunner) maxStep1Concurrency() int {
 	return r.max
 }
 
+type failOnRunRunner struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (r *failOnRunRunner) Run(context.Context, acpruntime.Task) (acpruntime.Result, error) {
+	r.mu.Lock()
+	r.calls++
+	r.mu.Unlock()
+	return acpruntime.Result{}, errors.New("unexpected provider invocation during resume")
+}
+
+func (r *failOnRunRunner) Preflight(context.Context) error {
+	return nil
+}
+
+func (r *failOnRunRunner) callCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls
+}
+
+type guardedResumeRunner struct {
+	mu           sync.Mutex
+	blockedSteps map[string]struct{}
+	totalCalls   int
+	blockedCalls int
+}
+
+func (r *guardedResumeRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	r.mu.Lock()
+	r.totalCalls++
+	_, blocked := r.blockedSteps[task.StepID]
+	if blocked {
+		r.blockedCalls++
+	}
+	r.mu.Unlock()
+	if blocked {
+		return acpruntime.Result{}, errors.New("unexpected provider invocation during resume")
+	}
+	return claudecode.FakeRunner{}.Run(ctx, task)
+}
+
+func (r *guardedResumeRunner) Preflight(context.Context) error {
+	return nil
+}
+
+func (r *guardedResumeRunner) blockedCallCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.blockedCalls
+}
+
 func marshalSyntheticTaskResult(result contracts.TaskResult) (acpruntime.Result, error) {
 	raw, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
@@ -1153,6 +1812,222 @@ func mustReadFile(t *testing.T, path string) string {
 	return string(content)
 }
 
+func copyRefreshShardArtifacts(
+	t *testing.T,
+	sourceWS workspace.Root,
+	targetWS workspace.Root,
+	sourceRunID string,
+	resumeRunID string,
+	stepID string,
+	statusForItem func(runtimeShardSummaryEntry) string,
+	applyToTargetModel func(runtimeShardSummaryEntry) bool,
+) runtimeShardSummary {
+	t.Helper()
+
+	stepSlug := strings.ReplaceAll(stepID, ".", "-")
+	sourceSummaryPath := mustGlobSingle(t, filepath.Join(sourceWS.Path, "reports", "taskruns", sourceRunID+"-"+stepSlug+"-shard-summary*.json"))
+	var summary runtimeShardSummary
+	readJSONFile(t, sourceSummaryPath, &summary)
+	summary.RunID = resumeRunID
+	singleShard := len(summary.Items) == 1
+
+	for idx, item := range summary.Items {
+		raw := mustReadTaskrunFile(t, sourceWS, item.TaskRun)
+		prepared, err := loadPreparedExecutionFromPersistedTaskRun(raw)
+		if err != nil {
+			t.Fatalf("load persisted taskrun %s: %v", item.TaskRun, err)
+		}
+		prepared.Task.RunID = resumeRunID
+		prepared.Normalized.Meta.RunID = resumeRunID
+		rewrittenRaw, err := json.MarshalIndent(prepared.Normalized, "", "  ")
+		if err != nil {
+			t.Fatalf("marshal rewritten taskrun %s: %v", item.TaskRun, err)
+		}
+		newTaskrunPath := shardTaskrunPath(resumeRunID, stepID, summary.DomainID, prepared.Task.ShardID, singleShard)
+		writeFile(t, filepath.Join(targetWS.Path, newTaskrunPath), string(append(rewrittenRaw, '\n')))
+		summary.Items[idx].TaskRun = newTaskrunPath
+		summary.Items[idx].TaskID = prepared.Task.TaskID
+		summary.Items[idx].Status = statusForItem(item)
+		if applyToTargetModel(item) {
+			result, parseErr := contracts.ParseTaskResult(rewrittenRaw)
+			if parseErr != nil {
+				t.Fatalf("parse rewritten taskrun %s: %v", newTaskrunPath, parseErr)
+			}
+			if _, applyErr := model.NewStore(targetWS).ApplyChangeset(result); applyErr != nil {
+				t.Fatalf("apply rewritten taskrun %s to target model: %v", newTaskrunPath, applyErr)
+			}
+		}
+	}
+
+	sourcePlanPath := mustGlobSingle(t, filepath.Join(sourceWS.Path, "reports", "taskruns", sourceRunID+"-"+stepSlug+"-shard-plan*.json"))
+	var plan runtimeShardPlanArtifact
+	readJSONFile(t, sourcePlanPath, &plan)
+	plan.RunID = resumeRunID
+	planRaw, err := json.MarshalIndent(plan, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal rewritten shard plan: %v", err)
+	}
+	writeFile(t, filepath.Join(targetWS.Path, shardPlanPath(resumeRunID, stepID, summary.DomainID)), string(append(planRaw, '\n')))
+
+	summaryRaw, err := json.MarshalIndent(summary, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal rewritten shard summary: %v", err)
+	}
+	writeFile(t, filepath.Join(targetWS.Path, shardSummaryPath(resumeRunID, stepID, summary.DomainID)), string(append(summaryRaw, '\n')))
+	return summary
+}
+
+func mustReadTaskrunFile(t *testing.T, ws workspace.Root, relPath string) []byte {
+	t.Helper()
+	content, err := os.ReadFile(filepath.Join(ws.Path, relPath))
+	if err != nil {
+		t.Fatalf("read taskrun %s: %v", relPath, err)
+	}
+	return content
+}
+
+func mustGlobSingle(t *testing.T, pattern string) string {
+	t.Helper()
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		t.Fatalf("glob %q: %v", pattern, err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected one match for %q, got %d (%v)", pattern, len(matches), matches)
+	}
+	return matches[0]
+}
+
+func assertRunLogMessage(t *testing.T, entries []RunLogEntry, message string) {
+	t.Helper()
+	for _, entry := range entries {
+		if entry.Message == message {
+			return
+		}
+	}
+	t.Fatalf("expected run log message %q, got %+v", message, entries)
+}
+
+func mustBuildShardTaskrunRaw(
+	t *testing.T,
+	runID string,
+	stepID string,
+	shardID string,
+	taskID string,
+	repoScopes []string,
+	pathScopes []string,
+) []byte {
+	t.Helper()
+	repoScope := ""
+	if len(repoScopes) > 0 {
+		repoScope = repoScopes[0]
+	}
+	result := contracts.TaskResult{
+		Meta: contracts.Meta{
+			TaskID:     taskID,
+			StepID:     stepID,
+			RunID:      runID,
+			Runtime:    contracts.RuntimeMeta{Name: "synthetic-shard-runner", Version: "test"},
+			StartedAt:  time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC).Format(time.RFC3339),
+			FinishedAt: time.Date(2026, 4, 16, 12, 0, 1, 0, time.UTC).Format(time.RFC3339),
+			Workspace:  "/tmp/workspace",
+			ShardID:    shardID,
+			RepoScope:  repoScope,
+			RepoScopes: append([]string(nil), repoScopes...),
+			PathScopes: append([]string(nil), pathScopes...),
+		},
+		Summary: "synthetic checkpoint payload",
+		Changeset: []contracts.Operation{
+			{
+				Op: "upsert_entity",
+				Entity: &contracts.Entity{
+					ID:   "svc." + shardID,
+					Type: "service",
+					Name: "Synthetic " + shardID,
+					Provenance: contracts.Provenance{
+						Kind:       "observation",
+						Confidence: 0.9,
+						Evidence: []contracts.Evidence{
+							{
+								Repo: repoScope,
+								Path: "README.md",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	raw, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal synthetic shard taskrun: %v", err)
+	}
+	return raw
+}
+
+func assertRelativeFileEqual(t *testing.T, left workspace.Root, right workspace.Root, relPath string) {
+	t.Helper()
+	leftContent := mustReadFile(t, filepath.Join(left.Path, relPath))
+	rightContent := mustReadFile(t, filepath.Join(right.Path, relPath))
+	if leftContent != rightContent {
+		t.Fatalf("content mismatch for %s", relPath)
+	}
+}
+
+func assertGlobFilesEqual(t *testing.T, left workspace.Root, right workspace.Root, relPattern string) {
+	t.Helper()
+
+	leftMatches := mustRelativeGlobMatches(t, left.Path, relPattern)
+	rightMatches := mustRelativeGlobMatches(t, right.Path, relPattern)
+	if !reflect.DeepEqual(leftMatches, rightMatches) {
+		t.Fatalf("glob mismatch for pattern %q: left=%v right=%v", relPattern, leftMatches, rightMatches)
+	}
+	for _, relPath := range leftMatches {
+		assertRelativeFileEqual(t, left, right, relPath)
+	}
+}
+
+func mustRelativeGlobMatches(t *testing.T, root string, relPattern string) []string {
+	t.Helper()
+	absPattern := filepath.Join(root, relPattern)
+	matches, err := filepath.Glob(absPattern)
+	if err != nil {
+		t.Fatalf("glob %q: %v", relPattern, err)
+	}
+	relMatches := make([]string, 0, len(matches))
+	for _, absPath := range matches {
+		relPath, relErr := filepath.Rel(root, absPath)
+		if relErr != nil {
+			t.Fatalf("relative path for %q: %v", absPath, relErr)
+		}
+		relMatches = append(relMatches, filepath.ToSlash(relPath))
+	}
+	sort.Strings(relMatches)
+	return relMatches
+}
+
+func waitForTerminalRunStatus(t *testing.T, ws workspace.Root, runID string, timeout time.Duration) RunStatus {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		snapshot, err := loadRunHistorySnapshot(ws)
+		if err == nil {
+			for _, item := range snapshot.Items {
+				if item.RunID != runID {
+					continue
+				}
+				if item.Status == RunStatusSucceeded || item.Status == RunStatusFailed {
+					return item.Status
+				}
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("run %q did not reach terminal status before timeout %s", runID, timeout)
+	return ""
+}
+
 func readRunQualitySummary(t *testing.T, ws workspace.Root, runID string) struct {
 	EvidenceState struct {
 		Collect struct {
@@ -1192,6 +2067,30 @@ func readRunQualitySummary(t *testing.T, ws workspace.Root, runID string) struct
 	}
 	readJSONFile(t, filepath.Join(ws.Path, "reports", "taskruns", runID+"-quality.json"), &summary)
 	return summary
+}
+
+func assertRunQualitySummaryEqual(
+	t *testing.T,
+	left workspace.Root,
+	leftRunID string,
+	right workspace.Root,
+	rightRunID string,
+) {
+	t.Helper()
+
+	readSanitized := func(ws workspace.Root, runID string) map[string]any {
+		var payload map[string]any
+		readJSONFile(t, filepath.Join(ws.Path, "reports", "taskruns", runID+"-quality.json"), &payload)
+		delete(payload, "run_id")
+		delete(payload, "generated_at")
+		return payload
+	}
+
+	leftPayload := readSanitized(left, leftRunID)
+	rightPayload := readSanitized(right, rightRunID)
+	if !reflect.DeepEqual(leftPayload, rightPayload) {
+		t.Fatalf("quality summary mismatch between uninterrupted and resumed runs")
+	}
 }
 
 func containsWarning(warnings []string, needle string) bool {

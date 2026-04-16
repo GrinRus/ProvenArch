@@ -78,7 +78,8 @@ Baseline scenario set:
 - async lifecycle operability:
   - `CancelRun` для pending run даёт immediate terminal `failed` + `error_code=run_canceled`
   - `CancelRun` для active run даёт cooperative cancel + `failed` + `error_code=run_canceled`, очередь продолжает работать
-  - stale persisted `queued/running` run при старте сервиса reconciled в `failed` + `error_code=run_reconciled_after_restart`
+  - stale persisted `queued` run при старте сервиса reconciled в `failed` + `error_code=run_reconciled_after_restart`
+  - stale persisted `running` run auto-resume-ится с тем же `run_id`, если присутствуют resumable shard artifacts; иначе reconciled в `failed` + `error_code=run_reconciled_after_restart`
 - runtime timeout control:
   - persisted profile в `workspace.yaml.runtime.profile.timeouts`
   - effective precedence `env > workspace > defaults`
@@ -168,8 +169,10 @@ Implemented additional jobs:
 - deterministic Step 1 enrichment включает `evidence_refs` в domain/team cards
 - sharded runtime regression:
   - step1/step3 materialize per-shard taskruns + shard-plan/shard-summary artifacts
+  - shard-summary statuses cover `pending/checkpointed/succeeded/failed` and survive restart recovery
   - parallel scheduler keeps deterministic merge/apply order despite out-of-order shard completion
   - TaskResult shard metadata (`meta.shard_id`, `meta.repo_scopes`, `meta.path_scopes`) сохраняется в persisted taskruns
+  - service restart recovery resumes same `run_id` from persisted shard artifacts without rerunning already persisted shard taskruns
 
 ### Smoke tests
 - `acp run --workspace ... --pipeline init --runtime fake --non-interactive`

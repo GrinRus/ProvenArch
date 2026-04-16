@@ -202,6 +202,8 @@ Orchestrator applies:
 - нормализует top-level `questions`/`coverage` в canonical representation
 - выполняет runtime `init.step1.collect`/`refresh.step1.collect` отдельно для каждой canonical domain card (`charter/cards/domains/*`)
 - materialize-ит отдельный raw taskrun на каждый домен в `reports/taskruns/*-step1-collect-domain-<domain>.json`
+- для sharded runtime ведёт shard-summary state machine `pending | checkpointed | succeeded | failed`; raw per-shard taskrun materialize-ится до `apply`, чтобы restart recovery мог replay-ить shard из persisted artifact
+- internal shard-summary contract: `taskrun_path` обязателен для `checkpointed/succeeded` item
 - обновляет `model/*`
 - сохраняет taskrun under `reports/taskruns/*`
 - формирует `reports/coverage/summary.md`
@@ -249,6 +251,7 @@ Runtime output (TaskResult):
 
 Orchestrator applies:
 - нормализует top-level `questions`/`coverage` в canonical representation
+- для sharded runtime replay-ит persisted `succeeded/checkpointed` shard taskruns без повторного provider execution; `checkpointed` shard повторно `apply`-ится, `succeeded` shard только восстанавливает orchestrator in-memory state
 - обновляет `reports/findings/*`
 - обновляет `reports/agent-outputs/architect/summary.md` через детерминированную агрегацию фактических domain outputs
 - materializes critical unknowns как findings, если отсутствуют owner/integration/database/CI-CD evidence

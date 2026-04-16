@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -27,9 +28,11 @@ type runtimeShardPlan struct {
 }
 
 type runtimeShardRunResult struct {
-	Plan     runtimeShardPlan
-	Prepared runtimePreparedExecution
-	Err      error
+	Plan           runtimeShardPlan
+	Prepared       runtimePreparedExecution
+	Err            error
+	AlreadyApplied bool
+	FromCheckpoint bool
 }
 
 type runtimeShardSummary struct {
@@ -53,6 +56,16 @@ type runtimeShardSummaryEntry struct {
 	TaskID     string   `json:"task_id,omitempty"`
 	TaskRun    string   `json:"taskrun_path,omitempty"`
 	Error      string   `json:"error,omitempty"`
+}
+
+type runtimeShardSummaryState struct {
+	execution   *pipelineExecution
+	stepID      string
+	domainID    string
+	singleShard bool
+	entries     []runtimeShardSummaryEntry
+	index       map[string]int
+	mu          sync.Mutex
 }
 
 type runtimeShardPlanArtifact struct {
@@ -175,6 +188,12 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 		return nil, runtimeShardOutcome{}, err
 	}
 
+	singleShard := len(plans) == 1
+	summaryState, err := e.loadRuntimeShardSummaryState(stepID, domainID, plans, singleShard)
+	if err != nil {
+		return nil, runtimeShardOutcome{}, err
+	}
+
 	e.logInfo(stepID, domainID, "runtime shard execution prepared", map[string]any{
 		"shards":         len(plans),
 		"strategy":       strategy,
@@ -190,8 +209,49 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 	var terminalErr error
 	if maxParallel <= 1 || len(plans) <= 1 {
 		for idx, plan := range plans {
+			entry := summaryState.entry(plan.ShardID)
+			if handled, result := e.loadReplayableShardResult(stepID, domainID, plan, entry, summaryState.singleShard); handled {
+				if result.Err != nil {
+					taskID := strings.TrimSpace(entry.TaskID)
+					if markErr := summaryState.markFailed(plan, taskID, strings.TrimSpace(result.Err.Error())); markErr != nil {
+						return nil, runtimeShardOutcome{}, markErr
+					}
+					if !bestEffort {
+						results[idx] = result
+						terminalErr = result.Err
+						break
+					}
+				}
+				results[idx] = result
+				continue
+			}
+			if entry.Status == "failed" {
+				result := runtimeShardRunResult{
+					Plan: plan,
+					Err:  fmt.Errorf("%s", shardFailureMessage(entry)),
+				}
+				results[idx] = result
+				if !bestEffort {
+					terminalErr = result.Err
+					break
+				}
+				continue
+			}
 			taskSuffix := buildShardTaskSuffix(taskSuffixPrefix, plan.ShardID)
 			prepared, err := e.runRuntimeTaskNormalized(ctx, stepID, taskSuffix, plan.RepoScopes, plan.PathScopes, domainID, plan.ShardID)
+			if err == nil {
+				taskrunPath := shardTaskrunPath(e.runID, stepID, domainID, plan.ShardID, summaryState.singleShard)
+				taskrunLabel := shardTaskrunLabel(stepID, domainID, plan.ShardID, summaryState.singleShard)
+				if checkpointErr := summaryState.markCheckpointed(plan, prepared.Task.TaskID, taskrunPath, taskrunLabel, prepared.NormalizedRaw); checkpointErr != nil {
+					err = checkpointErr
+				}
+			}
+			if err != nil {
+				message := strings.TrimSpace(err.Error())
+				if markErr := summaryState.markFailed(plan, prepared.Task.TaskID, message); markErr != nil {
+					return nil, runtimeShardOutcome{}, markErr
+				}
+			}
 			results[idx] = runtimeShardRunResult{Plan: plan, Prepared: prepared, Err: err}
 			if err != nil && !bestEffort {
 				terminalErr = err
@@ -215,11 +275,59 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 			wg.Add(1)
 			go func(index int, shard runtimeShardPlan) {
 				defer wg.Done()
+				entry := summaryState.entry(shard.ShardID)
+				if handled, result := e.loadReplayableShardResult(stepID, domainID, shard, entry, summaryState.singleShard); handled {
+					if result.Err != nil {
+						taskID := strings.TrimSpace(entry.TaskID)
+						if markErr := summaryState.markFailed(shard, taskID, strings.TrimSpace(result.Err.Error())); markErr != nil {
+							result.Err = markErr
+						}
+						if !bestEffort {
+							mu.Lock()
+							if firstErr == nil {
+								firstErr = result.Err
+								cancel()
+							}
+							mu.Unlock()
+						}
+					}
+					mu.Lock()
+					results[index] = result
+					mu.Unlock()
+					return
+				}
+				if entry.Status == "failed" {
+					result := runtimeShardRunResult{
+						Plan: shard,
+						Err:  fmt.Errorf("%s", shardFailureMessage(entry)),
+					}
+					mu.Lock()
+					results[index] = result
+					if !bestEffort && firstErr == nil {
+						firstErr = result.Err
+						cancel()
+					}
+					mu.Unlock()
+					return
+				}
 				sem <- struct{}{}
 				defer func() { <-sem }()
 
 				taskSuffix := buildShardTaskSuffix(taskSuffixPrefix, shard.ShardID)
 				prepared, err := e.runRuntimeTaskNormalized(runCtx, stepID, taskSuffix, shard.RepoScopes, shard.PathScopes, domainID, shard.ShardID)
+				if err == nil {
+					taskrunPath := shardTaskrunPath(e.runID, stepID, domainID, shard.ShardID, summaryState.singleShard)
+					taskrunLabel := shardTaskrunLabel(stepID, domainID, shard.ShardID, summaryState.singleShard)
+					if checkpointErr := summaryState.markCheckpointed(shard, prepared.Task.TaskID, taskrunPath, taskrunLabel, prepared.NormalizedRaw); checkpointErr != nil {
+						err = checkpointErr
+					}
+				}
+				if err != nil {
+					message := strings.TrimSpace(err.Error())
+					if markErr := summaryState.markFailed(shard, prepared.Task.TaskID, message); markErr != nil {
+						err = markErr
+					}
+				}
 				mu.Lock()
 				results[index] = runtimeShardRunResult{Plan: shard, Prepared: prepared, Err: err}
 				if err != nil && !bestEffort && firstErr == nil {
@@ -236,31 +344,18 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 	}
 
 	executions := make([]runtimeTaskExecution, 0, len(plans))
-	summary := make([]runtimeShardSummaryEntry, 0, len(plans))
 	outcome := runtimeShardOutcome{PlannedShards: len(plans)}
 
-	singleShard := len(plans) == 1
 	for _, result := range results {
 		if result.Err == nil && result.Prepared.Task.TaskID == "" && terminalErr != nil && !bestEffort {
+			if err := summaryState.markAborted(result.Plan); err != nil {
+				return nil, runtimeShardOutcome{}, err
+			}
 			outcome.FailedShards++
-			summary = append(summary, runtimeShardSummaryEntry{
-				ShardID:    result.Plan.ShardID,
-				RepoScopes: append([]string(nil), result.Plan.RepoScopes...),
-				PathScopes: append([]string(nil), result.Plan.PathScopes...),
-				Status:     "failed",
-				Error:      "shard not executed because fail_fast aborted remaining work",
-			})
 			continue
 		}
 		if result.Err != nil {
 			outcome.FailedShards++
-			summary = append(summary, runtimeShardSummaryEntry{
-				ShardID:    result.Plan.ShardID,
-				RepoScopes: append([]string(nil), result.Plan.RepoScopes...),
-				PathScopes: append([]string(nil), result.Plan.PathScopes...),
-				Status:     "failed",
-				Error:      strings.TrimSpace(result.Err.Error()),
-			})
 			if bestEffort {
 				e.registerPartialShardFailure(stepID, domainID, result.Plan, result.Err)
 				continue
@@ -271,17 +366,17 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 			continue
 		}
 
-		execution, err := e.applyRuntimeTaskExecution(stepID, domainID, result.Prepared)
+		var execution runtimeTaskExecution
+		if result.AlreadyApplied {
+			execution, err = e.replayRuntimeTaskExecution(stepID, domainID, result.Prepared)
+		} else {
+			execution, err = e.applyRuntimeTaskExecution(stepID, domainID, result.Prepared)
+		}
 		if err != nil {
 			outcome.FailedShards++
-			summary = append(summary, runtimeShardSummaryEntry{
-				ShardID:    result.Plan.ShardID,
-				RepoScopes: append([]string(nil), result.Plan.RepoScopes...),
-				PathScopes: append([]string(nil), result.Plan.PathScopes...),
-				Status:     "failed",
-				TaskID:     result.Prepared.Task.TaskID,
-				Error:      strings.TrimSpace(err.Error()),
-			})
+			if markErr := summaryState.markFailed(result.Plan, result.Prepared.Task.TaskID, strings.TrimSpace(err.Error())); markErr != nil {
+				return nil, runtimeShardOutcome{}, markErr
+			}
 			if bestEffort {
 				e.registerPartialShardFailure(stepID, domainID, result.Plan, err)
 				continue
@@ -292,26 +387,21 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 			continue
 		}
 
-		taskrunPath := shardTaskrunPath(e.runID, stepID, domainID, result.Plan.ShardID, singleShard)
-		taskrunLabel := shardTaskrunLabel(stepID, domainID, result.Plan.ShardID, singleShard)
-		if err := e.persistTaskRun(taskrunPath, taskrunLabel, result.Prepared.NormalizedRaw); err != nil {
+		taskrunPath := shardTaskrunPath(e.runID, stepID, domainID, result.Plan.ShardID, summaryState.singleShard)
+		if err := summaryState.markSucceeded(result.Plan, result.Prepared.Task.TaskID, taskrunPath); err != nil {
 			return nil, runtimeShardOutcome{}, err
 		}
-		summary = append(summary, runtimeShardSummaryEntry{
-			ShardID:    result.Plan.ShardID,
-			RepoScopes: append([]string(nil), result.Plan.RepoScopes...),
-			PathScopes: append([]string(nil), result.Plan.PathScopes...),
-			Status:     "succeeded",
-			TaskID:     result.Prepared.Task.TaskID,
-			TaskRun:    taskrunPath,
-		})
+		if result.FromCheckpoint {
+			e.logInfo(stepID, domainID, "shard replayed from checkpoint", map[string]any{
+				"shard_id":     result.Plan.ShardID,
+				"task_id":      result.Prepared.Task.TaskID,
+				"taskrun_path": taskrunPath,
+			})
+		}
 		outcome.SucceededShards++
 		executions = append(executions, execution)
 	}
 
-	if err := e.persistShardSummary(stepID, domainID, summary); err != nil {
-		return nil, runtimeShardOutcome{}, err
-	}
 	if terminalErr != nil {
 		return nil, outcome, terminalErr
 	}
@@ -338,6 +428,230 @@ func (e *pipelineExecution) registerPartialShardFailure(stepID string, domainID 
 		"path_scopes": plan.PathScopes,
 		"error":       message,
 	})
+}
+
+func (e *pipelineExecution) loadRuntimeShardSummaryState(
+	stepID string,
+	domainID string,
+	plans []runtimeShardPlan,
+	singleShard bool,
+) (*runtimeShardSummaryState, error) {
+	existingEntries, err := e.loadPersistedShardSummaryEntries(stepID, domainID)
+	if err != nil {
+		return nil, err
+	}
+	existingByShard := make(map[string]runtimeShardSummaryEntry, len(existingEntries))
+	for _, entry := range existingEntries {
+		if strings.TrimSpace(entry.ShardID) == "" {
+			continue
+		}
+		existingByShard[entry.ShardID] = entry
+	}
+
+	state := &runtimeShardSummaryState{
+		execution:   e,
+		stepID:      stepID,
+		domainID:    domainID,
+		singleShard: singleShard,
+		entries:     make([]runtimeShardSummaryEntry, 0, len(plans)),
+		index:       make(map[string]int, len(plans)),
+	}
+	for _, plan := range plans {
+		entry := runtimeShardSummaryEntry{
+			ShardID:    plan.ShardID,
+			RepoScopes: append([]string(nil), plan.RepoScopes...),
+			PathScopes: append([]string(nil), plan.PathScopes...),
+			Status:     "pending",
+		}
+		if existing, ok := existingByShard[plan.ShardID]; ok {
+			entry.Status = normalizeShardSummaryStatus(existing.Status)
+			entry.TaskID = strings.TrimSpace(existing.TaskID)
+			entry.TaskRun = strings.TrimSpace(existing.TaskRun)
+			entry.Error = strings.TrimSpace(existing.Error)
+		}
+		taskrunPath := entry.TaskRun
+		if taskrunPath == "" {
+			taskrunPath = shardTaskrunPath(e.runID, stepID, domainID, plan.ShardID, singleShard)
+		}
+		if taskrunPath != "" && e.taskrunExists(taskrunPath) {
+			entry.TaskRun = taskrunPath
+			if entry.Status == "pending" {
+				entry.Status = "checkpointed"
+				entry.Error = ""
+			}
+		}
+		state.index[plan.ShardID] = len(state.entries)
+		state.entries = append(state.entries, entry)
+	}
+	if err := state.persist(); err != nil {
+		return nil, err
+	}
+	return state, nil
+}
+
+func (e *pipelineExecution) loadPersistedShardSummaryEntries(stepID string, domainID string) ([]runtimeShardSummaryEntry, error) {
+	content, err := e.workspace.ReadFile(shardSummaryPath(e.runID, stepID, domainID))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var summary runtimeShardSummary
+	if err := json.Unmarshal(content, &summary); err != nil {
+		return nil, fmt.Errorf("decode persisted shard summary: %w", err)
+	}
+	return append([]runtimeShardSummaryEntry(nil), summary.Items...), nil
+}
+
+func (e *pipelineExecution) taskrunExists(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	_, err := e.workspace.ReadFile(path)
+	return err == nil
+}
+
+func normalizeShardSummaryStatus(status string) string {
+	switch strings.TrimSpace(status) {
+	case "checkpointed", "succeeded", "failed":
+		return strings.TrimSpace(status)
+	default:
+		return "pending"
+	}
+}
+
+func shardFailureMessage(entry runtimeShardSummaryEntry) string {
+	message := strings.TrimSpace(entry.Error)
+	if message == "" {
+		message = "shard failed in previous attempt"
+	}
+	return message
+}
+
+func (e *pipelineExecution) loadReplayableShardResult(
+	stepID string,
+	domainID string,
+	plan runtimeShardPlan,
+	entry runtimeShardSummaryEntry,
+	singleShard bool,
+) (bool, runtimeShardRunResult) {
+	status := normalizeShardSummaryStatus(entry.Status)
+	if status != "checkpointed" && status != "succeeded" {
+		return false, runtimeShardRunResult{}
+	}
+	taskrunPath := strings.TrimSpace(entry.TaskRun)
+	if taskrunPath == "" {
+		taskrunPath = shardTaskrunPath(e.runID, stepID, domainID, plan.ShardID, singleShard)
+	}
+	raw, err := e.workspace.ReadFile(taskrunPath)
+	if err != nil {
+		return true, runtimeShardRunResult{
+			Plan: plan,
+			Err:  fmt.Errorf("load persisted taskrun %q: %w", taskrunPath, err),
+		}
+	}
+	prepared, err := loadPreparedExecutionFromPersistedTaskRun(raw)
+	if err != nil {
+		return true, runtimeShardRunResult{
+			Plan: plan,
+			Err:  fmt.Errorf("decode persisted taskrun %q: %w", taskrunPath, err),
+		}
+	}
+	e.logInfo(stepID, domainID, "shard loaded from persisted taskrun", map[string]any{
+		"shard_id":     plan.ShardID,
+		"task_id":      prepared.Task.TaskID,
+		"taskrun_path": taskrunPath,
+		"status":       status,
+	})
+	return true, runtimeShardRunResult{
+		Plan:           plan,
+		Prepared:       prepared,
+		AlreadyApplied: status == "succeeded",
+		FromCheckpoint: status == "checkpointed",
+	}
+}
+
+func (s *runtimeShardSummaryState) entry(shardID string) runtimeShardSummaryEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if idx, ok := s.index[shardID]; ok {
+		return s.entries[idx]
+	}
+	return runtimeShardSummaryEntry{ShardID: shardID, Status: "pending"}
+}
+
+func (s *runtimeShardSummaryState) persist() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.persistLocked()
+}
+
+func (s *runtimeShardSummaryState) persistLocked() error {
+	return s.execution.persistShardSummary(s.stepID, s.domainID, append([]runtimeShardSummaryEntry(nil), s.entries...))
+}
+
+func (s *runtimeShardSummaryState) markCheckpointed(
+	plan runtimeShardPlan,
+	taskID string,
+	taskrunPath string,
+	taskrunLabel string,
+	raw []byte,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.execution.persistTaskRun(taskrunPath, taskrunLabel, raw); err != nil {
+		return err
+	}
+	s.updateLocked(plan, "checkpointed", taskID, taskrunPath, "")
+	return s.persistLocked()
+}
+
+func (s *runtimeShardSummaryState) markSucceeded(plan runtimeShardPlan, taskID string, taskrunPath string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.updateLocked(plan, "succeeded", taskID, taskrunPath, "")
+	return s.persistLocked()
+}
+
+func (s *runtimeShardSummaryState) markFailed(plan runtimeShardPlan, taskID string, message string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.updateLocked(plan, "failed", taskID, "", message)
+	return s.persistLocked()
+}
+
+func (s *runtimeShardSummaryState) markAborted(plan runtimeShardPlan) error {
+	return s.markFailed(plan, "", "shard not executed because fail_fast aborted remaining work")
+}
+
+func (s *runtimeShardSummaryState) updateLocked(
+	plan runtimeShardPlan,
+	status string,
+	taskID string,
+	taskrunPath string,
+	message string,
+) {
+	idx, ok := s.index[plan.ShardID]
+	if !ok {
+		return
+	}
+	entry := s.entries[idx]
+	entry.RepoScopes = append([]string(nil), plan.RepoScopes...)
+	entry.PathScopes = append([]string(nil), plan.PathScopes...)
+	entry.Status = normalizeShardSummaryStatus(status)
+	if strings.TrimSpace(taskID) != "" {
+		entry.TaskID = strings.TrimSpace(taskID)
+	}
+	if strings.TrimSpace(taskrunPath) != "" {
+		entry.TaskRun = strings.TrimSpace(taskrunPath)
+	}
+	if strings.TrimSpace(message) != "" {
+		entry.Error = strings.TrimSpace(message)
+	} else {
+		entry.Error = ""
+	}
+	s.entries[idx] = entry
 }
 
 func (e *pipelineExecution) persistShardPlan(
@@ -427,6 +741,10 @@ func (e *pipelineExecution) persistShardPlan(
 }
 
 func (e *pipelineExecution) persistShardSummary(stepID string, domainID string, items []runtimeShardSummaryEntry) error {
+	normalizedItems, err := normalizeAndValidateShardSummaryItems(items)
+	if err != nil {
+		return err
+	}
 	summary := runtimeShardSummary{
 		Version:       1,
 		RunID:         e.runID,
@@ -437,7 +755,7 @@ func (e *pipelineExecution) persistShardSummary(stepID string, domainID string, 
 		FailurePolicy: strings.TrimSpace(e.executionProfile.FailurePolicy),
 		ShardMode:     strings.TrimSpace(e.executionProfile.ShardMode),
 		GeneratedAt:   e.clock().UTC().Format(time.RFC3339),
-		Items:         append([]runtimeShardSummaryEntry(nil), items...),
+		Items:         normalizedItems,
 	}
 	if summary.Strategy == "" {
 		summary.Strategy = "sequential"
@@ -464,6 +782,27 @@ func (e *pipelineExecution) persistShardSummary(stepID string, domainID string, 
 	e.addArtifacts(Artifact{Path: path, Kind: "taskrun", Label: shardSummaryLabel(stepID, domainID)})
 	e.logInfo(stepID, domainID, "runtime shard summary persisted", map[string]any{"path": path, "items": len(items)})
 	return nil
+}
+
+func normalizeAndValidateShardSummaryItems(items []runtimeShardSummaryEntry) ([]runtimeShardSummaryEntry, error) {
+	normalized := make([]runtimeShardSummaryEntry, 0, len(items))
+	for _, entry := range items {
+		candidate := entry
+		candidate.ShardID = strings.TrimSpace(candidate.ShardID)
+		candidate.TaskID = strings.TrimSpace(candidate.TaskID)
+		candidate.TaskRun = strings.TrimSpace(candidate.TaskRun)
+		candidate.Error = strings.TrimSpace(candidate.Error)
+		candidate.Status = normalizeShardSummaryStatus(candidate.Status)
+		if (candidate.Status == "checkpointed" || candidate.Status == "succeeded") && candidate.TaskRun == "" {
+			shardID := candidate.ShardID
+			if shardID == "" {
+				shardID = "<unknown>"
+			}
+			return nil, fmt.Errorf("invalid shard summary: shard %q status %q requires taskrun_path", shardID, candidate.Status)
+		}
+		normalized = append(normalized, candidate)
+	}
+	return normalized, nil
 }
 
 func shardTaskrunPath(runID string, stepID string, domainID string, shardID string, singleShard bool) string {

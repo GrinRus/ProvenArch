@@ -65,6 +65,7 @@ type Service struct {
 	runner             acpruntime.Runner
 	clock              func() time.Time
 	executionOverrides acpruntime.ExecutionOverrides
+	resumeStaleAsync   bool
 
 	mu             sync.RWMutex
 	runs           map[string]*runRecord
@@ -186,6 +187,12 @@ func WithRunLogsRetention(ttl time.Duration, maxRuns int) Option {
 	}
 }
 
+func WithResumeStaleAsyncRuns() Option {
+	return func(service *Service) {
+		service.resumeStaleAsync = true
+	}
+}
+
 func NewService(options ...Option) *Service {
 	service := &Service{
 		runner:           claudecode.FakeRunner{},
@@ -202,7 +209,7 @@ func NewService(options ...Option) *Service {
 		option(service)
 	}
 	service.loadHistory()
-	service.reconcileStaleRunsAfterRestart()
+	service.recoverStaleRunsAfterRestart()
 	_ = service.cleanupRunLogs()
 	return service
 }
@@ -237,20 +244,41 @@ func (s *Service) ValidateRuntime(ctx context.Context) error {
 func (s *Service) runWithID(ctx context.Context, request RunRequest, runID string) (RunInfo, []Artifact, error) {
 	_ = s.cleanupRunLogs()
 	now := s.clock().UTC()
-	initialInfo := RunInfo{
-		RunID:     runID,
-		Pipeline:  string(request.Pipeline),
-		Status:    RunStatusRunning,
-		StartedAt: now,
+	resumedRecord, resumed := s.loadExistingRunRecord(runID)
+	startedAt := now
+	initialArtifacts := []Artifact{}
+	initialWarnings := []string{}
+	resumeFromStep := ""
+	runLogMessage := "run started"
+	runLogFields := map[string]any{
+		"pipeline": string(request.Pipeline),
 	}
-	s.storeRun(runRecord{info: initialInfo})
+	if resumed {
+		startedAt = resumedRecord.info.StartedAt.UTC()
+		initialArtifacts = append([]Artifact(nil), resumedRecord.artifacts...)
+		initialWarnings = append([]string(nil), resumedRecord.info.Warnings...)
+		resumeFromStep = resumeStepForCurrentStep(request.Pipeline, resumedRecord.info.CurrentStep)
+		runLogMessage = "run resumed after restart"
+		runLogFields["previous_current_step"] = resumedRecord.info.CurrentStep
+		runLogFields["resume_from_step"] = resumeFromStep
+	}
+	initialInfo := RunInfo{
+		RunID:       runID,
+		Pipeline:    string(request.Pipeline),
+		Status:      RunStatusRunning,
+		StartedAt:   startedAt,
+		CurrentStep: resumeFromStep,
+		Warnings:    append([]string(nil), initialWarnings...),
+	}
+	s.storeRun(runRecord{
+		info:      initialInfo,
+		artifacts: append([]Artifact(nil), initialArtifacts...),
+	})
 	s.appendRunLog(runID, RunLogEntry{
 		Timestamp: now,
 		Level:     RunLogLevelInfo,
-		Message:   "run started",
-		Fields: map[string]any{
-			"pipeline": string(request.Pipeline),
-		},
+		Message:   runLogMessage,
+		Fields:    runLogFields,
 	})
 	if err := s.ValidateRuntime(ctx); err != nil {
 		finishedAt := s.clock().UTC()
@@ -258,7 +286,10 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		failedInfo.Status = RunStatusFailed
 		failedInfo.ErrorCode, failedInfo.Error = s.classifyRunFailure(runID, err)
 		failedInfo.FinishedAt = &finishedAt
-		s.storeRun(runRecord{info: failedInfo})
+		s.storeRun(runRecord{
+			info:      failedInfo,
+			artifacts: append([]Artifact(nil), initialArtifacts...),
+		})
 		s.appendRunLog(runID, RunLogEntry{
 			Timestamp: finishedAt,
 			Level:     RunLogLevelError,
@@ -277,7 +308,10 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		failedInfo.Status = RunStatusFailed
 		failedInfo.Error = fmt.Sprintf("ensure workspace layout: %v", err)
 		failedInfo.FinishedAt = &finishedAt
-		s.storeRun(runRecord{info: failedInfo})
+		s.storeRun(runRecord{
+			info:      failedInfo,
+			artifacts: append([]Artifact(nil), initialArtifacts...),
+		})
 		s.appendRunLog(runID, RunLogEntry{
 			Timestamp: finishedAt,
 			Level:     RunLogLevelError,
@@ -291,9 +325,10 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	}
 	resolvedExecution := s.ResolveExecutionProfile(request.Workspace.Manifest)
 	validation := request.Workspace.Validate(ctx, workspace.ValidateOptions{
-		ResolveRepos: true,
-		FetchGit:     true,
-		VerifyRefs:   true,
+		ResolveRepos:      true,
+		FetchGit:          true,
+		VerifyRefs:        true,
+		RepoSelectionMode: resolvedExecution.Effective.RepoSelection,
 	})
 	if !validation.OK {
 		finishedAt := s.clock().UTC()
@@ -303,7 +338,8 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		failedInfo.Warnings = diagnosticMessages(validation.Warnings)
 		failedInfo.FinishedAt = &finishedAt
 		s.storeRun(runRecord{
-			info: failedInfo,
+			info:      failedInfo,
+			artifacts: append([]Artifact(nil), initialArtifacts...),
 		})
 		s.appendRunLog(runID, RunLogEntry{
 			Timestamp: finishedAt,
@@ -321,14 +357,14 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	execution := pipelineExecution{
 		runID:              runID,
 		pipeline:           request.Pipeline,
-		startedAt:          now,
+		startedAt:          startedAt,
 		workspace:          request.Workspace,
 		runner:             s.runner,
 		store:              model.NewStore(request.Workspace),
 		compiler:           reports.NewCompiler(request.Workspace),
 		clock:              s.clock,
-		artifacts:          []Artifact{},
-		artifactIndex:      map[string]int{},
+		artifacts:          append([]Artifact(nil), initialArtifacts...),
+		artifactIndex:      artifactIndexFor(initialArtifacts),
 		findings:           []contracts.Finding{},
 		questions:          []contracts.Question{},
 		coverage:           nil,
@@ -336,9 +372,16 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		stepStatus:         initialInfo,
 		runtimeStepMetrics: []runtimeStepQuality{},
 		runtimeVersions:    map[string]struct{}{},
+		resumeFromStep:     resumeFromStep,
+		warnings:           append([]string(nil), initialWarnings...),
 		resolvedRepoPaths:  map[string]string{},
-		selectedRepoScopes: collectRepoScopes(request.Workspace.Manifest.Repos),
+		repoSelectionMode:  validation.RepoSelectionMode,
+		selectedRepoScopes: append([]string(nil), validation.SelectedRepoScopes...),
+		repoSelection:      append([]workspace.RepoSelectionDecision(nil), validation.RepoSelection...),
 		reportContext:      reports.DefaultReportRenderContext(),
+	}
+	if len(execution.selectedRepoScopes) == 0 && execution.repoSelectionMode == workspace.RepoSelectionAll {
+		execution.selectedRepoScopes = collectRepoScopes(request.Workspace.Manifest.Repos)
 	}
 	for _, resolvedRepo := range validation.ResolvedRepos {
 		name := strings.TrimSpace(resolvedRepo.Name)
@@ -367,10 +410,38 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		"max_parallel":     execution.executionProfile.MaxParallel,
 		"failure_policy":   execution.executionProfile.FailurePolicy,
 		"shard_discovery":  execution.executionProfile.ShardMode,
+		"repo_selection":   execution.executionProfile.RepoSelection,
 		"selected_scopes":  append([]string(nil), execution.selectedRepoScopes...),
 		"timeout_step_sec": resolvedTimeouts.Effective.StepTimeoutSec,
 		"timeout_hb_sec":   resolvedTimeouts.Effective.HeartbeatSec,
 	})
+	for _, diagnostic := range validation.Warnings {
+		if diagnostic.Code != "workspace.repo.selection.role_unknown" {
+			continue
+		}
+		execution.addWarning(fmt.Sprintf("%s: %s", diagnostic.Code, diagnostic.Message))
+	}
+	if err := execution.persistRepoSelectionSummary(); err != nil {
+		finishedAt := s.clock().UTC()
+		failedInfo := initialInfo
+		failedInfo.Status = RunStatusFailed
+		failedInfo.Error = fmt.Sprintf("persist repo selection summary: %v", err)
+		failedInfo.FinishedAt = &finishedAt
+		s.storeRun(runRecord{
+			info:      failedInfo,
+			artifacts: append([]Artifact(nil), execution.artifacts...),
+		})
+		s.appendRunLog(runID, RunLogEntry{
+			Timestamp: finishedAt,
+			Level:     RunLogLevelError,
+			Message:   "run failed: persist repo selection summary",
+			Fields: map[string]any{
+				"error": failedInfo.Error,
+			},
+		})
+		_ = s.cleanupRunLogs()
+		return failedInfo, nil, err
+	}
 	execution.onStep = func(stepID string) {
 		progress := initialInfo
 		progress.Status = RunStatusRunning
@@ -693,6 +764,30 @@ func (s *Service) storeRun(record runRecord) {
 	s.upsertRunLocked(record)
 }
 
+func (s *Service) loadExistingRunRecord(runID string) (runRecord, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	record, ok := s.runs[runID]
+	if !ok || record == nil {
+		return runRecord{}, false
+	}
+	return runRecord{
+		info: RunInfo{
+			RunID:       record.info.RunID,
+			Pipeline:    record.info.Pipeline,
+			Status:      record.info.Status,
+			StartedAt:   record.info.StartedAt,
+			FinishedAt:  record.info.FinishedAt,
+			CurrentStep: record.info.CurrentStep,
+			Warnings:    append([]string(nil), record.info.Warnings...),
+			ErrorCode:   record.info.ErrorCode,
+			Error:       record.info.Error,
+		},
+		artifacts: append([]Artifact(nil), record.artifacts...),
+	}, true
+}
+
 func (s *Service) launchAsyncRun(ctx context.Context, runID string, request RunRequest) {
 	runCtx, cancel := context.WithCancel(ctx)
 
@@ -837,21 +932,48 @@ func (s *Service) loadHistory() {
 	}
 }
 
-func (s *Service) reconcileStaleRunsAfterRestart() {
+type staleRunReconciliation struct {
+	runID         string
+	previousState RunStatus
+}
+
+type staleRunResumeTarget struct {
+	runID   string
+	request RunRequest
+}
+
+func (s *Service) recoverStaleRunsAfterRestart() {
 	now := s.clock().UTC()
-	type staleRun struct {
-		runID         string
-		previousState RunStatus
-	}
-	staleRuns := []staleRun{}
+	reconciledRuns := []staleRunReconciliation{}
+	var resumeTarget *staleRunResumeTarget
 
 	s.mu.Lock()
+	candidateRunID := ""
+	if s.resumeStaleAsync {
+		candidateRunID = s.findResumableRunningRunLocked()
+	}
 	for runID, record := range s.runs {
 		if record == nil {
 			continue
 		}
-		if record.info.Status != RunStatusQueued && record.info.Status != RunStatusRunning {
+		switch record.info.Status {
+		case RunStatusQueued:
+		case RunStatusRunning:
+		default:
 			continue
+		}
+		if record.info.Status == RunStatusRunning && runID == candidateRunID {
+			if pipeline, err := ParsePipeline(record.info.Pipeline); err == nil {
+				resumeTarget = &staleRunResumeTarget{
+					runID: runID,
+					request: RunRequest{
+						Workspace:      s.historyWorkspace,
+						Pipeline:       pipeline,
+						NonInteractive: true,
+					},
+				}
+				continue
+			}
 		}
 		previousStatus := record.info.Status
 		finishedAt := now
@@ -862,15 +984,19 @@ func (s *Service) reconcileStaleRunsAfterRestart() {
 		reconciledInfo.FinishedAt = &finishedAt
 		record.info = reconciledInfo
 		s.runs[runID] = record
-		staleRuns = append(staleRuns, staleRun{
+		reconciledRuns = append(reconciledRuns, staleRunReconciliation{
 			runID:         runID,
 			previousState: previousStatus,
 		})
 	}
-	if len(staleRuns) > 0 {
+	if len(reconciledRuns) > 0 {
 		s.persistHistoryLocked()
 	}
-	s.activeRunID = ""
+	if resumeTarget != nil {
+		s.activeRunID = resumeTarget.runID
+	} else {
+		s.activeRunID = ""
+	}
 	s.pendingRun = nil
 	if s.runCancels == nil {
 		s.runCancels = map[string]context.CancelFunc{}
@@ -889,7 +1015,7 @@ func (s *Service) reconcileStaleRunsAfterRestart() {
 	}
 	s.mu.Unlock()
 
-	for _, stale := range staleRuns {
+	for _, stale := range reconciledRuns {
 		s.appendRunLog(stale.runID, RunLogEntry{
 			Timestamp: now,
 			Level:     RunLogLevelWarning,
@@ -900,6 +1026,55 @@ func (s *Service) reconcileStaleRunsAfterRestart() {
 			},
 		})
 	}
+	if resumeTarget != nil {
+		s.launchAsyncRun(context.Background(), resumeTarget.runID, resumeTarget.request)
+	}
+}
+
+func (s *Service) findResumableRunningRunLocked() string {
+	if !s.resumeStaleAsync || !s.historyEnabled || strings.TrimSpace(s.historyWorkspace.Path) == "" {
+		return ""
+	}
+
+	candidates := make([]runRecord, 0, len(s.runs))
+	for _, record := range s.runs {
+		if record == nil || record.info.Status != RunStatusRunning {
+			continue
+		}
+		if !s.isRunningRunResumable(*record) {
+			continue
+		}
+		candidates = append(candidates, *record)
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].info.StartedAt.Equal(candidates[j].info.StartedAt) {
+			return candidates[i].info.RunID > candidates[j].info.RunID
+		}
+		return candidates[i].info.StartedAt.After(candidates[j].info.StartedAt)
+	})
+	if len(candidates) == 0 {
+		return ""
+	}
+	return candidates[0].info.RunID
+}
+
+func (s *Service) isRunningRunResumable(record runRecord) bool {
+	pipeline, err := ParsePipeline(record.info.Pipeline)
+	if err != nil {
+		return false
+	}
+	currentStep := strings.TrimSpace(record.info.CurrentStep)
+	if currentStep == "" {
+		return false
+	}
+	resumeStep := resumeStepForCurrentStep(pipeline, currentStep)
+	if resumeStep == "" {
+		return false
+	}
+	if !isRuntimeOrLaterStep(pipeline, currentStep) {
+		return true
+	}
+	return hasShardArtifactsForRun(s.historyWorkspace.Path, record.info.RunID, resumeStep)
 }
 
 func (s *Service) persistHistoryLocked() {
@@ -1057,8 +1232,11 @@ type pipelineExecution struct {
 	runtimeHeartbeatInterval time.Duration
 	executionProfile         acpruntime.ExecutionValues
 	partialFailures          []runtimeShardFailure
+	resumeFromStep           string
 	resolvedRepoPaths        map[string]string
+	repoSelectionMode        string
 	selectedRepoScopes       []string
+	repoSelection            []workspace.RepoSelectionDecision
 	collectOutcome           runtimeShardOutcome
 	findingsOutcome          runtimeShardOutcome
 	findingsSkipped          bool
@@ -1101,7 +1279,13 @@ type domainRunSummary struct {
 
 func (e *pipelineExecution) run(ctx context.Context) error {
 	stepIDs := stepIDsForPipeline(e.pipeline)
-	for _, stepID := range stepIDs {
+	startIdx := 0
+	if strings.TrimSpace(e.resumeFromStep) != "" {
+		if idx := indexOfPipelineStep(stepIDs, e.resumeFromStep); idx >= 0 {
+			startIdx = idx
+		}
+	}
+	for _, stepID := range stepIDs[startIdx:] {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -1172,9 +1356,10 @@ func (e *pipelineExecution) runRuntimeStep(ctx context.Context, stepID string) e
 				"collect_status": e.renderContext().Collect.Status,
 			})
 		} else if len(normalizeOrderedUniqueStrings(e.selectedRepoScopes)) == 0 {
-			e.addWarning(fmt.Sprintf("%s: runtime step skipped because workspace resolved zero repo scopes", stepID))
+			e.addWarning(fmt.Sprintf("%s: runtime step skipped because repo_selection=%q selected zero repo scopes", stepID, e.repoSelectionMode))
 			e.logWarn(stepID, "", "runtime step skipped", map[string]any{
-				"selected_scopes": append([]string(nil), e.selectedRepoScopes...),
+				"repo_selection_mode": e.repoSelectionMode,
+				"selected_scopes":     append([]string(nil), e.selectedRepoScopes...),
 			})
 		} else {
 			_, outcome, err := e.executeRuntimeTasksSharded(ctx, stepID, "", append([]string(nil), e.selectedRepoScopes...), "")
@@ -1274,16 +1459,49 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 			})
 		}
 		skipReason := ""
+		if repoScope != "" && !e.isRepoScopeSelected(repoScope) {
+			unresolved = appendUniqueStrings(unresolved, "repo_scope")
+			questionText := fmt.Sprintf(
+				"Canonical domain %q repo_scope %q is excluded by runtime repo_selection=%q; domain task is skipped",
+				domainID,
+				repoScope,
+				e.repoSelectionMode,
+			)
+			if hasDeclaredRepoScope && scopeResolution.DeclaredRepoScopeKnown {
+				questionText = fmt.Sprintf(
+					"Canonical domain %q declares repo_scope %q, but it is excluded by runtime repo_selection=%q; domain task is skipped",
+					domainID,
+					declaredRepoScope,
+					e.repoSelectionMode,
+				)
+			} else if hasDeclaredRepoScope {
+				questionText = fmt.Sprintf(
+					"Canonical domain %q declares unknown repo_scope %q; resolved fallback repo_scope %q is excluded by runtime repo_selection=%q; domain task is skipped",
+					domainID,
+					declaredRepoScope,
+					repoScope,
+					e.repoSelectionMode,
+				)
+			}
+			e.questions = mergeQuestions(e.questions, []contracts.Question{
+				{
+					ID:       fmt.Sprintf("q.domain.%s.repo-scope-excluded-by-selection", slugutil.Slugify(domainID)),
+					Text:     questionText,
+					Priority: "high",
+				},
+			})
+			skipReason = fmt.Sprintf("repo_scope %q excluded by runtime repo_selection=%q", repoScope, e.repoSelectionMode)
+		}
 		if skipReason == "" && len(normalizeOrderedUniqueStrings(e.selectedRepoScopes)) == 0 {
 			unresolved = appendUniqueStrings(unresolved, "repo_scope")
 			e.questions = mergeQuestions(e.questions, []contracts.Question{
 				{
-					ID:       fmt.Sprintf("q.domain.%s.repo-scope-empty", slugutil.Slugify(domainID)),
-					Text:     fmt.Sprintf("Canonical domain %q is skipped because workspace resolved zero repo scopes", domainID),
+					ID:       fmt.Sprintf("q.domain.%s.repo-selection-empty", slugutil.Slugify(domainID)),
+					Text:     fmt.Sprintf("Canonical domain %q is skipped because runtime repo_selection=%q selected zero repo scopes", domainID, e.repoSelectionMode),
 					Priority: "high",
 				},
 			})
-			skipReason = "workspace resolved zero repo scopes"
+			skipReason = fmt.Sprintf("runtime repo_selection=%q selected zero repo scopes", e.repoSelectionMode)
 		}
 		envelopePath := fmt.Sprintf("reports/agent-outputs/domains/%s.task-envelope.json", sanitizeDomainArtifactSlug(domainID))
 		outputPath := fmt.Sprintf("reports/agent-outputs/domains/%s.md", domainID)
@@ -1319,8 +1537,9 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 			}
 		} else {
 			e.logWarn(stepID, domainID, "domain collect skipped", map[string]any{
-				"repo_scope":  repoScope,
-				"skip_reason": skipReason,
+				"repo_scope":       repoScope,
+				"repo_selection":   e.repoSelectionMode,
+				"selection_reason": skipReason,
 			})
 		}
 		partialFailuresAfter := len(e.partialFailures)
@@ -1639,6 +1858,130 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 	}, nil
 }
 
+func (e *pipelineExecution) replayRuntimeTaskExecution(
+	stepID string,
+	domainID string,
+	prepared runtimePreparedExecution,
+) (runtimeTaskExecution, error) {
+	normalized := prepared.Normalized
+	task := prepared.Task
+	runtimeName := prepared.RuntimeName
+	runtimeVersion := prepared.RuntimeVersion
+	runtimeKey := runtimeName
+	if runtimeVersion != "" {
+		runtimeKey = runtimeName + "@" + runtimeVersion
+	}
+	e.runtimeVersions[runtimeKey] = struct{}{}
+
+	applyReport := synthesizeApplyReport(normalized)
+	if len(applyReport.DocArtifacts) > 0 {
+		docArtifacts, err := e.compiler.WriteDocArtifacts(applyReport.DocArtifacts)
+		if err != nil {
+			return runtimeTaskExecution{}, err
+		}
+		e.addArtifacts(toOrchestratorArtifacts(docArtifacts)...)
+	}
+
+	e.questions = mergeQuestions(e.questions, normalized.Questions)
+	e.coverage = mergeCoverage(e.coverage, normalized.Coverage)
+	e.findings = append(e.findings, applyReport.Findings...)
+	e.runtimeStepMetrics = append(e.runtimeStepMetrics, runtimeStepQuality{
+		StepID:           stepID,
+		DomainID:         domainID,
+		RuntimeName:      runtimeName,
+		RuntimeVersion:   runtimeVersion,
+		RepoScopes:       append([]string(nil), task.RepoScopes...),
+		ChangesetOps:     len(normalized.Changeset),
+		EntityUpserts:    applyReport.UpsertedEntities,
+		EdgeUpserts:      applyReport.UpsertedEdges,
+		FindingsAdded:    len(applyReport.Findings),
+		QuestionsCount:   len(normalized.Questions),
+		CoverageObserved: countCoverageObserved(normalized.Coverage),
+		CoverageMissing:  countCoverageMissing(normalized.Coverage),
+		WarningsCount:    len(normalized.Warnings),
+	})
+	e.logInfo(stepID, domainID, "runtime task replayed from persisted taskrun", map[string]any{
+		"task_id":          task.TaskID,
+		"shard_id":         task.ShardID,
+		"repo_scope":       task.RepoScope,
+		"runtime_name":     runtimeName,
+		"runtime_version":  runtimeVersion,
+		"changeset_ops":    len(normalized.Changeset),
+		"entity_upserts":   applyReport.UpsertedEntities,
+		"edge_upserts":     applyReport.UpsertedEdges,
+		"findings_added":   len(applyReport.Findings),
+		"questions_count":  len(normalized.Questions),
+		"coverage_missing": countCoverageMissing(normalized.Coverage),
+		"warnings_count":   len(normalized.Warnings),
+	})
+
+	return runtimeTaskExecution{
+		RawJSON:    prepared.NormalizedRaw,
+		Normalized: normalized,
+		Apply:      applyReport,
+	}, nil
+}
+
+func loadPreparedExecutionFromPersistedTaskRun(raw []byte) (runtimePreparedExecution, error) {
+	parsed, err := contracts.ParseTaskResult(raw)
+	if err != nil {
+		return runtimePreparedExecution{}, err
+	}
+	normalized := contracts.NormalizeTaskResult(parsed)
+	startedAt, err := time.Parse(time.RFC3339, strings.TrimSpace(normalized.Meta.StartedAt))
+	if err != nil {
+		return runtimePreparedExecution{}, fmt.Errorf("parse persisted task start time: %w", err)
+	}
+	runtimeName := strings.TrimSpace(normalized.Meta.Runtime.Name)
+	if runtimeName == "" {
+		runtimeName = "unknown"
+	}
+	return runtimePreparedExecution{
+		Task: acpruntime.Task{
+			TaskID:       normalized.Meta.TaskID,
+			RunID:        normalized.Meta.RunID,
+			StepID:       normalized.Meta.StepID,
+			ShardID:      normalized.Meta.ShardID,
+			Workspace:    normalized.Meta.Workspace,
+			RepoScope:    normalized.Meta.RepoScope,
+			RepoScopes:   append([]string(nil), normalized.Meta.RepoScopes...),
+			PathScopes:   append([]string(nil), normalized.Meta.PathScopes...),
+			StartedAtUTC: startedAt.UTC(),
+		},
+		Normalized:     normalized,
+		NormalizedRaw:  append([]byte(nil), raw...),
+		RuntimeName:    runtimeName,
+		RuntimeVersion: strings.TrimSpace(normalized.Meta.Runtime.Version),
+	}, nil
+}
+
+func synthesizeApplyReport(result contracts.TaskResult) model.ApplyReport {
+	report := model.ApplyReport{
+		RemappedIDs: map[string]string{},
+	}
+	for _, op := range result.Changeset {
+		switch op.Op {
+		case "upsert_entity":
+			report.UpsertedEntities++
+		case "remove_entity":
+			report.RemovedEntities++
+		case "upsert_edge":
+			report.UpsertedEdges++
+		case "remove_edge":
+			report.RemovedEdges++
+		case "add_finding":
+			if op.Finding != nil {
+				report.Findings = append(report.Findings, *op.Finding)
+			}
+		case "add_doc_artifact":
+			if op.DocArtifact != nil {
+				report.DocArtifacts = append(report.DocArtifacts, *op.DocArtifact)
+			}
+		}
+	}
+	return report
+}
+
 func (e *pipelineExecution) persistTaskRun(path string, label string, raw []byte) error {
 	if err := e.workspace.WriteFile(path, raw); err != nil {
 		return err
@@ -1870,6 +2213,89 @@ func stepIDsForPipeline(pipeline Pipeline) []string {
 	}
 }
 
+func indexOfPipelineStep(stepIDs []string, stepID string) int {
+	target := strings.TrimSpace(stepID)
+	for idx, candidate := range stepIDs {
+		if candidate == target {
+			return idx
+		}
+	}
+	return -1
+}
+
+func resumeStepForCurrentStep(pipeline Pipeline, currentStep string) string {
+	currentStep = strings.TrimSpace(currentStep)
+	if currentStep == "" {
+		return ""
+	}
+	stepIDs := stepIDsForPipeline(pipeline)
+	if indexOfPipelineStep(stepIDs, currentStep) < 0 {
+		return ""
+	}
+	firstRuntime := firstRuntimeStepForPipeline(pipeline)
+	if firstRuntime == "" {
+		return currentStep
+	}
+	if isRuntimeOrLaterStep(pipeline, currentStep) {
+		return firstRuntime
+	}
+	return currentStep
+}
+
+func firstRuntimeStepForPipeline(pipeline Pipeline) string {
+	switch pipeline {
+	case PipelineInit:
+		return "init.step1.collect"
+	case PipelineRefresh:
+		return "refresh.step1.collect"
+	default:
+		return ""
+	}
+}
+
+func isRuntimeOrLaterStep(pipeline Pipeline, stepID string) bool {
+	stepIDs := stepIDsForPipeline(pipeline)
+	currentIdx := indexOfPipelineStep(stepIDs, stepID)
+	runtimeIdx := indexOfPipelineStep(stepIDs, firstRuntimeStepForPipeline(pipeline))
+	return currentIdx >= 0 && runtimeIdx >= 0 && currentIdx >= runtimeIdx
+}
+
+func artifactIndexFor(artifacts []Artifact) map[string]int {
+	index := make(map[string]int, len(artifacts))
+	for idx, artifact := range artifacts {
+		index[artifact.Kind+"|"+artifact.Path] = idx
+	}
+	return index
+}
+
+func hasShardArtifactsForRun(workspaceRoot string, runID string, stepID string) bool {
+	workspaceRoot = strings.TrimSpace(workspaceRoot)
+	runID = strings.TrimSpace(runID)
+	stepID = strings.TrimSpace(stepID)
+	if workspaceRoot == "" || runID == "" || stepID == "" {
+		return false
+	}
+	stepSlug := strings.ReplaceAll(stepID, ".", "-")
+	patterns := []string{
+		filepath.Join(workspaceRoot, "reports", "taskruns", fmt.Sprintf("%s-%s-shard-summary*.json", runID, stepSlug)),
+		filepath.Join(workspaceRoot, "reports", "taskruns", fmt.Sprintf("%s-%s-shard-plan*.json", runID, stepSlug)),
+		filepath.Join(workspaceRoot, "reports", "taskruns", fmt.Sprintf("%s-%s-shard-*.json", runID, stepSlug)),
+		filepath.Join(workspaceRoot, "reports", "taskruns", fmt.Sprintf("%s-%s-domain-*-shard-*.json", runID, stepSlug)),
+	}
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		for _, match := range matches {
+			if _, statErr := os.Stat(match); statErr == nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func summarizePartialFailures(failures []runtimeShardFailure) string {
 	if len(failures) == 0 {
 		return ""
@@ -2094,6 +2520,24 @@ func appendUniqueStrings(values []string, additions ...string) []string {
 		out = append(out, trimmed)
 	}
 	return out
+}
+
+func (e *pipelineExecution) isRepoScopeSelected(scope string) bool {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return false
+	}
+	selected := normalizeOrderedUniqueStrings(e.selectedRepoScopes)
+	if len(selected) == 0 {
+		mode := workspace.CanonicalRepoSelectionMode(e.repoSelectionMode)
+		return mode == workspace.RepoSelectionAll
+	}
+	for _, candidate := range selected {
+		if candidate == scope {
+			return true
+		}
+	}
+	return false
 }
 
 func primaryRepoScope(scopes []string) string {

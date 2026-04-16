@@ -408,7 +408,7 @@ Partial update persisted execution-полей в `workspace.yaml`.
 
 Для lifecycle сценариев используются дополнительные `error_code`:
 - `run_canceled` — run отменён пользователем;
-- `run_reconciled_after_restart` — stale `queued/running` run был reconciled в `failed` при старте сервиса после рестарта.
+- `run_reconciled_after_restart` — stale run был reconciled в `failed` при старте сервиса после рестарта (всегда для `queued`, и для `running` без resumable shard artifacts).
 - `run_partial_failed` — run завершён после `best_effort` shard execution, но один или более shard-ов завершились ошибкой.
 
 ### GET `/api/pipeline/runs?limit=<n>`

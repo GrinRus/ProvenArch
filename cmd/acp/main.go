@@ -147,6 +147,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		orchestrator.WithHistoryWorkspace(ws),
 		orchestrator.WithRunLogsRetention(time.Duration(*runLogsTTLHrs)*time.Hour, *runLogsMaxRuns),
 		orchestrator.WithExecutionOverrides(executionOverrides),
+		orchestrator.WithResumeStaleAsyncRuns(),
 	)
 	if err := service.ValidateRuntime(context.Background()); err != nil {
 		printRunnerError(stderr, err)
