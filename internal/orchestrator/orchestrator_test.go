@@ -958,6 +958,7 @@ func TestNewServiceAutoResumeLeavesQueuedAndArtifactlessRunningRunsReconciled(t 
 		WithRunner(&failOnRunRunner{}),
 		WithClock(func() time.Time { return baseTime.Add(30 * time.Minute) }),
 	)
+	defer waitForAsyncDrain(t, restartedService, 8*time.Second)
 
 	queuedInfo, ok := restartedService.GetRun("run_queued_stale")
 	if !ok {
@@ -1014,6 +1015,7 @@ func TestNewServiceAutoResumeChoosesNewestResumableRunningRun(t *testing.T) {
 		WithRunner(resumeRunner),
 		WithClock(func() time.Time { return baseTime.Add(30 * time.Minute) }),
 	)
+	defer waitForAsyncDrain(t, restartedService, 8*time.Second)
 
 	newestInfo := waitForRunTerminalState(t, restartedService, "run_running_newest", 8*time.Second)
 	if newestInfo.ErrorCode == runErrorCodeReconciledAfterRestart {
