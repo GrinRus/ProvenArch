@@ -1,0 +1,8 @@
+version: 1
+repos:
+  - name: posthog
+    path: /absolute/path/to/posthog/posthog
+    ref: 14d29a548d63665d60b506cf13bd5cfb2de7c743
+
+docs:
+  imports_path: ./docs/imports

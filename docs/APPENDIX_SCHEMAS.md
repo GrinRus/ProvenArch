@@ -43,8 +43,8 @@
 
 `repo_selection` policy в MVP:
 - `all`: включаются все repos.
-- `backend_only`: исключаются только repos с `analysis.role=frontend`.
-- `analysis.role=unknown` остаётся включённым и даёт warning `workspace.repo.selection.role_unknown`.
+- `backend_only`: использует declared `analysis.role`, а при его отсутствии консервативно пытается вывести роль из repo source (`name`/`path`/`git_url`).
+- repos с effective role `frontend` исключаются; unresolved repos остаются включёнными как `unknown` и дают warning `workspace.repo.selection.role_unknown`.
 
 ### Важное ограничение
 `workspace.yaml` не конфигурирует workspace layout beyond repo sources и imports path.

@@ -494,6 +494,36 @@ func TestRunInitFailFastStopsOnShardFailure(t *testing.T) {
 	if len(step3Summaries) != 0 {
 		t.Fatalf("expected no step3 shard summaries in fail_fast mode, got %v", step3Summaries)
 	}
+
+	serviceCatalog := mustReadFile(t, filepath.Join(ws.Path, "reports/as-is/service-catalog.md"))
+	if !strings.Contains(serviceCatalog, "Analysis incomplete.") && !strings.Contains(serviceCatalog, "Partial analysis. Some shards failed; downstream content may be incomplete.") {
+		t.Fatalf("expected incomplete/partial banner in service catalog after fail_fast abort, got:\n%s", serviceCatalog)
+	}
+
+	coverageSummary := mustReadFile(t, filepath.Join(ws.Path, "reports/coverage/summary.md"))
+	if !strings.Contains(coverageSummary, "Analysis incomplete.") && !strings.Contains(coverageSummary, "Partial analysis. Some shards failed; downstream content may be incomplete.") {
+		t.Fatalf("expected incomplete/partial banner in coverage summary after fail_fast abort, got:\n%s", coverageSummary)
+	}
+
+	openQuestions := mustReadFile(t, filepath.Join(ws.Path, "reports/coverage/open-questions.md"))
+	if !strings.Contains(openQuestions, "Analysis incomplete.") && !strings.Contains(openQuestions, "Partial analysis. Some shards failed; downstream content may be incomplete.") {
+		t.Fatalf("expected incomplete/partial banner in open-questions report after fail_fast abort, got:\n%s", openQuestions)
+	}
+
+	findingsReport := mustReadFile(t, filepath.Join(ws.Path, "reports/findings/findings.md"))
+	if !strings.Contains(findingsReport, "Findings unavailable because analysis did not complete.") {
+		t.Fatalf("expected incomplete findings wording after fail_fast abort, got:\n%s", findingsReport)
+	}
+
+	proposal := mustReadFile(t, filepath.Join(ws.Path, "proposals/proposal-baseline/proposal.md"))
+	if !strings.Contains(proposal, "Proposal generation incomplete because no reliable findings set was produced.") {
+		t.Fatalf("expected incomplete proposal wording after fail_fast abort, got:\n%s", proposal)
+	}
+
+	architectSummary := mustReadFile(t, filepath.Join(ws.Path, "reports/agent-outputs/architect/summary.md"))
+	if !strings.Contains(architectSummary, "Analysis incomplete.") && !strings.Contains(architectSummary, "Partial analysis. Some shards failed; downstream content may be incomplete.") {
+		t.Fatalf("expected incomplete/partial banner in architect summary after fail_fast abort, got:\n%s", architectSummary)
+	}
 }
 
 func TestShardSchedulerRespectsSequentialAndParallelStrategies(t *testing.T) {

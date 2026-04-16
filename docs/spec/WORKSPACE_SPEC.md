@@ -113,8 +113,9 @@ Effective precedence:
 
 `repo_selection` поведение:
 - `all`: включаются все repos.
-- `backend_only`: исключаются только repos с `analysis.role=frontend`; `backend|mixed|unknown` остаются включёнными.
-- для `analysis.role=unknown` при `backend_only` validator добавляет warning `workspace.repo.selection.role_unknown`.
+- `backend_only`: сначала использует явный `analysis.role`, затем консервативно пытается вывести роль из repo source (`name`/`path`/`git_url`).
+- repos с effective role `frontend` исключаются; `backend|mixed` остаются включёнными.
+- если ACP не смог получить ни declared, ни inferred роль, repo остаётся включённым как `unknown`, а validator добавляет warning `workspace.repo.selection.role_unknown`.
 
 ## 6) Пример
 

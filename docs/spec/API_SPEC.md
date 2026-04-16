@@ -105,7 +105,7 @@ Body: отсутствует.
 - `workspace.repo.ref.invalid` (error, для `path` source)
 - `workspace.repo.ref.resolved_via_remote` (warning, `ref` разрешён через `origin/*`)
 - `workspace.repo.ref.head_mismatch` (warning, локальный `HEAD` отличается от ожидаемого `ref`)
-- `workspace.repo.selection.role_unknown` (warning, `analysis.role=unknown` остался включён при `repo_selection=backend_only`)
+- `workspace.repo.selection.role_unknown` (warning, ACP не смог получить declared/inferred repo role и оставил repo включённым при `repo_selection=backend_only`)
 
 ### GET `/api/workspace/manifest`
 Возвращает текущее содержимое `workspace.yaml`.

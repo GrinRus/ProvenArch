@@ -1,0 +1,20 @@
+version: 1
+repos:
+  - name: openedx-platform
+    path: /absolute/path/to/openedx/openedx-platform
+    ref: 01dc3c84ea58d2e8b8181a90e89d6c9017aceee8
+  - name: frontend-platform
+    path: /absolute/path/to/openedx/frontend-platform
+    ref: 44cc02429404ed3547c20abd834faf4e487d2c00
+  - name: course-discovery
+    path: /absolute/path/to/openedx/course-discovery
+    ref: 127ea98b0ed6d05b955ea0fc8c57b9c0c285a9a5
+  - name: credentials
+    path: /absolute/path/to/openedx/credentials
+    ref: 88767bc79e8908a2c731f8c099e917fb8454bd5e
+  - name: devstack
+    path: /absolute/path/to/openedx-unsupported/devstack
+    ref: 28f6d7ea1fa30fd7e0bdc10f269999f15f7f8876
+
+docs:
+  imports_path: ./docs/imports

@@ -24,6 +24,9 @@ ACP_QWEN_CMD_BIN="${ACP_QWEN_CMD_BIN:-qwen}"
 ACP_APPLY_TIMEOUTS_VIA_API="${ACP_APPLY_TIMEOUTS_VIA_API:-1}"
 E2E_MATRIX_RELEASE_MODE="${E2E_MATRIX_RELEASE_MODE:-auto}"
 E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES="${E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES:-0}"
+BATCH_FRONTEND_MODE="${BATCH_FRONTEND_MODE:-}"
+BATCH_FRONTEND_CANCEL_MODE="${BATCH_FRONTEND_CANCEL_MODE:-}"
+UI_E2E_HEADED="${UI_E2E_HEADED:-}"
 MATRIX_DRIVER_LOG="${MATRIX_DRIVER_LOG:-$MATRIX_ROOT/driver.log}"
 PROFILE_REPOS_FILE_RESOLVED=""
 PROFILE_SOURCE_KIND_EFFECTIVE=""
@@ -171,6 +174,17 @@ mkdir -p "$(dirname "$MATRIX_DRIVER_LOG")"
 
 RELEASE_MODE="$(normalize_release_mode "$E2E_MATRIX_RELEASE_MODE")"
 ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES="$(normalize_binary_flag "$E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES" "E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES")"
+if [[ "$RELEASE_MODE" == "1" ]]; then
+  if [[ -z "$BATCH_FRONTEND_MODE" ]]; then
+    BATCH_FRONTEND_MODE="per_run"
+  fi
+  if [[ -z "$BATCH_FRONTEND_CANCEL_MODE" ]]; then
+    BATCH_FRONTEND_CANCEL_MODE="once_per_provider"
+  fi
+  if [[ -z "$UI_E2E_HEADED" ]]; then
+    UI_E2E_HEADED="1"
+  fi
+fi
 
 DIAGNOSTIC_TIMEOUT_ENV_KEYS=("${ACP_TIMEOUT_ENV_KEYS[@]}")
 
@@ -191,6 +205,7 @@ fi
 if [[ "$RELEASE_MODE" == "1" && "$ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES" != "1" && "${#DIAGNOSTIC_TIMEOUT_OVERRIDES[@]}" -gt 0 ]]; then
   die "$(acp_release_guard_blocked_message)"
 fi
+log "release frontend defaults: frontend_mode=${BATCH_FRONTEND_MODE:-default} frontend_cancel_mode=${BATCH_FRONTEND_CANCEL_MODE:-default} headed=${UI_E2E_HEADED:-default}"
 
 COMBINATIONS_TSV="$MATRIX_ROOT/profile-sweep-combinations.tsv"
 RECORDS_JSONL="$MATRIX_ROOT/profile-runs.jsonl"
@@ -433,9 +448,20 @@ while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sw
     ACP_SHARD_DISCOVERY_MODE="$sweep_shard_mode"
     ACP_REPO_SELECTION="$sweep_repo_selection"
     acp_build_execution_env_assignments
+    EXTRA_BATCH_ENV_ASSIGNMENTS=()
+    if [[ -n "$BATCH_FRONTEND_MODE" ]]; then
+      EXTRA_BATCH_ENV_ASSIGNMENTS+=("BATCH_FRONTEND_MODE=$BATCH_FRONTEND_MODE")
+    fi
+    if [[ -n "$BATCH_FRONTEND_CANCEL_MODE" ]]; then
+      EXTRA_BATCH_ENV_ASSIGNMENTS+=("BATCH_FRONTEND_CANCEL_MODE=$BATCH_FRONTEND_CANCEL_MODE")
+    fi
+    if [[ -n "$UI_E2E_HEADED" ]]; then
+      EXTRA_BATCH_ENV_ASSIGNMENTS+=("UI_E2E_HEADED=$UI_E2E_HEADED")
+    fi
     env \
       "${ACP_TIMEOUT_ENV_ASSIGNMENTS[@]}" \
       "${ACP_EXECUTION_ENV_ASSIGNMENTS[@]}" \
+      "${EXTRA_BATCH_ENV_ASSIGNMENTS[@]}" \
       "BATCH_ID=$batch_id" \
       "RUN_COUNT=$RUN_COUNT" \
       "TARGET_REPOS_FILE=$PROFILE_META_CACHE_REPOS_FILE" \

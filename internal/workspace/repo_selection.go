@@ -57,11 +57,10 @@ func EvaluateRepoSelection(repos []RepoSource, mode string) ([]string, []RepoSel
 
 	for _, repo := range repos {
 		name := strings.TrimSpace(repo.Name)
-		declaredRole := ""
-		if repo.Analysis != nil {
-			declaredRole = strings.TrimSpace(strings.ToLower(repo.Analysis.Role))
-		}
-		effectiveRole := CanonicalRepoRole(declaredRole)
+		roleResolution := ResolveRepoRole(repo)
+		declaredRole := roleResolution.DeclaredRole
+		effectiveRole := roleResolution.EffectiveRole
+		roleSource := roleResolution.Source
 
 		included := true
 		reason := fmt.Sprintf("included by repo_selection=%s", selectionMode)
@@ -69,16 +68,31 @@ func EvaluateRepoSelection(repos []RepoSource, mode string) ([]string, []RepoSel
 			switch effectiveRole {
 			case RepoRoleFrontend:
 				included = false
-				reason = "excluded by repo_selection=backend_only (effective_role=frontend)"
+				if roleSource == "inferred" {
+					reason = "excluded by repo_selection=backend_only (effective_role=frontend; inferred from repo source)"
+				} else {
+					reason = "excluded by repo_selection=backend_only (effective_role=frontend)"
+				}
 			case RepoRoleBackend, RepoRoleMixed:
 				reason = fmt.Sprintf("included by repo_selection=backend_only (effective_role=%s)", effectiveRole)
+				if roleSource == "inferred" {
+					reason = fmt.Sprintf("%s; inferred from repo source", strings.TrimSuffix(reason, ")")) + ")"
+				}
 			default:
-				reason = "included by repo_selection=backend_only (effective_role=unknown; safe default)"
+				if declaredRole == RepoRoleUnknown {
+					reason = "included by repo_selection=backend_only (effective_role=unknown; declared analysis.role=unknown)"
+				} else {
+					reason = "included by repo_selection=backend_only (effective_role=unknown; no declared or inferred role)"
+				}
+				warningMessage := fmt.Sprintf("repo %q has no declared analysis.role and ACP could not infer frontend/backend role from repo source; backend_only keeps it included", name)
+				if declaredRole == RepoRoleUnknown {
+					warningMessage = fmt.Sprintf("repo %q declares analysis.role=unknown and remains included by backend_only policy", name)
+				}
 				warnings = append(warnings, Diagnostic{
 					Level:   DiagnosticWarning,
 					Code:    "workspace.repo.selection.role_unknown",
 					Repo:    name,
-					Message: fmt.Sprintf("repo %q has unknown analysis.role and remains included by backend_only policy", name),
+					Message: warningMessage,
 				})
 			}
 		}

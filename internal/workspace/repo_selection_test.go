@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -63,6 +64,38 @@ func TestEvaluateRepoSelectionBackendOnlyExcludesFrontendAndWarnsUnknown(t *test
 	}
 	if decisionsByRepo["unknown-role"].EffectiveRole != RepoRoleUnknown || decisionsByRepo["unknown-role"].Included != true {
 		t.Fatalf("expected unknown role to be included with unknown effective role, got %+v", decisionsByRepo["unknown-role"])
+	}
+}
+
+func TestEvaluateRepoSelectionBackendOnlyInfersFrontendFromRepoSource(t *testing.T) {
+	t.Parallel()
+
+	repos := []RepoSource{
+		{Name: "frontend-platform"},
+		{Name: "payments-service"},
+		{Name: "relay"},
+	}
+
+	selectedScopes, decisions, warnings := EvaluateRepoSelection(repos, RepoSelectionBackendOnly)
+	if containsString(selectedScopes, "frontend-platform") {
+		t.Fatalf("expected inferred frontend repo to be excluded, got %+v", selectedScopes)
+	}
+	if len(warnings) != 1 || warnings[0].Repo != "relay" {
+		t.Fatalf("expected unresolved-role warning only for relay, got %+v", warnings)
+	}
+
+	decisionsByRepo := map[string]RepoSelectionDecision{}
+	for _, decision := range decisions {
+		decisionsByRepo[decision.Name] = decision
+	}
+	if decisionsByRepo["frontend-platform"].EffectiveRole != RepoRoleFrontend {
+		t.Fatalf("expected inferred frontend effective role, got %+v", decisionsByRepo["frontend-platform"])
+	}
+	if decisionsByRepo["frontend-platform"].Included {
+		t.Fatalf("expected inferred frontend repo to be excluded, got %+v", decisionsByRepo["frontend-platform"])
+	}
+	if !strings.Contains(decisionsByRepo["frontend-platform"].Reason, "inferred from repo source") {
+		t.Fatalf("expected inferred-role reason, got %+v", decisionsByRepo["frontend-platform"])
 	}
 }
 
@@ -131,5 +164,62 @@ repos:
 	}
 	if resolvedByName["web"].Included == nil || *resolvedByName["web"].Included != false {
 		t.Fatalf("expected web included=false, got %+v", resolvedByName["web"])
+	}
+}
+
+func TestValidateInfersFrontendRoleWithoutManifestAnnotation(t *testing.T) {
+	t.Parallel()
+
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary is required for resolver validation")
+	}
+
+	root := t.TempDir()
+	frontendPath := filepath.Join(root, "repos", "frontend-platform")
+	backendPath := filepath.Join(root, "repos", "payments-service")
+	if err := os.MkdirAll(frontendPath, 0o755); err != nil {
+		t.Fatalf("create frontend path: %v", err)
+	}
+	if err := os.MkdirAll(backendPath, 0o755); err != nil {
+		t.Fatalf("create backend path: %v", err)
+	}
+	writeManifestFile(t, root, `
+version: 1
+repos:
+  - name: frontend-platform
+    path: `+frontendPath+`
+  - name: payments-service
+    path: `+backendPath+`
+`)
+
+	ws, err := Open(root)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+
+	report := ws.Validate(context.Background(), ValidateOptions{
+		ResolveRepos:      true,
+		FetchGit:          false,
+		VerifyRefs:        false,
+		RepoSelectionMode: RepoSelectionBackendOnly,
+	})
+	if !report.OK {
+		t.Fatalf("expected validation to succeed, got errors %+v", report.Errors)
+	}
+	if containsString(report.SelectedRepoScopes, "frontend-platform") {
+		t.Fatalf("expected inferred frontend repo to be excluded, got %+v", report.SelectedRepoScopes)
+	}
+	resolvedByName := map[string]ResolvedRepo{}
+	for _, resolved := range report.ResolvedRepos {
+		resolvedByName[resolved.Name] = resolved
+	}
+	if resolvedByName["frontend-platform"].EffectiveRole != RepoRoleFrontend {
+		t.Fatalf("expected inferred frontend effective role, got %+v", resolvedByName["frontend-platform"])
+	}
+	if resolvedByName["frontend-platform"].Included == nil || *resolvedByName["frontend-platform"].Included != false {
+		t.Fatalf("expected inferred frontend included=false, got %+v", resolvedByName["frontend-platform"])
+	}
+	if !strings.Contains(resolvedByName["frontend-platform"].SelectionReason, "inferred from repo source") {
+		t.Fatalf("expected inferred selection reason, got %+v", resolvedByName["frontend-platform"])
 	}
 }

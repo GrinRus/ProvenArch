@@ -34,7 +34,7 @@
      - persisted profile в `workspace.yaml.runtime.profile.execution`
      - effective precedence: `CLI > env > workspace > defaults`
      - CLI overrides: `--execution-strategy`, `--max-parallel-tasks`, `--failure-policy`
-     - repo filtering policy: `runtime.profile.execution.repo_selection` (`all|backend_only`) + `repos[].analysis.role`
+     - repo filtering policy: `runtime.profile.execution.repo_selection` (`all|backend_only`) + declared/inferred repo role (`repos[].analysis.role` first, then conservative source inference from `name`/`path`/`git_url`)
    - Используется как локально, так и из SCM-triggered pipeline jobs/manual buttons
    - Internal API trigger остаётся optional trusted-mode capability, а не обязательной CI/CD поверхностью
    - Раздаёт embedded UI shell и API в одном процессе `acp serve`

@@ -20,6 +20,7 @@ UI_E2E_CANCEL_STUB_SLEEP_SEC="${UI_E2E_CANCEL_STUB_SLEEP_SEC:-90}"
 UI_INIT_POLL_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-}"
 UI_CANCEL_POLL_TIMEOUT_SEC="${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-}"
 UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC="${UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC:-30}"
+UI_E2E_HEADED="${UI_E2E_HEADED:-0}"
 FRONTEND_RESULT_FILENAME="${FRONTEND_RESULT_FILENAME:-frontend-e2e-result.json}"
 
 DEFAULT_UI_INIT_POLL_TIMEOUT_SEC=900
@@ -164,6 +165,13 @@ case "$UI_E2E_SCENARIO" in
     die "unsupported UI_E2E_SCENARIO '$UI_E2E_SCENARIO' (allowed: init-inspect, cancel-refresh)"
     ;;
 esac
+case "$UI_E2E_HEADED" in
+  0|1)
+    ;;
+  *)
+    die "UI_E2E_HEADED must be 0 or 1, got '$UI_E2E_HEADED'"
+    ;;
+esac
 
 require_cmd curl
 require_cmd python3
@@ -263,6 +271,11 @@ fi
 
 status="passed"
 reason="$ACP_FRONTEND_REASON_OK"
+playwright_cmd=(npm run --prefix ui e2e:live)
+if [[ "$UI_E2E_HEADED" == "1" ]]; then
+  playwright_cmd+=(-- --headed)
+fi
+log "playwright headed mode: $UI_E2E_HEADED"
 if ! (
   cd "$PROVENARCH_ROOT"
   UI_E2E_BASE_URL="$BASE_URL" \
@@ -272,7 +285,7 @@ if ! (
   ACP_UI_INIT_POLL_TIMEOUT_SEC="$UI_INIT_POLL_TIMEOUT_SEC" \
   ACP_UI_CANCEL_POLL_TIMEOUT_SEC="$UI_CANCEL_POLL_TIMEOUT_SEC" \
   UI_E2E_OUTPUT_DIR="$PLAYWRIGHT_RESULTS_DIR" \
-  npm run --prefix ui e2e:live
+  "${playwright_cmd[@]}"
 ) >"$PLAYWRIGHT_LOG" 2>&1; then
   status="failed"
   reason="$ACP_FRONTEND_REASON_PLAYWRIGHT_FAILED"

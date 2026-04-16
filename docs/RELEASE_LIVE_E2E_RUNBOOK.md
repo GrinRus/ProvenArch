@@ -3,6 +3,29 @@
 Этот runbook фиксирует manual pre-release gate на trusted локальной машине.
 Новый wrapper-скрипт не используется: агент запускает существующий matrix harness напрямую (`full-run-batch-matrix.sh` -> `full-run-batch-5x2.sh` -> `e2e_batch_report.py`).
 
+## 0) Canonical release targets (official waves)
+
+Release gate в проекте использует два canonical matrix-файла:
+- `examples/e2e-matrix.release-wave1.yaml`
+- `examples/e2e-matrix.release-wave2.yaml`
+
+Для official release verdict использовать только эти matrix-файлы как source of truth. Каталог repo targets ниже помогает понимать scope/pinned presets, но не заменяет canonical waves.
+
+Wave 1:
+- `single-path`: `posthog/posthog`
+- `single-git_url`: `microservices-patterns/ftgo-application`
+- `multi-path`: Open edX ecosystem (`openedx-platform`, `frontend-platform`, `course-discovery`, `credentials`, `devstack`)
+- `multi-git_url`: Sentry ecosystem (`sentry`, `self-hosted`, `snuba`, `relay`, `symbolicator`)
+
+Wave 2:
+- `single-path`: `GoogleCloudPlatform/bank-of-anthos`
+- `single-git_url`: `GoogleCloudPlatform/bank-of-anthos`
+- `multi-path`: OpenStack ecosystem (`openstack`, `nova`, `neutron`, `cinder`, `keystone`)
+- `multi-git_url`: OpenStack ecosystem (`openstack`, `nova`, `neutron`, `cinder`, `keystone`)
+
+Release verdict для readiness берётся только из:
+- `reports/release_verdict_<matrix-id>.json`
+
 ## 1) Scope и ограничения
 
 - Gate покрывает backend `5x2` + frontend `init-inspect` + frontend `cancel-refresh`.
@@ -22,6 +45,12 @@
 - `claude`
 - доступ к `path` repos
 - доступ к `git_url` repos с pinned `ref`
+
+Обязательное условие для path-профилей:
+- локальные checkout должны быть на тех же pinned SHA, что и соответствующие `github` presets;
+- абсолютные пути из `examples/repos/curated/*.repos.yaml` должны реально существовать на trusted машине;
+- если root `/absolute` недоступен на текущем хосте (read-only / missing privileges), выполнять release gate на другой машине или использовать локальный writable mount, где эти абсолютные пути могут быть подготовлены.
+- не переписывать canonical `examples/e2e-matrix.release-wave*.yaml` или `examples/repos/curated/*.repos.yaml` только ради обхода ограничений текущей машины.
 
 ## 3) Matrix input contract
 
@@ -46,6 +75,10 @@
 Причина: release matrix выше использует 4 fixed-профиля (`single-path`, `single-git_url`, `multi-path`, `multi-git_url`), поэтому для GitHub-only сценария выбор делается через `repos_file`:
 - `single-path`/`single-git_url`: выбрать один monorepo;
 - `multi-path`/`multi-git_url`: выбрать один multi-repo проект (2+ repos).
+
+Важно:
+- этот каталог фиксирует approved target set и pinned preset-файлы;
+- для official release gate решение всё равно принимается только по `examples/e2e-matrix.release-wave1.yaml` и `examples/e2e-matrix.release-wave2.yaml`.
 
 Pinned presets (commit SHA) добавлены в:
 - `examples/repos/github/mono-ftgo-application.repos.yaml`
@@ -75,19 +108,19 @@ profiles:
   - id: single-path
     source_kind: path
     expected_repo_count: 1
-    repos_file: /abs/path/to/local-clones/mono-ftgo-application.path.repos.yaml
+    repos_file: ./repos/curated/single-path.posthog.repos.yaml
   - id: single-git_url
     source_kind: git_url
     expected_repo_count: 1
-    repos_file: ./examples/repos/github/mono-posthog.repos.yaml
+    repos_file: ./repos/github/mono-ftgo-application.repos.yaml
   - id: multi-path
     source_kind: path
     expected_repo_count: 5
-    repos_file: /abs/path/to/local-clones/multi-openedx.path.repos.yaml
+    repos_file: ./repos/curated/multi-path.openedx.repos.yaml
   - id: multi-git_url
     source_kind: git_url
     expected_repo_count: 5
-    repos_file: ./examples/repos/github/multi-sentry-ecosystem.repos.yaml
+    repos_file: ./repos/github/multi-sentry-ecosystem.repos.yaml
 ```
 
 Важно:
@@ -95,7 +128,7 @@ profiles:
 - для `path` использовать локальные checkout тех же репозиториев на тех же SHA;
 - перед релизным прогоном при необходимости обновить SHA в preset-файлах отдельным коммитом (без изменения harness логики).
 - запасной monorepo-кандидат: `GoogleCloudPlatform/microservices-demo` (если нужно заменить `bank-of-anthos`).
-- рекомендуемый first-run набор: `posthog/posthog` + `microservices-patterns/ftgo-application` + `getsentry/*` + `Open edX ecosystem`.
+- рекомендуемый first-run набор для exploratory/live shakeout: `posthog/posthog` + `microservices-patterns/ftgo-application` + `getsentry/*` + `Open edX ecosystem`; он не заменяет official release gate по двум wave matrices.
 
 ## 4) Порядок запуска
 
@@ -107,16 +140,91 @@ npm ci --prefix ui
 npm exec --prefix ui playwright install chromium
 ```
 
-2. Matrix live harness:
+2. Проверка path targets (exist + pinned SHA):
 
 ```bash
-E2E_MATRIX_FILE=/abs/path/to/e2e-matrix.release.yaml \
-MATRIX_ID=release-$(date -u +%Y%m%dT%H%M%SZ) \
+python3 - <<'PY'
+import json, subprocess, sys
+from pathlib import Path
+
+files = [
+    "examples/repos/curated/single-path.posthog.repos.yaml",
+    "examples/repos/curated/multi-path.openedx.repos.yaml",
+    "examples/repos/curated/single-path.bank-of-anthos.repos.yaml",
+    "examples/repos/curated/multi-path.openstack.repos.yaml",
+]
+
+ok = True
+for rel in files:
+    payload = Path(rel).read_text(encoding="utf-8")
+    # lightweight YAML parse without deps: keep runbook script zero-dependency
+    repos = []
+    current = {}
+    for line in payload.splitlines():
+        s = line.strip()
+        if s.startswith("- name:"):
+            if current:
+                repos.append(current)
+            current = {"name": s.split(":", 1)[1].strip()}
+        elif s.startswith("path:"):
+            current["path"] = s.split(":", 1)[1].strip()
+        elif s.startswith("ref:"):
+            current["ref"] = s.split(":", 1)[1].strip()
+    if current:
+        repos.append(current)
+    for r in repos:
+        p = Path(r["path"])
+        if not p.exists():
+            ok = False
+            print(f"MISSING path: {p} ({r.get('name')})")
+            continue
+        try:
+            head = subprocess.check_output(
+                ["git", "-C", str(p), "rev-parse", "HEAD"],
+                text=True,
+            ).strip()
+        except Exception as exc:
+            ok = False
+            print(f"NOT_GIT_OR_UNREADABLE: {p} ({exc})")
+            continue
+        ref = r.get("ref", "")
+        if ref and head != ref:
+            ok = False
+            print(f"SHA_MISMATCH: {p} expected={ref} got={head}")
+        else:
+            print(f"OK {p} @ {head}")
+
+if not ok:
+    sys.exit(1)
+PY
+```
+
+Если этот preflight не проходит:
+- не править canonical matrix/curated preset под текущий хост;
+- остановить release gate как operational blocker и перенести прогон на подходящую trusted машину.
+
+3. Official release matrix (wave1 + wave2):
+
+```bash
+MATRIX_ID=release-$(date -u +%Y%m%dT%H%M%SZ)-wave1 \
+E2E_MATRIX_FILE=examples/e2e-matrix.release-wave1.yaml \
+ACP_CLAUDE_CMD_BIN=claude \
+ACP_QWEN_CMD_BIN=qwen \
+ACP_APPLY_TIMEOUTS_VIA_API=1 \
+./scripts/full-run-batch-matrix.sh
+
+MATRIX_ID=release-$(date -u +%Y%m%dT%H%M%SZ)-wave2 \
+E2E_MATRIX_FILE=examples/e2e-matrix.release-wave2.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
 ACP_APPLY_TIMEOUTS_VIA_API=1 \
 ./scripts/full-run-batch-matrix.sh
 ```
+
+В release-mode (`MATRIX_ID=release-*`) matrix harness автоматически выставляет:
+- `BATCH_FRONTEND_MODE=per_run`
+- `BATCH_FRONTEND_CANCEL_MODE=once_per_provider`
+- `UI_E2E_HEADED=1`
 
 Release guard rules:
 - Не задавать diagnostic timeout env для релизного запуска:
@@ -125,7 +233,7 @@ Release guard rules:
   - `E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES=1`
   - Такой прогон не использовать как release verdict.
 
-3. Сбор артефактов из:
+4. Сбор артефактов из:
 - `/tmp/provenarch-test_arch_project/reports/`
 
 ## 5) Release evidence artifacts
@@ -162,9 +270,10 @@ Blocking signals:
 ### 6.2 Repo selection hardening
 
 Проверяем:
-- `repo_selection=all|backend_only` vs `analysis.role` decisions;
+- `repo_selection=all|backend_only` vs declared/inferred repo role decisions;
 - наличие include/exclude reason в repo-selection summary;
-- отсутствие включения frontend-only repos в `backend_only`.
+- отсутствие включения frontend-only repos в `backend_only`;
+- если repo вроде `frontend-platform` остаётся `included` с effective role `unknown`, считать это product gap против user acceptance даже при `strict_status=passed`.
 
 Blocking signals:
 - `runtime:repo-selection`
@@ -226,6 +335,66 @@ Zero tolerance:
 - если raw/taskrun logs показывают `runner_parse_failed` или `runner_unavailable`, считать их primary failure class даже если `session-summary.md` дополнительно фиксирует `infra_incomplete_cycle`;
 - для release decision использовать только прогон без diagnostic timeout overrides.
 
+### 6.8 Additional Non-Release Checks
+
+После official release matrices выполнить отдельно:
+- parallel shard smoke: два параллельных `full-run-batch-5x2.sh` с разными `BATCH_ID` и `BATCH_PROVIDER_FILTER=qwen-code|claude-code`, `BATCH_RUN_SELECTION=1`, `BATCH_FRONTEND_MODE=never`;
+- forced-incomplete diagnostic run: large multi-repo batch с diagnostic timeout override, чтобы проверить `report_mode=incomplete`, triage-only wording и failure-class precedence.
+
+Эти прогоны не использовать для release verdict; они нужны только как additional evidence по новому функционалу.
+
+Рекомендуемые команды (без wrapper):
+
+```bash
+# parallel smoke (example: Sentry multi-git_url)
+TS="$(date -u +%Y%m%dT%H%M%SZ)"
+(
+  BATCH_ID=parallel-smoke-${TS}-qwen \
+  TARGET_REPOS_FILE=examples/repos/github/multi-sentry-ecosystem.repos.yaml \
+  BATCH_PROVIDER_FILTER=qwen-code \
+  BATCH_RUN_SELECTION=1 \
+  BATCH_FRONTEND_MODE=never \
+  ./scripts/full-run-batch-5x2.sh
+) &
+(
+  BATCH_ID=parallel-smoke-${TS}-claude \
+  TARGET_REPOS_FILE=examples/repos/github/multi-sentry-ecosystem.repos.yaml \
+  BATCH_PROVIDER_FILTER=claude-code \
+  BATCH_RUN_SELECTION=1 \
+  BATCH_FRONTEND_MODE=never \
+  BATCH_SKIP_PRECHECK=1 \
+  ./scripts/full-run-batch-5x2.sh
+) &
+wait || true
+
+# forced-incomplete diagnostic (example: OpenStack multi-path)
+# ВАЖНО: execution overrides задаются через ACP_EXECUTION_*/ACP_REPO_SELECTION, а не BATCH_*.
+BATCH_ID=forced-incomplete-$(date -u +%Y%m%dT%H%M%SZ)-qwen \
+TARGET_REPOS_FILE=examples/repos/curated/multi-path.openstack.repos.yaml \
+BATCH_PROVIDER_FILTER=qwen-code \
+BATCH_RUN_SELECTION=1 \
+BATCH_FRONTEND_MODE=never \
+BATCH_SKIP_PRECHECK=1 \
+ACP_EXECUTION_STRATEGY=parallel \
+ACP_MAX_PARALLEL_TASKS=4 \
+ACP_FAILURE_POLICY=best_effort \
+ACP_SHARD_DISCOVERY_MODE=semantic \
+ACP_REPO_SELECTION=backend_only \
+ACP_RUNTIME_STEP_TIMEOUT_SEC=15 \
+ACP_PIPELINE_TIMEOUT_SEC=300 \
+ACP_APPLY_TIMEOUTS_VIA_API=1 \
+./scripts/full-run-batch-5x2.sh || true
+```
+
+### 6.9 Manual acceptance audit for backend_only
+
+Проверять только артефакты `scale-backend`:
+- `reports/taskruns/*-repo-selection-summary.json`
+
+Audit expectation:
+- любой repo с `effective_role=frontend` должен быть `included=false` при `repo_selection_mode=backend_only`.
+- frontend-like repos тоже должны быть явно отмечены; если они остаются `included=true` при `effective_role=unknown`, это тоже gap против user acceptance.
+
 ## 7) Strict release acceptance
 
 Release `PASS` только если одновременно:
@@ -244,6 +413,19 @@ Release `PASS` только если одновременно:
 
 Источник истины для финального решения:
 - `release_verdict_<matrix-id>.md/.json`
+
+## 9) Common blockers (операционный triage)
+
+1. `repos[1] path does not exist: /absolute/path/to/...`
+- Причина: path profiles не подготовлены на pinned SHA.
+- Действие: подготовить локальные checkout в точных absolute paths из curated файлов.
+
+2. `mkdir: /absolute: Read-only file system`
+- Причина: хост не позволяет создать canonical path root.
+- Действие: запускать release gate на другой trusted машине или mount/alias среду, где canonical absolute paths доступны.
+
+3. `runtime_timeout` вместе с `runner_unavailable` в том же run
+- Политика triage: primary incident class = `runtime_timeout` при явном timeout signal в summary/classifier; `runner_unavailable` остаётся secondary evidence.
 
 Минимальный формат публикации агентом:
 

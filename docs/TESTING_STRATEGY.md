@@ -221,7 +221,8 @@ Implemented additional jobs:
   - runtime-flow hard-fail checks: `runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:repo-selection`, `runtime:execution-semantics`, `runtime_flow_failed`
   - hard-pass учитывает semantic hard-fail и snapshot source validity
   - run artifacts default: `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/*`
-  - reports: `run_matrix_<batch-id>.md/.tsv`, `frontend_e2e_matrix_<batch-id>.md`, `frontend_cancel_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md`, `documentation_audit_<batch-id>.md` (+ fields `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, runtime-flow checks, failure classes `runtime_parse/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing/precheck_failed`)
+  - reports: `run_matrix_<batch-id>.md/.tsv`, `frontend_e2e_matrix_<batch-id>.md`, `frontend_cancel_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md` (+ fields `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, runtime-flow checks, failure classes `runtime_parse/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing/precheck_failed`)
+  - `quality_report_<batch-id>.md` содержит `Backend-Only Audit` section для manual acceptance по auto role detection
 - profile matrix regression (local official runbook, non-required CI):
   - `scripts/full-run-batch-matrix.sh`
   - `E2E_MATRIX_FILE` обязателен (`profiles[]`: `id`, `repos_file`, `expected_repo_count`, `source_kind`)
@@ -237,7 +238,7 @@ Implemented additional jobs:
   - release-mode guard (auto при `MATRIX_ID=release-*`) блокирует diagnostic timeout overrides; debug bypass только через `E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES=1`
   - обязательны оба провайдера (`qwen-code`, `claude-code`) и оба frontend сценария (`init-inspect-service-first`, `cancel-refresh`)
   - для release-mode matrix используется `BATCH_FRONTEND_MODE=per_run`, `BATCH_FRONTEND_CANCEL_MODE=once_per_provider`, `UI_E2E_HEADED=1`
-  - strict blockers включают любой non-passed run-level status в `frontend_e2e_matrix` и `documentation_audit_auto/manual_status != passed`
+  - strict blockers включают любой non-passed summary/run-level status в `frontend_e2e_matrix` и `frontend_cancel_e2e_matrix`
   - strict acceptance: только `PASS`, любое нарушение quality/failure-class критериев = `RELEASE BLOCKED`
 - optional frontend live smoke:
   - `scripts/frontend-live-e2e.sh` (local)
@@ -255,7 +256,7 @@ Implemented additional jobs:
     - `BATCH_PROVIDER_FILTER` (`all` или CSV `qwen-code,claude-code`)
     - `BATCH_RUN_SELECTION` (`all`, CSV `1,3,5` или диапазоны `1-3,5`)
     - `BATCH_SKIP_PRECHECK=1` для secondary shard'ов
-    - `BATCH_FRONTEND_MODE=auto|always|never|per_run` (default `auto`, auto-skip frontend если `run1` не выбран)
+    - `BATCH_FRONTEND_MODE=auto|always|never|per_run` (default `auto`; `auto` skip если `run1` не выбран, `always` использует первый выбранный backend run)
     - `BATCH_FRONTEND_CANCEL_MODE=once_per_provider|per_run|never` (default `once_per_provider`)
     - `UI_E2E_HEADED=0|1` (при `1` Playwright запускается с `--headed`)
     - параллельные shard-процессы должны использовать разные `BATCH_ID`

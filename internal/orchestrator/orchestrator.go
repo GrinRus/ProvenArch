@@ -422,6 +422,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		failedInfo.Status = RunStatusFailed
 		failedInfo.ErrorCode, failedInfo.Error = s.classifyRunFailure(runID, err)
 		failedInfo.CurrentStep = execution.stepStatus.CurrentStep
+		execution.rewriteTerminalReports(RunStatusFailed)
 		failedInfo.Warnings = append([]string(nil), execution.warnings...)
 		failedInfo.FinishedAt = &finishedAt
 		if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusFailed, failedInfo.ErrorCode, failedInfo.Error); qualityErr == nil {
@@ -451,6 +452,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		failedInfo.ErrorCode = runErrorCodePartialFailed
 		failedInfo.Error = summarizePartialFailures(execution.partialFailures)
 		failedInfo.CurrentStep = execution.stepStatus.CurrentStep
+		execution.rewriteTerminalReports(RunStatusFailed)
 		failedInfo.Warnings = append([]string(nil), execution.warnings...)
 		failedInfo.FinishedAt = &finishedAt
 		if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusFailed, failedInfo.ErrorCode, failedInfo.Error); qualityErr == nil {
@@ -1858,6 +1860,62 @@ func (e *pipelineExecution) runStepProposals() error {
 		"artifacts": len(artifacts) + 1,
 	})
 	return nil
+}
+
+func (e *pipelineExecution) rewriteTerminalReports(status RunStatus) {
+	renderCtx := e.terminalRenderContext(status)
+	if !renderCtx.IsIncomplete() {
+		return
+	}
+
+	reportStep := strings.TrimSpace(e.stepStatus.CurrentStep)
+	if reportStep == "" {
+		reportStep = string(e.pipeline) + ".terminal"
+	}
+
+	logRewriteWarning := func(stage string, err error) {
+		e.addWarning(fmt.Sprintf("terminal report rewrite failed (%s): %v", stage, err))
+		e.logWarn(reportStep, "", "terminal report rewrite failed", map[string]any{
+			"stage": stage,
+			"error": err.Error(),
+		})
+	}
+
+	entities, entityErr := e.store.ListEntities()
+	edges, edgeErr := e.store.ListEdges()
+	if entityErr != nil {
+		logRewriteWarning("as-is.entities", entityErr)
+	} else if edgeErr != nil {
+		logRewriteWarning("as-is.edges", edgeErr)
+	} else if artifacts, err := e.compiler.CompileAsIs(entities, edges, renderCtx); err != nil {
+		logRewriteWarning("as-is", err)
+	} else {
+		e.addArtifacts(toOrchestratorArtifacts(artifacts)...)
+	}
+
+	if artifacts, err := e.compiler.WriteCoverage(e.coverage, e.questions, renderCtx); err != nil {
+		logRewriteWarning("coverage", err)
+	} else {
+		e.addArtifacts(toOrchestratorArtifacts(artifacts)...)
+	}
+
+	if artifacts, err := e.compiler.WriteFindings(e.findings, renderCtx); err != nil {
+		logRewriteWarning("findings", err)
+	} else {
+		e.addArtifacts(toOrchestratorArtifacts(artifacts)...)
+	}
+
+	if artifacts, err := e.compiler.WriteArchitectSummary(e.renderArchitectSummary(), renderCtx); err != nil {
+		logRewriteWarning("architect-summary", err)
+	} else {
+		e.addArtifacts(toOrchestratorArtifacts(artifacts)...)
+	}
+
+	if artifacts, err := e.compiler.CompileProposals(e.findings, renderCtx); err != nil {
+		logRewriteWarning("proposals", err)
+	} else {
+		e.addArtifacts(toOrchestratorArtifacts(artifacts)...)
+	}
 }
 
 func stepIDsForPipeline(pipeline Pipeline) []string {
