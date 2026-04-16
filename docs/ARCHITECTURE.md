@@ -34,7 +34,7 @@
      - persisted profile в `workspace.yaml.runtime.profile.execution`
      - effective precedence: `CLI > env > workspace > defaults`
      - CLI overrides: `--execution-strategy`, `--max-parallel-tasks`, `--failure-policy`
-     - sharding policy: `heuristics` строит deterministic structural full-coverage partition, `semantic` добавляет только relatedness metadata и не меняет shard boundaries
+     - repo filtering policy: `runtime.profile.execution.repo_selection` (`all|backend_only`) + declared/inferred repo role (`repos[].analysis.role` first, then conservative source inference from `name`/`path`/`git_url`)
    - Используется как локально, так и из SCM-triggered pipeline jobs/manual buttons
    - Internal API trigger остаётся optional trusted-mode capability, а не обязательной CI/CD поверхностью
    - Раздаёт embedded UI shell и API в одном процессе `acp serve`
@@ -81,9 +81,12 @@
    - Runtime step1 и enrich domain cards используют общий resolver `repo_scope` (declared -> slug fallback -> empty)
    - Проверяет согласованность canonical domain card: filename `<domain-id>.md` vs поле `- id:`; mismatch фиксируется high-priority question, runtime остаётся filename-based
    - Монолитный сценарий many-domains-to-one-repo поддержан через общий `repo_scope`; unknown scope фиксируется вопросом `q.domain.<id>.unknown-repo-scope`
+   - Если `repo_scope` домена исключён policy `repo_selection`, domain runtime task пропускается и фиксируется high-priority question
    - Выполняет runtime collect-step per-domain и сохраняет отдельные raw taskruns в `reports/taskruns/*-step1-collect-domain-*.json`
    - Runtime sharding planner (heuristics/semantic) materialize-ит deterministic shard-plan artifacts `reports/taskruns/*-shard-plan*.json` и shard-summary artifacts `reports/taskruns/*-shard-summary*.json`
    - shard-plan публикует полный неперекрывающийся coverage partition repo через `path_scopes` (directory/file scopes); для больших repo применяется только structural coalescing по filesystem ancestry
+   - Per-shard persistence crash-safe: shard-summary materialize-ится сразу со status=`pending`; после schema-validated TaskResult raw taskrun пишется до `apply`, shard переходит в `checkpointed`, после успешного `apply` — в `succeeded`; runtime/apply failure фиксируется как `failed` без ожидания конца шага
+   - Internal shard-summary contract: `taskrun_path` обязателен для `checkpointed/succeeded`; persisted taskrun сохраняет `meta.shard_id/meta.repo_scopes/meta.path_scopes`
    - Scheduler поддерживает `sequential|parallel` execution с worker-pool (`max_parallel_tasks`) и `fail_fast|best_effort` failure-policy
    - При `best_effort` downstream шаги продолжаются на partial model, но итог run фиксируется как `failed` с `error_code=run_partial_failed`; если `step1.collect` становится `unusable`, live `step3.findings` не выполняется, а downstream markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) materialize-ятся в `report_mode=incomplete` с явным banner/triage-only wording
    - Вызывает runtime adapter
@@ -97,7 +100,8 @@
    - Поддерживает управляемую отмену run:
      - pending run в debounce queue отменяется immediate (`failed`, `error_code=run_canceled`)
      - active run отменяется cooperative через `context cancel` (`failed`, `error_code=run_canceled`)
-   - На старте сервиса делает reconciliation stale persisted run (`queued/running`) в `failed` с `error_code=run_reconciled_after_restart`
+   - На старте сервиса stale `queued` run по-прежнему reconcile-ится в `failed` с `error_code=run_reconciled_after_restart`
+   - Для async service-managed run stale `running` run auto-resume-ится с тем же `run_id`, если есть resumable shard artifacts; resume cursor стартует с `*.step1.collect` для rebuild in-memory state из persisted taskruns, а runtime step replay-ит `succeeded/checkpointed` shard-ы без повторного provider execution
    - Ведёт persisted run history в `reports/taskruns/run-history.json` (versioned index, retention 500)
    - Ведёт run-level logs в `reports/taskruns/logs/<run_id>.ndjson` с cursor query API (`GET /api/pipeline/runs/<run_id>/logs`)
    - Runtime seam поддерживает live forwarding stdout/stderr от headless providers в run logs (`kind=runtime_output`, `stream=stdout|stderr`), event stream и raw stream сосуществуют
@@ -109,6 +113,7 @@
      - heartbeat-log `runtime task heartbeat` публикуется раз в `heartbeat_sec`
      - timeout/cancel причины добавляются в error message без изменения `error_code` контракта
    - Materialize-ит per-run quality summary `reports/taskruns/<run_id>-quality.json` (signal metrics/runtime versions + `evidence_state.collect/findings/report_mode/reasons`)
+   - Materialize-ит per-run repo selection summary `reports/taskruns/<run_id>-repo-selection-summary.json` (mode + selected scopes + include/exclude reasons)
    - Run logs retention policy (TTL + max runs) запускается при старте сервиса, перед run и после run
    - (опционально) делает git commit
 
@@ -134,7 +139,7 @@
    - валидирует manifest по `schemas/workspace.schema.json`
    - поддерживает `docs/imports/index.yaml` как metadata index для imported docs
    - поддерживает repo entries с `path` или `git_url` + optional `ref`
-   - поддерживает optional `repos[].analysis.role` (`backend|frontend|mixed|unknown`) как inert legacy metadata (runtime execution/sharding на него не опирается)
+   - поддерживает optional `repos[].analysis.role` (`backend|frontend|mixed|unknown`) для runtime repo-selection policy
    - поддерживает optional persisted runtime profile в `runtime.profile` (`timeouts + execution`, см. `WORKSPACE_SPEC`)
    - verify `ref` для `path` source использует fallback (`ref` -> `origin/ref` -> `refs/remotes/origin/ref`) и выдаёт warning при `HEAD` mismatch
    - clone/fetch для `git_url` выполняет на той же машине через локальный `git` и текущий user/runner auth context

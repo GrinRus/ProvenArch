@@ -923,6 +923,175 @@ func TestNewServiceReconcilesStaleRunsAfterRestart(t *testing.T) {
 	}
 }
 
+func TestNewServiceAutoResumeLeavesQueuedAndArtifactlessRunningRunsReconciled(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	baseTime := time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC)
+	service := NewService(
+		WithHistoryWorkspace(ws),
+		WithClock(func() time.Time { return baseTime }),
+	)
+
+	service.storeRun(runRecord{
+		info: RunInfo{
+			RunID:       "run_queued_stale",
+			Pipeline:    string(PipelineRefresh),
+			Status:      RunStatusQueued,
+			StartedAt:   baseTime.Add(-2 * time.Minute),
+			CurrentStep: "",
+		},
+	})
+	service.storeRun(runRecord{
+		info: RunInfo{
+			RunID:       "run_running_no_artifacts",
+			Pipeline:    string(PipelineRefresh),
+			Status:      RunStatusRunning,
+			StartedAt:   baseTime.Add(-3 * time.Minute),
+			CurrentStep: "refresh.step1.collect",
+		},
+	})
+
+	restartedService := NewService(
+		WithHistoryWorkspace(ws),
+		WithResumeStaleAsyncRuns(),
+		WithRunner(&failOnRunRunner{}),
+		WithClock(func() time.Time { return baseTime.Add(30 * time.Minute) }),
+	)
+
+	queuedInfo, ok := restartedService.GetRun("run_queued_stale")
+	if !ok {
+		t.Fatalf("expected queued run in registry")
+	}
+	if queuedInfo.Status != RunStatusFailed || queuedInfo.ErrorCode != runErrorCodeReconciledAfterRestart {
+		t.Fatalf("expected queued run reconciled after restart, got %+v", queuedInfo)
+	}
+
+	runningInfo, ok := restartedService.GetRun("run_running_no_artifacts")
+	if !ok {
+		t.Fatalf("expected running run in registry")
+	}
+	if runningInfo.Status != RunStatusFailed || runningInfo.ErrorCode != runErrorCodeReconciledAfterRestart {
+		t.Fatalf("expected artifactless running run reconciled after restart, got %+v", runningInfo)
+	}
+}
+
+func TestNewServiceAutoResumeChoosesNewestResumableRunningRun(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	baseTime := time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC)
+	service := NewService(
+		WithHistoryWorkspace(ws),
+		WithClock(func() time.Time { return baseTime }),
+	)
+
+	service.storeRun(runRecord{
+		info: RunInfo{
+			RunID:       "run_running_older",
+			Pipeline:    string(PipelineRefresh),
+			Status:      RunStatusRunning,
+			StartedAt:   baseTime.Add(-3 * time.Minute),
+			CurrentStep: "refresh.step1.collect",
+		},
+	})
+	service.storeRun(runRecord{
+		info: RunInfo{
+			RunID:       "run_running_newest",
+			Pipeline:    string(PipelineRefresh),
+			Status:      RunStatusRunning,
+			StartedAt:   baseTime.Add(-1 * time.Minute),
+			CurrentStep: "refresh.step1.collect",
+		},
+	})
+	writeShardRecoveryMarker(t, ws, "run_running_older", "refresh.step1.collect")
+	writeShardRecoveryMarker(t, ws, "run_running_newest", "refresh.step1.collect")
+
+	resumeRunner := &failOnRunRunner{}
+	restartedService := NewService(
+		WithHistoryWorkspace(ws),
+		WithResumeStaleAsyncRuns(),
+		WithRunner(resumeRunner),
+		WithClock(func() time.Time { return baseTime.Add(30 * time.Minute) }),
+	)
+
+	newestInfo := waitForRunTerminalState(t, restartedService, "run_running_newest", 8*time.Second)
+	if newestInfo.ErrorCode == runErrorCodeReconciledAfterRestart {
+		t.Fatalf("expected newest stale running run to be resumed, got %+v", newestInfo)
+	}
+	if resumeRunner.callCount() == 0 {
+		t.Fatalf("expected resumed run to invoke runtime provider at least once")
+	}
+
+	olderInfo, ok := restartedService.GetRun("run_running_older")
+	if !ok {
+		t.Fatalf("expected older running run in registry")
+	}
+	if olderInfo.Status != RunStatusFailed || olderInfo.ErrorCode != runErrorCodeReconciledAfterRestart {
+		t.Fatalf("expected older running run reconciled after restart, got %+v", olderInfo)
+	}
+
+	page, found, err := restartedService.GetRunLogs("run_running_newest", 0, 200)
+	if err != nil {
+		t.Fatalf("query logs for resumed run: %v", err)
+	}
+	if !found {
+		t.Fatalf("expected logs for resumed run")
+	}
+	findRunLogByMessage(t, page.Items, "run resumed after restart")
+}
+
+func TestResumeStepForCurrentStepResumeCursor(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		pipeline  Pipeline
+		current   string
+		wantStart string
+	}{
+		{
+			name:      "init pre-runtime keeps current step",
+			pipeline:  PipelineInit,
+			current:   "init.step0.constitution",
+			wantStart: "init.step0.constitution",
+		},
+		{
+			name:      "init runtime step resumes from step1",
+			pipeline:  PipelineInit,
+			current:   "init.step1.collect",
+			wantStart: "init.step1.collect",
+		},
+		{
+			name:      "init downstream runtime resumes from step1",
+			pipeline:  PipelineInit,
+			current:   "init.step3.findings",
+			wantStart: "init.step1.collect",
+		},
+		{
+			name:      "refresh downstream runtime resumes from step1",
+			pipeline:  PipelineRefresh,
+			current:   "refresh.step4.proposals",
+			wantStart: "refresh.step1.collect",
+		},
+		{
+			name:      "unknown step yields empty cursor",
+			pipeline:  PipelineRefresh,
+			current:   "refresh.unknown",
+			wantStart: "",
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := resumeStepForCurrentStep(tc.pipeline, tc.current)
+			if got != tc.wantStart {
+				t.Fatalf("resumeStepForCurrentStep(%q, %q): got=%q want=%q", tc.pipeline, tc.current, got, tc.wantStart)
+			}
+		})
+	}
+}
+
 func TestRuntimeFailureLogsIncludeSanitizedSnippets(t *testing.T) {
 	t.Parallel()
 
@@ -2857,6 +3026,40 @@ func loadRunHistorySnapshot(ws workspace.Root) (runHistorySnapshot, error) {
 		return runHistorySnapshot{}, err
 	}
 	return snapshot, nil
+}
+
+func writeShardRecoveryMarker(t *testing.T, ws workspace.Root, runID string, stepID string) {
+	t.Helper()
+
+	taskrunsDir := filepath.Join(ws.Path, "reports", "taskruns")
+	if err := os.MkdirAll(taskrunsDir, 0o755); err != nil {
+		t.Fatalf("create taskruns dir: %v", err)
+	}
+	summary := runtimeShardSummary{
+		Version:       1,
+		RunID:         runID,
+		StepID:        stepID,
+		Strategy:      "parallel",
+		MaxParallel:   1,
+		FailurePolicy: "best_effort",
+		ShardMode:     "heuristics",
+		GeneratedAt:   time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC).Format(time.RFC3339),
+		Items: []runtimeShardSummaryEntry{
+			{
+				ShardID: "synthetic-shard",
+				Status:  "pending",
+			},
+		},
+	}
+	content, err := json.MarshalIndent(summary, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal shard recovery marker: %v", err)
+	}
+	stepSlug := strings.ReplaceAll(stepID, ".", "-")
+	path := filepath.Join(taskrunsDir, fmt.Sprintf("%s-%s-shard-summary.json", runID, stepSlug))
+	if err := os.WriteFile(path, append(content, '\n'), 0o644); err != nil {
+		t.Fatalf("write shard recovery marker: %v", err)
+	}
 }
 
 func hasWarningPrefix(warnings []string, prefix string) bool {

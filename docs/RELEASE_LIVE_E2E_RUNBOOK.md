@@ -163,11 +163,10 @@ git -C /real/local/path/posthog checkout --detach 14d29a548d63665d60b506cf13bd5c
   - `multi-path`
   - `multi-git_url`
 - `sweeps[]` (optional):
-  - если отсутствует -> implicit `baseline` (только non-release/diagnostic)
+  - если отсутствует -> implicit `baseline`
   - release-ready harness использует 2 sweep-профиля:
-    - `baseline`: `strategy=sequential`, `max_parallel_tasks=1`, `failure_policy=best_effort`, `shard_discovery_mode=heuristics`
-    - `parallel-default`: `strategy=parallel`, `max_parallel_tasks=4`, `failure_policy=best_effort`, `shard_discovery_mode=heuristics`
-  - в release-mode (`MATRIX_ID=release-*` или `E2E_MATRIX_RELEASE_MODE=1`) `sweeps[]` обязателен и должен содержать ровно `baseline` + `parallel-default`; любое missing/extra значение блокирует matrix до batch run
+    - `baseline`: `strategy=sequential`, `max_parallel_tasks=1`, `failure_policy=best_effort`, `shard_discovery_mode=heuristics`, `repo_selection=all`
+    - `scale-backend`: `strategy=parallel`, `max_parallel_tasks=4`, `failure_policy=best_effort`, `shard_discovery_mode=semantic`, `repo_selection=backend_only`
 
 Готовый шаблон:
 - `examples/e2e-matrix.example.yaml`
@@ -364,30 +363,30 @@ Release guard rules:
 
 Проверяем:
 - shard artifacts для `init`/`refresh`: `shard-plan`, `shard-summary`, per-shard taskruns;
+- shard-summary status progression: `pending -> checkpointed -> succeeded` и `failed` path при runtime/apply ошибке;
 - taskrun metadata: `meta.shard_id`, `meta.repo_scopes`, `meta.path_scopes`.
 
 Blocking signals:
 - `runtime:shard-artifacts`
 - `runtime:shard-metadata`
 
-### 6.2 Structural shard-plan invariant
+### 6.2 Repo selection hardening
 
 Проверяем:
-- один и тот же profile под `baseline` и `parallel-default` даёт идентичный shard-plan;
-- planner покрывает весь repo неперекрывающимися `path_scopes`, без дыр и residual overlap;
-- для больших repo structural coalescing не смешивает разные top-level subtree.
+- `repo_selection=all|backend_only` vs declared/inferred repo role decisions;
+- наличие include/exclude reason в repo-selection summary;
+- отсутствие включения frontend-only repos в `backend_only`;
+- если repo вроде `frontend-platform` остаётся `included` с effective role `unknown`, считать это product gap против user acceptance даже при `strict_status=passed`.
 
 Blocking signals:
-- `shard_plan_invariant=failed`
-- `shard_plan_invariant=not_compared`
-- `shard_plan_invariant=artifact_error`
+- `runtime:repo-selection`
 - `analysis:cross-repo-missing`
 
 ### 6.3 Execution profile semantics
 
 Проверяем:
-- consistency `strategy`, `max_parallel_tasks`, `failure_policy`, `shard_discovery_mode` по effective surfaces + shard artifacts + run results;
-- headless provider command line включает не только `arch-workspace`, но и source repo directories для task repo scopes;
+- consistency `strategy`, `max_parallel_tasks`, `failure_policy`, `shard_discovery_mode`, `repo_selection` по effective surfaces + shard artifacts + run results;
+- headless provider command line включает не только `arch-workspace`, но и source repo directories для selected repo scopes;
 - корректную реакцию на partial shard failures по policy.
 
 Blocking signals:
@@ -473,7 +472,7 @@ TS="$(date -u +%Y%m%dT%H%M%SZ)"
 wait || true
 
 # forced-incomplete diagnostic (example: OpenStack multi-path)
-# ВАЖНО: execution overrides задаются через ACP_EXECUTION_*, а не BATCH_*.
+# ВАЖНО: execution overrides задаются через ACP_EXECUTION_*/ACP_REPO_SELECTION, а не BATCH_*.
 BATCH_ID=forced-incomplete-$(date -u +%Y%m%dT%H%M%SZ)-qwen \
 TARGET_REPOS_FILE=examples/repos/curated/multi-path.openstack.repos.yaml \
 BATCH_PROVIDER_FILTER=qwen-code \
@@ -483,12 +482,22 @@ BATCH_SKIP_PRECHECK=1 \
 ACP_EXECUTION_STRATEGY=parallel \
 ACP_MAX_PARALLEL_TASKS=4 \
 ACP_FAILURE_POLICY=best_effort \
-ACP_SHARD_DISCOVERY_MODE=heuristics \
+ACP_SHARD_DISCOVERY_MODE=semantic \
+ACP_REPO_SELECTION=backend_only \
 ACP_RUNTIME_STEP_TIMEOUT_SEC=15 \
 ACP_PIPELINE_TIMEOUT_SEC=300 \
 ACP_APPLY_TIMEOUTS_VIA_API=1 \
 ./scripts/full-run-batch-5x2.sh || true
 ```
+
+### 6.9 Manual acceptance audit for backend_only
+
+Проверять только артефакты `scale-backend`:
+- `reports/taskruns/*-repo-selection-summary.json`
+
+Audit expectation:
+- любой repo с `effective_role=frontend` должен быть `included=false` при `repo_selection_mode=backend_only`.
+- frontend-like repos тоже должны быть явно отмечены; если они остаются `included=true` при `effective_role=unknown`, это тоже gap против user acceptance.
 
 ## 7) Strict release acceptance
 
@@ -501,11 +510,6 @@ Release `PASS` только если одновременно:
 6. Нет `analysis:evidence-scope` и `analysis:cross-repo-missing`.
 7. Нет runtime flow violations (`runtime:*`, `runtime_flow_failed`).
 8. Frontend live/cancel smoke: `passed` для обоих провайдеров.
-9. Для каждого `profile_id` invariant `baseline == parallel-default` по shard-plan выполнен.
-10. `release_contract` в `release_verdict_<matrix-id>.json` имеет `contract_status=passed`:
-  - `required_sweeps=[baseline, parallel-default]`
-  - `observed_profile_sweep_runs=8` и `expected_profile_sweep_runs=8`
-  - `shard_plan_invariant_status=passed`
 
 Любое нарушение => `RELEASE BLOCKED`.
 
