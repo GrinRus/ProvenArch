@@ -23,9 +23,10 @@ for entry in "${workspace_cases[@]}"; do
   if [[ "$expectation" == "valid" ]]; then
     ajv validate --spec=draft2020 -c ajv-formats -s schemas/workspace.schema.json -d "$json_file"
   else
-    if ajv validate --spec=draft2020 -c ajv-formats -s schemas/workspace.schema.json -d "$json_file" >/tmp/acp-contracts-invalid.log 2>&1; then
+    invalid_log="$tmpdir/$(basename "$file").invalid.log"
+    if ajv validate --spec=draft2020 -c ajv-formats -s schemas/workspace.schema.json -d "$json_file" >"$invalid_log" 2>&1; then
       echo "Expected invalid fixture to fail: $file"
-      cat /tmp/acp-contracts-invalid.log
+      cat "$invalid_log"
       exit 1
     fi
     echo "$file invalid as expected"
@@ -34,9 +35,23 @@ done
 
 ajv validate --spec=draft2020 -c ajv-formats -s schemas/taskresult.schema.json -d examples/taskresult.example.json
 ajv validate --spec=draft2020 -c ajv-formats -s schemas/taskresult.schema.json -d fixtures/taskresult/normalized-top-level.json
-if ajv validate --spec=draft2020 -c ajv-formats -s schemas/taskresult.schema.json -d fixtures/taskresult/mixed-legacy.json >/tmp/acp-taskresult-invalid.log 2>&1; then
+taskresult_invalid_log="$tmpdir/taskresult.invalid.log"
+if ajv validate --spec=draft2020 -c ajv-formats -s schemas/taskresult.schema.json -d fixtures/taskresult/mixed-legacy.json >"$taskresult_invalid_log" 2>&1; then
   echo "Expected invalid fixture to fail: fixtures/taskresult/mixed-legacy.json"
-  cat /tmp/acp-taskresult-invalid.log
+  cat "$taskresult_invalid_log"
   exit 1
 fi
 echo "fixtures/taskresult/mixed-legacy.json invalid as expected"
+
+docs_first_contracts=(
+  "schemas/shard-pack-manifest.schema.json:examples/shard-pack-manifest.example.json"
+  "schemas/final-run-index.schema.json:examples/final-run-index.example.json"
+  "schemas/citation-index.schema.json:examples/citation-index.example.json"
+  "schemas/validator-verdict.schema.json:examples/validator-verdict.example.json"
+)
+
+for entry in "${docs_first_contracts[@]}"; do
+  schema="${entry%%:*}"
+  sample="${entry##*:}"
+  ajv validate --spec=draft2020 -c ajv-formats -s "$schema" -d "$sample"
+done

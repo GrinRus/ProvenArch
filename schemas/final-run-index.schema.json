@@ -1,0 +1,429 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/acp/schemas/final-run-index.schema.json",
+  "title": "ACP Final Run Index",
+  "type": "object",
+  "required": [
+    "version",
+    "run_id",
+    "pipeline",
+    "generated_at",
+    "canonical_documents",
+    "topics",
+    "citation_index_path",
+    "compatibility"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pipeline": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "citation_index_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "canonical_documents": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/document"
+      }
+    },
+    "topics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/topic"
+      }
+    },
+    "compatibility": {
+      "$ref": "#/$defs/compatibility"
+    }
+  },
+  "$defs": {
+    "document": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "canonical_path",
+        "staged_path",
+        "topics",
+        "citation_ids",
+        "source_shards",
+        "status"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "canonical_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "staged_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "topics": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "citation_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "source_shards": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "topic": {
+      "type": "object",
+      "required": [
+        "id",
+        "document_ids"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "document_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "line_range": {
+      "type": "object",
+      "required": [
+        "start",
+        "end"
+      ],
+      "properties": {
+        "start": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "required": [
+        "repo",
+        "path"
+      ],
+      "properties": {
+        "repo": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ref": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lines": {
+          "$ref": "#/$defs/line_range"
+        },
+        "excerpt_hash": {
+          "type": "string"
+        },
+        "excerpt": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "provenance": {
+      "type": "object",
+      "required": [
+        "kind",
+        "confidence"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "observation",
+            "inference",
+            "assertion"
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "entity": {
+      "type": "object",
+      "required": [
+        "id",
+        "type",
+        "name",
+        "provenance"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "attributes": {
+          "type": "object"
+        },
+        "owner_team_id": {
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/provenance"
+        }
+      },
+      "additionalProperties": true
+    },
+    "edge": {
+      "type": "object",
+      "required": [
+        "id",
+        "type",
+        "from",
+        "to",
+        "provenance"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "from": {
+          "type": "string",
+          "minLength": 1
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string"
+        },
+        "attributes": {
+          "type": "object"
+        },
+        "provenance": {
+          "$ref": "#/$defs/provenance"
+        }
+      },
+      "additionalProperties": true
+    },
+    "finding": {
+      "type": "object",
+      "required": [
+        "id",
+        "severity",
+        "title",
+        "provenance"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "rule_id": {
+          "type": "string"
+        },
+        "related_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "provenance": {
+          "$ref": "#/$defs/provenance"
+        }
+      },
+      "additionalProperties": true
+    },
+    "question": {
+      "type": "object",
+      "required": [
+        "id",
+        "text"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "priority": {
+          "type": "string"
+        },
+        "related_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "coverage": {
+      "type": "object",
+      "properties": {
+        "observed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "missing": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "compatibility": {
+      "type": "object",
+      "required": [
+        "coverage",
+        "questions",
+        "entities",
+        "edges",
+        "findings"
+      ],
+      "properties": {
+        "coverage": {
+          "$ref": "#/$defs/coverage"
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/question"
+          }
+        },
+        "entities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/entity"
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/edge"
+          }
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/finding"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

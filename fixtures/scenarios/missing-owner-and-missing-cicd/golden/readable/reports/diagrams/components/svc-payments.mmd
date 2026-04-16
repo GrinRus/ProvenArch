@@ -1,0 +1,8 @@
+flowchart TB
+  subgraph Service["Components: Payments Service"]
+    svc_svc_payments["Service Core"]
+    GapComponents["Gap: no evidence-backed API/Event components"]
+    svc_svc_payments -.-> GapComponents
+  end
+  GapComponentEdges["Gap: no evidence-backed component relations"]
+  Service -.-> GapComponentEdges

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "run_id": "run-123",
+  "generated_at": "2026-04-16T12:00:02Z",
+  "verdict": "PASS",
+  "summary": "Validator accepted staged doc set and indexes.",
+  "checked_paths": [
+    "reports/taskruns/run-123/staging/final/final-run-index.json",
+    "reports/taskruns/run-123/staging/final/citation-index.json",
+    "reports/taskruns/run-123/staging/final/reports/agent-outputs/domains/payments.md"
+  ],
+  "fixed_paths": [],
+  "issues": []
+}

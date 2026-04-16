@@ -1,6 +1,6 @@
 # Architect Aggregation Summary
 
-- total findings: 3
+- total findings: 1
 - total questions: 2
 - analyzed domains: 2
 - domain_outputs:

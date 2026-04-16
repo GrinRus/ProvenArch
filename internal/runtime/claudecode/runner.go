@@ -229,8 +229,9 @@ func buildUnavailableFailureMessage(task acpruntime.Task, runErr error, result a
 
 func runClaudeCommand(ctx context.Context, task acpruntime.Task, command string, args []string, stdin []byte) (acpruntime.Result, string, error, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
-	workspace := strings.TrimSpace(task.Workspace)
-	if workspace != "" {
+	if writeRoot := strings.TrimSpace(task.WriteRoot); writeRoot != "" {
+		cmd.Dir = writeRoot
+	} else if workspace := strings.TrimSpace(task.Workspace); workspace != "" {
 		cmd.Dir = workspace
 	}
 	if len(stdin) > 0 {
@@ -444,6 +445,7 @@ Task payload JSON:
 		`- meta.path_scopes may contain directories, files, or a mixed disjoint partition; treat every listed scope as in-bounds evidence for this task.`,
 		`- Use ACP-generated workspace artifacts as evidence only for ACP runtime/report state, not as a substitute for repository analysis.`,
 	}, "\n")
+	docFirstPolicy := buildDocFirstFilesystemPolicy(task)
 	retryHint := ""
 	if retry {
 		retryHint = strings.Join([]string{
@@ -485,6 +487,7 @@ STRICT CONTRACT (must pass):
 %s
 %s
 %s
+%s
 
 Set meta fields exactly:
 - meta.task_id = %q
@@ -503,7 +506,7 @@ Schema-valid template for this task (copy structure and field TYPES, then refine
 %s
 
 Serialized runtime task JSON (context only):
-%s`, acpruntime.ProviderClaudeCode, stepPolicy, repositoryEvidencePolicy, retryHint, nonEmptyResultHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderClaudeCode, "claude-cli", task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, task.ShardID, primaryRepoScope, repoScopesJSON, pathScopesJSON, buildDirectTaskResultTemplateJSON(task), strings.TrimSpace(string(taskPayload))))
+%s`, acpruntime.ProviderClaudeCode, stepPolicy, repositoryEvidencePolicy, docFirstPolicy, retryHint, nonEmptyResultHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderClaudeCode, "claude-cli", task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, task.ShardID, primaryRepoScope, repoScopesJSON, pathScopesJSON, buildDirectTaskResultTemplateJSON(task), strings.TrimSpace(string(taskPayload))))
 }
 
 func buildDirectTaskResultTemplateJSON(task acpruntime.Task) string {
@@ -585,6 +588,38 @@ func buildStepSpecificDirectPolicy(stepID string) string {
 		}
 		return ""
 	}
+}
+
+func buildDocFirstFilesystemPolicy(task acpruntime.Task) string {
+	readContextRootsJSON := "[]"
+	if raw, err := json.Marshal(task.ReadContextRoots); err == nil {
+		readContextRootsJSON = string(raw)
+	}
+	lines := []string{
+		`DOCS-FIRST FILESYSTEM CONTRACT:`,
+		`- Read only from meta.workspace and meta.path_scopes plus runtime read_context_roots; do not treat workspace root as implicit write target.`,
+		`- Write ONLY inside write_root. Never write to workspace.yaml, schemas/*, docs/spec/*, charter/*, or analyzed user repositories.`,
+		fmt.Sprintf(`- artifact_root (workspace-relative) = %q`, strings.TrimSpace(task.ArtifactRoot)),
+		fmt.Sprintf(`- write_root (absolute) = %q`, strings.TrimSpace(task.WriteRoot)),
+		fmt.Sprintf(`- read_context_roots = %s`, readContextRootsJSON),
+		fmt.Sprintf(`- domain_id = %q`, strings.TrimSpace(task.DomainID)),
+		fmt.Sprintf(`- agent_role = %q`, strings.TrimSpace(task.AgentRole)),
+	}
+	switch task.StepID {
+	case "init.step1.collect", "refresh.step1.collect":
+		lines = append(lines,
+			`- Produce runtime-authored documents in write_root and then write shard-pack-manifest.json in write_root.`,
+			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and compatibility snapshot.`,
+			`- You may be flexible in document structure, but promotion and rendering depend on manifest citations/topics remaining accurate.`,
+		)
+	case "init.step3.findings", "refresh.step3.findings":
+		lines = append(lines,
+			`- Inspect staged final artifacts under reports/taskruns/<run_id>/staging/final from read_context_roots.`,
+			`- Write validator-verdict.json in write_root.`,
+			`- Validator may fix only indexes, references, or technical document issues inside write_root; do not rewrite document meaning wholesale.`,
+		)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func buildDirectTemplateChangeset(task acpruntime.Task) []contracts.Operation {
@@ -691,6 +726,9 @@ func (FakeRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Resul
 				Notes:    []string{"fake runner materialized deterministic baseline output"},
 			},
 		}
+		if err := persistDocsFirstArtifacts(task, result); err != nil {
+			return acpruntime.Result{}, err
+		}
 		return marshalResult(result)
 	case "init.step3.findings", "refresh.step3.findings":
 		result := contracts.TaskResult{
@@ -709,6 +747,9 @@ func (FakeRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Resul
 			},
 			Summary:   "Fake findings completed",
 			Changeset: makeFindingsChangeset(repoScopes),
+		}
+		if err := persistDocsFirstArtifacts(task, result); err != nil {
+			return acpruntime.Result{}, err
 		}
 		return marshalResult(result)
 	default:
@@ -732,6 +773,9 @@ func (r RecordedRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime
 	taskResult, err := contracts.ParseTaskResult(content)
 	if err != nil {
 		return acpruntime.Result{}, fmt.Errorf("parse recorded taskresult: %w", err)
+	}
+	if err := persistDocsFirstArtifacts(task, taskResult); err != nil {
+		return acpruntime.Result{}, err
 	}
 	return acpruntime.Result{
 		TaskResult: taskResult,

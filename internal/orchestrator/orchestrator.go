@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -1207,12 +1208,19 @@ type pipelineExecution struct {
 	findingsOutcome          runtimeShardOutcome
 	findingsSkipped          bool
 	reportContext            reports.ReportRenderContext
+	shardPacks               []contracts.ShardPackManifest
+	finalRunIndex            *contracts.FinalRunIndex
+	citationIndex            *contracts.CitationIndex
+	validatorVerdict         *contracts.ValidatorVerdict
+	compatibilityBase        *contracts.CompatibilitySnapshot
 }
 
 type runtimeTaskExecution struct {
-	RawJSON    []byte
-	Normalized contracts.TaskResult
-	Apply      model.ApplyReport
+	RawJSON          []byte
+	Normalized       contracts.TaskResult
+	Apply            model.ApplyReport
+	ShardManifest    *contracts.ShardPackManifest
+	ValidatorVerdict *contracts.ValidatorVerdict
 }
 
 type runtimePreparedExecution struct {
@@ -1277,7 +1285,7 @@ func (e *pipelineExecution) runStep(ctx context.Context, stepID string) error {
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
 		return e.runStepAsIs()
 	case "init.step3.findings", "refresh.step3.findings":
-		return e.runRuntimeStep(ctx, stepID)
+		return e.runStepValidator(ctx, stepID)
 	case "init.step4.proposals", "refresh.step4.proposals":
 		return e.runStepProposals()
 	default:
@@ -1309,55 +1317,7 @@ func (e *pipelineExecution) runStepConstitution() error {
 }
 
 func (e *pipelineExecution) runRuntimeStep(ctx context.Context, stepID string) error {
-	if strings.HasSuffix(stepID, "step1.collect") {
-		if err := e.runStepCollectByDomain(ctx, stepID); err != nil {
-			return err
-		}
-	} else {
-		if strings.HasSuffix(stepID, "step3.findings") && e.shouldSkipFindingsRuntime() {
-			e.markFindingsSkipped("findings_skipped_due_to_unusable_collect")
-			e.addWarning(fmt.Sprintf("%s: runtime step skipped because collect evidence is unusable", stepID))
-			e.logWarn(stepID, "", "runtime step skipped", map[string]any{
-				"reason":         "collect evidence is unusable",
-				"collect_status": e.renderContext().Collect.Status,
-			})
-		} else if len(normalizeOrderedUniqueStrings(e.selectedRepoScopes)) == 0 {
-			e.addWarning(fmt.Sprintf("%s: runtime step skipped because repo_selection=%q selected zero repo scopes", stepID, e.repoSelectionMode))
-			e.logWarn(stepID, "", "runtime step skipped", map[string]any{
-				"repo_selection_mode": e.repoSelectionMode,
-				"selected_scopes":     append([]string(nil), e.selectedRepoScopes...),
-			})
-		} else {
-			_, outcome, err := e.executeRuntimeTasksSharded(ctx, stepID, "", append([]string(nil), e.selectedRepoScopes...), "")
-			e.recordRuntimeStepOutcome(stepID, outcome)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	renderCtx := e.renderContext()
-	coverageArtifacts, err := e.compiler.WriteCoverage(e.coverage, e.questions, renderCtx)
-	if err != nil {
-		return err
-	}
-	e.addArtifacts(toOrchestratorArtifacts(coverageArtifacts)...)
-
-	if strings.HasSuffix(stepID, "step3.findings") {
-		findingArtifacts, err := e.compiler.WriteFindings(e.findings, renderCtx)
-		if err != nil {
-			return err
-		}
-		e.addArtifacts(toOrchestratorArtifacts(findingArtifacts)...)
-
-		architectArtifacts, err := e.compiler.WriteArchitectSummary(e.renderArchitectSummary(), renderCtx)
-		if err != nil {
-			return err
-		}
-		e.addArtifacts(toOrchestratorArtifacts(architectArtifacts)...)
-	}
-
-	return nil
+	return e.runStepCollectByDomain(ctx, stepID)
 }
 
 func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID string) error {
@@ -1378,8 +1338,6 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 		})
 	}
 
-	domainReports := map[string]string{}
-	domainEnvelopes := make([]reports.DomainTaskEnvelope, 0, len(domainIDs))
 	for _, domainID := range domainIDs {
 		e.logInfo(stepID, domainID, "domain collect start", nil)
 		scopeResolution, err := resolveRepoScopeForDomainCard(e.workspace, domainID, e.workspace.Manifest.Repos)
@@ -1471,23 +1429,6 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 		}
 		envelopePath := fmt.Sprintf("reports/agent-outputs/domains/%s.task-envelope.json", sanitizeDomainArtifactSlug(domainID))
 		outputPath := fmt.Sprintf("reports/agent-outputs/domains/%s.md", domainID)
-		envelope := reports.DomainTaskEnvelope{
-			ContractVersion: 1,
-			AgentID:         "domain-analyst",
-			DomainID:        domainID,
-			RepoScope:       repoScope,
-			Unresolved:      unresolved,
-			Inputs: reports.DomainTaskInputs{
-				DomainCardPath:      fmt.Sprintf("charter/cards/domains/%s.md", domainID),
-				CoverageSummaryPath: "reports/coverage/summary.md",
-				QuestionsPath:       "reports/coverage/open-questions.md",
-				ModelEntitiesGlob:   "model/entities/*.yaml",
-				FindingsPath:        "reports/findings/findings.md",
-			},
-			OutputPath: outputPath,
-		}
-		domainEnvelopes = append(domainEnvelopes, envelope)
-
 		domainScopes := []string{}
 		if strings.TrimSpace(repoScope) != "" && skipReason == "" {
 			domainScopes = append(domainScopes, repoScope)
@@ -1520,10 +1461,17 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 		aggregatedQuestions := make([]contracts.Question, 0, len(executions))
 		summaries := make([]string, 0, len(executions))
 		for _, execution := range executions {
-			aggregatedApply.UpsertedEntities += execution.Apply.UpsertedEntities
-			aggregatedApply.UpsertedEdges += execution.Apply.UpsertedEdges
-			aggregatedApply.Findings = append(aggregatedApply.Findings, execution.Apply.Findings...)
-			aggregatedQuestions = append(aggregatedQuestions, execution.Normalized.Questions...)
+			if execution.ShardManifest != nil {
+				aggregatedApply.UpsertedEntities += len(execution.ShardManifest.Compatibility.Entities)
+				aggregatedApply.UpsertedEdges += len(execution.ShardManifest.Compatibility.Edges)
+				aggregatedApply.Findings = append(aggregatedApply.Findings, execution.ShardManifest.Compatibility.Findings...)
+				aggregatedQuestions = append(aggregatedQuestions, execution.ShardManifest.Compatibility.Questions...)
+			} else {
+				aggregatedApply.UpsertedEntities += execution.Apply.UpsertedEntities
+				aggregatedApply.UpsertedEdges += execution.Apply.UpsertedEdges
+				aggregatedApply.Findings = append(aggregatedApply.Findings, execution.Apply.Findings...)
+				aggregatedQuestions = append(aggregatedQuestions, execution.Normalized.Questions...)
+			}
 			summary := strings.TrimSpace(execution.Normalized.Summary)
 			if summary != "" {
 				summaries = append(summaries, summary)
@@ -1551,16 +1499,6 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 				domainFailedShards,
 			)
 		}
-		domainReports[domainID] = renderDomainRuntimeOutput(
-			domainID,
-			repoScope,
-			envelopePath,
-			runtimeSummary,
-			aggregatedApply,
-			questionIDs,
-			findingIDs,
-			unresolved,
-		)
 		e.domainRuns[domainID] = domainRunSummary{
 			DomainID:       domainID,
 			RepoScope:      repoScope,
@@ -1578,18 +1516,6 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 			"unresolved_count": len(unresolved),
 		})
 	}
-
-	contractArtifacts, err := e.compiler.WriteDomainTaskEnvelopes(domainEnvelopes)
-	if err != nil {
-		return err
-	}
-	e.addArtifacts(toOrchestratorArtifacts(contractArtifacts)...)
-	agentArtifacts, err := e.compiler.WriteDomainOutputs(domainReports)
-	if err != nil {
-		return err
-	}
-	e.addArtifacts(toOrchestratorArtifacts(agentArtifacts)...)
-
 	teamCards, err := loadCanonicalTeamCards(e.workspace)
 	if err != nil {
 		return err
@@ -1602,10 +1528,6 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 				Priority: "high",
 			},
 		})
-	}
-
-	if err := e.enrichCanonicalCards(domainIDs, teamCards); err != nil {
-		return err
 	}
 	return nil
 }
@@ -1641,26 +1563,38 @@ func (e *pipelineExecution) runRuntimeTaskNormalized(
 		taskID += "-" + taskSuffix
 	}
 	repoScope := primaryRepoScope(repoScopes)
+	artifactRootRel, writeRootAbs, readContextRoots, err := e.runtimeArtifactContext(stepID, strings.TrimSpace(shardID), repoScopes)
+	if err != nil {
+		return runtimePreparedExecution{}, err
+	}
 	task := acpruntime.Task{
-		TaskID:       taskID,
-		RunID:        e.runID,
-		StepID:       stepID,
-		ShardID:      strings.TrimSpace(shardID),
-		Workspace:    e.workspace.Path,
-		RepoScope:    repoScope,
-		RepoScopes:   append([]string(nil), repoScopes...),
-		PathScopes:   append([]string(nil), pathScopes...),
-		StartedAtUTC: e.clock().UTC(),
+		TaskID:           taskID,
+		RunID:            e.runID,
+		StepID:           stepID,
+		ShardID:          strings.TrimSpace(shardID),
+		DomainID:         strings.TrimSpace(domainID),
+		Workspace:        e.workspace.Path,
+		ArtifactRoot:     artifactRootRel,
+		WriteRoot:        writeRootAbs,
+		ReadContextRoots: append([]string(nil), readContextRoots...),
+		AgentRole:        runtimeAgentRole(stepID),
+		RepoScope:        repoScope,
+		RepoScopes:       append([]string(nil), repoScopes...),
+		PathScopes:       append([]string(nil), pathScopes...),
+		StartedAtUTC:     e.clock().UTC(),
 		OnOutput: func(chunk acpruntime.OutputChunk) {
 			e.logRuntimeOutput(stepID, domainID, chunk)
 		},
 	}
 	e.logInfo(stepID, domainID, "runtime task started", map[string]any{
-		"task_id":     task.TaskID,
-		"shard_id":    task.ShardID,
-		"repo_scope":  task.RepoScope,
-		"repo_scopes": task.RepoScopes,
-		"path_scopes": task.PathScopes,
+		"task_id":            task.TaskID,
+		"shard_id":           task.ShardID,
+		"repo_scope":         task.RepoScope,
+		"repo_scopes":        task.RepoScopes,
+		"path_scopes":        task.PathScopes,
+		"artifact_root":      task.ArtifactRoot,
+		"write_root":         task.WriteRoot,
+		"read_context_roots": task.ReadContextRoots,
 	})
 
 	taskCtx := ctx
@@ -1768,6 +1702,153 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 		}
 	}
 
+	if strings.HasSuffix(stepID, "step1.collect") {
+		manifest, manifestRaw, err := loadShardPackManifestFromRoot(task.WriteRoot)
+		if err != nil {
+			if fallbackErr := claudecode.PersistCompatibilityDocflowArtifacts(task, normalized); fallbackErr == nil {
+				manifest, manifestRaw, err = loadShardPackManifestFromRoot(task.WriteRoot)
+			}
+		}
+		if err != nil {
+			e.logError(stepID, domainID, "shard pack manifest load failed", map[string]any{
+				"task_id": task.TaskID,
+				"error":   strings.TrimSpace(err.Error()),
+			})
+			return runtimeTaskExecution{}, err
+		}
+		e.shardPacks = append(e.shardPacks, manifest)
+		applyReport, err := e.store.ApplyChangeset(normalized)
+		if err != nil {
+			e.logError(stepID, domainID, "compatibility model apply failed", map[string]any{
+				"task_id": task.TaskID,
+				"error":   strings.TrimSpace(err.Error()),
+			})
+			return runtimeTaskExecution{}, err
+		}
+		if len(applyReport.DocArtifacts) > 0 {
+			docArtifacts, err := e.compiler.WriteDocArtifacts(applyReport.DocArtifacts)
+			if err != nil {
+				return runtimeTaskExecution{}, err
+			}
+			e.addArtifacts(toOrchestratorArtifacts(docArtifacts)...)
+		}
+		manifestPath := path.Join(task.ArtifactRoot, shardPackManifestFile)
+		e.addArtifacts(Artifact{
+			Path:  manifestPath,
+			Kind:  "taskrun",
+			Label: "Shard Pack Manifest",
+		})
+		coverage := &manifest.Compatibility.Coverage
+		e.runtimeStepMetrics = append(e.runtimeStepMetrics, runtimeStepQuality{
+			StepID:           stepID,
+			DomainID:         domainID,
+			RuntimeName:      runtimeName,
+			RuntimeVersion:   runtimeVersion,
+			RepoScopes:       append([]string(nil), task.RepoScopes...),
+			ChangesetOps:     len(manifest.Compatibility.Entities) + len(manifest.Compatibility.Edges) + len(manifest.Compatibility.Findings),
+			EntityUpserts:    len(manifest.Compatibility.Entities),
+			EdgeUpserts:      len(manifest.Compatibility.Edges),
+			FindingsAdded:    len(manifest.Compatibility.Findings),
+			QuestionsCount:   len(manifest.Compatibility.Questions),
+			CoverageObserved: countCoverageObserved(coverage),
+			CoverageMissing:  countCoverageMissing(coverage),
+			WarningsCount:    len(normalized.Warnings),
+		})
+		e.logInfo(stepID, domainID, "runtime shard pack collected", map[string]any{
+			"task_id":         task.TaskID,
+			"shard_id":        task.ShardID,
+			"artifact_root":   task.ArtifactRoot,
+			"manifest_path":   manifestPath,
+			"documents":       len(manifest.Documents),
+			"citations":       len(manifest.Citations),
+			"compat_entities": len(manifest.Compatibility.Entities),
+			"compat_edges":    len(manifest.Compatibility.Edges),
+			"compat_findings": len(manifest.Compatibility.Findings),
+		})
+		e.logInfo(stepID, domainID, "runtime task completed", map[string]any{
+			"task_id":         task.TaskID,
+			"shard_id":        task.ShardID,
+			"runtime_name":    runtimeName,
+			"runtime_version": runtimeVersion,
+		})
+		return runtimeTaskExecution{
+			RawJSON:       manifestRaw,
+			Normalized:    normalized,
+			Apply:         applyReport,
+			ShardManifest: &manifest,
+		}, nil
+	}
+
+	if strings.HasSuffix(stepID, "step3.findings") {
+		newFindings := make([]contracts.Finding, 0, len(normalized.Changeset))
+		for _, op := range normalized.Changeset {
+			if op.Op == "add_finding" && op.Finding != nil {
+				newFindings = append(newFindings, *op.Finding)
+			}
+		}
+		e.questions = mergeQuestions(e.questions, normalized.Questions)
+		e.coverage = mergeCoverage(e.coverage, normalized.Coverage)
+		e.findings = mergeFindings(e.findings, newFindings)
+		if err := e.assembleStagedDocFlow(); err != nil {
+			return runtimeTaskExecution{}, err
+		}
+
+		verdict, verdictRaw, err := loadValidatorVerdictFromRoot(task.WriteRoot)
+		if err != nil {
+			if fallbackErr := claudecode.PersistCompatibilityDocflowArtifacts(task, normalized); fallbackErr == nil {
+				verdict, verdictRaw, err = loadValidatorVerdictFromRoot(task.WriteRoot)
+			}
+		}
+		if err != nil {
+			e.logError(stepID, domainID, "validator verdict load failed", map[string]any{
+				"task_id": task.TaskID,
+				"error":   strings.TrimSpace(err.Error()),
+			})
+			return runtimeTaskExecution{}, err
+		}
+		issues := e.validateStagedArtifacts()
+		if verdict.Verdict != "PASS" {
+			return runtimeTaskExecution{}, fmt.Errorf("validator verdict is %s", verdict.Verdict)
+		}
+		if len(issues) > 0 {
+			return runtimeTaskExecution{}, fmt.Errorf("validator detected staged artifact issues: %s", issues[0].Message)
+		}
+		e.validatorVerdict = &verdict
+		e.addArtifacts(Artifact{
+			Path:  runtimeValidatorVerdictPath(e.runID),
+			Kind:  "taskrun",
+			Label: "Validator Verdict",
+		})
+		e.runtimeStepMetrics = append(e.runtimeStepMetrics, runtimeStepQuality{
+			StepID:           stepID,
+			DomainID:         domainID,
+			RuntimeName:      runtimeName,
+			RuntimeVersion:   runtimeVersion,
+			RepoScopes:       append([]string(nil), task.RepoScopes...),
+			FindingsAdded:    len(newFindings),
+			QuestionsCount:   len(normalized.Questions),
+			CoverageObserved: countCoverageObserved(normalized.Coverage),
+			CoverageMissing:  countCoverageMissing(normalized.Coverage),
+			WarningsCount:    len(normalized.Warnings),
+		})
+		e.logInfo(stepID, domainID, "validator verdict accepted", map[string]any{
+			"task_id":     task.TaskID,
+			"checked":     len(verdict.CheckedPaths),
+			"fixed_paths": len(verdict.FixedPaths),
+		})
+		e.logInfo(stepID, domainID, "runtime task completed", map[string]any{
+			"task_id":         task.TaskID,
+			"shard_id":        task.ShardID,
+			"runtime_name":    runtimeName,
+			"runtime_version": runtimeVersion,
+		})
+		return runtimeTaskExecution{
+			RawJSON:          verdictRaw,
+			Normalized:       normalized,
+			ValidatorVerdict: &verdict,
+		}, nil
+	}
+
 	applyReport, err := e.store.ApplyChangeset(normalized)
 	if err != nil {
 		e.logError(stepID, domainID, "model apply failed", map[string]any{
@@ -1838,6 +1919,93 @@ func (e *pipelineExecution) replayRuntimeTaskExecution(
 		runtimeKey = runtimeName + "@" + runtimeVersion
 	}
 	e.runtimeVersions[runtimeKey] = struct{}{}
+
+	if len(normalized.Warnings) > 0 {
+		for _, runtimeWarning := range normalized.Warnings {
+			warningText := strings.TrimSpace(runtimeWarning)
+			if warningText == "" {
+				continue
+			}
+			prefixedWarning := warningText
+			if strings.TrimSpace(stepID) != "" {
+				prefixedWarning = fmt.Sprintf("%s: %s", stepID, warningText)
+			}
+			e.addWarning(prefixedWarning)
+			e.logWarn(stepID, domainID, "runtime warning", map[string]any{
+				"warning": warningText,
+			})
+		}
+	}
+
+	if strings.HasSuffix(stepID, "step1.collect") {
+		manifest, manifestRaw, err := loadShardPackManifestFromRoot(task.WriteRoot)
+		if err != nil {
+			if fallbackErr := claudecode.PersistCompatibilityDocflowArtifacts(task, normalized); fallbackErr == nil {
+				manifest, manifestRaw, err = loadShardPackManifestFromRoot(task.WriteRoot)
+			}
+		}
+		if err != nil {
+			e.logError(stepID, domainID, "shard pack manifest load failed", map[string]any{
+				"task_id": task.TaskID,
+				"error":   strings.TrimSpace(err.Error()),
+			})
+			return runtimeTaskExecution{}, err
+		}
+		e.shardPacks = append(e.shardPacks, manifest)
+		manifestPath := path.Join(task.ArtifactRoot, shardPackManifestFile)
+		e.addArtifacts(Artifact{
+			Path:  manifestPath,
+			Kind:  "taskrun",
+			Label: "Shard Pack Manifest",
+		})
+		coverage := &manifest.Compatibility.Coverage
+		e.runtimeStepMetrics = append(e.runtimeStepMetrics, runtimeStepQuality{
+			StepID:           stepID,
+			DomainID:         domainID,
+			RuntimeName:      runtimeName,
+			RuntimeVersion:   runtimeVersion,
+			RepoScopes:       append([]string(nil), task.RepoScopes...),
+			ChangesetOps:     len(manifest.Compatibility.Entities) + len(manifest.Compatibility.Edges) + len(manifest.Compatibility.Findings),
+			EntityUpserts:    len(manifest.Compatibility.Entities),
+			EdgeUpserts:      len(manifest.Compatibility.Edges),
+			FindingsAdded:    len(manifest.Compatibility.Findings),
+			QuestionsCount:   len(manifest.Compatibility.Questions),
+			CoverageObserved: countCoverageObserved(coverage),
+			CoverageMissing:  countCoverageMissing(coverage),
+			WarningsCount:    len(normalized.Warnings),
+		})
+		e.logInfo(stepID, domainID, "runtime shard pack replayed from persisted taskrun", map[string]any{
+			"task_id":         task.TaskID,
+			"shard_id":        task.ShardID,
+			"artifact_root":   task.ArtifactRoot,
+			"manifest_path":   manifestPath,
+			"documents":       len(manifest.Documents),
+			"citations":       len(manifest.Citations),
+			"compat_entities": len(manifest.Compatibility.Entities),
+			"compat_edges":    len(manifest.Compatibility.Edges),
+			"compat_findings": len(manifest.Compatibility.Findings),
+		})
+		e.logInfo(stepID, domainID, "runtime task replayed from persisted taskrun", map[string]any{
+			"task_id":          task.TaskID,
+			"shard_id":         task.ShardID,
+			"repo_scope":       task.RepoScope,
+			"runtime_name":     runtimeName,
+			"runtime_version":  runtimeVersion,
+			"changeset_ops":    len(normalized.Changeset),
+			"entity_upserts":   len(manifest.Compatibility.Entities),
+			"edge_upserts":     len(manifest.Compatibility.Edges),
+			"findings_added":   len(manifest.Compatibility.Findings),
+			"questions_count":  len(manifest.Compatibility.Questions),
+			"coverage_missing": countCoverageMissing(coverage),
+			"warnings_count":   len(normalized.Warnings),
+		})
+		return runtimeTaskExecution{
+			RawJSON:       manifestRaw,
+			Normalized:    normalized,
+			Apply:         synthesizeApplyReport(normalized),
+			ShardManifest: &manifest,
+		}, nil
+	}
 
 	applyReport := synthesizeApplyReport(normalized)
 	if len(applyReport.DocArtifacts) > 0 {
@@ -2043,42 +2211,51 @@ func extractFindingIDs(findings []contracts.Finding) []string {
 }
 
 func (e *pipelineExecution) runStepAsIs() error {
-	e.logInfo(e.stepStatus.CurrentStep, "", "compiling as-is reports", nil)
-	entities, err := e.store.ListEntities()
-	if err != nil {
-		return err
+	e.logInfo(e.stepStatus.CurrentStep, "", "assembling staged doc flow", nil)
+	return e.assembleStagedDocFlow()
+}
+
+func (e *pipelineExecution) runStepValidator(ctx context.Context, stepID string) error {
+	if e.shouldSkipFindingsRuntime() {
+		e.markFindingsSkipped("findings_skipped_due_to_unusable_collect")
+		e.addWarning(fmt.Sprintf("%s: validator step skipped because collect evidence is unusable", stepID))
+		e.logWarn(stepID, "", "validator step skipped", map[string]any{
+			"reason":         "collect evidence is unusable",
+			"collect_status": e.renderContext().Collect.Status,
+		})
+		return nil
 	}
-	edges, err := e.store.ListEdges()
-	if err != nil {
-		return err
+
+	selectedScopes := normalizeOrderedUniqueStrings(e.selectedRepoScopes)
+	if len(selectedScopes) == 0 {
+		e.addWarning(fmt.Sprintf("%s: validator step skipped because repo_selection=%q selected zero repo scopes", stepID, e.repoSelectionMode))
+		e.logWarn(stepID, "", "validator step skipped", map[string]any{
+			"repo_selection_mode": e.repoSelectionMode,
+			"selected_scopes":     append([]string(nil), e.selectedRepoScopes...),
+		})
+		return nil
 	}
-	artifacts, err := e.compiler.CompileAsIs(entities, edges, e.renderContext())
-	if err != nil {
-		return err
-	}
-	e.addArtifacts(toOrchestratorArtifacts(artifacts)...)
-	diagramArtifacts, err := e.compiler.CompileC4Diagrams(entities, edges)
-	if err != nil {
-		return err
-	}
-	e.addArtifacts(toOrchestratorArtifacts(diagramArtifacts)...)
-	e.logInfo(e.stepStatus.CurrentStep, "", "as-is reports compiled", map[string]any{
-		"entities":  len(entities),
-		"edges":     len(edges),
-		"artifacts": len(artifacts) + len(diagramArtifacts),
-	})
-	return nil
+
+	_, outcome, err := e.executeRuntimeTasksSharded(ctx, stepID, "", append([]string(nil), selectedScopes...), "")
+	e.recordRuntimeStepOutcome(stepID, outcome)
+	return err
 }
 
 func (e *pipelineExecution) runStepProposals() error {
-	e.logInfo(e.stepStatus.CurrentStep, "", "compiling proposals", map[string]any{
-		"findings": len(e.findings),
-	})
-	artifacts, err := e.compiler.CompileProposals(e.findings, e.renderContext())
-	if err != nil {
-		return err
+	if e.validatorVerdict != nil {
+		e.logInfo(e.stepStatus.CurrentStep, "", "promoting validated staged artifacts", nil)
+		if err := e.promoteValidatedArtifacts(); err != nil {
+			return err
+		}
+	} else if e.renderContext().IsIncomplete() || len(e.partialFailures) > 0 || e.findingsSkipped {
+		e.addWarning(fmt.Sprintf("%s: canonical promotion skipped because validator verdict is missing", e.stepStatus.CurrentStep))
+		e.logWarn(e.stepStatus.CurrentStep, "", "canonical promotion skipped", map[string]any{
+			"reason":      "validator verdict is missing",
+			"report_mode": e.renderContext().ReportMode,
+		})
+	} else {
+		return fmt.Errorf("promote validated artifacts: validator verdict is missing")
 	}
-	e.addArtifacts(toOrchestratorArtifacts(artifacts)...)
 
 	changelog, err := e.compiler.WriteIterationChangelog(
 		e.runID,
@@ -2096,7 +2273,7 @@ func (e *pipelineExecution) runStepProposals() error {
 		Label: changelog.Label,
 	})
 	e.logInfo(e.stepStatus.CurrentStep, "", "proposals and changelog compiled", map[string]any{
-		"artifacts": len(artifacts) + 1,
+		"artifacts": len(e.artifacts),
 	})
 	return nil
 }
@@ -2146,6 +2323,20 @@ func (e *pipelineExecution) rewriteTerminalReports(status RunStatus) {
 
 	if artifacts, err := e.compiler.WriteArchitectSummary(e.renderArchitectSummary(), renderCtx); err != nil {
 		logRewriteWarning("architect-summary", err)
+	} else {
+		e.addArtifacts(toOrchestratorArtifacts(artifacts)...)
+	}
+
+	if domainReports, err := e.authoredDomainReports(); err != nil {
+		logRewriteWarning("domain-outputs.prepare", err)
+	} else if artifacts, err := e.compiler.WriteDomainOutputs(domainReports); err != nil {
+		logRewriteWarning("domain-outputs", err)
+	} else {
+		e.addArtifacts(toOrchestratorArtifacts(artifacts)...)
+	}
+
+	if artifacts, err := e.compiler.WriteDomainTaskEnvelopes(e.stagedDomainEnvelopes()); err != nil {
+		logRewriteWarning("domain-task-envelopes", err)
 	} else {
 		e.addArtifacts(toOrchestratorArtifacts(artifacts)...)
 	}

@@ -367,7 +367,7 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 		}
 
 		var execution runtimeTaskExecution
-		if result.AlreadyApplied {
+		if result.AlreadyApplied && !strings.HasSuffix(stepID, "step3.findings") {
 			execution, err = e.replayRuntimeTaskExecution(stepID, domainID, result.Prepared)
 		} else {
 			execution, err = e.applyRuntimeTaskExecution(stepID, domainID, result.Prepared)
@@ -558,6 +558,34 @@ func (e *pipelineExecution) loadReplayableShardResult(
 			Err:  fmt.Errorf("decode persisted taskrun %q: %w", taskrunPath, err),
 		}
 	}
+	prepared.Task.StepID = stepID
+	prepared.Task.DomainID = strings.TrimSpace(domainID)
+	if strings.TrimSpace(prepared.Task.ShardID) == "" {
+		prepared.Task.ShardID = strings.TrimSpace(plan.ShardID)
+	}
+	if len(prepared.Task.RepoScopes) == 0 {
+		prepared.Task.RepoScopes = append([]string(nil), plan.RepoScopes...)
+	}
+	if len(prepared.Task.PathScopes) == 0 {
+		prepared.Task.PathScopes = append([]string(nil), plan.PathScopes...)
+	}
+	if strings.TrimSpace(prepared.Task.RepoScope) == "" {
+		prepared.Task.RepoScope = strings.TrimSpace(plan.PrimaryRepo)
+	}
+	if strings.TrimSpace(prepared.Task.Workspace) == "" {
+		prepared.Task.Workspace = e.workspace.Path
+	}
+	artifactRoot, writeRoot, readContextRoots, artifactErr := e.runtimeArtifactContext(stepID, prepared.Task.ShardID, prepared.Task.RepoScopes)
+	if artifactErr != nil {
+		return true, runtimeShardRunResult{
+			Plan: plan,
+			Err:  fmt.Errorf("prepare replay artifact context: %w", artifactErr),
+		}
+	}
+	prepared.Task.ArtifactRoot = artifactRoot
+	prepared.Task.WriteRoot = writeRoot
+	prepared.Task.ReadContextRoots = append([]string(nil), readContextRoots...)
+	prepared.Task.AgentRole = runtimeAgentRole(stepID)
 	e.logInfo(stepID, domainID, "shard loaded from persisted taskrun", map[string]any{
 		"shard_id":     plan.ShardID,
 		"task_id":      prepared.Task.TaskID,

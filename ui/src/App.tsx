@@ -74,6 +74,17 @@ type ArtifactsResponse = {
   artifacts: Artifact[];
 };
 
+type FinalRunIndexDocument = {
+  canonical_path: string;
+  kind?: string;
+  title?: string;
+};
+
+type FinalRunIndex = {
+  citation_index_path?: string;
+  canonical_documents?: FinalRunIndexDocument[];
+};
+
 type RunLogEntry = {
   cursor: number;
   timestamp: string;
@@ -295,6 +306,23 @@ async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
     throw new Error(getErrorMessage(payload, `request failed: ${url}`));
   }
   return payload;
+}
+
+function dedupeArtifactsByPath(items: Artifact[]): Artifact[] {
+  const deduped = new Map<string, Artifact>();
+  for (const artifact of items) {
+    const key = artifact.path.trim();
+    if (!key) {
+      continue;
+    }
+    deduped.set(key, { ...artifact, path: key });
+  }
+  return Array.from(deduped.values()).sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function indexArtifactPath(artifacts: Artifact[], suffix: string): string | null {
+  const match = artifacts.find((artifact) => artifact.path.endsWith(suffix));
+  return match ? match.path : null;
 }
 
 function splitListInput(input: string): string[] {
@@ -1234,7 +1262,48 @@ export default function App() {
 
   async function fetchArtifacts(id: string) {
     const payload = await fetchJSON<ArtifactsResponse>(`/api/pipeline/runs/${id}/artifacts`);
-    setArtifacts(payload.artifacts ?? []);
+    const runArtifacts = payload.artifacts ?? [];
+    const finalRunIndexPath = indexArtifactPath(runArtifacts, "/staging/final/final-run-index.json");
+    if (!finalRunIndexPath) {
+      setArtifacts(runArtifacts);
+      return;
+    }
+
+    try {
+      const finalRunIndex = await fetchJSON<FinalRunIndex>(`/api/artifacts?path=${encodeURIComponent(finalRunIndexPath)}`);
+      const canonicalArtifacts: Artifact[] = (finalRunIndex.canonical_documents ?? [])
+        .map((document) => {
+          const canonicalPath = String(document.canonical_path ?? "").trim();
+          if (!canonicalPath) {
+            return null;
+          }
+          return {
+            path: canonicalPath,
+            kind: String(document.kind ?? "report").trim() || "report",
+            label: String(document.title ?? canonicalPath).trim() || canonicalPath,
+          } satisfies Artifact;
+        })
+        .filter((artifact): artifact is Artifact => artifact !== null);
+
+      const indexArtifacts: Artifact[] = [
+        {
+          path: finalRunIndexPath,
+          kind: "taskrun",
+          label: "Final Run Index",
+        },
+      ];
+      const citationIndexPath = String(finalRunIndex.citation_index_path ?? "").trim();
+      if (citationIndexPath.length > 0) {
+        indexArtifacts.push({
+          path: citationIndexPath,
+          kind: "taskrun",
+          label: "Citation Index",
+        });
+      }
+      setArtifacts(dedupeArtifactsByPath([...canonicalArtifacts, ...indexArtifacts]));
+    } catch {
+      setArtifacts(runArtifacts);
+    }
   }
 
   async function loadCoverageArtifacts() {

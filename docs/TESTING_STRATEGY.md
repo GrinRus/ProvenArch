@@ -17,7 +17,12 @@
 
 ### Contract tests
 - `workspace.yaml` валидируется по `schemas/workspace.schema.json`
-- `TaskResult` валидируется по `schemas/taskresult.schema.json`
+- docs-first contracts валидируются по:
+  - `schemas/shard-pack-manifest.schema.json`
+  - `schemas/final-run-index.schema.json`
+  - `schemas/citation-index.schema.json`
+  - `schemas/validator-verdict.schema.json`
+- compatibility `TaskResult` валидируется по `schemas/taskresult.schema.json`
 - examples и fixture cases должны парситься и проходить contract validation, где это ожидается
 
 ### Semantic validator tests
@@ -27,14 +32,15 @@
 - ownership/card linkage constraints
 
 ### Golden/regression tests
-- model store materialization
-- compiler outputs (`reports/as-is/*`, `reports/diagrams/*`, findings, proposals, changelog)
+- docs-first staged + promoted outputs (`reports/*`, `proposals/*`)
+- model store materialization как compatibility/derived layer
+- diagrams/compat outputs как thin-code layer
 - deterministic comparisons against recorded golden outputs
 - hash-based snapshot compare against `fixtures/scenarios/*/golden/snapshot.sha256`
 
 ### Scenario integration tests
 - pipeline runs на synthetic repos и fixture workspaces
-- recorded raw TaskResult вместо live runner в required tests
+- recorded runtime outputs без live providers в required tests
 - fixture contract gate проверяет parse/semantics recorded runner outputs (`meta.step_id`, `repo_scopes`)
 
 ### Smoke tests
@@ -50,9 +56,10 @@
 
 - `fixtures/workspace/` — manifest и validator cases
 - `fixtures/taskresult/` — raw и normalized TaskResult cases
+- `examples/*.example.json` + contract tests — docs-first fixtures (manifest/index/citation/verdict)
 - `fixtures/scenarios/<name>/workspace/` — central workspace inputs
 - `fixtures/scenarios/<name>/repos/<repo-name>/` — synthetic repos
-- `fixtures/scenarios/<name>/runner/` — recorded raw TaskResult per step
+- `fixtures/scenarios/<name>/runner/` — recorded runtime payloads per step
 - `fixtures/scenarios/<name>/golden/` — expected deterministic snapshot (hash list) + fixture docs
 
 Baseline scenario set:
@@ -143,7 +150,9 @@ Implemented additional jobs:
 ### Contract tests
 - valid `workspace.yaml`
 - invalid `workspace.yaml`
-- valid canonical TaskResult
+- valid docs-first contracts (`shard-pack-manifest`, `final-run-index`, `citation-index`, `validator-verdict`)
+- negative docs-first contract cases (missing citations, duplicate claim/topic ids, broken topic refs)
+- valid compatibility TaskResult
 - invalid legacy TaskResult operations (`add_question` / `set_coverage`)
 - invalid TaskResult with schema violations
 
@@ -155,11 +164,10 @@ Implemented additional jobs:
 - canonical top-level coverage/questions dedupe
 
 ### Golden tests
-- entity/edge file materialization
+- stage-then-promote deterministic flow for canonical docs-first surfaces
+- derived compatibility `model/*` extraction determinism
 - stable slug normalization and collision handling
-- Step 2 `reports/as-is/*`
-- Step 3 findings materialization
-- Step 4 proposals/changelog determinism
+- Step 4 changelog determinism
 
 ### Scenario integration tests
 - one-service happy path

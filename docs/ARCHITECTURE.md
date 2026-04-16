@@ -1,7 +1,7 @@
 # ARCHITECTURE.md (Go monorepo MVP)
 
 Этот документ описывает целевую архитектуру реализации ACP для local-first MVP.
-В текущем состоянии реализован runnable baseline: `workspace`/`TaskResult` foundations, рабочий `init|refresh` execution path, API endpoints `/api/*`, deterministic materialization `model/reports/proposals/changelog` и fake-runner default для required CI без live dependencies.
+В текущем состоянии реализован runnable baseline: `workspace` foundations, docs-first staged runtime pipeline для `init|refresh`, API endpoints `/api/*`, validator-gated promotion в `reports/*`/`proposals/*`, compatibility materialization `model/*` и fake-runner default для required CI без live dependencies.
 
 ## Scope (MVP)
 - Local-first: всё работает на машине разработчика
@@ -82,7 +82,12 @@
    - Проверяет согласованность canonical domain card: filename `<domain-id>.md` vs поле `- id:`; mismatch фиксируется high-priority question, runtime остаётся filename-based
    - Монолитный сценарий many-domains-to-one-repo поддержан через общий `repo_scope`; unknown scope фиксируется вопросом `q.domain.<id>.unknown-repo-scope`
    - Если `repo_scope` домена исключён policy `repo_selection`, domain runtime task пропускается и фиксируется high-priority question
-   - Выполняет runtime collect-step per-domain и сохраняет отдельные raw taskruns в `reports/taskruns/*-step1-collect-domain-*.json`
+   - Выполняет runtime collect-step per-domain и выдаёт каждому shard runtime-aware envelope:
+     - `artifact_root` (workspace-relative)
+     - `write_root` (absolute run-scoped staging dir)
+     - `read_context_roots[]`
+   - Step 1 runtime primary output: authored shard dossier pack + `shard-pack-manifest.json`
+   - Сохраняет raw compatibility taskruns и shard summaries в `reports/taskruns/*` для recovery/auditability
    - Runtime sharding planner (heuristics/semantic) materialize-ит deterministic shard-plan artifacts `reports/taskruns/*-shard-plan*.json` и shard-summary artifacts `reports/taskruns/*-shard-summary*.json`
    - shard-plan публикует полный неперекрывающийся coverage partition repo через `path_scopes` (directory/file scopes); для больших repo применяется только structural coalescing по filesystem ancestry
    - Per-shard persistence crash-safe: shard-summary materialize-ится сразу со status=`pending`; после schema-validated TaskResult raw taskrun пишется до `apply`, shard переходит в `checkpointed`, после успешного `apply` — в `succeeded`; runtime/apply failure фиксируется как `failed` без ожидания конца шага
@@ -90,12 +95,16 @@
    - Scheduler поддерживает `sequential|parallel` execution с worker-pool (`max_parallel_tasks`) и `fail_fast|best_effort` failure-policy
    - При `best_effort` downstream шаги продолжаются на partial model, но итог run фиксируется как `failed` с `error_code=run_partial_failed`; если `step1.collect` становится `unusable`, live `step3.findings` не выполняется, а downstream markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) materialize-ятся в `report_mode=incomplete` с явным banner/triage-only wording
    - Вызывает runtime adapter
-   - Валидирует TaskResult (schema)
+   - Собирает staged final doc set в `reports/taskruns/<run_id>/staging/final/`
+   - Генерирует и валидирует `final-run-index.json` и `citation-index.json`
+   - Step 3 runtime primary output: `validator-verdict.json`
+   - Promotion копирует только approved final set в stable `reports/as-is/*`, `reports/findings/*`, `reports/coverage/*`, `reports/agent-outputs/*`, `proposals/*`
+   - Валидирует TaskResult как compatibility envelope, а не как primary filesystem contract
    - Нормализует canonical top-level `questions`/`coverage` (dedupe/canonicalization) без ingestion из legacy operations
    - Применяет semantic guard для refresh-taskruns: фильтрует placeholder/off-topic артефакты в `refresh.step1.collect`, добавляет deterministic fallback finding при owner-gap в `refresh.step3.findings`, канонизирует/дедуплицирует coverage/question semantics
-   - Применяет changeset к модели workspace
-   - Не auto-create/rename canonical domain/team cards
-   - Триггерит генерацию отчётов
+   - Поддерживает derived compatibility layer: `model/*` rebuild-ится из `final run index + citation index` после успешного promotion
+   - Не auto-create/rename canonical domain/team cards и не разрешает runtime напрямую писать в `charter/*`
+   - Для incomplete/failed terminal paths materialize-ит fallback markdown surfaces без promotion approved set
    - Поддерживает async run coordination: single active run + debounce queue (`last event wins`)
    - Поддерживает управляемую отмену run:
      - pending run в debounce queue отменяется immediate (`failed`, `error_code=run_canceled`)
@@ -127,7 +136,8 @@
 5) **Runtime providers (`internal/runtime/*`)** *(implemented baseline)*
    - headless providers: `claude-code` (`internal/runtime/claudecode`) и `qwen-code` (`internal/runtime/qwencode`)
    - общий runtime layer + provider factory: `internal/runtime/runtime.go`, `internal/runtime/providers/factory.go`
-   - каждый provider возвращает TaskResult JSON; parse failures классифицируются как `runner_parse_failed`
+   - каждый provider получает explicit staged-write contract (`artifact_root`, `write_root`, `read_context_roots`) и должен писать runtime-authored artifacts только внутрь `write_root`
+   - live headless providers продолжают возвращать TaskResult JSON как compatibility envelope; parse failures классифицируются как `runner_parse_failed`
    - headless provider scope включает `arch-workspace` и resolved repo directories для текущих `repo_scope/repo_scopes`, чтобы provider видел source evidence из реальных checkout-ов
    - command overrides:
      - `ACP_CLAUDE_CMD` (default `claude-code`)
@@ -149,19 +159,18 @@
    - `POST /api/workspace/validate` даёт pre-run readiness diagnostics по layout (`missing/will create on run`, `not_dir`, `unreadable`)
    - git helpers (shell out в `git`)
 
-7) **Model store (`internal/model`)** *(implemented baseline)*
+7) **Model store (`internal/model`)** *(implemented baseline, compatibility layer)*
    - entity-per-file YAML
    - stable IDs + aliases
    - детерминированная slug normalization и collision policy
    - apply changeset operations
-   - хранит service/API/datastore/external system model артефакты
+   - хранит derived compatibility view для legacy consumers и диаграмм
 
 8) **Reports (`internal/reports`)** *(implemented baseline)*
-   - генерирует `reports/as-is/*`, включая per-service dossiers, integrations/datastores/ci-cd views
-   - в Step 2 дополнительно генерирует evidence-first C4 Mermaid set: `Context`, `Container`, per-service `Component`, per-service `Code`
+   - primary narrative surfaces в docs-first path приходят из runtime-authored staged docs
+   - compiler layer используется как compatibility fallback для отсутствующих canonical surfaces
+   - в derived layer генерирует evidence-first C4 Mermaid set: `Context`, `Container`, per-service `Component`, per-service `Code`
    - materialize-ит индекс диаграмм `reports/diagrams/index.md` для UI filtering/open flow
-   - сохраняет `reports/coverage/*` для unknowns/questions
-   - сохраняет `reports/agent-outputs/*`
    - формирует `reports/changelog/*` по итерациям
 
 9) **Runtime Profile API (`internal/api`)** *(implemented baseline)*
@@ -191,10 +200,10 @@
 
 ## Pipeline (MVP)
 0) Конституция (charter)
-1) Collect context
-2) As-is docs
-3) Findings (gaps/anti-patterns)
-4) Proposals (improvements)
+1) Collect context -> shard-authored dossier packs + shard manifests
+2) As-is docs -> staged final doc assembly + indexes
+3) Findings -> validator verdict over staged final set
+4) Proposals -> promotion + compatibility rebuild
 
 On-demand capability:
 - Q&A агент использует `charter/cards + model + reports + docs/imports`; в beta доступен как internal service + CLI `acp qa` без публичного API endpoint.

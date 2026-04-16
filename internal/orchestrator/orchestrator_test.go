@@ -958,6 +958,7 @@ func TestNewServiceAutoResumeLeavesQueuedAndArtifactlessRunningRunsReconciled(t 
 		WithRunner(&failOnRunRunner{}),
 		WithClock(func() time.Time { return baseTime.Add(30 * time.Minute) }),
 	)
+	defer waitForAsyncDrain(t, restartedService, 8*time.Second)
 
 	queuedInfo, ok := restartedService.GetRun("run_queued_stale")
 	if !ok {
@@ -1014,6 +1015,7 @@ func TestNewServiceAutoResumeChoosesNewestResumableRunningRun(t *testing.T) {
 		WithRunner(resumeRunner),
 		WithClock(func() time.Time { return baseTime.Add(30 * time.Minute) }),
 	)
+	defer waitForAsyncDrain(t, restartedService, 8*time.Second)
 
 	newestInfo := waitForRunTerminalState(t, restartedService, "run_running_newest", 8*time.Second)
 	if newestInfo.ErrorCode == runErrorCodeReconciledAfterRestart {
@@ -1268,20 +1270,11 @@ func TestInitStep1EnrichesCanonicalCardsDeterministically(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read first team card: %v", err)
 	}
-	if !strings.Contains(string(firstDomain), "## Derived (ACP Step1)") {
-		t.Fatalf("expected derived section in domain card, got %q", string(firstDomain))
+	if strings.Contains(string(firstDomain), "## Derived (ACP Step1)") {
+		t.Fatalf("did not expect runtime-derived section in domain card, got %q", string(firstDomain))
 	}
-	if !strings.Contains(string(firstDomain), "related_entities: `svc.payments-service`") {
-		t.Fatalf("expected related entity in domain card, got %q", string(firstDomain))
-	}
-	if !strings.Contains(string(firstTeam), "## Derived (ACP Step1)") {
-		t.Fatalf("expected derived section in team card, got %q", string(firstTeam))
-	}
-	if !strings.Contains(string(firstTeam), "related_services: none") {
-		t.Fatalf("expected deterministic related services in team card, got %q", string(firstTeam))
-	}
-	if !strings.Contains(string(firstTeam), "evidence_refs: none") {
-		t.Fatalf("expected team evidence refs section in team card, got %q", string(firstTeam))
+	if strings.Contains(string(firstTeam), "## Derived (ACP Step1)") {
+		t.Fatalf("did not expect runtime-derived section in team card, got %q", string(firstTeam))
 	}
 
 	if _, _, err := service.Run(context.Background(), RunRequest{
@@ -1669,11 +1662,11 @@ func TestRefreshStep1RepoScopeResolverIsConsistentForRuntimeAndEnrich(t *testing
 		t.Fatalf("read enriched domain card: %v", err)
 	}
 	cardText := string(cardBytes)
-	if !strings.Contains(cardText, "## Derived (ACP Step1)") {
-		t.Fatalf("expected derived section in domain card, got %q", cardText)
+	if strings.Contains(cardText, "## Derived (ACP Step1)") {
+		t.Fatalf("did not expect runtime-derived section in domain card, got %q", cardText)
 	}
 	if !strings.Contains(cardText, "- repo_scope: `users-service`") {
-		t.Fatalf("expected enrich to use same resolved repo_scope users-service, got %q", cardText)
+		t.Fatalf("expected canonical card to keep declared repo_scope users-service, got %q", cardText)
 	}
 }
 

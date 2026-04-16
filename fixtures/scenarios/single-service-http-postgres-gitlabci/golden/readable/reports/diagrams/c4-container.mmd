@@ -1,0 +1,6 @@
+flowchart LR
+  subgraph Workspace["Workspace Containers"]
+    svc_svc_payments["Service: Payments Service"]
+  end
+  GapContainerEdges["Gap: no evidence-backed container relations"]
+  Workspace -.-> GapContainerEdges

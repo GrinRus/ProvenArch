@@ -13,8 +13,12 @@ import (
 type Schema string
 
 const (
-	WorkspaceSchema  Schema = "workspace.schema.json"
-	TaskResultSchema Schema = "taskresult.schema.json"
+	WorkspaceSchema         Schema = "workspace.schema.json"
+	TaskResultSchema        Schema = "taskresult.schema.json"
+	ShardPackManifestSchema Schema = "shard-pack-manifest.schema.json"
+	FinalRunIndexSchema     Schema = "final-run-index.schema.json"
+	CitationIndexSchema     Schema = "citation-index.schema.json"
+	ValidatorVerdictSchema  Schema = "validator-verdict.schema.json"
 )
 
 var (

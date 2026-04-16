@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "run_id": "run-123",
+  "generated_at": "2026-04-16T12:00:00Z",
+  "citations": [
+    {
+      "id": "cite.entity.svc-payments-service.1",
+      "repo": "payments-service",
+      "path": "README.md",
+      "claim_ids": [
+        "claim.entity.svc-payments-service.1"
+      ],
+      "document_ids": [
+        "doc.report.agent-outputs-domains-payments-md"
+      ]
+    }
+  ]
+}

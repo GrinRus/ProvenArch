@@ -1,14 +1,14 @@
 # Architecture Control Plane (Local-first MVP)
 
-> **Статус:** MVP beta foundation / runnable local pipeline baseline + strict contracts
+> **Статус:** MVP beta foundation / runnable local docs-first pipeline baseline + strict contracts
 > **Принятый стек реализации:** Go (backend/orchestrator) + React/TypeScript UI (embedded), runtime анализа в MVP: **headless multi-provider** (`claude-code` default, `qwen-code` optional)
-> **Последняя ревизия:** 2026-04-13
+> **Последняя ревизия:** 2026-04-16
 
 ## Что это
 
 Architecture Control Plane (ACP) — **local-first** инструмент, который строит и поддерживает **as-is архитектурную модель** multi-repo системы через agentic runtime.
 
-ACP не является "рисовалкой диаграмм". Архитектура трактуется как **версионируемая модель в Git**, а диаграммы/отчёты/предложения компилируются из неё.
+ACP не является "рисовалкой диаграмм". Архитектура трактуется как **версионируемый набор runtime-authored документов + индексов в Git**. Совместимый `model/*` в MVP остаётся производным слоем, а не primary source of truth для live pipeline.
 
 ---
 
@@ -18,7 +18,8 @@ ACP не является "рисовалкой диаграмм". Архите�
 - набор документов для стейкхолдеров и инженеров,
 - контракты и схемы,
 - рабочий local-first backend/API/CLI baseline (`init|refresh` execution path),
-- deterministic materialization baseline для `model/`, `reports/`, `proposals/`, `changelog`,
+- staged docs-first runtime pipeline для `reports/taskruns/*` с validator-gated promotion в стабильные `reports/*` и `proposals/*`,
+- deterministic compatibility materialization для `model/*`, `reports/*`, `proposals/*`, `changelog`,
 - UI shell + `make` entrypoints + repo CI.
 
 Реализация остаётся incremental по `docs/BACKLOG.md`, но базовый e2e поток уже исполним: `workspace validate -> run pipeline -> inspect artifacts`.
@@ -40,6 +41,7 @@ ACP не является "рисовалкой диаграмм". Архите�
 - deterministic Step 0 materialization из `charter/wizard/step0-contract.json` (с fallback baseline + warning в run diagnostics при missing/invalid contract)
 - встроенный baseline bundle agents/skills/prompts + редактируемые в UI prompt packs, версионируемые в Git
 - domain-first иерархия агентов (domain analysts + architect aggregator)
+- docs-first runtime contract: shard analysts пишут dossier packs в run-scoped staging, validator даёт canonical verdict, promotion переносит только approved final set
 - markdown-карточки доменов/команд как source-of-truth в `charter/cards`
 - internal Q&A capability системного аналитика поверх артефактов workspace (`internal/qa` + `acp qa`, без публичного API endpoint в beta surface)
 - итерационный changelog в `reports/changelog`
@@ -49,7 +51,28 @@ ACP не является "рисовалкой диаграмм". Архите�
 - явная фиксация недостатка информации через `coverage`, `questions` и findings
 - semantic guard в refresh-цикле: фильтрация нерелевантных placeholder-операций, fallback finding при owner-gap, канонизация/дедуп coverage+questions
 - Git-based versioning/branching для модели, правил, отчётов и proposal-пакетов
-- строгий контракт TaskResult (JSON Schema) между runtime и orchestrator
+- строгий runtime contract: staged filesystem artifact packs + `shard-pack-manifest` / `final-run-index` / `citation-index` / `validator-verdict`
+- `TaskResult` сохраняется как compatibility envelope для fake/legacy/test runners и semantic/model extraction
+
+## Docs-First Runtime Pipeline
+
+Primary execution path для `step1.collect` и `step3.findings`:
+- runtime пишет только в `reports/taskruns/<run_id>/...` внутри своего `write_root`
+- shard agents materialize-ят authored docs + `shard-pack-manifest.json`
+- orchestrator/aggregator собирает staged final doc set в `reports/taskruns/<run_id>/staging/final/`
+- validator пишет `validator-verdict.json`
+- только `PASS` verdict разрешает promotion в канонические `reports/as-is/*`, `reports/findings/*`, `reports/coverage/*`, `reports/agent-outputs/*`, `proposals/*`
+
+Machine-readable канон для дальнейшего рендера:
+- `final run index`
+- `citation index`
+
+Protected read-only surfaces для runtime:
+- `workspace.yaml`
+- `schemas/*`
+- `docs/spec/*`
+- `charter/*`
+- анализируемые user repos
 
 ❌ В MVP не включено:
 - security/compliance enforcement
@@ -475,8 +498,10 @@ flowchart LR
   GITLAB --> REPOS
   CC --> DOCS[Local docs/imports]
   CC --> REPOS
-  CC --> OUT[TaskResult JSON (changeset + evidence)]
+  CC --> OUT["Docs-first artifact pack (shard/final indexes + verdict)"]
+  CC --> COMP["TaskResult (compatibility envelope)"]
   OUT --> ORCH
+  COMP --> ORCH
   ORCH --> WS
   UI --> WS
 ```
@@ -512,25 +537,21 @@ MVP-модель должна покрывать как минимум:
 
 ---
 
-## Контракт runtime output: TaskResult (обязателен)
+## Контракт runtime output: docs-first (primary) + TaskResult (compatibility)
 
-Orchestrator принимает выход runtime **только** как TaskResult JSON и валидирует по `schemas/taskresult.schema.json`.
+Primary runtime contract для live `step1.collect`/`step3.findings`:
+- `shard-pack-manifest.json`
+- `final-run-index.json`
+- `citation-index.json`
+- `validator-verdict.json`
 
-### Top-level поля
-- required: `meta`, `summary`, `changeset`
-- optional: `questions`, `coverage`, `warnings`, `debug`
+TaskResult остаётся compatibility envelope:
+- валидируется по `schemas/taskresult.schema.json`
+- используется для semantic guards, taskrun diagnostics и derived `model/*`
+- не является primary source of truth для canonical `reports/*`/`proposals/*` promotion path
 
-MVP canonical runtime shape:
-- `questions[]` и `coverage` пишутся на top-level
-- `add_doc_artifact` трактуется как metadata registration op, а не как content write op
-
-### Changeset operations (MVP)
-- `upsert_entity`
-- `remove_entity`
-- `upsert_edge`
-- `remove_edge`
-- `add_finding`
-- `add_doc_artifact`
+Primary promotion gate:
+- только `validator-verdict = PASS` разрешает promotion staged final docs в canonical stable paths.
 
 ### Evidence format (MVP)
 
@@ -598,9 +619,9 @@ UI в MVP должен покрывать минимум:
 - source of truth: `docs/TESTING_STRATEGY.md`
 - required CI использует synthetic fixtures, recorded runner outputs и не зависит от live headless providers / live network
 - baseline layers:
-  - contract tests для `workspace.yaml` и `TaskResult`
+  - contract tests для `workspace.yaml`, `shard-pack-manifest`, `final-run-index`, `citation-index`, `validator-verdict` (+ compatibility `TaskResult`)
   - semantic validator tests
-  - golden/regression tests для model/compiler outputs
+  - golden/regression tests для docs-first staged/promoted outputs и derived compatibility layer
   - scenario integration tests на synthetic repos
   - smoke tests для CLI/API/UI
 - local live-runner smoke выполняется вручную (не через required CI) через
@@ -640,10 +661,18 @@ Run-specific поверхность (исключена из strict golden compa
 - `docs/spec/PIPELINE_SPEC.md` — pipeline I/O и expected artifacts
 - `docs/TESTING_STRATEGY.md` — baseline strategy для contract/golden/smoke tests
 - `docs/APPENDIX_SCHEMAS.md` — человеко-читаемые правила для schema/contracts
-- `schemas/taskresult.schema.json` — JSON Schema контракта runtime output
+- `schemas/shard-pack-manifest.schema.json` — JSON Schema primary shard runtime contract
+- `schemas/final-run-index.schema.json` — JSON Schema staged final run index
+- `schemas/citation-index.schema.json` — JSON Schema citation normalization layer
+- `schemas/validator-verdict.schema.json` — JSON Schema validator release gate
+- `schemas/taskresult.schema.json` — JSON Schema compatibility runtime envelope
 - `schemas/workspace.schema.json` — JSON Schema для `workspace.yaml`
 - `examples/workspace.example.yaml` — пример workspace config
-- `examples/taskresult.example.json` — пример TaskResult
+- `examples/shard-pack-manifest.example.json` — пример shard manifest
+- `examples/final-run-index.example.json` — пример final index
+- `examples/citation-index.example.json` — пример citation index
+- `examples/validator-verdict.example.json` — пример validator verdict
+- `examples/taskresult.example.json` — пример compatibility TaskResult
 - `cmd/acp/main.go` — CLI entrypoint (`serve`, `run`, `qa`)
 - `ui/package.json` — UI toolchain + scripts
 - `fixtures/README.md` — baseline fixtures и regression surface
@@ -654,7 +683,7 @@ Run-specific поверхность (исключена из strict golden compa
 
 ## Порядок реализации
 
-1) финализировать baseline model + TaskResult contract
+1) финализировать docs-first runtime contracts + compatibility extraction
 2) реализовать baseline bundle agents/skills/prompts
 3) реализовать CI/CD trigger surface: hooks/manual pipeline button/job + batch mode
 4) реализовать orchestrator + runtime provider adapters (`claude-code`, `qwen-code`)

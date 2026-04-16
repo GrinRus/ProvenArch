@@ -171,7 +171,10 @@ func NormalizeTaskResult(result TaskResult) TaskResult {
 		orderedQuestionIDs = append(orderedQuestionIDs, question.ID)
 	}
 
-	normalized.Changeset = append([]Operation(nil), result.Changeset...)
+	normalized.Changeset = append([]Operation{}, result.Changeset...)
+	if normalized.Changeset == nil {
+		normalized.Changeset = []Operation{}
+	}
 
 	normalizedQuestions := make([]Question, 0, len(orderedQuestionIDs))
 	for _, id := range orderedQuestionIDs {

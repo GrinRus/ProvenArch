@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/acp/schemas/citation-index.schema.json",
+  "title": "ACP Citation Index",
+  "type": "object",
+  "required": [
+    "version",
+    "run_id",
+    "generated_at",
+    "citations"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "citations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/citation"
+      }
+    }
+  },
+  "$defs": {
+    "line_range": {
+      "type": "object",
+      "required": [
+        "start",
+        "end"
+      ],
+      "properties": {
+        "start": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "citation": {
+      "type": "object",
+      "required": [
+        "id",
+        "repo",
+        "path",
+        "claim_ids",
+        "document_ids"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repo": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ref": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lines": {
+          "$ref": "#/$defs/line_range"
+        },
+        "excerpt_hash": {
+          "type": "string"
+        },
+        "excerpt": {
+          "type": "string"
+        },
+        "claim_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "document_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
