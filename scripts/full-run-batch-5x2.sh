@@ -28,11 +28,12 @@ ACP_EXECUTION_STRATEGY="${ACP_EXECUTION_STRATEGY:-}"
 ACP_MAX_PARALLEL_TASKS="${ACP_MAX_PARALLEL_TASKS:-}"
 ACP_FAILURE_POLICY="${ACP_FAILURE_POLICY:-}"
 ACP_SHARD_DISCOVERY_MODE="${ACP_SHARD_DISCOVERY_MODE:-}"
-ACP_REPO_SELECTION="${ACP_REPO_SELECTION:-}"
 BATCH_PROVIDER_FILTER="${BATCH_PROVIDER_FILTER:-all}"
 BATCH_RUN_SELECTION="${BATCH_RUN_SELECTION:-all}"
 BATCH_SKIP_PRECHECK="${BATCH_SKIP_PRECHECK:-0}"
 BATCH_FRONTEND_MODE="${BATCH_FRONTEND_MODE:-auto}"
+BATCH_FRONTEND_CANCEL_MODE="${BATCH_FRONTEND_CANCEL_MODE:-once_per_provider}"
+UI_E2E_HEADED="${UI_E2E_HEADED:-0}"
 E2E_TMP_ROOT="${E2E_TMP_ROOT:-/tmp/provenarch-test_arch_project}"
 BATCH_ROOT="${BATCH_ROOT:-$E2E_TMP_ROOT/runs/$BATCH_ID}"
 REPORTS_ROOT="${REPORTS_ROOT:-$E2E_TMP_ROOT/reports}"
@@ -101,6 +102,14 @@ array_contains() {
 run_index_selected() {
   local run_index="$1"
   array_contains "$run_index" "${SELECTED_RUN_INDEXES[@]-}"
+}
+
+first_selected_run_index() {
+  if [[ "${#SELECTED_RUN_INDEXES[@]}" -eq 0 ]]; then
+    printf ''
+    return 0
+  fi
+  printf '%s' "${SELECTED_RUN_INDEXES[0]}"
 }
 
 provider_selected() {
@@ -195,7 +204,7 @@ PY
   SELECTED_RUN_INDEXES_CSV="$(IFS=,; echo "${SELECTED_RUN_INDEXES[*]}")"
 }
 
-should_run_frontend_for_selection() {
+should_run_frontend_once() {
   case "$BATCH_FRONTEND_MODE" in
     never)
       return 1
@@ -207,10 +216,94 @@ should_run_frontend_for_selection() {
       run_index_selected "1"
       return $?
       ;;
+    per_run)
+      return 1
+      ;;
     *)
-      die "BATCH_FRONTEND_MODE must be auto|always|never (got '$BATCH_FRONTEND_MODE')"
+      die "BATCH_FRONTEND_MODE must be auto|always|never|per_run (got '$BATCH_FRONTEND_MODE')"
       ;;
   esac
+}
+
+should_run_frontend_for_run() {
+  local run_index="$1"
+  if [[ "$BATCH_FRONTEND_MODE" != "per_run" ]]; then
+    return 1
+  fi
+  run_index_selected "$run_index"
+}
+
+should_write_frontend_skip_result() {
+  case "$BATCH_FRONTEND_MODE" in
+    never)
+      return 0
+      ;;
+    auto)
+      if should_run_frontend_once; then
+        return 1
+      fi
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+should_run_frontend_cancel_once() {
+  case "$BATCH_FRONTEND_CANCEL_MODE" in
+    never)
+      return 1
+      ;;
+    once_per_provider)
+      return 0
+      ;;
+    per_run)
+      return 1
+      ;;
+    *)
+      die "BATCH_FRONTEND_CANCEL_MODE must be once_per_provider|per_run|never (got '$BATCH_FRONTEND_CANCEL_MODE')"
+      ;;
+  esac
+}
+
+should_run_frontend_cancel_for_run() {
+  local run_index="$1"
+  if [[ "$BATCH_FRONTEND_CANCEL_MODE" != "per_run" ]]; then
+    return 1
+  fi
+  run_index_selected "$run_index"
+}
+
+frontend_live_output_dir() {
+  local provider="$1"
+  local run_index="${2:-}"
+  if [[ -n "$run_index" ]]; then
+    printf '%s' "$BATCH_ROOT/frontend/$provider/run${run_index}"
+    return 0
+  fi
+  printf '%s' "$BATCH_ROOT/frontend/$provider"
+}
+
+frontend_cancel_output_dir() {
+  local provider="$1"
+  local run_index="${2:-}"
+  if [[ -n "$run_index" ]]; then
+    printf '%s' "$BATCH_ROOT/frontend-cancel/$provider/run${run_index}"
+    return 0
+  fi
+  printf '%s' "$BATCH_ROOT/frontend-cancel/$provider"
+}
+
+resolve_frontend_live_backend_run() {
+  local provider="$1"
+  local run_index
+  run_index="$(first_selected_run_index)"
+  if [[ -z "$run_index" ]]; then
+    printf '\t\n'
+    return 0
+  fi
+  printf '%s\t%s\n' "$BATCH_ROOT/$provider/run${run_index}" "$run_index"
 }
 
 summary_scalar() {
@@ -258,13 +351,14 @@ write_frontend_status_json() {
   local runtime_command="$8"
   local server_log="${9:-}"
   local playwright_log="${10:-}"
+  local run_index="${11:-}"
   acp_frontend_reason_validate "$reason" die
-  python3 - "$path" "$provider" "$scenario" "$status" "$reason" "$workspace" "$output_dir" "$runtime_command" "$server_log" "$playwright_log" <<'PY'
+  python3 - "$path" "$provider" "$scenario" "$status" "$reason" "$workspace" "$output_dir" "$runtime_command" "$server_log" "$playwright_log" "$run_index" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 
-path, provider, scenario, status, reason, workspace, output_dir, runtime_command, server_log, playwright_log = sys.argv[1:]
+path, provider, scenario, status, reason, workspace, output_dir, runtime_command, server_log, playwright_log, run_index = sys.argv[1:]
 payload = {
     "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "finished_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -278,6 +372,8 @@ payload = {
     "server_log": server_log or "-",
     "playwright_log": playwright_log or "-",
 }
+if run_index.strip():
+    payload["run_index"] = int(run_index)
 with open(path, "w", encoding="utf-8") as f:
     json.dump(payload, f, ensure_ascii=True, indent=2)
     f.write("\n")
@@ -304,6 +400,7 @@ write_frontend_cancel_failed_result_json() {
   local frontend_workspace="$2"
   local cancel_output_dir="$3"
   local runtime_cmd="$4"
+  local run_index="${5:-}"
   write_frontend_status_json \
     "$cancel_output_dir/$FRONTEND_CANCEL_RESULT_FILENAME" \
     "$provider" \
@@ -314,7 +411,206 @@ write_frontend_cancel_failed_result_json() {
     "$cancel_output_dir" \
     "$runtime_cmd" \
     "$cancel_output_dir/server.log" \
-    "$cancel_output_dir/playwright.log"
+    "$cancel_output_dir/playwright.log" \
+    "$run_index"
+}
+
+run_frontend_live_e2e() {
+  local provider="$1"
+  local backend_run_dir="$2"
+  local output_dir="$3"
+  local run_index="${4:-}"
+  local workspace="$backend_run_dir/arch-workspace"
+  local frontend_workspace="$output_dir/frontend-workspace"
+  local run_results_path="$backend_run_dir/run-results.tsv"
+  local refresh_run_id=""
+  local snapshot_reports=""
+  local runtime_cmd
+  runtime_cmd="$(runtime_cmd_for_provider "$provider")"
+
+  mkdir -p "$output_dir"
+  if [[ -f "$run_results_path" ]]; then
+    refresh_run_id="$(awk -F'\t' '$2=="headless" && $4=="refresh" {print $5}' "$run_results_path" | tail -n1)"
+  fi
+  if [[ -n "$refresh_run_id" ]]; then
+    snapshot_reports="$backend_run_dir/snapshots/$refresh_run_id/reports"
+  fi
+
+  if [[ ! -d "$workspace" ]]; then
+    write_frontend_status_json \
+      "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME" \
+      "$provider" \
+      "init-inspect" \
+      "failed" \
+      "$ACP_FRONTEND_REASON_BACKEND_WORKSPACE_MISSING" \
+      "$workspace" \
+      "$output_dir" \
+      "$runtime_cmd" \
+      "$output_dir/server.log" \
+      "$output_dir/playwright.log" \
+      "$run_index"
+    log "frontend e2e failed provider=$provider run=${run_index:-summary} reason=$ACP_FRONTEND_REASON_BACKEND_WORKSPACE_MISSING (workspace=$workspace)"
+    return 1
+  fi
+
+  if [[ -z "$refresh_run_id" || ! -d "$snapshot_reports" ]]; then
+    write_frontend_status_json \
+      "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME" \
+      "$provider" \
+      "init-inspect" \
+      "failed" \
+      "$ACP_FRONTEND_REASON_SNAPSHOT_REPORTS_MISSING" \
+      "$snapshot_reports" \
+      "$output_dir" \
+      "$runtime_cmd" \
+      "$output_dir/server.log" \
+      "$output_dir/playwright.log" \
+      "$run_index"
+    log "frontend e2e failed provider=$provider run=${run_index:-summary} reason=$ACP_FRONTEND_REASON_SNAPSHOT_REPORTS_MISSING refresh_run_id=${refresh_run_id:-unknown} snapshot_reports=${snapshot_reports:-unset}"
+    return 1
+  fi
+
+  rm -rf "$frontend_workspace"
+  cp -a "$workspace" "$frontend_workspace"
+  rm -rf "$frontend_workspace/reports"
+  cp -a "$snapshot_reports" "$frontend_workspace/reports"
+
+  log "frontend live e2e provider=$provider run=${run_index:-summary} workspace=$frontend_workspace artifact_source=snapshot refresh_run_id=${refresh_run_id:-unknown}"
+  if ! (
+    cd "$PROVENARCH_ROOT"
+    acp_build_timeout_env_assignments
+    acp_build_execution_env_assignments
+    env \
+      "${ACP_TIMEOUT_ENV_ASSIGNMENTS[@]}" \
+      "${ACP_EXECUTION_ENV_ASSIGNMENTS[@]}" \
+      "WORKSPACE=$frontend_workspace" \
+      "RUNTIME_PROVIDER=$provider" \
+      "OUTPUT_DIR=$output_dir" \
+      "UI_E2E_EXPECTED_REPO_COUNT=$EXPECTED_REPO_COUNT_RESOLVED" \
+      "ACP_CLAUDE_CMD=$ACP_CLAUDE_CMD_BIN" \
+      "ACP_QWEN_CMD=$ACP_QWEN_CMD_BIN" \
+      "UI_E2E_HEADED=$UI_E2E_HEADED" \
+      "FRONTEND_RESULT_FILENAME=$FRONTEND_LIVE_RESULT_FILENAME" \
+      ./scripts/frontend-live-e2e.sh
+  ) >"$output_dir/driver.log" 2>&1; then
+    if [[ ! -f "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME" ]]; then
+      write_frontend_status_json \
+        "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME" \
+        "$provider" \
+        "init-inspect" \
+        "failed" \
+        "$ACP_FRONTEND_REASON_FRONTEND_LIVE_E2E_FAILED" \
+        "$frontend_workspace" \
+        "$output_dir" \
+        "$runtime_cmd" \
+        "$output_dir/server.log" \
+        "$output_dir/playwright.log" \
+        "$run_index"
+    fi
+    log "frontend e2e failed provider=$provider run=${run_index:-summary} (see $output_dir/driver.log)"
+    return 1
+  fi
+
+  if [[ ! -f "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME" ]]; then
+    write_frontend_status_json \
+      "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME" \
+      "$provider" \
+      "init-inspect" \
+      "failed" \
+      "$ACP_FRONTEND_REASON_FRONTEND_LIVE_E2E_FAILED" \
+      "$frontend_workspace" \
+      "$output_dir" \
+      "$runtime_cmd" \
+      "$output_dir/server.log" \
+      "$output_dir/playwright.log" \
+      "$run_index"
+    log "frontend e2e failed provider=$provider run=${run_index:-summary} reason=missing_result_json (see $output_dir/driver.log)"
+    return 1
+  fi
+
+  return 0
+}
+
+resolve_frontend_cancel_workspace() {
+  local provider="$1"
+  local frontend_workspace="$BATCH_ROOT/frontend/$provider/frontend-workspace"
+  local run_index=""
+
+  if [[ -d "$frontend_workspace" ]]; then
+    printf '%s\t%s\n' "$frontend_workspace" "$(first_selected_run_index)"
+    return 0
+  fi
+
+  for run_index in "${SELECTED_RUN_INDEXES[@]}"; do
+    frontend_workspace="$BATCH_ROOT/frontend/$provider/run${run_index}/frontend-workspace"
+    if [[ -d "$frontend_workspace" ]]; then
+      printf '%s\t%s\n' "$frontend_workspace" "$run_index"
+      return 0
+    fi
+  done
+
+  printf '\t\n'
+}
+
+run_frontend_cancel_e2e() {
+  local provider="$1"
+  local frontend_workspace="$2"
+  local output_dir="$3"
+  local run_index="${4:-}"
+  local runtime_cmd
+  runtime_cmd="$(runtime_cmd_for_provider "$provider")"
+
+  mkdir -p "$output_dir"
+  if [[ ! -d "$frontend_workspace" ]]; then
+    write_frontend_status_json \
+      "$output_dir/$FRONTEND_CANCEL_RESULT_FILENAME" \
+      "$provider" \
+      "cancel-refresh" \
+      "skipped" \
+      "$ACP_FRONTEND_REASON_FRONTEND_WORKSPACE_MISSING" \
+      "$frontend_workspace" \
+      "$output_dir" \
+      "$runtime_cmd" \
+      "$output_dir/server.log" \
+      "$output_dir/playwright.log" \
+      "$run_index"
+    log "frontend cancel smoke skipped provider=$provider run=${run_index:-summary} reason=$ACP_FRONTEND_REASON_FRONTEND_WORKSPACE_MISSING"
+    return 2
+  fi
+
+  log "frontend cancel smoke provider=$provider run=${run_index:-summary} workspace=$frontend_workspace"
+  if ! (
+    cd "$PROVENARCH_ROOT"
+    acp_build_timeout_env_assignments
+    acp_build_execution_env_assignments
+    env \
+      "${ACP_TIMEOUT_ENV_ASSIGNMENTS[@]}" \
+      "${ACP_EXECUTION_ENV_ASSIGNMENTS[@]}" \
+      "WORKSPACE=$frontend_workspace" \
+      "RUNTIME_PROVIDER=$provider" \
+      "OUTPUT_DIR=$output_dir" \
+      "UI_E2E_SCENARIO=cancel-refresh" \
+      "UI_E2E_EXPECTED_REPO_COUNT=$EXPECTED_REPO_COUNT_RESOLVED" \
+      "ACP_CLAUDE_CMD=$ACP_CLAUDE_CMD_BIN" \
+      "ACP_QWEN_CMD=$ACP_QWEN_CMD_BIN" \
+      "UI_E2E_HEADED=$UI_E2E_HEADED" \
+      "FRONTEND_RESULT_FILENAME=$FRONTEND_CANCEL_RESULT_FILENAME" \
+      ./scripts/frontend-live-e2e.sh
+  ) >"$output_dir/driver.log" 2>&1; then
+    if [[ ! -f "$output_dir/$FRONTEND_CANCEL_RESULT_FILENAME" ]]; then
+      write_frontend_cancel_failed_result_json "$provider" "$frontend_workspace" "$output_dir" "$runtime_cmd" "$run_index"
+    fi
+    log "frontend cancel smoke failed provider=$provider run=${run_index:-summary} (see $output_dir/driver.log)"
+    return 1
+  fi
+
+  if [[ ! -f "$output_dir/$FRONTEND_CANCEL_RESULT_FILENAME" ]]; then
+    write_frontend_cancel_failed_result_json "$provider" "$frontend_workspace" "$output_dir" "$runtime_cmd" "$run_index"
+    log "frontend cancel smoke failed provider=$provider run=${run_index:-summary} reason=missing_result_json (see $output_dir/driver.log)"
+    return 1
+  fi
+
+  return 0
 }
 
 run_dod_precheck_make() {
@@ -388,17 +684,17 @@ classify_run_failure() {
     run_count="$(awk 'NF { count++ } END { print count+0 }' "$run_results_path")"
   fi
 
+  if [[ "$run_class" == "none" ]]; then
+    if [[ "$failure_reason" == "runtime_timeout" || "$termination_signal" == "timeout" ]]; then
+      run_class="runtime_timeout"
+    fi
+  fi
+
   if [[ "$run_class" == "none" ]] && contains_in_files "runner_unavailable" "${classify_log_paths[@]}"; then
     run_class="runner_unavailable"
   fi
   if [[ "$run_class" == "none" ]] && contains_in_files "runner_parse_failed" "${classify_log_paths[@]}"; then
     run_class="runtime_parse"
-  fi
-
-  if [[ "$run_class" == "none" ]]; then
-    if [[ "$failure_reason" == "runtime_timeout" || "$termination_signal" == "timeout" ]]; then
-      run_class="runtime_timeout"
-    fi
   fi
 
   if [[ "$run_class" == "none" ]]; then
@@ -640,10 +936,24 @@ if [[ "$BATCH_SKIP_PRECHECK" != "0" && "$BATCH_SKIP_PRECHECK" != "1" ]]; then
   die "BATCH_SKIP_PRECHECK must be 0 or 1, got '$BATCH_SKIP_PRECHECK'"
 fi
 case "$BATCH_FRONTEND_MODE" in
-  auto|always|never)
+  auto|always|never|per_run)
     ;;
   *)
-    die "BATCH_FRONTEND_MODE must be auto|always|never (got '$BATCH_FRONTEND_MODE')"
+    die "BATCH_FRONTEND_MODE must be auto|always|never|per_run (got '$BATCH_FRONTEND_MODE')"
+    ;;
+esac
+case "$BATCH_FRONTEND_CANCEL_MODE" in
+  once_per_provider|per_run|never)
+    ;;
+  *)
+    die "BATCH_FRONTEND_CANCEL_MODE must be once_per_provider|per_run|never (got '$BATCH_FRONTEND_CANCEL_MODE')"
+    ;;
+esac
+case "$UI_E2E_HEADED" in
+  0|1)
+    ;;
+  *)
+    die "UI_E2E_HEADED must be 0 or 1, got '$UI_E2E_HEADED'"
     ;;
 esac
 
@@ -727,7 +1037,7 @@ log "target repos input: file=$RESOLVED_TARGET_REPOS_FILE profile_id=${PROFILE_I
 log "preflight versions: claude='$CLAUDE_VERSION' qwen='$QWEN_VERSION'"
 acp_log_preflight_timeout log "$ACP_APPLY_TIMEOUTS_VIA_API" "$TIMEOUT_PROFILE_LINE"
 acp_log_preflight_execution log "${SWEEP_ID:-baseline}" "$EXECUTION_PROFILE_LINE"
-log "batch shard selection: providers=$SELECTED_PROVIDERS_CSV runs=$SELECTED_RUN_INDEXES_CSV skip_precheck=$BATCH_SKIP_PRECHECK frontend_mode=$BATCH_FRONTEND_MODE"
+log "batch shard selection: providers=$SELECTED_PROVIDERS_CSV runs=$SELECTED_RUN_INDEXES_CSV skip_precheck=$BATCH_SKIP_PRECHECK frontend_mode=$BATCH_FRONTEND_MODE frontend_cancel_mode=$BATCH_FRONTEND_CANCEL_MODE headed=$UI_E2E_HEADED"
 if [[ "$BATCH_SKIP_PRECHECK" == "1" ]]; then
   log "skipping DoD/UI precheck (BATCH_SKIP_PRECHECK=1)"
 else
@@ -790,8 +1100,32 @@ done
 
 frontend_failures=0
 for provider in "${SELECTED_PROVIDERS[@]}"; do
-  if ! should_run_frontend_for_selection; then
-    output_dir="$BATCH_ROOT/frontend/$provider"
+  if should_run_frontend_once; then
+    resolved_frontend_run="$(resolve_frontend_live_backend_run "$provider")"
+    backend_run_dir="${resolved_frontend_run%%$'\t'*}"
+    frontend_run_index="${resolved_frontend_run#*$'\t'}"
+    output_dir="$(frontend_live_output_dir "$provider")"
+    if ! run_frontend_live_e2e "$provider" "$backend_run_dir" "$output_dir" "$frontend_run_index"; then
+      frontend_failures=$((frontend_failures + 1))
+    fi
+    continue
+  fi
+
+  if [[ "$BATCH_FRONTEND_MODE" == "per_run" ]]; then
+    for i in "${SELECTED_RUN_INDEXES[@]}"; do
+      if ! should_run_frontend_for_run "$i"; then
+        continue
+      fi
+      output_dir="$(frontend_live_output_dir "$provider" "$i")"
+      if ! run_frontend_live_e2e "$provider" "$BATCH_ROOT/$provider/run${i}" "$output_dir" "$i"; then
+        frontend_failures=$((frontend_failures + 1))
+      fi
+    done
+    continue
+  fi
+
+  if should_write_frontend_skip_result; then
+    output_dir="$(frontend_live_output_dir "$provider")"
     mkdir -p "$output_dir"
     runtime_cmd="$(runtime_cmd_for_provider "$provider")"
     write_frontend_status_json \
@@ -806,83 +1140,46 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
     log "frontend live e2e skipped provider=$provider mode=$BATCH_FRONTEND_MODE runs=$SELECTED_RUN_INDEXES_CSV"
     continue
   fi
-
-  backend_run_dir="$BATCH_ROOT/$provider/run1"
-  workspace="$backend_run_dir/arch-workspace"
-  output_dir="$BATCH_ROOT/frontend/$provider"
-  frontend_workspace="$output_dir/frontend-workspace"
-  run_results_path="$backend_run_dir/run-results.tsv"
-  refresh_run_id=""
-  snapshot_reports=""
-  mkdir -p "$output_dir"
-  if [[ -f "$run_results_path" ]]; then
-    refresh_run_id="$(awk -F'\t' '$2=="headless" && $4=="refresh" {print $5}' "$run_results_path" | tail -n1)"
-  fi
-  if [[ -n "$refresh_run_id" ]]; then
-    snapshot_reports="$backend_run_dir/snapshots/$refresh_run_id/reports"
-  fi
-
-  if [[ ! -d "$workspace" ]]; then
-    frontend_failures=$((frontend_failures + 1))
-    write_frontend_status_json \
-      "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME" \
-      "$provider" \
-      "init-inspect" \
-      "failed" \
-      "$ACP_FRONTEND_REASON_BACKEND_WORKSPACE_MISSING" \
-      "$workspace" \
-      "$output_dir" \
-      "${ACP_CLAUDE_CMD_BIN}/${ACP_QWEN_CMD_BIN}"
-    log "frontend e2e failed provider=$provider reason=$ACP_FRONTEND_REASON_BACKEND_WORKSPACE_MISSING (workspace=$workspace)"
-    continue
-  fi
-
-  if [[ -z "$refresh_run_id" || ! -d "$snapshot_reports" ]]; then
-    frontend_failures=$((frontend_failures + 1))
-    write_frontend_status_json \
-      "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME" \
-      "$provider" \
-      "init-inspect" \
-      "failed" \
-      "$ACP_FRONTEND_REASON_SNAPSHOT_REPORTS_MISSING" \
-      "$snapshot_reports" \
-      "$output_dir" \
-      "${ACP_CLAUDE_CMD_BIN}/${ACP_QWEN_CMD_BIN}"
-    log "frontend e2e failed provider=$provider reason=$ACP_FRONTEND_REASON_SNAPSHOT_REPORTS_MISSING refresh_run_id=${refresh_run_id:-unknown} snapshot_reports=${snapshot_reports:-unset}"
-    continue
-  fi
-
-  rm -rf "$frontend_workspace"
-  cp -a "$workspace" "$frontend_workspace"
-  rm -rf "$frontend_workspace/reports"
-  cp -a "$snapshot_reports" "$frontend_workspace/reports"
-
-  log "frontend live e2e provider=$provider workspace=$frontend_workspace artifact_source=snapshot refresh_run_id=${refresh_run_id:-unknown}"
-  if ! (
-    cd "$PROVENARCH_ROOT"
-    acp_build_timeout_env_assignments
-    acp_build_execution_env_assignments
-    env \
-      "${ACP_TIMEOUT_ENV_ASSIGNMENTS[@]}" \
-      "${ACP_EXECUTION_ENV_ASSIGNMENTS[@]}" \
-      "WORKSPACE=$frontend_workspace" \
-      "RUNTIME_PROVIDER=$provider" \
-      "OUTPUT_DIR=$output_dir" \
-      "UI_E2E_EXPECTED_REPO_COUNT=$EXPECTED_REPO_COUNT_RESOLVED" \
-      "ACP_CLAUDE_CMD=$ACP_CLAUDE_CMD_BIN" \
-      "ACP_QWEN_CMD=$ACP_QWEN_CMD_BIN" \
-      ./scripts/frontend-live-e2e.sh
-  ) >"$output_dir/driver.log" 2>&1; then
-    frontend_failures=$((frontend_failures + 1))
-    log "frontend e2e failed provider=$provider (see $output_dir/driver.log)"
-  fi
 done
 
 for provider in "${SELECTED_PROVIDERS[@]}"; do
-  cancel_output_dir="$BATCH_ROOT/frontend-cancel/$provider"
-  mkdir -p "$cancel_output_dir"
   runtime_cmd="$(runtime_cmd_for_provider "$provider")"
-  if ! should_run_frontend_for_selection; then
+  if should_run_frontend_cancel_once; then
+    cancel_output_dir="$(frontend_cancel_output_dir "$provider")"
+    resolved_cancel_workspace="$(resolve_frontend_cancel_workspace "$provider")"
+    frontend_workspace="${resolved_cancel_workspace%%$'\t'*}"
+    cancel_run_index="${resolved_cancel_workspace#*$'\t'}"
+    cancel_result=0
+    run_frontend_cancel_e2e "$provider" "$frontend_workspace" "$cancel_output_dir" "$cancel_run_index" || cancel_result=$?
+    if [[ "$cancel_result" == "1" ]]; then
+      FRONTEND_CANCEL_FAILURES=$((FRONTEND_CANCEL_FAILURES + 1))
+    elif [[ "$cancel_result" == "2" ]]; then
+      FRONTEND_CANCEL_SKIPPED=$((FRONTEND_CANCEL_SKIPPED + 1))
+    fi
+    continue
+  fi
+
+  if [[ "$BATCH_FRONTEND_CANCEL_MODE" == "per_run" ]]; then
+    for i in "${SELECTED_RUN_INDEXES[@]}"; do
+      if ! should_run_frontend_cancel_for_run "$i"; then
+        continue
+      fi
+      cancel_output_dir="$(frontend_cancel_output_dir "$provider" "$i")"
+      frontend_workspace="$BATCH_ROOT/frontend/$provider/run${i}/frontend-workspace"
+      cancel_result=0
+      run_frontend_cancel_e2e "$provider" "$frontend_workspace" "$cancel_output_dir" "$i" || cancel_result=$?
+      if [[ "$cancel_result" == "1" ]]; then
+        FRONTEND_CANCEL_FAILURES=$((FRONTEND_CANCEL_FAILURES + 1))
+      elif [[ "$cancel_result" == "2" ]]; then
+        FRONTEND_CANCEL_SKIPPED=$((FRONTEND_CANCEL_SKIPPED + 1))
+      fi
+    done
+    continue
+  fi
+
+  if [[ "$BATCH_FRONTEND_CANCEL_MODE" == "never" ]]; then
+    cancel_output_dir="$(frontend_cancel_output_dir "$provider")"
+    mkdir -p "$cancel_output_dir"
     FRONTEND_CANCEL_SKIPPED=$((FRONTEND_CANCEL_SKIPPED + 1))
     write_frontend_status_json \
       "$cancel_output_dir/$FRONTEND_CANCEL_RESULT_FILENAME" \
@@ -893,58 +1190,7 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
       "$BATCH_ROOT/frontend/$provider/frontend-workspace" \
       "$cancel_output_dir" \
       "$runtime_cmd"
-    log "frontend cancel smoke skipped provider=$provider mode=$BATCH_FRONTEND_MODE runs=$SELECTED_RUN_INDEXES_CSV"
-    continue
-  fi
-
-  frontend_workspace="$BATCH_ROOT/frontend/$provider/frontend-workspace"
-
-  if [[ ! -d "$frontend_workspace" ]]; then
-    FRONTEND_CANCEL_SKIPPED=$((FRONTEND_CANCEL_SKIPPED + 1))
-    write_frontend_status_json \
-      "$cancel_output_dir/$FRONTEND_CANCEL_RESULT_FILENAME" \
-      "$provider" \
-      "cancel-refresh" \
-      "skipped" \
-      "$ACP_FRONTEND_REASON_FRONTEND_WORKSPACE_MISSING" \
-      "$frontend_workspace" \
-      "$cancel_output_dir" \
-      "$runtime_cmd"
-    log "frontend cancel smoke skipped provider=$provider reason=$ACP_FRONTEND_REASON_FRONTEND_WORKSPACE_MISSING"
-    continue
-  fi
-
-  log "frontend cancel smoke provider=$provider workspace=$frontend_workspace"
-  if ! (
-    cd "$PROVENARCH_ROOT"
-    acp_build_timeout_env_assignments
-    acp_build_execution_env_assignments
-    env \
-      "${ACP_TIMEOUT_ENV_ASSIGNMENTS[@]}" \
-      "${ACP_EXECUTION_ENV_ASSIGNMENTS[@]}" \
-      "WORKSPACE=$frontend_workspace" \
-      "RUNTIME_PROVIDER=$provider" \
-      "OUTPUT_DIR=$cancel_output_dir" \
-      "UI_E2E_SCENARIO=cancel-refresh" \
-      "UI_E2E_EXPECTED_REPO_COUNT=$EXPECTED_REPO_COUNT_RESOLVED" \
-      "ACP_CLAUDE_CMD=$ACP_CLAUDE_CMD_BIN" \
-      "ACP_QWEN_CMD=$ACP_QWEN_CMD_BIN" \
-      "FRONTEND_RESULT_FILENAME=$FRONTEND_CANCEL_RESULT_FILENAME" \
-      ./scripts/frontend-live-e2e.sh
-  ) >"$cancel_output_dir/driver.log" 2>&1; then
-    FRONTEND_CANCEL_FAILURES=$((FRONTEND_CANCEL_FAILURES + 1))
-    if [[ ! -f "$cancel_output_dir/$FRONTEND_CANCEL_RESULT_FILENAME" ]]; then
-      write_frontend_cancel_failed_result_json "$provider" "$frontend_workspace" "$cancel_output_dir" "$runtime_cmd"
-    fi
-    log "frontend cancel smoke failed provider=$provider (see $cancel_output_dir/driver.log)"
-    continue
-  fi
-
-  if [[ ! -f "$cancel_output_dir/$FRONTEND_CANCEL_RESULT_FILENAME" ]]; then
-    FRONTEND_CANCEL_FAILURES=$((FRONTEND_CANCEL_FAILURES + 1))
-    write_frontend_cancel_failed_result_json "$provider" "$frontend_workspace" "$cancel_output_dir" "$runtime_cmd"
-    log "frontend cancel smoke failed provider=$provider reason=missing_result_json (see $cancel_output_dir/driver.log)"
-    continue
+    log "frontend cancel smoke skipped provider=$provider mode=$BATCH_FRONTEND_CANCEL_MODE runs=$SELECTED_RUN_INDEXES_CSV"
   fi
 done
 

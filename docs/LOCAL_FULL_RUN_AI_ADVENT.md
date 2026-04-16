@@ -80,7 +80,6 @@ Batch/Frontend scripts:
     - `ACP_MAX_PARALLEL_TASKS`
     - `ACP_FAILURE_POLICY`
     - `ACP_SHARD_DISCOVERY_MODE`
-    - `ACP_REPO_SELECTION`
   - `E2E_TMP_ROOT` (default `/tmp/provenarch-test_arch_project`)
   - `BATCH_ROOT` (default `${E2E_TMP_ROOT}/runs/${BATCH_ID}`)
   - `REPORTS_ROOT` (default `${E2E_TMP_ROOT}/reports`)
@@ -90,14 +89,14 @@ Batch/Frontend scripts:
     - `BATCH_PROVIDER_FILTER` (`all` или CSV `qwen-code,claude-code`)
     - `BATCH_RUN_SELECTION` (`all`, CSV `1,3,5` или диапазоны `1-3,5`)
     - `BATCH_SKIP_PRECHECK` (`0|1`; default `0`)
-    - `BATCH_FRONTEND_MODE` (`auto|always|never|per_run`; default `auto`)
+    - `BATCH_FRONTEND_MODE` (`auto|always|never|per_run`; default `auto`; `auto` skip если `run1` не выбран, `always` использует первый выбранный backend run)
     - `BATCH_FRONTEND_CANCEL_MODE` (`once_per_provider|per_run|never`; default `once_per_provider`)
     - `UI_E2E_HEADED` (`0|1`; default `0`)
 - `scripts/full-run-batch-matrix.sh`
   - `E2E_MATRIX_FILE` (required; YAML `profiles[]`, optional `sweeps[]`)
   - обязательные профили: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
   - если `sweeps[]` отсутствует -> implicit `baseline` sweep
-  - release-ready sweeps: `baseline`, `scale-backend`
+  - release-ready sweeps: `baseline`, `parallel-default`
   - `repos_file` в matrix-профилях: относительные пути резолвятся от директории `E2E_MATRIX_FILE`
   - `MATRIX_ID` (default `matrix-<UTC timestamp>`)
   - `MATRIX_ROOT` (default `${E2E_TMP_ROOT}/matrix/${MATRIX_ID}`)
@@ -152,10 +151,6 @@ E2E_MATRIX_FILE=./examples/e2e-matrix.release-wave1.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
 ACP_APPLY_TIMEOUTS_VIA_API=1 \
-BATCH_FRONTEND_MODE=per_run \
-BATCH_FRONTEND_CANCEL_MODE=once_per_provider \
-UI_E2E_HEADED=1 \
-DOCUMENTATION_AUDIT_MANUAL_STATUS=passed \
 ./scripts/full-run-batch-matrix.sh
 
 # Вариант 7.2: release wave 2 (после wave1)
@@ -164,10 +159,6 @@ E2E_MATRIX_FILE=./examples/e2e-matrix.release-wave2.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
 ACP_APPLY_TIMEOUTS_VIA_API=1 \
-BATCH_FRONTEND_MODE=per_run \
-BATCH_FRONTEND_CANCEL_MODE=once_per_provider \
-UI_E2E_HEADED=1 \
-DOCUMENTATION_AUDIT_MANUAL_STATUS=passed \
 ./scripts/full-run-batch-matrix.sh
 
 # Вариант 8: параллельные shard-runs (по провайдерам)
@@ -216,7 +207,6 @@ Script всегда формирует:
 - `/tmp/provenarch-test_arch_project/reports/frontend_e2e_matrix_<batch-id>.md`
 - `/tmp/provenarch-test_arch_project/reports/frontend_cancel_e2e_matrix_<batch-id>.md`
 - `/tmp/provenarch-test_arch_project/reports/quality_report_<batch-id>.md`
-- `/tmp/provenarch-test_arch_project/reports/documentation_audit_<batch-id>.md`
 - `/tmp/provenarch-test_arch_project/reports/profile_matrix_<matrix-id>.md`
 - `/tmp/provenarch-test_arch_project/reports/profile_matrix_<matrix-id>.tsv`
 - `/tmp/provenarch-test_arch_project/reports/release_verdict_<matrix-id>.md`
@@ -227,10 +217,9 @@ Batch evaluator source-of-truth:
 - если snapshot недоступен, evaluator фиксирует issue `reliability:snapshot-missing` (без fallback к `arch-workspace/reports`);
 - frontend live e2e запускается на отдельной копии workspace (`frontend-workspace`) и не влияет на backend quality content score.
 - frontend/cancel matrix формируются в run-level формате (`provider + run_index`), strict matrix gate блокирует любой init run-status != `passed`.
-- `documentation_audit_<batch-id>.md` обязателен для strict verdict (`auto_status=passed` и `manual_status=passed`).
 - для multi-profile (`EXPECTED_REPO_COUNT >= 2`) batch hard-fail включает `analysis:cross-repo-missing`.
 - backend run-matrix дополнительно классифицирует failure classes: `runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_signal_terminated`, `infra_incomplete_cycle`, `quality_gates_failed`, `summary_missing`, `precheck_failed`.
-- runtime flow checks в evaluator: `runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:repo-selection`, `runtime:execution-semantics`, `runtime_flow_failed`.
+- runtime flow checks в evaluator: `runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:execution-semantics`, `runtime_flow_failed`.
 
 При `runner_parse_failed` raw stdout/stderr сохраняются в:
 - `WORKSPACE/reports/taskruns/raw/*-stdout.log`

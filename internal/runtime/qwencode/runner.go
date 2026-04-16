@@ -128,9 +128,8 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 
 func buildDefaultQwenArgs(task acpruntime.Task, prompt string) []string {
 	args := []string{"--output-format", "json", "--yolo", "--channel", "CI"}
-	workspace := strings.TrimSpace(task.Workspace)
-	if workspace != "" {
-		args = append(args, "--include-directories", workspace)
+	for _, dir := range acpruntime.ResolveHeadlessIncludeDirectories(task) {
+		args = append(args, "--include-directories", dir)
 	}
 	args = append(args, "--prompt", prompt)
 	return args
@@ -387,6 +386,13 @@ Task payload JSON:
 		pathScopesJSON = string(rawPathScopes)
 	}
 	stepPolicy := buildStepSpecificPolicy(task.StepID)
+	repositoryEvidencePolicy := strings.Join([]string{
+		`REPOSITORY EVIDENCE RULES:`,
+		`- ACP workspace scaffold (workspace.yaml, charter/, model/, reports/) is support context, not the primary source tree.`,
+		`- Prefer evidence from repository files under meta.repo_scopes/meta.path_scopes when those files are available.`,
+		`- meta.path_scopes may contain directories, files, or a mixed disjoint partition; treat every listed scope as in-bounds evidence for this task.`,
+		`- Use ACP-generated workspace artifacts as evidence only for ACP runtime/report state, not as a substitute for repository analysis.`,
+	}, "\n")
 	retryHint := ""
 	if retry {
 		retryHint = strings.Join([]string{
@@ -420,6 +426,7 @@ STRICT CONTRACT (must pass):
 - Do not claim workspace is empty/minimal unless provenance evidence includes concrete file paths proving it.
 %s
 %s
+%s
 
 Set meta fields exactly:
 - meta.task_id = %q
@@ -437,7 +444,7 @@ Schema-valid template for this task (copy structure and field TYPES, then refine
 %s
 
 Serialized runtime task JSON (context only):
-%s`, acpruntime.ProviderQwenCode, stepPolicy, retryHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderQwenCode, task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, task.ShardID, primaryRepoScope, repoScopesJSON, pathScopesJSON, buildTaskResultTemplateJSON(task), strings.TrimSpace(string(taskPayload))))
+%s`, acpruntime.ProviderQwenCode, stepPolicy, repositoryEvidencePolicy, retryHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderQwenCode, task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, task.ShardID, primaryRepoScope, repoScopesJSON, pathScopesJSON, buildTaskResultTemplateJSON(task), strings.TrimSpace(string(taskPayload))))
 }
 
 func buildTaskResultTemplateJSON(task acpruntime.Task) string {

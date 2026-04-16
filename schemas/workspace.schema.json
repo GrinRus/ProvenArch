@@ -197,13 +197,6 @@
             "best_effort"
           ]
         },
-        "repo_selection": {
-          "type": "string",
-          "enum": [
-            "all",
-            "backend_only"
-          ]
-        },
         "shard_discovery": {
           "$ref": "#/$defs/runtimeShardDiscovery"
         }

@@ -161,9 +161,8 @@ func runNativeDirectClaude(ctx context.Context, command string, task acpruntime.
 
 func buildNativeDirectClaudeArgs(task acpruntime.Task, prompt string) []string {
 	args := []string{"--output-format", "json", "--permission-mode", "bypassPermissions"}
-	workspace := strings.TrimSpace(task.Workspace)
-	if workspace != "" {
-		args = append(args, "--add-dir", workspace)
+	for _, dir := range acpruntime.ResolveHeadlessIncludeDirectories(task) {
+		args = append(args, "--add-dir", dir)
 	}
 	args = append(args, "-p", prompt)
 	return args
@@ -438,6 +437,13 @@ Task payload JSON:
 		pathScopesJSON = string(rawPathScopes)
 	}
 	stepPolicy := buildStepSpecificDirectPolicy(task.StepID)
+	repositoryEvidencePolicy := strings.Join([]string{
+		`REPOSITORY EVIDENCE RULES:`,
+		`- ACP workspace scaffold (workspace.yaml, charter/, model/, reports/) is support context, not the primary source tree.`,
+		`- Prefer evidence from repository files under meta.repo_scopes/meta.path_scopes when those files are available.`,
+		`- meta.path_scopes may contain directories, files, or a mixed disjoint partition; treat every listed scope as in-bounds evidence for this task.`,
+		`- Use ACP-generated workspace artifacts as evidence only for ACP runtime/report state, not as a substitute for repository analysis.`,
+	}, "\n")
 	retryHint := ""
 	if retry {
 		retryHint = strings.Join([]string{
@@ -478,6 +484,7 @@ STRICT CONTRACT (must pass):
 %s
 %s
 %s
+%s
 
 Set meta fields exactly:
 - meta.task_id = %q
@@ -496,7 +503,7 @@ Schema-valid template for this task (copy structure and field TYPES, then refine
 %s
 
 Serialized runtime task JSON (context only):
-%s`, acpruntime.ProviderClaudeCode, stepPolicy, retryHint, nonEmptyResultHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderClaudeCode, "claude-cli", task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, task.ShardID, primaryRepoScope, repoScopesJSON, pathScopesJSON, buildDirectTaskResultTemplateJSON(task), strings.TrimSpace(string(taskPayload))))
+%s`, acpruntime.ProviderClaudeCode, stepPolicy, repositoryEvidencePolicy, retryHint, nonEmptyResultHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderClaudeCode, "claude-cli", task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, task.ShardID, primaryRepoScope, repoScopesJSON, pathScopesJSON, buildDirectTaskResultTemplateJSON(task), strings.TrimSpace(string(taskPayload))))
 }
 
 func buildDirectTaskResultTemplateJSON(task acpruntime.Task) string {

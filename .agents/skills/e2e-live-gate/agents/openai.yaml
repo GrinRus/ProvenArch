@@ -1,0 +1,4 @@
+interface:
+  display_name: "ACP Live E2E Gate"
+  short_description: "Trusted-machine release live E2E workflow"
+  default_prompt: "Use $acp-e2e-live-gate to run or audit the trusted-machine live E2E release gate for this repo."

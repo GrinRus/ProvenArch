@@ -12,14 +12,10 @@ import (
 )
 
 type ResolvedRepo struct {
-	Name            string `json:"name"`
-	Source          string `json:"source"`
-	Path            string `json:"path"`
-	Ref             string `json:"ref,omitempty"`
-	DeclaredRole    string `json:"declared_role,omitempty"`
-	EffectiveRole   string `json:"effective_role,omitempty"`
-	Included        *bool  `json:"included,omitempty"`
-	SelectionReason string `json:"selection_reason,omitempty"`
+	Name   string `json:"name"`
+	Source string `json:"source"`
+	Path   string `json:"path"`
+	Ref    string `json:"ref,omitempty"`
 }
 
 type ResolveOptions struct {

@@ -121,7 +121,6 @@ function createFetchMock(state: FetchMockState = {}) {
           max_parallel_tasks: 1,
           failure_policy: "best_effort",
           shard_discovery_mode: "heuristics",
-          repo_selection: "all",
         },
         source: { strategy: "workspace" },
       });

@@ -63,7 +63,6 @@ SYNTHETIC_EVIDENCE_PREFIXES = (
 RUNTIME_FLOW_ISSUE_TAGS = (
     "runtime:shard-artifacts",
     "runtime:shard-metadata",
-    "runtime:repo-selection",
     "runtime:execution-semantics",
 )
 
@@ -72,9 +71,9 @@ FRONTEND_LIVE_RESULT_FILENAME = "frontend-e2e-result.json"
 FRONTEND_CANCEL_RESULT_FILENAME = "frontend-cancel-result.json"
 FAILURE_CLASS_PRECEDENCE = {
     "summary_missing": 0,
-    "runner_unavailable": 1,
-    "runtime_parse": 2,
-    "runtime_timeout": 3,
+    "runtime_timeout": 1,
+    "runner_unavailable": 2,
+    "runtime_parse": 3,
     "infra_signal_terminated": 4,
     "quality_gates_failed": 5,
     "infra_incomplete_cycle": 6,
@@ -261,13 +260,11 @@ def normalize_execution_profile(preflight: dict[str, Any]) -> dict[str, Any] | N
         "max_parallel_tasks": 1,
         "failure_policy": "best_effort",
         "shard_discovery_mode": "heuristics",
-        "repo_selection": "all",
     }
     allowed = {
         "strategy": {"sequential", "parallel"},
         "failure_policy": {"fail_fast", "best_effort"},
         "shard_discovery_mode": {"heuristics", "semantic"},
-        "repo_selection": {"all", "backend_only"},
     }
 
     strategy_raw = str(effective.get("strategy", defaults["strategy"])).strip()
@@ -288,17 +285,12 @@ def normalize_execution_profile(preflight: dict[str, Any]) -> dict[str, Any] | N
     )
     shard_mode_raw = str(effective.get("shard_discovery_mode", defaults["shard_discovery_mode"])).strip()
     shard_mode = shard_mode_raw if shard_mode_raw in allowed["shard_discovery_mode"] else defaults["shard_discovery_mode"]
-    repo_selection_raw = str(effective.get("repo_selection", defaults["repo_selection"])).strip()
-    repo_selection = (
-        repo_selection_raw if repo_selection_raw in allowed["repo_selection"] else defaults["repo_selection"]
-    )
 
     return {
         "strategy": strategy,
         "max_parallel_tasks": max_parallel,
         "failure_policy": failure_policy,
         "shard_discovery_mode": shard_mode,
-        "repo_selection": repo_selection,
     }
 
 
@@ -770,48 +762,6 @@ def evaluate_runtime_flow_checks(
         if run_id in inspected_run_ids:
             continue
         inspected_run_ids.add(run_id)
-
-        repo_selection_path = taskruns_root / f"{run_id}-repo-selection-summary.json"
-        if not repo_selection_path.exists():
-            issues.add("runtime:repo-selection")
-            details.append(f"runtime/repo-selection -> missing {repo_selection_path}")
-            continue
-        try:
-            repo_selection_payload = read_json(repo_selection_path)
-        except Exception as exc:
-            issues.add("runtime:repo-selection")
-            details.append(f"runtime/repo-selection -> invalid json {repo_selection_path} ({exc})")
-            continue
-
-        mode = str(repo_selection_payload.get("repo_selection_mode", "")).strip()
-        if mode != expected_execution["repo_selection"]:
-            issues.add("runtime:repo-selection")
-            details.append(
-                f"runtime/repo-selection -> {repo_selection_path}: expected mode={expected_execution['repo_selection']} got={mode or '-'}"
-            )
-
-        decisions = repo_selection_payload.get("decisions")
-        if not isinstance(decisions, list) or not decisions:
-            issues.add("runtime:repo-selection")
-            details.append(f"runtime/repo-selection -> {repo_selection_path}: missing decisions[]")
-            continue
-
-        for item in decisions:
-            if not isinstance(item, dict):
-                continue
-            reason = str(item.get("reason", "")).strip()
-            if not reason:
-                issues.add("runtime:repo-selection")
-                details.append(
-                    f"runtime/repo-selection -> {repo_selection_path}: empty decision reason for repo={item.get('name', '-')}"
-                )
-            role = normalize_text(str(item.get("effective_role", "")).strip())
-            included = bool(item.get("included", False))
-            if expected_execution["repo_selection"] == "backend_only" and role == "frontend" and included:
-                issues.add("runtime:repo-selection")
-                details.append(
-                    f"runtime/repo-selection -> {repo_selection_path}: frontend repo included under backend_only (repo={item.get('name', '-')})"
-                )
 
     return issues, details
 
@@ -1371,12 +1321,12 @@ def evaluate_run(
     failure_class = "none"
     if summary_missing:
         failure_class = "summary_missing"
+    elif runtime_timeout:
+        failure_class = "runtime_timeout"
     elif runner_unavailable_hit:
         failure_class = "runner_unavailable"
     elif runtime_parse_hit:
         failure_class = "runtime_parse"
-    elif runtime_timeout:
-        failure_class = "runtime_timeout"
     elif infra_signal_terminated:
         failure_class = "infra_signal_terminated"
     elif quality_gates_failed:
@@ -1451,29 +1401,106 @@ def evaluate_run(
     )
 
 
-def load_frontend_results(batch_root: Path) -> dict[str, dict[str, Any]]:
-    data: dict[str, dict[str, Any]] = {}
-    for provider in FRONTEND_PROVIDERS:
-        path = batch_root / "frontend" / provider / FRONTEND_LIVE_RESULT_FILENAME
-        if path.exists():
-            payload = read_json(path)
-            payload["path"] = str(path)
-            data[provider] = payload
-    return data
+def frontend_result_run_index(payload: dict[str, Any], path: Path) -> int | None:
+    raw = payload.get("run_index")
+    if isinstance(raw, int) and raw > 0:
+        return raw
+    if isinstance(raw, str):
+        try:
+            parsed = int(raw.strip())
+        except Exception:
+            parsed = 0
+        if parsed > 0:
+            return parsed
+    for part in reversed(path.parts):
+        match = re.fullmatch(r"run([1-9][0-9]*)", part)
+        if match:
+            return int(match.group(1))
+    return None
 
 
-def load_frontend_cancel_results(batch_root: Path) -> dict[str, dict[str, Any]]:
-    data: dict[str, dict[str, Any]] = {}
+def load_frontend_result_entries(batch_root: Path, subdir: str, result_filename: str) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
     for provider in FRONTEND_PROVIDERS:
-        path = batch_root / "frontend-cancel" / provider / FRONTEND_CANCEL_RESULT_FILENAME
-        if path.exists():
+        provider_root = batch_root / subdir / provider
+        candidate_paths: list[Path] = []
+        root_result = provider_root / result_filename
+        if root_result.exists():
+            candidate_paths.append(root_result)
+        candidate_paths.extend(sorted(provider_root.glob(f"run*/{result_filename}")))
+
+        seen: set[str] = set()
+        for path in candidate_paths:
+            key = str(path.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
             payload = read_json(path)
             payload["path"] = str(path)
-            data[provider] = payload
-    return data
+            payload["runtime_provider"] = str(payload.get("runtime_provider", provider) or provider)
+            run_index = frontend_result_run_index(payload, path)
+            if run_index is not None:
+                payload["run_index"] = run_index
+            entries.append(payload)
+
+    entries.sort(
+        key=lambda item: (
+            str(item.get("runtime_provider", "")),
+            int(item.get("run_index", 0) or 0),
+            str(item.get("path", "")),
+        )
+    )
+    return entries
+
+
+def load_frontend_results(batch_root: Path) -> list[dict[str, Any]]:
+    return load_frontend_result_entries(batch_root, "frontend", FRONTEND_LIVE_RESULT_FILENAME)
+
+
+def load_frontend_cancel_results(batch_root: Path) -> list[dict[str, Any]]:
+    return load_frontend_result_entries(batch_root, "frontend-cancel", FRONTEND_CANCEL_RESULT_FILENAME)
+
+
+def frontend_entries_by_provider(entries: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {provider: [] for provider in FRONTEND_PROVIDERS}
+    for payload in entries:
+        provider = str(payload.get("runtime_provider", "")).strip()
+        if provider not in grouped:
+            grouped[provider] = []
+        grouped[provider].append(payload)
+    for provider in grouped:
+        grouped[provider].sort(key=lambda item: (int(item.get("run_index", 0) or 0), str(item.get("path", ""))))
+    return grouped
+
+
+def aggregate_frontend_status(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "missing"
+    statuses = [str(item.get("status", "missing")).strip() or "missing" for item in items]
+    if all(status == "passed" for status in statuses):
+        return "passed"
+    if all(status == "skipped" for status in statuses):
+        return "skipped"
+    if any(status == "failed" for status in statuses):
+        return "failed"
+    if any(status == "missing" for status in statuses):
+        return "missing"
+    return "mixed"
+
+
+def aggregate_frontend_reasons(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "-"
+    reasons = Counter(str(item.get("reason", "-")).strip() or "-" for item in items)
+    return ", ".join(f"{reason}={count}" for reason, count in sorted(reasons.items()))
+
+
+def ensure_parent_dir(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
 
 
 def write_run_matrix(path: Path, runs: list[RunEvaluation]) -> None:
+    ensure_parent_dir(path)
     lines = [
         "# Run Matrix",
         "",
@@ -1494,68 +1521,119 @@ def write_run_matrix(path: Path, runs: list[RunEvaluation]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def write_frontend_matrix(path: Path, frontend: dict[str, dict[str, Any]]) -> None:
+def write_frontend_matrix(path: Path, frontend: list[dict[str, Any]]) -> None:
+    ensure_parent_dir(path)
+    grouped = frontend_entries_by_provider(frontend)
     lines = [
         "# Frontend Live E2E Matrix",
         "",
-        "| provider | status | base_url | workspace | runtime_command | server_log | playwright_log |",
-        "|---|---|---|---|---|---|---|",
+        "## Summary",
+        "",
+        "| provider | status | runs | reasons |",
+        "|---|---|---:|---|",
     ]
     for provider in FRONTEND_PROVIDERS:
-        payload = frontend.get(provider)
-        if not payload:
-            lines.append(f"| {provider} | missing | - | - | - | - | - |")
-            continue
+        items = grouped.get(provider, [])
         lines.append(
-            "| "
-            f"{provider} | {payload.get('status', '-') } | {payload.get('base_url', '-')} | "
-            f"{payload.get('workspace', '-')} | {payload.get('runtime_command', '-')} | "
-            f"{payload.get('server_log', '-')} | {payload.get('playwright_log', '-')} |"
+            f"| {provider} | {aggregate_frontend_status(items)} | {len(items)} | {aggregate_frontend_reasons(items)} |"
         )
+
+    lines.extend(
+        [
+            "",
+            "## Run Details",
+            "",
+            "| provider | run | status | reason | base_url | workspace | runtime_command | server_log | playwright_log |",
+            "|---|---:|---|---|---|---|---|---|---|",
+        ]
+    )
+    for provider in FRONTEND_PROVIDERS:
+        items = grouped.get(provider, [])
+        if not items:
+            lines.append(f"| {provider} | 0 | missing | missing_result | - | - | - | - | - |")
+            continue
+        for payload in items:
+            run_index = int(payload.get("run_index", 0) or 0)
+            run_label = str(run_index) if run_index > 0 else "-"
+            lines.append(
+                "| "
+                f"{provider} | {run_label} | {payload.get('status', '-')} | {payload.get('reason', '-')} | "
+                f"{payload.get('base_url', '-')} | {payload.get('workspace', '-')} | {payload.get('runtime_command', '-')} | "
+                f"{payload.get('server_log', '-')} | {payload.get('playwright_log', '-')} |"
+            )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def write_frontend_cancel_matrix(path: Path, frontend_cancel: dict[str, dict[str, Any]]) -> None:
+def write_frontend_cancel_matrix(path: Path, frontend_cancel: list[dict[str, Any]]) -> None:
+    ensure_parent_dir(path)
+    grouped = frontend_entries_by_provider(frontend_cancel)
     lines = [
         "# Frontend Cancel E2E Matrix",
         "",
-        "| provider | status | reason | scenario | workspace | runtime_command | server_log | playwright_log |",
-        "|---|---|---|---|---|---|---|---|",
+        "## Summary",
+        "",
+        "| provider | status | runs | reasons |",
+        "|---|---|---:|---|",
     ]
     for provider in FRONTEND_PROVIDERS:
-        payload = frontend_cancel.get(provider)
-        if not payload:
-            lines.append(f"| {provider} | missing | missing_result | cancel-refresh | - | - | - | - |")
-            continue
+        items = grouped.get(provider, [])
         lines.append(
-            "| "
-            f"{provider} | {payload.get('status', '-') } | {payload.get('reason', '-') } | "
-            f"{payload.get('scenario', '-') } | {payload.get('workspace', '-') } | "
-            f"{payload.get('runtime_command', '-') } | {payload.get('server_log', '-') } | {payload.get('playwright_log', '-') } |"
+            f"| {provider} | {aggregate_frontend_status(items)} | {len(items)} | {aggregate_frontend_reasons(items)} |"
         )
+
+    lines.extend(
+        [
+            "",
+            "## Run Details",
+            "",
+            "| provider | run | status | reason | scenario | workspace | runtime_command | server_log | playwright_log |",
+            "|---|---:|---|---|---|---|---|---|---|",
+        ]
+    )
+    for provider in FRONTEND_PROVIDERS:
+        items = grouped.get(provider, [])
+        if not items:
+            lines.append(f"| {provider} | 0 | missing | missing_result | cancel-refresh | - | - | - | - |")
+            continue
+        for payload in items:
+            run_index = int(payload.get("run_index", 0) or 0)
+            run_label = str(run_index) if run_index > 0 else "-"
+            lines.append(
+                "| "
+                f"{provider} | {run_label} | {payload.get('status', '-')} | {payload.get('reason', '-')} | "
+                f"{payload.get('scenario', '-')} | {payload.get('workspace', '-')} | "
+                f"{payload.get('runtime_command', '-')} | {payload.get('server_log', '-')} | {payload.get('playwright_log', '-')} |"
+            )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def frontend_live_verdict_lines(frontend: dict[str, dict[str, Any]]) -> list[str]:
-    return [f"- {provider}: {(frontend.get(provider) or {}).get('status', 'missing')}" for provider in FRONTEND_PROVIDERS]
+def frontend_live_verdict_lines(frontend: list[dict[str, Any]]) -> list[str]:
+    grouped = frontend_entries_by_provider(frontend)
+    return [
+        f"- {provider}: {aggregate_frontend_status(grouped.get(provider, []))} (runs={len(grouped.get(provider, []))})"
+        for provider in FRONTEND_PROVIDERS
+    ]
 
 
-def frontend_cancel_verdict_lines(frontend_cancel: dict[str, dict[str, Any]]) -> list[str]:
+def frontend_cancel_verdict_lines(frontend_cancel: list[dict[str, Any]]) -> list[str]:
+    grouped = frontend_entries_by_provider(frontend_cancel)
     lines: list[str] = []
     for provider in FRONTEND_PROVIDERS:
-        payload = frontend_cancel.get(provider) or {}
-        status = payload.get("status", "missing")
-        reason = payload.get("reason", "-")
-        lines.append(f"- {provider}: {status} (reason: {reason})")
+        items = grouped.get(provider, [])
+        lines.append(
+            f"- {provider}: {aggregate_frontend_status(items)} (runs={len(items)}, reasons: {aggregate_frontend_reasons(items)})"
+        )
     return lines
 
 
 def provider_matrix_rows(
-    runs: list[RunEvaluation], frontend: dict[str, dict[str, Any]], frontend_cancel: dict[str, dict[str, Any]]
+    runs: list[RunEvaluation], frontend: list[dict[str, Any]], frontend_cancel: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
     grouped: dict[str, list[RunEvaluation]] = defaultdict(list)
     for run in runs:
         grouped[run.provider].append(run)
+    frontend_grouped = frontend_entries_by_provider(frontend)
+    frontend_cancel_grouped = frontend_entries_by_provider(frontend_cancel)
 
     rows: list[dict[str, Any]] = []
     for provider in FRONTEND_PROVIDERS:
@@ -1569,10 +1647,18 @@ def provider_matrix_rows(
             issues_counter.update(item.issues)
             error_codes_counter.update(item.error_codes)
             artifact_sources.update([item.artifact_source])
-        frontend_status = frontend.get(provider, {}).get("status")
-        frontend_pass_rate = 1.0 if frontend_status == "passed" else 0.0 if frontend_status else 0.0
-        frontend_cancel_status = frontend_cancel.get(provider, {}).get("status")
-        frontend_cancel_pass_rate = 1.0 if frontend_cancel_status == "passed" else 0.0 if frontend_cancel_status else 0.0
+        frontend_items = frontend_grouped.get(provider, [])
+        frontend_cancel_items = frontend_cancel_grouped.get(provider, [])
+        frontend_pass_rate = (
+            sum(1 for payload in frontend_items if str(payload.get("status", "")).strip() == "passed") / len(frontend_items)
+            if frontend_items
+            else 0.0
+        )
+        frontend_cancel_pass_rate = (
+            sum(1 for payload in frontend_cancel_items if str(payload.get("status", "")).strip() == "passed") / len(frontend_cancel_items)
+            if frontend_cancel_items
+            else 0.0
+        )
         rows.append(
             {
                 "provider": provider,
@@ -1605,6 +1691,8 @@ def provider_matrix_rows(
                 "artifact_sources": ", ".join(f"{name}={count}" for name, count in sorted(artifact_sources.items())) or "-",
                 "frontend_pass_rate": frontend_pass_rate,
                 "frontend_cancel_pass_rate": frontend_cancel_pass_rate,
+                "frontend_status": aggregate_frontend_status(frontend_items),
+                "frontend_cancel_status": aggregate_frontend_status(frontend_cancel_items),
             }
         )
     return rows
@@ -1614,10 +1702,11 @@ def write_quality_report(
     path: Path,
     batch_id: str,
     runs: list[RunEvaluation],
-    frontend: dict[str, dict[str, Any]],
-    frontend_cancel: dict[str, dict[str, Any]],
+    frontend: list[dict[str, Any]],
+    frontend_cancel: list[dict[str, Any]],
     preflight: dict[str, Any],
 ) -> None:
+    ensure_parent_dir(path)
     provider_rows = provider_matrix_rows(runs, frontend, frontend_cancel)
     hard_pass_all = sum(1 for run in runs if run.hard_pass)
     semantic_hard_fail_runs = sum(1 for run in runs if run.semantic_hard_fail)
@@ -1678,15 +1767,20 @@ def write_quality_report(
             "## Что Сделано Качественно",
         ]
     )
+    frontend_grouped = frontend_entries_by_provider(frontend)
+    frontend_cancel_grouped = frontend_entries_by_provider(frontend_cancel)
     if hard_pass_all == len(runs):
         lines.append("- Все `10/10` backend full-runs прошли hard-gates без падений pipeline и signal regression.")
     else:
         lines.append("- Часть run прошла hard-gates, но есть деградации стабильности (см. matrix).")
-    if all((frontend.get(provider) or {}).get("status") == "passed" for provider in FRONTEND_PROVIDERS):
+    if all(aggregate_frontend_status(frontend_grouped.get(provider, [])) == "passed" for provider in FRONTEND_PROVIDERS):
         lines.append("- Frontend live e2e прошёл для обоих провайдеров (`2/2`).")
     else:
         lines.append("- Frontend live e2e не полностью стабилен (`<2/2`).")
-    if all((frontend_cancel.get(provider) or {}).get("status") == "passed" for provider in FRONTEND_PROVIDERS):
+    if all(
+        aggregate_frontend_status(frontend_cancel_grouped.get(provider, [])) == "passed"
+        for provider in FRONTEND_PROVIDERS
+    ):
         lines.append("- Frontend cancel-refresh smoke прошёл для обоих провайдеров (`2/2`).")
     else:
         lines.append("- Frontend cancel-refresh smoke не полностью стабилен (`<2/2`) или был пропущен.")
@@ -1732,6 +1826,7 @@ def write_quality_report(
 
 
 def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
+    ensure_parent_dir(path)
     header = [
         "provider",
         "run",

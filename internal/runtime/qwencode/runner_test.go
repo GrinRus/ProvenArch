@@ -618,21 +618,37 @@ func TestBuildPromptRefreshStep1CollectIncludesNoWebSearchPolicy(t *testing.T) {
 	}
 }
 
-func TestBuildDefaultQwenArgsUsesPromptFlagWithIncludeDirectories(t *testing.T) {
+func TestBuildDefaultQwenArgsUsesPromptFlagWithWorkspaceAndRepoDirectories(t *testing.T) {
 	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	repoPath := filepath.Join(root, "payments-service")
+	for _, dir := range []string{workspace, repoPath} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	manifest := "version: 1\nrepos:\n  - name: payments-service\n    path: " + repoPath + "\n"
+	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write workspace manifest: %v", err)
+	}
 
 	task := acpruntime.Task{
 		TaskID:       "task-args",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
-		Workspace:    "/tmp/workspace",
+		Workspace:    workspace,
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	}
 	args := buildDefaultQwenArgs(task, "prompt-text")
 	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "--include-directories /tmp/workspace") {
-		t.Fatalf("expected include-directories in args, got %q", joined)
+	if !strings.Contains(joined, "--include-directories "+workspace) {
+		t.Fatalf("expected workspace include-directories in args, got %q", joined)
+	}
+	if !strings.Contains(joined, "--include-directories "+repoPath) {
+		t.Fatalf("expected repo include-directories in args, got %q", joined)
 	}
 	if !strings.Contains(joined, "--prompt prompt-text") {
 		t.Fatalf("expected --prompt usage in args, got %q", joined)

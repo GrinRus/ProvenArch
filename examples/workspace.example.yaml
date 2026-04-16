@@ -32,7 +32,5 @@ runtime:
       strategy: sequential
       max_parallel_tasks: 1
       failure_policy: best_effort
-      # all|backend_only (default all)
-      repo_selection: all
       shard_discovery:
         mode: heuristics

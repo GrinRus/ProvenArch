@@ -1545,7 +1545,7 @@ func TestRefreshStep1DomainCardIDMismatchAddsQuestionAndKeepsFilenameDomainID(t 
 	}
 }
 
-func TestRefreshBackendOnlySkipsFrontendDomainAndWritesRepoSelectionSummary(t *testing.T) {
+func TestRefreshIncludesAllDomainRepoScopesAndOmitsRepoSelectionSummaryArtifact(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -1566,11 +1566,6 @@ func TestRefreshBackendOnlySkipsFrontendDomainAndWritesRepoSelectionSummary(t *t
 			{Name: "payments-service", Path: backendA, Analysis: &workspace.RepoAnalysisConfig{Role: workspace.RepoRoleBackend}},
 			{Name: "users-service", Path: backendB, Analysis: &workspace.RepoAnalysisConfig{Role: workspace.RepoRoleBackend}},
 			{Name: "web-frontend", Path: frontend, Analysis: &workspace.RepoAnalysisConfig{Role: workspace.RepoRoleFrontend}},
-		},
-		Runtime: &workspace.RuntimeConfig{
-			Profile: &workspace.RuntimeProfileConfig{
-				Execution: &workspace.RuntimeExecutionConfig{RepoSelection: workspace.RepoSelectionBackendOnly},
-			},
 		},
 	}
 	manifestRaw, err := workspace.RenderManifest(manifest)
@@ -1612,101 +1607,67 @@ func TestRefreshBackendOnlySkipsFrontendDomainAndWritesRepoSelectionSummary(t *t
 	}
 
 	collectTasks := runner.tasksForStep("refresh.step1.collect")
-	if len(collectTasks) != 2 {
-		t.Fatalf("expected two backend domain collect tasks, got %d", len(collectTasks))
+	if len(collectTasks) != 3 {
+		t.Fatalf("expected three domain collect tasks, got %d", len(collectTasks))
 	}
+	foundFrontendCollect := false
 	for _, task := range collectTasks {
 		if containsString(task.RepoScopes, "web-frontend") {
-			t.Fatalf("frontend scope must be excluded from step1 collect tasks, got %+v", task.RepoScopes)
+			foundFrontendCollect = true
 		}
+	}
+	if !foundFrontendCollect {
+		t.Fatalf("expected frontend scope to remain included in step1 collect tasks")
 	}
 	step3Tasks := runner.tasksForStep("refresh.step3.findings")
 	if len(step3Tasks) == 0 {
 		t.Fatalf("expected step3 findings tasks")
 	}
+	foundFrontendFindings := false
 	for _, task := range step3Tasks {
 		if containsString(task.RepoScopes, "web-frontend") {
-			t.Fatalf("frontend scope must be excluded from step3 tasks, got %+v", task.RepoScopes)
+			foundFrontendFindings = true
 		}
+	}
+	if !foundFrontendFindings {
+		t.Fatalf("expected frontend scope to remain included in step3 tasks")
 	}
 
 	questionsReport, err := os.ReadFile(filepath.Join(ws.Path, "reports/coverage/open-questions.md"))
 	if err != nil {
 		t.Fatalf("read open questions report: %v", err)
 	}
-	if !strings.Contains(string(questionsReport), "q.domain.web.repo-scope-excluded-by-selection") {
-		t.Fatalf("expected repo-scope-excluded question for web domain, got %q", string(questionsReport))
-	}
-
-	summaryPath := filepath.Join(ws.Path, "reports", "taskruns", info.RunID+"-repo-selection-summary.json")
-	var summary struct {
-		RepoSelectionMode  string   `json:"repo_selection_mode"`
-		SelectedRepoScopes []string `json:"selected_repo_scopes"`
-		Decisions          []struct {
-			Name     string `json:"name"`
-			Included bool   `json:"included"`
-		} `json:"decisions"`
-	}
-	summaryBytes, err := os.ReadFile(summaryPath)
-	if err != nil {
-		t.Fatalf("read repo selection summary: %v", err)
-	}
-	if err := json.Unmarshal(summaryBytes, &summary); err != nil {
-		t.Fatalf("decode repo selection summary: %v", err)
-	}
-	if summary.RepoSelectionMode != workspace.RepoSelectionBackendOnly {
-		t.Fatalf("expected backend_only mode in repo selection summary, got %q", summary.RepoSelectionMode)
-	}
-	if containsString(summary.SelectedRepoScopes, "web-frontend") {
-		t.Fatalf("frontend scope must not be present in selected_repo_scopes, got %+v", summary.SelectedRepoScopes)
-	}
-	frontendDecisionFound := false
-	for _, decision := range summary.Decisions {
-		if decision.Name == "web-frontend" {
-			frontendDecisionFound = true
-			if decision.Included {
-				t.Fatalf("frontend decision must be excluded, got %+v", decision)
-			}
-		}
-	}
-	if !frontendDecisionFound {
-		t.Fatalf("expected web-frontend decision in repo selection summary, got %+v", summary.Decisions)
+	if strings.Contains(string(questionsReport), "repo-scope-excluded-by-selection") {
+		t.Fatalf("did not expect legacy repo-selection exclusion question, got %q", string(questionsReport))
 	}
 
 	repoSelectionArtifactPath := "reports/taskruns/" + info.RunID + "-repo-selection-summary.json"
-	foundArtifact := false
+	if _, err := os.Stat(filepath.Join(ws.Path, repoSelectionArtifactPath)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected repo selection summary artifact to be absent, stat err=%v", err)
+	}
 	for _, artifact := range artifacts {
 		if artifact.Path == repoSelectionArtifactPath {
-			foundArtifact = true
-			break
+			t.Fatalf("did not expect repo selection summary artifact %q in run artifacts", repoSelectionArtifactPath)
 		}
-	}
-	if !foundArtifact {
-		t.Fatalf("expected repo selection summary artifact %q in run artifacts", repoSelectionArtifactPath)
 	}
 }
 
-func TestRefreshBackendOnlyExcludedQuestionUsesDeclaredUnknownRepoScopeDetails(t *testing.T) {
+func TestRefreshUnknownDeclaredRepoScopeFallsBackToResolvedRepoScopeWithoutSelectionSkip(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	frontend := filepath.Join(root, "repos", "billing")
-	if err := os.MkdirAll(frontend, 0o755); err != nil {
-		t.Fatalf("create frontend repo path: %v", err)
+	repoPath := filepath.Join(root, "repos", "billing")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("create billing repo path: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(frontend, "README.md"), []byte("# billing\n"), 0o644); err != nil {
-		t.Fatalf("write frontend readme: %v", err)
+	if err := os.WriteFile(filepath.Join(repoPath, "README.md"), []byte("# billing\n"), 0o644); err != nil {
+		t.Fatalf("write billing readme: %v", err)
 	}
 
 	manifest := workspace.Manifest{
 		Version: 1,
 		Repos: []workspace.RepoSource{
-			{Name: "billing", Path: frontend, Analysis: &workspace.RepoAnalysisConfig{Role: workspace.RepoRoleFrontend}},
-		},
-		Runtime: &workspace.RuntimeConfig{
-			Profile: &workspace.RuntimeProfileConfig{
-				Execution: &workspace.RuntimeExecutionConfig{RepoSelection: workspace.RepoSelectionBackendOnly},
-			},
+			{Name: "billing", Path: repoPath, Analysis: &workspace.RepoAnalysisConfig{Role: workspace.RepoRoleFrontend}},
 		},
 	}
 	manifestRaw, err := workspace.RenderManifest(manifest)
@@ -1747,23 +1708,18 @@ func TestRefreshBackendOnlyExcludedQuestionUsesDeclaredUnknownRepoScopeDetails(t
 		t.Fatalf("read open questions report: %v", err)
 	}
 	text := string(questionsReport)
-	if !strings.Contains(text, "q.domain.billing.repo-scope-excluded-by-selection") {
-		t.Fatalf("expected excluded-by-selection question, got %q", text)
+	if strings.Contains(text, "repo-scope-excluded-by-selection") {
+		t.Fatalf("did not expect excluded-by-selection question, got %q", text)
 	}
-	if !strings.Contains(text, "declares unknown repo_scope \"unknown-scope\"; resolved fallback repo_scope \"billing\" is excluded") {
-		t.Fatalf("expected excluded question to mention declared unknown + fallback scope, got %q", text)
+	if !strings.Contains(text, "q.domain.billing.unknown-repo-scope") {
+		t.Fatalf("expected unknown-repo-scope question, got %q", text)
 	}
-}
-
-func TestIsRepoScopeSelectedDefaultsToAllWhenModeEmpty(t *testing.T) {
-	t.Parallel()
-
-	execution := pipelineExecution{
-		repoSelectionMode:  "",
-		selectedRepoScopes: nil,
+	collectTasks := runner.tasksForStep("refresh.step1.collect")
+	if len(collectTasks) != 1 {
+		t.Fatalf("expected one collect task, got %d", len(collectTasks))
 	}
-	if !execution.isRepoScopeSelected("orders-monolith") {
-		t.Fatalf("expected empty repoSelectionMode to default to all")
+	if !containsString(collectTasks[0].RepoScopes, "billing") {
+		t.Fatalf("expected fallback repo scope billing in collect task, got %+v", collectTasks[0].RepoScopes)
 	}
 }
 

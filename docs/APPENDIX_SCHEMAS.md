@@ -36,15 +36,14 @@
   - `max_parallel_tasks > 0`
   - `failure_policy: fail_fast|best_effort`
   - `shard_discovery.mode: heuristics|semantic`
-  - `repo_selection: all|backend_only`
 - precedence:
   - timeouts: `env > workspace.yaml(runtime.profile.timeouts) > defaults`
   - execution: `CLI > env > workspace.yaml(runtime.profile.execution) > defaults`
 
-`repo_selection` policy в MVP:
-- `all`: включаются все repos.
-- `backend_only`: исключаются только repos с `analysis.role=frontend`.
-- `analysis.role=unknown` остаётся включённым и даёт warning `workspace.repo.selection.role_unknown`.
+Sharding policy в MVP:
+- `heuristics` строит structural full-coverage partition repo без overlap в `path_scopes`.
+- `semantic` больше не меняет shard boundaries и остаётся metadata-only surface поверх того же shard-plan.
+- runtime execution всегда анализирует все repo scopes из workspace; frontend/backend filtering в execution contract отсутствует.
 
 ### Важное ограничение
 `workspace.yaml` не конфигурирует workspace layout beyond repo sources и imports path.

@@ -45,7 +45,7 @@ Layout `charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/` не �
 - `path` означает локально доступный checkout
 - `git_url` означает remote source, который ACP разрешает через локальный `git` context пользователя/runner
 - `ref` задаёт желаемую ветку/тег/sha, если repo source поддерживает checkout/fetch semantics
-- `analysis.role` используется runtime repo-selection policy для явного учёта frontend/backend контекста
+- `analysis.role` сохранён как legacy metadata (`backend|frontend|mixed|unknown`) и не влияет на runtime execution/sharding contract
 - для `path`-source ACP не делает checkout (non-mutating policy в пользовательском репозитории)
 - verify `ref` для `path`-source использует fallback-резолвинг: `<ref>` -> `origin/<ref>` -> `refs/remotes/origin/<ref>`
 - при fallback/расхождении с `HEAD` validator возвращает warnings (не блокирующие), а не изменяет checkout
@@ -99,22 +99,20 @@ Balanced defaults (если поле не задано и env override отсу�
 - `max_parallel_tasks`: integer `> 0`
 - `failure_policy`: `fail_fast|best_effort`
 - `shard_discovery.mode`: `heuristics|semantic`
-- `repo_selection`: `all|backend_only`
 
 Default values:
 - `strategy=sequential`
 - `max_parallel_tasks=1`
 - `failure_policy=best_effort`
 - `shard_discovery.mode=heuristics`
-- `repo_selection=all`
 
 Effective precedence:
 - `CLI > env > workspace.yaml > defaults`
 
-`repo_selection` поведение:
-- `all`: включаются все repos.
-- `backend_only`: исключаются только repos с `analysis.role=frontend`; `backend|mixed|unknown` остаются включёнными.
-- для `analysis.role=unknown` при `backend_only` validator добавляет warning `workspace.repo.selection.role_unknown`.
+`shard_discovery.mode` поведение:
+- `heuristics`: детерминированное structural sharding с полным покрытием repo и неперекрывающимися `path_scopes`.
+- `semantic`: compatibility mode; использует тот же shard-plan, но дополняет его graph/debug metadata и не меняет count/boundaries shard-ов.
+- runtime execution всегда использует все repo scopes из `workspace.yaml`; frontend/backend filtering не входит в execution contract этого slice.
 
 ## 6) Пример
 
@@ -148,7 +146,6 @@ runtime:
       strategy: parallel
       max_parallel_tasks: 4
       failure_policy: best_effort
-      repo_selection: backend_only
       shard_discovery:
         mode: heuristics
 ```
@@ -169,7 +166,6 @@ Manifest считается невалидным, если:
 - `runtime.profile.execution.strategy` не в `sequential|parallel`
 - `runtime.profile.execution.failure_policy` не в `fail_fast|best_effort`
 - `runtime.profile.execution.shard_discovery.mode` не в `heuristics|semantic`
-- `runtime.profile.execution.repo_selection` не в `all|backend_only`
 - manifest пытается использовать legacy path `runtime.timeouts` (breaking change, intentional)
 - manifest пытается конфигурировать workspace layout beyond supported fields
 

@@ -17,6 +17,7 @@ Codex читает `AGENTS.md` перед началом работы. Держ�
 ## Всегда делать
 - Читать: README.md, docs/ARCHITECTURE.md, schemas/taskresult.schema.json
 - Для pre-release live gate использовать `docs/RELEASE_LIVE_E2E_RUNBOOK.md` как source of truth
+- Для live E2E/release gate использовать skill `acp-e2e-live-gate`; детальный workflow держать в skill/runbook, а не в `AGENTS.md`
 - Для нетривиальной задачи: ExecPlan в docs/PLANS.md
 - Добавлять/обновлять тесты/фикстуры при изменении core поведения
 - Обновлять документацию при изменении поведения
@@ -27,8 +28,8 @@ Codex читает `AGENTS.md` перед началом работы. Держ�
 - Для каждого завершённого slice выполнять DoD:
   `make contracts`, `make test`, `make lint`, `make build`
 - Для live matrix harness запускать только `scripts/full-run-batch-matrix.sh` (без wrapper-скрипта)
-- Для release matrix использовать 4 профиля: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`; sweep baseline: `baseline`, `scale-backend`
-- Если `sweeps[]` отсутствует в `E2E_MATRIX_FILE`, считать implicit `baseline`
+- Canonical release sweeps: `baseline` и `parallel-default`
+- Для одного `profile_id` sweep'ы `baseline` и `parallel-default` должны давать одинаковый shard-plan
 - Release verdict брать только из `reports/release_verdict_<matrix-id>.json` (`PASS` -> ready, иначе blocked)
 - В release gate требовать strict zero-failure и оба provider в PATH: `qwen`, `claude`
 - При изменении `schemas/*` или `docs/spec/*` обязательно синхронизировать:
@@ -47,3 +48,4 @@ Codex читает `AGENTS.md` перед началом работы. Держ�
 - Не “выдумывать” форматы данных/модели
 - Не писать в пользовательские репозитории; писать только в workspace
 - Не добавлять wrapper-скрипт поверх matrix harness для release gate
+- Не редактировать canonical release matrices или curated `repos_file` только чтобы обойти ограничения текущей машины; в таком случае переносить live gate на подходящий trusted host

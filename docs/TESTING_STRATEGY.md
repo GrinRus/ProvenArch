@@ -218,15 +218,16 @@ Implemented additional jobs:
   - backend quality source-of-truth: только snapshot reports (`snapshots/<run_id>/reports/*`), при отсутствии snapshot фиксируется `reliability:snapshot-missing` (без workspace fallback)
   - semantic hard-fail checks в batch evaluator: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`
   - multi-profile hard-fail: `analysis:cross-repo-missing` при `expected_repo_count >= 2` и отсутствии cross-repo сигнала
-  - runtime-flow hard-fail checks: `runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:repo-selection`, `runtime:execution-semantics`, `runtime_flow_failed`
+  - runtime-flow hard-fail checks: `runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:execution-semantics`, `runtime_flow_failed`
   - hard-pass учитывает semantic hard-fail и snapshot source validity
   - run artifacts default: `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/*`
-  - reports: `run_matrix_<batch-id>.md/.tsv`, `frontend_e2e_matrix_<batch-id>.md`, `frontend_cancel_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md`, `documentation_audit_<batch-id>.md` (+ fields `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, runtime-flow checks, failure classes `runtime_parse/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing/precheck_failed`)
+  - reports: `run_matrix_<batch-id>.md/.tsv`, `frontend_e2e_matrix_<batch-id>.md`, `frontend_cancel_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md` (+ fields `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, runtime-flow checks, failure classes `runtime_parse/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing/precheck_failed`)
 - profile matrix regression (local official runbook, non-required CI):
   - `scripts/full-run-batch-matrix.sh`
   - `E2E_MATRIX_FILE` обязателен (`profiles[]`: `id`, `repos_file`, `expected_repo_count`, `source_kind`)
   - `sweeps[]` optional (если отсутствует -> implicit `baseline`)
-  - release-ready sweep set: `baseline` + `scale-backend`
+  - release-ready sweep set: `baseline` + `parallel-default`
+  - matrix invariant: для одного `profile_id` shard-plan должен совпадать между `baseline` и `parallel-default`
   - относительные `repos_file` пути резолвятся от директории `E2E_MATRIX_FILE`
   - официальные профили: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
   - для `source_kind=git_url` refs должны быть pinned
@@ -237,7 +238,7 @@ Implemented additional jobs:
   - release-mode guard (auto при `MATRIX_ID=release-*`) блокирует diagnostic timeout overrides; debug bypass только через `E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES=1`
   - обязательны оба провайдера (`qwen-code`, `claude-code`) и оба frontend сценария (`init-inspect-service-first`, `cancel-refresh`)
   - для release-mode matrix используется `BATCH_FRONTEND_MODE=per_run`, `BATCH_FRONTEND_CANCEL_MODE=once_per_provider`, `UI_E2E_HEADED=1`
-  - strict blockers включают любой non-passed run-level status в `frontend_e2e_matrix` и `documentation_audit_auto/manual_status != passed`
+  - strict blockers включают любой non-passed summary/run-level status в `frontend_e2e_matrix` и `frontend_cancel_e2e_matrix`
   - strict acceptance: только `PASS`, любое нарушение quality/failure-class критериев = `RELEASE BLOCKED`
 - optional frontend live smoke:
   - `scripts/frontend-live-e2e.sh` (local)
@@ -255,7 +256,7 @@ Implemented additional jobs:
     - `BATCH_PROVIDER_FILTER` (`all` или CSV `qwen-code,claude-code`)
     - `BATCH_RUN_SELECTION` (`all`, CSV `1,3,5` или диапазоны `1-3,5`)
     - `BATCH_SKIP_PRECHECK=1` для secondary shard'ов
-    - `BATCH_FRONTEND_MODE=auto|always|never|per_run` (default `auto`, auto-skip frontend если `run1` не выбран)
+    - `BATCH_FRONTEND_MODE=auto|always|never|per_run` (default `auto`; `auto` skip если `run1` не выбран, `always` использует первый выбранный backend run)
     - `BATCH_FRONTEND_CANCEL_MODE=once_per_provider|per_run|never` (default `once_per_provider`)
     - `UI_E2E_HEADED=0|1` (при `1` Playwright запускается с `--headed`)
     - параллельные shard-процессы должны использовать разные `BATCH_ID`

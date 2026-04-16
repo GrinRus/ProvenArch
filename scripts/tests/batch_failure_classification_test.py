@@ -353,6 +353,52 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertTrue(result.runtime_parse)
         self.assertTrue(result.infra_incomplete_cycle)
 
+    def test_python_report_prefers_runtime_timeout_over_runner_unavailable_when_timeout_signaled(self) -> None:
+        run_dir = self.root / "run-timeout-python"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: skipped",
+                    "- failure_reason: runtime_timeout",
+                    "- expected_runs: 4",
+                    "- completed_runs: 2",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 0",
+                    "- running_runs_detected: 1",
+                    "- termination_signal: timeout",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            '{"level":"error","error_code":"runner_unavailable","message":"runtime task timeout after 15s"}\n',
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "runtime_timeout",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("runtime_timeout", result.failure_class)
+        self.assertTrue(result.runtime_timeout)
+
     def test_shell_classifier_reads_taskrun_logs_and_returns_runtime_parse(self) -> None:
         script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
         prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
@@ -374,6 +420,61 @@ class BatchFailureClassificationTest(unittest.TestCase):
         fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
         self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
         self.assertEqual("runtime_parse", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+
+    def test_shell_classifier_prefers_runtime_timeout_over_runner_unavailable_logs(self) -> None:
+        run_dir = self.root / "run-timeout-precedence"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: skipped",
+                    "- failure_reason: runtime_timeout",
+                    "- expected_runs: 4",
+                    "- completed_runs: 2",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 0",
+                    "- running_runs_detected: 1",
+                    "- termination_signal: timeout",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "full-run.log",
+            "pipeline timed out after 180s; runner_unavailable observed in step output\n",
+        )
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            '{"level":"error","error_code":"runner_unavailable","message":"runtime task timeout after 15s"}\n',
+        )
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        classifications_tsv = self.root / "backend-run-classifications-timeout.tsv"
+        command = (
+            prelude
+            + "\n"
+            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
+            + f'classify_run_failure "qwen-code" "1" {shlex.quote(str(run_dir))} "1"\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("", completed.stdout.strip(), completed.stdout)
+        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
+        self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("runtime_timeout", fields[2], classifications_tsv.read_text(encoding="utf-8"))
 
     def test_python_report_treats_incomplete_reports_as_triage_only_not_empty_analysis(self) -> None:
         run_dir = self.root / "run-incomplete"
@@ -420,6 +521,179 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertNotIn("analysis:questions", result.issues)
         self.assertNotIn("analysis:findings", result.issues)
 
+    def test_shell_frontend_mode_helpers_support_per_run(self) -> None:
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        command = (
+            prelude
+            + "\n"
+            + "RUN_COUNT=5\n"
+            + "BATCH_RUN_SELECTION=2,4\n"
+            + "BATCH_FRONTEND_MODE=per_run\n"
+            + "BATCH_FRONTEND_CANCEL_MODE=per_run\n"
+            + "resolve_selected_run_indexes\n"
+            + 'if should_run_frontend_once; then echo "live_once=1"; else echo "live_once=0"; fi\n'
+            + 'if should_run_frontend_for_run 2; then echo "live_run2=1"; else echo "live_run2=0"; fi\n'
+            + 'if should_run_frontend_for_run 1; then echo "live_run1=1"; else echo "live_run1=0"; fi\n'
+            + 'if should_run_frontend_cancel_once; then echo "cancel_once=1"; else echo "cancel_once=0"; fi\n'
+            + 'if should_run_frontend_cancel_for_run 4; then echo "cancel_run4=1"; else echo "cancel_run4=0"; fi\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        observed = set(line.strip() for line in completed.stdout.splitlines() if line.strip())
+        self.assertSetEqual(
+            {"live_once=0", "live_run2=1", "live_run1=0", "cancel_once=0", "cancel_run4=1"},
+            observed,
+        )
+
+    def test_shell_frontend_mode_helpers_mark_auto_skip_when_run1_not_selected(self) -> None:
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        command = (
+            prelude
+            + "\n"
+            + "RUN_COUNT=5\n"
+            + "BATCH_RUN_SELECTION=2,4\n"
+            + "BATCH_FRONTEND_MODE=auto\n"
+            + "resolve_selected_run_indexes\n"
+            + 'if should_run_frontend_once; then echo "live_once=1"; else echo "live_once=0"; fi\n'
+            + 'if should_write_frontend_skip_result; then echo "live_skip=1"; else echo "live_skip=0"; fi\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        observed = set(line.strip() for line in completed.stdout.splitlines() if line.strip())
+        self.assertSetEqual({"live_once=0", "live_skip=1"}, observed)
+
+    def test_shell_frontend_once_uses_first_selected_run_for_always_mode(self) -> None:
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        command = (
+            prelude
+            + "\n"
+            + "RUN_COUNT=5\n"
+            + "BATCH_ROOT=/tmp/provenarch-batch\n"
+            + "BATCH_RUN_SELECTION=2,4\n"
+            + "BATCH_FRONTEND_MODE=always\n"
+            + "resolve_selected_run_indexes\n"
+            + 'printf "%s\\n" "$(resolve_frontend_live_backend_run qwen-code)"\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("/tmp/provenarch-batch/qwen-code/run2\t2", completed.stdout.strip())
+
+    def test_python_frontend_matrix_supports_per_run_results(self) -> None:
+        batch_root = self.root / "batch"
+        reports_root = self.root / "reports"
+        write_json(
+            batch_root / "frontend/qwen-code/run1/frontend-e2e-result.json",
+            {
+                "status": "passed",
+                "reason": "ok",
+                "runtime_provider": "qwen-code",
+                "workspace": "/tmp/qwen-run1",
+                "base_url": "http://127.0.0.1:18081",
+                "runtime_command": "qwen",
+            },
+        )
+        write_json(
+            batch_root / "frontend/qwen-code/run3/frontend-e2e-result.json",
+            {
+                "status": "failed",
+                "reason": "playwright_failed",
+                "runtime_provider": "qwen-code",
+                "workspace": "/tmp/qwen-run3",
+                "base_url": "http://127.0.0.1:18083",
+                "runtime_command": "qwen",
+            },
+        )
+        write_json(
+            batch_root / "frontend/claude-code/frontend-e2e-result.json",
+            {
+                "status": "passed",
+                "reason": "ok",
+                "runtime_provider": "claude-code",
+                "workspace": "/tmp/claude",
+                "base_url": "http://127.0.0.1:18082",
+                "runtime_command": "claude",
+            },
+        )
+
+        frontend = self.module.load_frontend_results(batch_root)
+        self.assertEqual(3, len(frontend))
+
+        matrix_path = reports_root / "frontend-matrix.md"
+        self.module.write_frontend_matrix(matrix_path, frontend)
+        matrix_text = matrix_path.read_text(encoding="utf-8")
+
+        self.assertIn("| qwen-code | failed | 2 |", matrix_text)
+        self.assertIn("| claude-code | passed | 1 |", matrix_text)
+        self.assertIn("| qwen-code | 1 | passed | ok |", matrix_text)
+        self.assertIn("| qwen-code | 3 | failed | playwright_failed |", matrix_text)
+
+    def test_python_frontend_cancel_matrix_supports_per_run_results(self) -> None:
+        batch_root = self.root / "batch-cancel"
+        reports_root = self.root / "reports-cancel"
+        write_json(
+            batch_root / "frontend-cancel/qwen-code/run2/frontend-cancel-result.json",
+            {
+                "status": "passed",
+                "reason": "ok",
+                "scenario": "cancel-refresh",
+                "runtime_provider": "qwen-code",
+                "workspace": "/tmp/qwen-cancel-run2",
+                "runtime_command": "qwen",
+            },
+        )
+        write_json(
+            batch_root / "frontend-cancel/qwen-code/run4/frontend-cancel-result.json",
+            {
+                "status": "skipped",
+                "reason": "frontend_workspace_missing",
+                "scenario": "cancel-refresh",
+                "runtime_provider": "qwen-code",
+                "workspace": "/tmp/qwen-cancel-run4",
+                "runtime_command": "qwen",
+            },
+        )
+        write_json(
+            batch_root / "frontend-cancel/claude-code/frontend-cancel-result.json",
+            {
+                "status": "failed",
+                "reason": "frontend_live_e2e_failed",
+                "scenario": "cancel-refresh",
+                "runtime_provider": "claude-code",
+                "workspace": "/tmp/claude-cancel",
+                "runtime_command": "claude",
+            },
+        )
+
+        frontend_cancel = self.module.load_frontend_cancel_results(batch_root)
+        self.assertEqual(3, len(frontend_cancel))
+
+        matrix_path = reports_root / "frontend-cancel-matrix.md"
+        self.module.write_frontend_cancel_matrix(matrix_path, frontend_cancel)
+        matrix_text = matrix_path.read_text(encoding="utf-8")
+
+        self.assertIn("| qwen-code | mixed | 2 | frontend_workspace_missing=1, ok=1 |", matrix_text)
+        self.assertIn("| claude-code | failed | 1 | frontend_live_e2e_failed=1 |", matrix_text)
+        self.assertIn("| qwen-code | 2 | passed | ok | cancel-refresh |", matrix_text)
+        self.assertIn("| qwen-code | 4 | skipped | frontend_workspace_missing | cancel-refresh |", matrix_text)
+        self.assertIn("| claude-code | - | failed | frontend_live_e2e_failed | cancel-refresh |", matrix_text)
 
 if __name__ == "__main__":
     unittest.main()

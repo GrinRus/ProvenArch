@@ -53,7 +53,6 @@ type RuntimeExecutionConfig struct {
 	MaxParallel    *int                         `yaml:"max_parallel_tasks,omitempty" json:"max_parallel_tasks,omitempty"`
 	FailurePolicy  string                       `yaml:"failure_policy,omitempty" json:"failure_policy,omitempty"`
 	ShardDiscovery *RuntimeShardDiscoveryConfig `yaml:"shard_discovery,omitempty" json:"shard_discovery,omitempty"`
-	RepoSelection  string                       `yaml:"repo_selection,omitempty" json:"repo_selection,omitempty"`
 }
 
 type RuntimeShardDiscoveryConfig struct {
@@ -78,11 +77,6 @@ const (
 	RepoRoleUnknown  = "unknown"
 )
 
-const (
-	RepoSelectionAll         = "all"
-	RepoSelectionBackendOnly = "backend_only"
-)
-
 func (cfg *RuntimeTimeoutsConfig) IsZero() bool {
 	if cfg == nil {
 		return true
@@ -104,8 +98,7 @@ func (cfg *RuntimeExecutionConfig) IsZero() bool {
 	return strings.TrimSpace(cfg.Strategy) == "" &&
 		cfg.MaxParallel == nil &&
 		strings.TrimSpace(cfg.FailurePolicy) == "" &&
-		(cfg.ShardDiscovery == nil || strings.TrimSpace(cfg.ShardDiscovery.Mode) == "") &&
-		strings.TrimSpace(cfg.RepoSelection) == ""
+		(cfg.ShardDiscovery == nil || strings.TrimSpace(cfg.ShardDiscovery.Mode) == "")
 }
 
 func (cfg *RuntimeProfileConfig) IsZero() bool {
@@ -185,7 +178,6 @@ func applyManifestDefaults(manifest *Manifest) {
 			if manifest.Runtime.Profile.Execution != nil {
 				manifest.Runtime.Profile.Execution.Strategy = strings.TrimSpace(manifest.Runtime.Profile.Execution.Strategy)
 				manifest.Runtime.Profile.Execution.FailurePolicy = strings.TrimSpace(manifest.Runtime.Profile.Execution.FailurePolicy)
-				manifest.Runtime.Profile.Execution.RepoSelection = strings.TrimSpace(strings.ToLower(manifest.Runtime.Profile.Execution.RepoSelection))
 				if manifest.Runtime.Profile.Execution.ShardDiscovery != nil {
 					manifest.Runtime.Profile.Execution.ShardDiscovery.Mode = strings.TrimSpace(manifest.Runtime.Profile.Execution.ShardDiscovery.Mode)
 				}
@@ -294,11 +286,6 @@ func validateManifest(manifest Manifest) error {
 				if mode != "" && mode != "heuristics" && mode != "semantic" {
 					problems = append(problems, "runtime.profile.execution.shard_discovery.mode must be one of: heuristics, semantic")
 				}
-			}
-			if repoSelection := strings.TrimSpace(strings.ToLower(execution.RepoSelection)); repoSelection != "" &&
-				repoSelection != RepoSelectionAll &&
-				repoSelection != RepoSelectionBackendOnly {
-				problems = append(problems, "runtime.profile.execution.repo_selection must be one of: all, backend_only")
 			}
 		}
 	}

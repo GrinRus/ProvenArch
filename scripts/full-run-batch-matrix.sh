@@ -24,6 +24,9 @@ ACP_QWEN_CMD_BIN="${ACP_QWEN_CMD_BIN:-qwen}"
 ACP_APPLY_TIMEOUTS_VIA_API="${ACP_APPLY_TIMEOUTS_VIA_API:-1}"
 E2E_MATRIX_RELEASE_MODE="${E2E_MATRIX_RELEASE_MODE:-auto}"
 E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES="${E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES:-0}"
+BATCH_FRONTEND_MODE="${BATCH_FRONTEND_MODE:-}"
+BATCH_FRONTEND_CANCEL_MODE="${BATCH_FRONTEND_CANCEL_MODE:-}"
+UI_E2E_HEADED="${UI_E2E_HEADED:-}"
 MATRIX_DRIVER_LOG="${MATRIX_DRIVER_LOG:-$MATRIX_ROOT/driver.log}"
 PROFILE_REPOS_FILE_RESOLVED=""
 PROFILE_SOURCE_KIND_EFFECTIVE=""
@@ -171,6 +174,17 @@ mkdir -p "$(dirname "$MATRIX_DRIVER_LOG")"
 
 RELEASE_MODE="$(normalize_release_mode "$E2E_MATRIX_RELEASE_MODE")"
 ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES="$(normalize_binary_flag "$E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES" "E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES")"
+if [[ "$RELEASE_MODE" == "1" ]]; then
+  if [[ -z "$BATCH_FRONTEND_MODE" ]]; then
+    BATCH_FRONTEND_MODE="per_run"
+  fi
+  if [[ -z "$BATCH_FRONTEND_CANCEL_MODE" ]]; then
+    BATCH_FRONTEND_CANCEL_MODE="once_per_provider"
+  fi
+  if [[ -z "$UI_E2E_HEADED" ]]; then
+    UI_E2E_HEADED="1"
+  fi
+fi
 
 DIAGNOSTIC_TIMEOUT_ENV_KEYS=("${ACP_TIMEOUT_ENV_KEYS[@]}")
 
@@ -191,6 +205,7 @@ fi
 if [[ "$RELEASE_MODE" == "1" && "$ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES" != "1" && "${#DIAGNOSTIC_TIMEOUT_OVERRIDES[@]}" -gt 0 ]]; then
   die "$(acp_release_guard_blocked_message)"
 fi
+log "release frontend defaults: frontend_mode=${BATCH_FRONTEND_MODE:-default} frontend_cancel_mode=${BATCH_FRONTEND_CANCEL_MODE:-default} headed=${UI_E2E_HEADED:-default}"
 
 COMBINATIONS_TSV="$MATRIX_ROOT/profile-sweep-combinations.tsv"
 RECORDS_JSONL="$MATRIX_ROOT/profile-runs.jsonl"
@@ -302,7 +317,6 @@ allowed = {
     "strategy": {"sequential", "parallel"},
     "failure_policy": {"fail_fast", "best_effort"},
     "shard_discovery_mode": {"heuristics", "semantic"},
-    "repo_selection": {"all", "backend_only"},
 }
 
 default_sweep = {
@@ -311,7 +325,6 @@ default_sweep = {
     "max_parallel_tasks": 1,
     "failure_policy": "best_effort",
     "shard_discovery_mode": "heuristics",
-    "repo_selection": "all",
 }
 
 sweep_rows: list[dict[str, object]] = []
@@ -359,13 +372,6 @@ else:
                 % (idx, ", ".join(sorted(allowed["shard_discovery_mode"])), shard_mode)
             )
 
-        repo_selection = str(item.get("repo_selection", default_sweep["repo_selection"]))
-        if repo_selection not in allowed["repo_selection"]:
-            raise SystemExit(
-                "sweeps[%d] repo_selection must be one of: %s; got: %s"
-                % (idx, ", ".join(sorted(allowed["repo_selection"])), repo_selection)
-            )
-
         sweep_rows.append(
             {
                 "id": sweep_id,
@@ -373,7 +379,6 @@ else:
                 "max_parallel_tasks": max_parallel_tasks,
                 "failure_policy": failure_policy,
                 "shard_discovery_mode": shard_mode,
-                "repo_selection": repo_selection,
             }
         )
 
@@ -392,7 +397,6 @@ for profile_id, repos_file, expected_count, source_kind in profile_rows:
                     str(sweep["max_parallel_tasks"]),
                     str(sweep["failure_policy"]),
                     str(sweep["shard_discovery_mode"]),
-                    str(sweep["repo_selection"]),
                 ]
             )
         )
@@ -401,12 +405,13 @@ out_path.parent.mkdir(parents=True, exist_ok=True)
 out_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
 PY
 
-while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sweep_id sweep_strategy sweep_max_parallel sweep_failure_policy sweep_shard_mode sweep_repo_selection; do
+while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sweep_id sweep_strategy sweep_max_parallel sweep_failure_policy sweep_shard_mode; do
   [[ -z "$profile_id" ]] && continue
 
   profile_slug="$(slugify "$profile_id")"
   sweep_slug="$(slugify "$sweep_id")"
   batch_id="${MATRIX_ID}-${profile_slug}-${sweep_slug}"
+  batch_root="$E2E_TMP_ROOT/runs/$batch_id"
   profile_base_root="$MATRIX_ROOT/profiles/$profile_slug"
   profile_root="$profile_base_root/$sweep_slug"
   profile_repos_meta_json="$profile_base_root/target-repos-meta.json"
@@ -431,12 +436,23 @@ while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sw
     ACP_MAX_PARALLEL_TASKS="$sweep_max_parallel"
     ACP_FAILURE_POLICY="$sweep_failure_policy"
     ACP_SHARD_DISCOVERY_MODE="$sweep_shard_mode"
-    ACP_REPO_SELECTION="$sweep_repo_selection"
     acp_build_execution_env_assignments
+    EXTRA_BATCH_ENV_ASSIGNMENTS=()
+    if [[ -n "$BATCH_FRONTEND_MODE" ]]; then
+      EXTRA_BATCH_ENV_ASSIGNMENTS+=("BATCH_FRONTEND_MODE=$BATCH_FRONTEND_MODE")
+    fi
+    if [[ -n "$BATCH_FRONTEND_CANCEL_MODE" ]]; then
+      EXTRA_BATCH_ENV_ASSIGNMENTS+=("BATCH_FRONTEND_CANCEL_MODE=$BATCH_FRONTEND_CANCEL_MODE")
+    fi
+    if [[ -n "$UI_E2E_HEADED" ]]; then
+      EXTRA_BATCH_ENV_ASSIGNMENTS+=("UI_E2E_HEADED=$UI_E2E_HEADED")
+    fi
     env \
       "${ACP_TIMEOUT_ENV_ASSIGNMENTS[@]}" \
       "${ACP_EXECUTION_ENV_ASSIGNMENTS[@]}" \
+      "${EXTRA_BATCH_ENV_ASSIGNMENTS[@]}" \
       "BATCH_ID=$batch_id" \
+      "BATCH_ROOT=$batch_root" \
       "RUN_COUNT=$RUN_COUNT" \
       "TARGET_REPOS_FILE=$PROFILE_META_CACHE_REPOS_FILE" \
       "PROFILE_ID=$profile_id" \
@@ -462,8 +478,8 @@ while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sw
 
   python3 - "$RECORDS_JSONL" \
     "$profile_id" "$profile_slug" "$batch_id" "$PROFILE_META_CACHE_SOURCE_KIND" "$PROFILE_META_CACHE_EXPECTED_REPO_COUNT" "$PROFILE_META_CACHE_REPOS_FILE" "$status" \
-    "$sweep_id" "$sweep_strategy" "$sweep_max_parallel" "$sweep_failure_policy" "$sweep_shard_mode" "$sweep_repo_selection" \
-    "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md" "$driver_log" <<'PY'
+    "$sweep_id" "$sweep_strategy" "$sweep_max_parallel" "$sweep_failure_policy" "$sweep_shard_mode" \
+    "$batch_root" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md" "$driver_log" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -483,8 +499,8 @@ payload = {
         "max_parallel_tasks": int(sys.argv[11]),
         "failure_policy": sys.argv[12],
         "shard_discovery_mode": sys.argv[13],
-        "repo_selection": sys.argv[14],
     },
+    "batch_root": sys.argv[14],
     "run_matrix_tsv": sys.argv[15],
     "run_matrix_md": sys.argv[16],
     "frontend_matrix_md": sys.argv[17],
@@ -631,6 +647,70 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
     return stats
 
 
+def normalize_scope_list(values: object) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    normalized = []
+    for value in values:
+        text = str(value).strip()
+        if text:
+            normalized.append(text)
+    return sorted(set(normalized))
+
+
+def collect_batch_shard_plan_signature(batch_root: Path) -> tuple[str | None, list[str]]:
+    if not batch_root.exists():
+        return None, [f"shard_plan_artifacts=missing_batch_root:{batch_root}"]
+
+    entries: list[dict[str, object]] = []
+    for plan_path in sorted(batch_root.rglob("*-shard-plan*.json")):
+        if not plan_path.is_file():
+            continue
+        try:
+            payload = json.loads(plan_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            return None, [f"shard_plan_artifacts=invalid_json:{plan_path} ({exc})"]
+
+        rel_parts = plan_path.relative_to(batch_root).parts
+        provider = rel_parts[0] if len(rel_parts) >= 1 else "-"
+        run_slot = rel_parts[1] if len(rel_parts) >= 2 else "-"
+        match = re.search(r"-(init|refresh)-", plan_path.name)
+        pipeline = match.group(1) if match else "-"
+
+        items = payload.get("items")
+        normalized_items: list[dict[str, object]] = []
+        if isinstance(items, list):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                normalized_items.append(
+                    {
+                        "shard_id": str(item.get("shard_id", "")).strip(),
+                        "repo_scopes": normalize_scope_list(item.get("repo_scopes")),
+                        "path_scopes": normalize_scope_list(item.get("path_scopes")),
+                    }
+                )
+        normalized_items.sort(
+            key=lambda item: (
+                tuple(item["repo_scopes"]),
+                tuple(item["path_scopes"]),
+                str(item["shard_id"]),
+            )
+        )
+        entries.append(
+            {
+                "slot": f"{provider}/{run_slot}/{pipeline}",
+                "items": normalized_items,
+            }
+        )
+
+    if not entries:
+        return None, [f"shard_plan_artifacts=missing:{batch_root}"]
+
+    entries.sort(key=lambda item: str(item["slot"]))
+    return json.dumps(entries, ensure_ascii=True, sort_keys=True), []
+
+
 def strict_blockers(rec: dict[str, object], stats: dict[str, object], frontend: dict[str, str]) -> list[str]:
     reasons: list[str] = []
 
@@ -680,6 +760,59 @@ def strict_blockers(rec: dict[str, object], stats: dict[str, object], frontend: 
     return reasons
 
 
+def shard_plan_invariant_status(records: list[dict[str, object]]) -> tuple[dict[str, str], dict[str, list[str]]]:
+    status_by_batch: dict[str, str] = {}
+    blockers_by_batch: dict[str, list[str]] = {}
+    signatures_by_batch: dict[str, str | None] = {}
+
+    for rec in records:
+        batch_id = str(rec.get("batch_id", ""))
+        batch_root = Path(str(rec.get("batch_root", "")))
+        signature, artifact_blockers = collect_batch_shard_plan_signature(batch_root)
+        signatures_by_batch[batch_id] = signature
+        if artifact_blockers:
+            status_by_batch[batch_id] = "artifact_error"
+            blockers_by_batch[batch_id] = list(artifact_blockers)
+        else:
+            status_by_batch[batch_id] = "not_compared"
+            blockers_by_batch[batch_id] = []
+
+    records_by_profile: dict[str, dict[str, dict[str, object]]] = {}
+    for rec in records:
+        profile_id = str(rec.get("profile_id", ""))
+        sweep_id = str(rec.get("sweep_id", "baseline"))
+        records_by_profile.setdefault(profile_id, {})[sweep_id] = rec
+
+    for profile_id, sweeps in records_by_profile.items():
+        baseline = sweeps.get("baseline")
+        parallel_default = sweeps.get("parallel-default")
+        if baseline is None or parallel_default is None:
+            continue
+
+        baseline_batch = str(baseline.get("batch_id", ""))
+        parallel_batch = str(parallel_default.get("batch_id", ""))
+        baseline_blockers = blockers_by_batch.get(baseline_batch, [])
+        parallel_blockers = blockers_by_batch.get(parallel_batch, [])
+        if baseline_blockers or parallel_blockers:
+            continue
+
+        if signatures_by_batch.get(baseline_batch) == signatures_by_batch.get(parallel_batch):
+            status_by_batch[baseline_batch] = "passed"
+            status_by_batch[parallel_batch] = "passed"
+            continue
+
+        reason = (
+            "shard_plan_invariant=baseline_vs_parallel_default_mismatch"
+            f" (profile={profile_id}, baseline={baseline_batch}, parallel_default={parallel_batch})"
+        )
+        status_by_batch[baseline_batch] = "failed"
+        status_by_batch[parallel_batch] = "failed"
+        blockers_by_batch.setdefault(baseline_batch, []).append(reason)
+        blockers_by_batch.setdefault(parallel_batch, []).append(reason)
+
+    return status_by_batch, blockers_by_batch
+
+
 header = [
     "profile_id",
     "sweep_id",
@@ -690,7 +823,7 @@ header = [
     "execution_max_parallel_tasks",
     "execution_failure_policy",
     "execution_shard_discovery_mode",
-    "execution_repo_selection",
+    "shard_plan_invariant",
     "status",
     "strict_status",
     "backend_hard_pass",
@@ -723,9 +856,11 @@ tsv_lines = ["\t".join(header)]
 md_lines = [
     "# Profile Matrix",
     "",
-    "| profile_id | sweep_id | batch_id | status | strict | backend_hard/total | semantic_hard_fail | off_topic_hits | artifact_non_snapshot | evidence_scope | cross_repo_missing | runtime_flow | frontend init (qwen/claude) | frontend cancel (qwen/claude) | blockers | run_matrix | quality_report |",
-    "|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|---|",
+    "| profile_id | sweep_id | batch_id | status | strict | shard_plan_invariant | backend_hard/total | semantic_hard_fail | off_topic_hits | artifact_non_snapshot | evidence_scope | cross_repo_missing | runtime_flow | frontend init (qwen/claude) | frontend cancel (qwen/claude) | blockers | run_matrix | quality_report |",
+    "|---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|---|",
 ]
+
+invariant_status_by_batch, invariant_blockers_by_batch = shard_plan_invariant_status(records)
 
 verdict_records: list[dict[str, object]] = []
 strict_fail_count = 0
@@ -744,6 +879,8 @@ for rec in records:
     }
 
     blockers = strict_blockers(rec, stats, frontend_statuses)
+    blockers.extend(invariant_blockers_by_batch.get(str(rec["batch_id"]), []))
+    shard_plan_invariant = invariant_status_by_batch.get(str(rec["batch_id"]), "not_compared")
     strict_status = "passed" if not blockers else "failed"
     if blockers:
         strict_fail_count += 1
@@ -753,7 +890,6 @@ for rec in records:
     execution_max_parallel = str((execution or {}).get("max_parallel_tasks", "-"))
     execution_failure_policy = str((execution or {}).get("failure_policy", "-"))
     execution_shard_mode = str((execution or {}).get("shard_discovery_mode", "-"))
-    execution_repo_selection = str((execution or {}).get("repo_selection", "-"))
 
     tsv_lines.append(
         "\t".join(
@@ -767,7 +903,7 @@ for rec in records:
                 execution_max_parallel,
                 execution_failure_policy,
                 execution_shard_mode,
-                execution_repo_selection,
+                shard_plan_invariant,
                 str(rec["status"]),
                 strict_status,
                 str(stats["hard"]),
@@ -801,6 +937,7 @@ for rec in records:
     md_lines.append(
         "| "
         f"{rec['profile_id']} | {rec.get('sweep_id', 'baseline')} | {rec['batch_id']} | {rec['status']} | {strict_status} | "
+        f"{shard_plan_invariant} | "
         f"{stats['hard']}/{stats['total']} | {stats['semantic_hard_fail']} | {stats['off_topic_hits']} | {stats['artifact_non_snapshot']} | "
         f"{stats['evidence_scope_hits']} | {stats['cross_repo_missing_hits']} | "
         f"{int(stats['runtime_flow_failed']) + int(stats['runtime_flow_issue_hits'])} | "
@@ -817,12 +954,12 @@ for rec in records:
             "status": rec["status"],
             "strict_status": strict_status,
             "blocking_reasons": blockers,
+            "shard_plan_invariant": shard_plan_invariant,
             "execution": {
                 "strategy": execution_strategy,
                 "max_parallel_tasks": execution_max_parallel,
                 "failure_policy": execution_failure_policy,
                 "shard_discovery_mode": execution_shard_mode,
-                "repo_selection": execution_repo_selection,
             },
             "backend": {
                 "hard_pass": int(stats["hard"]),

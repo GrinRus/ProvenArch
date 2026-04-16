@@ -84,15 +84,11 @@ func TestWorkspaceValidateEndpoint(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", response.StatusCode)
 	}
 	var payload struct {
-		OK                 bool     `json:"ok"`
-		RepoSelectionMode  string   `json:"repo_selection_mode"`
-		SelectedRepoScopes []string `json:"selected_repo_scopes"`
-		RepoSelection      []struct {
-			Name          string `json:"name"`
-			Included      bool   `json:"included"`
-			Reason        string `json:"reason"`
-			EffectiveRole string `json:"effective_role"`
-		} `json:"repo_selection"`
+		OK            bool `json:"ok"`
+		ResolvedRepos []struct {
+			Name string `json:"name"`
+			Path string `json:"path"`
+		} `json:"resolved_repos"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode validate payload: %v", err)
@@ -100,14 +96,8 @@ func TestWorkspaceValidateEndpoint(t *testing.T) {
 	if !payload.OK {
 		t.Fatalf("expected ok=true")
 	}
-	if payload.RepoSelectionMode != workspace.RepoSelectionAll {
-		t.Fatalf("expected repo_selection_mode=%q, got %q", workspace.RepoSelectionAll, payload.RepoSelectionMode)
-	}
-	if len(payload.SelectedRepoScopes) == 0 {
-		t.Fatalf("expected selected_repo_scopes in payload")
-	}
-	if len(payload.RepoSelection) == 0 {
-		t.Fatalf("expected repo_selection decisions in payload")
+	if len(payload.ResolvedRepos) == 0 {
+		t.Fatalf("expected resolved_repos in payload")
 	}
 }
 
@@ -1351,12 +1341,6 @@ func TestRuntimeExecutionGetReturnsEffectiveDefaults(t *testing.T) {
 	if payload.Source.Strategy != acpruntime.ExecutionSourceDefault {
 		t.Fatalf("expected default source, got %s", payload.Source.Strategy)
 	}
-	if payload.Effective.RepoSelection != acpruntime.DefaultExecutionRepoSelection {
-		t.Fatalf("expected default repo_selection %q, got %q", acpruntime.DefaultExecutionRepoSelection, payload.Effective.RepoSelection)
-	}
-	if payload.Source.RepoSelection != acpruntime.ExecutionSourceDefault {
-		t.Fatalf("expected default repo_selection source, got %s", payload.Source.RepoSelection)
-	}
 }
 
 func TestRuntimeExecutionPutSupportsPartialUpdate(t *testing.T) {
@@ -1366,7 +1350,7 @@ func TestRuntimeExecutionPutSupportsPartialUpdate(t *testing.T) {
 	httpServer := httptest.NewServer(server.Handler())
 	defer httpServer.Close()
 
-	requestBody := `{"execution":{"strategy":"parallel","max_parallel_tasks":3,"failure_policy":"fail_fast","shard_discovery_mode":"semantic","repo_selection":"backend_only"}}`
+	requestBody := `{"execution":{"strategy":"parallel","max_parallel_tasks":3,"failure_policy":"fail_fast","shard_discovery_mode":"semantic"}}`
 	request, err := http.NewRequest(http.MethodPut, httpServer.URL+"/api/runtime/execution", strings.NewReader(requestBody))
 	if err != nil {
 		t.Fatalf("create PUT /api/runtime/execution request: %v", err)
@@ -1406,9 +1390,6 @@ func TestRuntimeExecutionPutSupportsPartialUpdate(t *testing.T) {
 	}
 	if !strings.Contains(manifestPayload.Content, "mode: semantic") {
 		t.Fatalf("expected shard_discovery.mode in manifest content, got:\n%s", manifestPayload.Content)
-	}
-	if !strings.Contains(manifestPayload.Content, "repo_selection: backend_only") {
-		t.Fatalf("expected repo_selection in manifest content, got:\n%s", manifestPayload.Content)
 	}
 }
 

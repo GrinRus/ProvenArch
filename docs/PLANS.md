@@ -49,6 +49,52 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 
 ### Plan ID
+EP-20260416-structural-sharding-reset
+
+### Context
+Нужно вернуть sharding к structural full-repo coverage contract: `heuristics` должен строить deterministic non-overlapping partition, `semantic` должен стать metadata-only, а runtime execution contract должен перестать зависеть от `repo_selection/backend_only`.
+
+### Goals (must have)
+- [x] Переписать planner на structural coverage roots + bounded coalescing
+- [x] Убрать `repo_selection/backend_only` из schema/runtime/API/UI/reporting
+- [x] Перевести release harness на sweeps `baseline` + `parallel-default`
+- [x] Добавить invariant `baseline == parallel-default` по shard-plan
+- [x] Синхронизировать tests/docs/skills
+
+### Non-goals
+- [x] Не менять public `schemas/taskresult.schema.json`
+- [x] Не вводить новый explicit repo filtering contract
+
+### Approach
+1) Упростить workspace/runtime execution до always-all-repos semantics.
+2) Пересобрать shard planner вокруг structural coverage и metadata-only semantic graph.
+3) Обновить matrix/reporting/docs под новый release contract и invariant.
+
+### Files expected to change
+- `internal/orchestrator/*`
+- `internal/runtime/*`
+- `internal/workspace/*`
+- `internal/api/*`
+- `scripts/*`
+- `ui/*`
+- `schemas/workspace.schema.json`
+- `examples/*`
+- `README.md`
+- `docs/*`
+- `.agents/skills/e2e-live-gate/*`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены
+- [x] Схемы/спеки синхронизированы
+- [x] Legacy `repo_selection/backend_only` убран из active contract surfaces
+
+### Risks
+- Structural coalescing должен сохранять full coverage и не смешивать top-level subtree; release harness дополнительно страхует это matrix invariant-ом.
+
+### Progress log
+- 2026-04-16: реализованы structural full-coverage shard planner, metadata-only semantic mode, removal of runtime repo filtering, updated matrix/reporting contract и docs sync.
+
+### Plan ID
 EP-20260416-zero-signal-hardening
 
 ### Context

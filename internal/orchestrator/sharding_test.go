@@ -20,11 +20,13 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
-func TestDiscoverHeuristicShardPathsPrunesParentRoots(t *testing.T) {
+func TestDiscoverHeuristicShardPathsCoversResidualFilesAndDirsWithoutOverlap(t *testing.T) {
 	t.Parallel()
 
 	repoPath := t.TempDir()
 	writeFile(t, filepath.Join(repoPath, "go.mod"), "module example.com/root\n")
+	writeFile(t, filepath.Join(repoPath, "README.md"), "# root\n")
+	writeFile(t, filepath.Join(repoPath, "docs", "architecture.md"), "# docs\n")
 	writeFile(t, filepath.Join(repoPath, "services", "api", "package.json"), "{\n  \"name\": \"api\"\n}\n")
 	writeFile(t, filepath.Join(repoPath, "services", "web", "pyproject.toml"), "[project]\nname = \"web\"\n")
 	writeFile(t, filepath.Join(repoPath, "services", "web", "sub", "Cargo.toml"), "[package]\nname = \"sub\"\n")
@@ -34,9 +36,19 @@ func TestDiscoverHeuristicShardPathsPrunesParentRoots(t *testing.T) {
 		t.Fatalf("discover heuristic shard paths: %v", err)
 	}
 
-	expected := []string{"services/api", "services/web/sub"}
+	expected := []string{"README.md", "docs", "go.mod", "services/api", "services/web/pyproject.toml", "services/web/sub"}
 	if !reflect.DeepEqual(paths, expected) {
 		t.Fatalf("unexpected shard paths: got=%v want=%v", paths, expected)
+	}
+	for i, candidate := range paths {
+		for j, other := range paths {
+			if i == j {
+				continue
+			}
+			if other == candidate || strings.HasPrefix(other, candidate+"/") {
+				t.Fatalf("expected disjoint coverage roots, got overlap candidate=%q other=%q", candidate, other)
+			}
+		}
 	}
 }
 
@@ -108,33 +120,32 @@ func TestRunInitParallelShardsUseDeterministicApplyOrderAndPersistShardPlan(t *t
 	}
 
 	step1Summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step1-collect-shard-summary-*.json"))
-	if len(step1Summary.Items) != 2 {
-		t.Fatalf("expected two step1 shard summary items, got %d", len(step1Summary.Items))
+	if len(step1Summary.Items) != 3 {
+		t.Fatalf("expected three step1 shard summary items, got %d", len(step1Summary.Items))
 	}
-	if len(step1Summary.Items[0].PathScopes) == 0 || step1Summary.Items[0].PathScopes[0] != "services/api" {
-		t.Fatalf("expected first summary shard path to be services/api, got %+v", step1Summary.Items[0].PathScopes)
-	}
-	if len(step1Summary.Items[1].PathScopes) == 0 || step1Summary.Items[1].PathScopes[0] != "services/web" {
-		t.Fatalf("expected second summary shard path to be services/web, got %+v", step1Summary.Items[1].PathScopes)
+	expectedStep1Paths := [][]string{{"README.md"}, {"services/api"}, {"services/web"}}
+	for idx, expectedPathScopes := range expectedStep1Paths {
+		if !reflect.DeepEqual(step1Summary.Items[idx].PathScopes, expectedPathScopes) {
+			t.Fatalf("unexpected step1 summary path scopes at index %d: got=%v want=%v", idx, step1Summary.Items[idx].PathScopes, expectedPathScopes)
+		}
 	}
 
 	step1Plan := readSingleShardPlan(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step1-collect-shard-plan-*.json"))
-	if len(step1Plan.Items) != 2 {
-		t.Fatalf("expected two step1 shard-plan items, got %d", len(step1Plan.Items))
+	if len(step1Plan.Items) != 3 {
+		t.Fatalf("expected three step1 shard-plan items, got %d", len(step1Plan.Items))
 	}
-	if len(step1Plan.Items[0].PathScopes) == 0 || step1Plan.Items[0].PathScopes[0] != "services/api" {
-		t.Fatalf("expected first shard-plan path to be services/api, got %+v", step1Plan.Items[0].PathScopes)
-	}
-	if len(step1Plan.Items[1].PathScopes) == 0 || step1Plan.Items[1].PathScopes[0] != "services/web" {
-		t.Fatalf("expected second shard-plan path to be services/web, got %+v", step1Plan.Items[1].PathScopes)
+	for idx, expectedPathScopes := range expectedStep1Paths {
+		if !reflect.DeepEqual(step1Plan.Items[idx].PathScopes, expectedPathScopes) {
+			t.Fatalf("unexpected step1 shard-plan path scopes at index %d: got=%v want=%v", idx, step1Plan.Items[idx].PathScopes, expectedPathScopes)
+		}
 	}
 
 	step1Taskruns, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-init-step1-collect-domain-*-shard-*.json"))
 	if err != nil {
 		t.Fatalf("glob step1 shard taskruns: %v", err)
 	}
-	if len(step1Taskruns) != 2 {
-		t.Fatalf("expected two step1 shard taskruns, got %d", len(step1Taskruns))
+	if len(step1Taskruns) != 3 {
+		t.Fatalf("expected three step1 shard taskruns, got %d", len(step1Taskruns))
 	}
 	for _, candidate := range step1Taskruns {
 		var payload contracts.TaskResult
@@ -151,41 +162,52 @@ func TestRunInitParallelShardsUseDeterministicApplyOrderAndPersistShardPlan(t *t
 	}
 }
 
-func TestRunInitSemanticShardPlanIncludesGraphEdges(t *testing.T) {
+func TestSemanticShardModePreservesHeuristicBoundariesAndAddsGraphEdges(t *testing.T) {
 	t.Parallel()
 
-	ws := createShardingWorkspace(t, shardingWorkspaceOptions{
-		Strategy:      acpruntime.ExecutionStrategyParallel,
-		MaxParallel:   2,
-		FailurePolicy: acpruntime.ExecutionFailurePolicyBestEffort,
-		ShardMode:     acpruntime.ExecutionShardDiscoverySemantic,
-	})
+	ws := createShardingWorkspace(t, shardingWorkspaceOptions{})
 	repoRoot := filepath.Join(ws.Path, "repos", "orders-monolith")
 	writeFile(t, filepath.Join(repoRoot, "services", "api", "main.go"), "package api\n\nimport _ \"orders-monolith/services/web\"\n")
 	writeFile(t, filepath.Join(repoRoot, "services", "web", "main.go"), "package web\n")
 
-	service := NewService()
-	info, _, err := service.Run(context.Background(), RunRequest{
-		Workspace:      ws,
-		Pipeline:       PipelineInit,
-		NonInteractive: true,
-	})
-	if err != nil {
-		t.Fatalf("run init pipeline in semantic mode: %v", err)
+	baseExecution := pipelineExecution{
+		workspace:         ws,
+		resolvedRepoPaths: map[string]string{"orders-monolith": repoRoot},
 	}
-	if info.Status != RunStatusSucceeded {
-		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
+	baseExecution.executionProfile.ShardMode = acpruntime.ExecutionShardDiscoveryHeuristics
+	heuristicPlans, heuristicWarnings, heuristicGraph := baseExecution.planRuntimeShards([]string{"orders-monolith"})
+	if len(heuristicWarnings) != 0 {
+		t.Fatalf("expected no heuristic planner warnings, got %v", heuristicWarnings)
+	}
+	if len(heuristicGraph) != 0 {
+		t.Fatalf("expected heuristics mode to omit semantic graph, got %+v", heuristicGraph)
 	}
 
-	step1Plan := readSingleShardPlan(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step1-collect-shard-plan-*.json"))
-	if step1Plan.ShardMode != acpruntime.ExecutionShardDiscoverySemantic {
-		t.Fatalf("expected semantic shard mode in plan, got %q", step1Plan.ShardMode)
+	semanticExecution := pipelineExecution{
+		workspace:         ws,
+		resolvedRepoPaths: map[string]string{"orders-monolith": repoRoot},
 	}
-	if len(step1Plan.SemanticGraph) == 0 {
-		t.Fatalf("expected non-empty semantic graph in shard plan artifact")
+	semanticExecution.executionProfile.ShardMode = acpruntime.ExecutionShardDiscoverySemantic
+	semanticPlans, semanticWarnings, semanticGraph := semanticExecution.planRuntimeShards([]string{"orders-monolith"})
+	if len(semanticWarnings) != 0 {
+		t.Fatalf("expected no semantic planner warnings, got %v", semanticWarnings)
 	}
-	if step1Plan.SemanticGraph[0].RepoScope != "orders-monolith" {
-		t.Fatalf("expected semantic graph edge repo_scope orders-monolith, got %+v", step1Plan.SemanticGraph[0])
+	if len(semanticPlans) != len(heuristicPlans) {
+		t.Fatalf("expected semantic mode to preserve shard count, got semantic=%d heuristic=%d", len(semanticPlans), len(heuristicPlans))
+	}
+	for idx := range heuristicPlans {
+		if !reflect.DeepEqual(semanticPlans[idx].PathScopes, heuristicPlans[idx].PathScopes) {
+			t.Fatalf("semantic mode changed path scopes at index %d: semantic=%v heuristic=%v", idx, semanticPlans[idx].PathScopes, heuristicPlans[idx].PathScopes)
+		}
+		if semanticPlans[idx].ShardID != heuristicPlans[idx].ShardID {
+			t.Fatalf("semantic mode changed shard id at index %d: semantic=%q heuristic=%q", idx, semanticPlans[idx].ShardID, heuristicPlans[idx].ShardID)
+		}
+	}
+	if len(semanticGraph) == 0 {
+		t.Fatalf("expected non-empty semantic graph in semantic mode")
+	}
+	if semanticGraph[0].RepoScope != "orders-monolith" {
+		t.Fatalf("expected semantic graph edge repo_scope orders-monolith, got %+v", semanticGraph[0])
 	}
 }
 
@@ -494,6 +516,36 @@ func TestRunInitFailFastStopsOnShardFailure(t *testing.T) {
 	if len(step3Summaries) != 0 {
 		t.Fatalf("expected no step3 shard summaries in fail_fast mode, got %v", step3Summaries)
 	}
+
+	serviceCatalog := mustReadFile(t, filepath.Join(ws.Path, "reports/as-is/service-catalog.md"))
+	if !strings.Contains(serviceCatalog, "Analysis incomplete.") && !strings.Contains(serviceCatalog, "Partial analysis. Some shards failed; downstream content may be incomplete.") {
+		t.Fatalf("expected incomplete/partial banner in service catalog after fail_fast abort, got:\n%s", serviceCatalog)
+	}
+
+	coverageSummary := mustReadFile(t, filepath.Join(ws.Path, "reports/coverage/summary.md"))
+	if !strings.Contains(coverageSummary, "Analysis incomplete.") && !strings.Contains(coverageSummary, "Partial analysis. Some shards failed; downstream content may be incomplete.") {
+		t.Fatalf("expected incomplete/partial banner in coverage summary after fail_fast abort, got:\n%s", coverageSummary)
+	}
+
+	openQuestions := mustReadFile(t, filepath.Join(ws.Path, "reports/coverage/open-questions.md"))
+	if !strings.Contains(openQuestions, "Analysis incomplete.") && !strings.Contains(openQuestions, "Partial analysis. Some shards failed; downstream content may be incomplete.") {
+		t.Fatalf("expected incomplete/partial banner in open-questions report after fail_fast abort, got:\n%s", openQuestions)
+	}
+
+	findingsReport := mustReadFile(t, filepath.Join(ws.Path, "reports/findings/findings.md"))
+	if !strings.Contains(findingsReport, "Findings unavailable because analysis did not complete.") {
+		t.Fatalf("expected incomplete findings wording after fail_fast abort, got:\n%s", findingsReport)
+	}
+
+	proposal := mustReadFile(t, filepath.Join(ws.Path, "proposals/proposal-baseline/proposal.md"))
+	if !strings.Contains(proposal, "Proposal generation incomplete because no reliable findings set was produced.") {
+		t.Fatalf("expected incomplete proposal wording after fail_fast abort, got:\n%s", proposal)
+	}
+
+	architectSummary := mustReadFile(t, filepath.Join(ws.Path, "reports/agent-outputs/architect/summary.md"))
+	if !strings.Contains(architectSummary, "Analysis incomplete.") && !strings.Contains(architectSummary, "Partial analysis. Some shards failed; downstream content may be incomplete.") {
+		t.Fatalf("expected incomplete/partial banner in architect summary after fail_fast abort, got:\n%s", architectSummary)
+	}
 }
 
 func TestShardSchedulerRespectsSequentialAndParallelStrategies(t *testing.T) {
@@ -589,7 +641,26 @@ func TestRefreshPipelineUsesShardingForStep1AndStep3(t *testing.T) {
 	}
 }
 
-func TestSyntheticLargeMonorepoShardingProducesManyShardArtifacts(t *testing.T) {
+func TestRepoWithoutMarkerFilesFallsBackToSingleRootShard(t *testing.T) {
+	t.Parallel()
+
+	repoPath := t.TempDir()
+	writeFile(t, filepath.Join(repoPath, "README.md"), "# root\n")
+	writeFile(t, filepath.Join(repoPath, "docs", "guide.md"), "# docs\n")
+
+	discovery, err := discoverHeuristicShardPathsWithMeta(repoPath)
+	if err != nil {
+		t.Fatalf("discover heuristic shard paths: %v", err)
+	}
+	if !discovery.FallbackNoMarkers {
+		t.Fatalf("expected no-marker fallback")
+	}
+	if !reflect.DeepEqual(discovery.Paths, []string{"."}) {
+		t.Fatalf("expected single root shard, got %v", discovery.Paths)
+	}
+}
+
+func TestSyntheticLargeMonorepoShardingCoalescesStructurallyByTopLevelSegment(t *testing.T) {
 	t.Parallel()
 
 	ws := createShardingWorkspace(t, shardingWorkspaceOptions{
@@ -598,10 +669,15 @@ func TestSyntheticLargeMonorepoShardingProducesManyShardArtifacts(t *testing.T) 
 		FailurePolicy: acpruntime.ExecutionFailurePolicyBestEffort,
 	})
 	repoRoot := filepath.Join(ws.Path, "repos", "orders-monolith")
-	for idx := 0; idx < 12; idx++ {
+	for idx := 0; idx < 20; idx++ {
 		modulePath := filepath.Join(repoRoot, "services", "module-"+strconv.Itoa(idx))
 		writeFile(t, filepath.Join(modulePath, "package.json"), "{\n  \"name\": \"module\"\n}\n")
 		writeFile(t, filepath.Join(modulePath, "README.md"), "# module\n")
+	}
+	for idx := 0; idx < 6; idx++ {
+		modulePath := filepath.Join(repoRoot, "libs", "lib-"+strconv.Itoa(idx))
+		writeFile(t, filepath.Join(modulePath, "package.json"), "{\n  \"name\": \"lib\"\n}\n")
+		writeFile(t, filepath.Join(modulePath, "README.md"), "# lib\n")
 	}
 
 	service := NewService()
@@ -618,13 +694,16 @@ func TestSyntheticLargeMonorepoShardingProducesManyShardArtifacts(t *testing.T) 
 	}
 
 	step1Summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step1-collect-shard-summary-*.json"))
-	if len(step1Summary.Items) < 10 {
-		t.Fatalf("expected at least 10 shards in synthetic monorepo, got %d", len(step1Summary.Items))
+	if len(step1Summary.Items) != 3 {
+		t.Fatalf("expected structural coalescing to reduce step1 shards to 3, got %d", len(step1Summary.Items))
 	}
+	got := [][]string{}
 	for _, item := range step1Summary.Items {
-		if len(item.PathScopes) == 0 {
-			t.Fatalf("expected non-empty path scope in summary item: %+v", item)
-		}
+		got = append(got, append([]string(nil), item.PathScopes...))
+	}
+	want := [][]string{{"README.md"}, {"libs"}, {"services"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected coalesced step1 path scopes: got=%v want=%v", got, want)
 	}
 }
 
@@ -667,14 +746,70 @@ func TestMultiRepoShardingHandlesDifferentModuleCounts(t *testing.T) {
 		summarySizes = append(summarySizes, len(summary.Items))
 	}
 	sort.Ints(summarySizes)
-	expected := []int{2, 3}
+	expected := []int{3, 4}
 	if !reflect.DeepEqual(summarySizes, expected) {
 		t.Fatalf("unexpected per-domain shard counts: got=%v want=%v", summarySizes, expected)
 	}
 
 	step3Summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step3-findings-shard-summary.json"))
-	if len(step3Summary.Items) != 5 {
-		t.Fatalf("expected five step3 shards (2+3), got %d", len(step3Summary.Items))
+	if len(step3Summary.Items) != 7 {
+		t.Fatalf("expected seven step3 shards ((2+1)+(3+1)), got %d", len(step3Summary.Items))
+	}
+}
+
+func TestBaselineAndParallelDefaultProduceIdenticalShardPlans(t *testing.T) {
+	t.Parallel()
+
+	wsBaseline := createShardingWorkspace(t, shardingWorkspaceOptions{
+		Strategy:      acpruntime.ExecutionStrategySequential,
+		MaxParallel:   1,
+		FailurePolicy: acpruntime.ExecutionFailurePolicyBestEffort,
+		ShardMode:     acpruntime.ExecutionShardDiscoveryHeuristics,
+	})
+	service := NewService()
+
+	baselineInfo, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      wsBaseline,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run baseline init pipeline: %v", err)
+	}
+	if baselineInfo.Status != RunStatusSucceeded {
+		t.Fatalf("expected baseline run to succeed, got %s (%s)", baselineInfo.Status, baselineInfo.Error)
+	}
+	baselinePlan := readSingleShardPlan(t, filepath.Join(wsBaseline.Path, "reports", "taskruns", "*-init-step1-collect-shard-plan-*.json"))
+
+	wsParallel := createShardingWorkspace(t, shardingWorkspaceOptions{
+		Strategy:      acpruntime.ExecutionStrategyParallel,
+		MaxParallel:   4,
+		FailurePolicy: acpruntime.ExecutionFailurePolicyBestEffort,
+		ShardMode:     acpruntime.ExecutionShardDiscoveryHeuristics,
+	})
+	parallelInfo, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      wsParallel,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run parallel init pipeline: %v", err)
+	}
+	if parallelInfo.Status != RunStatusSucceeded {
+		t.Fatalf("expected parallel run to succeed, got %s (%s)", parallelInfo.Status, parallelInfo.Error)
+	}
+	parallelPlan := readSingleShardPlan(t, filepath.Join(wsParallel.Path, "reports", "taskruns", "*-init-step1-collect-shard-plan-*.json"))
+
+	if len(baselinePlan.Items) != len(parallelPlan.Items) {
+		t.Fatalf("expected equal shard-plan size, got baseline=%d parallel=%d", len(baselinePlan.Items), len(parallelPlan.Items))
+	}
+	for idx := range baselinePlan.Items {
+		if !reflect.DeepEqual(baselinePlan.Items[idx].PathScopes, parallelPlan.Items[idx].PathScopes) {
+			t.Fatalf("baseline vs parallel-default path scopes diverged at index %d: baseline=%v parallel=%v", idx, baselinePlan.Items[idx].PathScopes, parallelPlan.Items[idx].PathScopes)
+		}
+		if baselinePlan.Items[idx].ShardID != parallelPlan.Items[idx].ShardID {
+			t.Fatalf("baseline vs parallel-default shard ids diverged at index %d: baseline=%q parallel=%q", idx, baselinePlan.Items[idx].ShardID, parallelPlan.Items[idx].ShardID)
+		}
 	}
 }
 
@@ -827,8 +962,11 @@ func (deterministicApplyOrderRunner) Run(ctx context.Context, task acpruntime.Ta
 			repoScope = strings.TrimSpace(task.RepoScopes[0])
 		}
 		evidencePath := pathScope + "/README.md"
-		if pathScope == "." {
+		if pathScope == "." || filepath.Ext(pathScope) != "" {
 			evidencePath = "README.md"
+			if pathScope != "." {
+				evidencePath = pathScope
+			}
 		}
 		result := contracts.TaskResult{
 			Meta: contracts.Meta{

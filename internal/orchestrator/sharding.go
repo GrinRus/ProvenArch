@@ -88,6 +88,8 @@ type heuristicShardDiscoveryResult struct {
 	FallbackNoMarkers bool
 }
 
+const maxAutoShardsPerRepo = 16
+
 var shardModuleMarkerFiles = map[string]struct{}{
 	"go.mod":          {},
 	"package.json":    {},
@@ -561,18 +563,22 @@ func (e *pipelineExecution) planRuntimeShards(repoScopes []string) ([]runtimeSha
 			paths = []string{"."}
 		}
 
-		groups := make([][]string, 0, len(paths))
+		repoPath := e.resolveRepoPath(scope)
+		groups, groupingWarnings := buildStructuralShardGroups(repoPath, paths)
+		warnings = append(warnings, groupingWarnings...)
+		if len(groups) == 0 {
+			groups = make([][]string, 0, len(paths))
+			for _, pathScope := range paths {
+				groups = append(groups, []string{pathScope})
+			}
+		}
 		mode := strings.TrimSpace(strings.ToLower(e.executionProfile.ShardMode))
 		if mode == "" {
 			mode = "heuristics"
 		}
 		if mode == "semantic" {
-			repoPath := strings.TrimSpace(e.resolvedRepoPaths[scope])
-			semanticGroups, semanticWarnings, semanticEdges := discoverSemanticShardGroups(repoPath, paths)
+			semanticWarnings, semanticEdges := discoverSemanticShardGraph(repoPath, paths)
 			warnings = append(warnings, semanticWarnings...)
-			if len(semanticGroups) > 0 {
-				groups = semanticGroups
-			}
 			for _, edge := range semanticEdges {
 				graphEdges = append(graphEdges, runtimeShardPlanGraphEdge{
 					RepoScope: scope,
@@ -582,12 +588,6 @@ func (e *pipelineExecution) planRuntimeShards(repoScopes []string) ([]runtimeSha
 				})
 			}
 		}
-		if len(groups) == 0 {
-			for _, pathScope := range paths {
-				groups = append(groups, []string{pathScope})
-			}
-		}
-
 		for idx, group := range groups {
 			normalizedGroup := normalizeOrderedUniqueStrings(group)
 			if len(normalizedGroup) == 0 {
@@ -643,6 +643,21 @@ func buildShardID(scope string, pathScopes []string) string {
 	return slug
 }
 
+func (e *pipelineExecution) resolveRepoPath(scope string) string {
+	repoPath := strings.TrimSpace(e.resolvedRepoPaths[scope])
+	repo, ok := lookupManifestRepo(e.workspace.Manifest.Repos, scope)
+	if !ok {
+		return repoPath
+	}
+	if repoPath == "" && strings.TrimSpace(repo.Path) != "" {
+		repoPath = strings.TrimSpace(repo.Path)
+		if !filepath.IsAbs(repoPath) {
+			repoPath = filepath.Join(e.workspace.Path, repoPath)
+		}
+	}
+	return strings.TrimSpace(repoPath)
+}
+
 func (e *pipelineExecution) planScopePaths(scope string) ([]string, []string) {
 	warnings := []string{}
 	repo, ok := lookupManifestRepo(e.workspace.Manifest.Repos, scope)
@@ -650,13 +665,7 @@ func (e *pipelineExecution) planScopePaths(scope string) ([]string, []string) {
 		return []string{"."}, []string{fmt.Sprintf("repo scope %q is not present in workspace manifest; fallback shard='.'", scope)}
 	}
 
-	repoPath := strings.TrimSpace(e.resolvedRepoPaths[scope])
-	if repoPath == "" && strings.TrimSpace(repo.Path) != "" {
-		repoPath = strings.TrimSpace(repo.Path)
-		if !filepath.IsAbs(repoPath) {
-			repoPath = filepath.Join(e.workspace.Path, repoPath)
-		}
-	}
+	repoPath := e.resolveRepoPath(scope)
 	if strings.TrimSpace(repoPath) == "" {
 		return []string{"."}, []string{fmt.Sprintf("repo scope %q has no local path for shard discovery; fallback shard='.'", scope)}
 	}
@@ -710,7 +719,7 @@ func discoverHeuristicShardPathsWithMeta(repoPath string) (heuristicShardDiscove
 		return heuristicShardDiscoveryResult{}, fmt.Errorf("repo path %q is not a directory", root)
 	}
 
-	candidates := map[string]struct{}{}
+	markerRoots := map[string]struct{}{}
 	err = filepath.WalkDir(root, func(current string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -736,23 +745,120 @@ func discoverHeuristicShardPathsWithMeta(repoPath string) (heuristicShardDiscove
 			return nil
 		}
 		rel = normalizeShardPath(rel)
-		candidates[rel] = struct{}{}
+		markerRoots[rel] = struct{}{}
 		return nil
 	})
 	if err != nil {
 		return heuristicShardDiscoveryResult{}, err
 	}
-	if len(candidates) == 0 {
+	if len(markerRoots) == 0 {
 		return heuristicShardDiscoveryResult{
 			Paths:             []string{"."},
 			FallbackNoMarkers: true,
 		}, nil
 	}
-	paths := make([]string, 0, len(candidates))
-	for candidate := range candidates {
-		paths = append(paths, candidate)
+	leafMarkers := make([]string, 0, len(markerRoots))
+	for candidate := range markerRoots {
+		leafMarkers = append(leafMarkers, candidate)
 	}
-	return heuristicShardDiscoveryResult{Paths: pruneParentShardPaths(paths)}, nil
+	coverageRoots, err := buildStructuralCoverageRoots(root, pruneParentShardPaths(leafMarkers))
+	if err != nil {
+		return heuristicShardDiscoveryResult{}, err
+	}
+	return heuristicShardDiscoveryResult{Paths: coverageRoots}, nil
+}
+
+func buildStructuralCoverageRoots(repoPath string, leafMarkers []string) ([]string, error) {
+	normalizedMarkers := normalizeAndSortShardPaths(leafMarkers)
+	if len(normalizedMarkers) == 0 {
+		return []string{"."}, nil
+	}
+
+	leafSet := map[string]struct{}{}
+	descendantSet := map[string]struct{}{}
+	for _, marker := range normalizedMarkers {
+		leafSet[marker] = struct{}{}
+		current := marker
+		for {
+			descendantSet[current] = struct{}{}
+			if current == "." {
+				break
+			}
+			current = shardParentPath(current)
+		}
+	}
+
+	coverageRoots := []string{}
+	if err := appendCoverageRoots(repoPath, ".", leafSet, descendantSet, &coverageRoots); err != nil {
+		return nil, err
+	}
+	return normalizeAndSortShardPaths(coverageRoots), nil
+}
+
+func appendCoverageRoots(repoPath string, rel string, leafSet map[string]struct{}, descendantSet map[string]struct{}, out *[]string) error {
+	rel = normalizeShardPath(rel)
+	if _, ok := leafSet[rel]; ok {
+		*out = append(*out, rel)
+		return nil
+	}
+
+	abs := repoPath
+	if rel != "." {
+		abs = filepath.Join(repoPath, filepath.FromSlash(rel))
+	}
+	entries, err := os.ReadDir(abs)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		name := strings.TrimSpace(entry.Name())
+		if name == "" {
+			continue
+		}
+		childRel := shardJoin(rel, name)
+		if entry.IsDir() {
+			lowerName := strings.ToLower(name)
+			if _, skip := shardSkippedDirs[lowerName]; skip {
+				continue
+			}
+			if strings.HasPrefix(lowerName, ".") {
+				continue
+			}
+			if _, covered := descendantSet[childRel]; covered {
+				if err := appendCoverageRoots(repoPath, childRel, leafSet, descendantSet, out); err != nil {
+					return err
+				}
+				continue
+			}
+			*out = append(*out, childRel)
+			continue
+		}
+		*out = append(*out, childRel)
+	}
+	return nil
+}
+
+func shardParentPath(rel string) string {
+	normalized := normalizeShardPath(rel)
+	if normalized == "." {
+		return "."
+	}
+	if idx := strings.LastIndex(normalized, "/"); idx >= 0 {
+		return normalized[:idx]
+	}
+	return "."
+}
+
+func shardJoin(base string, child string) string {
+	child = strings.TrimSpace(child)
+	if child == "" {
+		return normalizeShardPath(base)
+	}
+	if normalizeShardPath(base) == "." {
+		return normalizeShardPath(child)
+	}
+	return normalizeShardPath(path.Join(base, child))
 }
 
 func pruneParentShardPaths(paths []string) []string {
@@ -871,21 +977,98 @@ func matchShardPattern(candidate string, pattern string) bool {
 	return strings.HasPrefix(candidate, pattern+"/")
 }
 
-func discoverSemanticShardGroups(repoPath string, paths []string) ([][]string, []string, []runtimeShardPlanGraphEdge) {
+func buildStructuralShardGroups(repoPath string, coverageRoots []string) ([][]string, []string) {
+	normalized := normalizeAndSortShardPaths(coverageRoots)
+	if len(normalized) == 0 {
+		return [][]string{{"."}}, nil
+	}
+	if len(normalized) <= maxAutoShardsPerRepo || strings.TrimSpace(repoPath) == "" {
+		groups := make([][]string, 0, len(normalized))
+		for _, value := range normalized {
+			groups = append(groups, []string{value})
+		}
+		return groups, nil
+	}
+
+	rootFiles := make([]string, 0, len(normalized))
+	topLevelDirs := map[string]struct{}{}
+	for _, rel := range normalized {
+		if rel == "." {
+			return [][]string{{"."}}, []string{fmt.Sprintf("structural shard coalescing skipped because repo %q is already covered by root scope", repoPath)}
+		}
+		abs := filepath.Join(repoPath, filepath.FromSlash(rel))
+		info, err := os.Stat(abs)
+		if err != nil {
+			groups := make([][]string, 0, len(normalized))
+			for _, value := range normalized {
+				groups = append(groups, []string{value})
+			}
+			return groups, []string{fmt.Sprintf("structural shard coalescing fallback: stat failed for %q (%v); keeping coverage roots", rel, err)}
+		}
+		if info.IsDir() {
+			topLevelDirs[topLevelSegment(rel)] = struct{}{}
+			continue
+		}
+		if !strings.Contains(rel, "/") {
+			rootFiles = append(rootFiles, rel)
+			continue
+		}
+		topLevelDirs[topLevelSegment(rel)] = struct{}{}
+	}
+
+	keys := make([]string, 0, len(topLevelDirs))
+	for key := range topLevelDirs {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	sort.Strings(rootFiles)
+
+	groups := make([][]string, 0, len(keys)+1)
+	if len(rootFiles) > 0 {
+		groups = append(groups, append([]string(nil), rootFiles...))
+	}
+	for _, key := range keys {
+		groups = append(groups, []string{key})
+	}
+
+	warnings := []string{
+		fmt.Sprintf(
+			"structural shard coalescing reduced %d coverage roots to %d shard groups using top-level ancestry",
+			len(normalized),
+			len(groups),
+		),
+	}
+	if len(groups) > maxAutoShardsPerRepo {
+		warnings = append(
+			warnings,
+			fmt.Sprintf(
+				"structural shard coalescing kept %d shard groups because cross-top-level merges are forbidden (target cap=%d)",
+				len(groups),
+				maxAutoShardsPerRepo,
+			),
+		)
+	}
+	return groups, warnings
+}
+
+func topLevelSegment(rel string) string {
+	normalized := normalizeShardPath(rel)
+	if normalized == "." {
+		return "."
+	}
+	if idx := strings.Index(normalized, "/"); idx >= 0 {
+		return normalized[:idx]
+	}
+	return normalized
+}
+
+func discoverSemanticShardGraph(repoPath string, paths []string) ([]string, []runtimeShardPlanGraphEdge) {
 	normalized := normalizeAndSortShardPaths(paths)
 	if len(normalized) <= 1 {
-		groups := make([][]string, 0, len(normalized))
-		for _, value := range normalized {
-			groups = append(groups, []string{value})
-		}
-		return groups, nil, nil
+		return nil, nil
 	}
 	if strings.TrimSpace(repoPath) == "" {
-		groups := make([][]string, 0, len(normalized))
-		for _, value := range normalized {
-			groups = append(groups, []string{value})
-		}
-		return groups, []string{"semantic shard discovery fallback: repo path unavailable, using heuristic shard groups"}, nil
+		return []string{"semantic shard discovery fallback: repo path unavailable; semantic graph omitted"}, nil
 	}
 
 	corpora := make([]string, len(normalized))
@@ -898,31 +1081,7 @@ func discoverSemanticShardGroups(repoPath string, paths []string) ([][]string, [
 		corpora[idx] = corpus
 	}
 
-	parent := make([]int, len(normalized))
-	for idx := range parent {
-		parent[idx] = idx
-	}
 	graphEdges := make([]runtimeShardPlanGraphEdge, 0, len(normalized))
-	find := func(x int) int {
-		for parent[x] != x {
-			parent[x] = parent[parent[x]]
-			x = parent[x]
-		}
-		return x
-	}
-	union := func(a int, b int) {
-		ra := find(a)
-		rb := find(b)
-		if ra == rb {
-			return
-		}
-		if ra < rb {
-			parent[rb] = ra
-			return
-		}
-		parent[ra] = rb
-	}
-
 	for left := 0; left < len(normalized); left++ {
 		for right := left + 1; right < len(normalized); right++ {
 			if related, reason := semanticRootsRelated(normalized[left], normalized[right], corpora[left], corpora[right]); related {
@@ -931,24 +1090,9 @@ func discoverSemanticShardGroups(repoPath string, paths []string) ([][]string, [
 					ToPath:   normalized[right],
 					Reason:   reason,
 				})
-				union(left, right)
 			}
 		}
 	}
-
-	groupsMap := map[int][]string{}
-	for idx, rel := range normalized {
-		root := find(idx)
-		groupsMap[root] = append(groupsMap[root], rel)
-	}
-	groups := make([][]string, 0, len(groupsMap))
-	for _, group := range groupsMap {
-		sort.Strings(group)
-		groups = append(groups, group)
-	}
-	sort.Slice(groups, func(i, j int) bool {
-		return strings.Join(groups[i], "|") < strings.Join(groups[j], "|")
-	})
 	sort.Slice(graphEdges, func(i, j int) bool {
 		if graphEdges[i].FromPath != graphEdges[j].FromPath {
 			return graphEdges[i].FromPath < graphEdges[j].FromPath
@@ -958,7 +1102,7 @@ func discoverSemanticShardGroups(repoPath string, paths []string) ([][]string, [
 		}
 		return graphEdges[i].Reason < graphEdges[j].Reason
 	})
-	return groups, warnings, graphEdges
+	return warnings, graphEdges
 }
 
 func semanticRootsRelated(left string, right string, leftCorpus string, rightCorpus string) (bool, string) {
@@ -1006,14 +1150,16 @@ func buildSemanticCorpus(repoPath string, rel string) (string, error) {
 	if rel == "." {
 		abs = repoPath
 	}
-	if info, err := os.Stat(abs); err != nil {
+	info, err := os.Stat(abs)
+	if err != nil {
 		return "", err
-	} else if !info.IsDir() {
-		return "", fmt.Errorf("path %q is not a directory", abs)
+	}
+	if !info.IsDir() {
+		return readSemanticSourceFile(abs), nil
 	}
 
 	parts := make([]string, 0, 32)
-	err := filepath.WalkDir(abs, func(current string, entry fs.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(abs, func(current string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil
 		}
@@ -1051,4 +1197,21 @@ func buildSemanticCorpus(repoPath string, rel string) (string, error) {
 		return "", err
 	}
 	return strings.Join(parts, "\n"), nil
+}
+
+func readSemanticSourceFile(abs string) string {
+	ext := strings.ToLower(filepath.Ext(abs))
+	if _, ok := semanticSourceExtensions[ext]; !ok {
+		return ""
+	}
+	file, err := os.Open(abs)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	content, err := io.ReadAll(io.LimitReader(file, 128*1024))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(strings.ToLower(string(content)))
 }
