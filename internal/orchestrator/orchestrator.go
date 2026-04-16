@@ -325,10 +325,9 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	}
 	resolvedExecution := s.ResolveExecutionProfile(request.Workspace.Manifest)
 	validation := request.Workspace.Validate(ctx, workspace.ValidateOptions{
-		ResolveRepos:      true,
-		FetchGit:          true,
-		VerifyRefs:        true,
-		RepoSelectionMode: resolvedExecution.Effective.RepoSelection,
+		ResolveRepos: true,
+		FetchGit:     true,
+		VerifyRefs:   true,
 	})
 	if !validation.OK {
 		finishedAt := s.clock().UTC()
@@ -375,13 +374,9 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		resumeFromStep:     resumeFromStep,
 		warnings:           append([]string(nil), initialWarnings...),
 		resolvedRepoPaths:  map[string]string{},
-		repoSelectionMode:  validation.RepoSelectionMode,
-		selectedRepoScopes: append([]string(nil), validation.SelectedRepoScopes...),
-		repoSelection:      append([]workspace.RepoSelectionDecision(nil), validation.RepoSelection...),
+		repoSelectionMode:  "all",
+		selectedRepoScopes: collectRepoScopes(request.Workspace.Manifest.Repos),
 		reportContext:      reports.DefaultReportRenderContext(),
-	}
-	if len(execution.selectedRepoScopes) == 0 && execution.repoSelectionMode == workspace.RepoSelectionAll {
-		execution.selectedRepoScopes = collectRepoScopes(request.Workspace.Manifest.Repos)
 	}
 	for _, resolvedRepo := range validation.ResolvedRepos {
 		name := strings.TrimSpace(resolvedRepo.Name)
@@ -410,38 +405,10 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		"max_parallel":     execution.executionProfile.MaxParallel,
 		"failure_policy":   execution.executionProfile.FailurePolicy,
 		"shard_discovery":  execution.executionProfile.ShardMode,
-		"repo_selection":   execution.executionProfile.RepoSelection,
 		"selected_scopes":  append([]string(nil), execution.selectedRepoScopes...),
 		"timeout_step_sec": resolvedTimeouts.Effective.StepTimeoutSec,
 		"timeout_hb_sec":   resolvedTimeouts.Effective.HeartbeatSec,
 	})
-	for _, diagnostic := range validation.Warnings {
-		if diagnostic.Code != "workspace.repo.selection.role_unknown" {
-			continue
-		}
-		execution.addWarning(fmt.Sprintf("%s: %s", diagnostic.Code, diagnostic.Message))
-	}
-	if err := execution.persistRepoSelectionSummary(); err != nil {
-		finishedAt := s.clock().UTC()
-		failedInfo := initialInfo
-		failedInfo.Status = RunStatusFailed
-		failedInfo.Error = fmt.Sprintf("persist repo selection summary: %v", err)
-		failedInfo.FinishedAt = &finishedAt
-		s.storeRun(runRecord{
-			info:      failedInfo,
-			artifacts: append([]Artifact(nil), execution.artifacts...),
-		})
-		s.appendRunLog(runID, RunLogEntry{
-			Timestamp: finishedAt,
-			Level:     RunLogLevelError,
-			Message:   "run failed: persist repo selection summary",
-			Fields: map[string]any{
-				"error": failedInfo.Error,
-			},
-		})
-		_ = s.cleanupRunLogs()
-		return failedInfo, nil, err
-	}
 	execution.onStep = func(stepID string) {
 		progress := initialInfo
 		progress.Status = RunStatusRunning
@@ -1236,7 +1203,6 @@ type pipelineExecution struct {
 	resolvedRepoPaths        map[string]string
 	repoSelectionMode        string
 	selectedRepoScopes       []string
-	repoSelection            []workspace.RepoSelectionDecision
 	collectOutcome           runtimeShardOutcome
 	findingsOutcome          runtimeShardOutcome
 	findingsSkipped          bool
@@ -2529,8 +2495,8 @@ func (e *pipelineExecution) isRepoScopeSelected(scope string) bool {
 	}
 	selected := normalizeOrderedUniqueStrings(e.selectedRepoScopes)
 	if len(selected) == 0 {
-		mode := workspace.CanonicalRepoSelectionMode(e.repoSelectionMode)
-		return mode == workspace.RepoSelectionAll
+		mode := strings.ToLower(strings.TrimSpace(e.repoSelectionMode))
+		return mode == "" || mode == "all"
 	}
 	for _, candidate := range selected {
 		if candidate == scope {
