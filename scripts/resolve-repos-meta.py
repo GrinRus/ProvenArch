@@ -56,10 +56,6 @@ def normalize_declared_repos(repos_file: Path, repos: list[dict[str, Any]], sour
         if has_path == has_git:
             raise SystemExit(f"repos[{idx}] must set exactly one of path or git_url")
         ref = str(item.get("ref", "")).strip()
-        analysis = item.get("analysis")
-        declared_role = ""
-        if isinstance(analysis, dict):
-            declared_role = str(analysis.get("role", "")).strip().lower()
         if has_path:
             source = "path"
             path_value = Path(path_raw)
@@ -72,8 +68,6 @@ def normalize_declared_repos(repos_file: Path, repos: list[dict[str, Any]], sour
         else:
             source = "git_url"
             entry = {"name": name, "source": source, "git_url": git_url, "ref": ref}
-        if declared_role:
-            entry["declared_role"] = declared_role
         if source_kind == "path" and source != "path":
             raise SystemExit(f"profile source_kind=path but repos[{idx}] uses git_url")
         if source_kind == "git_url" and source != "git_url":

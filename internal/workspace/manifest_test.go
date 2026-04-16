@@ -117,7 +117,7 @@ repos:
 	}
 }
 
-func TestOpenRejectsManifestWithInvalidRepoSelection(t *testing.T) {
+func TestOpenRejectsManifestWithLegacyRepoSelectionField(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -129,15 +129,15 @@ repos:
 runtime:
   profile:
     execution:
-      repo_selection: backend
+      repo_selection: all
 `)
 
 	_, err := Open(root)
 	if err == nil {
 		t.Fatalf("expected validation error")
 	}
-	if !strings.Contains(err.Error(), "runtime.profile.execution.repo_selection must be one of: all, backend_only") {
-		t.Fatalf("expected repo_selection validation error, got %v", err)
+	if !strings.Contains(err.Error(), "additionalProperties 'repo_selection' not allowed") {
+		t.Fatalf("expected schema rejection for legacy repo_selection field, got %v", err)
 	}
 }
 

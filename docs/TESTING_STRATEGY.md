@@ -218,16 +218,16 @@ Implemented additional jobs:
   - backend quality source-of-truth: только snapshot reports (`snapshots/<run_id>/reports/*`), при отсутствии snapshot фиксируется `reliability:snapshot-missing` (без workspace fallback)
   - semantic hard-fail checks в batch evaluator: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`
   - multi-profile hard-fail: `analysis:cross-repo-missing` при `expected_repo_count >= 2` и отсутствии cross-repo сигнала
-  - runtime-flow hard-fail checks: `runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:repo-selection`, `runtime:execution-semantics`, `runtime_flow_failed`
+  - runtime-flow hard-fail checks: `runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:execution-semantics`, `runtime_flow_failed`
   - hard-pass учитывает semantic hard-fail и snapshot source validity
   - run artifacts default: `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/*`
   - reports: `run_matrix_<batch-id>.md/.tsv`, `frontend_e2e_matrix_<batch-id>.md`, `frontend_cancel_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md` (+ fields `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, runtime-flow checks, failure classes `runtime_parse/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing/precheck_failed`)
-  - `quality_report_<batch-id>.md` содержит `Backend-Only Audit` section для manual acceptance по auto role detection
 - profile matrix regression (local official runbook, non-required CI):
   - `scripts/full-run-batch-matrix.sh`
   - `E2E_MATRIX_FILE` обязателен (`profiles[]`: `id`, `repos_file`, `expected_repo_count`, `source_kind`)
   - `sweeps[]` optional (если отсутствует -> implicit `baseline`)
-  - release-ready sweep set: `baseline` + `scale-backend`
+  - release-ready sweep set: `baseline` + `parallel-default`
+  - matrix invariant: для одного `profile_id` shard-plan должен совпадать между `baseline` и `parallel-default`
   - относительные `repos_file` пути резолвятся от директории `E2E_MATRIX_FILE`
   - официальные профили: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
   - для `source_kind=git_url` refs должны быть pinned

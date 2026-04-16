@@ -7,7 +7,6 @@ ACP_EXECUTION_ENV_KEYS=(
   ACP_MAX_PARALLEL_TASKS
   ACP_FAILURE_POLICY
   ACP_SHARD_DISCOVERY_MODE
-  ACP_REPO_SELECTION
 )
 
 acp_validate_execution_env_overrides() {
@@ -22,8 +21,6 @@ acp_validate_execution_env_overrides() {
     message="ACP_FAILURE_POLICY must be fail_fast|best_effort (or empty), got '${ACP_FAILURE_POLICY}'"
   elif [[ -n "${ACP_SHARD_DISCOVERY_MODE:-}" && "${ACP_SHARD_DISCOVERY_MODE}" != "heuristics" && "${ACP_SHARD_DISCOVERY_MODE}" != "semantic" ]]; then
     message="ACP_SHARD_DISCOVERY_MODE must be heuristics|semantic (or empty), got '${ACP_SHARD_DISCOVERY_MODE}'"
-  elif [[ -n "${ACP_REPO_SELECTION:-}" && "${ACP_REPO_SELECTION}" != "all" && "${ACP_REPO_SELECTION}" != "backend_only" ]]; then
-    message="ACP_REPO_SELECTION must be all|backend_only (or empty), got '${ACP_REPO_SELECTION}'"
   fi
 
   if [[ -z "$message" ]]; then

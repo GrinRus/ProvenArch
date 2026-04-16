@@ -12,14 +12,12 @@ DEFAULTS = {
     "max_parallel_tasks": 1,
     "failure_policy": "best_effort",
     "shard_discovery_mode": "heuristics",
-    "repo_selection": "all",
 }
 
 ALLOWED = {
     "strategy": {"sequential", "parallel"},
     "failure_policy": {"fail_fast", "best_effort"},
     "shard_discovery_mode": {"heuristics", "semantic"},
-    "repo_selection": {"all", "backend_only"},
 }
 
 
@@ -79,18 +77,13 @@ def resolve_profile() -> dict[str, dict[str, int | str]]:
     source["shard_discovery_mode"] = "env" if shard_mode_raw in ALLOWED["shard_discovery_mode"] else "default"
     effective["shard_discovery_mode"] = shard_mode
 
-    repo_selection_raw = (os.environ.get("ACP_REPO_SELECTION", "") or "").strip()
-    repo_selection = repo_selection_raw if repo_selection_raw in ALLOWED["repo_selection"] else str(DEFAULTS["repo_selection"])
-    source["repo_selection"] = "env" if repo_selection_raw in ALLOWED["repo_selection"] else "default"
-    effective["repo_selection"] = repo_selection
-
     return {"effective": effective, "source": source}
 
 
 def render_line(profile: dict[str, dict[str, int | str]]) -> str:
     effective = profile["effective"]
     source = profile["source"]
-    keys = ("strategy", "max_parallel_tasks", "failure_policy", "shard_discovery_mode", "repo_selection")
+    keys = ("strategy", "max_parallel_tasks", "failure_policy", "shard_discovery_mode")
     parts = [f"{key}={effective[key]}({source[key]})" for key in keys]
     return " ".join(parts)
 

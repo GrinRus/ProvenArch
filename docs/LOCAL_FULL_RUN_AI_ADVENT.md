@@ -80,7 +80,6 @@ Batch/Frontend scripts:
     - `ACP_MAX_PARALLEL_TASKS`
     - `ACP_FAILURE_POLICY`
     - `ACP_SHARD_DISCOVERY_MODE`
-    - `ACP_REPO_SELECTION`
   - `E2E_TMP_ROOT` (default `/tmp/provenarch-test_arch_project`)
   - `BATCH_ROOT` (default `${E2E_TMP_ROOT}/runs/${BATCH_ID}`)
   - `REPORTS_ROOT` (default `${E2E_TMP_ROOT}/reports`)
@@ -97,7 +96,7 @@ Batch/Frontend scripts:
   - `E2E_MATRIX_FILE` (required; YAML `profiles[]`, optional `sweeps[]`)
   - обязательные профили: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
   - если `sweeps[]` отсутствует -> implicit `baseline` sweep
-  - release-ready sweeps: `baseline`, `scale-backend`
+  - release-ready sweeps: `baseline`, `parallel-default`
   - `repos_file` в matrix-профилях: относительные пути резолвятся от директории `E2E_MATRIX_FILE`
   - `MATRIX_ID` (default `matrix-<UTC timestamp>`)
   - `MATRIX_ROOT` (default `${E2E_TMP_ROOT}/matrix/${MATRIX_ID}`)
@@ -218,10 +217,9 @@ Batch evaluator source-of-truth:
 - если snapshot недоступен, evaluator фиксирует issue `reliability:snapshot-missing` (без fallback к `arch-workspace/reports`);
 - frontend live e2e запускается на отдельной копии workspace (`frontend-workspace`) и не влияет на backend quality content score.
 - frontend/cancel matrix формируются в run-level формате (`provider + run_index`), strict matrix gate блокирует любой init run-status != `passed`.
-- `quality_report_<batch-id>.md` включает `Backend-Only Audit` section для manual acceptance по auto role detection под `repo_selection=backend_only`.
 - для multi-profile (`EXPECTED_REPO_COUNT >= 2`) batch hard-fail включает `analysis:cross-repo-missing`.
 - backend run-matrix дополнительно классифицирует failure classes: `runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_signal_terminated`, `infra_incomplete_cycle`, `quality_gates_failed`, `summary_missing`, `precheck_failed`.
-- runtime flow checks в evaluator: `runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:repo-selection`, `runtime:execution-semantics`, `runtime_flow_failed`.
+- runtime flow checks в evaluator: `runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:execution-semantics`, `runtime_flow_failed`.
 
 При `runner_parse_failed` raw stdout/stderr сохраняются в:
 - `WORKSPACE/reports/taskruns/raw/*-stdout.log`

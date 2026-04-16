@@ -1,12 +1,12 @@
 ---
 name: acp-e2e-live-gate
-description: Используй для trusted-machine pre-release live E2E gate, matrix harness по wave1/wave2, additional non-release smoke/diagnostic прогонов и manual backend_only acceptance audit.
+description: Используй для trusted-machine pre-release live E2E gate, matrix harness по wave1/wave2 и дополнительных non-release smoke/diagnostic прогонов поверх canonical baseline/parallel-default sweeps.
 ---
 
 ## Когда использовать
 - Нужен `PASS|FAIL` pre-release live verdict.
 - Нужно прогнать `scripts/full-run-batch-matrix.sh` без wrapper.
-- Нужно проверить новый runtime behavior beyond release verdict: parallel smoke, forced-incomplete diagnostic, `backend_only` acceptance.
+- Нужно проверить новый runtime behavior beyond release verdict: parallel smoke, forced-incomplete diagnostic и shard-plan invariant.
 
 ## Source of truth
 1) `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
@@ -21,7 +21,7 @@ description: Используй для trusted-machine pre-release live E2E gate
 2) Перед release run проверить, что локальные `path` checkout'ы существуют и совпадают с pinned SHA из curated/github presets.
 3) Для release verdict использовать только `reports/release_verdict_<matrix-id>.json`.
 4) Не использовать diagnostic timeout overrides в official release matrix.
-5) Для non-release execution overrides задавать effective execution profile через `ACP_EXECUTION_*` и `ACP_REPO_SELECTION`, а не через `BATCH_*`.
+5) Для non-release execution overrides задавать effective execution profile через `ACP_EXECUTION_*`, а не через `BATCH_*`.
 6) Не добавлять wrapper-скрипт поверх `scripts/full-run-batch-matrix.sh`.
 7) Не редактировать canonical wave files или curated `repos_file`, чтобы адаптировать release gate под неподходящий хост; если текущая машина не удовлетворяет prerequisites, остановить прогон и зафиксировать operational blocker.
 
@@ -63,8 +63,8 @@ PY
 3) Выполнить official wave2 matrix.
 4) Выполнить additional non-release checks:
    - parallel smoke: два параллельных `full-run-batch-5x2.sh` с разными `BATCH_ID` и `BATCH_PROVIDER_FILTER=qwen-code|claude-code`
-   - forced-incomplete diagnostic run с `ACP_EXECUTION_STRATEGY=parallel`, `ACP_MAX_PARALLEL_TASKS=4`, `ACP_FAILURE_POLICY=best_effort`, `ACP_SHARD_DISCOVERY_MODE=semantic`, `ACP_REPO_SELECTION=backend_only`
-5) Выполнить manual acceptance audit по `repo-selection-summary.json` under `scale-backend`.
+   - forced-incomplete diagnostic run с `ACP_EXECUTION_STRATEGY=parallel`, `ACP_MAX_PARALLEL_TASKS=4`, `ACP_FAILURE_POLICY=best_effort`, `ACP_SHARD_DISCOVERY_MODE=heuristics`
+5) Проверить matrix invariant: для одного `profile_id` sweeps `baseline` и `parallel-default` дают одинаковый shard-plan.
 
 ## Acceptance focus
 - Во всех `profile+sweep`: `strict_status=passed`
@@ -73,12 +73,7 @@ PY
 - Frontend init/cancel passed для обоих провайдеров
 - `artifact_source` только `snapshot`
 - Нет `analysis:evidence-scope` и `analysis:cross-repo-missing`
-
-## backend_only audit
-- Проверять `reports/taskruns/*-repo-selection-summary.json`
-- Ожидание: любой repo с `effective_role=frontend` under `backend_only` должен быть `included=false`
-- Дополнительно frontend-like repo names тоже должны быть явно отмечены, даже если ACP оставил им `effective_role=unknown`
-- Если frontend-like repo остаётся `included=true` с `effective_role=unknown`, это product gap, даже если official strict verdict прошёл
+- Для одного `profile_id` shard-plan invariant между `baseline` и `parallel-default` = `passed`
 
 ## Common blockers
 - `repos[1] path does not exist: /tmp/provenarch-live-e2e/...`

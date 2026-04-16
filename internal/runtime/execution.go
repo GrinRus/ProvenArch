@@ -13,7 +13,6 @@ const (
 	ExecutionMaxParallelEnv   = "ACP_MAX_PARALLEL_TASKS"
 	ExecutionFailurePolicyEnv = "ACP_FAILURE_POLICY"
 	ExecutionShardModeEnv     = "ACP_SHARD_DISCOVERY_MODE"
-	ExecutionRepoSelectionEnv = "ACP_REPO_SELECTION"
 )
 
 const (
@@ -25,9 +24,6 @@ const (
 
 	ExecutionShardDiscoveryHeuristics = "heuristics"
 	ExecutionShardDiscoverySemantic   = "semantic"
-
-	ExecutionRepoSelectionAll         = workspace.RepoSelectionAll
-	ExecutionRepoSelectionBackendOnly = workspace.RepoSelectionBackendOnly
 )
 
 const (
@@ -35,7 +31,6 @@ const (
 	DefaultExecutionMaxParallel   = 1
 	DefaultExecutionFailurePolicy = ExecutionFailurePolicyBestEffort
 	DefaultExecutionShardMode     = ExecutionShardDiscoveryHeuristics
-	DefaultExecutionRepoSelection = ExecutionRepoSelectionAll
 )
 
 type ExecutionSource string
@@ -52,7 +47,6 @@ type ExecutionValues struct {
 	MaxParallel   int    `json:"max_parallel_tasks"`
 	FailurePolicy string `json:"failure_policy"`
 	ShardMode     string `json:"shard_discovery_mode"`
-	RepoSelection string `json:"repo_selection"`
 }
 
 type ExecutionSources struct {
@@ -60,7 +54,6 @@ type ExecutionSources struct {
 	MaxParallel   ExecutionSource `json:"max_parallel_tasks"`
 	FailurePolicy ExecutionSource `json:"failure_policy"`
 	ShardMode     ExecutionSource `json:"shard_discovery_mode"`
-	RepoSelection ExecutionSource `json:"repo_selection"`
 }
 
 type ExecutionResolution struct {
@@ -74,7 +67,6 @@ type ExecutionOverrides struct {
 	MaxParallel   *int
 	FailurePolicy *string
 	ShardMode     *string
-	RepoSelection *string
 }
 
 func ResolveExecution(manifest workspace.Manifest, overrides ExecutionOverrides) ExecutionResolution {
@@ -87,7 +79,6 @@ func DefaultExecution() ExecutionValues {
 		MaxParallel:   DefaultExecutionMaxParallel,
 		FailurePolicy: DefaultExecutionFailurePolicy,
 		ShardMode:     DefaultExecutionShardMode,
-		RepoSelection: DefaultExecutionRepoSelection,
 	}
 }
 
@@ -103,7 +94,6 @@ func resolveExecutionWithLookup(manifest workspace.Manifest, overrides Execution
 		MaxParallel:   ExecutionSourceDefault,
 		FailurePolicy: ExecutionSourceDefault,
 		ShardMode:     ExecutionSourceDefault,
-		RepoSelection: ExecutionSourceDefault,
 	}
 
 	effective.Strategy, source.Strategy = resolveEnumValue(
@@ -141,15 +131,6 @@ func resolveExecutionWithLookup(manifest workspace.Manifest, overrides Execution
 		DefaultExecutionShardMode,
 		lookup,
 	)
-	effective.RepoSelection, source.RepoSelection = resolveEnumValue(
-		persisted.RepoSelection,
-		overrides.RepoSelection,
-		ExecutionRepoSelectionEnv,
-		[]string{ExecutionRepoSelectionAll, ExecutionRepoSelectionBackendOnly},
-		DefaultExecutionRepoSelection,
-		lookup,
-	)
-
 	return ExecutionResolution{
 		Persisted: persisted,
 		Effective: effective,

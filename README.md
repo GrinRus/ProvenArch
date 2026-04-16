@@ -45,6 +45,7 @@ ACP не является "рисовалкой диаграмм". Архите�
 - итерационный changelog в `reports/changelog`
 - детальный анализ каждого сервиса: архитектура, внешние интеграции, БД, CI/CD
 - анализ arbitrary stacks через выбранный headless provider (`claude-code|qwen-code`) + baseline prompt bundle, без фиксированного whitelist парсеров в MVP
+- headless runtime получает не только `arch-workspace`, но и resolved source repo directories из `workspace.yaml` / `workspace-validate.json`, чтобы live analysis опирался на реальные checkout-ы, а не только на ACP-generated scaffold
 - явная фиксация недостатка информации через `coverage`, `questions` и findings
 - semantic guard в refresh-цикле: фильтрация нерелевантных placeholder-операций, fallback finding при owner-gap, канонизация/дедуп coverage+questions
 - Git-based versioning/branching для модели, правил, отчётов и proposal-пакетов
@@ -248,7 +249,6 @@ Default values:
 - `max_parallel_tasks=1`
 - `failure_policy=best_effort`
 - `shard_discovery.mode=heuristics`
-- `repo_selection=all`
 
 Precedence:
 - `CLI > env > workspace.yaml > defaults`
@@ -263,16 +263,15 @@ Env overrides:
 - `ACP_MAX_PARALLEL_TASKS`
 - `ACP_FAILURE_POLICY`
 - `ACP_SHARD_DISCOVERY_MODE`
-- `ACP_REPO_SELECTION`
 
 API управления execution-профилем:
 - `GET /api/runtime/execution` (persisted + effective + source)
 - `PUT /api/runtime/execution` (partial update persisted values)
 
-`repo_selection` policy:
-- `all`: анализируются все repos из `workspace.yaml`.
-- `backend_only`: сначала учитывает явный `analysis.role`, затем пытается консервативно вывести роль из repo source (`name`/`path`/`git_url`) и исключает repos с effective role `frontend`.
-- repos без declared/inferred роли остаются включёнными как `unknown`; validator пишет warning `workspace.repo.selection.role_unknown`.
+Sharding policy:
+- `heuristics` остаётся default mode и теперь означает детерминированное структурное разбиение с полным покрытием repo.
+- planner строит только неперекрывающиеся `path_scopes` (`directory`/`file`) и не использует frontend/backend repo filtering.
+- `semantic` сохраняется ради совместимости, но больше не меняет shard boundaries; он добавляет только metadata/graph surface поверх того же shard-plan.
 
 ### 7) Поднимите dev environment
 
@@ -392,12 +391,13 @@ ACP_QWEN_CMD_BIN=qwen \
 - `sweeps[]` (optional):
 - если `sweeps[]` отсутствует -> implicit `baseline` sweep
 - release-ready sweep set:
-  - `baseline`: `strategy=sequential`, `max_parallel_tasks=1`, `failure_policy=best_effort`, `shard_discovery_mode=heuristics`, `repo_selection=all`
-  - `scale-backend`: `strategy=parallel`, `max_parallel_tasks=4`, `failure_policy=best_effort`, `shard_discovery_mode=semantic`, `repo_selection=backend_only`
+  - `baseline`: `strategy=sequential`, `max_parallel_tasks=1`, `failure_policy=best_effort`, `shard_discovery_mode=heuristics`
+  - `parallel-default`: `strategy=parallel`, `max_parallel_tasks=4`, `failure_policy=best_effort`, `shard_discovery_mode=heuristics`
 - release-mode (`MATRIX_ID=release-*`) автоматически включает frontend defaults:
   - `BATCH_FRONTEND_MODE=per_run`
   - `BATCH_FRONTEND_CANCEL_MODE=once_per_provider`
   - `UI_E2E_HEADED=1`
+- matrix acceptance дополнительно проверяет invariant: для одного `profile_id` sweep'ы `baseline` и `parallel-default` должны давать одинаковый shard-plan; отличаться могут только schedule/concurrency и duration
 
 Готовый шаблон: `examples/e2e-matrix.example.yaml` (+ `examples/repos/*.repos.yaml`).
 GitHub target catalog для release выбора (`3` monorepo + `3` multi-repo ecosystems):
@@ -421,10 +421,8 @@ GitHub target catalog для release выбора (`3` monorepo + `3` multi-repo
   - `/tmp/provenarch-test_arch_project/reports/release_verdict_<matrix-id>.md`
   - `/tmp/provenarch-test_arch_project/reports/release_verdict_<matrix-id>.json`
 - backend quality считается только по snapshot-артефактам (`snapshots/<run_id>/reports/*`), frontend smoke запускается на отдельной `frontend-workspace` копии и не мутирует backend baseline
-- `quality_report_<batch-id>.md` включает отдельный `Backend-Only Audit` section для manual acceptance проверки auto role detection под `repo_selection=backend_only`:
-  repo с `effective_role=frontend` должен быть исключён, а frontend-like unknown-role inclusion считается product gap
 - batch evaluator добавляет semantic hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`; для multi-profile (`expected_repo_count >= 2`) обязателен `cross-repo` сигнал (`analysis:cross-repo-missing` при отсутствии)
-- в `run_matrix`/`quality_report` дополнительно фиксируются `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, runtime flow checks (`runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:repo-selection`, `runtime:execution-semantics`, `runtime_flow_failed`) и failure classes (`runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_signal_terminated`, `infra_incomplete_cycle`, `quality_gates_failed`, `summary_missing`, `precheck_failed`)
+- в `run_matrix`/`quality_report` дополнительно фиксируются `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, runtime flow checks (`runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:execution-semantics`, `runtime_flow_failed`) и failure classes (`runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_signal_terminated`, `infra_incomplete_cycle`, `quality_gates_failed`, `summary_missing`, `precheck_failed`)
 - direct `npm run --prefix ui e2e:live`: Playwright output default `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
 - `scripts/frontend-live-e2e.sh`: Playwright output сохраняется в `$OUTPUT_DIR/playwright-results`
 - frontend live e2e ожидает число resolved repos из `UI_E2E_EXPECTED_REPO_COUNT` (default `1`)

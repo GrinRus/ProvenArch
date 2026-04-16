@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 )
 
 type DiagnosticLevel string
@@ -25,33 +24,21 @@ type Diagnostic struct {
 }
 
 type ValidationReport struct {
-	Workspace          string                  `json:"workspace"`
-	OK                 bool                    `json:"ok"`
-	Errors             []Diagnostic            `json:"errors,omitempty"`
-	Warnings           []Diagnostic            `json:"warnings,omitempty"`
-	ResolvedRepos      []ResolvedRepo          `json:"resolved_repos,omitempty"`
-	RepoSelectionMode  string                  `json:"repo_selection_mode,omitempty"`
-	SelectedRepoScopes []string                `json:"selected_repo_scopes,omitempty"`
-	RepoSelection      []RepoSelectionDecision `json:"repo_selection,omitempty"`
+	Workspace     string         `json:"workspace"`
+	OK            bool           `json:"ok"`
+	Errors        []Diagnostic   `json:"errors,omitempty"`
+	Warnings      []Diagnostic   `json:"warnings,omitempty"`
+	ResolvedRepos []ResolvedRepo `json:"resolved_repos,omitempty"`
 }
 
 type ValidateOptions struct {
-	ResolveRepos      bool
-	FetchGit          bool
-	VerifyRefs        bool
-	RepoSelectionMode string
+	ResolveRepos bool
+	FetchGit     bool
+	VerifyRefs   bool
 }
 
 func (r Root) Validate(ctx context.Context, options ValidateOptions) ValidationReport {
 	report := ValidationReport{Workspace: r.Path}
-	repoSelectionMode := CanonicalRepoSelectionMode(options.RepoSelectionMode)
-	report.RepoSelectionMode = repoSelectionMode
-	selectedScopes, selectionDecisions, selectionDiagnostics := EvaluateRepoSelection(r.Manifest.Repos, repoSelectionMode)
-	report.SelectedRepoScopes = selectedScopes
-	report.RepoSelection = selectionDecisions
-	for _, diagnostic := range selectionDiagnostics {
-		report.Warnings = append(report.Warnings, diagnostic)
-	}
 
 	importsPath, err := r.Resolve(r.Manifest.Docs.ImportsPath)
 	if err != nil {
@@ -103,26 +90,6 @@ func (r Root) Validate(ctx context.Context, options ValidateOptions) ValidationR
 			} else {
 				report.Warnings = append(report.Warnings, diagnostic)
 			}
-		}
-		decisionsByRepo := map[string]RepoSelectionDecision{}
-		for _, decision := range report.RepoSelection {
-			repo := strings.TrimSpace(decision.Name)
-			if repo == "" {
-				continue
-			}
-			decisionsByRepo[repo] = decision
-		}
-		for idx := range report.ResolvedRepos {
-			repo := strings.TrimSpace(report.ResolvedRepos[idx].Name)
-			decision, ok := decisionsByRepo[repo]
-			if !ok {
-				continue
-			}
-			report.ResolvedRepos[idx].DeclaredRole = decision.DeclaredRole
-			report.ResolvedRepos[idx].EffectiveRole = decision.EffectiveRole
-			included := decision.Included
-			report.ResolvedRepos[idx].Included = &included
-			report.ResolvedRepos[idx].SelectionReason = decision.Reason
 		}
 	}
 

@@ -28,7 +28,6 @@ ACP_EXECUTION_STRATEGY="${ACP_EXECUTION_STRATEGY:-}"
 ACP_MAX_PARALLEL_TASKS="${ACP_MAX_PARALLEL_TASKS:-}"
 ACP_FAILURE_POLICY="${ACP_FAILURE_POLICY:-}"
 ACP_SHARD_DISCOVERY_MODE="${ACP_SHARD_DISCOVERY_MODE:-}"
-ACP_REPO_SELECTION="${ACP_REPO_SELECTION:-}"
 BATCH_PROVIDER_FILTER="${BATCH_PROVIDER_FILTER:-all}"
 BATCH_RUN_SELECTION="${BATCH_RUN_SELECTION:-all}"
 BATCH_SKIP_PRECHECK="${BATCH_SKIP_PRECHECK:-0}"
@@ -1114,6 +1113,9 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
 
   if [[ "$BATCH_FRONTEND_MODE" == "per_run" ]]; then
     for i in "${SELECTED_RUN_INDEXES[@]}"; do
+      if ! should_run_frontend_for_run "$i"; then
+        continue
+      fi
       output_dir="$(frontend_live_output_dir "$provider" "$i")"
       if ! run_frontend_live_e2e "$provider" "$BATCH_ROOT/$provider/run${i}" "$output_dir" "$i"; then
         frontend_failures=$((frontend_failures + 1))
@@ -1159,6 +1161,9 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
 
   if [[ "$BATCH_FRONTEND_CANCEL_MODE" == "per_run" ]]; then
     for i in "${SELECTED_RUN_INDEXES[@]}"; do
+      if ! should_run_frontend_cancel_for_run "$i"; then
+        continue
+      fi
       cancel_output_dir="$(frontend_cancel_output_dir "$provider" "$i")"
       frontend_workspace="$BATCH_ROOT/frontend/$provider/run${i}/frontend-workspace"
       cancel_result=0

@@ -21,12 +21,6 @@ func TestResolveExecutionDefaults(t *testing.T) {
 	if resolved.Source.Strategy != ExecutionSourceDefault {
 		t.Fatalf("expected default source, got %q", resolved.Source.Strategy)
 	}
-	if resolved.Effective.RepoSelection != DefaultExecutionRepoSelection {
-		t.Fatalf("expected default repo selection %q, got %q", DefaultExecutionRepoSelection, resolved.Effective.RepoSelection)
-	}
-	if resolved.Source.RepoSelection != ExecutionSourceDefault {
-		t.Fatalf("expected default repo selection source, got %q", resolved.Source.RepoSelection)
-	}
 }
 
 func TestResolveExecutionWorkspaceValues(t *testing.T) {
@@ -43,7 +37,6 @@ func TestResolveExecutionWorkspaceValues(t *testing.T) {
 					ShardDiscovery: &workspace.RuntimeShardDiscoveryConfig{
 						Mode: ExecutionShardDiscoverySemantic,
 					},
-					RepoSelection: ExecutionRepoSelectionBackendOnly,
 				},
 			},
 		},
@@ -59,12 +52,6 @@ func TestResolveExecutionWorkspaceValues(t *testing.T) {
 	}
 	if resolved.Source.Strategy != ExecutionSourceWorkspace {
 		t.Fatalf("expected workspace source, got %q", resolved.Source.Strategy)
-	}
-	if resolved.Effective.RepoSelection != ExecutionRepoSelectionBackendOnly {
-		t.Fatalf("expected repo selection backend_only, got %q", resolved.Effective.RepoSelection)
-	}
-	if resolved.Source.RepoSelection != ExecutionSourceWorkspace {
-		t.Fatalf("expected repo selection workspace source, got %q", resolved.Source.RepoSelection)
 	}
 }
 
@@ -86,12 +73,10 @@ func TestResolveExecutionOverrideBeatsEnvAndWorkspace(t *testing.T) {
 	overrideStrategy := ExecutionStrategyParallel
 	overrideMax := 9
 	overridePolicy := ExecutionFailurePolicyFailFast
-	overrideRepoSelection := ExecutionRepoSelectionAll
 	resolved := resolveExecutionWithLookup(manifest, ExecutionOverrides{
 		Strategy:      &overrideStrategy,
 		MaxParallel:   &overrideMax,
 		FailurePolicy: &overridePolicy,
-		RepoSelection: &overrideRepoSelection,
 	}, func(name string) (string, bool) {
 		switch name {
 		case ExecutionStrategyEnv:
@@ -100,8 +85,6 @@ func TestResolveExecutionOverrideBeatsEnvAndWorkspace(t *testing.T) {
 			return "4", true
 		case ExecutionFailurePolicyEnv:
 			return ExecutionFailurePolicyBestEffort, true
-		case ExecutionRepoSelectionEnv:
-			return ExecutionRepoSelectionBackendOnly, true
 		default:
 			return "", false
 		}
@@ -117,11 +100,5 @@ func TestResolveExecutionOverrideBeatsEnvAndWorkspace(t *testing.T) {
 	}
 	if resolved.Source.Strategy != ExecutionSourceOverride {
 		t.Fatalf("expected override source, got %q", resolved.Source.Strategy)
-	}
-	if resolved.Effective.RepoSelection != ExecutionRepoSelectionAll {
-		t.Fatalf("expected repo selection override all, got %q", resolved.Effective.RepoSelection)
-	}
-	if resolved.Source.RepoSelection != ExecutionSourceOverride {
-		t.Fatalf("expected repo selection override source, got %q", resolved.Source.RepoSelection)
 	}
 }

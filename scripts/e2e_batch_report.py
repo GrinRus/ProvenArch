@@ -44,18 +44,6 @@ OFF_TOPIC_TERMS = (
     "招标",
 )
 
-FRONTEND_REPO_HINTS = (
-    "android",
-    "browser",
-    "client",
-    "frontend",
-    "ios",
-    "mobile",
-    "ui",
-    "web",
-    "website",
-)
-
 POWER_TARGET_HINTS = (
     "power",
     "energy",
@@ -75,7 +63,6 @@ SYNTHETIC_EVIDENCE_PREFIXES = (
 RUNTIME_FLOW_ISSUE_TAGS = (
     "runtime:shard-artifacts",
     "runtime:shard-metadata",
-    "runtime:repo-selection",
     "runtime:execution-semantics",
 )
 
@@ -273,13 +260,11 @@ def normalize_execution_profile(preflight: dict[str, Any]) -> dict[str, Any] | N
         "max_parallel_tasks": 1,
         "failure_policy": "best_effort",
         "shard_discovery_mode": "heuristics",
-        "repo_selection": "all",
     }
     allowed = {
         "strategy": {"sequential", "parallel"},
         "failure_policy": {"fail_fast", "best_effort"},
         "shard_discovery_mode": {"heuristics", "semantic"},
-        "repo_selection": {"all", "backend_only"},
     }
 
     strategy_raw = str(effective.get("strategy", defaults["strategy"])).strip()
@@ -300,17 +285,12 @@ def normalize_execution_profile(preflight: dict[str, Any]) -> dict[str, Any] | N
     )
     shard_mode_raw = str(effective.get("shard_discovery_mode", defaults["shard_discovery_mode"])).strip()
     shard_mode = shard_mode_raw if shard_mode_raw in allowed["shard_discovery_mode"] else defaults["shard_discovery_mode"]
-    repo_selection_raw = str(effective.get("repo_selection", defaults["repo_selection"])).strip()
-    repo_selection = (
-        repo_selection_raw if repo_selection_raw in allowed["repo_selection"] else defaults["repo_selection"]
-    )
 
     return {
         "strategy": strategy,
         "max_parallel_tasks": max_parallel,
         "failure_policy": failure_policy,
         "shard_discovery_mode": shard_mode,
-        "repo_selection": repo_selection,
     }
 
 
@@ -782,48 +762,6 @@ def evaluate_runtime_flow_checks(
         if run_id in inspected_run_ids:
             continue
         inspected_run_ids.add(run_id)
-
-        repo_selection_path = taskruns_root / f"{run_id}-repo-selection-summary.json"
-        if not repo_selection_path.exists():
-            issues.add("runtime:repo-selection")
-            details.append(f"runtime/repo-selection -> missing {repo_selection_path}")
-            continue
-        try:
-            repo_selection_payload = read_json(repo_selection_path)
-        except Exception as exc:
-            issues.add("runtime:repo-selection")
-            details.append(f"runtime/repo-selection -> invalid json {repo_selection_path} ({exc})")
-            continue
-
-        mode = str(repo_selection_payload.get("repo_selection_mode", "")).strip()
-        if mode != expected_execution["repo_selection"]:
-            issues.add("runtime:repo-selection")
-            details.append(
-                f"runtime/repo-selection -> {repo_selection_path}: expected mode={expected_execution['repo_selection']} got={mode or '-'}"
-            )
-
-        decisions = repo_selection_payload.get("decisions")
-        if not isinstance(decisions, list) or not decisions:
-            issues.add("runtime:repo-selection")
-            details.append(f"runtime/repo-selection -> {repo_selection_path}: missing decisions[]")
-            continue
-
-        for item in decisions:
-            if not isinstance(item, dict):
-                continue
-            reason = str(item.get("reason", "")).strip()
-            if not reason:
-                issues.add("runtime:repo-selection")
-                details.append(
-                    f"runtime/repo-selection -> {repo_selection_path}: empty decision reason for repo={item.get('name', '-')}"
-                )
-            role = normalize_text(str(item.get("effective_role", "")).strip())
-            included = bool(item.get("included", False))
-            if expected_execution["repo_selection"] == "backend_only" and role == "frontend" and included:
-                issues.add("runtime:repo-selection")
-                details.append(
-                    f"runtime/repo-selection -> {repo_selection_path}: frontend repo included under backend_only (repo={item.get('name', '-')})"
-                )
 
     return issues, details
 
@@ -1760,108 +1698,6 @@ def provider_matrix_rows(
     return rows
 
 
-def repo_looks_frontend(name: str) -> bool:
-    normalized = normalize_text(name)
-    if not normalized:
-        return False
-    tokens = set(normalized.split())
-    return any(hint in tokens for hint in FRONTEND_REPO_HINTS)
-
-
-def resolve_repo_selection_summary_path(run: RunEvaluation) -> Path | None:
-    rows = parse_run_results(run.run_dir / "run-results.tsv")
-    headless_rows = parse_headless_rows(rows, run.provider)
-    row = headless_rows.get("refresh") or headless_rows.get("init")
-    if not row:
-        return None
-    run_id = str(row.get("run_id", "")).strip()
-    if not run_id:
-        return None
-    reports_root, _ = resolve_reports_root(run.run_dir, run_id)
-    return reports_root / "taskruns" / f"{run_id}-repo-selection-summary.json"
-
-
-def backend_only_audit_lines(runs: list[RunEvaluation], preflight: dict[str, Any]) -> list[str]:
-    expected_execution = normalize_execution_profile(preflight)
-    if not isinstance(expected_execution, dict) or expected_execution.get("repo_selection") != "backend_only":
-        return ["- not_applicable: batch execution repo_selection != backend_only"]
-
-    lines: list[str] = []
-    frontend_signal_seen = 0
-    gaps = 0
-    for run in runs:
-        summary_path = resolve_repo_selection_summary_path(run)
-        if summary_path is None or not summary_path.exists():
-            gaps += 1
-            lines.append(f"- {run.provider} run{run.run_index}: missing repo-selection summary for backend_only audit")
-            continue
-        try:
-            payload = read_json(summary_path)
-        except Exception as exc:
-            gaps += 1
-            lines.append(f"- {run.provider} run{run.run_index}: invalid repo-selection summary ({exc})")
-            continue
-
-        decisions = payload.get("decisions")
-        if not isinstance(decisions, list):
-            gaps += 1
-            lines.append(f"- {run.provider} run{run.run_index}: repo-selection summary has no decisions[]")
-            continue
-
-        excluded_frontend: list[str] = []
-        included_effective_frontend: list[str] = []
-        included_frontend_like: list[str] = []
-        for item in decisions:
-            if not isinstance(item, dict):
-                continue
-            name = str(item.get("name", "")).strip()
-            effective_role = str(item.get("effective_role", "")).strip()
-            included = bool(item.get("included", False))
-
-            if effective_role == "frontend":
-                frontend_signal_seen += 1
-                if included:
-                    included_effective_frontend.append(name)
-                else:
-                    excluded_frontend.append(name)
-                continue
-
-            if not repo_looks_frontend(name):
-                continue
-            frontend_signal_seen += 1
-            if included:
-                included_frontend_like.append(f"{name} (effective_role={effective_role or '-'})")
-            else:
-                excluded_frontend.append(name)
-
-        if included_effective_frontend:
-            gaps += 1
-            lines.append(
-                f"- {run.provider} run{run.run_index}: product gap, repos with effective_role=frontend still included under backend_only -> {', '.join(included_effective_frontend)}"
-            )
-        elif included_frontend_like:
-            gaps += 1
-            lines.append(
-                f"- {run.provider} run{run.run_index}: product gap, frontend-like repos still included under backend_only -> {', '.join(included_frontend_like)}"
-            )
-        elif excluded_frontend:
-            lines.append(
-                f"- {run.provider} run{run.run_index}: frontend repos excluded under backend_only -> {', '.join(excluded_frontend)}"
-            )
-        else:
-            lines.append(f"- {run.provider} run{run.run_index}: no frontend repos detected in repo-selection summary")
-
-    if frontend_signal_seen == 0:
-        lines.append(
-            "- note: no frontend repos were detected via effective_role=frontend or frontend-like names in this batch, so backend_only auto-detection was not exercised"
-        )
-    if gaps == 0:
-        lines.append("- verdict: no backend_only auto-role gaps detected in this batch")
-    else:
-        lines.append(f"- verdict: backend_only auto-role gaps detected in {gaps} run(s)")
-    return lines
-
-
 def write_quality_report(
     path: Path,
     batch_id: str,
@@ -1907,9 +1743,6 @@ def write_quality_report(
         "",
         "## Frontend Cancel Smoke Verdict",
         *frontend_cancel_verdict_lines(frontend_cancel),
-        "",
-        "## Backend-Only Audit",
-        *backend_only_audit_lines(runs, preflight),
         "",
         "## Provider Matrix",
         "",

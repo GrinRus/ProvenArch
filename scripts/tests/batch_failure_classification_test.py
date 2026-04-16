@@ -695,55 +695,5 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertIn("| qwen-code | 4 | skipped | frontend_workspace_missing | cancel-refresh |", matrix_text)
         self.assertIn("| claude-code | - | failed | frontend_live_e2e_failed | cancel-refresh |", matrix_text)
 
-    def test_backend_only_audit_flags_included_effective_frontend_even_without_frontend_like_name(self) -> None:
-        run_dir = self.root / "run-backend-audit"
-        self._create_fixture_run_dir(run_dir)
-        write_json(
-            run_dir / "snapshots/refresh-run/reports/taskruns/refresh-run-repo-selection-summary.json",
-            {
-                "repo_selection_mode": "backend_only",
-                "decisions": [
-                    {
-                        "name": "console-shell",
-                        "effective_role": "frontend",
-                        "included": True,
-                        "reason": "included by repo_selection=backend_only (effective_role=frontend)",
-                    }
-                ],
-            },
-        )
-
-        run = self.module.RunEvaluation(
-            provider="qwen-code",
-            run_index=1,
-            run_dir=run_dir,
-            hard_pass=False,
-            reliability=0,
-            contract=0,
-            analysis=0,
-            total=0,
-            verdict="FAIL",
-        )
-        lines = self.module.backend_only_audit_lines(
-            [run],
-            {
-                "execution_profile": {
-                    "effective": {
-                        "strategy": "parallel",
-                        "max_parallel_tasks": 4,
-                        "failure_policy": "best_effort",
-                        "shard_discovery_mode": "semantic",
-                        "repo_selection": "backend_only",
-                    }
-                }
-            },
-        )
-
-        joined = "\n".join(lines)
-        self.assertIn("effective_role=frontend still included under backend_only", joined)
-        self.assertIn("console-shell", joined)
-        self.assertIn("verdict: backend_only auto-role gaps detected in 1 run(s)", joined)
-
-
 if __name__ == "__main__":
     unittest.main()
