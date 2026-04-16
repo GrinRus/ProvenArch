@@ -23,7 +23,8 @@ description: Используй для trusted-machine pre-release live E2E gate
 4) Не использовать diagnostic timeout overrides в official release matrix.
 5) Для non-release execution overrides задавать effective execution profile через `ACP_EXECUTION_*`, а не через `BATCH_*`.
 6) Не добавлять wrapper-скрипт поверх `scripts/full-run-batch-matrix.sh`.
-7) Не редактировать canonical wave files или curated `repos_file`, чтобы адаптировать release gate под неподходящий хост; если текущая машина не удовлетворяет prerequisites, остановить прогон и зафиксировать operational blocker.
+7) В release-mode matrix обязан иметь explicit `sweeps[]` с ровно `baseline` + `parallel-default`; implicit baseline допустим только для non-release/diagnostic.
+8) Не редактировать canonical wave files или curated `repos_file`, чтобы адаптировать release gate под неподходящий хост; если текущая машина не удовлетворяет prerequisites, остановить прогон и зафиксировать operational blocker.
 
 ## Fail-Fast Host Check
 Перед DoD и matrix run сначала проверить, подходит ли хост для official release gate:
@@ -74,6 +75,7 @@ PY
 - `artifact_source` только `snapshot`
 - Нет `analysis:evidence-scope` и `analysis:cross-repo-missing`
 - Для одного `profile_id` shard-plan invariant между `baseline` и `parallel-default` = `passed`
+- `release_contract.contract_status=passed` и `expected_profile_sweep_runs=observed_profile_sweep_runs=8`
 
 ## Common blockers
 - `repos[1] path does not exist: /tmp/provenarch-live-e2e/...`

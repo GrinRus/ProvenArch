@@ -95,8 +95,9 @@ Batch/Frontend scripts:
 - `scripts/full-run-batch-matrix.sh`
   - `E2E_MATRIX_FILE` (required; YAML `profiles[]`, optional `sweeps[]`)
   - обязательные профили: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
-  - если `sweeps[]` отсутствует -> implicit `baseline` sweep
+  - если `sweeps[]` отсутствует -> implicit `baseline` sweep (только non-release/diagnostic)
   - release-ready sweeps: `baseline`, `parallel-default`
+  - release-mode (`MATRIX_ID=release-*` или `E2E_MATRIX_RELEASE_MODE=1`) требует explicit `sweeps[]` с ровно `baseline` + `parallel-default`; иначе matrix driver завершится fail-fast до batch execution
   - `repos_file` в matrix-профилях: относительные пути резолвятся от директории `E2E_MATRIX_FILE`
   - `MATRIX_ID` (default `matrix-<UTC timestamp>`)
   - `MATRIX_ROOT` (default `${E2E_TMP_ROOT}/matrix/${MATRIX_ID}`)

@@ -163,10 +163,11 @@ git -C /real/local/path/posthog checkout --detach 14d29a548d63665d60b506cf13bd5c
   - `multi-path`
   - `multi-git_url`
 - `sweeps[]` (optional):
-  - если отсутствует -> implicit `baseline`
+  - если отсутствует -> implicit `baseline` (только non-release/diagnostic)
   - release-ready harness использует 2 sweep-профиля:
     - `baseline`: `strategy=sequential`, `max_parallel_tasks=1`, `failure_policy=best_effort`, `shard_discovery_mode=heuristics`
     - `parallel-default`: `strategy=parallel`, `max_parallel_tasks=4`, `failure_policy=best_effort`, `shard_discovery_mode=heuristics`
+  - в release-mode (`MATRIX_ID=release-*` или `E2E_MATRIX_RELEASE_MODE=1`) `sweeps[]` обязателен и должен содержать ровно `baseline` + `parallel-default`; любое missing/extra значение блокирует matrix до batch run
 
 Готовый шаблон:
 - `examples/e2e-matrix.example.yaml`
@@ -378,6 +379,8 @@ Blocking signals:
 
 Blocking signals:
 - `shard_plan_invariant=failed`
+- `shard_plan_invariant=not_compared`
+- `shard_plan_invariant=artifact_error`
 - `analysis:cross-repo-missing`
 
 ### 6.3 Execution profile semantics
@@ -499,6 +502,10 @@ Release `PASS` только если одновременно:
 7. Нет runtime flow violations (`runtime:*`, `runtime_flow_failed`).
 8. Frontend live/cancel smoke: `passed` для обоих провайдеров.
 9. Для каждого `profile_id` invariant `baseline == parallel-default` по shard-plan выполнен.
+10. `release_contract` в `release_verdict_<matrix-id>.json` имеет `contract_status=passed`:
+  - `required_sweeps=[baseline, parallel-default]`
+  - `observed_profile_sweep_runs=8` и `expected_profile_sweep_runs=8`
+  - `shard_plan_invariant_status=passed`
 
 Любое нарушение => `RELEASE BLOCKED`.
 
