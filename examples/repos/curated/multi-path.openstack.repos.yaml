@@ -1,19 +1,19 @@
 version: 1
 repos:
   - name: openstack
-    path: /absolute/path/to/openstack/openstack
+    path: /tmp/provenarch-live-e2e/openstack/openstack
     ref: 32e939e38f8ff7f91d593e3be94240590afd4db2
   - name: nova
-    path: /absolute/path/to/openstack/nova
+    path: /tmp/provenarch-live-e2e/openstack/nova
     ref: b8340c9361b2a2e9473ba4e8abaabc372360c6ee
   - name: neutron
-    path: /absolute/path/to/openstack/neutron
+    path: /tmp/provenarch-live-e2e/openstack/neutron
     ref: f27e72c44246a3281f882201f91c88896e2adbe6
   - name: cinder
-    path: /absolute/path/to/openstack/cinder
+    path: /tmp/provenarch-live-e2e/openstack/cinder
     ref: 04f5a13c0376859711e69f3916409cb40f700e0f
   - name: keystone
-    path: /absolute/path/to/openstack/keystone
+    path: /tmp/provenarch-live-e2e/openstack/keystone
     ref: 80d5b7bf50448073223723cf1f6001a367695e80
 
 docs:

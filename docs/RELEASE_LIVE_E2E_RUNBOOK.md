@@ -46,10 +46,112 @@ Release verdict для readiness берётся только из:
 - доступ к `path` repos
 - доступ к `git_url` repos с pinned `ref`
 
+### 2.1) Fail-fast host eligibility
+
+Эту проверку выполнять до DoD/preflight и до старта official wave matrices:
+
+```bash
+python3 - <<'PY'
+from pathlib import Path
+import os
+root = Path("/tmp/provenarch-live-e2e")
+parent = root.parent
+print(f"root={root}")
+print(f"root_exists={root.exists()}")
+print(f"root_is_dir={root.is_dir() if root.exists() else False}")
+print(f"parent_writable={parent.exists() and os.access(parent, os.W_OK)}")
+print(f"root_writable={os.access(root, os.W_OK) if root.exists() else 'n/a'}")
+PY
+```
+
+Если результат показывает `parent_writable=false`, либо existing `root` не является writable directory:
+- текущий хост не подходит для official release gate с canonical curated `path` profiles под `/tmp/provenarch-live-e2e`;
+- `wave1`/`wave2` release matrices здесь запускать нельзя;
+- нужно перенести прогон на другой trusted host, а не переписывать matrix/curated files под локальную машину.
+
+### 2.2) One-time canonical path bootstrap
+
+Если хост подходит по `2.1`, но curated `path` checkout'ы ещё не существуют, их нужно подготовить один раз заранее.
+
+Минимальное требование:
+- каждый `path` из `examples/repos/curated/*.repos.yaml` должен существовать локально;
+- каждый checkout должен быть ровно на pinned SHA из соответствующего `github` preset;
+- official release gate запускается только после этого bootstrap.
+
+Есть два устойчивых варианта:
+- preferred: реальные локальные clone в exact canonical путях;
+- acceptable: symlink в canonical `/tmp/provenarch-live-e2e/...` path на уже существующий локальный clone, если symlink ведёт в рабочую git-директорию и checkout тоже зафиксирован на pinned SHA.
+
+Важно:
+- `/tmp` удобен для локального bootstrap, но может очищаться системой;
+- если нужен truly stable trusted host setup, bootstrap должен быть либо легко повторяемым, либо вынесенным на persistent volume, смонтированный в `/tmp/provenarch-live-e2e`.
+
+Пример one-time bootstrap команд для path profiles:
+
+```bash
+# canonical parent dirs
+mkdir -p \
+  /tmp/provenarch-live-e2e/posthog \
+  /tmp/provenarch-live-e2e/openedx \
+  /tmp/provenarch-live-e2e/openedx-unsupported \
+  /tmp/provenarch-live-e2e/GoogleCloudPlatform \
+  /tmp/provenarch-live-e2e/openstack
+
+# wave1 single-path
+git clone https://github.com/posthog/posthog.git /tmp/provenarch-live-e2e/posthog/posthog
+git -C /tmp/provenarch-live-e2e/posthog/posthog checkout --detach 14d29a548d63665d60b506cf13bd5cfb2de7c743
+
+# wave1 multi-path (Open edX)
+git clone https://github.com/openedx/openedx-platform.git /tmp/provenarch-live-e2e/openedx/openedx-platform
+git -C /tmp/provenarch-live-e2e/openedx/openedx-platform checkout --detach 01dc3c84ea58d2e8b8181a90e89d6c9017aceee8
+
+git clone https://github.com/openedx/frontend-platform.git /tmp/provenarch-live-e2e/openedx/frontend-platform
+git -C /tmp/provenarch-live-e2e/openedx/frontend-platform checkout --detach 44cc02429404ed3547c20abd834faf4e487d2c00
+
+git clone https://github.com/openedx/course-discovery.git /tmp/provenarch-live-e2e/openedx/course-discovery
+git -C /tmp/provenarch-live-e2e/openedx/course-discovery checkout --detach 127ea98b0ed6d05b955ea0fc8c57b9c0c285a9a5
+
+git clone https://github.com/openedx/credentials.git /tmp/provenarch-live-e2e/openedx/credentials
+git -C /tmp/provenarch-live-e2e/openedx/credentials checkout --detach 88767bc79e8908a2c731f8c099e917fb8454bd5e
+
+git clone https://github.com/openedx-unsupported/devstack.git /tmp/provenarch-live-e2e/openedx-unsupported/devstack
+git -C /tmp/provenarch-live-e2e/openedx-unsupported/devstack checkout --detach 28f6d7ea1fa30fd7e0bdc10f269999f15f7f8876
+
+# wave2 single-path
+git clone https://github.com/GoogleCloudPlatform/bank-of-anthos.git /tmp/provenarch-live-e2e/GoogleCloudPlatform/bank-of-anthos
+git -C /tmp/provenarch-live-e2e/GoogleCloudPlatform/bank-of-anthos checkout --detach 7f0589c7aaf0e009aacb4cd9e2e8f26bd30061e1
+
+# wave2 multi-path (OpenStack)
+git clone https://github.com/openstack/openstack.git /tmp/provenarch-live-e2e/openstack/openstack
+git -C /tmp/provenarch-live-e2e/openstack/openstack checkout --detach 32e939e38f8ff7f91d593e3be94240590afd4db2
+
+git clone https://github.com/openstack/nova.git /tmp/provenarch-live-e2e/openstack/nova
+git -C /tmp/provenarch-live-e2e/openstack/nova checkout --detach b8340c9361b2a2e9473ba4e8abaabc372360c6ee
+
+git clone https://github.com/openstack/neutron.git /tmp/provenarch-live-e2e/openstack/neutron
+git -C /tmp/provenarch-live-e2e/openstack/neutron checkout --detach f27e72c44246a3281f882201f91c88896e2adbe6
+
+git clone https://github.com/openstack/cinder.git /tmp/provenarch-live-e2e/openstack/cinder
+git -C /tmp/provenarch-live-e2e/openstack/cinder checkout --detach 04f5a13c0376859711e69f3916409cb40f700e0f
+
+git clone https://github.com/openstack/keystone.git /tmp/provenarch-live-e2e/openstack/keystone
+git -C /tmp/provenarch-live-e2e/openstack/keystone checkout --detach 80d5b7bf50448073223723cf1f6001a367695e80
+```
+
+Если репозитории уже выкачаны в другом месте, можно использовать symlink bootstrap вместо повторных clone:
+
+```bash
+mkdir -p /tmp/provenarch-live-e2e/posthog
+ln -s /real/local/path/posthog /tmp/provenarch-live-e2e/posthog/posthog
+git -C /real/local/path/posthog checkout --detach 14d29a548d63665d60b506cf13bd5cfb2de7c743
+```
+
+После bootstrap обязательно прогнать path/SHA verify script из `4) Порядок запуска` перед официальными matrices.
+
 Обязательное условие для path-профилей:
 - локальные checkout должны быть на тех же pinned SHA, что и соответствующие `github` presets;
-- абсолютные пути из `examples/repos/curated/*.repos.yaml` должны реально существовать на trusted машине;
-- если root `/absolute` недоступен на текущем хосте (read-only / missing privileges), выполнять release gate на другой машине или использовать локальный writable mount, где эти абсолютные пути могут быть подготовлены.
+- canonical пути из `examples/repos/curated/*.repos.yaml` должны реально существовать на trusted машине;
+- если `/tmp/provenarch-live-e2e` не может быть создан или системно очищается слишком агрессивно, использовать persistent mount/volume под этим canonical root.
 - не переписывать canonical `examples/e2e-matrix.release-wave*.yaml` или `examples/repos/curated/*.repos.yaml` только ради обхода ограничений текущей машины.
 
 ## 3) Matrix input contract
@@ -416,13 +518,13 @@ Release `PASS` только если одновременно:
 
 ## 9) Common blockers (операционный triage)
 
-1. `repos[1] path does not exist: /absolute/path/to/...`
+1. `repos[1] path does not exist: /tmp/provenarch-live-e2e/...`
 - Причина: path profiles не подготовлены на pinned SHA.
 - Действие: подготовить локальные checkout в точных absolute paths из curated файлов.
 
-2. `mkdir: /absolute: Read-only file system`
-- Причина: хост не позволяет создать canonical path root.
-- Действие: запускать release gate на другой trusted машине или mount/alias среду, где canonical absolute paths доступны.
+2. `SHA_MISMATCH: ... expected=<sha> got=<sha>`
+- Причина: локальный clone существует, но checkout не закреплён на pinned release SHA.
+- Действие: выполнить `git -C <repo> checkout --detach <expected_sha>` и повторить verify script.
 
 3. `runtime_timeout` вместе с `runner_unavailable` в том же run
 - Политика triage: primary incident class = `runtime_timeout` при явном timeout signal в summary/classifier; `runner_unavailable` остаётся secondary evidence.
