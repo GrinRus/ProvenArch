@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "run_id": "run-bank-refresh",
+  "step_id": "refresh.step1.collect",
+  "shard_id": "bank-root",
+  "agent_role": "shard-analyst",
+  "artifact_root": "/tmp/frozen/bank-root",
+  "repo_scopes": [
+    "bank-of-anthos"
+  ],
+  "path_scopes": [
+    "."
+  ],
+  "summary": "Reused existing shard artifacts.",
+  "documents": [
+    {
+      "id": "doc.bank.root",
+      "kind": "report",
+      "title": "Root Shard",
+      "path": "root-analysis.md",
+      "canonical_path": "reports/findings/findings.md",
+      "topics": [
+        "bank"
+      ],
+      "citation_ids": [
+        "cite.runtime-summary"
+      ],
+      "status": "staged"
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.runtime-summary",
+      "repo": "bank-of-anthos",
+      "path": ".gitignore",
+      "claim_ids": [
+        "claim.runtime-summary"
+      ],
+      "document_ids": [
+        "doc.bank.root"
+      ]
+    }
+  ],
+  "compatibility": {
+    "coverage": {
+      "observed": [
+        "services"
+      ],
+      "missing": [
+        "owner mappings"
+      ],
+      "notes": [
+        "reuse-only fixture"
+      ]
+    },
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}

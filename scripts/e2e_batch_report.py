@@ -65,6 +65,7 @@ RUNTIME_FLOW_ISSUE_TAGS = (
     "runtime:shard-metadata",
     "runtime:execution-semantics",
 )
+ARTIFACT_QUALITY_WARNING_PREFIX = "artifact_quality:"
 
 FRONTEND_PROVIDERS = ("qwen-code", "claude-code")
 FRONTEND_LIVE_RESULT_FILENAME = "frontend-e2e-result.json"
@@ -121,6 +122,18 @@ def parse_int(value: str, default: int = 0) -> int:
         return int(str(value).strip())
     except Exception:
         return default
+
+
+def extract_artifact_quality_warnings(quality_payload: dict[str, Any]) -> list[str]:
+    warnings = quality_payload.get("run_warnings") or []
+    if not isinstance(warnings, list):
+        return []
+    extracted: list[str] = []
+    for warning in warnings:
+        text = str(warning).strip()
+        if text.startswith(ARTIFACT_QUALITY_WARNING_PREFIX):
+            extracted.append(text)
+    return extracted
 
 
 def parse_run_results(path: Path) -> list[dict[str, Any]]:
@@ -1121,10 +1134,12 @@ def evaluate_run(
     analysis_collect_status = ""
     analysis_findings_status = ""
     analysis_quality_row = refresh_row or init_row
+    artifact_quality_warnings: list[str] = []
     if analysis_quality_row:
         analysis_quality_path, _ = resolve_quality_json(run_dir, analysis_quality_row)
         if analysis_quality_path.exists():
             analysis_quality_payload = read_json(analysis_quality_path)
+            artifact_quality_warnings = extract_artifact_quality_warnings(analysis_quality_payload)
             evidence_state = analysis_quality_payload.get("evidence_state") or {}
             if isinstance(evidence_state, dict):
                 analysis_report_mode = str(evidence_state.get("report_mode", "")).strip()
@@ -1134,6 +1149,11 @@ def evaluate_run(
                     analysis_collect_status = str(collect_state.get("status", "")).strip()
                 if isinstance(findings_state, dict):
                     analysis_findings_status = str(findings_state.get("status", "")).strip()
+            if artifact_quality_warnings:
+                issues.append("quality:artifact-quality")
+                for warning in artifact_quality_warnings:
+                    details.append(f"quality/artifact-quality -> {analysis_quality_path}: {warning}")
+                quality_gates_failed = True
     findings_path = analysis_reports_root / "findings/findings.md"
     overview_path = analysis_reports_root / "as-is/overview.md"
     coverage_path = analysis_reports_root / "coverage/summary.md"
@@ -1357,6 +1377,7 @@ def evaluate_run(
         and h3
         and h4
         and snapshot_ok
+        and not quality_gates_failed
         and not semantic_hard_fail
         and not runtime_flow_failed
         and not summary_missing

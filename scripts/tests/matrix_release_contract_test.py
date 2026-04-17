@@ -5,10 +5,42 @@ import subprocess
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
 class MatrixReleaseContractTest(unittest.TestCase):
+    SAFE_ENV_KEYS = (
+        "PATH",
+        "HOME",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+        "USER",
+        "LOGNAME",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "SHELL",
+        "PYENV_ROOT",
+    )
+    STRIPPED_ENV_PREFIXES = (
+        "ACP_",
+        "BATCH_",
+        "E2E_",
+        "MATRIX_",
+        "UI_E2E_",
+    )
+    STRIPPED_ENV_KEYS = (
+        "RUN_COUNT",
+        "TARGET_REPOS_FILE",
+        "PROFILE_ID",
+        "PROFILE_SOURCE_KIND",
+        "PROFILE_EXPECTED_REPO_COUNT",
+        "PROFILE_REPOS_FILE",
+        "SWEEP_ID",
+    )
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.repo_root = Path(__file__).resolve().parents[2]
@@ -284,8 +316,7 @@ class MatrixReleaseContractTest(unittest.TestCase):
         extra_env: dict[str, str] | None = None,
         release_mode: str = "1",
     ) -> subprocess.CompletedProcess[str]:
-        env = os.environ.copy()
-        env.update(
+        env = self._build_subprocess_env(
             {
                 "E2E_MATRIX_FILE": str(matrix_file),
                 "BATCH_SCRIPT": str(self.batch_script),
@@ -298,10 +329,9 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 "MATRIX_ROOT": str(self.e2e_tmp_root / "matrix" / matrix_id),
                 "MATRIX_TEST_SENTINEL": str(self.sentinel_path),
                 "MATRIX_TEST_TIMEOUT_SENTINEL": str(self.timeout_sentinel_path),
+                **(extra_env or {}),
             }
         )
-        if extra_env:
-            env.update(extra_env)
         return subprocess.run(
             [str(self.matrix_driver)],
             cwd=self.repo_root,
@@ -309,6 +339,20 @@ class MatrixReleaseContractTest(unittest.TestCase):
             capture_output=True,
             text=True,
         )
+
+    def _build_subprocess_env(self, owned_env: dict[str, str]) -> dict[str, str]:
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key in self.SAFE_ENV_KEYS and value
+        }
+        for key in list(env):
+            if any(key.startswith(prefix) for prefix in self.STRIPPED_ENV_PREFIXES):
+                env.pop(key, None)
+        for key in self.STRIPPED_ENV_KEYS:
+            env.pop(key, None)
+        env.update({key: value for key, value in owned_env.items() if value is not None})
+        return env
 
     def _load_verdict(self, matrix_id: str) -> dict:
         verdict_path = self.e2e_tmp_root / "reports" / f"release_verdict_{matrix_id}.json"
@@ -528,6 +572,79 @@ class MatrixReleaseContractTest(unittest.TestCase):
             all(
                 int(rec.get("backend", {}).get("total_runs", 0)) == 4
                 and int(rec.get("backend", {}).get("hard_pass", 0)) == 4
+                for rec in verdict.get("records", [])
+            )
+        )
+
+    def test_release_matrix_ignores_polluted_ambient_env(self) -> None:
+        matrix_file = self._write_matrix_file(["baseline", "parallel-default"])
+        matrix_id = "release-test-hermetic-polluted-env"
+        polluted_env = {
+            "BATCH_PROVIDER_FILTER": "qwen-code",
+            "BATCH_RUN_SELECTION": "1",
+            "RUN_COUNT": "7",
+            "ACP_RUNTIME_STEP_TIMEOUT_SEC": "9999",
+            "ACP_PIPELINE_TIMEOUT_SEC": "9999",
+            "ACP_UI_INIT_POLL_TIMEOUT_SEC": "9999",
+            "E2E_TMP_ROOT": str(self.tmp_root / "ambient-e2e"),
+            "MATRIX_ID": "ambient-matrix-id",
+        }
+        with mock.patch.dict(os.environ, polluted_env, clear=False):
+            result = self._run_matrix(matrix_file, matrix_id)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual(verdict["verdict"], "PASS")
+        release_contract = verdict["release_contract"]
+        self.assertEqual(release_contract["selected_providers"], ["qwen-code", "claude-code"])
+        self.assertEqual(release_contract["selected_run_indexes"], ["1"])
+        self.assertEqual(release_contract["expected_backend_runs_per_profile_sweep"], 2)
+        self.assertTrue(
+            all(
+                int(rec.get("backend", {}).get("total_runs", 0)) == 2
+                and int(rec.get("backend", {}).get("hard_pass", 0)) == 2
+                and rec.get("frontend", {}).get("frontend_qwen_status") == "passed"
+                and rec.get("frontend", {}).get("frontend_claude_status") == "passed"
+                and rec.get("strict_status") == "passed"
+                for rec in verdict.get("records", [])
+            )
+        )
+
+    def test_non_release_run_count_uses_test_owned_env_under_polluted_ambient_env(self) -> None:
+        matrix_file = self._write_matrix_file(
+            None,
+            include_profiles=["single-path", "multi-git_url"],
+        )
+        matrix_id = "matrix-test-non-release-hermetic-run-count"
+        polluted_env = {
+            "BATCH_PROVIDER_FILTER": "qwen-code",
+            "BATCH_RUN_SELECTION": "1",
+            "RUN_COUNT": "9",
+            "ACP_RUNTIME_STEP_TIMEOUT_SEC": "1111",
+            "ACP_PIPELINE_TIMEOUT_SEC": "2222",
+            "ACP_UI_INIT_POLL_TIMEOUT_SEC": "3333",
+        }
+        with mock.patch.dict(os.environ, polluted_env, clear=False):
+            result = self._run_matrix(
+                matrix_file,
+                matrix_id,
+                extra_env={"RUN_COUNT": "2"},
+                release_mode="0",
+            )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual(verdict["verdict"], "PASS")
+        release_contract = verdict["release_contract"]
+        self.assertEqual(release_contract["mode"], "non-release")
+        self.assertEqual(release_contract["selected_providers"], ["qwen-code", "claude-code"])
+        self.assertEqual(release_contract["selected_run_indexes"], ["1", "2"])
+        self.assertEqual(release_contract["expected_backend_runs_per_profile_sweep"], 4)
+        self.assertTrue(
+            all(
+                int(rec.get("backend", {}).get("total_runs", 0)) == 4
+                and int(rec.get("backend", {}).get("hard_pass", 0)) == 4
+                and rec.get("strict_status") == "passed"
                 for rec in verdict.get("records", [])
             )
         )

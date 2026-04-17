@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "run_id": "run-openstack-refresh",
+  "pipeline": "refresh",
+  "generated_at": "2026-04-17T13:07:00Z",
+  "citation_index_path": "reports/taskruns/run-openstack-refresh/staging/final/citation-index.json",
+  "canonical_documents": [
+    {
+      "id": "doc.report.overview",
+      "kind": "report",
+      "title": "Overview",
+      "canonical_path": "reports/as-is/overview.md",
+      "staged_path": "reports/taskruns/run-openstack-refresh/staging/final/reports/as-is/overview.md",
+      "topics": [
+        "openstack"
+      ],
+      "citation_ids": [
+        "cite.runtime-summary"
+      ],
+      "source_shards": [
+        "openstack-root"
+      ],
+      "status": "staged"
+    },
+    {
+      "id": "doc.report.findings",
+      "kind": "report",
+      "title": "Findings",
+      "canonical_path": "reports/findings/findings.md",
+      "staged_path": "reports/taskruns/run-openstack-refresh/staging/final/reports/findings/findings.md",
+      "topics": [
+        "openstack",
+        "keystone"
+      ],
+      "citation_ids": [
+        "cite.keystone.readme"
+      ],
+      "source_shards": [
+        "keystone"
+      ],
+      "status": "staged"
+    },
+    {
+      "id": "doc.report.questions",
+      "kind": "report",
+      "title": "Open Questions",
+      "canonical_path": "reports/coverage/open-questions.md",
+      "staged_path": "reports/taskruns/run-openstack-refresh/staging/final/reports/coverage/open-questions.md",
+      "topics": [
+        "openstack",
+        "keystone"
+      ],
+      "citation_ids": [
+        "cite.keystone.policy"
+      ],
+      "source_shards": [
+        "keystone"
+      ],
+      "status": "staged"
+    }
+  ],
+  "topics": [
+    {
+      "id": "openstack",
+      "document_ids": [
+        "doc.report.overview",
+        "doc.report.findings",
+        "doc.report.questions"
+      ]
+    },
+    {
+      "id": "keystone",
+      "document_ids": [
+        "doc.report.findings",
+        "doc.report.questions"
+      ]
+    }
+  ],
+  "compatibility": {
+    "coverage": {
+      "observed": [
+        "services"
+      ],
+      "missing": [
+        "owner mappings"
+      ],
+      "notes": [
+        "reduced frozen fixture"
+      ]
+    },
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}

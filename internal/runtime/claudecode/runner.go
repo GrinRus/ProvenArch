@@ -453,6 +453,9 @@ Task payload JSON:
 			`Do not include non-ASCII symbols in numbers or timestamps.`,
 			`RFC3339 timestamps only (example: 2026-04-09T15:28:49Z).`,
 			`Decimals must be compact numeric literals (example: 0.7, not 0. 7).`,
+			`Do NOT collapse a multi-document refresh into one generic "cite.runtime-summary" citation.`,
+			`Do NOT overwrite a rich shard-pack-manifest.json with a skeletal reuse-only manifest.`,
+			`Preserve repo-specific citations when repository evidence already exists or can be recovered from repo roots.`,
 			`Return only JSON object, without prose.`,
 		}, "\n")
 	}
@@ -611,6 +614,8 @@ func buildDocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Produce runtime-authored documents in write_root and then write shard-pack-manifest.json in write_root.`,
 			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and compatibility snapshot.`,
 			`- You may be flexible in document structure, but promotion and rendering depend on manifest citations/topics remaining accurate.`,
+			`- Do NOT collapse a multi-document refresh surface to one generic "cite.runtime-summary" citation when repository evidence exists.`,
+			`- Preserve repo-specific citations in shard-pack-manifest.json whenever repository files support them.`,
 		)
 	case "init.step3.findings", "refresh.step3.findings":
 		lines = append(lines,

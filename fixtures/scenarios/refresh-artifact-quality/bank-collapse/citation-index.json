@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "run_id": "run-bank-refresh",
+  "generated_at": "2026-04-17T13:27:37Z",
+  "citations": [
+    {
+      "id": "cite.runtime-summary",
+      "repo": "bank-of-anthos",
+      "path": "README.md",
+      "claim_ids": [
+        "claim.runtime-summary"
+      ],
+      "document_ids": [
+        "doc.report.overview",
+        "doc.report.findings",
+        "doc.report.questions"
+      ]
+    }
+  ]
+}

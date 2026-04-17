@@ -284,6 +284,7 @@ Batch evaluator source-of-truth:
 - для multi-profile (`EXPECTED_REPO_COUNT >= 2`) batch hard-fail включает `analysis:cross-repo-missing`.
 - backend run-matrix дополнительно классифицирует failure classes: `runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_signal_terminated`, `infra_incomplete_cycle`, `quality_gates_failed`, `summary_missing`, `precheck_failed`.
 - runtime flow checks в evaluator: `runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:execution-semantics`, `runtime_flow_failed`.
+- `artifact_quality:*` в `reports/taskruns/<run_id>-quality.json.run_warnings` эскалируется batch evaluator'ом в `quality_gates_failed`; canonical live gate не принимает refresh artifacts, схлопнувшиеся до одного generic `cite.runtime-summary` без rich repo-specific shard evidence.
 
 При `runner_parse_failed` raw stdout/stderr сохраняются в:
 - `WORKSPACE/reports/taskruns/raw/*-stdout.log`

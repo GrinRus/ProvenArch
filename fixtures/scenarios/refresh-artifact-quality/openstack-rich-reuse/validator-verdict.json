@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "run_id": "run-openstack-refresh",
+  "generated_at": "2026-04-17T13:07:01Z",
+  "verdict": "PASS",
+  "summary": "Frozen fixture canonical validator verdict for openstack refresh slice.",
+  "checked_paths": [
+    "reports/taskruns/run-openstack-refresh/staging/final/final-run-index.json",
+    "reports/taskruns/run-openstack-refresh/staging/final/citation-index.json"
+  ],
+  "fixed_paths": [],
+  "issues": []
+}

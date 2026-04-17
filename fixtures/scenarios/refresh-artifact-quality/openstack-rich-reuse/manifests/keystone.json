@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "run_id": "run-openstack-refresh",
+  "step_id": "refresh.step1.collect",
+  "shard_id": "keystone",
+  "agent_role": "shard-analyst",
+  "artifact_root": "/tmp/frozen/keystone",
+  "repo_scopes": [
+    "openstack"
+  ],
+  "path_scopes": [
+    "keystone"
+  ],
+  "summary": "Collected keystone evidence with repo-specific citations.",
+  "documents": [
+    {
+      "id": "doc.keystone.findings",
+      "kind": "report",
+      "title": "Keystone Findings",
+      "path": "keystone-findings.md",
+      "canonical_path": "reports/findings/findings.md",
+      "topics": [
+        "keystone"
+      ],
+      "citation_ids": [
+        "cite.keystone.readme",
+        "cite.keystone.policy"
+      ],
+      "status": "staged"
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.keystone.readme",
+      "repo": "openstack",
+      "path": "keystone/README.rst",
+      "claim_ids": [
+        "claim.keystone.readme"
+      ],
+      "document_ids": [
+        "doc.keystone.findings"
+      ]
+    },
+    {
+      "id": "cite.keystone.policy",
+      "repo": "openstack",
+      "path": "keystone/etc/policy.yaml",
+      "claim_ids": [
+        "claim.keystone.policy"
+      ],
+      "document_ids": [
+        "doc.keystone.findings"
+      ]
+    }
+  ],
+  "compatibility": {
+    "coverage": {
+      "observed": [
+        "services"
+      ],
+      "missing": [
+        "owner mappings"
+      ],
+      "notes": [
+        "rich shard fixture"
+      ]
+    },
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}

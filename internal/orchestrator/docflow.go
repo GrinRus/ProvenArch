@@ -355,6 +355,11 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 	})
 	e.finalRunIndex = &parsedFinalRunIndex
 	e.citationIndex = &parsedCitationIndex
+	if e.pipeline == PipelineRefresh {
+		for _, warning := range assessRefreshArtifactWarnings(e.shardPacks, parsedFinalRunIndex, parsedCitationIndex) {
+			e.addWarning(warning)
+		}
+	}
 	e.findings = append([]contracts.Finding(nil), compatibility.Findings...)
 	e.questions = append([]contracts.Question(nil), compatibility.Questions...)
 	e.coverage = mergeCoverage(nil, &compatibility.Coverage)
@@ -368,6 +373,89 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 		"questions":      len(compatibility.Questions),
 	})
 	return nil
+}
+
+func assessRefreshArtifactWarnings(
+	manifests []contracts.ShardPackManifest,
+	finalIndex contracts.FinalRunIndex,
+	citationIndex contracts.CitationIndex,
+) []string {
+	warnings := []string{}
+
+	if len(finalIndex.CanonicalDocuments) >= 2 && len(citationIndex.Citations) == 1 {
+		onlyCitationID := strings.TrimSpace(citationIndex.Citations[0].ID)
+		if isGenericRuntimeSummaryCitation(onlyCitationID) {
+			warnings = append(
+				warnings,
+				fmt.Sprintf(
+					"artifact_quality: refresh staged final set has %d canonical documents but only 1 generic runtime-summary citation (%s)",
+					len(finalIndex.CanonicalDocuments),
+					onlyCitationID,
+				),
+			)
+		}
+	}
+
+	if len(manifests) == 0 {
+		return warnings
+	}
+
+	richManifestCount := 0
+	for _, manifest := range manifests {
+		if manifestHasRepoSpecificCitationSurface(manifest) {
+			richManifestCount++
+		}
+	}
+	if richManifestCount == 0 {
+		warnings = append(
+			warnings,
+			fmt.Sprintf(
+				"artifact_quality: refresh collect manifests are reuse-only and preserve no repo-specific citations across %d shard(s)",
+				len(manifests),
+			),
+		)
+	}
+
+	return warnings
+}
+
+func manifestHasRepoSpecificCitationSurface(manifest contracts.ShardPackManifest) bool {
+	referencedCitationIDs := map[string]struct{}{}
+	for _, document := range manifest.Documents {
+		for _, citationID := range document.CitationIDs {
+			trimmedID := strings.TrimSpace(citationID)
+			if trimmedID == "" {
+				continue
+			}
+			referencedCitationIDs[trimmedID] = struct{}{}
+		}
+	}
+	if len(referencedCitationIDs) == 0 {
+		return false
+	}
+
+	for _, citation := range manifest.Citations {
+		citationID := strings.TrimSpace(citation.ID)
+		if citationID == "" {
+			continue
+		}
+		if _, ok := referencedCitationIDs[citationID]; !ok {
+			continue
+		}
+		if isGenericRuntimeSummaryCitation(citationID) {
+			continue
+		}
+		if strings.TrimSpace(citation.Repo) == "" || strings.TrimSpace(citation.Path) == "" {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func isGenericRuntimeSummaryCitation(id string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(id))
+	return normalized == "cite.runtime-summary" || strings.HasPrefix(normalized, "cite.runtime-summary.")
 }
 
 func (e *pipelineExecution) authoredDomainReports() (map[string]string, error) {

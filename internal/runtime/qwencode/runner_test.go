@@ -25,6 +25,103 @@ func loadCapturedLiveStdoutFixture(t *testing.T, name string) string {
 	return string(raw)
 }
 
+func validRetryRichManifestJSON() string {
+	return `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step1.collect",
+  "shard_id": "bank-of-anthos-iac",
+  "agent_role": "shard-analyst",
+  "artifact_root": "/tmp/write-root",
+  "repo_scopes": ["bank-of-anthos"],
+  "path_scopes": ["iac"],
+  "summary": "Collected repo-specific infrastructure evidence.",
+  "documents": [
+    {
+      "id": "doc.iac.overview",
+      "kind": "report",
+      "title": "IAC Overview",
+      "path": "iac-overview.md",
+      "canonical_path": "reports/as-is/iac-overview.md",
+      "topics": ["iac"],
+      "citation_ids": ["cite.bank.readme", "cite.bank.kustomization"],
+      "status": "staged"
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.bank.readme",
+      "repo": "bank-of-anthos",
+      "path": "iac/README.md",
+      "claim_ids": ["claim.iac.readme"],
+      "document_ids": ["doc.iac.overview"]
+    },
+    {
+      "id": "cite.bank.kustomization",
+      "repo": "bank-of-anthos",
+      "path": "iac/acm-multienv-cicd-anthos-autopilot/base/kustomization.yaml",
+      "claim_ids": ["claim.iac.kustomization"],
+      "document_ids": ["doc.iac.overview"]
+    }
+  ],
+  "compatibility": {
+    "coverage": {
+      "observed": ["iac"],
+      "missing": ["owner mappings"],
+      "notes": ["repo evidence preserved"]
+    },
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}`
+}
+
+func validRetrySkeletalManifestJSON() string {
+	return `{
+  "documents": [
+    {
+      "path": "shard-analysis.md",
+      "citation_ids": ["cite.runtime-summary"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.runtime-summary",
+      "repo": "bank-of-anthos",
+      "path": "README.md"
+    }
+  ],
+  "summary": "Reused existing shard artifacts."
+}`
+}
+
+func validRetryUnlinkedRepoSpecificManifestJSON() string {
+	return `{
+  "documents": [
+    {
+      "path": "shard-analysis.md",
+      "canonical_path": "reports/as-is/overview.md",
+      "citation_ids": ["cite.runtime-summary"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.runtime-summary",
+      "repo": "bank-of-anthos",
+      "path": "README.md"
+    },
+    {
+      "id": "cite.bank.repo-root",
+      "repo": "bank-of-anthos",
+      "path": "docs/architecture.md"
+    }
+  ],
+  "summary": "Reused existing shard artifacts."
+}`
+}
+
 func TestHeadlessRunnerUnavailableClassifiesAsRunnerUnavailable(t *testing.T) {
 	t.Parallel()
 
@@ -447,7 +544,7 @@ func TestHeadlessRunnerRetriesCapturedLiveIACInvalidStdoutFixtureWithWriteRootRe
 	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
 		t.Fatalf("mkdir write root: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(writeRoot, "shard-pack-manifest.json"), []byte(`{"documents":[{"path":"iac-overview.md"}]}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(writeRoot, "shard-pack-manifest.json"), []byte(validRetryRichManifestJSON()), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(writeRoot, "iac-overview.md"), []byte("# Overview\n"), 0o644); err != nil {
@@ -504,7 +601,7 @@ func TestHeadlessRunnerRetriesCapturedLiveExtrasInvalidStdoutFixtureWithMinimalR
 	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
 		t.Fatalf("mkdir write root: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(writeRoot, "shard-pack-manifest.json"), []byte(`{"documents":[{"path":"shard-analysis.md"}]}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(writeRoot, "shard-pack-manifest.json"), []byte(validRetryRichManifestJSON()), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(writeRoot, "shard-analysis.md"), []byte("# Analysis\n"), 0o644); err != nil {
@@ -828,7 +925,7 @@ func TestBuildPromptRetryIncludesWriteRootRecoveryGuidance(t *testing.T) {
 		t.Fatalf("mkdir write root: %v", err)
 	}
 	for name, contents := range map[string]string{
-		"shard-pack-manifest.json": `{"documents":[{"path":"iac-overview.md"}]}`,
+		"shard-pack-manifest.json": validRetryRichManifestJSON(),
 		"iac-overview.md":          "# Overview\n",
 		"iac-analysis.md":          "# Analysis\n",
 	} {
@@ -863,6 +960,12 @@ func TestBuildPromptRetryIncludesWriteRootRecoveryGuidance(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "shard-pack-manifest.json is already present in write_root") {
 		t.Fatalf("expected manifest reuse guidance in retry prompt")
+	}
+	if !strings.Contains(prompt, `Do NOT collapse a multi-document refresh into one generic "cite.runtime-summary" citation.`) {
+		t.Fatalf("expected runtime-summary collapse ban in retry prompt")
+	}
+	if !strings.Contains(prompt, "Preserve repo-specific citations when repository evidence already exists or can be recovered from repo roots.") {
+		t.Fatalf("expected repo-specific citation preservation rule in retry prompt")
 	}
 	if !strings.Contains(prompt, `Prefer "changeset": [] when write_root already contains authored docs`) {
 		t.Fatalf("expected minimal changeset guidance in retry prompt")
@@ -931,7 +1034,7 @@ func TestBuildRetryQwenArgsConstrainsCollectRetryToWriteRootWhenArtifactsExist(t
 	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
 		t.Fatalf("mkdir write root: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(writeRoot, "shard-pack-manifest.json"), []byte(`{"documents":[{"path":"iac-overview.md"}]}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(writeRoot, "shard-pack-manifest.json"), []byte(validRetryRichManifestJSON()), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(writeRoot, "iac-overview.md"), []byte("# Overview\n"), 0o644); err != nil {
@@ -957,6 +1060,145 @@ func TestBuildRetryQwenArgsConstrainsCollectRetryToWriteRootWhenArtifactsExist(t
 	}
 	if len(includeDirs) != 1 || includeDirs[0] != writeRoot {
 		t.Fatalf("expected retry include-directories to be constrained to write_root, got %#v", includeDirs)
+	}
+}
+
+func TestBuildRetryQwenArgsKeepsRepoRootsWhenManifestIsSkeletal(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	repoPath := filepath.Join(root, "bank-of-anthos")
+	writeRoot := filepath.Join(root, "write-root")
+	for _, dir := range []string{workspace, repoPath, writeRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	manifest := "version: 1\nrepos:\n  - name: bank-of-anthos\n    path: " + repoPath + "\n"
+	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write workspace manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "shard-pack-manifest.json"), []byte(validRetrySkeletalManifestJSON()), 0o644); err != nil {
+		t.Fatalf("write skeletal manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "shard-analysis.md"), []byte("# Analysis\n"), 0o644); err != nil {
+		t.Fatalf("write doc: %v", err)
+	}
+
+	task := acpruntime.Task{
+		TaskID:       "task-retry-skeletal",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		Workspace:    workspace,
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+
+	args := buildRetryQwenArgs(task, "prompt-text")
+	includeDirs := []string{}
+	for idx := 0; idx < len(args)-1; idx++ {
+		if args[idx] == "--include-directories" {
+			includeDirs = append(includeDirs, args[idx+1])
+		}
+	}
+	if len(includeDirs) < 2 {
+		t.Fatalf("expected retry include-directories to keep workspace and repo roots, got %#v", includeDirs)
+	}
+	if includeDirs[0] != workspace {
+		t.Fatalf("expected workspace include-directories first, got %#v", includeDirs)
+	}
+	if includeDirs[1] != repoPath {
+		t.Fatalf("expected repo include-directories to remain available, got %#v", includeDirs)
+	}
+}
+
+func TestBuildRetryQwenArgsKeepsRepoRootsWhenRepoSpecificCitationIsUnlinked(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	repoPath := filepath.Join(root, "bank-of-anthos")
+	writeRoot := filepath.Join(root, "write-root")
+	for _, dir := range []string{workspace, repoPath, writeRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	manifest := "version: 1\nrepos:\n  - name: bank-of-anthos\n    path: " + repoPath + "\n"
+	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write workspace manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "shard-pack-manifest.json"), []byte(validRetryUnlinkedRepoSpecificManifestJSON()), 0o644); err != nil {
+		t.Fatalf("write manifest with unlinked repo-specific citation: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "shard-analysis.md"), []byte("# Analysis\n"), 0o644); err != nil {
+		t.Fatalf("write doc: %v", err)
+	}
+
+	task := acpruntime.Task{
+		TaskID:       "task-retry-unlinked-citation",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		Workspace:    workspace,
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+
+	args := buildRetryQwenArgs(task, "prompt-text")
+	includeDirs := []string{}
+	for idx := 0; idx < len(args)-1; idx++ {
+		if args[idx] == "--include-directories" {
+			includeDirs = append(includeDirs, args[idx+1])
+		}
+	}
+	if len(includeDirs) < 2 {
+		t.Fatalf("expected retry include-directories to keep workspace and repo roots for unlinked citations, got %#v", includeDirs)
+	}
+	if includeDirs[0] != workspace {
+		t.Fatalf("expected workspace include-directories first, got %#v", includeDirs)
+	}
+	if includeDirs[1] != repoPath {
+		t.Fatalf("expected repo include-directories to remain available, got %#v", includeDirs)
+	}
+}
+
+func TestBuildPromptRetryWarnsWhenManifestIsSkeletal(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := filepath.Join(t.TempDir(), "write-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "shard-pack-manifest.json"), []byte(validRetrySkeletalManifestJSON()), 0o644); err != nil {
+		t.Fatalf("write skeletal manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "shard-analysis.md"), []byte("# Analysis\n"), 0o644); err != nil {
+		t.Fatalf("write doc: %v", err)
+	}
+
+	task := acpruntime.Task{
+		TaskID:       "task-retry-skeletal-prompt",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		Workspace:    t.TempDir(),
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	prompt := buildPrompt(raw, true)
+	if !strings.Contains(prompt, "looks skeletal/reuse-only; keep repo roots in include-directories") {
+		t.Fatalf("expected skeletal manifest guidance in retry prompt")
+	}
+	if !strings.Contains(prompt, `Do NOT reduce multi-document refresh evidence to one generic "cite.runtime-summary" citation.`) {
+		t.Fatalf("expected collapse warning for skeletal manifest prompt")
 	}
 }
 

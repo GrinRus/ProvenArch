@@ -600,6 +600,59 @@ func TestBuildDirectPromptRefreshStep3IncludesCanonicalEdgeContract(t *testing.T
 	}
 }
 
+func TestBuildDirectPromptCollectIncludesArtifactQualityGuardrails(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		TaskID:       "task-refresh-collect-guardrails",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		Workspace:    t.TempDir(),
+		RepoScopes:   []string{"openstack"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	prompt := buildDirectPrompt(raw, false, false)
+	if !strings.Contains(prompt, `Do NOT collapse a multi-document refresh surface to one generic "cite.runtime-summary" citation when repository evidence exists.`) {
+		t.Fatalf("expected collect artifact-quality guardrail in prompt")
+	}
+	if !strings.Contains(prompt, "Preserve repo-specific citations in shard-pack-manifest.json whenever repository files support them.") {
+		t.Fatalf("expected repo-specific citation guardrail in prompt")
+	}
+}
+
+func TestBuildDirectPromptRetryIncludesArtifactQualityGuardrails(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		TaskID:       "task-refresh-retry-guardrails",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		Workspace:    t.TempDir(),
+		RepoScopes:   []string{"openstack"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	prompt := buildDirectPrompt(raw, true, true)
+	if !strings.Contains(prompt, `Do NOT collapse a multi-document refresh into one generic "cite.runtime-summary" citation.`) {
+		t.Fatalf("expected retry runtime-summary collapse ban in prompt")
+	}
+	if !strings.Contains(prompt, "Do NOT overwrite a rich shard-pack-manifest.json with a skeletal reuse-only manifest.") {
+		t.Fatalf("expected retry rich-manifest preservation rule in prompt")
+	}
+	if !strings.Contains(prompt, "Preserve repo-specific citations when repository evidence already exists or can be recovered from repo roots.") {
+		t.Fatalf("expected retry repo-specific citation rule in prompt")
+	}
+}
+
 func validTaskResultJSON(taskID string, stepID string, runtimeName string, runtimeVersion string) string {
 	return fmt.Sprintf(`{"meta":{"task_id":"%s","step_id":"%s","runtime":{"name":"%s","version":"%s"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}`, taskID, stepID, runtimeName, runtimeVersion)
 }

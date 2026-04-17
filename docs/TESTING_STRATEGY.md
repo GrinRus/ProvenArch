@@ -247,7 +247,9 @@ Implemented additional jobs:
   - matrix invariant: для одного `profile_id` shard-plan должен совпадать между `baseline` и `parallel-default`
   - approved profile ids: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
   - release-mode (`MATRIX_ID=release-*` или `E2E_MATRIX_RELEASE_MODE=1`) фиксирует `RUN_COUNT=1` и требует explicit `sweeps[]` с ровно `baseline` + `parallel-default`, плюс ровно один `single-*` и один `multi-*` профиль; любое отклонение блокирует matrix до batch stage
+  - `scripts/tests/matrix_release_contract_test.py` обязан запускать matrix driver в hermetic subprocess env; ambient `ACP_*`, `BATCH_*`, `E2E_*`, `MATRIX_*`, `UI_E2E_*`, `RUN_COUNT`, `PROFILE_*`, `SWEEP_*` leakage не должен менять contract assertions
   - captured live qwen stdout fixture защищает retry/prompt discipline от event-stream chatter и partial TaskResult drafting
+  - refresh artifact-quality guard: `artifact_quality:*` в `reports/taskruns/<run_id>-quality.json.run_warnings` считается canonical live gate blocker; bank-like collapse к одному `cite.runtime-summary` должен ловиться, openstack-like reuse с хотя бы одним rich shard остаётся допустимым
   - относительные `repos_file` пути резолвятся от директории `E2E_MATRIX_FILE`
   - для `source_kind=git_url` refs должны быть pinned
   - агрегированные отчёты: `profile_matrix_<matrix-id>.md/.tsv`, `release_verdict_<matrix-id>.md/.json`

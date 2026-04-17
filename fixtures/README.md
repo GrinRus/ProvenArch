@@ -19,6 +19,7 @@ Baseline scenario surface:
 - `single-service-http-postgres-gitlabci`
 - `two-services-http-call-and-queue`
 - `missing-owner-and-missing-cicd`
+- `refresh-artifact-quality` — reduced frozen refresh artifact sets (`bank-collapse`, `openstack-rich-reuse`) for artifact-fidelity regression checks
 
 Generated artifacts policy:
 - `fixtures/scenarios/*/golden/readable/*` намеренно tracked в git как human-readable deterministic export.

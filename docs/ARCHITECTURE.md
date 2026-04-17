@@ -34,7 +34,6 @@
      - persisted profile в `workspace.yaml.runtime.profile.execution`
      - effective precedence: `CLI > env > workspace > defaults`
      - CLI overrides: `--execution-strategy`, `--max-parallel-tasks`, `--failure-policy`
-     - repo filtering policy: `runtime.profile.execution.repo_selection` (`all|backend_only`) + declared/inferred repo role (`repos[].analysis.role` first, then conservative source inference from `name`/`path`/`git_url`)
    - Используется как локально, так и из SCM-triggered pipeline jobs/manual buttons
    - Internal API trigger остаётся optional trusted-mode capability, а не обязательной CI/CD поверхностью
    - Раздаёт embedded UI shell и API в одном процессе `acp serve`
@@ -81,7 +80,6 @@
    - Runtime step1 и enrich domain cards используют общий resolver `repo_scope` (declared -> slug fallback -> empty)
    - Проверяет согласованность canonical domain card: filename `<domain-id>.md` vs поле `- id:`; mismatch фиксируется high-priority question, runtime остаётся filename-based
    - Монолитный сценарий many-domains-to-one-repo поддержан через общий `repo_scope`; unknown scope фиксируется вопросом `q.domain.<id>.unknown-repo-scope`
-   - Если `repo_scope` домена исключён policy `repo_selection`, domain runtime task пропускается и фиксируется high-priority question
    - Выполняет runtime collect-step per-domain и выдаёт каждому shard runtime-aware envelope:
      - `artifact_root` (workspace-relative)
      - `write_root` (absolute run-scoped staging dir)

@@ -336,6 +336,88 @@ class BatchFailureClassificationTest(unittest.TestCase):
             }
             write_json(quality_path, quality_payload)
 
+    def _create_artifact_quality_fixture_run_dir(self, run_dir: Path) -> None:
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: passed",
+                    "- quality_gates: passed",
+                    "- failure_reason: none",
+                    "- expected_runs: 4",
+                    "- completed_runs: 4",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 2",
+                    "- running_runs_detected: 0",
+                    "- termination_signal: none",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+        write_text(run_dir / "full-run.log", "full run completed\n")
+        write_text(run_dir / "batch-driver.log", "driver completed with process_exit=0\n")
+        write_text(
+            run_dir / "run-results.tsv",
+            "\n".join(
+                [
+                    "\t".join(
+                        [
+                            "1",
+                            "headless",
+                            "qwen-code",
+                            "init",
+                            "init-run",
+                            "succeeded",
+                            "10",
+                            "1",
+                            "0",
+                            "1",
+                            "2",
+                            "1",
+                            "0",
+                            "qwen-code@stub",
+                            "reports/taskruns/init-run-quality.json",
+                            "reports",
+                        ]
+                    ),
+                    "\t".join(
+                        [
+                            "1",
+                            "headless",
+                            "qwen-code",
+                            "refresh",
+                            "refresh-run",
+                            "succeeded",
+                            "11",
+                            "1",
+                            "1",
+                            "1",
+                            "2",
+                            "1",
+                            "0",
+                            "qwen-code@stub",
+                            "reports/taskruns/refresh-run-quality.json",
+                            "reports",
+                        ]
+                    ),
+                ]
+            )
+            + "\n",
+        )
+        self._write_snapshot(run_dir, "init-run", "init")
+        self._write_snapshot(run_dir, "refresh-run", "refresh")
+        refresh_quality_path = run_dir / "snapshots" / "refresh-run" / "reports" / "taskruns" / "refresh-run-quality.json"
+        refresh_quality = json.loads(refresh_quality_path.read_text(encoding="utf-8"))
+        refresh_quality["run_warnings"] = [
+            "artifact_quality: refresh staged final set has 6 canonical documents but only 1 generic runtime-summary citation (cite.runtime-summary)"
+        ]
+        write_json(refresh_quality_path, refresh_quality)
+
     def test_python_report_prefers_runtime_parse_over_incomplete_cycle_classifier(self) -> None:
         result = self.module.evaluate_run(
             provider="qwen-code",
@@ -398,6 +480,28 @@ class BatchFailureClassificationTest(unittest.TestCase):
 
         self.assertEqual("runtime_timeout", result.failure_class)
         self.assertTrue(result.runtime_timeout)
+
+    def test_python_report_escalates_artifact_quality_warning_to_quality_gate_failure(self) -> None:
+        run_dir = self.root / "run-artifact-quality"
+        self._create_artifact_quality_fixture_run_dir(run_dir)
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "none",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "0",
+            },
+        )
+
+        self.assertEqual("quality_gates_failed", result.failure_class)
+        self.assertTrue(result.quality_gates_failed)
+        self.assertFalse(result.hard_pass)
+        self.assertIn("quality:artifact-quality", result.issues)
 
     def test_shell_classifier_reads_taskrun_logs_and_returns_runtime_parse(self) -> None:
         script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")

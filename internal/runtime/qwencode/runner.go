@@ -34,6 +34,34 @@ type HeadlessRunner struct {
 	Args    []string
 }
 
+type retryManifestDocument struct {
+	Path          string   `json:"path"`
+	CanonicalPath string   `json:"canonical_path"`
+	CitationIDs   []string `json:"citation_ids"`
+}
+
+type retryManifestCitation struct {
+	ID   string `json:"id"`
+	Repo string `json:"repo"`
+	Path string `json:"path"`
+}
+
+type retryManifestShape struct {
+	Summary   string                  `json:"summary"`
+	Documents []retryManifestDocument `json:"documents"`
+	Citations []retryManifestCitation `json:"citations"`
+}
+
+type retryManifestAssessment struct {
+	ManifestPresent           bool
+	DocumentCount             int
+	LinkedDocumentCount       int
+	CitationCount             int
+	RepoSpecificCitationCount int
+	GenericRuntimeSummaryOnly bool
+	Rich                      bool
+}
+
 func (r HeadlessRunner) commandName() string {
 	command := strings.TrimSpace(r.Command)
 	if command == "" {
@@ -166,12 +194,97 @@ func shouldConstrainRetryToWriteRoot(task acpruntime.Task) bool {
 	if err != nil || total < 2 {
 		return false
 	}
+	assessment, assessErr := assessRetryManifestAtWriteRoot(writeRoot)
+	if assessErr != nil || !assessment.Rich {
+		return false
+	}
 	for _, rel := range files {
 		if rel == "shard-pack-manifest.json" {
 			return true
 		}
 	}
 	return false
+}
+
+func assessRetryManifestAtWriteRoot(writeRoot string) (retryManifestAssessment, error) {
+	manifestPath := filepath.Join(strings.TrimSpace(writeRoot), "shard-pack-manifest.json")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return retryManifestAssessment{}, nil
+		}
+		return retryManifestAssessment{}, err
+	}
+	return assessRetryManifest(raw), nil
+}
+
+func assessRetryManifest(raw []byte) retryManifestAssessment {
+	assessment := retryManifestAssessment{}
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return assessment
+	}
+
+	var manifest retryManifestShape
+	if err := json.Unmarshal(trimmed, &manifest); err != nil {
+		return assessment
+	}
+
+	assessment.ManifestPresent = true
+	referencedCitationIDs := map[string]struct{}{}
+	for _, document := range manifest.Documents {
+		pathValue := strings.TrimSpace(document.Path)
+		canonicalPathValue := strings.TrimSpace(document.CanonicalPath)
+		if pathValue == "" && canonicalPathValue == "" {
+			continue
+		}
+		assessment.DocumentCount++
+		linkCount := 0
+		for _, citationID := range document.CitationIDs {
+			trimmedID := strings.TrimSpace(citationID)
+			if trimmedID == "" {
+				continue
+			}
+			referencedCitationIDs[trimmedID] = struct{}{}
+			linkCount++
+		}
+		if linkCount > 0 {
+			assessment.LinkedDocumentCount++
+		}
+	}
+
+	uniqueLinkedCitationIDs := map[string]struct{}{}
+	genericRuntimeSummaryOnly := true
+	for _, citation := range manifest.Citations {
+		citationID := strings.TrimSpace(citation.ID)
+		if citationID == "" {
+			continue
+		}
+		if _, linked := referencedCitationIDs[citationID]; !linked {
+			continue
+		}
+		uniqueLinkedCitationIDs[citationID] = struct{}{}
+		if !isGenericRuntimeSummaryCitationID(citationID) {
+			genericRuntimeSummaryOnly = false
+		}
+		if strings.TrimSpace(citation.Repo) != "" && strings.TrimSpace(citation.Path) != "" && !isGenericRuntimeSummaryCitationID(citationID) {
+			assessment.RepoSpecificCitationCount++
+		}
+	}
+	assessment.CitationCount = len(uniqueLinkedCitationIDs)
+	assessment.GenericRuntimeSummaryOnly = assessment.CitationCount > 0 && genericRuntimeSummaryOnly
+	assessment.Rich = assessment.DocumentCount > 0 &&
+		assessment.LinkedDocumentCount > 0 &&
+		assessment.CitationCount > 0 &&
+		assessment.RepoSpecificCitationCount > 0 &&
+		!assessment.GenericRuntimeSummaryOnly
+
+	return assessment
+}
+
+func isGenericRuntimeSummaryCitationID(id string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(id))
+	return normalized == "cite.runtime-summary" || strings.HasPrefix(normalized, "cite.runtime-summary.")
 }
 
 func collectRetryWriteRootFiles(writeRoot string, limit int) ([]string, int, error) {
@@ -503,6 +616,7 @@ Task payload JSON:
 			`RFC3339 timestamps only (example: 2026-04-09T15:28:49Z).`,
 			`Decimals must be compact numeric literals (example: 0.7, not 0. 7).`,
 			`COMPACT JSON MODE: keep output concise and deterministic.`,
+			`- If envelope form is unavoidable, "result" MUST be a non-empty valid JSON object string.`,
 			`- Limit changeset to the minimum actionable operations for this step.`,
 			`- Prefer "changeset": [] when write_root already contains authored docs and the step does not strictly require an operation.`,
 			`- If changeset is non-empty, use at most 1 operation and at most 3 provenance.evidence items.`,
@@ -510,6 +624,9 @@ Task payload JSON:
 			`- Keep coverage.notes short (<=2 entries).`,
 			`- Avoid long prose in summary; keep a single sentence.`,
 			`- Do NOT copy long citations, topic arrays, or manifest document inventories into TaskResult JSON.`,
+			`- Do NOT collapse a multi-document refresh into one generic "cite.runtime-summary" citation.`,
+			`- Do NOT overwrite a rich shard-pack-manifest.json with a skeletal reuse-only manifest.`,
+			`- Preserve repo-specific citations when repository evidence already exists or can be recovered from repo roots.`,
 			`- Final response MUST start with "{" and end with "}".`,
 			`- Do not output markdown fences, bullet lists, plan text, or template walkthroughs.`,
 			buildRetryRecoveryHint(task),
@@ -644,6 +761,7 @@ func buildRetryRecoveryHint(task acpruntime.Task) string {
 		`- Retry goal is JSON repair, not fresh repository exploration.`,
 		`- First inspect write_root, not repo roots.`,
 		`- If authored docs already exist in write_root, reuse them instead of rediscovering the repository.`,
+		`- Preserve repo-specific citations when existing artifacts already contain them; do not replace them with one generic runtime summary citation.`,
 		`- Do NOT use todo_write, plan-style narration, or repeated broad list_directory sweeps in retry mode.`,
 		`- Use at most 3 tool calls in retry mode unless a required artifact is missing from write_root.`,
 		`- After optional write_root inspection, respond immediately with the final TaskResult JSON object.`,
@@ -651,6 +769,7 @@ func buildRetryRecoveryHint(task acpruntime.Task) string {
 
 	writeRoot := strings.TrimSpace(task.WriteRoot)
 	files, total, err := collectRetryWriteRootFiles(writeRoot, 8)
+	assessment, assessmentErr := assessRetryManifestAtWriteRoot(writeRoot)
 	switch {
 	case writeRoot == "":
 		lines = append(lines, `- write_root snapshot unavailable because write_root is empty.`)
@@ -665,9 +784,18 @@ func buildRetryRecoveryHint(task acpruntime.Task) string {
 		}
 		lines = append(lines, fmt.Sprintf(`- write_root already contains %d file(s): %s%s`, total, strings.Join(files, ", "), suffix))
 		if containsString(files, "shard-pack-manifest.json") {
-			lines = append(lines, `- shard-pack-manifest.json is already present in write_root; read it first and reuse authored docs instead of re-reading the repository.`)
-			lines = append(lines, `- When reusing authored docs, prefer "changeset": [] or one minimal operation instead of restating manifest contents.`)
-			lines = append(lines, `- Do NOT copy long citations, topic arrays, or manifest document inventories into TaskResult JSON.`)
+			switch {
+			case assessmentErr != nil:
+				lines = append(lines, fmt.Sprintf(`- shard-pack-manifest.json is present but could not be assessed (%v); keep repo roots available while repairing JSON.`, assessmentErr))
+			case assessment.Rich:
+				lines = append(lines, `- shard-pack-manifest.json is already present in write_root; read it first and reuse authored docs instead of re-reading the repository.`)
+				lines = append(lines, `- When reusing authored docs, prefer "changeset": [] or one minimal operation instead of restating manifest contents.`)
+				lines = append(lines, `- Do NOT copy long citations, topic arrays, or manifest document inventories into TaskResult JSON.`)
+			default:
+				lines = append(lines, `- shard-pack-manifest.json exists in write_root but looks skeletal/reuse-only; keep repo roots in include-directories and repair JSON without collapsing repository evidence.`)
+				lines = append(lines, `- Do NOT reduce multi-document refresh evidence to one generic "cite.runtime-summary" citation.`)
+				lines = append(lines, `- Preserve or restore repo-specific citations before returning the final TaskResult JSON object.`)
+			}
 		}
 		if shouldConstrainRetryToWriteRoot(task) {
 			lines = append(lines, `- Retry include-directories are constrained to write_root because the manifest and authored docs already exist.`)
@@ -741,6 +869,8 @@ func buildDocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Produce runtime-authored documents in write_root and then write shard-pack-manifest.json in write_root.`,
 			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and compatibility snapshot.`,
 			`- You may be flexible in document structure, but promotion and rendering depend on manifest citations/topics remaining accurate.`,
+			`- Do NOT collapse a multi-document refresh surface to one generic "cite.runtime-summary" citation when repository evidence exists.`,
+			`- Preserve repo-specific citations in shard-pack-manifest.json whenever repository files support them.`,
 		)
 	case "init.step3.findings", "refresh.step3.findings":
 		lines = append(lines,
