@@ -24,6 +24,8 @@ ACP_QWEN_CMD_BIN="${ACP_QWEN_CMD_BIN:-qwen}"
 ACP_APPLY_TIMEOUTS_VIA_API="${ACP_APPLY_TIMEOUTS_VIA_API:-1}"
 E2E_MATRIX_RELEASE_MODE="${E2E_MATRIX_RELEASE_MODE:-auto}"
 E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES="${E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES:-0}"
+BATCH_PROVIDER_FILTER="${BATCH_PROVIDER_FILTER:-all}"
+BATCH_RUN_SELECTION="${BATCH_RUN_SELECTION:-all}"
 BATCH_FRONTEND_MODE="${BATCH_FRONTEND_MODE:-}"
 BATCH_FRONTEND_CANCEL_MODE="${BATCH_FRONTEND_CANCEL_MODE:-}"
 UI_E2E_HEADED="${UI_E2E_HEADED:-}"
@@ -38,6 +40,11 @@ PROFILE_META_CACHE_SOURCE_KIND="mixed"
 PROFILE_META_CACHE_EXPECTED_REPO_COUNT=0
 MATRIX_TIMEOUT_PROFILE=""
 MATRIX_TIMEOUT_ENV_ASSIGNMENTS=()
+declare -a MATRIX_ALL_PROVIDERS=("qwen-code" "claude-code")
+declare -a MATRIX_SELECTED_PROVIDERS=()
+declare -a MATRIX_SELECTED_RUN_INDEXES=()
+MATRIX_SELECTED_PROVIDERS_CSV=""
+MATRIX_SELECTED_RUN_INDEXES_CSV=""
 
 log() {
   local line
@@ -105,6 +112,18 @@ normalize_binary_flag() {
   esac
 }
 
+array_contains() {
+  local needle="$1"
+  shift
+  local item
+  for item in "$@"; do
+    if [[ "$item" == "$needle" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 slugify() {
   local value
   value="$(echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
@@ -112,6 +131,94 @@ slugify() {
     value="item"
   fi
   printf '%s' "$value"
+}
+
+resolve_selected_providers() {
+  local filter_raw="${BATCH_PROVIDER_FILTER:-all}"
+  local filter
+  filter="$(echo "$filter_raw" | tr -d '[:space:]')"
+  if [[ -z "$filter" || "$filter" == "all" ]]; then
+    MATRIX_SELECTED_PROVIDERS=("${MATRIX_ALL_PROVIDERS[@]}")
+  else
+    MATRIX_SELECTED_PROVIDERS=()
+    local token
+    local -a tokens=()
+    IFS=',' read -r -a tokens <<<"$filter"
+    for token in "${tokens[@]}"; do
+      [[ -z "$token" ]] && continue
+      case "$token" in
+        qwen-code|claude-code)
+          if ! array_contains "$token" "${MATRIX_SELECTED_PROVIDERS[@]-}"; then
+            MATRIX_SELECTED_PROVIDERS+=("$token")
+          fi
+          ;;
+        *)
+          die "BATCH_PROVIDER_FILTER contains unsupported provider '$token' (allowed: qwen-code, claude-code, all)"
+          ;;
+      esac
+    done
+  fi
+  if [[ "${#MATRIX_SELECTED_PROVIDERS[@]}" -eq 0 ]]; then
+    die "BATCH_PROVIDER_FILTER resolved to an empty provider set"
+  fi
+  MATRIX_SELECTED_PROVIDERS_CSV="$(IFS=,; echo "${MATRIX_SELECTED_PROVIDERS[*]}")"
+}
+
+resolve_selected_run_indexes() {
+  local selection_raw="${BATCH_RUN_SELECTION:-all}"
+  local resolved_indexes
+  resolved_indexes="$(python3 - "$RUN_COUNT" "$selection_raw" <<'PY'
+import sys
+
+try:
+    run_count = int((sys.argv[1] or "").strip())
+except Exception:
+    raise SystemExit("RUN_COUNT must be a positive integer")
+
+selection = (sys.argv[2] or "").strip().lower()
+if selection in {"", "all"}:
+    print("\n".join(str(i) for i in range(1, run_count + 1)))
+    raise SystemExit(0)
+
+values = set()
+for token in [part.strip() for part in selection.split(",") if part.strip()]:
+    if "-" in token:
+        left, right = token.split("-", 1)
+        try:
+            start = int(left)
+            end = int(right)
+        except Exception:
+            raise SystemExit(f"invalid run range token: {token}")
+        if start > end:
+            raise SystemExit(f"invalid descending run range token: {token}")
+        for value in range(start, end + 1):
+            values.add(value)
+    else:
+        try:
+            values.add(int(token))
+        except Exception:
+            raise SystemExit(f"invalid run token: {token}")
+
+if not values:
+    raise SystemExit("BATCH_RUN_SELECTION resolved to an empty run set")
+
+for value in sorted(values):
+    if value < 1 or value > run_count:
+        raise SystemExit(f"run index out of bounds: {value} (RUN_COUNT={run_count})")
+
+print("\n".join(str(value) for value in sorted(values)))
+PY
+)"
+  MATRIX_SELECTED_RUN_INDEXES=()
+  local run_index
+  while IFS= read -r run_index; do
+    [[ -z "$run_index" ]] && continue
+    MATRIX_SELECTED_RUN_INDEXES+=("$run_index")
+  done <<<"$resolved_indexes"
+  if [[ "${#MATRIX_SELECTED_RUN_INDEXES[@]}" -eq 0 ]]; then
+    die "BATCH_RUN_SELECTION resolved to an empty run set"
+  fi
+  MATRIX_SELECTED_RUN_INDEXES_CSV="$(IFS=,; echo "${MATRIX_SELECTED_RUN_INDEXES[*]}")"
 }
 
 read_profile_repos_meta() {
@@ -174,6 +281,8 @@ require_cmd python3
 require_cmd "$ACP_CLAUDE_CMD_BIN"
 require_cmd "$ACP_QWEN_CMD_BIN"
 acp_ensure_no_legacy_env_set die
+resolve_selected_providers
+resolve_selected_run_indexes
 
 mkdir -p "$MATRIX_ROOT" "$REPORTS_ROOT"
 mkdir -p "$(dirname "$MATRIX_DRIVER_LOG")"
@@ -603,7 +712,7 @@ MATRIX_REPORT_TSV="$REPORTS_ROOT/profile_matrix_${MATRIX_ID}.tsv"
 VERDICT_MD="$REPORTS_ROOT/release_verdict_${MATRIX_ID}.md"
 VERDICT_JSON="$REPORTS_ROOT/release_verdict_${MATRIX_ID}.json"
 
-python3 - "$RECORDS_JSONL" "$MATRIX_REPORT_MD" "$MATRIX_REPORT_TSV" "$VERDICT_MD" "$VERDICT_JSON" "$MATRIX_ID" "$RELEASE_MODE" "$RUN_COUNT" <<'PY'
+python3 - "$RECORDS_JSONL" "$MATRIX_REPORT_MD" "$MATRIX_REPORT_TSV" "$VERDICT_MD" "$VERDICT_JSON" "$MATRIX_ID" "$RELEASE_MODE" "$RUN_COUNT" "$MATRIX_SELECTED_PROVIDERS_CSV" "$MATRIX_SELECTED_RUN_INDEXES_CSV" <<'PY'
 import json
 import re
 import sys
@@ -619,6 +728,8 @@ verdict_json = Path(sys.argv[5]).resolve()
 matrix_id = sys.argv[6]
 release_mode = str(sys.argv[7]).strip() == "1"
 run_count = int(sys.argv[8])
+selected_providers = [item.strip() for item in str(sys.argv[9]).split(",") if item.strip()]
+selected_run_indexes = [item.strip() for item in str(sys.argv[10]).split(",") if item.strip()]
 
 records = []
 for line in records_path.read_text(encoding="utf-8").splitlines():
@@ -808,6 +919,7 @@ def strict_blockers(
     shard_plan_invariant: str,
     release_mode: bool,
     expected_backend_runs: int,
+    required_frontend_providers: list[str],
 ) -> list[str]:
     reasons: list[str] = []
 
@@ -850,9 +962,16 @@ def strict_blockers(
             f"issue_hits:{stats['runtime_flow_issue_hits']} runtime_flow_failed:{stats['runtime_flow_failed']} (expected 0)"
         )
 
-    for key, value in frontend.items():
-        if value != "passed":
-            reasons.append(f"{key}={value} (expected passed)")
+    frontend_provider_keys = {
+        "qwen-code": ("frontend_qwen_status", "frontend_cancel_qwen_status"),
+        "claude-code": ("frontend_claude_status", "frontend_cancel_claude_status"),
+    }
+    for provider in required_frontend_providers:
+        init_key, cancel_key = frontend_provider_keys[provider]
+        if frontend.get(init_key) != "passed":
+            reasons.append(f"{init_key}={frontend.get(init_key, 'missing')} (expected passed)")
+        if frontend.get(cancel_key) != "passed":
+            reasons.append(f"{cancel_key}={frontend.get(cancel_key, 'missing')} (expected passed)")
     if release_mode and shard_plan_invariant != "passed":
         reasons.append(f"shard_plan_invariant={shard_plan_invariant} (release requires passed)")
 
@@ -1010,6 +1129,11 @@ release_contract_status = "passed" if not release_contract_blockers else "failed
 
 verdict_records: list[dict[str, object]] = []
 strict_fail_count = 0
+expected_backend_runs = run_count * len(required_release_providers)
+required_frontend_providers = list(required_release_providers)
+if not release_mode:
+    expected_backend_runs = len(selected_run_indexes) * len(selected_providers)
+    required_frontend_providers = list(selected_providers)
 
 for rec in records:
     run_matrix_tsv = Path(str(rec["run_matrix_tsv"]))
@@ -1024,7 +1148,6 @@ for rec in records:
         "frontend_cancel_claude_status": parse_frontend_status(frontend_cancel_matrix_md, "claude-code"),
     }
 
-    expected_backend_runs = run_count * len(required_release_providers)
     shard_plan_invariant = invariant_status_by_batch.get(str(rec["batch_id"]), "not_compared")
     blockers = strict_blockers(
         rec,
@@ -1033,6 +1156,7 @@ for rec in records:
         shard_plan_invariant,
         release_mode,
         expected_backend_runs,
+        required_frontend_providers,
     )
     blockers.extend(invariant_blockers_by_batch.get(str(rec["batch_id"]), []))
     strict_status = "passed" if not blockers else "failed"
@@ -1217,6 +1341,9 @@ verdict_payload = {
         "observed_sweeps": observed_sweeps,
         "expected_profile_sweep_runs": expected_profile_sweep_runs,
         "observed_profile_sweep_runs": observed_profile_sweep_runs,
+        "selected_providers": selected_providers,
+        "selected_run_indexes": selected_run_indexes,
+        "expected_backend_runs_per_profile_sweep": expected_backend_runs,
         "required_profiles": list(required_release_profiles) if release_mode else [],
         "observed_profiles": observed_profiles,
         "missing_profile_sweep_pairs": missing_profile_sweep_pairs,

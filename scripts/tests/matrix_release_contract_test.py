@@ -134,6 +134,14 @@ class MatrixReleaseContractTest(unittest.TestCase):
 
                 mkdir -p "${REPORTS_ROOT}" "${BATCH_ROOT}/qwen-code/run1/reports/taskruns"
 
+                provider_filter="${BATCH_PROVIDER_FILTER:-all}"
+                if [[ -z "${provider_filter}" || "${provider_filter}" == "all" ]]; then
+                  selected_providers=(qwen-code claude-code)
+                else
+                  IFS=',' read -r -a selected_providers <<< "${provider_filter}"
+                fi
+                provider_count="${#selected_providers[@]}"
+
                 run_matrix_tsv="${REPORTS_ROOT}/run_matrix_${BATCH_ID}.tsv"
                 run_matrix_md="${REPORTS_ROOT}/run_matrix_${BATCH_ID}.md"
                 quality_report_md="${REPORTS_ROOT}/quality_report_${BATCH_ID}.md"
@@ -142,7 +150,7 @@ class MatrixReleaseContractTest(unittest.TestCase):
 
                 {
                   printf 'hard_pass\\truntime_parse\\trunner_unavailable\\truntime_timeout\\tinfra_signal_terminated\\tinfra_incomplete_cycle\\tquality_gates_failed\\tsummary_missing\\tprecheck_failed\\tcancellation_like\\truntime_flow_failed\\tsemantic_hard_fail\\toff_topic_hits\\tartifact_source\\tissues\\n'
-                  for _ in $(seq 1 $((2 * RUN_COUNT))); do
+                  for _ in $(seq 1 $((provider_count * RUN_COUNT))); do
                     printf '1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\tsnapshot\\t-\\n'
                   done
                 } > "${run_matrix_tsv}"
@@ -150,19 +158,21 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 printf '# run matrix\\n' > "${run_matrix_md}"
                 printf '# quality\\n' > "${quality_report_md}"
 
-                cat > "${frontend_matrix_md}" <<'EOF'
-                | provider | status | runs |
-                |---|---|---|
-                | qwen-code | passed | 1 |
-                | claude-code | passed | 1 |
-                EOF
+                {
+                  printf '| provider | status | runs |\\n'
+                  printf '|---|---|---|\\n'
+                  for provider in "${selected_providers[@]}"; do
+                    printf '| %s | passed | 1 |\\n' "${provider}"
+                  done
+                } > "${frontend_matrix_md}"
 
-                cat > "${frontend_cancel_matrix_md}" <<'EOF'
-                | provider | status | runs |
-                |---|---|---|
-                | qwen-code | passed | 1 |
-                | claude-code | passed | 1 |
-                EOF
+                {
+                  printf '| provider | status | runs |\\n'
+                  printf '|---|---|---|\\n'
+                  for provider in "${selected_providers[@]}"; do
+                    printf '| %s | passed | 1 |\\n' "${provider}"
+                  done
+                } > "${frontend_cancel_matrix_md}"
 
                 shard_plan_path="${BATCH_ROOT}/qwen-code/run1/reports/taskruns/${BATCH_ID}-init-step1-collect-shard-plan.json"
                 if [[ "${MATRIX_TEST_ARTIFACT_ERROR:-0}" == "1" && "${PROFILE_ID}" == "single-path" && "${SWEEP_ID}" == "parallel-default" ]]; then
@@ -518,6 +528,60 @@ class MatrixReleaseContractTest(unittest.TestCase):
             all(
                 int(rec.get("backend", {}).get("total_runs", 0)) == 4
                 and int(rec.get("backend", {}).get("hard_pass", 0)) == 4
+                for rec in verdict.get("records", [])
+            )
+        )
+
+    def test_non_release_qwen_only_matrix_uses_single_provider_expectations(self) -> None:
+        matrix_file = self._write_matrix_file(
+            None,
+            include_profiles=["single-path", "multi-git_url"],
+        )
+        matrix_id = "matrix-test-non-release-qwen-only"
+        result = self._run_matrix(
+            matrix_file,
+            matrix_id,
+            extra_env={"BATCH_PROVIDER_FILTER": "qwen-code"},
+            release_mode="0",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual(verdict["verdict"], "PASS")
+        release_contract = verdict["release_contract"]
+        self.assertEqual(release_contract["mode"], "non-release")
+        self.assertEqual(release_contract["selected_providers"], ["qwen-code"])
+        self.assertEqual(release_contract["selected_run_indexes"], ["1"])
+        self.assertEqual(release_contract["expected_backend_runs_per_profile_sweep"], 1)
+        self.assertTrue(
+            all(
+                int(rec.get("backend", {}).get("total_runs", 0)) == 1
+                and int(rec.get("backend", {}).get("hard_pass", 0)) == 1
+                and rec.get("frontend", {}).get("frontend_qwen_status") == "passed"
+                and rec.get("frontend", {}).get("frontend_claude_status") == "missing"
+                and rec.get("strict_status") == "passed"
+                for rec in verdict.get("records", [])
+            )
+        )
+
+    def test_release_matrix_still_requires_dual_provider_execution(self) -> None:
+        matrix_file = self._write_matrix_file(["baseline", "parallel-default"])
+        matrix_id = "release-test-qwen-only-blocked"
+        result = self._run_matrix(
+            matrix_file,
+            matrix_id,
+            extra_env={"BATCH_PROVIDER_FILTER": "qwen-code"},
+        )
+        combined_output = result.stdout + "\n" + result.stderr
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("RELEASE BLOCKED", combined_output)
+
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual(verdict["verdict"], "FAIL")
+        self.assertTrue(
+            any(
+                any("backend_total_runs=1 (expected 2)" in reason for reason in rec.get("blocking_reasons", []))
+                or any("frontend_claude_status=missing (expected passed)" in reason for reason in rec.get("blocking_reasons", []))
                 for rec in verdict.get("records", [])
             )
         )
