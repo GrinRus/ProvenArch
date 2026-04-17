@@ -127,7 +127,7 @@ class MatrixReleaseContractTest(unittest.TestCase):
 
                 {
                   printf 'hard_pass\\truntime_parse\\trunner_unavailable\\truntime_timeout\\tinfra_signal_terminated\\tinfra_incomplete_cycle\\tquality_gates_failed\\tsummary_missing\\tprecheck_failed\\tcancellation_like\\truntime_flow_failed\\tsemantic_hard_fail\\toff_topic_hits\\tartifact_source\\tissues\\n'
-                  for _ in $(seq 1 10); do
+                  for _ in $(seq 1 $((2 * RUN_COUNT))); do
                     printf '1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\tsnapshot\\t-\\n'
                   done
                 } > "${run_matrix_tsv}"
@@ -172,7 +172,7 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.batch_script.chmod(self.batch_script.stat().st_mode | stat.S_IXUSR)
 
     def _write_matrix_file(self, sweeps: list[str] | None, include_profiles: list[str] | None = None) -> Path:
-        ordered_profiles = ["single-path", "single-git_url", "multi-path", "multi-git_url"]
+        ordered_profiles = ["single-path", "multi-git_url"]
         selected_profiles = include_profiles or ordered_profiles
         matrix_path = self.tmp_root / "matrix.yaml"
 
@@ -280,6 +280,45 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertTrue(verdict_path.exists(), f"missing verdict file: {verdict_path}")
         return json.loads(verdict_path.read_text(encoding="utf-8"))
 
+    def _load_yaml(self, path: Path) -> dict:
+        try:
+            import yaml  # type: ignore
+        except Exception as exc:  # pragma: no cover - hard fail mirrors runtime requirement
+            self.fail(f"PyYAML is required for parsing {path}: {exc}")
+        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+        self.assertIsInstance(payload, dict, f"expected YAML object in {path}")
+        return payload
+
+    def _assert_release_slice_shape(self, path: Path, expected_profiles: list[str]) -> None:
+        payload = self._load_yaml(path)
+        sweeps = payload.get("sweeps")
+        self.assertEqual(
+            [item.get("id") for item in sweeps],
+            ["baseline", "parallel-default"],
+            f"unexpected release sweeps in {path}",
+        )
+        profiles = payload.get("profiles")
+        self.assertEqual([item.get("id") for item in profiles], expected_profiles)
+        self.assertEqual(len(profiles), 2, f"release slice must keep exactly 2 concrete profiles: {path}")
+
+        profile_ids = {item.get("id") for item in profiles}
+        self.assertEqual(
+            len([profile_id for profile_id in profile_ids if str(profile_id).startswith("single-")]),
+            1,
+            f"release slice must keep exactly one single-* profile: {path}",
+        )
+        self.assertEqual(
+            len([profile_id for profile_id in profile_ids if str(profile_id).startswith("multi-")]),
+            1,
+            f"release slice must keep exactly one multi-* profile: {path}",
+        )
+
+    def _assert_non_release_slice_shape(self, path: Path, expected_profiles: list[str]) -> None:
+        payload = self._load_yaml(path)
+        self.assertNotIn("sweeps", payload, f"non-release slice should rely on implicit baseline: {path}")
+        profiles = payload.get("profiles")
+        self.assertEqual([item.get("id") for item in profiles], expected_profiles)
+
     def test_release_matrix_requires_parallel_default_sweep(self) -> None:
         matrix_file = self._write_matrix_file(["baseline"])
         matrix_id = "release-test-missing-parallel"
@@ -298,17 +337,38 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertIn("contains unsupported ids: extra-sweep", combined_output)
         self.assertFalse(self.sentinel_path.exists(), "batch script should not run when release sweeps contain extra ids")
 
-    def test_release_matrix_requires_all_four_profiles(self) -> None:
+    def test_release_matrix_requires_single_and_multi_profile_families(self) -> None:
         matrix_file = self._write_matrix_file(
             ["baseline", "parallel-default"],
-            include_profiles=["single-path", "single-git_url", "multi-path"],
+            include_profiles=["single-path"],
         )
         matrix_id = "release-test-missing-profile"
         result = self._run_matrix(matrix_file, matrix_id)
         combined_output = result.stdout + "\n" + result.stderr
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("missing required profile ids: multi-git_url", combined_output)
-        self.assertFalse(self.sentinel_path.exists(), "batch script should not run when release profile set is incomplete")
+        self.assertIn("exactly 2 profiles", combined_output)
+        self.assertFalse(self.sentinel_path.exists(), "batch script should not run when release profile families are incomplete")
+
+    def test_release_matrix_rejects_duplicate_single_family(self) -> None:
+        matrix_file = self._write_matrix_file(
+            ["baseline", "parallel-default"],
+            include_profiles=["single-path", "single-git_url", "multi-path"],
+        )
+        matrix_id = "release-test-duplicate-family"
+        result = self._run_matrix(matrix_file, matrix_id)
+        combined_output = result.stdout + "\n" + result.stderr
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("exactly 2 profiles", combined_output)
+        self.assertFalse(self.sentinel_path.exists(), "batch script should not run when release profile families are duplicated")
+
+    def test_release_matrix_requires_run_count_one(self) -> None:
+        matrix_file = self._write_matrix_file(["baseline", "parallel-default"])
+        matrix_id = "release-test-run-count"
+        result = self._run_matrix(matrix_file, matrix_id, extra_env={"RUN_COUNT": "2"})
+        combined_output = result.stdout + "\n" + result.stderr
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires RUN_COUNT=1", combined_output)
+        self.assertFalse(self.sentinel_path.exists(), "batch script should not run when release RUN_COUNT is invalid")
 
     def test_valid_release_matrix_passes_with_release_contract(self) -> None:
         matrix_file = self._write_matrix_file(["baseline", "parallel-default"])
@@ -323,12 +383,13 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertEqual(release_contract["contract_status"], "passed")
         self.assertEqual(release_contract["required_sweeps"], ["baseline", "parallel-default"])
         self.assertEqual(release_contract["observed_sweeps"], ["baseline", "parallel-default"])
-        self.assertEqual(release_contract["expected_profile_sweep_runs"], 8)
-        self.assertEqual(release_contract["observed_profile_sweep_runs"], 8)
+        self.assertEqual(release_contract["required_profiles"], ["single-path", "multi-git_url"])
+        self.assertEqual(release_contract["expected_profile_sweep_runs"], 4)
+        self.assertEqual(release_contract["observed_profile_sweep_runs"], 4)
         self.assertEqual(release_contract["shard_plan_invariant_status"], "passed")
 
         calls = self.sentinel_path.read_text(encoding="utf-8").splitlines()
-        self.assertEqual(len(calls), 8)
+        self.assertEqual(len(calls), 4)
 
     def test_release_mode_blocks_artifact_error_invariant(self) -> None:
         matrix_file = self._write_matrix_file(["baseline", "parallel-default"])
@@ -353,7 +414,10 @@ class MatrixReleaseContractTest(unittest.TestCase):
         )
 
     def test_non_release_allows_implicit_baseline_when_sweeps_omitted(self) -> None:
-        matrix_file = self._write_matrix_file(None)
+        matrix_file = self._write_matrix_file(
+            None,
+            include_profiles=["single-path", "single-git_url", "multi-path", "multi-git_url"],
+        )
         matrix_id = "matrix-test-implicit-baseline"
         result = self._run_matrix(matrix_file, matrix_id, release_mode="0")
         self.assertEqual(result.returncode, 0, msg=result.stderr)
@@ -371,6 +435,195 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 rec.get("shard_plan_invariant") == "not_compared" and rec.get("strict_status") == "passed"
                 for rec in verdict.get("records", [])
             )
+        )
+
+    def test_non_release_wave1_regression_matrix_allows_two_profiles(self) -> None:
+        matrix_file = self._write_matrix_file(
+            None,
+            include_profiles=["single-path", "multi-git_url"],
+        )
+        matrix_id = "matrix-test-wave1-regression"
+        result = self._run_matrix(matrix_file, matrix_id, release_mode="0")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual(verdict["verdict"], "PASS")
+        release_contract = verdict["release_contract"]
+        self.assertEqual(release_contract["mode"], "non-release")
+        self.assertEqual(release_contract["observed_sweeps"], ["baseline"])
+        self.assertEqual(release_contract["observed_profile_sweep_runs"], 2)
+
+    def test_non_release_single_profile_matrix_allows_implicit_baseline(self) -> None:
+        matrix_file = self._write_matrix_file(
+            None,
+            include_profiles=["multi-path"],
+        )
+        matrix_id = "matrix-test-single-profile-non-release"
+        result = self._run_matrix(matrix_file, matrix_id, release_mode="0")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual(verdict["verdict"], "PASS")
+        release_contract = verdict["release_contract"]
+        self.assertEqual(release_contract["mode"], "non-release")
+        self.assertEqual(release_contract["observed_sweeps"], ["baseline"])
+        self.assertEqual(release_contract["observed_profile_sweep_runs"], 1)
+
+    def test_release_slice_with_single_git_and_multi_path_passes(self) -> None:
+        matrix_file = self._write_matrix_file(
+            ["baseline", "parallel-default"],
+            include_profiles=["single-git_url", "multi-path"],
+        )
+        matrix_id = "release-test-single-git-multi-path"
+        result = self._run_matrix(matrix_file, matrix_id)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual(verdict["verdict"], "PASS")
+        self.assertEqual(verdict["release_contract"]["required_profiles"], ["single-git_url", "multi-path"])
+
+    def test_release_slice_with_single_path_and_multi_path_passes(self) -> None:
+        matrix_file = self._write_matrix_file(
+            ["baseline", "parallel-default"],
+            include_profiles=["single-path", "multi-path"],
+        )
+        matrix_id = "release-test-single-path-multi-path"
+        result = self._run_matrix(matrix_file, matrix_id)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual(verdict["verdict"], "PASS")
+        self.assertEqual(verdict["release_contract"]["required_profiles"], ["single-path", "multi-path"])
+
+    def test_release_slice_with_single_git_and_multi_git_passes(self) -> None:
+        matrix_file = self._write_matrix_file(
+            ["baseline", "parallel-default"],
+            include_profiles=["single-git_url", "multi-git_url"],
+        )
+        matrix_id = "release-test-single-git-multi-git"
+        result = self._run_matrix(matrix_file, matrix_id)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual(verdict["verdict"], "PASS")
+        self.assertEqual(verdict["release_contract"]["required_profiles"], ["single-git_url", "multi-git_url"])
+
+    def test_checked_in_profile_catalog_is_consistent(self) -> None:
+        catalog_path = self.repo_root / "examples" / "e2e-profile-catalog.yaml"
+        catalog = self._load_yaml(catalog_path)
+
+        repo_sets = catalog.get("repo_sets")
+        self.assertIsInstance(repo_sets, dict)
+        self.assertEqual(len(repo_sets), 6)
+
+        policies = catalog.get("execution_policies")
+        self.assertIsInstance(policies, dict)
+
+        profiles = catalog.get("profiles")
+        self.assertIsInstance(profiles, list)
+        self.assertEqual(len(profiles), 5)
+
+        profile_by_slug = {item["slug"]: item for item in profiles}
+        self.assertEqual(len(profile_by_slug), 5)
+
+        all_target_repo_sets: set[str] = set()
+        matrix_refs: dict[str, list[str]] = {}
+        allowed_ids = {"single-path", "single-git_url", "multi-path", "multi-git_url"}
+        examples_root = self.repo_root / "examples"
+
+        for profile in profiles:
+            slug = str(profile["slug"])
+            policy_name = str(profile["policy"])
+            self.assertIn(policy_name, policies, f"unknown policy for {slug}")
+            policy = policies[policy_name]
+            providers = policy.get("providers")
+            self.assertIsInstance(providers, list)
+            self.assertGreater(len(providers), 0)
+
+            target_repo_sets = profile.get("target_repo_sets")
+            self.assertIsInstance(target_repo_sets, list)
+            all_target_repo_sets.update(str(item) for item in target_repo_sets)
+
+            matrix_files = profile.get("matrix_files")
+            self.assertIsInstance(matrix_files, list)
+            self.assertGreater(len(matrix_files), 0)
+
+            computed_runs = 0
+            for rel_matrix in matrix_files:
+                matrix_path = (examples_root / str(rel_matrix).replace("./", "")).resolve()
+                self.assertTrue(matrix_path.exists(), f"missing matrix file for {slug}: {matrix_path}")
+                matrix_refs.setdefault(str(matrix_path), []).append(slug)
+
+                matrix_payload = self._load_yaml(matrix_path)
+                matrix_profiles = matrix_payload.get("profiles")
+                self.assertIsInstance(matrix_profiles, list)
+                self.assertGreater(len(matrix_profiles), 0)
+                for item in matrix_profiles:
+                    self.assertIn(item.get("id"), allowed_ids, f"illegal concrete profile id in {matrix_path}")
+
+                sweep_count = len(matrix_payload.get("sweeps") or [{"id": "baseline"}])
+                computed_runs += len(matrix_profiles) * sweep_count * len(providers)
+
+                if profile["mode"] == "release":
+                    self._assert_release_slice_shape(
+                        matrix_path,
+                        [item.get("id") for item in matrix_profiles],
+                    )
+                else:
+                    self.assertNotIn("sweeps", matrix_payload, f"regres slice should use implicit baseline: {matrix_path}")
+
+            self.assertEqual(
+                computed_runs,
+                int(profile["expected_backend_runs"]),
+                f"expected backend runs drift for {slug}",
+            )
+
+        self.assertEqual(all_target_repo_sets, set(repo_sets.keys()))
+
+        for matrix_path, refs in matrix_refs.items():
+            if len(refs) == 1:
+                continue
+            self.assertEqual(len(refs), 2, f"unexpected matrix reuse: {matrix_path} -> {refs}")
+            composite_slug = next(
+                (
+                    slug
+                    for slug in refs
+                    if profile_by_slug[slug].get("composite_of_profiles")
+                ),
+                None,
+            )
+            self.assertIsNotNone(composite_slug, f"matrix reuse must come from explicit composite profile: {matrix_path}")
+            other_refs = {slug for slug in refs if slug != composite_slug}
+            composite_children = set(profile_by_slug[composite_slug].get("composite_of_profiles", []))
+            self.assertEqual(
+                other_refs,
+                composite_children & other_refs,
+                f"matrix reuse mismatch for {matrix_path}: refs={refs} composite={composite_children}",
+            )
+
+        self._assert_release_slice_shape(
+            self.repo_root / "examples" / "e2e-matrix.release-fast.yaml",
+            ["single-git_url", "multi-path"],
+        )
+        self._assert_release_slice_shape(
+            self.repo_root / "examples" / "e2e-matrix.release-long.yaml",
+            ["single-path", "multi-path"],
+        )
+        self._assert_release_slice_shape(
+            self.repo_root / "examples" / "e2e-matrix.release-full.ftgo-sentry.yaml",
+            ["single-git_url", "multi-git_url"],
+        )
+        self._assert_non_release_slice_shape(
+            self.repo_root / "examples" / "e2e-matrix.regres-fast.bank-openedx.yaml",
+            ["single-git_url", "multi-path"],
+        )
+        self._assert_non_release_slice_shape(
+            self.repo_root / "examples" / "e2e-matrix.regres-fast.openstack.yaml",
+            ["multi-path"],
+        )
+        self._assert_non_release_slice_shape(
+            self.repo_root / "examples" / "e2e-matrix.regres-long.yaml",
+            ["single-path", "single-git_url"],
         )
 
 

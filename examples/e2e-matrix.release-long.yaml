@@ -1,5 +1,3 @@
-# Legacy compatibility slice. Keep for ad-hoc diagnostics; canonical release profiles live in
-# examples/e2e-profile-catalog.yaml and examples/e2e-matrix.release-*.yaml.
 version: 1
 sweeps:
   - id: baseline
@@ -20,7 +18,7 @@ profiles:
     expected_repo_count: 1
     repos_file: ./repos/curated/single-path.posthog.repos.yaml
 
-  - id: multi-git_url
-    source_kind: git_url
+  - id: multi-path
+    source_kind: path
     expected_repo_count: 5
-    repos_file: ./repos/github/multi-sentry-ecosystem.repos.yaml
+    repos_file: ./repos/curated/multi-path.openstack.repos.yaml

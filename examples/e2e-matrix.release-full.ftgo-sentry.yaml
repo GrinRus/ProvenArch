@@ -1,5 +1,3 @@
-# Legacy compatibility slice. Keep for ad-hoc diagnostics; canonical release profiles live in
-# examples/e2e-profile-catalog.yaml and examples/e2e-matrix.release-*.yaml.
 version: 1
 sweeps:
   - id: baseline
@@ -15,10 +13,10 @@ sweeps:
     shard_discovery_mode: heuristics
 
 profiles:
-  - id: single-path
-    source_kind: path
+  - id: single-git_url
+    source_kind: git_url
     expected_repo_count: 1
-    repos_file: ./repos/curated/single-path.posthog.repos.yaml
+    repos_file: ./repos/github/mono-ftgo-application.repos.yaml
 
   - id: multi-git_url
     source_kind: git_url

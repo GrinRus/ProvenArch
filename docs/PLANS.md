@@ -49,6 +49,133 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 
 ### Plan ID
+EP-20260417-live-e2e-profile-taxonomy
+
+### Context
+Нужно заменить wave-centric live E2E narrative на более гранулированную 5-профильную таксономию без изменения текущего runner contract. Concrete `profile_id` остаются прежними, а named профили (`regres fast|long`, `release fast|long|full`) вводятся как checked-in composite presets поверх прямых вызовов `full-run-batch-matrix.sh`.
+
+### Goals (must have)
+- [x] Добавить checked-in catalog с sizing policy, repo-set shard classification и expected backend totals
+- [x] Добавить runnable matrix slices для новых high-level профилей без изменения matrix parser/release-mode contract
+- [x] Синхронизировать runbook/testing docs/skill под новую canonical taxonomy и пометить старые wave files как legacy/compat
+- [x] Добавить tests на новые release/non-release slice shapes и catalog integrity
+
+### Non-goals
+- [x] Не менять approved concrete profile ids (`single-path`, `single-git_url`, `multi-path`, `multi-git_url`)
+- [x] Не добавлять wrapper-скрипт поверх `scripts/full-run-batch-matrix.sh`
+
+### Approach
+1) Зафиксировать canonical taxonomy в `examples/e2e-profile-catalog.yaml`.
+2) Разбить named профили на минимальные runnable matrix slice-файлы.
+3) Обновить docs/skill так, чтобы canonical source of truth ссылался на catalog/slices, а legacy wave matrices остались только для compatibility.
+4) Расширить matrix tests на новые slice shapes и catalog expansion counts.
+
+### Files expected to change
+- `examples/e2e-profile-catalog.yaml`
+- `examples/e2e-matrix.*.yaml`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/LOCAL_FULL_RUN_AI_ADVENT.md`
+- `.agents/skills/e2e-live-gate/SKILL.md`
+- `scripts/tests/matrix_release_contract_test.py`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены
+- [x] Catalog покрывает все 6 canonical repo sets и 5 named profiles
+- [x] Документация и skill синхронизированы с новой taxonomy
+
+### Risks
+- Главное место риска — смешение старых wave файлов с новой canonical taxonomy. Их нужно сохранить рабочими, но явно вывести из основного release narrative.
+
+### Progress log
+- 2026-04-17: добавлены catalog и canonical matrix slices для `regres fast|long`, `release fast|long|full`.
+- 2026-04-17: runbook/testing docs/skill переведены на 5-profile taxonomy; wave matrices оставлены как legacy compatibility.
+- 2026-04-17: добавлены slice-shape и catalog integrity regression tests, выполнена exploratory fake validation shard counts для canonical repo sets.
+
+### Plan ID
+EP-20260417-live-e2e-baseline-vs-full
+
+### Context
+Нужно развести два live E2E контура: быстрый baseline regression для ежедневной отладки (`wave1`, `qwen`, implicit baseline, 2 backend runs total) и полный trusted-machine прогон для release/debug escalation.
+
+### Goals (must have)
+- [x] Ввести отдельный regression matrix example для `wave1`
+- [x] Зафиксировать в docs/skill, что baseline regression = `qwen-only`, а release/full run остаётся полным прогоном
+- [x] Добавить regression test на 2-profile non-release matrix
+
+### Non-goals
+- [ ] Не менять release-mode matrix contract
+- [ ] Не менять provider list (`claude-code`, `qwen-code`)
+
+### Approach
+1) Добавить non-release matrix example с `single-path + multi-git_url`.
+2) Документировать запуск baseline regression через `BATCH_PROVIDER_FILTER=qwen-code`.
+3) Оставить official release wave1/wave2 как full run и закрепить это отдельной проверкой.
+
+### Files expected to change
+- `examples/e2e-matrix.*.yaml`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/LOCAL_FULL_RUN_AI_ADVENT.md`
+- `.agents/skills/e2e-live-gate/SKILL.md`
+- `scripts/tests/matrix_release_contract_test.py`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены
+- [x] Baseline regression и full run описаны без двусмысленности
+- [x] Новый regression matrix example добавлен
+
+### Risks
+- Если не развести baseline/full run достаточно явно, команда будет путать быстрый qwen-only smoke с release-ready verdict.
+
+### Progress log
+- 2026-04-17: старт slice на разделение quick baseline regression и full run/release gate.
+- 2026-04-17: добавлен `examples/e2e-matrix.regression-wave1.yaml`, docs/skill разведены на quick baseline vs full run, пройдены `python3 -m unittest scripts.tests.matrix_release_contract_test` и `go test ./internal/docsync`.
+
+### Plan ID
+EP-20260417-live-e2e-matrix-downsize
+
+### Context
+Нужно сократить manual live E2E release surface без потери базового coverage: оставить по одному `single` и `multi` профилю на wave, запускать по одному backend run на provider и сохранить release sweeps `baseline` + `parallel-default`.
+
+### Goals (must have)
+- [x] Перевести release-mode matrix contract на `RUN_COUNT=1`
+- [x] Требовать в official release matrix ровно один `single-*` и один `multi-*` профиль
+- [x] Обновить official wave1/wave2 matrices и release verdict expectations
+- [x] Синхронизировать skill/runbook/testing docs и regression tests
+
+### Non-goals
+- [ ] Не менять provider list (`claude-code`, `qwen-code`)
+- [ ] Не убирать canonical sweeps `baseline` и `parallel-default`
+
+### Approach
+1) Ослабить generic matrix parser до approved profile ids, а release-mode сузить до `single + multi`.
+2) Сделать expected backend totals динамическими от `RUN_COUNT`, зафиксировав release-mode на `1`.
+3) Пересобрать official wave matrices и docs под новый minimal live baseline.
+
+### Files expected to change
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/tests/*`
+- `examples/e2e-matrix.release-wave*.yaml`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/LOCAL_FULL_RUN_AI_ADVENT.md`
+- `.agents/skills/e2e-live-gate/SKILL.md`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены
+- [x] Release contract валидирует новый minimal matrix
+- [x] Документация и skill синхронизированы
+
+### Risks
+- Слишком жёсткий/неочевидный release contract может сломать существующие trusted-host процедуры; нужно держать ошибки fail-fast и явно описать allowed profile families.
+
+### Progress log
+- 2026-04-17: старт slice на уменьшение live E2E matrix до minimal single+multi baseline с `RUN_COUNT=1`.
+- 2026-04-17: release-mode matrix переведён на `RUN_COUNT=1`, official wave matrices сужены до `single + multi`, обновлены skill/runbooks/docs и пройдены `python3 -m unittest scripts.tests.matrix_release_contract_test`, `go test ./internal/docsync`, `bash -n scripts/full-run-batch-matrix.sh scripts/full-run-batch-5x2.sh`.
+
+### Plan ID
 EP-20260416-doc-first-runtime-pipeline
 
 ### Context

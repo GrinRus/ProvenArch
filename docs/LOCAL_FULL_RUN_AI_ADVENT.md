@@ -94,10 +94,15 @@ Batch/Frontend scripts:
     - `UI_E2E_HEADED` (`0|1`; default `0`)
 - `scripts/full-run-batch-matrix.sh`
   - `E2E_MATRIX_FILE` (required; YAML `profiles[]`, optional `sweeps[]`)
-  - обязательные профили: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
+  - approved profile ids: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
   - если `sweeps[]` отсутствует -> implicit `baseline` sweep (только non-release/diagnostic)
+  - canonical high-level profile catalog: `examples/e2e-profile-catalog.yaml`
+  - canonical non-release slices: `examples/e2e-matrix.regres-*.yaml`
+  - canonical release slices: `examples/e2e-matrix.release-*.yaml`
+  - legacy compatibility slices: `examples/e2e-matrix.regression-wave1.yaml`, `examples/e2e-matrix.release-wave1.yaml`, `examples/e2e-matrix.release-wave2.yaml`
   - release-ready sweeps: `baseline`, `parallel-default`
-  - release-mode (`MATRIX_ID=release-*` или `E2E_MATRIX_RELEASE_MODE=1`) требует explicit `sweeps[]` с ровно `baseline` + `parallel-default`; иначе matrix driver завершится fail-fast до batch execution
+  - `RUN_COUNT` (default `1` для matrix driver; release-mode фиксирует `RUN_COUNT=1`)
+  - release-mode (`MATRIX_ID=release-*` или `E2E_MATRIX_RELEASE_MODE=1`) требует explicit `sweeps[]` с ровно `baseline` + `parallel-default` и ровно два профиля: один `single-*`, один `multi-*`; иначе matrix driver завершится fail-fast до batch execution
   - `repos_file` в matrix-профилях: относительные пути резолвятся от директории `E2E_MATRIX_FILE`
   - `MATRIX_ID` (default `matrix-<UTC timestamp>`)
   - `MATRIX_ROOT` (default `${E2E_TMP_ROOT}/matrix/${MATRIX_ID}`)
@@ -140,29 +145,65 @@ ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
 ./scripts/full-run-batch-5x2.sh
 
-# Вариант 7: matrix 4 профиля × sweeps (single+multi, path+git_url)
+# Вариант 7: canonical `regres fast` (3 backend runs total)
+E2E_MATRIX_FILE=./examples/e2e-matrix.regres-fast.bank-openedx.yaml \
+ACP_CLAUDE_CMD_BIN=claude \
+ACP_QWEN_CMD_BIN=qwen \
+BATCH_PROVIDER_FILTER=qwen-code \
+./scripts/full-run-batch-matrix.sh
+
+E2E_MATRIX_FILE=./examples/e2e-matrix.regres-fast.openstack.yaml \
+ACP_CLAUDE_CMD_BIN=claude \
+ACP_QWEN_CMD_BIN=qwen \
+BATCH_PROVIDER_FILTER=qwen-code \
+./scripts/full-run-batch-matrix.sh
+
+# Вариант 7.1: canonical `regres long` (2 backend runs total)
+E2E_MATRIX_FILE=./examples/e2e-matrix.regres-long.yaml \
+ACP_CLAUDE_CMD_BIN=claude \
+ACP_QWEN_CMD_BIN=qwen \
+BATCH_PROVIDER_FILTER=qwen-code \
+./scripts/full-run-batch-matrix.sh
+
+# Вариант 7.2: дополнительная отладка того же regression slice на claude
+E2E_MATRIX_FILE=./examples/e2e-matrix.regres-long.yaml \
+ACP_CLAUDE_CMD_BIN=claude \
+ACP_QWEN_CMD_BIN=qwen \
+BATCH_PROVIDER_FILTER=claude-code \
+BATCH_SKIP_PRECHECK=1 \
+./scripts/full-run-batch-matrix.sh
+
+# Вариант 8: произвольный matrix run (approved profiles × sweeps)
 E2E_MATRIX_FILE=/abs/path/to/e2e-matrix.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
 ./scripts/full-run-batch-matrix.sh
 
-# Вариант 7.1: release wave 1 (per-run frontend + headed)
-MATRIX_ID=release-wave1-$(date -u +%Y%m%dT%H%M%SZ) \
-E2E_MATRIX_FILE=./examples/e2e-matrix.release-wave1.yaml \
+# Вариант 8.1: canonical `release fast`
+MATRIX_ID=release-fast-$(date -u +%Y%m%dT%H%M%SZ) \
+E2E_MATRIX_FILE=./examples/e2e-matrix.release-fast.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
 ACP_APPLY_TIMEOUTS_VIA_API=1 \
 ./scripts/full-run-batch-matrix.sh
 
-# Вариант 7.2: release wave 2 (после wave1)
-MATRIX_ID=release-wave2-$(date -u +%Y%m%dT%H%M%SZ) \
-E2E_MATRIX_FILE=./examples/e2e-matrix.release-wave2.yaml \
+# Вариант 8.2: canonical `release long`
+MATRIX_ID=release-long-$(date -u +%Y%m%dT%H%M%SZ) \
+E2E_MATRIX_FILE=./examples/e2e-matrix.release-long.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
 ACP_APPLY_TIMEOUTS_VIA_API=1 \
 ./scripts/full-run-batch-matrix.sh
 
-# Вариант 8: параллельные shard-runs (по провайдерам)
+# Вариант 8.3: canonical `release full` addon slice (`ftgo + sentry`)
+MATRIX_ID=release-full-ftgo-sentry-$(date -u +%Y%m%dT%H%M%SZ) \
+E2E_MATRIX_FILE=./examples/e2e-matrix.release-full.ftgo-sentry.yaml \
+ACP_CLAUDE_CMD_BIN=claude \
+ACP_QWEN_CMD_BIN=qwen \
+ACP_APPLY_TIMEOUTS_VIA_API=1 \
+./scripts/full-run-batch-matrix.sh
+
+# Вариант 9: параллельные shard-runs (по провайдерам)
 TARGET_REPOS_FILE=/abs/path/to/repos.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
@@ -179,6 +220,15 @@ BATCH_PROVIDER_FILTER=claude-code \
 
 wait
 ```
+
+Canonical regression/release profile taxonomy задаётся в `examples/e2e-profile-catalog.yaml`:
+- `regres fast` = `3` backend runs total
+- `regres long` = `2` backend runs total
+- `release fast` = `8` backend runs total
+- `release long` = `8` backend runs total
+- `release full` = `24` backend runs total
+
+Legacy `regression-wave1` / `release-wave1` / `release-wave2` остаются только compatibility slices для ad-hoc diagnostics и не считаются canonical profile taxonomy.
 
 Правила shard-run:
 - параллельные shard-процессы обязаны использовать разные `BATCH_ID`;

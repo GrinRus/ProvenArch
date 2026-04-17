@@ -237,17 +237,24 @@ Implemented additional jobs:
   - `scripts/full-run-batch-matrix.sh`
   - `E2E_MATRIX_FILE` обязателен (`profiles[]`: `id`, `repos_file`, `expected_repo_count`, `source_kind`)
   - `sweeps[]` optional (если отсутствует -> implicit `baseline` только для non-release/diagnostic)
+  - canonical high-level profile catalog: `examples/e2e-profile-catalog.yaml`
+  - canonical non-release slices: `examples/e2e-matrix.regres-fast.bank-openedx.yaml`, `examples/e2e-matrix.regres-fast.openstack.yaml`, `examples/e2e-matrix.regres-long.yaml`
+  - canonical release slices: `examples/e2e-matrix.release-fast.yaml`, `examples/e2e-matrix.release-long.yaml`, `examples/e2e-matrix.release-full.ftgo-sentry.yaml`
+  - expected backend totals from catalog: `regres fast=3`, `regres long=2`, `release fast=8`, `release long=8`, `release full=24`
   - release-ready sweep set: `baseline` + `parallel-default`
   - matrix invariant: для одного `profile_id` shard-plan должен совпадать между `baseline` и `parallel-default`
-  - release-mode (`MATRIX_ID=release-*` или `E2E_MATRIX_RELEASE_MODE=1`) требует explicit `sweeps[]` с ровно `baseline` + `parallel-default`; missing/extra sweep блокирует matrix до batch stage
+  - approved profile ids: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
+  - release-mode (`MATRIX_ID=release-*` или `E2E_MATRIX_RELEASE_MODE=1`) фиксирует `RUN_COUNT=1` и требует explicit `sweeps[]` с ровно `baseline` + `parallel-default`, плюс ровно один `single-*` и один `multi-*` профиль; любое отклонение блокирует matrix до batch stage
   - относительные `repos_file` пути резолвятся от директории `E2E_MATRIX_FILE`
-  - официальные профили: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
   - для `source_kind=git_url` refs должны быть pinned
   - агрегированные отчёты: `profile_matrix_<matrix-id>.md/.tsv`, `release_verdict_<matrix-id>.md/.json`
 - release live harness (manual pre-release gate, no wrapper):
   - source-of-truth runbook: `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
   - использует текущий matrix контур (`full-run-batch-matrix.sh` + `full-run-batch-5x2.sh` + `e2e_batch_report.py`)
+  - `regres*` профили не дают release verdict; это отдельный qwen-first smoke/debug surface
   - release-mode guard (auto при `MATRIX_ID=release-*`) блокирует diagnostic timeout overrides; debug bypass только через `E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES=1`
+  - canonical release taxonomy: `release fast`, `release long`, `release full`
+  - `release full` = composite из `release fast` + `release long` + `ftgo+sentry` slice; readiness требует `PASS` во всех constituent `release_verdict_<matrix-id>.json`
   - обязательны оба провайдера (`qwen-code`, `claude-code`) и оба frontend сценария (`init-inspect-service-first`, `cancel-refresh`)
   - для release-mode matrix используется `BATCH_FRONTEND_MODE=per_run`, `BATCH_FRONTEND_CANCEL_MODE=once_per_provider`, `UI_E2E_HEADED=1`
   - strict blockers включают любой non-passed summary/run-level status в `frontend_e2e_matrix` и `frontend_cancel_e2e_matrix`

@@ -1,0 +1,11 @@
+version: 1
+profiles:
+  - id: single-path
+    source_kind: path
+    expected_repo_count: 1
+    repos_file: ./repos/curated/single-path.posthog.repos.yaml
+
+  - id: single-git_url
+    source_kind: git_url
+    expected_repo_count: 1
+    repos_file: ./repos/github/mono-ftgo-application.repos.yaml
