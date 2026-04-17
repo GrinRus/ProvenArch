@@ -36,6 +36,9 @@ Legacy compatibility only:
 7) В release-mode matrix обязан иметь explicit `sweeps[]` с ровно `baseline` + `parallel-default`, ровно один `single-*` и один `multi-*` профиль, и `RUN_COUNT=1`; implicit baseline допустим только для non-release/diagnostic.
 8) Не редактировать canonical release slices или curated `repos_file`, чтобы адаптировать release gate под неподходящий хост; если текущая машина не удовлетворяет prerequisites, остановить прогон и зафиксировать operational blocker.
 9) Дополнительная отладка на `claude` остаётся ручной фазой и не входит в expected backend totals для `regres*` профилей.
+10) Canonical acceptance запускать только из clean committed tree или отдельного clean worktree без unrelated локальных правок; `BATCH_SKIP_PRECHECK=1` допустим только для diagnostic/triage run.
+11) Если canonical run идёт из отдельного clean worktree, сначала установить локальные UI deps в этом worktree (`npm ci --prefix ui`), иначе precheck на `make test` сломается ещё до live batch execution.
+12) Canonical matrix slices уже несут native `timeout_profile`; не задавай `ACP_*TIMEOUT*` вручную для штатного запуска. В non-release manual diagnostic внешние timeout env допустимы, в release-mode они остаются blocked-by-default.
 
 ## Fail-Fast Host Check
 Перед DoD и matrix run сначала проверить, подходит ли хост для canonical release slices:
@@ -68,6 +71,10 @@ PY
 - `release fast`: dual-provider, explicit `baseline + parallel-default`, `bank-of-anthos + openedx`, `8` backend runs total.
 - `release long`: dual-provider, explicit `baseline + parallel-default`, `posthog + openstack`, `8` backend runs total.
 - `release full`: composite из `release fast` + `release long` + `ftgo + sentry-ecosystem`, `24` backend runs total.
+- canonical timeout presets:
+  - `short-window`: step `3600s`, pipeline `7200s`, ui-init `1200s`
+  - `medium-window`: step `5400s`, pipeline `14400s`, ui-init `1500s`
+  - `extended-window`: step `10800s`, pipeline `21600s`, ui-init `1800s`
 
 ## Required flow
 1) Для базовой отладки/regression по умолчанию выполнить `regres fast` или `regres long` через catalog-approved slices с `BATCH_PROVIDER_FILTER=qwen-code`.
@@ -100,3 +107,7 @@ PY
   Причина: local clone существует, но не закреплён на pinned release SHA.
 - timeout + `runner_unavailable` в одном run:
   primary triage class = `runtime_timeout`, если summary/classifier явно фиксирует timeout.
+- `runner_parse_failed` на `single-git_url`/`qwen-code` в `regres fast`
+  Причина: live provider ушёл в tool chatter + partial TaskResult drafting вместо одного финального JSON; canonical reference incident зафиксирован 2026-04-17, Open edX companion run тогда был прерван вручную и не считается отдельным regression signal.
+- `runtime_timeout` на clean canonical slice
+  Причина: либо запускается legacy matrix без committed `timeout_profile`, либо даже native time budget оказался недостаточным; сначала проверить `timeout_profile` matrix-файла и `full-run.log`, затем уже считать это реальной runtime/provider деградацией.

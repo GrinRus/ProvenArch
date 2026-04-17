@@ -1,6 +1,8 @@
 package taskresultextractor
 
 import (
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -123,6 +125,60 @@ func TestExtractReturnsSpecificErrorForEmptyEnvelopeResult(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(err.Error()), "envelope result is empty") {
 		t.Fatalf("expected envelope-empty reason, got: %v", err)
+	}
+}
+
+func TestExtractReturnsErrorForCapturedQwenLiveInvalidStdoutFixture(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join("..", "testdata", "qwen_live_bank_of_anthos_invalid_stdout.txt")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read live stdout fixture: %v", err)
+	}
+
+	_, err = Extract(raw)
+	if err == nil {
+		t.Fatalf("expected extraction error for captured live invalid stdout fixture")
+	}
+	if !strings.Contains(err.Error(), "unable to extract valid TaskResult JSON") {
+		t.Fatalf("expected top-level extraction context in error, got %v", err)
+	}
+}
+
+func TestExtractReturnsErrorForCapturedQwenLiveIACInvalidStdoutFixture(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join("..", "testdata", "qwen_live_bank_of_anthos_iac_invalid_stdout.txt")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read live iac stdout fixture: %v", err)
+	}
+
+	_, err = Extract(raw)
+	if err == nil {
+		t.Fatalf("expected extraction error for captured live iac invalid stdout fixture")
+	}
+	if !strings.Contains(err.Error(), "unable to extract valid TaskResult JSON") {
+		t.Fatalf("expected top-level extraction context in error, got %v", err)
+	}
+}
+
+func TestExtractReturnsErrorForCapturedQwenLiveExtrasInvalidStdoutFixture(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join("..", "testdata", "qwen_live_bank_of_anthos_extras_invalid_stdout.txt")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read live extras stdout fixture: %v", err)
+	}
+
+	_, err = Extract(raw)
+	if err == nil {
+		t.Fatalf("expected extraction error for captured live extras invalid stdout fixture")
+	}
+	if !strings.Contains(err.Error(), "unable to extract valid TaskResult JSON") {
+		t.Fatalf("expected top-level extraction context in error, got %v", err)
 	}
 }
 

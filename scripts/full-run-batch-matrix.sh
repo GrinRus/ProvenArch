@@ -15,7 +15,7 @@ source "$PROVENARCH_ROOT/scripts/execution-env-keys.sh"
 BATCH_SCRIPT="${BATCH_SCRIPT:-$PROVENARCH_ROOT/scripts/full-run-batch-5x2.sh}"
 E2E_MATRIX_FILE="${E2E_MATRIX_FILE:-}"
 MATRIX_ID="${MATRIX_ID:-matrix-$(date -u +'%Y%m%dT%H%M%SZ')}"
-RUN_COUNT="${RUN_COUNT:-5}"
+RUN_COUNT="${RUN_COUNT:-1}"
 E2E_TMP_ROOT="${E2E_TMP_ROOT:-/tmp/provenarch-test_arch_project}"
 REPORTS_ROOT="${REPORTS_ROOT:-$E2E_TMP_ROOT/reports}"
 MATRIX_ROOT="${MATRIX_ROOT:-$E2E_TMP_ROOT/matrix/$MATRIX_ID}"
@@ -28,6 +28,7 @@ BATCH_FRONTEND_MODE="${BATCH_FRONTEND_MODE:-}"
 BATCH_FRONTEND_CANCEL_MODE="${BATCH_FRONTEND_CANCEL_MODE:-}"
 UI_E2E_HEADED="${UI_E2E_HEADED:-}"
 MATRIX_DRIVER_LOG="${MATRIX_DRIVER_LOG:-$MATRIX_ROOT/driver.log}"
+MATRIX_TIMEOUT_PROFILE_FILE="${MATRIX_TIMEOUT_PROFILE_FILE:-$MATRIX_ROOT/timeout-profile.txt}"
 PROFILE_REPOS_FILE_RESOLVED=""
 PROFILE_SOURCE_KIND_EFFECTIVE=""
 PROFILE_EXPECTED_REPO_COUNT_RESOLVED=0
@@ -35,6 +36,8 @@ PROFILE_META_CACHE_KEY=""
 PROFILE_META_CACHE_REPOS_FILE=""
 PROFILE_META_CACHE_SOURCE_KIND="mixed"
 PROFILE_META_CACHE_EXPECTED_REPO_COUNT=0
+MATRIX_TIMEOUT_PROFILE=""
+MATRIX_TIMEOUT_ENV_ASSIGNMENTS=()
 
 log() {
   local line
@@ -147,13 +150,17 @@ validate_profile_repos_meta() {
 }
 
 if [[ -z "$E2E_MATRIX_FILE" ]]; then
-  die "E2E_MATRIX_FILE is required (YAML with profiles[] and optional sweeps[])"
+  die "E2E_MATRIX_FILE is required (YAML with profiles[] and optional sweeps[]/timeout_profile)"
 fi
 if [[ ! -f "$E2E_MATRIX_FILE" ]]; then
   die "E2E_MATRIX_FILE does not exist: $E2E_MATRIX_FILE"
 fi
-if [[ "$RUN_COUNT" != "5" ]]; then
-  die "RUN_COUNT must be 5 for matrix mode (got '$RUN_COUNT')"
+RELEASE_MODE="$(normalize_release_mode "$E2E_MATRIX_RELEASE_MODE")"
+if [[ ! "$RUN_COUNT" =~ ^[1-9][0-9]*$ ]]; then
+  die "RUN_COUNT must be a positive integer, got '$RUN_COUNT'"
+fi
+if [[ "$RELEASE_MODE" == "1" && "$RUN_COUNT" != "1" ]]; then
+  die "release-mode requires RUN_COUNT=1 for matrix mode (got '$RUN_COUNT')"
 fi
 if [[ "$ACP_APPLY_TIMEOUTS_VIA_API" != "0" && "$ACP_APPLY_TIMEOUTS_VIA_API" != "1" ]]; then
   die "ACP_APPLY_TIMEOUTS_VIA_API must be 0 or 1, got '$ACP_APPLY_TIMEOUTS_VIA_API'"
@@ -172,7 +179,6 @@ mkdir -p "$MATRIX_ROOT" "$REPORTS_ROOT"
 mkdir -p "$(dirname "$MATRIX_DRIVER_LOG")"
 : > "$MATRIX_DRIVER_LOG"
 
-RELEASE_MODE="$(normalize_release_mode "$E2E_MATRIX_RELEASE_MODE")"
 ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES="$(normalize_binary_flag "$E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES" "E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES")"
 if [[ "$RELEASE_MODE" == "1" ]]; then
   if [[ -z "$BATCH_FRONTEND_MODE" ]]; then
@@ -196,8 +202,12 @@ for key in "${DIAGNOSTIC_TIMEOUT_ENV_KEYS[@]}"; do
   fi
 done
 
-TIMEOUT_PROFILE_LINE="$(python3 "$PROVENARCH_ROOT/scripts/resolve-timeout-profile.py" --format line)"
-acp_log_preflight_timeout log "$ACP_APPLY_TIMEOUTS_VIA_API" "$TIMEOUT_PROFILE_LINE"
+TIMEOUT_PROFILE_CMD=(
+  python3
+  "$PROVENARCH_ROOT/scripts/resolve-timeout-profile.py"
+  --format
+  line
+)
 acp_log_release_guard log "$RELEASE_MODE" "$MATRIX_ID" "$ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES" "${#DIAGNOSTIC_TIMEOUT_OVERRIDES[@]}"
 if [[ "${#DIAGNOSTIC_TIMEOUT_OVERRIDES[@]}" -gt 0 ]]; then
   acp_log_diagnostic_timeout_overrides log "${DIAGNOSTIC_TIMEOUT_OVERRIDES[*]}"
@@ -210,8 +220,9 @@ log "release frontend defaults: frontend_mode=${BATCH_FRONTEND_MODE:-default} fr
 COMBINATIONS_TSV="$MATRIX_ROOT/profile-sweep-combinations.tsv"
 RECORDS_JSONL="$MATRIX_ROOT/profile-runs.jsonl"
 : > "$RECORDS_JSONL"
+: > "$MATRIX_TIMEOUT_PROFILE_FILE"
 
-python3 - "$E2E_MATRIX_FILE" "$COMBINATIONS_TSV" "$RELEASE_MODE" <<'PY'
+python3 - "$E2E_MATRIX_FILE" "$COMBINATIONS_TSV" "$RELEASE_MODE" "$MATRIX_TIMEOUT_PROFILE_FILE" <<'PY'
 import sys
 from pathlib import Path
 
@@ -224,26 +235,40 @@ matrix_path = Path(sys.argv[1]).resolve()
 out_path = Path(sys.argv[2]).resolve()
 release_mode_raw = str(sys.argv[3]).strip().lower()
 release_mode = release_mode_raw in {"1", "true", "yes", "on"}
+timeout_profile_path = Path(sys.argv[4]).resolve()
 payload = yaml.safe_load(matrix_path.read_text(encoding="utf-8"))
+allowed_timeout_profiles = {"short-window", "medium-window", "extended-window"}
 
 if isinstance(payload, dict):
     profiles = payload.get("profiles")
     sweeps = payload.get("sweeps")
+    timeout_profile = str(payload.get("timeout_profile", "")).strip()
 elif isinstance(payload, list):
     profiles = payload
     sweeps = None
+    timeout_profile = ""
 else:
     profiles = None
     sweeps = None
+    timeout_profile = ""
 
 if not isinstance(profiles, list) or not profiles:
     raise SystemExit(f"matrix file {matrix_path} must contain non-empty profiles[]")
+if timeout_profile and timeout_profile not in allowed_timeout_profiles:
+    raise SystemExit(
+        f"matrix file {matrix_path} timeout_profile must be one of: "
+        f"{', '.join(sorted(allowed_timeout_profiles))}; got: {timeout_profile}"
+    )
 
-required_profiles = {
+allowed_profiles = {
     "single-path": {"source_kind": "path", "min_repos": 1, "max_repos": 1},
     "single-git_url": {"source_kind": "git_url", "min_repos": 1, "max_repos": 1},
     "multi-path": {"source_kind": "path", "min_repos": 2, "max_repos": None},
     "multi-git_url": {"source_kind": "git_url", "min_repos": 2, "max_repos": None},
+}
+release_profile_families = {
+    "single": ("single-path", "single-git_url"),
+    "multi": ("multi-path", "multi-git_url"),
 }
 
 profile_rows: list[tuple[str, str, int, str]] = []
@@ -281,10 +306,10 @@ for idx, item in enumerate(profiles, start=1):
     if expected_count <= 0:
         raise SystemExit(f"profiles[{idx}] expected_repo_count must be > 0, got: {expected_count}")
 
-    contract = required_profiles.get(profile_id)
+    contract = allowed_profiles.get(profile_id)
     if contract is None:
         raise SystemExit(
-            f"profiles[{idx}] id must be one of: {', '.join(sorted(required_profiles.keys()))}; got: {profile_id}"
+            f"profiles[{idx}] id must be one of: {', '.join(sorted(allowed_profiles.keys()))}; got: {profile_id}"
         )
     expected_kind = str(contract["source_kind"])
     if source_kind != expected_kind:
@@ -304,16 +329,20 @@ for idx, item in enumerate(profiles, start=1):
 
     profile_rows.append((profile_id, str(repos_file), expected_count, source_kind))
 
-missing = sorted(set(required_profiles.keys()) - seen_ids)
-extra = sorted(seen_ids - set(required_profiles.keys()))
-if missing:
-    raise SystemExit(f"matrix file {matrix_path} missing required profile ids: {', '.join(missing)}")
-if extra:
-    raise SystemExit(f"matrix file {matrix_path} has unsupported profile ids: {', '.join(extra)}")
-if len(profiles) != len(required_profiles):
-    raise SystemExit(
-        f"matrix file {matrix_path} must contain exactly {len(required_profiles)} profiles"
-    )
+if release_mode:
+    selected_ids = {profile_id for profile_id, _, _, _ in profile_rows}
+    if len(profile_rows) != 2:
+        raise SystemExit(
+            "release-mode requires exactly 2 profiles: one single-* and one multi-*"
+        )
+    for family, options in release_profile_families.items():
+        matched = [profile_id for profile_id in options if profile_id in selected_ids]
+        if len(matched) != 1:
+            raise SystemExit(
+                "release-mode requires exactly one "
+                f"{family} profile from [{', '.join(options)}], got: "
+                + (", ".join(matched) if matched else "none")
+            )
 
 allowed = {
     "strategy": {"sequential", "parallel"},
@@ -402,13 +431,13 @@ if release_mode:
         raise SystemExit(
             "release-mode sweeps[] contains unsupported ids: " + ", ".join(extra_sweeps)
         )
-    expected_release_combinations = len(required_profiles) * len(required_release_sweeps)
+    expected_release_combinations = len(profile_rows) * len(required_release_sweeps)
     observed_release_combinations = len(profile_rows) * len(sweep_rows)
     if observed_release_combinations != expected_release_combinations:
         raise SystemExit(
             "release-mode requires full profile×sweep matrix: "
             f"expected {expected_release_combinations} combinations "
-            f"(4 profiles × 2 sweeps), got {observed_release_combinations}"
+            f"(2 profiles × 2 sweeps), got {observed_release_combinations}"
         )
 
 rows: list[str] = []
@@ -432,7 +461,23 @@ for profile_id, repos_file, expected_count, source_kind in profile_rows:
 
 out_path.parent.mkdir(parents=True, exist_ok=True)
 out_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+timeout_profile_path.parent.mkdir(parents=True, exist_ok=True)
+timeout_profile_path.write_text((timeout_profile + "\n") if timeout_profile else "", encoding="utf-8")
 PY
+
+if [[ -f "$MATRIX_TIMEOUT_PROFILE_FILE" ]]; then
+  MATRIX_TIMEOUT_PROFILE="$(tr -d '\r' < "$MATRIX_TIMEOUT_PROFILE_FILE" | head -n1 | xargs)"
+fi
+if [[ -n "$MATRIX_TIMEOUT_PROFILE" ]]; then
+  TIMEOUT_PROFILE_CMD+=(--preset "$MATRIX_TIMEOUT_PROFILE")
+  while IFS='=' read -r key value; do
+    [[ -z "$key" || -n "${!key:-}" ]] && continue
+    MATRIX_TIMEOUT_ENV_ASSIGNMENTS+=("$key=$value")
+  done < <(python3 "$PROVENARCH_ROOT/scripts/resolve-timeout-profile.py" --preset "$MATRIX_TIMEOUT_PROFILE" --format env-kv)
+  log "matrix timeout profile: profile=$MATRIX_TIMEOUT_PROFILE"
+fi
+TIMEOUT_PROFILE_LINE="$("${TIMEOUT_PROFILE_CMD[@]}")"
+acp_log_preflight_timeout log "$ACP_APPLY_TIMEOUTS_VIA_API" "$TIMEOUT_PROFILE_LINE"
 
 while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sweep_id sweep_strategy sweep_max_parallel sweep_failure_policy sweep_shard_mode; do
   [[ -z "$profile_id" ]] && continue
@@ -460,6 +505,11 @@ while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sw
   status="passed"
   if ! (
     cd "$PROVENARCH_ROOT"
+    if [[ "${#MATRIX_TIMEOUT_ENV_ASSIGNMENTS[@]}" -gt 0 ]]; then
+      for assignment in "${MATRIX_TIMEOUT_ENV_ASSIGNMENTS[@]}"; do
+        export "$assignment"
+      done
+    fi
     acp_build_timeout_env_assignments
     ACP_EXECUTION_STRATEGY="$sweep_strategy"
     ACP_MAX_PARALLEL_TASKS="$sweep_max_parallel"
@@ -553,7 +603,7 @@ MATRIX_REPORT_TSV="$REPORTS_ROOT/profile_matrix_${MATRIX_ID}.tsv"
 VERDICT_MD="$REPORTS_ROOT/release_verdict_${MATRIX_ID}.md"
 VERDICT_JSON="$REPORTS_ROOT/release_verdict_${MATRIX_ID}.json"
 
-python3 - "$RECORDS_JSONL" "$MATRIX_REPORT_MD" "$MATRIX_REPORT_TSV" "$VERDICT_MD" "$VERDICT_JSON" "$MATRIX_ID" "$RELEASE_MODE" <<'PY'
+python3 - "$RECORDS_JSONL" "$MATRIX_REPORT_MD" "$MATRIX_REPORT_TSV" "$VERDICT_MD" "$VERDICT_JSON" "$MATRIX_ID" "$RELEASE_MODE" "$RUN_COUNT" <<'PY'
 import json
 import re
 import sys
@@ -568,6 +618,7 @@ verdict_md = Path(sys.argv[4]).resolve()
 verdict_json = Path(sys.argv[5]).resolve()
 matrix_id = sys.argv[6]
 release_mode = str(sys.argv[7]).strip() == "1"
+run_count = int(sys.argv[8])
 
 records = []
 for line in records_path.read_text(encoding="utf-8").splitlines():
@@ -579,8 +630,9 @@ for line in records_path.read_text(encoding="utf-8").splitlines():
 if not records:
     raise SystemExit(f"no matrix records found in {records_path}")
 
-required_release_profiles = ("single-path", "single-git_url", "multi-path", "multi-git_url")
 required_release_sweeps = ("baseline", "parallel-default")
+release_profile_order = ("single-path", "single-git_url", "multi-path", "multi-git_url")
+required_release_providers = ("qwen-code", "claude-code")
 
 
 def parse_frontend_status(path: Path, provider: str) -> str:
@@ -755,16 +807,17 @@ def strict_blockers(
     frontend: dict[str, str],
     shard_plan_invariant: str,
     release_mode: bool,
+    expected_backend_runs: int,
 ) -> list[str]:
     reasons: list[str] = []
 
     if str(rec.get("status", "")).strip() != "passed":
         reasons.append(f"batch_status={rec.get('status', 'missing')}")
 
-    if int(stats["total"]) != 10:
-        reasons.append(f"backend_total_runs={stats['total']} (expected 10)")
-    if int(stats["hard"]) != 10:
-        reasons.append(f"backend_hard_pass={stats['hard']} (expected 10)")
+    if int(stats["total"]) != expected_backend_runs:
+        reasons.append(f"backend_total_runs={stats['total']} (expected {expected_backend_runs})")
+    if int(stats["hard"]) != expected_backend_runs:
+        reasons.append(f"backend_hard_pass={stats['hard']} (expected {expected_backend_runs})")
 
     for key in (
         "runtime_parse",
@@ -910,6 +963,7 @@ invariant_status_by_batch, invariant_blockers_by_batch = shard_plan_invariant_st
 
 observed_sweeps = sorted({str(rec.get("sweep_id", "baseline")).strip() for rec in records})
 observed_profiles = sorted({str(rec.get("profile_id", "")).strip() for rec in records if str(rec.get("profile_id", "")).strip()})
+required_release_profiles = [profile_id for profile_id in release_profile_order if profile_id in observed_profiles]
 observed_pairs = {
     (str(rec.get("profile_id", "")).strip(), str(rec.get("sweep_id", "baseline")).strip())
     for rec in records
@@ -970,8 +1024,16 @@ for rec in records:
         "frontend_cancel_claude_status": parse_frontend_status(frontend_cancel_matrix_md, "claude-code"),
     }
 
+    expected_backend_runs = run_count * len(required_release_providers)
     shard_plan_invariant = invariant_status_by_batch.get(str(rec["batch_id"]), "not_compared")
-    blockers = strict_blockers(rec, stats, frontend_statuses, shard_plan_invariant, release_mode)
+    blockers = strict_blockers(
+        rec,
+        stats,
+        frontend_statuses,
+        shard_plan_invariant,
+        release_mode,
+        expected_backend_runs,
+    )
     blockers.extend(invariant_blockers_by_batch.get(str(rec["batch_id"]), []))
     strict_status = "passed" if not blockers else "failed"
     if blockers:

@@ -133,6 +133,61 @@ EP-20260417-live-e2e-baseline-vs-full
 - 2026-04-17: добавлен `examples/e2e-matrix.regression-wave1.yaml`, docs/skill разведены на quick baseline vs full run, пройдены `python3 -m unittest scripts.tests.matrix_release_contract_test` и `go test ./internal/docsync`.
 
 ### Plan ID
+EP-20260417-canonical-live-e2e-stabilization
+
+### Context
+После перехода на 5-profile taxonomy canonical `regres fast` должен исполняться из clean committed tree без `BATCH_SKIP_PRECHECK`. Для этого нужно синхронизировать committed harness с новым matrix contract, усилить qwen retry/JSON discipline на live shard output и закрепить clean-tree preflight в docs/skill.
+
+### Goals (must have)
+- [x] Синхронизировать harness и tests с новым non-release/release matrix contract
+- [x] Усилить qwen prompt/retry discipline и добавить regression fixture на реальный invalid live stdout pattern
+- [x] Обновить runbook/testing docs/skill под canonical clean-tree preflight
+- [x] Повторно прогнать non-live DoD после фиксов harness/tests
+- [ ] Довести canonical `regres fast` live acceptance до финального verdict без `BATCH_SKIP_PRECHECK`
+
+### Non-goals
+- [x] Не менять 5-profile taxonomy, catalog и curated repo sets
+- [x] Не добавлять wrapper-скрипт поверх `scripts/full-run-batch-matrix.sh`
+- [x] Не менять product API и `schemas/taskresult.schema.json`
+
+### Approach
+1) Убрать из tracked harness legacy-ожидание "в матрице должны быть все 4 concrete profile id" и привести release verdict math к реальному expansion.
+2) Зафиксировать qwen live parse regression fixture и усилить prompt/retry contract только под подтверждённые event-stream patterns.
+3) Синхронизировать runbook/skill/strategy на clean committed tree или отдельный clean worktree.
+4) Повторить canonical `regres fast` из clean worktree без `BATCH_SKIP_PRECHECK` и проверить verdict files.
+
+### Files expected to change
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/tests/matrix_release_contract_test.py`
+- `internal/runtime/qwencode/runner.go`
+- `internal/runtime/qwencode/runner_test.go`
+- `internal/runtime/taskresultextractor/extractor_test.go`
+- `internal/runtime/testdata/*`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/LOCAL_FULL_RUN_AI_ADVENT.md`
+- `.agents/skills/e2e-live-gate/SKILL.md`
+
+### Acceptance criteria
+- [x] Matrix contract tests покрывают release/non-release slices и implicit baseline
+- [x] Qwen regression fixture и retry path покрыты тестами
+- [x] Документация и skill описывают canonical clean-tree preflight
+- [x] `make contracts test lint build` проходит после фиксов
+- [ ] Canonical `regres fast` live rerun завершён с PASS verdict без `precheck_failed` и `runner_parse_failed`
+
+### Risks
+- Основной риск остался runtime-level: qwen может продолжать выдавать длинный prose/tool-planning перед финальным `TaskResult`, из-за чего canonical acceptance придётся подтверждать реальным trusted-host rerun, а не только unit coverage.
+
+### Progress log
+- 2026-04-17: synced committed harness with new matrix contract, including non-release positive `RUN_COUNT` and release-family validation.
+- 2026-04-17: added qwen live invalid stdout fixture, strengthened prompt/retry discipline, and expanded runner/extractor regression tests.
+- 2026-04-17: documented clean-tree canonical preflight in runbook, testing strategy, local full-run guide, and `acp-e2e-live-gate` skill.
+- 2026-04-17: reran `make contracts test lint build` successfully after fixing `REPORTS_ROOT`/`MATRIX_ROOT` env leakage in matrix contract tests.
+- 2026-04-17: canonical `regres fast` acceptance rerun started from clean worktree without `BATCH_SKIP_PRECHECK`; qwen advanced past the original immediate parse-failure path and entered retry-backed shard execution.
+- 2026-04-17: clean rerun showed the remaining canonical blocker moved from `runner_parse_failed` to `runtime_timeout` under legacy `pipeline_timeout=2400s`; follow-up slice adds matrix-native `timeout_profile` presets to canonical matrices and harness.
+
+### Plan ID
 EP-20260417-live-e2e-matrix-downsize
 
 ### Context

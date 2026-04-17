@@ -62,6 +62,16 @@ Release verdict для readiness берётся только из `reports/relea
 - доступ к `path` repos
 - доступ к `git_url` repos с pinned `ref`
 
+### 2.0) Clean tree requirement
+
+Canonical profile runs нужно выполнять из clean committed tree или из отдельного clean worktree без unrelated локального drift.
+
+Практическое правило:
+- если в основном worktree есть незакоммиченные изменения в harness/runtime/docs, сначала вынести canonical прогон в отдельный clean worktree;
+- если используется отдельный clean worktree, заранее установить локальные UI deps в этом worktree: минимум `npm ci --prefix ui`; для frontend live surface дополнительно `npm exec --prefix ui playwright install chromium`;
+- не использовать `BATCH_SKIP_PRECHECK=1` как способ обойти локальное расхождение между committed contract и текущими незакоммиченными правками;
+- diagnostic прогон с `BATCH_SKIP_PRECHECK=1` допустим только как triage-only evidence и не считается canonical acceptance run.
+
 ### 2.1) Fail-fast host eligibility
 
 Эту проверку выполнять до DoD/preflight и до старта canonical release slices:
@@ -258,6 +268,8 @@ BATCH_PROVIDER_FILTER=qwen-code \
 ./scripts/full-run-batch-matrix.sh
 ```
 
+Обе canonical matrix в этом профиле уже несут `timeout_profile=short-window`; штатный запуск не требует внешних `ACP_*TIMEOUT*`.
+
 2. `regres long` (qwen-first medium repos, 2 backend runs total):
 
 ```bash
@@ -267,6 +279,8 @@ ACP_QWEN_CMD_BIN=qwen \
 BATCH_PROVIDER_FILTER=qwen-code \
 ./scripts/full-run-batch-matrix.sh
 ```
+
+Этот slice несёт `timeout_profile=medium-window`.
 
 Если после regression нужна дополнительная debug-фаза на `claude`, повторить нужный regression slice с:
 
@@ -356,6 +370,8 @@ ACP_APPLY_TIMEOUTS_VIA_API=1 \
 ./scripts/full-run-batch-matrix.sh
 ```
 
+`examples/e2e-matrix.release-fast.yaml` несёт `timeout_profile=short-window`.
+
 6. `release long` (medium repos, 8 backend runs total):
 
 ```bash
@@ -366,6 +382,8 @@ ACP_QWEN_CMD_BIN=qwen \
 ACP_APPLY_TIMEOUTS_VIA_API=1 \
 ./scripts/full-run-batch-matrix.sh
 ```
+
+`examples/e2e-matrix.release-long.yaml` несёт `timeout_profile=medium-window`.
 
 7. `release full` (all canonical repo sets, 24 backend runs total):
 
@@ -392,6 +410,8 @@ ACP_APPLY_TIMEOUTS_VIA_API=1 \
 ./scripts/full-run-batch-matrix.sh
 ```
 
+Addon slice `examples/e2e-matrix.release-full.ftgo-sentry.yaml` несёт `timeout_profile=extended-window`.
+
 Composite readiness rule:
 - `release full` считается готовым только если все три constituent `release_verdict_<matrix-id>.json` имеют `PASS`.
 - `release fast` и `release long` можно использовать как самостоятельные slice verdicts.
@@ -407,6 +427,7 @@ Release guard rules:
 - Если нужен диагностический прогон с override, явно включать:
   - `E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES=1`
   - Такой прогон не использовать как release verdict.
+- Native `timeout_profile` внутри checked-in canonical matrix не считается diagnostic override и является частью штатного release/regression surface.
 
 ## 5) Release evidence artifacts
 
@@ -497,6 +518,8 @@ Zero tolerance:
 
 Дополнительно:
 - если run завершился `run_partial_failed` и `reports/taskruns/<run_id>-quality.json.evidence_state.report_mode=incomplete`, generated markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) читать только как triage-only artifacts; banner/triage-only wording обязаны явно указывать на incomplete analysis, а не имитировать пустой успешный verdict.
+- live triage от `2026-04-17` зафиксировал один надёжный blocker для canonical `regres fast`: `single-git_url` на `qwen-code` завершился `runner_parse_failed` после event-stream chatter и partial TaskResult drafting; последующий `multi-path`/Open edX run был прерван вручную и не считается самостоятельным продуктовым failure signal.
+- subsequent clean rerun от `2026-04-17` подтвердил, что после фикса qwen prompt/retry + `cwd/chat-recording` этот parse blocker снимается; оставшийся canonical blocker сместился в legacy `pipeline_timeout=2400s`, поэтому canonical matrix slices получили checked-in `timeout_profile` с matrix-native budget.
 
 ### 6.7 Triage rule for runtime timeout/infra signals
 

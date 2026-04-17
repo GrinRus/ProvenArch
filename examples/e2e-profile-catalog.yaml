@@ -9,6 +9,20 @@ sizing_policy:
   full:
     min_shards: 65
 
+timeout_profiles:
+  short-window:
+    step_timeout_sec: 3600
+    pipeline_timeout_sec: 7200
+    ui_init_poll_timeout_sec: 1200
+  medium-window:
+    step_timeout_sec: 5400
+    pipeline_timeout_sec: 14400
+    ui_init_poll_timeout_sec: 1500
+  extended-window:
+    step_timeout_sec: 10800
+    pipeline_timeout_sec: 21600
+    ui_init_poll_timeout_sec: 1800
+
 repo_sets:
   bank-of-anthos:
     concrete_profile_id: single-git_url
@@ -84,6 +98,7 @@ profiles:
     mode: regres
     policy: regres-default
     shard_bucket: small
+    timeout_profile: short-window
     expected_backend_runs: 3
     rough_duration_band: short-window
     target_repo_sets:
@@ -97,6 +112,7 @@ profiles:
     mode: regres
     policy: regres-default
     shard_bucket: medium
+    timeout_profile: medium-window
     expected_backend_runs: 2
     rough_duration_band: medium-window
     target_repo_sets:
@@ -108,6 +124,7 @@ profiles:
     mode: release
     policy: release-default
     shard_bucket: small
+    timeout_profile: short-window
     expected_backend_runs: 8
     rough_duration_band: short-window
     target_repo_sets:
@@ -119,6 +136,7 @@ profiles:
     mode: release
     policy: release-default
     shard_bucket: medium
+    timeout_profile: medium-window
     expected_backend_runs: 8
     rough_duration_band: medium-window
     target_repo_sets:
@@ -132,6 +150,7 @@ profiles:
     mode: release
     policy: release-default
     shard_bucket: full
+    timeout_profile: extended-window
     expected_backend_runs: 24
     rough_duration_band: extended-window
     target_repo_sets:

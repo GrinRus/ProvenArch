@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,17 @@ import (
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
+
+func loadCapturedLiveStdoutFixture(t *testing.T, name string) string {
+	t.Helper()
+
+	path := filepath.Join("..", "testdata", name)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read live stdout fixture: %v", err)
+	}
+	return string(raw)
+}
 
 func TestHeadlessRunnerUnavailableClassifiesAsRunnerUnavailable(t *testing.T) {
 	t.Parallel()
@@ -380,6 +392,165 @@ echo 'first stderr detail' >&2
 	}
 }
 
+func TestHeadlessRunnerRetriesCapturedLiveInvalidStdoutFixture(t *testing.T) {
+	tempDir := t.TempDir()
+	commandPath := filepath.Join(tempDir, "qwen-live-retry-stub.sh")
+	fixturePath := filepath.Join(tempDir, "live-invalid-output.txt")
+	if err := os.WriteFile(fixturePath, []byte(loadCapturedLiveStdoutFixture(t, "qwen_live_bank_of_anthos_invalid_stdout.txt")), 0o644); err != nil {
+		t.Fatalf("write live fixture copy: %v", err)
+	}
+	script := `#!/bin/sh
+set -eu
+last_arg=""
+for arg in "$@"; do
+  last_arg="$arg"
+done
+if echo "$last_arg" | grep -q "RETRY MODE"; then
+  cat <<'JSON'
+{"meta":{"task_id":"task-live-retry","step_id":"init.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}
+JSON
+  exit 0
+fi
+cat "$QWEN_LIVE_FIXTURE"
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write live retry command: %v", err)
+	}
+
+	t.Setenv("QWEN_LIVE_FIXTURE", fixturePath)
+
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-live-retry",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    t.TempDir(),
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("expected retry run to succeed after captured live invalid stdout: %v", err)
+	}
+	if result.TaskResult.Meta.TaskID != "task-live-retry" {
+		t.Fatalf("unexpected task id %q", result.TaskResult.Meta.TaskID)
+	}
+}
+
+func TestHeadlessRunnerRetriesCapturedLiveIACInvalidStdoutFixtureWithWriteRootRecoveryPrompt(t *testing.T) {
+	tempDir := t.TempDir()
+	commandPath := filepath.Join(tempDir, "qwen-live-iac-retry-stub.sh")
+	fixturePath := filepath.Join(tempDir, "live-invalid-iac-output.txt")
+	if err := os.WriteFile(fixturePath, []byte(loadCapturedLiveStdoutFixture(t, "qwen_live_bank_of_anthos_iac_invalid_stdout.txt")), 0o644); err != nil {
+		t.Fatalf("write live iac fixture copy: %v", err)
+	}
+	writeRoot := filepath.Join(tempDir, "write-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "shard-pack-manifest.json"), []byte(`{"documents":[{"path":"iac-overview.md"}]}`), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "iac-overview.md"), []byte("# Overview\n"), 0o644); err != nil {
+		t.Fatalf("write doc: %v", err)
+	}
+
+	script := `#!/bin/sh
+set -eu
+last_arg=""
+for arg in "$@"; do
+  last_arg="$arg"
+done
+if echo "$last_arg" | grep -q "Retry goal is JSON repair, not fresh repository exploration." \
+  && echo "$last_arg" | grep -q "shard-pack-manifest.json is already present in write_root"; then
+  cat <<'JSON'
+{"meta":{"task_id":"task-live-iac-retry","step_id":"init.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}
+JSON
+  exit 0
+fi
+cat "$QWEN_LIVE_IAC_FIXTURE"
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write live iac retry command: %v", err)
+	}
+
+	t.Setenv("QWEN_LIVE_IAC_FIXTURE", fixturePath)
+
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-live-iac-retry",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    t.TempDir(),
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("expected retry run to succeed after captured live iac invalid stdout: %v", err)
+	}
+	if result.TaskResult.Meta.TaskID != "task-live-iac-retry" {
+		t.Fatalf("unexpected task id %q", result.TaskResult.Meta.TaskID)
+	}
+}
+
+func TestHeadlessRunnerRetriesCapturedLiveExtrasInvalidStdoutFixtureWithMinimalRetryPrompt(t *testing.T) {
+	tempDir := t.TempDir()
+	commandPath := filepath.Join(tempDir, "qwen-live-extras-retry-stub.sh")
+	fixturePath := filepath.Join(tempDir, "live-invalid-extras-output.txt")
+	if err := os.WriteFile(fixturePath, []byte(loadCapturedLiveStdoutFixture(t, "qwen_live_bank_of_anthos_extras_invalid_stdout.txt")), 0o644); err != nil {
+		t.Fatalf("write live extras fixture copy: %v", err)
+	}
+	writeRoot := filepath.Join(tempDir, "write-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "shard-pack-manifest.json"), []byte(`{"documents":[{"path":"shard-analysis.md"}]}`), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "shard-analysis.md"), []byte("# Analysis\n"), 0o644); err != nil {
+		t.Fatalf("write doc: %v", err)
+	}
+
+	script := `#!/bin/sh
+set -eu
+last_arg=""
+for arg in "$@"; do
+  last_arg="$arg"
+done
+if echo "$last_arg" | grep -q 'Prefer "changeset": \[\]' \
+  && echo "$last_arg" | grep -q "Do NOT copy long citations, topic arrays, or manifest document inventories into TaskResult JSON." \
+  && echo "$last_arg" | grep -q "Retry-safe minimal template (preferred when reusing existing write_root artifacts):"; then
+  cat <<'JSON'
+{"meta":{"task_id":"task-live-extras-retry","step_id":"init.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}
+JSON
+  exit 0
+fi
+cat "$QWEN_LIVE_EXTRAS_FIXTURE"
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write live extras retry command: %v", err)
+	}
+
+	t.Setenv("QWEN_LIVE_EXTRAS_FIXTURE", fixturePath)
+
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-live-extras-retry",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    t.TempDir(),
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("expected retry run to succeed after captured live extras invalid stdout: %v", err)
+	}
+	if result.TaskResult.Meta.TaskID != "task-live-extras-retry" {
+		t.Fatalf("unexpected task id %q", result.TaskResult.Meta.TaskID)
+	}
+}
+
 func TestHeadlessRunnerPreservesContextCancellation(t *testing.T) {
 	t.Parallel()
 
@@ -618,6 +789,98 @@ func TestBuildPromptRefreshStep1CollectIncludesNoWebSearchPolicy(t *testing.T) {
 	}
 }
 
+func TestBuildPromptIncludesStrictResultJsonAndFinalResponseDiscipline(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		TaskID:       "task-result-discipline",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    t.TempDir(),
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	prompt := buildPrompt(raw, true)
+	if !strings.Contains(prompt, "STRICT RESULT JSON MODE") {
+		t.Fatalf("expected strict result json mode block in prompt")
+	}
+	if !strings.Contains(prompt, "Prefer returning a direct TaskResult JSON object") {
+		t.Fatalf("expected direct TaskResult preference in prompt")
+	}
+	if !strings.Contains(prompt, "Do NOT narrate file writes, manifest contents, or planning steps in the final message.") {
+		t.Fatalf("expected final response discipline in prompt")
+	}
+	if !strings.Contains(prompt, `Final response MUST start with "{" and end with "}".`) {
+		t.Fatalf("expected retry json framing guard in prompt")
+	}
+}
+
+func TestBuildPromptRetryIncludesWriteRootRecoveryGuidance(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := filepath.Join(t.TempDir(), "write-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	for name, contents := range map[string]string{
+		"shard-pack-manifest.json": `{"documents":[{"path":"iac-overview.md"}]}`,
+		"iac-overview.md":          "# Overview\n",
+		"iac-analysis.md":          "# Analysis\n",
+	} {
+		if err := os.WriteFile(filepath.Join(writeRoot, name), []byte(contents), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	task := acpruntime.Task{
+		TaskID:       "task-retry-recovery",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    t.TempDir(),
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	prompt := buildPrompt(raw, true)
+	if !strings.Contains(prompt, "RETRY RECOVERY MODE") {
+		t.Fatalf("expected retry recovery block in prompt")
+	}
+	if !strings.Contains(prompt, "Retry goal is JSON repair, not fresh repository exploration.") {
+		t.Fatalf("expected json-repair guidance in prompt")
+	}
+	if !strings.Contains(prompt, "Do NOT use todo_write") {
+		t.Fatalf("expected todo_write ban in retry prompt")
+	}
+	if !strings.Contains(prompt, "shard-pack-manifest.json is already present in write_root") {
+		t.Fatalf("expected manifest reuse guidance in retry prompt")
+	}
+	if !strings.Contains(prompt, `Prefer "changeset": [] when write_root already contains authored docs`) {
+		t.Fatalf("expected minimal changeset guidance in retry prompt")
+	}
+	if !strings.Contains(prompt, "Do NOT copy long citations, topic arrays, or manifest document inventories into TaskResult JSON.") {
+		t.Fatalf("expected manifest-copy ban in retry prompt")
+	}
+	if !strings.Contains(prompt, "Retry-safe minimal template (preferred when reusing existing write_root artifacts):") {
+		t.Fatalf("expected retry-safe minimal template block in prompt")
+	}
+	if !strings.Contains(prompt, `"changeset": []`) {
+		t.Fatalf("expected empty changeset in retry-safe template, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "iac-analysis.md") || !strings.Contains(prompt, "iac-overview.md") {
+		t.Fatalf("expected write_root snapshot filenames in retry prompt, got %q", prompt)
+	}
+}
+
 func TestBuildDefaultQwenArgsUsesPromptFlagWithWorkspaceAndRepoDirectories(t *testing.T) {
 	t.Parallel()
 
@@ -650,10 +913,94 @@ func TestBuildDefaultQwenArgsUsesPromptFlagWithWorkspaceAndRepoDirectories(t *te
 	if !strings.Contains(joined, "--include-directories "+repoPath) {
 		t.Fatalf("expected repo include-directories in args, got %q", joined)
 	}
+	if !strings.Contains(joined, "--chat-recording false") {
+		t.Fatalf("expected chat recording to be disabled in args, got %q", joined)
+	}
 	if !strings.Contains(joined, "--prompt prompt-text") {
 		t.Fatalf("expected --prompt usage in args, got %q", joined)
 	}
 	if args[len(args)-2] != "--prompt" || args[len(args)-1] != "prompt-text" {
 		t.Fatalf("expected prompt to be appended as --prompt <value>, got %#v", args)
+	}
+}
+
+func TestBuildRetryQwenArgsConstrainsCollectRetryToWriteRootWhenArtifactsExist(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := filepath.Join(t.TempDir(), "write-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "shard-pack-manifest.json"), []byte(`{"documents":[{"path":"iac-overview.md"}]}`), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "iac-overview.md"), []byte("# Overview\n"), 0o644); err != nil {
+		t.Fatalf("write doc: %v", err)
+	}
+
+	task := acpruntime.Task{
+		TaskID:       "task-retry-args",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    t.TempDir(),
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+
+	args := buildRetryQwenArgs(task, "prompt-text")
+	includeDirs := []string{}
+	for idx := 0; idx < len(args)-1; idx++ {
+		if args[idx] == "--include-directories" {
+			includeDirs = append(includeDirs, args[idx+1])
+		}
+	}
+	if len(includeDirs) != 1 || includeDirs[0] != writeRoot {
+		t.Fatalf("expected retry include-directories to be constrained to write_root, got %#v", includeDirs)
+	}
+}
+
+func TestRunQwenCommandPrefersWorkspaceAsCommandDirOverWriteRoot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	writeRoot := filepath.Join(workspace, "reports", "taskruns", "staging", "shards", "bank-of-anthos-docs")
+	for _, dir := range []string{workspace, writeRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	task := acpruntime.Task{
+		TaskID:       "task-dir-check",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    workspace,
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	validJSON := fmt.Sprintf(`{"meta":{"task_id":"%s","step_id":"%s","run_id":"%s","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z","workspace":"%s"},"summary":"ok","changeset":[{"op":"upsert_entity","entity":{"id":"svc.payments-service","type":"service","name":"Payments Service","attributes":{"repo_scope":"payments-service"},"provenance":{"kind":"observation","confidence":0.7,"evidence":[{"repo":"payments-service","path":"README.md"}]}}}]}`,
+		task.TaskID,
+		task.StepID,
+		task.RunID,
+		task.Workspace,
+	)
+
+	result, parseStage, parseErr, runErr := runQwenCommand(
+		context.Background(),
+		task,
+		"sh",
+		[]string{"-c", fmt.Sprintf("pwd >&2; printf '%%s' '%s'", validJSON)},
+	)
+	if runErr != nil {
+		t.Fatalf("unexpected runner error: %v", runErr)
+	}
+	if parseErr != nil {
+		t.Fatalf("unexpected parse error at stage %q: %v", parseStage, parseErr)
+	}
+	if got := strings.TrimSpace(result.Stderr); got != workspace {
+		t.Fatalf("expected qwen cwd to be workspace %q, got %q", workspace, got)
 	}
 }

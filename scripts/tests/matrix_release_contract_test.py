@@ -19,6 +19,7 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.tmp_root = Path(self.tmpdir.name)
         self.e2e_tmp_root = self.tmp_root / "e2e"
         self.sentinel_path = self.tmp_root / "batch-calls.log"
+        self.timeout_sentinel_path = self.tmp_root / "batch-timeouts.jsonl"
         self.batch_script = self.tmp_root / "dummy-batch.sh"
         self._write_dummy_batch_script()
         self.profile_repos_files = self._prepare_repos_files()
@@ -116,6 +117,20 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 if [[ -n "${MATRIX_TEST_SENTINEL:-}" ]]; then
                   printf '%s\\n' "${PROFILE_ID}/${SWEEP_ID}" >> "${MATRIX_TEST_SENTINEL}"
                 fi
+                if [[ -n "${MATRIX_TEST_TIMEOUT_SENTINEL:-}" ]]; then
+                  python3 - <<'PY' >> "${MATRIX_TEST_TIMEOUT_SENTINEL}"
+                import json
+                import os
+                payload = {
+                    "profile_id": os.environ.get("PROFILE_ID", ""),
+                    "sweep_id": os.environ.get("SWEEP_ID", ""),
+                    "step_timeout_sec": os.environ.get("ACP_RUNTIME_STEP_TIMEOUT_SEC", ""),
+                    "pipeline_timeout_sec": os.environ.get("ACP_PIPELINE_TIMEOUT_SEC", ""),
+                    "ui_init_poll_timeout_sec": os.environ.get("ACP_UI_INIT_POLL_TIMEOUT_SEC", ""),
+                }
+                print(json.dumps(payload, ensure_ascii=True))
+                PY
+                fi
 
                 mkdir -p "${REPORTS_ROOT}" "${BATCH_ROOT}/qwen-code/run1/reports/taskruns"
 
@@ -171,7 +186,12 @@ class MatrixReleaseContractTest(unittest.TestCase):
         )
         self.batch_script.chmod(self.batch_script.stat().st_mode | stat.S_IXUSR)
 
-    def _write_matrix_file(self, sweeps: list[str] | None, include_profiles: list[str] | None = None) -> Path:
+    def _write_matrix_file(
+        self,
+        sweeps: list[str] | None,
+        include_profiles: list[str] | None = None,
+        timeout_profile: str | None = None,
+    ) -> Path:
         ordered_profiles = ["single-path", "multi-git_url"]
         selected_profiles = include_profiles or ordered_profiles
         matrix_path = self.tmp_root / "matrix.yaml"
@@ -237,6 +257,8 @@ class MatrixReleaseContractTest(unittest.TestCase):
             )
 
         matrix_payload = ["version: 1\n"]
+        if timeout_profile:
+            matrix_payload.append(f"timeout_profile: {timeout_profile}\n")
         if sweeps is not None:
             matrix_payload.append("sweeps:\n")
             matrix_payload.append("".join(sweep_lines))
@@ -262,7 +284,10 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 "ACP_CLAUDE_CMD_BIN": "true",
                 "ACP_QWEN_CMD_BIN": "true",
                 "E2E_TMP_ROOT": str(self.e2e_tmp_root),
+                "REPORTS_ROOT": str(self.e2e_tmp_root / "reports"),
+                "MATRIX_ROOT": str(self.e2e_tmp_root / "matrix" / matrix_id),
                 "MATRIX_TEST_SENTINEL": str(self.sentinel_path),
+                "MATRIX_TEST_TIMEOUT_SENTINEL": str(self.timeout_sentinel_path),
             }
         )
         if extra_env:
@@ -469,6 +494,34 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertEqual(release_contract["observed_sweeps"], ["baseline"])
         self.assertEqual(release_contract["observed_profile_sweep_runs"], 1)
 
+    def test_non_release_matrix_allows_positive_run_count_without_release_guard(self) -> None:
+        matrix_file = self._write_matrix_file(
+            None,
+            include_profiles=["single-path", "multi-git_url"],
+        )
+        matrix_id = "matrix-test-non-release-run-count-two"
+        result = self._run_matrix(
+            matrix_file,
+            matrix_id,
+            extra_env={"RUN_COUNT": "2"},
+            release_mode="0",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual(verdict["verdict"], "PASS")
+        release_contract = verdict["release_contract"]
+        self.assertEqual(release_contract["mode"], "non-release")
+        self.assertEqual(release_contract["observed_sweeps"], ["baseline"])
+        self.assertEqual(release_contract["observed_profile_sweep_runs"], 2)
+        self.assertTrue(
+            all(
+                int(rec.get("backend", {}).get("total_runs", 0)) == 4
+                and int(rec.get("backend", {}).get("hard_pass", 0)) == 4
+                for rec in verdict.get("records", [])
+            )
+        )
+
     def test_release_slice_with_single_git_and_multi_path_passes(self) -> None:
         matrix_file = self._write_matrix_file(
             ["baseline", "parallel-default"],
@@ -508,6 +561,41 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertEqual(verdict["verdict"], "PASS")
         self.assertEqual(verdict["release_contract"]["required_profiles"], ["single-git_url", "multi-git_url"])
 
+    def test_matrix_timeout_profile_rejects_unknown_preset(self) -> None:
+        matrix_file = self._write_matrix_file(
+            None,
+            include_profiles=["multi-path"],
+            timeout_profile="unknown-window",
+        )
+        matrix_id = "matrix-test-timeout-profile-invalid"
+        result = self._run_matrix(matrix_file, matrix_id, release_mode="0")
+        combined_output = result.stdout + "\n" + result.stderr
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("timeout_profile must be one of", combined_output)
+        self.assertFalse(self.sentinel_path.exists(), "batch script should not run when timeout_profile is invalid")
+
+    def test_matrix_timeout_profile_injects_canonical_timeout_env(self) -> None:
+        matrix_file = self._write_matrix_file(
+            None,
+            include_profiles=["multi-path"],
+            timeout_profile="short-window",
+        )
+        matrix_id = "matrix-test-timeout-profile-short-window"
+        result = self._run_matrix(matrix_file, matrix_id, release_mode="0")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        payloads = [
+            json.loads(line)
+            for line in self.timeout_sentinel_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        self.assertEqual(len(payloads), 1)
+        self.assertEqual(payloads[0]["profile_id"], "multi-path")
+        self.assertEqual(payloads[0]["sweep_id"], "baseline")
+        self.assertEqual(payloads[0]["step_timeout_sec"], "3600")
+        self.assertEqual(payloads[0]["pipeline_timeout_sec"], "7200")
+        self.assertEqual(payloads[0]["ui_init_poll_timeout_sec"], "1200")
+
     def test_checked_in_profile_catalog_is_consistent(self) -> None:
         catalog_path = self.repo_root / "examples" / "e2e-profile-catalog.yaml"
         catalog = self._load_yaml(catalog_path)
@@ -529,6 +617,7 @@ class MatrixReleaseContractTest(unittest.TestCase):
         all_target_repo_sets: set[str] = set()
         matrix_refs: dict[str, list[str]] = {}
         allowed_ids = {"single-path", "single-git_url", "multi-path", "multi-git_url"}
+        allowed_timeout_profiles = {"short-window", "medium-window", "extended-window"}
         examples_root = self.repo_root / "examples"
 
         for profile in profiles:
@@ -555,6 +644,8 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 matrix_refs.setdefault(str(matrix_path), []).append(slug)
 
                 matrix_payload = self._load_yaml(matrix_path)
+                timeout_profile = matrix_payload.get("timeout_profile")
+                self.assertIn(timeout_profile, allowed_timeout_profiles, f"missing/invalid timeout_profile in {matrix_path}")
                 matrix_profiles = matrix_payload.get("profiles")
                 self.assertIsInstance(matrix_profiles, list)
                 self.assertGreater(len(matrix_profiles), 0)
@@ -605,25 +696,49 @@ class MatrixReleaseContractTest(unittest.TestCase):
             self.repo_root / "examples" / "e2e-matrix.release-fast.yaml",
             ["single-git_url", "multi-path"],
         )
+        self.assertEqual(
+            self._load_yaml(self.repo_root / "examples" / "e2e-matrix.release-fast.yaml").get("timeout_profile"),
+            "short-window",
+        )
         self._assert_release_slice_shape(
             self.repo_root / "examples" / "e2e-matrix.release-long.yaml",
             ["single-path", "multi-path"],
+        )
+        self.assertEqual(
+            self._load_yaml(self.repo_root / "examples" / "e2e-matrix.release-long.yaml").get("timeout_profile"),
+            "medium-window",
         )
         self._assert_release_slice_shape(
             self.repo_root / "examples" / "e2e-matrix.release-full.ftgo-sentry.yaml",
             ["single-git_url", "multi-git_url"],
         )
+        self.assertEqual(
+            self._load_yaml(self.repo_root / "examples" / "e2e-matrix.release-full.ftgo-sentry.yaml").get("timeout_profile"),
+            "extended-window",
+        )
         self._assert_non_release_slice_shape(
             self.repo_root / "examples" / "e2e-matrix.regres-fast.bank-openedx.yaml",
             ["single-git_url", "multi-path"],
+        )
+        self.assertEqual(
+            self._load_yaml(self.repo_root / "examples" / "e2e-matrix.regres-fast.bank-openedx.yaml").get("timeout_profile"),
+            "short-window",
         )
         self._assert_non_release_slice_shape(
             self.repo_root / "examples" / "e2e-matrix.regres-fast.openstack.yaml",
             ["multi-path"],
         )
+        self.assertEqual(
+            self._load_yaml(self.repo_root / "examples" / "e2e-matrix.regres-fast.openstack.yaml").get("timeout_profile"),
+            "short-window",
+        )
         self._assert_non_release_slice_shape(
             self.repo_root / "examples" / "e2e-matrix.regres-long.yaml",
             ["single-path", "single-git_url"],
+        )
+        self.assertEqual(
+            self._load_yaml(self.repo_root / "examples" / "e2e-matrix.regres-long.yaml").get("timeout_profile"),
+            "medium-window",
         )
 
 

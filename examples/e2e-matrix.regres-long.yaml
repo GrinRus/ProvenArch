@@ -1,4 +1,5 @@
 version: 1
+timeout_profile: medium-window
 profiles:
   - id: single-path
     source_kind: path

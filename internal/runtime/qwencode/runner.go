@@ -8,8 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -92,7 +95,7 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 	// Live qwen output can occasionally contain malformed tokens. Retry once with
 	// an explicitly stricter prompt before classifying as parse failure.
 	if len(r.Args) == 0 {
-		retryArgs := buildDefaultQwenArgs(task, buildPrompt(taskPayload, true))
+		retryArgs := buildRetryQwenArgs(task, buildPrompt(taskPayload, true))
 		retryResult, retryParseStage, retryParseErr, retryRunErr := runQwenCommand(ctx, task, command, retryArgs)
 		if retryRunErr != nil {
 			unavailableMessage := buildUnavailableFailureMessage(task, retryRunErr, retryResult)
@@ -127,12 +130,90 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 }
 
 func buildDefaultQwenArgs(task acpruntime.Task, prompt string) []string {
-	args := []string{"--output-format", "json", "--yolo", "--channel", "CI"}
+	args := []string{"--output-format", "json", "--chat-recording", "false", "--yolo", "--channel", "CI"}
 	for _, dir := range acpruntime.ResolveHeadlessIncludeDirectories(task) {
 		args = append(args, "--include-directories", dir)
 	}
 	args = append(args, "--prompt", prompt)
 	return args
+}
+
+func buildRetryQwenArgs(task acpruntime.Task, prompt string) []string {
+	args := []string{"--output-format", "json", "--chat-recording", "false", "--yolo", "--channel", "CI"}
+	for _, dir := range resolveRetryIncludeDirectories(task) {
+		args = append(args, "--include-directories", dir)
+	}
+	args = append(args, "--prompt", prompt)
+	return args
+}
+
+func resolveRetryIncludeDirectories(task acpruntime.Task) []string {
+	if shouldConstrainRetryToWriteRoot(task) {
+		return []string{strings.TrimSpace(task.WriteRoot)}
+	}
+	return acpruntime.ResolveHeadlessIncludeDirectories(task)
+}
+
+func shouldConstrainRetryToWriteRoot(task acpruntime.Task) bool {
+	if task.StepID != "init.step1.collect" && task.StepID != "refresh.step1.collect" {
+		return false
+	}
+	writeRoot := strings.TrimSpace(task.WriteRoot)
+	if writeRoot == "" {
+		return false
+	}
+	files, total, err := collectRetryWriteRootFiles(writeRoot, 4)
+	if err != nil || total < 2 {
+		return false
+	}
+	for _, rel := range files {
+		if rel == "shard-pack-manifest.json" {
+			return true
+		}
+	}
+	return false
+}
+
+func collectRetryWriteRootFiles(writeRoot string, limit int) ([]string, int, error) {
+	root := strings.TrimSpace(writeRoot)
+	if root == "" {
+		return nil, 0, nil
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, 0, nil
+		}
+		return nil, 0, err
+	}
+	if !info.IsDir() {
+		return nil, 0, fmt.Errorf("write_root is not a directory: %s", root)
+	}
+
+	files := []string{}
+	if walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return relErr
+		}
+		files = append(files, filepath.ToSlash(rel))
+		return nil
+	}); walkErr != nil {
+		return nil, 0, walkErr
+	}
+	sort.Strings(files)
+
+	total := len(files)
+	if limit > 0 && len(files) > limit {
+		files = append([]string(nil), files[:limit]...)
+	}
+	return files, total, nil
 }
 
 func buildParseFailureMessage(task acpruntime.Task, parseStage string, parseErr error, result acpruntime.Result) string {
@@ -182,10 +263,14 @@ func buildUnavailableFailureMessage(task acpruntime.Task, runErr error, result a
 
 func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, args []string) (acpruntime.Result, string, error, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
-	if writeRoot := strings.TrimSpace(task.WriteRoot); writeRoot != "" {
-		cmd.Dir = writeRoot
-	} else if workspace := strings.TrimSpace(task.Workspace); workspace != "" {
+	// Keep qwen's project root anchored at the ACP workspace rather than a
+	// deep shard staging directory. This avoids provider-local path explosions
+	// (for example chat/debug history paths derived from cwd) while preserving
+	// explicit write_root instructions inside the prompt.
+	if workspace := strings.TrimSpace(task.Workspace); workspace != "" {
 		cmd.Dir = workspace
+	} else if writeRoot := strings.TrimSpace(task.WriteRoot); writeRoot != "" {
+		cmd.Dir = writeRoot
 	}
 
 	var stdout bytes.Buffer
@@ -395,18 +480,42 @@ Task payload JSON:
 		`- Use ACP-generated workspace artifacts as evidence only for ACP runtime/report state, not as a substitute for repository analysis.`,
 	}, "\n")
 	docFirstPolicy := buildDocFirstFilesystemPolicy(task)
+	strictResultHint := strings.Join([]string{
+		`STRICT RESULT JSON MODE:`,
+		`- Prefer returning a direct TaskResult JSON object (without envelope wrappers).`,
+		`- If using envelope fields like "result", value MUST be a non-empty valid JSON object string.`,
+		`- Do NOT emit empty or malformed "result" payload.`,
+		`- Do NOT draft, preview, or explain the TaskResult before returning it.`,
+		`- Do NOT echo template fragments, markdown examples, or partial JSON.`,
+	}, "\n")
+	finalResponseDiscipline := strings.Join([]string{
+		`FINAL RESPONSE DISCIPLINE:`,
+		`- Use tool calls for filesystem reads/writes when needed, but the final assistant message MUST be only the TaskResult JSON object.`,
+		`- Do NOT narrate file writes, manifest contents, or planning steps in the final message.`,
+		`- After the last tool call, respond immediately with the final JSON object.`,
+	}, "\n")
 	retryHint := ""
+	retryTemplate := ""
 	if retry {
-		retryHint = strings.Join([]string{
+		retryLines := []string{
 			`RETRY MODE: previous output was invalid JSON.`,
 			`Do not include non-ASCII symbols in numbers or timestamps.`,
 			`RFC3339 timestamps only (example: 2026-04-09T15:28:49Z).`,
 			`Decimals must be compact numeric literals (example: 0.7, not 0. 7).`,
 			`COMPACT JSON MODE: keep output concise and deterministic.`,
 			`- Limit changeset to the minimum actionable operations for this step.`,
+			`- Prefer "changeset": [] when write_root already contains authored docs and the step does not strictly require an operation.`,
+			`- If changeset is non-empty, use at most 1 operation and at most 3 provenance.evidence items.`,
+			`- Keep coverage compact: observed <=2 items, missing <=2 canonical items, notes <=1 short entry.`,
 			`- Keep coverage.notes short (<=2 entries).`,
 			`- Avoid long prose in summary; keep a single sentence.`,
-		}, "\n")
+			`- Do NOT copy long citations, topic arrays, or manifest document inventories into TaskResult JSON.`,
+			`- Final response MUST start with "{" and end with "}".`,
+			`- Do not output markdown fences, bullet lists, plan text, or template walkthroughs.`,
+			buildRetryRecoveryHint(task),
+		}
+		retryHint = strings.Join(retryLines, "\n")
+		retryTemplate = "\nRetry-safe minimal template (preferred when reusing existing write_root artifacts):\n" + buildRetryMinimalTaskResultTemplateJSON(task)
 	}
 
 	return strings.TrimSpace(fmt.Sprintf(`You are ACP runtime provider %q.
@@ -430,6 +539,8 @@ STRICT CONTRACT (must pass):
 %s
 %s
 %s
+%s
+%s
 
 Set meta fields exactly:
 - meta.task_id = %q
@@ -445,9 +556,10 @@ Set meta fields exactly:
 
 Schema-valid template for this task (copy structure and field TYPES, then refine values with available evidence):
 %s
+%s
 
 Serialized runtime task JSON (context only):
-%s`, acpruntime.ProviderQwenCode, stepPolicy, repositoryEvidencePolicy, docFirstPolicy, retryHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderQwenCode, task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, task.ShardID, primaryRepoScope, repoScopesJSON, pathScopesJSON, buildTaskResultTemplateJSON(task), strings.TrimSpace(string(taskPayload))))
+%s`, acpruntime.ProviderQwenCode, stepPolicy, repositoryEvidencePolicy, docFirstPolicy, strictResultHint, finalResponseDiscipline, retryHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderQwenCode, task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, task.ShardID, primaryRepoScope, repoScopesJSON, pathScopesJSON, buildTaskResultTemplateJSON(task), retryTemplate, strings.TrimSpace(string(taskPayload))))
 }
 
 func buildTaskResultTemplateJSON(task acpruntime.Task) string {
@@ -495,6 +607,84 @@ func buildTaskResultTemplateJSON(task acpruntime.Task) string {
 	return string(raw)
 }
 
+func buildRetryMinimalTaskResultTemplateJSON(task acpruntime.Task) string {
+	template := contracts.TaskResult{
+		Meta: contracts.Meta{
+			TaskID:     task.TaskID,
+			StepID:     task.StepID,
+			RunID:      task.RunID,
+			Runtime:    contracts.RuntimeMeta{Name: string(acpruntime.ProviderQwenCode), Version: "0.14.2"},
+			StartedAt:  task.StartedAtUTC.UTC().Format(time.RFC3339),
+			FinishedAt: task.StartedAtUTC.UTC().Add(2 * time.Second).Format(time.RFC3339),
+			Workspace:  task.Workspace,
+			ShardID:    task.ShardID,
+			RepoScope:  primaryTaskRepoScope(task.RepoScope, task.RepoScopes),
+			RepoScopes: append([]string(nil), task.RepoScopes...),
+			PathScopes: append([]string(nil), task.PathScopes...),
+		},
+		Summary:   "Reused existing shard artifacts.",
+		Changeset: []contracts.Operation{},
+		Coverage: &contracts.Coverage{
+			Observed: []string{"artifacts"},
+			Missing:  []string{"owner mappings", "runtime metrics"},
+			Notes:    []string{"write_root artifacts reused."},
+		},
+	}
+
+	raw, err := json.MarshalIndent(template, "", "  ")
+	if err != nil {
+		return "{}"
+	}
+	return string(raw)
+}
+
+func buildRetryRecoveryHint(task acpruntime.Task) string {
+	lines := []string{
+		`RETRY RECOVERY MODE: previous attempt may already have written shard artifacts.`,
+		`- Retry goal is JSON repair, not fresh repository exploration.`,
+		`- First inspect write_root, not repo roots.`,
+		`- If authored docs already exist in write_root, reuse them instead of rediscovering the repository.`,
+		`- Do NOT use todo_write, plan-style narration, or repeated broad list_directory sweeps in retry mode.`,
+		`- Use at most 3 tool calls in retry mode unless a required artifact is missing from write_root.`,
+		`- After optional write_root inspection, respond immediately with the final TaskResult JSON object.`,
+	}
+
+	writeRoot := strings.TrimSpace(task.WriteRoot)
+	files, total, err := collectRetryWriteRootFiles(writeRoot, 8)
+	switch {
+	case writeRoot == "":
+		lines = append(lines, `- write_root snapshot unavailable because write_root is empty.`)
+	case err != nil:
+		lines = append(lines, fmt.Sprintf(`- write_root snapshot unavailable: %v.`, err))
+	case total == 0:
+		lines = append(lines, fmt.Sprintf(`- write_root %q is empty or missing; create only the minimum missing artifacts before returning JSON.`, writeRoot))
+	default:
+		suffix := ""
+		if total > len(files) {
+			suffix = fmt.Sprintf(" (+%d more)", total-len(files))
+		}
+		lines = append(lines, fmt.Sprintf(`- write_root already contains %d file(s): %s%s`, total, strings.Join(files, ", "), suffix))
+		if containsString(files, "shard-pack-manifest.json") {
+			lines = append(lines, `- shard-pack-manifest.json is already present in write_root; read it first and reuse authored docs instead of re-reading the repository.`)
+			lines = append(lines, `- When reusing authored docs, prefer "changeset": [] or one minimal operation instead of restating manifest contents.`)
+			lines = append(lines, `- Do NOT copy long citations, topic arrays, or manifest document inventories into TaskResult JSON.`)
+		}
+		if shouldConstrainRetryToWriteRoot(task) {
+			lines = append(lines, `- Retry include-directories are constrained to write_root because the manifest and authored docs already exist.`)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 func buildStepSpecificPolicy(stepID string) string {
 	switch stepID {
 	case "refresh.step1.collect":
@@ -538,6 +728,7 @@ func buildDocFirstFilesystemPolicy(task acpruntime.Task) string {
 		`DOCS-FIRST FILESYSTEM CONTRACT:`,
 		`- Read only from meta.workspace and meta.path_scopes plus runtime read_context_roots; do not treat workspace root as implicit write target.`,
 		`- Write ONLY inside write_root. Never write to workspace.yaml, schemas/*, docs/spec/*, charter/*, or analyzed user repositories.`,
+		`- Use tool calls for any file writes, but keep the final assistant response limited to the required TaskResult JSON object.`,
 		fmt.Sprintf(`- artifact_root (workspace-relative) = %q`, strings.TrimSpace(task.ArtifactRoot)),
 		fmt.Sprintf(`- write_root (absolute) = %q`, strings.TrimSpace(task.WriteRoot)),
 		fmt.Sprintf(`- read_context_roots = %s`, readContextRootsJSON),

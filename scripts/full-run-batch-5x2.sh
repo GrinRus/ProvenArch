@@ -923,9 +923,6 @@ read_declared_repos_meta() {
 if [[ ! "$RUN_COUNT" =~ ^[1-9][0-9]*$ ]]; then
   die "RUN_COUNT must be a positive integer, got '$RUN_COUNT'"
 fi
-if [[ "$RUN_COUNT" != "5" ]]; then
-  die "RUN_COUNT must be 5 for this batch plan (got '$RUN_COUNT')"
-fi
 if [[ "$ACP_APPLY_TIMEOUTS_VIA_API" != "0" && "$ACP_APPLY_TIMEOUTS_VIA_API" != "1" ]]; then
   die "ACP_APPLY_TIMEOUTS_VIA_API must be 0 or 1, got '$ACP_APPLY_TIMEOUTS_VIA_API'"
 fi

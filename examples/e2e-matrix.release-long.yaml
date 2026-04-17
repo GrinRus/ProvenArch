@@ -1,4 +1,5 @@
 version: 1
+timeout_profile: medium-window
 sweeps:
   - id: baseline
     strategy: sequential

@@ -96,6 +96,7 @@ Batch/Frontend scripts:
   - `E2E_MATRIX_FILE` (required; YAML `profiles[]`, optional `sweeps[]`)
   - approved profile ids: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
   - если `sweeps[]` отсутствует -> implicit `baseline` sweep (только non-release/diagnostic)
+  - canonical acceptance запускать из clean committed tree или отдельного clean worktree без unrelated локальных правок
   - canonical high-level profile catalog: `examples/e2e-profile-catalog.yaml`
   - canonical non-release slices: `examples/e2e-matrix.regres-*.yaml`
   - canonical release slices: `examples/e2e-matrix.release-*.yaml`
@@ -146,6 +147,7 @@ ACP_QWEN_CMD_BIN=qwen \
 ./scripts/full-run-batch-5x2.sh
 
 # Вариант 7: canonical `regres fast` (3 backend runs total)
+# matrix file already carries canonical timeout_profile=short-window
 E2E_MATRIX_FILE=./examples/e2e-matrix.regres-fast.bank-openedx.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
@@ -159,6 +161,7 @@ BATCH_PROVIDER_FILTER=qwen-code \
 ./scripts/full-run-batch-matrix.sh
 
 # Вариант 7.1: canonical `regres long` (2 backend runs total)
+# matrix file already carries canonical timeout_profile=medium-window
 E2E_MATRIX_FILE=./examples/e2e-matrix.regres-long.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
@@ -180,6 +183,7 @@ ACP_QWEN_CMD_BIN=qwen \
 ./scripts/full-run-batch-matrix.sh
 
 # Вариант 8.1: canonical `release fast`
+# matrix file already carries canonical timeout_profile=short-window
 MATRIX_ID=release-fast-$(date -u +%Y%m%dT%H%M%SZ) \
 E2E_MATRIX_FILE=./examples/e2e-matrix.release-fast.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
@@ -188,6 +192,7 @@ ACP_APPLY_TIMEOUTS_VIA_API=1 \
 ./scripts/full-run-batch-matrix.sh
 
 # Вариант 8.2: canonical `release long`
+# matrix file already carries canonical timeout_profile=medium-window
 MATRIX_ID=release-long-$(date -u +%Y%m%dT%H%M%SZ) \
 E2E_MATRIX_FILE=./examples/e2e-matrix.release-long.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
@@ -196,6 +201,7 @@ ACP_APPLY_TIMEOUTS_VIA_API=1 \
 ./scripts/full-run-batch-matrix.sh
 
 # Вариант 8.3: canonical `release full` addon slice (`ftgo + sentry`)
+# matrix file already carries canonical timeout_profile=extended-window
 MATRIX_ID=release-full-ftgo-sentry-$(date -u +%Y%m%dT%H%M%SZ) \
 E2E_MATRIX_FILE=./examples/e2e-matrix.release-full.ftgo-sentry.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
@@ -228,14 +234,21 @@ Canonical regression/release profile taxonomy задаётся в `examples/e2e-
 - `release long` = `8` backend runs total
 - `release full` = `24` backend runs total
 
+Canonical live matrices также несут checked-in `timeout_profile`, который matrix driver разворачивает без внешних `ACP_*TIMEOUT*` override:
+- `short-window` = step `3600s`, pipeline `7200s`, ui-init `1200s`
+- `medium-window` = step `5400s`, pipeline `14400s`, ui-init `1500s`
+- `extended-window` = step `10800s`, pipeline `21600s`, ui-init `1800s`
+
 Legacy `regression-wave1` / `release-wave1` / `release-wave2` остаются только compatibility slices для ad-hoc diagnostics и не считаются canonical profile taxonomy.
 
 Правила shard-run:
 - параллельные shard-процессы обязаны использовать разные `BATCH_ID`;
 - precheck рекомендуется выполнять только в одном shard (`BATCH_SKIP_PRECHECK=0`), для остальных shard'ов использовать `BATCH_SKIP_PRECHECK=1`.
+- для canonical regression/release acceptance `BATCH_SKIP_PRECHECK=1` не использовать; это diagnostic-only bypass.
 - в shard-режиме требуются runtime-бинари только выбранных провайдеров (`BATCH_PROVIDER_FILTER`).
 
 `full-run-batch-matrix.sh` — официальный локальный (trusted machine) runbook и не входит в required CI gates.
+При запуске из отдельного clean worktree сначала подготовьте локальные UI deps в этом worktree (`npm ci --prefix ui`), иначе precheck на `make test` остановит batch до runtime phase.
 Если цель запуска — release verdict, используйте критерии и формат решения из:
 - `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
 
