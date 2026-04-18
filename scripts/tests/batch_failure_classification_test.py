@@ -799,5 +799,93 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertIn("| qwen-code | 4 | skipped | frontend_workspace_missing | cancel-refresh |", matrix_text)
         self.assertIn("| claude-code | - | failed | frontend_live_e2e_failed | cancel-refresh |", matrix_text)
 
+    def test_quality_report_respects_selected_provider_surface(self) -> None:
+        reports_root = self.root / "reports-selected"
+        quality_path = reports_root / "quality.md"
+        frontend = [
+            {
+                "status": "passed",
+                "reason": "ok",
+                "runtime_provider": "qwen-code",
+                "run_index": 1,
+                "workspace": "/tmp/qwen-run1",
+                "runtime_command": "qwen",
+            }
+        ]
+        frontend_cancel = [
+            {
+                "status": "passed",
+                "reason": "ok",
+                "scenario": "cancel-refresh",
+                "runtime_provider": "qwen-code",
+                "run_index": 1,
+                "workspace": "/tmp/qwen-run1",
+                "runtime_command": "qwen",
+            }
+        ]
+        runs = [
+            self.module.RunEvaluation(
+                provider="qwen-code",
+                run_index=1,
+                run_dir=self.root / "qwen-only-run1",
+                hard_pass=True,
+                reliability=30,
+                contract=20,
+                analysis=20,
+                total=70,
+                verdict="PASS",
+            )
+        ]
+        preflight = {
+            "generated_at_utc": "2026-04-18T00:00:00Z",
+            "provenarch_sha": "abc123",
+            "target_repos_file": "examples/repos.txt",
+            "declared_repos_meta": {
+                "profile_id": "single-git_url",
+                "profile_source_kind": "git_url",
+                "expected_repo_count": 1,
+                "declared_repos": [{"name": "bank-of-anthos"}],
+            },
+            "selected_providers": ["qwen-code"],
+            "selected_run_indexes": ["1"],
+            "runtimes": {
+                "claude": {"version_line": "not-selected"},
+                "qwen": {"version_line": "qwen 0.1"},
+            },
+        }
+
+        self.module.write_quality_report(
+            quality_path,
+            "batch-qwen-only",
+            runs,
+            frontend,
+            frontend_cancel,
+            preflight,
+            ["qwen-code"],
+        )
+        report = quality_path.read_text(encoding="utf-8")
+        self.assertIn("`1/1` backend full-runs", report)
+        self.assertIn("выбранных провайдеров (`1/1`)", report)
+        self.assertNotIn("10/10", report)
+        self.assertNotIn("2/2", report)
+        self.assertNotIn("| claude-code |", report)
+
+    def test_selected_surface_is_resolved_from_preflight(self) -> None:
+        batch_root = self.root / "selected-surface"
+        classifications = {
+            ("qwen-code", 1): {"failure_class": "none"},
+            ("qwen-code", 2): {"failure_class": "none"},
+        }
+        preflight = {
+            "selected_providers": ["qwen-code"],
+            "selected_run_indexes": ["1", "2"],
+        }
+
+        providers = self.module.resolve_selected_providers(preflight, classifications, batch_root)
+        run_indexes = self.module.resolve_selected_run_indexes(preflight, classifications, batch_root)
+
+        self.assertEqual(["qwen-code"], providers)
+        self.assertEqual([1, 2], run_indexes)
+
 if __name__ == "__main__":
     unittest.main()

@@ -249,7 +249,10 @@ Implemented additional jobs:
   - release-mode (`MATRIX_ID=release-*` или `E2E_MATRIX_RELEASE_MODE=1`) фиксирует `RUN_COUNT=1` и требует explicit `sweeps[]` с ровно `baseline` + `parallel-default`, плюс ровно один `single-*` и один `multi-*` профиль; любое отклонение блокирует matrix до batch stage
   - `scripts/tests/matrix_release_contract_test.py` обязан запускать matrix driver в hermetic subprocess env; ambient `ACP_*`, `BATCH_*`, `E2E_*`, `MATRIX_*`, `UI_E2E_*`, `RUN_COUNT`, `PROFILE_*`, `SWEEP_*` leakage не должен менять contract assertions
   - captured live qwen stdout fixture защищает retry/prompt discipline от event-stream chatter и partial TaskResult drafting
+  - collect runtime делает максимум одну post-success artifact-repair попытку для skeletal/generic-only `shard-pack-manifest.json`; если repair не улучшил fidelity, исходный `write_root` восстанавливается
   - refresh artifact-quality guard: `artifact_quality:*` в `reports/taskruns/<run_id>-quality.json.run_warnings` считается canonical live gate blocker; bank-like collapse к одному `cite.runtime-summary` должен ловиться, openstack-like reuse с хотя бы одним rich shard остаётся допустимым
+  - `profile_matrix_<matrix-id>` и `quality_report_<batch-id>` обязаны агрегировать только реально выбранные `selected_providers`/`selected_run_indexes`; qwen-only non-release run не должен порождать synthetic `backend_total_runs=10` и `summary_missing=9`
+  - internal shard-plan/shard-summary taskrun JSON обязаны иметь non-empty `meta.runtime.name`; false `contract:runtime-name` на internal artifacts считается regression
   - относительные `repos_file` пути резолвятся от директории `E2E_MATRIX_FILE`
   - для `source_kind=git_url` refs должны быть pinned
   - агрегированные отчёты: `profile_matrix_<matrix-id>.md/.tsv`, `release_verdict_<matrix-id>.md/.json`
@@ -277,6 +280,8 @@ Implemented additional jobs:
     - `cancel-refresh`: validate -> run refresh -> cancel selected run -> expect `failed + run_canceled`
   - `UI_E2E_CANCEL_STUB_SLEEP_SEC` задаёт длительность controlled slow stub runner для `cancel-refresh`
   - cancel preflight guard: `ACP_UI_CANCEL_POLL_TIMEOUT_SEC >= UI_E2E_CANCEL_STUB_SLEEP_SEC + UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC`; при нарушении сценарий fail-fast до Playwright
+  - batch cancel smoke использует свежую копию backend `arch-workspace` для каждого provider/run и не переиспользует already-mutated init frontend workspace
+  - если cancel request выигрывает гонку у validation/layout failure, terminal API/RunInfo surface всё равно обязана показывать `error_code=run_canceled`
   - `ui/e2e/live-flow.spec.ts` + `npm run e2e:live --prefix ui`
   - batch shard controls (`scripts/full-run-batch-5x2.sh`):
     - `BATCH_PROVIDER_FILTER` (`all` или CSV `qwen-code,claude-code`)

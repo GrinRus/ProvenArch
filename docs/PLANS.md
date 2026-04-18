@@ -49,6 +49,64 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 
 ### Plan ID
+EP-20260418-regres-fast-artifact-quality
+
+### Context
+Canonical `regres fast` всё ещё краснеет не только из-за реальной bank-like деградации refresh-артефактов, но и из-за ложных blockers в batch report, `contract:runtime-name` и frontend cancel/init smoke. Публичные схемы менять нельзя; нужно довести runtime/harness/report/frontend поведение до уже зафиксированной policy.
+
+### Goals (must have)
+- [x] Добавить provider-side artifact-fidelity repair для collect steps и синхронизировать qwen/claude guardrails
+- [x] Исправить batch report, чтобы non-release verdict считался только по реально выбранным provider/run slots
+- [x] Убрать ложный `contract:runtime-name` для internal shard-plan/shard-summary артефактов
+- [x] Стабилизировать frontend init-inspect/cancel smoke и сохранить `run_canceled` при конкурирующем terminal failure
+- [x] Синхронизировать docs/skill и прогнать DoD (`make contracts`, `make test`, `make lint`, `make build`)
+
+### Non-goals
+- [ ] Не менять five-profile taxonomy
+- [ ] Не менять public schemas (`TaskResult`, `validator-verdict`, `final-run-index`, `citation-index`)
+- [ ] Не добавлять wrapper-скрипт поверх matrix harness
+
+### Approach
+1) Вынести shared helper для rich/skeletal manifest assessment и использовать его в runtime retry + docflow quality warnings.
+2) Добавить post-success artifact-repair attempt для collect steps, не ломая existing parse-retry contract.
+3) Перевести batch quality report на selected-provider/selected-run aware aggregation и убрать hardcoded `10/10`.
+4) Проставить runtime metadata в internal shard-plan/shard-summary JSON и починить frontend smoke/cancel path.
+5) Обновить docs/skill только по реально изменившемуся поведению и повторно прогнать non-live DoD.
+
+### Files expected to change
+- `internal/artifactquality/*`
+- `internal/runtime/qwencode/runner.go`
+- `internal/runtime/qwencode/runner_test.go`
+- `internal/runtime/claudecode/runner.go`
+- `internal/runtime/claudecode/runner_test.go`
+- `internal/orchestrator/docflow.go`
+- `internal/orchestrator/sharding.go`
+- `internal/orchestrator/*_test.go`
+- `scripts/e2e_batch_report.py`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/write-batch-preflight.py`
+- `scripts/tests/batch_failure_classification_test.py`
+- `ui/e2e/live-flow.spec.ts`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/LOCAL_FULL_RUN_AI_ADVENT.md`
+- `.agents/skills/e2e-live-gate/SKILL.md`
+
+### Acceptance criteria
+- [x] Bank-like collapse получает automatic repair attempt и остаётся blocker только если repair не улучшил artifacts
+- [x] Openstack-like rich reuse не считается ложным дефектом
+- [x] Batch report не генерирует фантомные `backend_total_runs=10` и `summary_missing=9` для qwen-only non-release runs
+- [x] Internal shard-plan/shard-summary больше не триггерят `contract:runtime-name`
+- [x] Frontend init-inspect и cancel smoke больше не падают на stale test id / missing `run_canceled`
+
+### Risks
+- Основной риск в artifact-repair path: не ухудшить already-good manifests повторным retry. Для этого repair должен запускаться только для collect steps с poor manifest и иметь rollback на исходный write_root при неудачном retry.
+
+### Progress log
+- 2026-04-18: старт slice на стабилизацию `regres fast` после frozen-state findings; scope зафиксирован как artifact-quality first, затем batch/runtime/frontend false blockers.
+- 2026-04-18: реализованы shared artifact-quality heuristics, collect repair retry/rollback, selected-surface batch aggregation, runtime metadata stamping и cancel precedence; `make contracts`, `make test`, `make lint`, `make build` прошли.
+
+### Plan ID
 EP-20260417-live-e2e-profile-taxonomy
 
 ### Context

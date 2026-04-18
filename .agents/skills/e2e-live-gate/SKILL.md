@@ -39,6 +39,9 @@ Legacy compatibility only:
 10) Canonical acceptance запускать только из clean committed tree или отдельного clean worktree без unrelated локальных правок; `BATCH_SKIP_PRECHECK=1` допустим только для diagnostic/triage run.
 11) Если canonical run идёт из отдельного clean worktree, сначала установить локальные UI deps в этом worktree (`npm ci --prefix ui`), иначе precheck на `make test` сломается ещё до live batch execution.
 12) Canonical matrix slices уже несут native `timeout_profile`; не задавай `ACP_*TIMEOUT*` вручную для штатного запуска. В non-release manual diagnostic внешние timeout env допустимы, в release-mode они остаются blocked-by-default.
+13) Batch/profile reports нужно читать только в рамках реально выбранной поверхности (`selected_providers`, `selected_run_indexes`); qwen-only `run1` regression run не должен интерпретироваться как synthetic `2x5` matrix.
+14) Для collect steps canonical runtime теперь делает одну artifact-repair попытку для skeletal/generic-only manifests; если repair не улучшил artifact fidelity, исходный `write_root` откатывается.
+15) Frontend cancel smoke должен идти из свежей копии backend `arch-workspace`, а terminal cancel verdict обязан сохранять `error_code=run_canceled`, даже если рядом всплыл validation/layout failure.
 
 ## Fail-Fast Host Check
 Перед DoD и matrix run сначала проверить, подходит ли хост для canonical release slices:
@@ -97,6 +100,7 @@ PY
 - `artifact_source` только `snapshot`
 - Нет `analysis:evidence-scope`, `analysis:cross-repo-missing`, `runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_*`, `summary_missing`, `precheck_failed`
 - Frontend init/cancel passed для обоих провайдеров
+- Нет `artifact_quality:*`; bank-like collapse к одному `cite.runtime-summary` должен либо починиться provider-side repair, либо остаться явным blocker
 - Для одного `profile_id` shard-plan invariant между `baseline` и `parallel-default` = `passed`
 - Для `release full` все constituent `release_verdict_<matrix-id>.json` должны иметь `PASS`
 

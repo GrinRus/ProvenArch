@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GrinRus/ProvenArch/internal/artifactquality"
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/runnerdiag"
@@ -34,33 +35,15 @@ type HeadlessRunner struct {
 	Args    []string
 }
 
-type retryManifestDocument struct {
-	Path          string   `json:"path"`
-	CanonicalPath string   `json:"canonical_path"`
-	CitationIDs   []string `json:"citation_ids"`
-}
+type retryManifestAssessment = artifactquality.ManifestAssessment
 
-type retryManifestCitation struct {
-	ID   string `json:"id"`
-	Repo string `json:"repo"`
-	Path string `json:"path"`
-}
+type promptRetryMode int
 
-type retryManifestShape struct {
-	Summary   string                  `json:"summary"`
-	Documents []retryManifestDocument `json:"documents"`
-	Citations []retryManifestCitation `json:"citations"`
-}
-
-type retryManifestAssessment struct {
-	ManifestPresent           bool
-	DocumentCount             int
-	LinkedDocumentCount       int
-	CitationCount             int
-	RepoSpecificCitationCount int
-	GenericRuntimeSummaryOnly bool
-	Rich                      bool
-}
+const (
+	promptRetryNone promptRetryMode = iota
+	promptRetryParse
+	promptRetryArtifact
+)
 
 func (r HeadlessRunner) commandName() string {
 	command := strings.TrimSpace(r.Command)
@@ -115,6 +98,9 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 		)
 	}
 	if parseErr == nil {
+		if len(r.Args) == 0 {
+			return maybeRepairCollectArtifacts(ctx, task, taskPayload, command, result), nil
+		}
 		return result, nil
 	}
 	finalStdout := result.Stdout
@@ -137,7 +123,7 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 			)
 		}
 		if retryParseErr == nil {
-			return retryResult, nil
+			return maybeRepairCollectArtifacts(ctx, task, taskPayload, command, retryResult), nil
 		}
 		result = retryResult
 		parseStage = retryParseStage
@@ -175,6 +161,45 @@ func buildRetryQwenArgs(task acpruntime.Task, prompt string) []string {
 	return args
 }
 
+func maybeRepairCollectArtifacts(
+	ctx context.Context,
+	task acpruntime.Task,
+	taskPayload []byte,
+	command string,
+	current acpruntime.Result,
+) acpruntime.Result {
+	if task.StepID != "init.step1.collect" && task.StepID != "refresh.step1.collect" {
+		return current
+	}
+
+	assessment, err := assessRetryManifestAtWriteRoot(task.WriteRoot)
+	if err != nil || assessment.Rich {
+		return current
+	}
+
+	snapshot, err := artifactquality.SnapshotWriteRoot(task.WriteRoot)
+	if err != nil {
+		return current
+	}
+	defer func() {
+		_ = snapshot.Cleanup()
+	}()
+
+	repairArgs := buildRetryQwenArgs(task, buildPromptWithMode(taskPayload, promptRetryArtifact))
+	repaired, _, parseErr, runErr := runQwenCommand(ctx, task, command, repairArgs)
+	if runErr != nil || parseErr != nil {
+		_ = snapshot.Restore()
+		return current
+	}
+
+	repairedAssessment, err := assessRetryManifestAtWriteRoot(task.WriteRoot)
+	if err != nil || !repairedAssessment.Rich {
+		_ = snapshot.Restore()
+		return current
+	}
+	return repaired
+}
+
 func resolveRetryIncludeDirectories(task acpruntime.Task) []string {
 	if shouldConstrainRetryToWriteRoot(task) {
 		return []string{strings.TrimSpace(task.WriteRoot)}
@@ -207,84 +232,19 @@ func shouldConstrainRetryToWriteRoot(task acpruntime.Task) bool {
 }
 
 func assessRetryManifestAtWriteRoot(writeRoot string) (retryManifestAssessment, error) {
-	manifestPath := filepath.Join(strings.TrimSpace(writeRoot), "shard-pack-manifest.json")
-	raw, err := os.ReadFile(manifestPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return retryManifestAssessment{}, nil
-		}
-		return retryManifestAssessment{}, err
-	}
-	return assessRetryManifest(raw), nil
+	return artifactquality.LoadManifestAssessment(writeRoot)
 }
 
 func assessRetryManifest(raw []byte) retryManifestAssessment {
-	assessment := retryManifestAssessment{}
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 {
-		return assessment
+	assessment, err := artifactquality.AssessManifestBytes(raw)
+	if err != nil {
+		return retryManifestAssessment{}
 	}
-
-	var manifest retryManifestShape
-	if err := json.Unmarshal(trimmed, &manifest); err != nil {
-		return assessment
-	}
-
-	assessment.ManifestPresent = true
-	referencedCitationIDs := map[string]struct{}{}
-	for _, document := range manifest.Documents {
-		pathValue := strings.TrimSpace(document.Path)
-		canonicalPathValue := strings.TrimSpace(document.CanonicalPath)
-		if pathValue == "" && canonicalPathValue == "" {
-			continue
-		}
-		assessment.DocumentCount++
-		linkCount := 0
-		for _, citationID := range document.CitationIDs {
-			trimmedID := strings.TrimSpace(citationID)
-			if trimmedID == "" {
-				continue
-			}
-			referencedCitationIDs[trimmedID] = struct{}{}
-			linkCount++
-		}
-		if linkCount > 0 {
-			assessment.LinkedDocumentCount++
-		}
-	}
-
-	uniqueLinkedCitationIDs := map[string]struct{}{}
-	genericRuntimeSummaryOnly := true
-	for _, citation := range manifest.Citations {
-		citationID := strings.TrimSpace(citation.ID)
-		if citationID == "" {
-			continue
-		}
-		if _, linked := referencedCitationIDs[citationID]; !linked {
-			continue
-		}
-		uniqueLinkedCitationIDs[citationID] = struct{}{}
-		if !isGenericRuntimeSummaryCitationID(citationID) {
-			genericRuntimeSummaryOnly = false
-		}
-		if strings.TrimSpace(citation.Repo) != "" && strings.TrimSpace(citation.Path) != "" && !isGenericRuntimeSummaryCitationID(citationID) {
-			assessment.RepoSpecificCitationCount++
-		}
-	}
-	assessment.CitationCount = len(uniqueLinkedCitationIDs)
-	assessment.GenericRuntimeSummaryOnly = assessment.CitationCount > 0 && genericRuntimeSummaryOnly
-	assessment.Rich = assessment.DocumentCount > 0 &&
-		assessment.LinkedDocumentCount > 0 &&
-		assessment.CitationCount > 0 &&
-		assessment.RepoSpecificCitationCount > 0 &&
-		!assessment.GenericRuntimeSummaryOnly
-
 	return assessment
 }
 
 func isGenericRuntimeSummaryCitationID(id string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(id))
-	return normalized == "cite.runtime-summary" || strings.HasPrefix(normalized, "cite.runtime-summary.")
+	return artifactquality.IsGenericRuntimeSummaryCitation(id)
 }
 
 func collectRetryWriteRootFiles(writeRoot string, limit int) ([]string, int, error) {
@@ -566,6 +526,14 @@ func forwardStreamOutput(task acpruntime.Task, stream acpruntime.OutputStream, c
 }
 
 func buildPrompt(taskPayload []byte, retry bool) string {
+	mode := promptRetryNone
+	if retry {
+		mode = promptRetryParse
+	}
+	return buildPromptWithMode(taskPayload, mode)
+}
+
+func buildPromptWithMode(taskPayload []byte, mode promptRetryMode) string {
 	var task acpruntime.Task
 	if err := json.Unmarshal(taskPayload, &task); err != nil {
 		return strings.TrimSpace(fmt.Sprintf(`You are ACP runtime provider %q.
@@ -609,9 +577,9 @@ Task payload JSON:
 	}, "\n")
 	retryHint := ""
 	retryTemplate := ""
-	if retry {
+	if mode != promptRetryNone {
 		retryLines := []string{
-			`RETRY MODE: previous output was invalid JSON.`,
+			`RETRY MODE: previous output needs one deterministic repair pass.`,
 			`Do not include non-ASCII symbols in numbers or timestamps.`,
 			`RFC3339 timestamps only (example: 2026-04-09T15:28:49Z).`,
 			`Decimals must be compact numeric literals (example: 0.7, not 0. 7).`,
@@ -629,8 +597,18 @@ Task payload JSON:
 			`- Preserve repo-specific citations when repository evidence already exists or can be recovered from repo roots.`,
 			`- Final response MUST start with "{" and end with "}".`,
 			`- Do not output markdown fences, bullet lists, plan text, or template walkthroughs.`,
-			buildRetryRecoveryHint(task),
 		}
+		switch mode {
+		case promptRetryParse:
+			retryLines[0] = `RETRY MODE: previous output was invalid JSON.`
+		case promptRetryArtifact:
+			retryLines[0] = `ARTIFACT REPAIR MODE: previous collect output was schema-valid but write_root artifacts look skeletal or generic-only.`
+			retryLines = append(retryLines,
+				`- Repair artifact fidelity before returning JSON; this retry is not a fresh repository rediscovery pass.`,
+				`- Keep repo roots available when write_root artifacts lack repo-specific citations or collapse to generic summaries.`,
+			)
+		}
+		retryLines = append(retryLines, buildRetryRecoveryHint(task))
 		retryHint = strings.Join(retryLines, "\n")
 		retryTemplate = "\nRetry-safe minimal template (preferred when reusing existing write_root artifacts):\n" + buildRetryMinimalTaskResultTemplateJSON(task)
 	}

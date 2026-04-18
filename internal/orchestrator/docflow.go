@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GrinRus/ProvenArch/internal/artifactquality"
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	"github.com/GrinRus/ProvenArch/internal/model"
 	"github.com/GrinRus/ProvenArch/internal/reports"
@@ -384,7 +385,7 @@ func assessRefreshArtifactWarnings(
 
 	if len(finalIndex.CanonicalDocuments) >= 2 && len(citationIndex.Citations) == 1 {
 		onlyCitationID := strings.TrimSpace(citationIndex.Citations[0].ID)
-		if isGenericRuntimeSummaryCitation(onlyCitationID) {
+		if artifactquality.IsGenericRuntimeSummaryCitation(onlyCitationID) {
 			warnings = append(
 				warnings,
 				fmt.Sprintf(
@@ -402,7 +403,7 @@ func assessRefreshArtifactWarnings(
 
 	richManifestCount := 0
 	for _, manifest := range manifests {
-		if manifestHasRepoSpecificCitationSurface(manifest) {
+		if artifactquality.HasRepoSpecificCitationSurface(manifest) {
 			richManifestCount++
 		}
 	}
@@ -420,42 +421,11 @@ func assessRefreshArtifactWarnings(
 }
 
 func manifestHasRepoSpecificCitationSurface(manifest contracts.ShardPackManifest) bool {
-	referencedCitationIDs := map[string]struct{}{}
-	for _, document := range manifest.Documents {
-		for _, citationID := range document.CitationIDs {
-			trimmedID := strings.TrimSpace(citationID)
-			if trimmedID == "" {
-				continue
-			}
-			referencedCitationIDs[trimmedID] = struct{}{}
-		}
-	}
-	if len(referencedCitationIDs) == 0 {
-		return false
-	}
-
-	for _, citation := range manifest.Citations {
-		citationID := strings.TrimSpace(citation.ID)
-		if citationID == "" {
-			continue
-		}
-		if _, ok := referencedCitationIDs[citationID]; !ok {
-			continue
-		}
-		if isGenericRuntimeSummaryCitation(citationID) {
-			continue
-		}
-		if strings.TrimSpace(citation.Repo) == "" || strings.TrimSpace(citation.Path) == "" {
-			continue
-		}
-		return true
-	}
-	return false
+	return artifactquality.HasRepoSpecificCitationSurface(manifest)
 }
 
 func isGenericRuntimeSummaryCitation(id string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(id))
-	return normalized == "cite.runtime-summary" || strings.HasPrefix(normalized, "cite.runtime-summary.")
+	return artifactquality.IsGenericRuntimeSummaryCitation(id)
 }
 
 func (e *pipelineExecution) authoredDomainReports() (map[string]string, error) {

@@ -736,6 +736,49 @@ func TestCancelRunActiveClassifiesRunnerKilledAsCanceled(t *testing.T) {
 	}
 }
 
+func TestRunWithIDWorkspaceValidationPrefersRunCanceledWhenCancelWasRequested(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	manifest := `version: 1
+repos:
+  - name: payments-service
+    path: ` + filepath.Join(ws.Path, "repos", "payments-service") + `
+    ref: definitely-missing-ref
+  - name: users-service
+    path: ` + filepath.Join(ws.Path, "repos", "users-service") + `
+`
+	if err := os.WriteFile(filepath.Join(ws.Path, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("rewrite manifest with invalid ref: %v", err)
+	}
+	ws, err := workspace.Open(ws.Path)
+	if err != nil {
+		t.Fatalf("reopen workspace: %v", err)
+	}
+
+	service := NewService()
+	runID := "run-validation-canceled"
+	service.cancelRequests[runID] = struct{}{}
+
+	info, _, err := service.runWithID(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	}, runID)
+	if err == nil {
+		t.Fatalf("expected workspace validation failure")
+	}
+	if info.Status != RunStatusFailed {
+		t.Fatalf("expected failed status, got %s", info.Status)
+	}
+	if info.ErrorCode != runErrorCodeCanceled {
+		t.Fatalf("expected error_code %q, got %q", runErrorCodeCanceled, info.ErrorCode)
+	}
+	if !strings.Contains(info.Error, "run canceled by request") {
+		t.Fatalf("expected cancel error message, got %q", info.Error)
+	}
+}
+
 func TestRunAppliesRuntimeStepTimeoutFromWorkspaceManifest(t *testing.T) {
 	clearRuntimeTimeoutEnvForTest(t)
 

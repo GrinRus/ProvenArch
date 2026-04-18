@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GrinRus/ProvenArch/internal/artifactquality"
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/runnerdiag"
@@ -32,6 +33,14 @@ type HeadlessRunner struct {
 	Command string
 	Args    []string
 }
+
+type promptRetryMode int
+
+const (
+	promptRetryNone promptRetryMode = iota
+	promptRetryParse
+	promptRetryArtifact
+)
 
 func (r HeadlessRunner) commandName() string {
 	command := strings.TrimSpace(r.Command)
@@ -121,7 +130,7 @@ func runNativeDirectClaude(ctx context.Context, command string, task acpruntime.
 		)
 	}
 	if parseErr == nil {
-		return result, nil
+		return maybeRepairCollectArtifacts(ctx, task, taskPayload, command, result), nil
 	}
 
 	retryArgs := buildNativeDirectClaudeArgs(
@@ -145,7 +154,7 @@ func runNativeDirectClaude(ctx context.Context, command string, task acpruntime.
 		)
 	}
 	if retryParseErr == nil {
-		return retryResult, nil
+		return maybeRepairCollectArtifacts(ctx, task, taskPayload, command, retryResult), nil
 	}
 
 	parseFailureMessage := buildParseFailureMessage(task, retryParseStage, retryParseErr, retryResult)
@@ -166,6 +175,45 @@ func buildNativeDirectClaudeArgs(task acpruntime.Task, prompt string) []string {
 	}
 	args = append(args, "-p", prompt)
 	return args
+}
+
+func maybeRepairCollectArtifacts(
+	ctx context.Context,
+	task acpruntime.Task,
+	taskPayload []byte,
+	command string,
+	current acpruntime.Result,
+) acpruntime.Result {
+	if task.StepID != "init.step1.collect" && task.StepID != "refresh.step1.collect" {
+		return current
+	}
+
+	assessment, err := artifactquality.LoadManifestAssessment(task.WriteRoot)
+	if err != nil || assessment.Rich {
+		return current
+	}
+
+	snapshot, err := artifactquality.SnapshotWriteRoot(task.WriteRoot)
+	if err != nil {
+		return current
+	}
+	defer func() {
+		_ = snapshot.Cleanup()
+	}()
+
+	repairArgs := buildNativeDirectClaudeArgs(task, buildDirectPromptWithMode(taskPayload, promptRetryArtifact, false))
+	repaired, _, parseErr, runErr := runClaudeCommand(ctx, task, command, repairArgs, nil)
+	if runErr != nil || parseErr != nil {
+		_ = snapshot.Restore()
+		return current
+	}
+
+	repairedAssessment, err := artifactquality.LoadManifestAssessment(task.WriteRoot)
+	if err != nil || !repairedAssessment.Rich {
+		_ = snapshot.Restore()
+		return current
+	}
+	return repaired
 }
 
 func isEnvelopeResultEmptyError(err error) bool {
@@ -419,6 +467,14 @@ func forwardStreamOutput(task acpruntime.Task, stream acpruntime.OutputStream, c
 }
 
 func buildDirectPrompt(taskPayload []byte, retry bool, requireNonEmptyResult bool) string {
+	mode := promptRetryNone
+	if retry {
+		mode = promptRetryParse
+	}
+	return buildDirectPromptWithMode(taskPayload, mode, requireNonEmptyResult)
+}
+
+func buildDirectPromptWithMode(taskPayload []byte, mode promptRetryMode, requireNonEmptyResult bool) string {
 	var task acpruntime.Task
 	if err := json.Unmarshal(taskPayload, &task); err != nil {
 		return strings.TrimSpace(fmt.Sprintf(`You are ACP runtime provider %q.
@@ -447,8 +503,8 @@ Task payload JSON:
 	}, "\n")
 	docFirstPolicy := buildDocFirstFilesystemPolicy(task)
 	retryHint := ""
-	if retry {
-		retryHint = strings.Join([]string{
+	if mode != promptRetryNone {
+		retryLines := []string{
 			`RETRY MODE: previous output was invalid JSON.`,
 			`Do not include non-ASCII symbols in numbers or timestamps.`,
 			`RFC3339 timestamps only (example: 2026-04-09T15:28:49Z).`,
@@ -457,7 +513,15 @@ Task payload JSON:
 			`Do NOT overwrite a rich shard-pack-manifest.json with a skeletal reuse-only manifest.`,
 			`Preserve repo-specific citations when repository evidence already exists or can be recovered from repo roots.`,
 			`Return only JSON object, without prose.`,
-		}, "\n")
+		}
+		if mode == promptRetryArtifact {
+			retryLines[0] = `ARTIFACT REPAIR MODE: previous collect output was schema-valid but write_root artifacts look skeletal or generic-only.`
+			retryLines = append(retryLines,
+				`Repair artifact fidelity before returning JSON; this retry is not a fresh repository rediscovery pass.`,
+				`Keep repo roots available while restoring repo-specific citations in shard-pack-manifest.json.`,
+			)
+		}
+		retryHint = strings.Join(retryLines, "\n")
 	}
 	nonEmptyResultHint := ""
 	if requireNonEmptyResult {

@@ -80,9 +80,22 @@ func validRetryRichManifestJSON() string {
 
 func validRetrySkeletalManifestJSON() string {
 	return `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step1.collect",
+  "shard_id": "bank-of-anthos-docs",
+  "agent_role": "shard-analyst",
+  "artifact_root": "/tmp/write-root",
+  "repo_scopes": ["bank-of-anthos"],
+  "path_scopes": ["docs"],
   "documents": [
     {
+      "id": "doc.reused.analysis",
+      "kind": "report",
+      "title": "Reused Analysis",
       "path": "shard-analysis.md",
+      "canonical_path": "reports/as-is/shard-analysis.md",
+      "topics": ["docs"],
       "citation_ids": ["cite.runtime-summary"]
     }
   ],
@@ -90,19 +103,44 @@ func validRetrySkeletalManifestJSON() string {
     {
       "id": "cite.runtime-summary",
       "repo": "bank-of-anthos",
-      "path": "README.md"
+      "path": "README.md",
+      "claim_ids": ["claim.runtime.summary"],
+      "document_ids": ["doc.reused.analysis"]
     }
   ],
-  "summary": "Reused existing shard artifacts."
+  "summary": "Reused existing shard artifacts.",
+  "compatibility": {
+    "coverage": {
+      "observed": ["docs"],
+      "missing": ["owner mappings"],
+      "notes": ["reused existing artifacts"]
+    },
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
 }`
 }
 
 func validRetryUnlinkedRepoSpecificManifestJSON() string {
 	return `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step1.collect",
+  "shard_id": "bank-of-anthos-docs",
+  "agent_role": "shard-analyst",
+  "artifact_root": "/tmp/write-root",
+  "repo_scopes": ["bank-of-anthos"],
+  "path_scopes": ["docs"],
   "documents": [
     {
+      "id": "doc.reused.analysis",
+      "kind": "report",
       "path": "shard-analysis.md",
+      "title": "Reused Analysis",
       "canonical_path": "reports/as-is/overview.md",
+      "topics": ["docs"],
       "citation_ids": ["cite.runtime-summary"]
     }
   ],
@@ -110,15 +148,30 @@ func validRetryUnlinkedRepoSpecificManifestJSON() string {
     {
       "id": "cite.runtime-summary",
       "repo": "bank-of-anthos",
-      "path": "README.md"
+      "path": "README.md",
+      "claim_ids": ["claim.runtime.summary"],
+      "document_ids": ["doc.reused.analysis"]
     },
     {
       "id": "cite.bank.repo-root",
       "repo": "bank-of-anthos",
-      "path": "docs/architecture.md"
+      "path": "docs/architecture.md",
+      "claim_ids": ["claim.repo.root"],
+      "document_ids": ["doc.reused.analysis"]
     }
   ],
-  "summary": "Reused existing shard artifacts."
+  "summary": "Reused existing shard artifacts.",
+  "compatibility": {
+    "coverage": {
+      "observed": ["docs"],
+      "missing": ["owner mappings"],
+      "notes": ["reused existing artifacts"]
+    },
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
 }`
 }
 
@@ -1200,6 +1253,174 @@ func TestBuildPromptRetryWarnsWhenManifestIsSkeletal(t *testing.T) {
 	if !strings.Contains(prompt, `Do NOT reduce multi-document refresh evidence to one generic "cite.runtime-summary" citation.`) {
 		t.Fatalf("expected collapse warning for skeletal manifest prompt")
 	}
+}
+
+func TestHeadlessRunnerRepairsSkeletalCollectArtifactsAfterSchemaValidRun(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	repoPath := filepath.Join(root, "bank-of-anthos")
+	writeRoot := filepath.Join(root, "write-root")
+	for _, dir := range []string{workspace, repoPath, writeRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	manifest := "version: 1\nrepos:\n  - name: bank-of-anthos\n    path: " + repoPath + "\n"
+	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write workspace manifest: %v", err)
+	}
+
+	stateFile := filepath.Join(root, "qwen-repair-count.txt")
+	commandPath := filepath.Join(root, "qwen-artifact-repair.sh")
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+count=0
+if [ -f %q ]; then
+  count="$(cat %q)"
+fi
+count=$((count + 1))
+printf '%%s' "$count" > %q
+mkdir -p %q
+if [ "$count" -eq 1 ]; then
+  cat <<'JSON' > %q/shard-pack-manifest.json
+%s
+JSON
+  cat <<'EOF' > %q/shard-analysis.md
+# Reused
+EOF
+  cat <<'JSON'
+{"meta":{"task_id":"task-artifact-repair","step_id":"refresh.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"initial collect","changeset":[]}
+JSON
+  exit 0
+fi
+cat <<'JSON' > %q/shard-pack-manifest.json
+%s
+JSON
+cat <<'EOF' > %q/iac-overview.md
+# IAC Overview
+EOF
+cat <<'JSON'
+{"meta":{"task_id":"task-artifact-repair","step_id":"refresh.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"artifact repair succeeded","changeset":[]}
+JSON
+`, stateFile, stateFile, stateFile, writeRoot, writeRoot, validRetrySkeletalManifestJSON(), writeRoot, writeRoot, validRetryRichManifestJSON(), writeRoot)
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write repair command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-artifact-repair",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		Workspace:    workspace,
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("expected artifact repair retry to succeed: %v", err)
+	}
+	if result.TaskResult.Summary != "artifact repair succeeded" {
+		t.Fatalf("expected repaired result summary, got %q", result.TaskResult.Summary)
+	}
+	if count := strings.TrimSpace(string(mustReadFile(t, stateFile))); count != "2" {
+		t.Fatalf("expected exactly 2 runner invocations, got %q", count)
+	}
+	assessment, assessErr := assessRetryManifestAtWriteRoot(writeRoot)
+	if assessErr != nil {
+		t.Fatalf("assess repaired manifest: %v", assessErr)
+	}
+	if !assessment.Rich {
+		t.Fatalf("expected repaired manifest to be rich, got %#v", assessment)
+	}
+}
+
+func TestHeadlessRunnerRestoresOriginalArtifactsWhenRepairDoesNotImproveManifest(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	repoPath := filepath.Join(root, "bank-of-anthos")
+	writeRoot := filepath.Join(root, "write-root")
+	for _, dir := range []string{workspace, repoPath, writeRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	manifest := "version: 1\nrepos:\n  - name: bank-of-anthos\n    path: " + repoPath + "\n"
+	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write workspace manifest: %v", err)
+	}
+
+	stateFile := filepath.Join(root, "qwen-repair-restore-count.txt")
+	commandPath := filepath.Join(root, "qwen-artifact-restore.sh")
+	initialDoc := "# Original skeletal analysis\n"
+	retryDoc := "# Retry overwrite that should be rolled back\n"
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+count=0
+if [ -f %q ]; then
+  count="$(cat %q)"
+fi
+count=$((count + 1))
+printf '%%s' "$count" > %q
+mkdir -p %q
+cat <<'JSON' > %q/shard-pack-manifest.json
+%s
+JSON
+if [ "$count" -eq 1 ]; then
+  cat <<'EOF' > %q/shard-analysis.md
+%sEOF
+  cat <<'JSON'
+{"meta":{"task_id":"task-artifact-restore","step_id":"refresh.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"initial collect","changeset":[]}
+JSON
+  exit 0
+fi
+cat <<'EOF' > %q/shard-analysis.md
+%sEOF
+cat <<'JSON'
+{"meta":{"task_id":"task-artifact-restore","step_id":"refresh.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"retry stayed skeletal","changeset":[]}
+JSON
+`, stateFile, stateFile, stateFile, writeRoot, writeRoot, validRetrySkeletalManifestJSON(), writeRoot, initialDoc, writeRoot, retryDoc)
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write restore command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-artifact-restore",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		Workspace:    workspace,
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("expected original result to survive failed artifact repair: %v", err)
+	}
+	if result.TaskResult.Summary != "initial collect" {
+		t.Fatalf("expected original result summary after rollback, got %q", result.TaskResult.Summary)
+	}
+	if count := strings.TrimSpace(string(mustReadFile(t, stateFile))); count != "2" {
+		t.Fatalf("expected exactly 2 runner invocations, got %q", count)
+	}
+	docContent := string(mustReadFile(t, filepath.Join(writeRoot, "shard-analysis.md")))
+	if docContent != initialDoc {
+		t.Fatalf("expected rollback to restore original doc, got %q", docContent)
+	}
+}
+
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return raw
 }
 
 func TestRunQwenCommandPrefersWorkspaceAsCommandDirOverWriteRoot(t *testing.T) {

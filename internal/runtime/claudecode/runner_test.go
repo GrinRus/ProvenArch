@@ -653,6 +653,201 @@ func TestBuildDirectPromptRetryIncludesArtifactQualityGuardrails(t *testing.T) {
 	}
 }
 
+func TestBuildDirectPromptArtifactRepairModeIncludesArtifactFidelityGuardrails(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		TaskID:       "task-refresh-artifact-repair",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		Workspace:    t.TempDir(),
+		RepoScopes:   []string{"openstack"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	prompt := buildDirectPromptWithMode(raw, promptRetryArtifact, false)
+	if !strings.Contains(prompt, "ARTIFACT REPAIR MODE") {
+		t.Fatalf("expected artifact repair mode banner in prompt")
+	}
+	if !strings.Contains(prompt, "Repair artifact fidelity before returning JSON; this retry is not a fresh repository rediscovery pass.") {
+		t.Fatalf("expected artifact fidelity repair guidance in prompt")
+	}
+}
+
+func TestHeadlessRunnerRepairsSkeletalCollectArtifactsAfterSchemaValidRun(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	repoPath := filepath.Join(root, "openstack")
+	writeRoot := filepath.Join(root, "write-root")
+	for _, dir := range []string{workspace, repoPath, writeRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	manifest := "version: 1\nrepos:\n  - name: openstack\n    path: " + repoPath + "\n"
+	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write workspace manifest: %v", err)
+	}
+
+	stateFile := filepath.Join(root, "claude-repair-count.txt")
+	commandPath := filepath.Join(root, "claude")
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+count=0
+if [ -f %q ]; then
+  count="$(cat %q)"
+fi
+count=$((count + 1))
+printf '%%s' "$count" > %q
+mkdir -p %q
+if [ "$count" -eq 1 ]; then
+  cat <<'JSON' > %q/shard-pack-manifest.json
+%s
+JSON
+  cat <<'EOF' > %q/shard-analysis.md
+# Reused
+EOF
+  cat <<'JSON'
+{"meta":{"task_id":"task-claude-artifact-repair","step_id":"refresh.step1.collect","runtime":{"name":"claude-code","version":"claude-cli"},"started_at":"2026-04-03T12:00:00Z"},"summary":"initial collect","changeset":[]}
+JSON
+  exit 0
+fi
+cat <<'JSON' > %q/shard-pack-manifest.json
+%s
+JSON
+cat <<'EOF' > %q/architecture-overview.md
+# Architecture
+EOF
+cat <<'JSON'
+{"meta":{"task_id":"task-claude-artifact-repair","step_id":"refresh.step1.collect","runtime":{"name":"claude-code","version":"claude-cli"},"started_at":"2026-04-03T12:00:00Z"},"summary":"artifact repair succeeded","changeset":[]}
+JSON
+`, stateFile, stateFile, stateFile, writeRoot, writeRoot, validRetrySkeletalManifestJSONForClaude(), writeRoot, writeRoot, validRetryRichManifestJSONForClaude(), writeRoot)
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write claude repair command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-claude-artifact-repair",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		Workspace:    workspace,
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"openstack"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("expected claude artifact repair retry to succeed: %v", err)
+	}
+	if result.TaskResult.Summary != "artifact repair succeeded" {
+		t.Fatalf("expected repaired result summary, got %q", result.TaskResult.Summary)
+	}
+	raw, err := os.ReadFile(filepath.Join(writeRoot, "shard-pack-manifest.json"))
+	if err != nil {
+		t.Fatalf("read repaired manifest: %v", err)
+	}
+	if !strings.Contains(string(raw), "cite.openstack.readme") {
+		t.Fatalf("expected rich repo-specific citation after repair, got %q", string(raw))
+	}
+}
+
 func validTaskResultJSON(taskID string, stepID string, runtimeName string, runtimeVersion string) string {
 	return fmt.Sprintf(`{"meta":{"task_id":"%s","step_id":"%s","runtime":{"name":"%s","version":"%s"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}`, taskID, stepID, runtimeName, runtimeVersion)
+}
+
+func validRetryRichManifestJSONForClaude() string {
+	return `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step1.collect",
+  "shard_id": "openstack-api",
+  "agent_role": "shard-analyst",
+  "artifact_root": "/tmp/write-root",
+  "repo_scopes": ["openstack"],
+  "path_scopes": ["api"],
+  "summary": "Collected openstack architecture evidence.",
+  "documents": [
+    {
+      "id": "doc.architecture.overview",
+      "kind": "report",
+      "title": "Architecture Overview",
+      "path": "architecture-overview.md",
+      "canonical_path": "reports/as-is/architecture-overview.md",
+      "topics": ["architecture"],
+      "citation_ids": ["cite.openstack.readme"],
+      "status": "staged"
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.openstack.readme",
+      "repo": "openstack",
+      "path": "README.md",
+      "claim_ids": ["claim.architecture.readme"],
+      "document_ids": ["doc.architecture.overview"]
+    }
+  ],
+  "compatibility": {
+    "coverage": {
+      "observed": ["architecture"],
+      "missing": ["owner mappings"],
+      "notes": ["repo evidence preserved"]
+    },
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}`
+}
+
+func validRetrySkeletalManifestJSONForClaude() string {
+	return `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step1.collect",
+  "shard_id": "openstack-api",
+  "agent_role": "shard-analyst",
+  "artifact_root": "/tmp/write-root",
+  "repo_scopes": ["openstack"],
+  "path_scopes": ["api"],
+  "documents": [
+    {
+      "id": "doc.reused.analysis",
+      "kind": "report",
+      "title": "Reused Analysis",
+      "path": "shard-analysis.md",
+      "canonical_path": "reports/as-is/shard-analysis.md",
+      "topics": ["api"],
+      "citation_ids": ["cite.runtime-summary"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.runtime-summary",
+      "repo": "openstack",
+      "path": "README.md",
+      "claim_ids": ["claim.runtime.summary"],
+      "document_ids": ["doc.reused.analysis"]
+    }
+  ],
+  "summary": "Reused existing shard artifacts.",
+  "compatibility": {
+    "coverage": {
+      "observed": ["api"],
+      "missing": ["owner mappings"],
+      "notes": ["reused existing artifacts"]
+    },
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}`
 }

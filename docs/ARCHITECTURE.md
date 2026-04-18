@@ -90,6 +90,7 @@
    - shard-plan публикует полный неперекрывающийся coverage partition repo через `path_scopes` (directory/file scopes); для больших repo применяется только structural coalescing по filesystem ancestry
    - Per-shard persistence crash-safe: shard-summary materialize-ится сразу со status=`pending`; после schema-validated TaskResult raw taskrun пишется до `apply`, shard переходит в `checkpointed`, после успешного `apply` — в `succeeded`; runtime/apply failure фиксируется как `failed` без ожидания конца шага
    - Internal shard-summary contract: `taskrun_path` обязателен для `checkpointed/succeeded`; persisted taskrun сохраняет `meta.shard_id/meta.repo_scopes/meta.path_scopes`
+   - Internal shard-plan/shard-summary artifacts materialize-ят non-empty `meta.runtime.name/meta.runtime.version`, чтобы internal batch/contract checks не трактовали их как runtime-name drift
    - Scheduler поддерживает `sequential|parallel` execution с worker-pool (`max_parallel_tasks`) и `fail_fast|best_effort` failure-policy
    - При `best_effort` downstream шаги продолжаются на partial model, но итог run фиксируется как `failed` с `error_code=run_partial_failed`; если `step1.collect` становится `unusable`, live `step3.findings` не выполняется, а downstream markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) materialize-ятся в `report_mode=incomplete` с явным banner/triage-only wording
    - Вызывает runtime adapter
@@ -107,6 +108,7 @@
    - Поддерживает управляемую отмену run:
      - pending run в debounce queue отменяется immediate (`failed`, `error_code=run_canceled`)
      - active run отменяется cooperative через `context cancel` (`failed`, `error_code=run_canceled`)
+     - если cancel request пришёл раньше конкурирующего layout/validation failure, terminal surface сохраняет `error_code=run_canceled`, а validation error остаётся в logs/warnings
    - На старте сервиса stale `queued` run по-прежнему reconcile-ится в `failed` с `error_code=run_reconciled_after_restart`
    - Для async service-managed run stale `running` run auto-resume-ится с тем же `run_id`, если есть resumable shard artifacts; resume cursor стартует с `*.step1.collect` для rebuild in-memory state из persisted taskruns, а runtime step replay-ит `succeeded/checkpointed` shard-ы без повторного provider execution
    - Ведёт persisted run history в `reports/taskruns/run-history.json` (versioned index, retention 500)
@@ -136,6 +138,7 @@
    - общий runtime layer + provider factory: `internal/runtime/runtime.go`, `internal/runtime/providers/factory.go`
    - каждый provider получает explicit staged-write contract (`artifact_root`, `write_root`, `read_context_roots`) и должен писать runtime-authored artifacts только внутрь `write_root`
    - live headless providers продолжают возвращать TaskResult JSON как compatibility envelope; parse failures классифицируются как `runner_parse_failed`
+   - для `init.step1.collect` / `refresh.step1.collect` runtime выполняет максимум одну post-success artifact-repair попытку, если `shard-pack-manifest.json` выглядит skeletal/generic-only; write-root-only retry разрешён только для already-rich manifests, иначе retry сохраняет repo roots и откатывает `write_root`, если fidelity не улучшилась
    - headless provider scope включает `arch-workspace` и resolved repo directories для текущих `repo_scope/repo_scopes`, чтобы provider видел source evidence из реальных checkout-ов
    - command overrides:
      - `ACP_CLAUDE_CMD` (default `claude-code`)

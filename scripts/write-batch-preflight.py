@@ -21,6 +21,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--declared-repos-meta-file", required=True)
     parser.add_argument("--apply-timeouts-via-api", required=True, choices=("0", "1"))
     parser.add_argument("--sweep-id", default="baseline")
+    parser.add_argument("--selected-providers", default="")
+    parser.add_argument("--selected-run-indexes", default="")
     parser.add_argument("--claude-path", required=True)
     parser.add_argument("--claude-version-line", required=True)
     parser.add_argument("--qwen-path", required=True)
@@ -61,6 +63,8 @@ def main() -> int:
     timeout_profile, timeout_profile_line = resolve_profile(timeout_profile_script)
     execution_profile, execution_profile_line = resolve_profile(execution_profile_script)
     sweep_id = (args.sweep_id or "").strip() or "baseline"
+    selected_providers = [item.strip() for item in (args.selected_providers or "").split(",") if item.strip()]
+    selected_run_indexes = [item.strip() for item in (args.selected_run_indexes or "").split(",") if item.strip()]
 
     payload = {
         "generated_at_utc": args.generated_at_utc,
@@ -73,6 +77,8 @@ def main() -> int:
         "timeout_profile": timeout_profile,
         "execution_profile": execution_profile,
         "sweep_id": sweep_id,
+        "selected_providers": selected_providers,
+        "selected_run_indexes": selected_run_indexes,
         "runtimes": {
             "claude": {
                 "path": args.claude_path,

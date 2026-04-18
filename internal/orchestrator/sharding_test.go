@@ -124,6 +124,9 @@ func TestRunInitParallelShardsUseDeterministicApplyOrderAndPersistShardPlan(t *t
 	}
 
 	step1Summary := readSingleShardSummary(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step1-collect-shard-summary-*.json"))
+	if strings.TrimSpace(step1Summary.Meta.Runtime.Name) == "" {
+		t.Fatalf("expected non-empty shard summary runtime name")
+	}
 	if len(step1Summary.Items) < 2 {
 		t.Fatalf("expected at least two step1 shard summary items, got %d", len(step1Summary.Items))
 	}
@@ -139,6 +142,9 @@ func TestRunInitParallelShardsUseDeterministicApplyOrderAndPersistShardPlan(t *t
 	}
 
 	step1Plan := readSingleShardPlan(t, filepath.Join(ws.Path, "reports", "taskruns", "*-init-step1-collect-shard-plan-*.json"))
+	if strings.TrimSpace(step1Plan.Meta.Runtime.Name) == "" {
+		t.Fatalf("expected non-empty shard plan runtime name")
+	}
 	if len(step1Plan.Items) < 2 {
 		t.Fatalf("expected at least two step1 shard-plan items, got %d", len(step1Plan.Items))
 	}

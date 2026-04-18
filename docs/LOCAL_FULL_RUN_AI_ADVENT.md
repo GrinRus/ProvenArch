@@ -281,9 +281,11 @@ Batch evaluator source-of-truth:
 - если snapshot недоступен, evaluator фиксирует issue `reliability:snapshot-missing` (без fallback к `arch-workspace/reports`);
 - frontend live e2e запускается на отдельной копии workspace (`frontend-workspace`) и не влияет на backend quality content score.
 - frontend/cancel matrix формируются в run-level формате (`provider + run_index`), strict matrix gate блокирует любой init run-status != `passed`.
+- `quality_report_<batch-id>.md` и `profile_matrix_<matrix-id>.md` считают только реально выбранные `selected_providers` и `selected_run_indexes`, а не synthetic `claude+qwen x run1..run5` поверхность.
 - для multi-profile (`EXPECTED_REPO_COUNT >= 2`) batch hard-fail включает `analysis:cross-repo-missing`.
 - backend run-matrix дополнительно классифицирует failure classes: `runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_signal_terminated`, `infra_incomplete_cycle`, `quality_gates_failed`, `summary_missing`, `precheck_failed`.
 - runtime flow checks в evaluator: `runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:execution-semantics`, `runtime_flow_failed`.
+- collect runtime делает максимум одну post-success artifact-repair попытку для skeletal/generic-only `shard-pack-manifest.json`; если repair не улучшил artifact fidelity, исходный `write_root` восстанавливается.
 - `artifact_quality:*` в `reports/taskruns/<run_id>-quality.json.run_warnings` эскалируется batch evaluator'ом в `quality_gates_failed`; canonical live gate не принимает refresh artifacts, схлопнувшиеся до одного generic `cite.runtime-summary` без rich repo-specific shard evidence.
 
 При `runner_parse_failed` raw stdout/stderr сохраняются в:

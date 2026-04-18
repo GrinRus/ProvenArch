@@ -499,8 +499,10 @@ Blocking signals:
 Проверяем:
 - frontend `init-inspect` = `passed` для `qwen-code` и `claude-code`;
 - frontend `cancel-refresh` = `passed` для `qwen-code` и `claude-code`;
+- frontend cancel smoke стартует из свежей копии `arch-workspace` выбранного backend run; reuse уже мутированного `frontend-workspace` из init-smoke не допускается;
 - preflight cancel-timeout guard соблюдён: `ACP_UI_CANCEL_POLL_TIMEOUT_SEC >= UI_E2E_CANCEL_STUB_SLEEP_SEC + UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC`;
-- cancel сценарий завершается `failed + run_canceled`.
+- cancel сценарий завершается `failed + run_canceled`;
+- если cancel request пришёл раньше конкурирующего layout/validation failure, terminal `error_code` остаётся `run_canceled`, а competing validation signal уходит только в logs/warnings.
 
 Blocking signals:
 - любой frontend status != `passed`
@@ -518,8 +520,11 @@ Zero tolerance:
 
 Дополнительно:
 - если run завершился `run_partial_failed` и `reports/taskruns/<run_id>-quality.json.evidence_state.report_mode=incomplete`, generated markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) читать только как triage-only artifacts; banner/triage-only wording обязаны явно указывать на incomplete analysis, а не имитировать пустой успешный verdict.
+- для `init.step1.collect` и `refresh.step1.collect` provider обязан сделать не более одной artifact-repair попытки после schema-valid `TaskResult`, если `write_root/shard-pack-manifest.json` выглядит skeletal/generic-only; при неудачном repair исходный `write_root` восстанавливается.
 - `reports/taskruns/<run_id>-quality.json.run_warnings` с префиксом `artifact_quality:` считаются canonical live gate blocker даже при schema-valid `validator-verdict.json = PASS`; типовой пример — refresh final set с несколькими canonical docs и единственным generic `cite.runtime-summary`.
 - acceptable reuse-pattern допускается только если frozen refresh artifacts сохраняют хотя бы один rich collect shard с repo-specific citations; reuse-only manifests без такого shard'а считаются low-signal collapse.
+- `profile_matrix_<matrix-id>` и `quality_report_<batch-id>` агрегируют только реально выбранные `selected_providers` и `selected_run_indexes`; qwen-only `run1` regression run не должен материализовать synthetic `2x5` deficits.
+- internal shard-plan/shard-summary taskrun JSON обязаны содержать non-empty `meta.runtime.name` / `meta.runtime.version`; пустой runtime meta считается contract drift, а не допустимым partial state.
 - live triage от `2026-04-17` зафиксировал один надёжный blocker для canonical `regres fast`: `single-git_url` на `qwen-code` завершился `runner_parse_failed` после event-stream chatter и partial TaskResult drafting; последующий `multi-path`/Open edX run был прерван вручную и не считается самостоятельным продуктовым failure signal.
 - subsequent clean rerun от `2026-04-17` подтвердил, что после фикса qwen prompt/retry + `cwd/chat-recording` этот parse blocker снимается; оставшийся canonical blocker сместился в legacy `pipeline_timeout=2400s`, поэтому canonical matrix slices получили checked-in `timeout_profile` с matrix-native budget.
 

@@ -307,7 +307,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		finishedAt := s.clock().UTC()
 		failedInfo := initialInfo
 		failedInfo.Status = RunStatusFailed
-		failedInfo.Error = fmt.Sprintf("ensure workspace layout: %v", err)
+		failedInfo.ErrorCode, failedInfo.Error = s.classifyRunFailure(runID, fmt.Errorf("ensure workspace layout: %w", err))
 		failedInfo.FinishedAt = &finishedAt
 		s.storeRun(runRecord{
 			info:      failedInfo,
@@ -318,7 +318,8 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 			Level:     RunLogLevelError,
 			Message:   "run failed: ensure workspace layout",
 			Fields: map[string]any{
-				"error": failedInfo.Error,
+				"error_code": failedInfo.ErrorCode,
+				"error":      failedInfo.Error,
 			},
 		})
 		_ = s.cleanupRunLogs()
@@ -334,7 +335,8 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		finishedAt := s.clock().UTC()
 		failedInfo := initialInfo
 		failedInfo.Status = RunStatusFailed
-		failedInfo.Error = formatValidationReportError(validation)
+		validationErr := errors.New(formatValidationReportError(validation))
+		failedInfo.ErrorCode, failedInfo.Error = s.classifyRunFailure(runID, validationErr)
 		failedInfo.Warnings = diagnosticMessages(validation.Warnings)
 		failedInfo.FinishedAt = &finishedAt
 		s.storeRun(runRecord{
@@ -346,12 +348,13 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 			Level:     RunLogLevelError,
 			Message:   "run failed: workspace validation",
 			Fields: map[string]any{
-				"error":    failedInfo.Error,
-				"warnings": failedInfo.Warnings,
+				"error_code": failedInfo.ErrorCode,
+				"error":      failedInfo.Error,
+				"warnings":   failedInfo.Warnings,
 			},
 		})
 		_ = s.cleanupRunLogs()
-		return failedInfo, nil, errors.New(failedInfo.Error)
+		return failedInfo, nil, validationErr
 	}
 
 	execution := pipelineExecution{

@@ -559,25 +559,25 @@ run_frontend_live_e2e() {
   return 0
 }
 
-resolve_frontend_cancel_workspace() {
-  local provider="$1"
-  local frontend_workspace="$BATCH_ROOT/frontend/$provider/frontend-workspace"
-  local run_index=""
+prepare_frontend_cancel_workspace() {
+  local backend_run_dir="$1"
+  local output_dir="$2"
+  if [[ -z "$backend_run_dir" ]]; then
+    printf ''
+    return 0
+  fi
+  local workspace="$backend_run_dir/arch-workspace"
+  local frontend_workspace="$output_dir/frontend-workspace"
 
-  if [[ -d "$frontend_workspace" ]]; then
-    printf '%s\t%s\n' "$frontend_workspace" "$(first_selected_run_index)"
+  if [[ ! -d "$workspace" ]]; then
+    printf ''
     return 0
   fi
 
-  for run_index in "${SELECTED_RUN_INDEXES[@]}"; do
-    frontend_workspace="$BATCH_ROOT/frontend/$provider/run${run_index}/frontend-workspace"
-    if [[ -d "$frontend_workspace" ]]; then
-      printf '%s\t%s\n' "$frontend_workspace" "$run_index"
-      return 0
-    fi
-  done
-
-  printf '\t\n'
+  mkdir -p "$output_dir"
+  rm -rf "$frontend_workspace"
+  cp -a "$workspace" "$frontend_workspace"
+  printf '%s\n' "$frontend_workspace"
 }
 
 run_frontend_cancel_e2e() {
@@ -1029,6 +1029,8 @@ preflight_meta_lines="$(python3 "$PROVENARCH_ROOT/scripts/write-batch-preflight.
   --declared-repos-meta-file "$DECLARED_REPOS_JSON" \
   --apply-timeouts-via-api "$ACP_APPLY_TIMEOUTS_VIA_API" \
   --sweep-id "$SWEEP_ID" \
+  --selected-providers "$SELECTED_PROVIDERS_CSV" \
+  --selected-run-indexes "$SELECTED_RUN_INDEXES_CSV" \
   --claude-path "$CLAUDE_PATH" \
   --claude-version-line "$CLAUDE_VERSION" \
   --qwen-path "$QWEN_PATH" \
@@ -1171,9 +1173,10 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
   runtime_cmd="$(runtime_cmd_for_provider "$provider")"
   if should_run_frontend_cancel_once; then
     cancel_output_dir="$(frontend_cancel_output_dir "$provider")"
-    resolved_cancel_workspace="$(resolve_frontend_cancel_workspace "$provider")"
-    frontend_workspace="${resolved_cancel_workspace%%$'\t'*}"
-    cancel_run_index="${resolved_cancel_workspace#*$'\t'}"
+    resolved_frontend_run="$(resolve_frontend_live_backend_run "$provider")"
+    backend_run_dir="${resolved_frontend_run%%$'\t'*}"
+    cancel_run_index="${resolved_frontend_run#*$'\t'}"
+    frontend_workspace="$(prepare_frontend_cancel_workspace "$backend_run_dir" "$cancel_output_dir")"
     cancel_result=0
     run_frontend_cancel_e2e "$provider" "$frontend_workspace" "$cancel_output_dir" "$cancel_run_index" || cancel_result=$?
     if [[ "$cancel_result" == "1" ]]; then
@@ -1190,7 +1193,7 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
         continue
       fi
       cancel_output_dir="$(frontend_cancel_output_dir "$provider" "$i")"
-      frontend_workspace="$BATCH_ROOT/frontend/$provider/run${i}/frontend-workspace"
+      frontend_workspace="$(prepare_frontend_cancel_workspace "$BATCH_ROOT/$provider/run${i}" "$cancel_output_dir")"
       cancel_result=0
       run_frontend_cancel_e2e "$provider" "$frontend_workspace" "$cancel_output_dir" "$i" || cancel_result=$?
       if [[ "$cancel_result" == "1" ]]; then
