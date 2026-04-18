@@ -676,6 +676,9 @@ func TestBuildDirectPromptArtifactRepairModeIncludesArtifactFidelityGuardrails(t
 	if !strings.Contains(prompt, "Repair artifact fidelity before returning JSON; this retry is not a fresh repository rediscovery pass.") {
 		t.Fatalf("expected artifact fidelity repair guidance in prompt")
 	}
+	if !strings.Contains(prompt, `Do NOT use documents[].citations; only documents[].citation_ids is allowed.`) {
+		t.Fatalf("expected canonical manifest field guardrail in artifact repair prompt")
+	}
 }
 
 func TestHeadlessRunnerRepairsSkeletalCollectArtifactsAfterSchemaValidRun(t *testing.T) {
@@ -754,6 +757,32 @@ JSON
 	}
 	if !strings.Contains(string(raw), "cite.openstack.readme") {
 		t.Fatalf("expected rich repo-specific citation after repair, got %q", string(raw))
+	}
+}
+
+func TestBuildDirectPromptIncludesCanonicalManifestSchemaGuardrails(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		TaskID:       "task-claude-manifest-schema-guardrails",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		Workspace:    t.TempDir(),
+		ArtifactRoot: "reports/taskruns/run-1/staging/shards/openstack-api",
+		RepoScopes:   []string{"openstack"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	prompt := buildDirectPrompt(raw, false, false)
+	if !strings.Contains(prompt, `Do NOT use documents[].citations; only documents[].citation_ids is allowed.`) {
+		t.Fatalf("expected canonical manifest field guardrail in prompt")
+	}
+	if !strings.Contains(prompt, `Do NOT use reports/taskruns/... staging paths as canonical_path.`) {
+		t.Fatalf("expected canonical_path staging-path ban in prompt")
 	}
 }
 

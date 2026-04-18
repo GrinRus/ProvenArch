@@ -250,6 +250,7 @@ Implemented additional jobs:
   - `scripts/tests/matrix_release_contract_test.py` обязан запускать matrix driver в hermetic subprocess env; ambient `ACP_*`, `BATCH_*`, `E2E_*`, `MATRIX_*`, `UI_E2E_*`, `RUN_COUNT`, `PROFILE_*`, `SWEEP_*` leakage не должен менять contract assertions
   - captured live qwen stdout fixture защищает retry/prompt discipline от event-stream chatter и partial TaskResult drafting
   - collect runtime делает максимум одну post-success artifact-repair попытку для skeletal/generic-only `shard-pack-manifest.json`; если repair не улучшил fidelity, исходный `write_root` восстанавливается
+  - collect runtime не принимает nominal success после failed artifact-repair: missing/invalid/skeletal manifest после единственной repair попытки поднимается как `runner_parse_failed` / `runtime_parse`
   - refresh artifact-quality guard: `artifact_quality:*` в `reports/taskruns/<run_id>-quality.json.run_warnings` считается canonical live gate blocker; bank-like collapse к одному `cite.runtime-summary` должен ловиться, openstack-like reuse с хотя бы одним rich shard остаётся допустимым
   - `profile_matrix_<matrix-id>` и `quality_report_<batch-id>` обязаны агрегировать только реально выбранные `selected_providers`/`selected_run_indexes`; qwen-only non-release run не должен порождать synthetic `backend_total_runs=10` и `summary_missing=9`
   - internal shard-plan/shard-summary taskrun JSON обязаны иметь non-empty `meta.runtime.name`; false `contract:runtime-name` на internal artifacts считается regression

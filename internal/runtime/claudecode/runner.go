@@ -130,7 +130,7 @@ func runNativeDirectClaude(ctx context.Context, command string, task acpruntime.
 		)
 	}
 	if parseErr == nil {
-		return maybeRepairCollectArtifacts(ctx, task, taskPayload, command, result), nil
+		return maybeRepairCollectArtifacts(ctx, task, taskPayload, command, result)
 	}
 
 	retryArgs := buildNativeDirectClaudeArgs(
@@ -154,7 +154,7 @@ func runNativeDirectClaude(ctx context.Context, command string, task acpruntime.
 		)
 	}
 	if retryParseErr == nil {
-		return maybeRepairCollectArtifacts(ctx, task, taskPayload, command, retryResult), nil
+		return maybeRepairCollectArtifacts(ctx, task, taskPayload, command, retryResult)
 	}
 
 	parseFailureMessage := buildParseFailureMessage(task, retryParseStage, retryParseErr, retryResult)
@@ -183,37 +183,83 @@ func maybeRepairCollectArtifacts(
 	taskPayload []byte,
 	command string,
 	current acpruntime.Result,
-) acpruntime.Result {
+) (acpruntime.Result, error) {
 	if task.StepID != "init.step1.collect" && task.StepID != "refresh.step1.collect" {
-		return current
+		return current, nil
+	}
+	if strings.TrimSpace(task.WriteRoot) == "" {
+		return current, nil
 	}
 
 	assessment, err := artifactquality.LoadManifestAssessment(task.WriteRoot)
-	if err != nil || assessment.Rich {
-		return current
+	if err == nil && assessment.Rich {
+		return current, nil
 	}
+	initialProblem := artifactquality.DescribeAssessmentProblem(assessment, err)
 
 	snapshot, err := artifactquality.SnapshotWriteRoot(task.WriteRoot)
 	if err != nil {
-		return current
+		return acpruntime.Result{}, wrapArtifactContractFailure(
+			current.Stdout,
+			current.Stderr,
+			fmt.Sprintf("collect artifacts require repair (%s), but write_root snapshot failed: %v", initialProblem, err),
+			err,
+		)
 	}
 	defer func() {
 		_ = snapshot.Cleanup()
 	}()
 
 	repairArgs := buildNativeDirectClaudeArgs(task, buildDirectPromptWithMode(taskPayload, promptRetryArtifact, false))
-	repaired, _, parseErr, runErr := runClaudeCommand(ctx, task, command, repairArgs, nil)
-	if runErr != nil || parseErr != nil {
+	repaired, repairParseStage, parseErr, runErr := runClaudeCommand(ctx, task, command, repairArgs, nil)
+	if runErr != nil {
 		_ = snapshot.Restore()
-		return current
+		unavailableMessage := buildUnavailableFailureMessage(task, runErr, repaired)
+		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+			acpruntime.ProviderClaudeCode,
+			acpruntime.ErrorCodeRunnerUnavailable,
+			fmt.Sprintf("%v: artifact repair retry failed after %s: %s", ErrRunnerUnavailable, initialProblem, unavailableMessage),
+			repaired.Stdout,
+			repaired.Stderr,
+			runErr,
+		)
+	}
+	if parseErr != nil {
+		_ = snapshot.Restore()
+		parseFailureMessage := buildParseFailureMessage(task, "artifact_repair."+repairParseStage, parseErr, repaired)
+		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+			acpruntime.ProviderClaudeCode,
+			acpruntime.ErrorCodeRunnerParseFailed,
+			fmt.Sprintf("headless provider %q returned invalid collect artifact repair result after %s: %s", acpruntime.ProviderClaudeCode, initialProblem, parseFailureMessage),
+			repaired.Stdout,
+			repaired.Stderr,
+			parseErr,
+		)
 	}
 
 	repairedAssessment, err := artifactquality.LoadManifestAssessment(task.WriteRoot)
 	if err != nil || !repairedAssessment.Rich {
 		_ = snapshot.Restore()
-		return current
+		repairedProblem := artifactquality.DescribeAssessmentProblem(repairedAssessment, err)
+		return acpruntime.Result{}, wrapArtifactContractFailure(
+			repaired.Stdout,
+			repaired.Stderr,
+			fmt.Sprintf("collect artifacts remained invalid after one repair attempt: initial=%s; repaired=%s", initialProblem, repairedProblem),
+			err,
+		)
 	}
-	return repaired
+	return repaired, nil
+}
+
+func wrapArtifactContractFailure(stdout string, stderr string, message string, cause error) error {
+	return acpruntime.WrapRunnerErrorWithOutput(
+		acpruntime.ProviderClaudeCode,
+		acpruntime.ErrorCodeRunnerParseFailed,
+		fmt.Sprintf("headless provider %q produced invalid collect artifacts: %s", acpruntime.ProviderClaudeCode, strings.TrimSpace(message)),
+		stdout,
+		stderr,
+		cause,
+	)
 }
 
 func isEnvelopeResultEmptyError(err error) bool {
@@ -519,6 +565,7 @@ Task payload JSON:
 			retryLines = append(retryLines,
 				`Repair artifact fidelity before returning JSON; this retry is not a fresh repository rediscovery pass.`,
 				`Keep repo roots available while restoring repo-specific citations in shard-pack-manifest.json.`,
+				`Rewrite shard-pack-manifest.json to the canonical ACP schema (version=1 integer, documents[].citation_ids, citations[].id/document_ids, stable canonical_path).`,
 			)
 		}
 		retryHint = strings.Join(retryLines, "\n")
@@ -678,6 +725,9 @@ func buildDocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Produce runtime-authored documents in write_root and then write shard-pack-manifest.json in write_root.`,
 			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and compatibility snapshot.`,
 			`- You may be flexible in document structure, but promotion and rendering depend on manifest citations/topics remaining accurate.`,
+		)
+		lines = append(lines, artifactquality.CollectManifestContractLines(strings.TrimSpace(task.ArtifactRoot))...)
+		lines = append(lines,
 			`- Do NOT collapse a multi-document refresh surface to one generic "cite.runtime-summary" citation when repository evidence exists.`,
 			`- Preserve repo-specific citations in shard-pack-manifest.json whenever repository files support them.`,
 		)

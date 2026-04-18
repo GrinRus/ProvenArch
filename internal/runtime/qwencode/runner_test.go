@@ -175,6 +175,43 @@ func validRetryUnlinkedRepoSpecificManifestJSON() string {
 }`
 }
 
+func invalidLegacyStyleManifestJSON() string {
+	return `{
+  "version": "1.0.0",
+  "run_id": "run-1",
+  "step_id": "refresh.step1.collect",
+  "shard_id": "bank-of-anthos-docs",
+  "agent_role": "shard-analyst",
+  "artifact_root": "reports/taskruns/run-1/staging/shards/bank-of-anthos-docs",
+  "repo_scope": "bank-of-anthos",
+  "path_scopes": ["docs"],
+  "documents": [
+    {
+      "path": "services.md",
+      "canonical_path": "reports/taskruns/run-1/staging/shards/bank-of-anthos-docs/services.md",
+      "topics": ["services"],
+      "citations": [
+        { "repo": "bank-of-anthos", "path": "docs/development.md" }
+      ]
+    }
+  ],
+  "citations": [
+    { "repo": "bank-of-anthos", "path": "docs/development.md" }
+  ],
+  "compatibility": {
+    "coverage": {
+      "observed": ["docs"],
+      "missing": ["owner mappings"],
+      "notes": ["legacy manifest drift"]
+    },
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}`
+}
+
 func TestHeadlessRunnerUnavailableClassifiesAsRunnerUnavailable(t *testing.T) {
 	t.Parallel()
 
@@ -1255,6 +1292,32 @@ func TestBuildPromptRetryWarnsWhenManifestIsSkeletal(t *testing.T) {
 	}
 }
 
+func TestBuildPromptIncludesCanonicalManifestSchemaGuardrails(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		TaskID:       "task-manifest-schema-guardrails",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		Workspace:    t.TempDir(),
+		ArtifactRoot: "reports/taskruns/run-1/staging/shards/bank-of-anthos-docs",
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	prompt := buildPrompt(raw, false)
+	if !strings.Contains(prompt, `Do NOT use documents[].citations; only documents[].citation_ids is allowed.`) {
+		t.Fatalf("expected canonical manifest field guardrail in prompt")
+	}
+	if !strings.Contains(prompt, `Do NOT use reports/taskruns/... staging paths as canonical_path.`) {
+		t.Fatalf("expected canonical_path staging-path ban in prompt")
+	}
+}
+
 func TestHeadlessRunnerRepairsSkeletalCollectArtifactsAfterSchemaValidRun(t *testing.T) {
 	t.Parallel()
 
@@ -1389,7 +1452,7 @@ JSON
 	}
 
 	runner := HeadlessRunner{Command: commandPath}
-	result, err := runner.Run(context.Background(), acpruntime.Task{
+	_, err := runner.Run(context.Background(), acpruntime.Task{
 		TaskID:       "task-artifact-restore",
 		RunID:        "run-1",
 		StepID:       "refresh.step1.collect",
@@ -1398,11 +1461,12 @@ JSON
 		RepoScopes:   []string{"bank-of-anthos"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
-	if err != nil {
-		t.Fatalf("expected original result to survive failed artifact repair: %v", err)
+	if err == nil {
+		t.Fatalf("expected failed artifact repair to reject skeletal collect artifacts")
 	}
-	if result.TaskResult.Summary != "initial collect" {
-		t.Fatalf("expected original result summary after rollback, got %q", result.TaskResult.Summary)
+	code, _, ok := acpruntime.ClassifyError(err)
+	if !ok || code != string(acpruntime.ErrorCodeRunnerParseFailed) {
+		t.Fatalf("expected runner_parse_failed classification, got code=%q err=%v", code, err)
 	}
 	if count := strings.TrimSpace(string(mustReadFile(t, stateFile))); count != "2" {
 		t.Fatalf("expected exactly 2 runner invocations, got %q", count)
@@ -1410,6 +1474,89 @@ JSON
 	docContent := string(mustReadFile(t, filepath.Join(writeRoot, "shard-analysis.md")))
 	if docContent != initialDoc {
 		t.Fatalf("expected rollback to restore original doc, got %q", docContent)
+	}
+}
+
+func TestHeadlessRunnerRepairsLegacyStyleManifestAfterSchemaValidRun(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	repoPath := filepath.Join(root, "bank-of-anthos")
+	writeRoot := filepath.Join(root, "write-root")
+	for _, dir := range []string{workspace, repoPath, writeRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	manifest := "version: 1\nrepos:\n  - name: bank-of-anthos\n    path: " + repoPath + "\n"
+	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write workspace manifest: %v", err)
+	}
+
+	stateFile := filepath.Join(root, "qwen-legacy-repair-count.txt")
+	commandPath := filepath.Join(root, "qwen-legacy-manifest-repair.sh")
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+count=0
+if [ -f %q ]; then
+  count="$(cat %q)"
+fi
+count=$((count + 1))
+printf '%%s' "$count" > %q
+mkdir -p %q
+if [ "$count" -eq 1 ]; then
+  cat <<'JSON' > %q/shard-pack-manifest.json
+%s
+JSON
+  cat <<'EOF' > %q/services.md
+# Services
+EOF
+  cat <<'JSON'
+{"meta":{"task_id":"task-legacy-manifest-repair","step_id":"refresh.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"initial collect","changeset":[]}
+JSON
+  exit 0
+fi
+cat <<'JSON' > %q/shard-pack-manifest.json
+%s
+JSON
+cat <<'EOF' > %q/iac-overview.md
+# IAC Overview
+EOF
+cat <<'JSON'
+{"meta":{"task_id":"task-legacy-manifest-repair","step_id":"refresh.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"artifact repair succeeded","changeset":[]}
+JSON
+`, stateFile, stateFile, stateFile, writeRoot, writeRoot, invalidLegacyStyleManifestJSON(), writeRoot, writeRoot, validRetryRichManifestJSON(), writeRoot)
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write repair command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-legacy-manifest-repair",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		Workspace:    workspace,
+		WriteRoot:    writeRoot,
+		ArtifactRoot: "reports/taskruns/run-1/staging/shards/bank-of-anthos-docs",
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("expected legacy manifest repair to succeed: %v", err)
+	}
+	if result.TaskResult.Summary != "artifact repair succeeded" {
+		t.Fatalf("expected repaired result summary, got %q", result.TaskResult.Summary)
+	}
+	if count := strings.TrimSpace(string(mustReadFile(t, stateFile))); count != "2" {
+		t.Fatalf("expected exactly 2 runner invocations, got %q", count)
+	}
+	assessment, assessErr := assessRetryManifestAtWriteRoot(writeRoot)
+	if assessErr != nil {
+		t.Fatalf("assess repaired manifest: %v", assessErr)
+	}
+	if !assessment.Rich {
+		t.Fatalf("expected repaired legacy manifest to be rich, got %#v", assessment)
 	}
 }
 

@@ -40,7 +40,7 @@ Legacy compatibility only:
 11) Если canonical run идёт из отдельного clean worktree, сначала установить локальные UI deps в этом worktree (`npm ci --prefix ui`), иначе precheck на `make test` сломается ещё до live batch execution.
 12) Canonical matrix slices уже несут native `timeout_profile`; не задавай `ACP_*TIMEOUT*` вручную для штатного запуска. В non-release manual diagnostic внешние timeout env допустимы, в release-mode они остаются blocked-by-default.
 13) Batch/profile reports нужно читать только в рамках реально выбранной поверхности (`selected_providers`, `selected_run_indexes`); qwen-only `run1` regression run не должен интерпретироваться как synthetic `2x5` matrix.
-14) Для collect steps canonical runtime теперь делает одну artifact-repair попытку для skeletal/generic-only manifests; если repair не улучшил artifact fidelity, исходный `write_root` откатывается.
+14) Для collect steps canonical runtime теперь делает одну artifact-repair попытку для skeletal/generic-only manifests; если repair не улучшил artifact fidelity, исходный `write_root` откатывается, а step классифицируется как `runner_parse_failed` / `runtime_parse`, а не как nominal success.
 15) Frontend cancel smoke должен идти из свежей копии backend `arch-workspace`, а terminal cancel verdict обязан сохранять `error_code=run_canceled`, даже если рядом всплыл validation/layout failure.
 
 ## Fail-Fast Host Check
