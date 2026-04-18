@@ -96,6 +96,7 @@
    - Вызывает runtime adapter
    - Собирает staged final doc set в `reports/taskruns/<run_id>/staging/final/`
    - Генерирует и валидирует `final-run-index.json` и `citation-index.json`
+   - `citation-index.json.claim_ids` трактуются как global staged-final namespace; duplicate claim ids в validator scope детерминированно repair-ятся на index/reference уровне с shard suffix без semantic rewrite authored docs
    - Step 3 runtime primary output: `validator-verdict.json`
    - Promotion копирует только approved final set в stable `reports/as-is/*`, `reports/findings/*`, `reports/coverage/*`, `reports/agent-outputs/*`, `proposals/*`
    - Валидирует TaskResult как compatibility envelope, а не как primary filesystem contract
@@ -139,7 +140,9 @@
    - каждый provider получает explicit staged-write contract (`artifact_root`, `write_root`, `read_context_roots`) и должен писать runtime-authored artifacts только внутрь `write_root`
    - live headless providers продолжают возвращать TaskResult JSON как compatibility envelope; parse failures классифицируются как `runner_parse_failed`
    - для `init.step1.collect` / `refresh.step1.collect` runtime выполняет максимум одну post-success artifact-repair попытку, если `shard-pack-manifest.json` выглядит skeletal/generic-only; write-root-only retry разрешён только для already-rich manifests, иначе retry сохраняет repo roots и откатывает `write_root`, если fidelity не улучшилась
+   - schema-retry и artifact-repair разведены: schema-invalid `TaskResult` получает один direct-JSON retry с жёстким whitelist `changeset[].op`, а schema-valid result с invalid manifest получает отдельный artifact-repair retry с canonical manifest skeleton
    - collect step не считается успешным, если после единственной artifact-repair попытки `shard-pack-manifest.json` остаётся missing/invalid/skeletal; такой случай поднимается как runtime contract failure (`runner_parse_failed` / `runtime_parse`)
+   - collect contract требует полного `compatibility` block в `shard-pack-manifest.json` (`coverage/questions/entities/edges/findings`) и repo-specific citation surface; generic-only `cite.runtime-summary` допустим только вне multi-document refresh evidence collapse
    - headless provider scope включает `arch-workspace` и resolved repo directories для текущих `repo_scope/repo_scopes`, чтобы provider видел source evidence из реальных checkout-ов
    - command overrides:
      - `ACP_CLAUDE_CMD` (default `claude-code`)

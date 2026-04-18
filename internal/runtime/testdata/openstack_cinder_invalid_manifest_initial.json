@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "run_id": "run_20260418_171057_001",
+  "step_id": "init.step1.collect",
+  "shard_id": "cinder",
+  "agent_role": "shard-analyst",
+  "artifact_root": "reports/taskruns/run_20260418_171057_001/staging/shards/cinder",
+  "documents": [
+    {
+      "id": "svc.cinder.as-is",
+      "kind": "as-is",
+      "title": "Cinder Service As-Is Overview",
+      "path": "cinder-as-is.md",
+      "canonical_path": "reports/as-is/cinder-as-is.md",
+      "topics": [
+        "service",
+        "cinder",
+        "openstack"
+      ],
+      "citation_ids": [
+        "cite.cinder.readme"
+      ]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.cinder.readme",
+      "repo": "cinder",
+      "path": "README.rst",
+      "claim_ids": [],
+      "document_ids": [
+        "svc.cinder.as-is"
+      ]
+    }
+  ],
+  "compatibility": {
+    "schema": "https://example.local/acp/schemas/shard-pack-manifest.schema.json",
+    "version": 1
+  }
+}

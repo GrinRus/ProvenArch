@@ -1347,8 +1347,230 @@ func TestBuildPromptIncludesCanonicalManifestSchemaGuardrails(t *testing.T) {
 	if !strings.Contains(prompt, `Do NOT use documents[].citations; only documents[].citation_ids is allowed.`) {
 		t.Fatalf("expected canonical manifest field guardrail in prompt")
 	}
+	if !strings.Contains(prompt, `citations[].claim_ids MUST be globally unique across the assembled staged final set`) {
+		t.Fatalf("expected global claim-id uniqueness guardrail in prompt")
+	}
+	if !strings.Contains(prompt, `compatibility MUST include coverage, questions, entities, edges, and findings`) {
+		t.Fatalf("expected compatibility completeness guardrail in prompt")
+	}
 	if !strings.Contains(prompt, `Do NOT use reports/taskruns/... staging paths as canonical_path.`) {
 		t.Fatalf("expected canonical_path staging-path ban in prompt")
+	}
+}
+
+func TestBuildPromptRetryIncludesSchemaFailureHintsForInvalidChangesetOp(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		TaskID:       "task-invalid-op-retry",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    t.TempDir(),
+		WriteRoot:    filepath.Join(t.TempDir(), "write-root"),
+		RepoScopes:   []string{"course-discovery"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	parseErr := errors.New(`taskresult is invalid: taskresult.schema.json validation failed: jsonschema: '/changeset/0/op' does not validate`)
+	prompt := buildPromptWithModeAndHints(raw, promptRetryParse, buildParseRepairHints("schema", parseErr))
+	if !strings.Contains(prompt, "Previous schema validation failure") {
+		t.Fatalf("expected schema failure hint in retry prompt")
+	}
+	if !strings.Contains(prompt, "Unknown changeset[].op values are forbidden") {
+		t.Fatalf("expected allowed-op whitelist in retry prompt")
+	}
+	if !strings.Contains(prompt, `For op="add_doc_artifact", the payload key MUST be "doc_artifact"; never use "artifact".`) {
+		t.Fatalf("expected doc_artifact payload guardrail in retry prompt")
+	}
+	if !strings.Contains(prompt, "Do NOT use ad-hoc ops such as upsert_file") {
+		t.Fatalf("expected upsert_file ban in retry prompt")
+	}
+}
+
+func TestHeadlessRunnerRetriesCapturedLiveOpenedxInvalidChangesetOpFixture(t *testing.T) {
+	tempDir := t.TempDir()
+	commandPath := filepath.Join(tempDir, "qwen-openedx-invalid-op-retry-stub.sh")
+	fixturePath := filepath.Join(tempDir, "openedx-invalid-op-output.txt")
+	writeRoot := filepath.Join(tempDir, "write-root")
+	if err := os.WriteFile(fixturePath, []byte(loadCapturedLiveStdoutFixture(t, "qwen_live_openedx_invalid_changeset_op_stdout.txt")), 0o644); err != nil {
+		t.Fatalf("write openedx invalid-op fixture copy: %v", err)
+	}
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "shard-pack-manifest.json"), []byte(validRetryRichManifestJSON()), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "iac-overview.md"), []byte("# Overview\n"), 0o644); err != nil {
+		t.Fatalf("write doc: %v", err)
+	}
+
+	script := `#!/bin/sh
+set -eu
+last_arg=""
+for arg in "$@"; do
+  last_arg="$arg"
+done
+if echo "$last_arg" | grep -Fq "Unknown changeset[].op values are forbidden" \
+  && echo "$last_arg" | grep -Fq "Do NOT use ad-hoc ops such as upsert_file"; then
+  cat <<'JSON'
+{"meta":{"task_id":"task-openedx-invalid-op","step_id":"init.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"schema retry fixed invalid op","changeset":[]}
+JSON
+  exit 0
+fi
+cat "$QWEN_OPENEDX_INVALID_OP_FIXTURE"
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write openedx invalid-op retry command: %v", err)
+	}
+
+	t.Setenv("QWEN_OPENEDX_INVALID_OP_FIXTURE", fixturePath)
+
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-openedx-invalid-op",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    t.TempDir(),
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"course-discovery"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("expected retry run to succeed after invalid-op fixture: %v", err)
+	}
+	if result.TaskResult.Summary != "schema retry fixed invalid op" {
+		t.Fatalf("unexpected result summary %q", result.TaskResult.Summary)
+	}
+}
+
+func TestHeadlessRunnerNormalizesCapturedLiveBankExtrasLegacyDocArtifactFixture(t *testing.T) {
+	tempDir := t.TempDir()
+	commandPath := filepath.Join(tempDir, "qwen-bank-extras-legacy-doc-artifact-stub.sh")
+	fixturePath := filepath.Join(tempDir, "bank-extras-legacy-doc-artifact-output.txt")
+	writeRoot := filepath.Join(tempDir, "write-root")
+	if err := os.WriteFile(fixturePath, []byte(loadCapturedLiveStdoutFixture(t, "qwen_live_bank_extras_legacy_doc_artifact_stdout.txt")), 0o644); err != nil {
+		t.Fatalf("write bank extras fixture copy: %v", err)
+	}
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "shard-pack-manifest.json"), []byte(validRetryRichManifestJSON()), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "extras-overview.md"), []byte("# Extras\n"), 0o644); err != nil {
+		t.Fatalf("write doc: %v", err)
+	}
+
+	script := `#!/bin/sh
+set -eu
+cat "$QWEN_BANK_EXTRAS_LEGACY_DOC_ARTIFACT_FIXTURE"
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write bank extras legacy artifact command: %v", err)
+	}
+
+	t.Setenv("QWEN_BANK_EXTRAS_LEGACY_DOC_ARTIFACT_FIXTURE", fixturePath)
+
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-run_20260418_214016_001-init-step1-collect-domain-bank-of-anthos-shard-bank-of-anthos-extras",
+		RunID:        "run_20260418_214016_001",
+		StepID:       "init.step1.collect",
+		Workspace:    t.TempDir(),
+		WriteRoot:    writeRoot,
+		RepoScope:    "bank-of-anthos",
+		RepoScopes:   []string{"bank-of-anthos"},
+		PathScopes:   []string{"extras"},
+		StartedAtUTC: time.Date(2026, 4, 18, 21, 48, 51, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("expected bank extras legacy artifact fixture to normalize successfully: %v", err)
+	}
+	if len(result.TaskResult.Changeset) != 0 {
+		t.Fatalf("expected malformed manifest repair op to be dropped, got %#v", result.TaskResult.Changeset)
+	}
+}
+
+func TestHeadlessRunnerRejectsInvalidManifestAfterArtifactRepairFixture(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	repoPath := filepath.Join(root, "cinder")
+	writeRoot := filepath.Join(root, "write-root")
+	for _, dir := range []string{workspace, repoPath, writeRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	manifest := "version: 1\nrepos:\n  - name: cinder\n    path: " + repoPath + "\n"
+	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write workspace manifest: %v", err)
+	}
+
+	initialManifest := loadCapturedLiveStdoutFixture(t, "openstack_cinder_invalid_manifest_initial.json")
+	repairedManifest := loadCapturedLiveStdoutFixture(t, "openstack_cinder_invalid_manifest_repaired.json")
+	commandPath := filepath.Join(root, "qwen-invalid-manifest-repair.sh")
+	stateFile := filepath.Join(root, "qwen-invalid-manifest-repair-count.txt")
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+count=0
+if [ -f %q ]; then
+  count="$(cat %q)"
+fi
+count=$((count + 1))
+printf '%%s' "$count" > %q
+mkdir -p %q
+cat <<'EOF' > %q/cinder-as-is.md
+# Cinder
+EOF
+if [ "$count" -eq 1 ]; then
+  cat <<'JSON' > %q/shard-pack-manifest.json
+%s
+JSON
+  cat <<'JSON'
+{"meta":{"task_id":"task-openstack-invalid-manifest","step_id":"init.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"initial collect","changeset":[]}
+JSON
+  exit 0
+fi
+cat <<'JSON' > %q/shard-pack-manifest.json
+%s
+JSON
+cat <<'JSON'
+{"meta":{"task_id":"task-openstack-invalid-manifest","step_id":"init.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"repair stayed invalid","changeset":[]}
+JSON
+`, stateFile, stateFile, stateFile, writeRoot, writeRoot, writeRoot, initialManifest, writeRoot, repairedManifest)
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write invalid manifest repair command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-openstack-invalid-manifest",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    workspace,
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"cinder"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected invalid repaired manifest fixture to fail")
+	}
+	code, _, ok := acpruntime.ClassifyError(err)
+	if !ok || code != string(acpruntime.ErrorCodeRunnerParseFailed) {
+		t.Fatalf("expected runner_parse_failed classification, got code=%q err=%v", code, err)
+	}
+	if count := strings.TrimSpace(string(mustReadFile(t, stateFile))); count != "2" {
+		t.Fatalf("expected exactly 2 runner invocations, got %q", count)
+	}
+	if restored := string(mustReadFile(t, filepath.Join(writeRoot, "shard-pack-manifest.json"))); strings.Contains(restored, `"entities": true`) {
+		t.Fatalf("expected write_root snapshot restore to discard invalid repaired manifest, got %q", restored)
 	}
 }
 

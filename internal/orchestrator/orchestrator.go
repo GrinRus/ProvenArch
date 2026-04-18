@@ -1809,6 +1809,13 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 			})
 			return runtimeTaskExecution{}, err
 		}
+		if err := e.repairValidatorScopedArtifacts(&verdict); err != nil {
+			e.logError(stepID, domainID, "validator scoped repair failed", map[string]any{
+				"task_id": task.TaskID,
+				"error":   strings.TrimSpace(err.Error()),
+			})
+			return runtimeTaskExecution{}, err
+		}
 		issues := e.validateStagedArtifacts()
 		if verdict.Verdict != "PASS" {
 			return runtimeTaskExecution{}, fmt.Errorf("validator verdict is %s", verdict.Verdict)

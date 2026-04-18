@@ -892,8 +892,47 @@ func TestBuildDirectPromptIncludesCanonicalManifestSchemaGuardrails(t *testing.T
 	if !strings.Contains(prompt, `Do NOT use documents[].citations; only documents[].citation_ids is allowed.`) {
 		t.Fatalf("expected canonical manifest field guardrail in prompt")
 	}
+	if !strings.Contains(prompt, `citations[].claim_ids MUST be globally unique across the assembled staged final set`) {
+		t.Fatalf("expected global claim-id uniqueness guardrail in prompt")
+	}
+	if !strings.Contains(prompt, `compatibility MUST include coverage, questions, entities, edges, and findings`) {
+		t.Fatalf("expected compatibility completeness guardrail in prompt")
+	}
 	if !strings.Contains(prompt, `Do NOT use reports/taskruns/... staging paths as canonical_path.`) {
 		t.Fatalf("expected canonical_path staging-path ban in prompt")
+	}
+}
+
+func TestBuildDirectPromptRetryIncludesSchemaFailureHintsForInvalidChangesetOp(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		TaskID:       "task-claude-invalid-op-retry",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    t.TempDir(),
+		WriteRoot:    filepath.Join(t.TempDir(), "write-root"),
+		RepoScopes:   []string{"course-discovery"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	parseErr := errors.New(`taskresult is invalid: taskresult.schema.json validation failed: jsonschema: '/changeset/0/op' does not validate`)
+	prompt := buildDirectPromptWithModeAndHints(raw, promptRetryParse, false, buildParseRepairHints("schema", parseErr))
+	if !strings.Contains(prompt, "Previous schema validation failure") {
+		t.Fatalf("expected schema failure hint in claude retry prompt")
+	}
+	if !strings.Contains(prompt, "Unknown changeset[].op values are forbidden") {
+		t.Fatalf("expected allowed-op whitelist in claude retry prompt")
+	}
+	if !strings.Contains(prompt, `For op="add_doc_artifact", the payload key MUST be "doc_artifact"; never use "artifact".`) {
+		t.Fatalf("expected doc_artifact payload guardrail in claude retry prompt")
+	}
+	if !strings.Contains(prompt, "Do NOT use ad-hoc ops such as upsert_file") {
+		t.Fatalf("expected upsert_file ban in claude retry prompt")
 	}
 }
 

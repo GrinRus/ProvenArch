@@ -221,6 +221,9 @@ Compatibility output:
 Orchestrator applies:
 - валидирует TaskResult schema как compatibility envelope
 - валидирует `shard-pack-manifest.json`
+- требует полного `compatibility` block в `shard-pack-manifest.json`: `coverage`, `questions`, `entities`, `edges`, `findings` обязательны, а `questions/entities/edges/findings` materialize-ятся массивами даже when empty
+- требует global uniqueness для `citations[].claim_ids` в assembled staged final set; provider должен формировать `claim_id` как semantic stem + shard slug и добавлять deterministic numeric suffix при остаточной коллизии
+- collect runtime до schema-validate normalizes только один legacy compatibility drift: malformed manifest-only `add_doc_artifact` для `shard-pack-manifest.json` отбрасывается, потому что repair materialize-ится через `write_root`, а не через public `changeset`
 - выполняет runtime `init.step1.collect`/`refresh.step1.collect` отдельно для каждой canonical domain card (`charter/cards/domains/*`)
 - materialize-ит отдельный raw taskrun на каждый домен в `reports/taskruns/*-step1-collect-domain-<domain>.json`
 - для sharded runtime ведёт shard-summary state machine `pending | checkpointed | succeeded | failed`; raw per-shard taskrun materialize-ится до `apply`, чтобы restart recovery мог replay-ить shard из persisted artifact
@@ -276,6 +279,7 @@ Orchestrator applies:
 - валидирует `validator-verdict.json`
 - блокирует promotion при verdict != `PASS` или при broken staged indexes
 - validator может править только index/reference/technical issues внутри validator scope; смысл authored docs не переписывается wholesale
+- duplicate `claim_id` внутри `citation-index.json` считаются validator-scope technical drift: orchestrator repair-ит поздние коллизии по правилу `<claim_id>.<shard_slug>[.<n>]` и фиксирует это в `validator-verdict.json.fixed_paths`
 - обновляет `reports/findings/*`
 - обновляет `reports/agent-outputs/architect/summary.md` через детерминированную агрегацию фактических domain outputs
 - materializes critical unknowns как findings, если отсутствуют owner/integration/database/CI-CD evidence

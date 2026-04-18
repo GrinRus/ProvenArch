@@ -249,8 +249,11 @@ Implemented additional jobs:
   - release-mode (`MATRIX_ID=release-*` или `E2E_MATRIX_RELEASE_MODE=1`) фиксирует `RUN_COUNT=1` и требует explicit `sweeps[]` с ровно `baseline` + `parallel-default`, плюс ровно один `single-*` и один `multi-*` профиль; любое отклонение блокирует matrix до batch stage
   - `scripts/tests/matrix_release_contract_test.py` обязан запускать matrix driver в hermetic subprocess env; ambient `ACP_*`, `BATCH_*`, `E2E_*`, `MATRIX_*`, `UI_E2E_*`, `RUN_COUNT`, `PROFILE_*`, `SWEEP_*` leakage не должен менять contract assertions
   - captured live qwen stdout fixture защищает retry/prompt discipline от event-stream chatter и partial TaskResult drafting
+  - captured live bank extras fixture защищает collect-repair normalization от legacy `changeset[].artifact` drift при manifest-only repair
   - collect runtime делает максимум одну post-success artifact-repair попытку для skeletal/generic-only `shard-pack-manifest.json`; если repair не улучшил fidelity, исходный `write_root` восстанавливается
+  - schema-invalid `TaskResult` получает один direct-JSON retry с whitelist допустимых `changeset[].op`; invalid manifest после schema-valid result идёт в отдельный artifact-repair path
   - collect runtime не принимает nominal success после failed artifact-repair: missing/invalid/skeletal manifest после единственной repair попытки поднимается как `runner_parse_failed` / `runtime_parse`
+  - global uniqueness для `citation-index.claim_ids` проверяется как validator contract; duplicate claim ids либо repair-ятся на index/reference уровне детерминированным shard suffix, либо остаются blocking defect
   - refresh artifact-quality guard: `artifact_quality:*` в `reports/taskruns/<run_id>-quality.json.run_warnings` считается canonical live gate blocker; bank-like collapse к одному `cite.runtime-summary` должен ловиться, openstack-like reuse с хотя бы одним rich shard остаётся допустимым
   - `profile_matrix_<matrix-id>` и `quality_report_<batch-id>` обязаны агрегировать только реально выбранные `selected_providers`/`selected_run_indexes`; qwen-only non-release run не должен порождать synthetic `backend_total_runs=10` и `summary_missing=9`
   - internal shard-plan/shard-summary taskrun JSON обязаны иметь non-empty `meta.runtime.name`; false `contract:runtime-name` на internal artifacts считается regression

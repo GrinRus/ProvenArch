@@ -545,6 +545,11 @@ Primary runtime contract для live `step1.collect`/`step3.findings`:
 - `citation-index.json`
 - `validator-verdict.json`
 
+Docs-first semantic rules:
+- `citation-index.json.claim_ids` образуют глобальное пространство имён в пределах assembled staged final set; один и тот же `claim_id` нельзя переиспользовать между разными shard/citation surfaces.
+- `shard-pack-manifest.json.compatibility` всегда materialize-ится полностью (`coverage`, `questions`, `entities`, `edges`, `findings`), а коллекционные retry не считаются успешными, если manifest остаётся missing/invalid/skeletal.
+- validator path может чинить только technical/reference drift в staged indexes; дублирующиеся `claim_id` детерминированно переименовываются в citation index без semantic rewrite authored docs.
+
 TaskResult остаётся compatibility envelope:
 - валидируется по `schemas/taskresult.schema.json`
 - используется для semantic guards, taskrun diagnostics и derived `model/*`
