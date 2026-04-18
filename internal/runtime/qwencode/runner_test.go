@@ -175,6 +175,40 @@ func validRetryUnlinkedRepoSpecificManifestJSON() string {
 }`
 }
 
+func validRetryRichManifestMissingMetadataJSON() string {
+	return `{
+  "artifact_root": "reports/taskruns/run-1/staging/shards/bank-of-anthos-docs",
+  "version": 1,
+  "documents": [
+    {
+      "id": "doc.service-catalog",
+      "kind": "analysis",
+      "title": "Bank of Anthos Service Catalog",
+      "path": "service-catalog.md",
+      "canonical_path": "reports/as-is/bank-of-anthos/service-catalog.md",
+      "topics": ["services", "architecture"],
+      "citation_ids": ["cite.readme", "cite.pom"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.readme",
+      "repo": "bank-of-anthos",
+      "path": "README.md",
+      "claim_ids": ["claim.services"],
+      "document_ids": ["doc.service-catalog"]
+    },
+    {
+      "id": "cite.pom",
+      "repo": "bank-of-anthos",
+      "path": "pom.xml",
+      "claim_ids": ["claim.maven-modules"],
+      "document_ids": ["doc.service-catalog"]
+    }
+  ]
+}`
+}
+
 func invalidLegacyStyleManifestJSON() string {
 	return `{
   "version": "1.0.0",
@@ -1557,6 +1591,87 @@ JSON
 	}
 	if !assessment.Rich {
 		t.Fatalf("expected repaired legacy manifest to be rich, got %#v", assessment)
+	}
+}
+
+func TestHeadlessRunnerCanonicalizesRichManifestMissingMetadataWithoutRepairRetry(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	repoPath := filepath.Join(root, "bank-of-anthos")
+	writeRoot := filepath.Join(root, "write-root")
+	for _, dir := range []string{workspace, repoPath, writeRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	manifest := "version: 1\nrepos:\n  - name: bank-of-anthos\n    path: " + repoPath + "\n"
+	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write workspace manifest: %v", err)
+	}
+
+	stateFile := filepath.Join(root, "qwen-metadata-normalize-count.txt")
+	commandPath := filepath.Join(root, "qwen-manifest-metadata-normalize.sh")
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+count=0
+if [ -f %q ]; then
+  count="$(cat %q)"
+fi
+count=$((count + 1))
+printf '%%s' "$count" > %q
+mkdir -p %q
+cat <<'JSON' > %q/shard-pack-manifest.json
+%s
+JSON
+cat <<'EOF' > %q/service-catalog.md
+# Service Catalog
+EOF
+cat <<'JSON'
+{"meta":{"task_id":"task-manifest-metadata-normalize","step_id":"refresh.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"metadata normalized","changeset":[],"coverage":{"observed":["services"],"missing":["owner mappings"],"notes":["repo evidence preserved"]}}
+JSON
+`, stateFile, stateFile, stateFile, writeRoot, writeRoot, validRetryRichManifestMissingMetadataJSON(), writeRoot)
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write metadata normalize command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-manifest-metadata-normalize",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		ShardID:      "bank-of-anthos-docs",
+		DomainID:     "bank-of-anthos",
+		Workspace:    workspace,
+		WriteRoot:    writeRoot,
+		ArtifactRoot: "reports/taskruns/run-1/staging/shards/bank-of-anthos-docs",
+		RepoScopes:   []string{"bank-of-anthos"},
+		PathScopes:   []string{"docs"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("expected metadata canonicalization to succeed without repair retry: %v", err)
+	}
+	if result.TaskResult.Summary != "metadata normalized" {
+		t.Fatalf("unexpected result summary %q", result.TaskResult.Summary)
+	}
+	if count := strings.TrimSpace(string(mustReadFile(t, stateFile))); count != "1" {
+		t.Fatalf("expected exactly 1 runner invocation, got %q", count)
+	}
+	raw := mustReadFile(t, filepath.Join(writeRoot, "shard-pack-manifest.json"))
+	assessment, assessErr := assessRetryManifestAtWriteRoot(writeRoot)
+	if assessErr != nil {
+		t.Fatalf("assess canonicalized manifest: %v", assessErr)
+	}
+	if !assessment.Rich {
+		t.Fatalf("expected canonicalized manifest to stay rich, got %#v", assessment)
+	}
+	text := string(raw)
+	for _, expected := range []string{`"run_id": "run-1"`, `"step_id": "refresh.step1.collect"`, `"shard_id": "bank-of-anthos-docs"`, `"agent_role": "shard-analyst"`, `"compatibility": {`} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("expected canonicalized manifest to contain %s, got %q", expected, text)
+		}
 	}
 }
 

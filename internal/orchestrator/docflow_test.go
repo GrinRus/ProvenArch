@@ -20,7 +20,7 @@ func TestReadShardDocumentRejectsPathTraversalOutsideArtifactRoot(t *testing.T) 
 	_, err := readShardDocument(manifest, contracts.AuthoredDocument{
 		ID:   "doc.escape",
 		Path: "../outside.md",
-	})
+	}, "")
 	if err == nil {
 		t.Fatalf("expected path traversal error")
 	}
@@ -48,11 +48,41 @@ func TestReadShardDocumentReadsRelativePathWithinArtifactRoot(t *testing.T) {
 	content, err := readShardDocument(manifest, contracts.AuthoredDocument{
 		ID:   "doc.safe",
 		Path: filepath.ToSlash(relPath),
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("read shard document: %v", err)
 	}
 	if content != "report-content" {
+		t.Fatalf("unexpected content %q", content)
+	}
+}
+
+func TestReadShardDocumentResolvesWorkspaceRelativeArtifactRoot(t *testing.T) {
+	t.Parallel()
+
+	workspaceRoot := t.TempDir()
+	artifactRel := filepath.Join("reports", "taskruns", "run-1", "staging", "shards", "sample")
+	artifactRoot := filepath.Join(workspaceRoot, artifactRel)
+	relPath := filepath.Join("nested", "report.md")
+	absPath := filepath.Join(artifactRoot, relPath)
+	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+		t.Fatalf("mkdir artifact root: %v", err)
+	}
+	if err := os.WriteFile(absPath, []byte("relative-report"), 0o644); err != nil {
+		t.Fatalf("write report: %v", err)
+	}
+
+	manifest := contracts.ShardPackManifest{
+		ArtifactRoot: filepath.ToSlash(artifactRel),
+	}
+	content, err := readShardDocument(manifest, contracts.AuthoredDocument{
+		ID:   "doc.relative",
+		Path: filepath.ToSlash(relPath),
+	}, workspaceRoot)
+	if err != nil {
+		t.Fatalf("read shard document with relative artifact_root: %v", err)
+	}
+	if content != "relative-report" {
 		t.Fatalf("unexpected content %q", content)
 	}
 }
@@ -96,7 +126,7 @@ func TestCollectAuthoredStageDocumentsMergesByCanonicalPath(t *testing.T) {
 		},
 	}
 
-	documents, err := collectAuthoredStageDocuments(manifests)
+	documents, err := collectAuthoredStageDocuments(manifests, "")
 	if err != nil {
 		t.Fatalf("collect authored docs: %v", err)
 	}

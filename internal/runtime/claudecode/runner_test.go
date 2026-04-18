@@ -760,6 +760,117 @@ JSON
 	}
 }
 
+func TestHeadlessRunnerCanonicalizesRichManifestMissingMetadataWithoutRepairRetry(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	repoPath := filepath.Join(root, "openstack")
+	writeRoot := filepath.Join(root, "write-root")
+	for _, dir := range []string{workspace, repoPath, writeRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	manifest := "version: 1\nrepos:\n  - name: openstack\n    path: " + repoPath + "\n"
+	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write workspace manifest: %v", err)
+	}
+
+	stateFile := filepath.Join(root, "claude-metadata-normalize-count.txt")
+	commandPath := filepath.Join(root, "claude")
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+count=0
+if [ -f %q ]; then
+  count="$(cat %q)"
+fi
+count=$((count + 1))
+printf '%%s' "$count" > %q
+mkdir -p %q
+cat <<'JSON' > %q/shard-pack-manifest.json
+{
+  "artifact_root": "reports/taskruns/run-1/staging/shards/openstack-api",
+  "version": 1,
+  "documents": [
+    {
+      "id": "doc.architecture",
+      "kind": "analysis",
+      "title": "OpenStack Architecture",
+      "path": "architecture-overview.md",
+      "canonical_path": "reports/as-is/openstack/architecture-overview.md",
+      "topics": ["api", "architecture"],
+      "citation_ids": ["cite.openstack.readme", "cite.openstack.api"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.openstack.readme",
+      "repo": "openstack",
+      "path": "README.md",
+      "claim_ids": ["claim.openstack.services"],
+      "document_ids": ["doc.architecture"]
+    },
+    {
+      "id": "cite.openstack.api",
+      "repo": "openstack",
+      "path": "api/openapi.yaml",
+      "claim_ids": ["claim.openstack.api"],
+      "document_ids": ["doc.architecture"]
+    }
+  ]
+}
+JSON
+cat <<'EOF' > %q/architecture-overview.md
+# Architecture
+EOF
+cat <<'JSON'
+{"result":"{\"meta\":{\"task_id\":\"task-claude-manifest-metadata-normalize\",\"step_id\":\"refresh.step1.collect\",\"runtime\":{\"name\":\"claude-code\",\"version\":\"claude-cli\"},\"started_at\":\"2026-04-03T12:00:00Z\"},\"summary\":\"metadata normalized\",\"changeset\":[],\"coverage\":{\"observed\":[\"api\"],\"missing\":[\"owner mappings\"],\"notes\":[\"repo evidence preserved\"]}}"}
+JSON
+`, stateFile, stateFile, stateFile, writeRoot, writeRoot, writeRoot)
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write claude metadata normalize command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-claude-manifest-metadata-normalize",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		ShardID:      "openstack-api",
+		DomainID:     "openstack",
+		Workspace:    workspace,
+		WriteRoot:    writeRoot,
+		ArtifactRoot: "reports/taskruns/run-1/staging/shards/openstack-api",
+		RepoScopes:   []string{"openstack"},
+		PathScopes:   []string{"api"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("expected claude metadata canonicalization to succeed without repair retry: %v", err)
+	}
+	if result.TaskResult.Summary != "metadata normalized" {
+		t.Fatalf("unexpected result summary %q", result.TaskResult.Summary)
+	}
+	stateRaw, err := os.ReadFile(stateFile)
+	if err != nil {
+		t.Fatalf("read state file: %v", err)
+	}
+	if count := strings.TrimSpace(string(stateRaw)); count != "1" {
+		t.Fatalf("expected exactly 1 runner invocation, got %q", count)
+	}
+	raw, err := os.ReadFile(filepath.Join(writeRoot, "shard-pack-manifest.json"))
+	if err != nil {
+		t.Fatalf("read canonicalized manifest: %v", err)
+	}
+	text := string(raw)
+	for _, expected := range []string{`"run_id": "run-1"`, `"step_id": "refresh.step1.collect"`, `"shard_id": "openstack-api"`, `"agent_role": "shard-analyst"`, `"compatibility": {`} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("expected canonicalized manifest to contain %s, got %q", expected, text)
+		}
+	}
+}
+
 func TestBuildDirectPromptIncludesCanonicalManifestSchemaGuardrails(t *testing.T) {
 	t.Parallel()
 

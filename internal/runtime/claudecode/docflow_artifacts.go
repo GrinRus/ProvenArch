@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GrinRus/ProvenArch/internal/artifactquality"
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
@@ -57,7 +58,7 @@ func writeShardPackManifest(writeRoot string, task acpruntime.Task, result contr
 		return fmt.Errorf("create shard write root: %w", err)
 	}
 
-	compatibility := compatibilitySnapshotFromTaskResult(result)
+	compatibility := artifactquality.CompatibilitySnapshotFromTaskResult(result)
 	documentID := runtimeDomainDocumentID(task)
 	citations := deriveRuntimeCitations(task, compatibility, documentID)
 	document := contracts.AuthoredDocument{
@@ -83,7 +84,7 @@ func writeShardPackManifest(writeRoot string, task acpruntime.Task, result contr
 		ShardID:       strings.TrimSpace(task.ShardID),
 		DomainID:      strings.TrimSpace(task.DomainID),
 		AgentRole:     runtimeAgentRoleForTask(task),
-		ArtifactRoot:  writeRoot,
+		ArtifactRoot:  strings.TrimSpace(task.ArtifactRoot),
 		RepoScopes:    append([]string(nil), task.RepoScopes...),
 		PathScopes:    append([]string(nil), task.PathScopes...),
 		Summary:       strings.TrimSpace(result.Summary),
@@ -134,41 +135,6 @@ func writeRuntimeArtifactFile(root string, relativePath string, content []byte) 
 		return fmt.Errorf("write artifact %q: %w", relativePath, err)
 	}
 	return nil
-}
-
-func compatibilitySnapshotFromTaskResult(result contracts.TaskResult) contracts.CompatibilitySnapshot {
-	snapshot := contracts.CompatibilitySnapshot{
-		Coverage:  contracts.Coverage{},
-		Questions: []contracts.Question{},
-		Entities:  []contracts.Entity{},
-		Edges:     []contracts.Edge{},
-		Findings:  []contracts.Finding{},
-	}
-	if result.Coverage != nil {
-		snapshot.Coverage = *result.Coverage
-	}
-	snapshot.Questions = append([]contracts.Question{}, result.Questions...)
-	for _, op := range result.Changeset {
-		switch op.Op {
-		case "upsert_entity":
-			if op.Entity != nil {
-				snapshot.Entities = append(snapshot.Entities, *op.Entity)
-			}
-		case "upsert_edge":
-			if op.Edge != nil {
-				snapshot.Edges = append(snapshot.Edges, *op.Edge)
-			}
-		case "add_finding":
-			if op.Finding != nil {
-				snapshot.Findings = append(snapshot.Findings, *op.Finding)
-			}
-		}
-	}
-	sort.Slice(snapshot.Entities, func(i, j int) bool { return snapshot.Entities[i].ID < snapshot.Entities[j].ID })
-	sort.Slice(snapshot.Edges, func(i, j int) bool { return snapshot.Edges[i].ID < snapshot.Edges[j].ID })
-	sort.Slice(snapshot.Findings, func(i, j int) bool { return snapshot.Findings[i].ID < snapshot.Findings[j].ID })
-	sort.Slice(snapshot.Questions, func(i, j int) bool { return snapshot.Questions[i].ID < snapshot.Questions[j].ID })
-	return snapshot
 }
 
 func deriveRuntimeCitations(

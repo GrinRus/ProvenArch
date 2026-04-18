@@ -207,7 +207,7 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 		return nil
 	}
 
-	authoredDocs, err := collectAuthoredStageDocuments(e.shardPacks)
+	authoredDocs, err := collectAuthoredStageDocuments(e.shardPacks, e.workspace.Path)
 	if err != nil {
 		return err
 	}
@@ -435,7 +435,7 @@ func (e *pipelineExecution) authoredDomainReports() (map[string]string, error) {
 			if !strings.HasPrefix(strings.TrimSpace(document.CanonicalPath), "reports/agent-outputs/domains/") {
 				continue
 			}
-			content, err := readShardDocument(manifest, document)
+			content, err := readShardDocument(manifest, document, e.workspace.Path)
 			if err != nil {
 				return nil, err
 			}
@@ -450,10 +450,34 @@ func (e *pipelineExecution) authoredDomainReports() (map[string]string, error) {
 	return reportsByDomain, nil
 }
 
-func readShardDocument(manifest contracts.ShardPackManifest, document contracts.AuthoredDocument) (string, error) {
-	artifactRoot := strings.TrimSpace(manifest.ArtifactRoot)
+func resolveManifestArtifactRoot(artifactRoot string, workspaceRoot string) (string, error) {
+	artifactRoot = strings.TrimSpace(artifactRoot)
 	if artifactRoot == "" {
-		return "", fmt.Errorf("read shard document %q: manifest artifact_root is empty", document.ID)
+		return "", fmt.Errorf("manifest artifact_root is empty")
+	}
+	if filepath.IsAbs(artifactRoot) {
+		return filepath.Clean(artifactRoot), nil
+	}
+	workspaceRoot = strings.TrimSpace(workspaceRoot)
+	if workspaceRoot == "" {
+		return "", fmt.Errorf("manifest artifact_root %q is relative but workspace root is empty", artifactRoot)
+	}
+	cleanWorkspaceRoot := filepath.Clean(workspaceRoot)
+	resolved := filepath.Join(cleanWorkspaceRoot, filepath.Clean(filepath.FromSlash(artifactRoot)))
+	relToWorkspace, err := filepath.Rel(cleanWorkspaceRoot, resolved)
+	if err != nil {
+		return "", fmt.Errorf("resolve relative artifact_root %q: %w", artifactRoot, err)
+	}
+	if relToWorkspace == ".." || strings.HasPrefix(relToWorkspace, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("manifest artifact_root %q escapes workspace root", artifactRoot)
+	}
+	return resolved, nil
+}
+
+func readShardDocument(manifest contracts.ShardPackManifest, document contracts.AuthoredDocument, workspaceRoot string) (string, error) {
+	artifactRoot, err := resolveManifestArtifactRoot(manifest.ArtifactRoot, workspaceRoot)
+	if err != nil {
+		return "", fmt.Errorf("read shard document %q: %w", document.ID, err)
 	}
 	relativePath := filepath.Clean(filepath.FromSlash(strings.TrimSpace(document.Path)))
 	if relativePath == "." || relativePath == "" {
@@ -478,7 +502,7 @@ func readShardDocument(manifest contracts.ShardPackManifest, document contracts.
 	return string(content), nil
 }
 
-func collectAuthoredStageDocuments(manifests []contracts.ShardPackManifest) ([]stagedAuthoredDocument, error) {
+func collectAuthoredStageDocuments(manifests []contracts.ShardPackManifest, workspaceRoot string) ([]stagedAuthoredDocument, error) {
 	documentsByCanonicalPath := map[string]*authoredDocumentAccumulator{}
 	for _, manifest := range manifests {
 		for _, document := range manifest.Documents {
@@ -513,7 +537,7 @@ func collectAuthoredStageDocuments(manifests []contracts.ShardPackManifest) ([]s
 					accumulator.CitationIDs[trimmed] = struct{}{}
 				}
 			}
-			content, err := readShardDocument(manifest, document)
+			content, err := readShardDocument(manifest, document, workspaceRoot)
 			if err != nil {
 				return nil, err
 			}
