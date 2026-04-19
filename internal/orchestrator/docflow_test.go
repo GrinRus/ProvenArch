@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
+	"github.com/GrinRus/ProvenArch/internal/model"
+	"github.com/GrinRus/ProvenArch/internal/reports"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
@@ -157,6 +159,76 @@ func TestPromoteValidatedArtifactsRejectsFailVerdict(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "validator verdict is FAIL") {
 		t.Fatalf("expected validator verdict failure, got %v", err)
+	}
+}
+
+func TestPromoteValidatedArtifactsRemovesStaleManagedCanonicalFiles(t *testing.T) {
+	t.Parallel()
+
+	workspaceRoot := t.TempDir()
+	ws := workspace.Root{Path: workspaceRoot}
+
+	stagedPath := "reports/taskruns/run-1/staging/final/reports/as-is/overview.md"
+	absStagedPath := filepath.Join(workspaceRoot, filepath.FromSlash(stagedPath))
+	if err := os.MkdirAll(filepath.Dir(absStagedPath), 0o755); err != nil {
+		t.Fatalf("mkdir staged path: %v", err)
+	}
+	if err := os.WriteFile(absStagedPath, []byte("# Current Overview\n"), 0o644); err != nil {
+		t.Fatalf("write staged overview: %v", err)
+	}
+
+	staleReportPath := filepath.Join(workspaceRoot, "reports", "as-is", "services", "legacy.md")
+	if err := os.MkdirAll(filepath.Dir(staleReportPath), 0o755); err != nil {
+		t.Fatalf("mkdir stale report dir: %v", err)
+	}
+	if err := os.WriteFile(staleReportPath, []byte("# Legacy\n"), 0o644); err != nil {
+		t.Fatalf("write stale report: %v", err)
+	}
+
+	staleProposalPath := filepath.Join(workspaceRoot, "proposals", "proposal-legacy", "proposal.md")
+	if err := os.MkdirAll(filepath.Dir(staleProposalPath), 0o755); err != nil {
+		t.Fatalf("mkdir stale proposal dir: %v", err)
+	}
+	if err := os.WriteFile(staleProposalPath, []byte("# Legacy Proposal\n"), 0o644); err != nil {
+		t.Fatalf("write stale proposal: %v", err)
+	}
+
+	execution := &pipelineExecution{
+		workspace:  ws,
+		store:      model.NewStore(ws),
+		compiler:   reports.NewCompiler(ws),
+		stepStatus: RunInfo{CurrentStep: "init.step4.proposals"},
+		finalRunIndex: &contracts.FinalRunIndex{
+			RunID: "run-1",
+			CanonicalDocuments: []contracts.FinalRunDocument{
+				{
+					ID:            "doc.overview",
+					Kind:          "report",
+					Title:         "System Overview",
+					CanonicalPath: "reports/as-is/overview.md",
+					StagedPath:    stagedPath,
+				},
+			},
+			Compatibility: contracts.CompatibilitySnapshot{},
+		},
+		validatorVerdict: &contracts.ValidatorVerdict{Verdict: "PASS"},
+	}
+
+	if err := execution.promoteValidatedArtifacts(); err != nil {
+		t.Fatalf("promote validated artifacts: %v", err)
+	}
+	if _, err := os.Stat(staleReportPath); !os.IsNotExist(err) {
+		t.Fatalf("expected stale report removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(staleProposalPath); !os.IsNotExist(err) {
+		t.Fatalf("expected stale proposal removed, stat err=%v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(workspaceRoot, "reports", "as-is", "overview.md"))
+	if err != nil {
+		t.Fatalf("read promoted overview: %v", err)
+	}
+	if !strings.Contains(string(content), "Current Overview") {
+		t.Fatalf("expected promoted overview content, got %q", string(content))
 	}
 }
 

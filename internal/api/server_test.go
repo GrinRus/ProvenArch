@@ -1427,6 +1427,183 @@ func TestRuntimeExecutionPutRejectsInvalidValues(t *testing.T) {
 	}
 }
 
+func TestRuntimeProfileGetIncludesStepProviders(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "repos", "payments-service")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("create repo path: %v", err)
+	}
+	manifest := `version: 1
+repos:
+  - name: payments-service
+    path: ` + repoPath + `
+runtime:
+  profile:
+    execution:
+      strategy: parallel
+      max_parallel_tasks: 2
+    steps:
+      step2_as_is:
+        provider: qwen-code
+`
+	server := newTestServerFromManifest(t, manifest)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Get(httpServer.URL + "/api/runtime/profile")
+	if err != nil {
+		t.Fatalf("GET /api/runtime/profile: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", response.StatusCode)
+	}
+
+	var payload struct {
+		OK            bool `json:"ok"`
+		StepProviders struct {
+			Persisted map[string]string `json:"persisted"`
+			Effective map[string]string `json:"effective"`
+			Source    map[string]string `json:"source"`
+		} `json:"step_providers"`
+		Execution struct {
+			Effective map[string]any `json:"effective"`
+		} `json:"execution"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode runtime profile payload: %v", err)
+	}
+	if !payload.OK {
+		t.Fatalf("expected ok=true")
+	}
+	if payload.StepProviders.Persisted["step2_as_is"] != "qwen-code" {
+		t.Fatalf("expected persisted step2_as_is=qwen-code, got %+v", payload.StepProviders.Persisted)
+	}
+	if payload.StepProviders.Effective["step2_as_is"] != "qwen-code" {
+		t.Fatalf("expected effective step2_as_is=qwen-code, got %+v", payload.StepProviders.Effective)
+	}
+	if payload.StepProviders.Effective["step1_collect"] != "claude-code" {
+		t.Fatalf("expected default effective step1_collect=claude-code, got %+v", payload.StepProviders.Effective)
+	}
+	if payload.StepProviders.Source["step2_as_is"] != "workspace" {
+		t.Fatalf("expected workspace source for step2_as_is, got %+v", payload.StepProviders.Source)
+	}
+	effectiveSteps, ok := payload.Execution.Effective["steps"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected execution.effective.steps map, got %+v", payload.Execution.Effective)
+	}
+	if effectiveSteps["step2_as_is"] != "qwen-code" {
+		t.Fatalf("expected execution.effective.steps.step2_as_is=qwen-code, got %+v", effectiveSteps)
+	}
+}
+
+func TestRuntimeExecutionPutSupportsStepProviderUpdate(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	requestBody := `{"execution":{"strategy":"parallel","steps":{"step2_as_is":"qwen-code","step4_proposals":"claude-code"}}}`
+	request, err := http.NewRequest(http.MethodPut, httpServer.URL+"/api/runtime/execution", strings.NewReader(requestBody))
+	if err != nil {
+		t.Fatalf("create PUT /api/runtime/execution request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("PUT /api/runtime/execution: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", response.StatusCode)
+	}
+
+	manifestResp, err := http.Get(httpServer.URL + "/api/workspace/manifest")
+	if err != nil {
+		t.Fatalf("GET /api/workspace/manifest: %v", err)
+	}
+	defer manifestResp.Body.Close()
+	var manifestPayload struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(manifestResp.Body).Decode(&manifestPayload); err != nil {
+		t.Fatalf("decode manifest payload: %v", err)
+	}
+	if !strings.Contains(manifestPayload.Content, "steps:") || !strings.Contains(manifestPayload.Content, "step2_as_is:") {
+		t.Fatalf("expected runtime.profile.steps in manifest content, got:\n%s", manifestPayload.Content)
+	}
+	if !strings.Contains(manifestPayload.Content, "provider: qwen-code") {
+		t.Fatalf("expected qwen step provider in manifest content, got:\n%s", manifestPayload.Content)
+	}
+}
+
+func TestRunStatusIncludesEffectiveStepProviders(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "repos", "payments-service")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("create repo path: %v", err)
+	}
+	manifest := `version: 1
+repos:
+  - name: payments-service
+    path: ` + repoPath + `
+runtime:
+  profile:
+    steps:
+      step2_as_is:
+        provider: qwen-code
+`
+	server := newTestServerFromManifest(t, manifest)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Post(httpServer.URL+"/api/pipeline/init", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/init: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", response.StatusCode)
+	}
+	var started struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&started); err != nil {
+		t.Fatalf("decode start payload: %v", err)
+	}
+	if started.RunID == "" {
+		t.Fatalf("expected run id")
+	}
+
+	runStatus := waitForRunTerminalStatus(t, httpServer.URL, started.RunID, 8*time.Second)
+	if runStatus.Status != string(orchestrator.RunStatusSucceeded) {
+		t.Fatalf("expected succeeded status, got %q", runStatus.Status)
+	}
+
+	detailResp, err := http.Get(httpServer.URL + "/api/pipeline/runs/" + started.RunID)
+	if err != nil {
+		t.Fatalf("GET run detail: %v", err)
+	}
+	defer detailResp.Body.Close()
+	var detail struct {
+		StepProviders map[string]string `json:"step_providers"`
+	}
+	if err := json.NewDecoder(detailResp.Body).Decode(&detail); err != nil {
+		t.Fatalf("decode run detail payload: %v", err)
+	}
+	if detail.StepProviders["step2_as_is"] != "qwen-code" {
+		t.Fatalf("expected run detail step2_as_is=qwen-code, got %+v", detail.StepProviders)
+	}
+	if detail.StepProviders["step1_collect"] != "claude-code" {
+		t.Fatalf("expected default step1_collect=claude-code, got %+v", detail.StepProviders)
+	}
+}
+
 func TestPipelineRunReflectsSequentialVsParallelExecutionProfileInLogsAndShardArtifacts(t *testing.T) {
 	t.Parallel()
 
@@ -1792,7 +1969,7 @@ func TestPipelineStartRejectsCreateProposalBranchInThisSlice(t *testing.T) {
 	}
 }
 
-func TestPipelineStartReturnsRunnerUnavailableEnvelope(t *testing.T) {
+func TestPipelineStartAcceptsAsyncRunAndReportsRunnerUnavailableInRunStatus(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -1823,24 +2000,26 @@ repos:
 		t.Fatalf("POST /api/pipeline/init runner unavailable: %v", err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("expected status 503, got %d", response.StatusCode)
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", response.StatusCode)
 	}
 
 	var payload struct {
-		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
+		RunID string `json:"run_id"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode error payload: %v", err)
+		t.Fatalf("decode start payload: %v", err)
 	}
-	if payload.Error.Code != "runner_unavailable" {
-		t.Fatalf("expected runner_unavailable code, got %q", payload.Error.Code)
+	if payload.RunID == "" {
+		t.Fatalf("expected non-empty run id")
 	}
-	if payload.Error.Message == "" {
-		t.Fatalf("expected non-empty runner_unavailable message")
+
+	runStatus := waitForRunTerminalStatus(t, httpServer.URL, payload.RunID, 8*time.Second)
+	if runStatus.Status != string(orchestrator.RunStatusFailed) {
+		t.Fatalf("expected failed run status, got %q", runStatus.Status)
+	}
+	if runStatus.ErrorCode != "runner_unavailable" {
+		t.Fatalf("expected runner_unavailable, got %q", runStatus.ErrorCode)
 	}
 }
 
@@ -1889,8 +2068,8 @@ repos:
 	if runStatus.Status != string(orchestrator.RunStatusFailed) {
 		t.Fatalf("expected failed run status, got %q", runStatus.Status)
 	}
-	if runStatus.ErrorCode != "run_partial_failed" {
-		t.Fatalf("expected run_partial_failed, got %q", runStatus.ErrorCode)
+	if runStatus.ErrorCode != "runner_parse_failed" {
+		t.Fatalf("expected runner_parse_failed, got %q", runStatus.ErrorCode)
 	}
 }
 

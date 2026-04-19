@@ -23,6 +23,23 @@ const (
 	citationIndexFileName     = "citation-index.json"
 )
 
+type runtimeDraftManifest struct {
+	Version      int                  `json:"version"`
+	RunID        string               `json:"run_id"`
+	StepID       string               `json:"step_id"`
+	StepContract string               `json:"step_contract"`
+	AgentRole    string               `json:"agent_role"`
+	Summary      string               `json:"summary,omitempty"`
+	Outputs      []runtimeDraftOutput `json:"outputs"`
+}
+
+type runtimeDraftOutput struct {
+	Path          string `json:"path"`
+	CanonicalPath string `json:"canonical_path"`
+	Kind          string `json:"kind,omitempty"`
+	Title         string `json:"title,omitempty"`
+}
+
 type runtimeCitationSource struct {
 	claimKey   string
 	repo       string
@@ -40,10 +57,16 @@ func persistDocsFirstArtifacts(task acpruntime.Task, result contracts.TaskResult
 		return nil
 	}
 	switch task.StepID {
+	case "init.step0.constitution":
+		return writeConstitutionDraftManifest(writeRoot, task, result)
 	case "init.step1.collect", "refresh.step1.collect":
 		return writeShardPackManifest(writeRoot, task, result)
+	case "init.step2.asis_docs", "refresh.step2.asis_docs":
+		return writeAsIsDraftManifest(writeRoot, task, result)
 	case "init.step3.findings", "refresh.step3.findings":
 		return writeValidatorVerdict(writeRoot, task)
+	case "init.step4.proposals", "refresh.step4.proposals":
+		return writeProposalsDraftManifest(writeRoot, task, result)
 	default:
 		return nil
 	}
@@ -119,6 +142,122 @@ func writeValidatorVerdict(writeRoot string, task acpruntime.Task) error {
 	}
 	encoded = append(encoded, '\n')
 	return writeRuntimeArtifactFile(writeRoot, validatorVerdictFileName, encoded)
+}
+
+func writeConstitutionDraftManifest(writeRoot string, task acpruntime.Task, result contracts.TaskResult) error {
+	outputs := []runtimeDraftOutput{
+		{Path: "charter-overview.md", CanonicalPath: "charter/overview.md", Kind: "charter", Title: "Constitution"},
+		{Path: "baseline-subagents.yaml", CanonicalPath: "skills/subagents.yaml", Kind: "bundle", Title: "Baseline Subagents"},
+	}
+	overview := strings.Builder{}
+	overview.WriteString("# Constitution Draft\n\n")
+	overview.WriteString("Prepared by the step-scoped runtime pipeline.\n\n")
+	if summary := strings.TrimSpace(result.Summary); summary != "" {
+		overview.WriteString("- Runtime summary: " + summary + "\n")
+	}
+	if len(task.RepoScopes) > 0 {
+		overview.WriteString("- Repo scopes: " + strings.Join(task.RepoScopes, ", ") + "\n")
+	}
+	if err := writeRuntimeDraftFinals(task, map[string]string{
+		"charter-overview.md":     overview.String(),
+		"baseline-subagents.yaml": "version: 1\nprofiles:\n  - id: baseline-architect\n    role: architect\n",
+	}); err != nil {
+		return err
+	}
+	return writeRuntimeDraftManifest(writeRoot, "constitution-draft.json", task, result, outputs)
+}
+
+func writeAsIsDraftManifest(writeRoot string, task acpruntime.Task, result contracts.TaskResult) error {
+	outputs := []runtimeDraftOutput{
+		{Path: "overview.md", CanonicalPath: "reports/as-is/overview.md", Kind: "report", Title: "System Overview"},
+		{Path: "summary.md", CanonicalPath: "reports/coverage/summary.md", Kind: "report", Title: "Coverage Summary"},
+		{Path: "architect-summary.md", CanonicalPath: "reports/agent-outputs/architect/summary.md", Kind: "agent-output", Title: "Architect Summary"},
+	}
+	overview := strings.Builder{}
+	overview.WriteString("# As-Is Overview (Runtime Draft)\n\n")
+	overview.WriteString("Prepared by the step-scoped runtime synthesizer.\n\n")
+	if summary := strings.TrimSpace(result.Summary); summary != "" {
+		overview.WriteString("- Runtime summary: " + summary + "\n")
+	}
+	if len(task.RepoScopes) > 0 {
+		overview.WriteString("- Repo scopes: " + strings.Join(task.RepoScopes, ", ") + "\n")
+	}
+	coverage := strings.Builder{}
+	coverage.WriteString("# Coverage Summary (Runtime Draft)\n\n")
+	if result.Coverage != nil {
+		if len(result.Coverage.Observed) > 0 {
+			coverage.WriteString("## Observed\n\n")
+			for _, item := range result.Coverage.Observed {
+				coverage.WriteString("- " + item + "\n")
+			}
+			coverage.WriteString("\n")
+		}
+		if len(result.Coverage.Missing) > 0 {
+			coverage.WriteString("## Missing\n\n")
+			for _, item := range result.Coverage.Missing {
+				coverage.WriteString("- " + item + "\n")
+			}
+			coverage.WriteString("\n")
+		}
+	}
+	architect := "# Architect Summary\n\n" + strings.TrimSpace(result.Summary) + "\n"
+	if err := writeRuntimeDraftFinals(task, map[string]string{
+		"overview.md":          overview.String(),
+		"summary.md":           coverage.String(),
+		"architect-summary.md": architect,
+	}); err != nil {
+		return err
+	}
+	return writeRuntimeDraftManifest(writeRoot, "asis-draft-manifest.json", task, result, outputs)
+}
+
+func writeProposalsDraftManifest(writeRoot string, task acpruntime.Task, result contracts.TaskResult) error {
+	outputs := []runtimeDraftOutput{
+		{Path: "proposal.md", CanonicalPath: "proposals/proposal-baseline/proposal.md", Kind: "proposal", Title: "proposal.md"},
+		{Path: "ADR.md", CanonicalPath: "proposals/proposal-baseline/ADR.md", Kind: "proposal", Title: "ADR.md"},
+		{Path: "RFC.md", CanonicalPath: "proposals/proposal-baseline/RFC.md", Kind: "proposal", Title: "RFC.md"},
+		{Path: "migration-checklist.md", CanonicalPath: "proposals/proposal-baseline/migration-checklist.md", Kind: "proposal", Title: "migration-checklist.md"},
+	}
+	if err := writeRuntimeDraftFinals(task, map[string]string{
+		"proposal.md":            "# Improvement Proposal (Runtime Draft)\n\n" + strings.TrimSpace(result.Summary) + "\n",
+		"ADR.md":                 "# ADR Draft (Runtime Draft)\n\nPromote validated staged findings into a reviewable remediation slice.\n",
+		"RFC.md":                 "# RFC Draft (Runtime Draft)\n\nDocument rollout and validation gates for the proposed remediation.\n",
+		"migration-checklist.md": "# Migration Checklist (Runtime Draft)\n\n- [ ] Confirm owners\n- [ ] Confirm rollout plan\n- [ ] Re-run validation gates\n",
+	}); err != nil {
+		return err
+	}
+	return writeRuntimeDraftManifest(writeRoot, "proposals-draft-manifest.json", task, result, outputs)
+}
+
+func writeRuntimeDraftManifest(writeRoot string, filename string, task acpruntime.Task, result contracts.TaskResult, outputs []runtimeDraftOutput) error {
+	manifest := runtimeDraftManifest{
+		Version:      1,
+		RunID:        strings.TrimSpace(task.RunID),
+		StepID:       strings.TrimSpace(task.StepID),
+		StepContract: strings.TrimSpace(task.StepContract),
+		AgentRole:    runtimeAgentRoleForTask(task),
+		Summary:      strings.TrimSpace(result.Summary),
+		Outputs:      outputs,
+	}
+	encoded, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal runtime draft manifest: %w", err)
+	}
+	encoded = append(encoded, '\n')
+	return writeRuntimeArtifactFile(writeRoot, filename, encoded)
+}
+
+func writeRuntimeDraftFinals(task acpruntime.Task, files map[string]string) error {
+	draftRoot := strings.TrimSpace(task.DraftFinalRoot)
+	if draftRoot == "" {
+		draftRoot = strings.TrimSpace(task.WriteRoot)
+	}
+	for relativePath, content := range files {
+		if err := writeRuntimeArtifactFile(draftRoot, relativePath, []byte(content)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func writeRuntimeArtifactFile(root string, relativePath string, content []byte) error {

@@ -126,6 +126,25 @@ func runtimeMetaForRunner(runner acpruntime.Runner) contracts.RuntimeMeta {
 	}
 }
 
+func (e *pipelineExecution) runtimeMetaForStep(stepID string) contracts.RuntimeMeta {
+	if e.runnerResolver != nil {
+		provider, runner, err := e.runnerResolver.RunnerForStep(stepID)
+		if err == nil {
+			meta := runtimeMetaForRunner(runner)
+			if strings.TrimSpace(meta.Name) == "" || meta.Name == "unknown" {
+				if provider != "" {
+					meta.Name = string(provider)
+				}
+			}
+			return meta
+		}
+	}
+	if provider := e.stepProviders.ProviderForStep(stepID); provider != "" {
+		return contracts.RuntimeMeta{Name: string(provider)}
+	}
+	return contracts.RuntimeMeta{Name: "unknown"}
+}
+
 var shardModuleMarkerFiles = map[string]struct{}{
 	"go.mod":          {},
 	"package.json":    {},
@@ -598,7 +617,7 @@ func (e *pipelineExecution) loadReplayableShardResult(
 	if strings.TrimSpace(prepared.Task.Workspace) == "" {
 		prepared.Task.Workspace = e.workspace.Path
 	}
-	artifactRoot, writeRoot, readContextRoots, artifactErr := e.runtimeArtifactContext(stepID, prepared.Task.ShardID, prepared.Task.RepoScopes)
+	artifactRoot, writeRoot, draftFinalRoot, readContextRoots, artifactErr := e.runtimeArtifactContext(stepID, prepared.Task.ShardID, prepared.Task.RepoScopes)
 	if artifactErr != nil {
 		return true, runtimeShardRunResult{
 			Plan: plan,
@@ -607,8 +626,11 @@ func (e *pipelineExecution) loadReplayableShardResult(
 	}
 	prepared.Task.ArtifactRoot = artifactRoot
 	prepared.Task.WriteRoot = writeRoot
+	prepared.Task.DraftFinalRoot = draftFinalRoot
 	prepared.Task.ReadContextRoots = append([]string(nil), readContextRoots...)
 	prepared.Task.AgentRole = runtimeAgentRole(stepID)
+	prepared.Task.StepContract = runtimeStepContract(stepID)
+	prepared.Task.ExpectedArtifacts = append([]string(nil), runtimeExpectedArtifacts(stepID)...)
 	e.logInfo(stepID, domainID, "shard loaded from persisted taskrun", map[string]any{
 		"shard_id":     plan.ShardID,
 		"task_id":      prepared.Task.TaskID,
@@ -750,7 +772,7 @@ func (e *pipelineExecution) persistShardPlan(
 
 	payload := runtimeShardPlanArtifact{
 		Version:       1,
-		Meta:          runtimeArtifactMeta{Runtime: runtimeMetaForRunner(e.runner)},
+		Meta:          runtimeArtifactMeta{Runtime: e.runtimeMetaForStep(stepID)},
 		RunID:         e.runID,
 		StepID:        stepID,
 		DomainID:      strings.TrimSpace(domainID),
@@ -799,7 +821,7 @@ func (e *pipelineExecution) persistShardSummary(stepID string, domainID string, 
 	}
 	summary := runtimeShardSummary{
 		Version:       1,
-		Meta:          runtimeArtifactMeta{Runtime: runtimeMetaForRunner(e.runner)},
+		Meta:          runtimeArtifactMeta{Runtime: e.runtimeMetaForStep(stepID)},
 		RunID:         e.runID,
 		StepID:        stepID,
 		DomainID:      strings.TrimSpace(domainID),

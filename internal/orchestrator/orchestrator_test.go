@@ -2422,6 +2422,75 @@ func TestSemanticGuardNormalizesMultiRepoMissingEdgeAndInvalidEvidence(t *testin
 	}
 }
 
+func TestRunFailsOnConcreteStepWhenStepScopedProviderPreflightFails(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	repoA := filepath.Join(root, "repos", "payments-service")
+	repoB := filepath.Join(root, "repos", "users-service")
+	if err := os.MkdirAll(repoA, 0o755); err != nil {
+		t.Fatalf("create payments repo: %v", err)
+	}
+	if err := os.MkdirAll(repoB, 0o755); err != nil {
+		t.Fatalf("create users repo: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoA, "README.md"), []byte("# payments-service\n"), 0o644); err != nil {
+		t.Fatalf("write payments readme: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoB, "README.md"), []byte("# users-service\n"), 0o644); err != nil {
+		t.Fatalf("write users readme: %v", err)
+	}
+
+	manifest := `version: 1
+repos:
+  - name: payments-service
+    path: ` + repoA + `
+  - name: users-service
+    path: ` + repoB + `
+runtime:
+  profile:
+    steps:
+      step2_as_is:
+        provider: qwen-code
+`
+	if err := os.WriteFile(filepath.Join(root, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	ws, err := workspace.Open(root)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+
+	service := NewService(WithRunnerFactory(func(provider acpruntime.Provider) (acpruntime.Runner, error) {
+		switch provider {
+		case acpruntime.ProviderClaudeCode:
+			return claudecode.FakeRunner{}, nil
+		case acpruntime.ProviderQwenCode:
+			return lazyUnavailableRunner{}, nil
+		default:
+			return nil, fmt.Errorf("unexpected provider %q", provider)
+		}
+	}))
+
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err == nil {
+		t.Fatalf("expected run failure on step2 provider preflight")
+	}
+	if info.ErrorCode != string(acpruntime.ErrorCodeRunnerUnavailable) {
+		t.Fatalf("expected runner_unavailable, got %+v", info)
+	}
+	if info.CurrentStep != "init.step2.asis_docs" {
+		t.Fatalf("expected failure on init.step2.asis_docs, got %+v", info)
+	}
+	if !strings.Contains(info.Error, "qwen-code runner is unavailable") {
+		t.Fatalf("expected qwen unavailable error, got %+v", info)
+	}
+}
+
 type delayedRunner struct {
 	delay time.Duration
 }
@@ -2478,6 +2547,21 @@ func (cancelReturnsRunnerUnavailableRunner) Run(ctx context.Context, _ acpruntim
 
 func (cancelReturnsRunnerUnavailableRunner) Preflight(context.Context) error {
 	return nil
+}
+
+type lazyUnavailableRunner struct{}
+
+func (lazyUnavailableRunner) Run(context.Context, acpruntime.Task) (acpruntime.Result, error) {
+	return acpruntime.Result{}, errors.New("unexpected run call for unavailable provider")
+}
+
+func (lazyUnavailableRunner) Preflight(context.Context) error {
+	return acpruntime.WrapRunnerError(
+		acpruntime.ProviderQwenCode,
+		acpruntime.ErrorCodeRunnerUnavailable,
+		"qwen-code runner is unavailable",
+		errors.New("binary missing"),
+	)
 }
 
 type runtimeFailureWithOutputRunner struct{}

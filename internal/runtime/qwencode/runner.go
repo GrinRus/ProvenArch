@@ -899,11 +899,20 @@ func buildDocFirstFilesystemPolicy(task acpruntime.Task) string {
 		`- Use tool calls for any file writes, but keep the final assistant response limited to the required TaskResult JSON object.`,
 		fmt.Sprintf(`- artifact_root (workspace-relative) = %q`, strings.TrimSpace(task.ArtifactRoot)),
 		fmt.Sprintf(`- write_root (absolute) = %q`, strings.TrimSpace(task.WriteRoot)),
+		fmt.Sprintf(`- draft_final_root (absolute) = %q`, strings.TrimSpace(task.DraftFinalRoot)),
 		fmt.Sprintf(`- read_context_roots = %s`, readContextRootsJSON),
 		fmt.Sprintf(`- domain_id = %q`, strings.TrimSpace(task.DomainID)),
 		fmt.Sprintf(`- agent_role = %q`, strings.TrimSpace(task.AgentRole)),
+		fmt.Sprintf(`- step_contract = %q`, strings.TrimSpace(task.StepContract)),
+		fmt.Sprintf(`- expected_artifacts = %s`, strings.Join(task.ExpectedArtifacts, ", ")),
 	}
 	switch task.StepID {
+	case "init.step0.constitution":
+		lines = append(lines,
+			`- Write constitution-draft.json in write_root.`,
+			`- Draft canonical files only under draft_final_root, targeting charter/overview.md and skills/subagents.yaml.`,
+			`- Keep the draft deterministic in shape; compiler will normalize/publish canonical files afterwards.`,
+		)
 	case "init.step1.collect", "refresh.step1.collect":
 		lines = append(lines,
 			`- Produce runtime-authored documents in write_root and then write shard-pack-manifest.json in write_root.`,
@@ -923,6 +932,21 @@ func buildDocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Validator may fix only indexes, references, or technical document issues inside write_root; do not rewrite document meaning wholesale.`,
 		)
 		lines = append(lines, artifactquality.ClaimIDContractLines()...)
+	case "init.step2.asis_docs", "refresh.step2.asis_docs":
+		lines = append(lines,
+			`- Write asis-draft-manifest.json in write_root.`,
+			`- Draft final docs only under draft_final_root.`,
+			`- Allowed canonical targets are reports/as-is/*, reports/coverage/*, and reports/agent-outputs/*.`,
+			`- Compiler will merge these drafts into staged final artifacts and keep canonical layout/indexing deterministic.`,
+		)
+	case "init.step4.proposals", "refresh.step4.proposals":
+		lines = append(lines,
+			`- Inspect validated staged artifacts under reports/taskruns/<run_id>/staging/final from read_context_roots.`,
+			`- Write proposals-draft-manifest.json in write_root.`,
+			`- Draft final docs only under draft_final_root.`,
+			`- Allowed canonical targets are proposals/* and reports/changelog/*.`,
+			`- Promotion remains deterministic; your drafts become publish candidates only after compile/publish gates.`,
+		)
 	}
 	return strings.Join(lines, "\n")
 }

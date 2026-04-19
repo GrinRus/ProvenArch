@@ -2,7 +2,7 @@
 
 > **Статус:** MVP beta foundation / runnable local docs-first pipeline baseline + strict contracts
 > **Принятый стек реализации:** Go (backend/orchestrator) + React/TypeScript UI (embedded), runtime анализа в MVP: **headless multi-provider** (`claude-code` default, `qwen-code` optional)
-> **Последняя ревизия:** 2026-04-16
+> **Последняя ревизия:** 2026-04-19
 
 ## Что это
 
@@ -31,7 +31,7 @@ ACP не является "рисовалкой диаграмм". Архите�
 ## Scope MVP (явно)
 
 ✅ В MVP включено:
-- process-scoped runtime provider selection для headless режима: `claude-code` (default) и `qwen-code`
+- step-scoped runtime provider selection для headless режима: `claude-code` (default fallback) и `qwen-code`
 - local-first режим (всё запускается локально)
 - запуск того же standalone orchestrator в CI/CD через GitHub/GitLab hooks и/или manual pipeline/job trigger
 - единый формат хранения: central `arch-workspace` git-репозиторий (Variant 2)
@@ -56,12 +56,15 @@ ACP не является "рисовалкой диаграмм". Архите�
 
 ## Docs-First Runtime Pipeline
 
-Primary execution path для `step1.collect` и `step3.findings`:
-- runtime пишет только в `reports/taskruns/<run_id>/...` внутри своего `write_root`
+Primary execution path для `step0..step4`:
+- runtime пишет только в `reports/taskruns/<run_id>/...` внутри своего `write_root` и `draft_final_root`
+- provider резолвится на уровне шага, а не всего run; global `--runtime-provider` / `ACP_RUNTIME_PROVIDER` остаются fallback только если step override не задан
+- `step0/2/4` materialize-ят staged draft manifests (`constitution-draft.json`, `asis-draft-manifest.json`, `proposals-draft-manifest.json`)
 - shard agents materialize-ят authored docs + `shard-pack-manifest.json`
 - orchestrator/aggregator собирает staged final doc set в `reports/taskruns/<run_id>/staging/final/`
 - validator пишет `validator-verdict.json`
-- только `PASS` verdict разрешает promotion в канонические `reports/as-is/*`, `reports/findings/*`, `reports/coverage/*`, `reports/agent-outputs/*`, `proposals/*`
+- только schema/semantic/validator gates разрешают promotion в канонические `reports/as-is/*`, `reports/findings/*`, `reports/coverage/*`, `reports/agent-outputs/*`, `proposals/*`
+- обязательного human gate перед publish больше нет
 
 Machine-readable канон для дальнейшего рендера:
 - `final run index`
@@ -225,7 +228,7 @@ make quickstart-local WORKSPACE=/path/to/arch-workspace REPO_PATH=/path/to/payme
 - `--runtime fake` — default для required deterministic CI surface и первого локального старта.
 - `--runtime headless` — opt-in для реального анализа через выбранный provider.
 - `--runtime-provider` поддерживает `claude-code` (default) и `qwen-code`.
-- precedence выбора provider: CLI `--runtime-provider` > `ACP_RUNTIME_PROVIDER` > `claude-code`.
+- effective precedence выбора provider для каждого шага: `workspace.yaml.runtime.profile.steps.<step>.provider` > CLI `--runtime-provider` / `ACP_RUNTIME_PROVIDER` > `claude-code`.
 - command env:
   - `ACP_CLAUDE_CMD` (default `claude-code`)
   - `ACP_QWEN_CMD` (default `qwen`)
@@ -266,6 +269,7 @@ API управления timeout-профилем:
 ### 6.2) Runtime execution profile (persisted + effective)
 
 Execution-конфиг хранится в `workspace.yaml` (`runtime.profile.execution`) и управляет шардированием runtime-задач.
+Step provider overrides хранятся в `workspace.yaml.runtime.profile.steps.*.provider` и доступны через `GET /api/runtime/profile` и `GET/PUT /api/runtime/execution`.
 
 Default values:
 - `strategy=sequential`

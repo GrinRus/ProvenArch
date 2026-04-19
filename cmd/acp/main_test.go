@@ -710,7 +710,7 @@ func TestRunHeadlessReturnsRunnerUnavailableWhenCommandMissing(t *testing.T) {
 	}
 }
 
-func TestServeHeadlessQwenReturnsRunnerUnavailableWhenCommandMissing(t *testing.T) {
+func TestServeHeadlessQwenDryRunDoesNotPreflightMissingCommand(t *testing.T) {
 	root := writeWorkspace(t)
 	t.Setenv("ACP_QWEN_CMD", "definitely-missing-acp-qwen-command")
 
@@ -723,14 +723,14 @@ func TestServeHeadlessQwenReturnsRunnerUnavailableWhenCommandMissing(t *testing.
 		"--runtime-provider", "qwen-code",
 		"--dry-run",
 	}, &stdout, &stderr)
-	if code != exitCodeValidation {
-		t.Fatalf("expected exit code %d, got %d", exitCodeValidation, code)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d: stderr=%q", exitCodeOK, code, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "runner_unavailable") {
-		t.Fatalf("expected runner_unavailable diagnostics, got %q", stderr.String())
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr for dry-run without preflight, got %q", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "qwen-code") {
-		t.Fatalf("expected qwen-code diagnostics, got %q", stderr.String())
+	if !strings.Contains(stdout.String(), "runtime provider: qwen-code") {
+		t.Fatalf("expected qwen-code output, got %q", stdout.String())
 	}
 }
 

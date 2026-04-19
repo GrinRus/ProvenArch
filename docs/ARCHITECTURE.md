@@ -25,7 +25,8 @@
    - Поддерживает batch/non-interactive режим для CI jobs
    - `run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]`
    - runtime selector process-scoped: `fake` default для required CI, `headless` opt-in
-   - provider selector process-scoped: `--runtime-provider` > `ACP_RUNTIME_PROVIDER` > `claude-code`
+   - global provider selector остаётся process-level fallback: `--runtime-provider` > `ACP_RUNTIME_PROVIDER` > `claude-code`
+   - effective provider resolution внутри run step-scoped: `workspace.yaml.runtime.profile.steps.<step>.provider` переопределяет global fallback только для выбранного шага
 	   - timeout control process/workspace-aware:
 	     - persisted profile в `workspace.yaml.runtime.profile.timeouts`
 	     - effective precedence: `env > workspace > defaults`
@@ -93,12 +94,14 @@
    - Internal shard-plan/shard-summary artifacts materialize-ят non-empty `meta.runtime.name/meta.runtime.version`, чтобы internal batch/contract checks не трактовали их как runtime-name drift
    - Scheduler поддерживает `sequential|parallel` execution с worker-pool (`max_parallel_tasks`) и `fail_fast|best_effort` failure-policy
    - При `best_effort` downstream шаги продолжаются на partial model, но итог run фиксируется как `failed` с `error_code=run_partial_failed`; если `step1.collect` становится `unusable`, live `step3.findings` не выполняется, а downstream markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) materialize-ятся в `report_mode=incomplete` с явным banner/triage-only wording
-   - Вызывает runtime adapter
+   - Вызывает runtime adapter через `StepRunnerResolver` с per-provider cache/preflight внутри одного run
+   - `step0..step4` становятся agent-first шагами, но runtime получает только staged surfaces (`write_root`, `draft_final_root`, `read_context_roots`, `step_contract`, `expected_artifacts`)
    - Собирает staged final doc set в `reports/taskruns/<run_id>/staging/final/`
    - Генерирует и валидирует `final-run-index.json` и `citation-index.json`
    - `citation-index.json.claim_ids` трактуются как global staged-final namespace; duplicate claim ids в validator scope детерминированно repair-ятся на index/reference уровне с shard suffix без semantic rewrite authored docs
    - Step 3 runtime primary output: `validator-verdict.json`
    - Promotion копирует только approved final set в stable `reports/as-is/*`, `reports/findings/*`, `reports/coverage/*`, `reports/agent-outputs/*`, `proposals/*`
+   - обязательный human gate перед publish отсутствует; после успешных compile/validator gates promotion происходит автоматически
    - Валидирует TaskResult как compatibility envelope, а не как primary filesystem contract
    - Нормализует canonical top-level `questions`/`coverage` (dedupe/canonicalization) без ingestion из legacy operations
    - Применяет semantic guard для refresh-taskruns: фильтрует placeholder/off-topic артефакты в `refresh.step1.collect`, добавляет deterministic fallback finding при owner-gap в `refresh.step3.findings`, канонизирует/дедуплицирует coverage/question semantics
@@ -111,7 +114,7 @@
      - active run отменяется cooperative через `context cancel` (`failed`, `error_code=run_canceled`)
      - если cancel request пришёл раньше конкурирующего layout/validation failure, terminal surface сохраняет `error_code=run_canceled`, а validation error остаётся в logs/warnings
    - На старте сервиса stale `queued` run по-прежнему reconcile-ится в `failed` с `error_code=run_reconciled_after_restart`
-   - Для async service-managed run stale `running` run auto-resume-ится с тем же `run_id`, если есть resumable shard artifacts; resume cursor стартует с `*.step1.collect` для rebuild in-memory state из persisted taskruns, а runtime step replay-ит `succeeded/checkpointed` shard-ы без повторного provider execution
+   - Для async service-managed run stale `running` run auto-resume-ится с тем же `run_id`, если есть resumable shard artifacts; resume cursor стартует с `*.step1.collect` для rebuild in-memory state из persisted taskruns, `step2.asis_docs` при resume после более позднего шага может быть детерминированно пересобран из persisted collect artifacts без live provider rerun
    - Ведёт persisted run history в `reports/taskruns/run-history.json` (versioned index, retention 500)
    - Ведёт run-level logs в `reports/taskruns/logs/<run_id>.ndjson` с cursor query API (`GET /api/pipeline/runs/<run_id>/logs`)
    - Runtime seam поддерживает live forwarding stdout/stderr от headless providers в run logs (`kind=runtime_output`, `stream=stdout|stderr`), event stream и raw stream сосуществуют
@@ -137,7 +140,7 @@
 5) **Runtime providers (`internal/runtime/*`)** *(implemented baseline)*
    - headless providers: `claude-code` (`internal/runtime/claudecode`) и `qwen-code` (`internal/runtime/qwencode`)
    - общий runtime layer + provider factory: `internal/runtime/runtime.go`, `internal/runtime/providers/factory.go`
-   - каждый provider получает explicit staged-write contract (`artifact_root`, `write_root`, `read_context_roots`) и должен писать runtime-authored artifacts только внутрь `write_root`
+   - каждый provider получает explicit staged-write contract (`artifact_root`, `write_root`, `draft_final_root`, `read_context_roots`, `step_contract`, `expected_artifacts`) и должен писать runtime-authored artifacts только внутрь `write_root`/`draft_final_root`
    - live headless providers продолжают возвращать TaskResult JSON как compatibility envelope; parse failures классифицируются как `runner_parse_failed`
    - для `init.step1.collect` / `refresh.step1.collect` runtime выполняет максимум одну post-success artifact-repair попытку, если `shard-pack-manifest.json` выглядит skeletal/generic-only; write-root-only retry разрешён только для already-rich manifests, иначе retry сохраняет repo roots и откатывает `write_root`, если fidelity не улучшилась
    - schema-retry и artifact-repair разведены: schema-invalid `TaskResult` получает один direct-JSON retry с жёстким whitelist `changeset[].op`, а schema-valid result с invalid manifest получает отдельный artifact-repair retry с canonical manifest skeleton
@@ -183,6 +186,7 @@
    - `PUT /api/runtime/timeouts`: partial update persisted timeout profile, write-through в `workspace.yaml`
    - `GET /api/runtime/execution`: persisted + effective + source
    - `PUT /api/runtime/execution`: partial update persisted execution profile, write-through в `workspace.yaml`
+   - `GET /api/runtime/profile`: aggregate view `timeouts + execution + step_providers`
    - active run не прерывается при изменении timeout settings; новые значения применяются к следующим run
 
 ## Agent Topology Artifacts (MVP)
@@ -206,9 +210,9 @@
 ## Pipeline (MVP)
 0) Конституция (charter)
 1) Collect context -> shard-authored dossier packs + shard manifests
-2) As-is docs -> staged final doc assembly + indexes
+2) As-is docs -> agent-authored drafts + compiler-normalized staged final doc assembly + indexes
 3) Findings -> validator verdict over staged final set
-4) Proposals -> promotion + compatibility rebuild
+4) Proposals -> agent-authored drafts + automatic promotion + compatibility rebuild
 
 On-demand capability:
 - Q&A агент использует `charter/cards + model + reports + docs/imports`; в beta доступен как internal service + CLI `acp qa` без публичного API endpoint.

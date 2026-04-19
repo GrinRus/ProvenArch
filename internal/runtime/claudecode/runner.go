@@ -731,11 +731,20 @@ func buildDocFirstFilesystemPolicy(task acpruntime.Task) string {
 		`- Write ONLY inside write_root. Never write to workspace.yaml, schemas/*, docs/spec/*, charter/*, or analyzed user repositories.`,
 		fmt.Sprintf(`- artifact_root (workspace-relative) = %q`, strings.TrimSpace(task.ArtifactRoot)),
 		fmt.Sprintf(`- write_root (absolute) = %q`, strings.TrimSpace(task.WriteRoot)),
+		fmt.Sprintf(`- draft_final_root (absolute) = %q`, strings.TrimSpace(task.DraftFinalRoot)),
 		fmt.Sprintf(`- read_context_roots = %s`, readContextRootsJSON),
 		fmt.Sprintf(`- domain_id = %q`, strings.TrimSpace(task.DomainID)),
 		fmt.Sprintf(`- agent_role = %q`, strings.TrimSpace(task.AgentRole)),
+		fmt.Sprintf(`- step_contract = %q`, strings.TrimSpace(task.StepContract)),
+		fmt.Sprintf(`- expected_artifacts = %s`, strings.Join(task.ExpectedArtifacts, ", ")),
 	}
 	switch task.StepID {
+	case "init.step0.constitution":
+		lines = append(lines,
+			`- Write constitution-draft.json in write_root.`,
+			`- Draft canonical files only under draft_final_root, targeting charter/overview.md and skills/subagents.yaml.`,
+			`- Keep the draft deterministic in shape; compiler will normalize/publish canonical files afterwards.`,
+		)
 	case "init.step1.collect", "refresh.step1.collect":
 		lines = append(lines,
 			`- Produce runtime-authored documents in write_root and then write shard-pack-manifest.json in write_root.`,
@@ -755,6 +764,21 @@ func buildDocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Validator may fix only indexes, references, or technical document issues inside write_root; do not rewrite document meaning wholesale.`,
 		)
 		lines = append(lines, artifactquality.ClaimIDContractLines()...)
+	case "init.step2.asis_docs", "refresh.step2.asis_docs":
+		lines = append(lines,
+			`- Write asis-draft-manifest.json in write_root.`,
+			`- Draft final docs only under draft_final_root.`,
+			`- Allowed canonical targets are reports/as-is/*, reports/coverage/*, and reports/agent-outputs/*.`,
+			`- Compiler will merge these drafts into staged final artifacts and keep canonical layout/indexing deterministic.`,
+		)
+	case "init.step4.proposals", "refresh.step4.proposals":
+		lines = append(lines,
+			`- Inspect validated staged artifacts under reports/taskruns/<run_id>/staging/final from read_context_roots.`,
+			`- Write proposals-draft-manifest.json in write_root.`,
+			`- Draft final docs only under draft_final_root.`,
+			`- Allowed canonical targets are proposals/* and reports/changelog/*.`,
+			`- Promotion remains deterministic; your drafts become publish candidates only after compile/publish gates.`,
+		)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -879,6 +903,32 @@ func (FakeRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Resul
 	sort.Strings(repoScopes)
 
 	switch task.StepID {
+	case "init.step0.constitution":
+		result := contracts.TaskResult{
+			Meta: contracts.Meta{
+				TaskID:     task.TaskID,
+				StepID:     task.StepID,
+				RunID:      task.RunID,
+				Runtime:    contracts.RuntimeMeta{Name: "claude-code", Version: "fake"},
+				StartedAt:  task.StartedAtUTC.UTC().Format(time.RFC3339),
+				FinishedAt: task.StartedAtUTC.UTC().Add(1 * time.Second).Format(time.RFC3339),
+				Workspace:  task.Workspace,
+				RepoScope:  primaryTaskRepoScope(task.RepoScope, repoScopes),
+				RepoScopes: repoScopes,
+				PathScopes: append([]string(nil), task.PathScopes...),
+			},
+			Summary:   "Fake constitution draft completed",
+			Changeset: []contracts.Operation{},
+			Coverage: &contracts.Coverage{
+				Observed: []string{"repos", "workspace manifest"},
+				Missing:  []string{"manual constitution review"},
+				Notes:    []string{"fake runner materialized deterministic constitution draft"},
+			},
+		}
+		if err := persistDocsFirstArtifacts(task, result); err != nil {
+			return acpruntime.Result{}, err
+		}
+		return marshalResult(result)
 	case "init.step1.collect", "refresh.step1.collect":
 		result := contracts.TaskResult{
 			Meta: contracts.Meta{
@@ -929,6 +979,58 @@ func (FakeRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Resul
 			return acpruntime.Result{}, err
 		}
 		return marshalResult(result)
+	case "init.step2.asis_docs", "refresh.step2.asis_docs":
+		result := contracts.TaskResult{
+			Meta: contracts.Meta{
+				TaskID:     task.TaskID,
+				StepID:     task.StepID,
+				RunID:      task.RunID,
+				Runtime:    contracts.RuntimeMeta{Name: "claude-code", Version: "fake"},
+				StartedAt:  task.StartedAtUTC.UTC().Format(time.RFC3339),
+				FinishedAt: task.StartedAtUTC.UTC().Add(1 * time.Second).Format(time.RFC3339),
+				Workspace:  task.Workspace,
+				RepoScope:  primaryTaskRepoScope(task.RepoScope, repoScopes),
+				RepoScopes: repoScopes,
+				PathScopes: append([]string(nil), task.PathScopes...),
+			},
+			Summary:   "Fake as-is synthesis completed",
+			Changeset: []contracts.Operation{},
+			Coverage: &contracts.Coverage{
+				Observed: []string{"runtime shard manifests", "staged coverage"},
+				Missing:  []string{"manual review"},
+				Notes:    []string{"fake runner materialized deterministic as-is draft"},
+			},
+		}
+		if err := persistDocsFirstArtifacts(task, result); err != nil {
+			return acpruntime.Result{}, err
+		}
+		return marshalResult(result)
+	case "init.step4.proposals", "refresh.step4.proposals":
+		result := contracts.TaskResult{
+			Meta: contracts.Meta{
+				TaskID:     task.TaskID,
+				StepID:     task.StepID,
+				RunID:      task.RunID,
+				Runtime:    contracts.RuntimeMeta{Name: "claude-code", Version: "fake"},
+				StartedAt:  task.StartedAtUTC.UTC().Format(time.RFC3339),
+				FinishedAt: task.StartedAtUTC.UTC().Add(1 * time.Second).Format(time.RFC3339),
+				Workspace:  task.Workspace,
+				RepoScope:  primaryTaskRepoScope(task.RepoScope, repoScopes),
+				RepoScopes: repoScopes,
+				PathScopes: append([]string(nil), task.PathScopes...),
+			},
+			Summary:   "Fake proposals draft completed",
+			Changeset: []contracts.Operation{},
+			Coverage: &contracts.Coverage{
+				Observed: []string{"validated staged docs", "proposal surface"},
+				Missing:  []string{"manual approval"},
+				Notes:    []string{"fake runner materialized deterministic proposals draft"},
+			},
+		}
+		if err := persistDocsFirstArtifacts(task, result); err != nil {
+			return acpruntime.Result{}, err
+		}
+		return marshalResult(result)
 	default:
 		return acpruntime.Result{}, fmt.Errorf("fake runner does not support step %q", task.StepID)
 	}
@@ -938,9 +1040,13 @@ type RecordedRunner struct {
 	ByStep map[string]string
 }
 
-func (r RecordedRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+func (r RecordedRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
 	path, ok := r.ByStep[task.StepID]
 	if !ok {
+		switch task.StepID {
+		case "init.step0.constitution", "init.step2.asis_docs", "refresh.step2.asis_docs", "init.step4.proposals", "refresh.step4.proposals":
+			return FakeRunner{}.Run(ctx, task)
+		}
 		return acpruntime.Result{}, fmt.Errorf("recorded taskresult is missing for step %q", task.StepID)
 	}
 	content, err := os.ReadFile(filepath.Clean(path))

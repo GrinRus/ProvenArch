@@ -49,6 +49,58 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 
 ### Plan ID
+EP-20260419-step-scoped-agent-pipeline
+
+### Context
+Нужно заменить legacy process-scoped runner flow на step-scoped agent-first pipeline без отдельного compatibility mode. Canonical workspace по-прежнему должен писаться только через deterministic compile/validate/publish слой, а выбор provider теперь делается на уровне шага с fallback на глобальные CLI/env настройки.
+
+### Goals (must have)
+- [x] Ввести `runtime.profile.steps.*.provider` в manifest/schema/API и сохранить precedence `workspace step override > CLI/env global > claude-code`
+- [x] Перевести `step0..step4` на step-scoped runtime resolution с provider cache/preflight внутри одного run
+- [x] Добавить runtime contract поля `draft_final_root`, `step_contract`, `expected_artifacts` и staged draft manifests для `step0/2/4`
+- [x] Сохранить compile/validate/publish как единственную canonical write surface и убрать обязательный human gate на promotion
+- [x] Обновить fake/test/docs/examples/fixtures под новую базовую архитектуру и прогнать DoD
+
+### Non-goals
+- [x] Не менять `schemas/taskresult.schema.json` в этом slice
+- [x] Не добавлять per-step execution knobs beyond provider selection
+- [x] Не расширять provider list beyond `claude-code|qwen-code`
+
+### Approach
+1) Заменить single-runner seam на `StepRunnerResolver` с per-provider cache/preflight и runtime metadata per step.
+2) Добавить step-scoped runtime contract и staged draft manifests; запретить runtime прямую запись в canonical workspace.
+3) Перевести `step0/2/4` на agent-first execution с compile/publish gating и auto-promotion после validator/schema checks.
+4) Синхронизировать API/spec/docs/examples/goldens и подтвердить поведение через contract/orchestrator/API tests.
+
+### Files expected to change
+- `internal/orchestrator/*`
+- `internal/runtime/*`
+- `internal/api/*`
+- `internal/workspace/*`
+- `cmd/acp/*`
+- `schemas/workspace.schema.json`
+- `docs/spec/*`
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/APPENDIX_SCHEMAS.md`
+- `docs/STAKEHOLDER_DOC.md`
+- `docs/adr/ADR-20260410-headless-runtime-multi-provider.md`
+- `examples/workspace.example.yaml`
+- `fixtures/scenarios/*/golden/snapshot.sha256`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены
+- [x] Schema/API/runtime contracts синхронизированы
+- [x] Документация и examples/fixtures обновлены
+
+### Risks
+- Основной риск — потерять canonical compile invariants при появлении draft-first шагов. Снижение риска: runtime drafts остаются staging-only surface, а coverage/findings/as-is/proposals канонизируются compile/publish слоем.
+
+### Progress log
+- 2026-04-19: введены step provider resolution, staged draft manifests, agent-first `step0/2/4`, auto-publish без human gate и API/runtime profile surfaces.
+- 2026-04-19: синхронизированы tests/goldens/docs; full DoD прогон запланирован после финальной contract/docs ревизии.
+
+### Plan ID
 EP-20260418-regres-fast-artifact-quality
 
 ### Context

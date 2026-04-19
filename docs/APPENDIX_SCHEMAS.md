@@ -36,9 +36,13 @@
   - `max_parallel_tasks > 0`
   - `failure_policy: fail_fast|best_effort`
   - `shard_discovery.mode: heuristics|semantic`
+- `runtime.profile.steps.*.provider` optional step-scoped provider override:
+  - `step0_constitution|step1_collect|step2_as_is|step3_findings|step4_proposals`
+  - allowed values: `claude-code|qwen-code`
 - precedence:
   - timeouts: `env > workspace.yaml(runtime.profile.timeouts) > defaults`
   - execution: `CLI > env > workspace.yaml(runtime.profile.execution) > defaults`
+  - step providers: `workspace step override > CLI/env global provider > claude-code`
 
 Sharding policy в MVP:
 - `heuristics` строит structural full-coverage partition repo без overlap в `path_scopes`.
@@ -125,6 +129,7 @@ Primary docs-first path:
 - compatibility envelope для semantic guards/derived model/taskrun diagnostics
 - `add_doc_artifact` остаётся metadata registration op без content payload
 - не заменяет runtime-authored docs-first artifact pack
+- per-step provider/runtime resolution не добавляется в `TaskResult` schema этого slice и фиксируется в run metadata / logs / runtime profile API
 
 ## 3) Shard Pack Manifest Schema
 
@@ -200,7 +205,21 @@ Allowed `verdict` values:
 Semantic role:
 - canonical gate для promotion staged final set в стабильные `reports/*` и `proposals/*`
 - validator может фиксировать только technical/index/reference issues, а не переписывать authored смысл документов
-## 7) Model conventions
+
+## 7) Runtime Draft Manifests (stage-only contract)
+
+В этом slice runtime пишет staged draft manifests для agent-first шагов:
+- `constitution-draft.json` (`step0.constitution`)
+- `asis-draft-manifest.json` (`step2.asis_docs`)
+- `proposals-draft-manifest.json` (`step4.proposals`)
+
+Инварианты:
+- runtime пишет manifests только в step `write_root`;
+- почти финальные документы пишет только в `draft_final_root`;
+- canonical workspace остаётся publish-only surface orchestrator/compiler/promoter;
+- обязательный human gate на promotion отсутствует: publish происходит автоматически после schema/semantic/validator gates.
+
+## 8) Model conventions
 
 - **Source of truth:** `docs/spec/MODEL_SPEC.md`
 - Каноническая модель хранится как entity-per-file:
@@ -209,14 +228,14 @@ Semantic role:
 - Stable ID patterns и normalization rules зафиксированы в `MODEL_SPEC`.
 - Канонические patterns в MVP: `svc.<slug>`, `team.<slug>`, `repo.<slug>`, `ext.<slug>`, `db.<engine>.<slug>`, `api.http.<service-slug>.<method>.<path-slug>`, `api.grpc.<service-slug>.<service>.<method>`, `topic.<slug>`, `edge.<from>.<type>.<to>`.
 
-## 8) Charter и skills conventions
+## 9) Charter и skills conventions
 
 - **Source of truth:** `docs/spec/PIPELINE_SPEC.md`
 - Charter хранится в `charter/`.
 - Cards `charter/cards/domains/*` и `charter/cards/teams/*` являются canonical human-owned source of truth; runtime pipeline не пишет в них напрямую.
 - Skills хранятся в `skills/` в версионируемом формате (manifest + prompts + templates).
 
-## 9) Изменения схем/контрактов
+## 10) Изменения схем/контрактов
 
 Любые изменения в `schemas/` и контрактах сопровождаются:
 - обновлением `docs/spec/*` и `docs/APPENDIX_SCHEMAS.md`

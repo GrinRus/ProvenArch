@@ -63,10 +63,12 @@ var (
 )
 
 type Service struct {
-	runner             acpruntime.Runner
+	runnerFactory      stepRunnerFactory
 	clock              func() time.Time
 	executionOverrides acpruntime.ExecutionOverrides
 	resumeStaleAsync   bool
+	providerFallback   acpruntime.Provider
+	providerSource     acpruntime.ProviderSource
 
 	mu             sync.RWMutex
 	runs           map[string]*runRecord
@@ -99,15 +101,16 @@ type runRecord struct {
 }
 
 type RunInfo struct {
-	RunID       string     `json:"run_id"`
-	Pipeline    string     `json:"pipeline"`
-	Status      RunStatus  `json:"status"`
-	StartedAt   time.Time  `json:"started_at"`
-	FinishedAt  *time.Time `json:"finished_at,omitempty"`
-	CurrentStep string     `json:"current_step,omitempty"`
-	Warnings    []string   `json:"warnings,omitempty"`
-	ErrorCode   string     `json:"error_code,omitempty"`
-	Error       string     `json:"error,omitempty"`
+	RunID         string            `json:"run_id"`
+	Pipeline      string            `json:"pipeline"`
+	Status        RunStatus         `json:"status"`
+	StartedAt     time.Time         `json:"started_at"`
+	FinishedAt    *time.Time        `json:"finished_at,omitempty"`
+	CurrentStep   string            `json:"current_step,omitempty"`
+	StepProviders map[string]string `json:"step_providers,omitempty"`
+	Warnings      []string          `json:"warnings,omitempty"`
+	ErrorCode     string            `json:"error_code,omitempty"`
+	Error         string            `json:"error,omitempty"`
 }
 
 type Artifact struct {
@@ -128,23 +131,45 @@ type runHistorySnapshot struct {
 }
 
 type runHistoryItem struct {
-	RunID       string     `json:"run_id"`
-	Pipeline    string     `json:"pipeline"`
-	Status      RunStatus  `json:"status"`
-	StartedAt   string     `json:"started_at"`
-	FinishedAt  *string    `json:"finished_at,omitempty"`
-	CurrentStep string     `json:"current_step,omitempty"`
-	Warnings    []string   `json:"warnings,omitempty"`
-	ErrorCode   string     `json:"error_code,omitempty"`
-	Error       string     `json:"error,omitempty"`
-	Artifacts   []Artifact `json:"artifacts,omitempty"`
+	RunID         string            `json:"run_id"`
+	Pipeline      string            `json:"pipeline"`
+	Status        RunStatus         `json:"status"`
+	StartedAt     string            `json:"started_at"`
+	FinishedAt    *string           `json:"finished_at,omitempty"`
+	CurrentStep   string            `json:"current_step,omitempty"`
+	StepProviders map[string]string `json:"step_providers,omitempty"`
+	Warnings      []string          `json:"warnings,omitempty"`
+	ErrorCode     string            `json:"error_code,omitempty"`
+	Error         string            `json:"error,omitempty"`
+	Artifacts     []Artifact        `json:"artifacts,omitempty"`
+}
+
+type stepRunnerFactory interface {
+	Build(provider acpruntime.Provider) (acpruntime.Runner, error)
+}
+
+type stepRunnerFactoryFunc func(provider acpruntime.Provider) (acpruntime.Runner, error)
+
+func (fn stepRunnerFactoryFunc) Build(provider acpruntime.Provider) (acpruntime.Runner, error) {
+	return fn(provider)
 }
 
 type Option func(*Service)
 
 func WithRunner(runner acpruntime.Runner) Option {
 	return func(service *Service) {
-		service.runner = runner
+		service.runnerFactory = stepRunnerFactoryFunc(func(acpruntime.Provider) (acpruntime.Runner, error) {
+			return runner, nil
+		})
+	}
+}
+
+func WithRunnerFactory(factory func(provider acpruntime.Provider) (acpruntime.Runner, error)) Option {
+	return func(service *Service) {
+		if factory == nil {
+			return
+		}
+		service.runnerFactory = stepRunnerFactoryFunc(factory)
 	}
 }
 
@@ -194,9 +219,20 @@ func WithResumeStaleAsyncRuns() Option {
 	}
 }
 
+func WithProviderFallback(provider acpruntime.Provider, source acpruntime.ProviderSource) Option {
+	return func(service *Service) {
+		if provider != "" {
+			service.providerFallback = provider
+		}
+		if source != "" {
+			service.providerSource = source
+		}
+	}
+}
+
 func NewService(options ...Option) *Service {
 	service := &Service{
-		runner:           claudecode.FakeRunner{},
+		runnerFactory:    stepRunnerFactoryFunc(func(acpruntime.Provider) (acpruntime.Runner, error) { return claudecode.FakeRunner{}, nil }),
 		clock:            time.Now,
 		runs:             map[string]*runRecord{},
 		debounceWindow:   5 * time.Minute,
@@ -205,6 +241,8 @@ func NewService(options ...Option) *Service {
 		historyRetention: runHistoryRetention,
 		runLogsTTL:       7 * 24 * time.Hour,
 		runLogsMaxRuns:   200,
+		providerFallback: acpruntime.ProviderClaudeCode,
+		providerSource:   acpruntime.ProviderSourceDefault,
 	}
 	for _, option := range options {
 		option(service)
@@ -230,16 +268,26 @@ func (s *Service) ResolveExecutionProfile(manifest workspace.Manifest) acpruntim
 	return acpruntime.ResolveExecution(manifest, s.executionOverrides)
 }
 
+func (s *Service) ResolveStepProviderProfile(manifest workspace.Manifest) (acpruntime.StepProviderResolution, error) {
+	return acpruntime.ResolveStepProviders(manifest, s.providerFallback, s.providerSource)
+}
+
 func (s *Service) Run(ctx context.Context, request RunRequest) (RunInfo, []Artifact, error) {
 	runID := s.nextRunID()
 	return s.runWithID(ctx, request, runID)
 }
 
-func (s *Service) ValidateRuntime(ctx context.Context) error {
-	if checker, ok := s.runner.(acpruntime.PreflightRunner); ok {
-		return checker.Preflight(ctx)
+func (s *Service) ValidateRuntime(ctx context.Context, manifests ...workspace.Manifest) error {
+	manifest := workspace.Manifest{}
+	if len(manifests) > 0 {
+		manifest = manifests[0]
 	}
-	return nil
+	resolved, err := s.ResolveStepProviderProfile(manifest)
+	if err != nil {
+		return err
+	}
+	resolver := newStepRunnerResolver(s.runnerFactory, resolved.Effective)
+	return resolver.Preflight(ctx)
 }
 
 func (s *Service) runWithID(ctx context.Context, request RunRequest, runID string) (RunInfo, []Artifact, error) {
@@ -250,6 +298,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	initialArtifacts := []Artifact{}
 	initialWarnings := []string{}
 	resumeFromStep := ""
+	resolvedStepProviders, resolvedStepProvidersErr := s.ResolveStepProviderProfile(request.Workspace.Manifest)
 	runLogMessage := "run started"
 	runLogFields := map[string]any{
 		"pipeline": string(request.Pipeline),
@@ -264,12 +313,16 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		runLogFields["resume_from_step"] = resumeFromStep
 	}
 	initialInfo := RunInfo{
-		RunID:       runID,
-		Pipeline:    string(request.Pipeline),
-		Status:      RunStatusRunning,
-		StartedAt:   startedAt,
-		CurrentStep: resumeFromStep,
-		Warnings:    append([]string(nil), initialWarnings...),
+		RunID:         runID,
+		Pipeline:      string(request.Pipeline),
+		Status:        RunStatusRunning,
+		StartedAt:     startedAt,
+		CurrentStep:   resumeFromStep,
+		StepProviders: map[string]string{},
+		Warnings:      append([]string(nil), initialWarnings...),
+	}
+	if resolvedStepProvidersErr == nil {
+		initialInfo.StepProviders = resolvedStepProviders.Effective.StringMap()
 	}
 	s.storeRun(runRecord{
 		info:      initialInfo,
@@ -281,11 +334,11 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		Message:   runLogMessage,
 		Fields:    runLogFields,
 	})
-	if err := s.ValidateRuntime(ctx); err != nil {
+	if resolvedStepProvidersErr != nil {
 		finishedAt := s.clock().UTC()
 		failedInfo := initialInfo
 		failedInfo.Status = RunStatusFailed
-		failedInfo.ErrorCode, failedInfo.Error = s.classifyRunFailure(runID, err)
+		failedInfo.ErrorCode, failedInfo.Error = s.classifyRunFailure(runID, resolvedStepProvidersErr)
 		failedInfo.FinishedAt = &finishedAt
 		s.storeRun(runRecord{
 			info:      failedInfo,
@@ -294,14 +347,14 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		s.appendRunLog(runID, RunLogEntry{
 			Timestamp: finishedAt,
 			Level:     RunLogLevelError,
-			Message:   "run failed: runtime validation",
+			Message:   "run failed: runtime provider resolution",
 			Fields: map[string]any{
 				"error_code": failedInfo.ErrorCode,
 				"error":      failedInfo.Error,
 			},
 		})
 		_ = s.cleanupRunLogs()
-		return failedInfo, nil, err
+		return failedInfo, nil, resolvedStepProvidersErr
 	}
 	if err := request.Workspace.EnsureLayout(); err != nil {
 		finishedAt := s.clock().UTC()
@@ -326,6 +379,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		return failedInfo, nil, err
 	}
 	resolvedExecution := s.ResolveExecutionProfile(request.Workspace.Manifest)
+	stepRunnerResolver := newStepRunnerResolver(s.runnerFactory, resolvedStepProviders.Effective)
 	validation := request.Workspace.Validate(ctx, workspace.ValidateOptions{
 		ResolveRepos: true,
 		FetchGit:     true,
@@ -362,7 +416,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		pipeline:           request.Pipeline,
 		startedAt:          startedAt,
 		workspace:          request.Workspace,
-		runner:             s.runner,
+		runnerResolver:     stepRunnerResolver,
 		store:              model.NewStore(request.Workspace),
 		compiler:           reports.NewCompiler(request.Workspace),
 		clock:              s.clock,
@@ -376,11 +430,13 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		runtimeStepMetrics: []runtimeStepQuality{},
 		runtimeVersions:    map[string]struct{}{},
 		resumeFromStep:     resumeFromStep,
+		resumeSourceStep:   strings.TrimSpace(resumedRecord.info.CurrentStep),
 		warnings:           append([]string(nil), initialWarnings...),
 		resolvedRepoPaths:  map[string]string{},
 		repoSelectionMode:  "all",
 		selectedRepoScopes: collectRepoScopes(request.Workspace.Manifest.Repos),
 		reportContext:      reports.DefaultReportRenderContext(),
+		stepProviders:      resolvedStepProviders.Effective,
 	}
 	for _, resolvedRepo := range validation.ResolvedRepos {
 		name := strings.TrimSpace(resolvedRepo.Name)
@@ -409,6 +465,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		"max_parallel":     execution.executionProfile.MaxParallel,
 		"failure_policy":   execution.executionProfile.FailurePolicy,
 		"shard_discovery":  execution.executionProfile.ShardMode,
+		"step_providers":   execution.stepProviders.StringMap(),
 		"selected_scopes":  append([]string(nil), execution.selectedRepoScopes...),
 		"timeout_step_sec": resolvedTimeouts.Effective.StepTimeoutSec,
 		"timeout_hb_sec":   resolvedTimeouts.Effective.HeartbeatSec,
@@ -417,6 +474,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		progress := initialInfo
 		progress.Status = RunStatusRunning
 		progress.CurrentStep = stepID
+		progress.StepProviders = execution.stepProviders.StringMap()
 		progress.Warnings = append([]string(nil), execution.warnings...)
 		s.storeRun(runRecord{
 			info:      progress,
@@ -509,7 +567,8 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 
 func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string, error) {
 	_ = s.cleanupRunLogs()
-	if err := s.ValidateRuntime(ctx); err != nil {
+	resolvedStepProviders, err := s.ResolveStepProviderProfile(request.Workspace.Manifest)
+	if err != nil {
 		return "", err
 	}
 	runID := s.nextRunID()
@@ -519,10 +578,11 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 	storeQueuedRun := func() {
 		s.upsertRunLocked(runRecord{
 			info: RunInfo{
-				RunID:     runID,
-				Pipeline:  string(request.Pipeline),
-				Status:    RunStatusQueued,
-				StartedAt: now,
+				RunID:         runID,
+				Pipeline:      string(request.Pipeline),
+				Status:        RunStatusQueued,
+				StartedAt:     now,
+				StepProviders: resolvedStepProviders.Effective.StringMap(),
 			},
 		})
 	}
@@ -1094,15 +1154,16 @@ func (s *Service) persistHistoryLocked() {
 
 func runRecordToHistoryItem(record runRecord) runHistoryItem {
 	item := runHistoryItem{
-		RunID:       record.info.RunID,
-		Pipeline:    record.info.Pipeline,
-		Status:      record.info.Status,
-		StartedAt:   record.info.StartedAt.UTC().Format(time.RFC3339),
-		CurrentStep: record.info.CurrentStep,
-		Warnings:    append([]string(nil), record.info.Warnings...),
-		ErrorCode:   record.info.ErrorCode,
-		Error:       record.info.Error,
-		Artifacts:   append([]Artifact(nil), record.artifacts...),
+		RunID:         record.info.RunID,
+		Pipeline:      record.info.Pipeline,
+		Status:        record.info.Status,
+		StartedAt:     record.info.StartedAt.UTC().Format(time.RFC3339),
+		CurrentStep:   record.info.CurrentStep,
+		StepProviders: cloneStringMap(record.info.StepProviders),
+		Warnings:      append([]string(nil), record.info.Warnings...),
+		ErrorCode:     record.info.ErrorCode,
+		Error:         record.info.Error,
+		Artifacts:     append([]Artifact(nil), record.artifacts...),
 	}
 	if record.info.FinishedAt != nil {
 		finished := record.info.FinishedAt.UTC().Format(time.RFC3339)
@@ -1126,15 +1187,16 @@ func historyItemToRunRecord(item runHistoryItem) (runRecord, bool) {
 	}
 	return runRecord{
 		info: RunInfo{
-			RunID:       item.RunID,
-			Pipeline:    item.Pipeline,
-			Status:      item.Status,
-			StartedAt:   startedAt.UTC(),
-			FinishedAt:  finishedAt,
-			CurrentStep: item.CurrentStep,
-			Warnings:    append([]string(nil), item.Warnings...),
-			ErrorCode:   item.ErrorCode,
-			Error:       item.Error,
+			RunID:         item.RunID,
+			Pipeline:      item.Pipeline,
+			Status:        item.Status,
+			StartedAt:     startedAt.UTC(),
+			FinishedAt:    finishedAt,
+			CurrentStep:   item.CurrentStep,
+			StepProviders: cloneStringMap(item.StepProviders),
+			Warnings:      append([]string(nil), item.Warnings...),
+			ErrorCode:     item.ErrorCode,
+			Error:         item.Error,
 		},
 		artifacts: append([]Artifact(nil), item.Artifacts...),
 	}, true
@@ -1183,7 +1245,7 @@ type pipelineExecution struct {
 	pipeline                 Pipeline
 	startedAt                time.Time
 	workspace                workspace.Root
-	runner                   acpruntime.Runner
+	runnerResolver           *stepRunnerResolver
 	store                    model.Store
 	compiler                 reports.Compiler
 	clock                    func() time.Time
@@ -1204,13 +1266,21 @@ type pipelineExecution struct {
 	executionProfile         acpruntime.ExecutionValues
 	partialFailures          []runtimeShardFailure
 	resumeFromStep           string
+	resumeSourceStep         string
 	resolvedRepoPaths        map[string]string
 	repoSelectionMode        string
 	selectedRepoScopes       []string
+	stepProviders            acpruntime.StepProviderValues
 	collectOutcome           runtimeShardOutcome
 	findingsOutcome          runtimeShardOutcome
 	findingsSkipped          bool
 	reportContext            reports.ReportRenderContext
+	step0DraftManifest       *runtimeDraftManifest
+	step0DraftRoot           string
+	asIsDraftManifest        *runtimeDraftManifest
+	asIsDraftRoot            string
+	proposalsDraftManifest   *runtimeDraftManifest
+	proposalsDraftRoot       string
 	shardPacks               []contracts.ShardPackManifest
 	finalRunIndex            *contracts.FinalRunIndex
 	citationIndex            *contracts.CitationIndex
@@ -1219,6 +1289,9 @@ type pipelineExecution struct {
 }
 
 type runtimeTaskExecution struct {
+	Task             acpruntime.Task
+	RuntimeName      string
+	RuntimeVersion   string
 	RawJSON          []byte
 	Normalized       contracts.TaskResult
 	Apply            model.ApplyReport
@@ -1282,22 +1355,44 @@ func (e *pipelineExecution) run(ctx context.Context) error {
 func (e *pipelineExecution) runStep(ctx context.Context, stepID string) error {
 	switch stepID {
 	case "init.step0.constitution":
-		return e.runStepConstitution()
+		return e.runStepConstitution(ctx, stepID)
 	case "init.step1.collect", "refresh.step1.collect":
 		return e.runRuntimeStep(ctx, stepID)
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
-		return e.runStepAsIs()
+		return e.runStepAsIs(ctx, stepID)
 	case "init.step3.findings", "refresh.step3.findings":
 		return e.runStepValidator(ctx, stepID)
 	case "init.step4.proposals", "refresh.step4.proposals":
-		return e.runStepProposals()
+		return e.runStepProposals(ctx, stepID)
 	default:
 		return fmt.Errorf("unsupported step %q", stepID)
 	}
 }
 
-func (e *pipelineExecution) runStepConstitution() error {
-	e.logInfo("init.step0.constitution", "", "materializing constitution artifacts", nil)
+func (e *pipelineExecution) runStepConstitution(ctx context.Context, stepID string) error {
+	selectedScopes := normalizeOrderedUniqueStrings(e.selectedRepoScopes)
+	execution, err := e.executeRuntimeTask(ctx, stepID, "constitution", selectedScopes, []string{"."}, "", "")
+	if err != nil {
+		return err
+	}
+	draft, _, err := loadRuntimeDraftManifest(execution.Task.WriteRoot, constitutionDraftManifestFile)
+	if err != nil {
+		if fallbackErr := claudecode.PersistCompatibilityDocflowArtifacts(execution.Task, execution.Normalized); fallbackErr == nil {
+			draft, _, err = loadRuntimeDraftManifest(execution.Task.WriteRoot, constitutionDraftManifestFile)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	e.step0DraftManifest = &draft
+	e.step0DraftRoot = execution.Task.DraftFinalRoot
+	e.addArtifacts(Artifact{
+		Path:  path.Join(execution.Task.ArtifactRoot, constitutionDraftManifestFile),
+		Kind:  "taskrun",
+		Label: "Constitution Draft Manifest",
+	})
+
+	e.logInfo(stepID, "", "materializing constitution artifacts", nil)
 	step0Contract, hasStep0Contract, err := loadStep0WizardContract(e.workspace)
 	if err != nil {
 		e.addWarning(fmt.Sprintf("step0_wizard_contract_invalid: %v; fallback baseline constitution materialization is used", err))
@@ -1566,25 +1661,36 @@ func (e *pipelineExecution) runRuntimeTaskNormalized(
 		taskID += "-" + taskSuffix
 	}
 	repoScope := primaryRepoScope(repoScopes)
-	artifactRootRel, writeRootAbs, readContextRoots, err := e.runtimeArtifactContext(stepID, strings.TrimSpace(shardID), repoScopes)
+	artifactRootRel, writeRootAbs, draftFinalRootAbs, readContextRoots, err := e.runtimeArtifactContext(stepID, strings.TrimSpace(shardID), repoScopes)
 	if err != nil {
 		return runtimePreparedExecution{}, err
 	}
+	resolvedProvider := acpruntime.ProviderClaudeCode
+	runner := acpruntime.Runner(nil)
+	if e.runnerResolver != nil {
+		resolvedProvider, runner, err = e.runnerResolver.ReadyRunnerForStep(ctx, stepID)
+		if err != nil {
+			return runtimePreparedExecution{}, err
+		}
+	}
 	task := acpruntime.Task{
-		TaskID:           taskID,
-		RunID:            e.runID,
-		StepID:           stepID,
-		ShardID:          strings.TrimSpace(shardID),
-		DomainID:         strings.TrimSpace(domainID),
-		Workspace:        e.workspace.Path,
-		ArtifactRoot:     artifactRootRel,
-		WriteRoot:        writeRootAbs,
-		ReadContextRoots: append([]string(nil), readContextRoots...),
-		AgentRole:        runtimeAgentRole(stepID),
-		RepoScope:        repoScope,
-		RepoScopes:       append([]string(nil), repoScopes...),
-		PathScopes:       append([]string(nil), pathScopes...),
-		StartedAtUTC:     e.clock().UTC(),
+		TaskID:            taskID,
+		RunID:             e.runID,
+		StepID:            stepID,
+		ShardID:           strings.TrimSpace(shardID),
+		DomainID:          strings.TrimSpace(domainID),
+		Workspace:         e.workspace.Path,
+		ArtifactRoot:      artifactRootRel,
+		WriteRoot:         writeRootAbs,
+		DraftFinalRoot:    draftFinalRootAbs,
+		ReadContextRoots:  append([]string(nil), readContextRoots...),
+		AgentRole:         runtimeAgentRole(stepID),
+		StepContract:      runtimeStepContract(stepID),
+		ExpectedArtifacts: append([]string(nil), runtimeExpectedArtifacts(stepID)...),
+		RepoScope:         repoScope,
+		RepoScopes:        append([]string(nil), repoScopes...),
+		PathScopes:        append([]string(nil), pathScopes...),
+		StartedAtUTC:      e.clock().UTC(),
 		OnOutput: func(chunk acpruntime.OutputChunk) {
 			e.logRuntimeOutput(stepID, domainID, chunk)
 		},
@@ -1595,8 +1701,10 @@ func (e *pipelineExecution) runRuntimeTaskNormalized(
 		"repo_scope":         task.RepoScope,
 		"repo_scopes":        task.RepoScopes,
 		"path_scopes":        task.PathScopes,
+		"provider":           resolvedProvider,
 		"artifact_root":      task.ArtifactRoot,
 		"write_root":         task.WriteRoot,
+		"draft_final_root":   task.DraftFinalRoot,
 		"read_context_roots": task.ReadContextRoots,
 	})
 
@@ -1630,7 +1738,10 @@ func (e *pipelineExecution) runRuntimeTaskNormalized(
 			}
 		}()
 	}
-	result, err := e.runner.Run(taskCtx, task)
+	if runner == nil {
+		return runtimePreparedExecution{}, fmt.Errorf("runtime runner resolver is not configured")
+	}
+	result, err := runner.Run(taskCtx, task)
 	close(heartbeatStop)
 	if err != nil {
 		if errors.Is(taskCtx.Err(), context.DeadlineExceeded) {
@@ -1775,10 +1886,13 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 			"runtime_version": runtimeVersion,
 		})
 		return runtimeTaskExecution{
-			RawJSON:       manifestRaw,
-			Normalized:    normalized,
-			Apply:         applyReport,
-			ShardManifest: &manifest,
+			Task:           task,
+			RuntimeName:    runtimeName,
+			RuntimeVersion: runtimeVersion,
+			RawJSON:        manifestRaw,
+			Normalized:     normalized,
+			Apply:          applyReport,
+			ShardManifest:  &manifest,
 		}, nil
 	}
 
@@ -1853,9 +1967,46 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 			"runtime_version": runtimeVersion,
 		})
 		return runtimeTaskExecution{
+			Task:             task,
+			RuntimeName:      runtimeName,
+			RuntimeVersion:   runtimeVersion,
 			RawJSON:          verdictRaw,
 			Normalized:       normalized,
 			ValidatorVerdict: &verdict,
+		}, nil
+	}
+
+	if isDraftOnlyRuntimeStep(stepID) {
+		applyReport := synthesizeApplyReport(normalized)
+		e.runtimeStepMetrics = append(e.runtimeStepMetrics, runtimeStepQuality{
+			StepID:           stepID,
+			DomainID:         domainID,
+			RuntimeName:      runtimeName,
+			RuntimeVersion:   runtimeVersion,
+			RepoScopes:       append([]string(nil), task.RepoScopes...),
+			ChangesetOps:     len(normalized.Changeset),
+			QuestionsCount:   len(normalized.Questions),
+			CoverageObserved: countCoverageObserved(normalized.Coverage),
+			CoverageMissing:  countCoverageMissing(normalized.Coverage),
+			WarningsCount:    len(normalized.Warnings),
+		})
+		e.logInfo(stepID, domainID, "runtime draft step completed", map[string]any{
+			"task_id":          task.TaskID,
+			"shard_id":         task.ShardID,
+			"runtime_name":     runtimeName,
+			"runtime_version":  runtimeVersion,
+			"changeset_ops":    len(normalized.Changeset),
+			"questions_count":  len(normalized.Questions),
+			"coverage_missing": countCoverageMissing(normalized.Coverage),
+			"warnings_count":   len(normalized.Warnings),
+		})
+		return runtimeTaskExecution{
+			Task:           task,
+			RuntimeName:    runtimeName,
+			RuntimeVersion: runtimeVersion,
+			RawJSON:        prepared.NormalizedRaw,
+			Normalized:     normalized,
+			Apply:          applyReport,
 		}, nil
 	}
 
@@ -1909,9 +2060,12 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 	})
 
 	return runtimeTaskExecution{
-		RawJSON:    prepared.NormalizedRaw,
-		Normalized: normalized,
-		Apply:      applyReport,
+		Task:           task,
+		RuntimeName:    runtimeName,
+		RuntimeVersion: runtimeVersion,
+		RawJSON:        prepared.NormalizedRaw,
+		Normalized:     normalized,
+		Apply:          applyReport,
 	}, nil
 }
 
@@ -2010,10 +2164,47 @@ func (e *pipelineExecution) replayRuntimeTaskExecution(
 			"warnings_count":   len(normalized.Warnings),
 		})
 		return runtimeTaskExecution{
-			RawJSON:       manifestRaw,
-			Normalized:    normalized,
-			Apply:         synthesizeApplyReport(normalized),
-			ShardManifest: &manifest,
+			Task:           task,
+			RuntimeName:    runtimeName,
+			RuntimeVersion: runtimeVersion,
+			RawJSON:        manifestRaw,
+			Normalized:     normalized,
+			Apply:          synthesizeApplyReport(normalized),
+			ShardManifest:  &manifest,
+		}, nil
+	}
+
+	if isDraftOnlyRuntimeStep(stepID) {
+		applyReport := synthesizeApplyReport(normalized)
+		e.runtimeStepMetrics = append(e.runtimeStepMetrics, runtimeStepQuality{
+			StepID:           stepID,
+			DomainID:         domainID,
+			RuntimeName:      runtimeName,
+			RuntimeVersion:   runtimeVersion,
+			RepoScopes:       append([]string(nil), task.RepoScopes...),
+			ChangesetOps:     len(normalized.Changeset),
+			QuestionsCount:   len(normalized.Questions),
+			CoverageObserved: countCoverageObserved(normalized.Coverage),
+			CoverageMissing:  countCoverageMissing(normalized.Coverage),
+			WarningsCount:    len(normalized.Warnings),
+		})
+		e.logInfo(stepID, domainID, "runtime draft step replayed from persisted taskrun", map[string]any{
+			"task_id":          task.TaskID,
+			"shard_id":         task.ShardID,
+			"runtime_name":     runtimeName,
+			"runtime_version":  runtimeVersion,
+			"changeset_ops":    len(normalized.Changeset),
+			"questions_count":  len(normalized.Questions),
+			"coverage_missing": countCoverageMissing(normalized.Coverage),
+			"warnings_count":   len(normalized.Warnings),
+		})
+		return runtimeTaskExecution{
+			Task:           task,
+			RuntimeName:    runtimeName,
+			RuntimeVersion: runtimeVersion,
+			RawJSON:        prepared.NormalizedRaw,
+			Normalized:     normalized,
+			Apply:          applyReport,
 		}, nil
 	}
 
@@ -2060,9 +2251,12 @@ func (e *pipelineExecution) replayRuntimeTaskExecution(
 	})
 
 	return runtimeTaskExecution{
-		RawJSON:    prepared.NormalizedRaw,
-		Normalized: normalized,
-		Apply:      applyReport,
+		Task:           task,
+		RuntimeName:    runtimeName,
+		RuntimeVersion: runtimeVersion,
+		RawJSON:        prepared.NormalizedRaw,
+		Normalized:     normalized,
+		Apply:          applyReport,
 	}, nil
 }
 
@@ -2220,8 +2414,38 @@ func extractFindingIDs(findings []contracts.Finding) []string {
 	return uniqueSorted(ids)
 }
 
-func (e *pipelineExecution) runStepAsIs() error {
-	e.logInfo(e.stepStatus.CurrentStep, "", "assembling staged doc flow", nil)
+func (e *pipelineExecution) runStepAsIs(ctx context.Context, stepID string) error {
+	if e.shouldReplayAsIsWithoutRuntime(stepID) {
+		e.logInfo(stepID, "", "rebuilding staged doc flow from persisted collect artifacts", map[string]any{
+			"resume_source_step": e.resumeSourceStep,
+		})
+		e.asIsDraftManifest = nil
+		e.asIsDraftRoot = ""
+		return e.assembleStagedDocFlow()
+	}
+
+	selectedScopes := normalizeOrderedUniqueStrings(e.selectedRepoScopes)
+	execution, err := e.executeRuntimeTask(ctx, stepID, "as-is", selectedScopes, []string{"."}, "", "")
+	if err != nil {
+		return err
+	}
+	draft, _, err := loadRuntimeDraftManifest(execution.Task.WriteRoot, asisDraftManifestFile)
+	if err != nil {
+		if fallbackErr := claudecode.PersistCompatibilityDocflowArtifacts(execution.Task, execution.Normalized); fallbackErr == nil {
+			draft, _, err = loadRuntimeDraftManifest(execution.Task.WriteRoot, asisDraftManifestFile)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	e.asIsDraftManifest = &draft
+	e.asIsDraftRoot = execution.Task.DraftFinalRoot
+	e.addArtifacts(Artifact{
+		Path:  path.Join(execution.Task.ArtifactRoot, asisDraftManifestFile),
+		Kind:  "taskrun",
+		Label: "As-Is Draft Manifest",
+	})
+	e.logInfo(stepID, "", "assembling staged doc flow", nil)
 	return e.assembleStagedDocFlow()
 }
 
@@ -2251,11 +2475,60 @@ func (e *pipelineExecution) runStepValidator(ctx context.Context, stepID string)
 	return err
 }
 
-func (e *pipelineExecution) runStepProposals() error {
+func (e *pipelineExecution) runStepProposals(ctx context.Context, stepID string) error {
+	selectedScopes := normalizeOrderedUniqueStrings(e.selectedRepoScopes)
+	execution, err := e.executeRuntimeTask(ctx, stepID, "proposals", selectedScopes, []string{"."}, "", "")
+	if err != nil {
+		return err
+	}
+	draft, _, err := loadRuntimeDraftManifest(execution.Task.WriteRoot, proposalsDraftManifestFile)
+	if err != nil {
+		if fallbackErr := claudecode.PersistCompatibilityDocflowArtifacts(execution.Task, execution.Normalized); fallbackErr == nil {
+			draft, _, err = loadRuntimeDraftManifest(execution.Task.WriteRoot, proposalsDraftManifestFile)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	e.proposalsDraftManifest = &draft
+	e.proposalsDraftRoot = execution.Task.DraftFinalRoot
+	e.addArtifacts(Artifact{
+		Path:  path.Join(execution.Task.ArtifactRoot, proposalsDraftManifestFile),
+		Kind:  "taskrun",
+		Label: "Proposals Draft Manifest",
+	})
 	if e.validatorVerdict != nil {
-		e.logInfo(e.stepStatus.CurrentStep, "", "promoting validated staged artifacts", nil)
+		e.logInfo(stepID, "", "promoting validated staged artifacts", nil)
 		if err := e.promoteValidatedArtifacts(); err != nil {
 			return err
+		}
+		if e.proposalsDraftManifest != nil {
+			if draftManifestHasPrefix(e.proposalsDraftManifest, "proposals/") && e.finalRunIndex != nil {
+				removed := draftManifestCanonicalPathsWithPrefix(e.proposalsDraftManifest, "proposals/")
+				for _, canonicalPath := range removed {
+					target, resolveErr := e.workspace.Resolve(canonicalPath)
+					if resolveErr != nil {
+						return resolveErr
+					}
+					if removeErr := os.Remove(target); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+						return fmt.Errorf("remove deterministic proposal %q: %w", canonicalPath, removeErr)
+					}
+				}
+				e.removeArtifactsByPath(removed...)
+			}
+			artifacts, err := applyRuntimeDraftOutputs(
+				e.workspace,
+				e.proposalsDraftRoot,
+				*e.proposalsDraftManifest,
+				"",
+				func(target string) bool {
+					return strings.HasPrefix(target, "proposals/") || strings.HasPrefix(target, "reports/changelog/")
+				},
+			)
+			if err != nil {
+				return err
+			}
+			e.addArtifacts(artifacts...)
 		}
 	} else if e.renderContext().IsIncomplete() || len(e.partialFailures) > 0 || e.findingsSkipped {
 		e.addWarning(fmt.Sprintf("%s: canonical promotion skipped because validator verdict is missing", e.stepStatus.CurrentStep))
@@ -2267,21 +2540,23 @@ func (e *pipelineExecution) runStepProposals() error {
 		return fmt.Errorf("promote validated artifacts: validator verdict is missing")
 	}
 
-	changelog, err := e.compiler.WriteIterationChangelog(
-		e.runID,
-		string(e.pipeline),
-		toReportArtifacts(e.artifacts),
-		e.startedAt,
-		e.clock().UTC(),
-	)
-	if err != nil {
-		return err
+	if !draftManifestHasPrefix(e.proposalsDraftManifest, "reports/changelog/") {
+		changelog, err := e.compiler.WriteIterationChangelog(
+			e.runID,
+			string(e.pipeline),
+			toReportArtifacts(e.artifacts),
+			e.startedAt,
+			e.clock().UTC(),
+		)
+		if err != nil {
+			return err
+		}
+		e.addArtifacts(Artifact{
+			Path:  changelog.Path,
+			Kind:  changelog.Kind,
+			Label: changelog.Label,
+		})
 	}
-	e.addArtifacts(Artifact{
-		Path:  changelog.Path,
-		Kind:  changelog.Kind,
-		Label: changelog.Label,
-	})
 	e.logInfo(e.stepStatus.CurrentStep, "", "proposals and changelog compiled", map[string]any{
 		"artifacts": len(e.artifacts),
 	})
@@ -2433,6 +2708,17 @@ func artifactIndexFor(artifacts []Artifact) map[string]int {
 		index[artifact.Kind+"|"+artifact.Path] = idx
 	}
 	return index
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]string, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func hasShardArtifactsForRun(workspaceRoot string, runID string, stepID string) bool {
@@ -2753,6 +3039,56 @@ func (e *pipelineExecution) addArtifacts(artifacts ...Artifact) {
 		}
 		e.artifactIndex[key] = len(e.artifacts)
 		e.artifacts = append(e.artifacts, artifact)
+	}
+}
+
+func (e *pipelineExecution) removeArtifactsByPath(paths ...string) {
+	if len(paths) == 0 || len(e.artifacts) == 0 {
+		return
+	}
+	removeSet := map[string]struct{}{}
+	for _, item := range paths {
+		if trimmed := strings.TrimSpace(item); trimmed != "" {
+			removeSet[trimmed] = struct{}{}
+		}
+	}
+	if len(removeSet) == 0 {
+		return
+	}
+	filtered := make([]Artifact, 0, len(e.artifacts))
+	for _, artifact := range e.artifacts {
+		if _, exists := removeSet[artifact.Path]; exists {
+			continue
+		}
+		filtered = append(filtered, artifact)
+	}
+	e.artifacts = filtered
+	e.artifactIndex = artifactIndexFor(filtered)
+}
+
+func (e *pipelineExecution) shouldReplayAsIsWithoutRuntime(stepID string) bool {
+	if !strings.HasSuffix(strings.TrimSpace(stepID), "step2.asis_docs") {
+		return false
+	}
+	if len(e.shardPacks) == 0 {
+		return false
+	}
+	resumeSourceStep := strings.TrimSpace(e.resumeSourceStep)
+	if resumeSourceStep == "" {
+		return false
+	}
+	stepIDs := stepIDsForPipeline(e.pipeline)
+	sourceIdx := indexOfPipelineStep(stepIDs, resumeSourceStep)
+	asIsIdx := indexOfPipelineStep(stepIDs, stepID)
+	return asIsIdx >= 0 && sourceIdx > asIsIdx
+}
+
+func isDraftOnlyRuntimeStep(stepID string) bool {
+	switch strings.TrimSpace(stepID) {
+	case "init.step0.constitution", "init.step2.asis_docs", "refresh.step2.asis_docs", "init.step4.proposals", "refresh.step4.proposals":
+		return true
+	default:
+		return false
 	}
 }
 

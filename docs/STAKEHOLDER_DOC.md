@@ -39,7 +39,7 @@ Epic matrix:
 
 **Дополнительно для MVP предусматриваем полноценную интеграцию standalone сервиса с CI/CD**: тот же orchestrator/CLI запускается из GitHub/GitLab webhook-triggered workflow и/или manual pipeline button/job, без hosted control plane.
 
-**В MVP используем process-scoped headless runtime providers**: `claude-code` (default) и `qwen-code`.
+**В MVP используем step-scoped headless runtime providers**: `claude-code` (default fallback) и `qwen-code`.
 
 **Техническое решение (принято):**
 - реализация продукта: **Go** (orchestrator/server) + UI (React/TypeScript, локально, с встраиванием в Go-бинарь);
@@ -542,7 +542,7 @@ flowchart TD
 
 ### 13.2. Контракт TaskResult
 - Текущий changeset contract считаем замороженным для MVP.
-- `write_file` в MVP не добавляется; Step 2 и Step 4 остаются compiler/orchestrator steps.
+- `write_file` в MVP не добавляется; Step 2 и Step 4 становятся agent-first шагами, но canonical publish по-прежнему выполняет только compiler/promoter слой.
 - Observation без evidence запрещён policy и examples.
 - Canonical MVP shape: runtime по умолчанию пишет `questions[]` и `coverage` на top-level.
 - Legacy operations `add_question` и `set_coverage` удалены из active contract; принимается только canonical top-level representation.

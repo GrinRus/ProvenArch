@@ -131,28 +131,20 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "runtime validation failed: %v\n", err)
 		return exitCodeValidation
 	}
-	provider, err := acpruntime.ResolveProvider(*runtimeProvider)
+	provider, providerSource, err := acpruntime.ResolveProviderWithSource(*runtimeProvider)
 	if err != nil {
 		fmt.Fprintf(stderr, "runtime validation failed: %v\n", err)
 		return exitCodeValidation
 	}
 
-	runner, err := buildRunner(mode, provider)
-	if err != nil {
-		fmt.Fprintf(stderr, "runtime validation failed: %v\n", err)
-		return exitCodeValidation
-	}
 	service := orchestrator.NewService(
-		orchestrator.WithRunner(runner),
+		orchestrator.WithRunnerFactory(buildRunnerFactory(mode)),
+		orchestrator.WithProviderFallback(provider, providerSource),
 		orchestrator.WithHistoryWorkspace(ws),
 		orchestrator.WithRunLogsRetention(time.Duration(*runLogsTTLHrs)*time.Hour, *runLogsMaxRuns),
 		orchestrator.WithExecutionOverrides(executionOverrides),
 		orchestrator.WithResumeStaleAsyncRuns(),
 	)
-	if err := service.ValidateRuntime(context.Background()); err != nil {
-		printRunnerError(stderr, err)
-		return exitCodeValidation
-	}
 	server := api.NewServer(ws, service)
 	if *dryRun {
 		fmt.Fprintf(stdout, "workspace ready at %s\n", ws.Path)
@@ -478,27 +470,19 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "runtime validation failed: %v\n", err)
 		return exitCodeValidation
 	}
-	provider, err := acpruntime.ResolveProvider(*runtimeProvider)
+	provider, providerSource, err := acpruntime.ResolveProviderWithSource(*runtimeProvider)
 	if err != nil {
 		fmt.Fprintf(stderr, "runtime validation failed: %v\n", err)
 		return exitCodeValidation
 	}
 
-	runner, err := buildRunner(mode, provider)
-	if err != nil {
-		fmt.Fprintf(stderr, "runtime validation failed: %v\n", err)
-		return exitCodeValidation
-	}
 	service := orchestrator.NewService(
-		orchestrator.WithRunner(runner),
+		orchestrator.WithRunnerFactory(buildRunnerFactory(mode)),
+		orchestrator.WithProviderFallback(provider, providerSource),
 		orchestrator.WithHistoryWorkspace(ws),
 		orchestrator.WithRunLogsRetention(time.Duration(*runLogsTTLHrs)*time.Hour, *runLogsMaxRuns),
 		orchestrator.WithExecutionOverrides(executionOverrides),
 	)
-	if err := service.ValidateRuntime(context.Background()); err != nil {
-		printRunnerError(stderr, err)
-		return exitCodeValidation
-	}
 	runInfo, artifacts, err := service.Run(context.Background(), orchestrator.RunRequest{
 		Workspace:      ws,
 		Pipeline:       pipeline,
@@ -629,6 +613,12 @@ func printValidationReport(w io.Writer, report workspace.ValidationReport) {
 
 func buildRunner(runtimeMode string, provider acpruntime.Provider) (acpruntime.Runner, error) {
 	return providers.BuildRunner(runtimeMode, provider)
+}
+
+func buildRunnerFactory(runtimeMode string) func(acpruntime.Provider) (acpruntime.Runner, error) {
+	return func(provider acpruntime.Provider) (acpruntime.Runner, error) {
+		return buildRunner(runtimeMode, provider)
+	}
 }
 
 func printRunnerError(w io.Writer, err error) {
@@ -795,10 +785,36 @@ func cloneRuntimeConfig(input *workspace.RuntimeConfig) *workspace.RuntimeConfig
 			clonedExecution = nil
 		}
 	}
+	var clonedSteps *workspace.RuntimeStepsConfig
+	if input.Profile != nil && input.Profile.Steps != nil {
+		cloneStep := func(step *workspace.RuntimeStepConfig) *workspace.RuntimeStepConfig {
+			if step == nil {
+				return nil
+			}
+			cloned := &workspace.RuntimeStepConfig{
+				Provider: strings.TrimSpace(step.Provider),
+			}
+			if cloned.IsZero() {
+				return nil
+			}
+			return cloned
+		}
+		clonedSteps = &workspace.RuntimeStepsConfig{
+			Step0Constitution: cloneStep(input.Profile.Steps.Step0Constitution),
+			Step1Collect:      cloneStep(input.Profile.Steps.Step1Collect),
+			Step2AsIs:         cloneStep(input.Profile.Steps.Step2AsIs),
+			Step3Findings:     cloneStep(input.Profile.Steps.Step3Findings),
+			Step4Proposals:    cloneStep(input.Profile.Steps.Step4Proposals),
+		}
+		if clonedSteps.IsZero() {
+			clonedSteps = nil
+		}
+	}
 	cloned := &workspace.RuntimeConfig{
 		Profile: &workspace.RuntimeProfileConfig{
 			Timeouts:  clonedTimeouts,
 			Execution: clonedExecution,
+			Steps:     clonedSteps,
 		},
 	}
 	if cloned.IsZero() {

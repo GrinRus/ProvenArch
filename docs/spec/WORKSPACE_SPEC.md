@@ -68,6 +68,7 @@ Default:
 Поддерживается optional блок `runtime.profile`:
 - `runtime.profile.timeouts`
 - `runtime.profile.execution`
+- `runtime.profile.steps`
 
 ### 5.1) `runtime.profile.timeouts`
 
@@ -114,6 +115,33 @@ Effective precedence:
 - `semantic`: compatibility mode; использует тот же shard-plan, но дополняет его graph/debug metadata и не меняет count/boundaries shard-ов.
 - runtime execution всегда использует все repo scopes из `workspace.yaml`; frontend/backend filtering не входит в execution contract этого slice.
 
+### 5.3) `runtime.profile.steps`
+
+Поддерживаемые optional поля:
+- `step0_constitution.provider`
+- `step1_collect.provider`
+- `step2_as_is.provider`
+- `step3_findings.provider`
+- `step4_proposals.provider`
+
+Допустимые значения provider:
+- `claude-code`
+- `qwen-code`
+
+Назначение:
+- step-scoped override для headless provider resolution;
+- позволяет смешивать providers между соседними шагами одного run, не меняя global execution knobs.
+
+Precedence effective provider для конкретного шага:
+- `runtime.profile.steps.<step>.provider`
+- CLI `--runtime-provider` или `ACP_RUNTIME_PROVIDER`
+- default `claude-code`
+
+Ограничения:
+- шаг не auto-fallback-ится на другой provider при недоступности выбранного provider;
+- per-step overrides в этом slice не вводят отдельные `max_parallel/failure_policy/shard_discovery` knobs;
+- canonical workspace outputs не пишутся runtime-шагом напрямую, даже если provider override задан.
+
 ## 6) Пример
 
 ```yaml
@@ -148,6 +176,13 @@ runtime:
       failure_policy: best_effort
       shard_discovery:
         mode: heuristics
+    steps:
+      step0_constitution:
+        provider: claude-code
+      step2_as_is:
+        provider: qwen-code
+      step4_proposals:
+        provider: claude-code
 ```
 
 ## 7) Validation expectations
@@ -166,6 +201,7 @@ Manifest считается невалидным, если:
 - `runtime.profile.execution.strategy` не в `sequential|parallel`
 - `runtime.profile.execution.failure_policy` не в `fail_fast|best_effort`
 - `runtime.profile.execution.shard_discovery.mode` не в `heuristics|semantic`
+- `runtime.profile.steps.*.provider` не в `claude-code|qwen-code`
 - manifest пытается использовать legacy path `runtime.timeouts` (breaking change, intentional)
 - manifest пытается конфигурировать workspace layout beyond supported fields
 

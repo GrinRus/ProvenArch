@@ -41,6 +41,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/workspace/manifest", s.handleWorkspaceManifest)
 	mux.HandleFunc("/api/runtime/timeouts", s.handleRuntimeTimeouts)
 	mux.HandleFunc("/api/runtime/execution", s.handleRuntimeExecution)
+	mux.HandleFunc("/api/runtime/profile", s.handleRuntimeProfile)
 	mux.HandleFunc("/api/artifacts", s.handleArtifacts)
 	mux.HandleFunc("/api/artifacts/write", s.handleArtifactsWrite)
 	mux.HandleFunc("/api/git/commit", s.handleGitCommit)
@@ -308,17 +309,35 @@ func mergeRuntimeTimeoutPatch(dst *workspace.RuntimeTimeoutsConfig, patch worksp
 }
 
 type runtimeExecutionPatch struct {
-	Strategy           *string `json:"strategy"`
-	MaxParallelTasks   *int    `json:"max_parallel_tasks"`
-	FailurePolicy      *string `json:"failure_policy"`
-	ShardDiscoveryMode *string `json:"shard_discovery_mode"`
+	Strategy           *string                    `json:"strategy"`
+	MaxParallelTasks   *int                       `json:"max_parallel_tasks"`
+	FailurePolicy      *string                    `json:"failure_policy"`
+	ShardDiscoveryMode *string                    `json:"shard_discovery_mode"`
+	Steps              *runtimeStepProvidersPatch `json:"steps"`
 }
 
 func (patch runtimeExecutionPatch) IsZero() bool {
 	return patch.Strategy == nil &&
 		patch.MaxParallelTasks == nil &&
 		patch.FailurePolicy == nil &&
-		patch.ShardDiscoveryMode == nil
+		patch.ShardDiscoveryMode == nil &&
+		(patch.Steps == nil || patch.Steps.IsZero())
+}
+
+type runtimeStepProvidersPatch struct {
+	Step0Constitution *string `json:"step0_constitution"`
+	Step1Collect      *string `json:"step1_collect"`
+	Step2AsIs         *string `json:"step2_as_is"`
+	Step3Findings     *string `json:"step3_findings"`
+	Step4Proposals    *string `json:"step4_proposals"`
+}
+
+func (patch runtimeStepProvidersPatch) IsZero() bool {
+	return patch.Step0Constitution == nil &&
+		patch.Step1Collect == nil &&
+		patch.Step2AsIs == nil &&
+		patch.Step3Findings == nil &&
+		patch.Step4Proposals == nil
 }
 
 func (s *Server) handleRuntimeExecution(writer http.ResponseWriter, request *http.Request) {
@@ -326,11 +345,16 @@ func (s *Server) handleRuntimeExecution(writer http.ResponseWriter, request *htt
 	case http.MethodGet:
 		ws := s.getWorkspace()
 		resolved := s.service.ResolveExecutionProfile(ws.Manifest)
+		stepProviders, err := s.service.ResolveStepProviderProfile(ws.Manifest)
+		if err != nil {
+			writeError(writer, http.StatusInternalServerError, "runtime_step_provider_resolution_failed", err.Error())
+			return
+		}
 		writeJSON(writer, http.StatusOK, map[string]any{
 			"ok":        true,
-			"persisted": runtimeExecutionPersistedPayload(resolved.Persisted),
-			"effective": runtimeExecutionEffectivePayload(resolved.Effective),
-			"source":    runtimeExecutionSourcePayload(resolved.Source),
+			"persisted": runtimeExecutionPersistedPayload(resolved.Persisted, stepProviders.Persisted),
+			"effective": runtimeExecutionEffectivePayload(resolved.Effective, stepProviders.Effective),
+			"source":    runtimeExecutionSourcePayload(resolved.Source, stepProviders.Source),
 		})
 	case http.MethodPut:
 		var payload struct {
@@ -360,9 +384,18 @@ func (s *Server) handleRuntimeExecution(writer http.ResponseWriter, request *htt
 		if manifest.Runtime.Profile.Execution == nil {
 			manifest.Runtime.Profile.Execution = &workspace.RuntimeExecutionConfig{}
 		}
+		if manifest.Runtime.Profile.Steps == nil {
+			manifest.Runtime.Profile.Steps = &workspace.RuntimeStepsConfig{}
+		}
 		mergeRuntimeExecutionPatch(manifest.Runtime.Profile.Execution, payload.Execution)
+		if payload.Execution.Steps != nil {
+			mergeRuntimeStepProvidersPatch(manifest.Runtime.Profile.Steps, *payload.Execution.Steps)
+		}
 		if manifest.Runtime.Profile.Execution.IsZero() {
 			manifest.Runtime.Profile.Execution = nil
+		}
+		if manifest.Runtime.Profile.Steps.IsZero() {
+			manifest.Runtime.Profile.Steps = nil
 		}
 		if manifest.Runtime.Profile.IsZero() {
 			manifest.Runtime.Profile = nil
@@ -387,15 +420,53 @@ func (s *Server) handleRuntimeExecution(writer http.ResponseWriter, request *htt
 		}
 		s.setWorkspace(reopened)
 		resolved := s.service.ResolveExecutionProfile(reopened.Manifest)
+		stepProviders, err := s.service.ResolveStepProviderProfile(reopened.Manifest)
+		if err != nil {
+			writeError(writer, http.StatusInternalServerError, "runtime_step_provider_resolution_failed", err.Error())
+			return
+		}
 		writeJSON(writer, http.StatusOK, map[string]any{
 			"ok":        true,
-			"persisted": runtimeExecutionPersistedPayload(resolved.Persisted),
-			"effective": runtimeExecutionEffectivePayload(resolved.Effective),
-			"source":    runtimeExecutionSourcePayload(resolved.Source),
+			"persisted": runtimeExecutionPersistedPayload(resolved.Persisted, stepProviders.Persisted),
+			"effective": runtimeExecutionEffectivePayload(resolved.Effective, stepProviders.Effective),
+			"source":    runtimeExecutionSourcePayload(resolved.Source, stepProviders.Source),
 		})
 	default:
 		writeMethodNotAllowed(writer, http.MethodGet+", "+http.MethodPut)
 	}
+}
+
+func (s *Server) handleRuntimeProfile(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		writeMethodNotAllowed(writer, http.MethodGet)
+		return
+	}
+	ws := s.getWorkspace()
+	timeouts := acpruntime.ResolveTimeouts(ws.Manifest)
+	execution := s.service.ResolveExecutionProfile(ws.Manifest)
+	stepProviders, err := s.service.ResolveStepProviderProfile(ws.Manifest)
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "runtime_step_provider_resolution_failed", err.Error())
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"ok": true,
+		"timeouts": map[string]any{
+			"persisted": timeouts.Persisted,
+			"effective": timeouts.Effective,
+			"source":    timeouts.Source,
+		},
+		"execution": map[string]any{
+			"persisted": runtimeExecutionPersistedPayload(execution.Persisted, stepProviders.Persisted),
+			"effective": runtimeExecutionEffectivePayload(execution.Effective, stepProviders.Effective),
+			"source":    runtimeExecutionSourcePayload(execution.Source, stepProviders.Source),
+		},
+		"step_providers": map[string]any{
+			"persisted": runtimeStepProvidersPersistedPayload(stepProviders.Persisted),
+			"effective": runtimeStepProvidersEffectivePayload(stepProviders.Effective),
+			"source":    runtimeStepProvidersSourcePayload(stepProviders.Source),
+		},
+	})
 }
 
 func validateRuntimeExecutionPatch(patch runtimeExecutionPatch) error {
@@ -418,6 +489,23 @@ func validateRuntimeExecutionPatch(patch runtimeExecutionPatch) error {
 		value := strings.TrimSpace(strings.ToLower(*patch.ShardDiscoveryMode))
 		if value != acpruntime.ExecutionShardDiscoveryHeuristics && value != acpruntime.ExecutionShardDiscoverySemantic {
 			return fmt.Errorf("shard_discovery_mode must be one of: %s, %s", acpruntime.ExecutionShardDiscoveryHeuristics, acpruntime.ExecutionShardDiscoverySemantic)
+		}
+	}
+	if patch.Steps != nil {
+		for label, value := range map[string]*string{
+			"step0_constitution": patch.Steps.Step0Constitution,
+			"step1_collect":      patch.Steps.Step1Collect,
+			"step2_as_is":        patch.Steps.Step2AsIs,
+			"step3_findings":     patch.Steps.Step3Findings,
+			"step4_proposals":    patch.Steps.Step4Proposals,
+		} {
+			if value == nil {
+				continue
+			}
+			provider := strings.TrimSpace(strings.ToLower(*value))
+			if provider != string(acpruntime.ProviderClaudeCode) && provider != string(acpruntime.ProviderQwenCode) {
+				return fmt.Errorf("%s must be one of: %s, %s", label, acpruntime.ProviderClaudeCode, acpruntime.ProviderQwenCode)
+			}
 		}
 	}
 	return nil
@@ -447,7 +535,30 @@ func mergeRuntimeExecutionPatch(dst *workspace.RuntimeExecutionConfig, patch run
 	}
 }
 
-func runtimeExecutionPersistedPayload(persisted workspace.RuntimeExecutionConfig) map[string]any {
+func mergeRuntimeStepProvidersPatch(dst *workspace.RuntimeStepsConfig, patch runtimeStepProvidersPatch) {
+	if dst == nil {
+		return
+	}
+	mergeStep := func(target **workspace.RuntimeStepConfig, raw *string) {
+		if raw == nil {
+			return
+		}
+		if *target == nil {
+			*target = &workspace.RuntimeStepConfig{}
+		}
+		(*target).Provider = strings.TrimSpace(strings.ToLower(*raw))
+		if (*target).IsZero() {
+			*target = nil
+		}
+	}
+	mergeStep(&dst.Step0Constitution, patch.Step0Constitution)
+	mergeStep(&dst.Step1Collect, patch.Step1Collect)
+	mergeStep(&dst.Step2AsIs, patch.Step2AsIs)
+	mergeStep(&dst.Step3Findings, patch.Step3Findings)
+	mergeStep(&dst.Step4Proposals, patch.Step4Proposals)
+}
+
+func runtimeExecutionPersistedPayload(persisted workspace.RuntimeExecutionConfig, steps workspace.RuntimeStepsConfig) map[string]any {
 	payload := map[string]any{}
 	if value := strings.TrimSpace(persisted.Strategy); value != "" {
 		payload["strategy"] = value
@@ -463,25 +574,70 @@ func runtimeExecutionPersistedPayload(persisted workspace.RuntimeExecutionConfig
 			payload["shard_discovery_mode"] = value
 		}
 	}
+	if runtimeSteps := runtimeStepProvidersPersistedPayload(steps); len(runtimeSteps) > 0 {
+		payload["steps"] = runtimeSteps
+	}
 	return payload
 }
 
-func runtimeExecutionEffectivePayload(effective acpruntime.ExecutionValues) map[string]any {
-	return map[string]any{
+func runtimeExecutionEffectivePayload(effective acpruntime.ExecutionValues, steps acpruntime.StepProviderValues) map[string]any {
+	payload := map[string]any{
 		"strategy":             effective.Strategy,
 		"max_parallel_tasks":   effective.MaxParallel,
 		"failure_policy":       effective.FailurePolicy,
 		"shard_discovery_mode": effective.ShardMode,
 	}
+	if runtimeSteps := runtimeStepProvidersEffectivePayload(steps); len(runtimeSteps) > 0 {
+		payload["steps"] = runtimeSteps
+	}
+	return payload
 }
 
-func runtimeExecutionSourcePayload(source acpruntime.ExecutionSources) map[string]any {
-	return map[string]any{
+func runtimeExecutionSourcePayload(source acpruntime.ExecutionSources, steps acpruntime.StepProviderSources) map[string]any {
+	payload := map[string]any{
 		"strategy":             source.Strategy,
 		"max_parallel_tasks":   source.MaxParallel,
 		"failure_policy":       source.FailurePolicy,
 		"shard_discovery_mode": source.ShardMode,
 	}
+	if runtimeSteps := runtimeStepProvidersSourcePayload(steps); len(runtimeSteps) > 0 {
+		payload["steps"] = runtimeSteps
+	}
+	return payload
+}
+
+func runtimeStepProvidersPersistedPayload(persisted workspace.RuntimeStepsConfig) map[string]any {
+	payload := map[string]any{}
+	appendStep := func(key string, step *workspace.RuntimeStepConfig) {
+		if step == nil {
+			return
+		}
+		if provider := strings.TrimSpace(step.Provider); provider != "" {
+			payload[key] = provider
+		}
+	}
+	appendStep("step0_constitution", persisted.Step0Constitution)
+	appendStep("step1_collect", persisted.Step1Collect)
+	appendStep("step2_as_is", persisted.Step2AsIs)
+	appendStep("step3_findings", persisted.Step3Findings)
+	appendStep("step4_proposals", persisted.Step4Proposals)
+	return payload
+}
+
+func runtimeStepProvidersEffectivePayload(effective acpruntime.StepProviderValues) map[string]any {
+	payload := map[string]any{}
+	for key, value := range effective.StringMap() {
+		payload[key] = value
+	}
+	return payload
+}
+
+func runtimeStepProvidersSourcePayload(source acpruntime.StepProviderSources) map[string]any {
+	payload := map[string]any{}
+	for key, value := range source {
+		payload[key] = value
+	}
+	return payload
 }
 
 func (s *Server) handleArtifactsWrite(writer http.ResponseWriter, request *http.Request) {
@@ -944,15 +1100,16 @@ func formatOptionalString(value string) any {
 
 func formatRunInfoPayload(runInfo orchestrator.RunInfo) map[string]any {
 	return map[string]any{
-		"run_id":       runInfo.RunID,
-		"pipeline":     runInfo.Pipeline,
-		"status":       runInfo.Status,
-		"started_at":   runInfo.StartedAt.UTC().Format(time.RFC3339),
-		"finished_at":  formatOptionalTime(runInfo.FinishedAt),
-		"current_step": runInfo.CurrentStep,
-		"warnings":     runInfo.Warnings,
-		"error_code":   formatOptionalString(runInfo.ErrorCode),
-		"error":        formatOptionalString(runInfo.Error),
+		"run_id":         runInfo.RunID,
+		"pipeline":       runInfo.Pipeline,
+		"status":         runInfo.Status,
+		"started_at":     runInfo.StartedAt.UTC().Format(time.RFC3339),
+		"finished_at":    formatOptionalTime(runInfo.FinishedAt),
+		"current_step":   runInfo.CurrentStep,
+		"step_providers": runInfo.StepProviders,
+		"warnings":       runInfo.Warnings,
+		"error_code":     formatOptionalString(runInfo.ErrorCode),
+		"error":          formatOptionalString(runInfo.Error),
 	}
 }
 

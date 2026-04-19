@@ -19,6 +19,7 @@ Primary runtime outputs для live pipeline:
 - `schemas/validator-verdict.schema.json`
 
 Staged write model:
+- runtime шаги пишут только в step-local `write_root` и `draft_final_root`
 - shard analysts пишут только в `reports/taskruns/<run_id>/staging/shards/<shard_id>/`
 - aggregator/orchestrator materialize-ит staged final set в `reports/taskruns/<run_id>/staging/final/`
 - validator пишет только в `reports/taskruns/<run_id>/validator/`
@@ -26,11 +27,11 @@ Staged write model:
 
 Runtime write policy:
 - `workspace root` больше не трактуется как implicit write target
-- runtime получает explicit `artifact_root`, `write_root`, `read_context_roots[]`
+- runtime получает explicit `artifact_root`, `write_root`, `draft_final_root`, `read_context_roots[]`, `step_contract`, `expected_artifacts[]`
 - runtime не имеет права писать в `workspace.yaml`, `schemas/*`, `docs/spec/*`, `charter/*` и анализируемые user repos
 
-> MVP policy фиксирует process-scoped runtime provider contract: `claude-code` (default) или `qwen-code` для headless runs; changeset contract остаётся замороженным без `write_file`.
-> CLI/process runtime mode задаётся флагом `--runtime fake|headless` (`fake` default, `headless` opt-in), provider — `--runtime-provider claude-code|qwen-code` (`claude-code` default, env fallback `ACP_RUNTIME_PROVIDER`).
+> MVP policy фиксирует step-scoped runtime provider contract: effective provider для шага выбирается как `workspace step override > CLI/env global provider > claude-code`; changeset contract остаётся замороженным без `write_file`.
+> CLI/process runtime mode задаётся флагом `--runtime fake|headless` (`fake` default, `headless` opt-in), global fallback provider — `--runtime-provider claude-code|qwen-code` (env fallback `ACP_RUNTIME_PROVIDER`).
 
 ## Repo source manifest (MVP)
 
@@ -187,11 +188,13 @@ Outputs:
 - обновлённые `charter/*`
 - initial canonical `charter/cards/domains/*`
 - initial canonical `charter/cards/teams/*`
+- runtime draft manifest `constitution-draft.json` + optional draft finals в `draft_final_root`
 
 Step 0 materialization policy:
 - если `charter/wizard/step0-contract.json` валиден, его поля детерминированно влияют на `charter/*` и canonical cards;
 - если contract отсутствует/невалиден, применяется baseline fallback materialization;
 - fallback фиксируется warning-сообщением в run diagnostics (`GET /api/pipeline/runs/<run_id>.warnings`).
+- runtime draft не пишет canonical `charter/*` напрямую; compile/materialization layer остаётся единственной publish surface.
 
 ### Step 1 — Collect context (runtime step)
 Inputs:
@@ -214,6 +217,7 @@ Runtime focuses on:
 Primary runtime output:
 - authored shard docs inside shard `write_root`
 - `shard-pack-manifest.json`
+- optional shard-local draft finals рядом с manifest, но только внутри shard staging root
 
 Compatibility output:
 - `TaskResult` with `changeset`, optional top-level `questions`, optional top-level `coverage`
@@ -343,3 +347,37 @@ Outputs:
 - Long-running standalone mode: при наличии поднятого ACP service внутренняя automation может вызывать тот же refresh flow через API/CLI без hosted control plane.
 - Internal API trigger optional и допустим только для trusted local/private deployment.
 - Debounce policy: одновременно активен только один run на workspace; события в окне 5 минут схлопываются, policy `last event wins`.
+### Step 2 — As-Is docs (agent-first + compiler)
+
+Inputs:
+- persisted Step 1 shard manifests / authored docs
+- compatibility snapshot из collect artifacts
+
+Primary runtime output:
+- `asis-draft-manifest.json`
+- optional draft docs inside `draft_final_root`
+
+Publish policy:
+- orchestrator/compiler нормализует layout, coverage/findings links и ordering;
+- runtime draft docs не считаются опубликованным результатом до compile/publish stage;
+- при resume после более позднего шага orchestrator может детерминированно пересобрать staged final docflow из persisted collect artifacts без live provider rerun.
+
+### Step 3 — Findings / Validator
+
+Primary runtime output:
+- `validator-verdict.json`
+
+Publish policy:
+- validator остаётся единственным schema/semantic gate для staged final set;
+- richer synthesis/ranking/evidence shaping разрешены, но итог проходит через validator verdict и compile checks.
+
+### Step 4 — Proposals (agent-first + auto-publish)
+
+Primary runtime output:
+- `proposals-draft-manifest.json`
+- optional proposal/changelog drafts inside `draft_final_root`
+
+Publish policy:
+- deterministic promoter проверяет schema/semantic/validator gates;
+- обязательного human approve нет;
+- canonical `proposals/*` и `reports/changelog/*` публикуются автоматически только после successful gates.

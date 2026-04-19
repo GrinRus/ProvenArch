@@ -35,8 +35,9 @@
 - docs-first staged + promoted outputs (`reports/*`, `proposals/*`)
 - model store materialization как compatibility/derived layer
 - diagrams/compat outputs как thin-code layer
-- deterministic comparisons against recorded golden outputs
+- deterministic comparisons against recorded golden outputs для `fake`/recorded baseline
 - hash-based snapshot compare against `fixtures/scenarios/*/golden/snapshot.sha256`
+- для live/headless acceptance больше не требуется byte-identical narrative markdown; обязательны structural contracts: shard-plan shape, manifest/index schemas, publish invariants и absence of direct canonical writes from runtime
 
 ### Scenario integration tests
 - pipeline runs на synthetic repos и fixture workspaces

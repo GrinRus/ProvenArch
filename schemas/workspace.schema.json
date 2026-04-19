@@ -134,6 +134,9 @@
         },
         "execution": {
           "$ref": "#/$defs/runtimeExecution"
+        },
+        "steps": {
+          "$ref": "#/$defs/runtimeSteps"
         }
       },
       "additionalProperties": false
@@ -199,6 +202,40 @@
         },
         "shard_discovery": {
           "$ref": "#/$defs/runtimeShardDiscovery"
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtimeSteps": {
+      "type": "object",
+      "properties": {
+        "step0_constitution": {
+          "$ref": "#/$defs/runtimeStep"
+        },
+        "step1_collect": {
+          "$ref": "#/$defs/runtimeStep"
+        },
+        "step2_as_is": {
+          "$ref": "#/$defs/runtimeStep"
+        },
+        "step3_findings": {
+          "$ref": "#/$defs/runtimeStep"
+        },
+        "step4_proposals": {
+          "$ref": "#/$defs/runtimeStep"
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtimeStep": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "claude-code",
+            "qwen-code"
+          ]
         }
       },
       "additionalProperties": false

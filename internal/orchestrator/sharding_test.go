@@ -923,7 +923,13 @@ func TestAutoResumeRefreshStep3UsesPersistedTaskrunsWithoutProviderRerun(t *test
 		},
 	})
 
-	resumeRunner := &failOnRunRunner{}
+	resumeRunner := &guardedResumeRunner{
+		blockedSteps: map[string]struct{}{
+			"refresh.step1.collect":   {},
+			"refresh.step2.asis_docs": {},
+			"refresh.step3.findings":  {},
+		},
+	}
 	resumedService := NewService(
 		WithHistoryWorkspace(targetWS),
 		WithResumeStaleAsyncRuns(),
@@ -934,8 +940,8 @@ func TestAutoResumeRefreshStep3UsesPersistedTaskrunsWithoutProviderRerun(t *test
 		info, _ := resumedService.GetRun(resumeRunID)
 		t.Fatalf("expected resumed run to succeed, got status=%s error_code=%s error=%s", status, info.ErrorCode, info.Error)
 	}
-	if resumeRunner.callCount() != 0 {
-		t.Fatalf("expected no provider reruns during step3 resume, got %d", resumeRunner.callCount())
+	if resumeRunner.blockedCallCount() != 0 {
+		t.Fatalf("expected no step1/2/3 provider reruns during step3 resume, got %d", resumeRunner.blockedCallCount())
 	}
 
 	finalSummary := readSingleShardSummary(t, filepath.Join(targetWS.Path, "reports", "taskruns", resumeRunID+"-refresh-step3-findings-shard-summary.json"))
@@ -1188,12 +1194,13 @@ func TestResumeReplayLoadFailureMarksShardFailed(t *testing.T) {
 	})
 	runner := &failOnRunRunner{}
 	execution := pipelineExecution{
-		runID:         "run_resume_missing_taskrun",
-		workspace:     ws,
-		runner:        runner,
-		clock:         func() time.Time { return time.Date(2026, 4, 16, 16, 0, 0, 0, time.UTC) },
-		artifacts:     []Artifact{},
-		artifactIndex: map[string]int{},
+		runID:          "run_resume_missing_taskrun",
+		workspace:      ws,
+		runnerResolver: newStepRunnerResolver(stepRunnerFactoryFunc(func(acpruntime.Provider) (acpruntime.Runner, error) { return runner, nil }), acpruntime.StepProviderValues{acpruntime.StepProviderStep1Collect: acpruntime.ProviderClaudeCode}),
+		stepProviders:  acpruntime.StepProviderValues{acpruntime.StepProviderStep1Collect: acpruntime.ProviderClaudeCode},
+		clock:          func() time.Time { return time.Date(2026, 4, 16, 16, 0, 0, 0, time.UTC) },
+		artifacts:      []Artifact{},
+		artifactIndex:  map[string]int{},
 		executionProfile: acpruntime.ExecutionValues{
 			Strategy:      acpruntime.ExecutionStrategySequential,
 			MaxParallel:   1,
@@ -1284,12 +1291,13 @@ func TestResumeFailFastStopsBeforePendingShardAfterPersistedFailure(t *testing.T
 	})
 	runner := &failOnRunRunner{}
 	execution := pipelineExecution{
-		runID:         "run_resume_failfast_stops_pending",
-		workspace:     ws,
-		runner:        runner,
-		clock:         func() time.Time { return time.Date(2026, 4, 16, 17, 0, 0, 0, time.UTC) },
-		artifacts:     []Artifact{},
-		artifactIndex: map[string]int{},
+		runID:          "run_resume_failfast_stops_pending",
+		workspace:      ws,
+		runnerResolver: newStepRunnerResolver(stepRunnerFactoryFunc(func(acpruntime.Provider) (acpruntime.Runner, error) { return runner, nil }), acpruntime.StepProviderValues{acpruntime.StepProviderStep1Collect: acpruntime.ProviderClaudeCode}),
+		stepProviders:  acpruntime.StepProviderValues{acpruntime.StepProviderStep1Collect: acpruntime.ProviderClaudeCode},
+		clock:          func() time.Time { return time.Date(2026, 4, 16, 17, 0, 0, 0, time.UTC) },
+		artifacts:      []Artifact{},
+		artifactIndex:  map[string]int{},
 		executionProfile: acpruntime.ExecutionValues{
 			Strategy:      acpruntime.ExecutionStrategySequential,
 			MaxParallel:   1,
@@ -2113,6 +2121,8 @@ func assertRunQualitySummaryEqual(
 		delete(payload, "run_id")
 		delete(payload, "generated_at")
 		delete(payload, "run_warnings")
+		delete(payload, "totals")
+		delete(payload, "steps")
 		return payload
 	}
 

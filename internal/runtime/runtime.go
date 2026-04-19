@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -50,14 +49,8 @@ func ParseProvider(value string) (Provider, error) {
 }
 
 func ResolveProvider(cliValue string) (Provider, error) {
-	value := strings.TrimSpace(cliValue)
-	if value == "" {
-		value = strings.TrimSpace(os.Getenv(RuntimeProviderEnv))
-	}
-	if value == "" {
-		return ProviderClaudeCode, nil
-	}
-	return ParseProvider(value)
+	provider, _, err := ResolveProviderWithSource(cliValue)
+	return provider, err
 }
 
 func NormalizeMode(mode string) (string, error) {
@@ -134,21 +127,24 @@ func ClassifyError(err error) (code string, message string, ok bool) {
 }
 
 type Task struct {
-	TaskID           string
-	RunID            string
-	StepID           string
-	ShardID          string
-	DomainID         string
-	Workspace        string
-	ArtifactRoot     string
-	WriteRoot        string
-	ReadContextRoots []string
-	AgentRole        string
-	RepoScope        string
-	RepoScopes       []string
-	PathScopes       []string
-	StartedAtUTC     time.Time
-	OnOutput         func(OutputChunk) `json:"-"`
+	TaskID            string
+	RunID             string
+	StepID            string
+	ShardID           string
+	DomainID          string
+	Workspace         string
+	ArtifactRoot      string
+	WriteRoot         string
+	DraftFinalRoot    string
+	ReadContextRoots  []string
+	AgentRole         string
+	StepContract      string
+	ExpectedArtifacts []string
+	RepoScope         string
+	RepoScopes        []string
+	PathScopes        []string
+	StartedAtUTC      time.Time
+	OnOutput          func(OutputChunk) `json:"-"`
 }
 
 type OutputChunk struct {

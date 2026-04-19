@@ -2,7 +2,9 @@ package orchestrator
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -83,7 +85,7 @@ func runtimeAgentRole(stepID string) string {
 	}
 }
 
-func (e *pipelineExecution) runtimeArtifactContext(stepID string, shardID string, repoScopes []string) (string, string, []string, error) {
+func (e *pipelineExecution) runtimeArtifactContext(stepID string, shardID string, repoScopes []string) (string, string, string, []string, error) {
 	var rel string
 	switch {
 	case strings.HasSuffix(stepID, "step1.collect"):
@@ -91,18 +93,32 @@ func (e *pipelineExecution) runtimeArtifactContext(stepID string, shardID string
 	case strings.HasSuffix(stepID, "step3.findings"):
 		rel = runtimeValidatorArtifactRoot(e.runID)
 	default:
-		rel = path.Join("reports", "taskruns", e.runID, "runtime")
+		rel = runtimeStepWriteRoot(e.runID, stepID)
 	}
 	abs, err := e.workspace.Resolve(rel)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", "", nil, err
 	}
 	if err := os.MkdirAll(abs, 0o755); err != nil {
-		return "", "", nil, fmt.Errorf("create runtime artifact root: %w", err)
+		return "", "", "", nil, fmt.Errorf("create runtime artifact root: %w", err)
+	}
+
+	draftRel := runtimeDraftArtifactRoot(e.runID, stepID)
+	draftAbs, err := e.workspace.Resolve(draftRel)
+	if err != nil {
+		return "", "", "", nil, err
+	}
+	if err := os.MkdirAll(draftAbs, 0o755); err != nil {
+		return "", "", "", nil, fmt.Errorf("create runtime draft root: %w", err)
 	}
 
 	roots := []string{e.workspace.Path}
 	if strings.HasSuffix(stepID, "step3.findings") {
+		if finalAbs, resolveErr := e.workspace.Resolve(runtimeFinalArtifactRoot(e.runID)); resolveErr == nil {
+			roots = append(roots, finalAbs)
+		}
+	}
+	if strings.HasSuffix(stepID, "step4.proposals") {
 		if finalAbs, resolveErr := e.workspace.Resolve(runtimeFinalArtifactRoot(e.runID)); resolveErr == nil {
 			roots = append(roots, finalAbs)
 		}
@@ -116,7 +132,7 @@ func (e *pipelineExecution) runtimeArtifactContext(stepID string, shardID string
 			roots = append(roots, repoPath)
 		}
 	}
-	return rel, abs, normalizeOrderedUniqueStrings(roots), nil
+	return rel, abs, draftAbs, normalizeOrderedUniqueStrings(roots), nil
 }
 
 func loadShardPackManifestFromRoot(root string) (contracts.ShardPackManifest, []byte, error) {
@@ -225,6 +241,25 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 			Label: document.Title,
 		})
 	}
+	if e.asIsDraftManifest != nil {
+		draftArtifacts, draftErr := applyRuntimeDraftOutputs(
+			stageRoot,
+			e.asIsDraftRoot,
+			*e.asIsDraftManifest,
+			stageRootRel,
+			func(target string) bool {
+				return strings.HasPrefix(target, "reports/as-is/") ||
+					strings.HasPrefix(target, "reports/coverage/") ||
+					strings.HasPrefix(target, "reports/agent-outputs/")
+			},
+		)
+		if draftErr != nil {
+			return draftErr
+		}
+		for _, artifact := range draftArtifacts {
+			registerStagedArtifact(artifact)
+		}
+	}
 
 	hasCanonicalPrefix := func(prefix string) bool {
 		for canonicalPath := range canonicalPaths {
@@ -233,10 +268,6 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 			}
 		}
 		return false
-	}
-	hasCanonicalPath := func(target string) bool {
-		_, ok := canonicalPaths[target]
-		return ok
 	}
 	hasCanonicalSuffix := func(suffix string) bool {
 		for canonicalPath := range canonicalPaths {
@@ -249,30 +280,22 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 
 	// Narratives are docs-first from runtime-authored staged packs.
 	// Compiler paths remain compatibility fallback only when required surfaces are absent.
-	if !hasCanonicalPrefix("reports/as-is/") {
-		if err := registerCompiledArtifacts(stageCompiler.CompileAsIs(entities, edges, renderCtx)); err != nil {
-			return err
-		}
+	if err := registerCompiledArtifacts(stageCompiler.CompileAsIs(entities, edges, renderCtx)); err != nil {
+		return err
 	}
-	if !hasCanonicalPrefix("reports/coverage/") {
-		if err := registerCompiledArtifacts(stageCompiler.WriteCoverage(&compatibility.Coverage, compatibility.Questions, renderCtx)); err != nil {
-			return err
-		}
+	if err := registerCompiledArtifacts(stageCompiler.WriteCoverage(&compatibility.Coverage, compatibility.Questions, renderCtx)); err != nil {
+		return err
 	}
-	if !hasCanonicalPrefix("reports/findings/") {
-		if err := registerCompiledArtifacts(stageCompiler.WriteFindings(compatibility.Findings, renderCtx)); err != nil {
-			return err
-		}
+	if err := registerCompiledArtifacts(stageCompiler.WriteFindings(compatibility.Findings, renderCtx)); err != nil {
+		return err
 	}
 	if !hasCanonicalPrefix("proposals/") {
 		if err := registerCompiledArtifacts(stageCompiler.CompileProposals(compatibility.Findings, renderCtx)); err != nil {
 			return err
 		}
 	}
-	if !hasCanonicalPath("reports/agent-outputs/architect/summary.md") {
-		if err := registerCompiledArtifacts(stageCompiler.WriteArchitectSummary(e.renderArchitectSummary(), renderCtx)); err != nil {
-			return err
-		}
+	if err := registerCompiledArtifacts(stageCompiler.WriteArchitectSummary(e.renderArchitectSummary(), renderCtx)); err != nil {
+		return err
 	}
 	if !hasCanonicalPrefix("reports/agent-outputs/domains/") {
 		if domainReports, domainErr := e.authoredDomainReports(); domainErr != nil {
@@ -1060,7 +1083,9 @@ func (e *pipelineExecution) promoteValidatedArtifacts() error {
 		return fmt.Errorf("promote validated artifacts: validator verdict is %s", e.validatorVerdict.Verdict)
 	}
 
+	expectedCanonicalPaths := map[string]struct{}{}
 	for _, document := range e.finalRunIndex.CanonicalDocuments {
+		expectedCanonicalPaths[document.CanonicalPath] = struct{}{}
 		content, err := e.workspace.ReadFile(document.StagedPath)
 		if err != nil {
 			return fmt.Errorf("read staged artifact %q: %w", document.StagedPath, err)
@@ -1073,6 +1098,9 @@ func (e *pipelineExecution) promoteValidatedArtifacts() error {
 			Kind:  document.Kind,
 			Label: document.Title,
 		})
+	}
+	if err := e.removeStaleManagedCanonicalArtifacts(expectedCanonicalPaths); err != nil {
+		return err
 	}
 
 	if err := e.rebuildCompatibilityModel(); err != nil {
@@ -1096,6 +1124,71 @@ func (e *pipelineExecution) promoteValidatedArtifacts() error {
 		"canonical_docs": len(e.finalRunIndex.CanonicalDocuments),
 	})
 	return nil
+}
+
+func (e *pipelineExecution) removeStaleManagedCanonicalArtifacts(expected map[string]struct{}) error {
+	stale := map[string]struct{}{}
+	for _, prefix := range managedCanonicalArtifactPrefixes() {
+		absRoot, err := e.workspace.Resolve(prefix)
+		if err != nil {
+			return err
+		}
+		if _, err := os.Stat(absRoot); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return fmt.Errorf("inspect managed canonical surface %q: %w", prefix, err)
+		}
+		if err := filepath.WalkDir(absRoot, func(item string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			relPath, err := filepath.Rel(e.workspace.Path, item)
+			if err != nil {
+				return err
+			}
+			canonicalPath := filepath.ToSlash(relPath)
+			if _, ok := expected[canonicalPath]; !ok {
+				stale[canonicalPath] = struct{}{}
+			}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("walk managed canonical surface %q: %w", prefix, err)
+		}
+	}
+	if len(stale) == 0 {
+		return nil
+	}
+	paths := make([]string, 0, len(stale))
+	for canonicalPath := range stale {
+		paths = append(paths, canonicalPath)
+	}
+	sort.Strings(paths)
+	for _, canonicalPath := range paths {
+		target, err := e.workspace.Resolve(canonicalPath)
+		if err != nil {
+			return err
+		}
+		if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove stale canonical artifact %q: %w", canonicalPath, err)
+		}
+	}
+	e.removeArtifactsByPath(paths...)
+	return nil
+}
+
+func managedCanonicalArtifactPrefixes() []string {
+	return []string{
+		"reports/as-is",
+		"reports/coverage",
+		"reports/findings",
+		"reports/agent-outputs",
+		"reports/diagrams",
+		"proposals",
+	}
 }
 
 func (e *pipelineExecution) rebuildCompatibilityModel() error {

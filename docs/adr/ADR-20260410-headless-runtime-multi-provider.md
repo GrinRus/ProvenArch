@@ -13,7 +13,7 @@ Current MVP implementation supports two production headless runtime providers:
 - `qwen-code` (optional)
 
 Required CI baseline must stay deterministic and independent from live provider binaries (`--runtime fake`).
-Provider selection is process-scoped (`--runtime-provider` / `ACP_RUNTIME_PROVIDER`) and is not exposed as per-request API override.
+Provider selection keeps a global CLI/env fallback (`--runtime-provider` / `ACP_RUNTIME_PROVIDER`), but effective provider resolution inside a run is step-scoped.
 
 ## Decision
 
@@ -21,6 +21,7 @@ ACP MVP runtime policy is **headless multi-provider + fake baseline**:
 - keep `fake` as required deterministic CI runtime mode;
 - keep headless provider IDs fixed to `claude-code` and `qwen-code`;
 - keep existing TaskResult schema/API contracts unchanged;
+- resolve provider per pipeline step, with precedence `workspace step override > CLI/env global provider > claude-code`;
 - support direct local binaries for providers through command envs:
   - `ACP_CLAUDE_CMD` (default `claude-code`, direct `claude` supported)
   - `ACP_QWEN_CMD` (default `qwen`)
@@ -28,7 +29,7 @@ ACP MVP runtime policy is **headless multi-provider + fake baseline**:
 ## Rationale
 
 - Runtime diversity is required for local-first usage across different developer environments.
-- Process-scoped provider selection preserves API stability and avoids hosted-style runtime routing in MVP.
+- Step-scoped provider selection preserves API stability while allowing mixed-provider runs without adding per-request hosted routing semantics.
 - Keeping schema/API unchanged limits migration risk and protects deterministic fixtures/tests.
 
 ## Consequences

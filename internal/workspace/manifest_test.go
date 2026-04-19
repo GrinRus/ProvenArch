@@ -141,6 +141,31 @@ runtime:
 	}
 }
 
+func TestOpenRejectsManifestWithInvalidStepProvider(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeManifestFile(t, root, `
+version: 1
+repos:
+  - name: payments
+    path: /tmp/payments
+runtime:
+  profile:
+    steps:
+      step2_as_is:
+        provider: bogus
+`)
+
+	_, err := Open(root)
+	if err == nil {
+		t.Fatalf("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "runtime.profile.steps.step2_as_is.provider") {
+		t.Fatalf("expected step provider validation error, got %v", err)
+	}
+}
+
 func TestRenderManifestIncludesRuntimeTimeouts(t *testing.T) {
 	t.Parallel()
 
@@ -172,6 +197,38 @@ func TestRenderManifestIncludesRuntimeTimeouts(t *testing.T) {
 	}
 	if !strings.Contains(text, "pipeline_timeout_sec: 2400") {
 		t.Fatalf("expected pipeline timeout in manifest, got:\n%s", text)
+	}
+}
+
+func TestRenderManifestIncludesRuntimeStepProviders(t *testing.T) {
+	t.Parallel()
+
+	raw, err := RenderManifest(Manifest{
+		Version: 1,
+		Repos: []RepoSource{
+			{Name: "payments", Path: "/tmp/payments"},
+		},
+		Runtime: &RuntimeConfig{
+			Profile: &RuntimeProfileConfig{
+				Steps: &RuntimeStepsConfig{
+					Step1Collect:   &RuntimeStepConfig{Provider: "qwen-code"},
+					Step4Proposals: &RuntimeStepConfig{Provider: "claude-code"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("render manifest: %v", err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, "steps:") {
+		t.Fatalf("expected runtime steps section, got:\n%s", text)
+	}
+	if !strings.Contains(text, "step1_collect:") || !strings.Contains(text, "provider: qwen-code") {
+		t.Fatalf("expected step1 provider in manifest, got:\n%s", text)
+	}
+	if !strings.Contains(text, "step4_proposals:") || !strings.Contains(text, "provider: claude-code") {
+		t.Fatalf("expected step4 provider in manifest, got:\n%s", text)
 	}
 }
 
