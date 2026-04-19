@@ -123,6 +123,12 @@ skills/<skill_name>/
 
 Bundle поставляется вместе с продуктом, хранится в workspace и может редактироваться пользователем через UI/git workflow.
 
+Headless runtime consumption:
+- `skills/prompt-packs/collect-context.md` реально подключается к `init.step1.collect` и `refresh.step1.collect`
+- `skills/prompt-packs/findings.md` реально подключается к `init.step3.findings` и `refresh.step3.findings`
+- prompt pack content добавляется в effective provider prompt как additive context перед strict runtime contract
+- если workspace override отсутствует или unreadable, runtime использует seeded baseline prompt pack и фиксирует warning в raw prompt diagnostics вместо silent fallback
+
 ## Docs imports metadata (MVP)
 
 Для imported docs используется metadata index:
@@ -155,6 +161,16 @@ Bundle поставляется вместе с продуктом, хранит
 - `refresh.step3.findings`
 - `refresh.step4.proposals`
 
+## Required canonical live surface
+
+Validated final set for live/manual gate must always contain:
+- `reports/as-is/overview.md`
+- `reports/coverage/summary.md`
+- `reports/coverage/open-questions.md`
+- `reports/findings/findings.md`
+
+Если runtime-authored docs already created only a partial `reports/as-is/*` or `reports/coverage/*` surface, assembler обязан детерминированно добавить недостающие aggregate docs до validator stage. `validator PASS` без этого canonical live surface недопустим.
+
 ## TaskResult semantics (MVP compatibility)
 
 Canonical MVP runtime shape:
@@ -166,6 +182,14 @@ Canonical-only operations policy:
 - `changeset[].op` поддерживает только canonical operations из schema-contract.
 - legacy operations `add_question` / `set_coverage` отклоняются contract validation.
 - orchestrator canonicalize-ит только top-level `questions[]` и `coverage` (dedupe + stable ordering).
+
+Headless prompt diagnostics:
+- каждый headless shard attempt/retry сохраняет effective prompt artifacts в `reports/taskruns/raw/*`
+- diagnostics включают:
+  - prompt text
+  - serialized runtime task payload
+  - metadata: provider, attempt kind, include-directories, prompt pack source/warning
+- эти артефакты являются source-of-truth для prompt audit и runtime forensic triage
 
 `add_doc_artifact` в MVP compatibility layer:
 - трактуется только как metadata registration op

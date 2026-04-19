@@ -650,6 +650,15 @@ run_dod_precheck_make() {
   "${env_cmd[@]}" make contracts test lint build
 }
 
+run_ui_dependency_precheck() {
+  npm ci --prefix ui >"$BATCH_ROOT/precheck-ui-npm.log" 2>&1
+  if [[ ! -x "$PROVENARCH_ROOT/ui/node_modules/.bin/vitest" ]]; then
+    echo "vitest binary missing after npm ci --prefix ui" >"$BATCH_ROOT/precheck-ui-readiness.log"
+    return 1
+  fi
+  npm exec --prefix ui playwright install chromium >"$BATCH_ROOT/precheck-playwright.log" 2>&1
+}
+
 classify_run_failure() {
   local provider="$1"
   local run_index="$2"
@@ -1068,21 +1077,20 @@ log "batch shard selection: providers=$SELECTED_PROVIDERS_CSV runs=$SELECTED_RUN
 if [[ "$BATCH_SKIP_PRECHECK" == "1" ]]; then
   log "skipping DoD/UI precheck (BATCH_SKIP_PRECHECK=1)"
 else
+  log "bootstrapping UI test dependencies before DoD precheck"
+  if ! (
+    cd "$PROVENARCH_ROOT"
+    run_ui_dependency_precheck
+  ); then
+    finalize_precheck_failure "UI dependency precheck failed (see $BATCH_ROOT/precheck-ui-npm.log, $BATCH_ROOT/precheck-ui-readiness.log, and $BATCH_ROOT/precheck-playwright.log)"
+  fi
+
   log "running DoD precheck: make contracts test lint build"
   if ! (
     cd "$PROVENARCH_ROOT"
     run_dod_precheck_make >"$BATCH_ROOT/precheck-make.log" 2>&1
   ); then
     finalize_precheck_failure "make contracts test lint build failed (see $BATCH_ROOT/precheck-make.log)"
-  fi
-
-  log "installing UI dependencies and Playwright browser"
-  if ! (
-    cd "$PROVENARCH_ROOT"
-    npm ci --prefix ui >"$BATCH_ROOT/precheck-ui-npm.log" 2>&1
-    npm exec --prefix ui playwright install chromium >"$BATCH_ROOT/precheck-playwright.log" 2>&1
-  ); then
-    finalize_precheck_failure "UI precheck failed (see $BATCH_ROOT/precheck-ui-npm.log and $BATCH_ROOT/precheck-playwright.log)"
   fi
 fi
 

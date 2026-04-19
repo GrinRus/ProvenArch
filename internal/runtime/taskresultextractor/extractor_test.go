@@ -182,6 +182,27 @@ func TestExtractReturnsErrorForCapturedQwenLiveExtrasInvalidStdoutFixture(t *tes
 	}
 }
 
+func TestExtractReturnsCandidateFromCapturedQwenLegacyDocArtifactEventStreamFixture(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join("..", "testdata", "qwen_live_bank_extras_legacy_doc_artifact_stdout.txt")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read legacy doc_artifact stdout fixture: %v", err)
+	}
+
+	parsed, err := Extract(raw)
+	if err != nil {
+		t.Fatalf("expected extractor to lift inner candidate from event-stream fixture: %v", err)
+	}
+	if _, err := contracts.ParseTaskResult(parsed); err == nil {
+		t.Fatalf("expected schema validation to fail for legacy artifact payload")
+	}
+	if !strings.Contains(string(parsed), `"artifact"`) {
+		t.Fatalf("expected extracted candidate to preserve legacy artifact payload, got %q", string(parsed))
+	}
+}
+
 func TestExtractReturnsCandidateObjectEvenWhenSchemaInvalid(t *testing.T) {
 	t.Parallel()
 

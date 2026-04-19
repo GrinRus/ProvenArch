@@ -143,6 +143,53 @@ func TestDocFirstValidatorFailBlocksPromotionInBestEffort(t *testing.T) {
 	}
 }
 
+func TestDocFirstAssemblyMaterializesRequiredCanonicalLiveDocsWhenAuthoredPrefixesArePartial(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	service := NewService(
+		WithRunner(docflowPartialCanonicalRunner{}),
+		WithExecutionOverrides(acpruntime.ExecutionOverrides{
+			FailurePolicy: strPtr(acpruntime.ExecutionFailurePolicyBestEffort),
+		}),
+		WithClock(func() time.Time {
+			return time.Date(2026, 4, 19, 12, 0, 0, 0, time.UTC)
+		}),
+	)
+
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run init pipeline: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
+	}
+
+	finalIndex := readRunFinalRunIndex(t, ws.Path, info.RunID)
+	required := map[string]bool{
+		"reports/as-is/overview.md":           false,
+		"reports/coverage/summary.md":         false,
+		"reports/coverage/open-questions.md":  false,
+		"reports/findings/findings.md":        false,
+		"reports/as-is/services/authored.md":  false,
+		"reports/coverage/custom-authored.md": false,
+	}
+	for _, document := range finalIndex.CanonicalDocuments {
+		if _, ok := required[document.CanonicalPath]; ok {
+			required[document.CanonicalPath] = true
+		}
+	}
+	for path, present := range required {
+		if !present {
+			t.Fatalf("expected final run index to include %s", path)
+		}
+	}
+}
+
 type docflowCustomProposalRunner struct{}
 
 func (docflowCustomProposalRunner) Preflight(context.Context) error { return nil }
@@ -162,7 +209,10 @@ func (docflowCustomProposalRunner) Run(ctx context.Context, task acpruntime.Task
 
 type docflowFailingValidatorRunner struct{}
 
+type docflowPartialCanonicalRunner struct{}
+
 func (docflowFailingValidatorRunner) Preflight(context.Context) error { return nil }
+func (docflowPartialCanonicalRunner) Preflight(context.Context) error { return nil }
 
 func (docflowFailingValidatorRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
 	result, err := docflowCustomProposalRunner{}.Run(ctx, task)
@@ -171,6 +221,19 @@ func (docflowFailingValidatorRunner) Run(ctx context.Context, task acpruntime.Ta
 	}
 	if strings.HasSuffix(task.StepID, "step3.findings") {
 		if err := overwriteValidatorVerdict(task, "FAIL"); err != nil {
+			return acpruntime.Result{}, err
+		}
+	}
+	return result, nil
+}
+
+func (docflowPartialCanonicalRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	result, err := claudecode.FakeRunner{}.Run(ctx, task)
+	if err != nil {
+		return acpruntime.Result{}, err
+	}
+	if strings.HasSuffix(task.StepID, "step1.collect") {
+		if err := appendPartialCanonicalDocsToManifest(task); err != nil {
 			return acpruntime.Result{}, err
 		}
 	}
@@ -229,6 +292,89 @@ func appendCustomProposalToManifest(task acpruntime.Task) error {
 		ClaimIDs:    []string{claimID},
 		DocumentIDs: []string{docID},
 	})
+
+	encoded, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal shard manifest: %w", err)
+	}
+	encoded = append(encoded, '\n')
+	if err := os.WriteFile(manifestPath, encoded, 0o644); err != nil {
+		return fmt.Errorf("rewrite shard manifest: %w", err)
+	}
+	return nil
+}
+
+func appendPartialCanonicalDocsToManifest(task acpruntime.Task) error {
+	writeRoot := strings.TrimSpace(task.WriteRoot)
+	if writeRoot == "" {
+		return fmt.Errorf("write_root is required")
+	}
+	manifestPath := filepath.Join(writeRoot, "shard-pack-manifest.json")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return fmt.Errorf("read shard manifest: %w", err)
+	}
+	manifest, err := contracts.ParseShardPackManifest(raw)
+	if err != nil {
+		return fmt.Errorf("parse shard manifest: %w", err)
+	}
+	for _, existing := range manifest.Documents {
+		if strings.TrimSpace(existing.CanonicalPath) == "reports/as-is/services/authored.md" {
+			return nil
+		}
+	}
+
+	authoredFiles := []struct {
+		ID            string
+		Title         string
+		Path          string
+		CanonicalPath string
+		CitationID    string
+		ClaimID       string
+		Content       string
+	}{
+		{
+			ID:            "doc.authored.partial.asis",
+			Title:         "Authored Partial Service Doc",
+			Path:          "authored-service.md",
+			CanonicalPath: "reports/as-is/services/authored.md",
+			CitationID:    "cite.authored.partial.asis",
+			ClaimID:       "claim.authored.partial.asis",
+			Content:       "# Authored Service\n\nCustom authored as-is content.\n",
+		},
+		{
+			ID:            "doc.authored.partial.coverage",
+			Title:         "Authored Partial Coverage Doc",
+			Path:          "custom-coverage.md",
+			CanonicalPath: "reports/coverage/custom-authored.md",
+			CitationID:    "cite.authored.partial.coverage",
+			ClaimID:       "claim.authored.partial.coverage",
+			Content:       "# Authored Coverage\n\nCustom authored coverage content.\n",
+		},
+	}
+	repo := primaryRepoForTask(task)
+	for _, authored := range authoredFiles {
+		if err := os.WriteFile(filepath.Join(writeRoot, authored.Path), []byte(authored.Content), 0o644); err != nil {
+			return fmt.Errorf("write authored partial doc %q: %w", authored.Path, err)
+		}
+		manifest.Documents = append(manifest.Documents, contracts.AuthoredDocument{
+			ID:            authored.ID,
+			Kind:          "report",
+			Title:         authored.Title,
+			Path:          authored.Path,
+			CanonicalPath: authored.CanonicalPath,
+			Topics:        []string{"runtime-docs-first"},
+			CitationIDs:   []string{authored.CitationID},
+			Status:        "staged",
+		})
+		manifest.Citations = append(manifest.Citations, contracts.DocumentCitation{
+			ID:          authored.CitationID,
+			Repo:        repo,
+			Path:        "README.md",
+			ClaimIDs:    []string{authored.ClaimID},
+			DocumentIDs: []string{authored.ID},
+		})
+	}
 
 	encoded, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {

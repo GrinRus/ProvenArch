@@ -36,6 +36,30 @@ type ParseFailureArtifacts struct {
 	RelativeMetadataPath string       `json:"relative_metadata_path"`
 }
 
+type PromptPackMetadata struct {
+	Name         string `json:"name,omitempty"`
+	RelativePath string `json:"relative_path,omitempty"`
+	Source       string `json:"source,omitempty"`
+	Warning      string `json:"warning,omitempty"`
+}
+
+type PromptArtifactsMetadata struct {
+	Attempt            string             `json:"attempt"`
+	IncludeDirectories []string           `json:"include_directories,omitempty"`
+	PromptPack         PromptPackMetadata `json:"prompt_pack,omitempty"`
+}
+
+type PromptArtifacts struct {
+	Directory               string       `json:"directory"`
+	RelativeDirectory       string       `json:"relative_directory"`
+	Prompt                  ArtifactFile `json:"prompt"`
+	TaskPayload             ArtifactFile `json:"task_payload"`
+	MetadataPath            string       `json:"metadata_path"`
+	RelativeMetadataPath    string       `json:"relative_metadata_path"`
+	RelativePromptPath      string       `json:"relative_prompt_path"`
+	RelativeTaskPayloadPath string       `json:"relative_task_payload_path"`
+}
+
 func WriteParseFailureArtifacts(task acpruntime.Task, provider acpruntime.Provider, stdout string, stderr string) (ParseFailureArtifacts, error) {
 	workspace := strings.TrimSpace(task.Workspace)
 	if workspace == "" {
@@ -116,6 +140,107 @@ func WriteParseFailureArtifacts(task acpruntime.Task, provider acpruntime.Provid
 	}
 	if err := os.WriteFile(metaFile, append(rawMeta, '\n'), 0o644); err != nil {
 		return ParseFailureArtifacts{}, fmt.Errorf("write parse-failure metadata: %w", err)
+	}
+
+	return artifacts, nil
+}
+
+func WritePromptArtifacts(
+	task acpruntime.Task,
+	provider acpruntime.Provider,
+	prompt string,
+	taskPayload []byte,
+	metadata PromptArtifactsMetadata,
+) (PromptArtifacts, error) {
+	workspace := strings.TrimSpace(task.Workspace)
+	if workspace == "" {
+		return PromptArtifacts{}, fmt.Errorf("workspace is empty")
+	}
+	absWorkspace, err := filepath.Abs(workspace)
+	if err != nil {
+		return PromptArtifacts{}, fmt.Errorf("resolve workspace path: %w", err)
+	}
+	rawDir := filepath.Join(absWorkspace, "reports", "taskruns", "raw")
+	if err := os.MkdirAll(rawDir, 0o755); err != nil {
+		return PromptArtifacts{}, fmt.Errorf("mkdir raw output dir: %w", err)
+	}
+
+	stamp := time.Now().UTC().Format("20060102T150405Z")
+	attempt := safePathPart(metadata.Attempt)
+	base := safePathPart(task.RunID) + "-" + safePathPart(task.StepID) + "-" + safePathPart(task.TaskID) + "-" + safePathPart(string(provider)) + "-" + attempt + "-" + stamp
+
+	promptFile := filepath.Join(rawDir, base+"-prompt.txt")
+	taskFile := filepath.Join(rawDir, base+"-task.json")
+	metaFile := filepath.Join(rawDir, base+"-prompt-meta.json")
+
+	promptArtifact, err := writeBoundedArtifactFile(promptFile, []byte(prompt))
+	if err != nil {
+		return PromptArtifacts{}, err
+	}
+	taskArtifact, err := writeBoundedArtifactFile(taskFile, taskPayload)
+	if err != nil {
+		return PromptArtifacts{}, err
+	}
+	promptArtifact.Path = promptFile
+	promptArtifact.RelativePath = toRelativePath(absWorkspace, promptFile)
+	taskArtifact.Path = taskFile
+	taskArtifact.RelativePath = toRelativePath(absWorkspace, taskFile)
+
+	artifacts := PromptArtifacts{
+		Directory:               rawDir,
+		RelativeDirectory:       toRelativePath(absWorkspace, rawDir),
+		Prompt:                  promptArtifact,
+		TaskPayload:             taskArtifact,
+		MetadataPath:            metaFile,
+		RelativeMetadataPath:    toRelativePath(absWorkspace, metaFile),
+		RelativePromptPath:      promptArtifact.RelativePath,
+		RelativeTaskPayloadPath: taskArtifact.RelativePath,
+	}
+
+	metaPayload := map[string]any{
+		"generated_at": time.Now().UTC().Format(time.RFC3339),
+		"provider":     provider,
+		"task": map[string]any{
+			"task_id":     task.TaskID,
+			"run_id":      task.RunID,
+			"step_id":     task.StepID,
+			"workspace":   absWorkspace,
+			"shard_id":    task.ShardID,
+			"repo_scope":  primaryRepoScope(task.RepoScope, task.RepoScopes),
+			"repo_scopes": append([]string(nil), task.RepoScopes...),
+			"path_scopes": append([]string(nil), task.PathScopes...),
+		},
+		"attempt":             strings.TrimSpace(metadata.Attempt),
+		"include_directories": append([]string(nil), metadata.IncludeDirectories...),
+		"prompt_pack": map[string]any{
+			"name":          metadata.PromptPack.Name,
+			"relative_path": metadata.PromptPack.RelativePath,
+			"source":        metadata.PromptPack.Source,
+			"warning":       metadata.PromptPack.Warning,
+		},
+		"prompt": map[string]any{
+			"path":          promptArtifact.Path,
+			"relative_path": promptArtifact.RelativePath,
+			"bytes":         promptArtifact.Bytes,
+			"stored_bytes":  promptArtifact.StoredBytes,
+			"sha256":        promptArtifact.SHA256,
+			"truncated":     promptArtifact.Truncated,
+		},
+		"task_payload": map[string]any{
+			"path":          taskArtifact.Path,
+			"relative_path": taskArtifact.RelativePath,
+			"bytes":         taskArtifact.Bytes,
+			"stored_bytes":  taskArtifact.StoredBytes,
+			"sha256":        taskArtifact.SHA256,
+			"truncated":     taskArtifact.Truncated,
+		},
+	}
+	rawMeta, err := json.MarshalIndent(metaPayload, "", "  ")
+	if err != nil {
+		return PromptArtifacts{}, fmt.Errorf("marshal prompt metadata: %w", err)
+	}
+	if err := os.WriteFile(metaFile, append(rawMeta, '\n'), 0o644); err != nil {
+		return PromptArtifacts{}, fmt.Errorf("write prompt metadata: %w", err)
 	}
 
 	return artifacts, nil

@@ -700,6 +700,78 @@ class BatchFailureClassificationTest(unittest.TestCase):
         )
         self.assertEqual("/tmp/provenarch-batch/qwen-code/run2\t2", completed.stdout.strip())
 
+    def test_shell_ui_dependency_precheck_fails_with_targeted_vitest_diagnostic(self) -> None:
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+
+        host_root = self.root / "host-precheck-missing-vitest"
+        (host_root / "ui").mkdir(parents=True, exist_ok=True)
+        batch_root = self.root / "batch-precheck-missing-vitest"
+        batch_root.mkdir(parents=True, exist_ok=True)
+        command = (
+            prelude
+            + "\n"
+            + "npm() {\n"
+            + "  if [[ \"$1\" == \"ci\" ]]; then return 0; fi\n"
+            + "  if [[ \"$1\" == \"exec\" ]]; then return 0; fi\n"
+            + "  return 0\n"
+            + "}\n"
+            + f'BATCH_ROOT={shlex.quote(str(batch_root))}\n'
+            + f'PROVENARCH_ROOT={shlex.quote(str(host_root))}\n'
+            + "if run_ui_dependency_precheck; then echo \"rc=0\"; else echo \"rc=$?\"; fi\n"
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "PROVENARCH_ROOT": str(REPO_ROOT),
+            },
+        )
+        self.assertIn("rc=1", completed.stdout)
+        readiness_log = batch_root / "precheck-ui-readiness.log"
+        self.assertTrue(readiness_log.exists(), "expected readiness diagnostic log")
+        self.assertIn("vitest binary missing after npm ci --prefix ui", readiness_log.read_text(encoding="utf-8"))
+
+    def test_shell_ui_dependency_precheck_succeeds_when_vitest_is_present(self) -> None:
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+
+        host_root = self.root / "host-precheck-with-vitest"
+        (host_root / "ui").mkdir(parents=True, exist_ok=True)
+        batch_root = self.root / "batch-precheck-with-vitest"
+        batch_root.mkdir(parents=True, exist_ok=True)
+        command = (
+            prelude
+            + "\n"
+            + "npm() {\n"
+            + "  if [[ \"$1\" == \"ci\" ]]; then\n"
+            + "    mkdir -p \"$PROVENARCH_ROOT/ui/node_modules/.bin\"\n"
+            + "    printf '#!/bin/sh\\nexit 0\\n' >\"$PROVENARCH_ROOT/ui/node_modules/.bin/vitest\"\n"
+            + "    chmod +x \"$PROVENARCH_ROOT/ui/node_modules/.bin/vitest\"\n"
+            + "    return 0\n"
+            + "  fi\n"
+            + "  if [[ \"$1\" == \"exec\" ]]; then return 0; fi\n"
+            + "  return 0\n"
+            + "}\n"
+            + f'BATCH_ROOT={shlex.quote(str(batch_root))}\n'
+            + f'PROVENARCH_ROOT={shlex.quote(str(host_root))}\n'
+            + "if run_ui_dependency_precheck; then echo \"rc=0\"; else echo \"rc=$?\"; fi\n"
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "PROVENARCH_ROOT": str(REPO_ROOT),
+            },
+        )
+        self.assertIn("rc=0", completed.stdout)
+
     def test_python_frontend_matrix_supports_per_run_results(self) -> None:
         batch_root = self.root / "batch"
         reports_root = self.root / "reports"

@@ -68,7 +68,7 @@ Canonical profile runs нужно выполнять из clean committed tree �
 
 Практическое правило:
 - если в основном worktree есть незакоммиченные изменения в harness/runtime/docs, сначала вынести canonical прогон в отдельный clean worktree;
-- если используется отдельный clean worktree, заранее установить локальные UI deps в этом worktree: минимум `npm ci --prefix ui`; для frontend live surface дополнительно `npm exec --prefix ui playwright install chromium`;
+- если используется отдельный clean worktree, batch precheck сам bootstrap-ит UI deps перед `make test`, но trusted host всё равно должен успешно проходить `npm ci --prefix ui` и `npm exec --prefix ui playwright install chromium`; missing `vitest`/UI deps классифицируется как host-readiness blocker, а не runtime regression;
 - не использовать `BATCH_SKIP_PRECHECK=1` как способ обойти локальное расхождение между committed contract и текущими незакоммиченными правками;
 - diagnostic прогон с `BATCH_SKIP_PRECHECK=1` допустим только как triage-only evidence и не считается canonical acceptance run.
 
@@ -536,9 +536,19 @@ Zero tolerance:
 Если в любом `profile+sweep` появляются `runtime_timeout` или `infra_*`:
 - считать это blocking runtime incident для релизного verdict;
 - сначала проверить `driver.log` (matrix + batch), затем `session-summary.md` и `full-run.log` в `runs/<batch-id>/<provider>/runN/`, затем `arch-workspace/reports/taskruns/logs/*.ndjson` и `reports/taskruns/raw/*` для первичного runtime signal;
+- в `reports/taskruns/raw/*` проверять не только stdout/stderr parse diagnostics, но и effective prompt artifacts (`*-prompt.txt`, `*-task.json`, `*-prompt-meta.json`) для каждого headless attempt/retry;
 - отделить induced failures (например, debug timeout override) от реальной runtime/provider деградации;
 - если raw/taskrun logs показывают `runner_parse_failed` или `runner_unavailable`, считать их primary failure class даже если `session-summary.md` дополнительно фиксирует `infra_incomplete_cycle`;
 - для release decision использовать только прогон без diagnostic timeout overrides.
+
+Required canonical live surface:
+- validated final set обязан содержать:
+  - `reports/as-is/overview.md`
+  - `reports/coverage/summary.md`
+  - `reports/coverage/open-questions.md`
+  - `reports/findings/findings.md`
+- если shard-authored docs материализовали только часть `reports/as-is/*` или `reports/coverage/*`, assembler детерминированно добавляет недостающие aggregate docs до validator stage
+- `validator PASS` без этого canonical live surface больше не считается допустимым состоянием
 
 ### 6.8 Additional Non-Release Checks
 

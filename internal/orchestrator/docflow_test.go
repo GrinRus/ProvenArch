@@ -210,6 +210,36 @@ func TestValidateStagedArtifactsReportsMissingStagedDocument(t *testing.T) {
 	}
 }
 
+func TestValidateStagedArtifactsReportsMissingRequiredCanonicalLiveDocuments(t *testing.T) {
+	t.Parallel()
+
+	execution := &pipelineExecution{
+		finalRunIndex: &contracts.FinalRunIndex{
+			RunID: "run-1",
+			CanonicalDocuments: []contracts.FinalRunDocument{
+				{
+					ID:            "doc.agent.domain",
+					Kind:          "agent-output",
+					CanonicalPath: "reports/agent-outputs/domains/payments.md",
+					StagedPath:    "reports/taskruns/run-1/staging/final/reports/agent-outputs/domains/payments.md",
+				},
+			},
+		},
+		citationIndex: &contracts.CitationIndex{RunID: "run-1"},
+	}
+
+	issues := execution.validateStagedArtifacts()
+	missingRequired := 0
+	for _, issue := range issues {
+		if issue.Code == "missing_required_canonical_document" {
+			missingRequired++
+		}
+	}
+	if missingRequired != len(requiredCanonicalLiveDocuments) {
+		t.Fatalf("expected %d missing required canonical document issues, got %d (%#v)", len(requiredCanonicalLiveDocuments), missingRequired, issues)
+	}
+}
+
 func TestValidateStagedArtifactsDetectsCitationAndTopicIssues(t *testing.T) {
 	t.Parallel()
 

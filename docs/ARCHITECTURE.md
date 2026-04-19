@@ -210,6 +210,12 @@
 3) Findings -> validator verdict over staged final set
 4) Proposals -> promotion + compatibility rebuild
 
+Headless runtime prompt assembly:
+- effective provider prompt собирается внутри runtime runner, а не читается напрямую из seeded markdown surface
+- workspace prompt packs `skills/prompt-packs/collect-context.md` и `skills/prompt-packs/findings.md` подключаются как additive context
+- strict schema/write invariants остаются в runtime builder и идут после additive prompt-pack section, поэтому редактируемые prompt packs не ослабляют contract
+- для каждого shard attempt/retry runtime materialize-ит prompt/task diagnostics в `reports/taskruns/raw/*`
+
 On-demand capability:
 - Q&A агент использует `charter/cards + model + reports + docs/imports`; в beta доступен как internal service + CLI `acp qa` без публичного API endpoint.
 

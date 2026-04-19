@@ -12,6 +12,7 @@ import (
 	"time"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtime/promptcontract"
 )
 
 func TestFakeRunnerCollectStep(t *testing.T) {
@@ -430,6 +431,176 @@ JSON
 	}
 	if result.TaskResult.Meta.TaskID != "task-native-malformed-retry" {
 		t.Fatalf("unexpected task id %q", result.TaskResult.Meta.TaskID)
+	}
+}
+
+func TestHeadlessRunnerNativeDirectClaudeCapturesInitialAndRetryPromptArtifactsWithWorkspacePromptPack(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	workspace := filepath.Join(tempDir, "workspace")
+	if err := os.MkdirAll(filepath.Join(workspace, "skills", "prompt-packs"), 0o755); err != nil {
+		t.Fatalf("mkdir prompt-pack dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "skills", "prompt-packs", "collect-context.md"), []byte("Custom claude collect-context.\n"), 0o644); err != nil {
+		t.Fatalf("write custom prompt pack: %v", err)
+	}
+
+	commandPath := filepath.Join(tempDir, "claude")
+	script := `#!/bin/sh
+set -eu
+last_arg=""
+for arg in "$@"; do
+  last_arg="$arg"
+done
+if echo "$last_arg" | grep -q "RETRY MODE"; then
+  cat <<'JSON'
+{"result":"{\"meta\":{\"task_id\":\"task-claude-prompt-artifacts\",\"step_id\":\"init.step1.collect\",\"runtime\":{\"name\":\"claude-code\",\"version\":\"claude-cli\"},\"started_at\":\"2026-04-03T12:00:00Z\"},\"summary\":\"ok\",\"changeset\":[]}"}
+JSON
+  exit 0
+fi
+echo "This is not JSON"
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write claude prompt-artifacts command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	if _, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-claude-prompt-artifacts",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    workspace,
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("expected claude run with retry prompt artifacts to succeed: %v", err)
+	}
+
+	metaFiles, err := filepath.Glob(filepath.Join(workspace, "reports", "taskruns", "raw", "*-prompt-meta.json"))
+	if err != nil {
+		t.Fatalf("glob prompt artifact metadata: %v", err)
+	}
+	if len(metaFiles) != 2 {
+		t.Fatalf("expected initial + retry prompt metadata files, got %d", len(metaFiles))
+	}
+	foundPackContent := false
+	foundRetryAttempt := false
+	for _, metaPath := range metaFiles {
+		rawMeta, readErr := os.ReadFile(metaPath)
+		if readErr != nil {
+			t.Fatalf("read prompt metadata %q: %v", metaPath, readErr)
+		}
+		meta := map[string]any{}
+		if err := json.Unmarshal(rawMeta, &meta); err != nil {
+			t.Fatalf("parse prompt metadata %q: %v", metaPath, err)
+		}
+		if strings.TrimSpace(meta["attempt"].(string)) == "parse-retry" {
+			foundRetryAttempt = true
+		}
+		promptBlock, ok := meta["prompt"].(map[string]any)
+		if !ok {
+			t.Fatalf("metadata %q missing prompt block", metaPath)
+		}
+		promptRel := strings.TrimSpace(promptBlock["relative_path"].(string))
+		promptRaw, err := os.ReadFile(filepath.Join(workspace, filepath.FromSlash(promptRel)))
+		if err != nil {
+			t.Fatalf("read prompt file %q: %v", promptRel, err)
+		}
+		if strings.Contains(string(promptRaw), "Custom claude collect-context.") {
+			foundPackContent = true
+		}
+	}
+	if !foundRetryAttempt {
+		t.Fatalf("expected parse-retry prompt artifact metadata")
+	}
+	if !foundPackContent {
+		t.Fatalf("expected custom workspace prompt pack content in captured claude prompt artifacts")
+	}
+}
+
+func TestHeadlessRunnerNativeDirectClaudeCapturesFindingsPromptPackInPromptArtifacts(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	workspace := filepath.Join(tempDir, "workspace")
+	if err := os.MkdirAll(filepath.Join(workspace, "skills", "prompt-packs"), 0o755); err != nil {
+		t.Fatalf("mkdir prompt-pack dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "skills", "prompt-packs", "findings.md"), []byte("Custom claude findings pack.\n"), 0o644); err != nil {
+		t.Fatalf("write custom findings prompt pack: %v", err)
+	}
+
+	commandPath := filepath.Join(tempDir, "claude")
+	script := `#!/bin/sh
+set -eu
+last_arg=""
+for arg in "$@"; do
+  last_arg="$arg"
+done
+if echo "$last_arg" | grep -q "RETRY MODE"; then
+  cat <<'JSON'
+{"result":"{\"meta\":{\"task_id\":\"task-claude-findings-prompt-artifacts\",\"step_id\":\"refresh.step3.findings\",\"runtime\":{\"name\":\"claude-code\",\"version\":\"claude-cli\"},\"started_at\":\"2026-04-03T12:00:00Z\"},\"summary\":\"ok\",\"changeset\":[]}"}
+JSON
+  exit 0
+fi
+echo "This is not JSON"
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write claude findings prompt-artifacts command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	if _, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-claude-findings-prompt-artifacts",
+		RunID:        "run-1",
+		StepID:       "refresh.step3.findings",
+		Workspace:    workspace,
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("expected claude findings run with retry prompt artifacts to succeed: %v", err)
+	}
+
+	metaFiles, err := filepath.Glob(filepath.Join(workspace, "reports", "taskruns", "raw", "*-prompt-meta.json"))
+	if err != nil {
+		t.Fatalf("glob prompt artifact metadata: %v", err)
+	}
+	if len(metaFiles) != 2 {
+		t.Fatalf("expected initial + retry prompt metadata files, got %d", len(metaFiles))
+	}
+	foundPackContent := false
+	foundRetryAttempt := false
+	for _, metaPath := range metaFiles {
+		rawMeta, readErr := os.ReadFile(metaPath)
+		if readErr != nil {
+			t.Fatalf("read prompt metadata %q: %v", metaPath, readErr)
+		}
+		meta := map[string]any{}
+		if err := json.Unmarshal(rawMeta, &meta); err != nil {
+			t.Fatalf("parse prompt metadata %q: %v", metaPath, err)
+		}
+		if strings.TrimSpace(meta["attempt"].(string)) == "parse-retry" {
+			foundRetryAttempt = true
+		}
+		promptBlock, ok := meta["prompt"].(map[string]any)
+		if !ok {
+			t.Fatalf("metadata %q missing prompt block", metaPath)
+		}
+		promptRel := strings.TrimSpace(promptBlock["relative_path"].(string))
+		promptRaw, err := os.ReadFile(filepath.Join(workspace, filepath.FromSlash(promptRel)))
+		if err != nil {
+			t.Fatalf("read prompt file %q: %v", promptRel, err)
+		}
+		if strings.Contains(string(promptRaw), "Custom claude findings pack.") {
+			foundPackContent = true
+		}
+	}
+	if !foundRetryAttempt {
+		t.Fatalf("expected parse-retry prompt artifact metadata")
+	}
+	if !foundPackContent {
+		t.Fatalf("expected custom findings prompt pack content in captured claude prompt artifacts")
 	}
 }
 
@@ -933,6 +1104,35 @@ func TestBuildDirectPromptRetryIncludesSchemaFailureHintsForInvalidChangesetOp(t
 	}
 	if !strings.Contains(prompt, "Do NOT use ad-hoc ops such as upsert_file") {
 		t.Fatalf("expected upsert_file ban in claude retry prompt")
+	}
+}
+
+func TestBuildDirectPromptRetryIncludesSharedPromptContractGuardrails(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		TaskID:       "task-claude-shared-guardrails",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		Workspace:    t.TempDir(),
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	prompt := buildDirectPromptWithMode(raw, promptRetryParse, false)
+	for _, line := range promptcontract.SharedTaskResultContractLines() {
+		if !strings.Contains(prompt, line) {
+			t.Fatalf("expected shared taskresult guardrail in claude prompt: %q", line)
+		}
+	}
+	for _, line := range promptcontract.SharedRetryGuardrailLines() {
+		if !strings.Contains(prompt, line) {
+			t.Fatalf("expected shared retry guardrail in claude prompt: %q", line)
+		}
 	}
 }
 

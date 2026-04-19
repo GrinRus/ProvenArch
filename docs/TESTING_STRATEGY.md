@@ -220,6 +220,7 @@ Implemented additional jobs:
   - full-run semantic checks ограничены локальным скриптом (owner-gap/findings, coverage/questions dedupe, critical off-topic markers) и не включают batch-only `analysis:evidence-scope`/`analysis:cross-doc`
   - summary/log/snapshots: `TMP_ROOT/session-summary.md`, `TMP_ROOT/full-run.log`, `TMP_ROOT/snapshots/*`
   - при parse-fail runtime сохраняет raw-output diagnostics в `reports/taskruns/raw/*` (stdout/stderr/meta with checksum)
+  - для headless attempt/retry runtime также сохраняет prompt diagnostics в `reports/taskruns/raw/*` (prompt text, task payload, metadata with attempt/include-directories/prompt-pack source)
 - batch regression `5x2` + frontend live e2e:
   - `scripts/full-run-batch-5x2.sh`
   - canonical input: `TARGET_REPOS_FILE` (`repos[]` format)

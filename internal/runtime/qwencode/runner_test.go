@@ -12,6 +12,7 @@ import (
 	"time"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtime/promptcontract"
 )
 
 func loadCapturedLiveStdoutFixture(t *testing.T, name string) string {
@@ -551,6 +552,176 @@ JSON
 	}
 }
 
+func TestHeadlessRunnerCapturesInitialAndRetryPromptArtifactsWithWorkspacePromptPack(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	workspace := filepath.Join(tempDir, "workspace")
+	if err := os.MkdirAll(filepath.Join(workspace, "skills", "prompt-packs"), 0o755); err != nil {
+		t.Fatalf("mkdir prompt-pack dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "skills", "prompt-packs", "collect-context.md"), []byte("Custom qwen collect-context.\n"), 0o644); err != nil {
+		t.Fatalf("write custom prompt pack: %v", err)
+	}
+
+	commandPath := filepath.Join(tempDir, "qwen-prompt-artifacts-stub.sh")
+	script := `#!/bin/sh
+set -eu
+last_arg=""
+for arg in "$@"; do
+  last_arg="$arg"
+done
+if echo "$last_arg" | grep -q "RETRY MODE"; then
+  cat <<'JSON'
+{"meta":{"task_id":"task-prompt-artifacts","step_id":"init.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}
+JSON
+  exit 0
+fi
+echo '{"response":"not-json"}'
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write prompt-artifacts command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	if _, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-prompt-artifacts",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    workspace,
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("expected run with retry prompt artifacts to succeed: %v", err)
+	}
+
+	metaFiles, err := filepath.Glob(filepath.Join(workspace, "reports", "taskruns", "raw", "*-prompt-meta.json"))
+	if err != nil {
+		t.Fatalf("glob prompt artifact metadata: %v", err)
+	}
+	if len(metaFiles) != 2 {
+		t.Fatalf("expected initial + retry prompt metadata files, got %d", len(metaFiles))
+	}
+	foundPackContent := false
+	foundRetryAttempt := false
+	for _, metaPath := range metaFiles {
+		rawMeta, readErr := os.ReadFile(metaPath)
+		if readErr != nil {
+			t.Fatalf("read prompt metadata %q: %v", metaPath, readErr)
+		}
+		meta := map[string]any{}
+		if err := json.Unmarshal(rawMeta, &meta); err != nil {
+			t.Fatalf("parse prompt metadata %q: %v", metaPath, err)
+		}
+		if strings.TrimSpace(meta["attempt"].(string)) == "parse-retry" {
+			foundRetryAttempt = true
+		}
+		promptBlock, ok := meta["prompt"].(map[string]any)
+		if !ok {
+			t.Fatalf("metadata %q missing prompt block", metaPath)
+		}
+		promptRel := strings.TrimSpace(promptBlock["relative_path"].(string))
+		promptRaw, err := os.ReadFile(filepath.Join(workspace, filepath.FromSlash(promptRel)))
+		if err != nil {
+			t.Fatalf("read prompt file %q: %v", promptRel, err)
+		}
+		if strings.Contains(string(promptRaw), "Custom qwen collect-context.") {
+			foundPackContent = true
+		}
+	}
+	if !foundRetryAttempt {
+		t.Fatalf("expected parse-retry prompt artifact metadata")
+	}
+	if !foundPackContent {
+		t.Fatalf("expected custom workspace prompt pack content in captured qwen prompt artifacts")
+	}
+}
+
+func TestHeadlessRunnerCapturesFindingsPromptPackInPromptArtifacts(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	workspace := filepath.Join(tempDir, "workspace")
+	if err := os.MkdirAll(filepath.Join(workspace, "skills", "prompt-packs"), 0o755); err != nil {
+		t.Fatalf("mkdir prompt-pack dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "skills", "prompt-packs", "findings.md"), []byte("Custom qwen findings pack.\n"), 0o644); err != nil {
+		t.Fatalf("write custom findings prompt pack: %v", err)
+	}
+
+	commandPath := filepath.Join(tempDir, "qwen-findings-prompt-artifacts-stub.sh")
+	script := `#!/bin/sh
+set -eu
+last_arg=""
+for arg in "$@"; do
+  last_arg="$arg"
+done
+if echo "$last_arg" | grep -q "RETRY MODE"; then
+  cat <<'JSON'
+{"meta":{"task_id":"task-findings-prompt-artifacts","step_id":"refresh.step3.findings","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}
+JSON
+  exit 0
+fi
+echo '{"response":"not-json"}'
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write findings prompt-artifacts command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	if _, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-findings-prompt-artifacts",
+		RunID:        "run-1",
+		StepID:       "refresh.step3.findings",
+		Workspace:    workspace,
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("expected run with findings retry prompt artifacts to succeed: %v", err)
+	}
+
+	metaFiles, err := filepath.Glob(filepath.Join(workspace, "reports", "taskruns", "raw", "*-prompt-meta.json"))
+	if err != nil {
+		t.Fatalf("glob prompt artifact metadata: %v", err)
+	}
+	if len(metaFiles) != 2 {
+		t.Fatalf("expected initial + retry prompt metadata files, got %d", len(metaFiles))
+	}
+	foundPackContent := false
+	foundRetryAttempt := false
+	for _, metaPath := range metaFiles {
+		rawMeta, readErr := os.ReadFile(metaPath)
+		if readErr != nil {
+			t.Fatalf("read prompt metadata %q: %v", metaPath, readErr)
+		}
+		meta := map[string]any{}
+		if err := json.Unmarshal(rawMeta, &meta); err != nil {
+			t.Fatalf("parse prompt metadata %q: %v", metaPath, err)
+		}
+		if strings.TrimSpace(meta["attempt"].(string)) == "parse-retry" {
+			foundRetryAttempt = true
+		}
+		promptBlock, ok := meta["prompt"].(map[string]any)
+		if !ok {
+			t.Fatalf("metadata %q missing prompt block", metaPath)
+		}
+		promptRel := strings.TrimSpace(promptBlock["relative_path"].(string))
+		promptRaw, err := os.ReadFile(filepath.Join(workspace, filepath.FromSlash(promptRel)))
+		if err != nil {
+			t.Fatalf("read prompt file %q: %v", promptRel, err)
+		}
+		if strings.Contains(string(promptRaw), "Custom qwen findings pack.") {
+			foundPackContent = true
+		}
+	}
+	if !foundRetryAttempt {
+		t.Fatalf("expected parse-retry prompt artifact metadata")
+	}
+	if !foundPackContent {
+		t.Fatalf("expected custom findings prompt pack content in captured qwen prompt artifacts")
+	}
+}
+
 func TestHeadlessRunnerRetryParseFailureUsesRetryOutputInRunnerError(t *testing.T) {
 	t.Parallel()
 
@@ -1038,6 +1209,35 @@ func TestBuildPromptIncludesStrictResultJsonAndFinalResponseDiscipline(t *testin
 	}
 	if !strings.Contains(prompt, `Final response MUST start with "{" and end with "}".`) {
 		t.Fatalf("expected retry json framing guard in prompt")
+	}
+}
+
+func TestBuildPromptRetryIncludesSharedPromptContractGuardrails(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		TaskID:       "task-shared-guardrails",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		Workspace:    t.TempDir(),
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	prompt := buildPromptWithMode(raw, promptRetryParse)
+	for _, line := range promptcontract.SharedTaskResultContractLines() {
+		if !strings.Contains(prompt, line) {
+			t.Fatalf("expected shared taskresult guardrail in prompt: %q", line)
+		}
+	}
+	for _, line := range promptcontract.SharedRetryGuardrailLines() {
+		if !strings.Contains(prompt, line) {
+			t.Fatalf("expected shared retry guardrail in prompt: %q", line)
+		}
 	}
 }
 

@@ -19,6 +19,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/artifactquality"
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtime/promptcontract"
 	"github.com/GrinRus/ProvenArch/internal/runtime/runnerdiag"
 	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultbinding"
 	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultcompat"
@@ -33,6 +34,11 @@ var (
 type HeadlessRunner struct {
 	Command string
 	Args    []string
+}
+
+type builtPrompt struct {
+	Text string
+	Pack promptcontract.PromptPack
 }
 
 type promptRetryMode int
@@ -117,7 +123,9 @@ func runStdinPassthrough(ctx context.Context, command string, args []string, tas
 }
 
 func runNativeDirectClaude(ctx context.Context, command string, task acpruntime.Task, taskPayload []byte) (acpruntime.Result, error) {
-	args := buildNativeDirectClaudeArgs(task, buildDirectPrompt(taskPayload, false, false))
+	initialPrompt := buildDirectPromptArtifact(taskPayload, promptRetryNone, false, nil)
+	recordPromptArtifacts(task, "initial", initialPrompt, acpruntime.ProviderClaudeCode, acpruntime.ResolveHeadlessIncludeDirectories(task), taskPayload)
+	args := buildNativeDirectClaudeArgs(task, initialPrompt.Text)
 	result, parseStage, parseErr, runErr := runClaudeCommand(ctx, task, command, args, nil)
 	if runErr != nil {
 		unavailableMessage := buildUnavailableFailureMessage(task, runErr, result)
@@ -134,15 +142,14 @@ func runNativeDirectClaude(ctx context.Context, command string, task acpruntime.
 		return maybeRepairCollectArtifacts(ctx, task, taskPayload, command, result)
 	}
 
-	retryArgs := buildNativeDirectClaudeArgs(
-		task,
-		buildDirectPromptWithModeAndHints(
-			taskPayload,
-			promptRetryParse,
-			parseStage == "extract" && (isEnvelopeResultEmptyError(parseErr) || isEnvelopeResultMalformedError(parseErr)),
-			buildParseRepairHints(parseStage, parseErr),
-		),
+	retryPrompt := buildDirectPromptArtifact(
+		taskPayload,
+		promptRetryParse,
+		parseStage == "extract" && (isEnvelopeResultEmptyError(parseErr) || isEnvelopeResultMalformedError(parseErr)),
+		buildParseRepairHints(parseStage, parseErr),
 	)
+	recordPromptArtifacts(task, "parse-retry", retryPrompt, acpruntime.ProviderClaudeCode, acpruntime.ResolveHeadlessIncludeDirectories(task), taskPayload)
+	retryArgs := buildNativeDirectClaudeArgs(task, retryPrompt.Text)
 	retryResult, retryParseStage, retryParseErr, retryRunErr := runClaudeCommand(ctx, task, command, retryArgs, nil)
 	if retryRunErr != nil {
 		unavailableMessage := buildUnavailableFailureMessage(task, retryRunErr, retryResult)
@@ -213,7 +220,9 @@ func maybeRepairCollectArtifacts(
 		_ = snapshot.Cleanup()
 	}()
 
-	repairArgs := buildNativeDirectClaudeArgs(task, buildDirectPromptWithModeAndHints(taskPayload, promptRetryArtifact, false, buildArtifactRepairHints(initialProblem)))
+	repairPrompt := buildDirectPromptArtifact(taskPayload, promptRetryArtifact, false, buildArtifactRepairHints(initialProblem))
+	recordPromptArtifacts(task, "artifact-repair", repairPrompt, acpruntime.ProviderClaudeCode, acpruntime.ResolveHeadlessIncludeDirectories(task), taskPayload)
+	repairArgs := buildNativeDirectClaudeArgs(task, repairPrompt.Text)
 	repaired, repairParseStage, parseErr, runErr := runClaudeCommand(ctx, task, command, repairArgs, nil)
 	if runErr != nil {
 		_ = snapshot.Restore()
@@ -524,21 +533,25 @@ func buildDirectPrompt(taskPayload []byte, retry bool, requireNonEmptyResult boo
 	if retry {
 		mode = promptRetryParse
 	}
-	return buildDirectPromptWithMode(taskPayload, mode, requireNonEmptyResult)
+	return buildDirectPromptArtifact(taskPayload, mode, requireNonEmptyResult, nil).Text
 }
 
 func buildDirectPromptWithMode(taskPayload []byte, mode promptRetryMode, requireNonEmptyResult bool) string {
-	return buildDirectPromptWithModeAndHints(taskPayload, mode, requireNonEmptyResult, nil)
+	return buildDirectPromptArtifact(taskPayload, mode, requireNonEmptyResult, nil).Text
 }
 
 func buildDirectPromptWithModeAndHints(taskPayload []byte, mode promptRetryMode, requireNonEmptyResult bool, extraHints []string) string {
+	return buildDirectPromptArtifact(taskPayload, mode, requireNonEmptyResult, extraHints).Text
+}
+
+func buildDirectPromptArtifact(taskPayload []byte, mode promptRetryMode, requireNonEmptyResult bool, extraHints []string) builtPrompt {
 	var task acpruntime.Task
 	if err := json.Unmarshal(taskPayload, &task); err != nil {
-		return strings.TrimSpace(fmt.Sprintf(`You are ACP runtime provider %q.
+		return builtPrompt{Text: strings.TrimSpace(fmt.Sprintf(`You are ACP runtime provider %q.
 Return exactly one valid JSON object for ACP TaskResult.
 Do not output markdown, code fences, or any explanatory text.
 Task payload JSON:
-%s`, acpruntime.ProviderClaudeCode, strings.TrimSpace(string(taskPayload))))
+%s`, acpruntime.ProviderClaudeCode, strings.TrimSpace(string(taskPayload))))}
 	}
 
 	repoScopesJSON := "[]"
@@ -550,15 +563,11 @@ Task payload JSON:
 	if rawPathScopes, err := json.Marshal(task.PathScopes); err == nil {
 		pathScopesJSON = string(rawPathScopes)
 	}
-	stepPolicy := buildStepSpecificDirectPolicy(task.StepID)
-	repositoryEvidencePolicy := strings.Join([]string{
-		`REPOSITORY EVIDENCE RULES:`,
-		`- ACP workspace scaffold (workspace.yaml, charter/, model/, reports/) is support context, not the primary source tree.`,
-		`- Prefer evidence from repository files under meta.repo_scopes/meta.path_scopes when those files are available.`,
-		`- meta.path_scopes may contain directories, files, or a mixed disjoint partition; treat every listed scope as in-bounds evidence for this task.`,
-		`- Use ACP-generated workspace artifacts as evidence only for ACP runtime/report state, not as a substitute for repository analysis.`,
-	}, "\n")
-	docFirstPolicy := buildDocFirstFilesystemPolicy(task)
+	promptPackSection, pack := promptcontract.AdditivePromptPackSection(task)
+	stepPolicy := promptcontract.StepPolicy(task.StepID)
+	repositoryEvidencePolicy := promptcontract.RepositoryEvidencePolicy()
+	docFirstPolicy := promptcontract.DocFirstFilesystemPolicy(task)
+	strictContractLines := strings.Join(promptcontract.SharedTaskResultContractLines(), "\n")
 	retryHint := ""
 	if mode != promptRetryNone {
 		retryLines := []string{
@@ -566,14 +575,9 @@ Task payload JSON:
 			`Do not include non-ASCII symbols in numbers or timestamps.`,
 			`RFC3339 timestamps only (example: 2026-04-09T15:28:49Z).`,
 			`Decimals must be compact numeric literals (example: 0.7, not 0. 7).`,
-			`Do NOT collapse a multi-document refresh into one generic "cite.runtime-summary" citation.`,
-			`Do NOT overwrite a rich shard-pack-manifest.json with a skeletal reuse-only manifest.`,
-			`Preserve repo-specific citations when repository evidence already exists or can be recovered from repo roots.`,
-			`Unknown changeset[].op values are forbidden; allowed values are exactly: upsert_entity, remove_entity, upsert_edge, remove_edge, add_finding, add_doc_artifact.`,
-			`For op="add_doc_artifact", the payload key MUST be "doc_artifact"; never use "artifact".`,
-			`If a retry only repaired files inside write_root, prefer "changeset": [] instead of inventing file-write operations.`,
-			`Return only JSON object, without prose.`,
 		}
+		retryLines = append(retryLines, promptcontract.SharedRetryGuardrailLines()...)
+		retryLines = append(retryLines, `Return only JSON object, without prose.`)
 		if mode == promptRetryArtifact {
 			retryLines[0] = `ARTIFACT REPAIR MODE: previous collect output was schema-valid but write_root artifacts look skeletal or generic-only.`
 			retryLines = append(retryLines,
@@ -596,23 +600,15 @@ Task payload JSON:
 		}, "\n")
 	}
 
-	return strings.TrimSpace(fmt.Sprintf(`You are ACP runtime provider %q.
+	return builtPrompt{
+		Text: strings.TrimSpace(fmt.Sprintf(`You are ACP runtime provider %q.
 Return exactly one valid JSON object for ACP TaskResult.
 Do not output markdown, code fences, explanations, or any text outside the JSON object.
 
+%s
+
 STRICT CONTRACT (must pass):
-- top-level required keys: "meta", "summary", "changeset"
-- meta required keys: "task_id", "step_id", "runtime", "started_at"
-- meta.runtime required key: "name"
-- use snake_case keys exactly as shown.
-- DO NOT use top-level fields: task_id, run_id, step_id, status.
-- provenance.kind MUST be one of: observation, inference, assertion.
-- provenance.confidence MUST be a NUMBER in range [0,1], never a string.
-- provenance.evidence MUST be an ARRAY of objects with repo/path.
-- if "questions" is present, it MUST be an array of objects (each object has at least "id" and "text").
-- coverage.missing MUST use canonical terms only: owner mappings, ci-cd evidence, delta validation, dependency graph, runtime metrics, api contracts, deployment configs, integration edges, datastore bindings, dependencies.
-- question IDs MUST use canonical form without numeric suffixes (example: q.refresh.delta, not q.refresh.delta.1).
-- Do not claim workspace is empty/minimal unless provenance evidence includes concrete file paths proving it.
+%s
 %s
 %s
 %s
@@ -636,7 +632,9 @@ Schema-valid template for this task (copy structure and field TYPES, then refine
 %s
 
 Serialized runtime task JSON (context only):
-%s`, acpruntime.ProviderClaudeCode, stepPolicy, repositoryEvidencePolicy, docFirstPolicy, retryHint, nonEmptyResultHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderClaudeCode, "claude-cli", task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, task.ShardID, primaryRepoScope, repoScopesJSON, pathScopesJSON, buildDirectTaskResultTemplateJSON(task), strings.TrimSpace(string(taskPayload))))
+%s`, acpruntime.ProviderClaudeCode, promptPackSection, strictContractLines, stepPolicy, repositoryEvidencePolicy, docFirstPolicy, retryHint, nonEmptyResultHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderClaudeCode, "claude-cli", task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, task.ShardID, primaryRepoScope, repoScopesJSON, pathScopesJSON, buildDirectTaskResultTemplateJSON(task), strings.TrimSpace(string(taskPayload)))),
+		Pack: pack,
+	}
 }
 
 func buildDirectTaskResultTemplateJSON(task acpruntime.Task) string {
@@ -684,111 +682,12 @@ func buildDirectTaskResultTemplateJSON(task acpruntime.Task) string {
 	return string(raw)
 }
 
-func buildStepSpecificDirectPolicy(stepID string) string {
-	switch stepID {
-	case "refresh.step1.collect":
-		return strings.Join([]string{
-			`STEP POLICY refresh.step1.collect:`,
-			`- Allowed upsert_entity types: service, datastore, integration, external.system, team, domain, api, component.`,
-			`- Forbidden placeholder entity types: runtime_provider, runtime, metadata.`,
-			`- Analyze only repository/workspace artifacts; do NOT perform web search or external browsing.`,
-			`- Every provenance.evidence.path must resolve to an existing file in workspace/repo scope.`,
-			`- Do NOT emit synthetic evidence paths such as search_source/*, search_query/*, search_config/*.`,
-			`- Do NOT introduce unrelated incident domains (for example bidding/tender/power-system topics) unless explicitly present in repository evidence.`,
-			`- If evidence is incomplete, capture gap via coverage.missing instead of synthetic placeholder entities.`,
-			`- Include at least one question and at least three items in coverage.missing.`,
-		}, "\n")
-	case "refresh.step3.findings":
-		return strings.Join([]string{
-			`STEP POLICY refresh.step3.findings:`,
-			`- If owner mapping is unresolved in evidence/coverage, include at least one add_finding operation.`,
-			`- Each finding must include rule_id, related_ids, and provenance.evidence[].`,
-			`- For observation provenance, evidence array MUST be non-empty.`,
-			`- If meta.repo_scopes has 2+ scopes, include at least one upsert_edge that links entities from different repo_scope values.`,
-			`- For upsert_edge use canonical keys only: edge.id, edge.type, edge.from, edge.to.`,
-			`- Forbidden edge aliases: edge.kind, edge.source, edge.target.`,
-			`- Minimal valid upsert_edge example: {"op":"upsert_edge","edge":{"id":"edge.cross.scope","type":"depends_on","from":"svc.a","to":"svc.b","provenance":{"kind":"inference","confidence":0.6,"evidence":[{"repo":"scope-a","path":"README.md"},{"repo":"scope-b","path":"README.md"}]}}}`,
-			`- Every provenance.evidence.path must resolve to an existing file in workspace/repo scope.`,
-			`- Do NOT emit synthetic evidence paths such as search_source/*, search_query/*, search_config/*.`,
-			`- Include at least one question and at least three items in coverage.missing.`,
-		}, "\n")
-	default:
-		if strings.HasPrefix(stepID, "refresh.") {
-			return `For refresh steps include at least one question object and at least three items in coverage.missing.`
-		}
-		return ""
-	}
-}
-
-func buildDocFirstFilesystemPolicy(task acpruntime.Task) string {
-	readContextRootsJSON := "[]"
-	if raw, err := json.Marshal(task.ReadContextRoots); err == nil {
-		readContextRootsJSON = string(raw)
-	}
-	lines := []string{
-		`DOCS-FIRST FILESYSTEM CONTRACT:`,
-		`- Read only from meta.workspace and meta.path_scopes plus runtime read_context_roots; do not treat workspace root as implicit write target.`,
-		`- Write ONLY inside write_root. Never write to workspace.yaml, schemas/*, docs/spec/*, charter/*, or analyzed user repositories.`,
-		fmt.Sprintf(`- artifact_root (workspace-relative) = %q`, strings.TrimSpace(task.ArtifactRoot)),
-		fmt.Sprintf(`- write_root (absolute) = %q`, strings.TrimSpace(task.WriteRoot)),
-		fmt.Sprintf(`- read_context_roots = %s`, readContextRootsJSON),
-		fmt.Sprintf(`- domain_id = %q`, strings.TrimSpace(task.DomainID)),
-		fmt.Sprintf(`- agent_role = %q`, strings.TrimSpace(task.AgentRole)),
-	}
-	switch task.StepID {
-	case "init.step1.collect", "refresh.step1.collect":
-		lines = append(lines,
-			`- Produce runtime-authored documents in write_root and then write shard-pack-manifest.json in write_root.`,
-			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and compatibility snapshot.`,
-			`- You may be flexible in document structure, but promotion and rendering depend on manifest citations/topics remaining accurate.`,
-		)
-		lines = append(lines, artifactquality.CollectManifestContractLines(strings.TrimSpace(task.ArtifactRoot))...)
-		lines = append(lines, artifactquality.ClaimIDContractLines()...)
-		lines = append(lines,
-			`- Do NOT collapse a multi-document refresh surface to one generic "cite.runtime-summary" citation when repository evidence exists.`,
-			`- Preserve repo-specific citations in shard-pack-manifest.json whenever repository files support them.`,
-		)
-	case "init.step3.findings", "refresh.step3.findings":
-		lines = append(lines,
-			`- Inspect staged final artifacts under reports/taskruns/<run_id>/staging/final from read_context_roots.`,
-			`- Write validator-verdict.json in write_root.`,
-			`- Validator may fix only indexes, references, or technical document issues inside write_root; do not rewrite document meaning wholesale.`,
-		)
-		lines = append(lines, artifactquality.ClaimIDContractLines()...)
-	}
-	return strings.Join(lines, "\n")
-}
-
 func buildParseRepairHints(parseStage string, parseErr error) []string {
-	if parseErr == nil {
-		return nil
-	}
-	lines := []string{}
-	if detail := compactRetryHint(parseErr.Error()); detail != "" {
-		stage := strings.TrimSpace(parseStage)
-		if stage == "" {
-			stage = "unknown"
-		}
-		lines = append(lines, fmt.Sprintf(`Previous %s validation failure: %s`, stage, detail))
-	}
-	return append(lines,
-		`Return a direct TaskResult JSON object, not an event-stream transcript or tool wrapper.`,
-		`Do NOT use ad-hoc ops such as upsert_file, write_file, update_file, or todo_write in changeset[].op.`,
-		`For add_doc_artifact, use doc_artifact and never the legacy artifact field.`,
-	)
+	return promptcontract.ParseRepairHints(parseStage, parseErr)
 }
 
 func buildArtifactRepairHints(initialProblem string) []string {
-	lines := []string{
-		`Rebuild shard-pack-manifest.json to the canonical ACP schema before returning JSON.`,
-		`compatibility.coverage/questions/entities/edges/findings are all required; questions/entities/edges/findings must be arrays even when empty.`,
-		`Do NOT leave claim_ids empty for cited repository evidence; preserve concrete repo-backed claim ids whenever the evidence supports them.`,
-		`Do NOT describe shard-pack-manifest.json repair via add_doc_artifact; repair the file in write_root and return "changeset": [].`,
-	}
-	if detail := compactRetryHint(initialProblem); detail != "" {
-		lines = append(lines, fmt.Sprintf(`Previous artifact contract failure: %s`, detail))
-	}
-	return lines
+	return promptcontract.ArtifactRepairHints(initialProblem)
 }
 
 func compactRetryHint(value string) string {
@@ -1073,4 +972,29 @@ func primaryTaskRepoScope(explicit string, scopes []string) string {
 		}
 	}
 	return ""
+}
+
+func recordPromptArtifacts(task acpruntime.Task, attempt string, prompt builtPrompt, provider acpruntime.Provider, includeDirectories []string, taskPayload []byte) {
+	if warning := strings.TrimSpace(prompt.Pack.Warning); warning != "" && task.OnOutput != nil {
+		task.OnOutput(acpruntime.OutputChunk{
+			Stream: acpruntime.OutputStreamStderr,
+			Text:   "prompt_pack_warning: " + warning,
+		})
+	}
+	_, err := runnerdiag.WritePromptArtifacts(task, provider, prompt.Text, taskPayload, runnerdiag.PromptArtifactsMetadata{
+		Attempt:            attempt,
+		IncludeDirectories: append([]string(nil), includeDirectories...),
+		PromptPack: runnerdiag.PromptPackMetadata{
+			Name:         prompt.Pack.Name,
+			RelativePath: prompt.Pack.RelativePath,
+			Source:       prompt.Pack.Source,
+			Warning:      prompt.Pack.Warning,
+		},
+	})
+	if err != nil && task.OnOutput != nil {
+		task.OnOutput(acpruntime.OutputChunk{
+			Stream: acpruntime.OutputStreamStderr,
+			Text:   fmt.Sprintf("prompt_artifact_warning: %v", err),
+		})
+	}
 }

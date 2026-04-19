@@ -25,6 +25,13 @@ const (
 	validatorVerdictFile  = "validator-verdict.json"
 )
 
+var requiredCanonicalLiveDocuments = []string{
+	"reports/as-is/overview.md",
+	"reports/coverage/summary.md",
+	"reports/coverage/open-questions.md",
+	"reports/findings/findings.md",
+}
+
 type aggregatedDocumentInfo struct {
 	Kind         string
 	Title        string
@@ -253,13 +260,35 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 		if err := registerCompiledArtifacts(stageCompiler.CompileAsIs(entities, edges, renderCtx)); err != nil {
 			return err
 		}
+	} else if !hasCanonicalPath("reports/as-is/overview.md") {
+		artifact, compileErr := stageCompiler.WriteAsIsOverview(entities, edges, renderCtx)
+		if err := registerCompiledArtifacts([]reports.Artifact{artifact}, compileErr); err != nil {
+			return err
+		}
 	}
 	if !hasCanonicalPrefix("reports/coverage/") {
 		if err := registerCompiledArtifacts(stageCompiler.WriteCoverage(&compatibility.Coverage, compatibility.Questions, renderCtx)); err != nil {
 			return err
 		}
+	} else {
+		if !hasCanonicalPath("reports/coverage/summary.md") {
+			artifact, compileErr := stageCompiler.WriteCoverageSummary(&compatibility.Coverage, renderCtx)
+			if err := registerCompiledArtifacts([]reports.Artifact{artifact}, compileErr); err != nil {
+				return err
+			}
+		}
+		if !hasCanonicalPath("reports/coverage/open-questions.md") {
+			artifact, compileErr := stageCompiler.WriteCoverageOpenQuestions(compatibility.Questions, renderCtx)
+			if err := registerCompiledArtifacts([]reports.Artifact{artifact}, compileErr); err != nil {
+				return err
+			}
+		}
 	}
 	if !hasCanonicalPrefix("reports/findings/") {
+		if err := registerCompiledArtifacts(stageCompiler.WriteFindings(compatibility.Findings, renderCtx)); err != nil {
+			return err
+		}
+	} else if !hasCanonicalPath("reports/findings/findings.md") {
 		if err := registerCompiledArtifacts(stageCompiler.WriteFindings(compatibility.Findings, renderCtx)); err != nil {
 			return err
 		}
@@ -975,8 +1004,10 @@ func (e *pipelineExecution) validateStagedArtifacts() []contracts.ValidatorIssue
 
 	seenTopics := map[string]struct{}{}
 	documentsByID := map[string]contracts.FinalRunDocument{}
+	documentsByCanonicalPath := map[string]contracts.FinalRunDocument{}
 	for _, document := range e.finalRunIndex.CanonicalDocuments {
 		documentsByID[document.ID] = document
+		documentsByCanonicalPath[document.CanonicalPath] = document
 		if strictCitationChecks && requiresDocumentCitations(document) && len(document.CitationIDs) == 0 {
 			issues = append(issues, contracts.ValidatorIssue{
 				Code:       "missing_document_citations",
@@ -1009,6 +1040,17 @@ func (e *pipelineExecution) validateStagedArtifacts() []contracts.ValidatorIssue
 				DocumentID: document.ID,
 			})
 		}
+	}
+	for _, requiredPath := range requiredCanonicalLiveDocuments {
+		if _, ok := documentsByCanonicalPath[requiredPath]; ok {
+			continue
+		}
+		issues = append(issues, contracts.ValidatorIssue{
+			Code:     "missing_required_canonical_document",
+			Severity: "error",
+			Message:  fmt.Sprintf("required canonical document %q is missing from final run index", requiredPath),
+			Path:     requiredPath,
+		})
 	}
 	for _, topic := range e.finalRunIndex.Topics {
 		if _, exists := seenTopics[topic.ID]; exists {
