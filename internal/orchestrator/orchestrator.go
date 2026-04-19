@@ -1718,11 +1718,19 @@ func (e *pipelineExecution) runRuntimeTaskNormalized(
 	}
 	defer cancel()
 
-	heartbeatStop := make(chan struct{})
+	if runner == nil {
+		return runtimePreparedExecution{}, fmt.Errorf("runtime runner resolver is not configured")
+	}
+
+	var heartbeatStop chan struct{}
+	var heartbeatWG sync.WaitGroup
 	if e.runtimeHeartbeatInterval > 0 {
+		heartbeatStop = make(chan struct{})
 		heartbeatTicker := time.NewTicker(e.runtimeHeartbeatInterval)
 		startedAt := e.clock().UTC()
+		heartbeatWG.Add(1)
 		go func() {
+			defer heartbeatWG.Done()
 			defer heartbeatTicker.Stop()
 			for {
 				select {
@@ -1741,11 +1749,15 @@ func (e *pipelineExecution) runRuntimeTaskNormalized(
 			}
 		}()
 	}
-	if runner == nil {
-		return runtimePreparedExecution{}, fmt.Errorf("runtime runner resolver is not configured")
+	stopHeartbeat := func() {
+		if heartbeatStop != nil {
+			close(heartbeatStop)
+		}
+		heartbeatWG.Wait()
+		heartbeatStop = nil
 	}
+	defer stopHeartbeat()
 	result, err := runner.Run(taskCtx, task)
-	close(heartbeatStop)
 	if err != nil {
 		if errors.Is(taskCtx.Err(), context.DeadlineExceeded) {
 			err = fmt.Errorf("runtime task timeout after %ds: %w", int(e.runtimeStepTimeout.Seconds()), err)
