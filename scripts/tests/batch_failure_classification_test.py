@@ -580,6 +580,108 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
         self.assertEqual("runtime_timeout", fields[2], classifications_tsv.read_text(encoding="utf-8"))
 
+    def test_shell_classifier_marks_missing_summary_as_incomplete_cycle_when_batch_reaches_classifier(self) -> None:
+        run_dir = self.root / "run-missing-summary"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        write_text(run_dir / "full-run.log", "child run ended before session summary\n")
+        write_text(run_dir / "batch-driver.log", "driver completed with process_exit=1\n")
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=process_failed",
+                    "process_exit=1",
+                    "termination_signal=none",
+                ]
+            )
+            + "\n",
+        )
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        classifications_tsv = self.root / "backend-run-classifications-missing-summary.tsv"
+        command = (
+            prelude
+            + "\n"
+            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
+            + f'classify_run_failure "qwen-code" "1" {shlex.quote(str(run_dir))} "1"\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("", completed.stdout.strip(), completed.stdout)
+        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
+        self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("infra_incomplete_cycle", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+
+    def test_shell_classifier_marks_missing_summary_signal_termination(self) -> None:
+        run_dir = self.root / "run-missing-summary-signal"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        write_text(run_dir / "full-run.log", "terminated by signal\n")
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=signal_terminated",
+                    "process_exit=143",
+                    "termination_signal=signal_15",
+                ]
+            )
+            + "\n",
+        )
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        classifications_tsv = self.root / "backend-run-classifications-signal.tsv"
+        command = (
+            prelude
+            + "\n"
+            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
+            + f'classify_run_failure "qwen-code" "1" {shlex.quote(str(run_dir))} "143"\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("", completed.stdout.strip(), completed.stdout)
+        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
+        self.assertGreaterEqual(len(fields), 7, classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("infra_signal_terminated", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("signal_15", fields[6], classifications_tsv.read_text(encoding="utf-8"))
+
+    def test_python_report_prefers_classifier_incomplete_cycle_over_summary_missing(self) -> None:
+        run_dir = self.root / "run-python-missing-summary"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        write_text(run_dir / "full-run.log", "session ended before summary persistence\n")
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "infra_incomplete_cycle",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("infra_incomplete_cycle", result.failure_class)
+        self.assertTrue(result.summary_missing)
+        self.assertTrue(result.infra_incomplete_cycle)
+
     def test_python_report_treats_incomplete_reports_as_triage_only_not_empty_analysis(self) -> None:
         run_dir = self.root / "run-incomplete"
         self._create_incomplete_fixture_run_dir(run_dir)

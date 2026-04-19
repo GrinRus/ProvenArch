@@ -1435,7 +1435,17 @@ def evaluate_run(
             details.append(
                 f"reliability/classifier-override -> summary_class={failure_class or 'none'} classifier_class={classified_failure}"
             )
-        if failure_class == "none" or failure_class_rank(classified_failure) < failure_class_rank(failure_class):
+        if failure_class == "summary_missing" and classified_failure in {
+            "runtime_timeout",
+            "runner_unavailable",
+            "runtime_parse",
+            "infra_signal_terminated",
+            "quality_gates_failed",
+            "infra_incomplete_cycle",
+            "runtime_flow_failed",
+        }:
+            failure_class = classified_failure
+        elif failure_class == "none" or failure_class_rank(classified_failure) < failure_class_rank(failure_class):
             failure_class = classified_failure
         runtime_parse_hit = runtime_parse_hit or classified_failure == "runtime_parse"
         runner_unavailable_hit = runner_unavailable_hit or classified_failure == "runner_unavailable"

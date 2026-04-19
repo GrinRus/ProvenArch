@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/artifactquality"
@@ -29,6 +30,11 @@ import (
 
 var (
 	ErrRunnerUnavailable = errors.New("qwen-code runner is unavailable")
+	errCollectStalled    = errors.New("collect_stalled_after_artifacts")
+
+	collectStallWindow         = 20 * time.Second
+	collectStallPollInterval   = 2 * time.Second
+	collectStallTerminateGrace = 2 * time.Second
 )
 
 type HeadlessRunner struct {
@@ -40,11 +46,103 @@ type retryManifestAssessment = artifactquality.ManifestAssessment
 
 type promptRetryMode int
 
+type runQwenOptions struct {
+	EnableCollectStallMonitor bool
+}
+
+type collectStallDiagnostic struct {
+	ManifestState         string
+	AuthoredFileCount     int
+	LastPipeActivity      time.Time
+	LastWriteRootMutation time.Time
+}
+
+type collectArtifactsStallError struct {
+	Diagnostic collectStallDiagnostic
+}
+
+type collectWriteRootSnapshot struct {
+	ManifestPresent   bool
+	ManifestState     string
+	AuthoredFileCount int
+	LastMutation      time.Time
+}
+
+type commandActivityTracker struct {
+	mu       sync.Mutex
+	lastRead time.Time
+}
+
+type activityTrackingReader struct {
+	reader  io.Reader
+	tracker *commandActivityTracker
+}
+
 const (
 	promptRetryNone promptRetryMode = iota
 	promptRetryParse
 	promptRetryArtifact
 )
+
+func (e collectArtifactsStallError) Error() string {
+	return errCollectStalled.Error()
+}
+
+func (e collectArtifactsStallError) Is(target error) bool {
+	return target == errCollectStalled
+}
+
+func (d collectStallDiagnostic) fields(task acpruntime.Task) map[string]any {
+	fields := map[string]any{
+		"provider":            string(acpruntime.ProviderQwenCode),
+		"shard_id":            strings.TrimSpace(task.ShardID),
+		"manifest_state":      strings.TrimSpace(d.ManifestState),
+		"authored_file_count": d.AuthoredFileCount,
+		"action":              "terminate_and_retry",
+	}
+	if !d.LastPipeActivity.IsZero() {
+		fields["last_pipe_activity_at"] = d.LastPipeActivity.UTC().Format(time.RFC3339)
+	}
+	if !d.LastWriteRootMutation.IsZero() {
+		fields["last_write_root_mutation_at"] = d.LastWriteRootMutation.UTC().Format(time.RFC3339)
+	}
+	return fields
+}
+
+func newCommandActivityTracker(start time.Time) *commandActivityTracker {
+	return &commandActivityTracker{lastRead: start.UTC()}
+}
+
+func (t *commandActivityTracker) Note(at time.Time) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if at.After(t.lastRead) {
+		t.lastRead = at.UTC()
+	}
+}
+
+func (t *commandActivityTracker) LastRead() time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.lastRead
+}
+
+func (r *activityTrackingReader) Read(p []byte) (int, error) {
+	if r == nil || r.reader == nil {
+		return 0, io.EOF
+	}
+	n, err := r.reader.Read(p)
+	if n > 0 && r.tracker != nil {
+		r.tracker.Note(time.Now().UTC())
+	}
+	return n, err
+}
 
 func (r HeadlessRunner) commandName() string {
 	command := strings.TrimSpace(r.Command)
@@ -86,8 +184,15 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 		args = buildDefaultQwenArgs(task, buildPrompt(taskPayload, false))
 	}
 
-	result, parseStage, parseErr, runErr := runQwenCommand(ctx, task, command, args)
+	options := runQwenOptions{
+		EnableCollectStallMonitor: len(r.Args) == 0 && isCollectStep(task.StepID),
+	}
+	result, parseStage, parseErr, runErr := runQwenCommand(ctx, task, command, args, options)
 	if runErr != nil {
+		var stalled collectArtifactsStallError
+		if len(r.Args) == 0 && errors.As(runErr, &stalled) {
+			return recoverCollectArtifactsAfterStall(ctx, task, taskPayload, command, result, stalled)
+		}
 		unavailableMessage := buildUnavailableFailureMessage(task, runErr, result)
 		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 			acpruntime.ProviderQwenCode,
@@ -111,7 +216,7 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 	// an explicitly stricter prompt before classifying as parse failure.
 	if len(r.Args) == 0 {
 		retryArgs := buildRetryQwenArgs(task, buildPromptWithModeAndHints(taskPayload, promptRetryParse, buildParseRepairHints(parseStage, parseErr)))
-		retryResult, retryParseStage, retryParseErr, retryRunErr := runQwenCommand(ctx, task, command, retryArgs)
+		retryResult, retryParseStage, retryParseErr, retryRunErr := runQwenCommand(ctx, task, command, retryArgs, runQwenOptions{})
 		if retryRunErr != nil {
 			unavailableMessage := buildUnavailableFailureMessage(task, retryRunErr, retryResult)
 			return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
@@ -186,9 +291,10 @@ func maybeRepairCollectArtifacts(
 	snapshot, err := artifactquality.SnapshotWriteRoot(task.WriteRoot)
 	if err != nil {
 		return acpruntime.Result{}, wrapArtifactContractFailure(
-			current.Stdout,
-			current.Stderr,
-			fmt.Sprintf("collect artifacts require repair (%s), but write_root snapshot failed: %v", initialProblem, err),
+			task,
+			"artifact_repair.snapshot",
+			current,
+			fmt.Sprintf("collect artifacts require repair (%s), but write_root snapshot failed", initialProblem),
 			err,
 		)
 	}
@@ -197,7 +303,7 @@ func maybeRepairCollectArtifacts(
 	}()
 
 	repairArgs := buildRetryQwenArgs(task, buildPromptWithModeAndHints(taskPayload, promptRetryArtifact, buildArtifactRepairHints(initialProblem)))
-	repaired, repairParseStage, parseErr, runErr := runQwenCommand(ctx, task, command, repairArgs)
+	repaired, repairParseStage, parseErr, runErr := runQwenCommand(ctx, task, command, repairArgs, runQwenOptions{})
 	if runErr != nil {
 		_ = snapshot.Restore()
 		unavailableMessage := buildUnavailableFailureMessage(task, runErr, repaired)
@@ -229,8 +335,9 @@ func maybeRepairCollectArtifacts(
 		_ = snapshot.Restore()
 		repairedProblem := artifactquality.DescribeAssessmentProblem(repairedAssessment, err)
 		return acpruntime.Result{}, wrapArtifactContractFailure(
-			repaired.Stdout,
-			repaired.Stderr,
+			task,
+			"artifact_repair.contract",
+			repaired,
 			fmt.Sprintf("collect artifacts remained invalid after one repair attempt: initial=%s; repaired=%s", initialProblem, repairedProblem),
 			err,
 		)
@@ -238,13 +345,136 @@ func maybeRepairCollectArtifacts(
 	return repaired, nil
 }
 
-func wrapArtifactContractFailure(stdout string, stderr string, message string, cause error) error {
+func recoverCollectArtifactsAfterStall(
+	ctx context.Context,
+	task acpruntime.Task,
+	taskPayload []byte,
+	command string,
+	current acpruntime.Result,
+	stalled collectArtifactsStallError,
+) (acpruntime.Result, error) {
+	initialProblem := errCollectStalled.Error()
+	emitDiagnostic(task, "runtime task retry scheduled", stalled.Diagnostic.fields(task))
+
+	snapshot, err := artifactquality.SnapshotWriteRoot(task.WriteRoot)
+	if err != nil {
+		message := buildFailureMessage(task, "stall_snapshot", fmt.Errorf("%w: snapshot write_root: %v", errCollectStalled, err), current)
+		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, "failed", err.Error(), stalled.Diagnostic.ManifestState))
+		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+			acpruntime.ProviderQwenCode,
+			acpruntime.ErrorCodeRunnerParseFailed,
+			fmt.Sprintf("headless provider %q collect_stalled_after_artifacts and artifact recovery setup failed: %s", acpruntime.ProviderQwenCode, message),
+			current.Stdout,
+			current.Stderr,
+			err,
+		)
+	}
+	defer func() {
+		_ = snapshot.Cleanup()
+	}()
+
+	repairArgs := buildRetryQwenArgs(task, buildPromptWithModeAndHints(taskPayload, promptRetryArtifact, buildArtifactRepairHints(initialProblem)))
+	repaired, repairParseStage, parseErr, runErr := runQwenCommand(ctx, task, command, repairArgs, runQwenOptions{})
+	if runErr != nil {
+		_ = snapshot.Restore()
+		failureResult := selectFailureResult(repaired, current)
+		failureMessage := buildFailureMessage(task, "stall_repair.exec", fmt.Errorf("%w: %v", errCollectStalled, runErr), failureResult)
+		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, "failed", runErr.Error(), stalled.Diagnostic.ManifestState))
+		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+			acpruntime.ProviderQwenCode,
+			acpruntime.ErrorCodeRunnerParseFailed,
+			fmt.Sprintf("headless provider %q collect_stalled_after_artifacts and repair retry failed: %s", acpruntime.ProviderQwenCode, failureMessage),
+			failureResult.Stdout,
+			failureResult.Stderr,
+			runErr,
+		)
+	}
+	if parseErr != nil {
+		_ = snapshot.Restore()
+		failureMessage := buildFailureMessage(task, "stall_repair."+strings.TrimSpace(repairParseStage), fmt.Errorf("%w: %v", errCollectStalled, parseErr), repaired)
+		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, "failed", parseErr.Error(), stalled.Diagnostic.ManifestState))
+		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+			acpruntime.ProviderQwenCode,
+			acpruntime.ErrorCodeRunnerParseFailed,
+			fmt.Sprintf("headless provider %q collect_stalled_after_artifacts and repair retry returned invalid taskresult: %s", acpruntime.ProviderQwenCode, failureMessage),
+			repaired.Stdout,
+			repaired.Stderr,
+			parseErr,
+		)
+	}
+
+	_ = artifactquality.EnsureCanonicalCollectManifest(task, repaired.TaskResult)
+	repairedAssessment, assessErr := assessRetryManifestAtWriteRoot(task.WriteRoot)
+	if assessErr != nil || !repairedAssessment.Rich {
+		_ = snapshot.Restore()
+		repairedProblem := artifactquality.DescribeAssessmentProblem(repairedAssessment, assessErr)
+		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, "failed", repairedProblem, stalled.Diagnostic.ManifestState))
+		return acpruntime.Result{}, wrapArtifactContractFailure(
+			task,
+			"stall_repair.contract",
+			repaired,
+			fmt.Sprintf("collect_stalled_after_artifacts and collect artifacts remained invalid after repair: repaired=%s", repairedProblem),
+			errors.Join(errCollectStalled, assessErr),
+		)
+	}
+
+	emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, "succeeded", "", "rich"))
+	return repaired, nil
+}
+
+func isCollectStep(stepID string) bool {
+	return strings.TrimSpace(stepID) == "init.step1.collect" || strings.TrimSpace(stepID) == "refresh.step1.collect"
+}
+
+func emitDiagnostic(task acpruntime.Task, message string, fields map[string]any) {
+	if task.OnDiagnostic == nil {
+		return
+	}
+	task.OnDiagnostic(acpruntime.DiagnosticEvent{
+		Message: strings.TrimSpace(message),
+		Fields:  fields,
+	})
+}
+
+func selectFailureResult(primary acpruntime.Result, fallback acpruntime.Result) acpruntime.Result {
+	if strings.TrimSpace(primary.Stdout) != "" || strings.TrimSpace(primary.Stderr) != "" {
+		return primary
+	}
+	return fallback
+}
+
+func retryDiagnosticFields(task acpruntime.Task, stalled collectArtifactsStallError, retryStatus string, errText string, manifestState string) map[string]any {
+	fields := stalled.Diagnostic.fields(task)
+	if state := strings.TrimSpace(manifestState); state != "" {
+		fields["manifest_state"] = state
+	}
+	if status := strings.TrimSpace(retryStatus); status != "" {
+		fields["retry_status"] = status
+	}
+	if detail := strings.TrimSpace(errText); detail != "" {
+		fields["error"] = detail
+	}
+	return fields
+}
+
+func wrapArtifactContractFailure(task acpruntime.Task, stage string, result acpruntime.Result, message string, cause error) error {
+	failure := cause
+	trimmed := strings.TrimSpace(message)
+	switch {
+	case trimmed != "" && cause != nil:
+		failure = fmt.Errorf("%s: %w", trimmed, cause)
+	case trimmed != "":
+		failure = errors.New(trimmed)
+	case failure == nil:
+		failure = errors.New("invalid collect artifacts")
+	}
+	failureMessage := buildFailureMessage(task, stage, failure, result)
 	return acpruntime.WrapRunnerErrorWithOutput(
 		acpruntime.ProviderQwenCode,
 		acpruntime.ErrorCodeRunnerParseFailed,
-		fmt.Sprintf("headless provider %q produced invalid collect artifacts: %s", acpruntime.ProviderQwenCode, strings.TrimSpace(message)),
-		stdout,
-		stderr,
+		fmt.Sprintf("headless provider %q produced invalid collect artifacts: %s", acpruntime.ProviderQwenCode, failureMessage),
+		result.Stdout,
+		result.Stderr,
 		cause,
 	)
 }
@@ -339,11 +569,22 @@ func collectRetryWriteRootFiles(writeRoot string, limit int) ([]string, int, err
 }
 
 func buildParseFailureMessage(task acpruntime.Task, parseStage string, parseErr error, result acpruntime.Result) string {
-	base := strings.TrimSpace(parseErr.Error())
-	if base == "" {
-		base = "unknown parse error"
+	return buildFailureMessage(task, parseStage, parseErr, result)
+}
+
+func buildUnavailableFailureMessage(task acpruntime.Task, runErr error, result acpruntime.Result) string {
+	return buildFailureMessage(task, "exec", runErr, result)
+}
+
+func buildFailureMessage(task acpruntime.Task, stage string, failure error, result acpruntime.Result) string {
+	base := "unknown failure"
+	if failure != nil {
+		base = strings.TrimSpace(failure.Error())
 	}
-	stage := strings.TrimSpace(parseStage)
+	if base == "" {
+		base = "unknown failure"
+	}
+	stage = strings.TrimSpace(stage)
 	if stage == "" {
 		stage = "unknown"
 	}
@@ -363,27 +604,7 @@ func buildParseFailureMessage(task acpruntime.Task, parseStage string, parseErr 
 	)
 }
 
-func buildUnavailableFailureMessage(task acpruntime.Task, runErr error, result acpruntime.Result) string {
-	base := strings.TrimSpace(runErr.Error())
-	if base == "" {
-		base = "unknown execution error"
-	}
-	artifacts, err := runnerdiag.WriteParseFailureArtifacts(task, acpruntime.ProviderQwenCode, result.Stdout, result.Stderr)
-	if err != nil {
-		return fmt.Sprintf("parse_stage=exec %s (raw_output_persist_failed=%v)", base, err)
-	}
-	return fmt.Sprintf(
-		"parse_stage=exec %s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
-		base,
-		artifacts.RelativeMetadataPath,
-		artifacts.Stdout.Bytes,
-		artifacts.Stdout.SHA256,
-		artifacts.Stderr.Bytes,
-		artifacts.Stderr.SHA256,
-	)
-}
-
-func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, args []string) (acpruntime.Result, string, error, error) {
+func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, args []string, options runQwenOptions) (acpruntime.Result, string, error, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
 	// Keep qwen's project root anchored at the ACP workspace rather than a
 	// deep shard staging directory. This avoids provider-local path explosions
@@ -413,6 +634,26 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 		return acpruntime.Result{}, "", nil, err
 	}
 
+	activityTracker := newCommandActivityTracker(time.Now().UTC())
+	monitorCtx, stopMonitor := context.WithCancel(context.Background())
+	defer stopMonitor()
+	var monitorWG sync.WaitGroup
+	var stalledErr error
+	var stalledMu sync.Mutex
+	if options.EnableCollectStallMonitor && isCollectStep(task.StepID) && strings.TrimSpace(task.WriteRoot) != "" && cmd.Process != nil {
+		monitorWG.Add(1)
+		go func() {
+			defer monitorWG.Done()
+			diagnostic, stalled := monitorCollectStall(monitorCtx, cmd.Process, task, activityTracker)
+			if !stalled {
+				return
+			}
+			stalledMu.Lock()
+			stalledErr = collectArtifactsStallError{Diagnostic: diagnostic}
+			stalledMu.Unlock()
+		}()
+	}
+
 	var streamErr error
 	var streamErrMu sync.Mutex
 	captureErr := func(captureErr error) {
@@ -430,39 +671,60 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		captureErr(captureCommandStream(stdoutPipe, &stdout, task, acpruntime.OutputStreamStdout))
+		captureErr(captureCommandStream(&activityTrackingReader{reader: stdoutPipe, tracker: activityTracker}, &stdout, task, acpruntime.OutputStreamStdout))
 	}()
 	go func() {
 		defer wg.Done()
-		captureErr(captureCommandStream(stderrPipe, &stderr, task, acpruntime.OutputStreamStderr))
+		captureErr(captureCommandStream(&activityTrackingReader{reader: stderrPipe, tracker: activityTracker}, &stderr, task, acpruntime.OutputStreamStderr))
 	}()
 
 	// Drain both output streams before waiting to avoid racy early pipe closes
 	// that can truncate stdout/stderr under parallel test/process scheduling.
 	wg.Wait()
 	waitErr := cmd.Wait()
+	stopMonitor()
+	monitorWG.Wait()
 	if waitErr == nil && streamErr != nil {
 		waitErr = streamErr
 	}
-	if waitErr != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return acpruntime.Result{
-				Stdout: stdout.String(),
-				Stderr: stderr.String(),
-			}, "", nil, ctxErr
-		}
-		return acpruntime.Result{
-			Stdout: stdout.String(),
-			Stderr: stderr.String(),
-		}, "", nil, runnerdiag.BuildExecFailure(waitErr, stdout.String(), stderr.String())
+	result := acpruntime.Result{
+		Stdout: stdout.String(),
+		Stderr: stderr.String(),
 	}
 
-	rawTaskResult, err := taskresultextractor.Extract(stdout.Bytes())
+	stalledMu.Lock()
+	currentStallErr := stalledErr
+	stalledMu.Unlock()
+	if currentStallErr != nil {
+		parsed, _, parseErr := parseCapturedTaskResult(task, stdout.Bytes(), result.Stdout, result.Stderr)
+		if parseErr == nil {
+			return parsed, "", nil, nil
+		}
+		return result, "", nil, currentStallErr
+	}
+	if waitErr != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return result, "", nil, ctxErr
+		}
+		return result, "", nil, runnerdiag.BuildExecFailure(waitErr, result.Stdout, result.Stderr)
+	}
+
+	parsed, parseStage, parseErr := parseCapturedTaskResult(task, stdout.Bytes(), result.Stdout, result.Stderr)
+	return parsed, parseStage, parseErr, nil
+}
+
+type streamedOutputBudget struct {
+	forwardedBytes int
+	truncated      bool
+}
+
+func parseCapturedTaskResult(task acpruntime.Task, stdoutBytes []byte, stdoutText string, stderrText string) (acpruntime.Result, string, error) {
+	rawTaskResult, err := taskresultextractor.Extract(stdoutBytes)
 	if err != nil {
 		return acpruntime.Result{
-			Stdout: stdout.String(),
-			Stderr: stderr.String(),
-		}, "extract", err, nil
+			Stdout: stdoutText,
+			Stderr: stderrText,
+		}, "extract", err
 	}
 	if normalizedRawTaskResult, changed, normalizeErr := taskresultcompat.NormalizeRawTaskResult(task, rawTaskResult); normalizeErr == nil && changed {
 		rawTaskResult = normalizedRawTaskResult
@@ -470,27 +732,143 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 	taskResult, err := contracts.ParseTaskResult(rawTaskResult)
 	if err != nil {
 		return acpruntime.Result{
-			Stdout: stdout.String(),
-			Stderr: stderr.String(),
-		}, "schema", err, nil
+			Stdout: stdoutText,
+			Stderr: stderrText,
+		}, "schema", err
 	}
 	if err := taskresultbinding.Validate(task, taskResult, acpruntime.ProviderQwenCode); err != nil {
 		return acpruntime.Result{
-			Stdout: stdout.String(),
-			Stderr: stderr.String(),
-		}, "binding", err, nil
+			Stdout: stdoutText,
+			Stderr: stderrText,
+		}, "binding", err
 	}
 	return acpruntime.Result{
 		TaskResult: taskResult,
 		RawJSON:    rawTaskResult,
-		Stdout:     stdout.String(),
-		Stderr:     stderr.String(),
-	}, "", nil, nil
+		Stdout:     stdoutText,
+		Stderr:     stderrText,
+	}, "", nil
 }
 
-type streamedOutputBudget struct {
-	forwardedBytes int
-	truncated      bool
+func monitorCollectStall(
+	ctx context.Context,
+	process *os.Process,
+	task acpruntime.Task,
+	activity *commandActivityTracker,
+) (collectStallDiagnostic, bool) {
+	ticker := time.NewTicker(collectStallPollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return collectStallDiagnostic{}, false
+		case <-ticker.C:
+			snapshot, err := scanCollectWriteRoot(task.WriteRoot)
+			if err != nil || !snapshot.ManifestPresent || snapshot.AuthoredFileCount <= 0 || snapshot.LastMutation.IsZero() {
+				continue
+			}
+			lastPipeActivity := activity.LastRead()
+			if lastPipeActivity.IsZero() {
+				continue
+			}
+			now := time.Now().UTC()
+			if now.Sub(lastPipeActivity) < collectStallWindow {
+				continue
+			}
+			if now.Sub(snapshot.LastMutation) < collectStallWindow {
+				continue
+			}
+
+			diagnostic := collectStallDiagnostic{
+				ManifestState:         strings.TrimSpace(snapshot.ManifestState),
+				AuthoredFileCount:     snapshot.AuthoredFileCount,
+				LastPipeActivity:      lastPipeActivity.UTC(),
+				LastWriteRootMutation: snapshot.LastMutation.UTC(),
+			}
+			emitDiagnostic(task, "runtime task stalled after artifacts", diagnostic.fields(task))
+			terminateProcessWithGrace(process)
+			return diagnostic, true
+		}
+	}
+}
+
+func scanCollectWriteRoot(writeRoot string) (collectWriteRootSnapshot, error) {
+	root := strings.TrimSpace(writeRoot)
+	if root == "" {
+		return collectWriteRootSnapshot{ManifestState: "missing"}, nil
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return collectWriteRootSnapshot{ManifestState: "missing"}, nil
+		}
+		return collectWriteRootSnapshot{}, err
+	}
+	if !info.IsDir() {
+		return collectWriteRootSnapshot{}, fmt.Errorf("write_root is not a directory: %s", root)
+	}
+
+	snapshot := collectWriteRootSnapshot{ManifestState: "missing"}
+	if walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return relErr
+		}
+		rel = filepath.ToSlash(rel)
+		if info, infoErr := d.Info(); infoErr == nil && info.ModTime().After(snapshot.LastMutation) {
+			snapshot.LastMutation = info.ModTime().UTC()
+		}
+		if rel == "shard-pack-manifest.json" {
+			snapshot.ManifestPresent = true
+			return nil
+		}
+		snapshot.AuthoredFileCount++
+		return nil
+	}); walkErr != nil {
+		return collectWriteRootSnapshot{}, walkErr
+	}
+
+	if snapshot.ManifestPresent {
+		assessment, assessErr := assessRetryManifestAtWriteRoot(root)
+		if assessErr == nil && assessment.Rich {
+			snapshot.ManifestState = "rich"
+		} else {
+			snapshot.ManifestState = "invalid"
+		}
+	}
+	return snapshot, nil
+}
+
+func terminateProcessWithGrace(process *os.Process) {
+	if process == nil {
+		return
+	}
+	if err := process.Signal(syscall.SIGTERM); err != nil && !isProcessDoneErr(err) {
+		_ = process.Kill()
+		return
+	}
+	if collectStallTerminateGrace > 0 {
+		time.Sleep(collectStallTerminateGrace)
+	}
+	_ = process.Kill()
+}
+
+func isProcessDoneErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, os.ErrProcessDone) {
+		return true
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "already finished") || strings.Contains(lower, "process already finished") || strings.Contains(lower, "no such process")
 }
 
 func captureCommandStream(reader io.Reader, sink *bytes.Buffer, task acpruntime.Task, stream acpruntime.OutputStream) error {
@@ -654,6 +1032,8 @@ Task payload JSON:
 			`- Unknown changeset[].op values are forbidden; allowed values are exactly: upsert_entity, remove_entity, upsert_edge, remove_edge, add_finding, add_doc_artifact.`,
 			`- For op="add_doc_artifact", the payload key MUST be "doc_artifact"; never use "artifact".`,
 			`- If a retry only repaired files inside write_root, prefer "changeset": [] instead of inventing file-write operations.`,
+			`- Retry repair is forbidden from inventing synthetic filesystem operations in changeset.`,
+			`- If write_root already contains authored docs, return the final TaskResult JSON immediately after minimal write_root inspection.`,
 			`- Final response MUST start with "{" and end with "}".`,
 			`- Do not output markdown fences, bullet lists, plan text, or template walkthroughs.`,
 		}
@@ -800,9 +1180,12 @@ func buildRetryRecoveryHint(task acpruntime.Task) string {
 		`- Retry goal is JSON repair, not fresh repository exploration.`,
 		`- First inspect write_root, not repo roots.`,
 		`- If authored docs already exist in write_root, reuse them instead of rediscovering the repository.`,
+		`- Once write_root contains authored docs, repository exploration is finished except for minimal JSON/manifest repair.`,
+		`- After shard-pack-manifest.json exists, do NOT continue broad list_directory/read_file sweeps across repo roots.`,
 		`- Preserve repo-specific citations when existing artifacts already contain them; do not replace them with one generic runtime summary citation.`,
 		`- Do NOT use todo_write, plan-style narration, or repeated broad list_directory sweeps in retry mode.`,
 		`- Use at most 3 tool calls in retry mode unless a required artifact is missing from write_root.`,
+		`- Repair mode forbids inventing file operations in changeset; prefer "changeset": [].`,
 		`- After optional write_root inspection, respond immediately with the final TaskResult JSON object.`,
 	}
 
@@ -918,6 +1301,9 @@ func buildDocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Produce runtime-authored documents in write_root and then write shard-pack-manifest.json in write_root.`,
 			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and compatibility snapshot.`,
 			`- You may be flexible in document structure, but promotion and rendering depend on manifest citations/topics remaining accurate.`,
+			`- After the first filesystem write inside write_root, stop broad repository exploration; only minimal manifest/JSON repair is allowed afterwards.`,
+			`- After writing shard-pack-manifest.json, do NOT continue broad list_directory/read_file sweeps across repo roots.`,
+			`- If authored docs already exist in write_root, respond immediately with the final TaskResult JSON object.`,
 		)
 		lines = append(lines, artifactquality.CollectManifestContractLines(strings.TrimSpace(task.ArtifactRoot))...)
 		lines = append(lines, artifactquality.ClaimIDContractLines()...)

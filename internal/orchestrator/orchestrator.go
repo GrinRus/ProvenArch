@@ -1694,6 +1694,9 @@ func (e *pipelineExecution) runRuntimeTaskNormalized(
 		OnOutput: func(chunk acpruntime.OutputChunk) {
 			e.logRuntimeOutput(stepID, domainID, chunk)
 		},
+		OnDiagnostic: func(event acpruntime.DiagnosticEvent) {
+			e.logInfo(stepID, domainID, event.Message, event.Fields)
+		},
 	}
 	e.logInfo(stepID, domainID, "runtime task started", map[string]any{
 		"task_id":            task.TaskID,

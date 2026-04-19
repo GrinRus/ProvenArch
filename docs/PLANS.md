@@ -49,6 +49,57 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 
 ### Plan ID
+EP-20260419-qwen-collect-stall-recovery
+
+### Context
+Live `regres small` показал, что `qwen-code` на `init.step1.collect` может дойти до authored collect artifacts (`shard-pack-manifest.json` + draft docs), но продолжать бессмысленный repo sweep и не возвращать финальный `TaskResult` до внешнего hard-stop. Из-за этого existing repair path не запускался, а batch/matrix harness оставляли run history без финальной классификации.
+
+### Goals (must have)
+- [x] Добавить ранний stall watchdog для `qwen` collect steps и forced artifact-repair retry до общего step timeout
+- [x] Усилить collect/retry prompt discipline правилом "no explore after write"
+- [x] Пробросить explicit runtime diagnostic events про stall/retry в orchestrator logs
+- [x] Сохранить raw stdout/stderr artifacts и normal `runner_parse_failed` semantics при failed stall recovery
+- [x] Устранить blind spot batch/matrix harness: incomplete child cycles получают classification/record даже без `session-summary.md`
+
+### Non-goals
+- [x] Не менять public schemas/API
+- [x] Не добавлять user-facing timeout/stall knobs
+- [x] Не чинить OS-level external `SIGKILL` всего matrix process tree
+
+### Approach
+1) Ввести provider-local collect stall monitor в `internal/runtime/qwencode/runner.go`, основанный на реальной pipe activity и мутациях `write_root`.
+2) При stall завершать provider process, писать diagnostics и сразу запускать forced `RETRY RECOVERY MODE` с existing artifact repair contract.
+3) Пробросить diagnostics в orchestrator event logs без расширения `TaskResult`.
+4) Добавить per-run sentinel/status files в batch harness и заставить matrix/report path работать на partially completed roots.
+5) Зафиксировать поведение тестами и минимально синхронизировать docs/runbook.
+
+### Files expected to change
+- `internal/runtime/runtime.go`
+- `internal/runtime/qwencode/*`
+- `internal/orchestrator/*`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/e2e_batch_report.py`
+- `scripts/tests/*`
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/TESTING_STRATEGY.md`
+
+### Acceptance criteria
+- [x] qwen collect stall после authored artifacts уходит в forced retry и не ждёт step timeout
+- [x] failed stall recovery оставляет `reports/taskruns/raw/*` и `runner_parse_failed`, а не `runner_unavailable`
+- [x] orchestrator logs содержат `runtime task stalled after artifacts` / `retry scheduled` / `retry completed`
+- [x] batch/matrix классифицируют incomplete child cycle даже без `session-summary.md`
+- [x] regression tests покрывают runtime, logs и batch/matrix failure accounting
+
+### Risks
+- Основной риск — ложное stall detection на legitimately long collect shards. Снижение риска: watchdog включён только для qwen collect steps и срабатывает только после authored artifacts плюс двойного idle сигнала (`stdout/stderr` и `write_root`).
+
+### Progress log
+- 2026-04-19: добавлены qwen collect stall watchdog, forced recovery retry, runtime diagnostics, batch/matrix sentinels/classification и regression tests.
+
+### Plan ID
 EP-20260419-step-scoped-agent-pipeline
 
 ### Context

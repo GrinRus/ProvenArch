@@ -25,6 +25,21 @@ func loadCapturedLiveStdoutFixture(t *testing.T, name string) string {
 	return string(raw)
 }
 
+func setCollectStallTimingsForTest(t *testing.T, window time.Duration, poll time.Duration, grace time.Duration) {
+	t.Helper()
+	prevWindow := collectStallWindow
+	prevPoll := collectStallPollInterval
+	prevGrace := collectStallTerminateGrace
+	collectStallWindow = window
+	collectStallPollInterval = poll
+	collectStallTerminateGrace = grace
+	t.Cleanup(func() {
+		collectStallWindow = prevWindow
+		collectStallPollInterval = prevPoll
+		collectStallTerminateGrace = prevGrace
+	})
+}
+
 func validRetryRichManifestJSON() string {
 	return `{
   "version": 1,
@@ -769,6 +784,443 @@ cat "$QWEN_LIVE_EXTRAS_FIXTURE"
 	}
 	if result.TaskResult.Meta.TaskID != "task-live-extras-retry" {
 		t.Fatalf("unexpected task id %q", result.TaskResult.Meta.TaskID)
+	}
+}
+
+func TestHeadlessRunnerRecoversCollectStallAfterArtifactsViaRetry(t *testing.T) {
+	setCollectStallTimingsForTest(t, 150*time.Millisecond, 25*time.Millisecond, 25*time.Millisecond)
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	commandPath := filepath.Join(tempDir, "qwen-stall-retry-stub.sh")
+	script := `#!/bin/sh
+set -eu
+last_arg=""
+for arg in "$@"; do
+  last_arg="$arg"
+done
+if echo "$last_arg" | grep -q "RETRY RECOVERY MODE"; then
+  cat > "$STALL_WRITE_ROOT/shard-pack-manifest.json" <<'MANIFEST'
+{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "shard_id": "bank-of-anthos-iac",
+  "agent_role": "shard-analyst",
+  "artifact_root": "/tmp/write-root",
+  "repo_scopes": ["bank-of-anthos"],
+  "path_scopes": ["iac"],
+  "documents": [
+    {
+      "id": "doc.iac",
+      "kind": "analysis",
+      "title": "IAC",
+      "path": "iac-analysis.md",
+      "canonical_path": "reports/as-is/bank-of-anthos/iac-analysis.md",
+      "topics": ["iac"],
+      "citation_ids": ["cite.bank.readme"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.bank.readme",
+      "repo": "bank-of-anthos",
+      "path": "README.md",
+      "claim_ids": ["claim.iac.readme"],
+      "document_ids": ["doc.iac"]
+    }
+  ],
+  "compatibility": {
+    "coverage": {"observed": ["iac"], "missing": ["owner mappings"], "notes": ["recovered"]},
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}
+MANIFEST
+  cat <<'JSON'
+{"meta":{"task_id":"task-stall-retry","step_id":"init.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"recovered","changeset":[]}
+JSON
+  exit 0
+fi
+mkdir -p "$STALL_WRITE_ROOT"
+printf '# IAC\n' > "$STALL_WRITE_ROOT/iac-analysis.md"
+cat > "$STALL_WRITE_ROOT/shard-pack-manifest.json" <<'JSON'
+{
+  "artifact_root": "reports/taskruns/run-1/staging/shards/bank-of-anthos-iac",
+  "version": 1,
+  "documents": [
+    {
+      "id": "doc.iac",
+      "kind": "analysis",
+      "title": "IAC",
+      "path": "iac-analysis.md",
+      "canonical_path": "reports/as-is/bank-of-anthos/iac-analysis.md",
+      "topics": ["iac"],
+      "citation_ids": ["cite.runtime-summary"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.runtime-summary",
+      "repo": "bank-of-anthos",
+      "path": "README.md",
+      "claim_ids": ["claim.runtime.summary"],
+      "document_ids": ["doc.iac"]
+    }
+  ]
+}
+JSON
+printf 'artifacts-ready\n'
+sleep 10
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write stall retry stub: %v", err)
+	}
+	t.Setenv("STALL_WRITE_ROOT", writeRoot)
+
+	var diagnostics []acpruntime.DiagnosticEvent
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-stall-retry",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    tempDir,
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+		OnDiagnostic: func(event acpruntime.DiagnosticEvent) {
+			diagnostics = append(diagnostics, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected collect stall recovery to succeed: %v", err)
+	}
+	if result.TaskResult.Meta.TaskID != "task-stall-retry" {
+		t.Fatalf("unexpected task id %q", result.TaskResult.Meta.TaskID)
+	}
+	if len(diagnostics) < 3 {
+		t.Fatalf("expected stall diagnostics, got %d events", len(diagnostics))
+	}
+	if diagnostics[0].Message != "runtime task stalled after artifacts" {
+		t.Fatalf("expected first diagnostic to report stall, got %q", diagnostics[0].Message)
+	}
+	if diagnostics[1].Message != "runtime task retry scheduled" {
+		t.Fatalf("expected retry scheduled diagnostic, got %q", diagnostics[1].Message)
+	}
+	if diagnostics[len(diagnostics)-1].Message != "runtime task retry completed" {
+		t.Fatalf("expected retry completed diagnostic, got %q", diagnostics[len(diagnostics)-1].Message)
+	}
+	if diagnostics[len(diagnostics)-1].Fields["retry_status"] != "succeeded" {
+		t.Fatalf("expected retry_status=succeeded, got %#v", diagnostics[len(diagnostics)-1].Fields["retry_status"])
+	}
+}
+
+func TestHeadlessRunnerDoesNotTriggerCollectStallMonitorWhileActivityContinues(t *testing.T) {
+	setCollectStallTimingsForTest(t, 160*time.Millisecond, 20*time.Millisecond, 10*time.Millisecond)
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	commandPath := filepath.Join(tempDir, "qwen-stall-active-stub.sh")
+	script := `#!/bin/sh
+set -eu
+last_arg=""
+for arg in "$@"; do
+  last_arg="$arg"
+done
+if echo "$last_arg" | grep -q "RETRY RECOVERY MODE"; then
+  echo "retry-unexpected" >&2
+  exit 97
+fi
+mkdir -p "$STALL_WRITE_ROOT"
+printf '# IAC\n' > "$STALL_WRITE_ROOT/iac-analysis.md"
+cat > "$STALL_WRITE_ROOT/shard-pack-manifest.json" <<'JSON'
+{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "shard_id": "bank-of-anthos-iac",
+  "agent_role": "shard-analyst",
+  "artifact_root": "/tmp/write-root",
+  "repo_scopes": ["bank-of-anthos"],
+  "path_scopes": ["iac"],
+  "documents": [
+    {
+      "id": "doc.iac",
+      "kind": "analysis",
+      "title": "IAC",
+      "path": "iac-analysis.md",
+      "canonical_path": "reports/as-is/bank-of-anthos/iac-analysis.md",
+      "topics": ["iac"],
+      "citation_ids": ["cite.bank.readme"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.bank.readme",
+      "repo": "bank-of-anthos",
+      "path": "README.md",
+      "claim_ids": ["claim.iac.readme"],
+      "document_ids": ["doc.iac"]
+    }
+  ],
+  "compatibility": {
+    "coverage": {"observed": ["iac"], "missing": ["owner mappings"], "notes": ["active"]},
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}
+JSON
+for tick in 1 2 3 4; do
+  printf 'tick-%s\n' "$tick"
+  printf '\nupdate %s\n' "$tick" >> "$STALL_WRITE_ROOT/iac-analysis.md"
+  sleep 0.05
+done
+cat <<'JSON'
+{"meta":{"task_id":"task-stall-active","step_id":"init.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"completed with live activity","changeset":[]}
+JSON
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write active stub: %v", err)
+	}
+	t.Setenv("STALL_WRITE_ROOT", writeRoot)
+
+	var diagnostics []acpruntime.DiagnosticEvent
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-stall-active",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    tempDir,
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+		OnDiagnostic: func(event acpruntime.DiagnosticEvent) {
+			diagnostics = append(diagnostics, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected active collect run to finish without stall: %v", err)
+	}
+	if result.TaskResult.Meta.TaskID != "task-stall-active" {
+		t.Fatalf("unexpected task id %q", result.TaskResult.Meta.TaskID)
+	}
+	for _, event := range diagnostics {
+		if event.Message == "runtime task stalled after artifacts" {
+			t.Fatalf("did not expect stall diagnostic while activity continued")
+		}
+	}
+}
+
+func TestHeadlessRunnerCollectStallRetryFailurePersistsRawArtifactsAndClassifiesParseFailure(t *testing.T) {
+	setCollectStallTimingsForTest(t, 150*time.Millisecond, 25*time.Millisecond, 25*time.Millisecond)
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	commandPath := filepath.Join(tempDir, "qwen-stall-invalid-retry-stub.sh")
+	script := `#!/bin/sh
+set -eu
+last_arg=""
+for arg in "$@"; do
+  last_arg="$arg"
+done
+if echo "$last_arg" | grep -q "RETRY RECOVERY MODE"; then
+  printf 'not-json\n'
+  exit 0
+fi
+mkdir -p "$STALL_WRITE_ROOT"
+printf '# IAC\n' > "$STALL_WRITE_ROOT/iac-analysis.md"
+cat > "$STALL_WRITE_ROOT/shard-pack-manifest.json" <<'JSON'
+{
+  "artifact_root": "reports/taskruns/run-1/staging/shards/bank-of-anthos-iac",
+  "version": 1,
+  "documents": [
+    {
+      "id": "doc.iac",
+      "kind": "analysis",
+      "title": "IAC",
+      "path": "iac-analysis.md",
+      "canonical_path": "reports/as-is/bank-of-anthos/iac-analysis.md",
+      "topics": ["iac"],
+      "citation_ids": ["cite.runtime-summary"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.runtime-summary",
+      "repo": "bank-of-anthos",
+      "path": "README.md",
+      "claim_ids": ["claim.runtime.summary"],
+      "document_ids": ["doc.iac"]
+    }
+  ]
+}
+JSON
+printf 'artifacts-ready\n'
+sleep 10
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write invalid retry stub: %v", err)
+	}
+	t.Setenv("STALL_WRITE_ROOT", writeRoot)
+
+	runner := HeadlessRunner{Command: commandPath}
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-stall-invalid",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    tempDir,
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected parse failure after stalled collect retry returned invalid output")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected runner error, got %v", err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRunnerParseFailed {
+		t.Fatalf("expected runner_parse_failed, got %s", runnerErr.Code)
+	}
+	if !strings.Contains(runnerErr.Error(), "collect_stalled_after_artifacts") {
+		t.Fatalf("expected collect_stalled_after_artifacts in error, got %v", runnerErr)
+	}
+	rawDir := filepath.Join(tempDir, "reports", "taskruns", "raw")
+	entries, readErr := os.ReadDir(rawDir)
+	if readErr != nil {
+		t.Fatalf("read raw artifact dir: %v", readErr)
+	}
+	if len(entries) == 0 {
+		t.Fatalf("expected raw artifacts under %s", rawDir)
+	}
+}
+
+func TestHeadlessRunnerCollectStallArtifactRepairContractFailurePersistsRawArtifacts(t *testing.T) {
+	setCollectStallTimingsForTest(t, 150*time.Millisecond, 25*time.Millisecond, 25*time.Millisecond)
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	commandPath := filepath.Join(tempDir, "qwen-stall-skeletal-retry-stub.sh")
+	script := `#!/bin/sh
+set -eu
+last_arg=""
+for arg in "$@"; do
+  last_arg="$arg"
+done
+if echo "$last_arg" | grep -q "RETRY RECOVERY MODE"; then
+  cat > "$STALL_WRITE_ROOT/shard-pack-manifest.json" <<'JSON'
+{
+  "artifact_root": "reports/taskruns/run-1/staging/shards/bank-of-anthos-iac",
+  "version": 1,
+  "documents": [
+    {
+      "id": "doc.iac",
+      "kind": "analysis",
+      "title": "IAC",
+      "path": "iac-analysis.md",
+      "canonical_path": "reports/as-is/bank-of-anthos/iac-analysis.md",
+      "topics": ["iac"],
+      "citation_ids": ["cite.runtime-summary"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.runtime-summary",
+      "repo": "bank-of-anthos",
+      "path": "README.md",
+      "claim_ids": ["claim.runtime.summary"],
+      "document_ids": ["doc.iac"]
+    }
+  ]
+}
+JSON
+  cat <<'JSON'
+{"meta":{"task_id":"task-stall-skeletal","step_id":"init.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"retry stayed skeletal","changeset":[]}
+JSON
+  exit 0
+fi
+mkdir -p "$STALL_WRITE_ROOT"
+printf '# IAC\n' > "$STALL_WRITE_ROOT/iac-analysis.md"
+cat > "$STALL_WRITE_ROOT/shard-pack-manifest.json" <<'JSON'
+{
+  "artifact_root": "reports/taskruns/run-1/staging/shards/bank-of-anthos-iac",
+  "version": 1,
+  "documents": [
+    {
+      "id": "doc.iac",
+      "kind": "analysis",
+      "title": "IAC",
+      "path": "iac-analysis.md",
+      "canonical_path": "reports/as-is/bank-of-anthos/iac-analysis.md",
+      "topics": ["iac"],
+      "citation_ids": ["cite.runtime-summary"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.runtime-summary",
+      "repo": "bank-of-anthos",
+      "path": "README.md",
+      "claim_ids": ["claim.runtime.summary"],
+      "document_ids": ["doc.iac"]
+    }
+  ]
+}
+JSON
+printf 'artifacts-ready\n'
+sleep 10
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write skeletal retry stub: %v", err)
+	}
+	t.Setenv("STALL_WRITE_ROOT", writeRoot)
+
+	runner := HeadlessRunner{Command: commandPath}
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-stall-skeletal",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    tempDir,
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected parse failure after stalled collect retry kept skeletal artifacts")
+	}
+	code, message, ok := acpruntime.ClassifyError(err)
+	if !ok || code != string(acpruntime.ErrorCodeRunnerParseFailed) {
+		t.Fatalf("expected runner_parse_failed classification, got code=%q err=%v", code, err)
+	}
+	if !strings.Contains(message, "collect_stalled_after_artifacts") {
+		t.Fatalf("expected collect_stalled_after_artifacts in message, got %q", message)
+	}
+	if !strings.Contains(message, "raw_output=reports/taskruns/raw/") {
+		t.Fatalf("expected raw output path in message, got %q", message)
+	}
+	rawMetaFiles, globErr := filepath.Glob(filepath.Join(tempDir, "reports", "taskruns", "raw", "*-meta.json"))
+	if globErr != nil {
+		t.Fatalf("glob raw output meta files: %v", globErr)
+	}
+	if len(rawMetaFiles) == 0 {
+		t.Fatalf("expected raw output metadata under %s", filepath.Join(tempDir, "reports", "taskruns", "raw"))
 	}
 }
 
@@ -1720,9 +2172,19 @@ JSON
 	if err == nil {
 		t.Fatalf("expected failed artifact repair to reject skeletal collect artifacts")
 	}
-	code, _, ok := acpruntime.ClassifyError(err)
+	code, message, ok := acpruntime.ClassifyError(err)
 	if !ok || code != string(acpruntime.ErrorCodeRunnerParseFailed) {
 		t.Fatalf("expected runner_parse_failed classification, got code=%q err=%v", code, err)
+	}
+	if !strings.Contains(message, "raw_output=reports/taskruns/raw/") {
+		t.Fatalf("expected raw output diagnostics in message, got %q", message)
+	}
+	rawMetaFiles, globErr := filepath.Glob(filepath.Join(workspace, "reports", "taskruns", "raw", "*-meta.json"))
+	if globErr != nil {
+		t.Fatalf("glob raw output meta files: %v", globErr)
+	}
+	if len(rawMetaFiles) == 0 {
+		t.Fatalf("expected raw output metadata under %s", filepath.Join(workspace, "reports", "taskruns", "raw"))
 	}
 	if count := strings.TrimSpace(string(mustReadFile(t, stateFile))); count != "2" {
 		t.Fatalf("expected exactly 2 runner invocations, got %q", count)
@@ -1940,6 +2402,7 @@ func TestRunQwenCommandPrefersWorkspaceAsCommandDirOverWriteRoot(t *testing.T) {
 		task,
 		"sh",
 		[]string{"-c", fmt.Sprintf("pwd >&2; printf '%%s' '%s'", validJSON)},
+		runQwenOptions{},
 	)
 	if runErr != nil {
 		t.Fatalf("unexpected runner error: %v", runErr)

@@ -144,13 +144,19 @@ type Task struct {
 	RepoScopes        []string
 	PathScopes        []string
 	StartedAtUTC      time.Time
-	OnOutput          func(OutputChunk) `json:"-"`
+	OnOutput          func(OutputChunk)     `json:"-"`
+	OnDiagnostic      func(DiagnosticEvent) `json:"-"`
 }
 
 type OutputChunk struct {
 	Stream    OutputStream
 	Text      string
 	Truncated bool
+}
+
+type DiagnosticEvent struct {
+	Message string
+	Fields  map[string]any
 }
 
 type Result struct {

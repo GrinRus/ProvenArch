@@ -133,6 +133,23 @@ slugify() {
   printf '%s' "$value"
 }
 
+batch_has_incomplete_run_sentinels() {
+  local batch_root="$1"
+  local status_file=""
+  local state=""
+  if [[ ! -d "$batch_root" ]]; then
+    return 1
+  fi
+  while IFS= read -r status_file; do
+    [[ -z "$status_file" ]] && continue
+    state="$(sed -n 's/^state=//p' "$status_file" | tail -n1 | tr -d '\r')"
+    if [[ "$state" == "running" || -z "$state" ]]; then
+      return 0
+    fi
+  done < <(find "$batch_root" -type f -name 'run-status.env' | LC_ALL=C sort)
+  return 1
+}
+
 resolve_selected_providers() {
   local filter_raw="${BATCH_PROVIDER_FILTER:-all}"
   local filter
@@ -661,6 +678,10 @@ while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sw
   ) >"$driver_log" 2>&1; then
     status="failed"
     log "profile+sweep failed: profile=$profile_id sweep=$sweep_id (see $driver_log)"
+  fi
+  if [[ "$status" == "passed" ]] && batch_has_incomplete_run_sentinels "$batch_root"; then
+    status="failed"
+    log "profile+sweep left unfinished run sentinel: profile=$profile_id sweep=$sweep_id batch_root=$batch_root"
   fi
 
   run_matrix_tsv="$REPORTS_ROOT/run_matrix_${batch_id}.tsv"

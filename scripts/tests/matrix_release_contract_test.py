@@ -164,6 +164,18 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 PY
                 fi
 
+                if [[ "${MATRIX_TEST_FAIL_BEFORE_REPORT:-0}" == "1" ]]; then
+                  mkdir -p "${BATCH_ROOT}/qwen-code/run1"
+                  cat > "${BATCH_ROOT}/qwen-code/run1/run-status.env" <<'EOF'
+                provider=qwen-code
+                run_index=1
+                state=running
+                process_exit=
+                termination_signal=none
+                EOF
+                  exit 1
+                fi
+
                 mkdir -p "${REPORTS_ROOT}" "${BATCH_ROOT}/qwen-code/run1/reports/taskruns"
 
                 provider_filter="${BATCH_PROVIDER_FILTER:-all}"
@@ -515,6 +527,31 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 for rec in verdict.get("records", [])
             )
         )
+
+    def test_matrix_records_failed_child_even_without_downstream_reports(self) -> None:
+        matrix_file = self._write_matrix_file(None, include_profiles=["single-path"])
+        matrix_id = "matrix-test-failed-child"
+        result = self._run_matrix(
+            matrix_file,
+            matrix_id,
+            extra_env={"MATRIX_TEST_FAIL_BEFORE_REPORT": "1"},
+            release_mode="0",
+        )
+        self.assertNotEqual(result.returncode, 0)
+
+        records_path = self.e2e_tmp_root / "matrix" / matrix_id / "profile-runs.jsonl"
+        self.assertTrue(records_path.exists(), f"missing matrix records: {records_path}")
+        records = [
+            json.loads(line)
+            for line in records_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        self.assertEqual(1, len(records))
+        self.assertEqual("failed", records[0]["status"])
+
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual("FAIL", verdict["verdict"])
+        self.assertEqual("failed", verdict["records"][0]["status"])
 
     def test_non_release_wave1_regression_matrix_allows_two_profiles(self) -> None:
         matrix_file = self._write_matrix_file(

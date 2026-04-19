@@ -115,6 +115,40 @@ require_cmd() {
   fi
 }
 
+run_status_file() {
+  local run_dir="$1"
+  printf '%s' "$run_dir/run-status.env"
+}
+
+write_run_status() {
+  local run_dir="$1"
+  local provider="$2"
+  local run_index="$3"
+  local state="$4"
+  local process_exit="${5:-}"
+  local termination_signal="${6:-none}"
+  local status_file
+  status_file="$(run_status_file "$run_dir")"
+  cat >"$status_file" <<EOF
+provider=$provider
+run_index=$run_index
+state=$state
+process_exit=$process_exit
+termination_signal=$termination_signal
+updated_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+EOF
+}
+
+read_status_field() {
+  local status_file="$1"
+  local key="$2"
+  if [[ ! -f "$status_file" ]]; then
+    printf ''
+    return 0
+  fi
+  sed -n "s/^${key}=//p" "$status_file" | tail -n1 | tr -d '\r'
+}
+
 array_contains() {
   local needle="$1"
   shift
@@ -673,6 +707,9 @@ classify_run_failure() {
   local run_subclass="none"
   local cancellation_like=0
   local quality_gates_status=""
+  local run_status_path="$run_dir/run-status.env"
+  local run_status_state=""
+  local run_status_signal=""
   local -a classify_log_paths=("$summary_path" "$full_log_path" "$batch_driver_log")
   local workspace="$run_dir/arch-workspace"
   local iter_log
@@ -692,10 +729,25 @@ classify_run_failure() {
     done < <(find "$workspace/reports/taskruns/raw" -type f | LC_ALL=C sort)
   fi
 
+  run_status_state="$(read_status_field "$run_status_path" "state")"
+  run_status_signal="$(read_status_field "$run_status_path" "termination_signal")"
+
   if [[ ! -f "$summary_path" ]]; then
-    run_class="summary_missing"
     summary_result="missing"
-    failure_reason="summary_missing"
+    if [[ "$run_status_state" == "signal_terminated" || "$run_status_signal" != "" && "$run_status_signal" != "none" || "$process_exit" -ge 128 ]]; then
+      run_class="infra_signal_terminated"
+      failure_reason="infra_signal_terminated"
+      if [[ -z "$termination_signal" || "$termination_signal" == "none" ]]; then
+        if [[ -n "$run_status_signal" && "$run_status_signal" != "none" ]]; then
+          termination_signal="$run_status_signal"
+        elif [[ "$process_exit" -ge 128 ]]; then
+          termination_signal="signal_$((process_exit - 128))"
+        fi
+      fi
+    else
+      run_class="infra_incomplete_cycle"
+      failure_reason="infra_incomplete_cycle"
+    fi
   else
     summary_result="$(summary_scalar "$summary_path" "result" | awk '{print $1}')"
     quality_gates_status="$(summary_scalar "$summary_path" "quality_gates" | awk '{print $1}')"
@@ -1091,6 +1143,7 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
   for i in "${SELECTED_RUN_INDEXES[@]}"; do
     run_dir="$BATCH_ROOT/$provider/run${i}"
     mkdir -p "$run_dir"
+    write_run_status "$run_dir" "$provider" "$i" "running" "" "none"
     log "full-run provider=$provider run=$i tmp_root=$run_dir"
     process_exit=0
     (
@@ -1115,6 +1168,17 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
         "SWEEP_ID=${SWEEP_ID:-baseline}" \
         ./scripts/full-run-ai-advent.sh
     ) >"$run_dir/batch-driver.log" 2>&1 || process_exit=$?
+
+    run_status_state="completed"
+    run_status_signal="none"
+    if [[ "$process_exit" -ne 0 ]]; then
+      run_status_state="process_failed"
+      if [[ "$process_exit" -ge 128 ]]; then
+        run_status_state="signal_terminated"
+        run_status_signal="signal_$((process_exit - 128))"
+      fi
+    fi
+    write_run_status "$run_dir" "$provider" "$i" "$run_status_state" "$process_exit" "$run_status_signal"
 
     classify_run_failure "$provider" "$i" "$run_dir" "$process_exit"
     if [[ "$LAST_RUN_FAILURE_CLASS" != "none" ]]; then

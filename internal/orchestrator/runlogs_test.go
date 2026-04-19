@@ -535,6 +535,66 @@ func TestRunLogsPaginationWorksWithMixedEventAndRuntimeEntries(t *testing.T) {
 	}
 }
 
+func TestRunLogsIncludeRuntimeDiagnosticEvents(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	service := NewService(
+		WithHistoryWorkspace(ws),
+		WithRunner(syntheticRuntimeDiagnosticRunner{}),
+	)
+
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run init pipeline with runtime diagnostic runner: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded run status, got %s", info.Status)
+	}
+
+	page, ok, err := service.GetRunLogs(info.RunID, 0, 500)
+	if err != nil {
+		t.Fatalf("get run logs: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected run logs for run %q", info.RunID)
+	}
+
+	foundStalled := false
+	foundRetryScheduled := false
+	foundRetryCompleted := false
+	foundPersisted := false
+	for _, entry := range page.Items {
+		switch entry.Message {
+		case "runtime task stalled after artifacts":
+			foundStalled = true
+			if entry.Fields["manifest_state"] != "invalid" {
+				t.Fatalf("expected manifest_state=invalid for stalled event, got %#v", entry.Fields["manifest_state"])
+			}
+		case "runtime task retry scheduled":
+			foundRetryScheduled = true
+		case "runtime task retry completed":
+			foundRetryCompleted = true
+			if entry.Fields["retry_status"] != "succeeded" {
+				t.Fatalf("expected retry_status=succeeded, got %#v", entry.Fields["retry_status"])
+			}
+		case "taskrun persisted":
+			foundPersisted = true
+		}
+	}
+
+	if !foundStalled || !foundRetryScheduled || !foundRetryCompleted {
+		t.Fatalf("expected runtime diagnostic events in run logs")
+	}
+	if !foundPersisted {
+		t.Fatalf("expected taskrun persisted event after runtime diagnostic recovery")
+	}
+}
+
 type syntheticRuntimeStreamRunner struct{}
 
 func (syntheticRuntimeStreamRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
@@ -573,3 +633,62 @@ func (syntheticRuntimeStreamRunner) Run(_ context.Context, task acpruntime.Task)
 }
 
 func (syntheticRuntimeStreamRunner) Preflight(context.Context) error { return nil }
+
+type syntheticRuntimeDiagnosticRunner struct{}
+
+func (syntheticRuntimeDiagnosticRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	if task.OnDiagnostic != nil {
+		task.OnDiagnostic(acpruntime.DiagnosticEvent{
+			Message: "runtime task stalled after artifacts",
+			Fields: map[string]any{
+				"provider":                    "qwen-code",
+				"shard_id":                    task.ShardID,
+				"manifest_state":              "invalid",
+				"authored_file_count":         1,
+				"last_pipe_activity_at":       task.StartedAtUTC.Add(5 * time.Second).Format(time.RFC3339),
+				"last_write_root_mutation_at": task.StartedAtUTC.Add(6 * time.Second).Format(time.RFC3339),
+				"action":                      "terminate_and_retry",
+			},
+		})
+		task.OnDiagnostic(acpruntime.DiagnosticEvent{
+			Message: "runtime task retry scheduled",
+			Fields: map[string]any{
+				"provider":            "qwen-code",
+				"shard_id":            task.ShardID,
+				"manifest_state":      "invalid",
+				"authored_file_count": 1,
+				"action":              "terminate_and_retry",
+			},
+		})
+		task.OnDiagnostic(acpruntime.DiagnosticEvent{
+			Message: "runtime task retry completed",
+			Fields: map[string]any{
+				"provider":            "qwen-code",
+				"shard_id":            task.ShardID,
+				"manifest_state":      "rich",
+				"authored_file_count": 1,
+				"retry_status":        "succeeded",
+				"action":              "terminate_and_retry",
+			},
+		})
+	}
+
+	payload := map[string]any{
+		"meta": map[string]any{
+			"task_id":    task.TaskID,
+			"step_id":    task.StepID,
+			"run_id":     task.RunID,
+			"runtime":    map[string]any{"name": "synthetic-headless", "version": "v1"},
+			"started_at": task.StartedAtUTC.Format(time.RFC3339),
+		},
+		"summary":   "synthetic diagnostic success",
+		"changeset": []any{},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return acpruntime.Result{}, err
+	}
+	return acpruntime.Result{RawJSON: raw}, nil
+}
+
+func (syntheticRuntimeDiagnosticRunner) Preflight(context.Context) error { return nil }
