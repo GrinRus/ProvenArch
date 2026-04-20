@@ -5,26 +5,24 @@ import (
 	"strings"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 )
 
 const (
-	constitutionDraftManifestFile = "constitution-draft.json"
-	asisDraftManifestFile         = "asis-draft-manifest.json"
-	proposalsDraftManifestFile    = "proposals-draft-manifest.json"
+	constitutionDraftManifestFile = runtimedrafts.ConstitutionManifestFile
+	asisDraftManifestFile         = runtimedrafts.AsIsManifestFile
+	proposalsDraftManifestFile    = runtimedrafts.ProposalsManifestFile
 )
 
 func runtimeStepContract(stepID string) string {
+	if contract := strings.TrimSpace(runtimedrafts.StepContractForStep(stepID)); contract != "" {
+		return contract
+	}
 	switch acpruntime.StepProviderKeyForStepID(stepID) {
-	case acpruntime.StepProviderStep0Constitution:
-		return "constitution"
 	case acpruntime.StepProviderStep1Collect:
 		return "collect"
-	case acpruntime.StepProviderStep2AsIs:
-		return "as_is"
 	case acpruntime.StepProviderStep3Findings:
 		return "findings"
-	case acpruntime.StepProviderStep4Proposals:
-		return "proposals"
 	default:
 		return "runtime"
 	}

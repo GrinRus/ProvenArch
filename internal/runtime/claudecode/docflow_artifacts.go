@@ -12,6 +12,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/artifactquality"
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 )
 
@@ -23,22 +24,8 @@ const (
 	citationIndexFileName     = "citation-index.json"
 )
 
-type runtimeDraftManifest struct {
-	Version      int                  `json:"version"`
-	RunID        string               `json:"run_id"`
-	StepID       string               `json:"step_id"`
-	StepContract string               `json:"step_contract"`
-	AgentRole    string               `json:"agent_role"`
-	Summary      string               `json:"summary,omitempty"`
-	Outputs      []runtimeDraftOutput `json:"outputs"`
-}
-
-type runtimeDraftOutput struct {
-	Path          string `json:"path"`
-	CanonicalPath string `json:"canonical_path"`
-	Kind          string `json:"kind,omitempty"`
-	Title         string `json:"title,omitempty"`
-}
+type runtimeDraftManifest = runtimedrafts.Manifest
+type runtimeDraftOutput = runtimedrafts.Output
 
 type runtimeCitationSource struct {
 	claimKey   string
@@ -164,7 +151,7 @@ func writeConstitutionDraftManifest(writeRoot string, task acpruntime.Task, resu
 	}); err != nil {
 		return err
 	}
-	return writeRuntimeDraftManifest(writeRoot, "constitution-draft.json", task, result, outputs)
+	return writeRuntimeDraftManifest(writeRoot, runtimedrafts.ConstitutionManifestFile, task, result, outputs)
 }
 
 func writeAsIsDraftManifest(writeRoot string, task acpruntime.Task, result contracts.TaskResult) error {
@@ -208,7 +195,7 @@ func writeAsIsDraftManifest(writeRoot string, task acpruntime.Task, result contr
 	}); err != nil {
 		return err
 	}
-	return writeRuntimeDraftManifest(writeRoot, "asis-draft-manifest.json", task, result, outputs)
+	return writeRuntimeDraftManifest(writeRoot, runtimedrafts.AsIsManifestFile, task, result, outputs)
 }
 
 func writeProposalsDraftManifest(writeRoot string, task acpruntime.Task, result contracts.TaskResult) error {
@@ -226,7 +213,7 @@ func writeProposalsDraftManifest(writeRoot string, task acpruntime.Task, result 
 	}); err != nil {
 		return err
 	}
-	return writeRuntimeDraftManifest(writeRoot, "proposals-draft-manifest.json", task, result, outputs)
+	return writeRuntimeDraftManifest(writeRoot, runtimedrafts.ProposalsManifestFile, task, result, outputs)
 }
 
 func writeRuntimeDraftManifest(writeRoot string, filename string, task acpruntime.Task, result contracts.TaskResult, outputs []runtimeDraftOutput) error {

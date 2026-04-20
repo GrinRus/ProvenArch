@@ -2,11 +2,11 @@ package taskresultcompat
 
 import (
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 )
 
 // NormalizeRawTaskResult repairs known collect-step compatibility drift in raw
@@ -77,12 +77,7 @@ func isCollectStep(stepID string) bool {
 }
 
 func isDraftManifestCompatibilityStep(stepID string) bool {
-	switch strings.TrimSpace(stepID) {
-	case "init.step2.asis_docs", "refresh.step2.asis_docs", "init.step4.proposals", "refresh.step4.proposals":
-		return true
-	default:
-		return false
-	}
+	return runtimedrafts.IsDraftStep(stepID)
 }
 
 func hasValidDocArtifact(value any) bool {
@@ -134,55 +129,42 @@ func resolveRuntimeDraftArtifactTargets(task acpruntime.Task) map[string]struct{
 	if writeRoot == "" || draftRoot == "" {
 		return nil
 	}
-	manifestFile := draftManifestFileForStep(task.StepID)
+	manifestFile := runtimedrafts.ManifestFileForStep(task.StepID)
 	if manifestFile == "" {
 		return nil
 	}
 	manifestPath := filepath.Join(writeRoot, manifestFile)
-	raw, err := os.ReadFile(manifestPath)
+	manifest, _, err := runtimedrafts.ValidateRequiredManifest(
+		writeRoot,
+		draftRoot,
+		task.RunID,
+		task.StepID,
+		task.StepContract,
+		nil,
+	)
 	if err != nil {
-		return nil
-	}
-	var manifest runtimeDraftManifestCompat
-	if err := json.Unmarshal(raw, &manifest); err != nil {
-		return nil
-	}
-	if manifest.Version != 1 || len(manifest.Outputs) == 0 {
 		return nil
 	}
 
 	targets := map[string]struct{}{
 		manifestFile:                   {},
 		filepath.ToSlash(manifestPath): {},
-		filepath.ToSlash(filepath.Join(artifactRoot, manifestFile)): {},
+	}
+	if artifactRoot != "" {
+		targets[filepath.ToSlash(filepath.Join(artifactRoot, manifestFile))] = struct{}{}
 	}
 	for _, output := range manifest.Outputs {
-		relPath := normalizeRelativePath(stringValue(output["path"]))
-		canonicalPath := normalizeCanonicalPath(stringValue(output["canonical_path"]))
+		relPath := normalizeRelativePath(output.Path)
+		canonicalPath := normalizeCanonicalPath(output.CanonicalPath)
 		if relPath == "" || canonicalPath == "" {
 			return nil
 		}
 		absDraftPath := filepath.Join(draftRoot, filepath.FromSlash(relPath))
-		info, err := os.Stat(absDraftPath)
-		if err != nil || info.IsDir() {
-			return nil
-		}
 		targets[relPath] = struct{}{}
 		targets[canonicalPath] = struct{}{}
 		targets[filepath.ToSlash(absDraftPath)] = struct{}{}
 	}
 	return targets
-}
-
-func draftManifestFileForStep(stepID string) string {
-	switch strings.TrimSpace(stepID) {
-	case "init.step2.asis_docs", "refresh.step2.asis_docs":
-		return "asis-draft-manifest.json"
-	case "init.step4.proposals", "refresh.step4.proposals":
-		return "proposals-draft-manifest.json"
-	default:
-		return ""
-	}
 }
 
 func targetsKnownRuntimeDraftArtifact(value any, targets map[string]struct{}) bool {
@@ -224,11 +206,6 @@ func normalizeCanonicalPath(value string) string {
 		return ""
 	}
 	return clean
-}
-
-type runtimeDraftManifestCompat struct {
-	Version int              `json:"version"`
-	Outputs []map[string]any `json:"outputs"`
 }
 
 func stringValue(value any) string {

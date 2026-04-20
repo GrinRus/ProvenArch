@@ -1,7 +1,6 @@
 package orchestrator
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path"
@@ -9,39 +8,15 @@ import (
 	"strings"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
-type runtimeDraftManifest struct {
-	Version      int                  `json:"version"`
-	RunID        string               `json:"run_id"`
-	StepID       string               `json:"step_id"`
-	StepContract string               `json:"step_contract"`
-	AgentRole    string               `json:"agent_role"`
-	Summary      string               `json:"summary,omitempty"`
-	Outputs      []runtimeDraftOutput `json:"outputs"`
-}
-
-type runtimeDraftOutput struct {
-	Path          string `json:"path"`
-	CanonicalPath string `json:"canonical_path"`
-	Kind          string `json:"kind,omitempty"`
-	Title         string `json:"title,omitempty"`
-}
+type runtimeDraftManifest = runtimedrafts.Manifest
+type runtimeDraftOutput = runtimedrafts.Output
 
 func loadRuntimeDraftManifest(root string, filename string) (runtimeDraftManifest, []byte, error) {
-	raw, err := os.ReadFile(filepath.Join(filepath.Clean(root), filename))
-	if err != nil {
-		return runtimeDraftManifest{}, nil, fmt.Errorf("read runtime draft manifest: %w", err)
-	}
-	var manifest runtimeDraftManifest
-	if err := json.Unmarshal(raw, &manifest); err != nil {
-		return runtimeDraftManifest{}, nil, fmt.Errorf("parse runtime draft manifest: %w", err)
-	}
-	if err := validateRuntimeDraftManifest(manifest); err != nil {
-		return runtimeDraftManifest{}, nil, err
-	}
-	return manifest, raw, nil
+	return runtimedrafts.Load(root, filename)
 }
 
 func loadValidatedRuntimeDraftManifest(root string, draftRoot string, filename string) (runtimeDraftManifest, []byte, error) {
@@ -56,127 +31,35 @@ func loadValidatedRuntimeDraftManifest(root string, draftRoot string, filename s
 }
 
 func validateRuntimeDraftManifest(manifest runtimeDraftManifest) error {
-	if manifest.Version != 1 {
-		return fmt.Errorf("runtime draft manifest version must be 1")
-	}
-	if len(manifest.Outputs) == 0 {
-		return fmt.Errorf("runtime draft manifest outputs must not be empty")
-	}
-	for idx, output := range manifest.Outputs {
-		if err := validateRelativeDraftPath(output.Path); err != nil {
-			return fmt.Errorf("runtime draft manifest outputs[%d].path: %w", idx, err)
-		}
-		if err := validateCanonicalDraftPath(output.CanonicalPath); err != nil {
-			return fmt.Errorf("runtime draft manifest outputs[%d].canonical_path: %w", idx, err)
-		}
-	}
-	return nil
+	return runtimedrafts.ValidateManifest(manifest)
 }
 
 func validateRuntimeDraftOutputsExist(draftRoot string, manifest runtimeDraftManifest) error {
-	draftRoot = strings.TrimSpace(draftRoot)
-	if draftRoot == "" {
-		return fmt.Errorf("runtime draft root is empty")
-	}
-	for idx, output := range manifest.Outputs {
-		relPath := filepath.Clean(strings.TrimSpace(output.Path))
-		if relPath == "" || relPath == "." {
-			return fmt.Errorf("runtime draft manifest outputs[%d].path: must not be empty", idx)
-		}
-		absPath := filepath.Join(filepath.Clean(draftRoot), relPath)
-		info, err := os.Stat(absPath)
-		if err != nil {
-			return fmt.Errorf("runtime draft manifest outputs[%d].path: referenced draft file %q is unavailable: %w", idx, output.Path, err)
-		}
-		if info.IsDir() {
-			return fmt.Errorf("runtime draft manifest outputs[%d].path: %q must point to a file", idx, output.Path)
-		}
-	}
-	return nil
+	return runtimedrafts.ValidateOutputsExist(draftRoot, manifest)
 }
 
 func requiredRuntimeDraftManifestFile(stepID string) string {
-	switch strings.TrimSpace(stepID) {
-	case "init.step0.constitution":
-		return constitutionDraftManifestFile
-	case "init.step2.asis_docs", "refresh.step2.asis_docs":
-		return asisDraftManifestFile
-	case "init.step4.proposals", "refresh.step4.proposals":
-		return proposalsDraftManifestFile
-	default:
-		return ""
-	}
+	return runtimedrafts.ManifestFileForStep(stepID)
 }
 
 func validateRequiredRuntimeDraftArtifacts(task acpruntime.Task) (runtimeDraftManifest, []byte, error) {
-	filename := requiredRuntimeDraftManifestFile(task.StepID)
-	if filename == "" {
-		return runtimeDraftManifest{}, nil, nil
-	}
-	if len(task.ExpectedArtifacts) > 0 {
-		found := false
-		for _, artifact := range task.ExpectedArtifacts {
-			if strings.TrimSpace(artifact) == filename {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return runtimeDraftManifest{}, nil, fmt.Errorf("runtime draft manifest %q is not declared in expected_artifacts", filename)
-		}
-	}
-	manifest, raw, err := loadRuntimeDraftManifest(task.WriteRoot, filename)
-	if err != nil {
-		return runtimeDraftManifest{}, nil, err
-	}
-	if err := validateRuntimeDraftManifestForTask(task, manifest); err != nil {
-		return runtimeDraftManifest{}, nil, err
-	}
-	if err := validateRuntimeDraftOutputsExist(task.DraftFinalRoot, manifest); err != nil {
-		return runtimeDraftManifest{}, nil, err
-	}
-	return manifest, raw, nil
+	return runtimedrafts.ValidateRequiredManifest(
+		task.WriteRoot,
+		task.DraftFinalRoot,
+		task.RunID,
+		task.StepID,
+		task.StepContract,
+		task.ExpectedArtifacts,
+	)
 }
 
 func validateRuntimeDraftManifestForTask(task acpruntime.Task, manifest runtimeDraftManifest) error {
-	expectedStepID := strings.TrimSpace(task.StepID)
-	if expectedStepID != "" && strings.TrimSpace(manifest.StepID) != expectedStepID {
-		return fmt.Errorf("runtime draft manifest step_id must equal %q", expectedStepID)
-	}
-	expectedContract := strings.TrimSpace(runtimeStepContract(task.StepID))
-	if expectedContract != "" && strings.TrimSpace(manifest.StepContract) != expectedContract {
-		return fmt.Errorf("runtime draft manifest step_contract must equal %q", expectedContract)
-	}
-	expectedRunID := strings.TrimSpace(task.RunID)
-	if expectedRunID != "" && strings.TrimSpace(manifest.RunID) != expectedRunID {
-		return fmt.Errorf("runtime draft manifest run_id must equal %q", expectedRunID)
-	}
-	if strings.TrimSpace(manifest.AgentRole) == "" {
-		return fmt.Errorf("runtime draft manifest agent_role must not be empty")
-	}
-	return nil
-}
-
-func validateRelativeDraftPath(value string) error {
-	clean := filepath.ToSlash(filepath.Clean(strings.TrimSpace(value)))
-	if clean == "." || clean == "" {
-		return fmt.Errorf("must not be empty")
-	}
-	if path.IsAbs(clean) || strings.HasPrefix(clean, "../") || clean == ".." {
-		return fmt.Errorf("must stay inside draft root")
-	}
-	return nil
-}
-
-func validateCanonicalDraftPath(value string) error {
-	clean := filepath.ToSlash(path.Clean(strings.TrimSpace(value)))
-	if clean == "." || clean == "" {
-		return fmt.Errorf("must not be empty")
-	}
-	if path.IsAbs(clean) || strings.HasPrefix(clean, "../") || clean == ".." {
-		return fmt.Errorf("must stay inside workspace")
-	}
-	return nil
+	return runtimedrafts.ValidateManifestForTask(
+		manifest,
+		task.RunID,
+		task.StepID,
+		task.StepContract,
+	)
 }
 
 func applyRuntimeDraftOutputs(

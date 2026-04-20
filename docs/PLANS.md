@@ -49,6 +49,55 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 
 ### Plan ID
+EP-20260420-qwen-step0-draft-contract-regressions
+
+### Context
+Live canonical `regres fast` показал универсальный hard-stop на `qwen-code` в `init.step0.constitution`: provider возвращает schema-valid `TaskResult`, но пишет `constitution-draft.json` в legacy constitution shapes (`schema_version`, `version: "0.1.0"`, `services/...`) вместо runtime draft manifest contract. Текущий orchestrator gate корректно ловит ошибку, но runtime не валидирует/не чинит draft-only artifacts до возврата, а qwen prompt/retry helpers остаются collect-centric.
+
+### Goals (must have)
+- [x] Вынести runtime draft manifest contract в shared internal package и использовать его в writer + validator
+- [x] Сделать `qwen` step0 prompt/retry contract-aware для `constitution-draft.json` и убрать legacy model-first drift
+- [x] Добавить runtime-side validation и один artifact-repair retry для draft-only steps (`step0/2/4`)
+- [x] Расширить safe normalization legacy `add_doc_artifact` drift на `step0` без silent legacy payload conversion
+- [x] Зафиксировать live step0 regression fixtures/tests и синхронизировать docs
+
+### Non-goals
+- [ ] Не менять public JSON schemas, API endpoints и `workspace.yaml`
+- [ ] Не трогать harness/reporting/incomplete-cycle logic в этом slice
+- [ ] Не добавлять broad auto-conversion legacy constitution payloads в canonical draft manifest
+
+### Approach
+1) Вынести manifest structs/validation/file-existence checks в shared draft-contract package и подключить его в orchestrator/runtime writer paths.
+2) Переписать qwen draft-only prompt/retry helpers: exact `constitution-draft.json` example, draft-aware recovery phrasing, `changeset: []` template для `step0/2/4`.
+3) После parse/binding success валидировать required draft artifacts в qwen runtime и при invalid manifest запускать один constrained repair retry поверх `write_root + draft_final_root`.
+4) Расширить compatibility normalization только на duplicate `add_doc_artifact` drift при уже валидном step0 draft manifest.
+5) Добавить recorded fixtures/tests на observed live legacy step0 shapes и обновить docs/architecture notes.
+
+### Files expected to change
+- `internal/orchestrator/*`
+- `internal/runtime/qwencode/*`
+- `internal/runtime/claudecode/*`
+- `internal/runtime/taskresultcompat/*`
+- `internal/runtime/testdata/*`
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Canonical `constitution-draft.json` contract валидируется из shared package и одинаково используется writer/validator
+- [x] `qwen` step0 prompt и retry prompt больше не тянут collect/shard wording и synthetic `upsert_entity` template
+- [x] Invalid step0 draft manifest идёт в один runtime repair retry и при неудаче падает как `runner_parse_failed` с raw artifacts
+- [x] Valid step0 draft manifest + legacy `add_doc_artifact` ops нормализуются без silent semantic payload conversion
+- [x] Regression fixtures/tests покрывают observed live step0 legacy shapes
+
+### Risks
+- Основной риск — случайно расширить safe normalization до semantic auto-conversion legacy constitution payloads. Снижение риска: shared validator остаётся строгим, а runtime normalization ограничена только duplicate `add_doc_artifact` drift при уже валидном manifest.
+
+### Progress log
+- 2026-04-20: зафиксирован implementation slice по `qwen` step0 draft-contract regressions; подтверждены observed live legacy manifest shapes (`schema_version`, `version:"0.1.0"`) и collect-centric prompt drift в qwen runtime.
+- 2026-04-20: live rerun после основного фикса выявил дополнительный qwen-specific post-artifact stall на `step0`, когда provider писал canonical `constitution-draft.json`, но оставлял draft files под `draft_final_root/<canonical_path>` и зависал без финального JSON; добавлены safe file-layout reconciliation, draft-step stall watchdog/retry и regression tests.
+
+### Plan ID
 EP-20260420-regres-small-live-triage
 
 ### Context

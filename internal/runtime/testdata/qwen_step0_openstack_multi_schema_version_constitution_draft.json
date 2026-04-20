@@ -1,0 +1,17 @@
+{
+  "schema_version": "acp-constitution-draft-v1",
+  "domain": "openstack",
+  "services": [
+    {
+      "id": "svc.cinder",
+      "name": "Cinder"
+    }
+  ],
+  "integration_edges": [],
+  "datastore_bindings": [],
+  "api_contracts": [],
+  "deployment_configs": [],
+  "coverage_notes": [
+    "legacy schema_version shape"
+  ]
+}

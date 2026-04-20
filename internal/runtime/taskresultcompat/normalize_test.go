@@ -265,3 +265,143 @@ func TestNormalizeRawTaskResultKeepsLegacyDraftManifestArtifactWhenReferencedDra
 		t.Fatalf("expected legacy op to remain when referenced proposal draft files are missing")
 	}
 }
+
+func TestNormalizeRawTaskResultDropsLegacyDraftManifestArtifactForStep0WhenManifestIsValid(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "charter-overview.md"), []byte("# Constitution\n"), 0o644); err != nil {
+		t.Fatalf("write charter overview: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "baseline-subagents.yaml"), []byte("version: 1\n"), 0o644); err != nil {
+		t.Fatalf("write baseline subagents: %v", err)
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step0.constitution",
+  "step_contract": "constitution",
+  "agent_role": "architect",
+  "outputs": [
+    {
+      "path": "charter-overview.md",
+      "canonical_path": "charter/overview.md",
+      "kind": "charter",
+      "title": "Constitution"
+    },
+    {
+      "path": "baseline-subagents.yaml",
+      "canonical_path": "skills/subagents.yaml",
+      "kind": "bundle",
+      "title": "Baseline Subagents"
+    }
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, "constitution-draft.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write constitution draft manifest: %v", err)
+	}
+
+	task := acpruntime.Task{
+		StepID:         "init.step0.constitution",
+		WriteRoot:      writeRoot,
+		DraftFinalRoot: draftRoot,
+		ArtifactRoot:   "reports/taskruns/run-1/runtime/step0_constitution",
+	}
+	raw := []byte(`{
+  "meta": {
+    "task_id": "task-1",
+    "step_id": "init.step0.constitution",
+    "runtime": {"name": "qwen-code"},
+    "started_at": "2026-04-20T07:16:00Z"
+  },
+  "summary": "constitution draft already written",
+  "changeset": [
+    {
+      "op": "add_doc_artifact",
+      "doc_artifact": {
+        "id": "constitution-draft-manifest",
+        "path": "reports/taskruns/run-1/runtime/step0_constitution/constitution-draft.json"
+      }
+    }
+  ]
+}`)
+
+	normalized, changed, err := NormalizeRawTaskResult(task, raw)
+	if err != nil {
+		t.Fatalf("normalize raw taskresult: %v", err)
+	}
+	if !changed {
+		t.Fatalf("expected legacy step0 draft manifest op to be dropped")
+	}
+	parsed, err := contracts.ParseTaskResult(normalized)
+	if err != nil {
+		t.Fatalf("expected normalized step0 taskresult to parse: %v", err)
+	}
+	if len(parsed.Changeset) != 0 {
+		t.Fatalf("expected normalized changeset to be empty, got %#v", parsed.Changeset)
+	}
+}
+
+func TestNormalizeRawTaskResultKeepsLegacyStep0DraftManifestArtifactWhenManifestIsInvalid(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "charter-overview.md"), []byte("# Constitution\n"), 0o644); err != nil {
+		t.Fatalf("write charter overview: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "baseline-subagents.yaml"), []byte("version: 1\n"), 0o644); err != nil {
+		t.Fatalf("write baseline subagents: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "constitution-draft.json"), []byte(`{"schema_version":"constitution-v0"}`), 0o644); err != nil {
+		t.Fatalf("write invalid constitution draft manifest: %v", err)
+	}
+
+	task := acpruntime.Task{
+		StepID:         "init.step0.constitution",
+		WriteRoot:      writeRoot,
+		DraftFinalRoot: draftRoot,
+		ArtifactRoot:   "reports/taskruns/run-1/runtime/step0_constitution",
+	}
+	raw := []byte(`{
+  "meta": {
+    "task_id": "task-1",
+    "step_id": "init.step0.constitution",
+    "runtime": {"name": "qwen-code"},
+    "started_at": "2026-04-20T07:16:00Z"
+  },
+  "summary": "legacy constitution artifact op remains",
+  "changeset": [
+    {
+      "op": "add_doc_artifact",
+      "doc_artifact": {
+        "id": "constitution-draft-manifest",
+        "path": "reports/taskruns/run-1/runtime/step0_constitution/constitution-draft.json"
+      }
+    }
+  ]
+}`)
+
+	_, changed, err := NormalizeRawTaskResult(task, raw)
+	if err != nil {
+		t.Fatalf("normalize raw taskresult: %v", err)
+	}
+	if changed {
+		t.Fatalf("expected legacy step0 op to remain when manifest is invalid")
+	}
+}

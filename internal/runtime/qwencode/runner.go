@@ -25,6 +25,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultbinding"
 	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultcompat"
 	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultextractor"
+	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 )
 
@@ -32,6 +33,7 @@ var (
 	ErrRunnerUnavailable             = errors.New("qwen-code runner is unavailable")
 	errCollectStalledAfterArtifacts  = errors.New("collect_stalled_after_artifacts")
 	errCollectStalledBeforeArtifacts = errors.New("collect_stalled_before_artifacts")
+	errDraftStalledAfterArtifacts    = errors.New("draft_stalled_after_artifacts")
 
 	collectPostArtifactStallWindow = 20 * time.Second
 	collectPreArtifactStallWindow  = 75 * time.Second
@@ -53,6 +55,7 @@ type collectStallPhase string
 
 type runQwenOptions struct {
 	EnableCollectStallMonitor bool
+	EnableDraftStallMonitor   bool
 }
 
 type collectStallDiagnostic struct {
@@ -108,6 +111,7 @@ const (
 	promptRetryNone promptRetryMode = iota
 	promptRetryParse
 	promptRetryArtifact
+	promptRetryDraftArtifact
 	promptRetryCollectFresh
 )
 
@@ -249,6 +253,7 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 
 	options := runQwenOptions{
 		EnableCollectStallMonitor: len(r.Args) == 0 && isCollectStep(task.StepID),
+		EnableDraftStallMonitor:   len(r.Args) == 0 && runtimedrafts.IsDraftStep(task.StepID),
 	}
 	result, parseStage, parseErr, runErr := runQwenCommand(ctx, task, command, args, options)
 	if runErr != nil {
@@ -259,6 +264,9 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 			}
 			if errors.Is(stalled, errCollectStalledBeforeArtifacts) {
 				return recoverCollectBeforeArtifactsAfterStall(ctx, task, taskPayload, command, result, stalled)
+			}
+			if errors.Is(stalled, errDraftStalledAfterArtifacts) {
+				return recoverDraftArtifactsAfterStall(ctx, task, taskPayload, command, result, stalled)
 			}
 		}
 		unavailableMessage := buildUnavailableFailureMessage(task, runErr, result)
@@ -272,11 +280,7 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 		)
 	}
 	if parseErr == nil {
-		if len(r.Args) == 0 {
-			repaired, _, repairErr := maybeRepairCollectArtifacts(ctx, task, taskPayload, command, result)
-			return repaired, repairErr
-		}
-		return result, nil
+		return finalizeSuccessfulQwenResult(ctx, task, taskPayload, command, result, len(r.Args) == 0)
 	}
 	finalStdout := result.Stdout
 	finalStderr := result.Stderr
@@ -284,7 +288,7 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 	// Live qwen output can occasionally contain malformed tokens. Retry once with
 	// an explicitly stricter prompt before classifying as parse failure.
 	if len(r.Args) == 0 {
-		retryArgs := buildRetryQwenArgs(task, buildPromptWithModeAndHints(taskPayload, promptRetryParse, buildParseRepairHints(parseStage, parseErr)))
+		retryArgs := buildRetryQwenArgs(task, buildPromptWithModeAndHints(taskPayload, promptRetryParse, buildParseRepairHints(task.StepID, parseStage, parseErr)))
 		retryResult, retryParseStage, retryParseErr, retryRunErr := runQwenCommand(ctx, task, command, retryArgs, runQwenOptions{})
 		if retryRunErr != nil {
 			unavailableMessage := buildUnavailableFailureMessage(task, retryRunErr, retryResult)
@@ -298,8 +302,7 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 			)
 		}
 		if retryParseErr == nil {
-			repaired, _, repairErr := maybeRepairCollectArtifacts(ctx, task, taskPayload, command, retryResult)
-			return repaired, repairErr
+			return finalizeSuccessfulQwenResult(ctx, task, taskPayload, command, retryResult, true)
 		}
 		result = retryResult
 		parseStage = retryParseStage
@@ -323,21 +326,133 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 }
 
 func buildDefaultQwenArgs(task acpruntime.Task, prompt string) []string {
+	return buildQwenArgsWithIncludeDirectories(acpruntime.ResolveHeadlessIncludeDirectories(task), prompt)
+}
+
+func buildRetryQwenArgs(task acpruntime.Task, prompt string) []string {
+	return buildQwenArgsWithIncludeDirectories(resolveRetryIncludeDirectories(task), prompt)
+}
+
+func buildDraftRepairQwenArgs(task acpruntime.Task, prompt string) []string {
+	directories := []string{}
+	for _, candidate := range []string{strings.TrimSpace(task.WriteRoot), strings.TrimSpace(task.DraftFinalRoot)} {
+		if candidate == "" {
+			continue
+		}
+		directories = append(directories, candidate)
+	}
+	return buildQwenArgsWithIncludeDirectories(directories, prompt)
+}
+
+func buildQwenArgsWithIncludeDirectories(includeDirs []string, prompt string) []string {
 	args := []string{"--output-format", "json", "--chat-recording", "false", "--yolo", "--channel", "CI"}
-	for _, dir := range acpruntime.ResolveHeadlessIncludeDirectories(task) {
+	seen := map[string]struct{}{}
+	for _, dir := range includeDirs {
+		dir = strings.TrimSpace(dir)
+		if dir == "" {
+			continue
+		}
+		if _, exists := seen[dir]; exists {
+			continue
+		}
+		seen[dir] = struct{}{}
 		args = append(args, "--include-directories", dir)
 	}
 	args = append(args, "--prompt", prompt)
 	return args
 }
 
-func buildRetryQwenArgs(task acpruntime.Task, prompt string) []string {
-	args := []string{"--output-format", "json", "--chat-recording", "false", "--yolo", "--channel", "CI"}
-	for _, dir := range resolveRetryIncludeDirectories(task) {
-		args = append(args, "--include-directories", dir)
+func finalizeSuccessfulQwenResult(
+	ctx context.Context,
+	task acpruntime.Task,
+	taskPayload []byte,
+	command string,
+	current acpruntime.Result,
+	allowRepair bool,
+) (acpruntime.Result, error) {
+	if isCollectStep(task.StepID) {
+		if !allowRepair {
+			return current, nil
+		}
+		repaired, _, repairErr := maybeRepairCollectArtifacts(ctx, task, taskPayload, command, current)
+		return repaired, repairErr
 	}
-	args = append(args, "--prompt", prompt)
-	return args
+	if !runtimedrafts.IsDraftStep(task.StepID) {
+		return current, nil
+	}
+	if _, _, err := validateRuntimeDraftArtifactsAtWriteRoot(task); err == nil {
+		return current, nil
+	} else if !allowRepair {
+		return acpruntime.Result{}, wrapRuntimeDraftContractFailure(
+			task,
+			"draft.contract",
+			current,
+			fmt.Sprintf("runtime required draft artifacts invalid: %v", err),
+			err,
+		)
+	}
+	return maybeRepairRuntimeDraftArtifacts(ctx, task, taskPayload, command, current)
+}
+
+func validateRuntimeDraftArtifactsAtWriteRoot(task acpruntime.Task) (runtimedrafts.Manifest, []byte, error) {
+	return runtimedrafts.ValidateRequiredManifest(
+		task.WriteRoot,
+		task.DraftFinalRoot,
+		task.RunID,
+		task.StepID,
+		task.StepContract,
+		task.ExpectedArtifacts,
+	)
+}
+
+func maybeRepairRuntimeDraftArtifacts(
+	ctx context.Context,
+	task acpruntime.Task,
+	taskPayload []byte,
+	command string,
+	current acpruntime.Result,
+) (acpruntime.Result, error) {
+	if !runtimedrafts.IsDraftStep(task.StepID) {
+		return current, nil
+	}
+	if _, _, err := validateRuntimeDraftArtifactsAtWriteRoot(task); err == nil {
+		return current, nil
+	} else {
+		initialProblem := compactRetryHint(err.Error())
+		repairArgs := buildDraftRepairQwenArgs(
+			task,
+			buildPromptWithModeAndHints(taskPayload, promptRetryDraftArtifact, buildDraftArtifactRepairHints(task, err)),
+		)
+		repaired, repairParseStage, parseErr, runErr := runQwenCommand(ctx, task, command, repairArgs, runQwenOptions{})
+		if runErr != nil {
+			return acpruntime.Result{}, wrapRuntimeDraftContractFailure(
+				task,
+				"draft_repair.exec",
+				repaired,
+				fmt.Sprintf("runtime required draft artifact repair attempt failed after initial validation error %s: %v", initialProblem, runErr),
+				runErr,
+			)
+		}
+		if parseErr != nil {
+			return acpruntime.Result{}, wrapQwenParseFailure(
+				task,
+				"draft_repair."+strings.TrimSpace(repairParseStage),
+				parseErr,
+				repaired,
+				fmt.Sprintf("headless provider %q returned invalid runtime draft artifact repair result after %s", acpruntime.ProviderQwenCode, initialProblem),
+			)
+		}
+		if _, _, repairErr := validateRuntimeDraftArtifactsAtWriteRoot(task); repairErr != nil {
+			return acpruntime.Result{}, wrapRuntimeDraftContractFailure(
+				task,
+				"draft_repair.contract",
+				repaired,
+				fmt.Sprintf("runtime required draft artifacts remained invalid after one repair attempt: initial=%s; validation=%v", initialProblem, repairErr),
+				repairErr,
+			)
+		}
+		return repaired, nil
+	}
 }
 
 func maybeRepairCollectArtifacts(
@@ -594,6 +709,66 @@ func recoverCollectBeforeArtifactsAfterStall(
 	return finalResult, nil
 }
 
+func recoverDraftArtifactsAfterStall(
+	ctx context.Context,
+	task acpruntime.Task,
+	taskPayload []byte,
+	command string,
+	current acpruntime.Result,
+	stalled collectStallError,
+) (acpruntime.Result, error) {
+	emitDiagnostic(task, "runtime task retry scheduled", stalled.Diagnostic.fields(task))
+	retryContext := retryDiagnosticContext{
+		LastStallPhase:           collectStallPhasePostArtifact,
+		ManifestStateBeforeRetry: stalled.Diagnostic.ManifestState,
+		AuthoredFileCount:        stalled.Diagnostic.AuthoredFileCount,
+		LastPipeActivity:         stalled.Diagnostic.LastPipeActivity,
+		LastWriteRootMutation:    stalled.Diagnostic.LastWriteRootMutation,
+	}
+
+	retryHints := append([]string{
+		`- Previous attempt stalled after writing draft artifacts; do NOT continue repository exploration on this retry.`,
+		`- Reuse the existing draft manifest and draft files from write_root/draft_final_root, fix only draft contract drift, and return the final TaskResult JSON immediately.`,
+	}, buildDraftArtifactRepairHints(task, errDraftStalledAfterArtifacts)...)
+	repairArgs := buildDraftRepairQwenArgs(task, buildPromptWithModeAndHints(taskPayload, promptRetryDraftArtifact, retryHints))
+	repaired, repairParseStage, parseErr, runErr := runQwenCommand(ctx, task, command, repairArgs, runQwenOptions{})
+	if runErr != nil {
+		failureResult := selectFailureResult(repaired, current)
+		failureMessage := buildFailureMessage(task, "draft_stall_repair.exec", fmt.Errorf("%w: %v", errDraftStalledAfterArtifacts, runErr), failureResult)
+		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, retryContext, "failed", runErr.Error(), currentDraftManifestState(task)))
+		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+			acpruntime.ProviderQwenCode,
+			acpruntime.ErrorCodeRunnerParseFailed,
+			fmt.Sprintf("headless provider %q draft_stalled_after_artifacts and repair retry failed: %s", acpruntime.ProviderQwenCode, failureMessage),
+			failureResult.Stdout,
+			failureResult.Stderr,
+			runErr,
+		)
+	}
+	if parseErr != nil {
+		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, retryContext, "failed", parseErr.Error(), currentDraftManifestState(task)))
+		return acpruntime.Result{}, wrapQwenParseFailure(
+			task,
+			"draft_stall_repair."+strings.TrimSpace(repairParseStage),
+			parseErr,
+			repaired,
+			fmt.Sprintf("headless provider %q draft_stalled_after_artifacts and repair retry returned invalid taskresult", acpruntime.ProviderQwenCode),
+		)
+	}
+	if _, _, err := validateRuntimeDraftArtifactsAtWriteRoot(task); err != nil {
+		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, retryContext, "failed", err.Error(), currentDraftManifestState(task)))
+		return acpruntime.Result{}, wrapRuntimeDraftContractFailure(
+			task,
+			"draft_stall_repair.contract",
+			repaired,
+			fmt.Sprintf("draft_stalled_after_artifacts and runtime draft artifacts remained invalid after repair: validation=%v", err),
+			errors.Join(errDraftStalledAfterArtifacts, err),
+		)
+	}
+	emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, retryContext, "succeeded", "", currentDraftManifestState(task)))
+	return repaired, nil
+}
+
 func isCollectStep(stepID string) bool {
 	return strings.TrimSpace(stepID) == "init.step1.collect" || strings.TrimSpace(stepID) == "refresh.step1.collect"
 }
@@ -687,6 +862,28 @@ func wrapArtifactContractFailure(task acpruntime.Task, stage string, result acpr
 		acpruntime.ProviderQwenCode,
 		acpruntime.ErrorCodeRunnerParseFailed,
 		fmt.Sprintf("headless provider %q produced invalid collect artifacts: %s", acpruntime.ProviderQwenCode, failureMessage),
+		result.Stdout,
+		result.Stderr,
+		cause,
+	)
+}
+
+func wrapRuntimeDraftContractFailure(task acpruntime.Task, stage string, result acpruntime.Result, message string, cause error) error {
+	failure := cause
+	trimmed := strings.TrimSpace(message)
+	switch {
+	case trimmed != "" && cause != nil:
+		failure = fmt.Errorf("%s: %w", trimmed, cause)
+	case trimmed != "":
+		failure = errors.New(trimmed)
+	case failure == nil:
+		failure = errors.New("invalid runtime draft artifacts")
+	}
+	failureMessage := buildFailureMessage(task, stage, failure, result)
+	return acpruntime.WrapRunnerErrorWithOutput(
+		acpruntime.ProviderQwenCode,
+		acpruntime.ErrorCodeRunnerParseFailed,
+		fmt.Sprintf("headless provider %q produced invalid runtime draft artifacts: %s", acpruntime.ProviderQwenCode, failureMessage),
 		result.Stdout,
 		result.Stderr,
 		cause,
@@ -820,6 +1017,7 @@ func buildFailureMessage(task acpruntime.Task, stage string, failure error, resu
 
 func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, args []string, options runQwenOptions) (acpruntime.Result, string, error, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
+	configureCommandProcessGroup(cmd)
 	// Keep qwen's project root anchored at the ACP workspace rather than a
 	// deep shard staging directory. This avoids provider-local path explosions
 	// (for example chat/debug history paths derived from cwd) while preserving
@@ -884,6 +1082,23 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 			}
 		}()
 	}
+	if options.EnableDraftStallMonitor && runtimedrafts.IsDraftStep(task.StepID) && strings.TrimSpace(task.WriteRoot) != "" && strings.TrimSpace(task.DraftFinalRoot) != "" && cmd.Process != nil {
+		monitorWG.Add(1)
+		go func() {
+			defer monitorWG.Done()
+			stallErr, stalled := monitorDraftArtifactStall(monitorCtx, cmd.Process, task, activityTracker)
+			if !stalled {
+				return
+			}
+			stalledMu.Lock()
+			stalledErr = stallErr
+			stalledMu.Unlock()
+			select {
+			case stallCh <- stallErr:
+			default:
+			}
+		}()
+	}
 
 	var streamErr error
 	var streamErrMu sync.Mutex
@@ -923,7 +1138,7 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 		waitErr = cmd.Wait()
 	case <-ctx.Done():
 		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
+			_ = killCommandProcessTree(cmd.Process)
 		}
 		waitForCommandStreams(stdoutPipe, stderrPipe, streamDone, collectStallPostTerminateDrain)
 		stopMonitor()
@@ -1082,6 +1297,106 @@ func monitorCollectStall(
 	}
 }
 
+type draftArtifactSnapshot struct {
+	ManifestPresent bool
+	ManifestState   string
+	DraftFileCount  int
+	LastMutation    time.Time
+}
+
+func monitorDraftArtifactStall(
+	ctx context.Context,
+	process *os.Process,
+	task acpruntime.Task,
+	activity *commandActivityTracker,
+) (collectStallError, bool) {
+	startedAt := time.Now().UTC()
+	ticker := time.NewTicker(collectStallPollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return collectStallError{}, false
+		case <-ticker.C:
+			snapshot, err := scanDraftArtifacts(task)
+			if err != nil {
+				continue
+			}
+			if !snapshot.ManifestPresent || snapshot.DraftFileCount == 0 {
+				continue
+			}
+			lastPipeActivity := activity.LastRead()
+			if lastPipeActivity.IsZero() {
+				lastPipeActivity = startedAt
+			}
+			now := time.Now().UTC()
+			lastMutation := effectiveCollectMutationTime(snapshot.LastMutation, startedAt)
+			if now.Sub(lastPipeActivity) < collectPostArtifactStallWindow {
+				continue
+			}
+			if now.Sub(lastMutation) < collectPostArtifactStallWindow {
+				continue
+			}
+
+			diagnostic := collectStallDiagnostic{
+				StallPhase:            collectStallPhasePostArtifact,
+				ManifestState:         strings.TrimSpace(snapshot.ManifestState),
+				AuthoredFileCount:     snapshot.DraftFileCount,
+				LastPipeActivity:      lastPipeActivity.UTC(),
+				LastWriteRootMutation: lastMutation.UTC(),
+			}
+			emitDiagnostic(task, "runtime task stalled after draft artifacts", diagnostic.fields(task))
+			terminateProcessWithGrace(process)
+			return collectStallError{Sentinel: errDraftStalledAfterArtifacts, Diagnostic: diagnostic}, true
+		}
+	}
+}
+
+func scanDraftArtifacts(task acpruntime.Task) (draftArtifactSnapshot, error) {
+	snapshot := draftArtifactSnapshot{ManifestState: "missing"}
+	writeRoot := strings.TrimSpace(task.WriteRoot)
+	draftRoot := strings.TrimSpace(task.DraftFinalRoot)
+	manifestFile := strings.TrimSpace(runtimedrafts.ManifestFileForStep(task.StepID))
+	if writeRoot == "" || draftRoot == "" || manifestFile == "" {
+		return snapshot, nil
+	}
+
+	manifestPath := filepath.Join(filepath.Clean(writeRoot), manifestFile)
+	if info, err := os.Stat(manifestPath); err == nil && !info.IsDir() {
+		snapshot.ManifestPresent = true
+		snapshot.LastMutation = info.ModTime().UTC()
+		if _, _, loadErr := runtimedrafts.Load(writeRoot, manifestFile); loadErr == nil {
+			snapshot.ManifestState = "present"
+		} else {
+			snapshot.ManifestState = "invalid"
+		}
+	} else if err != nil && !os.IsNotExist(err) {
+		return draftArtifactSnapshot{}, err
+	}
+
+	walkErr := filepath.WalkDir(filepath.Clean(draftRoot), func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		snapshot.DraftFileCount++
+		if info, infoErr := d.Info(); infoErr == nil && info.ModTime().After(snapshot.LastMutation) {
+			snapshot.LastMutation = info.ModTime().UTC()
+		}
+		return nil
+	})
+	if walkErr != nil && !os.IsNotExist(walkErr) {
+		return draftArtifactSnapshot{}, walkErr
+	}
+	return snapshot, nil
+}
+
 func effectiveCollectMutationTime(lastMutation time.Time, startedAt time.Time) time.Time {
 	if lastMutation.IsZero() || lastMutation.Before(startedAt) {
 		return startedAt.UTC()
@@ -1091,6 +1406,14 @@ func effectiveCollectMutationTime(lastMutation time.Time, startedAt time.Time) t
 
 func currentCollectManifestState(writeRoot string) string {
 	snapshot, err := scanCollectWriteRoot(writeRoot)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(snapshot.ManifestState)
+}
+
+func currentDraftManifestState(task acpruntime.Task) string {
+	snapshot, err := scanDraftArtifacts(task)
 	if err != nil {
 		return ""
 	}
@@ -1154,14 +1477,14 @@ func terminateProcessWithGrace(process *os.Process) {
 	if process == nil {
 		return
 	}
-	if err := process.Signal(syscall.SIGTERM); err != nil && !isProcessDoneErr(err) {
-		_ = process.Kill()
+	if err := signalCommandProcessTree(process, syscall.SIGTERM); err != nil && !isProcessDoneErr(err) {
+		_ = killCommandProcessTree(process)
 		return
 	}
 	if collectStallTerminateGrace > 0 {
 		time.Sleep(collectStallTerminateGrace)
 	}
-	_ = process.Kill()
+	_ = killCommandProcessTree(process)
 }
 
 func isProcessDoneErr(err error) bool {
@@ -1291,6 +1614,7 @@ Task payload JSON:
 		pathScopesJSON = string(rawPathScopes)
 	}
 	stepPolicy := buildStepSpecificPolicy(task.StepID)
+	topLevelCompatibilityRule := buildTopLevelCompatibilityRule(task.StepID)
 	repositoryEvidencePolicy := strings.Join([]string{
 		`REPOSITORY EVIDENCE RULES:`,
 		`- ACP workspace scaffold (workspace.yaml, charter/, model/, reports/) is support context, not the primary source tree.`,
@@ -1324,20 +1648,15 @@ Task payload JSON:
 			`COMPACT JSON MODE: keep output concise and deterministic.`,
 			`- If envelope form is unavoidable, "result" MUST be a non-empty valid JSON object string.`,
 			`- Limit changeset to the minimum actionable operations for this step.`,
-			`- Prefer "changeset": [] when write_root already contains authored docs and the step does not strictly require an operation.`,
+			`- Prefer "changeset": [] when the step can reuse already written artifacts and does not strictly require an operation.`,
 			`- If changeset is non-empty, use at most 1 operation and at most 3 provenance.evidence items.`,
 			`- Keep coverage compact: observed <=2 items, missing <=2 canonical items, notes <=1 short entry.`,
 			`- Keep coverage.notes short (<=2 entries).`,
 			`- Avoid long prose in summary; keep a single sentence.`,
-			`- Do NOT copy long citations, topic arrays, or manifest document inventories into TaskResult JSON.`,
-			`- Do NOT collapse a multi-document refresh into one generic "cite.runtime-summary" citation.`,
-			`- Do NOT overwrite a rich shard-pack-manifest.json with a skeletal reuse-only manifest.`,
-			`- Preserve repo-specific citations when repository evidence already exists or can be recovered from repo roots.`,
 			`- Unknown changeset[].op values are forbidden; allowed values are exactly: upsert_entity, remove_entity, upsert_edge, remove_edge, add_finding, add_doc_artifact.`,
 			`- For op="add_doc_artifact", the payload key MUST be "doc_artifact"; never use "artifact".`,
-			`- If a retry only repaired files inside write_root, prefer "changeset": [] instead of inventing file-write operations.`,
+			`- If a retry only repaired files inside write_root/draft_final_root, prefer "changeset": [] instead of inventing file-write operations.`,
 			`- Retry repair is forbidden from inventing synthetic filesystem operations in changeset.`,
-			`- If write_root already contains authored docs, return the final TaskResult JSON immediately after minimal write_root inspection.`,
 			`- Final response MUST start with "{" and end with "}".`,
 			`- Do not output markdown fences, bullet lists, plan text, or template walkthroughs.`,
 		}
@@ -1348,9 +1667,22 @@ Task payload JSON:
 			retryLines[0] = `ARTIFACT REPAIR MODE: previous collect output was schema-valid but write_root artifacts look skeletal or generic-only.`
 			retryLines = append(retryLines,
 				`- Repair artifact fidelity before returning JSON; this retry is not a fresh repository rediscovery pass.`,
+				`- If write_root already contains authored docs, return the final TaskResult JSON immediately after minimal write_root inspection.`,
+				`- Do NOT copy long citations, topic arrays, or manifest document inventories into TaskResult JSON.`,
+				`- Do NOT collapse a multi-document refresh into one generic "cite.runtime-summary" citation.`,
+				`- Do NOT overwrite a rich shard-pack-manifest.json with a skeletal reuse-only manifest.`,
+				`- Preserve repo-specific citations when repository evidence already exists or can be recovered from repo roots.`,
 				`- Keep repo roots available when write_root artifacts lack repo-specific citations or collapse to generic summaries.`,
 				`- In shard-pack-manifest.json, compatibility.coverage/questions/entities/edges/findings must all exist, and questions/entities/edges/findings must be arrays rather than booleans or null.`,
 				`- Do NOT add top-level "compatibility" to TaskResult JSON; keep compatibility only inside shard-pack-manifest.json.`,
+			)
+		case promptRetryDraftArtifact:
+			retryLines[0] = `DRAFT ARTIFACT REPAIR MODE: previous draft-only output was schema-valid but required runtime draft artifacts are invalid.`
+			retryLines = append(retryLines,
+				`- Repair runtime draft artifacts before returning JSON; this retry is not a fresh repository rediscovery pass.`,
+				`- First inspect write_root and draft_final_root, then reuse already written draft files whenever possible.`,
+				`- If the draft manifest and referenced draft files are already present, return the final TaskResult JSON immediately with "changeset": [].`,
+				`- Draft-only retry must not register draft artifacts through legacy add_doc_artifact ops when the draft manifest already describes the publish surface.`,
 			)
 		case promptRetryCollectFresh:
 			retryLines[0] = `COLLECT STALL RECOVERY MODE: previous collect attempt stalled before any artifact was finalized.`
@@ -1377,7 +1709,7 @@ STRICT CONTRACT (must pass):
 - meta.runtime required key: "name"
 - use snake_case keys exactly as shown.
 - DO NOT use top-level fields: task_id, run_id, step_id, status.
-- Do NOT add a top-level "compatibility" field to TaskResult JSON; shard-pack-manifest.json may contain compatibility, but the response payload must not.
+- %s
 - provenance.kind MUST be one of: observation, inference, assertion.
 - provenance.confidence MUST be a NUMBER in range [0,1], never a string.
 - provenance.evidence MUST be an ARRAY of objects with repo/path.
@@ -1409,12 +1741,14 @@ Schema-valid template for this task (copy structure and field TYPES, then refine
 %s
 
 Serialized runtime task JSON (context only):
-%s`, acpruntime.ProviderQwenCode, stepPolicy, repositoryEvidencePolicy, docFirstPolicy, strictResultHint, finalResponseDiscipline, retryHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderQwenCode, task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, task.ShardID, primaryRepoScope, repoScopesJSON, pathScopesJSON, buildTaskResultTemplateJSON(task), retryTemplate, strings.TrimSpace(string(taskPayload))))
+%s`, acpruntime.ProviderQwenCode, topLevelCompatibilityRule, stepPolicy, repositoryEvidencePolicy, docFirstPolicy, strictResultHint, finalResponseDiscipline, retryHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderQwenCode, task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, task.ShardID, primaryRepoScope, repoScopesJSON, pathScopesJSON, buildTaskResultTemplateJSON(task), retryTemplate, strings.TrimSpace(string(taskPayload))))
 }
 
 func buildTaskResultTemplateJSON(task acpruntime.Task) string {
 	coverageMissing := []string{"owner mappings", "ci-cd evidence"}
 	questions := []contracts.Question{}
+	coverageObserved := []string{"services"}
+	coverageNotes := []string{"evidence gaps are captured explicitly"}
 	if strings.HasPrefix(task.StepID, "refresh.") {
 		coverageMissing = append(coverageMissing, "delta validation")
 		questions = []contracts.Question{
@@ -1424,6 +1758,11 @@ func buildTaskResultTemplateJSON(task acpruntime.Task) string {
 				Priority: "high",
 			},
 		}
+	}
+	if runtimedrafts.IsDraftStep(task.StepID) {
+		coverageObserved = []string{"draft artifacts"}
+		coverageMissing = nil
+		coverageNotes = []string{"draft artifact coverage is captured by the runtime draft manifest"}
 	}
 
 	template := contracts.TaskResult{
@@ -1443,9 +1782,9 @@ func buildTaskResultTemplateJSON(task acpruntime.Task) string {
 		Summary:   "Task completed with contract-compliant output.",
 		Changeset: buildTemplateChangeset(task),
 		Coverage: &contracts.Coverage{
-			Observed: []string{"services"},
+			Observed: coverageObserved,
 			Missing:  coverageMissing,
-			Notes:    []string{"evidence gaps are captured explicitly"},
+			Notes:    coverageNotes,
 		},
 		Questions: questions,
 		Warnings:  []string{},
@@ -1458,6 +1797,17 @@ func buildTaskResultTemplateJSON(task acpruntime.Task) string {
 }
 
 func buildRetryMinimalTaskResultTemplateJSON(task acpruntime.Task) string {
+	summary := "Reused existing shard artifacts."
+	coverageObserved := []string{"artifacts"}
+	coverageMissing := []string{"owner mappings", "runtime metrics"}
+	coverageNotes := []string{"write_root artifacts reused."}
+	if runtimedrafts.IsDraftStep(task.StepID) {
+		summary = "Reused existing draft artifacts."
+		coverageObserved = []string{"draft artifacts"}
+		coverageMissing = nil
+		coverageNotes = []string{"write_root and draft_final_root artifacts reused."}
+	}
+
 	template := contracts.TaskResult{
 		Meta: contracts.Meta{
 			TaskID:     task.TaskID,
@@ -1472,12 +1822,12 @@ func buildRetryMinimalTaskResultTemplateJSON(task acpruntime.Task) string {
 			RepoScopes: append([]string(nil), task.RepoScopes...),
 			PathScopes: append([]string(nil), task.PathScopes...),
 		},
-		Summary:   "Reused existing shard artifacts.",
+		Summary:   summary,
 		Changeset: []contracts.Operation{},
 		Coverage: &contracts.Coverage{
-			Observed: []string{"artifacts"},
-			Missing:  []string{"owner mappings", "runtime metrics"},
-			Notes:    []string{"write_root artifacts reused."},
+			Observed: coverageObserved,
+			Missing:  coverageMissing,
+			Notes:    coverageNotes,
 		},
 	}
 
@@ -1489,13 +1839,24 @@ func buildRetryMinimalTaskResultTemplateJSON(task acpruntime.Task) string {
 }
 
 func buildRetryRecoveryHint(task acpruntime.Task) string {
+	if runtimedrafts.IsDraftStep(task.StepID) {
+		return buildDraftRetryRecoveryHint(task)
+	}
+	return buildCollectRetryRecoveryHint(task)
+}
+
+func buildCollectRetryRecoveryHint(task acpruntime.Task) string {
 	lines := []string{
 		`RETRY RECOVERY MODE: previous attempt may already have written shard artifacts.`,
 		`- Retry goal is JSON repair, not fresh repository exploration.`,
 		`- First inspect write_root, not repo roots.`,
 		`- If authored docs already exist in write_root, reuse them instead of rediscovering the repository.`,
+		`- Prefer "changeset": [] when write_root already contains authored docs.`,
 		`- Once write_root contains authored docs, repository exploration is finished except for minimal JSON/manifest repair.`,
 		`- After shard-pack-manifest.json exists, do NOT continue broad list_directory/read_file sweeps across repo roots.`,
+		`- Do NOT collapse a multi-document refresh into one generic "cite.runtime-summary" citation.`,
+		`- Do NOT reduce multi-document refresh evidence to one generic "cite.runtime-summary" citation.`,
+		`- Preserve repo-specific citations when repository evidence already exists or can be recovered from repo roots.`,
 		`- Preserve repo-specific citations when existing artifacts already contain them; do not replace them with one generic runtime summary citation.`,
 		`- Do NOT use todo_write, plan-style narration, or repeated broad list_directory sweeps in retry mode.`,
 		`- Do NOT delegate to agent/subagent helpers in retry mode.`,
@@ -1543,6 +1904,63 @@ func buildRetryRecoveryHint(task acpruntime.Task) string {
 	return strings.Join(lines, "\n")
 }
 
+func buildDraftRetryRecoveryHint(task acpruntime.Task) string {
+	manifestFile := runtimedrafts.ManifestFileForStep(task.StepID)
+	lines := []string{
+		`RETRY RECOVERY MODE: previous attempt may already have written draft artifacts.`,
+		fmt.Sprintf(`- Retry goal is repairing %s plus referenced draft files, not fresh repository exploration.`, manifestFile),
+		`- First inspect write_root and draft_final_root, not repo roots.`,
+		`- Reuse already written draft files whenever possible and prefer "changeset": [].`,
+		`- Do NOT use todo_write, plan-style narration, or repeated broad list_directory/read_file sweeps in retry mode.`,
+		`- Do NOT delegate to agent/subagent helpers in retry mode.`,
+		`- Repair mode forbids inventing filesystem operations in changeset; if files already exist, return the final TaskResult JSON immediately.`,
+	}
+
+	writeRoot := strings.TrimSpace(task.WriteRoot)
+	draftRoot := strings.TrimSpace(task.DraftFinalRoot)
+	files, total, err := collectRetryWriteRootFiles(writeRoot, 8)
+	switch {
+	case writeRoot == "":
+		lines = append(lines, `- write_root snapshot unavailable because write_root is empty.`)
+	case err != nil:
+		lines = append(lines, fmt.Sprintf(`- write_root snapshot unavailable: %v.`, err))
+	case total == 0:
+		lines = append(lines, fmt.Sprintf(`- write_root %q is empty or missing; create only the missing draft manifest and referenced draft files before returning JSON.`, writeRoot))
+	default:
+		suffix := ""
+		if total > len(files) {
+			suffix = fmt.Sprintf(" (+%d more)", total-len(files))
+		}
+		lines = append(lines, fmt.Sprintf(`- write_root already contains %d file(s): %s%s`, total, strings.Join(files, ", "), suffix))
+		if containsString(files, manifestFile) {
+			lines = append(lines, fmt.Sprintf(`- %s is already present in write_root; repair that file instead of writing a legacy constitution/report schema.`, manifestFile))
+		}
+	}
+	if draftRoot != "" {
+		lines = append(lines, fmt.Sprintf(`- draft_final_root for this retry: %q`, draftRoot))
+	}
+	switch strings.TrimSpace(task.StepID) {
+	case "init.step0.constitution":
+		lines = append(lines,
+			`- constitution-draft.json must use the exact runtime draft manifest contract (version=1 integer, run_id, step_id, step_contract, agent_role, outputs[]).`,
+			`- outputs[] must map "charter-overview.md" -> "charter/overview.md" and "baseline-subagents.yaml" -> "skills/subagents.yaml".`,
+			`- The actual draft files must be written at draft_final_root/charter-overview.md and draft_final_root/baseline-subagents.yaml; do NOT nest them under draft_final_root/charter/ or draft_final_root/skills/.`,
+			`- Do NOT emit legacy constitution shapes such as schema_version/system_id/services/coverage or version:"0.1.0".`,
+		)
+	case "init.step2.asis_docs", "refresh.step2.asis_docs":
+		lines = append(lines,
+			`- asis-draft-manifest.json must remain the only publish-surface manifest for reports/as-is/*, reports/coverage/*, and reports/agent-outputs/* draft outputs.`,
+			`- If valid draft artifacts already exist, return "changeset": [] and do NOT register them again via add_doc_artifact.`,
+		)
+	case "init.step4.proposals", "refresh.step4.proposals":
+		lines = append(lines,
+			`- proposals-draft-manifest.json must remain the only publish-surface manifest for proposals/* and reports/changelog/* draft outputs.`,
+			`- If valid draft artifacts already exist, return "changeset": [] and do NOT register them again via add_doc_artifact.`,
+		)
+	}
+	return strings.Join(lines, "\n")
+}
+
 func buildCollectFreshRetryHints(task acpruntime.Task) []string {
 	lines := []string{
 		`- This retry exists because the provider produced no durable collect artifacts in time.`,
@@ -1567,6 +1985,24 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
+func nonEmptyOr(value string, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value != "" {
+		return value
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func buildTopLevelCompatibilityRule(stepID string) string {
+	if isCollectStep(stepID) {
+		return `Do NOT add a top-level "compatibility" field to TaskResult JSON; shard-pack-manifest.json may contain compatibility, but the response payload must not.`
+	}
+	if runtimedrafts.IsDraftStep(stepID) {
+		return `Do NOT add a top-level "compatibility" field to TaskResult JSON; runtime draft metadata belongs only inside constitution-draft.json / asis-draft-manifest.json / proposals-draft-manifest.json files under write_root.`
+	}
+	return `Do NOT add a top-level "compatibility" field to TaskResult JSON unless the step contract explicitly allows it in a runtime file under write_root.`
+}
+
 func buildStepSpecificPolicy(stepID string) string {
 	switch stepID {
 	case "init.step0.constitution":
@@ -1576,6 +2012,8 @@ func buildStepSpecificPolicy(stepID string) string {
 			`- Do NOT use todo_write-style planning or long plan narration.`,
 			`- Use only existing repo entrypoint hints; do not assume README.md exists when it is not present.`,
 			`- After the first useful evidence pass, converge to constitution drafts instead of continuing a broad repo sweep.`,
+			`- constitution-draft.json must use the runtime draft manifest contract exactly; legacy constitution schemas are forbidden.`,
+			`- Default TaskResult template for this step is changeset: []; do not invent synthetic upsert_entity operations for draft-only output.`,
 		}, "\n")
 	case "init.step1.collect":
 		return strings.Join([]string{
@@ -1650,7 +2088,13 @@ func buildDocFirstFilesystemPolicy(task acpruntime.Task) string {
 		lines = append(lines,
 			`- Do NOT delegate to agent/subagent helpers and do NOT use todo_write-style planning.`,
 			`- Write constitution-draft.json in write_root.`,
-			`- Draft canonical files only under draft_final_root, targeting charter/overview.md and skills/subagents.yaml.`,
+			`- Write the referenced draft files exactly at draft_final_root/charter-overview.md and draft_final_root/baseline-subagents.yaml.`,
+			`- Do NOT place the draft files under draft_final_root/charter/ or draft_final_root/skills/; those are canonical publish paths, not draft file locations.`,
+			`- constitution-draft.json must use the exact runtime draft manifest shape shown below; do not emit legacy constitution schemas.`,
+			`- outputs[] must map charter-overview.md -> charter/overview.md and baseline-subagents.yaml -> skills/subagents.yaml exactly.`,
+			`- The default final TaskResult for this step should keep "changeset": [].`,
+			`- Exact constitution-draft.json example (replace IDs/summary only, keep keys/types and output mapping):`,
+			buildConstitutionDraftManifestExample(task),
 			`- Keep the draft deterministic in shape; compiler will normalize/publish canonical files afterwards.`,
 		)
 	case "init.step1.collect", "refresh.step1.collect":
@@ -1684,6 +2128,7 @@ func buildDocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Write asis-draft-manifest.json in write_root.`,
 			`- Draft final docs only under draft_final_root.`,
 			`- Allowed canonical targets are reports/as-is/*, reports/coverage/*, and reports/agent-outputs/*.`,
+			`- If asis-draft-manifest.json already describes the publish surface, prefer "changeset": [] and do NOT re-register draft artifacts through legacy add_doc_artifact ops.`,
 			`- Compiler will merge these drafts into staged final artifacts and keep canonical layout/indexing deterministic.`,
 		)
 	case "init.step4.proposals", "refresh.step4.proposals":
@@ -1692,13 +2137,44 @@ func buildDocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Write proposals-draft-manifest.json in write_root.`,
 			`- Draft final docs only under draft_final_root.`,
 			`- Allowed canonical targets are proposals/* and reports/changelog/*.`,
+			`- If proposals-draft-manifest.json already describes the publish surface, prefer "changeset": [] and do NOT re-register draft artifacts through legacy add_doc_artifact ops.`,
 			`- Promotion remains deterministic; your drafts become publish candidates only after compile/publish gates.`,
 		)
 	}
 	return strings.Join(lines, "\n")
 }
 
-func buildParseRepairHints(parseStage string, parseErr error) []string {
+func buildConstitutionDraftManifestExample(task acpruntime.Task) string {
+	manifest := runtimedrafts.Manifest{
+		Version:      1,
+		RunID:        task.RunID,
+		StepID:       "init.step0.constitution",
+		StepContract: "constitution",
+		AgentRole:    nonEmptyOr(strings.TrimSpace(task.AgentRole), "architect"),
+		Summary:      "Drafted constitution materials for compile/publish.",
+		Outputs: []runtimedrafts.Output{
+			{
+				Path:          "charter-overview.md",
+				CanonicalPath: "charter/overview.md",
+				Kind:          "charter",
+				Title:         "Constitution",
+			},
+			{
+				Path:          "baseline-subagents.yaml",
+				CanonicalPath: "skills/subagents.yaml",
+				Kind:          "bundle",
+				Title:         "Baseline Subagents",
+			},
+		},
+	}
+	raw, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return `{"version":1,"run_id":"run-1","step_id":"init.step0.constitution","step_contract":"constitution","agent_role":"architect","outputs":[{"path":"charter-overview.md","canonical_path":"charter/overview.md","kind":"charter","title":"Constitution"},{"path":"baseline-subagents.yaml","canonical_path":"skills/subagents.yaml","kind":"bundle","title":"Baseline Subagents"}]}`
+	}
+	return string(raw)
+}
+
+func buildParseRepairHints(stepID string, parseStage string, parseErr error) []string {
 	if parseErr == nil {
 		return nil
 	}
@@ -1711,7 +2187,7 @@ func buildParseRepairHints(parseStage string, parseErr error) []string {
 		lines = append(lines, fmt.Sprintf(`- Previous %s validation failure: %s`, stage, detail))
 	}
 	if strings.Contains(parseErr.Error(), `additionalProperties 'compatibility' not allowed`) {
-		lines = append(lines, `- Do NOT add top-level "compatibility" to TaskResult JSON; keep compatibility only inside shard-pack-manifest.json.`)
+		lines = append(lines, "- "+buildTopLevelCompatibilityRule(stepID))
 	}
 	return append(lines,
 		`- Return a direct TaskResult JSON object, not an event-stream transcript or tool wrapper.`,
@@ -1741,6 +2217,41 @@ func buildArtifactRepairHints(initialProblem string) []string {
 	return lines
 }
 
+func buildDraftArtifactRepairHints(task acpruntime.Task, validationErr error) []string {
+	manifestFile := runtimedrafts.ManifestFileForStep(task.StepID)
+	lines := []string{
+		fmt.Sprintf(`- Repair %s to the canonical ACP runtime draft manifest contract before returning JSON.`, manifestFile),
+		`- version MUST be the integer 1; string values such as "0.1.0" are invalid.`,
+		`- The manifest MUST include run_id, step_id, step_contract, agent_role, and outputs[].`,
+		`- outputs[].path MUST stay relative to draft_final_root and outputs[].canonical_path MUST stay workspace-relative.`,
+		`- If valid draft files already exist under draft_final_root, reuse them and return "changeset": [].`,
+		`- Do NOT describe draft manifest repair via add_doc_artifact when the draft manifest already describes the publish surface.`,
+		`- Repair mode is draft-only: do not invent extra repository file reads/writes in changeset after draft files already exist.`,
+	}
+	switch strings.TrimSpace(task.StepID) {
+	case "init.step0.constitution":
+		lines = append(lines,
+			`- constitution-draft.json exact required outputs[] entries are: {"path":"charter-overview.md","canonical_path":"charter/overview.md","kind":"charter","title":"Constitution"} and {"path":"baseline-subagents.yaml","canonical_path":"skills/subagents.yaml","kind":"bundle","title":"Baseline Subagents"}.`,
+			`- Do NOT emit legacy constitution shapes such as schema_version, system_id, services, relations, governance, coverage_notes, or version:"0.1.0".`,
+			`- Draft files referenced by constitution-draft.json must exist under draft_final_root before the final TaskResult is returned.`,
+		)
+	case "init.step2.asis_docs", "refresh.step2.asis_docs":
+		lines = append(lines,
+			`- asis-draft-manifest.json is the only publish-surface manifest for reports/as-is/*, reports/coverage/*, and reports/agent-outputs/* drafts.`,
+			`- Final response should prefer "changeset": [] after draft artifact repair; do not re-register draft artifacts via legacy metadata ops.`,
+		)
+	case "init.step4.proposals", "refresh.step4.proposals":
+		lines = append(lines,
+			`- proposals-draft-manifest.json is the only publish-surface manifest for proposals/* and reports/changelog/* drafts.`,
+			`- Final response should prefer "changeset": [] after draft artifact repair; do not re-register draft artifacts via legacy metadata ops.`,
+		)
+	}
+	if validationErr != nil {
+		lines = append(lines, fmt.Sprintf(`- Previous draft artifact validation failure: %s`, compactRetryHint(validationErr.Error())))
+	}
+	return lines
+}
+
 func compactRetryHint(value string) string {
 	normalized := strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
 	if len(normalized) <= 320 {
@@ -1750,6 +2261,9 @@ func compactRetryHint(value string) string {
 }
 
 func buildTemplateChangeset(task acpruntime.Task) []contracts.Operation {
+	if runtimedrafts.IsDraftStep(task.StepID) {
+		return []contracts.Operation{}
+	}
 	scopes := append([]string(nil), task.RepoScopes...)
 	if len(scopes) == 0 {
 		scopes = []string{"repository"}
