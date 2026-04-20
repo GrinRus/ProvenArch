@@ -29,12 +29,14 @@ import (
 )
 
 var (
-	ErrRunnerUnavailable = errors.New("qwen-code runner is unavailable")
-	errCollectStalled    = errors.New("collect_stalled_after_artifacts")
+	ErrRunnerUnavailable             = errors.New("qwen-code runner is unavailable")
+	errCollectStalledAfterArtifacts  = errors.New("collect_stalled_after_artifacts")
+	errCollectStalledBeforeArtifacts = errors.New("collect_stalled_before_artifacts")
 
-	collectStallWindow         = 20 * time.Second
-	collectStallPollInterval   = 2 * time.Second
-	collectStallTerminateGrace = 2 * time.Second
+	collectPostArtifactStallWindow = 20 * time.Second
+	collectPreArtifactStallWindow  = 75 * time.Second
+	collectStallPollInterval       = 2 * time.Second
+	collectStallTerminateGrace     = 2 * time.Second
 )
 
 type HeadlessRunner struct {
@@ -46,18 +48,22 @@ type retryManifestAssessment = artifactquality.ManifestAssessment
 
 type promptRetryMode int
 
+type collectStallPhase string
+
 type runQwenOptions struct {
 	EnableCollectStallMonitor bool
 }
 
 type collectStallDiagnostic struct {
+	StallPhase            collectStallPhase
 	ManifestState         string
 	AuthoredFileCount     int
 	LastPipeActivity      time.Time
 	LastWriteRootMutation time.Time
 }
 
-type collectArtifactsStallError struct {
+type collectStallError struct {
+	Sentinel   error
 	Diagnostic collectStallDiagnostic
 }
 
@@ -82,20 +88,30 @@ const (
 	promptRetryNone promptRetryMode = iota
 	promptRetryParse
 	promptRetryArtifact
+	promptRetryCollectFresh
 )
 
-func (e collectArtifactsStallError) Error() string {
-	return errCollectStalled.Error()
+const (
+	collectStallPhasePreArtifact  collectStallPhase = "pre_artifact"
+	collectStallPhasePostArtifact collectStallPhase = "post_artifact"
+)
+
+func (e collectStallError) Error() string {
+	if e.Sentinel == nil {
+		return "collect_stalled"
+	}
+	return e.Sentinel.Error()
 }
 
-func (e collectArtifactsStallError) Is(target error) bool {
-	return target == errCollectStalled
+func (e collectStallError) Is(target error) bool {
+	return target != nil && target == e.Sentinel
 }
 
 func (d collectStallDiagnostic) fields(task acpruntime.Task) map[string]any {
 	fields := map[string]any{
 		"provider":            string(acpruntime.ProviderQwenCode),
 		"shard_id":            strings.TrimSpace(task.ShardID),
+		"stall_phase":         strings.TrimSpace(string(d.StallPhase)),
 		"manifest_state":      strings.TrimSpace(d.ManifestState),
 		"authored_file_count": d.AuthoredFileCount,
 		"action":              "terminate_and_retry",
@@ -189,9 +205,14 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 	}
 	result, parseStage, parseErr, runErr := runQwenCommand(ctx, task, command, args, options)
 	if runErr != nil {
-		var stalled collectArtifactsStallError
+		var stalled collectStallError
 		if len(r.Args) == 0 && errors.As(runErr, &stalled) {
-			return recoverCollectArtifactsAfterStall(ctx, task, taskPayload, command, result, stalled)
+			if errors.Is(stalled, errCollectStalledAfterArtifacts) {
+				return recoverCollectArtifactsAfterStall(ctx, task, taskPayload, command, result, stalled)
+			}
+			if errors.Is(stalled, errCollectStalledBeforeArtifacts) {
+				return recoverCollectBeforeArtifactsAfterStall(ctx, task, taskPayload, command, result, stalled)
+			}
 		}
 		unavailableMessage := buildUnavailableFailureMessage(task, runErr, result)
 		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
@@ -351,14 +372,14 @@ func recoverCollectArtifactsAfterStall(
 	taskPayload []byte,
 	command string,
 	current acpruntime.Result,
-	stalled collectArtifactsStallError,
+	stalled collectStallError,
 ) (acpruntime.Result, error) {
-	initialProblem := errCollectStalled.Error()
+	initialProblem := errCollectStalledAfterArtifacts.Error()
 	emitDiagnostic(task, "runtime task retry scheduled", stalled.Diagnostic.fields(task))
 
 	snapshot, err := artifactquality.SnapshotWriteRoot(task.WriteRoot)
 	if err != nil {
-		message := buildFailureMessage(task, "stall_snapshot", fmt.Errorf("%w: snapshot write_root: %v", errCollectStalled, err), current)
+		message := buildFailureMessage(task, "stall_snapshot", fmt.Errorf("%w: snapshot write_root: %v", errCollectStalledAfterArtifacts, err), current)
 		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, "failed", err.Error(), stalled.Diagnostic.ManifestState))
 		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 			acpruntime.ProviderQwenCode,
@@ -378,7 +399,7 @@ func recoverCollectArtifactsAfterStall(
 	if runErr != nil {
 		_ = snapshot.Restore()
 		failureResult := selectFailureResult(repaired, current)
-		failureMessage := buildFailureMessage(task, "stall_repair.exec", fmt.Errorf("%w: %v", errCollectStalled, runErr), failureResult)
+		failureMessage := buildFailureMessage(task, "stall_repair.exec", fmt.Errorf("%w: %v", errCollectStalledAfterArtifacts, runErr), failureResult)
 		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, "failed", runErr.Error(), stalled.Diagnostic.ManifestState))
 		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 			acpruntime.ProviderQwenCode,
@@ -391,7 +412,7 @@ func recoverCollectArtifactsAfterStall(
 	}
 	if parseErr != nil {
 		_ = snapshot.Restore()
-		failureMessage := buildFailureMessage(task, "stall_repair."+strings.TrimSpace(repairParseStage), fmt.Errorf("%w: %v", errCollectStalled, parseErr), repaired)
+		failureMessage := buildFailureMessage(task, "stall_repair."+strings.TrimSpace(repairParseStage), fmt.Errorf("%w: %v", errCollectStalledAfterArtifacts, parseErr), repaired)
 		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, "failed", parseErr.Error(), stalled.Diagnostic.ManifestState))
 		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 			acpruntime.ProviderQwenCode,
@@ -414,12 +435,62 @@ func recoverCollectArtifactsAfterStall(
 			"stall_repair.contract",
 			repaired,
 			fmt.Sprintf("collect_stalled_after_artifacts and collect artifacts remained invalid after repair: repaired=%s", repairedProblem),
-			errors.Join(errCollectStalled, assessErr),
+			errors.Join(errCollectStalledAfterArtifacts, assessErr),
 		)
 	}
 
 	emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, "succeeded", "", "rich"))
 	return repaired, nil
+}
+
+func recoverCollectBeforeArtifactsAfterStall(
+	ctx context.Context,
+	task acpruntime.Task,
+	taskPayload []byte,
+	command string,
+	current acpruntime.Result,
+	stalled collectStallError,
+) (acpruntime.Result, error) {
+	emitDiagnostic(task, "runtime task retry scheduled", stalled.Diagnostic.fields(task))
+
+	retryArgs := buildRetryQwenArgs(task, buildPromptWithModeAndHints(taskPayload, promptRetryCollectFresh, buildCollectFreshRetryHints(task)))
+	retried, retryParseStage, parseErr, runErr := runQwenCommand(ctx, task, command, retryArgs, runQwenOptions{
+		EnableCollectStallMonitor: true,
+	})
+	if runErr != nil {
+		failureResult := selectFailureResult(retried, current)
+		failureMessage := buildFailureMessage(task, "stall_retry.exec", fmt.Errorf("%w: %v", errCollectStalledBeforeArtifacts, runErr), failureResult)
+		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, "failed", runErr.Error(), currentCollectManifestState(task.WriteRoot)))
+		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+			acpruntime.ProviderQwenCode,
+			acpruntime.ErrorCodeRunnerParseFailed,
+			fmt.Sprintf("headless provider %q collect_stalled_before_artifacts and forced retry failed: %s", acpruntime.ProviderQwenCode, failureMessage),
+			failureResult.Stdout,
+			failureResult.Stderr,
+			runErr,
+		)
+	}
+	if parseErr != nil {
+		failureMessage := buildFailureMessage(task, "stall_retry."+strings.TrimSpace(retryParseStage), fmt.Errorf("%w: %v", errCollectStalledBeforeArtifacts, parseErr), retried)
+		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, "failed", parseErr.Error(), currentCollectManifestState(task.WriteRoot)))
+		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+			acpruntime.ProviderQwenCode,
+			acpruntime.ErrorCodeRunnerParseFailed,
+			fmt.Sprintf("headless provider %q collect_stalled_before_artifacts and forced retry returned invalid taskresult: %s", acpruntime.ProviderQwenCode, failureMessage),
+			retried.Stdout,
+			retried.Stderr,
+			parseErr,
+		)
+	}
+
+	finalResult, err := maybeRepairCollectArtifacts(ctx, task, taskPayload, command, retried)
+	if err != nil {
+		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, "failed", err.Error(), currentCollectManifestState(task.WriteRoot)))
+		return acpruntime.Result{}, err
+	}
+
+	emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, "succeeded", "", currentCollectManifestState(task.WriteRoot)))
+	return finalResult, nil
 }
 
 func isCollectStep(stepID string) bool {
@@ -443,7 +514,7 @@ func selectFailureResult(primary acpruntime.Result, fallback acpruntime.Result) 
 	return fallback
 }
 
-func retryDiagnosticFields(task acpruntime.Task, stalled collectArtifactsStallError, retryStatus string, errText string, manifestState string) map[string]any {
+func retryDiagnosticFields(task acpruntime.Task, stalled collectStallError, retryStatus string, errText string, manifestState string) map[string]any {
 	fields := stalled.Diagnostic.fields(task)
 	if state := strings.TrimSpace(manifestState); state != "" {
 		fields["manifest_state"] = state
@@ -644,12 +715,12 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 		monitorWG.Add(1)
 		go func() {
 			defer monitorWG.Done()
-			diagnostic, stalled := monitorCollectStall(monitorCtx, cmd.Process, task, activityTracker)
+			stallErr, stalled := monitorCollectStall(monitorCtx, cmd.Process, task, activityTracker)
 			if !stalled {
 				return
 			}
 			stalledMu.Lock()
-			stalledErr = collectArtifactsStallError{Diagnostic: diagnostic}
+			stalledErr = stallErr
 			stalledMu.Unlock()
 		}()
 	}
@@ -755,42 +826,84 @@ func monitorCollectStall(
 	process *os.Process,
 	task acpruntime.Task,
 	activity *commandActivityTracker,
-) (collectStallDiagnostic, bool) {
+) (collectStallError, bool) {
+	startedAt := time.Now().UTC()
 	ticker := time.NewTicker(collectStallPollInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return collectStallDiagnostic{}, false
+			return collectStallError{}, false
 		case <-ticker.C:
 			snapshot, err := scanCollectWriteRoot(task.WriteRoot)
-			if err != nil || !snapshot.ManifestPresent || snapshot.AuthoredFileCount <= 0 || snapshot.LastMutation.IsZero() {
+			if err != nil {
 				continue
 			}
 			lastPipeActivity := activity.LastRead()
 			if lastPipeActivity.IsZero() {
-				continue
+				lastPipeActivity = startedAt
 			}
 			now := time.Now().UTC()
-			if now.Sub(lastPipeActivity) < collectStallWindow {
+			lastWriteRootMutation := effectiveCollectMutationTime(snapshot.LastMutation, startedAt)
+
+			if snapshot.ManifestPresent && snapshot.AuthoredFileCount > 0 {
+				if now.Sub(lastPipeActivity) < collectPostArtifactStallWindow {
+					continue
+				}
+				if now.Sub(lastWriteRootMutation) < collectPostArtifactStallWindow {
+					continue
+				}
+
+				diagnostic := collectStallDiagnostic{
+					StallPhase:            collectStallPhasePostArtifact,
+					ManifestState:         strings.TrimSpace(snapshot.ManifestState),
+					AuthoredFileCount:     snapshot.AuthoredFileCount,
+					LastPipeActivity:      lastPipeActivity.UTC(),
+					LastWriteRootMutation: lastWriteRootMutation.UTC(),
+				}
+				emitDiagnostic(task, "runtime task stalled after artifacts", diagnostic.fields(task))
+				terminateProcessWithGrace(process)
+				return collectStallError{Sentinel: errCollectStalledAfterArtifacts, Diagnostic: diagnostic}, true
+			}
+
+			if snapshot.ManifestPresent || snapshot.AuthoredFileCount > 0 {
 				continue
 			}
-			if now.Sub(snapshot.LastMutation) < collectStallWindow {
+			if now.Sub(lastPipeActivity) < collectPreArtifactStallWindow {
+				continue
+			}
+			if now.Sub(lastWriteRootMutation) < collectPreArtifactStallWindow {
 				continue
 			}
 
 			diagnostic := collectStallDiagnostic{
+				StallPhase:            collectStallPhasePreArtifact,
 				ManifestState:         strings.TrimSpace(snapshot.ManifestState),
 				AuthoredFileCount:     snapshot.AuthoredFileCount,
 				LastPipeActivity:      lastPipeActivity.UTC(),
-				LastWriteRootMutation: snapshot.LastMutation.UTC(),
+				LastWriteRootMutation: lastWriteRootMutation.UTC(),
 			}
-			emitDiagnostic(task, "runtime task stalled after artifacts", diagnostic.fields(task))
+			emitDiagnostic(task, "runtime task stalled before artifacts", diagnostic.fields(task))
 			terminateProcessWithGrace(process)
-			return diagnostic, true
+			return collectStallError{Sentinel: errCollectStalledBeforeArtifacts, Diagnostic: diagnostic}, true
 		}
 	}
+}
+
+func effectiveCollectMutationTime(lastMutation time.Time, startedAt time.Time) time.Time {
+	if lastMutation.IsZero() || lastMutation.Before(startedAt) {
+		return startedAt.UTC()
+	}
+	return lastMutation.UTC()
+}
+
+func currentCollectManifestState(writeRoot string) string {
+	snapshot, err := scanCollectWriteRoot(writeRoot)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(snapshot.ManifestState)
 }
 
 func scanCollectWriteRoot(writeRoot string) (collectWriteRootSnapshot, error) {
@@ -1045,7 +1158,16 @@ Task payload JSON:
 			retryLines = append(retryLines,
 				`- Repair artifact fidelity before returning JSON; this retry is not a fresh repository rediscovery pass.`,
 				`- Keep repo roots available when write_root artifacts lack repo-specific citations or collapse to generic summaries.`,
-				`- compatibility.coverage/questions/entities/edges/findings must all exist, and questions/entities/edges/findings must be arrays rather than booleans or null.`,
+				`- In shard-pack-manifest.json, compatibility.coverage/questions/entities/edges/findings must all exist, and questions/entities/edges/findings must be arrays rather than booleans or null.`,
+				`- Do NOT add top-level "compatibility" to TaskResult JSON; keep compatibility only inside shard-pack-manifest.json.`,
+			)
+		case promptRetryCollectFresh:
+			retryLines[0] = `COLLECT STALL RECOVERY MODE: previous collect attempt stalled before any artifact was finalized.`
+			retryLines = append(retryLines,
+				`- Do one minimal repo sweep only; avoid broad exploratory list_directory/read_file loops before the first authored artifact.`,
+				`- Quickly produce authored docs plus shard-pack-manifest.json in write_root, or return the final TaskResult immediately if write_root is already complete.`,
+				`- After the first filesystem write in write_root, repository exploration is finished except for minimal JSON/manifest repair.`,
+				`- Broad repo sweeps after the first write are forbidden in this retry.`,
 			)
 		}
 		retryLines = append(retryLines, extraHints...)
@@ -1064,6 +1186,7 @@ STRICT CONTRACT (must pass):
 - meta.runtime required key: "name"
 - use snake_case keys exactly as shown.
 - DO NOT use top-level fields: task_id, run_id, step_id, status.
+- Do NOT add a top-level "compatibility" field to TaskResult JSON; shard-pack-manifest.json may contain compatibility, but the response payload must not.
 - provenance.kind MUST be one of: observation, inference, assertion.
 - provenance.confidence MUST be a NUMBER in range [0,1], never a string.
 - provenance.evidence MUST be an ARRAY of objects with repo/path.
@@ -1186,6 +1309,7 @@ func buildRetryRecoveryHint(task acpruntime.Task) string {
 		`- Do NOT use todo_write, plan-style narration, or repeated broad list_directory sweeps in retry mode.`,
 		`- Use at most 3 tool calls in retry mode unless a required artifact is missing from write_root.`,
 		`- Repair mode forbids inventing file operations in changeset; prefer "changeset": [].`,
+		`- Do NOT add top-level "compatibility" to TaskResult JSON; keep compatibility only inside shard-pack-manifest.json.`,
 		`- After optional write_root inspection, respond immediately with the final TaskResult JSON object.`,
 	}
 
@@ -1225,6 +1349,18 @@ func buildRetryRecoveryHint(task acpruntime.Task) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func buildCollectFreshRetryHints(task acpruntime.Task) []string {
+	lines := []string{
+		`- This retry exists because the provider produced no durable collect artifacts in time.`,
+		`- Spend the minimum time needed to identify repo-backed evidence for one authored doc and shard-pack-manifest.json.`,
+		`- If write_root is still empty, create only the minimum viable authored doc set before returning the final JSON.`,
+	}
+	if strings.TrimSpace(task.WriteRoot) != "" {
+		lines = append(lines, fmt.Sprintf(`- write_root for this retry: %q`, strings.TrimSpace(task.WriteRoot)))
+	}
+	return lines
 }
 
 func containsString(values []string, target string) bool {
@@ -1298,8 +1434,11 @@ func buildDocFirstFilesystemPolicy(task acpruntime.Task) string {
 		)
 	case "init.step1.collect", "refresh.step1.collect":
 		lines = append(lines,
+			`- Before the first filesystem write inside write_root, keep repository exploration minimal and converge quickly on the first authored doc plus shard-pack-manifest.json.`,
 			`- Produce runtime-authored documents in write_root and then write shard-pack-manifest.json in write_root.`,
 			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and compatibility snapshot.`,
+			`- In shard-pack-manifest.json, compatibility MUST include coverage, questions, entities, edges, and findings.`,
+			`- Do NOT add top-level "compatibility" to TaskResult JSON; keep compatibility only inside shard-pack-manifest.json.`,
 			`- You may be flexible in document structure, but promotion and rendering depend on manifest citations/topics remaining accurate.`,
 			`- After the first filesystem write inside write_root, stop broad repository exploration; only minimal manifest/JSON repair is allowed afterwards.`,
 			`- After writing shard-pack-manifest.json, do NOT continue broad list_directory/read_file sweeps across repo roots.`,
@@ -1349,6 +1488,9 @@ func buildParseRepairHints(parseStage string, parseErr error) []string {
 		}
 		lines = append(lines, fmt.Sprintf(`- Previous %s validation failure: %s`, stage, detail))
 	}
+	if strings.Contains(parseErr.Error(), `additionalProperties 'compatibility' not allowed`) {
+		lines = append(lines, `- Do NOT add top-level "compatibility" to TaskResult JSON; keep compatibility only inside shard-pack-manifest.json.`)
+	}
 	return append(lines,
 		`- Return a direct TaskResult JSON object, not an event-stream transcript or tool wrapper.`,
 		`- Do NOT use ad-hoc ops such as upsert_file, write_file, update_file, or todo_write in changeset[].op.`,
@@ -1359,7 +1501,8 @@ func buildParseRepairHints(parseStage string, parseErr error) []string {
 func buildArtifactRepairHints(initialProblem string) []string {
 	lines := []string{
 		`- Rebuild shard-pack-manifest.json to the canonical ACP schema before returning JSON.`,
-		`- compatibility.coverage/questions/entities/edges/findings are all required; questions/entities/edges/findings must be arrays even when empty.`,
+		`- In shard-pack-manifest.json, compatibility.coverage/questions/entities/edges/findings are all required; questions/entities/edges/findings must be arrays even when empty.`,
+		`- Do NOT add top-level "compatibility" to TaskResult JSON; keep compatibility only inside shard-pack-manifest.json.`,
 		`- Do NOT leave claim_ids empty for cited repository evidence; preserve concrete repo-backed claim ids whenever the evidence supports them.`,
 		`- Do NOT describe shard-pack-manifest.json repair via add_doc_artifact; repair the file in write_root and return "changeset": [].`,
 	}

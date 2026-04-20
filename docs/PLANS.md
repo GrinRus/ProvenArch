@@ -49,6 +49,55 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 
 ### Plan ID
+EP-20260420-qwen-preartifact-stall-reporting
+
+### Context
+После фикса `collect_stalled_after_artifacts` live `regres small` всё ещё мог зависать раньше первого authored collect artifact: `qwen-code` на `step1.collect` оставался живым, но не писал ни stdout/stderr, ни `write_root`, из-за чего runtime не доходил до repair path. Параллельно batch/matrix harness оставляли слабые terminal breadcrumbs, если parent shell завершался до post-processing.
+
+### Goals (must have)
+- [x] Добавить отдельный `pre-artifact stall` watchdog для `qwen` collect steps с forced retry до общего step timeout
+- [x] Сохранить существующий `after-artifacts stall` path без semantic regression
+- [x] Усилить runtime diagnostics полями `stall_phase`, `last_pipe_activity_at`, `last_write_root_mutation_at`, `manifest_state`, `authored_file_count`
+- [x] Сделать child-owned run sentinel в `full-run-ai-advent.sh` и использовать его как durable source of truth в batch/matrix/report paths
+- [x] Убрать stale `queued|running` хвост через explicit reconcile helper в CLI/orchestrator и зафиксировать это тестами
+
+### Non-goals
+- [x] Не менять public schemas/API/workspace contract
+- [x] Не вводить user-facing knobs для stall thresholds
+- [x] Не чинить OS-level `SIGKILL` всего process tree
+
+### Approach
+1) Ввести в `internal/runtime/qwencode/runner.go` второй stall sentinel для collect steps, который срабатывает до manifest/doc artifacts при отсутствии pipe activity и `write_root` mutations.
+2) При `pre-artifact stall` досрочно завершать process, писать diagnostics и запускать один fresh retry с ужесточённым collect prompt.
+3) Перенести terminal sentinel ownership внутрь `full-run-ai-advent.sh`, а batch/matrix/report scripts научить классифицировать incomplete cycles по sentinel даже без summary/report artifacts.
+4) Вынести restart reconciliation из implicit startup behavior в explicit helper и вызывать его из CLI/tests там, где это действительно требуется.
+5) Закрыть slice regression tests на runtime, orchestrator resume и batch/matrix reconstruction.
+
+### Files expected to change
+- `internal/runtime/qwencode/*`
+- `internal/orchestrator/*`
+- `cmd/acp/*`
+- `scripts/full-run-ai-advent.sh`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/e2e_batch_report.py`
+- `scripts/tests/*`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] `qwen` collect shard без stdout/stderr и без artifacts детектится как `collect_stalled_before_artifacts` и идёт в forced retry
+- [x] failed retry после pre-artifact stall отдаёт `runner_parse_failed` и сохраняет raw runner diagnostics
+- [x] batch/matrix/report классифицируют incomplete cycle даже при missing `session-summary.md` и неполном `profile-runs.jsonl`
+- [x] interrupted/orphaned CLI history больше не остаётся в вечном `running`
+- [x] `make contracts`, `make test`, `make lint`, `make build` проходят
+
+### Risks
+- Основной риск — ложный pre-artifact stall на legitimately slow collect shard. Снижение риска: watchdog включён только для `init/refresh.step1.collect`, использует двойной idle сигнал (`stdout/stderr` + `write_root`) и conservative threshold `75s`.
+
+### Progress log
+- 2026-04-20: реализованы pre-artifact stall watchdog, forced fresh retry, durable run/profile sentinels, batch/matrix/report reconstruction и explicit stale-run reconciliation; полный DoD прогон зелёный.
+
+### Plan ID
 EP-20260419-qwen-collect-stall-recovery
 
 ### Context

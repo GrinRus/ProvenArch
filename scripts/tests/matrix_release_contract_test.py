@@ -553,6 +553,35 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertEqual("FAIL", verdict["verdict"])
         self.assertEqual("failed", verdict["records"][0]["status"])
 
+    def test_matrix_reconstructs_failed_record_from_status_files_when_jsonl_is_empty(self) -> None:
+        matrix_file = self._write_matrix_file(None, include_profiles=["single-path"])
+        matrix_id = "matrix-test-status-fallback"
+        result = self._run_matrix(
+            matrix_file,
+            matrix_id,
+            extra_env={
+                "MATRIX_TEST_FAIL_BEFORE_REPORT": "1",
+                "MATRIX_TEST_TRUNCATE_RECORDS_JSONL": "1",
+            },
+            release_mode="0",
+        )
+        self.assertNotEqual(result.returncode, 0)
+
+        records_path = self.e2e_tmp_root / "matrix" / matrix_id / "profile-runs.jsonl"
+        self.assertTrue(records_path.exists(), f"missing matrix records path: {records_path}")
+        self.assertEqual("", records_path.read_text(encoding="utf-8"))
+
+        status_root = self.e2e_tmp_root / "matrix" / matrix_id / "profile-status"
+        status_files = sorted(status_root.glob("*.json"))
+        self.assertTrue(status_files, f"missing profile status files under {status_root}")
+        status_payload = json.loads(status_files[0].read_text(encoding="utf-8"))
+        self.assertEqual("failed", status_payload["status"])
+
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual("FAIL", verdict["verdict"])
+        self.assertEqual(1, len(verdict["records"]))
+        self.assertEqual("failed", verdict["records"][0]["status"])
+
     def test_non_release_wave1_regression_matrix_allows_two_profiles(self) -> None:
         matrix_file = self._write_matrix_file(
             None,

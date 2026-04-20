@@ -40,6 +40,9 @@ REPORTS_ROOT="${REPORTS_ROOT:-$E2E_TMP_ROOT/reports}"
 RESOLVED_TARGET_REPOS_FILE=""
 DECLARED_REPOS_JSON=""
 RUN_CLASSIFICATIONS_TSV=""
+declare -a STARTED_RUN_DIRS=()
+declare -a STARTED_RUN_PROVIDERS=()
+declare -a STARTED_RUN_INDEXES=()
 declare -a ALL_PROVIDERS=("qwen-code" "claude-code")
 declare -a SELECTED_PROVIDERS=()
 declare -a SELECTED_RUN_INDEXES=()
@@ -127,6 +130,8 @@ write_run_status() {
   local state="$4"
   local process_exit="${5:-}"
   local termination_signal="${6:-none}"
+  local failure_reason="${7:-}"
+  local summary_written="${8:-no}"
   local status_file
   status_file="$(run_status_file "$run_dir")"
   cat >"$status_file" <<EOF
@@ -135,6 +140,8 @@ run_index=$run_index
 state=$state
 process_exit=$process_exit
 termination_signal=$termination_signal
+failure_reason=$failure_reason
+summary_written=$summary_written
 updated_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
 EOF
 }
@@ -147,6 +154,107 @@ read_status_field() {
     return 0
   fi
   sed -n "s/^${key}=//p" "$status_file" | tail -n1 | tr -d '\r'
+}
+
+signal_number() {
+  case "$1" in
+    HUP) printf '1' ;;
+    INT) printf '2' ;;
+    PIPE) printf '13' ;;
+    TERM) printf '15' ;;
+    *) printf '' ;;
+  esac
+}
+
+signal_status_token() {
+  local number
+  number="$(signal_number "$1")"
+  if [[ -n "$number" ]]; then
+    printf 'signal_%s' "$number"
+    return 0
+  fi
+  printf '%s' "$1"
+}
+
+signal_exit_code() {
+  local number
+  number="$(signal_number "$1")"
+  if [[ -n "$number" ]]; then
+    printf '%s' "$((128 + number))"
+    return 0
+  fi
+  printf '1'
+}
+
+run_classification_exists() {
+  local provider="$1"
+  local run_index="$2"
+  if [[ ! -f "$RUN_CLASSIFICATIONS_TSV" ]]; then
+    return 1
+  fi
+  grep -q "^${provider}"$'\t'"${run_index}"$'\t' "$RUN_CLASSIFICATIONS_TSV"
+}
+
+ensure_terminal_run_status() {
+  local run_dir="$1"
+  local provider="$2"
+  local run_index="$3"
+  local process_exit="$4"
+  local run_status_path
+  run_status_path="$(run_status_file "$run_dir")"
+  local state
+  state="$(read_status_field "$run_status_path" "state")"
+  if [[ "$state" != "running" && -n "$state" ]]; then
+    return 0
+  fi
+
+  local run_status_state="completed"
+  local run_status_signal="none"
+  local failure_reason=""
+  if [[ "$process_exit" -ne 0 ]]; then
+    run_status_state="process_failed"
+    failure_reason="infra_incomplete_cycle"
+    if [[ "$process_exit" -ge 128 ]]; then
+      run_status_state="signal_terminated"
+      run_status_signal="signal_$((process_exit - 128))"
+      failure_reason="infra_signal_terminated"
+    fi
+  fi
+  write_run_status "$run_dir" "$provider" "$run_index" "$run_status_state" "$process_exit" "$run_status_signal" "$failure_reason" "no"
+}
+
+classify_started_runs_on_signal() {
+  local signal_name="$1"
+  local idx
+  for idx in "${!STARTED_RUN_DIRS[@]}"; do
+    local run_dir="${STARTED_RUN_DIRS[$idx]}"
+    local provider="${STARTED_RUN_PROVIDERS[$idx]}"
+    local run_index="${STARTED_RUN_INDEXES[$idx]}"
+    local run_status_path=""
+    local run_status_state=""
+    local process_exit=""
+    [[ -z "$run_dir" || -z "$provider" || -z "$run_index" ]] && continue
+    if run_classification_exists "$provider" "$run_index"; then
+      continue
+    fi
+    run_status_path="$(run_status_file "$run_dir")"
+    run_status_state="$(read_status_field "$run_status_path" "state")"
+    process_exit="$(read_status_field "$run_status_path" "process_exit")"
+    if [[ -z "$run_status_state" || "$run_status_state" == "running" ]]; then
+      process_exit="$(signal_exit_code "$signal_name")"
+      write_run_status "$run_dir" "$provider" "$run_index" "signal_terminated" "$process_exit" "$(signal_status_token "$signal_name")" "infra_signal_terminated" "no"
+    elif [[ ! "$process_exit" =~ ^[0-9]+$ ]]; then
+      process_exit="$(signal_exit_code "$signal_name")"
+    fi
+    classify_run_failure "$provider" "$run_index" "$run_dir" "$process_exit"
+  done
+}
+
+on_batch_signal() {
+  local signal_name="$1"
+  log "received termination signal: $signal_name"
+  classify_started_runs_on_signal "$signal_name"
+  exit "$(signal_exit_code "$signal_name")"
 }
 
 array_contains() {
@@ -710,6 +818,9 @@ classify_run_failure() {
   local run_status_path="$run_dir/run-status.env"
   local run_status_state=""
   local run_status_signal=""
+  local run_status_process_exit=""
+  local run_status_failure_reason=""
+  local run_status_summary_written=""
   local -a classify_log_paths=("$summary_path" "$full_log_path" "$batch_driver_log")
   local workspace="$run_dir/arch-workspace"
   local iter_log
@@ -731,10 +842,19 @@ classify_run_failure() {
 
   run_status_state="$(read_status_field "$run_status_path" "state")"
   run_status_signal="$(read_status_field "$run_status_path" "termination_signal")"
+  run_status_process_exit="$(read_status_field "$run_status_path" "process_exit")"
+  run_status_failure_reason="$(read_status_field "$run_status_path" "failure_reason")"
+  run_status_summary_written="$(read_status_field "$run_status_path" "summary_written")"
+  if [[ "$run_status_process_exit" =~ ^[0-9]+$ ]]; then
+    process_exit="$run_status_process_exit"
+  fi
 
   if [[ ! -f "$summary_path" ]]; then
     summary_result="missing"
-    if [[ "$run_status_state" == "signal_terminated" || "$run_status_signal" != "" && "$run_status_signal" != "none" || "$process_exit" -ge 128 ]]; then
+    if [[ -n "$run_status_failure_reason" && "$run_status_failure_reason" != "none" ]]; then
+      failure_reason="$run_status_failure_reason"
+    fi
+    if [[ "$run_status_state" == "signal_terminated" || "$run_status_signal" != "" && "$run_status_signal" != "none" || "$failure_reason" == "infra_signal_terminated" || "$process_exit" -ge 128 ]]; then
       run_class="infra_signal_terminated"
       failure_reason="infra_signal_terminated"
       if [[ -z "$termination_signal" || "$termination_signal" == "none" ]]; then
@@ -746,7 +866,12 @@ classify_run_failure() {
       fi
     else
       run_class="infra_incomplete_cycle"
-      failure_reason="infra_incomplete_cycle"
+      if [[ -z "$failure_reason" || "$failure_reason" == "none" ]]; then
+        failure_reason="infra_incomplete_cycle"
+      fi
+    fi
+    if [[ "$run_status_summary_written" == "yes" ]]; then
+      summary_result="expected_but_missing"
     fi
   else
     summary_result="$(summary_scalar "$summary_path" "result" | awk '{print $1}')"
@@ -1055,6 +1180,9 @@ prepare_target_repos_file
 collect_declared_repos
 RUN_CLASSIFICATIONS_TSV="$BATCH_ROOT/backend-run-classifications.tsv"
 echo -e "provider\trun_index\tfailure_class\tprocess_exit\tsummary_result\tfailure_reason\ttermination_signal\texpected_runs\tcompleted_runs\texpected_headless_runs\tcompleted_headless_runs\trunning_runs_detected\trun_results_rows\tfailure_subclass\tcancellation_like" >"$RUN_CLASSIFICATIONS_TSV"
+trap 'on_batch_signal TERM' TERM
+trap 'on_batch_signal INT' INT
+trap 'on_batch_signal HUP' HUP
 
 PROVENARCH_SHA="$(git -C "$PROVENARCH_ROOT" rev-parse HEAD)"
 PROVENARCH_BRANCH="$(git -C "$PROVENARCH_ROOT" rev-parse --abbrev-ref HEAD)"
@@ -1143,7 +1271,10 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
   for i in "${SELECTED_RUN_INDEXES[@]}"; do
     run_dir="$BATCH_ROOT/$provider/run${i}"
     mkdir -p "$run_dir"
-    write_run_status "$run_dir" "$provider" "$i" "running" "" "none"
+    write_run_status "$run_dir" "$provider" "$i" "running" "" "none" "" "no"
+    STARTED_RUN_DIRS+=("$run_dir")
+    STARTED_RUN_PROVIDERS+=("$provider")
+    STARTED_RUN_INDEXES+=("$i")
     log "full-run provider=$provider run=$i tmp_root=$run_dir"
     process_exit=0
     (
@@ -1155,6 +1286,7 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
         "${ACP_EXECUTION_ENV_ASSIGNMENTS[@]}" \
         "TARGET_REPOS_FILE=$RESOLVED_TARGET_REPOS_FILE" \
         "TMP_ROOT=$run_dir" \
+        "RUN_STATUS_FILE=$(run_status_file "$run_dir")" \
         "KEEP_TMP=1" \
         "ITERATIONS=1" \
         "RUN_QUALITY_GATES=1" \
@@ -1169,17 +1301,7 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
         ./scripts/full-run-ai-advent.sh
     ) >"$run_dir/batch-driver.log" 2>&1 || process_exit=$?
 
-    run_status_state="completed"
-    run_status_signal="none"
-    if [[ "$process_exit" -ne 0 ]]; then
-      run_status_state="process_failed"
-      if [[ "$process_exit" -ge 128 ]]; then
-        run_status_state="signal_terminated"
-        run_status_signal="signal_$((process_exit - 128))"
-      fi
-    fi
-    write_run_status "$run_dir" "$provider" "$i" "$run_status_state" "$process_exit" "$run_status_signal"
-
+    ensure_terminal_run_status "$run_dir" "$provider" "$i" "$process_exit"
     classify_run_failure "$provider" "$i" "$run_dir" "$process_exit"
     if [[ "$LAST_RUN_FAILURE_CLASS" != "none" ]]; then
       failed_runs=$((failed_runs + 1))

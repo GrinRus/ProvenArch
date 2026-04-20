@@ -248,9 +248,12 @@ func NewService(options ...Option) *Service {
 		option(service)
 	}
 	service.loadHistory()
-	service.recoverStaleRunsAfterRestart()
 	_ = service.cleanupRunLogs()
 	return service
+}
+
+func (s *Service) ReconcileStaleRunsAfterRestart() {
+	s.recoverStaleRunsAfterRestart()
 }
 
 func ParsePipeline(value string) (Pipeline, error) {

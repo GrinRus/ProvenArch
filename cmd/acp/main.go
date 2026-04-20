@@ -145,6 +145,9 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		orchestrator.WithExecutionOverrides(executionOverrides),
 		orchestrator.WithResumeStaleAsyncRuns(),
 	)
+	if !*dryRun {
+		service.ReconcileStaleRunsAfterRestart()
+	}
 	server := api.NewServer(ws, service)
 	if *dryRun {
 		fmt.Fprintf(stdout, "workspace ready at %s\n", ws.Path)
@@ -483,6 +486,7 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 		orchestrator.WithRunLogsRetention(time.Duration(*runLogsTTLHrs)*time.Hour, *runLogsMaxRuns),
 		orchestrator.WithExecutionOverrides(executionOverrides),
 	)
+	service.ReconcileStaleRunsAfterRestart()
 	runInfo, artifacts, err := service.Run(context.Background(), orchestrator.RunRequest{
 		Workspace:      ws,
 		Pipeline:       pipeline,

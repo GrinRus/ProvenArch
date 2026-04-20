@@ -798,6 +798,7 @@ func TestAutoResumeRefreshStep1ReplaysSucceededAndCheckpointedShards(t *testing.
 		WithResumeStaleAsyncRuns(),
 		WithRunner(resumeRunner),
 	)
+	resumedService.ReconcileStaleRunsAfterRestart()
 	status := waitForTerminalRunStatus(t, targetWS, resumeRunID, 10*time.Second)
 	if status != RunStatusSucceeded {
 		info, _ := resumedService.GetRun(resumeRunID)
@@ -935,6 +936,7 @@ func TestAutoResumeRefreshStep3UsesPersistedTaskrunsWithoutProviderRerun(t *test
 		WithResumeStaleAsyncRuns(),
 		WithRunner(resumeRunner),
 	)
+	resumedService.ReconcileStaleRunsAfterRestart()
 	status := waitForTerminalRunStatus(t, targetWS, resumeRunID, 10*time.Second)
 	if status != RunStatusSucceeded {
 		info, _ := resumedService.GetRun(resumeRunID)
@@ -1131,6 +1133,7 @@ func TestResumeDeterminismMatchesUninterruptedRun(t *testing.T) {
 		WithResumeStaleAsyncRuns(),
 		WithRunner(resumeRunner),
 	)
+	resumedService.ReconcileStaleRunsAfterRestart()
 	status := waitForTerminalRunStatus(t, targetWS, resumeRunID, 10*time.Second)
 	if status != RunStatusSucceeded {
 		info, _ := resumedService.GetRun(resumeRunID)

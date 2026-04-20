@@ -187,6 +187,75 @@ def parse_backend_classifications(batch_root: Path) -> dict[tuple[str, int], dic
     return result
 
 
+def parse_run_status_file(path: Path) -> dict[str, str]:
+    payload: dict[str, str] = {}
+    if not path.exists():
+        return payload
+    for line in read_text_file(path).splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        payload[key] = value.strip()
+    return payload
+
+
+def reconstruct_backend_classifications(
+    batch_root: Path, classifications: dict[tuple[str, int], dict[str, str]]
+) -> dict[tuple[str, int], dict[str, str]]:
+    merged = dict(classifications)
+    for status_path in sorted(batch_root.glob("*/run*/run-status.env")):
+        status_payload = parse_run_status_file(status_path)
+        provider = str(status_payload.get("provider", status_path.parent.parent.name)).strip()
+        if provider not in FRONTEND_PROVIDERS:
+            continue
+        try:
+            run_index = int(str(status_payload.get("run_index", status_path.parent.name.replace("run", ""))).strip())
+        except Exception:
+            continue
+        key = (provider, run_index)
+        if key in merged:
+            continue
+
+        run_dir = status_path.parent
+        if (run_dir / "session-summary.md").exists():
+            continue
+
+        state = str(status_payload.get("state", "")).strip()
+        termination_signal = str(status_payload.get("termination_signal", "")).strip()
+        failure_reason = str(status_payload.get("failure_reason", "")).strip()
+        process_exit = str(status_payload.get("process_exit", "")).strip() or "1"
+        try:
+            process_exit_int = int(process_exit)
+        except Exception:
+            process_exit_int = 1
+            process_exit = "1"
+
+        failure_class = "infra_incomplete_cycle"
+        if (
+            failure_reason == "infra_signal_terminated"
+            or state == "signal_terminated"
+            or (termination_signal and termination_signal != "none")
+            or process_exit_int >= 128
+        ):
+            failure_class = "infra_signal_terminated"
+
+        merged[key] = {
+            "provider": provider,
+            "run_index": str(run_index),
+            "failure_class": failure_class,
+            "failure_subclass": "none",
+            "cancellation_like": "0",
+            "process_exit": process_exit,
+            "summary_result": "missing",
+            "failure_reason": failure_reason or failure_class,
+            "termination_signal": termination_signal or ("none" if failure_class != "infra_signal_terminated" else "unknown"),
+        }
+    return merged
+
+
 def normalize_selected_providers(values: Any) -> list[str]:
     if not isinstance(values, list):
         return []
@@ -2035,7 +2104,7 @@ def main() -> int:
 
     preflight_path = batch_root / "preflight.json"
     preflight = read_json(preflight_path) if preflight_path.exists() else {}
-    classifications = parse_backend_classifications(batch_root)
+    classifications = reconstruct_backend_classifications(batch_root, parse_backend_classifications(batch_root))
     selected_providers = resolve_selected_providers(preflight, classifications, batch_root)
     selected_run_indexes = resolve_selected_run_indexes(preflight, classifications, batch_root)
 

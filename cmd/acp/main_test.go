@@ -405,6 +405,73 @@ func TestRunPipelineBootstrapSkeleton(t *testing.T) {
 	}
 }
 
+func TestRunReconcilesStaleRunningHistoryBeforeNewRun(t *testing.T) {
+	t.Parallel()
+
+	root := writeWorkspace(t)
+	historyPath := filepath.Join(root, "reports", "taskruns", "run-history.json")
+	if err := os.MkdirAll(filepath.Dir(historyPath), 0o755); err != nil {
+		t.Fatalf("mkdir run history dir: %v", err)
+	}
+	historyPayload := map[string]any{
+		"version": 1,
+		"items": []map[string]any{
+			{
+				"run_id":       "run_stale_running",
+				"pipeline":     "refresh",
+				"status":       "running",
+				"started_at":   "2026-04-19T12:00:00Z",
+				"current_step": "refresh.step1.collect",
+			},
+		},
+	}
+	rawHistory, err := json.Marshal(historyPayload)
+	if err != nil {
+		t.Fatalf("marshal run history: %v", err)
+	}
+	if err := os.WriteFile(historyPath, rawHistory, 0o644); err != nil {
+		t.Fatalf("write run history: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"run", "--workspace", root, "--pipeline", "init", "--runtime", "fake", "--non-interactive"}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d: stderr=%q", exitCodeOK, code, stderr.String())
+	}
+
+	content, err := os.ReadFile(historyPath)
+	if err != nil {
+		t.Fatalf("read updated run history: %v", err)
+	}
+	var snapshot struct {
+		Items []struct {
+			RunID     string `json:"run_id"`
+			Status    string `json:"status"`
+			ErrorCode string `json:"error_code"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(content, &snapshot); err != nil {
+		t.Fatalf("decode updated run history: %v", err)
+	}
+	foundReconciled := false
+	foundSucceeded := false
+	for _, item := range snapshot.Items {
+		if item.RunID == "run_stale_running" {
+			foundReconciled = item.Status == "failed" && item.ErrorCode == "run_reconciled_after_restart"
+		}
+		if strings.HasPrefix(item.RunID, "run_") && item.RunID != "run_stale_running" && item.Status == "succeeded" {
+			foundSucceeded = true
+		}
+	}
+	if !foundReconciled {
+		t.Fatalf("expected stale running run to be reconciled before new run, history=%s", string(content))
+	}
+	if !foundSucceeded {
+		t.Fatalf("expected new run to succeed after reconciliation, history=%s", string(content))
+	}
+}
+
 func TestServeBootstrapSkeleton(t *testing.T) {
 	t.Parallel()
 

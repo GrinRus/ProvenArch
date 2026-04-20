@@ -660,6 +660,79 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual("infra_signal_terminated", fields[2], classifications_tsv.read_text(encoding="utf-8"))
         self.assertEqual("signal_15", fields[6], classifications_tsv.read_text(encoding="utf-8"))
 
+    def test_batch_signal_trap_preserves_child_terminal_sentinel_as_source_of_truth(self) -> None:
+        run_dir = self.root / "run-signal-after-child-terminal"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        write_text(run_dir / "full-run.log", "child already ended before outer batch got signal\n")
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=process_failed",
+                    "process_exit=1",
+                    "termination_signal=none",
+                    "failure_reason=infra_incomplete_cycle",
+                    "summary_written=no",
+                ]
+            )
+            + "\n",
+        )
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        classifications_tsv = self.root / "backend-run-classifications-signal-trap.tsv"
+        command = (
+            prelude
+            + "\n"
+            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
+            + f'STARTED_RUN_DIRS=({shlex.quote(str(run_dir))})\n'
+            + 'STARTED_RUN_PROVIDERS=("qwen-code")\n'
+            + 'STARTED_RUN_INDEXES=("1")\n'
+            + 'classify_started_runs_on_signal TERM\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("", completed.stdout.strip(), completed.stdout)
+        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
+        self.assertGreaterEqual(len(fields), 7, classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("infra_incomplete_cycle", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("none", fields[6], classifications_tsv.read_text(encoding="utf-8"))
+
+    def test_python_report_reconstructs_missing_classifier_row_from_run_status(self) -> None:
+        batch_root = self.root / "batch-root"
+        run_dir = batch_root / "qwen-code" / "run1"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        write_text(run_dir / "full-run.log", "child stopped before summary persistence\n")
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=signal_terminated",
+                    "process_exit=143",
+                    "termination_signal=signal_15",
+                    "failure_reason=infra_signal_terminated",
+                    "summary_written=no",
+                ]
+            )
+            + "\n",
+        )
+
+        reconstructed = self.module.reconstruct_backend_classifications(batch_root, {})
+        self.assertIn(("qwen-code", 1), reconstructed)
+        row = reconstructed[("qwen-code", 1)]
+        self.assertEqual("infra_signal_terminated", row["failure_class"])
+        self.assertEqual("143", row["process_exit"])
+        self.assertEqual("signal_15", row["termination_signal"])
+
     def test_python_report_prefers_classifier_incomplete_cycle_over_summary_missing(self) -> None:
         run_dir = self.root / "run-python-missing-summary"
         run_dir.mkdir(parents=True, exist_ok=True)

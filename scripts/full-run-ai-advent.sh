@@ -16,6 +16,7 @@ PROFILE_SOURCE_KIND="${PROFILE_SOURCE_KIND:-}"
 PROFILE_SOURCE_KIND_EFFECTIVE="mixed"
 EXPECTED_REPO_COUNT="${EXPECTED_REPO_COUNT:-}"
 TMP_ROOT="${TMP_ROOT:-}"
+RUN_STATUS_FILE="${RUN_STATUS_FILE:-}"
 KEEP_TMP="${KEEP_TMP:-0}"
 ITERATIONS="${ITERATIONS:-1}"
 RUN_QUALITY_GATES="${RUN_QUALITY_GATES:-1}"
@@ -55,6 +56,7 @@ RUNNING_RUNS_DETECTED=0
 RUNNING_RUNS_BASELINE=0
 RUNNING_RUNS_HEADLESS=0
 SUMMARY_RESULT=""
+SUMMARY_WRITTEN="no"
 LAST_PIPELINE_STAGE="not_started"
 LAST_RUNTIME_PROVIDER="unset"
 TIMEOUTS_API_APPLY_BASELINE_STATUS="not_applied"
@@ -160,11 +162,77 @@ die() {
   exit 1
 }
 
+read_run_status_seed_field() {
+  local key="$1"
+  if [[ -z "$RUN_STATUS_FILE" || ! -f "$RUN_STATUS_FILE" ]]; then
+    printf ''
+    return 0
+  fi
+  sed -n "s/^${key}=//p" "$RUN_STATUS_FILE" | tail -n1 | tr -d '\r'
+}
+
+signal_number() {
+  case "$1" in
+    HUP) printf '1' ;;
+    INT) printf '2' ;;
+    PIPE) printf '13' ;;
+    TERM) printf '15' ;;
+    *) printf '' ;;
+  esac
+}
+
+signal_status_token() {
+  local number
+  number="$(signal_number "$1")"
+  if [[ -n "$number" ]]; then
+    printf 'signal_%s' "$number"
+    return 0
+  fi
+  printf '%s' "$1"
+}
+
+signal_exit_code() {
+  local number
+  number="$(signal_number "$1")"
+  if [[ -n "$number" ]]; then
+    printf '%s' "$((128 + number))"
+    return 0
+  fi
+  printf '1'
+}
+
+write_terminal_run_status() {
+  local state="$1"
+  local process_exit="$2"
+  local termination_signal="$3"
+  local failure_reason="$4"
+  local summary_written="$5"
+  if [[ -z "$RUN_STATUS_FILE" ]]; then
+    return 0
+  fi
+  mkdir -p "$(dirname "$RUN_STATUS_FILE")"
+  local provider
+  provider="$(read_run_status_seed_field "provider")"
+  local run_index
+  run_index="$(read_run_status_seed_field "run_index")"
+  {
+    echo "provider=${provider}"
+    echo "run_index=${run_index}"
+    echo "state=${state}"
+    echo "process_exit=${process_exit}"
+    echo "termination_signal=${termination_signal}"
+    echo "failure_reason=${failure_reason}"
+    echo "summary_written=${summary_written}"
+    echo "updated_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+  } >"$RUN_STATUS_FILE"
+}
+
 on_termination_signal() {
   local signal_name="$1"
   TERMINATION_SIGNAL="$signal_name"
   FAILURE_REASON="infra_signal_terminated"
   log "received termination signal: $signal_name (last_pipeline_stage=$LAST_PIPELINE_STAGE last_runtime_provider=$LAST_RUNTIME_PROVIDER)"
+  write_terminal_run_status "signal_terminated" "$(signal_exit_code "$signal_name")" "$(signal_status_token "$signal_name")" "$FAILURE_REASON" "$SUMMARY_WRITTEN"
   exit 1
 }
 
@@ -1022,12 +1090,28 @@ PY
       echo "  3) Fix issues and rerun script from scratch (new tmp workspace)"
     fi
   } > "$SUMMARY_PATH"
+  SUMMARY_WRITTEN="yes"
 }
 
 cleanup() {
   local exit_code="$1"
   stop_server
-  write_summary "$exit_code"
+  SUMMARY_WRITTEN="no"
+  if ! write_summary "$exit_code"; then
+    SUMMARY_WRITTEN="no"
+  fi
+
+  local terminal_state="completed"
+  local terminal_signal="none"
+  local terminal_exit="$exit_code"
+  if [[ -n "$TERMINATION_SIGNAL" ]]; then
+    terminal_state="signal_terminated"
+    terminal_signal="$(signal_status_token "$TERMINATION_SIGNAL")"
+    terminal_exit="$(signal_exit_code "$TERMINATION_SIGNAL")"
+  elif [[ "$exit_code" -ne 0 || "$SUMMARY_RESULT" != "passed" ]]; then
+    terminal_state="process_failed"
+  fi
+  write_terminal_run_status "$terminal_state" "$terminal_exit" "$terminal_signal" "${FAILURE_REASON:-none}" "$SUMMARY_WRITTEN"
 
   if [[ "$exit_code" -ne 0 || "$SUMMARY_RESULT" != "passed" ]]; then
     log "run failed; keeping artifacts for debugging at $TMP_ROOT"
