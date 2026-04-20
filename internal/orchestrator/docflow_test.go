@@ -89,6 +89,58 @@ func TestReadShardDocumentResolvesWorkspaceRelativeArtifactRoot(t *testing.T) {
 	}
 }
 
+func TestLoadShardPackManifestFromRootRejectsWorkspaceRelativeDocumentPath(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	raw := []byte(`{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "shard_id": "bank-of-anthos-iac",
+  "agent_role": "shard-analyst",
+  "artifact_root": "reports/taskruns/run-1/staging/shards/bank-of-anthos-iac",
+  "documents": [
+    {
+      "id": "doc.iac",
+      "kind": "analysis",
+      "title": "IAC Overview",
+      "path": "reports/taskruns/run-1/staging/shards/bank-of-anthos-iac/iac-overview.md",
+      "canonical_path": "reports/as-is/bank-of-anthos/iac-overview.md",
+      "topics": ["iac"],
+      "citation_ids": ["cite.1"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.1",
+      "repo": "bank-of-anthos",
+      "path": "README.md",
+      "claim_ids": ["claim.1"],
+      "document_ids": ["doc.iac"]
+    }
+  ],
+  "compatibility": {
+    "coverage": {"observed": [], "missing": [], "notes": []},
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}`)
+	if err := os.WriteFile(filepath.Join(root, shardPackManifestFile), raw, 0o644); err != nil {
+		t.Fatalf("write shard-pack manifest: %v", err)
+	}
+
+	_, _, err := loadShardPackManifestFromRoot(root)
+	if err == nil {
+		t.Fatalf("expected compile-time manifest guard failure")
+	}
+	if !strings.Contains(err.Error(), "artifact_root-relative") {
+		t.Fatalf("expected artifact_root-relative error, got %v", err)
+	}
+}
+
 func TestCollectAuthoredStageDocumentsMergesByCanonicalPath(t *testing.T) {
 	t.Parallel()
 

@@ -182,6 +182,27 @@ func TestExtractReturnsErrorForCapturedQwenLiveExtrasInvalidStdoutFixture(t *tes
 	}
 }
 
+func TestExtractReturnsTransportErrorForCapturedQwenOpenstackSSLFixture(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join("..", "testdata", "qwen_live_openstack_step0_ssl_stdout.txt")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read openstack ssl stdout fixture: %v", err)
+	}
+
+	_, err = Extract(raw)
+	if err == nil {
+		t.Fatalf("expected transport extraction error for captured openstack ssl stdout fixture")
+	}
+	if !IsTransportError(err) {
+		t.Fatalf("expected transport error classification, got %v", err)
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "ssl") {
+		t.Fatalf("expected ssl marker in transport error, got %v", err)
+	}
+}
+
 func TestExtractReturnsCandidateObjectEvenWhenSchemaInvalid(t *testing.T) {
 	t.Parallel()
 

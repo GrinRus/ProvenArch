@@ -58,6 +58,7 @@ RUNTIME_TIMEOUT_FAILURES=0
 QUALITY_GATES_FAILED_FAILURES=0
 SUMMARY_MISSING_FAILURES=0
 PRECHECK_FAILED_FAILURES=0
+RUNTIME_FLOW_FAILED_FAILURES=0
 CANCELLATION_LIKE_FAILURES=0
 OTHER_FAILURES=0
 LAST_RUN_FAILURE_CLASS="none"
@@ -821,6 +822,7 @@ classify_run_failure() {
   local run_status_process_exit=""
   local run_status_failure_reason=""
   local run_status_summary_written=""
+  local terminal_pipeline_failure=0
   local -a classify_log_paths=("$summary_path" "$full_log_path" "$batch_driver_log")
   local workspace="$run_dir/arch-workspace"
   local iter_log
@@ -885,6 +887,10 @@ classify_run_failure() {
     termination_signal="$(summary_scalar "$summary_path" "termination_signal" | awk '{print $1}')"
   fi
 
+  if [[ -f "$summary_path" && "$run_status_state" == "process_failed" && "$run_status_summary_written" == "yes" ]]; then
+    terminal_pipeline_failure=1
+  fi
+
   if [[ -f "$run_results_path" ]]; then
     run_count="$(awk 'NF { count++ } END { print count+0 }' "$run_results_path")"
   fi
@@ -920,29 +926,39 @@ classify_run_failure() {
     if [[ "$failure_reason" == "infra_incomplete_cycle" ]]; then
       run_class="infra_incomplete_cycle"
     fi
-    if [[ "$expected_runs" =~ ^[0-9]+$ && "$completed_runs" =~ ^[0-9]+$ ]]; then
-      if (( completed_runs != expected_runs )); then
+    if [[ "$terminal_pipeline_failure" != "1" ]]; then
+      if [[ "$expected_runs" =~ ^[0-9]+$ && "$completed_runs" =~ ^[0-9]+$ ]]; then
+        if (( completed_runs != expected_runs )); then
+          run_class="infra_incomplete_cycle"
+        fi
+      fi
+      if [[ "$expected_headless_runs" =~ ^[0-9]+$ && "$completed_headless_runs" =~ ^[0-9]+$ ]]; then
+        if (( completed_headless_runs != expected_headless_runs )); then
+          run_class="infra_incomplete_cycle"
+        fi
+      fi
+      if [[ "$running_runs_detected" =~ ^[0-9]+$ ]] && (( running_runs_detected > 0 )); then
         run_class="infra_incomplete_cycle"
       fi
-    fi
-    if [[ "$expected_headless_runs" =~ ^[0-9]+$ && "$completed_headless_runs" =~ ^[0-9]+$ ]]; then
-      if (( completed_headless_runs != expected_headless_runs )); then
+      if [[ "$summary_result" != "passed" && "$run_class" == "none" ]]; then
         run_class="infra_incomplete_cycle"
       fi
-    fi
-    if [[ "$running_runs_detected" =~ ^[0-9]+$ ]] && (( running_runs_detected > 0 )); then
-      run_class="infra_incomplete_cycle"
-    fi
-    if [[ "$summary_result" != "passed" && "$run_class" == "none" ]]; then
-      run_class="infra_incomplete_cycle"
-    fi
-    if [[ ! -f "$run_results_path" ]]; then
-      run_class="infra_incomplete_cycle"
+      if [[ ! -f "$run_results_path" ]]; then
+        run_class="infra_incomplete_cycle"
+      fi
     fi
   fi
 
+  if [[ "$run_class" == "none" && "$terminal_pipeline_failure" == "1" ]]; then
+    run_class="runtime_flow_failed"
+  fi
+
   if [[ "$process_exit" -ne 0 && "$run_class" == "none" ]]; then
-    run_class="infra_incomplete_cycle"
+    if [[ "$terminal_pipeline_failure" == "1" ]]; then
+      run_class="runtime_flow_failed"
+    else
+      run_class="infra_incomplete_cycle"
+    fi
   fi
 
   if contains_regex_in_files "FatalCancellationError|code[=: ]130" "${classify_log_paths[@]}"; then
@@ -1025,6 +1041,9 @@ increment_failure_class_counter() {
     precheck_failed)
       PRECHECK_FAILED_FAILURES=$((PRECHECK_FAILED_FAILURES + 1))
       ;;
+    runtime_flow_failed)
+      RUNTIME_FLOW_FAILED_FAILURES=$((RUNTIME_FLOW_FAILED_FAILURES + 1))
+      ;;
     none)
       ;;
     *)
@@ -1083,8 +1102,8 @@ finalize_precheck_failure() {
   else
     log "report generation failed after precheck failure (see $BATCH_ROOT/report-paths.txt if present)"
   fi
-  log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_parse=$RUNTIME_PARSE_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
-  die "batch precheck failed: reason=$reason precheck_failed=$PRECHECK_FAILED_FAILURES runtime_parse=$RUNTIME_PARSE_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
+  log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_parse=$RUNTIME_PARSE_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
+  die "batch precheck failed: reason=$reason precheck_failed=$PRECHECK_FAILED_FAILURES runtime_parse=$RUNTIME_PARSE_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
 }
 
 prepare_target_repos_file() {
@@ -1420,10 +1439,10 @@ log "generating quality reports for batch=$BATCH_ID"
 log "report paths:"
 cat "$BATCH_ROOT/report-paths.txt"
 
-log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_parse=$RUNTIME_PARSE_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
+log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_parse=$RUNTIME_PARSE_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
 
 if [[ "$failed_runs" -ne 0 || "$frontend_failures" -ne 0 || "$FRONTEND_CANCEL_FAILURES" -ne 0 ]]; then
-  die "batch completed with failures: full_run_failed=$failed_runs frontend_failed=$frontend_failures frontend_cancel_failed=$FRONTEND_CANCEL_FAILURES frontend_cancel_skipped=$FRONTEND_CANCEL_SKIPPED precheck_failed=$PRECHECK_FAILED_FAILURES runtime_parse=$RUNTIME_PARSE_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
+  die "batch completed with failures: full_run_failed=$failed_runs frontend_failed=$frontend_failures frontend_cancel_failed=$FRONTEND_CANCEL_FAILURES frontend_cancel_skipped=$FRONTEND_CANCEL_SKIPPED precheck_failed=$PRECHECK_FAILED_FAILURES runtime_parse=$RUNTIME_PARSE_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
 fi
 
 log "batch completed successfully"

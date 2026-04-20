@@ -424,6 +424,51 @@ func TestHeadlessRunnerInvalidTaskResultClassifiesAsParseFailed(t *testing.T) {
 	}
 }
 
+func TestHeadlessRunnerClassifiesOpenstackTransportTranscriptAsRunnerUnavailable(t *testing.T) {
+	workspace := t.TempDir()
+	commandPath := filepath.Join(workspace, "qwen-openstack-ssl-transport.sh")
+	fixturePath := filepath.Join(workspace, "openstack-ssl.txt")
+	if err := os.WriteFile(fixturePath, []byte(loadCapturedLiveStdoutFixture(t, "qwen_live_openstack_step0_ssl_stdout.txt")), 0o644); err != nil {
+		t.Fatalf("write ssl fixture copy: %v", err)
+	}
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+cat %q
+`, fixturePath)
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write transport stub: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-openstack-step0",
+		RunID:        "run-1",
+		StepID:       "init.step0.constitution",
+		Workspace:    workspace,
+		RepoScopes:   []string{"openstack"},
+		StartedAtUTC: time.Date(2026, 4, 20, 7, 16, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected runner_unavailable for transport transcript")
+	}
+	code, message, ok := acpruntime.ClassifyError(err)
+	if !ok {
+		t.Fatalf("expected classify error to succeed")
+	}
+	if code != string(acpruntime.ErrorCodeRunnerUnavailable) {
+		t.Fatalf("expected runner_unavailable, got %s", code)
+	}
+	if !strings.Contains(message, "parse_stage=transport") {
+		t.Fatalf("expected transport parse stage in error, got %q", message)
+	}
+	if !strings.Contains(strings.ToLower(message), "ssl") {
+		t.Fatalf("expected ssl marker in unavailable message, got %q", message)
+	}
+	if !strings.Contains(message, "raw_output=reports/taskruns/raw/") {
+		t.Fatalf("expected raw output artifact path in message, got %q", message)
+	}
+}
+
 func TestHeadlessRunnerSchemaInvalidCandidateClassifiesAsSchemaStage(t *testing.T) {
 	t.Parallel()
 
@@ -1146,6 +1191,177 @@ sleep 10
 	}
 }
 
+func TestHeadlessRunnerPreArtifactRecoveryLogsFinalPostArtifactRetryContext(t *testing.T) {
+	setCollectPreArtifactStallTimingsForTest(t, time.Second, 25*time.Millisecond, 25*time.Millisecond)
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	stateFile := filepath.Join(tempDir, "qwen-pre-stall-post-artifact-count.txt")
+	commandPath := filepath.Join(tempDir, "qwen-pre-stall-post-artifact.sh")
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+count=0
+if [ -f %q ]; then
+  count="$(cat %q)"
+fi
+count=$((count + 1))
+printf '%%s' "$count" > %q
+last_arg=""
+for arg in "$@"; do
+  last_arg="$arg"
+done
+if [ "$count" -eq 1 ]; then
+  sleep 10
+  exit 0
+fi
+if [ "$count" -eq 2 ]; then
+  if ! echo "$last_arg" | grep -q 'no durable collect artifacts in time'; then
+    echo "missing pre-artifact retry hint" >&2
+    exit 91
+  fi
+  mkdir -p %q
+  printf '# Extras\n' > %q/extras-analysis.md
+  cat > %q/shard-pack-manifest.json <<'MANIFEST'
+{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "shard_id": "bank-of-anthos-extras",
+  "agent_role": "shard-analyst",
+  "artifact_root": "reports/taskruns/run-1/staging/shards/bank-of-anthos-extras",
+  "repo_scopes": ["bank-of-anthos"],
+  "path_scopes": ["extras"],
+  "documents": [
+    {
+      "id": "doc.extras",
+      "kind": "analysis",
+      "title": "Extras",
+      "path": "extras-analysis.md",
+      "canonical_path": "reports/as-is/bank-of-anthos/extras-analysis.md",
+      "topics": ["extras"],
+      "citation_ids": ["cite.bank.readme"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.bank.readme",
+      "repo": "bank-of-anthos",
+      "path": "README.md",
+      "claim_ids": ["claim.extras.readme"],
+      "document_ids": ["doc.extras"]
+    }
+  ],
+  "compatibility": {
+    "coverage": {"observed": ["extras"], "missing": ["owner mappings"], "notes": ["invalid findings form"]},
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": ["finding string is invalid"]
+  }
+}
+MANIFEST
+  cat <<'JSON'
+{"meta":{"task_id":"task-pre-post-context","step_id":"init.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"fresh retry returned invalid manifest","changeset":[]}
+JSON
+  exit 0
+fi
+if [ "$count" -eq 3 ]; then
+  if ! echo "$last_arg" | grep -Fq 'documents[].path MUST stay relative to artifact_root only'; then
+    echo "missing artifact-root repair guidance" >&2
+    exit 92
+  fi
+  cat > %q/shard-pack-manifest.json <<'MANIFEST'
+{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "shard_id": "bank-of-anthos-extras",
+  "agent_role": "shard-analyst",
+  "artifact_root": "reports/taskruns/run-1/staging/shards/bank-of-anthos-extras",
+  "repo_scopes": ["bank-of-anthos"],
+  "path_scopes": ["extras"],
+  "documents": [
+    {
+      "id": "doc.extras",
+      "kind": "analysis",
+      "title": "Extras",
+      "path": "extras-analysis.md",
+      "canonical_path": "reports/as-is/bank-of-anthos/extras-analysis.md",
+      "topics": ["extras"],
+      "citation_ids": ["cite.bank.readme"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.bank.readme",
+      "repo": "bank-of-anthos",
+      "path": "README.md",
+      "claim_ids": ["claim.extras.readme"],
+      "document_ids": ["doc.extras"]
+    }
+  ],
+  "compatibility": {
+    "coverage": {"observed": ["extras"], "missing": ["owner mappings"], "notes": ["recovered"]},
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}
+MANIFEST
+  cat <<'JSON'
+{"meta":{"task_id":"task-pre-post-context","step_id":"init.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"recovered after pre-artifact then post-artifact repair","changeset":[]}
+JSON
+  exit 0
+fi
+echo "unexpected invocation $count" >&2
+exit 93
+`, stateFile, stateFile, stateFile, writeRoot, writeRoot, writeRoot, writeRoot)
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write pre/post context stub: %v", err)
+	}
+
+	var diagnostics []acpruntime.DiagnosticEvent
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-pre-post-context",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    tempDir,
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+		OnDiagnostic: func(event acpruntime.DiagnosticEvent) {
+			diagnostics = append(diagnostics, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected combined pre/post recovery to succeed: %v", err)
+	}
+	if result.TaskResult.Summary != "recovered after pre-artifact then post-artifact repair" {
+		t.Fatalf("unexpected result summary %q", result.TaskResult.Summary)
+	}
+	if count := strings.TrimSpace(string(mustReadFile(t, stateFile))); count != "3" {
+		t.Fatalf("expected exactly 3 runner invocations, got %q", count)
+	}
+	last := diagnostics[len(diagnostics)-1]
+	if last.Message != "runtime task retry completed" {
+		t.Fatalf("expected retry completed diagnostic, got %q", last.Message)
+	}
+	if last.Fields["retry_status"] != "succeeded" {
+		t.Fatalf("expected retry_status=succeeded, got %#v", last.Fields["retry_status"])
+	}
+	if last.Fields["last_stall_phase"] != "post_artifact" {
+		t.Fatalf("expected last_stall_phase=post_artifact, got %#v", last.Fields["last_stall_phase"])
+	}
+	if last.Fields["manifest_state_before_retry"] != "invalid" {
+		t.Fatalf("expected manifest_state_before_retry=invalid, got %#v", last.Fields["manifest_state_before_retry"])
+	}
+}
+
 func TestHeadlessRunnerDoesNotTriggerPreArtifactStallWhileWriteRootMutates(t *testing.T) {
 	setCollectPreArtifactStallTimingsForTest(t, time.Second, 20*time.Millisecond, 10*time.Millisecond)
 
@@ -1499,6 +1715,166 @@ sleep 10
 	}
 	if !strings.Contains(message, "raw_output=reports/taskruns/raw/") {
 		t.Fatalf("expected raw output path in message, got %q", message)
+	}
+	rawMetaFiles, globErr := filepath.Glob(filepath.Join(tempDir, "reports", "taskruns", "raw", "*-meta.json"))
+	if globErr != nil {
+		t.Fatalf("glob raw output meta files: %v", globErr)
+	}
+	if len(rawMetaFiles) == 0 {
+		t.Fatalf("expected raw output metadata under %s", filepath.Join(tempDir, "reports", "taskruns", "raw"))
+	}
+}
+
+func TestHeadlessRunnerCollectArtifactRepairFailsOnInvalidCompatibilityManifest(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	stateFile := filepath.Join(tempDir, "qwen-invalid-compatibility-count.txt")
+	commandPath := filepath.Join(tempDir, "qwen-invalid-compatibility.sh")
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+count=0
+if [ -f %q ]; then
+  count="$(cat %q)"
+fi
+count=$((count + 1))
+printf '%%s' "$count" > %q
+last_arg=""
+for arg in "$@"; do
+  last_arg="$arg"
+done
+mkdir -p %q
+printf '# Extras\n' > %q/extras-analysis.md
+if [ "$count" -eq 1 ]; then
+  cat > %q/shard-pack-manifest.json <<'MANIFEST'
+{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step1.collect",
+  "shard_id": "bank-of-anthos-extras",
+  "agent_role": "shard-analyst",
+  "artifact_root": "reports/taskruns/run-1/staging/shards/bank-of-anthos-extras",
+  "repo_scopes": ["bank-of-anthos"],
+  "path_scopes": ["extras"],
+  "documents": [
+    {
+      "id": "doc.extras",
+      "kind": "analysis",
+      "title": "Extras",
+      "path": "extras-analysis.md",
+      "canonical_path": "reports/as-is/bank-of-anthos/extras-analysis.md",
+      "topics": ["extras"],
+      "citation_ids": ["cite.bank.readme"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.bank.readme",
+      "repo": "bank-of-anthos",
+      "path": "README.md",
+      "claim_ids": ["claim.extras.readme"],
+      "document_ids": ["doc.extras"]
+    }
+  ],
+  "compatibility": {
+    "coverage": {"observed": ["extras"], "missing": ["owner mappings"], "notes": ["invalid entities"]},
+    "questions": [],
+    "entities": [{"id":"svc.extras","type":"service","name":"Extras"}],
+    "edges": [],
+    "findings": ["finding as string"]
+  }
+}
+MANIFEST
+  cat <<'JSON'
+{"meta":{"task_id":"task-invalid-compatibility","step_id":"refresh.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"collect returned invalid compatibility manifest","changeset":[]}
+JSON
+  exit 0
+fi
+if ! echo "$last_arg" | grep -Fq 'compatibility.entities[*] MUST remain full entity objects with provenance'; then
+  echo "missing compatibility entity repair hint" >&2
+  exit 97
+fi
+if ! echo "$last_arg" | grep -Fq 'compatibility.findings[*] MUST remain objects'; then
+  echo "missing findings object repair hint" >&2
+  exit 98
+fi
+cat > %q/shard-pack-manifest.json <<'MANIFEST'
+{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step1.collect",
+  "shard_id": "bank-of-anthos-extras",
+  "agent_role": "shard-analyst",
+  "artifact_root": "reports/taskruns/run-1/staging/shards/bank-of-anthos-extras",
+  "repo_scopes": ["bank-of-anthos"],
+  "path_scopes": ["extras"],
+  "documents": [
+    {
+      "id": "doc.extras",
+      "kind": "analysis",
+      "title": "Extras",
+      "path": "extras-analysis.md",
+      "canonical_path": "reports/as-is/bank-of-anthos/extras-analysis.md",
+      "topics": ["extras"],
+      "citation_ids": ["cite.bank.readme"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.bank.readme",
+      "repo": "bank-of-anthos",
+      "path": "README.md",
+      "claim_ids": ["claim.extras.readme"],
+      "document_ids": ["doc.extras"]
+    }
+  ],
+  "compatibility": {
+    "coverage": {"observed": ["extras"], "missing": ["owner mappings"], "notes": ["still invalid"]},
+    "questions": [],
+    "entities": [{"id":"svc.extras","type":"service","name":"Extras"}],
+    "edges": [],
+    "findings": ["finding as string"]
+  }
+}
+MANIFEST
+cat <<'JSON'
+{"meta":{"task_id":"task-invalid-compatibility","step_id":"refresh.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"repair kept invalid compatibility manifest","changeset":[]}
+JSON
+`, stateFile, stateFile, stateFile, writeRoot, writeRoot, writeRoot, writeRoot)
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write invalid compatibility stub: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-invalid-compatibility",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		Workspace:    tempDir,
+		WriteRoot:    writeRoot,
+		ArtifactRoot: "reports/taskruns/run-1/staging/shards/bank-of-anthos-extras",
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected repair failure for invalid compatibility manifest")
+	}
+	code, message, ok := acpruntime.ClassifyError(err)
+	if !ok || code != string(acpruntime.ErrorCodeRunnerParseFailed) {
+		t.Fatalf("expected runner_parse_failed classification, got code=%q err=%v", code, err)
+	}
+	if !strings.Contains(message, "collect artifacts remained invalid after one repair attempt") {
+		t.Fatalf("expected contract failure context, got %q", message)
+	}
+	if !strings.Contains(message, "shard pack manifest is invalid") {
+		t.Fatalf("expected explicit manifest validation reason, got %q", message)
+	}
+	if !strings.Contains(message, "raw_output=reports/taskruns/raw/") {
+		t.Fatalf("expected raw output diagnostics, got %q", message)
 	}
 	rawMetaFiles, globErr := filepath.Glob(filepath.Join(tempDir, "reports", "taskruns", "raw", "*-meta.json"))
 	if globErr != nil {
@@ -2095,6 +2471,15 @@ func TestBuildPromptIncludesCanonicalManifestSchemaGuardrails(t *testing.T) {
 	}
 	if !strings.Contains(prompt, `Do NOT use reports/taskruns/... staging paths as canonical_path.`) {
 		t.Fatalf("expected canonical_path staging-path ban in prompt")
+	}
+	if !strings.Contains(prompt, `documents[].path MUST be artifact_root-relative only`) {
+		t.Fatalf("expected artifact_root-relative documents[].path guardrail in prompt")
+	}
+	if !strings.Contains(prompt, `compatibility.entities[*] MUST remain full entity objects with provenance`) {
+		t.Fatalf("expected compatibility entity provenance guardrail in prompt")
+	}
+	if !strings.Contains(prompt, `compatibility.findings[*] MUST remain structured finding objects`) {
+		t.Fatalf("expected compatibility findings object guardrail in prompt")
 	}
 }
 

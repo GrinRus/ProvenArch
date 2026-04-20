@@ -11,6 +11,23 @@ import (
 
 var ansiEscapePattern = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
 
+type TransportError struct {
+	Detail string
+}
+
+func (e TransportError) Error() string {
+	detail := strings.TrimSpace(e.Detail)
+	if detail == "" {
+		return "provider transport error"
+	}
+	return "provider transport error: " + detail
+}
+
+func IsTransportError(err error) bool {
+	var transportErr TransportError
+	return errors.As(err, &transportErr)
+}
+
 // Extract returns a schema-valid TaskResult JSON object extracted from runner stdout.
 func Extract(raw []byte) ([]byte, error) {
 	trimmed := bytes.TrimSpace(raw)
@@ -28,6 +45,9 @@ func Extract(raw []byte) ([]byte, error) {
 		return parsed, nil
 	} else {
 		bestErr = preferExtractError(bestErr, parseErr)
+	}
+	if transportErr := detectTransportError(string(trimmed)); transportErr != nil {
+		return nil, fmt.Errorf("unable to extract valid TaskResult JSON from runner output: %w", transportErr)
 	}
 	if bestErr == nil {
 		bestErr = errors.New("unknown extraction error")
@@ -327,4 +347,52 @@ func looksLikeTaskResultObject(value map[string]any) bool {
 		return true
 	}
 	return false
+}
+
+func detectTransportError(text string) error {
+	normalized := normalizeText(text)
+	if normalized == "" {
+		return nil
+	}
+	lower := strings.ToLower(normalized)
+	index := strings.LastIndex(lower, "[api error:")
+	if index < 0 {
+		index = strings.LastIndex(lower, "api error:")
+	}
+	if index < 0 {
+		return nil
+	}
+
+	excerpt := strings.TrimSpace(normalized[index:])
+	if newline := strings.IndexAny(excerpt, "\r\n"); newline >= 0 {
+		excerpt = strings.TrimSpace(excerpt[:newline])
+	}
+	lowerExcerpt := strings.ToLower(excerpt)
+	transportMarkers := []string{
+		"ssl",
+		"tls",
+		"certificate",
+		"connection",
+		"transport",
+		"timeout",
+		"socket",
+		"network",
+		"http2",
+		"packet length too long",
+		"econn",
+	}
+	for _, marker := range transportMarkers {
+		if strings.Contains(lowerExcerpt, marker) {
+			return TransportError{Detail: compactTransportExcerpt(excerpt)}
+		}
+	}
+	return nil
+}
+
+func compactTransportExcerpt(value string) string {
+	normalized := strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	if len(normalized) <= 320 {
+		return normalized
+	}
+	return normalized[:317] + "..."
 }

@@ -74,6 +74,16 @@ type collectWriteRootSnapshot struct {
 	LastMutation      time.Time
 }
 
+type collectRepairAttempt struct {
+	Attempted                bool
+	ManifestStateBeforeRetry string
+}
+
+type retryDiagnosticContext struct {
+	LastStallPhase           collectStallPhase
+	ManifestStateBeforeRetry string
+}
+
 type commandActivityTracker struct {
 	mu       sync.Mutex
 	lastRead time.Time
@@ -226,7 +236,8 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 	}
 	if parseErr == nil {
 		if len(r.Args) == 0 {
-			return maybeRepairCollectArtifacts(ctx, task, taskPayload, command, result)
+			repaired, _, repairErr := maybeRepairCollectArtifacts(ctx, task, taskPayload, command, result)
+			return repaired, repairErr
 		}
 		return result, nil
 	}
@@ -250,7 +261,8 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 			)
 		}
 		if retryParseErr == nil {
-			return maybeRepairCollectArtifacts(ctx, task, taskPayload, command, retryResult)
+			repaired, _, repairErr := maybeRepairCollectArtifacts(ctx, task, taskPayload, command, retryResult)
+			return repaired, repairErr
 		}
 		result = retryResult
 		parseStage = retryParseStage
@@ -259,14 +271,17 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 		finalStderr = retryResult.Stderr
 	}
 
-	parseFailureMessage := buildParseFailureMessage(task, parseStage, parseErr, result)
-	return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
-		acpruntime.ProviderQwenCode,
-		acpruntime.ErrorCodeRunnerParseFailed,
-		fmt.Sprintf("headless provider %q returned invalid taskresult: %s", acpruntime.ProviderQwenCode, parseFailureMessage),
-		finalStdout,
-		finalStderr,
+	return acpruntime.Result{}, wrapQwenParseFailure(
+		task,
+		parseStage,
 		parseErr,
+		acpruntime.Result{
+			TaskResult: result.TaskResult,
+			RawJSON:    result.RawJSON,
+			Stdout:     finalStdout,
+			Stderr:     finalStderr,
+		},
+		fmt.Sprintf("headless provider %q returned invalid taskresult", acpruntime.ProviderQwenCode),
 	)
 }
 
@@ -294,24 +309,29 @@ func maybeRepairCollectArtifacts(
 	taskPayload []byte,
 	command string,
 	current acpruntime.Result,
-) (acpruntime.Result, error) {
+) (acpruntime.Result, collectRepairAttempt, error) {
 	if task.StepID != "init.step1.collect" && task.StepID != "refresh.step1.collect" {
-		return current, nil
+		return current, collectRepairAttempt{}, nil
 	}
 	if strings.TrimSpace(task.WriteRoot) == "" {
-		return current, nil
+		return current, collectRepairAttempt{}, nil
 	}
 
 	_ = artifactquality.EnsureCanonicalCollectManifest(task, current.TaskResult)
 	assessment, err := assessRetryManifestAtWriteRoot(task.WriteRoot)
 	if err == nil && assessment.Rich {
-		return current, nil
+		return current, collectRepairAttempt{ManifestStateBeforeRetry: "rich"}, nil
 	}
 	initialProblem := artifactquality.DescribeAssessmentProblem(assessment, err)
+	beforeRepairState := currentCollectManifestState(task.WriteRoot)
+	attempt := collectRepairAttempt{
+		Attempted:                true,
+		ManifestStateBeforeRetry: beforeRepairState,
+	}
 
 	snapshot, err := artifactquality.SnapshotWriteRoot(task.WriteRoot)
 	if err != nil {
-		return acpruntime.Result{}, wrapArtifactContractFailure(
+		return acpruntime.Result{}, attempt, wrapArtifactContractFailure(
 			task,
 			"artifact_repair.snapshot",
 			current,
@@ -328,7 +348,7 @@ func maybeRepairCollectArtifacts(
 	if runErr != nil {
 		_ = snapshot.Restore()
 		unavailableMessage := buildUnavailableFailureMessage(task, runErr, repaired)
-		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+		return acpruntime.Result{}, attempt, acpruntime.WrapRunnerErrorWithOutput(
 			acpruntime.ProviderQwenCode,
 			acpruntime.ErrorCodeRunnerUnavailable,
 			fmt.Sprintf("%v: artifact repair retry failed after %s: %s", ErrRunnerUnavailable, initialProblem, unavailableMessage),
@@ -339,14 +359,12 @@ func maybeRepairCollectArtifacts(
 	}
 	if parseErr != nil {
 		_ = snapshot.Restore()
-		parseFailureMessage := buildParseFailureMessage(task, "artifact_repair."+repairParseStage, parseErr, repaired)
-		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
-			acpruntime.ProviderQwenCode,
-			acpruntime.ErrorCodeRunnerParseFailed,
-			fmt.Sprintf("headless provider %q returned invalid collect artifact repair result after %s: %s", acpruntime.ProviderQwenCode, initialProblem, parseFailureMessage),
-			repaired.Stdout,
-			repaired.Stderr,
+		return acpruntime.Result{}, attempt, wrapQwenParseFailure(
+			task,
+			"artifact_repair."+repairParseStage,
 			parseErr,
+			repaired,
+			fmt.Sprintf("headless provider %q returned invalid collect artifact repair result after %s", acpruntime.ProviderQwenCode, initialProblem),
 		)
 	}
 
@@ -355,7 +373,7 @@ func maybeRepairCollectArtifacts(
 	if err != nil || !repairedAssessment.Rich {
 		_ = snapshot.Restore()
 		repairedProblem := artifactquality.DescribeAssessmentProblem(repairedAssessment, err)
-		return acpruntime.Result{}, wrapArtifactContractFailure(
+		return acpruntime.Result{}, attempt, wrapArtifactContractFailure(
 			task,
 			"artifact_repair.contract",
 			repaired,
@@ -363,7 +381,7 @@ func maybeRepairCollectArtifacts(
 			err,
 		)
 	}
-	return repaired, nil
+	return repaired, attempt, nil
 }
 
 func recoverCollectArtifactsAfterStall(
@@ -376,11 +394,15 @@ func recoverCollectArtifactsAfterStall(
 ) (acpruntime.Result, error) {
 	initialProblem := errCollectStalledAfterArtifacts.Error()
 	emitDiagnostic(task, "runtime task retry scheduled", stalled.Diagnostic.fields(task))
+	retryContext := retryDiagnosticContext{
+		LastStallPhase:           collectStallPhasePostArtifact,
+		ManifestStateBeforeRetry: stalled.Diagnostic.ManifestState,
+	}
 
 	snapshot, err := artifactquality.SnapshotWriteRoot(task.WriteRoot)
 	if err != nil {
 		message := buildFailureMessage(task, "stall_snapshot", fmt.Errorf("%w: snapshot write_root: %v", errCollectStalledAfterArtifacts, err), current)
-		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, "failed", err.Error(), stalled.Diagnostic.ManifestState))
+		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, retryContext, "failed", err.Error(), stalled.Diagnostic.ManifestState))
 		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 			acpruntime.ProviderQwenCode,
 			acpruntime.ErrorCodeRunnerParseFailed,
@@ -400,7 +422,7 @@ func recoverCollectArtifactsAfterStall(
 		_ = snapshot.Restore()
 		failureResult := selectFailureResult(repaired, current)
 		failureMessage := buildFailureMessage(task, "stall_repair.exec", fmt.Errorf("%w: %v", errCollectStalledAfterArtifacts, runErr), failureResult)
-		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, "failed", runErr.Error(), stalled.Diagnostic.ManifestState))
+		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, retryContext, "failed", runErr.Error(), stalled.Diagnostic.ManifestState))
 		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 			acpruntime.ProviderQwenCode,
 			acpruntime.ErrorCodeRunnerParseFailed,
@@ -412,15 +434,13 @@ func recoverCollectArtifactsAfterStall(
 	}
 	if parseErr != nil {
 		_ = snapshot.Restore()
-		failureMessage := buildFailureMessage(task, "stall_repair."+strings.TrimSpace(repairParseStage), fmt.Errorf("%w: %v", errCollectStalledAfterArtifacts, parseErr), repaired)
-		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, "failed", parseErr.Error(), stalled.Diagnostic.ManifestState))
-		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
-			acpruntime.ProviderQwenCode,
-			acpruntime.ErrorCodeRunnerParseFailed,
-			fmt.Sprintf("headless provider %q collect_stalled_after_artifacts and repair retry returned invalid taskresult: %s", acpruntime.ProviderQwenCode, failureMessage),
-			repaired.Stdout,
-			repaired.Stderr,
+		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, retryContext, "failed", parseErr.Error(), stalled.Diagnostic.ManifestState))
+		return acpruntime.Result{}, wrapQwenParseFailure(
+			task,
+			"stall_repair."+strings.TrimSpace(repairParseStage),
 			parseErr,
+			repaired,
+			fmt.Sprintf("headless provider %q collect_stalled_after_artifacts and repair retry returned invalid taskresult", acpruntime.ProviderQwenCode),
 		)
 	}
 
@@ -429,7 +449,7 @@ func recoverCollectArtifactsAfterStall(
 	if assessErr != nil || !repairedAssessment.Rich {
 		_ = snapshot.Restore()
 		repairedProblem := artifactquality.DescribeAssessmentProblem(repairedAssessment, assessErr)
-		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, "failed", repairedProblem, stalled.Diagnostic.ManifestState))
+		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, retryContext, "failed", repairedProblem, stalled.Diagnostic.ManifestState))
 		return acpruntime.Result{}, wrapArtifactContractFailure(
 			task,
 			"stall_repair.contract",
@@ -439,7 +459,7 @@ func recoverCollectArtifactsAfterStall(
 		)
 	}
 
-	emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, "succeeded", "", "rich"))
+	emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, retryContext, "succeeded", "", "rich"))
 	return repaired, nil
 }
 
@@ -452,6 +472,10 @@ func recoverCollectBeforeArtifactsAfterStall(
 	stalled collectStallError,
 ) (acpruntime.Result, error) {
 	emitDiagnostic(task, "runtime task retry scheduled", stalled.Diagnostic.fields(task))
+	retryContext := retryDiagnosticContext{
+		LastStallPhase:           stalled.Diagnostic.StallPhase,
+		ManifestStateBeforeRetry: stalled.Diagnostic.ManifestState,
+	}
 
 	retryArgs := buildRetryQwenArgs(task, buildPromptWithModeAndHints(taskPayload, promptRetryCollectFresh, buildCollectFreshRetryHints(task)))
 	retried, retryParseStage, parseErr, runErr := runQwenCommand(ctx, task, command, retryArgs, runQwenOptions{
@@ -460,7 +484,7 @@ func recoverCollectBeforeArtifactsAfterStall(
 	if runErr != nil {
 		failureResult := selectFailureResult(retried, current)
 		failureMessage := buildFailureMessage(task, "stall_retry.exec", fmt.Errorf("%w: %v", errCollectStalledBeforeArtifacts, runErr), failureResult)
-		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, "failed", runErr.Error(), currentCollectManifestState(task.WriteRoot)))
+		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, retryContext, "failed", runErr.Error(), currentCollectManifestState(task.WriteRoot)))
 		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 			acpruntime.ProviderQwenCode,
 			acpruntime.ErrorCodeRunnerParseFailed,
@@ -471,25 +495,29 @@ func recoverCollectBeforeArtifactsAfterStall(
 		)
 	}
 	if parseErr != nil {
-		failureMessage := buildFailureMessage(task, "stall_retry."+strings.TrimSpace(retryParseStage), fmt.Errorf("%w: %v", errCollectStalledBeforeArtifacts, parseErr), retried)
-		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, "failed", parseErr.Error(), currentCollectManifestState(task.WriteRoot)))
-		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
-			acpruntime.ProviderQwenCode,
-			acpruntime.ErrorCodeRunnerParseFailed,
-			fmt.Sprintf("headless provider %q collect_stalled_before_artifacts and forced retry returned invalid taskresult: %s", acpruntime.ProviderQwenCode, failureMessage),
-			retried.Stdout,
-			retried.Stderr,
+		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, retryContext, "failed", parseErr.Error(), currentCollectManifestState(task.WriteRoot)))
+		return acpruntime.Result{}, wrapQwenParseFailure(
+			task,
+			"stall_retry."+strings.TrimSpace(retryParseStage),
 			parseErr,
+			retried,
+			fmt.Sprintf("headless provider %q collect_stalled_before_artifacts and forced retry returned invalid taskresult", acpruntime.ProviderQwenCode),
 		)
 	}
 
-	finalResult, err := maybeRepairCollectArtifacts(ctx, task, taskPayload, command, retried)
+	finalResult, repairAttempt, err := maybeRepairCollectArtifacts(ctx, task, taskPayload, command, retried)
+	if repairAttempt.Attempted {
+		retryContext.LastStallPhase = collectStallPhasePostArtifact
+		if state := strings.TrimSpace(repairAttempt.ManifestStateBeforeRetry); state != "" {
+			retryContext.ManifestStateBeforeRetry = state
+		}
+	}
 	if err != nil {
-		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, "failed", err.Error(), currentCollectManifestState(task.WriteRoot)))
+		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, retryContext, "failed", err.Error(), currentCollectManifestState(task.WriteRoot)))
 		return acpruntime.Result{}, err
 	}
 
-	emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, "succeeded", "", currentCollectManifestState(task.WriteRoot)))
+	emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, retryContext, "succeeded", "", currentCollectManifestState(task.WriteRoot)))
 	return finalResult, nil
 }
 
@@ -514,8 +542,19 @@ func selectFailureResult(primary acpruntime.Result, fallback acpruntime.Result) 
 	return fallback
 }
 
-func retryDiagnosticFields(task acpruntime.Task, stalled collectStallError, retryStatus string, errText string, manifestState string) map[string]any {
+func retryDiagnosticFields(task acpruntime.Task, stalled collectStallError, context retryDiagnosticContext, retryStatus string, errText string, manifestState string) map[string]any {
 	fields := stalled.Diagnostic.fields(task)
+	lastStallPhase := context.LastStallPhase
+	if lastStallPhase == "" {
+		lastStallPhase = stalled.Diagnostic.StallPhase
+	}
+	if lastStallPhase != "" {
+		fields["stall_phase"] = strings.TrimSpace(string(lastStallPhase))
+		fields["last_stall_phase"] = strings.TrimSpace(string(lastStallPhase))
+	}
+	if state := strings.TrimSpace(context.ManifestStateBeforeRetry); state != "" {
+		fields["manifest_state_before_retry"] = state
+	}
 	if state := strings.TrimSpace(manifestState); state != "" {
 		fields["manifest_state"] = state
 	}
@@ -526,6 +565,28 @@ func retryDiagnosticFields(task acpruntime.Task, stalled collectStallError, retr
 		fields["error"] = detail
 	}
 	return fields
+}
+
+func wrapQwenParseFailure(task acpruntime.Task, parseStage string, parseErr error, result acpruntime.Result, contextLabel string) error {
+	failureMessage := buildParseFailureMessage(task, parseStage, parseErr, result)
+	if taskresultextractor.IsTransportError(parseErr) {
+		return acpruntime.WrapRunnerErrorWithOutput(
+			acpruntime.ProviderQwenCode,
+			acpruntime.ErrorCodeRunnerUnavailable,
+			fmt.Sprintf("%v: %s transport/API failure: %s", ErrRunnerUnavailable, strings.TrimSpace(contextLabel), failureMessage),
+			result.Stdout,
+			result.Stderr,
+			parseErr,
+		)
+	}
+	return acpruntime.WrapRunnerErrorWithOutput(
+		acpruntime.ProviderQwenCode,
+		acpruntime.ErrorCodeRunnerParseFailed,
+		fmt.Sprintf("%s: %s", strings.TrimSpace(contextLabel), failureMessage),
+		result.Stdout,
+		result.Stderr,
+		parseErr,
+	)
 }
 
 func wrapArtifactContractFailure(task acpruntime.Task, stage string, result acpruntime.Result, message string, cause error) error {
@@ -792,10 +853,14 @@ type streamedOutputBudget struct {
 func parseCapturedTaskResult(task acpruntime.Task, stdoutBytes []byte, stdoutText string, stderrText string) (acpruntime.Result, string, error) {
 	rawTaskResult, err := taskresultextractor.Extract(stdoutBytes)
 	if err != nil {
+		parseStage := "extract"
+		if taskresultextractor.IsTransportError(err) {
+			parseStage = "transport"
+		}
 		return acpruntime.Result{
 			Stdout: stdoutText,
 			Stderr: stderrText,
-		}, "extract", err
+		}, parseStage, err
 	}
 	if normalizedRawTaskResult, changed, normalizeErr := taskresultcompat.NormalizeRawTaskResult(task, rawTaskResult); normalizeErr == nil && changed {
 		rawTaskResult = normalizedRawTaskResult
@@ -1355,7 +1420,9 @@ func buildCollectFreshRetryHints(task acpruntime.Task) []string {
 	lines := []string{
 		`- This retry exists because the provider produced no durable collect artifacts in time.`,
 		`- Spend the minimum time needed to identify repo-backed evidence for one authored doc and shard-pack-manifest.json.`,
+		`- Keep repository exploration minimal; do not resume a broad repo sweep on this retry.`,
 		`- If write_root is still empty, create only the minimum viable authored doc set before returning the final JSON.`,
+		`- As soon as the first authored doc and shard-pack-manifest.json exist in write_root, stop repository exploration and return the final TaskResult JSON immediately.`,
 	}
 	if strings.TrimSpace(task.WriteRoot) != "" {
 		lines = append(lines, fmt.Sprintf(`- write_root for this retry: %q`, strings.TrimSpace(task.WriteRoot)))
@@ -1502,9 +1569,13 @@ func buildArtifactRepairHints(initialProblem string) []string {
 	lines := []string{
 		`- Rebuild shard-pack-manifest.json to the canonical ACP schema before returning JSON.`,
 		`- In shard-pack-manifest.json, compatibility.coverage/questions/entities/edges/findings are all required; questions/entities/edges/findings must be arrays even when empty.`,
+		`- documents[].path MUST stay relative to artifact_root only; valid example: "iac-overview.md". Invalid examples: "reports/taskruns/run-1/staging/shards/bank-of-anthos-iac/iac-overview.md", "charter/overview.md".`,
 		`- Do NOT add top-level "compatibility" to TaskResult JSON; keep compatibility only inside shard-pack-manifest.json.`,
+		`- compatibility.entities[*] MUST remain full entity objects with provenance included; do not drop provenance during repair.`,
+		`- compatibility.findings[*] MUST remain objects; never replace them with plain strings or bullet text.`,
 		`- Do NOT leave claim_ids empty for cited repository evidence; preserve concrete repo-backed claim ids whenever the evidence supports them.`,
 		`- Do NOT describe shard-pack-manifest.json repair via add_doc_artifact; repair the file in write_root and return "changeset": [].`,
+		`- Repair mode is JSON-only: do not invent extra repository file reads/writes in changeset after authored docs already exist.`,
 	}
 	if detail := compactRetryHint(initialProblem); detail != "" {
 		lines = append(lines, fmt.Sprintf(`- Previous artifact contract failure: %s`, detail))

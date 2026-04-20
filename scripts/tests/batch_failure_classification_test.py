@@ -660,6 +660,143 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual("infra_signal_terminated", fields[2], classifications_tsv.read_text(encoding="utf-8"))
         self.assertEqual("signal_15", fields[6], classifications_tsv.read_text(encoding="utf-8"))
 
+    def test_shell_classifier_keeps_terminal_pipeline_failure_out_of_incomplete_cycle(self) -> None:
+        run_dir = self.root / "run-terminal-pipeline-failure"
+        self._create_fixture_run_dir(run_dir)
+        runtime_log = run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson"
+        raw_stderr = run_dir / "arch-workspace/reports/taskruns/raw/runtime.stderr.txt"
+        if runtime_log.exists():
+            runtime_log.unlink()
+        if raw_stderr.exists():
+            raw_stderr.unlink()
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: passed",
+                    "- failure_reason: pipeline_command_failed",
+                    "- expected_runs: 10",
+                    "- completed_runs: 2",
+                    "- expected_headless_runs: 10",
+                    "- completed_headless_runs: 2",
+                    "- running_runs_detected: 1",
+                    "- termination_signal: none",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=process_failed",
+                    "process_exit=1",
+                    "termination_signal=none",
+                    "failure_reason=pipeline_command_failed",
+                    "summary_written=yes",
+                ]
+            )
+            + "\n",
+        )
+        write_text(run_dir / "full-run.log", "step2 failed to promote staged docs\n")
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        classifications_tsv = self.root / "backend-run-classifications-terminal.tsv"
+        command = (
+            prelude
+            + "\n"
+            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
+            + f'classify_run_failure "qwen-code" "1" {shlex.quote(str(run_dir))} "1"\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("", completed.stdout.strip(), completed.stdout)
+        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
+        self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("runtime_flow_failed", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+
+    def test_shell_classifier_uses_terminal_process_failed_sentinel_even_when_outer_exit_is_zero(self) -> None:
+        run_dir = self.root / "run-terminal-pipeline-failure-zero-exit"
+        self._create_fixture_run_dir(run_dir)
+        runtime_log = run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson"
+        raw_stderr = run_dir / "arch-workspace/reports/taskruns/raw/runtime.stderr.txt"
+        if runtime_log.exists():
+            runtime_log.unlink()
+        if raw_stderr.exists():
+            raw_stderr.unlink()
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: passed",
+                    "- failure_reason: pipeline_command_failed",
+                    "- expected_runs: 10",
+                    "- completed_runs: 10",
+                    "- expected_headless_runs: 10",
+                    "- completed_headless_runs: 10",
+                    "- running_runs_detected: 0",
+                    "- termination_signal: none",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=process_failed",
+                    "process_exit=0",
+                    "termination_signal=none",
+                    "failure_reason=pipeline_command_failed",
+                    "summary_written=yes",
+                ]
+            )
+            + "\n",
+        )
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        classifications_tsv = self.root / "backend-run-classifications-terminal-zero-exit.tsv"
+        command = (
+            prelude
+            + "\n"
+            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
+            + f'classify_run_failure "qwen-code" "1" {shlex.quote(str(run_dir))} "0"\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("", completed.stdout.strip(), completed.stdout)
+        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
+        self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("runtime_flow_failed", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+
     def test_batch_signal_trap_preserves_child_terminal_sentinel_as_source_of_truth(self) -> None:
         run_dir = self.root / "run-signal-after-child-terminal"
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -754,6 +891,71 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual("infra_incomplete_cycle", result.failure_class)
         self.assertTrue(result.summary_missing)
         self.assertTrue(result.infra_incomplete_cycle)
+
+    def test_python_report_ignores_classifier_incomplete_cycle_for_terminal_process_failed_summary(self) -> None:
+        run_dir = self.root / "run-python-terminal-process-failed"
+        self._create_fixture_run_dir(run_dir)
+        runtime_log = run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson"
+        raw_stderr = run_dir / "arch-workspace/reports/taskruns/raw/runtime.stderr.txt"
+        if runtime_log.exists():
+            runtime_log.unlink()
+        if raw_stderr.exists():
+            raw_stderr.unlink()
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: passed",
+                    "- failure_reason: pipeline_command_failed",
+                    "- expected_runs: 10",
+                    "- completed_runs: 2",
+                    "- expected_headless_runs: 10",
+                    "- completed_headless_runs: 2",
+                    "- running_runs_detected: 1",
+                    "- termination_signal: none",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=process_failed",
+                    "process_exit=1",
+                    "termination_signal=none",
+                    "failure_reason=pipeline_command_failed",
+                    "summary_written=yes",
+                ]
+            )
+            + "\n",
+        )
+        write_text(run_dir / "full-run.log", "pipeline failed after writing session summary\n")
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "infra_incomplete_cycle",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("runtime_flow_failed", result.failure_class)
+        self.assertTrue(result.runtime_flow_failed)
+        self.assertFalse(result.infra_incomplete_cycle)
 
     def test_python_report_treats_incomplete_reports_as_triage_only_not_empty_analysis(self) -> None:
         run_dir = self.root / "run-incomplete"

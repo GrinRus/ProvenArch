@@ -82,6 +82,10 @@ func canonicalizeCollectManifest(raw []byte, task acpruntime.Task, result contra
 		manifest.ArtifactRoot = artifactRoot
 		changed = true
 	}
+	if normalizedDocuments, documentChanged := normalizeCollectDocumentPaths(manifest.Documents, manifest.ArtifactRoot, task.WriteRoot); documentChanged {
+		manifest.Documents = normalizedDocuments
+		changed = true
+	}
 	if len(manifest.RepoScopes) == 0 && len(task.RepoScopes) > 0 {
 		manifest.RepoScopes = append([]string(nil), task.RepoScopes...)
 		changed = true
@@ -95,7 +99,7 @@ func canonicalizeCollectManifest(raw []byte, task acpruntime.Task, result contra
 		changed = true
 	}
 
-	compatibility := CompatibilitySnapshotFromTaskResult(result)
+	compatibility := mergeCompatibilitySnapshot(manifest.Compatibility, result)
 	if !reflect.DeepEqual(manifest.Compatibility, compatibility) {
 		manifest.Compatibility = compatibility
 		changed = true
@@ -146,6 +150,41 @@ func CompatibilitySnapshotFromTaskResult(result contracts.TaskResult) contracts.
 	return snapshot
 }
 
+func mergeCompatibilitySnapshot(existing contracts.CompatibilitySnapshot, result contracts.TaskResult) contracts.CompatibilitySnapshot {
+	merged := existing
+	if result.Coverage != nil {
+		merged.Coverage = *result.Coverage
+	}
+	if len(result.Questions) > 0 || len(merged.Questions) == 0 {
+		merged.Questions = append([]contracts.Question(nil), result.Questions...)
+	}
+
+	projected := CompatibilitySnapshotFromTaskResult(result)
+	if len(projected.Entities) > 0 || len(merged.Entities) == 0 {
+		merged.Entities = projected.Entities
+	}
+	if len(projected.Edges) > 0 || len(merged.Edges) == 0 {
+		merged.Edges = projected.Edges
+	}
+	if len(projected.Findings) > 0 || len(merged.Findings) == 0 {
+		merged.Findings = projected.Findings
+	}
+
+	if merged.Questions == nil {
+		merged.Questions = []contracts.Question{}
+	}
+	if merged.Entities == nil {
+		merged.Entities = []contracts.Entity{}
+	}
+	if merged.Edges == nil {
+		merged.Edges = []contracts.Edge{}
+	}
+	if merged.Findings == nil {
+		merged.Findings = []contracts.Finding{}
+	}
+	return merged
+}
+
 func canonicalAgentRole(task acpruntime.Task) string {
 	if role := strings.TrimSpace(task.AgentRole); role != "" {
 		return role
@@ -158,4 +197,82 @@ func canonicalAgentRole(task acpruntime.Task) string {
 	default:
 		return "runtime"
 	}
+}
+
+func normalizeCollectDocumentPaths(documents []contracts.AuthoredDocument, artifactRoot string, writeRoot string) ([]contracts.AuthoredDocument, bool) {
+	if len(documents) == 0 {
+		return documents, false
+	}
+
+	normalized := append([]contracts.AuthoredDocument(nil), documents...)
+	changed := false
+	for idx, document := range normalized {
+		if relPath, ok := normalizeCollectDocumentPath(document.Path, artifactRoot, writeRoot); ok && relPath != document.Path {
+			normalized[idx].Path = relPath
+			changed = true
+		}
+	}
+	return normalized, changed
+}
+
+func normalizeCollectDocumentPath(rawPath string, artifactRoot string, writeRoot string) (string, bool) {
+	cleanedPath := filepath.Clean(filepath.FromSlash(strings.TrimSpace(rawPath)))
+	if cleanedPath == "." || cleanedPath == "" {
+		return "", false
+	}
+
+	cleanedWriteRoot := strings.TrimSpace(writeRoot)
+	if filepath.IsAbs(cleanedPath) && cleanedWriteRoot != "" {
+		if relPath, ok := normalizeAbsoluteCollectDocumentPath(cleanedPath, cleanedWriteRoot); ok {
+			return relPath, true
+		}
+	}
+
+	normalizedArtifactRoot := filepath.ToSlash(filepath.Clean(filepath.FromSlash(strings.TrimSpace(artifactRoot))))
+	if normalizedArtifactRoot == "." || normalizedArtifactRoot == "" {
+		return "", false
+	}
+
+	normalizedPath := filepath.ToSlash(cleanedPath)
+	if normalizedPath == normalizedArtifactRoot {
+		return "", false
+	}
+	if !strings.HasPrefix(normalizedPath, normalizedArtifactRoot+"/") {
+		return "", false
+	}
+	relPath := strings.TrimPrefix(normalizedPath, normalizedArtifactRoot+"/")
+	if relPath == "" {
+		return "", false
+	}
+	if !collectDocumentExistsAtWriteRoot(cleanedWriteRoot, relPath) {
+		return "", false
+	}
+	return relPath, true
+}
+
+func normalizeAbsoluteCollectDocumentPath(absPath string, writeRoot string) (string, bool) {
+	relativePath, err := filepath.Rel(filepath.Clean(writeRoot), filepath.Clean(absPath))
+	if err != nil {
+		return "", false
+	}
+	relativePath = filepath.Clean(relativePath)
+	if relativePath == "." || relativePath == "" {
+		return "", false
+	}
+	if relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	if !collectDocumentExistsAtWriteRoot(writeRoot, relativePath) {
+		return "", false
+	}
+	return filepath.ToSlash(relativePath), true
+}
+
+func collectDocumentExistsAtWriteRoot(writeRoot string, relPath string) bool {
+	if strings.TrimSpace(writeRoot) == "" {
+		return false
+	}
+	targetPath := filepath.Join(filepath.Clean(writeRoot), filepath.FromSlash(relPath))
+	info, err := os.Stat(targetPath)
+	return err == nil && !info.IsDir()
 }

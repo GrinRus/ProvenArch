@@ -194,8 +194,12 @@ class MatrixReleaseContractTest(unittest.TestCase):
 
                 {
                   printf 'hard_pass\\truntime_parse\\trunner_unavailable\\truntime_timeout\\tinfra_signal_terminated\\tinfra_incomplete_cycle\\tquality_gates_failed\\tsummary_missing\\tprecheck_failed\\tcancellation_like\\truntime_flow_failed\\tsemantic_hard_fail\\toff_topic_hits\\tartifact_source\\tissues\\n'
-                  for _ in $(seq 1 $((provider_count * RUN_COUNT))); do
-                    printf '1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\tsnapshot\\t-\\n'
+                  for idx in $(seq 1 $((provider_count * RUN_COUNT))); do
+                    if [[ "${MATRIX_TEST_RUNTIME_FLOW_FAILED:-0}" == "1" && "${PROFILE_ID}" == "single-path" && "${SWEEP_ID}" == "baseline" && "$idx" -eq 1 ]]; then
+                      printf '0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t1\\t0\\t0\\tsnapshot\\treliability:runtime-flow-failed\\n'
+                    else
+                      printf '1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\tsnapshot\\t-\\n'
+                    fi
                   done
                 } > "${run_matrix_tsv}"
 
@@ -233,6 +237,10 @@ class MatrixReleaseContractTest(unittest.TestCase):
                   ]
                 }
                 EOF
+                fi
+
+                if [[ "${MATRIX_TEST_RUNTIME_FLOW_FAILED:-0}" == "1" && "${PROFILE_ID}" == "single-path" && "${SWEEP_ID}" == "baseline" ]]; then
+                  exit 1
                 fi
                 """
             ),
@@ -581,6 +589,35 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertEqual("FAIL", verdict["verdict"])
         self.assertEqual(1, len(verdict["records"]))
         self.assertEqual("failed", verdict["records"][0]["status"])
+
+    def test_matrix_outputs_preserve_runtime_flow_failed_backend_class(self) -> None:
+        matrix_file = self._write_matrix_file(None, include_profiles=["single-path"])
+        matrix_id = "matrix-test-runtime-flow-failed"
+        result = self._run_matrix(
+            matrix_file,
+            matrix_id,
+            extra_env={"MATRIX_TEST_RUNTIME_FLOW_FAILED": "1"},
+            release_mode="0",
+        )
+        self.assertNotEqual(result.returncode, 0)
+
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual("FAIL", verdict["verdict"])
+        self.assertEqual(1, len(verdict["records"]))
+        record = verdict["records"][0]
+        self.assertEqual("failed", record["status"])
+        self.assertEqual(1, record["backend"]["runtime_flow_failed_runs"])
+        self.assertEqual(0, record["backend"]["infra_incomplete_cycle_failures"])
+
+        profile_matrix_tsv = self.e2e_tmp_root / "reports" / f"profile_matrix_{matrix_id}.tsv"
+        self.assertTrue(profile_matrix_tsv.exists(), f"missing profile matrix report: {profile_matrix_tsv}")
+        lines = [line for line in profile_matrix_tsv.read_text(encoding="utf-8").splitlines() if line.strip()]
+        self.assertGreaterEqual(len(lines), 2, f"expected header + row in {profile_matrix_tsv}")
+        header = lines[0].split("\t")
+        values = lines[1].split("\t")
+        row = dict(zip(header, values, strict=False))
+        self.assertEqual("1", row["runtime_flow_failed_runs"])
+        self.assertEqual("0", row["infra_incomplete_cycle_failures"])
 
     def test_non_release_wave1_regression_matrix_allows_two_profiles(self) -> None:
         matrix_file = self._write_matrix_file(

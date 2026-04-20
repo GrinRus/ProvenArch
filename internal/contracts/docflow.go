@@ -182,7 +182,7 @@ func validateShardPackManifest(manifest ShardPackManifest) error {
 	if strings.TrimSpace(manifest.ArtifactRoot) == "" {
 		problems = append(problems, "artifact_root is required")
 	}
-	problems = append(problems, validateDocumentSet(manifest.Documents, manifest.Citations)...)
+	problems = append(problems, validateDocumentSet(manifest.ArtifactRoot, manifest.Documents, manifest.Citations)...)
 	problems = append(problems, validateCitationSet(manifest.Citations)...)
 	if len(problems) > 0 {
 		sort.Strings(problems)
@@ -288,7 +288,7 @@ func validateValidatorVerdict(verdict ValidatorVerdict) error {
 	return nil
 }
 
-func validateDocumentSet(documents []AuthoredDocument, citations []DocumentCitation) []string {
+func validateDocumentSet(artifactRoot string, documents []AuthoredDocument, citations []DocumentCitation) []string {
 	problems := []string{}
 	citationIDs := map[string]struct{}{}
 	for _, citation := range citations {
@@ -311,7 +311,7 @@ func validateDocumentSet(documents []AuthoredDocument, citations []DocumentCitat
 		} else if !isAllowedCanonicalRuntimeDocumentPath(doc.CanonicalPath) {
 			problems = append(problems, label+".canonical_path must be within reports/as-is, reports/findings, reports/coverage, reports/agent-outputs, reports/diagrams, or proposals")
 		}
-		if pathErr := validateShardDocumentRelativePath(doc.Path); pathErr != "" {
+		if pathErr := validateShardDocumentRelativePath(doc.Path, artifactRoot); pathErr != "" {
 			problems = append(problems, label+".path "+pathErr)
 		}
 		if _, exists := seen[doc.ID]; exists && strings.TrimSpace(doc.ID) != "" {
@@ -327,7 +327,7 @@ func validateDocumentSet(documents []AuthoredDocument, citations []DocumentCitat
 	return problems
 }
 
-func validateShardDocumentRelativePath(rawPath string) string {
+func validateShardDocumentRelativePath(rawPath string, artifactRoot string) string {
 	cleaned := filepath.Clean(filepath.FromSlash(strings.TrimSpace(rawPath)))
 	if cleaned == "." || cleaned == "" {
 		return "must not be empty"
@@ -338,7 +338,32 @@ func validateShardDocumentRelativePath(rawPath string) string {
 	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
 		return "must not escape artifact_root"
 	}
+	if workspacePrefix := forbiddenWorkspaceLevelDocumentPrefix(cleaned); workspacePrefix != "" {
+		return fmt.Sprintf("must be artifact_root-relative, not workspace-level path starting with %q", workspacePrefix)
+	}
+	if duplicatedArtifactRootPrefix(cleaned, artifactRoot) {
+		return "must be artifact_root-relative and must not repeat artifact_root"
+	}
 	return ""
+}
+
+func forbiddenWorkspaceLevelDocumentPrefix(cleanedPath string) string {
+	normalized := strings.ToLower(filepath.ToSlash(strings.TrimSpace(cleanedPath)))
+	for _, prefix := range []string{"reports/", "charter/", "proposals/"} {
+		if strings.HasPrefix(normalized, prefix) {
+			return prefix
+		}
+	}
+	return ""
+}
+
+func duplicatedArtifactRootPrefix(cleanedPath string, artifactRoot string) bool {
+	normalizedArtifactRoot := filepath.ToSlash(filepath.Clean(filepath.FromSlash(strings.TrimSpace(artifactRoot))))
+	if normalizedArtifactRoot == "." || normalizedArtifactRoot == "" {
+		return false
+	}
+	normalizedPath := filepath.ToSlash(cleanedPath)
+	return normalizedPath == normalizedArtifactRoot || strings.HasPrefix(normalizedPath, normalizedArtifactRoot+"/")
 }
 
 func isAllowedCanonicalRuntimeDocumentPath(rawPath string) bool {

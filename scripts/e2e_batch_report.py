@@ -1036,6 +1036,7 @@ def evaluate_run(
 
     summary_text = read_text_file(summary_path) if summary_path.exists() else ""
     full_run_log_text = read_text_file(full_run_log) if full_run_log.exists() else ""
+    run_status = parse_run_status_file(run_dir / "run-status.env")
     summary_missing = not summary_path.exists()
     result_value = first_token(parse_markdown_scalar(summary_text, "result")) if summary_text else ""
     quality_gates_value = first_token(parse_markdown_scalar(summary_text, "quality_gates")) if summary_text else ""
@@ -1047,6 +1048,11 @@ def evaluate_run(
     completed_headless_runs = parse_int(parse_markdown_scalar(summary_text, "completed_headless_runs"), 0) if summary_text else 0
     running_runs_detected = parse_int(parse_markdown_scalar(summary_text, "running_runs_detected"), 0) if summary_text else 0
     api_status = parse_api_status(summary_text)
+    terminal_process_failure = (
+        summary_path.exists()
+        and str(run_status.get("state", "")).strip() == "process_failed"
+        and str(run_status.get("summary_written", "")).strip() == "yes"
+    )
 
     rows = parse_run_results(run_results_path)
     headless_rows = parse_headless_rows(rows, provider)
@@ -1142,12 +1148,13 @@ def evaluate_run(
     )
     infra_incomplete_cycle = failure_reason == "infra_incomplete_cycle"
     quality_gates_failed = failure_reason == "quality" or quality_gates_value == "failed"
-    if expected_runs > 0 and completed_runs != expected_runs:
-        infra_incomplete_cycle = True
-    if expected_headless_runs > 0 and completed_headless_runs != expected_headless_runs:
-        infra_incomplete_cycle = True
-    if running_runs_detected > 0:
-        infra_incomplete_cycle = True
+    if not terminal_process_failure:
+        if expected_runs > 0 and completed_runs != expected_runs:
+            infra_incomplete_cycle = True
+        if expected_headless_runs > 0 and completed_headless_runs != expected_headless_runs:
+            infra_incomplete_cycle = True
+        if running_runs_detected > 0:
+            infra_incomplete_cycle = True
     if runtime_timeout:
         issues.append("reliability:runtime-timeout")
         details.append(
@@ -1469,6 +1476,21 @@ def evaluate_run(
             issues.extend(sorted(runtime_flow_issues))
             issues.append("reliability:runtime-flow-failed")
             details.extend(runtime_flow_details)
+    if (
+        terminal_process_failure
+        and result_value == "failed"
+        and not runtime_timeout
+        and not runner_unavailable_hit
+        and not runtime_parse_hit
+        and not infra_signal_terminated
+        and not quality_gates_failed
+    ):
+        runtime_flow_failed = True
+        if "reliability:runtime-flow-failed" not in issues:
+            issues.append("reliability:runtime-flow-failed")
+            details.append(
+                "reliability/runtime-flow-failed -> terminal process_failed run-status + session-summary indicate completed deterministic pipeline failure"
+            )
 
     if not overview_ok:
         issues.append("analysis:overview")
@@ -1504,7 +1526,16 @@ def evaluate_run(
             details.append(
                 f"reliability/classifier-override -> summary_class={failure_class or 'none'} classifier_class={classified_failure}"
             )
-        if failure_class == "summary_missing" and classified_failure in {
+        ignore_classified_incomplete = (
+            terminal_process_failure
+            and classified_failure == "infra_incomplete_cycle"
+            and failure_reason != "infra_incomplete_cycle"
+        )
+        if ignore_classified_incomplete:
+            details.append(
+                "reliability/classifier-override -> ignored infra_incomplete_cycle because run-status.env marks terminal process_failed summary"
+            )
+        elif failure_class == "summary_missing" and classified_failure in {
             "runtime_timeout",
             "runner_unavailable",
             "runtime_parse",
@@ -1520,7 +1551,8 @@ def evaluate_run(
         runner_unavailable_hit = runner_unavailable_hit or classified_failure == "runner_unavailable"
         runtime_timeout = runtime_timeout or classified_failure == "runtime_timeout"
         infra_signal_terminated = infra_signal_terminated or classified_failure == "infra_signal_terminated"
-        infra_incomplete_cycle = infra_incomplete_cycle or classified_failure == "infra_incomplete_cycle"
+        if not ignore_classified_incomplete:
+            infra_incomplete_cycle = infra_incomplete_cycle or classified_failure == "infra_incomplete_cycle"
         quality_gates_failed = quality_gates_failed or classified_failure == "quality_gates_failed"
         summary_missing = summary_missing or classified_failure == "summary_missing"
 

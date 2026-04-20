@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "run_id": "run_20260420_054749_001",
+  "step_id": "init.step1.collect",
+  "shard_id": "bank-of-anthos-iac",
+  "agent_role": "shard-analyst",
+  "artifact_root": "reports/taskruns/run_20260420_054749_001/staging/shards/bank-of-anthos-iac",
+  "repo_scopes": [
+    "bank-of-anthos"
+  ],
+  "path_scopes": [
+    "iac"
+  ],
+  "summary": "Infrastructure shard with authored overview.",
+  "documents": [
+    {
+      "id": "doc.iac-overview",
+      "kind": "analysis",
+      "title": "IAC Overview",
+      "path": "reports/taskruns/run_20260420_054749_001/staging/shards/bank-of-anthos-iac/iac-overview.md",
+      "canonical_path": "reports/as-is/bank-of-anthos-iac-overview.md",
+      "topics": [
+        "iac"
+      ],
+      "citation_ids": [
+        "cite.bank.readme"
+      ]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.bank.readme",
+      "repo": "bank-of-anthos",
+      "path": "iac/README.md",
+      "claim_ids": [
+        "claim.iac.readme"
+      ],
+      "document_ids": [
+        "doc.iac-overview"
+      ]
+    }
+  ],
+  "compatibility": {
+    "coverage": {
+      "observed": [
+        "iac"
+      ],
+      "missing": [
+        "owner mappings"
+      ],
+      "notes": [
+        "recorded live drift"
+      ]
+    },
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}

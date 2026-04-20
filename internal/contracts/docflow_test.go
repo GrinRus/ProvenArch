@@ -228,6 +228,102 @@ func TestParseShardPackManifestRejectsEscapingDocumentPath(t *testing.T) {
 	}
 }
 
+func TestParseShardPackManifestRejectsWorkspaceRelativeDocumentPath(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "shard_id": "bank-of-anthos-iac",
+  "agent_role": "shard-analyst",
+  "artifact_root": "reports/taskruns/run-1/staging/shards/bank-of-anthos-iac",
+  "documents": [
+    {
+      "id": "doc.iac",
+      "kind": "analysis",
+      "title": "IAC Overview",
+      "path": "reports/taskruns/run-1/staging/shards/bank-of-anthos-iac/iac-overview.md",
+      "canonical_path": "reports/as-is/bank-of-anthos/iac-overview.md",
+      "topics": ["iac"],
+      "citation_ids": ["cite.1"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.1",
+      "repo": "bank-of-anthos",
+      "path": "README.md",
+      "claim_ids": ["claim.1"],
+      "document_ids": ["doc.iac"]
+    }
+  ],
+  "compatibility": {
+    "coverage": {"observed": [], "missing": [], "notes": []},
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}`)
+
+	_, err := ParseShardPackManifest(raw)
+	if err == nil {
+		t.Fatalf("expected workspace-relative document path validation error")
+	}
+	if !strings.Contains(err.Error(), "artifact_root-relative") {
+		t.Fatalf("expected artifact_root-relative error, got %v", err)
+	}
+}
+
+func TestParseShardPackManifestRejectsDuplicatedArtifactRootDocumentPath(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "shard_id": "payments-service",
+  "agent_role": "shard-analyst",
+  "artifact_root": "staging/shards/payments-service",
+  "documents": [
+    {
+      "id": "doc.payments",
+      "kind": "analysis",
+      "title": "Payments Overview",
+      "path": "staging/shards/payments-service/domain-report.md",
+      "canonical_path": "reports/as-is/payments-service/domain-report.md",
+      "topics": ["payments"],
+      "citation_ids": ["cite.1"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.1",
+      "repo": "payments-service",
+      "path": "README.md",
+      "claim_ids": ["claim.1"],
+      "document_ids": ["doc.payments"]
+    }
+  ],
+  "compatibility": {
+    "coverage": {"observed": [], "missing": [], "notes": []},
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}`)
+
+	_, err := ParseShardPackManifest(raw)
+	if err == nil {
+		t.Fatalf("expected duplicated artifact_root document path validation error")
+	}
+	if !strings.Contains(err.Error(), "must not repeat artifact_root") {
+		t.Fatalf("expected repeated artifact_root error, got %v", err)
+	}
+}
+
 func TestParseValidatorVerdictRejectsUnsupportedVerdict(t *testing.T) {
 	t.Parallel()
 

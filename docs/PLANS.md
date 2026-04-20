@@ -486,6 +486,51 @@ EP-20260416-doc-first-runtime-pipeline
 - 2026-04-16: primary path переведён на runtime-authored staged docs; compiler layer оставлен как compatibility fallback для отсутствующих surfaces, добавлены path policy guard и docflow negative tests.
 
 ### Plan ID
+EP-20260420-qwen-live-regress-stabilization
+
+### Context
+Нужно стабилизировать `qwen` live regress small без изменения public contracts: закрыть doubled-path drift в collect manifests, ужесточить collect-repair/runtime diagnostics, правильно классифицировать provider transport failures и перестать маркировать terminal pipeline failures как `infra_incomplete_cycle`.
+
+### Goals (must have)
+- [x] Сделать shard manifest contract artifact-root-aware и нормализовать repaired `documents[].path`
+- [x] Исправить `qwen` collect repair hints/diagnostics и transport error classification
+- [x] Исправить batch/report reconstruction для terminal pipeline failures
+- [x] Добавить regression fixtures/tests и синхронизировать docs
+
+### Non-goals
+- [x] Не менять public JSON schemas / API / `workspace.yaml`
+- [x] Не менять release matrix composition или timeout profiles
+
+### Approach
+1) Ужесточить manifest validation и canonicalization вокруг `artifact_root`.
+2) Усилить `qwen` repair prompt и выделить provider transport transcript errors в `runner_unavailable`.
+3) Исправить batch/report precedence: terminal summary + terminal sentinel не равны incomplete cycle.
+4) Добавить recorded fixtures и regression tests под live findings.
+
+### Files expected to change
+- `internal/contracts/*`
+- `internal/artifactquality/*`
+- `internal/runtime/qwencode/*`
+- `internal/runtime/taskresultextractor/*`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/e2e_batch_report.py`
+- `scripts/tests/*`
+- `docs/ARCHITECTURE.md`
+
+### Acceptance criteria
+- [x] `step2` больше не читает doubled paths из collect manifests
+- [x] `qwen` transport/API transcript errors классифицируются как `runner_unavailable`
+- [x] terminal pipeline failures больше не попадают в `infra_incomplete_cycle`
+- [x] tests/fixtures/docs обновлены
+
+### Risks
+- Слишком агрессивная manifest normalization может скрыть реальные contract violations; исправлять только случаи, которые однозначно указывают внутрь `write_root/artifact_root`.
+
+### Progress log
+- 2026-04-20: старт slice по стабилизации `qwen` live regress small; подтверждены three live failure classes (`documents[].path`, collect-repair drift, false incomplete-cycle classification) и отдельный step0 SSL transport path.
+- 2026-04-20: реализованы artifact-root-aware manifest validation + canonical path normalization, `qwen` transport/API classification в `runner_unavailable`, richer collect repair hints/diagnostics, corrected terminal batch/report classification; regression fixtures/tests и docs sync завершены, DoD (`make contracts test lint build`) пройден в изолированной копии.
+
+### Plan ID
 EP-20260416-structural-sharding-reset
 
 ### Context

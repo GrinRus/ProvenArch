@@ -555,11 +555,13 @@ Primary runtime contract для live `step1.collect`/`step3.findings`:
 Docs-first semantic rules:
 - `citation-index.json.claim_ids` образуют глобальное пространство имён в пределах assembled staged final set; один и тот же `claim_id` нельзя переиспользовать между разными shard/citation surfaces.
 - `shard-pack-manifest.json.compatibility` всегда materialize-ится полностью (`coverage`, `questions`, `entities`, `edges`, `findings`), а коллекционные retry не считаются успешными, если manifest остаётся missing/invalid/skeletal.
+- `shard-pack-manifest.json.documents[].path` всегда strict `artifact_root`-relative; runtime может детерминированно нормализовать duplicated `artifact_root` prefix только если файл реально существует внутри `write_root`, но persisted workspace-relative staging paths считаются contract-invalid drift.
 - validator path может чинить только technical/reference drift в staged indexes; дублирующиеся `claim_id` детерминированно переименовываются в citation index без semantic rewrite authored docs.
 
 TaskResult остаётся compatibility envelope:
 - валидируется по `schemas/taskresult.schema.json`
 - используется для semantic guards, taskrun diagnostics и derived `model/*`
+- provider/API transport transcripts (например `[API Error: ... SSL ...]`) классифицируются как `runner_unavailable` с обязательным сохранением raw stdout/stderr artifacts
 - не является primary source of truth для canonical `reports/*`/`proposals/*` promotion path
 
 Primary promotion gate:
