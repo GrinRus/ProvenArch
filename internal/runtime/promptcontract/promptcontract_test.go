@@ -78,3 +78,36 @@ func TestSharedContractAndRetryGuardrailsExposeCoreInvariants(t *testing.T) {
 		t.Fatalf("expected shared retry guardrails to include doc_artifact key invariant")
 	}
 }
+
+func TestStepPolicyFindingsExplicitlyLimitsContextToStagedSurface(t *testing.T) {
+	t.Parallel()
+
+	policy := StepPolicy("refresh.step3.findings")
+	if !strings.Contains(policy, "Prioritize staged final artifacts") {
+		t.Fatalf("expected staged-final priority in findings policy, got %q", policy)
+	}
+	if !strings.Contains(policy, "do not perform broad repository rediscovery") {
+		t.Fatalf("expected no broad rediscovery guardrail in findings policy, got %q", policy)
+	}
+	if !strings.Contains(policy, "Do not recursively crawl whole repositories") {
+		t.Fatalf("expected no full recrawl guardrail in findings policy, got %q", policy)
+	}
+}
+
+func TestDocFirstFilesystemPolicyFindingsMarksStagedArtifactsAsPrimaryEvidence(t *testing.T) {
+	t.Parallel()
+
+	policy := DocFirstFilesystemPolicy(acpruntime.Task{
+		StepID:           "refresh.step3.findings",
+		Workspace:        "/tmp/workspace",
+		ArtifactRoot:     "reports/taskruns/run-1/validator",
+		WriteRoot:        "/tmp/workspace/reports/taskruns/run-1/validator",
+		ReadContextRoots: []string{"/tmp/workspace", "/tmp/workspace/reports/taskruns/run-1/staging/final"},
+	})
+	if !strings.Contains(policy, "Use staged/final artifacts as primary evidence") {
+		t.Fatalf("expected staged/final primary evidence rule, got %q", policy)
+	}
+	if !strings.Contains(policy, "do not treat full repository recrawl as default behavior in validator step") {
+		t.Fatalf("expected no recrawl-by-default rule, got %q", policy)
+	}
+}

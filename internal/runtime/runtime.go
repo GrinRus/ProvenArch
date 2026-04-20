@@ -78,6 +78,7 @@ type ErrorCode string
 const (
 	ErrorCodeRunnerUnavailable ErrorCode = "runner_unavailable"
 	ErrorCodeRunnerParseFailed ErrorCode = "runner_parse_failed"
+	ErrorCodeRunnerStalled     ErrorCode = "runner_stalled"
 )
 
 type RunnerError struct {

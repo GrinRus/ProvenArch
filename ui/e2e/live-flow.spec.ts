@@ -165,6 +165,17 @@ test("live ui flow: run refresh -> cancel -> failed(run_canceled)", async ({ pag
       },
       { timeout: 60_000 }
     )
+    .toMatch(/^(queued|running)$/);
+
+  await expect
+    .poll(
+      async () => {
+        const response = await page.request.get(`/api/pipeline/runs/${runID}`);
+        const payload = (await response.json()) as { status?: string };
+        return (payload.status ?? "").trim();
+      },
+      { timeout: Math.max(cancelTimeoutMs, 180_000) }
+    )
     .toBe("running");
 
   const cancelButton = page.getByTestId("run-cancel-btn");

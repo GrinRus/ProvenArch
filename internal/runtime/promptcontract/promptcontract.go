@@ -123,12 +123,14 @@ func StepPolicy(stepID string) string {
 			`- If evidence is incomplete, capture gap via coverage.missing instead of synthetic placeholder entities.`,
 			`- Include at least one question and at least three items in coverage.missing.`,
 		}, "\n")
-	case "refresh.step3.findings":
+	case "init.step3.findings", "refresh.step3.findings":
 		return strings.Join([]string{
-			`STEP POLICY refresh.step3.findings:`,
+			`STEP POLICY step3.findings:`,
 			`- If owner mapping is unresolved in evidence/coverage, include at least one add_finding operation.`,
 			`- Each finding must include rule_id, related_ids, and provenance.evidence[].`,
 			`- For observation provenance, evidence array MUST be non-empty.`,
+			`- Prioritize staged final artifacts and validator context roots; do not perform broad repository rediscovery in this step.`,
+			`- Do not recursively crawl whole repositories; inspect only files needed to validate/fix staged final artifacts.`,
 			`- If meta.repo_scopes has 2+ scopes, include at least one upsert_edge that links entities from different repo_scope values.`,
 			`- For upsert_edge use canonical keys only: edge.id, edge.type, edge.from, edge.to.`,
 			`- Forbidden edge aliases: edge.kind, edge.source, edge.target.`,
@@ -207,6 +209,7 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 	case "init.step3.findings", "refresh.step3.findings":
 		lines = append(lines,
 			`- Inspect staged final artifacts under reports/taskruns/<run_id>/staging/final from read_context_roots.`,
+			`- Use staged/final artifacts as primary evidence; do not treat full repository recrawl as default behavior in validator step.`,
 			`- Write validator-verdict.json in write_root.`,
 			`- Validator may fix only indexes, references, or technical document issues inside write_root; do not rewrite document meaning wholesale.`,
 		)

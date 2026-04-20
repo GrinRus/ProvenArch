@@ -73,14 +73,15 @@ FRONTEND_CANCEL_RESULT_FILENAME = "frontend-cancel-result.json"
 FAILURE_CLASS_PRECEDENCE = {
     "summary_missing": 0,
     "runtime_timeout": 1,
-    "runner_unavailable": 2,
-    "runtime_artifact_contract": 3,
-    "runtime_parse": 4,
-    "infra_signal_terminated": 5,
-    "quality_gates_failed": 6,
-    "infra_incomplete_cycle": 7,
-    "runtime_flow_failed": 8,
-    "precheck_failed": 9,
+    "runtime_stalled": 2,
+    "runner_unavailable": 3,
+    "runtime_artifact_contract": 4,
+    "runtime_parse": 5,
+    "infra_signal_terminated": 6,
+    "quality_gates_failed": 7,
+    "infra_incomplete_cycle": 8,
+    "runtime_flow_failed": 9,
+    "precheck_failed": 10,
     "none": 99,
 }
 
@@ -123,6 +124,27 @@ def parse_int(value: str, default: int = 0) -> int:
         return int(str(value).strip())
     except Exception:
         return default
+
+
+def parse_stall_contexts(text: str) -> list[str]:
+    contexts: list[str] = []
+    if not text:
+        return contexts
+    pattern = re.compile(
+        r"runner stalled due to output inactivity: no stdout/stderr output for .*?\((?:task=([a-z0-9._-]+)\s+)?step=([a-z0-9._-]+)\s+shard=([a-z0-9._-]+)\)",
+        re.IGNORECASE,
+    )
+    for match in pattern.finditer(text):
+        task_id = (match.group(1) or "").strip()
+        step = match.group(2).strip()
+        shard = match.group(3).strip()
+        if not step or not shard:
+            continue
+        if task_id:
+            contexts.append(f"{task_id}:{step}:{shard}")
+        else:
+            contexts.append(f"{step}:{shard}")
+    return contexts
 
 
 def extract_artifact_quality_warnings(quality_payload: dict[str, Any]) -> list[str]:
@@ -890,6 +912,7 @@ class RunEvaluation:
     failure_class: str = "none"
     runtime_artifact_contract: bool = False
     runtime_parse: bool = False
+    runtime_stalled: bool = False
     runner_unavailable: bool = False
     runtime_timeout: bool = False
     infra_signal_terminated: bool = False
@@ -953,6 +976,7 @@ def evaluate_run(
             off_topic_hits=0,
             failure_class="precheck_failed",
             runtime_parse=False,
+            runtime_stalled=False,
             runner_unavailable=False,
             runtime_timeout=False,
             infra_signal_terminated=False,
@@ -1018,10 +1042,12 @@ def evaluate_run(
 
     runtime_parse_hit = False
     runtime_artifact_contract_hit = False
+    runtime_stalled_hit = False
     runner_unavailable_hit = False
     runner_error_hit = False
     parse_stages: set[str] = set()
     raw_outputs: set[str] = set()
+    stalled_contexts: set[str] = set()
     runner_error_sources = [summary_path, full_run_log]
     runner_error_sources.extend(sorted((run_dir / "logs").glob("run-iter*-*.log")))
     runner_error_sources.extend(sorted((workspace / "reports" / "taskruns" / "logs").glob("*.ndjson")))
@@ -1043,6 +1069,11 @@ def evaluate_run(
             runner_unavailable_hit = True
             runner_error_hit = True
             error_codes.append("runner_unavailable")
+        if "runner_stalled" in text:
+            runtime_stalled_hit = True
+            runner_error_hit = True
+            error_codes.append("runner_stalled")
+            stalled_contexts.update(parse_stall_contexts(text))
         if "runner_parse_failed" in text:
             if any(marker in text for marker in artifact_contract_markers):
                 runtime_artifact_contract_hit = True
@@ -1065,6 +1096,12 @@ def evaluate_run(
             details.append(f"reliability/runner-errors -> raw_outputs={sorted(raw_outputs)[:5]}")
     if runtime_parse_hit:
         issues.append("reliability:runtime-parse")
+    if runtime_stalled_hit:
+        issues.append("reliability:runtime-stalled")
+        if stalled_contexts:
+            details.append(f"reliability/runtime-stalled -> stalled_shards={sorted(stalled_contexts)[:5]}")
+        if raw_outputs:
+            details.append(f"reliability/runtime-stalled -> raw_outputs={sorted(raw_outputs)[:5]}")
     if runtime_artifact_contract_hit:
         issues.append("reliability:runtime-artifact-contract")
     if runner_unavailable_hit:
@@ -1435,6 +1472,8 @@ def evaluate_run(
         failure_class = "summary_missing"
     elif runtime_timeout:
         failure_class = "runtime_timeout"
+    elif runtime_stalled_hit:
+        failure_class = "runtime_stalled"
     elif runner_unavailable_hit:
         failure_class = "runner_unavailable"
     elif runtime_artifact_contract_hit:
@@ -1455,10 +1494,14 @@ def evaluate_run(
             details.append(
                 f"reliability/classifier-override -> summary_class={failure_class or 'none'} classifier_class={classified_failure}"
             )
-        if failure_class == "none" or failure_class_rank(classified_failure) < failure_class_rank(failure_class):
-            failure_class = classified_failure
+        normalized_classified_failure = classified_failure
+        if classified_failure == "runner_stalled":
+            normalized_classified_failure = "runtime_stalled"
+        if failure_class == "none" or failure_class_rank(normalized_classified_failure) < failure_class_rank(failure_class):
+            failure_class = normalized_classified_failure
         runtime_artifact_contract_hit = runtime_artifact_contract_hit or classified_failure == "runtime_artifact_contract"
         runtime_parse_hit = runtime_parse_hit or classified_failure == "runtime_parse"
+        runtime_stalled_hit = runtime_stalled_hit or classified_failure in {"runner_stalled", "runtime_stalled"}
         runner_unavailable_hit = runner_unavailable_hit or classified_failure == "runner_unavailable"
         runtime_timeout = runtime_timeout or classified_failure == "runtime_timeout"
         infra_signal_terminated = infra_signal_terminated or classified_failure == "infra_signal_terminated"
@@ -1505,6 +1548,7 @@ def evaluate_run(
         failure_class=failure_class,
         runtime_artifact_contract=runtime_artifact_contract_hit,
         runtime_parse=runtime_parse_hit,
+        runtime_stalled=runtime_stalled_hit,
         runner_unavailable=runner_unavailable_hit,
         runtime_timeout=runtime_timeout,
         infra_signal_terminated=infra_signal_terminated,
@@ -1630,15 +1674,15 @@ def write_run_matrix(path: Path, runs: list[RunEvaluation]) -> None:
     lines = [
         "# Run Matrix",
         "",
-        "| provider | run | hard_pass | reliability | contract | analysis | total | verdict | artifact_source | semantic_hard_fail | failure_class | runtime_artifact_contract | runtime_parse | runner_unavailable | runtime_timeout | infra_signal_terminated | infra_incomplete_cycle | quality_gates_failed | summary_missing | precheck_failed | runtime_flow_failed | cancellation_like | off_topic_hits | init_signal | refresh_signal | refresh_findings | refresh_questions | refresh_cov_missing | issues |",
-        "|---|---:|---:|---:|---:|---:|---:|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+        "| provider | run | hard_pass | reliability | contract | analysis | total | verdict | artifact_source | semantic_hard_fail | failure_class | runtime_artifact_contract | runtime_parse | runtime_stalled | runner_unavailable | runtime_timeout | infra_signal_terminated | infra_incomplete_cycle | quality_gates_failed | summary_missing | precheck_failed | runtime_flow_failed | cancellation_like | off_topic_hits | init_signal | refresh_signal | refresh_findings | refresh_questions | refresh_cov_missing | issues |",
+        "|---|---:|---:|---:|---:|---:|---:|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for item in runs:
         lines.append(
             "| "
             f"{item.provider} | {item.run_index} | {int(item.hard_pass)} | {item.reliability} | {item.contract} | "
             f"{item.analysis} | {item.total} | {item.verdict} | {item.artifact_source} | {int(item.semantic_hard_fail)} | {item.failure_class} | "
-            f"{int(item.runtime_artifact_contract)} | {int(item.runtime_parse)} | {int(item.runner_unavailable)} | {int(item.runtime_timeout)} | {int(item.infra_signal_terminated)} | "
+            f"{int(item.runtime_artifact_contract)} | {int(item.runtime_parse)} | {int(item.runtime_stalled)} | {int(item.runner_unavailable)} | {int(item.runtime_timeout)} | {int(item.infra_signal_terminated)} | "
             f"{int(item.infra_incomplete_cycle)} | {int(item.quality_gates_failed)} | {int(item.summary_missing)} | {int(item.precheck_failed)} | {int(item.runtime_flow_failed)} | {int(item.cancellation_like)} | {item.off_topic_hits} | "
             f"{item.init_signal} | {item.refresh_signal} | "
             f"{item.refresh_findings} | {item.refresh_questions} | {item.refresh_cov_missing} | "
@@ -1816,6 +1860,7 @@ def provider_matrix_rows(
                 "semantic_hard_fail_runs": sum(1 for item in items if item.semantic_hard_fail),
                 "runtime_artifact_contract_failures": sum(1 for item in items if item.runtime_artifact_contract),
                 "runtime_parse_failures": sum(1 for item in items if item.runtime_parse),
+                "runtime_stalled_failures": sum(1 for item in items if item.runtime_stalled),
                 "runner_unavailable_failures": sum(1 for item in items if item.runner_unavailable),
                 "runtime_timeout_failures": sum(1 for item in items if item.runtime_timeout),
                 "infra_signal_terminated_failures": sum(1 for item in items if item.infra_signal_terminated),
@@ -1887,8 +1932,8 @@ def write_quality_report(
         "",
         "## Provider Matrix",
         "",
-        "| provider | runs | pass_rate | avg_total | std_total | avg_reliability | avg_contract | avg_analysis | avg_refresh_signal | std_refresh_signal | avg_refresh_findings | avg_refresh_questions | avg_refresh_cov_missing | off_topic_hits | semantic_hard_fail_runs | runtime_artifact_contract_failures | runtime_parse_failures | runner_unavailable_failures | runtime_timeout_failures | infra_signal_terminated_failures | infra_incomplete_cycle_failures | quality_gates_failed_failures | summary_missing_failures | precheck_failed_failures | runtime_flow_failed_failures | cancellation_like_failures | artifact_sources | error_codes | frontend_live_pass_rate | frontend_cancel_pass_rate |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---:|---:|",
+        "| provider | runs | pass_rate | avg_total | std_total | avg_reliability | avg_contract | avg_analysis | avg_refresh_signal | std_refresh_signal | avg_refresh_findings | avg_refresh_questions | avg_refresh_cov_missing | off_topic_hits | semantic_hard_fail_runs | runtime_artifact_contract_failures | runtime_parse_failures | runtime_stalled_failures | runner_unavailable_failures | runtime_timeout_failures | infra_signal_terminated_failures | infra_incomplete_cycle_failures | quality_gates_failed_failures | summary_missing_failures | precheck_failed_failures | runtime_flow_failed_failures | cancellation_like_failures | artifact_sources | error_codes | frontend_live_pass_rate | frontend_cancel_pass_rate |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---:|---:|",
     ]
     for row in provider_rows:
         lines.append(
@@ -1897,7 +1942,7 @@ def write_quality_report(
             f"{row['avg_reliability']:.2f} | {row['avg_contract']:.2f} | {row['avg_analysis']:.2f} | "
             f"{row['avg_signal']:.2f} | {row['std_signal']:.2f} | {row['avg_findings']:.2f} | {row['avg_questions']:.2f} | "
             f"{row['avg_cov_missing']:.2f} | {row['off_topic_hits']} | {row['semantic_hard_fail_runs']} | "
-            f"{row['runtime_artifact_contract_failures']} | {row['runtime_parse_failures']} | {row['runner_unavailable_failures']} | {row['runtime_timeout_failures']} | {row['infra_signal_terminated_failures']} | "
+            f"{row['runtime_artifact_contract_failures']} | {row['runtime_parse_failures']} | {row['runtime_stalled_failures']} | {row['runner_unavailable_failures']} | {row['runtime_timeout_failures']} | {row['infra_signal_terminated_failures']} | "
             f"{row['infra_incomplete_cycle_failures']} | {row['quality_gates_failed_failures']} | {row['summary_missing_failures']} | {row['precheck_failed_failures']} | {row['runtime_flow_failed_failures']} | {row['cancellation_like_failures']} | "
             f"{row['artifact_sources']} | {row['error_codes']} | {row['frontend_pass_rate']:.2f} | {row['frontend_cancel_pass_rate']:.2f} |"
         )
@@ -1987,6 +2032,7 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
         "failure_class",
         "runtime_artifact_contract",
         "runtime_parse",
+        "runtime_stalled",
         "runner_unavailable",
         "runtime_timeout",
         "infra_signal_terminated",
@@ -2022,6 +2068,7 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
                     run.failure_class,
                     str(int(run.runtime_artifact_contract)),
                     str(int(run.runtime_parse)),
+                    str(int(run.runtime_stalled)),
                     str(int(run.runner_unavailable)),
                     str(int(run.runtime_timeout)),
                     str(int(run.infra_signal_terminated)),

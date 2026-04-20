@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/artifactquality"
@@ -30,7 +31,10 @@ import (
 
 var (
 	ErrRunnerUnavailable = errors.New("qwen-code runner is unavailable")
+	errRunnerStalled     = errors.New("runner stalled due to output inactivity")
 )
+
+var findingsIdleSilenceTimeout = 10 * time.Minute
 
 type HeadlessRunner struct {
 	Command string
@@ -96,6 +100,57 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 
 	result, parseStage, parseErr, runErr := runQwenCommand(ctx, task, command, args)
 	if runErr != nil {
+		if len(r.Args) == 0 && isRunnerStalledError(runErr) {
+			retryPrompt := buildPromptArtifact(taskPayload, promptRetryParse, buildStallRetryHints(runErr))
+			recordPromptArtifacts(task, "stall-retry", retryPrompt, acpruntime.ProviderQwenCode, resolveRetryIncludeDirectories(task), taskPayload)
+			retryArgs := buildRetryQwenArgs(task, retryPrompt.Text)
+			retryResult, retryParseStage, retryParseErr, retryRunErr := runQwenCommand(ctx, task, command, retryArgs)
+			if retryRunErr != nil {
+				if isRunnerStalledError(retryRunErr) {
+					stalledMessage := buildUnavailableFailureMessage(task, retryRunErr, retryResult)
+					return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+						acpruntime.ProviderQwenCode,
+						acpruntime.ErrorCodeRunnerStalled,
+						fmt.Sprintf("headless provider %q stalled after retry: %s", acpruntime.ProviderQwenCode, stalledMessage),
+						retryResult.Stdout,
+						retryResult.Stderr,
+						retryRunErr,
+					)
+				}
+				unavailableMessage := buildUnavailableFailureMessage(task, retryRunErr, retryResult)
+				return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+					acpruntime.ProviderQwenCode,
+					acpruntime.ErrorCodeRunnerUnavailable,
+					fmt.Sprintf("%v: %s", ErrRunnerUnavailable, unavailableMessage),
+					retryResult.Stdout,
+					retryResult.Stderr,
+					retryRunErr,
+				)
+			}
+			if retryParseErr == nil {
+				return maybeRepairCollectArtifacts(ctx, task, taskPayload, command, retryResult)
+			}
+			parseFailureMessage := buildParseFailureMessage(task, retryParseStage, retryParseErr, retryResult)
+			return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+				acpruntime.ProviderQwenCode,
+				acpruntime.ErrorCodeRunnerStalled,
+				fmt.Sprintf("headless provider %q stalled after retry (invalid taskresult): %s", acpruntime.ProviderQwenCode, parseFailureMessage),
+				retryResult.Stdout,
+				retryResult.Stderr,
+				retryParseErr,
+			)
+		}
+		if isRunnerStalledError(runErr) {
+			stalledMessage := buildUnavailableFailureMessage(task, runErr, result)
+			return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+				acpruntime.ProviderQwenCode,
+				acpruntime.ErrorCodeRunnerStalled,
+				fmt.Sprintf("headless provider %q stalled: %s", acpruntime.ProviderQwenCode, stalledMessage),
+				result.Stdout,
+				result.Stderr,
+				runErr,
+			)
+		}
 		unavailableMessage := buildUnavailableFailureMessage(task, runErr, result)
 		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 			acpruntime.ProviderQwenCode,
@@ -215,6 +270,17 @@ func maybeRepairCollectArtifacts(
 	repaired, repairParseStage, parseErr, runErr := runQwenCommand(ctx, task, command, repairArgs)
 	if runErr != nil {
 		_ = snapshot.Restore()
+		if isRunnerStalledError(runErr) {
+			stalledMessage := buildUnavailableFailureMessage(task, runErr, repaired)
+			return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+				acpruntime.ProviderQwenCode,
+				acpruntime.ErrorCodeRunnerStalled,
+				fmt.Sprintf("headless provider %q stalled during collect artifact repair retry after %s: %s", acpruntime.ProviderQwenCode, initialProblem, stalledMessage),
+				repaired.Stdout,
+				repaired.Stderr,
+				runErr,
+			)
+		}
 		unavailableMessage := buildUnavailableFailureMessage(task, runErr, repaired)
 		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
 			acpruntime.ProviderQwenCode,
@@ -401,6 +467,17 @@ func buildUnavailableFailureMessage(task acpruntime.Task, runErr error, result a
 	)
 }
 
+func idleWatchdogTimeout(task acpruntime.Task) time.Duration {
+	if strings.TrimSpace(task.StepID) == "init.step3.findings" || strings.TrimSpace(task.StepID) == "refresh.step3.findings" {
+		return findingsIdleSilenceTimeout
+	}
+	return 0
+}
+
+func isRunnerStalledError(err error) bool {
+	return errors.Is(err, errRunnerStalled)
+}
+
 func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, args []string) (acpruntime.Result, string, error, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
 	// Keep qwen's project root anchored at the ACP workspace rather than a
@@ -415,6 +492,13 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
+	var stalled atomic.Bool
+	lastOutputAtUnixNano := atomic.Int64{}
+	lastOutputAtUnixNano.Store(time.Now().UnixNano())
+	notifyOutput := func() {
+		lastOutputAtUnixNano.Store(time.Now().UnixNano())
+	}
+	idleTimeout := idleWatchdogTimeout(task)
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return acpruntime.Result{}, "", nil, err
@@ -430,6 +514,29 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 		}
 		return acpruntime.Result{}, "", nil, err
 	}
+
+	watchdogDone := make(chan struct{})
+	if idleTimeout > 0 {
+		go func() {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-watchdogDone:
+					return
+				case <-ticker.C:
+					last := time.Unix(0, lastOutputAtUnixNano.Load())
+					if time.Since(last) < idleTimeout {
+						continue
+					}
+					stalled.Store(true)
+					_ = cmd.Process.Kill()
+					return
+				}
+			}
+		}()
+	}
+	defer close(watchdogDone)
 
 	var streamErr error
 	var streamErrMu sync.Mutex
@@ -448,11 +555,11 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		captureErr(captureCommandStream(stdoutPipe, &stdout, task, acpruntime.OutputStreamStdout))
+		captureErr(captureCommandStream(stdoutPipe, &stdout, task, acpruntime.OutputStreamStdout, notifyOutput))
 	}()
 	go func() {
 		defer wg.Done()
-		captureErr(captureCommandStream(stderrPipe, &stderr, task, acpruntime.OutputStreamStderr))
+		captureErr(captureCommandStream(stderrPipe, &stderr, task, acpruntime.OutputStreamStderr, notifyOutput))
 	}()
 
 	// Drain both output streams before waiting to avoid racy early pipe closes
@@ -463,6 +570,20 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 		waitErr = streamErr
 	}
 	if waitErr != nil {
+		if stalled.Load() {
+			stallErr := fmt.Errorf(
+				"%w: no stdout/stderr output for %s (task=%s step=%s shard=%s)",
+				errRunnerStalled,
+				idleTimeout,
+				strings.TrimSpace(task.TaskID),
+				strings.TrimSpace(task.StepID),
+				strings.TrimSpace(task.ShardID),
+			)
+			return acpruntime.Result{
+				Stdout: stdout.String(),
+				Stderr: stderr.String(),
+			}, "", nil, stallErr
+		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return acpruntime.Result{
 				Stdout: stdout.String(),
@@ -511,7 +632,13 @@ type streamedOutputBudget struct {
 	truncated      bool
 }
 
-func captureCommandStream(reader io.Reader, sink *bytes.Buffer, task acpruntime.Task, stream acpruntime.OutputStream) error {
+func captureCommandStream(
+	reader io.Reader,
+	sink *bytes.Buffer,
+	task acpruntime.Task,
+	stream acpruntime.OutputStream,
+	onOutput func(),
+) error {
 	if sink == nil {
 		return errors.New("capture sink is nil")
 	}
@@ -521,6 +648,9 @@ func captureCommandStream(reader io.Reader, sink *bytes.Buffer, task acpruntime.
 		part, err := bufReader.ReadString('\n')
 		if len(part) > 0 {
 			sink.WriteString(part)
+			if onOutput != nil {
+				onOutput()
+			}
 			forwardStreamOutput(task, stream, part, budget)
 		}
 		if err != nil {
@@ -862,12 +992,31 @@ func buildParseRepairHints(parseStage string, parseErr error) []string {
 	return promptcontract.ParseRepairHints(parseStage, parseErr)
 }
 
+func buildStallRetryHints(stallErr error) []string {
+	lines := []string{
+		`Previous attempt stalled due to long stdout/stderr silence; respond quickly with one final TaskResult JSON object.`,
+		`Skip exploratory chatter and long tool narration; only minimal reads needed for deterministic completion are allowed.`,
+		`Do NOT return event arrays, transcript envelopes, or tool recap prose.`,
+	}
+	if detail := compactRetryHint(errorString(stallErr)); detail != "" {
+		lines = append(lines, "Stall detail: "+detail)
+	}
+	return lines
+}
+
 func buildArtifactRepairHints(initialProblem string) []string {
 	return promptcontract.ArtifactRepairHints(initialProblem)
 }
 
 func compactRetryHint(value string) string {
 	return strings.TrimSpace(strings.Join(strings.Fields(value), " "))
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func recordPromptArtifacts(task acpruntime.Task, attempt string, prompt builtPrompt, provider acpruntime.Provider, includeDirectories []string, taskPayload []byte) {

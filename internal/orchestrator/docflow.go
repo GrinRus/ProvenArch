@@ -91,11 +91,12 @@ func runtimeAgentRole(stepID string) string {
 }
 
 func (e *pipelineExecution) runtimeArtifactContext(stepID string, shardID string, repoScopes []string) (string, string, []string, error) {
+	isFindingsStep := strings.HasSuffix(stepID, "step3.findings")
 	var rel string
 	switch {
 	case strings.HasSuffix(stepID, "step1.collect"):
 		rel = runtimeShardArtifactRoot(e.runID, shardID)
-	case strings.HasSuffix(stepID, "step3.findings"):
+	case isFindingsStep:
 		rel = runtimeValidatorArtifactRoot(e.runID)
 	default:
 		rel = path.Join("reports", "taskruns", e.runID, "runtime")
@@ -109,18 +110,23 @@ func (e *pipelineExecution) runtimeArtifactContext(stepID string, shardID string
 	}
 
 	roots := []string{e.workspace.Path}
-	if strings.HasSuffix(stepID, "step3.findings") {
+	if isFindingsStep {
 		if finalAbs, resolveErr := e.workspace.Resolve(runtimeFinalArtifactRoot(e.runID)); resolveErr == nil {
 			roots = append(roots, finalAbs)
 		}
+		roots = append(roots, abs)
 	}
-	for _, scope := range repoScopes {
-		scope = strings.TrimSpace(scope)
-		if scope == "" {
-			continue
-		}
-		if repoPath := strings.TrimSpace(e.resolvedRepoPaths[scope]); repoPath != "" {
-			roots = append(roots, repoPath)
+	// Keep validator/findings tasks focused on staged-final artifacts and validator write_root.
+	// Repository roots stay enabled for collect tasks.
+	if !isFindingsStep {
+		for _, scope := range repoScopes {
+			scope = strings.TrimSpace(scope)
+			if scope == "" {
+				continue
+			}
+			if repoPath := strings.TrimSpace(e.resolvedRepoPaths[scope]); repoPath != "" {
+				roots = append(roots, repoPath)
+			}
 		}
 	}
 	return rel, abs, normalizeOrderedUniqueStrings(roots), nil

@@ -1139,7 +1139,7 @@ func TestBuildPromptIncludesStepSpecificPolicies(t *testing.T) {
 	}
 
 	prompt := buildPrompt(raw, false)
-	if !strings.Contains(prompt, "STEP POLICY refresh.step3.findings") {
+	if !strings.Contains(prompt, "STEP POLICY step3.findings") {
 		t.Fatalf("expected step3 policy block in prompt")
 	}
 	if !strings.Contains(prompt, "include at least one add_finding operation") {
@@ -2216,5 +2216,90 @@ func TestRunQwenCommandPrefersWorkspaceAsCommandDirOverWriteRoot(t *testing.T) {
 	}
 	if got := strings.TrimSpace(result.Stderr); got != workspace {
 		t.Fatalf("expected qwen cwd to be workspace %q, got %q", workspace, got)
+	}
+}
+
+func TestRunReturnsRunnerStalledForSilentFindingsTask(t *testing.T) {
+	previousTimeout := findingsIdleSilenceTimeout
+	findingsIdleSilenceTimeout = 100 * time.Millisecond
+	t.Cleanup(func() {
+		findingsIdleSilenceTimeout = previousTimeout
+	})
+
+	runner := HeadlessRunner{
+		Command: "sh",
+		Args:    []string{"-c", "sleep 2"},
+	}
+	workspace := t.TempDir()
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-stalled",
+		RunID:        "run-1",
+		StepID:       "refresh.step3.findings",
+		Workspace:    workspace,
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected stalled runner error")
+	}
+	code, message, ok := acpruntime.ClassifyError(err)
+	if !ok {
+		t.Fatalf("expected classified runner error, got %v", err)
+	}
+	if code != string(acpruntime.ErrorCodeRunnerStalled) {
+		t.Fatalf("expected runner_stalled code, got %q (%v)", code, err)
+	}
+	if !strings.Contains(message, "stalled") {
+		t.Fatalf("expected stalled message, got %q", message)
+	}
+}
+
+func TestRunReturnsRunnerStalledWhenStallRetryReturnsInvalidTaskResult(t *testing.T) {
+	previousTimeout := findingsIdleSilenceTimeout
+	findingsIdleSilenceTimeout = 500 * time.Millisecond
+	t.Cleanup(func() {
+		findingsIdleSilenceTimeout = previousTimeout
+	})
+
+	root := t.TempDir()
+	stateFile := filepath.Join(root, "qwen-stall-retry-count.txt")
+	commandPath := filepath.Join(root, "qwen")
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+count=0
+if [ -f %q ]; then
+  count="$(cat %q)"
+fi
+count=$((count + 1))
+printf '%%s' "$count" > %q
+if [ "$count" -eq 1 ]; then
+  sleep 2
+  exit 0
+fi
+printf '%%s\n' '{"meta":{"task_id":"bad-only"}}'
+`, stateFile, stateFile, stateFile)
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write qwen stall-retry command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-stalled-invalid-retry",
+		RunID:        "run-1",
+		StepID:       "refresh.step3.findings",
+		Workspace:    t.TempDir(),
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected stalled runner error")
+	}
+	code, message, ok := acpruntime.ClassifyError(err)
+	if !ok {
+		t.Fatalf("expected classified runner error, got %v", err)
+	}
+	if code != string(acpruntime.ErrorCodeRunnerStalled) {
+		t.Fatalf("expected runner_stalled code, got %q (%v)", code, err)
+	}
+	if !strings.Contains(message, "invalid taskresult") {
+		t.Fatalf("expected invalid-taskresult stall message, got %q", message)
 	}
 }

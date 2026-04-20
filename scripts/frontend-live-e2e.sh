@@ -257,6 +257,20 @@ if ! wait_for_health "$BASE_URL"; then
   die "ACP server did not become healthy in ${API_READY_TIMEOUT_SEC}s (see $SERVER_LOG)"
 fi
 resolve_ui_poll_timeouts
+if [[ "$UI_E2E_SCENARIO" == "init-inspect" ]]; then
+  init_timeout_sec="$(parse_positive_int_or_die "$UI_INIT_POLL_TIMEOUT_SEC" "ACP_UI_INIT_POLL_TIMEOUT_SEC")"
+  pipeline_timeout_sec=0
+  if [[ -n "${ACP_PIPELINE_TIMEOUT_SEC:-}" ]]; then
+    pipeline_timeout_sec="$(parse_positive_int_or_die "$ACP_PIPELINE_TIMEOUT_SEC" "ACP_PIPELINE_TIMEOUT_SEC")"
+  fi
+  if (( pipeline_timeout_sec > 0 )); then
+    min_init_timeout_sec=$((pipeline_timeout_sec + 30))
+    if (( init_timeout_sec < min_init_timeout_sec )); then
+      log "init-inspect timeout guard: bump ACP_UI_INIT_POLL_TIMEOUT_SEC ${init_timeout_sec}s -> ${min_init_timeout_sec}s to align with pipeline timeout ${pipeline_timeout_sec}s"
+      UI_INIT_POLL_TIMEOUT_SEC="$min_init_timeout_sec"
+    fi
+  fi
+fi
 log "effective UI polling timeouts: init=${UI_INIT_POLL_TIMEOUT_SEC}s cancel=${UI_CANCEL_POLL_TIMEOUT_SEC}s"
 if [[ "$UI_E2E_SCENARIO" == "cancel-refresh" ]]; then
   cancel_timeout_sec="$(parse_positive_int_or_die "$UI_CANCEL_POLL_TIMEOUT_SEC" "ACP_UI_CANCEL_POLL_TIMEOUT_SEC")"

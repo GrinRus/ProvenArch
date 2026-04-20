@@ -506,6 +506,75 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual("runtime_timeout", result.failure_class)
         self.assertTrue(result.runtime_timeout)
 
+    def test_python_report_classifies_runner_stalled_separately(self) -> None:
+        run_dir = self.root / "run-stalled-python"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: skipped",
+                    "- failure_reason: runner_stalled",
+                    "- expected_runs: 4",
+                    "- completed_runs: 2",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 1",
+                    "- running_runs_detected: 0",
+                    "- termination_signal: none",
+                    "",
+                    "## API Simulation",
+                    "- status: failed",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            '{"level":"error","error_code":"runner_stalled","message":"runner stalled due to output inactivity"}\n',
+        )
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/raw/runtime.stderr.txt",
+            "runner_stalled\n",
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "runner_stalled",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("runtime_stalled", result.failure_class)
+        self.assertTrue(result.runtime_stalled)
+        self.assertFalse(result.runtime_parse)
+
+    def test_parse_stall_contexts_supports_task_step_shard_shape(self) -> None:
+        contexts = self.module.parse_stall_contexts(
+            "runner stalled due to output inactivity: no stdout/stderr output for 10m0s "
+            "(task=task-run_20260420_130020_001-init-step3-findings-domain-bank-of-anthos-shard-validator "
+            "step=init.step3.findings shard=validator)"
+        )
+        self.assertEqual(
+            ["task-run_20260420_130020_001-init-step3-findings-domain-bank-of-anthos-shard-validator:init.step3.findings:validator"],
+            contexts,
+        )
+
+    def test_parse_stall_contexts_keeps_legacy_step_shard_shape(self) -> None:
+        contexts = self.module.parse_stall_contexts(
+            "runner stalled due to output inactivity: no stdout/stderr output for 10m0s "
+            "(step=refresh.step3.findings shard=validator)"
+        )
+        self.assertEqual(["refresh.step3.findings:validator"], contexts)
+
     def test_python_report_escalates_artifact_quality_warning_to_quality_gate_failure(self) -> None:
         run_dir = self.root / "run-artifact-quality"
         self._create_artifact_quality_fixture_run_dir(run_dir)
@@ -633,6 +702,61 @@ class BatchFailureClassificationTest(unittest.TestCase):
         fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
         self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
         self.assertEqual("runtime_timeout", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+
+    def test_shell_classifier_marks_runner_stalled(self) -> None:
+        run_dir = self.root / "run-stalled-shell"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: skipped",
+                    "- failure_reason: runner_stalled",
+                    "- expected_runs: 4",
+                    "- completed_runs: 1",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 1",
+                    "- running_runs_detected: 0",
+                    "- termination_signal: none",
+                    "",
+                    "## API Simulation",
+                    "- status: failed",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            '{"level":"error","error_code":"runner_stalled","message":"runner stalled due to output inactivity"}\n',
+        )
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/raw/runtime.stderr.txt",
+            "runner_stalled\n",
+        )
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        classifications_tsv = self.root / "backend-run-classifications-stalled.tsv"
+        command = (
+            prelude
+            + "\n"
+            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
+            + f'classify_run_failure "qwen-code" "1" {shlex.quote(str(run_dir))} "1"\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("", completed.stdout.strip(), completed.stdout)
+        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
+        self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("runner_stalled", fields[2], classifications_tsv.read_text(encoding="utf-8"))
 
     def test_python_report_treats_incomplete_reports_as_triage_only_not_empty_analysis(self) -> None:
         run_dir = self.root / "run-incomplete"

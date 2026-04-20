@@ -606,7 +606,7 @@ ACP_APPLY_TIMEOUTS_VIA_API=1 \
 Release `PASS` только если одновременно:
 1. Во всех `profile+sweep` строках `strict_status=passed`.
 2. Для каждого `profile+sweep`: `backend_total_runs=2`, `backend_hard_pass=2`.
-3. `runtime_artifact_contract/runtime_parse/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing/precheck_failed = 0`.
+3. `runtime_artifact_contract/runtime_parse/runtime_stalled/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing/precheck_failed = 0`.
 4. `semantic_hard_fail=0`, `off_topic_hits=0`.
 5. `artifact_source` только `snapshot` (без `workspace-fallback`).
 6. Нет `analysis:evidence-scope` и `analysis:cross-repo-missing`.
@@ -633,6 +633,10 @@ Release `PASS` только если одновременно:
 
 3. `runtime_timeout` вместе с `runner_unavailable` в том же run
 - Политика triage: primary incident class = `runtime_timeout` при явном timeout signal в summary/classifier; `runner_unavailable` остаётся secondary evidence.
+
+4. `runner_stalled`/`runtime_stalled` в `step3.findings`
+- Причина: long-silence зависание provider-а на findings task; раннер завершает процесс по idle watchdog и делает один strict retry.
+- Действие: смотреть `reports/taskruns/raw/*-prompt*.{txt,json}` и `raw_output=*` ссылки в quality report; если повторный stall сохранился, классифицировать как backend blocker.
 
 Минимальный формат публикации агентом:
 

@@ -2238,6 +2238,67 @@ func TestSemanticGuardAddsFallbackCrossRepoEdgeForMultiScopeRefreshStep3(t *test
 	}
 }
 
+func TestSemanticGuardLeavesNoCrossRepoEdgeWhenFallbackCandidatesAreImpossible(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure workspace layout: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/payments.md", []byte("# Domain: Payments\n\n- id: `payments`\n- repo_scope: `payments-service`\n")); err != nil {
+		t.Fatalf("write payments domain card: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/users.md", []byte("# Domain: Users\n\n- id: `users`\n- repo_scope: `users-service`\n")); err != nil {
+		t.Fatalf("write users domain card: %v", err)
+	}
+
+	service := NewService(WithRunner(refreshNoServiceMissingFindingsRunner{}))
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run refresh pipeline: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
+	}
+	if !hasWarningPrefix(info.Warnings, "refresh.step3.findings: semantic_guard: cross-repo fallback edge skipped") {
+		t.Fatalf("expected fallback-skip warning in run warnings, got %#v", info.Warnings)
+	}
+
+	step3TaskrunCandidates, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step3-findings*.json"))
+	if err != nil {
+		t.Fatalf("glob step3 taskruns: %v", err)
+	}
+	step3Taskruns := make([]string, 0, len(step3TaskrunCandidates))
+	for _, candidate := range step3TaskrunCandidates {
+		if strings.Contains(candidate, "shard-summary") {
+			continue
+		}
+		step3Taskruns = append(step3Taskruns, candidate)
+	}
+	sort.Strings(step3Taskruns)
+	if len(step3Taskruns) == 0 {
+		t.Fatalf("expected refresh step3 taskrun file")
+	}
+
+	raw, err := os.ReadFile(step3Taskruns[len(step3Taskruns)-1])
+	if err != nil {
+		t.Fatalf("read step3 taskrun: %v", err)
+	}
+	var payload contracts.TaskResult
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal step3 taskrun payload: %v", err)
+	}
+	for _, op := range payload.Changeset {
+		if op.Op == "upsert_edge" && op.Edge != nil {
+			t.Fatalf("expected no synthetic fallback edge when candidates are impossible, got %+v", op.Edge)
+		}
+	}
+}
+
 func TestSemanticGuardRemovesInvalidEvidenceAndDowngradesObservation(t *testing.T) {
 	t.Parallel()
 

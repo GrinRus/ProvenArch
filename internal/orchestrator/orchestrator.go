@@ -3417,6 +3417,12 @@ func (e *pipelineExecution) ensureCrossRepoEdgeFallback(domainID string, task ac
 		scopeSet[scope] = struct{}{}
 	}
 	repoRoots := declaredRepoRoots(e.workspace)
+	scopeAnchors := map[string]contracts.Evidence{}
+	for _, scope := range scopes {
+		if evidence, ok := fallbackScopeAnchorEvidence(scope, e.workspace.Path, repoRoots); ok {
+			scopeAnchors[scope] = evidence
+		}
+	}
 
 	entities, err := e.store.ListEntities()
 	if err != nil {
@@ -3425,6 +3431,7 @@ func (e *pipelineExecution) ensureCrossRepoEdgeFallback(domainID string, task ac
 	}
 
 	candidates := make([]serviceCandidate, 0, len(entities))
+	candidateKey := map[string]struct{}{}
 	for _, entity := range entities {
 		if strings.TrimSpace(entity.Type) != "service" {
 			continue
@@ -3449,9 +3456,58 @@ func (e *pipelineExecution) ensureCrossRepoEdgeFallback(domainID string, task ac
 			Repo:     repoScope,
 			Evidence: evidence,
 		})
+		candidateKey[repoScope+"|"+entityID] = struct{}{}
+	}
+
+	if len(candidates) < 2 {
+		servicesByScope := map[string][]string{}
+		for _, entity := range entities {
+			if strings.TrimSpace(entity.Type) != "service" {
+				continue
+			}
+			entityID := strings.TrimSpace(entity.ID)
+			if entityID == "" {
+				continue
+			}
+			repoScope := entityRepoScope(entity, task)
+			if _, ok := scopeSet[repoScope]; !ok {
+				continue
+			}
+			servicesByScope[repoScope] = append(servicesByScope[repoScope], entityID)
+		}
+		for scope := range servicesByScope {
+			sort.Strings(servicesByScope[scope])
+		}
+		for _, scope := range scopes {
+			ids := servicesByScope[scope]
+			if len(ids) == 0 {
+				continue
+			}
+			evidence, ok := scopeAnchors[scope]
+			if !ok {
+				continue
+			}
+			key := scope + "|" + ids[0]
+			if _, exists := candidateKey[key]; exists {
+				continue
+			}
+			candidates = append(candidates, serviceCandidate{
+				ID:       ids[0],
+				Repo:     scope,
+				Evidence: evidence,
+			})
+			candidateKey[key] = struct{}{}
+		}
 	}
 	if len(candidates) < 2 {
-		normalized.Warnings = append(normalized.Warnings, "semantic_guard: cross-repo fallback edge skipped: insufficient multi-scope service entities with valid evidence")
+		normalized.Warnings = append(
+			normalized.Warnings,
+			fmt.Sprintf(
+				"semantic_guard: cross-repo fallback edge skipped: insufficient multi-scope service entities with valid evidence (scopes=%d anchor_scopes=%d)",
+				len(scopes),
+				len(scopeAnchors),
+			),
+		)
 		return normalized
 	}
 	sort.Slice(candidates, func(i, j int) bool {
@@ -3470,7 +3526,14 @@ func (e *pipelineExecution) ensureCrossRepoEdgeFallback(domainID string, task ac
 		}
 	}
 	if toIndex == -1 {
-		normalized.Warnings = append(normalized.Warnings, "semantic_guard: cross-repo fallback edge skipped: candidates resolved to one repo_scope")
+		normalized.Warnings = append(
+			normalized.Warnings,
+			fmt.Sprintf(
+				"semantic_guard: cross-repo fallback edge skipped: candidates resolved to one repo_scope (candidates=%d anchor_scopes=%d)",
+				len(candidates),
+				len(scopeAnchors),
+			),
+		)
 		return normalized
 	}
 	to := candidates[toIndex]
@@ -3629,6 +3692,23 @@ func fallbackEvidenceForEntity(entity contracts.Entity, repoScope string, worksp
 	for _, candidatePath := range []string{"README.md", "README", "go.mod", "package.json", "pom.xml"} {
 		candidate := contracts.Evidence{
 			Repo: repo,
+			Path: candidatePath,
+		}
+		if evidencePathResolvesInScope(candidate, workspaceRoot, repoRoots) {
+			return candidate, true
+		}
+	}
+	return contracts.Evidence{}, false
+}
+
+func fallbackScopeAnchorEvidence(repoScope string, workspaceRoot string, repoRoots map[string]string) (contracts.Evidence, bool) {
+	scope := strings.TrimSpace(repoScope)
+	if scope == "" {
+		return contracts.Evidence{}, false
+	}
+	for _, candidatePath := range []string{"README.md", "README", "go.mod", "package.json", "pom.xml"} {
+		candidate := contracts.Evidence{
+			Repo: scope,
 			Path: candidatePath,
 		}
 		if evidencePathResolvesInScope(candidate, workspaceRoot, repoRoots) {

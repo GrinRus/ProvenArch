@@ -10,6 +10,83 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
+func TestRuntimeArtifactContextFindingsExcludesRepoRootsFromDefaultReadContext(t *testing.T) {
+	t.Parallel()
+
+	workspaceRoot := t.TempDir()
+	repoRoot := filepath.Join(workspaceRoot, "..", "repo-a")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+
+	execution := &pipelineExecution{
+		runID:             "run-ctx",
+		workspace:         workspace.Root{Path: workspaceRoot},
+		resolvedRepoPaths: map[string]string{"repo-a": repoRoot},
+	}
+
+	_, writeRoot, readRoots, err := execution.runtimeArtifactContext("refresh.step3.findings", "validator", []string{"repo-a"})
+	if err != nil {
+		t.Fatalf("runtime artifact context: %v", err)
+	}
+	finalRoot, resolveErr := execution.workspace.Resolve(runtimeFinalArtifactRoot(execution.runID))
+	if resolveErr != nil {
+		t.Fatalf("resolve final root: %v", resolveErr)
+	}
+	if !containsPathValue(readRoots, workspaceRoot) {
+		t.Fatalf("expected workspace root in read context, got %v", readRoots)
+	}
+	if !containsPathValue(readRoots, writeRoot) {
+		t.Fatalf("expected validator write root in read context, got %v", readRoots)
+	}
+	if !containsPathValue(readRoots, finalRoot) {
+		t.Fatalf("expected staged final root in read context, got %v", readRoots)
+	}
+	if containsPathValue(readRoots, repoRoot) {
+		t.Fatalf("did not expect repo root in findings read context, got %v", readRoots)
+	}
+}
+
+func TestRuntimeArtifactContextCollectKeepsRepoRootsInReadContext(t *testing.T) {
+	t.Parallel()
+
+	workspaceRoot := t.TempDir()
+	repoRoot := filepath.Join(workspaceRoot, "..", "repo-b")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+
+	execution := &pipelineExecution{
+		runID:             "run-ctx",
+		workspace:         workspace.Root{Path: workspaceRoot},
+		resolvedRepoPaths: map[string]string{"repo-b": repoRoot},
+	}
+
+	_, writeRoot, readRoots, err := execution.runtimeArtifactContext("refresh.step1.collect", "repo-b", []string{"repo-b"})
+	if err != nil {
+		t.Fatalf("runtime artifact context: %v", err)
+	}
+	if !containsPathValue(readRoots, workspaceRoot) {
+		t.Fatalf("expected workspace root in collect read context, got %v", readRoots)
+	}
+	if !containsPathValue(readRoots, repoRoot) {
+		t.Fatalf("expected repo root in collect read context, got %v", readRoots)
+	}
+	if containsPathValue(readRoots, writeRoot) {
+		t.Fatalf("did not expect collect write_root in read context by default, got %v", readRoots)
+	}
+}
+
+func containsPathValue(values []string, target string) bool {
+	target = filepath.Clean(strings.TrimSpace(target))
+	for _, value := range values {
+		if filepath.Clean(strings.TrimSpace(value)) == target {
+			return true
+		}
+	}
+	return false
+}
+
 func TestReadShardDocumentRejectsPathTraversalOutsideArtifactRoot(t *testing.T) {
 	t.Parallel()
 

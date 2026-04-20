@@ -53,7 +53,7 @@ func TestCaptureCommandStreamForwardsCRLFAndFinalLineWithoutNewline(t *testing.T
 		},
 	}
 
-	if err := captureCommandStream(strings.NewReader(input), &sink, task, acpruntime.OutputStreamStderr); err != nil {
+	if err := captureCommandStream(strings.NewReader(input), &sink, task, acpruntime.OutputStreamStderr, nil); err != nil {
 		t.Fatalf("capture command stream: %v", err)
 	}
 	if sink.String() != input {

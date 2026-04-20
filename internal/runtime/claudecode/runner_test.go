@@ -1204,6 +1204,90 @@ func TestBuildDirectPromptRetryIncludesSharedPromptContractGuardrails(t *testing
 	}
 }
 
+func TestHeadlessRunnerReturnsRunnerStalledForSilentFindingsTask(t *testing.T) {
+	previousTimeout := findingsIdleSilenceTimeout
+	findingsIdleSilenceTimeout = 100 * time.Millisecond
+	t.Cleanup(func() {
+		findingsIdleSilenceTimeout = previousTimeout
+	})
+
+	runner := HeadlessRunner{
+		Command: "sh",
+		Args:    []string{"-c", "sleep 2"},
+	}
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-claude-stalled",
+		RunID:        "run-1",
+		StepID:       "refresh.step3.findings",
+		Workspace:    t.TempDir(),
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected stalled runner error")
+	}
+	code, message, ok := acpruntime.ClassifyError(err)
+	if !ok {
+		t.Fatalf("expected classified runner error, got %v", err)
+	}
+	if code != string(acpruntime.ErrorCodeRunnerStalled) {
+		t.Fatalf("expected runner_stalled code, got %q (%v)", code, err)
+	}
+	if !strings.Contains(message, "stalled") {
+		t.Fatalf("expected stalled message, got %q", message)
+	}
+}
+
+func TestHeadlessRunnerReturnsRunnerStalledWhenStallRetryReturnsInvalidTaskResult(t *testing.T) {
+	previousTimeout := findingsIdleSilenceTimeout
+	findingsIdleSilenceTimeout = 500 * time.Millisecond
+	t.Cleanup(func() {
+		findingsIdleSilenceTimeout = previousTimeout
+	})
+
+	root := t.TempDir()
+	stateFile := filepath.Join(root, "claude-stall-retry-count.txt")
+	commandPath := filepath.Join(root, "claude")
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+count=0
+if [ -f %q ]; then
+  count="$(cat %q)"
+fi
+count=$((count + 1))
+printf '%%s' "$count" > %q
+if [ "$count" -eq 1 ]; then
+  sleep 2
+  exit 0
+fi
+printf '%%s\n' '{"meta":{"task_id":"bad-only"}}'
+`, stateFile, stateFile, stateFile)
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write claude stall-retry command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-claude-stalled-invalid-retry",
+		RunID:        "run-1",
+		StepID:       "refresh.step3.findings",
+		Workspace:    t.TempDir(),
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected stalled runner error")
+	}
+	code, message, ok := acpruntime.ClassifyError(err)
+	if !ok {
+		t.Fatalf("expected classified runner error, got %v", err)
+	}
+	if code != string(acpruntime.ErrorCodeRunnerStalled) {
+		t.Fatalf("expected runner_stalled code, got %q (%v)", code, err)
+	}
+	if !strings.Contains(message, "invalid taskresult") {
+		t.Fatalf("expected invalid-taskresult stall message, got %q", message)
+	}
+}
+
 func validTaskResultJSON(taskID string, stepID string, runtimeName string, runtimeVersion string) string {
 	return fmt.Sprintf(`{"meta":{"task_id":"%s","step_id":"%s","runtime":{"name":"%s","version":"%s"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}`, taskID, stepID, runtimeName, runtimeVersion)
 }
