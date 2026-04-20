@@ -510,6 +510,7 @@ Blocking signals:
 ### 6.6 Runtime parsing/diagnostics stability
 
 Zero tolerance:
+- `runtime_artifact_contract`
 - `runtime_parse`
 - `runner_unavailable`
 - `summary_missing`
@@ -522,7 +523,7 @@ Zero tolerance:
 - если run завершился `run_partial_failed` и `reports/taskruns/<run_id>-quality.json.evidence_state.report_mode=incomplete`, generated markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) читать только как triage-only artifacts; banner/triage-only wording обязаны явно указывать на incomplete analysis, а не имитировать пустой успешный verdict.
 - для `init.step1.collect` и `refresh.step1.collect` provider обязан сделать не более одной artifact-repair попытки после schema-valid `TaskResult`, если `write_root/shard-pack-manifest.json` выглядит skeletal/generic-only; при неудачном repair исходный `write_root` восстанавливается.
 - schema-invalid `TaskResult` (например, недопустимый `changeset[].op`) получает отдельный direct-JSON retry с жёстким whitelist допустимых операций; artifact-repair не должен маскировать schema-retry failure class.
-- если после этой единственной artifact-repair попытки `shard-pack-manifest.json` всё ещё missing/invalid/skeletal, collect step обязан завершиться runtime contract failure (`runner_parse_failed` / `runtime_parse`), а не продолжать прогон как nominal success.
+- если после этой единственной artifact-repair попытки `shard-pack-manifest.json` всё ещё missing/invalid/skeletal, collect step обязан завершиться runtime contract failure (`runner_parse_failed` / `runtime_artifact_contract`), а не продолжать прогон как nominal success.
 - collect contract требует полного `compatibility` block и global uniqueness для `citations[].claim_ids`; staged duplicate claim ids считаются blocking contract drift, если validator-scope repair не смог детерминированно снять коллизию на index/reference surface.
 - `reports/taskruns/<run_id>-quality.json.run_warnings` с префиксом `artifact_quality:` считаются canonical live gate blocker даже при schema-valid `validator-verdict.json = PASS`; типовой пример — refresh final set с несколькими canonical docs и единственным generic `cite.runtime-summary`.
 - acceptable reuse-pattern допускается только если frozen refresh artifacts сохраняют хотя бы один rich collect shard с repo-specific citations; reuse-only manifests без такого shard'а считаются low-signal collapse.
@@ -538,7 +539,7 @@ Zero tolerance:
 - сначала проверить `driver.log` (matrix + batch), затем `session-summary.md` и `full-run.log` в `runs/<batch-id>/<provider>/runN/`, затем `arch-workspace/reports/taskruns/logs/*.ndjson` и `reports/taskruns/raw/*` для первичного runtime signal;
 - в `reports/taskruns/raw/*` проверять не только stdout/stderr parse diagnostics, но и effective prompt artifacts (`*-prompt.txt`, `*-task.json`, `*-prompt-meta.json`) для каждого headless attempt/retry;
 - отделить induced failures (например, debug timeout override) от реальной runtime/provider деградации;
-- если raw/taskrun logs показывают `runner_parse_failed` или `runner_unavailable`, считать их primary failure class даже если `session-summary.md` дополнительно фиксирует `infra_incomplete_cycle`;
+- если raw/taskrun logs показывают `runner_parse_failed` (`runtime_artifact_contract`/`runtime_parse`) или `runner_unavailable`, считать их primary failure class даже если `session-summary.md` дополнительно фиксирует `infra_incomplete_cycle`;
 - для release decision использовать только прогон без diagnostic timeout overrides.
 
 Required canonical live surface:
@@ -605,7 +606,7 @@ ACP_APPLY_TIMEOUTS_VIA_API=1 \
 Release `PASS` только если одновременно:
 1. Во всех `profile+sweep` строках `strict_status=passed`.
 2. Для каждого `profile+sweep`: `backend_total_runs=2`, `backend_hard_pass=2`.
-3. `runtime_parse/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing/precheck_failed = 0`.
+3. `runtime_artifact_contract/runtime_parse/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing/precheck_failed = 0`.
 4. `semantic_hard_fail=0`, `off_topic_hits=0`.
 5. `artifact_source` только `snapshot` (без `workspace-fallback`).
 6. Нет `analysis:evidence-scope` и `analysis:cross-repo-missing`.

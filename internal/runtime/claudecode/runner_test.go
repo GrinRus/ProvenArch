@@ -1042,6 +1042,71 @@ JSON
 	}
 }
 
+func TestHeadlessRunnerRejectsUnreadableCollectManifestAfterArtifactRepair(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	repoPath := filepath.Join(root, "openstack")
+	writeRoot := filepath.Join(root, "write-root")
+	for _, dir := range []string{workspace, repoPath, writeRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	manifest := "version: 1\nrepos:\n  - name: openstack\n    path: " + repoPath + "\n"
+	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write workspace manifest: %v", err)
+	}
+
+	stateFile := filepath.Join(root, "claude-unreadable-manifest-count.txt")
+	commandPath := filepath.Join(root, "claude")
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+count=0
+if [ -f %q ]; then
+  count="$(cat %q)"
+fi
+count=$((count + 1))
+printf '%%s' "$count" > %q
+mkdir -p %q
+cat <<'JSON' > %q/shard-pack-manifest.json
+%s
+JSON
+cat <<'JSON'
+{"meta":{"task_id":"task-claude-unreadable-manifest","step_id":"refresh.step1.collect","runtime":{"name":"claude-code","version":"claude-cli"},"started_at":"2026-04-03T12:00:00Z"},"summary":"retry still unreadable","changeset":[]}
+JSON
+`, stateFile, stateFile, stateFile, writeRoot, writeRoot, validRetryRichManifestJSONForClaude())
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write claude unreadable manifest command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-claude-unreadable-manifest",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		Workspace:    workspace,
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"openstack"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected unreadable collect manifest to fail after one repair attempt")
+	}
+	code, _, ok := acpruntime.ClassifyError(err)
+	if !ok || code != string(acpruntime.ErrorCodeRunnerParseFailed) {
+		t.Fatalf("expected runner_parse_failed classification, got code=%q err=%v", code, err)
+	}
+	stateRaw, err := os.ReadFile(stateFile)
+	if err != nil {
+		t.Fatalf("read state file: %v", err)
+	}
+	if count := strings.TrimSpace(string(stateRaw)); count != "2" {
+		t.Fatalf("expected exactly 2 runner invocations for artifact repair retry, got %q", count)
+	}
+}
+
 func TestBuildDirectPromptIncludesCanonicalManifestSchemaGuardrails(t *testing.T) {
 	t.Parallel()
 
@@ -1068,6 +1133,9 @@ func TestBuildDirectPromptIncludesCanonicalManifestSchemaGuardrails(t *testing.T
 	}
 	if !strings.Contains(prompt, `compatibility MUST include coverage, questions, entities, edges, and findings`) {
 		t.Fatalf("expected compatibility completeness guardrail in prompt")
+	}
+	if !strings.Contains(prompt, `documents[].path MUST be write_root/artifact_root-relative`) {
+		t.Fatalf("expected documents[].path artifact_root-relative guardrail in prompt")
 	}
 	if !strings.Contains(prompt, `Do NOT use reports/taskruns/... staging paths as canonical_path.`) {
 		t.Fatalf("expected canonical_path staging-path ban in prompt")

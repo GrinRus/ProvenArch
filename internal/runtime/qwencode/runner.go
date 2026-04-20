@@ -186,8 +186,11 @@ func maybeRepairCollectArtifacts(
 		return current, nil
 	}
 
-	_ = artifactquality.EnsureCanonicalCollectManifest(task, current.TaskResult)
+	ensureErr := artifactquality.EnsureCanonicalCollectManifest(task, current.TaskResult)
 	assessment, err := assessRetryManifestAtWriteRoot(task.WriteRoot)
+	if ensureErr != nil {
+		err = ensureErr
+	}
 	if err == nil && assessment.Rich {
 		return current, nil
 	}
@@ -235,8 +238,11 @@ func maybeRepairCollectArtifacts(
 		)
 	}
 
-	_ = artifactquality.EnsureCanonicalCollectManifest(task, repaired.TaskResult)
+	ensureErr = artifactquality.EnsureCanonicalCollectManifest(task, repaired.TaskResult)
 	repairedAssessment, err := assessRetryManifestAtWriteRoot(task.WriteRoot)
+	if ensureErr != nil {
+		err = ensureErr
+	}
 	if err != nil || !repairedAssessment.Rich {
 		_ = snapshot.Restore()
 		repairedProblem := artifactquality.DescribeAssessmentProblem(repairedAssessment, err)
@@ -293,7 +299,7 @@ func shouldConstrainRetryToWriteRoot(task acpruntime.Task) bool {
 }
 
 func assessRetryManifestAtWriteRoot(writeRoot string) (retryManifestAssessment, error) {
-	return artifactquality.LoadManifestAssessment(writeRoot)
+	return artifactquality.ValidateCollectManifestAtWriteRoot(writeRoot)
 }
 
 func assessRetryManifest(raw []byte) retryManifestAssessment {

@@ -28,6 +28,8 @@ Runtime write policy:
 - `workspace root` больше не трактуется как implicit write target
 - runtime получает explicit `artifact_root`, `write_root`, `read_context_roots[]`
 - runtime не имеет права писать в `workspace.yaml`, `schemas/*`, `docs/spec/*`, `charter/*` и анализируемые user repos
+- `shard-pack-manifest.json` для collect шага обязан оставаться читаемым: `documents[].path` должны быть `artifact_root`-relative (без `reports/taskruns/...` и без дублирования `artifact_root` в `path`)
+- collect step считается успешным только после post-success проверки: schema-valid `TaskResult`, schema-valid `shard-pack-manifest.json` и читаемая document surface под `write_root`
 
 > MVP policy фиксирует process-scoped runtime provider contract: `claude-code` (default) или `qwen-code` для headless runs; changeset contract остаётся замороженным без `write_file`.
 > CLI/process runtime mode задаётся флагом `--runtime fake|headless` (`fake` default, `headless` opt-in), provider — `--runtime-provider claude-code|qwen-code` (`claude-code` default, env fallback `ACP_RUNTIME_PROVIDER`).

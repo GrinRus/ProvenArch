@@ -228,6 +228,100 @@ func TestParseShardPackManifestRejectsEscapingDocumentPath(t *testing.T) {
 	}
 }
 
+func TestParseShardPackManifestRejectsStagingPrefixedDocumentPath(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "shard_id": "openedx-platform",
+  "agent_role": "shard-analyst",
+  "artifact_root": "reports/taskruns/run-1/staging/shards/openedx-platform",
+  "documents": [
+    {
+      "id": "doc.service-inventory.openedx-platform",
+      "kind": "report",
+      "title": "Service Inventory",
+      "path": "reports/taskruns/run-1/staging/shards/openedx-platform/service-inventory.md",
+      "canonical_path": "reports/as-is/service-inventory/openedx-platform.md",
+      "topics": ["openedx"],
+      "citation_ids": ["cite.openedx.readme"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.openedx.readme",
+      "repo": "openedx-platform",
+      "path": "README.md",
+      "claim_ids": ["claim.openedx.readme"],
+      "document_ids": ["doc.service-inventory.openedx-platform"]
+    }
+  ],
+  "compatibility": {
+    "coverage": {"observed": [], "missing": [], "notes": []},
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}`)
+	_, err := ParseShardPackManifest(raw)
+	if err == nil {
+		t.Fatalf("expected shard manifest document path validation error")
+	}
+	if !strings.Contains(err.Error(), "reports/taskruns/... prefix is forbidden") {
+		t.Fatalf("expected staging prefix path error, got %v", err)
+	}
+}
+
+func TestParseShardPackManifestRejectsArtifactRootPrefixedDocumentPath(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "shard_id": "openedx-platform",
+  "agent_role": "shard-analyst",
+  "artifact_root": "shards/openedx-platform",
+  "documents": [
+    {
+      "id": "doc.service-inventory.openedx-platform",
+      "kind": "report",
+      "title": "Service Inventory",
+      "path": "shards/openedx-platform/service-inventory.md",
+      "canonical_path": "reports/as-is/service-inventory/openedx-platform.md",
+      "topics": ["openedx"],
+      "citation_ids": ["cite.openedx.readme"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.openedx.readme",
+      "repo": "openedx-platform",
+      "path": "README.md",
+      "claim_ids": ["claim.openedx.readme"],
+      "document_ids": ["doc.service-inventory.openedx-platform"]
+    }
+  ],
+  "compatibility": {
+    "coverage": {"observed": [], "missing": [], "notes": []},
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}`)
+	_, err := ParseShardPackManifest(raw)
+	if err == nil {
+		t.Fatalf("expected shard manifest artifact_root prefix validation error")
+	}
+	if !strings.Contains(err.Error(), "artifact_root-relative") {
+		t.Fatalf("expected artifact_root-relative path error, got %v", err)
+	}
+}
+
 func TestParseValidatorVerdictRejectsUnsupportedVerdict(t *testing.T) {
 	t.Parallel()
 

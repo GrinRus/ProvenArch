@@ -7,6 +7,8 @@ func CollectManifestContractLines(artifactRoot string) []string {
 		fmt.Sprintf(`- shard-pack-manifest.json MUST validate against the ACP shard-pack-manifest contract and use artifact_root = %q.`, artifactRoot),
 		`- version MUST be integer 1 (not "1.0.0" or any other string form).`,
 		`- Each documents[] item MUST include: id, kind, title, path, canonical_path, topics, citation_ids.`,
+		`- documents[].path MUST be write_root/artifact_root-relative (for example "service-inventory.md"), never absolute and never prefixed with "reports/taskruns/...".`,
+		`- documents[].path MUST NOT repeat artifact_root itself (forbidden form: "<artifact_root>/service-inventory.md").`,
 		`- Do NOT use documents[].citations; only documents[].citation_ids is allowed.`,
 		`- Each citations[] item MUST include: id, repo, path, claim_ids, document_ids.`,
 		`- citations[].id values MUST be unique, and every documents[].citation_ids entry MUST reference an existing citations[].id.`,

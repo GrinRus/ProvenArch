@@ -200,8 +200,11 @@ func maybeRepairCollectArtifacts(
 		return current, nil
 	}
 
-	_ = artifactquality.EnsureCanonicalCollectManifest(task, current.TaskResult)
-	assessment, err := artifactquality.LoadManifestAssessment(task.WriteRoot)
+	ensureErr := artifactquality.EnsureCanonicalCollectManifest(task, current.TaskResult)
+	assessment, err := artifactquality.ValidateCollectManifestAtWriteRoot(task.WriteRoot)
+	if ensureErr != nil {
+		err = ensureErr
+	}
 	if err == nil && assessment.Rich {
 		return current, nil
 	}
@@ -249,8 +252,11 @@ func maybeRepairCollectArtifacts(
 		)
 	}
 
-	_ = artifactquality.EnsureCanonicalCollectManifest(task, repaired.TaskResult)
-	repairedAssessment, err := artifactquality.LoadManifestAssessment(task.WriteRoot)
+	ensureErr = artifactquality.EnsureCanonicalCollectManifest(task, repaired.TaskResult)
+	repairedAssessment, err := artifactquality.ValidateCollectManifestAtWriteRoot(task.WriteRoot)
+	if ensureErr != nil {
+		err = ensureErr
+	}
 	if err != nil || !repairedAssessment.Rich {
 		_ = snapshot.Restore()
 		repairedProblem := artifactquality.DescribeAssessmentProblem(repairedAssessment, err)

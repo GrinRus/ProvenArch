@@ -2054,20 +2054,42 @@ if raw:
     except Exception:
         task = {}
 
-task_id = first_non_empty(task, ["task_id", "TaskID"]) or from_prompt("TaskID") or from_prompt("task_id") or "task"
-step_id = first_non_empty(task, ["step_id", "StepID"]) or from_prompt("StepID") or from_prompt("step_id") or "init.step1.collect"
-run_id = first_non_empty(task, ["run_id", "RunID"]) or from_prompt("RunID") or from_prompt("run_id")
-write_root = first_non_empty(task, ["write_root", "WriteRoot"]) or from_prompt("write_root") or from_prompt("WriteRoot")
-artifact_root = first_non_empty(task, ["artifact_root", "ArtifactRoot"]) or from_prompt("artifact_root") or from_prompt("ArtifactRoot")
-shard_id = first_non_empty(task, ["shard_id", "ShardID"]) or from_prompt("shard_id") or from_prompt("ShardID") or slugify(step_id)
-repo_scopes = first_non_empty_list(task, ["repo_scopes", "RepoScopes"])
+task_id = first_non_empty(task, ["task_id", "TaskID", "taskId"]) or from_prompt("TaskID") or from_prompt("task_id") or "task"
+step_id = first_non_empty(task, ["step_id", "StepID", "stepId"]) or from_prompt("StepID") or from_prompt("step_id") or "init.step1.collect"
+run_id = first_non_empty(task, ["run_id", "RunID", "runId"]) or from_prompt("RunID") or from_prompt("run_id")
+workspace = first_non_empty(task, ["workspace", "Workspace"]) or from_prompt("workspace") or from_prompt("Workspace")
+write_root = first_non_empty(task, ["write_root", "WriteRoot", "writeRoot"]) or from_prompt("write_root") or from_prompt("WriteRoot")
+artifact_root = first_non_empty(task, ["artifact_root", "ArtifactRoot", "artifactRoot"]) or from_prompt("artifact_root") or from_prompt("ArtifactRoot")
+shard_id = first_non_empty(task, ["shard_id", "ShardID", "shardId"]) or from_prompt("shard_id") or from_prompt("ShardID") or slugify(step_id)
+repo_scopes = first_non_empty_list(task, ["repo_scopes", "RepoScopes", "repoScopes"])
 if not repo_scopes:
-    repo_scope = first_non_empty(task, ["repo_scope", "RepoScope"]) or from_prompt("repo_scope") or from_prompt("RepoScope")
+    repo_scope = first_non_empty(task, ["repo_scope", "RepoScope", "repoScope"]) or from_prompt("repo_scope") or from_prompt("RepoScope")
     if repo_scope:
         repo_scopes = [repo_scope]
-path_scopes = first_non_empty_list(task, ["path_scopes", "PathScopes"])
-if step_id in {"init.step1.collect", "refresh.step1.collect"} and write_root:
+path_scopes = first_non_empty_list(task, ["path_scopes", "PathScopes", "pathScopes"])
+if not write_root and workspace:
+    write_root = workspace
+if not write_root:
+    write_root = os.getcwd()
+if write_root:
     os.makedirs(write_root, exist_ok=True)
+    manifest_artifact_root = artifact_root.strip() if isinstance(artifact_root, str) else ""
+    if not manifest_artifact_root and workspace:
+        try:
+            candidate = os.path.relpath(write_root, workspace)
+            if candidate and not candidate.startswith(".."):
+                manifest_artifact_root = candidate
+        except Exception:
+            manifest_artifact_root = ""
+    if not manifest_artifact_root:
+        try:
+            candidate = os.path.relpath(write_root, os.getcwd())
+            if candidate and not candidate.startswith(".."):
+                manifest_artifact_root = candidate
+        except Exception:
+            manifest_artifact_root = ""
+    if not manifest_artifact_root:
+        manifest_artifact_root = "."
     document_name = slugify(shard_id) + ".md"
     document_id = "doc." + slugify(shard_id)
     citation_id = "cite." + slugify(shard_id)
@@ -2080,7 +2102,7 @@ if step_id in {"init.step1.collect", "refresh.step1.collect"} and write_root:
         "step_id": step_id,
         "shard_id": shard_id,
         "agent_role": "shard-analyst",
-        "artifact_root": write_root,
+        "artifact_root": manifest_artifact_root,
         "repo_scopes": repo_scopes,
         "path_scopes": path_scopes,
         "summary": "stub shard pack",

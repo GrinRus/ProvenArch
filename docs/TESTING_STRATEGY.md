@@ -233,7 +233,7 @@ Implemented additional jobs:
   - runtime-flow hard-fail checks: `runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:execution-semantics`, `runtime_flow_failed`
   - hard-pass учитывает semantic hard-fail и snapshot source validity
   - run artifacts default: `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/*`
-  - reports: `run_matrix_<batch-id>.md/.tsv`, `frontend_e2e_matrix_<batch-id>.md`, `frontend_cancel_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md` (+ fields `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, runtime-flow checks, failure classes `runtime_parse/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing/precheck_failed`)
+  - reports: `run_matrix_<batch-id>.md/.tsv`, `frontend_e2e_matrix_<batch-id>.md`, `frontend_cancel_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md` (+ fields `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, runtime-flow checks, failure classes `runtime_artifact_contract/runtime_parse/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing/precheck_failed`)
 - profile matrix regression (local official runbook, non-required CI):
   - `scripts/full-run-batch-matrix.sh`
   - `E2E_MATRIX_FILE` обязателен (`profiles[]`: `id`, `repos_file`, `expected_repo_count`, `source_kind`)
@@ -253,7 +253,7 @@ Implemented additional jobs:
   - captured live bank extras fixture защищает collect-repair normalization от legacy `changeset[].artifact` drift при manifest-only repair
   - collect runtime делает максимум одну post-success artifact-repair попытку для skeletal/generic-only `shard-pack-manifest.json`; если repair не улучшил fidelity, исходный `write_root` восстанавливается
   - schema-invalid `TaskResult` получает один direct-JSON retry с whitelist допустимых `changeset[].op`; invalid manifest после schema-valid result идёт в отдельный artifact-repair path
-  - collect runtime не принимает nominal success после failed artifact-repair: missing/invalid/skeletal manifest после единственной repair попытки поднимается как `runner_parse_failed` / `runtime_parse`
+  - collect runtime не принимает nominal success после failed artifact-repair: missing/invalid/skeletal manifest после единственной repair попытки поднимается как `runner_parse_failed` / `runtime_artifact_contract`
   - global uniqueness для `citation-index.claim_ids` проверяется как validator contract; duplicate claim ids либо repair-ятся на index/reference уровне детерминированным shard suffix, либо остаются blocking defect
   - refresh artifact-quality guard: `artifact_quality:*` в `reports/taskruns/<run_id>-quality.json.run_warnings` считается canonical live gate blocker; bank-like collapse к одному `cite.runtime-summary` должен ловиться, openstack-like reuse с хотя бы одним rich shard остаётся допустимым
   - `profile_matrix_<matrix-id>` и `quality_report_<batch-id>` обязаны агрегировать только реально выбранные `selected_providers`/`selected_run_indexes`; qwen-only non-release run не должен порождать synthetic `backend_total_runs=10` и `summary_missing=9`

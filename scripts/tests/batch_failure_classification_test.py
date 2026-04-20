@@ -435,6 +435,31 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertTrue(result.runtime_parse)
         self.assertTrue(result.infra_incomplete_cycle)
 
+    def test_python_report_classifies_collect_artifact_contract_failure_separately(self) -> None:
+        run_dir = self.root / "run-artifact-contract-python"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            '{"level":"error","error_code":"runner_parse_failed","message":"headless provider \\"qwen-code\\" produced invalid collect artifacts: collect artifacts remained invalid after one repair attempt"}\n',
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "infra_incomplete_cycle",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("runtime_artifact_contract", result.failure_class)
+        self.assertTrue(result.runtime_artifact_contract)
+        self.assertFalse(result.runtime_parse)
+
     def test_python_report_prefers_runtime_timeout_over_runner_unavailable_when_timeout_signaled(self) -> None:
         run_dir = self.root / "run-timeout-python"
         self._create_fixture_run_dir(run_dir)
@@ -524,6 +549,35 @@ class BatchFailureClassificationTest(unittest.TestCase):
         fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
         self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
         self.assertEqual("runtime_parse", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+
+    def test_shell_classifier_marks_collect_artifact_contract_failure(self) -> None:
+        run_dir = self.root / "run-artifact-contract-shell"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            '{"level":"error","error_code":"runner_parse_failed","message":"headless provider \\"qwen-code\\" produced invalid collect artifacts: collect artifacts remained invalid after one repair attempt"}\n',
+        )
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        classifications_tsv = self.root / "backend-run-classifications-artifact.tsv"
+        command = (
+            prelude
+            + "\n"
+            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
+            + f'classify_run_failure "qwen-code" "1" {shlex.quote(str(run_dir))} "1"\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("", completed.stdout.strip(), completed.stdout)
+        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
+        self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("runtime_artifact_contract", fields[2], classifications_tsv.read_text(encoding="utf-8"))
 
     def test_shell_classifier_prefers_runtime_timeout_over_runner_unavailable_logs(self) -> None:
         run_dir = self.root / "run-timeout-precedence"

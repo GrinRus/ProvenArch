@@ -38,6 +38,30 @@ func LoadManifestAssessment(writeRoot string) (ManifestAssessment, error) {
 	return AssessManifestBytes(raw)
 }
 
+func ValidateCollectManifestAtWriteRoot(writeRoot string) (ManifestAssessment, error) {
+	writeRoot = strings.TrimSpace(writeRoot)
+	if writeRoot == "" {
+		return ManifestAssessment{}, nil
+	}
+	manifestPath := filepath.Join(writeRoot, shardPackManifestFile)
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ManifestAssessment{}, nil
+		}
+		return ManifestAssessment{}, err
+	}
+	manifest, err := contracts.ParseShardPackManifest(raw)
+	if err != nil {
+		return ManifestAssessment{}, err
+	}
+	assessment := AssessManifest(manifest)
+	if err := validateManifestReadableSurface(writeRoot, manifest); err != nil {
+		return assessment, err
+	}
+	return assessment, nil
+}
+
 func AssessManifestBytes(raw []byte) (ManifestAssessment, error) {
 	manifest, err := contracts.ParseShardPackManifest(raw)
 	if err != nil {
@@ -103,6 +127,35 @@ func AssessManifest(manifest contracts.ShardPackManifest) ManifestAssessment {
 
 func HasRepoSpecificCitationSurface(manifest contracts.ShardPackManifest) bool {
 	return AssessManifest(manifest).RepoSpecificCitationCount > 0
+}
+
+func validateManifestReadableSurface(writeRoot string, manifest contracts.ShardPackManifest) error {
+	root := strings.TrimSpace(writeRoot)
+	if root == "" {
+		return nil
+	}
+	for _, document := range manifest.Documents {
+		rel := strings.TrimSpace(document.Path)
+		if rel == "" {
+			return fmt.Errorf("document %q path is empty", strings.TrimSpace(document.ID))
+		}
+		candidate := filepath.Clean(filepath.Join(root, filepath.FromSlash(rel)))
+		relative, relErr := filepath.Rel(root, candidate)
+		if relErr != nil {
+			return fmt.Errorf("document %q path %q cannot be resolved: %w", strings.TrimSpace(document.ID), rel, relErr)
+		}
+		if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("document %q path %q escapes write_root", strings.TrimSpace(document.ID), rel)
+		}
+		info, statErr := os.Stat(candidate)
+		if statErr != nil {
+			return fmt.Errorf("document %q path %q is not readable under write_root: %w", strings.TrimSpace(document.ID), rel, statErr)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("document %q path %q points to a directory", strings.TrimSpace(document.ID), rel)
+		}
+	}
+	return nil
 }
 
 func IsGenericRuntimeSummaryCitation(id string) bool {

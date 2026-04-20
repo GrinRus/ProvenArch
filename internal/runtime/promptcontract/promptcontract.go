@@ -200,6 +200,7 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 		lines = append(lines, artifactquality.CollectManifestContractLines(strings.TrimSpace(task.ArtifactRoot))...)
 		lines = append(lines, artifactquality.ClaimIDContractLines()...)
 		lines = append(lines,
+			`- documents[].path in shard-pack-manifest.json MUST stay artifact_root-relative; reports/taskruns/... staging-prefixed paths are forbidden.`,
 			`- Do NOT collapse a multi-document refresh surface to one generic "cite.runtime-summary" citation when repository evidence exists.`,
 			`- Preserve repo-specific citations in shard-pack-manifest.json whenever repository files support them.`,
 		)

@@ -899,7 +899,7 @@ func TestHeadlessRunnerRetriesCapturedLiveExtrasInvalidStdoutFixtureWithMinimalR
 	if err := os.WriteFile(filepath.Join(writeRoot, "shard-pack-manifest.json"), []byte(validRetryRichManifestJSON()), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(writeRoot, "shard-analysis.md"), []byte("# Analysis\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(writeRoot, "iac-overview.md"), []byte("# Overview\n"), 0o644); err != nil {
 		t.Fatalf("write doc: %v", err)
 	}
 
@@ -1553,6 +1553,9 @@ func TestBuildPromptIncludesCanonicalManifestSchemaGuardrails(t *testing.T) {
 	if !strings.Contains(prompt, `compatibility MUST include coverage, questions, entities, edges, and findings`) {
 		t.Fatalf("expected compatibility completeness guardrail in prompt")
 	}
+	if !strings.Contains(prompt, `documents[].path MUST be write_root/artifact_root-relative`) {
+		t.Fatalf("expected documents[].path artifact_root-relative guardrail in prompt")
+	}
 	if !strings.Contains(prompt, `Do NOT use reports/taskruns/... staging paths as canonical_path.`) {
 		t.Fatalf("expected canonical_path staging-path ban in prompt")
 	}
@@ -1662,7 +1665,7 @@ func TestHeadlessRunnerNormalizesCapturedLiveBankExtrasLegacyDocArtifactFixture(
 	if err := os.WriteFile(filepath.Join(writeRoot, "shard-pack-manifest.json"), []byte(validRetryRichManifestJSON()), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(writeRoot, "extras-overview.md"), []byte("# Extras\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(writeRoot, "iac-overview.md"), []byte("# Overview\n"), 0o644); err != nil {
 		t.Fatalf("write doc: %v", err)
 	}
 
@@ -1750,7 +1753,7 @@ JSON
 	}
 
 	runner := HeadlessRunner{Command: commandPath}
-	_, err := runner.Run(context.Background(), acpruntime.Task{
+	result, err := runner.Run(context.Background(), acpruntime.Task{
 		TaskID:       "task-openstack-invalid-manifest",
 		RunID:        "run-1",
 		StepID:       "init.step1.collect",
@@ -1759,18 +1762,21 @@ JSON
 		RepoScopes:   []string{"cinder"},
 		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
 	})
-	if err == nil {
-		t.Fatalf("expected invalid repaired manifest fixture to fail")
+	if err != nil {
+		t.Fatalf("expected deterministic canonicalization to recover invalid manifest fixture: %v", err)
 	}
-	code, _, ok := acpruntime.ClassifyError(err)
-	if !ok || code != string(acpruntime.ErrorCodeRunnerParseFailed) {
-		t.Fatalf("expected runner_parse_failed classification, got code=%q err=%v", code, err)
+	if result.TaskResult.Summary != "initial collect" {
+		t.Fatalf("expected initial summary after deterministic canonicalization, got %q", result.TaskResult.Summary)
 	}
-	if count := strings.TrimSpace(string(mustReadFile(t, stateFile))); count != "2" {
-		t.Fatalf("expected exactly 2 runner invocations, got %q", count)
+	if count := strings.TrimSpace(string(mustReadFile(t, stateFile))); count != "1" {
+		t.Fatalf("expected exactly one runner invocation after deterministic manifest canonicalization, got %q", count)
 	}
-	if restored := string(mustReadFile(t, filepath.Join(writeRoot, "shard-pack-manifest.json"))); strings.Contains(restored, `"entities": true`) {
-		t.Fatalf("expected write_root snapshot restore to discard invalid repaired manifest, got %q", restored)
+	assessment, assessErr := assessRetryManifestAtWriteRoot(writeRoot)
+	if assessErr != nil {
+		t.Fatalf("assess canonicalized manifest: %v", assessErr)
+	}
+	if !assessment.Rich {
+		t.Fatalf("expected canonicalized manifest to be rich, got %#v", assessment)
 	}
 }
 
@@ -1933,6 +1939,67 @@ JSON
 	}
 }
 
+func TestHeadlessRunnerRejectsUnreadableCollectManifestAfterArtifactRepair(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	repoPath := filepath.Join(root, "bank-of-anthos")
+	writeRoot := filepath.Join(root, "write-root")
+	for _, dir := range []string{workspace, repoPath, writeRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	manifest := "version: 1\nrepos:\n  - name: bank-of-anthos\n    path: " + repoPath + "\n"
+	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write workspace manifest: %v", err)
+	}
+
+	stateFile := filepath.Join(root, "qwen-unreadable-manifest-count.txt")
+	commandPath := filepath.Join(root, "qwen-unreadable-manifest.sh")
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+count=0
+if [ -f %q ]; then
+  count="$(cat %q)"
+fi
+count=$((count + 1))
+printf '%%s' "$count" > %q
+mkdir -p %q
+cat <<'JSON' > %q/shard-pack-manifest.json
+%s
+JSON
+cat <<'JSON'
+{"meta":{"task_id":"task-qwen-unreadable-manifest","step_id":"refresh.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"retry still unreadable","changeset":[]}
+JSON
+`, stateFile, stateFile, stateFile, writeRoot, writeRoot, validRetryRichManifestJSON())
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write unreadable manifest command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-qwen-unreadable-manifest",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		Workspace:    workspace,
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected unreadable collect manifest to fail after one repair attempt")
+	}
+	code, _, ok := acpruntime.ClassifyError(err)
+	if !ok || code != string(acpruntime.ErrorCodeRunnerParseFailed) {
+		t.Fatalf("expected runner_parse_failed classification, got code=%q err=%v", code, err)
+	}
+	if count := strings.TrimSpace(string(mustReadFile(t, stateFile))); count != "2" {
+		t.Fatalf("expected exactly 2 runner invocations for artifact repair retry, got %q", count)
+	}
+}
+
 func TestHeadlessRunnerRepairsLegacyStyleManifestAfterSchemaValidRun(t *testing.T) {
 	t.Parallel()
 
@@ -2001,11 +2068,11 @@ JSON
 	if err != nil {
 		t.Fatalf("expected legacy manifest repair to succeed: %v", err)
 	}
-	if result.TaskResult.Summary != "artifact repair succeeded" {
-		t.Fatalf("expected repaired result summary, got %q", result.TaskResult.Summary)
+	if result.TaskResult.Summary != "initial collect" {
+		t.Fatalf("expected deterministic canonicalization to keep initial summary, got %q", result.TaskResult.Summary)
 	}
-	if count := strings.TrimSpace(string(mustReadFile(t, stateFile))); count != "2" {
-		t.Fatalf("expected exactly 2 runner invocations, got %q", count)
+	if count := strings.TrimSpace(string(mustReadFile(t, stateFile))); count != "1" {
+		t.Fatalf("expected exactly one runner invocation after deterministic legacy canonicalization, got %q", count)
 	}
 	assessment, assessErr := assessRetryManifestAtWriteRoot(writeRoot)
 	if assessErr != nil {
