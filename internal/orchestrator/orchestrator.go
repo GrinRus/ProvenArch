@@ -1378,12 +1378,7 @@ func (e *pipelineExecution) runStepConstitution(ctx context.Context, stepID stri
 	if err != nil {
 		return err
 	}
-	draft, _, err := loadRuntimeDraftManifest(execution.Task.WriteRoot, constitutionDraftManifestFile)
-	if err != nil {
-		if fallbackErr := claudecode.PersistCompatibilityDocflowArtifacts(execution.Task, execution.Normalized); fallbackErr == nil {
-			draft, _, err = loadRuntimeDraftManifest(execution.Task.WriteRoot, constitutionDraftManifestFile)
-		}
-	}
+	draft, _, err := validateRequiredRuntimeDraftArtifacts(execution.Task)
 	if err != nil {
 		return err
 	}
@@ -1762,6 +1757,15 @@ func (e *pipelineExecution) runRuntimeTaskNormalized(
 	defer stopHeartbeat()
 	result, err := runner.Run(taskCtx, task)
 	if err != nil {
+		if isDraftOnlyRuntimeStep(stepID) {
+			if _, _, draftErr := validateRequiredRuntimeDraftArtifacts(task); draftErr != nil {
+				e.logError(stepID, domainID, "runtime draft artifact validation failed", map[string]any{
+					"task_id": task.TaskID,
+					"error":   strings.TrimSpace(draftErr.Error()),
+				})
+				err = fmt.Errorf("%w: required runtime draft artifacts invalid: %v", err, draftErr)
+			}
+		}
 		if errors.Is(taskCtx.Err(), context.DeadlineExceeded) {
 			err = fmt.Errorf("runtime task timeout after %ds: %w", int(e.runtimeStepTimeout.Seconds()), err)
 		}
@@ -1778,6 +1782,15 @@ func (e *pipelineExecution) runRuntimeTaskNormalized(
 
 	parsed, err := contracts.ParseTaskResult(result.RawJSON)
 	if err != nil {
+		if isDraftOnlyRuntimeStep(stepID) {
+			if _, _, draftErr := validateRequiredRuntimeDraftArtifacts(task); draftErr != nil {
+				e.logError(stepID, domainID, "runtime draft artifact validation failed", map[string]any{
+					"task_id": task.TaskID,
+					"error":   strings.TrimSpace(draftErr.Error()),
+				})
+				err = fmt.Errorf("%w: required runtime draft artifacts invalid: %v", err, draftErr)
+			}
+		}
 		e.logError(stepID, domainID, "runtime task parse failed", runtimeFailureLogFields(task, err, result.Stdout, result.Stderr))
 		return runtimePreparedExecution{}, err
 	}
@@ -1786,6 +1799,15 @@ func (e *pipelineExecution) runRuntimeTaskNormalized(
 	normalizedRaw, err := json.MarshalIndent(normalized, "", "  ")
 	if err != nil {
 		return runtimePreparedExecution{}, fmt.Errorf("marshal normalized taskresult: %w", err)
+	}
+	if isDraftOnlyRuntimeStep(stepID) {
+		if _, _, draftErr := validateRequiredRuntimeDraftArtifacts(task); draftErr != nil {
+			e.logError(stepID, domainID, "runtime draft artifact validation failed", map[string]any{
+				"task_id": task.TaskID,
+				"error":   strings.TrimSpace(draftErr.Error()),
+			})
+			return runtimePreparedExecution{}, fmt.Errorf("runtime required draft artifacts invalid: %w", draftErr)
+		}
 	}
 	runtimeName := strings.TrimSpace(normalized.Meta.Runtime.Name)
 	runtimeVersion := strings.TrimSpace(normalized.Meta.Runtime.Version)
@@ -2447,12 +2469,7 @@ func (e *pipelineExecution) runStepAsIs(ctx context.Context, stepID string) erro
 	if err != nil {
 		return err
 	}
-	draft, _, err := loadRuntimeDraftManifest(execution.Task.WriteRoot, asisDraftManifestFile)
-	if err != nil {
-		if fallbackErr := claudecode.PersistCompatibilityDocflowArtifacts(execution.Task, execution.Normalized); fallbackErr == nil {
-			draft, _, err = loadRuntimeDraftManifest(execution.Task.WriteRoot, asisDraftManifestFile)
-		}
-	}
+	draft, _, err := validateRequiredRuntimeDraftArtifacts(execution.Task)
 	if err != nil {
 		return err
 	}
@@ -2499,12 +2516,7 @@ func (e *pipelineExecution) runStepProposals(ctx context.Context, stepID string)
 	if err != nil {
 		return err
 	}
-	draft, _, err := loadRuntimeDraftManifest(execution.Task.WriteRoot, proposalsDraftManifestFile)
-	if err != nil {
-		if fallbackErr := claudecode.PersistCompatibilityDocflowArtifacts(execution.Task, execution.Normalized); fallbackErr == nil {
-			draft, _, err = loadRuntimeDraftManifest(execution.Task.WriteRoot, proposalsDraftManifestFile)
-		}
-	}
+	draft, _, err := validateRequiredRuntimeDraftArtifacts(execution.Task)
 	if err != nil {
 		return err
 	}

@@ -343,6 +343,9 @@ func TestCleanupRunLogsByTTLAndMaxRuns(t *testing.T) {
 type syntheticWarningRunner struct{}
 
 func (syntheticWarningRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	if err := writeSyntheticRuntimeDraftArtifacts(task); err != nil {
+		return acpruntime.Result{}, err
+	}
 	payload := map[string]any{
 		"meta": map[string]any{
 			"task_id":    task.TaskID,
@@ -367,6 +370,9 @@ func (syntheticWarningRunner) Preflight(context.Context) error { return nil }
 type syntheticNoVersionRunner struct{}
 
 func (syntheticNoVersionRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	if err := writeSyntheticRuntimeDraftArtifacts(task); err != nil {
+		return acpruntime.Result{}, err
+	}
 	payload := map[string]any{
 		"meta": map[string]any{
 			"task_id":    task.TaskID,
@@ -390,6 +396,9 @@ func (syntheticNoVersionRunner) Preflight(context.Context) error { return nil }
 type syntheticMixedVersionRunner struct{}
 
 func (syntheticMixedVersionRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	if err := writeSyntheticRuntimeDraftArtifacts(task); err != nil {
+		return acpruntime.Result{}, err
+	}
 	runtime := map[string]any{"name": "synthetic-headless"}
 	if task.StepID == "init.step3.findings" {
 		runtime["version"] = "v1"
@@ -598,6 +607,9 @@ func TestRunLogsIncludeRuntimeDiagnosticEvents(t *testing.T) {
 type syntheticRuntimeStreamRunner struct{}
 
 func (syntheticRuntimeStreamRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	if err := writeSyntheticRuntimeDraftArtifacts(task); err != nil {
+		return acpruntime.Result{}, err
+	}
 	if task.OnOutput != nil {
 		task.OnOutput(acpruntime.OutputChunk{
 			Stream: acpruntime.OutputStreamStdout,
@@ -637,6 +649,9 @@ func (syntheticRuntimeStreamRunner) Preflight(context.Context) error { return ni
 type syntheticRuntimeDiagnosticRunner struct{}
 
 func (syntheticRuntimeDiagnosticRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	if err := writeSyntheticRuntimeDraftArtifacts(task); err != nil {
+		return acpruntime.Result{}, err
+	}
 	if task.OnDiagnostic != nil {
 		task.OnDiagnostic(acpruntime.DiagnosticEvent{
 			Message: "runtime task stalled after artifacts",
@@ -692,3 +707,88 @@ func (syntheticRuntimeDiagnosticRunner) Run(_ context.Context, task acpruntime.T
 }
 
 func (syntheticRuntimeDiagnosticRunner) Preflight(context.Context) error { return nil }
+
+func writeSyntheticRuntimeDraftArtifacts(task acpruntime.Task) error {
+	writeRoot := strings.TrimSpace(task.WriteRoot)
+	draftRoot := strings.TrimSpace(task.DraftFinalRoot)
+	if writeRoot == "" || draftRoot == "" {
+		return nil
+	}
+
+	type draftSpec struct {
+		manifest string
+		content  string
+		outputs  []runtimeDraftOutput
+	}
+
+	var spec draftSpec
+	switch strings.TrimSpace(task.StepID) {
+	case "init.step0.constitution":
+		spec = draftSpec{
+			manifest: constitutionDraftManifestFile,
+			content:  "# Synthetic Constitution\n",
+			outputs: []runtimeDraftOutput{
+				{
+					Path:          "overview.md",
+					CanonicalPath: "charter/overview.md",
+					Kind:          "charter",
+					Title:         "Synthetic Constitution",
+				},
+			},
+		}
+	case "init.step2.asis_docs", "refresh.step2.asis_docs":
+		spec = draftSpec{
+			manifest: asisDraftManifestFile,
+			content:  "# Synthetic As-Is Overview\n",
+			outputs: []runtimeDraftOutput{
+				{
+					Path:          "overview.md",
+					CanonicalPath: "reports/as-is/overview.md",
+					Kind:          "report",
+					Title:         "Synthetic As-Is Overview",
+				},
+			},
+		}
+	case "init.step4.proposals", "refresh.step4.proposals":
+		spec = draftSpec{
+			manifest: proposalsDraftManifestFile,
+			content:  "# Synthetic Proposal\n",
+			outputs: []runtimeDraftOutput{
+				{
+					Path:          "proposal.md",
+					CanonicalPath: "proposals/proposal-baseline/proposal.md",
+					Kind:          "proposal",
+					Title:         "Synthetic Proposal",
+				},
+			},
+		}
+	default:
+		return nil
+	}
+
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		return err
+	}
+	for _, output := range spec.outputs {
+		if err := os.WriteFile(filepath.Join(draftRoot, output.Path), []byte(spec.content), 0o644); err != nil {
+			return err
+		}
+	}
+	manifest := runtimeDraftManifest{
+		Version:      1,
+		RunID:        task.RunID,
+		StepID:       task.StepID,
+		StepContract: strings.TrimSpace(task.StepContract),
+		AgentRole:    strings.TrimSpace(task.AgentRole),
+		Summary:      "synthetic test draft artifacts",
+		Outputs:      spec.outputs,
+	}
+	raw, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(writeRoot, spec.manifest), raw, 0o644)
+}

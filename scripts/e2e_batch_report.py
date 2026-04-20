@@ -202,6 +202,31 @@ def parse_run_status_file(path: Path) -> dict[str, str]:
     return payload
 
 
+def parse_run_history_status_counts(path: Path) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    if not path.exists():
+        return counts
+    try:
+        payload = read_json(path)
+    except Exception:
+        return counts
+    items = []
+    if isinstance(payload, dict):
+        items = payload.get("items") or payload.get("runs") or []
+    elif isinstance(payload, list):
+        items = payload
+    if not isinstance(items, list):
+        return counts
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status", "")).strip().lower()
+        if not status:
+            continue
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
 def reconstruct_backend_classifications(
     batch_root: Path, classifications: dict[tuple[str, int], dict[str, str]]
 ) -> dict[tuple[str, int], dict[str, str]]:
@@ -220,6 +245,9 @@ def reconstruct_backend_classifications(
             continue
 
         run_dir = status_path.parent
+        run_history_counts = parse_run_history_status_counts(
+            run_dir / "arch-workspace" / "reports" / "taskruns" / "run-history.json"
+        )
         if (run_dir / "session-summary.md").exists():
             continue
 
@@ -252,6 +280,7 @@ def reconstruct_backend_classifications(
             "summary_result": "missing",
             "failure_reason": failure_reason or failure_class,
             "termination_signal": termination_signal or ("none" if failure_class != "infra_signal_terminated" else "unknown"),
+            "run_history_running": str(run_history_counts.get("running", 0)),
         }
     return merged
 
@@ -1037,6 +1066,7 @@ def evaluate_run(
     summary_text = read_text_file(summary_path) if summary_path.exists() else ""
     full_run_log_text = read_text_file(full_run_log) if full_run_log.exists() else ""
     run_status = parse_run_status_file(run_dir / "run-status.env")
+    run_history_counts = parse_run_history_status_counts(workspace / "reports" / "taskruns" / "run-history.json")
     summary_missing = not summary_path.exists()
     result_value = first_token(parse_markdown_scalar(summary_text, "result")) if summary_text else ""
     quality_gates_value = first_token(parse_markdown_scalar(summary_text, "quality_gates")) if summary_text else ""
@@ -1047,6 +1077,7 @@ def evaluate_run(
     expected_headless_runs = parse_int(parse_markdown_scalar(summary_text, "expected_headless_runs"), 0) if summary_text else 0
     completed_headless_runs = parse_int(parse_markdown_scalar(summary_text, "completed_headless_runs"), 0) if summary_text else 0
     running_runs_detected = parse_int(parse_markdown_scalar(summary_text, "running_runs_detected"), 0) if summary_text else 0
+    run_history_running = int(run_history_counts.get("running", 0))
     api_status = parse_api_status(summary_text)
     terminal_process_failure = (
         summary_path.exists()
@@ -1155,6 +1186,8 @@ def evaluate_run(
             infra_incomplete_cycle = True
         if running_runs_detected > 0:
             infra_incomplete_cycle = True
+        if run_history_running > 0:
+            infra_incomplete_cycle = True
     if runtime_timeout:
         issues.append("reliability:runtime-timeout")
         details.append(
@@ -1169,7 +1202,8 @@ def evaluate_run(
         issues.append("reliability:infra-incomplete-cycle")
         details.append(
             f"reliability/infra-incomplete-cycle -> {summary_path}: expected_runs={expected_runs} completed_runs={completed_runs} "
-            f"expected_headless_runs={expected_headless_runs} completed_headless_runs={completed_headless_runs} running_runs_detected={running_runs_detected}"
+            f"expected_headless_runs={expected_headless_runs} completed_headless_runs={completed_headless_runs} "
+            f"running_runs_detected={running_runs_detected} run_history_running={run_history_running}"
         )
     if quality_gates_failed:
         issues.append("reliability:quality-gates-failed")

@@ -1362,6 +1362,54 @@ exit 93
 	}
 }
 
+func TestHeadlessRunnerPreArtifactRecoveryDoesNotWaitForLingeringStdoutPipe(t *testing.T) {
+	setCollectPreArtifactStallTimingsForTest(t, 300*time.Millisecond, 25*time.Millisecond, 25*time.Millisecond)
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	commandPath := filepath.Join(tempDir, "qwen-pre-stall-lingering-pipe.sh")
+	script := `#!/bin/sh
+set -eu
+(trap '' TERM INT HUP; sleep 3) &
+sleep 3
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write lingering-pipe stub: %v", err)
+	}
+
+	task := acpruntime.Task{
+		TaskID:       "task-pre-stall-lingering",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    tempDir,
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	taskPayload, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task payload: %v", err)
+	}
+	args := buildDefaultQwenArgs(task, buildPrompt(taskPayload, false))
+
+	started := time.Now()
+	_, _, _, runErr := runQwenCommand(context.Background(), task, commandPath, args, runQwenOptions{
+		EnableCollectStallMonitor: true,
+	})
+	if runErr == nil {
+		t.Fatalf("expected collect_stalled_before_artifacts sentinel")
+	}
+	if !errors.Is(runErr, errCollectStalledBeforeArtifacts) {
+		t.Fatalf("expected collect_stalled_before_artifacts, got %v", runErr)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("expected forced retry to avoid long EOF wait, elapsed=%s", elapsed)
+	}
+}
+
 func TestHeadlessRunnerDoesNotTriggerPreArtifactStallWhileWriteRootMutates(t *testing.T) {
 	setCollectPreArtifactStallTimingsForTest(t, time.Second, 20*time.Millisecond, 10*time.Millisecond)
 
@@ -1802,6 +1850,14 @@ if ! echo "$last_arg" | grep -Fq 'compatibility.findings[*] MUST remain objects'
   echo "missing findings object repair hint" >&2
   exit 98
 fi
+if ! echo "$last_arg" | grep -Fq 'compatibility.edges[*] MUST remain objects with canonical keys type/from/to'; then
+  echo "missing edge canonical-key repair hint" >&2
+  exit 99
+fi
+if ! echo "$last_arg" | grep -Fq 'each finding MUST include title'; then
+  echo "missing findings title repair hint" >&2
+  exit 100
+fi
 cat > %q/shard-pack-manifest.json <<'MANIFEST'
 {
   "version": 1,
@@ -1836,8 +1892,8 @@ cat > %q/shard-pack-manifest.json <<'MANIFEST'
     "coverage": {"observed": ["extras"], "missing": ["owner mappings"], "notes": ["still invalid"]},
     "questions": [],
     "entities": [{"id":"svc.extras","type":"service","name":"Extras"}],
-    "edges": [],
-    "findings": ["finding as string"]
+    "edges": [{"id":"edge.extras.dep","kind":"depends_on","source":"svc.extras","target":"svc.payments"}],
+    "findings": [{"id":"finding.owner.missing","severity":"medium","description":"still missing title","rule_id":"rule.owner.required","related_ids":["svc.extras"],"provenance":{"kind":"inference","confidence":0.6,"evidence":[{"repo":"bank-of-anthos","path":"README.md"}]}}]
   }
 }
 MANIFEST
@@ -1872,6 +1928,11 @@ JSON
 	}
 	if !strings.Contains(message, "shard pack manifest is invalid") {
 		t.Fatalf("expected explicit manifest validation reason, got %q", message)
+	}
+	if !strings.Contains(strings.ToLower(message), "title") &&
+		!strings.Contains(strings.ToLower(message), "provenance") &&
+		!strings.Contains(strings.ToLower(message), "type") {
+		t.Fatalf("expected explicit nested manifest contract reason, got %q", message)
 	}
 	if !strings.Contains(message, "raw_output=reports/taskruns/raw/") {
 		t.Fatalf("expected raw output diagnostics, got %q", message)
@@ -2120,6 +2181,90 @@ func TestBuildPromptRefreshStep1CollectIncludesNoWebSearchPolicy(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "Do NOT emit synthetic evidence paths such as search_source/*") {
 		t.Fatalf("expected synthetic evidence-path ban in step1 collect policy")
+	}
+}
+
+func TestBuildPromptCollectIncludesExistingEntrypointHintsAndDelegationBan(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	repoRoot := filepath.Join(workspaceDir, "service-repo")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	packageJSONPath := filepath.Join(repoRoot, "package.json")
+	if err := os.WriteFile(packageJSONPath, []byte("{\"name\":\"service-repo\"}\n"), 0o644); err != nil {
+		t.Fatalf("write package.json: %v", err)
+	}
+
+	task := acpruntime.Task{
+		TaskID:           "task-init-step1",
+		RunID:            "run-1",
+		StepID:           "init.step1.collect",
+		Workspace:        workspaceDir,
+		ReadContextRoots: []string{repoRoot},
+		RepoScopes:       []string{"service-repo"},
+		StartedAtUTC:     time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	prompt := buildPrompt(raw, false)
+	if !strings.Contains(prompt, "Do NOT delegate to agent/subagent helpers.") {
+		t.Fatalf("expected delegation ban in collect prompt")
+	}
+	if !strings.Contains(prompt, filepath.ToSlash(packageJSONPath)) {
+		t.Fatalf("expected existing package.json entrypoint hint in prompt")
+	}
+	if strings.Contains(prompt, filepath.ToSlash(filepath.Join(repoRoot, "README.md"))) {
+		t.Fatalf("did not expect non-existent README.md entrypoint hint in prompt")
+	}
+}
+
+func TestBuildPromptConstitutionIncludesExistingEntrypointHintsAndDelegationBan(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	repoRoot := filepath.Join(workspaceDir, "service-repo")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	packageJSONPath := filepath.Join(repoRoot, "package.json")
+	if err := os.WriteFile(packageJSONPath, []byte("{\"name\":\"service-repo\"}\n"), 0o644); err != nil {
+		t.Fatalf("write package.json: %v", err)
+	}
+
+	task := acpruntime.Task{
+		TaskID:           "task-init-step0",
+		RunID:            "run-1",
+		StepID:           "init.step0.constitution",
+		Workspace:        workspaceDir,
+		ReadContextRoots: []string{repoRoot},
+		RepoScopes:       []string{"service-repo"},
+		StartedAtUTC:     time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	prompt := buildPrompt(raw, false)
+	if !strings.Contains(prompt, "STEP POLICY init.step0.constitution:") {
+		t.Fatalf("expected step0 policy section in prompt")
+	}
+	if !strings.Contains(prompt, "Do NOT delegate to agent/subagent helpers.") {
+		t.Fatalf("expected delegation ban in constitution prompt")
+	}
+	if !strings.Contains(prompt, "Write constitution-draft.json in write_root.") {
+		t.Fatalf("expected constitution draft manifest instruction in prompt")
+	}
+	if !strings.Contains(prompt, filepath.ToSlash(packageJSONPath)) {
+		t.Fatalf("expected existing package.json entrypoint hint in prompt")
+	}
+	if strings.Contains(prompt, filepath.ToSlash(filepath.Join(repoRoot, "README.md"))) {
+		t.Fatalf("did not expect non-existent README.md entrypoint hint in prompt")
 	}
 }
 

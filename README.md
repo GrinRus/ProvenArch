@@ -60,7 +60,9 @@ Primary execution path для `step0..step4`:
 - runtime пишет только в `reports/taskruns/<run_id>/...` внутри своего `write_root` и `draft_final_root`
 - provider резолвится на уровне шага, а не всего run; global `--runtime-provider` / `ACP_RUNTIME_PROVIDER` остаются fallback только если step override не задан
 - `step0/2/4` materialize-ят staged draft manifests (`constitution-draft.json`, `asis-draft-manifest.json`, `proposals-draft-manifest.json`)
+- `step0/2/4` считаются successful только если draft manifest contract валиден и все referenced draft files реально существуют под `draft_final_root`
 - shard agents materialize-ят authored docs + `shard-pack-manifest.json`
+- persisted collect manifests с workspace-level `documents[].path` drift (`reports/...`, `charter/...`, `proposals/...` или duplicated `artifact_root`) отбрасываются до `step2`, а qwen repair может детерминированно нормализовать только safe path drift
 - orchestrator/aggregator собирает staged final doc set в `reports/taskruns/<run_id>/staging/final/`
 - validator пишет `validator-verdict.json`
 - только schema/semantic/validator gates разрешают promotion в канонические `reports/as-is/*`, `reports/findings/*`, `reports/coverage/*`, `reports/agent-outputs/*`, `proposals/*`
@@ -340,7 +342,9 @@ Script делает strict полный цикл:
 - per-run snapshots в `TMP_ROOT/snapshots/<run_id>/...`;
 - гарантированные debug artifacts: `TMP_ROOT/full-run.log` и `TMP_ROOT/session-summary.md` даже при раннем fail.
 - при `runner_parse_failed` runtime сохраняет raw-output evidence в `reports/taskruns/raw/*` (stdout/stderr + checksums + meta).
-- для `qwen-code` на `init.step1.collect` / `refresh.step1.collect` включён internal stall watchdog: если `write_root` уже содержит `shard-pack-manifest.json` и authored docs, но provider замолчал по stdout/stderr и перестал мутировать `write_root`, runtime принудительно завершает процесс и делает forced recovery retry до step timeout.
+- для `qwen-code` на `init.step1.collect` / `refresh.step1.collect` включён двуфазный internal stall watchdog:
+  - `pre_artifact`: если provider жив, но в `write_root` ещё нет authored artifacts и одновременно молчат stdout/stderr и file mutations, runtime принудительно завершает процесс и делает forced fresh retry до step timeout;
+  - `post_artifact`: если `write_root` уже содержит `shard-pack-manifest.json` и authored docs, но provider замолчал по stdout/stderr и перестал мутировать `write_root`, runtime принудительно завершает процесс и делает forced recovery retry до step timeout.
 - `reports/taskruns/<run_id>-quality.json` хранит `evidence_state` (`collect/findings/report_mode/reasons`); если `report_mode=incomplete`, generated markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) помечаются banner/triage-only wording и не означают "сервисов/проблем нет".
 
 Если нужно сохранить временный workspace для ручного анализа:
@@ -452,8 +456,10 @@ GitHub target catalog для release выбора (`3` monorepo + `3` multi-repo
 - backend quality считается только по snapshot-артефактам (`snapshots/<run_id>/reports/*`), frontend smoke запускается на отдельной `frontend-workspace` копии и не мутирует backend baseline
 - batch evaluator добавляет semantic hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`; для multi-profile (`expected_repo_count >= 2`) обязателен `cross-repo` сигнал (`analysis:cross-repo-missing` при отсутствии)
 - в `run_matrix`/`quality_report` дополнительно фиксируются `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, runtime flow checks (`runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:execution-semantics`, `runtime_flow_failed`) и failure classes (`runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_signal_terminated`, `infra_incomplete_cycle`, `quality_gates_failed`, `summary_missing`, `precheck_failed`)
-- `full-run-batch-5x2.sh` пишет per-run status sentinel в каждый `run_dir`; если shell дошёл до classifier без `session-summary.md`, harness всё равно фиксирует `infra_incomplete_cycle` или `infra_signal_terminated` вместо немой потери batch accounting
-- `full-run-batch-matrix.sh` append-ит `profile-runs.jsonl` даже для failed/incomplete child batch и умеет строить matrix verdict на partially completed batch roots
+- inner `full-run-ai-advent.sh` пишет running-heartbeat в `run-status.env` (`updated_at`, `last_pipeline_stage`, `last_runtime_provider`, `last_progress_at`) и сам materialize-ит terminal status при normal/signal/process exit
+- `full-run-batch-5x2.sh` имеет signal + `EXIT` traps: если shell выходит без `session-summary.md`, harness всё равно досеивает terminal `run-status`, классифицирует started runs и пишет TSV row с `infra_incomplete_cycle` или `infra_signal_terminated`
+- `full-run-batch-matrix.sh` ведёт durable `profile-status/*.json`, переводит lingering `running` в terminal `failed` на `EXIT`, append-ит `profile-runs.jsonl` даже для failed/incomplete child batch и умеет строить matrix verdict на partially completed batch roots
+- batch/matrix reconstruction использует `run-status.env`, `profile-status/*.json` и `run-history.json` как равноправные источники истины; terminal `process_failed + summary_written=yes` остаётся deterministic pipeline failure и не должен перетираться в `infra_incomplete_cycle`
 - direct `npm run --prefix ui e2e:live`: Playwright output default `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
 - `scripts/frontend-live-e2e.sh`: Playwright output сохраняется в `$OUTPUT_DIR/playwright-results`
 - frontend live e2e ожидает число resolved repos из `UI_E2E_EXPECTED_REPO_COUNT` (default `1`)

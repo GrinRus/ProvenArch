@@ -171,6 +171,16 @@ read_run_status_seed_field() {
   sed -n "s/^${key}=//p" "$RUN_STATUS_FILE" | tail -n1 | tr -d '\r'
 }
 
+read_status_field() {
+  local status_file="$1"
+  local key="$2"
+  if [[ ! -f "$status_file" ]]; then
+    printf ''
+    return 0
+  fi
+  sed -n "s/^${key}=//p" "$status_file" | tail -n1 | tr -d '\r'
+}
+
 signal_number() {
   case "$1" in
     HUP) printf '1' ;;
@@ -224,6 +234,54 @@ write_terminal_run_status() {
     echo "failure_reason=${failure_reason}"
     echo "summary_written=${summary_written}"
     echo "updated_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+    echo "last_pipeline_stage=${LAST_PIPELINE_STAGE}"
+    echo "last_runtime_provider=${LAST_RUNTIME_PROVIDER}"
+    echo "last_progress_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+  } >"$RUN_STATUS_FILE"
+}
+
+write_running_run_status_heartbeat() {
+  if [[ -z "$RUN_STATUS_FILE" ]]; then
+    return 0
+  fi
+  local state
+  state="$(read_status_field "$RUN_STATUS_FILE" "state")"
+  if [[ -n "$state" && "$state" != "running" ]]; then
+    return 0
+  fi
+  mkdir -p "$(dirname "$RUN_STATUS_FILE")"
+  local provider
+  provider="$(read_run_status_seed_field "provider")"
+  local run_index
+  run_index="$(read_run_status_seed_field "run_index")"
+  local process_exit
+  process_exit="$(read_status_field "$RUN_STATUS_FILE" "process_exit")"
+  local termination_signal
+  termination_signal="$(read_status_field "$RUN_STATUS_FILE" "termination_signal")"
+  if [[ -z "$termination_signal" ]]; then
+    termination_signal="none"
+  fi
+  local failure_reason
+  failure_reason="$(read_status_field "$RUN_STATUS_FILE" "failure_reason")"
+  local summary_written
+  summary_written="$(read_status_field "$RUN_STATUS_FILE" "summary_written")"
+  if [[ -z "$summary_written" ]]; then
+    summary_written="no"
+  fi
+  local now_utc
+  now_utc="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+  {
+    echo "provider=${provider}"
+    echo "run_index=${run_index}"
+    echo "state=running"
+    echo "process_exit=${process_exit}"
+    echo "termination_signal=${termination_signal}"
+    echo "failure_reason=${failure_reason}"
+    echo "summary_written=${summary_written}"
+    echo "updated_at=${now_utc}"
+    echo "last_pipeline_stage=${LAST_PIPELINE_STAGE}"
+    echo "last_runtime_provider=${LAST_RUNTIME_PROVIDER}"
+    echo "last_progress_at=${now_utc}"
   } >"$RUN_STATUS_FILE"
 }
 
@@ -789,6 +847,7 @@ run_cli_pipeline() {
   else
     LAST_RUNTIME_PROVIDER="fake"
   fi
+  write_running_run_status_heartbeat
 
   local output_path="$LOG_DIR/run-iter${iteration}-${runtime_mode}-${runtime_provider}-${pipeline}.log"
   local quality_path
@@ -832,6 +891,7 @@ run_cli_pipeline() {
     local elapsed_sec=$((SECONDS - run_started_at))
     if (( RUNTIME_HEARTBEAT_SEC > 0 )) && (( elapsed_sec > 0 )) && (( elapsed_sec % RUNTIME_HEARTBEAT_SEC == 0 )) && (( elapsed_sec != last_progress_emit )); then
       log "pipeline progress: iteration=$iteration runtime=$runtime_label pipeline=$pipeline elapsed_sec=$elapsed_sec timeout_sec=$PIPELINE_TIMEOUT_SEC"
+      write_running_run_status_heartbeat
       last_progress_emit="$elapsed_sec"
     fi
   done
@@ -1210,6 +1270,9 @@ API_BASE="http://127.0.0.1:${API_PORT}"
 SERVER_LOG="$LOG_DIR/serve-fake.log"
 
 log "start API server for validate/init simulation"
+LAST_PIPELINE_STAGE="api_server.bootstrap"
+LAST_RUNTIME_PROVIDER="fake"
+write_running_run_status_heartbeat
 "$ACP_BIN" serve \
   --workspace "$WORKSPACE_BASELINE" \
   --runtime fake \
@@ -1231,6 +1294,8 @@ else
 fi
 
 log "POST /api/workspace/validate"
+LAST_PIPELINE_STAGE="api.workspace.validate"
+write_running_run_status_heartbeat
 curl -fsS -X POST "$API_BASE/api/workspace/validate" > "$VALIDATE_JSON"
 python3 - "$VALIDATE_JSON" "$EXPECTED_REPO_COUNT_RESOLVED" <<'PY'
 import json
@@ -1248,6 +1313,8 @@ print(f"resolved_repos={len(resolved)}")
 PY
 
 log "POST /api/pipeline/init"
+LAST_PIPELINE_STAGE="api.pipeline.init"
+write_running_run_status_heartbeat
 curl -fsS -X POST -H 'Content-Type: application/json' -d '{"trigger":"manual"}' "$API_BASE/api/pipeline/init" > "$API_INIT_START_JSON"
 API_INIT_RUN_ID="$(python3 - "$API_INIT_START_JSON" <<'PY'
 import json
@@ -1282,6 +1349,8 @@ PY
   api_init_elapsed=$((API_INIT_TIMEOUT_SEC - (api_init_deadline - SECONDS)))
   if (( RUNTIME_HEARTBEAT_SEC > 0 )) && (( api_init_elapsed > 0 )) && (( api_init_elapsed % RUNTIME_HEARTBEAT_SEC == 0 )) && (( api_init_elapsed != last_api_init_progress )); then
     log "api init progress: run_id=$API_INIT_RUN_ID status=$init_status elapsed_sec=$api_init_elapsed timeout_sec=$API_INIT_TIMEOUT_SEC"
+    LAST_PIPELINE_STAGE="api.pipeline.init.poll"
+    write_running_run_status_heartbeat
     last_api_init_progress="$api_init_elapsed"
   fi
   sleep 0.25
@@ -1319,6 +1388,9 @@ log "stop API server"
 stop_server
 
 log "bootstrap headless workspace in tmp"
+LAST_PIPELINE_STAGE="headless.workspace.bootstrap"
+LAST_RUNTIME_PROVIDER="$HEADLESS_PROVIDER"
+write_running_run_status_heartbeat
 "$ACP_BIN" init-workspace \
   --workspace "$WORKSPACE_HEADLESS" \
   --repos-file "$RESOLVED_TARGET_REPOS_FILE" >"$LOG_DIR/init-workspace-headless.log" 2>&1
@@ -1332,6 +1404,9 @@ fi
 resolve_effective_timeouts_from_workspace "$WORKSPACE_HEADLESS"
 if [[ "$APPLY_TIMEOUTS_VIA_API" == "1" ]]; then
   log "start temporary API server for timeout apply workspace=headless"
+  LAST_PIPELINE_STAGE="headless.timeouts.apply"
+  LAST_RUNTIME_PROVIDER="$HEADLESS_PROVIDER"
+  write_running_run_status_heartbeat
   HEADLESS_API_PORT="$(allocate_free_port)"
   HEADLESS_API_BASE="http://127.0.0.1:${HEADLESS_API_PORT}"
   HEADLESS_SERVER_LOG="$LOG_DIR/serve-headless-timeouts.log"
@@ -1353,6 +1428,9 @@ else
 fi
 
 log "run runtime cycles: fake + headless(provider=$HEADLESS_PROVIDER)"
+LAST_PIPELINE_STAGE="runtime.cycles"
+LAST_RUNTIME_PROVIDER="$HEADLESS_PROVIDER"
+write_running_run_status_heartbeat
 prev_fake_init_signal=""
 prev_fake_refresh_signal=""
 prev_headless_init_signal=""
@@ -1383,6 +1461,8 @@ fi
 
 if [[ "$RUN_QUALITY_GATES" == "1" ]]; then
   log "run quality gates: make contracts test lint build"
+  LAST_PIPELINE_STAGE="quality_gates"
+  write_running_run_status_heartbeat
   if ! (
     cd "$PROVENARCH_ROOT"
     # Run project gates with neutral runtime env so defaults in tests are stable.

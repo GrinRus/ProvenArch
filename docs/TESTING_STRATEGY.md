@@ -253,13 +253,19 @@ Implemented additional jobs:
   - captured live bank extras fixture защищает collect-repair normalization от legacy `changeset[].artifact` drift при manifest-only repair
   - collect runtime делает максимум одну post-success artifact-repair попытку для skeletal/generic-only `shard-pack-manifest.json`; если repair не улучшил fidelity, исходный `write_root` восстанавливается
   - schema-invalid `TaskResult` получает один direct-JSON retry с whitelist допустимых `changeset[].op`; invalid manifest после schema-valid result идёт в отдельный artifact-repair path
-  - `qwen-code` collect steps имеют internal stall watchdog: после появления manifest+authored docs отсутствие pipe activity и write-root mutations в течение внутреннего stall window должно завершать provider process с forced recovery retry до общего step timeout
+  - `qwen-code` collect steps имеют internal stall watchdog в двух фазах:
+    - `pre_artifact`: child process без stdout/stderr и без `write_root` mutations должен детектиться до общего timeout и переходить в forced fresh retry без долгого ожидания EOF, даже если дочерний stdout pipe удерживается незавершённым subprocess-ом
+    - `post_artifact`: после появления manifest+authored docs отсутствие pipe activity и write-root mutations в течение внутреннего stall window должно завершать provider process с forced recovery retry до общего step timeout
+  - provider-agnostic draft-step gate: `step0/2/4` принимаются только при валидном runtime draft manifest и наличии всех referenced draft files под `draft_final_root`; invalid draft manifest не должен маскироваться schema-valid `TaskResult`
+  - safe compatibility normalization для `step2/4` разрешает удалить legacy `add_doc_artifact` только если runtime draft manifest уже валиден и referenced draft files существуют
   - collect runtime не принимает nominal success после failed artifact-repair: missing/invalid/skeletal manifest после единственной repair попытки поднимается как `runner_parse_failed` / `runtime_parse`
   - global uniqueness для `citation-index.claim_ids` проверяется как validator contract; duplicate claim ids либо repair-ятся на index/reference уровне детерминированным shard suffix, либо остаются blocking defect
   - refresh artifact-quality guard: `artifact_quality:*` в `reports/taskruns/<run_id>-quality.json.run_warnings` считается canonical live gate blocker; bank-like collapse к одному `cite.runtime-summary` должен ловиться, openstack-like reuse с хотя бы одним rich shard остаётся допустимым
   - `profile_matrix_<matrix-id>` и `quality_report_<batch-id>` обязаны агрегировать только реально выбранные `selected_providers`/`selected_run_indexes`; qwen-only non-release run не должен порождать synthetic `backend_total_runs=10` и `summary_missing=9`
-  - `full-run-batch-5x2.sh` обязан писать per-run status sentinel и materialize-ить `infra_incomplete_cycle` / `infra_signal_terminated` даже если provider child завершился раньше `session-summary.md`
-  - `full-run-batch-matrix.sh` обязан append-ить `profile-runs.jsonl` и строить release verdict даже на partially completed batch roots; missing downstream report files не должны ронять matrix generator
+  - `full-run-ai-advent.sh` обязан обновлять running-heartbeat в `run-status.env` (`updated_at`, `last_pipeline_stage`, `last_runtime_provider`, `last_progress_at`) и сам писать terminal sentinel при completed/process_failed/signal_terminated
+  - `full-run-batch-5x2.sh` обязан писать per-run status sentinel, иметь `EXIT` trap и materialize-ить `infra_incomplete_cycle` / `infra_signal_terminated` даже если provider child завершился раньше `session-summary.md`
+  - `full-run-batch-matrix.sh` обязан append-ить `profile-runs.jsonl`, вести durable `profile-status/*.json`, переводить lingering `running` в terminal `failed` на `EXIT` и строить release verdict даже на partially completed batch roots; missing downstream report files не должны ронять matrix generator
+  - `e2e_batch_report.py` обязан реконструировать partial matrix roots из `run-status.env`, `profile-status/*.json` и `run-history.json`; terminal `process_failed + summary_written=yes` не должен классифицироваться как `infra_incomplete_cycle`
   - internal shard-plan/shard-summary taskrun JSON обязаны иметь non-empty `meta.runtime.name`; false `contract:runtime-name` на internal artifacts считается regression
   - относительные `repos_file` пути резолвятся от директории `E2E_MATRIX_FILE`
   - для `source_kind=git_url` refs должны быть pinned

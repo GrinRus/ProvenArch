@@ -1,7 +1,6 @@
 package qwencode
 
 import (
-	"bytes"
 	"strings"
 	"testing"
 
@@ -44,7 +43,7 @@ func TestCaptureCommandStreamForwardsCRLFAndFinalLineWithoutNewline(t *testing.T
 	t.Parallel()
 
 	input := "stderr line one\r\nstderr line two without trailing newline"
-	var sink bytes.Buffer
+	sink := &commandOutputBuffer{}
 	var chunks []acpruntime.OutputChunk
 
 	task := acpruntime.Task{
@@ -53,7 +52,7 @@ func TestCaptureCommandStreamForwardsCRLFAndFinalLineWithoutNewline(t *testing.T
 		},
 	}
 
-	if err := captureCommandStream(strings.NewReader(input), &sink, task, acpruntime.OutputStreamStderr); err != nil {
+	if err := captureCommandStream(strings.NewReader(input), sink, task, acpruntime.OutputStreamStderr); err != nil {
 		t.Fatalf("capture command stream: %v", err)
 	}
 	if sink.String() != input {

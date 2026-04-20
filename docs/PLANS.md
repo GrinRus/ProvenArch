@@ -49,6 +49,45 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 
 ### Plan ID
+EP-20260420-regres-small-live-triage
+
+### Context
+Нужно выполнить canonical live `regres fast` (`bank-of-anthos + openedx`, затем `openstack`) через `scripts/full-run-batch-matrix.sh` на trusted host, непрерывно мониторить статус прогонов и после завершения собрать детальный triage-отчёт по фактическим багам/недоработкам без изменения public contract.
+
+### Goals (must have)
+- [ ] Запустить оба canonical `regres fast` matrix slice из clean worktree с `BATCH_PROVIDER_FILTER=qwen-code`
+- [ ] Непрерывно мониторить matrix/batch progress до terminal state каждого slice
+- [ ] Собрать run artifacts, classifications и release/profile reports для каждого slice
+- [ ] Зафиксировать продуктовые/runtime/harness баги и отделить их от operational noise
+- [ ] Составить итоговый отчёт: что сломалось, где именно, что нужно чинить дальше
+
+### Non-goals
+- [ ] Не менять matrix taxonomy, timeout profiles и public schemas во время самого прогона
+- [ ] Не подменять canonical harness wrapper-скриптом или ad-hoc env overrides
+- [ ] Не пытаться "чинить на лету" live run до завершения triage цикла
+
+### Approach
+1) Проверить trusted-host prerequisites, pinned path checkouts и clean detached worktree.
+2) Выполнить `regres fast` как два последовательных вызова `scripts/full-run-batch-matrix.sh` с qwen-only provider filter.
+3) Во время выполнения регулярно читать batch/matrix logs, status files и intermediate reports, чтобы не пропустить stall/incomplete state.
+4) После завершения разобрать terminal artifacts: `profile-runs.jsonl`, matrix status files, batch classifications, session summaries, release/profile verdicts и raw taskrun diagnostics.
+5) Сформировать детальный triage-отчёт и список необходимых фиксов.
+
+### Files expected to change
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [ ] Оба `regres fast` slice дошли до terminal state (`passed|failed`) с сохранёнными matrix/batch breadcrumbs
+- [ ] Есть собранный список фактических failure classes и их root cause
+- [ ] Итоговый отчёт отделяет runtime/provider проблемы от harness/reporting проблем
+
+### Risks
+- Основной риск — long-running live provider hangs или внешние transport/API failures. Снижение риска: canonical watchdog/reporting уже встроены; во время прогона мониторинг идёт по нескольким источникам (`driver log`, batch status, profile status, taskrun artifacts), а не только по одному summary-файлу.
+
+### Progress log
+- 2026-04-20: prerequisites и pinned path SHA проверены, prepared clean detached worktree `/private/tmp/provenarch-run-clean`, запуск `regres fast` начинается.
+
+### Plan ID
 EP-20260420-qwen-preartifact-stall-reporting
 
 ### Context
@@ -621,6 +660,50 @@ EP-20260416-zero-signal-hardening
 
 ### Archived
 - Completed historical plans moved to `docs/archive/PLANS_ARCHIVE_2026-04.md` (archived on 2026-04-15).
+
+### Plan ID
+EP-20260420-qwen-live-regress-stabilization
+
+### Context
+Нужно закрыть подтвержденные live-regress баги `qwen` runtime/harness после прогона `regres fast`: поздний stall retry из-за pipe drain, неполный collect repair, отсутствие draft-artifact gate для step0/2/4 и ложный `running` в batch/matrix при аварийном завершении.
+
+### Goals (must have)
+- [ ] Ускорить forced retry после collect stall без ожидания полного EOF stdout/stderr
+- [ ] Дожать collect manifest contract enforcement после retry
+- [ ] Добавить required-artifact gate для `constitution/asis/proposals` draft manifests
+- [ ] Сделать terminal batch/matrix status durable даже при partial/abnormal exit
+- [ ] Обновить tests/fixtures/docs и прогнать DoD
+
+### Non-goals
+- [ ] Не менять public JSON schemas, API endpoints и `workspace.yaml`
+- [ ] Не добавлять user-facing knobs для stall thresholds или draft validation
+
+### Approach
+1) Перестроить `qwen` stall path вокруг short drain + immediate retry sentinel.
+2) Усилить runtime contract validation для collect и draft-step artifacts.
+3) Добавить durable parent/child terminal breadcrumbs в live harness и reconstruction.
+
+### Files expected to change
+- `internal/runtime/qwencode/*`
+- `internal/runtime/taskresultcompat/*`
+- `internal/orchestrator/runtime_drafts.go`
+- `scripts/full-run-ai-advent.sh`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/e2e_batch_report.py`
+- `scripts/tests/*`
+- `docs/ARCHITECTURE.md`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/TESTING_STRATEGY.md`
+
+### Acceptance criteria
+- [ ] Stall retry реально ранний и покрыт тестом с зависшим stdout pipe
+- [ ] Invalid collect/draft artifacts падают как contract/runtime failures с raw diagnostics
+- [ ] Batch/matrix partial exit больше не оставляет stale `running`
+- [ ] Документация и regression tests синхронизированы
+
+### Risks
+- В основном дереве уже есть unrelated изменения `internal/api/ui_dist/*`; не затрагивать их и прогонять verification аккуратно, при необходимости в изолированной копии.
 
 ---
 

@@ -1,6 +1,8 @@
 package taskresultcompat
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
@@ -121,5 +123,145 @@ func TestNormalizeRawTaskResultDoesNotDropNonManifestLegacyArtifact(t *testing.T
 	}
 	if changed {
 		t.Fatalf("expected non-manifest legacy op to remain for hard failure handling")
+	}
+}
+
+func TestNormalizeRawTaskResultDropsLegacyDraftManifestArtifactForStep2WhenManifestIsValid(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "overview.md"), []byte("# Overview\n"), 0o644); err != nil {
+		t.Fatalf("write draft overview: %v", err)
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step2.asis_docs",
+  "step_contract": "as_is",
+  "agent_role": "architect",
+  "outputs": [
+    {
+      "path": "overview.md",
+      "canonical_path": "reports/as-is/overview.md",
+      "kind": "report",
+      "title": "Overview"
+    }
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, "asis-draft-manifest.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write asis draft manifest: %v", err)
+	}
+
+	task := acpruntime.Task{
+		StepID:         "init.step2.asis_docs",
+		WriteRoot:      writeRoot,
+		DraftFinalRoot: draftRoot,
+		ArtifactRoot:   "reports/taskruns/run-1/runtime/step2_as_is",
+	}
+	raw := []byte(`{
+  "meta": {
+    "task_id": "task-1",
+    "step_id": "init.step2.asis_docs",
+    "runtime": {"name": "qwen-code"},
+    "started_at": "2026-04-18T21:54:16Z"
+  },
+  "summary": "draft manifest already written",
+  "changeset": [
+    {
+      "op": "add_doc_artifact",
+      "doc_artifact": {
+        "id": "asis-draft-manifest",
+        "path": "reports/taskruns/run-1/runtime/step2_as_is/asis-draft-manifest.json"
+      }
+    }
+  ]
+}`)
+
+	normalized, changed, err := NormalizeRawTaskResult(task, raw)
+	if err != nil {
+		t.Fatalf("normalize raw taskresult: %v", err)
+	}
+	if !changed {
+		t.Fatalf("expected legacy step2 draft manifest op to be dropped")
+	}
+	parsed, err := contracts.ParseTaskResult(normalized)
+	if err != nil {
+		t.Fatalf("expected normalized step2 taskresult to parse: %v", err)
+	}
+	if len(parsed.Changeset) != 0 {
+		t.Fatalf("expected normalized changeset to be empty, got %#v", parsed.Changeset)
+	}
+}
+
+func TestNormalizeRawTaskResultKeepsLegacyDraftManifestArtifactWhenReferencedDraftsAreMissing(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "outputs": [
+    {
+      "path": "proposal.md",
+      "canonical_path": "proposals/proposal-baseline/proposal.md",
+      "kind": "proposal",
+      "title": "proposal.md"
+    }
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, "proposals-draft-manifest.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write proposals draft manifest: %v", err)
+	}
+
+	task := acpruntime.Task{
+		StepID:         "init.step4.proposals",
+		WriteRoot:      writeRoot,
+		DraftFinalRoot: draftRoot,
+		ArtifactRoot:   "reports/taskruns/run-1/runtime/step4_proposals",
+	}
+	raw := []byte(`{
+  "meta": {
+    "task_id": "task-1",
+    "step_id": "init.step4.proposals",
+    "runtime": {"name": "qwen-code"},
+    "started_at": "2026-04-18T21:54:16Z"
+  },
+  "summary": "legacy proposal artifact op remains",
+  "changeset": [
+    {
+      "op": "add_doc_artifact",
+      "doc_artifact": {
+        "id": "proposal-draft-manifest",
+        "path": "reports/taskruns/run-1/runtime/step4_proposals/proposals-draft-manifest.json"
+      }
+    }
+  ]
+}`)
+
+	_, changed, err := NormalizeRawTaskResult(task, raw)
+	if err != nil {
+		t.Fatalf("normalize raw taskresult: %v", err)
+	}
+	if changed {
+		t.Fatalf("expected legacy op to remain when referenced proposal draft files are missing")
 	}
 }

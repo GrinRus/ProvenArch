@@ -258,6 +258,40 @@ on_batch_signal() {
   exit "$(signal_exit_code "$signal_name")"
 }
 
+classify_unfinished_started_runs_on_exit() {
+  local exit_code="$1"
+  local idx
+  for idx in "${!STARTED_RUN_DIRS[@]}"; do
+    local run_dir="${STARTED_RUN_DIRS[$idx]}"
+    local provider="${STARTED_RUN_PROVIDERS[$idx]}"
+    local run_index="${STARTED_RUN_INDEXES[$idx]}"
+    local run_status_path=""
+    local process_exit=""
+    [[ -z "$run_dir" || -z "$provider" || -z "$run_index" ]] && continue
+    if run_classification_exists "$provider" "$run_index"; then
+      continue
+    fi
+    run_status_path="$(run_status_file "$run_dir")"
+    process_exit="$(read_status_field "$run_status_path" "process_exit")"
+    if [[ ! "$process_exit" =~ ^[0-9]+$ ]]; then
+      process_exit="$exit_code"
+    fi
+    if [[ ! "$process_exit" =~ ^[0-9]+$ || "$process_exit" -eq 0 ]]; then
+      process_exit=1
+    fi
+    ensure_terminal_run_status "$run_dir" "$provider" "$run_index" "$process_exit"
+    classify_run_failure "$provider" "$run_index" "$run_dir" "$process_exit"
+  done
+}
+
+on_batch_exit() {
+  local exit_code="$1"
+  if [[ -z "${RUN_CLASSIFICATIONS_TSV:-}" ]]; then
+    return 0
+  fi
+  classify_unfinished_started_runs_on_exit "$exit_code"
+}
+
 array_contains() {
   local needle="$1"
   shift
@@ -1202,6 +1236,7 @@ echo -e "provider\trun_index\tfailure_class\tprocess_exit\tsummary_result\tfailu
 trap 'on_batch_signal TERM' TERM
 trap 'on_batch_signal INT' INT
 trap 'on_batch_signal HUP' HUP
+trap 'on_batch_exit $?' EXIT
 
 PROVENARCH_SHA="$(git -C "$PROVENARCH_ROOT" rev-parse HEAD)"
 PROVENARCH_BRANCH="$(git -C "$PROVENARCH_ROOT" rev-parse --abbrev-ref HEAD)"

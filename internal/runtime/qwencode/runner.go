@@ -37,6 +37,7 @@ var (
 	collectPreArtifactStallWindow  = 75 * time.Second
 	collectStallPollInterval       = 2 * time.Second
 	collectStallTerminateGrace     = 2 * time.Second
+	collectStallPostTerminateDrain = 500 * time.Millisecond
 )
 
 type HeadlessRunner struct {
@@ -77,11 +78,15 @@ type collectWriteRootSnapshot struct {
 type collectRepairAttempt struct {
 	Attempted                bool
 	ManifestStateBeforeRetry string
+	Diagnostic               collectStallDiagnostic
 }
 
 type retryDiagnosticContext struct {
 	LastStallPhase           collectStallPhase
 	ManifestStateBeforeRetry string
+	AuthoredFileCount        int
+	LastPipeActivity         time.Time
+	LastWriteRootMutation    time.Time
 }
 
 type commandActivityTracker struct {
@@ -92,6 +97,11 @@ type commandActivityTracker struct {
 type activityTrackingReader struct {
 	reader  io.Reader
 	tracker *commandActivityTracker
+}
+
+type commandOutputBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
 }
 
 const (
@@ -168,6 +178,33 @@ func (r *activityTrackingReader) Read(p []byte) (int, error) {
 		r.tracker.Note(time.Now().UTC())
 	}
 	return n, err
+}
+
+func (b *commandOutputBuffer) WriteString(value string) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf.WriteString(value)
+}
+
+func (b *commandOutputBuffer) BytesCopy() []byte {
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]byte(nil), b.buf.Bytes()...)
+}
+
+func (b *commandOutputBuffer) String() string {
+	if b == nil {
+		return ""
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 func (r HeadlessRunner) commandName() string {
@@ -327,6 +364,7 @@ func maybeRepairCollectArtifacts(
 	attempt := collectRepairAttempt{
 		Attempted:                true,
 		ManifestStateBeforeRetry: beforeRepairState,
+		Diagnostic:               buildCollectRepairDiagnostic(task.WriteRoot),
 	}
 
 	snapshot, err := artifactquality.SnapshotWriteRoot(task.WriteRoot)
@@ -369,6 +407,16 @@ func maybeRepairCollectArtifacts(
 	}
 
 	_ = artifactquality.EnsureCanonicalCollectManifest(task, repaired.TaskResult)
+	if contractErr := validateCollectManifestContractAtWriteRoot(task.WriteRoot); contractErr != nil {
+		_ = snapshot.Restore()
+		return acpruntime.Result{}, attempt, wrapArtifactContractFailure(
+			task,
+			"artifact_repair.contract",
+			repaired,
+			fmt.Sprintf("collect artifacts remained invalid after one repair attempt: initial=%s; validation=%v", initialProblem, contractErr),
+			contractErr,
+		)
+	}
 	repairedAssessment, err := assessRetryManifestAtWriteRoot(task.WriteRoot)
 	if err != nil || !repairedAssessment.Rich {
 		_ = snapshot.Restore()
@@ -397,6 +445,9 @@ func recoverCollectArtifactsAfterStall(
 	retryContext := retryDiagnosticContext{
 		LastStallPhase:           collectStallPhasePostArtifact,
 		ManifestStateBeforeRetry: stalled.Diagnostic.ManifestState,
+		AuthoredFileCount:        stalled.Diagnostic.AuthoredFileCount,
+		LastPipeActivity:         stalled.Diagnostic.LastPipeActivity,
+		LastWriteRootMutation:    stalled.Diagnostic.LastWriteRootMutation,
 	}
 
 	snapshot, err := artifactquality.SnapshotWriteRoot(task.WriteRoot)
@@ -445,6 +496,17 @@ func recoverCollectArtifactsAfterStall(
 	}
 
 	_ = artifactquality.EnsureCanonicalCollectManifest(task, repaired.TaskResult)
+	if contractErr := validateCollectManifestContractAtWriteRoot(task.WriteRoot); contractErr != nil {
+		_ = snapshot.Restore()
+		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, retryContext, "failed", contractErr.Error(), currentCollectManifestState(task.WriteRoot)))
+		return acpruntime.Result{}, wrapArtifactContractFailure(
+			task,
+			"stall_repair.contract",
+			repaired,
+			fmt.Sprintf("collect_stalled_after_artifacts and collect artifacts remained invalid after repair: validation=%v", contractErr),
+			errors.Join(errCollectStalledAfterArtifacts, contractErr),
+		)
+	}
 	repairedAssessment, assessErr := assessRetryManifestAtWriteRoot(task.WriteRoot)
 	if assessErr != nil || !repairedAssessment.Rich {
 		_ = snapshot.Restore()
@@ -475,6 +537,9 @@ func recoverCollectBeforeArtifactsAfterStall(
 	retryContext := retryDiagnosticContext{
 		LastStallPhase:           stalled.Diagnostic.StallPhase,
 		ManifestStateBeforeRetry: stalled.Diagnostic.ManifestState,
+		AuthoredFileCount:        stalled.Diagnostic.AuthoredFileCount,
+		LastPipeActivity:         stalled.Diagnostic.LastPipeActivity,
+		LastWriteRootMutation:    stalled.Diagnostic.LastWriteRootMutation,
 	}
 
 	retryArgs := buildRetryQwenArgs(task, buildPromptWithModeAndHints(taskPayload, promptRetryCollectFresh, buildCollectFreshRetryHints(task)))
@@ -482,6 +547,13 @@ func recoverCollectBeforeArtifactsAfterStall(
 		EnableCollectStallMonitor: true,
 	})
 	if runErr != nil {
+		var retryStalled collectStallError
+		if errors.As(runErr, &retryStalled) {
+			retryContext.absorbDiagnostic(retryStalled.Diagnostic)
+			if errors.Is(retryStalled, errCollectStalledAfterArtifacts) {
+				return recoverCollectArtifactsAfterStall(ctx, task, taskPayload, command, retried, retryStalled)
+			}
+		}
 		failureResult := selectFailureResult(retried, current)
 		failureMessage := buildFailureMessage(task, "stall_retry.exec", fmt.Errorf("%w: %v", errCollectStalledBeforeArtifacts, runErr), failureResult)
 		emitDiagnostic(task, "runtime task retry completed", retryDiagnosticFields(task, stalled, retryContext, "failed", runErr.Error(), currentCollectManifestState(task.WriteRoot)))
@@ -507,6 +579,7 @@ func recoverCollectBeforeArtifactsAfterStall(
 
 	finalResult, repairAttempt, err := maybeRepairCollectArtifacts(ctx, task, taskPayload, command, retried)
 	if repairAttempt.Attempted {
+		retryContext.absorbDiagnostic(repairAttempt.Diagnostic)
 		retryContext.LastStallPhase = collectStallPhasePostArtifact
 		if state := strings.TrimSpace(repairAttempt.ManifestStateBeforeRetry); state != "" {
 			retryContext.ManifestStateBeforeRetry = state
@@ -554,6 +627,15 @@ func retryDiagnosticFields(task acpruntime.Task, stalled collectStallError, cont
 	}
 	if state := strings.TrimSpace(context.ManifestStateBeforeRetry); state != "" {
 		fields["manifest_state_before_retry"] = state
+	}
+	if context.AuthoredFileCount > 0 {
+		fields["authored_file_count"] = context.AuthoredFileCount
+	}
+	if !context.LastPipeActivity.IsZero() {
+		fields["last_pipe_activity_at"] = context.LastPipeActivity.UTC().Format(time.RFC3339)
+	}
+	if !context.LastWriteRootMutation.IsZero() {
+		fields["last_write_root_mutation_at"] = context.LastWriteRootMutation.UTC().Format(time.RFC3339)
 	}
 	if state := strings.TrimSpace(manifestState); state != "" {
 		fields["manifest_state"] = state
@@ -748,28 +830,41 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 		cmd.Dir = writeRoot
 	}
 
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	stdoutPipe, err := cmd.StdoutPipe()
+	stdout := &commandOutputBuffer{}
+	stderr := &commandOutputBuffer{}
+	stdoutPipe, stdoutWriter, err := os.Pipe()
 	if err != nil {
 		return acpruntime.Result{}, "", nil, err
 	}
-	stderrPipe, err := cmd.StderrPipe()
+	stderrPipe, stderrWriter, err := os.Pipe()
 	if err != nil {
+		_ = stdoutPipe.Close()
+		_ = stdoutWriter.Close()
 		return acpruntime.Result{}, "", nil, err
 	}
+	cmd.Stdout = stdoutWriter
+	cmd.Stderr = stderrWriter
 
 	if err := cmd.Start(); err != nil {
+		_ = stdoutPipe.Close()
+		_ = stdoutWriter.Close()
+		_ = stderrPipe.Close()
+		_ = stderrWriter.Close()
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return acpruntime.Result{}, "", nil, ctxErr
 		}
 		return acpruntime.Result{}, "", nil, err
 	}
+	_ = stdoutWriter.Close()
+	_ = stderrWriter.Close()
+	defer closeCommandPipe(stdoutPipe)
+	defer closeCommandPipe(stderrPipe)
 
 	activityTracker := newCommandActivityTracker(time.Now().UTC())
 	monitorCtx, stopMonitor := context.WithCancel(context.Background())
 	defer stopMonitor()
 	var monitorWG sync.WaitGroup
+	stallCh := make(chan collectStallError, 1)
 	var stalledErr error
 	var stalledMu sync.Mutex
 	if options.EnableCollectStallMonitor && isCollectStep(task.StepID) && strings.TrimSpace(task.WriteRoot) != "" && cmd.Process != nil {
@@ -783,6 +878,10 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 			stalledMu.Lock()
 			stalledErr = stallErr
 			stalledMu.Unlock()
+			select {
+			case stallCh <- stallErr:
+			default:
+			}
 		}()
 	}
 
@@ -801,21 +900,45 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 
 	var wg sync.WaitGroup
 	wg.Add(2)
+	streamDone := make(chan struct{})
 	go func() {
 		defer wg.Done()
-		captureErr(captureCommandStream(&activityTrackingReader{reader: stdoutPipe, tracker: activityTracker}, &stdout, task, acpruntime.OutputStreamStdout))
+		captureErr(captureCommandStream(&activityTrackingReader{reader: stdoutPipe, tracker: activityTracker}, stdout, task, acpruntime.OutputStreamStdout))
 	}()
 	go func() {
 		defer wg.Done()
-		captureErr(captureCommandStream(&activityTrackingReader{reader: stderrPipe, tracker: activityTracker}, &stderr, task, acpruntime.OutputStreamStderr))
+		captureErr(captureCommandStream(&activityTrackingReader{reader: stderrPipe, tracker: activityTracker}, stderr, task, acpruntime.OutputStreamStderr))
+	}()
+	go func() {
+		wg.Wait()
+		close(streamDone)
 	}()
 
-	// Drain both output streams before waiting to avoid racy early pipe closes
-	// that can truncate stdout/stderr under parallel test/process scheduling.
-	wg.Wait()
-	waitErr := cmd.Wait()
-	stopMonitor()
-	monitorWG.Wait()
+	var waitErr error
+	stalledTriggered := false
+	select {
+	case <-streamDone:
+		stopMonitor()
+		monitorWG.Wait()
+		waitErr = cmd.Wait()
+	case <-ctx.Done():
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		waitForCommandStreams(stdoutPipe, stderrPipe, streamDone, collectStallPostTerminateDrain)
+		stopMonitor()
+		monitorWG.Wait()
+		waitErr = waitForCommandExit(cmd, collectStallPostTerminateDrain)
+		if waitErr == nil {
+			waitErr = ctx.Err()
+		}
+	case <-stallCh:
+		waitForCommandStreams(stdoutPipe, stderrPipe, streamDone, collectStallPostTerminateDrain)
+		stopMonitor()
+		monitorWG.Wait()
+		waitErr = waitForCommandExit(cmd, collectStallPostTerminateDrain)
+	}
+
 	if waitErr == nil && streamErr != nil {
 		waitErr = streamErr
 	}
@@ -828,7 +951,10 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 	currentStallErr := stalledErr
 	stalledMu.Unlock()
 	if currentStallErr != nil {
-		parsed, _, parseErr := parseCapturedTaskResult(task, stdout.Bytes(), result.Stdout, result.Stderr)
+		stalledTriggered = true
+	}
+	if stalledTriggered {
+		parsed, _, parseErr := parseCapturedTaskResult(task, stdout.BytesCopy(), result.Stdout, result.Stderr)
 		if parseErr == nil {
 			return parsed, "", nil, nil
 		}
@@ -841,7 +967,7 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 		return result, "", nil, runnerdiag.BuildExecFailure(waitErr, result.Stdout, result.Stderr)
 	}
 
-	parsed, parseStage, parseErr := parseCapturedTaskResult(task, stdout.Bytes(), result.Stdout, result.Stderr)
+	parsed, parseStage, parseErr := parseCapturedTaskResult(task, stdout.BytesCopy(), result.Stdout, result.Stderr)
 	return parsed, parseStage, parseErr, nil
 }
 
@@ -1049,7 +1175,7 @@ func isProcessDoneErr(err error) bool {
 	return strings.Contains(lower, "already finished") || strings.Contains(lower, "process already finished") || strings.Contains(lower, "no such process")
 }
 
-func captureCommandStream(reader io.Reader, sink *bytes.Buffer, task acpruntime.Task, stream acpruntime.OutputStream) error {
+func captureCommandStream(reader io.Reader, sink *commandOutputBuffer, task acpruntime.Task, stream acpruntime.OutputStream) error {
 	if sink == nil {
 		return errors.New("capture sink is nil")
 	}
@@ -1372,6 +1498,7 @@ func buildRetryRecoveryHint(task acpruntime.Task) string {
 		`- After shard-pack-manifest.json exists, do NOT continue broad list_directory/read_file sweeps across repo roots.`,
 		`- Preserve repo-specific citations when existing artifacts already contain them; do not replace them with one generic runtime summary citation.`,
 		`- Do NOT use todo_write, plan-style narration, or repeated broad list_directory sweeps in retry mode.`,
+		`- Do NOT delegate to agent/subagent helpers in retry mode.`,
 		`- Use at most 3 tool calls in retry mode unless a required artifact is missing from write_root.`,
 		`- Repair mode forbids inventing file operations in changeset; prefer "changeset": [].`,
 		`- Do NOT add top-level "compatibility" to TaskResult JSON; keep compatibility only inside shard-pack-manifest.json.`,
@@ -1421,6 +1548,7 @@ func buildCollectFreshRetryHints(task acpruntime.Task) []string {
 		`- This retry exists because the provider produced no durable collect artifacts in time.`,
 		`- Spend the minimum time needed to identify repo-backed evidence for one authored doc and shard-pack-manifest.json.`,
 		`- Keep repository exploration minimal; do not resume a broad repo sweep on this retry.`,
+		`- Do NOT delegate to agent/subagent helpers and do NOT use todo_write-style planning on this retry.`,
 		`- If write_root is still empty, create only the minimum viable authored doc set before returning the final JSON.`,
 		`- As soon as the first authored doc and shard-pack-manifest.json exist in write_root, stop repository exploration and return the final TaskResult JSON immediately.`,
 	}
@@ -1441,9 +1569,29 @@ func containsString(values []string, target string) bool {
 
 func buildStepSpecificPolicy(stepID string) string {
 	switch stepID {
+	case "init.step0.constitution":
+		return strings.Join([]string{
+			`STEP POLICY init.step0.constitution:`,
+			`- Do NOT delegate to agent/subagent helpers.`,
+			`- Do NOT use todo_write-style planning or long plan narration.`,
+			`- Use only existing repo entrypoint hints; do not assume README.md exists when it is not present.`,
+			`- After the first useful evidence pass, converge to constitution drafts instead of continuing a broad repo sweep.`,
+		}, "\n")
+	case "init.step1.collect":
+		return strings.Join([]string{
+			`STEP POLICY init.step1.collect:`,
+			`- Do NOT delegate to agent/subagent helpers.`,
+			`- Do NOT use todo_write-style planning or long plan narration.`,
+			`- Use only existing repo entrypoint hints; do not assume README.md exists when it is not present.`,
+			`- After the first useful evidence pass, converge to authored docs plus shard-pack-manifest.json instead of continuing a broad repo sweep.`,
+		}, "\n")
 	case "refresh.step1.collect":
 		return strings.Join([]string{
 			`STEP POLICY refresh.step1.collect:`,
+			`- Do NOT delegate to agent/subagent helpers.`,
+			`- Do NOT use todo_write-style planning or long plan narration.`,
+			`- Use only existing repo entrypoint hints; do not assume README.md exists when it is not present.`,
+			`- After the first useful evidence pass, converge to authored docs plus shard-pack-manifest.json instead of continuing a broad repo sweep.`,
 			`- Allowed upsert_entity types: service, datastore, integration, external.system, team, domain, api, component.`,
 			`- Forbidden placeholder entity types: runtime_provider, runtime, metadata.`,
 			`- Analyze only repository/workspace artifacts; do NOT perform web search or external browsing.`,
@@ -1492,15 +1640,22 @@ func buildDocFirstFilesystemPolicy(task acpruntime.Task) string {
 		fmt.Sprintf(`- step_contract = %q`, strings.TrimSpace(task.StepContract)),
 		fmt.Sprintf(`- expected_artifacts = %s`, strings.Join(task.ExpectedArtifacts, ", ")),
 	}
+	if entrypointHints := collectRepoEntrypointHints(task); len(entrypointHints) > 0 {
+		lines = append(lines, fmt.Sprintf(`- Existing repo entrypoint hints (read only these first when relevant): %s`, strings.Join(entrypointHints, ", ")))
+	} else if task.StepID == "init.step0.constitution" || task.StepID == "init.step1.collect" || task.StepID == "refresh.step1.collect" {
+		lines = append(lines, `- Repo entrypoint hints are limited to actually existing files; do not assume README.md exists when it is absent.`)
+	}
 	switch task.StepID {
 	case "init.step0.constitution":
 		lines = append(lines,
+			`- Do NOT delegate to agent/subagent helpers and do NOT use todo_write-style planning.`,
 			`- Write constitution-draft.json in write_root.`,
 			`- Draft canonical files only under draft_final_root, targeting charter/overview.md and skills/subagents.yaml.`,
 			`- Keep the draft deterministic in shape; compiler will normalize/publish canonical files afterwards.`,
 		)
 	case "init.step1.collect", "refresh.step1.collect":
 		lines = append(lines,
+			`- Do NOT delegate to agent/subagent helpers and do NOT use todo_write-style planning.`,
 			`- Before the first filesystem write inside write_root, keep repository exploration minimal and converge quickly on the first authored doc plus shard-pack-manifest.json.`,
 			`- Produce runtime-authored documents in write_root and then write shard-pack-manifest.json in write_root.`,
 			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and compatibility snapshot.`,
@@ -1571,11 +1726,14 @@ func buildArtifactRepairHints(initialProblem string) []string {
 		`- In shard-pack-manifest.json, compatibility.coverage/questions/entities/edges/findings are all required; questions/entities/edges/findings must be arrays even when empty.`,
 		`- documents[].path MUST stay relative to artifact_root only; valid example: "iac-overview.md". Invalid examples: "reports/taskruns/run-1/staging/shards/bank-of-anthos-iac/iac-overview.md", "charter/overview.md".`,
 		`- Do NOT add top-level "compatibility" to TaskResult JSON; keep compatibility only inside shard-pack-manifest.json.`,
-		`- compatibility.entities[*] MUST remain full entity objects with provenance included; do not drop provenance during repair.`,
-		`- compatibility.findings[*] MUST remain objects; never replace them with plain strings or bullet text.`,
+		`- compatibility.entities[*] MUST remain full entity objects with provenance included; do not drop entities[*].provenance during repair.`,
+		`- compatibility.edges[*] MUST remain objects with canonical keys type/from/to; do not use kind/source/target aliases.`,
+		`- compatibility.findings[*] MUST remain objects and each finding MUST include title; never replace findings with plain strings or bullet text.`,
+		`- compatibility.questions/entities/edges/findings must stay object-only arrays; booleans, nulls, and string-valued findings are invalid.`,
 		`- Do NOT leave claim_ids empty for cited repository evidence; preserve concrete repo-backed claim ids whenever the evidence supports them.`,
 		`- Do NOT describe shard-pack-manifest.json repair via add_doc_artifact; repair the file in write_root and return "changeset": [].`,
 		`- Repair mode is JSON-only: do not invent extra repository file reads/writes in changeset after authored docs already exist.`,
+		`- Valid compatibility examples: entities[*].provenance={"kind":"observation","confidence":0.7,"evidence":[...]}, edges[*]={"id":"edge.dep","type":"depends_on","from":"svc.a","to":"svc.b","provenance":{...}}, findings[*]={"id":"finding.x","severity":"medium","title":"Missing owner mapping","description":"...","rule_id":"rule.owner.required","related_ids":["svc.a"],"provenance":{...}}.`,
 	}
 	if detail := compactRetryHint(initialProblem); detail != "" {
 		lines = append(lines, fmt.Sprintf(`- Previous artifact contract failure: %s`, detail))
@@ -1692,4 +1850,153 @@ func primaryTaskRepoScope(explicit string, scopes []string) string {
 		}
 	}
 	return ""
+}
+
+func collectRepoEntrypointHints(task acpruntime.Task) []string {
+	if len(task.ReadContextRoots) == 0 {
+		return nil
+	}
+	patterns := []string{"README.*", "catalog-info.yaml", "pyproject.toml", "package.json", "docker-compose*", "skaffold.yaml", "Makefile"}
+	hints := []string{}
+	seen := map[string]struct{}{}
+	for _, root := range task.ReadContextRoots {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		info, err := os.Stat(root)
+		if err != nil {
+			continue
+		}
+		if !info.IsDir() {
+			continue
+		}
+		for _, pattern := range patterns {
+			matches, err := filepath.Glob(filepath.Join(root, pattern))
+			if err != nil {
+				continue
+			}
+			sort.Strings(matches)
+			for _, match := range matches {
+				matchInfo, err := os.Stat(match)
+				if err != nil || matchInfo.IsDir() {
+					continue
+				}
+				display := formatEntrypointHint(task.Workspace, match)
+				if display == "" {
+					continue
+				}
+				if _, exists := seen[display]; exists {
+					continue
+				}
+				seen[display] = struct{}{}
+				hints = append(hints, display)
+				if len(hints) >= 8 {
+					return hints
+				}
+			}
+		}
+	}
+	return hints
+}
+
+func formatEntrypointHint(_ string, target string) string {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return ""
+	}
+	return filepath.ToSlash(target)
+}
+
+func validateCollectManifestContractAtWriteRoot(writeRoot string) error {
+	writeRoot = strings.TrimSpace(writeRoot)
+	if writeRoot == "" {
+		return fmt.Errorf("write_root is empty")
+	}
+	raw, err := os.ReadFile(filepath.Join(filepath.Clean(writeRoot), "shard-pack-manifest.json"))
+	if err != nil {
+		return fmt.Errorf("read shard pack manifest: %w", err)
+	}
+	if _, err := contracts.ParseShardPackManifest(raw); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *retryDiagnosticContext) absorbDiagnostic(diagnostic collectStallDiagnostic) {
+	if c == nil {
+		return
+	}
+	if diagnostic.StallPhase != "" {
+		c.LastStallPhase = diagnostic.StallPhase
+	}
+	if state := strings.TrimSpace(diagnostic.ManifestState); state != "" {
+		c.ManifestStateBeforeRetry = state
+	}
+	if diagnostic.AuthoredFileCount > 0 {
+		c.AuthoredFileCount = diagnostic.AuthoredFileCount
+	}
+	if !diagnostic.LastPipeActivity.IsZero() {
+		c.LastPipeActivity = diagnostic.LastPipeActivity.UTC()
+	}
+	if !diagnostic.LastWriteRootMutation.IsZero() {
+		c.LastWriteRootMutation = diagnostic.LastWriteRootMutation.UTC()
+	}
+}
+
+func buildCollectRepairDiagnostic(writeRoot string) collectStallDiagnostic {
+	snapshot, err := scanCollectWriteRoot(writeRoot)
+	if err != nil {
+		return collectStallDiagnostic{}
+	}
+	return collectStallDiagnostic{
+		StallPhase:            collectStallPhasePostArtifact,
+		ManifestState:         strings.TrimSpace(snapshot.ManifestState),
+		AuthoredFileCount:     snapshot.AuthoredFileCount,
+		LastWriteRootMutation: snapshot.LastMutation.UTC(),
+	}
+}
+
+func waitForCommandStreams(stdoutPipe io.ReadCloser, stderrPipe io.ReadCloser, streamDone <-chan struct{}, timeout time.Duration) {
+	if timeout <= 0 {
+		<-streamDone
+		return
+	}
+	select {
+	case <-streamDone:
+		return
+	case <-time.After(timeout):
+		closeCommandPipe(stdoutPipe)
+		closeCommandPipe(stderrPipe)
+		select {
+		case <-streamDone:
+		case <-time.After(timeout):
+		}
+	}
+}
+
+func waitForCommandExit(cmd *exec.Cmd, timeout time.Duration) error {
+	if cmd == nil {
+		return nil
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+	if timeout <= 0 {
+		return <-done
+	}
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(timeout):
+		return nil
+	}
+}
+
+func closeCommandPipe(pipe io.Closer) {
+	if pipe == nil {
+		return
+	}
+	_ = pipe.Close()
 }

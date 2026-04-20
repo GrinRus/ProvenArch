@@ -249,6 +249,39 @@ on_matrix_signal() {
   exit "$(signal_exit_code "$signal_name")"
 }
 
+finalize_running_profile_statuses_on_exit() {
+  local failure_reason="$1"
+  [[ -d "$MATRIX_STATUS_ROOT" ]] || return 0
+  python3 - "$MATRIX_STATUS_ROOT" "$failure_reason" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+failure_reason = sys.argv[2]
+for path in sorted(root.glob("*.json")):
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        continue
+    if not isinstance(payload, dict):
+        continue
+    if str(payload.get("status", "")).strip() != "running":
+        continue
+    payload["status"] = "failed"
+    payload["failure_reason"] = failure_reason
+    payload["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    path.write_text(json.dumps(payload, ensure_ascii=True) + "\n", encoding="utf-8")
+PY
+}
+
+on_matrix_exit() {
+  local exit_code="$1"
+  [[ "$exit_code" =~ ^[0-9]+$ ]] || exit_code=1
+  finalize_running_profile_statuses_on_exit "infra_incomplete_cycle"
+}
+
 batch_has_incomplete_run_sentinels() {
   local batch_root="$1"
   local status_file=""
@@ -467,6 +500,7 @@ mkdir -p "$MATRIX_STATUS_ROOT"
 trap 'on_matrix_signal TERM' TERM
 trap 'on_matrix_signal INT' INT
 trap 'on_matrix_signal HUP' HUP
+trap 'on_matrix_exit $?' EXIT
 
 python3 - "$E2E_MATRIX_FILE" "$COMBINATIONS_TSV" "$RELEASE_MODE" "$MATRIX_TIMEOUT_PROFILE_FILE" <<'PY'
 import sys

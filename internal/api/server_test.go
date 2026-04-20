@@ -2238,6 +2238,9 @@ step_id = first_non_empty(task, ["step_id", "StepID"]) or from_prompt("StepID") 
 run_id = first_non_empty(task, ["run_id", "RunID"]) or from_prompt("RunID") or from_prompt("run_id")
 write_root = first_non_empty(task, ["write_root", "WriteRoot"]) or from_prompt("write_root") or from_prompt("WriteRoot")
 artifact_root = first_non_empty(task, ["artifact_root", "ArtifactRoot"]) or from_prompt("artifact_root") or from_prompt("ArtifactRoot")
+draft_root = first_non_empty(task, ["draft_final_root", "DraftFinalRoot"]) or from_prompt("draft_final_root") or from_prompt("DraftFinalRoot")
+step_contract = first_non_empty(task, ["step_contract", "StepContract"]) or from_prompt("step_contract") or from_prompt("StepContract")
+agent_role = first_non_empty(task, ["agent_role", "AgentRole"]) or from_prompt("agent_role") or from_prompt("AgentRole") or "architect"
 shard_id = first_non_empty(task, ["shard_id", "ShardID"]) or from_prompt("shard_id") or from_prompt("ShardID") or slugify(step_id)
 repo_scopes = first_non_empty_list(task, ["repo_scopes", "RepoScopes"])
 if not repo_scopes:
@@ -2245,6 +2248,40 @@ if not repo_scopes:
     if repo_scope:
         repo_scopes = [repo_scope]
 path_scopes = first_non_empty_list(task, ["path_scopes", "PathScopes"])
+
+def write_runtime_draft(manifest_name, draft_name, canonical_path, kind, title):
+    if not write_root or not draft_root:
+        return
+    os.makedirs(write_root, exist_ok=True)
+    os.makedirs(draft_root, exist_ok=True)
+    with open(os.path.join(draft_root, draft_name), "w", encoding="utf-8") as handle:
+        handle.write("# Stub Draft\n")
+    manifest = {
+        "version": 1,
+        "run_id": run_id or "run-1",
+        "step_id": step_id,
+        "step_contract": step_contract or "draft",
+        "agent_role": agent_role,
+        "summary": "stub runtime draft",
+        "outputs": [
+            {
+                "path": draft_name,
+                "canonical_path": canonical_path,
+                "kind": kind,
+                "title": title,
+            }
+        ],
+    }
+    with open(os.path.join(write_root, manifest_name), "w", encoding="utf-8") as handle:
+        json.dump(manifest, handle)
+
+if step_id == "init.step0.constitution":
+    write_runtime_draft("constitution-draft.json", "overview.md", "charter/overview.md", "charter", "Stub Constitution")
+elif step_id in {"init.step2.asis_docs", "refresh.step2.asis_docs"}:
+    write_runtime_draft("asis-draft-manifest.json", "overview.md", "reports/as-is/overview.md", "report", "Stub As-Is Overview")
+elif step_id in {"init.step4.proposals", "refresh.step4.proposals"}:
+    write_runtime_draft("proposals-draft-manifest.json", "proposal.md", "proposals/proposal-baseline/proposal.md", "proposal", "Stub Proposal")
+
 if step_id in {"init.step1.collect", "refresh.step1.collect"} and write_root:
     os.makedirs(write_root, exist_ok=True)
     document_name = slugify(shard_id) + ".md"
@@ -2436,6 +2473,9 @@ func (cancellableDelayedRunner) Preflight(context.Context) error {
 type streamingRunLogsRunner struct{}
 
 func (streamingRunLogsRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	if err := writeSyntheticServerDraftArtifacts(task); err != nil {
+		return acpruntime.Result{}, err
+	}
 	if task.OnOutput != nil {
 		task.OnOutput(acpruntime.OutputChunk{
 			Stream: acpruntime.OutputStreamStdout,
@@ -2472,4 +2512,90 @@ func (streamingRunLogsRunner) Run(_ context.Context, task acpruntime.Task) (acpr
 
 func (streamingRunLogsRunner) Preflight(context.Context) error {
 	return nil
+}
+
+func writeSyntheticServerDraftArtifacts(task acpruntime.Task) error {
+	writeRoot := strings.TrimSpace(task.WriteRoot)
+	draftRoot := strings.TrimSpace(task.DraftFinalRoot)
+	if writeRoot == "" || draftRoot == "" {
+		return nil
+	}
+
+	type draftSpec struct {
+		manifest string
+		content  string
+		outputs  []map[string]any
+	}
+
+	var spec draftSpec
+	switch strings.TrimSpace(task.StepID) {
+	case "init.step0.constitution":
+		spec = draftSpec{
+			manifest: "constitution-draft.json",
+			content:  "# Stub Constitution\n",
+			outputs: []map[string]any{
+				{
+					"path":           "overview.md",
+					"canonical_path": "charter/overview.md",
+					"kind":           "charter",
+					"title":          "Stub Constitution",
+				},
+			},
+		}
+	case "init.step2.asis_docs", "refresh.step2.asis_docs":
+		spec = draftSpec{
+			manifest: "asis-draft-manifest.json",
+			content:  "# Stub As-Is Overview\n",
+			outputs: []map[string]any{
+				{
+					"path":           "overview.md",
+					"canonical_path": "reports/as-is/overview.md",
+					"kind":           "report",
+					"title":          "Stub As-Is Overview",
+				},
+			},
+		}
+	case "init.step4.proposals", "refresh.step4.proposals":
+		spec = draftSpec{
+			manifest: "proposals-draft-manifest.json",
+			content:  "# Stub Proposal\n",
+			outputs: []map[string]any{
+				{
+					"path":           "proposal.md",
+					"canonical_path": "proposals/proposal-baseline/proposal.md",
+					"kind":           "proposal",
+					"title":          "Stub Proposal",
+				},
+			},
+		}
+	default:
+		return nil
+	}
+
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		return err
+	}
+	for _, output := range spec.outputs {
+		pathValue, _ := output["path"].(string)
+		if err := os.WriteFile(filepath.Join(draftRoot, pathValue), []byte(spec.content), 0o644); err != nil {
+			return err
+		}
+	}
+	manifest := map[string]any{
+		"version":       1,
+		"run_id":        task.RunID,
+		"step_id":       task.StepID,
+		"step_contract": task.StepContract,
+		"agent_role":    task.AgentRole,
+		"summary":       "stub runtime draft",
+		"outputs":       spec.outputs,
+	}
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(writeRoot, spec.manifest), raw, 0o644)
 }
