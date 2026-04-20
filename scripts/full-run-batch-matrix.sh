@@ -31,6 +31,7 @@ BATCH_FRONTEND_CANCEL_MODE="${BATCH_FRONTEND_CANCEL_MODE:-}"
 UI_E2E_HEADED="${UI_E2E_HEADED:-}"
 MATRIX_DRIVER_LOG="${MATRIX_DRIVER_LOG:-$MATRIX_ROOT/driver.log}"
 MATRIX_TIMEOUT_PROFILE_FILE="${MATRIX_TIMEOUT_PROFILE_FILE:-$MATRIX_ROOT/timeout-profile.txt}"
+MATRIX_PROFILE_STATUS_HEARTBEAT_SEC="${MATRIX_PROFILE_STATUS_HEARTBEAT_SEC:-10}"
 PROFILE_REPOS_FILE_RESOLVED=""
 PROFILE_SOURCE_KIND_EFFECTIVE=""
 PROFILE_EXPECTED_REPO_COUNT_RESOLVED=0
@@ -60,6 +61,7 @@ CURRENT_SWEEP_STRATEGY=""
 CURRENT_SWEEP_MAX_PARALLEL=""
 CURRENT_SWEEP_FAILURE_POLICY=""
 CURRENT_SWEEP_SHARD_MODE=""
+CURRENT_PROFILE_STATUS_HEARTBEAT_PID=""
 
 log() {
   local line
@@ -223,6 +225,31 @@ path.write_text(json.dumps(payload, ensure_ascii=True) + "\n", encoding="utf-8")
 PY
 }
 
+stop_current_profile_status_heartbeat() {
+  if [[ -z "${CURRENT_PROFILE_STATUS_HEARTBEAT_PID:-}" ]]; then
+    return 0
+  fi
+  kill "${CURRENT_PROFILE_STATUS_HEARTBEAT_PID}" >/dev/null 2>&1 || true
+  wait "${CURRENT_PROFILE_STATUS_HEARTBEAT_PID}" >/dev/null 2>&1 || true
+  CURRENT_PROFILE_STATUS_HEARTBEAT_PID=""
+}
+
+start_current_profile_status_heartbeat() {
+  stop_current_profile_status_heartbeat
+  [[ -z "$CURRENT_PROFILE_STATUS_FILE" ]] && return 0
+  local interval="${MATRIX_PROFILE_STATUS_HEARTBEAT_SEC:-10}"
+  if [[ ! "$interval" =~ ^[0-9]+$ ]] || [[ "$interval" -le 0 ]]; then
+    return 0
+  fi
+  (
+    while true; do
+      sleep "$interval"
+      write_current_profile_status "running" "none"
+    done
+  ) &
+  CURRENT_PROFILE_STATUS_HEARTBEAT_PID="$!"
+}
+
 signal_number() {
   case "$1" in
     HUP) printf '1' ;;
@@ -245,6 +272,7 @@ signal_exit_code() {
 on_matrix_signal() {
   local signal_name="$1"
   log "received termination signal: $signal_name profile=$CURRENT_PROFILE_ID sweep=$CURRENT_SWEEP_ID"
+  stop_current_profile_status_heartbeat
   write_current_profile_status "failed" "infra_signal_terminated"
   exit "$(signal_exit_code "$signal_name")"
 }
@@ -279,6 +307,7 @@ PY
 on_matrix_exit() {
   local exit_code="$1"
   [[ "$exit_code" =~ ^[0-9]+$ ]] || exit_code=1
+  stop_current_profile_status_heartbeat
   finalize_running_profile_statuses_on_exit "infra_incomplete_cycle"
 }
 
@@ -796,6 +825,7 @@ while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sw
   CURRENT_EXPECTED_REPO_COUNT="$PROFILE_META_CACHE_EXPECTED_REPO_COUNT"
   CURRENT_REPOS_FILE="$PROFILE_META_CACHE_REPOS_FILE"
   write_current_profile_status "running" "none"
+  start_current_profile_status_heartbeat
   log "running profile=$profile_id sweep=$sweep_id source_kind=$PROFILE_META_CACHE_SOURCE_KIND expected_repo_count=$PROFILE_META_CACHE_EXPECTED_REPO_COUNT batch_id=$batch_id"
   status="passed"
   if ! (
@@ -848,6 +878,7 @@ while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sw
     status="failed"
     log "profile+sweep failed: profile=$profile_id sweep=$sweep_id (see $driver_log)"
   fi
+  stop_current_profile_status_heartbeat
   if [[ "$status" == "passed" ]] && batch_has_incomplete_run_sentinels "$batch_root"; then
     status="failed"
     log "profile+sweep left unfinished run sentinel: profile=$profile_id sweep=$sweep_id batch_root=$batch_root"

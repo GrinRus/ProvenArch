@@ -695,7 +695,6 @@ func recoverCollectBeforeArtifactsAfterStall(
 	finalResult, repairAttempt, err := maybeRepairCollectArtifacts(ctx, task, taskPayload, command, retried)
 	if repairAttempt.Attempted {
 		retryContext.absorbDiagnostic(repairAttempt.Diagnostic)
-		retryContext.LastStallPhase = collectStallPhasePostArtifact
 		if state := strings.TrimSpace(repairAttempt.ManifestStateBeforeRetry); state != "" {
 			retryContext.ManifestStateBeforeRetry = state
 		}
@@ -1148,10 +1147,11 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 			waitErr = ctx.Err()
 		}
 	case <-stallCh:
+		stalledTriggered = true
 		waitForCommandStreams(stdoutPipe, stderrPipe, streamDone, collectStallPostTerminateDrain)
 		stopMonitor()
 		monitorWG.Wait()
-		waitErr = waitForCommandExit(cmd, collectStallPostTerminateDrain)
+		waitForCommandExitAsync(cmd)
 	}
 
 	if waitErr == nil && streamErr != nil {
@@ -2296,39 +2296,6 @@ func buildTemplateChangeset(task acpruntime.Task) []contracts.Operation {
 				},
 			})
 		}
-	default:
-		for _, scope := range scopes {
-			scope = strings.TrimSpace(scope)
-			if scope == "" {
-				scope = "repository"
-			}
-			slug := slugutil.Slugify(scope)
-			if slug == "" {
-				slug = "repository"
-			}
-			changes = append(changes, contracts.Operation{
-				Op: "upsert_entity",
-				Entity: &contracts.Entity{
-					ID:   "svc." + slug,
-					Type: "service",
-					Name: humanizeScope(scope) + " Service",
-					Attributes: map[string]any{
-						"repo_scope": scope,
-						"runtime":    acpruntime.ProviderQwenCode,
-					},
-					Provenance: contracts.Provenance{
-						Kind:       "observation",
-						Confidence: 0.7,
-						Evidence: []contracts.Evidence{
-							{
-								Repo: scope,
-								Path: "README.md",
-							},
-						},
-					},
-				},
-			})
-		}
 	}
 	return changes
 }
@@ -2464,7 +2431,6 @@ func buildCollectRepairDiagnostic(writeRoot string) collectStallDiagnostic {
 		return collectStallDiagnostic{}
 	}
 	return collectStallDiagnostic{
-		StallPhase:            collectStallPhasePostArtifact,
 		ManifestState:         strings.TrimSpace(snapshot.ManifestState),
 		AuthoredFileCount:     snapshot.AuthoredFileCount,
 		LastWriteRootMutation: snapshot.LastMutation.UTC(),
@@ -2506,6 +2472,15 @@ func waitForCommandExit(cmd *exec.Cmd, timeout time.Duration) error {
 	case <-time.After(timeout):
 		return nil
 	}
+}
+
+func waitForCommandExitAsync(cmd *exec.Cmd) {
+	if cmd == nil {
+		return
+	}
+	go func() {
+		_ = cmd.Wait()
+	}()
 }
 
 func closeCommandPipe(pipe io.Closer) {

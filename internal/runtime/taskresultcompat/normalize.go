@@ -2,9 +2,11 @@ package taskresultcompat
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 )
@@ -31,6 +33,7 @@ func NormalizeRawTaskResult(task acpruntime.Task, raw []byte) ([]byte, bool, err
 	normalized := make([]any, 0, len(changeset))
 	changed := false
 	draftTargets := resolveRuntimeDraftArtifactTargets(task)
+	collectManifestReady := hasValidCollectManifestAtWriteRoot(task)
 	for _, item := range changeset {
 		opMap, ok := item.(map[string]any)
 		if !ok {
@@ -45,7 +48,7 @@ func NormalizeRawTaskResult(task acpruntime.Task, raw []byte) ([]byte, bool, err
 			normalized = append(normalized, item)
 			continue
 		}
-		if isCollectStep(task.StepID) && (targetsShardManifest(opMap["artifact"], task) || targetsShardManifest(opMap["doc_artifact"], task)) {
+		if collectManifestReady && (targetsShardManifest(opMap["artifact"], task) || targetsShardManifest(opMap["doc_artifact"], task)) {
 			changed = true
 			continue
 		}
@@ -117,6 +120,22 @@ func targetsShardManifest(value any, task acpruntime.Task) bool {
 		}
 	}
 	return false
+}
+
+func hasValidCollectManifestAtWriteRoot(task acpruntime.Task) bool {
+	if !isCollectStep(task.StepID) {
+		return false
+	}
+	writeRoot := strings.TrimSpace(task.WriteRoot)
+	if writeRoot == "" {
+		return false
+	}
+	raw, err := os.ReadFile(filepath.Join(filepath.Clean(writeRoot), "shard-pack-manifest.json"))
+	if err != nil {
+		return false
+	}
+	_, err = contracts.ParseShardPackManifest(raw)
+	return err == nil
 }
 
 func resolveRuntimeDraftArtifactTargets(task acpruntime.Task) map[string]struct{} {

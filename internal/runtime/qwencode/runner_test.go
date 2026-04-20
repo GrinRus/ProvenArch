@@ -142,6 +142,48 @@ func validConstitutionDraftManifestJSON(runID string) string {
 }`, runID)
 }
 
+func validAsIsDraftManifestJSON(runID string) string {
+	if strings.TrimSpace(runID) == "" {
+		runID = "run-1"
+	}
+	return fmt.Sprintf(`{
+  "version": 1,
+  "run_id": %q,
+  "step_id": "refresh.step2.asis_docs",
+  "step_contract": "as_is",
+  "agent_role": "architect",
+  "outputs": [
+    {
+      "path": "bank-overview.md",
+      "canonical_path": "reports/as-is/bank-overview.md",
+      "kind": "report",
+      "title": "Bank Overview"
+    }
+  ]
+}`, runID)
+}
+
+func validProposalsDraftManifestJSON(runID string) string {
+	if strings.TrimSpace(runID) == "" {
+		runID = "run-1"
+	}
+	return fmt.Sprintf(`{
+  "version": 1,
+  "run_id": %q,
+  "step_id": "refresh.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "outputs": [
+    {
+      "path": "proposal.md",
+      "canonical_path": "proposals/proposal-baseline/proposal.md",
+      "kind": "proposal",
+      "title": "Proposal"
+    }
+  ]
+}`, runID)
+}
+
 func validRetrySkeletalManifestJSON() string {
 	return `{
   "version": 1,
@@ -500,6 +542,227 @@ cat %q
 	}
 	if !strings.Contains(message, "raw_output=reports/taskruns/raw/") {
 		t.Fatalf("expected raw output artifact path in message, got %q", message)
+	}
+}
+
+func TestHeadlessRunnerClassifiesOpenstackPermissionErrorTranscriptAsRunnerUnavailable(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	commandPath := filepath.Join(workspace, "qwen-openstack-permission-error.sh")
+	fixturePath := filepath.Join(workspace, "openstack-permission-error.txt")
+	if err := os.WriteFile(fixturePath, []byte(loadCapturedLiveStdoutFixture(t, "qwen_live_openstack_permission_error_stdout.txt")), 0o644); err != nil {
+		t.Fatalf("write permission fixture copy: %v", err)
+	}
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+cat %q
+`, fixturePath)
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write permission-error stub: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-openstack-step3",
+		RunID:        "run-1",
+		StepID:       "init.step3.findings",
+		Workspace:    workspace,
+		RepoScopes:   []string{"openstack"},
+		StartedAtUTC: time.Date(2026, 4, 20, 7, 16, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected runner_unavailable for permission_error transcript")
+	}
+	code, message, ok := acpruntime.ClassifyError(err)
+	if !ok {
+		t.Fatalf("expected classify error to succeed")
+	}
+	if code != string(acpruntime.ErrorCodeRunnerUnavailable) {
+		t.Fatalf("expected runner_unavailable, got %s", code)
+	}
+	if !strings.Contains(message, "parse_stage=transport") {
+		t.Fatalf("expected transport parse stage in error, got %q", message)
+	}
+	lower := strings.ToLower(message)
+	if !strings.Contains(lower, "permission_error") && !strings.Contains(lower, "usage limit") {
+		t.Fatalf("expected permission/quota marker in unavailable message, got %q", message)
+	}
+	if !strings.Contains(message, "raw_output=reports/taskruns/raw/") {
+		t.Fatalf("expected raw output artifact path in message, got %q", message)
+	}
+}
+
+func TestHeadlessRunnerRepairsInvalidStep2DraftManifestOnce(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+
+	stateFile := filepath.Join(tempDir, "step2-draft-repair-count.txt")
+	commandPath := filepath.Join(tempDir, "qwen-step2-draft-repair.sh")
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+count=0
+if [ -f %q ]; then
+  count="$(cat %q)"
+fi
+count=$((count + 1))
+printf '%%s' "$count" > %q
+last_arg=""
+for arg in "$@"; do
+  last_arg="$arg"
+done
+mkdir -p %q %q
+cat > %q/bank-overview.md <<'DOC'
+# Bank Overview
+DOC
+if [ "$count" -eq 1 ]; then
+  cat > %q/asis-draft-manifest.json <<'JSON'
+{"version":"0.1.0","outputs":[]}
+JSON
+  cat <<'JSON'
+{"meta":{"task_id":"task-step2-draft-repair","step_id":"refresh.step2.asis_docs","run_id":"run-1","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-20T07:16:00Z"},"summary":"initial step2 as-is draft","changeset":[]}
+JSON
+  exit 0
+fi
+if ! echo "$last_arg" | grep -Fq 'asis-draft-manifest.json'; then
+  echo "missing asis manifest retry hint" >&2
+  exit 91
+fi
+if ! echo "$last_arg" | grep -Fq '"changeset": []'; then
+  echo "missing empty changeset repair guidance" >&2
+  exit 92
+fi
+cat > %q/asis-draft-manifest.json <<'JSON'
+%s
+JSON
+cat <<'JSON'
+{"meta":{"task_id":"task-step2-draft-repair","step_id":"refresh.step2.asis_docs","run_id":"run-1","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-20T07:16:00Z"},"summary":"repaired step2 as-is draft","changeset":[]}
+JSON
+`, stateFile, stateFile, stateFile, writeRoot, draftRoot, draftRoot, writeRoot, writeRoot, validAsIsDraftManifestJSON("run-1"))
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write step2 repair stub: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:            "task-step2-draft-repair",
+		RunID:             "run-1",
+		StepID:            "refresh.step2.asis_docs",
+		Workspace:         tempDir,
+		WriteRoot:         writeRoot,
+		DraftFinalRoot:    draftRoot,
+		StepContract:      "as_is",
+		ExpectedArtifacts: []string{"asis-draft-manifest.json"},
+		RepoScopes:        []string{"bank-of-anthos"},
+		StartedAtUTC:      time.Date(2026, 4, 20, 7, 16, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("expected step2 draft repair to succeed: %v", err)
+	}
+	if result.TaskResult.Summary != "repaired step2 as-is draft" {
+		t.Fatalf("unexpected repaired summary %q", result.TaskResult.Summary)
+	}
+	if count := strings.TrimSpace(string(mustReadFile(t, stateFile))); count != "2" {
+		t.Fatalf("expected exactly 2 runner invocations, got %q", count)
+	}
+}
+
+func TestHeadlessRunnerFailsWhenStep4DraftRepairLeavesMissingReferencedFile(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+
+	stateFile := filepath.Join(tempDir, "step4-draft-repair-count.txt")
+	commandPath := filepath.Join(tempDir, "qwen-step4-draft-repair-fail.sh")
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+count=0
+if [ -f %q ]; then
+  count="$(cat %q)"
+fi
+count=$((count + 1))
+printf '%%s' "$count" > %q
+last_arg=""
+for arg in "$@"; do
+  last_arg="$arg"
+done
+mkdir -p %q %q
+if [ "$count" -eq 1 ]; then
+  cat > %q/proposals-draft-manifest.json <<'JSON'
+{"version":"0.1.0","outputs":[]}
+JSON
+  cat <<'JSON'
+{"meta":{"task_id":"task-step4-draft-repair-fail","step_id":"refresh.step4.proposals","run_id":"run-1","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-20T07:16:00Z"},"summary":"initial step4 proposals draft","changeset":[]}
+JSON
+  exit 0
+fi
+if ! echo "$last_arg" | grep -Fq 'proposals-draft-manifest.json'; then
+  echo "missing proposals manifest retry hint" >&2
+  exit 91
+fi
+if ! echo "$last_arg" | grep -Fq '"changeset": []'; then
+  echo "missing empty changeset repair guidance" >&2
+  exit 92
+fi
+cat > %q/proposals-draft-manifest.json <<'JSON'
+%s
+JSON
+cat <<'JSON'
+{"meta":{"task_id":"task-step4-draft-repair-fail","step_id":"refresh.step4.proposals","run_id":"run-1","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-20T07:16:00Z"},"summary":"repair kept missing proposal draft file","changeset":[]}
+JSON
+`, stateFile, stateFile, stateFile, writeRoot, draftRoot, writeRoot, writeRoot, validProposalsDraftManifestJSON("run-1"))
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write step4 repair fail stub: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:            "task-step4-draft-repair-fail",
+		RunID:             "run-1",
+		StepID:            "refresh.step4.proposals",
+		Workspace:         tempDir,
+		WriteRoot:         writeRoot,
+		DraftFinalRoot:    draftRoot,
+		StepContract:      "proposals",
+		ExpectedArtifacts: []string{"proposals-draft-manifest.json"},
+		RepoScopes:        []string{"bank-of-anthos"},
+		StartedAtUTC:      time.Date(2026, 4, 20, 7, 16, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected runner_parse_failed when step4 repair leaves missing draft file")
+	}
+	code, message, ok := acpruntime.ClassifyError(err)
+	if !ok || code != string(acpruntime.ErrorCodeRunnerParseFailed) {
+		t.Fatalf("expected runner_parse_failed classification, got code=%q err=%v", code, err)
+	}
+	if !strings.Contains(message, "runtime required draft artifacts remained invalid after one repair attempt") {
+		t.Fatalf("expected draft artifact repair failure context, got %q", message)
+	}
+	if !strings.Contains(message, "referenced draft file") {
+		t.Fatalf("expected explicit missing draft file reason, got %q", message)
+	}
+	if !strings.Contains(message, "raw_output=reports/taskruns/raw/") {
+		t.Fatalf("expected raw output artifact path in message, got %q", message)
+	}
+	if count := strings.TrimSpace(string(mustReadFile(t, stateFile))); count != "2" {
+		t.Fatalf("expected exactly 2 runner invocations, got %q", count)
 	}
 }
 
@@ -1750,11 +2013,144 @@ exit 93
 	if last.Fields["retry_status"] != "succeeded" {
 		t.Fatalf("expected retry_status=succeeded, got %#v", last.Fields["retry_status"])
 	}
-	if last.Fields["last_stall_phase"] != "post_artifact" {
-		t.Fatalf("expected last_stall_phase=post_artifact, got %#v", last.Fields["last_stall_phase"])
+	if last.Fields["last_stall_phase"] != "pre_artifact" {
+		t.Fatalf("expected last_stall_phase=pre_artifact when follow-up repair did not come from a real second stall, got %#v", last.Fields["last_stall_phase"])
 	}
 	if last.Fields["manifest_state_before_retry"] != "invalid" {
 		t.Fatalf("expected manifest_state_before_retry=invalid, got %#v", last.Fields["manifest_state_before_retry"])
+	}
+}
+
+func TestHeadlessRunnerPreArtifactThenPostArtifactStallLogsFinalPostArtifactContext(t *testing.T) {
+	setCollectPreArtifactStallTimingsForTest(t, 900*time.Millisecond, 25*time.Millisecond, 25*time.Millisecond)
+	setCollectStallTimingsForTest(t, 250*time.Millisecond, 25*time.Millisecond, 25*time.Millisecond)
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	stateFile := filepath.Join(tempDir, "qwen-pre-post-stall-count.txt")
+	commandPath := filepath.Join(tempDir, "qwen-pre-post-stall.sh")
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+count=0
+if [ -f %q ]; then
+  count="$(cat %q)"
+fi
+count=$((count + 1))
+printf '%%s' "$count" > %q
+last_arg=""
+for arg in "$@"; do
+  last_arg="$arg"
+done
+if [ "$count" -eq 1 ]; then
+  sleep 10
+  exit 0
+fi
+if [ "$count" -eq 2 ]; then
+  if ! echo "$last_arg" | grep -q 'no durable collect artifacts in time'; then
+    echo "missing pre-artifact retry hint" >&2
+    exit 91
+  fi
+  mkdir -p %q
+  printf '# Extras\n' > %q/extras-analysis.md
+  cat > %q/shard-pack-manifest.json <<'MANIFEST'
+{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "shard_id": "bank-of-anthos-extras",
+  "agent_role": "shard-analyst",
+  "artifact_root": "reports/taskruns/run-1/staging/shards/bank-of-anthos-extras",
+  "repo_scopes": ["bank-of-anthos"],
+  "path_scopes": ["extras"],
+  "documents": [
+    {
+      "id": "doc.extras",
+      "kind": "analysis",
+      "title": "Extras",
+      "path": "extras-analysis.md",
+      "canonical_path": "reports/as-is/bank-of-anthos/extras-analysis.md",
+      "topics": ["extras"],
+      "citation_ids": ["cite.bank.readme"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.bank.readme",
+      "repo": "bank-of-anthos",
+      "path": "README.md",
+      "claim_ids": ["claim.extras.readme"],
+      "document_ids": ["doc.extras"]
+    }
+  ],
+  "compatibility": {
+    "coverage": {"observed": ["extras"], "missing": ["owner mappings"], "notes": ["stalled after artifacts"]},
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}
+MANIFEST
+  printf 'artifacts-ready\n'
+  (trap '' TERM INT HUP; sleep 3) &
+  sleep 3
+  exit 0
+fi
+if [ "$count" -eq 3 ]; then
+  if ! echo "$last_arg" | grep -Fq 'documents[].path MUST stay relative to artifact_root only'; then
+    echo "missing artifact repair hint" >&2
+    exit 92
+  fi
+  cat <<'JSON'
+{"meta":{"task_id":"task-pre-post-stall","step_id":"init.step1.collect","runtime":{"name":"qwen-code","version":"test"},"started_at":"2026-04-03T12:00:00Z"},"summary":"recovered after pre-artifact then post-artifact stall","changeset":[]}
+JSON
+  exit 0
+fi
+echo "unexpected invocation $count" >&2
+exit 93
+`, stateFile, stateFile, stateFile, writeRoot, writeRoot, writeRoot)
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write pre/post stall stub: %v", err)
+	}
+
+	var diagnostics []acpruntime.DiagnosticEvent
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-pre-post-stall",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    tempDir,
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+		OnDiagnostic: func(event acpruntime.DiagnosticEvent) {
+			diagnostics = append(diagnostics, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected combined pre/post stall recovery to succeed: %v", err)
+	}
+	if result.TaskResult.Summary != "recovered after pre-artifact then post-artifact stall" {
+		t.Fatalf("unexpected result summary %q", result.TaskResult.Summary)
+	}
+	if count := strings.TrimSpace(string(mustReadFile(t, stateFile))); count != "3" {
+		t.Fatalf("expected exactly 3 runner invocations, got %q", count)
+	}
+	last := diagnostics[len(diagnostics)-1]
+	if last.Message != "runtime task retry completed" {
+		t.Fatalf("expected retry completed diagnostic, got %q", last.Message)
+	}
+	if last.Fields["retry_status"] != "succeeded" {
+		t.Fatalf("expected retry_status=succeeded, got %#v", last.Fields["retry_status"])
+	}
+	if last.Fields["last_stall_phase"] != "post_artifact" {
+		t.Fatalf("expected last_stall_phase=post_artifact after real second stall, got %#v", last.Fields["last_stall_phase"])
+	}
+	if last.Fields["manifest_state_before_retry"] != "rich" {
+		t.Fatalf("expected manifest_state_before_retry=rich, got %#v", last.Fields["manifest_state_before_retry"])
 	}
 }
 
@@ -1803,6 +2199,60 @@ sleep 3
 	}
 	if elapsed := time.Since(started); elapsed > 2*time.Second {
 		t.Fatalf("expected forced retry to avoid long EOF wait, elapsed=%s", elapsed)
+	}
+}
+
+func TestHeadlessRunnerPostArtifactRecoveryDoesNotWaitForLingeringStdoutPipe(t *testing.T) {
+	setCollectStallTimingsForTest(t, 300*time.Millisecond, 25*time.Millisecond, 25*time.Millisecond)
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	commandPath := filepath.Join(tempDir, "qwen-post-stall-lingering-pipe.sh")
+	script := `#!/bin/sh
+set -eu
+mkdir -p "$STALL_WRITE_ROOT"
+printf '# IAC\n' > "$STALL_WRITE_ROOT/iac-overview.md"
+cat > "$STALL_WRITE_ROOT/shard-pack-manifest.json" <<'JSON'
+` + validRetryRichManifestJSON() + `
+JSON
+(trap '' TERM INT HUP; sleep 3) &
+sleep 3
+`
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write post-artifact lingering-pipe stub: %v", err)
+	}
+	t.Setenv("STALL_WRITE_ROOT", writeRoot)
+
+	task := acpruntime.Task{
+		TaskID:       "task-post-stall-lingering",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		Workspace:    tempDir,
+		WriteRoot:    writeRoot,
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	taskPayload, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task payload: %v", err)
+	}
+	args := buildDefaultQwenArgs(task, buildPrompt(taskPayload, false))
+
+	started := time.Now()
+	_, _, _, runErr := runQwenCommand(context.Background(), task, commandPath, args, runQwenOptions{
+		EnableCollectStallMonitor: true,
+	})
+	if runErr == nil {
+		t.Fatalf("expected collect_stalled_after_artifacts sentinel")
+	}
+	if !errors.Is(runErr, errCollectStalledAfterArtifacts) {
+		t.Fatalf("expected collect_stalled_after_artifacts, got %v", runErr)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("expected post-artifact retry path to avoid long EOF wait, elapsed=%s", elapsed)
 	}
 }
 
@@ -2845,6 +3295,9 @@ func TestBuildPromptCollectIncludesExistingEntrypointHintsAndDelegationBan(t *te
 	prompt := buildPrompt(raw, false)
 	if !strings.Contains(prompt, "Do NOT delegate to agent/subagent helpers.") {
 		t.Fatalf("expected delegation ban in collect prompt")
+	}
+	if strings.Contains(prompt, `"op": "upsert_entity"`) {
+		t.Fatalf("did not expect synthetic upsert_entity template in collect prompt")
 	}
 	if !strings.Contains(prompt, filepath.ToSlash(packageJSONPath)) {
 		t.Fatalf("expected existing package.json entrypoint hint in prompt")

@@ -1,6 +1,7 @@
 package taskresultcompat
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,9 +13,48 @@ import (
 func TestNormalizeRawTaskResultDropsLegacyManifestRepairOp(t *testing.T) {
 	t.Parallel()
 
+	writeRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(writeRoot, "shard-pack-manifest.json"), []byte(`{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "shard_id": "bank-of-anthos-iac",
+  "agent_role": "shard-analyst",
+  "artifact_root": "/tmp/acp/write-root",
+  "documents": [
+    {
+      "id": "doc.1",
+      "kind": "analysis",
+      "title": "Analysis",
+      "path": "iac-overview.md",
+      "canonical_path": "reports/as-is/iac-overview.md",
+      "topics": ["iac"],
+      "citation_ids": ["cite.1"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.1",
+      "repo": "bank-of-anthos",
+      "path": "iac/README.md",
+      "claim_ids": ["claim.1"],
+      "document_ids": ["doc.1"]
+    }
+  ],
+  "compatibility": {
+    "coverage": {"observed": ["iac"], "missing": [], "notes": []},
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}`), 0o644); err != nil {
+		t.Fatalf("write valid shard-pack-manifest: %v", err)
+	}
+
 	task := acpruntime.Task{
 		StepID:    "init.step1.collect",
-		WriteRoot: "/tmp/acp/write-root",
+		WriteRoot: writeRoot,
 	}
 	raw := []byte(`{
   "meta": {
@@ -54,6 +94,47 @@ func TestNormalizeRawTaskResultDropsLegacyManifestRepairOp(t *testing.T) {
 	}
 	if len(parsed.Changeset) != 0 {
 		t.Fatalf("expected normalized changeset to be empty, got %#v", parsed.Changeset)
+	}
+}
+
+func TestNormalizeRawTaskResultKeepsLegacyManifestRepairOpWhenShardManifestIsStillInvalid(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(writeRoot, "shard-pack-manifest.json"), []byte(`{"version":1}`), 0o644); err != nil {
+		t.Fatalf("write invalid shard-pack-manifest: %v", err)
+	}
+
+	task := acpruntime.Task{
+		StepID:    "init.step1.collect",
+		WriteRoot: writeRoot,
+	}
+	manifestPath := filepath.ToSlash(filepath.Join(writeRoot, "shard-pack-manifest.json"))
+	raw := []byte(fmt.Sprintf(`{
+  "meta": {
+    "task_id": "task-1",
+    "step_id": "init.step1.collect",
+    "runtime": {"name": "qwen-code"},
+    "started_at": "2026-04-18T21:54:16Z"
+  },
+  "summary": "manifest repaired",
+  "changeset": [
+    {
+      "op": "add_doc_artifact",
+      "artifact": {
+        "id": "shard-pack-manifest.json",
+        "path": %q
+      }
+    }
+  ]
+}`, manifestPath))
+
+	_, changed, err := NormalizeRawTaskResult(task, raw)
+	if err != nil {
+		t.Fatalf("normalize raw taskresult: %v", err)
+	}
+	if changed {
+		t.Fatalf("expected invalid shard manifest to keep legacy repair op for hard failure handling")
 	}
 }
 

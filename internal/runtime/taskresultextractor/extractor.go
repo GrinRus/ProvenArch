@@ -381,7 +381,23 @@ func detectTransportError(text string) error {
 		"packet length too long",
 		"econn",
 	}
-	for _, marker := range transportMarkers {
+	providerFailureMarkers := []string{
+		"permission_error",
+		"permission error",
+		"usage limit",
+		"quota",
+		"quota exceeded",
+		"credit balance",
+		"insufficient credits",
+		"rate limit",
+		"rate_limit",
+		"forbidden",
+		"status code: 403",
+		"status code: 429",
+		" api error: 403",
+		" api error: 429",
+	}
+	for _, marker := range append(transportMarkers, providerFailureMarkers...) {
 		if strings.Contains(lowerExcerpt, marker) {
 			return TransportError{Detail: compactTransportExcerpt(excerpt)}
 		}

@@ -49,6 +49,54 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 
 ### Plan ID
+EP-20260420-regres-small-runtime-stabilization
+
+### Context
+Live canonical `regres fast` от 2026-04-20 показал три runtime release-blocker класса у `qwen-code` и один monitoring blind spot: collect stall recovery возвращается в retry слишком поздно из-за ожидания pipe EOF; collect-repair всё ещё допускает legacy/contract-invalid outputs; `step2.asis_docs` и `step4.proposals` могут вернуть schema-valid `TaskResult` при невалидных runtime draft artifacts; provider-side API failures (`403 permission_error`, usage limit) маскируются под `runner_parse_failed`. Дополнительно matrix `profile-status` обновляется только на старте/финише и во время live-monitorинга выглядит как stale `running`.
+
+### Goals (must have)
+- [x] Перестроить qwen stall path на early retry без ожидания полного pipe drain/EOF
+- [x] Ужесточить collect artifact repair и legacy compatibility так, чтобы invalid `add_doc_artifact` больше не проходил как repair surface
+- [x] Сделать runtime-side draft artifact gate для `step2/4` final authority до возврата в orchestrator с одним constrained repair retry
+- [x] Расширить extractor/provider classification для terminal API failures (`403`, `429`, permission/quota/usage-limit`)
+- [x] Добавить regression tests/fixtures и live-monitoring heartbeat для `profile-status`
+
+### Non-goals
+- [ ] Не менять public schemas, API endpoints и `workspace.yaml`
+- [ ] Не пересобирать terminal batch/matrix failure taxonomy, если текущая deterministic classification уже корректна
+- [ ] Не добавлять broad semantic auto-repair legacy collect/draft payloads
+
+### Approach
+1) Перестроить `runQwenCommand` на bounded post-terminate drain и early sentinel return, не дожидаясь полного `wg.Wait()`.
+2) Ужесточить collect repair path: contract-explicit prompts, strict manifest re-parse после retry, safe-only compatibility normalization.
+3) Довести runtime-side draft artifact validation/repair parity для `step2/4` и исключить legacy `add_doc_artifact` drift при уже валидном draft manifest.
+4) Расширить provider/API error detection в extractor и сохранить root cause как `runner_unavailable`.
+5) Добавить matrix profile heartbeat во время child batch execution и закрепить всё fixture-driven тестами.
+
+### Files expected to change
+- `internal/runtime/qwencode/*`
+- `internal/runtime/taskresultextractor/*`
+- `internal/runtime/taskresultcompat/*`
+- `internal/runtime/testdata/*`
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/tests/*`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] collect stall с зависшим stdout pipe уходит в retry быстро и покрыт тестом
+- [x] invalid collect repair outputs падают как contract failure с raw artifacts и точной причиной
+- [x] invalid `asis-draft-manifest.json`/`proposals-draft-manifest.json` не проходят runtime gate
+- [x] observed `403 permission_error` transcript классифицируется как `runner_unavailable`
+- [x] `profile-status/*.json` получает heartbeat во время активного batch run
+
+### Risks
+- Основной риск — случайно ослабить уже работающую terminal classification или расширить compatibility normalization до semantic auto-repair. Снижение риска: менять только runtime/extractor/monitoring paths, а normalization оставить safe-only и закрепить regression tests на observed live fixtures.
+
+### Progress log
+- 2026-04-20: зафиксирован slice по стабилизации `qwen` после live `regres fast`; подтверждены реальные failure classes: late collect retry, invalid collect repair output, invalid draft artifact gate на `step2`, misclassified provider/API failures и stale profile-status heartbeat.
+- 2026-04-20: реализованы bounded stall retry без ожидания EOF, strict collect manifest compatibility, runtime-side step2 draft repair gate, provider/API `runner_unavailable` classification и matrix profile heartbeat; regression fixtures/tests обновлены, DoD (`make contracts`, `make test`, `make lint`, `make build`) пройден.
+
+### Plan ID
 EP-20260420-qwen-step0-draft-contract-regressions
 
 ### Context

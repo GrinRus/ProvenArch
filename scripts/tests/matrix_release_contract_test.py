@@ -4,6 +4,7 @@ import stat
 import subprocess
 import tempfile
 import textwrap
+import time
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -177,6 +178,10 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 fi
 
                 mkdir -p "${REPORTS_ROOT}" "${BATCH_ROOT}/qwen-code/run1/reports/taskruns"
+
+                if [[ "${MATRIX_TEST_SLEEP_SEC:-0}" != "0" ]]; then
+                  sleep "${MATRIX_TEST_SLEEP_SEC}"
+                fi
 
                 provider_filter="${BATCH_PROVIDER_FILTER:-all}"
                 if [[ -z "${provider_filter}" || "${provider_filter}" == "all" ]]; then
@@ -618,6 +623,55 @@ class MatrixReleaseContractTest(unittest.TestCase):
         row = dict(zip(header, values, strict=False))
         self.assertEqual("1", row["runtime_flow_failed_runs"])
         self.assertEqual("0", row["infra_incomplete_cycle_failures"])
+
+    def test_matrix_updates_profile_status_while_child_batch_is_running(self) -> None:
+        matrix_file = self._write_matrix_file(None, include_profiles=["single-path"])
+        matrix_id = "matrix-test-profile-heartbeat"
+        env = self._build_subprocess_env(
+            {
+                "E2E_MATRIX_FILE": str(matrix_file),
+                "BATCH_SCRIPT": str(self.batch_script),
+                "MATRIX_ID": matrix_id,
+                "E2E_MATRIX_RELEASE_MODE": "0",
+                "ACP_CLAUDE_CMD_BIN": "true",
+                "ACP_QWEN_CMD_BIN": "true",
+                "E2E_TMP_ROOT": str(self.e2e_tmp_root),
+                "REPORTS_ROOT": str(self.e2e_tmp_root / "reports"),
+                "MATRIX_ROOT": str(self.e2e_tmp_root / "matrix" / matrix_id),
+                "MATRIX_TEST_SENTINEL": str(self.sentinel_path),
+                "MATRIX_TEST_TIMEOUT_SENTINEL": str(self.timeout_sentinel_path),
+                "MATRIX_TEST_SLEEP_SEC": "3",
+                "MATRIX_PROFILE_STATUS_HEARTBEAT_SEC": "1",
+            }
+        )
+        proc = subprocess.Popen(
+            [str(self.matrix_driver)],
+            cwd=self.repo_root,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            status_path = self.e2e_tmp_root / "matrix" / matrix_id / "profile-status" / "single-path--baseline.json"
+            deadline = time.time() + 5
+            while time.time() < deadline and not status_path.exists():
+                time.sleep(0.1)
+            self.assertTrue(status_path.exists(), f"missing profile status file: {status_path}")
+
+            first_updated_at = json.loads(status_path.read_text(encoding="utf-8"))["updated_at"]
+            changed = False
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                time.sleep(1.1)
+                updated_at = json.loads(status_path.read_text(encoding="utf-8"))["updated_at"]
+                if updated_at != first_updated_at:
+                    changed = True
+                    break
+            self.assertTrue(changed, f"expected profile status heartbeat to update {status_path}")
+        finally:
+            stdout, stderr = proc.communicate(timeout=15)
+        self.assertEqual(0, proc.returncode, msg=stderr or stdout)
 
     def test_non_release_wave1_regression_matrix_allows_two_profiles(self) -> None:
         matrix_file = self._write_matrix_file(

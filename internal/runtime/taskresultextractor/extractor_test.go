@@ -203,6 +203,28 @@ func TestExtractReturnsTransportErrorForCapturedQwenOpenstackSSLFixture(t *testi
 	}
 }
 
+func TestExtractReturnsTransportErrorForCapturedQwenPermissionErrorFixture(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join("..", "testdata", "qwen_live_openstack_permission_error_stdout.txt")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read openstack permission-error stdout fixture: %v", err)
+	}
+
+	_, err = Extract(raw)
+	if err == nil {
+		t.Fatalf("expected transport extraction error for captured openstack permission_error fixture")
+	}
+	if !IsTransportError(err) {
+		t.Fatalf("expected transport error classification, got %v", err)
+	}
+	message := strings.ToLower(err.Error())
+	if !strings.Contains(message, "permission_error") && !strings.Contains(message, "usage limit") {
+		t.Fatalf("expected permission/quota marker in transport error, got %v", err)
+	}
+}
+
 func TestExtractReturnsCandidateObjectEvenWhenSchemaInvalid(t *testing.T) {
 	t.Parallel()
 
