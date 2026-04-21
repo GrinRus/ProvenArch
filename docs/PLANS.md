@@ -54,6 +54,88 @@ EP-YYYYMMDD-<slug>
 ---
 
 ## Active Plans
+### Plan ID
+EP-20260421-repo-garbage-audit
+
+### Context
+Нужно провести двухэтапную ревизию репозитория на предмет лишнего/устаревшего кода и документации без поспешных выводов по неявно используемым entrypoints, fixtures, generated assets и runtime contracts.
+
+### Goals (must have)
+- [ ] Явно зафиксировать критерии "мусора" для кода и документации в контексте ACP
+- [ ] Проверить репозиторий на лишние артефакты, дубли, dead code, docs drift и низкоценные комментарии
+- [ ] Разделить находки на подтверждённые и требующие ручной верификации
+- [ ] Сформировать приоритизированный отчёт с рисками изменения и рекомендациями по cleanup
+
+### Non-goals
+- [ ] Не удалять и не переписывать код в рамках самой ревизии
+- [ ] Не объявлять неявно используемые entrypoints/fixtures/generated assets "мусором" без доказательств
+
+### Approach
+1) Прочитать канонические документы и зафиксировать критерии ревизии.
+2) Проверить структуру репозитория, codepaths, docs surfaces, fixtures/examples/scripts и generated assets.
+3) Для подозрительных мест собрать usage/context через symbol search, ripgrep и точечное чтение файлов.
+4) Составить отчёт по четырём корзинам: точно лишнее, вероятно лишнее, устаревшие docs, быстрые улучшения.
+
+### Files expected to change
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [ ] Есть явные критерии для code/docs garbage
+- [ ] Каждая находка содержит путь, аргументацию, риск и рекомендованное действие
+- [ ] Спорные места помечены как требующие подтверждения владельца/ручной проверки
+
+### Risks
+- Основной риск — принять за мусор generated/test/support assets или неявные runtime/CLI entrypoints. Снижение риска: проверять usage, учитывать контракты/fixtures и явно маркировать низкую уверенность.
+
+### Progress log
+- 2026-04-21: прочитаны README/ARCHITECTURE/PIPELINE_SPEC, зафиксирован план ревизии.
+
+### Plan ID
+EP-20260421-repo-cleanup-pr1-pr2
+
+### Context
+Нужно реализовать cleanup после ревизии мусора, не смешивая truth-sync документации и низкорискованный naming cleanup с owner-gated удалением скрытого `ai-advent` special-case в runtime scripts.
+
+### Goals (must have)
+- [x] Сжать duplicated runbook content в `README.md` и `docs/TESTING_STRATEGY.md`
+- [x] Вернуть `docs/LOCAL_FULL_RUN_AI_ADVENT.md` к scenario/full-run scope без release cookbook
+- [x] Убрать misleading legacy wording в canonical release examples и тестах без изменения поведения
+- [x] Обновить docsync assertions под новую границу ответственности docs
+
+### Non-goals
+- [x] Не менять hidden `ai-advent` runtime behavior без owner confirmation
+- [x] Не менять public API, schema contracts или `workspace.yaml`
+
+### Approach
+1) Сжать high-level docs и оставить подробный cookbook только в runbook'ах.
+2) Обновить примеры, pointer-доки и docsync tests под новую docs boundary.
+3) Переименовать legacy naming в тестах/сообщениях, не затрагивая runtime semantics.
+
+### Files expected to change
+- `README.md`
+- `docs/LOCAL_FULL_RUN_AI_ADVENT.md`
+- `docs/TESTING_STRATEGY.md`
+- `examples/e2e-matrix.release-fast.yaml`
+- `examples/e2e-matrix.release-full.ftgo-sentry.yaml`
+- `cmd/README.md`
+- `internal/docsync/docsync_test.go`
+- `scripts/tests/matrix_release_contract_test.py`
+- `internal/orchestrator/coverage_merge_test.go`
+
+### Acceptance criteria
+- [x] README остаётся high-level entrypoint и не дублирует release cookbook
+- [x] `docs/LOCAL_FULL_RUN_AI_ADVENT.md` больше не содержит release command blocks и release totals
+- [x] `docs/TESTING_STRATEGY.md` фиксирует policy/invariants, а не operational cookbook
+- [x] Docusync покрывает новую границу ответственности docs
+
+### Risks
+- Основной риск — случайно замаскировать действующее hidden `ai-advent` behavior как будто оно уже удалено. Снижение риска: не трогать scripts/runtime flow и оставлять release contract только в dedicated runbook.
+
+### Progress log
+- 2026-04-21: начата реализация PR1+PR2; PR3 явно отложен до owner confirmation.
+- 2026-04-21: README/local runbook/testing strategy сжаты до truth-sync boundary; обновлены canonical release example comments, docsync assertions и low-risk legacy naming в тестах; verification: `go test ./internal/docsync`, targeted Python/Go tests, `make contracts`, `make test`, `make lint`, `make build`.
+- 2026-04-21: `examples/e2e-matrix.regression-wave1.yaml` сознательно не менялся; файл остаётся deferred cleanup candidate до owner confirmation, как и hidden `ai-advent` script behavior.
+
 2026-04-21: cleanup/refactor closure по prompt layering, compatibility inventory, explicit repair stages и ownership split завершён; active engineering surface больше не держит эти планы как open work. Зафиксированный результат: workspace prompt pack остаётся editable content layer only, merge order фиксирован как `provider header -> artifact-only/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer`, а enforced runtime policy/invariants не могут быть ослаблены содержимым prompt pack. Active compatibility inventory ограничен `collect.documents_path_normalization` и `drafts.reconcile_existing_canonical_outputs`. Текущий source of truth для результата — код, `docs/ARCHITECTURE.md` и `docs/TESTING_STRATEGY.md`.
 
 ### Plan ID
