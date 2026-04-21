@@ -461,6 +461,86 @@ EP-20260416-zero-signal-hardening
 ### Progress log
 - 2026-04-16: реализованы `evidence_state`, incomplete/partial report semantics, batch failure precedence, regression tests и docs sync.
 
+### Plan ID
+EP-20260421-runtime-architecture-alignment-followup
+
+### Context
+Аудит текущего state показал, что core local-first/docs-first архитектура уже реализована и тестовый baseline зелёный, но остаются системные зоны риска:
+- часть source-of-truth всё ещё дублируется между Go runtime, shell harness и Python reporting;
+- baseline bundle имеет dual source-of-truth (`internal/workspace/baseline.go` vs UI editable surface) и не имеет явного migration/version path;
+- recorded full-chain regression покрывает `qwen-code`, но не даёт такой же orchestrator/report parity для `claude-code`;
+- live artifact-quality surface частично опирается на markdown string heuristics вместо полностью structured signals;
+- frontend product regression coverage заметно слабее backend/runtime coverage и всё ещё смешивается с operational smoke.
+
+### Goals (must have)
+- [x] Свести runtime/report classification к одному machine-readable source-of-truth с минимальным shell/python drift
+- [x] Ввести explicit baseline bundle manifest/versioning и убрать дублирование списка editable artifacts между backend и UI
+- [x] Добавить cross-provider recorded integration parity для `claude-code`
+- [x] Перевести quality gate с markdown-only heuristics на structured quality evidence, где это возможно
+- [x] Развести frontend operational smoke и isolated UI regression coverage
+
+### Non-goals
+- [ ] Не менять public JSON schemas (`TaskResult`, `shard-pack-manifest`, `final-run-index`, `citation-index`, `validator-verdict`)
+- [ ] Не ослаблять semantic gate `analysis:cross-repo-missing`
+- [ ] Не вводить hosted/security/compliance slices
+
+### Recommended first slice
+1) Вынести baseline bundle inventory в единый machine-readable manifest.
+2) Генерировать UI baseline editor surface из этого manifest вместо hardcoded списка.
+3) Добавить bundle version + stale/defaults diagnostics без авто-перезаписи пользовательских правок.
+
+Этот slice минимальный, reviewable и одновременно закрывает самый явный residual drift между runtime, workspace seeding и UI.
+
+### Approach
+1) **Failure taxonomy convergence**
+   - materialize единый batch/runtime classification artifact в Go-слое;
+   - shell/python переводить на consume-first модель, а fallback string scanning держать только для legacy runs;
+   - сократить дублирование precedence tables и subclass mapping.
+2) **Baseline bundle source-of-truth**
+   - ввести bundle manifest (`skills/bundle-manifest.json|yaml`) как canonical inventory для prompt packs / reference-only prompts / editable assets;
+   - `EnsureBaselineBundle` и UI editor должны читать один и тот же inventory;
+   - добавить version field и diagnostics для stale workspace baseline.
+3) **Cross-provider recorded integration parity**
+   - добавить `claude-code` recorded chain на тот же путь `raw provider output -> runner -> orchestrator/docflow -> batch/report`;
+   - зафиксировать одинаковые expected classes для salvage / unavailable / artifact-repair путей.
+4) **Structured quality evidence**
+   - вынести placeholder/incomplete/report-uselessness сигналы из ad-hoc markdown matching в structured report/quality artifact;
+   - markdown text checks оставить только как compatibility fallback.
+5) **Frontend test split**
+   - удержать `frontend-live-e2e` как trusted-host operational smoke;
+   - расширить `ui/src/*.test.tsx` и/или добавить non-live Playwright/RTL scenarios для baseline editor, runs/results navigation, error surfacing.
+
+### Files expected to change
+- `internal/orchestrator/*`
+- `internal/runtime/*`
+- `internal/workspace/*`
+- `internal/api/*`
+- `scripts/e2e_batch_report.py`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/frontend-live-e2e.sh`
+- `scripts/tests/*`
+- `ui/src/*`
+- `ui/e2e/*`
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/spec/PIPELINE_SPEC.md`
+
+### Acceptance criteria
+- [x] shell/python report layers не содержат независимой business-logic классификации для canonical runs
+- [x] baseline bundle inventory и UI editor surface генерируются из одного source-of-truth
+- [x] recorded integration tests существуют для `qwen-code` и `claude-code`
+- [x] artifact-quality blockers можно вывести из structured evidence без обязательного markdown text scanning
+- [x] isolated frontend regression tests покрывают ключевой UI flow без live provider dependency
+
+### Risks
+- Bundle migration легко сломать, если попытаться silently rewrite user-edited workspace assets; нужны diagnostics/versioning, а не force-overwrite.
+- Сведение classification logic в один source-of-truth затронет одновременно Go, shell и Python и потребует особенно аккуратной regression coverage.
+- Часть current artifact-quality semantics пока encoded в human-readable markdown; перенос в structured layer нужно делать без потери текущих blocking guarantees.
+
+### Progress log
+- 2026-04-21: реализованы structured run-level `failure`/`quality_signals` в quality summary, bundle manifest + stale diagnostics, backend/UI inventory convergence, `claude-code` recorded integration parity, additional non-live UI regression checks и shell-agnostic hermetic tooling (`yaml_compat`, `run-npm.sh`, `resolve-node-tool.sh`) для стабильного DoD из `bash`/`make`.
+
 ### Archived
 - Completed historical plans moved to `docs/archive/PLANS_ARCHIVE_2026-04.md` (archived on 2026-04-15).
 

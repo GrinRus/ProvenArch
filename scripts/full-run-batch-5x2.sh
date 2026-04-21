@@ -117,6 +117,26 @@ require_cmd() {
   fi
 }
 
+resolve_npm_bin() {
+  if [[ "$(type -t npm || true)" == "function" ]]; then
+    printf '%s\n' "npm"
+    return 0
+  fi
+  printf '%s\n' "$PROVENARCH_ROOT/scripts/run-npm.sh"
+}
+
+current_npm_bin() {
+  if [[ -n "${ACP_NPM_BIN:-}" ]]; then
+    printf '%s\n' "$ACP_NPM_BIN"
+    return 0
+  fi
+  if [[ -n "${NPM_BIN:-}" ]]; then
+    printf '%s\n' "$NPM_BIN"
+    return 0
+  fi
+  resolve_npm_bin
+}
+
 array_contains() {
   local needle="$1"
   shift
@@ -398,9 +418,37 @@ precedence = {
     "none": 99,
 }
 
+def load_quality_classifications(taskruns_root: Path, run_ids: set[str]) -> list[tuple[int, str, str]]:
+    records: list[tuple[int, str, str]] = []
+    if not taskruns_root.is_dir():
+        return records
+    if not run_ids:
+        return records
+    for run_id in sorted(run_ids):
+        quality_path = taskruns_root / f"{run_id}-quality.json"
+        if not quality_path.exists():
+            continue
+        try:
+            payload = json.loads(quality_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        failure = payload.get("failure") if isinstance(payload.get("failure"), dict) else {}
+        failure_class = str(failure.get("class", "")).strip()
+        if not failure_class or failure_class == "none":
+            continue
+        subclass = str(failure.get("subclass", "")).strip() or "none"
+        records.append((precedence.get(failure_class, 98), failure_class, subclass))
+    return records
+
 all_failures = []
 matched_failures = []
 unscoped_failures = []
+taskruns_root = raw_dir.parent
+quality_failures = load_quality_classifications(taskruns_root, run_ids)
+if quality_failures:
+    best = min(quality_failures, key=lambda item: item[0])
+    print(f"{best[1]}\t{best[2]}")
+    raise SystemExit(0)
 for path in sorted(raw_dir.rglob("*-failure.json")):
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -773,12 +821,14 @@ run_dod_precheck_make() {
 }
 
 run_ui_dependency_precheck() {
-  npm ci --prefix ui >"$BATCH_ROOT/precheck-ui-npm.log" 2>&1
+  local npm_bin
+  npm_bin="$(current_npm_bin)"
+  "$npm_bin" ci --prefix ui >"$BATCH_ROOT/precheck-ui-npm.log" 2>&1
   if [[ ! -x "$PROVENARCH_ROOT/ui/node_modules/.bin/vitest" ]]; then
     echo "vitest binary missing after npm ci --prefix ui" >"$BATCH_ROOT/precheck-ui-readiness.log"
     return 1
   fi
-  npm exec --prefix ui playwright install chromium >"$BATCH_ROOT/precheck-playwright.log" 2>&1
+  "$npm_bin" exec --prefix ui playwright install chromium >"$BATCH_ROOT/precheck-playwright.log" 2>&1
 }
 
 classify_run_failure() {
@@ -1269,7 +1319,8 @@ esac
 
 require_cmd git
 require_cmd go
-require_cmd npm
+NPM_BIN="${ACP_NPM_BIN:-$(resolve_npm_bin)}"
+require_cmd "$NPM_BIN"
 require_cmd make
 require_cmd python3
 require_cmd curl

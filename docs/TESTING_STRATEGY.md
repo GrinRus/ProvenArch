@@ -128,6 +128,7 @@ Implemented required jobs:
   - `npm run typecheck --prefix ui`
   - `npm run test --prefix ui -- --run`
   - `npm run build --prefix ui`
+  - `make`/bash harness run UI steps through `scripts/run-npm.sh` + `scripts/resolve-node-tool.sh`, so DoD keeps a matching `node`/`npm` pair even when `/bin/sh` and login shells expose different PATH orders or architectures
 
 Implemented additional jobs:
 - `golden`
@@ -256,7 +257,8 @@ Implemented additional jobs:
   - schema-invalid `TaskResult` получает один direct-JSON retry с whitelist допустимых `changeset[].op`; invalid manifest после schema-valid result идёт в отдельный artifact-repair path
   - collect runtime не принимает nominal success после failed artifact-repair: missing/invalid/skeletal manifest после единственной repair попытки поднимается как `runner_parse_failed` / `runtime_artifact_contract`
   - global uniqueness для `citation-index.claim_ids` проверяется как validator contract; duplicate claim ids либо repair-ятся на index/reference уровне детерминированным shard suffix, либо остаются blocking defect
-  - refresh artifact-quality guard: `artifact_quality:*` в `reports/taskruns/<run_id>-quality.json.run_warnings` считается canonical live gate blocker; bank-like collapse к одному `cite.runtime-summary` должен ловиться, openstack-like reuse с хотя бы одним rich shard остаётся допустимым
+  - refresh artifact-quality guard: `artifact_quality:*` в `reports/taskruns/<run_id>-quality.json.quality_signals[]` является primary live gate evidence, `run_warnings` остаётся compatibility fallback; bank-like collapse к одному `cite.runtime-summary` должен ловиться, openstack-like reuse с хотя бы одним rich shard остаётся допустимым
+  - per-run `reports/taskruns/<run_id>-quality.json.failure` является canonical run-level classification summary для новых run roots; shell/python batch layers должны consume его first и не пересчитывать class/subclass на structured runs
   - `profile_matrix_<matrix-id>` и `quality_report_<batch-id>` обязаны агрегировать только реально выбранные `selected_providers`/`selected_run_indexes`; qwen-only non-release run не должен порождать synthetic `backend_total_runs=10` и `summary_missing=9`
   - internal shard-plan/shard-summary taskrun JSON обязаны иметь non-empty `meta.runtime.name`; false `contract:runtime-name` на internal artifacts считается regression
   - относительные `repos_file` пути резолвятся от директории `E2E_MATRIX_FILE`

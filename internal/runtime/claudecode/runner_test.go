@@ -1340,8 +1340,11 @@ printf '%%s\n' '{"meta":{"task_id":"bad-only"}}'
 	if code != string(acpruntime.ErrorCodeRunnerStalled) {
 		t.Fatalf("expected runner_stalled code, got %q (%v)", code, err)
 	}
-	if !strings.Contains(message, "invalid taskresult") {
-		t.Fatalf("expected invalid-taskresult stall message, got %q", message)
+	if !strings.Contains(message, "stalled after retry") {
+		t.Fatalf("expected stall-retry message, got %q", message)
+	}
+	if !strings.Contains(message, "parse_stage=exec") && !strings.Contains(message, "invalid taskresult") {
+		t.Fatalf("expected retry diagnostics in stall message, got %q", message)
 	}
 }
 

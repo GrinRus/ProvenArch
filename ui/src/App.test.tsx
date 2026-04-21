@@ -12,6 +12,7 @@ type FetchMockState = {
   runStatus?: Record<string, MockJSON>;
   runArtifacts?: Record<string, MockJSON>;
   artifactText?: Record<string, string>;
+  baselineBundleWarnings?: MockJSON[];
 };
 
 function jsonResponse(body: MockJSON, status = 200): Response {
@@ -63,6 +64,20 @@ function createFetchMock(state: FetchMockState = {}) {
     "reports/coverage/open-questions.md": "- Clarify owners\n",
     ...(state.artifactText ?? {}),
   };
+  const baselineBundleManifest = {
+    schema_version: 1,
+    bundle_version: 1,
+    prompt_surface_policy: {
+      live_headless_source: "skills/prompt-packs/*.md",
+      reference_only_pattern: "skills/*/prompts/*.md",
+    },
+    editable_artifacts: [
+      { path: "charter/overview.md", label: "charter/overview.md", category: "charter" },
+      { path: "skills/prompt-packs/findings.md", label: "skills/prompt-packs/findings.md", category: "prompt-pack", prompt_usage: "live-consumed" },
+      { path: "skills/prompt-packs/qa.md", label: "skills/prompt-packs/qa.md", category: "prompt-pack", prompt_usage: "live-consumed" },
+      { path: "skills/findings/prompts/system.md", label: "skills/findings/prompts/system.md (reference-only)", category: "skill-prompt", prompt_usage: "reference-only" },
+    ],
+  };
 
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
@@ -91,6 +106,15 @@ function createFetchMock(state: FetchMockState = {}) {
     if (method === "GET" && url === "/api/workspace/manifest") {
       return jsonResponse({
         content: "version: 1\nrepos:\n  - name: payments-service\n    path: /tmp/payments-service\n",
+      });
+    }
+
+    if (method === "GET" && url === "/api/workspace/bundle") {
+      return jsonResponse({
+        ok: true,
+        workspace: "/tmp/workspace",
+        manifest: baselineBundleManifest,
+        warnings: state.baselineBundleWarnings ?? [],
       });
     }
 
@@ -285,6 +309,34 @@ describe("App", () => {
     });
   });
 
+  it("surfaces run errors and warnings in non-live status panel", async () => {
+    const runID = "run-status";
+    vi.stubGlobal("fetch", createFetchMock({
+      runID,
+      runStarted: true,
+      runStatus: {
+        [runID]: {
+          run_id: runID,
+          pipeline: "refresh",
+          status: "failed",
+          started_at: "2026-04-03T12:00:00Z",
+          finished_at: "2026-04-03T12:00:05Z",
+          warnings: ["artifact_quality: overview report is too sparse or placeholder-like for a succeeded run"],
+          error_code: "runner_unavailable",
+          error: "provider availability error (quota_or_permission)",
+        },
+      },
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("tab-runs"));
+
+    expect(await screen.findByText(/Error code: runner_unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/provider availability error \(quota_or_permission\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/artifact_quality: overview report is too sparse or placeholder-like/i)).toBeInTheDocument();
+  });
+
   it("shows diagrams surface in Results tab and renders Mermaid preview", async () => {
     const runID = "run-diagrams";
     const fetchMock = createFetchMock({
@@ -366,5 +418,23 @@ describe("App", () => {
     const options = Array.from((select as HTMLSelectElement).options).map((option) => option.text);
     expect(options).toContain("skills/prompt-packs/findings.md");
     expect(options).toContain("skills/findings/prompts/system.md (reference-only)");
+  });
+
+  it("surfaces baseline bundle diagnostics from backend inventory", async () => {
+    vi.stubGlobal("fetch", createFetchMock({
+      baselineBundleWarnings: [
+        {
+          level: "warning",
+          code: "workspace.skills.bundle_manifest.stale",
+          message: "baseline bundle manifest version mismatch",
+        },
+      ],
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("tab-baseline"));
+
+    expect(await screen.findByText(/workspace\.skills\.bundle_manifest\.stale/i)).toBeInTheDocument();
   });
 });

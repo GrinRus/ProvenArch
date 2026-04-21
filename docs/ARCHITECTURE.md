@@ -45,7 +45,7 @@
    - Live browser e2e: Playwright optional smoke (`ui/e2e/live-flow.spec.ts`, `npm run e2e:live --prefix ui`)
    - Guided setup поддерживает multi-repo (`repos[]`) с add/remove rows и optional `ref`
    - Показывает repo overview в validate surface: `resolved_repos` + diagnostics, сгруппированные по repo
-   - Редактирует baseline bundle artifacts через guided selector (`charter/*`, `skills/*`, prompt packs, `skills/subagents.yaml`)
+   - Редактирует baseline bundle artifacts через guided selector (`charter/*`, `skills/*`, prompt packs, `skills/subagents.yaml`), построенный из `skills/bundle-manifest.json`
    - UI разбит на top-level tabs `Setup / Baseline / Runs / Results / Settings`
    - Runtime profile (`timeouts` + `execution`) полностью вынесен в вкладку `Settings`
    - Показывает run dashboard (queued/running/succeeded/failed), включая завершённые run'ы из persisted history
@@ -69,6 +69,7 @@
    - Step 0 materialization читает persisted wizard contract `charter/wizard/step0-contract.json`
    - при missing/invalid wizard contract применяется deterministic baseline fallback и warning фиксируется в run diagnostics
    - baseline bundle seeding выполняется create-if-missing, без перезаписи пользовательских правок
+   - `skills/bundle-manifest.json` является machine-readable inventory/source-of-truth для baseline editor surface; stale manifest version выдаёт diagnostic, но не триггерит auto-overwrite workspace assets
    - Готовит ContextPack/PromptPack
    - Загружает baseline bundle agents/skills/prompts из workspace
    - Работает с единым central workspace (`arch-workspace`) как корнем артефактов MVP
@@ -122,7 +123,7 @@
      - `executeRuntimeTask` выполняет runner под `context.WithTimeout(step_timeout_sec)`
      - heartbeat-log `runtime task heartbeat` публикуется раз в `heartbeat_sec`
      - timeout/cancel причины добавляются в error message без изменения `error_code` контракта
-   - Materialize-ит per-run quality summary `reports/taskruns/<run_id>-quality.json` (signal metrics/runtime versions + `evidence_state.collect/findings/report_mode/reasons`)
+   - Materialize-ит per-run quality summary `reports/taskruns/<run_id>-quality.json` (signal metrics/runtime versions + structured `failure` + `quality_signals[]` + `evidence_state.collect/findings/report_mode/reasons`)
    - Materialize-ит per-run repo selection summary `reports/taskruns/<run_id>-repo-selection-summary.json` (mode + selected scopes + include/exclude reasons)
    - Run logs retention policy (TTL + max runs) запускается при старте сервиса, перед run и после run
    - (опционально) делает git commit

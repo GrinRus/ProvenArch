@@ -46,6 +46,26 @@ require_cmd() {
   fi
 }
 
+resolve_npm_bin() {
+  if [[ "$(type -t npm || true)" == "function" ]]; then
+    printf '%s\n' "npm"
+    return 0
+  fi
+  printf '%s\n' "$PROVENARCH_ROOT/scripts/run-npm.sh"
+}
+
+current_npm_bin() {
+  if [[ -n "${ACP_NPM_BIN:-}" ]]; then
+    printf '%s\n' "$ACP_NPM_BIN"
+    return 0
+  fi
+  if [[ -n "${NPM_BIN:-}" ]]; then
+    printf '%s\n' "$NPM_BIN"
+    return 0
+  fi
+  resolve_npm_bin
+}
+
 parse_positive_int_or_die() {
   local raw="$1"
   local name="$2"
@@ -176,7 +196,8 @@ esac
 
 require_cmd curl
 require_cmd python3
-require_cmd npm
+NPM_BIN="$(current_npm_bin)"
+require_cmd "$NPM_BIN"
 acp_ensure_no_legacy_env_set die
 
 runtime_cmd=""
@@ -291,7 +312,7 @@ fi
 
 status="passed"
 reason="$ACP_FRONTEND_REASON_OK"
-playwright_cmd=(npm run --prefix ui e2e:live)
+playwright_cmd=("$NPM_BIN" run --prefix ui e2e:live)
 if [[ "$UI_E2E_HEADED" == "1" ]]; then
   playwright_cmd+=(-- --headed)
 fi

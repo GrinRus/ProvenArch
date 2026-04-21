@@ -220,6 +220,18 @@ def filter_failure_artifacts_for_current_runs(
 
 
 def extract_artifact_quality_warnings(quality_payload: dict[str, Any]) -> list[str]:
+    quality_signals = quality_payload.get("quality_signals") or []
+    if isinstance(quality_signals, list):
+        extracted_from_signals: list[str] = []
+        for signal in quality_signals:
+            if not isinstance(signal, dict):
+                continue
+            code = str(signal.get("code", "")).strip()
+            message = str(signal.get("message", "")).strip()
+            if code.startswith("artifact_quality.") and message:
+                extracted_from_signals.append(message)
+        if extracted_from_signals:
+            return extracted_from_signals
     warnings = quality_payload.get("run_warnings") or []
     if not isinstance(warnings, list):
         return []
@@ -229,6 +241,18 @@ def extract_artifact_quality_warnings(quality_payload: dict[str, Any]) -> list[s
         if text.startswith(ARTIFACT_QUALITY_WARNING_PREFIX):
             extracted.append(text)
     return extracted
+
+
+def extract_failure_classification_from_quality(quality_payload: dict[str, Any]) -> tuple[str, str, str]:
+    failure = quality_payload.get("failure") or {}
+    if not isinstance(failure, dict):
+        return "", "", ""
+    failure_class = str(failure.get("class", "")).strip()
+    failure_subclass = str(failure.get("subclass", "")).strip()
+    parse_stage = str(failure.get("parse_stage", "")).strip()
+    if failure_class == "none":
+        failure_class = ""
+    return failure_class, failure_subclass, parse_stage
 
 
 def parse_run_results(path: Path) -> list[dict[str, Any]]:
@@ -1082,6 +1106,26 @@ def evaluate_run(
     init_row = headless_rows.get("init")
     refresh_row = headless_rows.get("refresh")
     active_run_ids = current_run_ids(init_row, refresh_row)
+    quality_classified_failure = ""
+    quality_classified_subclass = ""
+    quality_classified_parse_stage = ""
+    for row in (init_row, refresh_row):
+        if not row:
+            continue
+        quality_path, _ = resolve_quality_json(run_dir, row)
+        if not quality_path.exists():
+            continue
+        quality_payload = read_json(quality_path)
+        failure_class, failure_subclass, parse_stage = extract_failure_classification_from_quality(quality_payload)
+        if not failure_class:
+            continue
+        if (
+            not quality_classified_failure
+            or failure_class_rank(failure_class) < failure_class_rank(quality_classified_failure)
+        ):
+            quality_classified_failure = failure_class
+            quality_classified_subclass = failure_subclass
+            quality_classified_parse_stage = parse_stage
 
     snapshot_ok = True
     artifact_source = "snapshot"
@@ -1151,6 +1195,7 @@ def evaluate_run(
             parse_stages.add(parse_stage)
         if raw_output_path:
             raw_outputs.add(raw_output_path)
+    structured_failure_signals_present = bool(structured_failures) or bool(quality_classified_failure)
     runner_error_sources = [summary_path, full_run_log]
     runner_error_sources.extend(sorted((run_dir / "logs").glob("run-iter*-*.log")))
     runner_error_sources.extend(
@@ -1184,19 +1229,19 @@ def evaluate_run(
         if not source_path.exists():
             continue
         text = read_text_file(source_path)
-        if not structured_failures and "runner_unavailable" in text:
+        if not structured_failure_signals_present and "runner_unavailable" in text:
             runner_unavailable_hit = True
             runner_error_hit = True
             error_codes.append("runner_unavailable")
             if re.search(r"permission_error|insufficient_quota|usage limit|quota( exceeded| limit| will be refreshed)|API Error: 403", text, re.IGNORECASE):
                 runner_unavailable_quota_hit = True
                 error_codes.append("runner_unavailable:quota_or_permission")
-        if not structured_failures and "runner_stalled" in text:
+        if not structured_failure_signals_present and "runner_stalled" in text:
             runtime_stalled_hit = True
             runner_error_hit = True
             error_codes.append("runner_stalled")
             stalled_contexts.update(parse_stall_contexts(text))
-        if not structured_failures and "runner_parse_failed" in text:
+        if not structured_failure_signals_present and "runner_parse_failed" in text:
             if any(marker in text for marker in artifact_contract_markers):
                 runtime_artifact_contract_hit = True
                 error_codes.append("runtime_artifact_contract")
@@ -1204,13 +1249,18 @@ def evaluate_run(
                 runtime_parse_hit = True
             runner_error_hit = True
             error_codes.append("runner_parse_failed")
-        if not structured_failures:
+        if not structured_failure_signals_present:
             parse_stages.update(match.group(1).strip() for match in re.finditer(r"parse_stage=([a-z_]+)", text))
             raw_outputs.update(match.group(1).strip() for match in re.finditer(r"raw_output=([^\s)]+)", text))
         if "runner_stalled" in text:
             stalled_contexts.update(parse_stall_contexts(text))
     if runtime_artifact_contract_hit:
         runtime_parse_hit = False
+    if quality_classified_failure:
+        classified_failure = quality_classified_failure
+        classified_subclass = quality_classified_subclass
+        if quality_classified_parse_stage:
+            parse_stages.add(quality_classified_parse_stage)
     if classified_subclass == "quota_or_permission":
         runner_unavailable_quota_hit = True
     h3 = not runner_error_hit

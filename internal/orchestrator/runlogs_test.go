@@ -49,7 +49,13 @@ func TestRunWritesQualitySummaryAndQueryableLogs(t *testing.T) {
 		t.Fatalf("read quality summary %q: %v", qualityPath, err)
 	}
 	var quality struct {
-		Status string `json:"status"`
+		Status  string `json:"status"`
+		Failure struct {
+			Class string `json:"class"`
+		} `json:"failure"`
+		QualitySignals []struct {
+			Code string `json:"code"`
+		} `json:"quality_signals"`
 		Totals struct {
 			Steps       int `json:"steps"`
 			SignalScore int `json:"signal_score"`
@@ -62,11 +68,17 @@ func TestRunWritesQualitySummaryAndQueryableLogs(t *testing.T) {
 	if quality.Status != string(RunStatusSucceeded) {
 		t.Fatalf("expected quality summary status %q, got %q", RunStatusSucceeded, quality.Status)
 	}
+	if quality.Failure.Class != "none" {
+		t.Fatalf("expected quality summary failure.class=none, got %q", quality.Failure.Class)
+	}
 	if quality.Totals.Steps <= 0 {
 		t.Fatalf("expected positive quality step count, got %d", quality.Totals.Steps)
 	}
 	if len(quality.RuntimeVersions) == 0 {
 		t.Fatalf("expected runtime versions in quality summary")
+	}
+	if len(quality.QualitySignals) != 0 {
+		t.Fatalf("expected no quality signals for clean run, got %+v", quality.QualitySignals)
 	}
 
 	page, ok, err := service.GetRunLogs(info.RunID, 0, 500)
@@ -284,6 +296,11 @@ func TestAssessLiveReportSurfaceWarningsFlagsPlaceholderAndIncompleteArtifacts(t
 	writeReport("reports/coverage/open-questions.md", "# Open Questions\n\nOpen questions may be incomplete because some shards failed.\n")
 
 	ctx := reports.DefaultReportRenderContext()
+	signals := assessLiveReportSurfaceSignals(ws, ctx, RunStatusSucceeded)
+	joinedSignals := []string{}
+	for _, signal := range signals {
+		joinedSignals = append(joinedSignals, signal.Code)
+	}
 	warnings := assessLiveReportSurfaceWarnings(ws, ctx, RunStatusSucceeded)
 	joined := strings.Join(warnings, "\n")
 	if !strings.Contains(joined, "overview report is too sparse or placeholder-like") {
@@ -297,6 +314,16 @@ func TestAssessLiveReportSurfaceWarningsFlagsPlaceholderAndIncompleteArtifacts(t
 	}
 	if !strings.Contains(joined, "open questions report still indicates incomplete analysis") {
 		t.Fatalf("expected open questions incomplete warning, got %+v", warnings)
+	}
+	for _, code := range []string{
+		"artifact_quality.overview_placeholder",
+		"artifact_quality.findings_incomplete",
+		"artifact_quality.coverage_incomplete",
+		"artifact_quality.open_questions_incomplete",
+	} {
+		if !containsIssue(joinedSignals, code) {
+			t.Fatalf("expected structured quality signal %q, got %+v", code, joinedSignals)
+		}
 	}
 }
 

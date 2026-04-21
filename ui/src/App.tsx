@@ -25,6 +25,30 @@ type ValidateResponse = {
   }>;
 };
 
+type BaselineBundleEditableArtifact = {
+  path: string;
+  label: string;
+  category: string;
+  prompt_usage?: string;
+};
+
+type BaselineBundleManifest = {
+  schema_version: number;
+  bundle_version: number;
+  prompt_surface_policy?: {
+    live_headless_source?: string;
+    reference_only_pattern?: string;
+  };
+  editable_artifacts?: BaselineBundleEditableArtifact[];
+};
+
+type BaselineBundleResponse = {
+  ok: boolean;
+  workspace: string;
+  warnings?: Diagnostic[];
+  manifest?: BaselineBundleManifest;
+};
+
 type RunStartResponse = {
   run_id: string;
   status: string;
@@ -169,37 +193,6 @@ type EditableArtifactOption = {
   path: string;
   label: string;
 };
-
-const baselineEditorArtifacts: EditableArtifactOption[] = [
-  { path: "charter/overview.md", label: "charter/overview.md" },
-  { path: "charter/rules.yaml", label: "charter/rules.yaml" },
-  { path: "charter/nfr.yaml", label: "charter/nfr.yaml" },
-  { path: "charter/glossary.yaml", label: "charter/glossary.yaml" },
-  { path: "skills/subagents.yaml", label: "skills/subagents.yaml" },
-  { path: "skills/prompt-packs/constitution.md", label: "skills/prompt-packs/constitution.md" },
-  { path: "skills/prompt-packs/collect-context.md", label: "skills/prompt-packs/collect-context.md" },
-  { path: "skills/prompt-packs/findings.md", label: "skills/prompt-packs/findings.md" },
-  { path: "skills/prompt-packs/proposals.md", label: "skills/prompt-packs/proposals.md" },
-  { path: "skills/prompt-packs/qa.md", label: "skills/prompt-packs/qa.md" },
-  { path: "skills/service-inventory/prompts/system.md", label: "skills/service-inventory/prompts/system.md (reference-only)" },
-  { path: "skills/service-inventory/prompts/task.md", label: "skills/service-inventory/prompts/task.md (reference-only)" },
-  { path: "skills/interface-extraction/prompts/system.md", label: "skills/interface-extraction/prompts/system.md (reference-only)" },
-  { path: "skills/interface-extraction/prompts/task.md", label: "skills/interface-extraction/prompts/task.md (reference-only)" },
-  { path: "skills/integration-mapping/prompts/system.md", label: "skills/integration-mapping/prompts/system.md (reference-only)" },
-  { path: "skills/integration-mapping/prompts/task.md", label: "skills/integration-mapping/prompts/task.md (reference-only)" },
-  { path: "skills/datastore-mapping/prompts/system.md", label: "skills/datastore-mapping/prompts/system.md (reference-only)" },
-  { path: "skills/datastore-mapping/prompts/task.md", label: "skills/datastore-mapping/prompts/task.md (reference-only)" },
-  { path: "skills/cicd-mapping/prompts/system.md", label: "skills/cicd-mapping/prompts/system.md (reference-only)" },
-  { path: "skills/cicd-mapping/prompts/task.md", label: "skills/cicd-mapping/prompts/task.md (reference-only)" },
-  { path: "skills/ownership-coverage/prompts/system.md", label: "skills/ownership-coverage/prompts/system.md (reference-only)" },
-  { path: "skills/ownership-coverage/prompts/task.md", label: "skills/ownership-coverage/prompts/task.md (reference-only)" },
-  { path: "skills/findings/prompts/system.md", label: "skills/findings/prompts/system.md (reference-only)" },
-  { path: "skills/findings/prompts/task.md", label: "skills/findings/prompts/task.md (reference-only)" },
-  { path: "skills/proposals/prompts/system.md", label: "skills/proposals/prompts/system.md (reference-only)" },
-  { path: "skills/proposals/prompts/task.md", label: "skills/proposals/prompts/task.md (reference-only)" },
-  { path: "skills/qa/prompts/system.md", label: "skills/qa/prompts/system.md (reference-only)" },
-  { path: "skills/qa/prompts/task.md", label: "skills/qa/prompts/task.md (reference-only)" }
-];
 
 const runtimeTimeoutKeys: RuntimeTimeoutKey[] = [
   "step_timeout_sec",
@@ -479,7 +472,9 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
 
   const [manifestContent, setManifestContent] = useState("");
-  const [selectedEditorPath, setSelectedEditorPath] = useState<string>(baselineEditorArtifacts[0].path);
+  const [baselineEditorArtifacts, setBaselineEditorArtifacts] = useState<EditableArtifactOption[]>([]);
+  const [baselineBundleWarnings, setBaselineBundleWarnings] = useState<Diagnostic[]>([]);
+  const [selectedEditorPath, setSelectedEditorPath] = useState<string>("");
   const [selectedEditorContent, setSelectedEditorContent] = useState("");
   const [editorStatus, setEditorStatus] = useState("");
 
@@ -688,10 +683,35 @@ export default function App() {
       setManifestContent("");
     }
 
-    await loadTextArtifact(selectedEditorPath, setSelectedEditorContent);
+    await loadBaselineBundle();
     await loadWizardContract();
     await loadRuntimeTimeouts();
     await loadRuntimeExecution();
+  }
+
+  async function loadBaselineBundle() {
+    try {
+      const payload = await fetchJSON<BaselineBundleResponse>("/api/workspace/bundle");
+      const artifacts = (payload.manifest?.editable_artifacts ?? []).map((artifact) => ({
+        path: artifact.path,
+        label: artifact.label,
+      }));
+      setBaselineEditorArtifacts(artifacts);
+      setBaselineBundleWarnings(payload.warnings ?? []);
+      const hasCurrentSelection = artifacts.some((artifact) => artifact.path === selectedEditorPath);
+      const nextPath = hasCurrentSelection ? selectedEditorPath : (artifacts[0]?.path ?? "");
+      setSelectedEditorPath(nextPath);
+      if (nextPath) {
+        await loadTextArtifact(nextPath, setSelectedEditorContent);
+      } else {
+        setSelectedEditorContent("");
+      }
+    } catch {
+      setBaselineEditorArtifacts([]);
+      setBaselineBundleWarnings([]);
+      setSelectedEditorPath("");
+      setSelectedEditorContent("");
+    }
   }
 
   async function loadRunList(limit = 100): Promise<RunListItem[]> {
@@ -1684,6 +1704,14 @@ export default function App() {
               Editable baseline files from `charter/*` and `skills/*`. Live headless runtime customization consumes prompt packs for
               `collect`/`findings`; `skills/*/prompts/*.md` stay editable here as reference-only seeded assets.
             </p>
+            {baselineBundleWarnings.map((diagnostic, index) => (
+              <p
+                key={`${diagnostic.code}-${diagnostic.message}-${index}`}
+                className={diagnostic.level === "error" ? "status err" : "status warn"}
+              >
+                {diagnostic.level === "error" ? "Error" : "Warning"} [{diagnostic.code}]: {diagnostic.message}
+              </p>
+            ))}
             <label htmlFor="baselineArtifactSelect">Select artifact</label>
             <select
               id="baselineArtifactSelect"
@@ -1691,6 +1719,7 @@ export default function App() {
               onChange={(event) => {
                 void handleEditorSelectionChange(event.target.value);
               }}
+              disabled={baselineEditorArtifacts.length === 0}
             >
               {baselineEditorArtifacts.map((artifact) => (
                 <option key={artifact.path} value={artifact.path}>
@@ -1704,8 +1733,9 @@ export default function App() {
               value={selectedEditorContent}
               onChange={(event) => setSelectedEditorContent(event.target.value)}
               rows={10}
+              disabled={!selectedEditorPath}
             />
-            <button type="button" onClick={() => void handleSaveSelectedEditorArtifact()} disabled={busy}>
+            <button type="button" onClick={() => void handleSaveSelectedEditorArtifact()} disabled={busy || !selectedEditorPath}>
               Save selected baseline artifact
             </button>
             {editorStatus ? <p className="status ok">{editorStatus}</p> : null}

@@ -96,6 +96,9 @@ type RunnerFailureDetails struct {
 	FailureClass        string
 	FailureSubclass     string
 	ParseStage          string
+	TaskID              string
+	StepID              string
+	ShardID             string
 	FailureArtifactPath string
 	RawOutputPath       string
 	ShortCause          string

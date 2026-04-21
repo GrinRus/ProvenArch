@@ -434,7 +434,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		execution.rewriteTerminalReports(RunStatusFailed)
 		failedInfo.Warnings = append([]string(nil), execution.warnings...)
 		failedInfo.FinishedAt = &finishedAt
-		if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusFailed, failedInfo.ErrorCode, failedInfo.Error); qualityErr == nil {
+		if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusFailed, failedInfo.ErrorCode, failedInfo.Error, deriveRunFailureClassification(failedInfo.ErrorCode, err)); qualityErr == nil {
 			execution.addArtifacts(qualityArtifact)
 		} else {
 			failedInfo.Warnings = append(failedInfo.Warnings, fmt.Sprintf("run quality summary write failed: %v", qualityErr))
@@ -464,7 +464,10 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		execution.rewriteTerminalReports(RunStatusFailed)
 		failedInfo.Warnings = append([]string(nil), execution.warnings...)
 		failedInfo.FinishedAt = &finishedAt
-		if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusFailed, failedInfo.ErrorCode, failedInfo.Error); qualityErr == nil {
+		if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusFailed, failedInfo.ErrorCode, failedInfo.Error, normalizeRunFailureClassification(runFailureClassification{
+			Class:  "infra_incomplete_cycle",
+			Source: "partial_failures",
+		})); qualityErr == nil {
 			execution.addArtifacts(qualityArtifact)
 		} else {
 			failedInfo.Warnings = append(failedInfo.Warnings, fmt.Sprintf("run quality summary write failed: %v", qualityErr))
@@ -487,7 +490,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	succeeded.CurrentStep = execution.stepStatus.CurrentStep
 	succeeded.Warnings = append([]string(nil), execution.warnings...)
 	succeeded.FinishedAt = &finishedAt
-	if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusSucceeded, "", ""); qualityErr == nil {
+	if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusSucceeded, "", "", runFailureClassification{}); qualityErr == nil {
 		execution.addArtifacts(qualityArtifact)
 	} else {
 		succeeded.Warnings = append(succeeded.Warnings, fmt.Sprintf("run quality summary write failed: %v", qualityErr))
@@ -1165,6 +1168,50 @@ func (s *Service) classifyRunFailure(runID string, err error) (string, string) {
 		return runErrorCodeCanceled, message
 	}
 	return classifyExecutionError(err)
+}
+
+func deriveRunFailureClassification(errorCode string, err error) runFailureClassification {
+	classification := normalizeRunFailureClassification(runFailureClassification{})
+	var runnerErr acpruntime.RunnerError
+	if errors.As(err, &runnerErr) {
+		classification.Class = canonicalFailureClassFromRuntimeErrorCode(errorCode)
+		if value := strings.TrimSpace(runnerErr.Failure.FailureClass); value != "" {
+			classification.Class = value
+		}
+		classification.Subclass = strings.TrimSpace(runnerErr.Failure.FailureSubclass)
+		classification.ParseStage = strings.TrimSpace(runnerErr.Failure.ParseStage)
+		classification.Provider = strings.TrimSpace(string(runnerErr.Provider))
+		classification.TaskID = strings.TrimSpace(runnerErr.Failure.TaskID)
+		classification.StepID = strings.TrimSpace(runnerErr.Failure.StepID)
+		classification.ShardID = strings.TrimSpace(runnerErr.Failure.ShardID)
+		classification.FailureArtifact = strings.TrimSpace(runnerErr.Failure.FailureArtifactPath)
+		classification.RawOutput = strings.TrimSpace(runnerErr.Failure.RawOutputPath)
+		classification.ShortCause = strings.TrimSpace(runnerErr.Failure.ShortCause)
+		classification.Source = "runner_error"
+		return normalizeRunFailureClassification(classification)
+	}
+	if class := canonicalFailureClassFromRuntimeErrorCode(errorCode); class != "" && class != "none" {
+		return normalizeRunFailureClassification(runFailureClassification{
+			Class:  class,
+			Source: "error_code",
+		})
+	}
+	return classification
+}
+
+func canonicalFailureClassFromRuntimeErrorCode(errorCode string) string {
+	switch strings.TrimSpace(errorCode) {
+	case string(acpruntime.ErrorCodeRunnerParseFailed):
+		return "runtime_parse"
+	case string(acpruntime.ErrorCodeRunnerStalled):
+		return "runtime_stalled"
+	case string(acpruntime.ErrorCodeRunnerUnavailable):
+		return "runner_unavailable"
+	case string(acpruntime.ErrorCodeRuntimeTimeout):
+		return "runtime_timeout"
+	default:
+		return "none"
+	}
 }
 
 func (s *Service) isCancelRequested(runID string) bool {

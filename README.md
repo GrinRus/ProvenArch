@@ -21,6 +21,7 @@ ACP не является "рисовалкой диаграмм". Архите�
 - staged docs-first runtime pipeline для `reports/taskruns/*` с validator-gated promotion в стабильные `reports/*` и `proposals/*`,
 - deterministic compatibility materialization для `model/*`, `reports/*`, `proposals/*`, `changelog`,
 - UI shell + `make` entrypoints + repo CI.
+- `make`/bash UI steps run through `scripts/run-npm.sh` + `scripts/resolve-node-tool.sh`, so local DoD uses a matching `node`/`npm` pair even when login shells expose multiple Node architectures in different PATH orders.
 
 Реализация остаётся incremental по `docs/BACKLOG.md`, но базовый e2e поток уже исполним: `workspace validate -> run pipeline -> inspect artifacts`.
 
@@ -106,6 +107,7 @@ Q&A API follow-up в baseline зарезервирован как read-only endp
 Bundle bootstrap policy:
 - `init-workspace` и `serve --auto-init` создают baseline artifacts по стратегии create-if-missing;
 - существующие пользовательские правки в baseline файлах не перезаписываются.
+- `skills/bundle-manifest.json` materialize-ится как machine-readable baseline inventory/source-of-truth для workspace seeding и UI baseline editor; mismatch `bundle_version` surface-ится как diagnostic, без silent overwrite пользовательских файлов.
 - baseline prompt defaults структурированы по обязательным секциям (`Goal`, `Inputs`, `Required Output Shape`, `Evidence Policy`, `Forbidden Behavior`, `Fallback When Unknown`) и покрыты quality-тестом на минимальную насыщенность.
 
 ---
@@ -336,7 +338,7 @@ Script делает strict полный цикл:
 - per-run snapshots в `TMP_ROOT/snapshots/<run_id>/...`;
 - гарантированные debug artifacts: `TMP_ROOT/full-run.log` и `TMP_ROOT/session-summary.md` даже при раннем fail.
 - при `runner_parse_failed` runtime сохраняет raw-output evidence в `reports/taskruns/raw/*` (stdout/stderr + checksums + meta).
-- `reports/taskruns/<run_id>-quality.json` хранит `evidence_state` (`collect/findings/report_mode/reasons`); если `report_mode=incomplete`, generated markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) помечаются banner/triage-only wording и не означают "сервисов/проблем нет".
+- `reports/taskruns/<run_id>-quality.json` хранит `failure` (`class/subclass/parse_stage/provider/task metadata`), `quality_signals[]` и `evidence_state` (`collect/findings/report_mode/reasons`); если `report_mode=incomplete`, generated markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) помечаются banner/triage-only wording и не означают "сервисов/проблем нет".
 
 Если нужно сохранить временный workspace для ручного анализа:
 

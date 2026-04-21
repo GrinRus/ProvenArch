@@ -807,6 +807,39 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertFalse(result.hard_pass)
         self.assertIn("quality:artifact-quality", result.issues)
 
+    def test_python_report_reads_structured_quality_signals_without_run_warnings(self) -> None:
+        run_dir = self.root / "run-artifact-quality-signals-only"
+        self._create_artifact_quality_fixture_run_dir(run_dir)
+        refresh_quality_path = run_dir / "snapshots" / "refresh-run" / "reports" / "taskruns" / "refresh-run-quality.json"
+        refresh_quality = json.loads(refresh_quality_path.read_text(encoding="utf-8"))
+        refresh_quality.pop("run_warnings", None)
+        refresh_quality["quality_signals"] = [
+            {
+                "code": "artifact_quality.canonical_live_surface_missing",
+                "severity": "warning",
+                "message": "artifact_quality: canonical live surface is missing required document reports/findings/findings.md",
+                "path": "reports/findings/findings.md",
+            }
+        ]
+        write_json(refresh_quality_path, refresh_quality)
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "none",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "0",
+            },
+        )
+
+        self.assertEqual("quality_gates_failed", result.failure_class)
+        self.assertTrue(result.quality_gates_failed)
+        self.assertIn("quality:artifact-quality", result.issues)
+
     def test_shell_classifier_reads_taskrun_logs_and_returns_runtime_parse(self) -> None:
         script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
         prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)

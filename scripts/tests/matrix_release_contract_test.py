@@ -8,6 +8,11 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from yaml_compat import load_yaml_file
+
 
 class MatrixReleaseContractTest(unittest.TestCase):
     SAFE_ENV_KEYS = (
@@ -360,11 +365,7 @@ class MatrixReleaseContractTest(unittest.TestCase):
         return json.loads(verdict_path.read_text(encoding="utf-8"))
 
     def _load_yaml(self, path: Path) -> dict:
-        try:
-            import yaml  # type: ignore
-        except Exception as exc:  # pragma: no cover - hard fail mirrors runtime requirement
-            self.fail(f"PyYAML is required for parsing {path}: {exc}")
-        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+        payload = load_yaml_file(path)
         self.assertIsInstance(payload, dict, f"expected YAML object in {path}")
         return payload
 

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GrinRus/ProvenArch/internal/runtime/claudecode"
 	"github.com/GrinRus/ProvenArch/internal/runtime/qwencode"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
@@ -64,11 +65,11 @@ func TestRecordedRuntimeToReportChainSalvageAndClassification(t *testing.T) {
 		t.Fatalf("copy arch workspace: %v", err)
 	}
 
-	if err := writeRecordedIntegrationBatchFiles(batchRunDir, ws.Path); err != nil {
+	if err := writeRecordedIntegrationBatchFiles(batchRunDir, ws.Path, "qwen-code"); err != nil {
 		t.Fatalf("write synthetic batch files: %v", err)
 	}
 
-	result, err := evaluateRunWithBatchReport(t, batchRunDir)
+	result, err := evaluateRunWithBatchReport(t, batchRunDir, "qwen-code")
 	if err != nil {
 		t.Fatalf("evaluate run with batch report: %v", err)
 	}
@@ -151,11 +152,11 @@ func TestRecordedRuntimeToReportChainArtifactRepairAndClassification(t *testing.
 	if err := copyTree(ws.Path, filepath.Join(batchRunDir, "arch-workspace")); err != nil {
 		t.Fatalf("copy arch workspace: %v", err)
 	}
-	if err := writeRecordedIntegrationBatchFiles(batchRunDir, ws.Path); err != nil {
+	if err := writeRecordedIntegrationBatchFiles(batchRunDir, ws.Path, "qwen-code"); err != nil {
 		t.Fatalf("write synthetic batch files: %v", err)
 	}
 
-	result, err := evaluateRunWithBatchReport(t, batchRunDir)
+	result, err := evaluateRunWithBatchReport(t, batchRunDir, "qwen-code")
 	if err != nil {
 		t.Fatalf("evaluate run with batch report: %v", err)
 	}
@@ -197,11 +198,210 @@ func TestRecordedRuntimeToReportChainRunnerUnavailableClassification(t *testing.
 	if err := copyTree(ws.Path, filepath.Join(batchRunDir, "arch-workspace")); err != nil {
 		t.Fatalf("copy arch workspace: %v", err)
 	}
-	if err := writeRecordedFailureBatchFiles(batchRunDir); err != nil {
+	if err := writeRecordedFailureBatchFiles(batchRunDir, "qwen-code"); err != nil {
 		t.Fatalf("write failed synthetic batch files: %v", err)
 	}
 
-	result, err := evaluateRunWithBatchReport(t, batchRunDir)
+	result, err := evaluateRunWithBatchReport(t, batchRunDir, "qwen-code")
+	if err != nil {
+		t.Fatalf("evaluate run with batch report: %v", err)
+	}
+	if result.FailureClass != "runner_unavailable" {
+		t.Fatalf("expected runner_unavailable classification, got %+v", result)
+	}
+	if result.HardPass {
+		t.Fatalf("expected hard_pass=false for unavailable provider, got %+v", result)
+	}
+	if !containsIssue(result.Issues, "reliability:runner-unavailable-quota") {
+		t.Fatalf("expected quota availability issue in report, got %+v", result)
+	}
+}
+
+func TestRecordedClaudeRuntimeToReportChainSalvageAndClassification(t *testing.T) {
+	t.Parallel()
+
+	ws := createSingleRepoWorkspace(t)
+	commandPath := writeRecordedClaudeChainCommand(t)
+	service := NewService(
+		WithRunner(claudecode.HeadlessRunner{Command: commandPath}),
+		WithHistoryWorkspace(ws),
+		WithClock(func() time.Time { return time.Date(2026, 4, 3, 14, 0, 0, 0, time.UTC) }),
+	)
+
+	initInfo, _, err := service.runWithID(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	}, "init-run")
+	if err != nil {
+		t.Fatalf("run init pipeline: %v", err)
+	}
+	if initInfo.Status != RunStatusSucceeded {
+		t.Fatalf("expected init run to succeed, got %s (%s)", initInfo.Status, initInfo.Error)
+	}
+
+	batchRunDir := filepath.Join(t.TempDir(), "run1")
+	if err := copyTree(filepath.Join(ws.Path, "reports"), filepath.Join(batchRunDir, "snapshots", "init-run", "reports")); err != nil {
+		t.Fatalf("snapshot init reports: %v", err)
+	}
+
+	refreshInfo, _, err := service.runWithID(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	}, "refresh-run")
+	if err != nil {
+		t.Fatalf("run refresh pipeline: %v", err)
+	}
+	if refreshInfo.Status != RunStatusSucceeded {
+		t.Fatalf("expected refresh run to succeed, got %s (%s)", refreshInfo.Status, refreshInfo.Error)
+	}
+
+	if err := copyTree(filepath.Join(ws.Path, "reports"), filepath.Join(batchRunDir, "snapshots", "refresh-run", "reports")); err != nil {
+		t.Fatalf("snapshot refresh reports: %v", err)
+	}
+	if err := copyTree(ws.Path, filepath.Join(batchRunDir, "arch-workspace")); err != nil {
+		t.Fatalf("copy arch workspace: %v", err)
+	}
+
+	if err := writeRecordedIntegrationBatchFiles(batchRunDir, ws.Path, "claude-code"); err != nil {
+		t.Fatalf("write synthetic batch files: %v", err)
+	}
+
+	result, err := evaluateRunWithBatchReport(t, batchRunDir, "claude-code")
+	if err != nil {
+		t.Fatalf("evaluate run with batch report: %v", err)
+	}
+	if result.FailureClass != "none" {
+		t.Fatalf("expected no failure class, got %+v", result)
+	}
+	if !result.HardPass {
+		t.Fatalf("expected hard_pass=true, got %+v", result)
+	}
+	if result.ArtifactSource != "snapshot" {
+		t.Fatalf("expected snapshot artifact source, got %+v", result)
+	}
+}
+
+func TestRecordedClaudeRuntimeToReportChainArtifactRepairAndClassification(t *testing.T) {
+	t.Parallel()
+
+	ws := createSingleRepoWorkspace(t)
+	commandPath := writeRecordedClaudeArtifactRepairCommand(t)
+	service := NewService(
+		WithRunner(claudecode.HeadlessRunner{Command: commandPath}),
+		WithHistoryWorkspace(ws),
+		WithClock(func() time.Time { return time.Date(2026, 4, 3, 14, 30, 0, 0, time.UTC) }),
+	)
+
+	initInfo, _, err := service.runWithID(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	}, "init-run")
+	if err != nil {
+		t.Fatalf("run init pipeline: %v", err)
+	}
+	if initInfo.Status != RunStatusSucceeded {
+		t.Fatalf("expected init run to succeed, got %s (%s)", initInfo.Status, initInfo.Error)
+	}
+
+	refreshInfo, _, err := service.runWithID(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	}, "refresh-run")
+	if err != nil {
+		t.Fatalf("run refresh pipeline: %v", err)
+	}
+	if refreshInfo.Status != RunStatusSucceeded {
+		t.Fatalf("expected refresh run to succeed, got %s (%s)", refreshInfo.Status, refreshInfo.Error)
+	}
+
+	metaFiles, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "raw", "*-prompt-meta.json"))
+	if err != nil {
+		t.Fatalf("glob prompt metadata: %v", err)
+	}
+	foundArtifactRepair := false
+	for _, metaPath := range metaFiles {
+		rawMeta, err := os.ReadFile(metaPath)
+		if err != nil {
+			t.Fatalf("read prompt metadata %q: %v", metaPath, err)
+		}
+		meta := map[string]any{}
+		if err := json.Unmarshal(rawMeta, &meta); err != nil {
+			t.Fatalf("parse prompt metadata %q: %v", metaPath, err)
+		}
+		if strings.TrimSpace(fmt.Sprintf("%v", meta["attempt"])) == "artifact-repair" {
+			foundArtifactRepair = true
+			break
+		}
+	}
+	if !foundArtifactRepair {
+		t.Fatalf("expected recorded integration to materialize artifact-repair prompt artifacts")
+	}
+
+	batchRunDir := filepath.Join(t.TempDir(), "run1")
+	if err := copyTree(filepath.Join(ws.Path, "reports"), filepath.Join(batchRunDir, "snapshots", "init-run", "reports")); err != nil {
+		t.Fatalf("snapshot init reports: %v", err)
+	}
+	if err := copyTree(filepath.Join(ws.Path, "reports"), filepath.Join(batchRunDir, "snapshots", "refresh-run", "reports")); err != nil {
+		t.Fatalf("snapshot refresh reports: %v", err)
+	}
+	if err := copyTree(ws.Path, filepath.Join(batchRunDir, "arch-workspace")); err != nil {
+		t.Fatalf("copy arch workspace: %v", err)
+	}
+	if err := writeRecordedIntegrationBatchFiles(batchRunDir, ws.Path, "claude-code"); err != nil {
+		t.Fatalf("write synthetic batch files: %v", err)
+	}
+
+	result, err := evaluateRunWithBatchReport(t, batchRunDir, "claude-code")
+	if err != nil {
+		t.Fatalf("evaluate run with batch report: %v", err)
+	}
+	if result.FailureClass != "none" || !result.HardPass {
+		t.Fatalf("expected artifact-repair recorded chain to hard-pass, got %+v", result)
+	}
+}
+
+func TestRecordedClaudeRuntimeToReportChainRunnerUnavailableClassification(t *testing.T) {
+	t.Parallel()
+
+	ws := createSingleRepoWorkspace(t)
+	commandPath := writeRecordedClaudeUnavailableCommand(t)
+	service := NewService(
+		WithRunner(claudecode.HeadlessRunner{Command: commandPath}),
+		WithHistoryWorkspace(ws),
+		WithClock(func() time.Time { return time.Date(2026, 4, 3, 15, 0, 0, 0, time.UTC) }),
+	)
+
+	initInfo, _, err := service.runWithID(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	}, "init-run")
+	if err == nil {
+		t.Fatalf("expected init pipeline to fail for runner_unavailable path")
+	}
+	if initInfo.Status != RunStatusFailed {
+		t.Fatalf("expected init run to fail, got %s (%s)", initInfo.Status, initInfo.Error)
+	}
+
+	batchRunDir := filepath.Join(t.TempDir(), "run1")
+	reportsRoot := filepath.Join(ws.Path, "reports")
+	if _, err := os.Stat(reportsRoot); err == nil {
+		if err := copyTree(reportsRoot, filepath.Join(batchRunDir, "snapshots", "init-run", "reports")); err != nil {
+			t.Fatalf("snapshot init reports: %v", err)
+		}
+	}
+	if err := copyTree(ws.Path, filepath.Join(batchRunDir, "arch-workspace")); err != nil {
+		t.Fatalf("copy arch workspace: %v", err)
+	}
+	if err := writeRecordedFailureBatchFiles(batchRunDir, "claude-code"); err != nil {
+		t.Fatalf("write failed synthetic batch files: %v", err)
+	}
+
+	result, err := evaluateRunWithBatchReport(t, batchRunDir, "claude-code")
 	if err != nil {
 		t.Fatalf("evaluate run with batch report: %v", err)
 	}
@@ -224,7 +424,7 @@ type batchEvalResult struct {
 	IssueDetails   []string `json:"issue_details"`
 }
 
-func evaluateRunWithBatchReport(t *testing.T, runDir string) (batchEvalResult, error) {
+func evaluateRunWithBatchReport(t *testing.T, runDir string, provider string) (batchEvalResult, error) {
 	t.Helper()
 
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
@@ -256,7 +456,7 @@ preflight = {
         ],
     },
 }
-result = module.evaluate_run("qwen-code", 1, run_dir, preflight, None)
+result = module.evaluate_run(sys.argv[3], 1, run_dir, preflight, None)
 print(json.dumps({
     "hard_pass": result.hard_pass,
     "failure_class": result.failure_class,
@@ -265,7 +465,7 @@ print(json.dumps({
     "issue_details": result.issue_details,
 }))
 `
-	cmd := exec.Command("python3", "-c", script, repoRoot, runDir)
+	cmd := exec.Command("python3", "-c", script, repoRoot, runDir, provider)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return batchEvalResult{}, fmt.Errorf("python batch evaluation failed: %w (%s)", err, strings.TrimSpace(string(output)))
@@ -277,7 +477,7 @@ print(json.dumps({
 	return result, nil
 }
 
-func writeRecordedIntegrationBatchFiles(runDir string, workspacePath string) error {
+func writeRecordedIntegrationBatchFiles(runDir string, workspacePath string, provider string) error {
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return err
 	}
@@ -323,7 +523,7 @@ func writeRecordedIntegrationBatchFiles(runDir string, workspacePath string) err
 		rows = append(rows, strings.Join([]string{
 			"1",
 			"headless",
-			"qwen-code",
+			provider,
 			item.Pipeline,
 			item.RunID,
 			"succeeded",
@@ -342,7 +542,7 @@ func writeRecordedIntegrationBatchFiles(runDir string, workspacePath string) err
 	return os.WriteFile(filepath.Join(runDir, "run-results.tsv"), []byte(strings.Join(rows, "\n")+"\n"), 0o644)
 }
 
-func writeRecordedFailureBatchFiles(runDir string) error {
+func writeRecordedFailureBatchFiles(runDir string, provider string) error {
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return err
 	}
@@ -375,7 +575,7 @@ func writeRecordedFailureBatchFiles(runDir string) error {
 	row := strings.Join([]string{
 		"1",
 		"headless",
-		"qwen-code",
+		provider,
 		"init",
 		"init-run",
 		"failed",
@@ -386,7 +586,7 @@ func writeRecordedFailureBatchFiles(runDir string) error {
 		"0",
 		"0",
 		"0",
-		"qwen-code@recorded-integration",
+		provider + "@recorded-integration",
 		"reports/taskruns/init-run-quality.json",
 		"reports",
 	}, "\t")
@@ -420,21 +620,51 @@ func readQualitySnapshot(path string) (qualitySnapshot, error) {
 
 func writeRecordedQwenChainCommand(t *testing.T) string {
 	t.Helper()
+	return writeRecordedProviderChainCommand(t, "qwen", "--prompt", "qwen-code")
+}
 
-	path := filepath.Join(t.TempDir(), "recorded-qwen-chain.sh")
-	script := `#!/bin/sh
+func writeRecordedQwenUnavailableCommand(t *testing.T) string {
+	t.Helper()
+	return writeRecordedProviderUnavailableCommand(t, "qwen", "qwen-code")
+}
+
+func writeRecordedQwenArtifactRepairCommand(t *testing.T) string {
+	t.Helper()
+	return writeRecordedProviderArtifactRepairCommand(t, "qwen", "--prompt", "qwen-code")
+}
+
+func writeRecordedClaudeChainCommand(t *testing.T) string {
+	t.Helper()
+	return writeRecordedProviderChainCommand(t, "claude", "-p", "claude-code")
+}
+
+func writeRecordedClaudeUnavailableCommand(t *testing.T) string {
+	t.Helper()
+	return writeRecordedProviderUnavailableCommand(t, "claude", "claude-code")
+}
+
+func writeRecordedClaudeArtifactRepairCommand(t *testing.T) string {
+	t.Helper()
+	return writeRecordedProviderArtifactRepairCommand(t, "claude", "-p", "claude-code")
+}
+
+func writeRecordedProviderChainCommand(t *testing.T, fileName string, promptFlag string, provider string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), fileName)
+	script := fmt.Sprintf(`#!/bin/sh
 set -eu
 prompt=""
 prev=""
 for arg in "$@"; do
-  if [ "$prev" = "--prompt" ]; then
+  if [ "$prev" = %q ]; then
     prompt="$arg"
     break
   fi
   prev="$arg"
 done
 if [ -z "$prompt" ]; then
-  echo "missing --prompt payload" >&2
+  echo "missing prompt payload" >&2
   exit 1
 fi
 PROMPT="$prompt" python3 - <<'PY'
@@ -507,7 +737,7 @@ else:
         "meta": {
             "task_id": task_id,
             "step_id": step_id,
-            "runtime": {"name": "qwen-code", "version": "recorded-integration"},
+            "runtime": {"name": %q, "version": "recorded-integration"},
             "started_at": "2026-04-03T12:00:00Z",
         },
         "summary": "Recorded findings analysis completed.",
@@ -555,17 +785,17 @@ else:
         }
     ]))
 PY
-`
+`, promptFlag, provider)
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("write recorded qwen command: %v", err)
+		t.Fatalf("write recorded %s chain command: %v", provider, err)
 	}
 	return path
 }
 
-func writeRecordedQwenUnavailableCommand(t *testing.T) string {
+func writeRecordedProviderUnavailableCommand(t *testing.T, fileName string, provider string) string {
 	t.Helper()
 
-	path := filepath.Join(t.TempDir(), "recorded-qwen-unavailable.sh")
+	path := filepath.Join(t.TempDir(), fileName)
 	script := `#!/bin/sh
 set -eu
 python3 - <<'PY'
@@ -591,28 +821,28 @@ print(json.dumps([
 PY
 `
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("write recorded qwen unavailable command: %v", err)
+		t.Fatalf("write recorded %s unavailable command: %v", provider, err)
 	}
 	return path
 }
 
-func writeRecordedQwenArtifactRepairCommand(t *testing.T) string {
+func writeRecordedProviderArtifactRepairCommand(t *testing.T, fileName string, promptFlag string, provider string) string {
 	t.Helper()
 
-	path := filepath.Join(t.TempDir(), "recorded-qwen-artifact-repair.sh")
-	script := `#!/bin/sh
+	path := filepath.Join(t.TempDir(), fileName)
+	script := fmt.Sprintf(`#!/bin/sh
 set -eu
 prompt=""
 prev=""
 for arg in "$@"; do
-  if [ "$prev" = "--prompt" ]; then
+  if [ "$prev" = %q ]; then
     prompt="$arg"
     break
   fi
   prev="$arg"
 done
 if [ -z "$prompt" ]; then
-  echo "missing --prompt payload" >&2
+  echo "missing prompt payload" >&2
   exit 1
 fi
 PROMPT="$prompt" python3 - <<'PY'
@@ -637,7 +867,7 @@ def taskresult(summary):
         "meta": {
             "task_id": task_id,
             "step_id": step_id,
-            "runtime": {"name": "qwen-code", "version": "recorded-integration"},
+            "runtime": {"name": %q, "version": "recorded-integration"},
             "started_at": "2026-04-03T12:30:00Z",
         },
         "summary": summary,
@@ -710,9 +940,9 @@ if step_id.endswith("step1.collect"):
 else:
     print(json.dumps(taskresult("findings completed")))
 PY
-`
+`, promptFlag, provider)
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("write recorded qwen artifact repair command: %v", err)
+		t.Fatalf("write recorded %s artifact repair command: %v", provider, err)
 	}
 	return path
 }
