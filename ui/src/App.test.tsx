@@ -366,6 +366,59 @@ describe("App", () => {
     });
   });
 
+  it("copies run logs using the active line+fields view", async () => {
+    const runID = "run-copy-fields";
+    const writeText = vi.fn(async (_text: string) => undefined);
+    vi.stubGlobal("navigator", {
+      clipboard: {
+        writeText,
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runID,
+        runStarted: true,
+        runLogs: {
+          [runID]: {
+            run_id: runID,
+            items: [
+              {
+                cursor: 0,
+                timestamp: "2026-04-03T12:00:00Z",
+                level: "info",
+                kind: "event",
+                step_id: "init.step1.collect",
+                message: "runtime task started",
+                fields: {
+                  task_id: "task-1",
+                  artifact_count: 2,
+                },
+              },
+            ],
+            next_cursor: 1,
+            eof: true,
+          },
+        },
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("tab-runs"));
+    await screen.findByTestId("run-logs-content");
+
+    fireEvent.change(screen.getByTestId("run-logs-view-select"), { target: { value: "line+fields" } });
+    fireEvent.click(screen.getByTestId("run-logs-copy-btn"));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledTimes(1);
+    });
+    const copiedText = writeText.mock.calls[0][0];
+    expect(copiedText).toContain('"task_id": "task-1"');
+    expect(copiedText).toContain('"artifact_count": 2');
+  });
+
   it("renders failed run status with warnings and error details for partial live state", async () => {
     const runID = "run-partial-failed";
     vi.stubGlobal(

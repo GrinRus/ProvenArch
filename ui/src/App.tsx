@@ -6,281 +6,33 @@ import { RuntimeProfileSettingsPanel } from "./components/RuntimeProfileSettings
 import { TabNav, type TabOption } from "./components/TabNav";
 import { fetchJSON, getErrorMessage } from "./lib/api";
 import {
-  activeStatuses,
-  dedupeArtifactsByPath,
-  finalStatuses,
+  makeGuidedRepo,
+  runtimeExecutionLabels,
+  runtimeStepProviderLabels,
+  runtimeStepProviderOrder,
+  runtimeTimeoutKeys,
+  runtimeTimeoutLabels,
+  type BaselineBundleResponse,
+  type Diagnostic,
+  type EditableArtifactOption,
+  type GuidedRepo,
+  type RepoSourceMode,
+  type RuntimeExecutionKey,
+  type RuntimeTimeoutKey,
+  type ValidateResponse,
+  type WizardContract,
+} from "./lib/appContracts";
+import {
   formatTimestamp,
-  indexArtifactPath,
-  pickBootstrapRun,
-  reconcileSelectedRunID,
-  runLogsPageLimit,
   splitListInput,
 } from "./lib/runState";
+import { useRunExplorer } from "./hooks/useRunExplorer";
+import { useRuntimeSettings } from "./hooks/useRuntimeSettings";
 
 const MermaidPreview = lazy(async () => {
   const module = await import("./components/MermaidPreview");
   return { default: module.MermaidPreview };
 });
-
-type Diagnostic = {
-  level: "error" | "warning";
-  code: string;
-  message: string;
-  suggestion?: string;
-  path?: string;
-  repo?: string;
-};
-
-type ValidateResponse = {
-  ok: boolean;
-  workspace: string;
-  warnings?: Diagnostic[];
-  errors?: Diagnostic[];
-  resolved_repos?: Array<{
-    name: string;
-    source: string;
-    path: string;
-    ref?: string;
-  }>;
-};
-
-type BaselineBundleEditableArtifact = {
-  path: string;
-  label: string;
-  category: string;
-  prompt_usage?: string;
-};
-
-type BaselineBundleManifest = {
-  schema_version: number;
-  bundle_version: number;
-  prompt_surface_policy?: {
-    live_headless_source?: string;
-    reference_only_pattern?: string;
-  };
-  editable_artifacts?: BaselineBundleEditableArtifact[];
-};
-
-type BaselineBundleResponse = {
-  ok: boolean;
-  workspace: string;
-  warnings?: Diagnostic[];
-  manifest?: BaselineBundleManifest;
-};
-
-type RunStartResponse = {
-  run_id: string;
-  status: string;
-};
-
-type RunCancelResponse = {
-  run_id: string;
-  status: "cancel_requested";
-};
-
-type RunStatusResponse = {
-  run_id: string;
-  pipeline: string;
-  status: "queued" | "running" | "succeeded" | "failed";
-  started_at: string;
-  finished_at?: string | null;
-  current_step?: string;
-  warnings?: string[];
-  error_code?: string | null;
-  error?: string | null;
-};
-
-type RunListItem = {
-  run_id: string;
-  pipeline: string;
-  status: "queued" | "running" | "succeeded" | "failed";
-  started_at: string;
-  finished_at?: string | null;
-  current_step?: string;
-  warnings?: string[];
-  error_code?: string | null;
-  error?: string | null;
-};
-
-type RunListResponse = {
-  items: RunListItem[];
-};
-
-type Artifact = {
-  path: string;
-  kind: string;
-  label: string;
-};
-
-type ArtifactsResponse = {
-  run_id: string;
-  artifacts: Artifact[];
-};
-
-type FinalRunIndexDocument = {
-  canonical_path: string;
-  kind?: string;
-  title?: string;
-};
-
-type FinalRunIndex = {
-  citation_index_path?: string;
-  canonical_documents?: FinalRunIndexDocument[];
-};
-
-type RunLogEntry = {
-  cursor: number;
-  timestamp: string;
-  level: "info" | "warning" | "error";
-  kind?: "event" | "runtime_output";
-  stream?: "stdout" | "stderr";
-  step_id?: string;
-  domain_id?: string;
-  message: string;
-  taskrun_path?: string;
-  fields?: Record<string, unknown>;
-};
-
-type RunLogsResponse = {
-  run_id: string;
-  items: RunLogEntry[];
-  next_cursor: number;
-  eof: boolean;
-};
-
-type RepoSourceMode = "path" | "git_url";
-
-type GuidedRepo = {
-  id: string;
-  name: string;
-  mode: RepoSourceMode;
-  path: string;
-  git_url: string;
-  ref: string;
-};
-
-type WizardContract = {
-  version: number;
-  project_name: string;
-  scope: string;
-  nfr_priorities: string[];
-  rules: string[];
-};
-
-type RuntimeTimeoutKey =
-  | "step_timeout_sec"
-  | "heartbeat_sec"
-  | "pipeline_timeout_sec"
-  | "pipeline_kill_grace_sec"
-  | "api_ready_timeout_sec"
-  | "api_init_timeout_sec"
-  | "ui_init_poll_timeout_sec"
-  | "ui_cancel_poll_timeout_sec";
-
-type RuntimeTimeoutValues = Record<RuntimeTimeoutKey, number>;
-type RuntimeTimeoutSources = Record<RuntimeTimeoutKey, string>;
-
-type RuntimeTimeoutsResponse = {
-  ok: boolean;
-  persisted?: Partial<RuntimeTimeoutValues>;
-  effective?: Partial<RuntimeTimeoutValues>;
-  source?: Partial<RuntimeTimeoutSources>;
-};
-
-type RuntimeExecutionKey = "strategy" | "max_parallel_tasks" | "failure_policy" | "shard_discovery_mode";
-
-type RuntimeExecutionValues = Record<RuntimeExecutionKey, string | number>;
-type RuntimeExecutionSources = Record<RuntimeExecutionKey, string>;
-
-type RuntimeExecutionResponse = {
-  ok: boolean;
-  persisted?: Partial<RuntimeExecutionValues>;
-  effective?: Partial<RuntimeExecutionValues>;
-  source?: Partial<RuntimeExecutionSources>;
-};
-
-type RuntimeStepProviderValues = Record<string, string>;
-
-type RuntimeProfileResponse = {
-  ok: boolean;
-  step_providers?: {
-    persisted?: Partial<RuntimeStepProviderValues>;
-    effective?: Partial<RuntimeStepProviderValues>;
-    source?: Partial<RuntimeStepProviderValues>;
-  };
-};
-
-type EditableArtifactOption = {
-  path: string;
-  label: string;
-};
-
-const runtimeTimeoutKeys: RuntimeTimeoutKey[] = [
-  "step_timeout_sec",
-  "heartbeat_sec",
-  "pipeline_timeout_sec",
-  "pipeline_kill_grace_sec",
-  "api_ready_timeout_sec",
-  "api_init_timeout_sec",
-  "ui_init_poll_timeout_sec",
-  "ui_cancel_poll_timeout_sec",
-];
-
-const defaultRuntimeTimeoutValues: RuntimeTimeoutValues = {
-  step_timeout_sec: 1800,
-  heartbeat_sec: 30,
-  pipeline_timeout_sec: 2400,
-  pipeline_kill_grace_sec: 30,
-  api_ready_timeout_sec: 60,
-  api_init_timeout_sec: 120,
-  ui_init_poll_timeout_sec: 900,
-  ui_cancel_poll_timeout_sec: 420,
-};
-
-const runtimeTimeoutLabels: Record<RuntimeTimeoutKey, string> = {
-  step_timeout_sec: "runtime.profile.timeouts.step_timeout_sec",
-  heartbeat_sec: "runtime.profile.timeouts.heartbeat_sec",
-  pipeline_timeout_sec: "runtime.profile.timeouts.pipeline_timeout_sec",
-  pipeline_kill_grace_sec: "runtime.profile.timeouts.pipeline_kill_grace_sec",
-  api_ready_timeout_sec: "runtime.profile.timeouts.api_ready_timeout_sec",
-  api_init_timeout_sec: "runtime.profile.timeouts.api_init_timeout_sec",
-  ui_init_poll_timeout_sec: "runtime.profile.timeouts.ui_init_poll_timeout_sec",
-  ui_cancel_poll_timeout_sec: "runtime.profile.timeouts.ui_cancel_poll_timeout_sec",
-};
-
-const runtimeExecutionKeys: RuntimeExecutionKey[] = ["strategy", "max_parallel_tasks", "failure_policy", "shard_discovery_mode"];
-
-const defaultRuntimeExecutionValues: RuntimeExecutionValues = {
-  strategy: "sequential",
-  max_parallel_tasks: 1,
-  failure_policy: "best_effort",
-  shard_discovery_mode: "heuristics",
-};
-
-const runtimeExecutionLabels: Record<RuntimeExecutionKey, string> = {
-  strategy: "runtime.profile.execution.strategy",
-  max_parallel_tasks: "runtime.profile.execution.max_parallel_tasks",
-  failure_policy: "runtime.profile.execution.failure_policy",
-  shard_discovery_mode: "runtime.profile.execution.shard_discovery.mode",
-};
-
-const runtimeStepProviderOrder = [
-  "step0_constitution",
-  "step1_collect",
-  "step2_as_is",
-  "step3_findings",
-  "step4_proposals",
-] as const;
-
-const runtimeStepProviderLabels: Record<(typeof runtimeStepProviderOrder)[number], string> = {
-  step0_constitution: "runtime.profile.steps.step0_constitution.provider",
-  step1_collect: "runtime.profile.steps.step1_collect.provider",
-  step2_as_is: "runtime.profile.steps.step2_as_is.provider",
-  step3_findings: "runtime.profile.steps.step3_findings.provider",
-  step4_proposals: "runtime.profile.steps.step4_proposals.provider",
-};
-
-let guidedRepoSeed = 0;
 
 type TopTab = "setup" | "baseline" | "runs" | "results" | "settings";
 type ResultsTab = "coverage" | "artifacts" | "diagrams";
@@ -299,113 +51,6 @@ const resultsTabOptions: Array<TabOption<ResultsTab>> = [
   { id: "artifacts", label: "Artifacts", testId: "results-tab-artifacts" },
   { id: "diagrams", label: "Diagrams", testId: "results-tab-diagrams" },
 ];
-
-function makeGuidedRepo(partial?: Partial<GuidedRepo>): GuidedRepo {
-  guidedRepoSeed += 1;
-  return {
-    id: partial?.id ?? `repo-${guidedRepoSeed}`,
-    name: partial?.name ?? `repo-${guidedRepoSeed}`,
-    mode: partial?.mode ?? "path",
-    path: partial?.path ?? "/absolute/path/to/repository",
-    git_url: partial?.git_url ?? "https://gitlab.example.com/group/repository.git",
-    ref: partial?.ref ?? "",
-  };
-}
-
-function normalizeRuntimeTimeoutValues(
-  partial: Partial<RuntimeTimeoutValues> | undefined,
-  fallback: RuntimeTimeoutValues
-): RuntimeTimeoutValues {
-  const next = { ...fallback };
-  for (const key of runtimeTimeoutKeys) {
-    const raw = partial?.[key];
-    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
-      next[key] = Math.floor(raw);
-    }
-  }
-  return next;
-}
-
-function runtimeTimeoutDraftFromValues(values: RuntimeTimeoutValues): Record<RuntimeTimeoutKey, string> {
-  const draft = {} as Record<RuntimeTimeoutKey, string>;
-  for (const key of runtimeTimeoutKeys) {
-    draft[key] = String(values[key]);
-  }
-  return draft;
-}
-
-function parseRuntimeTimeoutPatch(draft: Record<RuntimeTimeoutKey, string>): RuntimeTimeoutValues {
-  const patch = {} as RuntimeTimeoutValues;
-  for (const key of runtimeTimeoutKeys) {
-    const value = Number.parseInt((draft[key] ?? "").trim(), 10);
-    if (!Number.isFinite(value) || value <= 0) {
-      throw new Error(`runtime timeout ${key} must be a positive integer`);
-    }
-    patch[key] = value;
-  }
-  return patch;
-}
-
-function normalizeRuntimeExecutionValues(
-  partial: Partial<RuntimeExecutionValues> | undefined,
-  fallback: RuntimeExecutionValues
-): RuntimeExecutionValues {
-  const strategyRaw = String(partial?.strategy ?? "").trim().toLowerCase();
-  const strategy = strategyRaw === "parallel" || strategyRaw === "sequential" ? strategyRaw : String(fallback.strategy);
-
-  const failureRaw = String(partial?.failure_policy ?? "").trim().toLowerCase();
-  const failurePolicy = failureRaw === "fail_fast" || failureRaw === "best_effort" ? failureRaw : String(fallback.failure_policy);
-
-  const shardRaw = String(partial?.shard_discovery_mode ?? "").trim().toLowerCase();
-  const shardMode = shardRaw === "semantic" || shardRaw === "heuristics" ? shardRaw : String(fallback.shard_discovery_mode);
-
-  const maxRaw = Number(partial?.max_parallel_tasks);
-  const maxParallel = Number.isFinite(maxRaw) && maxRaw > 0 ? Math.floor(maxRaw) : Number(fallback.max_parallel_tasks);
-
-  return {
-    strategy,
-    max_parallel_tasks: maxParallel,
-    failure_policy: failurePolicy,
-    shard_discovery_mode: shardMode,
-  };
-}
-
-type RuntimeExecutionDraft = Record<RuntimeExecutionKey, string>;
-
-function runtimeExecutionDraftFromValues(values: RuntimeExecutionValues): RuntimeExecutionDraft {
-  return {
-    strategy: String(values.strategy),
-    max_parallel_tasks: String(values.max_parallel_tasks),
-    failure_policy: String(values.failure_policy),
-    shard_discovery_mode: String(values.shard_discovery_mode),
-  };
-}
-
-function parseRuntimeExecutionPatch(draft: RuntimeExecutionDraft): RuntimeExecutionValues {
-  const strategy = draft.strategy.trim().toLowerCase();
-  if (strategy !== "sequential" && strategy !== "parallel") {
-    throw new Error("runtime execution strategy must be sequential or parallel");
-  }
-  const failurePolicy = draft.failure_policy.trim().toLowerCase();
-  if (failurePolicy !== "fail_fast" && failurePolicy !== "best_effort") {
-    throw new Error("runtime execution failure_policy must be fail_fast or best_effort");
-  }
-  const shardMode = draft.shard_discovery_mode.trim().toLowerCase();
-  if (shardMode !== "heuristics" && shardMode !== "semantic") {
-    throw new Error("runtime execution shard_discovery_mode must be heuristics or semantic");
-  }
-  const maxParallel = Number.parseInt(draft.max_parallel_tasks.trim(), 10);
-  if (!Number.isFinite(maxParallel) || maxParallel <= 0) {
-    throw new Error("runtime execution max_parallel_tasks must be a positive integer");
-  }
-
-  return {
-    strategy,
-    max_parallel_tasks: maxParallel,
-    failure_policy: failurePolicy,
-    shard_discovery_mode: shardMode,
-  };
-}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TopTab>("setup");
@@ -436,64 +81,78 @@ export default function App() {
   const [wizardRules, setWizardRules] = useState("no silent re-key, evidence-first findings");
   const [wizardStatus, setWizardStatus] = useState("");
 
-  const [runtimeTimeoutPersisted, setRuntimeTimeoutPersisted] = useState<Partial<RuntimeTimeoutValues>>({});
-  const [runtimeTimeoutEffective, setRuntimeTimeoutEffective] = useState<RuntimeTimeoutValues>(defaultRuntimeTimeoutValues);
-  const [runtimeTimeoutSource, setRuntimeTimeoutSource] = useState<Partial<RuntimeTimeoutSources>>({});
-  const [runtimeTimeoutDraft, setRuntimeTimeoutDraft] = useState<Record<RuntimeTimeoutKey, string>>(
-    runtimeTimeoutDraftFromValues(defaultRuntimeTimeoutValues)
-  );
-  const [runtimeTimeoutStatus, setRuntimeTimeoutStatus] = useState("");
-  const [runtimeExecutionPersisted, setRuntimeExecutionPersisted] = useState<Partial<RuntimeExecutionValues>>({});
-  const [runtimeExecutionEffective, setRuntimeExecutionEffective] = useState<RuntimeExecutionValues>(defaultRuntimeExecutionValues);
-  const [runtimeExecutionSource, setRuntimeExecutionSource] = useState<Partial<RuntimeExecutionSources>>({});
-  const [runtimeExecutionDraft, setRuntimeExecutionDraft] = useState<RuntimeExecutionDraft>(
-    runtimeExecutionDraftFromValues(defaultRuntimeExecutionValues)
-  );
-  const [runtimeExecutionStatus, setRuntimeExecutionStatus] = useState("");
-  const [runtimeStepProviderPersisted, setRuntimeStepProviderPersisted] = useState<Partial<RuntimeStepProviderValues>>({});
-  const [runtimeStepProviderEffective, setRuntimeStepProviderEffective] = useState<Partial<RuntimeStepProviderValues>>({});
-  const [runtimeStepProviderSource, setRuntimeStepProviderSource] = useState<Partial<RuntimeStepProviderValues>>({});
-
-  const [runId, setRunID] = useState<string | null>(null);
-  const [runStatus, setRunStatus] = useState<RunStatusResponse | null>(null);
-  const [runList, setRunList] = useState<RunListItem[]>([]);
-  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
-  const [selectedArtifact, setSelectedArtifact] = useState<string>("");
-  const [selectedArtifactContent, setSelectedArtifactContent] = useState<string>("");
-  const [runLogs, setRunLogs] = useState<RunLogEntry[]>([]);
-  const [runLogsCursor, setRunLogsCursor] = useState(0);
-  const [runLogsEOF, setRunLogsEOF] = useState(false);
-  const [runLogsStatus, setRunLogsStatus] = useState("");
-  const [runLogsViewMode, setRunLogsViewMode] = useState<"line" | "line+fields">("line");
-  const [runLogsMode, setRunLogsMode] = useState<RunLogsMode>("all");
-  const [runActionStatus, setRunActionStatus] = useState("");
-  const [cancelBusy, setCancelBusy] = useState(false);
-
-  const [coverageSummary, setCoverageSummary] = useState<string>("");
-  const [openQuestions, setOpenQuestions] = useState<string>("");
-
   const [gitMessage, setGitMessage] = useState("chore: update ACP workspace artifacts");
   const [proposalBranch, setProposalBranch] = useState("proposal/beta-refresh");
   const [gitStatus, setGitStatus] = useState<string>("");
 
-  const hasActiveRuns = useMemo(() => runList.some((run) => activeStatuses.has(run.status)), [runList]);
-  const runCounters = useMemo(
-    () =>
-      runList.reduce(
-        (acc, run) => {
-          if (run.status === "running" || run.status === "queued") {
-            acc.running += 1;
-          } else if (run.status === "succeeded") {
-            acc.succeeded += 1;
-          } else if (run.status === "failed") {
-            acc.failed += 1;
-          }
-          return acc;
-        },
-        { running: 0, succeeded: 0, failed: 0 }
-      ),
-    [runList]
-  );
+  const runtimeSettings = useRuntimeSettings({
+    setBusy,
+    setError,
+  });
+  const runExplorer = useRunExplorer({
+    setBusy,
+    setError,
+  });
+
+  const {
+    runtimeTimeoutPersisted,
+    runtimeTimeoutEffective,
+    runtimeTimeoutSource,
+    runtimeTimeoutDraft,
+    runtimeTimeoutStatus,
+    runtimeExecutionPersisted,
+    runtimeExecutionEffective,
+    runtimeExecutionSource,
+    runtimeExecutionDraft,
+    runtimeExecutionStatus,
+    runtimeStepProviderPersisted,
+    runtimeStepProviderEffective,
+    runtimeStepProviderSource,
+    loadRuntimeTimeouts,
+    loadRuntimeExecution,
+    loadRuntimeProfile,
+    updateRuntimeTimeoutDraft,
+    updateRuntimeExecutionDraft,
+    handleSaveRuntimeTimeouts,
+    handleResetRuntimeTimeouts,
+    handleSaveRuntimeExecution,
+    handleResetRuntimeExecution,
+  } = runtimeSettings;
+
+  const {
+    runId,
+    runStatus,
+    runList,
+    artifacts,
+    selectedArtifact,
+    selectedArtifactContent,
+    runLogsStatus,
+    runLogsViewMode,
+    setRunLogsViewMode,
+    runLogsMode,
+    setRunLogsMode,
+    runActionStatus,
+    cancelBusy,
+    coverageSummary,
+    openQuestions,
+    runCounters,
+    runLogTaskrunPaths,
+    filteredRunLogs,
+    diagramArtifacts,
+    nonDiagramArtifacts,
+    selectedArtifactIsMermaid,
+    selectedRunWarnings,
+    selectedRunIsActive,
+    runLogsRendered,
+    bootstrapRuns,
+    handleRunPipeline,
+    handleSelectRun,
+    handleCancelSelectedRun,
+    handleOpenArtifact,
+    handleCopyRunLogs,
+    handleDownloadRunLogs,
+  } = runExplorer;
+
   const validationDiagnosticsByRepo = useMemo(() => {
     if (!validateResult) {
       return [];
@@ -508,119 +167,13 @@ export default function App() {
     }
     return Array.from(grouped.entries()).sort((left, right) => left[0].localeCompare(right[0]));
   }, [validateResult]);
-  const runLogTaskrunPaths = useMemo(() => {
-    const paths = new Set<string>();
-    for (const entry of runLogs) {
-      if (entry.taskrun_path && entry.taskrun_path.trim().length > 0) {
-        paths.add(entry.taskrun_path.trim());
-      }
-    }
-    return Array.from(paths).sort((left, right) => left.localeCompare(right));
-  }, [runLogs]);
-  const filteredRunLogs = useMemo(() => {
-    if (runLogsMode === "all") {
-      return runLogs;
-    }
-    if (runLogsMode === "events") {
-      return runLogs.filter((entry) => (entry.kind ?? "event") !== "runtime_output");
-    }
-    return runLogs.filter((entry) => (entry.kind ?? "event") === "runtime_output");
-  }, [runLogs, runLogsMode]);
-  const diagramArtifacts = useMemo(() => {
-    return artifacts
-      .filter((artifact) => artifact.kind === "diagram" || artifact.kind === "diagram-index" || artifact.path.startsWith("reports/diagrams/"))
-      .sort((left, right) => left.path.localeCompare(right.path));
-  }, [artifacts]);
-  const nonDiagramArtifacts = useMemo(() => {
-    return artifacts
-      .filter((artifact) => !(artifact.kind === "diagram" || artifact.kind === "diagram-index" || artifact.path.startsWith("reports/diagrams/")))
-      .sort((left, right) => left.path.localeCompare(right.path));
-  }, [artifacts]);
-  const selectedArtifactIsMermaid = useMemo(() => {
-    if (!selectedArtifact) {
-      return false;
-    }
-    if (selectedArtifact.endsWith(".mmd")) {
-      return true;
-    }
-    const text = selectedArtifactContent.trim();
-    if (text.startsWith("flowchart") || text.startsWith("graph") || text.startsWith("sequenceDiagram") || text.startsWith("classDiagram")) {
-      return true;
-    }
-    return text.includes("```mermaid");
-  }, [selectedArtifact, selectedArtifactContent]);
-  const selectedRunListItem = useMemo(() => {
-    if (!runId) {
-      return null;
-    }
-    return runList.find((item) => item.run_id === runId) ?? null;
-  }, [runId, runList]);
-  const selectedRunWarnings = useMemo(() => {
-    if (runStatus && runId && runStatus.run_id === runId) {
-      return runStatus.warnings ?? [];
-    }
-    return selectedRunListItem?.warnings ?? [];
-  }, [runId, runStatus, selectedRunListItem]);
-  const selectedRunIsActive = useMemo(() => {
-    if (runStatus && runId && runStatus.run_id === runId) {
-      return activeStatuses.has(runStatus.status);
-    }
-    if (selectedRunListItem) {
-      return activeStatuses.has(selectedRunListItem.status);
-    }
-    return false;
-  }, [runId, runStatus, selectedRunListItem]);
-  const shouldPollRunDetails = useMemo(() => {
-    return hasActiveRuns || selectedRunIsActive || (runId !== null && !runLogsEOF);
-  }, [hasActiveRuns, selectedRunIsActive, runId, runLogsEOF]);
-  const runLogsRendered = useMemo(() => {
-    const includeFields = runLogsViewMode === "line+fields";
-    return filteredRunLogs
-      .map((entry) => {
-        const line = formatRunLogLine(entry);
-        if (!includeFields) {
-          return line;
-        }
-        if (!entry.fields || Object.keys(entry.fields).length === 0) {
-          return line;
-        }
-        const serialized = JSON.stringify(entry.fields, null, 2);
-        if (!serialized) {
-          return line;
-        }
-        return `${line}\n${serialized}`;
-      })
-      .join(includeFields ? "\n\n" : "\n");
-  }, [filteredRunLogs, runLogsViewMode]);
 
   useEffect(() => {
     void bootstrapEditorData();
   }, []);
 
-  useEffect(() => {
-    if (!shouldPollRunDetails) {
-      return;
-    }
-
-    const interval = setInterval(() => {
-      void pollRunUpdates();
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [shouldPollRunDetails, runId, runLogsCursor, runLogsEOF]);
-
   async function bootstrapEditorData() {
-    let initialRuns: RunListItem[] = [];
-    try {
-      initialRuns = await loadRunList(100);
-    } catch {
-      setRunList([]);
-    }
-
-    const bootstrapRun = pickBootstrapRun(initialRuns);
-    if (bootstrapRun) {
-      await handleSelectRun(bootstrapRun.run_id, { silentErrors: true });
-    }
+    await bootstrapRuns();
 
     try {
       const manifest = await fetchJSON<{ content: string }>("/api/workspace/manifest");
@@ -661,130 +214,6 @@ export default function App() {
     }
   }
 
-  async function loadRunList(limit = 100): Promise<RunListItem[]> {
-    const payload = await fetchJSON<RunListResponse>(`/api/pipeline/runs?limit=${limit}`);
-    const items = payload.items ?? [];
-    setRunList(items);
-    return items;
-  }
-
-  function resetRunLogs() {
-    setRunLogs([]);
-    setRunLogsCursor(0);
-    setRunLogsEOF(false);
-    setRunLogsStatus("");
-  }
-
-  function mergeRunLogsPayload(payload: RunLogsResponse, reset: boolean, fallbackCursor: number) {
-    setRunLogs((previous) => {
-      const seed = reset ? [] : previous;
-      const merged = [...seed];
-      const seen = new Set(merged.map((entry) => entry.cursor));
-      for (const entry of payload.items ?? []) {
-        if (seen.has(entry.cursor)) {
-          continue;
-        }
-        merged.push(entry);
-        seen.add(entry.cursor);
-      }
-      merged.sort((left, right) => left.cursor - right.cursor);
-      return merged;
-    });
-    setRunLogsCursor(payload.next_cursor ?? fallbackCursor);
-    setRunLogsEOF(Boolean(payload.eof));
-  }
-
-  async function fetchRunLogs(id: string, reset = false): Promise<RunLogsResponse | null> {
-    if (!id) {
-      return null;
-    }
-    const cursor = reset ? 0 : runLogsCursor;
-    if (!reset && runLogsEOF) {
-      return null;
-    }
-    const payload = await fetchJSON<RunLogsResponse>(
-      `/api/pipeline/runs/${id}/logs?cursor=${cursor}&limit=${runLogsPageLimit}`
-    );
-    mergeRunLogsPayload(payload, reset, cursor);
-    return payload;
-  }
-
-  async function fetchRunLogsUntilEOF(id: string) {
-    if (!id) {
-      return;
-    }
-    let cursor = 0;
-    let reset = true;
-    for (let page = 0; page < 25; page += 1) {
-      const payload = await fetchJSON<RunLogsResponse>(
-        `/api/pipeline/runs/${id}/logs?cursor=${cursor}&limit=${runLogsPageLimit}`
-      );
-      mergeRunLogsPayload(payload, reset, cursor);
-      if (payload.eof) {
-        return;
-      }
-      const nextCursor = payload.next_cursor ?? cursor;
-      if (nextCursor <= cursor) {
-        return;
-      }
-      cursor = nextCursor;
-      reset = false;
-    }
-  }
-
-  async function pollRunUpdates() {
-    try {
-      const latestRuns = await loadRunList(100);
-      if (runId) {
-        const nextSelectedRunID = reconcileSelectedRunID(runId, latestRuns);
-        if (nextSelectedRunID !== runId) {
-          const previousStatus = runStatus?.status ?? null;
-          const currentStatus = await fetchRunStatus(runId, { allowMissing: true });
-          if (currentStatus) {
-            if (activeStatuses.has(currentStatus.status)) {
-              await fetchRunLogs(runId, false);
-              return;
-            }
-            const statusChanged = previousStatus !== currentStatus.status;
-            if (statusChanged || !runLogsEOF) {
-              await fetchRunLogsUntilEOF(runId);
-            }
-            return;
-          }
-          setSelectedArtifact("");
-          setSelectedArtifactContent("");
-          setRunStatus((previous) => {
-            if (previous && previous.run_id === runId) {
-              return null;
-            }
-            return previous;
-          });
-          setArtifacts([]);
-          resetRunLogs();
-          if (nextSelectedRunID) {
-            await handleSelectRun(nextSelectedRunID, { silentErrors: true });
-            setRunActionStatus(`Selected run no longer exists; switched to ${nextSelectedRunID}.`);
-          } else {
-            setRunID(null);
-          }
-          return;
-        }
-        const previousStatus = runStatus?.status ?? null;
-        const status = await fetchRunStatus(runId);
-        if (activeStatuses.has(status.status)) {
-          await fetchRunLogs(runId, false);
-          return;
-        }
-        const statusChanged = previousStatus !== status.status;
-        if (statusChanged || !runLogsEOF) {
-          await fetchRunLogsUntilEOF(runId);
-        }
-      }
-    } catch {
-      // keep UI responsive even if polling fails temporarily
-    }
-  }
-
   async function loadWizardContract() {
     try {
       const response = await fetch("/api/artifacts?path=charter/wizard/step0-contract.json");
@@ -810,139 +239,6 @@ export default function App() {
       }
     } catch {
       // no-op: wizard contract is optional during bootstrap
-    }
-  }
-
-  async function loadRuntimeTimeouts() {
-    try {
-      const payload = await fetchJSON<RuntimeTimeoutsResponse>("/api/runtime/timeouts");
-      const nextEffective = normalizeRuntimeTimeoutValues(payload.effective, defaultRuntimeTimeoutValues);
-      const nextPersisted = payload.persisted ?? {};
-      const nextSource = payload.source ?? {};
-      setRuntimeTimeoutPersisted(nextPersisted);
-      setRuntimeTimeoutEffective(nextEffective);
-      setRuntimeTimeoutSource(nextSource);
-      setRuntimeTimeoutDraft(runtimeTimeoutDraftFromValues(nextEffective));
-    } catch {
-      setRuntimeTimeoutPersisted({});
-      setRuntimeTimeoutEffective(defaultRuntimeTimeoutValues);
-      setRuntimeTimeoutSource({});
-      setRuntimeTimeoutDraft(runtimeTimeoutDraftFromValues(defaultRuntimeTimeoutValues));
-    }
-  }
-
-  async function loadRuntimeExecution() {
-    try {
-      const payload = await fetchJSON<RuntimeExecutionResponse>("/api/runtime/execution");
-      const nextEffective = normalizeRuntimeExecutionValues(payload.effective, defaultRuntimeExecutionValues);
-      setRuntimeExecutionPersisted(payload.persisted ?? {});
-      setRuntimeExecutionEffective(nextEffective);
-      setRuntimeExecutionSource(payload.source ?? {});
-      setRuntimeExecutionDraft(runtimeExecutionDraftFromValues(nextEffective));
-    } catch {
-      setRuntimeExecutionPersisted({});
-      setRuntimeExecutionEffective(defaultRuntimeExecutionValues);
-      setRuntimeExecutionSource({});
-      setRuntimeExecutionDraft(runtimeExecutionDraftFromValues(defaultRuntimeExecutionValues));
-    }
-  }
-
-  async function loadRuntimeProfile() {
-    try {
-      const payload = await fetchJSON<RuntimeProfileResponse>("/api/runtime/profile");
-      setRuntimeStepProviderPersisted(payload.step_providers?.persisted ?? {});
-      setRuntimeStepProviderEffective(payload.step_providers?.effective ?? {});
-      setRuntimeStepProviderSource(payload.step_providers?.source ?? {});
-    } catch {
-      setRuntimeStepProviderPersisted({});
-      setRuntimeStepProviderEffective({});
-      setRuntimeStepProviderSource({});
-    }
-  }
-
-  function updateRuntimeTimeoutDraft(key: RuntimeTimeoutKey, value: string) {
-    setRuntimeTimeoutDraft((previous) => ({ ...previous, [key]: value }));
-  }
-
-  function updateRuntimeExecutionDraft(key: RuntimeExecutionKey, value: string) {
-    setRuntimeExecutionDraft((previous) => ({ ...previous, [key]: value }));
-  }
-
-  async function handleSaveRuntimeTimeouts() {
-    setBusy(true);
-    setError(null);
-    setRuntimeTimeoutStatus("");
-    try {
-      const patch = parseRuntimeTimeoutPatch(runtimeTimeoutDraft);
-      await fetchJSON<RuntimeTimeoutsResponse>("/api/runtime/timeouts", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ timeouts: patch }),
-      });
-      await loadRuntimeTimeouts();
-      setRuntimeTimeoutStatus("Runtime timeouts saved");
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "failed to save runtime timeouts");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleResetRuntimeTimeouts() {
-    setBusy(true);
-    setError(null);
-    setRuntimeTimeoutStatus("");
-    try {
-      await fetchJSON<RuntimeTimeoutsResponse>("/api/runtime/timeouts", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ timeouts: defaultRuntimeTimeoutValues }),
-      });
-      await loadRuntimeTimeouts();
-      setRuntimeTimeoutStatus("Runtime timeouts reset to balanced defaults");
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "failed to reset runtime timeouts");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleSaveRuntimeExecution() {
-    setBusy(true);
-    setError(null);
-    setRuntimeExecutionStatus("");
-    try {
-      const patch = parseRuntimeExecutionPatch(runtimeExecutionDraft);
-      await fetchJSON<RuntimeExecutionResponse>("/api/runtime/execution", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ execution: patch }),
-      });
-      await loadRuntimeExecution();
-      setRuntimeExecutionStatus("Runtime execution profile saved");
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "failed to save runtime execution profile");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleResetRuntimeExecution() {
-    setBusy(true);
-    setError(null);
-    setRuntimeExecutionStatus("");
-    try {
-      await fetchJSON<RuntimeExecutionResponse>("/api/runtime/execution", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ execution: defaultRuntimeExecutionValues }),
-      });
-      await loadRuntimeExecution();
-      setRuntimeExecutionStatus("Runtime execution profile reset to defaults");
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "failed to reset runtime execution profile");
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -1124,280 +420,6 @@ export default function App() {
     } finally {
       setBusy(false);
     }
-  }
-
-  async function handleRunPipeline(pipeline: "init" | "refresh") {
-    setBusy(true);
-    setError(null);
-    setRunActionStatus("");
-    setArtifacts([]);
-    setSelectedArtifact("");
-    setSelectedArtifactContent("");
-    resetRunLogs();
-    try {
-      const payload = await fetchJSON<RunStartResponse>(`/api/pipeline/${pipeline}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ trigger: "ui", commit: false, create_proposal_branch: false })
-      });
-      setRunList((previous) => [
-        {
-          run_id: payload.run_id,
-          pipeline,
-          status: "queued",
-          started_at: new Date().toISOString(),
-          finished_at: null,
-          warnings: [],
-          error_code: null,
-          error: null
-        },
-        ...previous.filter((run) => run.run_id !== payload.run_id)
-      ]);
-      setRunID(payload.run_id);
-      const status = await fetchRunStatus(payload.run_id);
-      await fetchRunLogs(payload.run_id, true);
-      if (finalStatuses.has(status.status)) {
-        await fetchRunLogsUntilEOF(payload.run_id);
-      }
-      await loadRunList(100);
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "failed to start pipeline");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function fetchRunStatus(id: string): Promise<RunStatusResponse>;
-  async function fetchRunStatus(
-    id: string,
-    options: {
-      allowMissing: true;
-    }
-  ): Promise<RunStatusResponse | null>;
-  async function fetchRunStatus(
-    id: string,
-    options?: {
-      allowMissing?: boolean;
-    }
-  ): Promise<RunStatusResponse | null> {
-    const response = await fetch(`/api/pipeline/runs/${id}`);
-    const payload = await response.json();
-    if (response.status === 404 && options?.allowMissing) {
-      return null;
-    }
-    if (!response.ok) {
-      throw new Error(getErrorMessage(payload, `request failed: /api/pipeline/runs/${id}`));
-    }
-    const typed = payload as RunStatusResponse;
-    setRunStatus(typed);
-    if (finalStatuses.has(typed.status)) {
-      await fetchArtifacts(id);
-      await loadCoverageArtifacts();
-    }
-    return typed;
-  }
-
-  async function handleSelectRun(
-    id: string,
-    options?: {
-      silentErrors?: boolean;
-    }
-  ) {
-    try {
-      setRunActionStatus("");
-      setRunID(id);
-      resetRunLogs();
-      const status = await fetchRunStatus(id);
-      await fetchArtifacts(id);
-      await fetchRunLogs(id, true);
-      if (finalStatuses.has(status.status)) {
-        await fetchRunLogsUntilEOF(id);
-      }
-    } catch (requestError) {
-      if (!options?.silentErrors) {
-        setError(requestError instanceof Error ? requestError.message : "failed to load run details");
-      }
-    }
-  }
-
-  async function handleCancelSelectedRun() {
-    if (!runId || !selectedRunIsActive) {
-      return;
-    }
-
-    setCancelBusy(true);
-    setError(null);
-    setRunActionStatus("");
-    try {
-      const response = await fetch(`/api/pipeline/runs/${runId}/cancel`, {
-        method: "POST"
-      });
-      const payload = await response.json();
-
-      if (response.status === 202) {
-        setRunActionStatus(`Cancel requested for ${runId}`);
-        await loadRunList(100);
-        const status = await fetchRunStatus(runId);
-        if (finalStatuses.has(status.status)) {
-          await fetchRunLogsUntilEOF(runId);
-        } else {
-          await fetchRunLogs(runId, false);
-        }
-        return;
-      }
-
-      if (response.status === 404) {
-        const latestRuns = await loadRunList(100);
-        const nextSelectedRunID = reconcileSelectedRunID(runId, latestRuns);
-        if (nextSelectedRunID !== runId) {
-          setSelectedArtifact("");
-          setSelectedArtifactContent("");
-          setRunStatus((previous) => {
-            if (previous && previous.run_id === runId) {
-              return null;
-            }
-            return previous;
-          });
-          setArtifacts([]);
-          resetRunLogs();
-          if (nextSelectedRunID) {
-            await handleSelectRun(nextSelectedRunID, { silentErrors: true });
-            setRunActionStatus(`Selected run no longer exists; switched to ${nextSelectedRunID}.`);
-          } else {
-            setRunID(null);
-            setRunActionStatus("Selected run no longer exists.");
-          }
-        } else {
-          setRunActionStatus("Selected run no longer exists.");
-        }
-        return;
-      }
-
-      if (response.status === 409) {
-        setRunActionStatus("Selected run is already terminal.");
-        await loadRunList(100);
-        const status = await fetchRunStatus(runId);
-        if (finalStatuses.has(status.status)) {
-          await fetchRunLogsUntilEOF(runId);
-        }
-        return;
-      }
-
-      throw new Error(getErrorMessage(payload, "failed to cancel selected run"));
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "failed to cancel selected run");
-    } finally {
-      setCancelBusy(false);
-    }
-  }
-
-  async function fetchArtifacts(id: string) {
-    const payload = await fetchJSON<ArtifactsResponse>(`/api/pipeline/runs/${id}/artifacts`);
-    const runArtifacts = payload.artifacts ?? [];
-    const finalRunIndexPath = indexArtifactPath(runArtifacts, "/staging/final/final-run-index.json");
-    if (!finalRunIndexPath) {
-      setArtifacts(runArtifacts);
-      return;
-    }
-
-    try {
-      const finalRunIndex = await fetchJSON<FinalRunIndex>(`/api/artifacts?path=${encodeURIComponent(finalRunIndexPath)}`);
-      const canonicalArtifacts: Artifact[] = (finalRunIndex.canonical_documents ?? [])
-        .map((document) => {
-          const canonicalPath = String(document.canonical_path ?? "").trim();
-          if (!canonicalPath) {
-            return null;
-          }
-          return {
-            path: canonicalPath,
-            kind: String(document.kind ?? "report").trim() || "report",
-            label: String(document.title ?? canonicalPath).trim() || canonicalPath,
-          } satisfies Artifact;
-        })
-        .filter((artifact): artifact is Artifact => artifact !== null);
-
-      const indexArtifacts: Artifact[] = [
-        {
-          path: finalRunIndexPath,
-          kind: "taskrun",
-          label: "Final Run Index",
-        },
-      ];
-      const citationIndexPath = String(finalRunIndex.citation_index_path ?? "").trim();
-      if (citationIndexPath.length > 0) {
-        indexArtifacts.push({
-          path: citationIndexPath,
-          kind: "taskrun",
-          label: "Citation Index",
-        });
-      }
-      setArtifacts(dedupeArtifactsByPath([...canonicalArtifacts, ...indexArtifacts]));
-    } catch {
-      setArtifacts(runArtifacts);
-    }
-  }
-
-  async function loadCoverageArtifacts() {
-    await loadTextArtifact("reports/coverage/summary.md", setCoverageSummary);
-    await loadTextArtifact("reports/coverage/open-questions.md", setOpenQuestions);
-  }
-
-  async function handleOpenArtifact(path: string) {
-    setSelectedArtifact(path);
-    setSelectedArtifactContent("Loading...");
-    await loadTextArtifact(path, setSelectedArtifactContent);
-  }
-
-  function formatRunLogLine(entry: RunLogEntry): string {
-    const kind = entry.kind ?? "event";
-    const stream = entry.stream ? `[${entry.stream.toUpperCase()}]` : "";
-    const parts = [
-      entry.timestamp,
-      entry.level.toUpperCase(),
-      kind === "runtime_output" ? "[RAW]" : "[EVENT]",
-      stream,
-      entry.step_id ? `[${entry.step_id}]` : "",
-      entry.domain_id ? `(${entry.domain_id})` : "",
-      entry.message
-    ].filter((value) => value && value.trim().length > 0);
-    return parts.join(" ");
-  }
-
-  async function handleCopyRunLogs() {
-    if (filteredRunLogs.length === 0) {
-      return;
-    }
-    const text = filteredRunLogs.map((entry) => formatRunLogLine(entry)).join("\n");
-    if (!navigator.clipboard || !navigator.clipboard.writeText) {
-      setRunLogsStatus("Clipboard API is not available in this browser context.");
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(text);
-      setRunLogsStatus("Run logs copied to clipboard");
-    } catch (requestError) {
-      setRunLogsStatus(
-        requestError instanceof Error ? requestError.message : "Run logs copy failed"
-      );
-    }
-  }
-
-  function handleDownloadRunLogs() {
-    if (filteredRunLogs.length === 0 || !runId) {
-      return;
-    }
-    const text = filteredRunLogs.map((entry) => formatRunLogLine(entry)).join("\n");
-    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${runId}.logs.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    setRunLogsStatus(`Downloaded ${runId}.logs.txt`);
   }
 
   async function handleGitCommit() {

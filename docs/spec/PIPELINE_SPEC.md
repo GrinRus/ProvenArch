@@ -196,7 +196,7 @@ Inputs:
 
 Runtime focuses on:
 - arbitrary stacks через выбранный headless provider (`claude-code|qwen-code`) + baseline skill/prompt bundle, без фиксированного whitelist parser implementations в MVP
-- workspace prompt packs участвуют в composed prompt как editable content layer; enforced runtime policy/invariants задаются internal shared step-policy слоем и не могут быть ослаблены содержимым prompt pack
+- workspace prompt packs участвуют в composed prompt как editable content layer; merge order фиксирован: provider header -> artifact-only/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer. Enforced runtime policy/invariants задаются internal shared step-policy слоем и не могут быть ослаблены содержимым prompt pack
 - service topology и entrypoints
 - interfaces (HTTP/gRPC/events)
 - external systems/integrations

@@ -82,17 +82,17 @@ func TestValidateRequiredManifestRejectsObservedLegacyStep0Shapes(t *testing.T) 
 	}{
 		{
 			name:      "bank single legacy schema_version",
-			fixture:   "qwen_step0_bank_single_legacy_constitution_draft.json",
+			fixture:   "legacy-rejection/qwen_step0_bank_single_legacy_constitution_draft.json",
 			wantError: "runtime draft manifest version must be 1",
 		},
 		{
 			name:      "openedx version string",
-			fixture:   "qwen_step0_openedx_multi_version_string_constitution_draft.json",
+			fixture:   "legacy-rejection/qwen_step0_openedx_multi_version_string_constitution_draft.json",
 			wantError: "cannot unmarshal string into Go struct field Manifest.version of type int",
 		},
 		{
 			name:      "openstack schema_version v1 string",
-			fixture:   "qwen_step0_openstack_multi_schema_version_constitution_draft.json",
+			fixture:   "legacy-rejection/qwen_step0_openstack_multi_schema_version_constitution_draft.json",
 			wantError: "runtime draft manifest version must be 1",
 		},
 	}
