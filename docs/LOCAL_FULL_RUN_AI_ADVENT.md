@@ -44,9 +44,10 @@ Batch-only semantic hard-fail checks (в `scripts/e2e_batch_report.py`):
   - если файл содержит `runtime.profile.timeouts`, `init-workspace` переносит профиль в `workspace.yaml`
 - legacy single inputs запрещены: script делает fail-fast с migration hint на `TARGET_REPOS_FILE`
 - `TMP_ROOT` (default: auto `mktemp -d -t provenarch-ai-advent.XXXXXX`)
-- `ACP_RUNTIME_PROVIDER` (headless provider: `claude-code` default или `qwen-code`)
+- `ACP_RUNTIME_PROVIDER` (headless provider: `claude-code` default, `qwen-code` или `codex-code`)
 - `ACP_CLAUDE_CMD` (команда для provider `claude-code`; default `claude-code`, поддержан direct `claude` без wrapper)
 - `ACP_QWEN_CMD` (команда для provider `qwen-code`; default `qwen`)
+- `ACP_CODEX_CMD` (команда для provider `codex-code`; default `codex`)
 - `KEEP_TMP` (`0/1`, default `0`)
 - `ITERATIONS` (default `1`)
 - `RUN_QUALITY_GATES` (`0/1`, default `1`)
@@ -85,8 +86,9 @@ Batch/Frontend scripts:
   - `REPORTS_ROOT` (default `${E2E_TMP_ROOT}/reports`)
   - `ACP_CLAUDE_CMD_BIN` (default `claude`, direct binary)
   - `ACP_QWEN_CMD_BIN` (default `qwen`, direct binary)
+  - `ACP_CODEX_CMD_BIN` (default `codex`, direct binary)
   - shard controls:
-    - `BATCH_PROVIDER_FILTER` (`all` или CSV `qwen-code,claude-code`)
+    - `BATCH_PROVIDER_FILTER` (`all` или CSV `qwen-code,claude-code,codex-code`)
     - `BATCH_RUN_SELECTION` (`all`, CSV `1,3,5` или диапазоны `1-3,5`)
     - `BATCH_SKIP_PRECHECK` (`0|1`; default `0`)
     - `BATCH_FRONTEND_MODE` (`auto|always|never|per_run`; default `auto`; `auto` skip если `run1` не выбран, `always` использует первый выбранный backend run)
@@ -107,7 +109,7 @@ Batch/Frontend scripts:
   - профильный запуск делегируется в `full-run-batch-5x2.sh` (`profiles × sweeps`)
 - `scripts/frontend-live-e2e.sh`
   - `WORKSPACE` (required)
-  - `RUNTIME_PROVIDER` (required: `claude-code|qwen-code`)
+  - `RUNTIME_PROVIDER` (required: `claude-code|qwen-code|codex-code`)
   - `UI_E2E_EXPECTED_REPO_COUNT` (optional; default `1`)
   - `OUTPUT_DIR` (optional; default `mktemp`)
   - `LISTEN` (optional; default free local port)
@@ -134,6 +136,9 @@ TARGET_REPOS_FILE=/abs/path/to/repos.yaml ACP_RUNTIME_PROVIDER=qwen-code ./scrip
 # Вариант 4: явно задать команду для выбранного provider
 TARGET_REPOS_FILE=/abs/path/to/repos.yaml ACP_RUNTIME_PROVIDER=qwen-code ACP_QWEN_CMD=/abs/path/to/qwen ./scripts/full-run-ai-advent.sh
 
+# Вариант 4.1: явно задать provider=codex-code
+TARGET_REPOS_FILE=/abs/path/to/repos.yaml ACP_RUNTIME_PROVIDER=codex-code ACP_CODEX_CMD=/abs/path/to/codex ./scripts/full-run-ai-advent.sh
+
 # Вариант 5: оставить tmp workspace для ручного анализа
 TARGET_REPOS_FILE=/abs/path/to/repos.yaml KEEP_TMP=1 ./scripts/full-run-ai-advent.sh
 
@@ -141,18 +146,21 @@ TARGET_REPOS_FILE=/abs/path/to/repos.yaml KEEP_TMP=1 ./scripts/full-run-ai-adven
 TARGET_REPOS_FILE=/abs/path/to/repos.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
+ACP_CODEX_CMD_BIN=codex \
 ./scripts/full-run-batch-5x2.sh
 
 # Вариант 7: canonical `regres fast`
 E2E_MATRIX_FILE=./examples/e2e-matrix.regres-fast.bank-openedx.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
+ACP_CODEX_CMD_BIN=codex \
 BATCH_PROVIDER_FILTER=qwen-code \
 ./scripts/full-run-batch-matrix.sh
 
 E2E_MATRIX_FILE=./examples/e2e-matrix.regres-fast.openstack.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
+ACP_CODEX_CMD_BIN=codex \
 BATCH_PROVIDER_FILTER=qwen-code \
 ./scripts/full-run-batch-matrix.sh
 
@@ -160,6 +168,7 @@ BATCH_PROVIDER_FILTER=qwen-code \
 E2E_MATRIX_FILE=./examples/e2e-matrix.regres-long.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
+ACP_CODEX_CMD_BIN=codex \
 BATCH_PROVIDER_FILTER=qwen-code \
 ./scripts/full-run-batch-matrix.sh
 
@@ -167,7 +176,17 @@ BATCH_PROVIDER_FILTER=qwen-code \
 E2E_MATRIX_FILE=./examples/e2e-matrix.regres-long.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
+ACP_CODEX_CMD_BIN=codex \
 BATCH_PROVIDER_FILTER=claude-code \
+BATCH_SKIP_PRECHECK=1 \
+./scripts/full-run-batch-matrix.sh
+
+# Вариант 7.3: дополнительная manual diagnostic-проверка того же regression slice на codex
+E2E_MATRIX_FILE=./examples/e2e-matrix.regres-long.yaml \
+ACP_CLAUDE_CMD_BIN=claude \
+ACP_QWEN_CMD_BIN=qwen \
+ACP_CODEX_CMD_BIN=codex \
+BATCH_PROVIDER_FILTER=codex-code \
 BATCH_SKIP_PRECHECK=1 \
 ./scripts/full-run-batch-matrix.sh
 
@@ -175,12 +194,13 @@ BATCH_SKIP_PRECHECK=1 \
 E2E_MATRIX_FILE=/abs/path/to/e2e-matrix.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
+ACP_CODEX_CMD_BIN=codex \
 ./scripts/full-run-batch-matrix.sh
-
 # Вариант 9: параллельные shard-runs (по провайдерам)
 TARGET_REPOS_FILE=/abs/path/to/repos.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
+ACP_CODEX_CMD_BIN=codex \
 BATCH_ID=batch-qwen \
 BATCH_PROVIDER_FILTER=qwen-code \
 ./scripts/full-run-batch-5x2.sh &
@@ -188,6 +208,7 @@ BATCH_PROVIDER_FILTER=qwen-code \
 TARGET_REPOS_FILE=/abs/path/to/repos.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
+ACP_CODEX_CMD_BIN=codex \
 BATCH_ID=batch-claude \
 BATCH_PROVIDER_FILTER=claude-code \
 ./scripts/full-run-batch-5x2.sh &
@@ -380,7 +401,8 @@ Output semantics:
 - Ошибка `headless runtime command ... is unavailable`:
   - проверить `ACP_RUNTIME_PROVIDER`;
   - для `claude-code`: установить `claude-code` или использовать direct `ACP_CLAUDE_CMD=claude` (либо задать `ACP_CLAUDE_CMD=/abs/path/to/runner`);
-  - для `qwen-code`: установить `qwen` или задать `ACP_QWEN_CMD=/abs/path/to/runner`.
+  - для `qwen-code`: установить `qwen` или задать `ACP_QWEN_CMD=/abs/path/to/runner`;
+  - для `codex-code`: установить `codex` или задать `ACP_CODEX_CMD=/abs/path/to/runner`.
 - Ошибки bootstrap (`workspace.yaml/.git/skills/subagents.yaml` не созданы):
   - проверить вывод `logs/init-workspace.log`.
 - Timeout/зависание pipeline:

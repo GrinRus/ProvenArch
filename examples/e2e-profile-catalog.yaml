@@ -78,12 +78,13 @@ execution_policies:
     release_mode: false
     notes:
       - Primary debug surface is qwen-only baseline.
-      - Additional claude debug stays manual and is not part of profile totals.
+      - Additional claude/codex debug stays manual and is not part of profile totals.
   release-default:
     mode: release
     providers:
       - qwen-code
       - claude-code
+      - codex-code
     sweeps:
       - baseline
       - parallel-default
@@ -125,7 +126,7 @@ profiles:
     policy: release-default
     shard_bucket: small
     timeout_profile: short-window
-    expected_backend_runs: 8
+    expected_backend_runs: 12
     rough_duration_band: short-window
     target_repo_sets:
       - bank-of-anthos
@@ -137,7 +138,7 @@ profiles:
     policy: release-default
     shard_bucket: medium
     timeout_profile: medium-window
-    expected_backend_runs: 8
+    expected_backend_runs: 12
     rough_duration_band: medium-window
     target_repo_sets:
       - posthog
@@ -151,7 +152,7 @@ profiles:
     policy: release-default
     shard_bucket: full
     timeout_profile: extended-window
-    expected_backend_runs: 24
+    expected_backend_runs: 36
     rough_duration_band: extended-window
     target_repo_sets:
       - bank-of-anthos

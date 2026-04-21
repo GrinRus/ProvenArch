@@ -1,7 +1,7 @@
 # Architecture Control Plane (Local-first MVP)
 
 > **Статус:** MVP beta foundation / runnable local docs-first pipeline baseline + strict contracts
-> **Принятый стек реализации:** Go (backend/orchestrator) + React/TypeScript UI (embedded), runtime анализа в MVP: **headless multi-provider** (`claude-code` default, `qwen-code` optional)
+> **Принятый стек реализации:** Go (backend/orchestrator) + React/TypeScript UI (embedded), runtime анализа в MVP: **headless multi-provider** (`claude-code` default, `qwen-code` optional, `codex-code` release peer)
 > **Последняя ревизия:** 2026-04-19
 
 ## Что это
@@ -31,7 +31,7 @@ ACP не является "рисовалкой диаграмм". Архите�
 ## Scope MVP (явно)
 
 ✅ В MVP включено:
-- step-scoped runtime provider selection для headless режима: `claude-code` (default fallback) и `qwen-code`
+- step-scoped runtime provider selection для headless режима: `claude-code` (default fallback), `qwen-code` и `codex-code` (release peer)
 - local-first режим (всё запускается локально)
 - запуск того же standalone orchestrator в CI/CD через GitHub/GitLab hooks и/или manual pipeline/job trigger
 - единый формат хранения: central `arch-workspace` git-репозиторий (Variant 2)
@@ -46,7 +46,7 @@ ACP не является "рисовалкой диаграмм". Архите�
 - internal Q&A capability системного аналитика поверх артефактов workspace (`internal/qa` + `acp qa`, без публичного API endpoint в beta surface)
 - итерационный changelog в `reports/changelog`
 - детальный анализ каждого сервиса: архитектура, внешние интеграции, БД, CI/CD
-- анализ arbitrary stacks через выбранный headless provider (`claude-code|qwen-code`) + baseline prompt bundle, без фиксированного whitelist парсеров в MVP
+- анализ arbitrary stacks через выбранный headless provider (`claude-code|qwen-code|codex-code`) + baseline prompt bundle, без фиксированного whitelist парсеров в MVP
 - headless runtime получает не только `arch-workspace`, но и resolved source repo directories из `workspace.yaml` / `workspace-validate.json`, чтобы live analysis опирался на реальные checkout-ы, а не только на ACP-generated scaffold
 - явная фиксация недостатка информации через `coverage`, `questions` и findings
 - semantic guard в refresh-цикле: фильтрация нерелевантных placeholder-операций, fallback finding при owner-gap, канонизация/дедуп coverage+questions
@@ -140,7 +140,7 @@ MVP policy: Observation + Assertion отображаются как рабоча
 - Node.js 22.21.1 + npm 10.x (нужно для UI dev/build в этом репозитории)
 
 Для первого запуска достаточно `--runtime fake`.
-Для реальных запусков `--runtime headless` нужен установленный provider command (`claude-code`/`qwen`) либо env override (`ACP_CLAUDE_CMD`/`ACP_QWEN_CMD`).
+Для реальных запусков `--runtime headless` нужен установленный provider command (`claude-code`/`qwen`/`codex`) либо env override (`ACP_CLAUDE_CMD`/`ACP_QWEN_CMD`/`ACP_CODEX_CMD`).
 Direct режим `ACP_CLAUDE_CMD=claude` поддерживается нативно (без wrapper).
 
 ### 1) Поднимите сервис одной командой (auto-init)
@@ -234,11 +234,12 @@ make quickstart-local WORKSPACE=/path/to/arch-workspace REPO_PATH=/path/to/payme
 
 - `--runtime fake` — default для required deterministic CI surface и первого локального старта.
 - `--runtime headless` — opt-in для реального анализа через выбранный provider.
-- `--runtime-provider` поддерживает `claude-code` (default) и `qwen-code`.
+- `--runtime-provider` поддерживает `claude-code` (default), `qwen-code` и `codex-code`.
 - effective precedence выбора provider для каждого шага: `workspace.yaml.runtime.profile.steps.<step>.provider` > CLI `--runtime-provider` / `ACP_RUNTIME_PROVIDER` > `claude-code`.
 - command env:
   - `ACP_CLAUDE_CMD` (default `claude-code`)
   - `ACP_QWEN_CMD` (default `qwen`)
+  - `ACP_CODEX_CMD` (default `codex`)
 - direct `claude` режим: `ACP_CLAUDE_CMD=claude` (native one-shot invocation с envelope parse).
 - в `--runtime fake` provider проходит валидацию, но фактически не используется runner’ом.
 
@@ -335,6 +336,7 @@ TARGET_REPOS_FILE=/abs/path/to/repos.yaml ./scripts/full-run-ai-advent.sh
 E2E_MATRIX_FILE=/abs/path/to/e2e-matrix.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
+ACP_CODEX_CMD_BIN=codex \
 ./scripts/full-run-batch-matrix.sh
 ```
 
@@ -365,7 +367,7 @@ Repo CI по умолчанию живёт в GitHub Actions:
 - **Agent topology**: domain analysts, architect aggregator, system analyst Q&A + baseline bundle skills/prompts
 - **UI**: guided workspace setup + baseline editors для `charter/*` и `skills/*`, запуск pipeline, просмотр результатов
 - **Orchestrator (Go)**: шаги pipeline, context/prompt packs, вызов runtime, local execution и CI/CD trigger execution
-- **Runtime providers**: headless jobs анализа через `claude-code|qwen-code`
+- **Runtime providers**: headless jobs анализа через `claude-code|qwen-code|codex-code`; `fake` остаётся deterministic baseline, default fallback остаётся `claude-code`
 - **Model store**: `model/` в формате entity-per-file, включая внешние системы и datastores
 - **Reports/Proposals**: `reports/` (включая `agent-outputs/` и `changelog/`) и `proposals/`
 
@@ -377,7 +379,7 @@ flowchart LR
   SCM[GitHub/GitLab hooks or pipeline button] --> ORCH
   UI --> ORCH[Orchestrator (Go)]
   ORCH --> WS[arch-workspace (git)]
-  ORCH --> CC[Headless Runtime Provider (claude-code or qwen-code)]
+  ORCH --> CC[Headless Runtime Provider (claude-code or qwen-code or codex-code)]
   ORCH --> SRC[Repo sources from workspace.yaml]
   SRC --> REPOS[Local checkout paths]
   SRC --> GITLAB[GitHub/GitLab git_url via local git]
@@ -577,6 +579,6 @@ Run-specific поверхность (исключена из strict golden compa
 1) финализировать artifact-only docs-first runtime contracts + derived model rebuild
 2) реализовать baseline bundle agents/skills/prompts
 3) реализовать CI/CD trigger surface: hooks/manual pipeline button/job + batch mode
-4) реализовать orchestrator + runtime provider adapters (`claude-code`, `qwen-code`)
+4) реализовать orchestrator + runtime provider adapters (`claude-code`, `qwen-code`, `codex-code`)
 5) реализовать model store (entity-per-file) и extraction coverage for integrations/datastores/CI-CD
 6) реализовать UI (workspace setup, charter/skills/run/results)

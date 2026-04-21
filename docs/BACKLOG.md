@@ -38,7 +38,7 @@ Suggested PR slices:
 
 ## Epic 3 — Headless runtime adapters (historически стартовал как Claude Code adapter)
 Acceptance:
-- orchestrator запускает headless runtime adapter для workspace (`claude-code` default, `qwen-code` optional)
+- orchestrator запускает headless runtime adapter для workspace (`claude-code` default, `qwen-code` optional, `codex-code` release peer)
 - поддерживается передача PromptPack + subagents + skills
 - adapter работает поверх baseline bundle agents/skills/prompts
 - persisted runtime execution metadata сохраняется в `reports/taskruns/`

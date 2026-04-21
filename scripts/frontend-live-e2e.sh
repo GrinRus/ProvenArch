@@ -164,7 +164,7 @@ if [[ -z "$WORKSPACE" ]]; then
   die "WORKSPACE is required"
 fi
 if [[ -z "$RUNTIME_PROVIDER" ]]; then
-  die "RUNTIME_PROVIDER is required (claude-code|qwen-code)"
+  die "RUNTIME_PROVIDER is required (claude-code|qwen-code|codex-code)"
 fi
 if [[ ! -d "$WORKSPACE" ]]; then
   die "WORKSPACE does not exist: $WORKSPACE"
@@ -210,8 +210,11 @@ case "$RUNTIME_PROVIDER" in
   qwen-code)
     runtime_cmd="${ACP_QWEN_CMD:-qwen}"
     ;;
+  codex-code)
+    runtime_cmd="${ACP_CODEX_CMD:-codex}"
+    ;;
   *)
-    die "unsupported RUNTIME_PROVIDER '$RUNTIME_PROVIDER' (allowed: claude-code, qwen-code)"
+    die "unsupported RUNTIME_PROVIDER '$RUNTIME_PROVIDER' (allowed: claude-code, qwen-code, codex-code)"
     ;;
 esac
 
@@ -234,6 +237,9 @@ EOF
       ;;
     qwen-code)
       server_env+=("ACP_QWEN_CMD=$runtime_cmd")
+      ;;
+    codex-code)
+      server_env+=("ACP_CODEX_CMD=$runtime_cmd")
       ;;
   esac
 fi

@@ -2,7 +2,7 @@
 
 Этот документ фиксирует фактический wire-contract HTTP API для local-first ACP standalone сервера.
 
-> MVP режим: `acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ... [--docs-imports-path <path>]]`.
+> MVP режим: `acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ... [--docs-imports-path <path>]]`.
 > Service работает с одним bound workspace на процесс.
 > Required CI/CD surface: CLI batch mode (`acp run ... --non-interactive`). API-trigger остаётся optional для trusted local/private deployment.
 
@@ -274,7 +274,7 @@ Partial update persisted execution-полей в `workspace.yaml`.
 - `max_parallel_tasks` должен быть целым `> 0`;
 - `failure_policy` в `fail_fast|best_effort`;
 - `shard_discovery_mode` в `heuristics|semantic`.
-- `execution.steps.*` в `claude-code|qwen-code`.
+- `execution.steps.*` в `claude-code|qwen-code|codex-code`.
 
 **400**
 - `invalid_request_body`
@@ -700,10 +700,10 @@ Run-specific поверхность (не входит в strict deterministic g
 
 ## 8) Deployment boundary
 - `acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)`: explicit bootstrap.
-- `acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]`: local interactive и trusted local/private deployment.
+- `acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]`: local interactive и trusted local/private deployment.
 - bootstrap behavior: если workspace root не является git-репозиторием, ACP автоматически выполняет `git init` (без auto-commit/auto-push).
 - `serve` startup работает в lenient mode: сервис стартует без блокирующего repo preflight; readiness diagnostics доступны через `POST /api/workspace/validate`.
-- `acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]`.
+- `acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]`.
 - run logs retention knobs:
   - CLI flags: `--run-logs-ttl-hours`, `--run-logs-max-runs` (для `serve` и `run`)
   - env overrides: `ACP_RUN_LOGS_TTL_HOURS`, `ACP_RUN_LOGS_MAX_RUNS`
@@ -711,7 +711,7 @@ Run-specific поверхность (не входит в strict deterministic g
 - default runtime mode: `fake` (required deterministic CI surface), `headless` — opt-in.
 - default runtime provider: `claude-code`; global fallback env `ACP_RUNTIME_PROVIDER`; CLI override `--runtime-provider`.
 - effective provider per step: `workspace.yaml.runtime.profile.steps.<step>.provider > CLI/env global provider > claude-code`.
-- provider-specific command envs: `ACP_CLAUDE_CMD` и `ACP_QWEN_CMD`.
+- provider-specific command envs: `ACP_CLAUDE_CMD`, `ACP_QWEN_CMD`, `ACP_CODEX_CMD`.
 - timeout control envs:
   - `ACP_RUNTIME_STEP_TIMEOUT_SEC`
   - `ACP_RUNTIME_HEARTBEAT_SEC`

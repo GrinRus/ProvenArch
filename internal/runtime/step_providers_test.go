@@ -53,6 +53,23 @@ func TestResolveStepProvidersWorkspaceOverridesGlobalFallback(t *testing.T) {
 	}
 }
 
+func TestResolveProviderWithSourceSupportsCodexCode(t *testing.T) {
+	t.Parallel()
+
+	provider, source, err := resolveProviderWithLookup("codex-code", func(string) (string, bool) {
+		return "qwen-code", true
+	})
+	if err != nil {
+		t.Fatalf("resolve provider with source: %v", err)
+	}
+	if provider != ProviderCodexCode {
+		t.Fatalf("expected codex-code provider, got %q", provider)
+	}
+	if source != ProviderSourceOverride {
+		t.Fatalf("expected override source, got %q", source)
+	}
+}
+
 func TestStepProviderKeyForStepID(t *testing.T) {
 	t.Parallel()
 

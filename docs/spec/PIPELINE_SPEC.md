@@ -7,7 +7,7 @@
 - **Workspace**: единый central git-репозиторий `arch-workspace/` (каноническая MVP-конвенция, Variant 2) с `workspace.yaml`, `charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/`.
 - **Workspace manifest**: `workspace.yaml`, валидируемый по `schemas/workspace.schema.json` и описанный в `docs/spec/WORKSPACE_SPEC.md`.
 - **Orchestrator**: управляет шагами, готовит PromptPack/ContextPack, выдаёт runtime staged-write envelope, валидирует manifests/indexes/verdicts и persisted runtime execution metadata.
-- **Runtime (MVP)**: headless multi-provider (`claude-code` default, `qwen-code` optional) + deterministic fake harness (default for required CI/testing).
+- **Runtime (MVP)**: headless multi-provider (`claude-code` default, `qwen-code` optional, `codex-code` release peer) + deterministic fake harness (default for required CI/testing).
 - **Runtime execution metadata**: internal metadata artifact runtime-шага (`task_id`, `run_id`, `step_id`, `provider`, write roots, status, raw output refs), не semantic source of truth для live docs-first flows.
 
 ## Docs-first runtime contract
@@ -31,7 +31,7 @@ Runtime write policy:
 - runtime не имеет права писать в `workspace.yaml`, `schemas/*`, `docs/spec/*`, `charter/*` и анализируемые user repos
 
 > MVP policy фиксирует step-scoped runtime provider contract: effective provider для шага выбирается как `workspace step override > CLI/env global provider > claude-code`; semantic stdout payloads не поддерживаются.
-> CLI/process runtime mode задаётся флагом `--runtime fake|headless` (`fake` default, `headless` opt-in), global fallback provider — `--runtime-provider claude-code|qwen-code` (env fallback `ACP_RUNTIME_PROVIDER`).
+> CLI/process runtime mode задаётся флагом `--runtime fake|headless` (`fake` default, `headless` opt-in), global fallback provider — `--runtime-provider claude-code|qwen-code|codex-code` (env fallback `ACP_RUNTIME_PROVIDER`).
 
 ## Repo source manifest (MVP)
 
@@ -195,7 +195,7 @@ Inputs:
 - `skills/*`
 
 Runtime focuses on:
-- arbitrary stacks через выбранный headless provider (`claude-code|qwen-code`) + baseline skill/prompt bundle, без фиксированного whitelist parser implementations в MVP
+- arbitrary stacks через выбранный headless provider (`claude-code|qwen-code|codex-code`) + baseline skill/prompt bundle, без фиксированного whitelist parser implementations в MVP
 - workspace prompt packs участвуют в composed prompt как editable content layer; merge order фиксирован: provider header -> artifact-only/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer. Enforced runtime policy/invariants задаются internal shared step-policy слоем и не могут быть ослаблены содержимым prompt pack
 - service topology и entrypoints
 - interfaces (HTTP/gRPC/events)

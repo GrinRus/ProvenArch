@@ -5,7 +5,7 @@
 ## 1) Цели и принципы
 
 - Required CI должен проходить локально и в CI без live network dependencies.
-- Required CI не зависит от live headless providers (`claude-code`/`qwen-code`), GitHub, GitLab или реальных пользовательских репозиториев.
+- Required CI не зависит от live headless providers (`claude-code`/`qwen-code`/`codex-code`), GitHub, GitLab или реальных пользовательских репозиториев.
 - Любые изменения schema/spec/examples должны сопровождаться обновлением fixtures и golden outputs в том же PR.
 - Synthetic fixtures считаются baseline regression surface.
 - Live headless providers проверяются только optional smoke на trusted machine/runner и не блокируют merge.
@@ -229,6 +229,7 @@ Implemented additional jobs:
 
 ### Optional live-runner smoke
 - `scripts/full-run-ai-advent.sh` — canonical local scenario/full-run loop:
+  - supported headless providers: `claude-code`, `qwen-code`, `codex-code`
   - canonical input: `TARGET_REPOS_FILE`
   - bootstrap в `tmp`, runtime циклы `fake + headless`, strict anti-mock/anti-zero-signal guardrails
   - completion invariants: expected/completed runtime counts, per-iteration headless `init+refresh`, отсутствие `running` в `run-history`
@@ -236,6 +237,7 @@ Implemented additional jobs:
   - debug artifacts и raw diagnostics: `TMP_ROOT/session-summary.md`, `TMP_ROOT/full-run.log`, `TMP_ROOT/snapshots/*`, `reports/taskruns/raw/*`
 - `scripts/full-run-batch-5x2.sh` — canonical batch `5x2` + frontend live e2e:
   - canonical input: `TARGET_REPOS_FILE`
+  - direct-only runtime commands: `claude`, `qwen`, `codex`
   - backend quality source-of-truth: только `snapshots/<run_id>/reports/*`
   - hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`, `analysis:cross-repo-missing`
   - frontend smoke работает на отдельной `frontend-workspace` копии run snapshot и не мутирует backend baseline
@@ -248,6 +250,7 @@ Implemented additional jobs:
   - для `source_kind=git_url` refs должны быть pinned
   - итоговый release decision брать только из `reports/release_verdict_<matrix-id>.json`
 - `scripts/frontend-live-e2e.sh` и `npm run e2e:live --prefix ui` используют Playwright:
+  - local wrapper поддерживает `claude-code`, `qwen-code`, `codex-code`
   - canonical toggles: `UI_E2E_EXPECTED_REPO_COUNT`, `UI_E2E_SCENARIO=init-inspect|cancel-refresh`, `UI_E2E_OUTPUT_DIR`
   - cancel flow остаётся guarded сценарием с явным `run_canceled`
 - Этот документ фиксирует policy, invariants и required gates; пошаговые live/release cookbook команды не дублируются здесь.

@@ -155,6 +155,17 @@ func TestKeySurfacesDoNotContainStaleMarkers(t *testing.T) {
 		},
 		"README.md": {
 			"bootstrap CLI skeleton",
+			"step-scoped runtime provider selection для headless режима: `claude-code` (default fallback) и `qwen-code`",
+			"direct-only `claude`/`qwen`",
+			"`BATCH_PROVIDER_FILTER`: `all` (default) или CSV из `qwen-code,claude-code`",
+			"Headless Runtime Provider (claude-code or qwen-code)",
+			"runtime provider adapters (`claude-code`, `qwen-code`)",
+		},
+		"AGENTS.md": {
+			"runtime анализа: **headless multi-provider** (`claude-code` default, `qwen-code` optional) + deterministic `fake` baseline",
+		},
+		"docs/BACKLOG.md": {
+			"orchestrator запускает headless runtime adapter для workspace (`claude-code` default, `qwen-code` optional)",
 		},
 		"cmd/README.md": {
 			"Bootstrap slice",
@@ -165,6 +176,26 @@ func TestKeySurfacesDoNotContainStaleMarkers(t *testing.T) {
 		},
 		"docs/STAKEHOLDER_DOC.md": {
 			"Горизонт по идеям",
+			"**В MVP используем step-scoped headless runtime providers**: `claude-code` (default fallback) и `qwen-code`.",
+			"Headless multi-provider runtime (`claude-code` + `qwen-code`)",
+		},
+		"docs/ARCHITECTURE.md": {
+			"headless providers: `claude-code` (`internal/runtime/claudecode`) и `qwen-code` (`internal/runtime/qwencode`)",
+			"`claude-code` и `qwen-code` используют shared provider-agnostic step-policy/prompt layer",
+		},
+		"docs/TESTING_STRATEGY.md": {
+			"direct-only runtime commands (`claude`, `qwen`)",
+			"expected backend totals from catalog: `regres fast=3`, `regres long=2`, `release fast=8`, `release long=8`, `release full=24`",
+			"обязательны оба провайдера (`qwen-code`, `claude-code`)",
+		},
+		"docs/RELEASE_LIVE_E2E_RUNBOOK.md": {
+			"BATCH_PROVIDER_FILTER=qwen-code|claude-code",
+		},
+		"docs/PLANS.md": {
+			"provider choice (`claude-code` default, `qwen-code`), persisted runtime execution metadata",
+		},
+		".agents/skills/e2e-live-gate/SKILL.md": {
+			"BATCH_PROVIDER_FILTER=qwen-code|claude-code",
 		},
 		"internal/reports/README.md": {
 			"MVP placeholder",
@@ -208,8 +239,8 @@ func TestCLIDocsSurfaceMatchesHelp(t *testing.T) {
 	helpSource := readDoc(t, "cmd/acp/main.go")
 	helpTokens := []string{
 		"acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]",
-		"acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]",
-		"acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]",
+		"acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]",
+		"acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]",
 		"acp qa --workspace <abs-path> --question \\\"<text>\\\"",
 	}
 	for _, token := range helpTokens {
@@ -229,20 +260,20 @@ func TestCLIDocsSurfaceMatchesHelp(t *testing.T) {
 		},
 		"cmd/acp/README.md": {
 			"acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)",
-			"acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]",
-			"acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]",
+			"acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]",
+			"acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]",
 			"acp qa --workspace <abs-path> --question",
 		},
 		"docs/ARCHITECTURE.md": {
 			"`init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)`",
-			"`serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]`",
-			"run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]",
+			"`serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]`",
+			"run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]",
 			"`acp qa`",
 		},
 		"docs/spec/API_SPEC.md": {
 			"acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)",
-			"acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]",
-			"acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]",
+			"acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]",
+			"acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]",
 		},
 	}
 	for path, tokens := range requiredByDoc {

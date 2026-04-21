@@ -185,7 +185,7 @@ class MatrixReleaseContractTest(unittest.TestCase):
 
                 provider_filter="${BATCH_PROVIDER_FILTER:-all}"
                 if [[ -z "${provider_filter}" || "${provider_filter}" == "all" ]]; then
-                  selected_providers=(qwen-code claude-code)
+                  selected_providers=(qwen-code claude-code codex-code)
                 else
                   IFS=',' read -r -a selected_providers <<< "${provider_filter}"
                 fi
@@ -349,6 +349,7 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 "E2E_MATRIX_RELEASE_MODE": release_mode,
                 "ACP_CLAUDE_CMD_BIN": "true",
                 "ACP_QWEN_CMD_BIN": "true",
+                "ACP_CODEX_CMD_BIN": "true",
                 "E2E_TMP_ROOT": str(self.e2e_tmp_root),
                 "REPORTS_ROOT": str(self.e2e_tmp_root / "reports"),
                 "MATRIX_ROOT": str(self.e2e_tmp_root / "matrix" / matrix_id),
@@ -635,6 +636,7 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 "E2E_MATRIX_RELEASE_MODE": "0",
                 "ACP_CLAUDE_CMD_BIN": "true",
                 "ACP_QWEN_CMD_BIN": "true",
+                "ACP_CODEX_CMD_BIN": "true",
                 "E2E_TMP_ROOT": str(self.e2e_tmp_root),
                 "REPORTS_ROOT": str(self.e2e_tmp_root / "reports"),
                 "MATRIX_ROOT": str(self.e2e_tmp_root / "matrix" / matrix_id),
@@ -727,8 +729,8 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertEqual(release_contract["observed_profile_sweep_runs"], 2)
         self.assertTrue(
             all(
-                int(rec.get("backend", {}).get("total_runs", 0)) == 4
-                and int(rec.get("backend", {}).get("hard_pass", 0)) == 4
+                int(rec.get("backend", {}).get("total_runs", 0)) == 6
+                and int(rec.get("backend", {}).get("hard_pass", 0)) == 6
                 for rec in verdict.get("records", [])
             )
         )
@@ -753,15 +755,16 @@ class MatrixReleaseContractTest(unittest.TestCase):
         verdict = self._load_verdict(matrix_id)
         self.assertEqual(verdict["verdict"], "PASS")
         release_contract = verdict["release_contract"]
-        self.assertEqual(release_contract["selected_providers"], ["qwen-code", "claude-code"])
+        self.assertEqual(release_contract["selected_providers"], ["qwen-code", "claude-code", "codex-code"])
         self.assertEqual(release_contract["selected_run_indexes"], ["1"])
-        self.assertEqual(release_contract["expected_backend_runs_per_profile_sweep"], 2)
+        self.assertEqual(release_contract["expected_backend_runs_per_profile_sweep"], 3)
         self.assertTrue(
             all(
-                int(rec.get("backend", {}).get("total_runs", 0)) == 2
-                and int(rec.get("backend", {}).get("hard_pass", 0)) == 2
+                int(rec.get("backend", {}).get("total_runs", 0)) == 3
+                and int(rec.get("backend", {}).get("hard_pass", 0)) == 3
                 and rec.get("frontend", {}).get("frontend_qwen_status") == "passed"
                 and rec.get("frontend", {}).get("frontend_claude_status") == "passed"
+                and rec.get("frontend", {}).get("frontend_codex_status") == "passed"
                 and rec.get("strict_status") == "passed"
                 for rec in verdict.get("records", [])
             )
@@ -794,13 +797,13 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertEqual(verdict["verdict"], "PASS")
         release_contract = verdict["release_contract"]
         self.assertEqual(release_contract["mode"], "non-release")
-        self.assertEqual(release_contract["selected_providers"], ["qwen-code", "claude-code"])
+        self.assertEqual(release_contract["selected_providers"], ["qwen-code", "claude-code", "codex-code"])
         self.assertEqual(release_contract["selected_run_indexes"], ["1", "2"])
-        self.assertEqual(release_contract["expected_backend_runs_per_profile_sweep"], 4)
+        self.assertEqual(release_contract["expected_backend_runs_per_profile_sweep"], 6)
         self.assertTrue(
             all(
-                int(rec.get("backend", {}).get("total_runs", 0)) == 4
-                and int(rec.get("backend", {}).get("hard_pass", 0)) == 4
+                int(rec.get("backend", {}).get("total_runs", 0)) == 6
+                and int(rec.get("backend", {}).get("hard_pass", 0)) == 6
                 and rec.get("strict_status") == "passed"
                 for rec in verdict.get("records", [])
             )
@@ -833,6 +836,7 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 and int(rec.get("backend", {}).get("hard_pass", 0)) == 1
                 and rec.get("frontend", {}).get("frontend_qwen_status") == "passed"
                 and rec.get("frontend", {}).get("frontend_claude_status") == "missing"
+                and rec.get("frontend", {}).get("frontend_codex_status") == "missing"
                 and rec.get("strict_status") == "passed"
                 for rec in verdict.get("records", [])
             )
@@ -854,8 +858,9 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertEqual(verdict["verdict"], "FAIL")
         self.assertTrue(
             any(
-                any("backend_total_runs=1 (expected 2)" in reason for reason in rec.get("blocking_reasons", []))
+                any("backend_total_runs=1 (expected 3)" in reason for reason in rec.get("blocking_reasons", []))
                 or any("frontend_claude_status=missing (expected passed)" in reason for reason in rec.get("blocking_reasons", []))
+                or any("frontend_codex_status=missing (expected passed)" in reason for reason in rec.get("blocking_reasons", []))
                 for rec in verdict.get("records", [])
             )
         )
