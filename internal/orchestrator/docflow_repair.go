@@ -10,50 +10,105 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 )
 
-func (e *pipelineExecution) repairValidatorScopedArtifacts(verdict *contracts.ValidatorVerdict) error {
-	if verdict == nil || e.finalRunIndex == nil || e.citationIndex == nil {
-		return nil
+type validatorRepairStageResult struct {
+	Changed        bool
+	ResolvedIssues int
+}
+
+func (e *pipelineExecution) applyValidatorRepairStage(stepID string, domainID string, taskID string, verdict *contracts.ValidatorVerdict) (validatorRepairStageResult, error) {
+	result, err := e.repairValidatorScopedArtifacts(verdict)
+	if err != nil {
+		e.logError(stepID, domainID, "validator repair stage failed", map[string]any{
+			"task_id": taskID,
+			"error":   strings.TrimSpace(err.Error()),
+		})
+		return validatorRepairStageResult{}, err
 	}
-	changed := repairDuplicateClaimIDsInCitationIndex(e.finalRunIndex, e.citationIndex)
+	if !result.Changed {
+		e.logInfo(stepID, domainID, "validator repair stage skipped", map[string]any{
+			"task_id": taskID,
+		})
+		return result, nil
+	}
+	e.logInfo(stepID, domainID, "validator repair stage applied", map[string]any{
+		"task_id":         taskID,
+		"resolved_issues": result.ResolvedIssues,
+	})
+	return result, nil
+}
+
+func (e *pipelineExecution) repairValidatorScopedArtifacts(verdict *contracts.ValidatorVerdict) (validatorRepairStageResult, error) {
+	if verdict == nil || e.finalRunIndex == nil || e.citationIndex == nil {
+		return validatorRepairStageResult{}, nil
+	}
+	citationCandidate, err := cloneCitationIndex(*e.citationIndex)
+	if err != nil {
+		return validatorRepairStageResult{}, fmt.Errorf("clone citation index for repair: %w", err)
+	}
+	changed := repairDuplicateClaimIDsInCitationIndex(e.finalRunIndex, &citationCandidate)
 	if !changed {
-		return nil
+		return validatorRepairStageResult{}, nil
 	}
 
-	citationRaw, err := json.MarshalIndent(e.citationIndex, "", "  ")
+	verdictCandidate, err := cloneValidatorVerdict(*verdict)
 	if err != nil {
-		return fmt.Errorf("marshal repaired citation index: %w", err)
+		return validatorRepairStageResult{}, fmt.Errorf("clone validator verdict for repair: %w", err)
+	}
+
+	citationRaw, err := json.MarshalIndent(&citationCandidate, "", "  ")
+	if err != nil {
+		return validatorRepairStageResult{}, fmt.Errorf("marshal repaired citation index: %w", err)
 	}
 	citationRaw = append(citationRaw, '\n')
 	repairedCitationIndex, err := contracts.ParseCitationIndex(citationRaw)
 	if err != nil {
-		return fmt.Errorf("parse repaired citation index: %w", err)
+		return validatorRepairStageResult{}, fmt.Errorf("parse repaired citation index: %w", err)
 	}
 	if err := e.workspace.WriteFile(runtimeCitationIndexPath(e.runID), citationRaw); err != nil {
-		return fmt.Errorf("write repaired citation index: %w", err)
+		return validatorRepairStageResult{}, fmt.Errorf("write repaired citation index: %w", err)
 	}
-	e.citationIndex = &repairedCitationIndex
 
-	remainingIssues, resolvedCount := filterResolvedValidatorIssues(verdict.Issues)
-	verdict.Issues = remainingIssues
+	remainingIssues, resolvedCount := filterResolvedValidatorIssues(verdictCandidate.Issues)
+	verdictCandidate.Issues = remainingIssues
 	if resolvedCount > 0 && len(remainingIssues) == 0 && strings.EqualFold(strings.TrimSpace(verdict.Verdict), "FAIL") {
-		verdict.Verdict = "PASS"
+		verdictCandidate.Verdict = "PASS"
 	}
-	verdict.FixedPaths = appendUniqueValidatorPaths(verdict.FixedPaths, runtimeCitationIndexPath(e.runID))
-	verdict.Summary = appendValidatorRepairNote(verdict.Summary, "deterministically repaired duplicate claim_ids in citation-index.json")
-	verdictRaw, err := json.MarshalIndent(verdict, "", "  ")
+	verdictCandidate.FixedPaths = appendUniqueValidatorPaths(verdictCandidate.FixedPaths, runtimeCitationIndexPath(e.runID))
+	verdictCandidate.Summary = appendValidatorRepairNote(verdictCandidate.Summary, "deterministically repaired duplicate claim_ids in citation-index.json")
+	verdictRaw, err := json.MarshalIndent(&verdictCandidate, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal repaired validator verdict: %w", err)
+		return validatorRepairStageResult{}, fmt.Errorf("marshal repaired validator verdict: %w", err)
 	}
 	verdictRaw = append(verdictRaw, '\n')
 	repairedVerdict, err := contracts.ParseValidatorVerdict(verdictRaw)
 	if err != nil {
-		return fmt.Errorf("parse repaired validator verdict: %w", err)
+		return validatorRepairStageResult{}, fmt.Errorf("parse repaired validator verdict: %w", err)
 	}
 	if err := e.workspace.WriteFile(runtimeValidatorVerdictPath(e.runID), verdictRaw); err != nil {
-		return fmt.Errorf("write repaired validator verdict: %w", err)
+		return validatorRepairStageResult{}, fmt.Errorf("write repaired validator verdict: %w", err)
 	}
+	e.citationIndex = &repairedCitationIndex
 	*verdict = repairedVerdict
-	return nil
+	return validatorRepairStageResult{
+		Changed:        true,
+		ResolvedIssues: resolvedCount,
+	}, nil
+}
+
+func cloneCitationIndex(index contracts.CitationIndex) (contracts.CitationIndex, error) {
+	raw, err := json.Marshal(index)
+	if err != nil {
+		return contracts.CitationIndex{}, err
+	}
+	return contracts.ParseCitationIndex(raw)
+}
+
+func cloneValidatorVerdict(verdict contracts.ValidatorVerdict) (contracts.ValidatorVerdict, error) {
+	raw, err := json.Marshal(verdict)
+	if err != nil {
+		return contracts.ValidatorVerdict{}, err
+	}
+	return contracts.ParseValidatorVerdict(raw)
 }
 
 func repairDuplicateClaimIDsInCitationIndex(finalRunIndex *contracts.FinalRunIndex, citationIndex *contracts.CitationIndex) bool {

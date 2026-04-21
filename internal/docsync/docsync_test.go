@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -213,6 +214,47 @@ func TestGeneratedArtifactsPolicyIsDocumented(t *testing.T) {
 	assertContains(t, fixtures, "human-readable deterministic export")
 }
 
+func TestActiveSurfacesRejectLegacyArtifactOnlyMarkers(t *testing.T) {
+	t.Parallel()
+
+	legacyMarkers := []string{
+		joinLegacyMarker("Task", "Result"),
+		"schemas/" + "taskresult" + ".schema.json",
+		"change" + "set",
+		"add" + "_doc_" + "artifact",
+		"upsert" + "_entity",
+		"upsert" + "_edge",
+		"add" + "_finding",
+	}
+	allowPrefixes := []string{
+		"docs/archive/",
+		"fixtures/legacy-rejection/",
+		"internal/runtime/testdata/legacy-rejection/",
+		"internal/api/ui_dist/",
+	}
+	roots := []string{
+		"README.md",
+		"docs",
+		"cmd",
+		"internal",
+		"ui/src",
+		"scripts",
+	}
+
+	for _, rel := range collectRepoTextFiles(t, roots, allowPrefixes) {
+		rel := rel
+		t.Run(rel, func(t *testing.T) {
+			t.Parallel()
+			content := readDoc(t, rel)
+			for _, marker := range legacyMarkers {
+				if strings.Contains(content, marker) {
+					t.Fatalf("expected active surface %s to avoid legacy marker %q", rel, marker)
+				}
+			}
+		})
+	}
+}
+
 func TestMultiRepoE2EDocsAreConsistent(t *testing.T) {
 	t.Parallel()
 
@@ -294,4 +336,77 @@ func repoRoot(t *testing.T) string {
 		t.Fatalf("runtime.Caller failed")
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+}
+
+func collectRepoTextFiles(t *testing.T, roots []string, allowPrefixes []string) []string {
+	t.Helper()
+
+	repo := repoRoot(t)
+	files := []string{}
+	seen := map[string]struct{}{}
+
+	addFile := func(rel string) {
+		rel = filepath.ToSlash(strings.TrimSpace(rel))
+		if rel == "" {
+			return
+		}
+		if strings.Contains(rel, "/__pycache__/") || strings.HasSuffix(rel, ".pyc") {
+			return
+		}
+		for _, prefix := range allowPrefixes {
+			if strings.HasPrefix(rel, prefix) {
+				return
+			}
+		}
+		if _, exists := seen[rel]; exists {
+			return
+		}
+		seen[rel] = struct{}{}
+		files = append(files, rel)
+	}
+
+	for _, rel := range roots {
+		full := filepath.Join(repo, filepath.FromSlash(rel))
+		info, err := os.Stat(full)
+		if err != nil {
+			t.Fatalf("stat %s: %v", rel, err)
+		}
+		if !info.IsDir() {
+			addFile(rel)
+			continue
+		}
+		if err := filepath.Walk(full, func(path string, info os.FileInfo, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if info.IsDir() {
+				relPath, err := filepath.Rel(repo, path)
+				if err != nil {
+					return err
+				}
+				relPath = filepath.ToSlash(relPath)
+				for _, prefix := range allowPrefixes {
+					if strings.HasPrefix(relPath+"/", prefix) {
+						return filepath.SkipDir
+					}
+				}
+				return nil
+			}
+			relPath, err := filepath.Rel(repo, path)
+			if err != nil {
+				return err
+			}
+			addFile(relPath)
+			return nil
+		}); err != nil {
+			t.Fatalf("walk %s: %v", rel, err)
+		}
+	}
+
+	sort.Strings(files)
+	return files
+}
+
+func joinLegacyMarker(parts ...string) string {
+	return strings.Join(parts, "")
 }
