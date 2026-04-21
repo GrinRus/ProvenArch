@@ -673,12 +673,12 @@ class MatrixReleaseContractTest(unittest.TestCase):
             stdout, stderr = proc.communicate(timeout=15)
         self.assertEqual(0, proc.returncode, msg=stderr or stdout)
 
-    def test_non_release_wave1_regression_matrix_allows_two_profiles(self) -> None:
+    def test_non_release_regres_matrix_allows_two_profiles(self) -> None:
         matrix_file = self._write_matrix_file(
             None,
             include_profiles=["single-path", "multi-git_url"],
         )
-        matrix_id = "matrix-test-wave1-regression"
+        matrix_id = "matrix-test-regres-non-release"
         result = self._run_matrix(matrix_file, matrix_id, release_mode="0")
         self.assertEqual(result.returncode, 0, msg=result.stderr)
 

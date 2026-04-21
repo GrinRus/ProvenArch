@@ -223,99 +223,34 @@ Implemented additional jobs:
   - save/reset `Runtime Execution`
 - UI quick actions:
   - `Open runtime execution artifact` открывает persisted taskrun artifact без live e2e-only допущений
-- локальный full-run regression сценарий на реальном репозитории:
-  - `scripts/full-run-ai-advent.sh`
-  - bootstrap в `tmp`, API simulation, runtime циклы `fake + headless`
-  - strict quality checks: anti-mock + anti-zero-signal + no last-run degradation
-  - completion invariants: expected/completed runtime counts, per-iteration headless `init+refresh`, отсутствие `running` в run-history
-  - signal handling: `TERM/INT/HUP/PIPE` => `infra_signal_terminated`, `result=passed` запрещён при неполном цикле
-  - full-run semantic checks ограничены локальным скриптом (owner-gap/findings, coverage/questions dedupe, critical off-topic markers) и не включают batch-only `analysis:evidence-scope`/`analysis:cross-doc`
-  - summary/log/snapshots: `TMP_ROOT/session-summary.md`, `TMP_ROOT/full-run.log`, `TMP_ROOT/snapshots/*`
-  - при runtime failure raw-output diagnostics сохраняются в `reports/taskruns/raw/*` (stdout/stderr/meta with checksum)
-- batch regression `5x2` + frontend live e2e:
-  - `scripts/full-run-batch-5x2.sh`
-  - canonical input: `TARGET_REPOS_FILE` (`repos[]` format)
-  - legacy single-repo inputs запрещены (fail-fast c migration hint)
-  - direct-only runtime commands (`claude`, `qwen`)
-  - frontend live e2e работает на отдельной `frontend-workspace` копии run snapshot, не мутируя backend baseline
-  - backend quality source-of-truth: только snapshot reports (`snapshots/<run_id>/reports/*`), при отсутствии snapshot фиксируется `reliability:snapshot-missing` (без workspace fallback)
-  - semantic hard-fail checks в batch evaluator: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`
-  - multi-profile hard-fail: `analysis:cross-repo-missing` при `expected_repo_count >= 2` и отсутствии cross-repo сигнала
-  - runtime-flow hard-fail checks: `runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:execution-semantics`, `runtime_flow_failed`
-  - hard-pass учитывает semantic hard-fail и snapshot source validity
-  - run artifacts default: `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/*`
-  - reports: `run_matrix_<batch-id>.md/.tsv`, `frontend_e2e_matrix_<batch-id>.md`, `frontend_cancel_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md` (+ fields `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, runtime-flow checks, failure classes `runtime_contract_failed/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing/precheck_failed`)
-- profile matrix regression (local official runbook, non-required CI):
-  - `scripts/full-run-batch-matrix.sh`
-  - `E2E_MATRIX_FILE` обязателен (`profiles[]`: `id`, `repos_file`, `expected_repo_count`, `source_kind`)
-  - optional root `timeout_profile`: `short-window|medium-window|extended-window`; canonical checked-in slices используют только эти native presets
-  - `sweeps[]` optional (если отсутствует -> implicit `baseline` только для non-release/diagnostic)
-  - canonical acceptance запускать из clean committed tree или отдельного clean worktree без unrelated локальных правок
-  - canonical high-level profile catalog: `examples/e2e-profile-catalog.yaml`
-  - canonical non-release slices: `examples/e2e-matrix.regres-fast.bank-openedx.yaml`, `examples/e2e-matrix.regres-fast.openstack.yaml`, `examples/e2e-matrix.regres-long.yaml`
-  - canonical release slices: `examples/e2e-matrix.release-fast.yaml`, `examples/e2e-matrix.release-long.yaml`, `examples/e2e-matrix.release-full.ftgo-sentry.yaml`
-  - expected backend totals from catalog: `regres fast=3`, `regres long=2`, `release fast=8`, `release long=8`, `release full=24`
-  - release-ready sweep set: `baseline` + `parallel-default`
-  - matrix invariant: для одного `profile_id` shard-plan должен совпадать между `baseline` и `parallel-default`
+- Подробный command cookbook по live/full-run intentionally вынесен в runbook'и:
+  - `docs/LOCAL_FULL_RUN_AI_ADVENT.md`
+  - `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+
+### Optional live-runner smoke
+- `scripts/full-run-ai-advent.sh` — canonical local scenario/full-run loop:
+  - canonical input: `TARGET_REPOS_FILE`
+  - bootstrap в `tmp`, runtime циклы `fake + headless`, strict anti-mock/anti-zero-signal guardrails
+  - completion invariants: expected/completed runtime counts, per-iteration headless `init+refresh`, отсутствие `running` в `run-history`
+  - signal handling: `TERM/INT/HUP/PIPE` => `infra_signal_terminated`
+  - debug artifacts и raw diagnostics: `TMP_ROOT/session-summary.md`, `TMP_ROOT/full-run.log`, `TMP_ROOT/snapshots/*`, `reports/taskruns/raw/*`
+- `scripts/full-run-batch-5x2.sh` — canonical batch `5x2` + frontend live e2e:
+  - canonical input: `TARGET_REPOS_FILE`
+  - backend quality source-of-truth: только `snapshots/<run_id>/reports/*`
+  - hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`, `analysis:cross-repo-missing`
+  - frontend smoke работает на отдельной `frontend-workspace` копии run snapshot и не мутирует backend baseline
+- `scripts/full-run-batch-matrix.sh` — официальный local trusted-machine harness:
+  - canonical input: `E2E_MATRIX_FILE`
   - approved profile ids: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
-  - release-mode (`MATRIX_ID=release-*` или `E2E_MATRIX_RELEASE_MODE=1`) фиксирует `RUN_COUNT=1` и требует explicit `sweeps[]` с ровно `baseline` + `parallel-default`, плюс ровно один `single-*` и один `multi-*` профиль; любое отклонение блокирует matrix до batch stage
-  - `scripts/tests/matrix_release_contract_test.py` обязан запускать matrix driver в hermetic subprocess env; ambient `ACP_*`, `BATCH_*`, `E2E_*`, `MATRIX_*`, `UI_E2E_*`, `RUN_COUNT`, `PROFILE_*`, `SWEEP_*` leakage не должен менять contract assertions
-  - captured live qwen stdout fixture защищает retry/prompt discipline от event-stream chatter и неполного artifact-only recovery
-  - captured live bank extras fixture защищает collect-repair normalization от manifest-only drift при explicit repair
-  - collect runtime делает максимум одну post-success artifact-repair попытку для skeletal/generic-only `shard-pack-manifest.json`; если repair не улучшил fidelity, исходный `write_root` восстанавливается
-  - invalid manifest после первого provider execution идёт в отдельный artifact-repair path без semantic stdout fallback
-  - `qwen-code` collect steps имеют internal stall watchdog в двух фазах:
-    - `pre_artifact`: child process без stdout/stderr и без `write_root` mutations должен детектиться до общего timeout и переходить в forced fresh retry без долгого ожидания EOF, даже если дочерний stdout pipe удерживается незавершённым subprocess-ом
-    - `post_artifact`: после появления manifest+authored docs отсутствие pipe activity и write-root mutations в течение внутреннего stall window должно завершать provider process с forced recovery retry до общего step timeout
-  - provider-agnostic draft-step gate: `step0/2/4` принимаются только при валидном runtime draft manifest и наличии всех referenced draft files под `draft_final_root`
-  - safe repair normalization для `step2/4` допускает только explicit draft-root reconcile уже существующих canonical draft files
-  - collect runtime не принимает nominal success после failed artifact-repair: missing/invalid/skeletal manifest после единственной repair попытки поднимается как `runtime_contract_failed`
-  - global uniqueness для `citation-index.claim_ids` проверяется как validator contract; duplicate claim ids либо repair-ятся на index/reference уровне детерминированным shard suffix, либо остаются blocking defect
-  - refresh artifact-quality guard: `artifact_quality:*` в `reports/taskruns/<run_id>-quality.json.run_warnings` считается canonical live gate blocker; bank-like collapse к одному `cite.runtime-summary` должен ловиться, openstack-like reuse с хотя бы одним rich shard остаётся допустимым
-  - `profile_matrix_<matrix-id>` и `quality_report_<batch-id>` обязаны агрегировать только реально выбранные `selected_providers`/`selected_run_indexes`; qwen-only non-release run не должен порождать synthetic `backend_total_runs=10` и `summary_missing=9`
-  - `full-run-ai-advent.sh` обязан обновлять running-heartbeat в `run-status.env` (`updated_at`, `last_pipeline_stage`, `last_runtime_provider`, `last_progress_at`) и сам писать terminal sentinel при completed/process_failed/signal_terminated
-  - `full-run-batch-5x2.sh` обязан писать per-run status sentinel, иметь `EXIT` trap и materialize-ить `infra_incomplete_cycle` / `infra_signal_terminated` даже если provider child завершился раньше `session-summary.md`
-  - `full-run-batch-matrix.sh` обязан append-ить `profile-runs.jsonl`, вести durable `profile-status/*.json`, переводить lingering `running` в terminal `failed` на `EXIT` и строить release verdict даже на partially completed batch roots; missing downstream report files не должны ронять matrix generator
-  - `e2e_batch_report.py` обязан реконструировать partial matrix roots из `run-status.env`, `profile-status/*.json` и `run-history.json`; terminal `process_failed + summary_written=yes` не должен классифицироваться как `infra_incomplete_cycle`
-  - internal shard-plan/shard-summary JSON обязаны иметь non-empty `meta.runtime.name`; false `contract:runtime-name` на internal artifacts считается regression
-  - относительные `repos_file` пути резолвятся от директории `E2E_MATRIX_FILE`
+  - non-release slices: `examples/e2e-matrix.regres-*.yaml`
+  - release-specific slices, `baseline` + `parallel-default`, strict blockers и release verdict policy живут только в `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+  - matrix invariant: для одного `profile_id` shard-plan должен совпадать между `baseline` и `parallel-default`
   - для `source_kind=git_url` refs должны быть pinned
-  - агрегированные отчёты: `profile_matrix_<matrix-id>.md/.tsv`, `release_verdict_<matrix-id>.md/.json`
-- release live harness (manual pre-release gate, no wrapper):
-  - source-of-truth runbook: `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
-  - использует текущий matrix контур (`full-run-batch-matrix.sh` + `full-run-batch-5x2.sh` + `e2e_batch_report.py`)
-  - `regres*` профили не дают release verdict; это отдельный qwen-first smoke/debug surface
-  - canonical release/regression acceptance не использует `BATCH_SKIP_PRECHECK=1`; этот флаг остаётся diagnostic-only bypass
-  - release-mode guard (auto при `MATRIX_ID=release-*`) блокирует diagnostic timeout overrides; debug bypass только через `E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES=1`
-  - matrix-native `timeout_profile` не считается diagnostic override и применяется как committed part of canonical slice contract
-  - canonical release taxonomy: `release fast`, `release long`, `release full`
-  - `release full` = composite из `release fast` + `release long` + `ftgo+sentry` slice; readiness требует `PASS` во всех constituent `release_verdict_<matrix-id>.json`
-  - обязательны оба провайдера (`qwen-code`, `claude-code`) и оба frontend сценария (`init-inspect-service-first`, `cancel-refresh`)
-  - для release-mode matrix используется `BATCH_FRONTEND_MODE=per_run`, `BATCH_FRONTEND_CANCEL_MODE=once_per_provider`, `UI_E2E_HEADED=1`
-  - strict blockers включают любой non-passed summary/run-level status в `frontend_e2e_matrix` и `frontend_cancel_e2e_matrix`
-  - strict acceptance: только `PASS`, любое нарушение quality/failure-class критериев = `RELEASE BLOCKED`
-- optional frontend live smoke:
-  - `scripts/frontend-live-e2e.sh` (local)
-  - direct `npm run e2e:live --prefix ui`: Playwright output default `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
-  - `scripts/frontend-live-e2e.sh`: Playwright output в `$OUTPUT_DIR/playwright-results`
-  - `scripts/frontend-live-e2e.sh` читает effective UI poll timeouts из `GET /api/runtime/timeouts` (если env override не задан)
-  - `UI_E2E_EXPECTED_REPO_COUNT` задаёт ожидаемое количество resolved repos (default `1`)
-  - `UI_E2E_SCENARIO=init-inspect|cancel-refresh` переключает live flow:
-    - `init-inspect`: validate -> run init -> inspect artifacts
-    - `cancel-refresh`: validate -> run refresh -> cancel selected run -> expect `failed + run_canceled`
-  - `UI_E2E_CANCEL_STUB_SLEEP_SEC` задаёт длительность controlled slow stub runner для `cancel-refresh`
-  - cancel preflight guard: `ACP_UI_CANCEL_POLL_TIMEOUT_SEC >= UI_E2E_CANCEL_STUB_SLEEP_SEC + UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC`; при нарушении сценарий fail-fast до Playwright
-  - batch cancel smoke использует свежую копию backend `arch-workspace` для каждого provider/run и не переиспользует already-mutated init frontend workspace
-  - если cancel request выигрывает гонку у validation/layout failure, terminal API/RunInfo surface всё равно обязана показывать `error_code=run_canceled`
-  - `ui/e2e/live-flow.spec.ts` + `npm run e2e:live --prefix ui`
-  - batch shard controls (`scripts/full-run-batch-5x2.sh`):
-    - `BATCH_PROVIDER_FILTER` (`all` или CSV `qwen-code,claude-code`)
-    - `BATCH_RUN_SELECTION` (`all`, CSV `1,3,5` или диапазоны `1-3,5`)
-    - `BATCH_SKIP_PRECHECK=1` для secondary shard'ов
-    - `BATCH_FRONTEND_MODE=auto|always|never|per_run` (default `auto`; `auto` skip если `run1` не выбран, `always` использует первый выбранный backend run)
-    - `BATCH_FRONTEND_CANCEL_MODE=once_per_provider|per_run|never` (default `once_per_provider`)
-    - `UI_E2E_HEADED=0|1` (при `1` Playwright запускается с `--headed`)
-    - параллельные shard-процессы должны использовать разные `BATCH_ID`
+  - итоговый release decision брать только из `reports/release_verdict_<matrix-id>.json`
+- `scripts/frontend-live-e2e.sh` и `npm run e2e:live --prefix ui` используют Playwright:
+  - canonical toggles: `UI_E2E_EXPECTED_REPO_COUNT`, `UI_E2E_SCENARIO=init-inspect|cancel-refresh`, `UI_E2E_OUTPUT_DIR`
+  - cancel flow остаётся guarded сценарием с явным `run_canceled`
+- Этот документ фиксирует policy, invariants и required gates; пошаговые live/release cookbook команды не дублируются здесь.
 
 ## 8) Acceptance для testing strategy
 
@@ -336,7 +271,7 @@ Implemented additional jobs:
 - Public product APIs и schema contracts этим документом не меняются
 - для schema validation в CI используется Draft 2020-12 compatible validator
 - основной backend test loop предполагает `go test`
-- UI smoke предполагает React test stack; конкретный framework выбирается при реализации UI
+- UI smoke стек: `React + Vite + Vitest + Playwright`
 - Balanced timeout defaults:
   - step `1800s`, heartbeat `30s`, pipeline `2400s`, kill-grace `30s`
   - api-ready `60s`, api-init `120s`, ui-init poll `900s`, ui-cancel poll `420s`

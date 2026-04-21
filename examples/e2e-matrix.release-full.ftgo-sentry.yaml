@@ -1,5 +1,5 @@
-# Legacy compatibility slice. Keep for ad-hoc diagnostics; canonical release profiles live in
-# examples/e2e-profile-catalog.yaml and examples/e2e-matrix.release-*.yaml.
+# Canonical release addon slice (`release full`: `ftgo + sentry`).
+# Source-of-truth for usage and verdict rules: docs/RELEASE_LIVE_E2E_RUNBOOK.md.
 version: 1
 timeout_profile: extended-window
 sweeps:

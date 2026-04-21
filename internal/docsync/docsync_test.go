@@ -323,6 +323,8 @@ func TestMultiRepoE2EDocsAreConsistent(t *testing.T) {
 
 	required := map[string][]string{
 		"README.md": {
+			"docs/LOCAL_FULL_RUN_AI_ADVENT.md",
+			"docs/RELEASE_LIVE_E2E_RUNBOOK.md",
 			"TARGET_REPOS_FILE",
 			"E2E_MATRIX_FILE",
 			"single-path",
@@ -334,6 +336,7 @@ func TestMultiRepoE2EDocsAreConsistent(t *testing.T) {
 			"pinned",
 		},
 		"docs/LOCAL_FULL_RUN_AI_ADVENT.md": {
+			"docs/RELEASE_LIVE_E2E_RUNBOOK.md",
 			"TARGET_REPOS_FILE",
 			"E2E_MATRIX_FILE",
 			"single-path",
@@ -344,6 +347,8 @@ func TestMultiRepoE2EDocsAreConsistent(t *testing.T) {
 			"trusted machine",
 		},
 		"docs/TESTING_STRATEGY.md": {
+			"docs/LOCAL_FULL_RUN_AI_ADVENT.md",
+			"docs/RELEASE_LIVE_E2E_RUNBOOK.md",
 			"TARGET_REPOS_FILE",
 			"E2E_MATRIX_FILE",
 			"analysis:cross-repo-missing",
@@ -352,6 +357,20 @@ func TestMultiRepoE2EDocsAreConsistent(t *testing.T) {
 			"multi-path",
 			"multi-git_url",
 			"UI_E2E_EXPECTED_REPO_COUNT",
+		},
+	}
+	forbidden := map[string][]string{
+		"README.md": {
+			"MATRIX_ID=release-fast-",
+			"ACP_APPLY_TIMEOUTS_VIA_API=1",
+		},
+		"docs/LOCAL_FULL_RUN_AI_ADVENT.md": {
+			"MATRIX_ID=release-fast-",
+			"`release full` = `24` backend runs total",
+		},
+		"docs/TESTING_STRATEGY.md": {
+			"MATRIX_ID=release-fast-",
+			"ACP_APPLY_TIMEOUTS_VIA_API=1",
 		},
 	}
 
@@ -373,12 +392,31 @@ func TestMultiRepoE2EDocsAreConsistent(t *testing.T) {
 			}
 		})
 	}
+
+	for path, markers := range forbidden {
+		path := path
+		markers := markers
+		t.Run(path+"/forbidden", func(t *testing.T) {
+			t.Parallel()
+			content := readDoc(t, path)
+			for _, marker := range markers {
+				assertNotContains(t, content, marker)
+			}
+		})
+	}
 }
 
 func assertContains(t *testing.T, content string, needle string) {
 	t.Helper()
 	if !strings.Contains(content, needle) {
 		t.Fatalf("expected document content to include %q", needle)
+	}
+}
+
+func assertNotContains(t *testing.T, content string, needle string) {
+	t.Helper()
+	if strings.Contains(content, needle) {
+		t.Fatalf("expected document content to avoid %q", needle)
 	}
 }
 

@@ -76,8 +76,8 @@ func TestMergeQuestionsDedupesByCanonicalIDAndText(t *testing.T) {
 	}
 	incoming := []contracts.Question{
 		{ID: "q.refresh.delta.1", Text: "What changed since previous run that affects ownership or dependencies?"},
-		{ID: "q.refresh.scope.1", Text: "Are there additional services in ai-advent not yet cataloged?"},
-		{ID: "q.refresh.scope.2", Text: "Are there additional services in ai-advent not yet cataloged?"},
+		{ID: "q.refresh.scope.1", Text: "Are there additional services in the current scenario not yet cataloged?"},
+		{ID: "q.refresh.scope.2", Text: "Are there additional services in the current scenario not yet cataloged?"},
 	}
 
 	merged := mergeQuestions(existing, incoming)
