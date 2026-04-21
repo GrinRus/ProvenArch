@@ -222,6 +222,14 @@ func (r Root) ensureBaselineBundle(includeSubagents bool) error {
 		}
 	}
 
+	manifestContent, err := renderBaselineBundleManifest()
+	if err != nil {
+		return err
+	}
+	if err := r.writeFileIfContentChanged(BaselineBundleManifestPath, manifestContent); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -237,6 +245,21 @@ func (r Root) writeFileIfMissing(relPath string, content []byte) error {
 		return nil
 	} else if !os.IsNotExist(statErr) {
 		return fmt.Errorf("stat baseline seed target %q: %w", relPath, statErr)
+	}
+	return r.WriteFile(relPath, content)
+}
+
+func (r Root) writeFileIfContentChanged(relPath string, content []byte) error {
+	abs, err := r.Resolve(relPath)
+	if err != nil {
+		return err
+	}
+	if existing, readErr := os.ReadFile(abs); readErr == nil {
+		if bytes.Equal(existing, content) {
+			return nil
+		}
+	} else if !os.IsNotExist(readErr) {
+		return fmt.Errorf("read managed baseline target %q: %w", relPath, readErr)
 	}
 	return r.WriteFile(relPath, content)
 }

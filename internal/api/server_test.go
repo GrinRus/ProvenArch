@@ -101,6 +101,60 @@ func TestWorkspaceValidateEndpoint(t *testing.T) {
 	}
 }
 
+func TestWorkspaceBundleEndpointReturnsEffectiveManifestAndWarnings(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Get(httpServer.URL + "/api/workspace/bundle")
+	if err != nil {
+		t.Fatalf("GET /api/workspace/bundle: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", response.StatusCode)
+	}
+	var payload struct {
+		OK       bool `json:"ok"`
+		Manifest struct {
+			SchemaVersion     int `json:"schema_version"`
+			BundleVersion     int `json:"bundle_version"`
+			EditableArtifacts []struct {
+				Path  string `json:"path"`
+				Label string `json:"label"`
+			} `json:"editable_artifacts"`
+		} `json:"manifest"`
+		Warnings []struct {
+			Code string `json:"code"`
+		} `json:"warnings"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode bundle payload: %v", err)
+	}
+	if !payload.OK {
+		t.Fatalf("expected ok=true")
+	}
+	if payload.Manifest.SchemaVersion == 0 || payload.Manifest.BundleVersion == 0 {
+		t.Fatalf("expected non-zero manifest versions, got %+v", payload.Manifest)
+	}
+	if len(payload.Manifest.EditableArtifacts) == 0 {
+		t.Fatalf("expected editable artifacts in bundle manifest")
+	}
+	foundMissingWarning := false
+	for _, warning := range payload.Warnings {
+		if warning.Code == "workspace.skills.bundle_manifest.missing" {
+			foundMissingWarning = true
+			break
+		}
+	}
+	if !foundMissingWarning {
+		t.Fatalf("expected missing bundle manifest warning, got %+v", payload.Warnings)
+	}
+}
+
 func TestWorkspaceValidateEndpointReturnsErrorEnvelopeWithDiagnostics(t *testing.T) {
 	t.Parallel()
 

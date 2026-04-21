@@ -100,6 +100,13 @@ func (r Root) Validate(ctx context.Context, options ValidateOptions) ValidationR
 			report.Warnings = append(report.Warnings, diagnostic)
 		}
 	}
+	for _, diagnostic := range r.validateBaselineBundleManifest() {
+		if diagnostic.Level == DiagnosticError {
+			report.Errors = append(report.Errors, diagnostic)
+		} else {
+			report.Warnings = append(report.Warnings, diagnostic)
+		}
+	}
 	for _, diagnostic := range r.validateLayoutReadiness() {
 		if diagnostic.Level == DiagnosticError {
 			report.Errors = append(report.Errors, diagnostic)

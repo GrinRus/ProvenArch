@@ -12,6 +12,7 @@ type FetchMockState = {
   runStatus?: Record<string, MockJSON>;
   runArtifacts?: Record<string, MockJSON>;
   artifactText?: Record<string, string>;
+  baselineBundleWarnings?: MockJSON[];
 };
 
 function jsonResponse(body: MockJSON, status = 200): Response {
@@ -63,6 +64,35 @@ function createFetchMock(state: FetchMockState = {}) {
     "reports/coverage/open-questions.md": "- Clarify owners\n",
     ...(state.artifactText ?? {}),
   };
+  const baselineBundleManifest = {
+    schema_version: 1,
+    bundle_version: 1,
+    prompt_surface_policy: {
+      live_headless_source: "skills/prompt-packs/*.md",
+      reference_only_pattern: "skills/*/prompts/*.md",
+    },
+    editable_artifacts: [
+      { path: "charter/overview.md", label: "charter/overview.md", category: "charter" },
+      {
+        path: "skills/prompt-packs/findings.md",
+        label: "skills/prompt-packs/findings.md",
+        category: "prompt-pack",
+        prompt_usage: "live-consumed",
+      },
+      {
+        path: "skills/prompt-packs/qa.md",
+        label: "skills/prompt-packs/qa.md",
+        category: "prompt-pack",
+        prompt_usage: "live-consumed",
+      },
+      {
+        path: "skills/findings/prompts/system.md",
+        label: "skills/findings/prompts/system.md (reference-only)",
+        category: "skill-prompt",
+        prompt_usage: "reference-only",
+      },
+    ],
+  };
 
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
@@ -91,6 +121,15 @@ function createFetchMock(state: FetchMockState = {}) {
     if (method === "GET" && url === "/api/workspace/manifest") {
       return jsonResponse({
         content: "version: 1\nrepos:\n  - name: payments-service\n    path: /tmp/payments-service\n",
+      });
+    }
+
+    if (method === "GET" && url === "/api/workspace/bundle") {
+      return jsonResponse({
+        ok: true,
+        workspace: "/tmp/workspace",
+        manifest: baselineBundleManifest,
+        warnings: state.baselineBundleWarnings ?? [],
       });
     }
 

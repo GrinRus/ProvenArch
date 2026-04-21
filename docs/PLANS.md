@@ -944,6 +944,82 @@ EP-20260421-flow-audit-followups
 
 ---
 
+## ExecPlan
+
+### Plan ID
+EP-20260421-cleanup-plan-audit-closeout
+
+### Context
+Финальная сверка ветки `codex/step-scoped-agent-pipeline` против cleanup-плана после вливания `codex/e2e-profile-taxonomy` в `main` показала, что на этой ветке остался незакрытый backport: baseline editor inventory в UI всё ещё хардкодился в `ui/src/App.tsx`, а manifest-based inventory (`skills/bundle-manifest.json` + `/api/workspace/bundle`) из `main` отсутствовал. Это нарушало требование cleanup slice про один editable baseline inventory source-of-truth.
+
+### Goals (must have)
+- [x] Вернуть manifest-based baseline inventory infrastructure (`skills/bundle-manifest.json`)
+- [x] Подключить bundle manifest в workspace validation и API без изменения текущих user-facing contracts beyond already-landed `main`
+- [x] Перевести UI baseline editor selector с hardcoded artifact list на `/api/workspace/bundle`
+- [x] Добавить/обновить backend/UI tests на effective bundle manifest path
+- [x] Повторно пройти DoD после cleanup backport
+
+### Non-goals
+- [ ] Не делать новый merge/rebase на `main`
+- [ ] Не менять pipeline contracts, runtime profile shape или release verdict schema
+- [ ] Не расширять live harness semantics beyond already landed behavior
+
+### Acceptance criteria
+- [x] В коде больше нет hardcoded baseline editor inventory как source-of-truth
+- [x] `skills/bundle-manifest.json` seed-ится baseline bundle logic и валидируется как часть workspace checks
+- [x] `/api/workspace/bundle` возвращает effective manifest + warnings
+- [x] UI baseline editor использует server-provided editable artifacts
+- [ ] DoD: `make contracts`, `make test`, `make lint`, `make build`
+
+### Risks
+- Основной риск — потянуть в текущую ветку неподходящий кусок `main` и случайно разойтись с уже стабилизированной runtime/UI логикой. Снижение риска: backport только inventory source-of-truth slice, без механического merge.
+
+### Plan ID
+EP-20260421-taxonomy-merge-audit
+
+### Context
+Нужно сравнить текущую ветку `codex/step-scoped-agent-pipeline` с удалённой `origin/codex/e2e-profile-taxonomy`, определить реальные логические расхождения после последних коммитов в taxonomy-ветке, оценить актуальность текущей логики относительно тех изменений и отдельно оценить фактическую сложность merge текущей ветки в `codex/e2e-profile-taxonomy`.
+
+### Goals (must have)
+- [ ] Подтянуть актуальный `origin/codex/e2e-profile-taxonomy` и определить merge-base
+- [ ] Разделить уникальные изменения taxonomy-ветки и текущей ветки по runtime/orchestrator/harness/UI
+- [ ] Отдельно определить пересекающиеся hot spots и фактические merge-conflict файлы
+- [ ] Сформировать вывод, какие части логики текущей ветки остаются актуальными, а какие уже расходятся с taxonomy-веткой
+- [ ] Дать практическую оценку сложности merge и рекомендованную стратегию интеграции
+
+### Non-goals
+- [ ] Не менять код или поведение веток в рамках этого аудита
+- [ ] Не выполнять реальный merge или rebasing
+- [ ] Не менять public contracts
+
+### Approach
+1) Fetch удалённой taxonomy-ветки и фиксация merge-base.
+2) Сравнение уникальных commit-цепочек и map changed files по обе стороны.
+3) Выделение representative diff-зон: runtime prompt/contracts, draft/collect artifact policy, batch/matrix harness, UI/runtime profile.
+4) Dry-run merge в отдельном временном worktree для оценки реального conflict surface.
+5) Подготовка итогового анализа: что изменилось, насколько текущая ветка остаётся актуальной и как сложно будет смержить её в taxonomy-ветку.
+
+### Files expected to inspect
+- `internal/runtime/*`
+- `internal/orchestrator/*`
+- `internal/artifactquality/*`
+- `internal/reports/*`
+- `scripts/*`
+- `scripts/tests/*`
+- `ui/src/*`
+- `docs/*`
+
+### Acceptance criteria
+- [ ] Есть точный merge-base и список уникальных commits по обе стороны
+- [ ] Выделены реальные conflict hot spots, а не только общий diff
+- [ ] Сформулирован вывод по актуальности текущей ветки относительно taxonomy-ветки
+- [ ] Дана инженерная оценка merge complexity и recommended merge order
+
+### Risks
+- Главный риск — перепутать “оба тронули один файл” с реальным смысловым конфликтом. Снижение риска: dry-run merge в отдельном worktree и разбор representative modules вместо чисто статистического diff.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.
