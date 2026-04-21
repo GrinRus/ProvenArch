@@ -40,3 +40,5 @@ runtime:
         provider: claude-code
       step2_as_is:
         provider: qwen-code
+      step3_findings:
+        provider: codex-code

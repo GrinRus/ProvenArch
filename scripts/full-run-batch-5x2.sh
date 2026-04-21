@@ -23,6 +23,7 @@ BATCH_ID="${BATCH_ID:-batch-$(date -u +'%Y%m%dT%H%M%SZ')}"
 RUN_COUNT="${RUN_COUNT:-5}"
 ACP_CLAUDE_CMD_BIN="${ACP_CLAUDE_CMD_BIN:-claude}"
 ACP_QWEN_CMD_BIN="${ACP_QWEN_CMD_BIN:-qwen}"
+ACP_CODEX_CMD_BIN="${ACP_CODEX_CMD_BIN:-codex}"
 ACP_APPLY_TIMEOUTS_VIA_API="${ACP_APPLY_TIMEOUTS_VIA_API:-1}"
 ACP_EXECUTION_STRATEGY="${ACP_EXECUTION_STRATEGY:-}"
 ACP_MAX_PARALLEL_TASKS="${ACP_MAX_PARALLEL_TASKS:-}"
@@ -43,7 +44,9 @@ RUN_CLASSIFICATIONS_TSV=""
 declare -a STARTED_RUN_DIRS=()
 declare -a STARTED_RUN_PROVIDERS=()
 declare -a STARTED_RUN_INDEXES=()
-declare -a ALL_PROVIDERS=("qwen-code" "claude-code")
+# Legacy `5x2` name is preserved for compatibility; provider surface is selectable
+# and now includes the canonical release triplet qwen/claude/codex.
+declare -a ALL_PROVIDERS=("qwen-code" "claude-code" "codex-code")
 declare -a SELECTED_PROVIDERS=()
 declare -a SELECTED_RUN_INDEXES=()
 SELECTED_PROVIDERS_CSV=""
@@ -75,6 +78,7 @@ TIMEOUT_PRECHECK_UNSET_KEYS=(
   ACP_APPLY_TIMEOUTS_VIA_API
   ACP_CLAUDE_CMD_BIN
   ACP_QWEN_CMD_BIN
+  ACP_CODEX_CMD_BIN
   BATCH_ID
   BATCH_PROVIDER_FILTER
   BATCH_RUN_SELECTION
@@ -335,13 +339,13 @@ resolve_selected_providers() {
     for token in "${tokens[@]}"; do
       [[ -z "$token" ]] && continue
       case "$token" in
-        qwen-code|claude-code)
+        qwen-code|claude-code|codex-code)
           if ! array_contains "$token" "${SELECTED_PROVIDERS[@]-}"; then
             SELECTED_PROVIDERS+=("$token")
           fi
           ;;
         *)
-          die "BATCH_PROVIDER_FILTER contains unsupported provider '$token' (allowed: qwen-code, claude-code, all)"
+          die "BATCH_PROVIDER_FILTER contains unsupported provider '$token' (allowed: qwen-code, claude-code, codex-code, all)"
           ;;
       esac
     done
@@ -594,8 +598,11 @@ runtime_cmd_for_provider() {
     claude-code)
       printf '%s' "$ACP_CLAUDE_CMD_BIN"
       ;;
+    codex-code)
+      printf '%s' "$ACP_CODEX_CMD_BIN"
+      ;;
     *)
-      die "unsupported provider '$provider' (allowed: qwen-code, claude-code)"
+      die "unsupported provider '$provider' (allowed: qwen-code, claude-code, codex-code)"
       ;;
   esac
 }
@@ -694,6 +701,7 @@ run_frontend_live_e2e() {
       "UI_E2E_EXPECTED_REPO_COUNT=$EXPECTED_REPO_COUNT_RESOLVED" \
       "ACP_CLAUDE_CMD=$ACP_CLAUDE_CMD_BIN" \
       "ACP_QWEN_CMD=$ACP_QWEN_CMD_BIN" \
+      "ACP_CODEX_CMD=$ACP_CODEX_CMD_BIN" \
       "UI_E2E_HEADED=$UI_E2E_HEADED" \
       "FRONTEND_RESULT_FILENAME=$FRONTEND_LIVE_RESULT_FILENAME" \
       ./scripts/frontend-live-e2e.sh
@@ -1226,6 +1234,9 @@ fi
 if provider_selected "qwen-code"; then
   require_cmd "$ACP_QWEN_CMD_BIN"
 fi
+if provider_selected "codex-code"; then
+  require_cmd "$ACP_CODEX_CMD_BIN"
+fi
 
 mkdir -p "$BATCH_ROOT" "$REPORTS_ROOT"
 acp_ensure_no_legacy_env_set die
@@ -1242,8 +1253,10 @@ PROVENARCH_SHA="$(git -C "$PROVENARCH_ROOT" rev-parse HEAD)"
 PROVENARCH_BRANCH="$(git -C "$PROVENARCH_ROOT" rev-parse --abbrev-ref HEAD)"
 CLAUDE_PATH="not-selected"
 QWEN_PATH="not-selected"
+CODEX_PATH="not-selected"
 CLAUDE_VERSION="not-selected"
 QWEN_VERSION="not-selected"
+CODEX_VERSION="not-selected"
 if provider_selected "claude-code"; then
   CLAUDE_PATH="$(command -v "$ACP_CLAUDE_CMD_BIN")"
   CLAUDE_VERSION="$("$ACP_CLAUDE_CMD_BIN" --version | head -n1 | tr -d '\r')"
@@ -1251,6 +1264,10 @@ fi
 if provider_selected "qwen-code"; then
   QWEN_PATH="$(command -v "$ACP_QWEN_CMD_BIN")"
   QWEN_VERSION="$("$ACP_QWEN_CMD_BIN" --version | head -n1 | tr -d '\r')"
+fi
+if provider_selected "codex-code"; then
+  CODEX_PATH="$(command -v "$ACP_CODEX_CMD_BIN")"
+  CODEX_VERSION="$("$ACP_CODEX_CMD_BIN" --version | head -n1 | tr -d '\r')"
 fi
 GENERATED_AT_UTC="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 preflight_meta_lines="$(python3 "$PROVENARCH_ROOT/scripts/write-batch-preflight.py" \
@@ -1268,7 +1285,9 @@ preflight_meta_lines="$(python3 "$PROVENARCH_ROOT/scripts/write-batch-preflight.
   --claude-path "$CLAUDE_PATH" \
   --claude-version-line "$CLAUDE_VERSION" \
   --qwen-path "$QWEN_PATH" \
-  --qwen-version-line "$QWEN_VERSION")"
+  --qwen-version-line "$QWEN_VERSION" \
+  --codex-path "$CODEX_PATH" \
+  --codex-version-line "$CODEX_VERSION")"
 TIMEOUT_PROFILE_LINE=""
 EXECUTION_PROFILE_LINE=""
 while IFS='=' read -r key value; do
@@ -1295,7 +1314,7 @@ if [[ "$PROFILE_SOURCE_KIND_FOR_FULL_RUN" == "mixed" ]]; then
 fi
 
 log "target repos input: file=$RESOLVED_TARGET_REPOS_FILE profile_id=${PROFILE_ID:-adhoc} source_kind=$PROFILE_SOURCE_KIND_EFFECTIVE expected_repo_count=$EXPECTED_REPO_COUNT_RESOLVED"
-log "preflight versions: claude='$CLAUDE_VERSION' qwen='$QWEN_VERSION'"
+log "preflight versions: claude='$CLAUDE_VERSION' qwen='$QWEN_VERSION' codex='$CODEX_VERSION'"
 acp_log_preflight_timeout log "$ACP_APPLY_TIMEOUTS_VIA_API" "$TIMEOUT_PROFILE_LINE"
 acp_log_preflight_execution log "${SWEEP_ID:-baseline}" "$EXECUTION_PROFILE_LINE"
 log "batch shard selection: providers=$SELECTED_PROVIDERS_CSV runs=$SELECTED_RUN_INDEXES_CSV skip_precheck=$BATCH_SKIP_PRECHECK frontend_mode=$BATCH_FRONTEND_MODE frontend_cancel_mode=$BATCH_FRONTEND_CANCEL_MODE headed=$UI_E2E_HEADED"
@@ -1350,6 +1369,7 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
         "ACP_RUNTIME_PROVIDER=$provider" \
         "ACP_CLAUDE_CMD=$ACP_CLAUDE_CMD_BIN" \
         "ACP_QWEN_CMD=$ACP_QWEN_CMD_BIN" \
+        "ACP_CODEX_CMD=$ACP_CODEX_CMD_BIN" \
         "ACP_APPLY_TIMEOUTS_VIA_API=$ACP_APPLY_TIMEOUTS_VIA_API" \
         "SWEEP_ID=${SWEEP_ID:-baseline}" \
         ./scripts/full-run-ai-advent.sh

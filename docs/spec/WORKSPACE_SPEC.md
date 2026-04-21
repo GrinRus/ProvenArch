@@ -201,7 +201,7 @@ Manifest считается невалидным, если:
 - `runtime.profile.execution.strategy` не в `sequential|parallel`
 - `runtime.profile.execution.failure_policy` не в `fail_fast|best_effort`
 - `runtime.profile.execution.shard_discovery.mode` не в `heuristics|semantic`
-- `runtime.profile.steps.*.provider` не в `claude-code|qwen-code`
+- `runtime.profile.steps.*.provider` не в `claude-code|qwen-code|codex-code`
 - manifest пытается использовать legacy path `runtime.timeouts` (breaking change, intentional)
 - manifest пытается конфигурировать workspace layout beyond supported fields
 

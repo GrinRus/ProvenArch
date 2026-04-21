@@ -234,7 +234,8 @@
           "type": "string",
           "enum": [
             "claude-code",
-            "qwen-code"
+            "qwen-code",
+            "codex-code"
           ]
         }
       },

@@ -71,9 +71,9 @@ PY
 ## Canonical profile taxonomy
 - `regres fast`: qwen-only, implicit baseline, composite из `bank-of-anthos + openedx` и отдельного `openstack` slice, `3` backend runs total.
 - `regres long`: qwen-only, implicit baseline, `posthog + ftgo`, `2` backend runs total.
-- `release fast`: dual-provider, explicit `baseline + parallel-default`, `bank-of-anthos + openedx`, `8` backend runs total.
-- `release long`: dual-provider, explicit `baseline + parallel-default`, `posthog + openstack`, `8` backend runs total.
-- `release full`: composite из `release fast` + `release long` + `ftgo + sentry-ecosystem`, `24` backend runs total.
+- `release fast`: three-provider, explicit `baseline + parallel-default`, `bank-of-anthos + openedx`, `12` backend runs total.
+- `release long`: three-provider, explicit `baseline + parallel-default`, `posthog + openstack`, `12` backend runs total.
+- `release full`: composite из `release fast` + `release long` + `ftgo + sentry-ecosystem`, `36` backend runs total.
 - canonical timeout presets:
   - `short-window`: step `3600s`, pipeline `7200s`, ui-init `1200s`
   - `medium-window`: step `5400s`, pipeline `14400s`, ui-init `1500s`
@@ -89,9 +89,9 @@ PY
    - `release fast`
    - `release long`
    - или весь `release full` как три последовательных matrix invocation
-4) При дополнительной отладке повторить нужный regression/release slice с `BATCH_PROVIDER_FILTER=claude-code`.
+4) При дополнительной отладке повторить нужный regression/release slice с `BATCH_PROVIDER_FILTER=claude-code` или `BATCH_PROVIDER_FILTER=codex-code`, если нужен isolated provider diagnostic вне canonical regression totals.
 5) Выполнить additional non-release checks:
-   - parallel smoke: два параллельных `full-run-batch-5x2.sh` с разными `BATCH_ID` и `BATCH_PROVIDER_FILTER=qwen-code|claude-code`
+   - parallel smoke: два параллельных `full-run-batch-5x2.sh` с разными `BATCH_ID` и разными single-provider `BATCH_PROVIDER_FILTER` (например, `qwen-code` и `claude-code`; при необходимости заменить один из них на `codex-code`)
    - forced-incomplete diagnostic run с `ACP_EXECUTION_STRATEGY=parallel`, `ACP_MAX_PARALLEL_TASKS=4`, `ACP_FAILURE_POLICY=best_effort`, `ACP_SHARD_DISCOVERY_MODE=heuristics`
 6) Проверить matrix invariant: для одного `profile_id` sweeps `baseline` и `parallel-default` дают одинаковый shard-plan.
 
@@ -99,7 +99,7 @@ PY
 - Во всех release slice verdicts: `strict_status=passed`
 - `artifact_source` только `snapshot`
 - Нет `analysis:evidence-scope`, `analysis:cross-repo-missing`, `runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_*`, `summary_missing`, `precheck_failed`
-- Frontend init/cancel passed для обоих провайдеров
+- Frontend init/cancel passed для всех трёх release providers (`qwen`, `claude`, `codex`)
 - Нет `artifact_quality:*`; bank-like collapse к одному `cite.runtime-summary` должен либо починиться provider-side repair, либо остаться явным blocker
 - Для одного `profile_id` shard-plan invariant между `baseline` и `parallel-default` = `passed`
 - Для `release full` все constituent `release_verdict_<matrix-id>.json` должны иметь `PASS`

@@ -1119,12 +1119,16 @@ case "$HEADLESS_PROVIDER" in
     HEADLESS_CMD="${ACP_QWEN_CMD:-qwen}"
     export ACP_QWEN_CMD="$HEADLESS_CMD"
     ;;
+  codex-code)
+    HEADLESS_CMD="${ACP_CODEX_CMD:-codex}"
+    export ACP_CODEX_CMD="$HEADLESS_CMD"
+    ;;
   *)
-    die "unsupported ACP_RUNTIME_PROVIDER '$HEADLESS_PROVIDER' (allowed: claude-code, qwen-code)"
+    die "unsupported ACP_RUNTIME_PROVIDER '$HEADLESS_PROVIDER' (allowed: claude-code, qwen-code, codex-code)"
     ;;
 esac
 if ! command -v "$HEADLESS_CMD" >/dev/null 2>&1; then
-  die "headless runtime command '$HEADLESS_CMD' is unavailable for provider '$HEADLESS_PROVIDER'. Install command or set ACP_CLAUDE_CMD/ACP_QWEN_CMD"
+  die "headless runtime command '$HEADLESS_CMD' is unavailable for provider '$HEADLESS_PROVIDER'. Install command or set ACP_CLAUDE_CMD/ACP_QWEN_CMD/ACP_CODEX_CMD"
 fi
 export ACP_RUNTIME_PROVIDER="$HEADLESS_PROVIDER"
 
@@ -1357,7 +1361,7 @@ if [[ "$RUN_QUALITY_GATES" == "1" ]]; then
   if ! (
     cd "$PROVENARCH_ROOT"
     # Run project gates with neutral runtime env so defaults in tests are stable.
-    quality_env_cmd=("env" "-u" "ACP_RUNTIME_PROVIDER" "-u" "ACP_QWEN_CMD" "-u" "ACP_CLAUDE_CMD" "-u" "ACP_APPLY_TIMEOUTS_VIA_API")
+    quality_env_cmd=("env" "-u" "ACP_RUNTIME_PROVIDER" "-u" "ACP_QWEN_CMD" "-u" "ACP_CLAUDE_CMD" "-u" "ACP_CODEX_CMD" "-u" "ACP_APPLY_TIMEOUTS_VIA_API")
     for key in "${ACP_TIMEOUT_ENV_KEYS[@]}"; do
       quality_env_cmd+=("-u" "$key")
     done

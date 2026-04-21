@@ -68,7 +68,7 @@ RUNTIME_FLOW_ISSUE_TAGS = (
 )
 ARTIFACT_QUALITY_WARNING_PREFIX = "artifact_quality:"
 
-FRONTEND_PROVIDERS = ("qwen-code", "claude-code")
+FRONTEND_PROVIDERS = ("qwen-code", "claude-code", "codex-code")
 FRONTEND_LIVE_RESULT_FILENAME = "frontend-e2e-result.json"
 FRONTEND_CANCEL_RESULT_FILENAME = "frontend-cancel-result.json"
 FAILURE_CLASS_PRECEDENCE = {
@@ -1997,6 +1997,7 @@ def write_quality_report(
         f"- declared_repos_count: {len(declared_repos)}",
         f"- claude: {((preflight.get('runtimes') or {}).get('claude') or {}).get('version_line', '-')}",
         f"- qwen: {((preflight.get('runtimes') or {}).get('qwen') or {}).get('version_line', '-')}",
+        f"- codex: {((preflight.get('runtimes') or {}).get('codex') or {}).get('version_line', '-')}",
         "",
         "## Backend Quality Verdict (source-of-truth)",
         f"- hard_pass_runs: {hard_pass_all}/{len(runs)}",
@@ -2083,7 +2084,7 @@ def write_quality_report(
         [
             "",
             "## P0/P1 Actions",
-            f"- P0: держать nightly `5x2` regression с direct binaries (`qwen`/`claude`) и обязательным frontend live smoke `{len(active_providers)}/{len(active_providers)}` для выбранного provider surface.",
+            f"- P0: держать nightly `5x2` regression с direct binaries (`qwen`/`claude`/`codex`) и обязательным frontend live smoke `{len(active_providers)}/{len(active_providers)}` для выбранного provider surface.",
             "- P0: если встречается `runtime_contract_failed`/`runner_unavailable`, блокировать rollout до фикса runtime contract/provider invocation.",
             "- P1: расширить semantic quality rubric на richer evidence density в findings (rule/evidence refs) и cross-doc consistency checks.",
         ]
@@ -2163,7 +2164,7 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Generate run/frontend matrices and quality report for 5x2 batch.")
+    parser = argparse.ArgumentParser(description="Generate run/frontend matrices and quality report for legacy 5x2 batch.")
     parser.add_argument("--batch-id", required=True)
     parser.add_argument("--batch-root", required=True)
     parser.add_argument("--reports-root", required=True)

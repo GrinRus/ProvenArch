@@ -70,13 +70,17 @@ class YAMLCompatTest(unittest.TestCase):
                         providers:
                           - qwen-code
                           - claude-code
+                          - codex-code
                     """
                 ),
                 encoding="utf-8",
             )
             payload = load_yaml_file(path)
         self.assertTrue(payload["execution_policies"]["release-default"]["release_mode"])
-        self.assertEqual(["qwen-code", "claude-code"], payload["execution_policies"]["release-default"]["providers"])
+        self.assertEqual(
+            ["qwen-code", "claude-code", "codex-code"],
+            payload["execution_policies"]["release-default"]["providers"],
+        )
 
 
 if __name__ == "__main__":

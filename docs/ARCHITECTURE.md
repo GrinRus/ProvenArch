@@ -6,7 +6,7 @@
 ## Scope (MVP)
 - Local-first: всё работает на машине разработчика
 - Тот же entrypoint поддерживает non-interactive batch execution в GitHub/GitLab CI jobs
-- Runtime (analysis): **headless multi-provider** (`claude-code` default, `qwen-code` optional) + deterministic `fake` baseline
+- Runtime (analysis): **headless multi-provider** (`claude-code` default, `qwen-code` optional, `codex-code` release peer) + deterministic `fake` baseline
 - Реализация продукта: **Go backend/orchestrator + embedded React UI**
 - Единая workspace-конвенция MVP: central `arch-workspace` git-репозиторий (Variant 2)
 - Agent operating model MVP: идеи `1,2,3,5,7` (domain-first cards/agents/changelog/Q&A)
@@ -18,12 +18,12 @@
    - `init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)` создаёт/обновляет `workspace.yaml`, bootstrap-ит fixed layout/baseline bundle и выполняет dry validation для первого старта
    - Раздаёт UI (embedded static assets из `ui/dist`)
    - Экспортирует API под `/api/*`
-   - `serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]` поднимает single-workspace-per-process service
+   - `serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]` поднимает single-workspace-per-process service
    - `serve --auto-init` bootstrap-ит workspace manifest/layout при отсутствии `workspace.yaml`
    - bootstrap (`init-workspace`/`serve --auto-init`) автоматически делает `git init` для workspace root при отсутствии `.git`
    - startup для `serve` lenient: без блокирующего repo preflight; readiness diagnostics доступны через `/api/workspace/validate`
    - Поддерживает batch/non-interactive режим для CI jobs
-   - `run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]`
+   - `run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]`
    - runtime selector process-scoped: `fake` default для required CI, `headless` opt-in
    - global provider selector остаётся process-level fallback: `--runtime-provider` > `ACP_RUNTIME_PROVIDER` > `claude-code`
    - effective provider resolution внутри run step-scoped: `workspace.yaml.runtime.profile.steps.<step>.provider` переопределяет global fallback только для выбранного шага
@@ -146,7 +146,7 @@
    - Базовые skill/prompt bundles поставляются вместе с продуктом и versioned в workspace
 
 5) **Runtime providers (`internal/runtime/*`)** *(implemented baseline)*
-   - headless providers: `claude-code` (`internal/runtime/claudecode`) и `qwen-code` (`internal/runtime/qwencode`)
+   - headless providers: `claude-code` (`internal/runtime/claudecode`), `qwen-code` (`internal/runtime/qwencode`) и `codex-code` (`internal/runtime/codexcode`)
    - общий runtime layer + provider factory: `internal/runtime/runtime.go`, `internal/runtime/providers/factory.go`
    - каждый provider получает explicit staged-write contract (`artifact_root`, `write_root`, `draft_final_root`, `read_context_roots`, `step_contract`, `expected_artifacts`) и должен писать runtime-authored artifacts только внутрь `write_root`/`draft_final_root`
    - live headless providers считаются успешными только при completed process + valid required artifacts; missing/invalid artifacts классифицируются как `runtime_contract_failed`
@@ -166,11 +166,12 @@
    - active repair surface зафиксирована internal registry и ограничена двумя safe drift paths: artifact-root-relative `documents[].path` normalization и draft-root reconcile только для уже записанных canonical draft files в явной repair stage
    - `qwen` для draft-only шагов (`step0/2/4`) валидирует required draft artifacts до возврата в orchestrator и делает один constrained artifact-repair retry (`write_root + draft_final_root`) вместо silent acceptance legacy draft schemas
    - `qwen` для draft-only шагов также имеет post-artifact stall recovery: если canonical draft manifest и draft files уже появились, но provider перестал писать в stdout/stderr и перестал мутировать `write_root`/`draft_final_root`, runtime принудительно завершает process и запускает один constrained artifact-only retry
-   - `claude-code` и `qwen-code` используют shared provider-agnostic step-policy/prompt layer для required artifacts, retry bans и explicit negative rules; provider-specific остаются только command/process execution, pipe monitoring, transcript extraction и provider failure classification
+   - `claude-code`, `qwen-code` и `codex-code` используют shared provider-agnostic step-policy/prompt layer для required artifacts, retry bans и explicit negative rules; provider-specific остаются только command/process execution, pipe monitoring, transcript extraction и provider failure classification
    - headless provider scope включает `arch-workspace` и resolved repo directories для текущих `repo_scope/repo_scopes`, чтобы provider видел source evidence из реальных checkout-ов
    - command overrides:
      - `ACP_CLAUDE_CMD` (default `claude-code`)
      - `ACP_QWEN_CMD` (default `qwen`)
+     - `ACP_CODEX_CMD` (default `codex`)
 
 6) **Workspace (`internal/workspace`)** *(implemented baseline)*
    - реализует/валидирует структуру central `arch-workspace` (Variant 2)

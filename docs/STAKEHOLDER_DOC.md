@@ -16,7 +16,7 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 
 | Stakeholder requirement | Implementation status | Evidence (artifact/test) |
 |---|---|---|
-| Runtime policy `fake` default + `headless` opt-in | done | `cmd/acp/main.go` (`--runtime ...`, `--runtime-provider ...`, `ACP_RUNTIME_PROVIDER`, `ACP_CLAUDE_CMD`, `ACP_QWEN_CMD`), `cmd/acp/main_test.go`, `internal/api/server_test.go` |
+| Runtime policy `fake` default + `headless` opt-in | done | `cmd/acp/main.go` (`--runtime ...`, `--runtime-provider ...`, `ACP_RUNTIME_PROVIDER`, `ACP_CLAUDE_CMD`, `ACP_QWEN_CMD`, `ACP_CODEX_CMD`), `cmd/acp/main_test.go`, `internal/api/server_test.go` |
 | Baseline flow `validate -> init|refresh -> inspect` (CLI/API/UI) | done | `scripts/smoke-cli.sh`, `scripts/smoke-api.sh`, `ui/src/App.test.tsx` |
 | Schema-driven workspace/runtime artifact validation + actionable diagnostics | done | `internal/workspace/validation.go`, `internal/contracts/runtimeexecution.go`, `internal/api/server_test.go` |
 | Domain-first per-domain execution with persisted runtime execution metadata + domain outputs | done | `internal/orchestrator/orchestrator.go`, `internal/orchestrator/orchestrator_test.go`, `internal/orchestrator/scenario_test.go` |
@@ -39,11 +39,11 @@ Epic matrix:
 
 **Дополнительно для MVP предусматриваем полноценную интеграцию standalone сервиса с CI/CD**: тот же orchestrator/CLI запускается из GitHub/GitLab webhook-triggered workflow и/или manual pipeline button/job, без hosted control plane.
 
-**В MVP используем step-scoped headless runtime providers**: `claude-code` (default fallback) и `qwen-code`.
+**В MVP используем step-scoped headless runtime providers**: `claude-code` (default fallback), `qwen-code` и `codex-code` (release peer).
 
 **Техническое решение (принято):**
 - реализация продукта: **Go** (orchestrator/server) + UI (React/TypeScript, локально, с встраиванием в Go-бинарь);
-- рантайм анализа (MVP): **headless multi-provider** (`claude-code` default, `qwen-code` optional).
+- рантайм анализа (MVP): **headless multi-provider** (`claude-code` default, `qwen-code` optional, `codex-code` release peer).
 
 ---
 
@@ -218,7 +218,7 @@ arch-workspace/
 ## 5. Что входит в MVP и что сознательно НЕ входит
 
 ### 5.1. MVP — ключевой функционал
-- **Headless multi-provider runtime (`claude-code` + `qwen-code`)**.  
+- **Headless multi-provider runtime (`claude-code` + `qwen-code` + `codex-code`)**.  
 - **Локальный запуск** сервиса и UI как основной режим.  
 - **Полноценная standalone интеграция с GitHub/GitLab CI/CD** тем же orchestrator/CLI, через hooks и/или manual pipeline triggers, без hosted control plane.  
 - Пользователь указывает **локальные пути** к репозиториям или **GitHub/GitLab URL**, но git access всегда идёт через локальный `git` контекст устройства/runner.  
@@ -237,7 +237,7 @@ arch-workspace/
   - CI/CD pipeline, build/deploy flow, runtime clues.
 - **All-stacks extraction strategy**:
   - MVP не фиксирует narrow whitelist языков/стэков,
-  - headless providers (`claude-code|qwen-code`) + baseline prompts/skills пытаются анализировать arbitrary stacks,
+  - headless providers (`claude-code|qwen-code|codex-code`) + baseline prompts/skills пытаются анализировать arbitrary stacks,
   - при нехватке evidence система пишет unknowns, а не придумывает факты.
 - **Явная фиксация unknowns**:
   - `reports/coverage/*`,
@@ -387,7 +387,7 @@ Wizard из блоков-шаблонов:
 - Конституция + skills/rules
 
 **Действия рантайма:**
-- анализ arbitrary stacks через headless providers (`claude-code|qwen-code`) + baseline prompts/skills (без фиксированного whitelist language adapters в MVP)  
+- анализ arbitrary stacks через headless providers (`claude-code|qwen-code|codex-code`) + baseline prompts/skills (без фиксированного whitelist language adapters в MVP)  
 - инвентаризация сервисов/юнитов  
 - извлечение интерфейсов (HTTP/gRPC/events), зависимостей, инфраструктурных следов  
 - извлечение внешних интеграций и third-party/system dependencies  
@@ -446,7 +446,7 @@ Wizard из блоков-шаблонов:
 - самый короткий старт: `acp serve --workspace ... --auto-init ((--repo-name ... (--repo-path ... | --repo-git-url ...) [--repo-ref ...]) | --repos-file ...) [--docs-imports-path ...] --runtime fake`
 - первый bootstrap workspace выполняется через `acp init-workspace --workspace ... ((--repo-name ... (--repo-path ... | --repo-git-url ...) [--repo-ref ...]) | --repos-file ...)`
 - первый materialization запуск: `acp run --workspace ... --pipeline init --runtime fake --non-interactive`
-- для live запуска: `acp run --workspace ... --pipeline init --runtime headless --runtime-provider qwen-code --non-interactive` (или `claude-code`)
+- для live запуска: `acp run --workspace ... --pipeline init --runtime headless --runtime-provider qwen-code --non-interactive` (или `claude-code` / `codex-code`)
 - пользователь добавил новые документы в workspace  
 - пользователь обновил репозитории (git pull)  
 - пользователь нажал “Rebuild as‑is / Re-run analysis”
@@ -553,7 +553,7 @@ flowchart TD
 
 ### 13.4. Extraction strategy
 - MVP не ограничивается narrow whitelist языков/стэков.
-- Анализ arbitrary stacks выполняется headless providers (`claude-code|qwen-code`) + baseline prompt/skill bundle.
+- Анализ arbitrary stacks выполняется headless providers (`claude-code|qwen-code|codex-code`) + baseline prompt/skill bundle.
 - Если стек или артефакт не удаётся надёжно интерпретировать, система фиксирует gaps через coverage/questions/findings.
 
 ### 13.5. Документы и metadata index

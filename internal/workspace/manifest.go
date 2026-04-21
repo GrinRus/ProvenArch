@@ -346,8 +346,8 @@ func validateManifest(manifest Manifest) error {
 				if provider == "" {
 					return
 				}
-				if provider != "claude-code" && provider != "qwen-code" {
-					problems = append(problems, fmt.Sprintf("%s.provider must be one of: claude-code, qwen-code", label))
+				if provider != "claude-code" && provider != "qwen-code" && provider != "codex-code" {
+					problems = append(problems, fmt.Sprintf("%s.provider must be one of: claude-code, qwen-code, codex-code", label))
 				}
 			}
 			validateStepProvider("runtime.profile.steps.step0_constitution", manifest.Runtime.Profile.Steps.Step0Constitution)

@@ -520,8 +520,10 @@ func validateRuntimeExecutionPatch(patch runtimeExecutionPatch) error {
 				continue
 			}
 			provider := strings.TrimSpace(strings.ToLower(*value))
-			if provider != string(acpruntime.ProviderClaudeCode) && provider != string(acpruntime.ProviderQwenCode) {
-				return fmt.Errorf("%s must be one of: %s, %s", label, acpruntime.ProviderClaudeCode, acpruntime.ProviderQwenCode)
+			if provider != string(acpruntime.ProviderClaudeCode) &&
+				provider != string(acpruntime.ProviderQwenCode) &&
+				provider != string(acpruntime.ProviderCodexCode) {
+				return fmt.Errorf("%s must be one of: %s, %s, %s", label, acpruntime.ProviderClaudeCode, acpruntime.ProviderQwenCode, acpruntime.ProviderCodexCode)
 			}
 		}
 	}
