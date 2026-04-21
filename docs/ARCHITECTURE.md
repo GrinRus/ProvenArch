@@ -15,26 +15,21 @@
 
 ## Компоненты
 1) **Go entrypoint (`cmd/acp`)** *(implemented baseline)*
-   - `init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)` создаёт/обновляет `workspace.yaml`, bootstrap-ит fixed layout/baseline bundle и выполняет dry validation для первого старта
+   - exact CLI flag/help surface остаётся canonical в `acp --help` / `acp <command> --help` и `cmd/acp/main.go`; этот документ фиксирует behavior boundary, а не второй help-manual
+   - `init-workspace` создаёт/обновляет `workspace.yaml`, bootstrap-ит fixed layout/baseline bundle и выполняет dry validation для первого старта
    - Раздаёт UI (embedded static assets из `ui/dist`)
    - Экспортирует API под `/api/*`
-   - `serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]` поднимает single-workspace-per-process service
+   - `serve` поднимает single-workspace-per-process local API+UI service
    - `serve --auto-init` bootstrap-ит workspace manifest/layout при отсутствии `workspace.yaml`
    - bootstrap (`init-workspace`/`serve --auto-init`) автоматически делает `git init` для workspace root при отсутствии `.git`
    - startup для `serve` lenient: без блокирующего repo preflight; readiness diagnostics доступны через `/api/workspace/validate`
    - Поддерживает batch/non-interactive режим для CI jobs
-   - `run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]`
+   - `run` выполняет deterministic `init|refresh` pipeline в local/batch/non-interactive execution
+   - `qa` даёт read-only ответы по артефактам workspace
    - runtime selector process-scoped: `fake` default для required CI, `headless` opt-in
    - global provider selector остаётся process-level fallback: `--runtime-provider` > `ACP_RUNTIME_PROVIDER` > `claude-code`
    - effective provider resolution внутри run step-scoped: `workspace.yaml.runtime.profile.steps.<step>.provider` переопределяет global fallback только для выбранного шага
-	   - timeout control process/workspace-aware:
-	     - persisted profile в `workspace.yaml.runtime.profile.timeouts`
-	     - effective precedence: `env > workspace > defaults`
-	     - canonical envs: `ACP_RUNTIME_*`, `ACP_PIPELINE_*`, `ACP_API_*`, `ACP_UI_*`
-	   - execution control process/workspace-aware:
-     - persisted profile в `workspace.yaml.runtime.profile.execution`
-     - effective precedence: `CLI > env > workspace > defaults`
-     - CLI overrides: `--execution-strategy`, `--max-parallel-tasks`, `--failure-policy`
+   - timeout и execution control остаются process/workspace-aware: persisted профиль живёт в `workspace.yaml.runtime.profile.*`, а точные precedence/API surfaces удерживаются в `docs/spec/API_SPEC.md` вместо дублирования здесь
    - Используется как локально, так и из SCM-triggered pipeline jobs/manual buttons
    - Internal API trigger остаётся optional trusted-mode capability, а не обязательной CI/CD поверхностью
    - Раздаёт embedded UI shell и API в одном процессе `acp serve`

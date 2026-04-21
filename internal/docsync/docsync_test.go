@@ -88,7 +88,6 @@ func TestPromptLayerTruthConsistentAcrossCoreDocs(t *testing.T) {
 	paths := []string{
 		"docs/ARCHITECTURE.md",
 		"docs/spec/PIPELINE_SPEC.md",
-		"docs/PLANS.md",
 	}
 
 	for _, path := range paths {
@@ -113,7 +112,12 @@ func TestPlansRemainActiveOnlyAfterCleanupClosure(t *testing.T) {
 	t.Parallel()
 
 	content := readDoc(t, "docs/PLANS.md")
+	if strings.Contains(content, "cleanup/refactor closure") {
+		t.Fatalf("expected docs/PLANS.md active section to exclude closed cleanup closure notes")
+	}
 	for _, marker := range []string{
+		"EP-20260421-repo-garbage-audit",
+		"EP-20260421-repo-cleanup-pr1-pr2",
 		"EP-20260421-flow-audit-followups",
 		"EP-20260421-artifact-only-cleanup-followthrough",
 	} {
@@ -130,7 +134,6 @@ func TestCompatibilityInventoryConsistentAcrossDocs(t *testing.T) {
 	paths := []string{
 		"docs/ARCHITECTURE.md",
 		"docs/TESTING_STRATEGY.md",
-		"docs/PLANS.md",
 	}
 
 	for _, path := range paths {
@@ -166,10 +169,6 @@ func TestKeySurfacesDoNotContainStaleMarkers(t *testing.T) {
 		},
 		"docs/BACKLOG.md": {
 			"orchestrator запускает headless runtime adapter для workspace (`claude-code` default, `qwen-code` optional)",
-		},
-		"cmd/README.md": {
-			"Bootstrap slice",
-			"runnable skeleton",
 		},
 		"docs/DOCS_POLICY.md": {
 			"v0.x",
@@ -233,7 +232,7 @@ func TestKeySurfacesDoNotContainStaleMarkers(t *testing.T) {
 	}
 }
 
-func TestCLIDocsSurfaceMatchesHelp(t *testing.T) {
+func TestCLIHelpSurfaceMatchesCommands(t *testing.T) {
 	t.Parallel()
 
 	helpSource := readDoc(t, "cmd/acp/main.go")
@@ -248,32 +247,31 @@ func TestCLIDocsSurfaceMatchesHelp(t *testing.T) {
 			t.Fatalf("expected cmd/acp/main.go to include help token %q", token)
 		}
 	}
+}
+
+func TestCLIDocsPointToCanonicalSources(t *testing.T) {
+	t.Parallel()
 
 	requiredByDoc := map[string][]string{
-		"README.md": {
-			"acp init-workspace --workspace /path/to/arch-workspace --repo-name payments-service --repo-path /path/to/payments-service",
-			"acp serve --workspace /path/to/arch-workspace --auto-init --repo-name payments-service --repo-path /path/to/payments-service --runtime fake",
-			"acp init-workspace --workspace /path/to/arch-workspace --repos-file /path/to/repos.yaml",
-			"acp serve --workspace /path/to/arch-workspace --auto-init --repos-file /path/to/repos.yaml --runtime fake",
-			"acp run --workspace /path/to/arch-workspace --pipeline init --runtime fake --non-interactive",
-			"acp qa --workspace /path/to/arch-workspace --question \"Who owns payments-service?\"",
-		},
 		"cmd/acp/README.md": {
-			"acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)",
-			"acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]",
-			"acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]",
-			"acp qa --workspace <abs-path> --question",
-		},
-		"docs/ARCHITECTURE.md": {
-			"`init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)`",
-			"`serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]`",
-			"run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]",
-			"`acp qa`",
+			"acp --help",
+			"acp <command> --help",
+			"cmd/acp/main.go",
+			"README.md",
+			"docs/spec/API_SPEC.md",
+			"docs/ARCHITECTURE.md",
 		},
 		"docs/spec/API_SPEC.md": {
-			"acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)",
-			"acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]",
-			"acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]",
+			"HTTP API wire-contract",
+			"cmd/acp/main.go",
+			"README.md",
+			"CLI batch mode",
+		},
+		"docs/ARCHITECTURE.md": {
+			"acp --help",
+			"cmd/acp/main.go",
+			"behavior boundary",
+			"local API+UI service",
 		},
 	}
 	for path, tokens := range requiredByDoc {
@@ -284,10 +282,69 @@ func TestCLIDocsSurfaceMatchesHelp(t *testing.T) {
 			content := readDoc(t, path)
 			for _, token := range tokens {
 				if !strings.Contains(content, token) {
-					t.Fatalf("expected %s to include CLI docs token %q", path, token)
+					t.Fatalf("expected %s to include canonical-source token %q", path, token)
 				}
 			}
 		})
+	}
+
+	forbiddenByDoc := map[string][]string{
+		"cmd/acp/README.md": {
+			"acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code]",
+			"acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code]",
+			"--max-parallel-tasks <n>",
+			"--run-logs-ttl-hours",
+		},
+		"docs/spec/API_SPEC.md": {
+			"acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ... [--docs-imports-path <path>]]",
+			"ACP_RUNTIME_STEP_TIMEOUT_SEC",
+			"ACP_EXECUTION_STRATEGY",
+		},
+		"docs/ARCHITECTURE.md": {
+			"serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort]",
+			"run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]",
+			"ACP_RUNTIME_*",
+			"--max-parallel-tasks <n>",
+		},
+	}
+	for path, tokens := range forbiddenByDoc {
+		path := path
+		tokens := tokens
+		t.Run(path+"-forbidden", func(t *testing.T) {
+			t.Parallel()
+			content := readDoc(t, path)
+			for _, token := range tokens {
+				if strings.Contains(content, token) {
+					t.Fatalf("expected %s to avoid duplicated detail token %q", path, token)
+				}
+			}
+		})
+	}
+}
+
+func TestREADMEFullRunSectionPointsToRunbooks(t *testing.T) {
+	t.Parallel()
+
+	content := readDoc(t, "README.md")
+	for _, required := range []string{
+		"docs/LOCAL_FULL_RUN_AI_ADVENT.md",
+		"docs/RELEASE_LIVE_E2E_RUNBOOK.md",
+		"TARGET_REPOS_FILE",
+		"E2E_MATRIX_FILE",
+		"scripts/full-run-ai-advent.sh",
+		"scripts/full-run-batch-matrix.sh",
+	} {
+		assertContains(t, content, required)
+	}
+	for _, forbidden := range []string{
+		"BATCH_PROVIDER_FILTER",
+		"UI_E2E_CANCEL_STUB_SLEEP_SEC",
+		"profile-status/*.json",
+		"parallel-default",
+	} {
+		if strings.Contains(content, forbidden) {
+			t.Fatalf("expected README.md full-run section to stay high-level and avoid %q", forbidden)
+		}
 	}
 }
 
@@ -358,13 +415,9 @@ func TestMultiRepoE2EDocsAreConsistent(t *testing.T) {
 			"docs/RELEASE_LIVE_E2E_RUNBOOK.md",
 			"TARGET_REPOS_FILE",
 			"E2E_MATRIX_FILE",
-			"single-path",
-			"single-git_url",
-			"multi-path",
-			"multi-git_url",
-			"UI_E2E_EXPECTED_REPO_COUNT",
-			"required ci gate",
-			"pinned",
+			"docs/LOCAL_FULL_RUN_AI_ADVENT.md",
+			"docs/RELEASE_LIVE_E2E_RUNBOOK.md",
+			"trusted-machine",
 		},
 		"docs/LOCAL_FULL_RUN_AI_ADVENT.md": {
 			"docs/RELEASE_LIVE_E2E_RUNBOOK.md",
