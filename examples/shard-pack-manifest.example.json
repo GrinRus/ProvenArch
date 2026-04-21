@@ -42,7 +42,7 @@
       ]
     }
   ],
-  "compatibility": {
+  "semantic": {
     "coverage": {
       "observed": [
         "services"

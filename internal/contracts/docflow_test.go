@@ -87,7 +87,7 @@ func TestParseShardPackManifestRejectsUnknownCitationReference(t *testing.T) {
     }
   ],
   "citations": [],
-  "compatibility": {
+  "semantic": {
     "coverage": {"observed": [], "missing": [], "notes": []},
     "questions": [],
     "entities": [],
@@ -117,7 +117,7 @@ func TestParseFinalRunIndexRejectsBrokenTopicReference(t *testing.T) {
   "topics": [
     {"id": "domain.payments", "document_ids": ["doc.missing"]}
   ],
-  "compatibility": {
+  "semantic": {
     "coverage": {"observed": [], "missing": [], "notes": []},
     "questions": [],
     "entities": [],
@@ -164,7 +164,7 @@ func TestParseShardPackManifestRejectsForbiddenCanonicalPath(t *testing.T) {
       "document_ids": ["doc.forbidden"]
     }
   ],
-  "compatibility": {
+  "semantic": {
     "coverage": {"observed": [], "missing": [], "notes": []},
     "questions": [],
     "entities": [],
@@ -211,7 +211,7 @@ func TestParseShardPackManifestRejectsEscapingDocumentPath(t *testing.T) {
       "document_ids": ["doc.escape"]
     }
   ],
-  "compatibility": {
+  "semantic": {
     "coverage": {"observed": [], "missing": [], "notes": []},
     "questions": [],
     "entities": [],
@@ -228,37 +228,37 @@ func TestParseShardPackManifestRejectsEscapingDocumentPath(t *testing.T) {
 	}
 }
 
-func TestParseShardPackManifestRejectsStagingPrefixedDocumentPath(t *testing.T) {
+func TestParseShardPackManifestRejectsWorkspaceRelativeDocumentPath(t *testing.T) {
 	t.Parallel()
 
 	raw := []byte(`{
   "version": 1,
   "run_id": "run-1",
   "step_id": "init.step1.collect",
-  "shard_id": "openedx-platform",
+  "shard_id": "bank-of-anthos-iac",
   "agent_role": "shard-analyst",
-  "artifact_root": "reports/taskruns/run-1/staging/shards/openedx-platform",
+  "artifact_root": "reports/taskruns/run-1/staging/shards/bank-of-anthos-iac",
   "documents": [
     {
-      "id": "doc.service-inventory.openedx-platform",
-      "kind": "report",
-      "title": "Service Inventory",
-      "path": "reports/taskruns/run-1/staging/shards/openedx-platform/service-inventory.md",
-      "canonical_path": "reports/as-is/service-inventory/openedx-platform.md",
-      "topics": ["openedx"],
-      "citation_ids": ["cite.openedx.readme"]
+      "id": "doc.iac",
+      "kind": "analysis",
+      "title": "IAC Overview",
+      "path": "reports/taskruns/run-1/staging/shards/bank-of-anthos-iac/iac-overview.md",
+      "canonical_path": "reports/as-is/bank-of-anthos/iac-overview.md",
+      "topics": ["iac"],
+      "citation_ids": ["cite.1"]
     }
   ],
   "citations": [
     {
-      "id": "cite.openedx.readme",
-      "repo": "openedx-platform",
+      "id": "cite.1",
+      "repo": "bank-of-anthos",
       "path": "README.md",
-      "claim_ids": ["claim.openedx.readme"],
-      "document_ids": ["doc.service-inventory.openedx-platform"]
+      "claim_ids": ["claim.1"],
+      "document_ids": ["doc.iac"]
     }
   ],
-  "compatibility": {
+  "semantic": {
     "coverage": {"observed": [], "missing": [], "notes": []},
     "questions": [],
     "entities": [],
@@ -266,46 +266,47 @@ func TestParseShardPackManifestRejectsStagingPrefixedDocumentPath(t *testing.T) 
     "findings": []
   }
 }`)
+
 	_, err := ParseShardPackManifest(raw)
 	if err == nil {
-		t.Fatalf("expected shard manifest document path validation error")
+		t.Fatalf("expected workspace-relative document path validation error")
 	}
-	if !strings.Contains(err.Error(), "reports/taskruns/... prefix is forbidden") {
-		t.Fatalf("expected staging prefix path error, got %v", err)
+	if !strings.Contains(err.Error(), "artifact_root-relative") {
+		t.Fatalf("expected artifact_root-relative error, got %v", err)
 	}
 }
 
-func TestParseShardPackManifestRejectsArtifactRootPrefixedDocumentPath(t *testing.T) {
+func TestParseShardPackManifestRejectsDuplicatedArtifactRootDocumentPath(t *testing.T) {
 	t.Parallel()
 
 	raw := []byte(`{
   "version": 1,
   "run_id": "run-1",
   "step_id": "init.step1.collect",
-  "shard_id": "openedx-platform",
+  "shard_id": "payments-service",
   "agent_role": "shard-analyst",
-  "artifact_root": "shards/openedx-platform",
+  "artifact_root": "staging/shards/payments-service",
   "documents": [
     {
-      "id": "doc.service-inventory.openedx-platform",
-      "kind": "report",
-      "title": "Service Inventory",
-      "path": "shards/openedx-platform/service-inventory.md",
-      "canonical_path": "reports/as-is/service-inventory/openedx-platform.md",
-      "topics": ["openedx"],
-      "citation_ids": ["cite.openedx.readme"]
+      "id": "doc.payments",
+      "kind": "analysis",
+      "title": "Payments Overview",
+      "path": "staging/shards/payments-service/domain-report.md",
+      "canonical_path": "reports/as-is/payments-service/domain-report.md",
+      "topics": ["payments"],
+      "citation_ids": ["cite.1"]
     }
   ],
   "citations": [
     {
-      "id": "cite.openedx.readme",
-      "repo": "openedx-platform",
+      "id": "cite.1",
+      "repo": "payments-service",
       "path": "README.md",
-      "claim_ids": ["claim.openedx.readme"],
-      "document_ids": ["doc.service-inventory.openedx-platform"]
+      "claim_ids": ["claim.1"],
+      "document_ids": ["doc.payments"]
     }
   ],
-  "compatibility": {
+  "semantic": {
     "coverage": {"observed": [], "missing": [], "notes": []},
     "questions": [],
     "entities": [],
@@ -313,12 +314,13 @@ func TestParseShardPackManifestRejectsArtifactRootPrefixedDocumentPath(t *testin
     "findings": []
   }
 }`)
+
 	_, err := ParseShardPackManifest(raw)
 	if err == nil {
-		t.Fatalf("expected shard manifest artifact_root prefix validation error")
+		t.Fatalf("expected duplicated artifact_root document path validation error")
 	}
-	if !strings.Contains(err.Error(), "artifact_root-relative") {
-		t.Fatalf("expected artifact_root-relative path error, got %v", err)
+	if !strings.Contains(err.Error(), "must not repeat artifact_root") {
+		t.Fatalf("expected repeated artifact_root error, got %v", err)
 	}
 }
 

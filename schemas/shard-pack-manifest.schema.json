@@ -12,7 +12,7 @@
     "artifact_root",
     "documents",
     "citations",
-    "compatibility"
+    "semantic"
   ],
   "properties": {
     "version": {
@@ -71,8 +71,8 @@
         "$ref": "#/$defs/citation"
       }
     },
-    "compatibility": {
-      "$ref": "#/$defs/compatibility"
+    "semantic": {
+      "$ref": "#/$defs/semantic"
     }
   },
   "$defs": {
@@ -429,7 +429,7 @@
       },
       "additionalProperties": false
     },
-    "compatibility": {
+    "semantic": {
       "type": "object",
       "required": [
         "coverage",

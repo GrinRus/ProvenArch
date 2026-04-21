@@ -3,7 +3,6 @@ package reports
 import (
 	"encoding/json"
 	"fmt"
-	"hash/fnv"
 	"sort"
 	"strings"
 	"time"
@@ -44,167 +43,7 @@ func NewCompiler(ws workspace.Root) Compiler {
 	return Compiler{workspace: ws}
 }
 
-func (c Compiler) CompileAsIs(entities []contracts.Entity, edges []contracts.Edge, renderCtx ReportRenderContext) ([]Artifact, error) {
-	renderCtx = NormalizeReportRenderContext(renderCtx)
-	var artifacts []Artifact
-
-	serviceEntities := filterEntitiesByType(entities, "service")
-	externalEntities := filterEntitiesByType(entities, "external.system")
-	datastoreEntities := filterEntitiesByType(entities, "datastore")
-
-	overviewArtifact, err := c.WriteAsIsOverview(entities, edges, renderCtx)
-	if err != nil {
-		return nil, err
-	}
-	artifacts = append(artifacts, overviewArtifact)
-
-	serviceCatalog := strings.Builder{}
-	serviceCatalog.WriteString("# Service Catalog\n\n")
-	writeAnalysisBanner(&serviceCatalog, renderCtx)
-	if len(serviceEntities) == 0 {
-		serviceCatalog.WriteString(emptyEvidenceMessage("services", renderCtx.Collect.Status))
-		serviceCatalog.WriteString("\n")
-	} else {
-		serviceCatalog.WriteString("| ID | Name |\n|---|---|\n")
-		for _, entity := range serviceEntities {
-			serviceCatalog.WriteString(fmt.Sprintf("| %s | %s |\n", entity.ID, entity.Name))
-		}
-	}
-	if err := c.workspace.WriteFile("reports/as-is/service-catalog.md", []byte(serviceCatalog.String())); err != nil {
-		return nil, err
-	}
-	artifacts = append(artifacts, Artifact{
-		Path:  "reports/as-is/service-catalog.md",
-		Kind:  "report",
-		Label: "Service Catalog",
-	})
-
-	for _, service := range serviceEntities {
-		content := strings.Builder{}
-		content.WriteString(fmt.Sprintf("# %s\n\n", service.Name))
-		writeAnalysisBanner(&content, renderCtx)
-		content.WriteString(fmt.Sprintf("- ID: `%s`\n", service.ID))
-		content.WriteString(fmt.Sprintf("- Type: `%s`\n", service.Type))
-		if service.OwnerTeamID != "" {
-			content.WriteString(fmt.Sprintf("- Owner team: `%s`\n", service.OwnerTeamID))
-		}
-		related := relatedEdges(service.ID, edges)
-		content.WriteString(fmt.Sprintf("- Related edges: %d\n\n", len(related)))
-		for _, edge := range related {
-			content.WriteString(fmt.Sprintf("- `%s`: `%s` -> `%s`\n", edge.Type, edge.From, edge.To))
-		}
-
-		filePath := fmt.Sprintf("reports/as-is/services/%s.md", service.ID)
-		if err := c.workspace.WriteFile(filePath, []byte(content.String())); err != nil {
-			return nil, err
-		}
-		artifacts = append(artifacts, Artifact{
-			Path:  filePath,
-			Kind:  "report",
-			Label: service.Name,
-		})
-	}
-
-	integrations := strings.Builder{}
-	integrations.WriteString("# Integrations\n\n")
-	writeAnalysisBanner(&integrations, renderCtx)
-	if len(externalEntities) == 0 {
-		integrations.WriteString(emptyEvidenceMessage("external systems", renderCtx.Collect.Status))
-		integrations.WriteString("\n")
-	} else {
-		for _, ext := range externalEntities {
-			integrations.WriteString(fmt.Sprintf("- `%s` %s\n", ext.ID, ext.Name))
-		}
-	}
-	if err := c.workspace.WriteFile("reports/as-is/integrations.md", []byte(integrations.String())); err != nil {
-		return nil, err
-	}
-	artifacts = append(artifacts, Artifact{
-		Path:  "reports/as-is/integrations.md",
-		Kind:  "report",
-		Label: "Integrations",
-	})
-
-	datastores := strings.Builder{}
-	datastores.WriteString("# Datastores\n\n")
-	writeAnalysisBanner(&datastores, renderCtx)
-	if len(datastoreEntities) == 0 {
-		datastores.WriteString(emptyEvidenceMessage("datastores", renderCtx.Collect.Status))
-		datastores.WriteString("\n")
-	} else {
-		for _, db := range datastoreEntities {
-			datastores.WriteString(fmt.Sprintf("- `%s` %s\n", db.ID, db.Name))
-		}
-	}
-	if err := c.workspace.WriteFile("reports/as-is/datastores.md", []byte(datastores.String())); err != nil {
-		return nil, err
-	}
-	artifacts = append(artifacts, Artifact{
-		Path:  "reports/as-is/datastores.md",
-		Kind:  "report",
-		Label: "Datastores",
-	})
-
-	ciCDBuilder := strings.Builder{}
-	ciCDBuilder.WriteString("# CI/CD\n\n")
-	writeAnalysisBanner(&ciCDBuilder, renderCtx)
-	ciCDBuilder.WriteString("CI/CD evidence is surfaced through coverage and findings artifacts.\n")
-	ciCD := ciCDBuilder.String()
-	if err := c.workspace.WriteFile("reports/as-is/ci-cd.md", []byte(ciCD)); err != nil {
-		return nil, err
-	}
-	artifacts = append(artifacts, Artifact{
-		Path:  "reports/as-is/ci-cd.md",
-		Kind:  "report",
-		Label: "CI/CD",
-	})
-
-	sortArtifacts(artifacts)
-	return artifacts, nil
-}
-
 func (c Compiler) WriteCoverage(coverage *contracts.Coverage, questions []contracts.Question, renderCtx ReportRenderContext) ([]Artifact, error) {
-	renderCtx = NormalizeReportRenderContext(renderCtx)
-	if coverage == nil {
-		coverage = &contracts.Coverage{}
-	}
-
-	summaryArtifact, err := c.WriteCoverageSummary(coverage, renderCtx)
-	if err != nil {
-		return nil, err
-	}
-	questionsArtifact, err := c.WriteCoverageOpenQuestions(questions, renderCtx)
-	if err != nil {
-		return nil, err
-	}
-	artifacts := []Artifact{summaryArtifact, questionsArtifact}
-	return artifacts, nil
-}
-
-func (c Compiler) WriteAsIsOverview(entities []contracts.Entity, edges []contracts.Edge, renderCtx ReportRenderContext) (Artifact, error) {
-	renderCtx = NormalizeReportRenderContext(renderCtx)
-	serviceEntities := filterEntitiesByType(entities, "service")
-	externalEntities := filterEntitiesByType(entities, "external.system")
-	datastoreEntities := filterEntitiesByType(entities, "datastore")
-
-	overview := strings.Builder{}
-	overview.WriteString("# As-Is Overview\n\n")
-	writeAnalysisBanner(&overview, renderCtx)
-	overview.WriteString(fmt.Sprintf("- Services: %d\n", len(serviceEntities)))
-	overview.WriteString(fmt.Sprintf("- Dependencies (edges): %d\n", len(edges)))
-	overview.WriteString(fmt.Sprintf("- External systems: %d\n", len(externalEntities)))
-	overview.WriteString(fmt.Sprintf("- Datastores: %d\n", len(datastoreEntities)))
-	if err := c.workspace.WriteFile("reports/as-is/overview.md", []byte(overview.String())); err != nil {
-		return Artifact{}, err
-	}
-	return Artifact{
-		Path:  "reports/as-is/overview.md",
-		Kind:  "report",
-		Label: "System Overview",
-	}, nil
-}
-
-func (c Compiler) WriteCoverageSummary(coverage *contracts.Coverage, renderCtx ReportRenderContext) (Artifact, error) {
 	renderCtx = NormalizeReportRenderContext(renderCtx)
 	if coverage == nil {
 		coverage = &contracts.Coverage{}
@@ -217,13 +56,9 @@ func (c Compiler) WriteCoverageSummary(coverage *contracts.Coverage, renderCtx R
 	writeStringListWithFallback(&summary, "Missing", coverage.Missing, coverageFallback("missing", renderCtx))
 	writeStringListWithFallback(&summary, "Notes", coverage.Notes, coverageFallback("notes", renderCtx))
 	if err := c.workspace.WriteFile("reports/coverage/summary.md", []byte(summary.String())); err != nil {
-		return Artifact{}, err
+		return nil, err
 	}
-	return Artifact{Path: "reports/coverage/summary.md", Kind: "report", Label: "Coverage Summary"}, nil
-}
 
-func (c Compiler) WriteCoverageOpenQuestions(questions []contracts.Question, renderCtx ReportRenderContext) (Artifact, error) {
-	renderCtx = NormalizeReportRenderContext(renderCtx)
 	questionsReport := strings.Builder{}
 	questionsReport.WriteString("# Open Questions\n\n")
 	writeAnalysisBanner(&questionsReport, renderCtx)
@@ -237,9 +72,14 @@ func (c Compiler) WriteCoverageOpenQuestions(questions []contracts.Question, ren
 		}
 	}
 	if err := c.workspace.WriteFile("reports/coverage/open-questions.md", []byte(questionsReport.String())); err != nil {
-		return Artifact{}, err
+		return nil, err
 	}
-	return Artifact{Path: "reports/coverage/open-questions.md", Kind: "report", Label: "Open Questions"}, nil
+
+	artifacts := []Artifact{
+		{Path: "reports/coverage/summary.md", Kind: "report", Label: "Coverage Summary"},
+		{Path: "reports/coverage/open-questions.md", Kind: "report", Label: "Open Questions"},
+	}
+	return artifacts, nil
 }
 
 func (c Compiler) WriteFindings(findings []contracts.Finding, renderCtx ReportRenderContext) ([]Artifact, error) {
@@ -326,110 +166,6 @@ func (c Compiler) WriteDocArtifacts(artifactsInput []contracts.DocArtifact) ([]A
 	return []Artifact{
 		{Path: path, Kind: "taskrun", Label: "Doc Artifact Metadata"},
 	}, nil
-}
-
-func (c Compiler) CompileProposals(findings []contracts.Finding, renderCtx ReportRenderContext) ([]Artifact, error) {
-	renderCtx = NormalizeReportRenderContext(renderCtx)
-	proposalID := fmt.Sprintf("proposal-%s", proposalSlugFromFindings(findings))
-	baseDir := fmt.Sprintf("proposals/%s", proposalID)
-
-	proposalBody := strings.Builder{}
-	proposalBody.WriteString("# Improvement Proposal\n\n")
-	writeAnalysisBanner(&proposalBody, renderCtx)
-	proposalBody.WriteString("This proposal is generated from findings and baseline charter constraints.\n\n")
-	if len(findings) == 0 && renderCtx.IsIncomplete() {
-		proposalBody.WriteString("Proposal generation incomplete because no reliable findings set was produced.\n")
-	} else if len(findings) == 0 {
-		proposalBody.WriteString("No findings available. Keep monitoring coverage and refresh pipeline.\n")
-	} else {
-		proposalBody.WriteString("## Findings addressed\n\n")
-		for _, finding := range findings {
-			proposalBody.WriteString(fmt.Sprintf("- `%s` %s\n", finding.ID, finding.Title))
-		}
-	}
-
-	adrBody := strings.Builder{}
-	adrBody.WriteString("# ADR Draft\n\n")
-	writeAnalysisBanner(&adrBody, renderCtx)
-	if renderCtx.IsIncomplete() {
-		adrBody.WriteString("This draft is triage-only because analysis did not complete.\n\n")
-	}
-	adrBody.WriteString(`## Context
-Generated by ACP proposals compiler from current findings set.
-
-## Decision
-Approve the selected remediation scope from proposal.md during architecture review.
-`)
-
-	rfcBody := strings.Builder{}
-	rfcBody.WriteString("# RFC Draft\n\n")
-	writeAnalysisBanner(&rfcBody, renderCtx)
-	if renderCtx.IsIncomplete() {
-		rfcBody.WriteString("This draft is triage-only because analysis did not complete.\n\n")
-	}
-	rfcBody.WriteString(`## Problem
-Captured by ACP findings and coverage outputs.
-
-## Proposal
-Decompose approved findings into phased implementation tasks with owners and rollout windows.
-`)
-
-	checklistBody := strings.Builder{}
-	checklistBody.WriteString("# Migration Checklist\n\n")
-	writeAnalysisBanner(&checklistBody, renderCtx)
-	if renderCtx.IsIncomplete() {
-		checklistBody.WriteString("This checklist is triage-only because analysis did not complete.\n\n")
-	}
-	checklistBody.WriteString(`- [ ] Confirm owners
-- [ ] Confirm CI/CD impact
-- [ ] Define rollout steps
-- [ ] Validate regressions in synthetic scenarios
-`)
-
-	files := map[string]string{
-		baseDir + "/proposal.md":            proposalBody.String(),
-		baseDir + "/ADR.md":                 adrBody.String(),
-		baseDir + "/RFC.md":                 rfcBody.String(),
-		baseDir + "/migration-checklist.md": checklistBody.String(),
-	}
-
-	var artifacts []Artifact
-	for path, content := range files {
-		if err := c.workspace.WriteFile(path, []byte(content)); err != nil {
-			return nil, err
-		}
-		artifacts = append(artifacts, Artifact{
-			Path:  path,
-			Kind:  "proposal",
-			Label: filepathLabel(path),
-		})
-	}
-	sortArtifacts(artifacts)
-	return artifacts, nil
-}
-
-func proposalSlugFromFindings(findings []contracts.Finding) string {
-	if len(findings) == 0 {
-		return "baseline"
-	}
-	ids := make([]string, 0, len(findings))
-	for _, finding := range findings {
-		id := strings.TrimSpace(finding.ID)
-		if id == "" {
-			continue
-		}
-		ids = append(ids, id)
-	}
-	if len(ids) == 0 {
-		return "baseline"
-	}
-	sort.Strings(ids)
-	hasher := fnv.New64a()
-	for _, id := range ids {
-		_, _ = hasher.Write([]byte(id))
-		_, _ = hasher.Write([]byte{'\n'})
-	}
-	return fmt.Sprintf("findings-%x", hasher.Sum64())
 }
 
 func (c Compiler) WriteDomainOutputs(domainReports map[string]string) ([]Artifact, error) {
@@ -527,17 +263,6 @@ func filterEntitiesByType(entities []contracts.Entity, entityType string) []cont
 	return filtered
 }
 
-func relatedEdges(entityID string, edges []contracts.Edge) []contracts.Edge {
-	var result []contracts.Edge
-	for _, edge := range edges {
-		if edge.From == entityID || edge.To == entityID {
-			result = append(result, edge)
-		}
-	}
-	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
-	return result
-}
-
 func writeStringList(builder *strings.Builder, title string, values []string) {
 	builder.WriteString(fmt.Sprintf("## %s\n\n", title))
 	if len(values) == 0 {
@@ -598,17 +323,6 @@ func analysisBannerHeadline(renderCtx ReportRenderContext) string {
 		return "Analysis incomplete. Some shards failed; downstream content may be incomplete."
 	}
 	return "Analysis incomplete."
-}
-
-func emptyEvidenceMessage(subject string, status EvidenceStatus) string {
-	switch status {
-	case EvidenceStatusUnusable:
-		return fmt.Sprintf("No evidence-backed %s were materialized because analysis did not complete.", subject)
-	case EvidenceStatusPartial:
-		return fmt.Sprintf("No evidence-backed %s were materialized from completed shards; analysis is partial and some shards failed.", subject)
-	default:
-		return fmt.Sprintf("No %s found.", subject)
-	}
 }
 
 func coverageFallback(section string, renderCtx ReportRenderContext) string {
@@ -731,12 +445,4 @@ func sanitizeProposalSlug(value string) string {
 		return "run"
 	}
 	return slug
-}
-
-func filepathLabel(path string) string {
-	parts := strings.Split(path, "/")
-	if len(parts) == 0 {
-		return path
-	}
-	return parts[len(parts)-1]
 }

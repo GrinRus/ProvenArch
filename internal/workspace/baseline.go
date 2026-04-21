@@ -57,9 +57,9 @@ var baselinePromptPacks = map[string]string{
 			"charter cards, glossary, and runtime step policy",
 		},
 		RequiredOutputShape: []string{
-			"TaskResult JSON with canonical meta + summary + changeset",
-			"Entity and edge operations with explicit provenance/evidence arrays",
-			"questions[] and coverage{} blocks for unknowns and missing evidence",
+			"`shard-pack-manifest.json` plus authored shard documents inside the assigned write root",
+			"Populate semantic.questions, semantic.coverage, semantic.entities, semantic.edges, and semantic.findings deterministically",
+			"Keep all semantic structure inside manifest fields; do not invent alternate metadata envelopes",
 		},
 		EvidencePolicy: []string{
 			"Observation requires concrete evidence path/repo references",
@@ -67,13 +67,13 @@ var baselinePromptPacks = map[string]string{
 			"Prefer precise file-level evidence over broad repository claims",
 		},
 		ForbiddenBehavior: []string{
-			"Do not output plain prose outside TaskResult JSON envelope",
+			"Do not treat stdout/stderr as semantic output surfaces",
 			"Do not guess runtime metrics, ownership, or external contracts without evidence",
 			"Do not introduce non-deterministic timestamps or unstable identifiers outside allowed meta fields",
 		},
 		FallbackWhenUnknown: []string{
-			"Emit canonical coverage.missing values and actionable questions",
-			"Keep partial but valid TaskResult even under sparse repository signal",
+			"Emit canonical semantic.coverage.missing values and actionable semantic.questions",
+			"Keep partial but valid shard manifest artifacts even under sparse repository signal",
 			"Flag critical gaps explicitly instead of silent omission",
 		},
 	}),
@@ -85,9 +85,9 @@ var baselinePromptPacks = map[string]string{
 			"runtime task scopes and prior domain outputs",
 		},
 		RequiredOutputShape: []string{
-			"TaskResult JSON with add_finding operations in changeset",
+			"`validator-verdict.json` only, with verdict/summary/checked_paths/fixed_paths/findings/questions",
 			"Each finding includes stable id/title/severity/description and provenance",
-			"Optional coverage/questions updates when evidence is incomplete",
+			"Questions live inside the verdict payload when evidence is incomplete",
 		},
 		EvidencePolicy: []string{
 			"Findings must point to concrete evidence references or explicit inference rationale",
@@ -177,9 +177,23 @@ const baselineSubagentsYAML = `agents:
     skills: [qa]
 `
 
+func BaselineSubagentsContent() []byte {
+	return []byte(baselineSubagentsYAML)
+}
+
 func (r Root) EnsureBaselineBundle() error {
-	if err := r.writeFileIfMissing("skills/subagents.yaml", []byte(baselineSubagentsYAML)); err != nil {
-		return err
+	return r.ensureBaselineBundle(true)
+}
+
+func (r Root) EnsureBaselineSupportBundle() error {
+	return r.ensureBaselineBundle(false)
+}
+
+func (r Root) ensureBaselineBundle(includeSubagents bool) error {
+	if includeSubagents {
+		if err := r.writeFileIfMissing("skills/subagents.yaml", BaselineSubagentsContent()); err != nil {
+			return err
+		}
 	}
 
 	for _, skill := range baselineSkillIDs {
@@ -266,7 +280,7 @@ func renderSkillSystemPrompt(skill string) string {
 				"workspace model/reports/charter artifacts relevant to this skill",
 			}, spec.Inputs...),
 			RequiredOutputShape: append([]string{
-				"Deterministic, reviewable outputs that fit TaskResult contract expectations",
+				"Deterministic, reviewable outputs that fit ACP artifact contracts",
 				"Stable IDs, canonical enums, and explicit provenance evidence arrays",
 			}, spec.RequiredOutputShape...),
 			EvidencePolicy: append([]string{
@@ -275,7 +289,7 @@ func renderSkillSystemPrompt(skill string) string {
 			}, spec.EvidencePolicy...),
 			ForbiddenBehavior: append([]string{
 				"No fabricated entities, integrations, owners, or deployment assumptions",
-				"No markdown wrappers around JSON payloads expected by runtime parser",
+				"No alternate semantic payloads on stdout/stderr outside required artifact files",
 			}, spec.ForbiddenBehavior...),
 			FallbackWhenUnknown: append([]string{
 				"Prefer partial valid output over invalid or speculative output",
@@ -296,7 +310,7 @@ func renderSkillTaskPrompt(skill string) string {
 				"current step objective from orchestrator",
 			}, spec.Inputs...),
 			RequiredOutputShape: append([]string{
-				"TaskResult-safe contributions for entities/edges/findings/questions/coverage",
+				"Artifact-safe contributions for semantic entities/edges/findings/questions/coverage",
 				"Actionable summaries without non-deterministic filler text",
 			}, spec.RequiredOutputShape...),
 			EvidencePolicy: append([]string{
@@ -448,7 +462,7 @@ var baselineSkillPromptSpecs = map[string]skillPromptSpec{
 			"model graph, coverage gaps, charter rules",
 		},
 		RequiredOutputShape: []string{
-			"add_finding operations with deterministic IDs and severity",
+			"validator verdict findings with deterministic IDs and severity",
 		},
 		EvidencePolicy: []string{
 			"Each finding must link to evidence or transparent inference",
@@ -509,7 +523,7 @@ func skillPromptSpecFor(skill string) skillPromptSpec {
 			"workspace artifacts relevant to this skill",
 		},
 		RequiredOutputShape: []string{
-			"TaskResult-compatible operations and structured unknown handling",
+			"Artifact-only outputs and structured unknown handling",
 		},
 		EvidencePolicy: []string{
 			"Do not assert facts without evidence paths",

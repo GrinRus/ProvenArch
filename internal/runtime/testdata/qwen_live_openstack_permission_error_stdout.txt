@@ -1,0 +1,1 @@
+[{"type":"assistant","message":{"content":[{"type":"text","text":"Collecting findings..."}]}},{"type":"result","subtype":"error","result":"[API Error: 403 {\"type\":\"permission_error\",\"message\":\"Usage limit exceeded for qwen-code\"}]"}]

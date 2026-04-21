@@ -1,0 +1,26 @@
+{
+  "schema_version": "constitution-v0",
+  "system_id": "bank-of-anthos",
+  "system_name": "Bank of Anthos",
+  "description": "Legacy constitution payload emitted by qwen step0.",
+  "repo_scope": "bank-of-anthos",
+  "entities": [
+    {
+      "id": "svc.frontend",
+      "type": "service",
+      "name": "Frontend"
+    }
+  ],
+  "relations": [],
+  "coverage": {
+    "observed": [
+      "services"
+    ],
+    "missing": [
+      "owner mappings"
+    ],
+    "notes": [
+      "legacy constitution shape"
+    ]
+  }
+}

@@ -222,9 +222,9 @@ if [[ "$UI_E2E_SCENARIO" == "cancel-refresh" ]]; then
 set -Eeuo pipefail
 trap 'exit 130' TERM INT HUP PIPE
 sleep ${UI_E2E_CANCEL_STUB_SLEEP_SEC}
-cat <<'JSON'
-{"meta":{"task_id":"task-stub","step_id":"refresh.step1.collect","runtime":{"name":"${RUNTIME_PROVIDER}","version":"cancel-stub"},"started_at":"2026-04-12T00:00:00Z"},"summary":"stub completion (unexpected in cancel scenario)","changeset":[]}
-JSON
+# Artifact-only cancel stub: if cancellation does not arrive in time, the
+# missing required shard artifacts will still fail the step contract.
+exit 0
 EOF
   chmod +x "$stub_runner"
   runtime_cmd="$stub_runner"

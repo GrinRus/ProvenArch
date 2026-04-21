@@ -1,9 +1,9 @@
 package artifactquality
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -11,7 +11,7 @@ import (
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
 
-func TestEnsureCanonicalCollectManifestRepairsInvalidExtrasFixture(t *testing.T) {
+func TestRepairCollectManifestRejectsLegacyCompatibilityPayload(t *testing.T) {
 	t.Parallel()
 
 	writeRoot := t.TempDir()
@@ -19,118 +19,121 @@ func TestEnsureCanonicalCollectManifestRepairsInvalidExtrasFixture(t *testing.T)
 	writeDoc(t, writeRoot, "extras-overview.md", "# Extras\n")
 
 	task := testCollectTask(writeRoot, "bank-of-anthos-extras", "bank-of-anthos")
-	result := testCollectResult(task.TaskID, task.StepID, task.RunID, "bank-of-anthos")
-
-	if err := EnsureCanonicalCollectManifest(task, result); err != nil {
-		t.Fatalf("canonicalize extras fixture: %v", err)
+	if err := RepairCollectManifest(task); err == nil {
+		t.Fatalf("expected repair to fail for legacy compatibility payload")
 	}
 
 	raw, err := os.ReadFile(filepath.Join(writeRoot, shardPackManifestFile))
 	if err != nil {
-		t.Fatalf("read canonicalized manifest: %v", err)
+		t.Fatalf("read original manifest: %v", err)
 	}
-	manifest, err := contracts.ParseShardPackManifest(raw)
-	if err != nil {
-		t.Fatalf("parse canonicalized manifest: %v", err)
-	}
-	if got := manifest.Compatibility.Coverage.Observed; len(got) == 0 || got[0] != "services" {
-		t.Fatalf("expected compatibility coverage from TaskResult snapshot, got %#v", got)
-	}
-	assessment, err := ValidateCollectManifestAtWriteRoot(writeRoot)
-	if err != nil {
-		t.Fatalf("validate collect manifest readability: %v", err)
-	}
-	if !assessment.Rich {
-		t.Fatalf("expected repaired extras manifest to be rich, got %#v", assessment)
+	if _, err := contracts.ParseShardPackManifest(raw); err == nil {
+		t.Fatalf("expected original manifest to remain invalid")
 	}
 }
 
-func TestEnsureCanonicalCollectManifestRepairsInvalidKubernetesFixture(t *testing.T) {
+func TestRepairCollectManifestNormalizesArtifactRootPrefixedDocumentPath(t *testing.T) {
 	t.Parallel()
 
 	writeRoot := t.TempDir()
-	writeFixtureManifest(t, writeRoot, "bank_kubernetes_invalid_manifest.json")
-	writeDoc(t, writeRoot, "kubernetes-manifests.md", "# Kubernetes\n")
+	writeFixtureManifest(t, writeRoot, "bank_of_anthos_doubled_path_manifest.json")
+	writeDoc(t, writeRoot, "iac-overview.md", "# IAC Overview\n")
 
-	task := testCollectTask(writeRoot, "bank-of-anthos-kubernetes-manifests", "bank-of-anthos")
-	result := testCollectResult(task.TaskID, task.StepID, task.RunID, "bank-of-anthos")
+	task := testCollectTask(writeRoot, "bank-of-anthos-iac", "bank-of-anthos")
+	task.RunID = "run_20260420_054749_001"
+	task.StepID = "init.step1.collect"
+	task.ArtifactRoot = "reports/taskruns/run_20260420_054749_001/staging/shards/bank-of-anthos-iac"
+	task.PathScopes = []string{"iac"}
 
-	if err := EnsureCanonicalCollectManifest(task, result); err != nil {
-		t.Fatalf("canonicalize kubernetes fixture: %v", err)
-	}
-
-	assessment, err := ValidateCollectManifestAtWriteRoot(writeRoot)
-	if err != nil {
-		t.Fatalf("validate collect manifest readability: %v", err)
-	}
-	if !assessment.Rich {
-		t.Fatalf("expected repaired kubernetes manifest to be rich, got %#v", assessment)
-	}
-}
-
-func TestEnsureCanonicalCollectManifestSynthesizesMissingManifestFromWriteRootDocs(t *testing.T) {
-	t.Parallel()
-
-	writeRoot := t.TempDir()
-	writeDoc(t, writeRoot, "services.md", "# Services\n")
-
-	task := testCollectTask(writeRoot, "bank-of-anthos-src", "bank-of-anthos")
-	result := testCollectResult(task.TaskID, task.StepID, task.RunID, "bank-of-anthos")
-
-	if err := EnsureCanonicalCollectManifest(task, result); err != nil {
-		t.Fatalf("synthesize missing manifest: %v", err)
+	if err := RepairCollectManifest(task); err != nil {
+		t.Fatalf("repair manifest: %v", err)
 	}
 
 	raw, err := os.ReadFile(filepath.Join(writeRoot, shardPackManifestFile))
 	if err != nil {
-		t.Fatalf("read synthesized manifest: %v", err)
+		t.Fatalf("read repaired manifest: %v", err)
 	}
 	manifest, err := contracts.ParseShardPackManifest(raw)
 	if err != nil {
-		t.Fatalf("parse synthesized manifest: %v", err)
+		t.Fatalf("parse repaired manifest: %v", err)
 	}
-	if len(manifest.Documents) == 0 {
-		t.Fatalf("expected synthesized manifest documents")
+	if got := manifest.Documents[0].Path; got != "iac-overview.md" {
+		t.Fatalf("expected normalized document path, got %q", got)
 	}
-	if got := strings.TrimSpace(manifest.Documents[0].Path); got != "services.md" {
-		t.Fatalf("expected synthesized doc path services.md, got %q", got)
+
+	assessment, err := LoadManifestAssessment(writeRoot)
+	if err != nil {
+		t.Fatalf("load manifest assessment: %v", err)
 	}
-	if _, err := ValidateCollectManifestAtWriteRoot(writeRoot); err != nil {
-		t.Fatalf("validate synthesized manifest readability: %v", err)
+	if !assessment.Rich {
+		t.Fatalf("expected repaired manifest to remain rich, got %#v", assessment)
 	}
 }
 
-func TestEnsureCanonicalCollectManifestNormalizesStagingPrefixedDocumentPaths(t *testing.T) {
+func TestRepairCollectManifestNormalizesAbsoluteDocumentPathUnderWriteRoot(t *testing.T) {
 	t.Parallel()
 
 	writeRoot := t.TempDir()
-	writeFixtureManifest(t, writeRoot, "openedx_staging_prefixed_path_manifest.json")
 	writeDoc(t, writeRoot, "service-inventory.md", "# Service Inventory\n")
 
-	task := testCollectTask(writeRoot, "openedx-platform", "openedx-platform")
-	task.ArtifactRoot = "reports/taskruns/run-1/staging/shards/openedx-platform"
-	result := testCollectResult(task.TaskID, task.StepID, task.RunID, "openedx-platform")
+	manifest := contracts.ShardPackManifest{
+		Version:      1,
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		ShardID:      "openedx-platform",
+		AgentRole:    "shard-analyst",
+		ArtifactRoot: "reports/taskruns/run-1/staging/shards/openedx-platform",
+		RepoScopes:   []string{"openedx-platform"},
+		PathScopes:   []string{"."},
+		Documents: []contracts.AuthoredDocument{
+			{
+				ID:            "doc.service-inventory",
+				Kind:          "report",
+				Title:         "Service Inventory",
+				Path:          filepath.Join(writeRoot, "service-inventory.md"),
+				CanonicalPath: "reports/as-is/service-inventory/openedx-platform.md",
+				Topics:        []string{"openedx"},
+				CitationIDs:   []string{"cite.openedx.readme"},
+			},
+		},
+		Citations: []contracts.DocumentCitation{
+			{
+				ID:          "cite.openedx.readme",
+				Repo:        "openedx-platform",
+				Path:        "README.md",
+				ClaimIDs:    []string{"claim.openedx.readme"},
+				DocumentIDs: []string{"doc.service-inventory"},
+			},
+		},
+		Semantic: contracts.SemanticSnapshot{
+			Coverage: contracts.Coverage{
+				Observed: []string{"services"},
+				Missing:  []string{"owner mappings"},
+				Notes:    []string{"absolute path drift"},
+			},
+			Questions: []contracts.Question{},
+			Entities:  []contracts.Entity{},
+			Edges:     []contracts.Edge{},
+			Findings:  []contracts.Finding{},
+		},
+	}
+	writeManifest(t, writeRoot, manifest)
 
-	if err := EnsureCanonicalCollectManifest(task, result); err != nil {
-		t.Fatalf("normalize staging-prefixed path: %v", err)
+	task := testCollectTask(writeRoot, "openedx-platform", "openedx-platform")
+	if err := RepairCollectManifest(task); err != nil {
+		t.Fatalf("repair manifest: %v", err)
 	}
 
 	raw, err := os.ReadFile(filepath.Join(writeRoot, shardPackManifestFile))
 	if err != nil {
-		t.Fatalf("read normalized manifest: %v", err)
+		t.Fatalf("read repaired manifest: %v", err)
 	}
-	manifest, err := contracts.ParseShardPackManifest(raw)
+	repaired, err := contracts.ParseShardPackManifest(raw)
 	if err != nil {
-		t.Fatalf("parse normalized manifest: %v", err)
+		t.Fatalf("parse repaired manifest: %v", err)
 	}
-	if len(manifest.Documents) != 1 {
-		t.Fatalf("expected one normalized document, got %d", len(manifest.Documents))
-	}
-	if got := manifest.Documents[0].Path; got != "service-inventory.md" {
-		t.Fatalf("expected normalized relative document path, got %q", got)
-	}
-	if _, err := ValidateCollectManifestAtWriteRoot(writeRoot); err != nil {
-		t.Fatalf("validate normalized manifest readability: %v", err)
+	if got := repaired.Documents[0].Path; got != "service-inventory.md" {
+		t.Fatalf("expected absolute path to normalize to write-root relative path, got %q", got)
 	}
 }
 
@@ -139,11 +142,12 @@ func testCollectTask(writeRoot string, shardID string, repo string) acpruntime.T
 		TaskID:       "task-" + shardID,
 		RunID:        "run-1",
 		StepID:       "refresh.step1.collect",
-		Workspace:    tTempWorkspace(writeRoot),
+		Workspace:    filepath.Clean(filepath.Join(writeRoot, "..", "workspace")),
 		WriteRoot:    writeRoot,
 		ArtifactRoot: "reports/taskruns/run-1/staging/shards/" + shardID,
 		ShardID:      shardID,
 		DomainID:     shardID,
+		AgentRole:    "shard-analyst",
 		RepoScope:    repo,
 		RepoScopes:   []string{repo},
 		PathScopes:   []string{"."},
@@ -151,44 +155,34 @@ func testCollectTask(writeRoot string, shardID string, repo string) acpruntime.T
 	}
 }
 
-func testCollectResult(taskID string, stepID string, runID string, repo string) contracts.TaskResult {
-	return contracts.TaskResult{
-		Meta: contracts.Meta{
-			TaskID:    taskID,
-			StepID:    stepID,
-			RunID:     runID,
-			Runtime:   contracts.RuntimeMeta{Name: "qwen-code", Version: "test"},
-			StartedAt: "2026-04-19T09:00:00Z",
-			RepoScope: repo,
-		},
-		Summary:   "collect canonicalized",
-		Changeset: []contracts.Operation{},
-		Questions: []contracts.Question{
-			{ID: "q.refresh.delta", Text: "What changed?", Priority: "high"},
-		},
-		Coverage: &contracts.Coverage{
-			Observed: []string{"services"},
-			Missing:  []string{"owner mappings", "runtime metrics", "dependencies"},
-			Notes:    []string{"canonicalized from fixture"},
-		},
-	}
-}
-
 func writeFixtureManifest(t *testing.T, writeRoot string, fixtureName string) {
-	t.Helper()
-	raw := readFixture(t, fixtureName)
-	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), raw, 0o644); err != nil {
-		t.Fatalf("write fixture manifest: %v", err)
-	}
-}
-
-func readFixture(t *testing.T, fixtureName string) []byte {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("testdata", fixtureName))
 	if err != nil {
 		t.Fatalf("read fixture %q: %v", fixtureName, err)
 	}
-	return raw
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), raw, 0o644); err != nil {
+		t.Fatalf("write fixture manifest: %v", err)
+	}
+}
+
+func writeManifest(t *testing.T, writeRoot string, manifest contracts.ShardPackManifest) {
+	t.Helper()
+	raw, err := jsonMarshalManifest(manifest)
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), raw, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+}
+
+func jsonMarshalManifest(manifest contracts.ShardPackManifest) ([]byte, error) {
+	raw, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(raw, '\n'), nil
 }
 
 func writeDoc(t *testing.T, writeRoot string, rel string, content string) {
@@ -200,8 +194,4 @@ func writeDoc(t *testing.T, writeRoot string, rel string, content string) {
 	if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
 		t.Fatalf("write doc %q: %v", rel, err)
 	}
-}
-
-func tTempWorkspace(writeRoot string) string {
-	return filepath.Clean(filepath.Join(writeRoot, "..", "workspace"))
 }

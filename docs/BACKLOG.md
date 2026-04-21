@@ -21,34 +21,34 @@ Suggested PR slices:
 - `1D workspace layout validator`
 - `1E workspace validator negative cases`
 
-## Epic 2 — TaskResult schema + validator
+## Epic 2 — Artifact contracts + runtime execution metadata
 Acceptance:
-- `schemas/taskresult.schema.json` зафиксирована как контракт
-- orchestrator валидирует TaskResult до применения изменений
-- orchestrator работает с canonical top-level `questions` / `coverage`; legacy ops отклоняются contract validation
-- невалидный TaskResult отклоняется с понятной ошибкой
+- orchestrator принимает только required step artifacts и persisted `runtime-execution.json`
+- collect semantic state приходит только через `shard-pack-manifest.json.semantic`
+- findings приходят только через `validator-verdict.json`
+- invalid artifact contract завершается с понятной ошибкой `runtime_contract_failed`
 - semantic tests покрывают `observation without evidence`, mixed normalized forms и explicit error surfacing
 
 Suggested PR slices:
 - `2A schema validation wiring`
 - `2B semantic validation rules`
 - `2C validator fixtures/errors`
-- `2D TaskResult normalization policy`
-- `2E normalization + error tests`
+- `2D runtime execution metadata`
+- `2E artifact-only error tests`
 
 ## Epic 3 — Headless runtime adapters (historически стартовал как Claude Code adapter)
 Acceptance:
 - orchestrator запускает headless runtime adapter для workspace (`claude-code` default, `qwen-code` optional)
 - поддерживается передача PromptPack + subagents + skills
 - adapter работает поверх baseline bundle agents/skills/prompts
-- raw TaskResult сохраняется в `reports/taskruns/`
+- persisted runtime execution metadata сохраняется в `reports/taskruns/`
 - required tests используют fake/recorded runner harness вместо live provider binaries
 
 Suggested PR slices:
 - `3A runner interface`
 - `3B process execution + stdout/stderr`
 - `3C taskrun persistence`
-- `3D fake runner + recorded TaskResult harness`
+- `3D fake runner + recorded artifact-only harness`
 
 ## Epic 4 — Model store (entity-per-file)
 Acceptance:
@@ -61,7 +61,7 @@ Acceptance:
 Suggested PR slices:
 - `4A entity/edge file store`
 - `4B alias resolver`
-- `4C changeset apply`
+- `4C semantic snapshot apply`
 - `4D stable ID normalization`
 - `4E golden stable-ID regressions`
 
@@ -153,7 +153,7 @@ Acceptance:
 - отдельный design/contract шаг в backlog для будущего API Q&A
 - фиксируется read-only endpoint `POST /api/qa/ask`
 - response shape содержит `answer`, `citations`, `unresolved`, `confidence`
-- endpoint не меняет workspace и не требует изменения `schemas/taskresult.schema.json`
+- endpoint не меняет workspace и не требует изменения runtime artifact contracts
 
 Suggested PR slices:
 - `11A /api/qa/ask contract + read-only semantics`

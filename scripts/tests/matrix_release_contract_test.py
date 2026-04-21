@@ -4,14 +4,10 @@ import stat
 import subprocess
 import tempfile
 import textwrap
+import time
 import unittest
 from unittest import mock
 from pathlib import Path
-
-import sys
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from yaml_compat import load_yaml_file
 
 
 class MatrixReleaseContractTest(unittest.TestCase):
@@ -169,7 +165,23 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 PY
                 fi
 
+                if [[ "${MATRIX_TEST_FAIL_BEFORE_REPORT:-0}" == "1" ]]; then
+                  mkdir -p "${BATCH_ROOT}/qwen-code/run1"
+                  cat > "${BATCH_ROOT}/qwen-code/run1/run-status.env" <<'EOF'
+                provider=qwen-code
+                run_index=1
+                state=running
+                process_exit=
+                termination_signal=none
+                EOF
+                  exit 1
+                fi
+
                 mkdir -p "${REPORTS_ROOT}" "${BATCH_ROOT}/qwen-code/run1/reports/taskruns"
+
+                if [[ "${MATRIX_TEST_SLEEP_SEC:-0}" != "0" ]]; then
+                  sleep "${MATRIX_TEST_SLEEP_SEC}"
+                fi
 
                 provider_filter="${BATCH_PROVIDER_FILTER:-all}"
                 if [[ -z "${provider_filter}" || "${provider_filter}" == "all" ]]; then
@@ -186,9 +198,13 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 frontend_cancel_matrix_md="${REPORTS_ROOT}/frontend_cancel_e2e_matrix_${BATCH_ID}.md"
 
                 {
-                  printf 'hard_pass\\truntime_parse\\trunner_unavailable\\truntime_timeout\\tinfra_signal_terminated\\tinfra_incomplete_cycle\\tquality_gates_failed\\tsummary_missing\\tprecheck_failed\\tcancellation_like\\truntime_flow_failed\\tsemantic_hard_fail\\toff_topic_hits\\tartifact_source\\tissues\\n'
-                  for _ in $(seq 1 $((provider_count * RUN_COUNT))); do
-                    printf '1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\tsnapshot\\t-\\n'
+                  printf 'hard_pass\\truntime_contract_failed\\trunner_unavailable\\truntime_timeout\\tinfra_signal_terminated\\tinfra_incomplete_cycle\\tquality_gates_failed\\tsummary_missing\\tprecheck_failed\\tcancellation_like\\truntime_flow_failed\\tsemantic_hard_fail\\toff_topic_hits\\tartifact_source\\tissues\\n'
+                  for idx in $(seq 1 $((provider_count * RUN_COUNT))); do
+                    if [[ "${MATRIX_TEST_RUNTIME_FLOW_FAILED:-0}" == "1" && "${PROFILE_ID}" == "single-path" && "${SWEEP_ID}" == "baseline" && "$idx" -eq 1 ]]; then
+                      printf '0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t1\\t0\\t0\\tsnapshot\\treliability:runtime-flow-failed\\n'
+                    else
+                      printf '1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\tsnapshot\\t-\\n'
+                    fi
                   done
                 } > "${run_matrix_tsv}"
 
@@ -226,6 +242,10 @@ class MatrixReleaseContractTest(unittest.TestCase):
                   ]
                 }
                 EOF
+                fi
+
+                if [[ "${MATRIX_TEST_RUNTIME_FLOW_FAILED:-0}" == "1" && "${PROFILE_ID}" == "single-path" && "${SWEEP_ID}" == "baseline" ]]; then
+                  exit 1
                 fi
                 """
             ),
@@ -365,7 +385,11 @@ class MatrixReleaseContractTest(unittest.TestCase):
         return json.loads(verdict_path.read_text(encoding="utf-8"))
 
     def _load_yaml(self, path: Path) -> dict:
-        payload = load_yaml_file(path)
+        try:
+            import yaml  # type: ignore
+        except Exception as exc:  # pragma: no cover - hard fail mirrors runtime requirement
+            self.fail(f"PyYAML is required for parsing {path}: {exc}")
+        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
         self.assertIsInstance(payload, dict, f"expected YAML object in {path}")
         return payload
 
@@ -516,6 +540,138 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 for rec in verdict.get("records", [])
             )
         )
+
+    def test_matrix_records_failed_child_even_without_downstream_reports(self) -> None:
+        matrix_file = self._write_matrix_file(None, include_profiles=["single-path"])
+        matrix_id = "matrix-test-failed-child"
+        result = self._run_matrix(
+            matrix_file,
+            matrix_id,
+            extra_env={"MATRIX_TEST_FAIL_BEFORE_REPORT": "1"},
+            release_mode="0",
+        )
+        self.assertNotEqual(result.returncode, 0)
+
+        records_path = self.e2e_tmp_root / "matrix" / matrix_id / "profile-runs.jsonl"
+        self.assertTrue(records_path.exists(), f"missing matrix records: {records_path}")
+        records = [
+            json.loads(line)
+            for line in records_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        self.assertEqual(1, len(records))
+        self.assertEqual("failed", records[0]["status"])
+
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual("FAIL", verdict["verdict"])
+        self.assertEqual("failed", verdict["records"][0]["status"])
+
+    def test_matrix_reconstructs_failed_record_from_status_files_when_jsonl_is_empty(self) -> None:
+        matrix_file = self._write_matrix_file(None, include_profiles=["single-path"])
+        matrix_id = "matrix-test-status-fallback"
+        result = self._run_matrix(
+            matrix_file,
+            matrix_id,
+            extra_env={
+                "MATRIX_TEST_FAIL_BEFORE_REPORT": "1",
+                "MATRIX_TEST_TRUNCATE_RECORDS_JSONL": "1",
+            },
+            release_mode="0",
+        )
+        self.assertNotEqual(result.returncode, 0)
+
+        records_path = self.e2e_tmp_root / "matrix" / matrix_id / "profile-runs.jsonl"
+        self.assertTrue(records_path.exists(), f"missing matrix records path: {records_path}")
+        self.assertEqual("", records_path.read_text(encoding="utf-8"))
+
+        status_root = self.e2e_tmp_root / "matrix" / matrix_id / "profile-status"
+        status_files = sorted(status_root.glob("*.json"))
+        self.assertTrue(status_files, f"missing profile status files under {status_root}")
+        status_payload = json.loads(status_files[0].read_text(encoding="utf-8"))
+        self.assertEqual("failed", status_payload["status"])
+
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual("FAIL", verdict["verdict"])
+        self.assertEqual(1, len(verdict["records"]))
+        self.assertEqual("failed", verdict["records"][0]["status"])
+
+    def test_matrix_outputs_preserve_runtime_flow_failed_backend_class(self) -> None:
+        matrix_file = self._write_matrix_file(None, include_profiles=["single-path"])
+        matrix_id = "matrix-test-runtime-flow-failed"
+        result = self._run_matrix(
+            matrix_file,
+            matrix_id,
+            extra_env={"MATRIX_TEST_RUNTIME_FLOW_FAILED": "1"},
+            release_mode="0",
+        )
+        self.assertNotEqual(result.returncode, 0)
+
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual("FAIL", verdict["verdict"])
+        self.assertEqual(1, len(verdict["records"]))
+        record = verdict["records"][0]
+        self.assertEqual("failed", record["status"])
+        self.assertEqual(1, record["backend"]["runtime_flow_failed_runs"])
+        self.assertEqual(0, record["backend"]["infra_incomplete_cycle_failures"])
+
+        profile_matrix_tsv = self.e2e_tmp_root / "reports" / f"profile_matrix_{matrix_id}.tsv"
+        self.assertTrue(profile_matrix_tsv.exists(), f"missing profile matrix report: {profile_matrix_tsv}")
+        lines = [line for line in profile_matrix_tsv.read_text(encoding="utf-8").splitlines() if line.strip()]
+        self.assertGreaterEqual(len(lines), 2, f"expected header + row in {profile_matrix_tsv}")
+        header = lines[0].split("\t")
+        values = lines[1].split("\t")
+        row = dict(zip(header, values, strict=False))
+        self.assertEqual("1", row["runtime_flow_failed_runs"])
+        self.assertEqual("0", row["infra_incomplete_cycle_failures"])
+
+    def test_matrix_updates_profile_status_while_child_batch_is_running(self) -> None:
+        matrix_file = self._write_matrix_file(None, include_profiles=["single-path"])
+        matrix_id = "matrix-test-profile-heartbeat"
+        env = self._build_subprocess_env(
+            {
+                "E2E_MATRIX_FILE": str(matrix_file),
+                "BATCH_SCRIPT": str(self.batch_script),
+                "MATRIX_ID": matrix_id,
+                "E2E_MATRIX_RELEASE_MODE": "0",
+                "ACP_CLAUDE_CMD_BIN": "true",
+                "ACP_QWEN_CMD_BIN": "true",
+                "E2E_TMP_ROOT": str(self.e2e_tmp_root),
+                "REPORTS_ROOT": str(self.e2e_tmp_root / "reports"),
+                "MATRIX_ROOT": str(self.e2e_tmp_root / "matrix" / matrix_id),
+                "MATRIX_TEST_SENTINEL": str(self.sentinel_path),
+                "MATRIX_TEST_TIMEOUT_SENTINEL": str(self.timeout_sentinel_path),
+                "MATRIX_TEST_SLEEP_SEC": "3",
+                "MATRIX_PROFILE_STATUS_HEARTBEAT_SEC": "1",
+            }
+        )
+        proc = subprocess.Popen(
+            [str(self.matrix_driver)],
+            cwd=self.repo_root,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            status_path = self.e2e_tmp_root / "matrix" / matrix_id / "profile-status" / "single-path--baseline.json"
+            deadline = time.time() + 5
+            while time.time() < deadline and not status_path.exists():
+                time.sleep(0.1)
+            self.assertTrue(status_path.exists(), f"missing profile status file: {status_path}")
+
+            first_updated_at = json.loads(status_path.read_text(encoding="utf-8"))["updated_at"]
+            changed = False
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                time.sleep(1.1)
+                updated_at = json.loads(status_path.read_text(encoding="utf-8"))["updated_at"]
+                if updated_at != first_updated_at:
+                    changed = True
+                    break
+            self.assertTrue(changed, f"expected profile status heartbeat to update {status_path}")
+        finally:
+            stdout, stderr = proc.communicate(timeout=15)
+        self.assertEqual(0, proc.returncode, msg=stderr or stdout)
 
     def test_non_release_wave1_regression_matrix_allows_two_profiles(self) -> None:
         matrix_file = self._write_matrix_file(

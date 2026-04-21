@@ -10,12 +10,15 @@ source "$PROVENARCH_ROOT/scripts/repos-meta-fields.sh"
 source "$PROVENARCH_ROOT/scripts/timeout-env-keys.sh"
 # shellcheck source=scripts/execution-env-keys.sh
 source "$PROVENARCH_ROOT/scripts/execution-env-keys.sh"
+# shellcheck source=scripts/run-status-heartbeat.sh
+source "$PROVENARCH_ROOT/scripts/run-status-heartbeat.sh"
 TARGET_REPOS_FILE="${TARGET_REPOS_FILE:-}"
 PROFILE_ID="${PROFILE_ID:-}"
 PROFILE_SOURCE_KIND="${PROFILE_SOURCE_KIND:-}"
 PROFILE_SOURCE_KIND_EFFECTIVE="mixed"
 EXPECTED_REPO_COUNT="${EXPECTED_REPO_COUNT:-}"
 TMP_ROOT="${TMP_ROOT:-}"
+RUN_STATUS_FILE="${RUN_STATUS_FILE:-}"
 KEEP_TMP="${KEEP_TMP:-0}"
 ITERATIONS="${ITERATIONS:-1}"
 RUN_QUALITY_GATES="${RUN_QUALITY_GATES:-1}"
@@ -55,6 +58,7 @@ RUNNING_RUNS_DETECTED=0
 RUNNING_RUNS_BASELINE=0
 RUNNING_RUNS_HEADLESS=0
 SUMMARY_RESULT=""
+SUMMARY_WRITTEN="no"
 LAST_PIPELINE_STAGE="not_started"
 LAST_RUNTIME_PROVIDER="unset"
 TIMEOUTS_API_APPLY_BASELINE_STATUS="not_applied"
@@ -165,6 +169,7 @@ on_termination_signal() {
   TERMINATION_SIGNAL="$signal_name"
   FAILURE_REASON="infra_signal_terminated"
   log "received termination signal: $signal_name (last_pipeline_stage=$LAST_PIPELINE_STAGE last_runtime_provider=$LAST_RUNTIME_PROVIDER)"
+  write_terminal_run_status "signal_terminated" "$(signal_exit_code "$signal_name")" "$(signal_status_token "$signal_name")" "$FAILURE_REASON" "$SUMMARY_WRITTEN"
   exit 1
 }
 
@@ -478,6 +483,16 @@ copy_if_exists() {
   fi
 }
 
+copy_tree_if_exists() {
+  local src="$1"
+  local dst="$2"
+  if [[ -d "$src" ]]; then
+    mkdir -p "$(dirname "$dst")"
+    rm -rf "$dst"
+    cp -R "$src" "$dst"
+  fi
+}
+
 snapshot_run_artifacts() {
   local run_id="$1"
   local runtime="$2"
@@ -492,8 +507,8 @@ snapshot_run_artifacts() {
   copy_if_exists "$workspace_path/reports/findings/findings.md" "$dst/reports/findings/findings.md"
   copy_if_exists "$workspace_path/reports/coverage/summary.md" "$dst/reports/coverage/summary.md"
   copy_if_exists "$workspace_path/reports/coverage/open-questions.md" "$dst/reports/coverage/open-questions.md"
-  copy_if_exists "$workspace_path/reports/taskruns/${run_id}.json" "$dst/reports/taskruns/${run_id}.json"
   copy_if_exists "$workspace_path/reports/taskruns/${run_id}-quality.json" "$dst/reports/taskruns/${run_id}-quality.json"
+  copy_tree_if_exists "$workspace_path/reports/taskruns/${run_id}" "$dst/reports/taskruns/${run_id}"
   for taskrun_json in "$workspace_path/reports/taskruns/${run_id}-"*.json; do
     if [[ -f "$taskrun_json" ]]; then
       copy_if_exists "$taskrun_json" "$dst/reports/taskruns/$(basename "$taskrun_json")"
@@ -537,20 +552,19 @@ def metric(name: str) -> int:
     return 0
 
 signal = metric('signal_score')
-changeset = metric('changeset_ops')
-findings = metric('findings_added')
+entities = metric('semantic_entities')
+edges = metric('semantic_edges')
+findings = metric('findings_count')
 questions = metric('questions_count')
 coverage_observed = metric('coverage_observed')
 coverage_missing = metric('coverage_missing')
 warnings = metric('warnings_count')
-entity_upserts = metric('entity_upserts')
-edge_upserts = metric('edge_upserts')
 
 runtime_blob = ",".join(str(item) for item in runtime_versions)
 runtime_lower = runtime_blob.lower()
 mock_flag = 1 if ('mock' in runtime_lower or 'fake' in runtime_lower) else 0
 
-signal_components = changeset + findings + questions + coverage_observed + coverage_missing + entity_upserts + edge_upserts
+signal_components = entities + edges + findings + questions + coverage_observed + coverage_missing
 zero_signal = 1 if signal_components == 0 else 0
 
 domain_collect_steps = 0
@@ -564,7 +578,8 @@ status = str(payload.get('status', ''))
 print("\t".join([
     status,
     str(signal),
-    str(changeset),
+    str(entities),
+    str(edges),
     str(findings),
     str(questions),
     str(coverage_observed),
@@ -683,11 +698,13 @@ if len(question_texts) != len(set(question_texts)):
     sys.exit(5)
 
 critical_marker = "semantic_guard: critical_off_topic_drift in refresh.step1.collect"
-taskrun_glob = os.path.join(workspace, "reports", "taskruns", f"{run_id}-refresh-step1-collect-*.json")
-for taskrun_path in sorted(glob.glob(taskrun_glob)):
+taskrun_glob = os.path.join(workspace, "reports", "taskruns", run_id, "**", "runtime-execution.json")
+for taskrun_path in sorted(glob.glob(taskrun_glob, recursive=True)):
     try:
         payload = json.load(open(taskrun_path, encoding="utf-8"))
     except Exception:
+        continue
+    if str(payload.get("step_id") or "").strip() != "refresh.step1.collect":
         continue
     warnings = payload.get("warnings") or []
     if any(critical_marker in str(item) for item in warnings):
@@ -721,6 +738,7 @@ run_cli_pipeline() {
   else
     LAST_RUNTIME_PROVIDER="fake"
   fi
+  write_running_run_status_heartbeat
 
   local output_path="$LOG_DIR/run-iter${iteration}-${runtime_mode}-${runtime_provider}-${pipeline}.log"
   local quality_path
@@ -764,6 +782,7 @@ run_cli_pipeline() {
     local elapsed_sec=$((SECONDS - run_started_at))
     if (( RUNTIME_HEARTBEAT_SEC > 0 )) && (( elapsed_sec > 0 )) && (( elapsed_sec % RUNTIME_HEARTBEAT_SEC == 0 )) && (( elapsed_sec != last_progress_emit )); then
       log "pipeline progress: iteration=$iteration runtime=$runtime_label pipeline=$pipeline elapsed_sec=$elapsed_sec timeout_sec=$PIPELINE_TIMEOUT_SEC"
+      write_running_run_status_heartbeat
       last_progress_emit="$elapsed_sec"
     fi
   done
@@ -806,9 +825,9 @@ run_cli_pipeline() {
   local metrics
   metrics="$(quality_metrics "$quality_path")"
 
-  local quality_status signal_score changeset findings questions coverage_observed coverage_missing warnings
+  local quality_status signal_score semantic_entities semantic_edges findings questions coverage_observed coverage_missing warnings
   local domain_collect_steps mock_flag zero_signal runtime_versions
-  IFS=$'\t' read -r quality_status signal_score changeset findings questions coverage_observed coverage_missing warnings domain_collect_steps mock_flag zero_signal runtime_versions <<<"$metrics"
+  IFS=$'\t' read -r quality_status signal_score semantic_entities semantic_edges findings questions coverage_observed coverage_missing warnings domain_collect_steps mock_flag zero_signal runtime_versions <<<"$metrics"
 
   if [[ "$quality_status" != "succeeded" ]]; then
     die "quality summary status is not succeeded for run $run_id: $quality_status"
@@ -839,7 +858,7 @@ run_cli_pipeline() {
   snapshot_run_artifacts "$run_id" "$runtime_label" "$pipeline" "$iteration" "$workspace_path"
 
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$signal_score" "$changeset" "$findings" "$questions" "$coverage_observed" "$coverage_missing" "$warnings" "$runtime_versions" "$quality_path" "$output_path" >> "$RUN_RESULTS_TSV"
+    "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$signal_score" "$semantic_entities" "$semantic_edges" "$findings" "$questions" "$coverage_observed" "$coverage_missing" "$warnings" "$runtime_versions" "$quality_path" "$output_path" >> "$RUN_RESULTS_TSV"
 
   LAST_SIGNAL="$signal_score"
   return 0
@@ -955,10 +974,10 @@ write_summary() {
     if [[ ! -s "$RUN_RESULTS_TSV" ]]; then
       echo "- no completed runs recorded"
     else
-      echo "| iteration | runtime_mode | runtime_provider | pipeline | run_id | status | signal | changeset | findings | questions | cov_obs | cov_missing | warnings |"
-      echo "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
-      while IFS=$'\t' read -r iter runtime_mode runtime_provider pipeline run_id status signal changeset findings questions cov_obs cov_missing warnings _runtime_versions _quality_path _run_log; do
-        echo "| $iter | $runtime_mode | $runtime_provider | $pipeline | $run_id | $status | $signal | $changeset | $findings | $questions | $cov_obs | $cov_missing | $warnings |"
+      echo "| iteration | runtime_mode | runtime_provider | pipeline | run_id | status | signal | entities | edges | findings | questions | cov_obs | cov_missing | warnings |"
+      echo "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+      while IFS=$'\t' read -r iter runtime_mode runtime_provider pipeline run_id status signal entities edges findings questions cov_obs cov_missing warnings _runtime_versions _quality_path _run_log; do
+        echo "| $iter | $runtime_mode | $runtime_provider | $pipeline | $run_id | $status | $signal | $entities | $edges | $findings | $questions | $cov_obs | $cov_missing | $warnings |"
       done < "$RUN_RESULTS_TSV"
     fi
     echo
@@ -1022,12 +1041,28 @@ PY
       echo "  3) Fix issues and rerun script from scratch (new tmp workspace)"
     fi
   } > "$SUMMARY_PATH"
+  SUMMARY_WRITTEN="yes"
 }
 
 cleanup() {
   local exit_code="$1"
   stop_server
-  write_summary "$exit_code"
+  SUMMARY_WRITTEN="no"
+  if ! write_summary "$exit_code"; then
+    SUMMARY_WRITTEN="no"
+  fi
+
+  local terminal_state="completed"
+  local terminal_signal="none"
+  local terminal_exit="$exit_code"
+  if [[ -n "$TERMINATION_SIGNAL" ]]; then
+    terminal_state="signal_terminated"
+    terminal_signal="$(signal_status_token "$TERMINATION_SIGNAL")"
+    terminal_exit="$(signal_exit_code "$TERMINATION_SIGNAL")"
+  elif [[ "$exit_code" -ne 0 || "$SUMMARY_RESULT" != "passed" ]]; then
+    terminal_state="process_failed"
+  fi
+  write_terminal_run_status "$terminal_state" "$terminal_exit" "$terminal_signal" "${FAILURE_REASON:-none}" "$SUMMARY_WRITTEN"
 
   if [[ "$exit_code" -ne 0 || "$SUMMARY_RESULT" != "passed" ]]; then
     log "run failed; keeping artifacts for debugging at $TMP_ROOT"
@@ -1126,6 +1161,9 @@ API_BASE="http://127.0.0.1:${API_PORT}"
 SERVER_LOG="$LOG_DIR/serve-fake.log"
 
 log "start API server for validate/init simulation"
+LAST_PIPELINE_STAGE="api_server.bootstrap"
+LAST_RUNTIME_PROVIDER="fake"
+write_running_run_status_heartbeat
 "$ACP_BIN" serve \
   --workspace "$WORKSPACE_BASELINE" \
   --runtime fake \
@@ -1147,6 +1185,8 @@ else
 fi
 
 log "POST /api/workspace/validate"
+LAST_PIPELINE_STAGE="api.workspace.validate"
+write_running_run_status_heartbeat
 curl -fsS -X POST "$API_BASE/api/workspace/validate" > "$VALIDATE_JSON"
 python3 - "$VALIDATE_JSON" "$EXPECTED_REPO_COUNT_RESOLVED" <<'PY'
 import json
@@ -1164,6 +1204,8 @@ print(f"resolved_repos={len(resolved)}")
 PY
 
 log "POST /api/pipeline/init"
+LAST_PIPELINE_STAGE="api.pipeline.init"
+write_running_run_status_heartbeat
 curl -fsS -X POST -H 'Content-Type: application/json' -d '{"trigger":"manual"}' "$API_BASE/api/pipeline/init" > "$API_INIT_START_JSON"
 API_INIT_RUN_ID="$(python3 - "$API_INIT_START_JSON" <<'PY'
 import json
@@ -1198,6 +1240,8 @@ PY
   api_init_elapsed=$((API_INIT_TIMEOUT_SEC - (api_init_deadline - SECONDS)))
   if (( RUNTIME_HEARTBEAT_SEC > 0 )) && (( api_init_elapsed > 0 )) && (( api_init_elapsed % RUNTIME_HEARTBEAT_SEC == 0 )) && (( api_init_elapsed != last_api_init_progress )); then
     log "api init progress: run_id=$API_INIT_RUN_ID status=$init_status elapsed_sec=$api_init_elapsed timeout_sec=$API_INIT_TIMEOUT_SEC"
+    LAST_PIPELINE_STAGE="api.pipeline.init.poll"
+    write_running_run_status_heartbeat
     last_api_init_progress="$api_init_elapsed"
   fi
   sleep 0.25
@@ -1235,6 +1279,9 @@ log "stop API server"
 stop_server
 
 log "bootstrap headless workspace in tmp"
+LAST_PIPELINE_STAGE="headless.workspace.bootstrap"
+LAST_RUNTIME_PROVIDER="$HEADLESS_PROVIDER"
+write_running_run_status_heartbeat
 "$ACP_BIN" init-workspace \
   --workspace "$WORKSPACE_HEADLESS" \
   --repos-file "$RESOLVED_TARGET_REPOS_FILE" >"$LOG_DIR/init-workspace-headless.log" 2>&1
@@ -1248,6 +1295,9 @@ fi
 resolve_effective_timeouts_from_workspace "$WORKSPACE_HEADLESS"
 if [[ "$APPLY_TIMEOUTS_VIA_API" == "1" ]]; then
   log "start temporary API server for timeout apply workspace=headless"
+  LAST_PIPELINE_STAGE="headless.timeouts.apply"
+  LAST_RUNTIME_PROVIDER="$HEADLESS_PROVIDER"
+  write_running_run_status_heartbeat
   HEADLESS_API_PORT="$(allocate_free_port)"
   HEADLESS_API_BASE="http://127.0.0.1:${HEADLESS_API_PORT}"
   HEADLESS_SERVER_LOG="$LOG_DIR/serve-headless-timeouts.log"
@@ -1269,6 +1319,9 @@ else
 fi
 
 log "run runtime cycles: fake + headless(provider=$HEADLESS_PROVIDER)"
+LAST_PIPELINE_STAGE="runtime.cycles"
+LAST_RUNTIME_PROVIDER="$HEADLESS_PROVIDER"
+write_running_run_status_heartbeat
 prev_fake_init_signal=""
 prev_fake_refresh_signal=""
 prev_headless_init_signal=""
@@ -1299,6 +1352,8 @@ fi
 
 if [[ "$RUN_QUALITY_GATES" == "1" ]]; then
   log "run quality gates: make contracts test lint build"
+  LAST_PIPELINE_STAGE="quality_gates"
+  write_running_run_status_heartbeat
   if ! (
     cd "$PROVENARCH_ROOT"
     # Run project gates with neutral runtime env so defaults in tests are stable.

@@ -1,0 +1,32 @@
+{
+  "version": "0.1.0",
+  "domain": "openedx",
+  "name": "Open edX Platform",
+  "description": "Legacy multi-repo constitution payload emitted by qwen step0.",
+  "services": [
+    {
+      "id": "svc.lms",
+      "name": "LMS"
+    }
+  ],
+  "dependencies": [
+    "mysql",
+    "redis"
+  ],
+  "governance": {
+    "owners": [
+      "platform"
+    ]
+  },
+  "coverage": {
+    "observed": [
+      "services"
+    ],
+    "missing": [
+      "dependencies"
+    ],
+    "notes": [
+      "legacy version string shape"
+    ]
+  }
+}

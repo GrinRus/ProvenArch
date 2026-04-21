@@ -126,6 +126,25 @@ func runtimeMetaForRunner(runner acpruntime.Runner) contracts.RuntimeMeta {
 	}
 }
 
+func (e *pipelineExecution) runtimeMetaForStep(stepID string) contracts.RuntimeMeta {
+	if e.runnerResolver != nil {
+		provider, runner, err := e.runnerResolver.RunnerForStep(stepID)
+		if err == nil {
+			meta := runtimeMetaForRunner(runner)
+			if strings.TrimSpace(meta.Name) == "" || meta.Name == "unknown" {
+				if provider != "" {
+					meta.Name = string(provider)
+				}
+			}
+			return meta
+		}
+	}
+	if provider := e.stepProviders.ProviderForStep(stepID); provider != "" {
+		return contracts.RuntimeMeta{Name: string(provider)}
+	}
+	return contracts.RuntimeMeta{Name: "unknown"}
+}
+
 var shardModuleMarkerFiles = map[string]struct{}{
 	"go.mod":          {},
 	"package.json":    {},
@@ -265,7 +284,7 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 			if err == nil {
 				taskrunPath := shardTaskrunPath(e.runID, stepID, domainID, plan.ShardID, summaryState.singleShard)
 				taskrunLabel := shardTaskrunLabel(stepID, domainID, plan.ShardID, summaryState.singleShard)
-				if checkpointErr := summaryState.markCheckpointed(plan, prepared.Task.TaskID, taskrunPath, taskrunLabel, prepared.NormalizedRaw); checkpointErr != nil {
+				if checkpointErr := summaryState.markCheckpointed(plan, prepared.Task.TaskID, taskrunPath, taskrunLabel, prepared.ExecutionRaw); checkpointErr != nil {
 					err = checkpointErr
 				}
 			}
@@ -341,7 +360,7 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 				if err == nil {
 					taskrunPath := shardTaskrunPath(e.runID, stepID, domainID, shard.ShardID, summaryState.singleShard)
 					taskrunLabel := shardTaskrunLabel(stepID, domainID, shard.ShardID, summaryState.singleShard)
-					if checkpointErr := summaryState.markCheckpointed(shard, prepared.Task.TaskID, taskrunPath, taskrunLabel, prepared.NormalizedRaw); checkpointErr != nil {
+					if checkpointErr := summaryState.markCheckpointed(shard, prepared.Task.TaskID, taskrunPath, taskrunLabel, prepared.ExecutionRaw); checkpointErr != nil {
 						err = checkpointErr
 					}
 				}
@@ -496,7 +515,7 @@ func (e *pipelineExecution) loadRuntimeShardSummaryState(
 		if taskrunPath == "" {
 			taskrunPath = shardTaskrunPath(e.runID, stepID, domainID, plan.ShardID, singleShard)
 		}
-		if taskrunPath != "" && e.taskrunExists(taskrunPath) {
+		if taskrunPath != "" && e.runtimeExecutionExists(taskrunPath) {
 			entry.TaskRun = taskrunPath
 			if entry.Status == "pending" {
 				entry.Status = "checkpointed"
@@ -527,7 +546,7 @@ func (e *pipelineExecution) loadPersistedShardSummaryEntries(stepID string, doma
 	return append([]runtimeShardSummaryEntry(nil), summary.Items...), nil
 }
 
-func (e *pipelineExecution) taskrunExists(path string) bool {
+func (e *pipelineExecution) runtimeExecutionExists(path string) bool {
 	if strings.TrimSpace(path) == "" {
 		return false
 	}
@@ -571,14 +590,14 @@ func (e *pipelineExecution) loadReplayableShardResult(
 	if err != nil {
 		return true, runtimeShardRunResult{
 			Plan: plan,
-			Err:  fmt.Errorf("load persisted taskrun %q: %w", taskrunPath, err),
+			Err:  fmt.Errorf("load persisted runtime execution %q: %w", taskrunPath, err),
 		}
 	}
-	prepared, err := loadPreparedExecutionFromPersistedTaskRun(raw)
+	prepared, err := loadPreparedExecutionFromPersistedRuntimeExecution(raw)
 	if err != nil {
 		return true, runtimeShardRunResult{
 			Plan: plan,
-			Err:  fmt.Errorf("decode persisted taskrun %q: %w", taskrunPath, err),
+			Err:  fmt.Errorf("decode persisted runtime execution %q: %w", taskrunPath, err),
 		}
 	}
 	prepared.Task.StepID = stepID
@@ -598,7 +617,7 @@ func (e *pipelineExecution) loadReplayableShardResult(
 	if strings.TrimSpace(prepared.Task.Workspace) == "" {
 		prepared.Task.Workspace = e.workspace.Path
 	}
-	artifactRoot, writeRoot, readContextRoots, artifactErr := e.runtimeArtifactContext(stepID, prepared.Task.ShardID, prepared.Task.RepoScopes)
+	artifactRoot, writeRoot, draftFinalRoot, readContextRoots, artifactErr := e.runtimeArtifactContext(stepID, prepared.Task.ShardID, prepared.Task.RepoScopes)
 	if artifactErr != nil {
 		return true, runtimeShardRunResult{
 			Plan: plan,
@@ -607,9 +626,12 @@ func (e *pipelineExecution) loadReplayableShardResult(
 	}
 	prepared.Task.ArtifactRoot = artifactRoot
 	prepared.Task.WriteRoot = writeRoot
+	prepared.Task.DraftFinalRoot = draftFinalRoot
 	prepared.Task.ReadContextRoots = append([]string(nil), readContextRoots...)
 	prepared.Task.AgentRole = runtimeAgentRole(stepID)
-	e.logInfo(stepID, domainID, "shard loaded from persisted taskrun", map[string]any{
+	prepared.Task.StepContract = runtimeStepContract(stepID)
+	prepared.Task.ExpectedArtifacts = append([]string(nil), runtimeExpectedArtifacts(stepID)...)
+	e.logInfo(stepID, domainID, "shard loaded from persisted runtime execution", map[string]any{
 		"shard_id":     plan.ShardID,
 		"task_id":      prepared.Task.TaskID,
 		"taskrun_path": taskrunPath,
@@ -651,7 +673,7 @@ func (s *runtimeShardSummaryState) markCheckpointed(
 ) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.execution.persistTaskRun(taskrunPath, taskrunLabel, raw); err != nil {
+	if err := s.execution.persistRuntimeExecutionArtifact(taskrunPath, taskrunLabel, raw); err != nil {
 		return err
 	}
 	s.updateLocked(plan, "checkpointed", taskID, taskrunPath, "")
@@ -750,7 +772,7 @@ func (e *pipelineExecution) persistShardPlan(
 
 	payload := runtimeShardPlanArtifact{
 		Version:       1,
-		Meta:          runtimeArtifactMeta{Runtime: runtimeMetaForRunner(e.runner)},
+		Meta:          runtimeArtifactMeta{Runtime: e.runtimeMetaForStep(stepID)},
 		RunID:         e.runID,
 		StepID:        stepID,
 		DomainID:      strings.TrimSpace(domainID),
@@ -799,7 +821,7 @@ func (e *pipelineExecution) persistShardSummary(stepID string, domainID string, 
 	}
 	summary := runtimeShardSummary{
 		Version:       1,
-		Meta:          runtimeArtifactMeta{Runtime: runtimeMetaForRunner(e.runner)},
+		Meta:          runtimeArtifactMeta{Runtime: e.runtimeMetaForStep(stepID)},
 		RunID:         e.runID,
 		StepID:        stepID,
 		DomainID:      strings.TrimSpace(domainID),
@@ -859,26 +881,14 @@ func normalizeAndValidateShardSummaryItems(items []runtimeShardSummaryEntry) ([]
 }
 
 func shardTaskrunPath(runID string, stepID string, domainID string, shardID string, singleShard bool) string {
-	if singleShard {
-		return singleShardTaskrunPath(runID, stepID, domainID)
-	}
-	stepSlug := strings.ReplaceAll(stepID, ".", "-")
-	shardSlug := sanitizeDomainArtifactSlug(shardID)
-	if strings.TrimSpace(shardSlug) == "" {
-		shardSlug = "shard"
-	}
-	if strings.TrimSpace(domainID) != "" {
-		return fmt.Sprintf("reports/taskruns/%s-%s-domain-%s-shard-%s.json", runID, stepSlug, sanitizeDomainArtifactSlug(domainID), shardSlug)
-	}
-	return fmt.Sprintf("reports/taskruns/%s-%s-shard-%s.json", runID, stepSlug, shardSlug)
+	_ = domainID
+	_ = singleShard
+	return runtimeExecutionMetadataPath(runID, stepID, shardID)
 }
 
 func singleShardTaskrunPath(runID string, stepID string, domainID string) string {
-	stepSlug := strings.ReplaceAll(stepID, ".", "-")
-	if strings.TrimSpace(domainID) != "" {
-		return fmt.Sprintf("reports/taskruns/%s-%s-domain-%s.json", runID, stepSlug, sanitizeDomainArtifactSlug(domainID))
-	}
-	return fmt.Sprintf("reports/taskruns/%s-%s.json", runID, stepSlug)
+	_ = domainID
+	return runtimeExecutionMetadataPath(runID, stepID, "")
 }
 
 func shardTaskrunLabel(stepID string, domainID string, shardID string, singleShard bool) string {

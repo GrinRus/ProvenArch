@@ -405,6 +405,73 @@ func TestRunPipelineBootstrapSkeleton(t *testing.T) {
 	}
 }
 
+func TestRunReconcilesStaleRunningHistoryBeforeNewRun(t *testing.T) {
+	t.Parallel()
+
+	root := writeWorkspace(t)
+	historyPath := filepath.Join(root, "reports", "taskruns", "run-history.json")
+	if err := os.MkdirAll(filepath.Dir(historyPath), 0o755); err != nil {
+		t.Fatalf("mkdir run history dir: %v", err)
+	}
+	historyPayload := map[string]any{
+		"version": 1,
+		"items": []map[string]any{
+			{
+				"run_id":       "run_stale_running",
+				"pipeline":     "refresh",
+				"status":       "running",
+				"started_at":   "2026-04-19T12:00:00Z",
+				"current_step": "refresh.step1.collect",
+			},
+		},
+	}
+	rawHistory, err := json.Marshal(historyPayload)
+	if err != nil {
+		t.Fatalf("marshal run history: %v", err)
+	}
+	if err := os.WriteFile(historyPath, rawHistory, 0o644); err != nil {
+		t.Fatalf("write run history: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"run", "--workspace", root, "--pipeline", "init", "--runtime", "fake", "--non-interactive"}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d: stderr=%q", exitCodeOK, code, stderr.String())
+	}
+
+	content, err := os.ReadFile(historyPath)
+	if err != nil {
+		t.Fatalf("read updated run history: %v", err)
+	}
+	var snapshot struct {
+		Items []struct {
+			RunID     string `json:"run_id"`
+			Status    string `json:"status"`
+			ErrorCode string `json:"error_code"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(content, &snapshot); err != nil {
+		t.Fatalf("decode updated run history: %v", err)
+	}
+	foundReconciled := false
+	foundSucceeded := false
+	for _, item := range snapshot.Items {
+		if item.RunID == "run_stale_running" {
+			foundReconciled = item.Status == "failed" && item.ErrorCode == "run_reconciled_after_restart"
+		}
+		if strings.HasPrefix(item.RunID, "run_") && item.RunID != "run_stale_running" && item.Status == "succeeded" {
+			foundSucceeded = true
+		}
+	}
+	if !foundReconciled {
+		t.Fatalf("expected stale running run to be reconciled before new run, history=%s", string(content))
+	}
+	if !foundSucceeded {
+		t.Fatalf("expected new run to succeed after reconciliation, history=%s", string(content))
+	}
+}
+
 func TestServeBootstrapSkeleton(t *testing.T) {
 	t.Parallel()
 
@@ -710,7 +777,7 @@ func TestRunHeadlessReturnsRunnerUnavailableWhenCommandMissing(t *testing.T) {
 	}
 }
 
-func TestServeHeadlessQwenReturnsRunnerUnavailableWhenCommandMissing(t *testing.T) {
+func TestServeHeadlessQwenDryRunDoesNotPreflightMissingCommand(t *testing.T) {
 	root := writeWorkspace(t)
 	t.Setenv("ACP_QWEN_CMD", "definitely-missing-acp-qwen-command")
 
@@ -723,14 +790,14 @@ func TestServeHeadlessQwenReturnsRunnerUnavailableWhenCommandMissing(t *testing.
 		"--runtime-provider", "qwen-code",
 		"--dry-run",
 	}, &stdout, &stderr)
-	if code != exitCodeValidation {
-		t.Fatalf("expected exit code %d, got %d", exitCodeValidation, code)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d: stderr=%q", exitCodeOK, code, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "runner_unavailable") {
-		t.Fatalf("expected runner_unavailable diagnostics, got %q", stderr.String())
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr for dry-run without preflight, got %q", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "qwen-code") {
-		t.Fatalf("expected qwen-code diagnostics, got %q", stderr.String())
+	if !strings.Contains(stdout.String(), "runtime provider: qwen-code") {
+		t.Fatalf("expected qwen-code output, got %q", stdout.String())
 	}
 }
 
@@ -1087,42 +1154,72 @@ if raw:
     except Exception:
         task = {}
 
-task_id = first_non_empty(task, ["task_id", "TaskID", "taskId"]) or from_prompt("TaskID") or from_prompt("task_id") or "task"
-step_id = first_non_empty(task, ["step_id", "StepID", "stepId"]) or from_prompt("StepID") or from_prompt("step_id") or "init.step1.collect"
-run_id = first_non_empty(task, ["run_id", "RunID", "runId"]) or from_prompt("RunID") or from_prompt("run_id")
-workspace = first_non_empty(task, ["workspace", "Workspace"]) or from_prompt("workspace") or from_prompt("Workspace")
-write_root = first_non_empty(task, ["write_root", "WriteRoot", "writeRoot"]) or from_prompt("write_root") or from_prompt("WriteRoot")
-artifact_root = first_non_empty(task, ["artifact_root", "ArtifactRoot", "artifactRoot"]) or from_prompt("artifact_root") or from_prompt("ArtifactRoot")
-shard_id = first_non_empty(task, ["shard_id", "ShardID", "shardId"]) or from_prompt("shard_id") or from_prompt("ShardID") or slugify(step_id)
-repo_scopes = first_non_empty_list(task, ["repo_scopes", "RepoScopes", "repoScopes"])
+task_id = first_non_empty(task, ["task_id", "TaskID"]) or from_prompt("TaskID") or from_prompt("task_id") or "task"
+step_id = first_non_empty(task, ["step_id", "StepID"]) or from_prompt("StepID") or from_prompt("step_id") or "init.step1.collect"
+run_id = first_non_empty(task, ["run_id", "RunID"]) or from_prompt("RunID") or from_prompt("run_id")
+write_root = first_non_empty(task, ["write_root", "WriteRoot"]) or from_prompt("write_root") or from_prompt("WriteRoot")
+artifact_root = first_non_empty(task, ["artifact_root", "ArtifactRoot"]) or from_prompt("artifact_root") or from_prompt("ArtifactRoot")
+draft_root = first_non_empty(task, ["draft_final_root", "DraftFinalRoot"]) or from_prompt("draft_final_root") or from_prompt("DraftFinalRoot")
+step_contract = first_non_empty(task, ["step_contract", "StepContract"]) or from_prompt("step_contract") or from_prompt("StepContract")
+agent_role = first_non_empty(task, ["agent_role", "AgentRole"]) or from_prompt("agent_role") or from_prompt("AgentRole") or "architect"
+shard_id = first_non_empty(task, ["shard_id", "ShardID"]) or from_prompt("shard_id") or from_prompt("ShardID") or slugify(step_id)
+repo_scopes = first_non_empty_list(task, ["repo_scopes", "RepoScopes"])
 if not repo_scopes:
-    repo_scope = first_non_empty(task, ["repo_scope", "RepoScope", "repoScope"]) or from_prompt("repo_scope") or from_prompt("RepoScope")
+    repo_scope = first_non_empty(task, ["repo_scope", "RepoScope"]) or from_prompt("repo_scope") or from_prompt("RepoScope")
     if repo_scope:
         repo_scopes = [repo_scope]
-path_scopes = first_non_empty_list(task, ["path_scopes", "PathScopes", "pathScopes"])
-if not write_root and workspace:
-    write_root = workspace
-if not write_root:
-    write_root = os.getcwd()
-if write_root:
+path_scopes = first_non_empty_list(task, ["path_scopes", "PathScopes"])
+
+def write_runtime_draft(manifest_name, draft_name, canonical_path, kind, title):
+    if not write_root or not draft_root:
+        return
     os.makedirs(write_root, exist_ok=True)
-    manifest_artifact_root = artifact_root.strip() if isinstance(artifact_root, str) else ""
-    if not manifest_artifact_root and workspace:
-        try:
-            candidate = os.path.relpath(write_root, workspace)
-            if candidate and not candidate.startswith(".."):
-                manifest_artifact_root = candidate
-        except Exception:
-            manifest_artifact_root = ""
-    if not manifest_artifact_root:
-        try:
-            candidate = os.path.relpath(write_root, os.getcwd())
-            if candidate and not candidate.startswith(".."):
-                manifest_artifact_root = candidate
-        except Exception:
-            manifest_artifact_root = ""
-    if not manifest_artifact_root:
-        manifest_artifact_root = "."
+    os.makedirs(draft_root, exist_ok=True)
+    with open(os.path.join(draft_root, draft_name), "w", encoding="utf-8") as handle:
+        handle.write("# Stub Draft\n")
+    manifest = {
+        "version": 1,
+        "run_id": run_id or "run-1",
+        "step_id": step_id,
+        "step_contract": step_contract or "draft",
+        "agent_role": agent_role,
+        "summary": "stub runtime draft",
+        "outputs": [
+            {
+                "path": draft_name,
+                "canonical_path": canonical_path,
+                "kind": kind,
+                "title": title,
+            }
+        ],
+    }
+    with open(os.path.join(write_root, manifest_name), "w", encoding="utf-8") as handle:
+        json.dump(manifest, handle)
+
+if step_id == "init.step0.constitution":
+    write_runtime_draft("constitution-draft.json", "overview.md", "charter/overview.md", "charter", "Stub Constitution")
+elif step_id in {"init.step2.asis_docs", "refresh.step2.asis_docs"}:
+    write_runtime_draft("asis-draft-manifest.json", "overview.md", "reports/as-is/overview.md", "report", "Stub As-Is Overview")
+elif step_id in {"init.step3.findings", "refresh.step3.findings"} and write_root:
+    os.makedirs(write_root, exist_ok=True)
+    verdict = {
+        "version": 1,
+        "run_id": run_id or "run-1",
+        "generated_at": "2026-04-21T10:00:00Z",
+        "verdict": "PASS",
+        "summary": "stub validator verdict",
+        "checked_paths": ["reports/taskruns/" + (run_id or "run-1") + "/staging/final/final-run-index.json"],
+        "fixed_paths": [],
+        "findings": [],
+        "questions": [],
+    }
+    with open(os.path.join(write_root, "validator-verdict.json"), "w", encoding="utf-8") as handle:
+        json.dump(verdict, handle)
+elif step_id in {"init.step4.proposals", "refresh.step4.proposals"}:
+    write_runtime_draft("proposals-draft-manifest.json", "proposal.md", "proposals/proposal-baseline/proposal.md", "proposal", "Stub Proposal")
+
+if step_id in {"init.step1.collect", "refresh.step1.collect"} and write_root:
+    os.makedirs(write_root, exist_ok=True)
     document_name = slugify(shard_id) + ".md"
     document_id = "doc." + slugify(shard_id)
     citation_id = "cite." + slugify(shard_id)
@@ -1135,7 +1232,7 @@ if write_root:
         "step_id": step_id,
         "shard_id": shard_id,
         "agent_role": "shard-analyst",
-        "artifact_root": manifest_artifact_root,
+        "artifact_root": write_root,
         "repo_scopes": repo_scopes,
         "path_scopes": path_scopes,
         "summary": "stub shard pack",
@@ -1160,7 +1257,7 @@ if write_root:
                 "document_ids": [document_id]
             }
         ],
-        "compatibility": {
+        "semantic": {
             "coverage": {
                 "observed": ["stub"],
                 "missing": ["owner mappings"],
@@ -1174,21 +1271,6 @@ if write_root:
     }
     with open(os.path.join(write_root, "shard-pack-manifest.json"), "w", encoding="utf-8") as handle:
         json.dump(manifest, handle)
-payload = {
-    "meta": {
-        "task_id": task_id,
-        "step_id": step_id,
-        "run_id": run_id,
-        "runtime": {
-            "name": "` + runtimeName + `",
-            "version": "stub"
-        },
-        "started_at": "2026-04-03T12:00:00Z"
-    },
-    "summary": "stub taskresult",
-    "changeset": []
-}
-sys.stdout.write(json.dumps(payload))
 PY
 `
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {

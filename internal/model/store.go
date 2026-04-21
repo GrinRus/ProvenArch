@@ -21,19 +21,15 @@ type Store struct {
 
 type ApplyReport struct {
 	UpsertedEntities int
-	RemovedEntities  int
 	UpsertedEdges    int
-	RemovedEdges     int
 	RemappedIDs      map[string]string
-	Findings         []contracts.Finding
-	DocArtifacts     []contracts.DocArtifact
 }
 
 func NewStore(ws workspace.Root) Store {
 	return Store{workspace: ws}
 }
 
-func (s Store) ApplyChangeset(result contracts.TaskResult) (ApplyReport, error) {
+func (s Store) ApplySemanticSnapshot(snapshot contracts.SemanticSnapshot) (ApplyReport, error) {
 	report := ApplyReport{RemappedIDs: map[string]string{}}
 
 	existingEntities, err := s.loadEntityMap()
@@ -46,99 +42,62 @@ func (s Store) ApplyChangeset(result contracts.TaskResult) (ApplyReport, error) 
 			existingTeams[id] = struct{}{}
 		}
 	}
-	incomingTeams := collectIncomingTeamIDs(result.Changeset)
+	incomingTeams := collectIncomingTeamIDs(snapshot.Entities)
 
-	for _, op := range result.Changeset {
-		switch op.Op {
-		case "upsert_entity":
-			if op.Entity == nil {
-				return report, errors.New("upsert_entity operation requires entity")
-			}
-			entity := *op.Entity
-			originalIncomingID := entity.ID
-			entity.ID = normalizeCanonicalID(entity.ID)
-			entity.OwnerTeamID = normalizeCanonicalID(entity.OwnerTeamID)
-			if originalIncomingID != entity.ID {
-				report.RemappedIDs[originalIncomingID] = entity.ID
-				entity.Aliases = appendUnique(entity.Aliases, originalIncomingID)
-			}
-			if err := validateOwnerTeamLink(entity, existingTeams, incomingTeams); err != nil {
-				return report, err
-			}
+	for _, entity := range snapshot.Entities {
+		originalIncomingID := entity.ID
+		entity.ID = normalizeCanonicalID(entity.ID)
+		entity.OwnerTeamID = normalizeCanonicalID(entity.OwnerTeamID)
+		if originalIncomingID != entity.ID {
+			report.RemappedIDs[originalIncomingID] = entity.ID
+			entity.Aliases = appendUnique(entity.Aliases, originalIncomingID)
+		}
+		if err := validateOwnerTeamLink(entity, existingTeams, incomingTeams); err != nil {
+			return report, err
+		}
 
-			originalID := entity.ID
-			if existing, exists := existingEntities[entity.ID]; exists {
-				if shouldRemapCollision(existing, entity) {
-					repoSlug := extractEvidenceRepoSlug(entity.Provenance.Evidence)
-					entity.ID = fmt.Sprintf("%s.repo-%s", originalID, repoSlug)
-					entity.Aliases = appendUnique(entity.Aliases, originalID)
-					report.RemappedIDs[originalID] = entity.ID
-				}
-			}
-
-			if err := s.writeYAML(filepath.Join("model/entities", safeFileName(entity.ID)+".yaml"), entity); err != nil {
-				return report, fmt.Errorf("write entity %q: %w", entity.ID, err)
-			}
-			existingEntities[entity.ID] = entity
-			if entity.Type == "team" {
-				existingTeams[entity.ID] = struct{}{}
-			}
-			report.UpsertedEntities++
-		case "remove_entity":
-			if strings.TrimSpace(op.EntityID) == "" {
-				return report, errors.New("remove_entity operation requires entity_id")
-			}
-			entityID := normalizeCanonicalID(op.EntityID)
-			if err := s.removeFile(filepath.Join("model/entities", safeFileName(entityID)+".yaml")); err != nil {
-				return report, err
-			}
-			delete(existingEntities, entityID)
-			delete(existingTeams, entityID)
-			report.RemovedEntities++
-		case "upsert_edge":
-			if op.Edge == nil {
-				return report, errors.New("upsert_edge operation requires edge")
-			}
-			edge := *op.Edge
-			originalFrom := edge.From
-			originalTo := edge.To
-			edge.From = normalizeCanonicalID(edge.From)
-			edge.To = normalizeCanonicalID(edge.To)
-			if remapped, ok := report.RemappedIDs[originalFrom]; ok {
-				edge.From = remapped
-			}
-			if remapped, ok := report.RemappedIDs[originalTo]; ok {
-				edge.To = remapped
-			}
-			if remapped, ok := report.RemappedIDs[edge.From]; ok {
-				edge.From = remapped
-			}
-			if remapped, ok := report.RemappedIDs[edge.To]; ok {
-				edge.To = remapped
-			}
-			edge.ID = canonicalEdgeID(edge.From, edge.Type, edge.To)
-			if err := s.writeYAML(filepath.Join("model/edges", safeFileName(edge.ID)+".yaml"), edge); err != nil {
-				return report, fmt.Errorf("write edge %q: %w", edge.ID, err)
-			}
-			report.UpsertedEdges++
-		case "remove_edge":
-			if strings.TrimSpace(op.EdgeID) == "" {
-				return report, errors.New("remove_edge operation requires edge_id")
-			}
-			edgeID := normalizeCanonicalID(op.EdgeID)
-			if err := s.removeFile(filepath.Join("model/edges", safeFileName(edgeID)+".yaml")); err != nil {
-				return report, err
-			}
-			report.RemovedEdges++
-		case "add_finding":
-			if op.Finding != nil {
-				report.Findings = append(report.Findings, *op.Finding)
-			}
-		case "add_doc_artifact":
-			if op.DocArtifact != nil {
-				report.DocArtifacts = append(report.DocArtifacts, *op.DocArtifact)
+		originalID := entity.ID
+		if existing, exists := existingEntities[entity.ID]; exists {
+			if shouldRemapCollision(existing, entity) {
+				repoSlug := extractEvidenceRepoSlug(entity.Provenance.Evidence)
+				entity.ID = fmt.Sprintf("%s.repo-%s", originalID, repoSlug)
+				entity.Aliases = appendUnique(entity.Aliases, originalID)
+				report.RemappedIDs[originalID] = entity.ID
 			}
 		}
+
+		if err := s.writeYAML(filepath.Join("model/entities", safeFileName(entity.ID)+".yaml"), entity); err != nil {
+			return report, fmt.Errorf("write entity %q: %w", entity.ID, err)
+		}
+		existingEntities[entity.ID] = entity
+		if entity.Type == "team" {
+			existingTeams[entity.ID] = struct{}{}
+		}
+		report.UpsertedEntities++
+	}
+
+	for _, edge := range snapshot.Edges {
+		originalFrom := edge.From
+		originalTo := edge.To
+		edge.From = normalizeCanonicalID(edge.From)
+		edge.To = normalizeCanonicalID(edge.To)
+		if remapped, ok := report.RemappedIDs[originalFrom]; ok {
+			edge.From = remapped
+		}
+		if remapped, ok := report.RemappedIDs[originalTo]; ok {
+			edge.To = remapped
+		}
+		if remapped, ok := report.RemappedIDs[edge.From]; ok {
+			edge.From = remapped
+		}
+		if remapped, ok := report.RemappedIDs[edge.To]; ok {
+			edge.To = remapped
+		}
+		edge.ID = canonicalEdgeID(edge.From, edge.Type, edge.To)
+		if err := s.writeYAML(filepath.Join("model/edges", safeFileName(edge.ID)+".yaml"), edge); err != nil {
+			return report, fmt.Errorf("write edge %q: %w", edge.ID, err)
+		}
+		report.UpsertedEdges++
 	}
 
 	return report, nil
@@ -239,14 +198,11 @@ func (s Store) removeFile(relPath string) error {
 	return nil
 }
 
-func collectIncomingTeamIDs(changeset []contracts.Operation) map[string]struct{} {
+func collectIncomingTeamIDs(entities []contracts.Entity) map[string]struct{} {
 	ids := map[string]struct{}{}
-	for _, op := range changeset {
-		if op.Op != "upsert_entity" || op.Entity == nil {
-			continue
-		}
-		if op.Entity.Type == "team" && strings.TrimSpace(op.Entity.ID) != "" {
-			ids[normalizeCanonicalID(op.Entity.ID)] = struct{}{}
+	for _, entity := range entities {
+		if entity.Type == "team" && strings.TrimSpace(entity.ID) != "" {
+			ids[normalizeCanonicalID(entity.ID)] = struct{}{}
 		}
 	}
 	return ids

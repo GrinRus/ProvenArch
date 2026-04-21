@@ -88,6 +88,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                             "2",
                             "1",
                             "0",
+                            "0",
                             "qwen-code@stub",
                             "reports/taskruns/init-run-quality.json",
                             "reports",
@@ -108,6 +109,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                             "2",
                             "1",
                             "0",
+                            "0",
                             "qwen-code@stub",
                             "reports/taskruns/refresh-run-quality.json",
                             "reports",
@@ -119,11 +121,11 @@ class BatchFailureClassificationTest(unittest.TestCase):
         )
         write_text(
             run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
-            '{"level":"error","error_code":"runner_parse_failed","message":"provider returned invalid envelope"}\n',
+            '{"level":"error","error_code":"runtime_contract_failed","message":"provider did not produce required artifacts"}\n',
         )
         write_text(
             run_dir / "arch-workspace/reports/taskruns/raw/runtime.stderr.txt",
-            "API Error: 403 permission_error\nrunner_parse_failed\n",
+            "artifact validation failed\nruntime_contract_failed\n",
         )
         self._write_snapshot(run_dir, "init-run", "init")
         self._write_snapshot(run_dir, "refresh-run", "refresh")
@@ -195,11 +197,13 @@ class BatchFailureClassificationTest(unittest.TestCase):
         quality_payload = {
             "runtime_versions": ["qwen-code@stub"],
             "totals": {
-                "changeset_ops": 1,
-                "findings_added": 0 if pipeline == "init" else 1,
-                "questions_count": 1,
-                "coverage_observed": 2,
-                "coverage_missing": 1,
+                "signal_score": 8 if pipeline == "init" else 9,
+                "semantic_entities": 1,
+                "semantic_edges": 0 if pipeline == "init" else 1,
+                "findings_count": 1,
+                "questions_count": 2,
+                "coverage_observed": 1,
+                "coverage_missing": 0,
                 "warnings_count": 0,
             },
             "steps": [
@@ -211,16 +215,80 @@ class BatchFailureClassificationTest(unittest.TestCase):
         }
         write_json(reports_root / f"taskruns/{run_id}-quality.json", quality_payload)
         taskrun_payload = {
-            "meta": {
-                "runtime": {"name": "qwen-code"},
-                "step_id": f"{pipeline}.step1.collect" if pipeline == "init" else f"{pipeline}.step3.findings",
-            },
-            "changeset": [],
+            "version": 1,
+            "task_id": f"task-{run_id}-{pipeline}",
+            "run_id": run_id,
+            "step_id": f"{pipeline}.step1.collect" if pipeline == "init" else f"{pipeline}.step3.findings",
+            "provider": "qwen-code",
+            "started_at": "2026-04-20T00:00:00Z",
+            "finished_at": "2026-04-20T00:00:01Z",
+            "status": "failed" if pipeline == "init" else "succeeded",
+            "repo_scopes": ["demo-repo"],
+            "path_scopes": ["src"],
         }
+        if pipeline == "init":
+            taskrun_payload["shard_id"] = "domain-a"
         write_json(
-            reports_root / f"taskruns/{run_id}-{pipeline}-step{'1-collect' if pipeline == 'init' else '3-findings'}.json",
+            reports_root / f"taskruns/{run_id}/runtime/{pipeline}-step{'1-collect' if pipeline == 'init' else '3-findings'}/runtime-execution.json",
             taskrun_payload,
         )
+        semantic_root = reports_root / "taskruns" / run_id
+        if pipeline == "refresh":
+            write_json(
+                semantic_root / "staging" / "shards" / "domain-a" / "shard-pack-manifest.json",
+                {
+                    "version": 1,
+                    "run_id": run_id,
+                    "step_id": "refresh.step1.collect",
+                    "shard_id": "domain-a",
+                    "domain_id": "domain-a",
+                    "agent_role": "shard-analyst",
+                    "artifact_root": "reports/taskruns/refresh-run/staging/shards/domain-a",
+                    "repo_scopes": ["demo-repo"],
+                    "path_scopes": ["src"],
+                    "documents": [
+                        {
+                            "id": "doc.arch",
+                            "title": "Architecture",
+                            "path": "architecture.md",
+                            "kind": "report",
+                        }
+                    ],
+                    "semantic": {
+                        "coverage": {
+                            "observed": ["services"],
+                            "missing": [],
+                            "notes": ["fixture"],
+                        },
+                        "questions": [{"id": "q.owner.service", "text": "Who owns the materialized service?"}],
+                        "entities": [],
+                        "edges": [],
+                        "findings": [],
+                    },
+                },
+            )
+            write_json(
+                semantic_root / "validator" / "validator-verdict.json",
+                {
+                    "version": 1,
+                    "run_id": run_id,
+                    "step_id": "refresh.step3.findings",
+                    "generated_at": "2026-04-20T00:00:01Z",
+                    "verdict": "PASS",
+                    "summary": "fixture verdict",
+                    "checked_paths": ["reports/as-is/overview.md"],
+                    "fixed_paths": [],
+                    "findings": [
+                        {
+                            "id": "finding.owner.missing",
+                            "title": "Missing owner mapping",
+                            "severity": "medium",
+                            "description": "owner_team_id is unknown",
+                        }
+                    ],
+                    "questions": [{"id": "q.owner.service", "text": "Who owns the materialized service?"}],
+                },
+            )
 
     def _create_incomplete_fixture_run_dir(self, run_dir: Path) -> None:
         self._create_fixture_run_dir(run_dir)
@@ -380,6 +448,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                             "2",
                             "1",
                             "0",
+                            "0",
                             "qwen-code@stub",
                             "reports/taskruns/init-run-quality.json",
                             "reports",
@@ -400,6 +469,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                             "2",
                             "1",
                             "0",
+                            "0",
                             "qwen-code@stub",
                             "reports/taskruns/refresh-run-quality.json",
                             "reports",
@@ -418,7 +488,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
         ]
         write_json(refresh_quality_path, refresh_quality)
 
-    def test_python_report_prefers_runtime_parse_over_incomplete_cycle_classifier(self) -> None:
+    def test_python_report_prefers_runtime_contract_failed_over_incomplete_cycle_classifier(self) -> None:
         result = self.module.evaluate_run(
             provider="qwen-code",
             run_index=1,
@@ -431,34 +501,9 @@ class BatchFailureClassificationTest(unittest.TestCase):
                 "process_exit": "1",
             },
         )
-        self.assertEqual("runtime_parse", result.failure_class)
-        self.assertTrue(result.runtime_parse)
+        self.assertEqual("runtime_contract_failed", result.failure_class)
+        self.assertTrue(result.runtime_contract_failed)
         self.assertTrue(result.infra_incomplete_cycle)
-
-    def test_python_report_classifies_collect_artifact_contract_failure_separately(self) -> None:
-        run_dir = self.root / "run-artifact-contract-python"
-        self._create_fixture_run_dir(run_dir)
-        write_text(
-            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
-            '{"level":"error","error_code":"runner_parse_failed","message":"headless provider \\"qwen-code\\" produced invalid collect artifacts: collect artifacts remained invalid after one repair attempt"}\n',
-        )
-
-        result = self.module.evaluate_run(
-            provider="qwen-code",
-            run_index=1,
-            run_dir=run_dir,
-            preflight={},
-            classification_row={
-                "failure_class": "infra_incomplete_cycle",
-                "failure_subclass": "none",
-                "cancellation_like": "0",
-                "process_exit": "1",
-            },
-        )
-
-        self.assertEqual("runtime_artifact_contract", result.failure_class)
-        self.assertTrue(result.runtime_artifact_contract)
-        self.assertFalse(result.runtime_parse)
 
     def test_python_report_prefers_runtime_timeout_over_runner_unavailable_when_timeout_signaled(self) -> None:
         run_dir = self.root / "run-timeout-python"
@@ -506,285 +551,6 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual("runtime_timeout", result.failure_class)
         self.assertTrue(result.runtime_timeout)
 
-    def test_python_report_classifies_runner_stalled_separately(self) -> None:
-        run_dir = self.root / "run-stalled-python"
-        self._create_fixture_run_dir(run_dir)
-        write_text(
-            run_dir / "session-summary.md",
-            "\n".join(
-                [
-                    "# Session Summary",
-                    "",
-                    "- result: failed",
-                    "- quality_gates: skipped",
-                    "- failure_reason: runner_stalled",
-                    "- expected_runs: 4",
-                    "- completed_runs: 2",
-                    "- expected_headless_runs: 2",
-                    "- completed_headless_runs: 1",
-                    "- running_runs_detected: 0",
-                    "- termination_signal: none",
-                    "",
-                    "## API Simulation",
-                    "- status: failed",
-                    "",
-                ]
-            ),
-        )
-        write_text(
-            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
-            '{"level":"error","error_code":"runner_stalled","message":"runner stalled due to output inactivity"}\n',
-        )
-        write_text(
-            run_dir / "arch-workspace/reports/taskruns/raw/runtime.stderr.txt",
-            "runner_stalled\n",
-        )
-
-        result = self.module.evaluate_run(
-            provider="qwen-code",
-            run_index=1,
-            run_dir=run_dir,
-            preflight={},
-            classification_row={
-                "failure_class": "runner_stalled",
-                "failure_subclass": "none",
-                "cancellation_like": "0",
-                "process_exit": "1",
-            },
-        )
-
-        self.assertEqual("runtime_stalled", result.failure_class)
-        self.assertTrue(result.runtime_stalled)
-        self.assertFalse(result.runtime_parse)
-
-    def test_python_report_marks_runner_unavailable_quota_subclass(self) -> None:
-        run_dir = self.root / "run-runner-unavailable-quota-python"
-        self._create_fixture_run_dir(run_dir)
-        write_text(
-            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
-            '{"level":"error","error_code":"runner_unavailable","message":"provider availability error (quota_or_permission): API Error: 403 permission_error usage limit"}\n',
-        )
-
-        result = self.module.evaluate_run(
-            provider="qwen-code",
-            run_index=1,
-            run_dir=run_dir,
-            preflight={},
-            classification_row={
-                "failure_class": "runner_unavailable",
-                "failure_subclass": "quota_or_permission",
-                "cancellation_like": "0",
-                "process_exit": "1",
-            },
-        )
-
-        self.assertEqual("runner_unavailable", result.failure_class)
-        self.assertTrue(result.runner_unavailable)
-        self.assertIn("reliability:runner-unavailable-quota", result.issues)
-
-    def test_python_report_prefers_structured_failure_artifact_over_log_strings(self) -> None:
-        run_dir = self.root / "run-structured-failure-python"
-        self._create_fixture_run_dir(run_dir)
-        write_text(
-            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
-            '{"level":"error","error_code":"runner_parse_failed","message":"headless provider \\"qwen-code\\" returned invalid taskresult parse_stage=extract"}\n',
-        )
-        write_json(
-            run_dir / "arch-workspace/reports/taskruns/raw/runtime-failure.json",
-            {
-                "failure_class": "runtime_artifact_contract",
-                "failure_subclass": "manifest_invalid",
-                "error_code": "runner_parse_failed",
-                "parse_stage": "artifact_repair.schema",
-                "raw_output": {"relative_metadata_path": "reports/taskruns/raw/runtime-meta.json"},
-            },
-        )
-
-        result = self.module.evaluate_run(
-            provider="qwen-code",
-            run_index=1,
-            run_dir=run_dir,
-            preflight={},
-            classification_row={"failure_class": "none", "failure_subclass": "none"},
-        )
-
-        self.assertEqual("runtime_artifact_contract", result.failure_class)
-        self.assertTrue(result.runtime_artifact_contract)
-        self.assertFalse(result.runtime_parse)
-        self.assertIn("reliability:runtime-artifact-contract", result.issues)
-
-    def test_python_report_ignores_stale_failure_artifacts_from_other_run_ids(self) -> None:
-        run_dir = self.root / "run-stale-structured-failure-python"
-        self._create_fixture_run_dir(run_dir)
-        write_text(
-            run_dir / "session-summary.md",
-            "\n".join(
-                [
-                    "# Session Summary",
-                    "",
-                    "- result: passed",
-                    "- quality_gates: passed",
-                    "- failure_reason: none",
-                    "- expected_runs: 2",
-                    "- completed_runs: 2",
-                    "- expected_headless_runs: 2",
-                    "- completed_headless_runs: 2",
-                    "- running_runs_detected: 0",
-                    "- termination_signal: none",
-                    "",
-                    "## API Simulation",
-                    "- status: succeeded",
-                    "",
-                ]
-            ),
-        )
-        write_text(run_dir / "full-run.log", "batch completed successfully\n")
-        write_text(run_dir / "batch-driver.log", "driver completed with process_exit=0\n")
-        (run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson").unlink()
-        (run_dir / "arch-workspace/reports/taskruns/raw/runtime.stderr.txt").unlink()
-        write_text(
-            run_dir / "arch-workspace/reports/taskruns/logs/old-run-refresh-step3-findings.ndjson",
-            '{"level":"error","error_code":"runner_unavailable","message":"provider availability error (quota_or_permission): API Error: 403 permission_error usage limit"}\n',
-        )
-        write_text(
-            run_dir / "arch-workspace/reports/taskruns/raw/old-run-refresh-step3-findings.stderr.txt",
-            "runner_unavailable\nAPI Error: 403 permission_error\n",
-        )
-        write_json(
-            run_dir / "arch-workspace/reports/taskruns/raw/old-run-runtime-failure.json",
-            {
-                "failure_class": "runner_unavailable",
-                "failure_subclass": "quota_or_permission",
-                "error_code": "runner_unavailable",
-                "task": {"run_id": "old-run", "step_id": "refresh.step1.collect", "task_id": "task-old"},
-                "raw_output": {"relative_metadata_path": "reports/taskruns/raw/old-run-runtime-meta.json"},
-            },
-        )
-
-        result = self.module.evaluate_run(
-            provider="qwen-code",
-            run_index=1,
-            run_dir=run_dir,
-            preflight={},
-            classification_row={"failure_class": "none", "failure_subclass": "none"},
-        )
-
-        self.assertEqual("none", result.failure_class)
-        self.assertTrue(result.hard_pass)
-        self.assertFalse(result.runner_unavailable)
-        self.assertFalse(result.runtime_parse)
-
-    def test_python_report_prefers_classified_failure_over_summary_missing_for_preflight_blockers(self) -> None:
-        run_dir = self.root / "run-preflight-runner-unavailable"
-        run_dir.mkdir(parents=True, exist_ok=True)
-
-        result = self.module.evaluate_run(
-            provider="qwen-code",
-            run_index=1,
-            run_dir=run_dir,
-            preflight={},
-            classification_row={"failure_class": "runner_unavailable", "failure_subclass": "quota_or_permission"},
-        )
-
-        self.assertEqual("runner_unavailable", result.failure_class)
-        self.assertTrue(result.runner_unavailable)
-        self.assertTrue(result.summary_missing)
-
-    def test_python_report_skips_cross_repo_missing_when_refresh_artifacts_absent_due_to_runner_failure(self) -> None:
-        run_dir = self.root / "run-runner-unavailable-no-headless-refresh"
-        self._create_fixture_run_dir(run_dir)
-        write_text(
-            run_dir / "run-results.tsv",
-            "\n".join(
-                [
-                    "\t".join(
-                        [
-                            "1",
-                            "fake",
-                            "qwen-code",
-                            "init",
-                            "init-run",
-                            "succeeded",
-                            "8",
-                            "1",
-                            "0",
-                            "1",
-                            "2",
-                            "1",
-                            "0",
-                            "claude-code@fake",
-                            "reports/taskruns/init-run-quality.json",
-                            "reports",
-                        ]
-                    ),
-                    "\t".join(
-                        [
-                            "1",
-                            "fake",
-                            "qwen-code",
-                            "refresh",
-                            "refresh-run",
-                            "succeeded",
-                            "9",
-                            "1",
-                            "1",
-                            "1",
-                            "2",
-                            "1",
-                            "0",
-                            "claude-code@fake",
-                            "reports/taskruns/refresh-run-quality.json",
-                            "reports",
-                        ]
-                    ),
-                ]
-            )
-            + "\n",
-        )
-        write_text(
-            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
-            '{"level":"error","error_code":"runner_unavailable","message":"provider availability error (quota_or_permission): API Error: 403 permission_error usage limit"}\n',
-        )
-
-        result = self.module.evaluate_run(
-            provider="qwen-code",
-            run_index=1,
-            run_dir=run_dir,
-            preflight={"expected_repo_count": 5},
-            classification_row={
-                "failure_class": "runner_unavailable",
-                "failure_subclass": "quota_or_permission",
-                "cancellation_like": "0",
-                "process_exit": "1",
-            },
-        )
-
-        self.assertEqual("runner_unavailable", result.failure_class)
-        self.assertTrue(result.runner_unavailable)
-        self.assertNotIn("analysis:cross-repo-missing", result.issues)
-        self.assertTrue(
-            any("analysis/cross-repo-check-skipped" in detail for detail in result.issue_details),
-            result.issue_details,
-        )
-
-    def test_parse_stall_contexts_supports_task_step_shard_shape(self) -> None:
-        contexts = self.module.parse_stall_contexts(
-            "runner stalled due to output inactivity: no stdout/stderr output for 10m0s "
-            "(task=task-run_20260420_130020_001-init-step3-findings-domain-bank-of-anthos-shard-validator "
-            "step=init.step3.findings shard=validator)"
-        )
-        self.assertEqual(
-            ["task-run_20260420_130020_001-init-step3-findings-domain-bank-of-anthos-shard-validator:init.step3.findings:validator"],
-            contexts,
-        )
-
-    def test_parse_stall_contexts_keeps_legacy_step_shard_shape(self) -> None:
-        contexts = self.module.parse_stall_contexts(
-            "runner stalled due to output inactivity: no stdout/stderr output for 10m0s "
-            "(step=refresh.step3.findings shard=validator)"
-        )
-        self.assertEqual(["refresh.step3.findings:validator"], contexts)
-
     def test_python_report_escalates_artifact_quality_warning_to_quality_gate_failure(self) -> None:
         run_dir = self.root / "run-artifact-quality"
         self._create_artifact_quality_fixture_run_dir(run_dir)
@@ -807,40 +573,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertFalse(result.hard_pass)
         self.assertIn("quality:artifact-quality", result.issues)
 
-    def test_python_report_reads_structured_quality_signals_without_run_warnings(self) -> None:
-        run_dir = self.root / "run-artifact-quality-signals-only"
-        self._create_artifact_quality_fixture_run_dir(run_dir)
-        refresh_quality_path = run_dir / "snapshots" / "refresh-run" / "reports" / "taskruns" / "refresh-run-quality.json"
-        refresh_quality = json.loads(refresh_quality_path.read_text(encoding="utf-8"))
-        refresh_quality.pop("run_warnings", None)
-        refresh_quality["quality_signals"] = [
-            {
-                "code": "artifact_quality.canonical_live_surface_missing",
-                "severity": "warning",
-                "message": "artifact_quality: canonical live surface is missing required document reports/findings/findings.md",
-                "path": "reports/findings/findings.md",
-            }
-        ]
-        write_json(refresh_quality_path, refresh_quality)
-
-        result = self.module.evaluate_run(
-            provider="qwen-code",
-            run_index=1,
-            run_dir=run_dir,
-            preflight={},
-            classification_row={
-                "failure_class": "none",
-                "failure_subclass": "none",
-                "cancellation_like": "0",
-                "process_exit": "0",
-            },
-        )
-
-        self.assertEqual("quality_gates_failed", result.failure_class)
-        self.assertTrue(result.quality_gates_failed)
-        self.assertIn("quality:artifact-quality", result.issues)
-
-    def test_shell_classifier_reads_taskrun_logs_and_returns_runtime_parse(self) -> None:
+    def test_shell_classifier_reads_taskrun_logs_and_returns_runtime_contract_failed(self) -> None:
         script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
         prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
         classifications_tsv = self.root / "backend-run-classifications.tsv"
@@ -860,201 +593,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual("", completed.stdout.strip(), completed.stdout)
         fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
         self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
-        self.assertEqual("runtime_parse", fields[2], classifications_tsv.read_text(encoding="utf-8"))
-
-    def test_shell_classifier_marks_collect_artifact_contract_failure(self) -> None:
-        run_dir = self.root / "run-artifact-contract-shell"
-        self._create_fixture_run_dir(run_dir)
-        write_text(
-            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
-            '{"level":"error","error_code":"runner_parse_failed","message":"headless provider \\"qwen-code\\" produced invalid collect artifacts: collect artifacts remained invalid after one repair attempt"}\n',
-        )
-
-        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
-        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
-        classifications_tsv = self.root / "backend-run-classifications-artifact.tsv"
-        command = (
-            prelude
-            + "\n"
-            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
-            + f'classify_run_failure "qwen-code" "1" {shlex.quote(str(run_dir))} "1"\n'
-        )
-        completed = subprocess.run(
-            ["bash", "-lc", command],
-            check=True,
-            capture_output=True,
-            text=True,
-            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
-        )
-        self.assertEqual("", completed.stdout.strip(), completed.stdout)
-        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
-        self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
-        self.assertEqual("runtime_artifact_contract", fields[2], classifications_tsv.read_text(encoding="utf-8"))
-
-    def test_shell_classifier_ignores_prompt_artifacts_for_contract_markers(self) -> None:
-        run_dir = self.root / "run-prompt-marker-shell"
-        self._create_fixture_run_dir(run_dir)
-        write_text(
-            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
-            '{"level":"error","error_code":"runner_parse_failed","message":"headless provider \\"qwen-code\\" returned invalid taskresult"}\n',
-        )
-        write_text(
-            run_dir / "arch-workspace/reports/taskruns/raw/run-iter1-parse-retry-prompt.txt",
-            "artifact contract failure\ncollect artifacts remained invalid after one repair attempt\n",
-        )
-
-        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
-        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
-        classifications_tsv = self.root / "backend-run-classifications-prompt.tsv"
-        command = (
-            prelude
-            + "\n"
-            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
-            + f'classify_run_failure "qwen-code" "1" {shlex.quote(str(run_dir))} "1"\n'
-        )
-        subprocess.run(
-            ["bash", "-lc", command],
-            check=True,
-            capture_output=True,
-            text=True,
-            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
-        )
-        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
-        self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
-        self.assertEqual("runtime_parse", fields[2], classifications_tsv.read_text(encoding="utf-8"))
-
-    def test_shell_classifier_prefers_structured_failure_artifact_over_log_strings(self) -> None:
-        run_dir = self.root / "run-structured-failure-shell"
-        self._create_fixture_run_dir(run_dir)
-        write_text(
-            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
-            '{"level":"error","error_code":"runner_parse_failed","message":"headless provider \\"qwen-code\\" returned invalid taskresult parse_stage=extract"}\n',
-        )
-        write_json(
-            run_dir / "arch-workspace/reports/taskruns/raw/runtime-failure.json",
-            {
-                "failure_class": "runtime_artifact_contract",
-                "failure_subclass": "manifest_invalid",
-                "error_code": "runner_parse_failed",
-            },
-        )
-
-        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
-        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
-        classifications_tsv = self.root / "backend-run-classifications-structured.tsv"
-        command = (
-            prelude
-            + "\n"
-            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
-            + f'classify_run_failure "qwen-code" "1" {shlex.quote(str(run_dir))} "1"\n'
-        )
-        subprocess.run(
-            ["bash", "-lc", command],
-            check=True,
-            capture_output=True,
-            text=True,
-            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
-        )
-        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
-        self.assertGreaterEqual(len(fields), 14, classifications_tsv.read_text(encoding="utf-8"))
-        self.assertEqual("runtime_artifact_contract", fields[2], classifications_tsv.read_text(encoding="utf-8"))
-        self.assertEqual("manifest_invalid", fields[13], classifications_tsv.read_text(encoding="utf-8"))
-
-    def test_shell_classifier_ignores_stale_failure_artifacts_from_other_run_ids(self) -> None:
-        run_dir = self.root / "run-stale-structured-failure-shell"
-        self._create_fixture_run_dir(run_dir)
-        write_text(
-            run_dir / "session-summary.md",
-            "\n".join(
-                [
-                    "# Session Summary",
-                    "",
-                    "- result: passed",
-                    "- quality_gates: passed",
-                    "- failure_reason: none",
-                    "- expected_runs: 2",
-                    "- completed_runs: 2",
-                    "- expected_headless_runs: 2",
-                    "- completed_headless_runs: 2",
-                    "- running_runs_detected: 0",
-                    "- termination_signal: none",
-                    "",
-                    "## API Simulation",
-                    "- status: succeeded",
-                    "",
-                ]
-            ),
-        )
-        write_text(run_dir / "full-run.log", "batch completed successfully\n")
-        write_text(run_dir / "batch-driver.log", "driver completed with process_exit=0\n")
-        (run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson").unlink()
-        (run_dir / "arch-workspace/reports/taskruns/raw/runtime.stderr.txt").unlink()
-        write_text(
-            run_dir / "arch-workspace/reports/taskruns/logs/old-run-refresh-step3-findings.ndjson",
-            '{"level":"error","error_code":"runner_unavailable","message":"provider availability error (quota_or_permission): API Error: 403 permission_error usage limit"}\n',
-        )
-        write_text(
-            run_dir / "arch-workspace/reports/taskruns/raw/old-run-refresh-step3-findings.stderr.txt",
-            "runner_unavailable\nAPI Error: 403 permission_error\n",
-        )
-        write_json(
-            run_dir / "arch-workspace/reports/taskruns/raw/old-run-runtime-failure.json",
-            {
-                "failure_class": "runner_unavailable",
-                "failure_subclass": "quota_or_permission",
-                "error_code": "runner_unavailable",
-                "task": {"run_id": "old-run", "step_id": "refresh.step1.collect", "task_id": "task-old"},
-            },
-        )
-
-        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
-        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
-        classifications_tsv = self.root / "backend-run-classifications-stale.tsv"
-        command = (
-            prelude
-            + "\n"
-            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
-            + f'classify_run_failure "qwen-code" "1" {shlex.quote(str(run_dir))} "0"\n'
-        )
-        subprocess.run(
-            ["bash", "-lc", command],
-            check=True,
-            capture_output=True,
-            text=True,
-            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
-        )
-        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
-        self.assertGreaterEqual(len(fields), 14, classifications_tsv.read_text(encoding="utf-8"))
-        self.assertEqual("none", fields[2], classifications_tsv.read_text(encoding="utf-8"))
-
-    def test_shell_classifier_marks_quota_subclass_for_runner_unavailable(self) -> None:
-        run_dir = self.root / "run-runner-unavailable-quota-shell"
-        self._create_fixture_run_dir(run_dir)
-        write_text(
-            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
-            '{"level":"error","error_code":"runner_unavailable","message":"provider availability error (quota_or_permission): [API Error: 403 {\\"error\\":{\\"type\\":\\"permission_error\\",\\"message\\":\\"usage limit\\"}}]"}\n',
-        )
-
-        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
-        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
-        classifications_tsv = self.root / "backend-run-classifications-quota.tsv"
-        command = (
-            prelude
-            + "\n"
-            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
-            + f'classify_run_failure "qwen-code" "1" {shlex.quote(str(run_dir))} "1"\n'
-        )
-        subprocess.run(
-            ["bash", "-lc", command],
-            check=True,
-            capture_output=True,
-            text=True,
-            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
-        )
-        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
-        self.assertGreaterEqual(len(fields), 14, classifications_tsv.read_text(encoding="utf-8"))
-        self.assertEqual("runner_unavailable", fields[2], classifications_tsv.read_text(encoding="utf-8"))
-        self.assertEqual("quota_or_permission", fields[13], classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("runtime_contract_failed", fields[2], classifications_tsv.read_text(encoding="utf-8"))
 
     def test_shell_classifier_prefers_runtime_timeout_over_runner_unavailable_logs(self) -> None:
         run_dir = self.root / "run-timeout-precedence"
@@ -1111,43 +650,28 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
         self.assertEqual("runtime_timeout", fields[2], classifications_tsv.read_text(encoding="utf-8"))
 
-    def test_shell_classifier_marks_runner_stalled(self) -> None:
-        run_dir = self.root / "run-stalled-shell"
-        self._create_fixture_run_dir(run_dir)
+    def test_shell_classifier_marks_missing_summary_as_incomplete_cycle_when_batch_reaches_classifier(self) -> None:
+        run_dir = self.root / "run-missing-summary"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        write_text(run_dir / "full-run.log", "child run ended before session summary\n")
+        write_text(run_dir / "batch-driver.log", "driver completed with process_exit=1\n")
         write_text(
-            run_dir / "session-summary.md",
+            run_dir / "run-status.env",
             "\n".join(
                 [
-                    "# Session Summary",
-                    "",
-                    "- result: failed",
-                    "- quality_gates: skipped",
-                    "- failure_reason: runner_stalled",
-                    "- expected_runs: 4",
-                    "- completed_runs: 1",
-                    "- expected_headless_runs: 2",
-                    "- completed_headless_runs: 1",
-                    "- running_runs_detected: 0",
-                    "- termination_signal: none",
-                    "",
-                    "## API Simulation",
-                    "- status: failed",
-                    "",
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=process_failed",
+                    "process_exit=1",
+                    "termination_signal=none",
                 ]
-            ),
-        )
-        write_text(
-            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
-            '{"level":"error","error_code":"runner_stalled","message":"runner stalled due to output inactivity"}\n',
-        )
-        write_text(
-            run_dir / "arch-workspace/reports/taskruns/raw/runtime.stderr.txt",
-            "runner_stalled\n",
+            )
+            + "\n",
         )
 
         script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
         prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
-        classifications_tsv = self.root / "backend-run-classifications-stalled.tsv"
+        classifications_tsv = self.root / "backend-run-classifications-missing-summary.tsv"
         command = (
             prelude
             + "\n"
@@ -1164,7 +688,434 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual("", completed.stdout.strip(), completed.stdout)
         fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
         self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
-        self.assertEqual("runner_stalled", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("infra_incomplete_cycle", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+
+    def test_shell_classifier_marks_missing_summary_signal_termination(self) -> None:
+        run_dir = self.root / "run-missing-summary-signal"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        write_text(run_dir / "full-run.log", "terminated by signal\n")
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=signal_terminated",
+                    "process_exit=143",
+                    "termination_signal=signal_15",
+                ]
+            )
+            + "\n",
+        )
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        classifications_tsv = self.root / "backend-run-classifications-signal.tsv"
+        command = (
+            prelude
+            + "\n"
+            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
+            + f'classify_run_failure "qwen-code" "1" {shlex.quote(str(run_dir))} "143"\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("", completed.stdout.strip(), completed.stdout)
+        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
+        self.assertGreaterEqual(len(fields), 7, classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("infra_signal_terminated", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("signal_15", fields[6], classifications_tsv.read_text(encoding="utf-8"))
+
+    def test_shell_classifier_keeps_terminal_pipeline_failure_out_of_incomplete_cycle(self) -> None:
+        run_dir = self.root / "run-terminal-pipeline-failure"
+        self._create_fixture_run_dir(run_dir)
+        runtime_log = run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson"
+        raw_stderr = run_dir / "arch-workspace/reports/taskruns/raw/runtime.stderr.txt"
+        if runtime_log.exists():
+            runtime_log.unlink()
+        if raw_stderr.exists():
+            raw_stderr.unlink()
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: passed",
+                    "- failure_reason: pipeline_command_failed",
+                    "- expected_runs: 10",
+                    "- completed_runs: 2",
+                    "- expected_headless_runs: 10",
+                    "- completed_headless_runs: 2",
+                    "- running_runs_detected: 1",
+                    "- termination_signal: none",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=process_failed",
+                    "process_exit=1",
+                    "termination_signal=none",
+                    "failure_reason=pipeline_command_failed",
+                    "summary_written=yes",
+                ]
+            )
+            + "\n",
+        )
+        write_text(run_dir / "full-run.log", "step2 failed to promote staged docs\n")
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        classifications_tsv = self.root / "backend-run-classifications-terminal.tsv"
+        command = (
+            prelude
+            + "\n"
+            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
+            + f'classify_run_failure "qwen-code" "1" {shlex.quote(str(run_dir))} "1"\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("", completed.stdout.strip(), completed.stdout)
+        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
+        self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("runtime_flow_failed", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+
+    def test_shell_classifier_uses_terminal_process_failed_sentinel_even_when_outer_exit_is_zero(self) -> None:
+        run_dir = self.root / "run-terminal-pipeline-failure-zero-exit"
+        self._create_fixture_run_dir(run_dir)
+        runtime_log = run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson"
+        raw_stderr = run_dir / "arch-workspace/reports/taskruns/raw/runtime.stderr.txt"
+        if runtime_log.exists():
+            runtime_log.unlink()
+        if raw_stderr.exists():
+            raw_stderr.unlink()
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: passed",
+                    "- failure_reason: pipeline_command_failed",
+                    "- expected_runs: 10",
+                    "- completed_runs: 10",
+                    "- expected_headless_runs: 10",
+                    "- completed_headless_runs: 10",
+                    "- running_runs_detected: 0",
+                    "- termination_signal: none",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=process_failed",
+                    "process_exit=0",
+                    "termination_signal=none",
+                    "failure_reason=pipeline_command_failed",
+                    "summary_written=yes",
+                ]
+            )
+            + "\n",
+        )
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        classifications_tsv = self.root / "backend-run-classifications-terminal-zero-exit.tsv"
+        command = (
+            prelude
+            + "\n"
+            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
+            + f'classify_run_failure "qwen-code" "1" {shlex.quote(str(run_dir))} "0"\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("", completed.stdout.strip(), completed.stdout)
+        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
+        self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("runtime_flow_failed", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+
+    def test_batch_signal_trap_preserves_child_terminal_sentinel_as_source_of_truth(self) -> None:
+        run_dir = self.root / "run-signal-after-child-terminal"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        write_text(run_dir / "full-run.log", "child already ended before outer batch got signal\n")
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=process_failed",
+                    "process_exit=1",
+                    "termination_signal=none",
+                    "failure_reason=infra_incomplete_cycle",
+                    "summary_written=no",
+                ]
+            )
+            + "\n",
+        )
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        classifications_tsv = self.root / "backend-run-classifications-signal-trap.tsv"
+        command = (
+            prelude
+            + "\n"
+            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
+            + f'STARTED_RUN_DIRS=({shlex.quote(str(run_dir))})\n'
+            + 'STARTED_RUN_PROVIDERS=("qwen-code")\n'
+            + 'STARTED_RUN_INDEXES=("1")\n'
+            + 'classify_started_runs_on_signal TERM\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("", completed.stdout.strip(), completed.stdout)
+        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
+        self.assertGreaterEqual(len(fields), 7, classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("infra_incomplete_cycle", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("none", fields[6], classifications_tsv.read_text(encoding="utf-8"))
+
+    def test_batch_exit_trap_classifies_running_started_run_without_summary(self) -> None:
+        run_dir = self.root / "run-exit-trap-running"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=running",
+                    "process_exit=",
+                    "termination_signal=none",
+                    "failure_reason=",
+                    "summary_written=no",
+                ]
+            )
+            + "\n",
+        )
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        classifications_tsv = self.root / "backend-run-classifications-exit-trap.tsv"
+        command = (
+            prelude
+            + "\n"
+            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
+            + f'STARTED_RUN_DIRS=({shlex.quote(str(run_dir))})\n'
+            + 'STARTED_RUN_PROVIDERS=("qwen-code")\n'
+            + 'STARTED_RUN_INDEXES=("1")\n'
+            + 'on_batch_exit 1\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("", completed.stdout.strip(), completed.stdout)
+        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
+        self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("infra_incomplete_cycle", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+        run_status_text = (run_dir / "run-status.env").read_text(encoding="utf-8")
+        self.assertIn("state=process_failed", run_status_text)
+
+    def test_python_report_reconstructs_missing_classifier_row_from_run_status(self) -> None:
+        batch_root = self.root / "batch-root"
+        run_dir = batch_root / "qwen-code" / "run1"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        write_text(run_dir / "full-run.log", "child stopped before summary persistence\n")
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=signal_terminated",
+                    "process_exit=143",
+                    "termination_signal=signal_15",
+                    "failure_reason=infra_signal_terminated",
+                    "summary_written=no",
+                ]
+            )
+            + "\n",
+        )
+
+        reconstructed = self.module.reconstruct_backend_classifications(batch_root, {})
+        self.assertIn(("qwen-code", 1), reconstructed)
+        row = reconstructed[("qwen-code", 1)]
+        self.assertEqual("infra_signal_terminated", row["failure_class"])
+        self.assertEqual("143", row["process_exit"])
+        self.assertEqual("signal_15", row["termination_signal"])
+
+    def test_python_report_marks_run_history_running_as_incomplete_cycle(self) -> None:
+        run_dir = self.root / "run-history-running"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        write_text(run_dir / "full-run.log", "partial run root without summary\n")
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=running",
+                    "process_exit=",
+                    "termination_signal=none",
+                    "failure_reason=",
+                    "summary_written=no",
+                ]
+            )
+            + "\n",
+        )
+        write_json(
+            run_dir / "arch-workspace/reports/taskruns/run-history.json",
+            {
+                "items": [
+                    {"id": "run-1", "status": "running"},
+                ]
+            },
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "infra_incomplete_cycle",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("infra_incomplete_cycle", result.failure_class)
+        self.assertTrue(result.infra_incomplete_cycle)
+        self.assertTrue(any("run_history_running=1" in detail for detail in result.issue_details))
+
+    def test_python_report_prefers_classifier_incomplete_cycle_over_summary_missing(self) -> None:
+        run_dir = self.root / "run-python-missing-summary"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        write_text(run_dir / "full-run.log", "session ended before summary persistence\n")
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "infra_incomplete_cycle",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("infra_incomplete_cycle", result.failure_class)
+        self.assertTrue(result.summary_missing)
+        self.assertTrue(result.infra_incomplete_cycle)
+
+    def test_python_report_ignores_classifier_incomplete_cycle_for_terminal_process_failed_summary(self) -> None:
+        run_dir = self.root / "run-python-terminal-process-failed"
+        self._create_fixture_run_dir(run_dir)
+        runtime_log = run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson"
+        raw_stderr = run_dir / "arch-workspace/reports/taskruns/raw/runtime.stderr.txt"
+        if runtime_log.exists():
+            runtime_log.unlink()
+        if raw_stderr.exists():
+            raw_stderr.unlink()
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: passed",
+                    "- failure_reason: pipeline_command_failed",
+                    "- expected_runs: 10",
+                    "- completed_runs: 2",
+                    "- expected_headless_runs: 10",
+                    "- completed_headless_runs: 2",
+                    "- running_runs_detected: 1",
+                    "- termination_signal: none",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=process_failed",
+                    "process_exit=1",
+                    "termination_signal=none",
+                    "failure_reason=pipeline_command_failed",
+                    "summary_written=yes",
+                ]
+            )
+            + "\n",
+        )
+        write_text(run_dir / "full-run.log", "pipeline failed after writing session summary\n")
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "infra_incomplete_cycle",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("runtime_flow_failed", result.failure_class)
+        self.assertTrue(result.runtime_flow_failed)
+        self.assertFalse(result.infra_incomplete_cycle)
 
     def test_python_report_treats_incomplete_reports_as_triage_only_not_empty_analysis(self) -> None:
         run_dir = self.root / "run-incomplete"
@@ -1176,14 +1127,14 @@ class BatchFailureClassificationTest(unittest.TestCase):
             run_dir=run_dir,
             preflight={},
             classification_row={
-                "failure_class": "runtime_parse",
+                "failure_class": "runtime_contract_failed",
                 "failure_subclass": "none",
                 "cancellation_like": "0",
                 "process_exit": "1",
             },
         )
 
-        self.assertEqual("runtime_parse", result.failure_class)
+        self.assertEqual("runtime_contract_failed", result.failure_class)
         self.assertNotIn("analysis:overview", result.issues)
         self.assertNotIn("analysis:findings", result.issues)
         self.assertNotIn("analysis:coverage", result.issues)
@@ -1199,14 +1150,14 @@ class BatchFailureClassificationTest(unittest.TestCase):
             run_dir=run_dir,
             preflight={},
             classification_row={
-                "failure_class": "runtime_parse",
+                "failure_class": "runtime_contract_failed",
                 "failure_subclass": "none",
                 "cancellation_like": "0",
                 "process_exit": "1",
             },
         )
 
-        self.assertEqual("runtime_parse", result.failure_class)
+        self.assertEqual("runtime_contract_failed", result.failure_class)
         self.assertNotIn("analysis:coverage", result.issues)
         self.assertNotIn("analysis:questions", result.issues)
         self.assertNotIn("analysis:findings", result.issues)
@@ -1285,78 +1236,6 @@ class BatchFailureClassificationTest(unittest.TestCase):
             env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
         )
         self.assertEqual("/tmp/provenarch-batch/qwen-code/run2\t2", completed.stdout.strip())
-
-    def test_shell_ui_dependency_precheck_fails_with_targeted_vitest_diagnostic(self) -> None:
-        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
-        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
-
-        host_root = self.root / "host-precheck-missing-vitest"
-        (host_root / "ui").mkdir(parents=True, exist_ok=True)
-        batch_root = self.root / "batch-precheck-missing-vitest"
-        batch_root.mkdir(parents=True, exist_ok=True)
-        command = (
-            prelude
-            + "\n"
-            + "npm() {\n"
-            + "  if [[ \"$1\" == \"ci\" ]]; then return 0; fi\n"
-            + "  if [[ \"$1\" == \"exec\" ]]; then return 0; fi\n"
-            + "  return 0\n"
-            + "}\n"
-            + f'BATCH_ROOT={shlex.quote(str(batch_root))}\n'
-            + f'PROVENARCH_ROOT={shlex.quote(str(host_root))}\n'
-            + "if run_ui_dependency_precheck; then echo \"rc=0\"; else echo \"rc=$?\"; fi\n"
-        )
-        completed = subprocess.run(
-            ["bash", "-lc", command],
-            check=True,
-            capture_output=True,
-            text=True,
-            env={
-                **os.environ,
-                "PROVENARCH_ROOT": str(REPO_ROOT),
-            },
-        )
-        self.assertIn("rc=1", completed.stdout)
-        readiness_log = batch_root / "precheck-ui-readiness.log"
-        self.assertTrue(readiness_log.exists(), "expected readiness diagnostic log")
-        self.assertIn("vitest binary missing after npm ci --prefix ui", readiness_log.read_text(encoding="utf-8"))
-
-    def test_shell_ui_dependency_precheck_succeeds_when_vitest_is_present(self) -> None:
-        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
-        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
-
-        host_root = self.root / "host-precheck-with-vitest"
-        (host_root / "ui").mkdir(parents=True, exist_ok=True)
-        batch_root = self.root / "batch-precheck-with-vitest"
-        batch_root.mkdir(parents=True, exist_ok=True)
-        command = (
-            prelude
-            + "\n"
-            + "npm() {\n"
-            + "  if [[ \"$1\" == \"ci\" ]]; then\n"
-            + "    mkdir -p \"$PROVENARCH_ROOT/ui/node_modules/.bin\"\n"
-            + "    printf '#!/bin/sh\\nexit 0\\n' >\"$PROVENARCH_ROOT/ui/node_modules/.bin/vitest\"\n"
-            + "    chmod +x \"$PROVENARCH_ROOT/ui/node_modules/.bin/vitest\"\n"
-            + "    return 0\n"
-            + "  fi\n"
-            + "  if [[ \"$1\" == \"exec\" ]]; then return 0; fi\n"
-            + "  return 0\n"
-            + "}\n"
-            + f'BATCH_ROOT={shlex.quote(str(batch_root))}\n'
-            + f'PROVENARCH_ROOT={shlex.quote(str(host_root))}\n'
-            + "if run_ui_dependency_precheck; then echo \"rc=0\"; else echo \"rc=$?\"; fi\n"
-        )
-        completed = subprocess.run(
-            ["bash", "-lc", command],
-            check=True,
-            capture_output=True,
-            text=True,
-            env={
-                **os.environ,
-                "PROVENARCH_ROOT": str(REPO_ROOT),
-            },
-        )
-        self.assertIn("rc=0", completed.stdout)
 
     def test_python_frontend_matrix_supports_per_run_results(self) -> None:
         batch_root = self.root / "batch"
@@ -1453,9 +1332,9 @@ class BatchFailureClassificationTest(unittest.TestCase):
 
         self.assertIn("| qwen-code | mixed | 2 | frontend_workspace_missing=1, ok=1 |", matrix_text)
         self.assertIn("| claude-code | failed | 1 | frontend_live_e2e_failed=1 |", matrix_text)
-        self.assertIn("| qwen-code | 2 | passed | ok | - | cancel-refresh |", matrix_text)
-        self.assertIn("| qwen-code | 4 | skipped | frontend_workspace_missing | - | cancel-refresh |", matrix_text)
-        self.assertIn("| claude-code | - | failed | frontend_live_e2e_failed | - | cancel-refresh |", matrix_text)
+        self.assertIn("| qwen-code | 2 | passed | ok | cancel-refresh |", matrix_text)
+        self.assertIn("| qwen-code | 4 | skipped | frontend_workspace_missing | cancel-refresh |", matrix_text)
+        self.assertIn("| claude-code | - | failed | frontend_live_e2e_failed | cancel-refresh |", matrix_text)
 
     def test_quality_report_respects_selected_provider_surface(self) -> None:
         reports_root = self.root / "reports-selected"

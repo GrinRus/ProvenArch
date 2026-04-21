@@ -49,43 +49,332 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 
 ### Plan ID
-EP-20260420-regres-audit-followups
+EP-20260420-regres-small-runtime-stabilization
 
 ### Context
-После серии live `regres small/fast` прогонов основной backend/runtime контур заметно укреплён, но forensic-аудит показывает остаточные системные зазоры: сильная зависимость live gate от внешней provider availability, смешение orchestration/runtime/report responsibilities в shell-слое, неполное observability для prompt/runtime surface и неравномерное покрытие интеграционных failure-class regression tests. Нужен единый follow-up план, выровненный с docs-first/local-first архитектурой.
+Live canonical `regres fast` от 2026-04-20 показал три runtime release-blocker класса у `qwen-code` и один monitoring blind spot: collect stall recovery возвращается в retry слишком поздно из-за ожидания pipe EOF; collect-repair всё ещё допускает legacy/contract-invalid outputs; `step2.asis_docs` и `step4.proposals` могут вернуть schema-valid `TaskResult` при невалидных runtime draft artifacts; provider-side API failures (`403 permission_error`, usage limit) маскируются под `runner_parse_failed`. Дополнительно matrix `profile-status` обновляется только на старте/финише и во время live-monitorинга выглядит как stale `running`.
 
 ### Goals (must have)
-- [ ] Свести runtime/provider failure handling к единому error taxonomy без stringly-typed drift между Go runtime и shell/python report layers
-- [ ] Довести prompt/runtime observability до уровня, где любой live shard triage делается по structured artifacts, а не по ad-hoc log scraping
-- [ ] Укрепить docflow/semantic fallback так, чтобы deterministic final-set assembly и cross-repo gates проверялись одинаково в unit/integration/live harness
-- [ ] Закрыть основные test coverage gaps вокруг negative/live-like scenarios, frontend smoke timing, и shell classifier coupling
-- [ ] Сверить README/ARCHITECTURE/spec/runbook с реально исполняемым поведением и убрать оставшиеся misleading narratives
+- [x] Перестроить qwen stall path на early retry без ожидания полного pipe drain/EOF
+- [x] Ужесточить collect artifact repair и legacy compatibility так, чтобы invalid `add_doc_artifact` больше не проходил как repair surface
+- [x] Сделать runtime-side draft artifact gate для `step2/4` final authority до возврата в orchestrator с одним constrained repair retry
+- [x] Расширить extractor/provider classification для terminal API failures (`403`, `429`, permission/quota/usage-limit`)
+- [x] Добавить regression tests/fixtures и live-monitoring heartbeat для `profile-status`
 
 ### Non-goals
-- [ ] Не менять five-profile taxonomy
-- [ ] Не менять public JSON schemas (`TaskResult`, `shard-pack-manifest`, `final-run-index`, `citation-index`, `validator-verdict`)
-- [ ] Не превращать optional live gate в required CI merge gate
+- [ ] Не менять public schemas, API endpoints и `workspace.yaml`
+- [ ] Не пересобирать terminal batch/matrix failure taxonomy, если текущая deterministic classification уже корректна
+- [ ] Не добавлять broad semantic auto-repair legacy collect/draft payloads
 
 ### Approach
-1) Выполнить full-flow audit: pipeline/orchestrator/runtime/report/frontend/smoke paths, включая prompt pack consumption и raw diagnostics.
-2) Сопоставить текущую реализацию с target architecture (`local-first`, `docs-first`, deterministic staged/promoted artifacts, additive prompt packs + strict contract tail).
-3) Разделить findings на P0/P1/P2: реальные runtime defects, shell/report legacy coupling, test coverage gaps, architectural debt.
-4) Зафиксировать план follow-up slices: runtime/report convergence, semantic/docflow hardening, frontend smoke stabilization, documentation/triage cleanup.
+1) Перестроить `runQwenCommand` на bounded post-terminate drain и early sentinel return, не дожидаясь полного `wg.Wait()`.
+2) Ужесточить collect repair path: contract-explicit prompts, strict manifest re-parse после retry, safe-only compatibility normalization.
+3) Довести runtime-side draft artifact validation/repair parity для `step2/4` и исключить legacy `add_doc_artifact` drift при уже валидном draft manifest.
+4) Расширить provider/API error detection в extractor и сохранить root cause как `runner_unavailable`.
+5) Добавить matrix profile heartbeat во время child batch execution и закрепить всё fixture-driven тестами.
+
+### Files expected to change
+- `internal/runtime/qwencode/*`
+- `internal/runtime/taskresultextractor/*`
+- `internal/runtime/taskresultcompat/*`
+- `internal/runtime/testdata/*`
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/tests/*`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] collect stall с зависшим stdout pipe уходит в retry быстро и покрыт тестом
+- [x] invalid collect repair outputs падают как contract failure с raw artifacts и точной причиной
+- [x] invalid `asis-draft-manifest.json`/`proposals-draft-manifest.json` не проходят runtime gate
+- [x] observed `403 permission_error` transcript классифицируется как `runner_unavailable`
+- [x] `profile-status/*.json` получает heartbeat во время активного batch run
+
+### Risks
+- Основной риск — случайно ослабить уже работающую terminal classification или расширить compatibility normalization до semantic auto-repair. Снижение риска: менять только runtime/extractor/monitoring paths, а normalization оставить safe-only и закрепить regression tests на observed live fixtures.
+
+### Progress log
+- 2026-04-20: зафиксирован slice по стабилизации `qwen` после live `regres fast`; подтверждены реальные failure classes: late collect retry, invalid collect repair output, invalid draft artifact gate на `step2`, misclassified provider/API failures и stale profile-status heartbeat.
+- 2026-04-20: реализованы bounded stall retry без ожидания EOF, strict collect manifest compatibility, runtime-side step2 draft repair gate, provider/API `runner_unavailable` classification и matrix profile heartbeat; regression fixtures/tests обновлены, DoD (`make contracts`, `make test`, `make lint`, `make build`) пройден.
+
+### Plan ID
+EP-20260420-qwen-step0-draft-contract-regressions
+
+### Context
+Live canonical `regres fast` показал универсальный hard-stop на `qwen-code` в `init.step0.constitution`: provider возвращает schema-valid `TaskResult`, но пишет `constitution-draft.json` в legacy constitution shapes (`schema_version`, `version: "0.1.0"`, `services/...`) вместо runtime draft manifest contract. Текущий orchestrator gate корректно ловит ошибку, но runtime не валидирует/не чинит draft-only artifacts до возврата, а qwen prompt/retry helpers остаются collect-centric.
+
+### Goals (must have)
+- [x] Вынести runtime draft manifest contract в shared internal package и использовать его в writer + validator
+- [x] Сделать `qwen` step0 prompt/retry contract-aware для `constitution-draft.json` и убрать legacy model-first drift
+- [x] Добавить runtime-side validation и один artifact-repair retry для draft-only steps (`step0/2/4`)
+- [x] Расширить safe normalization legacy `add_doc_artifact` drift на `step0` без silent legacy payload conversion
+- [x] Зафиксировать live step0 regression fixtures/tests и синхронизировать docs
+
+### Non-goals
+- [ ] Не менять public JSON schemas, API endpoints и `workspace.yaml`
+- [ ] Не трогать harness/reporting/incomplete-cycle logic в этом slice
+- [ ] Не добавлять broad auto-conversion legacy constitution payloads в canonical draft manifest
+
+### Approach
+1) Вынести manifest structs/validation/file-existence checks в shared draft-contract package и подключить его в orchestrator/runtime writer paths.
+2) Переписать qwen draft-only prompt/retry helpers: exact `constitution-draft.json` example, draft-aware recovery phrasing, `changeset: []` template для `step0/2/4`.
+3) После parse/binding success валидировать required draft artifacts в qwen runtime и при invalid manifest запускать один constrained repair retry поверх `write_root + draft_final_root`.
+4) Расширить compatibility normalization только на duplicate `add_doc_artifact` drift при уже валидном step0 draft manifest.
+5) Добавить recorded fixtures/tests на observed live legacy step0 shapes и обновить docs/architecture notes.
+
+### Files expected to change
+- `internal/orchestrator/*`
+- `internal/runtime/qwencode/*`
+- `internal/runtime/claudecode/*`
+- `internal/runtime/taskresultcompat/*`
+- `internal/runtime/testdata/*`
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Canonical `constitution-draft.json` contract валидируется из shared package и одинаково используется writer/validator
+- [x] `qwen` step0 prompt и retry prompt больше не тянут collect/shard wording и synthetic `upsert_entity` template
+- [x] Invalid step0 draft manifest идёт в один runtime repair retry и при неудаче падает как `runner_parse_failed` с raw artifacts
+- [x] Valid step0 draft manifest + legacy `add_doc_artifact` ops нормализуются без silent semantic payload conversion
+- [x] Regression fixtures/tests покрывают observed live step0 legacy shapes
+
+### Risks
+- Основной риск — случайно расширить safe normalization до semantic auto-conversion legacy constitution payloads. Снижение риска: shared validator остаётся строгим, а runtime normalization ограничена только duplicate `add_doc_artifact` drift при уже валидном manifest.
+
+### Progress log
+- 2026-04-20: зафиксирован implementation slice по `qwen` step0 draft-contract regressions; подтверждены observed live legacy manifest shapes (`schema_version`, `version:"0.1.0"`) и collect-centric prompt drift в qwen runtime.
+- 2026-04-20: live rerun после основного фикса выявил дополнительный qwen-specific post-artifact stall на `step0`, когда provider писал canonical `constitution-draft.json`, но оставлял draft files под `draft_final_root/<canonical_path>` и зависал без финального JSON; добавлены safe file-layout reconciliation, draft-step stall watchdog/retry и regression tests.
+
+### Plan ID
+EP-20260420-regres-small-live-triage
+
+### Context
+Нужно выполнить canonical live `regres fast` (`bank-of-anthos + openedx`, затем `openstack`) через `scripts/full-run-batch-matrix.sh` на trusted host, непрерывно мониторить статус прогонов и после завершения собрать детальный triage-отчёт по фактическим багам/недоработкам без изменения public contract.
+
+### Goals (must have)
+- [ ] Запустить оба canonical `regres fast` matrix slice из clean worktree с `BATCH_PROVIDER_FILTER=qwen-code`
+- [ ] Непрерывно мониторить matrix/batch progress до terminal state каждого slice
+- [ ] Собрать run artifacts, classifications и release/profile reports для каждого slice
+- [ ] Зафиксировать продуктовые/runtime/harness баги и отделить их от operational noise
+- [ ] Составить итоговый отчёт: что сломалось, где именно, что нужно чинить дальше
+
+### Non-goals
+- [ ] Не менять matrix taxonomy, timeout profiles и public schemas во время самого прогона
+- [ ] Не подменять canonical harness wrapper-скриптом или ad-hoc env overrides
+- [ ] Не пытаться "чинить на лету" live run до завершения triage цикла
+
+### Approach
+1) Проверить trusted-host prerequisites, pinned path checkouts и clean detached worktree.
+2) Выполнить `regres fast` как два последовательных вызова `scripts/full-run-batch-matrix.sh` с qwen-only provider filter.
+3) Во время выполнения регулярно читать batch/matrix logs, status files и intermediate reports, чтобы не пропустить stall/incomplete state.
+4) После завершения разобрать terminal artifacts: `profile-runs.jsonl`, matrix status files, batch classifications, session summaries, release/profile verdicts и raw taskrun diagnostics.
+5) Сформировать детальный triage-отчёт и список необходимых фиксов.
 
 ### Files expected to change
 - `docs/PLANS.md`
-- далее по follow-up slices: `internal/runtime/*`, `internal/orchestrator/*`, `internal/artifactquality/*`, `scripts/full-run-batch-*.sh`, `scripts/e2e_batch_report.py`, `ui/e2e/*`, `docs/spec/*`, `docs/RELEASE_LIVE_E2E_RUNBOOK.md`, `docs/TESTING_STRATEGY.md`
 
 ### Acceptance criteria
-- [ ] Аудит завершён по 7 requested areas: flow, project behavior, tests, prompts/artifacts, potential bugs, architecture fit, implementation plan
-- [ ] Для каждого существенного риска есть привязка к конкретному коду/контракту/тесту
-- [ ] План доработок разбит по приоритетам и не смешивает external provider issues с исправимыми внутренними дефектами
+- [ ] Оба `regres fast` slice дошли до terminal state (`passed|failed`) с сохранёнными matrix/batch breadcrumbs
+- [ ] Есть собранный список фактических failure classes и их root cause
+- [ ] Итоговый отчёт отделяет runtime/provider проблемы от harness/reporting проблем
 
 ### Risks
-- Самый большой риск — перепутать external provider availability limits с внутренними regressions и зафиксировать ложные продуктовые выводы. Второй риск — продолжить раздувать shell-classifier слой вместо перевода инцидентов в structured runtime evidence.
+- Основной риск — long-running live provider hangs или внешние transport/API failures. Снижение риска: canonical watchdog/reporting уже встроены; во время прогона мониторинг идёт по нескольким источникам (`driver log`, batch status, profile status, taskrun artifacts), а не только по одному summary-файлу.
 
 ### Progress log
-- 2026-04-20: старт полного аудита flow/project/tests/prompts/artifacts against target architecture.
+- 2026-04-20: prerequisites и pinned path SHA проверены, prepared clean detached worktree `/private/tmp/provenarch-run-clean`, запуск `regres fast` начинается.
+
+### Plan ID
+EP-20260420-project-flow-audit
+
+### Context
+Нужен полный аудит ACP после серии runtime/live slices: разобрать execution flow, текущую работу backend/API/UI/harness, существующее тестовое покрытие, prompt/artifact contracts, скрытые legacy-paths и расхождения с целевой step-scoped agent-first архитектурой. Результат этого плана — не код, а точная карта проблем и приоритизированный backlog доработок.
+
+### Goals (must have)
+- [ ] Проследить end-to-end flow: CLI/API -> orchestrator -> runtime -> compile/publish -> harness/reports
+- [ ] Разобрать, какие части системы уже соответствуют целевой архитектуре, а какие остаются transitional/legacy
+- [ ] Оценить текущее тестовое покрытие по runtime/orchestrator/harness/UI и отметить пробелы
+- [ ] Разобрать prompt/artifact contracts для `claude-code`, `qwen-code`, `fake` и compile-time gates
+- [ ] Сформировать конкретный план доработок по найденным рискам/расхождениям
+
+### Non-goals
+- [ ] Не вносить functional code changes в runtime/orchestrator/harness в рамках самого аудита
+- [ ] Не менять public schemas/API/workspace contracts
+- [ ] Не запускать новый live matrix как часть этого анализа
+
+### Approach
+1) Пройти кодовый execution path от `acp run`/API до `pipelineExecution`, step runner resolution и compile/publish.
+2) Разобрать runtime providers (`qwen`, `claude`, `fake`), prompt builders, repair/retry paths и artifact contracts.
+3) Просмотреть orchestrator/docflow/tests/harness scripts, чтобы отделить реальные invariants от transitional compatibility.
+4) Сверить observed implementation с declared architecture в README/docs/ARCHITECTURE и с agent-first target model.
+5) Сформировать приоритизированный план доработок с явным разделением: release risks, architecture debt, testing debt.
+
+### Files expected to change
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [ ] Есть явная карта flow и ownership по слоям
+- [ ] Найдены и описаны потенциальные bugs/shortcomings и legacy hotspots
+- [ ] Зафиксированы расхождения с целевой архитектурой
+- [ ] Составлен конкретный план доработок по итогам аудита
+
+### Risks
+- Главный риск — спутать уже зафиксированные runtime slices с текущим фактическим baseline и недооценить transitional logic, которая всё ещё влияет на live behavior. Снижение риска: опираться на кодовый execution path, тесты и current contracts, а не на старые assumptions.
+
+### Progress log
+- 2026-04-20: начат полный audit flow/project/tests/prompts/artifacts; разобраны CLI/API entrypoints, orchestrator pipeline execution, step-scoped provider resolution, qwen runtime watchdog/repair paths, shared runtime draft contracts, batch/matrix heartbeat/classification scripts и основное regression coverage.
+
+### Plan ID
+EP-20260420-qwen-preartifact-stall-reporting
+
+### Context
+После фикса `collect_stalled_after_artifacts` live `regres small` всё ещё мог зависать раньше первого authored collect artifact: `qwen-code` на `step1.collect` оставался живым, но не писал ни stdout/stderr, ни `write_root`, из-за чего runtime не доходил до repair path. Параллельно batch/matrix harness оставляли слабые terminal breadcrumbs, если parent shell завершался до post-processing.
+
+### Goals (must have)
+- [x] Добавить отдельный `pre-artifact stall` watchdog для `qwen` collect steps с forced retry до общего step timeout
+- [x] Сохранить существующий `after-artifacts stall` path без semantic regression
+- [x] Усилить runtime diagnostics полями `stall_phase`, `last_pipe_activity_at`, `last_write_root_mutation_at`, `manifest_state`, `authored_file_count`
+- [x] Сделать child-owned run sentinel в `full-run-ai-advent.sh` и использовать его как durable source of truth в batch/matrix/report paths
+- [x] Убрать stale `queued|running` хвост через explicit reconcile helper в CLI/orchestrator и зафиксировать это тестами
+
+### Non-goals
+- [x] Не менять public schemas/API/workspace contract
+- [x] Не вводить user-facing knobs для stall thresholds
+- [x] Не чинить OS-level `SIGKILL` всего process tree
+
+### Approach
+1) Ввести в `internal/runtime/qwencode/runner.go` второй stall sentinel для collect steps, который срабатывает до manifest/doc artifacts при отсутствии pipe activity и `write_root` mutations.
+2) При `pre-artifact stall` досрочно завершать process, писать diagnostics и запускать один fresh retry с ужесточённым collect prompt.
+3) Перенести terminal sentinel ownership внутрь `full-run-ai-advent.sh`, а batch/matrix/report scripts научить классифицировать incomplete cycles по sentinel даже без summary/report artifacts.
+4) Вынести restart reconciliation из implicit startup behavior в explicit helper и вызывать его из CLI/tests там, где это действительно требуется.
+5) Закрыть slice regression tests на runtime, orchestrator resume и batch/matrix reconstruction.
+
+### Files expected to change
+- `internal/runtime/qwencode/*`
+- `internal/orchestrator/*`
+- `cmd/acp/*`
+- `scripts/full-run-ai-advent.sh`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/e2e_batch_report.py`
+- `scripts/tests/*`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] `qwen` collect shard без stdout/stderr и без artifacts детектится как `collect_stalled_before_artifacts` и идёт в forced retry
+- [x] failed retry после pre-artifact stall отдаёт `runner_parse_failed` и сохраняет raw runner diagnostics
+- [x] batch/matrix/report классифицируют incomplete cycle даже при missing `session-summary.md` и неполном `profile-runs.jsonl`
+- [x] interrupted/orphaned CLI history больше не остаётся в вечном `running`
+- [x] `make contracts`, `make test`, `make lint`, `make build` проходят
+
+### Risks
+- Основной риск — ложный pre-artifact stall на legitimately slow collect shard. Снижение риска: watchdog включён только для `init/refresh.step1.collect`, использует двойной idle сигнал (`stdout/stderr` + `write_root`) и conservative threshold `75s`.
+
+### Progress log
+- 2026-04-20: реализованы pre-artifact stall watchdog, forced fresh retry, durable run/profile sentinels, batch/matrix/report reconstruction и explicit stale-run reconciliation; полный DoD прогон зелёный.
+
+### Plan ID
+EP-20260419-qwen-collect-stall-recovery
+
+### Context
+Live `regres small` показал, что `qwen-code` на `init.step1.collect` может дойти до authored collect artifacts (`shard-pack-manifest.json` + draft docs), но продолжать бессмысленный repo sweep и не возвращать финальный `TaskResult` до внешнего hard-stop. Из-за этого existing repair path не запускался, а batch/matrix harness оставляли run history без финальной классификации.
+
+### Goals (must have)
+- [x] Добавить ранний stall watchdog для `qwen` collect steps и forced artifact-repair retry до общего step timeout
+- [x] Усилить collect/retry prompt discipline правилом "no explore after write"
+- [x] Пробросить explicit runtime diagnostic events про stall/retry в orchestrator logs
+- [x] Сохранить raw stdout/stderr artifacts и normal `runner_parse_failed` semantics при failed stall recovery
+- [x] Устранить blind spot batch/matrix harness: incomplete child cycles получают classification/record даже без `session-summary.md`
+
+### Non-goals
+- [x] Не менять public schemas/API
+- [x] Не добавлять user-facing timeout/stall knobs
+- [x] Не чинить OS-level external `SIGKILL` всего matrix process tree
+
+### Approach
+1) Ввести provider-local collect stall monitor в `internal/runtime/qwencode/runner.go`, основанный на реальной pipe activity и мутациях `write_root`.
+2) При stall завершать provider process, писать diagnostics и сразу запускать forced `RETRY RECOVERY MODE` с existing artifact repair contract.
+3) Пробросить diagnostics в orchestrator event logs без расширения `TaskResult`.
+4) Добавить per-run sentinel/status files в batch harness и заставить matrix/report path работать на partially completed roots.
+5) Зафиксировать поведение тестами и минимально синхронизировать docs/runbook.
+
+### Files expected to change
+- `internal/runtime/runtime.go`
+- `internal/runtime/qwencode/*`
+- `internal/orchestrator/*`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/e2e_batch_report.py`
+- `scripts/tests/*`
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/TESTING_STRATEGY.md`
+
+### Acceptance criteria
+- [x] qwen collect stall после authored artifacts уходит в forced retry и не ждёт step timeout
+- [x] failed stall recovery оставляет `reports/taskruns/raw/*` и `runner_parse_failed`, а не `runner_unavailable`
+- [x] orchestrator logs содержат `runtime task stalled after artifacts` / `retry scheduled` / `retry completed`
+- [x] batch/matrix классифицируют incomplete child cycle даже без `session-summary.md`
+- [x] regression tests покрывают runtime, logs и batch/matrix failure accounting
+
+### Risks
+- Основной риск — ложное stall detection на legitimately long collect shards. Снижение риска: watchdog включён только для qwen collect steps и срабатывает только после authored artifacts плюс двойного idle сигнала (`stdout/stderr` и `write_root`).
+
+### Progress log
+- 2026-04-19: добавлены qwen collect stall watchdog, forced recovery retry, runtime diagnostics, batch/matrix sentinels/classification и regression tests.
+
+### Plan ID
+EP-20260419-step-scoped-agent-pipeline
+
+### Context
+Нужно заменить legacy process-scoped runner flow на step-scoped agent-first pipeline без отдельного compatibility mode. Canonical workspace по-прежнему должен писаться только через deterministic compile/validate/publish слой, а выбор provider теперь делается на уровне шага с fallback на глобальные CLI/env настройки.
+
+### Goals (must have)
+- [x] Ввести `runtime.profile.steps.*.provider` в manifest/schema/API и сохранить precedence `workspace step override > CLI/env global > claude-code`
+- [x] Перевести `step0..step4` на step-scoped runtime resolution с provider cache/preflight внутри одного run
+- [x] Добавить runtime contract поля `draft_final_root`, `step_contract`, `expected_artifacts` и staged draft manifests для `step0/2/4`
+- [x] Сохранить compile/validate/publish как единственную canonical write surface и убрать обязательный human gate на promotion
+- [x] Обновить fake/test/docs/examples/fixtures под новую базовую архитектуру и прогнать DoD
+
+### Non-goals
+- [x] Не менять `schemas/taskresult.schema.json` в этом slice
+- [x] Не добавлять per-step execution knobs beyond provider selection
+- [x] Не расширять provider list beyond `claude-code|qwen-code`
+
+### Approach
+1) Заменить single-runner seam на `StepRunnerResolver` с per-provider cache/preflight и runtime metadata per step.
+2) Добавить step-scoped runtime contract и staged draft manifests; запретить runtime прямую запись в canonical workspace.
+3) Перевести `step0/2/4` на agent-first execution с compile/publish gating и auto-promotion после validator/schema checks.
+4) Синхронизировать API/spec/docs/examples/goldens и подтвердить поведение через contract/orchestrator/API tests.
+
+### Files expected to change
+- `internal/orchestrator/*`
+- `internal/runtime/*`
+- `internal/api/*`
+- `internal/workspace/*`
+- `cmd/acp/*`
+- `schemas/workspace.schema.json`
+- `docs/spec/*`
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/APPENDIX_SCHEMAS.md`
+- `docs/STAKEHOLDER_DOC.md`
+- `docs/adr/ADR-20260410-headless-runtime-multi-provider.md`
+- `examples/workspace.example.yaml`
+- `fixtures/scenarios/*/golden/snapshot.sha256`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены
+- [x] Schema/API/runtime contracts синхронизированы
+- [x] Документация и examples/fixtures обновлены
+
+### Risks
+- Основной риск — потерять canonical compile invariants при появлении draft-first шагов. Снижение риска: runtime drafts остаются staging-only surface, а coverage/findings/as-is/proposals канонизируются compile/publish слоем.
+
+### Progress log
+- 2026-04-19: введены step provider resolution, staged draft manifests, agent-first `step0/2/4`, auto-publish без human gate и API/runtime profile surfaces.
+- 2026-04-19: синхронизированы tests/goldens/docs; full DoD прогон запланирован после финальной contract/docs ревизии.
 
 ### Plan ID
 EP-20260418-regres-fast-artifact-quality
@@ -373,6 +662,51 @@ EP-20260416-doc-first-runtime-pipeline
 - 2026-04-16: primary path переведён на runtime-authored staged docs; compiler layer оставлен как compatibility fallback для отсутствующих surfaces, добавлены path policy guard и docflow negative tests.
 
 ### Plan ID
+EP-20260420-qwen-live-regress-stabilization
+
+### Context
+Нужно стабилизировать `qwen` live regress small без изменения public contracts: закрыть doubled-path drift в collect manifests, ужесточить collect-repair/runtime diagnostics, правильно классифицировать provider transport failures и перестать маркировать terminal pipeline failures как `infra_incomplete_cycle`.
+
+### Goals (must have)
+- [x] Сделать shard manifest contract artifact-root-aware и нормализовать repaired `documents[].path`
+- [x] Исправить `qwen` collect repair hints/diagnostics и transport error classification
+- [x] Исправить batch/report reconstruction для terminal pipeline failures
+- [x] Добавить regression fixtures/tests и синхронизировать docs
+
+### Non-goals
+- [x] Не менять public JSON schemas / API / `workspace.yaml`
+- [x] Не менять release matrix composition или timeout profiles
+
+### Approach
+1) Ужесточить manifest validation и canonicalization вокруг `artifact_root`.
+2) Усилить `qwen` repair prompt и выделить provider transport transcript errors в `runner_unavailable`.
+3) Исправить batch/report precedence: terminal summary + terminal sentinel не равны incomplete cycle.
+4) Добавить recorded fixtures и regression tests под live findings.
+
+### Files expected to change
+- `internal/contracts/*`
+- `internal/artifactquality/*`
+- `internal/runtime/qwencode/*`
+- `internal/runtime/taskresultextractor/*`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/e2e_batch_report.py`
+- `scripts/tests/*`
+- `docs/ARCHITECTURE.md`
+
+### Acceptance criteria
+- [x] `step2` больше не читает doubled paths из collect manifests
+- [x] `qwen` transport/API transcript errors классифицируются как `runner_unavailable`
+- [x] terminal pipeline failures больше не попадают в `infra_incomplete_cycle`
+- [x] tests/fixtures/docs обновлены
+
+### Risks
+- Слишком агрессивная manifest normalization может скрыть реальные contract violations; исправлять только случаи, которые однозначно указывают внутрь `write_root/artifact_root`.
+
+### Progress log
+- 2026-04-20: старт slice по стабилизации `qwen` live regress small; подтверждены three live failure classes (`documents[].path`, collect-repair drift, false incomplete-cycle classification) и отдельный step0 SSL transport path.
+- 2026-04-20: реализованы artifact-root-aware manifest validation + canonical path normalization, `qwen` transport/API classification в `runner_unavailable`, richer collect repair hints/diagnostics, corrected terminal batch/report classification; regression fixtures/tests и docs sync завершены, DoD (`make contracts test lint build`) пройден в изолированной копии.
+
+### Plan ID
 EP-20260416-structural-sharding-reset
 
 ### Context
@@ -461,88 +795,228 @@ EP-20260416-zero-signal-hardening
 ### Progress log
 - 2026-04-16: реализованы `evidence_state`, incomplete/partial report semantics, batch failure precedence, regression tests и docs sync.
 
+### Archived
+- Completed historical plans moved to `docs/archive/PLANS_ARCHIVE_2026-04.md` (archived on 2026-04-15).
+
 ### Plan ID
-EP-20260421-runtime-architecture-alignment-followup
+EP-20260420-qwen-live-regress-stabilization
 
 ### Context
-Аудит текущего state показал, что core local-first/docs-first архитектура уже реализована и тестовый baseline зелёный, но остаются системные зоны риска:
-- часть source-of-truth всё ещё дублируется между Go runtime, shell harness и Python reporting;
-- baseline bundle имеет dual source-of-truth (`internal/workspace/baseline.go` vs UI editable surface) и не имеет явного migration/version path;
-- recorded full-chain regression покрывает `qwen-code`, но не даёт такой же orchestrator/report parity для `claude-code`;
-- live artifact-quality surface частично опирается на markdown string heuristics вместо полностью structured signals;
-- frontend product regression coverage заметно слабее backend/runtime coverage и всё ещё смешивается с operational smoke.
+Нужно закрыть подтвержденные live-regress баги `qwen` runtime/harness после прогона `regres fast`: поздний stall retry из-за pipe drain, неполный collect repair, отсутствие draft-artifact gate для step0/2/4 и ложный `running` в batch/matrix при аварийном завершении.
 
 ### Goals (must have)
-- [x] Свести runtime/report classification к одному machine-readable source-of-truth с минимальным shell/python drift
-- [x] Ввести explicit baseline bundle manifest/versioning и убрать дублирование списка editable artifacts между backend и UI
-- [x] Добавить cross-provider recorded integration parity для `claude-code`
-- [x] Перевести quality gate с markdown-only heuristics на structured quality evidence, где это возможно
-- [x] Развести frontend operational smoke и isolated UI regression coverage
+- [ ] Ускорить forced retry после collect stall без ожидания полного EOF stdout/stderr
+- [ ] Дожать collect manifest contract enforcement после retry
+- [ ] Добавить required-artifact gate для `constitution/asis/proposals` draft manifests
+- [ ] Сделать terminal batch/matrix status durable даже при partial/abnormal exit
+- [ ] Обновить tests/fixtures/docs и прогнать DoD
 
 ### Non-goals
-- [ ] Не менять public JSON schemas (`TaskResult`, `shard-pack-manifest`, `final-run-index`, `citation-index`, `validator-verdict`)
-- [ ] Не ослаблять semantic gate `analysis:cross-repo-missing`
-- [ ] Не вводить hosted/security/compliance slices
-
-### Recommended first slice
-1) Вынести baseline bundle inventory в единый machine-readable manifest.
-2) Генерировать UI baseline editor surface из этого manifest вместо hardcoded списка.
-3) Добавить bundle version + stale/defaults diagnostics без авто-перезаписи пользовательских правок.
-
-Этот slice минимальный, reviewable и одновременно закрывает самый явный residual drift между runtime, workspace seeding и UI.
+- [ ] Не менять public JSON schemas, API endpoints и `workspace.yaml`
+- [ ] Не добавлять user-facing knobs для stall thresholds или draft validation
 
 ### Approach
-1) **Failure taxonomy convergence**
-   - materialize единый batch/runtime classification artifact в Go-слое;
-   - shell/python переводить на consume-first модель, а fallback string scanning держать только для legacy runs;
-   - сократить дублирование precedence tables и subclass mapping.
-2) **Baseline bundle source-of-truth**
-   - ввести bundle manifest (`skills/bundle-manifest.json|yaml`) как canonical inventory для prompt packs / reference-only prompts / editable assets;
-   - `EnsureBaselineBundle` и UI editor должны читать один и тот же inventory;
-   - добавить version field и diagnostics для stale workspace baseline.
-3) **Cross-provider recorded integration parity**
-   - добавить `claude-code` recorded chain на тот же путь `raw provider output -> runner -> orchestrator/docflow -> batch/report`;
-   - зафиксировать одинаковые expected classes для salvage / unavailable / artifact-repair путей.
-4) **Structured quality evidence**
-   - вынести placeholder/incomplete/report-uselessness сигналы из ad-hoc markdown matching в structured report/quality artifact;
-   - markdown text checks оставить только как compatibility fallback.
-5) **Frontend test split**
-   - удержать `frontend-live-e2e` как trusted-host operational smoke;
-   - расширить `ui/src/*.test.tsx` и/или добавить non-live Playwright/RTL scenarios для baseline editor, runs/results navigation, error surfacing.
+1) Перестроить `qwen` stall path вокруг short drain + immediate retry sentinel.
+2) Усилить runtime contract validation для collect и draft-step artifacts.
+3) Добавить durable parent/child terminal breadcrumbs в live harness и reconstruction.
+
+### Files expected to change
+- `internal/runtime/qwencode/*`
+- `internal/runtime/taskresultcompat/*`
+- `internal/orchestrator/runtime_drafts.go`
+- `scripts/full-run-ai-advent.sh`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/e2e_batch_report.py`
+- `scripts/tests/*`
+- `docs/ARCHITECTURE.md`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/TESTING_STRATEGY.md`
+
+### Acceptance criteria
+- [ ] Stall retry реально ранний и покрыт тестом с зависшим stdout pipe
+- [ ] Invalid collect/draft artifacts падают как contract/runtime failures с raw diagnostics
+- [ ] Batch/matrix partial exit больше не оставляет stale `running`
+- [ ] Документация и regression tests синхронизированы
+
+### Risks
+- В основном дереве уже есть unrelated изменения `internal/api/ui_dist/*`; не затрагивать их и прогонять verification аккуратно, при необходимости в изолированной копии.
+
+---
+
+## ExecPlan
+
+### Plan ID
+EP-20260421-architecture-parity-closure
+
+### Context
+Нужно довести уже реализованный step-scoped agent pipeline до более строгой архитектурной parity после аудита flow и live harness: убрать hidden mutation из validator path, довести `step0` до draft-only publish authority, вынести shared step policy, разрезать самые рискованные монолиты в orchestrator/runtime/UI и закрыть пробелы в observability tests.
+
+### Goals (must have)
+- [x] `step0.constitution` публикует canonical outputs только из validated runtime draft artifacts
+- [x] Runtime draft validation остаётся read-only; reconciliation вынесен в явный отдельный stage
+- [x] Shared provider-agnostic step contract/prompt policy используется `qwen` и `claude`
+- [x] `qwen` runtime разделён на prompt, repair, diagnostics и process-exec/stall subsystems
+- [x] UI вынесен из одного корневого status/settings блока в отдельные presentation components
+- [x] Harness heartbeat покрыт и для `profile-status`, и для `run-status.env`
+- [x] Выполнен полный DoD (`make contracts`, `make lint`, `make test`, `make build`)
+
+### Non-goals
+- [x] Не менять public contracts (`workspace.yaml`, `schemas/taskresult.schema.json`, runtime profile API, release verdict/report outputs)
+- [x] Не превращать live provider runs в required CI
+
+### Files changed
+- `internal/orchestrator/*`
+- `internal/runtime/steppolicy/*`
+- `internal/runtime/qwencode/*`
+- `internal/runtime/claudecode/*`
+- `internal/runtimedrafts/*`
+- `scripts/full-run-ai-advent.sh`
+- `scripts/run-status-heartbeat.sh`
+- `scripts/tests/*`
+- `ui/src/App.tsx`
+- `ui/src/components/*`
+- `ui/src/App.test.tsx`
+- `README.md`
+- `docs/ARCHITECTURE.md`
+
+### Acceptance criteria
+- [x] Invalid draft artifacts не могут быть опубликованы fallback path-ом
+- [x] Invalid manifests падают без hidden repair внутри validation
+- [x] `qwen`/`claude` prompts получают одинаковые shared step obligations
+- [x] Active live heartbeat observable и тестируется отдельно для `profile-status` и `run-status.env`
+- [x] UI покрывает effective step providers и `running/failed` run states
+
+### Risks
+- `internal/orchestrator/orchestrator.go` и `ui/src/App.tsx` всё ещё остаются крупными файлами; дальнейшая декомпозиция возможна, но уже не блокирует текущую architectural parity slice.
+
+---
+
+## ExecPlan
+
+### Plan ID
+EP-20260421-flow-audit-followups
+
+### Context
+Полный аудит flow/project/tests/prompts/artifacts после closure step-scoped runtime parity показал, что core pipeline уже соответствует docs-first модели, но остаются четыре системных класса риска: prompt/source-of-truth drift между editable workspace prompt packs и hardcoded runtime policy, неполная модульная декомпозиция orchestrator/UI, transitional compatibility logic в runtime repair/canonicalization, и ограниченное интеграционное покрытие UI/harness относительно критичности live gate.
+
+### Goals (must have)
+- [ ] Зафиксировать явный layered contract между workspace prompt packs, enforced runtime step policy и provider-specific wrappers
+- [ ] Довести orchestrator lifecycle до более жёстких ownership boundaries без скрытых cross-cutting side effects
+- [ ] Сузить transitional compatibility/reconciliation logic до time-boxed, наблюдаемого слоя с понятным removal path
+- [ ] Укрепить test surface там, где реальное поведение всё ещё опирается на крупные stateful компоненты и shell harness
+- [ ] Сохранить текущие public contracts и release verdict semantics без расширения user-facing knobs
+
+### Non-goals
+- [ ] Не менять `workspace.yaml`, `schemas/taskresult.schema.json`, release verdict/report contract
+- [ ] Не добавлять новых live providers beyond `claude-code` / `qwen-code`
+- [ ] Не превращать manual live matrix gate в required CI
+
+### Approach
+1) Вынести prompt composition contract в отдельный internal слой: editable workspace prompt packs становятся declarative content layer, а hardcoded Go policy остаётся explicit enforcement layer с проверяемым merge order.
+2) Продолжить modular split orchestrator/UI: выделить runtime dispatch, compile/publish, run-registry/logging и semantic guards из `orchestrator.go`; в UI вынести API/polling state в hooks/client layer, оставив `App.tsx` route shell.
+3) Инвентаризировать transitional compatibility logic (`draft reconcile`, `legacy add_doc_artifact`, collect repair normalization), задать removal criteria и перевести каждое исключение в наблюдаемый compatibility registry/test matrix.
+4) Усилить integration tests для active run lifecycle, git actions UI, shell harness interruption/recovery и prompt/source-of-truth parity между providers.
 
 ### Files expected to change
 - `internal/orchestrator/*`
-- `internal/runtime/*`
-- `internal/workspace/*`
+- `internal/runtime/steppolicy/*`
+- `internal/runtime/qwencode/*`
+- `internal/runtime/claudecode/*`
+- `internal/runtimedrafts/*`
 - `internal/api/*`
-- `scripts/e2e_batch_report.py`
-- `scripts/full-run-batch-5x2.sh`
-- `scripts/frontend-live-e2e.sh`
-- `scripts/tests/*`
 - `ui/src/*`
-- `ui/e2e/*`
-- `README.md`
+- `scripts/*`
+- `scripts/tests/*`
 - `docs/ARCHITECTURE.md`
 - `docs/TESTING_STRATEGY.md`
-- `docs/spec/PIPELINE_SPEC.md`
+- `docs/PLANS.md`
 
 ### Acceptance criteria
-- [x] shell/python report layers не содержат независимой business-logic классификации для canonical runs
-- [x] baseline bundle inventory и UI editor surface генерируются из одного source-of-truth
-- [x] recorded integration tests существуют для `qwen-code` и `claude-code`
-- [x] artifact-quality blockers можно вывести из structured evidence без обязательного markdown text scanning
-- [x] isolated frontend regression tests покрывают ключевой UI flow без live provider dependency
+- [ ] Runtime prompt behavior имеет один documented source-of-truth layering и тест на composition order
+- [ ] `internal/orchestrator/orchestrator.go` и `ui/src/App.tsx` заметно уменьшаются за счёт выделения lifecycle/state modules без functional drift
+- [ ] Transitional compatibility paths имеют явный inventory, tests и removal notes вместо неявного накопления
+- [ ] UI/harness integration coverage закрывает active running, interruption/recovery и git action flows
+- [ ] DoD проходит: `make contracts`, `make test`, `make lint`, `make build`
 
 ### Risks
-- Bundle migration легко сломать, если попытаться silently rewrite user-edited workspace assets; нужны diagnostics/versioning, а не force-overwrite.
-- Сведение classification logic в один source-of-truth затронет одновременно Go, shell и Python и потребует особенно аккуратной regression coverage.
-- Часть current artifact-quality semantics пока encoded в human-readable markdown; перенос в structured layer нужно делать без потери текущих blocking guarantees.
+- Главный риск — сломать текущую стабильность ради structural cleanup. Снижение риска: делать только reviewable slices с parity tests и без изменения public contracts.
 
-### Progress log
-- 2026-04-21: реализованы structured run-level `failure`/`quality_signals` в quality summary, bundle manifest + stale diagnostics, backend/UI inventory convergence, `claude-code` recorded integration parity, additional non-live UI regression checks и shell-agnostic hermetic tooling (`yaml_compat`, `run-npm.sh`, `resolve-node-tool.sh`) для стабильного DoD из `bash`/`make`.
+---
 
-### Archived
-- Completed historical plans moved to `docs/archive/PLANS_ARCHIVE_2026-04.md` (archived on 2026-04-15).
+## ExecPlan
+
+### Plan ID
+EP-20260421-cleanup-plan-audit-closeout
+
+### Context
+Финальная сверка ветки `codex/step-scoped-agent-pipeline` против cleanup-плана после вливания `codex/e2e-profile-taxonomy` в `main` показала, что на этой ветке остался незакрытый backport: baseline editor inventory в UI всё ещё хардкодился в `ui/src/App.tsx`, а manifest-based inventory (`skills/bundle-manifest.json` + `/api/workspace/bundle`) из `main` отсутствовал. Это нарушало требование cleanup slice про один editable baseline inventory source-of-truth.
+
+### Goals (must have)
+- [x] Вернуть manifest-based baseline inventory infrastructure (`skills/bundle-manifest.json`)
+- [x] Подключить bundle manifest в workspace validation и API без изменения текущих user-facing contracts beyond already-landed `main`
+- [x] Перевести UI baseline editor selector с hardcoded artifact list на `/api/workspace/bundle`
+- [x] Добавить/обновить backend/UI tests на effective bundle manifest path
+- [x] Повторно пройти DoD после cleanup backport
+
+### Non-goals
+- [ ] Не делать новый merge/rebase на `main`
+- [ ] Не менять pipeline contracts, runtime profile shape или release verdict schema
+- [ ] Не расширять live harness semantics beyond already landed behavior
+
+### Acceptance criteria
+- [x] В коде больше нет hardcoded baseline editor inventory как source-of-truth
+- [x] `skills/bundle-manifest.json` seed-ится baseline bundle logic и валидируется как часть workspace checks
+- [x] `/api/workspace/bundle` возвращает effective manifest + warnings
+- [x] UI baseline editor использует server-provided editable artifacts
+- [ ] DoD: `make contracts`, `make test`, `make lint`, `make build`
+
+### Risks
+- Основной риск — потянуть в текущую ветку неподходящий кусок `main` и случайно разойтись с уже стабилизированной runtime/UI логикой. Снижение риска: backport только inventory source-of-truth slice, без механического merge.
+
+### Plan ID
+EP-20260421-taxonomy-merge-audit
+
+### Context
+Нужно сравнить текущую ветку `codex/step-scoped-agent-pipeline` с удалённой `origin/codex/e2e-profile-taxonomy`, определить реальные логические расхождения после последних коммитов в taxonomy-ветке, оценить актуальность текущей логики относительно тех изменений и отдельно оценить фактическую сложность merge текущей ветки в `codex/e2e-profile-taxonomy`.
+
+### Goals (must have)
+- [ ] Подтянуть актуальный `origin/codex/e2e-profile-taxonomy` и определить merge-base
+- [ ] Разделить уникальные изменения taxonomy-ветки и текущей ветки по runtime/orchestrator/harness/UI
+- [ ] Отдельно определить пересекающиеся hot spots и фактические merge-conflict файлы
+- [ ] Сформировать вывод, какие части логики текущей ветки остаются актуальными, а какие уже расходятся с taxonomy-веткой
+- [ ] Дать практическую оценку сложности merge и рекомендованную стратегию интеграции
+
+### Non-goals
+- [ ] Не менять код или поведение веток в рамках этого аудита
+- [ ] Не выполнять реальный merge или rebasing
+- [ ] Не менять public contracts
+
+### Approach
+1) Fetch удалённой taxonomy-ветки и фиксация merge-base.
+2) Сравнение уникальных commit-цепочек и map changed files по обе стороны.
+3) Выделение representative diff-зон: runtime prompt/contracts, draft/collect artifact policy, batch/matrix harness, UI/runtime profile.
+4) Dry-run merge в отдельном временном worktree для оценки реального conflict surface.
+5) Подготовка итогового анализа: что изменилось, насколько текущая ветка остаётся актуальной и как сложно будет смержить её в taxonomy-ветку.
+
+### Files expected to inspect
+- `internal/runtime/*`
+- `internal/orchestrator/*`
+- `internal/artifactquality/*`
+- `internal/reports/*`
+- `scripts/*`
+- `scripts/tests/*`
+- `ui/src/*`
+- `docs/*`
+
+### Acceptance criteria
+- [ ] Есть точный merge-base и список уникальных commits по обе стороны
+- [ ] Выделены реальные conflict hot spots, а не только общий diff
+- [ ] Сформулирован вывод по актуальности текущей ветки относительно taxonomy-ветки
+- [ ] Дана инженерная оценка merge complexity и recommended merge order
+
+### Risks
+- Главный риск — перепутать “оба тронули один файл” с реальным смысловым конфликтом. Снижение риска: dry-run merge в отдельном worktree и разбор representative modules вместо чисто статистического diff.
 
 ---
 
@@ -554,8 +1028,8 @@ EP-20260421-runtime-architecture-alignment-followup
 | Epic | Статус | Комментарий |
 |---|---|---|
 | 1 Workspace/contracts | done (beta baseline) | Schema-driven + semantic validation, resolver `path/git_url`, diagnostics API |
-| 2 TaskResult foundations | done (beta baseline) | Validation + canonical-only TaskResult contract, contract tests |
-| 3 Runtime/orchestration seam | done (beta baseline) | Fake default + opt-in headless runtime selector with provider choice (`claude-code` default, `qwen-code`), raw taskruns materialization |
+| 2 Runtime artifact contracts | done (beta baseline) | Validation + artifact-only runtime execution contract, contract tests |
+| 3 Runtime/orchestration seam | done (beta baseline) | Fake default + opt-in headless runtime selector with provider choice (`claude-code` default, `qwen-code`), persisted runtime execution metadata |
 | 4 Model deterministic core | done (beta baseline) | Canonical IDs/collision rules + deterministic regression tests |
 | 5 Pipeline 0–4 | done (beta baseline) | `init|refresh` runnable через CLI/API |
 | 6 UI baseline | done (beta baseline) | Setup/validate/run/inspect + editors + git helpers |
@@ -567,3 +1041,132 @@ EP-20260421-runtime-architecture-alignment-followup
 | 12–13 | out of MVP | Вне текущего beta scope |
 | 14 CI trigger mode | done (beta baseline) | CLI batch required, smoke/golden jobs без live network deps |
 | 15 Domain/baseline pack hardening | done (beta baseline) | Baseline skills/prompts wired и versioned в workspace |
+
+---
+
+## ExecPlan
+
+### Plan ID
+EP-20260421-docs-first-no-taskresult
+
+### Context
+Нужно довести ACP до чистой docs-first архитектуры без `TaskResult` и без backward compatibility. Текущий код всё ещё держит runtime wire contract, orchestration replay, semantic ingestion, collect canonicalization, prompts, fixtures и harness taxonomy вокруг `TaskResult`, `changeset` и legacy repair flows. Пользовательский запрос требует полностью удалить этот слой и перевести pipeline на artifact-only модель: runtime пишет только step-specific artifacts, orchestrator валидирует их и затем публикует deterministic outputs и derived projections.
+
+### Goals (must have)
+- [x] Удалить `TaskResult` schema, типы wire-level payload и все runtime packages/paths, которые извлекают или нормализуют provider JSON envelope
+- [x] Перевести runtime seam на artifact-only execution model с persisted `runtime-execution.json`
+- [x] Заменить `compatibility` на `semantic` в collect/final contracts и перестроить derived layer на manifests/verdicts
+- [x] Перевести `step3.findings` в single-agent validator step без shard fan-out и без `TaskResult` findings ingestion
+- [x] Обновить prompts, harness classification, UI, docs, fixtures и tests под новую artifact-only архитектуру
+- [x] Пройти DoD: `make contracts`, `make test`, `make lint`, `make build`
+
+### Non-goals
+- [x] Не сохранять backward compatibility со старыми recorded payloads, fixtures, prompts или error classes
+- [x] Не расширять `workspace.yaml` или runtime profile public API
+- [x] Не добавлять новых providers beyond `claude-code`, `qwen-code`, `fake`
+
+### Approach
+1. Сначала удалить core `TaskResult` seam: новые shared semantic/runtime-execution types, новый `acpruntime.Result`, обновление schemas/contracts.
+2. Затем перевести live/fake runners и orchestrator apply/replay path на artifact validation и persisted execution metadata.
+3. После этого вычистить derived/model/reporting слой: `semantic` snapshot из shard manifests, verdict-driven findings, без operation log.
+4. В конце синхронизировать harness, UI, docs, fixtures и удалить legacy packages/tests.
+
+### Files expected to change
+- `internal/contracts/*`
+- `internal/runtime/*`
+- `internal/orchestrator/*`
+- `internal/model/*`
+- `internal/reports/*`
+- `schemas/*`
+- `scripts/*`
+- `scripts/tests/*`
+- `cmd/acp/*`
+- `ui/src/*`
+- `docs/*`
+- `examples/*`
+- `fixtures/*`
+
+### Acceptance criteria
+- [x] В репозитории больше нет `TaskResult`, `changeset`, `add_doc_artifact`, `upsert_entity`, `upsert_edge`, `add_finding` как runtime wire surface
+- [x] Live providers больше не обязаны возвращать финальный JSON object; success определяется artifact contract validation
+- [x] `step1` использует `semantic` block как единственный structured semantic source
+- [x] `step3` single-agent и пишет только `validator-verdict.json` c canonical findings/questions
+- [x] Replay/recovery используют persisted manifests + runtime-execution metadata, а не taskresult payloads
+- [x] Harness/UI/docs/test fixtures очищены от `runner_parse_failed` и `TaskResult` assumptions
+
+### Risks
+- Основной риск — сломать несколько execution seams одновременно: runtime, replay, docflow, harness и UI. Снижение риска: сначала перевести shared contracts и execution metadata, затем менять orchestrator/model/reporting, а только потом чистить docs/fixtures/tests как завершающий pass.
+
+---
+
+## ExecPlan
+
+### Plan ID
+EP-20260421-docs-first-audit-closure
+
+### Context
+Нужно повторно сверить репозиторий с финальным artifact-only планом после удаления `TaskResult` и legacy wire surface. Цель — не только проверить отсутствие legacy терминов, но и найти оставшиеся architectural gaps в active code paths, tests и source-of-truth docs.
+
+### Goals (must have)
+- [x] Проверить active code/docs/specs на остатки `TaskResult` и legacy runtime operations
+- [x] Убрать любые оставшиеся dead fallback paths, противоречащие runtime-authored docs-first модели
+- [x] Свести role naming `step3.findings` к одному canonical значению
+- [x] Повторно пройти DoD после найденных фиксов
+
+### Non-goals
+- [x] Не переписывать исторические plan logs в этом файле
+- [x] Не менять public API shape без прямой необходимости
+
+### Approach
+1. Выполнить активный audit по contracts/runtime/orchestrator/reports/harness/UI.
+2. Убрать найденные dead fallback surfaces и contract naming drift.
+3. Перепроверить targeted модули и затем прогнать полный DoD.
+
+### Acceptance criteria
+- [x] В active code path больше нет dead `CompileAsIs`/`CompileProposals`
+- [x] `step3.findings` использует canonical role `validator-findings`
+- [x] Active docs/specs не противоречат artifact-only runtime contract
+- [x] `make contracts`, `make test`, `make lint`, `make build` зелёные
+
+### Risks
+- Основной риск — принять historical plan notes за active contract drift. Снижение риска: проверять только current code paths и source-of-truth docs/specs, а не переписывать историю решений.
+
+---
+
+## ExecPlan
+
+### Plan ID
+EP-20260421-main-merge-resolve
+
+### Context
+PR `codex/step-scoped-agent-pipeline` больше не mergeable в `main`: GitHub показывает `CONFLICTING`, а dry-run merge с `origin/main` подтверждает смысловые конфликты в contracts/orchestrator/runtime/harness/docs плюс шум в generated `internal/api/ui_dist/*`. Нужно довести ветку до реально mergeable состояния, не откатывая artifact-only архитектуру и не теряя live taxonomy/reporting hardening из `main`.
+
+### Goals (must have)
+- [ ] Смёржить `origin/main` в `codex/step-scoped-agent-pipeline` и разрешить все смысловые конфликты
+- [ ] Сохранить artifact-only docs-first модель без возврата `TaskResult`/legacy wire surface
+- [ ] Сохранить live taxonomy/reporting/harness additions из `main`
+- [ ] Пересинхронизировать docs/specs/schemas/fixtures/tests после merge
+- [ ] Пройти DoD: `make contracts`, `make test`, `make lint`, `make build`, `go vet ./...`
+- [ ] Проверить, что PR снова mergeable и что GitHub check suites создаются для нового SHA
+
+### Non-goals
+- [ ] Не делать mechanical conflict resolution в generated `internal/api/ui_dist/*`; эти файлы нужно просто регенерировать
+- [ ] Не менять public API shape сверх того, что уже закреплено artifact-only slice
+- [ ] Не откатывать single-agent `step3.findings` обратно в shard fan-out
+
+### Approach
+1. Выполнить реальный merge `origin/main` в текущую ветку.
+2. Сначала разрулить core-конфликты: `internal/contracts`, `internal/orchestrator`, `internal/runtime`, `internal/reports`, `internal/artifactquality`.
+3. Затем свести harness/scripts и только после этого docs/spec/tests/fixtures.
+4. Для `internal/api/ui_dist/*` не делать ручной merge: принять регенерацию из `make build`.
+5. После зелёного DoD повторно проверить mergeability PR и наличие check suites на новом SHA.
+
+### Acceptance criteria
+- [ ] `gh pr view 27 --json mergeable,mergeStateStatus` больше не показывает `CONFLICTING/DIRTY`
+- [ ] В branch code path по-прежнему нет `TaskResult`/legacy runtime surface
+- [ ] Dry-run merge с `origin/main` больше не выдаёт смысловых конфликтов
+- [ ] Generated UI assets согласованы с текущим UI build и embedded backend
+- [ ] Локальный DoD и `go vet ./...` зелёные
+
+### Risks
+- Самый большой риск — смешать artifact-only архитектуру ветки с partially legacy runtime/reporting кодом из `main`. Снижение риска: сначала сводить core contracts/runtime/orchestrator, затем уже harness/docs, и не принимать обратно deleted legacy packages.

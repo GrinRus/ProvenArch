@@ -15,7 +15,7 @@ Codex читает `AGENTS.md` перед началом работы. Держ�
 - Предпочитать Git-friendly diffs и детерминированность
 
 ## Всегда делать
-- Читать: README.md, docs/ARCHITECTURE.md, schemas/taskresult.schema.json
+- Читать: README.md, docs/ARCHITECTURE.md, docs/spec/PIPELINE_SPEC.md
 - Для pre-release live gate использовать `docs/RELEASE_LIVE_E2E_RUNBOOK.md` как source of truth
 - Для live E2E/release gate использовать skill `acp-e2e-live-gate`; детальный workflow держать в skill/runbook, а не в `AGENTS.md`
 - Для нетривиальной задачи: ExecPlan в docs/PLANS.md

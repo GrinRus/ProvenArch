@@ -2,7 +2,7 @@
 
 > **Статус:** MVP beta foundation / runnable local docs-first pipeline baseline + strict contracts
 > **Принятый стек реализации:** Go (backend/orchestrator) + React/TypeScript UI (embedded), runtime анализа в MVP: **headless multi-provider** (`claude-code` default, `qwen-code` optional)
-> **Последняя ревизия:** 2026-04-16
+> **Последняя ревизия:** 2026-04-19
 
 ## Что это
 
@@ -19,9 +19,8 @@ ACP не является "рисовалкой диаграмм". Архите�
 - контракты и схемы,
 - рабочий local-first backend/API/CLI baseline (`init|refresh` execution path),
 - staged docs-first runtime pipeline для `reports/taskruns/*` с validator-gated promotion в стабильные `reports/*` и `proposals/*`,
-- deterministic compatibility materialization для `model/*`, `reports/*`, `proposals/*`, `changelog`,
+- deterministic derived materialization для `model/*`, `reports/*`, `proposals/*`, `changelog`,
 - UI shell + `make` entrypoints + repo CI.
-- `make`/bash UI steps run through `scripts/run-npm.sh` + `scripts/resolve-node-tool.sh`, so local DoD uses a matching `node`/`npm` pair even when login shells expose multiple Node architectures in different PATH orders.
 
 Реализация остаётся incremental по `docs/BACKLOG.md`, но базовый e2e поток уже исполним: `workspace validate -> run pipeline -> inspect artifacts`.
 
@@ -32,15 +31,15 @@ ACP не является "рисовалкой диаграмм". Архите�
 ## Scope MVP (явно)
 
 ✅ В MVP включено:
-- process-scoped runtime provider selection для headless режима: `claude-code` (default) и `qwen-code`
+- step-scoped runtime provider selection для headless режима: `claude-code` (default fallback) и `qwen-code`
 - local-first режим (всё запускается локально)
 - запуск того же standalone orchestrator в CI/CD через GitHub/GitLab hooks и/или manual pipeline/job trigger
 - единый формат хранения: central `arch-workspace` git-репозиторий (Variant 2)
 - источники репозиториев: локальные checkout-папки и/или GitHub/GitLab `git_url`, разрешаемые через локальный `git` контекст пользователя/runner
 - локально импортированные документы
 - интерактивный wizard "Конституции проекта"
-- deterministic Step 0 materialization из `charter/wizard/step0-contract.json` (с fallback baseline + warning в run diagnostics при missing/invalid contract)
-- встроенный baseline bundle agents/skills/prompts + редактируемые в UI prompt packs, версионируемые в Git; live headless runtime customization берёт только `skills/prompt-packs/*.md`, а `skills/*/prompts/*.md` остаются seeded reference-only assets
+- deterministic Step 0 support-artifacts materialization из `charter/wizard/step0-contract.json`, а canonical `charter/overview.md` / `skills/subagents.yaml` публикуются только из валидных runtime draft artifacts (`constitution-draft.json` + draft finals) с warning в run diagnostics при missing/invalid wizard contract
+- встроенный baseline bundle agents/skills/prompts + редактируемые в UI prompt packs, версионируемые в Git
 - domain-first иерархия агентов (domain analysts + architect aggregator)
 - docs-first runtime contract: shard analysts пишут dossier packs в run-scoped staging, validator даёт canonical verdict, promotion переносит только approved final set
 - markdown-карточки доменов/команд как source-of-truth в `charter/cards`
@@ -53,16 +52,25 @@ ACP не является "рисовалкой диаграмм". Архите�
 - semantic guard в refresh-цикле: фильтрация нерелевантных placeholder-операций, fallback finding при owner-gap, канонизация/дедуп coverage+questions
 - Git-based versioning/branching для модели, правил, отчётов и proposal-пакетов
 - строгий runtime contract: staged filesystem artifact packs + `shard-pack-manifest` / `final-run-index` / `citation-index` / `validator-verdict`
-- `TaskResult` сохраняется как compatibility envelope для fake/legacy/test runners и semantic/model extraction
+- persisted runtime execution metadata сохраняется как internal audit/replay surface для fake/live runners
 
 ## Docs-First Runtime Pipeline
 
-Primary execution path для `step1.collect` и `step3.findings`:
-- runtime пишет только в `reports/taskruns/<run_id>/...` внутри своего `write_root`
+Primary execution path для `step0..step4`:
+- runtime пишет только в `reports/taskruns/<run_id>/...` внутри своего `write_root` и `draft_final_root`
+- provider резолвится на уровне шага, а не всего run; global `--runtime-provider` / `ACP_RUNTIME_PROVIDER` остаются fallback только если step override не задан
+- `step0/2/4` materialize-ят staged draft manifests (`constitution-draft.json`, `asis-draft-manifest.json`, `proposals-draft-manifest.json`)
+- `step0/2/4` считаются successful только если draft manifest contract валиден и все referenced draft files реально существуют под `draft_final_root`
+- publish для `step0/2/4` идёт только из validated runtime draft artifacts через deterministic compile/publish path; direct orchestrator writer больше не является альтернативным source-of-truth для canonical outputs
+- runtime draft manifest contract (`version=1`, `run_id`, `step_id`, `step_contract`, `agent_role`, `outputs[]`) является единым internal source of truth для writer + validator; `qwen` дополнительно делает один step-aware artifact-repair retry для draft-only шагов до возврата в orchestrator
+- runtime validators для collect manifests и draft manifests read-only по умолчанию; допустимая reconciliation вынесена в явную runtime repair/canonicalization стадию до финальной validation
+- если `qwen` на draft-only шаге уже записал draft manifest + draft files, но завис до завершения процесса, runtime принудительно завершает provider process и делает один constrained artifact-only retry.
 - shard agents materialize-ят authored docs + `shard-pack-manifest.json`
+- persisted collect manifests с workspace-level `documents[].path` drift (`reports/...`, `charter/...`, `proposals/...` или duplicated `artifact_root`) отбрасываются до `step2`, а qwen repair может детерминированно нормализовать только safe path drift
 - orchestrator/aggregator собирает staged final doc set в `reports/taskruns/<run_id>/staging/final/`
 - validator пишет `validator-verdict.json`
-- только `PASS` verdict разрешает promotion в канонические `reports/as-is/*`, `reports/findings/*`, `reports/coverage/*`, `reports/agent-outputs/*`, `proposals/*`
+- только schema/semantic/validator gates разрешают promotion в канонические `reports/as-is/*`, `reports/findings/*`, `reports/coverage/*`, `reports/agent-outputs/*`, `proposals/*`
+- обязательного human gate перед publish больше нет
 
 Machine-readable канон для дальнейшего рендера:
 - `final run index`
@@ -107,7 +115,7 @@ Q&A API follow-up в baseline зарезервирован как read-only endp
 Bundle bootstrap policy:
 - `init-workspace` и `serve --auto-init` создают baseline artifacts по стратегии create-if-missing;
 - существующие пользовательские правки в baseline файлах не перезаписываются.
-- `skills/bundle-manifest.json` materialize-ится как machine-readable baseline inventory/source-of-truth для workspace seeding и UI baseline editor; mismatch `bundle_version` surface-ится как diagnostic, без silent overwrite пользовательских файлов.
+- workspace prompt packs участвуют в runtime prompt composition как editable content layer; enforced safety/contract rules приходят из internal runtime step policy и не могут быть ослаблены содержимым prompt pack.
 - baseline prompt defaults структурированы по обязательным секциям (`Goal`, `Inputs`, `Required Output Shape`, `Evidence Policy`, `Forbidden Behavior`, `Fallback When Unknown`) и покрыты quality-тестом на минимальную насыщенность.
 
 ---
@@ -227,7 +235,7 @@ make quickstart-local WORKSPACE=/path/to/arch-workspace REPO_PATH=/path/to/payme
 - `--runtime fake` — default для required deterministic CI surface и первого локального старта.
 - `--runtime headless` — opt-in для реального анализа через выбранный provider.
 - `--runtime-provider` поддерживает `claude-code` (default) и `qwen-code`.
-- precedence выбора provider: CLI `--runtime-provider` > `ACP_RUNTIME_PROVIDER` > `claude-code`.
+- effective precedence выбора provider для каждого шага: `workspace.yaml.runtime.profile.steps.<step>.provider` > CLI `--runtime-provider` / `ACP_RUNTIME_PROVIDER` > `claude-code`.
 - command env:
   - `ACP_CLAUDE_CMD` (default `claude-code`)
   - `ACP_QWEN_CMD` (default `qwen`)
@@ -268,6 +276,7 @@ API управления timeout-профилем:
 ### 6.2) Runtime execution profile (persisted + effective)
 
 Execution-конфиг хранится в `workspace.yaml` (`runtime.profile.execution`) и управляет шардированием runtime-задач.
+Step provider overrides хранятся в `workspace.yaml.runtime.profile.steps.*.provider` и доступны через `GET /api/runtime/profile` и `GET/PUT /api/runtime/execution`.
 
 Default values:
 - `strategy=sequential`
@@ -337,8 +346,11 @@ Script делает strict полный цикл:
 - trap-handling для `TERM/INT/HUP/PIPE` с `failure_reason=infra_signal_terminated` и truthful summary semantics;
 - per-run snapshots в `TMP_ROOT/snapshots/<run_id>/...`;
 - гарантированные debug artifacts: `TMP_ROOT/full-run.log` и `TMP_ROOT/session-summary.md` даже при раннем fail.
-- при `runner_parse_failed` runtime сохраняет raw-output evidence в `reports/taskruns/raw/*` (stdout/stderr + checksums + meta).
-- `reports/taskruns/<run_id>-quality.json` хранит `failure` (`class/subclass/parse_stage/provider/task metadata`), `quality_signals[]` и `evidence_state` (`collect/findings/report_mode/reasons`); если `report_mode=incomplete`, generated markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) помечаются banner/triage-only wording и не означают "сервисов/проблем нет".
+- при `runtime_contract_failed` runtime сохраняет raw-output evidence в `reports/taskruns/raw/*` (stdout/stderr + checksums + meta).
+- для `qwen-code` на `init.step1.collect` / `refresh.step1.collect` включён двуфазный internal stall watchdog:
+  - `pre_artifact`: если provider жив, но в `write_root` ещё нет authored artifacts и одновременно молчат stdout/stderr и file mutations, runtime принудительно завершает процесс и делает forced fresh retry до step timeout;
+  - `post_artifact`: если `write_root` уже содержит `shard-pack-manifest.json` и authored docs, но provider замолчал по stdout/stderr и перестал мутировать `write_root`, runtime принудительно завершает процесс и делает forced recovery retry до step timeout.
+- `reports/taskruns/<run_id>-quality.json` хранит `evidence_state` (`collect/findings/report_mode/reasons`); если `report_mode=incomplete`, generated markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) помечаются banner/triage-only wording и не означают "сервисов/проблем нет".
 
 Если нужно сохранить временный workspace для ручного анализа:
 
@@ -448,7 +460,11 @@ GitHub target catalog для release выбора (`3` monorepo + `3` multi-repo
   - `/tmp/provenarch-test_arch_project/reports/release_verdict_<matrix-id>.json`
 - backend quality считается только по snapshot-артефактам (`snapshots/<run_id>/reports/*`), frontend smoke запускается на отдельной `frontend-workspace` копии и не мутирует backend baseline
 - batch evaluator добавляет semantic hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`; для multi-profile (`expected_repo_count >= 2`) обязателен `cross-repo` сигнал (`analysis:cross-repo-missing` при отсутствии)
-- в `run_matrix`/`quality_report` дополнительно фиксируются `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, runtime flow checks (`runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:execution-semantics`, `runtime_flow_failed`) и failure classes (`runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_signal_terminated`, `infra_incomplete_cycle`, `quality_gates_failed`, `summary_missing`, `precheck_failed`)
+- в `run_matrix`/`quality_report` дополнительно фиксируются `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, runtime flow checks (`runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:execution-semantics`, `runtime_flow_failed`) и failure classes (`runtime_contract_failed`, `runner_unavailable`, `runtime_timeout`, `infra_signal_terminated`, `infra_incomplete_cycle`, `quality_gates_failed`, `summary_missing`, `precheck_failed`)
+- inner `full-run-ai-advent.sh` пишет running-heartbeat в `run-status.env` (`updated_at`, `last_pipeline_stage`, `last_runtime_provider`, `last_progress_at`) и сам materialize-ит terminal status при normal/signal/process exit
+- `full-run-batch-5x2.sh` имеет signal + `EXIT` traps: если shell выходит без `session-summary.md`, harness всё равно досеивает terminal `run-status`, классифицирует started runs и пишет TSV row с `infra_incomplete_cycle` или `infra_signal_terminated`
+- `full-run-batch-matrix.sh` ведёт durable `profile-status/*.json`, переводит lingering `running` в terminal `failed` на `EXIT`, append-ит `profile-runs.jsonl` даже для failed/incomplete child batch и умеет строить matrix verdict на partially completed batch roots
+- batch/matrix reconstruction использует `run-status.env`, `profile-status/*.json` и `run-history.json` как равноправные источники истины; terminal `process_failed + summary_written=yes` остаётся deterministic pipeline failure и не должен перетираться в `infra_incomplete_cycle`
 - direct `npm run --prefix ui e2e:live`: Playwright output default `/tmp/provenarch-ui-e2e/test-results` (override: `UI_E2E_OUTPUT_DIR`)
 - `scripts/frontend-live-e2e.sh`: Playwright output сохраняется в `$OUTPUT_DIR/playwright-results`
 - frontend live e2e ожидает число resolved repos из `UI_E2E_EXPECTED_REPO_COUNT` (default `1`)
@@ -501,9 +517,9 @@ flowchart LR
   CC --> DOCS[Local docs/imports]
   CC --> REPOS
   CC --> OUT["Docs-first artifact pack (shard/final indexes + verdict)"]
-  CC --> COMP["TaskResult (compatibility envelope)"]
+  CC --> META["runtime-execution.json (internal metadata)"]
   OUT --> ORCH
-  COMP --> ORCH
+  META --> ORCH
   ORCH --> WS
   UI --> WS
 ```
@@ -539,7 +555,7 @@ MVP-модель должна покрывать как минимум:
 
 ---
 
-## Контракт runtime output: docs-first (primary) + TaskResult (compatibility)
+## Контракт runtime output: artifact-only docs-first
 
 Primary runtime contract для live `step1.collect`/`step3.findings`:
 - `shard-pack-manifest.json`
@@ -549,13 +565,15 @@ Primary runtime contract для live `step1.collect`/`step3.findings`:
 
 Docs-first semantic rules:
 - `citation-index.json.claim_ids` образуют глобальное пространство имён в пределах assembled staged final set; один и тот же `claim_id` нельзя переиспользовать между разными shard/citation surfaces.
-- `shard-pack-manifest.json.compatibility` всегда materialize-ится полностью (`coverage`, `questions`, `entities`, `edges`, `findings`), а коллекционные retry не считаются успешными, если manifest остаётся missing/invalid/skeletal.
+- `shard-pack-manifest.json.semantic` всегда materialize-ится полностью (`coverage`, `questions`, `entities`, `edges`, `findings`), а коллекционные retry не считаются успешными, если manifest остаётся missing/invalid/skeletal.
+- `shard-pack-manifest.json.documents[].path` всегда strict `artifact_root`-relative; runtime может детерминированно нормализовать duplicated `artifact_root` prefix только если файл реально существует внутри `write_root`, но persisted workspace-relative staging paths считаются contract-invalid drift.
 - validator path может чинить только technical/reference drift в staged indexes; дублирующиеся `claim_id` детерминированно переименовываются в citation index без semantic rewrite authored docs.
 
-TaskResult остаётся compatibility envelope:
-- валидируется по `schemas/taskresult.schema.json`
-- используется для semantic guards, taskrun diagnostics и derived `model/*`
-- не является primary source of truth для canonical `reports/*`/`proposals/*` promotion path
+Persisted runtime execution metadata:
+- сериализуется как internal `runtime-execution.json` payload рядом с taskrun artifacts
+- используется для replay/recovery, taskrun diagnostics и raw-output linking
+- provider/API transport transcripts (например `[API Error: ... SSL ...]`) классифицируются как `runner_unavailable` с обязательным сохранением raw stdout/stderr artifacts
+- не является semantic source of truth для canonical `reports/*`/`proposals/*` promotion path
 
 Primary promotion gate:
 - только `validator-verdict = PASS` разрешает promotion staged final docs в canonical stable paths.
@@ -574,7 +592,7 @@ Primary promotion gate:
 }
 ```
 
-Пример: `examples/taskresult.example.json`.
+Пример: `examples/validator-verdict.example.json`.
 
 ---
 
@@ -609,10 +627,10 @@ Primary promotion gate:
 UI в MVP должен покрывать минимум:
 - wizard для Step 0 (charter);
 - настройку `repos[]` (multi-repo) для локальных папок и GitHub/GitLab URL;
-- baseline-wide редактор `charter/*` + `skills/*` (`prompt-packs/*.md` как live-consumed additive prompt surface, `subagents.yaml`, skill prompts как reference-only seeded assets);
+- baseline-wide редактор `charter/*` + `skills/*` (prompt packs, `subagents.yaml`, skill prompts);
 - запуск pipeline (init/update);
 - явные top-level секции `Setup / Baseline / Runs / Results / Settings`;
-- `Settings` как отдельная вкладка для runtime profile (`timeouts` + `execution`);
+- `Settings` как отдельная вкладка для runtime profile (`timeouts` + `execution`) и effective step providers;
 - `Runs: Logs` с dual stream surface (`event timeline` + `raw agent stream`) и quick actions;
 - `Results` с отдельной вкладкой `Diagrams` (filter/open/preview C4 Mermaid artifacts);
 - просмотр остальных результатов (`as-is`, findings, proposals) и repo validation overview (`resolved_repos` + diagnostics по repo);
@@ -626,9 +644,9 @@ UI в MVP должен покрывать минимум:
 - source of truth: `docs/TESTING_STRATEGY.md`
 - required CI использует synthetic fixtures, recorded runner outputs и не зависит от live headless providers / live network
 - baseline layers:
-  - contract tests для `workspace.yaml`, `shard-pack-manifest`, `final-run-index`, `citation-index`, `validator-verdict` (+ compatibility `TaskResult`)
+  - contract tests для `workspace.yaml`, `shard-pack-manifest`, `final-run-index`, `citation-index`, `validator-verdict` и persisted runtime execution metadata
   - semantic validator tests
-  - golden/regression tests для docs-first staged/promoted outputs и derived compatibility layer
+  - golden/regression tests для docs-first staged/promoted outputs и derived model layer
   - scenario integration tests на synthetic repos
   - smoke tests для CLI/API/UI
 - local live-runner smoke выполняется вручную (не через required CI) через
@@ -651,7 +669,7 @@ Run-specific поверхность (исключена из strict golden compa
 - `reports/changelog/*`
 - `reports/taskruns/*`
 - runtime run registry/status (`/api/pipeline/runs/*`)
-- runtime parse/runtime и lifecycle ошибки после async start отражаются в `GET /api/pipeline/runs/<run_id>.error_code` (например, `runner_parse_failed`, `run_canceled`, `run_reconciled_after_restart`)
+- runtime contract/runtime и lifecycle ошибки после async start отражаются в `GET /api/pipeline/runs/<run_id>.error_code` (например, `runtime_contract_failed`, `run_canceled`, `run_reconciled_after_restart`)
 
 Статус покрытия epics (single source): `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.
 
@@ -672,14 +690,12 @@ Run-specific поверхность (исключена из strict golden compa
 - `schemas/final-run-index.schema.json` — JSON Schema staged final run index
 - `schemas/citation-index.schema.json` — JSON Schema citation normalization layer
 - `schemas/validator-verdict.schema.json` — JSON Schema validator release gate
-- `schemas/taskresult.schema.json` — JSON Schema compatibility runtime envelope
 - `schemas/workspace.schema.json` — JSON Schema для `workspace.yaml`
 - `examples/workspace.example.yaml` — пример workspace config
 - `examples/shard-pack-manifest.example.json` — пример shard manifest
 - `examples/final-run-index.example.json` — пример final index
 - `examples/citation-index.example.json` — пример citation index
 - `examples/validator-verdict.example.json` — пример validator verdict
-- `examples/taskresult.example.json` — пример compatibility TaskResult
 - `cmd/acp/main.go` — CLI entrypoint (`serve`, `run`, `qa`)
 - `ui/package.json` — UI toolchain + scripts
 - `fixtures/README.md` — baseline fixtures и regression surface
@@ -690,7 +706,7 @@ Run-specific поверхность (исключена из strict golden compa
 
 ## Порядок реализации
 
-1) финализировать docs-first runtime contracts + compatibility extraction
+1) финализировать artifact-only docs-first runtime contracts + derived model rebuild
 2) реализовать baseline bundle agents/skills/prompts
 3) реализовать CI/CD trigger surface: hooks/manual pipeline button/job + batch mode
 4) реализовать orchestrator + runtime provider adapters (`claude-code`, `qwen-code`)

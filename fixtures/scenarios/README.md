@@ -9,14 +9,12 @@ fixtures/scenarios/<name>/
   workspace/
   repos/
     <repo-name>/
-  runner/
   golden/
 ```
 
 Где:
 - `workspace/` содержит central workspace inputs
 - `repos/` содержит synthetic repos
-- `runner/` содержит recorded raw TaskResult per step
 - `golden/` содержит ожидаемые `model/`, `reports/`, `proposals/`, `changelog`
 
 Baseline scenarios для MVP:
@@ -26,5 +24,5 @@ Baseline scenarios для MVP:
 - `refresh-artifact-quality`
 - `validator-duplicate-claim`
 
-Required CI использует только synthetic scenarios и recorded runner artifacts.
+Required CI использует только synthetic scenarios, staged manifests/verdicts и golden snapshots.
 Live Claude Code runs в этом контуре не требуются.

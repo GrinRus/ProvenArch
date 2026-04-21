@@ -37,6 +37,28 @@ func TestEnsureBaselineBundleCreatesMissingArtifacts(t *testing.T) {
 	}
 }
 
+func TestEnsureBaselineSupportBundleDoesNotSeedCanonicalSubagentsOutput(t *testing.T) {
+	t.Parallel()
+
+	ws := writeBaselineWorkspace(t)
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure layout: %v", err)
+	}
+	if err := ws.EnsureBaselineSupportBundle(); err != nil {
+		t.Fatalf("ensure baseline support bundle: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(ws.Path, "skills/subagents.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("expected support bundle to avoid seeding canonical subagents output, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(ws.Path, "skills/prompt-packs/collect-context.md")); err != nil {
+		t.Fatalf("expected support bundle to keep prompt packs available: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(ws.Path, BaselineBundleManifestPath)); err != nil {
+		t.Fatalf("expected support bundle to keep baseline bundle manifest available: %v", err)
+	}
+}
+
 func TestEnsureBaselineBundleSeedsMachineReadableManifest(t *testing.T) {
 	t.Parallel()
 
@@ -91,6 +113,39 @@ func TestEnsureBaselineBundleDoesNotOverwriteExistingFiles(t *testing.T) {
 	}
 }
 
+func TestValidateWarnsOnStaleBaselineBundleManifest(t *testing.T) {
+	t.Parallel()
+
+	ws := writeBaselineWorkspace(t)
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure layout: %v", err)
+	}
+	if err := ws.EnsureBaselineBundle(); err != nil {
+		t.Fatalf("ensure baseline bundle: %v", err)
+	}
+	stale := EmbeddedBaselineBundleManifest()
+	stale.BundleVersion = 0
+	raw, err := json.MarshalIndent(stale, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal stale bundle manifest: %v", err)
+	}
+	if err := ws.WriteFile(BaselineBundleManifestPath, append(raw, '\n')); err != nil {
+		t.Fatalf("write stale bundle manifest: %v", err)
+	}
+
+	report := ws.Validate(context.Background(), ValidateOptions{})
+	found := false
+	for _, warning := range report.Warnings {
+		if warning.Code == "workspace.skills.bundle_manifest.stale" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected stale baseline bundle manifest warning, got %+v", report.Warnings)
+	}
+}
+
 func TestEnsureBaselineBundleSeedsStructuredPromptDefaults(t *testing.T) {
 	t.Parallel()
 
@@ -137,39 +192,6 @@ func TestEnsureBaselineBundleSeedsStructuredPromptDefaults(t *testing.T) {
 		if words := len(strings.Fields(body)); words < 70 {
 			t.Fatalf("prompt %s is too short: %d words", rel, words)
 		}
-	}
-}
-
-func TestValidateWarnsOnStaleBaselineBundleManifest(t *testing.T) {
-	t.Parallel()
-
-	ws := writeBaselineWorkspace(t)
-	if err := ws.EnsureLayout(); err != nil {
-		t.Fatalf("ensure layout: %v", err)
-	}
-	if err := ws.EnsureBaselineBundle(); err != nil {
-		t.Fatalf("ensure baseline bundle: %v", err)
-	}
-	stale := EmbeddedBaselineBundleManifest()
-	stale.BundleVersion = 0
-	raw, err := json.MarshalIndent(stale, "", "  ")
-	if err != nil {
-		t.Fatalf("marshal stale bundle manifest: %v", err)
-	}
-	if err := ws.WriteFile(BaselineBundleManifestPath, append(raw, '\n')); err != nil {
-		t.Fatalf("write stale bundle manifest: %v", err)
-	}
-
-	report := ws.Validate(context.Background(), ValidateOptions{})
-	found := false
-	for _, warning := range report.Warnings {
-		if warning.Code == "workspace.skills.bundle_manifest.stale" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected stale baseline bundle manifest warning, got %+v", report.Warnings)
 	}
 }
 

@@ -1,12 +1,10 @@
 package orchestrator
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -63,10 +61,12 @@ var (
 )
 
 type Service struct {
-	runner             acpruntime.Runner
+	runnerFactory      stepRunnerFactory
 	clock              func() time.Time
 	executionOverrides acpruntime.ExecutionOverrides
 	resumeStaleAsync   bool
+	providerFallback   acpruntime.Provider
+	providerSource     acpruntime.ProviderSource
 
 	mu             sync.RWMutex
 	runs           map[string]*runRecord
@@ -99,15 +99,16 @@ type runRecord struct {
 }
 
 type RunInfo struct {
-	RunID       string     `json:"run_id"`
-	Pipeline    string     `json:"pipeline"`
-	Status      RunStatus  `json:"status"`
-	StartedAt   time.Time  `json:"started_at"`
-	FinishedAt  *time.Time `json:"finished_at,omitempty"`
-	CurrentStep string     `json:"current_step,omitempty"`
-	Warnings    []string   `json:"warnings,omitempty"`
-	ErrorCode   string     `json:"error_code,omitempty"`
-	Error       string     `json:"error,omitempty"`
+	RunID         string            `json:"run_id"`
+	Pipeline      string            `json:"pipeline"`
+	Status        RunStatus         `json:"status"`
+	StartedAt     time.Time         `json:"started_at"`
+	FinishedAt    *time.Time        `json:"finished_at,omitempty"`
+	CurrentStep   string            `json:"current_step,omitempty"`
+	StepProviders map[string]string `json:"step_providers,omitempty"`
+	Warnings      []string          `json:"warnings,omitempty"`
+	ErrorCode     string            `json:"error_code,omitempty"`
+	Error         string            `json:"error,omitempty"`
 }
 
 type Artifact struct {
@@ -128,23 +129,45 @@ type runHistorySnapshot struct {
 }
 
 type runHistoryItem struct {
-	RunID       string     `json:"run_id"`
-	Pipeline    string     `json:"pipeline"`
-	Status      RunStatus  `json:"status"`
-	StartedAt   string     `json:"started_at"`
-	FinishedAt  *string    `json:"finished_at,omitempty"`
-	CurrentStep string     `json:"current_step,omitempty"`
-	Warnings    []string   `json:"warnings,omitempty"`
-	ErrorCode   string     `json:"error_code,omitempty"`
-	Error       string     `json:"error,omitempty"`
-	Artifacts   []Artifact `json:"artifacts,omitempty"`
+	RunID         string            `json:"run_id"`
+	Pipeline      string            `json:"pipeline"`
+	Status        RunStatus         `json:"status"`
+	StartedAt     string            `json:"started_at"`
+	FinishedAt    *string           `json:"finished_at,omitempty"`
+	CurrentStep   string            `json:"current_step,omitempty"`
+	StepProviders map[string]string `json:"step_providers,omitempty"`
+	Warnings      []string          `json:"warnings,omitempty"`
+	ErrorCode     string            `json:"error_code,omitempty"`
+	Error         string            `json:"error,omitempty"`
+	Artifacts     []Artifact        `json:"artifacts,omitempty"`
+}
+
+type stepRunnerFactory interface {
+	Build(provider acpruntime.Provider) (acpruntime.Runner, error)
+}
+
+type stepRunnerFactoryFunc func(provider acpruntime.Provider) (acpruntime.Runner, error)
+
+func (fn stepRunnerFactoryFunc) Build(provider acpruntime.Provider) (acpruntime.Runner, error) {
+	return fn(provider)
 }
 
 type Option func(*Service)
 
 func WithRunner(runner acpruntime.Runner) Option {
 	return func(service *Service) {
-		service.runner = runner
+		service.runnerFactory = stepRunnerFactoryFunc(func(acpruntime.Provider) (acpruntime.Runner, error) {
+			return runner, nil
+		})
+	}
+}
+
+func WithRunnerFactory(factory func(provider acpruntime.Provider) (acpruntime.Runner, error)) Option {
+	return func(service *Service) {
+		if factory == nil {
+			return
+		}
+		service.runnerFactory = stepRunnerFactoryFunc(factory)
 	}
 }
 
@@ -194,9 +217,20 @@ func WithResumeStaleAsyncRuns() Option {
 	}
 }
 
+func WithProviderFallback(provider acpruntime.Provider, source acpruntime.ProviderSource) Option {
+	return func(service *Service) {
+		if provider != "" {
+			service.providerFallback = provider
+		}
+		if source != "" {
+			service.providerSource = source
+		}
+	}
+}
+
 func NewService(options ...Option) *Service {
 	service := &Service{
-		runner:           claudecode.FakeRunner{},
+		runnerFactory:    stepRunnerFactoryFunc(func(acpruntime.Provider) (acpruntime.Runner, error) { return claudecode.FakeRunner{}, nil }),
 		clock:            time.Now,
 		runs:             map[string]*runRecord{},
 		debounceWindow:   5 * time.Minute,
@@ -205,14 +239,19 @@ func NewService(options ...Option) *Service {
 		historyRetention: runHistoryRetention,
 		runLogsTTL:       7 * 24 * time.Hour,
 		runLogsMaxRuns:   200,
+		providerFallback: acpruntime.ProviderClaudeCode,
+		providerSource:   acpruntime.ProviderSourceDefault,
 	}
 	for _, option := range options {
 		option(service)
 	}
 	service.loadHistory()
-	service.recoverStaleRunsAfterRestart()
 	_ = service.cleanupRunLogs()
 	return service
+}
+
+func (s *Service) ReconcileStaleRunsAfterRestart() {
+	s.recoverStaleRunsAfterRestart()
 }
 
 func ParsePipeline(value string) (Pipeline, error) {
@@ -230,16 +269,26 @@ func (s *Service) ResolveExecutionProfile(manifest workspace.Manifest) acpruntim
 	return acpruntime.ResolveExecution(manifest, s.executionOverrides)
 }
 
+func (s *Service) ResolveStepProviderProfile(manifest workspace.Manifest) (acpruntime.StepProviderResolution, error) {
+	return acpruntime.ResolveStepProviders(manifest, s.providerFallback, s.providerSource)
+}
+
 func (s *Service) Run(ctx context.Context, request RunRequest) (RunInfo, []Artifact, error) {
 	runID := s.nextRunID()
 	return s.runWithID(ctx, request, runID)
 }
 
-func (s *Service) ValidateRuntime(ctx context.Context) error {
-	if checker, ok := s.runner.(acpruntime.PreflightRunner); ok {
-		return checker.Preflight(ctx)
+func (s *Service) ValidateRuntime(ctx context.Context, manifests ...workspace.Manifest) error {
+	manifest := workspace.Manifest{}
+	if len(manifests) > 0 {
+		manifest = manifests[0]
 	}
-	return nil
+	resolved, err := s.ResolveStepProviderProfile(manifest)
+	if err != nil {
+		return err
+	}
+	resolver := newStepRunnerResolver(s.runnerFactory, resolved.Effective)
+	return resolver.Preflight(ctx)
 }
 
 func (s *Service) runWithID(ctx context.Context, request RunRequest, runID string) (RunInfo, []Artifact, error) {
@@ -250,6 +299,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	initialArtifacts := []Artifact{}
 	initialWarnings := []string{}
 	resumeFromStep := ""
+	resolvedStepProviders, resolvedStepProvidersErr := s.ResolveStepProviderProfile(request.Workspace.Manifest)
 	runLogMessage := "run started"
 	runLogFields := map[string]any{
 		"pipeline": string(request.Pipeline),
@@ -264,12 +314,16 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		runLogFields["resume_from_step"] = resumeFromStep
 	}
 	initialInfo := RunInfo{
-		RunID:       runID,
-		Pipeline:    string(request.Pipeline),
-		Status:      RunStatusRunning,
-		StartedAt:   startedAt,
-		CurrentStep: resumeFromStep,
-		Warnings:    append([]string(nil), initialWarnings...),
+		RunID:         runID,
+		Pipeline:      string(request.Pipeline),
+		Status:        RunStatusRunning,
+		StartedAt:     startedAt,
+		CurrentStep:   resumeFromStep,
+		StepProviders: map[string]string{},
+		Warnings:      append([]string(nil), initialWarnings...),
+	}
+	if resolvedStepProvidersErr == nil {
+		initialInfo.StepProviders = resolvedStepProviders.Effective.StringMap()
 	}
 	s.storeRun(runRecord{
 		info:      initialInfo,
@@ -281,11 +335,11 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		Message:   runLogMessage,
 		Fields:    runLogFields,
 	})
-	if err := s.ValidateRuntime(ctx); err != nil {
+	if resolvedStepProvidersErr != nil {
 		finishedAt := s.clock().UTC()
 		failedInfo := initialInfo
 		failedInfo.Status = RunStatusFailed
-		failedInfo.ErrorCode, failedInfo.Error = s.classifyRunFailure(runID, err)
+		failedInfo.ErrorCode, failedInfo.Error = s.classifyRunFailure(runID, resolvedStepProvidersErr)
 		failedInfo.FinishedAt = &finishedAt
 		s.storeRun(runRecord{
 			info:      failedInfo,
@@ -294,14 +348,14 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		s.appendRunLog(runID, RunLogEntry{
 			Timestamp: finishedAt,
 			Level:     RunLogLevelError,
-			Message:   "run failed: runtime validation",
+			Message:   "run failed: runtime provider resolution",
 			Fields: map[string]any{
 				"error_code": failedInfo.ErrorCode,
 				"error":      failedInfo.Error,
 			},
 		})
 		_ = s.cleanupRunLogs()
-		return failedInfo, nil, err
+		return failedInfo, nil, resolvedStepProvidersErr
 	}
 	if err := request.Workspace.EnsureLayout(); err != nil {
 		finishedAt := s.clock().UTC()
@@ -326,6 +380,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		return failedInfo, nil, err
 	}
 	resolvedExecution := s.ResolveExecutionProfile(request.Workspace.Manifest)
+	stepRunnerResolver := newStepRunnerResolver(s.runnerFactory, resolvedStepProviders.Effective)
 	validation := request.Workspace.Validate(ctx, workspace.ValidateOptions{
 		ResolveRepos: true,
 		FetchGit:     true,
@@ -362,7 +417,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		pipeline:           request.Pipeline,
 		startedAt:          startedAt,
 		workspace:          request.Workspace,
-		runner:             s.runner,
+		runnerResolver:     stepRunnerResolver,
 		store:              model.NewStore(request.Workspace),
 		compiler:           reports.NewCompiler(request.Workspace),
 		clock:              s.clock,
@@ -376,11 +431,13 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		runtimeStepMetrics: []runtimeStepQuality{},
 		runtimeVersions:    map[string]struct{}{},
 		resumeFromStep:     resumeFromStep,
+		resumeSourceStep:   strings.TrimSpace(resumedRecord.info.CurrentStep),
 		warnings:           append([]string(nil), initialWarnings...),
 		resolvedRepoPaths:  map[string]string{},
 		repoSelectionMode:  "all",
 		selectedRepoScopes: collectRepoScopes(request.Workspace.Manifest.Repos),
 		reportContext:      reports.DefaultReportRenderContext(),
+		stepProviders:      resolvedStepProviders.Effective,
 	}
 	for _, resolvedRepo := range validation.ResolvedRepos {
 		name := strings.TrimSpace(resolvedRepo.Name)
@@ -409,6 +466,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		"max_parallel":     execution.executionProfile.MaxParallel,
 		"failure_policy":   execution.executionProfile.FailurePolicy,
 		"shard_discovery":  execution.executionProfile.ShardMode,
+		"step_providers":   execution.stepProviders.StringMap(),
 		"selected_scopes":  append([]string(nil), execution.selectedRepoScopes...),
 		"timeout_step_sec": resolvedTimeouts.Effective.StepTimeoutSec,
 		"timeout_hb_sec":   resolvedTimeouts.Effective.HeartbeatSec,
@@ -417,6 +475,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		progress := initialInfo
 		progress.Status = RunStatusRunning
 		progress.CurrentStep = stepID
+		progress.StepProviders = execution.stepProviders.StringMap()
 		progress.Warnings = append([]string(nil), execution.warnings...)
 		s.storeRun(runRecord{
 			info:      progress,
@@ -434,7 +493,12 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		execution.rewriteTerminalReports(RunStatusFailed)
 		failedInfo.Warnings = append([]string(nil), execution.warnings...)
 		failedInfo.FinishedAt = &finishedAt
-		if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusFailed, failedInfo.ErrorCode, failedInfo.Error, deriveRunFailureClassification(failedInfo.ErrorCode, err)); qualityErr == nil {
+		if qualityArtifact, qualityErr := execution.writeRunQualitySummary(
+			RunStatusFailed,
+			failedInfo.ErrorCode,
+			failedInfo.Error,
+			classifyRunFailureSummary(execution.stepStatus.CurrentStep, err),
+		); qualityErr == nil {
 			execution.addArtifacts(qualityArtifact)
 		} else {
 			failedInfo.Warnings = append(failedInfo.Warnings, fmt.Sprintf("run quality summary write failed: %v", qualityErr))
@@ -464,10 +528,17 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		execution.rewriteTerminalReports(RunStatusFailed)
 		failedInfo.Warnings = append([]string(nil), execution.warnings...)
 		failedInfo.FinishedAt = &finishedAt
-		if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusFailed, failedInfo.ErrorCode, failedInfo.Error, normalizeRunFailureClassification(runFailureClassification{
-			Class:  "infra_incomplete_cycle",
-			Source: "partial_failures",
-		})); qualityErr == nil {
+		if qualityArtifact, qualityErr := execution.writeRunQualitySummary(
+			RunStatusFailed,
+			failedInfo.ErrorCode,
+			failedInfo.Error,
+			runFailureClassification{
+				Class:      failedInfo.ErrorCode,
+				StepID:     strings.TrimSpace(execution.stepStatus.CurrentStep),
+				ShortCause: strings.TrimSpace(failedInfo.Error),
+				Source:     "orchestrator.partial_failures",
+			},
+		); qualityErr == nil {
 			execution.addArtifacts(qualityArtifact)
 		} else {
 			failedInfo.Warnings = append(failedInfo.Warnings, fmt.Sprintf("run quality summary write failed: %v", qualityErr))
@@ -512,7 +583,8 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 
 func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string, error) {
 	_ = s.cleanupRunLogs()
-	if err := s.ValidateRuntime(ctx); err != nil {
+	resolvedStepProviders, err := s.ResolveStepProviderProfile(request.Workspace.Manifest)
+	if err != nil {
 		return "", err
 	}
 	runID := s.nextRunID()
@@ -522,10 +594,11 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 	storeQueuedRun := func() {
 		s.upsertRunLocked(runRecord{
 			info: RunInfo{
-				RunID:     runID,
-				Pipeline:  string(request.Pipeline),
-				Status:    RunStatusQueued,
-				StartedAt: now,
+				RunID:         runID,
+				Pipeline:      string(request.Pipeline),
+				Status:        RunStatusQueued,
+				StartedAt:     now,
+				StepProviders: resolvedStepProviders.Effective.StringMap(),
 			},
 		})
 	}
@@ -877,180 +950,6 @@ func (s *Service) trimRunRegistryLocked() {
 	}
 }
 
-func (s *Service) loadHistory() {
-	if !s.historyEnabled {
-		return
-	}
-	content, err := s.historyWorkspace.ReadFile(runHistoryPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return
-		}
-		return
-	}
-
-	var snapshot runHistorySnapshot
-	if err := json.Unmarshal(content, &snapshot); err != nil {
-		return
-	}
-	if snapshot.Version != runHistoryVersion {
-		return
-	}
-
-	for _, item := range snapshot.Items {
-		record, ok := historyItemToRunRecord(item)
-		if !ok {
-			continue
-		}
-		s.runs[record.info.RunID] = &record
-	}
-}
-
-type staleRunReconciliation struct {
-	runID         string
-	previousState RunStatus
-}
-
-type staleRunResumeTarget struct {
-	runID   string
-	request RunRequest
-}
-
-func (s *Service) recoverStaleRunsAfterRestart() {
-	now := s.clock().UTC()
-	reconciledRuns := []staleRunReconciliation{}
-	var resumeTarget *staleRunResumeTarget
-
-	s.mu.Lock()
-	candidateRunID := ""
-	if s.resumeStaleAsync {
-		candidateRunID = s.findResumableRunningRunLocked()
-	}
-	for runID, record := range s.runs {
-		if record == nil {
-			continue
-		}
-		switch record.info.Status {
-		case RunStatusQueued:
-		case RunStatusRunning:
-		default:
-			continue
-		}
-		if record.info.Status == RunStatusRunning && runID == candidateRunID {
-			if pipeline, err := ParsePipeline(record.info.Pipeline); err == nil {
-				resumeTarget = &staleRunResumeTarget{
-					runID: runID,
-					request: RunRequest{
-						Workspace:      s.historyWorkspace,
-						Pipeline:       pipeline,
-						NonInteractive: true,
-					},
-				}
-				continue
-			}
-		}
-		previousStatus := record.info.Status
-		finishedAt := now
-		reconciledInfo := record.info
-		reconciledInfo.Status = RunStatusFailed
-		reconciledInfo.ErrorCode = runErrorCodeReconciledAfterRestart
-		reconciledInfo.Error = fmt.Sprintf("run reconciled after service restart (stale status=%s)", previousStatus)
-		reconciledInfo.FinishedAt = &finishedAt
-		record.info = reconciledInfo
-		s.runs[runID] = record
-		reconciledRuns = append(reconciledRuns, staleRunReconciliation{
-			runID:         runID,
-			previousState: previousStatus,
-		})
-	}
-	if len(reconciledRuns) > 0 {
-		s.persistHistoryLocked()
-	}
-	if resumeTarget != nil {
-		s.activeRunID = resumeTarget.runID
-	} else {
-		s.activeRunID = ""
-	}
-	s.pendingRun = nil
-	if s.runCancels == nil {
-		s.runCancels = map[string]context.CancelFunc{}
-	}
-	for runID, cancel := range s.runCancels {
-		if cancel != nil {
-			cancel()
-		}
-		delete(s.runCancels, runID)
-	}
-	if s.cancelRequests == nil {
-		s.cancelRequests = map[string]struct{}{}
-	}
-	for runID := range s.cancelRequests {
-		delete(s.cancelRequests, runID)
-	}
-	s.mu.Unlock()
-
-	for _, stale := range reconciledRuns {
-		s.appendRunLog(stale.runID, RunLogEntry{
-			Timestamp: now,
-			Level:     RunLogLevelWarning,
-			Message:   "run reconciled after restart",
-			Fields: map[string]any{
-				"error_code":      runErrorCodeReconciledAfterRestart,
-				"previous_status": string(stale.previousState),
-			},
-		})
-	}
-	if resumeTarget != nil {
-		s.launchAsyncRun(context.Background(), resumeTarget.runID, resumeTarget.request)
-	}
-}
-
-func (s *Service) findResumableRunningRunLocked() string {
-	if !s.resumeStaleAsync || !s.historyEnabled || strings.TrimSpace(s.historyWorkspace.Path) == "" {
-		return ""
-	}
-
-	candidates := make([]runRecord, 0, len(s.runs))
-	for _, record := range s.runs {
-		if record == nil || record.info.Status != RunStatusRunning {
-			continue
-		}
-		if !s.isRunningRunResumable(*record) {
-			continue
-		}
-		candidates = append(candidates, *record)
-	}
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].info.StartedAt.Equal(candidates[j].info.StartedAt) {
-			return candidates[i].info.RunID > candidates[j].info.RunID
-		}
-		return candidates[i].info.StartedAt.After(candidates[j].info.StartedAt)
-	})
-	if len(candidates) == 0 {
-		return ""
-	}
-	return candidates[0].info.RunID
-}
-
-func (s *Service) isRunningRunResumable(record runRecord) bool {
-	pipeline, err := ParsePipeline(record.info.Pipeline)
-	if err != nil {
-		return false
-	}
-	currentStep := strings.TrimSpace(record.info.CurrentStep)
-	if currentStep == "" {
-		return false
-	}
-	resumeStep := resumeStepForCurrentStep(pipeline, currentStep)
-	if resumeStep == "" {
-		return false
-	}
-	if !isRuntimeOrLaterStep(pipeline, currentStep) {
-		return true
-	}
-	return hasShardArtifactsForRun(s.historyWorkspace.Path, record.info.RunID, resumeStep)
-}
-
 func (s *Service) persistHistoryLocked() {
 	if !s.historyEnabled {
 		return
@@ -1097,15 +996,16 @@ func (s *Service) persistHistoryLocked() {
 
 func runRecordToHistoryItem(record runRecord) runHistoryItem {
 	item := runHistoryItem{
-		RunID:       record.info.RunID,
-		Pipeline:    record.info.Pipeline,
-		Status:      record.info.Status,
-		StartedAt:   record.info.StartedAt.UTC().Format(time.RFC3339),
-		CurrentStep: record.info.CurrentStep,
-		Warnings:    append([]string(nil), record.info.Warnings...),
-		ErrorCode:   record.info.ErrorCode,
-		Error:       record.info.Error,
-		Artifacts:   append([]Artifact(nil), record.artifacts...),
+		RunID:         record.info.RunID,
+		Pipeline:      record.info.Pipeline,
+		Status:        record.info.Status,
+		StartedAt:     record.info.StartedAt.UTC().Format(time.RFC3339),
+		CurrentStep:   record.info.CurrentStep,
+		StepProviders: cloneStringMap(record.info.StepProviders),
+		Warnings:      append([]string(nil), record.info.Warnings...),
+		ErrorCode:     record.info.ErrorCode,
+		Error:         record.info.Error,
+		Artifacts:     append([]Artifact(nil), record.artifacts...),
 	}
 	if record.info.FinishedAt != nil {
 		finished := record.info.FinishedAt.UTC().Format(time.RFC3339)
@@ -1129,15 +1029,16 @@ func historyItemToRunRecord(item runHistoryItem) (runRecord, bool) {
 	}
 	return runRecord{
 		info: RunInfo{
-			RunID:       item.RunID,
-			Pipeline:    item.Pipeline,
-			Status:      item.Status,
-			StartedAt:   startedAt.UTC(),
-			FinishedAt:  finishedAt,
-			CurrentStep: item.CurrentStep,
-			Warnings:    append([]string(nil), item.Warnings...),
-			ErrorCode:   item.ErrorCode,
-			Error:       item.Error,
+			RunID:         item.RunID,
+			Pipeline:      item.Pipeline,
+			Status:        item.Status,
+			StartedAt:     startedAt.UTC(),
+			FinishedAt:    finishedAt,
+			CurrentStep:   item.CurrentStep,
+			StepProviders: cloneStringMap(item.StepProviders),
+			Warnings:      append([]string(nil), item.Warnings...),
+			ErrorCode:     item.ErrorCode,
+			Error:         item.Error,
 		},
 		artifacts: append([]Artifact(nil), item.Artifacts...),
 	}, true
@@ -1170,50 +1071,6 @@ func (s *Service) classifyRunFailure(runID string, err error) (string, string) {
 	return classifyExecutionError(err)
 }
 
-func deriveRunFailureClassification(errorCode string, err error) runFailureClassification {
-	classification := normalizeRunFailureClassification(runFailureClassification{})
-	var runnerErr acpruntime.RunnerError
-	if errors.As(err, &runnerErr) {
-		classification.Class = canonicalFailureClassFromRuntimeErrorCode(errorCode)
-		if value := strings.TrimSpace(runnerErr.Failure.FailureClass); value != "" {
-			classification.Class = value
-		}
-		classification.Subclass = strings.TrimSpace(runnerErr.Failure.FailureSubclass)
-		classification.ParseStage = strings.TrimSpace(runnerErr.Failure.ParseStage)
-		classification.Provider = strings.TrimSpace(string(runnerErr.Provider))
-		classification.TaskID = strings.TrimSpace(runnerErr.Failure.TaskID)
-		classification.StepID = strings.TrimSpace(runnerErr.Failure.StepID)
-		classification.ShardID = strings.TrimSpace(runnerErr.Failure.ShardID)
-		classification.FailureArtifact = strings.TrimSpace(runnerErr.Failure.FailureArtifactPath)
-		classification.RawOutput = strings.TrimSpace(runnerErr.Failure.RawOutputPath)
-		classification.ShortCause = strings.TrimSpace(runnerErr.Failure.ShortCause)
-		classification.Source = "runner_error"
-		return normalizeRunFailureClassification(classification)
-	}
-	if class := canonicalFailureClassFromRuntimeErrorCode(errorCode); class != "" && class != "none" {
-		return normalizeRunFailureClassification(runFailureClassification{
-			Class:  class,
-			Source: "error_code",
-		})
-	}
-	return classification
-}
-
-func canonicalFailureClassFromRuntimeErrorCode(errorCode string) string {
-	switch strings.TrimSpace(errorCode) {
-	case string(acpruntime.ErrorCodeRunnerParseFailed):
-		return "runtime_parse"
-	case string(acpruntime.ErrorCodeRunnerStalled):
-		return "runtime_stalled"
-	case string(acpruntime.ErrorCodeRunnerUnavailable):
-		return "runner_unavailable"
-	case string(acpruntime.ErrorCodeRuntimeTimeout):
-		return "runtime_timeout"
-	default:
-		return "none"
-	}
-}
-
 func (s *Service) isCancelRequested(runID string) bool {
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
@@ -1230,7 +1087,7 @@ type pipelineExecution struct {
 	pipeline                 Pipeline
 	startedAt                time.Time
 	workspace                workspace.Root
-	runner                   acpruntime.Runner
+	runnerResolver           *stepRunnerResolver
 	store                    model.Store
 	compiler                 reports.Compiler
 	clock                    func() time.Time
@@ -1251,23 +1108,33 @@ type pipelineExecution struct {
 	executionProfile         acpruntime.ExecutionValues
 	partialFailures          []runtimeShardFailure
 	resumeFromStep           string
+	resumeSourceStep         string
 	resolvedRepoPaths        map[string]string
 	repoSelectionMode        string
 	selectedRepoScopes       []string
+	stepProviders            acpruntime.StepProviderValues
 	collectOutcome           runtimeShardOutcome
 	findingsOutcome          runtimeShardOutcome
 	findingsSkipped          bool
 	reportContext            reports.ReportRenderContext
+	step0DraftManifest       *runtimeDraftManifest
+	step0DraftRoot           string
+	asIsDraftManifest        *runtimeDraftManifest
+	asIsDraftRoot            string
+	proposalsDraftManifest   *runtimeDraftManifest
+	proposalsDraftRoot       string
 	shardPacks               []contracts.ShardPackManifest
 	finalRunIndex            *contracts.FinalRunIndex
 	citationIndex            *contracts.CitationIndex
 	validatorVerdict         *contracts.ValidatorVerdict
-	compatibilityBase        *contracts.CompatibilitySnapshot
+	semanticBase             *contracts.SemanticSnapshot
 }
 
 type runtimeTaskExecution struct {
-	RawJSON          []byte
-	Normalized       contracts.TaskResult
+	Task             acpruntime.Task
+	RuntimeName      string
+	RuntimeVersion   string
+	Execution        contracts.RuntimeExecution
 	Apply            model.ApplyReport
 	ShardManifest    *contracts.ShardPackManifest
 	ValidatorVerdict *contracts.ValidatorVerdict
@@ -1275,8 +1142,8 @@ type runtimeTaskExecution struct {
 
 type runtimePreparedExecution struct {
 	Task           acpruntime.Task
-	Normalized     contracts.TaskResult
-	NormalizedRaw  []byte
+	Execution      contracts.RuntimeExecution
+	ExecutionRaw   []byte
 	RuntimeName    string
 	RuntimeVersion string
 }
@@ -1329,40 +1196,32 @@ func (e *pipelineExecution) run(ctx context.Context) error {
 func (e *pipelineExecution) runStep(ctx context.Context, stepID string) error {
 	switch stepID {
 	case "init.step0.constitution":
-		return e.runStepConstitution()
+		return e.runStepConstitution(ctx, stepID)
 	case "init.step1.collect", "refresh.step1.collect":
 		return e.runRuntimeStep(ctx, stepID)
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
-		return e.runStepAsIs()
+		return e.runStepAsIs(ctx, stepID)
 	case "init.step3.findings", "refresh.step3.findings":
 		return e.runStepValidator(ctx, stepID)
 	case "init.step4.proposals", "refresh.step4.proposals":
-		return e.runStepProposals()
+		return e.runStepProposals(ctx, stepID)
 	default:
 		return fmt.Errorf("unsupported step %q", stepID)
 	}
 }
 
-func (e *pipelineExecution) runStepConstitution() error {
-	e.logInfo("init.step0.constitution", "", "materializing constitution artifacts", nil)
-	step0Contract, hasStep0Contract, err := loadStep0WizardContract(e.workspace)
+func (e *pipelineExecution) runStepConstitution(ctx context.Context, stepID string) error {
+	selectedScopes := normalizeOrderedUniqueStrings(e.selectedRepoScopes)
+	execution, err := e.executeRuntimeTask(ctx, stepID, "constitution", selectedScopes, []string{"."}, "", "")
 	if err != nil {
-		e.addWarning(fmt.Sprintf("step0_wizard_contract_invalid: %v; fallback baseline constitution materialization is used", err))
-	}
-	if !hasStep0Contract {
-		e.addWarning("step0_wizard_contract_missing: charter/wizard/step0-contract.json not found; fallback baseline constitution materialization is used")
-	}
-	if err := e.writeConstitutionArtifacts(hasStep0Contract && err == nil, step0Contract); err != nil {
 		return err
 	}
-	if err := writeBaselineBundle(e.workspace); err != nil {
+	if err := e.publishValidatedConstitutionDrafts(execution); err != nil {
 		return err
 	}
-
-	e.addArtifacts(
-		Artifact{Path: "charter/overview.md", Kind: "charter", Label: "Constitution"},
-		Artifact{Path: "skills/subagents.yaml", Kind: "bundle", Label: "Baseline Subagents"},
-	)
+	if err := e.materializeConstitutionSupportSurface(stepID); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1509,26 +1368,25 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 		}
 		aggregatedApply := model.ApplyReport{}
 		aggregatedQuestions := make([]contracts.Question, 0, len(executions))
+		aggregatedFindings := make([]contracts.Finding, 0, len(executions))
 		summaries := make([]string, 0, len(executions))
 		for _, execution := range executions {
 			if execution.ShardManifest != nil {
-				aggregatedApply.UpsertedEntities += len(execution.ShardManifest.Compatibility.Entities)
-				aggregatedApply.UpsertedEdges += len(execution.ShardManifest.Compatibility.Edges)
-				aggregatedApply.Findings = append(aggregatedApply.Findings, execution.ShardManifest.Compatibility.Findings...)
-				aggregatedQuestions = append(aggregatedQuestions, execution.ShardManifest.Compatibility.Questions...)
-			} else {
-				aggregatedApply.UpsertedEntities += execution.Apply.UpsertedEntities
-				aggregatedApply.UpsertedEdges += execution.Apply.UpsertedEdges
-				aggregatedApply.Findings = append(aggregatedApply.Findings, execution.Apply.Findings...)
-				aggregatedQuestions = append(aggregatedQuestions, execution.Normalized.Questions...)
+				aggregatedApply.UpsertedEntities += len(execution.ShardManifest.Semantic.Entities)
+				aggregatedApply.UpsertedEdges += len(execution.ShardManifest.Semantic.Edges)
+				aggregatedQuestions = append(aggregatedQuestions, execution.ShardManifest.Semantic.Questions...)
+				aggregatedFindings = append(aggregatedFindings, execution.ShardManifest.Semantic.Findings...)
 			}
-			summary := strings.TrimSpace(execution.Normalized.Summary)
+			summary := ""
+			if execution.ShardManifest != nil {
+				summary = strings.TrimSpace(execution.ShardManifest.Summary)
+			}
 			if summary != "" {
 				summaries = append(summaries, summary)
 			}
 		}
 		questionIDs := extractQuestionIDs(aggregatedQuestions)
-		findingIDs := extractFindingIDs(aggregatedApply.Findings)
+		findingIDs := extractFindingIDs(aggregatedFindings)
 		domainTotalShards := outcome.PlannedShards
 		if domainTotalShards == 0 {
 			domainTotalShards = len(executions) + domainFailedShards
@@ -1595,6 +1453,11 @@ func (e *pipelineExecution) executeRuntimeTask(
 	if err != nil {
 		return runtimeTaskExecution{}, err
 	}
+	executionPath := runtimeExecutionMetadataPathForTask(prepared.Task)
+	executionLabel := strings.TrimSpace(stepID) + ".runtime-execution"
+	if err := e.persistRuntimeExecutionArtifact(executionPath, executionLabel, prepared.ExecutionRaw); err != nil {
+		return runtimeTaskExecution{}, err
+	}
 	return e.applyRuntimeTaskExecution(stepID, domainID, prepared)
 }
 
@@ -1613,27 +1476,41 @@ func (e *pipelineExecution) runRuntimeTaskNormalized(
 		taskID += "-" + taskSuffix
 	}
 	repoScope := primaryRepoScope(repoScopes)
-	artifactRootRel, writeRootAbs, readContextRoots, err := e.runtimeArtifactContext(stepID, strings.TrimSpace(shardID), repoScopes)
+	artifactRootRel, writeRootAbs, draftFinalRootAbs, readContextRoots, err := e.runtimeArtifactContext(stepID, strings.TrimSpace(shardID), repoScopes)
 	if err != nil {
 		return runtimePreparedExecution{}, err
 	}
+	resolvedProvider := acpruntime.ProviderClaudeCode
+	runner := acpruntime.Runner(nil)
+	if e.runnerResolver != nil {
+		resolvedProvider, runner, err = e.runnerResolver.ReadyRunnerForStep(ctx, stepID)
+		if err != nil {
+			return runtimePreparedExecution{}, err
+		}
+	}
 	task := acpruntime.Task{
-		TaskID:           taskID,
-		RunID:            e.runID,
-		StepID:           stepID,
-		ShardID:          strings.TrimSpace(shardID),
-		DomainID:         strings.TrimSpace(domainID),
-		Workspace:        e.workspace.Path,
-		ArtifactRoot:     artifactRootRel,
-		WriteRoot:        writeRootAbs,
-		ReadContextRoots: append([]string(nil), readContextRoots...),
-		AgentRole:        runtimeAgentRole(stepID),
-		RepoScope:        repoScope,
-		RepoScopes:       append([]string(nil), repoScopes...),
-		PathScopes:       append([]string(nil), pathScopes...),
-		StartedAtUTC:     e.clock().UTC(),
+		TaskID:            taskID,
+		RunID:             e.runID,
+		StepID:            stepID,
+		ShardID:           strings.TrimSpace(shardID),
+		DomainID:          strings.TrimSpace(domainID),
+		Workspace:         e.workspace.Path,
+		ArtifactRoot:      artifactRootRel,
+		WriteRoot:         writeRootAbs,
+		DraftFinalRoot:    draftFinalRootAbs,
+		ReadContextRoots:  append([]string(nil), readContextRoots...),
+		AgentRole:         runtimeAgentRole(stepID),
+		StepContract:      runtimeStepContract(stepID),
+		ExpectedArtifacts: append([]string(nil), runtimeExpectedArtifacts(stepID)...),
+		RepoScope:         repoScope,
+		RepoScopes:        append([]string(nil), repoScopes...),
+		PathScopes:        append([]string(nil), pathScopes...),
+		StartedAtUTC:      e.clock().UTC(),
 		OnOutput: func(chunk acpruntime.OutputChunk) {
 			e.logRuntimeOutput(stepID, domainID, chunk)
+		},
+		OnDiagnostic: func(event acpruntime.DiagnosticEvent) {
+			e.logInfo(stepID, domainID, event.Message, event.Fields)
 		},
 	}
 	e.logInfo(stepID, domainID, "runtime task started", map[string]any{
@@ -1642,8 +1519,10 @@ func (e *pipelineExecution) runRuntimeTaskNormalized(
 		"repo_scope":         task.RepoScope,
 		"repo_scopes":        task.RepoScopes,
 		"path_scopes":        task.PathScopes,
+		"provider":           resolvedProvider,
 		"artifact_root":      task.ArtifactRoot,
 		"write_root":         task.WriteRoot,
+		"draft_final_root":   task.DraftFinalRoot,
 		"read_context_roots": task.ReadContextRoots,
 	})
 
@@ -1654,11 +1533,19 @@ func (e *pipelineExecution) runRuntimeTaskNormalized(
 	}
 	defer cancel()
 
-	heartbeatStop := make(chan struct{})
+	if runner == nil {
+		return runtimePreparedExecution{}, fmt.Errorf("runtime runner resolver is not configured")
+	}
+
+	var heartbeatStop chan struct{}
+	var heartbeatWG sync.WaitGroup
 	if e.runtimeHeartbeatInterval > 0 {
+		heartbeatStop = make(chan struct{})
 		heartbeatTicker := time.NewTicker(e.runtimeHeartbeatInterval)
 		startedAt := e.clock().UTC()
+		heartbeatWG.Add(1)
 		go func() {
+			defer heartbeatWG.Done()
 			defer heartbeatTicker.Stop()
 			for {
 				select {
@@ -1677,44 +1564,72 @@ func (e *pipelineExecution) runRuntimeTaskNormalized(
 			}
 		}()
 	}
-	result, err := e.runner.Run(taskCtx, task)
-	close(heartbeatStop)
+	stopHeartbeat := func() {
+		if heartbeatStop != nil {
+			close(heartbeatStop)
+		}
+		heartbeatWG.Wait()
+		heartbeatStop = nil
+	}
+	defer stopHeartbeat()
+	result, err := runner.Run(taskCtx, task)
 	if err != nil {
+		if isDraftOnlyRuntimeStep(stepID) {
+			if _, _, draftErr := validateRequiredRuntimeDraftArtifacts(task); draftErr != nil {
+				e.logError(stepID, domainID, "runtime draft artifact validation failed", map[string]any{
+					"task_id": task.TaskID,
+					"error":   strings.TrimSpace(draftErr.Error()),
+				})
+				err = fmt.Errorf("%w: required runtime draft artifacts invalid: %v", err, draftErr)
+			}
+		}
 		if errors.Is(taskCtx.Err(), context.DeadlineExceeded) {
 			err = fmt.Errorf("runtime task timeout after %ds: %w", int(e.runtimeStepTimeout.Seconds()), err)
+		}
+		if failedExecution, ok := runtimeExecutionFromFailure(task, resolvedProvider, err, e.clock().UTC()); ok {
+			failedExecutionLabel := strings.TrimSpace(stepID) + ".runtime-execution"
+			if raw, marshalErr := json.MarshalIndent(failedExecution, "", "  "); marshalErr != nil {
+				e.logWarn(stepID, domainID, "marshal failed runtime execution metadata failed", map[string]any{
+					"task_id": task.TaskID,
+					"error":   marshalErr.Error(),
+				})
+			} else if persistErr := e.persistRuntimeExecutionArtifact(runtimeExecutionMetadataPathForTask(task), failedExecutionLabel, raw); persistErr != nil {
+				e.logWarn(stepID, domainID, "persist failed runtime execution metadata failed", map[string]any{
+					"task_id": task.TaskID,
+					"error":   persistErr.Error(),
+				})
+			}
 		}
 		e.logError(stepID, domainID, "runtime task failed", runtimeFailureLogFields(task, err, "", ""))
 		return runtimePreparedExecution{}, err
 	}
-	if len(result.RawJSON) == 0 {
-		raw, marshalErr := json.MarshalIndent(result.TaskResult, "", "  ")
-		if marshalErr != nil {
-			return runtimePreparedExecution{}, fmt.Errorf("marshal taskresult for taskrun persistence: %w", marshalErr)
+	execution := contracts.NormalizeRuntimeExecution(result.Execution)
+	if strings.TrimSpace(execution.TaskID) == "" {
+		execution = acpruntime.NewExecution(task, resolvedProvider, "", "succeeded", e.clock().UTC(), nil)
+	}
+	if isDraftOnlyRuntimeStep(stepID) {
+		if _, _, draftErr := validateRequiredRuntimeDraftArtifacts(task); draftErr != nil {
+			e.logError(stepID, domainID, "runtime draft artifact validation failed", map[string]any{
+				"task_id": task.TaskID,
+				"error":   strings.TrimSpace(draftErr.Error()),
+			})
+			return runtimePreparedExecution{}, fmt.Errorf("runtime required draft artifacts invalid: %w", draftErr)
 		}
-		result.RawJSON = raw
 	}
-
-	parsed, err := contracts.ParseTaskResult(result.RawJSON)
+	executionRaw, err := json.MarshalIndent(execution, "", "  ")
 	if err != nil {
-		e.logError(stepID, domainID, "runtime task parse failed", runtimeFailureLogFields(task, err, result.Stdout, result.Stderr))
-		return runtimePreparedExecution{}, err
+		return runtimePreparedExecution{}, fmt.Errorf("marshal runtime execution: %w", err)
 	}
-	normalized := contracts.NormalizeTaskResult(parsed)
-	normalized = e.applySemanticGuards(stepID, domainID, task, normalized)
-	normalizedRaw, err := json.MarshalIndent(normalized, "", "  ")
-	if err != nil {
-		return runtimePreparedExecution{}, fmt.Errorf("marshal normalized taskresult: %w", err)
-	}
-	runtimeName := strings.TrimSpace(normalized.Meta.Runtime.Name)
-	runtimeVersion := strings.TrimSpace(normalized.Meta.Runtime.Version)
+	runtimeName := strings.TrimSpace(execution.Provider)
+	runtimeVersion := strings.TrimSpace(execution.RuntimeVersion)
 	if runtimeName == "" {
-		runtimeName = "unknown"
+		runtimeName = string(resolvedProvider)
 	}
 
 	return runtimePreparedExecution{
 		Task:           task,
-		Normalized:     normalized,
-		NormalizedRaw:  normalizedRaw,
+		Execution:      execution,
+		ExecutionRaw:   executionRaw,
 		RuntimeName:    runtimeName,
 		RuntimeVersion: runtimeVersion,
 	}, nil
@@ -1725,8 +1640,8 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 	domainID string,
 	prepared runtimePreparedExecution,
 ) (runtimeTaskExecution, error) {
-	normalized := prepared.Normalized
 	task := prepared.Task
+	execution := prepared.Execution
 	runtimeName := prepared.RuntimeName
 	runtimeVersion := prepared.RuntimeVersion
 	runtimeKey := runtimeName
@@ -1735,8 +1650,8 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 	}
 	e.runtimeVersions[runtimeKey] = struct{}{}
 
-	if len(normalized.Warnings) > 0 {
-		for _, runtimeWarning := range normalized.Warnings {
+	if len(execution.Warnings) > 0 {
+		for _, runtimeWarning := range execution.Warnings {
 			warningText := strings.TrimSpace(runtimeWarning)
 			if warningText == "" {
 				continue
@@ -1753,12 +1668,7 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 	}
 
 	if strings.HasSuffix(stepID, "step1.collect") {
-		manifest, manifestRaw, err := loadShardPackManifestFromRoot(task.WriteRoot)
-		if err != nil {
-			if fallbackErr := claudecode.PersistCompatibilityDocflowArtifacts(task, normalized); fallbackErr == nil {
-				manifest, manifestRaw, err = loadShardPackManifestFromRoot(task.WriteRoot)
-			}
-		}
+		manifest, _, err := loadShardPackManifestFromRoot(task.WriteRoot)
 		if err != nil {
 			e.logError(stepID, domainID, "shard pack manifest load failed", map[string]any{
 				"task_id": task.TaskID,
@@ -1767,53 +1677,51 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 			return runtimeTaskExecution{}, err
 		}
 		e.shardPacks = append(e.shardPacks, manifest)
-		applyReport, err := e.store.ApplyChangeset(normalized)
+		applyReport, err := e.store.ApplySemanticSnapshot(contracts.SemanticSnapshot{
+			Entities: manifest.Semantic.Entities,
+			Edges:    manifest.Semantic.Edges,
+		})
 		if err != nil {
-			e.logError(stepID, domainID, "compatibility model apply failed", map[string]any{
+			e.logError(stepID, domainID, "semantic model apply failed", map[string]any{
 				"task_id": task.TaskID,
 				"error":   strings.TrimSpace(err.Error()),
 			})
 			return runtimeTaskExecution{}, err
 		}
-		if len(applyReport.DocArtifacts) > 0 {
-			docArtifacts, err := e.compiler.WriteDocArtifacts(applyReport.DocArtifacts)
-			if err != nil {
-				return runtimeTaskExecution{}, err
-			}
-			e.addArtifacts(toOrchestratorArtifacts(docArtifacts)...)
-		}
+		e.questions = mergeQuestions(e.questions, manifest.Semantic.Questions)
+		e.coverage = mergeCoverage(e.coverage, &manifest.Semantic.Coverage)
+		e.findings = mergeFindings(e.findings, manifest.Semantic.Findings)
 		manifestPath := path.Join(task.ArtifactRoot, shardPackManifestFile)
 		e.addArtifacts(Artifact{
 			Path:  manifestPath,
 			Kind:  "taskrun",
 			Label: "Shard Pack Manifest",
 		})
-		coverage := &manifest.Compatibility.Coverage
+		coverage := &manifest.Semantic.Coverage
 		e.runtimeStepMetrics = append(e.runtimeStepMetrics, runtimeStepQuality{
 			StepID:           stepID,
 			DomainID:         domainID,
 			RuntimeName:      runtimeName,
 			RuntimeVersion:   runtimeVersion,
 			RepoScopes:       append([]string(nil), task.RepoScopes...),
-			ChangesetOps:     len(manifest.Compatibility.Entities) + len(manifest.Compatibility.Edges) + len(manifest.Compatibility.Findings),
-			EntityUpserts:    len(manifest.Compatibility.Entities),
-			EdgeUpserts:      len(manifest.Compatibility.Edges),
-			FindingsAdded:    len(manifest.Compatibility.Findings),
-			QuestionsCount:   len(manifest.Compatibility.Questions),
+			SemanticEntities: len(manifest.Semantic.Entities),
+			SemanticEdges:    len(manifest.Semantic.Edges),
+			FindingsCount:    len(manifest.Semantic.Findings),
+			QuestionsCount:   len(manifest.Semantic.Questions),
 			CoverageObserved: countCoverageObserved(coverage),
 			CoverageMissing:  countCoverageMissing(coverage),
-			WarningsCount:    len(normalized.Warnings),
+			WarningsCount:    len(execution.Warnings),
 		})
 		e.logInfo(stepID, domainID, "runtime shard pack collected", map[string]any{
-			"task_id":         task.TaskID,
-			"shard_id":        task.ShardID,
-			"artifact_root":   task.ArtifactRoot,
-			"manifest_path":   manifestPath,
-			"documents":       len(manifest.Documents),
-			"citations":       len(manifest.Citations),
-			"compat_entities": len(manifest.Compatibility.Entities),
-			"compat_edges":    len(manifest.Compatibility.Edges),
-			"compat_findings": len(manifest.Compatibility.Findings),
+			"task_id":           task.TaskID,
+			"shard_id":          task.ShardID,
+			"artifact_root":     task.ArtifactRoot,
+			"manifest_path":     manifestPath,
+			"documents":         len(manifest.Documents),
+			"citations":         len(manifest.Citations),
+			"semantic_entities": len(manifest.Semantic.Entities),
+			"semantic_edges":    len(manifest.Semantic.Edges),
+			"semantic_findings": len(manifest.Semantic.Findings),
 		})
 		e.logInfo(stepID, domainID, "runtime task completed", map[string]any{
 			"task_id":         task.TaskID,
@@ -1822,38 +1730,30 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 			"runtime_version": runtimeVersion,
 		})
 		return runtimeTaskExecution{
-			RawJSON:       manifestRaw,
-			Normalized:    normalized,
-			Apply:         applyReport,
-			ShardManifest: &manifest,
+			Task:           task,
+			RuntimeName:    runtimeName,
+			RuntimeVersion: runtimeVersion,
+			Execution:      execution,
+			Apply:          applyReport,
+			ShardManifest:  &manifest,
 		}, nil
 	}
 
 	if strings.HasSuffix(stepID, "step3.findings") {
-		newFindings := make([]contracts.Finding, 0, len(normalized.Changeset))
-		for _, op := range normalized.Changeset {
-			if op.Op == "add_finding" && op.Finding != nil {
-				newFindings = append(newFindings, *op.Finding)
-			}
-		}
-		e.questions = mergeQuestions(e.questions, normalized.Questions)
-		e.coverage = mergeCoverage(e.coverage, normalized.Coverage)
-		e.findings = mergeFindings(e.findings, newFindings)
-		if err := e.assembleStagedDocFlow(); err != nil {
-			return runtimeTaskExecution{}, err
-		}
-
-		verdict, verdictRaw, err := loadValidatorVerdictFromRoot(task.WriteRoot)
-		if err != nil {
-			if fallbackErr := claudecode.PersistCompatibilityDocflowArtifacts(task, normalized); fallbackErr == nil {
-				verdict, verdictRaw, err = loadValidatorVerdictFromRoot(task.WriteRoot)
-			}
-		}
+		verdict, _, err := loadValidatorVerdictFromRoot(task.WriteRoot)
 		if err != nil {
 			e.logError(stepID, domainID, "validator verdict load failed", map[string]any{
 				"task_id": task.TaskID,
 				"error":   strings.TrimSpace(err.Error()),
 			})
+			return runtimeTaskExecution{}, err
+		}
+		if verdict.Verdict != "PASS" {
+			return runtimeTaskExecution{}, fmt.Errorf("validator verdict is %s", verdict.Verdict)
+		}
+		e.questions = mergeQuestions(e.questions, verdict.Questions)
+		e.findings = mergeFindings(e.findings, verdict.Findings)
+		if err := e.assembleStagedDocFlow(); err != nil {
 			return runtimeTaskExecution{}, err
 		}
 		if err := e.repairValidatorScopedArtifacts(&verdict); err != nil {
@@ -1864,9 +1764,6 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 			return runtimeTaskExecution{}, err
 		}
 		issues := e.validateStagedArtifacts()
-		if verdict.Verdict != "PASS" {
-			return runtimeTaskExecution{}, fmt.Errorf("validator verdict is %s", verdict.Verdict)
-		}
 		if len(issues) > 0 {
 			return runtimeTaskExecution{}, fmt.Errorf("validator detected staged artifact issues: %s", issues[0].Message)
 		}
@@ -1882,11 +1779,11 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 			RuntimeName:      runtimeName,
 			RuntimeVersion:   runtimeVersion,
 			RepoScopes:       append([]string(nil), task.RepoScopes...),
-			FindingsAdded:    len(newFindings),
-			QuestionsCount:   len(normalized.Questions),
-			CoverageObserved: countCoverageObserved(normalized.Coverage),
-			CoverageMissing:  countCoverageMissing(normalized.Coverage),
-			WarningsCount:    len(normalized.Warnings),
+			FindingsCount:    len(verdict.Findings),
+			QuestionsCount:   len(verdict.Questions),
+			CoverageObserved: countCoverageObserved(e.coverage),
+			CoverageMissing:  countCoverageMissing(e.coverage),
+			WarningsCount:    len(execution.Warnings),
 		})
 		e.logInfo(stepID, domainID, "validator verdict accepted", map[string]any{
 			"task_id":     task.TaskID,
@@ -1900,65 +1797,43 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 			"runtime_version": runtimeVersion,
 		})
 		return runtimeTaskExecution{
-			RawJSON:          verdictRaw,
-			Normalized:       normalized,
+			Task:             task,
+			RuntimeName:      runtimeName,
+			RuntimeVersion:   runtimeVersion,
+			Execution:        execution,
 			ValidatorVerdict: &verdict,
 		}, nil
 	}
 
-	applyReport, err := e.store.ApplyChangeset(normalized)
-	if err != nil {
-		e.logError(stepID, domainID, "model apply failed", map[string]any{
-			"task_id": task.TaskID,
-			"error":   strings.TrimSpace(err.Error()),
+	if isDraftOnlyRuntimeStep(stepID) {
+		e.runtimeStepMetrics = append(e.runtimeStepMetrics, runtimeStepQuality{
+			StepID:         stepID,
+			DomainID:       domainID,
+			RuntimeName:    runtimeName,
+			RuntimeVersion: runtimeVersion,
+			RepoScopes:     append([]string(nil), task.RepoScopes...),
+			WarningsCount:  len(execution.Warnings),
 		})
-		return runtimeTaskExecution{}, err
+		e.logInfo(stepID, domainID, "runtime draft step completed", map[string]any{
+			"task_id":         task.TaskID,
+			"shard_id":        task.ShardID,
+			"runtime_name":    runtimeName,
+			"runtime_version": runtimeVersion,
+			"warnings_count":  len(execution.Warnings),
+		})
+		return runtimeTaskExecution{
+			Task:           task,
+			RuntimeName:    runtimeName,
+			RuntimeVersion: runtimeVersion,
+			Execution:      execution,
+		}, nil
 	}
-	if len(applyReport.DocArtifacts) > 0 {
-		docArtifacts, err := e.compiler.WriteDocArtifacts(applyReport.DocArtifacts)
-		if err != nil {
-			return runtimeTaskExecution{}, err
-		}
-		e.addArtifacts(toOrchestratorArtifacts(docArtifacts)...)
-	}
-
-	e.questions = mergeQuestions(e.questions, normalized.Questions)
-	e.coverage = mergeCoverage(e.coverage, normalized.Coverage)
-	e.findings = append(e.findings, applyReport.Findings...)
-	e.runtimeStepMetrics = append(e.runtimeStepMetrics, runtimeStepQuality{
-		StepID:           stepID,
-		DomainID:         domainID,
-		RuntimeName:      runtimeName,
-		RuntimeVersion:   runtimeVersion,
-		RepoScopes:       append([]string(nil), task.RepoScopes...),
-		ChangesetOps:     len(normalized.Changeset),
-		EntityUpserts:    applyReport.UpsertedEntities,
-		EdgeUpserts:      applyReport.UpsertedEdges,
-		FindingsAdded:    len(applyReport.Findings),
-		QuestionsCount:   len(normalized.Questions),
-		CoverageObserved: countCoverageObserved(normalized.Coverage),
-		CoverageMissing:  countCoverageMissing(normalized.Coverage),
-		WarningsCount:    len(normalized.Warnings),
-	})
-	e.logInfo(stepID, domainID, "runtime task completed", map[string]any{
-		"task_id":          task.TaskID,
-		"shard_id":         task.ShardID,
-		"repo_scope":       task.RepoScope,
-		"runtime_name":     runtimeName,
-		"runtime_version":  runtimeVersion,
-		"changeset_ops":    len(normalized.Changeset),
-		"entity_upserts":   applyReport.UpsertedEntities,
-		"edge_upserts":     applyReport.UpsertedEdges,
-		"findings_added":   len(applyReport.Findings),
-		"questions_count":  len(normalized.Questions),
-		"coverage_missing": countCoverageMissing(normalized.Coverage),
-		"warnings_count":   len(normalized.Warnings),
-	})
 
 	return runtimeTaskExecution{
-		RawJSON:    prepared.NormalizedRaw,
-		Normalized: normalized,
-		Apply:      applyReport,
+		Task:           task,
+		RuntimeName:    runtimeName,
+		RuntimeVersion: runtimeVersion,
+		Execution:      execution,
 	}, nil
 }
 
@@ -1967,218 +1842,71 @@ func (e *pipelineExecution) replayRuntimeTaskExecution(
 	domainID string,
 	prepared runtimePreparedExecution,
 ) (runtimeTaskExecution, error) {
-	normalized := prepared.Normalized
-	task := prepared.Task
-	runtimeName := prepared.RuntimeName
-	runtimeVersion := prepared.RuntimeVersion
-	runtimeKey := runtimeName
-	if runtimeVersion != "" {
-		runtimeKey = runtimeName + "@" + runtimeVersion
-	}
-	e.runtimeVersions[runtimeKey] = struct{}{}
-
-	if len(normalized.Warnings) > 0 {
-		for _, runtimeWarning := range normalized.Warnings {
-			warningText := strings.TrimSpace(runtimeWarning)
-			if warningText == "" {
-				continue
-			}
-			prefixedWarning := warningText
-			if strings.TrimSpace(stepID) != "" {
-				prefixedWarning = fmt.Sprintf("%s: %s", stepID, warningText)
-			}
-			e.addWarning(prefixedWarning)
-			e.logWarn(stepID, domainID, "runtime warning", map[string]any{
-				"warning": warningText,
-			})
-		}
-	}
-
-	if strings.HasSuffix(stepID, "step1.collect") {
-		manifest, manifestRaw, err := loadShardPackManifestFromRoot(task.WriteRoot)
-		if err != nil {
-			if fallbackErr := claudecode.PersistCompatibilityDocflowArtifacts(task, normalized); fallbackErr == nil {
-				manifest, manifestRaw, err = loadShardPackManifestFromRoot(task.WriteRoot)
-			}
-		}
-		if err != nil {
-			e.logError(stepID, domainID, "shard pack manifest load failed", map[string]any{
-				"task_id": task.TaskID,
-				"error":   strings.TrimSpace(err.Error()),
-			})
-			return runtimeTaskExecution{}, err
-		}
-		e.shardPacks = append(e.shardPacks, manifest)
-		manifestPath := path.Join(task.ArtifactRoot, shardPackManifestFile)
-		e.addArtifacts(Artifact{
-			Path:  manifestPath,
-			Kind:  "taskrun",
-			Label: "Shard Pack Manifest",
-		})
-		coverage := &manifest.Compatibility.Coverage
-		e.runtimeStepMetrics = append(e.runtimeStepMetrics, runtimeStepQuality{
-			StepID:           stepID,
-			DomainID:         domainID,
-			RuntimeName:      runtimeName,
-			RuntimeVersion:   runtimeVersion,
-			RepoScopes:       append([]string(nil), task.RepoScopes...),
-			ChangesetOps:     len(manifest.Compatibility.Entities) + len(manifest.Compatibility.Edges) + len(manifest.Compatibility.Findings),
-			EntityUpserts:    len(manifest.Compatibility.Entities),
-			EdgeUpserts:      len(manifest.Compatibility.Edges),
-			FindingsAdded:    len(manifest.Compatibility.Findings),
-			QuestionsCount:   len(manifest.Compatibility.Questions),
-			CoverageObserved: countCoverageObserved(coverage),
-			CoverageMissing:  countCoverageMissing(coverage),
-			WarningsCount:    len(normalized.Warnings),
-		})
-		e.logInfo(stepID, domainID, "runtime shard pack replayed from persisted taskrun", map[string]any{
-			"task_id":         task.TaskID,
-			"shard_id":        task.ShardID,
-			"artifact_root":   task.ArtifactRoot,
-			"manifest_path":   manifestPath,
-			"documents":       len(manifest.Documents),
-			"citations":       len(manifest.Citations),
-			"compat_entities": len(manifest.Compatibility.Entities),
-			"compat_edges":    len(manifest.Compatibility.Edges),
-			"compat_findings": len(manifest.Compatibility.Findings),
-		})
-		e.logInfo(stepID, domainID, "runtime task replayed from persisted taskrun", map[string]any{
-			"task_id":          task.TaskID,
-			"shard_id":         task.ShardID,
-			"repo_scope":       task.RepoScope,
-			"runtime_name":     runtimeName,
-			"runtime_version":  runtimeVersion,
-			"changeset_ops":    len(normalized.Changeset),
-			"entity_upserts":   len(manifest.Compatibility.Entities),
-			"edge_upserts":     len(manifest.Compatibility.Edges),
-			"findings_added":   len(manifest.Compatibility.Findings),
-			"questions_count":  len(manifest.Compatibility.Questions),
-			"coverage_missing": countCoverageMissing(coverage),
-			"warnings_count":   len(normalized.Warnings),
-		})
-		return runtimeTaskExecution{
-			RawJSON:       manifestRaw,
-			Normalized:    normalized,
-			Apply:         synthesizeApplyReport(normalized),
-			ShardManifest: &manifest,
-		}, nil
-	}
-
-	applyReport := synthesizeApplyReport(normalized)
-	if len(applyReport.DocArtifacts) > 0 {
-		docArtifacts, err := e.compiler.WriteDocArtifacts(applyReport.DocArtifacts)
-		if err != nil {
-			return runtimeTaskExecution{}, err
-		}
-		e.addArtifacts(toOrchestratorArtifacts(docArtifacts)...)
-	}
-
-	e.questions = mergeQuestions(e.questions, normalized.Questions)
-	e.coverage = mergeCoverage(e.coverage, normalized.Coverage)
-	e.findings = append(e.findings, applyReport.Findings...)
-	e.runtimeStepMetrics = append(e.runtimeStepMetrics, runtimeStepQuality{
-		StepID:           stepID,
-		DomainID:         domainID,
-		RuntimeName:      runtimeName,
-		RuntimeVersion:   runtimeVersion,
-		RepoScopes:       append([]string(nil), task.RepoScopes...),
-		ChangesetOps:     len(normalized.Changeset),
-		EntityUpserts:    applyReport.UpsertedEntities,
-		EdgeUpserts:      applyReport.UpsertedEdges,
-		FindingsAdded:    len(applyReport.Findings),
-		QuestionsCount:   len(normalized.Questions),
-		CoverageObserved: countCoverageObserved(normalized.Coverage),
-		CoverageMissing:  countCoverageMissing(normalized.Coverage),
-		WarningsCount:    len(normalized.Warnings),
-	})
-	e.logInfo(stepID, domainID, "runtime task replayed from persisted taskrun", map[string]any{
-		"task_id":          task.TaskID,
-		"shard_id":         task.ShardID,
-		"repo_scope":       task.RepoScope,
-		"runtime_name":     runtimeName,
-		"runtime_version":  runtimeVersion,
-		"changeset_ops":    len(normalized.Changeset),
-		"entity_upserts":   applyReport.UpsertedEntities,
-		"edge_upserts":     applyReport.UpsertedEdges,
-		"findings_added":   len(applyReport.Findings),
-		"questions_count":  len(normalized.Questions),
-		"coverage_missing": countCoverageMissing(normalized.Coverage),
-		"warnings_count":   len(normalized.Warnings),
-	})
-
-	return runtimeTaskExecution{
-		RawJSON:    prepared.NormalizedRaw,
-		Normalized: normalized,
-		Apply:      applyReport,
-	}, nil
+	return e.applyRuntimeTaskExecution(stepID, domainID, prepared)
 }
 
-func loadPreparedExecutionFromPersistedTaskRun(raw []byte) (runtimePreparedExecution, error) {
-	parsed, err := contracts.ParseTaskResult(raw)
+func loadPreparedExecutionFromPersistedRuntimeExecution(raw []byte) (runtimePreparedExecution, error) {
+	execution, err := contracts.ParseRuntimeExecution(raw)
 	if err != nil {
 		return runtimePreparedExecution{}, err
 	}
-	normalized := contracts.NormalizeTaskResult(parsed)
-	startedAt, err := time.Parse(time.RFC3339, strings.TrimSpace(normalized.Meta.StartedAt))
+	startedAt, err := time.Parse(time.RFC3339, strings.TrimSpace(execution.StartedAt))
 	if err != nil {
-		return runtimePreparedExecution{}, fmt.Errorf("parse persisted task start time: %w", err)
+		return runtimePreparedExecution{}, fmt.Errorf("parse persisted runtime execution start time: %w", err)
 	}
-	runtimeName := strings.TrimSpace(normalized.Meta.Runtime.Name)
+	runtimeName := strings.TrimSpace(execution.Provider)
 	if runtimeName == "" {
 		runtimeName = "unknown"
 	}
 	return runtimePreparedExecution{
 		Task: acpruntime.Task{
-			TaskID:       normalized.Meta.TaskID,
-			RunID:        normalized.Meta.RunID,
-			StepID:       normalized.Meta.StepID,
-			ShardID:      normalized.Meta.ShardID,
-			Workspace:    normalized.Meta.Workspace,
-			RepoScope:    normalized.Meta.RepoScope,
-			RepoScopes:   append([]string(nil), normalized.Meta.RepoScopes...),
-			PathScopes:   append([]string(nil), normalized.Meta.PathScopes...),
-			StartedAtUTC: startedAt.UTC(),
+			TaskID:         execution.TaskID,
+			RunID:          execution.RunID,
+			StepID:         execution.StepID,
+			ShardID:        execution.ShardID,
+			DomainID:       execution.DomainID,
+			ArtifactRoot:   execution.ArtifactRoot,
+			WriteRoot:      execution.WriteRoot,
+			DraftFinalRoot: execution.DraftFinalRoot,
+			RepoScope:      execution.RepoScope,
+			RepoScopes:     append([]string(nil), execution.RepoScopes...),
+			PathScopes:     append([]string(nil), execution.PathScopes...),
+			StartedAtUTC:   startedAt.UTC(),
 		},
-		Normalized:     normalized,
-		NormalizedRaw:  append([]byte(nil), raw...),
+		Execution:      execution,
+		ExecutionRaw:   append([]byte(nil), raw...),
 		RuntimeName:    runtimeName,
-		RuntimeVersion: strings.TrimSpace(normalized.Meta.Runtime.Version),
+		RuntimeVersion: strings.TrimSpace(execution.RuntimeVersion),
 	}, nil
 }
 
-func synthesizeApplyReport(result contracts.TaskResult) model.ApplyReport {
-	report := model.ApplyReport{
-		RemappedIDs: map[string]string{},
+func runtimeExecutionFromFailure(task acpruntime.Task, fallbackProvider acpruntime.Provider, err error, finishedAt time.Time) (contracts.RuntimeExecution, bool) {
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		return contracts.RuntimeExecution{}, false
 	}
-	for _, op := range result.Changeset {
-		switch op.Op {
-		case "upsert_entity":
-			report.UpsertedEntities++
-		case "remove_entity":
-			report.RemovedEntities++
-		case "upsert_edge":
-			report.UpsertedEdges++
-		case "remove_edge":
-			report.RemovedEdges++
-		case "add_finding":
-			if op.Finding != nil {
-				report.Findings = append(report.Findings, *op.Finding)
-			}
-		case "add_doc_artifact":
-			if op.DocArtifact != nil {
-				report.DocArtifacts = append(report.DocArtifacts, *op.DocArtifact)
-			}
-		}
+	provider := runnerErr.Provider
+	if strings.TrimSpace(string(provider)) == "" {
+		provider = fallbackProvider
 	}
-	return report
+	status := "failed"
+	switch runnerErr.Code {
+	case acpruntime.ErrorCodeRuntimeTimeout:
+		status = "timeout"
+	case acpruntime.ErrorCodeRunCanceled:
+		status = "canceled"
+	}
+	execution := acpruntime.NewExecution(task, provider, "", status, finishedAt, nil)
+	execution.RawOutputRefs = runnerErr.RawOutputRefs
+	return contracts.NormalizeRuntimeExecution(execution), true
 }
 
-func (e *pipelineExecution) persistTaskRun(path string, label string, raw []byte) error {
+func (e *pipelineExecution) persistRuntimeExecutionArtifact(path string, label string, raw []byte) error {
 	if err := e.workspace.WriteFile(path, raw); err != nil {
 		return err
 	}
-	e.addArtifacts(Artifact{Path: path, Kind: "taskrun", Label: label})
-	e.logInfo(e.stepStatus.CurrentStep, "", "taskrun persisted", map[string]any{
+	e.addArtifacts(Artifact{Path: path, Kind: "runtime-execution", Label: label})
+	e.logInfo(e.stepStatus.CurrentStep, "", "runtime execution persisted", map[string]any{
 		"taskrun_path": path,
 		"label":        label,
 	})
@@ -2267,8 +1995,33 @@ func extractFindingIDs(findings []contracts.Finding) []string {
 	return uniqueSorted(ids)
 }
 
-func (e *pipelineExecution) runStepAsIs() error {
-	e.logInfo(e.stepStatus.CurrentStep, "", "assembling staged doc flow", nil)
+func (e *pipelineExecution) runStepAsIs(ctx context.Context, stepID string) error {
+	if e.shouldReplayAsIsWithoutRuntime(stepID) {
+		e.logInfo(stepID, "", "rebuilding staged doc flow from persisted collect artifacts", map[string]any{
+			"resume_source_step": e.resumeSourceStep,
+		})
+		e.asIsDraftManifest = nil
+		e.asIsDraftRoot = ""
+		return e.assembleStagedDocFlow()
+	}
+
+	selectedScopes := normalizeOrderedUniqueStrings(e.selectedRepoScopes)
+	execution, err := e.executeRuntimeTask(ctx, stepID, "as-is", selectedScopes, []string{"."}, "", "")
+	if err != nil {
+		return err
+	}
+	draft, _, err := validateRequiredRuntimeDraftArtifacts(execution.Task)
+	if err != nil {
+		return err
+	}
+	e.asIsDraftManifest = &draft
+	e.asIsDraftRoot = execution.Task.DraftFinalRoot
+	e.addArtifacts(Artifact{
+		Path:  path.Join(execution.Task.ArtifactRoot, asisDraftManifestFile),
+		Kind:  "taskrun",
+		Label: "As-Is Draft Manifest",
+	})
+	e.logInfo(stepID, "", "assembling staged doc flow", nil)
 	return e.assembleStagedDocFlow()
 }
 
@@ -2292,17 +2045,69 @@ func (e *pipelineExecution) runStepValidator(ctx context.Context, stepID string)
 		})
 		return nil
 	}
-
-	_, outcome, err := e.executeRuntimeTasksSharded(ctx, stepID, "", append([]string(nil), selectedScopes...), "")
+	execution, err := e.executeRuntimeTask(ctx, stepID, "validator-findings", append([]string(nil), selectedScopes...), []string{"."}, "", "")
+	outcome := runtimeShardOutcome{PlannedShards: 1}
+	if err != nil {
+		outcome.FailedShards = 1
+		e.recordRuntimeStepOutcome(stepID, outcome)
+		return err
+	}
+	if execution.ValidatorVerdict != nil {
+		outcome.SucceededShards = 1
+	}
 	e.recordRuntimeStepOutcome(stepID, outcome)
-	return err
+	return nil
 }
 
-func (e *pipelineExecution) runStepProposals() error {
+func (e *pipelineExecution) runStepProposals(ctx context.Context, stepID string) error {
+	selectedScopes := normalizeOrderedUniqueStrings(e.selectedRepoScopes)
+	execution, err := e.executeRuntimeTask(ctx, stepID, "proposals", selectedScopes, []string{"."}, "", "")
+	if err != nil {
+		return err
+	}
+	draft, _, err := validateRequiredRuntimeDraftArtifacts(execution.Task)
+	if err != nil {
+		return err
+	}
+	e.proposalsDraftManifest = &draft
+	e.proposalsDraftRoot = execution.Task.DraftFinalRoot
+	e.addArtifacts(Artifact{
+		Path:  path.Join(execution.Task.ArtifactRoot, proposalsDraftManifestFile),
+		Kind:  "taskrun",
+		Label: "Proposals Draft Manifest",
+	})
 	if e.validatorVerdict != nil {
-		e.logInfo(e.stepStatus.CurrentStep, "", "promoting validated staged artifacts", nil)
+		e.logInfo(stepID, "", "promoting validated staged artifacts", nil)
 		if err := e.promoteValidatedArtifacts(); err != nil {
 			return err
+		}
+		if e.proposalsDraftManifest != nil {
+			if draftManifestHasPrefix(e.proposalsDraftManifest, "proposals/") && e.finalRunIndex != nil {
+				removed := draftManifestCanonicalPathsWithPrefix(e.proposalsDraftManifest, "proposals/")
+				for _, canonicalPath := range removed {
+					target, resolveErr := e.workspace.Resolve(canonicalPath)
+					if resolveErr != nil {
+						return resolveErr
+					}
+					if removeErr := os.Remove(target); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+						return fmt.Errorf("remove deterministic proposal %q: %w", canonicalPath, removeErr)
+					}
+				}
+				e.removeArtifactsByPath(removed...)
+			}
+			artifacts, err := applyRuntimeDraftOutputs(
+				e.workspace,
+				e.proposalsDraftRoot,
+				*e.proposalsDraftManifest,
+				"",
+				func(target string) bool {
+					return strings.HasPrefix(target, "proposals/") || strings.HasPrefix(target, "reports/changelog/")
+				},
+			)
+			if err != nil {
+				return err
+			}
+			e.addArtifacts(artifacts...)
 		}
 	} else if e.renderContext().IsIncomplete() || len(e.partialFailures) > 0 || e.findingsSkipped {
 		e.addWarning(fmt.Sprintf("%s: canonical promotion skipped because validator verdict is missing", e.stepStatus.CurrentStep))
@@ -2314,21 +2119,23 @@ func (e *pipelineExecution) runStepProposals() error {
 		return fmt.Errorf("promote validated artifacts: validator verdict is missing")
 	}
 
-	changelog, err := e.compiler.WriteIterationChangelog(
-		e.runID,
-		string(e.pipeline),
-		toReportArtifacts(e.artifacts),
-		e.startedAt,
-		e.clock().UTC(),
-	)
-	if err != nil {
-		return err
+	if !draftManifestHasPrefix(e.proposalsDraftManifest, "reports/changelog/") {
+		changelog, err := e.compiler.WriteIterationChangelog(
+			e.runID,
+			string(e.pipeline),
+			toReportArtifacts(e.artifacts),
+			e.startedAt,
+			e.clock().UTC(),
+		)
+		if err != nil {
+			return err
+		}
+		e.addArtifacts(Artifact{
+			Path:  changelog.Path,
+			Kind:  changelog.Kind,
+			Label: changelog.Label,
+		})
 	}
-	e.addArtifacts(Artifact{
-		Path:  changelog.Path,
-		Kind:  changelog.Kind,
-		Label: changelog.Label,
-	})
 	e.logInfo(e.stepStatus.CurrentStep, "", "proposals and changelog compiled", map[string]any{
 		"artifacts": len(e.artifacts),
 	})
@@ -2354,18 +2161,6 @@ func (e *pipelineExecution) rewriteTerminalReports(status RunStatus) {
 		})
 	}
 
-	entities, entityErr := e.store.ListEntities()
-	edges, edgeErr := e.store.ListEdges()
-	if entityErr != nil {
-		logRewriteWarning("as-is.entities", entityErr)
-	} else if edgeErr != nil {
-		logRewriteWarning("as-is.edges", edgeErr)
-	} else if artifacts, err := e.compiler.CompileAsIs(entities, edges, renderCtx); err != nil {
-		logRewriteWarning("as-is", err)
-	} else {
-		e.addArtifacts(toOrchestratorArtifacts(artifacts)...)
-	}
-
 	if artifacts, err := e.compiler.WriteCoverage(e.coverage, e.questions, renderCtx); err != nil {
 		logRewriteWarning("coverage", err)
 	} else {
@@ -2374,12 +2169,6 @@ func (e *pipelineExecution) rewriteTerminalReports(status RunStatus) {
 
 	if artifacts, err := e.compiler.WriteFindings(e.findings, renderCtx); err != nil {
 		logRewriteWarning("findings", err)
-	} else {
-		e.addArtifacts(toOrchestratorArtifacts(artifacts)...)
-	}
-
-	if artifacts, err := e.compiler.WriteArchitectSummary(e.renderArchitectSummary(), renderCtx); err != nil {
-		logRewriteWarning("architect-summary", err)
 	} else {
 		e.addArtifacts(toOrchestratorArtifacts(artifacts)...)
 	}
@@ -2398,11 +2187,6 @@ func (e *pipelineExecution) rewriteTerminalReports(status RunStatus) {
 		e.addArtifacts(toOrchestratorArtifacts(artifacts)...)
 	}
 
-	if artifacts, err := e.compiler.CompileProposals(e.findings, renderCtx); err != nil {
-		logRewriteWarning("proposals", err)
-	} else {
-		e.addArtifacts(toOrchestratorArtifacts(artifacts)...)
-	}
 }
 
 func stepIDsForPipeline(pipeline Pipeline) []string {
@@ -2482,6 +2266,17 @@ func artifactIndexFor(artifacts []Artifact) map[string]int {
 	return index
 }
 
+func cloneStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]string, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
+}
+
 func hasShardArtifactsForRun(workspaceRoot string, runID string, stepID string) bool {
 	workspaceRoot = strings.TrimSpace(workspaceRoot)
 	runID = strings.TrimSpace(runID)
@@ -2539,168 +2334,8 @@ func summarizePartialFailures(failures []runtimeShardFailure) string {
 	return fmt.Sprintf("partial shard failures (%d): %s", len(parts), strings.Join(parts, "; "))
 }
 
-const step0WizardContractPath = "charter/wizard/step0-contract.json"
-
-type step0WizardContract struct {
-	Version       int      `json:"version"`
-	ProjectName   string   `json:"project_name"`
-	Scope         string   `json:"scope"`
-	NFRPriorities []string `json:"nfr_priorities"`
-	Rules         []string `json:"rules"`
-}
-
-func loadStep0WizardContract(ws workspace.Root) (step0WizardContract, bool, error) {
-	content, err := ws.ReadFile(step0WizardContractPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return step0WizardContract{}, false, nil
-		}
-		return step0WizardContract{}, false, fmt.Errorf("read %s: %w", step0WizardContractPath, err)
-	}
-
-	decoder := json.NewDecoder(bytes.NewReader(content))
-	decoder.DisallowUnknownFields()
-
-	var contract step0WizardContract
-	if err := decoder.Decode(&contract); err != nil {
-		return step0WizardContract{}, true, fmt.Errorf("parse %s: %w", step0WizardContractPath, err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err == nil {
-		return step0WizardContract{}, true, fmt.Errorf("parse %s: unexpected trailing JSON payload", step0WizardContractPath)
-	} else if !errors.Is(err, io.EOF) {
-		return step0WizardContract{}, true, fmt.Errorf("parse %s: %w", step0WizardContractPath, err)
-	}
-
-	contract.ProjectName = strings.TrimSpace(contract.ProjectName)
-	contract.Scope = strings.TrimSpace(contract.Scope)
-	contract.NFRPriorities = normalizeOrderedUniqueStrings(contract.NFRPriorities)
-	contract.Rules = normalizeOrderedUniqueStrings(contract.Rules)
-
-	validationProblems := []string{}
-	if contract.Version != 1 {
-		validationProblems = append(validationProblems, "version must be 1")
-	}
-	if contract.ProjectName == "" {
-		validationProblems = append(validationProblems, "project_name is required")
-	}
-	if contract.Scope == "" {
-		validationProblems = append(validationProblems, "scope is required")
-	}
-	if len(validationProblems) > 0 {
-		sort.Strings(validationProblems)
-		return step0WizardContract{}, true, fmt.Errorf("invalid %s: %s", step0WizardContractPath, strings.Join(validationProblems, "; "))
-	}
-
-	return contract, true, nil
-}
-
-func (e *pipelineExecution) writeConstitutionArtifacts(useWizardContract bool, contract step0WizardContract) error {
-	projectName := ""
-	scope := ""
-	nfrPriorities := []string{}
-	rules := []string{}
-	if useWizardContract {
-		projectName = contract.ProjectName
-		scope = contract.Scope
-		nfrPriorities = append([]string(nil), contract.NFRPriorities...)
-		rules = append([]string(nil), contract.Rules...)
-	}
-
-	overview := "# Project Constitution\n\nGenerated baseline charter for ACP MVP.\n"
-	glossary := "terms: []\n"
-	if useWizardContract {
-		overview = strings.TrimSpace(fmt.Sprintf(
-			"# Project Constitution\n\n- project_name: `%s`\n- scope: `%s`\n\nGenerated from `%s`.\n",
-			projectName,
-			scope,
-			step0WizardContractPath,
-		)) + "\n"
-		scopeTerms := splitAndNormalizeList(scope)
-		glossary = renderStringListYAML("terms", scopeTerms)
-	}
-	nfrContent := renderStringListYAML("nfr", nfrPriorities)
-	rulesContent := renderStringListYAML("rules", rules)
-
-	if err := e.workspace.WriteFile("charter/overview.md", []byte(overview)); err != nil {
-		return err
-	}
-	if err := e.workspace.WriteFile("charter/glossary.yaml", []byte(glossary)); err != nil {
-		return err
-	}
-	if err := e.workspace.WriteFile("charter/nfr.yaml", []byte(nfrContent)); err != nil {
-		return err
-	}
-	if err := e.workspace.WriteFile("charter/rules.yaml", []byte(rulesContent)); err != nil {
-		return err
-	}
-
-	for _, repo := range e.workspace.Manifest.Repos {
-		slug := slugutil.Slugify(repo.Name)
-		domainPath := fmt.Sprintf("charter/cards/domains/%s.md", slug)
-		domainBody := strings.TrimSpace(fmt.Sprintf("# Domain: %s\n\n- id: `%s`\n- repo_scope: `%s`\n", repo.Name, slug, repo.Name))
-		if useWizardContract {
-			domainBody += fmt.Sprintf("\n- charter_project: `%s`\n- charter_scope: `%s`\n", projectName, scope)
-		}
-		domainBody += "\n"
-		if err := e.workspace.WriteFile(domainPath, []byte(domainBody)); err != nil {
-			return err
-		}
-	}
-
-	teamBody := "# Team: Platform\n\n- id: `team.platform`\n"
-	if useWizardContract {
-		teamBody = strings.TrimSpace(teamBody+fmt.Sprintf("- charter_project: `%s`\n", projectName)) + "\n"
-	}
-	if err := e.workspace.WriteFile("charter/cards/teams/platform.md", []byte(teamBody)); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func renderStringListYAML(key string, values []string) string {
-	values = normalizeOrderedUniqueStrings(values)
-	if len(values) == 0 {
-		return fmt.Sprintf("%s: []\n", strings.TrimSpace(key))
-	}
-
-	builder := strings.Builder{}
-	builder.WriteString(strings.TrimSpace(key))
-	builder.WriteString(":\n")
-	for _, value := range values {
-		builder.WriteString("  - ")
-		builder.WriteString(strconv.Quote(value))
-		builder.WriteString("\n")
-	}
-	return builder.String()
-}
-
-func splitAndNormalizeList(raw string) []string {
-	replacer := strings.NewReplacer(",", "\n", ";", "\n", "\t", "\n")
-	values := strings.Split(replacer.Replace(raw), "\n")
-	return normalizeOrderedUniqueStrings(values)
-}
-
-func normalizeOrderedUniqueStrings(values []string) []string {
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
-			continue
-		}
-		if _, ok := seen[trimmed]; ok {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		out = append(out, trimmed)
-	}
-	return out
-}
-
-func writeBaselineBundle(ws workspace.Root) error {
-	return ws.EnsureBaselineBundle()
+func writeBaselineSupportBundle(ws workspace.Root) error {
+	return ws.EnsureBaselineSupportBundle()
 }
 
 func collectRepoScopes(repos []workspace.RepoSource) []string {
@@ -2803,6 +2438,56 @@ func (e *pipelineExecution) addArtifacts(artifacts ...Artifact) {
 	}
 }
 
+func (e *pipelineExecution) removeArtifactsByPath(paths ...string) {
+	if len(paths) == 0 || len(e.artifacts) == 0 {
+		return
+	}
+	removeSet := map[string]struct{}{}
+	for _, item := range paths {
+		if trimmed := strings.TrimSpace(item); trimmed != "" {
+			removeSet[trimmed] = struct{}{}
+		}
+	}
+	if len(removeSet) == 0 {
+		return
+	}
+	filtered := make([]Artifact, 0, len(e.artifacts))
+	for _, artifact := range e.artifacts {
+		if _, exists := removeSet[artifact.Path]; exists {
+			continue
+		}
+		filtered = append(filtered, artifact)
+	}
+	e.artifacts = filtered
+	e.artifactIndex = artifactIndexFor(filtered)
+}
+
+func (e *pipelineExecution) shouldReplayAsIsWithoutRuntime(stepID string) bool {
+	if !strings.HasSuffix(strings.TrimSpace(stepID), "step2.asis_docs") {
+		return false
+	}
+	if len(e.shardPacks) == 0 {
+		return false
+	}
+	resumeSourceStep := strings.TrimSpace(e.resumeSourceStep)
+	if resumeSourceStep == "" {
+		return false
+	}
+	stepIDs := stepIDsForPipeline(e.pipeline)
+	sourceIdx := indexOfPipelineStep(stepIDs, resumeSourceStep)
+	asIsIdx := indexOfPipelineStep(stepIDs, stepID)
+	return asIsIdx >= 0 && sourceIdx > asIsIdx
+}
+
+func isDraftOnlyRuntimeStep(stepID string) bool {
+	switch strings.TrimSpace(stepID) {
+	case "init.step0.constitution", "init.step2.asis_docs", "refresh.step2.asis_docs", "init.step4.proposals", "refresh.step4.proposals":
+		return true
+	default:
+		return false
+	}
+}
+
 func (e *pipelineExecution) addWarning(message string) {
 	message = strings.TrimSpace(message)
 	if message == "" {
@@ -2899,24 +2584,6 @@ func runtimeFailureLogFields(task acpruntime.Task, err error, fallbackStdout str
 	if errors.As(err, &runnerErr) {
 		if strings.TrimSpace(string(runnerErr.Provider)) != "" {
 			fields["provider"] = string(runnerErr.Provider)
-		}
-		if value := strings.TrimSpace(runnerErr.Failure.FailureClass); value != "" {
-			fields["failure_class"] = value
-		}
-		if value := strings.TrimSpace(runnerErr.Failure.FailureSubclass); value != "" {
-			fields["failure_subclass"] = value
-		}
-		if value := strings.TrimSpace(runnerErr.Failure.ParseStage); value != "" {
-			fields["parse_stage"] = value
-		}
-		if value := strings.TrimSpace(runnerErr.Failure.FailureArtifactPath); value != "" {
-			fields["failure_artifact"] = value
-		}
-		if value := strings.TrimSpace(runnerErr.Failure.RawOutputPath); value != "" {
-			fields["raw_output"] = value
-		}
-		if value := strings.TrimSpace(runnerErr.Failure.ShortCause); value != "" {
-			fields["short_cause"] = value
 		}
 		if strings.TrimSpace(stdout) == "" {
 			stdout = runnerErr.Stdout
@@ -3236,546 +2903,19 @@ func entitySemanticText(entity *contracts.Entity) string {
 	return strings.Join(parts, " ")
 }
 
-func (e *pipelineExecution) applySemanticGuards(stepID string, domainID string, task acpruntime.Task, normalized contracts.TaskResult) contracts.TaskResult {
-	if stepID == "refresh.step1.collect" {
-		filtered := make([]contracts.Operation, 0, len(normalized.Changeset))
-		droppedByType := map[string]int{}
-		droppedOffTopicEntities := 0
-		droppedOffTopicQuestions := 0
-		droppedOffTopicTerms := []string{}
-		offTopicGuard := shouldApplyOffTopicGuard(task)
-		for _, op := range normalized.Changeset {
-			if op.Op == "upsert_entity" && op.Entity != nil && shouldFilterRefreshCollectEntityType(op.Entity.Type) {
-				droppedByType[op.Entity.Type]++
-				continue
-			}
-			if offTopicGuard && op.Op == "upsert_entity" && op.Entity != nil {
-				hits := detectOffTopicTerms(entitySemanticText(op.Entity))
-				if len(hits) > 0 {
-					droppedOffTopicEntities++
-					droppedOffTopicTerms = append(droppedOffTopicTerms, hits...)
-					continue
-				}
-			}
-			filtered = append(filtered, op)
-		}
-		if len(droppedByType) > 0 {
-			normalized.Changeset = filtered
-			parts := make([]string, 0, len(droppedByType))
-			for typ, count := range droppedByType {
-				parts = append(parts, fmt.Sprintf("%s=%d", strings.TrimSpace(typ), count))
-			}
-			sort.Strings(parts)
-			normalized.Warnings = append(
-				normalized.Warnings,
-				fmt.Sprintf("semantic_guard: dropped refresh.step1.collect entity types [%s]", strings.Join(parts, ", ")),
-			)
-		} else {
-			normalized.Changeset = filtered
-		}
-		if offTopicGuard {
-			questions := make([]contracts.Question, 0, len(normalized.Questions))
-			for _, question := range normalized.Questions {
-				hits := detectOffTopicTerms(question.Text)
-				if len(hits) > 0 {
-					droppedOffTopicQuestions++
-					droppedOffTopicTerms = append(droppedOffTopicTerms, hits...)
-					continue
-				}
-				questions = append(questions, question)
-			}
-			normalized.Questions = questions
-		}
-		if droppedOffTopicEntities > 0 || droppedOffTopicQuestions > 0 {
-			normalized.Warnings = append(
-				normalized.Warnings,
-				fmt.Sprintf(
-					"semantic_guard: dropped refresh.step1.collect off-topic artifacts entities=%d questions=%d terms=[%s]",
-					droppedOffTopicEntities,
-					droppedOffTopicQuestions,
-					strings.Join(dedupeSemanticStrings(droppedOffTopicTerms), ", "),
-				),
-			)
-			if len(normalized.Changeset) == 0 {
-				normalized.Warnings = append(
-					normalized.Warnings,
-					"semantic_guard: critical_off_topic_drift in refresh.step1.collect",
-				)
-			}
-		}
-	}
-
-	if stepID == "refresh.step3.findings" {
-		normalized = e.ensureOwnerGapFallback(domainID, task, normalized)
-		normalized = e.ensureCrossRepoEdgeFallback(domainID, task, normalized)
-	}
-
-	return e.applyEvidencePathSemanticGuard(stepID, task, normalized)
-}
-
-func (e *pipelineExecution) ensureOwnerGapFallback(domainID string, task acpruntime.Task, normalized contracts.TaskResult) contracts.TaskResult {
-	hasFinding := false
-	for _, op := range normalized.Changeset {
-		if op.Op == "add_finding" && op.Finding != nil {
-			hasFinding = true
-			break
-		}
-	}
-	if hasFinding {
-		return normalized
-	}
-	if !isOwnerMappingsMissing(normalized.Coverage) {
-		return normalized
-	}
-
-	entities, err := e.store.ListEntities()
-	if err != nil {
-		normalized.Warnings = append(normalized.Warnings, fmt.Sprintf("semantic_guard: owner-gap check failed: %v", err))
-		return normalized
-	}
-	scopeSet := map[string]struct{}{}
-	for _, scope := range task.RepoScopes {
-		scope = strings.TrimSpace(scope)
-		if scope == "" {
-			continue
-		}
-		scopeSet[scope] = struct{}{}
-	}
-
-	var candidate contracts.Entity
-	found := false
-	for _, entity := range entities {
-		if entity.Type != "service" {
-			continue
-		}
-		if strings.TrimSpace(entity.OwnerTeamID) != "" {
-			continue
-		}
-		if len(scopeSet) > 0 {
-			attributes, ok := entity.Attributes.(map[string]any)
-			if !ok {
-				continue
-			}
-			repoScope, _ := attributes["repo_scope"].(string)
-			repoScope = strings.TrimSpace(repoScope)
-			if repoScope == "" {
-				continue
-			}
-			if _, ok := scopeSet[repoScope]; !ok {
-				continue
-			}
-		}
-		candidate = entity
-		found = true
-		break
-	}
-	if !found {
-		repo := "unknown"
-		if len(task.RepoScopes) > 0 && strings.TrimSpace(task.RepoScopes[0]) != "" {
-			repo = strings.TrimSpace(task.RepoScopes[0])
-		}
-		relatedID := "scope." + slugutil.Slugify(repo)
-		if relatedID == "scope." {
-			relatedID = "scope.unknown"
-		}
-		findingID := "finding.missing-owner." + slugutil.Slugify(relatedID) + ".refresh"
-		if strings.TrimSpace(domainID) != "" {
-			findingID = findingID + "." + slugutil.Slugify(domainID)
-		}
-		normalized.Changeset = append(normalized.Changeset, contracts.Operation{
-			Op: "add_finding",
-			Finding: &contracts.Finding{
-				ID:          findingID,
-				Severity:    "medium",
-				Title:       "Missing owner mapping",
-				Description: fmt.Sprintf("owner mappings are unresolved for repo scope %q", repo),
-				RuleID:      "rule.owner.required",
-				RelatedIDs:  []string{relatedID},
-				Provenance: contracts.Provenance{
-					Kind:       "inference",
-					Confidence: 0.62,
-					Evidence: []contracts.Evidence{
-						{
-							Repo: repo,
-							Path: "README.md",
-						},
-					},
-				},
-			},
-		})
-		normalized.Warnings = append(
-			normalized.Warnings,
-			fmt.Sprintf("semantic_guard: added fallback owner-mapping finding %q", findingID),
-		)
-		return normalized
-	}
-
-	evidence := append([]contracts.Evidence(nil), candidate.Provenance.Evidence...)
-	if len(evidence) == 0 {
-		repo := "unknown"
-		if len(task.RepoScopes) > 0 && strings.TrimSpace(task.RepoScopes[0]) != "" {
-			repo = strings.TrimSpace(task.RepoScopes[0])
-		}
-		evidence = []contracts.Evidence{
-			{
-				Repo: repo,
-				Path: "README.md",
-			},
-		}
-	}
-	relatedID := strings.TrimSpace(candidate.ID)
-	if relatedID == "" {
-		relatedID = "svc.unknown"
-	}
-	findingID := "finding.missing-owner." + slugutil.Slugify(relatedID) + ".refresh"
-	if strings.TrimSpace(domainID) != "" {
-		findingID = findingID + "." + slugutil.Slugify(domainID)
-	}
-	normalized.Changeset = append(normalized.Changeset, contracts.Operation{
-		Op: "add_finding",
-		Finding: &contracts.Finding{
-			ID:          findingID,
-			Severity:    "medium",
-			Title:       "Missing owner mapping",
-			Description: fmt.Sprintf("owner_team_id is not confirmed for service %q", relatedID),
-			RuleID:      "rule.owner.required",
-			RelatedIDs:  []string{relatedID},
-			Provenance: contracts.Provenance{
-				Kind:       "inference",
-				Confidence: 0.66,
-				Evidence:   evidence,
-			},
-		},
-	})
-	normalized.Warnings = append(
-		normalized.Warnings,
-		fmt.Sprintf("semantic_guard: added fallback owner-mapping finding %q", findingID),
-	)
+func (e *pipelineExecution) applySemanticGuards(stepID string, domainID string, task acpruntime.Task, normalized contracts.SemanticSnapshot) contracts.SemanticSnapshot {
 	return normalized
 }
 
-func (e *pipelineExecution) ensureCrossRepoEdgeFallback(domainID string, task acpruntime.Task, normalized contracts.TaskResult) contracts.TaskResult {
-	scopes := normalizeOrderedUniqueStrings(task.RepoScopes)
-	if len(scopes) < 2 {
-		selectedScopes := normalizeOrderedUniqueStrings(e.selectedRepoScopes)
-		if len(selectedScopes) >= 2 {
-			scopes = selectedScopes
-		}
-	}
-	if len(scopes) < 2 {
-		return normalized
-	}
-	for _, op := range normalized.Changeset {
-		if op.Op == "upsert_edge" && op.Edge != nil {
-			return normalized
-		}
-	}
-
-	type serviceCandidate struct {
-		ID       string
-		Repo     string
-		Evidence contracts.Evidence
-	}
-
-	scopeSet := map[string]struct{}{}
-	for _, scope := range scopes {
-		scopeSet[scope] = struct{}{}
-	}
-	repoRoots := declaredRepoRoots(e.workspace)
-	scopeAnchors := map[string]contracts.Evidence{}
-	for _, scope := range scopes {
-		if evidence, ok := fallbackScopeAnchorEvidence(scope, e.workspace.Path, repoRoots); ok {
-			scopeAnchors[scope] = evidence
-		}
-	}
-
-	entities, err := e.store.ListEntities()
-	if err != nil {
-		normalized.Warnings = append(normalized.Warnings, fmt.Sprintf("semantic_guard: cross-repo fallback edge skipped: %v", err))
-		return normalized
-	}
-
-	candidates := make([]serviceCandidate, 0, len(entities))
-	candidateKey := map[string]struct{}{}
-	existingEntityIDs := map[string]struct{}{}
-	for _, entity := range entities {
-		entityID := strings.TrimSpace(entity.ID)
-		if entityID != "" {
-			existingEntityIDs[entityID] = struct{}{}
-		}
-		if strings.TrimSpace(entity.Type) != "service" {
-			continue
-		}
-		if entityID == "" {
-			continue
-		}
-		repoScope := entityRepoScope(entity, task)
-		if repoScope == "" {
-			continue
-		}
-		if _, ok := scopeSet[repoScope]; !ok {
-			continue
-		}
-		evidence, ok := fallbackEvidenceForEntity(entity, repoScope, e.workspace.Path, repoRoots)
-		if !ok {
-			continue
-		}
-		candidates = append(candidates, serviceCandidate{
-			ID:       entityID,
-			Repo:     repoScope,
-			Evidence: evidence,
-		})
-		candidateKey[repoScope+"|"+entityID] = struct{}{}
-	}
-
-	if len(candidates) < 2 {
-		servicesByScope := map[string][]string{}
-		for _, entity := range entities {
-			if strings.TrimSpace(entity.Type) != "service" {
-				continue
-			}
-			entityID := strings.TrimSpace(entity.ID)
-			if entityID == "" {
-				continue
-			}
-			repoScope := entityRepoScope(entity, task)
-			if _, ok := scopeSet[repoScope]; !ok {
-				continue
-			}
-			servicesByScope[repoScope] = append(servicesByScope[repoScope], entityID)
-		}
-		for scope := range servicesByScope {
-			sort.Strings(servicesByScope[scope])
-		}
-		for _, scope := range scopes {
-			ids := servicesByScope[scope]
-			if len(ids) == 0 {
-				continue
-			}
-			evidence, ok := scopeAnchors[scope]
-			if !ok {
-				continue
-			}
-			key := scope + "|" + ids[0]
-			if _, exists := candidateKey[key]; exists {
-				continue
-			}
-			candidates = append(candidates, serviceCandidate{
-				ID:       ids[0],
-				Repo:     scope,
-				Evidence: evidence,
-			})
-			candidateKey[key] = struct{}{}
-		}
-	}
-	if len(candidates) < 2 {
-		hasCandidateInScope := map[string]struct{}{}
-		for _, candidate := range candidates {
-			hasCandidateInScope[candidate.Repo] = struct{}{}
-		}
-		createdFallbackEntities := []string{}
-		for _, scope := range scopes {
-			if _, ok := hasCandidateInScope[scope]; ok {
-				continue
-			}
-			evidence, ok := scopeAnchors[scope]
-			if !ok {
-				continue
-			}
-			scopeSlug := slugutil.Slugify(scope)
-			if scopeSlug == "" {
-				scopeSlug = "scope"
-			}
-			baseID := fmt.Sprintf("svc.scope-anchor.%s", scopeSlug)
-			entityID := baseID
-			suffix := 1
-			for {
-				if _, exists := existingEntityIDs[entityID]; !exists {
-					break
-				}
-				entityID = fmt.Sprintf("%s.%d", baseID, suffix)
-				suffix++
-			}
-			existingEntityIDs[entityID] = struct{}{}
-			hasCandidateInScope[scope] = struct{}{}
-			createdFallbackEntities = append(createdFallbackEntities, fmt.Sprintf("%s(%s)", entityID, scope))
-			normalized.Changeset = append(normalized.Changeset, contracts.Operation{
-				Op: "upsert_entity",
-				Entity: &contracts.Entity{
-					ID:   entityID,
-					Type: "service",
-					Name: fmt.Sprintf("Scope Anchor %s", scope),
-					Attributes: map[string]any{
-						"guard_added": true,
-						"repo_scope":  scope,
-						"anchor":      true,
-					},
-					Provenance: contracts.Provenance{
-						Kind:       "inference",
-						Confidence: 0.58,
-						Evidence:   []contracts.Evidence{evidence},
-					},
-				},
-			})
-			candidates = append(candidates, serviceCandidate{
-				ID:       entityID,
-				Repo:     scope,
-				Evidence: evidence,
-			})
-			candidateKey[scope+"|"+entityID] = struct{}{}
-		}
-		if len(createdFallbackEntities) > 0 {
-			normalized.Warnings = append(
-				normalized.Warnings,
-				fmt.Sprintf("semantic_guard: added fallback scope-anchor entities for cross-repo edge synthesis: %s", strings.Join(createdFallbackEntities, ", ")),
-			)
-		}
-	}
-	if len(candidates) < 2 {
-		normalized.Warnings = append(
-			normalized.Warnings,
-			fmt.Sprintf(
-				"semantic_guard: cross-repo fallback edge skipped: insufficient multi-scope service entities with valid evidence (scopes=%d anchor_scopes=%d)",
-				len(scopes),
-				len(scopeAnchors),
-			),
-		)
-		return normalized
-	}
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].Repo == candidates[j].Repo {
-			return candidates[i].ID < candidates[j].ID
-		}
-		return candidates[i].Repo < candidates[j].Repo
-	})
-
-	from := candidates[0]
-	toIndex := -1
-	for idx := 1; idx < len(candidates); idx++ {
-		if candidates[idx].Repo != from.Repo {
-			toIndex = idx
-			break
-		}
-	}
-	if toIndex == -1 {
-		normalized.Warnings = append(
-			normalized.Warnings,
-			fmt.Sprintf(
-				"semantic_guard: cross-repo fallback edge skipped: candidates resolved to one repo_scope (candidates=%d anchor_scopes=%d)",
-				len(candidates),
-				len(scopeAnchors),
-			),
-		)
-		return normalized
-	}
-	to := candidates[toIndex]
-
-	edgeID := "edge.cross-repo." + slugutil.Slugify(from.ID) + ".depends-on." + slugutil.Slugify(to.ID)
-	if strings.TrimSpace(domainID) != "" {
-		edgeID += "." + slugutil.Slugify(domainID)
-	}
-	normalized.Changeset = append(normalized.Changeset, contracts.Operation{
-		Op: "upsert_edge",
-		Edge: &contracts.Edge{
-			ID:   edgeID,
-			Type: "depends_on",
-			From: from.ID,
-			To:   to.ID,
-			Name: "Cross-repo dependency",
-			Attributes: map[string]any{
-				"inferred":        true,
-				"guard_added":     true,
-				"from_repo_scope": from.Repo,
-				"to_repo_scope":   to.Repo,
-			},
-			Provenance: contracts.Provenance{
-				Kind:       "inference",
-				Confidence: 0.61,
-				Evidence: []contracts.Evidence{
-					from.Evidence,
-					to.Evidence,
-				},
-			},
-		},
-	})
-	normalized.Warnings = append(
-		normalized.Warnings,
-		fmt.Sprintf(
-			"semantic_guard: added fallback cross-repo edge %q from=%q(%s) to=%q(%s)",
-			edgeID,
-			from.ID,
-			from.Repo,
-			to.ID,
-			to.Repo,
-		),
-	)
+func (e *pipelineExecution) ensureOwnerGapFallback(domainID string, task acpruntime.Task, normalized contracts.SemanticSnapshot) contracts.SemanticSnapshot {
 	return normalized
 }
 
-func (e *pipelineExecution) applyEvidencePathSemanticGuard(stepID string, task acpruntime.Task, normalized contracts.TaskResult) contracts.TaskResult {
-	if stepID != "refresh.step1.collect" && stepID != "refresh.step3.findings" {
-		return normalized
-	}
+func (e *pipelineExecution) ensureCrossRepoEdgeFallback(domainID string, task acpruntime.Task, normalized contracts.SemanticSnapshot) contracts.SemanticSnapshot {
+	return normalized
+}
 
-	repoRoots := declaredRepoRoots(e.workspace)
-	removedTotal := 0
-	downgradedTotal := 0
-
-	for idx := range normalized.Changeset {
-		op := &normalized.Changeset[idx]
-		switch op.Op {
-		case "upsert_entity":
-			if op.Entity == nil {
-				continue
-			}
-			defaultRepo := entityRepoScope(*op.Entity, task)
-			removed, downgraded := sanitizeProvenanceEvidence(&op.Entity.Provenance, defaultRepo, e.workspace.Path, repoRoots)
-			removedTotal += removed
-			if downgraded {
-				downgradedTotal++
-			}
-		case "upsert_edge":
-			if op.Edge == nil {
-				continue
-			}
-			defaultRepo := ""
-			if len(task.RepoScopes) > 0 {
-				defaultRepo = strings.TrimSpace(task.RepoScopes[0])
-			}
-			removed, downgraded := sanitizeProvenanceEvidence(&op.Edge.Provenance, defaultRepo, e.workspace.Path, repoRoots)
-			removedTotal += removed
-			if downgraded {
-				downgradedTotal++
-			}
-		case "add_finding":
-			if op.Finding == nil {
-				continue
-			}
-			defaultRepo := ""
-			if len(task.RepoScopes) > 0 {
-				defaultRepo = strings.TrimSpace(task.RepoScopes[0])
-			}
-			removed, downgraded := sanitizeProvenanceEvidence(&op.Finding.Provenance, defaultRepo, e.workspace.Path, repoRoots)
-			removedTotal += removed
-			if downgraded {
-				downgradedTotal++
-			}
-		}
-	}
-
-	if removedTotal > 0 {
-		normalized.Warnings = append(
-			normalized.Warnings,
-			fmt.Sprintf("semantic_guard: removed invalid evidence paths count=%d", removedTotal),
-		)
-	}
-	if downgradedTotal > 0 {
-		normalized.Warnings = append(
-			normalized.Warnings,
-			fmt.Sprintf("semantic_guard: downgraded observation provenance to inference count=%d", downgradedTotal),
-		)
-	}
-
+func (e *pipelineExecution) applyEvidencePathSemanticGuard(stepID string, task acpruntime.Task, normalized contracts.SemanticSnapshot) contracts.SemanticSnapshot {
 	return normalized
 }
 
@@ -3824,23 +2964,6 @@ func fallbackEvidenceForEntity(entity contracts.Entity, repoScope string, worksp
 	for _, candidatePath := range []string{"README.md", "README", "go.mod", "package.json", "pom.xml"} {
 		candidate := contracts.Evidence{
 			Repo: repo,
-			Path: candidatePath,
-		}
-		if evidencePathResolvesInScope(candidate, workspaceRoot, repoRoots) {
-			return candidate, true
-		}
-	}
-	return contracts.Evidence{}, false
-}
-
-func fallbackScopeAnchorEvidence(repoScope string, workspaceRoot string, repoRoots map[string]string) (contracts.Evidence, bool) {
-	scope := strings.TrimSpace(repoScope)
-	if scope == "" {
-		return contracts.Evidence{}, false
-	}
-	for _, candidatePath := range []string{"README.md", "README", "go.mod", "package.json", "pom.xml"} {
-		candidate := contracts.Evidence{
-			Repo: scope,
 			Path: candidatePath,
 		}
 		if evidencePathResolvesInScope(candidate, workspaceRoot, repoRoots) {

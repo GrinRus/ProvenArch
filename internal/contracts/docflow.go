@@ -33,28 +33,20 @@ type DocumentCitation struct {
 	DocumentIDs []string   `json:"document_ids"`
 }
 
-type CompatibilitySnapshot struct {
-	Coverage  Coverage   `json:"coverage"`
-	Questions []Question `json:"questions"`
-	Entities  []Entity   `json:"entities"`
-	Edges     []Edge     `json:"edges"`
-	Findings  []Finding  `json:"findings"`
-}
-
 type ShardPackManifest struct {
-	Version       int                   `json:"version"`
-	RunID         string                `json:"run_id"`
-	StepID        string                `json:"step_id"`
-	ShardID       string                `json:"shard_id"`
-	DomainID      string                `json:"domain_id,omitempty"`
-	AgentRole     string                `json:"agent_role"`
-	ArtifactRoot  string                `json:"artifact_root"`
-	RepoScopes    []string              `json:"repo_scopes,omitempty"`
-	PathScopes    []string              `json:"path_scopes,omitempty"`
-	Summary       string                `json:"summary,omitempty"`
-	Documents     []AuthoredDocument    `json:"documents"`
-	Citations     []DocumentCitation    `json:"citations"`
-	Compatibility CompatibilitySnapshot `json:"compatibility"`
+	Version      int                `json:"version"`
+	RunID        string             `json:"run_id"`
+	StepID       string             `json:"step_id"`
+	ShardID      string             `json:"shard_id"`
+	DomainID     string             `json:"domain_id,omitempty"`
+	AgentRole    string             `json:"agent_role"`
+	ArtifactRoot string             `json:"artifact_root"`
+	RepoScopes   []string           `json:"repo_scopes,omitempty"`
+	PathScopes   []string           `json:"path_scopes,omitempty"`
+	Summary      string             `json:"summary,omitempty"`
+	Documents    []AuthoredDocument `json:"documents"`
+	Citations    []DocumentCitation `json:"citations"`
+	Semantic     SemanticSnapshot   `json:"semantic"`
 }
 
 type FinalRunDocument struct {
@@ -75,14 +67,14 @@ type TopicIndexEntry struct {
 }
 
 type FinalRunIndex struct {
-	Version            int                   `json:"version"`
-	RunID              string                `json:"run_id"`
-	Pipeline           string                `json:"pipeline"`
-	GeneratedAt        string                `json:"generated_at"`
-	CitationIndexPath  string                `json:"citation_index_path"`
-	CanonicalDocuments []FinalRunDocument    `json:"canonical_documents"`
-	Topics             []TopicIndexEntry     `json:"topics"`
-	Compatibility      CompatibilitySnapshot `json:"compatibility"`
+	Version            int                `json:"version"`
+	RunID              string             `json:"run_id"`
+	Pipeline           string             `json:"pipeline"`
+	GeneratedAt        string             `json:"generated_at"`
+	CitationIndexPath  string             `json:"citation_index_path"`
+	CanonicalDocuments []FinalRunDocument `json:"canonical_documents"`
+	Topics             []TopicIndexEntry  `json:"topics"`
+	Semantic           SemanticSnapshot   `json:"semantic"`
 }
 
 type CitationIndex struct {
@@ -109,6 +101,8 @@ type ValidatorVerdict struct {
 	Summary      string           `json:"summary,omitempty"`
 	CheckedPaths []string         `json:"checked_paths"`
 	FixedPaths   []string         `json:"fixed_paths,omitempty"`
+	Findings     []Finding        `json:"findings,omitempty"`
+	Questions    []Question       `json:"questions,omitempty"`
 	Issues       []ValidatorIssue `json:"issues,omitempty"`
 }
 
@@ -182,7 +176,7 @@ func validateShardPackManifest(manifest ShardPackManifest) error {
 	if strings.TrimSpace(manifest.ArtifactRoot) == "" {
 		problems = append(problems, "artifact_root is required")
 	}
-	problems = append(problems, validateDocumentSet(manifest.Documents, manifest.Citations, manifest.ArtifactRoot)...)
+	problems = append(problems, validateDocumentSet(manifest.ArtifactRoot, manifest.Documents, manifest.Citations)...)
 	problems = append(problems, validateCitationSet(manifest.Citations)...)
 	if len(problems) > 0 {
 		sort.Strings(problems)
@@ -281,6 +275,27 @@ func validateValidatorVerdict(verdict ValidatorVerdict) error {
 			problems = append(problems, label+".severity must be error or warning")
 		}
 	}
+	for idx, finding := range verdict.Findings {
+		label := fmt.Sprintf("findings[%d]", idx)
+		if strings.TrimSpace(finding.ID) == "" {
+			problems = append(problems, label+".id is required")
+		}
+		if strings.TrimSpace(finding.Title) == "" {
+			problems = append(problems, label+".title is required")
+		}
+		if strings.TrimSpace(finding.Severity) == "" {
+			problems = append(problems, label+".severity is required")
+		}
+	}
+	for idx, question := range verdict.Questions {
+		label := fmt.Sprintf("questions[%d]", idx)
+		if strings.TrimSpace(question.ID) == "" {
+			problems = append(problems, label+".id is required")
+		}
+		if strings.TrimSpace(question.Text) == "" {
+			problems = append(problems, label+".text is required")
+		}
+	}
 	if len(problems) > 0 {
 		sort.Strings(problems)
 		return fmt.Errorf("validator verdict is invalid: %s", strings.Join(problems, "; "))
@@ -288,7 +303,7 @@ func validateValidatorVerdict(verdict ValidatorVerdict) error {
 	return nil
 }
 
-func validateDocumentSet(documents []AuthoredDocument, citations []DocumentCitation, artifactRoot string) []string {
+func validateDocumentSet(artifactRoot string, documents []AuthoredDocument, citations []DocumentCitation) []string {
 	problems := []string{}
 	citationIDs := map[string]struct{}{}
 	for _, citation := range citations {
@@ -338,15 +353,32 @@ func validateShardDocumentRelativePath(rawPath string, artifactRoot string) stri
 	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
 		return "must not escape artifact_root"
 	}
-	asSlash := filepath.ToSlash(cleaned)
-	if strings.HasPrefix(asSlash, "reports/taskruns/") {
-		return `must be artifact_root-relative; reports/taskruns/... prefix is forbidden`
+	if workspacePrefix := forbiddenWorkspaceLevelDocumentPrefix(cleaned); workspacePrefix != "" {
+		return fmt.Sprintf("must be artifact_root-relative, not workspace-level path starting with %q", workspacePrefix)
 	}
-	normalizedArtifactRoot := filepath.ToSlash(filepath.Clean(filepath.FromSlash(strings.TrimSpace(artifactRoot))))
-	if normalizedArtifactRoot != "" && (asSlash == normalizedArtifactRoot || strings.HasPrefix(asSlash, normalizedArtifactRoot+"/")) {
-		return "must be artifact_root-relative; artifact_root prefix is forbidden"
+	if duplicatedArtifactRootPrefix(cleaned, artifactRoot) {
+		return "must be artifact_root-relative and must not repeat artifact_root"
 	}
 	return ""
+}
+
+func forbiddenWorkspaceLevelDocumentPrefix(cleanedPath string) string {
+	normalized := strings.ToLower(filepath.ToSlash(strings.TrimSpace(cleanedPath)))
+	for _, prefix := range []string{"reports/", "charter/", "proposals/"} {
+		if strings.HasPrefix(normalized, prefix) {
+			return prefix
+		}
+	}
+	return ""
+}
+
+func duplicatedArtifactRootPrefix(cleanedPath string, artifactRoot string) bool {
+	normalizedArtifactRoot := filepath.ToSlash(filepath.Clean(filepath.FromSlash(strings.TrimSpace(artifactRoot))))
+	if normalizedArtifactRoot == "." || normalizedArtifactRoot == "" {
+		return false
+	}
+	normalizedPath := filepath.ToSlash(cleanedPath)
+	return normalizedPath == normalizedArtifactRoot || strings.HasPrefix(normalizedPath, normalizedArtifactRoot+"/")
 }
 
 func isAllowedCanonicalRuntimeDocumentPath(rawPath string) bool {

@@ -1,7 +1,26 @@
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 
-import { MermaidPreview } from "./components/MermaidPreview";
+import { BaselineGitPanel } from "./components/BaselineGitPanel";
+import { RunStatusPanel } from "./components/RunStatusPanel";
+import { RuntimeProfileSettingsPanel } from "./components/RuntimeProfileSettingsPanel";
 import { TabNav, type TabOption } from "./components/TabNav";
+import { fetchJSON, getErrorMessage } from "./lib/api";
+import {
+  activeStatuses,
+  dedupeArtifactsByPath,
+  finalStatuses,
+  formatTimestamp,
+  indexArtifactPath,
+  pickBootstrapRun,
+  reconcileSelectedRunID,
+  runLogsPageLimit,
+  splitListInput,
+} from "./lib/runState";
+
+const MermaidPreview = lazy(async () => {
+  const module = await import("./components/MermaidPreview");
+  return { default: module.MermaidPreview };
+});
 
 type Diagnostic = {
   level: "error" | "warning";
@@ -129,15 +148,6 @@ type RunLogsResponse = {
   eof: boolean;
 };
 
-type APIErrorPayload = {
-  error?:
-    | string
-    | {
-        code?: string;
-        message?: string;
-      };
-};
-
 type RepoSourceMode = "path" | "git_url";
 
 type GuidedRepo = {
@@ -187,6 +197,17 @@ type RuntimeExecutionResponse = {
   persisted?: Partial<RuntimeExecutionValues>;
   effective?: Partial<RuntimeExecutionValues>;
   source?: Partial<RuntimeExecutionSources>;
+};
+
+type RuntimeStepProviderValues = Record<string, string>;
+
+type RuntimeProfileResponse = {
+  ok: boolean;
+  step_providers?: {
+    persisted?: Partial<RuntimeStepProviderValues>;
+    effective?: Partial<RuntimeStepProviderValues>;
+    source?: Partial<RuntimeStepProviderValues>;
+  };
 };
 
 type EditableArtifactOption = {
@@ -243,9 +264,22 @@ const runtimeExecutionLabels: Record<RuntimeExecutionKey, string> = {
   shard_discovery_mode: "runtime.profile.execution.shard_discovery.mode",
 };
 
-const finalStatuses = new Set(["succeeded", "failed"]);
-const activeStatuses = new Set(["queued", "running"]);
-const runLogsPageLimit = 200;
+const runtimeStepProviderOrder = [
+  "step0_constitution",
+  "step1_collect",
+  "step2_as_is",
+  "step3_findings",
+  "step4_proposals",
+] as const;
+
+const runtimeStepProviderLabels: Record<(typeof runtimeStepProviderOrder)[number], string> = {
+  step0_constitution: "runtime.profile.steps.step0_constitution.provider",
+  step1_collect: "runtime.profile.steps.step1_collect.provider",
+  step2_as_is: "runtime.profile.steps.step2_as_is.provider",
+  step3_findings: "runtime.profile.steps.step3_findings.provider",
+  step4_proposals: "runtime.profile.steps.step4_proposals.provider",
+};
+
 let guidedRepoSeed = 0;
 
 type TopTab = "setup" | "baseline" | "runs" | "results" | "settings";
@@ -276,64 +310,6 @@ function makeGuidedRepo(partial?: Partial<GuidedRepo>): GuidedRepo {
     git_url: partial?.git_url ?? "https://gitlab.example.com/group/repository.git",
     ref: partial?.ref ?? "",
   };
-}
-
-function getErrorMessage(payload: unknown, fallback: string): string {
-  const typed = payload as APIErrorPayload;
-  if (!typed || typeof typed !== "object") {
-    return fallback;
-  }
-  if (typeof typed.error === "string") {
-    return typed.error;
-  }
-  if (typed.error && typeof typed.error.message === "string") {
-    return typed.error.message;
-  }
-  return fallback;
-}
-
-async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
-  const payload = (await response.json()) as T;
-  if (!response.ok) {
-    throw new Error(getErrorMessage(payload, `request failed: ${url}`));
-  }
-  return payload;
-}
-
-function dedupeArtifactsByPath(items: Artifact[]): Artifact[] {
-  const deduped = new Map<string, Artifact>();
-  for (const artifact of items) {
-    const key = artifact.path.trim();
-    if (!key) {
-      continue;
-    }
-    deduped.set(key, { ...artifact, path: key });
-  }
-  return Array.from(deduped.values()).sort((left, right) => left.path.localeCompare(right.path));
-}
-
-function indexArtifactPath(artifacts: Artifact[], suffix: string): string | null {
-  const match = artifacts.find((artifact) => artifact.path.endsWith(suffix));
-  return match ? match.path : null;
-}
-
-function splitListInput(input: string): string[] {
-  return input
-    .split(/[,\n]/)
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
-}
-
-function formatTimestamp(value?: string | null): string {
-  if (!value) {
-    return "-";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toISOString().replace("T", " ").replace(".000Z", " UTC");
 }
 
 function normalizeRuntimeTimeoutValues(
@@ -431,39 +407,6 @@ function parseRuntimeExecutionPatch(draft: RuntimeExecutionDraft): RuntimeExecut
   };
 }
 
-function parseTimeOrMin(value?: string | null): number {
-  if (!value) {
-    return Number.NEGATIVE_INFINITY;
-  }
-  const parsed = Date.parse(value);
-  if (Number.isNaN(parsed)) {
-    return Number.NEGATIVE_INFINITY;
-  }
-  return parsed;
-}
-
-function pickBootstrapRun(items: RunListItem[]): RunListItem | null {
-  if (!Array.isArray(items) || items.length === 0) {
-    return null;
-  }
-  let newestActive: RunListItem | null = null;
-  let newestActiveStartedAt = Number.NEGATIVE_INFINITY;
-  for (const item of items) {
-    if (!activeStatuses.has(item.status)) {
-      continue;
-    }
-    const startedAt = parseTimeOrMin(item.started_at);
-    if (newestActive === null || startedAt > newestActiveStartedAt) {
-      newestActive = item;
-      newestActiveStartedAt = startedAt;
-    }
-  }
-  if (newestActive) {
-    return newestActive;
-  }
-  return items[0];
-}
-
 export default function App() {
   const [activeTab, setActiveTab] = useState<TopTab>("setup");
   const [resultsTab, setResultsTab] = useState<ResultsTab>("coverage");
@@ -507,6 +450,9 @@ export default function App() {
     runtimeExecutionDraftFromValues(defaultRuntimeExecutionValues)
   );
   const [runtimeExecutionStatus, setRuntimeExecutionStatus] = useState("");
+  const [runtimeStepProviderPersisted, setRuntimeStepProviderPersisted] = useState<Partial<RuntimeStepProviderValues>>({});
+  const [runtimeStepProviderEffective, setRuntimeStepProviderEffective] = useState<Partial<RuntimeStepProviderValues>>({});
+  const [runtimeStepProviderSource, setRuntimeStepProviderSource] = useState<Partial<RuntimeStepProviderValues>>({});
 
   const [runId, setRunID] = useState<string | null>(null);
   const [runStatus, setRunStatus] = useState<RunStatusResponse | null>(null);
@@ -687,6 +633,7 @@ export default function App() {
     await loadWizardContract();
     await loadRuntimeTimeouts();
     await loadRuntimeExecution();
+    await loadRuntimeProfile();
   }
 
   async function loadBaselineBundle() {
@@ -789,8 +736,23 @@ export default function App() {
     try {
       const latestRuns = await loadRunList(100);
       if (runId) {
-        const selectedRunExists = latestRuns.some((item) => item.run_id === runId);
-        if (!selectedRunExists) {
+        const nextSelectedRunID = reconcileSelectedRunID(runId, latestRuns);
+        if (nextSelectedRunID !== runId) {
+          const previousStatus = runStatus?.status ?? null;
+          const currentStatus = await fetchRunStatus(runId, { allowMissing: true });
+          if (currentStatus) {
+            if (activeStatuses.has(currentStatus.status)) {
+              await fetchRunLogs(runId, false);
+              return;
+            }
+            const statusChanged = previousStatus !== currentStatus.status;
+            if (statusChanged || !runLogsEOF) {
+              await fetchRunLogsUntilEOF(runId);
+            }
+            return;
+          }
+          setSelectedArtifact("");
+          setSelectedArtifactContent("");
           setRunStatus((previous) => {
             if (previous && previous.run_id === runId) {
               return null;
@@ -799,6 +761,12 @@ export default function App() {
           });
           setArtifacts([]);
           resetRunLogs();
+          if (nextSelectedRunID) {
+            await handleSelectRun(nextSelectedRunID, { silentErrors: true });
+            setRunActionStatus(`Selected run no longer exists; switched to ${nextSelectedRunID}.`);
+          } else {
+            setRunID(null);
+          }
           return;
         }
         const previousStatus = runStatus?.status ?? null;
@@ -876,6 +844,19 @@ export default function App() {
       setRuntimeExecutionEffective(defaultRuntimeExecutionValues);
       setRuntimeExecutionSource({});
       setRuntimeExecutionDraft(runtimeExecutionDraftFromValues(defaultRuntimeExecutionValues));
+    }
+  }
+
+  async function loadRuntimeProfile() {
+    try {
+      const payload = await fetchJSON<RuntimeProfileResponse>("/api/runtime/profile");
+      setRuntimeStepProviderPersisted(payload.step_providers?.persisted ?? {});
+      setRuntimeStepProviderEffective(payload.step_providers?.effective ?? {});
+      setRuntimeStepProviderSource(payload.step_providers?.source ?? {});
+    } catch {
+      setRuntimeStepProviderPersisted({});
+      setRuntimeStepProviderEffective({});
+      setRuntimeStepProviderSource({});
     }
   }
 
@@ -986,8 +967,8 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" }
       });
-      const payload = (await response.json()) as ValidateResponse & APIErrorPayload;
-      setValidateResult(payload);
+      const payload = await response.json();
+      setValidateResult(payload as ValidateResponse);
       if (!response.ok) {
         throw new Error(getErrorMessage(payload, "workspace validation failed"));
       }
@@ -1186,14 +1167,34 @@ export default function App() {
     }
   }
 
-  async function fetchRunStatus(id: string): Promise<RunStatusResponse> {
-    const payload = await fetchJSON<RunStatusResponse>(`/api/pipeline/runs/${id}`);
-    setRunStatus(payload);
-    if (finalStatuses.has(payload.status)) {
+  async function fetchRunStatus(id: string): Promise<RunStatusResponse>;
+  async function fetchRunStatus(
+    id: string,
+    options: {
+      allowMissing: true;
+    }
+  ): Promise<RunStatusResponse | null>;
+  async function fetchRunStatus(
+    id: string,
+    options?: {
+      allowMissing?: boolean;
+    }
+  ): Promise<RunStatusResponse | null> {
+    const response = await fetch(`/api/pipeline/runs/${id}`);
+    const payload = await response.json();
+    if (response.status === 404 && options?.allowMissing) {
+      return null;
+    }
+    if (!response.ok) {
+      throw new Error(getErrorMessage(payload, `request failed: /api/pipeline/runs/${id}`));
+    }
+    const typed = payload as RunStatusResponse;
+    setRunStatus(typed);
+    if (finalStatuses.has(typed.status)) {
       await fetchArtifacts(id);
       await loadCoverageArtifacts();
     }
-    return payload;
+    return typed;
   }
 
   async function handleSelectRun(
@@ -1231,7 +1232,7 @@ export default function App() {
       const response = await fetch(`/api/pipeline/runs/${runId}/cancel`, {
         method: "POST"
       });
-      const payload = (await response.json()) as RunCancelResponse & APIErrorPayload;
+      const payload = await response.json();
 
       if (response.status === 202) {
         setRunActionStatus(`Cancel requested for ${runId}`);
@@ -1246,10 +1247,11 @@ export default function App() {
       }
 
       if (response.status === 404) {
-        setRunActionStatus("Selected run no longer exists.");
         const latestRuns = await loadRunList(100);
-        const selectedRunExists = latestRuns.some((item) => item.run_id === runId);
-        if (!selectedRunExists) {
+        const nextSelectedRunID = reconcileSelectedRunID(runId, latestRuns);
+        if (nextSelectedRunID !== runId) {
+          setSelectedArtifact("");
+          setSelectedArtifactContent("");
           setRunStatus((previous) => {
             if (previous && previous.run_id === runId) {
               return null;
@@ -1258,6 +1260,15 @@ export default function App() {
           });
           setArtifacts([]);
           resetRunLogs();
+          if (nextSelectedRunID) {
+            await handleSelectRun(nextSelectedRunID, { silentErrors: true });
+            setRunActionStatus(`Selected run no longer exists; switched to ${nextSelectedRunID}.`);
+          } else {
+            setRunID(null);
+            setRunActionStatus("Selected run no longer exists.");
+          }
+        } else {
+          setRunActionStatus("Selected run no longer exists.");
         }
         return;
       }
@@ -1587,113 +1598,36 @@ export default function App() {
       ) : null}
 
       {activeTab === "settings" ? (
-        <>
-          <section className="panel" data-testid="runtime-timeouts-panel">
-            <h2>Settings: Runtime Timeouts</h2>
-            <p className="hint">Persisted in `workspace.yaml` (`runtime.profile.timeouts`) with precedence `env &gt; workspace &gt; defaults`.</p>
-            <div className="actions">
-              <button type="button" onClick={() => void loadRuntimeTimeouts()} disabled={busy}>
-                Reload runtime timeouts
-              </button>
-              <button type="button" onClick={() => void handleSaveRuntimeTimeouts()} disabled={busy} data-testid="runtime-timeouts-save-btn">
-                Save runtime timeouts
-              </button>
-              <button type="button" onClick={() => void handleResetRuntimeTimeouts()} disabled={busy}>
-                Reset balanced defaults
-              </button>
-            </div>
-            {runtimeTimeoutKeys.map((key) => (
-              <div key={`timeout-${key}`}>
-                <label htmlFor={`runtime-timeout-${key}`}>{runtimeTimeoutLabels[key]}</label>
-                <input
-                  id={`runtime-timeout-${key}`}
-                  data-testid={`runtime-timeout-input-${key}`}
-                  value={runtimeTimeoutDraft[key]}
-                  onChange={(event) => updateRuntimeTimeoutDraft(key, event.target.value)}
-                />
-                <p className="hint">
-                  persisted: {runtimeTimeoutPersisted[key] ?? "-"} | effective: {runtimeTimeoutEffective[key]} | source: {runtimeTimeoutSource[key] ?? "default"}
-                </p>
-              </div>
-            ))}
-            {runtimeTimeoutStatus ? <p className="status ok">{runtimeTimeoutStatus}</p> : null}
-          </section>
-
-          <section className="panel" data-testid="runtime-execution-panel">
-            <h2>Settings: Runtime Execution</h2>
-            <p className="hint">Persisted in `workspace.yaml` (`runtime.profile.execution`) with precedence `CLI &gt; env &gt; workspace &gt; defaults`.</p>
-            <div className="actions">
-              <button type="button" onClick={() => void loadRuntimeExecution()} disabled={busy}>
-                Reload runtime execution
-              </button>
-              <button type="button" onClick={() => void handleSaveRuntimeExecution()} disabled={busy} data-testid="runtime-execution-save-btn">
-                Save runtime execution
-              </button>
-              <button type="button" onClick={() => void handleResetRuntimeExecution()} disabled={busy}>
-                Reset execution defaults
-              </button>
-            </div>
-
-            <label htmlFor="runtime-execution-strategy">{runtimeExecutionLabels.strategy}</label>
-            <select
-              id="runtime-execution-strategy"
-              data-testid="runtime-execution-strategy-select"
-              value={runtimeExecutionDraft.strategy}
-              onChange={(event) => updateRuntimeExecutionDraft("strategy", event.target.value)}
-            >
-              <option value="sequential">sequential</option>
-              <option value="parallel">parallel</option>
-            </select>
-            <p className="hint">
-              persisted: {String(runtimeExecutionPersisted.strategy ?? "-")} | effective: {String(runtimeExecutionEffective.strategy)} | source:{" "}
-              {runtimeExecutionSource.strategy ?? "default"}
-            </p>
-
-            <label htmlFor="runtime-execution-max-parallel">{runtimeExecutionLabels.max_parallel_tasks}</label>
-            <input
-              id="runtime-execution-max-parallel"
-              data-testid="runtime-execution-max-parallel-input"
-              value={runtimeExecutionDraft.max_parallel_tasks}
-              onChange={(event) => updateRuntimeExecutionDraft("max_parallel_tasks", event.target.value)}
-            />
-            <p className="hint">
-              persisted: {String(runtimeExecutionPersisted.max_parallel_tasks ?? "-")} | effective: {String(runtimeExecutionEffective.max_parallel_tasks)} | source:{" "}
-              {runtimeExecutionSource.max_parallel_tasks ?? "default"}
-            </p>
-
-            <label htmlFor="runtime-execution-failure">{runtimeExecutionLabels.failure_policy}</label>
-            <select
-              id="runtime-execution-failure"
-              data-testid="runtime-execution-failure-policy-select"
-              value={runtimeExecutionDraft.failure_policy}
-              onChange={(event) => updateRuntimeExecutionDraft("failure_policy", event.target.value)}
-            >
-              <option value="best_effort">best_effort</option>
-              <option value="fail_fast">fail_fast</option>
-            </select>
-            <p className="hint">
-              persisted: {String(runtimeExecutionPersisted.failure_policy ?? "-")} | effective: {String(runtimeExecutionEffective.failure_policy)} | source:{" "}
-              {runtimeExecutionSource.failure_policy ?? "default"}
-            </p>
-
-            <label htmlFor="runtime-execution-shard-mode">{runtimeExecutionLabels.shard_discovery_mode}</label>
-            <select
-              id="runtime-execution-shard-mode"
-              data-testid="runtime-execution-shard-mode-select"
-              value={runtimeExecutionDraft.shard_discovery_mode}
-              onChange={(event) => updateRuntimeExecutionDraft("shard_discovery_mode", event.target.value)}
-            >
-              <option value="heuristics">heuristics</option>
-              <option value="semantic">semantic</option>
-            </select>
-            <p className="hint">
-              persisted: {String(runtimeExecutionPersisted.shard_discovery_mode ?? "-")} | effective:{" "}
-              {String(runtimeExecutionEffective.shard_discovery_mode)} | source: {runtimeExecutionSource.shard_discovery_mode ?? "default"}
-            </p>
-
-            {runtimeExecutionStatus ? <p className="status ok">{runtimeExecutionStatus}</p> : null}
-          </section>
-        </>
+        <RuntimeProfileSettingsPanel
+          busy={busy}
+          runtimeTimeoutKeys={[...runtimeTimeoutKeys]}
+          runtimeTimeoutLabels={runtimeTimeoutLabels}
+          runtimeTimeoutDraft={runtimeTimeoutDraft}
+          runtimeTimeoutPersisted={runtimeTimeoutPersisted}
+          runtimeTimeoutEffective={runtimeTimeoutEffective}
+          runtimeTimeoutSource={runtimeTimeoutSource}
+          runtimeTimeoutStatus={runtimeTimeoutStatus}
+          onReloadTimeouts={() => void loadRuntimeTimeouts()}
+          onSaveTimeouts={() => void handleSaveRuntimeTimeouts()}
+          onResetTimeouts={() => void handleResetRuntimeTimeouts()}
+          onTimeoutChange={(key, value) => updateRuntimeTimeoutDraft(key as RuntimeTimeoutKey, value)}
+          runtimeExecutionLabels={runtimeExecutionLabels}
+          runtimeExecutionDraft={runtimeExecutionDraft}
+          runtimeExecutionPersisted={runtimeExecutionPersisted}
+          runtimeExecutionEffective={runtimeExecutionEffective}
+          runtimeExecutionSource={runtimeExecutionSource}
+          runtimeExecutionStatus={runtimeExecutionStatus}
+          onReloadExecution={() => void loadRuntimeExecution()}
+          onSaveExecution={() => void handleSaveRuntimeExecution()}
+          onResetExecution={() => void handleResetRuntimeExecution()}
+          onExecutionChange={(key, value) => updateRuntimeExecutionDraft(key as RuntimeExecutionKey, value)}
+          stepProviderLabels={runtimeStepProviderLabels}
+          stepProviderOrder={[...runtimeStepProviderOrder]}
+          stepProviderPersisted={runtimeStepProviderPersisted}
+          stepProviderEffective={runtimeStepProviderEffective}
+          stepProviderSource={runtimeStepProviderSource}
+          onReloadProfile={() => void loadRuntimeProfile()}
+        />
       ) : null}
 
       {activeTab === "baseline" ? (
@@ -1741,22 +1675,16 @@ export default function App() {
             {editorStatus ? <p className="status ok">{editorStatus}</p> : null}
           </section>
 
-          <section className="panel">
-            <h2>Baseline: Git Helper Actions</h2>
-            <label htmlFor="gitMessage">Commit message</label>
-            <input id="gitMessage" value={gitMessage} onChange={(event) => setGitMessage(event.target.value)} />
-            <button type="button" onClick={() => void handleGitCommit()} disabled={busy}>
-              Commit workspace changes
-            </button>
-
-            <label htmlFor="proposalBranch">Proposal branch</label>
-            <input id="proposalBranch" value={proposalBranch} onChange={(event) => setProposalBranch(event.target.value)} />
-            <button type="button" onClick={() => void handleCreateProposalBranch()} disabled={busy}>
-              Create/Switch proposal branch
-            </button>
-
-            {gitStatus ? <p className="status ok">{gitStatus}</p> : null}
-          </section>
+          <BaselineGitPanel
+            busy={busy}
+            gitMessage={gitMessage}
+            proposalBranch={proposalBranch}
+            gitStatus={gitStatus}
+            onGitMessageChange={setGitMessage}
+            onProposalBranchChange={setProposalBranch}
+            onCommit={() => void handleGitCommit()}
+            onCreateProposalBranch={() => void handleCreateProposalBranch()}
+          />
         </>
       ) : null}
 
@@ -1787,30 +1715,7 @@ export default function App() {
             </div>
             {runActionStatus ? <p className="status warn">{runActionStatus}</p> : null}
 
-            {runStatus ? (
-              <div className="status-block" data-testid="run-status-panel">
-                <p>
-                  Run <code data-testid="run-status-run-id">{runStatus.run_id}</code> status:{" "}
-                  <strong data-testid="run-status-value">{runStatus.status}</strong>
-                </p>
-                <p>Pipeline: {runStatus.pipeline}</p>
-                {runStatus.current_step ? <p>Current step: {runStatus.current_step}</p> : null}
-                {runStatus.error_code ? <p className="status warn">Error code: {runStatus.error_code}</p> : null}
-                {runStatus.error ? <p className="status err">Error: {runStatus.error}</p> : null}
-                {selectedRunWarnings.length > 0 ? (
-                  <div data-testid="run-status-warnings">
-                    <p className="hint">Warnings ({selectedRunWarnings.length})</p>
-                    <ul>
-                      {selectedRunWarnings.map((warning, index) => (
-                        <li key={`run-warning-${index}-${warning}`}>{warning}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : (
-                  <p data-testid="run-status-warnings-empty">Warnings: none</p>
-                )}
-              </div>
-            ) : null}
+            <RunStatusPanel runStatus={runStatus} warnings={selectedRunWarnings} />
           </section>
 
           <section className="panel" data-testid="runs-history-panel">
@@ -1915,7 +1820,7 @@ export default function App() {
               <div className="actions">
                 {runLogTaskrunPaths.map((path) => (
                   <button key={`taskrun-log-open-${path}`} type="button" onClick={() => void handleOpenArtifact(path)}>
-                    Open taskrun artifact: {path}
+                    Open runtime execution artifact: {path}
                   </button>
                 ))}
               </div>
@@ -1995,7 +1900,9 @@ export default function App() {
                   <div data-testid="run-diagram-content-panel">
                     <h3 data-testid="run-diagram-selected-path">{selectedArtifact || "Diagram Preview"}</h3>
                     {selectedArtifactIsMermaid ? (
-                      <MermaidPreview source={selectedArtifactContent} title={selectedArtifact || "diagram"} />
+                      <Suspense fallback={<p className="hint">Loading diagram renderer...</p>}>
+                        <MermaidPreview source={selectedArtifactContent} title={selectedArtifact || "diagram"} />
+                      </Suspense>
                     ) : (
                       <pre data-testid="run-diagram-content">
                         {selectedArtifactContent || "Select a `.mmd` diagram artifact to preview."}

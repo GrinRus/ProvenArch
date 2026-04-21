@@ -5,7 +5,7 @@ ACP — **AI-native** и **spec-first** проект.
 ## Start here
 1) Прочитайте `AGENTS.md`
 2) Прочитайте `README.md` и `docs/ARCHITECTURE.md`
-3) Относитесь к `schemas/taskresult.schema.json` и `docs/spec/*` как к контрактам
+3) Относитесь к `schemas/*` и `docs/spec/*` как к контрактам
 
 ## Local bootstrap
 - Требуемый стек: Go 1.20.x, Node 22.21.1, npm 10.x, Git

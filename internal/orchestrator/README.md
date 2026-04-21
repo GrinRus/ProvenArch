@@ -3,7 +3,7 @@
 Пакет реализует orchestration pipeline `init|refresh`:
 - sequencing шагов (Step 0..4 для `init`, Step 1..4 для `refresh`);
 - run control (single active run + debounce queue policy);
-- вызов runtime runner и обработку TaskResult;
+- вызов runtime runner, persisted runtime execution metadata и artifact-only step contracts;
 - materialization артефактов (`model/`, `reports/`, `proposals/`).
 
 Контракт и поведение синхронизируются с:

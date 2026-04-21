@@ -2,14 +2,23 @@ package orchestrator
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/reports"
+	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
+
+var requiredCanonicalLiveDocuments = []string{
+	"reports/as-is/overview.md",
+	"reports/coverage/summary.md",
+	"reports/coverage/open-questions.md",
+	"reports/findings/findings.md",
+}
 
 type runtimeStepQuality struct {
 	StepID           string   `json:"step_id"`
@@ -17,10 +26,9 @@ type runtimeStepQuality struct {
 	RuntimeName      string   `json:"runtime_name"`
 	RuntimeVersion   string   `json:"runtime_version,omitempty"`
 	RepoScopes       []string `json:"repo_scopes,omitempty"`
-	ChangesetOps     int      `json:"changeset_ops"`
-	EntityUpserts    int      `json:"entity_upserts"`
-	EdgeUpserts      int      `json:"edge_upserts"`
-	FindingsAdded    int      `json:"findings_added"`
+	SemanticEntities int      `json:"semantic_entities"`
+	SemanticEdges    int      `json:"semantic_edges"`
+	FindingsCount    int      `json:"findings_count"`
 	QuestionsCount   int      `json:"questions_count"`
 	CoverageObserved int      `json:"coverage_observed"`
 	CoverageMissing  int      `json:"coverage_missing"`
@@ -29,10 +37,9 @@ type runtimeStepQuality struct {
 
 type runQualityTotals struct {
 	Steps            int `json:"steps"`
-	ChangesetOps     int `json:"changeset_ops"`
-	EntityUpserts    int `json:"entity_upserts"`
-	EdgeUpserts      int `json:"edge_upserts"`
-	FindingsAdded    int `json:"findings_added"`
+	SemanticEntities int `json:"semantic_entities"`
+	SemanticEdges    int `json:"semantic_edges"`
+	FindingsCount    int `json:"findings_count"`
 	QuestionsCount   int `json:"questions_count"`
 	CoverageObserved int `json:"coverage_observed"`
 	CoverageMissing  int `json:"coverage_missing"`
@@ -100,18 +107,17 @@ func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode s
 
 	totals := runQualityTotals{Steps: len(steps)}
 	for _, step := range steps {
-		totals.ChangesetOps += step.ChangesetOps
-		totals.EntityUpserts += step.EntityUpserts
-		totals.EdgeUpserts += step.EdgeUpserts
-		totals.FindingsAdded += step.FindingsAdded
+		totals.SemanticEntities += step.SemanticEntities
+		totals.SemanticEdges += step.SemanticEdges
+		totals.FindingsCount += step.FindingsCount
 		totals.QuestionsCount += step.QuestionsCount
 		totals.CoverageObserved += step.CoverageObserved
 		totals.CoverageMissing += step.CoverageMissing
 		totals.WarningsCount += step.WarningsCount
 	}
-	totals.SignalScore = (totals.EntityUpserts * 2) +
-		(totals.EdgeUpserts * 2) +
-		(totals.FindingsAdded * 3) +
+	totals.SignalScore = (totals.SemanticEntities * 2) +
+		(totals.SemanticEdges * 2) +
+		(totals.FindingsCount * 3) +
 		totals.QuestionsCount +
 		totals.CoverageObserved +
 		totals.CoverageMissing
@@ -399,4 +405,40 @@ func normalizeRunFailureClassification(value runFailureClassification) runFailur
 		value.Source = "none"
 	}
 	return value
+}
+
+func classifyRunFailureSummary(stepID string, err error) runFailureClassification {
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		return runFailureClassification{
+			Class:      strings.TrimSpace(errClassFromMessage(err)),
+			StepID:     strings.TrimSpace(stepID),
+			ShortCause: strings.TrimSpace(err.Error()),
+			Source:     "orchestrator",
+		}
+	}
+
+	rawOutput := strings.TrimSpace(runnerErr.RawOutputRefs.Metadata)
+	if rawOutput == "" {
+		rawOutput = strings.TrimSpace(runnerErr.RawOutputRefs.Stdout)
+	}
+	if rawOutput == "" {
+		rawOutput = strings.TrimSpace(runnerErr.RawOutputRefs.Stderr)
+	}
+
+	return runFailureClassification{
+		Class:      strings.TrimSpace(string(runnerErr.Code)),
+		Provider:   strings.TrimSpace(string(runnerErr.Provider)),
+		StepID:     strings.TrimSpace(stepID),
+		RawOutput:  rawOutput,
+		ShortCause: strings.TrimSpace(runnerErr.Error()),
+		Source:     "runtime",
+	}
+}
+
+func errClassFromMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	return "failed"
 }

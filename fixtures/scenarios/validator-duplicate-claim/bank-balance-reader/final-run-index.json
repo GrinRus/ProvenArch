@@ -49,7 +49,7 @@
       ]
     }
   ],
-  "compatibility": {
+  "semantic": {
     "coverage": {
       "observed": [],
       "missing": [],

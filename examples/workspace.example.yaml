@@ -34,3 +34,9 @@ runtime:
       failure_policy: best_effort
       shard_discovery:
         mode: heuristics
+    steps:
+      # Optional step-scoped provider overrides.
+      step0_constitution:
+        provider: claude-code
+      step2_as_is:
+        provider: qwen-code

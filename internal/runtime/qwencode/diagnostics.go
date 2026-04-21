@@ -1,0 +1,189 @@
+package qwencode
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/GrinRus/ProvenArch/internal/contracts"
+	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtime/runnerdiag"
+)
+
+func (d collectStallDiagnostic) fields(task acpruntime.Task) map[string]any {
+	fields := map[string]any{
+		"provider":            string(acpruntime.ProviderQwenCode),
+		"shard_id":            strings.TrimSpace(task.ShardID),
+		"stall_phase":         strings.TrimSpace(string(d.StallPhase)),
+		"manifest_state":      strings.TrimSpace(d.ManifestState),
+		"authored_file_count": d.AuthoredFileCount,
+		"action":              "terminate_and_retry",
+	}
+	if !d.LastPipeActivity.IsZero() {
+		fields["last_pipe_activity_at"] = d.LastPipeActivity.UTC().Format(time.RFC3339)
+	}
+	if !d.LastWriteRootMutation.IsZero() {
+		fields["last_write_root_mutation_at"] = d.LastWriteRootMutation.UTC().Format(time.RFC3339)
+	}
+	return fields
+}
+
+func emitDiagnostic(task acpruntime.Task, message string, fields map[string]any) {
+	if task.OnDiagnostic == nil {
+		return
+	}
+	task.OnDiagnostic(acpruntime.DiagnosticEvent{
+		Message: strings.TrimSpace(message),
+		Fields:  fields,
+	})
+}
+
+func classifyRunFailure(task acpruntime.Task, result acpruntime.Result, err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		message, rawOutputRefs := buildFailureMessage(task, "exec", err, result)
+		return acpruntime.WrapRunnerErrorWithDiagnostics(
+			acpruntime.ProviderQwenCode,
+			acpruntime.ErrorCodeRuntimeTimeout,
+			message,
+			result.Stdout,
+			result.Stderr,
+			rawOutputRefs,
+			err,
+		)
+	}
+	if errors.Is(err, context.Canceled) {
+		message, rawOutputRefs := buildFailureMessage(task, "exec", err, result)
+		return acpruntime.WrapRunnerErrorWithDiagnostics(
+			acpruntime.ProviderQwenCode,
+			acpruntime.ErrorCodeRunCanceled,
+			message,
+			result.Stdout,
+			result.Stderr,
+			rawOutputRefs,
+			err,
+		)
+	}
+	var stalled collectStallError
+	if errors.As(err, &stalled) {
+		emitDiagnostic(task, "retry scheduled", stalled.Diagnostic.fields(task))
+		return wrapArtifactContractFailure(task, "stall", result, "runtime stalled after artifact writes", err)
+	}
+	if isProviderUnavailableText(result.Stdout, result.Stderr, err) {
+		message, rawOutputRefs := buildFailureMessage(task, "exec", err, result)
+		return acpruntime.WrapRunnerErrorWithDiagnostics(
+			acpruntime.ProviderQwenCode,
+			acpruntime.ErrorCodeRunnerUnavailable,
+			message,
+			result.Stdout,
+			result.Stderr,
+			rawOutputRefs,
+			err,
+		)
+	}
+	message, rawOutputRefs := buildFailureMessage(task, "exec", err, result)
+	return acpruntime.WrapRunnerErrorWithDiagnostics(
+		acpruntime.ProviderQwenCode,
+		acpruntime.ErrorCodeRunnerUnavailable,
+		message,
+		result.Stdout,
+		result.Stderr,
+		rawOutputRefs,
+		err,
+	)
+}
+
+func wrapArtifactContractFailure(task acpruntime.Task, stage string, result acpruntime.Result, message string, cause error) error {
+	failure := cause
+	trimmed := strings.TrimSpace(message)
+	switch {
+	case trimmed != "" && cause != nil:
+		failure = fmt.Errorf("%s: %w", trimmed, cause)
+	case trimmed != "":
+		failure = errors.New(trimmed)
+	case failure == nil:
+		failure = errors.New("invalid runtime artifacts")
+	}
+	failureMessage, rawOutputRefs := buildFailureMessage(task, stage, failure, result)
+	return acpruntime.WrapRunnerErrorWithDiagnostics(
+		acpruntime.ProviderQwenCode,
+		acpruntime.ErrorCodeRuntimeContract,
+		fmt.Sprintf("headless provider %q produced invalid runtime artifacts: %s", acpruntime.ProviderQwenCode, failureMessage),
+		result.Stdout,
+		result.Stderr,
+		rawOutputRefs,
+		cause,
+	)
+}
+
+func buildFailureMessage(task acpruntime.Task, stage string, failure error, result acpruntime.Result) (string, contracts.RuntimeOutputRefs) {
+	base := "unknown failure"
+	if failure != nil {
+		base = strings.TrimSpace(failure.Error())
+	}
+	if base == "" {
+		base = "unknown failure"
+	}
+	stage = strings.TrimSpace(stage)
+	if stage == "" {
+		stage = "unknown"
+	}
+	artifacts, err := runnerdiag.WriteFailureArtifacts(task, acpruntime.ProviderQwenCode, result.Stdout, result.Stderr)
+	if err != nil {
+		return fmt.Sprintf("stage=%s %s (raw_output_persist_failed=%v)", stage, base, err), contracts.RuntimeOutputRefs{}
+	}
+	return fmt.Sprintf(
+			"stage=%s %s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
+			stage,
+			base,
+			artifacts.RelativeMetadataPath,
+			artifacts.Stdout.Bytes,
+			artifacts.Stdout.SHA256,
+			artifacts.Stderr.Bytes,
+			artifacts.Stderr.SHA256,
+		), contracts.RuntimeOutputRefs{
+			Stdout:   artifacts.Stdout.RelativePath,
+			Stderr:   artifacts.Stderr.RelativePath,
+			Metadata: artifacts.RelativeMetadataPath,
+		}
+}
+
+func isProviderUnavailableText(stdout string, stderr string, err error) bool {
+	text := strings.ToLower(strings.Join([]string{stdout, stderr, errorText(err)}, "\n"))
+	markers := []string{
+		"permission_error",
+		"permission error",
+		"usage limit",
+		"quota exceeded",
+		"quota",
+		"insufficient credits",
+		"credit balance",
+		"rate limit",
+		"rate_limit",
+		"status code: 403",
+		"status code: 429",
+		"api error: 403",
+		"api error: 429",
+		"ssl",
+		"tls",
+		"certificate",
+		"network",
+		"socket",
+		"packet length too long",
+		"http2",
+	}
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}

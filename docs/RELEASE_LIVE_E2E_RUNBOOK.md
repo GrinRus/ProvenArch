@@ -7,13 +7,6 @@ Canonical source of truth для live profile taxonomy:
 - `examples/e2e-profile-catalog.yaml`
 - runnable slice-файлы `examples/e2e-matrix.regres-*.yaml` и `examples/e2e-matrix.release-*.yaml`
 
-Legacy compatibility matrices:
-- `examples/e2e-matrix.regression-wave1.yaml`
-- `examples/e2e-matrix.release-wave1.yaml`
-- `examples/e2e-matrix.release-wave2.yaml`
-
-Они остаются рабочими для ad-hoc diagnostics, но больше не считаются canonical profile taxonomy.
-
 ## 0) Canonical profile catalog
 
 Пять high-level профилей задаются как composite presets поверх одного или нескольких прямых вызовов `scripts/full-run-batch-matrix.sh`.
@@ -68,7 +61,7 @@ Canonical profile runs нужно выполнять из clean committed tree �
 
 Практическое правило:
 - если в основном worktree есть незакоммиченные изменения в harness/runtime/docs, сначала вынести canonical прогон в отдельный clean worktree;
-- если используется отдельный clean worktree, batch precheck сам bootstrap-ит UI deps перед `make test`, но trusted host всё равно должен успешно проходить `npm ci --prefix ui` и `npm exec --prefix ui playwright install chromium`; missing `vitest`/UI deps классифицируется как host-readiness blocker, а не runtime regression;
+- если используется отдельный clean worktree, заранее установить локальные UI deps в этом worktree: минимум `npm ci --prefix ui`; для frontend live surface дополнительно `npm exec --prefix ui playwright install chromium`;
 - не использовать `BATCH_SKIP_PRECHECK=1` как способ обойти локальное расхождение между committed contract и текущими незакоммиченными правками;
 - diagnostic прогон с `BATCH_SKIP_PRECHECK=1` допустим только как triage-only evidence и не считается canonical acceptance run.
 
@@ -201,11 +194,6 @@ git -C /real/local/path/posthog checkout --detach 14d29a548d63665d60b506cf13bd5c
 - `examples/e2e-matrix.release-long.yaml`
 - `examples/e2e-matrix.release-full.ftgo-sentry.yaml`
 - `examples/repos/*.repos.yaml`
-
-Legacy compatibility slices:
-- `examples/e2e-matrix.regression-wave1.yaml`
-- `examples/e2e-matrix.release-wave1.yaml`
-- `examples/e2e-matrix.release-wave2.yaml`
 
 ### 3.1) Canonical repo-set catalog
 
@@ -446,7 +434,6 @@ Release guard rules:
 - `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/*`
 - `backend-run-classifications.tsv`
 - `preflight.json`
-- `reports/taskruns/raw/*-failure.json`
 - `driver.log`, `full-run.log`, `session-summary.md`
 
 ## 6) Flow проверки новой функциональности
@@ -454,9 +441,9 @@ Release guard rules:
 ### 6.1 Runtime sharding
 
 Проверяем:
-- shard artifacts для `init`/`refresh`: `shard-plan`, `shard-summary`, per-shard taskruns;
+- shard artifacts для `init`/`refresh`: `shard-plan`, `shard-summary`, per-shard `runtime-execution.json`;
 - shard-summary status progression: `pending -> checkpointed -> succeeded` и `failed` path при runtime/apply ошибке;
-- taskrun metadata: `meta.shard_id`, `meta.repo_scopes`, `meta.path_scopes`.
+- runtime execution metadata: `shard_id`, `repo_scopes`, `path_scopes`.
 
 Blocking signals:
 - `runtime:shard-artifacts`
@@ -511,8 +498,7 @@ Blocking signals:
 ### 6.6 Runtime parsing/diagnostics stability
 
 Zero tolerance:
-- `runtime_artifact_contract`
-- `runtime_parse`
+- `runtime_contract_failed`
 - `runner_unavailable`
 - `summary_missing`
 - `infra_signal_terminated`
@@ -522,16 +508,20 @@ Zero tolerance:
 
 Дополнительно:
 - если run завершился `run_partial_failed` и `reports/taskruns/<run_id>-quality.json.evidence_state.report_mode=incomplete`, generated markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) читать только как triage-only artifacts; banner/triage-only wording обязаны явно указывать на incomplete analysis, а не имитировать пустой успешный verdict.
-- для `init.step1.collect` и `refresh.step1.collect` provider обязан сделать не более одной artifact-repair попытки после schema-valid `TaskResult`, если `write_root/shard-pack-manifest.json` выглядит skeletal/generic-only; при неудачном repair исходный `write_root` восстанавливается.
-- schema-invalid `TaskResult` (например, недопустимый `changeset[].op`) получает отдельный direct-JSON retry с жёстким whitelist допустимых операций; artifact-repair не должен маскировать schema-retry failure class.
-- если после этой единственной artifact-repair попытки `shard-pack-manifest.json` всё ещё missing/invalid/skeletal, collect step обязан завершиться runtime contract failure (`runner_parse_failed` / `runtime_artifact_contract`), а не продолжать прогон как nominal success.
-- collect contract требует полного `compatibility` block и global uniqueness для `citations[].claim_ids`; staged duplicate claim ids считаются blocking contract drift, если validator-scope repair не смог детерминированно снять коллизию на index/reference surface.
+- для `init.step1.collect` и `refresh.step1.collect` provider обязан сделать не более одной artifact-repair попытки, если `write_root/shard-pack-manifest.json` missing/invalid/skeletal; при неудачном repair исходный `write_root` восстанавливается.
+- `shard-pack-manifest.json.documents[].path` должен быть строго relative к `artifact_root`; workspace-level staging prefixes (`reports/...`, `charter/...`, `proposals/...`) и duplicated `artifact_root` prefix считаются contract-invalid collect drift и не должны доходить до `step2`.
+- `init.step0.constitution`, `init|refresh.step2.asis_docs` и `init|refresh.step4.proposals` считаются successful только если runtime draft manifest валиден и все referenced draft files реально существуют под `draft_final_root`.
+- `qwen-code` для `init.step1.collect` / `refresh.step1.collect` дополнительно имеет internal stall watchdog в двух фазах:
+  - `pre_artifact`: если provider жив, но до первого authored artifact одновременно нет stdout/stderr activity и нет мутаций `write_root`, runtime завершает process принудительно и делает forced fresh retry до step timeout;
+  - `post_artifact`: после появления `shard-pack-manifest.json` + authored docs runtime отслеживает реальную pipe activity и мутации `write_root`; если оба сигнала молчат один internal stall window, provider process завершается принудительно, runtime пишет diagnostic events (`runtime task stalled before artifacts` / `runtime task stalled after artifacts` / `retry scheduled` / `retry completed`) и делает forced `RETRY RECOVERY MODE` до step timeout.
+- если после этой единственной artifact-repair попытки `shard-pack-manifest.json` всё ещё missing/invalid/skeletal, collect step обязан завершиться runtime contract failure (`runtime_contract_failed`), а не продолжать прогон как nominal success.
+- transcript outputs с provider transport/API errors (например `[API Error: ... SSL ...]`) считаются `runner_unavailable`, а не `runtime_contract_failed`; raw stdout/stderr artifacts в `reports/taskruns/raw/*` обязательны.
+- collect contract требует полного `semantic` block и global uniqueness для `citations[].claim_ids`; staged duplicate claim ids считаются blocking contract drift, если validator-scope repair не смог детерминированно снять коллизию на index/reference surface.
 - `reports/taskruns/<run_id>-quality.json.run_warnings` с префиксом `artifact_quality:` считаются canonical live gate blocker даже при schema-valid `validator-verdict.json = PASS`; типовой пример — refresh final set с несколькими canonical docs и единственным generic `cite.runtime-summary`.
 - acceptable reuse-pattern допускается только если frozen refresh artifacts сохраняют хотя бы один rich collect shard с repo-specific citations; reuse-only manifests без такого shard'а считаются low-signal collapse.
 - `profile_matrix_<matrix-id>` и `quality_report_<batch-id>` агрегируют только реально выбранные `selected_providers` и `selected_run_indexes`; qwen-only `run1` regression run не должен материализовать synthetic `2x5` deficits.
-- `preflight.json.provider_readiness.*` фиксирует отдельный provider-readiness слой; явный quota/permission signal до batch execution считать operational blocker (`runner_unavailable`), а не product regression.
-- internal shard-plan/shard-summary taskrun JSON обязаны содержать non-empty `meta.runtime.name` / `meta.runtime.version`; пустой runtime meta считается contract drift, а не допустимым partial state.
-- live triage от `2026-04-17` зафиксировал один надёжный blocker для canonical `regres fast`: `single-git_url` на `qwen-code` завершился `runner_parse_failed` после event-stream chatter и partial TaskResult drafting; последующий `multi-path`/Open edX run был прерван вручную и не считается самостоятельным продуктовым failure signal.
+- internal shard-plan/shard-summary JSON обязаны содержать non-empty `meta.runtime.name` / `meta.runtime.version`; пустой runtime meta считается contract drift, а не допустимым partial state.
+- live triage от `2026-04-17` зафиксировал один надёжный blocker для canonical `regres fast`: `single-git_url` на `qwen-code` завершился runtime contract failure после event-stream chatter и неполного artifact-only collect recovery; последующий `multi-path`/Open edX run был прерван вручную и не считается самостоятельным продуктовым failure signal.
 - subsequent clean rerun от `2026-04-17` подтвердил, что после фикса qwen prompt/retry + `cwd/chat-recording` этот parse blocker снимается; оставшийся canonical blocker сместился в legacy `pipeline_timeout=2400s`, поэтому canonical matrix slices получили checked-in `timeout_profile` с matrix-native budget.
 
 ### 6.7 Triage rule for runtime timeout/infra signals
@@ -539,20 +529,13 @@ Zero tolerance:
 Если в любом `profile+sweep` появляются `runtime_timeout` или `infra_*`:
 - считать это blocking runtime incident для релизного verdict;
 - сначала проверить `driver.log` (matrix + batch), затем `session-summary.md` и `full-run.log` в `runs/<batch-id>/<provider>/runN/`, затем `arch-workspace/reports/taskruns/logs/*.ndjson` и `reports/taskruns/raw/*` для первичного runtime signal;
-- в `reports/taskruns/raw/*` проверять не только stdout/stderr parse diagnostics, но и effective prompt artifacts (`*-prompt.txt`, `*-task.json`, `*-prompt-meta.json`) для каждого headless attempt/retry;
-- `reports/taskruns/raw/*-failure.json` считать canonical source-of-truth для `failure_class`/`failure_subclass`/`parse_stage`; string scanning логов и prompt text оставлять только как legacy fallback;
 - отделить induced failures (например, debug timeout override) от реальной runtime/provider деградации;
-- если raw/taskrun logs показывают `runner_parse_failed` (`runtime_artifact_contract`/`runtime_parse`) или `runner_unavailable`, считать их primary failure class даже если `session-summary.md` дополнительно фиксирует `infra_incomplete_cycle`;
+- если raw/taskrun logs показывают `runtime_contract_failed` или `runner_unavailable`, считать их primary failure class даже если `session-summary.md` дополнительно фиксирует `infra_incomplete_cycle`;
+- terminal `session-summary.md` вместе с `run-status.env state=process_failed summary_written=yes` считать завершившимся deterministic pipeline failure; такой run не должен переопределяться в `infra_incomplete_cycle` только из-за mismatch `completed_*`, неполного `run-results.tsv` или classifier fallback.
+- inner `full-run-ai-advent.sh` обязан поддерживать running-heartbeat в `run-status.env` (`updated_at`, `last_pipeline_stage`, `last_runtime_provider`, `last_progress_at`) и сам писать terminal sentinel при `completed|process_failed|signal_terminated`.
+- если `session-summary.md` отсутствует, но batch shell успел дойти до classifier или завершился через `EXIT` trap, trusted harness обязан materialize-ить `infra_incomplete_cycle` или `infra_signal_terminated` через per-run `run-status.env`; отсутствие summary больше не считается допустимым silent gap.
+- `full-run-batch-matrix.sh` обязан держать durable `profile-status/*.json` и переводить lingering `running` в terminal `failed` на `EXIT`; reconstruction в `e2e_batch_report.py` использует `run-status.env`, `profile-status/*.json` и `run-history.json` как равноправные источники истины для partial roots.
 - для release decision использовать только прогон без diagnostic timeout overrides.
-
-Required canonical live surface:
-- validated final set обязан содержать:
-  - `reports/as-is/overview.md`
-  - `reports/coverage/summary.md`
-  - `reports/coverage/open-questions.md`
-  - `reports/findings/findings.md`
-- если shard-authored docs материализовали только часть `reports/as-is/*` или `reports/coverage/*`, assembler детерминированно добавляет недостающие aggregate docs до validator stage
-- `validator PASS` без этого canonical live surface больше не считается допустимым состоянием
 
 ### 6.8 Additional Non-Release Checks
 
@@ -609,7 +592,7 @@ ACP_APPLY_TIMEOUTS_VIA_API=1 \
 Release `PASS` только если одновременно:
 1. Во всех `profile+sweep` строках `strict_status=passed`.
 2. Для каждого `profile+sweep`: `backend_total_runs=2`, `backend_hard_pass=2`.
-3. `runtime_artifact_contract/runtime_parse/runtime_stalled/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing/precheck_failed = 0`.
+3. `runtime_contract_failed/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing/precheck_failed = 0`.
 4. `semantic_hard_fail=0`, `off_topic_hits=0`.
 5. `artifact_source` только `snapshot` (без `workspace-fallback`).
 6. Нет `analysis:evidence-scope` и `analysis:cross-repo-missing`.
@@ -636,10 +619,6 @@ Release `PASS` только если одновременно:
 
 3. `runtime_timeout` вместе с `runner_unavailable` в том же run
 - Политика triage: primary incident class = `runtime_timeout` при явном timeout signal в summary/classifier; `runner_unavailable` остаётся secondary evidence.
-
-4. `runner_stalled`/`runtime_stalled` в `step3.findings`
-- Причина: long-silence зависание provider-а на findings task; раннер завершает процесс по idle watchdog и делает один strict retry.
-- Действие: смотреть `reports/taskruns/raw/*-prompt*.{txt,json}` и `raw_output=*` ссылки в quality report; если повторный stall сохранился, классифицировать как backend blocker.
 
 Минимальный формат публикации агентом:
 

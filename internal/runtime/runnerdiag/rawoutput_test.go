@@ -11,7 +11,7 @@ import (
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
 
-func TestWriteParseFailureArtifactsWritesFilesAndMetadata(t *testing.T) {
+func TestWriteFailureArtifactsWritesFilesAndMetadata(t *testing.T) {
 	t.Parallel()
 
 	workspace := t.TempDir()
@@ -24,7 +24,7 @@ func TestWriteParseFailureArtifactsWritesFilesAndMetadata(t *testing.T) {
 		StartedAtUTC: time.Date(2026, 4, 11, 10, 0, 0, 0, time.UTC),
 	}
 
-	artifacts, err := WriteParseFailureArtifacts(task, acpruntime.ProviderQwenCode, "{\"bad\":true}", "stderr-text")
+	artifacts, err := WriteFailureArtifacts(task, acpruntime.ProviderQwenCode, "{\"bad\":true}", "stderr-text")
 	if err != nil {
 		t.Fatalf("write parse-failure artifacts: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestWriteParseFailureArtifactsWritesFilesAndMetadata(t *testing.T) {
 	}
 }
 
-func TestWriteParseFailureArtifactsTruncatesLargeOutput(t *testing.T) {
+func TestWriteFailureArtifactsTruncatesLargeOutput(t *testing.T) {
 	t.Parallel()
 
 	workspace := t.TempDir()
@@ -72,7 +72,7 @@ func TestWriteParseFailureArtifactsTruncatesLargeOutput(t *testing.T) {
 	}
 
 	largeStdout := strings.Repeat("x", maxStoredOutputBytes+2048)
-	artifacts, err := WriteParseFailureArtifacts(task, acpruntime.ProviderClaudeCode, largeStdout, "")
+	artifacts, err := WriteFailureArtifacts(task, acpruntime.ProviderClaudeCode, largeStdout, "")
 	if err != nil {
 		t.Fatalf("write parse-failure artifacts: %v", err)
 	}
@@ -95,12 +95,12 @@ func TestWriteParseFailureArtifactsTruncatesLargeOutput(t *testing.T) {
 	}
 }
 
-func TestWritePromptArtifactsWritesPromptTaskAndMetadata(t *testing.T) {
+func TestWriteFailureArtifactsMetadataIncludesTaskScopes(t *testing.T) {
 	t.Parallel()
 
 	workspace := t.TempDir()
 	task := acpruntime.Task{
-		TaskID:       "task-prompt",
+		TaskID:       "task-scopes",
 		RunID:        "run-3",
 		StepID:       "refresh.step1.collect",
 		Workspace:    workspace,
@@ -109,26 +109,12 @@ func TestWritePromptArtifactsWritesPromptTaskAndMetadata(t *testing.T) {
 		StartedAtUTC: time.Date(2026, 4, 11, 10, 10, 0, 0, time.UTC),
 	}
 
-	artifacts, err := WritePromptArtifacts(task, acpruntime.ProviderQwenCode, "prompt body", []byte(`{"task":"payload"}`), PromptArtifactsMetadata{
-		Attempt:            "parse-retry",
-		IncludeDirectories: []string{workspace, "/tmp/repo-a"},
-		PromptPack: PromptPackMetadata{
-			Name:         "collect-context",
-			RelativePath: "skills/prompt-packs/collect-context.md",
-			Source:       "workspace",
-		},
-	})
+	artifacts, err := WriteFailureArtifacts(task, acpruntime.ProviderQwenCode, "stdout text", "stderr text")
 	if err != nil {
-		t.Fatalf("write prompt artifacts: %v", err)
+		t.Fatalf("write failure artifacts: %v", err)
 	}
 	if _, err := os.Stat(artifacts.MetadataPath); err != nil {
-		t.Fatalf("stat prompt metadata file: %v", err)
-	}
-	if _, err := os.Stat(artifacts.Prompt.Path); err != nil {
-		t.Fatalf("stat prompt file: %v", err)
-	}
-	if _, err := os.Stat(artifacts.TaskPayload.Path); err != nil {
-		t.Fatalf("stat task payload file: %v", err)
+		t.Fatalf("stat metadata file: %v", err)
 	}
 
 	rawMeta, err := os.ReadFile(artifacts.MetadataPath)
@@ -139,72 +125,16 @@ func TestWritePromptArtifactsWritesPromptTaskAndMetadata(t *testing.T) {
 	if err := json.Unmarshal(rawMeta, &meta); err != nil {
 		t.Fatalf("parse metadata json: %v", err)
 	}
-	if got := strings.TrimSpace(meta["attempt"].(string)); got != "parse-retry" {
-		t.Fatalf("unexpected attempt %q", got)
-	}
-	promptPack, ok := meta["prompt_pack"].(map[string]any)
+	taskMeta, ok := meta["task"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected prompt_pack block in metadata")
+		t.Fatalf("expected task block in metadata")
 	}
-	if got := strings.TrimSpace(promptPack["relative_path"].(string)); got != "skills/prompt-packs/collect-context.md" {
-		t.Fatalf("unexpected prompt pack relative path %q", got)
+	repoScopes, ok := taskMeta["repo_scopes"].([]any)
+	if !ok || len(repoScopes) != 1 || strings.TrimSpace(repoScopes[0].(string)) != "repo-a" {
+		t.Fatalf("unexpected repo_scopes payload %#v", taskMeta["repo_scopes"])
 	}
-}
-
-func TestWriteRuntimeFailureArtifactWritesStructuredFailureFile(t *testing.T) {
-	t.Parallel()
-
-	workspace := t.TempDir()
-	task := acpruntime.Task{
-		TaskID:       "task-failure",
-		RunID:        "run-4",
-		StepID:       "refresh.step1.collect",
-		Workspace:    workspace,
-		RepoScopes:   []string{"repo-a", "repo-b"},
-		PathScopes:   []string{"services/api"},
-		StartedAtUTC: time.Date(2026, 4, 21, 8, 0, 0, 0, time.UTC),
-	}
-
-	artifact, err := WriteRuntimeFailureArtifact(task, acpruntime.ProviderQwenCode, FailureArtifactInput{
-		ErrorCode:       acpruntime.ErrorCodeRunnerParseFailed,
-		FailureClass:    "runtime_artifact_contract",
-		FailureSubclass: "manifest_invalid",
-		ParseStage:      "artifact_repair.schema",
-		ShortCause:      "collect artifacts remained invalid after one repair attempt",
-	}, "stdout text", "stderr text")
-	if err != nil {
-		t.Fatalf("write runtime failure artifact: %v", err)
-	}
-	if artifact.RelativePath == "" || !strings.HasPrefix(artifact.RelativePath, "reports/taskruns/raw/") {
-		t.Fatalf("unexpected failure artifact path: %q", artifact.RelativePath)
-	}
-	if _, err := os.Stat(artifact.Path); err != nil {
-		t.Fatalf("stat runtime failure artifact: %v", err)
-	}
-
-	rawFailure, err := os.ReadFile(artifact.Path)
-	if err != nil {
-		t.Fatalf("read runtime failure artifact: %v", err)
-	}
-	payload := map[string]any{}
-	if err := json.Unmarshal(rawFailure, &payload); err != nil {
-		t.Fatalf("parse runtime failure artifact: %v", err)
-	}
-	if got := strings.TrimSpace(payload["failure_class"].(string)); got != "runtime_artifact_contract" {
-		t.Fatalf("unexpected failure class %q", got)
-	}
-	if got := strings.TrimSpace(payload["failure_subclass"].(string)); got != "manifest_invalid" {
-		t.Fatalf("unexpected failure subclass %q", got)
-	}
-	if got := strings.TrimSpace(payload["parse_stage"].(string)); got != "artifact_repair.schema" {
-		t.Fatalf("unexpected parse stage %q", got)
-	}
-	rawOutput, ok := payload["raw_output"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected raw_output block")
-	}
-	relativeMeta := strings.TrimSpace(rawOutput["relative_metadata_path"].(string))
-	if relativeMeta == "" || !strings.HasPrefix(relativeMeta, "reports/taskruns/raw/") {
-		t.Fatalf("unexpected raw_output relative metadata path %q", relativeMeta)
+	pathScopes, ok := taskMeta["path_scopes"].([]any)
+	if !ok || len(pathScopes) != 1 || strings.TrimSpace(pathScopes[0].(string)) != "services" {
+		t.Fatalf("unexpected path_scopes payload %#v", taskMeta["path_scopes"])
 	}
 }

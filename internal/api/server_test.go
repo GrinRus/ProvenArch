@@ -1481,6 +1481,183 @@ func TestRuntimeExecutionPutRejectsInvalidValues(t *testing.T) {
 	}
 }
 
+func TestRuntimeProfileGetIncludesStepProviders(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "repos", "payments-service")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("create repo path: %v", err)
+	}
+	manifest := `version: 1
+repos:
+  - name: payments-service
+    path: ` + repoPath + `
+runtime:
+  profile:
+    execution:
+      strategy: parallel
+      max_parallel_tasks: 2
+    steps:
+      step2_as_is:
+        provider: qwen-code
+`
+	server := newTestServerFromManifest(t, manifest)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Get(httpServer.URL + "/api/runtime/profile")
+	if err != nil {
+		t.Fatalf("GET /api/runtime/profile: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", response.StatusCode)
+	}
+
+	var payload struct {
+		OK            bool `json:"ok"`
+		StepProviders struct {
+			Persisted map[string]string `json:"persisted"`
+			Effective map[string]string `json:"effective"`
+			Source    map[string]string `json:"source"`
+		} `json:"step_providers"`
+		Execution struct {
+			Effective map[string]any `json:"effective"`
+		} `json:"execution"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode runtime profile payload: %v", err)
+	}
+	if !payload.OK {
+		t.Fatalf("expected ok=true")
+	}
+	if payload.StepProviders.Persisted["step2_as_is"] != "qwen-code" {
+		t.Fatalf("expected persisted step2_as_is=qwen-code, got %+v", payload.StepProviders.Persisted)
+	}
+	if payload.StepProviders.Effective["step2_as_is"] != "qwen-code" {
+		t.Fatalf("expected effective step2_as_is=qwen-code, got %+v", payload.StepProviders.Effective)
+	}
+	if payload.StepProviders.Effective["step1_collect"] != "claude-code" {
+		t.Fatalf("expected default effective step1_collect=claude-code, got %+v", payload.StepProviders.Effective)
+	}
+	if payload.StepProviders.Source["step2_as_is"] != "workspace" {
+		t.Fatalf("expected workspace source for step2_as_is, got %+v", payload.StepProviders.Source)
+	}
+	effectiveSteps, ok := payload.Execution.Effective["steps"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected execution.effective.steps map, got %+v", payload.Execution.Effective)
+	}
+	if effectiveSteps["step2_as_is"] != "qwen-code" {
+		t.Fatalf("expected execution.effective.steps.step2_as_is=qwen-code, got %+v", effectiveSteps)
+	}
+}
+
+func TestRuntimeExecutionPutSupportsStepProviderUpdate(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	requestBody := `{"execution":{"strategy":"parallel","steps":{"step2_as_is":"qwen-code","step4_proposals":"claude-code"}}}`
+	request, err := http.NewRequest(http.MethodPut, httpServer.URL+"/api/runtime/execution", strings.NewReader(requestBody))
+	if err != nil {
+		t.Fatalf("create PUT /api/runtime/execution request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("PUT /api/runtime/execution: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", response.StatusCode)
+	}
+
+	manifestResp, err := http.Get(httpServer.URL + "/api/workspace/manifest")
+	if err != nil {
+		t.Fatalf("GET /api/workspace/manifest: %v", err)
+	}
+	defer manifestResp.Body.Close()
+	var manifestPayload struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(manifestResp.Body).Decode(&manifestPayload); err != nil {
+		t.Fatalf("decode manifest payload: %v", err)
+	}
+	if !strings.Contains(manifestPayload.Content, "steps:") || !strings.Contains(manifestPayload.Content, "step2_as_is:") {
+		t.Fatalf("expected runtime.profile.steps in manifest content, got:\n%s", manifestPayload.Content)
+	}
+	if !strings.Contains(manifestPayload.Content, "provider: qwen-code") {
+		t.Fatalf("expected qwen step provider in manifest content, got:\n%s", manifestPayload.Content)
+	}
+}
+
+func TestRunStatusIncludesEffectiveStepProviders(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "repos", "payments-service")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("create repo path: %v", err)
+	}
+	manifest := `version: 1
+repos:
+  - name: payments-service
+    path: ` + repoPath + `
+runtime:
+  profile:
+    steps:
+      step2_as_is:
+        provider: qwen-code
+`
+	server := newTestServerFromManifest(t, manifest)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Post(httpServer.URL+"/api/pipeline/init", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/init: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", response.StatusCode)
+	}
+	var started struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&started); err != nil {
+		t.Fatalf("decode start payload: %v", err)
+	}
+	if started.RunID == "" {
+		t.Fatalf("expected run id")
+	}
+
+	runStatus := waitForRunTerminalStatus(t, httpServer.URL, started.RunID, 8*time.Second)
+	if runStatus.Status != string(orchestrator.RunStatusSucceeded) {
+		t.Fatalf("expected succeeded status, got %q", runStatus.Status)
+	}
+
+	detailResp, err := http.Get(httpServer.URL + "/api/pipeline/runs/" + started.RunID)
+	if err != nil {
+		t.Fatalf("GET run detail: %v", err)
+	}
+	defer detailResp.Body.Close()
+	var detail struct {
+		StepProviders map[string]string `json:"step_providers"`
+	}
+	if err := json.NewDecoder(detailResp.Body).Decode(&detail); err != nil {
+		t.Fatalf("decode run detail payload: %v", err)
+	}
+	if detail.StepProviders["step2_as_is"] != "qwen-code" {
+		t.Fatalf("expected run detail step2_as_is=qwen-code, got %+v", detail.StepProviders)
+	}
+	if detail.StepProviders["step1_collect"] != "claude-code" {
+		t.Fatalf("expected default step1_collect=claude-code, got %+v", detail.StepProviders)
+	}
+}
+
 func TestPipelineRunReflectsSequentialVsParallelExecutionProfileInLogsAndShardArtifacts(t *testing.T) {
 	t.Parallel()
 
@@ -1846,7 +2023,7 @@ func TestPipelineStartRejectsCreateProposalBranchInThisSlice(t *testing.T) {
 	}
 }
 
-func TestPipelineStartReturnsRunnerUnavailableEnvelope(t *testing.T) {
+func TestPipelineStartAcceptsAsyncRunAndReportsRunnerUnavailableInRunStatus(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -1877,24 +2054,26 @@ repos:
 		t.Fatalf("POST /api/pipeline/init runner unavailable: %v", err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("expected status 503, got %d", response.StatusCode)
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", response.StatusCode)
 	}
 
 	var payload struct {
-		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
+		RunID string `json:"run_id"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode error payload: %v", err)
+		t.Fatalf("decode start payload: %v", err)
 	}
-	if payload.Error.Code != "runner_unavailable" {
-		t.Fatalf("expected runner_unavailable code, got %q", payload.Error.Code)
+	if payload.RunID == "" {
+		t.Fatalf("expected non-empty run id")
 	}
-	if payload.Error.Message == "" {
-		t.Fatalf("expected non-empty runner_unavailable message")
+
+	runStatus := waitForRunTerminalStatus(t, httpServer.URL, payload.RunID, 8*time.Second)
+	if runStatus.Status != string(orchestrator.RunStatusFailed) {
+		t.Fatalf("expected failed run status, got %q", runStatus.Status)
+	}
+	if runStatus.ErrorCode != "runner_unavailable" {
+		t.Fatalf("expected runner_unavailable, got %q", runStatus.ErrorCode)
 	}
 }
 
@@ -1922,7 +2101,7 @@ repos:
 		bytes.NewBufferString(`{"trigger":"ui"}`),
 	)
 	if err != nil {
-		t.Fatalf("POST /api/pipeline/init parse failure runner: %v", err)
+		t.Fatalf("POST /api/pipeline/init contract failure runner: %v", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusAccepted {
@@ -1943,12 +2122,12 @@ repos:
 	if runStatus.Status != string(orchestrator.RunStatusFailed) {
 		t.Fatalf("expected failed run status, got %q", runStatus.Status)
 	}
-	if runStatus.ErrorCode != "run_partial_failed" {
-		t.Fatalf("expected run_partial_failed, got %q", runStatus.ErrorCode)
+	if runStatus.ErrorCode != "runtime_contract_failed" {
+		t.Fatalf("expected runtime_contract_failed, got %q", runStatus.ErrorCode)
 	}
 }
 
-func TestPipelineStartWithParseFailureStillReturnsAccepted(t *testing.T) {
+func TestPipelineStartWithRuntimeContractFailureStillReturnsAccepted(t *testing.T) {
 	t.Parallel()
 
 	repoPath := t.TempDir()
@@ -1972,7 +2151,7 @@ repos:
 		bytes.NewBufferString(`{"trigger":"ui"}`),
 	)
 	if err != nil {
-		t.Fatalf("POST /api/pipeline/init parse failure runner: %v", err)
+		t.Fatalf("POST /api/pipeline/init contract failure runner: %v", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusAccepted {
@@ -1992,17 +2171,17 @@ repos:
 	_ = waitForRunTerminalStatus(t, httpServer.URL, payload.RunID, 8*time.Second)
 }
 
-func TestMapTypedRunnerAPIErrorDoesNotExposeRunnerParseFailedAtStartTime(t *testing.T) {
+func TestMapTypedRunnerAPIErrorDoesNotExposeRuntimeContractFailedAtStartTime(t *testing.T) {
 	t.Parallel()
 
 	err := acpruntime.WrapRunnerError(
 		acpruntime.ProviderClaudeCode,
-		acpruntime.ErrorCodeRunnerParseFailed,
-		"runner returned invalid taskresult in test",
-		errors.New("json decode error"),
+		acpruntime.ErrorCodeRuntimeContract,
+		"runner failed required artifact contract in test",
+		errors.New("missing shard-pack-manifest.json"),
 	)
 	if _, code, _, ok := mapTypedRunnerAPIError(err); ok {
-		t.Fatalf("expected runner_parse_failed to bypass start-time mapping, got mapped code %q", code)
+		t.Fatalf("expected runtime_contract_failed to bypass start-time mapping, got mapped code %q", code)
 	}
 }
 
@@ -2108,42 +2287,72 @@ if raw:
     except Exception:
         task = {}
 
-task_id = first_non_empty(task, ["task_id", "TaskID", "taskId"]) or from_prompt("TaskID") or from_prompt("task_id") or "task"
-step_id = first_non_empty(task, ["step_id", "StepID", "stepId"]) or from_prompt("StepID") or from_prompt("step_id") or "init.step1.collect"
-run_id = first_non_empty(task, ["run_id", "RunID", "runId"]) or from_prompt("RunID") or from_prompt("run_id")
-workspace = first_non_empty(task, ["workspace", "Workspace"]) or from_prompt("workspace") or from_prompt("Workspace")
-write_root = first_non_empty(task, ["write_root", "WriteRoot", "writeRoot"]) or from_prompt("write_root") or from_prompt("WriteRoot")
-artifact_root = first_non_empty(task, ["artifact_root", "ArtifactRoot", "artifactRoot"]) or from_prompt("artifact_root") or from_prompt("ArtifactRoot")
-shard_id = first_non_empty(task, ["shard_id", "ShardID", "shardId"]) or from_prompt("shard_id") or from_prompt("ShardID") or slugify(step_id)
-repo_scopes = first_non_empty_list(task, ["repo_scopes", "RepoScopes", "repoScopes"])
+task_id = first_non_empty(task, ["task_id", "TaskID"]) or from_prompt("TaskID") or from_prompt("task_id") or "task"
+step_id = first_non_empty(task, ["step_id", "StepID"]) or from_prompt("StepID") or from_prompt("step_id") or "init.step1.collect"
+run_id = first_non_empty(task, ["run_id", "RunID"]) or from_prompt("RunID") or from_prompt("run_id")
+write_root = first_non_empty(task, ["write_root", "WriteRoot"]) or from_prompt("write_root") or from_prompt("WriteRoot")
+artifact_root = first_non_empty(task, ["artifact_root", "ArtifactRoot"]) or from_prompt("artifact_root") or from_prompt("ArtifactRoot")
+draft_root = first_non_empty(task, ["draft_final_root", "DraftFinalRoot"]) or from_prompt("draft_final_root") or from_prompt("DraftFinalRoot")
+step_contract = first_non_empty(task, ["step_contract", "StepContract"]) or from_prompt("step_contract") or from_prompt("StepContract")
+agent_role = first_non_empty(task, ["agent_role", "AgentRole"]) or from_prompt("agent_role") or from_prompt("AgentRole") or "architect"
+shard_id = first_non_empty(task, ["shard_id", "ShardID"]) or from_prompt("shard_id") or from_prompt("ShardID") or slugify(step_id)
+repo_scopes = first_non_empty_list(task, ["repo_scopes", "RepoScopes"])
 if not repo_scopes:
-    repo_scope = first_non_empty(task, ["repo_scope", "RepoScope", "repoScope"]) or from_prompt("repo_scope") or from_prompt("RepoScope")
+    repo_scope = first_non_empty(task, ["repo_scope", "RepoScope"]) or from_prompt("repo_scope") or from_prompt("RepoScope")
     if repo_scope:
         repo_scopes = [repo_scope]
-path_scopes = first_non_empty_list(task, ["path_scopes", "PathScopes", "pathScopes"])
-if not write_root and workspace:
-    write_root = workspace
-if not write_root:
-    write_root = os.getcwd()
-if write_root:
+path_scopes = first_non_empty_list(task, ["path_scopes", "PathScopes"])
+
+def write_runtime_draft(manifest_name, draft_name, canonical_path, kind, title):
+    if not write_root or not draft_root:
+        return
     os.makedirs(write_root, exist_ok=True)
-    manifest_artifact_root = artifact_root.strip() if isinstance(artifact_root, str) else ""
-    if not manifest_artifact_root and workspace:
-        try:
-            candidate = os.path.relpath(write_root, workspace)
-            if candidate and not candidate.startswith(".."):
-                manifest_artifact_root = candidate
-        except Exception:
-            manifest_artifact_root = ""
-    if not manifest_artifact_root:
-        try:
-            candidate = os.path.relpath(write_root, os.getcwd())
-            if candidate and not candidate.startswith(".."):
-                manifest_artifact_root = candidate
-        except Exception:
-            manifest_artifact_root = ""
-    if not manifest_artifact_root:
-        manifest_artifact_root = "."
+    os.makedirs(draft_root, exist_ok=True)
+    with open(os.path.join(draft_root, draft_name), "w", encoding="utf-8") as handle:
+        handle.write("# Stub Draft\n")
+    manifest = {
+        "version": 1,
+        "run_id": run_id or "run-1",
+        "step_id": step_id,
+        "step_contract": step_contract or "draft",
+        "agent_role": agent_role,
+        "summary": "stub runtime draft",
+        "outputs": [
+            {
+                "path": draft_name,
+                "canonical_path": canonical_path,
+                "kind": kind,
+                "title": title,
+            }
+        ],
+    }
+    with open(os.path.join(write_root, manifest_name), "w", encoding="utf-8") as handle:
+        json.dump(manifest, handle)
+
+if step_id == "init.step0.constitution":
+    write_runtime_draft("constitution-draft.json", "overview.md", "charter/overview.md", "charter", "Stub Constitution")
+elif step_id in {"init.step2.asis_docs", "refresh.step2.asis_docs"}:
+    write_runtime_draft("asis-draft-manifest.json", "overview.md", "reports/as-is/overview.md", "report", "Stub As-Is Overview")
+elif step_id in {"init.step3.findings", "refresh.step3.findings"} and write_root:
+    os.makedirs(write_root, exist_ok=True)
+    verdict = {
+        "version": 1,
+        "run_id": run_id or "run-1",
+        "generated_at": "2026-04-21T10:00:00Z",
+        "verdict": "PASS",
+        "summary": "stub validator verdict",
+        "checked_paths": ["reports/taskruns/" + (run_id or "run-1") + "/staging/final/final-run-index.json"],
+        "fixed_paths": [],
+        "findings": [],
+        "questions": [],
+    }
+    with open(os.path.join(write_root, "validator-verdict.json"), "w", encoding="utf-8") as handle:
+        json.dump(verdict, handle)
+elif step_id in {"init.step4.proposals", "refresh.step4.proposals"}:
+    write_runtime_draft("proposals-draft-manifest.json", "proposal.md", "proposals/proposal-baseline/proposal.md", "proposal", "Stub Proposal")
+
+if step_id in {"init.step1.collect", "refresh.step1.collect"} and write_root:
+    os.makedirs(write_root, exist_ok=True)
     document_name = slugify(shard_id) + ".md"
     document_id = "doc." + slugify(shard_id)
     citation_id = "cite." + slugify(shard_id)
@@ -2156,7 +2365,7 @@ if write_root:
         "step_id": step_id,
         "shard_id": shard_id,
         "agent_role": "shard-analyst",
-        "artifact_root": manifest_artifact_root,
+        "artifact_root": write_root,
         "repo_scopes": repo_scopes,
         "path_scopes": path_scopes,
         "summary": "stub shard pack",
@@ -2181,7 +2390,7 @@ if write_root:
                 "document_ids": [document_id]
             }
         ],
-        "compatibility": {
+        "semantic": {
             "coverage": {
                 "observed": ["stub"],
                 "missing": ["owner mappings"],
@@ -2195,21 +2404,6 @@ if write_root:
     }
     with open(os.path.join(write_root, "shard-pack-manifest.json"), "w", encoding="utf-8") as handle:
         json.dump(manifest, handle)
-payload = {
-    "meta": {
-        "task_id": task_id,
-        "step_id": step_id,
-        "run_id": run_id,
-        "runtime": {
-            "name": "` + runtimeName + `",
-            "version": "stub"
-        },
-        "started_at": "2026-04-03T12:00:00Z"
-    },
-    "summary": "stub taskresult",
-    "changeset": []
-}
-print(json.dumps(payload))
 PY
 `
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
@@ -2303,8 +2497,8 @@ type parseFailureRunner struct{}
 func (parseFailureRunner) Run(context.Context, acpruntime.Task) (acpruntime.Result, error) {
 	return acpruntime.Result{}, acpruntime.WrapRunnerError(
 		acpruntime.ProviderClaudeCode,
-		acpruntime.ErrorCodeRunnerParseFailed,
-		"runner returned invalid taskresult in test",
+		acpruntime.ErrorCodeRuntimeContract,
+		"runner failed required artifact contract in test",
 		nil,
 	)
 }
@@ -2332,7 +2526,11 @@ func (cancellableDelayedRunner) Preflight(context.Context) error {
 
 type streamingRunLogsRunner struct{}
 
-func (streamingRunLogsRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+func (streamingRunLogsRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	result, err := claudecode.FakeRunner{}.Run(ctx, task)
+	if err != nil {
+		return acpruntime.Result{}, err
+	}
 	if task.OnOutput != nil {
 		task.OnOutput(acpruntime.OutputChunk{
 			Stream: acpruntime.OutputStreamStdout,
@@ -2348,25 +2546,96 @@ func (streamingRunLogsRunner) Run(_ context.Context, task acpruntime.Task) (acpr
 			Text:      "stdout output truncated after cap (synthetic)",
 		})
 	}
-
-	payload := map[string]any{
-		"meta": map[string]any{
-			"task_id":    task.TaskID,
-			"step_id":    task.StepID,
-			"run_id":     task.RunID,
-			"runtime":    map[string]any{"name": "streaming-test-runner", "version": "v1"},
-			"started_at": task.StartedAtUTC.Format(time.RFC3339),
-		},
-		"summary":   "synthetic streaming success",
-		"changeset": []any{},
-	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return acpruntime.Result{}, err
-	}
-	return acpruntime.Result{RawJSON: raw}, nil
+	result.Execution.RuntimeVersion = "streaming-test-runner"
+	return result, nil
 }
 
 func (streamingRunLogsRunner) Preflight(context.Context) error {
 	return nil
+}
+
+func writeSyntheticServerDraftArtifacts(task acpruntime.Task) error {
+	writeRoot := strings.TrimSpace(task.WriteRoot)
+	draftRoot := strings.TrimSpace(task.DraftFinalRoot)
+	if writeRoot == "" || draftRoot == "" {
+		return nil
+	}
+
+	type draftSpec struct {
+		manifest string
+		content  string
+		outputs  []map[string]any
+	}
+
+	var spec draftSpec
+	switch strings.TrimSpace(task.StepID) {
+	case "init.step0.constitution":
+		spec = draftSpec{
+			manifest: "constitution-draft.json",
+			content:  "# Stub Constitution\n",
+			outputs: []map[string]any{
+				{
+					"path":           "overview.md",
+					"canonical_path": "charter/overview.md",
+					"kind":           "charter",
+					"title":          "Stub Constitution",
+				},
+			},
+		}
+	case "init.step2.asis_docs", "refresh.step2.asis_docs":
+		spec = draftSpec{
+			manifest: "asis-draft-manifest.json",
+			content:  "# Stub As-Is Overview\n",
+			outputs: []map[string]any{
+				{
+					"path":           "overview.md",
+					"canonical_path": "reports/as-is/overview.md",
+					"kind":           "report",
+					"title":          "Stub As-Is Overview",
+				},
+			},
+		}
+	case "init.step4.proposals", "refresh.step4.proposals":
+		spec = draftSpec{
+			manifest: "proposals-draft-manifest.json",
+			content:  "# Stub Proposal\n",
+			outputs: []map[string]any{
+				{
+					"path":           "proposal.md",
+					"canonical_path": "proposals/proposal-baseline/proposal.md",
+					"kind":           "proposal",
+					"title":          "Stub Proposal",
+				},
+			},
+		}
+	default:
+		return nil
+	}
+
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		return err
+	}
+	for _, output := range spec.outputs {
+		pathValue, _ := output["path"].(string)
+		if err := os.WriteFile(filepath.Join(draftRoot, pathValue), []byte(spec.content), 0o644); err != nil {
+			return err
+		}
+	}
+	manifest := map[string]any{
+		"version":       1,
+		"run_id":        task.RunID,
+		"step_id":       task.StepID,
+		"step_contract": task.StepContract,
+		"agent_role":    task.AgentRole,
+		"summary":       "stub runtime draft",
+		"outputs":       spec.outputs,
+	}
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(writeRoot, spec.manifest), raw, 0o644)
 }

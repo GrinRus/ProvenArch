@@ -8,11 +8,9 @@
 - `fixtures/workspace/valid-with-runtime-timeouts.yaml`
 - `fixtures/workspace/invalid-both.yaml`
 - `fixtures/workspace/invalid-neither.yaml`
-- `fixtures/taskresult/normalized-top-level.json`
 
 Целевая структура:
 - `fixtures/workspace/` — manifest и validator cases
-- `fixtures/taskresult/` — raw/normalized TaskResult cases
 - `fixtures/scenarios/` — scenario integration inputs и golden outputs
 
 Baseline scenario surface:

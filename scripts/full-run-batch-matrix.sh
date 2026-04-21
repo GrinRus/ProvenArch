@@ -31,6 +31,7 @@ BATCH_FRONTEND_CANCEL_MODE="${BATCH_FRONTEND_CANCEL_MODE:-}"
 UI_E2E_HEADED="${UI_E2E_HEADED:-}"
 MATRIX_DRIVER_LOG="${MATRIX_DRIVER_LOG:-$MATRIX_ROOT/driver.log}"
 MATRIX_TIMEOUT_PROFILE_FILE="${MATRIX_TIMEOUT_PROFILE_FILE:-$MATRIX_ROOT/timeout-profile.txt}"
+MATRIX_PROFILE_STATUS_HEARTBEAT_SEC="${MATRIX_PROFILE_STATUS_HEARTBEAT_SEC:-10}"
 PROFILE_REPOS_FILE_RESOLVED=""
 PROFILE_SOURCE_KIND_EFFECTIVE=""
 PROFILE_EXPECTED_REPO_COUNT_RESOLVED=0
@@ -45,6 +46,22 @@ declare -a MATRIX_SELECTED_PROVIDERS=()
 declare -a MATRIX_SELECTED_RUN_INDEXES=()
 MATRIX_SELECTED_PROVIDERS_CSV=""
 MATRIX_SELECTED_RUN_INDEXES_CSV=""
+MATRIX_STATUS_ROOT="${MATRIX_ROOT}/profile-status"
+CURRENT_PROFILE_STATUS_FILE=""
+CURRENT_PROFILE_ID=""
+CURRENT_PROFILE_SLUG=""
+CURRENT_SWEEP_ID=""
+CURRENT_BATCH_ID=""
+CURRENT_BATCH_ROOT=""
+CURRENT_DRIVER_LOG=""
+CURRENT_SOURCE_KIND=""
+CURRENT_EXPECTED_REPO_COUNT=""
+CURRENT_REPOS_FILE=""
+CURRENT_SWEEP_STRATEGY=""
+CURRENT_SWEEP_MAX_PARALLEL=""
+CURRENT_SWEEP_FAILURE_POLICY=""
+CURRENT_SWEEP_SHARD_MODE=""
+CURRENT_PROFILE_STATUS_HEARTBEAT_PID=""
 
 log() {
   local line
@@ -131,6 +148,184 @@ slugify() {
     value="item"
   fi
   printf '%s' "$value"
+}
+
+write_current_profile_status() {
+  local status="$1"
+  local failure_reason="${2:-none}"
+  [[ -z "$CURRENT_PROFILE_STATUS_FILE" ]] && return 0
+  mkdir -p "$(dirname "$CURRENT_PROFILE_STATUS_FILE")"
+  python3 - "$CURRENT_PROFILE_STATUS_FILE" "$status" "$failure_reason" "$CURRENT_PROFILE_ID" "$CURRENT_PROFILE_SLUG" "$CURRENT_BATCH_ID" "$CURRENT_SOURCE_KIND" "$CURRENT_EXPECTED_REPO_COUNT" "$CURRENT_REPOS_FILE" "$CURRENT_SWEEP_ID" "$CURRENT_SWEEP_STRATEGY" "$CURRENT_SWEEP_MAX_PARALLEL" "$CURRENT_SWEEP_FAILURE_POLICY" "$CURRENT_SWEEP_SHARD_MODE" "$CURRENT_BATCH_ROOT" "$CURRENT_DRIVER_LOG" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+path = Path(sys.argv[1]).resolve()
+payload = {
+    "profile_id": sys.argv[4],
+    "profile_slug": sys.argv[5],
+    "batch_id": sys.argv[6],
+    "source_kind": sys.argv[7],
+    "expected_repo_count": int(sys.argv[8]),
+    "repos_file": sys.argv[9],
+    "status": sys.argv[2],
+    "failure_reason": sys.argv[3],
+    "sweep_id": sys.argv[10],
+    "execution": {
+        "strategy": sys.argv[11],
+        "max_parallel_tasks": int(sys.argv[12]),
+        "failure_policy": sys.argv[13],
+        "shard_discovery_mode": sys.argv[14],
+    },
+    "batch_root": sys.argv[15],
+    "run_matrix_tsv": "-",
+    "run_matrix_md": "-",
+    "frontend_matrix_md": "-",
+    "frontend_cancel_matrix_md": "-",
+    "quality_report_md": "-",
+    "driver_log": sys.argv[16],
+    "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+}
+path.write_text(json.dumps(payload, ensure_ascii=True) + "\n", encoding="utf-8")
+PY
+}
+
+update_current_profile_status_artifacts() {
+  local status="$1"
+  local failure_reason="$2"
+  local run_matrix_tsv="$3"
+  local run_matrix_md="$4"
+  local frontend_matrix_md="$5"
+  local frontend_cancel_matrix_md="$6"
+  local quality_report_md="$7"
+  [[ -z "$CURRENT_PROFILE_STATUS_FILE" ]] && return 0
+  python3 - "$CURRENT_PROFILE_STATUS_FILE" "$status" "$failure_reason" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+path = Path(sys.argv[1]).resolve()
+payload = {}
+if path.exists():
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        payload = {}
+payload["status"] = sys.argv[2]
+payload["failure_reason"] = sys.argv[3]
+payload["run_matrix_tsv"] = sys.argv[4]
+payload["run_matrix_md"] = sys.argv[5]
+payload["frontend_matrix_md"] = sys.argv[6]
+payload["frontend_cancel_matrix_md"] = sys.argv[7]
+payload["quality_report_md"] = sys.argv[8]
+payload["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+path.write_text(json.dumps(payload, ensure_ascii=True) + "\n", encoding="utf-8")
+PY
+}
+
+stop_current_profile_status_heartbeat() {
+  if [[ -z "${CURRENT_PROFILE_STATUS_HEARTBEAT_PID:-}" ]]; then
+    return 0
+  fi
+  kill "${CURRENT_PROFILE_STATUS_HEARTBEAT_PID}" >/dev/null 2>&1 || true
+  wait "${CURRENT_PROFILE_STATUS_HEARTBEAT_PID}" >/dev/null 2>&1 || true
+  CURRENT_PROFILE_STATUS_HEARTBEAT_PID=""
+}
+
+start_current_profile_status_heartbeat() {
+  stop_current_profile_status_heartbeat
+  [[ -z "$CURRENT_PROFILE_STATUS_FILE" ]] && return 0
+  local interval="${MATRIX_PROFILE_STATUS_HEARTBEAT_SEC:-10}"
+  if [[ ! "$interval" =~ ^[0-9]+$ ]] || [[ "$interval" -le 0 ]]; then
+    return 0
+  fi
+  (
+    while true; do
+      sleep "$interval"
+      write_current_profile_status "running" "none"
+    done
+  ) &
+  CURRENT_PROFILE_STATUS_HEARTBEAT_PID="$!"
+}
+
+signal_number() {
+  case "$1" in
+    HUP) printf '1' ;;
+    INT) printf '2' ;;
+    TERM) printf '15' ;;
+    *) printf '' ;;
+  esac
+}
+
+signal_exit_code() {
+  local number
+  number="$(signal_number "$1")"
+  if [[ -n "$number" ]]; then
+    printf '%s' "$((128 + number))"
+    return 0
+  fi
+  printf '1'
+}
+
+on_matrix_signal() {
+  local signal_name="$1"
+  log "received termination signal: $signal_name profile=$CURRENT_PROFILE_ID sweep=$CURRENT_SWEEP_ID"
+  stop_current_profile_status_heartbeat
+  write_current_profile_status "failed" "infra_signal_terminated"
+  exit "$(signal_exit_code "$signal_name")"
+}
+
+finalize_running_profile_statuses_on_exit() {
+  local failure_reason="$1"
+  [[ -d "$MATRIX_STATUS_ROOT" ]] || return 0
+  python3 - "$MATRIX_STATUS_ROOT" "$failure_reason" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+failure_reason = sys.argv[2]
+for path in sorted(root.glob("*.json")):
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        continue
+    if not isinstance(payload, dict):
+        continue
+    if str(payload.get("status", "")).strip() != "running":
+        continue
+    payload["status"] = "failed"
+    payload["failure_reason"] = failure_reason
+    payload["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    path.write_text(json.dumps(payload, ensure_ascii=True) + "\n", encoding="utf-8")
+PY
+}
+
+on_matrix_exit() {
+  local exit_code="$1"
+  [[ "$exit_code" =~ ^[0-9]+$ ]] || exit_code=1
+  stop_current_profile_status_heartbeat
+  finalize_running_profile_statuses_on_exit "infra_incomplete_cycle"
+}
+
+batch_has_incomplete_run_sentinels() {
+  local batch_root="$1"
+  local status_file=""
+  local state=""
+  if [[ ! -d "$batch_root" ]]; then
+    return 1
+  fi
+  while IFS= read -r status_file; do
+    [[ -z "$status_file" ]] && continue
+    state="$(sed -n 's/^state=//p' "$status_file" | tail -n1 | tr -d '\r')"
+    if [[ "$state" == "running" || -z "$state" ]]; then
+      return 0
+    fi
+  done < <(find "$batch_root" -type f -name 'run-status.env' | LC_ALL=C sort)
+  return 1
 }
 
 resolve_selected_providers() {
@@ -328,23 +523,29 @@ log "release frontend defaults: frontend_mode=${BATCH_FRONTEND_MODE:-default} fr
 
 COMBINATIONS_TSV="$MATRIX_ROOT/profile-sweep-combinations.tsv"
 RECORDS_JSONL="$MATRIX_ROOT/profile-runs.jsonl"
+mkdir -p "$MATRIX_STATUS_ROOT"
 : > "$RECORDS_JSONL"
 : > "$MATRIX_TIMEOUT_PROFILE_FILE"
+trap 'on_matrix_signal TERM' TERM
+trap 'on_matrix_signal INT' INT
+trap 'on_matrix_signal HUP' HUP
+trap 'on_matrix_exit $?' EXIT
 
-python3 - "$E2E_MATRIX_FILE" "$COMBINATIONS_TSV" "$RELEASE_MODE" "$MATRIX_TIMEOUT_PROFILE_FILE" "$PROVENARCH_ROOT" <<'PY'
+python3 - "$E2E_MATRIX_FILE" "$COMBINATIONS_TSV" "$RELEASE_MODE" "$MATRIX_TIMEOUT_PROFILE_FILE" <<'PY'
 import sys
 from pathlib import Path
+
+try:
+    import yaml  # type: ignore
+except Exception as exc:
+    raise SystemExit(f"PyYAML is required for parsing matrix file: {exc}")
 
 matrix_path = Path(sys.argv[1]).resolve()
 out_path = Path(sys.argv[2]).resolve()
 release_mode_raw = str(sys.argv[3]).strip().lower()
 release_mode = release_mode_raw in {"1", "true", "yes", "on"}
 timeout_profile_path = Path(sys.argv[4]).resolve()
-repo_root = Path(sys.argv[5]).resolve()
-sys.path.insert(0, str(repo_root / "scripts"))
-from yaml_compat import load_yaml_file  # type: ignore
-
-payload = load_yaml_file(matrix_path)
+payload = yaml.safe_load(matrix_path.read_text(encoding="utf-8"))
 allowed_timeout_profiles = {"short-window", "medium-window", "extended-window"}
 
 if isinstance(payload, dict):
@@ -599,6 +800,17 @@ while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sw
   profile_repos_meta_json="$profile_base_root/target-repos-meta.json"
   driver_log="$profile_root/driver.log"
   mkdir -p "$profile_root"
+  CURRENT_PROFILE_ID="$profile_id"
+  CURRENT_PROFILE_SLUG="$profile_slug"
+  CURRENT_SWEEP_ID="$sweep_id"
+  CURRENT_BATCH_ID="$batch_id"
+  CURRENT_BATCH_ROOT="$batch_root"
+  CURRENT_DRIVER_LOG="$driver_log"
+  CURRENT_SWEEP_STRATEGY="$sweep_strategy"
+  CURRENT_SWEEP_MAX_PARALLEL="$sweep_max_parallel"
+  CURRENT_SWEEP_FAILURE_POLICY="$sweep_failure_policy"
+  CURRENT_SWEEP_SHARD_MODE="$sweep_shard_mode"
+  CURRENT_PROFILE_STATUS_FILE="$MATRIX_STATUS_ROOT/${profile_slug}--${sweep_slug}.json"
 
   profile_meta_key="${profile_id}|${repos_file}|${expected_repo_count}|${source_kind}"
   if [[ "$profile_meta_key" != "$PROFILE_META_CACHE_KEY" ]]; then
@@ -609,6 +821,11 @@ while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sw
     PROFILE_META_CACHE_EXPECTED_REPO_COUNT="$PROFILE_EXPECTED_REPO_COUNT_RESOLVED"
     log "profile repos preflight: profile=$profile_id repos_file=$PROFILE_META_CACHE_REPOS_FILE source_kind=$PROFILE_META_CACHE_SOURCE_KIND expected_repo_count=$PROFILE_META_CACHE_EXPECTED_REPO_COUNT"
   fi
+  CURRENT_SOURCE_KIND="$PROFILE_META_CACHE_SOURCE_KIND"
+  CURRENT_EXPECTED_REPO_COUNT="$PROFILE_META_CACHE_EXPECTED_REPO_COUNT"
+  CURRENT_REPOS_FILE="$PROFILE_META_CACHE_REPOS_FILE"
+  write_current_profile_status "running" "none"
+  start_current_profile_status_heartbeat
   log "running profile=$profile_id sweep=$sweep_id source_kind=$PROFILE_META_CACHE_SOURCE_KIND expected_repo_count=$PROFILE_META_CACHE_EXPECTED_REPO_COUNT batch_id=$batch_id"
   status="passed"
   if ! (
@@ -661,12 +878,22 @@ while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sw
     status="failed"
     log "profile+sweep failed: profile=$profile_id sweep=$sweep_id (see $driver_log)"
   fi
+  stop_current_profile_status_heartbeat
+  if [[ "$status" == "passed" ]] && batch_has_incomplete_run_sentinels "$batch_root"; then
+    status="failed"
+    log "profile+sweep left unfinished run sentinel: profile=$profile_id sweep=$sweep_id batch_root=$batch_root"
+  fi
 
   run_matrix_tsv="$REPORTS_ROOT/run_matrix_${batch_id}.tsv"
   run_matrix_md="$REPORTS_ROOT/run_matrix_${batch_id}.md"
   frontend_matrix_md="$REPORTS_ROOT/frontend_e2e_matrix_${batch_id}.md"
   frontend_cancel_matrix_md="$REPORTS_ROOT/frontend_cancel_e2e_matrix_${batch_id}.md"
   quality_report_md="$REPORTS_ROOT/quality_report_${batch_id}.md"
+  if [[ "$status" == "passed" ]]; then
+    update_current_profile_status_artifacts "$status" "none" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md"
+  else
+    update_current_profile_status_artifacts "$status" "child_failed" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md"
+  fi
 
   python3 - "$RECORDS_JSONL" \
     "$profile_id" "$profile_slug" "$batch_id" "$PROFILE_META_CACHE_SOURCE_KIND" "$PROFILE_META_CACHE_EXPECTED_REPO_COUNT" "$PROFILE_META_CACHE_REPOS_FILE" "$status" \
@@ -705,13 +932,17 @@ with path.open("a", encoding="utf-8") as f:
     f.write("\n")
 PY
 done < "$COMBINATIONS_TSV"
+CURRENT_PROFILE_STATUS_FILE=""
 
 MATRIX_REPORT_MD="$REPORTS_ROOT/profile_matrix_${MATRIX_ID}.md"
 MATRIX_REPORT_TSV="$REPORTS_ROOT/profile_matrix_${MATRIX_ID}.tsv"
 VERDICT_MD="$REPORTS_ROOT/release_verdict_${MATRIX_ID}.md"
 VERDICT_JSON="$REPORTS_ROOT/release_verdict_${MATRIX_ID}.json"
+if [[ "${MATRIX_TEST_TRUNCATE_RECORDS_JSONL:-0}" == "1" ]]; then
+  : > "$RECORDS_JSONL"
+fi
 
-python3 - "$RECORDS_JSONL" "$MATRIX_REPORT_MD" "$MATRIX_REPORT_TSV" "$VERDICT_MD" "$VERDICT_JSON" "$MATRIX_ID" "$RELEASE_MODE" "$RUN_COUNT" "$MATRIX_SELECTED_PROVIDERS_CSV" "$MATRIX_SELECTED_RUN_INDEXES_CSV" <<'PY'
+python3 - "$RECORDS_JSONL" "$MATRIX_STATUS_ROOT" "$MATRIX_REPORT_MD" "$MATRIX_REPORT_TSV" "$VERDICT_MD" "$VERDICT_JSON" "$MATRIX_ID" "$RELEASE_MODE" "$RUN_COUNT" "$MATRIX_SELECTED_PROVIDERS_CSV" "$MATRIX_SELECTED_RUN_INDEXES_CSV" <<'PY'
 import json
 import re
 import sys
@@ -720,25 +951,81 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 records_path = Path(sys.argv[1]).resolve()
-out_md = Path(sys.argv[2]).resolve()
-out_tsv = Path(sys.argv[3]).resolve()
-verdict_md = Path(sys.argv[4]).resolve()
-verdict_json = Path(sys.argv[5]).resolve()
-matrix_id = sys.argv[6]
-release_mode = str(sys.argv[7]).strip() == "1"
-run_count = int(sys.argv[8])
-selected_providers = [item.strip() for item in str(sys.argv[9]).split(",") if item.strip()]
-selected_run_indexes = [item.strip() for item in str(sys.argv[10]).split(",") if item.strip()]
+status_root = Path(sys.argv[2]).resolve()
+out_md = Path(sys.argv[3]).resolve()
+out_tsv = Path(sys.argv[4]).resolve()
+verdict_md = Path(sys.argv[5]).resolve()
+verdict_json = Path(sys.argv[6]).resolve()
+matrix_id = sys.argv[7]
+release_mode = str(sys.argv[8]).strip() == "1"
+run_count = int(sys.argv[9])
+selected_providers = [item.strip() for item in str(sys.argv[10]).split(",") if item.strip()]
+selected_run_indexes = [item.strip() for item in str(sys.argv[11]).split(",") if item.strip()]
 
-records = []
-for line in records_path.read_text(encoding="utf-8").splitlines():
-    line = line.strip()
-    if not line:
-        continue
-    records.append(json.loads(line))
+
+def record_key(payload: dict[str, object]) -> tuple[str, str]:
+    return (str(payload.get("profile_id", "")).strip(), str(payload.get("sweep_id", "")).strip())
+
+
+records_by_key: dict[tuple[str, str], dict[str, object]] = {}
+if records_path.exists():
+    for line in records_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        payload = json.loads(line)
+        if not isinstance(payload, dict):
+            continue
+        records_by_key[record_key(payload)] = payload
+
+if status_root.exists():
+    for path in sorted(status_root.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        key = record_key(payload)
+        existing = records_by_key.get(key)
+        if existing is None:
+            records_by_key[key] = payload
+            continue
+        for field in (
+            "batch_id",
+            "source_kind",
+            "expected_repo_count",
+            "repos_file",
+            "status",
+            "failure_reason",
+            "batch_root",
+            "run_matrix_tsv",
+            "run_matrix_md",
+            "frontend_matrix_md",
+            "frontend_cancel_matrix_md",
+            "quality_report_md",
+            "driver_log",
+        ):
+            value = payload.get(field)
+            if field == "status" and str(value).strip():
+                existing[field] = value
+                continue
+            if existing.get(field):
+                continue
+            existing[field] = value
+        if isinstance(payload.get("execution"), dict) and not isinstance(existing.get("execution"), dict):
+            existing["execution"] = payload.get("execution")
+
+records = list(records_by_key.values())
 
 if not records:
-    raise SystemExit(f"no matrix records found in {records_path}")
+    raise SystemExit(f"no matrix records found in {records_path} or {status_root}")
+
+for record in records:
+    if str(record.get("status", "")).strip() == "running":
+        record["status"] = "failed"
+        if not str(record.get("failure_reason", "")).strip():
+            record["failure_reason"] = "infra_incomplete_cycle"
 
 required_release_sweeps = ("baseline", "parallel-default")
 release_profile_order = ("single-path", "single-git_url", "multi-path", "multi-git_url")
@@ -746,7 +1033,7 @@ required_release_providers = ("qwen-code", "claude-code")
 
 
 def parse_frontend_status(path: Path, provider: str) -> str:
-    if not path.exists():
+    if not path.exists() or not path.is_file():
         return "missing"
     text = path.read_text(encoding="utf-8")
     match = re.search(rf"^\|\s*{re.escape(provider)}\s*\|\s*([^|]+)\|", text, flags=re.MULTILINE)
@@ -757,9 +1044,7 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
     stats: dict[str, object] = {
         "hard": 0,
         "total": 0,
-        "runtime_artifact_contract": 0,
-        "runtime_parse": 0,
-        "runtime_stalled": 0,
+        "runtime_contract_failed": 0,
         "runner_unavailable": 0,
         "runtime_timeout": 0,
         "infra_signal_terminated": 0,
@@ -778,7 +1063,7 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
         "issues_counter": Counter(),
     }
 
-    if not tsv_path.exists():
+    if not tsv_path.exists() or not tsv_path.is_file():
         return stats
     lines = [line for line in tsv_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     if len(lines) <= 1:
@@ -810,9 +1095,7 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
             stats["hard"] = int(stats["hard"]) + 1
 
         for key in (
-            "runtime_artifact_contract",
-            "runtime_parse",
-            "runtime_stalled",
+            "runtime_contract_failed",
             "runner_unavailable",
             "runtime_timeout",
             "infra_signal_terminated",
@@ -935,9 +1218,7 @@ def strict_blockers(
         reasons.append(f"backend_hard_pass={stats['hard']} (expected {expected_backend_runs})")
 
     for key in (
-        "runtime_artifact_contract",
-        "runtime_parse",
-        "runtime_stalled",
+        "runtime_contract_failed",
         "runner_unavailable",
         "runtime_timeout",
         "infra_signal_terminated",
@@ -1054,9 +1335,7 @@ header = [
     "semantic_hard_fail_runs",
     "off_topic_hits",
     "artifact_non_snapshot_runs",
-    "runtime_artifact_contract_failures",
-    "runtime_parse_failures",
-    "runtime_stalled_failures",
+    "runtime_contract_failed_failures",
     "runner_unavailable_failures",
     "runtime_timeout_failures",
     "infra_signal_terminated_failures",
@@ -1196,9 +1475,7 @@ for rec in records:
                 str(stats["semantic_hard_fail"]),
                 str(stats["off_topic_hits"]),
                 str(stats["artifact_non_snapshot"]),
-                str(stats["runtime_artifact_contract"]),
-                str(stats["runtime_parse"]),
-                str(stats["runtime_stalled"]),
+                str(stats["runtime_contract_failed"]),
                 str(stats["runner_unavailable"]),
                 str(stats["runtime_timeout"]),
                 str(stats["infra_signal_terminated"]),
@@ -1254,9 +1531,7 @@ for rec in records:
                 "semantic_hard_fail_runs": int(stats["semantic_hard_fail"]),
                 "off_topic_hits": int(stats["off_topic_hits"]),
                 "artifact_non_snapshot_runs": int(stats["artifact_non_snapshot"]),
-                "runtime_artifact_contract_failures": int(stats["runtime_artifact_contract"]),
-                "runtime_parse_failures": int(stats["runtime_parse"]),
-                "runtime_stalled_failures": int(stats["runtime_stalled"]),
+                "runtime_contract_failed_failures": int(stats["runtime_contract_failed"]),
                 "runner_unavailable_failures": int(stats["runner_unavailable"]),
                 "runtime_timeout_failures": int(stats["runtime_timeout"]),
                 "infra_signal_terminated_failures": int(stats["infra_signal_terminated"]),

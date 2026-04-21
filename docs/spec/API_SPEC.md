@@ -205,6 +205,11 @@ Partial update persisted timeout-полей в `workspace.yaml`.
 - `effective` — значения после precedence-resolve (`CLI > env > workspace > defaults`);
 - `source` — источник каждого effective значения (`override|env|workspace|default`).
 
+Execution payload также включает `steps`:
+- `persisted.steps` — step-scoped provider overrides из `workspace.yaml.runtime.profile.steps`;
+- `effective.steps` — effective provider per step;
+- `source.steps` — источник effective provider per step (`workspace|override|env|default`).
+
 **200**
 ```json
 {
@@ -213,19 +218,32 @@ Partial update persisted timeout-полей в `workspace.yaml`.
     "strategy": "parallel",
     "max_parallel_tasks": 4,
     "failure_policy": "best_effort",
-    "shard_discovery_mode": "heuristics"
+    "shard_discovery_mode": "heuristics",
+    "steps": {
+      "step2_as_is": "qwen-code"
+    }
   },
   "effective": {
     "strategy": "parallel",
     "max_parallel_tasks": 4,
     "failure_policy": "best_effort",
-    "shard_discovery_mode": "heuristics"
+    "shard_discovery_mode": "heuristics",
+    "steps": {
+      "step0_constitution": "claude-code",
+      "step1_collect": "claude-code",
+      "step2_as_is": "qwen-code",
+      "step3_findings": "claude-code",
+      "step4_proposals": "claude-code"
+    }
   },
   "source": {
     "strategy": "workspace",
     "max_parallel_tasks": "workspace",
     "failure_policy": "workspace",
-    "shard_discovery_mode": "workspace"
+    "shard_discovery_mode": "workspace",
+    "steps": {
+      "step2_as_is": "workspace"
+    }
   }
 }
 ```
@@ -240,7 +258,11 @@ Partial update persisted execution-полей в `workspace.yaml`.
     "strategy": "parallel",
     "max_parallel_tasks": 6,
     "failure_policy": "best_effort",
-    "shard_discovery_mode": "semantic"
+    "shard_discovery_mode": "semantic",
+    "steps": {
+      "step2_as_is": "qwen-code",
+      "step4_proposals": "claude-code"
+    }
   }
 }
 ```
@@ -252,6 +274,7 @@ Partial update persisted execution-полей в `workspace.yaml`.
 - `max_parallel_tasks` должен быть целым `> 0`;
 - `failure_policy` в `fail_fast|best_effort`;
 - `shard_discovery_mode` в `heuristics|semantic`.
+- `execution.steps.*` в `claude-code|qwen-code`.
 
 **400**
 - `invalid_request_body`
@@ -262,6 +285,72 @@ Partial update persisted execution-полей в `workspace.yaml`.
 - `runtime_execution_render_failed`
 - `runtime_execution_write_failed`
 - `runtime_execution_reopen_failed`
+
+### GET `/api/runtime/profile`
+Возвращает aggregate runtime profile:
+- `timeouts`
+- `execution`
+- `step_providers`
+
+`step_providers` дублируется отдельно для UI/CLI, чтобы не требовать парсинг execution payload:
+- `persisted`
+- `effective`
+- `source`
+
+**200**
+```json
+{
+  "ok": true,
+  "timeouts": {
+    "persisted": {},
+    "effective": {
+      "step_timeout_sec": 1800
+    },
+    "source": {
+      "step_timeout_sec": "default"
+    }
+  },
+  "execution": {
+    "persisted": {
+      "strategy": "parallel",
+      "steps": {
+        "step2_as_is": "qwen-code"
+      }
+    },
+    "effective": {
+      "strategy": "parallel",
+      "steps": {
+        "step0_constitution": "claude-code",
+        "step1_collect": "claude-code",
+        "step2_as_is": "qwen-code",
+        "step3_findings": "claude-code",
+        "step4_proposals": "claude-code"
+      }
+    },
+    "source": {
+      "strategy": "workspace",
+      "steps": {
+        "step2_as_is": "workspace"
+      }
+    }
+  },
+  "step_providers": {
+    "persisted": {
+      "step2_as_is": "qwen-code"
+    },
+    "effective": {
+      "step0_constitution": "claude-code",
+      "step1_collect": "claude-code",
+      "step2_as_is": "qwen-code",
+      "step3_findings": "claude-code",
+      "step4_proposals": "claude-code"
+    },
+    "source": {
+      "step2_as_is": "workspace"
+    }
+  }
+}
+```
 
 ## 3) Artifacts endpoints
 
@@ -342,10 +431,7 @@ Partial update persisted execution-полей в `workspace.yaml`.
 - `trigger_unsupported`
 - `run_start_failed`
 
-**503**
-- `runner_unavailable`
-
-`runner_parse_failed` не возвращается start-endpoint'ом; этот код появляется только в run status (`GET /api/pipeline/runs/<run_id>`) после `202 Accepted`.
+`runner_unavailable` и `runtime_contract_failed` не возвращаются start-endpoint'ом; эти коды появляются только в run status (`GET /api/pipeline/runs/<run_id>`) после `202 Accepted`, когда конкретный step-scoped provider проходит lazy preflight или runtime execution.
 
 **501**
 - `not_supported`
@@ -391,6 +477,13 @@ Partial update persisted execution-полей в `workspace.yaml`.
   "started_at": "2026-04-03T12:00:00Z",
   "finished_at": null,
   "current_step": "init.step1.collect",
+  "step_providers": {
+    "step0_constitution": "claude-code",
+    "step1_collect": "claude-code",
+    "step2_as_is": "qwen-code",
+    "step3_findings": "claude-code",
+    "step4_proposals": "claude-code"
+  },
   "warnings": [],
   "error_code": null,
   "error": null
@@ -404,7 +497,7 @@ Partial update persisted execution-полей в `workspace.yaml`.
 - `failed`
 
 Для runtime parse/runtime ошибок после успешного async start используется run-level статус:
-- `error_code: "runner_parse_failed"` (или другой actionable code) в `failed` run.
+- `error_code: "runtime_contract_failed"` (или другой actionable code) в `failed` run.
 
 Для lifecycle сценариев используются дополнительные `error_code`:
 - `run_canceled` — run отменён пользователем;
@@ -428,6 +521,13 @@ Partial update persisted execution-полей в `workspace.yaml`.
       "started_at": "2026-04-03T12:00:00Z",
       "finished_at": "2026-04-03T12:00:02Z",
       "current_step": "init.step4.proposals",
+      "step_providers": {
+        "step0_constitution": "claude-code",
+        "step1_collect": "claude-code",
+        "step2_as_is": "qwen-code",
+        "step3_findings": "claude-code",
+        "step4_proposals": "claude-code"
+      },
       "warnings": [],
       "error_code": null,
       "error": null
@@ -462,7 +562,7 @@ Partial update persisted execution-полей в `workspace.yaml`.
       "step_id": "init.step1.collect",
       "domain_id": "payments-service",
       "message": "runtime task started",
-      "taskrun_path": "reports/taskruns/run_20260403_001-step1-collect-domain-payments-service.json",
+      "taskrun_path": "reports/taskruns/run_20260403_001/staging/shards/payments-service/runtime-execution.json",
       "fields": {
         "task_id": "task-run_20260403_001-init-step1-collect-payments-service",
         "provider": "claude-code",
@@ -609,7 +709,8 @@ Run-specific поверхность (не входит в strict deterministic g
   - env overrides: `ACP_RUN_LOGS_TTL_HOURS`, `ACP_RUN_LOGS_MAX_RUNS`
   - defaults: `168h` TTL и `200` run log files
 - default runtime mode: `fake` (required deterministic CI surface), `headless` — opt-in.
-- default runtime provider: `claude-code`; fallback env `ACP_RUNTIME_PROVIDER`; CLI override `--runtime-provider`.
+- default runtime provider: `claude-code`; global fallback env `ACP_RUNTIME_PROVIDER`; CLI override `--runtime-provider`.
+- effective provider per step: `workspace.yaml.runtime.profile.steps.<step>.provider > CLI/env global provider > claude-code`.
 - provider-specific command envs: `ACP_CLAUDE_CMD` и `ACP_QWEN_CMD`.
 - timeout control envs:
   - `ACP_RUNTIME_STEP_TIMEOUT_SEC`

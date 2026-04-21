@@ -46,6 +46,7 @@ type RuntimeConfig struct {
 type RuntimeProfileConfig struct {
 	Timeouts  *RuntimeTimeoutsConfig  `yaml:"timeouts,omitempty" json:"timeouts,omitempty"`
 	Execution *RuntimeExecutionConfig `yaml:"execution,omitempty" json:"execution,omitempty"`
+	Steps     *RuntimeStepsConfig     `yaml:"steps,omitempty" json:"steps,omitempty"`
 }
 
 type RuntimeExecutionConfig struct {
@@ -57,6 +58,18 @@ type RuntimeExecutionConfig struct {
 
 type RuntimeShardDiscoveryConfig struct {
 	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
+}
+
+type RuntimeStepsConfig struct {
+	Step0Constitution *RuntimeStepConfig `yaml:"step0_constitution,omitempty" json:"step0_constitution,omitempty"`
+	Step1Collect      *RuntimeStepConfig `yaml:"step1_collect,omitempty" json:"step1_collect,omitempty"`
+	Step2AsIs         *RuntimeStepConfig `yaml:"step2_as_is,omitempty" json:"step2_as_is,omitempty"`
+	Step3Findings     *RuntimeStepConfig `yaml:"step3_findings,omitempty" json:"step3_findings,omitempty"`
+	Step4Proposals    *RuntimeStepConfig `yaml:"step4_proposals,omitempty" json:"step4_proposals,omitempty"`
+}
+
+type RuntimeStepConfig struct {
+	Provider string `yaml:"provider,omitempty" json:"provider,omitempty"`
 }
 
 type RuntimeTimeoutsConfig struct {
@@ -101,12 +114,28 @@ func (cfg *RuntimeExecutionConfig) IsZero() bool {
 		(cfg.ShardDiscovery == nil || strings.TrimSpace(cfg.ShardDiscovery.Mode) == "")
 }
 
+func (cfg *RuntimeStepConfig) IsZero() bool {
+	return cfg == nil || strings.TrimSpace(cfg.Provider) == ""
+}
+
+func (cfg *RuntimeStepsConfig) IsZero() bool {
+	if cfg == nil {
+		return true
+	}
+	return (cfg.Step0Constitution == nil || cfg.Step0Constitution.IsZero()) &&
+		(cfg.Step1Collect == nil || cfg.Step1Collect.IsZero()) &&
+		(cfg.Step2AsIs == nil || cfg.Step2AsIs.IsZero()) &&
+		(cfg.Step3Findings == nil || cfg.Step3Findings.IsZero()) &&
+		(cfg.Step4Proposals == nil || cfg.Step4Proposals.IsZero())
+}
+
 func (cfg *RuntimeProfileConfig) IsZero() bool {
 	if cfg == nil {
 		return true
 	}
 	return (cfg.Timeouts == nil || cfg.Timeouts.IsZero()) &&
-		(cfg.Execution == nil || cfg.Execution.IsZero())
+		(cfg.Execution == nil || cfg.Execution.IsZero()) &&
+		(cfg.Steps == nil || cfg.Steps.IsZero())
 }
 
 func (cfg *RuntimeConfig) IsZero() bool {
@@ -183,6 +212,26 @@ func applyManifestDefaults(manifest *Manifest) {
 				}
 				if manifest.Runtime.Profile.Execution.IsZero() {
 					manifest.Runtime.Profile.Execution = nil
+				}
+			}
+			if manifest.Runtime.Profile.Steps != nil {
+				normalizeStep := func(step *RuntimeStepConfig) *RuntimeStepConfig {
+					if step == nil {
+						return nil
+					}
+					step.Provider = strings.TrimSpace(strings.ToLower(step.Provider))
+					if step.IsZero() {
+						return nil
+					}
+					return step
+				}
+				manifest.Runtime.Profile.Steps.Step0Constitution = normalizeStep(manifest.Runtime.Profile.Steps.Step0Constitution)
+				manifest.Runtime.Profile.Steps.Step1Collect = normalizeStep(manifest.Runtime.Profile.Steps.Step1Collect)
+				manifest.Runtime.Profile.Steps.Step2AsIs = normalizeStep(manifest.Runtime.Profile.Steps.Step2AsIs)
+				manifest.Runtime.Profile.Steps.Step3Findings = normalizeStep(manifest.Runtime.Profile.Steps.Step3Findings)
+				manifest.Runtime.Profile.Steps.Step4Proposals = normalizeStep(manifest.Runtime.Profile.Steps.Step4Proposals)
+				if manifest.Runtime.Profile.Steps.IsZero() {
+					manifest.Runtime.Profile.Steps = nil
 				}
 			}
 			if manifest.Runtime.Profile.IsZero() {
@@ -287,6 +336,25 @@ func validateManifest(manifest Manifest) error {
 					problems = append(problems, "runtime.profile.execution.shard_discovery.mode must be one of: heuristics, semantic")
 				}
 			}
+		}
+		if manifest.Runtime.Profile.Steps != nil {
+			validateStepProvider := func(label string, step *RuntimeStepConfig) {
+				if step == nil {
+					return
+				}
+				provider := strings.TrimSpace(strings.ToLower(step.Provider))
+				if provider == "" {
+					return
+				}
+				if provider != "claude-code" && provider != "qwen-code" {
+					problems = append(problems, fmt.Sprintf("%s.provider must be one of: claude-code, qwen-code", label))
+				}
+			}
+			validateStepProvider("runtime.profile.steps.step0_constitution", manifest.Runtime.Profile.Steps.Step0Constitution)
+			validateStepProvider("runtime.profile.steps.step1_collect", manifest.Runtime.Profile.Steps.Step1Collect)
+			validateStepProvider("runtime.profile.steps.step2_as_is", manifest.Runtime.Profile.Steps.Step2AsIs)
+			validateStepProvider("runtime.profile.steps.step3_findings", manifest.Runtime.Profile.Steps.Step3Findings)
+			validateStepProvider("runtime.profile.steps.step4_proposals", manifest.Runtime.Profile.Steps.Step4Proposals)
 		}
 	}
 

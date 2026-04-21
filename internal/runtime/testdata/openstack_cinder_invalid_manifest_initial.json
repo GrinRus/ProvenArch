@@ -33,7 +33,7 @@
       ]
     }
   ],
-  "compatibility": {
+  "semantic": {
     "schema": "https://example.local/acp/schemas/shard-pack-manifest.schema.json",
     "version": 1
   }

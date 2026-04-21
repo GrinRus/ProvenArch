@@ -73,9 +73,24 @@ function createFetchMock(state: FetchMockState = {}) {
     },
     editable_artifacts: [
       { path: "charter/overview.md", label: "charter/overview.md", category: "charter" },
-      { path: "skills/prompt-packs/findings.md", label: "skills/prompt-packs/findings.md", category: "prompt-pack", prompt_usage: "live-consumed" },
-      { path: "skills/prompt-packs/qa.md", label: "skills/prompt-packs/qa.md", category: "prompt-pack", prompt_usage: "live-consumed" },
-      { path: "skills/findings/prompts/system.md", label: "skills/findings/prompts/system.md (reference-only)", category: "skill-prompt", prompt_usage: "reference-only" },
+      {
+        path: "skills/prompt-packs/findings.md",
+        label: "skills/prompt-packs/findings.md",
+        category: "prompt-pack",
+        prompt_usage: "live-consumed",
+      },
+      {
+        path: "skills/prompt-packs/qa.md",
+        label: "skills/prompt-packs/qa.md",
+        category: "prompt-pack",
+        prompt_usage: "live-consumed",
+      },
+      {
+        path: "skills/findings/prompts/system.md",
+        label: "skills/findings/prompts/system.md (reference-only)",
+        category: "skill-prompt",
+        prompt_usage: "reference-only",
+      },
     ],
   };
 
@@ -150,6 +165,29 @@ function createFetchMock(state: FetchMockState = {}) {
       });
     }
 
+    if (method === "GET" && url === "/api/runtime/profile") {
+      return jsonResponse({
+        ok: true,
+        step_providers: {
+          persisted: { step2_as_is: "qwen-code" },
+          effective: {
+            step0_constitution: "claude-code",
+            step1_collect: "claude-code",
+            step2_as_is: "qwen-code",
+            step3_findings: "claude-code",
+            step4_proposals: "claude-code",
+          },
+          source: {
+            step0_constitution: "default",
+            step1_collect: "default",
+            step2_as_is: "workspace",
+            step3_findings: "default",
+            step4_proposals: "default",
+          },
+        },
+      });
+    }
+
     if (method === "GET" && url.startsWith("/api/artifacts?path=")) {
       const encodedPath = url.slice("/api/artifacts?path=".length);
       const decodedPath = decodeURIComponent(encodedPath);
@@ -192,6 +230,21 @@ function createFetchMock(state: FetchMockState = {}) {
       return jsonResponse({ ok: true });
     }
 
+    if (method === "POST" && url === "/api/git/commit") {
+      const payload = JSON.parse(String(init?.body ?? "{}")) as { message?: string };
+      return jsonResponse({
+        status: "ok",
+        output: `committed: ${payload.message ?? ""}`.trim(),
+      });
+    }
+
+    if (method === "POST" && url === "/api/git/proposal-branch") {
+      const payload = JSON.parse(String(init?.body ?? "{}")) as { name?: string };
+      return jsonResponse({
+        branch: payload.name ?? "proposal/beta-refresh",
+      });
+    }
+
     return jsonResponse(
       {
         error: {
@@ -219,6 +272,7 @@ vi.mock("mermaid", () => {
 
 describe("App", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -235,6 +289,9 @@ describe("App", () => {
 
     expect(await screen.findByTestId("runtime-timeouts-panel")).toBeInTheDocument();
     expect(screen.getByTestId("runtime-execution-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("runtime-step-providers-panel")).toBeInTheDocument();
+    expect(screen.getByText("runtime.profile.steps.step2_as_is.provider")).toBeInTheDocument();
+    expect(screen.getAllByText("qwen-code").length).toBeGreaterThanOrEqual(1);
   });
 
   it("runs init from Runs tab and supports event/raw log modes", async () => {
@@ -309,33 +366,317 @@ describe("App", () => {
     });
   });
 
-  it("surfaces run errors and warnings in non-live status panel", async () => {
-    const runID = "run-status";
-    vi.stubGlobal("fetch", createFetchMock({
-      runID,
-      runStarted: true,
-      runStatus: {
-        [runID]: {
-          run_id: runID,
-          pipeline: "refresh",
-          status: "failed",
-          started_at: "2026-04-03T12:00:00Z",
-          finished_at: "2026-04-03T12:00:05Z",
-          warnings: ["artifact_quality: overview report is too sparse or placeholder-like for a succeeded run"],
-          error_code: "runner_unavailable",
-          error: "provider availability error (quota_or_permission)",
+  it("renders failed run status with warnings and error details for partial live state", async () => {
+    const runID = "run-partial-failed";
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runID,
+        runStarted: true,
+        runStatus: {
+          [runID]: {
+            run_id: runID,
+            pipeline: "refresh",
+            status: "failed",
+            started_at: "2026-04-03T12:00:00Z",
+            finished_at: "2026-04-03T12:05:00Z",
+            current_step: "refresh.step3.findings",
+            warnings: ["collect coverage incomplete", "draft promotion skipped"],
+            error_code: "run_partial_failed",
+            error: "runtime draft manifest invalid",
+          },
         },
-      },
-    }));
+      }),
+    );
 
     render(<App />);
 
     fireEvent.click(screen.getByTestId("tab-runs"));
 
-    expect(await screen.findByText(/Error code: runner_unavailable/i)).toBeInTheDocument();
-    expect(screen.getByText(/provider availability error \(quota_or_permission\)/i)).toBeInTheDocument();
-    expect(screen.getByText(/artifact_quality: overview report is too sparse or placeholder-like/i)).toBeInTheDocument();
+    await screen.findByTestId("run-status-panel");
+    expect(screen.getByTestId("run-status-value").textContent).toBe("failed");
+    expect(screen.getByTestId("run-lifecycle-value").textContent).toBe("terminal");
+    expect(screen.getByText("Current step: refresh.step3.findings")).toBeInTheDocument();
+    expect(screen.getByText("Error code: run_partial_failed")).toBeInTheDocument();
+    expect(screen.getByText("Error: runtime draft manifest invalid")).toBeInTheDocument();
+    expect(screen.getByTestId("run-status-warnings").textContent ?? "").toContain("collect coverage incomplete");
+    expect(screen.getByTestId("run-status-warnings").textContent ?? "").toContain("draft promotion skipped");
   });
+
+  it("renders running run status for active live progress state", async () => {
+    const runID = "run-live-running";
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runID,
+        runStarted: true,
+        runStatus: {
+          [runID]: {
+            run_id: runID,
+            pipeline: "refresh",
+            status: "running",
+            started_at: "2026-04-03T12:00:00Z",
+            current_step: "refresh.step2.asis_docs",
+            warnings: [],
+            error_code: null,
+            error: null,
+          },
+        },
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("tab-runs"));
+
+    await screen.findByTestId("run-status-panel");
+    expect(screen.getByTestId("run-status-value").textContent).toBe("running");
+    expect(screen.getByTestId("run-lifecycle-value").textContent).toBe("active");
+    expect(screen.getByText("Current step: refresh.step2.asis_docs")).toBeInTheDocument();
+    expect(screen.getByTestId("run-status-warnings-empty").textContent).toContain("Warnings: none");
+  });
+
+  it("renders incomplete lifecycle status when run error code marks incomplete cycle", async () => {
+    const runID = "run-incomplete";
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runID,
+        runStarted: true,
+        runStatus: {
+          [runID]: {
+            run_id: runID,
+            pipeline: "refresh",
+            status: "failed",
+            started_at: "2026-04-03T12:00:00Z",
+            finished_at: "2026-04-03T12:05:00Z",
+            current_step: "refresh.step4.proposals",
+            warnings: ["infra_incomplete_cycle breadcrumb"],
+            error_code: "infra_incomplete_cycle",
+            error: "profile exited before completion",
+          },
+        },
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("tab-runs"));
+
+    await screen.findByTestId("run-status-panel");
+    expect(screen.getByTestId("run-lifecycle-value").textContent).toBe("incomplete");
+  });
+
+  it("renders recovered lifecycle status for reconciled runs", async () => {
+    const runID = "run-recovered";
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runID,
+        runStarted: true,
+        runStatus: {
+          [runID]: {
+            run_id: runID,
+            pipeline: "refresh",
+            status: "failed",
+            started_at: "2026-04-03T12:00:00Z",
+            finished_at: "2026-04-03T12:05:00Z",
+            current_step: "refresh.step1.collect",
+            warnings: [],
+            error_code: "run_reconciled_after_restart",
+            error: "orphaned run reconciled after restart",
+          },
+        },
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("tab-runs"));
+
+    await screen.findByTestId("run-status-panel");
+    expect(screen.getByTestId("run-lifecycle-value").textContent).toBe("recovered");
+  });
+
+  it("switches to the next available run when the selected run disappears during refresh", async () => {
+    const baseFetch = createFetchMock();
+    let runListCalls = 0;
+    let staleRunStatusCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        runListCalls += 1;
+        if (runListCalls === 1) {
+          return jsonResponse({
+            items: [
+              {
+                run_id: "run-stale",
+                pipeline: "refresh",
+                status: "running",
+                started_at: "2026-04-03T12:00:00Z",
+                finished_at: null,
+                warnings: [],
+                error_code: null,
+                error: null,
+              },
+            ],
+          });
+        }
+        return jsonResponse({
+          items: [
+            {
+              run_id: "run-fresh",
+              pipeline: "refresh",
+              status: "succeeded",
+              started_at: "2026-04-03T12:01:00Z",
+              finished_at: "2026-04-03T12:01:15Z",
+              warnings: [],
+              error_code: null,
+              error: null,
+            },
+          ],
+        });
+      }
+
+      if (method === "GET" && url === "/api/pipeline/runs/run-stale") {
+        staleRunStatusCalls += 1;
+        if (staleRunStatusCalls >= 2) {
+          return jsonResponse({
+            error: {
+              code: "not_found",
+              message: "run-stale no longer exists",
+            },
+          }, 404);
+        }
+        return jsonResponse({
+          run_id: "run-stale",
+          pipeline: "refresh",
+          status: "running",
+          started_at: "2026-04-03T12:00:00Z",
+          finished_at: null,
+          current_step: "refresh.step2.asis_docs",
+          warnings: [],
+          error_code: null,
+          error: null,
+        });
+      }
+
+      if (method === "GET" && url === "/api/pipeline/runs/run-fresh") {
+        return jsonResponse({
+          run_id: "run-fresh",
+          pipeline: "refresh",
+          status: "succeeded",
+          started_at: "2026-04-03T12:01:00Z",
+          finished_at: "2026-04-03T12:01:15Z",
+          warnings: [],
+          error_code: null,
+          error: null,
+        });
+      }
+
+      if (method === "GET" && url === "/api/pipeline/runs/run-stale/artifacts") {
+        return jsonResponse({ run_id: "run-stale", artifacts: [] });
+      }
+
+      if (method === "GET" && url === "/api/pipeline/runs/run-fresh/artifacts") {
+        return jsonResponse({ run_id: "run-fresh", artifacts: [] });
+      }
+
+      if (method === "GET" && url.startsWith("/api/pipeline/runs/run-stale/logs?")) {
+        return jsonResponse({ run_id: "run-stale", items: [], next_cursor: 0, eof: true });
+      }
+
+      if (method === "GET" && url.startsWith("/api/pipeline/runs/run-fresh/logs?")) {
+        return jsonResponse({ run_id: "run-fresh", items: [], next_cursor: 0, eof: true });
+      }
+
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.click(screen.getByTestId("tab-runs"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("run-status-run-id").textContent).toBe("run-stale");
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("run-status-run-id").textContent).toBe("run-fresh");
+    }, { timeout: 4000 });
+    expect(screen.getByText("Selected run no longer exists; switched to run-fresh.")).toBeInTheDocument();
+  }, 10000);
+
+  it("keeps the selected run when history refresh is temporarily empty but run status still exists", async () => {
+    const baseFetch = createFetchMock();
+    let runListCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        runListCalls += 1;
+        if (runListCalls === 1) {
+          return jsonResponse({
+            items: [
+              {
+                run_id: "run-stale",
+                pipeline: "refresh",
+                status: "running",
+                started_at: "2026-04-03T12:00:00Z",
+                finished_at: null,
+                warnings: [],
+                error_code: null,
+                error: null,
+              },
+            ],
+          });
+        }
+        return jsonResponse({ items: [] });
+      }
+
+      if (method === "GET" && url === "/api/pipeline/runs/run-stale") {
+        return jsonResponse({
+          run_id: "run-stale",
+          pipeline: "refresh",
+          status: "running",
+          started_at: "2026-04-03T12:00:00Z",
+          finished_at: null,
+          current_step: "refresh.step2.asis_docs",
+          warnings: [],
+          error_code: null,
+          error: null,
+        });
+      }
+
+      if (method === "GET" && url === "/api/pipeline/runs/run-stale/artifacts") {
+        return jsonResponse({ run_id: "run-stale", artifacts: [] });
+      }
+
+      if (method === "GET" && url.startsWith("/api/pipeline/runs/run-stale/logs?")) {
+        return jsonResponse({ run_id: "run-stale", items: [], next_cursor: 0, eof: true });
+      }
+
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.click(screen.getByTestId("tab-runs"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("run-status-run-id").textContent).toBe("run-stale");
+    });
+
+    await waitFor(() => {
+      expect(runListCalls).toBeGreaterThanOrEqual(2);
+    }, { timeout: 4000 });
+
+    expect(screen.getByTestId("run-status-run-id").textContent).toBe("run-stale");
+    expect(screen.queryByText(/Selected run no longer exists;/)).not.toBeInTheDocument();
+  }, 10000);
 
   it("shows diagrams surface in Results tab and renders Mermaid preview", async () => {
     const runID = "run-diagrams";
@@ -398,43 +739,29 @@ describe("App", () => {
     expect(saveCalls.length).toBe(1);
   });
 
-  it("labels prompt packs as live-consumed and skill prompts as reference-only", async () => {
-    vi.stubGlobal("fetch", createFetchMock({
-      artifactText: {
-        "skills/prompt-packs/findings.md": "findings prompt pack\n",
-        "skills/findings/prompts/system.md": "reference system prompt\n",
-      },
-    }));
+  it("executes git-helper commit and proposal-branch actions from Baseline tab", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
 
     fireEvent.click(screen.getByTestId("tab-baseline"));
 
-    expect(
-      await screen.findByText(/Live headless runtime customization consumes prompt packs/i),
-    ).toBeInTheDocument();
+    const commitInput = await screen.findByLabelText("Commit message");
+    fireEvent.change(commitInput, { target: { value: "feat: tighten prompt policy" } });
+    fireEvent.click(screen.getByTestId("git-commit-btn"));
 
-    const select = await screen.findByLabelText(/select artifact/i);
-    const options = Array.from((select as HTMLSelectElement).options).map((option) => option.text);
-    expect(options).toContain("skills/prompt-packs/findings.md");
-    expect(options).toContain("skills/findings/prompts/system.md (reference-only)");
-  });
+    await screen.findByText("committed: feat: tighten prompt policy");
 
-  it("surfaces baseline bundle diagnostics from backend inventory", async () => {
-    vi.stubGlobal("fetch", createFetchMock({
-      baselineBundleWarnings: [
-        {
-          level: "warning",
-          code: "workspace.skills.bundle_manifest.stale",
-          message: "baseline bundle manifest version mismatch",
-        },
-      ],
-    }));
+    const branchInput = screen.getByLabelText("Proposal branch");
+    fireEvent.change(branchInput, { target: { value: "proposal/prompt-policy" } });
+    fireEvent.click(screen.getByTestId("git-proposal-branch-btn"));
 
-    render(<App />);
+    await screen.findByText("checked out proposal/prompt-policy");
 
-    fireEvent.click(screen.getByTestId("tab-baseline"));
-
-    expect(await screen.findByText(/workspace\.skills\.bundle_manifest\.stale/i)).toBeInTheDocument();
+    const commitCalls = fetchMock.mock.calls.filter((call) => call[0] === "/api/git/commit");
+    expect(commitCalls).toHaveLength(1);
+    const branchCalls = fetchMock.mock.calls.filter((call) => call[0] === "/api/git/proposal-branch");
+    expect(branchCalls).toHaveLength(1);
   });
 });

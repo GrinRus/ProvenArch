@@ -7,85 +7,10 @@ import (
 	"testing"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
+	"github.com/GrinRus/ProvenArch/internal/model"
+	"github.com/GrinRus/ProvenArch/internal/reports"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
-
-func TestRuntimeArtifactContextFindingsExcludesRepoRootsFromDefaultReadContext(t *testing.T) {
-	t.Parallel()
-
-	workspaceRoot := t.TempDir()
-	repoRoot := filepath.Join(workspaceRoot, "..", "repo-a")
-	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
-		t.Fatalf("mkdir repo root: %v", err)
-	}
-
-	execution := &pipelineExecution{
-		runID:             "run-ctx",
-		workspace:         workspace.Root{Path: workspaceRoot},
-		resolvedRepoPaths: map[string]string{"repo-a": repoRoot},
-	}
-
-	_, writeRoot, readRoots, err := execution.runtimeArtifactContext("refresh.step3.findings", "validator", []string{"repo-a"})
-	if err != nil {
-		t.Fatalf("runtime artifact context: %v", err)
-	}
-	finalRoot, resolveErr := execution.workspace.Resolve(runtimeFinalArtifactRoot(execution.runID))
-	if resolveErr != nil {
-		t.Fatalf("resolve final root: %v", resolveErr)
-	}
-	if !containsPathValue(readRoots, writeRoot) {
-		t.Fatalf("expected validator write root in read context, got %v", readRoots)
-	}
-	if !containsPathValue(readRoots, finalRoot) {
-		t.Fatalf("expected staged final root in read context, got %v", readRoots)
-	}
-	if containsPathValue(readRoots, workspaceRoot) {
-		t.Fatalf("did not expect workspace root in findings read context, got %v", readRoots)
-	}
-	if containsPathValue(readRoots, repoRoot) {
-		t.Fatalf("did not expect repo root in findings read context, got %v", readRoots)
-	}
-}
-
-func TestRuntimeArtifactContextCollectKeepsRepoRootsInReadContext(t *testing.T) {
-	t.Parallel()
-
-	workspaceRoot := t.TempDir()
-	repoRoot := filepath.Join(workspaceRoot, "..", "repo-b")
-	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
-		t.Fatalf("mkdir repo root: %v", err)
-	}
-
-	execution := &pipelineExecution{
-		runID:             "run-ctx",
-		workspace:         workspace.Root{Path: workspaceRoot},
-		resolvedRepoPaths: map[string]string{"repo-b": repoRoot},
-	}
-
-	_, writeRoot, readRoots, err := execution.runtimeArtifactContext("refresh.step1.collect", "repo-b", []string{"repo-b"})
-	if err != nil {
-		t.Fatalf("runtime artifact context: %v", err)
-	}
-	if !containsPathValue(readRoots, workspaceRoot) {
-		t.Fatalf("expected workspace root in collect read context, got %v", readRoots)
-	}
-	if !containsPathValue(readRoots, repoRoot) {
-		t.Fatalf("expected repo root in collect read context, got %v", readRoots)
-	}
-	if containsPathValue(readRoots, writeRoot) {
-		t.Fatalf("did not expect collect write_root in read context by default, got %v", readRoots)
-	}
-}
-
-func containsPathValue(values []string, target string) bool {
-	target = filepath.Clean(strings.TrimSpace(target))
-	for _, value := range values {
-		if filepath.Clean(strings.TrimSpace(value)) == target {
-			return true
-		}
-	}
-	return false
-}
 
 func TestReadShardDocumentRejectsPathTraversalOutsideArtifactRoot(t *testing.T) {
 	t.Parallel()
@@ -164,6 +89,58 @@ func TestReadShardDocumentResolvesWorkspaceRelativeArtifactRoot(t *testing.T) {
 	}
 }
 
+func TestLoadShardPackManifestFromRootRejectsWorkspaceRelativeDocumentPath(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	raw := []byte(`{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "shard_id": "bank-of-anthos-iac",
+  "agent_role": "shard-analyst",
+  "artifact_root": "reports/taskruns/run-1/staging/shards/bank-of-anthos-iac",
+  "documents": [
+    {
+      "id": "doc.iac",
+      "kind": "analysis",
+      "title": "IAC Overview",
+      "path": "reports/taskruns/run-1/staging/shards/bank-of-anthos-iac/iac-overview.md",
+      "canonical_path": "reports/as-is/bank-of-anthos/iac-overview.md",
+      "topics": ["iac"],
+      "citation_ids": ["cite.1"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.1",
+      "repo": "bank-of-anthos",
+      "path": "README.md",
+      "claim_ids": ["claim.1"],
+      "document_ids": ["doc.iac"]
+    }
+  ],
+  "semantic": {
+    "coverage": {"observed": [], "missing": [], "notes": []},
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}`)
+	if err := os.WriteFile(filepath.Join(root, shardPackManifestFile), raw, 0o644); err != nil {
+		t.Fatalf("write shard-pack manifest: %v", err)
+	}
+
+	_, _, err := loadShardPackManifestFromRoot(root)
+	if err == nil {
+		t.Fatalf("expected compile-time manifest guard failure")
+	}
+	if !strings.Contains(err.Error(), "artifact_root-relative") {
+		t.Fatalf("expected artifact_root-relative error, got %v", err)
+	}
+}
+
 func TestCollectAuthoredStageDocumentsMergesByCanonicalPath(t *testing.T) {
 	t.Parallel()
 
@@ -237,6 +214,76 @@ func TestPromoteValidatedArtifactsRejectsFailVerdict(t *testing.T) {
 	}
 }
 
+func TestPromoteValidatedArtifactsRemovesStaleManagedCanonicalFiles(t *testing.T) {
+	t.Parallel()
+
+	workspaceRoot := t.TempDir()
+	ws := workspace.Root{Path: workspaceRoot}
+
+	stagedPath := "reports/taskruns/run-1/staging/final/reports/as-is/overview.md"
+	absStagedPath := filepath.Join(workspaceRoot, filepath.FromSlash(stagedPath))
+	if err := os.MkdirAll(filepath.Dir(absStagedPath), 0o755); err != nil {
+		t.Fatalf("mkdir staged path: %v", err)
+	}
+	if err := os.WriteFile(absStagedPath, []byte("# Current Overview\n"), 0o644); err != nil {
+		t.Fatalf("write staged overview: %v", err)
+	}
+
+	staleReportPath := filepath.Join(workspaceRoot, "reports", "as-is", "services", "legacy.md")
+	if err := os.MkdirAll(filepath.Dir(staleReportPath), 0o755); err != nil {
+		t.Fatalf("mkdir stale report dir: %v", err)
+	}
+	if err := os.WriteFile(staleReportPath, []byte("# Legacy\n"), 0o644); err != nil {
+		t.Fatalf("write stale report: %v", err)
+	}
+
+	staleProposalPath := filepath.Join(workspaceRoot, "proposals", "proposal-legacy", "proposal.md")
+	if err := os.MkdirAll(filepath.Dir(staleProposalPath), 0o755); err != nil {
+		t.Fatalf("mkdir stale proposal dir: %v", err)
+	}
+	if err := os.WriteFile(staleProposalPath, []byte("# Legacy Proposal\n"), 0o644); err != nil {
+		t.Fatalf("write stale proposal: %v", err)
+	}
+
+	execution := &pipelineExecution{
+		workspace:  ws,
+		store:      model.NewStore(ws),
+		compiler:   reports.NewCompiler(ws),
+		stepStatus: RunInfo{CurrentStep: "init.step4.proposals"},
+		finalRunIndex: &contracts.FinalRunIndex{
+			RunID: "run-1",
+			CanonicalDocuments: []contracts.FinalRunDocument{
+				{
+					ID:            "doc.overview",
+					Kind:          "report",
+					Title:         "System Overview",
+					CanonicalPath: "reports/as-is/overview.md",
+					StagedPath:    stagedPath,
+				},
+			},
+			Semantic: contracts.SemanticSnapshot{},
+		},
+		validatorVerdict: &contracts.ValidatorVerdict{Verdict: "PASS"},
+	}
+
+	if err := execution.promoteValidatedArtifacts(); err != nil {
+		t.Fatalf("promote validated artifacts: %v", err)
+	}
+	if _, err := os.Stat(staleReportPath); !os.IsNotExist(err) {
+		t.Fatalf("expected stale report removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(staleProposalPath); !os.IsNotExist(err) {
+		t.Fatalf("expected stale proposal removed, stat err=%v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(workspaceRoot, "reports", "as-is", "overview.md"))
+	if err != nil {
+		t.Fatalf("read promoted overview: %v", err)
+	}
+	if !strings.Contains(string(content), "Current Overview") {
+		t.Fatalf("expected promoted overview content, got %q", string(content))
+	}
+}
+
 func TestValidateStagedArtifactsReportsMissingStagedDocument(t *testing.T) {
 	t.Parallel()
 
@@ -284,36 +331,6 @@ func TestValidateStagedArtifactsReportsMissingStagedDocument(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected missing_staged_document issue, got %#v", issues)
-	}
-}
-
-func TestValidateStagedArtifactsReportsMissingRequiredCanonicalLiveDocuments(t *testing.T) {
-	t.Parallel()
-
-	execution := &pipelineExecution{
-		finalRunIndex: &contracts.FinalRunIndex{
-			RunID: "run-1",
-			CanonicalDocuments: []contracts.FinalRunDocument{
-				{
-					ID:            "doc.agent.domain",
-					Kind:          "agent-output",
-					CanonicalPath: "reports/agent-outputs/domains/payments.md",
-					StagedPath:    "reports/taskruns/run-1/staging/final/reports/agent-outputs/domains/payments.md",
-				},
-			},
-		},
-		citationIndex: &contracts.CitationIndex{RunID: "run-1"},
-	}
-
-	issues := execution.validateStagedArtifacts()
-	missingRequired := 0
-	for _, issue := range issues {
-		if issue.Code == "missing_required_canonical_document" {
-			missingRequired++
-		}
-	}
-	if missingRequired != len(requiredCanonicalLiveDocuments) {
-		t.Fatalf("expected %d missing required canonical document issues, got %d (%#v)", len(requiredCanonicalLiveDocuments), missingRequired, issues)
 	}
 }
 
