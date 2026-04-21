@@ -1130,3 +1130,43 @@ EP-20260421-docs-first-audit-closure
 
 ### Risks
 - Основной риск — принять historical plan notes за active contract drift. Снижение риска: проверять только current code paths и source-of-truth docs/specs, а не переписывать историю решений.
+
+---
+
+## ExecPlan
+
+### Plan ID
+EP-20260421-main-merge-resolve
+
+### Context
+PR `codex/step-scoped-agent-pipeline` больше не mergeable в `main`: GitHub показывает `CONFLICTING`, а dry-run merge с `origin/main` подтверждает смысловые конфликты в contracts/orchestrator/runtime/harness/docs плюс шум в generated `internal/api/ui_dist/*`. Нужно довести ветку до реально mergeable состояния, не откатывая artifact-only архитектуру и не теряя live taxonomy/reporting hardening из `main`.
+
+### Goals (must have)
+- [ ] Смёржить `origin/main` в `codex/step-scoped-agent-pipeline` и разрешить все смысловые конфликты
+- [ ] Сохранить artifact-only docs-first модель без возврата `TaskResult`/legacy wire surface
+- [ ] Сохранить live taxonomy/reporting/harness additions из `main`
+- [ ] Пересинхронизировать docs/specs/schemas/fixtures/tests после merge
+- [ ] Пройти DoD: `make contracts`, `make test`, `make lint`, `make build`, `go vet ./...`
+- [ ] Проверить, что PR снова mergeable и что GitHub check suites создаются для нового SHA
+
+### Non-goals
+- [ ] Не делать mechanical conflict resolution в generated `internal/api/ui_dist/*`; эти файлы нужно просто регенерировать
+- [ ] Не менять public API shape сверх того, что уже закреплено artifact-only slice
+- [ ] Не откатывать single-agent `step3.findings` обратно в shard fan-out
+
+### Approach
+1. Выполнить реальный merge `origin/main` в текущую ветку.
+2. Сначала разрулить core-конфликты: `internal/contracts`, `internal/orchestrator`, `internal/runtime`, `internal/reports`, `internal/artifactquality`.
+3. Затем свести harness/scripts и только после этого docs/spec/tests/fixtures.
+4. Для `internal/api/ui_dist/*` не делать ручной merge: принять регенерацию из `make build`.
+5. После зелёного DoD повторно проверить mergeability PR и наличие check suites на новом SHA.
+
+### Acceptance criteria
+- [ ] `gh pr view 27 --json mergeable,mergeStateStatus` больше не показывает `CONFLICTING/DIRTY`
+- [ ] В branch code path по-прежнему нет `TaskResult`/legacy runtime surface
+- [ ] Dry-run merge с `origin/main` больше не выдаёт смысловых конфликтов
+- [ ] Generated UI assets согласованы с текущим UI build и embedded backend
+- [ ] Локальный DoD и `go vet ./...` зелёные
+
+### Risks
+- Самый большой риск — смешать artifact-only архитектуру ветки с partially legacy runtime/reporting кодом из `main`. Снижение риска: сначала сводить core contracts/runtime/orchestrator, затем уже harness/docs, и не принимать обратно deleted legacy packages.
