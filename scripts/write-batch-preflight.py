@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -43,6 +44,79 @@ def resolve_profile(script_path: Path) -> tuple[dict[str, object], str]:
     except subprocess.CalledProcessError as exc:
         raise SystemExit(f"failed to resolve profile via {script_path}: {exc}") from exc
     return json.loads(json_raw), line_raw
+
+
+def probe_provider_readiness(provider: str, command: str, repo_root: str) -> dict[str, str]:
+    command = (command or "").strip()
+    if command in {"", "not-selected"}:
+        return {
+            "provider": provider,
+            "status": "not_selected",
+            "subclass": "",
+            "reason": "",
+        }
+
+    env = os.environ.copy()
+    try:
+        completed = subprocess.run(
+            [command],
+            cwd=repo_root or None,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+    except FileNotFoundError:
+        return {
+            "provider": provider,
+            "status": "unavailable",
+            "subclass": "missing_binary",
+            "reason": f"command not found: {command}",
+        }
+    except Exception as exc:  # pragma: no cover - defensive shell failure path
+        return {
+            "provider": provider,
+            "status": "unavailable",
+            "subclass": "probe_failed",
+            "reason": str(exc),
+        }
+
+    combined = "\n".join(part for part in [completed.stdout, completed.stderr] if part).strip()
+    normalized = combined.lower()
+    quota_markers = (
+        "permission_error",
+        "permission error",
+        "usage limit",
+        "quota exceeded",
+        "quota",
+        "rate limit",
+        "rate_limit",
+        "api error: 403",
+        "api error: 429",
+        "status code: 403",
+        "status code: 429",
+    )
+    if any(marker in normalized for marker in quota_markers):
+        return {
+            "provider": provider,
+            "status": "unavailable",
+            "subclass": "quota_or_permission",
+            "reason": combined or f"{provider} probe reported quota or permission failure",
+        }
+    if completed.returncode != 0:
+        return {
+            "provider": provider,
+            "status": "unavailable",
+            "subclass": "command_failed",
+            "reason": combined or f"{provider} probe exited with code {completed.returncode}",
+        }
+    return {
+        "provider": provider,
+        "status": "ready",
+        "subclass": "",
+        "reason": combined,
+    }
 
 
 def main() -> int:

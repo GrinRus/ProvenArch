@@ -11,10 +11,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-try:
-    import yaml  # type: ignore
-except Exception as exc:  # pragma: no cover
-    raise SystemExit(f"PyYAML is required for parsing repos file: {exc}")
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from yaml_compat import load_yaml_file
 
 
 def parse_args() -> argparse.Namespace:
@@ -28,7 +28,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_repos_payload(repos_file: Path) -> list[dict[str, Any]]:
-    payload = yaml.safe_load(repos_file.read_text(encoding="utf-8"))
+    payload = load_yaml_file(repos_file)
     repos: Any
     if isinstance(payload, list):
         repos = payload

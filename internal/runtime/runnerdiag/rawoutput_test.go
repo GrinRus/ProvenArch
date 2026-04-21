@@ -94,3 +94,47 @@ func TestWriteFailureArtifactsTruncatesLargeOutput(t *testing.T) {
 		t.Fatalf("stored stdout artifact must include truncation marker")
 	}
 }
+
+func TestWriteFailureArtifactsMetadataIncludesTaskScopes(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	task := acpruntime.Task{
+		TaskID:       "task-scopes",
+		RunID:        "run-3",
+		StepID:       "refresh.step1.collect",
+		Workspace:    workspace,
+		RepoScopes:   []string{"repo-a"},
+		PathScopes:   []string{"services"},
+		StartedAtUTC: time.Date(2026, 4, 11, 10, 10, 0, 0, time.UTC),
+	}
+
+	artifacts, err := WriteFailureArtifacts(task, acpruntime.ProviderQwenCode, "stdout text", "stderr text")
+	if err != nil {
+		t.Fatalf("write failure artifacts: %v", err)
+	}
+	if _, err := os.Stat(artifacts.MetadataPath); err != nil {
+		t.Fatalf("stat metadata file: %v", err)
+	}
+
+	rawMeta, err := os.ReadFile(artifacts.MetadataPath)
+	if err != nil {
+		t.Fatalf("read metadata file: %v", err)
+	}
+	meta := map[string]any{}
+	if err := json.Unmarshal(rawMeta, &meta); err != nil {
+		t.Fatalf("parse metadata json: %v", err)
+	}
+	taskMeta, ok := meta["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected task block in metadata")
+	}
+	repoScopes, ok := taskMeta["repo_scopes"].([]any)
+	if !ok || len(repoScopes) != 1 || strings.TrimSpace(repoScopes[0].(string)) != "repo-a" {
+		t.Fatalf("unexpected repo_scopes payload %#v", taskMeta["repo_scopes"])
+	}
+	pathScopes, ok := taskMeta["path_scopes"].([]any)
+	if !ok || len(pathScopes) != 1 || strings.TrimSpace(pathScopes[0].(string)) != "services" {
+		t.Fatalf("unexpected path_scopes payload %#v", taskMeta["path_scopes"])
+	}
+}

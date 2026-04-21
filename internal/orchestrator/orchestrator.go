@@ -493,7 +493,12 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		execution.rewriteTerminalReports(RunStatusFailed)
 		failedInfo.Warnings = append([]string(nil), execution.warnings...)
 		failedInfo.FinishedAt = &finishedAt
-		if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusFailed, failedInfo.ErrorCode, failedInfo.Error); qualityErr == nil {
+		if qualityArtifact, qualityErr := execution.writeRunQualitySummary(
+			RunStatusFailed,
+			failedInfo.ErrorCode,
+			failedInfo.Error,
+			classifyRunFailureSummary(execution.stepStatus.CurrentStep, err),
+		); qualityErr == nil {
 			execution.addArtifacts(qualityArtifact)
 		} else {
 			failedInfo.Warnings = append(failedInfo.Warnings, fmt.Sprintf("run quality summary write failed: %v", qualityErr))
@@ -523,7 +528,17 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		execution.rewriteTerminalReports(RunStatusFailed)
 		failedInfo.Warnings = append([]string(nil), execution.warnings...)
 		failedInfo.FinishedAt = &finishedAt
-		if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusFailed, failedInfo.ErrorCode, failedInfo.Error); qualityErr == nil {
+		if qualityArtifact, qualityErr := execution.writeRunQualitySummary(
+			RunStatusFailed,
+			failedInfo.ErrorCode,
+			failedInfo.Error,
+			runFailureClassification{
+				Class:      failedInfo.ErrorCode,
+				StepID:     strings.TrimSpace(execution.stepStatus.CurrentStep),
+				ShortCause: strings.TrimSpace(failedInfo.Error),
+				Source:     "orchestrator.partial_failures",
+			},
+		); qualityErr == nil {
 			execution.addArtifacts(qualityArtifact)
 		} else {
 			failedInfo.Warnings = append(failedInfo.Warnings, fmt.Sprintf("run quality summary write failed: %v", qualityErr))
@@ -546,7 +561,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	succeeded.CurrentStep = execution.stepStatus.CurrentStep
 	succeeded.Warnings = append([]string(nil), execution.warnings...)
 	succeeded.FinishedAt = &finishedAt
-	if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusSucceeded, "", ""); qualityErr == nil {
+	if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusSucceeded, "", "", runFailureClassification{}); qualityErr == nil {
 		execution.addArtifacts(qualityArtifact)
 	} else {
 		succeeded.Warnings = append(succeeded.Warnings, fmt.Sprintf("run quality summary write failed: %v", qualityErr))

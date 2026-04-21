@@ -163,6 +163,11 @@ var baselinePromptPacks = map[string]string{
 	}),
 }
 
+func BaselinePromptPack(name string) (string, bool) {
+	content, ok := baselinePromptPacks[strings.TrimSpace(name)]
+	return content, ok
+}
+
 const baselineSubagentsYAML = `agents:
   - id: domain-analyst
     skills: [service-inventory, interface-extraction, integration-mapping, datastore-mapping, cicd-mapping, ownership-coverage]

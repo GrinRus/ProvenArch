@@ -1,3 +1,5 @@
+# Legacy compatibility slice. Keep for ad-hoc diagnostics; canonical release profiles live in
+# examples/e2e-profile-catalog.yaml and examples/e2e-matrix.release-*.yaml.
 version: 1
 timeout_profile: extended-window
 sweeps:

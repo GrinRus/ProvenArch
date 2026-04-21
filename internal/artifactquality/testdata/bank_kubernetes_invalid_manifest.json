@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step1.collect",
+  "shard_id": "bank-of-anthos-kubernetes-manifests",
+  "agent_role": "shard-analyst",
+  "artifact_root": "reports/taskruns/run-1/staging/shards/bank-of-anthos-kubernetes-manifests",
+  "repo_scopes": [
+    "bank-of-anthos"
+  ],
+  "path_scopes": [
+    "kubernetes-manifests"
+  ],
+  "documents": [
+    {
+      "id": "doc.k8s.manifests",
+      "kind": "report",
+      "title": "Kubernetes Manifest Inventory",
+      "path": "kubernetes-manifests.md",
+      "canonical_path": "reports/as-is/bank-of-anthos/kubernetes-manifests.md",
+      "topics": [
+        "kubernetes"
+      ],
+      "citation_ids": [
+        "cite.bank.k8s.readme"
+      ]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.bank.k8s.readme",
+      "repo": "bank-of-anthos",
+      "path": "kubernetes-manifests/README.md",
+      "claim_ids": [
+        "claim.bank.k8s.readme"
+      ],
+      "document_ids": [
+        "doc.k8s.manifests"
+      ]
+    }
+  ],
+  "compatibility": {
+    "coverage": true,
+    "questions": "owner mappings are unknown",
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}

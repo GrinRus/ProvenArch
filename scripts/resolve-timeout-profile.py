@@ -12,6 +12,11 @@ import os
 from pathlib import Path
 from typing import Any
 
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from yaml_compat import load_yaml_file
+
 KEYS = (
     "step_timeout_sec",
     "heartbeat_sec",
@@ -118,11 +123,7 @@ def load_workspace_timeouts(workspace_manifest: str) -> dict[str, Any]:
     manifest_path = Path(workspace_manifest).resolve()
     if not manifest_path.is_file():
         raise SystemExit(f"workspace manifest does not exist: {manifest_path}")
-    try:
-        import yaml  # type: ignore
-    except Exception as exc:  # pragma: no cover
-        raise SystemExit(f"PyYAML is required for timeout resolution: {exc}")
-    payload = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+    payload = load_yaml_file(manifest_path) or {}
     runtime = payload.get("runtime") if isinstance(payload, dict) else {}
     timeouts = runtime.get("timeouts") if isinstance(runtime, dict) else {}
     return timeouts if isinstance(timeouts, dict) else {}

@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step1.collect",
+  "shard_id": "bank-of-anthos-extras",
+  "agent_role": "shard-analyst",
+  "artifact_root": "reports/taskruns/run-1/staging/shards/bank-of-anthos-extras",
+  "repo_scopes": [
+    "bank-of-anthos"
+  ],
+  "path_scopes": [
+    "extras"
+  ],
+  "documents": [
+    {
+      "id": "doc.extras.overview",
+      "kind": "report",
+      "title": "Extras Overview",
+      "path": "extras-overview.md",
+      "canonical_path": "reports/as-is/bank-of-anthos/extras-overview.md",
+      "topics": [
+        "extras"
+      ],
+      "citation_ids": [
+        "cite.bank.extras.readme"
+      ]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.bank.extras.readme",
+      "repo": "bank-of-anthos",
+      "path": "README.md",
+      "claim_ids": [
+        "claim.bank.extras.readme"
+      ],
+      "document_ids": [
+        "doc.extras.overview"
+      ]
+    }
+  ],
+  "compatibility": {
+    "coverage": [
+      "extras"
+    ],
+    "questions": [],
+    "entities": [],
+    "edges": [
+      "bad-edge-shape"
+    ],
+    "findings": []
+  }
+}
