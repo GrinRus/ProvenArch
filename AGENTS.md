@@ -4,7 +4,7 @@ Codex читает `AGENTS.md` перед началом работы. Держ�
 
 ## Mission (MVP)
 Собрать ACP как **local-first** инструмент:
-- runtime анализа: **headless multi-provider** (`claude-code` default, `qwen-code` optional) + deterministic `fake` baseline
+- runtime анализа: **headless multi-provider** (`claude-code` default, `qwen-code` optional, `codex-code` release peer) + deterministic `fake` baseline
 - стек реализации: **Go backend/orchestrator + React UI**
 - outputs: Git‑версионируемые файлы workspace (entity-per-file модель)
 
@@ -31,7 +31,7 @@ Codex читает `AGENTS.md` перед началом работы. Держ�
 - Canonical release sweeps: `baseline` и `parallel-default`
 - Для одного `profile_id` sweep'ы `baseline` и `parallel-default` должны давать одинаковый shard-plan
 - Release verdict брать только из `reports/release_verdict_<matrix-id>.json` (`PASS` -> ready, иначе blocked)
-- В release gate требовать strict zero-failure и оба provider в PATH: `qwen`, `claude`
+- В release gate требовать strict zero-failure и все release providers в PATH: `qwen`, `claude`, `codex`
 - При изменении `schemas/*` или `docs/spec/*` обязательно синхронизировать:
   `docs/APPENDIX_SCHEMAS.md`, `examples/*`, `fixtures/*`, валидаторы/тесты и ADR rationale
 - Использовать skills (`.agents/skills/*`) когда применимо
@@ -44,7 +44,7 @@ Codex читает `AGENTS.md` перед началом работы. Держ�
 - Full live matrix harness остаётся manual trusted-machine pre-release gate, а не required CI merge gate
 
 ## Не делать
-- Не расширять список headless providers в MVP beyond `claude-code` и `qwen-code` без отдельного slice
+- Не расширять список headless providers в MVP beyond `claude-code`, `qwen-code`, `codex-code` без отдельного slice
 - Не “выдумывать” форматы данных/модели
 - Не писать в пользовательские репозитории; писать только в workspace
 - Не добавлять wrapper-скрипт поверх matrix harness для release gate

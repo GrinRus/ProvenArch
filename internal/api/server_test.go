@@ -1481,6 +1481,40 @@ func TestRuntimeExecutionPutRejectsInvalidValues(t *testing.T) {
 	}
 }
 
+func TestRuntimeExecutionPutRejectsInvalidStepProvider(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	requestBody := `{"execution":{"steps":{"step3_findings":"unsupported-provider"}}}`
+	request, err := http.NewRequest(http.MethodPut, httpServer.URL+"/api/runtime/execution", strings.NewReader(requestBody))
+	if err != nil {
+		t.Fatalf("create PUT /api/runtime/execution request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("PUT /api/runtime/execution: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", response.StatusCode)
+	}
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	if payload.Error.Code != "runtime_execution_invalid" {
+		t.Fatalf("expected runtime_execution_invalid code, got %q", payload.Error.Code)
+	}
+}
+
 func TestRuntimeProfileGetIncludesStepProviders(t *testing.T) {
 	t.Parallel()
 
@@ -1501,6 +1535,8 @@ runtime:
     steps:
       step2_as_is:
         provider: qwen-code
+      step3_findings:
+        provider: codex-code
 `
 	server := newTestServerFromManifest(t, manifest)
 	httpServer := httptest.NewServer(server.Handler())
@@ -1538,6 +1574,12 @@ runtime:
 	if payload.StepProviders.Effective["step2_as_is"] != "qwen-code" {
 		t.Fatalf("expected effective step2_as_is=qwen-code, got %+v", payload.StepProviders.Effective)
 	}
+	if payload.StepProviders.Persisted["step3_findings"] != "codex-code" {
+		t.Fatalf("expected persisted step3_findings=codex-code, got %+v", payload.StepProviders.Persisted)
+	}
+	if payload.StepProviders.Effective["step3_findings"] != "codex-code" {
+		t.Fatalf("expected effective step3_findings=codex-code, got %+v", payload.StepProviders.Effective)
+	}
 	if payload.StepProviders.Effective["step1_collect"] != "claude-code" {
 		t.Fatalf("expected default effective step1_collect=claude-code, got %+v", payload.StepProviders.Effective)
 	}
@@ -1551,6 +1593,9 @@ runtime:
 	if effectiveSteps["step2_as_is"] != "qwen-code" {
 		t.Fatalf("expected execution.effective.steps.step2_as_is=qwen-code, got %+v", effectiveSteps)
 	}
+	if effectiveSteps["step3_findings"] != "codex-code" {
+		t.Fatalf("expected execution.effective.steps.step3_findings=codex-code, got %+v", effectiveSteps)
+	}
 }
 
 func TestRuntimeExecutionPutSupportsStepProviderUpdate(t *testing.T) {
@@ -1560,7 +1605,7 @@ func TestRuntimeExecutionPutSupportsStepProviderUpdate(t *testing.T) {
 	httpServer := httptest.NewServer(server.Handler())
 	defer httpServer.Close()
 
-	requestBody := `{"execution":{"strategy":"parallel","steps":{"step2_as_is":"qwen-code","step4_proposals":"claude-code"}}}`
+	requestBody := `{"execution":{"strategy":"parallel","steps":{"step2_as_is":"qwen-code","step3_findings":"codex-code","step4_proposals":"claude-code"}}}`
 	request, err := http.NewRequest(http.MethodPut, httpServer.URL+"/api/runtime/execution", strings.NewReader(requestBody))
 	if err != nil {
 		t.Fatalf("create PUT /api/runtime/execution request: %v", err)
@@ -1592,6 +1637,9 @@ func TestRuntimeExecutionPutSupportsStepProviderUpdate(t *testing.T) {
 	if !strings.Contains(manifestPayload.Content, "provider: qwen-code") {
 		t.Fatalf("expected qwen step provider in manifest content, got:\n%s", manifestPayload.Content)
 	}
+	if !strings.Contains(manifestPayload.Content, "provider: codex-code") {
+		t.Fatalf("expected codex step provider in manifest content, got:\n%s", manifestPayload.Content)
+	}
 }
 
 func TestRunStatusIncludesEffectiveStepProviders(t *testing.T) {
@@ -1611,6 +1659,8 @@ runtime:
     steps:
       step2_as_is:
         provider: qwen-code
+      step3_findings:
+        provider: codex-code
 `
 	server := newTestServerFromManifest(t, manifest)
 	httpServer := httptest.NewServer(server.Handler())
@@ -1652,6 +1702,9 @@ runtime:
 	}
 	if detail.StepProviders["step2_as_is"] != "qwen-code" {
 		t.Fatalf("expected run detail step2_as_is=qwen-code, got %+v", detail.StepProviders)
+	}
+	if detail.StepProviders["step3_findings"] != "codex-code" {
+		t.Fatalf("expected run detail step3_findings=codex-code, got %+v", detail.StepProviders)
 	}
 	if detail.StepProviders["step1_collect"] != "claude-code" {
 		t.Fatalf("expected default step1_collect=claude-code, got %+v", detail.StepProviders)

@@ -15,9 +15,9 @@ Canonical source of truth для live profile taxonomy:
 |---|---|---|---|---|---:|---|
 | `regres fast` | `regres` | `e2e-matrix.regres-fast.bank-openedx.yaml`, `e2e-matrix.regres-fast.openstack.yaml` | `bank-of-anthos`, `openedx`, `openstack` | `small` | 3 | `short-window` |
 | `regres long` | `regres` | `e2e-matrix.regres-long.yaml` | `posthog`, `ftgo` | `medium` | 2 | `medium-window` |
-| `release fast` | `release` | `e2e-matrix.release-fast.yaml` | `bank-of-anthos`, `openedx` | `small` | 8 | `short-window` |
-| `release long` | `release` | `e2e-matrix.release-long.yaml` | `posthog`, `openstack` | `medium` | 8 | `medium-window` |
-| `release full` | `release` | `e2e-matrix.release-fast.yaml`, `e2e-matrix.release-long.yaml`, `e2e-matrix.release-full.ftgo-sentry.yaml` | все 6 canonical repo sets | `full` | 24 | `extended-window` |
+| `release fast` | `release` | `e2e-matrix.release-fast.yaml` | `bank-of-anthos`, `openedx` | `small` | 12 | `short-window` |
+| `release long` | `release` | `e2e-matrix.release-long.yaml` | `posthog`, `openstack` | `medium` | 12 | `medium-window` |
+| `release full` | `release` | `e2e-matrix.release-fast.yaml`, `e2e-matrix.release-long.yaml`, `e2e-matrix.release-full.ftgo-sentry.yaml` | все 6 canonical repo sets | `full` | 36 | `extended-window` |
 
 Sizing policy по текущему planner:
 - `small <= 16 shards`
@@ -35,9 +35,9 @@ Release verdict для readiness берётся только из `reports/relea
 ## 1) Scope и ограничения
 
 - `regres*` профили идут как `qwen-only` non-release baseline с implicit `baseline`.
-- `release*` профили идут как dual-provider run (`qwen + claude`) с explicit `baseline + parallel-default`.
-- Дополнительная ручная debug-фаза на `claude` остаётся вне regression profile definition.
-- Gate покрывает backend `2 providers × RUN_COUNT=1` на каждый `profile+sweep` + frontend `init-inspect` + frontend `cancel-refresh` для release slices.
+- `release*` профили идут как three-provider run (`qwen + claude + codex`) с explicit `baseline + parallel-default`.
+- Дополнительная ручная debug-фаза на `claude` или `codex` остаётся вне regression profile definition и запускается через `BATCH_PROVIDER_FILTER=<provider>`.
+- Gate покрывает backend `3 providers × RUN_COUNT=1` на каждый `profile+sweep` + frontend `init-inspect` + frontend `cancel-refresh` для release slices.
 - Product API/schema contracts не меняются.
 - Gate режим: manual pre-release, не required CI merge gate.
 - Verdict policy: strict zero-failure (`PASS|FAIL`).
@@ -52,6 +52,7 @@ Release verdict для readiness берётся только из `reports/relea
 - `curl`
 - `qwen`
 - `claude`
+- `codex`
 - доступ к `path` repos
 - доступ к `git_url` repos с pinned `ref`
 
@@ -246,12 +247,14 @@ profiles:
 E2E_MATRIX_FILE=examples/e2e-matrix.regres-fast.bank-openedx.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
+ACP_CODEX_CMD_BIN=codex \
 BATCH_PROVIDER_FILTER=qwen-code \
 ./scripts/full-run-batch-matrix.sh
 
 E2E_MATRIX_FILE=examples/e2e-matrix.regres-fast.openstack.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
+ACP_CODEX_CMD_BIN=codex \
 BATCH_PROVIDER_FILTER=qwen-code \
 ./scripts/full-run-batch-matrix.sh
 ```
@@ -264,11 +267,24 @@ BATCH_PROVIDER_FILTER=qwen-code \
 E2E_MATRIX_FILE=examples/e2e-matrix.regres-long.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
+ACP_CODEX_CMD_BIN=codex \
 BATCH_PROVIDER_FILTER=qwen-code \
 ./scripts/full-run-batch-matrix.sh
 ```
 
 Этот slice несёт `timeout_profile=medium-window`.
+
+3. Manual Codex diagnostic для regression slice (не часть canonical regres verdict, только targeted smoke):
+
+```bash
+E2E_MATRIX_FILE=examples/e2e-matrix.regres-long.yaml \
+ACP_CLAUDE_CMD_BIN=claude \
+ACP_QWEN_CMD_BIN=qwen \
+ACP_CODEX_CMD_BIN=codex \
+BATCH_PROVIDER_FILTER=codex-code \
+BATCH_SKIP_PRECHECK=1 \
+./scripts/full-run-batch-matrix.sh
+```
 
 Если после regression нужна дополнительная debug-фаза на `claude`, повторить нужный regression slice с:
 
@@ -347,39 +363,42 @@ PY
 - не править canonical matrix/curated preset под текущий хост;
 - остановить release gate как operational blocker и перенести прогон на подходящую trusted машину.
 
-5. `release fast` (small repos, 8 backend runs total):
+5. `release fast` (small repos, 12 backend runs total):
 
 ```bash
 MATRIX_ID=release-fast-$(date -u +%Y%m%dT%H%M%SZ) \
 E2E_MATRIX_FILE=examples/e2e-matrix.release-fast.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
+ACP_CODEX_CMD_BIN=codex \
 ACP_APPLY_TIMEOUTS_VIA_API=1 \
 ./scripts/full-run-batch-matrix.sh
 ```
 
 `examples/e2e-matrix.release-fast.yaml` несёт `timeout_profile=short-window`.
 
-6. `release long` (medium repos, 8 backend runs total):
+6. `release long` (medium repos, 12 backend runs total):
 
 ```bash
 MATRIX_ID=release-long-$(date -u +%Y%m%dT%H%M%SZ) \
 E2E_MATRIX_FILE=examples/e2e-matrix.release-long.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
+ACP_CODEX_CMD_BIN=codex \
 ACP_APPLY_TIMEOUTS_VIA_API=1 \
 ./scripts/full-run-batch-matrix.sh
 ```
 
 `examples/e2e-matrix.release-long.yaml` несёт `timeout_profile=medium-window`.
 
-7. `release full` (all canonical repo sets, 24 backend runs total):
+7. `release full` (all canonical repo sets, 36 backend runs total):
 
 ```bash
 MATRIX_ID=release-full-fast-$(date -u +%Y%m%dT%H%M%SZ) \
 E2E_MATRIX_FILE=examples/e2e-matrix.release-fast.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
+ACP_CODEX_CMD_BIN=codex \
 ACP_APPLY_TIMEOUTS_VIA_API=1 \
 ./scripts/full-run-batch-matrix.sh
 
@@ -387,6 +406,7 @@ MATRIX_ID=release-full-long-$(date -u +%Y%m%dT%H%M%SZ) \
 E2E_MATRIX_FILE=examples/e2e-matrix.release-long.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
+ACP_CODEX_CMD_BIN=codex \
 ACP_APPLY_TIMEOUTS_VIA_API=1 \
 ./scripts/full-run-batch-matrix.sh
 
@@ -394,6 +414,7 @@ MATRIX_ID=release-full-ftgo-sentry-$(date -u +%Y%m%dT%H%M%SZ) \
 E2E_MATRIX_FILE=examples/e2e-matrix.release-full.ftgo-sentry.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
+ACP_CODEX_CMD_BIN=codex \
 ACP_APPLY_TIMEOUTS_VIA_API=1 \
 ./scripts/full-run-batch-matrix.sh
 ```
@@ -485,8 +506,8 @@ Blocking signals:
 ### 6.5 Run lifecycle + cancel
 
 Проверяем:
-- frontend `init-inspect` = `passed` для `qwen-code` и `claude-code`;
-- frontend `cancel-refresh` = `passed` для `qwen-code` и `claude-code`;
+- frontend `init-inspect` = `passed` для всех трёх release providers (`qwen-code`, `claude-code`, `codex-code`);
+- frontend `cancel-refresh` = `passed` для всех трёх release providers (`qwen-code`, `claude-code`, `codex-code`);
 - frontend cancel smoke стартует из свежей копии `arch-workspace` выбранного backend run; reuse уже мутированного `frontend-workspace` из init-smoke не допускается;
 - preflight cancel-timeout guard соблюдён: `ACP_UI_CANCEL_POLL_TIMEOUT_SEC >= UI_E2E_CANCEL_STUB_SLEEP_SEC + UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC`;
 - cancel сценарий завершается `failed + run_canceled`;
@@ -540,7 +561,7 @@ Zero tolerance:
 ### 6.8 Additional Non-Release Checks
 
 После official release matrices выполнить отдельно:
-- parallel shard smoke: два параллельных `full-run-batch-5x2.sh` с разными `BATCH_ID` и `BATCH_PROVIDER_FILTER=qwen-code|claude-code`, `BATCH_RUN_SELECTION=1`, `BATCH_FRONTEND_MODE=never`;
+- parallel shard smoke: два параллельных `full-run-batch-5x2.sh` с разными `BATCH_ID`, разными single-provider `BATCH_PROVIDER_FILTER` (например, `qwen-code` и `claude-code`; при необходимости можно заменить один из них на `codex-code`), `BATCH_RUN_SELECTION=1`, `BATCH_FRONTEND_MODE=never`;
 - forced-incomplete diagnostic run: large multi-repo batch с diagnostic timeout override, чтобы проверить `report_mode=incomplete`, triage-only wording и failure-class precedence.
 
 Эти прогоны не использовать для release verdict; они нужны только как additional evidence по новому функционалу.
@@ -591,13 +612,13 @@ ACP_APPLY_TIMEOUTS_VIA_API=1 \
 
 Release `PASS` только если одновременно:
 1. Во всех `profile+sweep` строках `strict_status=passed`.
-2. Для каждого `profile+sweep`: `backend_total_runs=2`, `backend_hard_pass=2`.
+2. Для каждого `profile+sweep`: `backend_total_runs=3`, `backend_hard_pass=3`.
 3. `runtime_contract_failed/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing/precheck_failed = 0`.
 4. `semantic_hard_fail=0`, `off_topic_hits=0`.
 5. `artifact_source` только `snapshot` (без `workspace-fallback`).
 6. Нет `analysis:evidence-scope` и `analysis:cross-repo-missing`.
 7. Нет runtime flow violations (`runtime:*`, `runtime_flow_failed`).
-8. Frontend live/cancel smoke: `passed` для обоих провайдеров.
+8. Frontend live/cancel smoke: `passed` для всех трёх release providers (`qwen`, `claude`, `codex`).
 9. Нет artifact-quality blockers (`artifact_quality:*` в run warnings / batch quality report).
 
 Любое нарушение => `RELEASE BLOCKED`.

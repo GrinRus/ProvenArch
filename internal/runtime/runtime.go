@@ -19,6 +19,7 @@ type Provider string
 const (
 	ProviderClaudeCode Provider = "claude-code"
 	ProviderQwenCode   Provider = "qwen-code"
+	ProviderCodexCode  Provider = "codex-code"
 )
 
 const RuntimeProviderEnv = "ACP_RUNTIME_PROVIDER"
@@ -43,8 +44,16 @@ func ParseProvider(value string) (Provider, error) {
 		return ProviderClaudeCode, nil
 	case string(ProviderQwenCode):
 		return ProviderQwenCode, nil
+	case string(ProviderCodexCode):
+		return ProviderCodexCode, nil
 	default:
-		return "", fmt.Errorf("unsupported runtime provider %q (allowed: %s, %s)", value, ProviderClaudeCode, ProviderQwenCode)
+		return "", fmt.Errorf(
+			"unsupported runtime provider %q (allowed: %s, %s, %s)",
+			value,
+			ProviderClaudeCode,
+			ProviderQwenCode,
+			ProviderCodexCode,
+		)
 	}
 }
 

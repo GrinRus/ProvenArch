@@ -232,6 +232,31 @@ func TestRenderManifestIncludesRuntimeStepProviders(t *testing.T) {
 	}
 }
 
+func TestRenderManifestIncludesCodexRuntimeStepProvider(t *testing.T) {
+	t.Parallel()
+
+	raw, err := RenderManifest(Manifest{
+		Version: 1,
+		Repos: []RepoSource{
+			{Name: "payments", Path: "/tmp/payments"},
+		},
+		Runtime: &RuntimeConfig{
+			Profile: &RuntimeProfileConfig{
+				Steps: &RuntimeStepsConfig{
+					Step3Findings: &RuntimeStepConfig{Provider: "codex-code"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("render manifest: %v", err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, "step3_findings:") || !strings.Contains(text, "provider: codex-code") {
+		t.Fatalf("expected codex step provider in manifest, got:\n%s", text)
+	}
+}
+
 func TestResolveRejectsAbsoluteAndTraversal(t *testing.T) {
 	t.Parallel()
 

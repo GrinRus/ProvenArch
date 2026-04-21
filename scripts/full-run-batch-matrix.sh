@@ -21,6 +21,7 @@ REPORTS_ROOT="${REPORTS_ROOT:-$E2E_TMP_ROOT/reports}"
 MATRIX_ROOT="${MATRIX_ROOT:-$E2E_TMP_ROOT/matrix/$MATRIX_ID}"
 ACP_CLAUDE_CMD_BIN="${ACP_CLAUDE_CMD_BIN:-claude}"
 ACP_QWEN_CMD_BIN="${ACP_QWEN_CMD_BIN:-qwen}"
+ACP_CODEX_CMD_BIN="${ACP_CODEX_CMD_BIN:-codex}"
 ACP_APPLY_TIMEOUTS_VIA_API="${ACP_APPLY_TIMEOUTS_VIA_API:-1}"
 E2E_MATRIX_RELEASE_MODE="${E2E_MATRIX_RELEASE_MODE:-auto}"
 E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES="${E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES:-0}"
@@ -41,7 +42,7 @@ PROFILE_META_CACHE_SOURCE_KIND="mixed"
 PROFILE_META_CACHE_EXPECTED_REPO_COUNT=0
 MATRIX_TIMEOUT_PROFILE=""
 MATRIX_TIMEOUT_ENV_ASSIGNMENTS=()
-declare -a MATRIX_ALL_PROVIDERS=("qwen-code" "claude-code")
+declare -a MATRIX_ALL_PROVIDERS=("qwen-code" "claude-code" "codex-code")
 declare -a MATRIX_SELECTED_PROVIDERS=()
 declare -a MATRIX_SELECTED_RUN_INDEXES=()
 MATRIX_SELECTED_PROVIDERS_CSV=""
@@ -342,13 +343,13 @@ resolve_selected_providers() {
     for token in "${tokens[@]}"; do
       [[ -z "$token" ]] && continue
       case "$token" in
-        qwen-code|claude-code)
+        qwen-code|claude-code|codex-code)
           if ! array_contains "$token" "${MATRIX_SELECTED_PROVIDERS[@]-}"; then
             MATRIX_SELECTED_PROVIDERS+=("$token")
           fi
           ;;
         *)
-          die "BATCH_PROVIDER_FILTER contains unsupported provider '$token' (allowed: qwen-code, claude-code, all)"
+          die "BATCH_PROVIDER_FILTER contains unsupported provider '$token' (allowed: qwen-code, claude-code, codex-code, all)"
           ;;
       esac
     done
@@ -473,11 +474,24 @@ fi
 
 require_cmd bash
 require_cmd python3
-require_cmd "$ACP_CLAUDE_CMD_BIN"
-require_cmd "$ACP_QWEN_CMD_BIN"
 acp_ensure_no_legacy_env_set die
 resolve_selected_providers
 resolve_selected_run_indexes
+if [[ "$RELEASE_MODE" == "1" ]]; then
+  require_cmd "$ACP_QWEN_CMD_BIN"
+  require_cmd "$ACP_CLAUDE_CMD_BIN"
+  require_cmd "$ACP_CODEX_CMD_BIN"
+else
+  if array_contains "qwen-code" "${MATRIX_SELECTED_PROVIDERS[@]-}"; then
+    require_cmd "$ACP_QWEN_CMD_BIN"
+  fi
+  if array_contains "claude-code" "${MATRIX_SELECTED_PROVIDERS[@]-}"; then
+    require_cmd "$ACP_CLAUDE_CMD_BIN"
+  fi
+  if array_contains "codex-code" "${MATRIX_SELECTED_PROVIDERS[@]-}"; then
+    require_cmd "$ACP_CODEX_CMD_BIN"
+  fi
+fi
 
 mkdir -p "$MATRIX_ROOT" "$REPORTS_ROOT"
 mkdir -p "$(dirname "$MATRIX_DRIVER_LOG")"
@@ -872,6 +886,7 @@ while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sw
       "REPORTS_ROOT=$REPORTS_ROOT" \
       "ACP_CLAUDE_CMD_BIN=$ACP_CLAUDE_CMD_BIN" \
       "ACP_QWEN_CMD_BIN=$ACP_QWEN_CMD_BIN" \
+      "ACP_CODEX_CMD_BIN=$ACP_CODEX_CMD_BIN" \
       "ACP_APPLY_TIMEOUTS_VIA_API=$ACP_APPLY_TIMEOUTS_VIA_API" \
       "$BATCH_SCRIPT"
   ) >"$driver_log" 2>&1; then
@@ -1029,7 +1044,7 @@ for record in records:
 
 required_release_sweeps = ("baseline", "parallel-default")
 release_profile_order = ("single-path", "single-git_url", "multi-path", "multi-git_url")
-required_release_providers = ("qwen-code", "claude-code")
+required_release_providers = ("qwen-code", "claude-code", "codex-code")
 
 
 def parse_frontend_status(path: Path, provider: str) -> str:
@@ -1251,6 +1266,7 @@ def strict_blockers(
     frontend_provider_keys = {
         "qwen-code": ("frontend_qwen_status", "frontend_cancel_qwen_status"),
         "claude-code": ("frontend_claude_status", "frontend_cancel_claude_status"),
+        "codex-code": ("frontend_codex_status", "frontend_cancel_codex_status"),
     }
     for provider in required_frontend_providers:
         init_key, cancel_key = frontend_provider_keys[provider]
@@ -1349,8 +1365,10 @@ header = [
     "runtime_flow_issue_hits",
     "frontend_qwen_status",
     "frontend_claude_status",
+    "frontend_codex_status",
     "frontend_cancel_qwen_status",
     "frontend_cancel_claude_status",
+    "frontend_cancel_codex_status",
     "blocking_reasons",
     "run_matrix_tsv",
     "quality_report_md",
@@ -1360,7 +1378,7 @@ tsv_lines = ["\t".join(header)]
 md_lines = [
     "# Profile Matrix",
     "",
-    "| profile_id | sweep_id | batch_id | status | strict | shard_plan_invariant | backend_hard/total | semantic_hard_fail | off_topic_hits | artifact_non_snapshot | evidence_scope | cross_repo_missing | runtime_flow | frontend init (qwen/claude) | frontend cancel (qwen/claude) | blockers | run_matrix | quality_report |",
+    "| profile_id | sweep_id | batch_id | status | strict | shard_plan_invariant | backend_hard/total | semantic_hard_fail | off_topic_hits | artifact_non_snapshot | evidence_scope | cross_repo_missing | runtime_flow | frontend init (qwen/claude/codex) | frontend cancel (qwen/claude/codex) | blockers | run_matrix | quality_report |",
     "|---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|---|",
 ]
 
@@ -1430,8 +1448,10 @@ for rec in records:
     frontend_statuses = {
         "frontend_qwen_status": parse_frontend_status(frontend_matrix_md, "qwen-code"),
         "frontend_claude_status": parse_frontend_status(frontend_matrix_md, "claude-code"),
+        "frontend_codex_status": parse_frontend_status(frontend_matrix_md, "codex-code"),
         "frontend_cancel_qwen_status": parse_frontend_status(frontend_cancel_matrix_md, "qwen-code"),
         "frontend_cancel_claude_status": parse_frontend_status(frontend_cancel_matrix_md, "claude-code"),
+        "frontend_cancel_codex_status": parse_frontend_status(frontend_cancel_matrix_md, "codex-code"),
     }
 
     shard_plan_invariant = invariant_status_by_batch.get(str(rec["batch_id"]), "not_compared")
@@ -1489,8 +1509,10 @@ for rec in records:
                 str(stats["runtime_flow_issue_hits"]),
                 frontend_statuses["frontend_qwen_status"],
                 frontend_statuses["frontend_claude_status"],
+                frontend_statuses["frontend_codex_status"],
                 frontend_statuses["frontend_cancel_qwen_status"],
                 frontend_statuses["frontend_cancel_claude_status"],
+                frontend_statuses["frontend_cancel_codex_status"],
                 "; ".join(blockers) if blockers else "-",
                 str(rec["run_matrix_tsv"]),
                 str(rec["quality_report_md"]),
@@ -1505,8 +1527,8 @@ for rec in records:
         f"{stats['hard']}/{stats['total']} | {stats['semantic_hard_fail']} | {stats['off_topic_hits']} | {stats['artifact_non_snapshot']} | "
         f"{stats['evidence_scope_hits']} | {stats['cross_repo_missing_hits']} | "
         f"{int(stats['runtime_flow_failed']) + int(stats['runtime_flow_issue_hits'])} | "
-        f"{frontend_statuses['frontend_qwen_status']}/{frontend_statuses['frontend_claude_status']} | "
-        f"{frontend_statuses['frontend_cancel_qwen_status']}/{frontend_statuses['frontend_cancel_claude_status']} | "
+        f"{frontend_statuses['frontend_qwen_status']}/{frontend_statuses['frontend_claude_status']}/{frontend_statuses['frontend_codex_status']} | "
+        f"{frontend_statuses['frontend_cancel_qwen_status']}/{frontend_statuses['frontend_cancel_claude_status']}/{frontend_statuses['frontend_cancel_codex_status']} | "
         f"{'; '.join(blockers) if blockers else '-'} | {rec['run_matrix_md']} | {rec['quality_report_md']} |"
     )
 

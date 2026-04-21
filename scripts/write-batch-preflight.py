@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Write full-run-batch-5x2 preflight payload")
+    parser = argparse.ArgumentParser(description="Write legacy full-run-batch-5x2 preflight payload")
     parser.add_argument("--out", required=True, help="Output preflight JSON path")
     parser.add_argument("--generated-at-utc", required=True)
     parser.add_argument("--provenarch-root", required=True)
@@ -28,6 +28,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--claude-version-line", required=True)
     parser.add_argument("--qwen-path", required=True)
     parser.add_argument("--qwen-version-line", required=True)
+    parser.add_argument("--codex-path", required=True)
+    parser.add_argument("--codex-version-line", required=True)
     return parser.parse_args()
 
 
@@ -161,6 +163,10 @@ def main() -> int:
             "qwen": {
                 "path": args.qwen_path,
                 "version_line": args.qwen_version_line,
+            },
+            "codex": {
+                "path": args.codex_path,
+                "version_line": args.codex_version_line,
             },
         },
     }

@@ -65,7 +65,7 @@ func TestRunSubcommandHelpReturnsZero(t *testing.T) {
 	if code != exitCodeOK {
 		t.Fatalf("expected exit code %d, got %d", exitCodeOK, code)
 	}
-	if !strings.Contains(stderr.String(), "Usage: acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]") {
+	if !strings.Contains(stderr.String(), "Usage: acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]") {
 		t.Fatalf("expected run usage in stderr, got %q", stderr.String())
 	}
 }
@@ -801,6 +801,30 @@ func TestServeHeadlessQwenDryRunDoesNotPreflightMissingCommand(t *testing.T) {
 	}
 }
 
+func TestServeHeadlessCodexDryRunDoesNotPreflightMissingCommand(t *testing.T) {
+	root := writeWorkspace(t)
+	t.Setenv("ACP_CODEX_CMD", "definitely-missing-acp-codex-command")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"serve",
+		"--workspace", root,
+		"--runtime", "headless",
+		"--runtime-provider", "codex-code",
+		"--dry-run",
+	}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d: stderr=%q", exitCodeOK, code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr for dry-run without preflight, got %q", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "runtime provider: codex-code") {
+		t.Fatalf("expected codex-code output, got %q", stdout.String())
+	}
+}
+
 func TestServeHeadlessClaudeCodeWithStubRunnerDryRunSucceeds(t *testing.T) {
 	root := writeWorkspace(t)
 	t.Setenv("ACP_CLAUDE_CMD", writeStubHeadlessRunner(t, "claude-code"))
@@ -855,6 +879,33 @@ func TestServeHeadlessQwenCodeWithStubRunnerDryRunSucceeds(t *testing.T) {
 	}
 }
 
+func TestServeHeadlessCodexCodeWithStubRunnerDryRunSucceeds(t *testing.T) {
+	root := writeWorkspace(t)
+	t.Setenv("ACP_CODEX_CMD", writeStubCodexRunner(t))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"serve",
+		"--workspace", root,
+		"--runtime", "headless",
+		"--runtime-provider", "codex-code",
+		"--dry-run",
+	}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d: stderr=%q", exitCodeOK, code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "runtime mode: headless") {
+		t.Fatalf("expected runtime mode output, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "runtime provider: codex-code") {
+		t.Fatalf("expected runtime provider output, got %q", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "ignored in fake mode") {
+		t.Fatalf("did not expect fake-mode provider note, got %q", stdout.String())
+	}
+}
+
 func TestRunHeadlessQwenReturnsRunnerUnavailableWhenCommandMissing(t *testing.T) {
 	root := writeWorkspace(t)
 	t.Setenv("ACP_QWEN_CMD", "definitely-missing-acp-qwen-command")
@@ -877,6 +928,31 @@ func TestRunHeadlessQwenReturnsRunnerUnavailableWhenCommandMissing(t *testing.T)
 	}
 	if !strings.Contains(stderr.String(), "qwen-code") {
 		t.Fatalf("expected qwen-code diagnostics, got %q", stderr.String())
+	}
+}
+
+func TestRunHeadlessCodexReturnsRunnerUnavailableWhenCommandMissing(t *testing.T) {
+	root := writeWorkspace(t)
+	t.Setenv("ACP_CODEX_CMD", "definitely-missing-acp-codex-command")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"run",
+		"--workspace", root,
+		"--pipeline", "refresh",
+		"--runtime", "headless",
+		"--runtime-provider", "codex-code",
+		"--non-interactive",
+	}, &stdout, &stderr)
+	if code != exitCodeValidation {
+		t.Fatalf("expected exit code %d, got %d", exitCodeValidation, code)
+	}
+	if !strings.Contains(stderr.String(), "runner_unavailable") {
+		t.Fatalf("expected runner_unavailable diagnostics, got %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "codex-code") {
+		t.Fatalf("expected codex-code diagnostics, got %q", stderr.String())
 	}
 }
 
@@ -953,6 +1029,31 @@ func TestRunHeadlessQwenCodeWithStubRunnerSucceeds(t *testing.T) {
 	}
 	if !containsQwen {
 		t.Fatalf("expected qwen runtime in quality summary, got %+v", quality.RuntimeVersions)
+	}
+}
+
+func TestRunHeadlessCodexCodeWithStubRunnerSucceeds(t *testing.T) {
+	root := writeWorkspace(t)
+	t.Setenv("ACP_CODEX_CMD", writeStubCodexRunner(t))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"run",
+		"--workspace", root,
+		"--pipeline", "init",
+		"--runtime", "headless",
+		"--runtime-provider", "codex-code",
+		"--non-interactive",
+	}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d: stderr=%q", exitCodeOK, code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "status: succeeded") {
+		t.Fatalf("expected succeeded run, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "runtime provider: codex-code") {
+		t.Fatalf("expected runtime provider output, got %q", stdout.String())
 	}
 }
 
@@ -1275,6 +1376,210 @@ PY
 `
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write stub headless runner: %v", err)
+	}
+	return path
+}
+
+func writeStubCodexRunner(t *testing.T) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "stub-codex-runner.sh")
+	script := `#!/usr/bin/env bash
+set -eu
+TASK_PROMPT="$(cat)"
+TASK_PROMPT="$TASK_PROMPT" python3 - <<'PY'
+import json
+import os
+import pathlib
+import re
+
+prompt = os.environ.get("TASK_PROMPT", "")
+
+def policy_value(name):
+    match = re.search(r'%s(?:\s+\([^)]+\))?\s*=\s*"([^"]+)"' % re.escape(name), prompt)
+    return match.group(1).strip() if match else ""
+
+def step_id():
+    match = re.search(r"STEP POLICY ([A-Za-z0-9._-]+):", prompt)
+    if match:
+        return match.group(1).strip()
+    if "Write constitution-draft.json in write_root." in prompt:
+        return "init.step0.constitution"
+    if "Write asis-draft-manifest.json in write_root." in prompt:
+        return "init.step2.asis_docs"
+    if "Write validator-verdict.json in write_root." in prompt:
+        return "refresh.step3.findings"
+    if "Write proposals-draft-manifest.json in write_root." in prompt:
+        return "init.step4.proposals"
+    return "init.step1.collect"
+
+def slugify(value):
+    return re.sub(r'[^a-z0-9]+', '-', value.lower()).strip('-') or "stub"
+
+def run_id_from_path(path_value):
+    parts = pathlib.Path(path_value).parts
+    for idx, part in enumerate(parts):
+        if part == "taskruns" and idx + 1 < len(parts):
+            return parts[idx + 1]
+    return "run-1"
+
+write_root = policy_value("write_root")
+draft_root = policy_value("draft_final_root")
+artifact_root = policy_value("artifact_root") or write_root
+agent_role = policy_value("agent_role") or "architect"
+step_contract = policy_value("step_contract") or "draft"
+current_step = step_id()
+run_id = run_id_from_path(write_root or draft_root or "/tmp/run-1")
+
+if current_step == "init.step0.constitution":
+    os.makedirs(write_root, exist_ok=True)
+    os.makedirs(draft_root, exist_ok=True)
+    with open(os.path.join(draft_root, "charter-overview.md"), "w", encoding="utf-8") as handle:
+        handle.write("# Stub Constitution\n")
+    with open(os.path.join(draft_root, "baseline-subagents.yaml"), "w", encoding="utf-8") as handle:
+        handle.write("version: 1\n")
+    manifest = {
+        "version": 1,
+        "run_id": run_id,
+        "step_id": current_step,
+        "step_contract": step_contract,
+        "agent_role": agent_role,
+        "summary": "stub codex constitution draft",
+        "outputs": [
+            {
+                "path": "charter-overview.md",
+                "canonical_path": "charter/overview.md",
+                "kind": "charter",
+                "title": "Constitution"
+            },
+            {
+                "path": "baseline-subagents.yaml",
+                "canonical_path": "skills/subagents.yaml",
+                "kind": "bundle",
+                "title": "Baseline Subagents"
+            }
+        ]
+    }
+    with open(os.path.join(write_root, "constitution-draft.json"), "w", encoding="utf-8") as handle:
+        json.dump(manifest, handle)
+elif current_step in {"init.step2.asis_docs", "refresh.step2.asis_docs"}:
+    os.makedirs(write_root, exist_ok=True)
+    os.makedirs(draft_root, exist_ok=True)
+    with open(os.path.join(draft_root, "overview.md"), "w", encoding="utf-8") as handle:
+        handle.write("# Stub As-Is\n")
+    manifest = {
+        "version": 1,
+        "run_id": run_id,
+        "step_id": current_step,
+        "step_contract": step_contract,
+        "agent_role": agent_role,
+        "summary": "stub codex as-is draft",
+        "outputs": [
+            {
+                "path": "overview.md",
+                "canonical_path": "reports/as-is/overview.md",
+                "kind": "report",
+                "title": "Stub As-Is Overview"
+            }
+        ]
+    }
+    with open(os.path.join(write_root, "asis-draft-manifest.json"), "w", encoding="utf-8") as handle:
+        json.dump(manifest, handle)
+elif current_step in {"init.step3.findings", "refresh.step3.findings"}:
+    os.makedirs(write_root, exist_ok=True)
+    verdict = {
+        "version": 1,
+        "run_id": run_id,
+        "generated_at": "2026-04-21T10:00:00Z",
+        "verdict": "PASS",
+        "summary": "stub codex validator verdict",
+        "checked_paths": ["reports/taskruns/" + run_id + "/staging/final/final-run-index.json"],
+        "fixed_paths": [],
+        "findings": [],
+        "questions": []
+    }
+    with open(os.path.join(write_root, "validator-verdict.json"), "w", encoding="utf-8") as handle:
+        json.dump(verdict, handle)
+elif current_step in {"init.step4.proposals", "refresh.step4.proposals"}:
+    os.makedirs(write_root, exist_ok=True)
+    os.makedirs(draft_root, exist_ok=True)
+    with open(os.path.join(draft_root, "proposal.md"), "w", encoding="utf-8") as handle:
+        handle.write("# Stub Proposal\n")
+    manifest = {
+        "version": 1,
+        "run_id": run_id,
+        "step_id": current_step,
+        "step_contract": step_contract,
+        "agent_role": agent_role,
+        "summary": "stub codex proposal draft",
+        "outputs": [
+            {
+                "path": "proposal.md",
+                "canonical_path": "proposals/proposal-baseline/proposal.md",
+                "kind": "proposal",
+                "title": "Stub Proposal"
+            }
+        ]
+    }
+    with open(os.path.join(write_root, "proposals-draft-manifest.json"), "w", encoding="utf-8") as handle:
+        json.dump(manifest, handle)
+else:
+    os.makedirs(write_root, exist_ok=True)
+    shard_id = slugify(os.path.basename(write_root))
+    document_name = shard_id + ".md"
+    with open(os.path.join(write_root, document_name), "w", encoding="utf-8") as handle:
+        handle.write("# Stub Analysis\n")
+    manifest = {
+        "version": 1,
+        "run_id": run_id,
+        "step_id": current_step,
+        "shard_id": shard_id,
+        "agent_role": "shard-analyst",
+        "artifact_root": artifact_root,
+        "repo_scopes": [],
+        "path_scopes": [],
+        "summary": "stub codex shard pack",
+        "documents": [
+            {
+                "id": "doc." + shard_id,
+                "kind": "report",
+                "title": "Stub Analysis",
+                "path": document_name,
+                "canonical_path": "reports/agent-outputs/domains/" + document_name,
+                "topics": ["stub"],
+                "citation_ids": ["cite." + shard_id],
+                "status": "staged"
+            }
+        ],
+        "citations": [
+            {
+                "id": "cite." + shard_id,
+                "repo": "stub-repo",
+                "path": "README.md",
+                "claim_ids": ["claim.stub"],
+                "document_ids": ["doc." + shard_id]
+            }
+        ],
+        "semantic": {
+            "coverage": {
+                "observed": ["stub"],
+                "missing": ["owner mappings"],
+                "notes": ["stub codex manifest"]
+            },
+            "questions": [],
+            "entities": [],
+            "edges": [],
+            "findings": []
+        }
+    }
+    with open(os.path.join(write_root, "shard-pack-manifest.json"), "w", encoding="utf-8") as handle:
+        json.dump(manifest, handle)
+
+print('{"type":"result","status":"ok"}')
+PY
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write stub codex runner: %v", err)
 	}
 	return path
 }

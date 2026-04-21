@@ -38,7 +38,7 @@
   - `shard_discovery.mode: heuristics|semantic`
 - `runtime.profile.steps.*.provider` optional step-scoped provider override:
   - `step0_constitution|step1_collect|step2_as_is|step3_findings|step4_proposals`
-  - allowed values: `claude-code|qwen-code`
+  - allowed values: `claude-code|qwen-code|codex-code`
 - precedence:
   - timeouts: `env > workspace.yaml(runtime.profile.timeouts) > defaults`
   - execution: `CLI > env > workspace.yaml(runtime.profile.execution) > defaults`

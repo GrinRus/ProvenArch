@@ -5,7 +5,7 @@
 ## 1) Цели и принципы
 
 - Required CI должен проходить локально и в CI без live network dependencies.
-- Required CI не зависит от live headless providers (`claude-code`/`qwen-code`), GitHub, GitLab или реальных пользовательских репозиториев.
+- Required CI не зависит от live headless providers (`claude-code`/`qwen-code`/`codex-code`), GitHub, GitLab или реальных пользовательских репозиториев.
 - Любые изменения schema/spec/examples должны сопровождаться обновлением fixtures и golden outputs в том же PR.
 - Synthetic fixtures считаются baseline regression surface.
 - Live headless providers проверяются только optional smoke на trusted machine/runner и не блокируют merge.
@@ -236,7 +236,7 @@ Implemented additional jobs:
   - `scripts/full-run-batch-5x2.sh`
   - canonical input: `TARGET_REPOS_FILE` (`repos[]` format)
   - legacy single-repo inputs запрещены (fail-fast c migration hint)
-  - direct-only runtime commands (`claude`, `qwen`)
+  - direct-only runtime commands (`claude`, `qwen`, `codex`)
   - frontend live e2e работает на отдельной `frontend-workspace` копии run snapshot, не мутируя backend baseline
   - backend quality source-of-truth: только snapshot reports (`snapshots/<run_id>/reports/*`), при отсутствии snapshot фиксируется `reliability:snapshot-missing` (без workspace fallback)
   - semantic hard-fail checks в batch evaluator: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`
@@ -254,7 +254,7 @@ Implemented additional jobs:
   - canonical high-level profile catalog: `examples/e2e-profile-catalog.yaml`
   - canonical non-release slices: `examples/e2e-matrix.regres-fast.bank-openedx.yaml`, `examples/e2e-matrix.regres-fast.openstack.yaml`, `examples/e2e-matrix.regres-long.yaml`
   - canonical release slices: `examples/e2e-matrix.release-fast.yaml`, `examples/e2e-matrix.release-long.yaml`, `examples/e2e-matrix.release-full.ftgo-sentry.yaml`
-  - expected backend totals from catalog: `regres fast=3`, `regres long=2`, `release fast=8`, `release long=8`, `release full=24`
+  - expected backend totals from catalog: `regres fast=3`, `regres long=2`, `release fast=12`, `release long=12`, `release full=36`
   - release-ready sweep set: `baseline` + `parallel-default`
   - matrix invariant: для одного `profile_id` shard-plan должен совпадать между `baseline` и `parallel-default`
   - approved profile ids: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
@@ -290,7 +290,7 @@ Implemented additional jobs:
   - matrix-native `timeout_profile` не считается diagnostic override и применяется как committed part of canonical slice contract
   - canonical release taxonomy: `release fast`, `release long`, `release full`
   - `release full` = composite из `release fast` + `release long` + `ftgo+sentry` slice; readiness требует `PASS` во всех constituent `release_verdict_<matrix-id>.json`
-  - обязательны оба провайдера (`qwen-code`, `claude-code`) и оба frontend сценария (`init-inspect-service-first`, `cancel-refresh`)
+  - обязательны все три release providers (`qwen-code`, `claude-code`, `codex-code`) и оба frontend сценария (`init-inspect-service-first`, `cancel-refresh`)
   - для release-mode matrix используется `BATCH_FRONTEND_MODE=per_run`, `BATCH_FRONTEND_CANCEL_MODE=once_per_provider`, `UI_E2E_HEADED=1`
   - strict blockers включают любой non-passed summary/run-level status в `frontend_e2e_matrix` и `frontend_cancel_e2e_matrix`
   - strict acceptance: только `PASS`, любое нарушение quality/failure-class критериев = `RELEASE BLOCKED`
@@ -309,7 +309,7 @@ Implemented additional jobs:
   - если cancel request выигрывает гонку у validation/layout failure, terminal API/RunInfo surface всё равно обязана показывать `error_code=run_canceled`
   - `ui/e2e/live-flow.spec.ts` + `npm run e2e:live --prefix ui`
   - batch shard controls (`scripts/full-run-batch-5x2.sh`):
-    - `BATCH_PROVIDER_FILTER` (`all` или CSV `qwen-code,claude-code`)
+    - `BATCH_PROVIDER_FILTER` (`all` или CSV `qwen-code,claude-code,codex-code`)
     - `BATCH_RUN_SELECTION` (`all`, CSV `1,3,5` или диапазоны `1-3,5`)
     - `BATCH_SKIP_PRECHECK=1` для secondary shard'ов
     - `BATCH_FRONTEND_MODE=auto|always|never|per_run` (default `auto`; `auto` skip если `run1` не выбран, `always` использует первый выбранный backend run)

@@ -6,6 +6,7 @@ import (
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/claudecode"
+	"github.com/GrinRus/ProvenArch/internal/runtime/codexcode"
 	"github.com/GrinRus/ProvenArch/internal/runtime/qwencode"
 )
 
@@ -54,6 +55,18 @@ func TestBuildRunnerHeadlessQwenCode(t *testing.T) {
 	}
 	if _, ok := runner.(qwencode.HeadlessRunner); !ok {
 		t.Fatalf("expected qwencode.HeadlessRunner, got %T", runner)
+	}
+}
+
+func TestBuildRunnerHeadlessCodexCode(t *testing.T) {
+	t.Parallel()
+
+	runner, err := BuildRunner(acpruntime.RuntimeModeHeadless, acpruntime.ProviderCodexCode)
+	if err != nil {
+		t.Fatalf("build codex-code headless runner: %v", err)
+	}
+	if _, ok := runner.(codexcode.HeadlessRunner); !ok {
+		t.Fatalf("expected codexcode.HeadlessRunner, got %T", runner)
 	}
 }
 
