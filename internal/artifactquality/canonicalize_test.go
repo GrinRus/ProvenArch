@@ -9,6 +9,7 @@ import (
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtime/compatibilityregistry"
 )
 
 func TestRepairCollectManifestRejectsLegacyCompatibilityPayload(t *testing.T) {
@@ -19,7 +20,7 @@ func TestRepairCollectManifestRejectsLegacyCompatibilityPayload(t *testing.T) {
 	writeDoc(t, writeRoot, "extras-overview.md", "# Extras\n")
 
 	task := testCollectTask(writeRoot, "bank-of-anthos-extras", "bank-of-anthos")
-	if err := RepairCollectManifest(task); err == nil {
+	if _, err := RepairCollectManifest(task); err == nil {
 		t.Fatalf("expected repair to fail for legacy compatibility payload")
 	}
 
@@ -45,8 +46,15 @@ func TestRepairCollectManifestNormalizesArtifactRootPrefixedDocumentPath(t *test
 	task.ArtifactRoot = "reports/taskruns/run_20260420_054749_001/staging/shards/bank-of-anthos-iac"
 	task.PathScopes = []string{"iac"}
 
-	if err := RepairCollectManifest(task); err != nil {
+	report, err := RepairCollectManifest(task)
+	if err != nil {
 		t.Fatalf("repair manifest: %v", err)
+	}
+	if !report.Changed {
+		t.Fatalf("expected repair report to mark manifest as changed")
+	}
+	if len(report.AppliedRuleIDs) != 1 || report.AppliedRuleIDs[0] != compatibilityregistry.RuleSafeCollectDocumentPathNormalization {
+		t.Fatalf("expected collect path normalization rule, got %#v", report.AppliedRuleIDs)
 	}
 
 	raw, err := os.ReadFile(filepath.Join(writeRoot, shardPackManifestFile))
@@ -120,8 +128,15 @@ func TestRepairCollectManifestNormalizesAbsoluteDocumentPathUnderWriteRoot(t *te
 	writeManifest(t, writeRoot, manifest)
 
 	task := testCollectTask(writeRoot, "openedx-platform", "openedx-platform")
-	if err := RepairCollectManifest(task); err != nil {
+	report, err := RepairCollectManifest(task)
+	if err != nil {
 		t.Fatalf("repair manifest: %v", err)
+	}
+	if !report.Changed {
+		t.Fatalf("expected repair report to mark manifest as changed")
+	}
+	if len(report.AppliedRuleIDs) != 1 || report.AppliedRuleIDs[0] != compatibilityregistry.RuleSafeCollectDocumentPathNormalization {
+		t.Fatalf("expected collect path normalization rule, got %#v", report.AppliedRuleIDs)
 	}
 
 	raw, err := os.ReadFile(filepath.Join(writeRoot, shardPackManifestFile))
@@ -134,6 +149,66 @@ func TestRepairCollectManifestNormalizesAbsoluteDocumentPathUnderWriteRoot(t *te
 	}
 	if got := repaired.Documents[0].Path; got != "service-inventory.md" {
 		t.Fatalf("expected absolute path to normalize to write-root relative path, got %q", got)
+	}
+}
+
+func TestCanonicalizeCollectManifestDoesNotReportRepairForAmbiguousDocumentPath(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+
+	manifest := contracts.ShardPackManifest{
+		Version:      1,
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		ShardID:      "openedx-platform",
+		AgentRole:    "shard-analyst",
+		ArtifactRoot: "reports/taskruns/run-1/staging/shards/openedx-platform",
+		RepoScopes:   []string{"openedx-platform"},
+		PathScopes:   []string{"."},
+		Documents: []contracts.AuthoredDocument{
+			{
+				ID:            "doc.service-inventory",
+				Kind:          "report",
+				Title:         "Service Inventory",
+				Path:          "reports/taskruns/run-1/staging/shards/openedx-platform/service-inventory.md",
+				CanonicalPath: "reports/as-is/service-inventory/openedx-platform.md",
+				Topics:        []string{"openedx"},
+				CitationIDs:   []string{"cite.openedx.readme"},
+			},
+		},
+		Citations: []contracts.DocumentCitation{
+			{
+				ID:          "cite.openedx.readme",
+				Repo:        "openedx-platform",
+				Path:        "README.md",
+				ClaimIDs:    []string{"claim.openedx.readme"},
+				DocumentIDs: []string{"doc.service-inventory"},
+			},
+		},
+		Semantic: contracts.SemanticSnapshot{
+			Coverage: contracts.Coverage{
+				Observed: []string{"services"},
+				Missing:  []string{"owner mappings"},
+				Notes:    []string{"artifact root path remains invalid when file is absent"},
+			},
+		},
+	}
+	raw, err := jsonMarshalManifest(manifest)
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+
+	task := testCollectTask(writeRoot, "openedx-platform", "openedx-platform")
+	_, report, err := canonicalizeCollectManifest(raw, task)
+	if err == nil {
+		t.Fatalf("expected invalid duplicated artifact_root path to remain invalid without safe repair")
+	}
+	if report.Changed {
+		t.Fatalf("expected no repair report for ambiguous document path, got %#v", report)
+	}
+	if len(report.AppliedRuleIDs) != 0 {
+		t.Fatalf("expected no applied rule ids for ambiguous document path, got %#v", report.AppliedRuleIDs)
 	}
 }
 

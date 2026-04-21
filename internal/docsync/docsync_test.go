@@ -81,6 +81,69 @@ func TestRuntimeAndQABoundaryConsistentAcrossDocs(t *testing.T) {
 	}
 }
 
+func TestPromptLayerTruthConsistentAcrossCoreDocs(t *testing.T) {
+	t.Parallel()
+
+	const mergeOrder = "provider header -> artifact-only/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer"
+	paths := []string{
+		"docs/ARCHITECTURE.md",
+		"docs/spec/PIPELINE_SPEC.md",
+		"docs/PLANS.md",
+	}
+
+	for _, path := range paths {
+		path := path
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			content := strings.ToLower(readDoc(t, path))
+			if !strings.Contains(content, mergeOrder) {
+				t.Fatalf("expected %s to document exact prompt merge order", path)
+			}
+			if !strings.Contains(content, "content layer") {
+				t.Fatalf("expected %s to describe workspace prompt pack as content layer", path)
+			}
+			if !strings.Contains(content, "cannot be") && !strings.Contains(content, "не может") && !strings.Contains(content, "не могут") {
+				t.Fatalf("expected %s to describe enforced runtime policy invariants", path)
+			}
+		})
+	}
+}
+
+func TestPlansRemainActiveOnlyAfterCleanupClosure(t *testing.T) {
+	t.Parallel()
+
+	content := readDoc(t, "docs/PLANS.md")
+	for _, marker := range []string{
+		"EP-20260421-flow-audit-followups",
+		"EP-20260421-artifact-only-cleanup-followthrough",
+	} {
+		if strings.Contains(content, marker) {
+			t.Fatalf("expected docs/PLANS.md to stay active-only and exclude closed cleanup plan %q", marker)
+		}
+	}
+	assertContains(t, content, "EP-20260420-regres-small-live-triage")
+}
+
+func TestCompatibilityInventoryConsistentAcrossDocs(t *testing.T) {
+	t.Parallel()
+
+	paths := []string{
+		"docs/ARCHITECTURE.md",
+		"docs/TESTING_STRATEGY.md",
+		"docs/PLANS.md",
+	}
+
+	for _, path := range paths {
+		path := path
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			content := readDoc(t, path)
+			assertContains(t, content, "collect.documents_path_normalization")
+			assertContains(t, content, "drafts.reconcile_existing_canonical_outputs")
+		})
+	}
+}
+
 func TestKeySurfacesDoNotContainStaleMarkers(t *testing.T) {
 	t.Parallel()
 
