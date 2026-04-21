@@ -14,6 +14,7 @@ import (
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
+	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
 const (
@@ -22,6 +23,7 @@ const (
 	validatorVerdictFileName  = "validator-verdict.json"
 	finalRunIndexFileName     = "final-run-index.json"
 	citationIndexFileName     = "citation-index.json"
+	step0WizardContractPath   = "charter/wizard/step0-contract.json"
 )
 
 type runtimeDraftManifest = runtimedrafts.Manifest
@@ -136,22 +138,58 @@ func writeConstitutionDraftManifest(writeRoot string, task acpruntime.Task, resu
 		{Path: "charter-overview.md", CanonicalPath: "charter/overview.md", Kind: "charter", Title: "Constitution"},
 		{Path: "baseline-subagents.yaml", CanonicalPath: "skills/subagents.yaml", Kind: "bundle", Title: "Baseline Subagents"},
 	}
-	overview := strings.Builder{}
-	overview.WriteString("# Constitution Draft\n\n")
-	overview.WriteString("Prepared by the step-scoped runtime pipeline.\n\n")
-	if summary := strings.TrimSpace(result.Summary); summary != "" {
-		overview.WriteString("- Runtime summary: " + summary + "\n")
-	}
-	if len(task.RepoScopes) > 0 {
-		overview.WriteString("- Repo scopes: " + strings.Join(task.RepoScopes, ", ") + "\n")
-	}
 	if err := writeRuntimeDraftFinals(task, map[string]string{
-		"charter-overview.md":     overview.String(),
-		"baseline-subagents.yaml": "version: 1\nprofiles:\n  - id: baseline-architect\n    role: architect\n",
+		"charter-overview.md":     renderConstitutionDraftOverview(task),
+		"baseline-subagents.yaml": string(workspace.BaselineSubagentsContent()),
 	}); err != nil {
 		return err
 	}
 	return writeRuntimeDraftManifest(writeRoot, runtimedrafts.ConstitutionManifestFile, task, result, outputs)
+}
+
+type runtimeStep0WizardContract struct {
+	Version       int      `json:"version"`
+	ProjectName   string   `json:"project_name"`
+	Scope         string   `json:"scope"`
+	NFRPriorities []string `json:"nfr_priorities"`
+	Rules         []string `json:"rules"`
+}
+
+func renderConstitutionDraftOverview(task acpruntime.Task) string {
+	contract, ok := loadRuntimeStep0WizardContract(task.Workspace)
+	if !ok {
+		return "# Project Constitution\n\nGenerated baseline charter for ACP MVP.\n"
+	}
+	return strings.TrimSpace(fmt.Sprintf(
+		"# Project Constitution\n\n- project_name: `%s`\n- scope: `%s`\n\nGenerated from `%s`.\n",
+		contract.ProjectName,
+		contract.Scope,
+		step0WizardContractPath,
+	)) + "\n"
+}
+
+func loadRuntimeStep0WizardContract(workspaceRoot string) (runtimeStep0WizardContract, bool) {
+	if strings.TrimSpace(workspaceRoot) == "" {
+		return runtimeStep0WizardContract{}, false
+	}
+	content, err := os.ReadFile(filepath.Join(filepath.Clean(workspaceRoot), filepath.FromSlash(step0WizardContractPath)))
+	if err != nil {
+		return runtimeStep0WizardContract{}, false
+	}
+
+	decoder := json.NewDecoder(strings.NewReader(string(content)))
+	decoder.DisallowUnknownFields()
+	var contract runtimeStep0WizardContract
+	if err := decoder.Decode(&contract); err != nil {
+		return runtimeStep0WizardContract{}, false
+	}
+	if err := decoder.Decode(&struct{}{}); err == nil {
+		return runtimeStep0WizardContract{}, false
+	}
+	if contract.Version != 1 || strings.TrimSpace(contract.ProjectName) == "" || strings.TrimSpace(contract.Scope) == "" {
+		return runtimeStep0WizardContract{}, false
+	}
+	return contract, true
 }
 
 func writeAsIsDraftManifest(writeRoot string, task acpruntime.Task, result contracts.TaskResult) error {

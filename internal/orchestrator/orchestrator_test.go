@@ -17,6 +17,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/model"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/claudecode"
+	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 	"github.com/GrinRus/ProvenArch/internal/testutil"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
@@ -247,6 +248,63 @@ func TestInitStep0UsesWizardContractDeterministically(t *testing.T) {
 	}
 }
 
+func TestInitStep0PublishesOverviewFromValidatedRuntimeDraftOutputs(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	service := NewService(WithRunner(step0DraftPublishingRunner{}))
+
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run init pipeline: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s", info.Status)
+	}
+
+	content, err := os.ReadFile(filepath.Join(ws.Path, "charter/overview.md"))
+	if err != nil {
+		t.Fatalf("read charter overview: %v", err)
+	}
+	text := string(content)
+	if !strings.Contains(text, "This came from runtime draft output.") {
+		t.Fatalf("expected runtime draft overview content, got %q", text)
+	}
+	if strings.Contains(text, "Generated baseline charter for ACP MVP.") {
+		t.Fatalf("did not expect fallback overview writer to overwrite runtime draft output")
+	}
+}
+
+func TestInitStep0InvalidRuntimeDraftDoesNotPublishFallbackOverview(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	service := NewService(WithRunner(step0InvalidDraftManifestRunner{}))
+
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err == nil {
+		t.Fatalf("expected init pipeline to fail on invalid step0 draft manifest")
+	}
+	if info.Status != RunStatusFailed {
+		t.Fatalf("expected failed status, got %s", info.Status)
+	}
+	if !strings.Contains(info.Error, "runtime required draft artifacts invalid") {
+		t.Fatalf("expected runtime draft artifact validation context, got %q", info.Error)
+	}
+	_, statErr := os.Stat(filepath.Join(ws.Path, "charter/overview.md"))
+	if !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected charter/overview.md to remain unpublished on invalid step0 draft, got err=%v", statErr)
+	}
+}
+
 func TestStartAsyncRunRegistersAndCompletesRun(t *testing.T) {
 	t.Parallel()
 
@@ -273,6 +331,107 @@ func TestStartAsyncRunRegistersAndCompletesRun(t *testing.T) {
 	if info.CurrentStep != "refresh.step4.proposals" {
 		t.Fatalf("expected final current_step to point to last step, got %q", info.CurrentStep)
 	}
+}
+
+type step0DraftPublishingRunner struct{}
+
+func (step0DraftPublishingRunner) Preflight(context.Context) error { return nil }
+
+func (step0DraftPublishingRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	if task.StepID != "init.step0.constitution" {
+		return claudecode.FakeRunner{}.Run(ctx, task)
+	}
+	if err := os.MkdirAll(task.WriteRoot, 0o755); err != nil {
+		return acpruntime.Result{}, err
+	}
+	if err := os.MkdirAll(task.DraftFinalRoot, 0o755); err != nil {
+		return acpruntime.Result{}, err
+	}
+	manifest := runtimedrafts.Manifest{
+		Version:      1,
+		RunID:        task.RunID,
+		StepID:       task.StepID,
+		StepContract: "constitution",
+		AgentRole:    "architect",
+		Outputs: []runtimedrafts.Output{
+			{Path: "charter-overview.md", CanonicalPath: "charter/overview.md", Kind: "charter", Title: "Constitution"},
+			{Path: "baseline-subagents.yaml", CanonicalPath: "skills/subagents.yaml", Kind: "bundle", Title: "Baseline Subagents"},
+		},
+	}
+	manifestRaw, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return acpruntime.Result{}, err
+	}
+	manifestRaw = append(manifestRaw, '\n')
+	if err := os.WriteFile(filepath.Join(task.WriteRoot, constitutionDraftManifestFile), manifestRaw, 0o644); err != nil {
+		return acpruntime.Result{}, err
+	}
+	if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, "charter-overview.md"), []byte("# Project Constitution\n\nThis came from runtime draft output.\n"), 0o644); err != nil {
+		return acpruntime.Result{}, err
+	}
+	if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, "baseline-subagents.yaml"), workspace.BaselineSubagentsContent(), 0o644); err != nil {
+		return acpruntime.Result{}, err
+	}
+	result := contracts.TaskResult{
+		Meta: contracts.Meta{
+			TaskID:     task.TaskID,
+			StepID:     task.StepID,
+			RunID:      task.RunID,
+			Runtime:    contracts.RuntimeMeta{Name: "claude-code", Version: "test"},
+			StartedAt:  task.StartedAtUTC.UTC().Format(time.RFC3339),
+			FinishedAt: task.StartedAtUTC.UTC().Add(1 * time.Second).Format(time.RFC3339),
+			Workspace:  task.Workspace,
+			RepoScopes: append([]string(nil), task.RepoScopes...),
+			PathScopes: append([]string(nil), task.PathScopes...),
+		},
+		Summary:   "step0 draft publish test",
+		Changeset: []contracts.Operation{},
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return acpruntime.Result{}, err
+	}
+	return acpruntime.Result{TaskResult: result, RawJSON: raw}, nil
+}
+
+type step0InvalidDraftManifestRunner struct{}
+
+func (step0InvalidDraftManifestRunner) Preflight(context.Context) error { return nil }
+
+func (step0InvalidDraftManifestRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	if task.StepID != "init.step0.constitution" {
+		return claudecode.FakeRunner{}.Run(ctx, task)
+	}
+	if err := os.MkdirAll(task.WriteRoot, 0o755); err != nil {
+		return acpruntime.Result{}, err
+	}
+	if err := os.MkdirAll(task.DraftFinalRoot, 0o755); err != nil {
+		return acpruntime.Result{}, err
+	}
+	if err := os.WriteFile(filepath.Join(task.WriteRoot, constitutionDraftManifestFile), []byte(`{"schema_version":"constitution-v0"}`), 0o644); err != nil {
+		return acpruntime.Result{}, err
+	}
+	if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, "charter-overview.md"), []byte("# Legacy Draft\n"), 0o644); err != nil {
+		return acpruntime.Result{}, err
+	}
+	result := contracts.TaskResult{
+		Meta: contracts.Meta{
+			TaskID:     task.TaskID,
+			StepID:     task.StepID,
+			RunID:      task.RunID,
+			Runtime:    contracts.RuntimeMeta{Name: "claude-code", Version: "test"},
+			StartedAt:  task.StartedAtUTC.UTC().Format(time.RFC3339),
+			FinishedAt: task.StartedAtUTC.UTC().Add(1 * time.Second).Format(time.RFC3339),
+			Workspace:  task.Workspace,
+		},
+		Summary:   "invalid step0 draft manifest",
+		Changeset: []contracts.Operation{},
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return acpruntime.Result{}, err
+	}
+	return acpruntime.Result{TaskResult: result, RawJSON: raw}, nil
 }
 
 func TestListRunsReturnsMostRecentFirstWithLimit(t *testing.T) {

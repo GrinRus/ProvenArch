@@ -1,12 +1,10 @@
 package orchestrator
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -937,180 +935,6 @@ func (s *Service) trimRunRegistryLocked() {
 	}
 }
 
-func (s *Service) loadHistory() {
-	if !s.historyEnabled {
-		return
-	}
-	content, err := s.historyWorkspace.ReadFile(runHistoryPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return
-		}
-		return
-	}
-
-	var snapshot runHistorySnapshot
-	if err := json.Unmarshal(content, &snapshot); err != nil {
-		return
-	}
-	if snapshot.Version != runHistoryVersion {
-		return
-	}
-
-	for _, item := range snapshot.Items {
-		record, ok := historyItemToRunRecord(item)
-		if !ok {
-			continue
-		}
-		s.runs[record.info.RunID] = &record
-	}
-}
-
-type staleRunReconciliation struct {
-	runID         string
-	previousState RunStatus
-}
-
-type staleRunResumeTarget struct {
-	runID   string
-	request RunRequest
-}
-
-func (s *Service) recoverStaleRunsAfterRestart() {
-	now := s.clock().UTC()
-	reconciledRuns := []staleRunReconciliation{}
-	var resumeTarget *staleRunResumeTarget
-
-	s.mu.Lock()
-	candidateRunID := ""
-	if s.resumeStaleAsync {
-		candidateRunID = s.findResumableRunningRunLocked()
-	}
-	for runID, record := range s.runs {
-		if record == nil {
-			continue
-		}
-		switch record.info.Status {
-		case RunStatusQueued:
-		case RunStatusRunning:
-		default:
-			continue
-		}
-		if record.info.Status == RunStatusRunning && runID == candidateRunID {
-			if pipeline, err := ParsePipeline(record.info.Pipeline); err == nil {
-				resumeTarget = &staleRunResumeTarget{
-					runID: runID,
-					request: RunRequest{
-						Workspace:      s.historyWorkspace,
-						Pipeline:       pipeline,
-						NonInteractive: true,
-					},
-				}
-				continue
-			}
-		}
-		previousStatus := record.info.Status
-		finishedAt := now
-		reconciledInfo := record.info
-		reconciledInfo.Status = RunStatusFailed
-		reconciledInfo.ErrorCode = runErrorCodeReconciledAfterRestart
-		reconciledInfo.Error = fmt.Sprintf("run reconciled after service restart (stale status=%s)", previousStatus)
-		reconciledInfo.FinishedAt = &finishedAt
-		record.info = reconciledInfo
-		s.runs[runID] = record
-		reconciledRuns = append(reconciledRuns, staleRunReconciliation{
-			runID:         runID,
-			previousState: previousStatus,
-		})
-	}
-	if len(reconciledRuns) > 0 {
-		s.persistHistoryLocked()
-	}
-	if resumeTarget != nil {
-		s.activeRunID = resumeTarget.runID
-	} else {
-		s.activeRunID = ""
-	}
-	s.pendingRun = nil
-	if s.runCancels == nil {
-		s.runCancels = map[string]context.CancelFunc{}
-	}
-	for runID, cancel := range s.runCancels {
-		if cancel != nil {
-			cancel()
-		}
-		delete(s.runCancels, runID)
-	}
-	if s.cancelRequests == nil {
-		s.cancelRequests = map[string]struct{}{}
-	}
-	for runID := range s.cancelRequests {
-		delete(s.cancelRequests, runID)
-	}
-	s.mu.Unlock()
-
-	for _, stale := range reconciledRuns {
-		s.appendRunLog(stale.runID, RunLogEntry{
-			Timestamp: now,
-			Level:     RunLogLevelWarning,
-			Message:   "run reconciled after restart",
-			Fields: map[string]any{
-				"error_code":      runErrorCodeReconciledAfterRestart,
-				"previous_status": string(stale.previousState),
-			},
-		})
-	}
-	if resumeTarget != nil {
-		s.launchAsyncRun(context.Background(), resumeTarget.runID, resumeTarget.request)
-	}
-}
-
-func (s *Service) findResumableRunningRunLocked() string {
-	if !s.resumeStaleAsync || !s.historyEnabled || strings.TrimSpace(s.historyWorkspace.Path) == "" {
-		return ""
-	}
-
-	candidates := make([]runRecord, 0, len(s.runs))
-	for _, record := range s.runs {
-		if record == nil || record.info.Status != RunStatusRunning {
-			continue
-		}
-		if !s.isRunningRunResumable(*record) {
-			continue
-		}
-		candidates = append(candidates, *record)
-	}
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].info.StartedAt.Equal(candidates[j].info.StartedAt) {
-			return candidates[i].info.RunID > candidates[j].info.RunID
-		}
-		return candidates[i].info.StartedAt.After(candidates[j].info.StartedAt)
-	})
-	if len(candidates) == 0 {
-		return ""
-	}
-	return candidates[0].info.RunID
-}
-
-func (s *Service) isRunningRunResumable(record runRecord) bool {
-	pipeline, err := ParsePipeline(record.info.Pipeline)
-	if err != nil {
-		return false
-	}
-	currentStep := strings.TrimSpace(record.info.CurrentStep)
-	if currentStep == "" {
-		return false
-	}
-	resumeStep := resumeStepForCurrentStep(pipeline, currentStep)
-	if resumeStep == "" {
-		return false
-	}
-	if !isRuntimeOrLaterStep(pipeline, currentStep) {
-		return true
-	}
-	return hasShardArtifactsForRun(s.historyWorkspace.Path, record.info.RunID, resumeStep)
-}
-
 func (s *Service) persistHistoryLocked() {
 	if !s.historyEnabled {
 		return
@@ -1389,26 +1213,39 @@ func (e *pipelineExecution) runStepConstitution(ctx context.Context, stepID stri
 		Kind:  "taskrun",
 		Label: "Constitution Draft Manifest",
 	})
+	publishedDrafts, err := applyRuntimeDraftOutputs(
+		e.workspace,
+		execution.Task.DraftFinalRoot,
+		draft,
+		"",
+		func(canonicalPath string) bool {
+			switch canonicalPath {
+			case "charter/overview.md", "skills/subagents.yaml":
+				return true
+			default:
+				return false
+			}
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("publish constitution runtime drafts: %w", err)
+	}
+	e.addArtifacts(publishedDrafts...)
 
-	e.logInfo(stepID, "", "materializing constitution artifacts", nil)
+	e.logInfo(stepID, "", "materializing constitution support artifacts", nil)
 	step0Contract, hasStep0Contract, err := loadStep0WizardContract(e.workspace)
 	if err != nil {
-		e.addWarning(fmt.Sprintf("step0_wizard_contract_invalid: %v; fallback baseline constitution materialization is used", err))
+		e.addWarning(fmt.Sprintf("step0_wizard_contract_invalid: %v; fallback baseline constitution support artifacts are used", err))
 	}
 	if !hasStep0Contract {
-		e.addWarning("step0_wizard_contract_missing: charter/wizard/step0-contract.json not found; fallback baseline constitution materialization is used")
+		e.addWarning("step0_wizard_contract_missing: charter/wizard/step0-contract.json not found; fallback baseline constitution support artifacts are used")
 	}
-	if err := e.writeConstitutionArtifacts(hasStep0Contract && err == nil, step0Contract); err != nil {
+	if err := e.writeConstitutionSupportArtifacts(hasStep0Contract && err == nil, step0Contract); err != nil {
 		return err
 	}
 	if err := writeBaselineBundle(e.workspace); err != nil {
 		return err
 	}
-
-	e.addArtifacts(
-		Artifact{Path: "charter/overview.md", Kind: "charter", Label: "Constitution"},
-		Artifact{Path: "skills/subagents.yaml", Kind: "bundle", Label: "Baseline Subagents"},
-	)
 	return nil
 }
 
@@ -2806,166 +2643,6 @@ func summarizePartialFailures(failures []runtimeShardFailure) string {
 	}
 	sort.Strings(parts)
 	return fmt.Sprintf("partial shard failures (%d): %s", len(parts), strings.Join(parts, "; "))
-}
-
-const step0WizardContractPath = "charter/wizard/step0-contract.json"
-
-type step0WizardContract struct {
-	Version       int      `json:"version"`
-	ProjectName   string   `json:"project_name"`
-	Scope         string   `json:"scope"`
-	NFRPriorities []string `json:"nfr_priorities"`
-	Rules         []string `json:"rules"`
-}
-
-func loadStep0WizardContract(ws workspace.Root) (step0WizardContract, bool, error) {
-	content, err := ws.ReadFile(step0WizardContractPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return step0WizardContract{}, false, nil
-		}
-		return step0WizardContract{}, false, fmt.Errorf("read %s: %w", step0WizardContractPath, err)
-	}
-
-	decoder := json.NewDecoder(bytes.NewReader(content))
-	decoder.DisallowUnknownFields()
-
-	var contract step0WizardContract
-	if err := decoder.Decode(&contract); err != nil {
-		return step0WizardContract{}, true, fmt.Errorf("parse %s: %w", step0WizardContractPath, err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err == nil {
-		return step0WizardContract{}, true, fmt.Errorf("parse %s: unexpected trailing JSON payload", step0WizardContractPath)
-	} else if !errors.Is(err, io.EOF) {
-		return step0WizardContract{}, true, fmt.Errorf("parse %s: %w", step0WizardContractPath, err)
-	}
-
-	contract.ProjectName = strings.TrimSpace(contract.ProjectName)
-	contract.Scope = strings.TrimSpace(contract.Scope)
-	contract.NFRPriorities = normalizeOrderedUniqueStrings(contract.NFRPriorities)
-	contract.Rules = normalizeOrderedUniqueStrings(contract.Rules)
-
-	validationProblems := []string{}
-	if contract.Version != 1 {
-		validationProblems = append(validationProblems, "version must be 1")
-	}
-	if contract.ProjectName == "" {
-		validationProblems = append(validationProblems, "project_name is required")
-	}
-	if contract.Scope == "" {
-		validationProblems = append(validationProblems, "scope is required")
-	}
-	if len(validationProblems) > 0 {
-		sort.Strings(validationProblems)
-		return step0WizardContract{}, true, fmt.Errorf("invalid %s: %s", step0WizardContractPath, strings.Join(validationProblems, "; "))
-	}
-
-	return contract, true, nil
-}
-
-func (e *pipelineExecution) writeConstitutionArtifacts(useWizardContract bool, contract step0WizardContract) error {
-	projectName := ""
-	scope := ""
-	nfrPriorities := []string{}
-	rules := []string{}
-	if useWizardContract {
-		projectName = contract.ProjectName
-		scope = contract.Scope
-		nfrPriorities = append([]string(nil), contract.NFRPriorities...)
-		rules = append([]string(nil), contract.Rules...)
-	}
-
-	overview := "# Project Constitution\n\nGenerated baseline charter for ACP MVP.\n"
-	glossary := "terms: []\n"
-	if useWizardContract {
-		overview = strings.TrimSpace(fmt.Sprintf(
-			"# Project Constitution\n\n- project_name: `%s`\n- scope: `%s`\n\nGenerated from `%s`.\n",
-			projectName,
-			scope,
-			step0WizardContractPath,
-		)) + "\n"
-		scopeTerms := splitAndNormalizeList(scope)
-		glossary = renderStringListYAML("terms", scopeTerms)
-	}
-	nfrContent := renderStringListYAML("nfr", nfrPriorities)
-	rulesContent := renderStringListYAML("rules", rules)
-
-	if err := e.workspace.WriteFile("charter/overview.md", []byte(overview)); err != nil {
-		return err
-	}
-	if err := e.workspace.WriteFile("charter/glossary.yaml", []byte(glossary)); err != nil {
-		return err
-	}
-	if err := e.workspace.WriteFile("charter/nfr.yaml", []byte(nfrContent)); err != nil {
-		return err
-	}
-	if err := e.workspace.WriteFile("charter/rules.yaml", []byte(rulesContent)); err != nil {
-		return err
-	}
-
-	for _, repo := range e.workspace.Manifest.Repos {
-		slug := slugutil.Slugify(repo.Name)
-		domainPath := fmt.Sprintf("charter/cards/domains/%s.md", slug)
-		domainBody := strings.TrimSpace(fmt.Sprintf("# Domain: %s\n\n- id: `%s`\n- repo_scope: `%s`\n", repo.Name, slug, repo.Name))
-		if useWizardContract {
-			domainBody += fmt.Sprintf("\n- charter_project: `%s`\n- charter_scope: `%s`\n", projectName, scope)
-		}
-		domainBody += "\n"
-		if err := e.workspace.WriteFile(domainPath, []byte(domainBody)); err != nil {
-			return err
-		}
-	}
-
-	teamBody := "# Team: Platform\n\n- id: `team.platform`\n"
-	if useWizardContract {
-		teamBody = strings.TrimSpace(teamBody+fmt.Sprintf("- charter_project: `%s`\n", projectName)) + "\n"
-	}
-	if err := e.workspace.WriteFile("charter/cards/teams/platform.md", []byte(teamBody)); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func renderStringListYAML(key string, values []string) string {
-	values = normalizeOrderedUniqueStrings(values)
-	if len(values) == 0 {
-		return fmt.Sprintf("%s: []\n", strings.TrimSpace(key))
-	}
-
-	builder := strings.Builder{}
-	builder.WriteString(strings.TrimSpace(key))
-	builder.WriteString(":\n")
-	for _, value := range values {
-		builder.WriteString("  - ")
-		builder.WriteString(strconv.Quote(value))
-		builder.WriteString("\n")
-	}
-	return builder.String()
-}
-
-func splitAndNormalizeList(raw string) []string {
-	replacer := strings.NewReplacer(",", "\n", ";", "\n", "\t", "\n")
-	values := strings.Split(replacer.Replace(raw), "\n")
-	return normalizeOrderedUniqueStrings(values)
-}
-
-func normalizeOrderedUniqueStrings(values []string) []string {
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
-			continue
-		}
-		if _, ok := seen[trimmed]; ok {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		out = append(out, trimmed)
-	}
-	return out
 }
 
 func writeBaselineBundle(ws workspace.Root) error {

@@ -172,8 +172,12 @@ const baselineSubagentsYAML = `agents:
     skills: [qa]
 `
 
+func BaselineSubagentsContent() []byte {
+	return []byte(baselineSubagentsYAML)
+}
+
 func (r Root) EnsureBaselineBundle() error {
-	if err := r.writeFileIfMissing("skills/subagents.yaml", []byte(baselineSubagentsYAML)); err != nil {
+	if err := r.writeFileIfMissing("skills/subagents.yaml", BaselineSubagentsContent()); err != nil {
 		return err
 	}
 

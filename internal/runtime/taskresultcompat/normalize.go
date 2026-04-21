@@ -70,6 +70,31 @@ func NormalizeRawTaskResult(task acpruntime.Task, raw []byte) ([]byte, bool, err
 	return normalizedRaw, true, nil
 }
 
+func NormalizeResult(task acpruntime.Task, result acpruntime.Result) (acpruntime.Result, bool, error) {
+	raw := result.RawJSON
+	if len(raw) == 0 && strings.TrimSpace(result.TaskResult.Meta.TaskID) != "" {
+		marshaled, err := json.Marshal(result.TaskResult)
+		if err != nil {
+			return result, false, err
+		}
+		raw = marshaled
+	}
+	if len(raw) == 0 {
+		return result, false, nil
+	}
+	normalizedRaw, changed, err := NormalizeRawTaskResult(task, raw)
+	if err != nil || !changed {
+		return result, changed, err
+	}
+	parsed, err := contracts.ParseTaskResult(normalizedRaw)
+	if err != nil {
+		return result, false, err
+	}
+	result.RawJSON = normalizedRaw
+	result.TaskResult = parsed
+	return result, true, nil
+}
+
 func isCollectStep(stepID string) bool {
 	switch strings.TrimSpace(stepID) {
 	case "init.step1.collect", "refresh.step1.collect":

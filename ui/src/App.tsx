@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { MermaidPreview } from "./components/MermaidPreview";
+import { RunStatusPanel } from "./components/RunStatusPanel";
+import { RuntimeProfileSettingsPanel } from "./components/RuntimeProfileSettingsPanel";
 import { TabNav, type TabOption } from "./components/TabNav";
 
 type Diagnostic = {
@@ -165,6 +167,17 @@ type RuntimeExecutionResponse = {
   source?: Partial<RuntimeExecutionSources>;
 };
 
+type RuntimeStepProviderValues = Record<string, string>;
+
+type RuntimeProfileResponse = {
+  ok: boolean;
+  step_providers?: {
+    persisted?: Partial<RuntimeStepProviderValues>;
+    effective?: Partial<RuntimeStepProviderValues>;
+    source?: Partial<RuntimeStepProviderValues>;
+  };
+};
+
 type EditableArtifactOption = {
   path: string;
   label: string;
@@ -248,6 +261,22 @@ const runtimeExecutionLabels: Record<RuntimeExecutionKey, string> = {
   max_parallel_tasks: "runtime.profile.execution.max_parallel_tasks",
   failure_policy: "runtime.profile.execution.failure_policy",
   shard_discovery_mode: "runtime.profile.execution.shard_discovery.mode",
+};
+
+const runtimeStepProviderOrder = [
+  "step0_constitution",
+  "step1_collect",
+  "step2_as_is",
+  "step3_findings",
+  "step4_proposals",
+] as const;
+
+const runtimeStepProviderLabels: Record<(typeof runtimeStepProviderOrder)[number], string> = {
+  step0_constitution: "runtime.profile.steps.step0_constitution.provider",
+  step1_collect: "runtime.profile.steps.step1_collect.provider",
+  step2_as_is: "runtime.profile.steps.step2_as_is.provider",
+  step3_findings: "runtime.profile.steps.step3_findings.provider",
+  step4_proposals: "runtime.profile.steps.step4_proposals.provider",
 };
 
 const finalStatuses = new Set(["succeeded", "failed"]);
@@ -512,6 +541,9 @@ export default function App() {
     runtimeExecutionDraftFromValues(defaultRuntimeExecutionValues)
   );
   const [runtimeExecutionStatus, setRuntimeExecutionStatus] = useState("");
+  const [runtimeStepProviderPersisted, setRuntimeStepProviderPersisted] = useState<Partial<RuntimeStepProviderValues>>({});
+  const [runtimeStepProviderEffective, setRuntimeStepProviderEffective] = useState<Partial<RuntimeStepProviderValues>>({});
+  const [runtimeStepProviderSource, setRuntimeStepProviderSource] = useState<Partial<RuntimeStepProviderValues>>({});
 
   const [runId, setRunID] = useState<string | null>(null);
   const [runStatus, setRunStatus] = useState<RunStatusResponse | null>(null);
@@ -692,6 +724,7 @@ export default function App() {
     await loadWizardContract();
     await loadRuntimeTimeouts();
     await loadRuntimeExecution();
+    await loadRuntimeProfile();
   }
 
   async function loadRunList(limit = 100): Promise<RunListItem[]> {
@@ -856,6 +889,19 @@ export default function App() {
       setRuntimeExecutionEffective(defaultRuntimeExecutionValues);
       setRuntimeExecutionSource({});
       setRuntimeExecutionDraft(runtimeExecutionDraftFromValues(defaultRuntimeExecutionValues));
+    }
+  }
+
+  async function loadRuntimeProfile() {
+    try {
+      const payload = await fetchJSON<RuntimeProfileResponse>("/api/runtime/profile");
+      setRuntimeStepProviderPersisted(payload.step_providers?.persisted ?? {});
+      setRuntimeStepProviderEffective(payload.step_providers?.effective ?? {});
+      setRuntimeStepProviderSource(payload.step_providers?.source ?? {});
+    } catch {
+      setRuntimeStepProviderPersisted({});
+      setRuntimeStepProviderEffective({});
+      setRuntimeStepProviderSource({});
     }
   }
 
@@ -1567,113 +1613,36 @@ export default function App() {
       ) : null}
 
       {activeTab === "settings" ? (
-        <>
-          <section className="panel" data-testid="runtime-timeouts-panel">
-            <h2>Settings: Runtime Timeouts</h2>
-            <p className="hint">Persisted in `workspace.yaml` (`runtime.profile.timeouts`) with precedence `env &gt; workspace &gt; defaults`.</p>
-            <div className="actions">
-              <button type="button" onClick={() => void loadRuntimeTimeouts()} disabled={busy}>
-                Reload runtime timeouts
-              </button>
-              <button type="button" onClick={() => void handleSaveRuntimeTimeouts()} disabled={busy} data-testid="runtime-timeouts-save-btn">
-                Save runtime timeouts
-              </button>
-              <button type="button" onClick={() => void handleResetRuntimeTimeouts()} disabled={busy}>
-                Reset balanced defaults
-              </button>
-            </div>
-            {runtimeTimeoutKeys.map((key) => (
-              <div key={`timeout-${key}`}>
-                <label htmlFor={`runtime-timeout-${key}`}>{runtimeTimeoutLabels[key]}</label>
-                <input
-                  id={`runtime-timeout-${key}`}
-                  data-testid={`runtime-timeout-input-${key}`}
-                  value={runtimeTimeoutDraft[key]}
-                  onChange={(event) => updateRuntimeTimeoutDraft(key, event.target.value)}
-                />
-                <p className="hint">
-                  persisted: {runtimeTimeoutPersisted[key] ?? "-"} | effective: {runtimeTimeoutEffective[key]} | source: {runtimeTimeoutSource[key] ?? "default"}
-                </p>
-              </div>
-            ))}
-            {runtimeTimeoutStatus ? <p className="status ok">{runtimeTimeoutStatus}</p> : null}
-          </section>
-
-          <section className="panel" data-testid="runtime-execution-panel">
-            <h2>Settings: Runtime Execution</h2>
-            <p className="hint">Persisted in `workspace.yaml` (`runtime.profile.execution`) with precedence `CLI &gt; env &gt; workspace &gt; defaults`.</p>
-            <div className="actions">
-              <button type="button" onClick={() => void loadRuntimeExecution()} disabled={busy}>
-                Reload runtime execution
-              </button>
-              <button type="button" onClick={() => void handleSaveRuntimeExecution()} disabled={busy} data-testid="runtime-execution-save-btn">
-                Save runtime execution
-              </button>
-              <button type="button" onClick={() => void handleResetRuntimeExecution()} disabled={busy}>
-                Reset execution defaults
-              </button>
-            </div>
-
-            <label htmlFor="runtime-execution-strategy">{runtimeExecutionLabels.strategy}</label>
-            <select
-              id="runtime-execution-strategy"
-              data-testid="runtime-execution-strategy-select"
-              value={runtimeExecutionDraft.strategy}
-              onChange={(event) => updateRuntimeExecutionDraft("strategy", event.target.value)}
-            >
-              <option value="sequential">sequential</option>
-              <option value="parallel">parallel</option>
-            </select>
-            <p className="hint">
-              persisted: {String(runtimeExecutionPersisted.strategy ?? "-")} | effective: {String(runtimeExecutionEffective.strategy)} | source:{" "}
-              {runtimeExecutionSource.strategy ?? "default"}
-            </p>
-
-            <label htmlFor="runtime-execution-max-parallel">{runtimeExecutionLabels.max_parallel_tasks}</label>
-            <input
-              id="runtime-execution-max-parallel"
-              data-testid="runtime-execution-max-parallel-input"
-              value={runtimeExecutionDraft.max_parallel_tasks}
-              onChange={(event) => updateRuntimeExecutionDraft("max_parallel_tasks", event.target.value)}
-            />
-            <p className="hint">
-              persisted: {String(runtimeExecutionPersisted.max_parallel_tasks ?? "-")} | effective: {String(runtimeExecutionEffective.max_parallel_tasks)} | source:{" "}
-              {runtimeExecutionSource.max_parallel_tasks ?? "default"}
-            </p>
-
-            <label htmlFor="runtime-execution-failure">{runtimeExecutionLabels.failure_policy}</label>
-            <select
-              id="runtime-execution-failure"
-              data-testid="runtime-execution-failure-policy-select"
-              value={runtimeExecutionDraft.failure_policy}
-              onChange={(event) => updateRuntimeExecutionDraft("failure_policy", event.target.value)}
-            >
-              <option value="best_effort">best_effort</option>
-              <option value="fail_fast">fail_fast</option>
-            </select>
-            <p className="hint">
-              persisted: {String(runtimeExecutionPersisted.failure_policy ?? "-")} | effective: {String(runtimeExecutionEffective.failure_policy)} | source:{" "}
-              {runtimeExecutionSource.failure_policy ?? "default"}
-            </p>
-
-            <label htmlFor="runtime-execution-shard-mode">{runtimeExecutionLabels.shard_discovery_mode}</label>
-            <select
-              id="runtime-execution-shard-mode"
-              data-testid="runtime-execution-shard-mode-select"
-              value={runtimeExecutionDraft.shard_discovery_mode}
-              onChange={(event) => updateRuntimeExecutionDraft("shard_discovery_mode", event.target.value)}
-            >
-              <option value="heuristics">heuristics</option>
-              <option value="semantic">semantic</option>
-            </select>
-            <p className="hint">
-              persisted: {String(runtimeExecutionPersisted.shard_discovery_mode ?? "-")} | effective:{" "}
-              {String(runtimeExecutionEffective.shard_discovery_mode)} | source: {runtimeExecutionSource.shard_discovery_mode ?? "default"}
-            </p>
-
-            {runtimeExecutionStatus ? <p className="status ok">{runtimeExecutionStatus}</p> : null}
-          </section>
-        </>
+        <RuntimeProfileSettingsPanel
+          busy={busy}
+          runtimeTimeoutKeys={[...runtimeTimeoutKeys]}
+          runtimeTimeoutLabels={runtimeTimeoutLabels}
+          runtimeTimeoutDraft={runtimeTimeoutDraft}
+          runtimeTimeoutPersisted={runtimeTimeoutPersisted}
+          runtimeTimeoutEffective={runtimeTimeoutEffective}
+          runtimeTimeoutSource={runtimeTimeoutSource}
+          runtimeTimeoutStatus={runtimeTimeoutStatus}
+          onReloadTimeouts={() => void loadRuntimeTimeouts()}
+          onSaveTimeouts={() => void handleSaveRuntimeTimeouts()}
+          onResetTimeouts={() => void handleResetRuntimeTimeouts()}
+          onTimeoutChange={(key, value) => updateRuntimeTimeoutDraft(key as RuntimeTimeoutKey, value)}
+          runtimeExecutionLabels={runtimeExecutionLabels}
+          runtimeExecutionDraft={runtimeExecutionDraft}
+          runtimeExecutionPersisted={runtimeExecutionPersisted}
+          runtimeExecutionEffective={runtimeExecutionEffective}
+          runtimeExecutionSource={runtimeExecutionSource}
+          runtimeExecutionStatus={runtimeExecutionStatus}
+          onReloadExecution={() => void loadRuntimeExecution()}
+          onSaveExecution={() => void handleSaveRuntimeExecution()}
+          onResetExecution={() => void handleResetRuntimeExecution()}
+          onExecutionChange={(key, value) => updateRuntimeExecutionDraft(key as RuntimeExecutionKey, value)}
+          stepProviderLabels={runtimeStepProviderLabels}
+          stepProviderOrder={[...runtimeStepProviderOrder]}
+          stepProviderPersisted={runtimeStepProviderPersisted}
+          stepProviderEffective={runtimeStepProviderEffective}
+          stepProviderSource={runtimeStepProviderSource}
+          onReloadProfile={() => void loadRuntimeProfile()}
+        />
       ) : null}
 
       {activeTab === "baseline" ? (
@@ -1754,30 +1723,7 @@ export default function App() {
             </div>
             {runActionStatus ? <p className="status warn">{runActionStatus}</p> : null}
 
-            {runStatus ? (
-              <div className="status-block" data-testid="run-status-panel">
-                <p>
-                  Run <code data-testid="run-status-run-id">{runStatus.run_id}</code> status:{" "}
-                  <strong data-testid="run-status-value">{runStatus.status}</strong>
-                </p>
-                <p>Pipeline: {runStatus.pipeline}</p>
-                {runStatus.current_step ? <p>Current step: {runStatus.current_step}</p> : null}
-                {runStatus.error_code ? <p className="status warn">Error code: {runStatus.error_code}</p> : null}
-                {runStatus.error ? <p className="status err">Error: {runStatus.error}</p> : null}
-                {selectedRunWarnings.length > 0 ? (
-                  <div data-testid="run-status-warnings">
-                    <p className="hint">Warnings ({selectedRunWarnings.length})</p>
-                    <ul>
-                      {selectedRunWarnings.map((warning, index) => (
-                        <li key={`run-warning-${index}-${warning}`}>{warning}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : (
-                  <p data-testid="run-status-warnings-empty">Warnings: none</p>
-                )}
-              </div>
-            ) : null}
+            <RunStatusPanel runStatus={runStatus} warnings={selectedRunWarnings} />
           </section>
 
           <section className="panel" data-testid="runs-history-panel">

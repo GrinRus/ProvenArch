@@ -20,9 +20,11 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/runnerdiag"
+	"github.com/GrinRus/ProvenArch/internal/runtime/steppolicy"
 	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultbinding"
 	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultcompat"
 	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultextractor"
+	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 )
 
@@ -41,6 +43,7 @@ const (
 	promptRetryNone promptRetryMode = iota
 	promptRetryParse
 	promptRetryArtifact
+	promptRetryDraftArtifact
 )
 
 func (r HeadlessRunner) commandName() string {
@@ -131,7 +134,7 @@ func runNativeDirectClaude(ctx context.Context, command string, task acpruntime.
 		)
 	}
 	if parseErr == nil {
-		return maybeRepairCollectArtifacts(ctx, task, taskPayload, command, result)
+		return finalizeSuccessfulClaudeResult(ctx, task, taskPayload, command, result)
 	}
 
 	retryArgs := buildNativeDirectClaudeArgs(
@@ -140,7 +143,7 @@ func runNativeDirectClaude(ctx context.Context, command string, task acpruntime.
 			taskPayload,
 			promptRetryParse,
 			parseStage == "extract" && (isEnvelopeResultEmptyError(parseErr) || isEnvelopeResultMalformedError(parseErr)),
-			buildParseRepairHints(parseStage, parseErr),
+			buildParseRepairHints(task.StepID, parseStage, parseErr),
 		),
 	)
 	retryResult, retryParseStage, retryParseErr, retryRunErr := runClaudeCommand(ctx, task, command, retryArgs, nil)
@@ -156,7 +159,7 @@ func runNativeDirectClaude(ctx context.Context, command string, task acpruntime.
 		)
 	}
 	if retryParseErr == nil {
-		return maybeRepairCollectArtifacts(ctx, task, taskPayload, command, retryResult)
+		return finalizeSuccessfulClaudeResult(ctx, task, taskPayload, command, retryResult)
 	}
 
 	parseFailureMessage := buildParseFailureMessage(task, retryParseStage, retryParseErr, retryResult)
@@ -228,6 +231,15 @@ func maybeRepairCollectArtifacts(
 		)
 	}
 	if parseErr != nil {
+		if contractErr := validateCollectManifestContractAtWriteRoot(task.WriteRoot); contractErr != nil {
+			_ = snapshot.Restore()
+			return acpruntime.Result{}, wrapArtifactContractFailure(
+				repaired.Stdout,
+				repaired.Stderr,
+				fmt.Sprintf("collect artifact repair returned invalid taskresult and left contract-invalid shard-pack-manifest.json: parse=%v; validation=%v", parseErr, contractErr),
+				errors.Join(parseErr, contractErr),
+			)
+		}
 		_ = snapshot.Restore()
 		parseFailureMessage := buildParseFailureMessage(task, "artifact_repair."+repairParseStage, parseErr, repaired)
 		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
@@ -255,11 +267,132 @@ func maybeRepairCollectArtifacts(
 	return repaired, nil
 }
 
+func finalizeSuccessfulClaudeResult(
+	ctx context.Context,
+	task acpruntime.Task,
+	taskPayload []byte,
+	command string,
+	current acpruntime.Result,
+) (acpruntime.Result, error) {
+	if isCollectStep(task.StepID) {
+		return maybeRepairCollectArtifacts(ctx, task, taskPayload, command, current)
+	}
+	if !runtimedrafts.IsDraftStep(task.StepID) {
+		return current, nil
+	}
+	current, _, _ = reconcileRuntimeDraftOutputsAtWriteRoot(task, current)
+	if _, _, err := validateRuntimeDraftArtifactsAtWriteRoot(task); err == nil {
+		return current, nil
+	}
+	return maybeRepairRuntimeDraftArtifacts(ctx, task, taskPayload, command, current)
+}
+
+func validateCollectManifestContractAtWriteRoot(writeRoot string) error {
+	raw, err := os.ReadFile(filepath.Join(filepath.Clean(writeRoot), "shard-pack-manifest.json"))
+	if err != nil {
+		return err
+	}
+	_, err = contracts.ParseShardPackManifest(raw)
+	return err
+}
+
+func validateRuntimeDraftArtifactsAtWriteRoot(task acpruntime.Task) (runtimedrafts.Manifest, []byte, error) {
+	return runtimedrafts.ValidateRequiredManifest(
+		task.WriteRoot,
+		task.DraftFinalRoot,
+		task.RunID,
+		task.StepID,
+		task.StepContract,
+		task.ExpectedArtifacts,
+	)
+}
+
+func reconcileRuntimeDraftOutputsAtWriteRoot(task acpruntime.Task, current acpruntime.Result) (acpruntime.Result, bool, error) {
+	if !runtimedrafts.IsDraftStep(task.StepID) {
+		return current, false, nil
+	}
+	manifestFile := runtimedrafts.ManifestFileForStep(task.StepID)
+	if strings.TrimSpace(task.WriteRoot) == "" || strings.TrimSpace(task.DraftFinalRoot) == "" || strings.TrimSpace(manifestFile) == "" {
+		return current, false, nil
+	}
+	manifest, _, err := runtimedrafts.Load(task.WriteRoot, manifestFile)
+	if err != nil {
+		return current, false, err
+	}
+	if err := runtimedrafts.ValidateManifestForTask(manifest, task.RunID, task.StepID, task.StepContract); err != nil {
+		return current, false, err
+	}
+	changed, err := runtimedrafts.ReconcileOutputsAtDraftRoot(task.DraftFinalRoot, manifest)
+	if err != nil || !changed {
+		return current, changed, err
+	}
+	normalized, _, err := taskresultcompat.NormalizeResult(task, current)
+	if err != nil {
+		return current, false, err
+	}
+	return normalized, true, nil
+}
+
+func maybeRepairRuntimeDraftArtifacts(
+	ctx context.Context,
+	task acpruntime.Task,
+	taskPayload []byte,
+	command string,
+	current acpruntime.Result,
+) (acpruntime.Result, error) {
+	if !runtimedrafts.IsDraftStep(task.StepID) {
+		return current, nil
+	}
+	if repaired, changed, err := reconcileRuntimeDraftOutputsAtWriteRoot(task, current); err == nil && changed {
+		if _, _, validationErr := validateRuntimeDraftArtifactsAtWriteRoot(task); validationErr == nil {
+			return repaired, nil
+		}
+		current = repaired
+	}
+	if _, _, err := validateRuntimeDraftArtifactsAtWriteRoot(task); err == nil {
+		return current, nil
+	} else {
+		repairArgs := buildNativeDirectClaudeArgs(
+			task,
+			buildDirectPromptWithModeAndHints(taskPayload, promptRetryDraftArtifact, false, buildDraftArtifactRepairHints(task, err)),
+		)
+		repaired, repairParseStage, parseErr, runErr := runClaudeCommand(ctx, task, command, repairArgs, nil)
+		if runErr != nil {
+			return acpruntime.Result{}, wrapArtifactContractFailure(
+				repaired.Stdout,
+				repaired.Stderr,
+				fmt.Sprintf("runtime required draft artifact repair attempt failed: %v", runErr),
+				runErr,
+			)
+		}
+		if parseErr != nil {
+			return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+				acpruntime.ProviderClaudeCode,
+				acpruntime.ErrorCodeRunnerParseFailed,
+				fmt.Sprintf("headless provider %q returned invalid runtime draft artifact repair result: %s", acpruntime.ProviderClaudeCode, buildParseFailureMessage(task, "draft_repair."+repairParseStage, parseErr, repaired)),
+				repaired.Stdout,
+				repaired.Stderr,
+				parseErr,
+			)
+		}
+		repaired, _, _ = reconcileRuntimeDraftOutputsAtWriteRoot(task, repaired)
+		if _, _, repairErr := validateRuntimeDraftArtifactsAtWriteRoot(task); repairErr != nil {
+			return acpruntime.Result{}, wrapArtifactContractFailure(
+				repaired.Stdout,
+				repaired.Stderr,
+				fmt.Sprintf("runtime required draft artifacts remained invalid after one repair attempt: validation=%v", repairErr),
+				repairErr,
+			)
+		}
+		return repaired, nil
+	}
+}
+
 func wrapArtifactContractFailure(stdout string, stderr string, message string, cause error) error {
 	return acpruntime.WrapRunnerErrorWithOutput(
 		acpruntime.ProviderClaudeCode,
 		acpruntime.ErrorCodeRunnerParseFailed,
-		fmt.Sprintf("headless provider %q produced invalid collect artifacts: %s", acpruntime.ProviderClaudeCode, strings.TrimSpace(message)),
+		fmt.Sprintf("headless provider %q produced invalid runtime artifacts: %s", acpruntime.ProviderClaudeCode, strings.TrimSpace(message)),
 		stdout,
 		stderr,
 		cause,
@@ -551,6 +684,7 @@ Task payload JSON:
 		pathScopesJSON = string(rawPathScopes)
 	}
 	stepPolicy := buildStepSpecificDirectPolicy(task.StepID)
+	topLevelCompatibilityRule := steppolicy.TopLevelCompatibilityRule(task.StepID)
 	repositoryEvidencePolicy := strings.Join([]string{
 		`REPOSITORY EVIDENCE RULES:`,
 		`- ACP workspace scaffold (workspace.yaml, charter/, model/, reports/) is support context, not the primary source tree.`,
@@ -566,13 +700,17 @@ Task payload JSON:
 			`Do not include non-ASCII symbols in numbers or timestamps.`,
 			`RFC3339 timestamps only (example: 2026-04-09T15:28:49Z).`,
 			`Decimals must be compact numeric literals (example: 0.7, not 0. 7).`,
-			`Do NOT collapse a multi-document refresh into one generic "cite.runtime-summary" citation.`,
-			`Do NOT overwrite a rich shard-pack-manifest.json with a skeletal reuse-only manifest.`,
-			`Preserve repo-specific citations when repository evidence already exists or can be recovered from repo roots.`,
 			`Unknown changeset[].op values are forbidden; allowed values are exactly: upsert_entity, remove_entity, upsert_edge, remove_edge, add_finding, add_doc_artifact.`,
 			`For op="add_doc_artifact", the payload key MUST be "doc_artifact"; never use "artifact".`,
 			`If a retry only repaired files inside write_root, prefer "changeset": [] instead of inventing file-write operations.`,
 			`Return only JSON object, without prose.`,
+		}
+		if isCollectStep(task.StepID) {
+			retryLines = append(retryLines,
+				`Do NOT collapse a multi-document refresh into one generic "cite.runtime-summary" citation.`,
+				`Do NOT overwrite a rich shard-pack-manifest.json with a skeletal reuse-only manifest.`,
+				`Preserve repo-specific citations when repository evidence already exists or can be recovered from repo roots.`,
+			)
 		}
 		if mode == promptRetryArtifact {
 			retryLines[0] = `ARTIFACT REPAIR MODE: previous collect output was schema-valid but write_root artifacts look skeletal or generic-only.`
@@ -581,6 +719,13 @@ Task payload JSON:
 				`Keep repo roots available while restoring repo-specific citations in shard-pack-manifest.json.`,
 				`Rewrite shard-pack-manifest.json to the canonical ACP schema (version=1 integer, documents[].citation_ids, citations[].id/document_ids, stable canonical_path).`,
 				`compatibility.coverage/questions/entities/edges/findings must all exist, and questions/entities/edges/findings must be arrays rather than booleans or null.`,
+			)
+		} else if mode == promptRetryDraftArtifact {
+			retryLines[0] = `DRAFT ARTIFACT REPAIR MODE: previous output was schema-valid but required runtime draft artifacts were invalid.`
+			retryLines = append(retryLines,
+				`Repair the runtime draft manifest and referenced draft files before returning JSON; this retry is not a fresh repository rediscovery pass.`,
+				`Keep writes constrained to write_root and draft_final_root only.`,
+				`If the draft manifest already describes the publish surface and draft files are on disk, prefer "changeset": [] and do not emit legacy metadata-registration operations.`,
 			)
 		}
 		retryLines = append(retryLines, extraHints...)
@@ -613,6 +758,7 @@ STRICT CONTRACT (must pass):
 - coverage.missing MUST use canonical terms only: owner mappings, ci-cd evidence, delta validation, dependency graph, runtime metrics, api contracts, deployment configs, integration edges, datastore bindings, dependencies.
 - question IDs MUST use canonical form without numeric suffixes (example: q.refresh.delta, not q.refresh.delta.1).
 - Do not claim workspace is empty/minimal unless provenance evidence includes concrete file paths proving it.
+- %s
 %s
 %s
 %s
@@ -636,7 +782,7 @@ Schema-valid template for this task (copy structure and field TYPES, then refine
 %s
 
 Serialized runtime task JSON (context only):
-%s`, acpruntime.ProviderClaudeCode, stepPolicy, repositoryEvidencePolicy, docFirstPolicy, retryHint, nonEmptyResultHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderClaudeCode, "claude-cli", task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, task.ShardID, primaryRepoScope, repoScopesJSON, pathScopesJSON, buildDirectTaskResultTemplateJSON(task), strings.TrimSpace(string(taskPayload))))
+%s`, acpruntime.ProviderClaudeCode, topLevelCompatibilityRule, stepPolicy, repositoryEvidencePolicy, docFirstPolicy, retryHint, nonEmptyResultHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderClaudeCode, "claude-cli", task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, task.ShardID, primaryRepoScope, repoScopesJSON, pathScopesJSON, buildDirectTaskResultTemplateJSON(task), strings.TrimSpace(string(taskPayload))))
 }
 
 func buildDirectTaskResultTemplateJSON(task acpruntime.Task) string {
@@ -685,134 +831,23 @@ func buildDirectTaskResultTemplateJSON(task acpruntime.Task) string {
 }
 
 func buildStepSpecificDirectPolicy(stepID string) string {
-	switch stepID {
-	case "refresh.step1.collect":
-		return strings.Join([]string{
-			`STEP POLICY refresh.step1.collect:`,
-			`- Allowed upsert_entity types: service, datastore, integration, external.system, team, domain, api, component.`,
-			`- Forbidden placeholder entity types: runtime_provider, runtime, metadata.`,
-			`- Analyze only repository/workspace artifacts; do NOT perform web search or external browsing.`,
-			`- Every provenance.evidence.path must resolve to an existing file in workspace/repo scope.`,
-			`- Do NOT emit synthetic evidence paths such as search_source/*, search_query/*, search_config/*.`,
-			`- Do NOT introduce unrelated incident domains (for example bidding/tender/power-system topics) unless explicitly present in repository evidence.`,
-			`- If evidence is incomplete, capture gap via coverage.missing instead of synthetic placeholder entities.`,
-			`- Include at least one question and at least three items in coverage.missing.`,
-		}, "\n")
-	case "refresh.step3.findings":
-		return strings.Join([]string{
-			`STEP POLICY refresh.step3.findings:`,
-			`- If owner mapping is unresolved in evidence/coverage, include at least one add_finding operation.`,
-			`- Each finding must include rule_id, related_ids, and provenance.evidence[].`,
-			`- For observation provenance, evidence array MUST be non-empty.`,
-			`- If meta.repo_scopes has 2+ scopes, include at least one upsert_edge that links entities from different repo_scope values.`,
-			`- For upsert_edge use canonical keys only: edge.id, edge.type, edge.from, edge.to.`,
-			`- Forbidden edge aliases: edge.kind, edge.source, edge.target.`,
-			`- Minimal valid upsert_edge example: {"op":"upsert_edge","edge":{"id":"edge.cross.scope","type":"depends_on","from":"svc.a","to":"svc.b","provenance":{"kind":"inference","confidence":0.6,"evidence":[{"repo":"scope-a","path":"README.md"},{"repo":"scope-b","path":"README.md"}]}}}`,
-			`- Every provenance.evidence.path must resolve to an existing file in workspace/repo scope.`,
-			`- Do NOT emit synthetic evidence paths such as search_source/*, search_query/*, search_config/*.`,
-			`- Include at least one question and at least three items in coverage.missing.`,
-		}, "\n")
-	default:
-		if strings.HasPrefix(stepID, "refresh.") {
-			return `For refresh steps include at least one question object and at least three items in coverage.missing.`
-		}
-		return ""
-	}
+	return steppolicy.StepSpecificPolicy(stepID)
 }
 
 func buildDocFirstFilesystemPolicy(task acpruntime.Task) string {
-	readContextRootsJSON := "[]"
-	if raw, err := json.Marshal(task.ReadContextRoots); err == nil {
-		readContextRootsJSON = string(raw)
-	}
-	lines := []string{
-		`DOCS-FIRST FILESYSTEM CONTRACT:`,
-		`- Read only from meta.workspace and meta.path_scopes plus runtime read_context_roots; do not treat workspace root as implicit write target.`,
-		`- Write ONLY inside write_root. Never write to workspace.yaml, schemas/*, docs/spec/*, charter/*, or analyzed user repositories.`,
-		fmt.Sprintf(`- artifact_root (workspace-relative) = %q`, strings.TrimSpace(task.ArtifactRoot)),
-		fmt.Sprintf(`- write_root (absolute) = %q`, strings.TrimSpace(task.WriteRoot)),
-		fmt.Sprintf(`- draft_final_root (absolute) = %q`, strings.TrimSpace(task.DraftFinalRoot)),
-		fmt.Sprintf(`- read_context_roots = %s`, readContextRootsJSON),
-		fmt.Sprintf(`- domain_id = %q`, strings.TrimSpace(task.DomainID)),
-		fmt.Sprintf(`- agent_role = %q`, strings.TrimSpace(task.AgentRole)),
-		fmt.Sprintf(`- step_contract = %q`, strings.TrimSpace(task.StepContract)),
-		fmt.Sprintf(`- expected_artifacts = %s`, strings.Join(task.ExpectedArtifacts, ", ")),
-	}
-	switch task.StepID {
-	case "init.step0.constitution":
-		lines = append(lines,
-			`- Write constitution-draft.json in write_root.`,
-			`- Draft canonical files only under draft_final_root, targeting charter/overview.md and skills/subagents.yaml.`,
-			`- Keep the draft deterministic in shape; compiler will normalize/publish canonical files afterwards.`,
-		)
-	case "init.step1.collect", "refresh.step1.collect":
-		lines = append(lines,
-			`- Produce runtime-authored documents in write_root and then write shard-pack-manifest.json in write_root.`,
-			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and compatibility snapshot.`,
-			`- You may be flexible in document structure, but promotion and rendering depend on manifest citations/topics remaining accurate.`,
-		)
-		lines = append(lines, artifactquality.CollectManifestContractLines(strings.TrimSpace(task.ArtifactRoot))...)
-		lines = append(lines, artifactquality.ClaimIDContractLines()...)
-		lines = append(lines,
-			`- Do NOT collapse a multi-document refresh surface to one generic "cite.runtime-summary" citation when repository evidence exists.`,
-			`- Preserve repo-specific citations in shard-pack-manifest.json whenever repository files support them.`,
-		)
-	case "init.step3.findings", "refresh.step3.findings":
-		lines = append(lines,
-			`- Inspect staged final artifacts under reports/taskruns/<run_id>/staging/final from read_context_roots.`,
-			`- Write validator-verdict.json in write_root.`,
-			`- Validator may fix only indexes, references, or technical document issues inside write_root; do not rewrite document meaning wholesale.`,
-		)
-		lines = append(lines, artifactquality.ClaimIDContractLines()...)
-	case "init.step2.asis_docs", "refresh.step2.asis_docs":
-		lines = append(lines,
-			`- Write asis-draft-manifest.json in write_root.`,
-			`- Draft final docs only under draft_final_root.`,
-			`- Allowed canonical targets are reports/as-is/*, reports/coverage/*, and reports/agent-outputs/*.`,
-			`- Compiler will merge these drafts into staged final artifacts and keep canonical layout/indexing deterministic.`,
-		)
-	case "init.step4.proposals", "refresh.step4.proposals":
-		lines = append(lines,
-			`- Inspect validated staged artifacts under reports/taskruns/<run_id>/staging/final from read_context_roots.`,
-			`- Write proposals-draft-manifest.json in write_root.`,
-			`- Draft final docs only under draft_final_root.`,
-			`- Allowed canonical targets are proposals/* and reports/changelog/*.`,
-			`- Promotion remains deterministic; your drafts become publish candidates only after compile/publish gates.`,
-		)
-	}
-	return strings.Join(lines, "\n")
+	return steppolicy.DocFirstFilesystemPolicy(task)
 }
 
-func buildParseRepairHints(parseStage string, parseErr error) []string {
-	if parseErr == nil {
-		return nil
-	}
-	lines := []string{}
-	if detail := compactRetryHint(parseErr.Error()); detail != "" {
-		stage := strings.TrimSpace(parseStage)
-		if stage == "" {
-			stage = "unknown"
-		}
-		lines = append(lines, fmt.Sprintf(`Previous %s validation failure: %s`, stage, detail))
-	}
-	return append(lines,
-		`Return a direct TaskResult JSON object, not an event-stream transcript or tool wrapper.`,
-		`Do NOT use ad-hoc ops such as upsert_file, write_file, update_file, or todo_write in changeset[].op.`,
-		`For add_doc_artifact, use doc_artifact and never the legacy artifact field.`,
-	)
+func buildParseRepairHints(stepID string, parseStage string, parseErr error) []string {
+	return steppolicy.ParseRepairHints(stepID, parseStage, parseErr)
 }
 
 func buildArtifactRepairHints(initialProblem string) []string {
-	lines := []string{
-		`Rebuild shard-pack-manifest.json to the canonical ACP schema before returning JSON.`,
-		`compatibility.coverage/questions/entities/edges/findings are all required; questions/entities/edges/findings must be arrays even when empty.`,
-		`Do NOT leave claim_ids empty for cited repository evidence; preserve concrete repo-backed claim ids whenever the evidence supports them.`,
-		`Do NOT describe shard-pack-manifest.json repair via add_doc_artifact; repair the file in write_root and return "changeset": [].`,
-	}
-	if detail := compactRetryHint(initialProblem); detail != "" {
-		lines = append(lines, fmt.Sprintf(`Previous artifact contract failure: %s`, detail))
-	}
-	return lines
+	return steppolicy.CollectArtifactRepairHints(initialProblem)
+}
+
+func buildDraftArtifactRepairHints(task acpruntime.Task, validationErr error) []string {
+	return steppolicy.DraftArtifactRepairHints(task, validationErr)
 }
 
 func compactRetryHint(value string) string {
@@ -824,6 +859,9 @@ func compactRetryHint(value string) string {
 }
 
 func buildDirectTemplateChangeset(task acpruntime.Task) []contracts.Operation {
+	if runtimedrafts.IsDraftStep(task.StepID) || isCollectStep(task.StepID) {
+		return []contracts.Operation{}
+	}
 	scopes := append([]string(nil), task.RepoScopes...)
 	if len(scopes) == 0 {
 		scopes = []string{"repository"}
@@ -859,41 +897,17 @@ func buildDirectTemplateChangeset(task acpruntime.Task) []contracts.Operation {
 				},
 			})
 		}
-	default:
-		for _, scope := range scopes {
-			scope = strings.TrimSpace(scope)
-			if scope == "" {
-				scope = "repository"
-			}
-			slug := slugutil.Slugify(scope)
-			if slug == "" {
-				slug = "repository"
-			}
-			changes = append(changes, contracts.Operation{
-				Op: "upsert_entity",
-				Entity: &contracts.Entity{
-					ID:   "svc." + slug,
-					Type: "service",
-					Name: humanizeServiceName(scope),
-					Attributes: map[string]any{
-						"repo_scope": scope,
-						"runtime":    acpruntime.ProviderClaudeCode,
-					},
-					Provenance: contracts.Provenance{
-						Kind:       "observation",
-						Confidence: 0.7,
-						Evidence: []contracts.Evidence{
-							{
-								Repo: scope,
-								Path: "README.md",
-							},
-						},
-					},
-				},
-			})
-		}
 	}
 	return changes
+}
+
+func isCollectStep(stepID string) bool {
+	switch strings.TrimSpace(stepID) {
+	case "init.step1.collect", "refresh.step1.collect":
+		return true
+	default:
+		return false
+	}
 }
 
 type FakeRunner struct{}
@@ -1170,13 +1184,5 @@ func humanizeServiceName(repo string) string {
 }
 
 func primaryTaskRepoScope(explicit string, scopes []string) string {
-	if value := strings.TrimSpace(explicit); value != "" {
-		return value
-	}
-	for _, scope := range scopes {
-		if value := strings.TrimSpace(scope); value != "" {
-			return value
-		}
-	}
-	return ""
+	return steppolicy.PrimaryTaskRepoScope(explicit, scopes)
 }

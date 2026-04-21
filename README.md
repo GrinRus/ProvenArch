@@ -38,7 +38,7 @@ ACP не является "рисовалкой диаграмм". Архите�
 - источники репозиториев: локальные checkout-папки и/или GitHub/GitLab `git_url`, разрешаемые через локальный `git` контекст пользователя/runner
 - локально импортированные документы
 - интерактивный wizard "Конституции проекта"
-- deterministic Step 0 materialization из `charter/wizard/step0-contract.json` (с fallback baseline + warning в run diagnostics при missing/invalid contract)
+- deterministic Step 0 support-artifacts materialization из `charter/wizard/step0-contract.json`, а canonical `charter/overview.md` / `skills/subagents.yaml` публикуются только из валидных runtime draft artifacts (`constitution-draft.json` + draft finals) с warning в run diagnostics при missing/invalid wizard contract
 - встроенный baseline bundle agents/skills/prompts + редактируемые в UI prompt packs, версионируемые в Git
 - domain-first иерархия агентов (domain analysts + architect aggregator)
 - docs-first runtime contract: shard analysts пишут dossier packs в run-scoped staging, validator даёт canonical verdict, promotion переносит только approved final set
@@ -61,7 +61,9 @@ Primary execution path для `step0..step4`:
 - provider резолвится на уровне шага, а не всего run; global `--runtime-provider` / `ACP_RUNTIME_PROVIDER` остаются fallback только если step override не задан
 - `step0/2/4` materialize-ят staged draft manifests (`constitution-draft.json`, `asis-draft-manifest.json`, `proposals-draft-manifest.json`)
 - `step0/2/4` считаются successful только если draft manifest contract валиден и все referenced draft files реально существуют под `draft_final_root`
+- publish для `step0/2/4` идёт только из validated runtime draft artifacts через deterministic compile/publish path; direct orchestrator writer больше не является альтернативным source-of-truth для canonical outputs
 - runtime draft manifest contract (`version=1`, `run_id`, `step_id`, `step_contract`, `agent_role`, `outputs[]`) является единым internal source of truth для writer + validator; `qwen` дополнительно делает один step-aware artifact-repair retry для draft-only шагов до возврата в orchestrator
+- runtime validators для collect manifests и draft manifests read-only по умолчанию; допустимая reconciliation вынесена в явную runtime repair/canonicalization стадию до финальной validation
 - если `qwen` на draft-only шаге уже записал draft manifest + draft files, но завис без финального JSON, runtime принудительно завершает provider process и делает один constrained retry для добора только финального `TaskResult`
 - shard agents materialize-ят authored docs + `shard-pack-manifest.json`
 - persisted collect manifests с workspace-level `documents[].path` drift (`reports/...`, `charter/...`, `proposals/...` или duplicated `artifact_root`) отбрасываются до `step2`, а qwen repair может детерминированно нормализовать только safe path drift
@@ -627,7 +629,7 @@ UI в MVP должен покрывать минимум:
 - baseline-wide редактор `charter/*` + `skills/*` (prompt packs, `subagents.yaml`, skill prompts);
 - запуск pipeline (init/update);
 - явные top-level секции `Setup / Baseline / Runs / Results / Settings`;
-- `Settings` как отдельная вкладка для runtime profile (`timeouts` + `execution`);
+- `Settings` как отдельная вкладка для runtime profile (`timeouts` + `execution`) и effective step providers;
 - `Runs: Logs` с dual stream surface (`event timeline` + `raw agent stream`) и quick actions;
 - `Results` с отдельной вкладкой `Diagrams` (filter/open/preview C4 Mermaid artifacts);
 - просмотр остальных результатов (`as-is`, findings, proposals) и repo validation overview (`resolved_repos` + diagnostics по repo);

@@ -185,6 +185,46 @@ EP-20260420-regres-small-live-triage
 - 2026-04-20: prerequisites и pinned path SHA проверены, prepared clean detached worktree `/private/tmp/provenarch-run-clean`, запуск `regres fast` начинается.
 
 ### Plan ID
+EP-20260420-project-flow-audit
+
+### Context
+Нужен полный аудит ACP после серии runtime/live slices: разобрать execution flow, текущую работу backend/API/UI/harness, существующее тестовое покрытие, prompt/artifact contracts, скрытые legacy-paths и расхождения с целевой step-scoped agent-first архитектурой. Результат этого плана — не код, а точная карта проблем и приоритизированный backlog доработок.
+
+### Goals (must have)
+- [ ] Проследить end-to-end flow: CLI/API -> orchestrator -> runtime -> compile/publish -> harness/reports
+- [ ] Разобрать, какие части системы уже соответствуют целевой архитектуре, а какие остаются transitional/legacy
+- [ ] Оценить текущее тестовое покрытие по runtime/orchestrator/harness/UI и отметить пробелы
+- [ ] Разобрать prompt/artifact contracts для `claude-code`, `qwen-code`, `fake` и compile-time gates
+- [ ] Сформировать конкретный план доработок по найденным рискам/расхождениям
+
+### Non-goals
+- [ ] Не вносить functional code changes в runtime/orchestrator/harness в рамках самого аудита
+- [ ] Не менять public schemas/API/workspace contracts
+- [ ] Не запускать новый live matrix как часть этого анализа
+
+### Approach
+1) Пройти кодовый execution path от `acp run`/API до `pipelineExecution`, step runner resolution и compile/publish.
+2) Разобрать runtime providers (`qwen`, `claude`, `fake`), prompt builders, repair/retry paths и artifact contracts.
+3) Просмотреть orchestrator/docflow/tests/harness scripts, чтобы отделить реальные invariants от transitional compatibility.
+4) Сверить observed implementation с declared architecture в README/docs/ARCHITECTURE и с agent-first target model.
+5) Сформировать приоритизированный план доработок с явным разделением: release risks, architecture debt, testing debt.
+
+### Files expected to change
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [ ] Есть явная карта flow и ownership по слоям
+- [ ] Найдены и описаны потенциальные bugs/shortcomings и legacy hotspots
+- [ ] Зафиксированы расхождения с целевой архитектурой
+- [ ] Составлен конкретный план доработок по итогам аудита
+
+### Risks
+- Главный риск — спутать уже зафиксированные runtime slices с текущим фактическим baseline и недооценить transitional logic, которая всё ещё влияет на live behavior. Снижение риска: опираться на кодовый execution path, тесты и current contracts, а не на старые assumptions.
+
+### Progress log
+- 2026-04-20: начат полный audit flow/project/tests/prompts/artifacts; разобраны CLI/API entrypoints, orchestrator pipeline execution, step-scoped provider resolution, qwen runtime watchdog/repair paths, shared runtime draft contracts, batch/matrix heartbeat/classification scripts и основное regression coverage.
+
+### Plan ID
 EP-20260420-qwen-preartifact-stall-reporting
 
 ### Context
@@ -801,6 +841,54 @@ EP-20260420-qwen-live-regress-stabilization
 
 ### Risks
 - В основном дереве уже есть unrelated изменения `internal/api/ui_dist/*`; не затрагивать их и прогонять verification аккуратно, при необходимости в изолированной копии.
+
+---
+
+## ExecPlan
+
+### Plan ID
+EP-20260421-architecture-parity-closure
+
+### Context
+Нужно довести уже реализованный step-scoped agent pipeline до более строгой архитектурной parity после аудита flow и live harness: убрать hidden mutation из validator path, довести `step0` до draft-only publish authority, вынести shared step policy, разрезать самые рискованные монолиты в orchestrator/runtime/UI и закрыть пробелы в observability tests.
+
+### Goals (must have)
+- [x] `step0.constitution` публикует canonical outputs только из validated runtime draft artifacts
+- [x] Runtime draft validation остаётся read-only; reconciliation вынесен в явный отдельный stage
+- [x] Shared provider-agnostic step contract/prompt policy используется `qwen` и `claude`
+- [x] `qwen` runtime разделён на prompt, repair, diagnostics и process-exec/stall subsystems
+- [x] UI вынесен из одного корневого status/settings блока в отдельные presentation components
+- [x] Harness heartbeat покрыт и для `profile-status`, и для `run-status.env`
+- [x] Выполнен полный DoD (`make contracts`, `make lint`, `make test`, `make build`)
+
+### Non-goals
+- [x] Не менять public contracts (`workspace.yaml`, `schemas/taskresult.schema.json`, runtime profile API, release verdict/report outputs)
+- [x] Не превращать live provider runs в required CI
+
+### Files changed
+- `internal/orchestrator/*`
+- `internal/runtime/steppolicy/*`
+- `internal/runtime/qwencode/*`
+- `internal/runtime/claudecode/*`
+- `internal/runtimedrafts/*`
+- `scripts/full-run-ai-advent.sh`
+- `scripts/run-status-heartbeat.sh`
+- `scripts/tests/*`
+- `ui/src/App.tsx`
+- `ui/src/components/*`
+- `ui/src/App.test.tsx`
+- `README.md`
+- `docs/ARCHITECTURE.md`
+
+### Acceptance criteria
+- [x] Invalid draft artifacts не могут быть опубликованы fallback path-ом
+- [x] Invalid manifests падают без hidden repair внутри validation
+- [x] `qwen`/`claude` prompts получают одинаковые shared step obligations
+- [x] Active live heartbeat observable и тестируется отдельно для `profile-status` и `run-status.env`
+- [x] UI покрывает effective step providers и `running/failed` run states
+
+### Risks
+- `internal/orchestrator/orchestrator.go` и `ui/src/App.tsx` всё ещё остаются крупными файлами; дальнейшая декомпозиция возможна, но уже не блокирует текущую architectural parity slice.
 
 ---
 

@@ -48,7 +48,7 @@
    - Показывает repo overview в validate surface: `resolved_repos` + diagnostics, сгруппированные по repo
    - Редактирует baseline bundle artifacts через guided selector (`charter/*`, `skills/*`, prompt packs, `skills/subagents.yaml`)
    - UI разбит на top-level tabs `Setup / Baseline / Runs / Results / Settings`
-   - Runtime profile (`timeouts` + `execution`) полностью вынесен в вкладку `Settings`
+   - Runtime profile (`timeouts` + `execution`) полностью вынесен в вкладку `Settings`, включая effective per-step providers
    - Показывает run dashboard (queued/running/succeeded/failed), включая завершённые run'ы из persisted history
    - При bootstrap авто-выбирает newest active run (`queued/running`), иначе первый run в history; после ручного выбора run auto-switch не выполняется
    - Если выбранный run исчезает из history (например, retention/restart race), UI очищает stale `Run status`/logs для этого run и не auto-switch-ится на другой run
@@ -67,8 +67,8 @@
 
 3) **Orchestrator (`internal/orchestrator`)** *(implemented baseline)*
    - Step registry (шаги init pipeline)
-   - Step 0 materialization читает persisted wizard contract `charter/wizard/step0-contract.json`
-   - при missing/invalid wizard contract применяется deterministic baseline fallback и warning фиксируется в run diagnostics
+   - Step 0 support-artifacts materialization читает persisted wizard contract `charter/wizard/step0-contract.json`
+   - при missing/invalid wizard contract применяется deterministic baseline fallback только для support artifacts, а warning фиксируется в run diagnostics
    - baseline bundle seeding выполняется create-if-missing, без перезаписи пользовательских правок
    - Готовит ContextPack/PromptPack
    - Загружает baseline bundle agents/skills/prompts из workspace
@@ -96,6 +96,7 @@
    - При `best_effort` downstream шаги продолжаются на partial model, но итог run фиксируется как `failed` с `error_code=run_partial_failed`; если `step1.collect` становится `unusable`, live `step3.findings` не выполняется, а downstream markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) materialize-ятся в `report_mode=incomplete` с явным banner/triage-only wording
    - Вызывает runtime adapter через `StepRunnerResolver` с per-provider cache/preflight внутри одного run
    - `step0..step4` становятся agent-first шагами, но runtime получает только staged surfaces (`write_root`, `draft_final_root`, `read_context_roots`, `step_contract`, `expected_artifacts`)
+   - canonical publish для `step0/2/4` выполняется только из validated runtime draft artifacts через deterministic compile/publish path; direct orchestrator writer больше не является альтернативным source of truth
    - Собирает staged final doc set в `reports/taskruns/<run_id>/staging/final/`
    - Генерирует и валидирует `final-run-index.json` и `citation-index.json`
    - `citation-index.json.claim_ids` трактуются как global staged-final namespace; duplicate claim ids в validator scope детерминированно repair-ятся на index/reference уровне с shard suffix без semantic rewrite authored docs
@@ -153,9 +154,11 @@
    - collect contract требует полного `compatibility` block в `shard-pack-manifest.json` (`coverage/questions/entities/edges/findings`) и repo-specific citation surface; generic-only `cite.runtime-summary` допустим только вне multi-document refresh evidence collapse
    - `init.step0.constitution`, `init|refresh.step2.asis_docs` и `init|refresh.step4.proposals` проходят provider-agnostic required-artifact gate: runtime принимает шаг только если draft manifest валиден и все referenced draft files существуют под `draft_final_root`; safe normalization допускает только удаление legacy `add_doc_artifact` ops, дублирующих уже валидный runtime draft manifest
    - runtime draft manifest contract для `step0/2/4` (`version=1`, `run_id`, `step_id`, `step_contract`, `agent_role`, `outputs[]`) вынесен в shared internal source of truth и используется и writer-ами, и validator-ами без дублирования структур
-   - draft validator допускает только safe file-layout reconciliation: если manifest уже canonical, но provider положил draft file по `draft_final_root/<canonical_path>` вместо `draft_final_root/<outputs[].path>`, runtime копирует файл в ожидаемый `outputs[].path` перед финальной валидацией
+   - validators для collect manifests и runtime draft manifests read-only по умолчанию: hidden filesystem mutation внутри validation не допускается
+   - filesystem reconciliation разрешён только как явная runtime repair/canonicalization стадия до финальной validation; сама validation лишь проверяет manifest contract и наличие referenced files
    - `qwen` для draft-only шагов (`step0/2/4`) валидирует required draft artifacts до возврата в orchestrator и делает один constrained artifact-repair retry (`write_root + draft_final_root`, `changeset: []` preferred) вместо silent acceptance legacy draft schemas
    - `qwen` для draft-only шагов также имеет post-artifact stall recovery: если canonical draft manifest и draft files уже появились, но provider перестал писать в stdout/stderr и перестал мутировать `write_root`/`draft_final_root`, runtime принудительно завершает process и запускает один constrained retry, который добирает только финальный `TaskResult`
+   - `claude-code` и `qwen-code` используют shared provider-agnostic step-policy/prompt layer для required artifacts, retry bans и explicit negative rules; provider-specific остаются только command/process execution, pipe monitoring, transcript extraction и provider failure classification
    - headless provider scope включает `arch-workspace` и resolved repo directories для текущих `repo_scope/repo_scopes`, чтобы provider видел source evidence из реальных checkout-ов
    - command overrides:
      - `ACP_CLAUDE_CMD` (default `claude-code`)

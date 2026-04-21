@@ -3,7 +3,6 @@ package runtimedrafts
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -167,9 +166,6 @@ func ValidateOutputsExist(draftRoot string, manifest Manifest) error {
 			return fmt.Errorf("runtime draft manifest outputs[%d].path: must not be empty", idx)
 		}
 		absPath := filepath.Join(cleanDraftRoot, relPath)
-		if err := reconcileCanonicalDraftOutput(cleanDraftRoot, absPath, output); err != nil {
-			return fmt.Errorf("runtime draft manifest outputs[%d].path: %w", idx, err)
-		}
 		info, err := os.Stat(absPath)
 		if err != nil {
 			return fmt.Errorf("runtime draft manifest outputs[%d].path: referenced draft file %q is unavailable: %w", idx, output.Path, err)
@@ -177,50 +173,6 @@ func ValidateOutputsExist(draftRoot string, manifest Manifest) error {
 		if info.IsDir() {
 			return fmt.Errorf("runtime draft manifest outputs[%d].path: %q must point to a file", idx, output.Path)
 		}
-	}
-	return nil
-}
-
-func reconcileCanonicalDraftOutput(draftRoot string, expectedPath string, output Output) error {
-	if _, err := os.Stat(expectedPath); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-
-	canonicalRel := filepath.Clean(filepath.FromSlash(strings.TrimSpace(output.CanonicalPath)))
-	if canonicalRel == "" || canonicalRel == "." {
-		return nil
-	}
-	canonicalPath := filepath.Join(filepath.Clean(draftRoot), canonicalRel)
-	if filepath.Clean(canonicalPath) == filepath.Clean(expectedPath) {
-		return nil
-	}
-	info, err := os.Stat(canonicalPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	if info.IsDir() {
-		return fmt.Errorf("canonical draft fallback %q must point to a file", output.CanonicalPath)
-	}
-	if err := os.MkdirAll(filepath.Dir(expectedPath), 0o755); err != nil {
-		return err
-	}
-	source, err := os.Open(canonicalPath)
-	if err != nil {
-		return err
-	}
-	defer source.Close()
-	target, err := os.OpenFile(expectedPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
-	if err != nil {
-		return err
-	}
-	defer target.Close()
-	if _, err := io.Copy(target, source); err != nil {
-		return err
 	}
 	return nil
 }

@@ -921,7 +921,7 @@ func TestBuildDirectPromptRetryIncludesSchemaFailureHintsForInvalidChangesetOp(t
 	}
 
 	parseErr := errors.New(`taskresult is invalid: taskresult.schema.json validation failed: jsonschema: '/changeset/0/op' does not validate`)
-	prompt := buildDirectPromptWithModeAndHints(raw, promptRetryParse, false, buildParseRepairHints("schema", parseErr))
+	prompt := buildDirectPromptWithModeAndHints(raw, promptRetryParse, false, buildParseRepairHints(task.StepID, "schema", parseErr))
 	if !strings.Contains(prompt, "Previous schema validation failure") {
 		t.Fatalf("expected schema failure hint in claude retry prompt")
 	}
@@ -933,6 +933,141 @@ func TestBuildDirectPromptRetryIncludesSchemaFailureHintsForInvalidChangesetOp(t
 	}
 	if !strings.Contains(prompt, "Do NOT use ad-hoc ops such as upsert_file") {
 		t.Fatalf("expected upsert_file ban in claude retry prompt")
+	}
+}
+
+func TestBuildDirectPromptCollectUsesExistingEntrypointHintsWithoutSyntheticTemplate(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	repoRoot := filepath.Join(workspaceDir, "service-repo")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	packageJSONPath := filepath.Join(repoRoot, "package.json")
+	if err := os.WriteFile(packageJSONPath, []byte("{\"name\":\"service-repo\"}\n"), 0o644); err != nil {
+		t.Fatalf("write package.json: %v", err)
+	}
+
+	task := acpruntime.Task{
+		TaskID:           "task-claude-init-step1",
+		RunID:            "run-1",
+		StepID:           "init.step1.collect",
+		Workspace:        workspaceDir,
+		ReadContextRoots: []string{repoRoot},
+		RepoScopes:       []string{"service-repo"},
+		StartedAtUTC:     time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	prompt := buildDirectPrompt(raw, false, false)
+	if !strings.Contains(prompt, "Do NOT delegate to agent/subagent helpers.") {
+		t.Fatalf("expected delegation ban in collect prompt")
+	}
+	if strings.Contains(prompt, `"op": "upsert_entity"`) {
+		t.Fatalf("did not expect synthetic upsert_entity template in collect prompt")
+	}
+	if !strings.Contains(prompt, filepath.ToSlash(packageJSONPath)) {
+		t.Fatalf("expected existing package.json entrypoint hint in prompt")
+	}
+	if strings.Contains(prompt, filepath.ToSlash(filepath.Join(repoRoot, "README.md"))) {
+		t.Fatalf("did not expect non-existent README.md entrypoint hint in prompt")
+	}
+}
+
+func TestBuildDirectPromptConstitutionIncludesExactDraftContract(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	repoRoot := filepath.Join(workspaceDir, "service-repo")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	packageJSONPath := filepath.Join(repoRoot, "package.json")
+	if err := os.WriteFile(packageJSONPath, []byte("{\"name\":\"service-repo\"}\n"), 0o644); err != nil {
+		t.Fatalf("write package.json: %v", err)
+	}
+
+	task := acpruntime.Task{
+		TaskID:           "task-claude-init-step0",
+		RunID:            "run-1",
+		StepID:           "init.step0.constitution",
+		Workspace:        workspaceDir,
+		ReadContextRoots: []string{repoRoot},
+		RepoScopes:       []string{"service-repo"},
+		StartedAtUTC:     time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	prompt := buildDirectPrompt(raw, false, false)
+	if !strings.Contains(prompt, "STEP POLICY init.step0.constitution:") {
+		t.Fatalf("expected step0 policy section in prompt")
+	}
+	if !strings.Contains(prompt, "Write constitution-draft.json in write_root.") {
+		t.Fatalf("expected constitution draft manifest instruction in prompt")
+	}
+	if !strings.Contains(prompt, `"step_contract": "constitution"`) {
+		t.Fatalf("expected exact constitution draft manifest example in prompt")
+	}
+	if !strings.Contains(prompt, `"canonical_path": "charter/overview.md"`) || !strings.Contains(prompt, `"canonical_path": "skills/subagents.yaml"`) {
+		t.Fatalf("expected exact constitution outputs mapping in prompt")
+	}
+	if strings.Contains(prompt, `"op": "upsert_entity"`) {
+		t.Fatalf("did not expect synthetic upsert_entity template for draft-only step0")
+	}
+	if !strings.Contains(prompt, filepath.ToSlash(packageJSONPath)) {
+		t.Fatalf("expected existing package.json entrypoint hint in prompt")
+	}
+	if strings.Contains(prompt, filepath.ToSlash(filepath.Join(repoRoot, "README.md"))) {
+		t.Fatalf("did not expect non-existent README.md entrypoint hint in prompt")
+	}
+}
+
+func TestBuildDirectPromptConstitutionRetryUsesDraftArtifactHints(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	writeRoot := filepath.Join(workspaceDir, "write-root")
+	draftRoot := filepath.Join(workspaceDir, "draft-root")
+	task := acpruntime.Task{
+		TaskID:            "task-claude-step0-repair",
+		RunID:             "run-1",
+		StepID:            "init.step0.constitution",
+		Workspace:         workspaceDir,
+		WriteRoot:         writeRoot,
+		DraftFinalRoot:    draftRoot,
+		StepContract:      "constitution",
+		ExpectedArtifacts: []string{"constitution-draft.json"},
+		StartedAtUTC:      time.Date(2026, 4, 20, 7, 16, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	prompt := buildDirectPromptWithModeAndHints(
+		raw,
+		promptRetryDraftArtifact,
+		false,
+		buildDraftArtifactRepairHints(task, errors.New("runtime draft manifest version must be 1")),
+	)
+	if !strings.Contains(prompt, "DRAFT ARTIFACT REPAIR MODE") {
+		t.Fatalf("expected draft artifact repair banner in prompt")
+	}
+	if !strings.Contains(prompt, "constitution-draft.json") {
+		t.Fatalf("expected constitution draft recovery guidance in prompt")
+	}
+	if !strings.Contains(prompt, `"step_contract": "constitution"`) {
+		t.Fatalf("expected exact constitution manifest example in retry prompt")
+	}
+	if strings.Contains(prompt, "shard-pack-manifest.json") {
+		t.Fatalf("did not expect collect-specific shard wording in step0 draft retry prompt")
 	}
 }
 

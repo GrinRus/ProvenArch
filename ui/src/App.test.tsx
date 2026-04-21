@@ -126,6 +126,29 @@ function createFetchMock(state: FetchMockState = {}) {
       });
     }
 
+    if (method === "GET" && url === "/api/runtime/profile") {
+      return jsonResponse({
+        ok: true,
+        step_providers: {
+          persisted: { step2_as_is: "qwen-code" },
+          effective: {
+            step0_constitution: "claude-code",
+            step1_collect: "claude-code",
+            step2_as_is: "qwen-code",
+            step3_findings: "claude-code",
+            step4_proposals: "claude-code",
+          },
+          source: {
+            step0_constitution: "default",
+            step1_collect: "default",
+            step2_as_is: "workspace",
+            step3_findings: "default",
+            step4_proposals: "default",
+          },
+        },
+      });
+    }
+
     if (method === "GET" && url.startsWith("/api/artifacts?path=")) {
       const encodedPath = url.slice("/api/artifacts?path=".length);
       const decodedPath = decodeURIComponent(encodedPath);
@@ -211,6 +234,9 @@ describe("App", () => {
 
     expect(await screen.findByTestId("runtime-timeouts-panel")).toBeInTheDocument();
     expect(screen.getByTestId("runtime-execution-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("runtime-step-providers-panel")).toBeInTheDocument();
+    expect(screen.getByText("runtime.profile.steps.step2_as_is.provider")).toBeInTheDocument();
+    expect(screen.getAllByText("qwen-code").length).toBeGreaterThanOrEqual(1);
   });
 
   it("runs init from Runs tab and supports event/raw log modes", async () => {
@@ -283,6 +309,74 @@ describe("App", () => {
       expect(rawOnly).toContain("[RAW]");
       expect(rawOnly).not.toContain("[EVENT]");
     });
+  });
+
+  it("renders failed run status with warnings and error details for partial live state", async () => {
+    const runID = "run-partial-failed";
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runID,
+        runStarted: true,
+        runStatus: {
+          [runID]: {
+            run_id: runID,
+            pipeline: "refresh",
+            status: "failed",
+            started_at: "2026-04-03T12:00:00Z",
+            finished_at: "2026-04-03T12:05:00Z",
+            current_step: "refresh.step3.findings",
+            warnings: ["collect coverage incomplete", "draft promotion skipped"],
+            error_code: "run_partial_failed",
+            error: "runtime draft manifest invalid",
+          },
+        },
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("tab-runs"));
+
+    await screen.findByTestId("run-status-panel");
+    expect(screen.getByTestId("run-status-value").textContent).toBe("failed");
+    expect(screen.getByText("Current step: refresh.step3.findings")).toBeInTheDocument();
+    expect(screen.getByText("Error code: run_partial_failed")).toBeInTheDocument();
+    expect(screen.getByText("Error: runtime draft manifest invalid")).toBeInTheDocument();
+    expect(screen.getByTestId("run-status-warnings").textContent ?? "").toContain("collect coverage incomplete");
+    expect(screen.getByTestId("run-status-warnings").textContent ?? "").toContain("draft promotion skipped");
+  });
+
+  it("renders running run status for active live progress state", async () => {
+    const runID = "run-live-running";
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runID,
+        runStarted: true,
+        runStatus: {
+          [runID]: {
+            run_id: runID,
+            pipeline: "refresh",
+            status: "running",
+            started_at: "2026-04-03T12:00:00Z",
+            current_step: "refresh.step2.asis_docs",
+            warnings: [],
+            error_code: null,
+            error: null,
+          },
+        },
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("tab-runs"));
+
+    await screen.findByTestId("run-status-panel");
+    expect(screen.getByTestId("run-status-value").textContent).toBe("running");
+    expect(screen.getByText("Current step: refresh.step2.asis_docs")).toBeInTheDocument();
+    expect(screen.getByTestId("run-status-warnings-empty").textContent).toContain("Warnings: none");
   });
 
   it("shows diagrams surface in Results tab and renders Mermaid preview", async () => {
