@@ -48,10 +48,12 @@
    - Показывает repo overview в validate surface: `resolved_repos` + diagnostics, сгруппированные по repo
    - Редактирует baseline bundle artifacts через guided selector (`charter/*`, `skills/*`, prompt packs, `skills/subagents.yaml`)
    - UI разбит на top-level tabs `Setup / Baseline / Runs / Results / Settings`
+   - `App.tsx` остаётся route shell, а крупные sections вынесены в dedicated panels (`SetupWorkspacePanel`, `WizardContractPanel`, `BaselineEditorsPanel`, `RunPanels`, `ResultsPanels`)
+   - setup/baseline/wizard/git state и actions вынесены в `useWorkspaceSetup`; runtime settings живут в отдельном hook, а внутри run explorer logs/artifacts разделены на internal hook modules
    - Runtime profile (`timeouts` + `execution`) полностью вынесен в вкладку `Settings`, включая effective per-step providers
    - Показывает run dashboard (queued/running/succeeded/failed), включая завершённые run'ы из persisted history
-   - При bootstrap авто-выбирает newest active run (`queued/running`), иначе первый run в history; после ручного выбора run auto-switch не выполняется
-   - Если выбранный run исчезает из history (например, retention/restart race), UI очищает stale `Run status`/logs для этого run и не auto-switch-ится на другой run
+   - При bootstrap авто-выбирает newest active run (`queued/running`), иначе первый run в history
+   - Если выбранный run исчезает из history и есть новый доступный run, UI переключается на него; если history временно пуста, но status endpoint ещё возвращает выбранный run, UI сохраняет текущий selection и не делает ложный auto-switch
    - Показывает `Run status` выбранного run с полным warnings list (`RunInfo.warnings`), `error_code` и `error`
    - Показывает `Runs: Logs` для выбранного run (`timestamp/level/step/domain/message`) с dual-view `event timeline | raw agent stream | all`, переключателем `line | line+fields` и quick actions `Copy logs`, `Download logs`, `Open runtime execution artifact`
    - `Results` включает sub-tabs `Coverage / Artifacts / Diagrams`, где `Diagrams` рендерит Mermaid previews для `reports/diagrams/*`
@@ -60,7 +62,7 @@
      - load/save/reset через `GET/PUT /api/runtime/timeouts`
      - показывает persisted/effective/source для каждого timeout поля
    - Runtime Execution settings panel:
-     - load/save через `GET/PUT /api/runtime/execution`
+     - load/save/reset через `GET/PUT /api/runtime/execution`
      - показывает persisted/effective/source для strategy/parallelism/failure/discovery
    - live e2e poll timeout-ы берутся из effective config (`/api/runtime/timeouts`) с env override
    - Критичные UI-контролы для live e2e снабжены стабильными `data-testid` (`validate/run/status/artifacts/logs`)
@@ -73,6 +75,7 @@
    - Готовит ContextPack/PromptPack
    - Загружает baseline bundle agents/skills/prompts из workspace
    - workspace prompt packs подключаются к runtime prompt composition как editable content layer по фиксированному merge order: provider header -> artifact-only/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer; содержимое prompt pack не может ослаблять enforced contract rules
+   - `internal/orchestrator/orchestrator.go` остаётся entry shell/pipeline glue; service run-registry/history lifecycle и semantic/card enrichment вынесены в dedicated package files
    - Работает с единым central workspace (`arch-workspace`) как корнем артефактов MVP
    - Валидирует `workspace.yaml` по `schemas/workspace.schema.json`
    - Разрешает repo sources (`path`/`git_url`) в локальные checkout перед анализом через системный `git` текущего пользователя/runner
@@ -87,6 +90,8 @@
      - `write_root` (absolute run-scoped staging dir)
      - `read_context_roots[]`
    - Step 1 runtime primary output: authored shard dossier pack + `shard-pack-manifest.json`
+   - Collect repair возвращает structured repair report (`changed`, `applied_rule_ids`) и логирует compatibility rule ids через runtime diagnostics вместо silent normalization
+   - Active compatibility inventory ограничен двумя safe rules из `internal/runtime/compatibilityregistry`: `collect.documents_path_normalization` и `drafts.reconcile_existing_canonical_outputs`
    - Сохраняет raw runtime execution metadata и shard summaries в `reports/taskruns/*` для recovery/auditability
    - Runtime sharding planner (heuristics/semantic) materialize-ит deterministic shard-plan artifacts `reports/taskruns/*-shard-plan*.json` и shard-summary artifacts `reports/taskruns/*-shard-summary*.json`
    - shard-plan публикует полный неперекрывающийся coverage partition repo через `path_scopes` (directory/file scopes); для больших repo применяется только structural coalescing по filesystem ancestry
@@ -102,6 +107,7 @@
    - Генерирует и валидирует `final-run-index.json` и `citation-index.json`
    - `citation-index.json.claim_ids` трактуются как global staged-final namespace; duplicate claim ids в validator scope детерминированно repair-ятся на index/reference уровне с shard suffix без semantic rewrite authored docs
    - Step 3 runtime primary output: `validator-verdict.json`
+   - Validator repair остаётся явной internal stage между load/parse verdict и финальной staged validation; repair write path остаётся atomic и не превращается в hidden mutation validation path
    - Promotion копирует только approved final set в stable `reports/as-is/*`, `reports/findings/*`, `reports/coverage/*`, `reports/agent-outputs/*`, `proposals/*`
    - обязательный human gate перед publish отсутствует; после успешных compile/validator gates promotion происходит автоматически
    - Валидирует только required step artifacts и persisted runtime execution metadata, а не semantic stdout payload

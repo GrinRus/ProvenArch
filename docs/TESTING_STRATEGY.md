@@ -98,6 +98,8 @@ Baseline scenario set:
   - `best_effort` partial shard failures: pipeline продолжается, но итоговый status `failed` + `error_code=run_partial_failed`
 - docs truth-sync gate проверяет:
   - согласованность runtime policy/Q&A boundary и ссылок на canonical stakeholder matrix;
+  - prompt-layer truth: exact merge order (`provider header -> artifact-only/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer`) и invariant `workspace prompt pack = editable content layer only`;
+  - active-only `docs/PLANS.md` не возвращает уже закрытые cleanup/refactor планы в current ExecPlan surface;
   - отсутствие stale-маркеров в ключевых surfaces (`future`, `skeleton`, `placeholder`, устаревшие version-маркеры);
   - CLI docs parity: базовые `acp serve|run|qa` usage и runtime flags в help и документации совпадают
 
@@ -154,6 +156,12 @@ Implemented additional jobs:
 - valid persisted runtime execution metadata
 - invalid runtime execution metadata
 - invalid artifact contracts (`shard-pack-manifest`, `validator-verdict`, draft manifests)
+- collect manifest repair report:
+  - safe normalization возвращает `applied_rule_ids=["collect.documents_path_normalization"]`
+  - ambiguous/unsafe path не repair-ится и не расширяет compatibility inventory
+- compatibility inventory ограничен двумя safe rules (`collect.documents_path_normalization`, `drafts.reconcile_existing_canonical_outputs`)
+- validator repair stage проверяется отдельно на atomicity: при write failure staged state не мутируется
+- UI ownership split держится unit/integration coverage-ом поверх route shell `App.tsx`, `useWorkspaceSetup`, `useRunExplorer`, `useRunLogs`, `useRunArtifacts`
 
 ### Semantic tests
 - duplicate repo names
@@ -207,9 +215,14 @@ Implemented additional jobs:
   - diagram artifact listing and Mermaid preview render
 - UI run lifecycle operability:
   - bootstrap auto-select newest active run
-  - если выбранный run исчезает из list endpoint, UI очищает stale run details/logs и не auto-switch-ится на другой run
+  - если выбранный run исчезает из list endpoint и replacement доступен, UI переключается на следующий run; если list endpoint временно пуст, но status endpoint ещё жив, selection сохраняется
   - `Run status` показывает полный warnings list выбранного run
   - `Cancel selected run` корректно обрабатывает `202/404/409`
+- UI runtime settings surface:
+  - save/reset `Runtime Timeouts`
+  - save/reset `Runtime Execution`
+- UI quick actions:
+  - `Open runtime execution artifact` открывает persisted taskrun artifact без live e2e-only допущений
 - локальный full-run regression сценарий на реальном репозитории:
   - `scripts/full-run-ai-advent.sh`
   - bootstrap в `tmp`, API simulation, runtime циклы `fake + headless`

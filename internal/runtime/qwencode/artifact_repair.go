@@ -26,15 +26,28 @@ func repairAndValidateArtifacts(task acpruntime.Task) error {
 }
 
 func repairAndValidateCollectArtifacts(task acpruntime.Task) error {
-	if err := artifactquality.RepairCollectManifest(task); err != nil {
+	report, err := artifactquality.RepairCollectManifest(task)
+	if err != nil {
 		return err
 	}
+	emitCollectRepairDiagnostic(task, report)
 	raw, err := os.ReadFile(filepath.Join(filepath.Clean(task.WriteRoot), "shard-pack-manifest.json"))
 	if err != nil {
 		return err
 	}
 	_, err = contracts.ParseShardPackManifest(raw)
 	return err
+}
+
+func emitCollectRepairDiagnostic(task acpruntime.Task, report artifactquality.RepairReport) {
+	if task.OnDiagnostic == nil || len(report.AppliedRuleIDs) == 0 {
+		return
+	}
+	emitDiagnostic(task, "collect compatibility repair applied", map[string]any{
+		"provider":         string(acpruntime.ProviderQwenCode),
+		"changed":          report.Changed,
+		"applied_rule_ids": append([]string(nil), report.AppliedRuleIDs...),
+	})
 }
 
 func repairAndValidateDraftArtifacts(task acpruntime.Task) error {

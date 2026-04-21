@@ -181,9 +181,11 @@ func validateRuntimeArtifacts(task acpruntime.Task) error {
 }
 
 func validateCollectArtifacts(task acpruntime.Task) error {
-	if err := artifactquality.RepairCollectManifest(task); err != nil {
+	report, err := artifactquality.RepairCollectManifest(task)
+	if err != nil {
 		return err
 	}
+	emitCollectRepairDiagnostic(task, report, acpruntime.ProviderClaudeCode)
 	raw, err := os.ReadFile(filepath.Join(filepath.Clean(task.WriteRoot), shardPackManifestFileName))
 	if err != nil {
 		return err
@@ -192,6 +194,20 @@ func validateCollectArtifacts(task acpruntime.Task) error {
 		return err
 	}
 	return nil
+}
+
+func emitCollectRepairDiagnostic(task acpruntime.Task, report artifactquality.RepairReport, provider acpruntime.Provider) {
+	if task.OnDiagnostic == nil || len(report.AppliedRuleIDs) == 0 {
+		return
+	}
+	task.OnDiagnostic(acpruntime.DiagnosticEvent{
+		Message: "collect compatibility repair applied",
+		Fields: map[string]any{
+			"provider":         string(provider),
+			"changed":          report.Changed,
+			"applied_rule_ids": append([]string(nil), report.AppliedRuleIDs...),
+		},
+	})
 }
 
 func validateDraftArtifacts(task acpruntime.Task) error {
