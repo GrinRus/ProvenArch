@@ -150,3 +150,61 @@ func TestWritePromptArtifactsWritesPromptTaskAndMetadata(t *testing.T) {
 		t.Fatalf("unexpected prompt pack relative path %q", got)
 	}
 }
+
+func TestWriteRuntimeFailureArtifactWritesStructuredFailureFile(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	task := acpruntime.Task{
+		TaskID:       "task-failure",
+		RunID:        "run-4",
+		StepID:       "refresh.step1.collect",
+		Workspace:    workspace,
+		RepoScopes:   []string{"repo-a", "repo-b"},
+		PathScopes:   []string{"services/api"},
+		StartedAtUTC: time.Date(2026, 4, 21, 8, 0, 0, 0, time.UTC),
+	}
+
+	artifact, err := WriteRuntimeFailureArtifact(task, acpruntime.ProviderQwenCode, FailureArtifactInput{
+		ErrorCode:       acpruntime.ErrorCodeRunnerParseFailed,
+		FailureClass:    "runtime_artifact_contract",
+		FailureSubclass: "manifest_invalid",
+		ParseStage:      "artifact_repair.schema",
+		ShortCause:      "collect artifacts remained invalid after one repair attempt",
+	}, "stdout text", "stderr text")
+	if err != nil {
+		t.Fatalf("write runtime failure artifact: %v", err)
+	}
+	if artifact.RelativePath == "" || !strings.HasPrefix(artifact.RelativePath, "reports/taskruns/raw/") {
+		t.Fatalf("unexpected failure artifact path: %q", artifact.RelativePath)
+	}
+	if _, err := os.Stat(artifact.Path); err != nil {
+		t.Fatalf("stat runtime failure artifact: %v", err)
+	}
+
+	rawFailure, err := os.ReadFile(artifact.Path)
+	if err != nil {
+		t.Fatalf("read runtime failure artifact: %v", err)
+	}
+	payload := map[string]any{}
+	if err := json.Unmarshal(rawFailure, &payload); err != nil {
+		t.Fatalf("parse runtime failure artifact: %v", err)
+	}
+	if got := strings.TrimSpace(payload["failure_class"].(string)); got != "runtime_artifact_contract" {
+		t.Fatalf("unexpected failure class %q", got)
+	}
+	if got := strings.TrimSpace(payload["failure_subclass"].(string)); got != "manifest_invalid" {
+		t.Fatalf("unexpected failure subclass %q", got)
+	}
+	if got := strings.TrimSpace(payload["parse_stage"].(string)); got != "artifact_repair.schema" {
+		t.Fatalf("unexpected parse stage %q", got)
+	}
+	rawOutput, ok := payload["raw_output"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected raw_output block")
+	}
+	relativeMeta := strings.TrimSpace(rawOutput["relative_metadata_path"].(string))
+	if relativeMeta == "" || !strings.HasPrefix(relativeMeta, "reports/taskruns/raw/") {
+		t.Fatalf("unexpected raw_output relative metadata path %q", relativeMeta)
+	}
+}

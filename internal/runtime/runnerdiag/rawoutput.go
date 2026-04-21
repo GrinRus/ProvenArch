@@ -36,6 +36,26 @@ type ParseFailureArtifacts struct {
 	RelativeMetadataPath string       `json:"relative_metadata_path"`
 }
 
+type FailureArtifactInput struct {
+	ErrorCode       acpruntime.ErrorCode `json:"error_code"`
+	FailureClass    string               `json:"failure_class"`
+	FailureSubclass string               `json:"failure_subclass,omitempty"`
+	ParseStage      string               `json:"parse_stage,omitempty"`
+	ShortCause      string               `json:"short_cause,omitempty"`
+}
+
+type FailureArtifact struct {
+	Path              string                `json:"path"`
+	RelativePath      string                `json:"relative_path"`
+	FailureClass      string                `json:"failure_class"`
+	FailureSubclass   string                `json:"failure_subclass,omitempty"`
+	ErrorCode         acpruntime.ErrorCode  `json:"error_code"`
+	ParseStage        string                `json:"parse_stage,omitempty"`
+	ShortCause        string                `json:"short_cause,omitempty"`
+	RawOutputMetadata string                `json:"raw_output_metadata"`
+	RawOutput         ParseFailureArtifacts `json:"raw_output"`
+}
+
 type PromptPackMetadata struct {
 	Name         string `json:"name,omitempty"`
 	RelativePath string `json:"relative_path,omitempty"`
@@ -61,21 +81,11 @@ type PromptArtifacts struct {
 }
 
 func WriteParseFailureArtifacts(task acpruntime.Task, provider acpruntime.Provider, stdout string, stderr string) (ParseFailureArtifacts, error) {
-	workspace := strings.TrimSpace(task.Workspace)
-	if workspace == "" {
-		return ParseFailureArtifacts{}, fmt.Errorf("workspace is empty")
-	}
-	absWorkspace, err := filepath.Abs(workspace)
+	absWorkspace, rawDir, err := prepareRawArtifactDir(task)
 	if err != nil {
-		return ParseFailureArtifacts{}, fmt.Errorf("resolve workspace path: %w", err)
+		return ParseFailureArtifacts{}, err
 	}
-	rawDir := filepath.Join(absWorkspace, "reports", "taskruns", "raw")
-	if err := os.MkdirAll(rawDir, 0o755); err != nil {
-		return ParseFailureArtifacts{}, fmt.Errorf("mkdir raw output dir: %w", err)
-	}
-
-	stamp := time.Now().UTC().Format("20060102T150405Z")
-	base := safePathPart(task.RunID) + "-" + safePathPart(task.StepID) + "-" + safePathPart(task.TaskID) + "-" + safePathPart(string(provider)) + "-" + stamp
+	base := buildRawArtifactBase(task, provider)
 
 	stdoutFile := filepath.Join(rawDir, base+"-stdout.log")
 	stderrFile := filepath.Join(rawDir, base+"-stderr.log")
@@ -143,6 +153,90 @@ func WriteParseFailureArtifacts(task acpruntime.Task, provider acpruntime.Provid
 	}
 
 	return artifacts, nil
+}
+
+func WriteRuntimeFailureArtifact(
+	task acpruntime.Task,
+	provider acpruntime.Provider,
+	input FailureArtifactInput,
+	stdout string,
+	stderr string,
+) (FailureArtifact, error) {
+	absWorkspace, rawDir, err := prepareRawArtifactDir(task)
+	if err != nil {
+		return FailureArtifact{}, err
+	}
+	rawOutput, err := WriteParseFailureArtifacts(task, provider, stdout, stderr)
+	if err != nil {
+		return FailureArtifact{}, err
+	}
+
+	base := buildRawArtifactBase(task, provider)
+	failureFile := filepath.Join(rawDir, base+"-failure.json")
+	payload := map[string]any{
+		"generated_at":  time.Now().UTC().Format(time.RFC3339),
+		"provider":      provider,
+		"error_code":    strings.TrimSpace(string(input.ErrorCode)),
+		"failure_class": strings.TrimSpace(input.FailureClass),
+		"task": map[string]any{
+			"task_id":     task.TaskID,
+			"run_id":      task.RunID,
+			"step_id":     task.StepID,
+			"workspace":   absWorkspace,
+			"shard_id":    task.ShardID,
+			"repo_scope":  primaryRepoScope(task.RepoScope, task.RepoScopes),
+			"repo_scopes": append([]string(nil), task.RepoScopes...),
+			"path_scopes": append([]string(nil), task.PathScopes...),
+		},
+		"raw_output": map[string]any{
+			"metadata_path":          rawOutput.MetadataPath,
+			"relative_metadata_path": rawOutput.RelativeMetadataPath,
+			"stdout": map[string]any{
+				"path":          rawOutput.Stdout.Path,
+				"relative_path": rawOutput.Stdout.RelativePath,
+				"bytes":         rawOutput.Stdout.Bytes,
+				"stored_bytes":  rawOutput.Stdout.StoredBytes,
+				"sha256":        rawOutput.Stdout.SHA256,
+				"truncated":     rawOutput.Stdout.Truncated,
+			},
+			"stderr": map[string]any{
+				"path":          rawOutput.Stderr.Path,
+				"relative_path": rawOutput.Stderr.RelativePath,
+				"bytes":         rawOutput.Stderr.Bytes,
+				"stored_bytes":  rawOutput.Stderr.StoredBytes,
+				"sha256":        rawOutput.Stderr.SHA256,
+				"truncated":     rawOutput.Stderr.Truncated,
+			},
+		},
+	}
+	if value := strings.TrimSpace(input.FailureSubclass); value != "" {
+		payload["failure_subclass"] = value
+	}
+	if value := strings.TrimSpace(input.ParseStage); value != "" {
+		payload["parse_stage"] = value
+	}
+	if value := strings.TrimSpace(input.ShortCause); value != "" {
+		payload["short_cause"] = value
+	}
+	rawPayload, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return FailureArtifact{}, fmt.Errorf("marshal runtime failure artifact: %w", err)
+	}
+	if err := os.WriteFile(failureFile, append(rawPayload, '\n'), 0o644); err != nil {
+		return FailureArtifact{}, fmt.Errorf("write runtime failure artifact: %w", err)
+	}
+
+	return FailureArtifact{
+		Path:              failureFile,
+		RelativePath:      toRelativePath(absWorkspace, failureFile),
+		FailureClass:      strings.TrimSpace(input.FailureClass),
+		FailureSubclass:   strings.TrimSpace(input.FailureSubclass),
+		ErrorCode:         input.ErrorCode,
+		ParseStage:        strings.TrimSpace(input.ParseStage),
+		ShortCause:        strings.TrimSpace(input.ShortCause),
+		RawOutputMetadata: rawOutput.RelativeMetadataPath,
+		RawOutput:         rawOutput,
+	}, nil
 }
 
 func WritePromptArtifacts(
@@ -264,6 +358,27 @@ func writeBoundedArtifactFile(path string, data []byte) (ArtifactFile, error) {
 		return ArtifactFile{}, fmt.Errorf("write raw output artifact %s: %w", path, err)
 	}
 	return summary, nil
+}
+
+func prepareRawArtifactDir(task acpruntime.Task) (string, string, error) {
+	workspace := strings.TrimSpace(task.Workspace)
+	if workspace == "" {
+		return "", "", fmt.Errorf("workspace is empty")
+	}
+	absWorkspace, err := filepath.Abs(workspace)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve workspace path: %w", err)
+	}
+	rawDir := filepath.Join(absWorkspace, "reports", "taskruns", "raw")
+	if err := os.MkdirAll(rawDir, 0o755); err != nil {
+		return "", "", fmt.Errorf("mkdir raw output dir: %w", err)
+	}
+	return absWorkspace, rawDir, nil
+}
+
+func buildRawArtifactBase(task acpruntime.Task, provider acpruntime.Provider) string {
+	stamp := time.Now().UTC().Format("20060102T150405Z")
+	return safePathPart(task.RunID) + "-" + safePathPart(task.StepID) + "-" + safePathPart(task.TaskID) + "-" + safePathPart(string(provider)) + "-" + stamp
 }
 
 func toRelativePath(workspace string, absPath string) string {

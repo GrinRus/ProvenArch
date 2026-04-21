@@ -345,4 +345,26 @@ describe("App", () => {
     const saveCalls = fetchMock.mock.calls.filter((call) => call[0] === "/api/artifacts/write");
     expect(saveCalls.length).toBe(1);
   });
+
+  it("labels prompt packs as live-consumed and skill prompts as reference-only", async () => {
+    vi.stubGlobal("fetch", createFetchMock({
+      artifactText: {
+        "skills/prompt-packs/findings.md": "findings prompt pack\n",
+        "skills/findings/prompts/system.md": "reference system prompt\n",
+      },
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("tab-baseline"));
+
+    expect(
+      await screen.findByText(/Live headless runtime customization consumes prompt packs/i),
+    ).toBeInTheDocument();
+
+    const select = await screen.findByLabelText(/select artifact/i);
+    const options = Array.from((select as HTMLSelectElement).options).map((option) => option.text);
+    expect(options).toContain("skills/prompt-packs/findings.md");
+    expect(options).toContain("skills/findings/prompts/system.md (reference-only)");
+  });
 });

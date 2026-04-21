@@ -181,24 +181,24 @@ const baselineEditorArtifacts: EditableArtifactOption[] = [
   { path: "skills/prompt-packs/findings.md", label: "skills/prompt-packs/findings.md" },
   { path: "skills/prompt-packs/proposals.md", label: "skills/prompt-packs/proposals.md" },
   { path: "skills/prompt-packs/qa.md", label: "skills/prompt-packs/qa.md" },
-  { path: "skills/service-inventory/prompts/system.md", label: "skills/service-inventory/prompts/system.md" },
-  { path: "skills/service-inventory/prompts/task.md", label: "skills/service-inventory/prompts/task.md" },
-  { path: "skills/interface-extraction/prompts/system.md", label: "skills/interface-extraction/prompts/system.md" },
-  { path: "skills/interface-extraction/prompts/task.md", label: "skills/interface-extraction/prompts/task.md" },
-  { path: "skills/integration-mapping/prompts/system.md", label: "skills/integration-mapping/prompts/system.md" },
-  { path: "skills/integration-mapping/prompts/task.md", label: "skills/integration-mapping/prompts/task.md" },
-  { path: "skills/datastore-mapping/prompts/system.md", label: "skills/datastore-mapping/prompts/system.md" },
-  { path: "skills/datastore-mapping/prompts/task.md", label: "skills/datastore-mapping/prompts/task.md" },
-  { path: "skills/cicd-mapping/prompts/system.md", label: "skills/cicd-mapping/prompts/system.md" },
-  { path: "skills/cicd-mapping/prompts/task.md", label: "skills/cicd-mapping/prompts/task.md" },
-  { path: "skills/ownership-coverage/prompts/system.md", label: "skills/ownership-coverage/prompts/system.md" },
-  { path: "skills/ownership-coverage/prompts/task.md", label: "skills/ownership-coverage/prompts/task.md" },
-  { path: "skills/findings/prompts/system.md", label: "skills/findings/prompts/system.md" },
-  { path: "skills/findings/prompts/task.md", label: "skills/findings/prompts/task.md" },
-  { path: "skills/proposals/prompts/system.md", label: "skills/proposals/prompts/system.md" },
-  { path: "skills/proposals/prompts/task.md", label: "skills/proposals/prompts/task.md" },
-  { path: "skills/qa/prompts/system.md", label: "skills/qa/prompts/system.md" },
-  { path: "skills/qa/prompts/task.md", label: "skills/qa/prompts/task.md" }
+  { path: "skills/service-inventory/prompts/system.md", label: "skills/service-inventory/prompts/system.md (reference-only)" },
+  { path: "skills/service-inventory/prompts/task.md", label: "skills/service-inventory/prompts/task.md (reference-only)" },
+  { path: "skills/interface-extraction/prompts/system.md", label: "skills/interface-extraction/prompts/system.md (reference-only)" },
+  { path: "skills/interface-extraction/prompts/task.md", label: "skills/interface-extraction/prompts/task.md (reference-only)" },
+  { path: "skills/integration-mapping/prompts/system.md", label: "skills/integration-mapping/prompts/system.md (reference-only)" },
+  { path: "skills/integration-mapping/prompts/task.md", label: "skills/integration-mapping/prompts/task.md (reference-only)" },
+  { path: "skills/datastore-mapping/prompts/system.md", label: "skills/datastore-mapping/prompts/system.md (reference-only)" },
+  { path: "skills/datastore-mapping/prompts/task.md", label: "skills/datastore-mapping/prompts/task.md (reference-only)" },
+  { path: "skills/cicd-mapping/prompts/system.md", label: "skills/cicd-mapping/prompts/system.md (reference-only)" },
+  { path: "skills/cicd-mapping/prompts/task.md", label: "skills/cicd-mapping/prompts/task.md (reference-only)" },
+  { path: "skills/ownership-coverage/prompts/system.md", label: "skills/ownership-coverage/prompts/system.md (reference-only)" },
+  { path: "skills/ownership-coverage/prompts/task.md", label: "skills/ownership-coverage/prompts/task.md (reference-only)" },
+  { path: "skills/findings/prompts/system.md", label: "skills/findings/prompts/system.md (reference-only)" },
+  { path: "skills/findings/prompts/task.md", label: "skills/findings/prompts/task.md (reference-only)" },
+  { path: "skills/proposals/prompts/system.md", label: "skills/proposals/prompts/system.md (reference-only)" },
+  { path: "skills/proposals/prompts/task.md", label: "skills/proposals/prompts/task.md (reference-only)" },
+  { path: "skills/qa/prompts/system.md", label: "skills/qa/prompts/system.md (reference-only)" },
+  { path: "skills/qa/prompts/task.md", label: "skills/qa/prompts/task.md (reference-only)" }
 ];
 
 const runtimeTimeoutKeys: RuntimeTimeoutKey[] = [
@@ -1680,7 +1680,10 @@ export default function App() {
         <>
           <section className="panel">
             <h2>Baseline: Editors</h2>
-            <p className="hint">Editable baseline files from `charter/*` and `skills/*`.</p>
+            <p className="hint">
+              Editable baseline files from `charter/*` and `skills/*`. Live headless runtime customization consumes prompt packs for
+              `collect`/`findings`; `skills/*/prompts/*.md` stay editable here as reference-only seeded assets.
+            </p>
             <label htmlFor="baselineArtifactSelect">Select artifact</label>
             <select
               id="baselineArtifactSelect"

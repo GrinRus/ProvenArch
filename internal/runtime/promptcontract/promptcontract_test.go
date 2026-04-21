@@ -59,6 +59,31 @@ func TestAdditivePromptPackSectionFallsBackToSeededBaselineWithWarning(t *testin
 	}
 }
 
+func TestAdditivePromptPackSectionIgnoresReferenceOnlySkillPromptFiles(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	referencePath := filepath.Join(root, "skills", "findings", "prompts")
+	if err := os.MkdirAll(referencePath, 0o755); err != nil {
+		t.Fatalf("mkdir reference prompt path: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(referencePath, "system.md"), []byte("Reference-only skill prompt should not be consumed.\n"), 0o644); err != nil {
+		t.Fatalf("write reference-only skill prompt: %v", err)
+	}
+
+	section, pack := AdditivePromptPackSection(acpruntime.Task{
+		StepID:       "refresh.step3.findings",
+		Workspace:    root,
+		StartedAtUTC: time.Date(2026, 4, 19, 10, 0, 0, 0, time.UTC),
+	})
+	if pack.Source != "seeded-baseline" {
+		t.Fatalf("expected seeded-baseline source when prompt pack is absent, got %q", pack.Source)
+	}
+	if strings.Contains(section, "Reference-only skill prompt should not be consumed.") {
+		t.Fatalf("reference-only skill prompt leaked into effective prompt section: %q", section)
+	}
+}
+
 func TestSharedContractAndRetryGuardrailsExposeCoreInvariants(t *testing.T) {
 	t.Parallel()
 
@@ -110,4 +135,33 @@ func TestDocFirstFilesystemPolicyFindingsMarksStagedArtifactsAsPrimaryEvidence(t
 	if !strings.Contains(policy, "do not treat full repository recrawl as default behavior in validator step") {
 		t.Fatalf("expected no recrawl-by-default rule, got %q", policy)
 	}
+}
+
+func TestRetryHintsExposeCompactJsonObjective(t *testing.T) {
+	t.Parallel()
+
+	parseHints := strings.Join(ParseRepairHints("extract", errSample("invalid json")), "\n")
+	if !strings.Contains(parseHints, "RETRY OBJECTIVE: return exactly one minimal TaskResult JSON object") {
+		t.Fatalf("expected compact retry objective in parse hints, got %q", parseHints)
+	}
+	if !strings.Contains(parseHints, "Do NOT include tool logs, event arrays") {
+		t.Fatalf("expected anti-chatter guardrail in parse hints, got %q", parseHints)
+	}
+
+	artifactHints := strings.Join(ArtifactRepairHints("manifest invalid"), "\n")
+	if !strings.Contains(artifactHints, "RETRY OBJECTIVE: repair collect artifacts deterministically") {
+		t.Fatalf("expected compact retry objective in artifact hints, got %q", artifactHints)
+	}
+}
+
+func errSample(msg string) error {
+	return &sampleErr{msg: msg}
+}
+
+type sampleErr struct {
+	msg string
+}
+
+func (e *sampleErr) Error() string {
+	return e.msg
 }

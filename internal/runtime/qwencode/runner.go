@@ -56,6 +56,11 @@ const (
 	promptRetryArtifact
 )
 
+type failureDiagnostics struct {
+	Message string
+	Details acpruntime.RunnerFailureDetails
+}
+
 func (r HeadlessRunner) commandName() string {
 	command := strings.TrimSpace(r.Command)
 	if command == "" {
@@ -106,58 +111,53 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 			retryArgs := buildRetryQwenArgs(task, retryPrompt.Text)
 			retryResult, retryParseStage, retryParseErr, retryRunErr := runQwenCommand(ctx, task, command, retryArgs)
 			if retryRunErr != nil {
-				if isRunnerStalledError(retryRunErr) {
-					stalledMessage := buildUnavailableFailureMessage(task, retryRunErr, retryResult)
-					return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
-						acpruntime.ProviderQwenCode,
-						acpruntime.ErrorCodeRunnerStalled,
-						fmt.Sprintf("headless provider %q stalled after retry: %s", acpruntime.ProviderQwenCode, stalledMessage),
-						retryResult.Stdout,
-						retryResult.Stderr,
-						retryRunErr,
-					)
+				code, class, execDiag := classifyExecutionFailure(task, retryRunErr, retryResult)
+				prefix := fmt.Sprintf("%v", ErrRunnerUnavailable)
+				switch class {
+				case "runtime_stalled":
+					prefix = fmt.Sprintf("headless provider %q stalled after retry", acpruntime.ProviderQwenCode)
+				case "runtime_timeout":
+					prefix = fmt.Sprintf("headless provider %q timed out after retry", acpruntime.ProviderQwenCode)
 				}
-				unavailableMessage := buildUnavailableFailureMessage(task, retryRunErr, retryResult)
-				return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+				return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithDetails(
 					acpruntime.ProviderQwenCode,
-					acpruntime.ErrorCodeRunnerUnavailable,
-					fmt.Sprintf("%v: %s", ErrRunnerUnavailable, unavailableMessage),
+					code,
+					fmt.Sprintf("%s: %s", prefix, execDiag.Message),
 					retryResult.Stdout,
 					retryResult.Stderr,
+					execDiag.Details,
 					retryRunErr,
 				)
 			}
 			if retryParseErr == nil {
 				return maybeRepairCollectArtifacts(ctx, task, taskPayload, command, retryResult)
 			}
-			parseFailureMessage := buildParseFailureMessage(task, retryParseStage, retryParseErr, retryResult)
-			return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+			parseDiag := buildParseFailureDiagnostics(task, retryParseStage, retryParseErr, retryResult)
+			return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithDetails(
 				acpruntime.ProviderQwenCode,
 				acpruntime.ErrorCodeRunnerStalled,
-				fmt.Sprintf("headless provider %q stalled after retry (invalid taskresult): %s", acpruntime.ProviderQwenCode, parseFailureMessage),
+				fmt.Sprintf("headless provider %q stalled after retry (invalid taskresult): %s", acpruntime.ProviderQwenCode, parseDiag.Message),
 				retryResult.Stdout,
 				retryResult.Stderr,
+				parseDiag.Details,
 				retryParseErr,
 			)
 		}
-		if isRunnerStalledError(runErr) {
-			stalledMessage := buildUnavailableFailureMessage(task, runErr, result)
-			return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
-				acpruntime.ProviderQwenCode,
-				acpruntime.ErrorCodeRunnerStalled,
-				fmt.Sprintf("headless provider %q stalled: %s", acpruntime.ProviderQwenCode, stalledMessage),
-				result.Stdout,
-				result.Stderr,
-				runErr,
-			)
+		code, class, execDiag := classifyExecutionFailure(task, runErr, result)
+		prefix := fmt.Sprintf("%v", ErrRunnerUnavailable)
+		switch class {
+		case "runtime_stalled":
+			prefix = fmt.Sprintf("headless provider %q stalled", acpruntime.ProviderQwenCode)
+		case "runtime_timeout":
+			prefix = fmt.Sprintf("headless provider %q timed out", acpruntime.ProviderQwenCode)
 		}
-		unavailableMessage := buildUnavailableFailureMessage(task, runErr, result)
-		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithDetails(
 			acpruntime.ProviderQwenCode,
-			acpruntime.ErrorCodeRunnerUnavailable,
-			fmt.Sprintf("%v: %s", ErrRunnerUnavailable, unavailableMessage),
+			code,
+			fmt.Sprintf("%s: %s", prefix, execDiag.Message),
 			result.Stdout,
 			result.Stderr,
+			execDiag.Details,
 			runErr,
 		)
 	}
@@ -170,6 +170,12 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 	finalStdout := result.Stdout
 	finalStderr := result.Stderr
 
+	if len(r.Args) == 0 {
+		if salvaged, ok, salvageErr := trySynthesizeCollectResultFromWriteRoot(task, acpruntime.ProviderQwenCode, result, parseStage, parseErr); salvageErr == nil && ok {
+			return maybeRepairCollectArtifacts(ctx, task, taskPayload, command, salvaged)
+		}
+	}
+
 	// Live qwen output can occasionally contain malformed tokens. Retry once with
 	// an explicitly stricter prompt before classifying as parse failure.
 	if len(r.Args) == 0 {
@@ -178,13 +184,21 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 		retryArgs := buildRetryQwenArgs(task, retryPrompt.Text)
 		retryResult, retryParseStage, retryParseErr, retryRunErr := runQwenCommand(ctx, task, command, retryArgs)
 		if retryRunErr != nil {
-			unavailableMessage := buildUnavailableFailureMessage(task, retryRunErr, retryResult)
-			return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+			code, class, execDiag := classifyExecutionFailure(task, retryRunErr, retryResult)
+			prefix := fmt.Sprintf("%v", ErrRunnerUnavailable)
+			switch class {
+			case "runtime_stalled":
+				prefix = fmt.Sprintf("headless provider %q stalled during parse retry", acpruntime.ProviderQwenCode)
+			case "runtime_timeout":
+				prefix = fmt.Sprintf("headless provider %q timed out during parse retry", acpruntime.ProviderQwenCode)
+			}
+			return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithDetails(
 				acpruntime.ProviderQwenCode,
-				acpruntime.ErrorCodeRunnerUnavailable,
-				fmt.Sprintf("%v: %s", ErrRunnerUnavailable, unavailableMessage),
+				code,
+				fmt.Sprintf("%s: %s", prefix, execDiag.Message),
 				retryResult.Stdout,
 				retryResult.Stderr,
+				execDiag.Details,
 				retryRunErr,
 			)
 		}
@@ -196,15 +210,19 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 		parseErr = retryParseErr
 		finalStdout = retryResult.Stdout
 		finalStderr = retryResult.Stderr
+		if salvaged, ok, salvageErr := trySynthesizeCollectResultFromWriteRoot(task, acpruntime.ProviderQwenCode, retryResult, retryParseStage, retryParseErr); salvageErr == nil && ok {
+			return maybeRepairCollectArtifacts(ctx, task, taskPayload, command, salvaged)
+		}
 	}
 
-	parseFailureMessage := buildParseFailureMessage(task, parseStage, parseErr, result)
-	return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+	parseDiag := buildParseFailureDiagnostics(task, parseStage, parseErr, result)
+	return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithDetails(
 		acpruntime.ProviderQwenCode,
 		acpruntime.ErrorCodeRunnerParseFailed,
-		fmt.Sprintf("headless provider %q returned invalid taskresult: %s", acpruntime.ProviderQwenCode, parseFailureMessage),
+		fmt.Sprintf("headless provider %q returned invalid taskresult: %s", acpruntime.ProviderQwenCode, parseDiag.Message),
 		finalStdout,
 		finalStderr,
+		parseDiag.Details,
 		parseErr,
 	)
 }
@@ -254,6 +272,7 @@ func maybeRepairCollectArtifacts(
 	snapshot, err := artifactquality.SnapshotWriteRoot(task.WriteRoot)
 	if err != nil {
 		return acpruntime.Result{}, wrapArtifactContractFailure(
+			task,
 			current.Stdout,
 			current.Stderr,
 			fmt.Sprintf("collect artifacts require repair (%s), but write_root snapshot failed: %v", initialProblem, err),
@@ -270,36 +289,36 @@ func maybeRepairCollectArtifacts(
 	repaired, repairParseStage, parseErr, runErr := runQwenCommand(ctx, task, command, repairArgs)
 	if runErr != nil {
 		_ = snapshot.Restore()
-		if isRunnerStalledError(runErr) {
-			stalledMessage := buildUnavailableFailureMessage(task, runErr, repaired)
-			return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
-				acpruntime.ProviderQwenCode,
-				acpruntime.ErrorCodeRunnerStalled,
-				fmt.Sprintf("headless provider %q stalled during collect artifact repair retry after %s: %s", acpruntime.ProviderQwenCode, initialProblem, stalledMessage),
-				repaired.Stdout,
-				repaired.Stderr,
-				runErr,
-			)
+		code, class, execDiag := classifyExecutionFailure(task, runErr, repaired)
+		prefix := fmt.Sprintf("%v", ErrRunnerUnavailable)
+		switch class {
+		case "runtime_stalled":
+			prefix = fmt.Sprintf("headless provider %q stalled during collect artifact repair retry after %s", acpruntime.ProviderQwenCode, initialProblem)
+		case "runtime_timeout":
+			prefix = fmt.Sprintf("headless provider %q timed out during collect artifact repair retry after %s", acpruntime.ProviderQwenCode, initialProblem)
+		default:
+			prefix = fmt.Sprintf("%v: artifact repair retry failed after %s", ErrRunnerUnavailable, initialProblem)
 		}
-		unavailableMessage := buildUnavailableFailureMessage(task, runErr, repaired)
-		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithDetails(
 			acpruntime.ProviderQwenCode,
-			acpruntime.ErrorCodeRunnerUnavailable,
-			fmt.Sprintf("%v: artifact repair retry failed after %s: %s", ErrRunnerUnavailable, initialProblem, unavailableMessage),
+			code,
+			fmt.Sprintf("%s: %s", prefix, execDiag.Message),
 			repaired.Stdout,
 			repaired.Stderr,
+			execDiag.Details,
 			runErr,
 		)
 	}
 	if parseErr != nil {
 		_ = snapshot.Restore()
-		parseFailureMessage := buildParseFailureMessage(task, "artifact_repair."+repairParseStage, parseErr, repaired)
-		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
+		parseDiag := buildParseFailureDiagnostics(task, "artifact_repair."+repairParseStage, parseErr, repaired)
+		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithDetails(
 			acpruntime.ProviderQwenCode,
 			acpruntime.ErrorCodeRunnerParseFailed,
-			fmt.Sprintf("headless provider %q returned invalid collect artifact repair result after %s: %s", acpruntime.ProviderQwenCode, initialProblem, parseFailureMessage),
+			fmt.Sprintf("headless provider %q returned invalid collect artifact repair result after %s: %s", acpruntime.ProviderQwenCode, initialProblem, parseDiag.Message),
 			repaired.Stdout,
 			repaired.Stderr,
+			parseDiag.Details,
 			parseErr,
 		)
 	}
@@ -313,6 +332,7 @@ func maybeRepairCollectArtifacts(
 		_ = snapshot.Restore()
 		repairedProblem := artifactquality.DescribeAssessmentProblem(repairedAssessment, err)
 		return acpruntime.Result{}, wrapArtifactContractFailure(
+			task,
 			repaired.Stdout,
 			repaired.Stderr,
 			fmt.Sprintf("collect artifacts remained invalid after one repair attempt: initial=%s; repaired=%s", initialProblem, repairedProblem),
@@ -322,13 +342,24 @@ func maybeRepairCollectArtifacts(
 	return repaired, nil
 }
 
-func wrapArtifactContractFailure(stdout string, stderr string, message string, cause error) error {
-	return acpruntime.WrapRunnerErrorWithOutput(
+func wrapArtifactContractFailure(task acpruntime.Task, stdout string, stderr string, message string, cause error) error {
+	diag := buildFailureDiagnostics(
+		task,
+		acpruntime.ProviderQwenCode,
+		acpruntime.ErrorCodeRunnerParseFailed,
+		"runtime_artifact_contract",
+		"",
+		"",
+		message,
+		acpruntime.Result{Stdout: stdout, Stderr: stderr},
+	)
+	return acpruntime.WrapRunnerErrorWithDetails(
 		acpruntime.ProviderQwenCode,
 		acpruntime.ErrorCodeRunnerParseFailed,
 		fmt.Sprintf("headless provider %q produced invalid collect artifacts: %s", acpruntime.ProviderQwenCode, strings.TrimSpace(message)),
 		stdout,
 		stderr,
+		diag.Details,
 		cause,
 	)
 }
@@ -422,7 +453,7 @@ func collectRetryWriteRootFiles(writeRoot string, limit int) ([]string, int, err
 	return files, total, nil
 }
 
-func buildParseFailureMessage(task acpruntime.Task, parseStage string, parseErr error, result acpruntime.Result) string {
+func buildParseFailureDiagnostics(task acpruntime.Task, parseStage string, parseErr error, result acpruntime.Result) failureDiagnostics {
 	base := strings.TrimSpace(parseErr.Error())
 	if base == "" {
 		base = "unknown parse error"
@@ -431,40 +462,118 @@ func buildParseFailureMessage(task acpruntime.Task, parseStage string, parseErr 
 	if stage == "" {
 		stage = "unknown"
 	}
-	artifacts, err := runnerdiag.WriteParseFailureArtifacts(task, acpruntime.ProviderQwenCode, result.Stdout, result.Stderr)
-	if err != nil {
-		return fmt.Sprintf("parse_stage=%s %s (raw_output_persist_failed=%v)", stage, base, err)
-	}
-	return fmt.Sprintf(
-		"parse_stage=%s %s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
+	return buildFailureDiagnostics(
+		task,
+		acpruntime.ProviderQwenCode,
+		acpruntime.ErrorCodeRunnerParseFailed,
+		"runtime_parse",
+		"",
 		stage,
 		base,
-		artifacts.RelativeMetadataPath,
-		artifacts.Stdout.Bytes,
-		artifacts.Stdout.SHA256,
-		artifacts.Stderr.Bytes,
-		artifacts.Stderr.SHA256,
+		result,
 	)
 }
 
-func buildUnavailableFailureMessage(task acpruntime.Task, runErr error, result acpruntime.Result) string {
+func buildUnavailableFailureDiagnostics(task acpruntime.Task, code acpruntime.ErrorCode, failureClass string, runErr error, result acpruntime.Result) failureDiagnostics {
 	base := strings.TrimSpace(runErr.Error())
 	if base == "" {
 		base = "unknown execution error"
 	}
-	artifacts, err := runnerdiag.WriteParseFailureArtifacts(task, acpruntime.ProviderQwenCode, result.Stdout, result.Stderr)
-	if err != nil {
-		return fmt.Sprintf("parse_stage=exec %s (raw_output_persist_failed=%v)", base, err)
+	subclass := ""
+	shortCause := base
+	if availability, ok := taskresultextractor.DetectProviderAvailabilitySignal([]byte(result.Stdout), []byte(result.Stderr)); ok {
+		subclass = strings.TrimSpace(availability.Subreason)
+		if value := strings.TrimSpace(availability.Message); value != "" {
+			shortCause = fmt.Sprintf("provider availability error (%s): %s", subclass, value)
+		}
 	}
-	return fmt.Sprintf(
-		"parse_stage=exec %s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
-		base,
-		artifacts.RelativeMetadataPath,
-		artifacts.Stdout.Bytes,
-		artifacts.Stdout.SHA256,
-		artifacts.Stderr.Bytes,
-		artifacts.Stderr.SHA256,
+	return buildFailureDiagnostics(task, acpruntime.ProviderQwenCode, code, failureClass, subclass, "exec", shortCause, result)
+}
+
+func buildTimeoutFailureDiagnostics(task acpruntime.Task, runErr error, result acpruntime.Result) failureDiagnostics {
+	shortCause := strings.TrimSpace(runErr.Error())
+	if shortCause == "" {
+		shortCause = "runtime task deadline exceeded"
+	}
+	return buildFailureDiagnostics(
+		task,
+		acpruntime.ProviderQwenCode,
+		acpruntime.ErrorCodeRuntimeTimeout,
+		"runtime_timeout",
+		"",
+		"exec",
+		shortCause,
+		result,
 	)
+}
+
+func classifyExecutionFailure(task acpruntime.Task, runErr error, result acpruntime.Result) (acpruntime.ErrorCode, string, failureDiagnostics) {
+	if errors.Is(runErr, context.DeadlineExceeded) {
+		return acpruntime.ErrorCodeRuntimeTimeout, "runtime_timeout", buildTimeoutFailureDiagnostics(task, runErr, result)
+	}
+	if isRunnerStalledError(runErr) {
+		return acpruntime.ErrorCodeRunnerStalled, "runtime_stalled", buildUnavailableFailureDiagnostics(task, acpruntime.ErrorCodeRunnerStalled, "runtime_stalled", runErr, result)
+	}
+	return acpruntime.ErrorCodeRunnerUnavailable, "runner_unavailable", buildUnavailableFailureDiagnostics(task, acpruntime.ErrorCodeRunnerUnavailable, "runner_unavailable", runErr, result)
+}
+
+func buildFailureDiagnostics(
+	task acpruntime.Task,
+	provider acpruntime.Provider,
+	code acpruntime.ErrorCode,
+	failureClass string,
+	failureSubclass string,
+	parseStage string,
+	shortCause string,
+	result acpruntime.Result,
+) failureDiagnostics {
+	shortCause = strings.TrimSpace(shortCause)
+	if shortCause == "" {
+		shortCause = "unknown execution error"
+	}
+	stage := strings.TrimSpace(parseStage)
+	if stage == "" {
+		stage = "unknown"
+	}
+	artifact, err := runnerdiag.WriteRuntimeFailureArtifact(task, provider, runnerdiag.FailureArtifactInput{
+		ErrorCode:       code,
+		FailureClass:    failureClass,
+		FailureSubclass: failureSubclass,
+		ParseStage:      parseStage,
+		ShortCause:      shortCause,
+	}, result.Stdout, result.Stderr)
+	if err != nil {
+		return failureDiagnostics{
+			Message: fmt.Sprintf("parse_stage=%s %s (raw_output_persist_failed=%v)", stage, shortCause, err),
+			Details: acpruntime.RunnerFailureDetails{
+				FailureClass:    strings.TrimSpace(failureClass),
+				FailureSubclass: strings.TrimSpace(failureSubclass),
+				ParseStage:      strings.TrimSpace(parseStage),
+				ShortCause:      shortCause,
+			},
+		}
+	}
+	return failureDiagnostics{
+		Message: fmt.Sprintf(
+			"parse_stage=%s %s (failure_artifact=%s raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
+			stage,
+			shortCause,
+			artifact.RelativePath,
+			artifact.RawOutput.RelativeMetadataPath,
+			artifact.RawOutput.Stdout.Bytes,
+			artifact.RawOutput.Stdout.SHA256,
+			artifact.RawOutput.Stderr.Bytes,
+			artifact.RawOutput.Stderr.SHA256,
+		),
+		Details: acpruntime.RunnerFailureDetails{
+			FailureClass:        strings.TrimSpace(failureClass),
+			FailureSubclass:     strings.TrimSpace(failureSubclass),
+			ParseStage:          strings.TrimSpace(parseStage),
+			FailureArtifactPath: artifact.RelativePath,
+			RawOutputPath:       artifact.RawOutput.RelativeMetadataPath,
+			ShortCause:          shortCause,
+		},
+	}
 }
 
 func idleWatchdogTimeout(task acpruntime.Task) time.Duration {
@@ -596,6 +705,13 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 		}, "", nil, runnerdiag.BuildExecFailure(waitErr, stdout.String(), stderr.String())
 	}
 
+	if availability, ok := taskresultextractor.DetectProviderAvailabilitySignal(stdout.Bytes(), stderr.Bytes()); ok {
+		return acpruntime.Result{
+			Stdout: stdout.String(),
+			Stderr: stderr.String(),
+		}, "", nil, fmt.Errorf("provider availability error (%s): %s", availability.Subreason, availability.Message)
+	}
+
 	rawTaskResult, err := taskresultextractor.Extract(stdout.Bytes())
 	if err != nil {
 		return acpruntime.Result{
@@ -723,6 +839,83 @@ func forwardStreamOutput(task acpruntime.Task, stream acpruntime.OutputStream, c
 			Text:      fmt.Sprintf("%s output truncated after %d bytes (internal safeguard)", stream, acpruntime.RuntimeOutputStreamHardCapBytes),
 		})
 	}
+}
+
+func trySynthesizeCollectResultFromWriteRoot(
+	task acpruntime.Task,
+	provider acpruntime.Provider,
+	current acpruntime.Result,
+	parseStage string,
+	parseErr error,
+) (acpruntime.Result, bool, error) {
+	if task.StepID != "init.step1.collect" && task.StepID != "refresh.step1.collect" {
+		return acpruntime.Result{}, false, nil
+	}
+	if strings.TrimSpace(parseStage) != "extract" {
+		return acpruntime.Result{}, false, nil
+	}
+	if strings.TrimSpace(task.WriteRoot) == "" {
+		return acpruntime.Result{}, false, nil
+	}
+	assessment, err := artifactquality.ValidateCollectManifestAtWriteRoot(task.WriteRoot)
+	if err != nil {
+		return acpruntime.Result{}, false, nil
+	}
+	if !assessment.ManifestPresent || assessment.DocumentCount == 0 || assessment.LinkedDocumentCount == 0 || assessment.CitationCount == 0 {
+		return acpruntime.Result{}, false, nil
+	}
+
+	startedAt := task.StartedAtUTC.UTC()
+	if startedAt.IsZero() {
+		startedAt = time.Now().UTC()
+	}
+	warnings := []string{
+		fmt.Sprintf("runtime_salvage: synthesized TaskResult from canonical write_root artifacts after parse_stage=%s", strings.TrimSpace(parseStage)),
+	}
+	if parseErr != nil {
+		errText := strings.TrimSpace(parseErr.Error())
+		if errText != "" {
+			if len(errText) > 220 {
+				errText = errText[:217] + "..."
+			}
+			warnings = append(warnings, "runtime_salvage: original parse error: "+errText)
+		}
+	}
+
+	synthesized := contracts.TaskResult{
+		Meta: contracts.Meta{
+			TaskID:     task.TaskID,
+			StepID:     task.StepID,
+			RunID:      task.RunID,
+			Runtime:    contracts.RuntimeMeta{Name: string(provider), Version: "deterministic-salvage"},
+			StartedAt:  startedAt.Format(time.RFC3339),
+			Workspace:  task.Workspace,
+			ShardID:    task.ShardID,
+			RepoScope:  primaryTaskRepoScope(task.RepoScope, task.RepoScopes),
+			RepoScopes: append([]string(nil), task.RepoScopes...),
+			PathScopes: append([]string(nil), task.PathScopes...),
+		},
+		Summary:   "collect artifacts already materialized; synthesized deterministic TaskResult",
+		Changeset: []contracts.Operation{},
+		Warnings:  warnings,
+	}
+	raw, err := json.Marshal(synthesized)
+	if err != nil {
+		return acpruntime.Result{}, false, err
+	}
+	parsed, err := contracts.ParseTaskResult(raw)
+	if err != nil {
+		return acpruntime.Result{}, false, err
+	}
+	if err := taskresultbinding.Validate(task, parsed, provider); err != nil {
+		return acpruntime.Result{}, false, err
+	}
+	return acpruntime.Result{
+		TaskResult: parsed,
+		RawJSON:    raw,
+		Stdout:     current.Stdout,
+		Stderr:     current.Stderr,
+	}, true, nil
 }
 
 func buildPrompt(taskPayload []byte, retry bool) string {

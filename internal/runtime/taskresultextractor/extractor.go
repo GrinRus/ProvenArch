@@ -10,6 +10,12 @@ import (
 )
 
 var ansiEscapePattern = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+var providerQuotaOrPermissionPattern = regexp.MustCompile(`(?is)(api\s*error\s*:\s*403|permission_error|insufficient_quota|usage\s+limit|quota(?:\s+will\s+be\s+refreshed|\s+exceeded|\s+limit)|forbidden)`)
+
+type ProviderAvailabilitySignal struct {
+	Subreason string
+	Message   string
+}
 
 // Extract returns a schema-valid TaskResult JSON object extracted from runner stdout.
 func Extract(raw []byte) ([]byte, error) {
@@ -33,6 +39,109 @@ func Extract(raw []byte) ([]byte, error) {
 		bestErr = errors.New("unknown extraction error")
 	}
 	return nil, fmt.Errorf("unable to extract valid TaskResult JSON from runner output: %w", bestErr)
+}
+
+// DetectProviderAvailabilitySignal inspects runner output for explicit provider
+// availability failures (for example permission/quota API responses) so callers
+// can classify them as execution failures before parse-retry.
+func DetectProviderAvailabilitySignal(stdout []byte, stderr []byte) (ProviderAvailabilitySignal, bool) {
+	candidates := []string{}
+	addCandidate := func(raw []byte) {
+		normalized := normalizeText(string(raw))
+		if normalized != "" {
+			candidates = append(candidates, normalized)
+		}
+		var value any
+		if err := json.Unmarshal(raw, &value); err == nil {
+			candidates = append(candidates, collectStringCandidates(value)...)
+		}
+	}
+
+	addCandidate(stdout)
+	addCandidate(stderr)
+	for _, candidate := range candidates {
+		if signal, ok := detectProviderAvailabilitySignalInText(candidate); ok {
+			return signal, true
+		}
+	}
+	return ProviderAvailabilitySignal{}, false
+}
+
+func collectStringCandidates(value any) []string {
+	candidates := []string{}
+	var walk func(any)
+	walk = func(node any) {
+		switch typed := node.(type) {
+		case string:
+			text := normalizeText(typed)
+			if text != "" {
+				candidates = append(candidates, text)
+			}
+		case []any:
+			for _, item := range typed {
+				walk(item)
+			}
+		case map[string]any:
+			priorityKeys := []string{"result", "message", "content", "text", "error"}
+			for _, key := range priorityKeys {
+				if value, ok := typed[key]; ok {
+					walk(value)
+				}
+			}
+			for _, value := range typed {
+				walk(value)
+			}
+		}
+	}
+	walk(value)
+	return candidates
+}
+
+func detectProviderAvailabilitySignalInText(text string) (ProviderAvailabilitySignal, bool) {
+	normalized := normalizeText(text)
+	if normalized == "" {
+		return ProviderAvailabilitySignal{}, false
+	}
+	match := strings.TrimSpace(providerQuotaOrPermissionPattern.FindString(normalized))
+	if match == "" {
+		return ProviderAvailabilitySignal{}, false
+	}
+	return ProviderAvailabilitySignal{
+		Subreason: "quota_or_permission",
+		Message:   compactSignalMessage(normalized, match),
+	}, true
+}
+
+func compactSignalMessage(fullText string, match string) string {
+	text := strings.TrimSpace(fullText)
+	if text == "" {
+		return strings.TrimSpace(match)
+	}
+	if len(text) <= 320 {
+		return text
+	}
+	lowerText := strings.ToLower(text)
+	lowerMatch := strings.ToLower(strings.TrimSpace(match))
+	idx := strings.Index(lowerText, lowerMatch)
+	if idx < 0 {
+		return text[:317] + "..."
+	}
+	start := idx - 96
+	if start < 0 {
+		start = 0
+	}
+	end := idx + len(lowerMatch) + 160
+	if end > len(text) {
+		end = len(text)
+	}
+	window := strings.TrimSpace(text[start:end])
+	if start > 0 {
+		window = "..." + window
+	}
+	if end < len(text) {
+		window += "..."
+	}
+	return window
 }
 
 func parseFromJSON(raw []byte) ([]byte, error) {

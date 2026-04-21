@@ -215,3 +215,30 @@ func TestExtractReturnsCandidateObjectEvenWhenSchemaInvalid(t *testing.T) {
 		t.Fatalf("expected schema validation to fail for extracted candidate")
 	}
 }
+
+func TestDetectProviderAvailabilitySignalFromEventArrayPayload(t *testing.T) {
+	t.Parallel()
+
+	stdout := `[
+{"type":"assistant","message":{"content":[{"type":"text","text":"[API Error: 403 {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your usage limit for this billing cycle\"},\"type\":\"error\"}]"}]}},
+{"type":"result","result":"[API Error: 403 {\"error\":{\"type\":\"permission_error\",\"message\":\"quota will be refreshed in the next cycle\"}}]"}
+]`
+	signal, ok := DetectProviderAvailabilitySignal([]byte(stdout), nil)
+	if !ok {
+		t.Fatalf("expected availability signal from event-stream payload")
+	}
+	if signal.Subreason != "quota_or_permission" {
+		t.Fatalf("expected quota_or_permission subreason, got %q", signal.Subreason)
+	}
+	if !strings.Contains(strings.ToLower(signal.Message), "permission_error") {
+		t.Fatalf("expected permission_error in compact signal message, got %q", signal.Message)
+	}
+}
+
+func TestDetectProviderAvailabilitySignalIgnoresValidTaskResult(t *testing.T) {
+	t.Parallel()
+
+	if signal, ok := DetectProviderAvailabilitySignal([]byte(validTaskResultJSON), nil); ok {
+		t.Fatalf("did not expect availability signal for valid taskresult, got %#v", signal)
+	}
+}

@@ -2,11 +2,13 @@ package orchestrator
 
 import (
 	"encoding/json"
+	"os"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/reports"
+	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
 type runtimeStepQuality struct {
@@ -55,6 +57,10 @@ type runQualitySummary struct {
 
 func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode string, errorMessage string) (Artifact, error) {
 	versions := normalizeRuntimeVersions(e.runtimeVersions)
+	renderContext := e.terminalRenderContext(status)
+	runWarnings := append([]string(nil), e.warnings...)
+	runWarnings = append(runWarnings, assessLiveReportSurfaceWarnings(e.workspace, renderContext, status)...)
+	runWarnings = normalizeOrderedUniqueStrings(runWarnings)
 
 	steps := append([]runtimeStepQuality(nil), e.runtimeStepMetrics...)
 	sort.Slice(steps, func(i, j int) bool {
@@ -91,8 +97,8 @@ func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode s
 		Error:           strings.TrimSpace(errorMessage),
 		GeneratedAt:     e.clock().UTC().Format(time.RFC3339),
 		RuntimeVersions: versions,
-		RunWarnings:     append([]string(nil), e.warnings...),
-		EvidenceState:   e.terminalRenderContext(status),
+		RunWarnings:     runWarnings,
+		EvidenceState:   renderContext,
 		Totals:          totals,
 		Steps:           steps,
 	}
@@ -111,6 +117,98 @@ func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode s
 		"signal_score": totals.SignalScore,
 	})
 	return Artifact{Path: path, Kind: "taskrun", Label: "Run Quality Summary"}, nil
+}
+
+func assessLiveReportSurfaceWarnings(ws workspace.Root, ctx reports.ReportRenderContext, status RunStatus) []string {
+	if status != RunStatusSucceeded || ctx.ReportMode != reports.ReportModeNormal {
+		return nil
+	}
+
+	warnings := []string{}
+	readRel := func(rel string) (string, bool) {
+		abs, err := ws.Resolve(rel)
+		if err != nil {
+			return "", false
+		}
+		raw, err := os.ReadFile(abs)
+		if err != nil {
+			return "", false
+		}
+		return string(raw), true
+	}
+
+	for _, rel := range requiredCanonicalLiveDocuments {
+		if _, ok := readRel(rel); !ok {
+			warnings = append(warnings, "artifact_quality: canonical live surface is missing required document "+rel)
+		}
+	}
+
+	if overviewText, ok := readRel("reports/as-is/overview.md"); ok {
+		nonEmpty := 0
+		placeholder := false
+		for _, line := range strings.Split(overviewText, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" {
+				continue
+			}
+			nonEmpty++
+			lower := strings.ToLower(trimmed)
+			if strings.Contains(lower, "no ") && strings.Contains(lower, " yet") {
+				placeholder = true
+			}
+		}
+		if reportHasIncompleteBanner(overviewText) {
+			warnings = append(warnings, "artifact_quality: overview report still carries incomplete-analysis banner in a succeeded run")
+		}
+		if nonEmpty < 4 || placeholder {
+			warnings = append(
+				warnings,
+				"artifact_quality: overview report is too sparse or placeholder-like for a succeeded run",
+			)
+		}
+	}
+
+	if findingsText, ok := readRel("reports/findings/findings.md"); ok {
+		if reportHasIncompleteBanner(findingsText) || findingsHasIncompleteFallback(findingsText) {
+			warnings = append(warnings, "artifact_quality: findings report still indicates incomplete analysis in a succeeded run")
+		}
+	}
+
+	if coverageText, ok := readRel("reports/coverage/summary.md"); ok {
+		if reportHasIncompleteBanner(coverageText) || coverageHasIncompleteFallback(coverageText) {
+			warnings = append(warnings, "artifact_quality: coverage summary still indicates incomplete analysis in a succeeded run")
+		}
+	}
+
+	if questionsText, ok := readRel("reports/coverage/open-questions.md"); ok {
+		if reportHasIncompleteBanner(questionsText) || openQuestionsHasIncompleteFallback(questionsText) {
+			warnings = append(warnings, "artifact_quality: open questions report still indicates incomplete analysis in a succeeded run")
+		}
+	}
+
+	return normalizeOrderedUniqueStrings(warnings)
+}
+
+func reportHasIncompleteBanner(text string) bool {
+	return strings.Contains(text, "Analysis incomplete.") ||
+		strings.Contains(text, "Partial analysis. Some shards failed; downstream content may be incomplete.")
+}
+
+func findingsHasIncompleteFallback(text string) bool {
+	return strings.Contains(text, "Findings unavailable because analysis did not complete.") ||
+		strings.Contains(text, "Findings may be incomplete because some shards failed.")
+}
+
+func coverageHasIncompleteFallback(text string) bool {
+	return strings.Contains(text, "Unavailable due to incomplete analysis.") ||
+		strings.Contains(text, "Unknown due to incomplete analysis.") ||
+		strings.Contains(text, "May be incomplete because some shards failed.") ||
+		strings.Contains(text, "Analysis incomplete. See banner above.")
+}
+
+func openQuestionsHasIncompleteFallback(text string) bool {
+	return strings.Contains(text, "Open questions unavailable due to incomplete analysis.") ||
+		strings.Contains(text, "Open questions may be incomplete because some shards failed.")
 }
 
 func normalizeRuntimeVersions(values map[string]struct{}) []string {

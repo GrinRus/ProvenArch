@@ -446,6 +446,7 @@ Release guard rules:
 - `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/*`
 - `backend-run-classifications.tsv`
 - `preflight.json`
+- `reports/taskruns/raw/*-failure.json`
 - `driver.log`, `full-run.log`, `session-summary.md`
 
 ## 6) Flow проверки новой функциональности
@@ -528,6 +529,7 @@ Zero tolerance:
 - `reports/taskruns/<run_id>-quality.json.run_warnings` с префиксом `artifact_quality:` считаются canonical live gate blocker даже при schema-valid `validator-verdict.json = PASS`; типовой пример — refresh final set с несколькими canonical docs и единственным generic `cite.runtime-summary`.
 - acceptable reuse-pattern допускается только если frozen refresh artifacts сохраняют хотя бы один rich collect shard с repo-specific citations; reuse-only manifests без такого shard'а считаются low-signal collapse.
 - `profile_matrix_<matrix-id>` и `quality_report_<batch-id>` агрегируют только реально выбранные `selected_providers` и `selected_run_indexes`; qwen-only `run1` regression run не должен материализовать synthetic `2x5` deficits.
+- `preflight.json.provider_readiness.*` фиксирует отдельный provider-readiness слой; явный quota/permission signal до batch execution считать operational blocker (`runner_unavailable`), а не product regression.
 - internal shard-plan/shard-summary taskrun JSON обязаны содержать non-empty `meta.runtime.name` / `meta.runtime.version`; пустой runtime meta считается contract drift, а не допустимым partial state.
 - live triage от `2026-04-17` зафиксировал один надёжный blocker для canonical `regres fast`: `single-git_url` на `qwen-code` завершился `runner_parse_failed` после event-stream chatter и partial TaskResult drafting; последующий `multi-path`/Open edX run был прерван вручную и не считается самостоятельным продуктовым failure signal.
 - subsequent clean rerun от `2026-04-17` подтвердил, что после фикса qwen prompt/retry + `cwd/chat-recording` этот parse blocker снимается; оставшийся canonical blocker сместился в legacy `pipeline_timeout=2400s`, поэтому canonical matrix slices получили checked-in `timeout_profile` с matrix-native budget.
@@ -538,6 +540,7 @@ Zero tolerance:
 - считать это blocking runtime incident для релизного verdict;
 - сначала проверить `driver.log` (matrix + batch), затем `session-summary.md` и `full-run.log` в `runs/<batch-id>/<provider>/runN/`, затем `arch-workspace/reports/taskruns/logs/*.ndjson` и `reports/taskruns/raw/*` для первичного runtime signal;
 - в `reports/taskruns/raw/*` проверять не только stdout/stderr parse diagnostics, но и effective prompt artifacts (`*-prompt.txt`, `*-task.json`, `*-prompt-meta.json`) для каждого headless attempt/retry;
+- `reports/taskruns/raw/*-failure.json` считать canonical source-of-truth для `failure_class`/`failure_subclass`/`parse_stage`; string scanning логов и prompt text оставлять только как legacy fallback;
 - отделить induced failures (например, debug timeout override) от реальной runtime/provider деградации;
 - если raw/taskrun logs показывают `runner_parse_failed` (`runtime_artifact_contract`/`runtime_parse`) или `runner_unavailable`, считать их primary failure class даже если `session-summary.md` дополнительно фиксирует `infra_incomplete_cycle`;
 - для release decision использовать только прогон без diagnostic timeout overrides.

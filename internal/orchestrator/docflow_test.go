@@ -33,14 +33,14 @@ func TestRuntimeArtifactContextFindingsExcludesRepoRootsFromDefaultReadContext(t
 	if resolveErr != nil {
 		t.Fatalf("resolve final root: %v", resolveErr)
 	}
-	if !containsPathValue(readRoots, workspaceRoot) {
-		t.Fatalf("expected workspace root in read context, got %v", readRoots)
-	}
 	if !containsPathValue(readRoots, writeRoot) {
 		t.Fatalf("expected validator write root in read context, got %v", readRoots)
 	}
 	if !containsPathValue(readRoots, finalRoot) {
 		t.Fatalf("expected staged final root in read context, got %v", readRoots)
+	}
+	if containsPathValue(readRoots, workspaceRoot) {
+		t.Fatalf("did not expect workspace root in findings read context, got %v", readRoots)
 	}
 	if containsPathValue(readRoots, repoRoot) {
 		t.Fatalf("did not expect repo root in findings read context, got %v", readRoots)

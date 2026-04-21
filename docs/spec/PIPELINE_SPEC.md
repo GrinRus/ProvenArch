@@ -129,7 +129,10 @@ Headless runtime consumption:
 - `skills/prompt-packs/collect-context.md` реально подключается к `init.step1.collect` и `refresh.step1.collect`
 - `skills/prompt-packs/findings.md` реально подключается к `init.step3.findings` и `refresh.step3.findings`
 - prompt pack content добавляется в effective provider prompt как additive context перед strict runtime contract
+- `skills/*/prompts/*.md` остаются seeded/reference assets в workspace bundle и не переопределяют live headless prompt assembly напрямую
 - если workspace override отсутствует или unreadable, runtime использует seeded baseline prompt pack и фиксирует warning в raw prompt diagnostics вместо silent fallback
+- `step3.findings` работает в staged-final-first режиме: default `read_context_roots` содержат staged final root + validator write root; broad workspace scan не используется как implicit default
+- runner failures materialize-ятся в `reports/taskruns/raw/*-failure.json` и содержат canonical `failure_class`, `failure_subclass`, `parse_stage`, task/provider metadata и ссылки на raw diagnostics
 
 ## Docs imports metadata (MVP)
 

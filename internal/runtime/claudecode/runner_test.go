@@ -133,6 +133,63 @@ exit 1
 	if !strings.Contains(message, "parse_stage=exec") || !strings.Contains(message, "raw_output=reports/taskruns/raw/") {
 		t.Fatalf("expected raw-output diagnostics in unavailable error message, got %q", message)
 	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected runner error details")
+	}
+	if runnerErr.Failure.FailureClass != "runner_unavailable" {
+		t.Fatalf("expected failure class runner_unavailable, got %+v", runnerErr.Failure)
+	}
+	if runnerErr.Failure.FailureArtifactPath == "" || runnerErr.Failure.RawOutputPath == "" {
+		t.Fatalf("expected structured failure artifact refs, got %+v", runnerErr.Failure)
+	}
+}
+
+func TestHeadlessRunnerTimeoutClassifiesAsRuntimeTimeout(t *testing.T) {
+	t.Parallel()
+
+	runner := HeadlessRunner{
+		Command: "sh",
+		Args: []string{
+			"-c",
+			"sleep 5",
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	_, err := runner.Run(ctx, acpruntime.Task{
+		TaskID:       "task-timeout",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    t.TempDir(),
+		RepoScopes:   []string{"payments-service"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected runtime timeout error")
+	}
+	code, message, ok := acpruntime.ClassifyError(err)
+	if !ok {
+		t.Fatalf("expected classify error to succeed")
+	}
+	if code != string(acpruntime.ErrorCodeRuntimeTimeout) {
+		t.Fatalf("expected runtime_timeout code, got %q (%v)", code, err)
+	}
+	if !strings.Contains(message, "timed out") {
+		t.Fatalf("expected timeout message, got %q", message)
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected runner error details")
+	}
+	if runnerErr.Failure.FailureClass != "runtime_timeout" {
+		t.Fatalf("expected runtime_timeout failure class, got %+v", runnerErr.Failure)
+	}
+	if runnerErr.Failure.FailureArtifactPath == "" || runnerErr.Failure.RawOutputPath == "" {
+		t.Fatalf("expected structured timeout artifact refs, got %+v", runnerErr.Failure)
+	}
 }
 
 func TestHeadlessRunnerInvalidTaskResultClassifiesAsParseFailed(t *testing.T) {
@@ -1288,6 +1345,128 @@ printf '%%s\n' '{"meta":{"task_id":"bad-only"}}'
 	}
 }
 
+func TestHeadlessRunnerClassifiesProviderQuotaAsRunnerUnavailable(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	writeRoot := filepath.Join(workspace, "write-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write-root: %v", err)
+	}
+
+	stateFile := filepath.Join(root, "claude-quota-count.txt")
+	commandPath := filepath.Join(root, "claude")
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+count=0
+if [ -f %q ]; then
+  count="$(cat %q)"
+fi
+count=$((count + 1))
+printf '%%s' "$count" > %q
+cat <<'JSON'
+[{"type":"assistant","message":{"content":[{"type":"text","text":"[API Error: 403 {\"error\":{\"type\":\"permission_error\",\"message\":\"usage limit reached for this billing cycle\"},\"type\":\"error\"}]"}]}}]
+JSON
+`, stateFile, stateFile, stateFile)
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write claude quota command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-claude-quota",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    workspace,
+		WriteRoot:    writeRoot,
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatalf("expected runner_unavailable for provider quota signal")
+	}
+	code, message, ok := acpruntime.ClassifyError(err)
+	if !ok {
+		t.Fatalf("expected classified runtime error, got %v", err)
+	}
+	if code != string(acpruntime.ErrorCodeRunnerUnavailable) {
+		t.Fatalf("expected runner_unavailable code, got %q (%v)", code, err)
+	}
+	if !strings.Contains(message, "quota_or_permission") {
+		t.Fatalf("expected quota_or_permission subreason in error message, got %q", message)
+	}
+	if count := strings.TrimSpace(string(mustReadFile(t, stateFile))); count != "1" {
+		t.Fatalf("expected one invocation without parse retry for provider availability error, got %q", count)
+	}
+}
+
+func TestHeadlessRunnerSalvagesCollectWhenParseFailsButManifestIsReadable(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	repoPath := filepath.Join(root, "openstack")
+	writeRoot := filepath.Join(root, "write-root")
+	for _, dir := range []string{workspace, repoPath, writeRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	manifest := "version: 1\nrepos:\n  - name: openstack\n    path: " + repoPath + "\n"
+	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write workspace manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "architecture-overview.md"), []byte("# Architecture\n"), 0o644); err != nil {
+		t.Fatalf("write collect doc: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "shard-pack-manifest.json"), []byte(validRetryRichManifestJSONForClaude()), 0o644); err != nil {
+		t.Fatalf("write rich manifest: %v", err)
+	}
+
+	stateFile := filepath.Join(root, "claude-salvage-count.txt")
+	commandPath := filepath.Join(root, "claude")
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+count=0
+if [ -f %q ]; then
+  count="$(cat %q)"
+fi
+count=$((count + 1))
+printf '%%s' "$count" > %q
+cat <<'OUT'
+[{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"tool chatter only, no taskresult"}]}}]
+OUT
+`, stateFile, stateFile, stateFile)
+	if err := os.WriteFile(commandPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write claude salvage command: %v", err)
+	}
+
+	runner := HeadlessRunner{Command: commandPath}
+	result, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:       "task-claude-salvage",
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		Workspace:    workspace,
+		WriteRoot:    writeRoot,
+		RepoScope:    "openstack",
+		RepoScopes:   []string{"openstack"},
+		PathScopes:   []string{"api"},
+		StartedAtUTC: time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("expected deterministic salvage from readable collect artifacts, got %v", err)
+	}
+	if !strings.Contains(result.TaskResult.Summary, "synthesized deterministic TaskResult") {
+		t.Fatalf("expected synthesized summary, got %q", result.TaskResult.Summary)
+	}
+	if count := strings.TrimSpace(string(mustReadFile(t, stateFile))); count != "1" {
+		t.Fatalf("expected salvage to avoid parse retry, got invocations=%q", count)
+	}
+}
+
 func validTaskResultJSON(taskID string, stepID string, runtimeName string, runtimeVersion string) string {
 	return fmt.Sprintf(`{"meta":{"task_id":"%s","step_id":"%s","runtime":{"name":"%s","version":"%s"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}`, taskID, stepID, runtimeName, runtimeVersion)
 }
@@ -1381,4 +1560,13 @@ func validRetrySkeletalManifestJSONForClaude() string {
     "findings": []
   }
 }`
+}
+
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return raw
 }

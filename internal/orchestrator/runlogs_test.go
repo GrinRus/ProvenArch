@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GrinRus/ProvenArch/internal/reports"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
 
@@ -263,6 +264,58 @@ func TestRunQualitySummaryRuntimeVersionsPreferVersionedEntry(t *testing.T) {
 	}
 	if quality.RuntimeVersions[0] != "synthetic-headless@v1" {
 		t.Fatalf("expected versioned runtime entry to win over bare name, got %+v", quality.RuntimeVersions)
+	}
+}
+
+func TestAssessLiveReportSurfaceWarningsFlagsPlaceholderAndIncompleteArtifacts(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	writeReport := func(rel string, content string) {
+		t.Helper()
+		if err := ws.WriteFile(rel, []byte(content)); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	writeReport("reports/as-is/overview.md", "# Overview\n\nNo report yet.\n")
+	writeReport("reports/findings/findings.md", "# Findings\n\nFindings may be incomplete because some shards failed.\n")
+	writeReport("reports/coverage/summary.md", "# Coverage Summary\n\nAnalysis incomplete. See banner above.\n")
+	writeReport("reports/coverage/open-questions.md", "# Open Questions\n\nOpen questions may be incomplete because some shards failed.\n")
+
+	ctx := reports.DefaultReportRenderContext()
+	warnings := assessLiveReportSurfaceWarnings(ws, ctx, RunStatusSucceeded)
+	joined := strings.Join(warnings, "\n")
+	if !strings.Contains(joined, "overview report is too sparse or placeholder-like") {
+		t.Fatalf("expected overview quality warning, got %+v", warnings)
+	}
+	if !strings.Contains(joined, "findings report still indicates incomplete analysis") {
+		t.Fatalf("expected findings incomplete warning, got %+v", warnings)
+	}
+	if !strings.Contains(joined, "coverage summary still indicates incomplete analysis") {
+		t.Fatalf("expected coverage incomplete warning, got %+v", warnings)
+	}
+	if !strings.Contains(joined, "open questions report still indicates incomplete analysis") {
+		t.Fatalf("expected open questions incomplete warning, got %+v", warnings)
+	}
+}
+
+func TestAssessLiveReportSurfaceWarningsSkipsIncompleteOrFailedRuns(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	if err := ws.WriteFile("reports/as-is/overview.md", []byte("# Overview\n\nNo report yet.\n")); err != nil {
+		t.Fatalf("write overview: %v", err)
+	}
+
+	incomplete := reports.DefaultReportRenderContext()
+	incomplete.ReportMode = reports.ReportModeIncomplete
+	if warnings := assessLiveReportSurfaceWarnings(ws, incomplete, RunStatusSucceeded); len(warnings) != 0 {
+		t.Fatalf("expected no warnings for incomplete-mode succeeded run, got %+v", warnings)
+	}
+	normal := reports.DefaultReportRenderContext()
+	if warnings := assessLiveReportSurfaceWarnings(ws, normal, RunStatusFailed); len(warnings) != 0 {
+		t.Fatalf("expected no warnings for failed run, got %+v", warnings)
 	}
 }
 

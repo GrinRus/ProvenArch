@@ -231,7 +231,9 @@ func ParseRepairHints(parseStage string, parseErr error) []string {
 		lines = append(lines, fmt.Sprintf(`Previous %s validation failure: %s`, stage, detail))
 	}
 	return append(lines,
+		`RETRY OBJECTIVE: return exactly one minimal TaskResult JSON object that validates for this task.`,
 		`Return a direct TaskResult JSON object, not an event-stream transcript or tool wrapper.`,
+		`Do NOT include tool logs, event arrays, envelope commentary, or any non-JSON preface/suffix.`,
 		`Do NOT use ad-hoc ops such as upsert_file, write_file, update_file, or todo_write in changeset[].op.`,
 		`For add_doc_artifact, use doc_artifact and never the legacy artifact field.`,
 	)
@@ -239,6 +241,7 @@ func ParseRepairHints(parseStage string, parseErr error) []string {
 
 func ArtifactRepairHints(initialProblem string) []string {
 	lines := []string{
+		`RETRY OBJECTIVE: repair collect artifacts deterministically, then return exactly one minimal TaskResult JSON object.`,
 		`Rebuild shard-pack-manifest.json to the canonical ACP schema before returning JSON.`,
 		`compatibility.coverage/questions/entities/edges/findings are all required; questions/entities/edges/findings must be arrays even when empty.`,
 		`Do NOT leave claim_ids empty for cited repository evidence; preserve concrete repo-backed claim ids whenever the evidence supports them.`,

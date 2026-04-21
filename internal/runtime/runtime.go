@@ -79,6 +79,7 @@ const (
 	ErrorCodeRunnerUnavailable ErrorCode = "runner_unavailable"
 	ErrorCodeRunnerParseFailed ErrorCode = "runner_parse_failed"
 	ErrorCodeRunnerStalled     ErrorCode = "runner_stalled"
+	ErrorCodeRuntimeTimeout    ErrorCode = "runtime_timeout"
 )
 
 type RunnerError struct {
@@ -87,7 +88,17 @@ type RunnerError struct {
 	Message  string
 	Stdout   string
 	Stderr   string
+	Failure  RunnerFailureDetails
 	Cause    error
+}
+
+type RunnerFailureDetails struct {
+	FailureClass        string
+	FailureSubclass     string
+	ParseStage          string
+	FailureArtifactPath string
+	RawOutputPath       string
+	ShortCause          string
 }
 
 func (e RunnerError) Error() string {
@@ -105,7 +116,7 @@ func (e RunnerError) Unwrap() error {
 }
 
 func WrapRunnerError(provider Provider, code ErrorCode, message string, cause error) error {
-	return WrapRunnerErrorWithOutput(provider, code, message, "", "", cause)
+	return WrapRunnerErrorWithDetails(provider, code, message, "", "", RunnerFailureDetails{}, cause)
 }
 
 func WrapRunnerErrorWithOutput(
@@ -116,12 +127,25 @@ func WrapRunnerErrorWithOutput(
 	stderr string,
 	cause error,
 ) error {
+	return WrapRunnerErrorWithDetails(provider, code, message, stdout, stderr, RunnerFailureDetails{}, cause)
+}
+
+func WrapRunnerErrorWithDetails(
+	provider Provider,
+	code ErrorCode,
+	message string,
+	stdout string,
+	stderr string,
+	failure RunnerFailureDetails,
+	cause error,
+) error {
 	return RunnerError{
 		Provider: provider,
 		Code:     code,
 		Message:  strings.TrimSpace(message),
 		Stdout:   stdout,
 		Stderr:   stderr,
+		Failure:  failure,
 		Cause:    cause,
 	}
 }

@@ -2853,6 +2853,24 @@ func runtimeFailureLogFields(task acpruntime.Task, err error, fallbackStdout str
 		if strings.TrimSpace(string(runnerErr.Provider)) != "" {
 			fields["provider"] = string(runnerErr.Provider)
 		}
+		if value := strings.TrimSpace(runnerErr.Failure.FailureClass); value != "" {
+			fields["failure_class"] = value
+		}
+		if value := strings.TrimSpace(runnerErr.Failure.FailureSubclass); value != "" {
+			fields["failure_subclass"] = value
+		}
+		if value := strings.TrimSpace(runnerErr.Failure.ParseStage); value != "" {
+			fields["parse_stage"] = value
+		}
+		if value := strings.TrimSpace(runnerErr.Failure.FailureArtifactPath); value != "" {
+			fields["failure_artifact"] = value
+		}
+		if value := strings.TrimSpace(runnerErr.Failure.RawOutputPath); value != "" {
+			fields["raw_output"] = value
+		}
+		if value := strings.TrimSpace(runnerErr.Failure.ShortCause); value != "" {
+			fields["short_cause"] = value
+		}
 		if strings.TrimSpace(stdout) == "" {
 			stdout = runnerErr.Stdout
 		}
@@ -3432,11 +3450,15 @@ func (e *pipelineExecution) ensureCrossRepoEdgeFallback(domainID string, task ac
 
 	candidates := make([]serviceCandidate, 0, len(entities))
 	candidateKey := map[string]struct{}{}
+	existingEntityIDs := map[string]struct{}{}
 	for _, entity := range entities {
+		entityID := strings.TrimSpace(entity.ID)
+		if entityID != "" {
+			existingEntityIDs[entityID] = struct{}{}
+		}
 		if strings.TrimSpace(entity.Type) != "service" {
 			continue
 		}
-		entityID := strings.TrimSpace(entity.ID)
 		if entityID == "" {
 			continue
 		}
@@ -3497,6 +3519,69 @@ func (e *pipelineExecution) ensureCrossRepoEdgeFallback(domainID string, task ac
 				Evidence: evidence,
 			})
 			candidateKey[key] = struct{}{}
+		}
+	}
+	if len(candidates) < 2 {
+		hasCandidateInScope := map[string]struct{}{}
+		for _, candidate := range candidates {
+			hasCandidateInScope[candidate.Repo] = struct{}{}
+		}
+		createdFallbackEntities := []string{}
+		for _, scope := range scopes {
+			if _, ok := hasCandidateInScope[scope]; ok {
+				continue
+			}
+			evidence, ok := scopeAnchors[scope]
+			if !ok {
+				continue
+			}
+			scopeSlug := slugutil.Slugify(scope)
+			if scopeSlug == "" {
+				scopeSlug = "scope"
+			}
+			baseID := fmt.Sprintf("svc.scope-anchor.%s", scopeSlug)
+			entityID := baseID
+			suffix := 1
+			for {
+				if _, exists := existingEntityIDs[entityID]; !exists {
+					break
+				}
+				entityID = fmt.Sprintf("%s.%d", baseID, suffix)
+				suffix++
+			}
+			existingEntityIDs[entityID] = struct{}{}
+			hasCandidateInScope[scope] = struct{}{}
+			createdFallbackEntities = append(createdFallbackEntities, fmt.Sprintf("%s(%s)", entityID, scope))
+			normalized.Changeset = append(normalized.Changeset, contracts.Operation{
+				Op: "upsert_entity",
+				Entity: &contracts.Entity{
+					ID:   entityID,
+					Type: "service",
+					Name: fmt.Sprintf("Scope Anchor %s", scope),
+					Attributes: map[string]any{
+						"guard_added": true,
+						"repo_scope":  scope,
+						"anchor":      true,
+					},
+					Provenance: contracts.Provenance{
+						Kind:       "inference",
+						Confidence: 0.58,
+						Evidence:   []contracts.Evidence{evidence},
+					},
+				},
+			})
+			candidates = append(candidates, serviceCandidate{
+				ID:       entityID,
+				Repo:     scope,
+				Evidence: evidence,
+			})
+			candidateKey[scope+"|"+entityID] = struct{}{}
+		}
+		if len(createdFallbackEntities) > 0 {
+			normalized.Warnings = append(
+				normalized.Warnings,
+				fmt.Sprintf("semantic_guard: added fallback scope-anchor entities for cross-repo edge synthesis: %s", strings.Join(createdFallbackEntities, ", ")),
+			)
 		}
 	}
 	if len(candidates) < 2 {

@@ -2251,6 +2251,15 @@ func TestSemanticGuardLeavesNoCrossRepoEdgeWhenFallbackCandidatesAreImpossible(t
 	if err := ws.WriteFile("charter/cards/domains/users.md", []byte("# Domain: Users\n\n- id: `users`\n- repo_scope: `users-service`\n")); err != nil {
 		t.Fatalf("write users domain card: %v", err)
 	}
+	for _, repo := range ws.Manifest.Repos {
+		path := strings.TrimSpace(repo.Path)
+		if path == "" {
+			continue
+		}
+		for _, anchor := range []string{"README.md", "README", "go.mod", "package.json", "pom.xml"} {
+			_ = os.Remove(filepath.Join(path, anchor))
+		}
+	}
 
 	service := NewService(WithRunner(refreshNoServiceMissingFindingsRunner{}))
 	info, _, err := service.Run(context.Background(), RunRequest{

@@ -49,6 +49,45 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 
 ### Plan ID
+EP-20260420-regres-audit-followups
+
+### Context
+После серии live `regres small/fast` прогонов основной backend/runtime контур заметно укреплён, но forensic-аудит показывает остаточные системные зазоры: сильная зависимость live gate от внешней provider availability, смешение orchestration/runtime/report responsibilities в shell-слое, неполное observability для prompt/runtime surface и неравномерное покрытие интеграционных failure-class regression tests. Нужен единый follow-up план, выровненный с docs-first/local-first архитектурой.
+
+### Goals (must have)
+- [ ] Свести runtime/provider failure handling к единому error taxonomy без stringly-typed drift между Go runtime и shell/python report layers
+- [ ] Довести prompt/runtime observability до уровня, где любой live shard triage делается по structured artifacts, а не по ad-hoc log scraping
+- [ ] Укрепить docflow/semantic fallback так, чтобы deterministic final-set assembly и cross-repo gates проверялись одинаково в unit/integration/live harness
+- [ ] Закрыть основные test coverage gaps вокруг negative/live-like scenarios, frontend smoke timing, и shell classifier coupling
+- [ ] Сверить README/ARCHITECTURE/spec/runbook с реально исполняемым поведением и убрать оставшиеся misleading narratives
+
+### Non-goals
+- [ ] Не менять five-profile taxonomy
+- [ ] Не менять public JSON schemas (`TaskResult`, `shard-pack-manifest`, `final-run-index`, `citation-index`, `validator-verdict`)
+- [ ] Не превращать optional live gate в required CI merge gate
+
+### Approach
+1) Выполнить full-flow audit: pipeline/orchestrator/runtime/report/frontend/smoke paths, включая prompt pack consumption и raw diagnostics.
+2) Сопоставить текущую реализацию с target architecture (`local-first`, `docs-first`, deterministic staged/promoted artifacts, additive prompt packs + strict contract tail).
+3) Разделить findings на P0/P1/P2: реальные runtime defects, shell/report legacy coupling, test coverage gaps, architectural debt.
+4) Зафиксировать план follow-up slices: runtime/report convergence, semantic/docflow hardening, frontend smoke stabilization, documentation/triage cleanup.
+
+### Files expected to change
+- `docs/PLANS.md`
+- далее по follow-up slices: `internal/runtime/*`, `internal/orchestrator/*`, `internal/artifactquality/*`, `scripts/full-run-batch-*.sh`, `scripts/e2e_batch_report.py`, `ui/e2e/*`, `docs/spec/*`, `docs/RELEASE_LIVE_E2E_RUNBOOK.md`, `docs/TESTING_STRATEGY.md`
+
+### Acceptance criteria
+- [ ] Аудит завершён по 7 requested areas: flow, project behavior, tests, prompts/artifacts, potential bugs, architecture fit, implementation plan
+- [ ] Для каждого существенного риска есть привязка к конкретному коду/контракту/тесту
+- [ ] План доработок разбит по приоритетам и не смешивает external provider issues с исправимыми внутренними дефектами
+
+### Risks
+- Самый большой риск — перепутать external provider availability limits с внутренними regressions и зафиксировать ложные продуктовые выводы. Второй риск — продолжить раздувать shell-classifier слой вместо перевода инцидентов в structured runtime evidence.
+
+### Progress log
+- 2026-04-20: старт полного аудита flow/project/tests/prompts/artifacts against target architecture.
+
+### Plan ID
 EP-20260418-regres-fast-artifact-quality
 
 ### Context

@@ -109,12 +109,14 @@ func (e *pipelineExecution) runtimeArtifactContext(stepID string, shardID string
 		return "", "", nil, fmt.Errorf("create runtime artifact root: %w", err)
 	}
 
-	roots := []string{e.workspace.Path}
+	roots := []string{}
 	if isFindingsStep {
 		if finalAbs, resolveErr := e.workspace.Resolve(runtimeFinalArtifactRoot(e.runID)); resolveErr == nil {
 			roots = append(roots, finalAbs)
 		}
 		roots = append(roots, abs)
+	} else {
+		roots = append(roots, e.workspace.Path)
 	}
 	// Keep validator/findings tasks focused on staged-final artifacts and validator write_root.
 	// Repository roots stay enabled for collect tasks.

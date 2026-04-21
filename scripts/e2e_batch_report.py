@@ -84,6 +84,7 @@ FAILURE_CLASS_PRECEDENCE = {
     "precheck_failed": 10,
     "none": 99,
 }
+TASKRUN_SCOPED_PATH_PATTERN = re.compile(r".+-(?:init|refresh)-step[0-9](?:[-._]|$)|.+-quality\.json$|.+-shard-(?:plan|summary)")
 
 
 def normalize_text(value: str) -> str:
@@ -145,6 +146,77 @@ def parse_stall_contexts(text: str) -> list[str]:
         else:
             contexts.append(f"{step}:{shard}")
     return contexts
+
+
+def load_runtime_failure_artifacts(raw_root: Path) -> list[dict[str, Any]]:
+    if not raw_root.exists():
+        return []
+    artifacts: list[dict[str, Any]] = []
+    for path in sorted(raw_root.rglob("*-failure.json")):
+        try:
+            payload = read_json(path)
+        except Exception:
+            continue
+        payload["_path"] = str(path)
+        artifacts.append(payload)
+    return artifacts
+
+
+def current_run_ids(*rows: dict[str, Any] | None) -> set[str]:
+    run_ids: set[str] = set()
+    for row in rows:
+        if not row:
+            continue
+        run_id = str(row.get("run_id", "")).strip()
+        if run_id:
+            run_ids.add(run_id)
+    return run_ids
+
+
+def path_matches_current_run(path: Path, run_ids: set[str]) -> bool:
+    if not run_ids:
+        return True
+    normalized = path.as_posix()
+    name = path.name
+    for run_id in run_ids:
+        token = f"{run_id}-"
+        if name.startswith(token) or token in normalized:
+            return True
+    return False
+
+
+def path_looks_taskrun_scoped(path: Path) -> bool:
+    return bool(TASKRUN_SCOPED_PATH_PATTERN.search(path.name))
+
+
+def filter_paths_for_current_runs(paths: list[Path], run_ids: set[str]) -> list[Path]:
+    if not run_ids:
+        return paths
+    matched = [path for path in paths if path_matches_current_run(path, run_ids)]
+    if matched:
+        return matched
+    return [path for path in paths if not path_looks_taskrun_scoped(path)]
+
+
+def filter_failure_artifacts_for_current_runs(
+    artifacts: list[dict[str, Any]],
+    run_ids: set[str],
+) -> list[dict[str, Any]]:
+    if not run_ids:
+        return artifacts
+    matched: list[dict[str, Any]] = []
+    unscoped: list[dict[str, Any]] = []
+    for payload in artifacts:
+        task = payload.get("task")
+        if not isinstance(task, dict):
+            unscoped.append(payload)
+            continue
+        run_id = str(task.get("run_id", "")).strip()
+        if run_id in run_ids:
+            matched.append(payload)
+        elif run_id == "":
+            unscoped.append(payload)
+    return matched if matched else unscoped
 
 
 def extract_artifact_quality_warnings(quality_payload: dict[str, Any]) -> list[str]:
@@ -1009,6 +1081,7 @@ def evaluate_run(
     headless_rows = parse_headless_rows(rows, provider)
     init_row = headless_rows.get("init")
     refresh_row = headless_rows.get("refresh")
+    active_run_ids = current_run_ids(init_row, refresh_row)
 
     snapshot_ok = True
     artifact_source = "snapshot"
@@ -1044,15 +1117,61 @@ def evaluate_run(
     runtime_artifact_contract_hit = False
     runtime_stalled_hit = False
     runner_unavailable_hit = False
+    runner_unavailable_quota_hit = False
     runner_error_hit = False
     parse_stages: set[str] = set()
     raw_outputs: set[str] = set()
     stalled_contexts: set[str] = set()
+    raw_root = workspace / "reports" / "taskruns" / "raw"
+    structured_failures = filter_failure_artifacts_for_current_runs(load_runtime_failure_artifacts(raw_root), active_run_ids)
+    for payload in structured_failures:
+        failure_class = str(payload.get("failure_class", "")).strip()
+        if not failure_class:
+            continue
+        runner_error_hit = True
+        error_code = str(payload.get("error_code", "")).strip()
+        failure_subclass = str(payload.get("failure_subclass", "")).strip()
+        parse_stage = str(payload.get("parse_stage", "")).strip()
+        raw_output = payload.get("raw_output", {}) if isinstance(payload.get("raw_output"), dict) else {}
+        raw_output_path = str(raw_output.get("relative_metadata_path", "")).strip()
+        if error_code:
+            error_codes.append(error_code)
+        if failure_class == "runtime_parse":
+            runtime_parse_hit = True
+        elif failure_class == "runtime_artifact_contract":
+            runtime_artifact_contract_hit = True
+        elif failure_class == "runtime_stalled":
+            runtime_stalled_hit = True
+        elif failure_class == "runner_unavailable":
+            runner_unavailable_hit = True
+        if failure_subclass == "quota_or_permission":
+            runner_unavailable_quota_hit = True
+            error_codes.append("runner_unavailable:quota_or_permission")
+        if parse_stage:
+            parse_stages.add(parse_stage)
+        if raw_output_path:
+            raw_outputs.add(raw_output_path)
     runner_error_sources = [summary_path, full_run_log]
     runner_error_sources.extend(sorted((run_dir / "logs").glob("run-iter*-*.log")))
-    runner_error_sources.extend(sorted((workspace / "reports" / "taskruns" / "logs").glob("*.ndjson")))
     runner_error_sources.extend(
-        sorted(path for path in (workspace / "reports" / "taskruns" / "raw").rglob("*") if path.is_file())
+        filter_paths_for_current_runs(
+            sorted((workspace / "reports" / "taskruns" / "logs").glob("*.ndjson")),
+            active_run_ids,
+        )
+    )
+    runner_error_sources.extend(
+        filter_paths_for_current_runs(
+            sorted(
+                path
+                for path in raw_root.rglob("*")
+                if path.is_file()
+                and not path.name.endswith("-failure.json")
+                and not path.name.endswith("-prompt.txt")
+                and not path.name.endswith("-prompt-task.json")
+                and not path.name.endswith("-prompt-meta.json")
+            ),
+            active_run_ids,
+        )
     )
     artifact_contract_markers = (
         "produced invalid collect artifacts",
@@ -1065,16 +1184,19 @@ def evaluate_run(
         if not source_path.exists():
             continue
         text = read_text_file(source_path)
-        if "runner_unavailable" in text:
+        if not structured_failures and "runner_unavailable" in text:
             runner_unavailable_hit = True
             runner_error_hit = True
             error_codes.append("runner_unavailable")
-        if "runner_stalled" in text:
+            if re.search(r"permission_error|insufficient_quota|usage limit|quota( exceeded| limit| will be refreshed)|API Error: 403", text, re.IGNORECASE):
+                runner_unavailable_quota_hit = True
+                error_codes.append("runner_unavailable:quota_or_permission")
+        if not structured_failures and "runner_stalled" in text:
             runtime_stalled_hit = True
             runner_error_hit = True
             error_codes.append("runner_stalled")
             stalled_contexts.update(parse_stall_contexts(text))
-        if "runner_parse_failed" in text:
+        if not structured_failures and "runner_parse_failed" in text:
             if any(marker in text for marker in artifact_contract_markers):
                 runtime_artifact_contract_hit = True
                 error_codes.append("runtime_artifact_contract")
@@ -1082,10 +1204,15 @@ def evaluate_run(
                 runtime_parse_hit = True
             runner_error_hit = True
             error_codes.append("runner_parse_failed")
-        parse_stages.update(match.group(1).strip() for match in re.finditer(r"parse_stage=([a-z_]+)", text))
-        raw_outputs.update(match.group(1).strip() for match in re.finditer(r"raw_output=([^\s)]+)", text))
+        if not structured_failures:
+            parse_stages.update(match.group(1).strip() for match in re.finditer(r"parse_stage=([a-z_]+)", text))
+            raw_outputs.update(match.group(1).strip() for match in re.finditer(r"raw_output=([^\s)]+)", text))
+        if "runner_stalled" in text:
+            stalled_contexts.update(parse_stall_contexts(text))
     if runtime_artifact_contract_hit:
         runtime_parse_hit = False
+    if classified_subclass == "quota_or_permission":
+        runner_unavailable_quota_hit = True
     h3 = not runner_error_hit
     if not h3:
         issues.append("reliability:runner-errors")
@@ -1106,6 +1233,9 @@ def evaluate_run(
         issues.append("reliability:runtime-artifact-contract")
     if runner_unavailable_hit:
         issues.append("reliability:runner-unavailable")
+        if runner_unavailable_quota_hit:
+            issues.append("reliability:runner-unavailable-quota")
+            details.append("reliability/runner-unavailable-quota -> provider quota/permission response detected")
 
     init_signal = int(init_row["signal"]) if init_row else 0
     refresh_signal = int(refresh_row["signal"]) if refresh_row else 0
@@ -1421,12 +1551,25 @@ def evaluate_run(
                     f"repo_mentions={len(repo_mentions)} edge_upserts={edge_upserts}"
                 )
     elif expected_repo_count >= 2:
-        semantic_hard_fail = True
-        issues.append("analysis:cross-repo-missing")
-        details.append(
-            f"analysis/cross-repo-missing -> run_dir={run_dir} expected_repo_count={expected_repo_count} "
-            "missing refresh step taskrun artifacts"
+        upstream_runtime_failure = (
+            runner_error_hit
+            or runtime_timeout
+            or infra_signal_terminated
+            or infra_incomplete_cycle
+            or classified_failure in {"runtime_parse", "runtime_artifact_contract", "runtime_stalled", "runner_unavailable", "runtime_timeout"}
         )
+        if upstream_runtime_failure:
+            details.append(
+                f"analysis/cross-repo-check-skipped -> run_dir={run_dir} expected_repo_count={expected_repo_count} "
+                "missing refresh step taskrun artifacts due to upstream runtime failure"
+            )
+        else:
+            semantic_hard_fail = True
+            issues.append("analysis:cross-repo-missing")
+            details.append(
+                f"analysis/cross-repo-missing -> run_dir={run_dir} expected_repo_count={expected_repo_count} "
+                "missing refresh step taskrun artifacts"
+            )
 
     overview_counts = parse_overview_counts(overview_path)
     services_count = int(overview_counts.get("services", 0))
@@ -1497,7 +1640,9 @@ def evaluate_run(
         normalized_classified_failure = classified_failure
         if classified_failure == "runner_stalled":
             normalized_classified_failure = "runtime_stalled"
-        if failure_class == "none" or failure_class_rank(normalized_classified_failure) < failure_class_rank(failure_class):
+        if summary_missing and not summary_path.exists():
+            failure_class = normalized_classified_failure
+        elif failure_class == "none" or failure_class_rank(normalized_classified_failure) < failure_class_rank(failure_class):
             failure_class = normalized_classified_failure
         runtime_artifact_contract_hit = runtime_artifact_contract_hit or classified_failure == "runtime_artifact_contract"
         runtime_parse_hit = runtime_parse_hit or classified_failure == "runtime_parse"
@@ -1661,7 +1806,14 @@ def aggregate_frontend_status(items: list[dict[str, Any]]) -> str:
 def aggregate_frontend_reasons(items: list[dict[str, Any]]) -> str:
     if not items:
         return "-"
-    reasons = Counter(str(item.get("reason", "-")).strip() or "-" for item in items)
+    reasons = Counter()
+    for item in items:
+        reason = str(item.get("reason", "-")).strip() or "-"
+        detail = str(item.get("reason_detail", "")).strip()
+        if detail:
+            reasons[f"{reason} [{detail}]"] += 1
+        else:
+            reasons[reason] += 1
     return ", ".join(f"{reason}={count}" for reason, count in sorted(reasons.items()))
 
 
@@ -1714,21 +1866,21 @@ def write_frontend_matrix(path: Path, frontend: list[dict[str, Any]], providers:
             "",
             "## Run Details",
             "",
-            "| provider | run | status | reason | base_url | workspace | runtime_command | server_log | playwright_log |",
-            "|---|---:|---|---|---|---|---|---|---|",
+            "| provider | run | status | reason | reason_detail | base_url | workspace | runtime_command | server_log | playwright_log |",
+            "|---|---:|---|---|---|---|---|---|---|---|",
         ]
     )
     for provider in active_providers:
         items = grouped.get(provider, [])
         if not items:
-            lines.append(f"| {provider} | 0 | missing | missing_result | - | - | - | - | - |")
+            lines.append(f"| {provider} | 0 | missing | missing_result | - | - | - | - | - | - |")
             continue
         for payload in items:
             run_index = int(payload.get("run_index", 0) or 0)
             run_label = str(run_index) if run_index > 0 else "-"
             lines.append(
                 "| "
-                f"{provider} | {run_label} | {payload.get('status', '-')} | {payload.get('reason', '-')} | "
+                f"{provider} | {run_label} | {payload.get('status', '-')} | {payload.get('reason', '-')} | {payload.get('reason_detail', '-')} | "
                 f"{payload.get('base_url', '-')} | {payload.get('workspace', '-')} | {payload.get('runtime_command', '-')} | "
                 f"{payload.get('server_log', '-')} | {payload.get('playwright_log', '-')} |"
             )
@@ -1760,21 +1912,21 @@ def write_frontend_cancel_matrix(
             "",
             "## Run Details",
             "",
-            "| provider | run | status | reason | scenario | workspace | runtime_command | server_log | playwright_log |",
-            "|---|---:|---|---|---|---|---|---|---|",
+            "| provider | run | status | reason | reason_detail | scenario | workspace | runtime_command | server_log | playwright_log |",
+            "|---|---:|---|---|---|---|---|---|---|---|",
         ]
     )
     for provider in active_providers:
         items = grouped.get(provider, [])
         if not items:
-            lines.append(f"| {provider} | 0 | missing | missing_result | cancel-refresh | - | - | - | - |")
+            lines.append(f"| {provider} | 0 | missing | missing_result | - | cancel-refresh | - | - | - | - |")
             continue
         for payload in items:
             run_index = int(payload.get("run_index", 0) or 0)
             run_label = str(run_index) if run_index > 0 else "-"
             lines.append(
                 "| "
-                f"{provider} | {run_label} | {payload.get('status', '-')} | {payload.get('reason', '-')} | "
+                f"{provider} | {run_label} | {payload.get('status', '-')} | {payload.get('reason', '-')} | {payload.get('reason_detail', '-')} | "
                 f"{payload.get('scenario', '-')} | {payload.get('workspace', '-')} | "
                 f"{payload.get('runtime_command', '-')} | {payload.get('server_log', '-')} | {payload.get('playwright_log', '-')} |"
             )

@@ -213,8 +213,10 @@
 Headless runtime prompt assembly:
 - effective provider prompt собирается внутри runtime runner, а не читается напрямую из seeded markdown surface
 - workspace prompt packs `skills/prompt-packs/collect-context.md` и `skills/prompt-packs/findings.md` подключаются как additive context
+- `skills/*/prompts/*.md` остаются seeded/reference baseline assets для bundle/UI review, но не являются live headless override surface
 - strict schema/write invariants остаются в runtime builder и идут после additive prompt-pack section, поэтому редактируемые prompt packs не ослабляют contract
 - для каждого shard attempt/retry runtime materialize-ит prompt/task diagnostics в `reports/taskruns/raw/*`
+- runtime failures materialize-ятся в `reports/taskruns/raw/*-failure.json`; batch/report слой обязан читать эти structured artifacts как primary source-of-truth вместо string scanning prompt/log text
 
 On-demand capability:
 - Q&A агент использует `charter/cards + model + reports + docs/imports`; в beta доступен как internal service + CLI `acp qa` без публичного API endpoint.

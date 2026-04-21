@@ -39,7 +39,7 @@ ACP не является "рисовалкой диаграмм". Архите�
 - локально импортированные документы
 - интерактивный wizard "Конституции проекта"
 - deterministic Step 0 materialization из `charter/wizard/step0-contract.json` (с fallback baseline + warning в run diagnostics при missing/invalid contract)
-- встроенный baseline bundle agents/skills/prompts + редактируемые в UI prompt packs, версионируемые в Git
+- встроенный baseline bundle agents/skills/prompts + редактируемые в UI prompt packs, версионируемые в Git; live headless runtime customization берёт только `skills/prompt-packs/*.md`, а `skills/*/prompts/*.md` остаются seeded reference-only assets
 - domain-first иерархия агентов (domain analysts + architect aggregator)
 - docs-first runtime contract: shard analysts пишут dossier packs в run-scoped staging, validator даёт canonical verdict, promotion переносит только approved final set
 - markdown-карточки доменов/команд как source-of-truth в `charter/cards`
@@ -607,7 +607,7 @@ Primary promotion gate:
 UI в MVP должен покрывать минимум:
 - wizard для Step 0 (charter);
 - настройку `repos[]` (multi-repo) для локальных папок и GitHub/GitLab URL;
-- baseline-wide редактор `charter/*` + `skills/*` (prompt packs, `subagents.yaml`, skill prompts);
+- baseline-wide редактор `charter/*` + `skills/*` (`prompt-packs/*.md` как live-consumed additive prompt surface, `subagents.yaml`, skill prompts как reference-only seeded assets);
 - запуск pipeline (init/update);
 - явные top-level секции `Setup / Baseline / Runs / Results / Settings`;
 - `Settings` как отдельная вкладка для runtime profile (`timeouts` + `execution`);
