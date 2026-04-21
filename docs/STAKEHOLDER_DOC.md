@@ -18,8 +18,8 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 |---|---|---|
 | Runtime policy `fake` default + `headless` opt-in | done | `cmd/acp/main.go` (`--runtime ...`, `--runtime-provider ...`, `ACP_RUNTIME_PROVIDER`, `ACP_CLAUDE_CMD`, `ACP_QWEN_CMD`), `cmd/acp/main_test.go`, `internal/api/server_test.go` |
 | Baseline flow `validate -> init|refresh -> inspect` (CLI/API/UI) | done | `scripts/smoke-cli.sh`, `scripts/smoke-api.sh`, `ui/src/App.test.tsx` |
-| Schema-driven workspace/taskresult validation + actionable diagnostics | done | `internal/workspace/validation.go`, `internal/contracts/taskresult.go`, `internal/api/server_test.go` |
-| Domain-first per-domain execution with raw taskruns + domain outputs | done | `internal/orchestrator/orchestrator.go`, `internal/orchestrator/orchestrator_test.go`, `internal/orchestrator/scenario_test.go` |
+| Schema-driven workspace/runtime artifact validation + actionable diagnostics | done | `internal/workspace/validation.go`, `internal/contracts/runtimeexecution.go`, `internal/api/server_test.go` |
+| Domain-first per-domain execution with persisted runtime execution metadata + domain outputs | done | `internal/orchestrator/orchestrator.go`, `internal/orchestrator/orchestrator_test.go`, `internal/orchestrator/scenario_test.go` |
 | Architect aggregation deterministic output | done | `reports/agent-outputs/architect/summary.md`, `TestArchitectSummaryIsDeterministicAcrossRuns`, scenario golden snapshot |
 | Q&A capability without public beta API surface | done (boundary-complete) | `internal/qa/service.go`, `cmd/acp/main.go` (`acp qa`), `docs/spec/API_SPEC.md` (`/api/qa/ask` follow-up) |
 | Public `POST /api/qa/ask` | follow-up (Epic 11) | not in current beta API surface |
@@ -291,7 +291,7 @@ arch-workspace/
    - готовит контекст и PromptPack перед запуском каждого шага  
    - загружает baseline bundle agents/skills/prompts из workspace  
    - разрешает repo sources (`path`/`git_url`) в локальные checkout перед анализом через системный `git` текущего пользователя/runner  
-   - принимает структурированный результат (TaskResult) и сохраняет в workspace
+   - принимает только required step artifacts + runtime execution metadata и сохраняет их в workspace
    - работает в interactive local mode и non-interactive CI mode
    - вызывается как напрямую пользователем, так и из CI/CD trigger flows
 
@@ -334,7 +334,7 @@ MVP должен стабильно производить следующий н
 - `reports/coverage/summary.md` — coverage отчёты (что извлечено, что не найдено)  
 - `reports/coverage/open-questions.md` — открытые вопросы по недостающей информации  
 - `proposals/<topic>/` — пакеты улучшений + ADR/RFC drafts  
-- `reports/taskruns/` — сохранённые TaskResult (для воспроизводимости и дебага)
+- `reports/taskruns/` — сохранённые runtime execution metadata и raw failure artifacts (для воспроизводимости и дебага)
 - `reports/agent-outputs/domains/<domain-id>.md` — outputs domain-агентов  
 - `reports/agent-outputs/architect/summary.md` — синтез Architect Aggregator Agent  
 - `reports/changelog/<yyyy-mm-dd>-<iteration-id>.md` — changelog по итерациям
@@ -541,13 +541,11 @@ flowchart TD
 - `owner_team_id` должен ссылаться на существующий `team.<slug>`; неизвестный owner не создаёт auto-team entity.
 - Stable IDs не пересчитываются автоматически при rename/move; для миграций используются `aliases[]` и явная модельная правка.
 
-### 13.2. Контракт TaskResult
-- Текущий changeset contract считаем замороженным для MVP.
-- `write_file` в MVP не добавляется; Step 2 и Step 4 становятся agent-first шагами, но canonical publish по-прежнему выполняет только compiler/promoter слой.
+### 13.2. Контракт runtime execution
+- MVP использует только artifact-only runtime contract.
+- Runtime пишет required step artifacts в `write_root` / `draft_final_root` и завершает процесс без semantic JSON на stdout.
+- Orchestrator принимает шаг только после read-only validation artifacts и persisted runtime execution metadata.
 - Observation без evidence запрещён policy и examples.
-- Canonical MVP shape: runtime по умолчанию пишет `questions[]` и `coverage` на top-level.
-- Legacy operations `add_question` и `set_coverage` удалены из active contract; принимается только canonical top-level representation.
-- `add_doc_artifact` трактуется как metadata registration op, а не как content write op.
 
 ### 13.3. Skills/prompts editing через UI
 - Минимальный UX MVP: edit → validate → commit → history → rollback.

@@ -1,14 +1,15 @@
 package qwencode
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/runnerdiag"
-	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultextractor"
 )
 
 func (d collectStallDiagnostic) fields(task acpruntime.Task) map[string]any {
@@ -39,66 +40,57 @@ func emitDiagnostic(task acpruntime.Task, message string, fields map[string]any)
 	})
 }
 
-func selectFailureResult(primary acpruntime.Result, fallback acpruntime.Result) acpruntime.Result {
-	if strings.TrimSpace(primary.Stdout) != "" || strings.TrimSpace(primary.Stderr) != "" {
-		return primary
-	}
-	return fallback
-}
-
-func retryDiagnosticFields(task acpruntime.Task, stalled collectStallError, context retryDiagnosticContext, retryStatus string, errText string, manifestState string) map[string]any {
-	fields := stalled.Diagnostic.fields(task)
-	lastStallPhase := context.LastStallPhase
-	if lastStallPhase == "" {
-		lastStallPhase = stalled.Diagnostic.StallPhase
-	}
-	if lastStallPhase != "" {
-		fields["stall_phase"] = strings.TrimSpace(string(lastStallPhase))
-		fields["last_stall_phase"] = strings.TrimSpace(string(lastStallPhase))
-	}
-	if state := strings.TrimSpace(context.ManifestStateBeforeRetry); state != "" {
-		fields["manifest_state_before_retry"] = state
-	}
-	if context.AuthoredFileCount > 0 {
-		fields["authored_file_count"] = context.AuthoredFileCount
-	}
-	if !context.LastPipeActivity.IsZero() {
-		fields["last_pipe_activity_at"] = context.LastPipeActivity.UTC().Format(time.RFC3339)
-	}
-	if !context.LastWriteRootMutation.IsZero() {
-		fields["last_write_root_mutation_at"] = context.LastWriteRootMutation.UTC().Format(time.RFC3339)
-	}
-	if state := strings.TrimSpace(manifestState); state != "" {
-		fields["manifest_state"] = state
-	}
-	if status := strings.TrimSpace(retryStatus); status != "" {
-		fields["retry_status"] = status
-	}
-	if detail := strings.TrimSpace(errText); detail != "" {
-		fields["error"] = detail
-	}
-	return fields
-}
-
-func wrapQwenParseFailure(task acpruntime.Task, parseStage string, parseErr error, result acpruntime.Result, contextLabel string) error {
-	failureMessage := buildParseFailureMessage(task, parseStage, parseErr, result)
-	if taskresultextractor.IsTransportError(parseErr) {
-		return acpruntime.WrapRunnerErrorWithOutput(
+func classifyRunFailure(task acpruntime.Task, result acpruntime.Result, err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		message, rawOutputRefs := buildFailureMessage(task, "exec", err, result)
+		return acpruntime.WrapRunnerErrorWithDiagnostics(
 			acpruntime.ProviderQwenCode,
-			acpruntime.ErrorCodeRunnerUnavailable,
-			fmt.Sprintf("%v: %s transport/API failure: %s", ErrRunnerUnavailable, strings.TrimSpace(contextLabel), failureMessage),
+			acpruntime.ErrorCodeRuntimeTimeout,
+			message,
 			result.Stdout,
 			result.Stderr,
-			parseErr,
+			rawOutputRefs,
+			err,
 		)
 	}
-	return acpruntime.WrapRunnerErrorWithOutput(
+	if errors.Is(err, context.Canceled) {
+		message, rawOutputRefs := buildFailureMessage(task, "exec", err, result)
+		return acpruntime.WrapRunnerErrorWithDiagnostics(
+			acpruntime.ProviderQwenCode,
+			acpruntime.ErrorCodeRunCanceled,
+			message,
+			result.Stdout,
+			result.Stderr,
+			rawOutputRefs,
+			err,
+		)
+	}
+	var stalled collectStallError
+	if errors.As(err, &stalled) {
+		emitDiagnostic(task, "retry scheduled", stalled.Diagnostic.fields(task))
+		return wrapArtifactContractFailure(task, "stall", result, "runtime stalled after artifact writes", err)
+	}
+	if isProviderUnavailableText(result.Stdout, result.Stderr, err) {
+		message, rawOutputRefs := buildFailureMessage(task, "exec", err, result)
+		return acpruntime.WrapRunnerErrorWithDiagnostics(
+			acpruntime.ProviderQwenCode,
+			acpruntime.ErrorCodeRunnerUnavailable,
+			message,
+			result.Stdout,
+			result.Stderr,
+			rawOutputRefs,
+			err,
+		)
+	}
+	message, rawOutputRefs := buildFailureMessage(task, "exec", err, result)
+	return acpruntime.WrapRunnerErrorWithDiagnostics(
 		acpruntime.ProviderQwenCode,
-		acpruntime.ErrorCodeRunnerParseFailed,
-		fmt.Sprintf("%s: %s", strings.TrimSpace(contextLabel), failureMessage),
+		acpruntime.ErrorCodeRunnerUnavailable,
+		message,
 		result.Stdout,
 		result.Stderr,
-		parseErr,
+		rawOutputRefs,
+		err,
 	)
 }
 
@@ -111,50 +103,21 @@ func wrapArtifactContractFailure(task acpruntime.Task, stage string, result acpr
 	case trimmed != "":
 		failure = errors.New(trimmed)
 	case failure == nil:
-		failure = errors.New("invalid collect artifacts")
+		failure = errors.New("invalid runtime artifacts")
 	}
-	failureMessage := buildFailureMessage(task, stage, failure, result)
-	return acpruntime.WrapRunnerErrorWithOutput(
+	failureMessage, rawOutputRefs := buildFailureMessage(task, stage, failure, result)
+	return acpruntime.WrapRunnerErrorWithDiagnostics(
 		acpruntime.ProviderQwenCode,
-		acpruntime.ErrorCodeRunnerParseFailed,
-		fmt.Sprintf("headless provider %q produced invalid collect artifacts: %s", acpruntime.ProviderQwenCode, failureMessage),
+		acpruntime.ErrorCodeRuntimeContract,
+		fmt.Sprintf("headless provider %q produced invalid runtime artifacts: %s", acpruntime.ProviderQwenCode, failureMessage),
 		result.Stdout,
 		result.Stderr,
+		rawOutputRefs,
 		cause,
 	)
 }
 
-func wrapRuntimeDraftContractFailure(task acpruntime.Task, stage string, result acpruntime.Result, message string, cause error) error {
-	failure := cause
-	trimmed := strings.TrimSpace(message)
-	switch {
-	case trimmed != "" && cause != nil:
-		failure = fmt.Errorf("%s: %w", trimmed, cause)
-	case trimmed != "":
-		failure = errors.New(trimmed)
-	case failure == nil:
-		failure = errors.New("invalid runtime draft artifacts")
-	}
-	failureMessage := buildFailureMessage(task, stage, failure, result)
-	return acpruntime.WrapRunnerErrorWithOutput(
-		acpruntime.ProviderQwenCode,
-		acpruntime.ErrorCodeRunnerParseFailed,
-		fmt.Sprintf("headless provider %q produced invalid runtime draft artifacts: %s", acpruntime.ProviderQwenCode, failureMessage),
-		result.Stdout,
-		result.Stderr,
-		cause,
-	)
-}
-
-func buildParseFailureMessage(task acpruntime.Task, parseStage string, parseErr error, result acpruntime.Result) string {
-	return buildFailureMessage(task, parseStage, parseErr, result)
-}
-
-func buildUnavailableFailureMessage(task acpruntime.Task, runErr error, result acpruntime.Result) string {
-	return buildFailureMessage(task, "exec", runErr, result)
-}
-
-func buildFailureMessage(task acpruntime.Task, stage string, failure error, result acpruntime.Result) string {
+func buildFailureMessage(task acpruntime.Task, stage string, failure error, result acpruntime.Result) (string, contracts.RuntimeOutputRefs) {
 	base := "unknown failure"
 	if failure != nil {
 		base = strings.TrimSpace(failure.Error())
@@ -166,18 +129,61 @@ func buildFailureMessage(task acpruntime.Task, stage string, failure error, resu
 	if stage == "" {
 		stage = "unknown"
 	}
-	artifacts, err := runnerdiag.WriteParseFailureArtifacts(task, acpruntime.ProviderQwenCode, result.Stdout, result.Stderr)
+	artifacts, err := runnerdiag.WriteFailureArtifacts(task, acpruntime.ProviderQwenCode, result.Stdout, result.Stderr)
 	if err != nil {
-		return fmt.Sprintf("parse_stage=%s %s (raw_output_persist_failed=%v)", stage, base, err)
+		return fmt.Sprintf("stage=%s %s (raw_output_persist_failed=%v)", stage, base, err), contracts.RuntimeOutputRefs{}
 	}
 	return fmt.Sprintf(
-		"parse_stage=%s %s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
-		stage,
-		base,
-		artifacts.RelativeMetadataPath,
-		artifacts.Stdout.Bytes,
-		artifacts.Stdout.SHA256,
-		artifacts.Stderr.Bytes,
-		artifacts.Stderr.SHA256,
-	)
+			"stage=%s %s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
+			stage,
+			base,
+			artifacts.RelativeMetadataPath,
+			artifacts.Stdout.Bytes,
+			artifacts.Stdout.SHA256,
+			artifacts.Stderr.Bytes,
+			artifacts.Stderr.SHA256,
+		), contracts.RuntimeOutputRefs{
+			Stdout:   artifacts.Stdout.RelativePath,
+			Stderr:   artifacts.Stderr.RelativePath,
+			Metadata: artifacts.RelativeMetadataPath,
+		}
+}
+
+func isProviderUnavailableText(stdout string, stderr string, err error) bool {
+	text := strings.ToLower(strings.Join([]string{stdout, stderr, errorText(err)}, "\n"))
+	markers := []string{
+		"permission_error",
+		"permission error",
+		"usage limit",
+		"quota exceeded",
+		"quota",
+		"insufficient credits",
+		"credit balance",
+		"rate limit",
+		"rate_limit",
+		"status code: 403",
+		"status code: 429",
+		"api error: 403",
+		"api error: 429",
+		"ssl",
+		"tls",
+		"certificate",
+		"network",
+		"socket",
+		"packet length too long",
+		"http2",
+	}
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }

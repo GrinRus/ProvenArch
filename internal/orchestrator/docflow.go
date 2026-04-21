@@ -79,7 +79,7 @@ func runtimeAgentRole(stepID string) string {
 	case strings.HasSuffix(stepID, "step1.collect"):
 		return "shard-analyst"
 	case strings.HasSuffix(stepID, "step3.findings"):
-		return "validator"
+		return "validator-findings"
 	default:
 		return "runtime"
 	}
@@ -173,12 +173,15 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 	}
 	stageRoot := workspace.Root{Path: stageRootAbs}
 
-	baseCompatibility := aggregateCompatibilitySnapshot(e.shardPacks)
-	e.compatibilityBase = &baseCompatibility
-	compatibility := e.effectiveCompatibilitySnapshot()
+	baseSemantic := aggregateSemanticSnapshot(e.shardPacks)
+	e.semanticBase = &baseSemantic
+	semantic := e.effectiveSemanticSnapshot()
 	stageStore := model.NewStore(stageRoot)
-	if _, err := stageStore.ApplyChangeset(buildCompatibilityModelTaskResult(e.runID, compatibility)); err != nil {
-		return fmt.Errorf("apply staged compatibility model: %w", err)
+	if _, err := stageStore.ApplySemanticSnapshot(contracts.SemanticSnapshot{
+		Entities: semantic.Entities,
+		Edges:    semantic.Edges,
+	}); err != nil {
+		return fmt.Errorf("apply staged semantic model: %w", err)
 	}
 	entities, err := stageStore.ListEntities()
 	if err != nil {
@@ -278,23 +281,12 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 		return false
 	}
 
-	// Narratives are docs-first from runtime-authored staged packs.
-	// Compiler paths remain compatibility fallback only when required surfaces are absent.
-	if err := registerCompiledArtifacts(stageCompiler.CompileAsIs(entities, edges, renderCtx)); err != nil {
+	// Canonical narratives are runtime-authored only.
+	// Compiler materializes derived technical artifacts and indexes, not fallback prose.
+	if err := registerCompiledArtifacts(stageCompiler.WriteCoverage(&semantic.Coverage, semantic.Questions, renderCtx)); err != nil {
 		return err
 	}
-	if err := registerCompiledArtifacts(stageCompiler.WriteCoverage(&compatibility.Coverage, compatibility.Questions, renderCtx)); err != nil {
-		return err
-	}
-	if err := registerCompiledArtifacts(stageCompiler.WriteFindings(compatibility.Findings, renderCtx)); err != nil {
-		return err
-	}
-	if !hasCanonicalPrefix("proposals/") {
-		if err := registerCompiledArtifacts(stageCompiler.CompileProposals(compatibility.Findings, renderCtx)); err != nil {
-			return err
-		}
-	}
-	if err := registerCompiledArtifacts(stageCompiler.WriteArchitectSummary(e.renderArchitectSummary(), renderCtx)); err != nil {
+	if err := registerCompiledArtifacts(stageCompiler.WriteFindings(semantic.Findings, renderCtx)); err != nil {
 		return err
 	}
 	if !hasCanonicalPrefix("reports/agent-outputs/domains/") {
@@ -354,7 +346,7 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 		stageArtifacts,
 		e.shardPacks,
 		parsedCitationIndex,
-		compatibility,
+		semantic,
 	)
 	if err != nil {
 		return err
@@ -384,17 +376,17 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 			e.addWarning(warning)
 		}
 	}
-	e.findings = append([]contracts.Finding(nil), compatibility.Findings...)
-	e.questions = append([]contracts.Question(nil), compatibility.Questions...)
-	e.coverage = mergeCoverage(nil, &compatibility.Coverage)
+	e.findings = append([]contracts.Finding(nil), semantic.Findings...)
+	e.questions = append([]contracts.Question(nil), semantic.Questions...)
+	e.coverage = mergeCoverage(nil, &semantic.Coverage)
 	e.logInfo(e.stepStatus.CurrentStep, "", "staged doc flow assembled", map[string]any{
 		"shard_packs":    len(e.shardPacks),
 		"staged_docs":    len(parsedFinalRunIndex.CanonicalDocuments),
 		"citation_count": len(parsedCitationIndex.Citations),
 		"entities":       len(entities),
 		"edges":          len(edges),
-		"findings":       len(compatibility.Findings),
-		"questions":      len(compatibility.Questions),
+		"findings":       len(semantic.Findings),
+		"questions":      len(semantic.Questions),
 	})
 	return nil
 }
@@ -648,8 +640,8 @@ func (e *pipelineExecution) stagedDomainEnvelopes() []reports.DomainTaskEnvelope
 	return envelopes
 }
 
-func aggregateCompatibilitySnapshot(manifests []contracts.ShardPackManifest) contracts.CompatibilitySnapshot {
-	snapshot := contracts.CompatibilitySnapshot{
+func aggregateSemanticSnapshot(manifests []contracts.ShardPackManifest) contracts.SemanticSnapshot {
+	snapshot := contracts.SemanticSnapshot{
 		Coverage:  contracts.Coverage{},
 		Questions: []contracts.Question{},
 		Entities:  []contracts.Entity{},
@@ -661,15 +653,15 @@ func aggregateCompatibilitySnapshot(manifests []contracts.ShardPackManifest) con
 	findingByID := map[string]contracts.Finding{}
 
 	for _, manifest := range manifests {
-		snapshot.Coverage = *mergeCoverage(&snapshot.Coverage, &manifest.Compatibility.Coverage)
-		snapshot.Questions = mergeQuestions(snapshot.Questions, manifest.Compatibility.Questions)
-		for _, entity := range manifest.Compatibility.Entities {
+		snapshot.Coverage = *mergeCoverage(&snapshot.Coverage, &manifest.Semantic.Coverage)
+		snapshot.Questions = mergeQuestions(snapshot.Questions, manifest.Semantic.Questions)
+		for _, entity := range manifest.Semantic.Entities {
 			entityByID[entity.ID] = entity
 		}
-		for _, edge := range manifest.Compatibility.Edges {
+		for _, edge := range manifest.Semantic.Edges {
 			edgeByID[edge.ID] = edge
 		}
-		for _, finding := range manifest.Compatibility.Findings {
+		for _, finding := range manifest.Semantic.Findings {
 			findingByID[finding.ID] = finding
 		}
 	}
@@ -689,16 +681,16 @@ func aggregateCompatibilitySnapshot(manifests []contracts.ShardPackManifest) con
 	return snapshot
 }
 
-func (e *pipelineExecution) effectiveCompatibilitySnapshot() contracts.CompatibilitySnapshot {
-	base := contracts.CompatibilitySnapshot{
+func (e *pipelineExecution) effectiveSemanticSnapshot() contracts.SemanticSnapshot {
+	base := contracts.SemanticSnapshot{
 		Coverage:  contracts.Coverage{},
 		Questions: []contracts.Question{},
 		Entities:  []contracts.Entity{},
 		Edges:     []contracts.Edge{},
 		Findings:  []contracts.Finding{},
 	}
-	if e.compatibilityBase != nil {
-		base = *e.compatibilityBase
+	if e.semanticBase != nil {
+		base = *e.semanticBase
 	}
 	effective := base
 	effective.Coverage = base.Coverage
@@ -728,34 +720,6 @@ func mergeFindings(existing []contracts.Finding, incoming []contracts.Finding) [
 	}
 	sort.Slice(findings, func(i, j int) bool { return findings[i].ID < findings[j].ID })
 	return findings
-}
-
-func buildCompatibilityModelTaskResult(runID string, snapshot contracts.CompatibilitySnapshot) contracts.TaskResult {
-	changeset := make([]contracts.Operation, 0, len(snapshot.Entities)+len(snapshot.Edges))
-	for _, entity := range snapshot.Entities {
-		entityCopy := entity
-		changeset = append(changeset, contracts.Operation{
-			Op:     "upsert_entity",
-			Entity: &entityCopy,
-		})
-	}
-	for _, edge := range snapshot.Edges {
-		edgeCopy := edge
-		changeset = append(changeset, contracts.Operation{
-			Op:   "upsert_edge",
-			Edge: &edgeCopy,
-		})
-	}
-	return contracts.TaskResult{
-		Meta: contracts.Meta{
-			TaskID:    "compat-" + runID,
-			StepID:    "compat.extract",
-			Runtime:   contracts.RuntimeMeta{Name: "docflow-compat", Version: "1"},
-			StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339),
-		},
-		Summary:   "Derived compatibility model from final run index.",
-		Changeset: changeset,
-	}
 }
 
 func aggregateCitationIndex(runID string, generatedAt time.Time, manifests []contracts.ShardPackManifest) contracts.CitationIndex {
@@ -792,7 +756,7 @@ func buildFinalRunIndex(
 	stageArtifacts []Artifact,
 	manifests []contracts.ShardPackManifest,
 	citationIndex contracts.CitationIndex,
-	compatibility contracts.CompatibilitySnapshot,
+	semantic contracts.SemanticSnapshot,
 ) (contracts.FinalRunIndex, error) {
 	aggregatedDocs := map[string]*aggregatedDocumentInfo{}
 	allShardIDs := map[string]struct{}{}
@@ -918,7 +882,7 @@ func buildFinalRunIndex(
 		CitationIndexPath:  runtimeCitationIndexPath(runID),
 		CanonicalDocuments: append([]contracts.FinalRunDocument{}, documents...),
 		Topics:             append([]contracts.TopicIndexEntry{}, topics...),
-		Compatibility:      compatibility,
+		Semantic:           semantic,
 	}
 	raw, err := json.Marshal(index)
 	if err != nil {
@@ -1103,7 +1067,7 @@ func (e *pipelineExecution) promoteValidatedArtifacts() error {
 		return err
 	}
 
-	if err := e.rebuildCompatibilityModel(); err != nil {
+	if err := e.rebuildDerivedModel(); err != nil {
 		return err
 	}
 
@@ -1191,9 +1155,9 @@ func managedCanonicalArtifactPrefixes() []string {
 	}
 }
 
-func (e *pipelineExecution) rebuildCompatibilityModel() error {
+func (e *pipelineExecution) rebuildDerivedModel() error {
 	if e.finalRunIndex == nil {
-		return fmt.Errorf("rebuild compatibility model: final run index is missing")
+		return fmt.Errorf("rebuild derived model: final run index is missing")
 	}
 	for _, rel := range []string{"model/entities", "model/edges"} {
 		abs, err := e.workspace.Resolve(rel)
@@ -1201,12 +1165,15 @@ func (e *pipelineExecution) rebuildCompatibilityModel() error {
 			return err
 		}
 		if err := os.RemoveAll(abs); err != nil {
-			return fmt.Errorf("clear compatibility model dir %q: %w", rel, err)
+			return fmt.Errorf("clear derived model dir %q: %w", rel, err)
 		}
 		if err := os.MkdirAll(abs, 0o755); err != nil {
-			return fmt.Errorf("recreate compatibility model dir %q: %w", rel, err)
+			return fmt.Errorf("recreate derived model dir %q: %w", rel, err)
 		}
 	}
-	_, err := e.store.ApplyChangeset(buildCompatibilityModelTaskResult(e.runID, e.finalRunIndex.Compatibility))
+	_, err := e.store.ApplySemanticSnapshot(contracts.SemanticSnapshot{
+		Entities: e.finalRunIndex.Semantic.Entities,
+		Edges:    e.finalRunIndex.Semantic.Edges,
+	})
 	return err
 }

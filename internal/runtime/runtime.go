@@ -70,16 +70,19 @@ type ErrorCode string
 
 const (
 	ErrorCodeRunnerUnavailable ErrorCode = "runner_unavailable"
-	ErrorCodeRunnerParseFailed ErrorCode = "runner_parse_failed"
+	ErrorCodeRuntimeContract   ErrorCode = "runtime_contract_failed"
+	ErrorCodeRuntimeTimeout    ErrorCode = "runtime_timeout"
+	ErrorCodeRunCanceled       ErrorCode = "run_canceled"
 )
 
 type RunnerError struct {
-	Provider Provider
-	Code     ErrorCode
-	Message  string
-	Stdout   string
-	Stderr   string
-	Cause    error
+	Provider      Provider
+	Code          ErrorCode
+	Message       string
+	Stdout        string
+	Stderr        string
+	RawOutputRefs contracts.RuntimeOutputRefs
+	Cause         error
 }
 
 func (e RunnerError) Error() string {
@@ -108,13 +111,26 @@ func WrapRunnerErrorWithOutput(
 	stderr string,
 	cause error,
 ) error {
+	return WrapRunnerErrorWithDiagnostics(provider, code, message, stdout, stderr, contracts.RuntimeOutputRefs{}, cause)
+}
+
+func WrapRunnerErrorWithDiagnostics(
+	provider Provider,
+	code ErrorCode,
+	message string,
+	stdout string,
+	stderr string,
+	rawOutputRefs contracts.RuntimeOutputRefs,
+	cause error,
+) error {
 	return RunnerError{
-		Provider: provider,
-		Code:     code,
-		Message:  strings.TrimSpace(message),
-		Stdout:   stdout,
-		Stderr:   stderr,
-		Cause:    cause,
+		Provider:      provider,
+		Code:          code,
+		Message:       strings.TrimSpace(message),
+		Stdout:        stdout,
+		Stderr:        stderr,
+		RawOutputRefs: rawOutputRefs,
+		Cause:         cause,
 	}
 }
 
@@ -160,10 +176,9 @@ type DiagnosticEvent struct {
 }
 
 type Result struct {
-	TaskResult contracts.TaskResult
-	RawJSON    []byte
-	Stdout     string
-	Stderr     string
+	Execution contracts.RuntimeExecution
+	Stdout    string
+	Stderr    string
 }
 
 type Runner interface {
@@ -172,4 +187,36 @@ type Runner interface {
 
 type PreflightRunner interface {
 	Preflight(context.Context) error
+}
+
+func NewExecution(task Task, provider Provider, runtimeVersion string, status string, finishedAt time.Time, warnings []string) contracts.RuntimeExecution {
+	startedAt := task.StartedAtUTC.UTC()
+	if startedAt.IsZero() {
+		startedAt = time.Now().UTC()
+	}
+	doneAt := finishedAt.UTC()
+	if doneAt.IsZero() {
+		doneAt = time.Now().UTC()
+	}
+	return contracts.NormalizeRuntimeExecution(contracts.RuntimeExecution{
+		Version:           1,
+		TaskID:            strings.TrimSpace(task.TaskID),
+		RunID:             strings.TrimSpace(task.RunID),
+		StepID:            strings.TrimSpace(task.StepID),
+		ShardID:           strings.TrimSpace(task.ShardID),
+		DomainID:          strings.TrimSpace(task.DomainID),
+		Provider:          string(provider),
+		RuntimeVersion:    strings.TrimSpace(runtimeVersion),
+		StartedAt:         startedAt.Format(time.RFC3339),
+		FinishedAt:        doneAt.Format(time.RFC3339),
+		RepoScope:         strings.TrimSpace(task.RepoScope),
+		RepoScopes:        append([]string(nil), task.RepoScopes...),
+		PathScopes:        append([]string(nil), task.PathScopes...),
+		ArtifactRoot:      strings.TrimSpace(task.ArtifactRoot),
+		WriteRoot:         strings.TrimSpace(task.WriteRoot),
+		DraftFinalRoot:    strings.TrimSpace(task.DraftFinalRoot),
+		Status:            strings.TrimSpace(status),
+		RequiredArtifacts: append([]string(nil), task.ExpectedArtifacts...),
+		Warnings:          append([]string(nil), warnings...),
+	})
 }

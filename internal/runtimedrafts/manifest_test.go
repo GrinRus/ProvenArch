@@ -305,6 +305,6 @@ func TestReconcileOutputsAtDraftRootErrorsIncludeCompatibilityRuleID(t *testing.
 		t.Fatalf("expected reconcile error")
 	}
 	if !strings.Contains(err.Error(), compatibilityregistry.RuleDraftRootReconcileExistingOutputs) {
-		t.Fatalf("expected compatibility rule id in reconcile error, got %v", err)
+		t.Fatalf("expected repair rule id in reconcile error, got %v", err)
 	}
 }

@@ -6,9 +6,9 @@
 
 - **Workspace**: единый central git-репозиторий `arch-workspace/` (каноническая MVP-конвенция, Variant 2) с `workspace.yaml`, `charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/`.
 - **Workspace manifest**: `workspace.yaml`, валидируемый по `schemas/workspace.schema.json` и описанный в `docs/spec/WORKSPACE_SPEC.md`.
-- **Orchestrator**: управляет шагами, готовит PromptPack/ContextPack, выдаёт runtime staged-write envelope, валидирует manifests/indexes/verdicts и compatibility TaskResult.
+- **Orchestrator**: управляет шагами, готовит PromptPack/ContextPack, выдаёт runtime staged-write envelope, валидирует manifests/indexes/verdicts и persisted runtime execution metadata.
 - **Runtime (MVP)**: headless multi-provider (`claude-code` default, `qwen-code` optional) + deterministic fake harness (default for required CI/testing).
-- **TaskResult**: compatibility envelope runtime-шага (`schemas/taskresult.schema.json`), не primary source of truth для live docs-first flows.
+- **Runtime execution metadata**: internal metadata artifact runtime-шага (`task_id`, `run_id`, `step_id`, `provider`, write roots, status, raw output refs), не semantic source of truth для live docs-first flows.
 
 ## Docs-first runtime contract
 
@@ -30,7 +30,7 @@ Runtime write policy:
 - runtime получает explicit `artifact_root`, `write_root`, `draft_final_root`, `read_context_roots[]`, `step_contract`, `expected_artifacts[]`
 - runtime не имеет права писать в `workspace.yaml`, `schemas/*`, `docs/spec/*`, `charter/*` и анализируемые user repos
 
-> MVP policy фиксирует step-scoped runtime provider contract: effective provider для шага выбирается как `workspace step override > CLI/env global provider > claude-code`; changeset contract остаётся замороженным без `write_file`.
+> MVP policy фиксирует step-scoped runtime provider contract: effective provider для шага выбирается как `workspace step override > CLI/env global provider > claude-code`; semantic stdout payloads не поддерживаются.
 > CLI/process runtime mode задаётся флагом `--runtime fake|headless` (`fake` default, `headless` opt-in), global fallback provider — `--runtime-provider claude-code|qwen-code` (env fallback `ACP_RUNTIME_PROVIDER`).
 
 ## Repo source manifest (MVP)
@@ -156,24 +156,12 @@ Bundle поставляется вместе с продуктом, хранит
 - `refresh.step3.findings`
 - `refresh.step4.proposals`
 
-## TaskResult semantics (MVP compatibility)
+## Runtime execution semantics
 
 Canonical MVP runtime shape:
-- `questions[]` пишутся на top-level
-- `coverage` пишется на top-level
-- `changeset` содержит model/findings/doc metadata operations
-
-Canonical-only operations policy:
-- `changeset[].op` поддерживает только canonical operations из schema-contract.
-- legacy operations `add_question` / `set_coverage` отклоняются contract validation.
-- orchestrator canonicalize-ит только top-level `questions[]` и `coverage` (dedupe + stable ordering).
-
-`add_doc_artifact` в MVP compatibility layer:
-- трактуется только как metadata registration op
-- может ссылаться на уже существующий или позднее materialized orchestrator artifact
-- не несёт content payload
-- не является скрытым `write_file`
-- не является primary dependency path для обязательных outputs Step 1 или Step 3
+- semantic source of truth для `step1` — `shard-pack-manifest.json.semantic`
+- semantic source of truth для `step3` — `validator-verdict.json.findings[]` и `validator-verdict.json.questions[]`
+- runtime execution metadata сохраняют только execution context, status, warnings и raw-output references
 
 ## Init pipeline
 
@@ -221,22 +209,18 @@ Primary runtime output:
 - `shard-pack-manifest.json`
 - optional shard-local draft finals рядом с manifest, но только внутри shard staging root
 
-Compatibility output:
-- `TaskResult` with `changeset`, optional top-level `questions`, optional top-level `coverage`
-
 Orchestrator applies:
-- валидирует TaskResult schema как compatibility envelope
 - валидирует `shard-pack-manifest.json`
-- требует полного `compatibility` block в `shard-pack-manifest.json`: `coverage`, `questions`, `entities`, `edges`, `findings` обязательны, а `questions/entities/edges/findings` materialize-ятся массивами даже when empty
+- требует полного `semantic` block в `shard-pack-manifest.json`: `coverage`, `questions`, `entities`, `edges`, `findings` обязательны, а `questions/entities/edges/findings` materialize-ятся массивами даже when empty
 - требует global uniqueness для `citations[].claim_ids` в assembled staged final set; provider должен формировать `claim_id` как semantic stem + shard slug и добавлять deterministic numeric suffix при остаточной коллизии
-- collect runtime до schema-validate normalizes только один legacy compatibility drift: malformed manifest-only `add_doc_artifact` для `shard-pack-manifest.json` отбрасывается, потому что repair materialize-ится через `write_root`, а не через public `changeset`
+- collect runtime до финальной validation может выполнять только explicit repair rules для path normalization и draft-root reconcile; semantic stdout repair отсутствует
 - выполняет runtime `init.step1.collect`/`refresh.step1.collect` отдельно для каждой canonical domain card (`charter/cards/domains/*`)
-- materialize-ит отдельный raw taskrun на каждый домен в `reports/taskruns/*-step1-collect-domain-<domain>.json`
+- materialize-ит отдельный `runtime-execution.json` на каждый shard/domain under `reports/taskruns/<run_id>/...`
 - для sharded runtime ведёт shard-summary state machine `pending | checkpointed | succeeded | failed`; raw per-shard taskrun materialize-ится до `apply`, чтобы restart recovery мог replay-ить shard из persisted artifact
-- internal shard-summary contract: `taskrun_path` обязателен для `checkpointed/succeeded` item
-- materialize-ит raw compatibility taskruns и shard summaries в `reports/taskruns/*`
-- извлекает compatibility snapshot для derived `model/*`/semantic guards
-- обновляет derived compatibility `model/*`
+- internal shard-summary contract: `taskrun_path` обязателен для `checkpointed/succeeded` item и должен ссылаться на persisted `runtime-execution.json`
+- materialize-ит raw runtime execution metadata и shard summaries в `reports/taskruns/*`
+- извлекает semantic snapshot из manifests/verdicts для derived `model/*`/semantic guards
+- обновляет derived `model/*`
 - enrich существующие `charter/cards/domains/*` и `charter/cards/teams/*` через детерминированную секцию `## Derived (ACP Step1)`:
   - related model IDs / findings / questions
   - coverage missing summary
@@ -255,11 +239,11 @@ Outputs:
 - staged final docs в `reports/taskruns/<run_id>/staging/final/`
 - `final-run-index.json`
 - `citation-index.json`
-- staged compatibility `model/*` для legacy readers и diagram builders
+- staged derived `model/*` для diagram builders и deterministic projections
 
 Step 2 policy:
 - domain outputs и финальные analysis/proposal surfaces собираются как authored/staged docs-first set из shard packs
-- orchestrator compiler допускается только как compatibility fallback для отсутствующих canonical surfaces
+- orchestrator compiler допускается только как deterministic renderer/materializer для technical derived surfaces
 - `model/*` и диаграммы остаются derived layer
 - если evidence incomplete, staged reports materialize-ятся с incomplete banner, но не promote-ятся без validator `PASS`
 
@@ -274,14 +258,9 @@ Inputs:
 Primary runtime output:
 - `validator-verdict.json`
 
-Compatibility output:
-- optional `TaskResult` findings/questions/coverage deltas for semantic compatibility layer
-
 Orchestrator applies:
-- нормализует top-level `questions`/`coverage` в canonical representation
 - для sharded runtime replay-ит persisted `succeeded/checkpointed` shard taskruns без повторного provider execution; `checkpointed` shard повторно `apply`-ится, `succeeded` shard только восстанавливает orchestrator in-memory state
-- нормализует top-level `questions`/`coverage` deltas в canonical representation
-- пересобирает staged final set после compatibility deltas
+- пересобирает staged final set после validator verdict
 - валидирует `validator-verdict.json`
 - блокирует promotion при verdict != `PASS` или при broken staged indexes
 - validator может править только index/reference/technical issues внутри validator scope; смысл authored docs не переписывается wholesale
@@ -304,7 +283,7 @@ Outputs:
 - `proposals/<proposal-id>/RFC.md`
 - `proposals/<proposal-id>/migration-checklist.md`
 
-> В MVP proposals формируются без write-file операции в TaskResult; primary path — runtime-authored staged docs, compiler допускается только как compatibility fallback.
+> В MVP proposals формируются только через runtime-authored staged docs; compiler допускается только как deterministic renderer/materializer для derived technical outputs.
 
 ## Iteration changelog (MVP)
 - На каждую итерацию orchestrator формирует:
@@ -353,7 +332,7 @@ Outputs:
 
 Inputs:
 - persisted Step 1 shard manifests / authored docs
-- compatibility snapshot из collect artifacts
+- semantic snapshot из collect artifacts
 
 Primary runtime output:
 - `asis-draft-manifest.json`

@@ -77,8 +77,8 @@ func TestDocFirstStageThenPromoteFlow(t *testing.T) {
 		t.Fatalf("expected PASS verdict, got %q", verdict.Verdict)
 	}
 
-	if len(finalIndex.Compatibility.Entities) == 0 {
-		t.Fatalf("expected compatibility entities in final run index")
+	if len(finalIndex.Semantic.Entities) == 0 {
+		t.Fatalf("expected semantic entities in final run index")
 	}
 	entityFiles, entityGlobErr := filepath.Glob(filepath.Join(ws.Path, "model", "entities", "*.yaml"))
 	if entityGlobErr != nil {
@@ -114,8 +114,8 @@ func TestDocFirstValidatorFailBlocksPromotionInBestEffort(t *testing.T) {
 	if info.Status != RunStatusFailed {
 		t.Fatalf("expected failed status, got %s", info.Status)
 	}
-	if info.ErrorCode != runErrorCodePartialFailed {
-		t.Fatalf("expected error_code %q, got %q", runErrorCodePartialFailed, info.ErrorCode)
+	if info.ErrorCode != "" {
+		t.Fatalf("expected empty error_code for validator verdict failure, got %q", info.ErrorCode)
 	}
 
 	finalIndex := readRunFinalRunIndex(t, ws.Path, info.RunID)

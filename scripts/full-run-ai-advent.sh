@@ -483,6 +483,16 @@ copy_if_exists() {
   fi
 }
 
+copy_tree_if_exists() {
+  local src="$1"
+  local dst="$2"
+  if [[ -d "$src" ]]; then
+    mkdir -p "$(dirname "$dst")"
+    rm -rf "$dst"
+    cp -R "$src" "$dst"
+  fi
+}
+
 snapshot_run_artifacts() {
   local run_id="$1"
   local runtime="$2"
@@ -497,8 +507,8 @@ snapshot_run_artifacts() {
   copy_if_exists "$workspace_path/reports/findings/findings.md" "$dst/reports/findings/findings.md"
   copy_if_exists "$workspace_path/reports/coverage/summary.md" "$dst/reports/coverage/summary.md"
   copy_if_exists "$workspace_path/reports/coverage/open-questions.md" "$dst/reports/coverage/open-questions.md"
-  copy_if_exists "$workspace_path/reports/taskruns/${run_id}.json" "$dst/reports/taskruns/${run_id}.json"
   copy_if_exists "$workspace_path/reports/taskruns/${run_id}-quality.json" "$dst/reports/taskruns/${run_id}-quality.json"
+  copy_tree_if_exists "$workspace_path/reports/taskruns/${run_id}" "$dst/reports/taskruns/${run_id}"
   for taskrun_json in "$workspace_path/reports/taskruns/${run_id}-"*.json; do
     if [[ -f "$taskrun_json" ]]; then
       copy_if_exists "$taskrun_json" "$dst/reports/taskruns/$(basename "$taskrun_json")"
@@ -542,20 +552,19 @@ def metric(name: str) -> int:
     return 0
 
 signal = metric('signal_score')
-changeset = metric('changeset_ops')
-findings = metric('findings_added')
+entities = metric('semantic_entities')
+edges = metric('semantic_edges')
+findings = metric('findings_count')
 questions = metric('questions_count')
 coverage_observed = metric('coverage_observed')
 coverage_missing = metric('coverage_missing')
 warnings = metric('warnings_count')
-entity_upserts = metric('entity_upserts')
-edge_upserts = metric('edge_upserts')
 
 runtime_blob = ",".join(str(item) for item in runtime_versions)
 runtime_lower = runtime_blob.lower()
 mock_flag = 1 if ('mock' in runtime_lower or 'fake' in runtime_lower) else 0
 
-signal_components = changeset + findings + questions + coverage_observed + coverage_missing + entity_upserts + edge_upserts
+signal_components = entities + edges + findings + questions + coverage_observed + coverage_missing
 zero_signal = 1 if signal_components == 0 else 0
 
 domain_collect_steps = 0
@@ -569,7 +578,8 @@ status = str(payload.get('status', ''))
 print("\t".join([
     status,
     str(signal),
-    str(changeset),
+    str(entities),
+    str(edges),
     str(findings),
     str(questions),
     str(coverage_observed),
@@ -688,11 +698,13 @@ if len(question_texts) != len(set(question_texts)):
     sys.exit(5)
 
 critical_marker = "semantic_guard: critical_off_topic_drift in refresh.step1.collect"
-taskrun_glob = os.path.join(workspace, "reports", "taskruns", f"{run_id}-refresh-step1-collect-*.json")
-for taskrun_path in sorted(glob.glob(taskrun_glob)):
+taskrun_glob = os.path.join(workspace, "reports", "taskruns", run_id, "**", "runtime-execution.json")
+for taskrun_path in sorted(glob.glob(taskrun_glob, recursive=True)):
     try:
         payload = json.load(open(taskrun_path, encoding="utf-8"))
     except Exception:
+        continue
+    if str(payload.get("step_id") or "").strip() != "refresh.step1.collect":
         continue
     warnings = payload.get("warnings") or []
     if any(critical_marker in str(item) for item in warnings):
@@ -813,9 +825,9 @@ run_cli_pipeline() {
   local metrics
   metrics="$(quality_metrics "$quality_path")"
 
-  local quality_status signal_score changeset findings questions coverage_observed coverage_missing warnings
+  local quality_status signal_score semantic_entities semantic_edges findings questions coverage_observed coverage_missing warnings
   local domain_collect_steps mock_flag zero_signal runtime_versions
-  IFS=$'\t' read -r quality_status signal_score changeset findings questions coverage_observed coverage_missing warnings domain_collect_steps mock_flag zero_signal runtime_versions <<<"$metrics"
+  IFS=$'\t' read -r quality_status signal_score semantic_entities semantic_edges findings questions coverage_observed coverage_missing warnings domain_collect_steps mock_flag zero_signal runtime_versions <<<"$metrics"
 
   if [[ "$quality_status" != "succeeded" ]]; then
     die "quality summary status is not succeeded for run $run_id: $quality_status"
@@ -846,7 +858,7 @@ run_cli_pipeline() {
   snapshot_run_artifacts "$run_id" "$runtime_label" "$pipeline" "$iteration" "$workspace_path"
 
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$signal_score" "$changeset" "$findings" "$questions" "$coverage_observed" "$coverage_missing" "$warnings" "$runtime_versions" "$quality_path" "$output_path" >> "$RUN_RESULTS_TSV"
+    "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$signal_score" "$semantic_entities" "$semantic_edges" "$findings" "$questions" "$coverage_observed" "$coverage_missing" "$warnings" "$runtime_versions" "$quality_path" "$output_path" >> "$RUN_RESULTS_TSV"
 
   LAST_SIGNAL="$signal_score"
   return 0
@@ -962,10 +974,10 @@ write_summary() {
     if [[ ! -s "$RUN_RESULTS_TSV" ]]; then
       echo "- no completed runs recorded"
     else
-      echo "| iteration | runtime_mode | runtime_provider | pipeline | run_id | status | signal | changeset | findings | questions | cov_obs | cov_missing | warnings |"
-      echo "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
-      while IFS=$'\t' read -r iter runtime_mode runtime_provider pipeline run_id status signal changeset findings questions cov_obs cov_missing warnings _runtime_versions _quality_path _run_log; do
-        echo "| $iter | $runtime_mode | $runtime_provider | $pipeline | $run_id | $status | $signal | $changeset | $findings | $questions | $cov_obs | $cov_missing | $warnings |"
+      echo "| iteration | runtime_mode | runtime_provider | pipeline | run_id | status | signal | entities | edges | findings | questions | cov_obs | cov_missing | warnings |"
+      echo "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+      while IFS=$'\t' read -r iter runtime_mode runtime_provider pipeline run_id status signal entities edges findings questions cov_obs cov_missing warnings _runtime_versions _quality_path _run_log; do
+        echo "| $iter | $runtime_mode | $runtime_provider | $pipeline | $run_id | $status | $signal | $entities | $edges | $findings | $questions | $cov_obs | $cov_missing | $warnings |"
       done < "$RUN_RESULTS_TSV"
     fi
     echo

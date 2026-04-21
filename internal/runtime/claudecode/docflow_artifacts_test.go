@@ -35,8 +35,8 @@ func TestFakeRunnerWritesShardPackManifestWhenWriteRootProvided(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run fake collect: %v", err)
 	}
-	if len(result.TaskResult.Changeset) == 0 {
-		t.Fatalf("expected collect changeset")
+	if result.Execution.TaskID != "task-collect" {
+		t.Fatalf("expected runtime execution metadata for collect task")
 	}
 
 	manifestRaw, err := os.ReadFile(filepath.Join(writeRoot, "shard-pack-manifest.json"))
@@ -52,6 +52,9 @@ func TestFakeRunnerWritesShardPackManifestWhenWriteRootProvided(t *testing.T) {
 	}
 	if len(manifest.Citations) == 0 {
 		t.Fatalf("expected citations in manifest")
+	}
+	if len(manifest.Semantic.Entities) == 0 {
+		t.Fatalf("expected semantic entities in manifest")
 	}
 }
 
@@ -79,15 +82,15 @@ func TestFakeRunnerWritesValidatorVerdictWhenWriteRootProvided(t *testing.T) {
 		Workspace:    workspace,
 		WriteRoot:    writeRoot,
 		ArtifactRoot: "reports/taskruns/run-1/validator",
-		AgentRole:    "validator",
+		AgentRole:    "validator-findings",
 		RepoScopes:   []string{"payments-service"},
 		StartedAtUTC: time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
 		t.Fatalf("run fake findings: %v", err)
 	}
-	if len(result.TaskResult.Changeset) == 0 {
-		t.Fatalf("expected findings changeset")
+	if result.Execution.TaskID != "task-findings" {
+		t.Fatalf("expected runtime execution metadata for findings task")
 	}
 
 	verdictRaw, err := os.ReadFile(filepath.Join(writeRoot, "validator-verdict.json"))
@@ -103,5 +106,8 @@ func TestFakeRunnerWritesValidatorVerdictWhenWriteRootProvided(t *testing.T) {
 	}
 	if len(verdict.CheckedPaths) == 0 {
 		t.Fatalf("expected checked paths in verdict")
+	}
+	if len(verdict.Findings) == 0 {
+		t.Fatalf("expected findings in verdict")
 	}
 }

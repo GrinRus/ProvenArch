@@ -18,7 +18,7 @@ func TestStepSpecificPolicyDefinesSharedDraftOnlyObligationsForStep0(t *testing.
 		`Do NOT delegate to agent/subagent helpers.`,
 		`Do NOT use todo_write-style planning or long plan narration.`,
 		`constitution-draft.json must use the runtime draft manifest contract exactly; legacy constitution schemas are forbidden.`,
-		`Default TaskResult template for this step is changeset: []; do not invent synthetic upsert_entity operations for draft-only output.`,
+		`This is a draft-only step; do not invent semantic entities, edges, findings, or questions on stdout.`,
 	}
 	for _, needle := range required {
 		if !strings.Contains(policy, needle) {
@@ -50,7 +50,7 @@ func TestDocFirstFilesystemPolicyDefinesSharedCollectRepairSurface(t *testing.T)
 		`Write ONLY inside write_root.`,
 		`After the first filesystem write inside write_root, stop broad repository exploration; only minimal manifest/JSON repair is allowed afterwards.`,
 		`After writing shard-pack-manifest.json, do NOT continue broad list_directory/read_file sweeps across repo roots.`,
-		`If authored docs already exist in write_root, respond immediately with the final TaskResult JSON object.`,
+		`If authored docs and shard-pack-manifest.json already exist in write_root, stop and exit successfully.`,
 		`documents[].path MUST be artifact_root-relative only`,
 	}
 	for _, needle := range required {
@@ -64,8 +64,8 @@ func TestCollectArtifactRepairHintsBanLegacyRepairSurface(t *testing.T) {
 	t.Parallel()
 
 	hints := strings.Join(CollectArtifactRepairHints("manifest drift"), "\n")
-	if !strings.Contains(hints, `Do NOT describe shard-pack-manifest.json repair via add_doc_artifact; repair the file in write_root and return "changeset": [].`) {
-		t.Fatalf("expected collect repair hints to ban legacy add_doc_artifact repair surface, got:\n%s", hints)
+	if !strings.Contains(hints, `Repair mode is artifact-only: do not invent extra repository file reads/writes after authored docs already exist.`) {
+		t.Fatalf("expected collect repair hints to ban extra repair writes outside the artifact-only surface, got:\n%s", hints)
 	}
 }
 
@@ -81,8 +81,8 @@ func TestDraftArtifactRepairHintsBanLegacyRepairSurface(t *testing.T) {
 	}
 
 	hints := strings.Join(DraftArtifactRepairHints(task, nil), "\n")
-	if !strings.Contains(hints, `Do NOT describe draft manifest repair via add_doc_artifact when the draft manifest already describes the publish surface.`) {
-		t.Fatalf("expected draft repair hints to ban legacy add_doc_artifact repair surface, got:\n%s", hints)
+	if !strings.Contains(hints, `Repair mode is draft-only: do not invent extra repository file reads/writes after draft files already exist.`) {
+		t.Fatalf("expected draft repair hints to ban extra repair writes outside the draft-only surface, got:\n%s", hints)
 	}
 }
 

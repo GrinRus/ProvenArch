@@ -87,7 +87,7 @@ func TestParseShardPackManifestRejectsUnknownCitationReference(t *testing.T) {
     }
   ],
   "citations": [],
-  "compatibility": {
+  "semantic": {
     "coverage": {"observed": [], "missing": [], "notes": []},
     "questions": [],
     "entities": [],
@@ -117,7 +117,7 @@ func TestParseFinalRunIndexRejectsBrokenTopicReference(t *testing.T) {
   "topics": [
     {"id": "domain.payments", "document_ids": ["doc.missing"]}
   ],
-  "compatibility": {
+  "semantic": {
     "coverage": {"observed": [], "missing": [], "notes": []},
     "questions": [],
     "entities": [],
@@ -164,7 +164,7 @@ func TestParseShardPackManifestRejectsForbiddenCanonicalPath(t *testing.T) {
       "document_ids": ["doc.forbidden"]
     }
   ],
-  "compatibility": {
+  "semantic": {
     "coverage": {"observed": [], "missing": [], "notes": []},
     "questions": [],
     "entities": [],
@@ -211,7 +211,7 @@ func TestParseShardPackManifestRejectsEscapingDocumentPath(t *testing.T) {
       "document_ids": ["doc.escape"]
     }
   ],
-  "compatibility": {
+  "semantic": {
     "coverage": {"observed": [], "missing": [], "notes": []},
     "questions": [],
     "entities": [],
@@ -258,7 +258,7 @@ func TestParseShardPackManifestRejectsWorkspaceRelativeDocumentPath(t *testing.T
       "document_ids": ["doc.iac"]
     }
   ],
-  "compatibility": {
+  "semantic": {
     "coverage": {"observed": [], "missing": [], "notes": []},
     "questions": [],
     "entities": [],
@@ -306,7 +306,7 @@ func TestParseShardPackManifestRejectsDuplicatedArtifactRootDocumentPath(t *test
       "document_ids": ["doc.payments"]
     }
   ],
-  "compatibility": {
+  "semantic": {
     "coverage": {"observed": [], "missing": [], "notes": []},
     "questions": [],
     "entities": [],

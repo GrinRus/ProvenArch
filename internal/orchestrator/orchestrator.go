@@ -1112,15 +1112,14 @@ type pipelineExecution struct {
 	finalRunIndex            *contracts.FinalRunIndex
 	citationIndex            *contracts.CitationIndex
 	validatorVerdict         *contracts.ValidatorVerdict
-	compatibilityBase        *contracts.CompatibilitySnapshot
+	semanticBase             *contracts.SemanticSnapshot
 }
 
 type runtimeTaskExecution struct {
 	Task             acpruntime.Task
 	RuntimeName      string
 	RuntimeVersion   string
-	RawJSON          []byte
-	Normalized       contracts.TaskResult
+	Execution        contracts.RuntimeExecution
 	Apply            model.ApplyReport
 	ShardManifest    *contracts.ShardPackManifest
 	ValidatorVerdict *contracts.ValidatorVerdict
@@ -1128,8 +1127,8 @@ type runtimeTaskExecution struct {
 
 type runtimePreparedExecution struct {
 	Task           acpruntime.Task
-	Normalized     contracts.TaskResult
-	NormalizedRaw  []byte
+	Execution      contracts.RuntimeExecution
+	ExecutionRaw   []byte
 	RuntimeName    string
 	RuntimeVersion string
 }
@@ -1354,26 +1353,25 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 		}
 		aggregatedApply := model.ApplyReport{}
 		aggregatedQuestions := make([]contracts.Question, 0, len(executions))
+		aggregatedFindings := make([]contracts.Finding, 0, len(executions))
 		summaries := make([]string, 0, len(executions))
 		for _, execution := range executions {
 			if execution.ShardManifest != nil {
-				aggregatedApply.UpsertedEntities += len(execution.ShardManifest.Compatibility.Entities)
-				aggregatedApply.UpsertedEdges += len(execution.ShardManifest.Compatibility.Edges)
-				aggregatedApply.Findings = append(aggregatedApply.Findings, execution.ShardManifest.Compatibility.Findings...)
-				aggregatedQuestions = append(aggregatedQuestions, execution.ShardManifest.Compatibility.Questions...)
-			} else {
-				aggregatedApply.UpsertedEntities += execution.Apply.UpsertedEntities
-				aggregatedApply.UpsertedEdges += execution.Apply.UpsertedEdges
-				aggregatedApply.Findings = append(aggregatedApply.Findings, execution.Apply.Findings...)
-				aggregatedQuestions = append(aggregatedQuestions, execution.Normalized.Questions...)
+				aggregatedApply.UpsertedEntities += len(execution.ShardManifest.Semantic.Entities)
+				aggregatedApply.UpsertedEdges += len(execution.ShardManifest.Semantic.Edges)
+				aggregatedQuestions = append(aggregatedQuestions, execution.ShardManifest.Semantic.Questions...)
+				aggregatedFindings = append(aggregatedFindings, execution.ShardManifest.Semantic.Findings...)
 			}
-			summary := strings.TrimSpace(execution.Normalized.Summary)
+			summary := ""
+			if execution.ShardManifest != nil {
+				summary = strings.TrimSpace(execution.ShardManifest.Summary)
+			}
 			if summary != "" {
 				summaries = append(summaries, summary)
 			}
 		}
 		questionIDs := extractQuestionIDs(aggregatedQuestions)
-		findingIDs := extractFindingIDs(aggregatedApply.Findings)
+		findingIDs := extractFindingIDs(aggregatedFindings)
 		domainTotalShards := outcome.PlannedShards
 		if domainTotalShards == 0 {
 			domainTotalShards = len(executions) + domainFailedShards
@@ -1438,6 +1436,11 @@ func (e *pipelineExecution) executeRuntimeTask(
 ) (runtimeTaskExecution, error) {
 	prepared, err := e.runRuntimeTaskNormalized(ctx, stepID, taskSuffix, repoScopes, pathScopes, domainID, shardID)
 	if err != nil {
+		return runtimeTaskExecution{}, err
+	}
+	executionPath := runtimeExecutionMetadataPathForTask(prepared.Task)
+	executionLabel := strings.TrimSpace(stepID) + ".runtime-execution"
+	if err := e.persistRuntimeExecutionArtifact(executionPath, executionLabel, prepared.ExecutionRaw); err != nil {
 		return runtimeTaskExecution{}, err
 	}
 	return e.applyRuntimeTaskExecution(stepID, domainID, prepared)
@@ -1568,36 +1571,26 @@ func (e *pipelineExecution) runRuntimeTaskNormalized(
 		if errors.Is(taskCtx.Err(), context.DeadlineExceeded) {
 			err = fmt.Errorf("runtime task timeout after %ds: %w", int(e.runtimeStepTimeout.Seconds()), err)
 		}
+		if failedExecution, ok := runtimeExecutionFromFailure(task, resolvedProvider, err, e.clock().UTC()); ok {
+			failedExecutionLabel := strings.TrimSpace(stepID) + ".runtime-execution"
+			if raw, marshalErr := json.MarshalIndent(failedExecution, "", "  "); marshalErr != nil {
+				e.logWarn(stepID, domainID, "marshal failed runtime execution metadata failed", map[string]any{
+					"task_id": task.TaskID,
+					"error":   marshalErr.Error(),
+				})
+			} else if persistErr := e.persistRuntimeExecutionArtifact(runtimeExecutionMetadataPathForTask(task), failedExecutionLabel, raw); persistErr != nil {
+				e.logWarn(stepID, domainID, "persist failed runtime execution metadata failed", map[string]any{
+					"task_id": task.TaskID,
+					"error":   persistErr.Error(),
+				})
+			}
+		}
 		e.logError(stepID, domainID, "runtime task failed", runtimeFailureLogFields(task, err, "", ""))
 		return runtimePreparedExecution{}, err
 	}
-	if len(result.RawJSON) == 0 {
-		raw, marshalErr := json.MarshalIndent(result.TaskResult, "", "  ")
-		if marshalErr != nil {
-			return runtimePreparedExecution{}, fmt.Errorf("marshal taskresult for taskrun persistence: %w", marshalErr)
-		}
-		result.RawJSON = raw
-	}
-
-	parsed, err := contracts.ParseTaskResult(result.RawJSON)
-	if err != nil {
-		if isDraftOnlyRuntimeStep(stepID) {
-			if _, _, draftErr := validateRequiredRuntimeDraftArtifacts(task); draftErr != nil {
-				e.logError(stepID, domainID, "runtime draft artifact validation failed", map[string]any{
-					"task_id": task.TaskID,
-					"error":   strings.TrimSpace(draftErr.Error()),
-				})
-				err = fmt.Errorf("%w: required runtime draft artifacts invalid: %v", err, draftErr)
-			}
-		}
-		e.logError(stepID, domainID, "runtime task parse failed", runtimeFailureLogFields(task, err, result.Stdout, result.Stderr))
-		return runtimePreparedExecution{}, err
-	}
-	normalized := contracts.NormalizeTaskResult(parsed)
-	normalized = e.applySemanticGuards(stepID, domainID, task, normalized)
-	normalizedRaw, err := json.MarshalIndent(normalized, "", "  ")
-	if err != nil {
-		return runtimePreparedExecution{}, fmt.Errorf("marshal normalized taskresult: %w", err)
+	execution := contracts.NormalizeRuntimeExecution(result.Execution)
+	if strings.TrimSpace(execution.TaskID) == "" {
+		execution = acpruntime.NewExecution(task, resolvedProvider, "", "succeeded", e.clock().UTC(), nil)
 	}
 	if isDraftOnlyRuntimeStep(stepID) {
 		if _, _, draftErr := validateRequiredRuntimeDraftArtifacts(task); draftErr != nil {
@@ -1608,16 +1601,20 @@ func (e *pipelineExecution) runRuntimeTaskNormalized(
 			return runtimePreparedExecution{}, fmt.Errorf("runtime required draft artifacts invalid: %w", draftErr)
 		}
 	}
-	runtimeName := strings.TrimSpace(normalized.Meta.Runtime.Name)
-	runtimeVersion := strings.TrimSpace(normalized.Meta.Runtime.Version)
+	executionRaw, err := json.MarshalIndent(execution, "", "  ")
+	if err != nil {
+		return runtimePreparedExecution{}, fmt.Errorf("marshal runtime execution: %w", err)
+	}
+	runtimeName := strings.TrimSpace(execution.Provider)
+	runtimeVersion := strings.TrimSpace(execution.RuntimeVersion)
 	if runtimeName == "" {
-		runtimeName = "unknown"
+		runtimeName = string(resolvedProvider)
 	}
 
 	return runtimePreparedExecution{
 		Task:           task,
-		Normalized:     normalized,
-		NormalizedRaw:  normalizedRaw,
+		Execution:      execution,
+		ExecutionRaw:   executionRaw,
 		RuntimeName:    runtimeName,
 		RuntimeVersion: runtimeVersion,
 	}, nil
@@ -1628,8 +1625,8 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 	domainID string,
 	prepared runtimePreparedExecution,
 ) (runtimeTaskExecution, error) {
-	normalized := prepared.Normalized
 	task := prepared.Task
+	execution := prepared.Execution
 	runtimeName := prepared.RuntimeName
 	runtimeVersion := prepared.RuntimeVersion
 	runtimeKey := runtimeName
@@ -1638,8 +1635,8 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 	}
 	e.runtimeVersions[runtimeKey] = struct{}{}
 
-	if len(normalized.Warnings) > 0 {
-		for _, runtimeWarning := range normalized.Warnings {
+	if len(execution.Warnings) > 0 {
+		for _, runtimeWarning := range execution.Warnings {
 			warningText := strings.TrimSpace(runtimeWarning)
 			if warningText == "" {
 				continue
@@ -1656,12 +1653,7 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 	}
 
 	if strings.HasSuffix(stepID, "step1.collect") {
-		manifest, manifestRaw, err := loadShardPackManifestFromRoot(task.WriteRoot)
-		if err != nil {
-			if fallbackErr := claudecode.PersistCompatibilityDocflowArtifacts(task, normalized); fallbackErr == nil {
-				manifest, manifestRaw, err = loadShardPackManifestFromRoot(task.WriteRoot)
-			}
-		}
+		manifest, _, err := loadShardPackManifestFromRoot(task.WriteRoot)
 		if err != nil {
 			e.logError(stepID, domainID, "shard pack manifest load failed", map[string]any{
 				"task_id": task.TaskID,
@@ -1670,53 +1662,51 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 			return runtimeTaskExecution{}, err
 		}
 		e.shardPacks = append(e.shardPacks, manifest)
-		applyReport, err := e.store.ApplyChangeset(normalized)
+		applyReport, err := e.store.ApplySemanticSnapshot(contracts.SemanticSnapshot{
+			Entities: manifest.Semantic.Entities,
+			Edges:    manifest.Semantic.Edges,
+		})
 		if err != nil {
-			e.logError(stepID, domainID, "compatibility model apply failed", map[string]any{
+			e.logError(stepID, domainID, "semantic model apply failed", map[string]any{
 				"task_id": task.TaskID,
 				"error":   strings.TrimSpace(err.Error()),
 			})
 			return runtimeTaskExecution{}, err
 		}
-		if len(applyReport.DocArtifacts) > 0 {
-			docArtifacts, err := e.compiler.WriteDocArtifacts(applyReport.DocArtifacts)
-			if err != nil {
-				return runtimeTaskExecution{}, err
-			}
-			e.addArtifacts(toOrchestratorArtifacts(docArtifacts)...)
-		}
+		e.questions = mergeQuestions(e.questions, manifest.Semantic.Questions)
+		e.coverage = mergeCoverage(e.coverage, &manifest.Semantic.Coverage)
+		e.findings = mergeFindings(e.findings, manifest.Semantic.Findings)
 		manifestPath := path.Join(task.ArtifactRoot, shardPackManifestFile)
 		e.addArtifacts(Artifact{
 			Path:  manifestPath,
 			Kind:  "taskrun",
 			Label: "Shard Pack Manifest",
 		})
-		coverage := &manifest.Compatibility.Coverage
+		coverage := &manifest.Semantic.Coverage
 		e.runtimeStepMetrics = append(e.runtimeStepMetrics, runtimeStepQuality{
 			StepID:           stepID,
 			DomainID:         domainID,
 			RuntimeName:      runtimeName,
 			RuntimeVersion:   runtimeVersion,
 			RepoScopes:       append([]string(nil), task.RepoScopes...),
-			ChangesetOps:     len(manifest.Compatibility.Entities) + len(manifest.Compatibility.Edges) + len(manifest.Compatibility.Findings),
-			EntityUpserts:    len(manifest.Compatibility.Entities),
-			EdgeUpserts:      len(manifest.Compatibility.Edges),
-			FindingsAdded:    len(manifest.Compatibility.Findings),
-			QuestionsCount:   len(manifest.Compatibility.Questions),
+			SemanticEntities: len(manifest.Semantic.Entities),
+			SemanticEdges:    len(manifest.Semantic.Edges),
+			FindingsCount:    len(manifest.Semantic.Findings),
+			QuestionsCount:   len(manifest.Semantic.Questions),
 			CoverageObserved: countCoverageObserved(coverage),
 			CoverageMissing:  countCoverageMissing(coverage),
-			WarningsCount:    len(normalized.Warnings),
+			WarningsCount:    len(execution.Warnings),
 		})
 		e.logInfo(stepID, domainID, "runtime shard pack collected", map[string]any{
-			"task_id":         task.TaskID,
-			"shard_id":        task.ShardID,
-			"artifact_root":   task.ArtifactRoot,
-			"manifest_path":   manifestPath,
-			"documents":       len(manifest.Documents),
-			"citations":       len(manifest.Citations),
-			"compat_entities": len(manifest.Compatibility.Entities),
-			"compat_edges":    len(manifest.Compatibility.Edges),
-			"compat_findings": len(manifest.Compatibility.Findings),
+			"task_id":           task.TaskID,
+			"shard_id":          task.ShardID,
+			"artifact_root":     task.ArtifactRoot,
+			"manifest_path":     manifestPath,
+			"documents":         len(manifest.Documents),
+			"citations":         len(manifest.Citations),
+			"semantic_entities": len(manifest.Semantic.Entities),
+			"semantic_edges":    len(manifest.Semantic.Edges),
+			"semantic_findings": len(manifest.Semantic.Findings),
 		})
 		e.logInfo(stepID, domainID, "runtime task completed", map[string]any{
 			"task_id":         task.TaskID,
@@ -1728,38 +1718,27 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 			Task:           task,
 			RuntimeName:    runtimeName,
 			RuntimeVersion: runtimeVersion,
-			RawJSON:        manifestRaw,
-			Normalized:     normalized,
+			Execution:      execution,
 			Apply:          applyReport,
 			ShardManifest:  &manifest,
 		}, nil
 	}
 
 	if strings.HasSuffix(stepID, "step3.findings") {
-		newFindings := make([]contracts.Finding, 0, len(normalized.Changeset))
-		for _, op := range normalized.Changeset {
-			if op.Op == "add_finding" && op.Finding != nil {
-				newFindings = append(newFindings, *op.Finding)
-			}
-		}
-		e.questions = mergeQuestions(e.questions, normalized.Questions)
-		e.coverage = mergeCoverage(e.coverage, normalized.Coverage)
-		e.findings = mergeFindings(e.findings, newFindings)
-		if err := e.assembleStagedDocFlow(); err != nil {
-			return runtimeTaskExecution{}, err
-		}
-
-		verdict, verdictRaw, err := loadValidatorVerdictFromRoot(task.WriteRoot)
-		if err != nil {
-			if fallbackErr := claudecode.PersistCompatibilityDocflowArtifacts(task, normalized); fallbackErr == nil {
-				verdict, verdictRaw, err = loadValidatorVerdictFromRoot(task.WriteRoot)
-			}
-		}
+		verdict, _, err := loadValidatorVerdictFromRoot(task.WriteRoot)
 		if err != nil {
 			e.logError(stepID, domainID, "validator verdict load failed", map[string]any{
 				"task_id": task.TaskID,
 				"error":   strings.TrimSpace(err.Error()),
 			})
+			return runtimeTaskExecution{}, err
+		}
+		if verdict.Verdict != "PASS" {
+			return runtimeTaskExecution{}, fmt.Errorf("validator verdict is %s", verdict.Verdict)
+		}
+		e.questions = mergeQuestions(e.questions, verdict.Questions)
+		e.findings = mergeFindings(e.findings, verdict.Findings)
+		if err := e.assembleStagedDocFlow(); err != nil {
 			return runtimeTaskExecution{}, err
 		}
 		if err := e.repairValidatorScopedArtifacts(&verdict); err != nil {
@@ -1770,9 +1749,6 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 			return runtimeTaskExecution{}, err
 		}
 		issues := e.validateStagedArtifacts()
-		if verdict.Verdict != "PASS" {
-			return runtimeTaskExecution{}, fmt.Errorf("validator verdict is %s", verdict.Verdict)
-		}
 		if len(issues) > 0 {
 			return runtimeTaskExecution{}, fmt.Errorf("validator detected staged artifact issues: %s", issues[0].Message)
 		}
@@ -1788,11 +1764,11 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 			RuntimeName:      runtimeName,
 			RuntimeVersion:   runtimeVersion,
 			RepoScopes:       append([]string(nil), task.RepoScopes...),
-			FindingsAdded:    len(newFindings),
-			QuestionsCount:   len(normalized.Questions),
-			CoverageObserved: countCoverageObserved(normalized.Coverage),
-			CoverageMissing:  countCoverageMissing(normalized.Coverage),
-			WarningsCount:    len(normalized.Warnings),
+			FindingsCount:    len(verdict.Findings),
+			QuestionsCount:   len(verdict.Questions),
+			CoverageObserved: countCoverageObserved(e.coverage),
+			CoverageMissing:  countCoverageMissing(e.coverage),
+			WarningsCount:    len(execution.Warnings),
 		})
 		e.logInfo(stepID, domainID, "validator verdict accepted", map[string]any{
 			"task_id":     task.TaskID,
@@ -1809,102 +1785,40 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 			Task:             task,
 			RuntimeName:      runtimeName,
 			RuntimeVersion:   runtimeVersion,
-			RawJSON:          verdictRaw,
-			Normalized:       normalized,
+			Execution:        execution,
 			ValidatorVerdict: &verdict,
 		}, nil
 	}
 
 	if isDraftOnlyRuntimeStep(stepID) {
-		applyReport := synthesizeApplyReport(normalized)
 		e.runtimeStepMetrics = append(e.runtimeStepMetrics, runtimeStepQuality{
-			StepID:           stepID,
-			DomainID:         domainID,
-			RuntimeName:      runtimeName,
-			RuntimeVersion:   runtimeVersion,
-			RepoScopes:       append([]string(nil), task.RepoScopes...),
-			ChangesetOps:     len(normalized.Changeset),
-			QuestionsCount:   len(normalized.Questions),
-			CoverageObserved: countCoverageObserved(normalized.Coverage),
-			CoverageMissing:  countCoverageMissing(normalized.Coverage),
-			WarningsCount:    len(normalized.Warnings),
+			StepID:         stepID,
+			DomainID:       domainID,
+			RuntimeName:    runtimeName,
+			RuntimeVersion: runtimeVersion,
+			RepoScopes:     append([]string(nil), task.RepoScopes...),
+			WarningsCount:  len(execution.Warnings),
 		})
 		e.logInfo(stepID, domainID, "runtime draft step completed", map[string]any{
-			"task_id":          task.TaskID,
-			"shard_id":         task.ShardID,
-			"runtime_name":     runtimeName,
-			"runtime_version":  runtimeVersion,
-			"changeset_ops":    len(normalized.Changeset),
-			"questions_count":  len(normalized.Questions),
-			"coverage_missing": countCoverageMissing(normalized.Coverage),
-			"warnings_count":   len(normalized.Warnings),
+			"task_id":         task.TaskID,
+			"shard_id":        task.ShardID,
+			"runtime_name":    runtimeName,
+			"runtime_version": runtimeVersion,
+			"warnings_count":  len(execution.Warnings),
 		})
 		return runtimeTaskExecution{
 			Task:           task,
 			RuntimeName:    runtimeName,
 			RuntimeVersion: runtimeVersion,
-			RawJSON:        prepared.NormalizedRaw,
-			Normalized:     normalized,
-			Apply:          applyReport,
+			Execution:      execution,
 		}, nil
 	}
-
-	applyReport, err := e.store.ApplyChangeset(normalized)
-	if err != nil {
-		e.logError(stepID, domainID, "model apply failed", map[string]any{
-			"task_id": task.TaskID,
-			"error":   strings.TrimSpace(err.Error()),
-		})
-		return runtimeTaskExecution{}, err
-	}
-	if len(applyReport.DocArtifacts) > 0 {
-		docArtifacts, err := e.compiler.WriteDocArtifacts(applyReport.DocArtifacts)
-		if err != nil {
-			return runtimeTaskExecution{}, err
-		}
-		e.addArtifacts(toOrchestratorArtifacts(docArtifacts)...)
-	}
-
-	e.questions = mergeQuestions(e.questions, normalized.Questions)
-	e.coverage = mergeCoverage(e.coverage, normalized.Coverage)
-	e.findings = append(e.findings, applyReport.Findings...)
-	e.runtimeStepMetrics = append(e.runtimeStepMetrics, runtimeStepQuality{
-		StepID:           stepID,
-		DomainID:         domainID,
-		RuntimeName:      runtimeName,
-		RuntimeVersion:   runtimeVersion,
-		RepoScopes:       append([]string(nil), task.RepoScopes...),
-		ChangesetOps:     len(normalized.Changeset),
-		EntityUpserts:    applyReport.UpsertedEntities,
-		EdgeUpserts:      applyReport.UpsertedEdges,
-		FindingsAdded:    len(applyReport.Findings),
-		QuestionsCount:   len(normalized.Questions),
-		CoverageObserved: countCoverageObserved(normalized.Coverage),
-		CoverageMissing:  countCoverageMissing(normalized.Coverage),
-		WarningsCount:    len(normalized.Warnings),
-	})
-	e.logInfo(stepID, domainID, "runtime task completed", map[string]any{
-		"task_id":          task.TaskID,
-		"shard_id":         task.ShardID,
-		"repo_scope":       task.RepoScope,
-		"runtime_name":     runtimeName,
-		"runtime_version":  runtimeVersion,
-		"changeset_ops":    len(normalized.Changeset),
-		"entity_upserts":   applyReport.UpsertedEntities,
-		"edge_upserts":     applyReport.UpsertedEdges,
-		"findings_added":   len(applyReport.Findings),
-		"questions_count":  len(normalized.Questions),
-		"coverage_missing": countCoverageMissing(normalized.Coverage),
-		"warnings_count":   len(normalized.Warnings),
-	})
 
 	return runtimeTaskExecution{
 		Task:           task,
 		RuntimeName:    runtimeName,
 		RuntimeVersion: runtimeVersion,
-		RawJSON:        prepared.NormalizedRaw,
-		Normalized:     normalized,
-		Apply:          applyReport,
+		Execution:      execution,
 	}, nil
 }
 
@@ -1913,258 +1827,71 @@ func (e *pipelineExecution) replayRuntimeTaskExecution(
 	domainID string,
 	prepared runtimePreparedExecution,
 ) (runtimeTaskExecution, error) {
-	normalized := prepared.Normalized
-	task := prepared.Task
-	runtimeName := prepared.RuntimeName
-	runtimeVersion := prepared.RuntimeVersion
-	runtimeKey := runtimeName
-	if runtimeVersion != "" {
-		runtimeKey = runtimeName + "@" + runtimeVersion
-	}
-	e.runtimeVersions[runtimeKey] = struct{}{}
-
-	if len(normalized.Warnings) > 0 {
-		for _, runtimeWarning := range normalized.Warnings {
-			warningText := strings.TrimSpace(runtimeWarning)
-			if warningText == "" {
-				continue
-			}
-			prefixedWarning := warningText
-			if strings.TrimSpace(stepID) != "" {
-				prefixedWarning = fmt.Sprintf("%s: %s", stepID, warningText)
-			}
-			e.addWarning(prefixedWarning)
-			e.logWarn(stepID, domainID, "runtime warning", map[string]any{
-				"warning": warningText,
-			})
-		}
-	}
-
-	if strings.HasSuffix(stepID, "step1.collect") {
-		manifest, manifestRaw, err := loadShardPackManifestFromRoot(task.WriteRoot)
-		if err != nil {
-			if fallbackErr := claudecode.PersistCompatibilityDocflowArtifacts(task, normalized); fallbackErr == nil {
-				manifest, manifestRaw, err = loadShardPackManifestFromRoot(task.WriteRoot)
-			}
-		}
-		if err != nil {
-			e.logError(stepID, domainID, "shard pack manifest load failed", map[string]any{
-				"task_id": task.TaskID,
-				"error":   strings.TrimSpace(err.Error()),
-			})
-			return runtimeTaskExecution{}, err
-		}
-		e.shardPacks = append(e.shardPacks, manifest)
-		manifestPath := path.Join(task.ArtifactRoot, shardPackManifestFile)
-		e.addArtifacts(Artifact{
-			Path:  manifestPath,
-			Kind:  "taskrun",
-			Label: "Shard Pack Manifest",
-		})
-		coverage := &manifest.Compatibility.Coverage
-		e.runtimeStepMetrics = append(e.runtimeStepMetrics, runtimeStepQuality{
-			StepID:           stepID,
-			DomainID:         domainID,
-			RuntimeName:      runtimeName,
-			RuntimeVersion:   runtimeVersion,
-			RepoScopes:       append([]string(nil), task.RepoScopes...),
-			ChangesetOps:     len(manifest.Compatibility.Entities) + len(manifest.Compatibility.Edges) + len(manifest.Compatibility.Findings),
-			EntityUpserts:    len(manifest.Compatibility.Entities),
-			EdgeUpserts:      len(manifest.Compatibility.Edges),
-			FindingsAdded:    len(manifest.Compatibility.Findings),
-			QuestionsCount:   len(manifest.Compatibility.Questions),
-			CoverageObserved: countCoverageObserved(coverage),
-			CoverageMissing:  countCoverageMissing(coverage),
-			WarningsCount:    len(normalized.Warnings),
-		})
-		e.logInfo(stepID, domainID, "runtime shard pack replayed from persisted taskrun", map[string]any{
-			"task_id":         task.TaskID,
-			"shard_id":        task.ShardID,
-			"artifact_root":   task.ArtifactRoot,
-			"manifest_path":   manifestPath,
-			"documents":       len(manifest.Documents),
-			"citations":       len(manifest.Citations),
-			"compat_entities": len(manifest.Compatibility.Entities),
-			"compat_edges":    len(manifest.Compatibility.Edges),
-			"compat_findings": len(manifest.Compatibility.Findings),
-		})
-		e.logInfo(stepID, domainID, "runtime task replayed from persisted taskrun", map[string]any{
-			"task_id":          task.TaskID,
-			"shard_id":         task.ShardID,
-			"repo_scope":       task.RepoScope,
-			"runtime_name":     runtimeName,
-			"runtime_version":  runtimeVersion,
-			"changeset_ops":    len(normalized.Changeset),
-			"entity_upserts":   len(manifest.Compatibility.Entities),
-			"edge_upserts":     len(manifest.Compatibility.Edges),
-			"findings_added":   len(manifest.Compatibility.Findings),
-			"questions_count":  len(manifest.Compatibility.Questions),
-			"coverage_missing": countCoverageMissing(coverage),
-			"warnings_count":   len(normalized.Warnings),
-		})
-		return runtimeTaskExecution{
-			Task:           task,
-			RuntimeName:    runtimeName,
-			RuntimeVersion: runtimeVersion,
-			RawJSON:        manifestRaw,
-			Normalized:     normalized,
-			Apply:          synthesizeApplyReport(normalized),
-			ShardManifest:  &manifest,
-		}, nil
-	}
-
-	if isDraftOnlyRuntimeStep(stepID) {
-		applyReport := synthesizeApplyReport(normalized)
-		e.runtimeStepMetrics = append(e.runtimeStepMetrics, runtimeStepQuality{
-			StepID:           stepID,
-			DomainID:         domainID,
-			RuntimeName:      runtimeName,
-			RuntimeVersion:   runtimeVersion,
-			RepoScopes:       append([]string(nil), task.RepoScopes...),
-			ChangesetOps:     len(normalized.Changeset),
-			QuestionsCount:   len(normalized.Questions),
-			CoverageObserved: countCoverageObserved(normalized.Coverage),
-			CoverageMissing:  countCoverageMissing(normalized.Coverage),
-			WarningsCount:    len(normalized.Warnings),
-		})
-		e.logInfo(stepID, domainID, "runtime draft step replayed from persisted taskrun", map[string]any{
-			"task_id":          task.TaskID,
-			"shard_id":         task.ShardID,
-			"runtime_name":     runtimeName,
-			"runtime_version":  runtimeVersion,
-			"changeset_ops":    len(normalized.Changeset),
-			"questions_count":  len(normalized.Questions),
-			"coverage_missing": countCoverageMissing(normalized.Coverage),
-			"warnings_count":   len(normalized.Warnings),
-		})
-		return runtimeTaskExecution{
-			Task:           task,
-			RuntimeName:    runtimeName,
-			RuntimeVersion: runtimeVersion,
-			RawJSON:        prepared.NormalizedRaw,
-			Normalized:     normalized,
-			Apply:          applyReport,
-		}, nil
-	}
-
-	applyReport := synthesizeApplyReport(normalized)
-	if len(applyReport.DocArtifacts) > 0 {
-		docArtifacts, err := e.compiler.WriteDocArtifacts(applyReport.DocArtifacts)
-		if err != nil {
-			return runtimeTaskExecution{}, err
-		}
-		e.addArtifacts(toOrchestratorArtifacts(docArtifacts)...)
-	}
-
-	e.questions = mergeQuestions(e.questions, normalized.Questions)
-	e.coverage = mergeCoverage(e.coverage, normalized.Coverage)
-	e.findings = append(e.findings, applyReport.Findings...)
-	e.runtimeStepMetrics = append(e.runtimeStepMetrics, runtimeStepQuality{
-		StepID:           stepID,
-		DomainID:         domainID,
-		RuntimeName:      runtimeName,
-		RuntimeVersion:   runtimeVersion,
-		RepoScopes:       append([]string(nil), task.RepoScopes...),
-		ChangesetOps:     len(normalized.Changeset),
-		EntityUpserts:    applyReport.UpsertedEntities,
-		EdgeUpserts:      applyReport.UpsertedEdges,
-		FindingsAdded:    len(applyReport.Findings),
-		QuestionsCount:   len(normalized.Questions),
-		CoverageObserved: countCoverageObserved(normalized.Coverage),
-		CoverageMissing:  countCoverageMissing(normalized.Coverage),
-		WarningsCount:    len(normalized.Warnings),
-	})
-	e.logInfo(stepID, domainID, "runtime task replayed from persisted taskrun", map[string]any{
-		"task_id":          task.TaskID,
-		"shard_id":         task.ShardID,
-		"repo_scope":       task.RepoScope,
-		"runtime_name":     runtimeName,
-		"runtime_version":  runtimeVersion,
-		"changeset_ops":    len(normalized.Changeset),
-		"entity_upserts":   applyReport.UpsertedEntities,
-		"edge_upserts":     applyReport.UpsertedEdges,
-		"findings_added":   len(applyReport.Findings),
-		"questions_count":  len(normalized.Questions),
-		"coverage_missing": countCoverageMissing(normalized.Coverage),
-		"warnings_count":   len(normalized.Warnings),
-	})
-
-	return runtimeTaskExecution{
-		Task:           task,
-		RuntimeName:    runtimeName,
-		RuntimeVersion: runtimeVersion,
-		RawJSON:        prepared.NormalizedRaw,
-		Normalized:     normalized,
-		Apply:          applyReport,
-	}, nil
+	return e.applyRuntimeTaskExecution(stepID, domainID, prepared)
 }
 
-func loadPreparedExecutionFromPersistedTaskRun(raw []byte) (runtimePreparedExecution, error) {
-	parsed, err := contracts.ParseTaskResult(raw)
+func loadPreparedExecutionFromPersistedRuntimeExecution(raw []byte) (runtimePreparedExecution, error) {
+	execution, err := contracts.ParseRuntimeExecution(raw)
 	if err != nil {
 		return runtimePreparedExecution{}, err
 	}
-	normalized := contracts.NormalizeTaskResult(parsed)
-	startedAt, err := time.Parse(time.RFC3339, strings.TrimSpace(normalized.Meta.StartedAt))
+	startedAt, err := time.Parse(time.RFC3339, strings.TrimSpace(execution.StartedAt))
 	if err != nil {
-		return runtimePreparedExecution{}, fmt.Errorf("parse persisted task start time: %w", err)
+		return runtimePreparedExecution{}, fmt.Errorf("parse persisted runtime execution start time: %w", err)
 	}
-	runtimeName := strings.TrimSpace(normalized.Meta.Runtime.Name)
+	runtimeName := strings.TrimSpace(execution.Provider)
 	if runtimeName == "" {
 		runtimeName = "unknown"
 	}
 	return runtimePreparedExecution{
 		Task: acpruntime.Task{
-			TaskID:       normalized.Meta.TaskID,
-			RunID:        normalized.Meta.RunID,
-			StepID:       normalized.Meta.StepID,
-			ShardID:      normalized.Meta.ShardID,
-			Workspace:    normalized.Meta.Workspace,
-			RepoScope:    normalized.Meta.RepoScope,
-			RepoScopes:   append([]string(nil), normalized.Meta.RepoScopes...),
-			PathScopes:   append([]string(nil), normalized.Meta.PathScopes...),
-			StartedAtUTC: startedAt.UTC(),
+			TaskID:         execution.TaskID,
+			RunID:          execution.RunID,
+			StepID:         execution.StepID,
+			ShardID:        execution.ShardID,
+			DomainID:       execution.DomainID,
+			ArtifactRoot:   execution.ArtifactRoot,
+			WriteRoot:      execution.WriteRoot,
+			DraftFinalRoot: execution.DraftFinalRoot,
+			RepoScope:      execution.RepoScope,
+			RepoScopes:     append([]string(nil), execution.RepoScopes...),
+			PathScopes:     append([]string(nil), execution.PathScopes...),
+			StartedAtUTC:   startedAt.UTC(),
 		},
-		Normalized:     normalized,
-		NormalizedRaw:  append([]byte(nil), raw...),
+		Execution:      execution,
+		ExecutionRaw:   append([]byte(nil), raw...),
 		RuntimeName:    runtimeName,
-		RuntimeVersion: strings.TrimSpace(normalized.Meta.Runtime.Version),
+		RuntimeVersion: strings.TrimSpace(execution.RuntimeVersion),
 	}, nil
 }
 
-func synthesizeApplyReport(result contracts.TaskResult) model.ApplyReport {
-	report := model.ApplyReport{
-		RemappedIDs: map[string]string{},
+func runtimeExecutionFromFailure(task acpruntime.Task, fallbackProvider acpruntime.Provider, err error, finishedAt time.Time) (contracts.RuntimeExecution, bool) {
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		return contracts.RuntimeExecution{}, false
 	}
-	for _, op := range result.Changeset {
-		switch op.Op {
-		case "upsert_entity":
-			report.UpsertedEntities++
-		case "remove_entity":
-			report.RemovedEntities++
-		case "upsert_edge":
-			report.UpsertedEdges++
-		case "remove_edge":
-			report.RemovedEdges++
-		case "add_finding":
-			if op.Finding != nil {
-				report.Findings = append(report.Findings, *op.Finding)
-			}
-		case "add_doc_artifact":
-			if op.DocArtifact != nil {
-				report.DocArtifacts = append(report.DocArtifacts, *op.DocArtifact)
-			}
-		}
+	provider := runnerErr.Provider
+	if strings.TrimSpace(string(provider)) == "" {
+		provider = fallbackProvider
 	}
-	return report
+	status := "failed"
+	switch runnerErr.Code {
+	case acpruntime.ErrorCodeRuntimeTimeout:
+		status = "timeout"
+	case acpruntime.ErrorCodeRunCanceled:
+		status = "canceled"
+	}
+	execution := acpruntime.NewExecution(task, provider, "", status, finishedAt, nil)
+	execution.RawOutputRefs = runnerErr.RawOutputRefs
+	return contracts.NormalizeRuntimeExecution(execution), true
 }
 
-func (e *pipelineExecution) persistTaskRun(path string, label string, raw []byte) error {
+func (e *pipelineExecution) persistRuntimeExecutionArtifact(path string, label string, raw []byte) error {
 	if err := e.workspace.WriteFile(path, raw); err != nil {
 		return err
 	}
-	e.addArtifacts(Artifact{Path: path, Kind: "taskrun", Label: label})
-	e.logInfo(e.stepStatus.CurrentStep, "", "taskrun persisted", map[string]any{
+	e.addArtifacts(Artifact{Path: path, Kind: "runtime-execution", Label: label})
+	e.logInfo(e.stepStatus.CurrentStep, "", "runtime execution persisted", map[string]any{
 		"taskrun_path": path,
 		"label":        label,
 	})
@@ -2303,10 +2030,18 @@ func (e *pipelineExecution) runStepValidator(ctx context.Context, stepID string)
 		})
 		return nil
 	}
-
-	_, outcome, err := e.executeRuntimeTasksSharded(ctx, stepID, "", append([]string(nil), selectedScopes...), "")
+	execution, err := e.executeRuntimeTask(ctx, stepID, "validator-findings", append([]string(nil), selectedScopes...), []string{"."}, "", "")
+	outcome := runtimeShardOutcome{PlannedShards: 1}
+	if err != nil {
+		outcome.FailedShards = 1
+		e.recordRuntimeStepOutcome(stepID, outcome)
+		return err
+	}
+	if execution.ValidatorVerdict != nil {
+		outcome.SucceededShards = 1
+	}
 	e.recordRuntimeStepOutcome(stepID, outcome)
-	return err
+	return nil
 }
 
 func (e *pipelineExecution) runStepProposals(ctx context.Context, stepID string) error {
@@ -2411,18 +2146,6 @@ func (e *pipelineExecution) rewriteTerminalReports(status RunStatus) {
 		})
 	}
 
-	entities, entityErr := e.store.ListEntities()
-	edges, edgeErr := e.store.ListEdges()
-	if entityErr != nil {
-		logRewriteWarning("as-is.entities", entityErr)
-	} else if edgeErr != nil {
-		logRewriteWarning("as-is.edges", edgeErr)
-	} else if artifacts, err := e.compiler.CompileAsIs(entities, edges, renderCtx); err != nil {
-		logRewriteWarning("as-is", err)
-	} else {
-		e.addArtifacts(toOrchestratorArtifacts(artifacts)...)
-	}
-
 	if artifacts, err := e.compiler.WriteCoverage(e.coverage, e.questions, renderCtx); err != nil {
 		logRewriteWarning("coverage", err)
 	} else {
@@ -2431,12 +2154,6 @@ func (e *pipelineExecution) rewriteTerminalReports(status RunStatus) {
 
 	if artifacts, err := e.compiler.WriteFindings(e.findings, renderCtx); err != nil {
 		logRewriteWarning("findings", err)
-	} else {
-		e.addArtifacts(toOrchestratorArtifacts(artifacts)...)
-	}
-
-	if artifacts, err := e.compiler.WriteArchitectSummary(e.renderArchitectSummary(), renderCtx); err != nil {
-		logRewriteWarning("architect-summary", err)
 	} else {
 		e.addArtifacts(toOrchestratorArtifacts(artifacts)...)
 	}
@@ -2455,11 +2172,6 @@ func (e *pipelineExecution) rewriteTerminalReports(status RunStatus) {
 		e.addArtifacts(toOrchestratorArtifacts(artifacts)...)
 	}
 
-	if artifacts, err := e.compiler.CompileProposals(e.findings, renderCtx); err != nil {
-		logRewriteWarning("proposals", err)
-	} else {
-		e.addArtifacts(toOrchestratorArtifacts(artifacts)...)
-	}
 }
 
 func stepIDsForPipeline(pipeline Pipeline) []string {
@@ -3176,416 +2888,19 @@ func entitySemanticText(entity *contracts.Entity) string {
 	return strings.Join(parts, " ")
 }
 
-func (e *pipelineExecution) applySemanticGuards(stepID string, domainID string, task acpruntime.Task, normalized contracts.TaskResult) contracts.TaskResult {
-	if stepID == "refresh.step1.collect" {
-		filtered := make([]contracts.Operation, 0, len(normalized.Changeset))
-		droppedByType := map[string]int{}
-		droppedOffTopicEntities := 0
-		droppedOffTopicQuestions := 0
-		droppedOffTopicTerms := []string{}
-		offTopicGuard := shouldApplyOffTopicGuard(task)
-		for _, op := range normalized.Changeset {
-			if op.Op == "upsert_entity" && op.Entity != nil && shouldFilterRefreshCollectEntityType(op.Entity.Type) {
-				droppedByType[op.Entity.Type]++
-				continue
-			}
-			if offTopicGuard && op.Op == "upsert_entity" && op.Entity != nil {
-				hits := detectOffTopicTerms(entitySemanticText(op.Entity))
-				if len(hits) > 0 {
-					droppedOffTopicEntities++
-					droppedOffTopicTerms = append(droppedOffTopicTerms, hits...)
-					continue
-				}
-			}
-			filtered = append(filtered, op)
-		}
-		if len(droppedByType) > 0 {
-			normalized.Changeset = filtered
-			parts := make([]string, 0, len(droppedByType))
-			for typ, count := range droppedByType {
-				parts = append(parts, fmt.Sprintf("%s=%d", strings.TrimSpace(typ), count))
-			}
-			sort.Strings(parts)
-			normalized.Warnings = append(
-				normalized.Warnings,
-				fmt.Sprintf("semantic_guard: dropped refresh.step1.collect entity types [%s]", strings.Join(parts, ", ")),
-			)
-		} else {
-			normalized.Changeset = filtered
-		}
-		if offTopicGuard {
-			questions := make([]contracts.Question, 0, len(normalized.Questions))
-			for _, question := range normalized.Questions {
-				hits := detectOffTopicTerms(question.Text)
-				if len(hits) > 0 {
-					droppedOffTopicQuestions++
-					droppedOffTopicTerms = append(droppedOffTopicTerms, hits...)
-					continue
-				}
-				questions = append(questions, question)
-			}
-			normalized.Questions = questions
-		}
-		if droppedOffTopicEntities > 0 || droppedOffTopicQuestions > 0 {
-			normalized.Warnings = append(
-				normalized.Warnings,
-				fmt.Sprintf(
-					"semantic_guard: dropped refresh.step1.collect off-topic artifacts entities=%d questions=%d terms=[%s]",
-					droppedOffTopicEntities,
-					droppedOffTopicQuestions,
-					strings.Join(dedupeSemanticStrings(droppedOffTopicTerms), ", "),
-				),
-			)
-			if len(normalized.Changeset) == 0 {
-				normalized.Warnings = append(
-					normalized.Warnings,
-					"semantic_guard: critical_off_topic_drift in refresh.step1.collect",
-				)
-			}
-		}
-	}
-
-	if stepID == "refresh.step3.findings" {
-		normalized = e.ensureOwnerGapFallback(domainID, task, normalized)
-		normalized = e.ensureCrossRepoEdgeFallback(domainID, task, normalized)
-	}
-
-	return e.applyEvidencePathSemanticGuard(stepID, task, normalized)
-}
-
-func (e *pipelineExecution) ensureOwnerGapFallback(domainID string, task acpruntime.Task, normalized contracts.TaskResult) contracts.TaskResult {
-	hasFinding := false
-	for _, op := range normalized.Changeset {
-		if op.Op == "add_finding" && op.Finding != nil {
-			hasFinding = true
-			break
-		}
-	}
-	if hasFinding {
-		return normalized
-	}
-	if !isOwnerMappingsMissing(normalized.Coverage) {
-		return normalized
-	}
-
-	entities, err := e.store.ListEntities()
-	if err != nil {
-		normalized.Warnings = append(normalized.Warnings, fmt.Sprintf("semantic_guard: owner-gap check failed: %v", err))
-		return normalized
-	}
-	scopeSet := map[string]struct{}{}
-	for _, scope := range task.RepoScopes {
-		scope = strings.TrimSpace(scope)
-		if scope == "" {
-			continue
-		}
-		scopeSet[scope] = struct{}{}
-	}
-
-	var candidate contracts.Entity
-	found := false
-	for _, entity := range entities {
-		if entity.Type != "service" {
-			continue
-		}
-		if strings.TrimSpace(entity.OwnerTeamID) != "" {
-			continue
-		}
-		if len(scopeSet) > 0 {
-			attributes, ok := entity.Attributes.(map[string]any)
-			if !ok {
-				continue
-			}
-			repoScope, _ := attributes["repo_scope"].(string)
-			repoScope = strings.TrimSpace(repoScope)
-			if repoScope == "" {
-				continue
-			}
-			if _, ok := scopeSet[repoScope]; !ok {
-				continue
-			}
-		}
-		candidate = entity
-		found = true
-		break
-	}
-	if !found {
-		repo := "unknown"
-		if len(task.RepoScopes) > 0 && strings.TrimSpace(task.RepoScopes[0]) != "" {
-			repo = strings.TrimSpace(task.RepoScopes[0])
-		}
-		relatedID := "scope." + slugutil.Slugify(repo)
-		if relatedID == "scope." {
-			relatedID = "scope.unknown"
-		}
-		findingID := "finding.missing-owner." + slugutil.Slugify(relatedID) + ".refresh"
-		if strings.TrimSpace(domainID) != "" {
-			findingID = findingID + "." + slugutil.Slugify(domainID)
-		}
-		normalized.Changeset = append(normalized.Changeset, contracts.Operation{
-			Op: "add_finding",
-			Finding: &contracts.Finding{
-				ID:          findingID,
-				Severity:    "medium",
-				Title:       "Missing owner mapping",
-				Description: fmt.Sprintf("owner mappings are unresolved for repo scope %q", repo),
-				RuleID:      "rule.owner.required",
-				RelatedIDs:  []string{relatedID},
-				Provenance: contracts.Provenance{
-					Kind:       "inference",
-					Confidence: 0.62,
-					Evidence: []contracts.Evidence{
-						{
-							Repo: repo,
-							Path: "README.md",
-						},
-					},
-				},
-			},
-		})
-		normalized.Warnings = append(
-			normalized.Warnings,
-			fmt.Sprintf("semantic_guard: added fallback owner-mapping finding %q", findingID),
-		)
-		return normalized
-	}
-
-	evidence := append([]contracts.Evidence(nil), candidate.Provenance.Evidence...)
-	if len(evidence) == 0 {
-		repo := "unknown"
-		if len(task.RepoScopes) > 0 && strings.TrimSpace(task.RepoScopes[0]) != "" {
-			repo = strings.TrimSpace(task.RepoScopes[0])
-		}
-		evidence = []contracts.Evidence{
-			{
-				Repo: repo,
-				Path: "README.md",
-			},
-		}
-	}
-	relatedID := strings.TrimSpace(candidate.ID)
-	if relatedID == "" {
-		relatedID = "svc.unknown"
-	}
-	findingID := "finding.missing-owner." + slugutil.Slugify(relatedID) + ".refresh"
-	if strings.TrimSpace(domainID) != "" {
-		findingID = findingID + "." + slugutil.Slugify(domainID)
-	}
-	normalized.Changeset = append(normalized.Changeset, contracts.Operation{
-		Op: "add_finding",
-		Finding: &contracts.Finding{
-			ID:          findingID,
-			Severity:    "medium",
-			Title:       "Missing owner mapping",
-			Description: fmt.Sprintf("owner_team_id is not confirmed for service %q", relatedID),
-			RuleID:      "rule.owner.required",
-			RelatedIDs:  []string{relatedID},
-			Provenance: contracts.Provenance{
-				Kind:       "inference",
-				Confidence: 0.66,
-				Evidence:   evidence,
-			},
-		},
-	})
-	normalized.Warnings = append(
-		normalized.Warnings,
-		fmt.Sprintf("semantic_guard: added fallback owner-mapping finding %q", findingID),
-	)
+func (e *pipelineExecution) applySemanticGuards(stepID string, domainID string, task acpruntime.Task, normalized contracts.SemanticSnapshot) contracts.SemanticSnapshot {
 	return normalized
 }
 
-func (e *pipelineExecution) ensureCrossRepoEdgeFallback(domainID string, task acpruntime.Task, normalized contracts.TaskResult) contracts.TaskResult {
-	scopes := normalizeOrderedUniqueStrings(task.RepoScopes)
-	if len(scopes) < 2 {
-		selectedScopes := normalizeOrderedUniqueStrings(e.selectedRepoScopes)
-		if len(selectedScopes) >= 2 {
-			scopes = selectedScopes
-		}
-	}
-	if len(scopes) < 2 {
-		return normalized
-	}
-	for _, op := range normalized.Changeset {
-		if op.Op == "upsert_edge" && op.Edge != nil {
-			return normalized
-		}
-	}
-
-	type serviceCandidate struct {
-		ID       string
-		Repo     string
-		Evidence contracts.Evidence
-	}
-
-	scopeSet := map[string]struct{}{}
-	for _, scope := range scopes {
-		scopeSet[scope] = struct{}{}
-	}
-	repoRoots := declaredRepoRoots(e.workspace)
-
-	entities, err := e.store.ListEntities()
-	if err != nil {
-		normalized.Warnings = append(normalized.Warnings, fmt.Sprintf("semantic_guard: cross-repo fallback edge skipped: %v", err))
-		return normalized
-	}
-
-	candidates := make([]serviceCandidate, 0, len(entities))
-	for _, entity := range entities {
-		if strings.TrimSpace(entity.Type) != "service" {
-			continue
-		}
-		entityID := strings.TrimSpace(entity.ID)
-		if entityID == "" {
-			continue
-		}
-		repoScope := entityRepoScope(entity, task)
-		if repoScope == "" {
-			continue
-		}
-		if _, ok := scopeSet[repoScope]; !ok {
-			continue
-		}
-		evidence, ok := fallbackEvidenceForEntity(entity, repoScope, e.workspace.Path, repoRoots)
-		if !ok {
-			continue
-		}
-		candidates = append(candidates, serviceCandidate{
-			ID:       entityID,
-			Repo:     repoScope,
-			Evidence: evidence,
-		})
-	}
-	if len(candidates) < 2 {
-		normalized.Warnings = append(normalized.Warnings, "semantic_guard: cross-repo fallback edge skipped: insufficient multi-scope service entities with valid evidence")
-		return normalized
-	}
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].Repo == candidates[j].Repo {
-			return candidates[i].ID < candidates[j].ID
-		}
-		return candidates[i].Repo < candidates[j].Repo
-	})
-
-	from := candidates[0]
-	toIndex := -1
-	for idx := 1; idx < len(candidates); idx++ {
-		if candidates[idx].Repo != from.Repo {
-			toIndex = idx
-			break
-		}
-	}
-	if toIndex == -1 {
-		normalized.Warnings = append(normalized.Warnings, "semantic_guard: cross-repo fallback edge skipped: candidates resolved to one repo_scope")
-		return normalized
-	}
-	to := candidates[toIndex]
-
-	edgeID := "edge.cross-repo." + slugutil.Slugify(from.ID) + ".depends-on." + slugutil.Slugify(to.ID)
-	if strings.TrimSpace(domainID) != "" {
-		edgeID += "." + slugutil.Slugify(domainID)
-	}
-	normalized.Changeset = append(normalized.Changeset, contracts.Operation{
-		Op: "upsert_edge",
-		Edge: &contracts.Edge{
-			ID:   edgeID,
-			Type: "depends_on",
-			From: from.ID,
-			To:   to.ID,
-			Name: "Cross-repo dependency",
-			Attributes: map[string]any{
-				"inferred":        true,
-				"guard_added":     true,
-				"from_repo_scope": from.Repo,
-				"to_repo_scope":   to.Repo,
-			},
-			Provenance: contracts.Provenance{
-				Kind:       "inference",
-				Confidence: 0.61,
-				Evidence: []contracts.Evidence{
-					from.Evidence,
-					to.Evidence,
-				},
-			},
-		},
-	})
-	normalized.Warnings = append(
-		normalized.Warnings,
-		fmt.Sprintf(
-			"semantic_guard: added fallback cross-repo edge %q from=%q(%s) to=%q(%s)",
-			edgeID,
-			from.ID,
-			from.Repo,
-			to.ID,
-			to.Repo,
-		),
-	)
+func (e *pipelineExecution) ensureOwnerGapFallback(domainID string, task acpruntime.Task, normalized contracts.SemanticSnapshot) contracts.SemanticSnapshot {
 	return normalized
 }
 
-func (e *pipelineExecution) applyEvidencePathSemanticGuard(stepID string, task acpruntime.Task, normalized contracts.TaskResult) contracts.TaskResult {
-	if stepID != "refresh.step1.collect" && stepID != "refresh.step3.findings" {
-		return normalized
-	}
+func (e *pipelineExecution) ensureCrossRepoEdgeFallback(domainID string, task acpruntime.Task, normalized contracts.SemanticSnapshot) contracts.SemanticSnapshot {
+	return normalized
+}
 
-	repoRoots := declaredRepoRoots(e.workspace)
-	removedTotal := 0
-	downgradedTotal := 0
-
-	for idx := range normalized.Changeset {
-		op := &normalized.Changeset[idx]
-		switch op.Op {
-		case "upsert_entity":
-			if op.Entity == nil {
-				continue
-			}
-			defaultRepo := entityRepoScope(*op.Entity, task)
-			removed, downgraded := sanitizeProvenanceEvidence(&op.Entity.Provenance, defaultRepo, e.workspace.Path, repoRoots)
-			removedTotal += removed
-			if downgraded {
-				downgradedTotal++
-			}
-		case "upsert_edge":
-			if op.Edge == nil {
-				continue
-			}
-			defaultRepo := ""
-			if len(task.RepoScopes) > 0 {
-				defaultRepo = strings.TrimSpace(task.RepoScopes[0])
-			}
-			removed, downgraded := sanitizeProvenanceEvidence(&op.Edge.Provenance, defaultRepo, e.workspace.Path, repoRoots)
-			removedTotal += removed
-			if downgraded {
-				downgradedTotal++
-			}
-		case "add_finding":
-			if op.Finding == nil {
-				continue
-			}
-			defaultRepo := ""
-			if len(task.RepoScopes) > 0 {
-				defaultRepo = strings.TrimSpace(task.RepoScopes[0])
-			}
-			removed, downgraded := sanitizeProvenanceEvidence(&op.Finding.Provenance, defaultRepo, e.workspace.Path, repoRoots)
-			removedTotal += removed
-			if downgraded {
-				downgradedTotal++
-			}
-		}
-	}
-
-	if removedTotal > 0 {
-		normalized.Warnings = append(
-			normalized.Warnings,
-			fmt.Sprintf("semantic_guard: removed invalid evidence paths count=%d", removedTotal),
-		)
-	}
-	if downgradedTotal > 0 {
-		normalized.Warnings = append(
-			normalized.Warnings,
-			fmt.Sprintf("semantic_guard: downgraded observation provenance to inference count=%d", downgradedTotal),
-		)
-	}
-
+func (e *pipelineExecution) applyEvidencePathSemanticGuard(stepID string, task acpruntime.Task, normalized contracts.SemanticSnapshot) contracts.SemanticSnapshot {
 	return normalized
 }
 

@@ -11,7 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestApplyChangesetWritesEntityAndEdgeFiles(t *testing.T) {
+func TestApplySemanticSnapshotWritesEntityAndEdgeFiles(t *testing.T) {
 	t.Parallel()
 
 	ws := writeWorkspaceRoot(t)
@@ -20,55 +20,46 @@ func TestApplyChangesetWritesEntityAndEdgeFiles(t *testing.T) {
 	}
 
 	store := NewStore(ws)
-	result := contracts.TaskResult{
-		Changeset: []contracts.Operation{
+	report, err := store.ApplySemanticSnapshot(contracts.SemanticSnapshot{
+		Entities: []contracts.Entity{
 			{
-				Op: "upsert_entity",
-				Entity: &contracts.Entity{
-					ID:   "team.platform",
-					Type: "team",
-					Name: "Platform",
-					Provenance: contracts.Provenance{
-						Kind:       "assertion",
-						Confidence: 1,
-					},
+				ID:   "team.platform",
+				Type: "team",
+				Name: "Platform",
+				Provenance: contracts.Provenance{
+					Kind:       "assertion",
+					Confidence: 1,
 				},
 			},
 			{
-				Op: "upsert_entity",
-				Entity: &contracts.Entity{
-					ID:          "svc.payments",
-					Type:        "service",
-					Name:        "Payments Service",
-					OwnerTeamID: "team.platform",
-					Provenance: contracts.Provenance{
-						Kind:       "observation",
-						Confidence: 0.9,
-						Evidence: []contracts.Evidence{
-							{Repo: "payments-service", Path: "README.md"},
-						},
-					},
-				},
-			},
-			{
-				Op: "upsert_edge",
-				Edge: &contracts.Edge{
-					ID:   "edge.svc.payments.calls.svc.users",
-					Type: "calls",
-					From: "svc.payments",
-					To:   "svc.users",
-					Provenance: contracts.Provenance{
-						Kind:       "inference",
-						Confidence: 0.6,
+				ID:          "svc.payments",
+				Type:        "service",
+				Name:        "Payments Service",
+				OwnerTeamID: "team.platform",
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.9,
+					Evidence: []contracts.Evidence{
+						{Repo: "payments-service", Path: "README.md"},
 					},
 				},
 			},
 		},
-	}
-
-	report, err := store.ApplyChangeset(result)
+		Edges: []contracts.Edge{
+			{
+				ID:   "edge.svc.payments.calls.svc.users",
+				Type: "calls",
+				From: "svc.payments",
+				To:   "svc.users",
+				Provenance: contracts.Provenance{
+					Kind:       "inference",
+					Confidence: 0.6,
+				},
+			},
+		},
+	})
 	if err != nil {
-		t.Fatalf("apply changeset: %v", err)
+		t.Fatalf("apply semantic snapshot: %v", err)
 	}
 	if report.UpsertedEntities != 2 {
 		t.Fatalf("expected 2 upserted entities, got %d", report.UpsertedEntities)
@@ -83,7 +74,7 @@ func TestApplyChangesetWritesEntityAndEdgeFiles(t *testing.T) {
 	}
 }
 
-func TestApplyChangesetRejectsUnknownOwnerTeam(t *testing.T) {
+func TestApplySemanticSnapshotRejectsUnknownOwnerTeam(t *testing.T) {
 	t.Parallel()
 
 	ws := writeWorkspaceRoot(t)
@@ -92,21 +83,18 @@ func TestApplyChangesetRejectsUnknownOwnerTeam(t *testing.T) {
 	}
 
 	store := NewStore(ws)
-	_, err := store.ApplyChangeset(contracts.TaskResult{
-		Changeset: []contracts.Operation{
+	_, err := store.ApplySemanticSnapshot(contracts.SemanticSnapshot{
+		Entities: []contracts.Entity{
 			{
-				Op: "upsert_entity",
-				Entity: &contracts.Entity{
-					ID:          "svc.payments",
-					Type:        "service",
-					Name:        "Payments Service",
-					OwnerTeamID: "team.unknown",
-					Provenance: contracts.Provenance{
-						Kind:       "observation",
-						Confidence: 0.9,
-						Evidence: []contracts.Evidence{
-							{Repo: "payments-service", Path: "README.md"},
-						},
+				ID:          "svc.payments",
+				Type:        "service",
+				Name:        "Payments Service",
+				OwnerTeamID: "team.unknown",
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.9,
+					Evidence: []contracts.Evidence{
+						{Repo: "payments-service", Path: "README.md"},
 					},
 				},
 			},
@@ -120,7 +108,7 @@ func TestApplyChangesetRejectsUnknownOwnerTeam(t *testing.T) {
 	}
 }
 
-func TestApplyChangesetRemapsCollidingEntityIDs(t *testing.T) {
+func TestApplySemanticSnapshotRemapsCollidingEntityIDs(t *testing.T) {
 	t.Parallel()
 
 	ws := writeWorkspaceRoot(t)
@@ -129,20 +117,17 @@ func TestApplyChangesetRemapsCollidingEntityIDs(t *testing.T) {
 	}
 	store := NewStore(ws)
 
-	_, err := store.ApplyChangeset(contracts.TaskResult{
-		Changeset: []contracts.Operation{
+	_, err := store.ApplySemanticSnapshot(contracts.SemanticSnapshot{
+		Entities: []contracts.Entity{
 			{
-				Op: "upsert_entity",
-				Entity: &contracts.Entity{
-					ID:   "svc.orders",
-					Type: "service",
-					Name: "Orders",
-					Provenance: contracts.Provenance{
-						Kind:       "observation",
-						Confidence: 0.9,
-						Evidence: []contracts.Evidence{
-							{Repo: "orders-api", Path: "README.md"},
-						},
+				ID:   "svc.orders",
+				Type: "service",
+				Name: "Orders",
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.9,
+					Evidence: []contracts.Evidence{
+						{Repo: "orders-api", Path: "README.md"},
 					},
 				},
 			},
@@ -152,20 +137,17 @@ func TestApplyChangesetRemapsCollidingEntityIDs(t *testing.T) {
 		t.Fatalf("seed entity: %v", err)
 	}
 
-	report, err := store.ApplyChangeset(contracts.TaskResult{
-		Changeset: []contracts.Operation{
+	report, err := store.ApplySemanticSnapshot(contracts.SemanticSnapshot{
+		Entities: []contracts.Entity{
 			{
-				Op: "upsert_entity",
-				Entity: &contracts.Entity{
-					ID:   "svc.orders",
-					Type: "service",
-					Name: "Orders V2",
-					Provenance: contracts.Provenance{
-						Kind:       "observation",
-						Confidence: 0.9,
-						Evidence: []contracts.Evidence{
-							{Repo: "orders-monolith", Path: "README.md"},
-						},
+				ID:   "svc.orders",
+				Type: "service",
+				Name: "Orders V2",
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.9,
+					Evidence: []contracts.Evidence{
+						{Repo: "orders-monolith", Path: "README.md"},
 					},
 				},
 			},
@@ -196,7 +178,7 @@ func TestApplyChangesetRemapsCollidingEntityIDs(t *testing.T) {
 	}
 }
 
-func TestApplyChangesetKeepsCanonicalIDOnRenameInSameRepo(t *testing.T) {
+func TestApplySemanticSnapshotKeepsCanonicalIDOnRenameInSameRepo(t *testing.T) {
 	t.Parallel()
 
 	ws := writeWorkspaceRoot(t)
@@ -205,20 +187,17 @@ func TestApplyChangesetKeepsCanonicalIDOnRenameInSameRepo(t *testing.T) {
 	}
 	store := NewStore(ws)
 
-	_, err := store.ApplyChangeset(contracts.TaskResult{
-		Changeset: []contracts.Operation{
+	_, err := store.ApplySemanticSnapshot(contracts.SemanticSnapshot{
+		Entities: []contracts.Entity{
 			{
-				Op: "upsert_entity",
-				Entity: &contracts.Entity{
-					ID:   "svc.payments",
-					Type: "service",
-					Name: "Payments Service",
-					Provenance: contracts.Provenance{
-						Kind:       "observation",
-						Confidence: 0.9,
-						Evidence: []contracts.Evidence{
-							{Repo: "payments-service", Path: "README.md"},
-						},
+				ID:   "svc.payments",
+				Type: "service",
+				Name: "Payments Service",
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.9,
+					Evidence: []contracts.Evidence{
+						{Repo: "payments-service", Path: "README.md"},
 					},
 				},
 			},
@@ -228,20 +207,17 @@ func TestApplyChangesetKeepsCanonicalIDOnRenameInSameRepo(t *testing.T) {
 		t.Fatalf("seed entity: %v", err)
 	}
 
-	report, err := store.ApplyChangeset(contracts.TaskResult{
-		Changeset: []contracts.Operation{
+	report, err := store.ApplySemanticSnapshot(contracts.SemanticSnapshot{
+		Entities: []contracts.Entity{
 			{
-				Op: "upsert_entity",
-				Entity: &contracts.Entity{
-					ID:   "svc.payments",
-					Type: "service",
-					Name: "Payments API",
-					Provenance: contracts.Provenance{
-						Kind:       "observation",
-						Confidence: 0.9,
-						Evidence: []contracts.Evidence{
-							{Repo: "payments-service", Path: "internal/api/server.go"},
-						},
+				ID:   "svc.payments",
+				Type: "service",
+				Name: "Payments API",
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.9,
+					Evidence: []contracts.Evidence{
+						{Repo: "payments-service", Path: "internal/api/server.go"},
 					},
 				},
 			},

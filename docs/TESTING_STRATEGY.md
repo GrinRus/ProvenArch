@@ -22,7 +22,7 @@
   - `schemas/final-run-index.schema.json`
   - `schemas/citation-index.schema.json`
   - `schemas/validator-verdict.schema.json`
-- compatibility `TaskResult` валидируется по `schemas/taskresult.schema.json`
+- persisted `runtime-execution.json` metadata и artifact-only step contracts проходят parse/semantic validation
 - examples и fixture cases должны парситься и проходить contract validation, где это ожидается
 
 ### Semantic validator tests
@@ -33,7 +33,7 @@
 
 ### Golden/regression tests
 - docs-first staged + promoted outputs (`reports/*`, `proposals/*`)
-- model store materialization как compatibility/derived layer
+- model store materialization как derived layer
 - diagrams/compat outputs как thin-code layer
 - deterministic comparisons against recorded golden outputs для `fake`/recorded baseline
 - hash-based snapshot compare against `fixtures/scenarios/*/golden/snapshot.sha256`
@@ -56,11 +56,9 @@
 ## 3) Обязательная структура test assets
 
 - `fixtures/workspace/` — manifest и validator cases
-- `fixtures/taskresult/` — raw и normalized TaskResult cases
 - `examples/*.example.json` + contract tests — docs-first fixtures (manifest/index/citation/verdict)
 - `fixtures/scenarios/<name>/workspace/` — central workspace inputs
 - `fixtures/scenarios/<name>/repos/<repo-name>/` — synthetic repos
-- `fixtures/scenarios/<name>/runner/` — recorded runtime payloads per step
 - `fixtures/scenarios/<name>/golden/` — expected deterministic snapshot (hash list) + fixture docs
 
 Baseline scenario set:
@@ -75,7 +73,7 @@ Baseline scenario set:
 - top-level `questions/coverage` canonicalize deterministically
 - legacy `add_question` / `set_coverage` rejected contract validation
 - `observation` without evidence rejected
-- `add_doc_artifact` не используется как content write path
+- semantic stdout payload не используется как content write path
 - `owner_team_id` должен ссылаться на существующий `team.<slug>`
 - stable ID normalization использует canonical slug rules
 - collision suffix `.repo-<repo-slug>` применяется детерминированно
@@ -153,9 +151,9 @@ Implemented additional jobs:
 - invalid `workspace.yaml`
 - valid docs-first contracts (`shard-pack-manifest`, `final-run-index`, `citation-index`, `validator-verdict`)
 - negative docs-first contract cases (missing citations, duplicate claim/topic ids, broken topic refs)
-- valid compatibility TaskResult
-- invalid legacy TaskResult operations (`add_question` / `set_coverage`)
-- invalid TaskResult with schema violations
+- valid persisted runtime execution metadata
+- invalid runtime execution metadata
+- invalid artifact contracts (`shard-pack-manifest`, `validator-verdict`, draft manifests)
 
 ### Semantic tests
 - duplicate repo names
@@ -166,7 +164,7 @@ Implemented additional jobs:
 
 ### Golden tests
 - stage-then-promote deterministic flow for canonical docs-first surfaces
-- derived compatibility `model/*` extraction determinism
+- derived `model/*` extraction determinism
 - stable slug normalization and collision handling
 - Step 4 changelog determinism
 
@@ -177,11 +175,11 @@ Implemented additional jobs:
 - unresolved domain/team becomes question/finding, not new card
 - deterministic Step 1 enrichment включает `evidence_refs` в domain/team cards
 - sharded runtime regression:
-  - step1/step3 materialize per-shard taskruns + shard-plan/shard-summary artifacts
+  - step1/step3 materialize runtime-execution metadata + shard-plan/shard-summary artifacts
   - shard-summary statuses cover `pending/checkpointed/succeeded/failed` and survive restart recovery
   - parallel scheduler keeps deterministic merge/apply order despite out-of-order shard completion
-  - TaskResult shard metadata (`meta.shard_id`, `meta.repo_scopes`, `meta.path_scopes`) сохраняется в persisted taskruns
-  - service restart recovery resumes same `run_id` from persisted shard artifacts without rerunning already persisted shard taskruns
+  - runtime execution metadata (`shard_id`, `repo_scopes`, `path_scopes`) сохраняется в persisted `runtime-execution.json`
+  - service restart recovery resumes same `run_id` from persisted shard artifacts without rerunning already persisted runtime executions
 
 ### Smoke tests
 - `acp run --workspace ... --pipeline init --runtime fake --non-interactive`
@@ -203,7 +201,7 @@ Implemented additional jobs:
   - log polling/append without duplicates
   - view toggle `line | line+fields`
   - mode toggle `event timeline | raw agent stream | all`
-  - quick action `Open taskrun artifact`
+  - quick action `Open runtime execution artifact`
 - UI results diagrams surface:
   - navigation `Results -> Diagrams`
   - diagram artifact listing and Mermaid preview render
@@ -220,7 +218,7 @@ Implemented additional jobs:
   - signal handling: `TERM/INT/HUP/PIPE` => `infra_signal_terminated`, `result=passed` запрещён при неполном цикле
   - full-run semantic checks ограничены локальным скриптом (owner-gap/findings, coverage/questions dedupe, critical off-topic markers) и не включают batch-only `analysis:evidence-scope`/`analysis:cross-doc`
   - summary/log/snapshots: `TMP_ROOT/session-summary.md`, `TMP_ROOT/full-run.log`, `TMP_ROOT/snapshots/*`
-  - при parse-fail runtime сохраняет raw-output diagnostics в `reports/taskruns/raw/*` (stdout/stderr/meta with checksum)
+  - при runtime failure raw-output diagnostics сохраняются в `reports/taskruns/raw/*` (stdout/stderr/meta with checksum)
 - batch regression `5x2` + frontend live e2e:
   - `scripts/full-run-batch-5x2.sh`
   - canonical input: `TARGET_REPOS_FILE` (`repos[]` format)
@@ -233,7 +231,7 @@ Implemented additional jobs:
   - runtime-flow hard-fail checks: `runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:execution-semantics`, `runtime_flow_failed`
   - hard-pass учитывает semantic hard-fail и snapshot source validity
   - run artifacts default: `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/*`
-  - reports: `run_matrix_<batch-id>.md/.tsv`, `frontend_e2e_matrix_<batch-id>.md`, `frontend_cancel_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md` (+ fields `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, runtime-flow checks, failure classes `runtime_parse/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing/precheck_failed`)
+  - reports: `run_matrix_<batch-id>.md/.tsv`, `frontend_e2e_matrix_<batch-id>.md`, `frontend_cancel_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md` (+ fields `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, runtime-flow checks, failure classes `runtime_contract_failed/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing/precheck_failed`)
 - profile matrix regression (local official runbook, non-required CI):
   - `scripts/full-run-batch-matrix.sh`
   - `E2E_MATRIX_FILE` обязателен (`profiles[]`: `id`, `repos_file`, `expected_repo_count`, `source_kind`)
@@ -249,16 +247,16 @@ Implemented additional jobs:
   - approved profile ids: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
   - release-mode (`MATRIX_ID=release-*` или `E2E_MATRIX_RELEASE_MODE=1`) фиксирует `RUN_COUNT=1` и требует explicit `sweeps[]` с ровно `baseline` + `parallel-default`, плюс ровно один `single-*` и один `multi-*` профиль; любое отклонение блокирует matrix до batch stage
   - `scripts/tests/matrix_release_contract_test.py` обязан запускать matrix driver в hermetic subprocess env; ambient `ACP_*`, `BATCH_*`, `E2E_*`, `MATRIX_*`, `UI_E2E_*`, `RUN_COUNT`, `PROFILE_*`, `SWEEP_*` leakage не должен менять contract assertions
-  - captured live qwen stdout fixture защищает retry/prompt discipline от event-stream chatter и partial TaskResult drafting
-  - captured live bank extras fixture защищает collect-repair normalization от legacy `changeset[].artifact` drift при manifest-only repair
+  - captured live qwen stdout fixture защищает retry/prompt discipline от event-stream chatter и неполного artifact-only recovery
+  - captured live bank extras fixture защищает collect-repair normalization от manifest-only drift при explicit repair
   - collect runtime делает максимум одну post-success artifact-repair попытку для skeletal/generic-only `shard-pack-manifest.json`; если repair не улучшил fidelity, исходный `write_root` восстанавливается
-  - schema-invalid `TaskResult` получает один direct-JSON retry с whitelist допустимых `changeset[].op`; invalid manifest после schema-valid result идёт в отдельный artifact-repair path
+  - invalid manifest после первого provider execution идёт в отдельный artifact-repair path без semantic stdout fallback
   - `qwen-code` collect steps имеют internal stall watchdog в двух фазах:
     - `pre_artifact`: child process без stdout/stderr и без `write_root` mutations должен детектиться до общего timeout и переходить в forced fresh retry без долгого ожидания EOF, даже если дочерний stdout pipe удерживается незавершённым subprocess-ом
     - `post_artifact`: после появления manifest+authored docs отсутствие pipe activity и write-root mutations в течение внутреннего stall window должно завершать provider process с forced recovery retry до общего step timeout
-  - provider-agnostic draft-step gate: `step0/2/4` принимаются только при валидном runtime draft manifest и наличии всех referenced draft files под `draft_final_root`; invalid draft manifest не должен маскироваться schema-valid `TaskResult`
-  - safe compatibility normalization для `step2/4` разрешает удалить legacy `add_doc_artifact` только если runtime draft manifest уже валиден и referenced draft files существуют
-  - collect runtime не принимает nominal success после failed artifact-repair: missing/invalid/skeletal manifest после единственной repair попытки поднимается как `runner_parse_failed` / `runtime_parse`
+  - provider-agnostic draft-step gate: `step0/2/4` принимаются только при валидном runtime draft manifest и наличии всех referenced draft files под `draft_final_root`
+  - safe repair normalization для `step2/4` допускает только explicit draft-root reconcile уже существующих canonical draft files
+  - collect runtime не принимает nominal success после failed artifact-repair: missing/invalid/skeletal manifest после единственной repair попытки поднимается как `runtime_contract_failed`
   - global uniqueness для `citation-index.claim_ids` проверяется как validator contract; duplicate claim ids либо repair-ятся на index/reference уровне детерминированным shard suffix, либо остаются blocking defect
   - refresh artifact-quality guard: `artifact_quality:*` в `reports/taskruns/<run_id>-quality.json.run_warnings` считается canonical live gate blocker; bank-like collapse к одному `cite.runtime-summary` должен ловиться, openstack-like reuse с хотя бы одним rich shard остаётся допустимым
   - `profile_matrix_<matrix-id>` и `quality_report_<batch-id>` обязаны агрегировать только реально выбранные `selected_providers`/`selected_run_indexes`; qwen-only non-release run не должен порождать synthetic `backend_total_runs=10` и `summary_missing=9`
@@ -266,7 +264,7 @@ Implemented additional jobs:
   - `full-run-batch-5x2.sh` обязан писать per-run status sentinel, иметь `EXIT` trap и materialize-ить `infra_incomplete_cycle` / `infra_signal_terminated` даже если provider child завершился раньше `session-summary.md`
   - `full-run-batch-matrix.sh` обязан append-ить `profile-runs.jsonl`, вести durable `profile-status/*.json`, переводить lingering `running` в terminal `failed` на `EXIT` и строить release verdict даже на partially completed batch roots; missing downstream report files не должны ронять matrix generator
   - `e2e_batch_report.py` обязан реконструировать partial matrix roots из `run-status.env`, `profile-status/*.json` и `run-history.json`; terminal `process_failed + summary_written=yes` не должен классифицироваться как `infra_incomplete_cycle`
-  - internal shard-plan/shard-summary taskrun JSON обязаны иметь non-empty `meta.runtime.name`; false `contract:runtime-name` на internal artifacts считается regression
+  - internal shard-plan/shard-summary JSON обязаны иметь non-empty `meta.runtime.name`; false `contract:runtime-name` на internal artifacts считается regression
   - относительные `repos_file` пути резолвятся от директории `E2E_MATRIX_FILE`
   - для `source_kind=git_url` refs должны быть pinned
   - агрегированные отчёты: `profile_matrix_<matrix-id>.md/.tsv`, `release_verdict_<matrix-id>.md/.json`

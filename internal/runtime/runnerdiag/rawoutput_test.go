@@ -11,7 +11,7 @@ import (
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
 
-func TestWriteParseFailureArtifactsWritesFilesAndMetadata(t *testing.T) {
+func TestWriteFailureArtifactsWritesFilesAndMetadata(t *testing.T) {
 	t.Parallel()
 
 	workspace := t.TempDir()
@@ -24,7 +24,7 @@ func TestWriteParseFailureArtifactsWritesFilesAndMetadata(t *testing.T) {
 		StartedAtUTC: time.Date(2026, 4, 11, 10, 0, 0, 0, time.UTC),
 	}
 
-	artifacts, err := WriteParseFailureArtifacts(task, acpruntime.ProviderQwenCode, "{\"bad\":true}", "stderr-text")
+	artifacts, err := WriteFailureArtifacts(task, acpruntime.ProviderQwenCode, "{\"bad\":true}", "stderr-text")
 	if err != nil {
 		t.Fatalf("write parse-failure artifacts: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestWriteParseFailureArtifactsWritesFilesAndMetadata(t *testing.T) {
 	}
 }
 
-func TestWriteParseFailureArtifactsTruncatesLargeOutput(t *testing.T) {
+func TestWriteFailureArtifactsTruncatesLargeOutput(t *testing.T) {
 	t.Parallel()
 
 	workspace := t.TempDir()
@@ -72,7 +72,7 @@ func TestWriteParseFailureArtifactsTruncatesLargeOutput(t *testing.T) {
 	}
 
 	largeStdout := strings.Repeat("x", maxStoredOutputBytes+2048)
-	artifacts, err := WriteParseFailureArtifacts(task, acpruntime.ProviderClaudeCode, largeStdout, "")
+	artifacts, err := WriteFailureArtifacts(task, acpruntime.ProviderClaudeCode, largeStdout, "")
 	if err != nil {
 		t.Fatalf("write parse-failure artifacts: %v", err)
 	}

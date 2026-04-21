@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/artifactquality"
@@ -21,30 +20,16 @@ import (
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/runnerdiag"
 	"github.com/GrinRus/ProvenArch/internal/runtime/steppolicy"
-	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultbinding"
-	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultcompat"
-	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultextractor"
 	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 )
 
-var (
-	ErrRunnerUnavailable = errors.New("claude-code runner is unavailable")
-)
+var ErrRunnerUnavailable = errors.New("claude-code runner is unavailable")
 
 type HeadlessRunner struct {
 	Command string
 	Args    []string
 }
-
-type promptRetryMode int
-
-const (
-	promptRetryNone promptRetryMode = iota
-	promptRetryParse
-	promptRetryArtifact
-	promptRetryDraftArtifact
-)
 
 func (r HeadlessRunner) commandName() string {
 	command := strings.TrimSpace(r.Command)
@@ -75,105 +60,75 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 		return acpruntime.Result{}, err
 	}
 	command := r.commandName()
+	stdout, stderr, runErr := runClaudeCommand(ctx, task, command, r.Args)
+	if runErr != nil {
+		return acpruntime.Result{}, wrapCommandFailure(acpruntime.ProviderClaudeCode, task, stdout, stderr, runErr)
+	}
+	if err := validateRuntimeArtifacts(task); err != nil {
+		return acpruntime.Result{}, wrapContractFailure(acpruntime.ProviderClaudeCode, task, stdout, stderr, err)
+	}
+	return acpruntime.Result{
+		Execution: acpruntime.NewExecution(task, acpruntime.ProviderClaudeCode, "headless", "succeeded", time.Now().UTC(), nil),
+		Stdout:    stdout,
+		Stderr:    stderr,
+	}, nil
+}
 
+func runClaudeCommand(ctx context.Context, task acpruntime.Task, command string, args []string) (string, string, error) {
 	taskPayload, err := json.Marshal(task)
 	if err != nil {
-		return acpruntime.Result{}, fmt.Errorf("marshal runner task: %w", err)
+		return "", "", fmt.Errorf("marshal runtime task: %w", err)
 	}
-	if len(r.Args) > 0 || !isNativeDirectClaudeCommand(command) {
-		return runStdinPassthrough(ctx, command, r.Args, task, taskPayload)
+	commandArgs := append([]string(nil), args...)
+	if len(commandArgs) == 0 {
+		commandArgs = buildDefaultClaudeArgs(task, buildPrompt(task))
 	}
 
-	return runNativeDirectClaude(ctx, command, task, taskPayload)
+	cmd := exec.CommandContext(ctx, command, commandArgs...)
+	if workspace := strings.TrimSpace(task.Workspace); workspace != "" {
+		cmd.Dir = workspace
+	} else if writeRoot := strings.TrimSpace(task.WriteRoot); writeRoot != "" {
+		cmd.Dir = writeRoot
+	}
+	cmd.Stdin = bytes.NewReader(taskPayload)
+
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", "", err
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return "", "", err
+	}
+
+	if err := cmd.Start(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", "", ctxErr
+		}
+		return "", "", err
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	errCh := make(chan error, 2)
+	go func() { errCh <- captureCommandStream(stdoutPipe, &stdout, task, acpruntime.OutputStreamStdout) }()
+	go func() { errCh <- captureCommandStream(stderrPipe, &stderr, task, acpruntime.OutputStreamStderr) }()
+	for i := 0; i < 2; i++ {
+		if streamErr := <-errCh; streamErr != nil {
+			_ = cmd.Wait()
+			return stdout.String(), stderr.String(), streamErr
+		}
+	}
+	if err := cmd.Wait(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return stdout.String(), stderr.String(), ctxErr
+		}
+		return stdout.String(), stderr.String(), runnerdiag.BuildExecFailure(err, stdout.String(), stderr.String())
+	}
+	return stdout.String(), stderr.String(), nil
 }
 
-func isNativeDirectClaudeCommand(command string) bool {
-	base := strings.ToLower(strings.TrimSpace(filepath.Base(command)))
-	return base == "claude" || base == "claude.exe"
-}
-
-func runStdinPassthrough(ctx context.Context, command string, args []string, task acpruntime.Task, taskPayload []byte) (acpruntime.Result, error) {
-	result, parseStage, parseErr, runErr := runClaudeCommand(ctx, task, command, append([]string(nil), args...), taskPayload)
-	if runErr != nil {
-		unavailableMessage := buildUnavailableFailureMessage(task, runErr, result)
-		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
-			acpruntime.ProviderClaudeCode,
-			acpruntime.ErrorCodeRunnerUnavailable,
-			fmt.Sprintf("%v: %s", ErrRunnerUnavailable, unavailableMessage),
-			result.Stdout,
-			result.Stderr,
-			runErr,
-		)
-	}
-	if parseErr != nil {
-		parseFailureMessage := buildParseFailureMessage(task, parseStage, parseErr, result)
-		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
-			acpruntime.ProviderClaudeCode,
-			acpruntime.ErrorCodeRunnerParseFailed,
-			fmt.Sprintf("headless provider %q returned invalid taskresult: %s", acpruntime.ProviderClaudeCode, parseFailureMessage),
-			result.Stdout,
-			result.Stderr,
-			parseErr,
-		)
-	}
-	return result, nil
-}
-
-func runNativeDirectClaude(ctx context.Context, command string, task acpruntime.Task, taskPayload []byte) (acpruntime.Result, error) {
-	args := buildNativeDirectClaudeArgs(task, buildDirectPrompt(taskPayload, false, false))
-	result, parseStage, parseErr, runErr := runClaudeCommand(ctx, task, command, args, nil)
-	if runErr != nil {
-		unavailableMessage := buildUnavailableFailureMessage(task, runErr, result)
-		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
-			acpruntime.ProviderClaudeCode,
-			acpruntime.ErrorCodeRunnerUnavailable,
-			fmt.Sprintf("%v: %s", ErrRunnerUnavailable, unavailableMessage),
-			result.Stdout,
-			result.Stderr,
-			runErr,
-		)
-	}
-	if parseErr == nil {
-		return finalizeSuccessfulClaudeResult(ctx, task, taskPayload, command, result)
-	}
-
-	retryArgs := buildNativeDirectClaudeArgs(
-		task,
-		buildDirectPromptWithModeAndHints(
-			taskPayload,
-			promptRetryParse,
-			parseStage == "extract" && (isEnvelopeResultEmptyError(parseErr) || isEnvelopeResultMalformedError(parseErr)),
-			buildParseRepairHints(task.StepID, parseStage, parseErr),
-		),
-	)
-	retryResult, retryParseStage, retryParseErr, retryRunErr := runClaudeCommand(ctx, task, command, retryArgs, nil)
-	if retryRunErr != nil {
-		unavailableMessage := buildUnavailableFailureMessage(task, retryRunErr, retryResult)
-		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
-			acpruntime.ProviderClaudeCode,
-			acpruntime.ErrorCodeRunnerUnavailable,
-			fmt.Sprintf("%v: %s", ErrRunnerUnavailable, unavailableMessage),
-			retryResult.Stdout,
-			retryResult.Stderr,
-			retryRunErr,
-		)
-	}
-	if retryParseErr == nil {
-		return finalizeSuccessfulClaudeResult(ctx, task, taskPayload, command, retryResult)
-	}
-
-	parseFailureMessage := buildParseFailureMessage(task, retryParseStage, retryParseErr, retryResult)
-	return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
-		acpruntime.ProviderClaudeCode,
-		acpruntime.ErrorCodeRunnerParseFailed,
-		fmt.Sprintf("headless provider %q returned invalid taskresult: %s", acpruntime.ProviderClaudeCode, parseFailureMessage),
-		retryResult.Stdout,
-		retryResult.Stderr,
-		retryParseErr,
-	)
-}
-
-func buildNativeDirectClaudeArgs(task acpruntime.Task, prompt string) []string {
+func buildDefaultClaudeArgs(task acpruntime.Task, prompt string) []string {
 	args := []string{"--output-format", "json", "--permission-mode", "bypassPermissions"}
 	for _, dir := range acpruntime.ResolveHeadlessIncludeDirectories(task) {
 		args = append(args, "--add-dir", dir)
@@ -182,121 +137,105 @@ func buildNativeDirectClaudeArgs(task acpruntime.Task, prompt string) []string {
 	return args
 }
 
-func maybeRepairCollectArtifacts(
-	ctx context.Context,
-	task acpruntime.Task,
-	taskPayload []byte,
-	command string,
-	current acpruntime.Result,
-) (acpruntime.Result, error) {
-	if task.StepID != "init.step1.collect" && task.StepID != "refresh.step1.collect" {
-		return current, nil
+func buildPrompt(task acpruntime.Task) string {
+	sections := []string{
+		fmt.Sprintf("You are ACP runtime provider %q.", acpruntime.ProviderClaudeCode),
+		"Artifact-only contract:",
+		"- Do not return semantic JSON or any other semantic payload on stdout.",
+		"- Write only the required step artifacts into write_root and draft_final_root.",
+		"- Stdout/stderr are diagnostics only.",
+		steppolicy.DocFirstFilesystemPolicy(task),
 	}
-	if strings.TrimSpace(task.WriteRoot) == "" {
-		return current, nil
+	if stepPolicy := strings.TrimSpace(steppolicy.StepSpecificPolicy(task.StepID)); stepPolicy != "" {
+		sections = append(sections, stepPolicy)
 	}
+	if pack := strings.TrimSpace(steppolicy.WorkspacePromptPackSection(task)); pack != "" {
+		sections = append(sections, pack)
+	}
+	sections = append(sections,
+		"Completion rule:",
+		"- Exit with code 0 only after required artifacts are fully written.",
+		"- Do not emit legacy operation logs or any wrapper envelopes on stdout.",
+	)
+	return strings.Join(sections, "\n\n")
+}
 
-	_ = artifactquality.EnsureCanonicalCollectManifest(task, current.TaskResult)
-	assessment, err := artifactquality.LoadManifestAssessment(task.WriteRoot)
-	if err == nil && assessment.Rich {
-		return current, nil
+func captureCommandStream(reader io.Reader, sink *bytes.Buffer, task acpruntime.Task, stream acpruntime.OutputStream) error {
+	if sink == nil {
+		return errors.New("capture sink is nil")
 	}
-	initialProblem := artifactquality.DescribeAssessmentProblem(assessment, err)
-
-	snapshot, err := artifactquality.SnapshotWriteRoot(task.WriteRoot)
-	if err != nil {
-		return acpruntime.Result{}, wrapArtifactContractFailure(
-			current.Stdout,
-			current.Stderr,
-			fmt.Sprintf("collect artifacts require repair (%s), but write_root snapshot failed: %v", initialProblem, err),
-			err,
-		)
-	}
-	defer func() {
-		_ = snapshot.Cleanup()
-	}()
-
-	repairArgs := buildNativeDirectClaudeArgs(task, buildDirectPromptWithModeAndHints(taskPayload, promptRetryArtifact, false, buildArtifactRepairHints(initialProblem)))
-	repaired, repairParseStage, parseErr, runErr := runClaudeCommand(ctx, task, command, repairArgs, nil)
-	if runErr != nil {
-		_ = snapshot.Restore()
-		unavailableMessage := buildUnavailableFailureMessage(task, runErr, repaired)
-		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
-			acpruntime.ProviderClaudeCode,
-			acpruntime.ErrorCodeRunnerUnavailable,
-			fmt.Sprintf("%v: artifact repair retry failed after %s: %s", ErrRunnerUnavailable, initialProblem, unavailableMessage),
-			repaired.Stdout,
-			repaired.Stderr,
-			runErr,
-		)
-	}
-	if parseErr != nil {
-		if contractErr := validateCollectManifestContractAtWriteRoot(task.WriteRoot); contractErr != nil {
-			_ = snapshot.Restore()
-			return acpruntime.Result{}, wrapArtifactContractFailure(
-				repaired.Stdout,
-				repaired.Stderr,
-				fmt.Sprintf("collect artifact repair returned invalid taskresult and left contract-invalid shard-pack-manifest.json: parse=%v; validation=%v", parseErr, contractErr),
-				errors.Join(parseErr, contractErr),
-			)
+	bufReader := bufio.NewReader(reader)
+	for {
+		part, err := bufReader.ReadString('\n')
+		if len(part) > 0 {
+			sink.WriteString(part)
+			if task.OnOutput != nil {
+				task.OnOutput(acpruntime.OutputChunk{
+					Stream: stream,
+					Text:   strings.TrimRight(part, "\r\n"),
+				})
+			}
 		}
-		_ = snapshot.Restore()
-		parseFailureMessage := buildParseFailureMessage(task, "artifact_repair."+repairParseStage, parseErr, repaired)
-		return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
-			acpruntime.ProviderClaudeCode,
-			acpruntime.ErrorCodeRunnerParseFailed,
-			fmt.Sprintf("headless provider %q returned invalid collect artifact repair result after %s: %s", acpruntime.ProviderClaudeCode, initialProblem, parseFailureMessage),
-			repaired.Stdout,
-			repaired.Stderr,
-			parseErr,
-		)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
 	}
-
-	_ = artifactquality.EnsureCanonicalCollectManifest(task, repaired.TaskResult)
-	repairedAssessment, err := artifactquality.LoadManifestAssessment(task.WriteRoot)
-	if err != nil || !repairedAssessment.Rich {
-		_ = snapshot.Restore()
-		repairedProblem := artifactquality.DescribeAssessmentProblem(repairedAssessment, err)
-		return acpruntime.Result{}, wrapArtifactContractFailure(
-			repaired.Stdout,
-			repaired.Stderr,
-			fmt.Sprintf("collect artifacts remained invalid after one repair attempt: initial=%s; repaired=%s", initialProblem, repairedProblem),
-			err,
-		)
-	}
-	return repaired, nil
 }
 
-func finalizeSuccessfulClaudeResult(
-	ctx context.Context,
-	task acpruntime.Task,
-	taskPayload []byte,
-	command string,
-	current acpruntime.Result,
-) (acpruntime.Result, error) {
-	if isCollectStep(task.StepID) {
-		return maybeRepairCollectArtifacts(ctx, task, taskPayload, command, current)
+func validateRuntimeArtifacts(task acpruntime.Task) error {
+	switch acpruntime.StepProviderKeyForStepID(task.StepID) {
+	case acpruntime.StepProviderStep1Collect:
+		return validateCollectArtifacts(task)
+	case acpruntime.StepProviderStep3Findings:
+		return validateValidatorArtifacts(task)
+	default:
+		if runtimedrafts.IsDraftStep(task.StepID) {
+			return validateDraftArtifacts(task)
+		}
+		return nil
 	}
-	if !runtimedrafts.IsDraftStep(task.StepID) {
-		return current, nil
-	}
-	current, _, _ = reconcileRuntimeDraftOutputsAtWriteRoot(task, current)
-	if _, _, err := validateRuntimeDraftArtifactsAtWriteRoot(task); err == nil {
-		return current, nil
-	}
-	return maybeRepairRuntimeDraftArtifacts(ctx, task, taskPayload, command, current)
 }
 
-func validateCollectManifestContractAtWriteRoot(writeRoot string) error {
-	raw, err := os.ReadFile(filepath.Join(filepath.Clean(writeRoot), "shard-pack-manifest.json"))
+func validateCollectArtifacts(task acpruntime.Task) error {
+	if err := artifactquality.RepairCollectManifest(task); err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(filepath.Join(filepath.Clean(task.WriteRoot), shardPackManifestFileName))
 	if err != nil {
 		return err
 	}
-	_, err = contracts.ParseShardPackManifest(raw)
+	if _, err := contracts.ParseShardPackManifest(raw); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateDraftArtifacts(task acpruntime.Task) error {
+	if _, _, err := validateRequiredRuntimeDraftArtifacts(task); err == nil {
+		return nil
+	}
+	manifestFile := runtimedrafts.ManifestFileForStep(task.StepID)
+	if manifestFile == "" {
+		return fmt.Errorf("draft manifest file is undefined for %s", task.StepID)
+	}
+	manifest, _, loadErr := runtimedrafts.Load(task.WriteRoot, manifestFile)
+	if loadErr != nil {
+		return loadErr
+	}
+	if err := runtimedrafts.ValidateManifestForTask(manifest, task.RunID, task.StepID, task.StepContract); err != nil {
+		return err
+	}
+	if _, err := runtimedrafts.ReconcileOutputsAtDraftRoot(task.DraftFinalRoot, manifest); err != nil {
+		return err
+	}
+	_, _, err := validateRequiredRuntimeDraftArtifacts(task)
 	return err
 }
 
-func validateRuntimeDraftArtifactsAtWriteRoot(task acpruntime.Task) (runtimedrafts.Manifest, []byte, error) {
+func validateRequiredRuntimeDraftArtifacts(task acpruntime.Task) (runtimedrafts.Manifest, []byte, error) {
 	return runtimedrafts.ValidateRequiredManifest(
 		task.WriteRoot,
 		task.DraftFinalRoot,
@@ -307,749 +246,187 @@ func validateRuntimeDraftArtifactsAtWriteRoot(task acpruntime.Task) (runtimedraf
 	)
 }
 
-func reconcileRuntimeDraftOutputsAtWriteRoot(task acpruntime.Task, current acpruntime.Result) (acpruntime.Result, bool, error) {
-	if !runtimedrafts.IsDraftStep(task.StepID) {
-		return current, false, nil
-	}
-	manifestFile := runtimedrafts.ManifestFileForStep(task.StepID)
-	if strings.TrimSpace(task.WriteRoot) == "" || strings.TrimSpace(task.DraftFinalRoot) == "" || strings.TrimSpace(manifestFile) == "" {
-		return current, false, nil
-	}
-	manifest, _, err := runtimedrafts.Load(task.WriteRoot, manifestFile)
+func validateValidatorArtifacts(task acpruntime.Task) error {
+	raw, err := os.ReadFile(filepath.Join(filepath.Clean(task.WriteRoot), validatorVerdictFileName))
 	if err != nil {
-		return current, false, err
+		return err
 	}
-	if err := runtimedrafts.ValidateManifestForTask(manifest, task.RunID, task.StepID, task.StepContract); err != nil {
-		return current, false, err
+	_, err = contracts.ParseValidatorVerdict(raw)
+	return err
+}
+
+func wrapCommandFailure(provider acpruntime.Provider, task acpruntime.Task, stdout string, stderr string, cause error) error {
+	if errors.Is(cause, context.DeadlineExceeded) {
+		message, rawOutputRefs := buildFailureMessage(provider, task, "exec", cause, stdout, stderr)
+		return acpruntime.WrapRunnerErrorWithDiagnostics(provider, acpruntime.ErrorCodeRuntimeTimeout, message, stdout, stderr, rawOutputRefs, cause)
 	}
-	changed, err := runtimedrafts.ReconcileOutputsAtDraftRoot(task.DraftFinalRoot, manifest)
-	if err != nil || !changed {
-		return current, changed, err
+	if errors.Is(cause, context.Canceled) {
+		message, rawOutputRefs := buildFailureMessage(provider, task, "exec", cause, stdout, stderr)
+		return acpruntime.WrapRunnerErrorWithDiagnostics(provider, acpruntime.ErrorCodeRunCanceled, message, stdout, stderr, rawOutputRefs, cause)
 	}
-	normalized, _, err := taskresultcompat.NormalizeResult(task, current)
+	message, rawOutputRefs := buildFailureMessage(provider, task, "exec", cause, stdout, stderr)
+	return acpruntime.WrapRunnerErrorWithDiagnostics(provider, acpruntime.ErrorCodeRunnerUnavailable, message, stdout, stderr, rawOutputRefs, cause)
+}
+
+func wrapContractFailure(provider acpruntime.Provider, task acpruntime.Task, stdout string, stderr string, cause error) error {
+	message, rawOutputRefs := buildFailureMessage(provider, task, "contract", cause, stdout, stderr)
+	return acpruntime.WrapRunnerErrorWithDiagnostics(provider, acpruntime.ErrorCodeRuntimeContract, message, stdout, stderr, rawOutputRefs, cause)
+}
+
+func buildFailureMessage(provider acpruntime.Provider, task acpruntime.Task, stage string, cause error, stdout string, stderr string) (string, contracts.RuntimeOutputRefs) {
+	base := "unknown failure"
+	if cause != nil {
+		base = strings.TrimSpace(cause.Error())
+	}
+	artifacts, err := runnerdiag.WriteFailureArtifacts(task, provider, stdout, stderr)
 	if err != nil {
-		return current, false, err
-	}
-	return normalized, true, nil
-}
-
-func maybeRepairRuntimeDraftArtifacts(
-	ctx context.Context,
-	task acpruntime.Task,
-	taskPayload []byte,
-	command string,
-	current acpruntime.Result,
-) (acpruntime.Result, error) {
-	if !runtimedrafts.IsDraftStep(task.StepID) {
-		return current, nil
-	}
-	if repaired, changed, err := reconcileRuntimeDraftOutputsAtWriteRoot(task, current); err == nil && changed {
-		if _, _, validationErr := validateRuntimeDraftArtifactsAtWriteRoot(task); validationErr == nil {
-			return repaired, nil
-		}
-		current = repaired
-	}
-	if _, _, err := validateRuntimeDraftArtifactsAtWriteRoot(task); err == nil {
-		return current, nil
-	} else {
-		repairArgs := buildNativeDirectClaudeArgs(
-			task,
-			buildDirectPromptWithModeAndHints(taskPayload, promptRetryDraftArtifact, false, buildDraftArtifactRepairHints(task, err)),
-		)
-		repaired, repairParseStage, parseErr, runErr := runClaudeCommand(ctx, task, command, repairArgs, nil)
-		if runErr != nil {
-			return acpruntime.Result{}, wrapArtifactContractFailure(
-				repaired.Stdout,
-				repaired.Stderr,
-				fmt.Sprintf("runtime required draft artifact repair attempt failed: %v", runErr),
-				runErr,
-			)
-		}
-		if parseErr != nil {
-			return acpruntime.Result{}, acpruntime.WrapRunnerErrorWithOutput(
-				acpruntime.ProviderClaudeCode,
-				acpruntime.ErrorCodeRunnerParseFailed,
-				fmt.Sprintf("headless provider %q returned invalid runtime draft artifact repair result: %s", acpruntime.ProviderClaudeCode, buildParseFailureMessage(task, "draft_repair."+repairParseStage, parseErr, repaired)),
-				repaired.Stdout,
-				repaired.Stderr,
-				parseErr,
-			)
-		}
-		repaired, _, _ = reconcileRuntimeDraftOutputsAtWriteRoot(task, repaired)
-		if _, _, repairErr := validateRuntimeDraftArtifactsAtWriteRoot(task); repairErr != nil {
-			return acpruntime.Result{}, wrapArtifactContractFailure(
-				repaired.Stdout,
-				repaired.Stderr,
-				fmt.Sprintf("runtime required draft artifacts remained invalid after one repair attempt: validation=%v", repairErr),
-				repairErr,
-			)
-		}
-		return repaired, nil
-	}
-}
-
-func wrapArtifactContractFailure(stdout string, stderr string, message string, cause error) error {
-	return acpruntime.WrapRunnerErrorWithOutput(
-		acpruntime.ProviderClaudeCode,
-		acpruntime.ErrorCodeRunnerParseFailed,
-		fmt.Sprintf("headless provider %q produced invalid runtime artifacts: %s", acpruntime.ProviderClaudeCode, strings.TrimSpace(message)),
-		stdout,
-		stderr,
-		cause,
-	)
-}
-
-func isEnvelopeResultEmptyError(err error) bool {
-	return strings.Contains(strings.ToLower(strings.TrimSpace(err.Error())), "envelope result is empty")
-}
-
-func isEnvelopeResultMalformedError(err error) bool {
-	text := strings.ToLower(strings.TrimSpace(err.Error()))
-	if !strings.Contains(text, "envelope key \"result\"") {
-		return false
-	}
-	return strings.Contains(text, "string candidate parse failed") ||
-		strings.Contains(text, "invalid character") ||
-		strings.Contains(text, "unexpected end of json input")
-}
-
-func buildParseFailureMessage(task acpruntime.Task, parseStage string, parseErr error, result acpruntime.Result) string {
-	base := strings.TrimSpace(parseErr.Error())
-	if base == "" {
-		base = "unknown parse error"
-	}
-	stage := strings.TrimSpace(parseStage)
-	if stage == "" {
-		stage = "unknown"
-	}
-	artifacts, err := runnerdiag.WriteParseFailureArtifacts(task, acpruntime.ProviderClaudeCode, result.Stdout, result.Stderr)
-	if err != nil {
-		return fmt.Sprintf("parse_stage=%s %s (raw_output_persist_failed=%v)", stage, base, err)
+		return fmt.Sprintf("stage=%s %s (raw_output_persist_failed=%v)", stage, base, err), contracts.RuntimeOutputRefs{}
 	}
 	return fmt.Sprintf(
-		"parse_stage=%s %s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
-		stage,
-		base,
-		artifacts.RelativeMetadataPath,
-		artifacts.Stdout.Bytes,
-		artifacts.Stdout.SHA256,
-		artifacts.Stderr.Bytes,
-		artifacts.Stderr.SHA256,
-	)
-}
-
-func buildUnavailableFailureMessage(task acpruntime.Task, runErr error, result acpruntime.Result) string {
-	base := strings.TrimSpace(runErr.Error())
-	if base == "" {
-		base = "unknown execution error"
-	}
-	artifacts, err := runnerdiag.WriteParseFailureArtifacts(task, acpruntime.ProviderClaudeCode, result.Stdout, result.Stderr)
-	if err != nil {
-		return fmt.Sprintf("parse_stage=exec %s (raw_output_persist_failed=%v)", base, err)
-	}
-	return fmt.Sprintf(
-		"parse_stage=exec %s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
-		base,
-		artifacts.RelativeMetadataPath,
-		artifacts.Stdout.Bytes,
-		artifacts.Stdout.SHA256,
-		artifacts.Stderr.Bytes,
-		artifacts.Stderr.SHA256,
-	)
-}
-
-func runClaudeCommand(ctx context.Context, task acpruntime.Task, command string, args []string, stdin []byte) (acpruntime.Result, string, error, error) {
-	cmd := exec.CommandContext(ctx, command, args...)
-	if writeRoot := strings.TrimSpace(task.WriteRoot); writeRoot != "" {
-		cmd.Dir = writeRoot
-	} else if workspace := strings.TrimSpace(task.Workspace); workspace != "" {
-		cmd.Dir = workspace
-	}
-	if len(stdin) > 0 {
-		cmd.Stdin = bytes.NewReader(stdin)
-	}
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return acpruntime.Result{}, "", nil, err
-	}
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		return acpruntime.Result{}, "", nil, err
-	}
-
-	if err := cmd.Start(); err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return acpruntime.Result{}, "", nil, ctxErr
+			"stage=%s %s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
+			stage,
+			base,
+			artifacts.RelativeMetadataPath,
+			artifacts.Stdout.Bytes,
+			artifacts.Stdout.SHA256,
+			artifacts.Stderr.Bytes,
+			artifacts.Stderr.SHA256,
+		), contracts.RuntimeOutputRefs{
+			Stdout:   artifacts.Stdout.RelativePath,
+			Stderr:   artifacts.Stderr.RelativePath,
+			Metadata: artifacts.RelativeMetadataPath,
 		}
-		return acpruntime.Result{}, "", nil, err
-	}
-
-	var streamErr error
-	var streamErrMu sync.Mutex
-	captureErr := func(captureErr error) {
-		if captureErr == nil {
-			return
-		}
-		streamErrMu.Lock()
-		defer streamErrMu.Unlock()
-		if streamErr == nil {
-			streamErr = captureErr
-		}
-	}
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		captureErr(captureCommandStream(stdoutPipe, &stdout, task, acpruntime.OutputStreamStdout))
-	}()
-	go func() {
-		defer wg.Done()
-		captureErr(captureCommandStream(stderrPipe, &stderr, task, acpruntime.OutputStreamStderr))
-	}()
-
-	// Drain both output streams before waiting to avoid racy early pipe closes
-	// that can truncate stdout/stderr under parallel test/process scheduling.
-	wg.Wait()
-	waitErr := cmd.Wait()
-	if waitErr == nil && streamErr != nil {
-		waitErr = streamErr
-	}
-	if waitErr != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return acpruntime.Result{
-				Stdout: stdout.String(),
-				Stderr: stderr.String(),
-			}, "", nil, ctxErr
-		}
-		return acpruntime.Result{
-			Stdout: stdout.String(),
-			Stderr: stderr.String(),
-		}, "", nil, runnerdiag.BuildExecFailure(waitErr, stdout.String(), stderr.String())
-	}
-
-	raw, err := taskresultextractor.Extract(stdout.Bytes())
-	if err != nil {
-		return acpruntime.Result{
-			Stdout: stdout.String(),
-			Stderr: stderr.String(),
-		}, "extract", err, nil
-	}
-	if normalizedRaw, changed, normalizeErr := taskresultcompat.NormalizeRawTaskResult(task, raw); normalizeErr == nil && changed {
-		raw = normalizedRaw
-	}
-	taskResult, err := contracts.ParseTaskResult(raw)
-	if err != nil {
-		return acpruntime.Result{
-			Stdout: stdout.String(),
-			Stderr: stderr.String(),
-		}, "schema", err, nil
-	}
-	if err := taskresultbinding.Validate(task, taskResult, acpruntime.ProviderClaudeCode); err != nil {
-		return acpruntime.Result{
-			Stdout: stdout.String(),
-			Stderr: stderr.String(),
-		}, "binding", err, nil
-	}
-
-	return acpruntime.Result{
-		TaskResult: taskResult,
-		RawJSON:    raw,
-		Stdout:     stdout.String(),
-		Stderr:     stderr.String(),
-	}, "", nil, nil
-}
-
-type streamedOutputBudget struct {
-	forwardedBytes int
-	truncated      bool
-}
-
-func captureCommandStream(reader io.Reader, sink *bytes.Buffer, task acpruntime.Task, stream acpruntime.OutputStream) error {
-	if sink == nil {
-		return errors.New("capture sink is nil")
-	}
-	bufReader := bufio.NewReader(reader)
-	budget := &streamedOutputBudget{}
-	for {
-		part, err := bufReader.ReadString('\n')
-		if len(part) > 0 {
-			sink.WriteString(part)
-			forwardStreamOutput(task, stream, part, budget)
-		}
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			if isPipeClosedErr(err) {
-				return nil
-			}
-			return err
-		}
-	}
-}
-
-func isPipeClosedErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, os.ErrClosed) {
-		return true
-	}
-	return strings.Contains(strings.ToLower(err.Error()), "file already closed")
-}
-
-func forwardStreamOutput(task acpruntime.Task, stream acpruntime.OutputStream, chunk string, budget *streamedOutputBudget) {
-	if task.OnOutput == nil || budget == nil {
-		return
-	}
-	normalized := strings.ReplaceAll(chunk, "\r\n", "\n")
-	normalized = strings.ReplaceAll(normalized, "\r", "\n")
-	lines := strings.Split(normalized, "\n")
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-		if budget.truncated {
-			continue
-		}
-		lineBytes := len([]byte(line))
-		nextBytes := budget.forwardedBytes + lineBytes
-		if nextBytes <= acpruntime.RuntimeOutputStreamHardCapBytes {
-			budget.forwardedBytes = nextBytes
-			task.OnOutput(acpruntime.OutputChunk{
-				Stream: stream,
-				Text:   line,
-			})
-			continue
-		}
-		remaining := acpruntime.RuntimeOutputStreamHardCapBytes - budget.forwardedBytes
-		if remaining > 0 {
-			trimmed := line
-			if len([]byte(trimmed)) > remaining {
-				trimmedBytes := []byte(trimmed)
-				if remaining < len(trimmedBytes) {
-					trimmed = string(trimmedBytes[:remaining])
-				}
-			}
-			trimmed = strings.TrimSpace(trimmed)
-			if trimmed != "" {
-				task.OnOutput(acpruntime.OutputChunk{
-					Stream: stream,
-					Text:   trimmed,
-				})
-			}
-		}
-		budget.truncated = true
-		task.OnOutput(acpruntime.OutputChunk{
-			Stream:    stream,
-			Truncated: true,
-			Text:      fmt.Sprintf("%s output truncated after %d bytes (internal safeguard)", stream, acpruntime.RuntimeOutputStreamHardCapBytes),
-		})
-	}
-}
-
-func buildDirectPrompt(taskPayload []byte, retry bool, requireNonEmptyResult bool) string {
-	mode := promptRetryNone
-	if retry {
-		mode = promptRetryParse
-	}
-	return buildDirectPromptWithMode(taskPayload, mode, requireNonEmptyResult)
-}
-
-func buildDirectPromptWithMode(taskPayload []byte, mode promptRetryMode, requireNonEmptyResult bool) string {
-	return buildDirectPromptWithModeAndHints(taskPayload, mode, requireNonEmptyResult, nil)
-}
-
-func buildDirectPromptWithModeAndHints(taskPayload []byte, mode promptRetryMode, requireNonEmptyResult bool, extraHints []string) string {
-	var task acpruntime.Task
-	if err := json.Unmarshal(taskPayload, &task); err != nil {
-		return strings.TrimSpace(fmt.Sprintf(`You are ACP runtime provider %q.
-Return exactly one valid JSON object for ACP TaskResult.
-Do not output markdown, code fences, or any explanatory text.
-Task payload JSON:
-%s`, acpruntime.ProviderClaudeCode, strings.TrimSpace(string(taskPayload))))
-	}
-
-	repoScopesJSON := "[]"
-	if rawRepoScopes, err := json.Marshal(task.RepoScopes); err == nil {
-		repoScopesJSON = string(rawRepoScopes)
-	}
-	primaryRepoScope := primaryTaskRepoScope(task.RepoScope, task.RepoScopes)
-	pathScopesJSON := "[]"
-	if rawPathScopes, err := json.Marshal(task.PathScopes); err == nil {
-		pathScopesJSON = string(rawPathScopes)
-	}
-	stepPolicy := buildStepSpecificDirectPolicy(task.StepID)
-	topLevelCompatibilityRule := steppolicy.TopLevelCompatibilityRule(task.StepID)
-	repositoryEvidencePolicy := strings.Join([]string{
-		`REPOSITORY EVIDENCE RULES:`,
-		`- ACP workspace scaffold (workspace.yaml, charter/, model/, reports/) is support context, not the primary source tree.`,
-		`- Prefer evidence from repository files under meta.repo_scopes/meta.path_scopes when those files are available.`,
-		`- meta.path_scopes may contain directories, files, or a mixed disjoint partition; treat every listed scope as in-bounds evidence for this task.`,
-		`- Use ACP-generated workspace artifacts as evidence only for ACP runtime/report state, not as a substitute for repository analysis.`,
-	}, "\n")
-	docFirstPolicy := buildDocFirstFilesystemPolicy(task)
-	workspacePromptPack := steppolicy.WorkspacePromptPackSection(task)
-	retryHint := ""
-	if mode != promptRetryNone {
-		retryLines := []string{
-			`RETRY MODE: previous output was invalid JSON.`,
-			`Do not include non-ASCII symbols in numbers or timestamps.`,
-			`RFC3339 timestamps only (example: 2026-04-09T15:28:49Z).`,
-			`Decimals must be compact numeric literals (example: 0.7, not 0. 7).`,
-			`Unknown changeset[].op values are forbidden; allowed values are exactly: upsert_entity, remove_entity, upsert_edge, remove_edge, add_finding, add_doc_artifact.`,
-			`For op="add_doc_artifact", the payload key MUST be "doc_artifact"; never use "artifact".`,
-			`If a retry only repaired files inside write_root, prefer "changeset": [] instead of inventing file-write operations.`,
-			`Return only JSON object, without prose.`,
-		}
-		if isCollectStep(task.StepID) {
-			retryLines = append(retryLines,
-				`Do NOT collapse a multi-document refresh into one generic "cite.runtime-summary" citation.`,
-				`Do NOT overwrite a rich shard-pack-manifest.json with a skeletal reuse-only manifest.`,
-				`Preserve repo-specific citations when repository evidence already exists or can be recovered from repo roots.`,
-			)
-		}
-		if mode == promptRetryArtifact {
-			retryLines[0] = `ARTIFACT REPAIR MODE: previous collect output was schema-valid but write_root artifacts look skeletal or generic-only.`
-			retryLines = append(retryLines,
-				`Repair artifact fidelity before returning JSON; this retry is not a fresh repository rediscovery pass.`,
-				`Keep repo roots available while restoring repo-specific citations in shard-pack-manifest.json.`,
-				`Rewrite shard-pack-manifest.json to the canonical ACP schema (version=1 integer, documents[].citation_ids, citations[].id/document_ids, stable canonical_path).`,
-				`compatibility.coverage/questions/entities/edges/findings must all exist, and questions/entities/edges/findings must be arrays rather than booleans or null.`,
-			)
-		} else if mode == promptRetryDraftArtifact {
-			retryLines[0] = `DRAFT ARTIFACT REPAIR MODE: previous output was schema-valid but required runtime draft artifacts were invalid.`
-			retryLines = append(retryLines,
-				`Repair the runtime draft manifest and referenced draft files before returning JSON; this retry is not a fresh repository rediscovery pass.`,
-				`Keep writes constrained to write_root and draft_final_root only.`,
-				`If the draft manifest already describes the publish surface and draft files are on disk, prefer "changeset": [] and do not emit legacy metadata-registration operations.`,
-			)
-		}
-		retryLines = append(retryLines, extraHints...)
-		retryHint = strings.Join(retryLines, "\n")
-	}
-	nonEmptyResultHint := ""
-	if requireNonEmptyResult {
-		nonEmptyResultHint = strings.Join([]string{
-			`STRICT RESULT JSON MODE:`,
-			`- If using envelope fields like "result", value MUST be a non-empty valid JSON object string.`,
-			`- Do NOT emit empty or malformed "result" payload.`,
-			`- Prefer returning a direct TaskResult JSON object (without envelope wrappers).`,
-		}, "\n")
-	}
-
-	return strings.TrimSpace(fmt.Sprintf(`You are ACP runtime provider %q.
-Return exactly one valid JSON object for ACP TaskResult.
-Do not output markdown, code fences, explanations, or any text outside the JSON object.
-
-STRICT CONTRACT (must pass):
-- top-level required keys: "meta", "summary", "changeset"
-- meta required keys: "task_id", "step_id", "runtime", "started_at"
-- meta.runtime required key: "name"
-- use snake_case keys exactly as shown.
-- DO NOT use top-level fields: task_id, run_id, step_id, status.
-- provenance.kind MUST be one of: observation, inference, assertion.
-- provenance.confidence MUST be a NUMBER in range [0,1], never a string.
-- provenance.evidence MUST be an ARRAY of objects with repo/path.
-- if "questions" is present, it MUST be an array of objects (each object has at least "id" and "text").
-- coverage.missing MUST use canonical terms only: owner mappings, ci-cd evidence, delta validation, dependency graph, runtime metrics, api contracts, deployment configs, integration edges, datastore bindings, dependencies.
-- question IDs MUST use canonical form without numeric suffixes (example: q.refresh.delta, not q.refresh.delta.1).
-- Do not claim workspace is empty/minimal unless provenance evidence includes concrete file paths proving it.
-- %s
-%s
-%s
-%s
-%s
-%s
-%s
-
-Set meta fields exactly:
-- meta.task_id = %q
-- meta.step_id = %q
-- meta.run_id = %q
-- meta.runtime.name = %q
-- meta.runtime.version = %q
-- meta.started_at = %q
-- meta.workspace = %q
-- meta.shard_id = %q
-- meta.repo_scope = %q
-- meta.repo_scopes = %s
-- meta.path_scopes = %s
-
-Schema-valid template for this task (copy structure and field TYPES, then refine values with available evidence):
-%s
-
-Serialized runtime task JSON (context only):
-%s`, acpruntime.ProviderClaudeCode, topLevelCompatibilityRule, stepPolicy, repositoryEvidencePolicy, docFirstPolicy, workspacePromptPack, retryHint, nonEmptyResultHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderClaudeCode, "claude-cli", task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, task.ShardID, primaryRepoScope, repoScopesJSON, pathScopesJSON, buildDirectTaskResultTemplateJSON(task), strings.TrimSpace(string(taskPayload))))
-}
-
-func buildDirectTaskResultTemplateJSON(task acpruntime.Task) string {
-	coverageMissing := []string{"owner mappings", "ci-cd evidence"}
-	questions := []contracts.Question{}
-	if strings.HasPrefix(task.StepID, "refresh.") {
-		coverageMissing = append(coverageMissing, "delta validation")
-		questions = []contracts.Question{
-			{
-				ID:       "q.refresh.delta",
-				Text:     "What changed since previous run that affects ownership or dependencies?",
-				Priority: "high",
-			},
-		}
-	}
-
-	template := contracts.TaskResult{
-		Meta: contracts.Meta{
-			TaskID:     task.TaskID,
-			StepID:     task.StepID,
-			RunID:      task.RunID,
-			Runtime:    contracts.RuntimeMeta{Name: string(acpruntime.ProviderClaudeCode), Version: "claude-cli"},
-			StartedAt:  task.StartedAtUTC.UTC().Format(time.RFC3339),
-			FinishedAt: task.StartedAtUTC.UTC().Add(2 * time.Second).Format(time.RFC3339),
-			Workspace:  task.Workspace,
-			ShardID:    task.ShardID,
-			RepoScope:  primaryTaskRepoScope(task.RepoScope, task.RepoScopes),
-			RepoScopes: append([]string(nil), task.RepoScopes...),
-			PathScopes: append([]string(nil), task.PathScopes...),
-		},
-		Summary:   "Task completed with contract-compliant output.",
-		Changeset: buildDirectTemplateChangeset(task),
-		Coverage: &contracts.Coverage{
-			Observed: []string{"services"},
-			Missing:  coverageMissing,
-			Notes:    []string{"evidence gaps are captured explicitly"},
-		},
-		Questions: questions,
-		Warnings:  []string{},
-	}
-	raw, err := json.MarshalIndent(template, "", "  ")
-	if err != nil {
-		return "{}"
-	}
-	return string(raw)
-}
-
-func buildStepSpecificDirectPolicy(stepID string) string {
-	return steppolicy.StepSpecificPolicy(stepID)
-}
-
-func buildDocFirstFilesystemPolicy(task acpruntime.Task) string {
-	return steppolicy.DocFirstFilesystemPolicy(task)
-}
-
-func buildParseRepairHints(stepID string, parseStage string, parseErr error) []string {
-	return steppolicy.ParseRepairHints(stepID, parseStage, parseErr)
-}
-
-func buildArtifactRepairHints(initialProblem string) []string {
-	return steppolicy.CollectArtifactRepairHints(initialProblem)
-}
-
-func buildDraftArtifactRepairHints(task acpruntime.Task, validationErr error) []string {
-	return steppolicy.DraftArtifactRepairHints(task, validationErr)
-}
-
-func compactRetryHint(value string) string {
-	normalized := strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
-	if len(normalized) <= 320 {
-		return normalized
-	}
-	return normalized[:317] + "..."
-}
-
-func buildDirectTemplateChangeset(task acpruntime.Task) []contracts.Operation {
-	if runtimedrafts.IsDraftStep(task.StepID) || isCollectStep(task.StepID) {
-		return []contracts.Operation{}
-	}
-	scopes := append([]string(nil), task.RepoScopes...)
-	if len(scopes) == 0 {
-		scopes = []string{"repository"}
-	}
-	changes := make([]contracts.Operation, 0, len(scopes))
-	switch task.StepID {
-	case "init.step3.findings", "refresh.step3.findings":
-		for _, scope := range scopes {
-			scope = strings.TrimSpace(scope)
-			if scope == "" {
-				scope = "repository"
-			}
-			slug := slugutil.Slugify(scope)
-			if slug == "" {
-				slug = "repository"
-			}
-			changes = append(changes, contracts.Operation{
-				Op: "add_finding",
-				Finding: &contracts.Finding{
-					ID:          "finding.missing-owner.svc." + slug,
-					Severity:    "medium",
-					Title:       "Missing owner mapping",
-					Description: "owner_team_id is not confirmed",
-					RuleID:      "rule.owner.required",
-					RelatedIDs:  []string{"svc." + slug},
-					Provenance: contracts.Provenance{
-						Kind:       "inference",
-						Confidence: 0.66,
-						Evidence: []contracts.Evidence{
-							{Repo: scope, Path: "service.yaml"},
-						},
-					},
-				},
-			})
-		}
-	}
-	return changes
-}
-
-func isCollectStep(stepID string) bool {
-	switch strings.TrimSpace(stepID) {
-	case "init.step1.collect", "refresh.step1.collect":
-		return true
-	default:
-		return false
-	}
 }
 
 type FakeRunner struct{}
 
 func (FakeRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	semantic := fakeSemanticSnapshot(task)
+	summary := fakeSummary(task)
+	var verdict *contracts.ValidatorVerdict
+	if acpruntime.StepProviderKeyForStepID(task.StepID) == acpruntime.StepProviderStep3Findings {
+		verdict = &contracts.ValidatorVerdict{
+			Version:      1,
+			RunID:        task.RunID,
+			GeneratedAt:  task.StartedAtUTC.UTC().Add(2 * time.Second).Format(time.RFC3339),
+			Verdict:      "PASS",
+			Summary:      "Fake validator verdict accepted",
+			CheckedPaths: []string{"reports/taskruns/" + task.RunID + "/staging/final"},
+			Findings:     append([]contracts.Finding(nil), semantic.Findings...),
+			Questions:    append([]contracts.Question(nil), semantic.Questions...),
+		}
+	}
+	if err := PersistRuntimeArtifacts(task, summary, semantic, verdict); err != nil {
+		return acpruntime.Result{}, err
+	}
+	if err := validateRuntimeArtifacts(task); err != nil {
+		return acpruntime.Result{}, err
+	}
+	return acpruntime.Result{
+		Execution: acpruntime.NewExecution(task, acpruntime.ProviderClaudeCode, "fake", "succeeded", task.StartedAtUTC.UTC().Add(2*time.Second), nil),
+	}, nil
+}
+
+func fakeSummary(task acpruntime.Task) string {
+	switch acpruntime.StepProviderKeyForStepID(task.StepID) {
+	case acpruntime.StepProviderStep0Constitution:
+		return "Fake constitution draft completed"
+	case acpruntime.StepProviderStep1Collect:
+		return "Fake collect shard completed"
+	case acpruntime.StepProviderStep2AsIs:
+		return "Fake as-is draft completed"
+	case acpruntime.StepProviderStep3Findings:
+		return "Fake validator findings completed"
+	case acpruntime.StepProviderStep4Proposals:
+		return "Fake proposals draft completed"
+	default:
+		return "Fake runtime completed"
+	}
+}
+
+func fakeSemanticSnapshot(task acpruntime.Task) contracts.SemanticSnapshot {
 	repoScopes := append([]string(nil), task.RepoScopes...)
 	sort.Strings(repoScopes)
-
-	switch task.StepID {
-	case "init.step0.constitution":
-		result := contracts.TaskResult{
-			Meta: contracts.Meta{
-				TaskID:     task.TaskID,
-				StepID:     task.StepID,
-				RunID:      task.RunID,
-				Runtime:    contracts.RuntimeMeta{Name: "claude-code", Version: "fake"},
-				StartedAt:  task.StartedAtUTC.UTC().Format(time.RFC3339),
-				FinishedAt: task.StartedAtUTC.UTC().Add(1 * time.Second).Format(time.RFC3339),
-				Workspace:  task.Workspace,
-				RepoScope:  primaryTaskRepoScope(task.RepoScope, repoScopes),
-				RepoScopes: repoScopes,
-				PathScopes: append([]string(nil), task.PathScopes...),
-			},
-			Summary:   "Fake constitution draft completed",
-			Changeset: []contracts.Operation{},
-			Coverage: &contracts.Coverage{
-				Observed: []string{"repos", "workspace manifest"},
-				Missing:  []string{"manual constitution review"},
-				Notes:    []string{"fake runner materialized deterministic constitution draft"},
-			},
-		}
-		if err := persistDocsFirstArtifacts(task, result); err != nil {
-			return acpruntime.Result{}, err
-		}
-		return marshalResult(result)
-	case "init.step1.collect", "refresh.step1.collect":
-		result := contracts.TaskResult{
-			Meta: contracts.Meta{
-				TaskID:     task.TaskID,
-				StepID:     task.StepID,
-				RunID:      task.RunID,
-				Runtime:    contracts.RuntimeMeta{Name: "claude-code", Version: "fake"},
-				StartedAt:  task.StartedAtUTC.UTC().Format(time.RFC3339),
-				FinishedAt: task.StartedAtUTC.UTC().Add(2 * time.Second).Format(time.RFC3339),
-				Workspace:  task.Workspace,
-				ShardID:    task.ShardID,
-				RepoScope:  primaryTaskRepoScope(task.RepoScope, repoScopes),
-				RepoScopes: repoScopes,
-				PathScopes: append([]string(nil), task.PathScopes...),
-			},
-			Summary:   "Fake collect context completed",
-			Changeset: makeCollectChangeset(repoScopes),
-			Questions: makeCollectQuestions(repoScopes),
-			Coverage: &contracts.Coverage{
-				Observed: []string{"services", "entrypoints"},
-				Missing:  []string{"owner mappings", "ci-cd evidence"},
-				Notes:    []string{"fake runner materialized deterministic baseline output"},
-			},
-		}
-		if err := persistDocsFirstArtifacts(task, result); err != nil {
-			return acpruntime.Result{}, err
-		}
-		return marshalResult(result)
-	case "init.step3.findings", "refresh.step3.findings":
-		result := contracts.TaskResult{
-			Meta: contracts.Meta{
-				TaskID:     task.TaskID,
-				StepID:     task.StepID,
-				RunID:      task.RunID,
-				Runtime:    contracts.RuntimeMeta{Name: "claude-code", Version: "fake"},
-				StartedAt:  task.StartedAtUTC.UTC().Format(time.RFC3339),
-				FinishedAt: task.StartedAtUTC.UTC().Add(1 * time.Second).Format(time.RFC3339),
-				Workspace:  task.Workspace,
-				ShardID:    task.ShardID,
-				RepoScope:  primaryTaskRepoScope(task.RepoScope, repoScopes),
-				RepoScopes: repoScopes,
-				PathScopes: append([]string(nil), task.PathScopes...),
-			},
-			Summary:   "Fake findings completed",
-			Changeset: makeFindingsChangeset(repoScopes),
-		}
-		if err := persistDocsFirstArtifacts(task, result); err != nil {
-			return acpruntime.Result{}, err
-		}
-		return marshalResult(result)
-	case "init.step2.asis_docs", "refresh.step2.asis_docs":
-		result := contracts.TaskResult{
-			Meta: contracts.Meta{
-				TaskID:     task.TaskID,
-				StepID:     task.StepID,
-				RunID:      task.RunID,
-				Runtime:    contracts.RuntimeMeta{Name: "claude-code", Version: "fake"},
-				StartedAt:  task.StartedAtUTC.UTC().Format(time.RFC3339),
-				FinishedAt: task.StartedAtUTC.UTC().Add(1 * time.Second).Format(time.RFC3339),
-				Workspace:  task.Workspace,
-				RepoScope:  primaryTaskRepoScope(task.RepoScope, repoScopes),
-				RepoScopes: repoScopes,
-				PathScopes: append([]string(nil), task.PathScopes...),
-			},
-			Summary:   "Fake as-is synthesis completed",
-			Changeset: []contracts.Operation{},
-			Coverage: &contracts.Coverage{
-				Observed: []string{"runtime shard manifests", "staged coverage"},
-				Missing:  []string{"manual review"},
-				Notes:    []string{"fake runner materialized deterministic as-is draft"},
-			},
-		}
-		if err := persistDocsFirstArtifacts(task, result); err != nil {
-			return acpruntime.Result{}, err
-		}
-		return marshalResult(result)
-	case "init.step4.proposals", "refresh.step4.proposals":
-		result := contracts.TaskResult{
-			Meta: contracts.Meta{
-				TaskID:     task.TaskID,
-				StepID:     task.StepID,
-				RunID:      task.RunID,
-				Runtime:    contracts.RuntimeMeta{Name: "claude-code", Version: "fake"},
-				StartedAt:  task.StartedAtUTC.UTC().Format(time.RFC3339),
-				FinishedAt: task.StartedAtUTC.UTC().Add(1 * time.Second).Format(time.RFC3339),
-				Workspace:  task.Workspace,
-				RepoScope:  primaryTaskRepoScope(task.RepoScope, repoScopes),
-				RepoScopes: repoScopes,
-				PathScopes: append([]string(nil), task.PathScopes...),
-			},
-			Summary:   "Fake proposals draft completed",
-			Changeset: []contracts.Operation{},
-			Coverage: &contracts.Coverage{
-				Observed: []string{"validated staged docs", "proposal surface"},
-				Missing:  []string{"manual approval"},
-				Notes:    []string{"fake runner materialized deterministic proposals draft"},
-			},
-		}
-		if err := persistDocsFirstArtifacts(task, result); err != nil {
-			return acpruntime.Result{}, err
-		}
-		return marshalResult(result)
-	default:
-		return acpruntime.Result{}, fmt.Errorf("fake runner does not support step %q", task.StepID)
+	primaryRepo := ""
+	if len(repoScopes) > 0 {
+		primaryRepo = repoScopes[0]
 	}
+	if primaryRepo == "" {
+		primaryRepo = "stub-repo"
+	}
+	serviceID := "svc." + slugutil.Slugify(primaryRepo)
+	snapshot := contracts.SemanticSnapshot{
+		Coverage: contracts.Coverage{
+			Observed: []string{"services", "entrypoints"},
+			Missing:  []string{"owner mappings", "ci-cd evidence", "api contracts"},
+			Notes:    []string{"fake artifact-only runner output"},
+		},
+		Questions: []contracts.Question{
+			{
+				ID:         "q.owner." + serviceID,
+				Text:       fmt.Sprintf("Who owns %s?", serviceID),
+				Priority:   "high",
+				RelatedIDs: []string{serviceID},
+			},
+		},
+		Entities: []contracts.Entity{
+			{
+				ID:   serviceID,
+				Type: "service",
+				Name: humanizeServiceName(primaryRepo),
+				Attributes: map[string]any{
+					"repo_scope": primaryRepo,
+					"runtime":    "fake",
+				},
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.8,
+					Evidence: []contracts.Evidence{
+						{Repo: primaryRepo, Path: "README.md"},
+					},
+				},
+			},
+		},
+		Edges: []contracts.Edge{},
+		Findings: []contracts.Finding{
+			{
+				ID:          "finding.owner." + serviceID,
+				Severity:    "medium",
+				Title:       "Owner mapping is missing",
+				Description: "Fake runner keeps an explicit ownership gap for deterministic validation coverage.",
+				RuleID:      "rule.owner.required",
+				RelatedIDs:  []string{serviceID},
+				Provenance: contracts.Provenance{
+					Kind:       "inference",
+					Confidence: 0.6,
+					Evidence: []contracts.Evidence{
+						{Repo: primaryRepo, Path: "README.md"},
+					},
+				},
+			},
+		},
+	}
+	if acpruntime.StepProviderKeyForStepID(task.StepID) == acpruntime.StepProviderStep3Findings {
+		snapshot.Coverage.Observed = []string{"validator sweep", "staged findings"}
+		snapshot.Coverage.Missing = []string{"manual rollout review"}
+	}
+	return snapshot
+}
+
+func humanizeServiceName(repo string) string {
+	if strings.TrimSpace(repo) == "" {
+		return "Stub Service"
+	}
+	parts := strings.FieldsFunc(repo, func(r rune) bool {
+		return r == '-' || r == '_' || r == '/'
+	})
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(part[:1]) + strings.ToLower(part[1:])
+	}
+	return strings.Join(parts, " ")
 }
 
 type RecordedRunner struct {
@@ -1057,134 +434,11 @@ type RecordedRunner struct {
 }
 
 func (r RecordedRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
-	path, ok := r.ByStep[task.StepID]
-	if !ok {
-		switch task.StepID {
-		case "init.step0.constitution", "init.step2.asis_docs", "refresh.step2.asis_docs", "init.step4.proposals", "refresh.step4.proposals":
-			return FakeRunner{}.Run(ctx, task)
-		}
-		return acpruntime.Result{}, fmt.Errorf("recorded taskresult is missing for step %q", task.StepID)
+	// Legacy recorded stdout fixtures with semantic JSON are intentionally
+	// unsupported in the artifact-only architecture. Tests that still depend on them should be
+	// updated to artifact fixtures or removed.
+	if _, ok := r.ByStep[task.StepID]; ok {
+		return acpruntime.Result{}, fmt.Errorf("recorded legacy semantic stdout fixtures are unsupported in artifact-only runtime")
 	}
-	content, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		return acpruntime.Result{}, fmt.Errorf("read recorded taskresult: %w", err)
-	}
-	taskResult, err := contracts.ParseTaskResult(content)
-	if err != nil {
-		return acpruntime.Result{}, fmt.Errorf("parse recorded taskresult: %w", err)
-	}
-	if err := persistDocsFirstArtifacts(task, taskResult); err != nil {
-		return acpruntime.Result{}, err
-	}
-	return acpruntime.Result{
-		TaskResult: taskResult,
-		RawJSON:    bytes.TrimSpace(content),
-	}, nil
-}
-
-func marshalResult(result contracts.TaskResult) (acpruntime.Result, error) {
-	raw, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return acpruntime.Result{}, fmt.Errorf("marshal fake taskresult: %w", err)
-	}
-	return acpruntime.Result{
-		TaskResult: result,
-		RawJSON:    raw,
-	}, nil
-}
-
-func makeCollectChangeset(repoScopes []string) []contracts.Operation {
-	changes := make([]contracts.Operation, 0, len(repoScopes))
-	for _, repo := range repoScopes {
-		slug := slugutil.Slugify(repo)
-		changes = append(changes, contracts.Operation{
-			Op: "upsert_entity",
-			Entity: &contracts.Entity{
-				ID:   "svc." + slug,
-				Type: "service",
-				Name: humanizeServiceName(repo),
-				Attributes: map[string]any{
-					"repo_scope": repo,
-					"runtime":    "claude-code",
-				},
-				Provenance: contracts.Provenance{
-					Kind:       "observation",
-					Confidence: 0.7,
-					Evidence: []contracts.Evidence{
-						{
-							Repo: repo,
-							Path: "README.md",
-						},
-					},
-				},
-			},
-		})
-	}
-	return changes
-}
-
-func makeCollectQuestions(repoScopes []string) []contracts.Question {
-	questions := make([]contracts.Question, 0, len(repoScopes))
-	for _, repo := range repoScopes {
-		slug := slugutil.Slugify(repo)
-		questions = append(questions, contracts.Question{
-			ID:       "q.owner.svc." + slug,
-			Text:     fmt.Sprintf("Who owns service derived from repo %q?", repo),
-			Priority: "high",
-			RelatedIDs: []string{
-				"svc." + slug,
-			},
-		})
-	}
-	return questions
-}
-
-func makeFindingsChangeset(repoScopes []string) []contracts.Operation {
-	findings := make([]contracts.Operation, 0, len(repoScopes))
-	for _, repo := range repoScopes {
-		slug := slugutil.Slugify(repo)
-		findings = append(findings, contracts.Operation{
-			Op: "add_finding",
-			Finding: &contracts.Finding{
-				ID:          "finding.missing-owner.svc." + slug,
-				Severity:    "medium",
-				Title:       "Missing owner mapping",
-				Description: fmt.Sprintf("owner_team_id is unknown for service derived from repo %q", repo),
-				RuleID:      "rule.owner.required",
-				RelatedIDs: []string{
-					"svc." + slug,
-				},
-				Provenance: contracts.Provenance{
-					Kind:       "inference",
-					Confidence: 0.66,
-				},
-			},
-		})
-	}
-	return findings
-}
-
-func humanizeServiceName(repo string) string {
-	repo = strings.TrimSpace(repo)
-	if repo == "" {
-		return "Unknown Service"
-	}
-	parts := strings.FieldsFunc(repo, func(r rune) bool {
-		return r == '-' || r == '_' || r == '/'
-	})
-	for i := range parts {
-		if parts[i] == "" {
-			continue
-		}
-		parts[i] = strings.ToUpper(parts[i][:1]) + strings.ToLower(parts[i][1:])
-	}
-	name := strings.Join(parts, " ")
-	if strings.HasSuffix(strings.ToLower(name), " service") {
-		return name
-	}
-	return name + " Service"
-}
-
-func primaryTaskRepoScope(explicit string, scopes []string) string {
-	return steppolicy.PrimaryTaskRepoScope(explicit, scopes)
+	return FakeRunner{}.Run(ctx, task)
 }

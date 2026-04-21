@@ -1820,7 +1820,7 @@ export default function App() {
               <div className="actions">
                 {runLogTaskrunPaths.map((path) => (
                   <button key={`taskrun-log-open-${path}`} type="button" onClick={() => void handleOpenArtifact(path)}>
-                    Open taskrun artifact: {path}
+                    Open runtime execution artifact: {path}
                   </button>
                 ))}
               </div>

@@ -120,7 +120,7 @@ func TestLoadShardPackManifestFromRootRejectsWorkspaceRelativeDocumentPath(t *te
       "document_ids": ["doc.iac"]
     }
   ],
-  "compatibility": {
+  "semantic": {
     "coverage": {"observed": [], "missing": [], "notes": []},
     "questions": [],
     "entities": [],
@@ -261,7 +261,7 @@ func TestPromoteValidatedArtifactsRemovesStaleManagedCanonicalFiles(t *testing.T
 					StagedPath:    stagedPath,
 				},
 			},
-			Compatibility: contracts.CompatibilitySnapshot{},
+			Semantic: contracts.SemanticSnapshot{},
 		},
 		validatorVerdict: &contracts.ValidatorVerdict{Verdict: "PASS"},
 	}

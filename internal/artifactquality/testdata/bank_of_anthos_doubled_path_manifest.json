@@ -40,7 +40,7 @@
       ]
     }
   ],
-  "compatibility": {
+  "semantic": {
     "coverage": {
       "observed": [
         "iac"

@@ -33,16 +33,6 @@ for entry in "${workspace_cases[@]}"; do
   fi
 done
 
-ajv validate --spec=draft2020 -c ajv-formats -s schemas/taskresult.schema.json -d examples/taskresult.example.json
-ajv validate --spec=draft2020 -c ajv-formats -s schemas/taskresult.schema.json -d fixtures/taskresult/normalized-top-level.json
-taskresult_invalid_log="$tmpdir/taskresult.invalid.log"
-if ajv validate --spec=draft2020 -c ajv-formats -s schemas/taskresult.schema.json -d fixtures/taskresult/mixed-legacy.json >"$taskresult_invalid_log" 2>&1; then
-  echo "Expected invalid fixture to fail: fixtures/taskresult/mixed-legacy.json"
-  cat "$taskresult_invalid_log"
-  exit 1
-fi
-echo "fixtures/taskresult/mixed-legacy.json invalid as expected"
-
 docs_first_contracts=(
   "schemas/shard-pack-manifest.schema.json:examples/shard-pack-manifest.example.json"
   "schemas/final-run-index.schema.json:examples/final-run-index.example.json"

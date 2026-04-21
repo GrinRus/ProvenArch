@@ -1138,8 +1138,8 @@ func mapTypedRunnerAPIError(err error) (statusCode int, code string, message str
 	switch runnerCode {
 	case string(acpruntime.ErrorCodeRunnerUnavailable):
 		return http.StatusServiceUnavailable, runnerCode, runnerMessage, true
-	case string(acpruntime.ErrorCodeRunnerParseFailed):
-		// Parse failures are surfaced as run-level failures (`error_code`) after async start.
+	case string(acpruntime.ErrorCodeRuntimeContract), string(acpruntime.ErrorCodeRuntimeTimeout), string(acpruntime.ErrorCodeRunCanceled):
+		// Runtime execution failures are surfaced as run-level failures (`error_code`) after async start.
 		return 0, "", "", false
 	default:
 		return http.StatusBadRequest, runnerCode, runnerMessage, true

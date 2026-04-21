@@ -431,7 +431,7 @@ Partial update persisted execution-полей в `workspace.yaml`.
 - `trigger_unsupported`
 - `run_start_failed`
 
-`runner_unavailable` и `runner_parse_failed` не возвращаются start-endpoint'ом; эти коды появляются только в run status (`GET /api/pipeline/runs/<run_id>`) после `202 Accepted`, когда конкретный step-scoped provider проходит lazy preflight или runtime execution.
+`runner_unavailable` и `runtime_contract_failed` не возвращаются start-endpoint'ом; эти коды появляются только в run status (`GET /api/pipeline/runs/<run_id>`) после `202 Accepted`, когда конкретный step-scoped provider проходит lazy preflight или runtime execution.
 
 **501**
 - `not_supported`
@@ -497,7 +497,7 @@ Partial update persisted execution-полей в `workspace.yaml`.
 - `failed`
 
 Для runtime parse/runtime ошибок после успешного async start используется run-level статус:
-- `error_code: "runner_parse_failed"` (или другой actionable code) в `failed` run.
+- `error_code: "runtime_contract_failed"` (или другой actionable code) в `failed` run.
 
 Для lifecycle сценариев используются дополнительные `error_code`:
 - `run_canceled` — run отменён пользователем;
@@ -562,7 +562,7 @@ Partial update persisted execution-полей в `workspace.yaml`.
       "step_id": "init.step1.collect",
       "domain_id": "payments-service",
       "message": "runtime task started",
-      "taskrun_path": "reports/taskruns/run_20260403_001-step1-collect-domain-payments-service.json",
+      "taskrun_path": "reports/taskruns/run_20260403_001/staging/shards/payments-service/runtime-execution.json",
       "fields": {
         "task_id": "task-run_20260403_001-init-step1-collect-payments-service",
         "provider": "claude-code",

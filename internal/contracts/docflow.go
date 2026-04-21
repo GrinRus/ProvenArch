@@ -33,28 +33,20 @@ type DocumentCitation struct {
 	DocumentIDs []string   `json:"document_ids"`
 }
 
-type CompatibilitySnapshot struct {
-	Coverage  Coverage   `json:"coverage"`
-	Questions []Question `json:"questions"`
-	Entities  []Entity   `json:"entities"`
-	Edges     []Edge     `json:"edges"`
-	Findings  []Finding  `json:"findings"`
-}
-
 type ShardPackManifest struct {
-	Version       int                   `json:"version"`
-	RunID         string                `json:"run_id"`
-	StepID        string                `json:"step_id"`
-	ShardID       string                `json:"shard_id"`
-	DomainID      string                `json:"domain_id,omitempty"`
-	AgentRole     string                `json:"agent_role"`
-	ArtifactRoot  string                `json:"artifact_root"`
-	RepoScopes    []string              `json:"repo_scopes,omitempty"`
-	PathScopes    []string              `json:"path_scopes,omitempty"`
-	Summary       string                `json:"summary,omitempty"`
-	Documents     []AuthoredDocument    `json:"documents"`
-	Citations     []DocumentCitation    `json:"citations"`
-	Compatibility CompatibilitySnapshot `json:"compatibility"`
+	Version      int                `json:"version"`
+	RunID        string             `json:"run_id"`
+	StepID       string             `json:"step_id"`
+	ShardID      string             `json:"shard_id"`
+	DomainID     string             `json:"domain_id,omitempty"`
+	AgentRole    string             `json:"agent_role"`
+	ArtifactRoot string             `json:"artifact_root"`
+	RepoScopes   []string           `json:"repo_scopes,omitempty"`
+	PathScopes   []string           `json:"path_scopes,omitempty"`
+	Summary      string             `json:"summary,omitempty"`
+	Documents    []AuthoredDocument `json:"documents"`
+	Citations    []DocumentCitation `json:"citations"`
+	Semantic     SemanticSnapshot   `json:"semantic"`
 }
 
 type FinalRunDocument struct {
@@ -75,14 +67,14 @@ type TopicIndexEntry struct {
 }
 
 type FinalRunIndex struct {
-	Version            int                   `json:"version"`
-	RunID              string                `json:"run_id"`
-	Pipeline           string                `json:"pipeline"`
-	GeneratedAt        string                `json:"generated_at"`
-	CitationIndexPath  string                `json:"citation_index_path"`
-	CanonicalDocuments []FinalRunDocument    `json:"canonical_documents"`
-	Topics             []TopicIndexEntry     `json:"topics"`
-	Compatibility      CompatibilitySnapshot `json:"compatibility"`
+	Version            int                `json:"version"`
+	RunID              string             `json:"run_id"`
+	Pipeline           string             `json:"pipeline"`
+	GeneratedAt        string             `json:"generated_at"`
+	CitationIndexPath  string             `json:"citation_index_path"`
+	CanonicalDocuments []FinalRunDocument `json:"canonical_documents"`
+	Topics             []TopicIndexEntry  `json:"topics"`
+	Semantic           SemanticSnapshot   `json:"semantic"`
 }
 
 type CitationIndex struct {
@@ -109,6 +101,8 @@ type ValidatorVerdict struct {
 	Summary      string           `json:"summary,omitempty"`
 	CheckedPaths []string         `json:"checked_paths"`
 	FixedPaths   []string         `json:"fixed_paths,omitempty"`
+	Findings     []Finding        `json:"findings,omitempty"`
+	Questions    []Question       `json:"questions,omitempty"`
 	Issues       []ValidatorIssue `json:"issues,omitempty"`
 }
 
@@ -279,6 +273,27 @@ func validateValidatorVerdict(verdict ValidatorVerdict) error {
 		case "error", "warning":
 		default:
 			problems = append(problems, label+".severity must be error or warning")
+		}
+	}
+	for idx, finding := range verdict.Findings {
+		label := fmt.Sprintf("findings[%d]", idx)
+		if strings.TrimSpace(finding.ID) == "" {
+			problems = append(problems, label+".id is required")
+		}
+		if strings.TrimSpace(finding.Title) == "" {
+			problems = append(problems, label+".title is required")
+		}
+		if strings.TrimSpace(finding.Severity) == "" {
+			problems = append(problems, label+".severity is required")
+		}
+	}
+	for idx, question := range verdict.Questions {
+		label := fmt.Sprintf("questions[%d]", idx)
+		if strings.TrimSpace(question.ID) == "" {
+			problems = append(problems, label+".id is required")
+		}
+		if strings.TrimSpace(question.Text) == "" {
+			problems = append(problems, label+".text is required")
 		}
 	}
 	if len(problems) > 0 {

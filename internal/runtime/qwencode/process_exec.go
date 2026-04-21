@@ -2,27 +2,88 @@ package qwencode
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
-	"github.com/GrinRus/ProvenArch/internal/runtime/runnerdiag"
-	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultbinding"
-	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultcompat"
-	"github.com/GrinRus/ProvenArch/internal/runtime/taskresultextractor"
-	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 )
+
+const (
+	collectPostArtifactStallWindow = 20 * time.Second
+	collectPreArtifactStallWindow  = 75 * time.Second
+	collectStallPollInterval       = 2 * time.Second
+	collectStallTerminateGrace     = 2 * time.Second
+	collectStallPostTerminateDrain = 500 * time.Millisecond
+)
+
+type runQwenOptions struct {
+	EnableCollectStallMonitor bool
+	EnableDraftStallMonitor   bool
+}
+
+type collectStallPhase string
+
+const (
+	collectStallPhasePreArtifact  collectStallPhase = "pre_artifact"
+	collectStallPhasePostArtifact collectStallPhase = "post_artifact"
+)
+
+type collectStallDiagnostic struct {
+	StallPhase            collectStallPhase
+	ManifestState         string
+	AuthoredFileCount     int
+	LastPipeActivity      time.Time
+	LastWriteRootMutation time.Time
+}
+
+type collectStallError struct {
+	Sentinel   error
+	Diagnostic collectStallDiagnostic
+}
+
+func (e collectStallError) Error() string {
+	if e.Sentinel == nil {
+		return "collect_stalled"
+	}
+	return e.Sentinel.Error()
+}
+
+func (e collectStallError) Is(target error) bool {
+	return target != nil && target == e.Sentinel
+}
+
+type collectWriteRootSnapshot struct {
+	ManifestPresent   bool
+	ManifestState     string
+	AuthoredFileCount int
+	LastMutation      time.Time
+}
+
+type commandActivityTracker struct {
+	mu       sync.Mutex
+	lastRead time.Time
+}
+
+type activityTrackingReader struct {
+	reader  io.Reader
+	tracker *commandActivityTracker
+}
+
+type commandOutputBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
 
 func newCommandActivityTracker(start time.Time) *commandActivityTracker {
 	return &commandActivityTracker{lastRead: start.UTC()}
@@ -68,15 +129,6 @@ func (b *commandOutputBuffer) WriteString(value string) {
 	b.buf.WriteString(value)
 }
 
-func (b *commandOutputBuffer) BytesCopy() []byte {
-	if b == nil {
-		return nil
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return append([]byte(nil), b.buf.Bytes()...)
-}
-
 func (b *commandOutputBuffer) String() string {
 	if b == nil {
 		return ""
@@ -86,26 +138,36 @@ func (b *commandOutputBuffer) String() string {
 	return b.buf.String()
 }
 
-func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, args []string, options runQwenOptions) (acpruntime.Result, string, error, error) {
-	cmd := exec.CommandContext(ctx, command, args...)
+func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, args []string, options runQwenOptions) (acpruntime.Result, error) {
+	taskPayload, err := json.Marshal(task)
+	if err != nil {
+		return acpruntime.Result{}, err
+	}
+	commandArgs := append([]string(nil), args...)
+	if len(commandArgs) == 0 {
+		commandArgs = buildDefaultQwenArgs(task, buildPrompt(task))
+	}
+
+	cmd := exec.CommandContext(ctx, command, commandArgs...)
 	configureCommandProcessGroup(cmd)
 	if workspace := strings.TrimSpace(task.Workspace); workspace != "" {
 		cmd.Dir = workspace
 	} else if writeRoot := strings.TrimSpace(task.WriteRoot); writeRoot != "" {
 		cmd.Dir = writeRoot
 	}
+	cmd.Stdin = bytes.NewReader(taskPayload)
 
 	stdout := &commandOutputBuffer{}
 	stderr := &commandOutputBuffer{}
 	stdoutPipe, stdoutWriter, err := os.Pipe()
 	if err != nil {
-		return acpruntime.Result{}, "", nil, err
+		return acpruntime.Result{}, err
 	}
 	stderrPipe, stderrWriter, err := os.Pipe()
 	if err != nil {
 		_ = stdoutPipe.Close()
 		_ = stdoutWriter.Close()
-		return acpruntime.Result{}, "", nil, err
+		return acpruntime.Result{}, err
 	}
 	cmd.Stdout = stdoutWriter
 	cmd.Stderr = stderrWriter
@@ -116,9 +178,9 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 		_ = stderrPipe.Close()
 		_ = stderrWriter.Close()
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return acpruntime.Result{}, "", nil, ctxErr
+			return acpruntime.Result{}, ctxErr
 		}
-		return acpruntime.Result{}, "", nil, err
+		return acpruntime.Result{}, err
 	}
 	_ = stdoutWriter.Close()
 	_ = stderrWriter.Close()
@@ -130,39 +192,27 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 	defer stopMonitor()
 	var monitorWG sync.WaitGroup
 	stallCh := make(chan collectStallError, 1)
-	var stalledErr error
-	var stalledMu sync.Mutex
 	if options.EnableCollectStallMonitor && isCollectStep(task.StepID) && strings.TrimSpace(task.WriteRoot) != "" && cmd.Process != nil {
 		monitorWG.Add(1)
 		go func() {
 			defer monitorWG.Done()
-			stallErr, stalled := monitorCollectStall(monitorCtx, cmd.Process, task, activityTracker)
-			if !stalled {
-				return
-			}
-			stalledMu.Lock()
-			stalledErr = stallErr
-			stalledMu.Unlock()
-			select {
-			case stallCh <- stallErr:
-			default:
+			if stallErr, stalled := monitorCollectStall(monitorCtx, cmd.Process, task, activityTracker); stalled {
+				select {
+				case stallCh <- stallErr:
+				default:
+				}
 			}
 		}()
 	}
-	if options.EnableDraftStallMonitor && runtimedrafts.IsDraftStep(task.StepID) && strings.TrimSpace(task.WriteRoot) != "" && strings.TrimSpace(task.DraftFinalRoot) != "" && cmd.Process != nil {
+	if options.EnableDraftStallMonitor && isDraftStep(task.StepID) && strings.TrimSpace(task.WriteRoot) != "" && strings.TrimSpace(task.DraftFinalRoot) != "" && cmd.Process != nil {
 		monitorWG.Add(1)
 		go func() {
 			defer monitorWG.Done()
-			stallErr, stalled := monitorDraftArtifactStall(monitorCtx, cmd.Process, task, activityTracker)
-			if !stalled {
-				return
-			}
-			stalledMu.Lock()
-			stalledErr = stallErr
-			stalledMu.Unlock()
-			select {
-			case stallCh <- stallErr:
-			default:
+			if stallErr, stalled := monitorDraftArtifactStall(monitorCtx, cmd.Process, task, activityTracker); stalled {
+				select {
+				case stallCh <- stallErr:
+				default:
+				}
 			}
 		}()
 	}
@@ -197,7 +247,6 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 	}()
 
 	var waitErr error
-	stalledTriggered := false
 	select {
 	case <-streamDone:
 		stopMonitor()
@@ -214,12 +263,15 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 		if waitErr == nil {
 			waitErr = ctx.Err()
 		}
-	case <-stallCh:
-		stalledTriggered = true
+	case stallErr := <-stallCh:
 		waitForCommandStreams(stdoutPipe, stderrPipe, streamDone, collectStallPostTerminateDrain)
 		stopMonitor()
 		monitorWG.Wait()
 		waitForCommandExitAsync(cmd)
+		return acpruntime.Result{
+			Stdout: stdout.String(),
+			Stderr: stderr.String(),
+		}, stallErr
 	}
 
 	if waitErr == nil && streamErr != nil {
@@ -229,341 +281,13 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 		Stdout: stdout.String(),
 		Stderr: stderr.String(),
 	}
-
-	stalledMu.Lock()
-	currentStallErr := stalledErr
-	stalledMu.Unlock()
-	if currentStallErr != nil {
-		stalledTriggered = true
-	}
-	if stalledTriggered {
-		parsed, _, parseErr := parseCapturedTaskResult(task, stdout.BytesCopy(), result.Stdout, result.Stderr)
-		if parseErr == nil {
-			return parsed, "", nil, nil
-		}
-		return result, "", nil, currentStallErr
-	}
 	if waitErr != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return result, "", nil, ctxErr
+			return result, ctxErr
 		}
-		return result, "", nil, runnerdiag.BuildExecFailure(waitErr, result.Stdout, result.Stderr)
+		return result, waitErr
 	}
-
-	parsed, parseStage, parseErr := parseCapturedTaskResult(task, stdout.BytesCopy(), result.Stdout, result.Stderr)
-	return parsed, parseStage, parseErr, nil
-}
-
-type streamedOutputBudget struct {
-	forwardedBytes int
-	truncated      bool
-}
-
-func parseCapturedTaskResult(task acpruntime.Task, stdoutBytes []byte, stdoutText string, stderrText string) (acpruntime.Result, string, error) {
-	rawTaskResult, err := taskresultextractor.Extract(stdoutBytes)
-	if err != nil {
-		parseStage := "extract"
-		if taskresultextractor.IsTransportError(err) {
-			parseStage = "transport"
-		}
-		return acpruntime.Result{
-			Stdout: stdoutText,
-			Stderr: stderrText,
-		}, parseStage, err
-	}
-	if normalizedRawTaskResult, changed, normalizeErr := taskresultcompat.NormalizeRawTaskResult(task, rawTaskResult); normalizeErr == nil && changed {
-		rawTaskResult = normalizedRawTaskResult
-	}
-	taskResult, err := contracts.ParseTaskResult(rawTaskResult)
-	if err != nil {
-		return acpruntime.Result{
-			Stdout: stdoutText,
-			Stderr: stderrText,
-		}, "schema", err
-	}
-	if err := taskresultbinding.Validate(task, taskResult, acpruntime.ProviderQwenCode); err != nil {
-		return acpruntime.Result{
-			Stdout: stdoutText,
-			Stderr: stderrText,
-		}, "binding", err
-	}
-	return acpruntime.Result{
-		TaskResult: taskResult,
-		RawJSON:    rawTaskResult,
-		Stdout:     stdoutText,
-		Stderr:     stderrText,
-	}, "", nil
-}
-
-func monitorCollectStall(
-	ctx context.Context,
-	process *os.Process,
-	task acpruntime.Task,
-	activity *commandActivityTracker,
-) (collectStallError, bool) {
-	startedAt := time.Now().UTC()
-	ticker := time.NewTicker(collectStallPollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return collectStallError{}, false
-		case <-ticker.C:
-			snapshot, err := scanCollectWriteRoot(task.WriteRoot)
-			if err != nil {
-				continue
-			}
-			lastPipeActivity := activity.LastRead()
-			if lastPipeActivity.IsZero() {
-				lastPipeActivity = startedAt
-			}
-			now := time.Now().UTC()
-			lastWriteRootMutation := effectiveCollectMutationTime(snapshot.LastMutation, startedAt)
-
-			if snapshot.ManifestPresent && snapshot.AuthoredFileCount > 0 {
-				if now.Sub(lastPipeActivity) < collectPostArtifactStallWindow {
-					continue
-				}
-				if now.Sub(lastWriteRootMutation) < collectPostArtifactStallWindow {
-					continue
-				}
-
-				diagnostic := collectStallDiagnostic{
-					StallPhase:            collectStallPhasePostArtifact,
-					ManifestState:         strings.TrimSpace(snapshot.ManifestState),
-					AuthoredFileCount:     snapshot.AuthoredFileCount,
-					LastPipeActivity:      lastPipeActivity.UTC(),
-					LastWriteRootMutation: lastWriteRootMutation.UTC(),
-				}
-				emitDiagnostic(task, "runtime task stalled after artifacts", diagnostic.fields(task))
-				terminateProcessWithGrace(process)
-				return collectStallError{Sentinel: errCollectStalledAfterArtifacts, Diagnostic: diagnostic}, true
-			}
-
-			if snapshot.ManifestPresent || snapshot.AuthoredFileCount > 0 {
-				continue
-			}
-			if now.Sub(lastPipeActivity) < collectPreArtifactStallWindow {
-				continue
-			}
-			if now.Sub(lastWriteRootMutation) < collectPreArtifactStallWindow {
-				continue
-			}
-
-			diagnostic := collectStallDiagnostic{
-				StallPhase:            collectStallPhasePreArtifact,
-				ManifestState:         strings.TrimSpace(snapshot.ManifestState),
-				AuthoredFileCount:     snapshot.AuthoredFileCount,
-				LastPipeActivity:      lastPipeActivity.UTC(),
-				LastWriteRootMutation: lastWriteRootMutation.UTC(),
-			}
-			emitDiagnostic(task, "runtime task stalled before artifacts", diagnostic.fields(task))
-			terminateProcessWithGrace(process)
-			return collectStallError{Sentinel: errCollectStalledBeforeArtifacts, Diagnostic: diagnostic}, true
-		}
-	}
-}
-
-type draftArtifactSnapshot struct {
-	ManifestPresent bool
-	ManifestState   string
-	DraftFileCount  int
-	LastMutation    time.Time
-}
-
-func monitorDraftArtifactStall(
-	ctx context.Context,
-	process *os.Process,
-	task acpruntime.Task,
-	activity *commandActivityTracker,
-) (collectStallError, bool) {
-	startedAt := time.Now().UTC()
-	ticker := time.NewTicker(collectStallPollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return collectStallError{}, false
-		case <-ticker.C:
-			snapshot, err := scanDraftArtifacts(task)
-			if err != nil {
-				continue
-			}
-			if !snapshot.ManifestPresent || snapshot.DraftFileCount == 0 {
-				continue
-			}
-			lastPipeActivity := activity.LastRead()
-			if lastPipeActivity.IsZero() {
-				lastPipeActivity = startedAt
-			}
-			now := time.Now().UTC()
-			lastMutation := effectiveCollectMutationTime(snapshot.LastMutation, startedAt)
-			if now.Sub(lastPipeActivity) < collectPostArtifactStallWindow {
-				continue
-			}
-			if now.Sub(lastMutation) < collectPostArtifactStallWindow {
-				continue
-			}
-
-			diagnostic := collectStallDiagnostic{
-				StallPhase:            collectStallPhasePostArtifact,
-				ManifestState:         strings.TrimSpace(snapshot.ManifestState),
-				AuthoredFileCount:     snapshot.DraftFileCount,
-				LastPipeActivity:      lastPipeActivity.UTC(),
-				LastWriteRootMutation: lastMutation.UTC(),
-			}
-			emitDiagnostic(task, "runtime task stalled after draft artifacts", diagnostic.fields(task))
-			terminateProcessWithGrace(process)
-			return collectStallError{Sentinel: errDraftStalledAfterArtifacts, Diagnostic: diagnostic}, true
-		}
-	}
-}
-
-func scanDraftArtifacts(task acpruntime.Task) (draftArtifactSnapshot, error) {
-	snapshot := draftArtifactSnapshot{ManifestState: "missing"}
-	writeRoot := strings.TrimSpace(task.WriteRoot)
-	draftRoot := strings.TrimSpace(task.DraftFinalRoot)
-	manifestFile := strings.TrimSpace(runtimedrafts.ManifestFileForStep(task.StepID))
-	if writeRoot == "" || draftRoot == "" || manifestFile == "" {
-		return snapshot, nil
-	}
-
-	manifestPath := filepath.Join(filepath.Clean(writeRoot), manifestFile)
-	if info, err := os.Stat(manifestPath); err == nil && !info.IsDir() {
-		snapshot.ManifestPresent = true
-		snapshot.LastMutation = info.ModTime().UTC()
-		if _, _, loadErr := runtimedrafts.Load(writeRoot, manifestFile); loadErr == nil {
-			snapshot.ManifestState = "present"
-		} else {
-			snapshot.ManifestState = "invalid"
-		}
-	} else if err != nil && !os.IsNotExist(err) {
-		return draftArtifactSnapshot{}, err
-	}
-
-	walkErr := filepath.WalkDir(filepath.Clean(draftRoot), func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil
-			}
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		snapshot.DraftFileCount++
-		if info, infoErr := d.Info(); infoErr == nil && info.ModTime().After(snapshot.LastMutation) {
-			snapshot.LastMutation = info.ModTime().UTC()
-		}
-		return nil
-	})
-	if walkErr != nil && !os.IsNotExist(walkErr) {
-		return draftArtifactSnapshot{}, walkErr
-	}
-	return snapshot, nil
-}
-
-func effectiveCollectMutationTime(lastMutation time.Time, startedAt time.Time) time.Time {
-	if lastMutation.IsZero() || lastMutation.Before(startedAt) {
-		return startedAt.UTC()
-	}
-	return lastMutation.UTC()
-}
-
-func currentCollectManifestState(writeRoot string) string {
-	snapshot, err := scanCollectWriteRoot(writeRoot)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(snapshot.ManifestState)
-}
-
-func currentDraftManifestState(task acpruntime.Task) string {
-	snapshot, err := scanDraftArtifacts(task)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(snapshot.ManifestState)
-}
-
-func scanCollectWriteRoot(writeRoot string) (collectWriteRootSnapshot, error) {
-	root := strings.TrimSpace(writeRoot)
-	if root == "" {
-		return collectWriteRootSnapshot{ManifestState: "missing"}, nil
-	}
-	info, err := os.Stat(root)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return collectWriteRootSnapshot{ManifestState: "missing"}, nil
-		}
-		return collectWriteRootSnapshot{}, err
-	}
-	if !info.IsDir() {
-		return collectWriteRootSnapshot{}, fmt.Errorf("write_root is not a directory: %s", root)
-	}
-
-	snapshot := collectWriteRootSnapshot{ManifestState: "missing"}
-	if walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if d.IsDir() {
-			return nil
-		}
-		rel, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			return relErr
-		}
-		rel = filepath.ToSlash(rel)
-		if info, infoErr := d.Info(); infoErr == nil && info.ModTime().After(snapshot.LastMutation) {
-			snapshot.LastMutation = info.ModTime().UTC()
-		}
-		if rel == "shard-pack-manifest.json" {
-			snapshot.ManifestPresent = true
-			return nil
-		}
-		snapshot.AuthoredFileCount++
-		return nil
-	}); walkErr != nil {
-		return collectWriteRootSnapshot{}, walkErr
-	}
-
-	if snapshot.ManifestPresent {
-		assessment, assessErr := assessRetryManifestAtWriteRoot(root)
-		if assessErr == nil && assessment.Rich {
-			snapshot.ManifestState = "rich"
-		} else {
-			snapshot.ManifestState = "invalid"
-		}
-	}
-	return snapshot, nil
-}
-
-func terminateProcessWithGrace(process *os.Process) {
-	if process == nil {
-		return
-	}
-	if err := signalCommandProcessTree(process, syscall.SIGTERM); err != nil && !isProcessDoneErr(err) {
-		_ = killCommandProcessTree(process)
-		return
-	}
-	if collectStallTerminateGrace > 0 {
-		time.Sleep(collectStallTerminateGrace)
-	}
-	_ = killCommandProcessTree(process)
-}
-
-func isProcessDoneErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, os.ErrProcessDone) {
-		return true
-	}
-	lower := strings.ToLower(err.Error())
-	return strings.Contains(lower, "already finished") || strings.Contains(lower, "process already finished") || strings.Contains(lower, "no such process")
+	return result, nil
 }
 
 func captureCommandStream(reader io.Reader, sink *commandOutputBuffer, task acpruntime.Task, stream acpruntime.OutputStream) error {
@@ -579,10 +303,7 @@ func captureCommandStream(reader io.Reader, sink *commandOutputBuffer, task acpr
 			forwardStreamOutput(task, stream, part, budget)
 		}
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			if isPipeClosedErr(err) {
+			if errors.Is(err, io.EOF) || isPipeClosedErr(err) {
 				return nil
 			}
 			return err
@@ -590,14 +311,9 @@ func captureCommandStream(reader io.Reader, sink *commandOutputBuffer, task acpr
 	}
 }
 
-func isPipeClosedErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, os.ErrClosed) {
-		return true
-	}
-	return strings.Contains(strings.ToLower(err.Error()), "file already closed")
+type streamedOutputBudget struct {
+	forwardedBytes int
+	truncated      bool
 }
 
 func forwardStreamOutput(task acpruntime.Task, stream acpruntime.OutputStream, chunk string, budget *streamedOutputBudget) {
@@ -618,28 +334,8 @@ func forwardStreamOutput(task acpruntime.Task, stream acpruntime.OutputStream, c
 		nextBytes := budget.forwardedBytes + lineBytes
 		if nextBytes <= acpruntime.RuntimeOutputStreamHardCapBytes {
 			budget.forwardedBytes = nextBytes
-			task.OnOutput(acpruntime.OutputChunk{
-				Stream: stream,
-				Text:   line,
-			})
+			task.OnOutput(acpruntime.OutputChunk{Stream: stream, Text: line})
 			continue
-		}
-		remaining := acpruntime.RuntimeOutputStreamHardCapBytes - budget.forwardedBytes
-		if remaining > 0 {
-			trimmed := line
-			if len([]byte(trimmed)) > remaining {
-				trimmedBytes := []byte(trimmed)
-				if remaining < len(trimmedBytes) {
-					trimmed = string(trimmedBytes[:remaining])
-				}
-			}
-			trimmed = strings.TrimSpace(trimmed)
-			if trimmed != "" {
-				task.OnOutput(acpruntime.OutputChunk{
-					Stream: stream,
-					Text:   trimmed,
-				})
-			}
 		}
 		budget.truncated = true
 		task.OnOutput(acpruntime.OutputChunk{
@@ -650,42 +346,18 @@ func forwardStreamOutput(task acpruntime.Task, stream acpruntime.OutputStream, c
 	}
 }
 
-func (c *retryDiagnosticContext) absorbDiagnostic(diagnostic collectStallDiagnostic) {
-	if c == nil {
-		return
-	}
-	if diagnostic.StallPhase != "" {
-		c.LastStallPhase = diagnostic.StallPhase
-	}
-	if state := strings.TrimSpace(diagnostic.ManifestState); state != "" {
-		c.ManifestStateBeforeRetry = state
-	}
-	if diagnostic.AuthoredFileCount > 0 {
-		c.AuthoredFileCount = diagnostic.AuthoredFileCount
-	}
-	if !diagnostic.LastPipeActivity.IsZero() {
-		c.LastPipeActivity = diagnostic.LastPipeActivity.UTC()
-	}
-	if !diagnostic.LastWriteRootMutation.IsZero() {
-		c.LastWriteRootMutation = diagnostic.LastWriteRootMutation.UTC()
+func closeCommandPipe(file *os.File) {
+	if file != nil {
+		_ = file.Close()
 	}
 }
 
-func waitForCommandStreams(stdoutPipe io.ReadCloser, stderrPipe io.ReadCloser, streamDone <-chan struct{}, timeout time.Duration) {
-	if timeout <= 0 {
-		<-streamDone
-		return
-	}
+func waitForCommandStreams(stdoutPipe *os.File, stderrPipe *os.File, streamDone <-chan struct{}, timeout time.Duration) {
+	closeCommandPipe(stdoutPipe)
+	closeCommandPipe(stderrPipe)
 	select {
 	case <-streamDone:
-		return
 	case <-time.After(timeout):
-		closeCommandPipe(stdoutPipe)
-		closeCommandPipe(stderrPipe)
-		select {
-		case <-streamDone:
-		case <-time.After(timeout):
-		}
 	}
 }
 
@@ -697,9 +369,6 @@ func waitForCommandExit(cmd *exec.Cmd, timeout time.Duration) error {
 	go func() {
 		done <- cmd.Wait()
 	}()
-	if timeout <= 0 {
-		return <-done
-	}
 	select {
 	case err := <-done:
 		return err
@@ -717,9 +386,122 @@ func waitForCommandExitAsync(cmd *exec.Cmd) {
 	}()
 }
 
-func closeCommandPipe(pipe io.Closer) {
-	if pipe == nil {
-		return
+func isPipeClosedErr(err error) bool {
+	if err == nil {
+		return false
 	}
-	_ = pipe.Close()
+	if errors.Is(err, os.ErrClosed) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "file already closed")
+}
+
+func monitorCollectStall(ctx context.Context, process *os.Process, task acpruntime.Task, tracker *commandActivityTracker) (collectStallError, bool) {
+	for {
+		select {
+		case <-ctx.Done():
+			return collectStallError{}, false
+		case <-time.After(collectStallPollInterval):
+		}
+		snapshot := collectWriteRootState(task.WriteRoot)
+		lastPipe := tracker.LastRead()
+		lastMutation := snapshot.LastMutation
+		if !snapshot.ManifestPresent && !lastMutation.IsZero() && time.Since(lastMutation) < collectPreArtifactStallWindow {
+			continue
+		}
+		if !lastPipe.IsZero() && time.Since(lastPipe) < collectPreArtifactStallWindow {
+			continue
+		}
+		if snapshot.ManifestPresent {
+			if !lastPipe.IsZero() && time.Since(lastPipe) < collectPostArtifactStallWindow {
+				continue
+			}
+			return collectStallError{
+				Sentinel: errCollectStalledAfterArtifacts,
+				Diagnostic: collectStallDiagnostic{
+					StallPhase:            collectStallPhasePostArtifact,
+					ManifestState:         snapshot.ManifestState,
+					AuthoredFileCount:     snapshot.AuthoredFileCount,
+					LastPipeActivity:      lastPipe,
+					LastWriteRootMutation: lastMutation,
+				},
+			}, true
+		}
+		return collectStallError{
+			Sentinel: errCollectStalledBeforeArtifacts,
+			Diagnostic: collectStallDiagnostic{
+				StallPhase:            collectStallPhasePreArtifact,
+				ManifestState:         snapshot.ManifestState,
+				AuthoredFileCount:     snapshot.AuthoredFileCount,
+				LastPipeActivity:      lastPipe,
+				LastWriteRootMutation: lastMutation,
+			},
+		}, true
+	}
+}
+
+func monitorDraftArtifactStall(ctx context.Context, process *os.Process, task acpruntime.Task, tracker *commandActivityTracker) (collectStallError, bool) {
+	for {
+		select {
+		case <-ctx.Done():
+			return collectStallError{}, false
+		case <-time.After(collectStallPollInterval):
+		}
+		if _, _, err := validateRuntimeDraftArtifactsAtWriteRoot(task); err != nil {
+			continue
+		}
+		lastPipe := tracker.LastRead()
+		if !lastPipe.IsZero() && time.Since(lastPipe) < collectPostArtifactStallWindow {
+			continue
+		}
+		return collectStallError{
+			Sentinel: errDraftStalledAfterArtifacts,
+			Diagnostic: collectStallDiagnostic{
+				StallPhase:            collectStallPhasePostArtifact,
+				ManifestState:         "valid",
+				LastPipeActivity:      lastPipe,
+				LastWriteRootMutation: time.Now().UTC(),
+			},
+		}, true
+	}
+}
+
+func collectWriteRootState(writeRoot string) collectWriteRootSnapshot {
+	snapshot := collectWriteRootSnapshot{}
+	if strings.TrimSpace(writeRoot) == "" {
+		return snapshot
+	}
+	manifestPath := filepath.Join(writeRoot, "shard-pack-manifest.json")
+	if info, err := os.Stat(manifestPath); err == nil && !info.IsDir() {
+		snapshot.ManifestPresent = true
+		snapshot.LastMutation = info.ModTime().UTC()
+		snapshot.ManifestState = "present"
+	}
+	entries, err := os.ReadDir(writeRoot)
+	if err != nil {
+		return snapshot
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Name() == "shard-pack-manifest.json" {
+			continue
+		}
+		snapshot.AuthoredFileCount++
+		if info, statErr := entry.Info(); statErr == nil {
+			modTime := info.ModTime().UTC()
+			if modTime.After(snapshot.LastMutation) {
+				snapshot.LastMutation = modTime
+			}
+		}
+	}
+	if snapshot.ManifestPresent {
+		raw, err := os.ReadFile(manifestPath)
+		if err == nil {
+			if _, parseErr := contracts.ParseShardPackManifest(raw); parseErr == nil {
+				snapshot.ManifestState = "valid"
+			} else {
+				snapshot.ManifestState = "invalid"
+			}
+		}
+	}
+	return snapshot
 }

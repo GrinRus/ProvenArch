@@ -88,6 +88,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                             "2",
                             "1",
                             "0",
+                            "0",
                             "qwen-code@stub",
                             "reports/taskruns/init-run-quality.json",
                             "reports",
@@ -108,6 +109,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                             "2",
                             "1",
                             "0",
+                            "0",
                             "qwen-code@stub",
                             "reports/taskruns/refresh-run-quality.json",
                             "reports",
@@ -119,11 +121,11 @@ class BatchFailureClassificationTest(unittest.TestCase):
         )
         write_text(
             run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
-            '{"level":"error","error_code":"runner_parse_failed","message":"provider returned invalid envelope"}\n',
+            '{"level":"error","error_code":"runtime_contract_failed","message":"provider did not produce required artifacts"}\n',
         )
         write_text(
             run_dir / "arch-workspace/reports/taskruns/raw/runtime.stderr.txt",
-            "API Error: 403 permission_error\nrunner_parse_failed\n",
+            "artifact validation failed\nruntime_contract_failed\n",
         )
         self._write_snapshot(run_dir, "init-run", "init")
         self._write_snapshot(run_dir, "refresh-run", "refresh")
@@ -195,11 +197,13 @@ class BatchFailureClassificationTest(unittest.TestCase):
         quality_payload = {
             "runtime_versions": ["qwen-code@stub"],
             "totals": {
-                "changeset_ops": 1,
-                "findings_added": 0 if pipeline == "init" else 1,
-                "questions_count": 1,
-                "coverage_observed": 2,
-                "coverage_missing": 1,
+                "signal_score": 8 if pipeline == "init" else 9,
+                "semantic_entities": 1,
+                "semantic_edges": 0 if pipeline == "init" else 1,
+                "findings_count": 1,
+                "questions_count": 2,
+                "coverage_observed": 1,
+                "coverage_missing": 0,
                 "warnings_count": 0,
             },
             "steps": [
@@ -211,16 +215,80 @@ class BatchFailureClassificationTest(unittest.TestCase):
         }
         write_json(reports_root / f"taskruns/{run_id}-quality.json", quality_payload)
         taskrun_payload = {
-            "meta": {
-                "runtime": {"name": "qwen-code"},
-                "step_id": f"{pipeline}.step1.collect" if pipeline == "init" else f"{pipeline}.step3.findings",
-            },
-            "changeset": [],
+            "version": 1,
+            "task_id": f"task-{run_id}-{pipeline}",
+            "run_id": run_id,
+            "step_id": f"{pipeline}.step1.collect" if pipeline == "init" else f"{pipeline}.step3.findings",
+            "provider": "qwen-code",
+            "started_at": "2026-04-20T00:00:00Z",
+            "finished_at": "2026-04-20T00:00:01Z",
+            "status": "failed" if pipeline == "init" else "succeeded",
+            "repo_scopes": ["demo-repo"],
+            "path_scopes": ["src"],
         }
+        if pipeline == "init":
+            taskrun_payload["shard_id"] = "domain-a"
         write_json(
-            reports_root / f"taskruns/{run_id}-{pipeline}-step{'1-collect' if pipeline == 'init' else '3-findings'}.json",
+            reports_root / f"taskruns/{run_id}/runtime/{pipeline}-step{'1-collect' if pipeline == 'init' else '3-findings'}/runtime-execution.json",
             taskrun_payload,
         )
+        semantic_root = reports_root / "taskruns" / run_id
+        if pipeline == "refresh":
+            write_json(
+                semantic_root / "staging" / "shards" / "domain-a" / "shard-pack-manifest.json",
+                {
+                    "version": 1,
+                    "run_id": run_id,
+                    "step_id": "refresh.step1.collect",
+                    "shard_id": "domain-a",
+                    "domain_id": "domain-a",
+                    "agent_role": "shard-analyst",
+                    "artifact_root": "reports/taskruns/refresh-run/staging/shards/domain-a",
+                    "repo_scopes": ["demo-repo"],
+                    "path_scopes": ["src"],
+                    "documents": [
+                        {
+                            "id": "doc.arch",
+                            "title": "Architecture",
+                            "path": "architecture.md",
+                            "kind": "report",
+                        }
+                    ],
+                    "semantic": {
+                        "coverage": {
+                            "observed": ["services"],
+                            "missing": [],
+                            "notes": ["fixture"],
+                        },
+                        "questions": [{"id": "q.owner.service", "text": "Who owns the materialized service?"}],
+                        "entities": [],
+                        "edges": [],
+                        "findings": [],
+                    },
+                },
+            )
+            write_json(
+                semantic_root / "validator" / "validator-verdict.json",
+                {
+                    "version": 1,
+                    "run_id": run_id,
+                    "step_id": "refresh.step3.findings",
+                    "generated_at": "2026-04-20T00:00:01Z",
+                    "verdict": "PASS",
+                    "summary": "fixture verdict",
+                    "checked_paths": ["reports/as-is/overview.md"],
+                    "fixed_paths": [],
+                    "findings": [
+                        {
+                            "id": "finding.owner.missing",
+                            "title": "Missing owner mapping",
+                            "severity": "medium",
+                            "description": "owner_team_id is unknown",
+                        }
+                    ],
+                    "questions": [{"id": "q.owner.service", "text": "Who owns the materialized service?"}],
+                },
+            )
 
     def _create_incomplete_fixture_run_dir(self, run_dir: Path) -> None:
         self._create_fixture_run_dir(run_dir)
@@ -380,6 +448,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                             "2",
                             "1",
                             "0",
+                            "0",
                             "qwen-code@stub",
                             "reports/taskruns/init-run-quality.json",
                             "reports",
@@ -400,6 +469,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                             "2",
                             "1",
                             "0",
+                            "0",
                             "qwen-code@stub",
                             "reports/taskruns/refresh-run-quality.json",
                             "reports",
@@ -418,7 +488,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
         ]
         write_json(refresh_quality_path, refresh_quality)
 
-    def test_python_report_prefers_runtime_parse_over_incomplete_cycle_classifier(self) -> None:
+    def test_python_report_prefers_runtime_contract_failed_over_incomplete_cycle_classifier(self) -> None:
         result = self.module.evaluate_run(
             provider="qwen-code",
             run_index=1,
@@ -431,8 +501,8 @@ class BatchFailureClassificationTest(unittest.TestCase):
                 "process_exit": "1",
             },
         )
-        self.assertEqual("runtime_parse", result.failure_class)
-        self.assertTrue(result.runtime_parse)
+        self.assertEqual("runtime_contract_failed", result.failure_class)
+        self.assertTrue(result.runtime_contract_failed)
         self.assertTrue(result.infra_incomplete_cycle)
 
     def test_python_report_prefers_runtime_timeout_over_runner_unavailable_when_timeout_signaled(self) -> None:
@@ -503,7 +573,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertFalse(result.hard_pass)
         self.assertIn("quality:artifact-quality", result.issues)
 
-    def test_shell_classifier_reads_taskrun_logs_and_returns_runtime_parse(self) -> None:
+    def test_shell_classifier_reads_taskrun_logs_and_returns_runtime_contract_failed(self) -> None:
         script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
         prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
         classifications_tsv = self.root / "backend-run-classifications.tsv"
@@ -523,7 +593,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual("", completed.stdout.strip(), completed.stdout)
         fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
         self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
-        self.assertEqual("runtime_parse", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("runtime_contract_failed", fields[2], classifications_tsv.read_text(encoding="utf-8"))
 
     def test_shell_classifier_prefers_runtime_timeout_over_runner_unavailable_logs(self) -> None:
         run_dir = self.root / "run-timeout-precedence"
@@ -1057,14 +1127,14 @@ class BatchFailureClassificationTest(unittest.TestCase):
             run_dir=run_dir,
             preflight={},
             classification_row={
-                "failure_class": "runtime_parse",
+                "failure_class": "runtime_contract_failed",
                 "failure_subclass": "none",
                 "cancellation_like": "0",
                 "process_exit": "1",
             },
         )
 
-        self.assertEqual("runtime_parse", result.failure_class)
+        self.assertEqual("runtime_contract_failed", result.failure_class)
         self.assertNotIn("analysis:overview", result.issues)
         self.assertNotIn("analysis:findings", result.issues)
         self.assertNotIn("analysis:coverage", result.issues)
@@ -1080,14 +1150,14 @@ class BatchFailureClassificationTest(unittest.TestCase):
             run_dir=run_dir,
             preflight={},
             classification_row={
-                "failure_class": "runtime_parse",
+                "failure_class": "runtime_contract_failed",
                 "failure_subclass": "none",
                 "cancellation_like": "0",
                 "process_exit": "1",
             },
         )
 
-        self.assertEqual("runtime_parse", result.failure_class)
+        self.assertEqual("runtime_contract_failed", result.failure_class)
         self.assertNotIn("analysis:coverage", result.issues)
         self.assertNotIn("analysis:questions", result.issues)
         self.assertNotIn("analysis:findings", result.issues)

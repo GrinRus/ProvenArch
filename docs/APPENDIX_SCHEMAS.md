@@ -53,83 +53,41 @@ Sharding policy в MVP:
 `workspace.yaml` не конфигурирует workspace layout beyond repo sources и imports path.
 Папки `charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/` фиксированы MVP convention.
 
-## 2) TaskResult JSON Schema
+## 2) Runtime execution metadata
 
-- **Source of truth:** `schemas/taskresult.schema.json`
-- Compatibility-контракт между **orchestrator** и **runtime** (MVP runtime: headless providers `claude-code|qwen-code` + fake baseline).
-- Orchestrator обязан валидировать TaskResult до применения изменений.
+- **Source of truth:** `internal/contracts/runtimeexecution.go`
+- Internal execution metadata между **runtime** и **orchestrator**.
+- Semantic success surface полностью artifact-only: stdout/stderr используются только для diagnostics/classification и raw-output forensics.
 
 ### Top-level поля
 - required:
-  - `meta`
-  - `summary`
-  - `changeset`
-- optional:
-  - `questions`
-  - `coverage`
-  - `warnings`
-  - `debug`
-
-### `meta` (минимум)
-- required:
+  - `version`
   - `task_id`
-  - `step_id`
-  - `runtime.name` (non-empty string)
-  - `started_at`
-- optional:
-  - `runtime.version`
-  - `finished_at`
   - `run_id`
-  - `workspace`
+  - `step_id`
+  - `provider`
+  - `started_at`
+  - `finished_at`
+  - `status`
+- optional:
   - `shard_id`
+  - `domain_id`
+  - `runtime_version`
   - `repo_scope`
   - `repo_scopes[]`
   - `path_scopes[]`
-
-> Политика MVP: `runtime.name` остаётся provider-aware (`claude-code` или `qwen-code` для headless, `claude-code` для fake baseline), при этом схема по-прежнему требует только непустую строку.
-> `repo_scope` — primary repo context shard-а (удобен для prompt/diagnostics и обратной совместимости single-scope шагов).
-> `repo_scopes[]` соответствует repo entries, заданным в `workspace.yaml`, и использует их `name`.
-> `shard_id`/`path_scopes[]` используются runtime shard planner/scheduler для per-shard диагностики и воспроизводимости taskrun-артефактов.
-
-### Changeset operations (MVP)
-- `upsert_entity`
-- `remove_entity`
-- `upsert_edge`
-- `remove_edge`
-- `add_finding`
-- `add_doc_artifact`
+  - `artifact_root`
+  - `write_root`
+  - `draft_final_root`
+  - `required_artifacts[]`
+  - `warnings[]`
+  - `raw_output_refs`
 
 ### Canonical MVP semantics
-- runtime по умолчанию пишет `questions[]` и `coverage` на top-level
-- `changeset[].op` поддерживает только canonical operations из schema
-- legacy forms `add_question` и `set_coverage` отклоняются на contract validation
-
-Conflict policy:
-- duplicate questions dedupe по canonical `id` и нормализованному `text`
-- `coverage.observed`, `coverage.missing`, `coverage.notes` canonicalize-ятся (snake/kebab/spaced variants) с дедупликацией по нормализованной форме
-
-### Provenance и evidence
-- `provenance.kind`: `observation | inference | assertion`
-- `provenance.confidence`: `0..1`
-- `provenance.evidence[]`:
-  - `repo`
-  - `path`
-  - optional `ref`
-  - optional `lines` в формате объекта `{ "start": <int>, "end": <int> }`
-
-### Ограничение compatibility-контракта
-`TaskResult` не поддерживает `write_file(content)` и не является primary writer surface.
-
-Primary docs-first path:
-- runtime пишет authored docs только в run-scoped `write_root`
-- каноника живёт в staged/promoted doc set + `final-run-index` + `citation-index`
-- `validator-verdict` является release gate
-
-`TaskResult` в MVP:
-- compatibility envelope для semantic guards/derived model/taskrun diagnostics
-- `add_doc_artifact` остаётся metadata registration op без content payload
-- не заменяет runtime-authored docs-first artifact pack
-- per-step provider/runtime resolution не добавляется в `TaskResult` schema этого slice и фиксируется в run metadata / logs / runtime profile API
+- provider success = process completed + required step artifacts passed contract validation
+- semantic state не приходит через stdout/stderr или отдельный JSON envelope
+- execution metadata используются для replay/recovery, diagnostics и linking to raw stdout/stderr artifacts
+- `status` поддерживает только `succeeded | failed | canceled | timeout`
 
 ## 3) Shard Pack Manifest Schema
 
@@ -145,12 +103,12 @@ Top-level required fields:
 - `artifact_root`
 - `documents[]`
 - `citations[]`
-- `compatibility`
+- `semantic`
 
 Semantic role:
 - описывает authored shard docs внутри shard staging root
 - связывает документы с canonical stable paths, topics и citation ids
-- несёт compatibility snapshot для derived model layer
+- несёт semantic snapshot для derived model layer
 
 ## 4) Final Run Index Schema
 
@@ -165,7 +123,7 @@ Required fields:
 - `citation_index_path`
 - `canonical_documents[]`
 - `topics[]`
-- `compatibility`
+- `semantic`
 
 Semantic role:
 - canonical machine-readable index для UI/API/results surfaces

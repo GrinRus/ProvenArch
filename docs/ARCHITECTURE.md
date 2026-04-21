@@ -1,7 +1,7 @@
 # ARCHITECTURE.md (Go monorepo MVP)
 
 Этот документ описывает целевую архитектуру реализации ACP для local-first MVP.
-В текущем состоянии реализован runnable baseline: `workspace` foundations, docs-first staged runtime pipeline для `init|refresh`, API endpoints `/api/*`, validator-gated promotion в `reports/*`/`proposals/*`, compatibility materialization `model/*` и fake-runner default для required CI без live dependencies.
+В текущем состоянии реализован runnable baseline: `workspace` foundations, docs-first staged runtime pipeline для `init|refresh`, API endpoints `/api/*`, validator-gated promotion в `reports/*`/`proposals/*`, derived model materialization `model/*` и fake-runner default для required CI без live dependencies.
 
 ## Scope (MVP)
 - Local-first: всё работает на машине разработчика
@@ -53,7 +53,7 @@
    - При bootstrap авто-выбирает newest active run (`queued/running`), иначе первый run в history; после ручного выбора run auto-switch не выполняется
    - Если выбранный run исчезает из history (например, retention/restart race), UI очищает stale `Run status`/logs для этого run и не auto-switch-ится на другой run
    - Показывает `Run status` выбранного run с полным warnings list (`RunInfo.warnings`), `error_code` и `error`
-   - Показывает `Runs: Logs` для выбранного run (`timestamp/level/step/domain/message`) с dual-view `event timeline | raw agent stream | all`, переключателем `line | line+fields` и quick actions `Copy logs`, `Download logs`, `Open taskrun artifact`
+   - Показывает `Runs: Logs` для выбранного run (`timestamp/level/step/domain/message`) с dual-view `event timeline | raw agent stream | all`, переключателем `line | line+fields` и quick actions `Copy logs`, `Download logs`, `Open runtime execution artifact`
    - `Results` включает sub-tabs `Coverage / Artifacts / Diagrams`, где `Diagrams` рендерит Mermaid previews для `reports/diagrams/*`
    - Поддерживает `Cancel selected run` для active run через `POST /api/pipeline/runs/<run_id>/cancel`
    - Runtime Timeouts settings panel:
@@ -87,11 +87,11 @@
      - `write_root` (absolute run-scoped staging dir)
      - `read_context_roots[]`
    - Step 1 runtime primary output: authored shard dossier pack + `shard-pack-manifest.json`
-   - Сохраняет raw compatibility taskruns и shard summaries в `reports/taskruns/*` для recovery/auditability
+   - Сохраняет raw runtime execution metadata и shard summaries в `reports/taskruns/*` для recovery/auditability
    - Runtime sharding planner (heuristics/semantic) materialize-ит deterministic shard-plan artifacts `reports/taskruns/*-shard-plan*.json` и shard-summary artifacts `reports/taskruns/*-shard-summary*.json`
    - shard-plan публикует полный неперекрывающийся coverage partition repo через `path_scopes` (directory/file scopes); для больших repo применяется только structural coalescing по filesystem ancestry
-   - Per-shard persistence crash-safe: shard-summary materialize-ится сразу со status=`pending`; после schema-validated TaskResult raw taskrun пишется до `apply`, shard переходит в `checkpointed`, после успешного `apply` — в `succeeded`; runtime/apply failure фиксируется как `failed` без ожидания конца шага
-   - Internal shard-summary contract: `taskrun_path` обязателен для `checkpointed/succeeded`; persisted taskrun сохраняет `meta.shard_id/meta.repo_scopes/meta.path_scopes`
+   - Per-shard persistence crash-safe: shard-summary materialize-ится сразу со status=`pending`; после validated runtime execution metadata internal `runtime-execution.json` пишется до `apply`, shard переходит в `checkpointed`, после успешного `apply` — в `succeeded`; runtime/apply failure фиксируется как `failed` без ожидания конца шага
+   - Internal shard-summary contract: `taskrun_path` обязателен для `checkpointed/succeeded`; он должен ссылаться на persisted `runtime-execution.json` с `shard_id/repo_scopes/path_scopes`
    - Internal shard-plan/shard-summary artifacts materialize-ят non-empty `meta.runtime.name/meta.runtime.version`, чтобы internal batch/contract checks не трактовали их как runtime-name drift
    - Scheduler поддерживает `sequential|parallel` execution с worker-pool (`max_parallel_tasks`) и `fail_fast|best_effort` failure-policy
    - При `best_effort` downstream шаги продолжаются на partial model, но итог run фиксируется как `failed` с `error_code=run_partial_failed`; если `step1.collect` становится `unusable`, live `step3.findings` не выполняется, а downstream markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) materialize-ятся в `report_mode=incomplete` с явным banner/triage-only wording
@@ -104,10 +104,10 @@
    - Step 3 runtime primary output: `validator-verdict.json`
    - Promotion копирует только approved final set в stable `reports/as-is/*`, `reports/findings/*`, `reports/coverage/*`, `reports/agent-outputs/*`, `proposals/*`
    - обязательный human gate перед publish отсутствует; после успешных compile/validator gates promotion происходит автоматически
-   - Валидирует TaskResult как compatibility envelope, а не как primary filesystem contract
+   - Валидирует только required step artifacts и persisted runtime execution metadata, а не semantic stdout payload
    - Нормализует canonical top-level `questions`/`coverage` (dedupe/canonicalization) без ingestion из legacy operations
    - Применяет semantic guard для refresh-taskruns: фильтрует placeholder/off-topic артефакты в `refresh.step1.collect`, добавляет deterministic fallback finding при owner-gap в `refresh.step3.findings`, канонизирует/дедуплицирует coverage/question semantics
-   - Поддерживает derived compatibility layer: `model/*` rebuild-ится из `final run index + citation index` после успешного promotion
+   - Поддерживает derived model layer: `model/*` rebuild-ится из `final run index + citation index` после успешного promotion
    - Не auto-create/rename canonical domain/team cards и не разрешает runtime напрямую писать в `charter/*`
    - Для incomplete/failed terminal paths materialize-ит fallback markdown surfaces без promotion approved set
    - Поддерживает async run coordination: single active run + debounce queue (`last event wins`)
@@ -116,13 +116,13 @@
      - active run отменяется cooperative через `context cancel` (`failed`, `error_code=run_canceled`)
      - если cancel request пришёл раньше конкурирующего layout/validation failure, terminal surface сохраняет `error_code=run_canceled`, а validation error остаётся в logs/warnings
    - На старте сервиса stale `queued` run по-прежнему reconcile-ится в `failed` с `error_code=run_reconciled_after_restart`
-   - Для async service-managed run stale `running` run auto-resume-ится с тем же `run_id`, если есть resumable shard artifacts; resume cursor стартует с `*.step1.collect` для rebuild in-memory state из persisted taskruns, `step2.asis_docs` при resume после более позднего шага может быть детерминированно пересобран из persisted collect artifacts без live provider rerun
+   - Для async service-managed run stale `running` run auto-resume-ится с тем же `run_id`, если есть resumable shard artifacts; resume cursor стартует с persisted `runtime-execution.json` для `step1.collect`, `step2.asis_docs` при resume после более позднего шага может быть детерминированно пересобран из persisted collect artifacts без live provider rerun
    - Ведёт persisted run history в `reports/taskruns/run-history.json` (versioned index, retention 500)
    - Ведёт run-level logs в `reports/taskruns/logs/<run_id>.ndjson` с cursor query API (`GET /api/pipeline/runs/<run_id>/logs`)
    - Runtime seam поддерживает live forwarding stdout/stderr от headless providers в run logs (`kind=runtime_output`, `stream=stdout|stderr`), event stream и raw stream сосуществуют
    - Internal safeguard ограничивает raw runtime stream hard-cap и публикует явный truncation marker (`fields.output_truncated=true`)
    - При runtime/parse fail логирует structured diagnostics snippets (`stdout_snippet`/`stderr_snippet`) в `RunLogEntry.fields` (sanitize + truncate)
-   - Пробрасывает `TaskResult.warnings` в run diagnostics (`RunInfo.Warnings`) и логирует warning events
+   - Пробрасывает runtime warnings из execution metadata в run diagnostics (`RunInfo.Warnings`) и логирует warning events
    - Runtime step execution:
      - `executeRuntimeTask` выполняет runner под `context.WithTimeout(step_timeout_sec)`
      - heartbeat-log `runtime task heartbeat` публикуется раз в `heartbeat_sec`
@@ -143,23 +143,23 @@
    - headless providers: `claude-code` (`internal/runtime/claudecode`) и `qwen-code` (`internal/runtime/qwencode`)
    - общий runtime layer + provider factory: `internal/runtime/runtime.go`, `internal/runtime/providers/factory.go`
    - каждый provider получает explicit staged-write contract (`artifact_root`, `write_root`, `draft_final_root`, `read_context_roots`, `step_contract`, `expected_artifacts`) и должен писать runtime-authored artifacts только внутрь `write_root`/`draft_final_root`
-   - live headless providers продолжают возвращать TaskResult JSON как compatibility envelope; parse failures классифицируются как `runner_parse_failed`
+   - live headless providers считаются успешными только при completed process + valid required artifacts; missing/invalid artifacts классифицируются как `runtime_contract_failed`
    - `shard-pack-manifest.json.documents[].path` — strict `artifact_root`-relative contract; workspace-level prefixes (`reports/...`, `charter/...`, `proposals/...`) и duplicated `artifact_root` prefix считаются invalid collect artifact drift. Runtime canonicalizer может детерминированно переписать такой path только если он однозначно указывает на существующий файл внутри `write_root`
    - для `init.step1.collect` / `refresh.step1.collect` runtime выполняет максимум одну post-success artifact-repair попытку, если `shard-pack-manifest.json` выглядит skeletal/generic-only; write-root-only retry разрешён только для already-rich manifests, иначе retry сохраняет repo roots и откатывает `write_root`, если fidelity не улучшилась
-   - schema-retry и artifact-repair разведены: schema-invalid `TaskResult` получает один direct-JSON retry с жёстким whitelist `changeset[].op`, а schema-valid result с invalid manifest получает отдельный artifact-repair retry с canonical manifest skeleton
+   - artifact-repair и provider retry разведены: invalid manifest получает один explicit artifact-repair retry с canonical manifest skeleton; semantic stdout parse больше не является success surface
    - `qwen-code` для `init.step1.collect` / `refresh.step1.collect` имеет internal stall watchdog в двух фазах:
      - `pre_artifact`: если process жив, но до первого authored artifact одновременно молчат stdout/stderr и мутации `write_root`, runtime принудительно завершает provider process и запускает один forced fresh retry до общего step timeout
      - `post_artifact`: если в `write_root` уже есть `shard-pack-manifest.json` + authored docs, но provider перестал писать в stdout/stderr и перестал мутировать `write_root`, runtime принудительно завершает provider process, пишет diagnostic events (`runtime task stalled before artifacts` / `runtime task stalled after artifacts` / `retry scheduled` / `retry completed`) и запускает forced artifact-repair retry до step timeout
-   - transcript outputs с provider transport/API failures (например `[API Error: ... SSL ...]`) не считаются generic `runtime_parse`: runtime сохраняет raw stdout/stderr и классифицирует их как `runner_unavailable`
-   - collect step не считается успешным, если после единственной artifact-repair попытки `shard-pack-manifest.json` остаётся missing/invalid/skeletal; такой случай поднимается как runtime contract failure (`runner_parse_failed` / `runtime_parse`)
-   - collect contract требует полного `compatibility` block в `shard-pack-manifest.json` (`coverage/questions/entities/edges/findings`) и repo-specific citation surface; generic-only `cite.runtime-summary` допустим только вне multi-document refresh evidence collapse
-   - `init.step0.constitution`, `init|refresh.step2.asis_docs` и `init|refresh.step4.proposals` проходят provider-agnostic required-artifact gate: runtime принимает шаг только если draft manifest валиден и все referenced draft files существуют под `draft_final_root`; safe normalization допускает только удаление legacy `add_doc_artifact` ops, дублирующих уже валидный runtime draft manifest
+   - transcript outputs с provider transport/API failures (например `[API Error: ... SSL ...]`) не считаются generic `runtime_contract_failed`: runtime сохраняет raw stdout/stderr и классифицирует их как `runner_unavailable`
+   - collect step не считается успешным, если после единственной artifact-repair попытки `shard-pack-manifest.json` остаётся missing/invalid/skeletal; такой случай поднимается как runtime contract failure (`runtime_contract_failed`)
+   - collect contract требует полного `semantic` block в `shard-pack-manifest.json` (`coverage/questions/entities/edges/findings`) и repo-specific citation surface; generic-only `cite.runtime-summary` допустим только вне multi-document refresh evidence collapse
+   - `init.step0.constitution`, `init|refresh.step2.asis_docs` и `init|refresh.step4.proposals` проходят provider-agnostic required-artifact gate: runtime принимает шаг только если draft manifest валиден и все referenced draft files существуют под `draft_final_root`
    - runtime draft manifest contract для `step0/2/4` (`version=1`, `run_id`, `step_id`, `step_contract`, `agent_role`, `outputs[]`) вынесен в shared internal source of truth и используется и writer-ами, и validator-ами без дублирования структур
    - validators для collect manifests и runtime draft manifests read-only по умолчанию: hidden filesystem mutation внутри validation не допускается
    - filesystem reconciliation разрешён только как явная runtime repair/canonicalization стадия до финальной validation; сама validation лишь проверяет manifest contract и наличие referenced files
-   - active compatibility surface зафиксирована internal registry и ограничена тремя safe drift paths: artifact-root-relative `documents[].path` normalization, duplicate legacy `add_doc_artifact` drop при уже валидной canonical surface и draft-root reconcile только для уже записанных canonical draft files в явной repair stage
-   - `qwen` для draft-only шагов (`step0/2/4`) валидирует required draft artifacts до возврата в orchestrator и делает один constrained artifact-repair retry (`write_root + draft_final_root`, `changeset: []` preferred) вместо silent acceptance legacy draft schemas
-   - `qwen` для draft-only шагов также имеет post-artifact stall recovery: если canonical draft manifest и draft files уже появились, но provider перестал писать в stdout/stderr и перестал мутировать `write_root`/`draft_final_root`, runtime принудительно завершает process и запускает один constrained retry, который добирает только финальный `TaskResult`
+   - active repair surface зафиксирована internal registry и ограничена двумя safe drift paths: artifact-root-relative `documents[].path` normalization и draft-root reconcile только для уже записанных canonical draft files в явной repair stage
+   - `qwen` для draft-only шагов (`step0/2/4`) валидирует required draft artifacts до возврата в orchestrator и делает один constrained artifact-repair retry (`write_root + draft_final_root`) вместо silent acceptance legacy draft schemas
+   - `qwen` для draft-only шагов также имеет post-artifact stall recovery: если canonical draft manifest и draft files уже появились, но provider перестал писать в stdout/stderr и перестал мутировать `write_root`/`draft_final_root`, runtime принудительно завершает process и запускает один constrained artifact-only retry
    - `claude-code` и `qwen-code` используют shared provider-agnostic step-policy/prompt layer для required artifacts, retry bans и explicit negative rules; provider-specific остаются только command/process execution, pipe monitoring, transcript extraction и provider failure classification
    - headless provider scope включает `arch-workspace` и resolved repo directories для текущих `repo_scope/repo_scopes`, чтобы provider видел source evidence из реальных checkout-ов
    - command overrides:
@@ -182,16 +182,16 @@
    - `POST /api/workspace/validate` даёт pre-run readiness diagnostics по layout (`missing/will create on run`, `not_dir`, `unreadable`)
    - git helpers (shell out в `git`)
 
-7) **Model store (`internal/model`)** *(implemented baseline, compatibility layer)*
+7) **Model store (`internal/model`)** *(implemented baseline, derived layer)*
    - entity-per-file YAML
    - stable IDs + aliases
    - детерминированная slug normalization и collision policy
-   - apply changeset operations
-   - хранит derived compatibility view для legacy consumers и диаграмм
+   - apply semantic snapshots
+   - хранит derived model view для диаграмм и deterministic projections
 
 8) **Reports (`internal/reports`)** *(implemented baseline)*
    - primary narrative surfaces в docs-first path приходят из runtime-authored staged docs
-   - compiler layer используется как compatibility fallback для отсутствующих canonical surfaces
+   - compiler layer используется только как deterministic renderer/materializer для derived technical surfaces
    - в derived layer генерирует evidence-first C4 Mermaid set: `Context`, `Container`, per-service `Component`, per-service `Code`
    - materialize-ит индекс диаграмм `reports/diagrams/index.md` для UI filtering/open flow
    - формирует `reports/changelog/*` по итерациям
@@ -227,7 +227,7 @@
 1) Collect context -> shard-authored dossier packs + shard manifests
 2) As-is docs -> agent-authored drafts + compiler-normalized staged final doc assembly + indexes
 3) Findings -> validator verdict over staged final set
-4) Proposals -> agent-authored drafts + automatic promotion + compatibility rebuild
+4) Proposals -> agent-authored drafts + automatic promotion + derived model rebuild
 
 On-demand capability:
 - Q&A агент использует `charter/cards + model + reports + docs/imports`; в beta доступен как internal service + CLI `acp qa` без публичного API endpoint.

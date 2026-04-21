@@ -18,7 +18,8 @@ RUN_RESULTS_COLUMNS = [
     "run_id",
     "status",
     "signal",
-    "changeset",
+    "entities",
+    "edges",
     "findings",
     "questions",
     "cov_obs",
@@ -74,7 +75,7 @@ FAILURE_CLASS_PRECEDENCE = {
     "summary_missing": 0,
     "runtime_timeout": 1,
     "runner_unavailable": 2,
-    "runtime_parse": 3,
+    "runtime_contract_failed": 3,
     "infra_signal_terminated": 4,
     "quality_gates_failed": 5,
     "infra_incomplete_cycle": 6,
@@ -147,7 +148,7 @@ def parse_run_results(path: Path) -> list[dict[str, Any]]:
         if len(parts) < len(RUN_RESULTS_COLUMNS):
             continue
         record = dict(zip(RUN_RESULTS_COLUMNS, parts))
-        for numeric_key in ("signal", "changeset", "findings", "questions", "cov_obs", "cov_missing", "warnings"):
+        for numeric_key in ("signal", "entities", "edges", "findings", "questions", "cov_obs", "cov_missing", "warnings"):
             try:
                 record[numeric_key] = int(record[numeric_key])
             except Exception:
@@ -585,8 +586,18 @@ def resolve_quality_json(run_dir: Path, row: dict[str, Any]) -> tuple[Path, str]
 
 def resolve_step_taskrun_files(run_dir: Path, run_id: str, pipeline: str) -> tuple[list[Path], str]:
     reports_root, source = resolve_reports_root(run_dir, run_id)
-    files = sorted((reports_root / "taskruns").glob(f"{run_id}-{pipeline}-*.json"))
+    files = sorted((reports_root / "taskruns" / run_id).glob("**/runtime-execution.json"))
     return files, source
+
+
+def resolve_step_semantic_files(run_dir: Path, run_id: str) -> list[Path]:
+    reports_root, _ = resolve_reports_root(run_dir, run_id)
+    taskruns_root = reports_root / "taskruns" / run_id
+    files: list[Path] = []
+    files.extend(sorted((taskruns_root / "staging" / "shards").glob("*/shard-pack-manifest.json")))
+    files.extend(sorted((taskruns_root / "staging" / "final").glob("final-run-index.json")))
+    files.extend(sorted((taskruns_root / "validator").glob("validator-verdict.json")))
+    return [path for path in files if path.exists()]
 
 
 def is_within(path: Path, root: Path) -> bool:
@@ -735,17 +746,12 @@ def collect_repo_mentions(payload: dict[str, Any]) -> set[str]:
     return mentions
 
 
-def count_upsert_edge_ops(payload: dict[str, Any]) -> int:
-    changeset = payload.get("changeset") or []
-    if not isinstance(changeset, list):
+def count_semantic_edges(payload: dict[str, Any]) -> int:
+    semantic = payload.get("semantic") or {}
+    if not isinstance(semantic, dict):
         return 0
-    count = 0
-    for op in changeset:
-        if not isinstance(op, dict):
-            continue
-        if str(op.get("op", "")).strip() == "upsert_edge":
-            count += 1
-    return count
+    edges = semantic.get("edges") or []
+    return len(edges) if isinstance(edges, list) else 0
 
 
 def collect_off_topic_hits(payload: dict[str, Any]) -> list[str]:
@@ -754,7 +760,11 @@ def collect_off_topic_hits(payload: dict[str, Any]) -> list[str]:
     if summary:
         fragments.append(summary)
 
-    questions = payload.get("questions") or []
+    semantic = payload.get("semantic") or {}
+    if not isinstance(semantic, dict):
+        semantic = {}
+
+    questions = semantic.get("questions") or []
     if isinstance(questions, list):
         for question in questions:
             if isinstance(question, dict):
@@ -762,21 +772,19 @@ def collect_off_topic_hits(payload: dict[str, Any]) -> list[str]:
                 if text:
                     fragments.append(text)
 
-    changeset = payload.get("changeset") or []
-    if isinstance(changeset, list):
-        for op in changeset:
-            if not isinstance(op, dict):
+    entities = semantic.get("entities") or []
+    if isinstance(entities, list):
+        for entity in entities:
+            if not isinstance(entity, dict):
                 continue
-            if isinstance(op.get("entity"), dict):
-                entity = op["entity"]
-                fragments.extend(
-                    [
-                        str(entity.get("id", "")).strip(),
-                        str(entity.get("type", "")).strip(),
-                        str(entity.get("name", "")).strip(),
-                        json.dumps(entity.get("attributes", {}), ensure_ascii=False),
-                    ]
-                )
+            fragments.extend(
+                [
+                    str(entity.get("id", "")).strip(),
+                    str(entity.get("type", "")).strip(),
+                    str(entity.get("name", "")).strip(),
+                    json.dumps(entity.get("attributes", {}), ensure_ascii=False),
+                ]
+            )
 
     corpus = "\n".join(fragment for fragment in fragments if fragment).lower()
     if not corpus:
@@ -800,22 +808,17 @@ def parse_overview_counts(path: Path) -> dict[str, int]:
 
 
 def collect_runtime_taskrun_payloads(taskruns_root: Path, run_id: str, pipeline: str) -> list[tuple[Path, dict[str, Any]]]:
-    candidates = sorted(taskruns_root.glob(f"{run_id}-{pipeline}-*.json"))
+    candidates = sorted((taskruns_root / run_id).glob("**/runtime-execution.json"))
     result: list[tuple[Path, dict[str, Any]]] = []
     for candidate in candidates:
-        name = candidate.name
-        if "-shard-plan" in name or "-shard-summary" in name or name.endswith("-quality.json"):
-            continue
         try:
             payload = read_json(candidate)
         except Exception:
             continue
         if not isinstance(payload, dict):
             continue
-        meta = payload.get("meta")
-        if not isinstance(meta, dict):
-            continue
-        step_id = str(meta.get("step_id", "")).strip()
+        meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+        step_id = str(payload.get("step_id") or meta.get("step_id") or "").strip()
         if step_id and not step_id.startswith(f"{pipeline}."):
             continue
         result.append((candidate, payload))
@@ -861,16 +864,17 @@ def evaluate_runtime_flow_checks(
             details.append(f"runtime/shard-artifacts -> missing shard-summary for run_id={run_id} pipeline={pipeline}")
         if not runtime_taskruns:
             issues.add("runtime:shard-artifacts")
-            details.append(f"runtime/shard-artifacts -> missing per-shard taskruns for run_id={run_id} pipeline={pipeline}")
+            details.append(f"runtime/shard-artifacts -> missing runtime-execution metadata for run_id={run_id} pipeline={pipeline}")
 
         missing_shard_meta = []
         for taskrun_path, payload in runtime_taskruns:
-            meta = payload.get("meta") or {}
-            shard_id = str(meta.get("shard_id", "")).strip()
-            repo_scopes = meta.get("repo_scopes")
-            path_scopes = meta.get("path_scopes")
+            meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+            step_id = str(payload.get("step_id") or meta.get("step_id") or "").strip()
+            shard_id = str(payload.get("shard_id") or meta.get("shard_id") or "").strip()
+            repo_scopes = payload.get("repo_scopes") if isinstance(payload.get("repo_scopes"), list) else meta.get("repo_scopes")
+            path_scopes = payload.get("path_scopes") if isinstance(payload.get("path_scopes"), list) else meta.get("path_scopes")
             if (
-                not shard_id
+                (step_id.endswith("step1.collect") and not shard_id)
                 or not isinstance(repo_scopes, list)
                 or not isinstance(path_scopes, list)
                 or len(repo_scopes) == 0
@@ -882,7 +886,7 @@ def evaluate_runtime_flow_checks(
             for path in missing_shard_meta[:8]:
                 details.append(f"runtime/shard-metadata -> {path}: require meta.shard_id/meta.repo_scopes/meta.path_scopes")
             if len(missing_shard_meta) > 8:
-                details.append(f"runtime/shard-metadata -> +{len(missing_shard_meta) - 8} additional taskruns with missing shard metadata")
+                details.append(f"runtime/shard-metadata -> +{len(missing_shard_meta) - 8} additional runtime-execution artifacts with missing shard metadata")
 
         for artifact_path in [*plan_files, *summary_files]:
             try:
@@ -985,7 +989,7 @@ class RunEvaluation:
     semantic_hard_fail: bool = False
     off_topic_hits: int = 0
     failure_class: str = "none"
-    runtime_parse: bool = False
+    runtime_contract_failed: bool = False
     runner_unavailable: bool = False
     runtime_timeout: bool = False
     infra_signal_terminated: bool = False
@@ -1048,7 +1052,7 @@ def evaluate_run(
             semantic_hard_fail=False,
             off_topic_hits=0,
             failure_class="precheck_failed",
-            runtime_parse=False,
+            runtime_contract_failed=False,
             runner_unavailable=False,
             runtime_timeout=False,
             infra_signal_terminated=False,
@@ -1120,7 +1124,7 @@ def evaluate_run(
             f"refresh={refresh_row['status'] if refresh_row else 'missing'}"
         )
 
-    runtime_parse_hit = False
+    runtime_contract_failed_hit = False
     runner_unavailable_hit = False
     runner_error_hit = False
     parse_stages: set[str] = set()
@@ -1139,10 +1143,10 @@ def evaluate_run(
             runner_unavailable_hit = True
             runner_error_hit = True
             error_codes.append("runner_unavailable")
-        if "runner_parse_failed" in text:
-            runtime_parse_hit = True
+        if "runtime_contract_failed" in text:
+            runtime_contract_failed_hit = True
             runner_error_hit = True
-            error_codes.append("runner_parse_failed")
+            error_codes.append("runtime_contract_failed")
         parse_stages.update(match.group(1).strip() for match in re.finditer(r"parse_stage=([a-z_]+)", text))
         raw_outputs.update(match.group(1).strip() for match in re.finditer(r"raw_output=([^\s)]+)", text))
     h3 = not runner_error_hit
@@ -1153,8 +1157,8 @@ def evaluate_run(
             details.append(f"reliability/runner-errors -> parse_stages={sorted(parse_stages)}")
         if raw_outputs:
             details.append(f"reliability/runner-errors -> raw_outputs={sorted(raw_outputs)[:5]}")
-    if runtime_parse_hit:
-        issues.append("reliability:runtime-parse")
+    if runtime_contract_failed_hit:
+        issues.append("reliability:runtime-contract-failed")
     if runner_unavailable_hit:
         issues.append("reliability:runner-unavailable")
 
@@ -1251,8 +1255,9 @@ def evaluate_run(
         totals = quality_payload.get("totals") or {}
         pairs = (
             ("signal", "signal_score"),
-            ("changeset", "changeset_ops"),
-            ("findings", "findings_added"),
+            ("entities", "semantic_entities"),
+            ("edges", "semantic_edges"),
+            ("findings", "findings_count"),
             ("questions", "questions_count"),
             ("cov_obs", "coverage_observed"),
             ("cov_missing", "coverage_missing"),
@@ -1293,10 +1298,10 @@ def evaluate_run(
                     )
         for taskrun_file in taskrun_files:
             payload = read_json(taskrun_file)
-            runtime_name = str((payload.get("meta") or {}).get("runtime", {}).get("name", "")).strip()
+            runtime_name = str(payload.get("provider") or (payload.get("meta") or {}).get("runtime", {}).get("name", "")).strip()
             if not runtime_name:
                 c1_runtime_name_ok = False
-                details.append(f"contract/runtime-name -> {taskrun_file}: empty meta.runtime.name")
+                details.append(f"contract/runtime-name -> {taskrun_file}: empty provider/runtime.name")
             if runtime_name != provider:
                 c1_runtime_name_ok = False
                 details.append(f"contract/runtime-name -> {taskrun_file}: expected={provider} got={runtime_name}")
@@ -1431,11 +1436,11 @@ def evaluate_run(
     refresh_step_files: list[Path] = []
     if refresh_row:
         refresh_run_id = str(refresh_row.get("run_id", ""))
-        refresh_step_files, _ = resolve_step_taskrun_files(run_dir, refresh_run_id, "refresh")
+        refresh_step_files = resolve_step_semantic_files(run_dir, refresh_run_id)
 
     if refresh_step_files:
         non_power_target = not is_power_target(repo_roots, declared_meta)
-        step1_files = [path for path in refresh_step_files if "-step1-collect-" in path.name]
+        step1_files = [path for path in refresh_step_files if path.name == "shard-pack-manifest.json"]
         if non_power_target:
             for step_file in step1_files:
                 payload = read_json(step_file)
@@ -1467,7 +1472,7 @@ def evaluate_run(
             for step_file in refresh_step_files:
                 payload = read_json(step_file)
                 repo_mentions.update(collect_repo_mentions(payload))
-                edge_upserts += count_upsert_edge_ops(payload)
+                edge_upserts += count_semantic_edges(payload)
             if len(repo_mentions) < 2 or edge_upserts < 1:
                 semantic_hard_fail = True
                 issues.append("analysis:cross-repo-missing")
@@ -1480,7 +1485,7 @@ def evaluate_run(
         issues.append("analysis:cross-repo-missing")
         details.append(
             f"analysis/cross-repo-missing -> run_dir={run_dir} expected_repo_count={expected_repo_count} "
-            "missing refresh step taskrun artifacts"
+            "missing refresh step runtime-execution artifacts"
         )
 
     overview_counts = parse_overview_counts(overview_path)
@@ -1515,7 +1520,7 @@ def evaluate_run(
         and result_value == "failed"
         and not runtime_timeout
         and not runner_unavailable_hit
-        and not runtime_parse_hit
+        and not runtime_contract_failed_hit
         and not infra_signal_terminated
         and not quality_gates_failed
     ):
@@ -1544,8 +1549,8 @@ def evaluate_run(
         failure_class = "runtime_timeout"
     elif runner_unavailable_hit:
         failure_class = "runner_unavailable"
-    elif runtime_parse_hit:
-        failure_class = "runtime_parse"
+    elif runtime_contract_failed_hit:
+        failure_class = "runtime_contract_failed"
     elif infra_signal_terminated:
         failure_class = "infra_signal_terminated"
     elif quality_gates_failed:
@@ -1572,7 +1577,7 @@ def evaluate_run(
         elif failure_class == "summary_missing" and classified_failure in {
             "runtime_timeout",
             "runner_unavailable",
-            "runtime_parse",
+            "runtime_contract_failed",
             "infra_signal_terminated",
             "quality_gates_failed",
             "infra_incomplete_cycle",
@@ -1581,7 +1586,7 @@ def evaluate_run(
             failure_class = classified_failure
         elif failure_class == "none" or failure_class_rank(classified_failure) < failure_class_rank(failure_class):
             failure_class = classified_failure
-        runtime_parse_hit = runtime_parse_hit or classified_failure == "runtime_parse"
+        runtime_contract_failed_hit = runtime_contract_failed_hit or classified_failure == "runtime_contract_failed"
         runner_unavailable_hit = runner_unavailable_hit or classified_failure == "runner_unavailable"
         runtime_timeout = runtime_timeout or classified_failure == "runtime_timeout"
         infra_signal_terminated = infra_signal_terminated or classified_failure == "infra_signal_terminated"
@@ -1625,7 +1630,7 @@ def evaluate_run(
         semantic_hard_fail=semantic_hard_fail,
         off_topic_hits=off_topic_hits,
         failure_class=failure_class,
-        runtime_parse=runtime_parse_hit,
+        runtime_contract_failed=runtime_contract_failed_hit,
         runner_unavailable=runner_unavailable_hit,
         runtime_timeout=runtime_timeout,
         infra_signal_terminated=infra_signal_terminated,
@@ -1751,7 +1756,7 @@ def write_run_matrix(path: Path, runs: list[RunEvaluation]) -> None:
     lines = [
         "# Run Matrix",
         "",
-        "| provider | run | hard_pass | reliability | contract | analysis | total | verdict | artifact_source | semantic_hard_fail | failure_class | runtime_parse | runner_unavailable | runtime_timeout | infra_signal_terminated | infra_incomplete_cycle | quality_gates_failed | summary_missing | precheck_failed | runtime_flow_failed | cancellation_like | off_topic_hits | init_signal | refresh_signal | refresh_findings | refresh_questions | refresh_cov_missing | issues |",
+        "| provider | run | hard_pass | reliability | contract | analysis | total | verdict | artifact_source | semantic_hard_fail | failure_class | runtime_contract_failed | runner_unavailable | runtime_timeout | infra_signal_terminated | infra_incomplete_cycle | quality_gates_failed | summary_missing | precheck_failed | runtime_flow_failed | cancellation_like | off_topic_hits | init_signal | refresh_signal | refresh_findings | refresh_questions | refresh_cov_missing | issues |",
         "|---|---:|---:|---:|---:|---:|---:|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for item in runs:
@@ -1759,7 +1764,7 @@ def write_run_matrix(path: Path, runs: list[RunEvaluation]) -> None:
             "| "
             f"{item.provider} | {item.run_index} | {int(item.hard_pass)} | {item.reliability} | {item.contract} | "
             f"{item.analysis} | {item.total} | {item.verdict} | {item.artifact_source} | {int(item.semantic_hard_fail)} | {item.failure_class} | "
-            f"{int(item.runtime_parse)} | {int(item.runner_unavailable)} | {int(item.runtime_timeout)} | {int(item.infra_signal_terminated)} | "
+            f"{int(item.runtime_contract_failed)} | {int(item.runner_unavailable)} | {int(item.runtime_timeout)} | {int(item.infra_signal_terminated)} | "
             f"{int(item.infra_incomplete_cycle)} | {int(item.quality_gates_failed)} | {int(item.summary_missing)} | {int(item.precheck_failed)} | {int(item.runtime_flow_failed)} | {int(item.cancellation_like)} | {item.off_topic_hits} | "
             f"{item.init_signal} | {item.refresh_signal} | "
             f"{item.refresh_findings} | {item.refresh_questions} | {item.refresh_cov_missing} | "
@@ -1935,7 +1940,7 @@ def provider_matrix_rows(
                 "avg_cov_missing": mean([item.refresh_cov_missing for item in items]) if items else 0.0,
                 "off_topic_hits": sum(item.off_topic_hits for item in items),
                 "semantic_hard_fail_runs": sum(1 for item in items if item.semantic_hard_fail),
-                "runtime_parse_failures": sum(1 for item in items if item.runtime_parse),
+                "runtime_contract_failed_failures": sum(1 for item in items if item.runtime_contract_failed),
                 "runner_unavailable_failures": sum(1 for item in items if item.runner_unavailable),
                 "runtime_timeout_failures": sum(1 for item in items if item.runtime_timeout),
                 "infra_signal_terminated_failures": sum(1 for item in items if item.infra_signal_terminated),
@@ -2007,7 +2012,7 @@ def write_quality_report(
         "",
         "## Provider Matrix",
         "",
-        "| provider | runs | pass_rate | avg_total | std_total | avg_reliability | avg_contract | avg_analysis | avg_refresh_signal | std_refresh_signal | avg_refresh_findings | avg_refresh_questions | avg_refresh_cov_missing | off_topic_hits | semantic_hard_fail_runs | runtime_parse_failures | runner_unavailable_failures | runtime_timeout_failures | infra_signal_terminated_failures | infra_incomplete_cycle_failures | quality_gates_failed_failures | summary_missing_failures | precheck_failed_failures | runtime_flow_failed_failures | cancellation_like_failures | artifact_sources | error_codes | frontend_live_pass_rate | frontend_cancel_pass_rate |",
+        "| provider | runs | pass_rate | avg_total | std_total | avg_reliability | avg_contract | avg_analysis | avg_refresh_signal | std_refresh_signal | avg_refresh_findings | avg_refresh_questions | avg_refresh_cov_missing | off_topic_hits | semantic_hard_fail_runs | runtime_contract_failed_failures | runner_unavailable_failures | runtime_timeout_failures | infra_signal_terminated_failures | infra_incomplete_cycle_failures | quality_gates_failed_failures | summary_missing_failures | precheck_failed_failures | runtime_flow_failed_failures | cancellation_like_failures | artifact_sources | error_codes | frontend_live_pass_rate | frontend_cancel_pass_rate |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---:|---:|",
     ]
     for row in provider_rows:
@@ -2017,7 +2022,7 @@ def write_quality_report(
             f"{row['avg_reliability']:.2f} | {row['avg_contract']:.2f} | {row['avg_analysis']:.2f} | "
             f"{row['avg_signal']:.2f} | {row['std_signal']:.2f} | {row['avg_findings']:.2f} | {row['avg_questions']:.2f} | "
             f"{row['avg_cov_missing']:.2f} | {row['off_topic_hits']} | {row['semantic_hard_fail_runs']} | "
-            f"{row['runtime_parse_failures']} | {row['runner_unavailable_failures']} | {row['runtime_timeout_failures']} | {row['infra_signal_terminated_failures']} | "
+            f"{row['runtime_contract_failed_failures']} | {row['runner_unavailable_failures']} | {row['runtime_timeout_failures']} | {row['infra_signal_terminated_failures']} | "
             f"{row['infra_incomplete_cycle_failures']} | {row['quality_gates_failed_failures']} | {row['summary_missing_failures']} | {row['precheck_failed_failures']} | {row['runtime_flow_failed_failures']} | {row['cancellation_like_failures']} | "
             f"{row['artifact_sources']} | {row['error_codes']} | {row['frontend_pass_rate']:.2f} | {row['frontend_cancel_pass_rate']:.2f} |"
         )
@@ -2079,7 +2084,7 @@ def write_quality_report(
             "",
             "## P0/P1 Actions",
             f"- P0: держать nightly `5x2` regression с direct binaries (`qwen`/`claude`) и обязательным frontend live smoke `{len(active_providers)}/{len(active_providers)}` для выбранного provider surface.",
-            "- P0: если встречается `runner_parse_failed`/`runner_unavailable`, блокировать rollout до фикса runtime invocation/parsing.",
+            "- P0: если встречается `runtime_contract_failed`/`runner_unavailable`, блокировать rollout до фикса runtime contract/provider invocation.",
             "- P1: расширить semantic quality rubric на richer evidence density в findings (rule/evidence refs) и cross-doc consistency checks.",
         ]
     )
@@ -2105,7 +2110,7 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
         "artifact_source",
         "semantic_hard_fail",
         "failure_class",
-        "runtime_parse",
+        "runtime_contract_failed",
         "runner_unavailable",
         "runtime_timeout",
         "infra_signal_terminated",
@@ -2139,7 +2144,7 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
                     run.artifact_source,
                     str(int(run.semantic_hard_fail)),
                     run.failure_class,
-                    str(int(run.runtime_parse)),
+                    str(int(run.runtime_contract_failed)),
                     str(int(run.runner_unavailable)),
                     str(int(run.runtime_timeout)),
                     str(int(run.infra_signal_terminated)),

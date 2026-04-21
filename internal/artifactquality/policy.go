@@ -14,9 +14,9 @@ func CollectManifestContractLines(artifactRoot string) []string {
 		`- citations[].claim_ids MUST be globally unique across the assembled staged final set; do NOT reuse the same claim id across different shard/citation surfaces.`,
 		`- Build claim_ids as a semantic stem plus shard slug (example: claim.owner.<shard-slug>), and add a deterministic numeric suffix when a shard-local collision remains.`,
 		`- citations[].document_ids MUST point back to ids that exist in documents[].id.`,
-		`- compatibility MUST include coverage, questions, entities, edges, and findings; questions/entities/edges/findings MUST be arrays even when empty.`,
-		`- compatibility.entities[*] MUST remain full entity objects with provenance; do not drop provenance during repair or retry flows.`,
-		`- compatibility.findings[*] MUST remain structured finding objects; never collapse findings to strings.`,
+		`- semantic MUST include coverage, questions, entities, edges, and findings; questions/entities/edges/findings MUST be arrays even when empty.`,
+		`- semantic.entities[*] MUST remain full entity objects with provenance; do not drop provenance during repair or retry flows.`,
+		`- semantic.findings[*] MUST remain structured finding objects; never collapse findings to strings.`,
 		`- canonical_path MUST be a stable promoted path under reports/as-is, reports/findings, reports/coverage, reports/agent-outputs, reports/diagrams, or proposals.`,
 		`- Do NOT use reports/taskruns/... staging paths as canonical_path.`,
 	}

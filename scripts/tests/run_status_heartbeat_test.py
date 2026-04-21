@@ -72,7 +72,7 @@ class RunStatusHeartbeatTest(unittest.TestCase):
                 state=process_failed
                 process_exit=1
                 termination_signal=none
-                failure_reason=runtime_parse
+                failure_reason=runtime_contract_failed
                 summary_written=yes
                 updated_at=2026-04-20T00:00:00Z
                 last_pipeline_stage=step2.asis_docs

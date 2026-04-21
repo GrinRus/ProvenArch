@@ -15,10 +15,9 @@ type runtimeStepQuality struct {
 	RuntimeName      string   `json:"runtime_name"`
 	RuntimeVersion   string   `json:"runtime_version,omitempty"`
 	RepoScopes       []string `json:"repo_scopes,omitempty"`
-	ChangesetOps     int      `json:"changeset_ops"`
-	EntityUpserts    int      `json:"entity_upserts"`
-	EdgeUpserts      int      `json:"edge_upserts"`
-	FindingsAdded    int      `json:"findings_added"`
+	SemanticEntities int      `json:"semantic_entities"`
+	SemanticEdges    int      `json:"semantic_edges"`
+	FindingsCount    int      `json:"findings_count"`
 	QuestionsCount   int      `json:"questions_count"`
 	CoverageObserved int      `json:"coverage_observed"`
 	CoverageMissing  int      `json:"coverage_missing"`
@@ -27,10 +26,9 @@ type runtimeStepQuality struct {
 
 type runQualityTotals struct {
 	Steps            int `json:"steps"`
-	ChangesetOps     int `json:"changeset_ops"`
-	EntityUpserts    int `json:"entity_upserts"`
-	EdgeUpserts      int `json:"edge_upserts"`
-	FindingsAdded    int `json:"findings_added"`
+	SemanticEntities int `json:"semantic_entities"`
+	SemanticEdges    int `json:"semantic_edges"`
+	FindingsCount    int `json:"findings_count"`
 	QuestionsCount   int `json:"questions_count"`
 	CoverageObserved int `json:"coverage_observed"`
 	CoverageMissing  int `json:"coverage_missing"`
@@ -66,18 +64,17 @@ func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode s
 
 	totals := runQualityTotals{Steps: len(steps)}
 	for _, step := range steps {
-		totals.ChangesetOps += step.ChangesetOps
-		totals.EntityUpserts += step.EntityUpserts
-		totals.EdgeUpserts += step.EdgeUpserts
-		totals.FindingsAdded += step.FindingsAdded
+		totals.SemanticEntities += step.SemanticEntities
+		totals.SemanticEdges += step.SemanticEdges
+		totals.FindingsCount += step.FindingsCount
 		totals.QuestionsCount += step.QuestionsCount
 		totals.CoverageObserved += step.CoverageObserved
 		totals.CoverageMissing += step.CoverageMissing
 		totals.WarningsCount += step.WarningsCount
 	}
-	totals.SignalScore = (totals.EntityUpserts * 2) +
-		(totals.EdgeUpserts * 2) +
-		(totals.FindingsAdded * 3) +
+	totals.SignalScore = (totals.SemanticEntities * 2) +
+		(totals.SemanticEdges * 2) +
+		(totals.FindingsCount * 3) +
 		totals.QuestionsCount +
 		totals.CoverageObserved +
 		totals.CoverageMissing

@@ -2101,7 +2101,7 @@ repos:
 		bytes.NewBufferString(`{"trigger":"ui"}`),
 	)
 	if err != nil {
-		t.Fatalf("POST /api/pipeline/init parse failure runner: %v", err)
+		t.Fatalf("POST /api/pipeline/init contract failure runner: %v", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusAccepted {
@@ -2122,12 +2122,12 @@ repos:
 	if runStatus.Status != string(orchestrator.RunStatusFailed) {
 		t.Fatalf("expected failed run status, got %q", runStatus.Status)
 	}
-	if runStatus.ErrorCode != "runner_parse_failed" {
-		t.Fatalf("expected runner_parse_failed, got %q", runStatus.ErrorCode)
+	if runStatus.ErrorCode != "runtime_contract_failed" {
+		t.Fatalf("expected runtime_contract_failed, got %q", runStatus.ErrorCode)
 	}
 }
 
-func TestPipelineStartWithParseFailureStillReturnsAccepted(t *testing.T) {
+func TestPipelineStartWithRuntimeContractFailureStillReturnsAccepted(t *testing.T) {
 	t.Parallel()
 
 	repoPath := t.TempDir()
@@ -2151,7 +2151,7 @@ repos:
 		bytes.NewBufferString(`{"trigger":"ui"}`),
 	)
 	if err != nil {
-		t.Fatalf("POST /api/pipeline/init parse failure runner: %v", err)
+		t.Fatalf("POST /api/pipeline/init contract failure runner: %v", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusAccepted {
@@ -2171,17 +2171,17 @@ repos:
 	_ = waitForRunTerminalStatus(t, httpServer.URL, payload.RunID, 8*time.Second)
 }
 
-func TestMapTypedRunnerAPIErrorDoesNotExposeRunnerParseFailedAtStartTime(t *testing.T) {
+func TestMapTypedRunnerAPIErrorDoesNotExposeRuntimeContractFailedAtStartTime(t *testing.T) {
 	t.Parallel()
 
 	err := acpruntime.WrapRunnerError(
 		acpruntime.ProviderClaudeCode,
-		acpruntime.ErrorCodeRunnerParseFailed,
-		"runner returned invalid taskresult in test",
-		errors.New("json decode error"),
+		acpruntime.ErrorCodeRuntimeContract,
+		"runner failed required artifact contract in test",
+		errors.New("missing shard-pack-manifest.json"),
 	)
 	if _, code, _, ok := mapTypedRunnerAPIError(err); ok {
-		t.Fatalf("expected runner_parse_failed to bypass start-time mapping, got mapped code %q", code)
+		t.Fatalf("expected runtime_contract_failed to bypass start-time mapping, got mapped code %q", code)
 	}
 }
 
@@ -2333,6 +2333,21 @@ if step_id == "init.step0.constitution":
     write_runtime_draft("constitution-draft.json", "overview.md", "charter/overview.md", "charter", "Stub Constitution")
 elif step_id in {"init.step2.asis_docs", "refresh.step2.asis_docs"}:
     write_runtime_draft("asis-draft-manifest.json", "overview.md", "reports/as-is/overview.md", "report", "Stub As-Is Overview")
+elif step_id in {"init.step3.findings", "refresh.step3.findings"} and write_root:
+    os.makedirs(write_root, exist_ok=True)
+    verdict = {
+        "version": 1,
+        "run_id": run_id or "run-1",
+        "generated_at": "2026-04-21T10:00:00Z",
+        "verdict": "PASS",
+        "summary": "stub validator verdict",
+        "checked_paths": ["reports/taskruns/" + (run_id or "run-1") + "/staging/final/final-run-index.json"],
+        "fixed_paths": [],
+        "findings": [],
+        "questions": [],
+    }
+    with open(os.path.join(write_root, "validator-verdict.json"), "w", encoding="utf-8") as handle:
+        json.dump(verdict, handle)
 elif step_id in {"init.step4.proposals", "refresh.step4.proposals"}:
     write_runtime_draft("proposals-draft-manifest.json", "proposal.md", "proposals/proposal-baseline/proposal.md", "proposal", "Stub Proposal")
 
@@ -2375,7 +2390,7 @@ if step_id in {"init.step1.collect", "refresh.step1.collect"} and write_root:
                 "document_ids": [document_id]
             }
         ],
-        "compatibility": {
+        "semantic": {
             "coverage": {
                 "observed": ["stub"],
                 "missing": ["owner mappings"],
@@ -2389,21 +2404,6 @@ if step_id in {"init.step1.collect", "refresh.step1.collect"} and write_root:
     }
     with open(os.path.join(write_root, "shard-pack-manifest.json"), "w", encoding="utf-8") as handle:
         json.dump(manifest, handle)
-payload = {
-    "meta": {
-        "task_id": task_id,
-        "step_id": step_id,
-        "run_id": run_id,
-        "runtime": {
-            "name": "` + runtimeName + `",
-            "version": "stub"
-        },
-        "started_at": "2026-04-03T12:00:00Z"
-    },
-    "summary": "stub taskresult",
-    "changeset": []
-}
-print(json.dumps(payload))
 PY
 `
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
@@ -2497,8 +2497,8 @@ type parseFailureRunner struct{}
 func (parseFailureRunner) Run(context.Context, acpruntime.Task) (acpruntime.Result, error) {
 	return acpruntime.Result{}, acpruntime.WrapRunnerError(
 		acpruntime.ProviderClaudeCode,
-		acpruntime.ErrorCodeRunnerParseFailed,
-		"runner returned invalid taskresult in test",
+		acpruntime.ErrorCodeRuntimeContract,
+		"runner failed required artifact contract in test",
 		nil,
 	)
 }
@@ -2526,8 +2526,9 @@ func (cancellableDelayedRunner) Preflight(context.Context) error {
 
 type streamingRunLogsRunner struct{}
 
-func (streamingRunLogsRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
-	if err := writeSyntheticServerDraftArtifacts(task); err != nil {
+func (streamingRunLogsRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	result, err := claudecode.FakeRunner{}.Run(ctx, task)
+	if err != nil {
 		return acpruntime.Result{}, err
 	}
 	if task.OnOutput != nil {
@@ -2545,23 +2546,8 @@ func (streamingRunLogsRunner) Run(_ context.Context, task acpruntime.Task) (acpr
 			Text:      "stdout output truncated after cap (synthetic)",
 		})
 	}
-
-	payload := map[string]any{
-		"meta": map[string]any{
-			"task_id":    task.TaskID,
-			"step_id":    task.StepID,
-			"run_id":     task.RunID,
-			"runtime":    map[string]any{"name": "streaming-test-runner", "version": "v1"},
-			"started_at": task.StartedAtUTC.Format(time.RFC3339),
-		},
-		"summary":   "synthetic streaming success",
-		"changeset": []any{},
-	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return acpruntime.Result{}, err
-	}
-	return acpruntime.Result{RawJSON: raw}, nil
+	result.Execution.RuntimeVersion = "streaming-test-runner"
+	return result, nil
 }
 
 func (streamingRunLogsRunner) Preflight(context.Context) error {

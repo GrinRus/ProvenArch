@@ -1044,7 +1044,7 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
     stats: dict[str, object] = {
         "hard": 0,
         "total": 0,
-        "runtime_parse": 0,
+        "runtime_contract_failed": 0,
         "runner_unavailable": 0,
         "runtime_timeout": 0,
         "infra_signal_terminated": 0,
@@ -1095,7 +1095,7 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
             stats["hard"] = int(stats["hard"]) + 1
 
         for key in (
-            "runtime_parse",
+            "runtime_contract_failed",
             "runner_unavailable",
             "runtime_timeout",
             "infra_signal_terminated",
@@ -1218,7 +1218,7 @@ def strict_blockers(
         reasons.append(f"backend_hard_pass={stats['hard']} (expected {expected_backend_runs})")
 
     for key in (
-        "runtime_parse",
+        "runtime_contract_failed",
         "runner_unavailable",
         "runtime_timeout",
         "infra_signal_terminated",
@@ -1335,7 +1335,7 @@ header = [
     "semantic_hard_fail_runs",
     "off_topic_hits",
     "artifact_non_snapshot_runs",
-    "runtime_parse_failures",
+    "runtime_contract_failed_failures",
     "runner_unavailable_failures",
     "runtime_timeout_failures",
     "infra_signal_terminated_failures",
@@ -1475,7 +1475,7 @@ for rec in records:
                 str(stats["semantic_hard_fail"]),
                 str(stats["off_topic_hits"]),
                 str(stats["artifact_non_snapshot"]),
-                str(stats["runtime_parse"]),
+                str(stats["runtime_contract_failed"]),
                 str(stats["runner_unavailable"]),
                 str(stats["runtime_timeout"]),
                 str(stats["infra_signal_terminated"]),
@@ -1531,7 +1531,7 @@ for rec in records:
                 "semantic_hard_fail_runs": int(stats["semantic_hard_fail"]),
                 "off_topic_hits": int(stats["off_topic_hits"]),
                 "artifact_non_snapshot_runs": int(stats["artifact_non_snapshot"]),
-                "runtime_parse_failures": int(stats["runtime_parse"]),
+                "runtime_contract_failed_failures": int(stats["runtime_contract_failed"]),
                 "runner_unavailable_failures": int(stats["runner_unavailable"]),
                 "runtime_timeout_failures": int(stats["runtime_timeout"]),
                 "infra_signal_terminated_failures": int(stats["infra_signal_terminated"]),

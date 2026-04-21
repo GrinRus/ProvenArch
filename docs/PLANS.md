@@ -1028,8 +1028,8 @@ EP-20260421-taxonomy-merge-audit
 | Epic | Статус | Комментарий |
 |---|---|---|
 | 1 Workspace/contracts | done (beta baseline) | Schema-driven + semantic validation, resolver `path/git_url`, diagnostics API |
-| 2 TaskResult foundations | done (beta baseline) | Validation + canonical-only TaskResult contract, contract tests |
-| 3 Runtime/orchestration seam | done (beta baseline) | Fake default + opt-in headless runtime selector with provider choice (`claude-code` default, `qwen-code`), raw taskruns materialization |
+| 2 Runtime artifact contracts | done (beta baseline) | Validation + artifact-only runtime execution contract, contract tests |
+| 3 Runtime/orchestration seam | done (beta baseline) | Fake default + opt-in headless runtime selector with provider choice (`claude-code` default, `qwen-code`), persisted runtime execution metadata |
 | 4 Model deterministic core | done (beta baseline) | Canonical IDs/collision rules + deterministic regression tests |
 | 5 Pipeline 0–4 | done (beta baseline) | `init|refresh` runnable через CLI/API |
 | 6 UI baseline | done (beta baseline) | Setup/validate/run/inspect + editors + git helpers |
@@ -1041,3 +1041,92 @@ EP-20260421-taxonomy-merge-audit
 | 12–13 | out of MVP | Вне текущего beta scope |
 | 14 CI trigger mode | done (beta baseline) | CLI batch required, smoke/golden jobs без live network deps |
 | 15 Domain/baseline pack hardening | done (beta baseline) | Baseline skills/prompts wired и versioned в workspace |
+
+---
+
+## ExecPlan
+
+### Plan ID
+EP-20260421-docs-first-no-taskresult
+
+### Context
+Нужно довести ACP до чистой docs-first архитектуры без `TaskResult` и без backward compatibility. Текущий код всё ещё держит runtime wire contract, orchestration replay, semantic ingestion, collect canonicalization, prompts, fixtures и harness taxonomy вокруг `TaskResult`, `changeset` и legacy repair flows. Пользовательский запрос требует полностью удалить этот слой и перевести pipeline на artifact-only модель: runtime пишет только step-specific artifacts, orchestrator валидирует их и затем публикует deterministic outputs и derived projections.
+
+### Goals (must have)
+- [x] Удалить `TaskResult` schema, типы wire-level payload и все runtime packages/paths, которые извлекают или нормализуют provider JSON envelope
+- [x] Перевести runtime seam на artifact-only execution model с persisted `runtime-execution.json`
+- [x] Заменить `compatibility` на `semantic` в collect/final contracts и перестроить derived layer на manifests/verdicts
+- [x] Перевести `step3.findings` в single-agent validator step без shard fan-out и без `TaskResult` findings ingestion
+- [x] Обновить prompts, harness classification, UI, docs, fixtures и tests под новую artifact-only архитектуру
+- [x] Пройти DoD: `make contracts`, `make test`, `make lint`, `make build`
+
+### Non-goals
+- [x] Не сохранять backward compatibility со старыми recorded payloads, fixtures, prompts или error classes
+- [x] Не расширять `workspace.yaml` или runtime profile public API
+- [x] Не добавлять новых providers beyond `claude-code`, `qwen-code`, `fake`
+
+### Approach
+1. Сначала удалить core `TaskResult` seam: новые shared semantic/runtime-execution types, новый `acpruntime.Result`, обновление schemas/contracts.
+2. Затем перевести live/fake runners и orchestrator apply/replay path на artifact validation и persisted execution metadata.
+3. После этого вычистить derived/model/reporting слой: `semantic` snapshot из shard manifests, verdict-driven findings, без operation log.
+4. В конце синхронизировать harness, UI, docs, fixtures и удалить legacy packages/tests.
+
+### Files expected to change
+- `internal/contracts/*`
+- `internal/runtime/*`
+- `internal/orchestrator/*`
+- `internal/model/*`
+- `internal/reports/*`
+- `schemas/*`
+- `scripts/*`
+- `scripts/tests/*`
+- `cmd/acp/*`
+- `ui/src/*`
+- `docs/*`
+- `examples/*`
+- `fixtures/*`
+
+### Acceptance criteria
+- [x] В репозитории больше нет `TaskResult`, `changeset`, `add_doc_artifact`, `upsert_entity`, `upsert_edge`, `add_finding` как runtime wire surface
+- [x] Live providers больше не обязаны возвращать финальный JSON object; success определяется artifact contract validation
+- [x] `step1` использует `semantic` block как единственный structured semantic source
+- [x] `step3` single-agent и пишет только `validator-verdict.json` c canonical findings/questions
+- [x] Replay/recovery используют persisted manifests + runtime-execution metadata, а не taskresult payloads
+- [x] Harness/UI/docs/test fixtures очищены от `runner_parse_failed` и `TaskResult` assumptions
+
+### Risks
+- Основной риск — сломать несколько execution seams одновременно: runtime, replay, docflow, harness и UI. Снижение риска: сначала перевести shared contracts и execution metadata, затем менять orchestrator/model/reporting, а только потом чистить docs/fixtures/tests как завершающий pass.
+
+---
+
+## ExecPlan
+
+### Plan ID
+EP-20260421-docs-first-audit-closure
+
+### Context
+Нужно повторно сверить репозиторий с финальным artifact-only планом после удаления `TaskResult` и legacy wire surface. Цель — не только проверить отсутствие legacy терминов, но и найти оставшиеся architectural gaps в active code paths, tests и source-of-truth docs.
+
+### Goals (must have)
+- [x] Проверить active code/docs/specs на остатки `TaskResult` и legacy runtime operations
+- [x] Убрать любые оставшиеся dead fallback paths, противоречащие runtime-authored docs-first модели
+- [x] Свести role naming `step3.findings` к одному canonical значению
+- [x] Повторно пройти DoD после найденных фиксов
+
+### Non-goals
+- [x] Не переписывать исторические plan logs в этом файле
+- [x] Не менять public API shape без прямой необходимости
+
+### Approach
+1. Выполнить активный audit по contracts/runtime/orchestrator/reports/harness/UI.
+2. Убрать найденные dead fallback surfaces и contract naming drift.
+3. Перепроверить targeted модули и затем прогнать полный DoD.
+
+### Acceptance criteria
+- [x] В active code path больше нет dead `CompileAsIs`/`CompileProposals`
+- [x] `step3.findings` использует canonical role `validator-findings`
+- [x] Active docs/specs не противоречат artifact-only runtime contract
+- [x] `make contracts`, `make test`, `make lint`, `make build` зелёные
+
+### Risks
+- Основной риск — принять historical plan notes за active contract drift. Снижение риска: проверять только current code paths и source-of-truth docs/specs, а не переписывать историю решений.

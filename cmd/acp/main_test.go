@@ -1200,6 +1200,21 @@ if step_id == "init.step0.constitution":
     write_runtime_draft("constitution-draft.json", "overview.md", "charter/overview.md", "charter", "Stub Constitution")
 elif step_id in {"init.step2.asis_docs", "refresh.step2.asis_docs"}:
     write_runtime_draft("asis-draft-manifest.json", "overview.md", "reports/as-is/overview.md", "report", "Stub As-Is Overview")
+elif step_id in {"init.step3.findings", "refresh.step3.findings"} and write_root:
+    os.makedirs(write_root, exist_ok=True)
+    verdict = {
+        "version": 1,
+        "run_id": run_id or "run-1",
+        "generated_at": "2026-04-21T10:00:00Z",
+        "verdict": "PASS",
+        "summary": "stub validator verdict",
+        "checked_paths": ["reports/taskruns/" + (run_id or "run-1") + "/staging/final/final-run-index.json"],
+        "fixed_paths": [],
+        "findings": [],
+        "questions": [],
+    }
+    with open(os.path.join(write_root, "validator-verdict.json"), "w", encoding="utf-8") as handle:
+        json.dump(verdict, handle)
 elif step_id in {"init.step4.proposals", "refresh.step4.proposals"}:
     write_runtime_draft("proposals-draft-manifest.json", "proposal.md", "proposals/proposal-baseline/proposal.md", "proposal", "Stub Proposal")
 
@@ -1242,7 +1257,7 @@ if step_id in {"init.step1.collect", "refresh.step1.collect"} and write_root:
                 "document_ids": [document_id]
             }
         ],
-        "compatibility": {
+        "semantic": {
             "coverage": {
                 "observed": ["stub"],
                 "missing": ["owner mappings"],
@@ -1256,21 +1271,6 @@ if step_id in {"init.step1.collect", "refresh.step1.collect"} and write_root:
     }
     with open(os.path.join(write_root, "shard-pack-manifest.json"), "w", encoding="utf-8") as handle:
         json.dump(manifest, handle)
-payload = {
-    "meta": {
-        "task_id": task_id,
-        "step_id": step_id,
-        "run_id": run_id,
-        "runtime": {
-            "name": "` + runtimeName + `",
-            "version": "stub"
-        },
-        "started_at": "2026-04-03T12:00:00Z"
-    },
-    "summary": "stub taskresult",
-    "changeset": []
-}
-sys.stdout.write(json.dumps(payload))
 PY
 `
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {

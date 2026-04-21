@@ -5,15 +5,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
-	"sort"
 	"strings"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
 
-func EnsureCanonicalCollectManifest(task acpruntime.Task, result contracts.TaskResult) error {
+// RepairCollectManifest applies the explicit collect repair rules allowed by the
+// docs-first runtime contract. It never invents semantic payloads; it only
+// normalizes write-root metadata and unambiguous document paths.
+func RepairCollectManifest(task acpruntime.Task) error {
 	writeRoot := strings.TrimSpace(task.WriteRoot)
 	if writeRoot == "" {
 		return nil
@@ -28,7 +29,7 @@ func EnsureCanonicalCollectManifest(task acpruntime.Task, result contracts.TaskR
 		return err
 	}
 
-	manifest, changed, err := canonicalizeCollectManifest(raw, task, result)
+	manifest, changed, err := canonicalizeCollectManifest(raw, task)
 	if err != nil {
 		return err
 	}
@@ -47,7 +48,7 @@ func EnsureCanonicalCollectManifest(task acpruntime.Task, result contracts.TaskR
 	return os.WriteFile(manifestPath, encoded, 0o644)
 }
 
-func canonicalizeCollectManifest(raw []byte, task acpruntime.Task, result contracts.TaskResult) (contracts.ShardPackManifest, bool, error) {
+func canonicalizeCollectManifest(raw []byte, task acpruntime.Task) (contracts.ShardPackManifest, bool, error) {
 	var manifest contracts.ShardPackManifest
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		return contracts.ShardPackManifest{}, false, fmt.Errorf("decode shard pack manifest for canonicalization: %w", err)
@@ -94,16 +95,6 @@ func canonicalizeCollectManifest(raw []byte, task acpruntime.Task, result contra
 		manifest.PathScopes = append([]string(nil), task.PathScopes...)
 		changed = true
 	}
-	if summary := strings.TrimSpace(result.Summary); summary != "" && strings.TrimSpace(manifest.Summary) == "" {
-		manifest.Summary = summary
-		changed = true
-	}
-
-	compatibility := mergeCompatibilitySnapshot(manifest.Compatibility, result)
-	if !reflect.DeepEqual(manifest.Compatibility, compatibility) {
-		manifest.Compatibility = compatibility
-		changed = true
-	}
 
 	encoded, err := json.Marshal(manifest)
 	if err != nil {
@@ -115,76 +106,6 @@ func canonicalizeCollectManifest(raw []byte, task acpruntime.Task, result contra
 	return manifest, changed, nil
 }
 
-func CompatibilitySnapshotFromTaskResult(result contracts.TaskResult) contracts.CompatibilitySnapshot {
-	snapshot := contracts.CompatibilitySnapshot{
-		Coverage:  contracts.Coverage{},
-		Questions: []contracts.Question{},
-		Entities:  []contracts.Entity{},
-		Edges:     []contracts.Edge{},
-		Findings:  []contracts.Finding{},
-	}
-	if result.Coverage != nil {
-		snapshot.Coverage = *result.Coverage
-	}
-	snapshot.Questions = append([]contracts.Question{}, result.Questions...)
-	for _, op := range result.Changeset {
-		switch op.Op {
-		case "upsert_entity":
-			if op.Entity != nil {
-				snapshot.Entities = append(snapshot.Entities, *op.Entity)
-			}
-		case "upsert_edge":
-			if op.Edge != nil {
-				snapshot.Edges = append(snapshot.Edges, *op.Edge)
-			}
-		case "add_finding":
-			if op.Finding != nil {
-				snapshot.Findings = append(snapshot.Findings, *op.Finding)
-			}
-		}
-	}
-	sort.Slice(snapshot.Entities, func(i, j int) bool { return snapshot.Entities[i].ID < snapshot.Entities[j].ID })
-	sort.Slice(snapshot.Edges, func(i, j int) bool { return snapshot.Edges[i].ID < snapshot.Edges[j].ID })
-	sort.Slice(snapshot.Findings, func(i, j int) bool { return snapshot.Findings[i].ID < snapshot.Findings[j].ID })
-	sort.Slice(snapshot.Questions, func(i, j int) bool { return snapshot.Questions[i].ID < snapshot.Questions[j].ID })
-	return snapshot
-}
-
-func mergeCompatibilitySnapshot(existing contracts.CompatibilitySnapshot, result contracts.TaskResult) contracts.CompatibilitySnapshot {
-	merged := existing
-	if result.Coverage != nil {
-		merged.Coverage = *result.Coverage
-	}
-	if len(result.Questions) > 0 || len(merged.Questions) == 0 {
-		merged.Questions = append([]contracts.Question(nil), result.Questions...)
-	}
-
-	projected := CompatibilitySnapshotFromTaskResult(result)
-	if len(projected.Entities) > 0 || len(merged.Entities) == 0 {
-		merged.Entities = projected.Entities
-	}
-	if len(projected.Edges) > 0 || len(merged.Edges) == 0 {
-		merged.Edges = projected.Edges
-	}
-	if len(projected.Findings) > 0 || len(merged.Findings) == 0 {
-		merged.Findings = projected.Findings
-	}
-
-	if merged.Questions == nil {
-		merged.Questions = []contracts.Question{}
-	}
-	if merged.Entities == nil {
-		merged.Entities = []contracts.Entity{}
-	}
-	if merged.Edges == nil {
-		merged.Edges = []contracts.Edge{}
-	}
-	if merged.Findings == nil {
-		merged.Findings = []contracts.Finding{}
-	}
-	return merged
-}
-
 func canonicalAgentRole(task acpruntime.Task) string {
 	if role := strings.TrimSpace(task.AgentRole); role != "" {
 		return role
@@ -193,7 +114,7 @@ func canonicalAgentRole(task acpruntime.Task) string {
 	case strings.HasSuffix(task.StepID, "step1.collect"):
 		return "shard-analyst"
 	case strings.HasSuffix(task.StepID, "step3.findings"):
-		return "validator"
+		return "validator-findings"
 	default:
 		return "runtime"
 	}
@@ -259,7 +180,7 @@ func normalizeAbsoluteCollectDocumentPath(absPath string, writeRoot string) (str
 	if relativePath == "." || relativePath == "" {
 		return "", false
 	}
-	if relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+	if strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) || relativePath == ".." {
 		return "", false
 	}
 	if !collectDocumentExistsAtWriteRoot(writeRoot, relativePath) {
@@ -269,10 +190,11 @@ func normalizeAbsoluteCollectDocumentPath(absPath string, writeRoot string) (str
 }
 
 func collectDocumentExistsAtWriteRoot(writeRoot string, relPath string) bool {
-	if strings.TrimSpace(writeRoot) == "" {
+	writeRoot = strings.TrimSpace(writeRoot)
+	if writeRoot == "" {
 		return false
 	}
-	targetPath := filepath.Join(filepath.Clean(writeRoot), filepath.FromSlash(relPath))
-	info, err := os.Stat(targetPath)
+	target := filepath.Join(filepath.Clean(writeRoot), filepath.Clean(relPath))
+	info, err := os.Stat(target)
 	return err == nil && !info.IsDir()
 }

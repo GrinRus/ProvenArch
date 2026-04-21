@@ -100,7 +100,6 @@ Batch/Frontend scripts:
   - canonical high-level profile catalog: `examples/e2e-profile-catalog.yaml`
   - canonical non-release slices: `examples/e2e-matrix.regres-*.yaml`
   - canonical release slices: `examples/e2e-matrix.release-*.yaml`
-  - legacy compatibility slices: `examples/e2e-matrix.regression-wave1.yaml`, `examples/e2e-matrix.release-wave1.yaml`, `examples/e2e-matrix.release-wave2.yaml`
   - release-ready sweeps: `baseline`, `parallel-default`
   - `RUN_COUNT` (default `1` для matrix driver; release-mode фиксирует `RUN_COUNT=1`)
   - release-mode (`MATRIX_ID=release-*` или `E2E_MATRIX_RELEASE_MODE=1`) требует explicit `sweeps[]` с ровно `baseline` + `parallel-default` и ровно два профиля: один `single-*`, один `multi-*`; иначе matrix driver завершится fail-fast до batch execution
@@ -239,8 +238,6 @@ Canonical live matrices также несут checked-in `timeout_profile`, ко
 - `medium-window` = step `5400s`, pipeline `14400s`, ui-init `1500s`
 - `extended-window` = step `10800s`, pipeline `21600s`, ui-init `1800s`
 
-Legacy `regression-wave1` / `release-wave1` / `release-wave2` остаются только compatibility slices для ad-hoc diagnostics и не считаются canonical profile taxonomy.
-
 Правила shard-run:
 - параллельные shard-процессы обязаны использовать разные `BATCH_ID`;
 - precheck рекомендуется выполнять только в одном shard (`BATCH_SKIP_PRECHECK=0`), для остальных shard'ов использовать `BATCH_SKIP_PRECHECK=1`.
@@ -283,15 +280,14 @@ Batch evaluator source-of-truth:
 - frontend/cancel matrix формируются в run-level формате (`provider + run_index`), strict matrix gate блокирует любой init run-status != `passed`.
 - `quality_report_<batch-id>.md` и `profile_matrix_<matrix-id>.md` считают только реально выбранные `selected_providers` и `selected_run_indexes`, а не synthetic `claude+qwen x run1..run5` поверхность.
 - для multi-profile (`EXPECTED_REPO_COUNT >= 2`) batch hard-fail включает `analysis:cross-repo-missing`.
-- backend run-matrix дополнительно классифицирует failure classes: `runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_signal_terminated`, `infra_incomplete_cycle`, `quality_gates_failed`, `summary_missing`, `precheck_failed`.
+- backend run-matrix дополнительно классифицирует failure classes: `runtime_contract_failed`, `runner_unavailable`, `runtime_timeout`, `infra_signal_terminated`, `infra_incomplete_cycle`, `quality_gates_failed`, `summary_missing`, `precheck_failed`.
 - runtime flow checks в evaluator: `runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:execution-semantics`, `runtime_flow_failed`.
 - collect runtime делает максимум одну post-success artifact-repair попытку для skeletal/generic-only `shard-pack-manifest.json`; если repair не улучшил artifact fidelity, исходный `write_root` восстанавливается.
-- schema-invalid `TaskResult` получает отдельный direct-JSON retry с whitelist допустимых `changeset[].op`; invalid manifest после schema-valid result идёт в отдельный artifact-repair retry.
-- если после этой repair попытки `shard-pack-manifest.json` остаётся missing/invalid/skeletal, collect step больше не считается успешным и должен выйти как `runner_parse_failed` / `runtime_parse`.
-- collect contract требует полного `compatibility` block и global uniqueness для `citation-index.claim_ids`; duplicate claim ids разрешается чинить только как validator-scope index/reference repair, без semantic rewrite authored docs.
+- collect runtime делает максимум одну artifact-repair попытку для missing/invalid/skeletal `shard-pack-manifest.json`; если repair не улучшил artifact fidelity, шаг обязан завершиться как `runtime_contract_failed`.
+- collect contract требует полного `semantic` block и global uniqueness для `citation-index.claim_ids`; duplicate claim ids разрешается чинить только как validator-scope index/reference repair, без semantic rewrite authored docs.
 - `artifact_quality:*` в `reports/taskruns/<run_id>-quality.json.run_warnings` эскалируется batch evaluator'ом в `quality_gates_failed`; canonical live gate не принимает refresh artifacts, схлопнувшиеся до одного generic `cite.runtime-summary` без rich repo-specific shard evidence.
 
-При `runner_parse_failed` raw stdout/stderr сохраняются в:
+При `runtime_contract_failed` raw stdout/stderr сохраняются в:
 - `WORKSPACE/reports/taskruns/raw/*-stdout.log`
 - `WORKSPACE/reports/taskruns/raw/*-stderr.log`
 - `WORKSPACE/reports/taskruns/raw/*-meta.json` (bytes/hash + task context)
@@ -355,7 +351,7 @@ PORT=18080
 - В `Runs: Logs` работают quick actions:
   - `Copy logs`
   - `Download logs`
-  - `Open taskrun artifact` (если путь найден в log events)
+  - `Open runtime execution artifact` (если путь найден в log events)
 
 ### Results
 

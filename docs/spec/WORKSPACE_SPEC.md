@@ -39,7 +39,7 @@ Layout `charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/` не �
   - `role` optional enum: `backend|frontend|mixed|unknown`
 
 Правила:
-- `name` используется как stable repo scope identifier в `TaskResult.meta.repo_scopes[]`, warnings и evidence references
+- `name` используется как stable repo scope identifier в persisted runtime execution metadata, warnings и evidence references
 - имена репозиториев в одном workspace должны быть уникальными
 - uniqueness `name` проверяется workspace validator-ом как semantic rule поверх JSON Schema
 - `path` означает локально доступный checkout
@@ -112,7 +112,7 @@ Effective precedence:
 
 `shard_discovery.mode` поведение:
 - `heuristics`: детерминированное structural sharding с полным покрытием repo и неперекрывающимися `path_scopes`.
-- `semantic`: compatibility mode; использует тот же shard-plan, но дополняет его graph/debug metadata и не меняет count/boundaries shard-ов.
+- `semantic`: metadata-only mode; использует тот же shard-plan, но дополняет его graph/debug metadata и не меняет count/boundaries shard-ов.
 - runtime execution всегда использует все repo scopes из `workspace.yaml`; frontend/backend filtering не входит в execution contract этого slice.
 
 ### 5.3) `runtime.profile.steps`

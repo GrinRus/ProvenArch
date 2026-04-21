@@ -12,6 +12,7 @@ const (
 	constitutionDraftManifestFile = runtimedrafts.ConstitutionManifestFile
 	asisDraftManifestFile         = runtimedrafts.AsIsManifestFile
 	proposalsDraftManifestFile    = runtimedrafts.ProposalsManifestFile
+	runtimeExecutionFile          = "runtime-execution.json"
 )
 
 func runtimeStepContract(stepID string) string {
@@ -59,4 +60,23 @@ func runtimeStepWriteRoot(runID string, stepID string) string {
 		stepKey = "runtime"
 	}
 	return path.Join("reports", "taskruns", runID, "runtime", stepKey)
+}
+
+func runtimeExecutionMetadataPath(runID string, stepID string, shardID string) string {
+	switch acpruntime.StepProviderKeyForStepID(stepID) {
+	case acpruntime.StepProviderStep1Collect:
+		return path.Join(runtimeShardArtifactRoot(runID, shardID), runtimeExecutionFile)
+	case acpruntime.StepProviderStep3Findings:
+		return path.Join(runtimeValidatorArtifactRoot(runID), runtimeExecutionFile)
+	default:
+		return path.Join(runtimeStepWriteRoot(runID, stepID), runtimeExecutionFile)
+	}
+}
+
+func runtimeExecutionMetadataPathForTask(task acpruntime.Task) string {
+	artifactRoot := strings.TrimSpace(task.ArtifactRoot)
+	if artifactRoot != "" {
+		return path.Join(artifactRoot, runtimeExecutionFile)
+	}
+	return runtimeExecutionMetadataPath(task.RunID, task.StepID, task.ShardID)
 }

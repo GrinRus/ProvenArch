@@ -27,7 +27,7 @@ type ArtifactFile struct {
 	Truncated    bool   `json:"truncated"`
 }
 
-type ParseFailureArtifacts struct {
+type FailureArtifacts struct {
 	Directory            string       `json:"directory"`
 	RelativeDirectory    string       `json:"relative_directory"`
 	Stdout               ArtifactFile `json:"stdout"`
@@ -36,18 +36,18 @@ type ParseFailureArtifacts struct {
 	RelativeMetadataPath string       `json:"relative_metadata_path"`
 }
 
-func WriteParseFailureArtifacts(task acpruntime.Task, provider acpruntime.Provider, stdout string, stderr string) (ParseFailureArtifacts, error) {
+func WriteFailureArtifacts(task acpruntime.Task, provider acpruntime.Provider, stdout string, stderr string) (FailureArtifacts, error) {
 	workspace := strings.TrimSpace(task.Workspace)
 	if workspace == "" {
-		return ParseFailureArtifacts{}, fmt.Errorf("workspace is empty")
+		return FailureArtifacts{}, fmt.Errorf("workspace is empty")
 	}
 	absWorkspace, err := filepath.Abs(workspace)
 	if err != nil {
-		return ParseFailureArtifacts{}, fmt.Errorf("resolve workspace path: %w", err)
+		return FailureArtifacts{}, fmt.Errorf("resolve workspace path: %w", err)
 	}
 	rawDir := filepath.Join(absWorkspace, "reports", "taskruns", "raw")
 	if err := os.MkdirAll(rawDir, 0o755); err != nil {
-		return ParseFailureArtifacts{}, fmt.Errorf("mkdir raw output dir: %w", err)
+		return FailureArtifacts{}, fmt.Errorf("mkdir raw output dir: %w", err)
 	}
 
 	stamp := time.Now().UTC().Format("20060102T150405Z")
@@ -59,11 +59,11 @@ func WriteParseFailureArtifacts(task acpruntime.Task, provider acpruntime.Provid
 
 	stdoutArtifact, err := writeBoundedArtifactFile(stdoutFile, []byte(stdout))
 	if err != nil {
-		return ParseFailureArtifacts{}, err
+		return FailureArtifacts{}, err
 	}
 	stderrArtifact, err := writeBoundedArtifactFile(stderrFile, []byte(stderr))
 	if err != nil {
-		return ParseFailureArtifacts{}, err
+		return FailureArtifacts{}, err
 	}
 
 	stdoutArtifact.Path = stdoutFile
@@ -71,7 +71,7 @@ func WriteParseFailureArtifacts(task acpruntime.Task, provider acpruntime.Provid
 	stdoutArtifact.RelativePath = toRelativePath(absWorkspace, stdoutFile)
 	stderrArtifact.RelativePath = toRelativePath(absWorkspace, stderrFile)
 
-	artifacts := ParseFailureArtifacts{
+	artifacts := FailureArtifacts{
 		Directory:            rawDir,
 		RelativeDirectory:    toRelativePath(absWorkspace, rawDir),
 		Stdout:               stdoutArtifact,
@@ -112,10 +112,10 @@ func WriteParseFailureArtifacts(task acpruntime.Task, provider acpruntime.Provid
 	}
 	rawMeta, err := json.MarshalIndent(metaPayload, "", "  ")
 	if err != nil {
-		return ParseFailureArtifacts{}, fmt.Errorf("marshal parse-failure metadata: %w", err)
+		return FailureArtifacts{}, fmt.Errorf("marshal runtime failure metadata: %w", err)
 	}
 	if err := os.WriteFile(metaFile, append(rawMeta, '\n'), 0o644); err != nil {
-		return ParseFailureArtifacts{}, fmt.Errorf("write parse-failure metadata: %w", err)
+		return FailureArtifacts{}, fmt.Errorf("write runtime failure metadata: %w", err)
 	}
 
 	return artifacts, nil

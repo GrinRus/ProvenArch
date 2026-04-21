@@ -11,7 +11,6 @@ type Rule struct {
 
 const (
 	RuleSafeCollectDocumentPathNormalization = "collect.documents_path_normalization"
-	RuleDropDuplicateLegacyAddDocArtifact    = "taskresult.drop_duplicate_legacy_add_doc_artifact"
 	RuleDraftRootReconcileExistingOutputs    = "drafts.reconcile_existing_canonical_outputs"
 )
 
@@ -23,14 +22,6 @@ var rules = []Rule{
 		ExactMutation:    "rewrite documents[].path to artifact_root-relative form only",
 		FailureSemantics: "if path is ambiguous or file is absent, keep path unchanged and let contract validation fail",
 		RemovalTarget:    "remove when providers stop emitting workspace-relative or duplicated artifact-root document paths",
-	},
-	{
-		ID:               RuleDropDuplicateLegacyAddDocArtifact,
-		Trigger:          "TaskResult changeset contains legacy add_doc_artifact op that duplicates an already-valid collect or draft manifest surface",
-		Preconditions:    "canonical manifest is already valid and all referenced files required for promotion are present",
-		ExactMutation:    "drop only the duplicate legacy add_doc_artifact op before schema validation",
-		FailureSemantics: "if canonical manifest is invalid or referenced files are missing, keep legacy op and let runtime contract failure surface",
-		RemovalTarget:    "remove when providers stop emitting duplicate legacy add_doc_artifact ops for canonical manifest artifacts",
 	},
 	{
 		ID:               RuleDraftRootReconcileExistingOutputs,
