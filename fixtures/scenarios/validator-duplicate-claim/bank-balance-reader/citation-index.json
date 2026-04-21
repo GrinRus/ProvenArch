@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "run_id": "run_bank_duplicate_claim",
+  "generated_at": "2026-04-18T16:23:02Z",
+  "citations": [
+    {
+      "id": "cite.balancereader",
+      "repo": "bank-of-anthos",
+      "path": "kubernetes-manifests/balance-reader.yaml",
+      "claim_ids": [
+        "claim.balancereader.service",
+        "claim.balancereader.deployment"
+      ],
+      "document_ids": [
+        "doc.reports-as-is-kubernetes-manifests-services-md"
+      ]
+    },
+    {
+      "id": "cite.k8s.balancereader",
+      "repo": "bank-of-anthos",
+      "path": "kubernetes-manifests/balance-reader.yaml",
+      "claim_ids": [
+        "claim.balancereader.deployment",
+        "claim.balancereader.service",
+        "claim.balancereader.version"
+      ],
+      "document_ids": [
+        "doc.reports-as-is-bank-of-anthos-service-catalog-md"
+      ]
+    }
+  ]
+}

@@ -68,3 +68,34 @@ func TestResolveHeadlessIncludeDirectoriesFallsBackToWorkspaceValidate(t *testin
 		t.Fatalf("unexpected include dirs:\n got=%v\nwant=%v", got, want)
 	}
 }
+
+func TestResolveHeadlessIncludeDirectoriesUsesReadContextRootsWithoutRepoFallback(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "arch-workspace")
+	stagedFinal := filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "final")
+	validatorRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "validator")
+	repoRoot := filepath.Join(root, "repo-a")
+	for _, dir := range []string{workspace, stagedFinal, validatorRoot, repoRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	manifest := "version: 1\nrepos:\n  - name: repo-a\n    path: " + repoRoot + "\n"
+	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	got := ResolveHeadlessIncludeDirectories(Task{
+		Workspace:        workspace,
+		RepoScopes:       []string{"repo-a"},
+		ReadContextRoots: []string{workspace, stagedFinal, validatorRoot},
+	})
+
+	want := []string{workspace, stagedFinal, validatorRoot}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected include dirs with read_context_roots:\n got=%v\nwant=%v", got, want)
+	}
+}

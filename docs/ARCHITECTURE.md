@@ -34,7 +34,6 @@
      - persisted profile в `workspace.yaml.runtime.profile.execution`
      - effective precedence: `CLI > env > workspace > defaults`
      - CLI overrides: `--execution-strategy`, `--max-parallel-tasks`, `--failure-policy`
-     - repo filtering policy: `runtime.profile.execution.repo_selection` (`all|backend_only`) + declared/inferred repo role (`repos[].analysis.role` first, then conservative source inference from `name`/`path`/`git_url`)
    - Используется как локально, так и из SCM-triggered pipeline jobs/manual buttons
    - Internal API trigger остаётся optional trusted-mode capability, а не обязательной CI/CD поверхностью
    - Раздаёт embedded UI shell и API в одном процессе `acp serve`
@@ -46,7 +45,7 @@
    - Live browser e2e: Playwright optional smoke (`ui/e2e/live-flow.spec.ts`, `npm run e2e:live --prefix ui`)
    - Guided setup поддерживает multi-repo (`repos[]`) с add/remove rows и optional `ref`
    - Показывает repo overview в validate surface: `resolved_repos` + diagnostics, сгруппированные по repo
-   - Редактирует baseline bundle artifacts через guided selector (`charter/*`, `skills/*`, prompt packs, `skills/subagents.yaml`)
+   - Редактирует baseline bundle artifacts через guided selector (`charter/*`, `skills/*`, prompt packs, `skills/subagents.yaml`), построенный из `skills/bundle-manifest.json`
    - UI разбит на top-level tabs `Setup / Baseline / Runs / Results / Settings`
    - Runtime profile (`timeouts` + `execution`) полностью вынесен в вкладку `Settings`
    - Показывает run dashboard (queued/running/succeeded/failed), включая завершённые run'ы из persisted history
@@ -70,6 +69,7 @@
    - Step 0 materialization читает persisted wizard contract `charter/wizard/step0-contract.json`
    - при missing/invalid wizard contract применяется deterministic baseline fallback и warning фиксируется в run diagnostics
    - baseline bundle seeding выполняется create-if-missing, без перезаписи пользовательских правок
+   - `skills/bundle-manifest.json` является machine-readable inventory/source-of-truth для baseline editor surface; stale manifest version выдаёт diagnostic, но не триггерит auto-overwrite workspace assets
    - Готовит ContextPack/PromptPack
    - Загружает baseline bundle agents/skills/prompts из workspace
    - Работает с единым central workspace (`arch-workspace`) как корнем артефактов MVP
@@ -81,7 +81,6 @@
    - Runtime step1 и enrich domain cards используют общий resolver `repo_scope` (declared -> slug fallback -> empty)
    - Проверяет согласованность canonical domain card: filename `<domain-id>.md` vs поле `- id:`; mismatch фиксируется high-priority question, runtime остаётся filename-based
    - Монолитный сценарий many-domains-to-one-repo поддержан через общий `repo_scope`; unknown scope фиксируется вопросом `q.domain.<id>.unknown-repo-scope`
-   - Если `repo_scope` домена исключён policy `repo_selection`, domain runtime task пропускается и фиксируется high-priority question
    - Выполняет runtime collect-step per-domain и выдаёт каждому shard runtime-aware envelope:
      - `artifact_root` (workspace-relative)
      - `write_root` (absolute run-scoped staging dir)
@@ -92,11 +91,13 @@
    - shard-plan публикует полный неперекрывающийся coverage partition repo через `path_scopes` (directory/file scopes); для больших repo применяется только structural coalescing по filesystem ancestry
    - Per-shard persistence crash-safe: shard-summary materialize-ится сразу со status=`pending`; после schema-validated TaskResult raw taskrun пишется до `apply`, shard переходит в `checkpointed`, после успешного `apply` — в `succeeded`; runtime/apply failure фиксируется как `failed` без ожидания конца шага
    - Internal shard-summary contract: `taskrun_path` обязателен для `checkpointed/succeeded`; persisted taskrun сохраняет `meta.shard_id/meta.repo_scopes/meta.path_scopes`
+   - Internal shard-plan/shard-summary artifacts materialize-ят non-empty `meta.runtime.name/meta.runtime.version`, чтобы internal batch/contract checks не трактовали их как runtime-name drift
    - Scheduler поддерживает `sequential|parallel` execution с worker-pool (`max_parallel_tasks`) и `fail_fast|best_effort` failure-policy
    - При `best_effort` downstream шаги продолжаются на partial model, но итог run фиксируется как `failed` с `error_code=run_partial_failed`; если `step1.collect` становится `unusable`, live `step3.findings` не выполняется, а downstream markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) materialize-ятся в `report_mode=incomplete` с явным banner/triage-only wording
    - Вызывает runtime adapter
    - Собирает staged final doc set в `reports/taskruns/<run_id>/staging/final/`
    - Генерирует и валидирует `final-run-index.json` и `citation-index.json`
+   - `citation-index.json.claim_ids` трактуются как global staged-final namespace; duplicate claim ids в validator scope детерминированно repair-ятся на index/reference уровне с shard suffix без semantic rewrite authored docs
    - Step 3 runtime primary output: `validator-verdict.json`
    - Promotion копирует только approved final set в stable `reports/as-is/*`, `reports/findings/*`, `reports/coverage/*`, `reports/agent-outputs/*`, `proposals/*`
    - Валидирует TaskResult как compatibility envelope, а не как primary filesystem contract
@@ -109,6 +110,7 @@
    - Поддерживает управляемую отмену run:
      - pending run в debounce queue отменяется immediate (`failed`, `error_code=run_canceled`)
      - active run отменяется cooperative через `context cancel` (`failed`, `error_code=run_canceled`)
+     - если cancel request пришёл раньше конкурирующего layout/validation failure, terminal surface сохраняет `error_code=run_canceled`, а validation error остаётся в logs/warnings
    - На старте сервиса stale `queued` run по-прежнему reconcile-ится в `failed` с `error_code=run_reconciled_after_restart`
    - Для async service-managed run stale `running` run auto-resume-ится с тем же `run_id`, если есть resumable shard artifacts; resume cursor стартует с `*.step1.collect` для rebuild in-memory state из persisted taskruns, а runtime step replay-ит `succeeded/checkpointed` shard-ы без повторного provider execution
    - Ведёт persisted run history в `reports/taskruns/run-history.json` (versioned index, retention 500)
@@ -121,7 +123,7 @@
      - `executeRuntimeTask` выполняет runner под `context.WithTimeout(step_timeout_sec)`
      - heartbeat-log `runtime task heartbeat` публикуется раз в `heartbeat_sec`
      - timeout/cancel причины добавляются в error message без изменения `error_code` контракта
-   - Materialize-ит per-run quality summary `reports/taskruns/<run_id>-quality.json` (signal metrics/runtime versions + `evidence_state.collect/findings/report_mode/reasons`)
+   - Materialize-ит per-run quality summary `reports/taskruns/<run_id>-quality.json` (signal metrics/runtime versions + structured `failure` + `quality_signals[]` + `evidence_state.collect/findings/report_mode/reasons`)
    - Materialize-ит per-run repo selection summary `reports/taskruns/<run_id>-repo-selection-summary.json` (mode + selected scopes + include/exclude reasons)
    - Run logs retention policy (TTL + max runs) запускается при старте сервиса, перед run и после run
    - (опционально) делает git commit
@@ -138,6 +140,10 @@
    - общий runtime layer + provider factory: `internal/runtime/runtime.go`, `internal/runtime/providers/factory.go`
    - каждый provider получает explicit staged-write contract (`artifact_root`, `write_root`, `read_context_roots`) и должен писать runtime-authored artifacts только внутрь `write_root`
    - live headless providers продолжают возвращать TaskResult JSON как compatibility envelope; parse failures классифицируются как `runner_parse_failed`
+   - для `init.step1.collect` / `refresh.step1.collect` runtime выполняет максимум одну post-success artifact-repair попытку, если `shard-pack-manifest.json` выглядит skeletal/generic-only; write-root-only retry разрешён только для already-rich manifests, иначе retry сохраняет repo roots и откатывает `write_root`, если fidelity не улучшилась
+   - schema-retry и artifact-repair разведены: schema-invalid `TaskResult` получает один direct-JSON retry с жёстким whitelist `changeset[].op`, а schema-valid result с invalid manifest получает отдельный artifact-repair retry с canonical manifest skeleton
+   - collect step не считается успешным, если после единственной artifact-repair попытки `shard-pack-manifest.json` остаётся missing/invalid/skeletal; такой случай поднимается как runtime contract failure (`runner_parse_failed` / `runtime_parse`)
+   - collect contract требует полного `compatibility` block в `shard-pack-manifest.json` (`coverage/questions/entities/edges/findings`) и repo-specific citation surface; generic-only `cite.runtime-summary` допустим только вне multi-document refresh evidence collapse
    - headless provider scope включает `arch-workspace` и resolved repo directories для текущих `repo_scope/repo_scopes`, чтобы provider видел source evidence из реальных checkout-ов
    - command overrides:
      - `ACP_CLAUDE_CMD` (default `claude-code`)
@@ -204,6 +210,14 @@
 2) As-is docs -> staged final doc assembly + indexes
 3) Findings -> validator verdict over staged final set
 4) Proposals -> promotion + compatibility rebuild
+
+Headless runtime prompt assembly:
+- effective provider prompt собирается внутри runtime runner, а не читается напрямую из seeded markdown surface
+- workspace prompt packs `skills/prompt-packs/collect-context.md` и `skills/prompt-packs/findings.md` подключаются как additive context
+- `skills/*/prompts/*.md` остаются seeded/reference baseline assets для bundle/UI review, но не являются live headless override surface
+- strict schema/write invariants остаются в runtime builder и идут после additive prompt-pack section, поэтому редактируемые prompt packs не ослабляют contract
+- для каждого shard attempt/retry runtime materialize-ит prompt/task diagnostics в `reports/taskruns/raw/*`
+- runtime failures materialize-ятся в `reports/taskruns/raw/*-failure.json`; batch/report слой обязан читать эти structured artifacts как primary source-of-truth вместо string scanning prompt/log text
 
 On-demand capability:
 - Q&A агент использует `charter/cards + model + reports + docs/imports`; в beta доступен как internal service + CLI `acp qa` без публичного API endpoint.

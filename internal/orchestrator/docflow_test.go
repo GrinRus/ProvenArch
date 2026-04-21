@@ -10,6 +10,83 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
+func TestRuntimeArtifactContextFindingsExcludesRepoRootsFromDefaultReadContext(t *testing.T) {
+	t.Parallel()
+
+	workspaceRoot := t.TempDir()
+	repoRoot := filepath.Join(workspaceRoot, "..", "repo-a")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+
+	execution := &pipelineExecution{
+		runID:             "run-ctx",
+		workspace:         workspace.Root{Path: workspaceRoot},
+		resolvedRepoPaths: map[string]string{"repo-a": repoRoot},
+	}
+
+	_, writeRoot, readRoots, err := execution.runtimeArtifactContext("refresh.step3.findings", "validator", []string{"repo-a"})
+	if err != nil {
+		t.Fatalf("runtime artifact context: %v", err)
+	}
+	finalRoot, resolveErr := execution.workspace.Resolve(runtimeFinalArtifactRoot(execution.runID))
+	if resolveErr != nil {
+		t.Fatalf("resolve final root: %v", resolveErr)
+	}
+	if !containsPathValue(readRoots, writeRoot) {
+		t.Fatalf("expected validator write root in read context, got %v", readRoots)
+	}
+	if !containsPathValue(readRoots, finalRoot) {
+		t.Fatalf("expected staged final root in read context, got %v", readRoots)
+	}
+	if containsPathValue(readRoots, workspaceRoot) {
+		t.Fatalf("did not expect workspace root in findings read context, got %v", readRoots)
+	}
+	if containsPathValue(readRoots, repoRoot) {
+		t.Fatalf("did not expect repo root in findings read context, got %v", readRoots)
+	}
+}
+
+func TestRuntimeArtifactContextCollectKeepsRepoRootsInReadContext(t *testing.T) {
+	t.Parallel()
+
+	workspaceRoot := t.TempDir()
+	repoRoot := filepath.Join(workspaceRoot, "..", "repo-b")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+
+	execution := &pipelineExecution{
+		runID:             "run-ctx",
+		workspace:         workspace.Root{Path: workspaceRoot},
+		resolvedRepoPaths: map[string]string{"repo-b": repoRoot},
+	}
+
+	_, writeRoot, readRoots, err := execution.runtimeArtifactContext("refresh.step1.collect", "repo-b", []string{"repo-b"})
+	if err != nil {
+		t.Fatalf("runtime artifact context: %v", err)
+	}
+	if !containsPathValue(readRoots, workspaceRoot) {
+		t.Fatalf("expected workspace root in collect read context, got %v", readRoots)
+	}
+	if !containsPathValue(readRoots, repoRoot) {
+		t.Fatalf("expected repo root in collect read context, got %v", readRoots)
+	}
+	if containsPathValue(readRoots, writeRoot) {
+		t.Fatalf("did not expect collect write_root in read context by default, got %v", readRoots)
+	}
+}
+
+func containsPathValue(values []string, target string) bool {
+	target = filepath.Clean(strings.TrimSpace(target))
+	for _, value := range values {
+		if filepath.Clean(strings.TrimSpace(value)) == target {
+			return true
+		}
+	}
+	return false
+}
+
 func TestReadShardDocumentRejectsPathTraversalOutsideArtifactRoot(t *testing.T) {
 	t.Parallel()
 
@@ -20,7 +97,7 @@ func TestReadShardDocumentRejectsPathTraversalOutsideArtifactRoot(t *testing.T) 
 	_, err := readShardDocument(manifest, contracts.AuthoredDocument{
 		ID:   "doc.escape",
 		Path: "../outside.md",
-	})
+	}, "")
 	if err == nil {
 		t.Fatalf("expected path traversal error")
 	}
@@ -48,11 +125,41 @@ func TestReadShardDocumentReadsRelativePathWithinArtifactRoot(t *testing.T) {
 	content, err := readShardDocument(manifest, contracts.AuthoredDocument{
 		ID:   "doc.safe",
 		Path: filepath.ToSlash(relPath),
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("read shard document: %v", err)
 	}
 	if content != "report-content" {
+		t.Fatalf("unexpected content %q", content)
+	}
+}
+
+func TestReadShardDocumentResolvesWorkspaceRelativeArtifactRoot(t *testing.T) {
+	t.Parallel()
+
+	workspaceRoot := t.TempDir()
+	artifactRel := filepath.Join("reports", "taskruns", "run-1", "staging", "shards", "sample")
+	artifactRoot := filepath.Join(workspaceRoot, artifactRel)
+	relPath := filepath.Join("nested", "report.md")
+	absPath := filepath.Join(artifactRoot, relPath)
+	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+		t.Fatalf("mkdir artifact root: %v", err)
+	}
+	if err := os.WriteFile(absPath, []byte("relative-report"), 0o644); err != nil {
+		t.Fatalf("write report: %v", err)
+	}
+
+	manifest := contracts.ShardPackManifest{
+		ArtifactRoot: filepath.ToSlash(artifactRel),
+	}
+	content, err := readShardDocument(manifest, contracts.AuthoredDocument{
+		ID:   "doc.relative",
+		Path: filepath.ToSlash(relPath),
+	}, workspaceRoot)
+	if err != nil {
+		t.Fatalf("read shard document with relative artifact_root: %v", err)
+	}
+	if content != "relative-report" {
 		t.Fatalf("unexpected content %q", content)
 	}
 }
@@ -96,7 +203,7 @@ func TestCollectAuthoredStageDocumentsMergesByCanonicalPath(t *testing.T) {
 		},
 	}
 
-	documents, err := collectAuthoredStageDocuments(manifests)
+	documents, err := collectAuthoredStageDocuments(manifests, "")
 	if err != nil {
 		t.Fatalf("collect authored docs: %v", err)
 	}
@@ -177,6 +284,36 @@ func TestValidateStagedArtifactsReportsMissingStagedDocument(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected missing_staged_document issue, got %#v", issues)
+	}
+}
+
+func TestValidateStagedArtifactsReportsMissingRequiredCanonicalLiveDocuments(t *testing.T) {
+	t.Parallel()
+
+	execution := &pipelineExecution{
+		finalRunIndex: &contracts.FinalRunIndex{
+			RunID: "run-1",
+			CanonicalDocuments: []contracts.FinalRunDocument{
+				{
+					ID:            "doc.agent.domain",
+					Kind:          "agent-output",
+					CanonicalPath: "reports/agent-outputs/domains/payments.md",
+					StagedPath:    "reports/taskruns/run-1/staging/final/reports/agent-outputs/domains/payments.md",
+				},
+			},
+		},
+		citationIndex: &contracts.CitationIndex{RunID: "run-1"},
+	}
+
+	issues := execution.validateStagedArtifacts()
+	missingRequired := 0
+	for _, issue := range issues {
+		if issue.Code == "missing_required_canonical_document" {
+			missingRequired++
+		}
+	}
+	if missingRequired != len(requiredCanonicalLiveDocuments) {
+		t.Fatalf("expected %d missing required canonical document issues, got %d (%#v)", len(requiredCanonicalLiveDocuments), missingRequired, issues)
 	}
 }
 

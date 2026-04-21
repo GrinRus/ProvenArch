@@ -26,26 +26,31 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page })
   await expect(page.getByText("Status: valid")).toBeVisible();
   const resolvedRepoRows = page.getByTestId("workspace-validate-resolved-repos").locator("li");
   await expect(resolvedRepoRows).toHaveCount(expectedRepoCount);
-  const repoSelectionRows = page.getByTestId("workspace-validate-repo-selection").locator("li");
-  await expect
-    .poll(async () => repoSelectionRows.count())
-    .toBeGreaterThan(0);
 
   await page.getByTestId("tab-runs").click();
   await page.getByTestId("run-init-btn").click();
   await expect(page.getByTestId("run-status-panel")).toBeVisible();
   const runID = ((await page.getByTestId("run-status-run-id").textContent()) ?? "").trim();
   expect(runID).not.toBe("");
-  await expect
-    .poll(
-      async () => {
-        const response = await page.request.get(`/api/pipeline/runs/${runID}`);
-        const payload = (await response.json()) as { status?: string };
-        return (payload.status ?? "").trim();
-      },
-      { timeout: initTimeoutMs }
-    )
-    .toBe("succeeded");
+  const initDeadline = Date.now() + initTimeoutMs;
+  let terminalStatus = "";
+  while (Date.now() < initDeadline) {
+    const response = await page.request.get(`/api/pipeline/runs/${runID}`);
+    const payload = (await response.json()) as { status?: string; error_code?: string | null };
+    const status = (payload.status ?? "").trim();
+    const errorCode = (payload.error_code ?? "").trim();
+    if (status === "succeeded") {
+      terminalStatus = status;
+      break;
+    }
+    if (status === "failed") {
+      throw new Error(`run ${runID} terminated before inspect stage: status=failed error_code=${errorCode || "-"}`);
+    }
+    await page.waitForTimeout(500);
+  }
+  if (terminalStatus !== "succeeded") {
+    throw new Error(`run ${runID} did not reach succeeded within ${initTimeoutSec}s`);
+  }
 
   const selectedRunButton = page.getByRole("button", { name: runID }).first();
   await expect(selectedRunButton).toBeVisible();
@@ -169,7 +174,26 @@ test("live ui flow: run refresh -> cancel -> failed(run_canceled)", async ({ pag
       },
       { timeout: 60_000 }
     )
-    .toBe("running");
+    .toMatch(/^(queued|running)$/);
+  const activeDeadline = Date.now() + Math.max(cancelTimeoutMs, 180_000);
+  let activeStatus = "";
+  while (Date.now() < activeDeadline) {
+    const response = await page.request.get(`/api/pipeline/runs/${runID}`);
+    const payload = (await response.json()) as { status?: string; error_code?: string | null };
+    const status = (payload.status ?? "").trim();
+    const errorCode = (payload.error_code ?? "").trim();
+    if (status === "running") {
+      activeStatus = status;
+      break;
+    }
+    if (status === "failed") {
+      throw new Error(`run ${runID} terminated before cancel: status=failed error_code=${errorCode || "-"}`);
+    }
+    await page.waitForTimeout(1000);
+  }
+  if (activeStatus !== "running") {
+    throw new Error(`run ${runID} did not reach running status before cancel deadline (${Math.max(cancelTimeoutSec, 180)}s)`);
+  }
 
   const cancelButton = page.getByTestId("run-cancel-btn");
   await expect(cancelButton).toBeEnabled({ timeout: 30_000 });

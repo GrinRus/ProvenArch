@@ -23,6 +23,8 @@ Baseline scenarios для MVP:
 - `single-service-http-postgres-gitlabci`
 - `two-services-http-call-and-queue`
 - `missing-owner-and-missing-cicd`
+- `refresh-artifact-quality`
+- `validator-duplicate-claim`
 
 Required CI использует только synthetic scenarios и recorded runner artifacts.
 Live Claude Code runs в этом контуре не требуются.

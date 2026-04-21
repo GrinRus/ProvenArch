@@ -49,6 +49,285 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 
 ### Plan ID
+EP-20260420-regres-audit-followups
+
+### Context
+После серии live `regres small/fast` прогонов основной backend/runtime контур заметно укреплён, но forensic-аудит показывает остаточные системные зазоры: сильная зависимость live gate от внешней provider availability, смешение orchestration/runtime/report responsibilities в shell-слое, неполное observability для prompt/runtime surface и неравномерное покрытие интеграционных failure-class regression tests. Нужен единый follow-up план, выровненный с docs-first/local-first архитектурой.
+
+### Goals (must have)
+- [ ] Свести runtime/provider failure handling к единому error taxonomy без stringly-typed drift между Go runtime и shell/python report layers
+- [ ] Довести prompt/runtime observability до уровня, где любой live shard triage делается по structured artifacts, а не по ad-hoc log scraping
+- [ ] Укрепить docflow/semantic fallback так, чтобы deterministic final-set assembly и cross-repo gates проверялись одинаково в unit/integration/live harness
+- [ ] Закрыть основные test coverage gaps вокруг negative/live-like scenarios, frontend smoke timing, и shell classifier coupling
+- [ ] Сверить README/ARCHITECTURE/spec/runbook с реально исполняемым поведением и убрать оставшиеся misleading narratives
+
+### Non-goals
+- [ ] Не менять five-profile taxonomy
+- [ ] Не менять public JSON schemas (`TaskResult`, `shard-pack-manifest`, `final-run-index`, `citation-index`, `validator-verdict`)
+- [ ] Не превращать optional live gate в required CI merge gate
+
+### Approach
+1) Выполнить full-flow audit: pipeline/orchestrator/runtime/report/frontend/smoke paths, включая prompt pack consumption и raw diagnostics.
+2) Сопоставить текущую реализацию с target architecture (`local-first`, `docs-first`, deterministic staged/promoted artifacts, additive prompt packs + strict contract tail).
+3) Разделить findings на P0/P1/P2: реальные runtime defects, shell/report legacy coupling, test coverage gaps, architectural debt.
+4) Зафиксировать план follow-up slices: runtime/report convergence, semantic/docflow hardening, frontend smoke stabilization, documentation/triage cleanup.
+
+### Files expected to change
+- `docs/PLANS.md`
+- далее по follow-up slices: `internal/runtime/*`, `internal/orchestrator/*`, `internal/artifactquality/*`, `scripts/full-run-batch-*.sh`, `scripts/e2e_batch_report.py`, `ui/e2e/*`, `docs/spec/*`, `docs/RELEASE_LIVE_E2E_RUNBOOK.md`, `docs/TESTING_STRATEGY.md`
+
+### Acceptance criteria
+- [ ] Аудит завершён по 7 requested areas: flow, project behavior, tests, prompts/artifacts, potential bugs, architecture fit, implementation plan
+- [ ] Для каждого существенного риска есть привязка к конкретному коду/контракту/тесту
+- [ ] План доработок разбит по приоритетам и не смешивает external provider issues с исправимыми внутренними дефектами
+
+### Risks
+- Самый большой риск — перепутать external provider availability limits с внутренними regressions и зафиксировать ложные продуктовые выводы. Второй риск — продолжить раздувать shell-classifier слой вместо перевода инцидентов в structured runtime evidence.
+
+### Progress log
+- 2026-04-20: старт полного аудита flow/project/tests/prompts/artifacts against target architecture.
+
+### Plan ID
+EP-20260418-regres-fast-artifact-quality
+
+### Context
+Canonical `regres fast` всё ещё краснеет не только из-за реальной bank-like деградации refresh-артефактов, но и из-за ложных blockers в batch report, `contract:runtime-name` и frontend cancel/init smoke. Публичные схемы менять нельзя; нужно довести runtime/harness/report/frontend поведение до уже зафиксированной policy.
+
+### Goals (must have)
+- [x] Добавить provider-side artifact-fidelity repair для collect steps и синхронизировать qwen/claude guardrails
+- [x] Исправить batch report, чтобы non-release verdict считался только по реально выбранным provider/run slots
+- [x] Убрать ложный `contract:runtime-name` для internal shard-plan/shard-summary артефактов
+- [x] Стабилизировать frontend init-inspect/cancel smoke и сохранить `run_canceled` при конкурирующем terminal failure
+- [x] Синхронизировать docs/skill и прогнать DoD (`make contracts`, `make test`, `make lint`, `make build`)
+
+### Non-goals
+- [ ] Не менять five-profile taxonomy
+- [ ] Не менять public schemas (`TaskResult`, `validator-verdict`, `final-run-index`, `citation-index`)
+- [ ] Не добавлять wrapper-скрипт поверх matrix harness
+
+### Approach
+1) Вынести shared helper для rich/skeletal manifest assessment и использовать его в runtime retry + docflow quality warnings.
+2) Добавить post-success artifact-repair attempt для collect steps, не ломая existing parse-retry contract.
+3) Перевести batch quality report на selected-provider/selected-run aware aggregation и убрать hardcoded `10/10`.
+4) Проставить runtime metadata в internal shard-plan/shard-summary JSON и починить frontend smoke/cancel path.
+5) Обновить docs/skill только по реально изменившемуся поведению и повторно прогнать non-live DoD.
+
+### Files expected to change
+- `internal/artifactquality/*`
+- `internal/runtime/qwencode/runner.go`
+- `internal/runtime/qwencode/runner_test.go`
+- `internal/runtime/claudecode/runner.go`
+- `internal/runtime/claudecode/runner_test.go`
+- `internal/orchestrator/docflow.go`
+- `internal/orchestrator/sharding.go`
+- `internal/orchestrator/*_test.go`
+- `scripts/e2e_batch_report.py`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/write-batch-preflight.py`
+- `scripts/tests/batch_failure_classification_test.py`
+- `ui/e2e/live-flow.spec.ts`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/LOCAL_FULL_RUN_AI_ADVENT.md`
+- `.agents/skills/e2e-live-gate/SKILL.md`
+
+### Acceptance criteria
+- [x] Bank-like collapse получает automatic repair attempt и остаётся blocker только если repair не улучшил artifacts
+- [x] Openstack-like rich reuse не считается ложным дефектом
+- [x] Batch report не генерирует фантомные `backend_total_runs=10` и `summary_missing=9` для qwen-only non-release runs
+- [x] Internal shard-plan/shard-summary больше не триггерят `contract:runtime-name`
+- [x] Frontend init-inspect и cancel smoke больше не падают на stale test id / missing `run_canceled`
+
+### Risks
+- Основной риск в artifact-repair path: не ухудшить already-good manifests повторным retry. Для этого repair должен запускаться только для collect steps с poor manifest и иметь rollback на исходный write_root при неудачном retry.
+
+### Progress log
+- 2026-04-18: старт slice на стабилизацию `regres fast` после frozen-state findings; scope зафиксирован как artifact-quality first, затем batch/runtime/frontend false blockers.
+- 2026-04-18: реализованы shared artifact-quality heuristics, collect repair retry/rollback, selected-surface batch aggregation, runtime metadata stamping и cancel precedence; `make contracts`, `make test`, `make lint`, `make build` прошли.
+
+### Plan ID
+EP-20260417-live-e2e-profile-taxonomy
+
+### Context
+Нужно заменить wave-centric live E2E narrative на более гранулированную 5-профильную таксономию без изменения текущего runner contract. Concrete `profile_id` остаются прежними, а named профили (`regres fast|long`, `release fast|long|full`) вводятся как checked-in composite presets поверх прямых вызовов `full-run-batch-matrix.sh`.
+
+### Goals (must have)
+- [x] Добавить checked-in catalog с sizing policy, repo-set shard classification и expected backend totals
+- [x] Добавить runnable matrix slices для новых high-level профилей без изменения matrix parser/release-mode contract
+- [x] Синхронизировать runbook/testing docs/skill под новую canonical taxonomy и пометить старые wave files как legacy/compat
+- [x] Добавить tests на новые release/non-release slice shapes и catalog integrity
+
+### Non-goals
+- [x] Не менять approved concrete profile ids (`single-path`, `single-git_url`, `multi-path`, `multi-git_url`)
+- [x] Не добавлять wrapper-скрипт поверх `scripts/full-run-batch-matrix.sh`
+
+### Approach
+1) Зафиксировать canonical taxonomy в `examples/e2e-profile-catalog.yaml`.
+2) Разбить named профили на минимальные runnable matrix slice-файлы.
+3) Обновить docs/skill так, чтобы canonical source of truth ссылался на catalog/slices, а legacy wave matrices остались только для compatibility.
+4) Расширить matrix tests на новые slice shapes и catalog expansion counts.
+
+### Files expected to change
+- `examples/e2e-profile-catalog.yaml`
+- `examples/e2e-matrix.*.yaml`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/LOCAL_FULL_RUN_AI_ADVENT.md`
+- `.agents/skills/e2e-live-gate/SKILL.md`
+- `scripts/tests/matrix_release_contract_test.py`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены
+- [x] Catalog покрывает все 6 canonical repo sets и 5 named profiles
+- [x] Документация и skill синхронизированы с новой taxonomy
+
+### Risks
+- Главное место риска — смешение старых wave файлов с новой canonical taxonomy. Их нужно сохранить рабочими, но явно вывести из основного release narrative.
+
+### Progress log
+- 2026-04-17: добавлены catalog и canonical matrix slices для `regres fast|long`, `release fast|long|full`.
+- 2026-04-17: runbook/testing docs/skill переведены на 5-profile taxonomy; wave matrices оставлены как legacy compatibility.
+- 2026-04-17: добавлены slice-shape и catalog integrity regression tests, выполнена exploratory fake validation shard counts для canonical repo sets.
+
+### Plan ID
+EP-20260417-live-e2e-baseline-vs-full
+
+### Context
+Нужно развести два live E2E контура: быстрый baseline regression для ежедневной отладки (`wave1`, `qwen`, implicit baseline, 2 backend runs total) и полный trusted-machine прогон для release/debug escalation.
+
+### Goals (must have)
+- [x] Ввести отдельный regression matrix example для `wave1`
+- [x] Зафиксировать в docs/skill, что baseline regression = `qwen-only`, а release/full run остаётся полным прогоном
+- [x] Добавить regression test на 2-profile non-release matrix
+
+### Non-goals
+- [ ] Не менять release-mode matrix contract
+- [ ] Не менять provider list (`claude-code`, `qwen-code`)
+
+### Approach
+1) Добавить non-release matrix example с `single-path + multi-git_url`.
+2) Документировать запуск baseline regression через `BATCH_PROVIDER_FILTER=qwen-code`.
+3) Оставить official release wave1/wave2 как full run и закрепить это отдельной проверкой.
+
+### Files expected to change
+- `examples/e2e-matrix.*.yaml`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/LOCAL_FULL_RUN_AI_ADVENT.md`
+- `.agents/skills/e2e-live-gate/SKILL.md`
+- `scripts/tests/matrix_release_contract_test.py`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены
+- [x] Baseline regression и full run описаны без двусмысленности
+- [x] Новый regression matrix example добавлен
+
+### Risks
+- Если не развести baseline/full run достаточно явно, команда будет путать быстрый qwen-only smoke с release-ready verdict.
+
+### Progress log
+- 2026-04-17: старт slice на разделение quick baseline regression и full run/release gate.
+- 2026-04-17: добавлен `examples/e2e-matrix.regression-wave1.yaml`, docs/skill разведены на quick baseline vs full run, пройдены `python3 -m unittest scripts.tests.matrix_release_contract_test` и `go test ./internal/docsync`.
+
+### Plan ID
+EP-20260417-canonical-live-e2e-stabilization
+
+### Context
+После перехода на 5-profile taxonomy canonical `regres fast` должен исполняться из clean committed tree без `BATCH_SKIP_PRECHECK`. Для этого нужно синхронизировать committed harness с новым matrix contract, усилить qwen retry/JSON discipline на live shard output и закрепить clean-tree preflight в docs/skill.
+
+### Goals (must have)
+- [x] Синхронизировать harness и tests с новым non-release/release matrix contract
+- [x] Усилить qwen prompt/retry discipline и добавить regression fixture на реальный invalid live stdout pattern
+- [x] Обновить runbook/testing docs/skill под canonical clean-tree preflight
+- [x] Повторно прогнать non-live DoD после фиксов harness/tests
+- [ ] Довести canonical `regres fast` live acceptance до финального verdict без `BATCH_SKIP_PRECHECK`
+
+### Non-goals
+- [x] Не менять 5-profile taxonomy, catalog и curated repo sets
+- [x] Не добавлять wrapper-скрипт поверх `scripts/full-run-batch-matrix.sh`
+- [x] Не менять product API и `schemas/taskresult.schema.json`
+
+### Approach
+1) Убрать из tracked harness legacy-ожидание "в матрице должны быть все 4 concrete profile id" и привести release verdict math к реальному expansion.
+2) Зафиксировать qwen live parse regression fixture и усилить prompt/retry contract только под подтверждённые event-stream patterns.
+3) Синхронизировать runbook/skill/strategy на clean committed tree или отдельный clean worktree.
+4) Повторить canonical `regres fast` из clean worktree без `BATCH_SKIP_PRECHECK` и проверить verdict files.
+
+### Files expected to change
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/tests/matrix_release_contract_test.py`
+- `internal/runtime/qwencode/runner.go`
+- `internal/runtime/qwencode/runner_test.go`
+- `internal/runtime/taskresultextractor/extractor_test.go`
+- `internal/runtime/testdata/*`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/LOCAL_FULL_RUN_AI_ADVENT.md`
+- `.agents/skills/e2e-live-gate/SKILL.md`
+
+### Acceptance criteria
+- [x] Matrix contract tests покрывают release/non-release slices и implicit baseline
+- [x] Qwen regression fixture и retry path покрыты тестами
+- [x] Документация и skill описывают canonical clean-tree preflight
+- [x] `make contracts test lint build` проходит после фиксов
+- [ ] Canonical `regres fast` live rerun завершён с PASS verdict без `precheck_failed` и `runner_parse_failed`
+
+### Risks
+- Основной риск остался runtime-level: qwen может продолжать выдавать длинный prose/tool-planning перед финальным `TaskResult`, из-за чего canonical acceptance придётся подтверждать реальным trusted-host rerun, а не только unit coverage.
+
+### Progress log
+- 2026-04-17: synced committed harness with new matrix contract, including non-release positive `RUN_COUNT` and release-family validation.
+- 2026-04-17: added qwen live invalid stdout fixture, strengthened prompt/retry discipline, and expanded runner/extractor regression tests.
+- 2026-04-17: documented clean-tree canonical preflight in runbook, testing strategy, local full-run guide, and `acp-e2e-live-gate` skill.
+- 2026-04-17: reran `make contracts test lint build` successfully after fixing `REPORTS_ROOT`/`MATRIX_ROOT` env leakage in matrix contract tests.
+- 2026-04-17: canonical `regres fast` acceptance rerun started from clean worktree without `BATCH_SKIP_PRECHECK`; qwen advanced past the original immediate parse-failure path and entered retry-backed shard execution.
+- 2026-04-17: clean rerun showed the remaining canonical blocker moved from `runner_parse_failed` to `runtime_timeout` under legacy `pipeline_timeout=2400s`; follow-up slice adds matrix-native `timeout_profile` presets to canonical matrices and harness.
+
+### Plan ID
+EP-20260417-live-e2e-matrix-downsize
+
+### Context
+Нужно сократить manual live E2E release surface без потери базового coverage: оставить по одному `single` и `multi` профилю на wave, запускать по одному backend run на provider и сохранить release sweeps `baseline` + `parallel-default`.
+
+### Goals (must have)
+- [x] Перевести release-mode matrix contract на `RUN_COUNT=1`
+- [x] Требовать в official release matrix ровно один `single-*` и один `multi-*` профиль
+- [x] Обновить official wave1/wave2 matrices и release verdict expectations
+- [x] Синхронизировать skill/runbook/testing docs и regression tests
+
+### Non-goals
+- [ ] Не менять provider list (`claude-code`, `qwen-code`)
+- [ ] Не убирать canonical sweeps `baseline` и `parallel-default`
+
+### Approach
+1) Ослабить generic matrix parser до approved profile ids, а release-mode сузить до `single + multi`.
+2) Сделать expected backend totals динамическими от `RUN_COUNT`, зафиксировав release-mode на `1`.
+3) Пересобрать official wave matrices и docs под новый minimal live baseline.
+
+### Files expected to change
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/tests/*`
+- `examples/e2e-matrix.release-wave*.yaml`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/LOCAL_FULL_RUN_AI_ADVENT.md`
+- `.agents/skills/e2e-live-gate/SKILL.md`
+
+### Acceptance criteria
+- [x] Тесты обновлены/добавлены
+- [x] Release contract валидирует новый minimal matrix
+- [x] Документация и skill синхронизированы
+
+### Risks
+- Слишком жёсткий/неочевидный release contract может сломать существующие trusted-host процедуры; нужно держать ошибки fail-fast и явно описать allowed profile families.
+
+### Progress log
+- 2026-04-17: старт slice на уменьшение live E2E matrix до minimal single+multi baseline с `RUN_COUNT=1`.
+- 2026-04-17: release-mode matrix переведён на `RUN_COUNT=1`, official wave matrices сужены до `single + multi`, обновлены skill/runbooks/docs и пройдены `python3 -m unittest scripts.tests.matrix_release_contract_test`, `go test ./internal/docsync`, `bash -n scripts/full-run-batch-matrix.sh scripts/full-run-batch-5x2.sh`.
+
+### Plan ID
 EP-20260416-doc-first-runtime-pipeline
 
 ### Context
@@ -181,6 +460,86 @@ EP-20260416-zero-signal-hardening
 
 ### Progress log
 - 2026-04-16: реализованы `evidence_state`, incomplete/partial report semantics, batch failure precedence, regression tests и docs sync.
+
+### Plan ID
+EP-20260421-runtime-architecture-alignment-followup
+
+### Context
+Аудит текущего state показал, что core local-first/docs-first архитектура уже реализована и тестовый baseline зелёный, но остаются системные зоны риска:
+- часть source-of-truth всё ещё дублируется между Go runtime, shell harness и Python reporting;
+- baseline bundle имеет dual source-of-truth (`internal/workspace/baseline.go` vs UI editable surface) и не имеет явного migration/version path;
+- recorded full-chain regression покрывает `qwen-code`, но не даёт такой же orchestrator/report parity для `claude-code`;
+- live artifact-quality surface частично опирается на markdown string heuristics вместо полностью structured signals;
+- frontend product regression coverage заметно слабее backend/runtime coverage и всё ещё смешивается с operational smoke.
+
+### Goals (must have)
+- [x] Свести runtime/report classification к одному machine-readable source-of-truth с минимальным shell/python drift
+- [x] Ввести explicit baseline bundle manifest/versioning и убрать дублирование списка editable artifacts между backend и UI
+- [x] Добавить cross-provider recorded integration parity для `claude-code`
+- [x] Перевести quality gate с markdown-only heuristics на structured quality evidence, где это возможно
+- [x] Развести frontend operational smoke и isolated UI regression coverage
+
+### Non-goals
+- [ ] Не менять public JSON schemas (`TaskResult`, `shard-pack-manifest`, `final-run-index`, `citation-index`, `validator-verdict`)
+- [ ] Не ослаблять semantic gate `analysis:cross-repo-missing`
+- [ ] Не вводить hosted/security/compliance slices
+
+### Recommended first slice
+1) Вынести baseline bundle inventory в единый machine-readable manifest.
+2) Генерировать UI baseline editor surface из этого manifest вместо hardcoded списка.
+3) Добавить bundle version + stale/defaults diagnostics без авто-перезаписи пользовательских правок.
+
+Этот slice минимальный, reviewable и одновременно закрывает самый явный residual drift между runtime, workspace seeding и UI.
+
+### Approach
+1) **Failure taxonomy convergence**
+   - materialize единый batch/runtime classification artifact в Go-слое;
+   - shell/python переводить на consume-first модель, а fallback string scanning держать только для legacy runs;
+   - сократить дублирование precedence tables и subclass mapping.
+2) **Baseline bundle source-of-truth**
+   - ввести bundle manifest (`skills/bundle-manifest.json|yaml`) как canonical inventory для prompt packs / reference-only prompts / editable assets;
+   - `EnsureBaselineBundle` и UI editor должны читать один и тот же inventory;
+   - добавить version field и diagnostics для stale workspace baseline.
+3) **Cross-provider recorded integration parity**
+   - добавить `claude-code` recorded chain на тот же путь `raw provider output -> runner -> orchestrator/docflow -> batch/report`;
+   - зафиксировать одинаковые expected classes для salvage / unavailable / artifact-repair путей.
+4) **Structured quality evidence**
+   - вынести placeholder/incomplete/report-uselessness сигналы из ad-hoc markdown matching в structured report/quality artifact;
+   - markdown text checks оставить только как compatibility fallback.
+5) **Frontend test split**
+   - удержать `frontend-live-e2e` как trusted-host operational smoke;
+   - расширить `ui/src/*.test.tsx` и/или добавить non-live Playwright/RTL scenarios для baseline editor, runs/results navigation, error surfacing.
+
+### Files expected to change
+- `internal/orchestrator/*`
+- `internal/runtime/*`
+- `internal/workspace/*`
+- `internal/api/*`
+- `scripts/e2e_batch_report.py`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/frontend-live-e2e.sh`
+- `scripts/tests/*`
+- `ui/src/*`
+- `ui/e2e/*`
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/spec/PIPELINE_SPEC.md`
+
+### Acceptance criteria
+- [x] shell/python report layers не содержат независимой business-logic классификации для canonical runs
+- [x] baseline bundle inventory и UI editor surface генерируются из одного source-of-truth
+- [x] recorded integration tests существуют для `qwen-code` и `claude-code`
+- [x] artifact-quality blockers можно вывести из structured evidence без обязательного markdown text scanning
+- [x] isolated frontend regression tests покрывают ключевой UI flow без live provider dependency
+
+### Risks
+- Bundle migration легко сломать, если попытаться silently rewrite user-edited workspace assets; нужны diagnostics/versioning, а не force-overwrite.
+- Сведение classification logic в один source-of-truth затронет одновременно Go, shell и Python и потребует особенно аккуратной regression coverage.
+- Часть current artifact-quality semantics пока encoded в human-readable markdown; перенос в structured layer нужно делать без потери текущих blocking guarantees.
+
+### Progress log
+- 2026-04-21: реализованы structured run-level `failure`/`quality_signals` в quality summary, bundle manifest + stale diagnostics, backend/UI inventory convergence, `claude-code` recorded integration parity, additional non-live UI regression checks и shell-agnostic hermetic tooling (`yaml_compat`, `run-npm.sh`, `resolve-node-tool.sh`) для стабильного DoD из `bash`/`make`.
 
 ### Archived
 - Completed historical plans moved to `docs/archive/PLANS_ARCHIVE_2026-04.md` (archived on 2026-04-15).

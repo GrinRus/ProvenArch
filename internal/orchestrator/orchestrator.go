@@ -307,7 +307,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		finishedAt := s.clock().UTC()
 		failedInfo := initialInfo
 		failedInfo.Status = RunStatusFailed
-		failedInfo.Error = fmt.Sprintf("ensure workspace layout: %v", err)
+		failedInfo.ErrorCode, failedInfo.Error = s.classifyRunFailure(runID, fmt.Errorf("ensure workspace layout: %w", err))
 		failedInfo.FinishedAt = &finishedAt
 		s.storeRun(runRecord{
 			info:      failedInfo,
@@ -318,7 +318,8 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 			Level:     RunLogLevelError,
 			Message:   "run failed: ensure workspace layout",
 			Fields: map[string]any{
-				"error": failedInfo.Error,
+				"error_code": failedInfo.ErrorCode,
+				"error":      failedInfo.Error,
 			},
 		})
 		_ = s.cleanupRunLogs()
@@ -334,7 +335,8 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		finishedAt := s.clock().UTC()
 		failedInfo := initialInfo
 		failedInfo.Status = RunStatusFailed
-		failedInfo.Error = formatValidationReportError(validation)
+		validationErr := errors.New(formatValidationReportError(validation))
+		failedInfo.ErrorCode, failedInfo.Error = s.classifyRunFailure(runID, validationErr)
 		failedInfo.Warnings = diagnosticMessages(validation.Warnings)
 		failedInfo.FinishedAt = &finishedAt
 		s.storeRun(runRecord{
@@ -346,12 +348,13 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 			Level:     RunLogLevelError,
 			Message:   "run failed: workspace validation",
 			Fields: map[string]any{
-				"error":    failedInfo.Error,
-				"warnings": failedInfo.Warnings,
+				"error_code": failedInfo.ErrorCode,
+				"error":      failedInfo.Error,
+				"warnings":   failedInfo.Warnings,
 			},
 		})
 		_ = s.cleanupRunLogs()
-		return failedInfo, nil, errors.New(failedInfo.Error)
+		return failedInfo, nil, validationErr
 	}
 
 	execution := pipelineExecution{
@@ -431,7 +434,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		execution.rewriteTerminalReports(RunStatusFailed)
 		failedInfo.Warnings = append([]string(nil), execution.warnings...)
 		failedInfo.FinishedAt = &finishedAt
-		if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusFailed, failedInfo.ErrorCode, failedInfo.Error); qualityErr == nil {
+		if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusFailed, failedInfo.ErrorCode, failedInfo.Error, deriveRunFailureClassification(failedInfo.ErrorCode, err)); qualityErr == nil {
 			execution.addArtifacts(qualityArtifact)
 		} else {
 			failedInfo.Warnings = append(failedInfo.Warnings, fmt.Sprintf("run quality summary write failed: %v", qualityErr))
@@ -461,7 +464,10 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		execution.rewriteTerminalReports(RunStatusFailed)
 		failedInfo.Warnings = append([]string(nil), execution.warnings...)
 		failedInfo.FinishedAt = &finishedAt
-		if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusFailed, failedInfo.ErrorCode, failedInfo.Error); qualityErr == nil {
+		if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusFailed, failedInfo.ErrorCode, failedInfo.Error, normalizeRunFailureClassification(runFailureClassification{
+			Class:  "infra_incomplete_cycle",
+			Source: "partial_failures",
+		})); qualityErr == nil {
 			execution.addArtifacts(qualityArtifact)
 		} else {
 			failedInfo.Warnings = append(failedInfo.Warnings, fmt.Sprintf("run quality summary write failed: %v", qualityErr))
@@ -484,7 +490,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	succeeded.CurrentStep = execution.stepStatus.CurrentStep
 	succeeded.Warnings = append([]string(nil), execution.warnings...)
 	succeeded.FinishedAt = &finishedAt
-	if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusSucceeded, "", ""); qualityErr == nil {
+	if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusSucceeded, "", "", runFailureClassification{}); qualityErr == nil {
 		execution.addArtifacts(qualityArtifact)
 	} else {
 		succeeded.Warnings = append(succeeded.Warnings, fmt.Sprintf("run quality summary write failed: %v", qualityErr))
@@ -1164,6 +1170,50 @@ func (s *Service) classifyRunFailure(runID string, err error) (string, string) {
 	return classifyExecutionError(err)
 }
 
+func deriveRunFailureClassification(errorCode string, err error) runFailureClassification {
+	classification := normalizeRunFailureClassification(runFailureClassification{})
+	var runnerErr acpruntime.RunnerError
+	if errors.As(err, &runnerErr) {
+		classification.Class = canonicalFailureClassFromRuntimeErrorCode(errorCode)
+		if value := strings.TrimSpace(runnerErr.Failure.FailureClass); value != "" {
+			classification.Class = value
+		}
+		classification.Subclass = strings.TrimSpace(runnerErr.Failure.FailureSubclass)
+		classification.ParseStage = strings.TrimSpace(runnerErr.Failure.ParseStage)
+		classification.Provider = strings.TrimSpace(string(runnerErr.Provider))
+		classification.TaskID = strings.TrimSpace(runnerErr.Failure.TaskID)
+		classification.StepID = strings.TrimSpace(runnerErr.Failure.StepID)
+		classification.ShardID = strings.TrimSpace(runnerErr.Failure.ShardID)
+		classification.FailureArtifact = strings.TrimSpace(runnerErr.Failure.FailureArtifactPath)
+		classification.RawOutput = strings.TrimSpace(runnerErr.Failure.RawOutputPath)
+		classification.ShortCause = strings.TrimSpace(runnerErr.Failure.ShortCause)
+		classification.Source = "runner_error"
+		return normalizeRunFailureClassification(classification)
+	}
+	if class := canonicalFailureClassFromRuntimeErrorCode(errorCode); class != "" && class != "none" {
+		return normalizeRunFailureClassification(runFailureClassification{
+			Class:  class,
+			Source: "error_code",
+		})
+	}
+	return classification
+}
+
+func canonicalFailureClassFromRuntimeErrorCode(errorCode string) string {
+	switch strings.TrimSpace(errorCode) {
+	case string(acpruntime.ErrorCodeRunnerParseFailed):
+		return "runtime_parse"
+	case string(acpruntime.ErrorCodeRunnerStalled):
+		return "runtime_stalled"
+	case string(acpruntime.ErrorCodeRunnerUnavailable):
+		return "runner_unavailable"
+	case string(acpruntime.ErrorCodeRuntimeTimeout):
+		return "runtime_timeout"
+	default:
+		return "none"
+	}
+}
+
 func (s *Service) isCancelRequested(runID string) bool {
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
@@ -1801,6 +1851,13 @@ func (e *pipelineExecution) applyRuntimeTaskExecution(
 		}
 		if err != nil {
 			e.logError(stepID, domainID, "validator verdict load failed", map[string]any{
+				"task_id": task.TaskID,
+				"error":   strings.TrimSpace(err.Error()),
+			})
+			return runtimeTaskExecution{}, err
+		}
+		if err := e.repairValidatorScopedArtifacts(&verdict); err != nil {
+			e.logError(stepID, domainID, "validator scoped repair failed", map[string]any{
 				"task_id": task.TaskID,
 				"error":   strings.TrimSpace(err.Error()),
 			})
@@ -2843,6 +2900,24 @@ func runtimeFailureLogFields(task acpruntime.Task, err error, fallbackStdout str
 		if strings.TrimSpace(string(runnerErr.Provider)) != "" {
 			fields["provider"] = string(runnerErr.Provider)
 		}
+		if value := strings.TrimSpace(runnerErr.Failure.FailureClass); value != "" {
+			fields["failure_class"] = value
+		}
+		if value := strings.TrimSpace(runnerErr.Failure.FailureSubclass); value != "" {
+			fields["failure_subclass"] = value
+		}
+		if value := strings.TrimSpace(runnerErr.Failure.ParseStage); value != "" {
+			fields["parse_stage"] = value
+		}
+		if value := strings.TrimSpace(runnerErr.Failure.FailureArtifactPath); value != "" {
+			fields["failure_artifact"] = value
+		}
+		if value := strings.TrimSpace(runnerErr.Failure.RawOutputPath); value != "" {
+			fields["raw_output"] = value
+		}
+		if value := strings.TrimSpace(runnerErr.Failure.ShortCause); value != "" {
+			fields["short_cause"] = value
+		}
 		if strings.TrimSpace(stdout) == "" {
 			stdout = runnerErr.Stdout
 		}
@@ -3407,6 +3482,12 @@ func (e *pipelineExecution) ensureCrossRepoEdgeFallback(domainID string, task ac
 		scopeSet[scope] = struct{}{}
 	}
 	repoRoots := declaredRepoRoots(e.workspace)
+	scopeAnchors := map[string]contracts.Evidence{}
+	for _, scope := range scopes {
+		if evidence, ok := fallbackScopeAnchorEvidence(scope, e.workspace.Path, repoRoots); ok {
+			scopeAnchors[scope] = evidence
+		}
+	}
 
 	entities, err := e.store.ListEntities()
 	if err != nil {
@@ -3415,11 +3496,16 @@ func (e *pipelineExecution) ensureCrossRepoEdgeFallback(domainID string, task ac
 	}
 
 	candidates := make([]serviceCandidate, 0, len(entities))
+	candidateKey := map[string]struct{}{}
+	existingEntityIDs := map[string]struct{}{}
 	for _, entity := range entities {
+		entityID := strings.TrimSpace(entity.ID)
+		if entityID != "" {
+			existingEntityIDs[entityID] = struct{}{}
+		}
 		if strings.TrimSpace(entity.Type) != "service" {
 			continue
 		}
-		entityID := strings.TrimSpace(entity.ID)
 		if entityID == "" {
 			continue
 		}
@@ -3439,9 +3525,121 @@ func (e *pipelineExecution) ensureCrossRepoEdgeFallback(domainID string, task ac
 			Repo:     repoScope,
 			Evidence: evidence,
 		})
+		candidateKey[repoScope+"|"+entityID] = struct{}{}
+	}
+
+	if len(candidates) < 2 {
+		servicesByScope := map[string][]string{}
+		for _, entity := range entities {
+			if strings.TrimSpace(entity.Type) != "service" {
+				continue
+			}
+			entityID := strings.TrimSpace(entity.ID)
+			if entityID == "" {
+				continue
+			}
+			repoScope := entityRepoScope(entity, task)
+			if _, ok := scopeSet[repoScope]; !ok {
+				continue
+			}
+			servicesByScope[repoScope] = append(servicesByScope[repoScope], entityID)
+		}
+		for scope := range servicesByScope {
+			sort.Strings(servicesByScope[scope])
+		}
+		for _, scope := range scopes {
+			ids := servicesByScope[scope]
+			if len(ids) == 0 {
+				continue
+			}
+			evidence, ok := scopeAnchors[scope]
+			if !ok {
+				continue
+			}
+			key := scope + "|" + ids[0]
+			if _, exists := candidateKey[key]; exists {
+				continue
+			}
+			candidates = append(candidates, serviceCandidate{
+				ID:       ids[0],
+				Repo:     scope,
+				Evidence: evidence,
+			})
+			candidateKey[key] = struct{}{}
+		}
 	}
 	if len(candidates) < 2 {
-		normalized.Warnings = append(normalized.Warnings, "semantic_guard: cross-repo fallback edge skipped: insufficient multi-scope service entities with valid evidence")
+		hasCandidateInScope := map[string]struct{}{}
+		for _, candidate := range candidates {
+			hasCandidateInScope[candidate.Repo] = struct{}{}
+		}
+		createdFallbackEntities := []string{}
+		for _, scope := range scopes {
+			if _, ok := hasCandidateInScope[scope]; ok {
+				continue
+			}
+			evidence, ok := scopeAnchors[scope]
+			if !ok {
+				continue
+			}
+			scopeSlug := slugutil.Slugify(scope)
+			if scopeSlug == "" {
+				scopeSlug = "scope"
+			}
+			baseID := fmt.Sprintf("svc.scope-anchor.%s", scopeSlug)
+			entityID := baseID
+			suffix := 1
+			for {
+				if _, exists := existingEntityIDs[entityID]; !exists {
+					break
+				}
+				entityID = fmt.Sprintf("%s.%d", baseID, suffix)
+				suffix++
+			}
+			existingEntityIDs[entityID] = struct{}{}
+			hasCandidateInScope[scope] = struct{}{}
+			createdFallbackEntities = append(createdFallbackEntities, fmt.Sprintf("%s(%s)", entityID, scope))
+			normalized.Changeset = append(normalized.Changeset, contracts.Operation{
+				Op: "upsert_entity",
+				Entity: &contracts.Entity{
+					ID:   entityID,
+					Type: "service",
+					Name: fmt.Sprintf("Scope Anchor %s", scope),
+					Attributes: map[string]any{
+						"guard_added": true,
+						"repo_scope":  scope,
+						"anchor":      true,
+					},
+					Provenance: contracts.Provenance{
+						Kind:       "inference",
+						Confidence: 0.58,
+						Evidence:   []contracts.Evidence{evidence},
+					},
+				},
+			})
+			candidates = append(candidates, serviceCandidate{
+				ID:       entityID,
+				Repo:     scope,
+				Evidence: evidence,
+			})
+			candidateKey[scope+"|"+entityID] = struct{}{}
+		}
+		if len(createdFallbackEntities) > 0 {
+			normalized.Warnings = append(
+				normalized.Warnings,
+				fmt.Sprintf("semantic_guard: added fallback scope-anchor entities for cross-repo edge synthesis: %s", strings.Join(createdFallbackEntities, ", ")),
+			)
+		}
+	}
+	if len(candidates) < 2 {
+		normalized.Warnings = append(
+			normalized.Warnings,
+			fmt.Sprintf(
+				"semantic_guard: cross-repo fallback edge skipped: insufficient multi-scope service entities with valid evidence (scopes=%d anchor_scopes=%d)",
+				len(scopes),
+				len(scopeAnchors),
+			),
+		)
 		return normalized
 	}
 	sort.Slice(candidates, func(i, j int) bool {
@@ -3460,7 +3658,14 @@ func (e *pipelineExecution) ensureCrossRepoEdgeFallback(domainID string, task ac
 		}
 	}
 	if toIndex == -1 {
-		normalized.Warnings = append(normalized.Warnings, "semantic_guard: cross-repo fallback edge skipped: candidates resolved to one repo_scope")
+		normalized.Warnings = append(
+			normalized.Warnings,
+			fmt.Sprintf(
+				"semantic_guard: cross-repo fallback edge skipped: candidates resolved to one repo_scope (candidates=%d anchor_scopes=%d)",
+				len(candidates),
+				len(scopeAnchors),
+			),
+		)
 		return normalized
 	}
 	to := candidates[toIndex]
@@ -3619,6 +3824,23 @@ func fallbackEvidenceForEntity(entity contracts.Entity, repoScope string, worksp
 	for _, candidatePath := range []string{"README.md", "README", "go.mod", "package.json", "pom.xml"} {
 		candidate := contracts.Evidence{
 			Repo: repo,
+			Path: candidatePath,
+		}
+		if evidencePathResolvesInScope(candidate, workspaceRoot, repoRoots) {
+			return candidate, true
+		}
+	}
+	return contracts.Evidence{}, false
+}
+
+func fallbackScopeAnchorEvidence(repoScope string, workspaceRoot string, repoRoots map[string]string) (contracts.Evidence, bool) {
+	scope := strings.TrimSpace(repoScope)
+	if scope == "" {
+		return contracts.Evidence{}, false
+	}
+	for _, candidatePath := range []string{"README.md", "README", "go.mod", "package.json", "pom.xml"} {
+		candidate := contracts.Evidence{
+			Repo: scope,
 			Path: candidatePath,
 		}
 		if evidencePathResolvesInScope(candidate, workspaceRoot, repoRoots) {

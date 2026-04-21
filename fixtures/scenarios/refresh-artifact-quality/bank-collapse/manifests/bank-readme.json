@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "run_id": "run-bank-refresh",
+  "step_id": "refresh.step1.collect",
+  "shard_id": "bank-readme",
+  "agent_role": "shard-analyst",
+  "artifact_root": "/tmp/frozen/bank-readme",
+  "repo_scopes": [
+    "bank-of-anthos"
+  ],
+  "path_scopes": [
+    "README.md"
+  ],
+  "summary": "Reused existing shard artifacts.",
+  "documents": [
+    {
+      "id": "doc.bank.readme",
+      "kind": "report",
+      "title": "README Shard",
+      "path": "shard-analysis.md",
+      "canonical_path": "reports/as-is/overview.md",
+      "topics": [
+        "bank"
+      ],
+      "citation_ids": [
+        "cite.runtime-summary"
+      ],
+      "status": "staged"
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.runtime-summary",
+      "repo": "bank-of-anthos",
+      "path": "README.md",
+      "claim_ids": [
+        "claim.runtime-summary"
+      ],
+      "document_ids": [
+        "doc.bank.readme"
+      ]
+    }
+  ],
+  "compatibility": {
+    "coverage": {
+      "observed": [
+        "services"
+      ],
+      "missing": [
+        "owner mappings"
+      ],
+      "notes": [
+        "reuse-only fixture"
+      ]
+    },
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}

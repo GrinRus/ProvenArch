@@ -21,6 +21,7 @@ ACP не является "рисовалкой диаграмм". Архите�
 - staged docs-first runtime pipeline для `reports/taskruns/*` с validator-gated promotion в стабильные `reports/*` и `proposals/*`,
 - deterministic compatibility materialization для `model/*`, `reports/*`, `proposals/*`, `changelog`,
 - UI shell + `make` entrypoints + repo CI.
+- `make`/bash UI steps run through `scripts/run-npm.sh` + `scripts/resolve-node-tool.sh`, so local DoD uses a matching `node`/`npm` pair even when login shells expose multiple Node architectures in different PATH orders.
 
 Реализация остаётся incremental по `docs/BACKLOG.md`, но базовый e2e поток уже исполним: `workspace validate -> run pipeline -> inspect artifacts`.
 
@@ -39,7 +40,7 @@ ACP не является "рисовалкой диаграмм". Архите�
 - локально импортированные документы
 - интерактивный wizard "Конституции проекта"
 - deterministic Step 0 materialization из `charter/wizard/step0-contract.json` (с fallback baseline + warning в run diagnostics при missing/invalid contract)
-- встроенный baseline bundle agents/skills/prompts + редактируемые в UI prompt packs, версионируемые в Git
+- встроенный baseline bundle agents/skills/prompts + редактируемые в UI prompt packs, версионируемые в Git; live headless runtime customization берёт только `skills/prompt-packs/*.md`, а `skills/*/prompts/*.md` остаются seeded reference-only assets
 - domain-first иерархия агентов (domain analysts + architect aggregator)
 - docs-first runtime contract: shard analysts пишут dossier packs в run-scoped staging, validator даёт canonical verdict, promotion переносит только approved final set
 - markdown-карточки доменов/команд как source-of-truth в `charter/cards`
@@ -106,6 +107,7 @@ Q&A API follow-up в baseline зарезервирован как read-only endp
 Bundle bootstrap policy:
 - `init-workspace` и `serve --auto-init` создают baseline artifacts по стратегии create-if-missing;
 - существующие пользовательские правки в baseline файлах не перезаписываются.
+- `skills/bundle-manifest.json` materialize-ится как machine-readable baseline inventory/source-of-truth для workspace seeding и UI baseline editor; mismatch `bundle_version` surface-ится как diagnostic, без silent overwrite пользовательских файлов.
 - baseline prompt defaults структурированы по обязательным секциям (`Goal`, `Inputs`, `Required Output Shape`, `Evidence Policy`, `Forbidden Behavior`, `Fallback When Unknown`) и покрыты quality-тестом на минимальную насыщенность.
 
 ---
@@ -336,7 +338,7 @@ Script делает strict полный цикл:
 - per-run snapshots в `TMP_ROOT/snapshots/<run_id>/...`;
 - гарантированные debug artifacts: `TMP_ROOT/full-run.log` и `TMP_ROOT/session-summary.md` даже при раннем fail.
 - при `runner_parse_failed` runtime сохраняет raw-output evidence в `reports/taskruns/raw/*` (stdout/stderr + checksums + meta).
-- `reports/taskruns/<run_id>-quality.json` хранит `evidence_state` (`collect/findings/report_mode/reasons`); если `report_mode=incomplete`, generated markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) помечаются banner/triage-only wording и не означают "сервисов/проблем нет".
+- `reports/taskruns/<run_id>-quality.json` хранит `failure` (`class/subclass/parse_stage/provider/task metadata`), `quality_signals[]` и `evidence_state` (`collect/findings/report_mode/reasons`); если `report_mode=incomplete`, generated markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) помечаются banner/triage-only wording и не означают "сервисов/проблем нет".
 
 Если нужно сохранить временный workspace для ручного анализа:
 
@@ -545,6 +547,11 @@ Primary runtime contract для live `step1.collect`/`step3.findings`:
 - `citation-index.json`
 - `validator-verdict.json`
 
+Docs-first semantic rules:
+- `citation-index.json.claim_ids` образуют глобальное пространство имён в пределах assembled staged final set; один и тот же `claim_id` нельзя переиспользовать между разными shard/citation surfaces.
+- `shard-pack-manifest.json.compatibility` всегда materialize-ится полностью (`coverage`, `questions`, `entities`, `edges`, `findings`), а коллекционные retry не считаются успешными, если manifest остаётся missing/invalid/skeletal.
+- validator path может чинить только technical/reference drift в staged indexes; дублирующиеся `claim_id` детерминированно переименовываются в citation index без semantic rewrite authored docs.
+
 TaskResult остаётся compatibility envelope:
 - валидируется по `schemas/taskresult.schema.json`
 - используется для semantic guards, taskrun diagnostics и derived `model/*`
@@ -602,7 +609,7 @@ Primary promotion gate:
 UI в MVP должен покрывать минимум:
 - wizard для Step 0 (charter);
 - настройку `repos[]` (multi-repo) для локальных папок и GitHub/GitLab URL;
-- baseline-wide редактор `charter/*` + `skills/*` (prompt packs, `subagents.yaml`, skill prompts);
+- baseline-wide редактор `charter/*` + `skills/*` (`prompt-packs/*.md` как live-consumed additive prompt surface, `subagents.yaml`, skill prompts как reference-only seeded assets);
 - запуск pipeline (init/update);
 - явные top-level секции `Setup / Baseline / Runs / Results / Settings`;
 - `Settings` как отдельная вкладка для runtime profile (`timeouts` + `execution`);

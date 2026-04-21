@@ -1,0 +1,25 @@
+version: 1
+timeout_profile: medium-window
+sweeps:
+  - id: baseline
+    strategy: sequential
+    max_parallel_tasks: 1
+    failure_policy: best_effort
+    shard_discovery_mode: heuristics
+
+  - id: parallel-default
+    strategy: parallel
+    max_parallel_tasks: 4
+    failure_policy: best_effort
+    shard_discovery_mode: heuristics
+
+profiles:
+  - id: single-path
+    source_kind: path
+    expected_repo_count: 1
+    repos_file: ./repos/curated/single-path.posthog.repos.yaml
+
+  - id: multi-path
+    source_kind: path
+    expected_repo_count: 5
+    repos_file: ./repos/curated/multi-path.openstack.repos.yaml

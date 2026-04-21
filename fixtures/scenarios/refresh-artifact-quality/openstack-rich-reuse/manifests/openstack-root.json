@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "run_id": "run-openstack-refresh",
+  "step_id": "refresh.step1.collect",
+  "shard_id": "openstack-root",
+  "agent_role": "shard-analyst",
+  "artifact_root": "/tmp/frozen/openstack-root",
+  "repo_scopes": [
+    "openstack"
+  ],
+  "path_scopes": [
+    "."
+  ],
+  "summary": "Reused existing shard artifacts.",
+  "documents": [
+    {
+      "id": "doc.openstack.root",
+      "kind": "report",
+      "title": "OpenStack Root",
+      "path": "root-analysis.md",
+      "canonical_path": "reports/as-is/overview.md",
+      "topics": [
+        "openstack"
+      ],
+      "citation_ids": [
+        "cite.runtime-summary"
+      ],
+      "status": "staged"
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.runtime-summary",
+      "repo": "openstack",
+      "path": "README.rst",
+      "claim_ids": [
+        "claim.runtime-summary"
+      ],
+      "document_ids": [
+        "doc.openstack.root"
+      ]
+    }
+  ],
+  "compatibility": {
+    "coverage": {
+      "observed": [
+        "services"
+      ],
+      "missing": [
+        "owner mappings"
+      ],
+      "notes": [
+        "reuse-only fixture"
+      ]
+    },
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}

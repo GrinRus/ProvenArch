@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "run_id": "run-bank-refresh",
+  "pipeline": "refresh",
+  "generated_at": "2026-04-17T13:27:37Z",
+  "citation_index_path": "reports/taskruns/run-bank-refresh/staging/final/citation-index.json",
+  "canonical_documents": [
+    {
+      "id": "doc.report.overview",
+      "kind": "report",
+      "title": "Overview",
+      "canonical_path": "reports/as-is/overview.md",
+      "staged_path": "reports/taskruns/run-bank-refresh/staging/final/reports/as-is/overview.md",
+      "topics": [
+        "bank"
+      ],
+      "citation_ids": [
+        "cite.runtime-summary"
+      ],
+      "source_shards": [
+        "bank-readme"
+      ],
+      "status": "staged"
+    },
+    {
+      "id": "doc.report.findings",
+      "kind": "report",
+      "title": "Findings",
+      "canonical_path": "reports/findings/findings.md",
+      "staged_path": "reports/taskruns/run-bank-refresh/staging/final/reports/findings/findings.md",
+      "topics": [
+        "bank"
+      ],
+      "citation_ids": [
+        "cite.runtime-summary"
+      ],
+      "source_shards": [
+        "bank-root"
+      ],
+      "status": "staged"
+    },
+    {
+      "id": "doc.report.questions",
+      "kind": "report",
+      "title": "Open Questions",
+      "canonical_path": "reports/coverage/open-questions.md",
+      "staged_path": "reports/taskruns/run-bank-refresh/staging/final/reports/coverage/open-questions.md",
+      "topics": [
+        "bank"
+      ],
+      "citation_ids": [
+        "cite.runtime-summary"
+      ],
+      "source_shards": [
+        "bank-root"
+      ],
+      "status": "staged"
+    }
+  ],
+  "topics": [
+    {
+      "id": "bank",
+      "document_ids": [
+        "doc.report.overview",
+        "doc.report.findings",
+        "doc.report.questions"
+      ]
+    }
+  ],
+  "compatibility": {
+    "coverage": {
+      "observed": [
+        "services"
+      ],
+      "missing": [
+        "owner mappings"
+      ],
+      "notes": [
+        "reduced frozen fixture"
+      ]
+    },
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}

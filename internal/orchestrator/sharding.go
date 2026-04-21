@@ -15,6 +15,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GrinRus/ProvenArch/internal/contracts"
+	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtime/claudecode"
+	"github.com/GrinRus/ProvenArch/internal/runtime/qwencode"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
@@ -37,6 +41,7 @@ type runtimeShardRunResult struct {
 
 type runtimeShardSummary struct {
 	Version       int                        `json:"version"`
+	Meta          runtimeArtifactMeta        `json:"meta,omitempty"`
 	RunID         string                     `json:"run_id"`
 	StepID        string                     `json:"step_id"`
 	DomainID      string                     `json:"domain_id,omitempty"`
@@ -70,6 +75,7 @@ type runtimeShardSummaryState struct {
 
 type runtimeShardPlanArtifact struct {
 	Version       int                            `json:"version"`
+	Meta          runtimeArtifactMeta            `json:"meta,omitempty"`
 	RunID         string                         `json:"run_id"`
 	StepID        string                         `json:"step_id"`
 	DomainID      string                         `json:"domain_id,omitempty"`
@@ -96,12 +102,29 @@ type runtimeShardPlanGraphEdge struct {
 	Reason    string `json:"reason"`
 }
 
+type runtimeArtifactMeta struct {
+	Runtime contracts.RuntimeMeta `json:"runtime"`
+}
+
 type heuristicShardDiscoveryResult struct {
 	Paths             []string
 	FallbackNoMarkers bool
 }
 
 const maxAutoShardsPerRepo = 16
+
+func runtimeMetaForRunner(runner acpruntime.Runner) contracts.RuntimeMeta {
+	switch runner.(type) {
+	case claudecode.FakeRunner, *claudecode.FakeRunner:
+		return contracts.RuntimeMeta{Name: string(acpruntime.ProviderClaudeCode), Version: "fake"}
+	case claudecode.HeadlessRunner, *claudecode.HeadlessRunner:
+		return contracts.RuntimeMeta{Name: string(acpruntime.ProviderClaudeCode), Version: "headless"}
+	case qwencode.HeadlessRunner, *qwencode.HeadlessRunner:
+		return contracts.RuntimeMeta{Name: string(acpruntime.ProviderQwenCode), Version: "headless"}
+	default:
+		return contracts.RuntimeMeta{Name: "unknown"}
+	}
+}
 
 var shardModuleMarkerFiles = map[string]struct{}{
 	"go.mod":          {},
@@ -727,6 +750,7 @@ func (e *pipelineExecution) persistShardPlan(
 
 	payload := runtimeShardPlanArtifact{
 		Version:       1,
+		Meta:          runtimeArtifactMeta{Runtime: runtimeMetaForRunner(e.runner)},
 		RunID:         e.runID,
 		StepID:        stepID,
 		DomainID:      strings.TrimSpace(domainID),
@@ -775,6 +799,7 @@ func (e *pipelineExecution) persistShardSummary(stepID string, domainID string, 
 	}
 	summary := runtimeShardSummary{
 		Version:       1,
+		Meta:          runtimeArtifactMeta{Runtime: runtimeMetaForRunner(e.runner)},
 		RunID:         e.runID,
 		StepID:        stepID,
 		DomainID:      strings.TrimSpace(domainID),

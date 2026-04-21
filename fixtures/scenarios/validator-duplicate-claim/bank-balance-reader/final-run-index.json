@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "run_id": "run_bank_duplicate_claim",
+  "pipeline": "refresh",
+  "generated_at": "2026-04-18T16:23:02Z",
+  "citation_index_path": "reports/taskruns/run_bank_duplicate_claim/staging/final/citation-index.json",
+  "canonical_documents": [
+    {
+      "id": "doc.reports-as-is-kubernetes-manifests-services-md",
+      "kind": "report",
+      "title": "Kubernetes Manifests Services",
+      "canonical_path": "reports/as-is/kubernetes-manifests-services.md",
+      "staged_path": "reports/taskruns/run_bank_duplicate_claim/staging/final/reports/as-is/kubernetes-manifests-services.md",
+      "topics": [
+        "service-catalog"
+      ],
+      "citation_ids": [
+        "cite.balancereader"
+      ],
+      "source_shards": [
+        "bank-of-anthos-kubernetes-manifests"
+      ],
+      "status": "staged"
+    },
+    {
+      "id": "doc.reports-as-is-bank-of-anthos-service-catalog-md",
+      "kind": "report",
+      "title": "Bank of Anthos Service Catalog",
+      "canonical_path": "reports/as-is/bank-of-anthos/service-catalog.md",
+      "staged_path": "reports/taskruns/run_bank_duplicate_claim/staging/final/reports/as-is/bank-of-anthos/service-catalog.md",
+      "topics": [
+        "service-catalog"
+      ],
+      "citation_ids": [
+        "cite.k8s.balancereader"
+      ],
+      "source_shards": [
+        "bank-of-anthos-docs"
+      ],
+      "status": "staged"
+    }
+  ],
+  "topics": [
+    {
+      "id": "service-catalog",
+      "document_ids": [
+        "doc.reports-as-is-bank-of-anthos-service-catalog-md",
+        "doc.reports-as-is-kubernetes-manifests-services-md"
+      ]
+    }
+  ],
+  "compatibility": {
+    "coverage": {
+      "observed": [],
+      "missing": [],
+      "notes": []
+    },
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}

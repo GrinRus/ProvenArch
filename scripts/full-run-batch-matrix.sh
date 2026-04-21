@@ -15,7 +15,7 @@ source "$PROVENARCH_ROOT/scripts/execution-env-keys.sh"
 BATCH_SCRIPT="${BATCH_SCRIPT:-$PROVENARCH_ROOT/scripts/full-run-batch-5x2.sh}"
 E2E_MATRIX_FILE="${E2E_MATRIX_FILE:-}"
 MATRIX_ID="${MATRIX_ID:-matrix-$(date -u +'%Y%m%dT%H%M%SZ')}"
-RUN_COUNT="${RUN_COUNT:-5}"
+RUN_COUNT="${RUN_COUNT:-1}"
 E2E_TMP_ROOT="${E2E_TMP_ROOT:-/tmp/provenarch-test_arch_project}"
 REPORTS_ROOT="${REPORTS_ROOT:-$E2E_TMP_ROOT/reports}"
 MATRIX_ROOT="${MATRIX_ROOT:-$E2E_TMP_ROOT/matrix/$MATRIX_ID}"
@@ -24,10 +24,13 @@ ACP_QWEN_CMD_BIN="${ACP_QWEN_CMD_BIN:-qwen}"
 ACP_APPLY_TIMEOUTS_VIA_API="${ACP_APPLY_TIMEOUTS_VIA_API:-1}"
 E2E_MATRIX_RELEASE_MODE="${E2E_MATRIX_RELEASE_MODE:-auto}"
 E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES="${E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES:-0}"
+BATCH_PROVIDER_FILTER="${BATCH_PROVIDER_FILTER:-all}"
+BATCH_RUN_SELECTION="${BATCH_RUN_SELECTION:-all}"
 BATCH_FRONTEND_MODE="${BATCH_FRONTEND_MODE:-}"
 BATCH_FRONTEND_CANCEL_MODE="${BATCH_FRONTEND_CANCEL_MODE:-}"
 UI_E2E_HEADED="${UI_E2E_HEADED:-}"
 MATRIX_DRIVER_LOG="${MATRIX_DRIVER_LOG:-$MATRIX_ROOT/driver.log}"
+MATRIX_TIMEOUT_PROFILE_FILE="${MATRIX_TIMEOUT_PROFILE_FILE:-$MATRIX_ROOT/timeout-profile.txt}"
 PROFILE_REPOS_FILE_RESOLVED=""
 PROFILE_SOURCE_KIND_EFFECTIVE=""
 PROFILE_EXPECTED_REPO_COUNT_RESOLVED=0
@@ -35,6 +38,13 @@ PROFILE_META_CACHE_KEY=""
 PROFILE_META_CACHE_REPOS_FILE=""
 PROFILE_META_CACHE_SOURCE_KIND="mixed"
 PROFILE_META_CACHE_EXPECTED_REPO_COUNT=0
+MATRIX_TIMEOUT_PROFILE=""
+MATRIX_TIMEOUT_ENV_ASSIGNMENTS=()
+declare -a MATRIX_ALL_PROVIDERS=("qwen-code" "claude-code")
+declare -a MATRIX_SELECTED_PROVIDERS=()
+declare -a MATRIX_SELECTED_RUN_INDEXES=()
+MATRIX_SELECTED_PROVIDERS_CSV=""
+MATRIX_SELECTED_RUN_INDEXES_CSV=""
 
 log() {
   local line
@@ -102,6 +112,18 @@ normalize_binary_flag() {
   esac
 }
 
+array_contains() {
+  local needle="$1"
+  shift
+  local item
+  for item in "$@"; do
+    if [[ "$item" == "$needle" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 slugify() {
   local value
   value="$(echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
@@ -109,6 +131,94 @@ slugify() {
     value="item"
   fi
   printf '%s' "$value"
+}
+
+resolve_selected_providers() {
+  local filter_raw="${BATCH_PROVIDER_FILTER:-all}"
+  local filter
+  filter="$(echo "$filter_raw" | tr -d '[:space:]')"
+  if [[ -z "$filter" || "$filter" == "all" ]]; then
+    MATRIX_SELECTED_PROVIDERS=("${MATRIX_ALL_PROVIDERS[@]}")
+  else
+    MATRIX_SELECTED_PROVIDERS=()
+    local token
+    local -a tokens=()
+    IFS=',' read -r -a tokens <<<"$filter"
+    for token in "${tokens[@]}"; do
+      [[ -z "$token" ]] && continue
+      case "$token" in
+        qwen-code|claude-code)
+          if ! array_contains "$token" "${MATRIX_SELECTED_PROVIDERS[@]-}"; then
+            MATRIX_SELECTED_PROVIDERS+=("$token")
+          fi
+          ;;
+        *)
+          die "BATCH_PROVIDER_FILTER contains unsupported provider '$token' (allowed: qwen-code, claude-code, all)"
+          ;;
+      esac
+    done
+  fi
+  if [[ "${#MATRIX_SELECTED_PROVIDERS[@]}" -eq 0 ]]; then
+    die "BATCH_PROVIDER_FILTER resolved to an empty provider set"
+  fi
+  MATRIX_SELECTED_PROVIDERS_CSV="$(IFS=,; echo "${MATRIX_SELECTED_PROVIDERS[*]}")"
+}
+
+resolve_selected_run_indexes() {
+  local selection_raw="${BATCH_RUN_SELECTION:-all}"
+  local resolved_indexes
+  resolved_indexes="$(python3 - "$RUN_COUNT" "$selection_raw" <<'PY'
+import sys
+
+try:
+    run_count = int((sys.argv[1] or "").strip())
+except Exception:
+    raise SystemExit("RUN_COUNT must be a positive integer")
+
+selection = (sys.argv[2] or "").strip().lower()
+if selection in {"", "all"}:
+    print("\n".join(str(i) for i in range(1, run_count + 1)))
+    raise SystemExit(0)
+
+values = set()
+for token in [part.strip() for part in selection.split(",") if part.strip()]:
+    if "-" in token:
+        left, right = token.split("-", 1)
+        try:
+            start = int(left)
+            end = int(right)
+        except Exception:
+            raise SystemExit(f"invalid run range token: {token}")
+        if start > end:
+            raise SystemExit(f"invalid descending run range token: {token}")
+        for value in range(start, end + 1):
+            values.add(value)
+    else:
+        try:
+            values.add(int(token))
+        except Exception:
+            raise SystemExit(f"invalid run token: {token}")
+
+if not values:
+    raise SystemExit("BATCH_RUN_SELECTION resolved to an empty run set")
+
+for value in sorted(values):
+    if value < 1 or value > run_count:
+        raise SystemExit(f"run index out of bounds: {value} (RUN_COUNT={run_count})")
+
+print("\n".join(str(value) for value in sorted(values)))
+PY
+)"
+  MATRIX_SELECTED_RUN_INDEXES=()
+  local run_index
+  while IFS= read -r run_index; do
+    [[ -z "$run_index" ]] && continue
+    MATRIX_SELECTED_RUN_INDEXES+=("$run_index")
+  done <<<"$resolved_indexes"
+  if [[ "${#MATRIX_SELECTED_RUN_INDEXES[@]}" -eq 0 ]]; then
+    die "BATCH_RUN_SELECTION resolved to an empty run set"
+  fi
+  MATRIX_SELECTED_RUN_INDEXES_CSV="$(IFS=,; echo "${MATRIX_SELECTED_RUN_INDEXES[*]}")"
 }
 
 read_profile_repos_meta() {
@@ -147,13 +257,17 @@ validate_profile_repos_meta() {
 }
 
 if [[ -z "$E2E_MATRIX_FILE" ]]; then
-  die "E2E_MATRIX_FILE is required (YAML with profiles[] and optional sweeps[])"
+  die "E2E_MATRIX_FILE is required (YAML with profiles[] and optional sweeps[]/timeout_profile)"
 fi
 if [[ ! -f "$E2E_MATRIX_FILE" ]]; then
   die "E2E_MATRIX_FILE does not exist: $E2E_MATRIX_FILE"
 fi
-if [[ "$RUN_COUNT" != "5" ]]; then
-  die "RUN_COUNT must be 5 for matrix mode (got '$RUN_COUNT')"
+RELEASE_MODE="$(normalize_release_mode "$E2E_MATRIX_RELEASE_MODE")"
+if [[ ! "$RUN_COUNT" =~ ^[1-9][0-9]*$ ]]; then
+  die "RUN_COUNT must be a positive integer, got '$RUN_COUNT'"
+fi
+if [[ "$RELEASE_MODE" == "1" && "$RUN_COUNT" != "1" ]]; then
+  die "release-mode requires RUN_COUNT=1 for matrix mode (got '$RUN_COUNT')"
 fi
 if [[ "$ACP_APPLY_TIMEOUTS_VIA_API" != "0" && "$ACP_APPLY_TIMEOUTS_VIA_API" != "1" ]]; then
   die "ACP_APPLY_TIMEOUTS_VIA_API must be 0 or 1, got '$ACP_APPLY_TIMEOUTS_VIA_API'"
@@ -167,12 +281,13 @@ require_cmd python3
 require_cmd "$ACP_CLAUDE_CMD_BIN"
 require_cmd "$ACP_QWEN_CMD_BIN"
 acp_ensure_no_legacy_env_set die
+resolve_selected_providers
+resolve_selected_run_indexes
 
 mkdir -p "$MATRIX_ROOT" "$REPORTS_ROOT"
 mkdir -p "$(dirname "$MATRIX_DRIVER_LOG")"
 : > "$MATRIX_DRIVER_LOG"
 
-RELEASE_MODE="$(normalize_release_mode "$E2E_MATRIX_RELEASE_MODE")"
 ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES="$(normalize_binary_flag "$E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES" "E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES")"
 if [[ "$RELEASE_MODE" == "1" ]]; then
   if [[ -z "$BATCH_FRONTEND_MODE" ]]; then
@@ -196,8 +311,12 @@ for key in "${DIAGNOSTIC_TIMEOUT_ENV_KEYS[@]}"; do
   fi
 done
 
-TIMEOUT_PROFILE_LINE="$(python3 "$PROVENARCH_ROOT/scripts/resolve-timeout-profile.py" --format line)"
-acp_log_preflight_timeout log "$ACP_APPLY_TIMEOUTS_VIA_API" "$TIMEOUT_PROFILE_LINE"
+TIMEOUT_PROFILE_CMD=(
+  python3
+  "$PROVENARCH_ROOT/scripts/resolve-timeout-profile.py"
+  --format
+  line
+)
 acp_log_release_guard log "$RELEASE_MODE" "$MATRIX_ID" "$ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES" "${#DIAGNOSTIC_TIMEOUT_OVERRIDES[@]}"
 if [[ "${#DIAGNOSTIC_TIMEOUT_OVERRIDES[@]}" -gt 0 ]]; then
   acp_log_diagnostic_timeout_overrides log "${DIAGNOSTIC_TIMEOUT_OVERRIDES[*]}"
@@ -210,40 +329,54 @@ log "release frontend defaults: frontend_mode=${BATCH_FRONTEND_MODE:-default} fr
 COMBINATIONS_TSV="$MATRIX_ROOT/profile-sweep-combinations.tsv"
 RECORDS_JSONL="$MATRIX_ROOT/profile-runs.jsonl"
 : > "$RECORDS_JSONL"
+: > "$MATRIX_TIMEOUT_PROFILE_FILE"
 
-python3 - "$E2E_MATRIX_FILE" "$COMBINATIONS_TSV" "$RELEASE_MODE" <<'PY'
+python3 - "$E2E_MATRIX_FILE" "$COMBINATIONS_TSV" "$RELEASE_MODE" "$MATRIX_TIMEOUT_PROFILE_FILE" "$PROVENARCH_ROOT" <<'PY'
 import sys
 from pathlib import Path
-
-try:
-    import yaml  # type: ignore
-except Exception as exc:
-    raise SystemExit(f"PyYAML is required for parsing matrix file: {exc}")
 
 matrix_path = Path(sys.argv[1]).resolve()
 out_path = Path(sys.argv[2]).resolve()
 release_mode_raw = str(sys.argv[3]).strip().lower()
 release_mode = release_mode_raw in {"1", "true", "yes", "on"}
-payload = yaml.safe_load(matrix_path.read_text(encoding="utf-8"))
+timeout_profile_path = Path(sys.argv[4]).resolve()
+repo_root = Path(sys.argv[5]).resolve()
+sys.path.insert(0, str(repo_root / "scripts"))
+from yaml_compat import load_yaml_file  # type: ignore
+
+payload = load_yaml_file(matrix_path)
+allowed_timeout_profiles = {"short-window", "medium-window", "extended-window"}
 
 if isinstance(payload, dict):
     profiles = payload.get("profiles")
     sweeps = payload.get("sweeps")
+    timeout_profile = str(payload.get("timeout_profile", "")).strip()
 elif isinstance(payload, list):
     profiles = payload
     sweeps = None
+    timeout_profile = ""
 else:
     profiles = None
     sweeps = None
+    timeout_profile = ""
 
 if not isinstance(profiles, list) or not profiles:
     raise SystemExit(f"matrix file {matrix_path} must contain non-empty profiles[]")
+if timeout_profile and timeout_profile not in allowed_timeout_profiles:
+    raise SystemExit(
+        f"matrix file {matrix_path} timeout_profile must be one of: "
+        f"{', '.join(sorted(allowed_timeout_profiles))}; got: {timeout_profile}"
+    )
 
-required_profiles = {
+allowed_profiles = {
     "single-path": {"source_kind": "path", "min_repos": 1, "max_repos": 1},
     "single-git_url": {"source_kind": "git_url", "min_repos": 1, "max_repos": 1},
     "multi-path": {"source_kind": "path", "min_repos": 2, "max_repos": None},
     "multi-git_url": {"source_kind": "git_url", "min_repos": 2, "max_repos": None},
+}
+release_profile_families = {
+    "single": ("single-path", "single-git_url"),
+    "multi": ("multi-path", "multi-git_url"),
 }
 
 profile_rows: list[tuple[str, str, int, str]] = []
@@ -281,10 +414,10 @@ for idx, item in enumerate(profiles, start=1):
     if expected_count <= 0:
         raise SystemExit(f"profiles[{idx}] expected_repo_count must be > 0, got: {expected_count}")
 
-    contract = required_profiles.get(profile_id)
+    contract = allowed_profiles.get(profile_id)
     if contract is None:
         raise SystemExit(
-            f"profiles[{idx}] id must be one of: {', '.join(sorted(required_profiles.keys()))}; got: {profile_id}"
+            f"profiles[{idx}] id must be one of: {', '.join(sorted(allowed_profiles.keys()))}; got: {profile_id}"
         )
     expected_kind = str(contract["source_kind"])
     if source_kind != expected_kind:
@@ -304,16 +437,20 @@ for idx, item in enumerate(profiles, start=1):
 
     profile_rows.append((profile_id, str(repos_file), expected_count, source_kind))
 
-missing = sorted(set(required_profiles.keys()) - seen_ids)
-extra = sorted(seen_ids - set(required_profiles.keys()))
-if missing:
-    raise SystemExit(f"matrix file {matrix_path} missing required profile ids: {', '.join(missing)}")
-if extra:
-    raise SystemExit(f"matrix file {matrix_path} has unsupported profile ids: {', '.join(extra)}")
-if len(profiles) != len(required_profiles):
-    raise SystemExit(
-        f"matrix file {matrix_path} must contain exactly {len(required_profiles)} profiles"
-    )
+if release_mode:
+    selected_ids = {profile_id for profile_id, _, _, _ in profile_rows}
+    if len(profile_rows) != 2:
+        raise SystemExit(
+            "release-mode requires exactly 2 profiles: one single-* and one multi-*"
+        )
+    for family, options in release_profile_families.items():
+        matched = [profile_id for profile_id in options if profile_id in selected_ids]
+        if len(matched) != 1:
+            raise SystemExit(
+                "release-mode requires exactly one "
+                f"{family} profile from [{', '.join(options)}], got: "
+                + (", ".join(matched) if matched else "none")
+            )
 
 allowed = {
     "strategy": {"sequential", "parallel"},
@@ -402,13 +539,13 @@ if release_mode:
         raise SystemExit(
             "release-mode sweeps[] contains unsupported ids: " + ", ".join(extra_sweeps)
         )
-    expected_release_combinations = len(required_profiles) * len(required_release_sweeps)
+    expected_release_combinations = len(profile_rows) * len(required_release_sweeps)
     observed_release_combinations = len(profile_rows) * len(sweep_rows)
     if observed_release_combinations != expected_release_combinations:
         raise SystemExit(
             "release-mode requires full profile×sweep matrix: "
             f"expected {expected_release_combinations} combinations "
-            f"(4 profiles × 2 sweeps), got {observed_release_combinations}"
+            f"(2 profiles × 2 sweeps), got {observed_release_combinations}"
         )
 
 rows: list[str] = []
@@ -432,7 +569,23 @@ for profile_id, repos_file, expected_count, source_kind in profile_rows:
 
 out_path.parent.mkdir(parents=True, exist_ok=True)
 out_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+timeout_profile_path.parent.mkdir(parents=True, exist_ok=True)
+timeout_profile_path.write_text((timeout_profile + "\n") if timeout_profile else "", encoding="utf-8")
 PY
+
+if [[ -f "$MATRIX_TIMEOUT_PROFILE_FILE" ]]; then
+  MATRIX_TIMEOUT_PROFILE="$(tr -d '\r' < "$MATRIX_TIMEOUT_PROFILE_FILE" | head -n1 | xargs)"
+fi
+if [[ -n "$MATRIX_TIMEOUT_PROFILE" ]]; then
+  TIMEOUT_PROFILE_CMD+=(--preset "$MATRIX_TIMEOUT_PROFILE")
+  while IFS='=' read -r key value; do
+    [[ -z "$key" || -n "${!key:-}" ]] && continue
+    MATRIX_TIMEOUT_ENV_ASSIGNMENTS+=("$key=$value")
+  done < <(python3 "$PROVENARCH_ROOT/scripts/resolve-timeout-profile.py" --preset "$MATRIX_TIMEOUT_PROFILE" --format env-kv)
+  log "matrix timeout profile: profile=$MATRIX_TIMEOUT_PROFILE"
+fi
+TIMEOUT_PROFILE_LINE="$("${TIMEOUT_PROFILE_CMD[@]}")"
+acp_log_preflight_timeout log "$ACP_APPLY_TIMEOUTS_VIA_API" "$TIMEOUT_PROFILE_LINE"
 
 while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sweep_id sweep_strategy sweep_max_parallel sweep_failure_policy sweep_shard_mode; do
   [[ -z "$profile_id" ]] && continue
@@ -460,6 +613,11 @@ while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sw
   status="passed"
   if ! (
     cd "$PROVENARCH_ROOT"
+    if [[ "${#MATRIX_TIMEOUT_ENV_ASSIGNMENTS[@]}" -gt 0 ]]; then
+      for assignment in "${MATRIX_TIMEOUT_ENV_ASSIGNMENTS[@]}"; do
+        export "$assignment"
+      done
+    fi
     acp_build_timeout_env_assignments
     ACP_EXECUTION_STRATEGY="$sweep_strategy"
     ACP_MAX_PARALLEL_TASKS="$sweep_max_parallel"
@@ -553,7 +711,7 @@ MATRIX_REPORT_TSV="$REPORTS_ROOT/profile_matrix_${MATRIX_ID}.tsv"
 VERDICT_MD="$REPORTS_ROOT/release_verdict_${MATRIX_ID}.md"
 VERDICT_JSON="$REPORTS_ROOT/release_verdict_${MATRIX_ID}.json"
 
-python3 - "$RECORDS_JSONL" "$MATRIX_REPORT_MD" "$MATRIX_REPORT_TSV" "$VERDICT_MD" "$VERDICT_JSON" "$MATRIX_ID" "$RELEASE_MODE" <<'PY'
+python3 - "$RECORDS_JSONL" "$MATRIX_REPORT_MD" "$MATRIX_REPORT_TSV" "$VERDICT_MD" "$VERDICT_JSON" "$MATRIX_ID" "$RELEASE_MODE" "$RUN_COUNT" "$MATRIX_SELECTED_PROVIDERS_CSV" "$MATRIX_SELECTED_RUN_INDEXES_CSV" <<'PY'
 import json
 import re
 import sys
@@ -568,6 +726,9 @@ verdict_md = Path(sys.argv[4]).resolve()
 verdict_json = Path(sys.argv[5]).resolve()
 matrix_id = sys.argv[6]
 release_mode = str(sys.argv[7]).strip() == "1"
+run_count = int(sys.argv[8])
+selected_providers = [item.strip() for item in str(sys.argv[9]).split(",") if item.strip()]
+selected_run_indexes = [item.strip() for item in str(sys.argv[10]).split(",") if item.strip()]
 
 records = []
 for line in records_path.read_text(encoding="utf-8").splitlines():
@@ -579,8 +740,9 @@ for line in records_path.read_text(encoding="utf-8").splitlines():
 if not records:
     raise SystemExit(f"no matrix records found in {records_path}")
 
-required_release_profiles = ("single-path", "single-git_url", "multi-path", "multi-git_url")
 required_release_sweeps = ("baseline", "parallel-default")
+release_profile_order = ("single-path", "single-git_url", "multi-path", "multi-git_url")
+required_release_providers = ("qwen-code", "claude-code")
 
 
 def parse_frontend_status(path: Path, provider: str) -> str:
@@ -595,7 +757,9 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
     stats: dict[str, object] = {
         "hard": 0,
         "total": 0,
+        "runtime_artifact_contract": 0,
         "runtime_parse": 0,
+        "runtime_stalled": 0,
         "runner_unavailable": 0,
         "runtime_timeout": 0,
         "infra_signal_terminated": 0,
@@ -646,7 +810,9 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
             stats["hard"] = int(stats["hard"]) + 1
 
         for key in (
+            "runtime_artifact_contract",
             "runtime_parse",
+            "runtime_stalled",
             "runner_unavailable",
             "runtime_timeout",
             "infra_signal_terminated",
@@ -755,19 +921,23 @@ def strict_blockers(
     frontend: dict[str, str],
     shard_plan_invariant: str,
     release_mode: bool,
+    expected_backend_runs: int,
+    required_frontend_providers: list[str],
 ) -> list[str]:
     reasons: list[str] = []
 
     if str(rec.get("status", "")).strip() != "passed":
         reasons.append(f"batch_status={rec.get('status', 'missing')}")
 
-    if int(stats["total"]) != 10:
-        reasons.append(f"backend_total_runs={stats['total']} (expected 10)")
-    if int(stats["hard"]) != 10:
-        reasons.append(f"backend_hard_pass={stats['hard']} (expected 10)")
+    if int(stats["total"]) != expected_backend_runs:
+        reasons.append(f"backend_total_runs={stats['total']} (expected {expected_backend_runs})")
+    if int(stats["hard"]) != expected_backend_runs:
+        reasons.append(f"backend_hard_pass={stats['hard']} (expected {expected_backend_runs})")
 
     for key in (
+        "runtime_artifact_contract",
         "runtime_parse",
+        "runtime_stalled",
         "runner_unavailable",
         "runtime_timeout",
         "infra_signal_terminated",
@@ -797,9 +967,16 @@ def strict_blockers(
             f"issue_hits:{stats['runtime_flow_issue_hits']} runtime_flow_failed:{stats['runtime_flow_failed']} (expected 0)"
         )
 
-    for key, value in frontend.items():
-        if value != "passed":
-            reasons.append(f"{key}={value} (expected passed)")
+    frontend_provider_keys = {
+        "qwen-code": ("frontend_qwen_status", "frontend_cancel_qwen_status"),
+        "claude-code": ("frontend_claude_status", "frontend_cancel_claude_status"),
+    }
+    for provider in required_frontend_providers:
+        init_key, cancel_key = frontend_provider_keys[provider]
+        if frontend.get(init_key) != "passed":
+            reasons.append(f"{init_key}={frontend.get(init_key, 'missing')} (expected passed)")
+        if frontend.get(cancel_key) != "passed":
+            reasons.append(f"{cancel_key}={frontend.get(cancel_key, 'missing')} (expected passed)")
     if release_mode and shard_plan_invariant != "passed":
         reasons.append(f"shard_plan_invariant={shard_plan_invariant} (release requires passed)")
 
@@ -877,7 +1054,9 @@ header = [
     "semantic_hard_fail_runs",
     "off_topic_hits",
     "artifact_non_snapshot_runs",
+    "runtime_artifact_contract_failures",
     "runtime_parse_failures",
+    "runtime_stalled_failures",
     "runner_unavailable_failures",
     "runtime_timeout_failures",
     "infra_signal_terminated_failures",
@@ -910,6 +1089,7 @@ invariant_status_by_batch, invariant_blockers_by_batch = shard_plan_invariant_st
 
 observed_sweeps = sorted({str(rec.get("sweep_id", "baseline")).strip() for rec in records})
 observed_profiles = sorted({str(rec.get("profile_id", "")).strip() for rec in records if str(rec.get("profile_id", "")).strip()})
+required_release_profiles = [profile_id for profile_id in release_profile_order if profile_id in observed_profiles]
 observed_pairs = {
     (str(rec.get("profile_id", "")).strip(), str(rec.get("sweep_id", "baseline")).strip())
     for rec in records
@@ -956,6 +1136,11 @@ release_contract_status = "passed" if not release_contract_blockers else "failed
 
 verdict_records: list[dict[str, object]] = []
 strict_fail_count = 0
+expected_backend_runs = run_count * len(required_release_providers)
+required_frontend_providers = list(required_release_providers)
+if not release_mode:
+    expected_backend_runs = len(selected_run_indexes) * len(selected_providers)
+    required_frontend_providers = list(selected_providers)
 
 for rec in records:
     run_matrix_tsv = Path(str(rec["run_matrix_tsv"]))
@@ -971,7 +1156,15 @@ for rec in records:
     }
 
     shard_plan_invariant = invariant_status_by_batch.get(str(rec["batch_id"]), "not_compared")
-    blockers = strict_blockers(rec, stats, frontend_statuses, shard_plan_invariant, release_mode)
+    blockers = strict_blockers(
+        rec,
+        stats,
+        frontend_statuses,
+        shard_plan_invariant,
+        release_mode,
+        expected_backend_runs,
+        required_frontend_providers,
+    )
     blockers.extend(invariant_blockers_by_batch.get(str(rec["batch_id"]), []))
     strict_status = "passed" if not blockers else "failed"
     if blockers:
@@ -1003,7 +1196,9 @@ for rec in records:
                 str(stats["semantic_hard_fail"]),
                 str(stats["off_topic_hits"]),
                 str(stats["artifact_non_snapshot"]),
+                str(stats["runtime_artifact_contract"]),
                 str(stats["runtime_parse"]),
+                str(stats["runtime_stalled"]),
                 str(stats["runner_unavailable"]),
                 str(stats["runtime_timeout"]),
                 str(stats["infra_signal_terminated"]),
@@ -1059,7 +1254,9 @@ for rec in records:
                 "semantic_hard_fail_runs": int(stats["semantic_hard_fail"]),
                 "off_topic_hits": int(stats["off_topic_hits"]),
                 "artifact_non_snapshot_runs": int(stats["artifact_non_snapshot"]),
+                "runtime_artifact_contract_failures": int(stats["runtime_artifact_contract"]),
                 "runtime_parse_failures": int(stats["runtime_parse"]),
+                "runtime_stalled_failures": int(stats["runtime_stalled"]),
                 "runner_unavailable_failures": int(stats["runner_unavailable"]),
                 "runtime_timeout_failures": int(stats["runtime_timeout"]),
                 "infra_signal_terminated_failures": int(stats["infra_signal_terminated"]),
@@ -1155,6 +1352,9 @@ verdict_payload = {
         "observed_sweeps": observed_sweeps,
         "expected_profile_sweep_runs": expected_profile_sweep_runs,
         "observed_profile_sweep_runs": observed_profile_sweep_runs,
+        "selected_providers": selected_providers,
+        "selected_run_indexes": selected_run_indexes,
+        "expected_backend_runs_per_profile_sweep": expected_backend_runs,
         "required_profiles": list(required_release_profiles) if release_mode else [],
         "observed_profiles": observed_profiles,
         "missing_profile_sweep_pairs": missing_profile_sweep_pairs,

@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,6 +23,7 @@ func TestEnsureBaselineBundleCreatesMissingArtifacts(t *testing.T) {
 
 	required := []string{
 		"skills/subagents.yaml",
+		"skills/bundle-manifest.json",
 		"skills/prompt-packs/collect-context.md",
 		"skills/service-inventory/prompts/system.md",
 		"skills/service-inventory/prompts/task.md",
@@ -31,6 +34,36 @@ func TestEnsureBaselineBundleCreatesMissingArtifacts(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(ws.Path, rel)); err != nil {
 			t.Fatalf("expected %s to be seeded: %v", rel, err)
 		}
+	}
+}
+
+func TestEnsureBaselineBundleSeedsMachineReadableManifest(t *testing.T) {
+	t.Parallel()
+
+	ws := writeBaselineWorkspace(t)
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure layout: %v", err)
+	}
+	if err := ws.EnsureBaselineBundle(); err != nil {
+		t.Fatalf("ensure baseline bundle: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(ws.Path, BaselineBundleManifestPath))
+	if err != nil {
+		t.Fatalf("read baseline bundle manifest: %v", err)
+	}
+	var manifest BaselineBundleManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatalf("decode baseline bundle manifest: %v", err)
+	}
+	if manifest.SchemaVersion != baselineBundleSchemaVersion {
+		t.Fatalf("expected schema version %d, got %d", baselineBundleSchemaVersion, manifest.SchemaVersion)
+	}
+	if manifest.BundleVersion != baselineBundleVersion {
+		t.Fatalf("expected bundle version %d, got %d", baselineBundleVersion, manifest.BundleVersion)
+	}
+	if len(manifest.EditableArtifacts) == 0 {
+		t.Fatalf("expected editable_artifacts in baseline bundle manifest")
 	}
 }
 
@@ -104,6 +137,39 @@ func TestEnsureBaselineBundleSeedsStructuredPromptDefaults(t *testing.T) {
 		if words := len(strings.Fields(body)); words < 70 {
 			t.Fatalf("prompt %s is too short: %d words", rel, words)
 		}
+	}
+}
+
+func TestValidateWarnsOnStaleBaselineBundleManifest(t *testing.T) {
+	t.Parallel()
+
+	ws := writeBaselineWorkspace(t)
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure layout: %v", err)
+	}
+	if err := ws.EnsureBaselineBundle(); err != nil {
+		t.Fatalf("ensure baseline bundle: %v", err)
+	}
+	stale := EmbeddedBaselineBundleManifest()
+	stale.BundleVersion = 0
+	raw, err := json.MarshalIndent(stale, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal stale bundle manifest: %v", err)
+	}
+	if err := ws.WriteFile(BaselineBundleManifestPath, append(raw, '\n')); err != nil {
+		t.Fatalf("write stale bundle manifest: %v", err)
+	}
+
+	report := ws.Validate(context.Background(), ValidateOptions{})
+	found := false
+	for _, warning := range report.Warnings {
+		if warning.Code == "workspace.skills.bundle_manifest.stale" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected stale baseline bundle manifest warning, got %+v", report.Warnings)
 	}
 }
 

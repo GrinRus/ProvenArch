@@ -1,5 +1,5 @@
 GO ?= go
-NPM ?= npm
+NPM ?= ./scripts/run-npm.sh
 UI_DIR := ui
 GO_FILES := $(shell find cmd internal -name '*.go' -type f 2>/dev/null)
 RUNTIME ?= fake
@@ -33,6 +33,7 @@ lint:
 	$(NPM) run typecheck --prefix $(UI_DIR)
 
 build:
+	rm -rf $(UI_DIR)/dist $(UI_DIR)/node_modules/.vite
 	$(NPM) run build --prefix $(UI_DIR)
 	rm -rf internal/api/ui_dist/assets internal/api/ui_dist/index.html
 	mkdir -p internal/api/ui_dist/assets

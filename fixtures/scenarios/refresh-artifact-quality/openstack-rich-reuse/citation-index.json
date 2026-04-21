@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "run_id": "run-openstack-refresh",
+  "generated_at": "2026-04-17T13:07:00Z",
+  "citations": [
+    {
+      "id": "cite.runtime-summary",
+      "repo": "openstack",
+      "path": "README.rst",
+      "claim_ids": [
+        "claim.runtime-summary"
+      ],
+      "document_ids": [
+        "doc.report.overview"
+      ]
+    },
+    {
+      "id": "cite.keystone.readme",
+      "repo": "openstack",
+      "path": "keystone/README.rst",
+      "claim_ids": [
+        "claim.keystone.readme"
+      ],
+      "document_ids": [
+        "doc.report.findings"
+      ]
+    },
+    {
+      "id": "cite.keystone.policy",
+      "repo": "openstack",
+      "path": "keystone/etc/policy.yaml",
+      "claim_ids": [
+        "claim.keystone.policy"
+      ],
+      "document_ids": [
+        "doc.report.questions"
+      ]
+    }
+  ]
+}

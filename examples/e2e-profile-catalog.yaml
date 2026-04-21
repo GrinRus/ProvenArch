@@ -1,0 +1,185 @@
+version: 1
+
+sizing_policy:
+  small:
+    max_shards: 16
+  medium:
+    min_shards: 17
+    max_shards: 64
+  full:
+    min_shards: 65
+
+timeout_profiles:
+  short-window:
+    step_timeout_sec: 3600
+    pipeline_timeout_sec: 7200
+    ui_init_poll_timeout_sec: 1200
+  medium-window:
+    step_timeout_sec: 5400
+    pipeline_timeout_sec: 14400
+    ui_init_poll_timeout_sec: 1500
+  extended-window:
+    step_timeout_sec: 10800
+    pipeline_timeout_sec: 21600
+    ui_init_poll_timeout_sec: 1800
+
+repo_sets:
+  bank-of-anthos:
+    concrete_profile_id: single-git_url
+    source_kind: git_url
+    expected_repo_count: 1
+    repos_file: ./repos/github/mono-bank-of-anthos.repos.yaml
+    shard_count: 6
+    shard_bucket: small
+  openedx-ecosystem:
+    concrete_profile_id: multi-path
+    source_kind: path
+    expected_repo_count: 5
+    repos_file: ./repos/curated/multi-path.openedx.repos.yaml
+    shard_count: 5
+    shard_bucket: small
+  openstack-ecosystem:
+    concrete_profile_id: multi-path
+    source_kind: path
+    expected_repo_count: 5
+    repos_file: ./repos/curated/multi-path.openstack.repos.yaml
+    shard_count: 5
+    shard_bucket: small
+  posthog:
+    concrete_profile_id: single-path
+    source_kind: path
+    expected_repo_count: 1
+    repos_file: ./repos/curated/single-path.posthog.repos.yaml
+    shard_count: 24
+    shard_bucket: medium
+  ftgo-application:
+    concrete_profile_id: single-git_url
+    source_kind: git_url
+    expected_repo_count: 1
+    repos_file: ./repos/github/mono-ftgo-application.repos.yaml
+    shard_count: 37
+    shard_bucket: medium
+  sentry-ecosystem:
+    concrete_profile_id: multi-git_url
+    source_kind: git_url
+    expected_repo_count: 5
+    repos_file: ./repos/github/multi-sentry-ecosystem.repos.yaml
+    shard_count: 104
+    shard_bucket: full
+
+execution_policies:
+  regres-default:
+    mode: regres
+    providers:
+      - qwen-code
+    sweeps:
+      - implicit-baseline
+    sweeps_count: 1
+    release_mode: false
+    notes:
+      - Primary debug surface is qwen-only baseline.
+      - Additional claude debug stays manual and is not part of profile totals.
+  release-default:
+    mode: release
+    providers:
+      - qwen-code
+      - claude-code
+    sweeps:
+      - baseline
+      - parallel-default
+    sweeps_count: 2
+    release_mode: true
+    notes:
+      - Release slices keep the existing matrix contract unchanged.
+      - Each runnable matrix file must contain exactly one single-* and one multi-* profile.
+
+profiles:
+  - slug: regres-fast
+    mode: regres
+    policy: regres-default
+    shard_bucket: small
+    timeout_profile: short-window
+    expected_backend_runs: 3
+    rough_duration_band: short-window
+    target_repo_sets:
+      - bank-of-anthos
+      - openedx-ecosystem
+      - openstack-ecosystem
+    matrix_files:
+      - ./e2e-matrix.regres-fast.bank-openedx.yaml
+      - ./e2e-matrix.regres-fast.openstack.yaml
+  - slug: regres-long
+    mode: regres
+    policy: regres-default
+    shard_bucket: medium
+    timeout_profile: medium-window
+    expected_backend_runs: 2
+    rough_duration_band: medium-window
+    target_repo_sets:
+      - posthog
+      - ftgo-application
+    matrix_files:
+      - ./e2e-matrix.regres-long.yaml
+  - slug: release-fast
+    mode: release
+    policy: release-default
+    shard_bucket: small
+    timeout_profile: short-window
+    expected_backend_runs: 8
+    rough_duration_band: short-window
+    target_repo_sets:
+      - bank-of-anthos
+      - openedx-ecosystem
+    matrix_files:
+      - ./e2e-matrix.release-fast.yaml
+  - slug: release-long
+    mode: release
+    policy: release-default
+    shard_bucket: medium
+    timeout_profile: medium-window
+    expected_backend_runs: 8
+    rough_duration_band: medium-window
+    target_repo_sets:
+      - posthog
+      - openstack-ecosystem
+    matrix_files:
+      - ./e2e-matrix.release-long.yaml
+    notes:
+      - openstack stays the small multi companion because release-mode still requires one multi-* profile per matrix invocation.
+  - slug: release-full
+    mode: release
+    policy: release-default
+    shard_bucket: full
+    timeout_profile: extended-window
+    expected_backend_runs: 24
+    rough_duration_band: extended-window
+    target_repo_sets:
+      - bank-of-anthos
+      - openedx-ecosystem
+      - posthog
+      - openstack-ecosystem
+      - ftgo-application
+      - sentry-ecosystem
+    composite_of_profiles:
+      - release-fast
+      - release-long
+    matrix_files:
+      - ./e2e-matrix.release-fast.yaml
+      - ./e2e-matrix.release-long.yaml
+      - ./e2e-matrix.release-full.ftgo-sentry.yaml
+
+legacy_compat_matrix_files:
+  - path: ./e2e-matrix.regression-wave1.yaml
+    status: legacy-compat
+    replacement_profiles:
+      - regres-long
+  - path: ./e2e-matrix.release-wave1.yaml
+    status: legacy-compat
+    replacement_profiles:
+      - release-long
+      - release-full
+  - path: ./e2e-matrix.release-wave2.yaml
+    status: legacy-compat
+    replacement_profiles:
+      - release-fast
+      - release-full

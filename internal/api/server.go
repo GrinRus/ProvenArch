@@ -38,6 +38,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("/api/health", s.handleHealth)
 	mux.HandleFunc("/api/workspace/validate", s.handleWorkspaceValidate)
+	mux.HandleFunc("/api/workspace/bundle", s.handleWorkspaceBundle)
 	mux.HandleFunc("/api/workspace/manifest", s.handleWorkspaceManifest)
 	mux.HandleFunc("/api/runtime/timeouts", s.handleRuntimeTimeouts)
 	mux.HandleFunc("/api/runtime/execution", s.handleRuntimeExecution)
@@ -128,6 +129,22 @@ func (s *Server) handleWorkspaceValidate(writer http.ResponseWriter, request *ht
 		"workspace":      ws.Path,
 		"warnings":       report.Warnings,
 		"resolved_repos": report.ResolvedRepos,
+	})
+}
+
+func (s *Server) handleWorkspaceBundle(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		writeMethodNotAllowed(writer, http.MethodGet)
+		return
+	}
+
+	ws := s.getWorkspace()
+	manifest, diagnostics := ws.EffectiveBaselineBundleManifest()
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"ok":        true,
+		"workspace": ws.Path,
+		"manifest":  manifest,
+		"warnings":  diagnostics,
 	})
 }
 

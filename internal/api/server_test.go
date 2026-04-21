@@ -101,6 +101,60 @@ func TestWorkspaceValidateEndpoint(t *testing.T) {
 	}
 }
 
+func TestWorkspaceBundleEndpointReturnsEffectiveManifestAndWarnings(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Get(httpServer.URL + "/api/workspace/bundle")
+	if err != nil {
+		t.Fatalf("GET /api/workspace/bundle: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", response.StatusCode)
+	}
+	var payload struct {
+		OK       bool `json:"ok"`
+		Manifest struct {
+			SchemaVersion     int `json:"schema_version"`
+			BundleVersion     int `json:"bundle_version"`
+			EditableArtifacts []struct {
+				Path  string `json:"path"`
+				Label string `json:"label"`
+			} `json:"editable_artifacts"`
+		} `json:"manifest"`
+		Warnings []struct {
+			Code string `json:"code"`
+		} `json:"warnings"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode bundle payload: %v", err)
+	}
+	if !payload.OK {
+		t.Fatalf("expected ok=true")
+	}
+	if payload.Manifest.SchemaVersion == 0 || payload.Manifest.BundleVersion == 0 {
+		t.Fatalf("expected non-zero manifest versions, got %+v", payload.Manifest)
+	}
+	if len(payload.Manifest.EditableArtifacts) == 0 {
+		t.Fatalf("expected editable artifacts in bundle manifest")
+	}
+	foundMissingWarning := false
+	for _, warning := range payload.Warnings {
+		if warning.Code == "workspace.skills.bundle_manifest.missing" {
+			foundMissingWarning = true
+			break
+		}
+	}
+	if !foundMissingWarning {
+		t.Fatalf("expected missing bundle manifest warning, got %+v", payload.Warnings)
+	}
+}
+
 func TestWorkspaceValidateEndpointReturnsErrorEnvelopeWithDiagnostics(t *testing.T) {
 	t.Parallel()
 
@@ -2037,6 +2091,16 @@ def from_prompt(field):
     match = re.search(r'"%s"\s*:\s*"([^"]+)"' % re.escape(field), prompt)
     return match.group(1).strip() if match else ""
 
+def first_non_empty_list(mapping, keys):
+    for key in keys:
+        value = mapping.get(key)
+        if isinstance(value, list) and value:
+            return [str(item).strip() for item in value if str(item).strip()]
+    return []
+
+def slugify(value):
+    return re.sub(r'[^a-z0-9]+', '-', value.lower()).strip('-') or "stub"
+
 task = {}
 if raw:
     try:
@@ -2044,9 +2108,93 @@ if raw:
     except Exception:
         task = {}
 
-task_id = first_non_empty(task, ["task_id", "TaskID"]) or from_prompt("TaskID") or from_prompt("task_id") or "task"
-step_id = first_non_empty(task, ["step_id", "StepID"]) or from_prompt("StepID") or from_prompt("step_id") or "init.step1.collect"
-run_id = first_non_empty(task, ["run_id", "RunID"]) or from_prompt("RunID") or from_prompt("run_id")
+task_id = first_non_empty(task, ["task_id", "TaskID", "taskId"]) or from_prompt("TaskID") or from_prompt("task_id") or "task"
+step_id = first_non_empty(task, ["step_id", "StepID", "stepId"]) or from_prompt("StepID") or from_prompt("step_id") or "init.step1.collect"
+run_id = first_non_empty(task, ["run_id", "RunID", "runId"]) or from_prompt("RunID") or from_prompt("run_id")
+workspace = first_non_empty(task, ["workspace", "Workspace"]) or from_prompt("workspace") or from_prompt("Workspace")
+write_root = first_non_empty(task, ["write_root", "WriteRoot", "writeRoot"]) or from_prompt("write_root") or from_prompt("WriteRoot")
+artifact_root = first_non_empty(task, ["artifact_root", "ArtifactRoot", "artifactRoot"]) or from_prompt("artifact_root") or from_prompt("ArtifactRoot")
+shard_id = first_non_empty(task, ["shard_id", "ShardID", "shardId"]) or from_prompt("shard_id") or from_prompt("ShardID") or slugify(step_id)
+repo_scopes = first_non_empty_list(task, ["repo_scopes", "RepoScopes", "repoScopes"])
+if not repo_scopes:
+    repo_scope = first_non_empty(task, ["repo_scope", "RepoScope", "repoScope"]) or from_prompt("repo_scope") or from_prompt("RepoScope")
+    if repo_scope:
+        repo_scopes = [repo_scope]
+path_scopes = first_non_empty_list(task, ["path_scopes", "PathScopes", "pathScopes"])
+if not write_root and workspace:
+    write_root = workspace
+if not write_root:
+    write_root = os.getcwd()
+if write_root:
+    os.makedirs(write_root, exist_ok=True)
+    manifest_artifact_root = artifact_root.strip() if isinstance(artifact_root, str) else ""
+    if not manifest_artifact_root and workspace:
+        try:
+            candidate = os.path.relpath(write_root, workspace)
+            if candidate and not candidate.startswith(".."):
+                manifest_artifact_root = candidate
+        except Exception:
+            manifest_artifact_root = ""
+    if not manifest_artifact_root:
+        try:
+            candidate = os.path.relpath(write_root, os.getcwd())
+            if candidate and not candidate.startswith(".."):
+                manifest_artifact_root = candidate
+        except Exception:
+            manifest_artifact_root = ""
+    if not manifest_artifact_root:
+        manifest_artifact_root = "."
+    document_name = slugify(shard_id) + ".md"
+    document_id = "doc." + slugify(shard_id)
+    citation_id = "cite." + slugify(shard_id)
+    canonical_path = "reports/agent-outputs/domains/" + document_name
+    with open(os.path.join(write_root, document_name), "w", encoding="utf-8") as handle:
+        handle.write("# Stub Analysis\n")
+    manifest = {
+        "version": 1,
+        "run_id": run_id or "run-1",
+        "step_id": step_id,
+        "shard_id": shard_id,
+        "agent_role": "shard-analyst",
+        "artifact_root": manifest_artifact_root,
+        "repo_scopes": repo_scopes,
+        "path_scopes": path_scopes,
+        "summary": "stub shard pack",
+        "documents": [
+            {
+                "id": document_id,
+                "kind": "report",
+                "title": "Stub Analysis",
+                "path": document_name,
+                "canonical_path": canonical_path,
+                "topics": ["stub"],
+                "citation_ids": [citation_id],
+                "status": "staged"
+            }
+        ],
+        "citations": [
+            {
+                "id": citation_id,
+                "repo": repo_scopes[0] if repo_scopes else "stub-repo",
+                "path": "README.md",
+                "claim_ids": ["claim.stub"],
+                "document_ids": [document_id]
+            }
+        ],
+        "compatibility": {
+            "coverage": {
+                "observed": ["stub"],
+                "missing": ["owner mappings"],
+                "notes": ["stub manifest for integration tests"]
+            },
+            "questions": [],
+            "entities": [],
+            "edges": [],
+            "findings": []
+        }
+    }
+    with open(os.path.join(write_root, "shard-pack-manifest.json"), "w", encoding="utf-8") as handle:
+        json.dump(manifest, handle)
 payload = {
     "meta": {
         "task_id": task_id,

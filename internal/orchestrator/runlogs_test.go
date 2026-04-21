@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GrinRus/ProvenArch/internal/reports"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
 
@@ -48,7 +49,13 @@ func TestRunWritesQualitySummaryAndQueryableLogs(t *testing.T) {
 		t.Fatalf("read quality summary %q: %v", qualityPath, err)
 	}
 	var quality struct {
-		Status string `json:"status"`
+		Status  string `json:"status"`
+		Failure struct {
+			Class string `json:"class"`
+		} `json:"failure"`
+		QualitySignals []struct {
+			Code string `json:"code"`
+		} `json:"quality_signals"`
 		Totals struct {
 			Steps       int `json:"steps"`
 			SignalScore int `json:"signal_score"`
@@ -61,11 +68,17 @@ func TestRunWritesQualitySummaryAndQueryableLogs(t *testing.T) {
 	if quality.Status != string(RunStatusSucceeded) {
 		t.Fatalf("expected quality summary status %q, got %q", RunStatusSucceeded, quality.Status)
 	}
+	if quality.Failure.Class != "none" {
+		t.Fatalf("expected quality summary failure.class=none, got %q", quality.Failure.Class)
+	}
 	if quality.Totals.Steps <= 0 {
 		t.Fatalf("expected positive quality step count, got %d", quality.Totals.Steps)
 	}
 	if len(quality.RuntimeVersions) == 0 {
 		t.Fatalf("expected runtime versions in quality summary")
+	}
+	if len(quality.QualitySignals) != 0 {
+		t.Fatalf("expected no quality signals for clean run, got %+v", quality.QualitySignals)
 	}
 
 	page, ok, err := service.GetRunLogs(info.RunID, 0, 500)
@@ -263,6 +276,73 @@ func TestRunQualitySummaryRuntimeVersionsPreferVersionedEntry(t *testing.T) {
 	}
 	if quality.RuntimeVersions[0] != "synthetic-headless@v1" {
 		t.Fatalf("expected versioned runtime entry to win over bare name, got %+v", quality.RuntimeVersions)
+	}
+}
+
+func TestAssessLiveReportSurfaceWarningsFlagsPlaceholderAndIncompleteArtifacts(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	writeReport := func(rel string, content string) {
+		t.Helper()
+		if err := ws.WriteFile(rel, []byte(content)); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	writeReport("reports/as-is/overview.md", "# Overview\n\nNo report yet.\n")
+	writeReport("reports/findings/findings.md", "# Findings\n\nFindings may be incomplete because some shards failed.\n")
+	writeReport("reports/coverage/summary.md", "# Coverage Summary\n\nAnalysis incomplete. See banner above.\n")
+	writeReport("reports/coverage/open-questions.md", "# Open Questions\n\nOpen questions may be incomplete because some shards failed.\n")
+
+	ctx := reports.DefaultReportRenderContext()
+	signals := assessLiveReportSurfaceSignals(ws, ctx, RunStatusSucceeded)
+	joinedSignals := []string{}
+	for _, signal := range signals {
+		joinedSignals = append(joinedSignals, signal.Code)
+	}
+	warnings := assessLiveReportSurfaceWarnings(ws, ctx, RunStatusSucceeded)
+	joined := strings.Join(warnings, "\n")
+	if !strings.Contains(joined, "overview report is too sparse or placeholder-like") {
+		t.Fatalf("expected overview quality warning, got %+v", warnings)
+	}
+	if !strings.Contains(joined, "findings report still indicates incomplete analysis") {
+		t.Fatalf("expected findings incomplete warning, got %+v", warnings)
+	}
+	if !strings.Contains(joined, "coverage summary still indicates incomplete analysis") {
+		t.Fatalf("expected coverage incomplete warning, got %+v", warnings)
+	}
+	if !strings.Contains(joined, "open questions report still indicates incomplete analysis") {
+		t.Fatalf("expected open questions incomplete warning, got %+v", warnings)
+	}
+	for _, code := range []string{
+		"artifact_quality.overview_placeholder",
+		"artifact_quality.findings_incomplete",
+		"artifact_quality.coverage_incomplete",
+		"artifact_quality.open_questions_incomplete",
+	} {
+		if !containsIssue(joinedSignals, code) {
+			t.Fatalf("expected structured quality signal %q, got %+v", code, joinedSignals)
+		}
+	}
+}
+
+func TestAssessLiveReportSurfaceWarningsSkipsIncompleteOrFailedRuns(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	if err := ws.WriteFile("reports/as-is/overview.md", []byte("# Overview\n\nNo report yet.\n")); err != nil {
+		t.Fatalf("write overview: %v", err)
+	}
+
+	incomplete := reports.DefaultReportRenderContext()
+	incomplete.ReportMode = reports.ReportModeIncomplete
+	if warnings := assessLiveReportSurfaceWarnings(ws, incomplete, RunStatusSucceeded); len(warnings) != 0 {
+		t.Fatalf("expected no warnings for incomplete-mode succeeded run, got %+v", warnings)
+	}
+	normal := reports.DefaultReportRenderContext()
+	if warnings := assessLiveReportSurfaceWarnings(ws, normal, RunStatusFailed); len(warnings) != 0 {
+		t.Fatalf("expected no warnings for failed run, got %+v", warnings)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GrinRus/ProvenArch/internal/artifactquality"
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	"github.com/GrinRus/ProvenArch/internal/model"
 	"github.com/GrinRus/ProvenArch/internal/reports"
@@ -23,6 +24,13 @@ const (
 	citationIndexFile     = "citation-index.json"
 	validatorVerdictFile  = "validator-verdict.json"
 )
+
+var requiredCanonicalLiveDocuments = []string{
+	"reports/as-is/overview.md",
+	"reports/coverage/summary.md",
+	"reports/coverage/open-questions.md",
+	"reports/findings/findings.md",
+}
 
 type aggregatedDocumentInfo struct {
 	Kind         string
@@ -83,11 +91,12 @@ func runtimeAgentRole(stepID string) string {
 }
 
 func (e *pipelineExecution) runtimeArtifactContext(stepID string, shardID string, repoScopes []string) (string, string, []string, error) {
+	isFindingsStep := strings.HasSuffix(stepID, "step3.findings")
 	var rel string
 	switch {
 	case strings.HasSuffix(stepID, "step1.collect"):
 		rel = runtimeShardArtifactRoot(e.runID, shardID)
-	case strings.HasSuffix(stepID, "step3.findings"):
+	case isFindingsStep:
 		rel = runtimeValidatorArtifactRoot(e.runID)
 	default:
 		rel = path.Join("reports", "taskruns", e.runID, "runtime")
@@ -100,19 +109,26 @@ func (e *pipelineExecution) runtimeArtifactContext(stepID string, shardID string
 		return "", "", nil, fmt.Errorf("create runtime artifact root: %w", err)
 	}
 
-	roots := []string{e.workspace.Path}
-	if strings.HasSuffix(stepID, "step3.findings") {
+	roots := []string{}
+	if isFindingsStep {
 		if finalAbs, resolveErr := e.workspace.Resolve(runtimeFinalArtifactRoot(e.runID)); resolveErr == nil {
 			roots = append(roots, finalAbs)
 		}
+		roots = append(roots, abs)
+	} else {
+		roots = append(roots, e.workspace.Path)
 	}
-	for _, scope := range repoScopes {
-		scope = strings.TrimSpace(scope)
-		if scope == "" {
-			continue
-		}
-		if repoPath := strings.TrimSpace(e.resolvedRepoPaths[scope]); repoPath != "" {
-			roots = append(roots, repoPath)
+	// Keep validator/findings tasks focused on staged-final artifacts and validator write_root.
+	// Repository roots stay enabled for collect tasks.
+	if !isFindingsStep {
+		for _, scope := range repoScopes {
+			scope = strings.TrimSpace(scope)
+			if scope == "" {
+				continue
+			}
+			if repoPath := strings.TrimSpace(e.resolvedRepoPaths[scope]); repoPath != "" {
+				roots = append(roots, repoPath)
+			}
 		}
 	}
 	return rel, abs, normalizeOrderedUniqueStrings(roots), nil
@@ -206,7 +222,7 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 		return nil
 	}
 
-	authoredDocs, err := collectAuthoredStageDocuments(e.shardPacks)
+	authoredDocs, err := collectAuthoredStageDocuments(e.shardPacks, e.workspace.Path)
 	if err != nil {
 		return err
 	}
@@ -252,13 +268,35 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 		if err := registerCompiledArtifacts(stageCompiler.CompileAsIs(entities, edges, renderCtx)); err != nil {
 			return err
 		}
+	} else if !hasCanonicalPath("reports/as-is/overview.md") {
+		artifact, compileErr := stageCompiler.WriteAsIsOverview(entities, edges, renderCtx)
+		if err := registerCompiledArtifacts([]reports.Artifact{artifact}, compileErr); err != nil {
+			return err
+		}
 	}
 	if !hasCanonicalPrefix("reports/coverage/") {
 		if err := registerCompiledArtifacts(stageCompiler.WriteCoverage(&compatibility.Coverage, compatibility.Questions, renderCtx)); err != nil {
 			return err
 		}
+	} else {
+		if !hasCanonicalPath("reports/coverage/summary.md") {
+			artifact, compileErr := stageCompiler.WriteCoverageSummary(&compatibility.Coverage, renderCtx)
+			if err := registerCompiledArtifacts([]reports.Artifact{artifact}, compileErr); err != nil {
+				return err
+			}
+		}
+		if !hasCanonicalPath("reports/coverage/open-questions.md") {
+			artifact, compileErr := stageCompiler.WriteCoverageOpenQuestions(compatibility.Questions, renderCtx)
+			if err := registerCompiledArtifacts([]reports.Artifact{artifact}, compileErr); err != nil {
+				return err
+			}
+		}
 	}
 	if !hasCanonicalPrefix("reports/findings/") {
+		if err := registerCompiledArtifacts(stageCompiler.WriteFindings(compatibility.Findings, renderCtx)); err != nil {
+			return err
+		}
+	} else if !hasCanonicalPath("reports/findings/findings.md") {
 		if err := registerCompiledArtifacts(stageCompiler.WriteFindings(compatibility.Findings, renderCtx)); err != nil {
 			return err
 		}
@@ -355,6 +393,11 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 	})
 	e.finalRunIndex = &parsedFinalRunIndex
 	e.citationIndex = &parsedCitationIndex
+	if e.pipeline == PipelineRefresh {
+		for _, warning := range assessRefreshArtifactWarnings(e.shardPacks, parsedFinalRunIndex, parsedCitationIndex) {
+			e.addWarning(warning)
+		}
+	}
 	e.findings = append([]contracts.Finding(nil), compatibility.Findings...)
 	e.questions = append([]contracts.Question(nil), compatibility.Questions...)
 	e.coverage = mergeCoverage(nil, &compatibility.Coverage)
@@ -370,6 +413,58 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 	return nil
 }
 
+func assessRefreshArtifactWarnings(
+	manifests []contracts.ShardPackManifest,
+	finalIndex contracts.FinalRunIndex,
+	citationIndex contracts.CitationIndex,
+) []string {
+	warnings := []string{}
+
+	if len(finalIndex.CanonicalDocuments) >= 2 && len(citationIndex.Citations) == 1 {
+		onlyCitationID := strings.TrimSpace(citationIndex.Citations[0].ID)
+		if artifactquality.IsGenericRuntimeSummaryCitation(onlyCitationID) {
+			warnings = append(
+				warnings,
+				fmt.Sprintf(
+					"artifact_quality: refresh staged final set has %d canonical documents but only 1 generic runtime-summary citation (%s)",
+					len(finalIndex.CanonicalDocuments),
+					onlyCitationID,
+				),
+			)
+		}
+	}
+
+	if len(manifests) == 0 {
+		return warnings
+	}
+
+	richManifestCount := 0
+	for _, manifest := range manifests {
+		if artifactquality.HasRepoSpecificCitationSurface(manifest) {
+			richManifestCount++
+		}
+	}
+	if richManifestCount == 0 {
+		warnings = append(
+			warnings,
+			fmt.Sprintf(
+				"artifact_quality: refresh collect manifests are reuse-only and preserve no repo-specific citations across %d shard(s)",
+				len(manifests),
+			),
+		)
+	}
+
+	return warnings
+}
+
+func manifestHasRepoSpecificCitationSurface(manifest contracts.ShardPackManifest) bool {
+	return artifactquality.HasRepoSpecificCitationSurface(manifest)
+}
+
+func isGenericRuntimeSummaryCitation(id string) bool {
+	return artifactquality.IsGenericRuntimeSummaryCitation(id)
+}
+
 func (e *pipelineExecution) authoredDomainReports() (map[string]string, error) {
 	reportsByDomain := map[string]string{}
 	for _, manifest := range e.shardPacks {
@@ -377,7 +472,7 @@ func (e *pipelineExecution) authoredDomainReports() (map[string]string, error) {
 			if !strings.HasPrefix(strings.TrimSpace(document.CanonicalPath), "reports/agent-outputs/domains/") {
 				continue
 			}
-			content, err := readShardDocument(manifest, document)
+			content, err := readShardDocument(manifest, document, e.workspace.Path)
 			if err != nil {
 				return nil, err
 			}
@@ -392,10 +487,34 @@ func (e *pipelineExecution) authoredDomainReports() (map[string]string, error) {
 	return reportsByDomain, nil
 }
 
-func readShardDocument(manifest contracts.ShardPackManifest, document contracts.AuthoredDocument) (string, error) {
-	artifactRoot := strings.TrimSpace(manifest.ArtifactRoot)
+func resolveManifestArtifactRoot(artifactRoot string, workspaceRoot string) (string, error) {
+	artifactRoot = strings.TrimSpace(artifactRoot)
 	if artifactRoot == "" {
-		return "", fmt.Errorf("read shard document %q: manifest artifact_root is empty", document.ID)
+		return "", fmt.Errorf("manifest artifact_root is empty")
+	}
+	if filepath.IsAbs(artifactRoot) {
+		return filepath.Clean(artifactRoot), nil
+	}
+	workspaceRoot = strings.TrimSpace(workspaceRoot)
+	if workspaceRoot == "" {
+		return "", fmt.Errorf("manifest artifact_root %q is relative but workspace root is empty", artifactRoot)
+	}
+	cleanWorkspaceRoot := filepath.Clean(workspaceRoot)
+	resolved := filepath.Join(cleanWorkspaceRoot, filepath.Clean(filepath.FromSlash(artifactRoot)))
+	relToWorkspace, err := filepath.Rel(cleanWorkspaceRoot, resolved)
+	if err != nil {
+		return "", fmt.Errorf("resolve relative artifact_root %q: %w", artifactRoot, err)
+	}
+	if relToWorkspace == ".." || strings.HasPrefix(relToWorkspace, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("manifest artifact_root %q escapes workspace root", artifactRoot)
+	}
+	return resolved, nil
+}
+
+func readShardDocument(manifest contracts.ShardPackManifest, document contracts.AuthoredDocument, workspaceRoot string) (string, error) {
+	artifactRoot, err := resolveManifestArtifactRoot(manifest.ArtifactRoot, workspaceRoot)
+	if err != nil {
+		return "", fmt.Errorf("read shard document %q: %w", document.ID, err)
 	}
 	relativePath := filepath.Clean(filepath.FromSlash(strings.TrimSpace(document.Path)))
 	if relativePath == "." || relativePath == "" {
@@ -420,7 +539,7 @@ func readShardDocument(manifest contracts.ShardPackManifest, document contracts.
 	return string(content), nil
 }
 
-func collectAuthoredStageDocuments(manifests []contracts.ShardPackManifest) ([]stagedAuthoredDocument, error) {
+func collectAuthoredStageDocuments(manifests []contracts.ShardPackManifest, workspaceRoot string) ([]stagedAuthoredDocument, error) {
 	documentsByCanonicalPath := map[string]*authoredDocumentAccumulator{}
 	for _, manifest := range manifests {
 		for _, document := range manifest.Documents {
@@ -455,7 +574,7 @@ func collectAuthoredStageDocuments(manifests []contracts.ShardPackManifest) ([]s
 					accumulator.CitationIDs[trimmed] = struct{}{}
 				}
 			}
-			content, err := readShardDocument(manifest, document)
+			content, err := readShardDocument(manifest, document, workspaceRoot)
 			if err != nil {
 				return nil, err
 			}
@@ -893,8 +1012,10 @@ func (e *pipelineExecution) validateStagedArtifacts() []contracts.ValidatorIssue
 
 	seenTopics := map[string]struct{}{}
 	documentsByID := map[string]contracts.FinalRunDocument{}
+	documentsByCanonicalPath := map[string]contracts.FinalRunDocument{}
 	for _, document := range e.finalRunIndex.CanonicalDocuments {
 		documentsByID[document.ID] = document
+		documentsByCanonicalPath[document.CanonicalPath] = document
 		if strictCitationChecks && requiresDocumentCitations(document) && len(document.CitationIDs) == 0 {
 			issues = append(issues, contracts.ValidatorIssue{
 				Code:       "missing_document_citations",
@@ -927,6 +1048,17 @@ func (e *pipelineExecution) validateStagedArtifacts() []contracts.ValidatorIssue
 				DocumentID: document.ID,
 			})
 		}
+	}
+	for _, requiredPath := range requiredCanonicalLiveDocuments {
+		if _, ok := documentsByCanonicalPath[requiredPath]; ok {
+			continue
+		}
+		issues = append(issues, contracts.ValidatorIssue{
+			Code:     "missing_required_canonical_document",
+			Severity: "error",
+			Message:  fmt.Sprintf("required canonical document %q is missing from final run index", requiredPath),
+			Path:     requiredPath,
+		})
 	}
 	for _, topic := range e.finalRunIndex.Topics {
 		if _, exists := seenTopics[topic.ID]; exists {

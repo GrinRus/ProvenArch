@@ -20,6 +20,7 @@ UI_E2E_CANCEL_STUB_SLEEP_SEC="${UI_E2E_CANCEL_STUB_SLEEP_SEC:-90}"
 UI_INIT_POLL_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-}"
 UI_CANCEL_POLL_TIMEOUT_SEC="${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-}"
 UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC="${UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC:-30}"
+UI_E2E_INIT_TIMEOUT_CAP_SEC="${UI_E2E_INIT_TIMEOUT_CAP_SEC:-1800}"
 UI_E2E_HEADED="${UI_E2E_HEADED:-0}"
 FRONTEND_RESULT_FILENAME="${FRONTEND_RESULT_FILENAME:-frontend-e2e-result.json}"
 
@@ -43,6 +44,26 @@ require_cmd() {
   if ! command -v "$cmd" >/dev/null 2>&1; then
     die "required command is unavailable: $cmd"
   fi
+}
+
+resolve_npm_bin() {
+  if [[ "$(type -t npm || true)" == "function" ]]; then
+    printf '%s\n' "npm"
+    return 0
+  fi
+  printf '%s\n' "$PROVENARCH_ROOT/scripts/run-npm.sh"
+}
+
+current_npm_bin() {
+  if [[ -n "${ACP_NPM_BIN:-}" ]]; then
+    printf '%s\n' "$ACP_NPM_BIN"
+    return 0
+  fi
+  if [[ -n "${NPM_BIN:-}" ]]; then
+    printf '%s\n' "$NPM_BIN"
+    return 0
+  fi
+  resolve_npm_bin
 }
 
 parse_positive_int_or_die() {
@@ -175,7 +196,8 @@ esac
 
 require_cmd curl
 require_cmd python3
-require_cmd npm
+NPM_BIN="$(current_npm_bin)"
+require_cmd "$NPM_BIN"
 acp_ensure_no_legacy_env_set die
 
 runtime_cmd=""
@@ -257,6 +279,25 @@ if ! wait_for_health "$BASE_URL"; then
   die "ACP server did not become healthy in ${API_READY_TIMEOUT_SEC}s (see $SERVER_LOG)"
 fi
 resolve_ui_poll_timeouts
+if [[ "$UI_E2E_SCENARIO" == "init-inspect" ]]; then
+  init_timeout_sec="$(parse_positive_int_or_die "$UI_INIT_POLL_TIMEOUT_SEC" "ACP_UI_INIT_POLL_TIMEOUT_SEC")"
+  pipeline_timeout_sec=0
+  init_timeout_cap_sec="$(parse_positive_int_or_die "$UI_E2E_INIT_TIMEOUT_CAP_SEC" "UI_E2E_INIT_TIMEOUT_CAP_SEC")"
+  if [[ -n "${ACP_PIPELINE_TIMEOUT_SEC:-}" ]]; then
+    pipeline_timeout_sec="$(parse_positive_int_or_die "$ACP_PIPELINE_TIMEOUT_SEC" "ACP_PIPELINE_TIMEOUT_SEC")"
+  fi
+  if (( pipeline_timeout_sec > 0 )); then
+    min_init_timeout_sec=$((pipeline_timeout_sec + 30))
+    if (( min_init_timeout_sec > init_timeout_cap_sec )); then
+      log "init-inspect timeout guard: suggested=${min_init_timeout_sec}s exceeds cap=${init_timeout_cap_sec}s; applying bounded cap"
+      min_init_timeout_sec="$init_timeout_cap_sec"
+    fi
+    if (( init_timeout_sec < min_init_timeout_sec )); then
+      log "init-inspect timeout guard: bump ACP_UI_INIT_POLL_TIMEOUT_SEC ${init_timeout_sec}s -> ${min_init_timeout_sec}s (pipeline_timeout=${pipeline_timeout_sec}s, cap=${init_timeout_cap_sec}s)"
+      UI_INIT_POLL_TIMEOUT_SEC="$min_init_timeout_sec"
+    fi
+  fi
+fi
 log "effective UI polling timeouts: init=${UI_INIT_POLL_TIMEOUT_SEC}s cancel=${UI_CANCEL_POLL_TIMEOUT_SEC}s"
 if [[ "$UI_E2E_SCENARIO" == "cancel-refresh" ]]; then
   cancel_timeout_sec="$(parse_positive_int_or_die "$UI_CANCEL_POLL_TIMEOUT_SEC" "ACP_UI_CANCEL_POLL_TIMEOUT_SEC")"
@@ -271,7 +312,7 @@ fi
 
 status="passed"
 reason="$ACP_FRONTEND_REASON_OK"
-playwright_cmd=(npm run --prefix ui e2e:live)
+playwright_cmd=("$NPM_BIN" run --prefix ui e2e:live)
 if [[ "$UI_E2E_HEADED" == "1" ]]; then
   playwright_cmd+=(-- --headed)
 fi

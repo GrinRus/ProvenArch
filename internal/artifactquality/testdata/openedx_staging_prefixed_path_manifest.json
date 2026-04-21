@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step1.collect",
+  "shard_id": "openedx-platform",
+  "agent_role": "shard-analyst",
+  "artifact_root": "reports/taskruns/run-1/staging/shards/openedx-platform",
+  "repo_scopes": [
+    "openedx-platform"
+  ],
+  "path_scopes": [
+    "."
+  ],
+  "documents": [
+    {
+      "id": "doc.service-inventory.openedx-platform",
+      "kind": "report",
+      "title": "Service Inventory",
+      "path": "reports/taskruns/run-1/staging/shards/openedx-platform/service-inventory.md",
+      "canonical_path": "reports/as-is/service-inventory/openedx-platform.md",
+      "topics": [
+        "openedx"
+      ],
+      "citation_ids": [
+        "cite.openedx.readme"
+      ]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.openedx.readme",
+      "repo": "openedx-platform",
+      "path": "README.md",
+      "claim_ids": [
+        "claim.openedx.readme"
+      ],
+      "document_ids": [
+        "doc.service-inventory.openedx-platform"
+      ]
+    }
+  ],
+  "compatibility": {
+    "coverage": {
+      "observed": [
+        "services"
+      ],
+      "missing": [
+        "owner mappings"
+      ],
+      "notes": [
+        "staging path must be normalized"
+      ]
+    },
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}

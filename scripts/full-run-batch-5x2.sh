@@ -48,6 +48,8 @@ SELECTED_RUN_INDEXES_CSV=""
 PROFILE_SOURCE_KIND_EFFECTIVE=""
 PROFILE_SOURCE_KIND_FOR_FULL_RUN=""
 RUNTIME_PARSE_FAILURES=0
+RUNTIME_ARTIFACT_CONTRACT_FAILURES=0
+RUNTIME_STALLED_FAILURES=0
 RUNNER_UNAVAILABLE_FAILURES=0
 INFRA_SIGNAL_TERMINATED_FAILURES=0
 INFRA_INCOMPLETE_CYCLE_FAILURES=0
@@ -68,7 +70,35 @@ FRONTEND_CANCEL_RESULT_FILENAME="frontend-cancel-result.json"
 TIMEOUT_PRECHECK_UNSET_KEYS=(
   "${ACP_TIMEOUT_ENV_KEYS[@]}"
   "${ACP_EXECUTION_ENV_KEYS[@]}"
+  ACP_APPLY_TIMEOUTS_VIA_API
+  ACP_CLAUDE_CMD_BIN
+  ACP_QWEN_CMD_BIN
+  BATCH_ID
+  BATCH_PROVIDER_FILTER
+  BATCH_RUN_SELECTION
+  BATCH_SCRIPT
+  BATCH_ROOT
+  BATCH_SKIP_PRECHECK
+  BATCH_FRONTEND_MODE
+  BATCH_FRONTEND_CANCEL_MODE
+  E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES
+  E2E_MATRIX_FILE
+  E2E_MATRIX_RELEASE_MODE
+  E2E_TMP_ROOT
+  EXPECTED_REPO_COUNT
+  MATRIX_DRIVER_LOG
+  MATRIX_ID
+  MATRIX_ROOT
+  MATRIX_TEST_SENTINEL
+  MATRIX_TEST_TIMEOUT_SENTINEL
+  MATRIX_TIMEOUT_PROFILE_FILE
+  PROFILE_ID
+  PROFILE_SOURCE_KIND
+  REPORTS_ROOT
+  RUN_COUNT
   SWEEP_ID
+  TARGET_REPOS_FILE
+  UI_E2E_HEADED
 )
 
 log() {
@@ -85,6 +115,26 @@ require_cmd() {
   if ! command -v "$cmd" >/dev/null 2>&1; then
     die "required command is unavailable: $cmd"
   fi
+}
+
+resolve_npm_bin() {
+  if [[ "$(type -t npm || true)" == "function" ]]; then
+    printf '%s\n' "npm"
+    return 0
+  fi
+  printf '%s\n' "$PROVENARCH_ROOT/scripts/run-npm.sh"
+}
+
+current_npm_bin() {
+  if [[ -n "${ACP_NPM_BIN:-}" ]]; then
+    printf '%s\n' "$ACP_NPM_BIN"
+    return 0
+  fi
+  if [[ -n "${NPM_BIN:-}" ]]; then
+    printf '%s\n' "$NPM_BIN"
+    return 0
+  fi
+  resolve_npm_bin
 }
 
 array_contains() {
@@ -340,6 +390,138 @@ contains_regex_in_files() {
   return 1
 }
 
+read_structured_failure_classification() {
+  local raw_dir="$1"
+  shift || true
+  python3 - "$raw_dir" "$@" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+raw_dir = Path(sys.argv[1])
+run_ids = {item.strip() for item in sys.argv[2:] if item.strip()}
+if not raw_dir.is_dir():
+    raise SystemExit(0)
+
+precedence = {
+    "summary_missing": 0,
+    "runtime_timeout": 1,
+    "runtime_stalled": 2,
+    "runner_unavailable": 3,
+    "runtime_artifact_contract": 4,
+    "runtime_parse": 5,
+    "infra_signal_terminated": 6,
+    "quality_gates_failed": 7,
+    "infra_incomplete_cycle": 8,
+    "runtime_flow_failed": 9,
+    "precheck_failed": 10,
+    "none": 99,
+}
+
+def load_quality_classifications(taskruns_root: Path, run_ids: set[str]) -> list[tuple[int, str, str]]:
+    records: list[tuple[int, str, str]] = []
+    if not taskruns_root.is_dir():
+        return records
+    if not run_ids:
+        return records
+    for run_id in sorted(run_ids):
+        quality_path = taskruns_root / f"{run_id}-quality.json"
+        if not quality_path.exists():
+            continue
+        try:
+            payload = json.loads(quality_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        failure = payload.get("failure") if isinstance(payload.get("failure"), dict) else {}
+        failure_class = str(failure.get("class", "")).strip()
+        if not failure_class or failure_class == "none":
+            continue
+        subclass = str(failure.get("subclass", "")).strip() or "none"
+        records.append((precedence.get(failure_class, 98), failure_class, subclass))
+    return records
+
+all_failures = []
+matched_failures = []
+unscoped_failures = []
+taskruns_root = raw_dir.parent
+quality_failures = load_quality_classifications(taskruns_root, run_ids)
+if quality_failures:
+    best = min(quality_failures, key=lambda item: item[0])
+    print(f"{best[1]}\t{best[2]}")
+    raise SystemExit(0)
+for path in sorted(raw_dir.rglob("*-failure.json")):
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        continue
+    failure_class = str(payload.get("failure_class", "")).strip()
+    if not failure_class:
+        continue
+    subclass = str(payload.get("failure_subclass", "")).strip() or "none"
+    rank = precedence.get(failure_class, 98)
+    task = payload.get("task") if isinstance(payload.get("task"), dict) else {}
+    run_id = str(task.get("run_id", "")).strip()
+    record = (rank, failure_class, subclass)
+    all_failures.append(record)
+    if run_ids and run_id in run_ids:
+        matched_failures.append(record)
+    elif not run_id:
+        unscoped_failures.append(record)
+
+source = matched_failures if matched_failures else unscoped_failures
+best = None
+for record in source:
+    if best is None or record[0] < best[0]:
+        best = record
+
+if best is not None:
+    print(f"{best[1]}\t{best[2]}")
+PY
+}
+
+collect_current_run_ids() {
+  local run_results_path="$1"
+  local provider="$2"
+  local run_index="$3"
+  [[ -f "$run_results_path" ]] || return 0
+  awk -F'\t' -v provider="$provider" -v run_index="$run_index" 'NF && $1 == run_index && $3 == provider {print $5}' "$run_results_path"
+}
+
+path_matches_any_run_id() {
+  local path="$1"
+  shift || true
+  if [[ "$#" -eq 0 ]]; then
+    return 0
+  fi
+  local run_id=""
+  local token=""
+  local base_name
+  base_name="$(basename "$path")"
+  for run_id in "$@"; do
+    [[ -n "$run_id" ]] || continue
+    token="${run_id}-"
+    if [[ "$base_name" == "$token"* || "$path" == *"$token"* ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+path_looks_taskrun_scoped() {
+  local base_name
+  base_name="$(basename "$1")"
+  if [[ "$base_name" =~ -(init|refresh)-step[0-9]([._-]|$) ]]; then
+    return 0
+  fi
+  if [[ "$base_name" =~ -quality\.json$ ]]; then
+    return 0
+  fi
+  if [[ "$base_name" =~ -shard-(plan|summary) ]]; then
+    return 0
+  fi
+  return 1
+}
+
 write_frontend_status_json() {
   local path="$1"
   local provider="$2"
@@ -352,13 +534,14 @@ write_frontend_status_json() {
   local server_log="${9:-}"
   local playwright_log="${10:-}"
   local run_index="${11:-}"
+  local reason_detail="${12:-}"
   acp_frontend_reason_validate "$reason" die
-  python3 - "$path" "$provider" "$scenario" "$status" "$reason" "$workspace" "$output_dir" "$runtime_command" "$server_log" "$playwright_log" "$run_index" <<'PY'
+  python3 - "$path" "$provider" "$scenario" "$status" "$reason" "$workspace" "$output_dir" "$runtime_command" "$server_log" "$playwright_log" "$run_index" "$reason_detail" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 
-path, provider, scenario, status, reason, workspace, output_dir, runtime_command, server_log, playwright_log, run_index = sys.argv[1:]
+path, provider, scenario, status, reason, workspace, output_dir, runtime_command, server_log, playwright_log, run_index, reason_detail = sys.argv[1:]
 payload = {
     "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "finished_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -374,6 +557,8 @@ payload = {
 }
 if run_index.strip():
     payload["run_index"] = int(run_index)
+if reason_detail.strip():
+    payload["reason_detail"] = reason_detail
 with open(path, "w", encoding="utf-8") as f:
     json.dump(payload, f, ensure_ascii=True, indent=2)
     f.write("\n")
@@ -454,6 +639,18 @@ run_frontend_live_e2e() {
   fi
 
   if [[ -z "$refresh_run_id" || ! -d "$snapshot_reports" ]]; then
+    local backend_summary="$backend_run_dir/session-summary.md"
+    local backend_result="-"
+    local backend_failure_reason="-"
+    local backend_quality="-"
+    if [[ -f "$backend_summary" ]]; then
+      backend_result="$(summary_scalar "$backend_summary" "result" | awk '{print $1}')"
+      backend_failure_reason="$(summary_scalar "$backend_summary" "failure_reason" | awk '{print $1}')"
+      backend_quality="$(summary_scalar "$backend_summary" "quality_gates" | awk '{print $1}')"
+      [[ -n "$backend_result" ]] || backend_result="-"
+      [[ -n "$backend_failure_reason" ]] || backend_failure_reason="-"
+      [[ -n "$backend_quality" ]] || backend_quality="-"
+    fi
     write_frontend_status_json \
       "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME" \
       "$provider" \
@@ -465,8 +662,9 @@ run_frontend_live_e2e() {
       "$runtime_cmd" \
       "$output_dir/server.log" \
       "$output_dir/playwright.log" \
-      "$run_index"
-    log "frontend e2e failed provider=$provider run=${run_index:-summary} reason=$ACP_FRONTEND_REASON_SNAPSHOT_REPORTS_MISSING refresh_run_id=${refresh_run_id:-unknown} snapshot_reports=${snapshot_reports:-unset}"
+      "$run_index" \
+      "backend_result=${backend_result} backend_quality=${backend_quality} backend_failure_reason=${backend_failure_reason}"
+    log "frontend e2e failed provider=$provider run=${run_index:-summary} reason=$ACP_FRONTEND_REASON_SNAPSHOT_REPORTS_MISSING refresh_run_id=${refresh_run_id:-unknown} snapshot_reports=${snapshot_reports:-unset} backend_result=${backend_result} backend_quality=${backend_quality} backend_failure_reason=${backend_failure_reason}"
     return 1
   fi
 
@@ -531,25 +729,25 @@ run_frontend_live_e2e() {
   return 0
 }
 
-resolve_frontend_cancel_workspace() {
-  local provider="$1"
-  local frontend_workspace="$BATCH_ROOT/frontend/$provider/frontend-workspace"
-  local run_index=""
+prepare_frontend_cancel_workspace() {
+  local backend_run_dir="$1"
+  local output_dir="$2"
+  if [[ -z "$backend_run_dir" ]]; then
+    printf ''
+    return 0
+  fi
+  local workspace="$backend_run_dir/arch-workspace"
+  local frontend_workspace="$output_dir/frontend-workspace"
 
-  if [[ -d "$frontend_workspace" ]]; then
-    printf '%s\t%s\n' "$frontend_workspace" "$(first_selected_run_index)"
+  if [[ ! -d "$workspace" ]]; then
+    printf ''
     return 0
   fi
 
-  for run_index in "${SELECTED_RUN_INDEXES[@]}"; do
-    frontend_workspace="$BATCH_ROOT/frontend/$provider/run${run_index}/frontend-workspace"
-    if [[ -d "$frontend_workspace" ]]; then
-      printf '%s\t%s\n' "$frontend_workspace" "$run_index"
-      return 0
-    fi
-  done
-
-  printf '\t\n'
+  mkdir -p "$output_dir"
+  rm -rf "$frontend_workspace"
+  cp -a "$workspace" "$frontend_workspace"
+  printf '%s\n' "$frontend_workspace"
 }
 
 run_frontend_cancel_e2e() {
@@ -622,6 +820,17 @@ run_dod_precheck_make() {
   "${env_cmd[@]}" make contracts test lint build
 }
 
+run_ui_dependency_precheck() {
+  local npm_bin
+  npm_bin="$(current_npm_bin)"
+  "$npm_bin" ci --prefix ui >"$BATCH_ROOT/precheck-ui-npm.log" 2>&1
+  if [[ ! -x "$PROVENARCH_ROOT/ui/node_modules/.bin/vitest" ]]; then
+    echo "vitest binary missing after npm ci --prefix ui" >"$BATCH_ROOT/precheck-ui-readiness.log"
+    return 1
+  fi
+  "$npm_bin" exec --prefix ui playwright install chromium >"$BATCH_ROOT/precheck-playwright.log" 2>&1
+}
+
 classify_run_failure() {
   local provider="$1"
   local run_index="$2"
@@ -643,25 +852,18 @@ classify_run_failure() {
   local run_count=0
   local run_class="none"
   local run_subclass="none"
+  local structured_class="none"
+  local structured_subclass="none"
   local cancellation_like=0
   local quality_gates_status=""
   local -a classify_log_paths=("$summary_path" "$full_log_path" "$batch_driver_log")
+  local -a current_run_ids=()
   local workspace="$run_dir/arch-workspace"
   local iter_log
   if [[ -d "$run_dir/logs" ]]; then
     while IFS= read -r iter_log; do
       classify_log_paths+=("$iter_log")
     done < <(find "$run_dir/logs" -maxdepth 1 -type f -name 'run-iter*-*.log' | LC_ALL=C sort)
-  fi
-  if [[ -d "$workspace/reports/taskruns/logs" ]]; then
-    while IFS= read -r iter_log; do
-      classify_log_paths+=("$iter_log")
-    done < <(find "$workspace/reports/taskruns/logs" -maxdepth 1 -type f -name '*.ndjson' | LC_ALL=C sort)
-  fi
-  if [[ -d "$workspace/reports/taskruns/raw" ]]; then
-    while IFS= read -r iter_log; do
-      classify_log_paths+=("$iter_log")
-    done < <(find "$workspace/reports/taskruns/raw" -type f | LC_ALL=C sort)
   fi
 
   if [[ ! -f "$summary_path" ]]; then
@@ -682,6 +884,95 @@ classify_run_failure() {
 
   if [[ -f "$run_results_path" ]]; then
     run_count="$(awk 'NF { count++ } END { print count+0 }' "$run_results_path")"
+    while IFS= read -r iter_log; do
+      [[ -n "$iter_log" ]] && current_run_ids+=("$iter_log")
+    done < <(collect_current_run_ids "$run_results_path" "$provider" "$run_index")
+  fi
+
+  if [[ -d "$workspace/reports/taskruns/logs" ]]; then
+    local -a taskrun_log_paths=()
+    local -a matched_taskrun_log_paths=()
+    while IFS= read -r iter_log; do
+      taskrun_log_paths+=("$iter_log")
+    done < <(find "$workspace/reports/taskruns/logs" -maxdepth 1 -type f -name '*.ndjson' | LC_ALL=C sort)
+    if [[ "${#current_run_ids[@]}" -gt 0 ]]; then
+      for iter_log in "${taskrun_log_paths[@]-}"; do
+        if path_matches_any_run_id "$iter_log" "${current_run_ids[@]}"; then
+          matched_taskrun_log_paths+=("$iter_log")
+        fi
+      done
+      if [[ "${#matched_taskrun_log_paths[@]}" -gt 0 ]]; then
+        taskrun_log_paths=("${matched_taskrun_log_paths[@]}")
+      else
+        local -a legacy_taskrun_log_paths=()
+        for iter_log in "${taskrun_log_paths[@]-}"; do
+          if ! path_looks_taskrun_scoped "$iter_log"; then
+            legacy_taskrun_log_paths+=("$iter_log")
+          fi
+        done
+        if [[ "${#legacy_taskrun_log_paths[@]}" -gt 0 ]]; then
+          taskrun_log_paths=("${legacy_taskrun_log_paths[@]}")
+        else
+          taskrun_log_paths=()
+        fi
+      fi
+    fi
+    classify_log_paths+=("${taskrun_log_paths[@]-}")
+  fi
+  if [[ -d "$workspace/reports/taskruns/raw" ]]; then
+    local -a taskrun_raw_paths=()
+    local -a matched_taskrun_raw_paths=()
+    while IFS= read -r iter_log; do
+      taskrun_raw_paths+=("$iter_log")
+    done < <(find "$workspace/reports/taskruns/raw" -type f \
+      ! -name '*-failure.json' \
+      ! -name '*-prompt.txt' \
+      ! -name '*-prompt-task.json' \
+      ! -name '*-prompt-meta.json' \
+      | LC_ALL=C sort)
+    if [[ "${#current_run_ids[@]}" -gt 0 ]]; then
+      for iter_log in "${taskrun_raw_paths[@]-}"; do
+        if path_matches_any_run_id "$iter_log" "${current_run_ids[@]}"; then
+          matched_taskrun_raw_paths+=("$iter_log")
+        fi
+      done
+      if [[ "${#matched_taskrun_raw_paths[@]}" -gt 0 ]]; then
+        taskrun_raw_paths=("${matched_taskrun_raw_paths[@]}")
+      else
+        local -a legacy_taskrun_raw_paths=()
+        for iter_log in "${taskrun_raw_paths[@]-}"; do
+          if ! path_looks_taskrun_scoped "$iter_log"; then
+            legacy_taskrun_raw_paths+=("$iter_log")
+          fi
+        done
+        if [[ "${#legacy_taskrun_raw_paths[@]}" -gt 0 ]]; then
+          taskrun_raw_paths=("${legacy_taskrun_raw_paths[@]}")
+        else
+          taskrun_raw_paths=()
+        fi
+      fi
+    fi
+    classify_log_paths+=("${taskrun_raw_paths[@]-}")
+  fi
+
+  if [[ -d "$workspace/reports/taskruns/raw" ]]; then
+    local structured_fields=""
+    structured_fields="$(read_structured_failure_classification "$workspace/reports/taskruns/raw" "${current_run_ids[@]}")"
+    if [[ -n "$structured_fields" ]]; then
+      structured_class="$(printf '%s' "$structured_fields" | awk -F'\t' 'NR==1 {print $1}')"
+      structured_subclass="$(printf '%s' "$structured_fields" | awk -F'\t' 'NR==1 {print $2}')"
+      [[ -z "$structured_subclass" ]] && structured_subclass="none"
+    fi
+  fi
+
+  if [[ "$run_class" == "none" ]]; then
+    if [[ "$failure_reason" == "runner_stalled" ]]; then
+      run_class="runner_stalled"
+    fi
+  fi
+
+  if [[ "$run_class" == "none" ]] && contains_in_files "runner_stalled" "${classify_log_paths[@]}"; then
+    run_class="runner_stalled"
   fi
 
   if [[ "$run_class" == "none" ]]; then
@@ -690,11 +981,23 @@ classify_run_failure() {
     fi
   fi
 
+  if [[ "$run_class" == "none" && "$structured_class" != "none" ]]; then
+    run_class="$structured_class"
+    run_subclass="$structured_subclass"
+  fi
+
   if [[ "$run_class" == "none" ]] && contains_in_files "runner_unavailable" "${classify_log_paths[@]}"; then
     run_class="runner_unavailable"
   fi
+  if [[ "$run_class" == "runner_unavailable" ]] && contains_regex_in_files "permission_error|insufficient_quota|usage limit|quota( exceeded| limit| will be refreshed)|API Error: 403" "${classify_log_paths[@]}"; then
+    run_subclass="quota_or_permission"
+  fi
   if [[ "$run_class" == "none" ]] && contains_in_files "runner_parse_failed" "${classify_log_paths[@]}"; then
-    run_class="runtime_parse"
+    if contains_regex_in_files "invalid collect artifacts|collect artifacts remained invalid after one repair attempt|shard-pack-manifest\\.json is missing or invalid|shard pack manifest is invalid|artifact contract failure" "${classify_log_paths[@]}"; then
+      run_class="runtime_artifact_contract"
+    else
+      run_class="runtime_parse"
+    fi
   fi
 
   if [[ "$run_class" == "none" ]]; then
@@ -799,6 +1102,12 @@ increment_failure_class_counter() {
     runtime_parse)
       RUNTIME_PARSE_FAILURES=$((RUNTIME_PARSE_FAILURES + 1))
       ;;
+    runtime_artifact_contract)
+      RUNTIME_ARTIFACT_CONTRACT_FAILURES=$((RUNTIME_ARTIFACT_CONTRACT_FAILURES + 1))
+      ;;
+    runner_stalled|runtime_stalled)
+      RUNTIME_STALLED_FAILURES=$((RUNTIME_STALLED_FAILURES + 1))
+      ;;
     runner_unavailable)
       RUNNER_UNAVAILABLE_FAILURES=$((RUNNER_UNAVAILABLE_FAILURES + 1))
       ;;
@@ -861,6 +1170,38 @@ record_precheck_failed_classifications() {
   PRECHECK_FAILURE_RECORDED=1
 }
 
+record_runner_unavailable_classifications() {
+  local subclass="${1:-none}"
+  if [[ "$PRECHECK_FAILURE_RECORDED" == "1" ]]; then
+    return 0
+  fi
+  [[ -z "$subclass" ]] && subclass="none"
+  local provider
+  local run_index
+  for provider in "${SELECTED_PROVIDERS[@]}"; do
+    for run_index in "${SELECTED_RUN_INDEXES[@]}"; do
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$provider" \
+        "$run_index" \
+        "runner_unavailable" \
+        "1" \
+        "runner_unavailable" \
+        "runner_unavailable" \
+        "none" \
+        "-" \
+        "-" \
+        "-" \
+        "-" \
+        "-" \
+        "0" \
+        "$subclass" \
+        "0" >>"$RUN_CLASSIFICATIONS_TSV"
+      increment_failure_class_counter "runner_unavailable" "$subclass" "0"
+    done
+  done
+  PRECHECK_FAILURE_RECORDED=1
+}
+
 finalize_precheck_failure() {
   local reason="$1"
   record_precheck_failed_classifications
@@ -878,8 +1219,30 @@ finalize_precheck_failure() {
   else
     log "report generation failed after precheck failure (see $BATCH_ROOT/report-paths.txt if present)"
   fi
-  log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_parse=$RUNTIME_PARSE_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
-  die "batch precheck failed: reason=$reason precheck_failed=$PRECHECK_FAILED_FAILURES runtime_parse=$RUNTIME_PARSE_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
+  log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_parse=$RUNTIME_PARSE_FAILURES runtime_artifact_contract=$RUNTIME_ARTIFACT_CONTRACT_FAILURES runtime_stalled=$RUNTIME_STALLED_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
+  die "batch precheck failed: reason=$reason precheck_failed=$PRECHECK_FAILED_FAILURES runtime_parse=$RUNTIME_PARSE_FAILURES runtime_artifact_contract=$RUNTIME_ARTIFACT_CONTRACT_FAILURES runtime_stalled=$RUNTIME_STALLED_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
+}
+
+finalize_provider_unavailable_failure() {
+  local reason="$1"
+  local subclass="${2:-none}"
+  record_runner_unavailable_classifications "$subclass"
+  log "provider readiness failed: $reason subclass=$subclass"
+  log "generating quality reports for batch=$BATCH_ID (runner_unavailable)"
+  if (
+    cd "$PROVENARCH_ROOT"
+    python3 scripts/e2e_batch_report.py \
+      --batch-root "$BATCH_ROOT" \
+      --batch-id "$BATCH_ID" \
+      --reports-root "$REPORTS_ROOT" \
+      --preflight-json "$BATCH_ROOT/preflight.json"
+  ); then
+    log "quality reports generated for batch=$BATCH_ID"
+  else
+    log "warning: failed to generate quality reports for batch=$BATCH_ID"
+  fi
+  log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_parse=$RUNTIME_PARSE_FAILURES runtime_artifact_contract=$RUNTIME_ARTIFACT_CONTRACT_FAILURES runtime_stalled=$RUNTIME_STALLED_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
+  die "batch provider readiness failed: reason=$reason subclass=$subclass precheck_failed=$PRECHECK_FAILED_FAILURES runtime_parse=$RUNTIME_PARSE_FAILURES runtime_artifact_contract=$RUNTIME_ARTIFACT_CONTRACT_FAILURES runtime_stalled=$RUNTIME_STALLED_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
 }
 
 prepare_target_repos_file() {
@@ -923,9 +1286,6 @@ read_declared_repos_meta() {
 if [[ ! "$RUN_COUNT" =~ ^[1-9][0-9]*$ ]]; then
   die "RUN_COUNT must be a positive integer, got '$RUN_COUNT'"
 fi
-if [[ "$RUN_COUNT" != "5" ]]; then
-  die "RUN_COUNT must be 5 for this batch plan (got '$RUN_COUNT')"
-fi
 if [[ "$ACP_APPLY_TIMEOUTS_VIA_API" != "0" && "$ACP_APPLY_TIMEOUTS_VIA_API" != "1" ]]; then
   die "ACP_APPLY_TIMEOUTS_VIA_API must be 0 or 1, got '$ACP_APPLY_TIMEOUTS_VIA_API'"
 fi
@@ -959,7 +1319,8 @@ esac
 
 require_cmd git
 require_cmd go
-require_cmd npm
+NPM_BIN="${ACP_NPM_BIN:-$(resolve_npm_bin)}"
+require_cmd "$NPM_BIN"
 require_cmd make
 require_cmd python3
 require_cmd curl
@@ -985,6 +1346,10 @@ CLAUDE_PATH="not-selected"
 QWEN_PATH="not-selected"
 CLAUDE_VERSION="not-selected"
 QWEN_VERSION="not-selected"
+CLAUDE_READINESS_STATUS="not_selected"
+CLAUDE_READINESS_SUBCLASS=""
+QWEN_READINESS_STATUS="not_selected"
+QWEN_READINESS_SUBCLASS=""
 if provider_selected "claude-code"; then
   CLAUDE_PATH="$(command -v "$ACP_CLAUDE_CMD_BIN")"
   CLAUDE_VERSION="$("$ACP_CLAUDE_CMD_BIN" --version | head -n1 | tr -d '\r')"
@@ -1004,6 +1369,8 @@ preflight_meta_lines="$(python3 "$PROVENARCH_ROOT/scripts/write-batch-preflight.
   --declared-repos-meta-file "$DECLARED_REPOS_JSON" \
   --apply-timeouts-via-api "$ACP_APPLY_TIMEOUTS_VIA_API" \
   --sweep-id "$SWEEP_ID" \
+  --selected-providers "$SELECTED_PROVIDERS_CSV" \
+  --selected-run-indexes "$SELECTED_RUN_INDEXES_CSV" \
   --claude-path "$CLAUDE_PATH" \
   --claude-version-line "$CLAUDE_VERSION" \
   --qwen-path "$QWEN_PATH" \
@@ -1014,10 +1381,32 @@ while IFS='=' read -r key value; do
   case "$key" in
     timeout_profile_line) TIMEOUT_PROFILE_LINE="$value" ;;
     execution_profile_line) EXECUTION_PROFILE_LINE="$value" ;;
+    provider_readiness_claude_status) CLAUDE_READINESS_STATUS="$value" ;;
+    provider_readiness_claude_subclass) CLAUDE_READINESS_SUBCLASS="$value" ;;
+    provider_readiness_qwen_status) QWEN_READINESS_STATUS="$value" ;;
+    provider_readiness_qwen_subclass) QWEN_READINESS_SUBCLASS="$value" ;;
   esac
 done <<<"$preflight_meta_lines"
 if [[ -z "$TIMEOUT_PROFILE_LINE" || -z "$EXECUTION_PROFILE_LINE" ]]; then
   die "preflight helper did not return timeout/execution profile lines"
+fi
+log "provider readiness: claude=${CLAUDE_READINESS_STATUS}${CLAUDE_READINESS_SUBCLASS:+(${CLAUDE_READINESS_SUBCLASS})} qwen=${QWEN_READINESS_STATUS}${QWEN_READINESS_SUBCLASS:+(${QWEN_READINESS_SUBCLASS})}"
+
+selected_provider_unavailable=0
+if provider_selected "claude-code" && [[ "$CLAUDE_READINESS_STATUS" == "unavailable" ]]; then
+  selected_provider_unavailable=1
+fi
+if provider_selected "qwen-code" && [[ "$QWEN_READINESS_STATUS" == "unavailable" ]]; then
+  selected_provider_unavailable=1
+fi
+if [[ "${#SELECTED_PROVIDERS[@]}" -gt 0 && "$selected_provider_unavailable" -eq 1 ]]; then
+  provider_unavailable_subclass="none"
+  if provider_selected "qwen-code" && [[ -n "$QWEN_READINESS_SUBCLASS" ]]; then
+    provider_unavailable_subclass="$QWEN_READINESS_SUBCLASS"
+  elif provider_selected "claude-code" && [[ -n "$CLAUDE_READINESS_SUBCLASS" ]]; then
+    provider_unavailable_subclass="$CLAUDE_READINESS_SUBCLASS"
+  fi
+  finalize_provider_unavailable_failure "selected provider failed readiness probe" "$provider_unavailable_subclass"
 fi
 
 read_declared_repos_meta
@@ -1041,21 +1430,20 @@ log "batch shard selection: providers=$SELECTED_PROVIDERS_CSV runs=$SELECTED_RUN
 if [[ "$BATCH_SKIP_PRECHECK" == "1" ]]; then
   log "skipping DoD/UI precheck (BATCH_SKIP_PRECHECK=1)"
 else
+  log "bootstrapping UI test dependencies before DoD precheck"
+  if ! (
+    cd "$PROVENARCH_ROOT"
+    run_ui_dependency_precheck
+  ); then
+    finalize_precheck_failure "UI dependency precheck failed (see $BATCH_ROOT/precheck-ui-npm.log, $BATCH_ROOT/precheck-ui-readiness.log, and $BATCH_ROOT/precheck-playwright.log)"
+  fi
+
   log "running DoD precheck: make contracts test lint build"
   if ! (
     cd "$PROVENARCH_ROOT"
     run_dod_precheck_make >"$BATCH_ROOT/precheck-make.log" 2>&1
   ); then
     finalize_precheck_failure "make contracts test lint build failed (see $BATCH_ROOT/precheck-make.log)"
-  fi
-
-  log "installing UI dependencies and Playwright browser"
-  if ! (
-    cd "$PROVENARCH_ROOT"
-    npm ci --prefix ui >"$BATCH_ROOT/precheck-ui-npm.log" 2>&1
-    npm exec --prefix ui playwright install chromium >"$BATCH_ROOT/precheck-playwright.log" 2>&1
-  ); then
-    finalize_precheck_failure "UI precheck failed (see $BATCH_ROOT/precheck-ui-npm.log and $BATCH_ROOT/precheck-playwright.log)"
   fi
 fi
 
@@ -1146,9 +1534,10 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
   runtime_cmd="$(runtime_cmd_for_provider "$provider")"
   if should_run_frontend_cancel_once; then
     cancel_output_dir="$(frontend_cancel_output_dir "$provider")"
-    resolved_cancel_workspace="$(resolve_frontend_cancel_workspace "$provider")"
-    frontend_workspace="${resolved_cancel_workspace%%$'\t'*}"
-    cancel_run_index="${resolved_cancel_workspace#*$'\t'}"
+    resolved_frontend_run="$(resolve_frontend_live_backend_run "$provider")"
+    backend_run_dir="${resolved_frontend_run%%$'\t'*}"
+    cancel_run_index="${resolved_frontend_run#*$'\t'}"
+    frontend_workspace="$(prepare_frontend_cancel_workspace "$backend_run_dir" "$cancel_output_dir")"
     cancel_result=0
     run_frontend_cancel_e2e "$provider" "$frontend_workspace" "$cancel_output_dir" "$cancel_run_index" || cancel_result=$?
     if [[ "$cancel_result" == "1" ]]; then
@@ -1165,7 +1554,7 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
         continue
       fi
       cancel_output_dir="$(frontend_cancel_output_dir "$provider" "$i")"
-      frontend_workspace="$BATCH_ROOT/frontend/$provider/run${i}/frontend-workspace"
+      frontend_workspace="$(prepare_frontend_cancel_workspace "$BATCH_ROOT/$provider/run${i}" "$cancel_output_dir")"
       cancel_result=0
       run_frontend_cancel_e2e "$provider" "$frontend_workspace" "$cancel_output_dir" "$i" || cancel_result=$?
       if [[ "$cancel_result" == "1" ]]; then
@@ -1206,10 +1595,10 @@ log "generating quality reports for batch=$BATCH_ID"
 log "report paths:"
 cat "$BATCH_ROOT/report-paths.txt"
 
-log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_parse=$RUNTIME_PARSE_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
+log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_parse=$RUNTIME_PARSE_FAILURES runtime_artifact_contract=$RUNTIME_ARTIFACT_CONTRACT_FAILURES runtime_stalled=$RUNTIME_STALLED_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
 
 if [[ "$failed_runs" -ne 0 || "$frontend_failures" -ne 0 || "$FRONTEND_CANCEL_FAILURES" -ne 0 ]]; then
-  die "batch completed with failures: full_run_failed=$failed_runs frontend_failed=$frontend_failures frontend_cancel_failed=$FRONTEND_CANCEL_FAILURES frontend_cancel_skipped=$FRONTEND_CANCEL_SKIPPED precheck_failed=$PRECHECK_FAILED_FAILURES runtime_parse=$RUNTIME_PARSE_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
+  die "batch completed with failures: full_run_failed=$failed_runs frontend_failed=$frontend_failures frontend_cancel_failed=$FRONTEND_CANCEL_FAILURES frontend_cancel_skipped=$FRONTEND_CANCEL_SKIPPED precheck_failed=$PRECHECK_FAILED_FAILURES runtime_parse=$RUNTIME_PARSE_FAILURES runtime_artifact_contract=$RUNTIME_ARTIFACT_CONTRACT_FAILURES runtime_stalled=$RUNTIME_STALLED_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
 fi
 
 log "batch completed successfully"

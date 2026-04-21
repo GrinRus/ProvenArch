@@ -128,6 +128,7 @@ Implemented required jobs:
   - `npm run typecheck --prefix ui`
   - `npm run test --prefix ui -- --run`
   - `npm run build --prefix ui`
+  - `make`/bash harness run UI steps through `scripts/run-npm.sh` + `scripts/resolve-node-tool.sh`, so DoD keeps a matching `node`/`npm` pair even when `/bin/sh` and login shells expose different PATH orders or architectures
 
 Implemented additional jobs:
 - `golden`
@@ -220,6 +221,7 @@ Implemented additional jobs:
   - full-run semantic checks ограничены локальным скриптом (owner-gap/findings, coverage/questions dedupe, critical off-topic markers) и не включают batch-only `analysis:evidence-scope`/`analysis:cross-doc`
   - summary/log/snapshots: `TMP_ROOT/session-summary.md`, `TMP_ROOT/full-run.log`, `TMP_ROOT/snapshots/*`
   - при parse-fail runtime сохраняет raw-output diagnostics в `reports/taskruns/raw/*` (stdout/stderr/meta with checksum)
+  - для headless attempt/retry runtime также сохраняет prompt diagnostics в `reports/taskruns/raw/*` (prompt text, task payload, metadata with attempt/include-directories/prompt-pack source)
 - batch regression `5x2` + frontend live e2e:
   - `scripts/full-run-batch-5x2.sh`
   - canonical input: `TARGET_REPOS_FILE` (`repos[]` format)
@@ -232,22 +234,45 @@ Implemented additional jobs:
   - runtime-flow hard-fail checks: `runtime:shard-artifacts`, `runtime:shard-metadata`, `runtime:execution-semantics`, `runtime_flow_failed`
   - hard-pass учитывает semantic hard-fail и snapshot source validity
   - run artifacts default: `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/*`
-  - reports: `run_matrix_<batch-id>.md/.tsv`, `frontend_e2e_matrix_<batch-id>.md`, `frontend_cancel_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md` (+ fields `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, runtime-flow checks, failure classes `runtime_parse/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing/precheck_failed`)
+  - reports: `run_matrix_<batch-id>.md/.tsv`, `frontend_e2e_matrix_<batch-id>.md`, `frontend_cancel_e2e_matrix_<batch-id>.md`, `quality_report_<batch-id>.md` (+ fields `artifact_source`, `semantic_hard_fail`, `off_topic_hits`, runtime-flow checks, failure classes `runtime_artifact_contract/runtime_parse/runtime_stalled/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing/precheck_failed`)
 - profile matrix regression (local official runbook, non-required CI):
   - `scripts/full-run-batch-matrix.sh`
   - `E2E_MATRIX_FILE` обязателен (`profiles[]`: `id`, `repos_file`, `expected_repo_count`, `source_kind`)
+  - optional root `timeout_profile`: `short-window|medium-window|extended-window`; canonical checked-in slices используют только эти native presets
   - `sweeps[]` optional (если отсутствует -> implicit `baseline` только для non-release/diagnostic)
+  - canonical acceptance запускать из clean committed tree или отдельного clean worktree без unrelated локальных правок
+  - canonical high-level profile catalog: `examples/e2e-profile-catalog.yaml`
+  - canonical non-release slices: `examples/e2e-matrix.regres-fast.bank-openedx.yaml`, `examples/e2e-matrix.regres-fast.openstack.yaml`, `examples/e2e-matrix.regres-long.yaml`
+  - canonical release slices: `examples/e2e-matrix.release-fast.yaml`, `examples/e2e-matrix.release-long.yaml`, `examples/e2e-matrix.release-full.ftgo-sentry.yaml`
+  - expected backend totals from catalog: `regres fast=3`, `regres long=2`, `release fast=8`, `release long=8`, `release full=24`
   - release-ready sweep set: `baseline` + `parallel-default`
   - matrix invariant: для одного `profile_id` shard-plan должен совпадать между `baseline` и `parallel-default`
-  - release-mode (`MATRIX_ID=release-*` или `E2E_MATRIX_RELEASE_MODE=1`) требует explicit `sweeps[]` с ровно `baseline` + `parallel-default`; missing/extra sweep блокирует matrix до batch stage
+  - approved profile ids: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
+  - release-mode (`MATRIX_ID=release-*` или `E2E_MATRIX_RELEASE_MODE=1`) фиксирует `RUN_COUNT=1` и требует explicit `sweeps[]` с ровно `baseline` + `parallel-default`, плюс ровно один `single-*` и один `multi-*` профиль; любое отклонение блокирует matrix до batch stage
+  - `scripts/tests/matrix_release_contract_test.py` обязан запускать matrix driver в hermetic subprocess env; ambient `ACP_*`, `BATCH_*`, `E2E_*`, `MATRIX_*`, `UI_E2E_*`, `RUN_COUNT`, `PROFILE_*`, `SWEEP_*` leakage не должен менять contract assertions
+  - captured live qwen stdout fixture защищает retry/prompt discipline от event-stream chatter и partial TaskResult drafting
+  - captured live bank extras fixture защищает collect-repair normalization от legacy `changeset[].artifact` drift при manifest-only repair
+  - `reports/taskruns/raw/*-failure.json` является canonical runtime failure source для новых run roots; prompt artifacts и raw prompt text не участвуют в failure-class inference
+  - collect runtime делает максимум одну post-success artifact-repair попытку для skeletal/generic-only `shard-pack-manifest.json`; если repair не улучшил fidelity, исходный `write_root` восстанавливается
+  - schema-invalid `TaskResult` получает один direct-JSON retry с whitelist допустимых `changeset[].op`; invalid manifest после schema-valid result идёт в отдельный artifact-repair path
+  - collect runtime не принимает nominal success после failed artifact-repair: missing/invalid/skeletal manifest после единственной repair попытки поднимается как `runner_parse_failed` / `runtime_artifact_contract`
+  - global uniqueness для `citation-index.claim_ids` проверяется как validator contract; duplicate claim ids либо repair-ятся на index/reference уровне детерминированным shard suffix, либо остаются blocking defect
+  - refresh artifact-quality guard: `artifact_quality:*` в `reports/taskruns/<run_id>-quality.json.quality_signals[]` является primary live gate evidence, `run_warnings` остаётся compatibility fallback; bank-like collapse к одному `cite.runtime-summary` должен ловиться, openstack-like reuse с хотя бы одним rich shard остаётся допустимым
+  - per-run `reports/taskruns/<run_id>-quality.json.failure` является canonical run-level classification summary для новых run roots; shell/python batch layers должны consume его first и не пересчитывать class/subclass на structured runs
+  - `profile_matrix_<matrix-id>` и `quality_report_<batch-id>` обязаны агрегировать только реально выбранные `selected_providers`/`selected_run_indexes`; qwen-only non-release run не должен порождать synthetic `backend_total_runs=10` и `summary_missing=9`
+  - internal shard-plan/shard-summary taskrun JSON обязаны иметь non-empty `meta.runtime.name`; false `contract:runtime-name` на internal artifacts считается regression
   - относительные `repos_file` пути резолвятся от директории `E2E_MATRIX_FILE`
-  - официальные профили: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
   - для `source_kind=git_url` refs должны быть pinned
   - агрегированные отчёты: `profile_matrix_<matrix-id>.md/.tsv`, `release_verdict_<matrix-id>.md/.json`
 - release live harness (manual pre-release gate, no wrapper):
   - source-of-truth runbook: `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
   - использует текущий matrix контур (`full-run-batch-matrix.sh` + `full-run-batch-5x2.sh` + `e2e_batch_report.py`)
+  - `regres*` профили не дают release verdict; это отдельный qwen-first smoke/debug surface
+  - canonical release/regression acceptance не использует `BATCH_SKIP_PRECHECK=1`; этот флаг остаётся diagnostic-only bypass
   - release-mode guard (auto при `MATRIX_ID=release-*`) блокирует diagnostic timeout overrides; debug bypass только через `E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES=1`
+  - matrix-native `timeout_profile` не считается diagnostic override и применяется как committed part of canonical slice contract
+  - canonical release taxonomy: `release fast`, `release long`, `release full`
+  - `release full` = composite из `release fast` + `release long` + `ftgo+sentry` slice; readiness требует `PASS` во всех constituent `release_verdict_<matrix-id>.json`
   - обязательны оба провайдера (`qwen-code`, `claude-code`) и оба frontend сценария (`init-inspect-service-first`, `cancel-refresh`)
   - для release-mode matrix используется `BATCH_FRONTEND_MODE=per_run`, `BATCH_FRONTEND_CANCEL_MODE=once_per_provider`, `UI_E2E_HEADED=1`
   - strict blockers включают любой non-passed summary/run-level status в `frontend_e2e_matrix` и `frontend_cancel_e2e_matrix`
@@ -263,6 +288,8 @@ Implemented additional jobs:
     - `cancel-refresh`: validate -> run refresh -> cancel selected run -> expect `failed + run_canceled`
   - `UI_E2E_CANCEL_STUB_SLEEP_SEC` задаёт длительность controlled slow stub runner для `cancel-refresh`
   - cancel preflight guard: `ACP_UI_CANCEL_POLL_TIMEOUT_SEC >= UI_E2E_CANCEL_STUB_SLEEP_SEC + UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC`; при нарушении сценарий fail-fast до Playwright
+  - batch cancel smoke использует свежую копию backend `arch-workspace` для каждого provider/run и не переиспользует already-mutated init frontend workspace
+  - если cancel request выигрывает гонку у validation/layout failure, terminal API/RunInfo surface всё равно обязана показывать `error_code=run_canceled`
   - `ui/e2e/live-flow.spec.ts` + `npm run e2e:live --prefix ui`
   - batch shard controls (`scripts/full-run-batch-5x2.sh`):
     - `BATCH_PROVIDER_FILTER` (`all` или CSV `qwen-code,claude-code`)
@@ -296,6 +323,10 @@ Implemented additional jobs:
 - Balanced timeout defaults:
   - step `1800s`, heartbeat `30s`, pipeline `2400s`, kill-grace `30s`
   - api-ready `60s`, api-init `120s`, ui-init poll `900s`, ui-cancel poll `420s`
+- Canonical live matrix timeout presets:
+  - `short-window`: step `3600s`, pipeline `7200s`, ui-init `1200s`
+  - `medium-window`: step `5400s`, pipeline `14400s`, ui-init `1500s`
+  - `extended-window`: step `10800s`, pipeline `21600s`, ui-init `1800s`
 
 ## 10) Developer entrypoints
 

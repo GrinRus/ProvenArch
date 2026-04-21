@@ -52,21 +52,11 @@ func (c Compiler) CompileAsIs(entities []contracts.Entity, edges []contracts.Edg
 	externalEntities := filterEntitiesByType(entities, "external.system")
 	datastoreEntities := filterEntitiesByType(entities, "datastore")
 
-	overview := strings.Builder{}
-	overview.WriteString("# As-Is Overview\n\n")
-	writeAnalysisBanner(&overview, renderCtx)
-	overview.WriteString(fmt.Sprintf("- Services: %d\n", len(serviceEntities)))
-	overview.WriteString(fmt.Sprintf("- Dependencies (edges): %d\n", len(edges)))
-	overview.WriteString(fmt.Sprintf("- External systems: %d\n", len(externalEntities)))
-	overview.WriteString(fmt.Sprintf("- Datastores: %d\n", len(datastoreEntities)))
-	if err := c.workspace.WriteFile("reports/as-is/overview.md", []byte(overview.String())); err != nil {
+	overviewArtifact, err := c.WriteAsIsOverview(entities, edges, renderCtx)
+	if err != nil {
 		return nil, err
 	}
-	artifacts = append(artifacts, Artifact{
-		Path:  "reports/as-is/overview.md",
-		Kind:  "report",
-		Label: "System Overview",
-	})
+	artifacts = append(artifacts, overviewArtifact)
 
 	serviceCatalog := strings.Builder{}
 	serviceCatalog.WriteString("# Service Catalog\n\n")
@@ -179,6 +169,47 @@ func (c Compiler) WriteCoverage(coverage *contracts.Coverage, questions []contra
 		coverage = &contracts.Coverage{}
 	}
 
+	summaryArtifact, err := c.WriteCoverageSummary(coverage, renderCtx)
+	if err != nil {
+		return nil, err
+	}
+	questionsArtifact, err := c.WriteCoverageOpenQuestions(questions, renderCtx)
+	if err != nil {
+		return nil, err
+	}
+	artifacts := []Artifact{summaryArtifact, questionsArtifact}
+	return artifacts, nil
+}
+
+func (c Compiler) WriteAsIsOverview(entities []contracts.Entity, edges []contracts.Edge, renderCtx ReportRenderContext) (Artifact, error) {
+	renderCtx = NormalizeReportRenderContext(renderCtx)
+	serviceEntities := filterEntitiesByType(entities, "service")
+	externalEntities := filterEntitiesByType(entities, "external.system")
+	datastoreEntities := filterEntitiesByType(entities, "datastore")
+
+	overview := strings.Builder{}
+	overview.WriteString("# As-Is Overview\n\n")
+	writeAnalysisBanner(&overview, renderCtx)
+	overview.WriteString(fmt.Sprintf("- Services: %d\n", len(serviceEntities)))
+	overview.WriteString(fmt.Sprintf("- Dependencies (edges): %d\n", len(edges)))
+	overview.WriteString(fmt.Sprintf("- External systems: %d\n", len(externalEntities)))
+	overview.WriteString(fmt.Sprintf("- Datastores: %d\n", len(datastoreEntities)))
+	if err := c.workspace.WriteFile("reports/as-is/overview.md", []byte(overview.String())); err != nil {
+		return Artifact{}, err
+	}
+	return Artifact{
+		Path:  "reports/as-is/overview.md",
+		Kind:  "report",
+		Label: "System Overview",
+	}, nil
+}
+
+func (c Compiler) WriteCoverageSummary(coverage *contracts.Coverage, renderCtx ReportRenderContext) (Artifact, error) {
+	renderCtx = NormalizeReportRenderContext(renderCtx)
+	if coverage == nil {
+		coverage = &contracts.Coverage{}
+	}
+
 	summary := strings.Builder{}
 	summary.WriteString("# Coverage Summary\n\n")
 	writeAnalysisBanner(&summary, renderCtx)
@@ -186,9 +217,13 @@ func (c Compiler) WriteCoverage(coverage *contracts.Coverage, questions []contra
 	writeStringListWithFallback(&summary, "Missing", coverage.Missing, coverageFallback("missing", renderCtx))
 	writeStringListWithFallback(&summary, "Notes", coverage.Notes, coverageFallback("notes", renderCtx))
 	if err := c.workspace.WriteFile("reports/coverage/summary.md", []byte(summary.String())); err != nil {
-		return nil, err
+		return Artifact{}, err
 	}
+	return Artifact{Path: "reports/coverage/summary.md", Kind: "report", Label: "Coverage Summary"}, nil
+}
 
+func (c Compiler) WriteCoverageOpenQuestions(questions []contracts.Question, renderCtx ReportRenderContext) (Artifact, error) {
+	renderCtx = NormalizeReportRenderContext(renderCtx)
 	questionsReport := strings.Builder{}
 	questionsReport.WriteString("# Open Questions\n\n")
 	writeAnalysisBanner(&questionsReport, renderCtx)
@@ -202,14 +237,9 @@ func (c Compiler) WriteCoverage(coverage *contracts.Coverage, questions []contra
 		}
 	}
 	if err := c.workspace.WriteFile("reports/coverage/open-questions.md", []byte(questionsReport.String())); err != nil {
-		return nil, err
+		return Artifact{}, err
 	}
-
-	artifacts := []Artifact{
-		{Path: "reports/coverage/summary.md", Kind: "report", Label: "Coverage Summary"},
-		{Path: "reports/coverage/open-questions.md", Kind: "report", Label: "Open Questions"},
-	}
-	return artifacts, nil
+	return Artifact{Path: "reports/coverage/open-questions.md", Kind: "report", Label: "Open Questions"}, nil
 }
 
 func (c Compiler) WriteFindings(findings []contracts.Finding, renderCtx ReportRenderContext) ([]Artifact, error) {

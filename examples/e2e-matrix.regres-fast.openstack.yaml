@@ -1,0 +1,7 @@
+version: 1
+timeout_profile: short-window
+profiles:
+  - id: multi-path
+    source_kind: path
+    expected_repo_count: 5
+    repos_file: ./repos/curated/multi-path.openstack.repos.yaml

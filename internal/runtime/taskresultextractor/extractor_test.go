@@ -1,6 +1,8 @@
 package taskresultextractor
 
 import (
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -126,6 +128,81 @@ func TestExtractReturnsSpecificErrorForEmptyEnvelopeResult(t *testing.T) {
 	}
 }
 
+func TestExtractReturnsErrorForCapturedQwenLiveInvalidStdoutFixture(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join("..", "testdata", "qwen_live_bank_of_anthos_invalid_stdout.txt")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read live stdout fixture: %v", err)
+	}
+
+	_, err = Extract(raw)
+	if err == nil {
+		t.Fatalf("expected extraction error for captured live invalid stdout fixture")
+	}
+	if !strings.Contains(err.Error(), "unable to extract valid TaskResult JSON") {
+		t.Fatalf("expected top-level extraction context in error, got %v", err)
+	}
+}
+
+func TestExtractReturnsErrorForCapturedQwenLiveIACInvalidStdoutFixture(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join("..", "testdata", "qwen_live_bank_of_anthos_iac_invalid_stdout.txt")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read live iac stdout fixture: %v", err)
+	}
+
+	_, err = Extract(raw)
+	if err == nil {
+		t.Fatalf("expected extraction error for captured live iac invalid stdout fixture")
+	}
+	if !strings.Contains(err.Error(), "unable to extract valid TaskResult JSON") {
+		t.Fatalf("expected top-level extraction context in error, got %v", err)
+	}
+}
+
+func TestExtractReturnsErrorForCapturedQwenLiveExtrasInvalidStdoutFixture(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join("..", "testdata", "qwen_live_bank_of_anthos_extras_invalid_stdout.txt")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read live extras stdout fixture: %v", err)
+	}
+
+	_, err = Extract(raw)
+	if err == nil {
+		t.Fatalf("expected extraction error for captured live extras invalid stdout fixture")
+	}
+	if !strings.Contains(err.Error(), "unable to extract valid TaskResult JSON") {
+		t.Fatalf("expected top-level extraction context in error, got %v", err)
+	}
+}
+
+func TestExtractReturnsCandidateFromCapturedQwenLegacyDocArtifactEventStreamFixture(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join("..", "testdata", "qwen_live_bank_extras_legacy_doc_artifact_stdout.txt")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read legacy doc_artifact stdout fixture: %v", err)
+	}
+
+	parsed, err := Extract(raw)
+	if err != nil {
+		t.Fatalf("expected extractor to lift inner candidate from event-stream fixture: %v", err)
+	}
+	if _, err := contracts.ParseTaskResult(parsed); err == nil {
+		t.Fatalf("expected schema validation to fail for legacy artifact payload")
+	}
+	if !strings.Contains(string(parsed), `"artifact"`) {
+		t.Fatalf("expected extracted candidate to preserve legacy artifact payload, got %q", string(parsed))
+	}
+}
+
 func TestExtractReturnsCandidateObjectEvenWhenSchemaInvalid(t *testing.T) {
 	t.Parallel()
 
@@ -136,5 +213,32 @@ func TestExtractReturnsCandidateObjectEvenWhenSchemaInvalid(t *testing.T) {
 	}
 	if _, err := contracts.ParseTaskResult(parsed); err == nil {
 		t.Fatalf("expected schema validation to fail for extracted candidate")
+	}
+}
+
+func TestDetectProviderAvailabilitySignalFromEventArrayPayload(t *testing.T) {
+	t.Parallel()
+
+	stdout := `[
+{"type":"assistant","message":{"content":[{"type":"text","text":"[API Error: 403 {\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your usage limit for this billing cycle\"},\"type\":\"error\"}]"}]}},
+{"type":"result","result":"[API Error: 403 {\"error\":{\"type\":\"permission_error\",\"message\":\"quota will be refreshed in the next cycle\"}}]"}
+]`
+	signal, ok := DetectProviderAvailabilitySignal([]byte(stdout), nil)
+	if !ok {
+		t.Fatalf("expected availability signal from event-stream payload")
+	}
+	if signal.Subreason != "quota_or_permission" {
+		t.Fatalf("expected quota_or_permission subreason, got %q", signal.Subreason)
+	}
+	if !strings.Contains(strings.ToLower(signal.Message), "permission_error") {
+		t.Fatalf("expected permission_error in compact signal message, got %q", signal.Message)
+	}
+}
+
+func TestDetectProviderAvailabilitySignalIgnoresValidTaskResult(t *testing.T) {
+	t.Parallel()
+
+	if signal, ok := DetectProviderAvailabilitySignal([]byte(validTaskResultJSON), nil); ok {
+		t.Fatalf("did not expect availability signal for valid taskresult, got %#v", signal)
 	}
 }

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "run_id": "run-bank-refresh",
+  "generated_at": "2026-04-17T13:27:38Z",
+  "verdict": "PASS",
+  "summary": "Frozen fixture canonical validator verdict for bank refresh slice.",
+  "checked_paths": [
+    "reports/taskruns/run-bank-refresh/staging/final/final-run-index.json",
+    "reports/taskruns/run-bank-refresh/staging/final/citation-index.json"
+  ],
+  "fixed_paths": [],
+  "issues": []
+}

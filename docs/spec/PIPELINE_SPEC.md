@@ -28,6 +28,8 @@ Runtime write policy:
 - `workspace root` больше не трактуется как implicit write target
 - runtime получает explicit `artifact_root`, `write_root`, `read_context_roots[]`
 - runtime не имеет права писать в `workspace.yaml`, `schemas/*`, `docs/spec/*`, `charter/*` и анализируемые user repos
+- `shard-pack-manifest.json` для collect шага обязан оставаться читаемым: `documents[].path` должны быть `artifact_root`-relative (без `reports/taskruns/...` и без дублирования `artifact_root` в `path`)
+- collect step считается успешным только после post-success проверки: schema-valid `TaskResult`, schema-valid `shard-pack-manifest.json` и читаемая document surface под `write_root`
 
 > MVP policy фиксирует process-scoped runtime provider contract: `claude-code` (default) или `qwen-code` для headless runs; changeset contract остаётся замороженным без `write_file`.
 > CLI/process runtime mode задаётся флагом `--runtime fake|headless` (`fake` default, `headless` opt-in), provider — `--runtime-provider claude-code|qwen-code` (`claude-code` default, env fallback `ACP_RUNTIME_PROVIDER`).
@@ -122,6 +124,18 @@ skills/<skill_name>/
   - `qa`
 
 Bundle поставляется вместе с продуктом, хранится в workspace и может редактироваться пользователем через UI/git workflow.
+- `skills/bundle-manifest.json` materialize-ится вместе с baseline bundle и является machine-readable inventory/source-of-truth для UI baseline editor surface
+- `bundle_version` mismatch в workspace считается stale-bundle diagnostic; runtime/UI используют embedded baseline inventory как fallback, но пользовательские правки не перезаписываются автоматически
+
+Headless runtime consumption:
+- `skills/prompt-packs/collect-context.md` реально подключается к `init.step1.collect` и `refresh.step1.collect`
+- `skills/prompt-packs/findings.md` реально подключается к `init.step3.findings` и `refresh.step3.findings`
+- prompt pack content добавляется в effective provider prompt как additive context перед strict runtime contract
+- `skills/*/prompts/*.md` остаются seeded/reference assets в workspace bundle и не переопределяют live headless prompt assembly напрямую
+- если workspace override отсутствует или unreadable, runtime использует seeded baseline prompt pack и фиксирует warning в raw prompt diagnostics вместо silent fallback
+- `step3.findings` работает в staged-final-first режиме: default `read_context_roots` содержат staged final root + validator write root; broad workspace scan не используется как implicit default
+- runner failures materialize-ятся в `reports/taskruns/raw/*-failure.json` и содержат canonical `failure_class`, `failure_subclass`, `parse_stage`, task/provider metadata и ссылки на raw diagnostics
+- per-run quality summary `reports/taskruns/<run_id>-quality.json` дополнительно materialize-ит structured `failure` и `quality_signals[]`; batch/report слой для canonical runs обязан читать эти поля как primary structured evidence
 
 ## Docs imports metadata (MVP)
 
@@ -155,6 +169,16 @@ Bundle поставляется вместе с продуктом, хранит
 - `refresh.step3.findings`
 - `refresh.step4.proposals`
 
+## Required canonical live surface
+
+Validated final set for live/manual gate must always contain:
+- `reports/as-is/overview.md`
+- `reports/coverage/summary.md`
+- `reports/coverage/open-questions.md`
+- `reports/findings/findings.md`
+
+Если runtime-authored docs already created only a partial `reports/as-is/*` or `reports/coverage/*` surface, assembler обязан детерминированно добавить недостающие aggregate docs до validator stage. `validator PASS` без этого canonical live surface недопустим.
+
 ## TaskResult semantics (MVP compatibility)
 
 Canonical MVP runtime shape:
@@ -166,6 +190,14 @@ Canonical-only operations policy:
 - `changeset[].op` поддерживает только canonical operations из schema-contract.
 - legacy operations `add_question` / `set_coverage` отклоняются contract validation.
 - orchestrator canonicalize-ит только top-level `questions[]` и `coverage` (dedupe + stable ordering).
+
+Headless prompt diagnostics:
+- каждый headless shard attempt/retry сохраняет effective prompt artifacts в `reports/taskruns/raw/*`
+- diagnostics включают:
+  - prompt text
+  - serialized runtime task payload
+  - metadata: provider, attempt kind, include-directories, prompt pack source/warning
+- эти артефакты являются source-of-truth для prompt audit и runtime forensic triage
 
 `add_doc_artifact` в MVP compatibility layer:
 - трактуется только как metadata registration op
@@ -221,6 +253,9 @@ Compatibility output:
 Orchestrator applies:
 - валидирует TaskResult schema как compatibility envelope
 - валидирует `shard-pack-manifest.json`
+- требует полного `compatibility` block в `shard-pack-manifest.json`: `coverage`, `questions`, `entities`, `edges`, `findings` обязательны, а `questions/entities/edges/findings` materialize-ятся массивами даже when empty
+- требует global uniqueness для `citations[].claim_ids` в assembled staged final set; provider должен формировать `claim_id` как semantic stem + shard slug и добавлять deterministic numeric suffix при остаточной коллизии
+- collect runtime до schema-validate normalizes только один legacy compatibility drift: malformed manifest-only `add_doc_artifact` для `shard-pack-manifest.json` отбрасывается, потому что repair materialize-ится через `write_root`, а не через public `changeset`
 - выполняет runtime `init.step1.collect`/`refresh.step1.collect` отдельно для каждой canonical domain card (`charter/cards/domains/*`)
 - materialize-ит отдельный raw taskrun на каждый домен в `reports/taskruns/*-step1-collect-domain-<domain>.json`
 - для sharded runtime ведёт shard-summary state machine `pending | checkpointed | succeeded | failed`; raw per-shard taskrun materialize-ится до `apply`, чтобы restart recovery мог replay-ить shard из persisted artifact
@@ -276,6 +311,7 @@ Orchestrator applies:
 - валидирует `validator-verdict.json`
 - блокирует promotion при verdict != `PASS` или при broken staged indexes
 - validator может править только index/reference/technical issues внутри validator scope; смысл authored docs не переписывается wholesale
+- duplicate `claim_id` внутри `citation-index.json` считаются validator-scope technical drift: orchestrator repair-ит поздние коллизии по правилу `<claim_id>.<shard_slug>[.<n>]` и фиксирует это в `validator-verdict.json.fixed_paths`
 - обновляет `reports/findings/*`
 - обновляет `reports/agent-outputs/architect/summary.md` через детерминированную агрегацию фактических domain outputs
 - materializes critical unknowns как findings, если отсутствуют owner/integration/database/CI-CD evidence

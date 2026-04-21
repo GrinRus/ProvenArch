@@ -736,6 +736,49 @@ func TestCancelRunActiveClassifiesRunnerKilledAsCanceled(t *testing.T) {
 	}
 }
 
+func TestRunWithIDWorkspaceValidationPrefersRunCanceledWhenCancelWasRequested(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	manifest := `version: 1
+repos:
+  - name: payments-service
+    path: ` + filepath.Join(ws.Path, "repos", "payments-service") + `
+    ref: definitely-missing-ref
+  - name: users-service
+    path: ` + filepath.Join(ws.Path, "repos", "users-service") + `
+`
+	if err := os.WriteFile(filepath.Join(ws.Path, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("rewrite manifest with invalid ref: %v", err)
+	}
+	ws, err := workspace.Open(ws.Path)
+	if err != nil {
+		t.Fatalf("reopen workspace: %v", err)
+	}
+
+	service := NewService()
+	runID := "run-validation-canceled"
+	service.cancelRequests[runID] = struct{}{}
+
+	info, _, err := service.runWithID(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	}, runID)
+	if err == nil {
+		t.Fatalf("expected workspace validation failure")
+	}
+	if info.Status != RunStatusFailed {
+		t.Fatalf("expected failed status, got %s", info.Status)
+	}
+	if info.ErrorCode != runErrorCodeCanceled {
+		t.Fatalf("expected error_code %q, got %q", runErrorCodeCanceled, info.ErrorCode)
+	}
+	if !strings.Contains(info.Error, "run canceled by request") {
+		t.Fatalf("expected cancel error message, got %q", info.Error)
+	}
+}
+
 func TestRunAppliesRuntimeStepTimeoutFromWorkspaceManifest(t *testing.T) {
 	clearRuntimeTimeoutEnvForTest(t)
 
@@ -2192,6 +2235,76 @@ func TestSemanticGuardAddsFallbackCrossRepoEdgeForMultiScopeRefreshStep3(t *test
 	}
 	if !foundEdge {
 		t.Fatalf("expected fallback cross-repo upsert_edge in step3 taskrun, got %#v", payload.Changeset)
+	}
+}
+
+func TestSemanticGuardLeavesNoCrossRepoEdgeWhenFallbackCandidatesAreImpossible(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure workspace layout: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/payments.md", []byte("# Domain: Payments\n\n- id: `payments`\n- repo_scope: `payments-service`\n")); err != nil {
+		t.Fatalf("write payments domain card: %v", err)
+	}
+	if err := ws.WriteFile("charter/cards/domains/users.md", []byte("# Domain: Users\n\n- id: `users`\n- repo_scope: `users-service`\n")); err != nil {
+		t.Fatalf("write users domain card: %v", err)
+	}
+	for _, repo := range ws.Manifest.Repos {
+		path := strings.TrimSpace(repo.Path)
+		if path == "" {
+			continue
+		}
+		for _, anchor := range []string{"README.md", "README", "go.mod", "package.json", "pom.xml"} {
+			_ = os.Remove(filepath.Join(path, anchor))
+		}
+	}
+
+	service := NewService(WithRunner(refreshNoServiceMissingFindingsRunner{}))
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run refresh pipeline: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
+	}
+	if !hasWarningPrefix(info.Warnings, "refresh.step3.findings: semantic_guard: cross-repo fallback edge skipped") {
+		t.Fatalf("expected fallback-skip warning in run warnings, got %#v", info.Warnings)
+	}
+
+	step3TaskrunCandidates, err := filepath.Glob(filepath.Join(ws.Path, "reports", "taskruns", "*-refresh-step3-findings*.json"))
+	if err != nil {
+		t.Fatalf("glob step3 taskruns: %v", err)
+	}
+	step3Taskruns := make([]string, 0, len(step3TaskrunCandidates))
+	for _, candidate := range step3TaskrunCandidates {
+		if strings.Contains(candidate, "shard-summary") {
+			continue
+		}
+		step3Taskruns = append(step3Taskruns, candidate)
+	}
+	sort.Strings(step3Taskruns)
+	if len(step3Taskruns) == 0 {
+		t.Fatalf("expected refresh step3 taskrun file")
+	}
+
+	raw, err := os.ReadFile(step3Taskruns[len(step3Taskruns)-1])
+	if err != nil {
+		t.Fatalf("read step3 taskrun: %v", err)
+	}
+	var payload contracts.TaskResult
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal step3 taskrun payload: %v", err)
+	}
+	for _, op := range payload.Changeset {
+		if op.Op == "upsert_edge" && op.Edge != nil {
+			t.Fatalf("expected no synthetic fallback edge when candidates are impossible, got %+v", op.Edge)
+		}
 	}
 }
 
