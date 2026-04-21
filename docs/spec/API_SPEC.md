@@ -2,9 +2,9 @@
 
 Этот документ фиксирует фактический wire-contract HTTP API для local-first ACP standalone сервера.
 
-> MVP режим: `acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ... [--docs-imports-path <path>]]`.
-> Service работает с одним bound workspace на процесс.
-> Required CI/CD surface: CLI batch mode (`acp run ... --non-interactive`). API-trigger остаётся optional для trusted local/private deployment.
+> Этот документ описывает только HTTP API wire-contract.
+> Exact CLI flag/help surface canonical в `acp --help` и `cmd/acp/main.go`; quickstart и runbook usage удерживаются в `README.md` и профильных runbook docs.
+> Service работает с одним bound workspace на процесс. Required CI/CD surface: CLI batch mode (`acp run ... --non-interactive`), API-trigger остаётся optional для trusted local/private deployment.
 
 ## 1) Конвенции
 - Base path: `/api`
@@ -699,31 +699,13 @@ Run-specific поверхность (не входит в strict deterministic g
 Каноническая фиксация runtime/Q&A boundary: `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.
 
 ## 8) Deployment boundary
-- `acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>)`: explicit bootstrap.
-- `acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path <path>]]`: local interactive и trusted local/private deployment.
+- CLI deployment surface остаётся explicit: bootstrap через `acp init-workspace`, local service через `acp serve`, required CI/CD через `acp run`.
 - bootstrap behavior: если workspace root не является git-репозиторием, ACP автоматически выполняет `git init` (без auto-commit/auto-push).
 - `serve` startup работает в lenient mode: сервис стартует без блокирующего repo preflight; readiness diagnostics доступны через `POST /api/workspace/validate`.
-- `acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]`.
-- run logs retention knobs:
-  - CLI flags: `--run-logs-ttl-hours`, `--run-logs-max-runs` (для `serve` и `run`)
-  - env overrides: `ACP_RUN_LOGS_TTL_HOURS`, `ACP_RUN_LOGS_MAX_RUNS`
-  - defaults: `168h` TTL и `200` run log files
 - default runtime mode: `fake` (required deterministic CI surface), `headless` — opt-in.
-- default runtime provider: `claude-code`; global fallback env `ACP_RUNTIME_PROVIDER`; CLI override `--runtime-provider`.
 - effective provider per step: `workspace.yaml.runtime.profile.steps.<step>.provider > CLI/env global provider > claude-code`.
 - provider-specific command envs: `ACP_CLAUDE_CMD`, `ACP_QWEN_CMD`, `ACP_CODEX_CMD`.
-- timeout control envs:
-  - `ACP_RUNTIME_STEP_TIMEOUT_SEC`
-  - `ACP_RUNTIME_HEARTBEAT_SEC`
-  - `ACP_PIPELINE_TIMEOUT_SEC`
-  - `ACP_PIPELINE_KILL_GRACE_SEC`
-  - `ACP_API_READY_TIMEOUT_SEC`
-  - `ACP_API_INIT_TIMEOUT_SEC`
-  - `ACP_UI_INIT_POLL_TIMEOUT_SEC`
-  - `ACP_UI_CANCEL_POLL_TIMEOUT_SEC`
-- timeout precedence: `env > workspace.yaml(runtime.profile.timeouts) > defaults`.
-- execution precedence: `CLI > env > workspace.yaml(runtime.profile.execution) > defaults`.
-- execution env overrides: `ACP_EXECUTION_STRATEGY`, `ACP_MAX_PARALLEL_TASKS`, `ACP_FAILURE_POLICY`, `ACP_SHARD_DISCOVERY_MODE`.
 - при `--runtime fake` provider value валидируется, но live provider command не выполняется.
 - GitHub/GitLab hooks/manual jobs для required CI/CD должны использовать CLI batch mode с deterministic defaults (`--runtime fake`).
 - API-trigger не должен превращаться в hosted control plane в рамках MVP.
+- Exact CLI flags, run log retention knobs, env precedence и local runbook examples намеренно не дублируются здесь; canonical source of truth — CLI help, `README.md` quickstart и профильные runbook docs.

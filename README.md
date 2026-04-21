@@ -246,67 +246,13 @@ make quickstart-local WORKSPACE=/path/to/arch-workspace REPO_PATH=/path/to/payme
 ### 6.1) Runtime timeouts (persisted + effective)
 
 Timeout-конфиг хранится в `workspace.yaml` (`runtime.profile.timeouts`) и используется backend/full-run/frontend e2e.
-
-Balanced defaults:
-- `step_timeout_sec=1800`
-- `heartbeat_sec=30`
-- `pipeline_timeout_sec=2400`
-- `pipeline_kill_grace_sec=30`
-- `api_ready_timeout_sec=60`
-- `api_init_timeout_sec=120`
-- `ui_init_poll_timeout_sec=900`
-- `ui_cancel_poll_timeout_sec=420`
-
-Precedence:
-- `env > workspace.yaml > defaults`
-
-Каноничные env overrides:
-- `ACP_RUNTIME_STEP_TIMEOUT_SEC`
-- `ACP_RUNTIME_HEARTBEAT_SEC`
-- `ACP_PIPELINE_TIMEOUT_SEC`
-- `ACP_PIPELINE_KILL_GRACE_SEC`
-- `ACP_API_READY_TIMEOUT_SEC`
-- `ACP_API_INIT_TIMEOUT_SEC`
-- `ACP_UI_INIT_POLL_TIMEOUT_SEC`
-- `ACP_UI_CANCEL_POLL_TIMEOUT_SEC`
-
-API управления timeout-профилем:
-- `GET /api/runtime/timeouts` (persisted + effective + source)
-- `PUT /api/runtime/timeouts` (partial update persisted values)
+Канонический contract для persisted/effective/source representation и API surfaces удерживается в [docs/spec/API_SPEC.md](docs/spec/API_SPEC.md); runtime semantics и ownership boundary описаны в [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ### 6.2) Runtime execution profile (persisted + effective)
 
 Execution-конфиг хранится в `workspace.yaml` (`runtime.profile.execution`) и управляет шардированием runtime-задач.
-Step provider overrides хранятся в `workspace.yaml.runtime.profile.steps.*.provider` и доступны через `GET /api/runtime/profile` и `GET/PUT /api/runtime/execution`.
-
-Default values:
-- `strategy=sequential`
-- `max_parallel_tasks=1`
-- `failure_policy=best_effort`
-- `shard_discovery.mode=heuristics`
-
-Precedence:
-- `CLI > env > workspace.yaml > defaults`
-
-CLI overrides (ограниченный набор):
-- `--execution-strategy sequential|parallel`
-- `--max-parallel-tasks <n>`
-- `--failure-policy fail_fast|best_effort`
-
-Env overrides:
-- `ACP_EXECUTION_STRATEGY`
-- `ACP_MAX_PARALLEL_TASKS`
-- `ACP_FAILURE_POLICY`
-- `ACP_SHARD_DISCOVERY_MODE`
-
-API управления execution-профилем:
-- `GET /api/runtime/execution` (persisted + effective + source)
-- `PUT /api/runtime/execution` (partial update persisted values)
-
-Sharding policy:
-- `heuristics` остаётся default mode и теперь означает детерминированное структурное разбиение с полным покрытием repo.
-- planner строит только неперекрывающиеся `path_scopes` (`directory`/`file`) и не использует frontend/backend repo filtering.
-- `semantic` сохраняется ради совместимости, но больше не меняет shard boundaries; он добавляет только metadata/graph surface поверх того же shard-plan.
+Step provider overrides живут в `workspace.yaml.runtime.profile.steps.*.provider`.
+Точный wire/API contract, precedence и update surface удерживаются в [docs/spec/API_SPEC.md](docs/spec/API_SPEC.md), а sharding/runtime behavior boundary — в [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ### 7) Поднимите dev environment
 
@@ -321,18 +267,25 @@ Root entrypoints:
 
 ### 8) Полный локальный прогон (scenario)
 
-Source of truth по live/full-run surface:
-- [docs/LOCAL_FULL_RUN_AI_ADVENT.md](docs/LOCAL_FULL_RUN_AI_ADVENT.md) — локальный scenario/full-run loop в `tmp` workspace
-- [docs/RELEASE_LIVE_E2E_RUNBOOK.md](docs/RELEASE_LIVE_E2E_RUNBOOK.md) — pre-release live gate, canonical release slices и strict verdict rules
-- `scripts/full-run-ai-advent.sh` — одиночный scenario full-run
-- `scripts/full-run-batch-5x2.sh` — batch `5x2` + frontend live smoke
-- `scripts/full-run-batch-matrix.sh` — multi-profile matrix orchestrator поверх approved `E2E_MATRIX_FILE`
-- `scripts/frontend-live-e2e.sh` — локальный Playwright smoke для выбранного provider
+Канонические runbook-документы:
+- [docs/LOCAL_FULL_RUN_AI_ADVENT.md](docs/LOCAL_FULL_RUN_AI_ADVENT.md)
+- [docs/RELEASE_LIVE_E2E_RUNBOOK.md](docs/RELEASE_LIVE_E2E_RUNBOOK.md) — агентский pre-release live gate (`PASS|FAIL`, strict zero-failure)
 
-Минимальный запуск:
+Доступные entrypoint-скрипты:
+- `scripts/full-run-ai-advent.sh` — полный локальный cycle over `TARGET_REPOS_FILE`
+- `scripts/full-run-batch-5x2.sh` — batch re-audit + frontend live e2e
+- `scripts/full-run-batch-matrix.sh` — multi-profile matrix orchestrator
+- `scripts/frontend-live-e2e.sh` — локальный UI smoke для выбранного provider
+
+Быстрый локальный запуск:
 
 ```bash
 TARGET_REPOS_FILE=/abs/path/to/repos.yaml ./scripts/full-run-ai-advent.sh
+```
+
+Быстрый matrix запуск:
+
+```bash
 E2E_MATRIX_FILE=/abs/path/to/e2e-matrix.yaml \
 ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
@@ -340,15 +293,13 @@ ACP_CODEX_CMD_BIN=codex \
 ./scripts/full-run-batch-matrix.sh
 ```
 
-Канонические входы и границы:
-- `TARGET_REPOS_FILE` — единственный input-контракт для `full-run` и batch (`repos[]` в формате `workspace.yaml`)
-- `E2E_MATRIX_FILE` — единственный input для matrix harness; approved profile ids: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
-- для `source_kind=git_url` refs в `repos_file` должны быть `pinned`
-- `UI_E2E_EXPECTED_REPO_COUNT` задаёт ожидаемое число resolved repos для live UI smoke
-- detailed script cookbook, shard split и tmp/debug knobs живут в [docs/LOCAL_FULL_RUN_AI_ADVENT.md](docs/LOCAL_FULL_RUN_AI_ADVENT.md)
-- release-specific slices, `baseline` + `parallel-default`, mandatory frontend scenarios и strict verdict rules живут только в [docs/RELEASE_LIVE_E2E_RUNBOOK.md](docs/RELEASE_LIVE_E2E_RUNBOOK.md)
-- full matrix остаётся local trusted-machine runbook и не является required CI gate
-- release decision брать только из `reports/release_verdict_<matrix-id>.json`
+Ключевые правила:
+- канонический input для full-run и batch: `TARGET_REPOS_FILE`
+- release matrix и trusted-machine gate не входят в required CI merge gate
+- подробные matrix/sweep/shard/release rules, output contracts и troubleshooting удерживаются только в runbook docs выше, а не в `README.md`
+
+Для release decision и детального live gate используйте:
+- [docs/RELEASE_LIVE_E2E_RUNBOOK.md](docs/RELEASE_LIVE_E2E_RUNBOOK.md)
 
 Repo CI по умолчанию живёт в GitHub Actions:
 - `contracts`

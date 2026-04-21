@@ -29,6 +29,25 @@ const (
 	exitCodeValidation     = 3
 )
 
+type runtimeCommandFlags struct {
+	runtimeMode       *string
+	runtimeProvider   *string
+	executionStrategy *string
+	maxParallelTasks  *int
+	failurePolicy     *string
+	runLogsTTLHrs     *int
+	runLogsMaxRuns    *int
+}
+
+type resolvedRuntimeConfig struct {
+	mode               string
+	provider           acpruntime.Provider
+	providerSource     acpruntime.ProviderSource
+	executionOverrides acpruntime.ExecutionOverrides
+	runLogsTTL         time.Duration
+	runLogsMaxRuns     int
+}
+
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
@@ -61,13 +80,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 
 	workspacePath := fs.String("workspace", "", "absolute path to arch-workspace")
 	listenAddress := fs.String("listen", "127.0.0.1:8080", "listen address for local API server")
-	runtimeMode := fs.String("runtime", "fake", "runtime mode: fake or headless")
-	runtimeProvider := fs.String("runtime-provider", "", "runtime provider for headless mode: claude-code, qwen-code, or codex-code (fallback: ACP_RUNTIME_PROVIDER)")
-	executionStrategy := fs.String("execution-strategy", "", "execution strategy override: sequential or parallel")
-	maxParallelTasks := fs.Int("max-parallel-tasks", 0, "execution max parallel tasks override (>0)")
-	failurePolicy := fs.String("failure-policy", "", "execution failure policy override: fail_fast or best_effort")
-	runLogsTTLHrs := fs.Int("run-logs-ttl-hours", envInt("ACP_RUN_LOGS_TTL_HOURS", 168), "run logs retention TTL in hours")
-	runLogsMaxRuns := fs.Int("run-logs-max-runs", envInt("ACP_RUN_LOGS_MAX_RUNS", 200), "maximum number of run log files to retain")
+	runtimeFlags := registerRuntimeCommandFlags(fs)
 	dryRun := fs.Bool("dry-run", false, "validate workspace and server wiring without starting listener")
 	autoInit := fs.Bool("auto-init", false, "bootstrap workspace manifest/layout when workspace.yaml is missing")
 	repoName := fs.String("repo-name", "", "repo scope name for --auto-init")
@@ -92,17 +105,9 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return exitCodeInvalidCommand
 	}
-	if *runLogsTTLHrs <= 0 {
-		fmt.Fprintln(stderr, "run logs validation failed: --run-logs-ttl-hours must be > 0")
-		return exitCodeValidation
-	}
-	if *runLogsMaxRuns <= 0 {
-		fmt.Fprintln(stderr, "run logs validation failed: --run-logs-max-runs must be > 0")
-		return exitCodeValidation
-	}
-	executionOverrides, err := executionOverridesFromCLI(*executionStrategy, *maxParallelTasks, *failurePolicy)
+	runtimeConfig, err := resolveRuntimeCommandConfig(runtimeFlags)
 	if err != nil {
-		fmt.Fprintf(stderr, "execution validation failed: %v\n", err)
+		fmt.Fprintln(stderr, err)
 		return exitCodeValidation
 	}
 
@@ -126,23 +131,9 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		return exitCodeValidation
 	}
 
-	mode, err := acpruntime.NormalizeMode(*runtimeMode)
-	if err != nil {
-		fmt.Fprintf(stderr, "runtime validation failed: %v\n", err)
-		return exitCodeValidation
-	}
-	provider, providerSource, err := acpruntime.ResolveProviderWithSource(*runtimeProvider)
-	if err != nil {
-		fmt.Fprintf(stderr, "runtime validation failed: %v\n", err)
-		return exitCodeValidation
-	}
-
-	service := orchestrator.NewService(
-		orchestrator.WithRunnerFactory(buildRunnerFactory(mode)),
-		orchestrator.WithProviderFallback(provider, providerSource),
-		orchestrator.WithHistoryWorkspace(ws),
-		orchestrator.WithRunLogsRetention(time.Duration(*runLogsTTLHrs)*time.Hour, *runLogsMaxRuns),
-		orchestrator.WithExecutionOverrides(executionOverrides),
+	service := newCLIService(
+		ws,
+		runtimeConfig,
 		orchestrator.WithResumeStaleAsyncRuns(),
 	)
 	if !*dryRun {
@@ -152,13 +143,13 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	if *dryRun {
 		fmt.Fprintf(stdout, "workspace ready at %s\n", ws.Path)
 		fmt.Fprintf(stdout, "server configured for %s\n", *listenAddress)
-		fmt.Fprintf(stdout, "runtime mode: %s\n", mode)
-		fmt.Fprintf(stdout, "runtime provider: %s\n", provider)
+		fmt.Fprintf(stdout, "runtime mode: %s\n", runtimeConfig.mode)
+		fmt.Fprintf(stdout, "runtime provider: %s\n", runtimeConfig.provider)
 		executionResolved := service.ResolveExecutionProfile(ws.Manifest)
 		fmt.Fprintf(stdout, "execution strategy: %s\n", executionResolved.Effective.Strategy)
 		fmt.Fprintf(stdout, "execution max_parallel_tasks: %d\n", executionResolved.Effective.MaxParallel)
 		fmt.Fprintf(stdout, "execution failure_policy: %s\n", executionResolved.Effective.FailurePolicy)
-		if mode == acpruntime.RuntimeModeFake {
+		if runtimeConfig.mode == acpruntime.RuntimeModeFake {
 			fmt.Fprintln(stdout, "runtime provider note: ignored in fake mode")
 		}
 		return exitCodeOK
@@ -409,13 +400,7 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 
 	workspacePath := fs.String("workspace", "", "absolute path to arch-workspace")
 	pipelineName := fs.String("pipeline", "", "pipeline to run: init or refresh")
-	runtimeMode := fs.String("runtime", "fake", "runtime mode: fake or headless")
-	runtimeProvider := fs.String("runtime-provider", "", "runtime provider for headless mode: claude-code, qwen-code, or codex-code (fallback: ACP_RUNTIME_PROVIDER)")
-	executionStrategy := fs.String("execution-strategy", "", "execution strategy override: sequential or parallel")
-	maxParallelTasks := fs.Int("max-parallel-tasks", 0, "execution max parallel tasks override (>0)")
-	failurePolicy := fs.String("failure-policy", "", "execution failure policy override: fail_fast or best_effort")
-	runLogsTTLHrs := fs.Int("run-logs-ttl-hours", envInt("ACP_RUN_LOGS_TTL_HOURS", 168), "run logs retention TTL in hours")
-	runLogsMaxRuns := fs.Int("run-logs-max-runs", envInt("ACP_RUN_LOGS_MAX_RUNS", 200), "maximum number of run log files to retain")
+	runtimeFlags := registerRuntimeCommandFlags(fs)
 	nonInteractive := fs.Bool("non-interactive", false, "disable interactive prompts")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "Usage: acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]")
@@ -433,17 +418,9 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return exitCodeInvalidCommand
 	}
-	if *runLogsTTLHrs <= 0 {
-		fmt.Fprintln(stderr, "run logs validation failed: --run-logs-ttl-hours must be > 0")
-		return exitCodeValidation
-	}
-	if *runLogsMaxRuns <= 0 {
-		fmt.Fprintln(stderr, "run logs validation failed: --run-logs-max-runs must be > 0")
-		return exitCodeValidation
-	}
-	executionOverrides, err := executionOverridesFromCLI(*executionStrategy, *maxParallelTasks, *failurePolicy)
+	runtimeConfig, err := resolveRuntimeCommandConfig(runtimeFlags)
 	if err != nil {
-		fmt.Fprintf(stderr, "execution validation failed: %v\n", err)
+		fmt.Fprintln(stderr, err)
 		return exitCodeValidation
 	}
 
@@ -468,24 +445,7 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 		return exitCodeValidation
 	}
 
-	mode, err := acpruntime.NormalizeMode(*runtimeMode)
-	if err != nil {
-		fmt.Fprintf(stderr, "runtime validation failed: %v\n", err)
-		return exitCodeValidation
-	}
-	provider, providerSource, err := acpruntime.ResolveProviderWithSource(*runtimeProvider)
-	if err != nil {
-		fmt.Fprintf(stderr, "runtime validation failed: %v\n", err)
-		return exitCodeValidation
-	}
-
-	service := orchestrator.NewService(
-		orchestrator.WithRunnerFactory(buildRunnerFactory(mode)),
-		orchestrator.WithProviderFallback(provider, providerSource),
-		orchestrator.WithHistoryWorkspace(ws),
-		orchestrator.WithRunLogsRetention(time.Duration(*runLogsTTLHrs)*time.Hour, *runLogsMaxRuns),
-		orchestrator.WithExecutionOverrides(executionOverrides),
-	)
+	service := newCLIService(ws, runtimeConfig)
 	service.ReconcileStaleRunsAfterRestart()
 	runInfo, artifacts, err := service.Run(context.Background(), orchestrator.RunRequest{
 		Workspace:      ws,
@@ -504,13 +464,13 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "run_id: %s\n", runInfo.RunID)
 	fmt.Fprintf(stdout, "pipeline: %s\n", runInfo.Pipeline)
 	fmt.Fprintf(stdout, "status: %s\n", runInfo.Status)
-	fmt.Fprintf(stdout, "runtime mode: %s\n", mode)
-	fmt.Fprintf(stdout, "runtime provider: %s\n", provider)
+	fmt.Fprintf(stdout, "runtime mode: %s\n", runtimeConfig.mode)
+	fmt.Fprintf(stdout, "runtime provider: %s\n", runtimeConfig.provider)
 	executionResolved := service.ResolveExecutionProfile(ws.Manifest)
 	fmt.Fprintf(stdout, "execution strategy: %s\n", executionResolved.Effective.Strategy)
 	fmt.Fprintf(stdout, "execution max_parallel_tasks: %d\n", executionResolved.Effective.MaxParallel)
 	fmt.Fprintf(stdout, "execution failure_policy: %s\n", executionResolved.Effective.FailurePolicy)
-	if mode == acpruntime.RuntimeModeFake {
+	if runtimeConfig.mode == acpruntime.RuntimeModeFake {
 		fmt.Fprintln(stdout, "runtime provider note: ignored in fake mode")
 	}
 	fmt.Fprintf(stdout, "artifacts: %d\n", len(artifacts))
@@ -615,22 +575,56 @@ func printValidationReport(w io.Writer, report workspace.ValidationReport) {
 	}
 }
 
-func buildRunner(runtimeMode string, provider acpruntime.Provider) (acpruntime.Runner, error) {
-	return providers.BuildRunner(runtimeMode, provider)
-}
-
-func buildRunnerFactory(runtimeMode string) func(acpruntime.Provider) (acpruntime.Runner, error) {
-	return func(provider acpruntime.Provider) (acpruntime.Runner, error) {
-		return buildRunner(runtimeMode, provider)
+func registerRuntimeCommandFlags(fs *flag.FlagSet) runtimeCommandFlags {
+	return runtimeCommandFlags{
+		runtimeMode:       fs.String("runtime", "fake", "runtime mode: fake or headless"),
+		runtimeProvider:   fs.String("runtime-provider", "", "runtime provider for headless mode: claude-code, qwen-code, or codex-code (fallback: ACP_RUNTIME_PROVIDER)"),
+		executionStrategy: fs.String("execution-strategy", "", "execution strategy override: sequential or parallel"),
+		maxParallelTasks:  fs.Int("max-parallel-tasks", 0, "execution max parallel tasks override (>0)"),
+		failurePolicy:     fs.String("failure-policy", "", "execution failure policy override: fail_fast or best_effort"),
+		runLogsTTLHrs:     fs.Int("run-logs-ttl-hours", envInt("ACP_RUN_LOGS_TTL_HOURS", 168), "run logs retention TTL in hours"),
+		runLogsMaxRuns:    fs.Int("run-logs-max-runs", envInt("ACP_RUN_LOGS_MAX_RUNS", 200), "maximum number of run log files to retain"),
 	}
 }
 
-func printRunnerError(w io.Writer, err error) {
-	if code, message, ok := acpruntime.ClassifyError(err); ok {
-		fmt.Fprintf(w, "%s: %s\n", code, message)
-		return
+func resolveRuntimeCommandConfig(flags runtimeCommandFlags) (resolvedRuntimeConfig, error) {
+	if err := validateRunLogsRetention(*flags.runLogsTTLHrs, *flags.runLogsMaxRuns); err != nil {
+		return resolvedRuntimeConfig{}, err
 	}
-	fmt.Fprintf(w, "runner validation failed: %v\n", err)
+	executionOverrides, err := executionOverridesFromCLI(*flags.executionStrategy, *flags.maxParallelTasks, *flags.failurePolicy)
+	if err != nil {
+		return resolvedRuntimeConfig{}, fmt.Errorf("execution validation failed: %w", err)
+	}
+	mode, err := acpruntime.NormalizeMode(*flags.runtimeMode)
+	if err != nil {
+		return resolvedRuntimeConfig{}, fmt.Errorf("runtime validation failed: %w", err)
+	}
+	provider, providerSource, err := acpruntime.ResolveProviderWithSource(*flags.runtimeProvider)
+	if err != nil {
+		return resolvedRuntimeConfig{}, fmt.Errorf("runtime validation failed: %w", err)
+	}
+	return resolvedRuntimeConfig{
+		mode:               mode,
+		provider:           provider,
+		providerSource:     providerSource,
+		executionOverrides: executionOverrides,
+		runLogsTTL:         time.Duration(*flags.runLogsTTLHrs) * time.Hour,
+		runLogsMaxRuns:     *flags.runLogsMaxRuns,
+	}, nil
+}
+
+func newCLIService(ws workspace.Root, runtimeConfig resolvedRuntimeConfig, extraOptions ...orchestrator.Option) *orchestrator.Service {
+	options := []orchestrator.Option{
+		orchestrator.WithRunnerFactory(func(provider acpruntime.Provider) (acpruntime.Runner, error) {
+			return providers.BuildRunner(runtimeConfig.mode, provider)
+		}),
+		orchestrator.WithProviderFallback(runtimeConfig.provider, runtimeConfig.providerSource),
+		orchestrator.WithHistoryWorkspace(ws),
+		orchestrator.WithRunLogsRetention(runtimeConfig.runLogsTTL, runtimeConfig.runLogsMaxRuns),
+		orchestrator.WithExecutionOverrides(runtimeConfig.executionOverrides),
+	}
+	options = append(options, extraOptions...)
+	return orchestrator.NewService(options...)
 }
 
 func envInt(name string, fallback int) int {
@@ -670,6 +664,16 @@ func executionOverridesFromCLI(strategy string, maxParallel int, failurePolicy s
 	return overrides, nil
 }
 
+func validateRunLogsRetention(ttlHours int, maxRuns int) error {
+	if ttlHours <= 0 {
+		return errors.New("run logs validation failed: --run-logs-ttl-hours must be > 0")
+	}
+	if maxRuns <= 0 {
+		return errors.New("run logs validation failed: --run-logs-max-runs must be > 0")
+	}
+	return nil
+}
+
 func ensureWorkspaceGitRepository(workspacePath string) error {
 	gitDir := filepath.Join(workspacePath, ".git")
 	_, err := os.Stat(gitDir)
@@ -691,11 +695,6 @@ func ensureWorkspaceGitRepository(workspacePath string) error {
 		return fmt.Errorf("workspace.git.init.failed: git init failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return nil
-}
-
-func loadRepoSourcesFromFile(rawPath string) ([]workspace.RepoSource, error) {
-	repos, _, err := loadRepoSourcesAndRuntimeFromFile(rawPath)
-	return repos, err
 }
 
 func loadRepoSourcesAndRuntimeFromFile(rawPath string) ([]workspace.RepoSource, *workspace.RuntimeConfig, error) {
