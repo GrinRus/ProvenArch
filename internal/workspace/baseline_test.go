@@ -34,6 +34,25 @@ func TestEnsureBaselineBundleCreatesMissingArtifacts(t *testing.T) {
 	}
 }
 
+func TestEnsureBaselineSupportBundleDoesNotSeedCanonicalSubagentsOutput(t *testing.T) {
+	t.Parallel()
+
+	ws := writeBaselineWorkspace(t)
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure layout: %v", err)
+	}
+	if err := ws.EnsureBaselineSupportBundle(); err != nil {
+		t.Fatalf("ensure baseline support bundle: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(ws.Path, "skills/subagents.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("expected support bundle to avoid seeding canonical subagents output, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(ws.Path, "skills/prompt-packs/collect-context.md")); err != nil {
+		t.Fatalf("expected support bundle to keep prompt packs available: %v", err)
+	}
+}
+
 func TestEnsureBaselineBundleDoesNotOverwriteExistingFiles(t *testing.T) {
 	t.Parallel()
 

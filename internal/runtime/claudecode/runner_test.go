@@ -1071,6 +1071,46 @@ func TestBuildDirectPromptConstitutionRetryUsesDraftArtifactHints(t *testing.T) 
 	}
 }
 
+func TestBuildDirectPromptInjectsWorkspacePromptPackAfterPolicyLayer(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	packDir := filepath.Join(workspaceDir, "skills", "prompt-packs")
+	if err := os.MkdirAll(packDir, 0o755); err != nil {
+		t.Fatalf("mkdir prompt pack dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(packDir, "collect-context.md"), []byte("Workspace collect pack guidance.\n"), 0o644); err != nil {
+		t.Fatalf("write collect prompt pack: %v", err)
+	}
+
+	task := acpruntime.Task{
+		TaskID:       "task-claude-workspace-pack",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		Workspace:    workspaceDir,
+		RepoScopes:   []string{"bank-of-anthos"},
+		StartedAtUTC: time.Date(2026, 4, 21, 9, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	prompt := buildDirectPrompt(raw, false, false)
+	if !strings.Contains(prompt, "Workspace collect pack guidance.") {
+		t.Fatalf("expected workspace prompt-pack content in claude prompt")
+	}
+	stepIdx := strings.Index(prompt, "STEP POLICY init.step1.collect:")
+	packIdx := strings.Index(prompt, "WORKSPACE PROMPT PACK CONTENT LAYER:")
+	templateIdx := strings.Index(prompt, "Schema-valid template for this task")
+	if stepIdx == -1 || packIdx == -1 || templateIdx == -1 {
+		t.Fatalf("expected prompt sections to exist, got:\n%s", prompt)
+	}
+	if !(stepIdx < packIdx && packIdx < templateIdx) {
+		t.Fatalf("expected workspace prompt pack to appear after policy layer and before provider footer/template")
+	}
+}
+
 func validTaskResultJSON(taskID string, stepID string, runtimeName string, runtimeVersion string) string {
 	return fmt.Sprintf(`{"meta":{"task_id":"%s","step_id":"%s","runtime":{"name":"%s","version":"%s"},"started_at":"2026-04-03T12:00:00Z"},"summary":"ok","changeset":[]}`, taskID, stepID, runtimeName, runtimeVersion)
 }

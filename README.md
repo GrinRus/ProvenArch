@@ -115,6 +115,7 @@ Q&A API follow-up в baseline зарезервирован как read-only endp
 Bundle bootstrap policy:
 - `init-workspace` и `serve --auto-init` создают baseline artifacts по стратегии create-if-missing;
 - существующие пользовательские правки в baseline файлах не перезаписываются.
+- workspace prompt packs участвуют в runtime prompt composition как editable content layer; enforced safety/contract rules приходят из internal runtime step policy и не могут быть ослаблены содержимым prompt pack.
 - baseline prompt defaults структурированы по обязательным секциям (`Goal`, `Inputs`, `Required Output Shape`, `Evidence Policy`, `Forbidden Behavior`, `Fallback When Unknown`) и покрыты quality-тестом на минимальную насыщенность.
 
 ---

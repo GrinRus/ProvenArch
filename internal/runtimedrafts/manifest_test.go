@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/GrinRus/ProvenArch/internal/runtime/compatibilityregistry"
 )
 
 func readRuntimeFixture(t *testing.T, name string) []byte {
@@ -223,6 +225,12 @@ func TestValidateRequiredManifestRejectsCanonicalPathOnlyDraftFilesWithoutExplic
 	if !strings.Contains(err.Error(), "referenced draft file") {
 		t.Fatalf("expected referenced draft file error, got %v", err)
 	}
+	if _, statErr := os.Stat(filepath.Join(draftRoot, "charter-overview.md")); !os.IsNotExist(statErr) {
+		t.Fatalf("expected read-only validation to avoid creating repaired draft file, stat err=%v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(draftRoot, "baseline-subagents.yaml")); !os.IsNotExist(statErr) {
+		t.Fatalf("expected read-only validation to avoid creating repaired bundle draft file, stat err=%v", statErr)
+	}
 }
 
 func TestReconcileOutputsAtDraftRootCopiesCanonicalPathDraftFiles(t *testing.T) {
@@ -267,5 +275,36 @@ func TestReconcileOutputsAtDraftRootCopiesCanonicalPathDraftFiles(t *testing.T) 
 	}
 	if _, err := os.Stat(filepath.Join(draftRoot, "baseline-subagents.yaml")); err != nil {
 		t.Fatalf("expected reconciled baseline-subagents.yaml: %v", err)
+	}
+}
+
+func TestReconcileOutputsAtDraftRootErrorsIncludeCompatibilityRuleID(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(draftRoot, "charter"), 0o755); err != nil {
+		t.Fatalf("mkdir canonical fallback dir: %v", err)
+	}
+	manifest := Manifest{
+		Version:      1,
+		RunID:        "run-1",
+		StepID:       "init.step0.constitution",
+		StepContract: "constitution",
+		AgentRole:    "architect",
+		Outputs: []Output{
+			{Path: "charter-overview.md", CanonicalPath: "charter", Kind: "charter", Title: "Constitution"},
+		},
+	}
+
+	_, err := ReconcileOutputsAtDraftRoot(draftRoot, manifest)
+	if err == nil {
+		t.Fatalf("expected reconcile error")
+	}
+	if !strings.Contains(err.Error(), compatibilityregistry.RuleDraftRootReconcileExistingOutputs) {
+		t.Fatalf("expected compatibility rule id in reconcile error, got %v", err)
 	}
 }

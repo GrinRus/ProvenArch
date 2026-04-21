@@ -177,8 +177,18 @@ func BaselineSubagentsContent() []byte {
 }
 
 func (r Root) EnsureBaselineBundle() error {
-	if err := r.writeFileIfMissing("skills/subagents.yaml", BaselineSubagentsContent()); err != nil {
-		return err
+	return r.ensureBaselineBundle(true)
+}
+
+func (r Root) EnsureBaselineSupportBundle() error {
+	return r.ensureBaselineBundle(false)
+}
+
+func (r Root) ensureBaselineBundle(includeSubagents bool) error {
+	if includeSubagents {
+		if err := r.writeFileIfMissing("skills/subagents.yaml", BaselineSubagentsContent()); err != nil {
+			return err
+		}
 	}
 
 	for _, skill := range baselineSkillIDs {

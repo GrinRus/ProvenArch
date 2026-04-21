@@ -277,6 +277,14 @@ func TestInitStep0PublishesOverviewFromValidatedRuntimeDraftOutputs(t *testing.T
 	if strings.Contains(text, "Generated baseline charter for ACP MVP.") {
 		t.Fatalf("did not expect fallback overview writer to overwrite runtime draft output")
 	}
+
+	subagentsContent, err := os.ReadFile(filepath.Join(ws.Path, "skills/subagents.yaml"))
+	if err != nil {
+		t.Fatalf("read subagents bundle: %v", err)
+	}
+	if !strings.Contains(string(subagentsContent), "from-runtime-draft: true") {
+		t.Fatalf("expected runtime draft subagents bundle content, got %q", string(subagentsContent))
+	}
 }
 
 func TestInitStep0InvalidRuntimeDraftDoesNotPublishFallbackOverview(t *testing.T) {
@@ -369,7 +377,7 @@ func (step0DraftPublishingRunner) Run(ctx context.Context, task acpruntime.Task)
 	if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, "charter-overview.md"), []byte("# Project Constitution\n\nThis came from runtime draft output.\n"), 0o644); err != nil {
 		return acpruntime.Result{}, err
 	}
-	if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, "baseline-subagents.yaml"), workspace.BaselineSubagentsContent(), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, "baseline-subagents.yaml"), []byte("agents:\n  - id: runtime-draft\n    from-runtime-draft: true\n"), 0o644); err != nil {
 		return acpruntime.Result{}, err
 	}
 	result := contracts.TaskResult{

@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/GrinRus/ProvenArch/internal/runtime/compatibilityregistry"
 )
 
 func ReconcileOutputsAtDraftRoot(draftRoot string, manifest Manifest) (bool, error) {
@@ -17,7 +19,7 @@ func ReconcileOutputsAtDraftRoot(draftRoot string, manifest Manifest) (bool, err
 	for idx, output := range manifest.Outputs {
 		reconciled, err := reconcileOutputAtDraftRoot(cleanDraftRoot, output)
 		if err != nil {
-			return changed, fmt.Errorf("runtime draft manifest outputs[%d].path: %w", idx, err)
+			return changed, fmt.Errorf("%s: runtime draft manifest outputs[%d].path: %w", compatibilityregistry.RuleDraftRootReconcileExistingOutputs, idx, err)
 		}
 		if reconciled {
 			changed = true

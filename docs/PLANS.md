@@ -892,6 +892,58 @@ EP-20260421-architecture-parity-closure
 
 ---
 
+## ExecPlan
+
+### Plan ID
+EP-20260421-flow-audit-followups
+
+### Context
+Полный аудит flow/project/tests/prompts/artifacts после closure step-scoped runtime parity показал, что core pipeline уже соответствует docs-first модели, но остаются четыре системных класса риска: prompt/source-of-truth drift между editable workspace prompt packs и hardcoded runtime policy, неполная модульная декомпозиция orchestrator/UI, transitional compatibility logic в runtime repair/canonicalization, и ограниченное интеграционное покрытие UI/harness относительно критичности live gate.
+
+### Goals (must have)
+- [ ] Зафиксировать явный layered contract между workspace prompt packs, enforced runtime step policy и provider-specific wrappers
+- [ ] Довести orchestrator lifecycle до более жёстких ownership boundaries без скрытых cross-cutting side effects
+- [ ] Сузить transitional compatibility/reconciliation logic до time-boxed, наблюдаемого слоя с понятным removal path
+- [ ] Укрепить test surface там, где реальное поведение всё ещё опирается на крупные stateful компоненты и shell harness
+- [ ] Сохранить текущие public contracts и release verdict semantics без расширения user-facing knobs
+
+### Non-goals
+- [ ] Не менять `workspace.yaml`, `schemas/taskresult.schema.json`, release verdict/report contract
+- [ ] Не добавлять новых live providers beyond `claude-code` / `qwen-code`
+- [ ] Не превращать manual live matrix gate в required CI
+
+### Approach
+1) Вынести prompt composition contract в отдельный internal слой: editable workspace prompt packs становятся declarative content layer, а hardcoded Go policy остаётся explicit enforcement layer с проверяемым merge order.
+2) Продолжить modular split orchestrator/UI: выделить runtime dispatch, compile/publish, run-registry/logging и semantic guards из `orchestrator.go`; в UI вынести API/polling state в hooks/client layer, оставив `App.tsx` route shell.
+3) Инвентаризировать transitional compatibility logic (`draft reconcile`, `legacy add_doc_artifact`, collect repair normalization), задать removal criteria и перевести каждое исключение в наблюдаемый compatibility registry/test matrix.
+4) Усилить integration tests для active run lifecycle, git actions UI, shell harness interruption/recovery и prompt/source-of-truth parity между providers.
+
+### Files expected to change
+- `internal/orchestrator/*`
+- `internal/runtime/steppolicy/*`
+- `internal/runtime/qwencode/*`
+- `internal/runtime/claudecode/*`
+- `internal/runtimedrafts/*`
+- `internal/api/*`
+- `ui/src/*`
+- `scripts/*`
+- `scripts/tests/*`
+- `docs/ARCHITECTURE.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [ ] Runtime prompt behavior имеет один documented source-of-truth layering и тест на composition order
+- [ ] `internal/orchestrator/orchestrator.go` и `ui/src/App.tsx` заметно уменьшаются за счёт выделения lifecycle/state modules без functional drift
+- [ ] Transitional compatibility paths имеют явный inventory, tests и removal notes вместо неявного накопления
+- [ ] UI/harness integration coverage закрывает active running, interruption/recovery и git action flows
+- [ ] DoD проходит: `make contracts`, `make test`, `make lint`, `make build`
+
+### Risks
+- Главный риск — сломать текущую стабильность ради structural cleanup. Снижение риска: делать только reviewable slices с parity tests и без изменения public contracts.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.

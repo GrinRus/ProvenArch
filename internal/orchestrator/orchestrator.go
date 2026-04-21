@@ -1202,48 +1202,10 @@ func (e *pipelineExecution) runStepConstitution(ctx context.Context, stepID stri
 	if err != nil {
 		return err
 	}
-	draft, _, err := validateRequiredRuntimeDraftArtifacts(execution.Task)
-	if err != nil {
+	if err := e.publishValidatedConstitutionDrafts(execution); err != nil {
 		return err
 	}
-	e.step0DraftManifest = &draft
-	e.step0DraftRoot = execution.Task.DraftFinalRoot
-	e.addArtifacts(Artifact{
-		Path:  path.Join(execution.Task.ArtifactRoot, constitutionDraftManifestFile),
-		Kind:  "taskrun",
-		Label: "Constitution Draft Manifest",
-	})
-	publishedDrafts, err := applyRuntimeDraftOutputs(
-		e.workspace,
-		execution.Task.DraftFinalRoot,
-		draft,
-		"",
-		func(canonicalPath string) bool {
-			switch canonicalPath {
-			case "charter/overview.md", "skills/subagents.yaml":
-				return true
-			default:
-				return false
-			}
-		},
-	)
-	if err != nil {
-		return fmt.Errorf("publish constitution runtime drafts: %w", err)
-	}
-	e.addArtifacts(publishedDrafts...)
-
-	e.logInfo(stepID, "", "materializing constitution support artifacts", nil)
-	step0Contract, hasStep0Contract, err := loadStep0WizardContract(e.workspace)
-	if err != nil {
-		e.addWarning(fmt.Sprintf("step0_wizard_contract_invalid: %v; fallback baseline constitution support artifacts are used", err))
-	}
-	if !hasStep0Contract {
-		e.addWarning("step0_wizard_contract_missing: charter/wizard/step0-contract.json not found; fallback baseline constitution support artifacts are used")
-	}
-	if err := e.writeConstitutionSupportArtifacts(hasStep0Contract && err == nil, step0Contract); err != nil {
-		return err
-	}
-	if err := writeBaselineBundle(e.workspace); err != nil {
+	if err := e.materializeConstitutionSupportSurface(stepID); err != nil {
 		return err
 	}
 	return nil
@@ -2645,8 +2607,8 @@ func summarizePartialFailures(failures []runtimeShardFailure) string {
 	return fmt.Sprintf("partial shard failures (%d): %s", len(parts), strings.Join(parts, "; "))
 }
 
-func writeBaselineBundle(ws workspace.Root) error {
-	return ws.EnsureBaselineBundle()
+func writeBaselineSupportBundle(ws workspace.Root) error {
+	return ws.EnsureBaselineSupportBundle()
 }
 
 func collectRepoScopes(repos []workspace.RepoSource) []string {

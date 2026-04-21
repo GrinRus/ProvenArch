@@ -140,6 +140,7 @@ arch-workspace/
 - agents: `domain-analyst`, `architect-aggregator`, `system-analyst-qa`
 - skills: `service-inventory`, `interface-extraction`, `integration-mapping`, `datastore-mapping`, `cicd-mapping`, `ownership-coverage`, `findings`, `proposals`
 - prompt packs: `constitution`, `collect-context`, `findings`, `proposals`, `qa`
+- prompt packs остаются редактируемыми Git-tracked artifacts, но используются как content layer; enforced runtime policy и contract guardrails задаются internal step-policy слоем
 
 Статус epics и границы scope фиксируются только в секции
 `0. Canonical Stakeholder Matrix (source of truth)` этого документа.

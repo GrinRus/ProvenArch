@@ -69,9 +69,10 @@
    - Step registry (шаги init pipeline)
    - Step 0 support-artifacts materialization читает persisted wizard contract `charter/wizard/step0-contract.json`
    - при missing/invalid wizard contract применяется deterministic baseline fallback только для support artifacts, а warning фиксируется в run diagnostics
-   - baseline bundle seeding выполняется create-if-missing, без перезаписи пользовательских правок
+   - baseline bundle seeding выполняется create-if-missing, без перезаписи пользовательских правок; support-only bundle не пишет canonical `skills/subagents.yaml`, поэтому source of truth для него остаётся validated `constitution-draft.json`
    - Готовит ContextPack/PromptPack
    - Загружает baseline bundle agents/skills/prompts из workspace
+   - workspace prompt packs подключаются к runtime prompt composition как editable content layer после shared step policy/invariants и до provider-specific footer; они не могут ослаблять enforced contract rules
    - Работает с единым central workspace (`arch-workspace`) как корнем артефактов MVP
    - Валидирует `workspace.yaml` по `schemas/workspace.schema.json`
    - Разрешает repo sources (`path`/`git_url`) в локальные checkout перед анализом через системный `git` текущего пользователя/runner
@@ -156,6 +157,7 @@
    - runtime draft manifest contract для `step0/2/4` (`version=1`, `run_id`, `step_id`, `step_contract`, `agent_role`, `outputs[]`) вынесен в shared internal source of truth и используется и writer-ами, и validator-ами без дублирования структур
    - validators для collect manifests и runtime draft manifests read-only по умолчанию: hidden filesystem mutation внутри validation не допускается
    - filesystem reconciliation разрешён только как явная runtime repair/canonicalization стадия до финальной validation; сама validation лишь проверяет manifest contract и наличие referenced files
+   - active compatibility surface зафиксирована internal registry и ограничена тремя safe drift paths: artifact-root-relative `documents[].path` normalization, duplicate legacy `add_doc_artifact` drop при уже валидной canonical surface и draft-root reconcile только для уже записанных canonical draft files в явной repair stage
    - `qwen` для draft-only шагов (`step0/2/4`) валидирует required draft artifacts до возврата в orchestrator и делает один constrained artifact-repair retry (`write_root + draft_final_root`, `changeset: []` preferred) вместо silent acceptance legacy draft schemas
    - `qwen` для draft-only шагов также имеет post-artifact stall recovery: если canonical draft manifest и draft files уже появились, но provider перестал писать в stdout/stderr и перестал мутировать `write_root`/`draft_final_root`, runtime принудительно завершает process и запускает один constrained retry, который добирает только финальный `TaskResult`
    - `claude-code` и `qwen-code` используют shared provider-agnostic step-policy/prompt layer для required artifacts, retry bans и explicit negative rules; provider-specific остаются только command/process execution, pipe monitoring, transcript extraction и provider failure classification

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -69,6 +70,57 @@ func loadStep0WizardContract(ws workspace.Root) (step0WizardContract, bool, erro
 	}
 
 	return contract, true, nil
+}
+
+func (e *pipelineExecution) publishValidatedConstitutionDrafts(execution runtimeTaskExecution) error {
+	draft, _, err := validateRequiredRuntimeDraftArtifacts(execution.Task)
+	if err != nil {
+		return err
+	}
+	e.step0DraftManifest = &draft
+	e.step0DraftRoot = execution.Task.DraftFinalRoot
+	e.addArtifacts(Artifact{
+		Path:  path.Join(execution.Task.ArtifactRoot, constitutionDraftManifestFile),
+		Kind:  "taskrun",
+		Label: "Constitution Draft Manifest",
+	})
+	publishedDrafts, err := applyRuntimeDraftOutputs(
+		e.workspace,
+		execution.Task.DraftFinalRoot,
+		draft,
+		"",
+		func(canonicalPath string) bool {
+			switch canonicalPath {
+			case "charter/overview.md", "skills/subagents.yaml":
+				return true
+			default:
+				return false
+			}
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("publish constitution runtime drafts: %w", err)
+	}
+	e.addArtifacts(publishedDrafts...)
+	return nil
+}
+
+func (e *pipelineExecution) materializeConstitutionSupportSurface(stepID string) error {
+	e.logInfo(stepID, "", "materializing constitution support artifacts", nil)
+	step0Contract, hasStep0Contract, err := loadStep0WizardContract(e.workspace)
+	if err != nil {
+		e.addWarning(fmt.Sprintf("step0_wizard_contract_invalid: %v; fallback baseline constitution support artifacts are used", err))
+	}
+	if !hasStep0Contract {
+		e.addWarning("step0_wizard_contract_missing: charter/wizard/step0-contract.json not found; fallback baseline constitution support artifacts are used")
+	}
+	if err := e.writeConstitutionSupportArtifacts(hasStep0Contract && err == nil, step0Contract); err != nil {
+		return err
+	}
+	if err := writeBaselineSupportBundle(e.workspace); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (e *pipelineExecution) writeConstitutionSupportArtifacts(useWizardContract bool, contract step0WizardContract) error {

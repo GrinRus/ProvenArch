@@ -693,6 +693,7 @@ Task payload JSON:
 		`- Use ACP-generated workspace artifacts as evidence only for ACP runtime/report state, not as a substitute for repository analysis.`,
 	}, "\n")
 	docFirstPolicy := buildDocFirstFilesystemPolicy(task)
+	workspacePromptPack := steppolicy.WorkspacePromptPackSection(task)
 	retryHint := ""
 	if mode != promptRetryNone {
 		retryLines := []string{
@@ -764,6 +765,7 @@ STRICT CONTRACT (must pass):
 %s
 %s
 %s
+%s
 
 Set meta fields exactly:
 - meta.task_id = %q
@@ -782,7 +784,7 @@ Schema-valid template for this task (copy structure and field TYPES, then refine
 %s
 
 Serialized runtime task JSON (context only):
-%s`, acpruntime.ProviderClaudeCode, topLevelCompatibilityRule, stepPolicy, repositoryEvidencePolicy, docFirstPolicy, retryHint, nonEmptyResultHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderClaudeCode, "claude-cli", task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, task.ShardID, primaryRepoScope, repoScopesJSON, pathScopesJSON, buildDirectTaskResultTemplateJSON(task), strings.TrimSpace(string(taskPayload))))
+%s`, acpruntime.ProviderClaudeCode, topLevelCompatibilityRule, stepPolicy, repositoryEvidencePolicy, docFirstPolicy, workspacePromptPack, retryHint, nonEmptyResultHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderClaudeCode, "claude-cli", task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, task.ShardID, primaryRepoScope, repoScopesJSON, pathScopesJSON, buildDirectTaskResultTemplateJSON(task), strings.TrimSpace(string(taskPayload))))
 }
 
 func buildDirectTaskResultTemplateJSON(task acpruntime.Task) string {

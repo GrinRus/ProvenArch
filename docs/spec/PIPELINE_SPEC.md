@@ -195,6 +195,7 @@ Step 0 materialization policy:
 - если contract отсутствует/невалиден, применяется baseline fallback materialization;
 - fallback фиксируется warning-сообщением в run diagnostics (`GET /api/pipeline/runs/<run_id>.warnings`).
 - runtime draft не пишет canonical `charter/*` напрямую; compile/materialization layer остаётся единственной publish surface.
+- support-only baseline bundle seeding не пишет canonical `skills/subagents.yaml`; этот файл публикуется только из validated `constitution-draft.json`.
 
 ### Step 1 — Collect context (runtime step)
 Inputs:
@@ -207,6 +208,7 @@ Inputs:
 
 Runtime focuses on:
 - arbitrary stacks через выбранный headless provider (`claude-code|qwen-code`) + baseline skill/prompt bundle, без фиксированного whitelist parser implementations в MVP
+- workspace prompt packs участвуют в composed prompt как editable content layer; enforced runtime policy/invariants задаются internal shared step-policy слоем и не могут быть ослаблены содержимым prompt pack
 - service topology и entrypoints
 - interfaces (HTTP/gRPC/events)
 - external systems/integrations

@@ -191,6 +191,21 @@ function createFetchMock(state: FetchMockState = {}) {
       return jsonResponse({ ok: true });
     }
 
+    if (method === "POST" && url === "/api/git/commit") {
+      const payload = JSON.parse(String(init?.body ?? "{}")) as { message?: string };
+      return jsonResponse({
+        status: "ok",
+        output: `committed: ${payload.message ?? ""}`.trim(),
+      });
+    }
+
+    if (method === "POST" && url === "/api/git/proposal-branch") {
+      const payload = JSON.parse(String(init?.body ?? "{}")) as { name?: string };
+      return jsonResponse({
+        branch: payload.name ?? "proposal/beta-refresh",
+      });
+    }
+
     return jsonResponse(
       {
         error: {
@@ -218,6 +233,7 @@ vi.mock("mermaid", () => {
 
 describe("App", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -340,6 +356,7 @@ describe("App", () => {
 
     await screen.findByTestId("run-status-panel");
     expect(screen.getByTestId("run-status-value").textContent).toBe("failed");
+    expect(screen.getByTestId("run-lifecycle-value").textContent).toBe("terminal");
     expect(screen.getByText("Current step: refresh.step3.findings")).toBeInTheDocument();
     expect(screen.getByText("Error code: run_partial_failed")).toBeInTheDocument();
     expect(screen.getByText("Error: runtime draft manifest invalid")).toBeInTheDocument();
@@ -375,9 +392,252 @@ describe("App", () => {
 
     await screen.findByTestId("run-status-panel");
     expect(screen.getByTestId("run-status-value").textContent).toBe("running");
+    expect(screen.getByTestId("run-lifecycle-value").textContent).toBe("active");
     expect(screen.getByText("Current step: refresh.step2.asis_docs")).toBeInTheDocument();
     expect(screen.getByTestId("run-status-warnings-empty").textContent).toContain("Warnings: none");
   });
+
+  it("renders incomplete lifecycle status when run error code marks incomplete cycle", async () => {
+    const runID = "run-incomplete";
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runID,
+        runStarted: true,
+        runStatus: {
+          [runID]: {
+            run_id: runID,
+            pipeline: "refresh",
+            status: "failed",
+            started_at: "2026-04-03T12:00:00Z",
+            finished_at: "2026-04-03T12:05:00Z",
+            current_step: "refresh.step4.proposals",
+            warnings: ["infra_incomplete_cycle breadcrumb"],
+            error_code: "infra_incomplete_cycle",
+            error: "profile exited before completion",
+          },
+        },
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("tab-runs"));
+
+    await screen.findByTestId("run-status-panel");
+    expect(screen.getByTestId("run-lifecycle-value").textContent).toBe("incomplete");
+  });
+
+  it("renders recovered lifecycle status for reconciled runs", async () => {
+    const runID = "run-recovered";
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runID,
+        runStarted: true,
+        runStatus: {
+          [runID]: {
+            run_id: runID,
+            pipeline: "refresh",
+            status: "failed",
+            started_at: "2026-04-03T12:00:00Z",
+            finished_at: "2026-04-03T12:05:00Z",
+            current_step: "refresh.step1.collect",
+            warnings: [],
+            error_code: "run_reconciled_after_restart",
+            error: "orphaned run reconciled after restart",
+          },
+        },
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("tab-runs"));
+
+    await screen.findByTestId("run-status-panel");
+    expect(screen.getByTestId("run-lifecycle-value").textContent).toBe("recovered");
+  });
+
+  it("switches to the next available run when the selected run disappears during refresh", async () => {
+    const baseFetch = createFetchMock();
+    let runListCalls = 0;
+    let staleRunStatusCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        runListCalls += 1;
+        if (runListCalls === 1) {
+          return jsonResponse({
+            items: [
+              {
+                run_id: "run-stale",
+                pipeline: "refresh",
+                status: "running",
+                started_at: "2026-04-03T12:00:00Z",
+                finished_at: null,
+                warnings: [],
+                error_code: null,
+                error: null,
+              },
+            ],
+          });
+        }
+        return jsonResponse({
+          items: [
+            {
+              run_id: "run-fresh",
+              pipeline: "refresh",
+              status: "succeeded",
+              started_at: "2026-04-03T12:01:00Z",
+              finished_at: "2026-04-03T12:01:15Z",
+              warnings: [],
+              error_code: null,
+              error: null,
+            },
+          ],
+        });
+      }
+
+      if (method === "GET" && url === "/api/pipeline/runs/run-stale") {
+        staleRunStatusCalls += 1;
+        if (staleRunStatusCalls >= 2) {
+          return jsonResponse({
+            error: {
+              code: "not_found",
+              message: "run-stale no longer exists",
+            },
+          }, 404);
+        }
+        return jsonResponse({
+          run_id: "run-stale",
+          pipeline: "refresh",
+          status: "running",
+          started_at: "2026-04-03T12:00:00Z",
+          finished_at: null,
+          current_step: "refresh.step2.asis_docs",
+          warnings: [],
+          error_code: null,
+          error: null,
+        });
+      }
+
+      if (method === "GET" && url === "/api/pipeline/runs/run-fresh") {
+        return jsonResponse({
+          run_id: "run-fresh",
+          pipeline: "refresh",
+          status: "succeeded",
+          started_at: "2026-04-03T12:01:00Z",
+          finished_at: "2026-04-03T12:01:15Z",
+          warnings: [],
+          error_code: null,
+          error: null,
+        });
+      }
+
+      if (method === "GET" && url === "/api/pipeline/runs/run-stale/artifacts") {
+        return jsonResponse({ run_id: "run-stale", artifacts: [] });
+      }
+
+      if (method === "GET" && url === "/api/pipeline/runs/run-fresh/artifacts") {
+        return jsonResponse({ run_id: "run-fresh", artifacts: [] });
+      }
+
+      if (method === "GET" && url.startsWith("/api/pipeline/runs/run-stale/logs?")) {
+        return jsonResponse({ run_id: "run-stale", items: [], next_cursor: 0, eof: true });
+      }
+
+      if (method === "GET" && url.startsWith("/api/pipeline/runs/run-fresh/logs?")) {
+        return jsonResponse({ run_id: "run-fresh", items: [], next_cursor: 0, eof: true });
+      }
+
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.click(screen.getByTestId("tab-runs"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("run-status-run-id").textContent).toBe("run-stale");
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("run-status-run-id").textContent).toBe("run-fresh");
+    }, { timeout: 4000 });
+    expect(screen.getByText("Selected run no longer exists; switched to run-fresh.")).toBeInTheDocument();
+  }, 10000);
+
+  it("keeps the selected run when history refresh is temporarily empty but run status still exists", async () => {
+    const baseFetch = createFetchMock();
+    let runListCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        runListCalls += 1;
+        if (runListCalls === 1) {
+          return jsonResponse({
+            items: [
+              {
+                run_id: "run-stale",
+                pipeline: "refresh",
+                status: "running",
+                started_at: "2026-04-03T12:00:00Z",
+                finished_at: null,
+                warnings: [],
+                error_code: null,
+                error: null,
+              },
+            ],
+          });
+        }
+        return jsonResponse({ items: [] });
+      }
+
+      if (method === "GET" && url === "/api/pipeline/runs/run-stale") {
+        return jsonResponse({
+          run_id: "run-stale",
+          pipeline: "refresh",
+          status: "running",
+          started_at: "2026-04-03T12:00:00Z",
+          finished_at: null,
+          current_step: "refresh.step2.asis_docs",
+          warnings: [],
+          error_code: null,
+          error: null,
+        });
+      }
+
+      if (method === "GET" && url === "/api/pipeline/runs/run-stale/artifacts") {
+        return jsonResponse({ run_id: "run-stale", artifacts: [] });
+      }
+
+      if (method === "GET" && url.startsWith("/api/pipeline/runs/run-stale/logs?")) {
+        return jsonResponse({ run_id: "run-stale", items: [], next_cursor: 0, eof: true });
+      }
+
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.click(screen.getByTestId("tab-runs"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("run-status-run-id").textContent).toBe("run-stale");
+    });
+
+    await waitFor(() => {
+      expect(runListCalls).toBeGreaterThanOrEqual(2);
+    }, { timeout: 4000 });
+
+    expect(screen.getByTestId("run-status-run-id").textContent).toBe("run-stale");
+    expect(screen.queryByText(/Selected run no longer exists;/)).not.toBeInTheDocument();
+  }, 10000);
 
   it("shows diagrams surface in Results tab and renders Mermaid preview", async () => {
     const runID = "run-diagrams";
@@ -438,5 +698,31 @@ describe("App", () => {
 
     const saveCalls = fetchMock.mock.calls.filter((call) => call[0] === "/api/artifacts/write");
     expect(saveCalls.length).toBe(1);
+  });
+
+  it("executes git-helper commit and proposal-branch actions from Baseline tab", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("tab-baseline"));
+
+    const commitInput = await screen.findByLabelText("Commit message");
+    fireEvent.change(commitInput, { target: { value: "feat: tighten prompt policy" } });
+    fireEvent.click(screen.getByTestId("git-commit-btn"));
+
+    await screen.findByText("committed: feat: tighten prompt policy");
+
+    const branchInput = screen.getByLabelText("Proposal branch");
+    fireEvent.change(branchInput, { target: { value: "proposal/prompt-policy" } });
+    fireEvent.click(screen.getByTestId("git-proposal-branch-btn"));
+
+    await screen.findByText("checked out proposal/prompt-policy");
+
+    const commitCalls = fetchMock.mock.calls.filter((call) => call[0] === "/api/git/commit");
+    expect(commitCalls).toHaveLength(1);
+    const branchCalls = fetchMock.mock.calls.filter((call) => call[0] === "/api/git/proposal-branch");
+    expect(branchCalls).toHaveLength(1);
   });
 });

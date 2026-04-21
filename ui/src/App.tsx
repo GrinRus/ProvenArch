@@ -1,9 +1,26 @@
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 
-import { MermaidPreview } from "./components/MermaidPreview";
+import { BaselineGitPanel } from "./components/BaselineGitPanel";
 import { RunStatusPanel } from "./components/RunStatusPanel";
 import { RuntimeProfileSettingsPanel } from "./components/RuntimeProfileSettingsPanel";
 import { TabNav, type TabOption } from "./components/TabNav";
+import { fetchJSON, getErrorMessage } from "./lib/api";
+import {
+  activeStatuses,
+  dedupeArtifactsByPath,
+  finalStatuses,
+  formatTimestamp,
+  indexArtifactPath,
+  pickBootstrapRun,
+  reconcileSelectedRunID,
+  runLogsPageLimit,
+  splitListInput,
+} from "./lib/runState";
+
+const MermaidPreview = lazy(async () => {
+  const module = await import("./components/MermaidPreview");
+  return { default: module.MermaidPreview };
+});
 
 type Diagnostic = {
   level: "error" | "warning";
@@ -105,15 +122,6 @@ type RunLogsResponse = {
   items: RunLogEntry[];
   next_cursor: number;
   eof: boolean;
-};
-
-type APIErrorPayload = {
-  error?:
-    | string
-    | {
-        code?: string;
-        message?: string;
-      };
 };
 
 type RepoSourceMode = "path" | "git_url";
@@ -279,9 +287,6 @@ const runtimeStepProviderLabels: Record<(typeof runtimeStepProviderOrder)[number
   step4_proposals: "runtime.profile.steps.step4_proposals.provider",
 };
 
-const finalStatuses = new Set(["succeeded", "failed"]);
-const activeStatuses = new Set(["queued", "running"]);
-const runLogsPageLimit = 200;
 let guidedRepoSeed = 0;
 
 type TopTab = "setup" | "baseline" | "runs" | "results" | "settings";
@@ -312,64 +317,6 @@ function makeGuidedRepo(partial?: Partial<GuidedRepo>): GuidedRepo {
     git_url: partial?.git_url ?? "https://gitlab.example.com/group/repository.git",
     ref: partial?.ref ?? "",
   };
-}
-
-function getErrorMessage(payload: unknown, fallback: string): string {
-  const typed = payload as APIErrorPayload;
-  if (!typed || typeof typed !== "object") {
-    return fallback;
-  }
-  if (typeof typed.error === "string") {
-    return typed.error;
-  }
-  if (typed.error && typeof typed.error.message === "string") {
-    return typed.error.message;
-  }
-  return fallback;
-}
-
-async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
-  const payload = (await response.json()) as T;
-  if (!response.ok) {
-    throw new Error(getErrorMessage(payload, `request failed: ${url}`));
-  }
-  return payload;
-}
-
-function dedupeArtifactsByPath(items: Artifact[]): Artifact[] {
-  const deduped = new Map<string, Artifact>();
-  for (const artifact of items) {
-    const key = artifact.path.trim();
-    if (!key) {
-      continue;
-    }
-    deduped.set(key, { ...artifact, path: key });
-  }
-  return Array.from(deduped.values()).sort((left, right) => left.path.localeCompare(right.path));
-}
-
-function indexArtifactPath(artifacts: Artifact[], suffix: string): string | null {
-  const match = artifacts.find((artifact) => artifact.path.endsWith(suffix));
-  return match ? match.path : null;
-}
-
-function splitListInput(input: string): string[] {
-  return input
-    .split(/[,\n]/)
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
-}
-
-function formatTimestamp(value?: string | null): string {
-  if (!value) {
-    return "-";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toISOString().replace("T", " ").replace(".000Z", " UTC");
 }
 
 function normalizeRuntimeTimeoutValues(
@@ -465,39 +412,6 @@ function parseRuntimeExecutionPatch(draft: RuntimeExecutionDraft): RuntimeExecut
     failure_policy: failurePolicy,
     shard_discovery_mode: shardMode,
   };
-}
-
-function parseTimeOrMin(value?: string | null): number {
-  if (!value) {
-    return Number.NEGATIVE_INFINITY;
-  }
-  const parsed = Date.parse(value);
-  if (Number.isNaN(parsed)) {
-    return Number.NEGATIVE_INFINITY;
-  }
-  return parsed;
-}
-
-function pickBootstrapRun(items: RunListItem[]): RunListItem | null {
-  if (!Array.isArray(items) || items.length === 0) {
-    return null;
-  }
-  let newestActive: RunListItem | null = null;
-  let newestActiveStartedAt = Number.NEGATIVE_INFINITY;
-  for (const item of items) {
-    if (!activeStatuses.has(item.status)) {
-      continue;
-    }
-    const startedAt = parseTimeOrMin(item.started_at);
-    if (newestActive === null || startedAt > newestActiveStartedAt) {
-      newestActive = item;
-      newestActiveStartedAt = startedAt;
-    }
-  }
-  if (newestActive) {
-    return newestActive;
-  }
-  return items[0];
 }
 
 export default function App() {
@@ -802,8 +716,23 @@ export default function App() {
     try {
       const latestRuns = await loadRunList(100);
       if (runId) {
-        const selectedRunExists = latestRuns.some((item) => item.run_id === runId);
-        if (!selectedRunExists) {
+        const nextSelectedRunID = reconcileSelectedRunID(runId, latestRuns);
+        if (nextSelectedRunID !== runId) {
+          const previousStatus = runStatus?.status ?? null;
+          const currentStatus = await fetchRunStatus(runId, { allowMissing: true });
+          if (currentStatus) {
+            if (activeStatuses.has(currentStatus.status)) {
+              await fetchRunLogs(runId, false);
+              return;
+            }
+            const statusChanged = previousStatus !== currentStatus.status;
+            if (statusChanged || !runLogsEOF) {
+              await fetchRunLogsUntilEOF(runId);
+            }
+            return;
+          }
+          setSelectedArtifact("");
+          setSelectedArtifactContent("");
           setRunStatus((previous) => {
             if (previous && previous.run_id === runId) {
               return null;
@@ -812,6 +741,12 @@ export default function App() {
           });
           setArtifacts([]);
           resetRunLogs();
+          if (nextSelectedRunID) {
+            await handleSelectRun(nextSelectedRunID, { silentErrors: true });
+            setRunActionStatus(`Selected run no longer exists; switched to ${nextSelectedRunID}.`);
+          } else {
+            setRunID(null);
+          }
           return;
         }
         const previousStatus = runStatus?.status ?? null;
@@ -1012,8 +947,8 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" }
       });
-      const payload = (await response.json()) as ValidateResponse & APIErrorPayload;
-      setValidateResult(payload);
+      const payload = await response.json();
+      setValidateResult(payload as ValidateResponse);
       if (!response.ok) {
         throw new Error(getErrorMessage(payload, "workspace validation failed"));
       }
@@ -1212,14 +1147,34 @@ export default function App() {
     }
   }
 
-  async function fetchRunStatus(id: string): Promise<RunStatusResponse> {
-    const payload = await fetchJSON<RunStatusResponse>(`/api/pipeline/runs/${id}`);
-    setRunStatus(payload);
-    if (finalStatuses.has(payload.status)) {
+  async function fetchRunStatus(id: string): Promise<RunStatusResponse>;
+  async function fetchRunStatus(
+    id: string,
+    options: {
+      allowMissing: true;
+    }
+  ): Promise<RunStatusResponse | null>;
+  async function fetchRunStatus(
+    id: string,
+    options?: {
+      allowMissing?: boolean;
+    }
+  ): Promise<RunStatusResponse | null> {
+    const response = await fetch(`/api/pipeline/runs/${id}`);
+    const payload = await response.json();
+    if (response.status === 404 && options?.allowMissing) {
+      return null;
+    }
+    if (!response.ok) {
+      throw new Error(getErrorMessage(payload, `request failed: /api/pipeline/runs/${id}`));
+    }
+    const typed = payload as RunStatusResponse;
+    setRunStatus(typed);
+    if (finalStatuses.has(typed.status)) {
       await fetchArtifacts(id);
       await loadCoverageArtifacts();
     }
-    return payload;
+    return typed;
   }
 
   async function handleSelectRun(
@@ -1257,7 +1212,7 @@ export default function App() {
       const response = await fetch(`/api/pipeline/runs/${runId}/cancel`, {
         method: "POST"
       });
-      const payload = (await response.json()) as RunCancelResponse & APIErrorPayload;
+      const payload = await response.json();
 
       if (response.status === 202) {
         setRunActionStatus(`Cancel requested for ${runId}`);
@@ -1272,10 +1227,11 @@ export default function App() {
       }
 
       if (response.status === 404) {
-        setRunActionStatus("Selected run no longer exists.");
         const latestRuns = await loadRunList(100);
-        const selectedRunExists = latestRuns.some((item) => item.run_id === runId);
-        if (!selectedRunExists) {
+        const nextSelectedRunID = reconcileSelectedRunID(runId, latestRuns);
+        if (nextSelectedRunID !== runId) {
+          setSelectedArtifact("");
+          setSelectedArtifactContent("");
           setRunStatus((previous) => {
             if (previous && previous.run_id === runId) {
               return null;
@@ -1284,6 +1240,15 @@ export default function App() {
           });
           setArtifacts([]);
           resetRunLogs();
+          if (nextSelectedRunID) {
+            await handleSelectRun(nextSelectedRunID, { silentErrors: true });
+            setRunActionStatus(`Selected run no longer exists; switched to ${nextSelectedRunID}.`);
+          } else {
+            setRunID(null);
+            setRunActionStatus("Selected run no longer exists.");
+          }
+        } else {
+          setRunActionStatus("Selected run no longer exists.");
         }
         return;
       }
@@ -1677,22 +1642,16 @@ export default function App() {
             {editorStatus ? <p className="status ok">{editorStatus}</p> : null}
           </section>
 
-          <section className="panel">
-            <h2>Baseline: Git Helper Actions</h2>
-            <label htmlFor="gitMessage">Commit message</label>
-            <input id="gitMessage" value={gitMessage} onChange={(event) => setGitMessage(event.target.value)} />
-            <button type="button" onClick={() => void handleGitCommit()} disabled={busy}>
-              Commit workspace changes
-            </button>
-
-            <label htmlFor="proposalBranch">Proposal branch</label>
-            <input id="proposalBranch" value={proposalBranch} onChange={(event) => setProposalBranch(event.target.value)} />
-            <button type="button" onClick={() => void handleCreateProposalBranch()} disabled={busy}>
-              Create/Switch proposal branch
-            </button>
-
-            {gitStatus ? <p className="status ok">{gitStatus}</p> : null}
-          </section>
+          <BaselineGitPanel
+            busy={busy}
+            gitMessage={gitMessage}
+            proposalBranch={proposalBranch}
+            gitStatus={gitStatus}
+            onGitMessageChange={setGitMessage}
+            onProposalBranchChange={setProposalBranch}
+            onCommit={() => void handleGitCommit()}
+            onCreateProposalBranch={() => void handleCreateProposalBranch()}
+          />
         </>
       ) : null}
 
@@ -1908,7 +1867,9 @@ export default function App() {
                   <div data-testid="run-diagram-content-panel">
                     <h3 data-testid="run-diagram-selected-path">{selectedArtifact || "Diagram Preview"}</h3>
                     {selectedArtifactIsMermaid ? (
-                      <MermaidPreview source={selectedArtifactContent} title={selectedArtifact || "diagram"} />
+                      <Suspense fallback={<p className="hint">Loading diagram renderer...</p>}>
+                        <MermaidPreview source={selectedArtifactContent} title={selectedArtifact || "diagram"} />
+                      </Suspense>
                     ) : (
                       <pre data-testid="run-diagram-content">
                         {selectedArtifactContent || "Select a `.mmd` diagram artifact to preview."}

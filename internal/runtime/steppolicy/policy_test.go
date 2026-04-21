@@ -1,6 +1,8 @@
 package steppolicy
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -81,5 +83,35 @@ func TestDraftArtifactRepairHintsBanLegacyRepairSurface(t *testing.T) {
 	hints := strings.Join(DraftArtifactRepairHints(task, nil), "\n")
 	if !strings.Contains(hints, `Do NOT describe draft manifest repair via add_doc_artifact when the draft manifest already describes the publish surface.`) {
 		t.Fatalf("expected draft repair hints to ban legacy add_doc_artifact repair surface, got:\n%s", hints)
+	}
+}
+
+func TestWorkspacePromptPackSectionLoadsEditableContentLayer(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	packPath := filepath.Join(workspaceDir, "skills", "prompt-packs")
+	if err := os.MkdirAll(packPath, 0o755); err != nil {
+		t.Fatalf("mkdir prompt pack dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(packPath, "collect-context.md"), []byte("Collect pack line A\nCollect pack line B\n"), 0o644); err != nil {
+		t.Fatalf("write prompt pack: %v", err)
+	}
+
+	section := WorkspacePromptPackSection(acpruntime.Task{
+		StepID:    "init.step1.collect",
+		Workspace: workspaceDir,
+	})
+	required := []string{
+		`WORKSPACE PROMPT PACK CONTENT LAYER:`,
+		`Source file: "skills/prompt-packs/collect-context.md"`,
+		`editable content layer only`,
+		`Collect pack line A`,
+		`END WORKSPACE PROMPT PACK`,
+	}
+	for _, needle := range required {
+		if !strings.Contains(section, needle) {
+			t.Fatalf("expected workspace prompt-pack section to contain %q, got:\n%s", needle, section)
+		}
 	}
 }

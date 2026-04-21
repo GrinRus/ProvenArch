@@ -55,6 +55,7 @@ Task payload JSON:
 		`- Use ACP-generated workspace artifacts as evidence only for ACP runtime/report state, not as a substitute for repository analysis.`,
 	}, "\n")
 	docFirstPolicy := buildDocFirstFilesystemPolicy(task)
+	workspacePromptPack := steppolicy.WorkspacePromptPackSection(task)
 	strictResultHint := strings.Join([]string{
 		`STRICT RESULT JSON MODE:`,
 		`- Prefer returning a direct TaskResult JSON object (without envelope wrappers).`,
@@ -155,6 +156,7 @@ STRICT CONTRACT (must pass):
 %s
 %s
 %s
+%s
 
 Set meta fields exactly:
 - meta.task_id = %q
@@ -173,7 +175,7 @@ Schema-valid template for this task (copy structure and field TYPES, then refine
 %s
 
 Serialized runtime task JSON (context only):
-%s`, acpruntime.ProviderQwenCode, topLevelCompatibilityRule, stepPolicy, repositoryEvidencePolicy, docFirstPolicy, strictResultHint, finalResponseDiscipline, retryHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderQwenCode, task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, task.ShardID, primaryRepoScope, repoScopesJSON, pathScopesJSON, buildTaskResultTemplateJSON(task), retryTemplate, strings.TrimSpace(string(taskPayload))))
+%s`, acpruntime.ProviderQwenCode, topLevelCompatibilityRule, stepPolicy, repositoryEvidencePolicy, docFirstPolicy, workspacePromptPack, strictResultHint, finalResponseDiscipline, retryHint, task.TaskID, task.StepID, task.RunID, acpruntime.ProviderQwenCode, task.StartedAtUTC.UTC().Format(time.RFC3339), task.Workspace, task.ShardID, primaryRepoScope, repoScopesJSON, pathScopesJSON, buildTaskResultTemplateJSON(task), retryTemplate, strings.TrimSpace(string(taskPayload))))
 }
 
 func buildTaskResultTemplateJSON(task acpruntime.Task) string {
