@@ -105,6 +105,14 @@ func (r HeadlessRunner) recoverAfterStall(
 
 	retryResult, retryErr := runQwenCommand(ctx, task, command, r.Args, stallRetryOptions(options, stalled.Diagnostic))
 	if retryErr != nil {
+		var retryStalled collectStallError
+		if errors.As(retryErr, &retryStalled) {
+			emitRetryExhaustedDiagnostic(task, retryStalled.Diagnostic, "fresh_process")
+			if isProviderUnavailableText(retryResult.Stdout, retryResult.Stderr, retryErr) {
+				return true, acpruntime.Result{}, wrapArtifactProviderUnavailable(task, "retry", retryResult, "provider unavailable after fresh-process stall retry", retryErr)
+			}
+			return true, acpruntime.Result{}, wrapArtifactContractFailure(task, "retry", retryResult, "fresh-process retry stalled before producing required artifacts", retryErr)
+		}
 		return true, acpruntime.Result{}, classifyRunFailure(task, retryResult, retryErr)
 	}
 	if err := repairAndValidateArtifacts(task); err != nil {
@@ -120,10 +128,9 @@ func (r HeadlessRunner) recoverAfterStall(
 func stallRetryOptions(options runQwenOptions, diagnostic collectStallDiagnostic) runQwenOptions {
 	retryOptions := options
 	if diagnostic.StallPhase == collectStallPhasePreArtifact {
-		// A pre-artifact retry is the last-chance full rerun. Disable only the
-		// pre-artifact collect sentinel so the second attempt gets the normal
-		// step-timeout budget without losing post-artifact stall recovery.
-		retryOptions.DisableCollectPreArtifactStall = true
+		// The second attempt gets a wider but still bounded pre-artifact grace
+		// window, while preserving post-artifact stall recovery.
+		retryOptions.CollectPreArtifactWindow = collectRetryPreArtifactWindow
 	}
 	return retryOptions
 }

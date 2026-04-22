@@ -174,8 +174,8 @@ func TestStallRetryOptionsDisablesCollectMonitorForPreArtifactRetry(t *testing.T
 	if !got.EnableCollectStallMonitor {
 		t.Fatal("expected collect stall monitor to remain enabled for post-artifact recovery")
 	}
-	if !got.DisableCollectPreArtifactStall {
-		t.Fatal("expected pre-artifact collect stall detection to be disabled for retry")
+	if got.CollectPreArtifactWindow != collectRetryPreArtifactWindow {
+		t.Fatalf("expected pre-artifact retry window %s, got %s", collectRetryPreArtifactWindow, got.CollectPreArtifactWindow)
 	}
 	if !got.EnableDraftStallMonitor {
 		t.Fatal("expected draft stall monitor to remain enabled")
@@ -194,15 +194,15 @@ func TestStallRetryOptionsKeepsCollectMonitorForPostArtifactRetry(t *testing.T) 
 	if !got.EnableCollectStallMonitor {
 		t.Fatal("expected collect stall monitor to stay enabled for post-artifact handling")
 	}
-	if got.DisableCollectPreArtifactStall {
-		t.Fatal("expected pre-artifact stall detection to stay enabled outside pre-artifact retries")
+	if got.CollectPreArtifactWindow != 0 {
+		t.Fatalf("expected default pre-artifact window on non-pre-artifact retries, got %s", got.CollectPreArtifactWindow)
 	}
 	if !got.EnableDraftStallMonitor {
 		t.Fatal("expected draft stall monitor to remain enabled")
 	}
 }
 
-func TestMonitorCollectStallSkipsPreArtifactWhenDisabled(t *testing.T) {
+func TestMonitorCollectStallHonorsConfiguredPreArtifactWindow(t *testing.T) {
 	t.Parallel()
 
 	workspace := t.TempDir()
@@ -212,7 +212,7 @@ func TestMonitorCollectStallSkipsPreArtifactWhenDisabled(t *testing.T) {
 	}
 
 	task := acpruntime.Task{WriteRoot: writeRoot}
-	tracker := newCommandActivityTracker(time.Now().Add(-time.Hour))
+	tracker := newCommandActivityTracker(time.Now().Add(-1500 * time.Millisecond))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -222,13 +222,13 @@ func TestMonitorCollectStallSkipsPreArtifactWhenDisabled(t *testing.T) {
 	}
 	done := make(chan monitorResult, 1)
 	go func() {
-		err, stalled := monitorCollectStall(ctx, nil, task, tracker, false)
+		err, stalled := monitorCollectStall(ctx, nil, task, tracker, 5*time.Second)
 		done <- monitorResult{err: err, stalled: stalled}
 	}()
 
 	select {
 	case result := <-done:
-		t.Fatalf("expected disabled pre-artifact monitor to keep waiting, got stalled=%v err=%v", result.stalled, result.err)
+		t.Fatalf("expected extended pre-artifact window to keep waiting, got stalled=%v err=%v", result.stalled, result.err)
 	case <-time.After(2500 * time.Millisecond):
 	}
 
@@ -241,6 +241,40 @@ func TestMonitorCollectStallSkipsPreArtifactWhenDisabled(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected monitor to stop after context cancellation")
+	}
+}
+
+func TestMonitorCollectStallTripsAfterConfiguredPreArtifactWindow(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	writeRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "collect")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+
+	task := acpruntime.Task{WriteRoot: writeRoot}
+	tracker := newCommandActivityTracker(time.Now().Add(-2 * time.Second))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan collectStallError, 1)
+	go func() {
+		err, stalled := monitorCollectStall(ctx, nil, task, tracker, time.Second)
+		if !stalled {
+			done <- collectStallError{}
+			return
+		}
+		done <- err
+	}()
+
+	select {
+	case result := <-done:
+		if !errors.Is(result, errCollectStalledBeforeArtifacts) {
+			t.Fatalf("expected pre-artifact stall, got %v", result)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("expected configured pre-artifact window to trip")
 	}
 }
 
