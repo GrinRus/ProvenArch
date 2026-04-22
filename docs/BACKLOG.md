@@ -2,7 +2,7 @@
 
 Этот backlog описывает эпики реализации, критерии приёмки MVP и рекомендуемую PR-level нарезку.
 Для MVP-эпиков `Suggested PR slices` зафиксированы прямо в этом файле.
-Required CI для MVP опирается на schema/contracts, synthetic fixtures, fake/recorded runner artifacts и не требует live headless provider binaries.
+Required CI для MVP опирается на schema/contracts, synthetic fixtures, fake runner + recorded artifacts и не требует live headless provider binaries.
 
 ## Epic 1 — Управление workspace
 Acceptance:
@@ -42,13 +42,13 @@ Acceptance:
 - поддерживается передача PromptPack + subagents + skills
 - adapter работает поверх baseline bundle agents/skills/prompts
 - persisted runtime execution metadata сохраняется в `reports/taskruns/`
-- required tests используют fake/recorded runner harness вместо live provider binaries
+- required tests используют fake runner + artifact fixtures вместо live provider binaries
 
 Suggested PR slices:
 - `3A runner interface`
 - `3B process execution + stdout/stderr`
 - `3C taskrun persistence`
-- `3D fake runner + recorded artifact-only harness`
+- `3D fake runner + artifact-fixture harness`
 
 ## Epic 4 — Model store (entity-per-file)
 Acceptance:
@@ -228,6 +228,14 @@ Suggested PR slices:
 - Risk: medium/high (риск удалить скрыто используемые файлы или ухудшить regression/review UX)
 - Next step: подтвердить explicit ownership и usage contracts, затем принять retain/remove/dedupe решение отдельным PR.
 
+3) Owner decision по `docs/LOCAL_FULL_RUN_AI_ADVENT.md`
+- Owner: ACP maintainers + docs owner
+- Risk: low/medium (риск держать ещё один reference runbook и накапливать drift)
+- Next step: после merge подтвердить, остаётся ли документ отдельным convenience runbook, либо схлопывается в pointer/appendix после дополнительного сокращения.
+
 Resolved (2026-04-05):
 - `slugify` дедупликация между подсистемами выполнена через `internal/slugutil` + regression tests.
 - `.codex/model_instructions.md` удалён из tracked surface в cleanup-срезе.
+
+Follow-up note (2026-04-22):
+- статус `docs/BACKLOG.md` как active planning surface vs reference/history требует отдельного owner decision; этот cleanup-slice синхронизирует только terminology, не меняя роль документа.
