@@ -365,6 +365,97 @@ func TestGeneratedArtifactsPolicyIsDocumented(t *testing.T) {
 	assertContains(t, fixtures, "human-readable deterministic export")
 }
 
+func TestArtifactFixtureTerminologyIsConsistent(t *testing.T) {
+	t.Parallel()
+
+	required := map[string][]string{
+		"README.md":                             {"synthetic fixtures and recorded artifacts", "artifact fixtures"},
+		"docs/ARCHITECTURE.md":                  {"artifact fixtures"},
+		"docs/spec/API_SPEC.md":                 {"artifact fixtures"},
+		"docs/TESTING_STRATEGY.md":              {"artifact fixtures", "recorded artifacts"},
+		"docs/BACKLOG.md":                       {"fake runner + artifact fixtures", "recorded artifacts"},
+		"fixtures/README.md":                    {"recorded artifacts"},
+		"internal/runtime/claudecode/README.md": {"artifact fixtures"},
+	}
+	forbidden := []string{
+		"recordedrunner",
+		"recorded runner outputs",
+		"recorded runner harness",
+		"recorded runtime outputs",
+		"fake/recorded runner",
+	}
+
+	for path, tokens := range required {
+		path := path
+		tokens := tokens
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			content := strings.ToLower(readDoc(t, path))
+			for _, marker := range forbidden {
+				if strings.Contains(content, marker) {
+					t.Fatalf("expected %s to avoid stale recorded-runner marker %q", path, marker)
+				}
+			}
+			found := false
+			for _, token := range tokens {
+				if strings.Contains(content, strings.ToLower(token)) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("expected %s to use artifact-fixture terminology", path)
+			}
+		})
+	}
+}
+
+func TestActiveDocsAvoidStaleRecordedRunnerTerminologyRepoWide(t *testing.T) {
+	t.Parallel()
+
+	forbidden := []string{
+		"recordedrunner",
+		"recorded runner outputs",
+		"recorded runner harness",
+		"recorded runtime outputs",
+		"fake/recorded runner",
+	}
+	roots := []string{
+		"README.md",
+		"cmd",
+		"docs",
+		"internal",
+	}
+	allowPrefixes := []string{
+		"docs/archive/",
+		"internal/api/ui_dist/",
+	}
+
+	for _, rel := range collectRepoMarkdownFiles(t, roots, allowPrefixes) {
+		rel := rel
+		t.Run(rel, func(t *testing.T) {
+			t.Parallel()
+			content := strings.ToLower(readDoc(t, rel))
+			for _, marker := range forbidden {
+				if strings.Contains(content, marker) {
+					t.Fatalf("expected active doc %s to avoid stale recorded-runner marker %q", rel, marker)
+				}
+			}
+		})
+	}
+}
+
+func TestPackageDocsStayAligned(t *testing.T) {
+	t.Parallel()
+
+	assertPathMissing(t, "cmd/README.md")
+	assertPathMissing(t, "internal/README.md")
+
+	reportsReadme := readDoc(t, "internal/reports/README.md")
+	assertContains(t, reportsReadme, "`reports/diagrams/*`")
+	assertContains(t, reportsReadme, "render-context")
+}
+
 func TestActiveSurfacesRejectLegacyArtifactOnlyMarkers(t *testing.T) {
 	t.Parallel()
 
@@ -514,6 +605,16 @@ func readDoc(t *testing.T, rel string) string {
 	return string(content)
 }
 
+func assertPathMissing(t *testing.T, rel string) {
+	t.Helper()
+	path := filepath.Join(repoRoot(t), filepath.FromSlash(rel))
+	if _, err := os.Stat(path); err == nil {
+		t.Fatalf("expected %s to stay absent", rel)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat %s: %v", rel, err)
+	}
+}
+
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
@@ -590,6 +691,19 @@ func collectRepoTextFiles(t *testing.T, roots []string, allowPrefixes []string) 
 
 	sort.Strings(files)
 	return files
+}
+
+func collectRepoMarkdownFiles(t *testing.T, roots []string, allowPrefixes []string) []string {
+	t.Helper()
+
+	all := collectRepoTextFiles(t, roots, allowPrefixes)
+	docs := make([]string, 0, len(all))
+	for _, rel := range all {
+		if strings.HasSuffix(strings.ToLower(rel), ".md") {
+			docs = append(docs, rel)
+		}
+	}
+	return docs
 }
 
 func joinLegacyMarker(parts ...string) string {

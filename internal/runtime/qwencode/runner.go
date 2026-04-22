@@ -13,7 +13,6 @@ import (
 )
 
 var (
-	ErrRunnerUnavailable             = errors.New("qwen-code runner is unavailable")
 	errCollectStalledAfterArtifacts  = errors.New("collect_stalled_after_artifacts")
 	errCollectStalledBeforeArtifacts = errors.New("collect_stalled_before_artifacts")
 	errDraftStalledAfterArtifacts    = errors.New("draft_stalled_after_artifacts")

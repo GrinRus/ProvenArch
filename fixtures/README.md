@@ -24,5 +24,5 @@ Generated artifacts policy:
 - `fixtures/scenarios/*/golden/readable/*` намеренно tracked в git как human-readable deterministic export.
 - Эти файлы используются для review diffability и не считаются случайными артефактами.
 
-Required CI использует только local fixtures, synthetic repos и recorded runner artifacts.
+Required CI использует только local fixtures, synthetic repos и recorded artifacts.
 Live Claude Code runs в этом контуре не требуются.

@@ -241,7 +241,7 @@ Execution modes:
 - optional internal API trigger: только для trusted local/private long-running deployment
 
 ## Deterministic scope (beta baseline)
-- Stable artifacts (при одинаковом input + recorded runner):
+- Stable artifacts (при одинаковом input + одинаковом наборе artifact fixtures):
   - `charter/`
   - `model/`
   - `reports/as-is/`

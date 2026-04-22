@@ -35,14 +35,14 @@
 - docs-first staged + promoted outputs (`reports/*`, `proposals/*`)
 - model store materialization как derived layer
 - diagrams/compat outputs как thin-code layer
-- deterministic comparisons against recorded golden outputs для `fake`/recorded baseline
+- deterministic comparisons against recorded golden outputs для `fake` + artifact-fixture baseline
 - hash-based snapshot compare against `fixtures/scenarios/*/golden/snapshot.sha256`
 - для live/headless acceptance больше не требуется byte-identical narrative markdown; обязательны structural contracts: shard-plan shape, manifest/index schemas, publish invariants и absence of direct canonical writes from runtime
 
 ### Scenario integration tests
 - pipeline runs на synthetic repos и fixture workspaces
-- recorded runtime outputs без live providers в required tests
-- fixture contract gate проверяет parse/semantics recorded runner outputs (`meta.step_id`, `repo_scopes`)
+- artifact fixtures without live providers в required tests
+- fixture contract gate проверяет parse/semantics recorded artifacts (`meta.step_id`, `repo_scopes`)
 
 ### Smoke tests
 - CLI smoke
@@ -105,7 +105,7 @@ Baseline scenario set:
 
 ## 5) Обязательные internal test seams
 
-- fake/recorded runner вместо live headless providers в required tests
+- fake runner + artifact fixtures вместо live headless providers в required tests
 - injectable clock/run-id provider для deterministic golden outputs
 - injectable git executor/repo resolver для local test doubles
 - workspace sandbox root для integration tests без записи вне test workspace

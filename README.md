@@ -463,7 +463,7 @@ UI в MVP должен покрывать минимум:
 ## Стратегия тестирования (baseline)
 
 - source of truth: `docs/TESTING_STRATEGY.md`
-- required CI использует synthetic fixtures, recorded runner outputs и не зависит от live headless providers / live network
+- required CI использует synthetic fixtures and recorded artifacts и не зависит от live headless providers / live network
 - baseline layers:
   - contract tests для `workspace.yaml`, `shard-pack-manifest`, `final-run-index`, `citation-index`, `validator-verdict` и persisted runtime execution metadata
   - semantic validator tests
@@ -477,7 +477,7 @@ UI в MVP должен покрывать минимум:
 
 ## Deterministic scope (beta baseline)
 
-При одинаковом input + recorded runner expected stable surface:
+При одинаковом input + одинаковом наборе artifact fixtures expected stable surface:
 - `charter/`
 - `model/`
 - `reports/as-is/`

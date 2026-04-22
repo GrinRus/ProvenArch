@@ -24,8 +24,6 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 )
 
-var ErrRunnerUnavailable = errors.New("claude-code runner is unavailable")
-
 type HeadlessRunner struct {
 	Command string
 	Args    []string
@@ -424,18 +422,4 @@ func humanizeServiceName(repo string) string {
 		parts[i] = strings.ToUpper(part[:1]) + strings.ToLower(part[1:])
 	}
 	return strings.Join(parts, " ")
-}
-
-type RecordedRunner struct {
-	ByStep map[string]string
-}
-
-func (r RecordedRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
-	// Legacy recorded stdout fixtures with semantic JSON are intentionally
-	// unsupported in the artifact-only architecture. Tests that still depend on them should be
-	// updated to artifact fixtures or removed.
-	if _, ok := r.ByStep[task.StepID]; ok {
-		return acpruntime.Result{}, fmt.Errorf("recorded legacy semantic stdout fixtures are unsupported in artifact-only runtime")
-	}
-	return FakeRunner{}.Run(ctx, task)
 }

@@ -677,7 +677,7 @@ Partial update persisted execution-полей в `workspace.yaml`.
 
 ## 6) Deterministic scope
 
-Детерминированно сравниваемые артефакты (при одинаковом input и recorded runner):
+Детерминированно сравниваемые артефакты (при одинаковом input и одинаковом наборе artifact fixtures):
 - `charter/`
 - `model/`
 - `reports/as-is/`
