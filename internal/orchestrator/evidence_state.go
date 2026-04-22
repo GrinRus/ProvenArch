@@ -50,10 +50,21 @@ func (e *pipelineExecution) recordRuntimeStepOutcome(stepID string, outcome runt
 
 func (e *pipelineExecution) markFindingsSkipped(reason string) {
 	e.findingsSkipped = true
-	if trimmed := strings.TrimSpace(reason); trimmed != "" {
-		e.reportContext.Reasons = append(e.reportContext.Reasons, trimmed)
-	}
+	e.addReportReason(reason)
 	e.refreshReportContext()
+}
+
+func (e *pipelineExecution) addReportReason(reason string) {
+	trimmed := strings.TrimSpace(reason)
+	if trimmed == "" {
+		return
+	}
+	for _, existing := range e.reportContext.Reasons {
+		if existing == trimmed {
+			return
+		}
+	}
+	e.reportContext.Reasons = append(e.reportContext.Reasons, trimmed)
 }
 
 func (e *pipelineExecution) refreshReportContext() {

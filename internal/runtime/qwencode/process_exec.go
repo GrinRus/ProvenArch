@@ -28,8 +28,9 @@ const (
 )
 
 type runQwenOptions struct {
-	EnableCollectStallMonitor bool
-	EnableDraftStallMonitor   bool
+	EnableCollectStallMonitor      bool
+	DisableCollectPreArtifactStall bool
+	EnableDraftStallMonitor        bool
 }
 
 type collectStallPhase string
@@ -150,10 +151,8 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 
 	cmd := exec.CommandContext(ctx, command, commandArgs...)
 	configureCommandProcessGroup(cmd)
-	if workspace := strings.TrimSpace(task.Workspace); workspace != "" {
-		cmd.Dir = workspace
-	} else if writeRoot := strings.TrimSpace(task.WriteRoot); writeRoot != "" {
-		cmd.Dir = writeRoot
+	if workDir := strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task)); workDir != "" {
+		cmd.Dir = workDir
 	}
 	cmd.Stdin = bytes.NewReader(taskPayload)
 
@@ -196,7 +195,7 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 		monitorWG.Add(1)
 		go func() {
 			defer monitorWG.Done()
-			if stallErr, stalled := monitorCollectStall(monitorCtx, cmd.Process, task, activityTracker); stalled {
+			if stallErr, stalled := monitorCollectStall(monitorCtx, cmd.Process, task, activityTracker, !options.DisableCollectPreArtifactStall); stalled {
 				select {
 				case stallCh <- stallErr:
 				default:
@@ -264,10 +263,13 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 			waitErr = ctx.Err()
 		}
 	case stallErr := <-stallCh:
+		if cmd.Process != nil {
+			_ = killCommandProcessTree(cmd.Process)
+		}
 		waitForCommandStreams(stdoutPipe, stderrPipe, streamDone, collectStallPostTerminateDrain)
 		stopMonitor()
 		monitorWG.Wait()
-		waitForCommandExitAsync(cmd)
+		_ = waitForCommandExit(cmd, collectStallTerminateGrace)
 		return acpruntime.Result{
 			Stdout: stdout.String(),
 			Stderr: stderr.String(),
@@ -396,7 +398,7 @@ func isPipeClosedErr(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "file already closed")
 }
 
-func monitorCollectStall(ctx context.Context, process *os.Process, task acpruntime.Task, tracker *commandActivityTracker) (collectStallError, bool) {
+func monitorCollectStall(ctx context.Context, process *os.Process, task acpruntime.Task, tracker *commandActivityTracker, monitorPreArtifact bool) (collectStallError, bool) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -426,6 +428,9 @@ func monitorCollectStall(ctx context.Context, process *os.Process, task acprunti
 					LastWriteRootMutation: lastMutation,
 				},
 			}, true
+		}
+		if !monitorPreArtifact {
+			continue
 		}
 		return collectStallError{
 			Sentinel: errCollectStalledBeforeArtifacts,
@@ -459,8 +464,9 @@ func monitorDraftArtifactStall(ctx context.Context, process *os.Process, task ac
 			Diagnostic: collectStallDiagnostic{
 				StallPhase:            collectStallPhasePostArtifact,
 				ManifestState:         "valid",
+				AuthoredFileCount:     countDraftFiles(task.DraftFinalRoot),
 				LastPipeActivity:      lastPipe,
-				LastWriteRootMutation: time.Now().UTC(),
+				LastWriteRootMutation: latestDraftMutation(task.WriteRoot, task.DraftFinalRoot),
 			},
 		}, true
 	}
@@ -504,4 +510,49 @@ func collectWriteRootState(writeRoot string) collectWriteRootSnapshot {
 		}
 	}
 	return snapshot
+}
+
+func countDraftFiles(draftRoot string) int {
+	draftRoot = strings.TrimSpace(draftRoot)
+	if draftRoot == "" {
+		return 0
+	}
+	entries, err := os.ReadDir(draftRoot)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func latestDraftMutation(writeRoot string, draftRoot string) time.Time {
+	latest := collectWriteRootState(writeRoot).LastMutation
+	draftRoot = strings.TrimSpace(draftRoot)
+	if draftRoot == "" {
+		return latest
+	}
+	entries, err := os.ReadDir(draftRoot)
+	if err != nil {
+		return latest
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, statErr := entry.Info()
+		if statErr != nil {
+			continue
+		}
+		modTime := info.ModTime().UTC()
+		if modTime.After(latest) {
+			latest = modTime
+		}
+	}
+	return latest
 }

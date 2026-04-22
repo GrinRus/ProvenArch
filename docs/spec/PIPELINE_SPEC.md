@@ -160,6 +160,7 @@ Bundle поставляется вместе с продуктом, хранит
 
 Canonical MVP runtime shape:
 - semantic source of truth для `step1` — `shard-pack-manifest.json.semantic`
+- `step1` semantic provenance evidence (`entities/edges/findings[].provenance.evidence[]`) обязаны содержать non-empty `repo` + `path`; citation-only semantic evidence objects невалидны
 - semantic source of truth для `step3` — `validator-verdict.json.findings[]` и `validator-verdict.json.questions[]`
 - runtime execution metadata сохраняют только execution context, status, warnings и raw-output references
 
@@ -212,8 +213,10 @@ Primary runtime output:
 Orchestrator applies:
 - валидирует `shard-pack-manifest.json`
 - требует полного `semantic` block в `shard-pack-manifest.json`: `coverage`, `questions`, `entities`, `edges`, `findings` обязательны, а `questions/entities/edges/findings` materialize-ятся массивами даже when empty
+- collect manifest принимает только canonical vocabulary: `semantic.coverage.observed`, `semantic.questions[*].text`, `semantic.edges[*].type`, object-shaped `provenance`, numeric `confidence`; aliases вроде `covered_topics`, `question`, `relation`, array provenance, string confidence, `evidence_citation_ids`, top-level `step_contract` и `compatibility` считаются contract-invalid legacy drift
 - требует global uniqueness для `citations[].claim_ids` в assembled staged final set; provider должен формировать `claim_id` как semantic stem + shard slug и добавлять deterministic numeric suffix при остаточной коллизии
 - collect runtime до финальной validation может выполнять только explicit repair rules для path normalization и draft-root reconcile; semantic stdout repair отсутствует
+- для `step1.collect` runtime использует только selected repo roots, `write_root` и explicit `read_context_roots`; `reports/taskruns/**`, raw logs и archive docs не считаются schema source of truth и не должны использоваться как manifest examples
 - выполняет runtime `init.step1.collect`/`refresh.step1.collect` отдельно для каждой canonical domain card (`charter/cards/domains/*`)
 - materialize-ит отдельный `runtime-execution.json` на каждый shard/domain under `reports/taskruns/<run_id>/...`
 - для sharded runtime ведёт shard-summary state machine `pending | checkpointed | succeeded | failed`; raw per-shard taskrun materialize-ится до `apply`, чтобы restart recovery мог replay-ить shard из persisted artifact
@@ -240,12 +243,21 @@ Outputs:
 - `final-run-index.json`
 - `citation-index.json`
 - staged derived `model/*` для diagram builders и deterministic projections
+- если live runtime step выполняется, его primary output — `asis-draft-manifest.json` + optional draft docs внутри `draft_final_root`
 
 Step 2 policy:
 - domain outputs и финальные analysis/proposal surfaces собираются как authored/staged docs-first set из shard packs
 - orchestrator compiler допускается только как deterministic renderer/materializer для technical derived surfaces
 - `model/*` и диаграммы остаются derived layer
+- `asis-draft-manifest.json` обязан использовать strict canonical contract: `version=1`, `run_id`, `step_id`, `step_contract="as_is"`, `agent_role`, `outputs[]`
+- для `step2.asis_docs` обязательны canonical publish mappings `reports/as-is/overview.md`, `reports/coverage/summary.md`, `reports/agent-outputs/architect/summary.md`; дополнительные outputs разрешены только под `reports/as-is/<domain>/overview.md`
+- runtime draft parsing для `step2` strict: unknown top-level fields и legacy envelopes (`repo_scopes`, `compatibility`, `step_contract=null`, неканонические coverage outputs) reject-ятся до publish
+- `final-run-index.json` и `citation-index.json` используют один deterministic `document_id` mapping, который наследует `manifest.Documents[*].id`; provider-authored `document_ids` remap-ятся в этот canonical namespace до validator
+- staged semantic assembly нормализует `evidence.repo` к логическому repo scope, сводит generated checkout-dir aliases и дедуплицирует entity aliases/related references до validator
 - если evidence incomplete, staged reports materialize-ятся с incomplete banner, но не promote-ятся без validator `PASS`
+- если collect status = `unusable`, live runtime для `step2.asis_docs` не запускается; orchestrator детерминированно пересобирает triage-only staged docflow только из persisted collect artifacts
+- non-collect runtime шаги не стартуют из workspace root: `step2` использует `draft_final_root` как cwd, а live harness разводит headless и baseline workspaces по разным temp roots, чтобы sibling baseline artifacts не были implicit template source
+- provider-side hard sandbox в текущих headless CLI отсутствует; practical isolation для runtime обеспечивается только через separated temp roots и step-local `cwd`
 
 ### Step 3 — Findings / Validation (runtime step)
 Inputs:
@@ -257,6 +269,8 @@ Inputs:
 
 Primary runtime output:
 - `validator-verdict.json`
+- `validator-verdict.json` обязан содержать canonical metadata trio `version=1`, `run_id`, `generated_at` вместе с `verdict` и `checked_paths`
+- validator findings сохраняют canonical `title + description + provenance`; observation evidence внутри `findings[*].provenance.evidence[]` обязано содержать `repo/path`
 
 Orchestrator applies:
 - для sharded runtime replay-ит persisted `succeeded/checkpointed` shard taskruns без повторного provider execution; `checkpointed` shard повторно `apply`-ится, `succeeded` shard только восстанавливает orchestrator in-memory state
@@ -268,6 +282,7 @@ Orchestrator applies:
 - обновляет `reports/findings/*`
 - обновляет `reports/agent-outputs/architect/summary.md` через детерминированную агрегацию фактических domain outputs
 - materializes critical unknowns как findings, если отсутствуют owner/integration/database/CI-CD evidence
+- owner-gap остаётся surfaced через `coverage/findings/questions`, но owner-only residual без технических validator issues не должен сам по себе держать `validator-verdict = FAIL`; после repair stages orchestrator может детерминированно reconcile-ить такой verdict в `PASS`, не скрывая сам gap
 
 ### Step 4 — Promotion / Proposals
 Inputs:
@@ -341,6 +356,7 @@ Primary runtime output:
 Publish policy:
 - orchestrator/compiler нормализует layout, coverage/findings links и ordering;
 - runtime draft docs не считаются опубликованным результатом до compile/publish stage;
+- strict `asis-draft-manifest.json` contract обязателен для live runtime path: `step_contract="as_is"`, required overview/coverage/architect outputs и отсутствие legacy top-level fields;
 - при resume после более позднего шага orchestrator может детерминированно пересобрать staged final docflow из persisted collect artifacts без live provider rerun.
 
 ### Step 3 — Findings / Validator
@@ -351,6 +367,7 @@ Primary runtime output:
 Publish policy:
 - validator остаётся единственным schema/semantic gate для staged final set;
 - richer synthesis/ranking/evidence shaping разрешены, но итог проходит через validator verdict и compile checks.
+- terminal `validator verdict is FAIL` трактуется как completed runtime flow failure, а не как draft/runtime-contract failure; owner-gap-only verdict после technical repairs может быть downgraded в `PASS` при сохранении findings/questions.
 
 ### Step 4 — Proposals (agent-first + auto-publish)
 

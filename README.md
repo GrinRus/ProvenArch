@@ -61,6 +61,7 @@ Primary execution path для `step0..step4`:
 - provider резолвится на уровне шага, а не всего run; global `--runtime-provider` / `ACP_RUNTIME_PROVIDER` остаются fallback только если step override не задан
 - `step0/2/4` materialize-ят staged draft manifests (`constitution-draft.json`, `asis-draft-manifest.json`, `proposals-draft-manifest.json`)
 - `step0/2/4` считаются successful только если draft manifest contract валиден и все referenced draft files реально существуют под `draft_final_root`
+- `step2.asis_docs` использует strict canonical manifest contract: `step_contract="as_is"`, required outputs `reports/as-is/overview.md`, `reports/coverage/summary.md`, `reports/agent-outputs/architect/summary.md`, а extra outputs допускаются только под `reports/as-is/<domain>/overview.md`
 - publish для `step0/2/4` идёт только из validated runtime draft artifacts через deterministic compile/publish path; direct orchestrator writer больше не является альтернативным source-of-truth для canonical outputs
 - runtime draft manifest contract (`version=1`, `run_id`, `step_id`, `step_contract`, `agent_role`, `outputs[]`) является единым internal source of truth для writer + validator; `qwen` дополнительно делает один step-aware artifact-repair retry для draft-only шагов до возврата в orchestrator
 - runtime validators для collect manifests и draft manifests read-only по умолчанию; допустимая reconciliation вынесена в явную runtime repair/canonicalization стадию до финальной validation
@@ -68,7 +69,10 @@ Primary execution path для `step0..step4`:
 - shard agents materialize-ят authored docs + `shard-pack-manifest.json`
 - persisted collect manifests с workspace-level `documents[].path` drift (`reports/...`, `charter/...`, `proposals/...` или duplicated `artifact_root`) отбрасываются до `step2`, а qwen repair может детерминированно нормализовать только safe path drift
 - orchestrator/aggregator собирает staged final doc set в `reports/taskruns/<run_id>/staging/final/`
+- staged docflow использует один deterministic `document_id` mapping для `manifest.Documents[*].id`, `citation-index.json` и `final-run-index.json`; semantic assembly нормализует repo aliases и дедуплицирует entity aliases до validator/promotion
 - validator пишет `validator-verdict.json`
+- owner-gap остаётся visible signal в coverage/findings/questions, но owner-only residual больше не блокирует verdict сам по себе; terminal `validator verdict is FAIL` классифицируется как `runtime_flow_failed`, а не как `runtime_contract_failed`
+- provider-side hard sandbox в текущих headless CLI нет; filesystem isolation обеспечивается только через separated temp roots и step-local `cwd` (`draft_final_root` для draft steps, `write_root` для validator)
 - только schema/semantic/validator gates разрешают promotion в канонические `reports/as-is/*`, `reports/findings/*`, `reports/coverage/*`, `reports/agent-outputs/*`, `proposals/*`
 - обязательного human gate перед publish больше нет
 

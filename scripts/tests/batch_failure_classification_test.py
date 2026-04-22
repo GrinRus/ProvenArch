@@ -505,6 +505,67 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertTrue(result.runtime_contract_failed)
         self.assertTrue(result.infra_incomplete_cycle)
 
+    def test_python_report_prefers_runtime_flow_failed_when_validator_verdict_failed(self) -> None:
+        run_dir = self.root / "run-validator-verdict-fail-python"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: passed",
+                    "- failure_reason: pipeline_command_failed",
+                    "- expected_runs: 4",
+                    "- completed_runs: 4",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 2",
+                    "- running_runs_detected: 0",
+                    "- termination_signal: none",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=process_failed",
+                    "process_exit=1",
+                    "termination_signal=none",
+                    "failure_reason=pipeline_command_failed",
+                    "summary_written=yes",
+                ]
+            )
+            + "\n",
+        )
+        write_text(
+            run_dir / "full-run.log",
+            "runtime_contract_failed in step2 diagnostics\nvalidator verdict is FAIL\n",
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "runtime_contract_failed",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("runtime_flow_failed", result.failure_class)
+        self.assertTrue(result.runtime_flow_failed)
+
     def test_python_report_prefers_runtime_timeout_over_runner_unavailable_when_timeout_signaled(self) -> None:
         run_dir = self.root / "run-timeout-python"
         self._create_fixture_run_dir(run_dir)
@@ -594,6 +655,72 @@ class BatchFailureClassificationTest(unittest.TestCase):
         fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
         self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
         self.assertEqual("runtime_contract_failed", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+
+    def test_shell_classifier_prefers_runtime_flow_failed_for_validator_verdict_fail(self) -> None:
+        run_dir = self.root / "run-validator-verdict-fail-shell"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: passed",
+                    "- failure_reason: pipeline_command_failed",
+                    "- expected_runs: 4",
+                    "- completed_runs: 4",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 2",
+                    "- running_runs_detected: 0",
+                    "- termination_signal: none",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=process_failed",
+                    "process_exit=1",
+                    "termination_signal=none",
+                    "failure_reason=pipeline_command_failed",
+                    "summary_written=yes",
+                ]
+            )
+            + "\n",
+        )
+        write_text(
+            run_dir / "full-run.log",
+            "runtime_contract_failed in step2 diagnostics\nvalidator verdict is FAIL\n",
+        )
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        classifications_tsv = self.root / "backend-run-classifications-validator-verdict.tsv"
+        command = (
+            prelude
+            + "\n"
+            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
+            + f'classify_run_failure "qwen-code" "1" {shlex.quote(str(run_dir))} "1"\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("", completed.stdout.strip(), completed.stdout)
+        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
+        self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("runtime_flow_failed", fields[2], classifications_tsv.read_text(encoding="utf-8"))
 
     def test_shell_classifier_prefers_runtime_timeout_over_runner_unavailable_logs(self) -> None:
         run_dir = self.root / "run-timeout-precedence"
@@ -956,6 +1083,41 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual("infra_incomplete_cycle", fields[2], classifications_tsv.read_text(encoding="utf-8"))
         run_status_text = (run_dir / "run-status.env").read_text(encoding="utf-8")
         self.assertIn("state=process_failed", run_status_text)
+        self.assertIn("process_exit=1", run_status_text)
+        self.assertIn("failure_reason=infra_incomplete_cycle", run_status_text)
+
+    def test_batch_exit_trap_materializes_owner_sidecar_terminal_state(self) -> None:
+        batch_root = self.root / "batch-root-sidecar"
+        batch_root.mkdir(parents=True, exist_ok=True)
+        owner_path = batch_root / "batch-owner.env"
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        command = (
+            prelude
+            + "\n"
+            + f'BATCH_ROOT={shlex.quote(str(batch_root))}\n'
+            + 'BATCH_ID=batch-sidecar\n'
+            + 'PROFILE_ID=single-path\n'
+            + 'SWEEP_ID=baseline\n'
+            + 'RUN_CLASSIFICATIONS_TSV=\n'
+            + 'BATCH_OWNER_SENTINEL="$(batch_owner_status_file)"\n'
+            + 'start_batch_owner_heartbeat\n'
+            + 'on_batch_exit 1\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("", completed.stdout.strip(), completed.stdout)
+        self.assertTrue(owner_path.exists(), f"missing owner sentinel: {owner_path}")
+        owner_text = owner_path.read_text(encoding="utf-8")
+        self.assertIn("state=process_failed", owner_text)
+        self.assertIn("process_exit=1", owner_text)
+        self.assertIn("failure_reason=batch_exit_nonzero", owner_text)
 
     def test_python_report_reconstructs_missing_classifier_row_from_run_status(self) -> None:
         batch_root = self.root / "batch-root"

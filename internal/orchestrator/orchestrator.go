@@ -1285,6 +1285,18 @@ func (e *pipelineExecution) runStepAsIs(ctx context.Context, stepID string) erro
 		e.asIsDraftRoot = ""
 		return e.assembleStagedDocFlow()
 	}
+	if e.shouldSkipFindingsRuntime() {
+		e.addReportReason("asis_docs_skipped_due_to_unusable_collect")
+		e.refreshReportContext()
+		e.addWarning(fmt.Sprintf("%s: as-is doc step skipped because collect evidence is unusable", stepID))
+		e.logWarn(stepID, "", "as-is doc step skipped", map[string]any{
+			"reason":         "collect evidence is unusable",
+			"collect_status": e.renderContext().Collect.Status,
+		})
+		e.asIsDraftManifest = nil
+		e.asIsDraftRoot = ""
+		return e.assembleStagedDocFlow()
+	}
 
 	selectedScopes := normalizeOrderedUniqueStrings(e.selectedRepoScopes)
 	execution, err := e.executeRuntimeTask(ctx, stepID, "as-is", selectedScopes, []string{"."}, "", "")

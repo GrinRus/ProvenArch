@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/GrinRus/ProvenArch/internal/artifactquality"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/steppolicy"
 )
@@ -26,6 +27,39 @@ func SharedSections(task acpruntime.Task) []string {
 	}
 	if stepPolicy := strings.TrimSpace(steppolicy.StepSpecificPolicy(task.StepID)); stepPolicy != "" {
 		sections = append(sections, stepPolicy)
+	}
+	if acpruntime.IsCollectStep(task.StepID) {
+		collectLines := []string{
+			"COLLECT MANIFEST CANONICAL SHAPE:",
+		}
+		collectLines = append(collectLines, artifactquality.CollectManifestContractLines(strings.TrimSpace(task.ArtifactRoot))...)
+		collectLines = append(collectLines,
+			`- Canonical fragment below is normative for field names and value types; copy keys/types exactly and only change IDs/content.`,
+			artifactquality.CollectManifestCanonicalExample(),
+		)
+		sections = append(sections, strings.Join(collectLines, "\n"))
+	}
+	switch strings.TrimSpace(task.StepID) {
+	case "init.step2.asis_docs", "refresh.step2.asis_docs":
+		asIsLines := []string{
+			"AS-IS DRAFT MANIFEST CANONICAL SHAPE:",
+		}
+		asIsLines = append(asIsLines, artifactquality.AsIsDraftManifestContractLines()...)
+		asIsLines = append(asIsLines,
+			`- Canonical fragment below is normative for field names, step_contract, and required outputs; copy keys/types exactly and only change IDs/content.`,
+			artifactquality.AsIsDraftManifestCanonicalExample(),
+		)
+		sections = append(sections, strings.Join(asIsLines, "\n"))
+	case "init.step3.findings", "refresh.step3.findings":
+		findingsLines := []string{
+			"VALIDATOR VERDICT CANONICAL SHAPE:",
+		}
+		findingsLines = append(findingsLines, artifactquality.ValidatorVerdictContractLines()...)
+		findingsLines = append(findingsLines,
+			`- Canonical fragment below is normative for validator metadata and finding evidence shape; copy keys/types exactly and only change IDs/content.`,
+			artifactquality.ValidatorVerdictCanonicalExample(),
+		)
+		sections = append(sections, strings.Join(findingsLines, "\n"))
 	}
 	if pack := strings.TrimSpace(steppolicy.WorkspacePromptPackSection(task)); pack != "" {
 		sections = append(sections, pack)

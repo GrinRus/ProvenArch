@@ -119,6 +119,13 @@ func (e *pipelineExecution) applyValidatorRuntimeExecution(
 	if _, err := e.applyValidatorRepairStage(stepID, domainID, task.TaskID, &verdict); err != nil {
 		return runtimeTaskExecution{}, err
 	}
+	if reconciled, err := e.reconcileOwnerGapOnlyVerdict(&verdict); err != nil {
+		return runtimeTaskExecution{}, err
+	} else if reconciled {
+		e.logInfo(stepID, domainID, "owner-gap verdict downgraded to pass", map[string]any{
+			"task_id": task.TaskID,
+		})
+	}
 	if verdict.Verdict != "PASS" {
 		return runtimeTaskExecution{}, fmt.Errorf("validator verdict is %s", verdict.Verdict)
 	}

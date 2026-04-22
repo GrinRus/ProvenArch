@@ -226,17 +226,18 @@ func validateOwnerTeamLink(entity contracts.Entity, existing, incoming map[strin
 }
 
 func extractEvidenceRepoSlug(evidence []contracts.Evidence) string {
-	if len(evidence) == 0 || strings.TrimSpace(evidence[0].Repo) == "" {
+	repo := normalizeEvidenceRepoIdentity(primaryEvidenceRepo(evidence))
+	if repo == "" {
 		return "unknown"
 	}
-	return slugutil.Slugify(evidence[0].Repo)
+	return slugutil.Slugify(repo)
 }
 
 func primaryEvidenceRepo(evidence []contracts.Evidence) string {
 	if len(evidence) == 0 {
 		return ""
 	}
-	return strings.TrimSpace(evidence[0].Repo)
+	return normalizeEvidenceRepoIdentity(evidence[0].Repo)
 }
 
 func shouldRemapCollision(existing contracts.Entity, incoming contracts.Entity) bool {
@@ -246,6 +247,33 @@ func shouldRemapCollision(existing contracts.Entity, incoming contracts.Entity) 
 		return false
 	}
 	return existingRepo != incomingRepo
+}
+
+func normalizeEvidenceRepoIdentity(value string) string {
+	value = strings.TrimSpace(filepath.Base(strings.TrimSpace(value)))
+	if value == "" || value == "." {
+		return ""
+	}
+	lastDash := strings.LastIndex(value, "-")
+	if lastDash > 0 && lastDash < len(value)-1 {
+		suffix := value[lastDash+1:]
+		if len(suffix) >= 7 && isHexToken(suffix) {
+			value = value[:lastDash]
+		}
+	}
+	return strings.TrimSpace(value)
+}
+
+func isHexToken(value string) bool {
+	for _, r := range value {
+		isDigit := r >= '0' && r <= '9'
+		isLowerHex := r >= 'a' && r <= 'f'
+		isUpperHex := r >= 'A' && r <= 'F'
+		if !isDigit && !isLowerHex && !isUpperHex {
+			return false
+		}
+	}
+	return true
 }
 
 func appendUnique(values []string, candidate string) []string {

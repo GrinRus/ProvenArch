@@ -58,18 +58,24 @@ var baselinePromptPacks = map[string]string{
 		},
 		RequiredOutputShape: []string{
 			"`shard-pack-manifest.json` plus authored shard documents inside the assigned write root",
-			"Populate semantic.questions, semantic.coverage, semantic.entities, semantic.edges, and semantic.findings deterministically",
-			"Keep all semantic structure inside manifest fields; do not invent alternate metadata envelopes",
+			"Populate semantic.coverage.observed/missing/notes, semantic.questions[*].text, semantic.entities[*], semantic.edges[*].type/from/to, and semantic.findings[*].provenance deterministically",
+			"Keep all semantic structure inside canonical manifest fields only; do not invent alternate metadata envelopes, compatibility blocks, or top-level step_contract fields",
+			"Use object-shaped provenance with numeric confidence values; do not use array provenance or string confidence aliases",
+			"Each semantic provenance.evidence[*] item must include non-empty repo/path fields; citation-only semantic evidence objects are invalid",
+			"Findings use title + description + provenance; do not use summary as a finding alias",
 		},
 		EvidencePolicy: []string{
 			"Observation requires concrete evidence path/repo references",
 			"Inference must be explicitly marked and confidence-scored",
 			"Prefer precise file-level evidence over broad repository claims",
+			"Treat schemas/spec plus the enforced runtime prompt as the only manifest schema source of truth",
 		},
 		ForbiddenBehavior: []string{
 			"Do not treat stdout/stderr as semantic output surfaces",
 			"Do not guess runtime metrics, ownership, or external contracts without evidence",
 			"Do not introduce non-deterministic timestamps or unstable identifiers outside allowed meta fields",
+			"Do not read reports/taskruns, raw runtime logs, archived plans, or prior shard-pack manifests as schema templates",
+			"Do not use legacy collect aliases such as covered_topics, question, relation, evidence_citation_ids, or top-level compatibility blocks",
 		},
 		FallbackWhenUnknown: []string{
 			"Emit canonical semantic.coverage.missing values and actionable semantic.questions",
@@ -85,12 +91,14 @@ var baselinePromptPacks = map[string]string{
 			"runtime task scopes and prior domain outputs",
 		},
 		RequiredOutputShape: []string{
-			"`validator-verdict.json` only, with verdict/summary/checked_paths/fixed_paths/findings/questions",
+			"`validator-verdict.json` only, with version/run_id/generated_at/verdict/summary/checked_paths and optional fixed_paths/issues/findings/questions",
 			"Each finding includes stable id/title/severity/description and provenance",
 			"Questions live inside the verdict payload when evidence is incomplete",
+			"Owner-gap may remain visible in findings/questions while verdict stays PASS when no technical validator issues remain",
 		},
 		EvidencePolicy: []string{
 			"Findings must point to concrete evidence references or explicit inference rationale",
+			"Observation provenance evidence must include repo/path for every cited file-level fact",
 			"Severity should reflect impact and confidence, not stylistic preferences",
 			"Cross-repo claims require cross-repo evidence",
 		},
@@ -101,7 +109,7 @@ var baselinePromptPacks = map[string]string{
 		},
 		FallbackWhenUnknown: []string{
 			"When proof is weak, emit high-priority question rather than hard finding",
-			"If owner linkage is missing, surface owner-gap finding with explicit uncertainty",
+			"If owner linkage is missing, surface owner-gap finding with explicit uncertainty without forcing FAIL on its own",
 			"Prefer fewer high-signal findings over noisy exhaustive lists",
 		},
 	}),

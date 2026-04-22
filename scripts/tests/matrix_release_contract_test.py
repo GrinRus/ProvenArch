@@ -562,6 +562,7 @@ class MatrixReleaseContractTest(unittest.TestCase):
         ]
         self.assertEqual(1, len(records))
         self.assertEqual("failed", records[0]["status"])
+        self.assertEqual("infra_incomplete_cycle", records[0]["failure_reason"])
 
         verdict = self._load_verdict(matrix_id)
         self.assertEqual("FAIL", verdict["verdict"])
@@ -590,6 +591,7 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertTrue(status_files, f"missing profile status files under {status_root}")
         status_payload = json.loads(status_files[0].read_text(encoding="utf-8"))
         self.assertEqual("failed", status_payload["status"])
+        self.assertEqual("infra_incomplete_cycle", status_payload["failure_reason"])
 
         verdict = self._load_verdict(matrix_id)
         self.assertEqual("FAIL", verdict["verdict"])
@@ -674,6 +676,75 @@ class MatrixReleaseContractTest(unittest.TestCase):
         finally:
             stdout, stderr = proc.communicate(timeout=15)
         self.assertEqual(0, proc.returncode, msg=stderr or stdout)
+
+    def test_matrix_reconcile_only_marks_stale_running_profile_as_failed(self) -> None:
+        matrix_id = "matrix-test-stale-profile-reconcile"
+        status_root = self.e2e_tmp_root / "matrix" / matrix_id / "profile-status"
+        batch_root = self.e2e_tmp_root / "runs" / "stale-batch"
+        status_root.mkdir(parents=True, exist_ok=True)
+        batch_root.mkdir(parents=True, exist_ok=True)
+
+        status_path = status_root / "single-path--baseline.json"
+        status_payload = {
+            "profile_id": "single-path",
+            "profile_slug": "single-path",
+            "batch_id": "stale-batch",
+            "source_kind": "path",
+            "expected_repo_count": 1,
+            "repos_file": str(self.profile_repos_files["single-path"]),
+            "status": "running",
+            "failure_reason": "none",
+            "sweep_id": "baseline",
+            "execution": {
+                "strategy": "sequential",
+                "max_parallel_tasks": 1,
+                "failure_policy": "best_effort",
+                "shard_discovery_mode": "heuristics",
+            },
+            "batch_root": str(batch_root),
+            "updated_at": "2026-04-22T08:00:00Z",
+        }
+        status_path.write_text(json.dumps(status_payload, ensure_ascii=True) + "\n", encoding="utf-8")
+        (batch_root / "batch-owner.env").write_text(
+            "\n".join(
+                [
+                    "batch_id=stale-batch",
+                    "profile_id=single-path",
+                    "sweep_id=baseline",
+                    "pid=999999",
+                    "parent_pid=1",
+                    "state=running",
+                    "process_exit=",
+                    "termination_signal=none",
+                    "failure_reason=none",
+                    "updated_at=2026-04-22T08:00:00Z",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [str(self.matrix_driver)],
+            cwd=self.repo_root,
+            env=self._build_subprocess_env(
+                {
+                    "MATRIX_ID": matrix_id,
+                    "MATRIX_ROOT": str(self.e2e_tmp_root / "matrix" / matrix_id),
+                    "E2E_TMP_ROOT": str(self.e2e_tmp_root),
+                    "REPORTS_ROOT": str(self.e2e_tmp_root / "reports"),
+                    "MATRIX_TEST_RECONCILE_ONLY": "1",
+                    "MATRIX_PROFILE_STATUS_STALE_SEC": "1",
+                }
+            ),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(0, result.returncode, msg=result.stderr or result.stdout)
+
+        reconciled = json.loads(status_path.read_text(encoding="utf-8"))
+        self.assertEqual("failed", reconciled["status"])
+        self.assertEqual("infra_incomplete_cycle", reconciled["failure_reason"])
 
     def test_non_release_regres_matrix_allows_two_profiles(self) -> None:
         matrix_file = self._write_matrix_file(

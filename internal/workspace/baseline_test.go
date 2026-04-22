@@ -195,6 +195,48 @@ func TestEnsureBaselineBundleSeedsStructuredPromptDefaults(t *testing.T) {
 	}
 }
 
+func TestBaselineCollectPromptPackEncodesLegacyHygieneRules(t *testing.T) {
+	t.Parallel()
+
+	content, ok := BaselinePromptPack("collect-context")
+	if !ok {
+		t.Fatalf("expected collect-context baseline prompt pack")
+	}
+
+	expected := []string{
+		"semantic.coverage.observed/missing/notes",
+		"Each semantic provenance.evidence[*] item must include non-empty repo/path fields",
+		"Treat schemas/spec plus the enforced runtime prompt as the only manifest schema source of truth",
+		"Do not read reports/taskruns, raw runtime logs, archived plans, or prior shard-pack manifests as schema templates",
+		"Do not use legacy collect aliases such as covered_topics, question, relation, evidence_citation_ids, or top-level compatibility blocks",
+	}
+	for _, token := range expected {
+		if !strings.Contains(content, token) {
+			t.Fatalf("expected collect prompt pack to contain %q, got:\n%s", token, content)
+		}
+	}
+}
+
+func TestBaselineFindingsPromptPackRequiresCanonicalVerdictMetadata(t *testing.T) {
+	t.Parallel()
+
+	content, ok := BaselinePromptPack("findings")
+	if !ok {
+		t.Fatalf("expected findings baseline prompt pack")
+	}
+
+	expected := []string{
+		"`validator-verdict.json` only, with version/run_id/generated_at/verdict/summary/checked_paths",
+		"Observation provenance evidence must include repo/path for every cited file-level fact",
+		"If owner linkage is missing, surface owner-gap finding with explicit uncertainty without forcing FAIL on its own",
+	}
+	for _, token := range expected {
+		if !strings.Contains(content, token) {
+			t.Fatalf("expected findings prompt pack to contain %q, got:\n%s", token, content)
+		}
+	}
+}
+
 func writeBaselineWorkspace(t *testing.T) Root {
 	t.Helper()
 

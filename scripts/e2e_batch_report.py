@@ -1125,6 +1125,7 @@ def evaluate_run(
         )
 
     runtime_contract_failed_hit = False
+    validator_verdict_failed_hit = False
     runner_unavailable_hit = False
     runner_error_hit = False
     parse_stages: set[str] = set()
@@ -1147,6 +1148,8 @@ def evaluate_run(
             runtime_contract_failed_hit = True
             runner_error_hit = True
             error_codes.append("runtime_contract_failed")
+        if "validator verdict is FAIL" in text:
+            validator_verdict_failed_hit = True
         parse_stages.update(match.group(1).strip() for match in re.finditer(r"parse_stage=([a-z_]+)", text))
         raw_outputs.update(match.group(1).strip() for match in re.finditer(r"raw_output=([^\s)]+)", text))
     h3 = not runner_error_hit
@@ -1530,6 +1533,13 @@ def evaluate_run(
             details.append(
                 "reliability/runtime-flow-failed -> terminal process_failed run-status + session-summary indicate completed deterministic pipeline failure"
             )
+    if terminal_process_failure and validator_verdict_failed_hit:
+        runtime_flow_failed = True
+        if "reliability:runtime-flow-failed" not in issues:
+            issues.append("reliability:runtime-flow-failed")
+        details.append(
+            "reliability/runtime-flow-failed -> validator verdict is FAIL in terminal task logs; classify as runtime flow failure, not runtime contract failure"
+        )
 
     if not overview_ok:
         issues.append("analysis:overview")
@@ -1549,6 +1559,8 @@ def evaluate_run(
         failure_class = "runtime_timeout"
     elif runner_unavailable_hit:
         failure_class = "runner_unavailable"
+    elif validator_verdict_failed_hit or runtime_flow_failed:
+        failure_class = "runtime_flow_failed"
     elif runtime_contract_failed_hit:
         failure_class = "runtime_contract_failed"
     elif infra_signal_terminated:
@@ -1557,8 +1569,6 @@ def evaluate_run(
         failure_class = "quality_gates_failed"
     elif infra_incomplete_cycle:
         failure_class = "infra_incomplete_cycle"
-    elif runtime_flow_failed:
-        failure_class = "runtime_flow_failed"
 
     if classified_failure and classified_failure != "none":
         if failure_class != classified_failure:
@@ -1570,9 +1580,14 @@ def evaluate_run(
             and classified_failure == "infra_incomplete_cycle"
             and failure_reason != "infra_incomplete_cycle"
         )
+        ignore_classified_contract = validator_verdict_failed_hit and classified_failure == "runtime_contract_failed"
         if ignore_classified_incomplete:
             details.append(
                 "reliability/classifier-override -> ignored infra_incomplete_cycle because run-status.env marks terminal process_failed summary"
+            )
+        elif ignore_classified_contract:
+            details.append(
+                "reliability/classifier-override -> ignored runtime_contract_failed because terminal logs show validator verdict is FAIL"
             )
         elif failure_class == "summary_missing" and classified_failure in {
             "runtime_timeout",
@@ -1586,7 +1601,8 @@ def evaluate_run(
             failure_class = classified_failure
         elif failure_class == "none" or failure_class_rank(classified_failure) < failure_class_rank(failure_class):
             failure_class = classified_failure
-        runtime_contract_failed_hit = runtime_contract_failed_hit or classified_failure == "runtime_contract_failed"
+        if not ignore_classified_contract:
+            runtime_contract_failed_hit = runtime_contract_failed_hit or classified_failure == "runtime_contract_failed"
         runner_unavailable_hit = runner_unavailable_hit or classified_failure == "runner_unavailable"
         runtime_timeout = runtime_timeout or classified_failure == "runtime_timeout"
         infra_signal_terminated = infra_signal_terminated or classified_failure == "infra_signal_terminated"

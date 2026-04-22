@@ -1,11 +1,15 @@
 package runtimedrafts
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -67,9 +71,9 @@ func Load(root string, filename string) (Manifest, []byte, error) {
 	if err != nil {
 		return Manifest{}, nil, fmt.Errorf("read runtime draft manifest: %w", err)
 	}
-	var manifest Manifest
-	if err := json.Unmarshal(raw, &manifest); err != nil {
-		return Manifest{}, nil, fmt.Errorf("parse runtime draft manifest: %w", err)
+	manifest, err := decodeManifest(raw)
+	if err != nil {
+		return Manifest{}, nil, err
 	}
 	if err := ValidateManifest(manifest); err != nil {
 		return Manifest{}, nil, err
@@ -151,6 +155,9 @@ func ValidateManifestForTask(manifest Manifest, runID string, stepID string, ste
 	if strings.TrimSpace(manifest.AgentRole) == "" {
 		return fmt.Errorf("runtime draft manifest agent_role must not be empty")
 	}
+	if err := validateStepSpecificOutputs(manifest, stepID); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -197,4 +204,88 @@ func validateCanonicalDraftPath(value string) error {
 		return fmt.Errorf("must stay inside workspace")
 	}
 	return nil
+}
+
+func decodeManifest(raw []byte) (Manifest, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+
+	var manifest Manifest
+	if err := decoder.Decode(&manifest); err != nil {
+		return Manifest{}, fmt.Errorf("parse runtime draft manifest: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err == nil {
+		return Manifest{}, fmt.Errorf("parse runtime draft manifest: unexpected trailing JSON payload")
+	} else if !errors.Is(err, io.EOF) {
+		return Manifest{}, fmt.Errorf("parse runtime draft manifest: %w", err)
+	}
+	return manifest, nil
+}
+
+func validateStepSpecificOutputs(manifest Manifest, stepID string) error {
+	switch strings.TrimSpace(stepID) {
+	case "init.step2.asis_docs", "refresh.step2.asis_docs":
+		return validateAsIsDraftOutputs(manifest.Outputs)
+	default:
+		return nil
+	}
+}
+
+func validateAsIsDraftOutputs(outputs []Output) error {
+	required := map[string]string{
+		"reports/as-is/overview.md":                  "overview.md",
+		"reports/coverage/summary.md":                "summary.md",
+		"reports/agent-outputs/architect/summary.md": "architect-summary.md",
+	}
+	byCanonicalPath := make(map[string]Output, len(outputs))
+	problems := []string{}
+
+	for idx, output := range outputs {
+		canonicalPath := filepath.ToSlash(path.Clean(strings.TrimSpace(output.CanonicalPath)))
+		if canonicalPath == "" || canonicalPath == "." {
+			continue
+		}
+		if _, exists := byCanonicalPath[canonicalPath]; exists {
+			problems = append(problems, fmt.Sprintf("outputs[%d].canonical_path %q must be unique", idx, canonicalPath))
+			continue
+		}
+		byCanonicalPath[canonicalPath] = output
+	}
+
+	for canonicalPath, requiredPath := range required {
+		output, ok := byCanonicalPath[canonicalPath]
+		if !ok {
+			problems = append(problems, fmt.Sprintf("outputs must include %q", canonicalPath))
+			continue
+		}
+		actualPath := filepath.ToSlash(filepath.Clean(strings.TrimSpace(output.Path)))
+		if actualPath != requiredPath {
+			problems = append(problems, fmt.Sprintf("output %q must use path %q", canonicalPath, requiredPath))
+		}
+	}
+
+	for canonicalPath := range byCanonicalPath {
+		if _, ok := required[canonicalPath]; ok {
+			continue
+		}
+		if !isAllowedAdditionalAsIsCanonicalPath(canonicalPath) {
+			problems = append(problems, fmt.Sprintf("output %q is outside the allowed as-is publish surface", canonicalPath))
+		}
+	}
+
+	if len(problems) == 0 {
+		return nil
+	}
+	sort.Strings(problems)
+	return fmt.Errorf("runtime draft manifest outputs are invalid: %s", strings.Join(problems, "; "))
+}
+
+func isAllowedAdditionalAsIsCanonicalPath(canonicalPath string) bool {
+	parts := strings.Split(filepath.ToSlash(path.Clean(strings.TrimSpace(canonicalPath))), "/")
+	return len(parts) == 4 &&
+		parts[0] == "reports" &&
+		parts[1] == "as-is" &&
+		strings.TrimSpace(parts[2]) != "" &&
+		parts[3] == "overview.md"
 }
