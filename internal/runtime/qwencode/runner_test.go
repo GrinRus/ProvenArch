@@ -162,6 +162,39 @@ func TestRecoverAfterStallRetriesFreshProcessWhenArtifactsWereMissing(t *testing
 	}
 }
 
+func TestShouldClassifyRetryStallAsProviderUnavailableForSilentPreArtifactRetry(t *testing.T) {
+	t.Parallel()
+
+	stalled := collectStallError{
+		Sentinel: errCollectStalledBeforeArtifacts,
+		Diagnostic: collectStallDiagnostic{
+			StallPhase:        collectStallPhasePreArtifact,
+			ManifestState:     "",
+			AuthoredFileCount: 1,
+		},
+	}
+	if !shouldClassifyRetryStallAsProviderUnavailable(acpruntime.Result{}, stalled, stalled) {
+		t.Fatal("expected silent pre-artifact retry exhaustion to classify as provider unavailable")
+	}
+}
+
+func TestShouldClassifyRetryStallAsContractFailureWhenRetryProducedOutput(t *testing.T) {
+	t.Parallel()
+
+	stalled := collectStallError{
+		Sentinel: errCollectStalledBeforeArtifacts,
+		Diagnostic: collectStallDiagnostic{
+			StallPhase:        collectStallPhasePreArtifact,
+			ManifestState:     "",
+			AuthoredFileCount: 1,
+		},
+	}
+	result := acpruntime.Result{Stderr: "partial output before stall"}
+	if shouldClassifyRetryStallAsProviderUnavailable(result, stalled, stalled) {
+		t.Fatal("expected retry exhaustion with provider output to remain a contract failure")
+	}
+}
+
 func TestStallRetryOptionsDisablesCollectMonitorForPreArtifactRetry(t *testing.T) {
 	t.Parallel()
 

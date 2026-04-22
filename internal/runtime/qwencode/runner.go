@@ -108,7 +108,7 @@ func (r HeadlessRunner) recoverAfterStall(
 		var retryStalled collectStallError
 		if errors.As(retryErr, &retryStalled) {
 			emitRetryExhaustedDiagnostic(task, retryStalled.Diagnostic, "fresh_process")
-			if isProviderUnavailableText(retryResult.Stdout, retryResult.Stderr, retryErr) {
+			if shouldClassifyRetryStallAsProviderUnavailable(retryResult, retryStalled, retryErr) {
 				return true, acpruntime.Result{}, wrapArtifactProviderUnavailable(task, "retry", retryResult, "provider unavailable after fresh-process stall retry", retryErr)
 			}
 			return true, acpruntime.Result{}, wrapArtifactContractFailure(task, "retry", retryResult, "fresh-process retry stalled before producing required artifacts", retryErr)
@@ -133,4 +133,15 @@ func stallRetryOptions(options runQwenOptions, diagnostic collectStallDiagnostic
 		retryOptions.CollectPreArtifactWindow = collectRetryPreArtifactWindow
 	}
 	return retryOptions
+}
+
+func shouldClassifyRetryStallAsProviderUnavailable(result acpruntime.Result, stalled collectStallError, retryErr error) bool {
+	if isProviderUnavailableText(result.Stdout, result.Stderr, retryErr) {
+		return true
+	}
+	// A fully silent second collect attempt is operationally closer to provider
+	// unavailability than to a malformed artifact contract response.
+	return stalled.Diagnostic.StallPhase == collectStallPhasePreArtifact &&
+		strings.TrimSpace(result.Stdout) == "" &&
+		strings.TrimSpace(result.Stderr) == ""
 }
