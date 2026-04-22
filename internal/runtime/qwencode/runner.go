@@ -140,8 +140,9 @@ func shouldClassifyRetryStallAsProviderUnavailable(result acpruntime.Result, sta
 		return true
 	}
 	// A fully silent second collect attempt is operationally closer to provider
-	// unavailability than to a malformed artifact contract response.
-	return stalled.Diagnostic.StallPhase == collectStallPhasePreArtifact &&
-		strings.TrimSpace(result.Stdout) == "" &&
+	// unavailability than to a malformed artifact contract response, even if
+	// the retry managed to create partial files before stalling again.
+	_ = stalled
+	return strings.TrimSpace(result.Stdout) == "" &&
 		strings.TrimSpace(result.Stderr) == ""
 }

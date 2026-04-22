@@ -178,6 +178,22 @@ func TestShouldClassifyRetryStallAsProviderUnavailableForSilentPreArtifactRetry(
 	}
 }
 
+func TestShouldClassifyRetryStallAsProviderUnavailableForSilentPostArtifactRetry(t *testing.T) {
+	t.Parallel()
+
+	stalled := collectStallError{
+		Sentinel: errCollectStalledAfterArtifacts,
+		Diagnostic: collectStallDiagnostic{
+			StallPhase:        collectStallPhasePostArtifact,
+			ManifestState:     "valid",
+			AuthoredFileCount: 1,
+		},
+	}
+	if !shouldClassifyRetryStallAsProviderUnavailable(acpruntime.Result{}, stalled, stalled) {
+		t.Fatal("expected silent post-artifact retry exhaustion to classify as provider unavailable")
+	}
+}
+
 func TestShouldClassifyRetryStallAsContractFailureWhenRetryProducedOutput(t *testing.T) {
 	t.Parallel()
 
