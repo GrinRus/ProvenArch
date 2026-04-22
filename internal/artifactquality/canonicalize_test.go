@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,8 @@ func TestRepairCollectManifestRejectsLegacyCompatibilityPayload(t *testing.T) {
 	task := testCollectTask(writeRoot, "bank-of-anthos-extras", "bank-of-anthos")
 	if _, err := RepairCollectManifest(task); err == nil {
 		t.Fatalf("expected repair to fail for legacy compatibility payload")
+	} else if !strings.Contains(err.Error(), "legacy collect manifest fields are forbidden") {
+		t.Fatalf("expected explicit legacy rejection error, got %v", err)
 	}
 
 	raw, err := os.ReadFile(filepath.Join(writeRoot, shardPackManifestFile))
@@ -30,6 +33,198 @@ func TestRepairCollectManifestRejectsLegacyCompatibilityPayload(t *testing.T) {
 	}
 	if _, err := contracts.ParseShardPackManifest(raw); err == nil {
 		t.Fatalf("expected original manifest to remain invalid")
+	}
+}
+
+func TestRepairCollectManifestRejectsLegacySemanticAliasesBeforeDecode(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	writeDoc(t, writeRoot, "overview.md", "# Overview\n")
+
+	raw := []byte(`{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step1.collect",
+  "step_contract": "collect",
+  "shard_id": "payments",
+  "domain_id": "payments",
+  "agent_role": "shard-analyst",
+  "artifact_root": "reports/taskruns/run-1/staging/shards/payments",
+  "repo_scopes": ["payments-service"],
+  "path_scopes": ["src"],
+  "documents": [
+    {
+      "id": "doc.payments.overview",
+      "kind": "report",
+      "title": "Payments Overview",
+      "path": "overview.md",
+      "canonical_path": "reports/as-is/payments/overview.md",
+      "topics": ["payments"],
+      "citation_ids": ["cite.payments.readme"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.payments.readme",
+      "repo": "payments-service",
+      "path": "README.md",
+      "claim_ids": ["claim.payments.readme"],
+      "document_ids": ["doc.payments.overview"]
+    }
+  ],
+  "semantic": {
+    "coverage": {
+      "covered_topics": ["services"],
+      "missing": ["owner mappings"],
+      "notes": ["legacy payload"]
+    },
+    "questions": [
+      {
+        "id": "q.payments.owner",
+        "question": "Who owns payments?"
+      }
+    ],
+    "entities": [
+      {
+        "id": "svc.payments",
+        "name": "payments",
+        "type": "service",
+        "provenance": [
+          {
+            "citation_id": "cite.payments.readme"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge.payments.depends-on",
+        "relation": "depends_on",
+        "from": "svc.payments",
+        "to": "svc.ledger",
+        "provenance": {
+          "kind": "observation",
+          "confidence": "0.7"
+        }
+      }
+    ],
+    "findings": [
+      {
+        "id": "finding.payments.owner",
+        "severity": "medium",
+        "title": "Missing owner",
+        "description": "Owner mapping is absent.",
+        "summary": "legacy summary",
+        "evidence_citation_ids": ["cite.payments.readme"]
+      }
+    ]
+  }
+}`)
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), raw, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	task := testCollectTask(writeRoot, "payments", "payments-service")
+	_, err := RepairCollectManifest(task)
+	if err == nil {
+		t.Fatalf("expected repair to fail for legacy semantic aliases")
+	}
+
+	message := err.Error()
+	for _, token := range []string{
+		"step_contract",
+		"semantic.coverage.covered_topics",
+		"semantic.questions[0].question",
+		"semantic.entities[0].provenance",
+		"semantic.edges[0].relation",
+		"semantic.edges[0].provenance.confidence",
+		"semantic.findings[0].summary",
+		"semantic.findings[0].evidence_citation_ids",
+	} {
+		if !strings.Contains(message, token) {
+			t.Fatalf("expected legacy rejection message to mention %q, got %v", token, err)
+		}
+	}
+}
+
+func TestRepairCollectManifestRejectsCitationOnlySemanticEvidenceObjects(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	writeDoc(t, writeRoot, "overview.md", "# Overview\n")
+
+	raw := []byte(`{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step1.collect",
+  "shard_id": "payments",
+  "domain_id": "payments",
+  "agent_role": "shard-analyst",
+  "artifact_root": "reports/taskruns/run-1/staging/shards/payments",
+  "repo_scopes": ["payments-service"],
+  "path_scopes": ["src"],
+  "documents": [
+    {
+      "id": "doc.payments.overview",
+      "kind": "report",
+      "title": "Payments Overview",
+      "path": "overview.md",
+      "canonical_path": "reports/as-is/payments/overview.md",
+      "topics": ["payments"],
+      "citation_ids": ["cite.payments.readme"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.payments.readme",
+      "repo": "payments-service",
+      "path": "README.md",
+      "claim_ids": ["claim.payments.readme"],
+      "document_ids": ["doc.payments.overview"]
+    }
+  ],
+  "semantic": {
+    "coverage": {
+      "observed": ["services"],
+      "missing": ["owner mappings"],
+      "notes": ["citation-only drift"]
+    },
+    "questions": [],
+    "entities": [
+      {
+        "id": "svc.payments",
+        "name": "payments",
+        "type": "service",
+        "provenance": {
+          "kind": "observation",
+          "confidence": 0.8,
+          "evidence": [
+            {
+              "citation_id": "cite.payments.readme"
+            }
+          ]
+        }
+      }
+    ],
+    "edges": [],
+    "findings": []
+  }
+}`)
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), raw, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	task := testCollectTask(writeRoot, "payments", "payments-service")
+	_, err := RepairCollectManifest(task)
+	if err == nil {
+		t.Fatalf("expected repair to fail for citation-only semantic evidence")
+	}
+	if !strings.Contains(err.Error(), "semantic.entities[0].provenance.evidence[0]") {
+		t.Fatalf("expected explicit semantic evidence path in error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "repo/path") {
+		t.Fatalf("expected repo/path requirement in error, got %v", err)
 	}
 }
 

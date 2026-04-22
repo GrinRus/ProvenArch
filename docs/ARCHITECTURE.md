@@ -100,9 +100,13 @@
    - canonical publish для `step0/2/4` выполняется только из validated runtime draft artifacts через deterministic compile/publish path; direct orchestrator writer больше не является альтернативным source of truth
    - Собирает staged final doc set в `reports/taskruns/<run_id>/staging/final/`
    - Генерирует и валидирует `final-run-index.json` и `citation-index.json`
+   - `final-run-index.json` и `citation-index.json` используют один deterministic `document_id` mapping: canonical staged document ids берутся из `manifest.Documents[*].id`, а не пересобираются независимо на citation/final-index сторонах
    - `citation-index.json.claim_ids` трактуются как global staged-final namespace; duplicate claim ids в validator scope детерминированно repair-ятся на index/reference уровне с shard suffix без semantic rewrite authored docs
    - Step 3 runtime primary output: `validator-verdict.json`
+   - `validator-verdict.json` использует canonical contract с обязательными `version=1`, `run_id`, `generated_at`, `verdict`, `checked_paths`; validator findings сохраняют `title + description + provenance`, а observation evidence требует non-empty `repo/path`
+   - staged semantic snapshot нормализует `evidence.repo` к логическому repo scope, сводит generated checkout-dir aliases и детерминированно дедуплицирует entity/edge/finding references до validator/promotion
    - Validator repair остаётся явной internal stage между load/parse verdict и финальной staged validation; repair write path остаётся atomic и не превращается в hidden mutation validation path
+   - owner-gap остаётся visible signal в `coverage/findings/questions`, но owner-only residual после технических repair stages может быть reconciled из `FAIL` в `PASS` без скрытия самих findings/questions
    - Promotion копирует только approved final set в stable `reports/as-is/*`, `reports/findings/*`, `reports/coverage/*`, `reports/agent-outputs/*`, `proposals/*`
    - обязательный human gate перед publish отсутствует; после успешных compile/validator gates promotion происходит автоматически
    - Валидирует только required step artifacts и persisted runtime execution metadata, а не semantic stdout payload
@@ -130,6 +134,9 @@
      - timeout/cancel причины добавляются в error message без изменения `error_code` контракта
    - Materialize-ит per-run quality summary `reports/taskruns/<run_id>-quality.json` (signal metrics/runtime versions + `evidence_state.collect/findings/report_mode/reasons`)
    - Materialize-ит per-run repo selection summary `reports/taskruns/<run_id>-repo-selection-summary.json` (mode + selected scopes + include/exclude reasons)
+   - trusted batch/matrix harness не оставляет terminal-less child runs: если per-run `run-status.env` отсутствует или остаётся `running` после завершения child batch, outer reconciliation переводит его в terminal `failed` с `failure_reason=infra_incomplete_cycle`
+   - child batch публикует `batch-owner.env` heartbeat в `BATCH_ROOT`; stale `profile-status/*.json = running` без живого owner pid или со stale owner heartbeat reconciles-ится в terminal `failed/infra_incomplete_cycle`
+   - terminal `validator verdict is FAIL` классифицируется как `runtime_flow_failed`; `runtime_contract_failed` остаётся только для active runtime artifact/manifest/required-output failures
    - Run logs retention policy (TTL + max runs) запускается при старте сервиса, перед run и после run
    - (опционально) делает git commit
 
@@ -149,12 +156,16 @@
    - для `init.step1.collect` / `refresh.step1.collect` runtime выполняет максимум одну post-success artifact-repair попытку, если `shard-pack-manifest.json` выглядит skeletal/generic-only; write-root-only retry разрешён только для already-rich manifests, иначе retry сохраняет repo roots и откатывает `write_root`, если fidelity не улучшилась
    - artifact-repair и provider retry разведены: invalid manifest получает один explicit artifact-repair retry с canonical manifest skeleton; semantic stdout parse больше не является success surface
    - `qwen-code` для `init.step1.collect` / `refresh.step1.collect` имеет internal stall watchdog в двух фазах:
-     - `pre_artifact`: если process жив, но до первого authored artifact одновременно молчат stdout/stderr и мутации `write_root`, runtime принудительно завершает provider process и запускает один forced fresh retry до общего step timeout
+     - `pre_artifact`: если process жив, но до первого authored artifact одновременно молчат stdout/stderr и мутации `write_root`, runtime принудительно завершает provider process и запускает один forced fresh retry; на этой второй попытке отключается только pre-artifact sentinel, а post-artifact stall recovery остаётся активным, чтобы retry получил полный step timeout budget без потери recovery после первых файлов
      - `post_artifact`: если в `write_root` уже есть `shard-pack-manifest.json` + authored docs, но provider перестал писать в stdout/stderr и перестал мутировать `write_root`, runtime принудительно завершает provider process, пишет diagnostic events (`runtime task stalled before artifacts` / `runtime task stalled after artifacts` / `retry scheduled` / `retry completed`) и запускает forced artifact-repair retry до step timeout
    - transcript outputs с provider transport/API failures (например `[API Error: ... SSL ...]`) не считаются generic `runtime_contract_failed`: runtime сохраняет raw stdout/stderr и классифицирует их как `runner_unavailable`
    - collect step не считается успешным, если после единственной artifact-repair попытки `shard-pack-manifest.json` остаётся missing/invalid/skeletal; такой случай поднимается как runtime contract failure (`runtime_contract_failed`)
    - collect contract требует полного `semantic` block в `shard-pack-manifest.json` (`coverage/questions/entities/edges/findings`) и repo-specific citation surface; generic-only `cite.runtime-summary` допустим только вне multi-document refresh evidence collapse
+   - canonical collect vocabulary жёсткая: `coverage.observed`, `questions[*].text`, `edges[*].type`, object-shaped `provenance`, numeric `confidence`; legacy aliases (`covered_topics`, `question`, `relation`, array provenance, string confidence, `evidence_citation_ids`, top-level `step_contract`, `compatibility`) reject-ятся до strict parse
+   - `step1.collect` не использует `reports/taskruns/**`, raw logs, старые manifests или archive docs как schema/reference surface; headless provider получает только selected repo roots, `write_root` и explicit `read_context_roots`, а collect cwd фиксируется на `write_root`
+   - если collect evidence стал `unusable`, live runtime для `init|refresh.step2.asis_docs` не вызывается: orchestrator детерминированно пересобирает incomplete staged docflow из persisted shard packs и помечает report context reason `asis_docs_skipped_due_to_unusable_collect`
    - `init.step0.constitution`, `init|refresh.step2.asis_docs` и `init|refresh.step4.proposals` проходят provider-agnostic required-artifact gate: runtime принимает шаг только если draft manifest валиден и все referenced draft files существуют под `draft_final_root`
+   - `init|refresh.step2.asis_docs` использует strict shared draft contract: `step_contract="as_is"`, required canonical outputs `reports/as-is/overview.md`, `reports/coverage/summary.md`, `reports/agent-outputs/architect/summary.md`, а extra outputs разрешены только под `reports/as-is/<domain>/overview.md`
    - runtime draft manifest contract для `step0/2/4` (`version=1`, `run_id`, `step_id`, `step_contract`, `agent_role`, `outputs[]`) вынесен в shared internal source of truth и используется и writer-ами, и validator-ами без дублирования структур
    - validators для collect manifests и runtime draft manifests read-only по умолчанию: hidden filesystem mutation внутри validation не допускается
    - filesystem reconciliation разрешён только как явная runtime repair/canonicalization стадия до финальной validation; сама validation лишь проверяет manifest contract и наличие referenced files
@@ -162,6 +173,8 @@
    - `qwen` для draft-only шагов (`step0/2/4`) валидирует required draft artifacts до возврата в orchestrator и делает один constrained artifact-repair retry (`write_root + draft_final_root`) вместо silent acceptance legacy draft schemas
    - `qwen` для draft-only шагов также имеет post-artifact stall recovery: если canonical draft manifest и draft files уже появились, но provider перестал писать в stdout/stderr и перестал мутировать `write_root`/`draft_final_root`, runtime принудительно завершает process и запускает один constrained artifact-only retry
    - `claude-code`, `qwen-code` и `codex-code` используют shared provider-agnostic step-policy/prompt layer для required artifacts, retry bans и explicit negative rules; provider-specific остаются только command/process execution, pipe monitoring, transcript extraction и provider failure classification
+   - non-collect headless шаги больше не стартуют из workspace root: draft steps используют `draft_final_root` как cwd, validator использует `write_root`, а live harness разводит headless и baseline workspaces по разным temp roots вместо sibling layout
+   - provider-side hard sandbox в текущих CLI surface нет; isolation достигается layout-ом temp roots и step-local `cwd`, а не отдельной sandbox policy
    - headless provider scope включает `arch-workspace` и resolved repo directories для текущих `repo_scope/repo_scopes`, чтобы provider видел source evidence из реальных checkout-ов
    - command overrides:
      - `ACP_CLAUDE_CMD` (default `claude-code`)

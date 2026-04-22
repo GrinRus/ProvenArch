@@ -83,7 +83,7 @@ func TestValidateRequiredManifestRejectsObservedLegacyStep0Shapes(t *testing.T) 
 		{
 			name:      "bank single legacy schema_version",
 			fixture:   "legacy-rejection/qwen_step0_bank_single_legacy_constitution_draft.json",
-			wantError: "runtime draft manifest version must be 1",
+			wantError: `unknown field "schema_version"`,
 		},
 		{
 			name:      "openedx version string",
@@ -93,7 +93,7 @@ func TestValidateRequiredManifestRejectsObservedLegacyStep0Shapes(t *testing.T) 
 		{
 			name:      "openstack schema_version v1 string",
 			fixture:   "legacy-rejection/qwen_step0_openstack_multi_schema_version_constitution_draft.json",
-			wantError: "runtime draft manifest version must be 1",
+			wantError: `unknown field "schema_version"`,
 		},
 	}
 
@@ -129,6 +129,182 @@ func TestValidateRequiredManifestRejectsObservedLegacyStep0Shapes(t *testing.T) 
 				t.Fatalf("expected %q in error, got %v", tc.wantError, err)
 			}
 		})
+	}
+}
+
+func TestValidateRequiredManifestAcceptsCanonicalAsIsDraft(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	for relPath, content := range map[string]string{
+		"overview.md":          "# Overview\n",
+		"summary.md":           "# Coverage\n",
+		"architect-summary.md": "# Architect\n",
+		"payments-overview.md": "# Payments\n",
+	} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(content), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step2.asis_docs",
+  "step_contract": "as_is",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "overview.md", "canonical_path": "reports/as-is/overview.md", "kind": "report", "title": "System Overview"},
+    {"path": "summary.md", "canonical_path": "reports/coverage/summary.md", "kind": "report", "title": "Coverage Summary"},
+    {"path": "architect-summary.md", "canonical_path": "reports/agent-outputs/architect/summary.md", "kind": "agent-output", "title": "Architect Summary"},
+    {"path": "payments-overview.md", "canonical_path": "reports/as-is/payments/overview.md", "kind": "report", "title": "Payments Overview"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, AsIsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	loaded, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "init.step2.asis_docs", "as_is", []string{AsIsManifestFile})
+	if err != nil {
+		t.Fatalf("expected canonical as-is draft manifest to validate: %v", err)
+	}
+	if got, want := len(loaded.Outputs), 4; got != want {
+		t.Fatalf("unexpected output count: got=%d want=%d", got, want)
+	}
+}
+
+func TestValidateRequiredManifestRejectsAsIsDraftUnknownTopLevelField(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	for _, relPath := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte("# draft\n"), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step2.asis_docs",
+  "step_contract": "as_is",
+  "agent_role": "architect",
+  "repo_scopes": ["payments"],
+  "outputs": [
+    {"path": "overview.md", "canonical_path": "reports/as-is/overview.md"},
+    {"path": "summary.md", "canonical_path": "reports/coverage/summary.md"},
+    {"path": "architect-summary.md", "canonical_path": "reports/agent-outputs/architect/summary.md"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, AsIsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "init.step2.asis_docs", "as_is", []string{AsIsManifestFile})
+	if err == nil {
+		t.Fatalf("expected strict parser to reject unknown top-level field")
+	}
+	if !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("expected unknown field error, got %v", err)
+	}
+}
+
+func TestValidateRequiredManifestRejectsAsIsDraftNullStepContract(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	for _, relPath := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte("# draft\n"), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step2.asis_docs",
+  "step_contract": null,
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "overview.md", "canonical_path": "reports/as-is/overview.md"},
+    {"path": "summary.md", "canonical_path": "reports/coverage/summary.md"},
+    {"path": "architect-summary.md", "canonical_path": "reports/agent-outputs/architect/summary.md"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, AsIsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "init.step2.asis_docs", "as_is", []string{AsIsManifestFile})
+	if err == nil {
+		t.Fatalf("expected null step_contract to be rejected")
+	}
+	if !strings.Contains(err.Error(), `runtime draft manifest step_contract must equal "as_is"`) {
+		t.Fatalf("expected strict step_contract error, got %v", err)
+	}
+}
+
+func TestValidateRequiredManifestRejectsAsIsDraftLegacyOutputSurface(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	for _, relPath := range []string{"overview.md", "summary.md", "architect-summary.md", "open-questions.md"} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte("# draft\n"), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step2.asis_docs",
+  "step_contract": "as_is",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "overview.md", "canonical_path": "reports/as-is/overview.md"},
+    {"path": "summary.md", "canonical_path": "reports/coverage/summary.md"},
+    {"path": "architect-summary.md", "canonical_path": "reports/agent-outputs/architect/summary.md"},
+    {"path": "open-questions.md", "canonical_path": "reports/coverage/open-questions.md"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, AsIsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "init.step2.asis_docs", "as_is", []string{AsIsManifestFile})
+	if err == nil {
+		t.Fatalf("expected invalid as-is publish surface to be rejected")
+	}
+	if !strings.Contains(err.Error(), "outside the allowed as-is publish surface") {
+		t.Fatalf("expected as-is publish surface error, got %v", err)
 	}
 }
 

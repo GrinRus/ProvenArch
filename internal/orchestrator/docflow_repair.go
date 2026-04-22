@@ -279,3 +279,70 @@ func filterResolvedValidatorIssues(issues []contracts.ValidatorIssue) ([]contrac
 	}
 	return filtered, resolved
 }
+
+func (e *pipelineExecution) reconcileOwnerGapOnlyVerdict(verdict *contracts.ValidatorVerdict) (bool, error) {
+	if verdict == nil || !strings.EqualFold(strings.TrimSpace(verdict.Verdict), "FAIL") {
+		return false, nil
+	}
+	if !ownerGapOnlyResidual(*verdict, e.coverage) {
+		return false, nil
+	}
+
+	verdictCandidate, err := cloneValidatorVerdict(*verdict)
+	if err != nil {
+		return false, fmt.Errorf("clone validator verdict for owner-gap reconciliation: %w", err)
+	}
+	verdictCandidate.Verdict = "PASS"
+	verdictCandidate.Summary = appendValidatorRepairNote(
+		verdictCandidate.Summary,
+		"owner-gap remains visible in findings/questions but is non-blocking without technical validator issues",
+	)
+
+	verdictRaw, err := json.MarshalIndent(&verdictCandidate, "", "  ")
+	if err != nil {
+		return false, fmt.Errorf("marshal owner-gap-reconciled validator verdict: %w", err)
+	}
+	verdictRaw = append(verdictRaw, '\n')
+	repairedVerdict, err := contracts.ParseValidatorVerdict(verdictRaw)
+	if err != nil {
+		return false, fmt.Errorf("parse owner-gap-reconciled validator verdict: %w", err)
+	}
+	if err := e.workspace.WriteFile(runtimeValidatorVerdictPath(e.runID), verdictRaw); err != nil {
+		return false, fmt.Errorf("write owner-gap-reconciled validator verdict: %w", err)
+	}
+	*verdict = repairedVerdict
+	return true, nil
+}
+
+func ownerGapOnlyResidual(verdict contracts.ValidatorVerdict, coverage *contracts.Coverage) bool {
+	if len(verdict.Issues) > 0 || !isOwnerMappingsMissing(coverage) {
+		return false
+	}
+	if len(verdict.Findings) == 0 && len(verdict.Questions) == 0 {
+		return false
+	}
+	for _, finding := range verdict.Findings {
+		if !isOwnerGapFinding(finding) {
+			return false
+		}
+	}
+	for _, question := range verdict.Questions {
+		if !isOwnerGapQuestion(question) {
+			return false
+		}
+	}
+	return true
+}
+
+func isOwnerGapFinding(finding contracts.Finding) bool {
+	if strings.EqualFold(strings.TrimSpace(finding.RuleID), "rule.owner.required") {
+		return true
+	}
+	text := normalizeSemanticKey(strings.Join([]string{finding.Title, finding.Description}, " "))
+	return strings.Contains(text, "owner") || strings.Contains(text, "ownership")
+}
+
+func isOwnerGapQuestion(question contracts.Question) bool {
+	text := normalizeSemanticKey(question.Text)
+	return strings.Contains(text, "owner") || strings.Contains(text, "owns") || strings.Contains(text, "ownership")
+}

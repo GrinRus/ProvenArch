@@ -33,6 +33,7 @@ UI_E2E_HEADED="${UI_E2E_HEADED:-}"
 MATRIX_DRIVER_LOG="${MATRIX_DRIVER_LOG:-$MATRIX_ROOT/driver.log}"
 MATRIX_TIMEOUT_PROFILE_FILE="${MATRIX_TIMEOUT_PROFILE_FILE:-$MATRIX_ROOT/timeout-profile.txt}"
 MATRIX_PROFILE_STATUS_HEARTBEAT_SEC="${MATRIX_PROFILE_STATUS_HEARTBEAT_SEC:-10}"
+MATRIX_PROFILE_STATUS_STALE_SEC="${MATRIX_PROFILE_STATUS_STALE_SEC:-0}"
 PROFILE_REPOS_FILE_RESOLVED=""
 PROFILE_SOURCE_KIND_EFFECTIVE=""
 PROFILE_EXPECTED_REPO_COUNT_RESOLVED=0
@@ -305,10 +306,124 @@ for path in sorted(root.glob("*.json")):
 PY
 }
 
+reconcile_stale_profile_statuses() {
+  [[ -d "$MATRIX_STATUS_ROOT" ]] || return 0
+  local changed_count
+  changed_count="$(python3 - "$MATRIX_STATUS_ROOT" "$MATRIX_PROFILE_STATUS_HEARTBEAT_SEC" "$MATRIX_PROFILE_STATUS_STALE_SEC" <<'PY'
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+try:
+    heartbeat_sec = int((sys.argv[2] or "").strip())
+except Exception:
+    heartbeat_sec = 10
+try:
+    stale_override = int((sys.argv[3] or "").strip())
+except Exception:
+    stale_override = 0
+stale_sec = stale_override if stale_override > 0 else max(heartbeat_sec * 3, 30)
+now = datetime.now(timezone.utc)
+changed = 0
+
+
+def parse_ts(value: str | None) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def is_recent(value: datetime | None) -> bool:
+    if value is None:
+        return False
+    return (now - value).total_seconds() <= stale_sec
+
+
+def pid_alive(pid_value: str | None) -> bool:
+    text = str(pid_value or "").strip()
+    if not text:
+        return False
+    try:
+        pid = int(text)
+    except Exception:
+        return False
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def read_env(path: Path) -> dict[str, str]:
+    payload: dict[str, str] = {}
+    if not path.exists():
+        return payload
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        payload[key.strip()] = value.strip()
+    return payload
+
+
+for path in sorted(root.glob("*.json")):
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        continue
+    if not isinstance(payload, dict):
+        continue
+    if str(payload.get("status", "")).strip() != "running":
+        continue
+
+    profile_recent = is_recent(parse_ts(payload.get("updated_at")))
+    batch_root_raw = str(payload.get("batch_root", "")).strip()
+    owner = read_env(Path(batch_root_raw).expanduser() / "batch-owner.env") if batch_root_raw else {}
+    owner_state = str(owner.get("state", "")).strip()
+    owner_recent = is_recent(parse_ts(owner.get("updated_at")))
+    owner_alive = pid_alive(owner.get("pid"))
+
+    keep_running = False
+    if owner:
+        keep_running = owner_state == "running" and owner_alive and owner_recent
+    elif profile_recent:
+        keep_running = True
+
+    if keep_running:
+        continue
+
+    payload["status"] = "failed"
+    payload["failure_reason"] = "infra_incomplete_cycle"
+    payload["updated_at"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    path.write_text(json.dumps(payload, ensure_ascii=True) + "\n", encoding="utf-8")
+    changed += 1
+
+print(changed)
+PY
+)"
+  if [[ "$changed_count" =~ ^[1-9][0-9]*$ ]]; then
+    log "reconciled stale profile statuses: count=$changed_count"
+  fi
+}
+
 on_matrix_exit() {
   local exit_code="$1"
   [[ "$exit_code" =~ ^[0-9]+$ ]] || exit_code=1
   stop_current_profile_status_heartbeat
+  reconcile_stale_profile_statuses
   finalize_running_profile_statuses_on_exit "infra_incomplete_cycle"
 }
 
@@ -452,6 +567,12 @@ validate_profile_repos_meta() {
   read_profile_repos_meta "$output_json"
 }
 
+if [[ "${MATRIX_TEST_RECONCILE_ONLY:-0}" == "1" ]]; then
+  mkdir -p "$MATRIX_ROOT" "$REPORTS_ROOT" "$MATRIX_STATUS_ROOT"
+  reconcile_stale_profile_statuses
+  exit 0
+fi
+
 if [[ -z "$E2E_MATRIX_FILE" ]]; then
   die "E2E_MATRIX_FILE is required (YAML with profiles[] and optional sweeps[]/timeout_profile)"
 fi
@@ -496,6 +617,8 @@ fi
 mkdir -p "$MATRIX_ROOT" "$REPORTS_ROOT"
 mkdir -p "$(dirname "$MATRIX_DRIVER_LOG")"
 : > "$MATRIX_DRIVER_LOG"
+mkdir -p "$MATRIX_STATUS_ROOT"
+reconcile_stale_profile_statuses
 
 ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES="$(normalize_binary_flag "$E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES" "E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES")"
 if [[ "$RELEASE_MODE" == "1" ]]; then
@@ -894,8 +1017,13 @@ while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sw
     log "profile+sweep failed: profile=$profile_id sweep=$sweep_id (see $driver_log)"
   fi
   stop_current_profile_status_heartbeat
-  if [[ "$status" == "passed" ]] && batch_has_incomplete_run_sentinels "$batch_root"; then
+  profile_failure_reason="none"
+  if [[ "$status" != "passed" ]]; then
+    profile_failure_reason="child_failed"
+  fi
+  if batch_has_incomplete_run_sentinels "$batch_root"; then
     status="failed"
+    profile_failure_reason="infra_incomplete_cycle"
     log "profile+sweep left unfinished run sentinel: profile=$profile_id sweep=$sweep_id batch_root=$batch_root"
   fi
 
@@ -904,14 +1032,10 @@ while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sw
   frontend_matrix_md="$REPORTS_ROOT/frontend_e2e_matrix_${batch_id}.md"
   frontend_cancel_matrix_md="$REPORTS_ROOT/frontend_cancel_e2e_matrix_${batch_id}.md"
   quality_report_md="$REPORTS_ROOT/quality_report_${batch_id}.md"
-  if [[ "$status" == "passed" ]]; then
-    update_current_profile_status_artifacts "$status" "none" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md"
-  else
-    update_current_profile_status_artifacts "$status" "child_failed" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md"
-  fi
+  update_current_profile_status_artifacts "$status" "$profile_failure_reason" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md"
 
   python3 - "$RECORDS_JSONL" \
-    "$profile_id" "$profile_slug" "$batch_id" "$PROFILE_META_CACHE_SOURCE_KIND" "$PROFILE_META_CACHE_EXPECTED_REPO_COUNT" "$PROFILE_META_CACHE_REPOS_FILE" "$status" \
+    "$profile_id" "$profile_slug" "$batch_id" "$PROFILE_META_CACHE_SOURCE_KIND" "$PROFILE_META_CACHE_EXPECTED_REPO_COUNT" "$PROFILE_META_CACHE_REPOS_FILE" "$status" "$profile_failure_reason" \
     "$sweep_id" "$sweep_strategy" "$sweep_max_parallel" "$sweep_failure_policy" "$sweep_shard_mode" \
     "$batch_root" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md" "$driver_log" <<'PY'
 import json
@@ -927,20 +1051,21 @@ payload = {
     "expected_repo_count": int(sys.argv[6]),
     "repos_file": sys.argv[7],
     "status": sys.argv[8],
-    "sweep_id": sys.argv[9],
+    "failure_reason": sys.argv[9],
+    "sweep_id": sys.argv[10],
     "execution": {
-        "strategy": sys.argv[10],
-        "max_parallel_tasks": int(sys.argv[11]),
-        "failure_policy": sys.argv[12],
-        "shard_discovery_mode": sys.argv[13],
+        "strategy": sys.argv[11],
+        "max_parallel_tasks": int(sys.argv[12]),
+        "failure_policy": sys.argv[13],
+        "shard_discovery_mode": sys.argv[14],
     },
-    "batch_root": sys.argv[14],
-    "run_matrix_tsv": sys.argv[15],
-    "run_matrix_md": sys.argv[16],
-    "frontend_matrix_md": sys.argv[17],
-    "frontend_cancel_matrix_md": sys.argv[18],
-    "quality_report_md": sys.argv[19],
-    "driver_log": sys.argv[20],
+    "batch_root": sys.argv[15],
+    "run_matrix_tsv": sys.argv[16],
+    "run_matrix_md": sys.argv[17],
+    "frontend_matrix_md": sys.argv[18],
+    "frontend_cancel_matrix_md": sys.argv[19],
+    "quality_report_md": sys.argv[20],
+    "driver_log": sys.argv[21],
 }
 with path.open("a", encoding="utf-8") as f:
     f.write(json.dumps(payload, ensure_ascii=True))
@@ -948,6 +1073,8 @@ with path.open("a", encoding="utf-8") as f:
 PY
 done < "$COMBINATIONS_TSV"
 CURRENT_PROFILE_STATUS_FILE=""
+
+reconcile_stale_profile_statuses
 
 MATRIX_REPORT_MD="$REPORTS_ROOT/profile_matrix_${MATRIX_ID}.md"
 MATRIX_REPORT_TSV="$REPORTS_ROOT/profile_matrix_${MATRIX_ID}.tsv"

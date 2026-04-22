@@ -62,3 +62,85 @@ func TestComposeArtifactOnlyPromptKeepsSharedOrderAcrossProviders(t *testing.T) 
 		lastIndex = index
 	}
 }
+
+func TestComposeArtifactOnlyPromptAddsCollectLegacyHygieneSection(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		StepID:         "init.step1.collect",
+		ArtifactRoot:   "reports/taskruns/run-1/staging/shards/payments",
+		WriteRoot:      "/tmp/write-root",
+		DraftFinalRoot: "/tmp/draft-root",
+		RepoScopes:     []string{"payments-service"},
+		PathScopes:     []string{"src"},
+	}
+
+	prompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderClaudeCode, task)
+	expectedTokens := []string{
+		"COLLECT MANIFEST CANONICAL SHAPE:",
+		"semantic.coverage MUST use observed/missing/notes",
+		"Do NOT add top-level step_contract, compatibility",
+		"semantic provenance.evidence[*] objects MUST carry repo/path",
+		"Canonical fragment below is normative",
+		`"artifact_root": "reports/taskruns/run-1/staging/shards/payments"`,
+		`"repo": "payments-service"`,
+		`"description": "Repository evidence names the payments service but does not identify an owning team."`,
+	}
+	for _, token := range expectedTokens {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected collect prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
+func TestComposeArtifactOnlyPromptAddsValidatorVerdictCanonicalSection(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		StepID:            "init.step3.findings",
+		WriteRoot:         "/tmp/write-root",
+		DraftFinalRoot:    "/tmp/draft-root",
+		ExpectedArtifacts: []string{"validator-verdict.json"},
+	}
+
+	prompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderQwenCode, task)
+	expectedTokens := []string{
+		"VALIDATOR VERDICT CANONICAL SHAPE:",
+		"validator-verdict.json MUST include version=1, run_id, generated_at, verdict, and checked_paths.",
+		"owner-only residual evidence gaps may still return verdict=PASS when no technical validator issues remain.",
+		`"generated_at": "2026-04-16T12:00:02Z"`,
+		`"title": "Owner mapping remains unresolved"`,
+		`"repo": "payments-service"`,
+		`"path": "README.md"`,
+	}
+	for _, token := range expectedTokens {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected findings prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
+func TestComposeArtifactOnlyPromptAddsAsIsDraftCanonicalSection(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		StepID:            "init.step2.asis_docs",
+		WriteRoot:         "/tmp/write-root",
+		DraftFinalRoot:    "/tmp/draft-root",
+		ExpectedArtifacts: []string{"asis-draft-manifest.json"},
+	}
+
+	prompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderCodexCode, task)
+	expectedTokens := []string{
+		"AS-IS DRAFT MANIFEST CANONICAL SHAPE:",
+		`asis-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="as_is", agent_role, and outputs[].`,
+		`overview.md -> reports/as-is/overview.md`,
+		`"step_contract": "as_is"`,
+		`"canonical_path": "reports/as-is/payments/overview.md"`,
+	}
+	for _, token := range expectedTokens {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected as-is prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}

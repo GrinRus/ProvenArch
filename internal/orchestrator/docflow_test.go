@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	"github.com/GrinRus/ProvenArch/internal/model"
@@ -410,5 +411,150 @@ func TestValidateStagedArtifactsDetectsCitationAndTopicIssues(t *testing.T) {
 		if !seen[expected] {
 			t.Fatalf("expected issue code %q, got %#v", expected, issues)
 		}
+	}
+}
+
+func TestDocflowIndexesUseConsistentManifestDocumentIDs(t *testing.T) {
+	t.Parallel()
+
+	manifests := []contracts.ShardPackManifest{
+		{
+			ShardID:      "payments",
+			ArtifactRoot: "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments",
+			Documents: []contracts.AuthoredDocument{
+				{
+					ID:            "doc.payments.overview",
+					Kind:          "report",
+					Title:         "Payments Overview",
+					Path:          "overview.md",
+					CanonicalPath: "reports/as-is/overview.md",
+					CitationIDs:   []string{"cite.payments.readme"},
+				},
+			},
+			Citations: []contracts.DocumentCitation{
+				{
+					ID:          "cite.payments.readme",
+					Repo:        "payments-service",
+					Path:        "README.md",
+					ClaimIDs:    []string{"claim.payments.readme"},
+					DocumentIDs: []string{"doc.payments.overview"},
+				},
+			},
+			Semantic: contracts.SemanticSnapshot{
+				Coverage:  contracts.Coverage{Observed: []string{"services"}},
+				Questions: []contracts.Question{},
+				Entities:  []contracts.Entity{},
+				Edges:     []contracts.Edge{},
+				Findings:  []contracts.Finding{},
+			},
+		},
+	}
+	documentInfos := aggregateDocumentInfos(manifests)
+	citationIndex := aggregateCitationIndex("run-1", time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC), manifests, documentInfos)
+	finalIndex, err := buildFinalRunIndex(
+		"run-1",
+		string(PipelineInit),
+		time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC),
+		[]Artifact{{
+			Path:  "reports/taskruns/run-1/staging/final/reports/as-is/overview.md",
+			Kind:  "report",
+			Label: "Payments Overview",
+		}},
+		manifests,
+		documentInfos,
+		citationIndex,
+		contracts.SemanticSnapshot{Coverage: contracts.Coverage{}, Questions: []contracts.Question{}, Entities: []contracts.Entity{}, Edges: []contracts.Edge{}, Findings: []contracts.Finding{}},
+	)
+	if err != nil {
+		t.Fatalf("build final run index: %v", err)
+	}
+	if got, want := finalIndex.CanonicalDocuments[0].ID, "doc.payments.overview"; got != want {
+		t.Fatalf("unexpected final run document id: got=%q want=%q", got, want)
+	}
+	if got, want := citationIndex.Citations[0].DocumentIDs, []string{"doc.payments.overview"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("unexpected citation document ids: got=%v want=%v", got, want)
+	}
+}
+
+func TestNormalizeSemanticSnapshotDedupesRepoAliasEntitiesAndRewritesReferences(t *testing.T) {
+	t.Parallel()
+
+	resolver := newSemanticRepoAliasResolver(
+		map[string]string{"bank-of-anthos": "/tmp/repos/bank-of-anthos-7fb01b96709b"},
+		nil,
+	)
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{
+		Coverage: contracts.Coverage{Missing: []string{"owner mappings"}},
+		Questions: []contracts.Question{
+			{ID: "q.bank.owner", Text: "Who owns the bank service?", RelatedIDs: []string{"svc.bank_of_anthos"}},
+		},
+		Entities: []contracts.Entity{
+			{
+				ID:   "svc.bank-of-anthos",
+				Type: "service",
+				Name: "bank-of-anthos",
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.7,
+					Evidence:   []contracts.Evidence{{Repo: "bank-of-anthos", Path: "src/main.go"}},
+				},
+			},
+			{
+				ID:   "svc.bank_of_anthos",
+				Type: "service",
+				Name: "bank-of-anthos",
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.8,
+					Evidence:   []contracts.Evidence{{Repo: "bank-of-anthos-7fb01b96709b", Path: "src/main.go"}},
+				},
+			},
+		},
+		Edges: []contracts.Edge{
+			{
+				ID:   "edge.dep",
+				Type: "depends_on",
+				From: "svc.bank_of_anthos",
+				To:   "svc.ledger",
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.6,
+					Evidence:   []contracts.Evidence{{Repo: "bank-of-anthos-7fb01b96709b", Path: "src/main.go"}},
+				},
+			},
+		},
+		Findings: []contracts.Finding{
+			{
+				ID:         "finding.bank.owner",
+				Severity:   "medium",
+				Title:      "Missing owner mapping",
+				RelatedIDs: []string{"svc.bank_of_anthos"},
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.6,
+					Evidence:   []contracts.Evidence{{Repo: "bank-of-anthos-7fb01b96709b", Path: "src/main.go"}},
+				},
+			},
+		},
+	}, resolver)
+
+	if got, want := len(snapshot.Entities), 1; got != want {
+		t.Fatalf("expected deduped entities, got=%d want=%d", got, want)
+	}
+	winnerID := snapshot.Entities[0].ID
+	if winnerID != "svc.bank-of-anthos" {
+		t.Fatalf("expected stable winning entity id, got %q", winnerID)
+	}
+	if got := snapshot.Findings[0].RelatedIDs; len(got) != 1 || got[0] != winnerID {
+		t.Fatalf("expected finding related_ids to be rewritten to %q, got %v", winnerID, got)
+	}
+	if got := snapshot.Questions[0].RelatedIDs; len(got) != 1 || got[0] != winnerID {
+		t.Fatalf("expected question related_ids to be rewritten to %q, got %v", winnerID, got)
+	}
+	if got := snapshot.Edges[0].From; got != winnerID {
+		t.Fatalf("expected edge.from to be rewritten to %q, got %q", winnerID, got)
+	}
+	if got := snapshot.Entities[0].Provenance.Evidence[0].Repo; got != "bank-of-anthos" {
+		t.Fatalf("expected repo alias normalization to logical repo scope, got %q", got)
 	}
 }

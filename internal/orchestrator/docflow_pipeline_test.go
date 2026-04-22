@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -143,6 +144,44 @@ func TestDocFirstValidatorFailBlocksPromotionInBestEffort(t *testing.T) {
 	}
 }
 
+func TestDocFirstOwnerGapOnlyValidatorFailDowngradesToPass(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	service := NewService(
+		WithRunner(docflowOwnerGapValidatorRunner{}),
+		WithExecutionOverrides(acpruntime.ExecutionOverrides{
+			FailurePolicy: strPtr(acpruntime.ExecutionFailurePolicyBestEffort),
+		}),
+		WithClock(func() time.Time {
+			return time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
+		}),
+	)
+
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("expected owner-gap-only validator residual to be reconciled to PASS, got %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
+	}
+
+	verdict := readRunValidatorVerdict(t, ws.Path, info.RunID)
+	if verdict.Verdict != "PASS" {
+		t.Fatalf("expected reconciled PASS verdict, got %q", verdict.Verdict)
+	}
+	if len(verdict.Findings) == 0 || len(verdict.Questions) == 0 {
+		t.Fatalf("expected owner-gap findings/questions to remain visible, got %+v", verdict)
+	}
+	if !strings.Contains(strings.ToLower(verdict.Summary), "owner-gap") {
+		t.Fatalf("expected summary to mention owner-gap reconciliation, got %q", verdict.Summary)
+	}
+}
+
 func TestDocFirstAssemblyMaterializesRequiredCanonicalLiveDocsWhenAuthoredPrefixesArePartial(t *testing.T) {
 	t.Parallel()
 
@@ -190,6 +229,51 @@ func TestDocFirstAssemblyMaterializesRequiredCanonicalLiveDocsWhenAuthoredPrefix
 	}
 }
 
+func TestDocFlowSkipsAsIsRuntimeWhenCollectEvidenceIsUnusable(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	runner := &collectFailureRunner{}
+	service := NewService(
+		WithRunner(runner),
+		WithExecutionOverrides(acpruntime.ExecutionOverrides{
+			FailurePolicy: strPtr(acpruntime.ExecutionFailurePolicyBestEffort),
+		}),
+		WithClock(func() time.Time {
+			return time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
+		}),
+	)
+
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err == nil {
+		t.Fatalf("expected run error when all collect shards fail")
+	}
+	if info.Status != RunStatusFailed {
+		t.Fatalf("expected failed status, got %s", info.Status)
+	}
+	if runner.asIsInvocationCount() != 0 {
+		t.Fatalf("expected as-is runtime to be skipped, got %d invocations", runner.asIsInvocationCount())
+	}
+	if !strings.Contains(info.Error, "step1.collect") {
+		t.Fatalf("expected collect failure summary, got %q", info.Error)
+	}
+
+	quality := readRunQuality(t, ws.Path, info.RunID)
+	if quality.EvidenceState.ReportMode != "incomplete" {
+		t.Fatalf("expected incomplete report mode, got %#v", quality.EvidenceState)
+	}
+	if !containsString(quality.EvidenceState.Reasons, "collect_all_shards_failed") {
+		t.Fatalf("expected collect_all_shards_failed reason, got %#v", quality.EvidenceState.Reasons)
+	}
+	if !containsString(quality.EvidenceState.Reasons, "asis_docs_skipped_due_to_unusable_collect") {
+		t.Fatalf("expected as-is skip reason, got %#v", quality.EvidenceState.Reasons)
+	}
+}
+
 type docflowCustomProposalRunner struct{}
 
 func (docflowCustomProposalRunner) Preflight(context.Context) error { return nil }
@@ -211,8 +295,17 @@ type docflowFailingValidatorRunner struct{}
 
 type docflowPartialCanonicalRunner struct{}
 
-func (docflowFailingValidatorRunner) Preflight(context.Context) error { return nil }
-func (docflowPartialCanonicalRunner) Preflight(context.Context) error { return nil }
+type docflowOwnerGapValidatorRunner struct{}
+
+type collectFailureRunner struct {
+	mu          sync.Mutex
+	asIsInvoked int
+}
+
+func (docflowFailingValidatorRunner) Preflight(context.Context) error  { return nil }
+func (docflowPartialCanonicalRunner) Preflight(context.Context) error  { return nil }
+func (docflowOwnerGapValidatorRunner) Preflight(context.Context) error { return nil }
+func (*collectFailureRunner) Preflight(context.Context) error          { return nil }
 
 func (docflowFailingValidatorRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
 	result, err := docflowCustomProposalRunner{}.Run(ctx, task)
@@ -238,6 +331,44 @@ func (docflowPartialCanonicalRunner) Run(ctx context.Context, task acpruntime.Ta
 		}
 	}
 	return result, nil
+}
+
+func (docflowOwnerGapValidatorRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	result, err := docflowCustomProposalRunner{}.Run(ctx, task)
+	if err != nil {
+		return acpruntime.Result{}, err
+	}
+	if strings.HasSuffix(task.StepID, "step3.findings") {
+		if err := overwriteOwnerGapValidatorVerdict(task); err != nil {
+			return acpruntime.Result{}, err
+		}
+	}
+	return result, nil
+}
+
+func (r *collectFailureRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	switch task.StepID {
+	case "init.step1.collect", "refresh.step1.collect":
+		return acpruntime.Result{}, acpruntime.WrapRunnerError(
+			acpruntime.ProviderClaudeCode,
+			acpruntime.ErrorCodeRuntimeContract,
+			"collect manifest contract invalid",
+			errors.New("legacy collect manifest fields are forbidden"),
+		)
+	case "init.step2.asis_docs", "refresh.step2.asis_docs":
+		r.mu.Lock()
+		r.asIsInvoked++
+		r.mu.Unlock()
+		return acpruntime.Result{}, fmt.Errorf("unexpected as-is runtime invocation")
+	default:
+		return claudecode.FakeRunner{}.Run(ctx, task)
+	}
+}
+
+func (r *collectFailureRunner) asIsInvocationCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.asIsInvoked
 }
 
 func appendCustomProposalToManifest(task acpruntime.Task) error {
@@ -387,6 +518,29 @@ func appendPartialCanonicalDocsToManifest(task acpruntime.Task) error {
 	return nil
 }
 
+func readRunQuality(t *testing.T, workspacePath string, runID string) runQualitySummary {
+	t.Helper()
+
+	raw, err := os.ReadFile(filepath.Join(workspacePath, "reports", "taskruns", runID+"-quality.json"))
+	if err != nil {
+		t.Fatalf("read run quality: %v", err)
+	}
+	var report runQualitySummary
+	if err := json.Unmarshal(raw, &report); err != nil {
+		t.Fatalf("decode run quality: %v", err)
+	}
+	return report
+}
+
+func containsString(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
+}
+
 func overwriteValidatorVerdict(task acpruntime.Task, verdictValue string) error {
 	writeRoot := strings.TrimSpace(task.WriteRoot)
 	if writeRoot == "" {
@@ -413,6 +567,59 @@ func overwriteValidatorVerdict(task acpruntime.Task, verdictValue string) error 
 				Path:     checkedPaths[0],
 			},
 		}
+	}
+	encoded, err := json.MarshalIndent(verdict, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal validator verdict: %w", err)
+	}
+	encoded = append(encoded, '\n')
+	if err := os.WriteFile(filepath.Join(writeRoot, "validator-verdict.json"), encoded, 0o644); err != nil {
+		return fmt.Errorf("write validator verdict: %w", err)
+	}
+	return nil
+}
+
+func overwriteOwnerGapValidatorVerdict(task acpruntime.Task) error {
+	writeRoot := strings.TrimSpace(task.WriteRoot)
+	if writeRoot == "" {
+		return fmt.Errorf("write_root is required")
+	}
+	checkedPaths := []string{
+		path.Join("reports", "taskruns", task.RunID, "staging", "final", "final-run-index.json"),
+		path.Join("reports", "taskruns", task.RunID, "staging", "final", "citation-index.json"),
+	}
+	verdict := contracts.ValidatorVerdict{
+		Version:      1,
+		RunID:        strings.TrimSpace(task.RunID),
+		GeneratedAt:  task.StartedAtUTC.UTC().Add(2 * time.Second).Format(time.RFC3339),
+		Verdict:      "FAIL",
+		Summary:      "Synthetic owner-gap-only validator verdict.",
+		CheckedPaths: checkedPaths,
+		Findings: []contracts.Finding{
+			{
+				ID:          "finding.owner.synthetic",
+				Severity:    "medium",
+				Title:       "Owner mapping remains unresolved",
+				Description: "Validator could not confirm an owning team from staged evidence.",
+				RuleID:      "rule.owner.required",
+				RelatedIDs:  []string{"svc.checkout"},
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.7,
+					Evidence: []contracts.Evidence{{
+						Repo: "checkout",
+						Path: "README.md",
+					}},
+				},
+			},
+		},
+		Questions: []contracts.Question{
+			{
+				ID:         "q.owner.synthetic",
+				Text:       "Which team owns the checkout service?",
+				RelatedIDs: []string{"svc.checkout"},
+			},
+		},
 	}
 	encoded, err := json.MarshalIndent(verdict, "", "  ")
 	if err != nil {

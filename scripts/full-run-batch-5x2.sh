@@ -41,6 +41,9 @@ REPORTS_ROOT="${REPORTS_ROOT:-$E2E_TMP_ROOT/reports}"
 RESOLVED_TARGET_REPOS_FILE=""
 DECLARED_REPOS_JSON=""
 RUN_CLASSIFICATIONS_TSV=""
+BATCH_OWNER_HEARTBEAT_SEC="${BATCH_OWNER_HEARTBEAT_SEC:-10}"
+BATCH_OWNER_SENTINEL=""
+BATCH_OWNER_HEARTBEAT_PID=""
 declare -a STARTED_RUN_DIRS=()
 declare -a STARTED_RUN_PROVIDERS=()
 declare -a STARTED_RUN_INDEXES=()
@@ -128,6 +131,75 @@ run_status_file() {
   printf '%s' "$run_dir/run-status.env"
 }
 
+batch_owner_status_file() {
+  printf '%s' "${BATCH_ROOT}/batch-owner.env"
+}
+
+write_batch_owner_status() {
+  local state="$1"
+  local process_exit="${2:-}"
+  local termination_signal="${3:-none}"
+  local failure_reason="${4:-none}"
+  local status_file
+  status_file="${BATCH_OWNER_SENTINEL:-$(batch_owner_status_file)}"
+  mkdir -p "$(dirname "$status_file")"
+  cat >"$status_file" <<EOF
+batch_id=$BATCH_ID
+profile_id=$PROFILE_ID
+sweep_id=$SWEEP_ID
+pid=$$
+parent_pid=${PPID:-}
+state=$state
+process_exit=$process_exit
+termination_signal=$termination_signal
+failure_reason=$failure_reason
+updated_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+EOF
+}
+
+stop_batch_owner_heartbeat() {
+  if [[ -z "${BATCH_OWNER_HEARTBEAT_PID:-}" ]]; then
+    return 0
+  fi
+  kill "${BATCH_OWNER_HEARTBEAT_PID}" >/dev/null 2>&1 || true
+  wait "${BATCH_OWNER_HEARTBEAT_PID}" >/dev/null 2>&1 || true
+  BATCH_OWNER_HEARTBEAT_PID=""
+}
+
+start_batch_owner_heartbeat() {
+  stop_batch_owner_heartbeat
+  local interval="${BATCH_OWNER_HEARTBEAT_SEC:-10}"
+  if [[ ! "$interval" =~ ^[0-9]+$ ]] || [[ "$interval" -le 0 ]]; then
+    write_batch_owner_status "running" "" "none" "none"
+    return 0
+  fi
+  write_batch_owner_status "running" "" "none" "none"
+  (
+    while true; do
+      sleep "$interval"
+      write_batch_owner_status "running" "" "none" "none"
+    done
+  ) &
+  BATCH_OWNER_HEARTBEAT_PID="$!"
+}
+
+finalize_batch_owner_status() {
+  local exit_code="$1"
+  stop_batch_owner_heartbeat
+  if [[ ! "$exit_code" =~ ^[0-9]+$ ]]; then
+    exit_code=1
+  fi
+  if [[ "$exit_code" -eq 0 ]]; then
+    write_batch_owner_status "completed" "0" "none" "none"
+    return 0
+  fi
+  if [[ "$exit_code" -ge 128 ]]; then
+    write_batch_owner_status "signal_terminated" "$exit_code" "signal_$((exit_code - 128))" "infra_signal_terminated"
+    return 0
+  fi
+  write_batch_owner_status "process_failed" "$exit_code" "none" "batch_exit_nonzero"
+}
+
 write_run_status() {
   local run_dir="$1"
   local provider="$2"
@@ -213,19 +285,20 @@ ensure_terminal_run_status() {
     return 0
   fi
 
-  local run_status_state="completed"
-  local run_status_signal="none"
-  local failure_reason=""
-  if [[ "$process_exit" -ne 0 ]]; then
-    run_status_state="process_failed"
-    failure_reason="infra_incomplete_cycle"
-    if [[ "$process_exit" -ge 128 ]]; then
-      run_status_state="signal_terminated"
-      run_status_signal="signal_$((process_exit - 128))"
-      failure_reason="infra_signal_terminated"
-    fi
+  local effective_process_exit="$process_exit"
+  if [[ ! "$effective_process_exit" =~ ^[0-9]+$ || "$effective_process_exit" -eq 0 ]]; then
+    effective_process_exit=1
   fi
-  write_run_status "$run_dir" "$provider" "$run_index" "$run_status_state" "$process_exit" "$run_status_signal" "$failure_reason" "no"
+
+  local run_status_state="process_failed"
+  local run_status_signal="none"
+  local failure_reason="infra_incomplete_cycle"
+  if [[ "$effective_process_exit" -ge 128 ]]; then
+    run_status_state="signal_terminated"
+    run_status_signal="signal_$((effective_process_exit - 128))"
+    failure_reason="infra_signal_terminated"
+  fi
+  write_run_status "$run_dir" "$provider" "$run_index" "$run_status_state" "$effective_process_exit" "$run_status_signal" "$failure_reason" "no"
 }
 
 classify_started_runs_on_signal() {
@@ -258,6 +331,8 @@ classify_started_runs_on_signal() {
 on_batch_signal() {
   local signal_name="$1"
   log "received termination signal: $signal_name"
+  stop_batch_owner_heartbeat
+  write_batch_owner_status "signal_terminated" "$(signal_exit_code "$signal_name")" "$(signal_status_token "$signal_name")" "infra_signal_terminated"
   classify_started_runs_on_signal "$signal_name"
   exit "$(signal_exit_code "$signal_name")"
 }
@@ -290,6 +365,7 @@ classify_unfinished_started_runs_on_exit() {
 
 on_batch_exit() {
   local exit_code="$1"
+  finalize_batch_owner_status "$exit_code"
   if [[ -z "${RUN_CLASSIFICATIONS_TSV:-}" ]]; then
     return 0
   fi
@@ -865,6 +941,7 @@ classify_run_failure() {
   local run_status_failure_reason=""
   local run_status_summary_written=""
   local terminal_pipeline_failure=0
+  local validator_verdict_failed=0
   local -a classify_log_paths=("$summary_path" "$full_log_path" "$batch_driver_log")
   local workspace="$run_dir/arch-workspace"
   local iter_log
@@ -932,6 +1009,9 @@ classify_run_failure() {
   if [[ -f "$summary_path" && "$run_status_state" == "process_failed" && "$run_status_summary_written" == "yes" ]]; then
     terminal_pipeline_failure=1
   fi
+  if contains_in_files "validator verdict is FAIL" "${classify_log_paths[@]}"; then
+    validator_verdict_failed=1
+  fi
 
   if [[ -f "$run_results_path" ]]; then
     run_count="$(awk 'NF { count++ } END { print count+0 }' "$run_results_path")"
@@ -945,6 +1025,9 @@ classify_run_failure() {
 
   if [[ "$run_class" == "none" ]] && contains_in_files "runner_unavailable" "${classify_log_paths[@]}"; then
     run_class="runner_unavailable"
+  fi
+  if [[ "$run_class" == "none" && "$validator_verdict_failed" == "1" ]]; then
+    run_class="runtime_flow_failed"
   fi
   if [[ "$run_class" == "none" ]] && contains_in_files "runtime_contract_failed" "${classify_log_paths[@]}"; then
     run_class="runtime_contract_failed"
@@ -1239,6 +1322,8 @@ if provider_selected "codex-code"; then
 fi
 
 mkdir -p "$BATCH_ROOT" "$REPORTS_ROOT"
+BATCH_OWNER_SENTINEL="$(batch_owner_status_file)"
+start_batch_owner_heartbeat
 acp_ensure_no_legacy_env_set die
 prepare_target_repos_file
 collect_declared_repos

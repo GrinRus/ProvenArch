@@ -54,6 +54,11 @@ func StepSpecificPolicy(stepID string) string {
 			`- Do NOT use todo_write-style planning or long plan narration.`,
 			`- Use only existing repo entrypoint hints; do not assume README.md exists when it is not present.`,
 			`- After the first useful evidence pass, converge to authored docs plus shard-pack-manifest.json instead of continuing a broad repo sweep.`,
+			`- Treat schemas/*, docs/spec/*, and the enforced prompt contract as the only schema source of truth for shard-pack-manifest.json.`,
+			`- Do NOT inspect reports/taskruns, prior shard-pack-manifest.json files, raw logs, or archive docs to infer collect manifest shape.`,
+			`- Every semantic provenance.evidence[] item must include non-empty repo and path values that resolve to real repository evidence.`,
+			`- Citation-only semantic evidence objects such as {"citation_id":"..."} are forbidden.`,
+			`- semantic.findings[*] must use title + description + provenance; do NOT use summary as a compatibility alias.`,
 		}, "\n")
 	case "refresh.step1.collect":
 		return strings.Join([]string{
@@ -62,23 +67,38 @@ func StepSpecificPolicy(stepID string) string {
 			`- Do NOT use todo_write-style planning or long plan narration.`,
 			`- Use only existing repo entrypoint hints; do not assume README.md exists when it is not present.`,
 			`- After the first useful evidence pass, converge to authored docs plus shard-pack-manifest.json instead of continuing a broad repo sweep.`,
+			`- Treat schemas/*, docs/spec/*, and the enforced prompt contract as the only schema source of truth for shard-pack-manifest.json.`,
+			`- Do NOT inspect reports/taskruns, prior shard-pack-manifest.json files, raw logs, or archive docs to infer collect manifest shape.`,
 			`- Allowed semantic.entities[*].type values: service, datastore, integration, external.system, team, domain, api, component.`,
 			`- Forbidden placeholder entity types: runtime_provider, runtime, metadata.`,
 			`- Analyze only repository/workspace artifacts; do NOT perform web search or external browsing.`,
 			`- Every provenance.evidence.path must resolve to an existing file in workspace/repo scope.`,
+			`- Every provenance.evidence.repo must name the repository that owns the cited path.`,
 			`- Do NOT emit synthetic evidence paths such as search_source/*, search_query/*, search_config/*.`,
+			`- Citation-only semantic evidence objects such as {"citation_id":"..."} are forbidden.`,
 			`- Do NOT introduce unrelated incident domains (for example bidding/tender/power-system topics) unless explicitly present in repository evidence.`,
 			`- If evidence is incomplete, capture gap via coverage.missing instead of synthetic placeholder entities.`,
 			`- Include at least one question and at least three items in coverage.missing.`,
 		}, "\n")
-	case "refresh.step3.findings":
+	case "init.step2.asis_docs", "refresh.step2.asis_docs":
 		return strings.Join([]string{
-			`STEP POLICY refresh.step3.findings:`,
+			fmt.Sprintf(`STEP POLICY %s:`, strings.TrimSpace(stepID)),
+			`- Do NOT delegate to agent/subagent helpers.`,
+			`- Do NOT use todo_write-style planning or long plan narration.`,
+			`- Use staged final evidence from read_context_roots; do not treat sibling baseline workspaces, prior draft manifests, or prior reports as template sources.`,
+			`- Treat schemas/*, docs/spec/*, and the enforced prompt contract as the only manifest source of truth for asis-draft-manifest.json.`,
+			`- Keep step_contract exactly "as_is"; null, empty, or alternate values are invalid.`,
+			`- Do NOT register legacy metadata envelopes or repo_scopes/path_scopes fields in asis-draft-manifest.json.`,
+		}, "\n")
+	case "init.step3.findings", "refresh.step3.findings":
+		return strings.Join([]string{
+			fmt.Sprintf(`STEP POLICY %s:`, strings.TrimSpace(stepID)),
 			`- Write validator-verdict.json only; do not write shard manifests or semantic snapshots for this step.`,
-			`- validator-verdict.json must include verdict, summary, checked_paths, fixed_paths, findings, and questions.`,
-			`- Each finding must include rule_id, related_ids, and provenance.evidence[].`,
-			`- For observation provenance, evidence array MUST be non-empty.`,
+			`- validator-verdict.json must include version=1, run_id, generated_at, verdict, and checked_paths.`,
+			`- findings[] items must use title + description + provenance; do NOT use summary as a finding alias.`,
+			`- For observation provenance, findings[*].provenance.evidence[] must be non-empty and each evidence item must include repo/path.`,
 			`- If owner mapping remains unresolved in evidence, include at least one finding and at least one question in validator-verdict.json.`,
+			`- Owner-gap findings/questions may coexist with verdict PASS when no technical validator issues remain.`,
 		}, "\n")
 	default:
 		if strings.HasPrefix(strings.TrimSpace(stepID), "refresh.") {
@@ -132,13 +152,19 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Produce runtime-authored documents in write_root and then write shard-pack-manifest.json in write_root.`,
 			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and semantic snapshot.`,
 			`- In shard-pack-manifest.json, semantic MUST include coverage, questions, entities, edges, and findings.`,
+			`- Use only canonical collect vocabulary: semantic.coverage.observed, semantic.questions[*].text, semantic.edges[*].type, and object-shaped provenance blocks.`,
 			`- Do NOT emit semantic payloads on stdout; keep semantic only inside shard-pack-manifest.json.`,
 			`- You may be flexible in document structure, but promotion and rendering depend on manifest citations/topics remaining accurate.`,
 			`- After the first filesystem write inside write_root, stop broad repository exploration; only minimal manifest/JSON repair is allowed afterwards.`,
 			`- After writing shard-pack-manifest.json, do NOT continue broad list_directory/read_file sweeps across repo roots.`,
+			`- Do NOT read reports/taskruns/**, raw runtime logs, or previously generated shard-pack-manifest.json files as schema examples during collect.`,
 			`- If authored docs and shard-pack-manifest.json already exist in write_root, stop and exit successfully.`,
 		)
 		lines = append(lines, artifactquality.CollectManifestContractLines(strings.TrimSpace(task.ArtifactRoot))...)
+		lines = append(lines,
+			`- Canonical collect fragment below is normative for field names and value types; do not substitute legacy aliases.`,
+			artifactquality.CollectManifestCanonicalExample(),
+		)
 		lines = append(lines, artifactquality.ClaimIDContractLines()...)
 		lines = append(lines,
 			`- Do NOT collapse a multi-document refresh surface to one generic "cite.runtime-summary" citation when repository evidence exists.`,
@@ -151,14 +177,24 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Validator may fix only indexes, references, or technical document issues inside write_root; do not rewrite document meaning wholesale.`,
 			`- Do NOT shard this step and do NOT emit findings through stdout; validator-verdict.json is the only primary output.`,
 		)
+		lines = append(lines, artifactquality.ValidatorVerdictContractLines()...)
+		lines = append(lines,
+			`- Canonical validator-verdict fragment below is normative for metadata fields and finding evidence shape; copy keys/types exactly and only change IDs/content.`,
+			artifactquality.ValidatorVerdictCanonicalExample(),
+		)
 		lines = append(lines, artifactquality.ClaimIDContractLines()...)
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
 		lines = append(lines,
 			`- Write asis-draft-manifest.json in write_root.`,
 			`- Draft final docs only under draft_final_root.`,
-			`- Allowed canonical targets are reports/as-is/*, reports/coverage/*, and reports/agent-outputs/*.`,
+			`- Use staged final evidence from read_context_roots only; do NOT read sibling baseline workspaces or previously published as-is drafts as templates.`,
 			`- If asis-draft-manifest.json already describes the publish surface, stop after artifact validation; do NOT re-register draft artifacts through any legacy metadata op.`,
 			`- Compiler may materialize indexes and derived technical artifacts only; canonical narratives come from your drafts.`,
+		)
+		lines = append(lines, artifactquality.AsIsDraftManifestContractLines()...)
+		lines = append(lines,
+			`- Canonical as-is draft fragment below is normative for field names, step_contract, and required outputs; copy keys/types exactly and only change IDs/content.`,
+			artifactquality.AsIsDraftManifestCanonicalExample(),
 		)
 	case "init.step4.proposals", "refresh.step4.proposals":
 		lines = append(lines,
@@ -240,6 +276,7 @@ func CollectArtifactRepairHints(initialProblem string) []string {
 		`- Repair mode is artifact-only: do not invent extra repository file reads/writes after authored docs already exist.`,
 		`- Valid semantic examples: entities[*].provenance={"kind":"observation","confidence":0.7,"evidence":[...]}, edges[*]={"id":"edge.dep","type":"depends_on","from":"svc.a","to":"svc.b","provenance":{...}}, findings[*]={"id":"finding.x","severity":"medium","title":"Missing owner mapping","description":"...","rule_id":"rule.owner.required","related_ids":["svc.a"],"provenance":{...}}.`,
 	}
+	lines = append(lines, artifactquality.CollectManifestLegacyHygieneLines()...)
 	if detail := compactRetryHint(initialProblem); detail != "" {
 		lines = append(lines, fmt.Sprintf(`- Previous artifact contract failure: %s`, detail))
 	}
@@ -331,7 +368,19 @@ func CollectRepoEntrypointHints(task acpruntime.Task) []string {
 	if len(task.ReadContextRoots) == 0 {
 		return nil
 	}
-	patterns := []string{"README.*", "catalog-info.yaml", "pyproject.toml", "package.json", "docker-compose*", "skaffold.yaml", "Makefile"}
+	patterns := []string{
+		"README.*",
+		".github/CODEOWNERS",
+		"CODEOWNERS",
+		"OWNERS*",
+		"MAINTAINERS*",
+		"catalog-info.yaml",
+		"pyproject.toml",
+		"package.json",
+		"docker-compose*",
+		"skaffold.yaml",
+		"Makefile",
+	}
 	hints := []string{}
 	seen := map[string]struct{}{}
 	for _, root := range task.ReadContextRoots {

@@ -1271,36 +1271,73 @@ if not repo_scopes:
         repo_scopes = [repo_scope]
 path_scopes = first_non_empty_list(task, ["path_scopes", "PathScopes"])
 
-def write_runtime_draft(manifest_name, draft_name, canonical_path, kind, title):
+def write_runtime_draft(manifest_name, outputs, default_step_contract="draft"):
     if not write_root or not draft_root:
         return
     os.makedirs(write_root, exist_ok=True)
     os.makedirs(draft_root, exist_ok=True)
-    with open(os.path.join(draft_root, draft_name), "w", encoding="utf-8") as handle:
-        handle.write("# Stub Draft\n")
+    rendered_outputs = []
+    for output in outputs:
+        draft_name = output["path"]
+        with open(os.path.join(draft_root, draft_name), "w", encoding="utf-8") as handle:
+            handle.write(output.get("content", "# Stub Draft\n"))
+        rendered_outputs.append(
+            {
+                "path": draft_name,
+                "canonical_path": output["canonical_path"],
+                "kind": output["kind"],
+                "title": output["title"],
+            }
+        )
     manifest = {
         "version": 1,
         "run_id": run_id or "run-1",
         "step_id": step_id,
-        "step_contract": step_contract or "draft",
+        "step_contract": step_contract or default_step_contract,
         "agent_role": agent_role,
         "summary": "stub runtime draft",
-        "outputs": [
-            {
-                "path": draft_name,
-                "canonical_path": canonical_path,
-                "kind": kind,
-                "title": title,
-            }
-        ],
+        "outputs": rendered_outputs,
     }
     with open(os.path.join(write_root, manifest_name), "w", encoding="utf-8") as handle:
         json.dump(manifest, handle)
 
 if step_id == "init.step0.constitution":
-    write_runtime_draft("constitution-draft.json", "overview.md", "charter/overview.md", "charter", "Stub Constitution")
+    write_runtime_draft(
+        "constitution-draft.json",
+        [
+            {
+                "path": "overview.md",
+                "canonical_path": "charter/overview.md",
+                "kind": "charter",
+                "title": "Stub Constitution",
+            }
+        ],
+    )
 elif step_id in {"init.step2.asis_docs", "refresh.step2.asis_docs"}:
-    write_runtime_draft("asis-draft-manifest.json", "overview.md", "reports/as-is/overview.md", "report", "Stub As-Is Overview")
+    write_runtime_draft(
+        "asis-draft-manifest.json",
+        [
+            {
+                "path": "overview.md",
+                "canonical_path": "reports/as-is/overview.md",
+                "kind": "report",
+                "title": "Stub As-Is Overview",
+            },
+            {
+                "path": "summary.md",
+                "canonical_path": "reports/coverage/summary.md",
+                "kind": "report",
+                "title": "Stub Coverage Summary",
+            },
+            {
+                "path": "architect-summary.md",
+                "canonical_path": "reports/agent-outputs/architect/summary.md",
+                "kind": "agent-output",
+                "title": "Stub Architect Summary",
+            },
+        ],
+        "as_is",
+    )
 elif step_id in {"init.step3.findings", "refresh.step3.findings"} and write_root:
     os.makedirs(write_root, exist_ok=True)
     verdict = {
@@ -1317,7 +1354,17 @@ elif step_id in {"init.step3.findings", "refresh.step3.findings"} and write_root
     with open(os.path.join(write_root, "validator-verdict.json"), "w", encoding="utf-8") as handle:
         json.dump(verdict, handle)
 elif step_id in {"init.step4.proposals", "refresh.step4.proposals"}:
-    write_runtime_draft("proposals-draft-manifest.json", "proposal.md", "proposals/proposal-baseline/proposal.md", "proposal", "Stub Proposal")
+    write_runtime_draft(
+        "proposals-draft-manifest.json",
+        [
+            {
+                "path": "proposal.md",
+                "canonical_path": "proposals/proposal-baseline/proposal.md",
+                "kind": "proposal",
+                "title": "Stub Proposal",
+            }
+        ],
+    )
 
 if step_id in {"init.step1.collect", "refresh.step1.collect"} and write_root:
     os.makedirs(write_root, exist_ok=True)
@@ -1467,11 +1514,15 @@ elif current_step in {"init.step2.asis_docs", "refresh.step2.asis_docs"}:
     os.makedirs(draft_root, exist_ok=True)
     with open(os.path.join(draft_root, "overview.md"), "w", encoding="utf-8") as handle:
         handle.write("# Stub As-Is\n")
+    with open(os.path.join(draft_root, "summary.md"), "w", encoding="utf-8") as handle:
+        handle.write("# Stub Coverage Summary\n")
+    with open(os.path.join(draft_root, "architect-summary.md"), "w", encoding="utf-8") as handle:
+        handle.write("# Stub Architect Summary\n")
     manifest = {
         "version": 1,
         "run_id": run_id,
         "step_id": current_step,
-        "step_contract": step_contract,
+        "step_contract": step_contract or "as_is",
         "agent_role": agent_role,
         "summary": "stub codex as-is draft",
         "outputs": [
@@ -1480,6 +1531,18 @@ elif current_step in {"init.step2.asis_docs", "refresh.step2.asis_docs"}:
                 "canonical_path": "reports/as-is/overview.md",
                 "kind": "report",
                 "title": "Stub As-Is Overview"
+            },
+            {
+                "path": "summary.md",
+                "canonical_path": "reports/coverage/summary.md",
+                "kind": "report",
+                "title": "Stub Coverage Summary"
+            },
+            {
+                "path": "architect-summary.md",
+                "canonical_path": "reports/agent-outputs/architect/summary.md",
+                "kind": "agent-output",
+                "title": "Stub Architect Summary"
             }
         ]
     }

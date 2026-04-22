@@ -1,9 +1,12 @@
 package artifactquality
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 func CollectManifestContractLines(artifactRoot string) []string {
-	return []string{
+	lines := []string{
 		fmt.Sprintf(`- shard-pack-manifest.json MUST validate against the ACP shard-pack-manifest contract and use artifact_root = %q.`, artifactRoot),
 		`- version MUST be integer 1 (not "1.0.0" or any other string form).`,
 		`- Each documents[] item MUST include: id, kind, title, path, canonical_path, topics, citation_ids.`,
@@ -17,9 +20,13 @@ func CollectManifestContractLines(artifactRoot string) []string {
 		`- semantic MUST include coverage, questions, entities, edges, and findings; questions/entities/edges/findings MUST be arrays even when empty.`,
 		`- semantic.entities[*] MUST remain full entity objects with provenance; do not drop provenance during repair or retry flows.`,
 		`- semantic.findings[*] MUST remain structured finding objects; never collapse findings to strings.`,
+		`- Every semantic.entities[*].provenance.evidence[*], semantic.edges[*].provenance.evidence[*], and semantic.findings[*].provenance.evidence[*] item MUST include non-empty repo and path values that point to concrete repository evidence.`,
+		`- Citation-only semantic evidence objects are forbidden; do NOT use {"citation_id":"..."} without repo/path inside semantic provenance.evidence[].`,
+		`- semantic.findings[*] MUST use title + description + provenance; do NOT use summary as a compatibility alias.`,
 		`- canonical_path MUST be a stable promoted path under reports/as-is, reports/findings, reports/coverage, reports/agent-outputs, reports/diagrams, or proposals.`,
 		`- Do NOT use reports/taskruns/... staging paths as canonical_path.`,
 	}
+	return append(lines, CollectManifestLegacyHygieneLines()...)
 }
 
 func ClaimIDContractLines() []string {
@@ -28,4 +35,228 @@ func ClaimIDContractLines() []string {
 		`- Do NOT reuse the same claim_id across different citations or shards, even when they describe related evidence.`,
 		`- When deriving claim_ids, append the shard slug and then a deterministic numeric suffix if another collision remains.`,
 	}
+}
+
+func CollectManifestLegacyHygieneLines() []string {
+	return []string{
+		`- Treat schemas/*, docs/spec/*, and the enforced collect prompt contract as the only schema source of truth; do NOT infer manifest shape from prior reports/taskruns artifacts, raw logs, or archived examples.`,
+		`- semantic.coverage MUST use observed/missing/notes; do NOT use covered_topics or alternate coverage keys.`,
+		`- semantic.questions[*] MUST use text; do NOT use question or other alias keys.`,
+		`- semantic.edges[*] MUST use canonical keys id/type/from/to/provenance; do NOT use relation/source/target aliases.`,
+		`- semantic.entities[*].provenance, semantic.edges[*].provenance, and semantic.findings[*].provenance MUST be objects; do NOT use arrays of legacy citation records.`,
+		`- provenance.confidence values MUST stay numeric; string confidence values are invalid.`,
+		`- semantic.findings[*] MUST keep evidence inside provenance.evidence; do NOT use evidence_citation_ids or legacy inference/summary compatibility fields.`,
+		`- semantic provenance.evidence[*] objects MUST carry repo/path; citation-only evidence objects and empty repo/path strings are invalid legacy drift.`,
+		`- Do NOT add top-level step_contract, compatibility, or any alternate semantic wrapper fields to shard-pack-manifest.json.`,
+	}
+}
+
+func CollectManifestCanonicalExample() string {
+	return strings.TrimSpace(`{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "shard_id": "payments",
+  "domain_id": "payments",
+  "agent_role": "shard-analyst",
+  "artifact_root": "reports/taskruns/run-1/staging/shards/payments",
+  "repo_scopes": ["payments-service"],
+  "path_scopes": ["src"],
+  "documents": [
+    {
+      "id": "doc.payments.overview",
+      "kind": "report",
+      "title": "Payments Overview",
+      "path": "overview.md",
+      "canonical_path": "reports/as-is/payments/overview.md",
+      "topics": ["payments"],
+      "citation_ids": ["cite.payments.readme"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.payments.readme",
+      "repo": "payments-service",
+      "path": "README.md",
+      "claim_ids": ["claim.payments.readme.payments"],
+      "document_ids": ["doc.payments.overview"]
+    }
+  ],
+  "semantic": {
+    "coverage": {
+      "observed": ["services"],
+      "missing": ["owner mappings"],
+      "notes": ["Use canonical keys only."]
+    },
+    "questions": [
+      {
+        "id": "q.payments.owner",
+        "text": "Who owns the payments service?"
+      }
+    ],
+    "entities": [
+      {
+        "id": "svc.payments",
+        "name": "payments",
+        "type": "service",
+        "provenance": {
+          "kind": "observation",
+          "confidence": 0.8,
+          "evidence": [
+            {
+              "citation_id": "cite.payments.readme",
+              "repo": "payments-service",
+              "path": "README.md"
+            }
+          ]
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge.payments.depends-on-ledger",
+        "type": "depends_on",
+        "from": "svc.payments",
+        "to": "svc.ledger",
+        "provenance": {
+          "kind": "observation",
+          "confidence": 0.7,
+          "evidence": [
+            {
+              "citation_id": "cite.payments.readme",
+              "repo": "payments-service",
+              "path": "README.md"
+            }
+          ]
+        }
+      }
+    ],
+    "findings": [
+      {
+        "id": "finding.payments.owner",
+        "severity": "medium",
+        "title": "Missing owner mapping",
+        "description": "Repository evidence names the payments service but does not identify an owning team.",
+        "rule_id": "rule.owner.required",
+        "related_ids": ["svc.payments"],
+        "provenance": {
+          "kind": "observation",
+          "confidence": 0.6,
+          "evidence": [
+            {
+              "citation_id": "cite.payments.readme",
+              "repo": "payments-service",
+              "path": "README.md"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}`)
+}
+
+func ValidatorVerdictContractLines() []string {
+	return []string{
+		`- validator-verdict.json MUST validate against the ACP validator-verdict contract.`,
+		`- validator-verdict.json MUST include version=1, run_id, generated_at, verdict, and checked_paths.`,
+		`- generated_at MUST be an RFC3339 UTC timestamp string (example: "2026-04-16T12:00:02Z").`,
+		`- checked_paths MUST enumerate the staged final artifacts inspected by the validator.`,
+		`- Optional fixed_paths/issues/findings/questions arrays are allowed, but they must keep canonical object shapes.`,
+		`- findings[] items MUST use title + description + provenance; do NOT use summary as a finding alias.`,
+		`- For observation provenance, findings[*].provenance.evidence[] MUST be non-empty and each evidence item MUST include non-empty repo and path values.`,
+		`- owner-gap findings/questions remain visible, but owner-only residual evidence gaps may still return verdict=PASS when no technical validator issues remain.`,
+	}
+}
+
+func ValidatorVerdictCanonicalExample() string {
+	return strings.TrimSpace(`{
+  "version": 1,
+  "run_id": "run-1",
+  "generated_at": "2026-04-16T12:00:02Z",
+  "verdict": "PASS",
+  "summary": "Validator kept the owner-gap visible in findings/questions, but no blocking technical issues remain.",
+  "checked_paths": [
+    "reports/taskruns/run-1/staging/final/final-run-index.json",
+    "reports/taskruns/run-1/staging/final/citation-index.json",
+    "reports/taskruns/run-1/staging/final/reports/as-is/payments/overview.md"
+  ],
+  "fixed_paths": [],
+  "findings": [
+    {
+      "id": "finding.payments.owner",
+      "severity": "medium",
+      "title": "Owner mapping remains unresolved",
+      "description": "Validator could not confirm an owning team from the staged evidence set, but the staged docflow is otherwise technically valid.",
+      "rule_id": "rule.owner.required",
+      "related_ids": ["svc.payments"],
+      "provenance": {
+        "kind": "observation",
+        "confidence": 0.7,
+        "evidence": [
+          {
+            "citation_id": "cite.payments.readme",
+            "repo": "payments-service",
+            "path": "README.md"
+          }
+        ]
+      }
+    }
+  ],
+  "questions": [
+    {
+      "id": "q.payments.owner",
+      "text": "Which team owns the payments service?"
+    }
+  ],
+  "issues": []
+}`)
+}
+
+func AsIsDraftManifestContractLines() []string {
+	return []string{
+		`- asis-draft-manifest.json MUST validate against the ACP runtime draft manifest contract.`,
+		`- asis-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="as_is", agent_role, and outputs[].`,
+		`- Do NOT add legacy top-level fields such as repo_scopes, path_scopes, compatibility, or alternate metadata envelopes.`,
+		`- outputs[] MUST include exactly these required publish mappings: overview.md -> reports/as-is/overview.md, summary.md -> reports/coverage/summary.md, architect-summary.md -> reports/agent-outputs/architect/summary.md.`,
+		`- Additional outputs are allowed only under reports/as-is/<domain>/overview.md.`,
+		`- outputs[].path MUST stay relative to draft_final_root and outputs[].canonical_path MUST stay workspace-relative.`,
+	}
+}
+
+func AsIsDraftManifestCanonicalExample() string {
+	return strings.TrimSpace(`{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step2.asis_docs",
+  "step_contract": "as_is",
+  "agent_role": "architect",
+  "summary": "Drafted canonical as-is reports from the staged final context.",
+  "outputs": [
+    {
+      "path": "overview.md",
+      "canonical_path": "reports/as-is/overview.md",
+      "kind": "report",
+      "title": "System Overview"
+    },
+    {
+      "path": "summary.md",
+      "canonical_path": "reports/coverage/summary.md",
+      "kind": "report",
+      "title": "Coverage Summary"
+    },
+    {
+      "path": "architect-summary.md",
+      "canonical_path": "reports/agent-outputs/architect/summary.md",
+      "kind": "agent-output",
+      "title": "Architect Summary"
+    },
+    {
+      "path": "payments-overview.md",
+      "canonical_path": "reports/as-is/payments/overview.md",
+      "kind": "report",
+      "title": "Payments Overview"
+    }
+  ]
+}`)
 }

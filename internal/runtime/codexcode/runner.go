@@ -78,10 +78,8 @@ func runCodexCommand(ctx context.Context, task acpruntime.Task, command string, 
 	}
 
 	cmd := exec.CommandContext(ctx, command, commandArgs...)
-	if workspace := strings.TrimSpace(task.Workspace); workspace != "" {
-		cmd.Dir = workspace
-	} else if writeRoot := strings.TrimSpace(task.WriteRoot); writeRoot != "" {
-		cmd.Dir = writeRoot
+	if workDir := strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task)); workDir != "" {
+		cmd.Dir = workDir
 	}
 	cmd.Stdin = strings.NewReader(buildPrompt(task))
 
@@ -122,10 +120,7 @@ func runCodexCommand(ctx context.Context, task acpruntime.Task, command string, 
 }
 
 func buildDefaultCodexArgs(task acpruntime.Task) []string {
-	cwd := strings.TrimSpace(task.Workspace)
-	if cwd == "" {
-		cwd = strings.TrimSpace(task.WriteRoot)
-	}
+	cwd := strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task))
 	args := []string{
 		"exec",
 		"--json",

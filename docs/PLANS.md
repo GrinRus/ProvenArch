@@ -55,6 +55,175 @@ EP-YYYYMMDD-<slug>
 
 ## Active Plans
 ### Plan ID
+EP-20260422-headless-legacy-cleanup
+
+### Context
+Live `regres fast` на `codex-code` показал, что collect provider может писать legacy `shard-pack-manifest` shape и подхватывать schema drift из runtime workspace (`reports/taskruns`, raw logs, archived artifacts). Параллельно обнаружены downstream gaps: `step2.asis_docs` стартует даже при unusable collect, а batch/matrix harness может оставлять child/profile в stale `running`.
+
+### Goals (must have)
+- [x] Зафиксировать shared canonical-only collect contract для `claude-code`, `qwen-code`, `codex-code`
+- [x] Убрать workspace-root fallback и legacy schema scavenging из collect runtime surface
+- [x] Добавить explicit legacy precheck перед strict collect canonicalization
+- [x] Не запускать live `step2.asis_docs` при unusable collect
+- [x] Переводить terminal-less child/profile runs в `infra_incomplete_cycle`
+- [ ] Прогнать DoD (`make contracts`, `make test`, `make lint`, `make build`)
+- [ ] Запустить новый canonical live `regres fast` matrix и зафиксировать следующий triage cycle
+
+### Non-goals
+- [x] Не расширять schema/contracts под legacy aliases
+- [x] Не добавлять permissive semantic compatibility repair
+- [x] Не менять release taxonomy или canonical matrix harness command
+
+### Approach
+1) Усилить shared prompt/policy/baseline contract для collect и явно запретить legacy aliases.
+2) Ограничить collect runtime surface до `write_root` + selected repo roots + explicit `read_context_roots`, включая collect cwd.
+3) Добавить raw legacy detector в artifactquality и сохранить strict parse/validate path без semantic repair.
+4) Исправить orchestrator skip path для unusable collect и harness reconciliation для stale `running`.
+5) Синхронизировать spec/runbook/docs и затем прогнать DoD + новый live matrix cycle.
+
+### Files expected to change
+- `internal/runtime/*`
+- `internal/artifactquality/*`
+- `internal/orchestrator/*`
+- `internal/workspace/*`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/tests/*`
+- `docs/spec/PIPELINE_SPEC.md`
+- `docs/ARCHITECTURE.md`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [ ] Collect prompts/contracts for all headless providers encode canonical-only vocabulary and legacy bans
+- [ ] `step1.collect` no longer sees workspace-root by default and uses `write_root` as working directory
+- [ ] Legacy collect payloads fail with explicit precheck diagnostics before strict parse
+- [ ] `step2.asis_docs` is skipped when collect evidence is unusable
+- [ ] Batch/matrix status files never remain silently `running` after child completion
+- [ ] DoD passes and a new live `regres fast` cycle is launched for triage
+
+### Risks
+- Основной риск — пережать runtime surface и случайно отрезать нужные repo reads. Снижение риска: collect access остаётся на selected repo roots, а `step2/3` продолжают использовать explicit `read_context_roots`.
+
+### Progress log
+- 2026-04-22: implementation started for shared prompt cleanup, collect surface hardening, explicit legacy precheck, `step2` unusable-collect skip and batch/matrix stale-running reconciliation.
+
+### Plan ID
+EP-20260422-headless-legacy-residuals
+
+### Context
+После первого live rerun остались residual failure classes: collect semantic evidence всё ещё может дрейфовать в citation-only shape, findings verdict prompt недоописывает canonical metadata trio, `qwen-code` маскирует quota/auth как `runtime_contract_failed`, а matrix reconciliation не добивает stale `profile-status=running` по owner heartbeat.
+
+### Goals (must have)
+- [x] Дожать shared collect contract до обязательного `repo/path` внутри semantic provenance evidence
+- [x] Добавить shared canonical contract/example для `validator-verdict.json`
+- [x] Переклассифицировать `qwen-code` post-run quota/auth failures в `runner_unavailable`
+- [x] Добавить durable child owner sidecar + matrix stale-profile reconciliation
+- [ ] Прогнать DoD (`make contracts`, `make test`, `make lint`, `make build`)
+- [ ] Запустить следующий live `regres fast` cycle и зафиксировать новый triage
+
+### Non-goals
+- [x] Не менять `schemas/*` и public contracts
+- [x] Не добавлять semantic compatibility repair для legacy payloads
+- [x] Не вводить provider-specific codex footer до завершения shared prompt wave
+
+### Approach
+1) Обновить shared artifact/prompt policy: collect evidence требует `repo/path`, findings contract задаёт canonical validator verdict example.
+2) Сохранить strict legacy reject в `artifactquality` и расширить diagnostics на citation-only semantic evidence.
+3) Исправить `qwen` post-run classification без ослабления artifact validation.
+4) Добавить `batch-owner.env` heartbeat и matrix stale sweep поверх `profile-status/*.json`.
+5) Синхронизировать docs, прогнать DoD и затем повторить live `regres fast`.
+
+### Files expected to change
+- `internal/artifactquality/*`
+- `internal/runtime/*`
+- `internal/workspace/*`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/tests/*`
+- `docs/spec/PIPELINE_SPEC.md`
+- `docs/ARCHITECTURE.md`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [ ] Collect examples/prompts больше не показывают citation-only semantic evidence и явно требуют `repo/path`
+- [ ] Findings prompts/policies требуют `version/run_id/generated_at` в `validator-verdict.json`
+- [ ] `qwen` quota/auth post-run failures классифицируются как `runner_unavailable`
+- [ ] Matrix умеет перевести stale `profile-status=running` в `failed/infra_incomplete_cycle` по owner sidecar
+- [ ] DoD проходит и запускается новый live rerun
+
+### Risks
+- Главный риск — переусилить stale reconciliation и ложно добивать живой профиль. Снижение риска: reconciliation использует `batch-owner.env pid + updated_at` и оставляет свежий live heartbeat нетронутым.
+
+### Progress log
+- 2026-04-22: started residual wave for canonical semantic evidence `repo/path`, validator verdict metadata trio, qwen post-run reclassification, and batch-owner-based stale profile reconciliation.
+- 2026-04-22: closed residual literal gaps after implementation audit: added strict `step_contract:null` reject coverage, explicit owner-gap `PASS` prompt/policy coverage, entrypoint hint tests for root `CODEOWNERS`/`MAINTAINERS*`, and docs wording that current runtime isolation relies on temp-root layout + step-local `cwd` because provider-side hard sandbox is unavailable.
+- 2026-04-22: fixed an additional qwen runtime bug found during acceptance audit: stall monitors now terminate the stuck provider process, draft/collect post-artifact stalls recover through artifact-only validation/repair, and pre-artifact stalls get one fresh-process retry before final failure classification.
+- 2026-04-22: fresh clean bank acceptance rerun surfaced one more qwen residual: the pre-artifact fresh-process retry was still running with the same collect stall watchdog and could loop back into `collect_stalled_before_artifacts`; fixed by disabling the pre-artifact watchdog on the second attempt, keeping the retry on the normal step-timeout budget, and adding regression coverage plus architecture/runbook notes.
+- 2026-04-22: tightened the qwen pre-artifact retry fix after code audit: the retry now disables only the pre-artifact sentinel while preserving post-artifact collect recovery, with an additional monitor-level regression test to prevent losing post-artifact stall handling on the second attempt.
+
+### Plan ID
+EP-20260422-docflow-runtime-residuals
+
+### Context
+После второго live `regres fast` collect перестал быть главным blocker, но surfaced новые residual drift classes: `step2.asis_docs` мог писать loose draft manifest и читать sibling baseline artifacts, `step3.findings` ломался на расходящемся `document_id` mapping и semantic alias duplicates, owner-gap оставался release-blocking даже без технических validator issues, а batch classifier путал terminal `validator verdict is FAIL` с `runtime_contract_failed`.
+
+### Goals (must have)
+- [x] Зафиксировать strict canonical contract для `step2.asis_docs`
+- [x] Убрать sibling baseline leakage через step-local cwd + separated temp roots
+- [x] Нормализовать staged docflow document IDs и semantic repo/entity aliases до validator
+- [x] Перевести owner-only residual `FAIL` в non-blocking `PASS` без потери findings/questions
+- [x] Классифицировать terminal `validator verdict is FAIL` как `runtime_flow_failed`
+- [x] Синхронизировать README/spec/runbook/architecture с новым поведением
+- [x] Прогнать DoD (`make contracts`, `make test`, `make lint`, `make build`)
+- [ ] Запустить новый canonical live `regres fast` matrix и зафиксировать следующий triage cycle
+
+### Non-goals
+- [x] Не менять `schemas/*` и `internal/contracts/*`
+- [x] Не добавлять новые verdict states или provider-specific compatibility repair
+- [x] Не ослаблять validator или collect schemas под legacy semantic payloads
+
+### Approach
+1) Усилить shared prompt/policy/runtime-manifest validation для `step2.asis_docs`.
+2) Перевести non-collect runtime cwd на step-local roots и развести headless/baseline temp roots.
+3) Нормализовать `document_id` mapping, `evidence.repo` identity и semantic alias duplicates в docflow assembly/model layer.
+4) Добавить owner-gap-only verdict reconciliation и скорректировать batch/report failure classification.
+5) Синхронизировать docs, прогнать DoD и затем повторить canonical live `regres fast`.
+
+### Files expected to change
+- `internal/artifactquality/*`
+- `internal/runtime/*`
+- `internal/runtimedrafts/*`
+- `internal/orchestrator/*`
+- `internal/model/*`
+- `internal/workspace/*`
+- `scripts/full-run-ai-advent.sh`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/e2e_batch_report.py`
+- `scripts/tests/*`
+- `docs/PLANS.md`
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/spec/PIPELINE_SPEC.md`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+
+### Acceptance criteria
+- [ ] `step2.asis_docs` принимает только canonical draft manifest с required outputs и без legacy top-level fields
+- [ ] non-collect runtime шаги больше не стартуют из workspace root и не видят sibling baseline workspace как лёгкий template source
+- [ ] staged `citation-index.json` и `final-run-index.json` используют согласованный deterministic `document_id` mapping
+- [ ] semantic assembly нормализует repo aliases и детерминированно дедуплицирует entity aliases до validator/promotion
+- [ ] owner-gap-only residual больше не держит `validator-verdict = FAIL`, но signal остаётся visible в findings/questions
+- [ ] terminal `validator verdict is FAIL` классифицируется как `runtime_flow_failed`
+- [ ] DoD проходит и следующий live `regres fast` cycle запускается
+
+### Risks
+- Главный риск — переусилить semantic dedupe и случайно слить разные сущности. Снижение риска: canonical key включает type + normalized repo identity + normalized name + primary evidence path, а alias remap остаётся детерминированным и тестируется на bank-style duplicates.
+
+### Progress log
+- 2026-04-22: started runtime/docflow residual wave for strict `step2` manifest contract, isolated non-collect cwd/layout, deterministic staged document IDs, semantic alias folding, owner-gap downgrade, and validator-fail classifier correction.
+
+### Plan ID
 EP-20260421-cleanup-owner-followups
 
 ### Context

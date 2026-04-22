@@ -107,8 +107,10 @@ else
   mkdir -p "$TMP_ROOT"
 fi
 
-WORKSPACE_HEADLESS="$TMP_ROOT/arch-workspace"
-WORKSPACE_BASELINE="$TMP_ROOT/arch-workspace-baseline"
+HEADLESS_TMP_ROOT="$TMP_ROOT/headless"
+BASELINE_TMP_ROOT="$TMP_ROOT/baseline"
+WORKSPACE_HEADLESS="$HEADLESS_TMP_ROOT/arch-workspace"
+WORKSPACE_BASELINE="$BASELINE_TMP_ROOT/arch-workspace"
 LOG_DIR="$TMP_ROOT/logs"
 SNAPSHOT_DIR="$TMP_ROOT/snapshots"
 SUMMARY_PATH="$TMP_ROOT/session-summary.md"

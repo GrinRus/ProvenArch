@@ -28,11 +28,13 @@ const (
 )
 
 type aggregatedDocumentInfo struct {
-	Kind         string
-	Title        string
-	Topics       map[string]struct{}
-	CitationIDs  map[string]struct{}
-	SourceShards map[string]struct{}
+	CanonicalID       string
+	Kind              string
+	Title             string
+	Topics            map[string]struct{}
+	CitationIDs       map[string]struct{}
+	SourceShards      map[string]struct{}
+	SourceDocumentIDs map[string]struct{}
 }
 
 type authoredDocumentAccumulator struct {
@@ -173,9 +175,12 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 	}
 	stageRoot := workspace.Root{Path: stageRootAbs}
 
-	baseSemantic := aggregateSemanticSnapshot(e.shardPacks)
+	repoAliases := newSemanticRepoAliasResolver(e.resolvedRepoPaths, e.shardPacks)
+	baseSemantic := aggregateSemanticSnapshot(e.shardPacks, repoAliases)
 	e.semanticBase = &baseSemantic
 	semantic := e.effectiveSemanticSnapshot()
+	semantic = normalizeSemanticSnapshot(semantic, repoAliases)
+	documentInfos := aggregateDocumentInfos(e.shardPacks)
 	stageStore := model.NewStore(stageRoot)
 	if _, err := stageStore.ApplySemanticSnapshot(contracts.SemanticSnapshot{
 		Entities: semantic.Entities,
@@ -316,7 +321,7 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 		stageArtifacts = append(stageArtifacts, stageArtifactsByPath[stagedPath])
 	}
 
-	citationIndex := aggregateCitationIndex(e.runID, e.clock().UTC(), e.shardPacks)
+	citationIndex := aggregateCitationIndex(e.runID, e.clock().UTC(), e.shardPacks, documentInfos)
 	citationRaw, err := json.MarshalIndent(citationIndex, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal citation index: %w", err)
@@ -345,6 +350,7 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 		e.clock().UTC(),
 		stageArtifacts,
 		e.shardPacks,
+		documentInfos,
 		parsedCitationIndex,
 		semantic,
 	)
@@ -640,7 +646,76 @@ func (e *pipelineExecution) stagedDomainEnvelopes() []reports.DomainTaskEnvelope
 	return envelopes
 }
 
-func aggregateSemanticSnapshot(manifests []contracts.ShardPackManifest) contracts.SemanticSnapshot {
+type semanticRepoAliasResolver struct {
+	exact map[string]string
+	slug  map[string]string
+}
+
+func newSemanticRepoAliasResolver(resolvedRepoPaths map[string]string, manifests []contracts.ShardPackManifest) semanticRepoAliasResolver {
+	resolver := semanticRepoAliasResolver{
+		exact: map[string]string{},
+		slug:  map[string]string{},
+	}
+	for repoScope, repoPath := range resolvedRepoPaths {
+		resolver.register(repoScope, repoScope)
+		if base := strings.TrimSpace(filepath.Base(strings.TrimSpace(repoPath))); base != "" && base != "." {
+			resolver.register(base, repoScope)
+		}
+	}
+	for _, manifest := range manifests {
+		for _, repoScope := range manifest.RepoScopes {
+			resolver.register(repoScope, repoScope)
+		}
+	}
+	return resolver
+}
+
+func (r semanticRepoAliasResolver) register(alias string, canonical string) {
+	alias = strings.TrimSpace(alias)
+	canonical = strings.TrimSpace(canonical)
+	if alias == "" {
+		return
+	}
+	if canonical == "" {
+		canonical = alias
+	}
+	exactKey := strings.ToLower(alias)
+	if _, exists := r.exact[exactKey]; !exists {
+		r.exact[exactKey] = canonical
+	}
+	slugKey := slugutil.Slugify(stripGeneratedRepoSuffix(alias))
+	if slugKey != "" {
+		if _, exists := r.slug[slugKey]; !exists {
+			r.slug[slugKey] = canonical
+		}
+	}
+}
+
+func (r semanticRepoAliasResolver) canonical(repo string) string {
+	repo = strings.TrimSpace(repo)
+	if repo == "" {
+		return ""
+	}
+	if canonical, ok := r.exact[strings.ToLower(repo)]; ok {
+		return canonical
+	}
+	if stripped := stripGeneratedRepoSuffix(repo); stripped != repo {
+		if canonical, ok := r.exact[strings.ToLower(stripped)]; ok {
+			return canonical
+		}
+	}
+	if canonical, ok := r.slug[slugutil.Slugify(repo)]; ok {
+		return canonical
+	}
+	if stripped := stripGeneratedRepoSuffix(repo); stripped != repo {
+		if canonical, ok := r.slug[slugutil.Slugify(stripped)]; ok {
+			return canonical
+		}
+	}
+	return repo
+}
+
+func aggregateSemanticSnapshot(manifests []contracts.ShardPackManifest, repoAliases semanticRepoAliasResolver) contracts.SemanticSnapshot {
 	snapshot := contracts.SemanticSnapshot{
 		Coverage:  contracts.Coverage{},
 		Questions: []contracts.Question{},
@@ -678,7 +753,356 @@ func aggregateSemanticSnapshot(manifests []contracts.ShardPackManifest) contract
 	sort.Slice(snapshot.Entities, func(i, j int) bool { return snapshot.Entities[i].ID < snapshot.Entities[j].ID })
 	sort.Slice(snapshot.Edges, func(i, j int) bool { return snapshot.Edges[i].ID < snapshot.Edges[j].ID })
 	sort.Slice(snapshot.Findings, func(i, j int) bool { return snapshot.Findings[i].ID < snapshot.Findings[j].ID })
+	return normalizeSemanticSnapshot(snapshot, repoAliases)
+}
+
+func normalizeSemanticSnapshot(snapshot contracts.SemanticSnapshot, repoAliases semanticRepoAliasResolver) contracts.SemanticSnapshot {
+	snapshot.Coverage.Observed = dedupeSemanticStrings(snapshot.Coverage.Observed)
+	snapshot.Coverage.Missing = dedupeSemanticStrings(canonicalizeCoverageMissing(snapshot.Coverage.Missing))
+	snapshot.Coverage.Notes = dedupeSemanticStrings(snapshot.Coverage.Notes)
+
+	entities, entityRemap := dedupeSemanticEntities(snapshot.Entities, repoAliases)
+	snapshot.Entities = entities
+	snapshot.Edges = dedupeSemanticEdges(snapshot.Edges, repoAliases, entityRemap)
+	snapshot.Findings = dedupeSemanticFindings(snapshot.Findings, repoAliases, entityRemap)
+	snapshot.Questions = mergeQuestions(nil, rewriteSemanticQuestions(snapshot.Questions, entityRemap))
 	return snapshot
+}
+
+func dedupeSemanticEntities(entities []contracts.Entity, repoAliases semanticRepoAliasResolver) ([]contracts.Entity, map[string]string) {
+	normalizedGroups := map[string][]contracts.Entity{}
+	order := []string{}
+	for _, entity := range entities {
+		entity = normalizeSemanticEntity(entity, repoAliases)
+		key := semanticEntityDedupKey(entity)
+		if _, exists := normalizedGroups[key]; !exists {
+			order = append(order, key)
+		}
+		normalizedGroups[key] = append(normalizedGroups[key], entity)
+	}
+
+	mergedEntities := make([]contracts.Entity, 0, len(order))
+	remap := map[string]string{}
+	for _, key := range order {
+		group := normalizedGroups[key]
+		if len(group) == 0 {
+			continue
+		}
+		sort.Slice(group, func(i, j int) bool {
+			return canonicalSemanticIDSortKey(group[i].ID) < canonicalSemanticIDSortKey(group[j].ID)
+		})
+		winner := group[0]
+		winner.Aliases = dedupeExactStrings(winner.Aliases)
+		winner.Tags = dedupeSemanticStrings(winner.Tags)
+		for _, candidate := range group[1:] {
+			remap[strings.TrimSpace(candidate.ID)] = strings.TrimSpace(winner.ID)
+			winner = mergeSemanticEntity(winner, candidate)
+		}
+		mergedEntities = append(mergedEntities, winner)
+	}
+	sort.Slice(mergedEntities, func(i, j int) bool { return mergedEntities[i].ID < mergedEntities[j].ID })
+	return mergedEntities, remap
+}
+
+func normalizeSemanticEntity(entity contracts.Entity, repoAliases semanticRepoAliasResolver) contracts.Entity {
+	entity.ID = strings.TrimSpace(entity.ID)
+	entity.Type = strings.TrimSpace(entity.Type)
+	entity.Name = strings.TrimSpace(entity.Name)
+	entity.OwnerTeamID = strings.TrimSpace(entity.OwnerTeamID)
+	entity.Aliases = dedupeExactStrings(entity.Aliases)
+	entity.Tags = dedupeSemanticStrings(entity.Tags)
+	entity.Provenance = normalizeSemanticProvenance(entity.Provenance, repoAliases)
+	return entity
+}
+
+func mergeSemanticEntity(winner contracts.Entity, candidate contracts.Entity) contracts.Entity {
+	winner.Aliases = dedupeExactStrings(append(append([]string{}, winner.Aliases...), candidate.Aliases...))
+	winner.Aliases = appendSemanticAlias(winner.Aliases, candidate.ID, winner.ID)
+	winner.Tags = dedupeSemanticStrings(append(winner.Tags, candidate.Tags...))
+	if strings.TrimSpace(winner.Name) == "" {
+		winner.Name = strings.TrimSpace(candidate.Name)
+	}
+	if strings.TrimSpace(winner.OwnerTeamID) == "" {
+		winner.OwnerTeamID = strings.TrimSpace(candidate.OwnerTeamID)
+	}
+	if winner.Attributes == nil && candidate.Attributes != nil {
+		winner.Attributes = candidate.Attributes
+	}
+	winner.Provenance = mergeSemanticProvenance(winner.Provenance, candidate.Provenance)
+	return winner
+}
+
+func dedupeSemanticEdges(edges []contracts.Edge, repoAliases semanticRepoAliasResolver, entityRemap map[string]string) []contracts.Edge {
+	grouped := map[string][]contracts.Edge{}
+	order := []string{}
+	for _, edge := range edges {
+		edge.ID = strings.TrimSpace(edge.ID)
+		edge.Type = strings.TrimSpace(edge.Type)
+		edge.Name = strings.TrimSpace(edge.Name)
+		edge.From = rewriteSemanticID(edge.From, entityRemap)
+		edge.To = rewriteSemanticID(edge.To, entityRemap)
+		edge.Provenance = normalizeSemanticProvenance(edge.Provenance, repoAliases)
+		key := semanticEdgeDedupKey(edge)
+		if _, exists := grouped[key]; !exists {
+			order = append(order, key)
+		}
+		grouped[key] = append(grouped[key], edge)
+	}
+
+	merged := make([]contracts.Edge, 0, len(order))
+	for _, key := range order {
+		group := grouped[key]
+		if len(group) == 0 {
+			continue
+		}
+		sort.Slice(group, func(i, j int) bool {
+			return canonicalSemanticIDSortKey(group[i].ID) < canonicalSemanticIDSortKey(group[j].ID)
+		})
+		winner := group[0]
+		for _, candidate := range group[1:] {
+			winner.Provenance = mergeSemanticProvenance(winner.Provenance, candidate.Provenance)
+			if strings.TrimSpace(winner.Name) == "" {
+				winner.Name = strings.TrimSpace(candidate.Name)
+			}
+		}
+		merged = append(merged, winner)
+	}
+	sort.Slice(merged, func(i, j int) bool { return merged[i].ID < merged[j].ID })
+	return merged
+}
+
+func dedupeSemanticFindings(findings []contracts.Finding, repoAliases semanticRepoAliasResolver, entityRemap map[string]string) []contracts.Finding {
+	byID := map[string]contracts.Finding{}
+	for _, finding := range findings {
+		finding.ID = strings.TrimSpace(finding.ID)
+		finding.Title = strings.TrimSpace(finding.Title)
+		finding.Description = strings.TrimSpace(finding.Description)
+		finding.RuleID = strings.TrimSpace(finding.RuleID)
+		finding.RelatedIDs = rewriteSemanticRelatedIDs(finding.RelatedIDs, entityRemap)
+		finding.Provenance = normalizeSemanticProvenance(finding.Provenance, repoAliases)
+		if existing, ok := byID[finding.ID]; ok {
+			existing.RelatedIDs = dedupeSemanticStrings(append(existing.RelatedIDs, finding.RelatedIDs...))
+			existing.Provenance = mergeSemanticProvenance(existing.Provenance, finding.Provenance)
+			if strings.TrimSpace(existing.Description) == "" {
+				existing.Description = strings.TrimSpace(finding.Description)
+			}
+			byID[finding.ID] = existing
+			continue
+		}
+		byID[finding.ID] = finding
+	}
+	merged := make([]contracts.Finding, 0, len(byID))
+	for _, finding := range byID {
+		merged = append(merged, finding)
+	}
+	sort.Slice(merged, func(i, j int) bool { return merged[i].ID < merged[j].ID })
+	return merged
+}
+
+func rewriteSemanticQuestions(questions []contracts.Question, entityRemap map[string]string) []contracts.Question {
+	rewritten := make([]contracts.Question, 0, len(questions))
+	for _, question := range questions {
+		question.ID = strings.TrimSpace(question.ID)
+		question.Text = strings.TrimSpace(question.Text)
+		question.Priority = strings.TrimSpace(question.Priority)
+		question.RelatedIDs = rewriteSemanticRelatedIDs(question.RelatedIDs, entityRemap)
+		rewritten = append(rewritten, question)
+	}
+	return rewritten
+}
+
+func rewriteSemanticRelatedIDs(values []string, entityRemap map[string]string) []string {
+	rewritten := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		canonical := rewriteSemanticID(value, entityRemap)
+		if canonical == "" {
+			continue
+		}
+		if _, exists := seen[canonical]; exists {
+			continue
+		}
+		seen[canonical] = struct{}{}
+		rewritten = append(rewritten, canonical)
+	}
+	sort.Strings(rewritten)
+	return rewritten
+}
+
+func rewriteSemanticID(value string, entityRemap map[string]string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if remapped, ok := entityRemap[value]; ok && strings.TrimSpace(remapped) != "" {
+		return strings.TrimSpace(remapped)
+	}
+	return value
+}
+
+func normalizeSemanticProvenance(provenance contracts.Provenance, repoAliases semanticRepoAliasResolver) contracts.Provenance {
+	provenance.Kind = strings.TrimSpace(provenance.Kind)
+	provenance.Evidence = normalizeSemanticEvidenceSet(provenance.Evidence, repoAliases)
+	return provenance
+}
+
+func normalizeSemanticEvidenceSet(evidence []contracts.Evidence, repoAliases semanticRepoAliasResolver) []contracts.Evidence {
+	type keyedEvidence struct {
+		key      string
+		evidence contracts.Evidence
+	}
+	items := make([]keyedEvidence, 0, len(evidence))
+	seen := map[string]struct{}{}
+	for _, item := range evidence {
+		item.Repo = repoAliases.canonical(item.Repo)
+		item.Path = normalizeSemanticPath(item.Path)
+		item.Ref = strings.TrimSpace(item.Ref)
+		item.ExcerptHash = strings.TrimSpace(item.ExcerptHash)
+		item.Excerpt = strings.TrimSpace(item.Excerpt)
+		key := semanticEvidenceKey(item)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		items = append(items, keyedEvidence{key: key, evidence: item})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].key < items[j].key })
+	normalized := make([]contracts.Evidence, 0, len(items))
+	for _, item := range items {
+		normalized = append(normalized, item.evidence)
+	}
+	return normalized
+}
+
+func mergeSemanticProvenance(winner contracts.Provenance, candidate contracts.Provenance) contracts.Provenance {
+	if strings.TrimSpace(winner.Kind) == "" {
+		winner.Kind = strings.TrimSpace(candidate.Kind)
+	}
+	if strings.EqualFold(strings.TrimSpace(candidate.Kind), "observation") && !strings.EqualFold(strings.TrimSpace(winner.Kind), "observation") {
+		winner.Kind = strings.TrimSpace(candidate.Kind)
+	}
+	if candidate.Confidence > winner.Confidence {
+		winner.Confidence = candidate.Confidence
+	}
+	winner.Evidence = normalizeSemanticEvidenceSet(append(append([]contracts.Evidence{}, winner.Evidence...), candidate.Evidence...), semanticRepoAliasResolver{})
+	return winner
+}
+
+func semanticEntityDedupKey(entity contracts.Entity) string {
+	entityType := normalizeSemanticKey(entity.Type)
+	repo := normalizeSemanticKey(primarySemanticEvidenceRepo(entity.Provenance.Evidence))
+	name := normalizeSemanticKey(entity.Name)
+	evidencePath := normalizeSemanticKey(primarySemanticEvidencePath(entity.Provenance.Evidence))
+	if name == "" || (repo == "" && evidencePath == "") {
+		return "id|" + strings.TrimSpace(entity.ID)
+	}
+	return strings.Join([]string{entityType, repo, name, evidencePath}, "|")
+}
+
+func semanticEdgeDedupKey(edge contracts.Edge) string {
+	edgeType := normalizeSemanticKey(edge.Type)
+	fromID := strings.TrimSpace(edge.From)
+	toID := strings.TrimSpace(edge.To)
+	evidencePath := normalizeSemanticKey(primarySemanticEvidencePath(edge.Provenance.Evidence))
+	if fromID == "" || toID == "" {
+		return "id|" + strings.TrimSpace(edge.ID)
+	}
+	return strings.Join([]string{edgeType, fromID, toID, evidencePath}, "|")
+}
+
+func primarySemanticEvidenceRepo(evidence []contracts.Evidence) string {
+	if len(evidence) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(evidence[0].Repo)
+}
+
+func primarySemanticEvidencePath(evidence []contracts.Evidence) string {
+	if len(evidence) == 0 {
+		return ""
+	}
+	return normalizeSemanticPath(evidence[0].Path)
+}
+
+func normalizeSemanticPath(value string) string {
+	clean := filepath.ToSlash(filepath.Clean(strings.TrimSpace(value)))
+	if clean == "." {
+		return ""
+	}
+	return clean
+}
+
+func semanticEvidenceKey(evidence contracts.Evidence) string {
+	lines := ""
+	if evidence.Lines != nil {
+		lines = fmt.Sprintf("%d:%d", evidence.Lines.Start, evidence.Lines.End)
+	}
+	return strings.Join([]string{
+		strings.TrimSpace(evidence.Repo),
+		normalizeSemanticPath(evidence.Path),
+		strings.TrimSpace(evidence.Ref),
+		lines,
+		strings.TrimSpace(evidence.ExcerptHash),
+	}, "|")
+}
+
+func canonicalSemanticIDSortKey(id string) string {
+	id = strings.TrimSpace(strings.ToLower(id))
+	if id == "" {
+		return "~"
+	}
+	return id
+}
+
+func appendSemanticAlias(aliases []string, candidate string, winnerID string) []string {
+	candidate = strings.TrimSpace(candidate)
+	winnerID = strings.TrimSpace(winnerID)
+	if candidate == "" || candidate == winnerID {
+		return aliases
+	}
+	return dedupeExactStrings(append(aliases, candidate))
+}
+
+func dedupeExactStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func stripGeneratedRepoSuffix(value string) string {
+	base := strings.TrimSpace(filepath.Base(strings.TrimSpace(value)))
+	lastDash := strings.LastIndex(base, "-")
+	if lastDash <= 0 || lastDash == len(base)-1 {
+		return strings.TrimSpace(value)
+	}
+	suffix := base[lastDash+1:]
+	if len(suffix) < 7 || !isLikelyHexToken(suffix) {
+		return strings.TrimSpace(value)
+	}
+	return strings.TrimSpace(base[:lastDash])
+}
+
+func isLikelyHexToken(value string) bool {
+	for _, r := range value {
+		isDigit := r >= '0' && r <= '9'
+		isLowerHex := r >= 'a' && r <= 'f'
+		isUpperHex := r >= 'A' && r <= 'F'
+		if !isDigit && !isLowerHex && !isUpperHex {
+			return false
+		}
+	}
+	return true
 }
 
 func (e *pipelineExecution) effectiveSemanticSnapshot() contracts.SemanticSnapshot {
@@ -722,10 +1146,92 @@ func mergeFindings(existing []contracts.Finding, incoming []contracts.Finding) [
 	return findings
 }
 
-func aggregateCitationIndex(runID string, generatedAt time.Time, manifests []contracts.ShardPackManifest) contracts.CitationIndex {
+func aggregateDocumentInfos(manifests []contracts.ShardPackManifest) map[string]*aggregatedDocumentInfo {
+	aggregatedDocs := map[string]*aggregatedDocumentInfo{}
+	for _, manifest := range manifests {
+		for _, document := range manifest.Documents {
+			key := strings.TrimSpace(document.CanonicalPath)
+			if key == "" {
+				continue
+			}
+			info, ok := aggregatedDocs[key]
+			if !ok {
+				info = &aggregatedDocumentInfo{
+					Kind:              strings.TrimSpace(document.Kind),
+					Title:             strings.TrimSpace(document.Title),
+					Topics:            map[string]struct{}{},
+					CitationIDs:       map[string]struct{}{},
+					SourceShards:      map[string]struct{}{},
+					SourceDocumentIDs: map[string]struct{}{},
+				}
+				aggregatedDocs[key] = info
+			}
+			for _, topic := range document.Topics {
+				if trimmed := strings.TrimSpace(topic); trimmed != "" {
+					info.Topics[trimmed] = struct{}{}
+				}
+			}
+			for _, citationID := range document.CitationIDs {
+				if trimmed := strings.TrimSpace(citationID); trimmed != "" {
+					info.CitationIDs[trimmed] = struct{}{}
+				}
+			}
+			if shardID := strings.TrimSpace(manifest.ShardID); shardID != "" {
+				info.SourceShards[shardID] = struct{}{}
+			}
+			if documentID := strings.TrimSpace(document.ID); documentID != "" {
+				info.SourceDocumentIDs[documentID] = struct{}{}
+			}
+			if strings.TrimSpace(info.Title) == "" {
+				info.Title = strings.TrimSpace(document.Title)
+			}
+			if strings.TrimSpace(info.Kind) == "" {
+				info.Kind = strings.TrimSpace(document.Kind)
+			}
+		}
+	}
+	for canonicalPath, info := range aggregatedDocs {
+		info.CanonicalID = preferredCanonicalDocumentID(canonicalPath, setKeysSorted(info.SourceDocumentIDs))
+	}
+	return aggregatedDocs
+}
+
+func preferredCanonicalDocumentID(canonicalPath string, sourceDocumentIDs []string) string {
+	for _, documentID := range sourceDocumentIDs {
+		if trimmed := strings.TrimSpace(documentID); trimmed != "" {
+			return trimmed
+		}
+	}
+	documentID := "doc." + slugutil.Slugify(strings.TrimSpace(canonicalPath))
+	if strings.TrimSpace(documentID) == "doc." {
+		return "doc.unknown"
+	}
+	return documentID
+}
+
+func aggregateCitationIndex(
+	runID string,
+	generatedAt time.Time,
+	manifests []contracts.ShardPackManifest,
+	documentInfos map[string]*aggregatedDocumentInfo,
+) contracts.CitationIndex {
 	merged := map[string]contracts.DocumentCitation{}
 	for _, manifest := range manifests {
+		remappedDocumentIDs := map[string][]string{}
+		for _, document := range manifest.Documents {
+			sourceID := strings.TrimSpace(document.ID)
+			canonicalPath := strings.TrimSpace(document.CanonicalPath)
+			if sourceID == "" || canonicalPath == "" {
+				continue
+			}
+			info := documentInfos[canonicalPath]
+			if info == nil || strings.TrimSpace(info.CanonicalID) == "" {
+				continue
+			}
+			remappedDocumentIDs[sourceID] = append(remappedDocumentIDs[sourceID], info.CanonicalID)
+		}
 		for _, citation := range manifest.Citations {
+			citation.DocumentIDs = remapCitationDocumentIDs(citation.DocumentIDs, remappedDocumentIDs)
 			existing, ok := merged[citation.ID]
 			if !ok {
 				existing = citation
@@ -749,56 +1255,48 @@ func aggregateCitationIndex(runID string, generatedAt time.Time, manifests []con
 	}
 }
 
+func remapCitationDocumentIDs(documentIDs []string, remapped map[string][]string) []string {
+	seen := map[string]struct{}{}
+	mapped := make([]string, 0, len(documentIDs))
+	for _, documentID := range documentIDs {
+		documentID = strings.TrimSpace(documentID)
+		if documentID == "" {
+			continue
+		}
+		targets := remapped[documentID]
+		if len(targets) == 0 {
+			targets = []string{documentID}
+		}
+		for _, target := range targets {
+			target = strings.TrimSpace(target)
+			if target == "" {
+				continue
+			}
+			if _, exists := seen[target]; exists {
+				continue
+			}
+			seen[target] = struct{}{}
+			mapped = append(mapped, target)
+		}
+	}
+	sort.Strings(mapped)
+	return mapped
+}
+
 func buildFinalRunIndex(
 	runID string,
 	pipeline string,
 	generatedAt time.Time,
 	stageArtifacts []Artifact,
 	manifests []contracts.ShardPackManifest,
+	documentInfos map[string]*aggregatedDocumentInfo,
 	citationIndex contracts.CitationIndex,
 	semantic contracts.SemanticSnapshot,
 ) (contracts.FinalRunIndex, error) {
-	aggregatedDocs := map[string]*aggregatedDocumentInfo{}
 	allShardIDs := map[string]struct{}{}
 	for _, manifest := range manifests {
 		if shardID := strings.TrimSpace(manifest.ShardID); shardID != "" {
 			allShardIDs[shardID] = struct{}{}
-		}
-		for _, document := range manifest.Documents {
-			key := strings.TrimSpace(document.CanonicalPath)
-			if key == "" {
-				continue
-			}
-			info, ok := aggregatedDocs[key]
-			if !ok {
-				info = &aggregatedDocumentInfo{
-					Kind:         document.Kind,
-					Title:        document.Title,
-					Topics:       map[string]struct{}{},
-					CitationIDs:  map[string]struct{}{},
-					SourceShards: map[string]struct{}{},
-				}
-				aggregatedDocs[key] = info
-			}
-			for _, topic := range document.Topics {
-				if trimmed := strings.TrimSpace(topic); trimmed != "" {
-					info.Topics[trimmed] = struct{}{}
-				}
-			}
-			for _, citationID := range document.CitationIDs {
-				if trimmed := strings.TrimSpace(citationID); trimmed != "" {
-					info.CitationIDs[trimmed] = struct{}{}
-				}
-			}
-			if shardID := strings.TrimSpace(manifest.ShardID); shardID != "" {
-				info.SourceShards[shardID] = struct{}{}
-			}
-			if strings.TrimSpace(info.Title) == "" {
-				info.Title = document.Title
-			}
-			if strings.TrimSpace(info.Kind) == "" {
-				info.Kind = document.Kind
-			}
 		}
 	}
 	allCitationIDs := make([]string, 0, len(citationIndex.Citations))
@@ -817,11 +1315,8 @@ func buildFinalRunIndex(
 			continue
 		}
 		canonicalPath := stripStagePrefix(artifact.Path)
-		info := aggregatedDocs[canonicalPath]
-		documentID := "doc." + slugutil.Slugify(canonicalPath)
-		if strings.TrimSpace(documentID) == "doc." {
-			documentID = "doc.unknown"
-		}
+		info := documentInfos[canonicalPath]
+		documentID := preferredCanonicalDocumentID(canonicalPath, nil)
 		entry := contracts.FinalRunDocument{
 			ID:            documentID,
 			Kind:          artifact.Kind,
@@ -834,6 +1329,9 @@ func buildFinalRunIndex(
 			Status:        "staged",
 		}
 		if info != nil {
+			if strings.TrimSpace(info.CanonicalID) != "" {
+				entry.ID = strings.TrimSpace(info.CanonicalID)
+			}
 			if strings.TrimSpace(info.Kind) != "" {
 				entry.Kind = info.Kind
 			}

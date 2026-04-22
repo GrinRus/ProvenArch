@@ -40,6 +40,16 @@ func emitDiagnostic(task acpruntime.Task, message string, fields map[string]any)
 	})
 }
 
+func emitRetryCompletedDiagnostic(task acpruntime.Task, phase collectStallPhase, recoveryMode string) {
+	fields := map[string]any{
+		"provider":      string(acpruntime.ProviderQwenCode),
+		"shard_id":      strings.TrimSpace(task.ShardID),
+		"stall_phase":   strings.TrimSpace(string(phase)),
+		"recovery_mode": strings.TrimSpace(recoveryMode),
+	}
+	emitDiagnostic(task, "retry completed", fields)
+}
+
 func classifyRunFailure(task acpruntime.Task, result acpruntime.Result, err error) error {
 	if errors.Is(err, context.DeadlineExceeded) {
 		message, rawOutputRefs := buildFailureMessage(task, "exec", err, result)
@@ -110,6 +120,29 @@ func wrapArtifactContractFailure(task acpruntime.Task, stage string, result acpr
 		acpruntime.ProviderQwenCode,
 		acpruntime.ErrorCodeRuntimeContract,
 		fmt.Sprintf("headless provider %q produced invalid runtime artifacts: %s", acpruntime.ProviderQwenCode, failureMessage),
+		result.Stdout,
+		result.Stderr,
+		rawOutputRefs,
+		cause,
+	)
+}
+
+func wrapArtifactProviderUnavailable(task acpruntime.Task, stage string, result acpruntime.Result, message string, cause error) error {
+	failure := cause
+	trimmed := strings.TrimSpace(message)
+	switch {
+	case trimmed != "" && cause != nil:
+		failure = fmt.Errorf("%s: %w", trimmed, cause)
+	case trimmed != "":
+		failure = errors.New(trimmed)
+	case failure == nil:
+		failure = errors.New("provider unavailable before required artifacts were written")
+	}
+	failureMessage, rawOutputRefs := buildFailureMessage(task, stage, failure, result)
+	return acpruntime.WrapRunnerErrorWithDiagnostics(
+		acpruntime.ProviderQwenCode,
+		acpruntime.ErrorCodeRunnerUnavailable,
+		fmt.Sprintf("headless provider %q became unavailable before required artifacts were written: %s", acpruntime.ProviderQwenCode, failureMessage),
 		result.Stdout,
 		result.Stderr,
 		rawOutputRefs,

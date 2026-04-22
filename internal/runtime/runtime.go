@@ -229,3 +229,37 @@ func NewExecution(task Task, provider Provider, runtimeVersion string, status st
 		Warnings:          append([]string(nil), warnings...),
 	})
 }
+
+func IsCollectStep(stepID string) bool {
+	switch strings.TrimSpace(stepID) {
+	case "init.step1.collect", "refresh.step1.collect":
+		return true
+	default:
+		return false
+	}
+}
+
+func ResolveHeadlessWorkingDirectory(task Task) string {
+	if IsCollectStep(task.StepID) {
+		if writeRoot := strings.TrimSpace(task.WriteRoot); writeRoot != "" {
+			return writeRoot
+		}
+	}
+	switch strings.TrimSpace(task.StepID) {
+	case "init.step3.findings", "refresh.step3.findings":
+		if writeRoot := strings.TrimSpace(task.WriteRoot); writeRoot != "" {
+			return writeRoot
+		}
+	case "init.step0.constitution", "init.step2.asis_docs", "refresh.step2.asis_docs", "init.step4.proposals", "refresh.step4.proposals":
+		if draftRoot := strings.TrimSpace(task.DraftFinalRoot); draftRoot != "" {
+			return draftRoot
+		}
+	}
+	if writeRoot := strings.TrimSpace(task.WriteRoot); writeRoot != "" {
+		return writeRoot
+	}
+	if workspace := strings.TrimSpace(task.Workspace); workspace != "" {
+		return workspace
+	}
+	return ""
+}

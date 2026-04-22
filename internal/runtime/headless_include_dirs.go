@@ -22,6 +22,10 @@ type headlessResolvedRepo struct {
 // repository directories relevant to the current task, so headless providers
 // can inspect source evidence instead of only ACP-generated workspace files.
 func ResolveHeadlessIncludeDirectories(task Task) []string {
+	if IsCollectStep(task.StepID) {
+		return resolveCollectHeadlessIncludeDirectories(task)
+	}
+
 	dirs := make([]string, 0, 4)
 	seen := map[string]struct{}{}
 	addDir := func(path string) {
@@ -54,8 +58,45 @@ func ResolveHeadlessIncludeDirectories(task Task) []string {
 	}
 
 	addDir(workspace)
-	scopeFilter := headlessRepoScopeFilter(task)
+	addResolvedRepoScopeDirectories(addDir, workspace, headlessRepoScopeFilter(task))
 
+	return dirs
+}
+
+func resolveCollectHeadlessIncludeDirectories(task Task) []string {
+	dirs := make([]string, 0, 4)
+	seen := map[string]struct{}{}
+	addDir := func(path string) {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			return
+		}
+		cleaned := filepath.Clean(path)
+		info, err := os.Stat(cleaned)
+		if err != nil || !info.IsDir() {
+			return
+		}
+		if _, ok := seen[cleaned]; ok {
+			return
+		}
+		seen[cleaned] = struct{}{}
+		dirs = append(dirs, cleaned)
+	}
+
+	addDir(task.WriteRoot)
+	for _, path := range task.ReadContextRoots {
+		addDir(path)
+	}
+
+	workspace := strings.TrimSpace(task.Workspace)
+	if workspace == "" {
+		return dirs
+	}
+	addResolvedRepoScopeDirectories(addDir, workspace, headlessRepoScopeFilter(task))
+	return dirs
+}
+
+func addResolvedRepoScopeDirectories(addDir func(string), workspace string, scopeFilter repoScopeFilter) {
 	manifestPath := filepath.Join(workspace, "workspace.yaml")
 	if manifest, err := workspacecfg.LoadManifest(manifestPath); err == nil {
 		for _, repo := range manifest.Repos {
@@ -78,8 +119,6 @@ func ResolveHeadlessIncludeDirectories(task Task) []string {
 			}
 		}
 	}
-
-	return dirs
 }
 
 type repoScopeFilter map[string]struct{}
