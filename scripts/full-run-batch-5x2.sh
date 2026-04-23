@@ -591,6 +591,32 @@ resolve_frontend_live_backend_run() {
   printf '%s\t%s\n' "$BATCH_ROOT/$provider/run${run_index}" "$run_index"
 }
 
+backend_workspace_candidates() {
+  local run_dir="$1"
+  printf '%s\n' \
+    "$run_dir/headless/arch-workspace" \
+    "$run_dir/arch-workspace" \
+    "$run_dir/workspace"
+}
+
+first_backend_workspace_candidate() {
+  local run_dir="$1"
+  backend_workspace_candidates "$run_dir" | head -n1
+}
+
+resolve_backend_workspace_dir() {
+  local run_dir="$1"
+  local candidate
+  while IFS= read -r candidate; do
+    [[ -z "$candidate" ]] && continue
+    if [[ -d "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done < <(backend_workspace_candidates "$run_dir")
+  printf ''
+}
+
 summary_scalar() {
   local summary_path="$1"
   local key="$2"
@@ -619,6 +645,30 @@ contains_regex_in_files() {
   local path
   for path in "$@"; do
     if [[ -f "$path" ]] && grep -E -q "$pattern" "$path"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+contains_runner_unavailable_signature() {
+  local -a paths=("$@")
+  if contains_in_files "runner_unavailable" "${paths[@]}"; then
+    return 0
+  fi
+  if contains_regex_in_files "([Mm]odel( is)? at capacity|[Ss]tatus[[:space:]]*[:=][[:space:]]*429|\\b429\\b|[Rr]ate[ -]?limit(ed)?|[Tt]oo many requests)" "${paths[@]}"; then
+    return 0
+  fi
+  return 1
+}
+
+contains_runtime_contract_parse_signature() {
+  local -a paths=("$@")
+  local path
+  for path in "${paths[@]}"; do
+    if [[ -f "$path" ]] \
+      && grep -E -q "parse runtime draft manifest" "$path" \
+      && grep -E -q "unknown field" "$path"; then
       return 0
     fi
   done
@@ -708,7 +758,13 @@ run_frontend_live_e2e() {
   local backend_run_dir="$2"
   local output_dir="$3"
   local run_index="${4:-}"
-  local workspace="$backend_run_dir/arch-workspace"
+  local workspace
+  workspace="$(resolve_backend_workspace_dir "$backend_run_dir")"
+  local workspace_fallback
+  workspace_fallback="$(first_backend_workspace_candidate "$backend_run_dir")"
+  if [[ -z "$workspace" ]]; then
+    workspace="$workspace_fallback"
+  fi
   local frontend_workspace="$output_dir/frontend-workspace"
   local run_results_path="$backend_run_dir/run-results.tsv"
   local refresh_run_id=""
@@ -827,10 +883,11 @@ prepare_frontend_cancel_workspace() {
     printf ''
     return 0
   fi
-  local workspace="$backend_run_dir/arch-workspace"
+  local workspace
+  workspace="$(resolve_backend_workspace_dir "$backend_run_dir")"
   local frontend_workspace="$output_dir/frontend-workspace"
 
-  if [[ ! -d "$workspace" ]]; then
+  if [[ -z "$workspace" || ! -d "$workspace" ]]; then
     printf ''
     return 0
   fi
@@ -943,23 +1000,37 @@ classify_run_failure() {
   local terminal_pipeline_failure=0
   local validator_verdict_failed=0
   local -a classify_log_paths=("$summary_path" "$full_log_path" "$batch_driver_log")
-  local workspace="$run_dir/arch-workspace"
+  local workspace=""
+  local -a workspace_candidates=()
+  local workspace_candidate
+  while IFS= read -r workspace_candidate; do
+    [[ -z "$workspace_candidate" ]] && continue
+    workspace_candidates+=("$workspace_candidate")
+    if [[ -z "$workspace" && -d "$workspace_candidate" ]]; then
+      workspace="$workspace_candidate"
+    fi
+  done < <(backend_workspace_candidates "$run_dir")
+  if [[ -z "$workspace" && "${#workspace_candidates[@]}" -gt 0 ]]; then
+    workspace="${workspace_candidates[0]}"
+  fi
   local iter_log
   if [[ -d "$run_dir/logs" ]]; then
     while IFS= read -r iter_log; do
       classify_log_paths+=("$iter_log")
     done < <(find "$run_dir/logs" -maxdepth 1 -type f -name 'run-iter*-*.log' | LC_ALL=C sort)
   fi
-  if [[ -d "$workspace/reports/taskruns/logs" ]]; then
-    while IFS= read -r iter_log; do
-      classify_log_paths+=("$iter_log")
-    done < <(find "$workspace/reports/taskruns/logs" -maxdepth 1 -type f -name '*.ndjson' | LC_ALL=C sort)
-  fi
-  if [[ -d "$workspace/reports/taskruns/raw" ]]; then
-    while IFS= read -r iter_log; do
-      classify_log_paths+=("$iter_log")
-    done < <(find "$workspace/reports/taskruns/raw" -type f | LC_ALL=C sort)
-  fi
+  for workspace_candidate in "${workspace_candidates[@]}"; do
+    if [[ -d "$workspace_candidate/reports/taskruns/logs" ]]; then
+      while IFS= read -r iter_log; do
+        classify_log_paths+=("$iter_log")
+      done < <(find "$workspace_candidate/reports/taskruns/logs" -maxdepth 1 -type f -name '*.ndjson' | LC_ALL=C sort)
+    fi
+    if [[ -d "$workspace_candidate/reports/taskruns/raw" ]]; then
+      while IFS= read -r iter_log; do
+        classify_log_paths+=("$iter_log")
+      done < <(find "$workspace_candidate/reports/taskruns/raw" -type f | LC_ALL=C sort)
+    fi
+  done
 
   run_status_state="$(read_status_field "$run_status_path" "state")"
   run_status_signal="$(read_status_field "$run_status_path" "termination_signal")"
@@ -1023,7 +1094,10 @@ classify_run_failure() {
     fi
   fi
 
-  if [[ "$run_class" == "none" ]] && contains_in_files "runner_unavailable" "${classify_log_paths[@]}"; then
+  if [[ "$run_class" == "none" ]] && contains_runtime_contract_parse_signature "${classify_log_paths[@]}"; then
+    run_class="runtime_contract_failed"
+  fi
+  if [[ "$run_class" == "none" ]] && contains_runner_unavailable_signature "${classify_log_paths[@]}"; then
     run_class="runner_unavailable"
   fi
   if [[ "$run_class" == "none" && "$validator_verdict_failed" == "1" ]]; then

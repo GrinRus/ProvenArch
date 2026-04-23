@@ -556,7 +556,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
             run_dir=run_dir,
             preflight={},
             classification_row={
-                "failure_class": "runtime_contract_failed",
+                "failure_class": "none",
                 "failure_subclass": "none",
                 "cancellation_like": "0",
                 "process_exit": "1",
@@ -565,6 +565,67 @@ class BatchFailureClassificationTest(unittest.TestCase):
 
         self.assertEqual("runtime_flow_failed", result.failure_class)
         self.assertTrue(result.runtime_flow_failed)
+
+    def test_python_report_keeps_runtime_contract_failed_when_already_classified_terminal(self) -> None:
+        run_dir = self.root / "run-validator-verdict-fail-python-classified-contract"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: passed",
+                    "- failure_reason: pipeline_command_failed",
+                    "- expected_runs: 4",
+                    "- completed_runs: 4",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 2",
+                    "- running_runs_detected: 0",
+                    "- termination_signal: none",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=process_failed",
+                    "process_exit=1",
+                    "termination_signal=none",
+                    "failure_reason=pipeline_command_failed",
+                    "summary_written=yes",
+                ]
+            )
+            + "\n",
+        )
+        write_text(
+            run_dir / "full-run.log",
+            "runtime_contract_failed in step2 diagnostics\nvalidator verdict is FAIL\n",
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "runtime_contract_failed",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("runtime_contract_failed", result.failure_class)
+        self.assertFalse(result.runtime_flow_failed)
 
     def test_python_report_prefers_runtime_timeout_over_runner_unavailable_when_timeout_signaled(self) -> None:
         run_dir = self.root / "run-timeout-python"
@@ -611,6 +672,167 @@ class BatchFailureClassificationTest(unittest.TestCase):
 
         self.assertEqual("runtime_timeout", result.failure_class)
         self.assertTrue(result.runtime_timeout)
+
+    def test_python_report_detects_runner_unavailable_capacity_signal(self) -> None:
+        run_dir = self.root / "run-capacity-python"
+        self._create_fixture_run_dir(run_dir)
+        write_text(run_dir / "full-run.log", "provider returned error: Selected model is at capacity\n")
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            '{"level":"error","message":"Selected model is at capacity"}\n',
+        )
+        write_text(run_dir / "arch-workspace/reports/taskruns/raw/runtime.stderr.txt", "429 Too Many Requests\n")
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "none",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("runner_unavailable", result.failure_class)
+        self.assertTrue(result.runner_unavailable)
+
+    def test_python_report_prefers_parse_signature_contract_failure_over_runner_unavailable(self) -> None:
+        run_dir = self.root / "run-parse-signature-python"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "full-run.log",
+            (
+                "parse runtime draft manifest: json: unknown field \"repo_scopes\"\n"
+                "Selected model is at capacity\n"
+            ),
+        )
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            (
+                '{"level":"error","message":"parse runtime draft manifest: json: unknown field \\"repo_scopes\\""}\n'
+                '{"level":"error","message":"Selected model is at capacity"}\n'
+            ),
+        )
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/raw/runtime.stderr.txt",
+            "parse runtime draft manifest: json: unknown field \"repo_scopes\"\n429 Too Many Requests\n",
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "runner_unavailable",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("runtime_contract_failed", result.failure_class)
+        self.assertTrue(result.runtime_contract_failed)
+        self.assertTrue(any("ignored runner/runtime-flow override" in detail for detail in result.issue_details))
+
+    def test_python_report_reads_runner_logs_from_headless_workspace_candidate(self) -> None:
+        run_dir = self.root / "run-headless-workspace-python"
+        self._create_fixture_run_dir(run_dir)
+        source_workspace = run_dir / "arch-workspace"
+        headless_workspace = run_dir / "headless" / "arch-workspace"
+        headless_workspace.parent.mkdir(parents=True, exist_ok=True)
+        source_workspace.rename(headless_workspace)
+        write_text(
+            headless_workspace / "reports/taskruns/logs/runtime.ndjson",
+            '{"level":"error","error_code":"runtime_contract_failed","message":"contract failure"}\n',
+        )
+        write_text(
+            headless_workspace / "reports/taskruns/raw/runtime.stderr.txt",
+            "runtime_contract_failed\n",
+        )
+        write_text(run_dir / "full-run.log", "run completed with contract issue\n")
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "runtime_contract_failed",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("runtime_contract_failed", result.failure_class)
+        self.assertTrue(result.runtime_contract_failed)
+
+    def test_runtime_flow_best_effort_partial_skips_run_partial_enforcement_on_runner_unavailable(self) -> None:
+        run_dir = self.root / "run-best-effort-capacity"
+        workspace = run_dir / "headless/arch-workspace"
+        workspace.mkdir(parents=True, exist_ok=True)
+        expected_execution = {
+            "strategy": "parallel",
+            "max_parallel_tasks": 4,
+            "failure_policy": "best_effort",
+            "shard_discovery_mode": "heuristics",
+        }
+        headless_rows = {
+            "init": {"run_id": "init-run"},
+            "refresh": {"run_id": "refresh-run"},
+        }
+        for pipeline, run_id in (("init", "init-run"), ("refresh", "refresh-run")):
+            taskruns_root = run_dir / "snapshots" / run_id / "reports" / "taskruns"
+            write_json(
+                taskruns_root / f"{run_id}-{pipeline}-step1-collect-shard-plan.json",
+                {
+                    "strategy": "parallel",
+                    "max_parallel_tasks": 4,
+                    "failure_policy": "best_effort",
+                    "shard_discovery_mode": "heuristics",
+                },
+            )
+            write_json(
+                taskruns_root / f"{run_id}-{pipeline}-step1-collect-shard-summary.json",
+                {
+                    "strategy": "parallel",
+                    "max_parallel_tasks": 4,
+                    "failure_policy": "best_effort",
+                    "shard_discovery_mode": "heuristics",
+                    "items": [{"status": "failed"}],
+                },
+            )
+            write_json(
+                taskruns_root / run_id / "runtime" / f"{pipeline}-step1-collect" / "runtime-execution.json",
+                {
+                    "step_id": f"{pipeline}.step1.collect",
+                    "shard_id": "domain-a",
+                    "repo_scopes": ["demo-repo"],
+                    "path_scopes": ["src"],
+                    "meta": {
+                        "step_id": f"{pipeline}.step1.collect",
+                        "shard_id": "domain-a",
+                        "repo_scopes": ["demo-repo"],
+                        "path_scopes": ["src"],
+                    },
+                },
+            )
+
+        issues, _details = self.module.evaluate_runtime_flow_checks(
+            run_dir=run_dir,
+            workspace=workspace,
+            headless_rows=headless_rows,
+            expected_execution=expected_execution,
+            summary_text="provider returned 429 Too Many Requests",
+            full_run_log_text="Selected model is at capacity",
+            runner_unavailable_signal=True,
+        )
+
+        self.assertNotIn("runtime:execution-semantics", issues)
 
     def test_python_report_escalates_artifact_quality_warning_to_quality_gate_failure(self) -> None:
         run_dir = self.root / "run-artifact-quality"
@@ -776,6 +998,87 @@ class BatchFailureClassificationTest(unittest.TestCase):
         fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
         self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
         self.assertEqual("runtime_timeout", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+
+    def test_shell_classifier_reads_capacity_signal_from_headless_workspace(self) -> None:
+        run_dir = self.root / "run-headless-workspace-capacity"
+        self._create_fixture_run_dir(run_dir)
+        source_workspace = run_dir / "arch-workspace"
+        headless_workspace = run_dir / "headless" / "arch-workspace"
+        headless_workspace.parent.mkdir(parents=True, exist_ok=True)
+        source_workspace.rename(headless_workspace)
+        write_text(
+            headless_workspace / "reports/taskruns/logs/runtime.ndjson",
+            '{"level":"error","message":"Selected model is at capacity"}\n',
+        )
+        write_text(
+            headless_workspace / "reports/taskruns/raw/runtime.stderr.txt",
+            "429 Too Many Requests\n",
+        )
+        write_text(run_dir / "full-run.log", "terminal pipeline failure without explicit error_code\n")
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        classifications_tsv = self.root / "backend-run-classifications-capacity-headless.tsv"
+        command = (
+            prelude
+            + "\n"
+            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
+            + f'classify_run_failure "qwen-code" "1" {shlex.quote(str(run_dir))} "1"\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("", completed.stdout.strip(), completed.stdout)
+        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
+        self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("runner_unavailable", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+
+    def test_shell_classifier_prefers_parse_signature_contract_failure_over_capacity_signal(self) -> None:
+        run_dir = self.root / "run-shell-parse-signature"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "full-run.log",
+            (
+                "parse runtime draft manifest: json: unknown field \"repo_scopes\"\n"
+                "Selected model is at capacity\n"
+            ),
+        )
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            (
+                '{"level":"error","message":"parse runtime draft manifest: json: unknown field \\"repo_scopes\\""}\n'
+                '{"level":"error","message":"Selected model is at capacity"}\n'
+            ),
+        )
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/raw/runtime.stderr.txt",
+            "parse runtime draft manifest: json: unknown field \"repo_scopes\"\n429 Too Many Requests\n",
+        )
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        classifications_tsv = self.root / "backend-run-classifications-parse-signature.tsv"
+        command = (
+            prelude
+            + "\n"
+            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
+            + f'classify_run_failure "qwen-code" "1" {shlex.quote(str(run_dir))} "1"\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("", completed.stdout.strip(), completed.stdout)
+        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
+        self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("runtime_contract_failed", fields[2], classifications_tsv.read_text(encoding="utf-8"))
 
     def test_shell_classifier_marks_missing_summary_as_incomplete_cycle_when_batch_reaches_classifier(self) -> None:
         run_dir = self.root / "run-missing-summary"
@@ -1278,6 +1581,73 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual("runtime_flow_failed", result.failure_class)
         self.assertTrue(result.runtime_flow_failed)
         self.assertFalse(result.infra_incomplete_cycle)
+
+    def test_python_report_skips_runtime_flow_and_cross_repo_for_terminal_runtime_provider_failure(self) -> None:
+        run_dir = self.root / "run-python-terminal-provider-failure"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=process_failed",
+                    "process_exit=1",
+                    "termination_signal=none",
+                    "failure_reason=pipeline_command_failed",
+                    "summary_written=yes",
+                ]
+            )
+            + "\n",
+        )
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: passed",
+                    "- failure_reason: pipeline_command_failed",
+                    "- expected_runs: 4",
+                    "- completed_runs: 4",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 2",
+                    "- running_runs_detected: 0",
+                    "- termination_signal: none",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+        write_text(run_dir / "full-run.log", "runtime_contract_failed in step2 diagnostics\n")
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={
+                "expected_repo_count": 2,
+                "execution_profile": {
+                    "strategy": "parallel",
+                    "max_parallel_tasks": 4,
+                    "failure_policy": "best_effort",
+                    "shard_discovery_mode": "heuristics",
+                },
+            },
+            classification_row={
+                "failure_class": "runtime_contract_failed",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("runtime_contract_failed", result.failure_class)
+        self.assertFalse(result.runtime_flow_failed)
+        self.assertNotIn("analysis:cross-repo-missing", result.issues)
 
     def test_python_report_treats_incomplete_reports_as_triage_only_not_empty_analysis(self) -> None:
         run_dir = self.root / "run-incomplete"

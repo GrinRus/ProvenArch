@@ -89,6 +89,28 @@ PY
 - canonical release profiles здесь запускать нельзя;
 - нужно перенести прогон на другой trusted host, а не переписывать matrix/curated files под локальную машину.
 
+Дополнительный runtime host preflight для `regres/release` matrix:
+
+```bash
+export PATH=/opt/homebrew/bin:$PATH
+qwen --version
+python3 - <<'PY'
+from pathlib import Path
+for path in [
+    Path("/tmp/provenarch-test_arch_project"),
+    Path("/tmp/provenarch-test_arch_project/reports"),
+    Path("/tmp/provenarch-test_arch_project/matrix"),
+]:
+    path.mkdir(parents=True, exist_ok=True)
+    probe = path / ".write-probe"
+    probe.write_text("ok", encoding="utf-8")
+    probe.unlink()
+    print(f"OK writable: {path}")
+PY
+```
+
+Если любой шаг выше падает, фиксировать как `operational_host_preflight_failed` и не интерпретировать как продуктовый ACP дефект.
+
 ### 2.2) One-time canonical path bootstrap
 
 Если хост подходит по `2.1`, но curated `path` checkout'ы ещё не существуют, их нужно подготовить один раз заранее.
@@ -560,7 +582,9 @@ Zero tolerance:
 - сначала проверить `driver.log` (matrix + batch), затем `session-summary.md` и `full-run.log` в `runs/<batch-id>/<provider>/runN/`, затем `arch-workspace/reports/taskruns/logs/*.ndjson` и `reports/taskruns/raw/*` для первичного runtime signal;
 - отделить induced failures (например, debug timeout override) от реальной runtime/provider деградации;
 - если raw/taskrun logs показывают `runtime_contract_failed` или `runner_unavailable`, считать их primary failure class даже если `session-summary.md` дополнительно фиксирует `infra_incomplete_cycle`;
-- если terminal logs показывают `validator verdict is FAIL`, primary failure class для batch/reporting должен быть `runtime_flow_failed`, даже если раньше в логах встречался `runtime_contract_failed` marker;
+- если terminal logs показывают `parse runtime draft manifest` вместе с `unknown field`, primary failure class для batch/reporting должен быть `runtime_contract_failed` даже при одновременных `runner_unavailable` capacity/429 маркерах;
+- если terminal logs показывают `validator verdict is FAIL`, primary failure class для batch/reporting должен быть `runtime_flow_failed`, но только когда run не классифицирован как terminal runtime/provider failure (`runtime_timeout`, `runner_unavailable`, `runtime_contract_failed`);
+- для terminal runtime/provider failures (`runtime_timeout`, `runner_unavailable`, `runtime_contract_failed`) не эскалировать secondary `runtime_flow_failed`/`analysis:cross-repo-missing` только из-за неполных refresh/runtime artifacts;
 - terminal `session-summary.md` вместе с `run-status.env state=process_failed summary_written=yes` считать завершившимся deterministic pipeline failure; такой run не должен переопределяться в `infra_incomplete_cycle` только из-за mismatch `completed_*`, неполного `run-results.tsv` или classifier fallback.
 - inner `full-run-ai-advent.sh` обязан поддерживать running-heartbeat в `run-status.env` (`updated_at`, `last_pipeline_stage`, `last_runtime_provider`, `last_progress_at`) и сам писать terminal sentinel при `completed|process_failed|signal_terminated`.
 - если `session-summary.md` отсутствует, но batch shell успел дойти до classifier или завершился через `EXIT` trap, trusted harness обязан materialize-ить `infra_incomplete_cycle` или `infra_signal_terminated` через per-run `run-status.env`; отсутствие summary больше не считается допустимым silent gap.
@@ -652,6 +676,21 @@ Release `PASS` только если одновременно:
 3. `runtime_timeout` вместе с `runner_unavailable` в том же run
 - Политика triage: primary incident class = `runtime_timeout` при явном timeout signal в summary/classifier; `runner_unavailable` остаётся secondary evidence.
 
+4. `operational_host_preflight_failed` до старта backend runs
+- Причина: невалидный runtime binary surface (`qwen` в PATH), либо нерелевантный writable state/tmp surface.
+- Действие: починить host prerequisites и повторить запуск; не считать это продуктовым ACP багом.
+
+5. `Selected model is at capacity` / `429` / `rate limited` в task logs
+- Политика triage: классифицировать как `runner_unavailable` (если одновременно нет explicit timeout signal).
+- Для `best_effort` partial shard run это считается provider-availability incident, а не runtime execution-semantics drift.
+
+6. `backend_workspace_missing` / `frontend_workspace_missing`
+- Harness workspace resolver обязан проверять в порядке `run_dir/headless/arch-workspace` -> `run_dir/arch-workspace` -> `run_dir/workspace`.
+- Если workspace найден в одном из candidate roots, это не blocker; если отсутствует во всех roots, инцидент остаётся operational.
+
+7. `parse runtime draft manifest ... unknown field ...` вместе с `runner_unavailable`/capacity сигналами
+- Политика triage: primary incident class = `runtime_contract_failed` (parse-signature override); capacity/429 остаются secondary evidence.
+
 Минимальный формат публикации агентом:
 
 ```text
@@ -664,3 +703,5 @@ Evidence:
 - /tmp/provenarch-test_arch_project/reports/release_verdict_<matrix-id>.md
 - /tmp/provenarch-test_arch_project/reports/profile_matrix_<matrix-id>.md
 ```
+
+В execution report для смешанных сигналов обязательно указывать `primary failure class` отдельно от secondary evidence (например `runtime_contract_failed` + `runner_unavailable`).
