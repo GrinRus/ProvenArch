@@ -336,6 +336,9 @@ if ! (
 ) >"$PLAYWRIGHT_LOG" 2>&1; then
   status="failed"
   reason="$ACP_FRONTEND_REASON_PLAYWRIGHT_FAILED"
+  if grep -q "ACTIVE_RUN_TIMEOUT:" "$PLAYWRIGHT_LOG"; then
+    reason="$ACP_FRONTEND_REASON_ACTIVE_RUN_TIMEOUT"
+  fi
 fi
 
 finished_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -154,6 +155,48 @@ func wrapArtifactProviderUnavailable(task acpruntime.Task, stage string, result 
 		rawOutputRefs,
 		cause,
 	)
+}
+
+func shouldTreatArtifactFailureAsProviderUnavailable(result acpruntime.Result, err error) bool {
+	if !isProviderUnavailableText(result.Stdout, result.Stderr, err) {
+		return false
+	}
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return true
+	}
+
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case text == "":
+		return true
+	case strings.Contains(text, "parse runtime draft manifest"):
+		return false
+	case strings.Contains(text, "runtime draft manifest step_id must equal"):
+		return false
+	case strings.Contains(text, "runtime draft manifest step_contract must equal"):
+		return false
+	case strings.Contains(text, "runtime draft manifest run_id must equal"):
+		return false
+	case strings.Contains(text, "runtime draft manifest agent_role must not be empty"):
+		return false
+	case strings.Contains(text, "runtime draft manifest outputs are invalid"):
+		return false
+	case strings.Contains(text, "shard pack manifest"):
+		return false
+	case strings.Contains(text, "validator verdict"):
+		return false
+	case strings.Contains(text, "is unavailable"):
+		return true
+	case strings.Contains(text, "no such file or directory"):
+		return true
+	case strings.Contains(text, "must point to a file"):
+		return false
+	default:
+		return false
+	}
 }
 
 func buildFailureMessage(task acpruntime.Task, stage string, failure error, result acpruntime.Result) (string, contracts.RuntimeOutputRefs) {

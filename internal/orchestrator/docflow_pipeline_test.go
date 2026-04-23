@@ -258,6 +258,9 @@ func TestDocFlowSkipsAsIsRuntimeWhenCollectEvidenceIsUnusable(t *testing.T) {
 	if runner.asIsInvocationCount() != 0 {
 		t.Fatalf("expected as-is runtime to be skipped, got %d invocations", runner.asIsInvocationCount())
 	}
+	if runner.proposalsInvocationCount() != 0 {
+		t.Fatalf("expected proposals runtime to be skipped, got %d invocations", runner.proposalsInvocationCount())
+	}
 	if !strings.Contains(info.Error, "step1.collect") {
 		t.Fatalf("expected collect failure summary, got %q", info.Error)
 	}
@@ -298,8 +301,9 @@ type docflowPartialCanonicalRunner struct{}
 type docflowOwnerGapValidatorRunner struct{}
 
 type collectFailureRunner struct {
-	mu          sync.Mutex
-	asIsInvoked int
+	mu               sync.Mutex
+	asIsInvoked      int
+	proposalsInvoked int
 }
 
 func (docflowFailingValidatorRunner) Preflight(context.Context) error  { return nil }
@@ -360,6 +364,11 @@ func (r *collectFailureRunner) Run(ctx context.Context, task acpruntime.Task) (a
 		r.asIsInvoked++
 		r.mu.Unlock()
 		return acpruntime.Result{}, fmt.Errorf("unexpected as-is runtime invocation")
+	case "init.step4.proposals", "refresh.step4.proposals":
+		r.mu.Lock()
+		r.proposalsInvoked++
+		r.mu.Unlock()
+		return acpruntime.Result{}, fmt.Errorf("unexpected proposals runtime invocation")
 	default:
 		return claudecode.FakeRunner{}.Run(ctx, task)
 	}
@@ -369,6 +378,12 @@ func (r *collectFailureRunner) asIsInvocationCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.asIsInvoked
+}
+
+func (r *collectFailureRunner) proposalsInvocationCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.proposalsInvoked
 }
 
 func appendCustomProposalToManifest(task acpruntime.Task) error {

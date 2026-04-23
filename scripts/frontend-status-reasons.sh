@@ -3,6 +3,7 @@
 # Canonical reason codes for frontend e2e status artifacts.
 ACP_FRONTEND_REASON_OK="ok"
 ACP_FRONTEND_REASON_PLAYWRIGHT_FAILED="playwright_failed"
+ACP_FRONTEND_REASON_ACTIVE_RUN_TIMEOUT="active_run_timeout"
 ACP_FRONTEND_REASON_SELECTION_SKIPPED="frontend_selection_skipped"
 ACP_FRONTEND_REASON_BACKEND_WORKSPACE_MISSING="backend_workspace_missing"
 ACP_FRONTEND_REASON_SNAPSHOT_REPORTS_MISSING="snapshot_reports_missing"
@@ -15,6 +16,7 @@ acp_frontend_reason_is_allowed() {
   case "$reason" in
     "$ACP_FRONTEND_REASON_OK"|\
       "$ACP_FRONTEND_REASON_PLAYWRIGHT_FAILED"|\
+      "$ACP_FRONTEND_REASON_ACTIVE_RUN_TIMEOUT"|\
       "$ACP_FRONTEND_REASON_SELECTION_SKIPPED"|\
       "$ACP_FRONTEND_REASON_BACKEND_WORKSPACE_MISSING"|\
       "$ACP_FRONTEND_REASON_SNAPSHOT_REPORTS_MISSING"|\

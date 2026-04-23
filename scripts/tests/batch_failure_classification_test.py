@@ -627,6 +627,53 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual("runtime_contract_failed", result.failure_class)
         self.assertFalse(result.runtime_flow_failed)
 
+    def test_python_report_prefers_runtime_contract_failed_over_runner_unavailable_classifier(self) -> None:
+        run_dir = self.root / "run-contract-vs-runner-unavailable-python"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: passed",
+                    "- failure_reason: runtime_contract_failed",
+                    "- expected_runs: 4",
+                    "- completed_runs: 4",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 2",
+                    "- running_runs_detected: 0",
+                    "- termination_signal: none",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "full-run.log",
+            "runtime_contract_failed while validating draft manifest\nprovider returned status=429 model at capacity\n",
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "runner_unavailable",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("runtime_contract_failed", result.failure_class)
+        self.assertTrue(result.runtime_contract_failed)
+        self.assertTrue(result.runner_unavailable)
+
     def test_python_report_prefers_runtime_timeout_over_runner_unavailable_when_timeout_signaled(self) -> None:
         run_dir = self.root / "run-timeout-python"
         self._create_fixture_run_dir(run_dir)
@@ -698,6 +745,29 @@ class BatchFailureClassificationTest(unittest.TestCase):
 
         self.assertEqual("runner_unavailable", result.failure_class)
         self.assertTrue(result.runner_unavailable)
+
+    def test_python_runner_unavailable_signal_ignores_codex_plugin_cloudflare_noise(self) -> None:
+        text = "\n".join(
+            [
+                "GET https://chatgpt.com/backend-api/plugins/featured -> 429 Too Many Requests",
+                "Just a moment...",
+                "Cloudflare",
+                "failed to renew cache TTL: Operation not permitted",
+            ]
+        )
+
+        self.assertFalse(self.module.text_has_runner_unavailable_signal(text))
+
+    def test_python_runner_unavailable_signal_keeps_real_capacity_when_noise_is_separate(self) -> None:
+        text = "\n".join(
+            [
+                "GET https://chatgpt.com/backend-api/plugins/featured -> 429 Too Many Requests",
+                "Cloudflare",
+                "actual runtime error: Selected model is at capacity",
+            ]
+        )
+
+        self.assertTrue(self.module.text_has_runner_unavailable_signal(text))
 
     def test_python_report_prefers_parse_signature_contract_failure_over_runner_unavailable(self) -> None:
         run_dir = self.root / "run-parse-signature-python"
@@ -878,6 +948,56 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
         self.assertEqual("runtime_contract_failed", fields[2], classifications_tsv.read_text(encoding="utf-8"))
 
+    def test_shell_classifier_prefers_runtime_contract_failed_over_runner_unavailable_signature(self) -> None:
+        run_dir = self.root / "run-contract-vs-runner-unavailable-shell"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: passed",
+                    "- failure_reason: runtime_contract_failed",
+                    "- expected_runs: 4",
+                    "- completed_runs: 4",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 2",
+                    "- running_runs_detected: 0",
+                    "- termination_signal: none",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "full-run.log",
+            "runtime_contract_failed while validating draft manifest\nrunner_unavailable marker: status=429\n",
+        )
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        classifications_tsv = self.root / "backend-run-classifications-contract-vs-runner.tsv"
+        command = (
+            prelude
+            + "\n"
+            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
+            + f'classify_run_failure "qwen-code" "1" {shlex.quote(str(run_dir))} "1"\n'
+        )
+        subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
+        self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("runtime_contract_failed", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+
     def test_shell_classifier_prefers_runtime_flow_failed_for_validator_verdict_fail(self) -> None:
         run_dir = self.root / "run-validator-verdict-fail-shell"
         self._create_fixture_run_dir(run_dir)
@@ -1036,6 +1156,84 @@ class BatchFailureClassificationTest(unittest.TestCase):
         fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
         self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
         self.assertEqual("runner_unavailable", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+
+    def test_shell_runner_unavailable_signature_ignores_codex_plugin_cloudflare_noise(self) -> None:
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        noise_log = self.root / "codex-plugin-noise.log"
+        write_text(
+            noise_log,
+            "\n".join(
+                [
+                    "GET https://chatgpt.com/backend-api/plugins/featured -> 429 Too Many Requests",
+                    "Just a moment...",
+                    "Cloudflare",
+                    "failed to renew cache TTL: Operation not permitted",
+                ]
+            )
+            + "\n",
+        )
+        command = (
+            prelude
+            + "\n"
+            + f'if contains_runner_unavailable_signature {shlex.quote(str(noise_log))}; then echo yes; else echo no; fi\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("no", completed.stdout.strip(), completed.stdout)
+
+    def test_shell_runner_unavailable_signature_keeps_real_capacity_when_noise_is_separate(self) -> None:
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        mixed_log = self.root / "codex-plugin-noise-with-real-capacity.log"
+        write_text(
+            mixed_log,
+            "\n".join(
+                [
+                    "GET https://chatgpt.com/backend-api/plugins/featured -> 429 Too Many Requests",
+                    "Cloudflare",
+                    "actual runtime error: Selected model is at capacity",
+                ]
+            )
+            + "\n",
+        )
+        command = (
+            prelude
+            + "\n"
+            + f'if contains_runner_unavailable_signature {shlex.quote(str(mixed_log))}; then echo yes; else echo no; fi\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("yes", completed.stdout.strip(), completed.stdout)
+
+    def test_shell_runner_unavailable_signature_detects_bare_429_line(self) -> None:
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        bare_log = self.root / "bare-429.log"
+        write_text(bare_log, "429\n")
+        command = (
+            prelude
+            + "\n"
+            + f'if contains_runner_unavailable_signature {shlex.quote(str(bare_log))}; then echo yes; else echo no; fi\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("yes", completed.stdout.strip(), completed.stdout)
 
     def test_shell_classifier_prefers_parse_signature_contract_failure_over_capacity_signal(self) -> None:
         run_dir = self.root / "run-shell-parse-signature"

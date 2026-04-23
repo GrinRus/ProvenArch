@@ -653,12 +653,24 @@ contains_regex_in_files() {
 
 contains_runner_unavailable_signature() {
   local -a paths=("$@")
-  if contains_in_files "runner_unavailable" "${paths[@]}"; then
-    return 0
-  fi
-  if contains_regex_in_files "([Mm]odel( is)? at capacity|[Ss]tatus[[:space:]]*[:=][[:space:]]*429|\\b429\\b|[Rr]ate[ -]?limit(ed)?|[Tt]oo many requests)" "${paths[@]}"; then
-    return 0
-  fi
+  local path
+  local line
+  local generic_pattern="([Mm]odel( is)? at capacity|[Ss]tatus[[:space:]]*[:=][[:space:]]*429|(^|[^0-9])429([^0-9]|$)|[Rr]ate[ -]?limit(ed)?|[Tt]oo many requests)"
+  local noise_pattern="(chatgpt\\.com/backend-api/plugins/featured|[Cc]loudflare|failed to renew cache ttl|state db|Operation not permitted)"
+  for path in "${paths[@]}"; do
+    [[ ! -f "$path" ]] && continue
+    if grep -q "runner_unavailable" "$path"; then
+      return 0
+    fi
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      if printf '%s\n' "$line" | grep -E -q "$generic_pattern"; then
+        if printf '%s\n' "$line" | grep -E -q "$noise_pattern"; then
+          continue
+        fi
+        return 0
+      fi
+    done < "$path"
+  done
   return 1
 }
 
@@ -673,6 +685,18 @@ contains_runtime_contract_parse_signature() {
     fi
   done
   return 1
+}
+
+is_explicit_failure_class() {
+  local value="$1"
+  case "$value" in
+    runtime_timeout|runner_unavailable|runtime_contract_failed|infra_signal_terminated|quality_gates_failed|runtime_flow_failed)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 write_frontend_status_json() {
@@ -1089,6 +1113,12 @@ classify_run_failure() {
   fi
 
   if [[ "$run_class" == "none" ]]; then
+    if is_explicit_failure_class "$failure_reason"; then
+      run_class="$failure_reason"
+    fi
+  fi
+
+  if [[ "$run_class" == "none" ]]; then
     if [[ "$failure_reason" == "runtime_timeout" || "$termination_signal" == "timeout" ]]; then
       run_class="runtime_timeout"
     fi
@@ -1097,14 +1127,14 @@ classify_run_failure() {
   if [[ "$run_class" == "none" ]] && contains_runtime_contract_parse_signature "${classify_log_paths[@]}"; then
     run_class="runtime_contract_failed"
   fi
-  if [[ "$run_class" == "none" ]] && contains_runner_unavailable_signature "${classify_log_paths[@]}"; then
-    run_class="runner_unavailable"
-  fi
   if [[ "$run_class" == "none" && "$validator_verdict_failed" == "1" ]]; then
     run_class="runtime_flow_failed"
   fi
   if [[ "$run_class" == "none" ]] && contains_in_files "runtime_contract_failed" "${classify_log_paths[@]}"; then
     run_class="runtime_contract_failed"
+  fi
+  if [[ "$run_class" == "none" ]] && contains_runner_unavailable_signature "${classify_log_paths[@]}"; then
+    run_class="runner_unavailable"
   fi
 
   if [[ "$run_class" == "none" ]]; then
