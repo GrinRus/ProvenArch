@@ -105,6 +105,14 @@ func (r HeadlessRunner) recoverAfterStall(
 
 	retryResult, retryErr := runQwenCommand(ctx, task, command, r.Args, stallRetryOptions(options, stalled.Diagnostic))
 	if retryErr != nil {
+		var retryStalled collectStallError
+		if errors.As(retryErr, &retryStalled) {
+			emitRetryExhaustedDiagnostic(task, retryStalled.Diagnostic, "fresh_process")
+			if shouldClassifyRetryStallAsProviderUnavailable(retryResult, retryStalled, retryErr) {
+				return true, acpruntime.Result{}, wrapArtifactProviderUnavailable(task, "retry", retryResult, "provider unavailable after fresh-process stall retry", retryErr)
+			}
+			return true, acpruntime.Result{}, wrapArtifactContractFailure(task, "retry", retryResult, "fresh-process retry stalled before producing required artifacts", retryErr)
+		}
 		return true, acpruntime.Result{}, classifyRunFailure(task, retryResult, retryErr)
 	}
 	if err := repairAndValidateArtifacts(task); err != nil {
@@ -120,10 +128,21 @@ func (r HeadlessRunner) recoverAfterStall(
 func stallRetryOptions(options runQwenOptions, diagnostic collectStallDiagnostic) runQwenOptions {
 	retryOptions := options
 	if diagnostic.StallPhase == collectStallPhasePreArtifact {
-		// A pre-artifact retry is the last-chance full rerun. Disable only the
-		// pre-artifact collect sentinel so the second attempt gets the normal
-		// step-timeout budget without losing post-artifact stall recovery.
-		retryOptions.DisableCollectPreArtifactStall = true
+		// The second attempt gets a wider but still bounded pre-artifact grace
+		// window, while preserving post-artifact stall recovery.
+		retryOptions.CollectPreArtifactWindow = collectRetryPreArtifactWindow
 	}
 	return retryOptions
+}
+
+func shouldClassifyRetryStallAsProviderUnavailable(result acpruntime.Result, stalled collectStallError, retryErr error) bool {
+	if isProviderUnavailableText(result.Stdout, result.Stderr, retryErr) {
+		return true
+	}
+	// A fully silent second collect attempt is operationally closer to provider
+	// unavailability than to a malformed artifact contract response, even if
+	// the retry managed to create partial files before stalling again.
+	_ = stalled
+	return strings.TrimSpace(result.Stdout) == "" &&
+		strings.TrimSpace(result.Stderr) == ""
 }

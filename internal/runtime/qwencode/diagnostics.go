@@ -50,6 +50,12 @@ func emitRetryCompletedDiagnostic(task acpruntime.Task, phase collectStallPhase,
 	emitDiagnostic(task, "retry completed", fields)
 }
 
+func emitRetryExhaustedDiagnostic(task acpruntime.Task, diagnostic collectStallDiagnostic, recoveryMode string) {
+	fields := diagnostic.fields(task)
+	fields["recovery_mode"] = strings.TrimSpace(recoveryMode)
+	emitDiagnostic(task, "retry exhausted", fields)
+}
+
 func classifyRunFailure(task acpruntime.Task, result acpruntime.Result, err error) error {
 	if errors.Is(err, context.DeadlineExceeded) {
 		message, rawOutputRefs := buildFailureMessage(task, "exec", err, result)

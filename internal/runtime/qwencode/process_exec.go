@@ -22,15 +22,16 @@ import (
 const (
 	collectPostArtifactStallWindow = 20 * time.Second
 	collectPreArtifactStallWindow  = 75 * time.Second
+	collectRetryPreArtifactWindow  = 3 * time.Minute
 	collectStallPollInterval       = 2 * time.Second
 	collectStallTerminateGrace     = 2 * time.Second
 	collectStallPostTerminateDrain = 500 * time.Millisecond
 )
 
 type runQwenOptions struct {
-	EnableCollectStallMonitor      bool
-	DisableCollectPreArtifactStall bool
-	EnableDraftStallMonitor        bool
+	EnableCollectStallMonitor bool
+	CollectPreArtifactWindow  time.Duration
+	EnableDraftStallMonitor   bool
 }
 
 type collectStallPhase string
@@ -195,7 +196,7 @@ func runQwenCommand(ctx context.Context, task acpruntime.Task, command string, a
 		monitorWG.Add(1)
 		go func() {
 			defer monitorWG.Done()
-			if stallErr, stalled := monitorCollectStall(monitorCtx, cmd.Process, task, activityTracker, !options.DisableCollectPreArtifactStall); stalled {
+			if stallErr, stalled := monitorCollectStall(monitorCtx, cmd.Process, task, activityTracker, options.collectPreArtifactWindow()); stalled {
 				select {
 				case stallCh <- stallErr:
 				default:
@@ -398,7 +399,17 @@ func isPipeClosedErr(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "file already closed")
 }
 
-func monitorCollectStall(ctx context.Context, process *os.Process, task acpruntime.Task, tracker *commandActivityTracker, monitorPreArtifact bool) (collectStallError, bool) {
+func (o runQwenOptions) collectPreArtifactWindow() time.Duration {
+	if o.CollectPreArtifactWindow > 0 {
+		return o.CollectPreArtifactWindow
+	}
+	return collectPreArtifactStallWindow
+}
+
+func monitorCollectStall(ctx context.Context, process *os.Process, task acpruntime.Task, tracker *commandActivityTracker, preArtifactWindow time.Duration) (collectStallError, bool) {
+	if preArtifactWindow <= 0 {
+		preArtifactWindow = collectPreArtifactStallWindow
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -408,10 +419,10 @@ func monitorCollectStall(ctx context.Context, process *os.Process, task acprunti
 		snapshot := collectWriteRootState(task.WriteRoot)
 		lastPipe := tracker.LastRead()
 		lastMutation := snapshot.LastMutation
-		if !snapshot.ManifestPresent && !lastMutation.IsZero() && time.Since(lastMutation) < collectPreArtifactStallWindow {
+		if !snapshot.ManifestPresent && !lastMutation.IsZero() && time.Since(lastMutation) < preArtifactWindow {
 			continue
 		}
-		if !lastPipe.IsZero() && time.Since(lastPipe) < collectPreArtifactStallWindow {
+		if !lastPipe.IsZero() && time.Since(lastPipe) < preArtifactWindow {
 			continue
 		}
 		if snapshot.ManifestPresent {
@@ -428,9 +439,6 @@ func monitorCollectStall(ctx context.Context, process *os.Process, task acprunti
 					LastWriteRootMutation: lastMutation,
 				},
 			}, true
-		}
-		if !monitorPreArtifact {
-			continue
 		}
 		return collectStallError{
 			Sentinel: errCollectStalledBeforeArtifacts,
