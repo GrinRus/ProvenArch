@@ -84,10 +84,50 @@ FAILURE_CLASS_PRECEDENCE = {
     "none": 99,
 }
 
+RUNNER_UNAVAILABLE_PATTERNS = (
+    r"\brunner[_ -]?unavailable\b",
+    r"\bmodel(?:\s+is)?\s+at\s+capacity\b",
+    r"\brate[ -]?limit(?:ed)?\b",
+    r"\btoo many requests\b",
+    r"\b429\b",
+)
+
 
 def normalize_text(value: str) -> str:
     cleaned = value.strip().lower().replace("_", " ").replace("-", " ")
     return " ".join(cleaned.split())
+
+
+def text_has_runner_unavailable_signal(text: str) -> bool:
+    haystack = str(text or "")
+    for pattern in RUNNER_UNAVAILABLE_PATTERNS:
+        if re.search(pattern, haystack, flags=re.IGNORECASE):
+            return True
+    return False
+
+
+def text_has_runtime_contract_parse_signature(text: str) -> bool:
+    haystack = str(text or "")
+    return bool(
+        re.search(r"parse runtime draft manifest", haystack, flags=re.IGNORECASE)
+        and re.search(r"unknown field", haystack, flags=re.IGNORECASE)
+    )
+
+
+def workspace_candidates(run_dir: Path) -> list[Path]:
+    return [
+        run_dir / "headless" / "arch-workspace",
+        run_dir / "arch-workspace",
+        run_dir / "workspace",
+    ]
+
+
+def resolve_workspace(run_dir: Path) -> tuple[Path, list[Path]]:
+    candidates = workspace_candidates(run_dir)
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_dir():
+            return candidate, candidates
+    return candidates[0], candidates
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -246,9 +286,8 @@ def reconstruct_backend_classifications(
             continue
 
         run_dir = status_path.parent
-        run_history_counts = parse_run_history_status_counts(
-            run_dir / "arch-workspace" / "reports" / "taskruns" / "run-history.json"
-        )
+        workspace, _ = resolve_workspace(run_dir)
+        run_history_counts = parse_run_history_status_counts(workspace / "reports" / "taskruns" / "run-history.json")
         if (run_dir / "session-summary.md").exists():
             continue
 
@@ -832,6 +871,7 @@ def evaluate_runtime_flow_checks(
     expected_execution: dict[str, Any],
     summary_text: str,
     full_run_log_text: str,
+    runner_unavailable_signal: bool = False,
 ) -> tuple[set[str], list[str]]:
     issues: set[str] = set()
     details: list[str] = []
@@ -937,10 +977,14 @@ def evaluate_runtime_flow_checks(
         if summary_has_failed_items:
             summary_blob = (summary_text + "\n" + full_run_log_text).lower()
             if expected_execution["failure_policy"] == "best_effort":
-                if "run_partial_failed" not in summary_blob:
+                if "run_partial_failed" not in summary_blob and not runner_unavailable_signal:
                     issues.add("runtime:execution-semantics")
                     details.append(
                         f"runtime/execution-semantics -> run_id={run_id} has failed shard items under best_effort but missing run_partial_failed signal"
+                    )
+                elif "run_partial_failed" not in summary_blob and runner_unavailable_signal:
+                    details.append(
+                        f"runtime/execution-semantics -> run_id={run_id} has failed shard items under best_effort with provider-unavailable signal; skip run_partial_failed enforcement"
                     )
             else:
                 issues.add("runtime:execution-semantics")
@@ -1014,7 +1058,7 @@ def evaluate_run(
     summary_path = run_dir / "session-summary.md"
     run_results_path = run_dir / "run-results.tsv"
     full_run_log = run_dir / "full-run.log"
-    workspace = run_dir / "arch-workspace"
+    workspace, workspace_roots = resolve_workspace(run_dir)
     declared_meta = normalize_declared_repos_meta(preflight)
     expected_repo_count = int(declared_meta.get("expected_repo_count", 1))
     repo_roots = collect_repo_roots(run_dir, declared_meta)
@@ -1125,6 +1169,7 @@ def evaluate_run(
         )
 
     runtime_contract_failed_hit = False
+    runtime_contract_parse_failed_hit = False
     validator_verdict_failed_hit = False
     runner_unavailable_hit = False
     runner_error_hit = False
@@ -1132,15 +1177,21 @@ def evaluate_run(
     raw_outputs: set[str] = set()
     runner_error_sources = [summary_path, full_run_log]
     runner_error_sources.extend(sorted((run_dir / "logs").glob("run-iter*-*.log")))
-    runner_error_sources.extend(sorted((workspace / "reports" / "taskruns" / "logs").glob("*.ndjson")))
-    runner_error_sources.extend(
-        sorted(path for path in (workspace / "reports" / "taskruns" / "raw").rglob("*") if path.is_file())
-    )
+    for workspace_root in workspace_roots:
+        runner_error_sources.extend(sorted((workspace_root / "reports" / "taskruns" / "logs").glob("*.ndjson")))
+        runner_error_sources.extend(
+            sorted(path for path in (workspace_root / "reports" / "taskruns" / "raw").rglob("*") if path.is_file())
+        )
     for source_path in runner_error_sources:
         if not source_path.exists():
             continue
         text = read_text_file(source_path)
-        if "runner_unavailable" in text:
+        if text_has_runtime_contract_parse_signature(text):
+            runtime_contract_parse_failed_hit = True
+            runtime_contract_failed_hit = True
+            runner_error_hit = True
+            error_codes.append("runtime_contract_failed")
+        if text_has_runner_unavailable_signal(text):
             runner_unavailable_hit = True
             runner_error_hit = True
             error_codes.append("runner_unavailable")
@@ -1222,6 +1273,25 @@ def evaluate_run(
         details.append(
             f"reliability/cancellation-like -> failure_subclass={classified_subclass or '-'} process_exit={classification_row.get('process_exit', '-')}"
         )
+
+    classified_terminal_runtime_provider_failure = classified_failure in {
+        "runtime_timeout",
+        "runner_unavailable",
+        "runtime_contract_failed",
+    }
+    terminal_runtime_provider_failure = (
+        (
+            terminal_process_failure
+            and result_value == "failed"
+            and (
+                runtime_timeout
+                or runner_unavailable_hit
+                or runtime_contract_parse_failed_hit
+                or (runtime_contract_failed_hit and not validator_verdict_failed_hit)
+            )
+        )
+        or classified_terminal_runtime_provider_failure
+    )
 
     c1_runtime_name_ok = True
     c2_runtime_versions_ok = True
@@ -1470,26 +1540,37 @@ def evaluate_run(
                 details.append(f"analysis/evidence-scope -> +{len(invalid_evidence) - 8} more invalid evidence paths")
 
         if expected_repo_count >= 2:
-            repo_mentions: set[str] = set()
-            edge_upserts = 0
-            for step_file in refresh_step_files:
-                payload = read_json(step_file)
-                repo_mentions.update(collect_repo_mentions(payload))
-                edge_upserts += count_semantic_edges(payload)
-            if len(repo_mentions) < 2 or edge_upserts < 1:
-                semantic_hard_fail = True
-                issues.append("analysis:cross-repo-missing")
+            if terminal_runtime_provider_failure:
                 details.append(
-                    f"analysis/cross-repo-missing -> run_dir={run_dir} expected_repo_count={expected_repo_count} "
-                    f"repo_mentions={len(repo_mentions)} edge_upserts={edge_upserts}"
+                    "analysis/cross-repo-missing -> skipped for terminal runtime/provider failure classification"
                 )
+            else:
+                repo_mentions: set[str] = set()
+                edge_upserts = 0
+                for step_file in refresh_step_files:
+                    payload = read_json(step_file)
+                    repo_mentions.update(collect_repo_mentions(payload))
+                    edge_upserts += count_semantic_edges(payload)
+                if len(repo_mentions) < 2 or edge_upserts < 1:
+                    semantic_hard_fail = True
+                    issues.append("analysis:cross-repo-missing")
+                    details.append(
+                        f"analysis/cross-repo-missing -> run_dir={run_dir} expected_repo_count={expected_repo_count} "
+                        f"repo_mentions={len(repo_mentions)} edge_upserts={edge_upserts}"
+                    )
     elif expected_repo_count >= 2:
-        semantic_hard_fail = True
-        issues.append("analysis:cross-repo-missing")
-        details.append(
-            f"analysis/cross-repo-missing -> run_dir={run_dir} expected_repo_count={expected_repo_count} "
-            "missing refresh step runtime-execution artifacts"
-        )
+        if terminal_runtime_provider_failure:
+            details.append(
+                "analysis/cross-repo-missing -> skipped for terminal runtime/provider failure classification "
+                "(missing refresh step runtime-execution artifacts)"
+            )
+        else:
+            semantic_hard_fail = True
+            issues.append("analysis:cross-repo-missing")
+            details.append(
+                f"analysis/cross-repo-missing -> run_dir={run_dir} expected_repo_count={expected_repo_count} "
+                "missing refresh step runtime-execution artifacts"
+            )
 
     overview_counts = parse_overview_counts(overview_path)
     services_count = int(overview_counts.get("services", 0))
@@ -1504,7 +1585,8 @@ def evaluate_run(
         issues.append("reliability:semantic-hard-fail")
 
     runtime_flow_failed = False
-    if expected_execution is not None:
+    if expected_execution is not None and not terminal_runtime_provider_failure:
+        runtime_unavailable_hint = text_has_runner_unavailable_signal(summary_text + "\n" + full_run_log_text)
         runtime_flow_issues, runtime_flow_details = evaluate_runtime_flow_checks(
             run_dir,
             workspace,
@@ -1512,6 +1594,7 @@ def evaluate_run(
             expected_execution,
             summary_text,
             full_run_log_text,
+            runtime_unavailable_hint,
         )
         if runtime_flow_issues:
             runtime_flow_failed = True
@@ -1521,6 +1604,7 @@ def evaluate_run(
     if (
         terminal_process_failure
         and result_value == "failed"
+        and not terminal_runtime_provider_failure
         and not runtime_timeout
         and not runner_unavailable_hit
         and not runtime_contract_failed_hit
@@ -1533,7 +1617,7 @@ def evaluate_run(
             details.append(
                 "reliability/runtime-flow-failed -> terminal process_failed run-status + session-summary indicate completed deterministic pipeline failure"
             )
-    if terminal_process_failure and validator_verdict_failed_hit:
+    if terminal_process_failure and validator_verdict_failed_hit and not terminal_runtime_provider_failure:
         runtime_flow_failed = True
         if "reliability:runtime-flow-failed" not in issues:
             issues.append("reliability:runtime-flow-failed")
@@ -1557,6 +1641,8 @@ def evaluate_run(
         failure_class = "summary_missing"
     elif runtime_timeout:
         failure_class = "runtime_timeout"
+    elif runtime_contract_parse_failed_hit:
+        failure_class = "runtime_contract_failed"
     elif runner_unavailable_hit:
         failure_class = "runner_unavailable"
     elif validator_verdict_failed_hit or runtime_flow_failed:
@@ -1580,14 +1666,17 @@ def evaluate_run(
             and classified_failure == "infra_incomplete_cycle"
             and failure_reason != "infra_incomplete_cycle"
         )
-        ignore_classified_contract = validator_verdict_failed_hit and classified_failure == "runtime_contract_failed"
+        ignore_classified_parse_override = runtime_contract_parse_failed_hit and classified_failure in {
+            "runner_unavailable",
+            "runtime_flow_failed",
+        }
         if ignore_classified_incomplete:
             details.append(
                 "reliability/classifier-override -> ignored infra_incomplete_cycle because run-status.env marks terminal process_failed summary"
             )
-        elif ignore_classified_contract:
+        elif ignore_classified_parse_override:
             details.append(
-                "reliability/classifier-override -> ignored runtime_contract_failed because terminal logs show validator verdict is FAIL"
+                "reliability/classifier-override -> ignored runner/runtime-flow override because parse runtime draft manifest unknown field is classified as runtime_contract_failed"
             )
         elif failure_class == "summary_missing" and classified_failure in {
             "runtime_timeout",
@@ -1601,9 +1690,9 @@ def evaluate_run(
             failure_class = classified_failure
         elif failure_class == "none" or failure_class_rank(classified_failure) < failure_class_rank(failure_class):
             failure_class = classified_failure
-        if not ignore_classified_contract:
-            runtime_contract_failed_hit = runtime_contract_failed_hit or classified_failure == "runtime_contract_failed"
-        runner_unavailable_hit = runner_unavailable_hit or classified_failure == "runner_unavailable"
+        runtime_contract_failed_hit = runtime_contract_failed_hit or classified_failure == "runtime_contract_failed"
+        if not ignore_classified_parse_override:
+            runner_unavailable_hit = runner_unavailable_hit or classified_failure == "runner_unavailable"
         runtime_timeout = runtime_timeout or classified_failure == "runtime_timeout"
         infra_signal_terminated = infra_signal_terminated or classified_failure == "infra_signal_terminated"
         if not ignore_classified_incomplete:
