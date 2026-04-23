@@ -69,7 +69,7 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 		return acpruntime.Result{}, classifyRunFailure(task, result, runErr)
 	}
 	if err := repairAndValidateArtifacts(task); err != nil {
-		if isProviderUnavailableText(result.Stdout, result.Stderr, err) {
+		if shouldTreatArtifactFailureAsProviderUnavailable(result, err) {
 			return acpruntime.Result{}, wrapArtifactProviderUnavailable(task, "contract", result, "provider unavailable before artifact validation completed", err)
 		}
 		return acpruntime.Result{}, wrapArtifactContractFailure(task, "contract", result, "artifact validation failed", err)
@@ -116,7 +116,7 @@ func (r HeadlessRunner) recoverAfterStall(
 		return true, acpruntime.Result{}, classifyRunFailure(task, retryResult, retryErr)
 	}
 	if err := repairAndValidateArtifacts(task); err != nil {
-		if isProviderUnavailableText(retryResult.Stdout, retryResult.Stderr, err) {
+		if shouldTreatArtifactFailureAsProviderUnavailable(retryResult, err) {
 			return true, acpruntime.Result{}, wrapArtifactProviderUnavailable(task, "retry", retryResult, "provider unavailable before retry artifact validation completed", err)
 		}
 		return true, acpruntime.Result{}, wrapArtifactContractFailure(task, "retry", retryResult, "artifact validation failed after stall retry", err)

@@ -255,7 +255,7 @@ Step 2 policy:
 - `final-run-index.json` и `citation-index.json` используют один deterministic `document_id` mapping, который наследует `manifest.Documents[*].id`; provider-authored `document_ids` remap-ятся в этот canonical namespace до validator
 - staged semantic assembly нормализует `evidence.repo` к логическому repo scope, сводит generated checkout-dir aliases и дедуплицирует entity aliases/related references до validator
 - если evidence incomplete, staged reports materialize-ятся с incomplete banner, но не promote-ятся без validator `PASS`
-- если collect status = `unusable`, live runtime для `step2.asis_docs` не запускается; orchestrator детерминированно пересобирает triage-only staged docflow только из persisted collect artifacts
+- если collect status = `unusable`, live runtime для `step2.asis_docs`, `step3.findings` и `step4.proposals` не запускается; orchestrator детерминированно пересобирает triage-only staged docflow только из persisted collect artifacts, а terminal/root cause остаётся collect failure
 - non-collect runtime шаги не стартуют из workspace root: `step2` использует `draft_final_root` как cwd, а live harness разводит headless и baseline workspaces по разным temp roots, чтобы sibling baseline artifacts не были implicit template source
 - provider-side hard sandbox в текущих headless CLI отсутствует; practical isolation для runtime обеспечивается только через separated temp roots и step-local `cwd`
 

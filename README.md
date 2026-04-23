@@ -71,6 +71,7 @@ Primary execution path для `step0..step4`:
 - orchestrator/aggregator собирает staged final doc set в `reports/taskruns/<run_id>/staging/final/`
 - staged docflow использует один deterministic `document_id` mapping для `manifest.Documents[*].id`, `citation-index.json` и `final-run-index.json`; semantic assembly нормализует repo aliases и дедуплицирует entity aliases до validator/promotion
 - validator пишет `validator-verdict.json`
+- если collect evidence стал `unusable`, live runtime для `step2.asis_docs`, `step3.findings` и `step4.proposals` не вызывается; orchestrator собирает только triage-only incomplete surface и сохраняет collect как primary root cause
 - owner-gap остаётся visible signal в coverage/findings/questions, но owner-only residual больше не блокирует verdict сам по себе; terminal `validator verdict is FAIL` классифицируется как `runtime_flow_failed`, а не как `runtime_contract_failed`
 - provider-side hard sandbox в текущих headless CLI нет; filesystem isolation обеспечивается только через separated temp roots и step-local `cwd` (`draft_final_root` для draft steps, `write_root` для validator)
 - только schema/semantic/validator gates разрешают promotion в канонические `reports/as-is/*`, `reports/findings/*`, `reports/coverage/*`, `reports/agent-outputs/*`, `proposals/*`
@@ -279,7 +280,8 @@ Root entrypoints:
 - `scripts/full-run-ai-advent.sh` — полный локальный cycle over `TARGET_REPOS_FILE`
 - `scripts/full-run-batch-5x2.sh` — batch re-audit + frontend live e2e
 - `scripts/full-run-batch-matrix.sh` — multi-profile matrix orchestrator
-- `scripts/frontend-live-e2e.sh` — локальный UI smoke для выбранного provider
+- `scripts/frontend-live-e2e.sh` — локальный UI smoke для выбранного provider; различает generic `playwright_failed` и `active_run_timeout`, если run остаётся продуктивным, но не успевает дойти до `succeeded`
+- generic capacity/429 сигналы из `codex` plugin/Cloudflare/state-db noise не считаются root-cause `runner_unavailable`, если raw runtime не дал explicit terminal provider failure
 
 Быстрый локальный запуск:
 

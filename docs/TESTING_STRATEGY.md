@@ -253,6 +253,7 @@ Implemented additional jobs:
   - local wrapper поддерживает `claude-code`, `qwen-code`, `codex-code`
   - canonical toggles: `UI_E2E_EXPECTED_REPO_COUNT`, `UI_E2E_SCENARIO=init-inspect|cancel-refresh`, `UI_E2E_OUTPUT_DIR`
   - cancel flow остаётся guarded сценарием с явным `run_canceled`
+  - init inspect обязан различать `playwright_failed` и `active_run_timeout`, если run остаётся продуктивным, но не доходит до `succeeded` в UI poll budget
 - Этот документ фиксирует policy, invariants и required gates; пошаговые live/release cookbook команды не дублируются здесь.
 
 ## 8) Acceptance для testing strategy

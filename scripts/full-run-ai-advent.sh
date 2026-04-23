@@ -57,6 +57,7 @@ COMPLETED_HEADLESS_RUNS=0
 RUNNING_RUNS_DETECTED=0
 RUNNING_RUNS_BASELINE=0
 RUNNING_RUNS_HEADLESS=0
+MALFORMED_RUN_RESULTS_ROWS=0
 SUMMARY_RESULT=""
 SUMMARY_WRITTEN="no"
 LAST_PIPELINE_STAGE="not_started"
@@ -99,6 +100,7 @@ if ! acp_ensure_no_legacy_env_set; then
 fi
 EXPECTED_RUNS=$((ITERATIONS * 4))
 EXPECTED_HEADLESS_RUNS=$((ITERATIONS * 2))
+RUN_RESULTS_EXPECTED_FIELDS=17
 
 if [[ -z "$TMP_ROOT" ]]; then
   TMP_ROOT="$(mktemp -d -t provenarch-ai-advent.XXXXXX)"
@@ -204,11 +206,24 @@ PY
 
 refresh_runtime_cycle_metrics() {
   if [[ -f "$RUN_RESULTS_TSV" ]]; then
-    COMPLETED_RUNS="$(awk 'NF { count++ } END { print count+0 }' "$RUN_RESULTS_TSV")"
-    COMPLETED_HEADLESS_RUNS="$(awk -F'\t' 'NF && $2 == "headless" { count++ } END { print count+0 }' "$RUN_RESULTS_TSV")"
+    local metrics
+    metrics="$(awk -F'\t' -v expected_fields="$RUN_RESULTS_EXPECTED_FIELDS" '
+      NF == 0 { next }
+      NF == expected_fields {
+        valid++
+        if ($2 == "headless") {
+          headless++
+        }
+        next
+      }
+      { malformed++ }
+      END { print (valid+0) "\t" (headless+0) "\t" (malformed+0) }
+    ' "$RUN_RESULTS_TSV")"
+    IFS=$'\t' read -r COMPLETED_RUNS COMPLETED_HEADLESS_RUNS MALFORMED_RUN_RESULTS_ROWS <<<"$metrics"
   else
     COMPLETED_RUNS=0
     COMPLETED_HEADLESS_RUNS=0
+    MALFORMED_RUN_RESULTS_ROWS=0
   fi
 
   local baseline_history_path="$WORKSPACE_BASELINE/reports/taskruns/run-history.json"
@@ -230,17 +245,21 @@ validate_runtime_cycle_completion() {
     log "completion invariant failed: expected_headless_runs=$EXPECTED_HEADLESS_RUNS completed_headless_runs=$COMPLETED_HEADLESS_RUNS"
     failed=1
   fi
+  if (( MALFORMED_RUN_RESULTS_ROWS > 0 )); then
+    log "completion invariant failed: malformed_run_results_rows=$MALFORMED_RUN_RESULTS_ROWS expected_fields=$RUN_RESULTS_EXPECTED_FIELDS"
+    failed=1
+  fi
 
   if [[ ! -f "$RUN_RESULTS_TSV" ]]; then
     log "completion invariant failed: missing $RUN_RESULTS_TSV"
     failed=1
   else
     for iteration in $(seq 1 "$ITERATIONS"); do
-      if ! awk -F'\t' -v iter="$iteration" '$1 == iter && $2 == "headless" && $4 == "init" { ok=1 } END { exit ok ? 0 : 1 }' "$RUN_RESULTS_TSV"; then
+      if ! awk -F'\t' -v iter="$iteration" -v expected_fields="$RUN_RESULTS_EXPECTED_FIELDS" 'NF == expected_fields && $1 == iter && $2 == "headless" && $4 == "init" { ok=1 } END { exit ok ? 0 : 1 }' "$RUN_RESULTS_TSV"; then
         log "completion invariant failed: missing headless init for iteration=$iteration"
         failed=1
       fi
-      if ! awk -F'\t' -v iter="$iteration" '$1 == iter && $2 == "headless" && $4 == "refresh" { ok=1 } END { exit ok ? 0 : 1 }' "$RUN_RESULTS_TSV"; then
+      if ! awk -F'\t' -v iter="$iteration" -v expected_fields="$RUN_RESULTS_EXPECTED_FIELDS" 'NF == expected_fields && $1 == iter && $2 == "headless" && $4 == "refresh" { ok=1 } END { exit ok ? 0 : 1 }' "$RUN_RESULTS_TSV"; then
         log "completion invariant failed: missing headless refresh for iteration=$iteration"
         failed=1
       fi
@@ -859,7 +878,7 @@ run_cli_pipeline() {
 
   snapshot_run_artifacts "$run_id" "$runtime_label" "$pipeline" "$iteration" "$workspace_path"
 
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$signal_score" "$semantic_entities" "$semantic_edges" "$findings" "$questions" "$coverage_observed" "$coverage_missing" "$warnings" "$runtime_versions" "$quality_path" "$output_path" >> "$RUN_RESULTS_TSV"
 
   LAST_SIGNAL="$signal_score"
@@ -950,6 +969,7 @@ write_summary() {
     echo "- completed_runs: $COMPLETED_RUNS"
     echo "- expected_headless_runs: $EXPECTED_HEADLESS_RUNS"
     echo "- completed_headless_runs: $COMPLETED_HEADLESS_RUNS"
+    echo "- malformed_run_results_rows: $MALFORMED_RUN_RESULTS_ROWS"
     echo "- running_runs_detected: $RUNNING_RUNS_DETECTED"
     echo "- last_pipeline_stage: $LAST_PIPELINE_STAGE"
     echo "- last_runtime_provider: $LAST_RUNTIME_PROVIDER"
@@ -978,7 +998,10 @@ write_summary() {
     else
       echo "| iteration | runtime_mode | runtime_provider | pipeline | run_id | status | signal | entities | edges | findings | questions | cov_obs | cov_missing | warnings |"
       echo "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
-      while IFS=$'\t' read -r iter runtime_mode runtime_provider pipeline run_id status signal entities edges findings questions cov_obs cov_missing warnings _runtime_versions _quality_path _run_log; do
+      while IFS=$'\t' read -r iter runtime_mode runtime_provider pipeline run_id status signal entities edges findings questions cov_obs cov_missing warnings _runtime_versions _quality_path _run_log _extra; do
+        if [[ -n "$_extra" || -z "$run_id" ]]; then
+          continue
+        fi
         echo "| $iter | $runtime_mode | $runtime_provider | $pipeline | $run_id | $status | $signal | $entities | $edges | $findings | $questions | $cov_obs | $cov_missing | $warnings |"
       done < "$RUN_RESULTS_TSV"
     fi

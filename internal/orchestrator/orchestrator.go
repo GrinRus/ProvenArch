@@ -1353,6 +1353,18 @@ func (e *pipelineExecution) runStepValidator(ctx context.Context, stepID string)
 }
 
 func (e *pipelineExecution) runStepProposals(ctx context.Context, stepID string) error {
+	if e.shouldSkipFindingsRuntime() {
+		e.addReportReason("proposals_skipped_due_to_unusable_collect")
+		e.addWarning(fmt.Sprintf("%s: proposals step skipped because collect evidence is unusable", stepID))
+		e.logWarn(stepID, "", "proposals step skipped", map[string]any{
+			"reason":         "collect evidence is unusable",
+			"collect_status": e.renderContext().Collect.Status,
+		})
+		e.proposalsDraftManifest = nil
+		e.proposalsDraftRoot = ""
+		return nil
+	}
+
 	selectedScopes := normalizeOrderedUniqueStrings(e.selectedRepoScopes)
 	execution, err := e.executeRuntimeTask(ctx, stepID, "proposals", selectedScopes, []string{"."}, "", "")
 	if err != nil {

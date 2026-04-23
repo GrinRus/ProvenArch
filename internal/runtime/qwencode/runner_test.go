@@ -60,6 +60,73 @@ func TestRunClassifiesProviderUnavailableWhenArtifactsAreMissingAfterSuccessfulP
 	}
 }
 
+func TestArtifactValidationKeepsMalformedManifestAsRuntimeContractFailure(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	writeRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "proposals")
+	draftRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "final")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(writeRoot, "proposals-draft-manifest.json"),
+		[]byte("{\"version\":1,\"run_id\":\"run-1\",\"step_id\":\"init.step4.proposals\",\"step_contract\":\"proposals\",\"agent_role\":\"architect\",\"manifest_version\":2,\"outputs\":[]}"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write invalid proposals manifest: %v", err)
+	}
+
+	result := acpruntime.Result{Stdout: "API Error: 403 permission_error usage limit"}
+	err := repairAndValidateArtifacts(acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step4.proposals",
+		StepContract:      "proposals",
+		WriteRoot:         writeRoot,
+		DraftFinalRoot:    draftRoot,
+		ExpectedArtifacts: []string{"proposals-draft-manifest.json"},
+	})
+	if err == nil {
+		t.Fatal("expected artifact validation error")
+	}
+	if shouldTreatArtifactFailureAsProviderUnavailable(result, err) {
+		t.Fatalf("expected malformed manifest to remain contract failure, got provider-unavailable classification for %v", err)
+	}
+}
+
+func TestArtifactValidationTreatsMissingDraftManifestAsProviderUnavailableWhenProviderMarkersExist(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	writeRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "constitution")
+	draftRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "final")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+
+	result := acpruntime.Result{Stdout: "API Error: 403 permission_error usage limit"}
+	err := repairAndValidateArtifacts(acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step0.constitution",
+		StepContract:      "constitution",
+		WriteRoot:         writeRoot,
+		DraftFinalRoot:    draftRoot,
+		ExpectedArtifacts: []string{"constitution-draft.json"},
+	})
+	if err == nil {
+		t.Fatal("expected artifact validation error")
+	}
+	if !shouldTreatArtifactFailureAsProviderUnavailable(result, err) {
+		t.Fatalf("expected missing draft manifest to classify as provider unavailable, got %v", err)
+	}
+}
+
 func TestRecoverAfterStallAcceptsValidDraftArtifacts(t *testing.T) {
 	t.Parallel()
 

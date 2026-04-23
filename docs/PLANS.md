@@ -55,6 +55,116 @@ EP-YYYYMMDD-<slug>
 
 ## Active Plans
 ### Plan ID
+EP-20260423-regres-fast-failure-taxonomy-hardening
+
+### Context
+Сравнительный live triage по `qwen` и `codex` показал четыре новых дефекта: `step4.proposals` всё ещё может запускаться после unusable collect, `qwen` местами смешивает provider unavailable и artifact contract failures, `full-run-ai-advent.sh` может ложно раздувать `completed_runs` из-за malformed `run-results.tsv`, а frontend live E2E не различает explicit failure и productive timeout.
+
+### Goals (must have)
+- [x] Не запускать `init|refresh.step4.proposals` после unusable collect
+- [x] Сохранить collect/runtime contract как primary root cause вместо downstream proposal parse failures
+- [x] Развести `runtime_contract_failed` и `runner_unavailable` в `qwen` artifact-validation paths
+- [x] Исправить `run-results.tsv` accounting так, чтобы malformed rows не превращали успешный backend в `infra_incomplete_cycle`
+- [x] Поднять raw `runtime_contract_failed` выше heuristic `runner_unavailable` в shell/python batch reporting
+- [x] Развести `playwright_failed` и `active_run_timeout` для frontend live E2E
+- [x] Прогнать DoD (`make contracts`, `make test`, `make lint`, `make build`)
+- [ ] Перепроверить live `regres fast` минимум на `qwen bank/openedx` и `codex bank/openedx`
+
+### Non-goals
+- [x] Не менять публичные schemas/contracts
+- [x] Не ослаблять strict runtime draft manifest validator
+- [x] Не трактовать codex plugin/state/cache noise как primary blocker
+
+### Approach
+1) Закрыть orchestrator path для proposals после unusable collect и добавить regression coverage.
+2) Уточнить qwen artifact-failure classification на missing-artifacts vs malformed-artifacts.
+3) Починить structured accounting в `full-run-ai-advent.sh`.
+4) Выровнять precedence между raw runtime/session-summary и grep/signature overrides в shell/python reporting.
+5) Развести frontend active timeout и explicit Playwright/backend failure, затем синхронизировать docs.
+
+### Files expected to change
+- `internal/orchestrator/*`
+- `internal/runtime/qwencode/*`
+- `scripts/full-run-ai-advent.sh`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/e2e_batch_report.py`
+- `scripts/frontend-live-e2e.sh`
+- `scripts/frontend-status-reasons.sh`
+- `ui/e2e/live-flow.spec.ts`
+- `scripts/tests/*`
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/spec/PIPELINE_SPEC.md`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Unusable collect не запускает `step4.proposals`
+- [x] Malformed runtime draft/shard artifacts остаются `runtime_contract_failed`, даже если рядом есть capacity/429 markers
+- [x] Missing artifacts + explicit provider unavailable markers остаются `runner_unavailable`
+- [x] `run-results.tsv` считает только валидные строки с фиксированным числом полей
+- [x] Batch/reporting держат `runtime_contract_failed` выше `runner_unavailable`, если raw runtime уже дал contract failure
+- [x] Frontend live E2E пишет `active_run_timeout` для продуктивного long-running run вместо generic `playwright_failed`
+
+### Risks
+- Главный риск: переагрессивно поднять `runtime_contract_failed` и потерять реальные provider incidents. Снижение риска: provider-unavailable остаётся только для explicit markers + missing-artifact shapes, а malformed manifests/unknown fields сохраняются в contract lane.
+
+### Progress log
+- 2026-04-23: implementation started for proposals skip gating, qwen artifact classification split, structured ai-advent run accounting, batch/report precedence hardening, and frontend active timeout differentiation.
+- 2026-04-23: completed DoD (`make contracts`, `make test`, `make lint`, snapshot `make build`) and hardened shell/python classifiers to ignore `codex` plugin/Cloudflare/state-db noise as primary `runner_unavailable`; live `regres fast` reruns remain pending.
+
+### Plan ID
+EP-20260423-regres-fast-qwen-hardening
+
+### Context
+Последний live diagnostic выявил четыре blocker класса: semantic duplicates (`user-service` vs `userservice` + owner-gap finding clones), неверный frontend workspace handoff (`headless/arch-workspace` не подхватывался), недоклассификацию provider capacity/rate-limit как `runner_unavailable`, и слабый host preflight до matrix запуска.
+
+### Goals (must have)
+- [x] Усилить semantic dedupe для service token variants и finding signature merge
+- [x] Ввести единый workspace resolver (`headless/arch-workspace` -> `arch-workspace` -> `workspace`) в shell/python harness
+- [x] Добавить capacity/rate-limit сигнатуры в shell/python failure classifiers с сохранением приоритета `runtime_timeout > runner_unavailable > runtime_flow_failed > runtime_contract_failed`
+- [x] Не эскалировать `best_effort` partial в `runtime:execution-semantics`, если подтверждён provider unavailable signal
+- [x] Усилить host preflight и пометку operational blocker до live matrix run
+- [ ] Прогнать DoD (`make contracts`, `make test`, `make lint`, `make build`)
+- [ ] Выполнить canonical live `regres fast` на `qwen-code` (оба matrix slices) и выпустить execution report
+
+### Non-goals
+- [x] Не менять публичные schemas/contracts (`release_verdict_*`, `profile_matrix_*`, `run_matrix_*`, `quality_report_*`)
+- [x] Не менять canonical matrix/curated presets под текущую машину
+
+### Approach
+1) Исправить dedupe в orchestrator (`semanticEntityDedupKey`, findings-by-signature merge).
+2) Унифицировать workspace resolution в `full-run-batch-5x2.sh` и `e2e_batch_report.py`.
+3) Расширить runtime/provider classification на capacity/rate-limit сигналы в shell/python.
+4) Усилить matrix host preflight (`qwen` binary/version + writable roots + path SHA checks для pinned refs).
+5) Прогнать DoD, затем mandatory qwen `regres fast` и собрать evidence-based blocker report.
+
+### Files expected to change
+- `internal/orchestrator/docflow.go`
+- `internal/orchestrator/docflow_test.go`
+- `scripts/full-run-batch-5x2.sh`
+- `scripts/e2e_batch_report.py`
+- `scripts/resolve-repos-meta.py`
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/tests/batch_failure_classification_test.py`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [ ] `user-service/userservice` и дубли owner-gap findings схлопываются детерминированно
+- [ ] Frontend init/cancel не получает false `*_workspace_missing`, если workspace есть в `headless/arch-workspace`
+- [ ] Capacity/rate-limit инциденты классифицируются как `runner_unavailable` (при отсутствии explicit timeout)
+- [ ] `best_effort` partial не получает runtime semantics blocker только из-за отсутствующего `run_partial_failed`, если есть provider unavailable signal
+- [ ] Host preflight ловит невалидный qwen/writable roots/pinned path SHA mismatch как operational blocker до live run
+
+### Risks
+- Главный риск: переагрессивный finding dedupe может объединить разные инциденты. Снижение риска: signature ограничен `rule_id + normalized related_ids + normalized title` и merge остаётся deterministic.
+
+### Progress log
+- 2026-04-23: implementation started for semantic dedupe hardening, workspace resolver, classifier capacity signals, and host preflight enforcement.
+
+### Plan ID
 EP-20260422-headless-legacy-cleanup
 
 ### Context

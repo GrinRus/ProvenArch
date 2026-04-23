@@ -137,6 +137,7 @@
    - trusted batch/matrix harness не оставляет terminal-less child runs: если per-run `run-status.env` отсутствует или остаётся `running` после завершения child batch, outer reconciliation переводит его в terminal `failed` с `failure_reason=infra_incomplete_cycle`
    - child batch публикует `batch-owner.env` heartbeat в `BATCH_ROOT`; stale `profile-status/*.json = running` без живого owner pid или со stale owner heartbeat reconciles-ится в terminal `failed/infra_incomplete_cycle`
    - terminal `validator verdict is FAIL` классифицируется как `runtime_flow_failed`; `runtime_contract_failed` остаётся только для active runtime artifact/manifest/required-output failures
+   - generic `codex` plugin/Cloudflare/state-db warnings (`plugins/featured`, Cloudflare HTML, cache/state-db permission noise) считаются secondary telemetry и не должны сами поднимать `runner_unavailable`
    - Run logs retention policy (TTL + max runs) запускается при старте сервиса, перед run и после run
    - (опционально) делает git commit
 
@@ -163,7 +164,7 @@
    - collect contract требует полного `semantic` block в `shard-pack-manifest.json` (`coverage/questions/entities/edges/findings`) и repo-specific citation surface; generic-only `cite.runtime-summary` допустим только вне multi-document refresh evidence collapse
    - canonical collect vocabulary жёсткая: `coverage.observed`, `questions[*].text`, `edges[*].type`, object-shaped `provenance`, numeric `confidence`; legacy aliases (`covered_topics`, `question`, `relation`, array provenance, string confidence, `evidence_citation_ids`, top-level `step_contract`, `compatibility`) reject-ятся до strict parse
    - `step1.collect` не использует `reports/taskruns/**`, raw logs, старые manifests или archive docs как schema/reference surface; headless provider получает только selected repo roots, `write_root` и explicit `read_context_roots`, а collect cwd фиксируется на `write_root`
-   - если collect evidence стал `unusable`, live runtime для `init|refresh.step2.asis_docs` не вызывается: orchestrator детерминированно пересобирает incomplete staged docflow из persisted shard packs и помечает report context reason `asis_docs_skipped_due_to_unusable_collect`
+   - если collect evidence стал `unusable`, live runtime для `init|refresh.step2.asis_docs`, `init|refresh.step3.findings` и `init|refresh.step4.proposals` не вызывается: orchestrator детерминированно пересобирает incomplete staged docflow из persisted shard packs, помечает triage reasons (`asis_docs_skipped_due_to_unusable_collect`, `findings_skipped_due_to_unusable_collect`, `proposals_skipped_due_to_unusable_collect`) и не позволяет downstream draft errors перезаписать collect root cause
    - `init.step0.constitution`, `init|refresh.step2.asis_docs` и `init|refresh.step4.proposals` проходят provider-agnostic required-artifact gate: runtime принимает шаг только если draft manifest валиден и все referenced draft files существуют под `draft_final_root`
    - `init|refresh.step2.asis_docs` использует strict shared draft contract: `step_contract="as_is"`, required canonical outputs `reports/as-is/overview.md`, `reports/coverage/summary.md`, `reports/agent-outputs/architect/summary.md`, а extra outputs разрешены только под `reports/as-is/<domain>/overview.md`
    - runtime draft manifest contract для `step0/2/4` (`version=1`, `run_id`, `step_id`, `step_contract`, `agent_role`, `outputs[]`) вынесен в shared internal source of truth и используется и writer-ами, и validator-ами без дублирования структур
@@ -218,6 +219,7 @@
    - `PUT /api/runtime/execution`: partial update persisted execution profile, write-through в `workspace.yaml`
    - `GET /api/runtime/profile`: aggregate view `timeouts + execution + step_providers`
    - active run не прерывается при изменении timeout settings; новые значения применяются к следующим run
+   - frontend live E2E differentiates explicit Playwright/backend failure (`playwright_failed`) from productive timeout (`active_run_timeout`), чтобы живой long-running run не выглядел как тот же failure class, что и terminal backend crash
 
 ## Agent Topology Artifacts (MVP)
 - `charter/cards/domains/<domain-id>.md`

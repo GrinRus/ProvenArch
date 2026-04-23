@@ -1,10 +1,91 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const scenario = (process.env.UI_E2E_SCENARIO ?? "init-inspect").trim().toLowerCase();
 const initTimeoutSec = Number.parseInt(process.env.ACP_UI_INIT_POLL_TIMEOUT_SEC ?? "900", 10);
 const cancelTimeoutSec = Number.parseInt(process.env.ACP_UI_CANCEL_POLL_TIMEOUT_SEC ?? "420", 10);
 const initTimeoutMs = Number.isFinite(initTimeoutSec) && initTimeoutSec > 0 ? initTimeoutSec * 1000 : 900_000;
 const cancelTimeoutMs = Number.isFinite(cancelTimeoutSec) && cancelTimeoutSec > 0 ? cancelTimeoutSec * 1000 : 420_000;
+
+type RunStatusPollResponse = {
+  status?: string;
+  error_code?: string | null;
+  current_step?: string;
+  warnings?: string[] | null;
+};
+
+type RunArtifactsPollResponse = {
+  artifacts?: unknown[];
+};
+
+type RunObservation = {
+  status: string;
+  errorCode: string;
+  currentStep: string;
+  warningsCount: number;
+  artifactCount: number;
+};
+
+async function fetchRunObservation(page: Page, runID: string): Promise<RunObservation> {
+  const response = await page.request.get(`/api/pipeline/runs/${runID}`);
+  const payload = (await response.json()) as RunStatusPollResponse;
+  let artifactCount = 0;
+  const artifactsResponse = await page.request.get(`/api/pipeline/runs/${runID}/artifacts`);
+  if (artifactsResponse.ok()) {
+    const artifactsPayload = (await artifactsResponse.json()) as RunArtifactsPollResponse;
+    artifactCount = Array.isArray(artifactsPayload.artifacts) ? artifactsPayload.artifacts.length : 0;
+  }
+  return {
+    status: (payload.status ?? "").trim(),
+    errorCode: (payload.error_code ?? "").trim(),
+    currentStep: (payload.current_step ?? "").trim(),
+    warningsCount: Array.isArray(payload.warnings) ? payload.warnings.length : 0,
+    artifactCount
+  };
+}
+
+function observationShowsProductiveProgress(previous: RunObservation | null, current: RunObservation): boolean {
+  if (current.status === "running" && current.currentStep !== "") {
+    if (previous === null) {
+      return true;
+    }
+    if (current.currentStep !== previous.currentStep) {
+      return true;
+    }
+  }
+  if (previous === null) {
+    return current.artifactCount > 0;
+  }
+  return current.artifactCount > previous.artifactCount || current.warningsCount > previous.warningsCount;
+}
+
+async function waitForInitInspectRun(page: Page, runID: string): Promise<void> {
+  const initDeadline = Date.now() + initTimeoutMs;
+  let lastObservation: RunObservation | null = null;
+  let sawProductiveProgress = false;
+  while (Date.now() < initDeadline) {
+    const observation = await fetchRunObservation(page, runID);
+    if (observationShowsProductiveProgress(lastObservation, observation)) {
+      sawProductiveProgress = true;
+    }
+    if (observation.status === "succeeded") {
+      return;
+    }
+    if (observation.status === "failed") {
+      throw new Error(
+        `run ${runID} terminated before inspect stage: status=failed error_code=${observation.errorCode || "-"} current_step=${observation.currentStep || "-"}`
+      );
+    }
+    lastObservation = observation;
+    await page.waitForTimeout(500);
+  }
+
+  if (sawProductiveProgress) {
+    throw new Error(
+      `ACTIVE_RUN_TIMEOUT: run ${runID} stayed productive but did not reach succeeded within ${initTimeoutSec}s current_step=${lastObservation?.currentStep || "-"} artifact_count=${lastObservation?.artifactCount ?? 0}`
+    );
+  }
+  throw new Error(`run ${runID} did not reach succeeded within ${initTimeoutSec}s`);
+}
 
 test("live ui flow: validate -> run init -> inspect artifacts", async ({ page }) => {
   test.skip(scenario !== "init-inspect", `scenario ${scenario} skips init-inspect flow`);
@@ -32,25 +113,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page })
   await expect(page.getByTestId("run-status-panel")).toBeVisible();
   const runID = ((await page.getByTestId("run-status-run-id").textContent()) ?? "").trim();
   expect(runID).not.toBe("");
-  const initDeadline = Date.now() + initTimeoutMs;
-  let terminalStatus = "";
-  while (Date.now() < initDeadline) {
-    const response = await page.request.get(`/api/pipeline/runs/${runID}`);
-    const payload = (await response.json()) as { status?: string; error_code?: string | null };
-    const status = (payload.status ?? "").trim();
-    const errorCode = (payload.error_code ?? "").trim();
-    if (status === "succeeded") {
-      terminalStatus = status;
-      break;
-    }
-    if (status === "failed") {
-      throw new Error(`run ${runID} terminated before inspect stage: status=failed error_code=${errorCode || "-"}`);
-    }
-    await page.waitForTimeout(500);
-  }
-  if (terminalStatus !== "succeeded") {
-    throw new Error(`run ${runID} did not reach succeeded within ${initTimeoutSec}s`);
-  }
+  await waitForInitInspectRun(page, runID);
 
   const selectedRunButton = page.getByRole("button", { name: runID }).first();
   await expect(selectedRunButton).toBeVisible();

@@ -74,8 +74,8 @@ FRONTEND_CANCEL_RESULT_FILENAME = "frontend-cancel-result.json"
 FAILURE_CLASS_PRECEDENCE = {
     "summary_missing": 0,
     "runtime_timeout": 1,
-    "runner_unavailable": 2,
-    "runtime_contract_failed": 3,
+    "runtime_contract_failed": 2,
+    "runner_unavailable": 3,
     "infra_signal_terminated": 4,
     "quality_gates_failed": 5,
     "infra_incomplete_cycle": 6,
@@ -84,12 +84,23 @@ FAILURE_CLASS_PRECEDENCE = {
     "none": 99,
 }
 
-RUNNER_UNAVAILABLE_PATTERNS = (
+EXPLICIT_RUNNER_UNAVAILABLE_PATTERNS = (
     r"\brunner[_ -]?unavailable\b",
+)
+
+GENERIC_RUNNER_UNAVAILABLE_PATTERNS = (
     r"\bmodel(?:\s+is)?\s+at\s+capacity\b",
     r"\brate[ -]?limit(?:ed)?\b",
     r"\btoo many requests\b",
     r"\b429\b",
+)
+
+CODEX_RUNTIME_NOISE_PATTERNS = (
+    r"chatgpt\.com/backend-api/plugins/featured",
+    r"\bcloudflare\b",
+    r"failed to renew cache ttl",
+    r"\bstate db\b",
+    r"operation not permitted",
 )
 
 
@@ -100,9 +111,15 @@ def normalize_text(value: str) -> str:
 
 def text_has_runner_unavailable_signal(text: str) -> bool:
     haystack = str(text or "")
-    for pattern in RUNNER_UNAVAILABLE_PATTERNS:
+    for pattern in EXPLICIT_RUNNER_UNAVAILABLE_PATTERNS:
         if re.search(pattern, haystack, flags=re.IGNORECASE):
             return True
+    for line in haystack.splitlines():
+        for pattern in GENERIC_RUNNER_UNAVAILABLE_PATTERNS:
+            if re.search(pattern, line, flags=re.IGNORECASE):
+                if any(re.search(noise_pattern, line, flags=re.IGNORECASE) for noise_pattern in CODEX_RUNTIME_NOISE_PATTERNS):
+                    break
+                return True
     return False
 
 
@@ -1231,6 +1248,14 @@ def evaluate_run(
         reliability = max(0, reliability - 10)
 
     runtime_timeout = failure_reason == "runtime_timeout" or termination_signal == "timeout"
+    if failure_reason == "runtime_contract_failed":
+        runtime_contract_failed_hit = True
+        runner_error_hit = True
+        error_codes.append("runtime_contract_failed")
+    if failure_reason == "runner_unavailable":
+        runner_unavailable_hit = True
+        runner_error_hit = True
+        error_codes.append("runner_unavailable")
     infra_signal_terminated = (
         failure_reason == "infra_signal_terminated"
         or (termination_signal not in {"", "none"} and termination_signal != "-")
@@ -1643,12 +1668,14 @@ def evaluate_run(
         failure_class = "runtime_timeout"
     elif runtime_contract_parse_failed_hit:
         failure_class = "runtime_contract_failed"
-    elif runner_unavailable_hit:
-        failure_class = "runner_unavailable"
+    elif failure_reason == "runtime_contract_failed":
+        failure_class = "runtime_contract_failed"
     elif validator_verdict_failed_hit or runtime_flow_failed:
         failure_class = "runtime_flow_failed"
     elif runtime_contract_failed_hit:
         failure_class = "runtime_contract_failed"
+    elif runner_unavailable_hit:
+        failure_class = "runner_unavailable"
     elif infra_signal_terminated:
         failure_class = "infra_signal_terminated"
     elif quality_gates_failed:
@@ -1666,7 +1693,7 @@ def evaluate_run(
             and classified_failure == "infra_incomplete_cycle"
             and failure_reason != "infra_incomplete_cycle"
         )
-        ignore_classified_parse_override = runtime_contract_parse_failed_hit and classified_failure in {
+        ignore_classified_contract_override = runtime_contract_failed_hit and classified_failure in {
             "runner_unavailable",
             "runtime_flow_failed",
         }
@@ -1674,9 +1701,9 @@ def evaluate_run(
             details.append(
                 "reliability/classifier-override -> ignored infra_incomplete_cycle because run-status.env marks terminal process_failed summary"
             )
-        elif ignore_classified_parse_override:
+        elif ignore_classified_contract_override:
             details.append(
-                "reliability/classifier-override -> ignored runner/runtime-flow override because parse runtime draft manifest unknown field is classified as runtime_contract_failed"
+                "reliability/classifier-override -> ignored runner/runtime-flow override because raw runtime/session-summary classified the run as runtime_contract_failed"
             )
         elif failure_class == "summary_missing" and classified_failure in {
             "runtime_timeout",
@@ -1691,7 +1718,7 @@ def evaluate_run(
         elif failure_class == "none" or failure_class_rank(classified_failure) < failure_class_rank(failure_class):
             failure_class = classified_failure
         runtime_contract_failed_hit = runtime_contract_failed_hit or classified_failure == "runtime_contract_failed"
-        if not ignore_classified_parse_override:
+        if not ignore_classified_contract_override:
             runner_unavailable_hit = runner_unavailable_hit or classified_failure == "runner_unavailable"
         runtime_timeout = runtime_timeout or classified_failure == "runtime_timeout"
         infra_signal_terminated = infra_signal_terminated or classified_failure == "infra_signal_terminated"
