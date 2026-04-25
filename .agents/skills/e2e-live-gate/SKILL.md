@@ -12,9 +12,11 @@ description: Используй для trusted-machine pre-release live E2E gate
 1) `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
 2) `examples/e2e-profile-catalog.yaml`
 3) canonical runnable slices:
+   - `examples/e2e-matrix.smoke-tiny.bank.yaml` (diagnostic selector only)
    - `examples/e2e-matrix.regres-fast.bank-openedx.yaml`
    - `examples/e2e-matrix.regres-fast.openstack.yaml`
    - `examples/e2e-matrix.regres-long.yaml`
+   - `examples/e2e-matrix.diagnostic.sentry.yaml` (diagnostic selector only)
    - `examples/e2e-matrix.release-fast.yaml`
    - `examples/e2e-matrix.release-long.yaml`
    - `examples/e2e-matrix.release-full.ftgo-sentry.yaml`
@@ -35,13 +37,15 @@ Legacy compatibility only:
 6) Не добавлять wrapper-скрипт поверх `scripts/full-run-batch-matrix.sh`.
 7) В release-mode matrix обязан иметь explicit `sweeps[]` с ровно `baseline` + `parallel-default`, ровно один `single-*` и один `multi-*` профиль, и `RUN_COUNT=1`; implicit baseline допустим только для non-release/diagnostic.
 8) Не редактировать canonical release slices или curated `repos_file`, чтобы адаптировать release gate под неподходящий хост; если текущая машина не удовлетворяет prerequisites, остановить прогон и зафиксировать operational blocker.
-9) Дополнительная отладка на `claude` остаётся ручной фазой и не входит в expected backend totals для `regres*` профилей.
+9) Дополнительная отладка на `claude`/`codex` остаётся ручной фазой и не входит в canonical expected backend totals для `regres*` профилей; generated diagnostic selectors считают totals по фактически выбранным providers/run indexes.
 10) Canonical acceptance запускать только из clean committed tree или отдельного clean worktree без unrelated локальных правок; `BATCH_SKIP_PRECHECK=1` допустим только для diagnostic/triage run.
 11) Если canonical run идёт из отдельного clean worktree, сначала установить локальные UI deps в этом worktree (`npm ci --prefix ui`), иначе precheck на `make test` сломается ещё до live batch execution.
 12) Canonical matrix slices уже несут native `timeout_profile`; не задавай `ACP_*TIMEOUT*` вручную для штатного запуска. В non-release manual diagnostic внешние timeout env допустимы, в release-mode они остаются blocked-by-default.
 13) Batch/profile reports нужно читать только в рамках реально выбранной поверхности (`selected_providers`, `selected_run_indexes`); qwen-only `run1` regression run не должен интерпретироваться как synthetic `2x5` matrix.
 14) Для collect steps canonical runtime теперь делает одну artifact-repair попытку для skeletal/generic-only manifests; если repair не улучшил artifact fidelity, исходный `write_root` откатывается, а step классифицируется как `runner_parse_failed` / `runtime_parse`, а не как nominal success.
 15) Frontend cancel smoke должен идти из свежей копии backend `arch-workspace`, а terminal cancel verdict обязан сохранять `error_code=run_canceled`, даже если рядом всплыл validation/layout failure.
+16) Для flexible combinations можно использовать `python3 scripts/live-e2e-plan.py ... --format shell`; этот tool только печатает прямые `full-run-batch-matrix.sh` команды и не заменяет release harness.
+17) Regress/release acceptance всегда включает artifact quality: `reports/taskruns/<run_id>-quality.json`, `quality_report_<batch-id>.md`, `quality_gates_failed=0`, отсутствие `artifact_quality:*`.
 
 ## Fail-Fast Host Check
 Перед DoD и matrix run сначала проверить, подходит ли хост для canonical release slices:
@@ -69,8 +73,10 @@ PY
 - выставить каждый checkout на pinned SHA из curated/github presets до запуска canonical release slices.
 
 ## Canonical profile taxonomy
-- `regres fast`: qwen-only, implicit baseline, composite из `bank-of-anthos + openedx` и отдельного `openstack` slice, `3` backend runs total.
-- `regres long`: qwen-only, implicit baseline, `posthog + ftgo`, `2` backend runs total.
+- `smoke tiny`: diagnostic-only, exactly one provider, one `bank-of-anthos` repo set, `RUN_COUNT=1`, frontend off by default, `1` backend run total.
+- `regres fast`: qwen-only default, provider-selectable for generated diagnostic runs, implicit baseline, composite из `bank-of-anthos + openedx` и отдельного `openstack` slice, `3 × providers × RUN_COUNT` backend runs total.
+- `regres long`: qwen-only default, provider-selectable for generated diagnostic runs, implicit baseline, `posthog + ftgo`, `2 × providers × RUN_COUNT` backend runs total.
+- `regres full`: diagnostic-only provider-selectable baseline over all 6 canonical repo sets, including Sentry, `6 × providers × RUN_COUNT` backend runs total.
 - `release fast`: three-provider, explicit `baseline + parallel-default`, `bank-of-anthos + openedx`, `12` backend runs total.
 - `release long`: three-provider, explicit `baseline + parallel-default`, `posthog + openstack`, `12` backend runs total.
 - `release full`: composite из `release fast` + `release long` + `ftgo + sentry-ecosystem`, `36` backend runs total.
@@ -80,20 +86,21 @@ PY
   - `extended-window`: step `10800s`, pipeline `21600s`, ui-init `1800s`
 
 ## Required flow
-1) Для базовой отладки/regression по умолчанию выполнить `regres fast` или `regres long` через catalog-approved slices с `BATCH_PROVIDER_FILTER=qwen-code`.
-2) Если нужен full pre-release verdict, выполнить preflight:
+1) Для самого быстрого trusted-machine signal выполнить generated `smoke tiny`, например `python3 scripts/live-e2e-plan.py --mode smoke --size tiny --providers qwen --format shell`, затем запустить напечатанную direct command.
+2) Для базовой отладки/regression по умолчанию выполнить `regres fast` или `regres long` через catalog-approved slices с `BATCH_PROVIDER_FILTER=qwen-code` или сгенерировать direct commands через `scripts/live-e2e-plan.py`.
+3) Если нужен full pre-release verdict, выполнить preflight:
    `make contracts test lint build`
    `npm ci --prefix ui`
    `npm exec --prefix ui playwright install chromium`
-3) Выполнить нужный canonical release slice:
+4) Выполнить нужный canonical release slice:
    - `release fast`
    - `release long`
    - или весь `release full` как три последовательных matrix invocation
-4) При дополнительной отладке повторить нужный regression/release slice с `BATCH_PROVIDER_FILTER=claude-code` или `BATCH_PROVIDER_FILTER=codex-code`, если нужен isolated provider diagnostic вне canonical regression totals.
-5) Выполнить additional non-release checks:
+5) При дополнительной отладке повторить нужный regression/non-release diagnostic slice с `BATCH_PROVIDER_FILTER=claude-code` или `BATCH_PROVIDER_FILTER=codex-code`, если нужен isolated provider diagnostic вне canonical regression totals; release-mode provider subsets не использовать.
+6) Выполнить additional non-release checks:
    - parallel smoke: два параллельных `full-run-batch-5x2.sh` с разными `BATCH_ID` и разными single-provider `BATCH_PROVIDER_FILTER` (например, `qwen-code` и `claude-code`; при необходимости заменить один из них на `codex-code`)
    - forced-incomplete diagnostic run с `ACP_EXECUTION_STRATEGY=parallel`, `ACP_MAX_PARALLEL_TASKS=4`, `ACP_FAILURE_POLICY=best_effort`, `ACP_SHARD_DISCOVERY_MODE=heuristics`
-6) Проверить matrix invariant: для одного `profile_id` sweeps `baseline` и `parallel-default` дают одинаковый shard-plan.
+7) Проверить matrix invariant: для одного `profile_id` sweeps `baseline` и `parallel-default` дают одинаковый shard-plan.
 
 ## Acceptance focus
 - Во всех release slice verdicts: `strict_status=passed`

@@ -6,6 +6,7 @@
 Canonical source of truth для live profile taxonomy:
 - `examples/e2e-profile-catalog.yaml`
 - runnable slice-файлы `examples/e2e-matrix.regres-*.yaml` и `examples/e2e-matrix.release-*.yaml`
+- diagnostic selector slice-файлы `examples/e2e-matrix.smoke-tiny.bank.yaml` и `examples/e2e-matrix.diagnostic.sentry.yaml`
 
 ## 0) Canonical profile catalog
 
@@ -32,11 +33,42 @@ Current shard classification:
 Release verdict для readiness берётся только из `reports/release_verdict_<matrix-id>.json`.
 Для `release full` composite readiness означает, что все constituent `release_verdict_<matrix-id>.json` имеют `PASS`.
 
+### 0.1) Flexible command generator (no wrapper)
+
+Для быстрых diagnostic/non-release комбинаций можно сгенерировать прямые команды harness:
+
+```bash
+python3 scripts/live-e2e-plan.py --mode smoke --size tiny --providers codex --format shell
+python3 scripts/live-e2e-plan.py --mode regres --size fast --providers codex --format shell
+python3 scripts/live-e2e-plan.py --mode regres --size full --providers claude --frontend-mode never --format shell
+python3 scripts/live-e2e-plan.py --mode release --size full --format shell
+```
+
+`scripts/live-e2e-plan.py` только печатает команды `scripts/full-run-batch-matrix.sh`; он не запускает batch и не является release wrapper.
+Оператор копирует/запускает напечатанные прямые команды, поэтому official release verdict contract не меняется.
+Если selector задаёт `--frontend-mode never`, generator выставляет и `BATCH_FRONTEND_MODE=never`, и `BATCH_FRONTEND_CANCEL_MODE=never`, чтобы не запускать ни init, ни cancel frontend smoke.
+
+Flexible selectors:
+
+| Selector | Mode | Coverage | Providers | Sweeps | Backend runs |
+|---|---|---|---|---|---:|
+| `smoke tiny` | diagnostic | `bank-of-anthos` | exactly 1 selected provider | implicit baseline | 1 |
+| `regres fast` | diagnostic/regression | `bank-of-anthos`, `openedx`, `openstack` | selected provider(s) | implicit baseline | `3 × providers × RUN_COUNT` |
+| `regres long` | diagnostic/regression | `posthog`, `ftgo` | selected provider(s) | implicit baseline | `2 × providers × RUN_COUNT` |
+| `regres full` | diagnostic/regression | all 6 canonical repo sets, including Sentry | selected provider(s) | implicit baseline | `6 × providers × RUN_COUNT` |
+| `release fast|long|full` | release | canonical release slices | all three providers only | `baseline + parallel-default` | unchanged |
+
+Artifact-quality policy для generated regress/release команд остаётся штатной:
+- каждый backend run должен иметь `reports/taskruns/<run_id>-quality.json`;
+- `quality_report_<batch-id>.md` должен агрегировать только реально выбранные providers/run indexes;
+- `artifact_quality:*` warning поднимается в `quality_gates_failed` и блокирует strict verdict.
+
 ## 1) Scope и ограничения
 
-- `regres*` профили идут как `qwen-only` non-release baseline с implicit `baseline`.
+- Canonical `regres*` профили по умолчанию идут как `qwen-only` non-release baseline с implicit `baseline`; flexible diagnostic selectors могут явно выбрать provider set через generator/`BATCH_PROVIDER_FILTER`.
 - `release*` профили идут как three-provider run (`qwen + claude + codex`) с explicit `baseline + parallel-default`.
 - Дополнительная ручная debug-фаза на `claude` или `codex` остаётся вне regression profile definition и запускается через `BATCH_PROVIDER_FILTER=<provider>`.
+- `smoke tiny` и `regres full` являются generated diagnostic selectors, а не новыми release verdict профилями.
 - Gate покрывает backend `3 providers × RUN_COUNT=1` на каждый `profile+sweep` + frontend `init-inspect` + frontend `cancel-refresh` для release slices.
 - Product API/schema contracts не меняются.
 - Gate режим: manual pre-release, не required CI merge gate.
@@ -210,9 +242,11 @@ git -C /real/local/path/posthog checkout --detach 14d29a548d63665d60b506cf13bd5c
 Готовый шаблон:
 - `examples/e2e-matrix.example.yaml`
 - `examples/e2e-profile-catalog.yaml`
+- `examples/e2e-matrix.smoke-tiny.bank.yaml`
 - `examples/e2e-matrix.regres-fast.bank-openedx.yaml`
 - `examples/e2e-matrix.regres-fast.openstack.yaml`
 - `examples/e2e-matrix.regres-long.yaml`
+- `examples/e2e-matrix.diagnostic.sentry.yaml`
 - `examples/e2e-matrix.release-fast.yaml`
 - `examples/e2e-matrix.release-long.yaml`
 - `examples/e2e-matrix.release-full.ftgo-sentry.yaml`
@@ -262,6 +296,14 @@ profiles:
 - catalog `examples/e2e-profile-catalog.yaml` фиксирует shard bucket, expected backend runs и runnable matrix files для каждого named profile.
 
 ## 4) Порядок запуска
+
+0. Super-fast smoke через generated direct command (`1 repo × 1 run × 1 provider`):
+
+```bash
+python3 scripts/live-e2e-plan.py --mode smoke --size tiny --providers qwen --format shell
+```
+
+Проверить напечатанную команду и запустить её напрямую. Этот smoke не является release readiness signal.
 
 1. `regres fast` (qwen-first small repos, 3 backend runs total):
 
@@ -314,6 +356,15 @@ BATCH_SKIP_PRECHECK=1 \
 BATCH_PROVIDER_FILTER=claude-code \
 BATCH_SKIP_PRECHECK=1
 ```
+
+Альтернативно для provider/size combinations использовать generator:
+
+```bash
+python3 scripts/live-e2e-plan.py --mode regres --size fast --providers codex --format shell
+python3 scripts/live-e2e-plan.py --mode regres --size full --providers claude --frontend-mode never --format shell
+```
+
+`regres full` добавляет diagnostic Sentry baseline slice и покрывает все 6 canonical repo sets, но остаётся non-release.
 
 3. Preflight ACP quality для release slices:
 
@@ -601,7 +652,7 @@ Zero tolerance:
 ### 6.8 Additional Non-Release Checks
 
 После official release matrices выполнить отдельно:
-- parallel shard smoke: два параллельных `full-run-batch-5x2.sh` с разными `BATCH_ID`, разными single-provider `BATCH_PROVIDER_FILTER` (например, `qwen-code` и `claude-code`; при необходимости можно заменить один из них на `codex-code`), `BATCH_RUN_SELECTION=1`, `BATCH_FRONTEND_MODE=never`;
+- parallel shard smoke: два параллельных `full-run-batch-5x2.sh` с разными `BATCH_ID`, разными single-provider `BATCH_PROVIDER_FILTER` (например, `qwen-code` и `claude-code`; при необходимости можно заменить один из них на `codex-code`), `BATCH_RUN_SELECTION=1`, `BATCH_FRONTEND_MODE=never`, `BATCH_FRONTEND_CANCEL_MODE=never`;
 - forced-incomplete diagnostic run: large multi-repo batch с diagnostic timeout override, чтобы проверить `report_mode=incomplete`, triage-only wording и failure-class precedence.
 
 Эти прогоны не использовать для release verdict; они нужны только как additional evidence по новому функционалу.
@@ -617,6 +668,7 @@ TS="$(date -u +%Y%m%dT%H%M%SZ)"
   BATCH_PROVIDER_FILTER=qwen-code \
   BATCH_RUN_SELECTION=1 \
   BATCH_FRONTEND_MODE=never \
+  BATCH_FRONTEND_CANCEL_MODE=never \
   ./scripts/full-run-batch-5x2.sh
 ) &
 (
@@ -625,6 +677,7 @@ TS="$(date -u +%Y%m%dT%H%M%SZ)"
   BATCH_PROVIDER_FILTER=claude-code \
   BATCH_RUN_SELECTION=1 \
   BATCH_FRONTEND_MODE=never \
+  BATCH_FRONTEND_CANCEL_MODE=never \
   BATCH_SKIP_PRECHECK=1 \
   ./scripts/full-run-batch-5x2.sh
 ) &
@@ -637,6 +690,7 @@ TARGET_REPOS_FILE=examples/repos/curated/multi-path.openstack.repos.yaml \
 BATCH_PROVIDER_FILTER=qwen-code \
 BATCH_RUN_SELECTION=1 \
 BATCH_FRONTEND_MODE=never \
+BATCH_FRONTEND_CANCEL_MODE=never \
 BATCH_SKIP_PRECHECK=1 \
 ACP_EXECUTION_STRATEGY=parallel \
 ACP_MAX_PARALLEL_TASKS=4 \

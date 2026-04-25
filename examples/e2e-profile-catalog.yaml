@@ -94,6 +94,168 @@ execution_policies:
       - Release slices keep the existing matrix contract unchanged.
       - Each runnable matrix file must contain exactly one single-* and one multi-* profile.
 
+quality_policy:
+  artifact_quality_warnings_block: true
+  source:
+    - reports/taskruns/<run_id>-quality.json
+    - quality_report_<batch-id>.md
+  blocking_failure_class: quality_gates_failed
+
+selectors:
+  - slug: smoke-tiny
+    mode: smoke
+    size: tiny
+    description: One repo, one run, one provider for fastest live signal.
+    release_mode: false
+    diagnostic: true
+    provider_policy: exactly-one
+    default_providers:
+      - qwen-code
+    default_run_count: 1
+    default_run_selection: "1"
+    default_frontend_mode: never
+    quality_required: true
+    target_repo_sets:
+      - bank-of-anthos
+    matrix_invocations:
+      - matrix_file: ./e2e-matrix.smoke-tiny.bank.yaml
+        matrix_id_prefix: smoke-tiny-bank
+  - slug: regres-fast
+    mode: regres
+    size: fast
+    description: Existing small qwen-first regression coverage, provider-selectable for diagnostics.
+    release_mode: false
+    diagnostic: true
+    provider_policy: one-or-more
+    default_providers:
+      - qwen-code
+    default_run_count: 1
+    default_run_selection: all
+    quality_required: true
+    target_repo_sets:
+      - bank-of-anthos
+      - openedx-ecosystem
+      - openstack-ecosystem
+    matrix_invocations:
+      - matrix_file: ./e2e-matrix.regres-fast.bank-openedx.yaml
+        matrix_id_prefix: regres-fast-bank-openedx
+      - matrix_file: ./e2e-matrix.regres-fast.openstack.yaml
+        matrix_id_prefix: regres-fast-openstack
+  - slug: regres-long
+    mode: regres
+    size: long
+    description: Existing medium regression coverage, provider-selectable for diagnostics.
+    release_mode: false
+    diagnostic: true
+    provider_policy: one-or-more
+    default_providers:
+      - qwen-code
+    default_run_count: 1
+    default_run_selection: all
+    quality_required: true
+    target_repo_sets:
+      - posthog
+      - ftgo-application
+    matrix_invocations:
+      - matrix_file: ./e2e-matrix.regres-long.yaml
+        matrix_id_prefix: regres-long-posthog-ftgo
+  - slug: regres-full
+    mode: regres
+    size: full
+    description: Diagnostic baseline sweep over all six canonical repo sets, including Sentry.
+    release_mode: false
+    diagnostic: true
+    provider_policy: one-or-more
+    default_providers:
+      - qwen-code
+    default_run_count: 1
+    default_run_selection: all
+    quality_required: true
+    target_repo_sets:
+      - bank-of-anthos
+      - openedx-ecosystem
+      - openstack-ecosystem
+      - posthog
+      - ftgo-application
+      - sentry-ecosystem
+    matrix_invocations:
+      - matrix_file: ./e2e-matrix.regres-fast.bank-openedx.yaml
+        matrix_id_prefix: regres-full-bank-openedx
+      - matrix_file: ./e2e-matrix.regres-fast.openstack.yaml
+        matrix_id_prefix: regres-full-openstack
+      - matrix_file: ./e2e-matrix.regres-long.yaml
+        matrix_id_prefix: regres-full-posthog-ftgo
+      - matrix_file: ./e2e-matrix.diagnostic.sentry.yaml
+        matrix_id_prefix: regres-full-sentry
+  - slug: release-fast
+    mode: release
+    size: fast
+    description: Canonical release fast selector; command generator only preserves direct harness invocation.
+    release_mode: true
+    diagnostic: false
+    provider_policy: all
+    default_providers:
+      - qwen-code
+      - claude-code
+      - codex-code
+    default_run_count: 1
+    default_run_selection: all
+    quality_required: true
+    target_repo_sets:
+      - bank-of-anthos
+      - openedx-ecosystem
+    matrix_invocations:
+      - matrix_file: ./e2e-matrix.release-fast.yaml
+        matrix_id_prefix: release-fast
+  - slug: release-long
+    mode: release
+    size: long
+    description: Canonical release long selector; command generator only preserves direct harness invocation.
+    release_mode: true
+    diagnostic: false
+    provider_policy: all
+    default_providers:
+      - qwen-code
+      - claude-code
+      - codex-code
+    default_run_count: 1
+    default_run_selection: all
+    quality_required: true
+    target_repo_sets:
+      - posthog
+      - openstack-ecosystem
+    matrix_invocations:
+      - matrix_file: ./e2e-matrix.release-long.yaml
+        matrix_id_prefix: release-long
+  - slug: release-full
+    mode: release
+    size: full
+    description: Canonical release full composite selector; all constituent verdicts must pass.
+    release_mode: true
+    diagnostic: false
+    provider_policy: all
+    default_providers:
+      - qwen-code
+      - claude-code
+      - codex-code
+    default_run_count: 1
+    default_run_selection: all
+    quality_required: true
+    target_repo_sets:
+      - bank-of-anthos
+      - openedx-ecosystem
+      - posthog
+      - openstack-ecosystem
+      - ftgo-application
+      - sentry-ecosystem
+    matrix_invocations:
+      - matrix_file: ./e2e-matrix.release-fast.yaml
+        matrix_id_prefix: release-full-fast
+      - matrix_file: ./e2e-matrix.release-long.yaml
+        matrix_id_prefix: release-full-long
+      - matrix_file: ./e2e-matrix.release-full.ftgo-sentry.yaml
+        matrix_id_prefix: release-full-ftgo-sentry
+
 profiles:
   - slug: regres-fast
     mode: regres

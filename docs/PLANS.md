@@ -55,6 +55,61 @@ EP-YYYYMMDD-<slug>
 
 ## Active Plans
 ### Plan ID
+EP-20260425-flexible-live-e2e-selector
+
+### Context
+Live E2E surface сейчас имеет canonical release taxonomy и low-level env selectors (`BATCH_PROVIDER_FILTER`, `BATCH_RUN_SELECTION`), но нет удобного catalog-driven способа получить прямые команды для комбинаций вроде `regres + codex + fast`, `regres + claude + full` или супербыстрого `1 repo × 1 run × 1 provider` smoke. Нужно добавить этот слой без превращения его в wrapper поверх release harness и без изменения official release verdict contract.
+
+### Goals (must have)
+- [x] Добавить command generator, который только печатает direct `scripts/full-run-batch-matrix.sh` commands
+- [x] Добавить `smoke tiny` selector (`bank-of-anthos`, one provider, one run, frontend off)
+- [x] Добавить diagnostic `regres full` selector на все 6 canonical repo sets, включая Sentry
+- [x] Сохранить canonical release taxonomy и release verdict source unchanged
+- [x] Явно зафиксировать artifact quality как обязательный gate для regress/release
+- [x] Синхронизировать runbook/testing strategy/live-e2e skill
+- [x] Прогнать targeted tests и DoD (`make contracts`, `make test`, `make lint`, `make build`)
+
+### Non-goals
+- [x] Не добавлять executable wrapper, который сам запускает release matrix
+- [x] Не менять public schemas/product APIs
+- [x] Не делать standalone artifact-eval command в этом slice
+
+### Approach
+1) Расширить `examples/e2e-profile-catalog.yaml` отдельным `selectors[]` слоем, не меняя canonical `profiles[]`.
+2) Добавить diagnostic matrix files для `smoke tiny` и Sentry baseline.
+3) Реализовать `scripts/live-e2e-plan.py` с выводом `shell|json|markdown`.
+4) Покрыть selector normalization, provider shorthand, release subset rejection, run counts и direct command output unit tests.
+5) Обновить docs/skill и выполнить DoD.
+
+### Files expected to change
+- `scripts/live-e2e-plan.py`
+- `scripts/tests/live_e2e_plan_test.py`
+- `examples/e2e-profile-catalog.yaml`
+- `examples/e2e-matrix.smoke-tiny.bank.yaml`
+- `examples/e2e-matrix.diagnostic.sentry.yaml`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/TESTING_STRATEGY.md`
+- `.agents/skills/e2e-live-gate/SKILL.md`
+
+### Acceptance criteria
+- [x] `smoke tiny` generates exactly one backend run for exactly one provider
+- [x] `regres full` is non-release and includes all six canonical repo sets
+- [x] `release fast|long|full` generated commands keep all three release providers
+- [x] Provider subset is rejected for release selectors
+- [x] Full release provider set is accepted in any CLI order and normalized to canonical order
+- [x] `frontend-mode=never` disables both init and cancel frontend smoke in generated commands
+- [x] Generated regress/release metadata declares existing artifact-quality gate path
+
+### Risks
+- Главный риск: оператор может принять generated diagnostic selector за official release verdict. Mitigation: docs/skill/script metadata помечают `smoke`/`regres full` как diagnostic/non-release, а release readiness остаётся только `release_verdict_<matrix-id>.json`.
+
+### Progress log
+- 2026-04-25: Started implementation of catalog-driven live E2E command generator, smoke tiny, diagnostic regres full, docs/skill sync, and unit tests.
+- 2026-04-25: Added generator/catalog/matrix/docs/skill changes and passed targeted tests, full `scripts/tests` discovery, and DoD (`make contracts`, `make test`, `make lint`, `make build`).
+- 2026-04-25: Audit fixed release provider ordering bug (`codex,qwen,claude` now accepted as the full release provider set) and added regression coverage.
+- 2026-04-25: Follow-up audit fixed `frontend-mode=never` command generation to set `BATCH_FRONTEND_CANCEL_MODE=never` as well, and tightened release provider diagnostic guidance.
+
+### Plan ID
 EP-20260425-runtime-providers-stabilization
 
 ### Context
