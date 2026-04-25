@@ -177,6 +177,72 @@ Semantic role:
 - canonical workspace остаётся publish-only surface orchestrator/compiler/promoter;
 - обязательный human gate на promotion отсутствует: publish происходит автоматически после schema/semantic/validator gates.
 
+Shared required fields:
+- `version` — integer `1`
+- `run_id`
+- `step_id`
+- `step_contract`
+- `agent_role`
+- `outputs[]`
+
+Allowed common optional fields:
+- `summary`
+- `outputs[].kind`
+- `outputs[].title`
+
+Output mapping rules:
+- `outputs[].path` must stay relative to `draft_final_root`
+- `outputs[].canonical_path` must stay workspace-relative
+- `outputs[].canonical_path` values must be unique when a step-specific publish surface is constrained
+
+`asis-draft-manifest.json` specifics:
+- `step_contract="as_is"`
+- required canonical mappings:
+  - `overview.md` -> `reports/as-is/overview.md`
+  - `summary.md` -> `reports/coverage/summary.md`
+  - `architect-summary.md` -> `reports/agent-outputs/architect/summary.md`
+- additional outputs allowed only under `reports/as-is/<domain>/overview.md`
+
+`proposals-draft-manifest.json` specifics:
+- `step_contract="proposals"`
+- allowed canonical publish surface only:
+  - `proposals/*`
+  - `reports/changelog/*`
+- forbidden legacy top-level fields:
+  - `pipeline`
+  - `step`
+  - `generated_at`
+  - `domain_id`
+  - `proposals`
+  - `info_findings_noted`
+  - `orphan_coverage_gaps`
+- canonical example:
+
+```json
+{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "summary": "Drafted remediation proposals from validated findings.",
+  "outputs": [
+    {
+      "path": "proposal.md",
+      "canonical_path": "proposals/proposal-baseline/proposal.md",
+      "kind": "proposal",
+      "title": "Baseline Remediation Proposal"
+    },
+    {
+      "path": "changelog.md",
+      "canonical_path": "reports/changelog/run-1.md",
+      "kind": "changelog",
+      "title": "Proposal Changelog"
+    }
+  ]
+}
+```
+
 ## 8) Model conventions
 
 - **Source of truth:** `docs/spec/MODEL_SPEC.md`

@@ -227,6 +227,8 @@ func validateStepSpecificOutputs(manifest Manifest, stepID string) error {
 	switch strings.TrimSpace(stepID) {
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
 		return validateAsIsDraftOutputs(manifest.Outputs)
+	case "init.step4.proposals", "refresh.step4.proposals":
+		return validateProposalsDraftOutputs(manifest.Outputs)
 	default:
 		return nil
 	}
@@ -288,4 +290,35 @@ func isAllowedAdditionalAsIsCanonicalPath(canonicalPath string) bool {
 		parts[1] == "as-is" &&
 		strings.TrimSpace(parts[2]) != "" &&
 		parts[3] == "overview.md"
+}
+
+func validateProposalsDraftOutputs(outputs []Output) error {
+	seen := make(map[string]struct{}, len(outputs))
+	problems := []string{}
+
+	for idx, output := range outputs {
+		canonicalPath := filepath.ToSlash(path.Clean(strings.TrimSpace(output.CanonicalPath)))
+		if canonicalPath == "" || canonicalPath == "." {
+			continue
+		}
+		if _, exists := seen[canonicalPath]; exists {
+			problems = append(problems, fmt.Sprintf("outputs[%d].canonical_path %q must be unique", idx, canonicalPath))
+			continue
+		}
+		seen[canonicalPath] = struct{}{}
+		if !isAllowedProposalsCanonicalPath(canonicalPath) {
+			problems = append(problems, fmt.Sprintf("output %q is outside the allowed proposals publish surface", canonicalPath))
+		}
+	}
+
+	if len(problems) == 0 {
+		return nil
+	}
+	sort.Strings(problems)
+	return fmt.Errorf("runtime draft manifest outputs are invalid: %s", strings.Join(problems, "; "))
+}
+
+func isAllowedProposalsCanonicalPath(canonicalPath string) bool {
+	clean := filepath.ToSlash(path.Clean(strings.TrimSpace(canonicalPath)))
+	return strings.HasPrefix(clean, "proposals/") || strings.HasPrefix(clean, "reports/changelog/")
 }

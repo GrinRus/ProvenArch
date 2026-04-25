@@ -138,3 +138,92 @@ func TestWriteFailureArtifactsMetadataIncludesTaskScopes(t *testing.T) {
 		t.Fatalf("unexpected path_scopes payload %#v", taskMeta["path_scopes"])
 	}
 }
+
+func TestWriteFailureArtifactsWithMetadataPersistsDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	task := acpruntime.Task{
+		TaskID:       "task-diag",
+		RunID:        "run-diag",
+		StepID:       "refresh.step1.collect",
+		Workspace:    workspace,
+		RepoScopes:   []string{"repo-a"},
+		StartedAtUTC: time.Date(2026, 4, 11, 10, 15, 0, 0, time.UTC),
+	}
+
+	artifacts, err := WriteFailureArtifactsWithMetadata(task, acpruntime.ProviderQwenCode, "stdout text", "stderr text", map[string]any{
+		"stall_phase":         "post_write",
+		"authored_file_count": 3,
+	})
+	if err != nil {
+		t.Fatalf("write failure artifacts: %v", err)
+	}
+
+	rawMeta, err := os.ReadFile(artifacts.MetadataPath)
+	if err != nil {
+		t.Fatalf("read metadata file: %v", err)
+	}
+	meta := map[string]any{}
+	if err := json.Unmarshal(rawMeta, &meta); err != nil {
+		t.Fatalf("parse metadata json: %v", err)
+	}
+	if got := strings.TrimSpace(meta["command_family"].(string)); got != string(acpruntime.ProviderQwenCode) {
+		t.Fatalf("unexpected command_family %q", got)
+	}
+	diagnostics, ok := meta["diagnostics"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected diagnostics block in metadata: %#v", meta)
+	}
+	if got := strings.TrimSpace(diagnostics["stall_phase"].(string)); got != "post_write" {
+		t.Fatalf("unexpected stall_phase %q", got)
+	}
+	if got := int(diagnostics["authored_file_count"].(float64)); got != 3 {
+		t.Fatalf("unexpected authored_file_count %d", got)
+	}
+}
+
+func TestWriteFailureArtifactsDoesNotOverwriteRapidFailures(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	task := acpruntime.Task{
+		TaskID:       "task-rapid",
+		RunID:        "run-rapid",
+		StepID:       "refresh.step1.collect",
+		Workspace:    workspace,
+		RepoScopes:   []string{"repo-a"},
+		StartedAtUTC: time.Date(2026, 4, 11, 10, 20, 0, 0, time.UTC),
+	}
+
+	first, err := WriteFailureArtifacts(task, acpruntime.ProviderQwenCode, "first stdout", "first stderr")
+	if err != nil {
+		t.Fatalf("write first failure artifacts: %v", err)
+	}
+	second, err := WriteFailureArtifacts(task, acpruntime.ProviderQwenCode, "second stdout", "second stderr")
+	if err != nil {
+		t.Fatalf("write second failure artifacts: %v", err)
+	}
+
+	if first.MetadataPath == second.MetadataPath {
+		t.Fatalf("rapid failure metadata paths must be unique, got %q", first.MetadataPath)
+	}
+	if first.Stdout.Path == second.Stdout.Path {
+		t.Fatalf("rapid failure stdout paths must be unique, got %q", first.Stdout.Path)
+	}
+	if got := mustReadRawOutput(t, first.Stdout.Path); got != "first stdout" {
+		t.Fatalf("first stdout artifact was overwritten: %q", got)
+	}
+	if got := mustReadRawOutput(t, second.Stdout.Path); got != "second stdout" {
+		t.Fatalf("second stdout artifact mismatch: %q", got)
+	}
+}
+
+func mustReadRawOutput(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		t.Fatalf("read raw output %s: %v", path, err)
+	}
+	return string(raw)
+}

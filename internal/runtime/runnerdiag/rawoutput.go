@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
@@ -17,6 +19,7 @@ import (
 const maxStoredOutputBytes = 256 * 1024
 
 var invalidPathChars = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
+var failureArtifactSequence uint64
 
 type ArtifactFile struct {
 	Path         string `json:"path"`
@@ -37,6 +40,10 @@ type FailureArtifacts struct {
 }
 
 func WriteFailureArtifacts(task acpruntime.Task, provider acpruntime.Provider, stdout string, stderr string) (FailureArtifacts, error) {
+	return WriteFailureArtifactsWithMetadata(task, provider, stdout, stderr, nil)
+}
+
+func WriteFailureArtifactsWithMetadata(task acpruntime.Task, provider acpruntime.Provider, stdout string, stderr string, diagnostics map[string]any) (FailureArtifacts, error) {
 	workspace := strings.TrimSpace(task.Workspace)
 	if workspace == "" {
 		return FailureArtifacts{}, fmt.Errorf("workspace is empty")
@@ -50,8 +57,7 @@ func WriteFailureArtifacts(task acpruntime.Task, provider acpruntime.Provider, s
 		return FailureArtifacts{}, fmt.Errorf("mkdir raw output dir: %w", err)
 	}
 
-	stamp := time.Now().UTC().Format("20060102T150405Z")
-	base := safePathPart(task.RunID) + "-" + safePathPart(task.StepID) + "-" + safePathPart(task.TaskID) + "-" + safePathPart(string(provider)) + "-" + stamp
+	base := safePathPart(task.RunID) + "-" + safePathPart(task.StepID) + "-" + safePathPart(task.TaskID) + "-" + safePathPart(string(provider)) + "-" + failureArtifactSuffix()
 
 	stdoutFile := filepath.Join(rawDir, base+"-stdout.log")
 	stderrFile := filepath.Join(rawDir, base+"-stderr.log")
@@ -81,8 +87,10 @@ func WriteFailureArtifacts(task acpruntime.Task, provider acpruntime.Provider, s
 	}
 
 	metaPayload := map[string]any{
-		"generated_at": time.Now().UTC().Format(time.RFC3339),
-		"provider":     provider,
+		"generated_at":    time.Now().UTC().Format(time.RFC3339),
+		"provider":        provider,
+		"command_family":  string(provider),
+		"diagnostics_set": len(diagnostics) > 0,
 		"task": map[string]any{
 			"task_id":     task.TaskID,
 			"run_id":      task.RunID,
@@ -110,11 +118,18 @@ func WriteFailureArtifacts(task acpruntime.Task, provider acpruntime.Provider, s
 			"truncated":     stderrArtifact.Truncated,
 		},
 	}
+	if len(diagnostics) > 0 {
+		copied := make(map[string]any, len(diagnostics))
+		for key, value := range diagnostics {
+			copied[strings.TrimSpace(key)] = value
+		}
+		metaPayload["diagnostics"] = copied
+	}
 	rawMeta, err := json.MarshalIndent(metaPayload, "", "  ")
 	if err != nil {
 		return FailureArtifacts{}, fmt.Errorf("marshal runtime failure metadata: %w", err)
 	}
-	if err := os.WriteFile(metaFile, append(rawMeta, '\n'), 0o644); err != nil {
+	if err := writeFileExclusive(metaFile, append(rawMeta, '\n'), 0o644); err != nil {
 		return FailureArtifacts{}, fmt.Errorf("write runtime failure metadata: %w", err)
 	}
 
@@ -135,10 +150,29 @@ func writeBoundedArtifactFile(path string, data []byte) (ArtifactFile, error) {
 		summary.Truncated = true
 	}
 	summary.StoredBytes = len(stored)
-	if err := os.WriteFile(path, stored, 0o644); err != nil {
+	if err := writeFileExclusive(path, stored, 0o644); err != nil {
 		return ArtifactFile{}, fmt.Errorf("write raw output artifact %s: %w", path, err)
 	}
 	return summary, nil
+}
+
+func writeFileExclusive(path string, data []byte, perm os.FileMode) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if err != nil {
+		return err
+	}
+	_, writeErr := file.Write(data)
+	closeErr := file.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	return closeErr
+}
+
+func failureArtifactSuffix() string {
+	stamp := time.Now().UTC().Format("20060102T150405.000000000Z")
+	seq := atomic.AddUint64(&failureArtifactSequence, 1)
+	return stamp + "-pid" + strconv.Itoa(os.Getpid()) + "-seq" + strconv.FormatUint(seq, 10)
 }
 
 func toRelativePath(workspace string, absPath string) string {

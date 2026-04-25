@@ -10,7 +10,7 @@ import (
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
-	"github.com/GrinRus/ProvenArch/internal/runtime/runnerdiag"
+	"github.com/GrinRus/ProvenArch/internal/runtime/providercommon"
 )
 
 func (d collectStallDiagnostic) fields(task acpruntime.Task) map[string]any {
@@ -200,35 +200,18 @@ func shouldTreatArtifactFailureAsProviderUnavailable(result acpruntime.Result, e
 }
 
 func buildFailureMessage(task acpruntime.Task, stage string, failure error, result acpruntime.Result) (string, contracts.RuntimeOutputRefs) {
-	base := "unknown failure"
-	if failure != nil {
-		base = strings.TrimSpace(failure.Error())
+	diagnostics := map[string]any{
+		"current_step":      strings.TrimSpace(task.StepID),
+		"last_stdout_bytes": len([]byte(result.Stdout)),
+		"last_stderr_bytes": len([]byte(result.Stderr)),
 	}
-	if base == "" {
-		base = "unknown failure"
-	}
-	stage = strings.TrimSpace(stage)
-	if stage == "" {
-		stage = "unknown"
-	}
-	artifacts, err := runnerdiag.WriteFailureArtifacts(task, acpruntime.ProviderQwenCode, result.Stdout, result.Stderr)
-	if err != nil {
-		return fmt.Sprintf("stage=%s %s (raw_output_persist_failed=%v)", stage, base, err), contracts.RuntimeOutputRefs{}
-	}
-	return fmt.Sprintf(
-			"stage=%s %s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
-			stage,
-			base,
-			artifacts.RelativeMetadataPath,
-			artifacts.Stdout.Bytes,
-			artifacts.Stdout.SHA256,
-			artifacts.Stderr.Bytes,
-			artifacts.Stderr.SHA256,
-		), contracts.RuntimeOutputRefs{
-			Stdout:   artifacts.Stdout.RelativePath,
-			Stderr:   artifacts.Stderr.RelativePath,
-			Metadata: artifacts.RelativeMetadataPath,
+	var stalled collectStallError
+	if errors.As(failure, &stalled) {
+		for key, value := range stalled.Diagnostic.fields(task) {
+			diagnostics[key] = value
 		}
+	}
+	return providercommon.BuildFailureMessage(acpruntime.ProviderQwenCode, task, stage, failure, result.Stdout, result.Stderr, diagnostics)
 }
 
 func isProviderUnavailableText(stdout string, stderr string, err error) bool {

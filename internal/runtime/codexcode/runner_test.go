@@ -2,6 +2,8 @@ package codexcode
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,6 +143,73 @@ func TestHeadlessRunnerPreservesStdoutExcerptOnProcessFailure(t *testing.T) {
 	}
 }
 
+func TestHeadlessRunnerClassifiesTimeoutAndWritesDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	writeRoot := filepath.Join(workspaceDir, "reports", "taskruns", "run-codex", "step0")
+	draftRoot := filepath.Join(workspaceDir, "reports", "taskruns", "run-codex", "staging", "final")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+
+	runner := HeadlessRunner{
+		Command: writeSleepingStubRunner(t),
+		Args:    []string{"sleep"},
+	}
+	task := acpruntime.Task{
+		TaskID:            "task-timeout",
+		RunID:             "run-codex",
+		StepID:            "init.step0.constitution",
+		StepContract:      "constitution",
+		AgentRole:         "architect",
+		Workspace:         workspaceDir,
+		WriteRoot:         writeRoot,
+		DraftFinalRoot:    draftRoot,
+		ExpectedArtifacts: []string{"constitution-draft.json", "charter-overview.md", "baseline-subagents.yaml"},
+		StartedAtUTC:      time.Now().UTC(),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err := runner.Run(ctx, task)
+	if err == nil {
+		t.Fatalf("expected timeout error")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected runtime runner error, got %T: %v", err, err)
+	}
+	if got, want := runnerErr.Code, acpruntime.ErrorCodeRuntimeTimeout; got != want {
+		t.Fatalf("expected %s, got %s (%v)", want, got, err)
+	}
+	if strings.TrimSpace(runnerErr.RawOutputRefs.Metadata) == "" {
+		t.Fatalf("expected timeout raw metadata refs")
+	}
+
+	rawMeta, readErr := os.ReadFile(filepath.Join(workspaceDir, filepath.FromSlash(runnerErr.RawOutputRefs.Metadata)))
+	if readErr != nil {
+		t.Fatalf("read timeout metadata: %v", readErr)
+	}
+	meta := map[string]any{}
+	if decodeErr := json.Unmarshal(rawMeta, &meta); decodeErr != nil {
+		t.Fatalf("decode timeout metadata: %v", decodeErr)
+	}
+	diagnostics, ok := meta["diagnostics"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected diagnostics block in timeout metadata: %#v", meta)
+	}
+	if got := strings.TrimSpace(diagnostics["current_step"].(string)); got != "init.step0.constitution" {
+		t.Fatalf("unexpected current_step %q", got)
+	}
+	if _, ok := diagnostics["last_stdout_bytes"]; !ok {
+		t.Fatalf("expected last_stdout_bytes in timeout diagnostics: %#v", diagnostics)
+	}
+}
+
 func writeDraftStubRunner(t *testing.T) string {
 	t.Helper()
 
@@ -207,6 +276,17 @@ func writeFailingStubRunner(t *testing.T) string {
 	script := "#!/usr/bin/env bash\nset -eu\nprintf '%s\\n' 'codex stub failed after emitting output'\nexit 1\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write failing stub: %v", err)
+	}
+	return path
+}
+
+func writeSleepingStubRunner(t *testing.T) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "codex-sleeping-stub.sh")
+	script := "#!/usr/bin/env bash\nset -eu\nprintf '%s\\n' 'codex stub started'\nsleep 5\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write sleeping stub: %v", err)
 	}
 	return path
 }

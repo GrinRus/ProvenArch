@@ -1,14 +1,10 @@
 package qwencode
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
-	"github.com/GrinRus/ProvenArch/internal/artifactquality"
-	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtime/providercommon"
 	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 )
 
@@ -26,71 +22,19 @@ func repairAndValidateArtifacts(task acpruntime.Task) error {
 }
 
 func repairAndValidateCollectArtifacts(task acpruntime.Task) error {
-	report, err := artifactquality.RepairCollectManifest(task)
-	if err != nil {
-		return err
-	}
-	emitCollectRepairDiagnostic(task, report)
-	raw, err := os.ReadFile(filepath.Join(filepath.Clean(task.WriteRoot), "shard-pack-manifest.json"))
-	if err != nil {
-		return err
-	}
-	_, err = contracts.ParseShardPackManifest(raw)
-	return err
-}
-
-func emitCollectRepairDiagnostic(task acpruntime.Task, report artifactquality.RepairReport) {
-	if task.OnDiagnostic == nil || len(report.AppliedRuleIDs) == 0 {
-		return
-	}
-	emitDiagnostic(task, "collect compatibility repair applied", map[string]any{
-		"provider":         string(acpruntime.ProviderQwenCode),
-		"changed":          report.Changed,
-		"applied_rule_ids": append([]string(nil), report.AppliedRuleIDs...),
-	})
+	return providercommon.ValidateCollectArtifacts(task, acpruntime.ProviderQwenCode)
 }
 
 func repairAndValidateDraftArtifacts(task acpruntime.Task) error {
-	if _, _, err := validateRuntimeDraftArtifactsAtWriteRoot(task); err == nil {
-		return nil
-	}
-
-	manifestFile := runtimedrafts.ManifestFileForStep(task.StepID)
-	if manifestFile == "" {
-		return fmt.Errorf("runtime draft manifest is undefined for %s", task.StepID)
-	}
-	manifest, _, err := runtimedrafts.Load(task.WriteRoot, manifestFile)
-	if err != nil {
-		return err
-	}
-	if err := runtimedrafts.ValidateManifestForTask(manifest, task.RunID, task.StepID, task.StepContract); err != nil {
-		return err
-	}
-	if _, err := runtimedrafts.ReconcileOutputsAtDraftRoot(task.DraftFinalRoot, manifest); err != nil {
-		return err
-	}
-	_, _, err = validateRuntimeDraftArtifactsAtWriteRoot(task)
-	return err
+	return providercommon.ValidateDraftArtifacts(task)
 }
 
 func validateRuntimeDraftArtifactsAtWriteRoot(task acpruntime.Task) (runtimedrafts.Manifest, []byte, error) {
-	return runtimedrafts.ValidateRequiredManifest(
-		task.WriteRoot,
-		task.DraftFinalRoot,
-		task.RunID,
-		task.StepID,
-		task.StepContract,
-		task.ExpectedArtifacts,
-	)
+	return providercommon.ValidateRequiredRuntimeDraftArtifacts(task)
 }
 
 func validateValidatorArtifacts(task acpruntime.Task) error {
-	raw, err := os.ReadFile(filepath.Join(filepath.Clean(task.WriteRoot), "validator-verdict.json"))
-	if err != nil {
-		return err
-	}
-	_, err = contracts.ParseValidatorVerdict(raw)
-	return err
+	return providercommon.ValidateValidatorArtifacts(task)
 }
 
 func isCollectStep(stepID string) bool {

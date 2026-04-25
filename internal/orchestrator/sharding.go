@@ -18,6 +18,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/claudecode"
+	"github.com/GrinRus/ProvenArch/internal/runtime/codexcode"
 	"github.com/GrinRus/ProvenArch/internal/runtime/qwencode"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
@@ -121,6 +122,8 @@ func runtimeMetaForRunner(runner acpruntime.Runner) contracts.RuntimeMeta {
 		return contracts.RuntimeMeta{Name: string(acpruntime.ProviderClaudeCode), Version: "headless"}
 	case qwencode.HeadlessRunner, *qwencode.HeadlessRunner:
 		return contracts.RuntimeMeta{Name: string(acpruntime.ProviderQwenCode), Version: "headless"}
+	case codexcode.HeadlessRunner, *codexcode.HeadlessRunner:
+		return contracts.RuntimeMeta{Name: string(acpruntime.ProviderCodexCode), Version: "headless"}
 	default:
 		return contracts.RuntimeMeta{Name: "unknown"}
 	}

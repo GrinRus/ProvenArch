@@ -558,3 +558,87 @@ func TestNormalizeSemanticSnapshotDedupesRepoAliasEntitiesAndRewritesReferences(
 		t.Fatalf("expected repo alias normalization to logical repo scope, got %q", got)
 	}
 }
+
+func TestNormalizeSemanticSnapshotDedupesServiceTokenVariantsAndFindingSignatures(t *testing.T) {
+	t.Parallel()
+
+	resolver := newSemanticRepoAliasResolver(
+		map[string]string{"bank-of-anthos": "/tmp/repos/bank-of-anthos"},
+		nil,
+	)
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{
+		Coverage: contracts.Coverage{Missing: []string{"owner mappings"}},
+		Entities: []contracts.Entity{
+			{
+				ID:   "svc.bank-of-anthos.user-service",
+				Type: "service",
+				Name: "user-service",
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.8,
+					Evidence:   []contracts.Evidence{{Repo: "bank-of-anthos", Path: "src/user-service/main.go"}},
+				},
+			},
+			{
+				ID:   "svc.bank-of-anthos.userservice",
+				Type: "service",
+				Name: "userservice",
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.7,
+					Evidence:   []contracts.Evidence{{Repo: "bank-of-anthos", Path: "src/user-service/main.go"}},
+				},
+			},
+		},
+		Findings: []contracts.Finding{
+			{
+				ID:         "finding.owner.gap.1",
+				Severity:   "medium",
+				Title:      "Missing owner mapping",
+				RuleID:     "owner-gap",
+				RelatedIDs: []string{"svc.bank-of-anthos.user-service"},
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.6,
+					Evidence:   []contracts.Evidence{{Repo: "bank-of-anthos", Path: "src/user-service/main.go"}},
+				},
+			},
+			{
+				ID:          "finding.owner.gap.2",
+				Severity:    "medium",
+				Title:       "Missing owner mapping",
+				RuleID:      "owner-gap",
+				Description: "owner_team_id is unknown",
+				RelatedIDs:  []string{"svc.bank-of-anthos.userservice"},
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.7,
+					Evidence:   []contracts.Evidence{{Repo: "bank-of-anthos", Path: "src/user-service/main.go"}},
+				},
+			},
+		},
+		Questions: []contracts.Question{
+			{ID: "q.owner", Text: "Who owns user-service?", RelatedIDs: []string{"svc.bank-of-anthos.userservice"}},
+		},
+	}, resolver)
+
+	if got, want := len(snapshot.Entities), 1; got != want {
+		t.Fatalf("expected service aliases to dedupe into one entity, got=%d want=%d", got, want)
+	}
+	winnerID := snapshot.Entities[0].ID
+	if winnerID != "svc.bank-of-anthos.user-service" {
+		t.Fatalf("expected stable canonical id winner, got %q", winnerID)
+	}
+	if got, want := len(snapshot.Findings), 1; got != want {
+		t.Fatalf("expected duplicate owner-gap findings to dedupe, got=%d want=%d", got, want)
+	}
+	if got := snapshot.Findings[0].RelatedIDs; len(got) != 1 || got[0] != winnerID {
+		t.Fatalf("expected finding related_ids to use deduped entity %q, got %v", winnerID, got)
+	}
+	if got := strings.TrimSpace(snapshot.Findings[0].Description); got != "owner_team_id is unknown" {
+		t.Fatalf("expected merged finding description, got %q", got)
+	}
+	if got := snapshot.Questions[0].RelatedIDs; len(got) != 1 || got[0] != winnerID {
+		t.Fatalf("expected question related_ids to be rewritten to %q, got %v", winnerID, got)
+	}
+}

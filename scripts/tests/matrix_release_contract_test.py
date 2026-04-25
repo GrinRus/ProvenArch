@@ -138,6 +138,18 @@ class MatrixReleaseContractTest(unittest.TestCase):
             "multi-git_url": multi_git_file,
         }
 
+    def _create_git_repo(self, name: str) -> tuple[Path, str]:
+        repo = self.tmp_root / "repos" / name
+        repo.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, check=True)
+        (repo / "README.md").write_text("# repo\n", encoding="utf-8")
+        subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True, text=True)
+        head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+        return repo, head
+
     def _write_dummy_batch_script(self) -> None:
         self.batch_script.write_text(
             textwrap.dedent(
@@ -210,6 +222,45 @@ class MatrixReleaseContractTest(unittest.TestCase):
 
                 printf '# run matrix\\n' > "${run_matrix_md}"
                 printf '# quality\\n' > "${quality_report_md}"
+
+                if [[ "${MATRIX_TEST_RAW_METADATA:-0}" == "1" ]]; then
+                  raw_dir="${BATCH_ROOT}/qwen-code/run1/arch-workspace/reports/taskruns/raw"
+                  mkdir -p "${raw_dir}"
+                  cat > "${raw_dir}/run-codex-init-step0-task-codex-codex-code-meta.json" <<'EOF'
+                {
+                  "generated_at": "2026-04-25T00:00:00Z",
+                  "provider": "codex-code",
+                  "command_family": "codex-code",
+                  "diagnostics_set": true,
+                  "task": {
+                    "task_id": "task-codex",
+                    "run_id": "run-codex",
+                    "step_id": "init.step0.constitution",
+                    "workspace": "/tmp/workspace",
+                    "shard_id": "single",
+                    "repo_scope": "repo-a",
+                    "repo_scopes": ["repo-a"],
+                    "path_scopes": []
+                  },
+                  "stdout": {
+                    "path": "/tmp/workspace/reports/taskruns/raw/stdout.log",
+                    "relative_path": "reports/taskruns/raw/stdout.log",
+                    "bytes": 12,
+                    "stored_bytes": 12,
+                    "sha256": "abc",
+                    "truncated": false
+                  },
+                  "stderr": {
+                    "path": "/tmp/workspace/reports/taskruns/raw/stderr.log",
+                    "relative_path": "reports/taskruns/raw/stderr.log",
+                    "bytes": 34,
+                    "stored_bytes": 34,
+                    "sha256": "def",
+                    "truncated": false
+                  }
+                }
+                EOF
+                fi
 
                 {
                   printf '| provider | status | runs |\\n'
@@ -626,6 +677,99 @@ class MatrixReleaseContractTest(unittest.TestCase):
         row = dict(zip(header, values, strict=False))
         self.assertEqual("1", row["runtime_flow_failed_runs"])
         self.assertEqual("0", row["infra_incomplete_cycle_failures"])
+
+    def test_matrix_writes_durable_inventory_with_raw_output_refs(self) -> None:
+        matrix_file = self._write_matrix_file(None, include_profiles=["single-path"])
+        matrix_id = "matrix-test-durable-inventory"
+        result = self._run_matrix(
+            matrix_file,
+            matrix_id,
+            extra_env={"MATRIX_TEST_RAW_METADATA": "1"},
+            release_mode="0",
+        )
+        self.assertEqual(0, result.returncode, msg=result.stderr or result.stdout)
+
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual("PASS", verdict["verdict"])
+        record = verdict["records"][0]
+        inventory_path = Path(record["artifacts"]["inventory_json"])
+        self.assertTrue(inventory_path.exists(), f"missing inventory file: {inventory_path}")
+        self.assertEqual(1, record["artifacts"]["raw_output_ref_count"])
+
+        inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+        self.assertEqual(matrix_id, inventory["matrix_id"])
+        self.assertEqual("single-path", inventory["profile_id"])
+        self.assertEqual("passed", inventory["terminal_status"])
+        refs = inventory["raw_output_refs"]
+        self.assertEqual(1, len(refs))
+        self.assertEqual("codex-code", refs[0]["provider"])
+        self.assertEqual("init.step0.constitution", refs[0]["step_id"])
+        self.assertEqual(12, refs[0]["stdout"]["bytes"])
+
+    def test_missing_selected_provider_binary_materializes_operational_blocker_report(self) -> None:
+        matrix_file = self._write_matrix_file(None, include_profiles=["single-path"])
+        matrix_id = "matrix-test-missing-provider-preflight"
+        result = self._run_matrix(
+            matrix_file,
+            matrix_id,
+            extra_env={
+                "BATCH_PROVIDER_FILTER": "codex-code",
+                "ACP_CODEX_CMD_BIN": "definitely-missing-acp-codex-command",
+            },
+            release_mode="0",
+        )
+        self.assertNotEqual(result.returncode, 0)
+
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual("FAIL", verdict["verdict"])
+        self.assertEqual("operational-preflight", verdict["release_contract"]["mode"])
+        self.assertIn("required command is unavailable", verdict["release_contract"]["blocking_reasons"][0])
+
+        status_path = self.e2e_tmp_root / "matrix" / matrix_id / "profile-status" / "matrix-operational-preflight.json"
+        self.assertTrue(status_path.exists(), f"missing operational profile status: {status_path}")
+        status = json.loads(status_path.read_text(encoding="utf-8"))
+        self.assertEqual("failed", status["status"])
+        self.assertEqual("operational_host_preflight_failed", status["failure_reason"])
+
+        inventory_path = Path(status["inventory_json"])
+        self.assertTrue(inventory_path.exists(), f"missing operational inventory: {inventory_path}")
+
+    def test_path_sha_mismatch_materializes_profile_operational_blocker_without_child_run(self) -> None:
+        repo, _head = self._create_git_repo("sha-mismatch")
+        repos_file = self.tmp_root / "matrix-inputs" / "single-path-sha-mismatch.repos.yaml"
+        repos_file.parent.mkdir(parents=True, exist_ok=True)
+        repos_file.write_text(
+            textwrap.dedent(
+                f"""\
+                repos:
+                  - name: sha-mismatch
+                    path: {repo}
+                    ref: "{'0' * 40}"
+                """
+            ),
+            encoding="utf-8",
+        )
+        self.profile_repos_files["single-path"] = repos_file
+        matrix_file = self._write_matrix_file(None, include_profiles=["single-path"])
+        matrix_id = "matrix-test-path-sha-mismatch"
+        result = self._run_matrix(matrix_file, matrix_id, release_mode="0")
+        self.assertNotEqual(result.returncode, 0)
+
+        self.assertFalse(self.sentinel_path.exists(), "child batch must not start after path SHA mismatch")
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual("FAIL", verdict["verdict"])
+        self.assertEqual(1, len(verdict["records"]))
+        record = verdict["records"][0]
+        self.assertEqual("failed", record["status"])
+
+        status_path = self.e2e_tmp_root / "matrix" / matrix_id / "profile-status" / "single-path--baseline.json"
+        self.assertTrue(status_path.exists(), f"missing profile status: {status_path}")
+        status = json.loads(status_path.read_text(encoding="utf-8"))
+        self.assertEqual("operational_host_preflight_failed", status["failure_reason"])
+        inventory_path = Path(status["inventory_json"])
+        self.assertTrue(inventory_path.exists(), f"missing profile inventory: {inventory_path}")
+        driver_log = Path(status["driver_log"])
+        self.assertIn("path SHA mismatch", driver_log.read_text(encoding="utf-8"))
 
     def test_matrix_updates_profile_status_while_child_batch_is_running(self) -> None:
         matrix_file = self._write_matrix_file(None, include_profiles=["single-path"])

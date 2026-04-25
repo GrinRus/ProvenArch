@@ -125,6 +125,57 @@ func TestDocFirstFilesystemPolicyDefinesCanonicalAsIsDraftSurface(t *testing.T) 
 	}
 }
 
+func TestStepSpecificPolicyDefinesProposalsDraftContract(t *testing.T) {
+	t.Parallel()
+
+	policy := StepSpecificPolicy("init.step4.proposals")
+	required := []string{
+		`STEP POLICY init.step4.proposals:`,
+		`Use validated staged final evidence from read_context_roots`,
+		`Treat schemas/*, docs/spec/*, and the enforced prompt contract as the only manifest source of truth for proposals-draft-manifest.json.`,
+		`Keep step_contract exactly "proposals"`,
+		`outputs[].canonical_path values are allowed only under proposals/* or reports/changelog/*.`,
+		`pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps`,
+	}
+	for _, needle := range required {
+		if !strings.Contains(policy, needle) {
+			t.Fatalf("expected proposals step policy to contain %q, got:\n%s", needle, policy)
+		}
+	}
+}
+
+func TestDocFirstFilesystemPolicyDefinesCanonicalProposalsDraftSurface(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		TaskID:            "task-1",
+		RunID:             "run-1",
+		StepID:            "init.step4.proposals",
+		Workspace:         "/tmp/workspace",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/step4",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ReadContextRoots:  []string{"/tmp/workspace/reports/taskruns/run-1/staging/final"},
+		ExpectedArtifacts: []string{"proposals-draft-manifest.json"},
+		StartedAtUTC:      time.Date(2026, 4, 22, 8, 0, 0, 0, time.UTC),
+	}
+
+	policy := DocFirstFilesystemPolicy(task)
+	required := []string{
+		`Write proposals-draft-manifest.json in write_root.`,
+		`Allowed canonical targets are proposals/* and reports/changelog/*.`,
+		`proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="proposals", agent_role, optional summary, and outputs[].`,
+		`Do NOT add legacy top-level fields such as pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps.`,
+		`"step_contract": "proposals"`,
+		`"canonical_path": "proposals/proposal-baseline/proposal.md"`,
+		`"canonical_path": "reports/changelog/run-1.md"`,
+	}
+	for _, needle := range required {
+		if !strings.Contains(policy, needle) {
+			t.Fatalf("expected proposals doc-first policy to contain %q, got:\n%s", needle, policy)
+		}
+	}
+}
+
 func TestCollectArtifactRepairHintsBanLegacyRepairSurface(t *testing.T) {
 	t.Parallel()
 
@@ -148,6 +199,15 @@ func TestDraftArtifactRepairHintsBanLegacyRepairSurface(t *testing.T) {
 	hints := strings.Join(DraftArtifactRepairHints(task, nil), "\n")
 	if !strings.Contains(hints, `Repair mode is draft-only: do not invent extra repository file reads/writes after draft files already exist.`) {
 		t.Fatalf("expected draft repair hints to ban extra repair writes outside the draft-only surface, got:\n%s", hints)
+	}
+	for _, needle := range []string{
+		`step_contract MUST be exactly "proposals"`,
+		`outputs[].canonical_path values are allowed only under proposals/* or reports/changelog/* and MUST be unique.`,
+		`pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps`,
+	} {
+		if !strings.Contains(hints, needle) {
+			t.Fatalf("expected proposals repair hints to contain %q, got:\n%s", needle, hints)
+		}
 	}
 }
 

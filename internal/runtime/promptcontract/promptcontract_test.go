@@ -144,3 +144,40 @@ func TestComposeArtifactOnlyPromptAddsAsIsDraftCanonicalSection(t *testing.T) {
 		}
 	}
 }
+
+func TestComposeArtifactOnlyPromptAddsProposalsDraftCanonicalSection(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		StepID:            "init.step4.proposals",
+		WriteRoot:         "/tmp/write-root",
+		DraftFinalRoot:    "/tmp/draft-root",
+		ExpectedArtifacts: []string{"proposals-draft-manifest.json"},
+	}
+
+	claudePrompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderClaudeCode, task)
+	qwenPrompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderQwenCode, task)
+	codexPrompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderCodexCode, task)
+
+	claudeTail := strings.TrimPrefix(claudePrompt, "You are ACP runtime provider \"claude-code\".\n\n")
+	qwenTail := strings.TrimPrefix(qwenPrompt, "You are ACP runtime provider \"qwen-code\".\n\n")
+	codexTail := strings.TrimPrefix(codexPrompt, "You are ACP runtime provider \"codex-code\".\n\n")
+	if claudeTail != qwenTail || claudeTail != codexTail {
+		t.Fatalf("expected proposals enforced prompt body to be provider-independent")
+	}
+
+	expectedTokens := []string{
+		"PROPOSALS DRAFT MANIFEST CANONICAL SHAPE:",
+		`proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="proposals", agent_role, optional summary, and outputs[].`,
+		`outputs[].canonical_path values are allowed only under proposals/* or reports/changelog/*.`,
+		`pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps`,
+		`"step_contract": "proposals"`,
+		`"canonical_path": "proposals/proposal-baseline/proposal.md"`,
+		`"canonical_path": "reports/changelog/run-1.md"`,
+	}
+	for _, token := range expectedTokens {
+		if !strings.Contains(claudePrompt, token) {
+			t.Fatalf("expected proposals prompt to contain %q, got:\n%s", token, claudePrompt)
+		}
+	}
+}

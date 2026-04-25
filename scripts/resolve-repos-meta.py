@@ -9,6 +9,8 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import re
+import subprocess
 from typing import Any
 
 import sys
@@ -64,6 +66,16 @@ def normalize_declared_repos(repos_file: Path, repos: list[dict[str, Any]], sour
                 raise SystemExit(f"repos[{idx}] path does not exist: {abs_path}")
             if not abs_path.is_dir():
                 raise SystemExit(f"repos[{idx}] path is not a directory: {abs_path}")
+            if ref and re.fullmatch(r"[0-9a-fA-F]{40}", ref):
+                try:
+                    head = subprocess.check_output(
+                        ["git", "-C", str(abs_path), "rev-parse", "HEAD"],
+                        text=True,
+                    ).strip()
+                except Exception as exc:
+                    raise SystemExit(f"repos[{idx}] path is not a readable git checkout: {abs_path} ({exc})") from None
+                if head != ref:
+                    raise SystemExit(f"repos[{idx}] path SHA mismatch: {abs_path} expected={ref} got={head}")
             entry = {"name": name, "source": source, "path": str(abs_path), "ref": ref}
         else:
             source = "git_url"

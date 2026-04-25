@@ -260,3 +260,40 @@ func AsIsDraftManifestCanonicalExample() string {
   ]
 }`)
 }
+
+func ProposalsDraftManifestContractLines() []string {
+	return []string{
+		`- proposals-draft-manifest.json MUST validate against the ACP runtime draft manifest contract.`,
+		`- proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="proposals", agent_role, optional summary, and outputs[].`,
+		`- outputs[].path MUST stay relative to draft_final_root and outputs[].canonical_path MUST stay workspace-relative.`,
+		`- outputs[].canonical_path values are allowed only under proposals/* or reports/changelog/*.`,
+		`- outputs[].canonical_path values MUST be unique.`,
+		`- Do NOT add legacy top-level fields such as pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps.`,
+		`- Do NOT emit final-index-like proposal envelopes; proposals-draft-manifest.json is only the runtime draft publish map.`,
+	}
+}
+
+func ProposalsDraftManifestCanonicalExample() string {
+	return strings.TrimSpace(`{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "summary": "Drafted remediation proposals from validated findings.",
+  "outputs": [
+    {
+      "path": "proposal.md",
+      "canonical_path": "proposals/proposal-baseline/proposal.md",
+      "kind": "proposal",
+      "title": "Baseline Remediation Proposal"
+    },
+    {
+      "path": "changelog.md",
+      "canonical_path": "reports/changelog/run-1.md",
+      "kind": "changelog",
+      "title": "Proposal Changelog"
+    }
+  ]
+}`)
+}

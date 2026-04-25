@@ -86,11 +86,256 @@ die() {
   exit 1
 }
 
+write_matrix_operational_blocker_report() {
+  local reason="$1"
+  if ! command -v python3 >/dev/null 2>&1; then
+    return 0
+  fi
+  python3 - "$MATRIX_ID" "$E2E_MATRIX_FILE" "$MATRIX_ROOT" "$REPORTS_ROOT" "$MATRIX_STATUS_ROOT" "$MATRIX_DRIVER_LOG" "$reason" "$MATRIX_SELECTED_PROVIDERS_CSV" "$MATRIX_SELECTED_RUN_INDEXES_CSV" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+matrix_id = sys.argv[1]
+matrix_file = sys.argv[2]
+matrix_root = Path(sys.argv[3]).resolve()
+reports_root = Path(sys.argv[4]).resolve()
+status_root = Path(sys.argv[5]).resolve()
+driver_log = sys.argv[6]
+reason = sys.argv[7]
+selected_providers = [item for item in sys.argv[8].split(",") if item]
+selected_run_indexes = [item for item in sys.argv[9].split(",") if item]
+
+now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+status_root.mkdir(parents=True, exist_ok=True)
+reports_root.mkdir(parents=True, exist_ok=True)
+inventory_root = matrix_root / "inventory"
+inventory_root.mkdir(parents=True, exist_ok=True)
+
+status_path = status_root / "matrix-operational-preflight.json"
+inventory_path = inventory_root / "matrix-operational-preflight.json"
+profile_matrix_md = reports_root / f"profile_matrix_{matrix_id}.md"
+profile_matrix_tsv = reports_root / f"profile_matrix_{matrix_id}.tsv"
+verdict_md = reports_root / f"release_verdict_{matrix_id}.md"
+verdict_json = reports_root / f"release_verdict_{matrix_id}.json"
+records_path = matrix_root / "profile-runs.jsonl"
+records_path.parent.mkdir(parents=True, exist_ok=True)
+
+batch_id = f"{matrix_id}-operational-preflight"
+inventory_payload = {
+    "generated_at": now,
+    "matrix_id": matrix_id,
+    "matrix_file": matrix_file,
+    "profile_id": "matrix-operational-preflight",
+    "sweep_id": "preflight",
+    "batch_id": batch_id,
+    "batch_root": "-",
+    "terminal_status": "failed",
+    "failure_reason": "operational_host_preflight_failed",
+    "operational_blocker": reason,
+    "selected_providers": selected_providers,
+    "selected_run_indexes": selected_run_indexes,
+    "key_paths": {
+        "driver_log": driver_log,
+        "profile_status_file": str(status_path),
+        "run_matrix_tsv": "-",
+        "run_matrix_md": "-",
+        "frontend_matrix_md": "-",
+        "frontend_cancel_matrix_md": "-",
+        "quality_report_md": "-",
+    },
+    "raw_output_refs": [],
+}
+inventory_path.write_text(json.dumps(inventory_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+
+status_payload = {
+    "profile_id": "matrix-operational-preflight",
+    "profile_slug": "matrix-operational-preflight",
+    "batch_id": batch_id,
+    "matrix_id": matrix_id,
+    "matrix_file": matrix_file,
+    "selected_providers": selected_providers,
+    "selected_run_indexes": selected_run_indexes,
+    "source_kind": "operational",
+    "expected_repo_count": 0,
+    "repos_file": "-",
+    "status": "failed",
+    "failure_reason": "operational_host_preflight_failed",
+    "sweep_id": "preflight",
+    "execution": {
+        "strategy": "-",
+        "max_parallel_tasks": 0,
+        "failure_policy": "-",
+        "shard_discovery_mode": "-",
+    },
+    "batch_root": "-",
+    "run_matrix_tsv": "-",
+    "run_matrix_md": "-",
+    "frontend_matrix_md": "-",
+    "frontend_cancel_matrix_md": "-",
+    "quality_report_md": "-",
+    "driver_log": driver_log,
+    "inventory_json": str(inventory_path),
+    "raw_output_refs": [],
+    "operational_blocker": reason,
+    "updated_at": now,
+}
+status_path.write_text(json.dumps(status_payload, ensure_ascii=True) + "\n", encoding="utf-8")
+
+record = dict(status_payload)
+record["strict_status"] = "failed"
+record["blocking_reasons"] = [reason]
+records_path.write_text(json.dumps(record, ensure_ascii=True) + "\n", encoding="utf-8")
+
+profile_matrix_tsv.write_text(
+    "\t".join(
+        [
+            "profile_id",
+            "sweep_id",
+            "batch_id",
+            "status",
+            "strict_status",
+            "failure_reason",
+            "blocking_reasons",
+            "inventory_json",
+        ]
+    )
+    + "\n"
+    + "\t".join(
+        [
+            "matrix-operational-preflight",
+            "preflight",
+            batch_id,
+            "failed",
+            "failed",
+            "operational_host_preflight_failed",
+            reason,
+            str(inventory_path),
+        ]
+    )
+    + "\n",
+    encoding="utf-8",
+)
+profile_matrix_md.write_text(
+    "\n".join(
+        [
+            "# Profile Matrix",
+            "",
+            "| profile_id | sweep_id | batch_id | status | strict | failure_reason | blockers | inventory |",
+            "|---|---|---|---|---|---|---|---|",
+            f"| matrix-operational-preflight | preflight | {batch_id} | failed | failed | operational_host_preflight_failed | {reason} | {inventory_path} |",
+        ]
+    )
+    + "\n",
+    encoding="utf-8",
+)
+
+verdict_payload = {
+    "matrix_id": matrix_id,
+    "generated_at_utc": now,
+    "verdict": "FAIL",
+    "release_state": "RELEASE BLOCKED",
+    "profile_sweep_runs": 1,
+    "strict_pass_runs": 0,
+    "strict_fail_runs": 1,
+    "release_contract": {
+        "mode": "operational-preflight",
+        "selected_providers": selected_providers,
+        "selected_run_indexes": selected_run_indexes,
+        "contract_status": "failed",
+        "blocking_reasons": [reason],
+    },
+    "records": [
+        {
+            "profile_id": "matrix-operational-preflight",
+            "sweep_id": "preflight",
+            "batch_id": batch_id,
+            "status": "failed",
+            "strict_status": "failed",
+            "blocking_reasons": [reason],
+            "backend": {
+                "hard_pass": 0,
+                "total_runs": 0,
+                "runtime_contract_failed_failures": 0,
+                "runner_unavailable_failures": 0,
+                "runtime_timeout_failures": 0,
+                "precheck_failed_failures": 1,
+            },
+            "artifacts": {
+                "driver_log": driver_log,
+                "inventory_json": str(inventory_path),
+                "raw_output_ref_count": 0,
+            },
+        }
+    ],
+}
+verdict_json.write_text(json.dumps(verdict_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+verdict_md.write_text(
+    "\n".join(
+        [
+            f"# Release Verdict: {matrix_id}",
+            "",
+            f"- generated_at_utc: {now}",
+            "- verdict: FAIL",
+            "- release_state: RELEASE BLOCKED",
+            "- release_contract_status: failed",
+            "",
+            "## Blocking Items",
+            f"- matrix-operational-preflight / preflight ({batch_id}):",
+            f"  - {reason}",
+            f"  - inventory: {inventory_path} (raw_output_refs=0)",
+        ]
+    )
+    + "\n",
+    encoding="utf-8",
+)
+PY
+}
+
+operational_host_preflight_failed() {
+  local reason="$1"
+  write_matrix_operational_blocker_report "$reason" || true
+  die "operational_host_preflight_failed: $reason"
+}
+
 require_cmd() {
   local cmd="$1"
   if ! command -v "$cmd" >/dev/null 2>&1; then
-    die "required command is unavailable: $cmd"
+    operational_host_preflight_failed "required command is unavailable: $cmd"
   fi
+}
+
+ensure_writable_dir() {
+  local path="$1"
+  local label="$2"
+  if ! mkdir -p "$path" 2>/dev/null; then
+    operational_host_preflight_failed "cannot create $label directory at $path"
+  fi
+  local probe="$path/.write-probe.$$"
+  if ! : >"$probe" 2>/dev/null; then
+    operational_host_preflight_failed "$label directory is not writable: $path"
+  fi
+  rm -f "$probe" >/dev/null 2>&1 || true
+}
+
+run_host_preflight_checks() {
+  if array_contains "qwen-code" "${MATRIX_SELECTED_PROVIDERS[@]-}"; then
+    local qwen_path
+    qwen_path="$(command -v "$ACP_QWEN_CMD_BIN" 2>/dev/null || true)"
+    if [[ -z "$qwen_path" ]]; then
+      operational_host_preflight_failed "qwen binary not found in PATH (ACP_QWEN_CMD_BIN=$ACP_QWEN_CMD_BIN)"
+    fi
+    local qwen_version
+    if ! qwen_version="$("$ACP_QWEN_CMD_BIN" --version 2>/dev/null | head -n1 | tr -d '\r')"; then
+      operational_host_preflight_failed "failed to read qwen version from $ACP_QWEN_CMD_BIN"
+    fi
+    log "host preflight: qwen_bin=$qwen_path qwen_version=${qwen_version:-unknown}"
+  fi
+  ensure_writable_dir "$E2E_TMP_ROOT" "e2e_tmp_root"
+  ensure_writable_dir "$REPORTS_ROOT" "reports_root"
+  ensure_writable_dir "$MATRIX_ROOT" "matrix_root"
+  ensure_writable_dir "$MATRIX_STATUS_ROOT" "matrix_status_root"
 }
 
 normalize_release_mode() {
@@ -157,7 +402,7 @@ write_current_profile_status() {
   local failure_reason="${2:-none}"
   [[ -z "$CURRENT_PROFILE_STATUS_FILE" ]] && return 0
   mkdir -p "$(dirname "$CURRENT_PROFILE_STATUS_FILE")"
-  python3 - "$CURRENT_PROFILE_STATUS_FILE" "$status" "$failure_reason" "$CURRENT_PROFILE_ID" "$CURRENT_PROFILE_SLUG" "$CURRENT_BATCH_ID" "$CURRENT_SOURCE_KIND" "$CURRENT_EXPECTED_REPO_COUNT" "$CURRENT_REPOS_FILE" "$CURRENT_SWEEP_ID" "$CURRENT_SWEEP_STRATEGY" "$CURRENT_SWEEP_MAX_PARALLEL" "$CURRENT_SWEEP_FAILURE_POLICY" "$CURRENT_SWEEP_SHARD_MODE" "$CURRENT_BATCH_ROOT" "$CURRENT_DRIVER_LOG" <<'PY'
+  python3 - "$CURRENT_PROFILE_STATUS_FILE" "$status" "$failure_reason" "$CURRENT_PROFILE_ID" "$CURRENT_PROFILE_SLUG" "$CURRENT_BATCH_ID" "$CURRENT_SOURCE_KIND" "$CURRENT_EXPECTED_REPO_COUNT" "$CURRENT_REPOS_FILE" "$CURRENT_SWEEP_ID" "$CURRENT_SWEEP_STRATEGY" "$CURRENT_SWEEP_MAX_PARALLEL" "$CURRENT_SWEEP_FAILURE_POLICY" "$CURRENT_SWEEP_SHARD_MODE" "$CURRENT_BATCH_ROOT" "$CURRENT_DRIVER_LOG" "$MATRIX_ID" "$E2E_MATRIX_FILE" "$MATRIX_SELECTED_PROVIDERS_CSV" "$MATRIX_SELECTED_RUN_INDEXES_CSV" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
@@ -168,6 +413,10 @@ payload = {
     "profile_id": sys.argv[4],
     "profile_slug": sys.argv[5],
     "batch_id": sys.argv[6],
+    "matrix_id": sys.argv[17],
+    "matrix_file": sys.argv[18],
+    "selected_providers": [item for item in sys.argv[19].split(",") if item],
+    "selected_run_indexes": [item for item in sys.argv[20].split(",") if item],
     "source_kind": sys.argv[7],
     "expected_repo_count": int(sys.argv[8]),
     "repos_file": sys.argv[9],
@@ -187,6 +436,8 @@ payload = {
     "frontend_cancel_matrix_md": "-",
     "quality_report_md": "-",
     "driver_log": sys.argv[16],
+    "inventory_json": "-",
+    "raw_output_refs": [],
     "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
 }
 path.write_text(json.dumps(payload, ensure_ascii=True) + "\n", encoding="utf-8")
@@ -201,8 +452,9 @@ update_current_profile_status_artifacts() {
   local frontend_matrix_md="$5"
   local frontend_cancel_matrix_md="$6"
   local quality_report_md="$7"
+  local inventory_json="${8:--}"
   [[ -z "$CURRENT_PROFILE_STATUS_FILE" ]] && return 0
-  python3 - "$CURRENT_PROFILE_STATUS_FILE" "$status" "$failure_reason" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md" <<'PY'
+  python3 - "$CURRENT_PROFILE_STATUS_FILE" "$status" "$failure_reason" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md" "$inventory_json" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
@@ -222,8 +474,106 @@ payload["run_matrix_md"] = sys.argv[5]
 payload["frontend_matrix_md"] = sys.argv[6]
 payload["frontend_cancel_matrix_md"] = sys.argv[7]
 payload["quality_report_md"] = sys.argv[8]
+payload["inventory_json"] = sys.argv[9]
+if sys.argv[9] and sys.argv[9] != "-":
+    try:
+        inventory = json.loads(Path(sys.argv[9]).read_text(encoding="utf-8"))
+        payload["raw_output_refs"] = inventory.get("raw_output_refs", [])
+    except Exception:
+        payload["raw_output_refs"] = []
 payload["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 path.write_text(json.dumps(payload, ensure_ascii=True) + "\n", encoding="utf-8")
+PY
+}
+
+write_current_profile_inventory() {
+  local status="$1"
+  local failure_reason="$2"
+  local run_matrix_tsv="$3"
+  local run_matrix_md="$4"
+  local frontend_matrix_md="$5"
+  local frontend_cancel_matrix_md="$6"
+  local quality_report_md="$7"
+  local inventory_json="$MATRIX_ROOT/inventory/${CURRENT_BATCH_ID}.json"
+  mkdir -p "$(dirname "$inventory_json")"
+  python3 - "$inventory_json" "$MATRIX_ID" "$E2E_MATRIX_FILE" "$CURRENT_PROFILE_ID" "$CURRENT_SWEEP_ID" "$CURRENT_BATCH_ID" "$CURRENT_BATCH_ROOT" "$status" "$failure_reason" "$CURRENT_DRIVER_LOG" "$CURRENT_PROFILE_STATUS_FILE" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md" "$MATRIX_SELECTED_PROVIDERS_CSV" "$MATRIX_SELECTED_RUN_INDEXES_CSV" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+out = Path(sys.argv[1]).resolve()
+batch_root = Path(sys.argv[7])
+raw_output_refs = []
+
+if batch_root.exists():
+    for meta_path in sorted(batch_root.rglob("reports/taskruns/raw/*-meta.json")):
+        if not meta_path.is_file():
+            continue
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raw_output_refs.append(
+                {
+                    "metadata": str(meta_path),
+                    "parse_error": str(exc),
+                }
+            )
+            continue
+        task = meta.get("task") if isinstance(meta.get("task"), dict) else {}
+        stdout = meta.get("stdout") if isinstance(meta.get("stdout"), dict) else {}
+        stderr = meta.get("stderr") if isinstance(meta.get("stderr"), dict) else {}
+        raw_output_refs.append(
+            {
+                "metadata": str(meta_path),
+                "provider": str(meta.get("provider", "")),
+                "command_family": str(meta.get("command_family", "")),
+                "task_id": str(task.get("task_id", "")),
+                "run_id": str(task.get("run_id", "")),
+                "step_id": str(task.get("step_id", "")),
+                "stdout": {
+                    "relative_path": str(stdout.get("relative_path", "")),
+                    "bytes": int(stdout.get("bytes", 0) or 0),
+                    "stored_bytes": int(stdout.get("stored_bytes", 0) or 0),
+                    "sha256": str(stdout.get("sha256", "")),
+                    "truncated": bool(stdout.get("truncated", False)),
+                },
+                "stderr": {
+                    "relative_path": str(stderr.get("relative_path", "")),
+                    "bytes": int(stderr.get("bytes", 0) or 0),
+                    "stored_bytes": int(stderr.get("stored_bytes", 0) or 0),
+                    "sha256": str(stderr.get("sha256", "")),
+                    "truncated": bool(stderr.get("truncated", False)),
+                },
+                "diagnostics_set": bool(meta.get("diagnostics_set", False)),
+            }
+        )
+
+payload = {
+    "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "matrix_id": sys.argv[2],
+    "matrix_file": sys.argv[3],
+    "profile_id": sys.argv[4],
+    "sweep_id": sys.argv[5],
+    "batch_id": sys.argv[6],
+    "batch_root": sys.argv[7],
+    "terminal_status": sys.argv[8],
+    "failure_reason": sys.argv[9],
+    "selected_providers": [item for item in sys.argv[17].split(",") if item],
+    "selected_run_indexes": [item for item in sys.argv[18].split(",") if item],
+    "key_paths": {
+        "driver_log": sys.argv[10],
+        "profile_status_file": sys.argv[11],
+        "run_matrix_tsv": sys.argv[12],
+        "run_matrix_md": sys.argv[13],
+        "frontend_matrix_md": sys.argv[14],
+        "frontend_cancel_matrix_md": sys.argv[15],
+        "quality_report_md": sys.argv[16],
+    },
+    "raw_output_refs": raw_output_refs,
+}
+out.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+print(str(out))
 PY
 }
 
@@ -558,12 +908,14 @@ validate_profile_repos_meta() {
   local expected_repo_count="$3"
   local source_kind="$4"
   local output_json="$5"
-  python3 "$PROVENARCH_ROOT/scripts/resolve-repos-meta.py" \
+  if ! python3 "$PROVENARCH_ROOT/scripts/resolve-repos-meta.py" \
     --repos-file "$repos_file" \
     --expected-repo-count "$expected_repo_count" \
     --source-kind "$source_kind" \
     --profile-id "$profile_id" \
-    --out "$output_json"
+    --out "$output_json"; then
+    return 1
+  fi
   read_profile_repos_meta "$output_json"
 }
 
@@ -598,6 +950,12 @@ require_cmd python3
 acp_ensure_no_legacy_env_set die
 resolve_selected_providers
 resolve_selected_run_indexes
+if ! mkdir -p "$(dirname "$MATRIX_DRIVER_LOG")"; then
+  die "operational_host_preflight_failed: cannot create matrix driver log directory for $MATRIX_DRIVER_LOG"
+fi
+if ! : > "$MATRIX_DRIVER_LOG"; then
+  die "operational_host_preflight_failed: cannot write matrix driver log at $MATRIX_DRIVER_LOG"
+fi
 if [[ "$RELEASE_MODE" == "1" ]]; then
   require_cmd "$ACP_QWEN_CMD_BIN"
   require_cmd "$ACP_CLAUDE_CMD_BIN"
@@ -614,9 +972,9 @@ else
   fi
 fi
 
+run_host_preflight_checks
+
 mkdir -p "$MATRIX_ROOT" "$REPORTS_ROOT"
-mkdir -p "$(dirname "$MATRIX_DRIVER_LOG")"
-: > "$MATRIX_DRIVER_LOG"
 mkdir -p "$MATRIX_STATUS_ROOT"
 reconcile_stale_profile_statuses
 
@@ -948,10 +1306,66 @@ while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sw
   CURRENT_SWEEP_FAILURE_POLICY="$sweep_failure_policy"
   CURRENT_SWEEP_SHARD_MODE="$sweep_shard_mode"
   CURRENT_PROFILE_STATUS_FILE="$MATRIX_STATUS_ROOT/${profile_slug}--${sweep_slug}.json"
+  CURRENT_SOURCE_KIND="$source_kind"
+  CURRENT_EXPECTED_REPO_COUNT="$expected_repo_count"
+  CURRENT_REPOS_FILE="$repos_file"
 
   profile_meta_key="${profile_id}|${repos_file}|${expected_repo_count}|${source_kind}"
   if [[ "$profile_meta_key" != "$PROFILE_META_CACHE_KEY" ]]; then
-    validate_profile_repos_meta "$profile_id" "$repos_file" "$expected_repo_count" "$source_kind" "$profile_repos_meta_json"
+    if ! validate_profile_repos_meta "$profile_id" "$repos_file" "$expected_repo_count" "$source_kind" "$profile_repos_meta_json" >>"$driver_log" 2>&1; then
+      status="failed"
+      profile_failure_reason="operational_host_preflight_failed"
+      log "profile repos preflight failed: profile=$profile_id sweep=$sweep_id repos_file=$repos_file (see $driver_log)"
+      write_current_profile_status "$status" "$profile_failure_reason"
+
+      run_matrix_tsv="$REPORTS_ROOT/run_matrix_${batch_id}.tsv"
+      run_matrix_md="$REPORTS_ROOT/run_matrix_${batch_id}.md"
+      frontend_matrix_md="$REPORTS_ROOT/frontend_e2e_matrix_${batch_id}.md"
+      frontend_cancel_matrix_md="$REPORTS_ROOT/frontend_cancel_e2e_matrix_${batch_id}.md"
+      quality_report_md="$REPORTS_ROOT/quality_report_${batch_id}.md"
+      inventory_json="$(write_current_profile_inventory "$status" "$profile_failure_reason" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md")"
+      update_current_profile_status_artifacts "$status" "$profile_failure_reason" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md" "$inventory_json"
+
+      python3 - "$RECORDS_JSONL" \
+        "$profile_id" "$profile_slug" "$batch_id" "$source_kind" "$expected_repo_count" "$repos_file" "$status" "$profile_failure_reason" \
+        "$sweep_id" "$sweep_strategy" "$sweep_max_parallel" "$sweep_failure_policy" "$sweep_shard_mode" \
+        "$batch_root" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md" "$driver_log" "$inventory_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1]).resolve()
+payload = {
+    "profile_id": sys.argv[2],
+    "profile_slug": sys.argv[3],
+    "batch_id": sys.argv[4],
+    "source_kind": sys.argv[5],
+    "expected_repo_count": int(sys.argv[6]),
+    "repos_file": sys.argv[7],
+    "status": sys.argv[8],
+    "failure_reason": sys.argv[9],
+    "sweep_id": sys.argv[10],
+    "execution": {
+        "strategy": sys.argv[11],
+        "max_parallel_tasks": int(sys.argv[12]),
+        "failure_policy": sys.argv[13],
+        "shard_discovery_mode": sys.argv[14],
+    },
+    "batch_root": sys.argv[15],
+    "run_matrix_tsv": sys.argv[16],
+    "run_matrix_md": sys.argv[17],
+    "frontend_matrix_md": sys.argv[18],
+    "frontend_cancel_matrix_md": sys.argv[19],
+    "quality_report_md": sys.argv[20],
+    "driver_log": sys.argv[21],
+    "inventory_json": sys.argv[22],
+}
+with path.open("a", encoding="utf-8") as f:
+    f.write(json.dumps(payload, ensure_ascii=True))
+    f.write("\n")
+PY
+      continue
+    fi
     PROFILE_META_CACHE_KEY="$profile_meta_key"
     PROFILE_META_CACHE_REPOS_FILE="$PROFILE_REPOS_FILE_RESOLVED"
     PROFILE_META_CACHE_SOURCE_KIND="$PROFILE_SOURCE_KIND_EFFECTIVE"
@@ -1020,6 +1434,9 @@ while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sw
   profile_failure_reason="none"
   if [[ "$status" != "passed" ]]; then
     profile_failure_reason="child_failed"
+    if [[ -f "$driver_log" ]] && grep -q "operational_host_preflight_failed" "$driver_log"; then
+      profile_failure_reason="operational_host_preflight_failed"
+    fi
   fi
   if batch_has_incomplete_run_sentinels "$batch_root"; then
     status="failed"
@@ -1032,12 +1449,13 @@ while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sw
   frontend_matrix_md="$REPORTS_ROOT/frontend_e2e_matrix_${batch_id}.md"
   frontend_cancel_matrix_md="$REPORTS_ROOT/frontend_cancel_e2e_matrix_${batch_id}.md"
   quality_report_md="$REPORTS_ROOT/quality_report_${batch_id}.md"
-  update_current_profile_status_artifacts "$status" "$profile_failure_reason" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md"
+  inventory_json="$(write_current_profile_inventory "$status" "$profile_failure_reason" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md")"
+  update_current_profile_status_artifacts "$status" "$profile_failure_reason" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md" "$inventory_json"
 
   python3 - "$RECORDS_JSONL" \
     "$profile_id" "$profile_slug" "$batch_id" "$PROFILE_META_CACHE_SOURCE_KIND" "$PROFILE_META_CACHE_EXPECTED_REPO_COUNT" "$PROFILE_META_CACHE_REPOS_FILE" "$status" "$profile_failure_reason" \
     "$sweep_id" "$sweep_strategy" "$sweep_max_parallel" "$sweep_failure_policy" "$sweep_shard_mode" \
-    "$batch_root" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md" "$driver_log" <<'PY'
+    "$batch_root" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md" "$driver_log" "$inventory_json" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -1066,6 +1484,7 @@ payload = {
     "frontend_cancel_matrix_md": sys.argv[19],
     "quality_report_md": sys.argv[20],
     "driver_log": sys.argv[21],
+    "inventory_json": sys.argv[22],
 }
 with path.open("a", encoding="utf-8") as f:
     f.write(json.dumps(payload, ensure_ascii=True))
@@ -1147,6 +1566,7 @@ if status_root.exists():
             "frontend_cancel_matrix_md",
             "quality_report_md",
             "driver_log",
+            "inventory_json",
         ):
             value = payload.get(field)
             if field == "status" and str(value).strip():
@@ -1157,6 +1577,8 @@ if status_root.exists():
             existing[field] = value
         if isinstance(payload.get("execution"), dict) and not isinstance(existing.get("execution"), dict):
             existing["execution"] = payload.get("execution")
+        if isinstance(payload.get("raw_output_refs"), list) and not isinstance(existing.get("raw_output_refs"), list):
+            existing["raw_output_refs"] = payload.get("raw_output_refs")
 
 records = list(records_by_key.values())
 
@@ -1407,6 +1829,22 @@ def strict_blockers(
     return reasons
 
 
+def collect_raw_output_refs(rec: dict[str, object]) -> list[object]:
+    refs = rec.get("raw_output_refs")
+    if isinstance(refs, list):
+        return refs
+    inventory_path = Path(str(rec.get("inventory_json", "")))
+    if inventory_path.exists() and inventory_path.is_file():
+        try:
+            payload = json.loads(inventory_path.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        refs = payload.get("raw_output_refs")
+        if isinstance(refs, list):
+            return refs
+    return []
+
+
 def shard_plan_invariant_status(records: list[dict[str, object]]) -> tuple[dict[str, str], dict[str, list[str]]]:
     status_by_batch: dict[str, str] = {}
     blockers_by_batch: dict[str, list[str]] = {}
@@ -1497,8 +1935,10 @@ header = [
     "frontend_cancel_claude_status",
     "frontend_cancel_codex_status",
     "blocking_reasons",
+    "raw_output_ref_count",
     "run_matrix_tsv",
     "quality_report_md",
+    "inventory_json",
 ]
 
 tsv_lines = ["\t".join(header)]
@@ -1601,6 +2041,7 @@ for rec in records:
     execution_max_parallel = str((execution or {}).get("max_parallel_tasks", "-"))
     execution_failure_policy = str((execution or {}).get("failure_policy", "-"))
     execution_shard_mode = str((execution or {}).get("shard_discovery_mode", "-"))
+    raw_output_refs = collect_raw_output_refs(rec)
 
     tsv_lines.append(
         "\t".join(
@@ -1641,8 +2082,10 @@ for rec in records:
                 frontend_statuses["frontend_cancel_claude_status"],
                 frontend_statuses["frontend_cancel_codex_status"],
                 "; ".join(blockers) if blockers else "-",
+                str(len(raw_output_refs)),
                 str(rec["run_matrix_tsv"]),
                 str(rec["quality_report_md"]),
+                str(rec.get("inventory_json", "-")),
             ]
         )
     )
@@ -1701,6 +2144,8 @@ for rec in records:
                 "frontend_cancel_matrix_md": rec["frontend_cancel_matrix_md"],
                 "quality_report_md": rec["quality_report_md"],
                 "driver_log": rec["driver_log"],
+                "inventory_json": rec.get("inventory_json", "-"),
+                "raw_output_ref_count": len(raw_output_refs),
             },
         }
     )
@@ -1744,6 +2189,7 @@ else:
         verdict_lines.append(f"  - quality_report: {artifacts['quality_report_md']}")
         verdict_lines.append(f"  - frontend_matrix: {artifacts['frontend_matrix_md']}")
         verdict_lines.append(f"  - frontend_cancel_matrix: {artifacts['frontend_cancel_matrix_md']}")
+        verdict_lines.append(f"  - inventory: {artifacts['inventory_json']} (raw_output_refs={artifacts['raw_output_ref_count']})")
     if release_contract_failed:
         verdict_lines.append("- release_contract:")
         for blocker in release_contract_blockers:

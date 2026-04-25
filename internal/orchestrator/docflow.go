@@ -872,31 +872,61 @@ func dedupeSemanticEdges(edges []contracts.Edge, repoAliases semanticRepoAliasRe
 }
 
 func dedupeSemanticFindings(findings []contracts.Finding, repoAliases semanticRepoAliasResolver, entityRemap map[string]string) []contracts.Finding {
-	byID := map[string]contracts.Finding{}
+	grouped := map[string][]contracts.Finding{}
+	order := []string{}
 	for _, finding := range findings {
 		finding.ID = strings.TrimSpace(finding.ID)
 		finding.Title = strings.TrimSpace(finding.Title)
 		finding.Description = strings.TrimSpace(finding.Description)
+		finding.Severity = strings.TrimSpace(finding.Severity)
 		finding.RuleID = strings.TrimSpace(finding.RuleID)
 		finding.RelatedIDs = rewriteSemanticRelatedIDs(finding.RelatedIDs, entityRemap)
 		finding.Provenance = normalizeSemanticProvenance(finding.Provenance, repoAliases)
-		if existing, ok := byID[finding.ID]; ok {
-			existing.RelatedIDs = dedupeSemanticStrings(append(existing.RelatedIDs, finding.RelatedIDs...))
-			existing.Provenance = mergeSemanticProvenance(existing.Provenance, finding.Provenance)
-			if strings.TrimSpace(existing.Description) == "" {
-				existing.Description = strings.TrimSpace(finding.Description)
-			}
-			byID[finding.ID] = existing
+		key := semanticFindingDedupKey(finding)
+		if _, exists := grouped[key]; !exists {
+			order = append(order, key)
+		}
+		grouped[key] = append(grouped[key], finding)
+	}
+	merged := make([]contracts.Finding, 0, len(order))
+	for _, key := range order {
+		group := grouped[key]
+		if len(group) == 0 {
 			continue
 		}
-		byID[finding.ID] = finding
-	}
-	merged := make([]contracts.Finding, 0, len(byID))
-	for _, finding := range byID {
-		merged = append(merged, finding)
+		sort.Slice(group, func(i, j int) bool {
+			return canonicalSemanticIDSortKey(group[i].ID) < canonicalSemanticIDSortKey(group[j].ID)
+		})
+		winner := group[0]
+		winner.RelatedIDs = dedupeSemanticStrings(winner.RelatedIDs)
+		for _, candidate := range group[1:] {
+			winner = mergeSemanticFinding(winner, candidate)
+		}
+		merged = append(merged, winner)
 	}
 	sort.Slice(merged, func(i, j int) bool { return merged[i].ID < merged[j].ID })
 	return merged
+}
+
+func mergeSemanticFinding(winner contracts.Finding, candidate contracts.Finding) contracts.Finding {
+	if strings.TrimSpace(winner.ID) == "" {
+		winner.ID = strings.TrimSpace(candidate.ID)
+	}
+	if strings.TrimSpace(winner.Severity) == "" {
+		winner.Severity = strings.TrimSpace(candidate.Severity)
+	}
+	if strings.TrimSpace(winner.Title) == "" {
+		winner.Title = strings.TrimSpace(candidate.Title)
+	}
+	if strings.TrimSpace(winner.Description) == "" {
+		winner.Description = strings.TrimSpace(candidate.Description)
+	}
+	if strings.TrimSpace(winner.RuleID) == "" {
+		winner.RuleID = strings.TrimSpace(candidate.RuleID)
+	}
+	winner.RelatedIDs = dedupeSemanticStrings(append(append([]string{}, winner.RelatedIDs...), candidate.RelatedIDs...))
+	winner.Provenance = mergeSemanticProvenance(winner.Provenance, candidate.Provenance)
+	return winner
 }
 
 func rewriteSemanticQuestions(questions []contracts.Question, entityRemap map[string]string) []contracts.Question {
@@ -991,12 +1021,57 @@ func mergeSemanticProvenance(winner contracts.Provenance, candidate contracts.Pr
 func semanticEntityDedupKey(entity contracts.Entity) string {
 	entityType := normalizeSemanticKey(entity.Type)
 	repo := normalizeSemanticKey(primarySemanticEvidenceRepo(entity.Provenance.Evidence))
-	name := normalizeSemanticKey(entity.Name)
+	name := normalizeSemanticEntityNameDedupKey(entity.Type, entity.Name)
 	evidencePath := normalizeSemanticKey(primarySemanticEvidencePath(entity.Provenance.Evidence))
 	if name == "" || (repo == "" && evidencePath == "") {
 		return "id|" + strings.TrimSpace(entity.ID)
 	}
 	return strings.Join([]string{entityType, repo, name, evidencePath}, "|")
+}
+
+func normalizeSemanticEntityNameDedupKey(entityType string, name string) string {
+	normalizedName := normalizeSemanticKey(name)
+	if normalizedName == "" {
+		return ""
+	}
+	if strings.Contains(normalizeSemanticKey(entityType), "service") {
+		collapsed := strings.ReplaceAll(normalizedName, " ", "")
+		if collapsed != "" {
+			return collapsed
+		}
+	}
+	return normalizedName
+}
+
+func semanticFindingDedupKey(finding contracts.Finding) string {
+	ruleID := normalizeSemanticKey(finding.RuleID)
+	title := normalizeSemanticKey(finding.Title)
+	related := normalizedSemanticRelatedIDSet(finding.RelatedIDs)
+	if ruleID == "" && title == "" && len(related) == 0 {
+		return "id|" + strings.TrimSpace(finding.ID)
+	}
+	return "sig|" + strings.Join([]string{ruleID, title, strings.Join(related, ",")}, "|")
+}
+
+func normalizedSemanticRelatedIDSet(values []string) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+	seen := map[string]struct{}{}
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		key := normalizeSemanticKey(value)
+		if key == "" {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, key)
+	}
+	sort.Strings(normalized)
+	return normalized
 }
 
 func semanticEdgeDedupKey(edge contracts.Edge) string {
