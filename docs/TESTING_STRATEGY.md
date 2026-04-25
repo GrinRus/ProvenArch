@@ -228,6 +228,11 @@ Implemented additional jobs:
   - `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
 
 ### Optional live-runner smoke
+- `scripts/live-e2e-plan.py` — catalog-driven command generator for direct matrix harness invocations:
+  - does not execute the harness and does not replace `scripts/full-run-batch-matrix.sh`
+  - supports flexible selectors `smoke tiny`, `regres fast|long|full`, `release fast|long|full`
+  - `smoke tiny` is `1 repo × 1 run × 1 provider` for fastest trusted-machine signal
+  - generated `regres`/`release` commands rely on the existing quality path: `reports/taskruns/<run_id>-quality.json`, `quality_report_<batch-id>.md`, `quality_gates_failed=0`, no `artifact_quality:*`
 - `scripts/full-run-ai-advent.sh` — canonical local scenario/full-run loop:
   - supported headless providers: `claude-code`, `qwen-code`, `codex-code`
   - canonical input: `TARGET_REPOS_FILE`
@@ -245,6 +250,7 @@ Implemented additional jobs:
   - canonical input: `E2E_MATRIX_FILE`
   - approved profile ids: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
   - non-release slices: `examples/e2e-matrix.regres-*.yaml`
+  - diagnostic slices for generated selectors: `examples/e2e-matrix.smoke-tiny.bank.yaml`, `examples/e2e-matrix.diagnostic.sentry.yaml`
   - release-specific slices, `baseline` + `parallel-default`, strict blockers и release verdict policy живут только в `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
   - matrix invariant: для одного `profile_id` shard-plan должен совпадать между `baseline` и `parallel-default`
   - для `source_kind=git_url` refs должны быть pinned
