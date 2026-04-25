@@ -100,6 +100,17 @@ func StepSpecificPolicy(stepID string) string {
 			`- If owner mapping remains unresolved in evidence, include at least one finding and at least one question in validator-verdict.json.`,
 			`- Owner-gap findings/questions may coexist with verdict PASS when no technical validator issues remain.`,
 		}, "\n")
+	case "init.step4.proposals", "refresh.step4.proposals":
+		return strings.Join([]string{
+			fmt.Sprintf(`STEP POLICY %s:`, strings.TrimSpace(stepID)),
+			`- Do NOT delegate to agent/subagent helpers.`,
+			`- Do NOT use todo_write-style planning or long plan narration.`,
+			`- Use validated staged final evidence from read_context_roots; do not treat prior proposal reports or final indexes as manifest templates.`,
+			`- Treat schemas/*, docs/spec/*, and the enforced prompt contract as the only manifest source of truth for proposals-draft-manifest.json.`,
+			`- Keep step_contract exactly "proposals"; null, empty, or alternate values are invalid.`,
+			`- outputs[].canonical_path values are allowed only under proposals/* or reports/changelog/*.`,
+			`- Do NOT register legacy top-level fields: pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps.`,
+		}, "\n")
 	default:
 		if strings.HasPrefix(strings.TrimSpace(stepID), "refresh.") {
 			return `For refresh steps, keep unresolved gaps explicit in artifacts instead of inventing placeholder semantic payloads.`
@@ -204,6 +215,11 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Allowed canonical targets are proposals/* and reports/changelog/*.`,
 			`- If proposals-draft-manifest.json already describes the publish surface, stop after artifact validation; do NOT re-register draft artifacts through any legacy metadata op.`,
 			`- Promotion remains deterministic; your drafts become publish candidates only after compile/publish gates.`,
+		)
+		lines = append(lines, artifactquality.ProposalsDraftManifestContractLines()...)
+		lines = append(lines,
+			`- Canonical proposals draft fragment below is normative for field names, step_contract, and allowed publish surface; copy keys/types exactly and only change IDs/content.`,
+			artifactquality.ProposalsDraftManifestCanonicalExample(),
 		)
 	}
 	return strings.Join(lines, "\n")
@@ -355,6 +371,9 @@ func DraftArtifactRepairHints(task acpruntime.Task, validationErr error) []strin
 	case "init.step4.proposals", "refresh.step4.proposals":
 		lines = append(lines,
 			`- proposals-draft-manifest.json is the only publish-surface manifest for proposals/* and reports/changelog/* drafts.`,
+			`- step_contract MUST be exactly "proposals"; version MUST be integer 1.`,
+			`- outputs[].canonical_path values are allowed only under proposals/* or reports/changelog/* and MUST be unique.`,
+			`- Do NOT add legacy top-level fields such as pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps.`,
 			`- After draft artifact repair, stop after artifacts validate; do not emit any legacy metadata registration surface.`,
 		)
 	}

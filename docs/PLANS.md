@@ -55,6 +55,62 @@ EP-YYYYMMDD-<slug>
 
 ## Active Plans
 ### Plan ID
+EP-20260425-runtime-providers-stabilization
+
+### Context
+Live `regres fast` triage показал подтверждённый ACP product defect: `step4.proposals` prompt/step policy был слабее `collect/as_is/findings`, поэтому provider смог записать legacy proposal envelope, а strict parser корректно завершил run как `runtime_contract_failed`. Параллельно нужен меньший provider-specific drift между `claude/qwen/codex`, non-empty codex runtime metadata и durable evidence после cleanup temp roots.
+
+### Goals (must have)
+- [x] Усилить enforced `proposals-draft-manifest.json` contract без ослабления strict parser
+- [x] Добавить parser-level guard для proposals publish surface
+- [x] Вынести shared provider validation/raw diagnostic helpers без изменения qwen stall watchdog semantics
+- [x] Исправить `codex-code` runtime meta до `codex-code/headless`
+- [x] Добавить durable matrix inventory с bounded raw-output refs
+- [x] Синхронизировать docs/spec/runbook и fixtures/tests
+- [ ] Перепроверить live `claude-code × bank-openedx`, затем qwen-focused `regres fast`, затем full fresh-all-6 на trusted host
+
+### Non-goals
+- [x] Не менять публичные API/schemas/release taxonomy
+- [x] Не добавлять compatibility alias layer для legacy proposals manifests
+- [x] Не менять canonical matrix/profile/timeout files под текущую машину
+- [x] Не добавлять wrapper scripts поверх matrix harness
+
+### Approach
+1) Добавить proposals contract helpers/example и подключить их в enforced prompt, step policy, repair hints и baseline prompt bundle.
+2) Расширить runtime draft validator для `step4.proposals`: allowed canonical targets `proposals/*` + `reports/changelog/*`, duplicate target rejection.
+3) Создать `internal/runtime/providercommon` для artifact validation, stream capture и raw failure message persistence; qwen переиспользует только safe helpers.
+4) Зафиксировать codex runtime metadata и расширить raw failure metadata/inventory для post-cleanup triage.
+5) Обновить docs/spec/runbook/README и покрыть unit/script tests.
+
+### Files expected to change
+- `internal/artifactquality/*`
+- `internal/runtime/promptcontract/*`
+- `internal/runtime/steppolicy/*`
+- `internal/runtimedrafts/*`
+- `internal/runtime/{providercommon,claudecode,codexcode,qwencode,runnerdiag}/*`
+- `internal/orchestrator/sharding*`
+- `internal/workspace/baseline*`
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/resolve-repos-meta.py`
+- `scripts/tests/*`
+- `docs/*`
+
+### Acceptance criteria
+- [x] Targeted Go runtime/provider tests pass
+- [x] Resolver and matrix durable-inventory script tests pass
+- [x] Full DoD (`make contracts`, `make test`, `make lint`, `make build`) passes in this worktree
+- [ ] Live verification completed on trusted host
+
+### Risks
+- Provider-runtime outages (`qwen runner_unavailable`, `codex runtime_timeout`) may still block canonical live confidence even after ACP contract fixes.
+- Existing dirty WIP in matrix/preflight/docflow files must not be accidentally reverted or mixed into unrelated semantic changes.
+
+### Progress log
+- 2026-04-25: Implemented proposals contract hardening, parser guard, shared providercommon helpers, codex runtime meta, raw diagnostic metadata, durable matrix inventory, fixtures/tests, and docs sync. Full DoD passed; live verification remains pending.
+- 2026-04-25: Closed remaining operational blocker surface gap: missing selected provider binary and path pinned-SHA mismatch now materialize terminal `operational_host_preflight_failed` status/inventory/verdict before child batch execution. Full DoD passed again.
+- 2026-04-25: Final audit fixed raw failure artifact overwrite risk by switching runnerdiag names from second-resolution stamps to nanosecond-resolution stamp + pid + atomic sequence and exclusive file creation; rapid-failure regression coverage added. Live verification remains pending.
+
+### Plan ID
 EP-20260423-regres-fast-failure-taxonomy-hardening
 
 ### Context

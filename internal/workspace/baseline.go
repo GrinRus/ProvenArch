@@ -121,9 +121,11 @@ var baselinePromptPacks = map[string]string{
 			"existing proposal templates and ADR/RFC stubs",
 		},
 		RequiredOutputShape: []string{
+			"`proposals-draft-manifest.json` with version=1, run_id, step_id, step_contract=\"proposals\", agent_role, optional summary, and outputs[]",
+			"Draft proposal/changelog files written under draft_final_root with outputs[].path relative to draft_final_root",
+			"outputs[].canonical_path values only under proposals/* or reports/changelog/*, and unique",
 			"Structured proposal artifacts with explicit scope, rollout, and risk notes",
 			"Deterministic ordering of finding references and migration checklist items",
-			"No contract-breaking fields outside current proposal artifact conventions",
 		},
 		EvidencePolicy: []string{
 			"Every proposal item references one or more concrete findings or coverage gaps",
@@ -134,6 +136,8 @@ var baselinePromptPacks = map[string]string{
 			"Do not propose features unrelated to current findings scope",
 			"Do not promise runtime/security/compliance guarantees outside MVP boundary",
 			"Do not mutate schema contracts from proposal generation step",
+			"Do not add legacy manifest fields: pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps",
+			"Do not emit final-index-like proposal envelopes as proposals-draft-manifest.json",
 		},
 		FallbackWhenUnknown: []string{
 			"When effort or ownership is unknown, add deterministic TODO markers",
@@ -488,6 +492,8 @@ var baselineSkillPromptSpecs = map[string]skillPromptSpec{
 			"findings set, charter constraints, proposal templates",
 		},
 		RequiredOutputShape: []string{
+			"proposals-draft-manifest.json with version=1, run_id, step_id, step_contract=\"proposals\", agent_role, optional summary, and outputs[]",
+			"outputs[].canonical_path values only under proposals/* or reports/changelog/*",
 			"deterministic proposal outline with rollout and risk sections",
 		},
 		EvidencePolicy: []string{
@@ -495,6 +501,7 @@ var baselineSkillPromptSpecs = map[string]skillPromptSpec{
 		},
 		ForbiddenBehavior: []string{
 			"Do not prescribe broad rewrites without supporting findings",
+			"Do not emit legacy proposal manifest envelopes with pipeline/step/proposals[] top-level fields",
 		},
 		FallbackWhenUnknown: []string{
 			"Use phased TODO markers for unknown owners or effort estimates",

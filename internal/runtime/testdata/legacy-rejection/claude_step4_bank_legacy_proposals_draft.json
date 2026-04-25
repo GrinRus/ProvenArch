@@ -1,0 +1,15 @@
+{
+  "pipeline": "init",
+  "step": "step4.proposals",
+  "generated_at": "2026-04-24T07:23:06Z",
+  "domain_id": "bank-openedx",
+  "proposals": [
+    {
+      "id": "proposal.owner-gap",
+      "title": "Resolve owner gaps",
+      "summary": "Legacy proposal envelope observed in live provider output."
+    }
+  ],
+  "info_findings_noted": [],
+  "orphan_coverage_gaps": []
+}

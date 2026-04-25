@@ -62,6 +62,7 @@ Primary execution path для `step0..step4`:
 - `step0/2/4` materialize-ят staged draft manifests (`constitution-draft.json`, `asis-draft-manifest.json`, `proposals-draft-manifest.json`)
 - `step0/2/4` считаются successful только если draft manifest contract валиден и все referenced draft files реально существуют под `draft_final_root`
 - `step2.asis_docs` использует strict canonical manifest contract: `step_contract="as_is"`, required outputs `reports/as-is/overview.md`, `reports/coverage/summary.md`, `reports/agent-outputs/architect/summary.md`, а extra outputs допускаются только под `reports/as-is/<domain>/overview.md`
+- `step4.proposals` использует strict canonical manifest contract: `step_contract="proposals"`, allowed `outputs[].canonical_path` только `proposals/*` и `reports/changelog/*`; legacy proposal envelopes (`pipeline`, `step`, `proposals[]`) reject-ятся как runtime contract drift
 - publish для `step0/2/4` идёт только из validated runtime draft artifacts через deterministic compile/publish path; direct orchestrator writer больше не является альтернативным source-of-truth для canonical outputs
 - runtime draft manifest contract (`version=1`, `run_id`, `step_id`, `step_contract`, `agent_role`, `outputs[]`) является единым internal source of truth для writer + validator; `qwen` дополнительно делает один step-aware artifact-repair retry для draft-only шагов до возврата в orchestrator
 - runtime validators для collect manifests и draft manifests read-only по умолчанию; допустимая reconciliation вынесена в явную runtime repair/canonicalization стадию до финальной validation
@@ -279,7 +280,7 @@ Root entrypoints:
 Доступные entrypoint-скрипты:
 - `scripts/full-run-ai-advent.sh` — полный локальный cycle over `TARGET_REPOS_FILE`
 - `scripts/full-run-batch-5x2.sh` — batch re-audit + frontend live e2e
-- `scripts/full-run-batch-matrix.sh` — multi-profile matrix orchestrator
+- `scripts/full-run-batch-matrix.sh` — multi-profile matrix orchestrator; пишет durable profile status + per-batch inventory с key log/report paths и bounded raw-output refs
 - `scripts/frontend-live-e2e.sh` — локальный UI smoke для выбранного provider; различает generic `playwright_failed` и `active_run_timeout`, если run остаётся продуктивным, но не успевает дойти до `succeeded`
 - generic capacity/429 сигналы из `codex` plugin/Cloudflare/state-db noise не считаются root-cause `runner_unavailable`, если raw runtime не дал explicit terminal provider failure
 

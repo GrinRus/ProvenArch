@@ -60,6 +60,16 @@ func SharedSections(task acpruntime.Task) []string {
 			artifactquality.ValidatorVerdictCanonicalExample(),
 		)
 		sections = append(sections, strings.Join(findingsLines, "\n"))
+	case "init.step4.proposals", "refresh.step4.proposals":
+		proposalsLines := []string{
+			"PROPOSALS DRAFT MANIFEST CANONICAL SHAPE:",
+		}
+		proposalsLines = append(proposalsLines, artifactquality.ProposalsDraftManifestContractLines()...)
+		proposalsLines = append(proposalsLines,
+			`- Canonical fragment below is normative for field names, step_contract, allowed publish surface, and forbidden legacy fields; copy keys/types exactly and only change IDs/content.`,
+			artifactquality.ProposalsDraftManifestCanonicalExample(),
+		)
+		sections = append(sections, strings.Join(proposalsLines, "\n"))
 	}
 	if pack := strings.TrimSpace(steppolicy.WorkspacePromptPackSection(task)); pack != "" {
 		sections = append(sections, pack)

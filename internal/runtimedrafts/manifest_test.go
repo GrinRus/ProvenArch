@@ -308,6 +308,155 @@ func TestValidateRequiredManifestRejectsAsIsDraftLegacyOutputSurface(t *testing.
 	}
 }
 
+func TestValidateRequiredManifestAcceptsCanonicalProposalsDraft(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	for relPath, content := range map[string]string{
+		"proposal.md":  "# Proposal\n",
+		"changelog.md": "# Changelog\n",
+	} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(content), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "summary": "Drafted proposals.",
+  "outputs": [
+    {"path": "proposal.md", "canonical_path": "proposals/proposal-baseline/proposal.md", "kind": "proposal", "title": "Proposal"},
+    {"path": "changelog.md", "canonical_path": "reports/changelog/run-1.md", "kind": "changelog", "title": "Changelog"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	loaded, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "init.step4.proposals", "proposals", []string{ProposalsManifestFile})
+	if err != nil {
+		t.Fatalf("expected canonical proposals draft manifest to validate: %v", err)
+	}
+	if got, want := len(loaded.Outputs), 2; got != want {
+		t.Fatalf("unexpected output count: got=%d want=%d", got, want)
+	}
+}
+
+func TestValidateRequiredManifestRejectsObservedLegacyProposalsEnvelope(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), readRuntimeFixture(t, "legacy-rejection/claude_step4_bank_legacy_proposals_draft.json"), 0o644); err != nil {
+		t.Fatalf("write fixture manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "init.step4.proposals", "proposals", []string{ProposalsManifestFile})
+	if err == nil {
+		t.Fatalf("expected legacy proposals envelope to be rejected")
+	}
+	if !strings.Contains(err.Error(), `unknown field "pipeline"`) {
+		t.Fatalf("expected strict parser unknown field error, got %v", err)
+	}
+}
+
+func TestValidateRequiredManifestRejectsProposalsDraftOutsideAllowedPublishSurface(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "proposal.md"), []byte("# Proposal\n"), 0o644); err != nil {
+		t.Fatalf("write draft file: %v", err)
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "proposal.md", "canonical_path": "reports/as-is/proposal.md", "kind": "proposal", "title": "Proposal"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "init.step4.proposals", "proposals", []string{ProposalsManifestFile})
+	if err == nil {
+		t.Fatalf("expected invalid proposals publish surface to be rejected")
+	}
+	if !strings.Contains(err.Error(), "outside the allowed proposals publish surface") {
+		t.Fatalf("expected proposals publish surface error, got %v", err)
+	}
+}
+
+func TestValidateRequiredManifestRejectsDuplicateProposalsCanonicalPath(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	for _, relPath := range []string{"proposal-a.md", "proposal-b.md"} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte("# Proposal\n"), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "proposal-a.md", "canonical_path": "proposals/proposal-baseline/proposal.md", "kind": "proposal", "title": "Proposal A"},
+    {"path": "proposal-b.md", "canonical_path": "proposals/proposal-baseline/proposal.md", "kind": "proposal", "title": "Proposal B"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "init.step4.proposals", "proposals", []string{ProposalsManifestFile})
+	if err == nil {
+		t.Fatalf("expected duplicate proposals canonical path to be rejected")
+	}
+	if !strings.Contains(err.Error(), "must be unique") {
+		t.Fatalf("expected duplicate canonical path error, got %v", err)
+	}
+}
+
 func TestValidateRequiredManifestRejectsMissingReferencedDraftFile(t *testing.T) {
 	t.Parallel()
 

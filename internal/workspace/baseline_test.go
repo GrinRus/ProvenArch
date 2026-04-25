@@ -237,6 +237,38 @@ func TestBaselineFindingsPromptPackRequiresCanonicalVerdictMetadata(t *testing.T
 	}
 }
 
+func TestBaselineProposalsPromptPackRequiresCanonicalDraftManifest(t *testing.T) {
+	t.Parallel()
+
+	content, ok := BaselinePromptPack("proposals")
+	if !ok {
+		t.Fatalf("expected proposals baseline prompt pack")
+	}
+
+	expected := []string{
+		"`proposals-draft-manifest.json` with version=1, run_id, step_id, step_contract=\"proposals\", agent_role, optional summary, and outputs[]",
+		"outputs[].canonical_path values only under proposals/* or reports/changelog/*, and unique",
+		"Do not add legacy manifest fields: pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps",
+		"Do not emit final-index-like proposal envelopes as proposals-draft-manifest.json",
+	}
+	for _, token := range expected {
+		if !strings.Contains(content, token) {
+			t.Fatalf("expected proposals prompt pack to contain %q, got:\n%s", token, content)
+		}
+	}
+
+	system := renderSkillSystemPrompt("proposals")
+	for _, token := range []string{
+		"step_contract=\"proposals\"",
+		"outputs[].canonical_path values only under proposals/* or reports/changelog/*",
+		"pipeline/step/proposals[] top-level fields",
+	} {
+		if !strings.Contains(system, token) {
+			t.Fatalf("expected proposals skill prompt to contain %q, got:\n%s", token, system)
+		}
+	}
+}
+
 func writeBaselineWorkspace(t *testing.T) Root {
 	t.Helper()
 

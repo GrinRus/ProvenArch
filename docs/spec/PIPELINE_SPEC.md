@@ -300,6 +300,13 @@ Outputs:
 
 > В MVP proposals формируются только через runtime-authored staged docs; compiler допускается только как deterministic renderer/materializer для derived technical outputs.
 
+Runtime proposal contract:
+- если live runtime step выполняется, primary output — `proposals-draft-manifest.json` + optional proposal/changelog drafts внутри `draft_final_root`;
+- manifest обязан использовать strict canonical contract: `version=1`, `run_id`, `step_id`, `step_contract="proposals"`, `agent_role`, optional `summary`, `outputs[]`;
+- `outputs[].path` relative только к `draft_final_root`, `outputs[].canonical_path` workspace-relative и unique;
+- allowed publish surface для `outputs[].canonical_path`: только `proposals/*` и `reports/changelog/*`;
+- legacy/final-index-like envelopes (`pipeline`, `step`, `generated_at`, `domain_id`, `proposals[]`, `info_findings_noted`, `orphan_coverage_gaps`) являются contract drift и reject-ятся strict parser-ом до promotion.
+
 ## Iteration changelog (MVP)
 - На каждую итерацию orchestrator формирует:
   - `reports/changelog/<yyyy-mm-dd>-<iteration-id>.md`
@@ -376,6 +383,9 @@ Primary runtime output:
 - optional proposal/changelog drafts inside `draft_final_root`
 
 Publish policy:
+- strict `proposals-draft-manifest.json` contract обязателен для live runtime path: `version=1`, `run_id`, `step_id`, `step_contract="proposals"`, `agent_role`, optional `summary`, `outputs[]`;
+- `outputs[].path` relative только к `draft_final_root`, `outputs[].canonical_path` workspace-relative, unique и разрешён только под `proposals/*` или `reports/changelog/*`;
+- legacy/final-index-like envelopes запрещены: top-level `pipeline`, `step`, `generated_at`, `domain_id`, `proposals[]`, `info_findings_noted`, `orphan_coverage_gaps` должны hard-fail-иться strict parser-ом;
 - deterministic promoter проверяет schema/semantic/validator gates;
 - обязательного human approve нет;
 - canonical `proposals/*` и `reports/changelog/*` публикуются автоматически только после successful gates.

@@ -1,26 +1,21 @@
 package claudecode
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/GrinRus/ProvenArch/internal/artifactquality"
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/promptcontract"
+	"github.com/GrinRus/ProvenArch/internal/runtime/providercommon"
 	"github.com/GrinRus/ProvenArch/internal/runtime/runnerdiag"
-	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 )
 
@@ -60,10 +55,10 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 	command := r.commandName()
 	stdout, stderr, runErr := runClaudeCommand(ctx, task, command, r.Args)
 	if runErr != nil {
-		return acpruntime.Result{}, wrapCommandFailure(acpruntime.ProviderClaudeCode, task, stdout, stderr, runErr)
+		return acpruntime.Result{}, providercommon.WrapCommandFailure(acpruntime.ProviderClaudeCode, task, stdout, stderr, runErr)
 	}
-	if err := validateRuntimeArtifacts(task); err != nil {
-		return acpruntime.Result{}, wrapContractFailure(acpruntime.ProviderClaudeCode, task, stdout, stderr, err)
+	if err := providercommon.ValidateRuntimeArtifacts(task, acpruntime.ProviderClaudeCode); err != nil {
+		return acpruntime.Result{}, providercommon.WrapContractFailure(acpruntime.ProviderClaudeCode, task, stdout, stderr, err)
 	}
 	return acpruntime.Result{
 		Execution: acpruntime.NewExecution(task, acpruntime.ProviderClaudeCode, "headless", "succeeded", time.Now().UTC(), nil),
@@ -107,8 +102,12 @@ func runClaudeCommand(ctx context.Context, task acpruntime.Task, command string,
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	errCh := make(chan error, 2)
-	go func() { errCh <- captureCommandStream(stdoutPipe, &stdout, task, acpruntime.OutputStreamStdout) }()
-	go func() { errCh <- captureCommandStream(stderrPipe, &stderr, task, acpruntime.OutputStreamStderr) }()
+	go func() {
+		errCh <- providercommon.CaptureCommandStream(stdoutPipe, &stdout, task, acpruntime.OutputStreamStdout)
+	}()
+	go func() {
+		errCh <- providercommon.CaptureCommandStream(stderrPipe, &stderr, task, acpruntime.OutputStreamStderr)
+	}()
 	for i := 0; i < 2; i++ {
 		if streamErr := <-errCh; streamErr != nil {
 			_ = cmd.Wait()
@@ -137,160 +136,6 @@ func buildPrompt(task acpruntime.Task) string {
 	return promptcontract.ComposeArtifactOnlyPrompt(acpruntime.ProviderClaudeCode, task)
 }
 
-func captureCommandStream(reader io.Reader, sink *bytes.Buffer, task acpruntime.Task, stream acpruntime.OutputStream) error {
-	if sink == nil {
-		return errors.New("capture sink is nil")
-	}
-	bufReader := bufio.NewReader(reader)
-	for {
-		part, err := bufReader.ReadString('\n')
-		if len(part) > 0 {
-			sink.WriteString(part)
-			if task.OnOutput != nil {
-				task.OnOutput(acpruntime.OutputChunk{
-					Stream: stream,
-					Text:   strings.TrimRight(part, "\r\n"),
-				})
-			}
-		}
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			return err
-		}
-	}
-}
-
-func validateRuntimeArtifacts(task acpruntime.Task) error {
-	switch acpruntime.StepProviderKeyForStepID(task.StepID) {
-	case acpruntime.StepProviderStep1Collect:
-		return validateCollectArtifacts(task)
-	case acpruntime.StepProviderStep3Findings:
-		return validateValidatorArtifacts(task)
-	default:
-		if runtimedrafts.IsDraftStep(task.StepID) {
-			return validateDraftArtifacts(task)
-		}
-		return nil
-	}
-}
-
-func validateCollectArtifacts(task acpruntime.Task) error {
-	report, err := artifactquality.RepairCollectManifest(task)
-	if err != nil {
-		return err
-	}
-	emitCollectRepairDiagnostic(task, report, acpruntime.ProviderClaudeCode)
-	raw, err := os.ReadFile(filepath.Join(filepath.Clean(task.WriteRoot), shardPackManifestFileName))
-	if err != nil {
-		return err
-	}
-	if _, err := contracts.ParseShardPackManifest(raw); err != nil {
-		return err
-	}
-	return nil
-}
-
-func emitCollectRepairDiagnostic(task acpruntime.Task, report artifactquality.RepairReport, provider acpruntime.Provider) {
-	if task.OnDiagnostic == nil || len(report.AppliedRuleIDs) == 0 {
-		return
-	}
-	task.OnDiagnostic(acpruntime.DiagnosticEvent{
-		Message: "collect compatibility repair applied",
-		Fields: map[string]any{
-			"provider":         string(provider),
-			"changed":          report.Changed,
-			"applied_rule_ids": append([]string(nil), report.AppliedRuleIDs...),
-		},
-	})
-}
-
-func validateDraftArtifacts(task acpruntime.Task) error {
-	if _, _, err := validateRequiredRuntimeDraftArtifacts(task); err == nil {
-		return nil
-	}
-	manifestFile := runtimedrafts.ManifestFileForStep(task.StepID)
-	if manifestFile == "" {
-		return fmt.Errorf("draft manifest file is undefined for %s", task.StepID)
-	}
-	manifest, _, loadErr := runtimedrafts.Load(task.WriteRoot, manifestFile)
-	if loadErr != nil {
-		return loadErr
-	}
-	if err := runtimedrafts.ValidateManifestForTask(manifest, task.RunID, task.StepID, task.StepContract); err != nil {
-		return err
-	}
-	if _, err := runtimedrafts.ReconcileOutputsAtDraftRoot(task.DraftFinalRoot, manifest); err != nil {
-		return err
-	}
-	_, _, err := validateRequiredRuntimeDraftArtifacts(task)
-	return err
-}
-
-func validateRequiredRuntimeDraftArtifacts(task acpruntime.Task) (runtimedrafts.Manifest, []byte, error) {
-	return runtimedrafts.ValidateRequiredManifest(
-		task.WriteRoot,
-		task.DraftFinalRoot,
-		task.RunID,
-		task.StepID,
-		task.StepContract,
-		task.ExpectedArtifacts,
-	)
-}
-
-func validateValidatorArtifacts(task acpruntime.Task) error {
-	raw, err := os.ReadFile(filepath.Join(filepath.Clean(task.WriteRoot), validatorVerdictFileName))
-	if err != nil {
-		return err
-	}
-	_, err = contracts.ParseValidatorVerdict(raw)
-	return err
-}
-
-func wrapCommandFailure(provider acpruntime.Provider, task acpruntime.Task, stdout string, stderr string, cause error) error {
-	if errors.Is(cause, context.DeadlineExceeded) {
-		message, rawOutputRefs := buildFailureMessage(provider, task, "exec", cause, stdout, stderr)
-		return acpruntime.WrapRunnerErrorWithDiagnostics(provider, acpruntime.ErrorCodeRuntimeTimeout, message, stdout, stderr, rawOutputRefs, cause)
-	}
-	if errors.Is(cause, context.Canceled) {
-		message, rawOutputRefs := buildFailureMessage(provider, task, "exec", cause, stdout, stderr)
-		return acpruntime.WrapRunnerErrorWithDiagnostics(provider, acpruntime.ErrorCodeRunCanceled, message, stdout, stderr, rawOutputRefs, cause)
-	}
-	message, rawOutputRefs := buildFailureMessage(provider, task, "exec", cause, stdout, stderr)
-	return acpruntime.WrapRunnerErrorWithDiagnostics(provider, acpruntime.ErrorCodeRunnerUnavailable, message, stdout, stderr, rawOutputRefs, cause)
-}
-
-func wrapContractFailure(provider acpruntime.Provider, task acpruntime.Task, stdout string, stderr string, cause error) error {
-	message, rawOutputRefs := buildFailureMessage(provider, task, "contract", cause, stdout, stderr)
-	return acpruntime.WrapRunnerErrorWithDiagnostics(provider, acpruntime.ErrorCodeRuntimeContract, message, stdout, stderr, rawOutputRefs, cause)
-}
-
-func buildFailureMessage(provider acpruntime.Provider, task acpruntime.Task, stage string, cause error, stdout string, stderr string) (string, contracts.RuntimeOutputRefs) {
-	base := "unknown failure"
-	if cause != nil {
-		base = strings.TrimSpace(cause.Error())
-	}
-	artifacts, err := runnerdiag.WriteFailureArtifacts(task, provider, stdout, stderr)
-	if err != nil {
-		return fmt.Sprintf("stage=%s %s (raw_output_persist_failed=%v)", stage, base, err), contracts.RuntimeOutputRefs{}
-	}
-	return fmt.Sprintf(
-			"stage=%s %s (raw_output=%s stdout_bytes=%d stdout_sha256=%s stderr_bytes=%d stderr_sha256=%s)",
-			stage,
-			base,
-			artifacts.RelativeMetadataPath,
-			artifacts.Stdout.Bytes,
-			artifacts.Stdout.SHA256,
-			artifacts.Stderr.Bytes,
-			artifacts.Stderr.SHA256,
-		), contracts.RuntimeOutputRefs{
-			Stdout:   artifacts.Stdout.RelativePath,
-			Stderr:   artifacts.Stderr.RelativePath,
-			Metadata: artifacts.RelativeMetadataPath,
-		}
-}
-
 type FakeRunner struct{}
 
 func (FakeRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
@@ -312,7 +157,7 @@ func (FakeRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Resul
 	if err := PersistRuntimeArtifacts(task, summary, semantic, verdict); err != nil {
 		return acpruntime.Result{}, err
 	}
-	if err := validateRuntimeArtifacts(task); err != nil {
+	if err := providercommon.ValidateRuntimeArtifacts(task, acpruntime.ProviderClaudeCode); err != nil {
 		return acpruntime.Result{}, err
 	}
 	return acpruntime.Result{
