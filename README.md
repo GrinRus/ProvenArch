@@ -400,6 +400,7 @@ Docs-first semantic rules:
 Persisted runtime execution metadata:
 - сериализуется как internal `runtime-execution.json` payload рядом с taskrun artifacts
 - используется для replay/recovery, taskrun diagnostics и raw-output linking
+- live headless providers (`claude-code`, `qwen-code`, `codex-code`) проходят через общий artifact-only process engine; provider adapters задают только CLI invocation и explicit activity/recovery policy
 - provider/API transport transcripts (например `[API Error: ... SSL ...]`) классифицируются как `runner_unavailable` с обязательным сохранением raw stdout/stderr artifacts
 - не является semantic source of truth для canonical `reports/*`/`proposals/*` promotion path
 

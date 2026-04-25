@@ -53,6 +53,11 @@
 - только manual/opt-in
 - не входит в required CI gates
 
+### Headless provider conformance
+- required tests используют stub provider adapters без live network dependencies
+- общий process engine проверяется на success by valid artifacts, controlled stop after valid artifacts, silent missing-artifact classification, invalid artifact contract failures, deadline timeout и raw stdout/stderr diagnostics
+- provider-specific tests проверяют только adapter policy/args: `qwen` не требует semantic JSON stdout, а `claude`/`codex` machine-mode flags остаются diagnostic transport mode
+
 ## 3) Обязательная структура test assets
 
 - `fixtures/workspace/` — manifest и validator cases
