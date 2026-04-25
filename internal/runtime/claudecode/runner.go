@@ -1,9 +1,7 @@
 package claudecode
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,7 +13,6 @@ import (
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/promptcontract"
 	"github.com/GrinRus/ProvenArch/internal/runtime/providercommon"
-	"github.com/GrinRus/ProvenArch/internal/runtime/runnerdiag"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 )
 
@@ -52,80 +49,67 @@ func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acprunti
 	if err := r.Preflight(ctx); err != nil {
 		return acpruntime.Result{}, err
 	}
-	command := r.commandName()
-	stdout, stderr, runErr := runClaudeCommand(ctx, task, command, r.Args)
-	if runErr != nil {
-		return acpruntime.Result{}, providercommon.WrapCommandFailure(acpruntime.ProviderClaudeCode, task, stdout, stderr, runErr)
+	return providercommon.RunHeadlessProvider(ctx, task, claudeAdapter{runner: r})
+}
+
+type claudeAdapter struct {
+	runner HeadlessRunner
+}
+
+func (a claudeAdapter) Provider() acpruntime.Provider {
+	return acpruntime.ProviderClaudeCode
+}
+
+func (a claudeAdapter) RuntimeVersion() string {
+	return "headless"
+}
+
+func (a claudeAdapter) CommandSpec(task acpruntime.Task) (providercommon.CommandSpec, error) {
+	includeDirs := acpruntime.ResolveHeadlessIncludeDirectories(task)
+	commandArgs := append([]string(nil), a.runner.Args...)
+	if len(commandArgs) == 0 {
+		commandArgs = buildClaudeArgsWithIncludeDirectories(includeDirs, buildPrompt(task))
 	}
-	if err := providercommon.ValidateRuntimeArtifacts(task, acpruntime.ProviderClaudeCode); err != nil {
-		return acpruntime.Result{}, providercommon.WrapContractFailure(acpruntime.ProviderClaudeCode, task, stdout, stderr, err)
+	stdin, err := providercommon.JSONTaskStdin(task)
+	if err != nil {
+		return providercommon.CommandSpec{}, err
 	}
-	return acpruntime.Result{
-		Execution: acpruntime.NewExecution(task, acpruntime.ProviderClaudeCode, "headless", "succeeded", time.Now().UTC(), nil),
-		Stdout:    stdout,
-		Stderr:    stderr,
+	return providercommon.CommandSpec{
+		Command:     a.runner.commandName(),
+		Args:        commandArgs,
+		Stdin:       stdin,
+		Dir:         strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task)),
+		IncludeDirs: includeDirs,
 	}, nil
 }
 
-func runClaudeCommand(ctx context.Context, task acpruntime.Task, command string, args []string) (string, string, error) {
-	taskPayload, err := json.Marshal(task)
-	if err != nil {
-		return "", "", fmt.Errorf("marshal runtime task: %w", err)
-	}
-	commandArgs := append([]string(nil), args...)
-	if len(commandArgs) == 0 {
-		commandArgs = buildDefaultClaudeArgs(task, buildPrompt(task))
-	}
+func (a claudeAdapter) ValidateArtifacts(task acpruntime.Task) error {
+	return providercommon.ValidateRuntimeArtifacts(task, acpruntime.ProviderClaudeCode)
+}
 
-	cmd := exec.CommandContext(ctx, command, commandArgs...)
-	if workDir := strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task)); workDir != "" {
-		cmd.Dir = workDir
+func (a claudeAdapter) ActivityPolicy(_ acpruntime.Task) providercommon.ActivityPolicy {
+	return providercommon.ActivityPolicy{
+		MonitorArtifacts: true,
 	}
-	cmd.Stdin = bytes.NewReader(taskPayload)
+}
 
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return "", "", err
+func (a claudeAdapter) RecoveryPolicy(_ acpruntime.Task) providercommon.RecoveryPolicy {
+	return providercommon.RecoveryPolicy{
+		AcceptValidArtifactsAfterStop: true,
 	}
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		return "", "", err
-	}
+}
 
-	if err := cmd.Start(); err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return "", "", ctxErr
-		}
-		return "", "", err
-	}
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	errCh := make(chan error, 2)
-	go func() {
-		errCh <- providercommon.CaptureCommandStream(stdoutPipe, &stdout, task, acpruntime.OutputStreamStdout)
-	}()
-	go func() {
-		errCh <- providercommon.CaptureCommandStream(stderrPipe, &stderr, task, acpruntime.OutputStreamStderr)
-	}()
-	for i := 0; i < 2; i++ {
-		if streamErr := <-errCh; streamErr != nil {
-			_ = cmd.Wait()
-			return stdout.String(), stderr.String(), streamErr
-		}
-	}
-	if err := cmd.Wait(); err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return stdout.String(), stderr.String(), ctxErr
-		}
-		return stdout.String(), stderr.String(), runnerdiag.BuildExecFailure(err, stdout.String(), stderr.String())
-	}
-	return stdout.String(), stderr.String(), nil
+func (a claudeAdapter) UnavailableMarkers() []string {
+	return providercommon.DefaultUnavailableMarkers()
 }
 
 func buildDefaultClaudeArgs(task acpruntime.Task, prompt string) []string {
+	return buildClaudeArgsWithIncludeDirectories(acpruntime.ResolveHeadlessIncludeDirectories(task), prompt)
+}
+
+func buildClaudeArgsWithIncludeDirectories(includeDirs []string, prompt string) []string {
 	args := []string{"--output-format", "json", "--permission-mode", "bypassPermissions"}
-	for _, dir := range acpruntime.ResolveHeadlessIncludeDirectories(task) {
+	for _, dir := range includeDirs {
 		args = append(args, "--add-dir", dir)
 	}
 	args = append(args, "-p", prompt)

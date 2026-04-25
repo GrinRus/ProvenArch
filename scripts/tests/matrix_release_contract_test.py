@@ -266,7 +266,11 @@ class MatrixReleaseContractTest(unittest.TestCase):
                   printf '| provider | status | runs |\\n'
                   printf '|---|---|---|\\n'
                   for provider in "${selected_providers[@]}"; do
-                    printf '| %s | passed | 1 |\\n' "${provider}"
+                    if [[ "${BATCH_FRONTEND_MODE:-}" == "never" ]]; then
+                      printf '| %s | skipped | 0 |\\n' "${provider}"
+                    else
+                      printf '| %s | passed | 1 |\\n' "${provider}"
+                    fi
                   done
                 } > "${frontend_matrix_md}"
 
@@ -274,7 +278,11 @@ class MatrixReleaseContractTest(unittest.TestCase):
                   printf '| provider | status | runs |\\n'
                   printf '|---|---|---|\\n'
                   for provider in "${selected_providers[@]}"; do
-                    printf '| %s | passed | 1 |\\n' "${provider}"
+                    if [[ "${BATCH_FRONTEND_CANCEL_MODE:-}" == "never" ]]; then
+                      printf '| %s | skipped | 0 |\\n' "${provider}"
+                    else
+                      printf '| %s | passed | 1 |\\n' "${provider}"
+                    fi
                   done
                 } > "${frontend_cancel_matrix_md}"
 
@@ -1053,6 +1061,36 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 and rec.get("frontend", {}).get("frontend_claude_status") == "missing"
                 and rec.get("frontend", {}).get("frontend_codex_status") == "missing"
                 and rec.get("strict_status") == "passed"
+                for rec in verdict.get("records", [])
+            )
+        )
+
+    def test_non_release_frontend_never_is_non_applicable(self) -> None:
+        matrix_file = self._write_matrix_file(
+            None,
+            include_profiles=["single-path"],
+        )
+        matrix_id = "matrix-test-non-release-frontend-never"
+        result = self._run_matrix(
+            matrix_file,
+            matrix_id,
+            extra_env={
+                "BATCH_PROVIDER_FILTER": "qwen-code",
+                "BATCH_FRONTEND_MODE": "never",
+                "BATCH_FRONTEND_CANCEL_MODE": "never",
+            },
+            release_mode="0",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual(verdict["verdict"], "PASS")
+        self.assertTrue(
+            all(
+                rec.get("frontend", {}).get("frontend_qwen_status") == "skipped"
+                and rec.get("frontend", {}).get("frontend_cancel_qwen_status") == "skipped"
+                and rec.get("strict_status") == "passed"
+                and not rec.get("blocking_reasons")
                 for rec in verdict.get("records", [])
             )
         )

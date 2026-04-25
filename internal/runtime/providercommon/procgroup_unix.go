@@ -1,6 +1,6 @@
 //go:build unix
 
-package qwencode
+package providercommon
 
 import (
 	"os"
@@ -13,16 +13,6 @@ func configureCommandProcessGroup(cmd *exec.Cmd) {
 		return
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-}
-
-func signalCommandProcessTree(process *os.Process, sig syscall.Signal) error {
-	if process == nil || process.Pid <= 0 {
-		return nil
-	}
-	if err := syscall.Kill(-process.Pid, sig); err == nil {
-		return nil
-	}
-	return process.Signal(sig)
 }
 
 func killCommandProcessTree(process *os.Process) error {

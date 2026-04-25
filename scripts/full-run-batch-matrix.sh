@@ -1505,6 +1505,7 @@ fi
 
 python3 - "$RECORDS_JSONL" "$MATRIX_STATUS_ROOT" "$MATRIX_REPORT_MD" "$MATRIX_REPORT_TSV" "$VERDICT_MD" "$VERDICT_JSON" "$MATRIX_ID" "$RELEASE_MODE" "$RUN_COUNT" "$MATRIX_SELECTED_PROVIDERS_CSV" "$MATRIX_SELECTED_RUN_INDEXES_CSV" <<'PY'
 import json
+import os
 import re
 import sys
 from collections import Counter
@@ -1770,6 +1771,8 @@ def strict_blockers(
     release_mode: bool,
     expected_backend_runs: int,
     required_frontend_providers: list[str],
+    frontend_init_required: bool,
+    frontend_cancel_required: bool,
 ) -> list[str]:
     reasons: list[str] = []
 
@@ -1819,9 +1822,9 @@ def strict_blockers(
     }
     for provider in required_frontend_providers:
         init_key, cancel_key = frontend_provider_keys[provider]
-        if frontend.get(init_key) != "passed":
+        if frontend_init_required and frontend.get(init_key) != "passed":
             reasons.append(f"{init_key}={frontend.get(init_key, 'missing')} (expected passed)")
-        if frontend.get(cancel_key) != "passed":
+        if frontend_cancel_required and frontend.get(cancel_key) != "passed":
             reasons.append(f"{cancel_key}={frontend.get(cancel_key, 'missing')} (expected passed)")
     if release_mode and shard_plan_invariant != "passed":
         reasons.append(f"shard_plan_invariant={shard_plan_invariant} (release requires passed)")
@@ -2005,6 +2008,8 @@ required_frontend_providers = list(required_release_providers)
 if not release_mode:
     expected_backend_runs = len(selected_run_indexes) * len(selected_providers)
     required_frontend_providers = list(selected_providers)
+frontend_init_required = release_mode or os.environ.get("BATCH_FRONTEND_MODE", "").strip().lower() != "never"
+frontend_cancel_required = release_mode or os.environ.get("BATCH_FRONTEND_CANCEL_MODE", "").strip().lower() != "never"
 
 for rec in records:
     run_matrix_tsv = Path(str(rec["run_matrix_tsv"]))
@@ -2030,6 +2035,8 @@ for rec in records:
         release_mode,
         expected_backend_runs,
         required_frontend_providers,
+        frontend_init_required,
+        frontend_cancel_required,
     )
     blockers.extend(invariant_blockers_by_batch.get(str(rec["batch_id"]), []))
     strict_status = "passed" if not blockers else "failed"

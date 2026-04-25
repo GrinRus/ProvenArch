@@ -15,33 +15,8 @@ import (
 func TestRunClassifiesProviderUnavailableWhenArtifactsAreMissingAfterSuccessfulProcess(t *testing.T) {
 	t.Parallel()
 
-	workspace := t.TempDir()
-	writeRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "constitution")
-	draftRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "final")
-	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
-		t.Fatalf("mkdir write root: %v", err)
-	}
-	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
-		t.Fatalf("mkdir draft root: %v", err)
-	}
-
-	scriptPath := filepath.Join(workspace, "fake-qwen.sh")
-	script := "#!/bin/sh\nprintf '%s\\n' 'API Error: 403 permission_error usage limit'\nexit 0\n"
-	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake qwen script: %v", err)
-	}
-
-	runner := HeadlessRunner{Command: scriptPath}
-	task := acpruntime.Task{
-		TaskID:            "task-1",
-		RunID:             "run-1",
-		StepID:            "init.step0.constitution",
-		StepContract:      "constitution",
-		Workspace:         workspace,
-		WriteRoot:         writeRoot,
-		DraftFinalRoot:    draftRoot,
-		ExpectedArtifacts: []string{"constitution-draft.json"},
-	}
+	task := newQwenDraftTask(t, "run-provider-marker")
+	runner := HeadlessRunner{Command: writeQwenScript(t, "#!/usr/bin/env bash\nset -eu\nprintf '%s\\n' 'API Error: 403 permission_error usage limit'\n")}
 
 	_, err := runner.Run(context.Background(), task)
 	if err == nil {
@@ -60,337 +35,42 @@ func TestRunClassifiesProviderUnavailableWhenArtifactsAreMissingAfterSuccessfulP
 	}
 }
 
-func TestArtifactValidationKeepsMalformedManifestAsRuntimeContractFailure(t *testing.T) {
+func TestRunClassifiesSilentMissingArtifactsAsProviderUnavailable(t *testing.T) {
 	t.Parallel()
 
-	workspace := t.TempDir()
-	writeRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "proposals")
-	draftRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "final")
-	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
-		t.Fatalf("mkdir write root: %v", err)
-	}
-	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
-		t.Fatalf("mkdir draft root: %v", err)
-	}
-	if err := os.WriteFile(
-		filepath.Join(writeRoot, "proposals-draft-manifest.json"),
-		[]byte("{\"version\":1,\"run_id\":\"run-1\",\"step_id\":\"init.step4.proposals\",\"step_contract\":\"proposals\",\"agent_role\":\"architect\",\"manifest_version\":2,\"outputs\":[]}"),
-		0o644,
-	); err != nil {
-		t.Fatalf("write invalid proposals manifest: %v", err)
-	}
+	task := newQwenDraftTask(t, "run-silent-missing")
+	runner := HeadlessRunner{Command: writeQwenScript(t, "#!/usr/bin/env bash\nset -eu\n")}
 
-	result := acpruntime.Result{Stdout: "API Error: 403 permission_error usage limit"}
-	err := repairAndValidateArtifacts(acpruntime.Task{
-		RunID:             "run-1",
-		StepID:            "init.step4.proposals",
-		StepContract:      "proposals",
-		WriteRoot:         writeRoot,
-		DraftFinalRoot:    draftRoot,
-		ExpectedArtifacts: []string{"proposals-draft-manifest.json"},
-	})
+	_, err := runner.Run(context.Background(), task)
 	if err == nil {
-		t.Fatal("expected artifact validation error")
+		t.Fatal("expected runner error")
 	}
-	if shouldTreatArtifactFailureAsProviderUnavailable(result, err) {
-		t.Fatalf("expected malformed manifest to remain contract failure, got provider-unavailable classification for %v", err)
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected runtime runner error, got %T: %v", err, err)
+	}
+	if got, want := runnerErr.Code, acpruntime.ErrorCodeRunnerUnavailable; got != want {
+		t.Fatalf("expected %s, got %s (%v)", want, got, err)
 	}
 }
 
-func TestArtifactValidationTreatsMissingDraftManifestAsProviderUnavailableWhenProviderMarkersExist(t *testing.T) {
+func TestRunKeepsMalformedManifestAsRuntimeContractFailure(t *testing.T) {
 	t.Parallel()
 
-	workspace := t.TempDir()
-	writeRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "constitution")
-	draftRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "final")
-	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
-		t.Fatalf("mkdir write root: %v", err)
-	}
-	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
-		t.Fatalf("mkdir draft root: %v", err)
-	}
+	task := newQwenDraftTask(t, "run-malformed")
+	script := "#!/usr/bin/env bash\nset -eu\nmkdir -p " + shellQuote(task.WriteRoot) + "\nprintf '%s\\n' '{\"version\":1,\"run_id\":\"" + task.RunID + "\",\"step_id\":\"init.step0.constitution\",\"step_contract\":\"constitution\",\"agent_role\":\"architect\",\"manifest_version\":2,\"outputs\":[]}' > " + shellQuote(filepath.Join(task.WriteRoot, "constitution-draft.json")) + "\nprintf '%s\\n' 'API Error: 403 permission_error usage limit'\n"
+	runner := HeadlessRunner{Command: writeQwenScript(t, script)}
 
-	result := acpruntime.Result{Stdout: "API Error: 403 permission_error usage limit"}
-	err := repairAndValidateArtifacts(acpruntime.Task{
-		RunID:             "run-1",
-		StepID:            "init.step0.constitution",
-		StepContract:      "constitution",
-		WriteRoot:         writeRoot,
-		DraftFinalRoot:    draftRoot,
-		ExpectedArtifacts: []string{"constitution-draft.json"},
-	})
+	_, err := runner.Run(context.Background(), task)
 	if err == nil {
-		t.Fatal("expected artifact validation error")
+		t.Fatal("expected runtime contract error")
 	}
-	if !shouldTreatArtifactFailureAsProviderUnavailable(result, err) {
-		t.Fatalf("expected missing draft manifest to classify as provider unavailable, got %v", err)
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected runtime runner error, got %T: %v", err, err)
 	}
-}
-
-func TestRecoverAfterStallAcceptsValidDraftArtifacts(t *testing.T) {
-	t.Parallel()
-
-	workspace := t.TempDir()
-	writeRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "constitution")
-	draftRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "final")
-	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
-		t.Fatalf("mkdir write root: %v", err)
-	}
-	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
-		t.Fatalf("mkdir draft root: %v", err)
-	}
-	writeCanonicalConstitutionDraft(t, writeRoot, draftRoot, "run-1")
-
-	runner := HeadlessRunner{Command: "/usr/bin/true"}
-	task := acpruntime.Task{
-		TaskID:            "task-1",
-		RunID:             "run-1",
-		StepID:            "init.step0.constitution",
-		StepContract:      "constitution",
-		Workspace:         workspace,
-		WriteRoot:         writeRoot,
-		DraftFinalRoot:    draftRoot,
-		ExpectedArtifacts: []string{"constitution-draft.json"},
-		StartedAtUTC:      time.Now().UTC(),
-	}
-
-	recovered, _, err := runner.recoverAfterStall(
-		context.Background(),
-		task,
-		runner.Command,
-		runQwenOptions{},
-		acpruntime.Result{},
-		collectStallError{
-			Sentinel: errDraftStalledAfterArtifacts,
-			Diagnostic: collectStallDiagnostic{
-				StallPhase:        collectStallPhasePostArtifact,
-				ManifestState:     "valid",
-				AuthoredFileCount: 2,
-			},
-		},
-	)
-	if !recovered {
-		t.Fatal("expected draft stall to enter recovery path")
-	}
-	if err != nil {
-		t.Fatalf("expected artifact-only recovery to succeed, got %v", err)
-	}
-}
-
-func TestRecoverAfterStallRetriesFreshProcessWhenArtifactsWereMissing(t *testing.T) {
-	t.Parallel()
-
-	workspace := t.TempDir()
-	writeRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "constitution")
-	draftRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "final")
-	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
-		t.Fatalf("mkdir write root: %v", err)
-	}
-	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
-		t.Fatalf("mkdir draft root: %v", err)
-	}
-
-	runner := HeadlessRunner{Command: writeQwenRetryStubRunner(t, writeRoot, draftRoot, "run-1")}
-	task := acpruntime.Task{
-		TaskID:            "task-1",
-		RunID:             "run-1",
-		StepID:            "init.step0.constitution",
-		StepContract:      "constitution",
-		Workspace:         workspace,
-		WriteRoot:         writeRoot,
-		DraftFinalRoot:    draftRoot,
-		ExpectedArtifacts: []string{"constitution-draft.json"},
-		StartedAtUTC:      time.Now().UTC(),
-	}
-
-	recovered, result, err := runner.recoverAfterStall(
-		context.Background(),
-		task,
-		runner.Command,
-		runQwenOptions{},
-		acpruntime.Result{},
-		collectStallError{
-			Sentinel: errCollectStalledBeforeArtifacts,
-			Diagnostic: collectStallDiagnostic{
-				StallPhase:        collectStallPhasePreArtifact,
-				ManifestState:     "",
-				AuthoredFileCount: 0,
-			},
-		},
-	)
-	if !recovered {
-		t.Fatal("expected pre-artifact stall to enter recovery path")
-	}
-	if err != nil {
-		t.Fatalf("expected fresh retry to succeed, got %v", err)
-	}
-	if !strings.Contains(result.Stdout, "ok") {
-		t.Fatalf("expected retry result stdout to be preserved, got %q", result.Stdout)
-	}
-}
-
-func TestShouldClassifyRetryStallAsProviderUnavailableForSilentPreArtifactRetry(t *testing.T) {
-	t.Parallel()
-
-	stalled := collectStallError{
-		Sentinel: errCollectStalledBeforeArtifacts,
-		Diagnostic: collectStallDiagnostic{
-			StallPhase:        collectStallPhasePreArtifact,
-			ManifestState:     "",
-			AuthoredFileCount: 1,
-		},
-	}
-	if !shouldClassifyRetryStallAsProviderUnavailable(acpruntime.Result{}, stalled, stalled) {
-		t.Fatal("expected silent pre-artifact retry exhaustion to classify as provider unavailable")
-	}
-}
-
-func TestShouldClassifyRetryStallAsProviderUnavailableForSilentPostArtifactRetry(t *testing.T) {
-	t.Parallel()
-
-	stalled := collectStallError{
-		Sentinel: errCollectStalledAfterArtifacts,
-		Diagnostic: collectStallDiagnostic{
-			StallPhase:        collectStallPhasePostArtifact,
-			ManifestState:     "valid",
-			AuthoredFileCount: 1,
-		},
-	}
-	if !shouldClassifyRetryStallAsProviderUnavailable(acpruntime.Result{}, stalled, stalled) {
-		t.Fatal("expected silent post-artifact retry exhaustion to classify as provider unavailable")
-	}
-}
-
-func TestShouldClassifyRetryStallAsContractFailureWhenRetryProducedOutput(t *testing.T) {
-	t.Parallel()
-
-	stalled := collectStallError{
-		Sentinel: errCollectStalledBeforeArtifacts,
-		Diagnostic: collectStallDiagnostic{
-			StallPhase:        collectStallPhasePreArtifact,
-			ManifestState:     "",
-			AuthoredFileCount: 1,
-		},
-	}
-	result := acpruntime.Result{Stderr: "partial output before stall"}
-	if shouldClassifyRetryStallAsProviderUnavailable(result, stalled, stalled) {
-		t.Fatal("expected retry exhaustion with provider output to remain a contract failure")
-	}
-}
-
-func TestStallRetryOptionsDisablesCollectMonitorForPreArtifactRetry(t *testing.T) {
-	t.Parallel()
-
-	options := runQwenOptions{
-		EnableCollectStallMonitor: true,
-		EnableDraftStallMonitor:   true,
-	}
-
-	got := stallRetryOptions(options, collectStallDiagnostic{StallPhase: collectStallPhasePreArtifact})
-	if !got.EnableCollectStallMonitor {
-		t.Fatal("expected collect stall monitor to remain enabled for post-artifact recovery")
-	}
-	if got.CollectPreArtifactWindow != collectRetryPreArtifactWindow {
-		t.Fatalf("expected pre-artifact retry window %s, got %s", collectRetryPreArtifactWindow, got.CollectPreArtifactWindow)
-	}
-	if !got.EnableDraftStallMonitor {
-		t.Fatal("expected draft stall monitor to remain enabled")
-	}
-}
-
-func TestStallRetryOptionsKeepsCollectMonitorForPostArtifactRetry(t *testing.T) {
-	t.Parallel()
-
-	options := runQwenOptions{
-		EnableCollectStallMonitor: true,
-		EnableDraftStallMonitor:   true,
-	}
-
-	got := stallRetryOptions(options, collectStallDiagnostic{StallPhase: collectStallPhasePostArtifact})
-	if !got.EnableCollectStallMonitor {
-		t.Fatal("expected collect stall monitor to stay enabled for post-artifact handling")
-	}
-	if got.CollectPreArtifactWindow != 0 {
-		t.Fatalf("expected default pre-artifact window on non-pre-artifact retries, got %s", got.CollectPreArtifactWindow)
-	}
-	if !got.EnableDraftStallMonitor {
-		t.Fatal("expected draft stall monitor to remain enabled")
-	}
-}
-
-func TestMonitorCollectStallHonorsConfiguredPreArtifactWindow(t *testing.T) {
-	t.Parallel()
-
-	workspace := t.TempDir()
-	writeRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "collect")
-	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
-		t.Fatalf("mkdir write root: %v", err)
-	}
-
-	task := acpruntime.Task{WriteRoot: writeRoot}
-	tracker := newCommandActivityTracker(time.Now().Add(-1500 * time.Millisecond))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	type monitorResult struct {
-		err     collectStallError
-		stalled bool
-	}
-	done := make(chan monitorResult, 1)
-	go func() {
-		err, stalled := monitorCollectStall(ctx, nil, task, tracker, 5*time.Second)
-		done <- monitorResult{err: err, stalled: stalled}
-	}()
-
-	select {
-	case result := <-done:
-		t.Fatalf("expected extended pre-artifact window to keep waiting, got stalled=%v err=%v", result.stalled, result.err)
-	case <-time.After(2500 * time.Millisecond):
-	}
-
-	cancel()
-
-	select {
-	case result := <-done:
-		if result.stalled {
-			t.Fatalf("expected canceled monitor to exit without stall, got %v", result.err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("expected monitor to stop after context cancellation")
-	}
-}
-
-func TestMonitorCollectStallTripsAfterConfiguredPreArtifactWindow(t *testing.T) {
-	t.Parallel()
-
-	workspace := t.TempDir()
-	writeRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "collect")
-	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
-		t.Fatalf("mkdir write root: %v", err)
-	}
-
-	task := acpruntime.Task{WriteRoot: writeRoot}
-	tracker := newCommandActivityTracker(time.Now().Add(-2 * time.Second))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	done := make(chan collectStallError, 1)
-	go func() {
-		err, stalled := monitorCollectStall(ctx, nil, task, tracker, time.Second)
-		if !stalled {
-			done <- collectStallError{}
-			return
-		}
-		done <- err
-	}()
-
-	select {
-	case result := <-done:
-		if !errors.Is(result, errCollectStalledBeforeArtifacts) {
-			t.Fatalf("expected pre-artifact stall, got %v", result)
-		}
-	case <-time.After(4 * time.Second):
-		t.Fatal("expected configured pre-artifact window to trip")
+	if got, want := runnerErr.Code, acpruntime.ErrorCodeRuntimeContract; got != want {
+		t.Fatalf("expected %s, got %s (%v)", want, got, err)
 	}
 }
 
@@ -403,51 +83,47 @@ func containsAll(text string, tokens []string) bool {
 	return true
 }
 
-func writeCanonicalConstitutionDraft(t *testing.T, writeRoot string, draftRoot string, runID string) {
+func newQwenDraftTask(t *testing.T, runID string) acpruntime.Task {
 	t.Helper()
 
-	manifest := `{
-  "version": 1,
-  "run_id": "` + runID + `",
-  "step_id": "init.step0.constitution",
-  "step_contract": "constitution",
-  "agent_role": "architect",
-  "summary": "Recovered constitution artifacts.",
-  "outputs": [
-    {
-      "path": "charter-overview.md",
-      "canonical_path": "charter/overview.md",
-      "kind": "charter",
-      "title": "Constitution"
-    },
-    {
-      "path": "baseline-subagents.yaml",
-      "canonical_path": "skills/subagents.yaml",
-      "kind": "bundle",
-      "title": "Baseline Subagents"
-    }
-  ]
-}`
-	if err := os.WriteFile(filepath.Join(writeRoot, "constitution-draft.json"), []byte(manifest), 0o644); err != nil {
-		t.Fatalf("write constitution manifest: %v", err)
+	workspace := t.TempDir()
+	writeRoot := filepath.Join(workspace, "reports", "taskruns", runID, "constitution")
+	draftRoot := filepath.Join(workspace, "reports", "taskruns", runID, "staging", "final")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(draftRoot, "charter-overview.md"), []byte("# Constitution\n"), 0o644); err != nil {
-		t.Fatalf("write charter overview: %v", err)
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(draftRoot, "baseline-subagents.yaml"), []byte("version: 1\n"), 0o644); err != nil {
-		t.Fatalf("write baseline subagents: %v", err)
+	return acpruntime.Task{
+		TaskID:            "task-" + runID,
+		RunID:             runID,
+		StepID:            "init.step0.constitution",
+		StepContract:      "constitution",
+		Workspace:         workspace,
+		WriteRoot:         writeRoot,
+		DraftFinalRoot:    draftRoot,
+		ExpectedArtifacts: []string{"constitution-draft.json", "charter-overview.md", "baseline-subagents.yaml"},
+		StartedAtUTC:      time.Now().UTC(),
 	}
 }
 
-func writeQwenRetryStubRunner(t *testing.T, writeRoot string, draftRoot string, runID string) string {
+func writeQwenScript(t *testing.T, script string) string {
 	t.Helper()
 
-	path := filepath.Join(t.TempDir(), "qwen-retry-stub.sh")
-	script := `#!/usr/bin/env bash
+	path := filepath.Join(t.TempDir(), "qwen-stub.sh")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write qwen stub: %v", err)
+	}
+	return path
+}
+
+func qwenValidDraftScript(task acpruntime.Task, tail string) string {
+	return `#!/usr/bin/env bash
 set -eu
-write_root="` + writeRoot + `"
-draft_root="` + draftRoot + `"
-run_id="` + runID + `"
+write_root=` + shellQuote(task.WriteRoot) + `
+draft_root=` + shellQuote(task.DraftFinalRoot) + `
+run_id=` + shellQuote(task.RunID) + `
 mkdir -p "$write_root" "$draft_root"
 cat >"$write_root/constitution-draft.json" <<EOF
 {
@@ -479,10 +155,9 @@ EOF
 cat >"$draft_root/baseline-subagents.yaml" <<'EOF'
 version: 1
 EOF
-printf '%s\n' '{"type":"result","status":"ok"}'
-`
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("write retry stub: %v", err)
-	}
-	return path
+` + tail + "\n"
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }

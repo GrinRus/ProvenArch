@@ -26,6 +26,34 @@ func TestHeadlessRunnerPreflightFailsWhenCommandMissing(t *testing.T) {
 	}
 }
 
+func TestDefaultCodexArgsKeepNoninteractiveDiagnosticMode(t *testing.T) {
+	t.Parallel()
+
+	args := buildCodexArgsWithIncludeDirectories("/tmp/work", []string{"/tmp/work", "/tmp/repo"})
+	assertCodexArg(t, args, "exec")
+	assertCodexArg(t, args, "--json")
+	assertCodexArg(t, args, "--color")
+	assertCodexArg(t, args, "never")
+	assertCodexArg(t, args, "--skip-git-repo-check")
+	assertCodexArg(t, args, "--sandbox")
+	assertCodexArg(t, args, "danger-full-access")
+	assertCodexArg(t, args, "--cd")
+	assertCodexArg(t, args, "/tmp/work")
+	assertCodexArg(t, args, "--add-dir")
+	assertCodexArg(t, args, "/tmp/repo")
+	assertCodexArg(t, args, "--ephemeral")
+	assertCodexArg(t, args, "-")
+}
+
+func TestCodexAdapterUsesSharedUnavailableMarkers(t *testing.T) {
+	t.Parallel()
+
+	markers := (codexAdapter{}).UnavailableMarkers()
+	if !codexSliceContains(markers, "rate limit") || !codexSliceContains(markers, "ssl") {
+		t.Fatalf("expected shared unavailable markers, got %v", markers)
+	}
+}
+
 func TestHeadlessRunnerSucceedsWithValidDraftArtifacts(t *testing.T) {
 	t.Parallel()
 
@@ -289,4 +317,20 @@ func writeSleepingStubRunner(t *testing.T) string {
 		t.Fatalf("write sleeping stub: %v", err)
 	}
 	return path
+}
+
+func assertCodexArg(t *testing.T, args []string, want string) {
+	t.Helper()
+	if !codexSliceContains(args, want) {
+		t.Fatalf("expected arg %q in %v", want, args)
+	}
+}
+
+func codexSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

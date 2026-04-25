@@ -12,7 +12,7 @@ func buildDefaultQwenArgs(task acpruntime.Task, prompt string) []string {
 }
 
 func buildQwenArgsWithIncludeDirectories(includeDirs []string, prompt string) []string {
-	args := []string{"--output-format", "json", "--chat-recording", "false", "--yolo", "--channel", "CI"}
+	args := []string{"--chat-recording", "false", "--yolo", "--channel", "CI"}
 	for _, dir := range includeDirs {
 		if strings.TrimSpace(dir) == "" {
 			continue

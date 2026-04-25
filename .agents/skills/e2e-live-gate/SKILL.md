@@ -42,7 +42,7 @@ Legacy compatibility only:
 11) Если canonical run идёт из отдельного clean worktree, сначала установить локальные UI deps в этом worktree (`npm ci --prefix ui`), иначе precheck на `make test` сломается ещё до live batch execution.
 12) Canonical matrix slices уже несут native `timeout_profile`; не задавай `ACP_*TIMEOUT*` вручную для штатного запуска. В non-release manual diagnostic внешние timeout env допустимы, в release-mode они остаются blocked-by-default.
 13) Batch/profile reports нужно читать только в рамках реально выбранной поверхности (`selected_providers`, `selected_run_indexes`); qwen-only `run1` regression run не должен интерпретироваться как synthetic `2x5` matrix.
-14) Для collect steps canonical runtime теперь делает одну artifact-repair попытку для skeletal/generic-only manifests; если repair не улучшил artifact fidelity, исходный `write_root` откатывается, а step классифицируется как `runner_parse_failed` / `runtime_parse`, а не как nominal success.
+14) Для headless providers runtime использует общий artifact-only process engine и тонкие adapters; stdout/stderr являются diagnostics, а success берётся только из валидных artifacts.
 15) Frontend cancel smoke должен идти из свежей копии backend `arch-workspace`, а terminal cancel verdict обязан сохранять `error_code=run_canceled`, даже если рядом всплыл validation/layout failure.
 16) Для flexible combinations можно использовать `python3 scripts/live-e2e-plan.py ... --format shell`; этот tool только печатает прямые `full-run-batch-matrix.sh` команды и не заменяет release harness.
 17) Regress/release acceptance всегда включает artifact quality: `reports/taskruns/<run_id>-quality.json`, `quality_report_<batch-id>.md`, `quality_gates_failed=0`, отсутствие `artifact_quality:*`.
@@ -119,6 +119,8 @@ PY
 - timeout + `runner_unavailable` в одном run:
   primary triage class = `runtime_timeout`, если summary/classifier явно фиксирует timeout.
 - `runner_parse_failed` на `single-git_url`/`qwen-code` в `regres fast`
-  Причина: live provider ушёл в tool chatter + partial TaskResult drafting вместо одного финального JSON; canonical reference incident зафиксирован 2026-04-17, Open edX companion run тогда был прерван вручную и не считается отдельным regression signal.
+  Исторический legacy incident: до удаления semantic stdout/TaskResult contract live provider мог уйти в tool chatter + partial JSON drafting. В актуальном artifact-only runtime такой сигнал должен проявляться как `runtime_contract_failed`, `runner_unavailable` или `runtime_timeout` с raw-output refs; не использовать этот старый инцидент как текущую qwen-specific диагностику.
+- `runner_unavailable` на qwen-only smoke без raw stdout/stderr
+  Причина: qwen adapter policy классифицирует fully silent missing-artifact path или silent retry exhaustion как provider availability incident. Сначала проверить raw metadata и artifact state; valid artifacts after controlled stop должны считаться success.
 - `runtime_timeout` на clean canonical slice
   Причина: либо запускается legacy matrix без committed `timeout_profile`, либо даже native time budget оказался недостаточным; сначала проверить `timeout_profile` matrix-файла и `full-run.log`, затем уже считать это реальной runtime/provider деградацией.

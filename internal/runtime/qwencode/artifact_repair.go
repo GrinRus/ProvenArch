@@ -29,10 +29,6 @@ func repairAndValidateDraftArtifacts(task acpruntime.Task) error {
 	return providercommon.ValidateDraftArtifacts(task)
 }
 
-func validateRuntimeDraftArtifactsAtWriteRoot(task acpruntime.Task) (runtimedrafts.Manifest, []byte, error) {
-	return providercommon.ValidateRequiredRuntimeDraftArtifacts(task)
-}
-
 func validateValidatorArtifacts(task acpruntime.Task) error {
 	return providercommon.ValidateValidatorArtifacts(task)
 }

@@ -55,6 +55,56 @@ EP-YYYYMMDD-<slug>
 
 ## Active Plans
 ### Plan ID
+EP-20260425-provider-runtime-adapter-alignment
+
+### Context
+Qwen live smoke показал, что provider уже успевает записать валидные artifacts, но старый qwen-only watchdog мог убить процесс и классифицировать artifact-only success как `runner_unavailable`. У `claude-code` и `codex-code` не было такого же watchdog, но был общий риск: разные process lifecycle paths при одинаковом artifact-only runtime contract.
+
+### Goals (must have)
+- [x] Вынести process lifecycle для `claude-code`, `qwen-code`, `codex-code` в общий `providercommon` engine
+- [x] Оставить provider differences в adapters: command/args/stdin/workdir, unavailable markers, activity/recovery policy
+- [x] Принять valid artifacts after controlled stop как success
+- [x] Убрать qwen dependency на `--output-format json`
+- [x] Сохранить `qwen` silent missing-artifact/retry exhaustion как `runner_unavailable`, а malformed artifacts как `runtime_contract_failed`
+- [x] Исправить non-release frontend `never` verdict semantics без ослабления release-mode strict frontend checks
+
+### Non-goals
+- [x] Не менять product API, workspace schema или public artifact schemas
+- [x] Не добавлять wrapper поверх `scripts/full-run-batch-matrix.sh`
+- [x] Не расширять MVP provider set
+
+### Approach
+1) Добавить shared `providercommon` process engine с raw diagnostics, activity monitor, controlled stop/retry и artifact validation.
+2) Переключить `claudecode`, `qwencode`, `codexcode` на thin adapters поверх engine и удалить qwen-only process executor.
+3) Добавить conformance tests для artifact-only success/failure/timeout/unavailable paths и provider args tests.
+4) Синхронизировать architecture/spec/testing/runbook/live-e2e skill.
+
+### Files expected to change
+- `internal/runtime/providercommon/*`
+- `internal/runtime/{claudecode,codexcode,qwencode}/*`
+- `scripts/full-run-batch-matrix.sh`
+- `docs/*`, `.agents/skills/e2e-live-gate/SKILL.md`
+
+### Acceptance criteria
+- [x] `go test ./internal/runtime/...`
+- [x] targeted matrix release-contract tests for non-release frontend `never` and release strict frontend blockers
+- [x] `make contracts`
+- [x] `make test`
+- [x] `make lint`
+- [x] `make build`
+- [x] Trusted-machine smoke tiny qwen rerun executed; verdict remained blocked by live `qwen-code` partial/missing artifact behavior (`runner_unavailable`), with frontend `never` correctly non-blocking
+
+### Risks
+- Live CLI behavior can still fail due external auth/rate limits; such failures must stay explicit `runner_unavailable` with raw-output refs.
+- Release-mode frontend checks must remain strict even though non-release diagnostic `frontend=never` is now non-applicable.
+
+### Progress log
+- 2026-04-25: Implemented shared provider engine/adapters, removed qwen-only process executor, fixed qwen output args, added conformance tests, fixed non-release frontend-never verdict semantics, and synchronized docs/runbook/skill.
+- 2026-04-25: Follow-up audit closed residual gaps: adapter contract now exposes include dirs, `claude`/`codex` adapter conformance tests cover noninteractive diagnostic flags and shared unavailable markers, and shared engine now applies explicit adapter retry policy after normal-exit missing/invalid artifact validation failures.
+- 2026-04-25: Full local DoD passed (`make contracts`, `make test`, `make lint`, `make build`). Trusted smoke tiny qwen diagnostic `smoke-tiny-bank-20260425T133718Z` produced reports but failed with backend `runner_unavailable`; raw diagnostics show qwen left five collect shards partial/missing while valid artifacts-after-stop were accepted for the first shard.
+- 2026-04-25: Final defect audit fixed retry classification edge case: an initial structurally malformed artifact contract cannot be masked by a later silent retry as `runner_unavailable`; added regression coverage and reran full DoD.
+
+### Plan ID
 EP-20260425-flexible-live-e2e-selector
 
 ### Context
@@ -118,7 +168,7 @@ Live `regres fast` triage показал подтверждённый ACP produc
 ### Goals (must have)
 - [x] Усилить enforced `proposals-draft-manifest.json` contract без ослабления strict parser
 - [x] Добавить parser-level guard для proposals publish surface
-- [x] Вынести shared provider validation/raw diagnostic helpers без изменения qwen stall watchdog semantics
+- [x] Вынести shared provider validation/raw diagnostic helpers; full process lifecycle alignment superseded by `EP-20260425-provider-runtime-adapter-alignment`
 - [x] Исправить `codex-code` runtime meta до `codex-code/headless`
 - [x] Добавить durable matrix inventory с bounded raw-output refs
 - [x] Синхронизировать docs/spec/runbook и fixtures/tests
