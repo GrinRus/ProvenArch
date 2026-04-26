@@ -12,7 +12,7 @@ source "$PROVENARCH_ROOT/scripts/preflight-log.sh"
 source "$PROVENARCH_ROOT/scripts/timeout-env-keys.sh"
 # shellcheck source=scripts/execution-env-keys.sh
 source "$PROVENARCH_ROOT/scripts/execution-env-keys.sh"
-BATCH_SCRIPT="${BATCH_SCRIPT:-$PROVENARCH_ROOT/scripts/full-run-batch-5x2.sh}"
+BATCH_SCRIPT="${BATCH_SCRIPT:-$PROVENARCH_ROOT/scripts/full-run-batch.sh}"
 E2E_MATRIX_FILE="${E2E_MATRIX_FILE:-}"
 MATRIX_ID="${MATRIX_ID:-matrix-$(date -u +'%Y%m%dT%H%M%SZ')}"
 RUN_COUNT="${RUN_COUNT:-1}"
@@ -2161,6 +2161,17 @@ release_contract_failed = release_mode and release_contract_status != "passed"
 verdict = "PASS" if strict_fail_count == 0 and not release_contract_failed else "FAIL"
 release_state = "RELEASE READY" if verdict == "PASS" else "RELEASE BLOCKED"
 
+backend_aggregate: dict[str, int] = {}
+for rec in verdict_records:
+    backend = rec.get("backend")
+    if not isinstance(backend, dict):
+        continue
+    for key, value in backend.items():
+        try:
+            backend_aggregate[key] = backend_aggregate.get(key, 0) + int(value)
+        except Exception:
+            continue
+
 out_md.parent.mkdir(parents=True, exist_ok=True)
 out_md.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
 out_tsv.write_text("\n".join(tsv_lines) + "\n", encoding="utf-8")
@@ -2223,6 +2234,7 @@ verdict_payload = {
     "profile_sweep_runs": len(verdict_records),
     "strict_pass_runs": len(verdict_records) - strict_fail_count,
     "strict_fail_runs": strict_fail_count,
+    "backend": backend_aggregate,
     "release_contract": {
         "mode": "release" if release_mode else "non-release",
         "required_sweeps": required_sweeps,

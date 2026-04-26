@@ -54,6 +54,7 @@ func StepSpecificPolicy(stepID string) string {
 			`- Do NOT use todo_write-style planning or long plan narration.`,
 			`- Use only existing repo entrypoint hints; do not assume README.md exists when it is not present.`,
 			`- After the first useful evidence pass, converge to authored docs plus shard-pack-manifest.json instead of continuing a broad repo sweep.`,
+			`- Markdown-only completion is invalid: shard-pack-manifest.json is the required collect result contract for every shard.`,
 			`- Treat schemas/*, docs/spec/*, and the enforced prompt contract as the only schema source of truth for shard-pack-manifest.json.`,
 			`- Do NOT inspect reports/taskruns, prior shard-pack-manifest.json files, raw logs, or archive docs to infer collect manifest shape.`,
 			`- Every semantic provenance.evidence[] item must include non-empty repo and path values that resolve to real repository evidence.`,
@@ -67,6 +68,7 @@ func StepSpecificPolicy(stepID string) string {
 			`- Do NOT use todo_write-style planning or long plan narration.`,
 			`- Use only existing repo entrypoint hints; do not assume README.md exists when it is not present.`,
 			`- After the first useful evidence pass, converge to authored docs plus shard-pack-manifest.json instead of continuing a broad repo sweep.`,
+			`- Markdown-only completion is invalid: shard-pack-manifest.json is the required collect result contract for every shard.`,
 			`- Treat schemas/*, docs/spec/*, and the enforced prompt contract as the only schema source of truth for shard-pack-manifest.json.`,
 			`- Do NOT inspect reports/taskruns, prior shard-pack-manifest.json files, raw logs, or archive docs to infer collect manifest shape.`,
 			`- Allowed semantic.entities[*].type values: service, datastore, integration, external.system, team, domain, api, component.`,
@@ -161,6 +163,7 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Do NOT delegate to agent/subagent helpers and do NOT use todo_write-style planning.`,
 			`- Before the first filesystem write inside write_root, keep repository exploration minimal and converge quickly on the first authored doc plus shard-pack-manifest.json.`,
 			`- Produce runtime-authored documents in write_root and then write shard-pack-manifest.json in write_root.`,
+			`- Do not exit after writing markdown only; every collect shard must finish with a valid shard-pack-manifest.json.`,
 			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and semantic snapshot.`,
 			`- In shard-pack-manifest.json, semantic MUST include coverage, questions, entities, edges, and findings.`,
 			`- Use only canonical collect vocabulary: semantic.coverage.observed, semantic.questions[*].text, semantic.edges[*].type, and object-shaped provenance blocks.`,
@@ -266,10 +269,6 @@ func ParseRepairHints(stepID string, parseStage string, parseErr error) []string
 			stage = "unknown"
 		}
 		lines = append(lines, fmt.Sprintf(`- Previous %s validation failure: %s`, stage, detail))
-	}
-	if strings.Contains(parseErr.Error(), `additionalProperties 'compatibility' not allowed`) {
-		lines = append(lines, `- Replace any legacy "compatibility" block with the canonical "semantic" block in shard-pack-manifest.json.`)
-		lines = append(lines, "- "+TopLevelSemanticOutputRule(stepID))
 	}
 	return append(lines,
 		`- Do NOT return semantic payloads on stdout; write the required artifacts and exit.`,

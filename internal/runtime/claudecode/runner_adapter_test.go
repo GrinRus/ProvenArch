@@ -76,12 +76,74 @@ func TestClaudeAdapterCommandSpecExposesRuntimeContractSurface(t *testing.T) {
 	}
 }
 
+func TestClaudeRepairCommandSpecNarrowsReadSurface(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "arch-workspace")
+	repoRoot := filepath.Join(root, "repo-a")
+	writeRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "shards", "repo-a")
+	stagedFinal := filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "final")
+	for _, dir := range []string{workspace, repoRoot, writeRoot, stagedFinal} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	manifest := "version: 1\nrepos:\n  - name: repo-a\n    path: " + repoRoot + "\n"
+	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	task := acpruntime.Task{
+		RunID:            "run-1",
+		StepID:           "init.step1.collect",
+		Workspace:        workspace,
+		WriteRoot:        writeRoot,
+		ArtifactRoot:     "reports/taskruns/run-1/staging/shards/repo-a",
+		ReadContextRoots: []string{workspace, stagedFinal, repoRoot},
+		RepoScopes:       []string{"repo-a"},
+		PathScopes:       []string{"src"},
+	}
+
+	spec, err := (claudeAdapter{runner: HeadlessRunner{Command: "claude-test"}}).CollectManifestRepairCommandSpec(task, os.ErrNotExist)
+	if err != nil {
+		t.Fatalf("repair command spec: %v", err)
+	}
+	if stringSliceContains(spec.IncludeDirs, workspace) || stringSliceContains(spec.IncludeDirs, stagedFinal) {
+		t.Fatalf("repair include dirs must exclude workspace/taskrun history, got %v", spec.IncludeDirs)
+	}
+	if !stringSliceContains(spec.IncludeDirs, writeRoot) || !stringSliceContains(spec.IncludeDirs, repoRoot) {
+		t.Fatalf("repair include dirs must keep write root and repo evidence, got %v", spec.IncludeDirs)
+	}
+	raw, err := io.ReadAll(spec.Stdin)
+	if err != nil {
+		t.Fatalf("read stdin: %v", err)
+	}
+	if strings.Contains(string(raw), stagedFinal) {
+		t.Fatalf("repair task stdin must not expose sibling taskrun roots, got %s", raw)
+	}
+}
+
 func TestClaudeAdapterUsesSharedUnavailableMarkers(t *testing.T) {
 	t.Parallel()
 
 	markers := (claudeAdapter{}).UnavailableMarkers()
 	if !stringSliceContains(markers, "rate limit") || !stringSliceContains(markers, "ssl") {
 		t.Fatalf("expected shared unavailable markers, got %v", markers)
+	}
+}
+
+func TestClaudeAdapterMonitorsPreArtifactStallsForArtifactSteps(t *testing.T) {
+	t.Parallel()
+
+	policy := (claudeAdapter{}).ActivityPolicy(acpruntime.Task{StepID: "init.step1.collect"})
+	if !policy.MonitorArtifacts || !policy.MonitorPreArtifact {
+		t.Fatalf("expected collect artifact and pre-artifact monitoring, got %+v", policy)
+	}
+
+	policy = (claudeAdapter{}).ActivityPolicy(acpruntime.Task{StepID: "init.step0.constitution"})
+	if !policy.MonitorArtifacts || !policy.MonitorPreArtifact {
+		t.Fatalf("expected draft artifact and pre-artifact monitoring, got %+v", policy)
 	}
 }
 

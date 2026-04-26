@@ -17,7 +17,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/model"
 	"github.com/GrinRus/ProvenArch/internal/reports"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
-	"github.com/GrinRus/ProvenArch/internal/runtime/claudecode"
+	"github.com/GrinRus/ProvenArch/internal/runtime/fakeruntime"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
@@ -228,7 +228,7 @@ func WithProviderFallback(provider acpruntime.Provider, source acpruntime.Provid
 
 func NewService(options ...Option) *Service {
 	service := &Service{
-		runnerFactory:    stepRunnerFactoryFunc(func(acpruntime.Provider) (acpruntime.Runner, error) { return claudecode.FakeRunner{}, nil }),
+		runnerFactory:    stepRunnerFactoryFunc(func(acpruntime.Provider) (acpruntime.Runner, error) { return fakeruntime.Runner{}, nil }),
 		clock:            time.Now,
 		runs:             map[string]*runRecord{},
 		debounceWindow:   5 * time.Minute,

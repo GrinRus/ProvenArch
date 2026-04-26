@@ -68,6 +68,39 @@ func TestResolveHeadlessIncludeDirectoriesCollectUsesWriteRootAndRepoScopes(t *t
 	}
 }
 
+func TestResolveHeadlessCollectRepairIncludeDirectoriesExcludesWorkspaceReports(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "arch-workspace")
+	writeRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "shards", "repo-b")
+	stagedFinal := filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "final")
+	repoB := filepath.Join(root, "repo-b")
+	for _, dir := range []string{workspace, writeRoot, stagedFinal, repoB} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	manifest := "version: 1\nrepos:\n  - name: repo-b\n    path: " + repoB + "\n"
+	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	got := ResolveHeadlessCollectRepairIncludeDirectories(Task{
+		StepID:           "init.step1.collect",
+		Workspace:        workspace,
+		WriteRoot:        writeRoot,
+		RepoScopes:       []string{"repo-b"},
+		ReadContextRoots: []string{workspace, stagedFinal, repoB},
+	})
+
+	want := []string{writeRoot, repoB}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected repair include dirs:\n got=%v\nwant=%v", got, want)
+	}
+}
+
 func TestResolveHeadlessIncludeDirectoriesFallsBackToWorkspaceValidate(t *testing.T) {
 	t.Parallel()
 

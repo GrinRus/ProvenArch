@@ -1,7 +1,7 @@
 # Release Live E2E Runbook (Agent, no wrapper)
 
 Этот runbook фиксирует manual pre-release gate на trusted локальной машине.
-Новый wrapper-скрипт не используется: агент запускает существующий matrix harness напрямую (`full-run-batch-matrix.sh` -> `full-run-batch-5x2.sh` -> `e2e_batch_report.py`).
+Новый wrapper-скрипт не используется: агент запускает существующий matrix harness напрямую (`full-run-batch-matrix.sh` -> `full-run-batch.sh` -> `e2e_batch_report.py`).
 
 Canonical source of truth для live profile taxonomy:
 - `examples/e2e-profile-catalog.yaml`
@@ -603,19 +603,20 @@ Zero tolerance:
 
 Дополнительно:
 - если run завершился `run_partial_failed` и `reports/taskruns/<run_id>-quality.json.evidence_state.report_mode=incomplete`, generated markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) читать только как triage-only artifacts; banner/triage-only wording обязаны явно указывать на incomplete analysis, а не имитировать пустой успешный verdict.
-- для `init.step1.collect` и `refresh.step1.collect` provider обязан сделать не более одной artifact-repair попытки, если `write_root/shard-pack-manifest.json` missing/invalid/skeletal; при неудачном repair исходный `write_root` восстанавливается.
+- для `init.step1.collect` и `refresh.step1.collect` общий runtime делает не более одной manifest-only repair попытки, если provider уже записал authored docs, но `write_root/shard-pack-manifest.json` missing/invalid; repair prompt и engine write-set guard разрешают менять только `write_root/shard-pack-manifest.json`.
+- manifest-only repair intentionally runs with narrow read scope: current `write_root` + repo evidence roots only. Broader ACP workspace, sibling `reports/taskruns`, raw logs, archive docs and old shard manifests are excluded; embedded prompt contract/schema text is authoritative when runtime workspace does not contain `schemas/*` or `docs/spec/*`.
 - `shard-pack-manifest.json.documents[].path` должен быть строго relative к `artifact_root`; workspace-level staging prefixes (`reports/...`, `charter/...`, `proposals/...`) и duplicated `artifact_root` prefix считаются contract-invalid collect drift и не должны доходить до `step2`.
 - collect manifest допускает только canonical vocabulary: `semantic.coverage.observed`, `semantic.questions[*].text`, `semantic.edges[*].type`, object-shaped `provenance`, numeric `confidence`; aliases вроде `covered_topics`, `question`, `relation`, array provenance, string confidence, `evidence_citation_ids`, top-level `step_contract` и `compatibility` считаются hard contract drift.
-- для `step1.collect` runtime не должен использовать `reports/taskruns/**`, raw logs, архивные планы и старые `shard-pack-manifest.json` как schema/reference surface; headless provider опирается только на schema/spec/prompt contract, selected repo roots, `write_root` и explicit `read_context_roots`.
+- для `step1.collect` runtime не должен использовать `reports/taskruns/**`, raw logs, архивные планы и старые `shard-pack-manifest.json` как schema/reference surface; headless provider опирается на embedded schema/spec/prompt contract, selected repo roots, `write_root` и explicit `read_context_roots`.
 - `init.step0.constitution`, `init|refresh.step2.asis_docs` и `init|refresh.step4.proposals` считаются successful только если runtime draft manifest валиден и все referenced draft files реально существуют под `draft_final_root`.
 - `init|refresh.step2.asis_docs` использует strict shared draft contract: `step_contract="as_is"`, required outputs `reports/as-is/overview.md`, `reports/coverage/summary.md`, `reports/agent-outputs/architect/summary.md`; дополнительные outputs допустимы только под `reports/as-is/<domain>/overview.md`, а legacy top-level fields вроде `repo_scopes` или `compatibility` должны hard-fail-иться.
 - `init|refresh.step4.proposals` использует strict shared draft contract: `step_contract="proposals"`, required top-level shape `version=1/run_id/step_id/step_contract/agent_role/summary?/outputs[]`; `outputs[].canonical_path` допустим только под `proposals/*` или `reports/changelog/*`, duplicate canonical paths запрещены, а legacy fields `pipeline`, `step`, `generated_at`, `domain_id`, `proposals[]`, `info_findings_noted`, `orphan_coverage_gaps` должны hard-fail-иться как `runtime_contract_failed`.
 - non-collect runtime шаги не должны стартовать из workspace root: draft steps используют `draft_final_root` как cwd, validator использует `write_root`, а `full-run-ai-advent.sh` разводит headless и baseline workspaces по разным temp roots, чтобы sibling baseline artifacts не были implicit template source.
 - provider-side hard sandbox в текущих headless CLI нет; поэтому runtime isolation надо оценивать через temp-root layout и step-local `cwd`, а не ожидать отдельного sandbox enforcement от provider tooling.
 - `claude-code`, `qwen-code` и `codex-code` используют общий artifact-only process engine: stdout/stderr capture, process-group termination, timeout/cancel handling, raw diagnostics, activity monitor и artifact validation находятся в shared `providercommon` path.
-- post-artifact recovery provider-agnostic: после появления required artifacts runtime ждёт stale pipe activity и stale mutations `write_root`/`draft_final_root`; если artifacts уже валидны, controlled stop считается successful artifact-only completion, а не provider failure. Partial artifacts могут ждать отдельное более длинное provider policy grace window.
-- provider-specific recovery задаётся adapter policy: `qwen-code` дополнительно разрешает один fresh retry для missing/invalid artifacts и классифицирует fully silent missing-artifact path / silent retry exhaustion как `runner_unavailable`; malformed manifest/draft contract остаётся `runtime_contract_failed`.
-- если после этой единственной artifact-repair попытки `shard-pack-manifest.json` всё ещё missing/invalid/skeletal, collect step обязан завершиться runtime contract failure (`runtime_contract_failed`), а не продолжать прогон как nominal success.
+- pre/post-artifact recovery provider-agnostic: до появления artifacts silent/no-artifact hangs bounded для всех live adapters; после появления required artifacts runtime ждёт stale pipe activity и stale mutations `write_root`/`draft_final_root`; если artifacts уже валидны, controlled stop считается successful artifact-only completion, а не provider failure. Partial artifacts могут ждать отдельное более длинное provider policy grace window.
+- provider-specific recovery задаётся adapter policy: `qwen-code` дополнительно разрешает один fresh retry для missing/invalid artifacts и классифицирует fully silent no-artifact path / silent retry exhaustion как `runner_unavailable`; partial authored artifacts без валидного manifest и malformed manifest/draft contract остаются `runtime_contract_failed`.
+- если после этой единственной manifest-only repair попытки `shard-pack-manifest.json` всё ещё missing/invalid, collect step обязан завершиться runtime contract failure (`runtime_contract_failed`), а не продолжать прогон как nominal success.
 - transcript outputs с provider transport/API errors (например `[API Error: ... SSL ...]`) считаются `runner_unavailable`, а не `runtime_contract_failed`; raw stdout/stderr artifacts в `reports/taskruns/raw/*` обязательны.
 - collect contract требует полного `semantic` block и global uniqueness для `citations[].claim_ids`; staged duplicate claim ids считаются blocking contract drift, если validator-scope repair не смог детерминированно снять коллизию на index/reference surface.
 - staged `citation-index.json` и `final-run-index.json` должны использовать один deterministic `document_id` namespace, наследующий `manifest.Documents[*].id`; semantic assembly перед validator обязана нормализовать `evidence.repo` к логическому repo scope и дедуплицировать alias entities/related refs.
@@ -643,7 +644,7 @@ Zero tolerance:
 - inner `full-run-ai-advent.sh` обязан поддерживать running-heartbeat в `run-status.env` (`updated_at`, `last_pipeline_stage`, `last_runtime_provider`, `last_progress_at`) и сам писать terminal sentinel при `completed|process_failed|signal_terminated`.
 - если `session-summary.md` отсутствует, но batch shell успел дойти до classifier или завершился через `EXIT` trap, trusted harness обязан materialize-ить `infra_incomplete_cycle` или `infra_signal_terminated` через per-run `run-status.env`; отсутствие summary больше не считается допустимым silent gap.
 - если child batch завершился, а `run-status.env` отсутствует или остаётся `state=running`, outer batch обязан синтезировать terminal `process_failed` с `failure_reason=infra_incomplete_cycle`; `profile-status/*.json` должны отражать тот же terminal reason, а не generic `child_failed`.
-- child `full-run-batch-5x2.sh` обязан публиковать `batch-owner.env` heartbeat в `BATCH_ROOT`; lingering `profile-status/*.json = running` без живого owner pid или со stale owner heartbeat считаются terminal `infra_incomplete_cycle`.
+- child `full-run-batch.sh` обязан публиковать `batch-owner.env` heartbeat в `BATCH_ROOT`; lingering `profile-status/*.json = running` без живого owner pid или со stale owner heartbeat считаются terminal `infra_incomplete_cycle`.
 - `full-run-batch-matrix.sh` обязан держать durable `profile-status/*.json`, выполнять stale sweep на старте/перед report synthesis и переводить lingering `running` в terminal `failed`; reconstruction в `e2e_batch_report.py` использует `run-status.env`, `profile-status/*.json`, `batch-owner.env` и `run-history.json` как равноправные источники истины для partial roots.
 - `full-run-batch-matrix.sh` обязан писать durable inventory per started profile/sweep (`matrix/<matrix-id>/inventory/<batch-id>.json`) с `matrix_id`, matrix file, selected providers/run indexes, `batch_id`, output root, terminal status, key report/log paths и bounded `raw_output_refs` metadata (provider, run_id/task_id/step_id, stdout/stderr bytes/hash/truncation). Этот inventory является decision-support evidence после cleanup temp roots, но не заменяет terminal status/verdict fields.
 - frontend live E2E должен различать explicit Playwright/backend fail (`playwright_failed`) и productive timeout (`active_run_timeout`), когда run остаётся `running`, двигает `current_step`/artifacts, но не успевает дойти до `succeeded` в отведённый UI budget.
@@ -653,7 +654,7 @@ Zero tolerance:
 ### 6.8 Additional Non-Release Checks
 
 После official release matrices выполнить отдельно:
-- parallel shard smoke: два параллельных `full-run-batch-5x2.sh` с разными `BATCH_ID`, разными single-provider `BATCH_PROVIDER_FILTER` (например, `qwen-code` и `claude-code`; при необходимости можно заменить один из них на `codex-code`), `BATCH_RUN_SELECTION=1`, `BATCH_FRONTEND_MODE=never`, `BATCH_FRONTEND_CANCEL_MODE=never`;
+- parallel shard smoke: два параллельных `full-run-batch.sh` с разными `BATCH_ID`, разными single-provider `BATCH_PROVIDER_FILTER` (например, `qwen-code` и `claude-code`; при необходимости можно заменить один из них на `codex-code`), `BATCH_RUN_SELECTION=1`, `BATCH_FRONTEND_MODE=never`, `BATCH_FRONTEND_CANCEL_MODE=never`;
 - forced-incomplete diagnostic run: large multi-repo batch с diagnostic timeout override, чтобы проверить `report_mode=incomplete`, triage-only wording и failure-class precedence.
 
 Эти прогоны не использовать для release verdict; они нужны только как additional evidence по новому функционалу.
@@ -670,7 +671,7 @@ TS="$(date -u +%Y%m%dT%H%M%SZ)"
   BATCH_RUN_SELECTION=1 \
   BATCH_FRONTEND_MODE=never \
   BATCH_FRONTEND_CANCEL_MODE=never \
-  ./scripts/full-run-batch-5x2.sh
+  ./scripts/full-run-batch.sh
 ) &
 (
   BATCH_ID=parallel-smoke-${TS}-claude \
@@ -680,7 +681,7 @@ TS="$(date -u +%Y%m%dT%H%M%SZ)"
   BATCH_FRONTEND_MODE=never \
   BATCH_FRONTEND_CANCEL_MODE=never \
   BATCH_SKIP_PRECHECK=1 \
-  ./scripts/full-run-batch-5x2.sh
+  ./scripts/full-run-batch.sh
 ) &
 wait || true
 
@@ -700,7 +701,7 @@ ACP_SHARD_DISCOVERY_MODE=heuristics \
 ACP_RUNTIME_STEP_TIMEOUT_SEC=15 \
 ACP_PIPELINE_TIMEOUT_SEC=300 \
 ACP_APPLY_TIMEOUTS_VIA_API=1 \
-./scripts/full-run-batch-5x2.sh || true
+./scripts/full-run-batch.sh || true
 ```
 
 ## 7) Strict release acceptance
@@ -737,18 +738,22 @@ Release `PASS` только если одновременно:
 - Политика triage: primary incident class = `runtime_timeout` при явном timeout signal в summary/classifier; `runner_unavailable` остаётся secondary evidence.
 
 4. `operational_host_preflight_failed` до старта backend runs
-- Причина: невалидный runtime binary surface (`qwen` в PATH), либо нерелевантный writable state/tmp surface.
+- Причина: невалидный runtime binary surface (`qwen`/`claude`/`codex` в PATH), provider readiness blocker, known codex model/CLI mismatch, либо нерелевантный writable state/tmp surface.
 - Действие: починить host prerequisites и повторить запуск; не считать это продуктовым ACP багом.
 
-5. `Selected model is at capacity` / `429` / `rate limited` в task logs
+5. `collect_manifest_missing` / `shard-pack-manifest.json is missing` на `init.step1.collect`
+- Политика triage: если в `write_root` есть authored docs, общий engine должен сделать один manifest-only repair; writes outside `shard-pack-manifest.json` или failure после repair остаются `runtime_contract_failed`.
+- Если authored docs отсутствуют и provider был полностью silent, qwen может классифицировать incident как `runner_unavailable`; для `claude-code`/`codex-code` missing collect artifacts обычно остаются `runtime_contract_failed`, если нет явных auth/rate-limit markers.
+
+6. `Selected model is at capacity` / `429` / `rate limited` в task logs
 - Политика triage: классифицировать как `runner_unavailable` (если одновременно нет explicit timeout signal).
 - Для `best_effort` partial shard run это считается provider-availability incident, а не runtime execution-semantics drift.
 
-6. `backend_workspace_missing` / `frontend_workspace_missing`
+7. `backend_workspace_missing` / `frontend_workspace_missing`
 - Harness workspace resolver обязан проверять в порядке `run_dir/headless/arch-workspace` -> `run_dir/arch-workspace` -> `run_dir/workspace`.
 - Если workspace найден в одном из candidate roots, это не blocker; если отсутствует во всех roots, инцидент остаётся operational.
 
-7. `parse runtime draft manifest ... unknown field ...` вместе с `runner_unavailable`/capacity сигналами
+8. `parse runtime draft manifest ... unknown field ...` вместе с `runner_unavailable`/capacity сигналами
 - Политика triage: primary incident class = `runtime_contract_failed` (parse-signature override); capacity/429 остаются secondary evidence.
 
 Минимальный формат публикации агентом:

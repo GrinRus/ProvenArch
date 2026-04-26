@@ -55,8 +55,9 @@
 
 ### Headless provider conformance
 - required tests используют stub provider adapters без live network dependencies
-- общий process engine проверяется на success by valid artifacts, controlled stop after valid artifacts, silent missing-artifact classification, invalid artifact contract failures, deadline timeout и raw stdout/stderr diagnostics
+- общий process engine проверяется на success by valid artifacts, controlled stop after valid artifacts, collect manifest-only repair success/failure, bounded pre-artifact and repair stall windows, silent no-artifact classification, invalid artifact contract failures, deadline timeout и raw stdout/stderr diagnostics
 - provider-specific tests проверяют только adapter policy/args: `qwen` не требует semantic JSON stdout, а `claude`/`codex` machine-mode flags остаются diagnostic transport mode
+- batch preflight tests покрывают selected-provider readiness без live network dependency, включая codex `gpt-5.5`/CLI version mismatch guard
 
 ## 3) Обязательная структура test assets
 
@@ -161,10 +162,14 @@ Implemented additional jobs:
 - valid persisted runtime execution metadata
 - invalid runtime execution metadata
 - invalid artifact contracts (`shard-pack-manifest`, `validator-verdict`, draft manifests)
-- collect manifest repair report:
-  - safe normalization возвращает `applied_rule_ids=["collect.documents_path_normalization"]`
-  - ambiguous/unsafe path не repair-ится и не расширяет compatibility inventory
-- compatibility inventory ограничен двумя safe rules (`collect.documents_path_normalization`, `drafts.reconcile_existing_canonical_outputs`)
+- strict collect validation:
+  - artifact-root-prefixed и absolute `documents[].path` fail-ятся без rewrite
+  - missing required metadata fail-ится без autofill
+  - manifest-only runtime repair запускается один раз только при authored docs + missing/invalid `shard-pack-manifest.json`
+  - manifest-only runtime repair fail-ится, если provider пишет что-либо кроме `shard-pack-manifest.json`
+  - repair include dirs исключают broader workspace `reports/taskruns`/sibling manifests и оставляют только current write root + repo evidence roots
+- strict draft validation fail-ится, если referenced `outputs[].path` отсутствует, даже когда файл существует только по `outputs[].canonical_path`
+- active compatibility inventory отсутствует; tests не должны ожидать compatibility rule ids
 - validator repair stage проверяется отдельно на atomicity: при write failure staged state не мутируется
 - UI ownership split держится unit/integration coverage-ом поверх route shell `App.tsx`, `useWorkspaceSetup`, `useRunExplorer`, `useRunLogs`, `useRunArtifacts`
 
@@ -245,9 +250,10 @@ Implemented additional jobs:
   - completion invariants: expected/completed runtime counts, per-iteration headless `init+refresh`, отсутствие `running` в `run-history`
   - signal handling: `TERM/INT/HUP/PIPE` => `infra_signal_terminated`
   - debug artifacts и raw diagnostics: `TMP_ROOT/session-summary.md`, `TMP_ROOT/full-run.log`, `TMP_ROOT/snapshots/*`, `reports/taskruns/raw/*`
-- `scripts/full-run-batch-5x2.sh` — canonical batch `5x2` + frontend live e2e:
+- `scripts/full-run-batch.sh` — canonical live batch + frontend live e2e:
   - canonical input: `TARGET_REPOS_FILE`
   - direct-only runtime commands: `claude`, `qwen`, `codex`
+  - selected-provider readiness записывается в `preflight.json`; known model/version/auth blockers должны завершаться operational preflight failure до deep run
   - backend quality source-of-truth: только `snapshots/<run_id>/reports/*`
   - hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`, `analysis:cross-repo-missing`
   - frontend smoke работает на отдельной `frontend-workspace` копии run snapshot и не мутирует backend baseline
@@ -305,7 +311,7 @@ Implemented additional jobs:
 - `make run-backend WORKSPACE=/abs/path/to/arch-workspace`
 - `make run-ui`
 - `./scripts/full-run-ai-advent.sh`
-- `./scripts/full-run-batch-5x2.sh`
+- `./scripts/full-run-batch.sh`
 - `./scripts/full-run-batch-matrix.sh`
 - `./scripts/frontend-live-e2e.sh`
 - runtime live log seam:

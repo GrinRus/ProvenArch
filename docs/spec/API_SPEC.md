@@ -705,7 +705,7 @@ Run-specific поверхность (не входит в strict deterministic g
 - default runtime mode: `fake` (required deterministic CI surface), `headless` — opt-in.
 - effective provider per step: `workspace.yaml.runtime.profile.steps.<step>.provider > CLI/env global provider > claude-code`.
 - provider-specific command envs: `ACP_CLAUDE_CMD`, `ACP_QWEN_CMD`, `ACP_CODEX_CMD`.
-- при `--runtime fake` provider value валидируется, но live provider command не выполняется.
+- при `--runtime fake` provider value валидируется как config fallback, live provider command не выполняется, а runtime execution metadata пишет provider `fake`.
 - GitHub/GitLab hooks/manual jobs для required CI/CD должны использовать CLI batch mode с deterministic defaults (`--runtime fake`).
 - API-trigger не должен превращаться в hosted control plane в рамках MVP.
 - Exact CLI flags, run log retention knobs, env precedence и local runbook examples намеренно не дублируются здесь; canonical source of truth — CLI help, `README.md` quickstart и профильные runbook docs.

@@ -1,4 +1,4 @@
-package claudecode
+package fakeruntime
 
 import (
 	"context"
@@ -11,12 +11,12 @@ import (
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
 
-func TestFakeRunnerWritesShardPackManifestWhenWriteRootProvided(t *testing.T) {
+func TestRunnerWritesShardPackManifestWhenWriteRootProvided(t *testing.T) {
 	t.Parallel()
 
 	workspace := t.TempDir()
 	writeRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "shards", "payments")
-	runner := FakeRunner{}
+	runner := Runner{}
 
 	result, err := runner.Run(context.Background(), acpruntime.Task{
 		TaskID:       "task-collect",
@@ -58,7 +58,7 @@ func TestFakeRunnerWritesShardPackManifestWhenWriteRootProvided(t *testing.T) {
 	}
 }
 
-func TestFakeRunnerWritesValidatorVerdictWhenWriteRootProvided(t *testing.T) {
+func TestRunnerWritesValidatorVerdictWhenWriteRootProvided(t *testing.T) {
 	t.Parallel()
 
 	workspace := t.TempDir()
@@ -72,7 +72,7 @@ func TestFakeRunnerWritesValidatorVerdictWhenWriteRootProvided(t *testing.T) {
 		}
 	}
 	writeRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "validator")
-	runner := FakeRunner{}
+	runner := Runner{}
 
 	result, err := runner.Run(context.Background(), acpruntime.Task{
 		TaskID:       "task-findings",

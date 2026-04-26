@@ -19,6 +19,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/orchestrator"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/claudecode"
+	"github.com/GrinRus/ProvenArch/internal/runtime/fakeruntime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/qwencode"
 	"github.com/GrinRus/ProvenArch/internal/testutil"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
@@ -2617,7 +2618,7 @@ func (r cancellableDelayedRunner) Run(ctx context.Context, task acpruntime.Task)
 		return acpruntime.Result{}, ctx.Err()
 	case <-time.After(r.delay):
 	}
-	return claudecode.FakeRunner{}.Run(ctx, task)
+	return fakeruntime.Runner{}.Run(ctx, task)
 }
 
 func (cancellableDelayedRunner) Preflight(context.Context) error {
@@ -2627,7 +2628,7 @@ func (cancellableDelayedRunner) Preflight(context.Context) error {
 type streamingRunLogsRunner struct{}
 
 func (streamingRunLogsRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
-	result, err := claudecode.FakeRunner{}.Run(ctx, task)
+	result, err := fakeruntime.Runner{}.Run(ctx, task)
 	if err != nil {
 		return acpruntime.Result{}, err
 	}

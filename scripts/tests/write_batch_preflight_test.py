@@ -57,6 +57,39 @@ class WriteBatchPreflightTest(unittest.TestCase):
         self.assertEqual("ready", result["status"])
         self.assertEqual("", result["subclass"])
 
+    def test_probe_provider_readiness_blocks_old_codex_for_gpt55(self) -> None:
+        command = self._write_script("codex-stub", "#!/bin/sh\nprintf '%s\n' 'codex-cli 0.118.0'\n")
+
+        result = self.module.probe_provider_readiness(
+            "codex",
+            command,
+            str(REPO_ROOT),
+            "codex-cli 0.118.0",
+            'model = "gpt-5.5"\n',
+        )
+
+        self.assertEqual("unavailable", result["status"])
+        self.assertEqual("codex_model_requires_newer_cli", result["subclass"])
+
+    def test_probe_provider_readiness_allows_updated_codex_for_gpt55(self) -> None:
+        command = self._write_script("codex-stub", "#!/bin/sh\nprintf '%s\n' 'codex-cli 0.125.0'\n")
+
+        result = self.module.probe_provider_readiness(
+            "codex",
+            command,
+            str(REPO_ROOT),
+            "codex-cli 0.125.0",
+            'model = "gpt-5.5"\n',
+        )
+
+        self.assertEqual("ready", result["status"])
+        self.assertEqual("", result["subclass"])
+
+    def test_selected_readiness_keys_limits_non_release_provider_filter(self) -> None:
+        self.assertEqual(["qwen"], self.module.selected_readiness_keys(["qwen-code"]))
+        self.assertEqual(["claude", "codex"], self.module.selected_readiness_keys(["claude-code", "codex-code"]))
+        self.assertEqual(["claude", "qwen", "codex"], self.module.selected_readiness_keys([]))
+
 
 if __name__ == "__main__":
     unittest.main()

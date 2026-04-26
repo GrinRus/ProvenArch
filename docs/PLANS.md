@@ -55,6 +55,118 @@ EP-YYYYMMDD-<slug>
 
 ## Active Plans
 ### Plan ID
+EP-20260426-strict-runtime-no-compatibility-shims
+
+### Context
+После выравнивания live provider adapters в runtime остались compatibility-шымы, которые могли молча переписать provider artifacts после выполнения: collect manifest path/metadata canonicalization и draft file reconciliation из `outputs[].canonical_path`. Обратная совместимость с такими malformed artifacts больше не требуется; success source of truth должен быть strict artifact-only validation.
+
+### Goals (must have)
+- [x] Удалить active compatibility registry и rule-id diagnostics
+- [x] Сделать collect validation read-only: без autofill metadata и без `documents[].path` normalization
+- [x] Сделать draft validation read-only: без копирования draft files из `outputs[].canonical_path` в `outputs[].path`
+- [x] Сохранить только manifest-only provider repair для collect shards с authored docs + missing/invalid manifest
+- [x] Перенести deterministic fake runtime в provider-neutral package
+- [x] Переименовать child batch harness в нейтральное имя без wrapper для старого пути
+- [x] Обновить tests/docs под no-compat behavior
+
+### Non-goals
+- [x] Не менять public artifact schemas
+- [x] Не добавлять backward-compat wrapper для старого имени batch script
+
+### Approach
+1) Заменить локальный collect repair/canonicalization на strict read-only manifest validation с legacy precheck.
+2) Удалить draft-root reconciliation path и tests, которые ожидали compatibility mutations.
+3) Обновить provider adapters так, чтобы qwen не имел отдельной repair-named artifact validation обёртки.
+4) Перенести fake runtime из `claudecode` в `fakeruntime`, сохранив deterministic artifacts.
+5) Переименовать child batch harness с legacy имени на `full-run-batch.sh` и синхронизировать matrix harness/docs/tests.
+6) Добавить engine write-set guard для manifest-only collect repair: всё кроме `shard-pack-manifest.json` остаётся contract failure.
+7) Синхронизировать docs/spec/testing с strict no-compat runtime behavior.
+
+### Files expected to change
+- `internal/artifactquality/*`
+- `internal/runtime/providercommon/*`
+- `internal/runtimedrafts/*`
+- `internal/runtime/qwencode/*`
+- `internal/runtime/fakeruntime/*`
+- `scripts/full-run-batch.sh`
+- `scripts/full-run-batch-matrix.sh`
+- `docs/*`
+
+### Acceptance criteria
+- [x] Artifact validation never rewrites collect manifests or draft files
+- [x] Artifact-root-prefixed/absolute collect document paths fail strict validation
+- [x] Draft files written only at `outputs[].canonical_path` fail strict validation
+- [x] Manifest-only provider repair remains available and engine-enforced to write only `shard-pack-manifest.json`
+- [x] Deterministic fake runtime is no longer implemented inside `claudecode`
+- [x] Active docs/tests/scripts no longer reference the old child batch script name
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`
+
+### Risks
+- Existing live providers may fail more often after hidden normalization is removed. That is intentional: failures should surface as `runtime_contract_failed` and be fixed via prompt/adapter behavior, not post-hoc mutation.
+
+### Progress log
+- 2026-04-26: Implemented strict collect/draft validation, removed compatibility registry/reconciliation shims, moved deterministic fake runtime to `fakeruntime`, renamed the child batch harness, added collect repair write-set guard, updated tests/docs, and completed full DoD plus `git diff --check`.
+
+### Plan ID
+EP-20260426-live-provider-collect-contract-stabilization
+
+### Context
+Smoke tiny live triage показал общий collect-contract failure surface: `qwen-code`/`claude-code` доходят до `init.step1.collect`, но оставляют `shard-pack-manifest.json` missing/invalid, а `codex-code` после обновления CLI снова должен участвовать как полноценный peer. Success source остаётся artifact-only; stdout/stderr являются diagnostics.
+
+### Goals (must have)
+- [x] Добавить общий manifest-only repair path для collect steps после authored docs + missing/invalid `shard-pack-manifest.json`
+- [x] Расширить artifact-state diagnostics: manifest state, authored artifact count, raw stdout/stderr refs
+- [x] Сузить qwen `runner_unavailable` до fully silent/no-artifact paths; partial artifacts без валидного manifest остаются `runtime_contract_failed`
+- [x] Сохранить thin adapters для `claude-code`, `qwen-code`, `codex-code`
+- [x] Добавить selected-provider readiness guard, включая codex `gpt-5.5`/CLI version mismatch
+- [x] Обновить docs/spec/testing/runbook/live-e2e skill
+
+### Non-goals
+- [x] Не менять product API, workspace schema, public artifact schemas или release matrices
+- [x] Не добавлять wrapper поверх `scripts/full-run-batch-matrix.sh`
+- [x] Не расширять MVP provider set
+
+### Approach
+1) В `providercommon` добавить optional collect repair adapter interface, shared diagnostics и классификацию partial collect artifacts как contract failure.
+2) Подключить manifest-only repair prompt ко всем live adapters; qwen сохраняет fresh retry только для no-artifact/missing-invalid paths.
+3) Усилить collect prompt policy против markdown-only completion.
+4) В batch preflight записывать selected provider readiness и блокировать известный codex model/version mismatch до deep run.
+5) Синхронизировать docs/skill и покрыть runtime/preflight tests.
+
+### Files expected to change
+- `internal/runtime/providercommon/*`
+- `internal/runtime/{claudecode,codexcode,qwencode,promptcontract,steppolicy}/*`
+- `scripts/full-run-batch.sh`
+- `scripts/write-batch-preflight.py`
+- `docs/*`, `.agents/skills/e2e-live-gate/SKILL.md`
+
+### Acceptance criteria
+- [x] Unit tests cover manifest-only collect repair success/failure
+- [x] qwen partial collect artifacts without valid manifest classify as `runtime_contract_failed`
+- [x] qwen no-output/no-artifact retry exhaustion remains `runner_unavailable`
+- [x] codex `0.125.0` + `gpt-5.5` passes readiness guard; old `0.118.0` is blocked
+- [x] Top-level `release_verdict_*.json.backend` aggregate exists for canonical acceptance checks
+- [x] `claude-code`/`codex-code` adapters use shared pre-artifact stall monitoring instead of waiting for full hard timeout on silent/no-artifact hangs
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`
+- [x] Trusted-machine smoke tiny rerun for `qwen-code` captured residual live collect repair failure
+- [x] Trusted-machine smoke tiny rerun for `codex-code` confirmed updated CLI readiness and the same collect-manifest residual on `bank-of-anthos-extras`
+- [x] Trusted-machine smoke tiny rerun for `claude-code`
+- [x] Post-tightening trusted smoke tiny rerun for `qwen-code`
+- [x] Post-pre-artifact-monitor trusted smoke tiny rerun for `codex-code`/`claude-code`
+
+### Risks
+- Manifest-only repair can still fail if provider wrote no authored docs at all; that must stay explicit `runtime_contract_failed`/`runner_unavailable`, not be hidden as artifact quality.
+- Provider auth/rate-limit remains operational and must surface as `runner_unavailable` with raw diagnostics.
+
+### Progress log
+- 2026-04-26: Implemented shared collect manifest repair path, adapter repair prompts, artifact-state diagnostics, qwen partial-artifact classification guard, codex readiness guard, and targeted tests. Full DoD and live reruns pending.
+- 2026-04-26: Full DoD passed. Trusted `qwen-code` smoke tiny `smoke-tiny-bank-qwen-20260426T104225Z` failed as expected on residual live behavior: authored collect docs were present, manifest-only repair stalled without producing `shard-pack-manifest.json`; retry partial-artifact classification was tightened after this run.
+- 2026-04-26: Trusted `codex-code` smoke tiny `smoke-tiny-bank-codex-20260426T112719Z` passed selected-provider readiness on `codex-cli 0.125.0`/`gpt-5.5`, then failed as `runtime_contract_failed` on `bank-of-anthos-extras`: authored `extras-overview.md` existed, but manifest-only repair still stalled without `shard-pack-manifest.json`. The residual exposed repair-surface drift, so repair include dirs were narrowed to current `write_root` + repo evidence, repair prompt now treats embedded schema text as authoritative, and repair watchdog uses a bounded 90s repair window instead of the normal 20s post-artifact stall.
+- 2026-04-26: Post-tightening `qwen-code` smoke tiny `smoke-tiny-bank-qwen-20260426T130440Z` completed with verdict `FAIL`, mode `non-release`, selected provider `qwen-code`, run index `1`, backend `0/1`, `runtime_contract_failed=1`, `runner_unavailable=0`, `runtime_timeout=0`; frontend `never` remained skipped/non-blocking. Task logs confirmed manifest-only repair scheduled/exhausted per partial collect shard.
+- 2026-04-26: During post-tightening `codex-code` smoke tiny `smoke-tiny-bank-codex-20260426T135500Z`, updated CLI readiness passed and initial step/first collect shards succeeded, but `bank-of-anthos-extras` exposed a shared lifecycle gap: `claude-code`/`codex-code` lacked pre-artifact stall monitoring for silent/no-artifact hangs. The diagnostic run was terminated after capturing the issue; adapters now use shared artifact-step pre-artifact monitoring and release verdict JSON now has a top-level backend aggregate for canonical acceptance checks.
+- 2026-04-26: Post-pre-artifact-monitor smoke tiny reruns completed for all three live providers: `codex-code` `smoke-tiny-bank-codex-postfix-20260426T144025Z` (`FAIL`, non-release, backend `0/1`, `runtime_contract_failed=1`, `runner_unavailable=0`, `runtime_timeout=0`), `claude-code` `smoke-tiny-bank-claude-postfix-20260426T150624Z` (`FAIL`, non-release, backend `0/1`, `runtime_contract_failed=1`, `runner_unavailable=0`, `runtime_timeout=0`), and `qwen-code` `smoke-tiny-bank-qwen-postfix-20260426T152149Z` (`FAIL`, non-release, backend `0/1`, `runtime_contract_failed=1`, `runner_unavailable=1`, `runtime_timeout=0`). The qwen `runner_unavailable` came from a later silent/no-artifact non-collect path; collect partial artifacts remained classified as `runtime_contract_failed`.
+
+### Plan ID
 EP-20260425-provider-runtime-adapter-alignment
 
 ### Context
@@ -247,7 +359,7 @@ EP-20260423-regres-fast-failure-taxonomy-hardening
 - `internal/orchestrator/*`
 - `internal/runtime/qwencode/*`
 - `scripts/full-run-ai-advent.sh`
-- `scripts/full-run-batch-5x2.sh`
+- `scripts/full-run-batch.sh`
 - `scripts/e2e_batch_report.py`
 - `scripts/frontend-live-e2e.sh`
 - `scripts/frontend-status-reasons.sh`
@@ -296,7 +408,7 @@ EP-20260423-regres-fast-qwen-hardening
 
 ### Approach
 1) Исправить dedupe в orchestrator (`semanticEntityDedupKey`, findings-by-signature merge).
-2) Унифицировать workspace resolution в `full-run-batch-5x2.sh` и `e2e_batch_report.py`.
+2) Унифицировать workspace resolution в `full-run-batch.sh` и `e2e_batch_report.py`.
 3) Расширить runtime/provider classification на capacity/rate-limit сигналы в shell/python.
 4) Усилить matrix host preflight (`qwen` binary/version + writable roots + path SHA checks для pinned refs).
 5) Прогнать DoD, затем mandatory qwen `regres fast` и собрать evidence-based blocker report.
@@ -304,7 +416,7 @@ EP-20260423-regres-fast-qwen-hardening
 ### Files expected to change
 - `internal/orchestrator/docflow.go`
 - `internal/orchestrator/docflow_test.go`
-- `scripts/full-run-batch-5x2.sh`
+- `scripts/full-run-batch.sh`
 - `scripts/e2e_batch_report.py`
 - `scripts/resolve-repos-meta.py`
 - `scripts/full-run-batch-matrix.sh`
@@ -357,7 +469,7 @@ Live `regres fast` на `codex-code` показал, что collect provider м�
 - `internal/artifactquality/*`
 - `internal/orchestrator/*`
 - `internal/workspace/*`
-- `scripts/full-run-batch-5x2.sh`
+- `scripts/full-run-batch.sh`
 - `scripts/full-run-batch-matrix.sh`
 - `scripts/tests/*`
 - `docs/spec/PIPELINE_SPEC.md`
@@ -409,7 +521,7 @@ EP-20260422-headless-legacy-residuals
 - `internal/artifactquality/*`
 - `internal/runtime/*`
 - `internal/workspace/*`
-- `scripts/full-run-batch-5x2.sh`
+- `scripts/full-run-batch.sh`
 - `scripts/full-run-batch-matrix.sh`
 - `scripts/tests/*`
 - `docs/spec/PIPELINE_SPEC.md`
@@ -471,7 +583,7 @@ EP-20260422-docflow-runtime-residuals
 - `internal/model/*`
 - `internal/workspace/*`
 - `scripts/full-run-ai-advent.sh`
-- `scripts/full-run-batch-5x2.sh`
+- `scripts/full-run-batch.sh`
 - `scripts/e2e_batch_report.py`
 - `scripts/tests/*`
 - `docs/PLANS.md`
@@ -544,7 +656,7 @@ EP-20260421-codex-runtime-provider
 ### Non-goals
 - [x] Не добавлять hosted mode
 - [x] Не менять default provider с `claude-code`
-- [x] Не переименовывать legacy `full-run-batch-5x2.sh`
+- [x] Не добавлять wrapper-скрипты поверх canonical matrix harness
 - [x] Не добавлять wrapper-скрипты поверх canonical matrix harness
 
 ### Approach
@@ -560,7 +672,7 @@ EP-20260421-codex-runtime-provider
 - `cmd/acp/*`
 - `schemas/*`
 - `scripts/full-run-batch-matrix.sh`
-- `scripts/full-run-batch-5x2.sh`
+- `scripts/full-run-batch.sh`
 - `scripts/frontend-live-e2e.sh`
 - `scripts/write-batch-preflight.py`
 - `scripts/e2e_batch_report.py`

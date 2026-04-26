@@ -4,13 +4,16 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +28,7 @@ const (
 	defaultPostArtifactStallWindow = 20 * time.Second
 	defaultPreArtifactStallWindow  = 75 * time.Second
 	defaultRetryPreArtifactWindow  = 3 * time.Minute
+	defaultCollectRepairWindow     = 90 * time.Second
 	defaultStallPollInterval       = 2 * time.Second
 	defaultStallTerminateGrace     = 2 * time.Second
 	defaultPostTerminateDrain      = 500 * time.Millisecond
@@ -54,6 +58,13 @@ type ProviderAdapter interface {
 	UnavailableMarkers() []string
 }
 
+// CollectManifestRepairAdapter is implemented by provider adapters that can run
+// a narrow collect-manifest repair prompt after a provider already wrote
+// authored collect documents but missed or malformed shard-pack-manifest.json.
+type CollectManifestRepairAdapter interface {
+	CollectManifestRepairCommandSpec(acpruntime.Task, error) (CommandSpec, error)
+}
+
 type ActivityPolicy struct {
 	MonitorArtifacts            bool
 	MonitorPreArtifact          bool
@@ -68,6 +79,7 @@ type ActivityPolicy struct {
 
 type RecoveryPolicy struct {
 	AcceptValidArtifactsAfterStop            bool
+	RepairCollectManifestOnce                bool
 	RetryInvalidOrMissingArtifactsOnce       bool
 	ClassifySilentRetryExhaustionUnavailable bool
 }
@@ -193,6 +205,9 @@ func RunHeadlessProvider(ctx context.Context, task acpruntime.Task, adapter Prov
 
 func recoverAfterArtifactValidationFailure(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, validationErr error) (bool, acpruntime.Result, error) {
 	policy := adapter.RecoveryPolicy(task)
+	if recovered, recoveredResult, recoveredErr := recoverCollectManifestRepair(ctx, task, adapter, result, validationErr, "contract"); recovered {
+		return true, recoveredResult, recoveredErr
+	}
 	if !policy.RetryInvalidOrMissingArtifactsOnce {
 		return false, acpruntime.Result{}, nil
 	}
@@ -207,13 +222,15 @@ func recoverAfterArtifactValidationFailure(ctx context.Context, task acpruntime.
 				if err := adapter.ValidateArtifacts(task); err == nil {
 					emitRetryCompletedDiagnostic(task, adapter.Provider(), retryStalled.Diagnostic.StallPhase, "fresh_process_artifact_only")
 					return true, retryResult, nil
+				} else if recovered, recoveredResult, recoveredErr := recoverCollectManifestRepair(ctx, task, adapter, retryResult, err, "retry"); recovered {
+					return true, recoveredResult, recoveredErr
 				}
 			}
 			emitRetryExhaustedDiagnostic(task, adapter.Provider(), retryStalled.Diagnostic, "fresh_process")
 			if initialStructuralFailure {
 				return true, acpruntime.Result{}, wrapArtifactContractFailure(adapter, task, "retry", retryResult, "fresh-process retry stalled after an earlier malformed artifact contract", validationErr)
 			}
-			if policy.ClassifySilentRetryExhaustionUnavailable && strings.TrimSpace(retryResult.Stdout) == "" && strings.TrimSpace(retryResult.Stderr) == "" {
+			if shouldClassifySilentRetryExhaustionUnavailable(policy, task, retryResult) {
 				return true, acpruntime.Result{}, wrapProviderUnavailable(adapter, task, "retry", retryResult, "provider unavailable after fresh-process artifact retry", retryErr)
 			}
 			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "retry", "fresh-process retry stalled before producing valid artifacts", retryErr)
@@ -224,6 +241,9 @@ func recoverAfterArtifactValidationFailure(ctx context.Context, task acpruntime.
 		emitArtifactRetryExhaustedDiagnostic(task, adapter.Provider(), err)
 		if initialStructuralFailure {
 			return true, acpruntime.Result{}, wrapArtifactContractFailure(adapter, task, "retry", retryResult, "artifact validation failed after an earlier malformed artifact contract", validationErr)
+		}
+		if recovered, recoveredResult, recoveredErr := recoverCollectManifestRepair(ctx, task, adapter, retryResult, err, "retry"); recovered {
+			return true, recoveredResult, recoveredErr
 		}
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "retry", "artifact validation failed after fresh-process retry", err)
 	}
@@ -243,6 +263,8 @@ func recoverAfterStall(ctx context.Context, task acpruntime.Task, adapter Provid
 		if err := adapter.ValidateArtifacts(task); err == nil {
 			emitRetryCompletedDiagnostic(task, adapter.Provider(), stalled.Diagnostic.StallPhase, "artifact_only")
 			return true, result, nil
+		} else if recovered, recoveredResult, recoveredErr := recoverCollectManifestRepair(ctx, task, adapter, result, err, "stall"); recovered {
+			return true, recoveredResult, recoveredErr
 		}
 	}
 	if !policy.RetryInvalidOrMissingArtifactsOnce {
@@ -261,10 +283,12 @@ func recoverAfterStall(ctx context.Context, task acpruntime.Task, adapter Provid
 				if err := adapter.ValidateArtifacts(task); err == nil {
 					emitRetryCompletedDiagnostic(task, adapter.Provider(), retryStalled.Diagnostic.StallPhase, "fresh_process_artifact_only")
 					return true, retryResult, nil
+				} else if recovered, recoveredResult, recoveredErr := recoverCollectManifestRepair(ctx, task, adapter, retryResult, err, "retry"); recovered {
+					return true, recoveredResult, recoveredErr
 				}
 			}
 			emitRetryExhaustedDiagnostic(task, adapter.Provider(), retryStalled.Diagnostic, "fresh_process")
-			if policy.ClassifySilentRetryExhaustionUnavailable && strings.TrimSpace(retryResult.Stdout) == "" && strings.TrimSpace(retryResult.Stderr) == "" {
+			if shouldClassifySilentRetryExhaustionUnavailable(policy, task, retryResult) {
 				return true, acpruntime.Result{}, wrapProviderUnavailable(adapter, task, "retry", retryResult, "provider unavailable after fresh-process stall retry", retryErr)
 			}
 			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "retry", "fresh-process retry stalled before producing valid artifacts", retryErr)
@@ -272,10 +296,74 @@ func recoverAfterStall(ctx context.Context, task acpruntime.Task, adapter Provid
 		return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, retryResult, retryErr)
 	}
 	if err := adapter.ValidateArtifacts(task); err != nil {
+		if recovered, recoveredResult, recoveredErr := recoverCollectManifestRepair(ctx, task, adapter, retryResult, err, "retry"); recovered {
+			return true, recoveredResult, recoveredErr
+		}
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "retry", "artifact validation failed after stall retry", err)
 	}
 	emitRetryCompletedDiagnostic(task, adapter.Provider(), stalled.Diagnostic.StallPhase, "fresh_process")
 	return true, retryResult, nil
+}
+
+func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, validationErr error, stage string) (bool, acpruntime.Result, error) {
+	policy := adapter.RecoveryPolicy(task)
+	if !policy.RepairCollectManifestOnce || !acpruntime.IsCollectStep(task.StepID) {
+		return false, acpruntime.Result{}, nil
+	}
+	snapshot := runtimeArtifactSnapshot(task)
+	if snapshot.AuthoredFiles <= 0 {
+		return false, acpruntime.Result{}, nil
+	}
+	repairAdapter, ok := adapter.(CollectManifestRepairAdapter)
+	if !ok {
+		return false, acpruntime.Result{}, nil
+	}
+	beforeRepairFiles, err := snapshotWriteRootFiles(task.WriteRoot)
+	if err != nil {
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "collect_manifest_repair", "manifest-only collect repair write-set precheck failed", err)
+	}
+
+	emitCollectManifestRepairScheduledDiagnostic(task, adapter.Provider(), snapshot, validationErr)
+	spec, err := repairAdapter.CollectManifestRepairCommandSpec(task, validationErr)
+	if err != nil {
+		return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, result, err)
+	}
+	repairPolicy := normalizeActivityPolicy(adapter.ActivityPolicy(task))
+	repairPolicy.MonitorArtifacts = true
+	repairPolicy.MonitorPreArtifact = false
+	if repairPolicy.PostArtifactStallWindow < defaultCollectRepairWindow {
+		repairPolicy.PostArtifactStallWindow = defaultCollectRepairWindow
+	}
+	if repairPolicy.PartialArtifactStallWindow < defaultCollectRepairWindow {
+		repairPolicy.PartialArtifactStallWindow = defaultCollectRepairWindow
+	}
+	repairResult, repairErr := runCommandSpec(ctx, task, spec, repairPolicy)
+	if repairErr != nil {
+		if err := validateCollectManifestRepairWriteSet(task, beforeRepairFiles); err != nil {
+			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_manifest_repair", "manifest-only collect repair wrote outside shard-pack-manifest.json", err)
+		}
+		var repairStalled StallError
+		if errors.As(repairErr, &repairStalled) {
+			if policy.AcceptValidArtifactsAfterStop {
+				if err := adapter.ValidateArtifacts(task); err == nil {
+					emitCollectManifestRepairCompletedDiagnostic(task, adapter.Provider(), repairStalled.Diagnostic.StallPhase)
+					return true, repairResult, nil
+				}
+			}
+			emitCollectManifestRepairExhaustedDiagnostic(task, adapter.Provider(), repairStalled.Diagnostic, repairErr)
+			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_manifest_repair", "manifest-only collect repair stalled before valid artifacts were available", repairErr)
+		}
+		return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, repairResult, repairErr)
+	}
+	if err := validateCollectManifestRepairWriteSet(task, beforeRepairFiles); err != nil {
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_manifest_repair", "manifest-only collect repair wrote outside shard-pack-manifest.json", err)
+	}
+	if err := adapter.ValidateArtifacts(task); err != nil {
+		emitCollectManifestRepairExhaustedDiagnostic(task, adapter.Provider(), runtimeArtifactSnapshot(task).stallDiagnostic(), err)
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_manifest_repair", "manifest-only collect repair did not produce valid collect artifacts", err)
+	}
+	emitCollectManifestRepairCompletedDiagnostic(task, adapter.Provider(), "")
+	return true, repairResult, nil
 }
 
 func runProviderCommand(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, policy ActivityPolicy) (acpruntime.Result, error) {
@@ -283,6 +371,10 @@ func runProviderCommand(ctx context.Context, task acpruntime.Task, adapter Provi
 	if err != nil {
 		return acpruntime.Result{}, err
 	}
+	return runCommandSpec(ctx, task, spec, policy)
+}
+
+func runCommandSpec(ctx context.Context, task acpruntime.Task, spec CommandSpec, policy ActivityPolicy) (acpruntime.Result, error) {
 	cmd := exec.CommandContext(ctx, strings.TrimSpace(spec.Command), append([]string(nil), spec.Args...)...)
 	configureCommandProcessGroup(cmd)
 	if dir := strings.TrimSpace(spec.Dir); dir != "" {
@@ -431,16 +523,20 @@ func classifyCommandFailure(adapter ProviderAdapter, task acpruntime.Task, resul
 }
 
 func classifyArtifactFailure(adapter ProviderAdapter, task acpruntime.Task, result acpruntime.Result, stage string, message string, cause error) error {
-	if adapter.RecoveryPolicy(task).ClassifySilentRetryExhaustionUnavailable &&
-		strings.TrimSpace(result.Stdout) == "" &&
-		strings.TrimSpace(result.Stderr) == "" &&
-		isMissingArtifactFailure(cause) {
+	if shouldClassifySilentRetryExhaustionUnavailable(adapter.RecoveryPolicy(task), task, result) && isMissingArtifactFailure(cause) {
 		return wrapProviderUnavailable(adapter, task, stage, result, "provider unavailable before required artifacts were written", cause)
 	}
 	if shouldTreatArtifactFailureAsProviderUnavailable(result, cause, adapter.UnavailableMarkers()) {
 		return wrapProviderUnavailable(adapter, task, stage, result, "provider unavailable before required artifacts were written", cause)
 	}
 	return wrapArtifactContractFailure(adapter, task, stage, result, message, cause)
+}
+
+func shouldClassifySilentRetryExhaustionUnavailable(policy RecoveryPolicy, task acpruntime.Task, result acpruntime.Result) bool {
+	return policy.ClassifySilentRetryExhaustionUnavailable &&
+		strings.TrimSpace(result.Stdout) == "" &&
+		strings.TrimSpace(result.Stderr) == "" &&
+		runtimeArtifactSnapshot(task).AuthoredFiles == 0
 }
 
 func isMissingArtifactFailure(err error) bool {
@@ -526,6 +622,9 @@ func buildEngineFailureMessage(adapter ProviderAdapter, task acpruntime.Task, st
 		"current_step":      strings.TrimSpace(task.StepID),
 		"last_stdout_bytes": len([]byte(result.Stdout)),
 		"last_stderr_bytes": len([]byte(result.Stderr)),
+	}
+	for key, value := range runtimeArtifactSnapshot(task).diagnosticFields() {
+		diagnostics[key] = value
 	}
 	var stalled StallError
 	if errors.As(failure, &stalled) {
@@ -624,12 +723,43 @@ func normalizeActivityPolicy(policy ActivityPolicy) ActivityPolicy {
 	return policy
 }
 
+func MonitorsRuntimeArtifacts(task acpruntime.Task) bool {
+	switch acpruntime.StepProviderKeyForStepID(task.StepID) {
+	case acpruntime.StepProviderStep1Collect, acpruntime.StepProviderStep3Findings:
+		return true
+	default:
+		return runtimedrafts.IsDraftStep(task.StepID)
+	}
+}
+
 type artifactSnapshot struct {
 	ArtifactObserved bool
 	Valid            bool
 	State            string
 	AuthoredFiles    int
 	LastMutation     time.Time
+}
+
+func (s artifactSnapshot) diagnosticFields() map[string]any {
+	fields := map[string]any{
+		"manifest_state":      strings.TrimSpace(s.State),
+		"artifact_observed":   s.ArtifactObserved,
+		"artifact_valid":      s.Valid,
+		"authored_file_count": s.AuthoredFiles,
+	}
+	if !s.LastMutation.IsZero() {
+		fields["last_write_root_mutation_at"] = s.LastMutation.UTC().Format(time.RFC3339)
+	}
+	return fields
+}
+
+func (s artifactSnapshot) stallDiagnostic() StallDiagnostic {
+	return StallDiagnostic{
+		StallPhase:            StallPhasePostArtifact,
+		ArtifactState:         s.State,
+		AuthoredFileCount:     s.AuthoredFiles,
+		LastWriteRootMutation: s.LastMutation,
+	}
 }
 
 func monitorArtifactStall(ctx context.Context, task acpruntime.Task, tracker *commandActivityTracker, policy ActivityPolicy) (StallError, bool) {
@@ -725,7 +855,7 @@ func collectArtifactSnapshot(writeRoot string) artifactSnapshot {
 		return snapshot
 	}
 	for _, entry := range entries {
-		if entry.IsDir() || entry.Name() == ShardPackManifestFileName {
+		if entry.IsDir() || isCollectNonAuthoredFile(entry.Name()) {
 			continue
 		}
 		snapshot.AuthoredFiles++
@@ -741,6 +871,128 @@ func collectArtifactSnapshot(writeRoot string) artifactSnapshot {
 		snapshot.State = "partial"
 	}
 	return snapshot
+}
+
+func isCollectNonAuthoredFile(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "", ShardPackManifestFileName, "runtime-execution.json":
+		return true
+	default:
+		return false
+	}
+}
+
+type writeRootFileSnapshot map[string]writeRootFileState
+
+type writeRootFileState struct {
+	IsDir   bool
+	Mode    fs.FileMode
+	Size    int64
+	ModTime time.Time
+	SHA256  [sha256.Size]byte
+}
+
+func snapshotWriteRootFiles(root string) (writeRootFileSnapshot, error) {
+	snapshot := writeRootFileSnapshot{}
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return snapshot, nil
+	}
+	cleanRoot := filepath.Clean(root)
+	if _, err := os.Stat(cleanRoot); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return snapshot, nil
+		}
+		return nil, fmt.Errorf("stat write_root %q: %w", root, err)
+	}
+	if err := filepath.WalkDir(cleanRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry == nil {
+			return nil
+		}
+		rel, err := filepath.Rel(cleanRoot, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+		state := writeRootFileState{
+			IsDir: info.IsDir(),
+			Mode:  info.Mode(),
+		}
+		if info.IsDir() {
+			snapshot[filepath.ToSlash(rel)] = state
+			return nil
+		}
+		state.Size = info.Size()
+		state.ModTime = info.ModTime().UTC()
+		if info.Mode().IsRegular() {
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			state.SHA256 = sha256.Sum256(content)
+		}
+		snapshot[filepath.ToSlash(rel)] = state
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("snapshot write_root %q: %w", root, err)
+	}
+	return snapshot, nil
+}
+
+func validateCollectManifestRepairWriteSet(task acpruntime.Task, before writeRootFileSnapshot) error {
+	after, err := snapshotWriteRootFiles(task.WriteRoot)
+	if err != nil {
+		return err
+	}
+	changes := unexpectedCollectRepairMutations(before, after)
+	if len(changes) == 0 {
+		return nil
+	}
+	return fmt.Errorf("manifest-only collect repair wrote forbidden files: %s", strings.Join(changes, "; "))
+}
+
+func unexpectedCollectRepairMutations(before writeRootFileSnapshot, after writeRootFileSnapshot) []string {
+	paths := map[string]struct{}{}
+	for path := range before {
+		paths[path] = struct{}{}
+	}
+	for path := range after {
+		paths[path] = struct{}{}
+	}
+	changes := make([]string, 0)
+	for path := range paths {
+		if path == ShardPackManifestFileName {
+			continue
+		}
+		beforeState, beforeExists := before[path]
+		afterState, afterExists := after[path]
+		switch {
+		case !beforeExists && afterExists:
+			changes = append(changes, "created "+describeWriteRootPath(path, afterState))
+		case beforeExists && !afterExists:
+			changes = append(changes, "deleted "+describeWriteRootPath(path, beforeState))
+		case beforeExists && afterExists && beforeState != afterState:
+			changes = append(changes, "modified "+describeWriteRootPath(path, afterState))
+		}
+	}
+	sort.Strings(changes)
+	return changes
+}
+
+func describeWriteRootPath(path string, state writeRootFileState) string {
+	if state.IsDir {
+		return "directory " + path
+	}
+	return path
 }
 
 func draftArtifactSnapshot(task acpruntime.Task) artifactSnapshot {
@@ -1030,6 +1282,39 @@ func emitArtifactRetryExhaustedDiagnostic(task acpruntime.Task, provider acprunt
 		fields["validation_error"] = strings.TrimSpace(cause.Error())
 	}
 	emitDiagnostic(task, "retry exhausted", fields)
+}
+
+func emitCollectManifestRepairScheduledDiagnostic(task acpruntime.Task, provider acpruntime.Provider, snapshot artifactSnapshot, cause error) {
+	fields := snapshot.diagnosticFields()
+	fields["provider"] = string(provider)
+	fields["shard_id"] = strings.TrimSpace(task.ShardID)
+	fields["action"] = "manifest_only_repair"
+	fields["recovery_mode"] = "collect_manifest_repair"
+	if cause != nil {
+		fields["validation_error"] = strings.TrimSpace(cause.Error())
+	}
+	emitDiagnostic(task, "collect manifest repair scheduled", fields)
+}
+
+func emitCollectManifestRepairCompletedDiagnostic(task acpruntime.Task, provider acpruntime.Provider, phase StallPhase) {
+	fields := map[string]any{
+		"provider":      string(provider),
+		"shard_id":      strings.TrimSpace(task.ShardID),
+		"recovery_mode": "collect_manifest_repair",
+	}
+	if phase != "" {
+		fields["stall_phase"] = strings.TrimSpace(string(phase))
+	}
+	emitDiagnostic(task, "collect manifest repair completed", fields)
+}
+
+func emitCollectManifestRepairExhaustedDiagnostic(task acpruntime.Task, provider acpruntime.Provider, diagnostic StallDiagnostic, cause error) {
+	fields := diagnostic.fields(provider, task, "")
+	fields["recovery_mode"] = "collect_manifest_repair"
+	if cause != nil {
+		fields["validation_error"] = strings.TrimSpace(cause.Error())
+	}
+	emitDiagnostic(task, "collect manifest repair exhausted", fields)
 }
 
 func (d StallDiagnostic) fields(provider acpruntime.Provider, task acpruntime.Task, action string) map[string]any {

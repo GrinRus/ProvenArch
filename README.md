@@ -64,11 +64,11 @@ Primary execution path для `step0..step4`:
 - `step2.asis_docs` использует strict canonical manifest contract: `step_contract="as_is"`, required outputs `reports/as-is/overview.md`, `reports/coverage/summary.md`, `reports/agent-outputs/architect/summary.md`, а extra outputs допускаются только под `reports/as-is/<domain>/overview.md`
 - `step4.proposals` использует strict canonical manifest contract: `step_contract="proposals"`, allowed `outputs[].canonical_path` только `proposals/*` и `reports/changelog/*`; legacy proposal envelopes (`pipeline`, `step`, `proposals[]`) reject-ятся как runtime contract drift
 - publish для `step0/2/4` идёт только из validated runtime draft artifacts через deterministic compile/publish path; direct orchestrator writer больше не является альтернативным source-of-truth для canonical outputs
-- runtime draft manifest contract (`version=1`, `run_id`, `step_id`, `step_contract`, `agent_role`, `outputs[]`) является единым internal source of truth для writer + validator; `qwen` дополнительно делает один step-aware artifact-repair retry для draft-only шагов до возврата в orchestrator
-- runtime validators для collect manifests и draft manifests read-only по умолчанию; допустимая reconciliation вынесена в явную runtime repair/canonicalization стадию до финальной validation
-- если `qwen` на draft-only шаге уже записал draft manifest + draft files, но завис до завершения процесса, runtime принудительно завершает provider process и делает один constrained artifact-only retry.
+- runtime draft manifest contract (`version=1`, `run_id`, `step_id`, `step_contract`, `agent_role`, `outputs[]`) является единым internal source of truth для writer + validator; provider-specific retry policy остаётся в adapters
+- runtime validators для collect manifests и draft manifests read-only: они не нормализуют provider artifacts и не выполняют filesystem reconciliation
+- если live provider уже записал валидные required artifacts, но завис до завершения процесса, shared runtime controlled stop принимает artifact-only success.
 - shard agents materialize-ят authored docs + `shard-pack-manifest.json`
-- persisted collect manifests с workspace-level `documents[].path` drift (`reports/...`, `charter/...`, `proposals/...` или duplicated `artifact_root`) отбрасываются до `step2`, а qwen repair может детерминированно нормализовать только safe path drift
+- persisted collect manifests с workspace-level `documents[].path` drift (`reports/...`, `charter/...`, `proposals/...` или duplicated `artifact_root`) отбрасываются до `step2`; единственный collect repair path — один manifest-only provider retry с engine write-set guard, который может заменить только `shard-pack-manifest.json`
 - orchestrator/aggregator собирает staged final doc set в `reports/taskruns/<run_id>/staging/final/`
 - staged docflow использует один deterministic `document_id` mapping для `manifest.Documents[*].id`, `citation-index.json` и `final-run-index.json`; semantic assembly нормализует repo aliases и дедуплицирует entity aliases до validator/promotion
 - validator пишет `validator-verdict.json`
@@ -247,7 +247,7 @@ make quickstart-local WORKSPACE=/path/to/arch-workspace REPO_PATH=/path/to/payme
   - `ACP_QWEN_CMD` (default `qwen`)
   - `ACP_CODEX_CMD` (default `codex`)
 - direct `claude` режим: `ACP_CLAUDE_CMD=claude` (native one-shot invocation с envelope parse).
-- в `--runtime fake` provider проходит валидацию, но фактически не используется runner’ом.
+- в `--runtime fake` provider проходит валидацию как config fallback, live command не запускается, а runtime execution metadata пишет neutral provider `fake`.
 
 ### 6.1) Runtime timeouts (persisted + effective)
 
@@ -279,7 +279,7 @@ Root entrypoints:
 
 Доступные entrypoint-скрипты:
 - `scripts/full-run-ai-advent.sh` — полный локальный cycle over `TARGET_REPOS_FILE`
-- `scripts/full-run-batch-5x2.sh` — batch re-audit + frontend live e2e
+- `scripts/full-run-batch.sh` — batch re-audit + frontend live e2e
 - `scripts/full-run-batch-matrix.sh` — multi-profile matrix orchestrator; пишет durable profile status + per-batch inventory с key log/report paths и bounded raw-output refs
 - `scripts/frontend-live-e2e.sh` — локальный UI smoke для выбранного provider; различает generic `playwright_failed` и `active_run_timeout`, если run остаётся продуктивным, но не успевает дойти до `succeeded`
 - generic capacity/429 сигналы из `codex` plugin/Cloudflare/state-db noise не считаются root-cause `runner_unavailable`, если raw runtime не дал explicit terminal provider failure
@@ -393,7 +393,8 @@ Primary runtime contract для live `step1.collect`/`step3.findings`:
 
 Docs-first semantic rules:
 - `citation-index.json.claim_ids` образуют глобальное пространство имён в пределах assembled staged final set; один и тот же `claim_id` нельзя переиспользовать между разными shard/citation surfaces.
-- `shard-pack-manifest.json.semantic` всегда materialize-ится полностью (`coverage`, `questions`, `entities`, `edges`, `findings`), а коллекционные retry не считаются успешными, если manifest остаётся missing/invalid/skeletal.
+- `shard-pack-manifest.json.semantic` всегда materialize-ится полностью (`coverage`, `questions`, `entities`, `edges`, `findings`), а collect step не считается успешным, если manifest остаётся missing/invalid после единственной manifest-only repair попытки.
+- manifest-only repair читает только текущий shard `write_root` и repo evidence roots; broader workspace `reports/taskruns`, sibling shard manifests и filesystem schema scavenging не являются repair input.
 - `shard-pack-manifest.json.documents[].path` всегда strict `artifact_root`-relative; runtime может детерминированно нормализовать duplicated `artifact_root` prefix только если файл реально существует внутри `write_root`, но persisted workspace-relative staging paths считаются contract-invalid drift.
 - validator path может чинить только technical/reference drift в staged indexes; дублирующиеся `claim_id` детерминированно переименовываются в citation index без semantic rewrite authored docs.
 
@@ -401,6 +402,7 @@ Persisted runtime execution metadata:
 - сериализуется как internal `runtime-execution.json` payload рядом с taskrun artifacts
 - используется для replay/recovery, taskrun diagnostics и raw-output linking
 - live headless providers (`claude-code`, `qwen-code`, `codex-code`) проходят через общий artifact-only process engine; provider adapters задают только CLI invocation и explicit activity/recovery policy
+- selected-provider preflight фиксирует command/model/version readiness до deep live run; такие blockers являются operational, не product verdict
 - provider/API transport transcripts (например `[API Error: ... SSL ...]`) классифицируются как `runner_unavailable` с обязательным сохранением raw stdout/stderr artifacts
 - не является semantic source of truth для canonical `reports/*`/`proposals/*` promotion path
 

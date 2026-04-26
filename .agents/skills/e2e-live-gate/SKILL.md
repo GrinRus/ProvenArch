@@ -98,7 +98,7 @@ PY
    - или весь `release full` как три последовательных matrix invocation
 5) При дополнительной отладке повторить нужный regression/non-release diagnostic slice с `BATCH_PROVIDER_FILTER=claude-code` или `BATCH_PROVIDER_FILTER=codex-code`, если нужен isolated provider diagnostic вне canonical regression totals; release-mode provider subsets не использовать.
 6) Выполнить additional non-release checks:
-   - parallel smoke: два параллельных `full-run-batch-5x2.sh` с разными `BATCH_ID` и разными single-provider `BATCH_PROVIDER_FILTER` (например, `qwen-code` и `claude-code`; при необходимости заменить один из них на `codex-code`)
+   - parallel smoke: два параллельных `full-run-batch.sh` с разными `BATCH_ID` и разными single-provider `BATCH_PROVIDER_FILTER` (например, `qwen-code` и `claude-code`; при необходимости заменить один из них на `codex-code`)
    - forced-incomplete diagnostic run с `ACP_EXECUTION_STRATEGY=parallel`, `ACP_MAX_PARALLEL_TASKS=4`, `ACP_FAILURE_POLICY=best_effort`, `ACP_SHARD_DISCOVERY_MODE=heuristics`
 7) Проверить matrix invariant: для одного `profile_id` sweeps `baseline` и `parallel-default` дают одинаковый shard-plan.
 
@@ -121,6 +121,10 @@ PY
 - `runner_parse_failed` на `single-git_url`/`qwen-code` в `regres fast`
   Исторический legacy incident: до удаления semantic stdout/TaskResult contract live provider мог уйти в tool chatter + partial JSON drafting. В актуальном artifact-only runtime такой сигнал должен проявляться как `runtime_contract_failed`, `runner_unavailable` или `runtime_timeout` с raw-output refs; не использовать этот старый инцидент как текущую qwen-specific диагностику.
 - `runner_unavailable` на qwen-only smoke без raw stdout/stderr
-  Причина: qwen adapter policy классифицирует fully silent missing-artifact path или silent retry exhaustion как provider availability incident. Сначала проверить raw metadata и artifact state; valid artifacts after controlled stop должны считаться success.
+  Причина: qwen adapter policy классифицирует fully silent no-artifact path или silent retry exhaustion как provider availability incident. Сначала проверить raw metadata и artifact state; valid artifacts after controlled stop должны считаться success.
+- `shard-pack-manifest.json is missing` / `collect_manifest_missing` на `init.step1.collect`
+  Это не qwen-only signal. Если authored docs уже есть, shared engine должен сделать один manifest-only repair через тот же provider adapter; repair читает только current write_root + repo evidence roots, не sibling `reports/taskruns`, и write-set guard разрешает менять только `shard-pack-manifest.json`; failure после repair = `runtime_contract_failed`. Если authored docs отсутствуют и provider silent/no-artifact, pre-artifact monitor должен bounded-stop all live adapters; qwen может остаться `runner_unavailable`, остальные обычно `runtime_contract_failed`, если нет auth/rate-limit markers.
+- `operational_host_preflight_failed` с codex model/version текстом
+  Это host/provider readiness blocker до deep run. Обновить `codex` или явно задать `ACP_CODEX_CMD_BIN` на совместимый binary; не считать product verdict.
 - `runtime_timeout` на clean canonical slice
   Причина: либо запускается legacy matrix без committed `timeout_profile`, либо даже native time budget оказался недостаточным; сначала проверить `timeout_profile` matrix-файла и `full-run.log`, затем уже считать это реальной runtime/provider деградацией.

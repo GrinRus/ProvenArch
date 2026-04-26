@@ -1,4 +1,4 @@
-package claudecode
+package fakeruntime
 
 import (
 	"encoding/json"
@@ -36,7 +36,7 @@ type runtimeStep0WizardContract struct {
 	Rules         []string `json:"rules"`
 }
 
-func PersistRuntimeArtifacts(task acpruntime.Task, summary string, semantic contracts.SemanticSnapshot, verdict *contracts.ValidatorVerdict) error {
+func persistRuntimeArtifacts(task acpruntime.Task, summary string, semantic contracts.SemanticSnapshot, verdict *contracts.ValidatorVerdict) error {
 	writeRoot := strings.TrimSpace(task.WriteRoot)
 	if writeRoot == "" {
 		return nil

@@ -6,6 +6,7 @@ import (
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/claudecode"
 	"github.com/GrinRus/ProvenArch/internal/runtime/codexcode"
+	"github.com/GrinRus/ProvenArch/internal/runtime/fakeruntime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/qwencode"
 )
 
@@ -21,7 +22,7 @@ func BuildRunner(runtimeMode string, provider acpruntime.Provider) (acpruntime.R
 
 	switch mode {
 	case acpruntime.RuntimeModeFake:
-		return claudecode.FakeRunner{}, nil
+		return fakeruntime.Runner{}, nil
 	case acpruntime.RuntimeModeHeadless:
 		switch provider {
 		case acpruntime.ProviderClaudeCode:

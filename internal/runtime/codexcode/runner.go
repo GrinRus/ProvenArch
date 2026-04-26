@@ -79,19 +79,40 @@ func (a codexAdapter) CommandSpec(task acpruntime.Task) (providercommon.CommandS
 	}, nil
 }
 
+func (a codexAdapter) CollectManifestRepairCommandSpec(task acpruntime.Task, validationErr error) (providercommon.CommandSpec, error) {
+	includeDirs := acpruntime.ResolveHeadlessCollectRepairIncludeDirectories(task)
+	repairTask := task
+	repairTask.ReadContextRoots = append([]string(nil), includeDirs...)
+	cwd := strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task))
+	commandArgs := append([]string(nil), a.runner.Args...)
+	if len(commandArgs) == 0 {
+		commandArgs = buildCodexArgsWithIncludeDirectories(cwd, includeDirs)
+	}
+	return providercommon.CommandSpec{
+		Command:     a.runner.commandName(),
+		Args:        commandArgs,
+		Stdin:       strings.NewReader(promptcontract.ComposeCollectManifestRepairPrompt(acpruntime.ProviderCodexCode, repairTask, validationErr)),
+		Dir:         cwd,
+		IncludeDirs: includeDirs,
+	}, nil
+}
+
 func (a codexAdapter) ValidateArtifacts(task acpruntime.Task) error {
 	return providercommon.ValidateRuntimeArtifacts(task, acpruntime.ProviderCodexCode)
 }
 
-func (a codexAdapter) ActivityPolicy(_ acpruntime.Task) providercommon.ActivityPolicy {
+func (a codexAdapter) ActivityPolicy(task acpruntime.Task) providercommon.ActivityPolicy {
+	monitorArtifacts := providercommon.MonitorsRuntimeArtifacts(task)
 	return providercommon.ActivityPolicy{
-		MonitorArtifacts: true,
+		MonitorArtifacts:   monitorArtifacts,
+		MonitorPreArtifact: monitorArtifacts,
 	}
 }
 
 func (a codexAdapter) RecoveryPolicy(_ acpruntime.Task) providercommon.RecoveryPolicy {
 	return providercommon.RecoveryPolicy{
 		AcceptValidArtifactsAfterStop: true,
+		RepairCollectManifestOnce:     true,
 	}
 }
 

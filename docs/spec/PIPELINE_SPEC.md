@@ -32,6 +32,7 @@ Runtime write policy:
 
 > MVP policy фиксирует step-scoped runtime provider contract: effective provider для шага выбирается как `workspace step override > CLI/env global provider > claude-code`; semantic stdout payloads не поддерживаются.
 > CLI/process runtime mode задаётся флагом `--runtime fake|headless` (`fake` default, `headless` opt-in), global fallback provider — `--runtime-provider claude-code|qwen-code|codex-code` (env fallback `ACP_RUNTIME_PROVIDER`).
+> В `--runtime fake` fallback provider валидируется как config surface, но execution metadata пишет neutral provider `fake`; live provider command не запускается.
 
 ## Repo source manifest (MVP)
 
@@ -161,10 +162,12 @@ Bundle поставляется вместе с продуктом, хранит
 Canonical MVP runtime shape:
 - `claude-code`, `qwen-code` и `codex-code` используют общий artifact-only process engine; provider adapters задают CLI args/stdin/workdir, unavailable markers и bounded activity/recovery policy
 - stdout/stderr provider transcripts сохраняются как diagnostics/raw-output refs и никогда не трактуются как semantic success payload
+- selected-provider readiness фиксируется в batch preflight; provider command/model/auth/version blockers являются operational failures до deep run
 - semantic source of truth для `step1` — `shard-pack-manifest.json.semantic`
 - `step1` semantic provenance evidence (`entities/edges/findings[].provenance.evidence[]`) обязаны содержать non-empty `repo` + `path`; citation-only semantic evidence objects невалидны
 - semantic source of truth для `step3` — `validator-verdict.json.findings[]` и `validator-verdict.json.questions[]`
 - runtime execution metadata сохраняют только execution context, status, warnings и raw-output references
+- deterministic fake runtime пишет provider `fake`; headless adapters пишут `claude-code`, `qwen-code` или `codex-code`
 
 ## Init pipeline
 
@@ -217,8 +220,10 @@ Orchestrator applies:
 - требует полного `semantic` block в `shard-pack-manifest.json`: `coverage`, `questions`, `entities`, `edges`, `findings` обязательны, а `questions/entities/edges/findings` materialize-ятся массивами даже when empty
 - collect manifest принимает только canonical vocabulary: `semantic.coverage.observed`, `semantic.questions[*].text`, `semantic.edges[*].type`, object-shaped `provenance`, numeric `confidence`; aliases вроде `covered_topics`, `question`, `relation`, array provenance, string confidence, `evidence_citation_ids`, top-level `step_contract` и `compatibility` считаются contract-invalid legacy drift
 - требует global uniqueness для `citations[].claim_ids` в assembled staged final set; provider должен формировать `claim_id` как semantic stem + shard slug и добавлять deterministic numeric suffix при остаточной коллизии
-- collect runtime до финальной validation может выполнять только explicit repair rules для path normalization и draft-root reconcile; semantic stdout repair отсутствует
-- для `step1.collect` runtime использует только selected repo roots, `write_root` и explicit `read_context_roots`; `reports/taskruns/**`, raw logs и archive docs не считаются schema source of truth и не должны использоваться как manifest examples
+- collect runtime до финальной validation может выполнить только одну manifest-only provider repair попытку: если provider уже записал authored docs, но `shard-pack-manifest.json` missing/invalid, общий engine вызывает того же provider с repair prompt и проверяет write-set, разрешая изменить только `write_root/shard-pack-manifest.json`; ACP не нормализует `documents[].path`, не автозаполняет metadata и не использует semantic stdout repair
+- manifest-only repair read surface уже collect: текущий `write_root` + repo evidence roots. Workspace-level `reports/taskruns`, sibling shard manifests, raw logs, archive docs, examples и filesystem schema scavenging не являются допустимым repair input; embedded prompt contract/schema fragment is authoritative for the repair attempt
+- markdown-only collect completion невалиден: hard pass невозможен, пока каждый required shard не имеет валидный `shard-pack-manifest.json` после единственной repair попытки
+- для `step1.collect` runtime использует selected repo roots, `write_root` и explicit `read_context_roots`; `reports/taskruns/**`, raw logs и archive docs не считаются schema source of truth и не должны использоваться как manifest examples. Manifest-only repair дополнительно исключает broader workspace read scope, чтобы sibling shard manifests не становились неявными examples
 - выполняет runtime `init.step1.collect`/`refresh.step1.collect` отдельно для каждой canonical domain card (`charter/cards/domains/*`)
 - materialize-ит отдельный `runtime-execution.json` на каждый shard/domain under `reports/taskruns/<run_id>/...`
 - для sharded runtime ведёт shard-summary state machine `pending | checkpointed | succeeded | failed`; raw per-shard taskrun materialize-ится до `apply`, чтобы restart recovery мог replay-ить shard из persisted artifact

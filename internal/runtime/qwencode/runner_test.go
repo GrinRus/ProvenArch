@@ -74,6 +74,20 @@ func TestRunKeepsMalformedManifestAsRuntimeContractFailure(t *testing.T) {
 	}
 }
 
+func TestQwenAdapterMonitorsPreArtifactStallsForArtifactSteps(t *testing.T) {
+	t.Parallel()
+
+	policy := (qwenAdapter{}).ActivityPolicy(acpruntime.Task{StepID: "init.step1.collect"})
+	if !policy.MonitorArtifacts || !policy.MonitorPreArtifact {
+		t.Fatalf("expected collect artifact and pre-artifact monitoring, got %+v", policy)
+	}
+
+	policy = (qwenAdapter{}).ActivityPolicy(acpruntime.Task{StepID: "init.step0.constitution"})
+	if !policy.MonitorArtifacts || !policy.MonitorPreArtifact {
+		t.Fatalf("expected draft artifact and pre-artifact monitoring, got %+v", policy)
+	}
+}
+
 func containsAll(text string, tokens []string) bool {
 	for _, token := range tokens {
 		if !strings.Contains(text, token) {

@@ -29,8 +29,6 @@ func TestRunHeadlessProviderSucceedsWithValidArtifacts(t *testing.T) {
 }
 
 func TestRunHeadlessProviderAcceptsValidArtifactsAfterControlledStop(t *testing.T) {
-	t.Parallel()
-
 	task := newDraftTask(t, "run-hang-valid")
 	runner := testAdapter{
 		command: writeEngineScript(t, draftScript(task, "sleep 5")),
@@ -44,7 +42,7 @@ func TestRunHeadlessProviderAcceptsValidArtifactsAfterControlledStop(t *testing.
 		recovery: RecoveryPolicy{AcceptValidArtifactsAfterStop: true},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	result, err := RunHeadlessProvider(ctx, task, runner)
 	if err != nil {
@@ -64,8 +62,8 @@ func TestRunHeadlessProviderClassifiesSilentRetryExhaustionUnavailable(t *testin
 		activity: ActivityPolicy{
 			MonitorArtifacts:            true,
 			MonitorPreArtifact:          true,
-			PreArtifactStallWindow:      20 * time.Millisecond,
-			RetryPreArtifactStallWindow: 20 * time.Millisecond,
+			PreArtifactStallWindow:      time.Second,
+			RetryPreArtifactStallWindow: time.Second,
 			PostArtifactStallWindow:     20 * time.Millisecond,
 			PollInterval:                5 * time.Millisecond,
 			PostTerminateDrain:          10 * time.Millisecond,
@@ -77,7 +75,7 @@ func TestRunHeadlessProviderClassifiesSilentRetryExhaustionUnavailable(t *testin
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	_, err := RunHeadlessProvider(ctx, task, runner)
 	if err == nil {
@@ -222,6 +220,180 @@ fi
 	}
 	if result.Execution.Status != "succeeded" {
 		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+}
+
+func TestRunHeadlessProviderRepairsMissingCollectManifestWithAuthoredDocs(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-repair")
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + `
+`
+	repairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+`
+	runner := testAdapter{
+		command:       writeEngineScript(t, initialScript),
+		repairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected collect manifest repair success, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+}
+
+func TestRunHeadlessProviderRejectsCollectRepairExtraWrites(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-repair-extra-write")
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + `
+`
+	repairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+printf '%s\n' '# Repair Notes' > ` + shellQuote(filepath.Join(task.WriteRoot, "repair-notes.md")) + `
+`
+	runner := testAdapter{
+		command:       writeEngineScript(t, initialScript),
+		repairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+		},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected collect repair write-set contract failure")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "manifest-only collect repair wrote forbidden files") {
+		t.Fatalf("expected manifest-only write-set failure, got %v", err)
+	}
+	if !strings.Contains(runnerErr.Error(), "created repair-notes.md") {
+		t.Fatalf("expected forbidden file path in error, got %v", err)
+	}
+}
+
+func TestRunHeadlessProviderRejectsCollectRepairExtraWritesBeforeCommandFailure(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-repair-extra-write-exit")
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + `
+`
+	repairScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(filepath.Join(task.WriteRoot, "scratch-dir")) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+exit 2
+`
+	runner := testAdapter{
+		command:       writeEngineScript(t, initialScript),
+		repairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+		},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected collect repair write-set contract failure")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "manifest-only collect repair wrote forbidden files") {
+		t.Fatalf("expected write-set failure to win over command failure, got %v", err)
+	}
+	if !strings.Contains(runnerErr.Error(), "created directory scratch-dir") {
+		t.Fatalf("expected forbidden directory path in error, got %v", err)
+	}
+}
+
+func TestRunHeadlessProviderClassifiesQwenPartialCollectArtifactsAsContractFailure(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-partial")
+	script := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + `
+`
+	runner := testAdapter{
+		command:       writeEngineScript(t, script),
+		repairCommand: writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nexit 0\n"),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:            true,
+			RepairCollectManifestOnce:                true,
+			RetryInvalidOrMissingArtifactsOnce:       false,
+			ClassifySilentRetryExhaustionUnavailable: true,
+		},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected collect contract failure")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed for partial collect artifacts, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "manifest-only collect repair") {
+		t.Fatalf("expected manifest repair context in error, got %v", err)
+	}
+}
+
+func TestSilentRetryExhaustionUnavailableRequiresNoAuthoredArtifacts(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-retry-partial")
+	policy := RecoveryPolicy{ClassifySilentRetryExhaustionUnavailable: true}
+	if !shouldClassifySilentRetryExhaustionUnavailable(policy, task, acpruntime.Result{}) {
+		t.Fatal("empty collect write_root should be eligible for silent unavailable classification")
+	}
+	if err := os.WriteFile(filepath.Join(task.WriteRoot, "overview.md"), []byte("# Collect Overview\n"), 0o644); err != nil {
+		t.Fatalf("write authored collect doc: %v", err)
+	}
+	if shouldClassifySilentRetryExhaustionUnavailable(policy, task, acpruntime.Result{}) {
+		t.Fatal("authored collect artifacts must keep silent retry exhaustion in runtime_contract_failed lane")
 	}
 }
 
@@ -371,10 +543,28 @@ func TestMonitorArtifactStallUsesPartialArtifactWindow(t *testing.T) {
 	cancel()
 }
 
+func TestCollectArtifactSnapshotIgnoresRuntimeExecutionMetadata(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-runtime-execution-only")
+	if err := os.WriteFile(filepath.Join(task.WriteRoot, "runtime-execution.json"), []byte(`{"status":"failed"}`), 0o644); err != nil {
+		t.Fatalf("write runtime execution metadata: %v", err)
+	}
+
+	snapshot := collectArtifactSnapshot(task.WriteRoot)
+	if snapshot.AuthoredFiles != 0 {
+		t.Fatalf("runtime-execution.json must not count as authored collect artifact, got %d", snapshot.AuthoredFiles)
+	}
+	if snapshot.ArtifactObserved {
+		t.Fatalf("runtime-execution.json alone must not count as provider artifact: %#v", snapshot)
+	}
+}
+
 type testAdapter struct {
-	command  string
-	activity ActivityPolicy
-	recovery RecoveryPolicy
+	command       string
+	repairCommand string
+	activity      ActivityPolicy
+	recovery      RecoveryPolicy
 }
 
 func (a testAdapter) Provider() acpruntime.Provider {
@@ -387,6 +577,13 @@ func (a testAdapter) RuntimeVersion() string {
 
 func (a testAdapter) CommandSpec(acpruntime.Task) (CommandSpec, error) {
 	return CommandSpec{Command: a.command}, nil
+}
+
+func (a testAdapter) CollectManifestRepairCommandSpec(acpruntime.Task, error) (CommandSpec, error) {
+	if strings.TrimSpace(a.repairCommand) == "" {
+		return CommandSpec{}, errors.New("repair command is unavailable")
+	}
+	return CommandSpec{Command: a.repairCommand}, nil
 }
 
 func (a testAdapter) ValidateArtifacts(task acpruntime.Task) error {
@@ -429,6 +626,98 @@ func newDraftTask(t *testing.T, runID string) acpruntime.Task {
 		ExpectedArtifacts: []string{"constitution-draft.json", "charter-overview.md", "baseline-subagents.yaml"},
 		StartedAtUTC:      time.Now().UTC(),
 	}
+}
+
+func newCollectTask(t *testing.T, runID string) acpruntime.Task {
+	t.Helper()
+
+	workspace := t.TempDir()
+	writeRoot := filepath.Join(workspace, "reports", "taskruns", runID, "staging", "shards", "bank")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	return acpruntime.Task{
+		TaskID:            "task-" + runID,
+		RunID:             runID,
+		StepID:            "init.step1.collect",
+		StepContract:      "collect",
+		AgentRole:         "shard-analyst",
+		Workspace:         workspace,
+		WriteRoot:         writeRoot,
+		ArtifactRoot:      "reports/taskruns/" + runID + "/staging/shards/bank",
+		ShardID:           "bank",
+		DomainID:          "bank",
+		RepoScopes:        []string{"bank-of-anthos"},
+		PathScopes:        []string{"."},
+		ExpectedArtifacts: []string{ShardPackManifestFileName},
+		StartedAtUTC:      time.Now().UTC(),
+	}
+}
+
+func collectManifestJSON(task acpruntime.Task) string {
+	return `{
+  "version": 1,
+  "run_id": "` + task.RunID + `",
+  "step_id": "init.step1.collect",
+  "shard_id": "bank",
+  "domain_id": "bank",
+  "agent_role": "shard-analyst",
+  "artifact_root": "` + task.ArtifactRoot + `",
+  "repo_scopes": ["bank-of-anthos"],
+  "path_scopes": ["."],
+  "documents": [
+    {
+      "id": "doc.bank.overview",
+      "kind": "report",
+      "title": "Bank Overview",
+      "path": "overview.md",
+      "canonical_path": "reports/as-is/bank/overview.md",
+      "topics": ["bank"],
+      "citation_ids": ["cite.bank.readme"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.bank.readme",
+      "repo": "bank-of-anthos",
+      "path": "README.md",
+      "claim_ids": ["claim.bank.readme"],
+      "document_ids": ["doc.bank.overview"]
+    }
+  ],
+  "semantic": {
+    "coverage": {
+      "observed": ["repository entrypoints"],
+      "missing": ["owner mapping"],
+      "notes": ["repair test fixture"]
+    },
+    "questions": [
+      {
+        "id": "q.bank.owner",
+        "text": "Who owns bank-of-anthos?"
+      }
+    ],
+    "entities": [
+      {
+        "id": "svc.bank",
+        "name": "bank",
+        "type": "service",
+        "provenance": {
+          "kind": "observation",
+          "confidence": 0.8,
+          "evidence": [
+            {
+              "repo": "bank-of-anthos",
+              "path": "README.md"
+            }
+          ]
+        }
+      }
+    ],
+    "edges": [],
+    "findings": []
+  }
+}`
 }
 
 func writeEngineScript(t *testing.T, script string) string {

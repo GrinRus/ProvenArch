@@ -6,6 +6,7 @@ import (
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/claudecode"
 	"github.com/GrinRus/ProvenArch/internal/runtime/codexcode"
+	"github.com/GrinRus/ProvenArch/internal/runtime/fakeruntime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/qwencode"
 )
 
@@ -18,7 +19,7 @@ func TestRuntimeMetaForRunnerCoversReleaseProviders(t *testing.T) {
 		wantName    string
 		wantVersion string
 	}{
-		{name: "fake", runner: claudecode.FakeRunner{}, wantName: "claude-code", wantVersion: "fake"},
+		{name: "fake", runner: fakeruntime.Runner{}, wantName: "fake", wantVersion: "fake"},
 		{name: "claude", runner: claudecode.HeadlessRunner{}, wantName: "claude-code", wantVersion: "headless"},
 		{name: "qwen", runner: qwencode.HeadlessRunner{}, wantName: "qwen-code", wantVersion: "headless"},
 		{name: "codex", runner: codexcode.HeadlessRunner{}, wantName: "codex-code", wantVersion: "headless"},
