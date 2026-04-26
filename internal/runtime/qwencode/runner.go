@@ -9,6 +9,7 @@ import (
 	"time"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtime/promptcontract"
 	"github.com/GrinRus/ProvenArch/internal/runtime/providercommon"
 )
 
@@ -79,17 +80,40 @@ func (a qwenAdapter) CommandSpec(task acpruntime.Task) (providercommon.CommandSp
 	}, nil
 }
 
+func (a qwenAdapter) CollectManifestRepairCommandSpec(task acpruntime.Task, validationErr error) (providercommon.CommandSpec, error) {
+	includeDirs := acpruntime.ResolveHeadlessCollectRepairIncludeDirectories(task)
+	repairTask := task
+	repairTask.ReadContextRoots = append([]string(nil), includeDirs...)
+	prompt := promptcontract.ComposeCollectManifestRepairPrompt(acpruntime.ProviderQwenCode, repairTask, validationErr)
+	commandArgs := append([]string(nil), a.runner.Args...)
+	if len(commandArgs) == 0 {
+		commandArgs = buildQwenArgsWithIncludeDirectories(includeDirs, prompt)
+	}
+	stdin, err := providercommon.JSONTaskStdin(repairTask)
+	if err != nil {
+		return providercommon.CommandSpec{}, err
+	}
+	return providercommon.CommandSpec{
+		Command:     a.runner.commandName(),
+		Args:        commandArgs,
+		Stdin:       stdin,
+		Dir:         strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task)),
+		IncludeDirs: includeDirs,
+	}, nil
+}
+
 func (a qwenAdapter) ValidateArtifacts(task acpruntime.Task) error {
-	return repairAndValidateArtifacts(task)
+	return providercommon.ValidateRuntimeArtifacts(task, acpruntime.ProviderQwenCode)
 }
 
 func (a qwenAdapter) ActivityPolicy(task acpruntime.Task) providercommon.ActivityPolicy {
 	if len(a.runner.Args) != 0 {
 		return providercommon.ActivityPolicy{}
 	}
+	monitorArtifacts := providercommon.MonitorsRuntimeArtifacts(task)
 	return providercommon.ActivityPolicy{
-		MonitorArtifacts:           isCollectStep(task.StepID) || isDraftStep(task.StepID) || isFindingsStep(task.StepID),
-		MonitorPreArtifact:         isCollectStep(task.StepID),
+		MonitorArtifacts:           monitorArtifacts,
+		MonitorPreArtifact:         monitorArtifacts,
 		PartialArtifactStallWindow: 90 * time.Second,
 	}
 }
@@ -97,6 +121,7 @@ func (a qwenAdapter) ActivityPolicy(task acpruntime.Task) providercommon.Activit
 func (a qwenAdapter) RecoveryPolicy(_ acpruntime.Task) providercommon.RecoveryPolicy {
 	return providercommon.RecoveryPolicy{
 		AcceptValidArtifactsAfterStop:            true,
+		RepairCollectManifestOnce:                true,
 		RetryInvalidOrMissingArtifactsOnce:       true,
 		ClassifySilentRetryExhaustionUnavailable: true,
 	}

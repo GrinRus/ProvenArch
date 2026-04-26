@@ -2,6 +2,9 @@ package promptcontract
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/GrinRus/ProvenArch/internal/artifactquality"
@@ -14,6 +17,57 @@ func ComposeArtifactOnlyPrompt(provider acpruntime.Provider, task acpruntime.Tas
 		fmt.Sprintf("You are ACP runtime provider %q.", provider),
 	}
 	sections = append(sections, SharedSections(task)...)
+	return strings.Join(sections, "\n\n")
+}
+
+func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpruntime.Task, validationErr error) string {
+	sections := []string{
+		fmt.Sprintf("You are ACP runtime provider %q in collect manifest repair mode.", provider),
+		"Artifact-only repair contract:",
+		"- Do not return semantic JSON or any semantic payload on stdout.",
+		"- Do not rewrite existing authored markdown documents.",
+		"- Write or replace only write_root/shard-pack-manifest.json.",
+		"- Exit with code 0 only after shard-pack-manifest.json validates.",
+		fmt.Sprintf(`- artifact_root (workspace-relative) = %q`, strings.TrimSpace(task.ArtifactRoot)),
+		fmt.Sprintf(`- write_root (absolute) = %q`, strings.TrimSpace(task.WriteRoot)),
+		fmt.Sprintf(`- read_context_roots = %q`, strings.Join(task.ReadContextRoots, ", ")),
+		fmt.Sprintf(`- domain_id = %q`, strings.TrimSpace(task.DomainID)),
+		fmt.Sprintf(`- shard_id = %q`, strings.TrimSpace(task.ShardID)),
+		fmt.Sprintf(`- agent_role = %q`, strings.TrimSpace(task.AgentRole)),
+		fmt.Sprintf(`- repo_scopes = %q`, strings.Join(task.RepoScopes, ", ")),
+		fmt.Sprintf(`- path_scopes = %q`, strings.Join(task.PathScopes, ", ")),
+	}
+	repairLines := []string{
+		"COLLECT MANIFEST REPAIR INSTRUCTIONS:",
+		"- Existing authored documents in write_root are the source surface to describe.",
+		"- Do not search the filesystem for schemas/*, docs/spec/*, examples, or prior manifests; the schema embedded in this prompt is authoritative for this repair.",
+		"- Do not inspect reports/taskruns outside the current write_root and do not read sibling shard manifests as examples.",
+		"- Reuse existing repository evidence from read_context_roots and path scopes; do not perform broad new exploration.",
+		"- If evidence is sparse, keep the gap explicit in semantic.coverage.missing instead of inventing unsupported entities.",
+	}
+	if authoredDocs := authoredRepairDocuments(task.WriteRoot); len(authoredDocs) > 0 {
+		repairLines = append(repairLines, "Existing authored document files in write_root:")
+		for _, rel := range authoredDocs {
+			repairLines = append(repairLines, fmt.Sprintf("- %s", rel))
+		}
+	}
+	if evidencePaths := repairEvidenceCandidates(task); len(evidencePaths) > 0 {
+		repairLines = append(repairLines, "Use these repository evidence path candidates before any broader lookup:")
+		for _, rel := range evidencePaths {
+			repairLines = append(repairLines, fmt.Sprintf("- %s", rel))
+		}
+	}
+	repairLines = append(repairLines, steppolicy.CollectArtifactRepairHints(errorText(validationErr))...)
+	repairLines = append(repairLines,
+		"COLLECT MANIFEST CANONICAL SHAPE:",
+	)
+	repairLines = append(repairLines, artifactquality.CollectManifestContractLines(strings.TrimSpace(task.ArtifactRoot))...)
+	repairLines = append(repairLines,
+		`- Repair-mode note: if schemas/* or docs/spec/* are absent from the runtime workspace, do not look for them; use this embedded canonical fragment and contract text.`,
+		`- Canonical fragment below is normative for field names and value types; copy keys/types exactly and only change IDs/content.`,
+		artifactquality.CollectManifestCanonicalExample(),
+	)
+	sections = append(sections, strings.Join(repairLines, "\n"))
 	return strings.Join(sections, "\n\n")
 }
 
@@ -80,4 +134,108 @@ func SharedSections(task acpruntime.Task) []string {
 		"- Do not emit legacy operation logs or any wrapper envelopes on stdout.",
 	)
 	return sections
+}
+
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+func authoredRepairDocuments(writeRoot string) []string {
+	writeRoot = strings.TrimSpace(writeRoot)
+	if writeRoot == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(writeRoot)
+	if err != nil {
+		return nil
+	}
+	docs := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := strings.TrimSpace(entry.Name())
+		if name == "" || name == "shard-pack-manifest.json" || name == "runtime-execution.json" {
+			continue
+		}
+		docs = append(docs, filepath.ToSlash(name))
+	}
+	sort.Strings(docs)
+	return docs
+}
+
+func repairEvidenceCandidates(task acpruntime.Task) []string {
+	if len(task.PathScopes) == 0 || len(task.ReadContextRoots) == 0 {
+		return nil
+	}
+	workspace := filepath.Clean(strings.TrimSpace(task.Workspace))
+	writeRoot := filepath.Clean(strings.TrimSpace(task.WriteRoot))
+	seen := map[string]struct{}{}
+	candidates := []string{}
+	add := func(path string) {
+		path = filepath.ToSlash(strings.TrimSpace(path))
+		if path == "" {
+			return
+		}
+		if _, ok := seen[path]; ok {
+			return
+		}
+		seen[path] = struct{}{}
+		candidates = append(candidates, path)
+	}
+	for _, root := range task.ReadContextRoots {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		cleanRoot := filepath.Clean(root)
+		if (workspace != "." && cleanRoot == workspace) || (writeRoot != "." && cleanRoot == writeRoot) {
+			continue
+		}
+		if strings.Contains(filepath.ToSlash(cleanRoot), "/reports/taskruns/") {
+			continue
+		}
+		for _, scope := range task.PathScopes {
+			scope = strings.Trim(strings.TrimSpace(scope), string(filepath.Separator))
+			scope = strings.Trim(scope, "/")
+			if scope == "" {
+				continue
+			}
+			target := filepath.Join(cleanRoot, filepath.FromSlash(scope))
+			info, err := os.Stat(target)
+			if err != nil {
+				continue
+			}
+			if !info.IsDir() {
+				add(scope)
+				continue
+			}
+			_ = filepath.WalkDir(target, func(path string, entry os.DirEntry, err error) error {
+				if err != nil {
+					return nil
+				}
+				if len(candidates) >= 24 {
+					return filepath.SkipAll
+				}
+				if entry.IsDir() {
+					name := entry.Name()
+					if name == ".git" || name == "node_modules" || name == ".venv" {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+				rel, relErr := filepath.Rel(cleanRoot, path)
+				if relErr != nil {
+					return nil
+				}
+				add(rel)
+				return nil
+			})
+		}
+	}
+	sort.Strings(candidates)
+	return candidates
 }

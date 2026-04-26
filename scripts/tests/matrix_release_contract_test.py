@@ -1053,6 +1053,8 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertEqual(release_contract["selected_providers"], ["qwen-code"])
         self.assertEqual(release_contract["selected_run_indexes"], ["1"])
         self.assertEqual(release_contract["expected_backend_runs_per_profile_sweep"], 1)
+        self.assertEqual(len(verdict.get("records", [])), int(verdict["backend"]["total_runs"]))
+        self.assertEqual(len(verdict.get("records", [])), int(verdict["backend"]["hard_pass"]))
         self.assertTrue(
             all(
                 int(rec.get("backend", {}).get("total_runs", 0)) == 1

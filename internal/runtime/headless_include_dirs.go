@@ -96,6 +96,53 @@ func resolveCollectHeadlessIncludeDirectories(task Task) []string {
 	return dirs
 }
 
+// ResolveHeadlessCollectRepairIncludeDirectories returns the narrow read scope
+// for manifest-only collect repair. The repair prompt should see the current
+// shard write root plus repository evidence, but not the broader ACP workspace
+// where sibling shard manifests and reports/taskruns history can be mistaken
+// for schema examples.
+func ResolveHeadlessCollectRepairIncludeDirectories(task Task) []string {
+	dirs := make([]string, 0, 4)
+	seen := map[string]struct{}{}
+	addDir := func(path string) {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			return
+		}
+		cleaned := filepath.Clean(path)
+		info, err := os.Stat(cleaned)
+		if err != nil || !info.IsDir() {
+			return
+		}
+		if _, ok := seen[cleaned]; ok {
+			return
+		}
+		seen[cleaned] = struct{}{}
+		dirs = append(dirs, cleaned)
+	}
+
+	addDir(task.WriteRoot)
+	workspace := filepath.Clean(strings.TrimSpace(task.Workspace))
+	for _, root := range task.ReadContextRoots {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		cleaned := filepath.Clean(root)
+		if workspace != "." && cleaned == workspace {
+			continue
+		}
+		if strings.Contains(filepath.ToSlash(cleaned), "/reports/taskruns/") && cleaned != filepath.Clean(strings.TrimSpace(task.WriteRoot)) {
+			continue
+		}
+		addDir(cleaned)
+	}
+	if workspace != "." {
+		addResolvedRepoScopeDirectories(addDir, workspace, headlessRepoScopeFilter(task))
+	}
+	return dirs
+}
+
 func addResolvedRepoScopeDirectories(addDir func(string), workspace string, scopeFilter repoScopeFilter) {
 	manifestPath := filepath.Join(workspace, "workspace.yaml")
 	if manifest, err := workspacecfg.LoadManifest(manifestPath); err == nil {

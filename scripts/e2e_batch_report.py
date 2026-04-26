@@ -2216,7 +2216,7 @@ def write_quality_report(
         [
             "",
             "## P0/P1 Actions",
-            f"- P0: держать nightly `5x2` regression с direct binaries (`qwen`/`claude`/`codex`) и обязательным frontend live smoke `{len(active_providers)}/{len(active_providers)}` для выбранного provider surface.",
+            f"- P0: держать nightly batch regression с direct binaries (`qwen`/`claude`/`codex`) и обязательным frontend live smoke `{len(active_providers)}/{len(active_providers)}` для выбранного provider surface.",
             "- P0: если встречается `runtime_contract_failed`/`runner_unavailable`, блокировать rollout до фикса runtime contract/provider invocation.",
             "- P1: расширить semantic quality rubric на richer evidence density в findings (rule/evidence refs) и cross-doc consistency checks.",
         ]
@@ -2296,7 +2296,7 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Generate run/frontend matrices and quality report for legacy 5x2 batch.")
+    parser = argparse.ArgumentParser(description="Generate run/frontend matrices and quality report for the live batch.")
     parser.add_argument("--batch-id", required=True)
     parser.add_argument("--batch-root", required=True)
     parser.add_argument("--reports-root", required=True)

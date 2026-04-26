@@ -48,6 +48,7 @@ func TestDocFirstFilesystemPolicyDefinesSharedCollectRepairSurface(t *testing.T)
 	policy := DocFirstFilesystemPolicy(task)
 	required := []string{
 		`Write ONLY inside write_root.`,
+		`Do not exit after writing markdown only; every collect shard must finish with a valid shard-pack-manifest.json.`,
 		`After the first filesystem write inside write_root, stop broad repository exploration; only minimal manifest/JSON repair is allowed afterwards.`,
 		`After writing shard-pack-manifest.json, do NOT continue broad list_directory/read_file sweeps across repo roots.`,
 		`If authored docs and shard-pack-manifest.json already exist in write_root, stop and exit successfully.`,

@@ -15,7 +15,7 @@ import (
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
-	"github.com/GrinRus/ProvenArch/internal/runtime/claudecode"
+	"github.com/GrinRus/ProvenArch/internal/runtime/fakeruntime"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 )
 
@@ -282,7 +282,7 @@ type docflowCustomProposalRunner struct{}
 func (docflowCustomProposalRunner) Preflight(context.Context) error { return nil }
 
 func (docflowCustomProposalRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
-	result, err := claudecode.FakeRunner{}.Run(ctx, task)
+	result, err := fakeruntime.Runner{}.Run(ctx, task)
 	if err != nil {
 		return acpruntime.Result{}, err
 	}
@@ -325,7 +325,7 @@ func (docflowFailingValidatorRunner) Run(ctx context.Context, task acpruntime.Ta
 }
 
 func (docflowPartialCanonicalRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
-	result, err := claudecode.FakeRunner{}.Run(ctx, task)
+	result, err := fakeruntime.Runner{}.Run(ctx, task)
 	if err != nil {
 		return acpruntime.Result{}, err
 	}
@@ -370,7 +370,7 @@ func (r *collectFailureRunner) Run(ctx context.Context, task acpruntime.Task) (a
 		r.mu.Unlock()
 		return acpruntime.Result{}, fmt.Errorf("unexpected proposals runtime invocation")
 	default:
-		return claudecode.FakeRunner{}.Run(ctx, task)
+		return fakeruntime.Runner{}.Run(ctx, task)
 	}
 }
 

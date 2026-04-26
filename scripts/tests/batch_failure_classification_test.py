@@ -11,7 +11,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 E2E_BATCH_REPORT_PATH = REPO_ROOT / "scripts" / "e2e_batch_report.py"
-FULL_RUN_BATCH_SCRIPT = REPO_ROOT / "scripts" / "full-run-batch-5x2.sh"
+FULL_RUN_BATCH_SCRIPT = REPO_ROOT / "scripts" / "full-run-batch.sh"
 
 
 def load_e2e_batch_report_module():

@@ -54,6 +54,20 @@ func TestCodexAdapterUsesSharedUnavailableMarkers(t *testing.T) {
 	}
 }
 
+func TestCodexAdapterMonitorsPreArtifactStallsForArtifactSteps(t *testing.T) {
+	t.Parallel()
+
+	policy := (codexAdapter{}).ActivityPolicy(acpruntime.Task{StepID: "init.step1.collect"})
+	if !policy.MonitorArtifacts || !policy.MonitorPreArtifact {
+		t.Fatalf("expected collect artifact and pre-artifact monitoring, got %+v", policy)
+	}
+
+	policy = (codexAdapter{}).ActivityPolicy(acpruntime.Task{StepID: "init.step0.constitution"})
+	if !policy.MonitorArtifacts || !policy.MonitorPreArtifact {
+		t.Fatalf("expected draft artifact and pre-artifact monitoring, got %+v", policy)
+	}
+}
+
 func TestHeadlessRunnerSucceedsWithValidDraftArtifacts(t *testing.T) {
 	t.Parallel()
 

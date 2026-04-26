@@ -128,7 +128,7 @@ func TestPlansRemainActiveOnlyAfterCleanupClosure(t *testing.T) {
 	assertContains(t, content, "EP-20260420-regres-small-live-triage")
 }
 
-func TestCompatibilityInventoryConsistentAcrossDocs(t *testing.T) {
+func TestDocsDoNotAdvertiseActiveCompatibilityInventory(t *testing.T) {
 	t.Parallel()
 
 	paths := []string{
@@ -141,8 +141,8 @@ func TestCompatibilityInventoryConsistentAcrossDocs(t *testing.T) {
 		t.Run(path, func(t *testing.T) {
 			t.Parallel()
 			content := readDoc(t, path)
-			assertContains(t, content, "collect.documents_path_normalization")
-			assertContains(t, content, "drafts.reconcile_existing_canonical_outputs")
+			assertNotContains(t, content, "collect.documents_path_normalization")
+			assertNotContains(t, content, "drafts.reconcile_existing_canonical_outputs")
 		})
 	}
 }

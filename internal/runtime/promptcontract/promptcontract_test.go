@@ -93,6 +93,63 @@ func TestComposeArtifactOnlyPromptAddsCollectLegacyHygieneSection(t *testing.T) 
 	}
 }
 
+func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeRoot := filepath.Join(root, "write-root")
+	repoRoot := filepath.Join(root, "payments-repo")
+	if err := os.MkdirAll(filepath.Join(repoRoot, "src"), 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "overview.md"), []byte("# Payments\n"), 0o644); err != nil {
+		t.Fatalf("write authored doc: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "src", "README.md"), []byte("# Payments source\n"), 0o644); err != nil {
+		t.Fatalf("write evidence candidate: %v", err)
+	}
+
+	task := acpruntime.Task{
+		RunID:            "run-1",
+		StepID:           "init.step1.collect",
+		ArtifactRoot:     "reports/taskruns/run-1/staging/shards/payments",
+		WriteRoot:        writeRoot,
+		ReadContextRoots: []string{repoRoot},
+		ShardID:          "payments",
+		DomainID:         "payments",
+		AgentRole:        "shard-analyst",
+		RepoScopes:       []string{"payments-service"},
+		PathScopes:       []string{"src"},
+	}
+
+	prompt := ComposeCollectManifestRepairPrompt(acpruntime.ProviderQwenCode, task, os.ErrNotExist)
+	expectedTokens := []string{
+		"collect manifest repair mode",
+		"Write or replace only write_root/shard-pack-manifest.json.",
+		"Existing authored documents in write_root are the source surface to describe.",
+		"Do not search the filesystem for schemas/*, docs/spec/*, examples, or prior manifests",
+		"Do not inspect reports/taskruns outside the current write_root",
+		"Existing authored document files in write_root:",
+		"overview.md",
+		"Use these repository evidence path candidates before any broader lookup:",
+		"src/README.md",
+		"COLLECT MANIFEST REPAIR INSTRUCTIONS:",
+		"COLLECT MANIFEST CANONICAL SHAPE:",
+		"Previous artifact contract failure",
+	}
+	for _, token := range expectedTokens {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected repair prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	if strings.Contains(prompt, "Produce runtime-authored documents in write_root") {
+		t.Fatalf("repair prompt must not ask the provider to rewrite authored docs:\n%s", prompt)
+	}
+}
+
 func TestComposeArtifactOnlyPromptAddsValidatorVerdictCanonicalSection(t *testing.T) {
 	t.Parallel()
 

@@ -10,10 +10,9 @@ import (
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
-	"github.com/GrinRus/ProvenArch/internal/runtime/compatibilityregistry"
 )
 
-func TestRepairCollectManifestRejectsLegacyCompatibilityPayload(t *testing.T) {
+func TestValidateCollectManifestRejectsLegacyCompatibilityPayload(t *testing.T) {
 	t.Parallel()
 
 	writeRoot := t.TempDir()
@@ -21,8 +20,8 @@ func TestRepairCollectManifestRejectsLegacyCompatibilityPayload(t *testing.T) {
 	writeDoc(t, writeRoot, "extras-overview.md", "# Extras\n")
 
 	task := testCollectTask(writeRoot, "bank-of-anthos-extras", "bank-of-anthos")
-	if _, err := RepairCollectManifest(task); err == nil {
-		t.Fatalf("expected repair to fail for legacy compatibility payload")
+	if err := ValidateCollectManifest(task); err == nil {
+		t.Fatalf("expected validation to fail for legacy compatibility payload")
 	} else if !strings.Contains(err.Error(), "legacy collect manifest fields are forbidden") {
 		t.Fatalf("expected explicit legacy rejection error, got %v", err)
 	}
@@ -36,7 +35,7 @@ func TestRepairCollectManifestRejectsLegacyCompatibilityPayload(t *testing.T) {
 	}
 }
 
-func TestRepairCollectManifestRejectsLegacySemanticAliasesBeforeDecode(t *testing.T) {
+func TestValidateCollectManifestRejectsLegacySemanticAliasesBeforeDecode(t *testing.T) {
 	t.Parallel()
 
 	writeRoot := t.TempDir()
@@ -126,9 +125,9 @@ func TestRepairCollectManifestRejectsLegacySemanticAliasesBeforeDecode(t *testin
 	}
 
 	task := testCollectTask(writeRoot, "payments", "payments-service")
-	_, err := RepairCollectManifest(task)
+	err := ValidateCollectManifest(task)
 	if err == nil {
-		t.Fatalf("expected repair to fail for legacy semantic aliases")
+		t.Fatalf("expected validation to fail for legacy semantic aliases")
 	}
 
 	message := err.Error()
@@ -148,7 +147,7 @@ func TestRepairCollectManifestRejectsLegacySemanticAliasesBeforeDecode(t *testin
 	}
 }
 
-func TestRepairCollectManifestRejectsCitationOnlySemanticEvidenceObjects(t *testing.T) {
+func TestValidateCollectManifestRejectsCitationOnlySemanticEvidenceObjects(t *testing.T) {
 	t.Parallel()
 
 	writeRoot := t.TempDir()
@@ -216,9 +215,9 @@ func TestRepairCollectManifestRejectsCitationOnlySemanticEvidenceObjects(t *test
 	}
 
 	task := testCollectTask(writeRoot, "payments", "payments-service")
-	_, err := RepairCollectManifest(task)
+	err := ValidateCollectManifest(task)
 	if err == nil {
-		t.Fatalf("expected repair to fail for citation-only semantic evidence")
+		t.Fatalf("expected validation to fail for citation-only semantic evidence")
 	}
 	if !strings.Contains(err.Error(), "semantic.entities[0].provenance.evidence[0]") {
 		t.Fatalf("expected explicit semantic evidence path in error, got %v", err)
@@ -228,7 +227,7 @@ func TestRepairCollectManifestRejectsCitationOnlySemanticEvidenceObjects(t *test
 	}
 }
 
-func TestRepairCollectManifestNormalizesArtifactRootPrefixedDocumentPath(t *testing.T) {
+func TestValidateCollectManifestRejectsArtifactRootPrefixedDocumentPathWithoutRewrite(t *testing.T) {
 	t.Parallel()
 
 	writeRoot := t.TempDir()
@@ -241,39 +240,28 @@ func TestRepairCollectManifestNormalizesArtifactRootPrefixedDocumentPath(t *test
 	task.ArtifactRoot = "reports/taskruns/run_20260420_054749_001/staging/shards/bank-of-anthos-iac"
 	task.PathScopes = []string{"iac"}
 
-	report, err := RepairCollectManifest(task)
+	manifestPath := filepath.Join(writeRoot, shardPackManifestFile)
+	before, err := os.ReadFile(manifestPath)
 	if err != nil {
-		t.Fatalf("repair manifest: %v", err)
-	}
-	if !report.Changed {
-		t.Fatalf("expected repair report to mark manifest as changed")
-	}
-	if len(report.AppliedRuleIDs) != 1 || report.AppliedRuleIDs[0] != compatibilityregistry.RuleSafeCollectDocumentPathNormalization {
-		t.Fatalf("expected collect path normalization rule, got %#v", report.AppliedRuleIDs)
+		t.Fatalf("read original manifest: %v", err)
 	}
 
-	raw, err := os.ReadFile(filepath.Join(writeRoot, shardPackManifestFile))
-	if err != nil {
-		t.Fatalf("read repaired manifest: %v", err)
-	}
-	manifest, err := contracts.ParseShardPackManifest(raw)
-	if err != nil {
-		t.Fatalf("parse repaired manifest: %v", err)
-	}
-	if got := manifest.Documents[0].Path; got != "iac-overview.md" {
-		t.Fatalf("expected normalized document path, got %q", got)
+	if err := ValidateCollectManifest(task); err == nil {
+		t.Fatalf("expected artifact-root-prefixed document path to fail strict validation")
+	} else if !strings.Contains(err.Error(), "must be artifact_root-relative") {
+		t.Fatalf("expected strict document path error, got %v", err)
 	}
 
-	assessment, err := LoadManifestAssessment(writeRoot)
+	after, err := os.ReadFile(manifestPath)
 	if err != nil {
-		t.Fatalf("load manifest assessment: %v", err)
+		t.Fatalf("read manifest after validation: %v", err)
 	}
-	if !assessment.Rich {
-		t.Fatalf("expected repaired manifest to remain rich, got %#v", assessment)
+	if string(after) != string(before) {
+		t.Fatalf("expected strict validation not to rewrite manifest")
 	}
 }
 
-func TestRepairCollectManifestNormalizesAbsoluteDocumentPathUnderWriteRoot(t *testing.T) {
+func TestValidateCollectManifestRejectsAbsoluteDocumentPathWithoutRewrite(t *testing.T) {
 	t.Parallel()
 
 	writeRoot := t.TempDir()
@@ -322,88 +310,109 @@ func TestRepairCollectManifestNormalizesAbsoluteDocumentPathUnderWriteRoot(t *te
 	}
 	writeManifest(t, writeRoot, manifest)
 
-	task := testCollectTask(writeRoot, "openedx-platform", "openedx-platform")
-	report, err := RepairCollectManifest(task)
+	manifestPath := filepath.Join(writeRoot, shardPackManifestFile)
+	before, err := os.ReadFile(manifestPath)
 	if err != nil {
-		t.Fatalf("repair manifest: %v", err)
-	}
-	if !report.Changed {
-		t.Fatalf("expected repair report to mark manifest as changed")
-	}
-	if len(report.AppliedRuleIDs) != 1 || report.AppliedRuleIDs[0] != compatibilityregistry.RuleSafeCollectDocumentPathNormalization {
-		t.Fatalf("expected collect path normalization rule, got %#v", report.AppliedRuleIDs)
+		t.Fatalf("read original manifest: %v", err)
 	}
 
-	raw, err := os.ReadFile(filepath.Join(writeRoot, shardPackManifestFile))
-	if err != nil {
-		t.Fatalf("read repaired manifest: %v", err)
+	task := testCollectTask(writeRoot, "openedx-platform", "openedx-platform")
+	if err := ValidateCollectManifest(task); err == nil {
+		t.Fatalf("expected absolute document path to fail strict validation")
+	} else if !strings.Contains(err.Error(), "must be relative") {
+		t.Fatalf("expected strict document path error, got %v", err)
 	}
-	repaired, err := contracts.ParseShardPackManifest(raw)
+
+	after, err := os.ReadFile(manifestPath)
 	if err != nil {
-		t.Fatalf("parse repaired manifest: %v", err)
+		t.Fatalf("read manifest after validation: %v", err)
 	}
-	if got := repaired.Documents[0].Path; got != "service-inventory.md" {
-		t.Fatalf("expected absolute path to normalize to write-root relative path, got %q", got)
+	if string(after) != string(before) {
+		t.Fatalf("expected strict validation not to rewrite manifest")
 	}
 }
 
-func TestCanonicalizeCollectManifestDoesNotReportRepairForAmbiguousDocumentPath(t *testing.T) {
+func TestValidateCollectManifestRejectsMissingRequiredMetadataWithoutAutofill(t *testing.T) {
 	t.Parallel()
 
 	writeRoot := t.TempDir()
-
-	manifest := contracts.ShardPackManifest{
-		Version:      1,
-		RunID:        "run-1",
-		StepID:       "refresh.step1.collect",
-		ShardID:      "openedx-platform",
-		AgentRole:    "shard-analyst",
-		ArtifactRoot: "reports/taskruns/run-1/staging/shards/openedx-platform",
-		RepoScopes:   []string{"openedx-platform"},
-		PathScopes:   []string{"."},
-		Documents: []contracts.AuthoredDocument{
-			{
-				ID:            "doc.service-inventory",
-				Kind:          "report",
-				Title:         "Service Inventory",
-				Path:          "reports/taskruns/run-1/staging/shards/openedx-platform/service-inventory.md",
-				CanonicalPath: "reports/as-is/service-inventory/openedx-platform.md",
-				Topics:        []string{"openedx"},
-				CitationIDs:   []string{"cite.openedx.readme"},
-			},
-		},
-		Citations: []contracts.DocumentCitation{
-			{
-				ID:          "cite.openedx.readme",
-				Repo:        "openedx-platform",
-				Path:        "README.md",
-				ClaimIDs:    []string{"claim.openedx.readme"},
-				DocumentIDs: []string{"doc.service-inventory"},
-			},
-		},
-		Semantic: contracts.SemanticSnapshot{
-			Coverage: contracts.Coverage{
-				Observed: []string{"services"},
-				Missing:  []string{"owner mappings"},
-				Notes:    []string{"artifact root path remains invalid when file is absent"},
-			},
-		},
+	raw := []byte(`{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step1.collect",
+  "shard_id": "payments",
+  "agent_role": "shard-analyst",
+  "artifact_root": "reports/taskruns/run-1/staging/shards/payments",
+  "documents": [],
+  "citations": [],
+  "semantic": {
+    "coverage": {"observed": [], "missing": [], "notes": []},
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}`)
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), raw, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
 	}
-	raw, err := jsonMarshalManifest(manifest)
+
+	task := testCollectTask(writeRoot, "payments", "payments-service")
+	if err := ValidateCollectManifest(task); err != nil {
+		t.Fatalf("expected valid manifest without optional repo/path/domain metadata to pass: %v", err)
+	}
+
+	missingRunID := strings.Replace(string(raw), `"run_id": "run-1",`, `"run_id": "",`, 1)
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), []byte(missingRunID), 0o644); err != nil {
+		t.Fatalf("write missing run_id manifest: %v", err)
+	}
+	if err := ValidateCollectManifest(task); err == nil {
+		t.Fatalf("expected missing run_id to fail strict validation")
+	} else if !strings.Contains(err.Error(), "run_id") {
+		t.Fatalf("expected run_id validation error, got %v", err)
+	}
+}
+
+func TestValidateCollectManifestRejectsUnknownTopLevelFieldWithoutRewrite(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	raw := []byte(`{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step1.collect",
+  "shard_id": "payments",
+  "agent_role": "shard-analyst",
+  "artifact_root": "reports/taskruns/run-1/staging/shards/payments",
+  "unknown_runtime_wrapper": true,
+  "documents": [],
+  "citations": [],
+  "semantic": {
+    "coverage": {"observed": [], "missing": [], "notes": []},
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}`)
+	manifestPath := filepath.Join(writeRoot, shardPackManifestFile)
+	if err := os.WriteFile(manifestPath, raw, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	task := testCollectTask(writeRoot, "payments", "payments-service")
+	if err := ValidateCollectManifest(task); err == nil {
+		t.Fatalf("expected unknown top-level field to fail strict validation")
+	} else if !strings.Contains(err.Error(), "unknown_runtime_wrapper") {
+		t.Fatalf("expected unknown field name in validation error, got %v", err)
+	}
+
+	after, err := os.ReadFile(manifestPath)
 	if err != nil {
-		t.Fatalf("marshal manifest: %v", err)
+		t.Fatalf("read manifest after validation: %v", err)
 	}
-
-	task := testCollectTask(writeRoot, "openedx-platform", "openedx-platform")
-	_, report, err := canonicalizeCollectManifest(raw, task)
-	if err == nil {
-		t.Fatalf("expected invalid duplicated artifact_root path to remain invalid without safe repair")
-	}
-	if report.Changed {
-		t.Fatalf("expected no repair report for ambiguous document path, got %#v", report)
-	}
-	if len(report.AppliedRuleIDs) != 0 {
-		t.Fatalf("expected no applied rule ids for ambiguous document path, got %#v", report.AppliedRuleIDs)
+	if string(after) != string(raw) {
+		t.Fatalf("expected strict validation not to rewrite manifest")
 	}
 }
 

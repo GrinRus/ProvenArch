@@ -19,6 +19,7 @@ import (
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/claudecode"
 	"github.com/GrinRus/ProvenArch/internal/runtime/codexcode"
+	"github.com/GrinRus/ProvenArch/internal/runtime/fakeruntime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/qwencode"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
@@ -116,8 +117,8 @@ const maxAutoShardsPerRepo = 16
 
 func runtimeMetaForRunner(runner acpruntime.Runner) contracts.RuntimeMeta {
 	switch runner.(type) {
-	case claudecode.FakeRunner, *claudecode.FakeRunner:
-		return contracts.RuntimeMeta{Name: string(acpruntime.ProviderClaudeCode), Version: "fake"}
+	case fakeruntime.Runner, *fakeruntime.Runner:
+		return contracts.RuntimeMeta{Name: "fake", Version: "fake"}
 	case claudecode.HeadlessRunner, *claudecode.HeadlessRunner:
 		return contracts.RuntimeMeta{Name: string(acpruntime.ProviderClaudeCode), Version: "headless"}
 	case qwencode.HeadlessRunner, *qwencode.HeadlessRunner:

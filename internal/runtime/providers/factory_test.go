@@ -7,18 +7,19 @@ import (
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/claudecode"
 	"github.com/GrinRus/ProvenArch/internal/runtime/codexcode"
+	"github.com/GrinRus/ProvenArch/internal/runtime/fakeruntime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/qwencode"
 )
 
-func TestBuildRunnerFakeModeAlwaysUsesFakeRunner(t *testing.T) {
+func TestBuildRunnerFakeModeAlwaysUsesNeutralRuntime(t *testing.T) {
 	t.Parallel()
 
 	runner, err := BuildRunner(acpruntime.RuntimeModeFake, acpruntime.ProviderQwenCode)
 	if err != nil {
 		t.Fatalf("build fake runner: %v", err)
 	}
-	if _, ok := runner.(claudecode.FakeRunner); !ok {
-		t.Fatalf("expected claudecode.FakeRunner, got %T", runner)
+	if _, ok := runner.(fakeruntime.Runner); !ok {
+		t.Fatalf("expected fakeruntime.Runner, got %T", runner)
 	}
 }
 

@@ -47,8 +47,8 @@ BATCH_OWNER_HEARTBEAT_PID=""
 declare -a STARTED_RUN_DIRS=()
 declare -a STARTED_RUN_PROVIDERS=()
 declare -a STARTED_RUN_INDEXES=()
-# Legacy `5x2` name is preserved for compatibility; provider surface is selectable
-# and now includes the canonical release triplet qwen/claude/codex.
+# Provider surface is selectable and includes the canonical release triplet
+# qwen/claude/codex.
 declare -a ALL_PROVIDERS=("qwen-code" "claude-code" "codex-code")
 declare -a SELECTED_PROVIDERS=()
 declare -a SELECTED_RUN_INDEXES=()
@@ -111,11 +111,11 @@ TIMEOUT_PRECHECK_UNSET_KEYS=(
 )
 
 log() {
-  printf '[batch-5x2] %s\n' "$*" >&2
+  printf '[batch] %s\n' "$*" >&2
 }
 
 die() {
-  echo "[batch-5x2][error] $*" >&2
+  echo "[batch][error] $*" >&2
   exit 1
 }
 
@@ -1479,14 +1479,21 @@ preflight_meta_lines="$(python3 "$PROVENARCH_ROOT/scripts/write-batch-preflight.
   --codex-version-line "$CODEX_VERSION")"
 TIMEOUT_PROFILE_LINE=""
 EXECUTION_PROFILE_LINE=""
+PROVIDER_READINESS_STATUS=""
+PROVIDER_READINESS_REASON=""
 while IFS='=' read -r key value; do
   case "$key" in
     timeout_profile_line) TIMEOUT_PROFILE_LINE="$value" ;;
     execution_profile_line) EXECUTION_PROFILE_LINE="$value" ;;
+    provider_readiness_status) PROVIDER_READINESS_STATUS="$value" ;;
+    provider_readiness_reason) PROVIDER_READINESS_REASON="$value" ;;
   esac
 done <<<"$preflight_meta_lines"
 if [[ -z "$TIMEOUT_PROFILE_LINE" || -z "$EXECUTION_PROFILE_LINE" ]]; then
   die "preflight helper did not return timeout/execution profile lines"
+fi
+if [[ "$PROVIDER_READINESS_STATUS" == "unavailable" ]]; then
+  die "operational_host_preflight_failed: selected provider readiness failed: ${PROVIDER_READINESS_REASON:-unknown provider readiness failure}"
 fi
 
 read_declared_repos_meta
