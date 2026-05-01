@@ -63,18 +63,14 @@ func (a qwenAdapter) RuntimeVersion() string {
 
 func (a qwenAdapter) CommandSpec(task acpruntime.Task) (providercommon.CommandSpec, error) {
 	includeDirs := acpruntime.ResolveHeadlessIncludeDirectories(task)
-	commandArgs := append([]string(nil), a.runner.Args...)
+	prompt := buildPrompt(task)
+	commandArgs := qwenArgsWithPrompt(append([]string(nil), a.runner.Args...), prompt)
 	if len(commandArgs) == 0 {
-		commandArgs = buildQwenArgsWithIncludeDirectories(includeDirs, buildPrompt(task))
-	}
-	stdin, err := providercommon.JSONTaskStdin(task)
-	if err != nil {
-		return providercommon.CommandSpec{}, err
+		commandArgs = buildQwenArgsWithIncludeDirectories(includeDirs, prompt)
 	}
 	return providercommon.CommandSpec{
 		Command:     a.runner.commandName(),
 		Args:        commandArgs,
-		Stdin:       stdin,
 		Dir:         strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task)),
 		IncludeDirs: includeDirs,
 	}, nil
@@ -85,18 +81,13 @@ func (a qwenAdapter) CollectManifestRepairCommandSpec(task acpruntime.Task, vali
 	repairTask := task
 	repairTask.ReadContextRoots = append([]string(nil), includeDirs...)
 	prompt := promptcontract.ComposeCollectManifestRepairPrompt(acpruntime.ProviderQwenCode, repairTask, validationErr)
-	commandArgs := append([]string(nil), a.runner.Args...)
+	commandArgs := qwenArgsWithPrompt(append([]string(nil), a.runner.Args...), prompt)
 	if len(commandArgs) == 0 {
 		commandArgs = buildQwenArgsWithIncludeDirectories(includeDirs, prompt)
-	}
-	stdin, err := providercommon.JSONTaskStdin(repairTask)
-	if err != nil {
-		return providercommon.CommandSpec{}, err
 	}
 	return providercommon.CommandSpec{
 		Command:     a.runner.commandName(),
 		Args:        commandArgs,
-		Stdin:       stdin,
 		Dir:         strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task)),
 		IncludeDirs: includeDirs,
 	}, nil
@@ -129,4 +120,51 @@ func (a qwenAdapter) RecoveryPolicy(_ acpruntime.Task) providercommon.RecoveryPo
 
 func (a qwenAdapter) UnavailableMarkers() []string {
 	return providercommon.DefaultUnavailableMarkers()
+}
+
+func qwenArgsWithPrompt(args []string, prompt string) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	normalized := make([]string, 0, len(args)+2)
+	promptSet := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		trimmed := strings.TrimSpace(arg)
+		switch {
+		case strings.HasPrefix(trimmed, "--prompt="):
+			if !promptSet {
+				normalized = append(normalized, "--prompt="+prompt)
+				promptSet = true
+			}
+			continue
+		case strings.HasPrefix(trimmed, "-p="):
+			if !promptSet {
+				normalized = append(normalized, "-p="+prompt)
+				promptSet = true
+			}
+			continue
+		}
+		switch trimmed {
+		case "-p", "--prompt":
+			if !promptSet {
+				normalized = append(normalized, trimmed, prompt)
+				promptSet = true
+			}
+			if i+1 < len(args) && qwenPromptFlagValueLooksPresent(args[i+1]) {
+				i++
+			}
+			continue
+		}
+		normalized = append(normalized, arg)
+	}
+	if !promptSet {
+		normalized = append(normalized, "-p", prompt)
+	}
+	return normalized
+}
+
+func qwenPromptFlagValueLooksPresent(arg string) bool {
+	trimmed := strings.TrimSpace(arg)
+	return trimmed == "" || !strings.HasPrefix(trimmed, "-")
 }

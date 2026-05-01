@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
 
@@ -39,6 +40,8 @@ func TestDocFirstFilesystemPolicyDefinesSharedCollectRepairSurface(t *testing.T)
 		ArtifactRoot:     "reports/taskruns/run-1/staging/shards/payments",
 		ReadContextRoots: []string{"/tmp/repos/payments"},
 		RepoScopes:       []string{"payments"},
+		PathScopes:       []string{"payments"},
+		ShardID:          "payments",
 		ExpectedArtifacts: []string{
 			"shard-pack-manifest.json",
 		},
@@ -48,9 +51,15 @@ func TestDocFirstFilesystemPolicyDefinesSharedCollectRepairSurface(t *testing.T)
 	policy := DocFirstFilesystemPolicy(task)
 	required := []string{
 		`Write ONLY inside write_root.`,
+		`Suggested collect authored doc path for this shard:`,
+		`Do not wait for a complete broad repository sweep before writing shard-pack-manifest.json`,
+		`TASK-SPECIFIC COLLECT MANIFEST JSON SKELETON:`,
+		`"path": "payments-overview.md"`,
+		`"artifact_root": "reports/taskruns/run-1/staging/shards/payments"`,
 		`Do not exit after writing markdown only; every collect shard must finish with a valid shard-pack-manifest.json.`,
 		`After the first filesystem write inside write_root, stop broad repository exploration; only minimal manifest/JSON repair is allowed afterwards.`,
 		`After writing shard-pack-manifest.json, do NOT continue broad list_directory/read_file sweeps across repo roots.`,
+		`Do NOT read reports/taskruns/**, raw runtime logs, or previously generated shard-pack-manifest.json files as schema examples during collect.`,
 		`If authored docs and shard-pack-manifest.json already exist in write_root, stop and exit successfully.`,
 		`documents[].path MUST be artifact_root-relative only`,
 		`semantic.entities[*].provenance.evidence[*], semantic.edges[*].provenance.evidence[*], and semantic.findings[*].provenance.evidence[*] item MUST include non-empty repo and path values`,
@@ -60,6 +69,99 @@ func TestDocFirstFilesystemPolicyDefinesSharedCollectRepairSurface(t *testing.T)
 		if !strings.Contains(policy, needle) {
 			t.Fatalf("expected collect doc-first policy to contain %q, got:\n%s", needle, policy)
 		}
+	}
+}
+
+func TestDocFirstFilesystemPolicyAddsRootFileShardHint(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		TaskID:           "task-1",
+		RunID:            "run-1",
+		StepID:           "init.step1.collect",
+		Workspace:        "/tmp/workspace",
+		WriteRoot:        "/tmp/workspace/reports/taskruns/run-1/staging/shards/root-files",
+		ArtifactRoot:     "reports/taskruns/run-1/staging/shards/root-files",
+		ReadContextRoots: []string{"/tmp/repos/bank"},
+		RepoScopes:       []string{"bank"},
+		PathScopes:       []string{".gitignore", "LICENSE", "Makefile", "README.md", "pom.xml"},
+		ExpectedArtifacts: []string{
+			"shard-pack-manifest.json",
+		},
+		StartedAtUTC: time.Date(2026, 5, 1, 8, 0, 0, 0, time.UTC),
+	}
+
+	policy := DocFirstFilesystemPolicy(task)
+	required := []string{
+		`Root-file collect shard detected: path_scopes contains root-level files only:`,
+		`.gitignore, LICENSE, Makefile, README.md, pom.xml`,
+		`read only the listed root files first; do not recursively sweep top-level directories`,
+		`Produce one concise root overview document in write_root, then write shard-pack-manifest.json`,
+		`"path": "root-overview.md"`,
+	}
+	for _, needle := range required {
+		if !strings.Contains(policy, needle) {
+			t.Fatalf("expected root-file shard policy to contain %q, got:\n%s", needle, policy)
+		}
+	}
+}
+
+func TestDocFirstFilesystemPolicyDoesNotTreatTopLevelDirsAsRootFileShard(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		TaskID:           "task-1",
+		RunID:            "run-1",
+		StepID:           "init.step1.collect",
+		Workspace:        "/tmp/workspace",
+		WriteRoot:        "/tmp/workspace/reports/taskruns/run-1/staging/shards/source-docs",
+		ArtifactRoot:     "reports/taskruns/run-1/staging/shards/source-docs",
+		ReadContextRoots: []string{"/tmp/repos/bank"},
+		RepoScopes:       []string{"bank"},
+		PathScopes:       []string{"docs", "src"},
+		ShardID:          "bank-source-docs",
+	}
+
+	policy := DocFirstFilesystemPolicy(task)
+	if strings.Contains(policy, "Root-file collect shard detected") {
+		t.Fatalf("top-level directory scopes must not receive root-file shard hint:\n%s", policy)
+	}
+	if !strings.Contains(policy, `"path": "bank-source-docs-overview.md"`) {
+		t.Fatalf("expected non-root shard to use shard-based doc suggestion, got:\n%s", policy)
+	}
+
+	task.PathScopes = []string{".github", "README.md"}
+	task.ShardID = "bank-root-and-ci"
+	policy = DocFirstFilesystemPolicy(task)
+	if strings.Contains(policy, "Root-file collect shard detected") {
+		t.Fatalf("mixed root files and top-level service dirs must not receive root-file shard hint:\n%s", policy)
+	}
+}
+
+func TestCollectManifestTaskSkeletonParsesAsShardPackManifest(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		ArtifactRoot: "reports/taskruns/run-1/staging/shards/source-docs",
+		RepoScopes:   []string{"bank"},
+		PathScopes:   []string{"src"},
+		ShardID:      "bank-source-docs",
+		DomainID:     "payments",
+		AgentRole:    "shard-analyst",
+	}
+
+	raw := CollectManifestTaskSkeleton(task, []string{"docs/overview.md", "overview.md"}, []string{"src/main.go"})
+	manifest, err := contracts.ParseShardPackManifest([]byte(raw))
+	if err != nil {
+		t.Fatalf("expected task skeleton to parse as a valid shard pack manifest, got %v\n%s", err, raw)
+	}
+	if got, want := len(manifest.Documents), 2; got != want {
+		t.Fatalf("documents = %d, want %d in skeleton:\n%s", got, want, raw)
+	}
+	if got, want := manifest.Citations[0].Path, "src/main.go"; got != want {
+		t.Fatalf("citation path = %q, want %q", got, want)
 	}
 }
 

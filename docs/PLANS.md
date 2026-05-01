@@ -55,6 +55,61 @@ EP-YYYYMMDD-<slug>
 
 ## Active Plans
 ### Plan ID
+EP-20260501-qwen-smoke-tiny-collect-manifest-hardening
+
+### Context
+Diagnostic `smoke tiny` на `qwen-code` (`smoke-tiny-bank-20260501T093108Z`) дошёл до backend run, но завершился `FAIL`: один collect shard прошёл, четыре shards написали authored markdown без `shard-pack-manifest.json`, manifest-only repair stalled без manifest, а root-file shard остался fully silent/no-artifact и был корректно classified как `runner_unavailable`. Нужно стабилизировать qwen invocation/prompt surface без ослабления strict artifact-only validation и без изменения public schemas/API.
+
+### Goals (must have)
+- [x] Убрать JSON task stdin из `qwen-code` invocation; prompt остаётся только в CLI `-p`, включая custom qwen args
+- [x] Усилить collect manifest repair prompt task-specific scaffold-ом и literal JSON skeleton
+- [x] Добавить root-file collect shard hint против recursive sweep и silent/no-artifact hang
+- [x] Сохранить `runtime_contract_failed` для markdown-only collect после одной repair попытки и `runner_unavailable` для fully silent qwen retry exhaustion
+- [x] Синхронизировать docs/runbook/testing и покрыть tests
+
+### Non-goals
+- [x] Не менять public schemas/API/workspace contracts
+- [x] Не добавлять ACP-side manifest synthesis/autofill
+- [x] Не менять `best_effort partial` orchestration semantics
+
+### Approach
+1) Перевести `qwencode` command specs на prompt-only stdin-empty invocation.
+2) Расширить shared prompt contract: repair prompt перечисляет authored docs, exact metadata, repo/path scopes, evidence candidates и task-specific manifest JSON skeleton.
+3) Расширить collect step policy: root-file shards читают только перечисленные root files, пишут один concise overview doc и manifest; все collect shards получают suggested doc path и manifest skeleton до canonical example.
+4) Добавить adapter/prompt/policy tests и синхронизировать docs.
+5) Прогнать targeted tests, DoD и затем clean-worktree `smoke tiny` qwen diagnostic.
+
+### Files expected to change
+- `internal/runtime/qwencode/*`
+- `internal/runtime/{promptcontract,steppolicy}/*`
+- `docs/*`, `README.md`
+
+### Acceptance criteria
+- [x] `qwen-code` command specs keep stdin empty and pass artifact prompt through CLI `-p`
+- [x] Repair prompt exposes task-specific manifest scaffold, literal JSON skeleton and no broader schema/history scavenging
+- [x] Root-file collect shard prompt forbids recursive repo sweep
+- [x] Targeted runtime tests pass
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`
+- [x] Trusted-machine `smoke tiny` qwen rerun captured with backend `1/1` or residual blocker evidence
+
+### Risks
+- Live provider behavior can still fail due auth/rate limits or qwen CLI changes; such failures must remain explicit `runner_unavailable` with raw diagnostics.
+- Prompt hardening may reduce broad context collection on root-file shards; remaining uncertainty should be represented as coverage gaps, not hidden success.
+
+### Progress log
+- 2026-05-01: Started implementation after `smoke-tiny-bank-20260501T093108Z` log triage.
+- 2026-05-01: Implemented qwen prompt-only invocation, collect repair scaffold, root-file shard hints, stub test parsing for prompt-only qwen, and synchronized README/architecture/spec/runbook/testing docs. Targeted runtime tests and full DoD passed.
+- 2026-05-01: Final audit found that custom `HeadlessRunner.Args` could drop the qwen artifact prompt after stdin removal, or keep a caller-supplied prompt. Fixed qwen args normalization so custom args still receive exactly one artifact prompt through CLI `-p`/`--prompt`, with stdin empty; added adapter coverage and synchronized docs.
+- 2026-05-01: Final audit also found the root-file hint detector was too broad for multiple top-level directory scopes such as `docs, src` and service dirs like `.github`. Tightened it so root-file mode requires every scope to look like a root-level file, and added regression coverage.
+- 2026-05-01: Follow-up audit found collect repair only counted/listed top-level authored files even though `documents[].path` may be nested. Made collect authored-file snapshots and repair prompt document discovery recursive under `write_root`, while still excluding runtime metadata/manifest files and keeping manifest-only write-set guard unchanged.
+- 2026-05-01: Added a skeleton parse regression and fixed duplicate scaffold IDs when authored docs share the same basename in different directories, e.g. `overview.md` and `docs/overview.md`.
+- 2026-05-01: Clean-worktree diagnostic rerun `smoke-tiny-bank-qwen-fix-20260501T105754Z` used qwen `0.15.2`, selected only `qwen-code` run `1`, frontend `never`, and did not skip precheck. Verdict stayed `FAIL`: backend `0/1`, `runtime_contract_failed=1`, `runner_unavailable=1`, frontend skipped/non-blocking. Evidence: `/tmp/provenarch-test_arch_project/reports/release_verdict_smoke-tiny-bank-qwen-fix-20260501T105754Z.json` and `/tmp/provenarch-test_arch_project/reports/profile_matrix_smoke-tiny-bank-qwen-fix-20260501T105754Z.md`.
+- 2026-05-01: Live residuals narrowed: `docs` collect shard now wrote both authored doc and `shard-pack-manifest.json`; root-file shard still exhausted as silent/no-artifact `runner_unavailable`, `extras` hit qwen CLI/API TLS `runner_unavailable`, and `iac`/`kubernetes-manifests`/`src` wrote markdown but manifest-only repair still stalled as `runtime_contract_failed`. Step2 then aborted as silent/no-artifact `runner_unavailable`.
+- 2026-05-01: Revalidated current diff from a clean temp clone with installed UI deps using direct harness matrix `smoke-tiny-bank-20260501T121025Z`. Precheck passed, selected provider/run were `qwen-code`/`1`, frontend init/cancel were skipped by `never`, and verdict stayed `FAIL`: backend `0/1`, `runtime_contract_failed=1`, `runner_unavailable=1`, `precheck_failed=0`. Collect improved to one valid shard (`bank-of-anthos-src`) and five authored-docs-without-manifest shards that exhausted manifest-only repair; downstream `step2.asis_docs` assembled from the one valid shard, then `step3.findings` failed as silent no-artifact `runner_unavailable`.
+- 2026-05-01: Follow-up audit found the remaining prompt gap: qwen still wrote authored docs before manifest. Added suggested authored doc paths plus literal task-specific manifest JSON skeletons to normal collect and manifest-only repair prompts; this remains provider instruction only, with no ACP-side manifest synthesis/autofill.
+- 2026-05-01: Clean temp-clone rerun `smoke-tiny-bank-20260501T131747Z` used direct `./scripts/full-run-batch-matrix.sh` with qwen `0.15.2`, selected only `qwen-code` run `1`, frontend init/cancel `never`, and no `BATCH_SKIP_PRECHECK`. Verdict stayed diagnostic `FAIL`: backend `0/1`, `runtime_contract_failed=1`, `runner_unavailable=1`, `precheck_failed=0`, frontend skipped. The new manifest skeleton improved collect to two valid shard packs (`bank-of-anthos-docs`, `bank-of-anthos-extras`); root-file shard remained fully silent/no-artifact `runner_unavailable`; `iac`, `kubernetes-manifests`, and `src` wrote overview markdown but exhausted manifest-only repair without `shard-pack-manifest.json`; `step2.asis_docs` recovered on fresh retry; `step3.findings` then exhausted as silent/no-artifact `runner_unavailable`. Evidence: `/tmp/provenarch-test_arch_project/reports/release_verdict_smoke-tiny-bank-20260501T131747Z.json`, `/tmp/provenarch-test_arch_project/reports/profile_matrix_smoke-tiny-bank-20260501T131747Z.md`, and `/tmp/provenarch-test_arch_project/reports/quality_report_smoke-tiny-bank-20260501T131747Z-single-git-url-baseline.md`.
+
+### Plan ID
 EP-20260426-strict-runtime-no-compatibility-shims
 
 ### Context

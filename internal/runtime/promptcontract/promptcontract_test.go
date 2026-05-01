@@ -108,6 +108,12 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(writeRoot, "overview.md"), []byte("# Payments\n"), 0o644); err != nil {
 		t.Fatalf("write authored doc: %v", err)
 	}
+	if err := os.MkdirAll(filepath.Join(writeRoot, "docs"), 0o755); err != nil {
+		t.Fatalf("mkdir nested authored docs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "docs", "deep-dive.md"), []byte("# Payments Deep Dive\n"), 0o644); err != nil {
+		t.Fatalf("write nested authored doc: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(repoRoot, "src", "README.md"), []byte("# Payments source\n"), 0o644); err != nil {
 		t.Fatalf("write evidence candidate: %v", err)
 	}
@@ -129,13 +135,27 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 	expectedTokens := []string{
 		"collect manifest repair mode",
 		"Write or replace only write_root/shard-pack-manifest.json.",
+		"Final action must be: write only write_root/shard-pack-manifest.json, then exit successfully.",
 		"Existing authored documents in write_root are the source surface to describe.",
 		"Do not search the filesystem for schemas/*, docs/spec/*, examples, or prior manifests",
 		"Do not inspect reports/taskruns outside the current write_root",
+		"prior manifests, or raw logs as examples",
 		"Existing authored document files in write_root:",
+		"docs/deep-dive.md",
 		"overview.md",
 		"Use these repository evidence path candidates before any broader lookup:",
 		"src/README.md",
+		"TASK-SPECIFIC MANIFEST SCAFFOLD:",
+		`run_id: "run-1"`,
+		`artifact_root: "reports/taskruns/run-1/staging/shards/payments"`,
+		`repo_scopes: ["payments-service"]`,
+		`path_scopes: ["src"]`,
+		"Create one documents[] item per authored file",
+		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
+		`"path": "docs/deep-dive.md"`,
+		`"path": "overview.md"`,
+		`"path": "src/README.md"`,
+		"Final repair action: write write_root/shard-pack-manifest.json",
 		"COLLECT MANIFEST REPAIR INSTRUCTIONS:",
 		"COLLECT MANIFEST CANONICAL SHAPE:",
 		"Previous artifact contract failure",

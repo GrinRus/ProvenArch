@@ -1,7 +1,9 @@
 package promptcontract
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -27,6 +29,7 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 		"- Do not return semantic JSON or any semantic payload on stdout.",
 		"- Do not rewrite existing authored markdown documents.",
 		"- Write or replace only write_root/shard-pack-manifest.json.",
+		"- Final action must be: write only write_root/shard-pack-manifest.json, then exit successfully.",
 		"- Exit with code 0 only after shard-pack-manifest.json validates.",
 		fmt.Sprintf(`- artifact_root (workspace-relative) = %q`, strings.TrimSpace(task.ArtifactRoot)),
 		fmt.Sprintf(`- write_root (absolute) = %q`, strings.TrimSpace(task.WriteRoot)),
@@ -41,22 +44,25 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 		"COLLECT MANIFEST REPAIR INSTRUCTIONS:",
 		"- Existing authored documents in write_root are the source surface to describe.",
 		"- Do not search the filesystem for schemas/*, docs/spec/*, examples, or prior manifests; the schema embedded in this prompt is authoritative for this repair.",
-		"- Do not inspect reports/taskruns outside the current write_root and do not read sibling shard manifests as examples.",
+		"- Do not inspect reports/taskruns outside the current write_root and do not read sibling shard manifests, prior manifests, or raw logs as examples.",
 		"- Reuse existing repository evidence from read_context_roots and path scopes; do not perform broad new exploration.",
 		"- If evidence is sparse, keep the gap explicit in semantic.coverage.missing instead of inventing unsupported entities.",
 	}
-	if authoredDocs := authoredRepairDocuments(task.WriteRoot); len(authoredDocs) > 0 {
+	authoredDocs := authoredRepairDocuments(task.WriteRoot)
+	if len(authoredDocs) > 0 {
 		repairLines = append(repairLines, "Existing authored document files in write_root:")
 		for _, rel := range authoredDocs {
 			repairLines = append(repairLines, fmt.Sprintf("- %s", rel))
 		}
 	}
-	if evidencePaths := repairEvidenceCandidates(task); len(evidencePaths) > 0 {
+	evidencePaths := repairEvidenceCandidates(task)
+	if len(evidencePaths) > 0 {
 		repairLines = append(repairLines, "Use these repository evidence path candidates before any broader lookup:")
 		for _, rel := range evidencePaths {
 			repairLines = append(repairLines, fmt.Sprintf("- %s", rel))
 		}
 	}
+	repairLines = append(repairLines, collectManifestRepairScaffold(task, authoredDocs, evidencePaths)...)
 	repairLines = append(repairLines, steppolicy.CollectArtifactRepairHints(errorText(validationErr))...)
 	repairLines = append(repairLines,
 		"COLLECT MANIFEST CANONICAL SHAPE:",
@@ -69,6 +75,65 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 	)
 	sections = append(sections, strings.Join(repairLines, "\n"))
 	return strings.Join(sections, "\n\n")
+}
+
+func collectManifestRepairScaffold(task acpruntime.Task, authoredDocs []string, evidencePaths []string) []string {
+	lines := []string{
+		"TASK-SPECIFIC MANIFEST SCAFFOLD:",
+		"- Start from the canonical fragment below, but copy these exact metadata values:",
+		`  - version: 1`,
+		fmt.Sprintf(`  - run_id: %q`, strings.TrimSpace(task.RunID)),
+		fmt.Sprintf(`  - step_id: %q`, strings.TrimSpace(task.StepID)),
+		fmt.Sprintf(`  - shard_id: %q`, strings.TrimSpace(task.ShardID)),
+		fmt.Sprintf(`  - domain_id: %q`, strings.TrimSpace(task.DomainID)),
+		fmt.Sprintf(`  - agent_role: %q`, strings.TrimSpace(task.AgentRole)),
+		fmt.Sprintf(`  - artifact_root: %q`, strings.TrimSpace(task.ArtifactRoot)),
+		fmt.Sprintf(`  - repo_scopes: %s`, jsonStringList(task.RepoScopes)),
+		fmt.Sprintf(`  - path_scopes: %s`, jsonStringList(task.PathScopes)),
+	}
+	if len(authoredDocs) > 0 {
+		lines = append(lines,
+			fmt.Sprintf(`- Create one documents[] item per authored file; documents[].path MUST be exactly one of: %s.`, strings.Join(authoredDocs, ", ")),
+			`- documents[].canonical_path must be a stable promoted reports/as-is or reports/agent-outputs path, never a reports/taskruns staging path.`,
+		)
+	} else {
+		lines = append(lines, `- No authored document file was listed; do not invent markdown in repair mode. Write the manifest only if authored docs are visible in write_root.`)
+	}
+	if len(evidencePaths) > 0 {
+		lines = append(lines,
+			fmt.Sprintf(`- Build citations[] from real repository evidence; citations[].path should use one of these candidates when applicable: %s.`, strings.Join(evidencePaths, ", ")),
+			`- Link documents[].citation_ids to citations[].id and keep every citation document_ids[] pointed back to an authored document id.`,
+		)
+	} else {
+		lines = append(lines, `- If no evidence candidate is listed, use concrete repo evidence from the assigned path scopes before finalizing; do not leave placeholder citations or citation-only semantic evidence.`)
+	}
+	lines = append(lines,
+		`- Keep semantic.coverage/questions/entities/edges/findings present; empty arrays are allowed for questions/entities/edges/findings when evidence is sparse.`,
+		`TASK-SPECIFIC MANIFEST JSON SKELETON:`,
+		steppolicy.CollectManifestTaskSkeleton(task, authoredDocs, evidencePaths),
+		`- Copy the JSON skeleton into write_root/shard-pack-manifest.json, preserve exact task metadata, then adjust document/citation/semantic content to match the authored docs and real evidence.`,
+		`- Final repair action: write write_root/shard-pack-manifest.json, verify no other file changed, then exit successfully.`,
+	)
+	return lines
+}
+
+func jsonStringList(values []string) string {
+	cleaned := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		cleaned = append(cleaned, trimmed)
+	}
+	if len(cleaned) == 0 {
+		return "[]"
+	}
+	raw, err := json.Marshal(cleaned)
+	if err != nil {
+		return "[]"
+	}
+	return string(raw)
 }
 
 func SharedSections(task acpruntime.Task) []string {
@@ -148,21 +213,29 @@ func authoredRepairDocuments(writeRoot string) []string {
 	if writeRoot == "" {
 		return nil
 	}
-	entries, err := os.ReadDir(writeRoot)
-	if err != nil {
+	cleanRoot := filepath.Clean(writeRoot)
+	if _, err := os.Stat(cleanRoot); err != nil {
 		return nil
 	}
-	docs := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+	docs := []string{}
+	_ = filepath.WalkDir(cleanRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil || entry == nil {
+			return nil
+		}
+		if path == cleanRoot || entry.IsDir() {
+			return nil
 		}
 		name := strings.TrimSpace(entry.Name())
 		if name == "" || name == "shard-pack-manifest.json" || name == "runtime-execution.json" {
-			continue
+			return nil
 		}
-		docs = append(docs, filepath.ToSlash(name))
-	}
+		rel, relErr := filepath.Rel(cleanRoot, path)
+		if relErr != nil || strings.TrimSpace(rel) == "" || rel == "." {
+			return nil
+		}
+		docs = append(docs, filepath.ToSlash(rel))
+		return nil
+	})
 	sort.Strings(docs)
 	return docs
 }

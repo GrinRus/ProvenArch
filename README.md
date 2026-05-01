@@ -394,14 +394,16 @@ Primary runtime contract для live `step1.collect`/`step3.findings`:
 Docs-first semantic rules:
 - `citation-index.json.claim_ids` образуют глобальное пространство имён в пределах assembled staged final set; один и тот же `claim_id` нельзя переиспользовать между разными shard/citation surfaces.
 - `shard-pack-manifest.json.semantic` всегда materialize-ится полностью (`coverage`, `questions`, `entities`, `edges`, `findings`), а collect step не считается успешным, если manifest остаётся missing/invalid после единственной manifest-only repair попытки.
-- manifest-only repair читает только текущий shard `write_root` и repo evidence roots; broader workspace `reports/taskruns`, sibling shard manifests и filesystem schema scavenging не являются repair input.
-- `shard-pack-manifest.json.documents[].path` всегда strict `artifact_root`-relative; runtime может детерминированно нормализовать duplicated `artifact_root` prefix только если файл реально существует внутри `write_root`, но persisted workspace-relative staging paths считаются contract-invalid drift.
+- collect prompt даёт provider-у suggested authored doc path и literal task-specific `shard-pack-manifest.json` skeleton, чтобы manifest писался сразу после первого shard doc, а не после broad sweep.
+- manifest-only repair читает только текущий shard `write_root` и repo evidence roots; repair prompt перечисляет фактические authored docs, candidate evidence paths и literal JSON skeleton. Broader workspace `reports/taskruns`, sibling shard manifests и filesystem schema scavenging не являются repair input.
+- `shard-pack-manifest.json.documents[].path` всегда strict `artifact_root`-relative; duplicated `artifact_root` prefix, persisted workspace-relative staging paths и absolute paths считаются contract-invalid drift и не нормализуются ACP.
 - validator path может чинить только technical/reference drift в staged indexes; дублирующиеся `claim_id` детерминированно переименовываются в citation index без semantic rewrite authored docs.
 
 Persisted runtime execution metadata:
 - сериализуется как internal `runtime-execution.json` payload рядом с taskrun artifacts
 - используется для replay/recovery, taskrun diagnostics и raw-output linking
 - live headless providers (`claude-code`, `qwen-code`, `codex-code`) проходят через общий artifact-only process engine; provider adapters задают только CLI invocation и explicit activity/recovery policy
+- `qwen-code` adapter invocation передаёт artifact prompt только через CLI `-p` без JSON task stdin; custom qwen args нормализуются так, чтобы не подменять artifact prompt. `claude-code`/`codex-code` сохраняют свои transport-specific stdin/machine-mode surfaces
 - selected-provider preflight фиксирует command/model/version readiness до deep live run; такие blockers являются operational, не product verdict
 - provider/API transport transcripts (например `[API Error: ... SSL ...]`) классифицируются как `runner_unavailable` с обязательным сохранением raw stdout/stderr artifacts
 - не является semantic source of truth для canonical `reports/*`/`proposals/*` promotion path

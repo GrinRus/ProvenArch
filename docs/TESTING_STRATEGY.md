@@ -56,7 +56,8 @@
 ### Headless provider conformance
 - required tests используют stub provider adapters без live network dependencies
 - общий process engine проверяется на success by valid artifacts, controlled stop after valid artifacts, collect manifest-only repair success/failure, bounded pre-artifact and repair stall windows, silent no-artifact classification, invalid artifact contract failures, deadline timeout и raw stdout/stderr diagnostics
-- provider-specific tests проверяют только adapter policy/args: `qwen` не требует semantic JSON stdout, а `claude`/`codex` machine-mode flags остаются diagnostic transport mode
+- provider-specific tests проверяют только adapter policy/args: `qwen` не требует semantic JSON stdout, не передаёт JSON task stdin при `-p` invocation и нормализует custom prompt args к artifact prompt, а `claude`/`codex` machine-mode flags остаются diagnostic transport mode
+- prompt contract tests покрывают collect repair task-specific scaffold, literal manifest JSON skeleton и root-file shard hints без live network dependency
 - batch preflight tests покрывают selected-provider readiness без live network dependency, включая codex `gpt-5.5`/CLI version mismatch guard
 
 ## 3) Обязательная структура test assets

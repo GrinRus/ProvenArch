@@ -256,6 +256,41 @@ EOF
 	}
 }
 
+func TestRunHeadlessProviderRepairsMissingCollectManifestWithNestedAuthoredDocs(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-repair-nested")
+	nestedDocPath := filepath.Join(task.WriteRoot, "docs", "overview.md")
+	nestedManifest := strings.Replace(collectManifestJSON(task), `"path": "overview.md"`, `"path": "docs/overview.md"`, 1)
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(filepath.Dir(nestedDocPath)) + `
+printf '%s\n' '# Nested Collect Overview' > ` + shellQuote(nestedDocPath) + `
+`
+	repairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + nestedManifest + `
+EOF
+`
+	runner := testAdapter{
+		command:       writeEngineScript(t, initialScript),
+		repairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected nested collect manifest repair success, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+}
+
 func TestRunHeadlessProviderRejectsCollectRepairExtraWrites(t *testing.T) {
 	t.Parallel()
 

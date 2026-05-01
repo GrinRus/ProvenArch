@@ -88,6 +88,164 @@ func TestQwenAdapterMonitorsPreArtifactStallsForArtifactSteps(t *testing.T) {
 	}
 }
 
+func TestQwenCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
+	t.Parallel()
+
+	task := newQwenDraftTask(t, "run-command-spec")
+	repoRoot := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	task.ReadContextRoots = []string{task.Workspace, repoRoot}
+	spec, err := (qwenAdapter{runner: HeadlessRunner{Command: "qwen-test"}}).CommandSpec(task)
+	if err != nil {
+		t.Fatalf("command spec: %v", err)
+	}
+	if got, want := spec.Command, "qwen-test"; got != want {
+		t.Fatalf("command = %q, want %q", got, want)
+	}
+	if spec.Stdin != nil {
+		t.Fatalf("qwen default invocation must keep stdin empty; task context belongs in -p prompt")
+	}
+	args := strings.Join(spec.Args, "\n")
+	for _, token := range []string{
+		"--chat-recording",
+		"--yolo",
+		"-p",
+		"Artifact-only contract:",
+		task.WriteRoot,
+		task.DraftFinalRoot,
+		"read_context_roots",
+		repoRoot,
+	} {
+		if !strings.Contains(args, token) {
+			t.Fatalf("expected qwen args to contain %q, got %v", token, spec.Args)
+		}
+	}
+}
+
+func TestQwenCommandSpecAppendsPromptForCustomArgsWithoutTaskJSONStdin(t *testing.T) {
+	t.Parallel()
+
+	task := newQwenDraftTask(t, "run-custom-args")
+	spec, err := (qwenAdapter{runner: HeadlessRunner{
+		Command: "qwen-test",
+		Args:    []string{"--chat-recording", "false", "--yolo"},
+	}}).CommandSpec(task)
+	if err != nil {
+		t.Fatalf("command spec: %v", err)
+	}
+	if spec.Stdin != nil {
+		t.Fatalf("qwen custom invocation must keep stdin empty; task context belongs in -p prompt")
+	}
+	args := strings.Join(spec.Args, "\n")
+	for _, token := range []string{
+		"--chat-recording",
+		"--yolo",
+		"-p",
+		"Artifact-only contract:",
+		task.WriteRoot,
+		task.DraftFinalRoot,
+	} {
+		if !strings.Contains(args, token) {
+			t.Fatalf("expected qwen custom args to contain %q, got %v", token, spec.Args)
+		}
+	}
+}
+
+func TestQwenCommandSpecNormalizesCustomPromptArgsToArtifactPrompt(t *testing.T) {
+	t.Parallel()
+
+	task := newQwenDraftTask(t, "run-custom-prompt")
+	spec, err := (qwenAdapter{runner: HeadlessRunner{
+		Command: "qwen-test",
+		Args:    []string{"--chat-recording", "false", "--prompt", "custom prompt", "--yolo", "-p=second prompt"},
+	}}).CommandSpec(task)
+	if err != nil {
+		t.Fatalf("command spec: %v", err)
+	}
+	if spec.Stdin != nil {
+		t.Fatalf("qwen custom invocation must keep stdin empty; task context belongs in -p prompt")
+	}
+	args := strings.Join(spec.Args, "\n")
+	for _, forbidden := range []string{"custom prompt", "second prompt"} {
+		if strings.Contains(args, forbidden) {
+			t.Fatalf("expected custom prompt %q to be replaced by artifact prompt, got %v", forbidden, spec.Args)
+		}
+	}
+	for _, token := range []string{
+		"--chat-recording",
+		"--yolo",
+		"--prompt",
+		"Artifact-only contract:",
+		task.WriteRoot,
+		task.DraftFinalRoot,
+	} {
+		if !strings.Contains(args, token) {
+			t.Fatalf("expected qwen custom args to contain %q, got %v", token, spec.Args)
+		}
+	}
+	if got := strings.Count(args, "Artifact-only contract:"); got != 1 {
+		t.Fatalf("expected exactly one artifact prompt, got %d in %v", got, spec.Args)
+	}
+}
+
+func TestQwenRepairCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "arch-workspace")
+	repoRoot := filepath.Join(root, "repo-a")
+	writeRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "shards", "repo-a")
+	for _, dir := range []string{workspace, repoRoot, writeRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte("version: 1\nrepos:\n  - name: repo-a\n    path: "+repoRoot+"\n"), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "overview.md"), []byte("# Repo A\n"), 0o644); err != nil {
+		t.Fatalf("write authored doc: %v", err)
+	}
+
+	task := acpruntime.Task{
+		RunID:            "run-1",
+		StepID:           "init.step1.collect",
+		Workspace:        workspace,
+		WriteRoot:        writeRoot,
+		ArtifactRoot:     "reports/taskruns/run-1/staging/shards/repo-a",
+		ReadContextRoots: []string{workspace, repoRoot},
+		RepoScopes:       []string{"repo-a"},
+		PathScopes:       []string{"README.md", "pom.xml"},
+		ShardID:          "repo-a-root-files",
+	}
+
+	spec, err := (qwenAdapter{runner: HeadlessRunner{Command: "qwen-test"}}).CollectManifestRepairCommandSpec(task, os.ErrNotExist)
+	if err != nil {
+		t.Fatalf("repair command spec: %v", err)
+	}
+	if spec.Stdin != nil {
+		t.Fatalf("qwen repair invocation must keep stdin empty; repair contract belongs in -p prompt")
+	}
+	if !containsArg(spec.IncludeDirs, writeRoot) || !containsArg(spec.IncludeDirs, repoRoot) {
+		t.Fatalf("repair include dirs must keep write root and repo evidence, got %v", spec.IncludeDirs)
+	}
+	args := strings.Join(spec.Args, "\n")
+	for _, token := range []string{
+		"collect manifest repair mode",
+		"TASK-SPECIFIC MANIFEST SCAFFOLD:",
+		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
+		"Final repair action: write write_root/shard-pack-manifest.json",
+		"overview.md",
+		`"path": "overview.md"`,
+	} {
+		if !strings.Contains(args, token) {
+			t.Fatalf("expected qwen repair prompt arg to contain %q, got %v", token, spec.Args)
+		}
+	}
+}
+
 func containsAll(text string, tokens []string) bool {
 	for _, token := range tokens {
 		if !strings.Contains(text, token) {
