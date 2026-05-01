@@ -1235,8 +1235,31 @@ def first_non_empty(mapping, keys):
     return ""
 
 def from_prompt(field):
-    match = re.search(r'"%s"\s*:\s*"([^"]+)"' % re.escape(field), prompt)
-    return match.group(1).strip() if match else ""
+    patterns = [
+        r'%s(?:\s+\([^)]+\))?\s*=\s*"([^"]+)"',
+        r'"%s"\s*:\s*"([^"]+)"',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern % re.escape(field), prompt)
+        if match:
+            return match.group(1).strip()
+    return ""
+
+def step_id_from_prompt():
+    match = re.search(r"STEP POLICY ([A-Za-z0-9._-]+):", prompt)
+    if match:
+        return match.group(1).strip()
+    if "Write constitution-draft.json in write_root." in prompt:
+        return "init.step0.constitution"
+    if "Write asis-draft-manifest.json in write_root." in prompt:
+        return "init.step2.asis_docs"
+    if "Write validator-verdict.json in write_root." in prompt:
+        return "init.step3.findings"
+    if "Write proposals-draft-manifest.json in write_root." in prompt:
+        return "init.step4.proposals"
+    if "shard-pack-manifest.json" in prompt:
+        return "init.step1.collect"
+    return ""
 
 def first_non_empty_list(mapping, keys):
     for key in keys:
@@ -1256,7 +1279,7 @@ if raw:
         task = {}
 
 task_id = first_non_empty(task, ["task_id", "TaskID"]) or from_prompt("TaskID") or from_prompt("task_id") or "task"
-step_id = first_non_empty(task, ["step_id", "StepID"]) or from_prompt("StepID") or from_prompt("step_id") or "init.step1.collect"
+step_id = first_non_empty(task, ["step_id", "StepID"]) or from_prompt("StepID") or from_prompt("step_id") or step_id_from_prompt() or "init.step1.collect"
 run_id = first_non_empty(task, ["run_id", "RunID"]) or from_prompt("RunID") or from_prompt("run_id")
 write_root = first_non_empty(task, ["write_root", "WriteRoot"]) or from_prompt("write_root") or from_prompt("WriteRoot")
 artifact_root = first_non_empty(task, ["artifact_root", "ArtifactRoot"]) or from_prompt("artifact_root") or from_prompt("ArtifactRoot")

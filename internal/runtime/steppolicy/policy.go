@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/GrinRus/ProvenArch/internal/artifactquality"
+	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 )
@@ -131,10 +132,15 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 		`- Read only from meta.workspace and meta.path_scopes plus runtime read_context_roots; do not treat workspace root as implicit write target.`,
 		`- Write ONLY inside write_root. Never write to workspace.yaml, schemas/*, docs/spec/*, charter/*, or analyzed user repositories.`,
 		`- Use tool calls for file writes. Stdout/stderr are diagnostics only and are not a semantic result surface.`,
+		fmt.Sprintf(`- task_id = %q`, strings.TrimSpace(task.TaskID)),
+		fmt.Sprintf(`- run_id = %q`, strings.TrimSpace(task.RunID)),
+		fmt.Sprintf(`- step_id = %q`, strings.TrimSpace(task.StepID)),
 		fmt.Sprintf(`- artifact_root (workspace-relative) = %q`, strings.TrimSpace(task.ArtifactRoot)),
 		fmt.Sprintf(`- write_root (absolute) = %q`, strings.TrimSpace(task.WriteRoot)),
 		fmt.Sprintf(`- draft_final_root (absolute) = %q`, strings.TrimSpace(task.DraftFinalRoot)),
 		fmt.Sprintf(`- read_context_roots = %s`, readContextRootsJSON),
+		fmt.Sprintf(`- repo_scopes = %s`, jsonStringList(task.RepoScopes)),
+		fmt.Sprintf(`- path_scopes = %s`, jsonStringList(task.PathScopes)),
 		fmt.Sprintf(`- domain_id = %q`, strings.TrimSpace(task.DomainID)),
 		fmt.Sprintf(`- agent_role = %q`, strings.TrimSpace(task.AgentRole)),
 		fmt.Sprintf(`- step_contract = %q`, strings.TrimSpace(task.StepContract)),
@@ -163,6 +169,9 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Do NOT delegate to agent/subagent helpers and do NOT use todo_write-style planning.`,
 			`- Before the first filesystem write inside write_root, keep repository exploration minimal and converge quickly on the first authored doc plus shard-pack-manifest.json.`,
 			`- Produce runtime-authored documents in write_root and then write shard-pack-manifest.json in write_root.`,
+			fmt.Sprintf(`- Suggested collect authored doc path for this shard: %q. Prefer exactly this single doc path unless already writing an existing clearer authored doc.`, SuggestedCollectDocumentPath(task)),
+			`- Do not wait for a complete broad repository sweep before writing shard-pack-manifest.json; once the first authored doc covers the assigned shard scope, write the manifest and record remaining gaps in semantic.coverage.missing.`,
+			`- Immediately after writing the first authored doc, write shard-pack-manifest.json by adapting the task-specific JSON skeleton below; keep exact metadata keys and replace only evidence/content values you actually observed.`,
 			`- Do not exit after writing markdown only; every collect shard must finish with a valid shard-pack-manifest.json.`,
 			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and semantic snapshot.`,
 			`- In shard-pack-manifest.json, semantic MUST include coverage, questions, entities, edges, and findings.`,
@@ -173,6 +182,17 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- After writing shard-pack-manifest.json, do NOT continue broad list_directory/read_file sweeps across repo roots.`,
 			`- Do NOT read reports/taskruns/**, raw runtime logs, or previously generated shard-pack-manifest.json files as schema examples during collect.`,
 			`- If authored docs and shard-pack-manifest.json already exist in write_root, stop and exit successfully.`,
+		)
+		if rootFileScopes := rootFileShardPathScopes(task.PathScopes); len(rootFileScopes) > 0 {
+			lines = append(lines,
+				fmt.Sprintf(`- Root-file collect shard detected: path_scopes contains root-level files only: %s.`, strings.Join(rootFileScopes, ", ")),
+				`- For this root-file shard, read only the listed root files first; do not recursively sweep top-level directories or unrelated source trees.`,
+				`- Produce one concise root overview document in write_root, then write shard-pack-manifest.json for that document and exit successfully.`,
+			)
+		}
+		lines = append(lines,
+			`TASK-SPECIFIC COLLECT MANIFEST JSON SKELETON:`,
+			CollectManifestTaskSkeleton(task, []string{SuggestedCollectDocumentPath(task)}, nil),
 		)
 		lines = append(lines, artifactquality.CollectManifestContractLines(strings.TrimSpace(task.ArtifactRoot))...)
 		lines = append(lines,
@@ -226,6 +246,188 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 		)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func SuggestedCollectDocumentPath(task acpruntime.Task) string {
+	if rootFileScopes := rootFileShardPathScopes(task.PathScopes); len(rootFileScopes) > 0 {
+		return "root-overview.md"
+	}
+	if len(task.PathScopes) == 1 {
+		if slug := slugComponent(task.PathScopes[0]); slug != "" {
+			return slug + "-overview.md"
+		}
+	}
+	if slug := slugComponent(task.ShardID); slug != "" {
+		return slug + "-overview.md"
+	}
+	return "overview.md"
+}
+
+func CollectManifestTaskSkeleton(task acpruntime.Task, docPaths []string, evidencePaths []string) string {
+	cleanDocPaths := make([]string, 0, len(docPaths))
+	seenDocs := map[string]struct{}{}
+	for _, docPath := range docPaths {
+		docPath = filepath.ToSlash(strings.TrimSpace(docPath))
+		if docPath == "" || docPath == "runtime-execution.json" || docPath == "shard-pack-manifest.json" {
+			continue
+		}
+		if _, exists := seenDocs[docPath]; exists {
+			continue
+		}
+		seenDocs[docPath] = struct{}{}
+		cleanDocPaths = append(cleanDocPaths, docPath)
+	}
+	if len(cleanDocPaths) == 0 {
+		cleanDocPaths = []string{SuggestedCollectDocumentPath(task)}
+	}
+
+	repo := PrimaryTaskRepoScope(task.RepoScope, task.RepoScopes)
+	if strings.TrimSpace(repo) == "" {
+		repo = "repo"
+	}
+	evidencePath := firstNonEmptyPath(evidencePaths)
+	if evidencePath == "" {
+		evidencePath = firstNonEmptyPath(task.PathScopes)
+	}
+	if evidencePath == "" {
+		evidencePath = "README.md"
+	}
+
+	shardSlug := slugComponent(firstNonEmpty(task.ShardID, task.DomainID, strings.Join(task.PathScopes, "-"), "shard"))
+	idStem := idComponent(shardSlug)
+	topic := firstNonEmpty(slugComponent(task.DomainID), shardSlug)
+	if topic == "" {
+		topic = "architecture"
+	}
+	runID := firstNonEmpty(task.RunID, "run-1")
+	stepID := firstNonEmpty(task.StepID, "init.step1.collect")
+	shardID := firstNonEmpty(task.ShardID, shardSlug)
+	artifactRoot := firstNonEmpty(task.ArtifactRoot, fmt.Sprintf("reports/taskruns/%s/staging/shards/%s", runID, shardSlug))
+
+	documents := make([]contracts.AuthoredDocument, 0, len(cleanDocPaths))
+	citations := make([]contracts.DocumentCitation, 0, len(cleanDocPaths))
+	for idx, docPath := range cleanDocPaths {
+		docSlug := slugComponent(strings.TrimSuffix(docPath, filepath.Ext(docPath)))
+		if docSlug == "" {
+			docSlug = fmt.Sprintf("doc-%d", idx+1)
+		}
+		docID := fmt.Sprintf("doc.%s.%s", idStem, idComponent(docSlug))
+		citationID := fmt.Sprintf("cite.%s.%s", idStem, idComponent(docSlug))
+		documents = append(documents, contracts.AuthoredDocument{
+			ID:            docID,
+			Kind:          "report",
+			Title:         titleFromSlug(docSlug),
+			Path:          docPath,
+			CanonicalPath: fmt.Sprintf("reports/as-is/%s/%s.md", shardSlug, docSlug),
+			Topics:        []string{topic},
+			CitationIDs:   []string{citationID},
+		})
+		citations = append(citations, contracts.DocumentCitation{
+			ID:          citationID,
+			Repo:        repo,
+			Path:        evidencePath,
+			ClaimIDs:    []string{fmt.Sprintf("claim.%s.%s", idStem, idComponent(docSlug))},
+			DocumentIDs: []string{docID},
+		})
+	}
+
+	manifest := contracts.ShardPackManifest{
+		Version:      1,
+		RunID:        runID,
+		StepID:       stepID,
+		ShardID:      shardID,
+		DomainID:     strings.TrimSpace(task.DomainID),
+		AgentRole:    firstNonEmpty(task.AgentRole, "shard-analyst"),
+		ArtifactRoot: artifactRoot,
+		RepoScopes:   nonEmptyList(task.RepoScopes),
+		PathScopes:   nonEmptyList(task.PathScopes),
+		Documents:    documents,
+		Citations:    citations,
+		Semantic: contracts.SemanticSnapshot{
+			Coverage: contracts.Coverage{
+				Observed: []string{topic},
+				Missing:  []string{"owner mappings if absent from repository evidence"},
+				Notes:    []string{"Replace this scaffold content with concrete repository observations before exiting."},
+			},
+			Questions: []contracts.Question{},
+			Entities:  []contracts.Entity{},
+			Edges:     []contracts.Edge{},
+			Findings:  []contracts.Finding{},
+		},
+	}
+	raw, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return "{}"
+	}
+	return string(raw)
+}
+
+func rootFileShardPathScopes(pathScopes []string) []string {
+	if len(pathScopes) == 0 {
+		return nil
+	}
+	values := make([]string, 0, len(pathScopes))
+	for _, raw := range pathScopes {
+		value := filepath.ToSlash(strings.TrimSpace(raw))
+		value = strings.TrimPrefix(value, "./")
+		value = strings.Trim(value, "/")
+		if value == "" || value == "." || strings.Contains(value, "/") {
+			return nil
+		}
+		if !isLikelyRootFileName(value) {
+			return nil
+		}
+		values = append(values, value)
+	}
+	sort.Strings(values)
+	return values
+}
+
+func jsonStringList(values []string) string {
+	cleaned := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		cleaned = append(cleaned, trimmed)
+	}
+	if len(cleaned) == 0 {
+		return "[]"
+	}
+	raw, err := json.Marshal(cleaned)
+	if err != nil {
+		return "[]"
+	}
+	return string(raw)
+}
+
+func isLikelyRootFileName(value string) bool {
+	name := strings.TrimSpace(value)
+	if name == "" {
+		return false
+	}
+	if isLikelyRootDirectoryName(name) {
+		return false
+	}
+	if strings.Contains(name, ".") {
+		return true
+	}
+	switch strings.ToLower(name) {
+	case "authors", "changelog", "copying", "contributors", "dockerfile", "gradlew", "justfile", "license", "makefile", "mvnw", "notice", "procfile", "rakefile", "readme":
+		return true
+	default:
+		return false
+	}
+}
+
+func isLikelyRootDirectoryName(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case ".circleci", ".github", ".gitlab", ".idea", ".vscode":
+		return true
+	default:
+		return false
+	}
 }
 
 func ConstitutionDraftManifestExample(task acpruntime.Task) string {
@@ -437,6 +639,81 @@ func CollectRepoEntrypointHints(task acpruntime.Task) []string {
 		}
 	}
 	return hints
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstNonEmptyPath(values []string) string {
+	for _, value := range values {
+		value = filepath.ToSlash(strings.Trim(strings.TrimSpace(value), "/"))
+		if value != "" && value != "." {
+			return value
+		}
+	}
+	return ""
+}
+
+func nonEmptyList(values []string) []string {
+	cleaned := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			cleaned = append(cleaned, value)
+		}
+	}
+	return cleaned
+}
+
+func slugComponent(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var builder strings.Builder
+	lastDash := false
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			builder.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash && builder.Len() > 0 {
+			builder.WriteByte('-')
+			lastDash = true
+		}
+	}
+	result := strings.Trim(builder.String(), "-")
+	if len(result) > 72 {
+		result = strings.Trim(result[:72], "-")
+	}
+	return result
+}
+
+func idComponent(value string) string {
+	value = strings.ReplaceAll(slugComponent(value), "-", ".")
+	if value == "" {
+		return "shard"
+	}
+	return value
+}
+
+func titleFromSlug(value string) string {
+	parts := strings.Fields(strings.ReplaceAll(slugComponent(value), "-", " "))
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(part[:1]) + part[1:]
+	}
+	if len(parts) == 0 {
+		return "Shard Overview"
+	}
+	return strings.Join(parts, " ")
 }
 
 func compactRetryHint(value string) string {

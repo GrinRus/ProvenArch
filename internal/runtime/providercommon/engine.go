@@ -850,23 +850,31 @@ func collectArtifactSnapshot(writeRoot string) artifactSnapshot {
 			}
 		}
 	}
-	entries, err := os.ReadDir(writeRoot)
-	if err != nil {
+	cleanRoot := filepath.Clean(writeRoot)
+	if _, err := os.Stat(cleanRoot); err != nil {
 		return snapshot
 	}
-	for _, entry := range entries {
-		if entry.IsDir() || isCollectNonAuthoredFile(entry.Name()) {
-			continue
+	_ = filepath.WalkDir(cleanRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil || entry == nil {
+			return nil
+		}
+		if path == cleanRoot || entry.IsDir() || isCollectNonAuthoredFile(entry.Name()) {
+			return nil
+		}
+		rel, relErr := filepath.Rel(cleanRoot, path)
+		if relErr != nil || strings.TrimSpace(rel) == "" || rel == "." {
+			return nil
 		}
 		snapshot.AuthoredFiles++
 		snapshot.ArtifactObserved = true
-		if info, statErr := entry.Info(); statErr == nil {
+		if info, statErr := os.Stat(path); statErr == nil {
 			modTime := info.ModTime().UTC()
 			if modTime.After(snapshot.LastMutation) {
 				snapshot.LastMutation = modTime
 			}
 		}
-	}
+		return nil
+	})
 	if snapshot.State == "" && snapshot.ArtifactObserved {
 		snapshot.State = "partial"
 	}
