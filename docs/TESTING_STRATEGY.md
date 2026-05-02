@@ -99,6 +99,7 @@ Baseline scenario set:
   - новые API endpoints `GET/PUT /api/runtime/timeouts`
 - runtime sharding control:
   - heuristics planner (module markers + leaf-pruning) и `analysis.include/exclude` фильтры
+  - structural coalescing для больших repos сохраняет module marker leaf shard groups внутри top-level dirs, если итоговый shard count остаётся в `maxAutoShardsPerRepo`
   - fallback warning + root shard `.` при пустом результате фильтров
   - scheduler semantics `sequential|parallel` (`max_parallel_tasks`) и deterministic apply order
   - `fail_fast` останавливает step/pipeline на первой shard error без перехода в downstream runtime steps

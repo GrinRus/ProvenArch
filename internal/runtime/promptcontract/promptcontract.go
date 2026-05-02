@@ -41,12 +41,7 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 		fmt.Sprintf(`- path_scopes = %q`, strings.Join(task.PathScopes, ", ")),
 	}
 	repairLines := []string{
-		"COLLECT MANIFEST REPAIR INSTRUCTIONS:",
-		"- Existing authored documents in write_root are the source surface to describe.",
-		"- Do not search the filesystem for schemas/*, docs/spec/*, examples, or prior manifests; the schema embedded in this prompt is authoritative for this repair.",
-		"- Do not inspect reports/taskruns outside the current write_root and do not read sibling shard manifests, prior manifests, or raw logs as examples.",
-		"- Reuse existing repository evidence from read_context_roots and path scopes; do not perform broad new exploration.",
-		"- If evidence is sparse, keep the gap explicit in semantic.coverage.missing instead of inventing unsupported entities.",
+		"Existing authored documents in write_root are the source surface to describe.",
 	}
 	authoredDocs := authoredRepairDocuments(task.WriteRoot)
 	if len(authoredDocs) > 0 {
@@ -63,7 +58,7 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 		}
 	}
 	repairLines = append(repairLines, collectManifestRepairScaffold(task, authoredDocs, evidencePaths)...)
-	repairLines = append(repairLines, steppolicy.CollectArtifactRepairHints(errorText(validationErr))...)
+	repairLines = append(repairLines, compactCollectManifestRepairInstructions(errorText(validationErr))...)
 	repairLines = append(repairLines,
 		"COLLECT MANIFEST CANONICAL SHAPE:",
 	)
@@ -75,6 +70,25 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 	)
 	sections = append(sections, strings.Join(repairLines, "\n"))
 	return strings.Join(sections, "\n\n")
+}
+
+func compactCollectManifestRepairInstructions(initialProblem string) []string {
+	lines := []string{
+		"COLLECT MANIFEST REPAIR INSTRUCTIONS:",
+		"- Copy the task-specific JSON skeleton first; then adjust only evidence/content values needed to describe existing authored docs.",
+		"- Do not search the filesystem for schemas/*, docs/spec/*, examples, or prior manifests; the schema embedded in this prompt is authoritative for this repair.",
+		"- Do not inspect reports/taskruns outside the current write_root and do not read sibling shard manifests, prior manifests, or raw logs as examples.",
+		"- Reuse existing repository evidence from read_context_roots and path scopes; do not perform broad new exploration.",
+		"- If evidence is sparse, keep the gap explicit in semantic.coverage.missing instead of inventing unsupported entities.",
+		"- semantic.coverage/questions/entities/edges/findings are all required; questions/entities/edges/findings must be arrays even when empty.",
+		"- semantic entities/edges/findings must remain full objects with object-shaped provenance and repo/path evidence.",
+		"- Repair mode is artifact-only: do not invent extra repository file reads/writes after authored docs already exist.",
+	}
+	lines = append(lines, artifactquality.CollectManifestLegacyHygieneLines()...)
+	if detail := strings.TrimSpace(initialProblem); detail != "" {
+		lines = append(lines, fmt.Sprintf("- Previous artifact contract failure: %s", detail))
+	}
+	return lines
 }
 
 func collectManifestRepairScaffold(task acpruntime.Task, authoredDocs []string, evidencePaths []string) []string {

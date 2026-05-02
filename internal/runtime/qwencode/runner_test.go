@@ -236,6 +236,7 @@ func TestQwenRepairCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 		"collect manifest repair mode",
 		"TASK-SPECIFIC MANIFEST SCAFFOLD:",
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
+		"Copy the task-specific JSON skeleton first",
 		"Final repair action: write write_root/shard-pack-manifest.json",
 		"overview.md",
 		`"path": "overview.md"`,

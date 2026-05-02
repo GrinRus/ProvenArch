@@ -394,9 +394,10 @@ Primary runtime contract для live `step1.collect`/`step3.findings`:
 Docs-first semantic rules:
 - `citation-index.json.claim_ids` образуют глобальное пространство имён в пределах assembled staged final set; один и тот же `claim_id` нельзя переиспользовать между разными shard/citation surfaces.
 - `shard-pack-manifest.json.semantic` всегда materialize-ится полностью (`coverage`, `questions`, `entities`, `edges`, `findings`), а collect step не считается успешным, если manifest остаётся missing/invalid после единственной manifest-only repair попытки.
-- collect prompt даёт provider-у suggested authored doc path и literal task-specific `shard-pack-manifest.json` skeleton, чтобы manifest писался сразу после первого shard doc, а не после broad sweep.
-- manifest-only repair читает только текущий shard `write_root` и repo evidence roots; repair prompt перечисляет фактические authored docs, candidate evidence paths и literal JSON skeleton. Broader workspace `reports/taskruns`, sibling shard manifests и filesystem schema scavenging не являются repair input.
+- collect prompt даёт provider-у early pair-write target: suggested authored doc path + literal task-specific `shard-pack-manifest.json` skeleton должны появиться до broad second-pass sweep.
+- manifest-only repair читает только текущий shard `write_root` и repo evidence roots; repair prompt перечисляет фактические authored docs, candidate evidence paths и ставит literal JSON skeleton перед compact repair constraints. Broader workspace `reports/taskruns`, sibling shard manifests и filesystem schema scavenging не являются repair input.
 - `shard-pack-manifest.json.documents[].path` всегда strict `artifact_root`-relative; duplicated `artifact_root` prefix, persisted workspace-relative staging paths и absolute paths считаются contract-invalid drift и не нормализуются ACP.
+- Для больших repos structural shard coalescing сохраняет module marker leaf shard groups внутри top-level dirs, если итоговый shard count остаётся в `maxAutoShardsPerRepo`; top-level groups, которые не помещаются в cap, остаются coalesced с warning.
 - validator path может чинить только technical/reference drift в staged indexes; дублирующиеся `claim_id` детерминированно переименовываются в citation index без semantic rewrite authored docs.
 
 Persisted runtime execution metadata:

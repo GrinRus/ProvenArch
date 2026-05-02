@@ -55,6 +55,60 @@ EP-YYYYMMDD-<slug>
 
 ## Active Plans
 ### Plan ID
+EP-20260502-qwen-smoke-tiny-marker-collect-hardening
+
+### Context
+Diagnostic `smoke tiny` на `qwen-code` (`smoke-tiny-bank-20260501T172519Z`) снова подтвердил, что release/matrix selector корректный, но backend hard pass блокируется в `init.step1.collect`: root/src shards писали useful markdown без `shard-pack-manifest.json` и затем exhausting manifest-only repair (`runtime_contract_failed`), а `kubernetes-manifests` оставался fully silent/no-artifact (`runner_unavailable`). Дополнительно heuristic coverage roots для Bank of Anthos схлопывались с 26 roots до 6 top-level groups, превращая весь `src` в один тяжёлый collect shard.
+
+### Goals (must have)
+- [x] Усилить collect prompt до early pair-write: suggested overview doc + `shard-pack-manifest.json` до broad second-pass sweep
+- [x] Сфокусировать manifest-only repair prompt: authored docs + exact JSON skeleton first, затем compact constraints/canonical reference
+- [x] Сохранить strict artifact-only policy: ACP не синтезирует manifest и не нормализует provider artifacts
+- [x] Сделать structural coalescing marker-aware: сохранять module marker leaf shards внутри крупных top-level dirs, пока итоговый план остаётся в `maxAutoShardsPerRepo`
+- [x] Добавить regression coverage для prompt contracts, qwen repair command spec и marker-preserving sharding
+- [x] Прогнать DoD (`make contracts`, `make test`, `make lint`, `make build`)
+- [x] Выполнить trusted-machine `smoke tiny` qwen diagnostic и зафиксировать verdict/evidence
+
+### Non-goals
+- [x] Не менять public schemas/API/report formats/provider IDs
+- [x] Не добавлять wrapper поверх `scripts/full-run-batch-matrix.sh`
+- [x] Не менять `best_effort partial` semantics: partial downstream может продолжаться, но terminal run остаётся failed
+
+### Approach
+1) Обновить shared collect step policy: early pair-write wording, tiny-smoke target shape, manifest skeleton remains provider instruction only.
+2) Переставить repair prompt вокруг exact skeleton-first flow и заменить длинный repair hint tail компактными repair constraints.
+3) В sharding planner вынести discovery marker leaves в reusable helper и раскрывать top-level coalesced groups на marker leaves + residual group только в пределах shard cap.
+4) Добавить targeted tests для prompt order/content, qwen repair args и marker-preserving coalescing.
+5) Синхронизировать README/architecture/runbook/testing docs и затем прогнать DoD + live diagnostic.
+
+### Files expected to change
+- `internal/runtime/{steppolicy,promptcontract,qwencode}/*`
+- `internal/orchestrator/sharding*`
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Collect prompt contains explicit early pair-write requirement
+- [x] Repair prompt remains manifest-only, lists authored docs and puts exact JSON skeleton before repair constraints
+- [x] Qwen repair command still uses `-p` prompt and empty stdin
+- [x] Marker-leaf code shards are preserved under coalescing without exceeding `maxAutoShardsPerRepo`
+- [x] DoD passes
+- [x] `smoke tiny` qwen rerun has `release_verdict_<matrix-id>.json.verdict == "PASS"` or records a narrower residual provider blocker
+
+### Risks
+- Marker-aware coalescing can increase shard count for large repos. Mitigation: expansion is bounded by `maxAutoShardsPerRepo`; top-level groups that do not fit stay coalesced and log a warning.
+- Prompt hardening can still fail under provider auth/rate-limit/CLI regressions. Those remain explicit `runner_unavailable` incidents with raw diagnostics.
+
+### Progress log
+- 2026-05-02: Started implementation after triage of `smoke-tiny-bank-20260501T172519Z`; added early pair-write prompt wording, compact skeleton-first repair prompt, marker-preserving structural coalescing, and targeted regression tests.
+- 2026-05-02: DoD passed: `make contracts`, `make test`, `make lint`, `make build`.
+- 2026-05-02: Ran direct `scripts/full-run-batch-matrix.sh` diagnostic as `smoke-tiny-bank-qwen-hardening-20260502T055955Z`; verdict `FAIL`/`RELEASE BLOCKED`, release contract selector passed (`qwen-code`, run `1`, `baseline`, snapshot artifacts, frontend skipped) but backend hard pass stayed `0/1` with `runtime_contract_failed=1` and `runner_unavailable=1`.
+- 2026-05-02: Live evidence confirmed marker-preserving coalescing worked (`26` coverage roots -> `10` shard groups, including `4` preserved module marker leaves); collect improved from the prior `3/6` pass shape to `4/10` succeeded shards, but residual qwen stalls remained: markdown-only collect shards still exhausted manifest-only repair with empty stdout/stderr, `iac` had no artifacts after retry, and `step3.findings` ended `runner_unavailable`.
+
+### Plan ID
 EP-20260501-qwen-smoke-tiny-collect-manifest-hardening
 
 ### Context

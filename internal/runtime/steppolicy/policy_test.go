@@ -52,6 +52,8 @@ func TestDocFirstFilesystemPolicyDefinesSharedCollectRepairSurface(t *testing.T)
 	required := []string{
 		`Write ONLY inside write_root.`,
 		`Suggested collect authored doc path for this shard:`,
+		`Early pair-write requirement: write the suggested overview doc and shard-pack-manifest.json as one focused artifact pair`,
+		`Tiny smoke target shape: write "payments-overview.md" + "shard-pack-manifest.json" early`,
 		`Do not wait for a complete broad repository sweep before writing shard-pack-manifest.json`,
 		`TASK-SPECIFIC COLLECT MANIFEST JSON SKELETON:`,
 		`"path": "payments-overview.md"`,

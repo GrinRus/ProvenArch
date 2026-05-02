@@ -157,6 +157,7 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		`"path": "src/README.md"`,
 		"Final repair action: write write_root/shard-pack-manifest.json",
 		"COLLECT MANIFEST REPAIR INSTRUCTIONS:",
+		"Copy the task-specific JSON skeleton first",
 		"COLLECT MANIFEST CANONICAL SHAPE:",
 		"Previous artifact contract failure",
 	}
@@ -167,6 +168,15 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 	}
 	if strings.Contains(prompt, "Produce runtime-authored documents in write_root") {
 		t.Fatalf("repair prompt must not ask the provider to rewrite authored docs:\n%s", prompt)
+	}
+	skeletonIndex := strings.Index(prompt, "TASK-SPECIFIC MANIFEST JSON SKELETON:")
+	instructionIndex := strings.Index(prompt, "COLLECT MANIFEST REPAIR INSTRUCTIONS:")
+	canonicalIndex := strings.Index(prompt, "COLLECT MANIFEST CANONICAL SHAPE:")
+	if skeletonIndex < 0 || instructionIndex < 0 || canonicalIndex < 0 {
+		t.Fatalf("expected repair prompt to contain skeleton, instructions, and canonical sections:\n%s", prompt)
+	}
+	if !(skeletonIndex < instructionIndex && instructionIndex < canonicalIndex) {
+		t.Fatalf("expected compact repair prompt to put exact skeleton before repair instructions and canonical reference:\n%s", prompt)
 	}
 }
 
