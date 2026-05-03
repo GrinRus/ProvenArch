@@ -20,9 +20,28 @@ class FullRunAiAdventLayoutTest(unittest.TestCase):
         script_text = FULL_RUN_AI_ADVENT.read_text(encoding="utf-8")
 
         self.assertIn('RUN_RESULTS_EXPECTED_FIELDS=17', script_text)
+        self.assertIn('run_result_row_exists()', script_text)
+        self.assertIn('append_run_result_row_once()', script_text)
         self.assertIn('NF == expected_fields', script_text)
         self.assertIn('malformed_run_results_rows', script_text)
         self.assertIn("printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n'", script_text)
+
+    def test_failed_pipeline_paths_persist_run_results_metadata_before_die(self) -> None:
+        script_text = FULL_RUN_AI_ADVENT.read_text(encoding="utf-8")
+
+        self.assertIn('snapshot_run_artifacts "$run_id" "$runtime_label" "$pipeline" "$iteration" "$workspace_path" || true', script_text)
+        self.assertIn('if metrics="$(quality_metrics "$quality_path" 2>/dev/null)"; then', script_text)
+        self.assertIn('append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "failed" "$workspace_path" "$output_path"', script_text)
+        self.assertIn('append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "${status:-failed}" "$workspace_path" "$output_path"', script_text)
+        self.assertIn('append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"', script_text)
+        self.assertLess(
+            script_text.index('append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "${status:-failed}" "$workspace_path" "$output_path"'),
+            script_text.index('die "pipeline command failed for runtime=$runtime_label pipeline=$pipeline"'),
+        )
+        self.assertLess(
+            script_text.index('append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "failed" "$workspace_path" "$output_path"'),
+            script_text.index('die "missing quality summary for run $run_id at $quality_path"'),
+        )
 
 
 if __name__ == "__main__":

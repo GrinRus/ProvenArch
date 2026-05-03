@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -113,7 +115,11 @@ type heuristicShardDiscoveryResult struct {
 	FallbackNoMarkers bool
 }
 
-const maxAutoShardsPerRepo = 16
+const (
+	maxAutoShardsPerRepo     = 16
+	maxRuntimeShardIDLength  = 96
+	runtimeShardIDHashLength = 12
+)
 
 func runtimeMetaForRunner(runner acpruntime.Runner) contracts.RuntimeMeta {
 	switch runner.(type) {
@@ -1005,7 +1011,7 @@ func (e *pipelineExecution) planRuntimeShards(repoScopes []string) ([]runtimeSha
 			seenShardIDs[baseID] = sequence + 1
 			shardID := baseID
 			if sequence > 0 {
-				shardID = fmt.Sprintf("%s-%d", baseID, sequence+1)
+				shardID = appendShardIDSequence(baseID, sequence+1)
 			}
 			sortKey := fmt.Sprintf("%s:%s:%03d", scope, strings.Join(normalizedGroup, "|"), idx)
 			plans = append(plans, runtimeShardPlan{
@@ -1046,7 +1052,47 @@ func buildShardID(scope string, pathScopes []string) string {
 	if strings.TrimSpace(slug) == "" {
 		return "shard"
 	}
-	return slug
+	return boundRuntimeShardID(slug)
+}
+
+func appendShardIDSequence(base string, sequence int) string {
+	if sequence <= 1 {
+		return base
+	}
+	suffix := fmt.Sprintf("-%d", sequence)
+	if len(base)+len(suffix) <= maxRuntimeShardIDLength {
+		return base + suffix
+	}
+	limit := maxRuntimeShardIDLength - len(suffix)
+	if limit <= 0 {
+		return strings.TrimPrefix(suffix, "-")
+	}
+	prefix := strings.Trim(base[:limit], "-")
+	if prefix == "" {
+		prefix = "shard"
+	}
+	return prefix + suffix
+}
+
+func boundRuntimeShardID(slug string) string {
+	slug = strings.Trim(strings.TrimSpace(slug), "-")
+	if slug == "" {
+		return "shard"
+	}
+	if len(slug) <= maxRuntimeShardIDLength {
+		return slug
+	}
+	sum := sha256.Sum256([]byte(slug))
+	hash := hex.EncodeToString(sum[:])[:runtimeShardIDHashLength]
+	limit := maxRuntimeShardIDLength - len(hash) - 1
+	if limit <= 0 {
+		return hash
+	}
+	prefix := strings.Trim(slug[:limit], "-")
+	if prefix == "" {
+		prefix = "shard"
+	}
+	return prefix + "-" + hash
 }
 
 func (e *pipelineExecution) resolveRepoPath(scope string) string {
@@ -1125,8 +1171,74 @@ func discoverHeuristicShardPathsWithMeta(repoPath string) (heuristicShardDiscove
 		return heuristicShardDiscoveryResult{}, fmt.Errorf("repo path %q is not a directory", root)
 	}
 
+	markerRoots, err := discoverShardModuleMarkerRoots(root)
+	if err != nil {
+		return heuristicShardDiscoveryResult{}, err
+	}
+	if len(markerRoots) == 0 {
+		return heuristicShardDiscoveryResult{
+			Paths:             []string{"."},
+			FallbackNoMarkers: true,
+		}, nil
+	}
+	if hasOnlyRootModuleMarker(markerRoots) {
+		coverageRoots, err := discoverRootMarkerCoverageRoots(root)
+		if err != nil {
+			return heuristicShardDiscoveryResult{}, err
+		}
+		return heuristicShardDiscoveryResult{Paths: coverageRoots}, nil
+	}
+	coverageRoots, err := buildStructuralCoverageRoots(root, markerRoots)
+	if err != nil {
+		return heuristicShardDiscoveryResult{}, err
+	}
+	return heuristicShardDiscoveryResult{Paths: coverageRoots}, nil
+}
+
+func hasOnlyRootModuleMarker(markerRoots []string) bool {
+	normalized := normalizeAndSortShardPaths(markerRoots)
+	return len(normalized) == 1 && normalized[0] == "."
+}
+
+func discoverRootMarkerCoverageRoots(repoPath string) ([]string, error) {
+	root := strings.TrimSpace(repoPath)
+	if root == "" {
+		return []string{"."}, nil
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, err
+	}
+	roots := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		name := strings.TrimSpace(entry.Name())
+		if name == "" {
+			continue
+		}
+		if entry.IsDir() {
+			lowerName := strings.ToLower(name)
+			if _, skip := shardSkippedDirs[lowerName]; skip {
+				continue
+			}
+			if strings.HasPrefix(lowerName, ".") {
+				continue
+			}
+		}
+		roots = append(roots, normalizeShardPath(name))
+	}
+	if len(roots) == 0 {
+		return []string{"."}, nil
+	}
+	return normalizeAndSortShardPaths(roots), nil
+}
+
+func discoverShardModuleMarkerRoots(repoPath string) ([]string, error) {
+	root := strings.TrimSpace(repoPath)
+	if root == "" {
+		return nil, nil
+	}
 	markerRoots := map[string]struct{}{}
-	err = filepath.WalkDir(root, func(current string, entry fs.DirEntry, walkErr error) error {
+	err := filepath.WalkDir(root, func(current string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -1150,28 +1262,17 @@ func discoverHeuristicShardPathsWithMeta(repoPath string) (heuristicShardDiscove
 		if relErr != nil {
 			return nil
 		}
-		rel = normalizeShardPath(rel)
-		markerRoots[rel] = struct{}{}
+		markerRoots[normalizeShardPath(rel)] = struct{}{}
 		return nil
 	})
 	if err != nil {
-		return heuristicShardDiscoveryResult{}, err
-	}
-	if len(markerRoots) == 0 {
-		return heuristicShardDiscoveryResult{
-			Paths:             []string{"."},
-			FallbackNoMarkers: true,
-		}, nil
+		return nil, err
 	}
 	leafMarkers := make([]string, 0, len(markerRoots))
 	for candidate := range markerRoots {
 		leafMarkers = append(leafMarkers, candidate)
 	}
-	coverageRoots, err := buildStructuralCoverageRoots(root, pruneParentShardPaths(leafMarkers))
-	if err != nil {
-		return heuristicShardDiscoveryResult{}, err
-	}
-	return heuristicShardDiscoveryResult{Paths: coverageRoots}, nil
+	return pruneParentShardPaths(leafMarkers), nil
 }
 
 func buildStructuralCoverageRoots(repoPath string, leafMarkers []string) ([]string, error) {
@@ -1389,6 +1490,11 @@ func buildStructuralShardGroups(repoPath string, coverageRoots []string) ([][]st
 		return [][]string{{"."}}, nil
 	}
 	if len(normalized) <= maxAutoShardsPerRepo || strings.TrimSpace(repoPath) == "" {
+		if strings.TrimSpace(repoPath) != "" && len(normalized) <= maxAutoShardsPerRepo {
+			if grouped, ok := groupRootFilesWithinCap(repoPath, normalized); ok {
+				return grouped, nil
+			}
+		}
 		groups := make([][]string, 0, len(normalized))
 		for _, value := range normalized {
 			groups = append(groups, []string{value})
@@ -1397,7 +1503,7 @@ func buildStructuralShardGroups(repoPath string, coverageRoots []string) ([][]st
 	}
 
 	rootFiles := make([]string, 0, len(normalized))
-	topLevelDirs := map[string]struct{}{}
+	topLevelRoots := map[string][]string{}
 	for _, rel := range normalized {
 		if rel == "." {
 			return [][]string{{"."}}, []string{fmt.Sprintf("structural shard coalescing skipped because repo %q is already covered by root scope", repoPath)}
@@ -1412,18 +1518,20 @@ func buildStructuralShardGroups(repoPath string, coverageRoots []string) ([][]st
 			return groups, []string{fmt.Sprintf("structural shard coalescing fallback: stat failed for %q (%v); keeping coverage roots", rel, err)}
 		}
 		if info.IsDir() {
-			topLevelDirs[topLevelSegment(rel)] = struct{}{}
+			key := topLevelSegment(rel)
+			topLevelRoots[key] = append(topLevelRoots[key], rel)
 			continue
 		}
 		if !strings.Contains(rel, "/") {
 			rootFiles = append(rootFiles, rel)
 			continue
 		}
-		topLevelDirs[topLevelSegment(rel)] = struct{}{}
+		key := topLevelSegment(rel)
+		topLevelRoots[key] = append(topLevelRoots[key], rel)
 	}
 
-	keys := make([]string, 0, len(topLevelDirs))
-	for key := range topLevelDirs {
+	keys := make([]string, 0, len(topLevelRoots))
+	for key := range topLevelRoots {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
@@ -1444,6 +1552,12 @@ func buildStructuralShardGroups(repoPath string, coverageRoots []string) ([][]st
 			len(groups),
 		),
 	}
+	if preservedGroups, preservedWarnings := preserveMarkerLeafShardGroups(repoPath, groups, rootFiles, keys, topLevelRoots); len(preservedGroups) > 0 {
+		groups = preservedGroups
+		warnings = append(warnings, preservedWarnings...)
+	} else {
+		warnings = append(warnings, preservedWarnings...)
+	}
 	if len(groups) > maxAutoShardsPerRepo {
 		warnings = append(
 			warnings,
@@ -1455,6 +1569,104 @@ func buildStructuralShardGroups(repoPath string, coverageRoots []string) ([][]st
 		)
 	}
 	return groups, warnings
+}
+
+func groupRootFilesWithinCap(repoPath string, normalized []string) ([][]string, bool) {
+	rootFiles := make([]string, 0, len(normalized))
+	others := make([]string, 0, len(normalized))
+	for _, rel := range normalized {
+		if rel == "." {
+			return nil, false
+		}
+		abs := filepath.Join(repoPath, filepath.FromSlash(rel))
+		info, err := os.Stat(abs)
+		if err != nil {
+			return nil, false
+		}
+		if !info.IsDir() && !strings.Contains(rel, "/") {
+			rootFiles = append(rootFiles, rel)
+			continue
+		}
+		others = append(others, rel)
+	}
+	if len(rootFiles) <= 1 {
+		return nil, false
+	}
+	sort.Strings(rootFiles)
+	sort.Strings(others)
+	groups := make([][]string, 0, len(others)+1)
+	groups = append(groups, append([]string(nil), rootFiles...))
+	for _, rel := range others {
+		groups = append(groups, []string{rel})
+	}
+	return groups, true
+}
+
+func preserveMarkerLeafShardGroups(repoPath string, baseGroups [][]string, rootFiles []string, keys []string, topLevelRoots map[string][]string) ([][]string, []string) {
+	markerRoots, err := discoverShardModuleMarkerRoots(repoPath)
+	if err != nil {
+		return nil, []string{fmt.Sprintf("structural shard marker preservation skipped: marker discovery failed (%v)", err)}
+	}
+	if len(markerRoots) == 0 {
+		return nil, nil
+	}
+	markerSet := map[string]struct{}{}
+	for _, marker := range markerRoots {
+		markerSet[normalizeShardPath(marker)] = struct{}{}
+	}
+
+	groups := make([][]string, 0, len(baseGroups))
+	if len(rootFiles) > 0 {
+		groups = append(groups, append([]string(nil), rootFiles...))
+	}
+	warnings := []string{}
+	preserved := 0
+	for idx, key := range keys {
+		roots := normalizeAndSortShardPaths(topLevelRoots[key])
+		markerGroups := make([][]string, 0, len(roots))
+		residual := make([]string, 0, len(roots))
+		for _, rel := range roots {
+			if _, ok := markerSet[rel]; ok {
+				markerGroups = append(markerGroups, []string{rel})
+				continue
+			}
+			residual = append(residual, rel)
+		}
+		if len(markerGroups) == 0 {
+			groups = append(groups, []string{key})
+			continue
+		}
+
+		nextGroupCount := len(groups) + len(markerGroups)
+		if len(residual) > 0 {
+			nextGroupCount++
+		}
+		if nextGroupCount+minimumRemainingTopLevelGroups(keys[idx+1:], topLevelRoots) > maxAutoShardsPerRepo {
+			groups = append(groups, []string{key})
+			warnings = append(warnings, fmt.Sprintf("structural shard marker preservation skipped for %q because it would exceed target cap=%d", key, maxAutoShardsPerRepo))
+			continue
+		}
+		if len(residual) > 0 {
+			groups = append(groups, residual)
+		}
+		groups = append(groups, markerGroups...)
+		preserved += len(markerGroups)
+	}
+	if preserved == 0 {
+		return nil, warnings
+	}
+	warnings = append(warnings, fmt.Sprintf("structural shard coalescing preserved %d module marker leaf shard groups within target cap=%d", preserved, maxAutoShardsPerRepo))
+	return groups, warnings
+}
+
+func minimumRemainingTopLevelGroups(keys []string, topLevelRoots map[string][]string) int {
+	count := 0
+	for _, key := range keys {
+		if len(topLevelRoots[key]) > 0 {
+			count++
+		}
+	}
+	return count
 }
 
 func topLevelSegment(rel string) string {

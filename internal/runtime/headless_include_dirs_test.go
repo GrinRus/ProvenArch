@@ -101,6 +101,34 @@ func TestResolveHeadlessCollectRepairIncludeDirectoriesExcludesWorkspaceReports(
 	}
 }
 
+func TestResolveHeadlessValidatorRepairIncludeDirectoriesUsesOnlyVerdictAndStagedFinal(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "arch-workspace")
+	writeRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "validator")
+	stagedFinal := filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "final")
+	repoRoot := filepath.Join(root, "repo-a")
+	for _, dir := range []string{workspace, writeRoot, stagedFinal, repoRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	got := ResolveHeadlessValidatorRepairIncludeDirectories(Task{
+		StepID:           "refresh.step3.findings",
+		Workspace:        workspace,
+		WriteRoot:        writeRoot,
+		RepoScopes:       []string{"repo-a"},
+		ReadContextRoots: []string{workspace, stagedFinal, repoRoot},
+	})
+
+	want := []string{writeRoot, stagedFinal}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected validator repair include dirs:\n got=%v\nwant=%v", got, want)
+	}
+}
+
 func TestResolveHeadlessIncludeDirectoriesFallsBackToWorkspaceValidate(t *testing.T) {
 	t.Parallel()
 

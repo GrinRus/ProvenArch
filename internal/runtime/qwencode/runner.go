@@ -93,6 +93,57 @@ func (a qwenAdapter) CollectManifestRepairCommandSpec(task acpruntime.Task, vali
 	}, nil
 }
 
+func (a qwenAdapter) CollectArtifactPairRepairCommandSpec(task acpruntime.Task, validationErr error) (providercommon.CommandSpec, error) {
+	includeDirs := acpruntime.ResolveHeadlessCollectRepairIncludeDirectories(task)
+	repairTask := task
+	repairTask.ReadContextRoots = append([]string(nil), includeDirs...)
+	prompt := promptcontract.ComposeCollectArtifactPairRepairPrompt(acpruntime.ProviderQwenCode, repairTask, validationErr)
+	commandArgs := qwenArgsWithPrompt(append([]string(nil), a.runner.Args...), prompt)
+	if len(commandArgs) == 0 {
+		commandArgs = buildQwenArgsWithIncludeDirectories(includeDirs, prompt)
+	}
+	return providercommon.CommandSpec{
+		Command:     a.runner.commandName(),
+		Args:        commandArgs,
+		Dir:         strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task)),
+		IncludeDirs: includeDirs,
+	}, nil
+}
+
+func (a qwenAdapter) ValidatorVerdictRepairCommandSpec(task acpruntime.Task, validationErr error) (providercommon.CommandSpec, error) {
+	includeDirs := acpruntime.ResolveHeadlessValidatorRepairIncludeDirectories(task)
+	repairTask := task
+	repairTask.ReadContextRoots = append([]string(nil), includeDirs...)
+	prompt := promptcontract.ComposeValidatorVerdictRepairPrompt(acpruntime.ProviderQwenCode, repairTask, validationErr)
+	commandArgs := qwenArgsWithPrompt(append([]string(nil), a.runner.Args...), prompt)
+	if len(commandArgs) == 0 {
+		commandArgs = buildQwenArgsWithIncludeDirectories(includeDirs, prompt)
+	}
+	return providercommon.CommandSpec{
+		Command:     a.runner.commandName(),
+		Args:        commandArgs,
+		Dir:         strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task)),
+		IncludeDirs: includeDirs,
+	}, nil
+}
+
+func (a qwenAdapter) DraftArtifactRepairCommandSpec(task acpruntime.Task, validationErr error) (providercommon.CommandSpec, error) {
+	includeDirs := acpruntime.ResolveHeadlessDraftRepairIncludeDirectories(task)
+	repairTask := task
+	repairTask.ReadContextRoots = append([]string(nil), includeDirs...)
+	prompt := promptcontract.ComposeDraftArtifactRepairPrompt(acpruntime.ProviderQwenCode, repairTask, validationErr)
+	commandArgs := qwenArgsWithPrompt(append([]string(nil), a.runner.Args...), prompt)
+	if len(commandArgs) == 0 {
+		commandArgs = buildQwenArgsWithIncludeDirectories(includeDirs, prompt)
+	}
+	return providercommon.CommandSpec{
+		Command:     a.runner.commandName(),
+		Args:        commandArgs,
+		Dir:         strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task)),
+		IncludeDirs: includeDirs,
+	}, nil
+}
+
 func (a qwenAdapter) ValidateArtifacts(task acpruntime.Task) error {
 	return providercommon.ValidateRuntimeArtifacts(task, acpruntime.ProviderQwenCode)
 }
@@ -113,6 +164,9 @@ func (a qwenAdapter) RecoveryPolicy(_ acpruntime.Task) providercommon.RecoveryPo
 	return providercommon.RecoveryPolicy{
 		AcceptValidArtifactsAfterStop:            true,
 		RepairCollectManifestOnce:                true,
+		RepairCollectArtifactPairOnce:            true,
+		RepairValidatorVerdictOnce:               true,
+		RepairDraftArtifactsOnce:                 true,
 		RetryInvalidOrMissingArtifactsOnce:       true,
 		ClassifySilentRetryExhaustionUnavailable: true,
 	}

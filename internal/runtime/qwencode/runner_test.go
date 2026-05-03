@@ -234,14 +234,145 @@ func TestQwenRepairCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 	args := strings.Join(spec.Args, "\n")
 	for _, token := range []string{
 		"collect manifest repair mode",
-		"TASK-SPECIFIC MANIFEST SCAFFOLD:",
+		"Run the preferred file write command below",
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
-		"Final repair action: write write_root/shard-pack-manifest.json",
+		"<<'ACP_MANIFEST_JSON'",
+		"Copy the heredoc JSON exactly during repair",
+		"Do not read, diff, or patch an existing invalid shard-pack-manifest.json",
+		"Final action must be: write only write_root/shard-pack-manifest.json",
 		"overview.md",
 		`"path": "overview.md"`,
 	} {
 		if !strings.Contains(args, token) {
 			t.Fatalf("expected qwen repair prompt arg to contain %q, got %v", token, spec.Args)
+		}
+	}
+}
+
+func TestQwenCollectArtifactPairRepairCommandSpecUsesPromptOnly(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "arch-workspace")
+	repoRoot := filepath.Join(root, "repo-a")
+	writeRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "shards", "repo-a-root-files")
+	for _, dir := range []string{workspace, repoRoot, writeRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte("version: 1\nrepos:\n  - name: repo-a\n    path: "+repoRoot+"\n"), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	task := acpruntime.Task{
+		RunID:            "run-1",
+		StepID:           "init.step1.collect",
+		Workspace:        workspace,
+		WriteRoot:        writeRoot,
+		ArtifactRoot:     "reports/taskruns/run-1/staging/shards/repo-a-root-files",
+		ReadContextRoots: []string{workspace, repoRoot},
+		RepoScopes:       []string{"repo-a"},
+		PathScopes:       []string{"README.md", "pom.xml"},
+		ShardID:          "repo-a-root-files",
+	}
+
+	spec, err := (qwenAdapter{runner: HeadlessRunner{Command: "qwen-test"}}).CollectArtifactPairRepairCommandSpec(task, os.ErrNotExist)
+	if err != nil {
+		t.Fatalf("collect pair repair command spec: %v", err)
+	}
+	if spec.Stdin != nil {
+		t.Fatalf("qwen collect pair repair invocation must keep stdin empty; repair contract belongs in -p prompt")
+	}
+	if !containsArg(spec.IncludeDirs, writeRoot) || !containsArg(spec.IncludeDirs, repoRoot) {
+		t.Fatalf("collect pair repair include dirs must keep write root and repo evidence, got %v", spec.IncludeDirs)
+	}
+	args := strings.Join(spec.Args, "\n")
+	for _, token := range []string{
+		"-p",
+		"collect artifact pair focused recovery mode",
+		"Run the exact shell command below as your next command. Do not inspect repository files first.",
+		"COLLECT PAIR WRITE COMMAND:",
+		"<<'ACP_COLLECT_DOC'",
+		"<<'ACP_MANIFEST_JSON'",
+		"root-overview.md",
+		"shard-pack-manifest.json",
+		`"path": "root-overview.md"`,
+		"Previous collect artifact validation failure",
+	} {
+		if !strings.Contains(args, token) {
+			t.Fatalf("expected qwen collect pair repair prompt arg to contain %q, got %v", token, spec.Args)
+		}
+	}
+}
+
+func TestQwenValidatorRepairCommandSpecUsesPromptOnly(t *testing.T) {
+	t.Parallel()
+
+	task := newQwenDraftTask(t, "run-validator-repair-spec")
+	task.StepID = "init.step3.findings"
+	task.WriteRoot = filepath.Join(task.Workspace, "reports", "taskruns", task.RunID, "validator")
+	task.ReadContextRoots = []string{task.DraftFinalRoot}
+	task.ExpectedArtifacts = []string{"validator-verdict.json"}
+	if err := os.MkdirAll(task.WriteRoot, 0o755); err != nil {
+		t.Fatalf("mkdir validator write root: %v", err)
+	}
+
+	spec, err := (qwenAdapter{runner: HeadlessRunner{Command: "qwen-test"}}).ValidatorVerdictRepairCommandSpec(task, os.ErrNotExist)
+	if err != nil {
+		t.Fatalf("validator repair command spec: %v", err)
+	}
+	if spec.Stdin != nil {
+		t.Fatalf("qwen validator repair invocation must keep stdin empty; repair contract belongs in -p prompt")
+	}
+	if !containsArg(spec.IncludeDirs, task.WriteRoot) || !containsArg(spec.IncludeDirs, task.DraftFinalRoot) {
+		t.Fatalf("validator repair include dirs must keep write root and staged final evidence, got %v", spec.IncludeDirs)
+	}
+	args := strings.Join(spec.Args, "\n")
+	for _, token := range []string{
+		"validator verdict focused recovery mode",
+		"Immediate validator verdict repair action:",
+		"VALIDATOR VERDICT WRITE COMMAND:",
+		"<<'ACP_VALIDATOR_VERDICT_JSON'",
+		"VALIDATOR VERDICT JSON SKELETON:",
+		"issues[] items must use only: code, severity, message, path, document_id, citation_id",
+		"Legacy issue fields are forbidden inside issues[]",
+		`"issues": []`,
+	} {
+		if !strings.Contains(args, token) {
+			t.Fatalf("expected qwen validator repair prompt arg to contain %q, got %v", token, spec.Args)
+		}
+	}
+}
+
+func TestQwenDraftRepairCommandSpecUsesPromptOnly(t *testing.T) {
+	t.Parallel()
+
+	task := newQwenDraftTask(t, "run-draft-repair-spec")
+	spec, err := (qwenAdapter{runner: HeadlessRunner{Command: "qwen-test"}}).DraftArtifactRepairCommandSpec(task, os.ErrNotExist)
+	if err != nil {
+		t.Fatalf("draft repair command spec: %v", err)
+	}
+	if spec.Stdin != nil {
+		t.Fatalf("qwen draft repair invocation must keep stdin empty; repair contract belongs in -p prompt")
+	}
+	if !containsArg(spec.IncludeDirs, task.WriteRoot) || !containsArg(spec.IncludeDirs, task.DraftFinalRoot) {
+		t.Fatalf("draft repair include dirs must keep write/draft roots, got %v", spec.IncludeDirs)
+	}
+	args := strings.Join(spec.Args, "\n")
+	for _, token := range []string{
+		"draft artifact focused recovery mode",
+		"Immediate draft artifact repair action:",
+		"RUNTIME DRAFT MANIFEST JSON SKELETON:",
+		"<<'ACP_DRAFT_MANIFEST_JSON'",
+		"<<'ACP_DRAFT_FILE'",
+		"Copy the heredoc artifacts exactly first",
+		"overwrite them from the heredoc artifacts",
+		"Write draft content only under draft_final_root",
+		"Absolute target checks must use write_root/draft_final_root exactly",
+	} {
+		if !strings.Contains(args, token) {
+			t.Fatalf("expected qwen draft repair prompt arg to contain %q, got %v", token, spec.Args)
 		}
 	}
 }

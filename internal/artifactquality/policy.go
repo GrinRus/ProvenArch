@@ -163,10 +163,22 @@ func ValidatorVerdictContractLines() []string {
 		`- generated_at MUST be an RFC3339 UTC timestamp string (example: "2026-04-16T12:00:02Z").`,
 		`- checked_paths MUST enumerate the staged final artifacts inspected by the validator.`,
 		`- Optional fixed_paths/issues/findings/questions arrays are allowed, but they must keep canonical object shapes.`,
+		`- issues[] items MUST use exactly the canonical validator issue shape: code, severity, message, and optional path/document_id/citation_id.`,
+		`- issues[].severity MUST be "error" or "warning" only; do NOT use high/medium/low/critical in issues[].`,
+		`- Do NOT put legacy finding-shaped fields inside issues[]: id, title, description, rule_id, related_paths, related_ids, provenance.`,
 		`- findings[] items MUST use title + description + provenance; do NOT use summary as a finding alias.`,
 		`- For observation provenance, findings[*].provenance.evidence[] MUST be non-empty and each evidence item MUST include non-empty repo and path values.`,
 		`- owner-gap findings/questions remain visible, but owner-only residual evidence gaps may still return verdict=PASS when no technical validator issues remain.`,
 	}
+}
+
+func ValidatorVerdictIssueCanonicalExample() string {
+	return strings.TrimSpace(`{
+  "code": "staged_index_missing",
+  "severity": "error",
+  "message": "final-run-index.json is missing from the staged final set.",
+  "path": "reports/taskruns/run-1/staging/final/final-run-index.json"
+}`)
 }
 
 func ValidatorVerdictCanonicalExample() string {

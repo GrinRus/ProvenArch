@@ -55,9 +55,9 @@
 
 ### Headless provider conformance
 - required tests используют stub provider adapters без live network dependencies
-- общий process engine проверяется на success by valid artifacts, controlled stop after valid artifacts, collect manifest-only repair success/failure, bounded pre-artifact and repair stall windows, silent no-artifact classification, invalid artifact contract failures, deadline timeout и raw stdout/stderr diagnostics
+- общий process engine проверяется на success by valid artifacts, controlled stop after valid artifacts, collect pair recovery, collect manifest-only repair success/failure, validator-verdict-only repair, draft-artifact repair, bounded pre-artifact and repair stall windows, silent no-artifact classification, invalid artifact contract failures, deadline timeout и raw stdout/stderr diagnostics
 - provider-specific tests проверяют только adapter policy/args: `qwen` не требует semantic JSON stdout, не передаёт JSON task stdin при `-p` invocation и нормализует custom prompt args к artifact prompt, а `claude`/`codex` machine-mode flags остаются diagnostic transport mode
-- prompt contract tests покрывают collect repair task-specific scaffold, literal manifest JSON skeleton и root-file shard hints без live network dependency
+- prompt contract tests покрывают collect pair recovery command-first doc+manifest heredoc targets, collect manifest-only repair command-first heredoc write target, literal manifest JSON skeleton, validator issue canonical shape/legacy bans, draft recovery command-first manifest+draft-file heredocs, exact targets и root-file shard hints без live network dependency
 - batch preflight tests покрывают selected-provider readiness без live network dependency, включая codex `gpt-5.5`/CLI version mismatch guard
 
 ## 3) Обязательная структура test assets
@@ -99,6 +99,8 @@ Baseline scenario set:
   - новые API endpoints `GET/PUT /api/runtime/timeouts`
 - runtime sharding control:
   - heuristics planner (module markers + leaf-pruning) и `analysis.include/exclude` фильтры
+  - structural coalescing для больших repos сохраняет module marker leaf shard groups внутри top-level dirs, если итоговый shard count остаётся в `maxAutoShardsPerRepo`
+  - root-marker-only repos планируются как root-file group + top-level directory shards, а не single `"."` shard, если структура repo большая
   - fallback warning + root shard `.` при пустом результате фильтров
   - scheduler semantics `sequential|parallel` (`max_parallel_tasks`) и deterministic apply order
   - `fail_fast` останавливает step/pipeline на первой shard error без перехода в downstream runtime steps
@@ -166,9 +168,12 @@ Implemented additional jobs:
 - strict collect validation:
   - artifact-root-prefixed и absolute `documents[].path` fail-ятся без rewrite
   - missing required metadata fail-ится без autofill
+  - collect pair recovery запускается один раз только при no authored artifacts + non-empty provider diagnostics и разрешает писать только suggested authored doc + `shard-pack-manifest.json`
   - manifest-only runtime repair запускается один раз только при authored docs + missing/invalid `shard-pack-manifest.json`
   - manifest-only runtime repair fail-ится, если provider пишет что-либо кроме `shard-pack-manifest.json`
   - repair include dirs исключают broader workspace `reports/taskruns`/sibling manifests и оставляют только current write root + repo evidence roots
+- strict validator repair запускается максимум один раз, пишет только `validator-verdict.json`, начинается с command-first absolute heredoc skeleton, указывает `checked_paths` на staged final artifacts, требует canonical `issues[]` shape и reject-ит legacy issue fields
+- strict draft repair запускается максимум один раз, пишет только step manifest в `write_root` и draft files под `draft_final_root`; draft artifact monitor учитывает nested draft files inside `draft_final_root`
 - strict draft validation fail-ится, если referenced `outputs[].path` отсутствует, даже когда файл существует только по `outputs[].canonical_path`
 - active compatibility inventory отсутствует; tests не должны ожидать compatibility rule ids
 - validator repair stage проверяется отдельно на atomicity: при write failure staged state не мутируется
@@ -249,6 +254,7 @@ Implemented additional jobs:
   - canonical input: `TARGET_REPOS_FILE`
   - bootstrap в `tmp`, runtime циклы `fake + headless`, strict anti-mock/anti-zero-signal guardrails
   - completion invariants: expected/completed runtime counts, per-iteration headless `init+refresh`, отсутствие `running` в `run-history`
+  - failed CLI cycles with a known `run_id` append the same 17-field `run-results.tsv` row and best-effort snapshot before terminal cleanup, including missing/invalid quality summary cases, so failed headless init/refresh evidence is not reported as a missing-row infra gap
   - signal handling: `TERM/INT/HUP/PIPE` => `infra_signal_terminated`
   - debug artifacts и raw diagnostics: `TMP_ROOT/session-summary.md`, `TMP_ROOT/full-run.log`, `TMP_ROOT/snapshots/*`, `reports/taskruns/raw/*`
 - `scripts/full-run-batch.sh` — canonical live batch + frontend live e2e:
@@ -256,8 +262,10 @@ Implemented additional jobs:
   - direct-only runtime commands: `claude`, `qwen`, `codex`
   - selected-provider readiness записывается в `preflight.json`; known model/version/auth blockers должны завершаться operational preflight failure до deep run
   - backend quality source-of-truth: только `snapshots/<run_id>/reports/*`
-  - hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`, `analysis:cross-repo-missing`
-  - frontend smoke работает на отдельной `frontend-workspace` копии run snapshot и не мутирует backend baseline
+  - hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`, `analysis:cross-repo-missing`; cross-repo presence can be satisfied by explicit `semantic.edges[]` or by repo-wide `citations[].repo` coverage plus findings with multi-repo provenance evidence
+  - frontend smoke работает на отдельной `frontend-workspace` копии run snapshot и не мутирует backend baseline; `snapshot_reports_missing` после terminal backend failure записывается как dependent skipped frontend status, а не independent frontend regression
+  - terminal-success backend runs (`result=passed`, `quality_gates=passed`, `run-status.env state=completed process_exit=0`) остаются `failure_class=none`, даже если raw provider logs содержат recovered `runner_unavailable`/429 diagnostics
+  - batch report evidence tests проверяют, что `collect_partial_shard_failures`, focused recovery exhaustion/write-set violations и missing headless rows with runtime logs surfaced as per-run issue details, а не теряются за aggregate failure class
 - `scripts/full-run-batch-matrix.sh` — официальный local trusted-machine harness:
   - canonical input: `E2E_MATRIX_FILE`
   - approved profile ids: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`

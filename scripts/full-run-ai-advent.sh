@@ -204,6 +204,80 @@ print(running)
 PY
 }
 
+run_result_row_exists() {
+  local iteration="$1"
+  local runtime_mode="$2"
+  local runtime_provider="$3"
+  local pipeline="$4"
+  if [[ ! -f "$RUN_RESULTS_TSV" ]]; then
+    return 1
+  fi
+  awk -F'\t' \
+    -v iter="$iteration" \
+    -v mode="$runtime_mode" \
+    -v provider="$runtime_provider" \
+    -v pipeline="$pipeline" \
+    -v expected_fields="$RUN_RESULTS_EXPECTED_FIELDS" \
+    'NF == expected_fields && $1 == iter && $2 == mode && $3 == provider && $4 == pipeline { ok=1 } END { exit ok ? 0 : 1 }' \
+    "$RUN_RESULTS_TSV"
+}
+
+append_run_result_row_once() {
+  local iteration="$1"
+  local runtime_mode="$2"
+  local runtime_provider="$3"
+  local pipeline="$4"
+  local run_id="$5"
+  local status="$6"
+  local workspace_path="$7"
+  local output_path="$8"
+
+  if [[ -z "$run_id" ]]; then
+    return 0
+  fi
+  if run_result_row_exists "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline"; then
+    return 0
+  fi
+  if [[ -z "$status" ]]; then
+    status="failed"
+  fi
+
+  local runtime_label="$runtime_mode"
+  if [[ "$runtime_mode" == "headless" ]]; then
+    runtime_label="${runtime_mode}:${runtime_provider}"
+  fi
+  if [[ -d "$workspace_path" ]]; then
+    snapshot_run_artifacts "$run_id" "$runtime_label" "$pipeline" "$iteration" "$workspace_path" || true
+  fi
+
+  local quality_path="$workspace_path/reports/taskruns/${run_id}-quality.json"
+  local signal_score=0
+  local semantic_entities=0
+  local semantic_edges=0
+  local findings=0
+  local questions=0
+  local coverage_observed=0
+  local coverage_missing=0
+  local warnings=0
+  local domain_collect_steps=0
+  local mock_flag=0
+  local zero_signal=1
+  local runtime_versions="${runtime_mode}@unknown"
+
+  if [[ -f "$quality_path" ]]; then
+    local metrics
+    if metrics="$(quality_metrics "$quality_path" 2>/dev/null)"; then
+      local quality_status
+      IFS=$'\t' read -r quality_status signal_score semantic_entities semantic_edges findings questions coverage_observed coverage_missing warnings domain_collect_steps mock_flag zero_signal runtime_versions <<<"$metrics"
+    else
+      warnings=1
+    fi
+  fi
+
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$signal_score" "$semantic_entities" "$semantic_edges" "$findings" "$questions" "$coverage_observed" "$coverage_missing" "$warnings" "$runtime_versions" "$quality_path" "$output_path" >> "$RUN_RESULTS_TSV"
+}
+
 refresh_runtime_cycle_metrics() {
   if [[ -f "$RUN_RESULTS_TSV" ]]; then
     local metrics
@@ -818,6 +892,9 @@ run_cli_pipeline() {
 
   if [[ -f "$timeout_flag" ]]; then
     rm -f "$timeout_flag"
+    status="$(sed -n 's/^status: //p' "$output_path" | tail -n1 | tr -d '\r')"
+    run_id="$(sed -n 's/^run_id: //p' "$output_path" | tail -n1 | tr -d '\r')"
+    append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "${status:-failed}" "$workspace_path" "$output_path"
     FAILURE_REASON="runtime_timeout"
     TERMINATION_SIGNAL="timeout"
     die "pipeline timed out after ${PIPELINE_TIMEOUT_SEC}s (grace ${PIPELINE_KILL_GRACE_SEC}s): runtime=$runtime_label pipeline=$pipeline (see $output_path)"
@@ -825,6 +902,9 @@ run_cli_pipeline() {
   rm -f "$timeout_flag"
 
   if [[ "$run_exit" -ne 0 ]]; then
+    status="$(sed -n 's/^status: //p' "$output_path" | tail -n1 | tr -d '\r')"
+    run_id="$(sed -n 's/^run_id: //p' "$output_path" | tail -n1 | tr -d '\r')"
+    append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "${status:-failed}" "$workspace_path" "$output_path"
     echo "pipeline failed: runtime=$runtime_label pipeline=$pipeline (see $output_path)" >&2
     tail -n 120 "$output_path" >&2 || true
     die "pipeline command failed for runtime=$runtime_label pipeline=$pipeline"
@@ -835,51 +915,64 @@ run_cli_pipeline() {
     die "missing run_id in CLI output for runtime=$runtime_label pipeline=$pipeline"
   fi
   if [[ "$status" != "succeeded" ]]; then
+    append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "${status:-failed}" "$workspace_path" "$output_path"
     die "unexpected run status for $run_id: $status"
   fi
 
   quality_path="$workspace_path/reports/taskruns/${run_id}-quality.json"
   if [[ ! -f "$quality_path" ]]; then
+    append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "failed" "$workspace_path" "$output_path"
     die "missing quality summary for run $run_id at $quality_path"
   fi
 
   local metrics
-  metrics="$(quality_metrics "$quality_path")"
+  if ! metrics="$(quality_metrics "$quality_path")"; then
+    append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "failed" "$workspace_path" "$output_path"
+    die "invalid quality summary for run $run_id at $quality_path"
+  fi
 
   local quality_status signal_score semantic_entities semantic_edges findings questions coverage_observed coverage_missing warnings
   local domain_collect_steps mock_flag zero_signal runtime_versions
   IFS=$'\t' read -r quality_status signal_score semantic_entities semantic_edges findings questions coverage_observed coverage_missing warnings domain_collect_steps mock_flag zero_signal runtime_versions <<<"$metrics"
 
   if [[ "$quality_status" != "succeeded" ]]; then
+    append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
     die "quality summary status is not succeeded for run $run_id: $quality_status"
   fi
 
   if [[ "$runtime_mode" == "headless" ]]; then
     if [[ "$mock_flag" == "1" ]]; then
+      append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
       die "headless run $run_id uses mock/fake runtime version ($runtime_versions)"
     fi
     if [[ "$zero_signal" == "1" ]]; then
+      append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
       die "headless run $run_id produced zero-signal quality summary"
     fi
     if [[ "$TARGET_PROFILE" == "ai-advent" && "$domain_collect_steps" -le 0 ]]; then
+      append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
       die "headless run $run_id has no domain collect signal in quality summary"
     fi
   fi
 
   if [[ "$runtime_mode" == "headless" && "$pipeline" == "refresh" ]]; then
     if [[ -n "$previous_signal" ]] && (( signal_score < previous_signal )); then
+      append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
       die "quality regression: last run signal ($signal_score) is lower than previous run signal ($previous_signal) in iteration $iteration"
     fi
-    check_headless_refresh_semantic_quality "$workspace_path" "$run_id" || die "headless refresh semantic quality checks failed for run $run_id"
+    check_headless_refresh_semantic_quality "$workspace_path" "$run_id" || {
+      append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
+      die "headless refresh semantic quality checks failed for run $run_id"
+    }
     if [[ "$TARGET_PROFILE" == "ai-advent" ]]; then
-      check_ai_advent_text_signal "$workspace_path" "$run_id" || die "ai-advent textual quality check failed for run $run_id"
+      check_ai_advent_text_signal "$workspace_path" "$run_id" || {
+        append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
+        die "ai-advent textual quality check failed for run $run_id"
+      }
     fi
   fi
 
-  snapshot_run_artifacts "$run_id" "$runtime_label" "$pipeline" "$iteration" "$workspace_path"
-
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$signal_score" "$semantic_entities" "$semantic_edges" "$findings" "$questions" "$coverage_observed" "$coverage_missing" "$warnings" "$runtime_versions" "$quality_path" "$output_path" >> "$RUN_RESULTS_TSV"
+  append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
 
   LAST_SIGNAL="$signal_score"
   return 0

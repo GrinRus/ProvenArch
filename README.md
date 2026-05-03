@@ -68,7 +68,7 @@ Primary execution path для `step0..step4`:
 - runtime validators для collect manifests и draft manifests read-only: они не нормализуют provider artifacts и не выполняют filesystem reconciliation
 - если live provider уже записал валидные required artifacts, но завис до завершения процесса, shared runtime controlled stop принимает artifact-only success.
 - shard agents materialize-ят authored docs + `shard-pack-manifest.json`
-- persisted collect manifests с workspace-level `documents[].path` drift (`reports/...`, `charter/...`, `proposals/...` или duplicated `artifact_root`) отбрасываются до `step2`; единственный collect repair path — один manifest-only provider retry с engine write-set guard, который может заменить только `shard-pack-manifest.json`
+- persisted collect manifests с workspace-level `documents[].path` drift (`reports/...`, `charter/...`, `proposals/...` или duplicated `artifact_root`) отбрасываются до `step2`; collect recovery остаётся provider-authored: non-silent no-artifact collect может получить одну pair-recovery попытку (`suggested overview doc + shard-pack-manifest.json`), а authored-doc collect — одну manifest-only попытку с write-set guard только на `shard-pack-manifest.json`
 - orchestrator/aggregator собирает staged final doc set в `reports/taskruns/<run_id>/staging/final/`
 - staged docflow использует один deterministic `document_id` mapping для `manifest.Documents[*].id`, `citation-index.json` и `final-run-index.json`; semantic assembly нормализует repo aliases и дедуплицирует entity aliases до validator/promotion
 - validator пишет `validator-verdict.json`
@@ -282,7 +282,10 @@ Root entrypoints:
 - `scripts/full-run-batch.sh` — batch re-audit + frontend live e2e
 - `scripts/full-run-batch-matrix.sh` — multi-profile matrix orchestrator; пишет durable profile status + per-batch inventory с key log/report paths и bounded raw-output refs
 - `scripts/frontend-live-e2e.sh` — локальный UI smoke для выбранного provider; различает generic `playwright_failed` и `active_run_timeout`, если run остаётся продуктивным, но не успевает дойти до `succeeded`
-- generic capacity/429 сигналы из `codex` plugin/Cloudflare/state-db noise не считаются root-cause `runner_unavailable`, если raw runtime не дал explicit terminal provider failure
+- generic capacity/429 сигналы из `codex` plugin/Cloudflare/state-db noise не считаются root-cause `runner_unavailable`, а raw provider text не поднимает secondary `runner_unavailable` только из-за упоминания имени категории без реального availability signal
+- terminal-success backend runs (`result=passed`, `quality_gates=passed`, `run-status.env state=completed process_exit=0`) не получают failure class из recovered raw provider diagnostics
+- multi-repo report gate считает cross-repo signal по explicit `semantic.edges[]` или по `citations[].repo` coverage вместе с multi-repo finding provenance, чтобы не помечать schema-valid focused recovery outputs как `analysis:cross-repo-missing`
+- failed CLI cycles с известным `run_id` сохраняют fixed-shape `run-results.tsv` row и best-effort snapshot до terminal cleanup, даже если quality summary отсутствует/битый; provider/runtime failures отображаются как failed headless rows, а не как missing-row infra gaps
 
 Быстрый локальный запуск:
 
@@ -393,10 +396,15 @@ Primary runtime contract для live `step1.collect`/`step3.findings`:
 
 Docs-first semantic rules:
 - `citation-index.json.claim_ids` образуют глобальное пространство имён в пределах assembled staged final set; один и тот же `claim_id` нельзя переиспользовать между разными shard/citation surfaces.
-- `shard-pack-manifest.json.semantic` всегда materialize-ится полностью (`coverage`, `questions`, `entities`, `edges`, `findings`), а collect step не считается успешным, если manifest остаётся missing/invalid после единственной manifest-only repair попытки.
-- collect prompt даёт provider-у suggested authored doc path и literal task-specific `shard-pack-manifest.json` skeleton, чтобы manifest писался сразу после первого shard doc, а не после broad sweep.
-- manifest-only repair читает только текущий shard `write_root` и repo evidence roots; repair prompt перечисляет фактические authored docs, candidate evidence paths и literal JSON skeleton. Broader workspace `reports/taskruns`, sibling shard manifests и filesystem schema scavenging не являются repair input.
+- `shard-pack-manifest.json.semantic` всегда materialize-ится полностью (`coverage`, `questions`, `entities`, `edges`, `findings`), а collect step не считается успешным, если manifest остаётся missing/invalid после разрешённых focused collect recovery попыток.
+- Все required runtime artifacts должны писаться и проверяться по exact absolute `write_root`/`draft_final_root`; relative CWD checks вроде `test -f validator-verdict.json` не являются валидным artifact target.
+- collect prompt даёт provider-у early pair-write target: suggested authored doc path + literal task-specific `shard-pack-manifest.json` skeleton должны появиться до broad second-pass sweep.
+- collect pair recovery используется только когда provider оставил diagnostics, но не написал authored artifacts: prompt сначала пишет suggested overview doc и literal `shard-pack-manifest.json` skeleton по exact absolute targets, а write-set guard разрешает только эту пару файлов. Fully silent no-artifact qwen path остаётся `runner_unavailable`.
+- manifest-only repair читает только текущий shard `write_root` и repo evidence roots; repair prompt начинается с command-first absolute heredoc write target вокруг literal JSON skeleton, overwrites existing invalid manifests instead of reading/diffing/patching them, and does not repeat validation-error cues that invite field-level patching. Broader workspace `reports/taskruns`, sibling shard manifests и filesystem schema scavenging не являются repair input.
 - `shard-pack-manifest.json.documents[].path` всегда strict `artifact_root`-relative; duplicated `artifact_root` prefix, persisted workspace-relative staging paths и absolute paths считаются contract-invalid drift и не нормализуются ACP.
+- Validator verdict recovery — focused provider-authored pass, который может писать только `write_root/validator-verdict.json`; repair prompt начинается с command-first absolute heredoc skeleton, `checked_paths` ссылается на staged final artifacts, `issues[]` использует только canonical `code/severity/message` + optional `path/document_id/citation_id`, legacy finding-shaped issue fields reject-ятся strict validation.
+- Draft recovery для `step0/2/4` может писать только step manifest в `write_root` и referenced draft files под `draft_final_root`; repair prompt начинается с command-first heredoc artifact set для manifest + draft files и запрещает broad analysis до первого валидного draft set. ACP не синтезирует draft artifacts и не делает hidden reconciliation.
+- Для больших repos structural shard coalescing сохраняет module marker leaf shard groups внутри top-level dirs, если итоговый shard count остаётся в `maxAutoShardsPerRepo`; root-marker-only repos больше не схлопываются в `"."`, а планируются как root-file group + top-level directory shards.
 - validator path может чинить только technical/reference drift в staged indexes; дублирующиеся `claim_id` детерминированно переименовываются в citation index без semantic rewrite authored docs.
 
 Persisted runtime execution metadata:

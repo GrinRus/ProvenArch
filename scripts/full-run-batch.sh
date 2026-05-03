@@ -656,10 +656,11 @@ contains_runner_unavailable_signature() {
   local path
   local line
   local generic_pattern="([Mm]odel( is)? at capacity|[Ss]tatus[[:space:]]*[:=][[:space:]]*429|(^|[^0-9])429([^0-9]|$)|[Rr]ate[ -]?limit(ed)?|[Tt]oo many requests)"
+  local structured_pattern="(run failed \\(runner_unavailable\\)|failure_class[\"'=:_ -]*runner_unavailable|failure_reason[\"'=:_ -]*runner_unavailable|error_code[\"'=:_ -]*runner_unavailable)"
   local noise_pattern="(chatgpt\\.com/backend-api/plugins/featured|[Cc]loudflare|failed to renew cache ttl|state db|Operation not permitted)"
   for path in "${paths[@]}"; do
     [[ ! -f "$path" ]] && continue
-    if grep -q "runner_unavailable" "$path"; then
+    if grep -E -q "$structured_pattern" "$path"; then
       return 0
     fi
     while IFS= read -r line || [[ -n "$line" ]]; do
@@ -822,6 +823,26 @@ run_frontend_live_e2e() {
   fi
 
   if [[ -z "$refresh_run_id" || ! -d "$snapshot_reports" ]]; then
+    local backend_failure_reason
+    local backend_state
+    backend_failure_reason="$(read_status_field "$backend_run_dir/run-status.env" "failure_reason")"
+    backend_state="$(read_status_field "$backend_run_dir/run-status.env" "state")"
+    if [[ "$backend_state" == "process_failed" || "$backend_state" == "signal_terminated" || -n "$backend_failure_reason" && "$backend_failure_reason" != "none" ]]; then
+      write_frontend_status_json \
+        "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME" \
+        "$provider" \
+        "init-inspect" \
+        "skipped" \
+        "$ACP_FRONTEND_REASON_SNAPSHOT_REPORTS_MISSING" \
+        "$snapshot_reports" \
+        "$output_dir" \
+        "$runtime_cmd" \
+        "$output_dir/server.log" \
+        "$output_dir/playwright.log" \
+        "$run_index"
+      log "frontend e2e skipped provider=$provider run=${run_index:-summary} reason=$ACP_FRONTEND_REASON_SNAPSHOT_REPORTS_MISSING backend_state=${backend_state:-unknown} backend_failure_reason=${backend_failure_reason:-none}"
+      return 0
+    fi
     write_frontend_status_json \
       "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME" \
       "$provider" \
@@ -1022,6 +1043,7 @@ classify_run_failure() {
   local run_status_failure_reason=""
   local run_status_summary_written=""
   local terminal_pipeline_failure=0
+  local terminal_success=0
   local validator_verdict_failed=0
   local -a classify_log_paths=("$summary_path" "$full_log_path" "$batch_driver_log")
   local workspace=""
@@ -1104,8 +1126,13 @@ classify_run_failure() {
   if [[ -f "$summary_path" && "$run_status_state" == "process_failed" && "$run_status_summary_written" == "yes" ]]; then
     terminal_pipeline_failure=1
   fi
-  if contains_in_files "validator verdict is FAIL" "${classify_log_paths[@]}"; then
-    validator_verdict_failed=1
+  if [[ "$summary_result" == "passed" && "$quality_gates_status" == "passed" && "$process_exit" =~ ^[0-9]+$ && "$process_exit" -eq 0 ]]; then
+    terminal_success=1
+  fi
+  if [[ "$terminal_success" != "1" ]]; then
+    if contains_in_files "validator verdict is FAIL" "${classify_log_paths[@]}"; then
+      validator_verdict_failed=1
+    fi
   fi
 
   if [[ -f "$run_results_path" ]]; then
@@ -1124,16 +1151,16 @@ classify_run_failure() {
     fi
   fi
 
-  if [[ "$run_class" == "none" ]] && contains_runtime_contract_parse_signature "${classify_log_paths[@]}"; then
+  if [[ "$run_class" == "none" && "$terminal_success" != "1" ]] && contains_runtime_contract_parse_signature "${classify_log_paths[@]}"; then
     run_class="runtime_contract_failed"
   fi
   if [[ "$run_class" == "none" && "$validator_verdict_failed" == "1" ]]; then
     run_class="runtime_flow_failed"
   fi
-  if [[ "$run_class" == "none" ]] && contains_in_files "runtime_contract_failed" "${classify_log_paths[@]}"; then
+  if [[ "$run_class" == "none" && "$terminal_success" != "1" ]] && contains_in_files "runtime_contract_failed" "${classify_log_paths[@]}"; then
     run_class="runtime_contract_failed"
   fi
-  if [[ "$run_class" == "none" ]] && contains_runner_unavailable_signature "${classify_log_paths[@]}"; then
+  if [[ "$run_class" == "none" && "$terminal_success" != "1" ]] && contains_runner_unavailable_signature "${classify_log_paths[@]}"; then
     run_class="runner_unavailable"
   fi
 

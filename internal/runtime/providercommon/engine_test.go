@@ -11,6 +11,7 @@ import (
 	"time"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtime/steppolicy"
 )
 
 func TestRunHeadlessProviderSucceedsWithValidArtifacts(t *testing.T) {
@@ -33,11 +34,12 @@ func TestRunHeadlessProviderAcceptsValidArtifactsAfterControlledStop(t *testing.
 	runner := testAdapter{
 		command: writeEngineScript(t, draftScript(task, "sleep 5")),
 		activity: ActivityPolicy{
-			MonitorArtifacts:        true,
-			PostArtifactStallWindow: 20 * time.Millisecond,
-			PollInterval:            5 * time.Millisecond,
-			PostTerminateDrain:      10 * time.Millisecond,
-			TerminateGrace:          10 * time.Millisecond,
+			MonitorArtifacts:           true,
+			PostArtifactStallWindow:    20 * time.Millisecond,
+			PartialArtifactStallWindow: 500 * time.Millisecond,
+			PollInterval:               5 * time.Millisecond,
+			PostTerminateDrain:         10 * time.Millisecond,
+			TerminateGrace:             10 * time.Millisecond,
 		},
 		recovery: RecoveryPolicy{AcceptValidArtifactsAfterStop: true},
 	}
@@ -75,7 +77,7 @@ func TestRunHeadlessProviderClassifiesSilentRetryExhaustionUnavailable(t *testin
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	_, err := RunHeadlessProvider(ctx, task, runner)
 	if err == nil {
@@ -256,6 +258,158 @@ EOF
 	}
 }
 
+func TestRunHeadlessProviderRepairsNonSilentNoArtifactCollectWithPairRepair(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-pair-repair")
+	docRel := steppolicy.SuggestedCollectDocumentPath(task)
+	manifest := strings.Replace(collectManifestJSON(task), `"path": "overview.md"`, `"path": "`+docRel+`"`, 1)
+	initialScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'codex collect started'
+`
+	repairScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot, filepath.FromSlash(docRel))) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + manifest + `
+EOF
+`
+	runner := testAdapter{
+		command:           writeEngineScript(t, initialScript),
+		pairRepairCommand: writeEngineScript(t, repairScript),
+		activity: ActivityPolicy{
+			MonitorArtifacts:            true,
+			MonitorPreArtifact:          false,
+			PreArtifactStallWindow:      250 * time.Millisecond,
+			RetryPreArtifactStallWindow: 250 * time.Millisecond,
+			PostArtifactStallWindow:     20 * time.Millisecond,
+			PartialArtifactStallWindow:  20 * time.Millisecond,
+			PollInterval:                5 * time.Millisecond,
+			PostTerminateDrain:          10 * time.Millisecond,
+			TerminateGrace:              10 * time.Millisecond,
+		},
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectArtifactPairOnce: true,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	result, err := RunHeadlessProvider(ctx, task, runner)
+	if err != nil {
+		t.Fatalf("expected collect pair repair success, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+}
+
+func TestRunHeadlessProviderRejectsCollectPairRepairExtraWrites(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-pair-repair-extra-write")
+	docRel := steppolicy.SuggestedCollectDocumentPath(task)
+	manifest := strings.Replace(collectManifestJSON(task), `"path": "overview.md"`, `"path": "`+docRel+`"`, 1)
+	initialScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'codex collect started'
+`
+	repairScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot, filepath.FromSlash(docRel))) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + manifest + `
+EOF
+printf '%s\n' '# Repair Notes' > ` + shellQuote(filepath.Join(task.WriteRoot, "repair-notes.md")) + `
+`
+	runner := testAdapter{
+		command:           writeEngineScript(t, initialScript),
+		pairRepairCommand: writeEngineScript(t, repairScript),
+		activity: ActivityPolicy{
+			MonitorArtifacts:            true,
+			MonitorPreArtifact:          false,
+			PreArtifactStallWindow:      250 * time.Millisecond,
+			RetryPreArtifactStallWindow: 250 * time.Millisecond,
+			PostArtifactStallWindow:     20 * time.Millisecond,
+			PartialArtifactStallWindow:  20 * time.Millisecond,
+			PollInterval:                5 * time.Millisecond,
+			PostTerminateDrain:          10 * time.Millisecond,
+			TerminateGrace:              10 * time.Millisecond,
+		},
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectArtifactPairOnce: true,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	_, err := RunHeadlessProvider(ctx, task, runner)
+	if err == nil {
+		t.Fatal("expected collect pair repair write-set contract failure")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "collect pair recovery wrote forbidden files") {
+		t.Fatalf("expected collect pair write-set failure, got %v", err)
+	}
+	if !strings.Contains(runnerErr.Error(), "created repair-notes.md") {
+		t.Fatalf("expected forbidden file path in error, got %v", err)
+	}
+}
+
+func TestCollectPairRepairDoesNotMaskSilentNoArtifactCollect(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-pair-repair-silent")
+	runner := testAdapter{
+		command: writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 5\n"),
+		activity: ActivityPolicy{
+			MonitorArtifacts:            true,
+			MonitorPreArtifact:          true,
+			PreArtifactStallWindow:      20 * time.Millisecond,
+			RetryPreArtifactStallWindow: 20 * time.Millisecond,
+			PostArtifactStallWindow:     20 * time.Millisecond,
+			PartialArtifactStallWindow:  20 * time.Millisecond,
+			PollInterval:                5 * time.Millisecond,
+			PostTerminateDrain:          10 * time.Millisecond,
+			TerminateGrace:              10 * time.Millisecond,
+		},
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:            true,
+			RepairCollectArtifactPairOnce:            true,
+			RetryInvalidOrMissingArtifactsOnce:       true,
+			ClassifySilentRetryExhaustionUnavailable: true,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := RunHeadlessProvider(ctx, task, runner)
+	if err == nil {
+		t.Fatal("expected silent collect to remain provider unavailable")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRunnerUnavailable {
+		t.Fatalf("expected runner_unavailable, got %s (%v)", runnerErr.Code, err)
+	}
+	if strings.Contains(runnerErr.Error(), "collect_pair_repair") {
+		t.Fatalf("silent no-artifact collect should not enter collect pair repair, got %v", err)
+	}
+}
+
 func TestRunHeadlessProviderRepairsMissingCollectManifestWithNestedAuthoredDocs(t *testing.T) {
 	t.Parallel()
 
@@ -416,6 +570,195 @@ printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot
 	}
 }
 
+func TestRunHeadlessProviderRepairsMissingValidatorVerdict(t *testing.T) {
+	t.Parallel()
+
+	task := newValidatorTask(t, "run-validator-repair")
+	initialScript := "#!/usr/bin/env bash\nset -eu\nexit 0\n"
+	repairScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ValidatorVerdictFileName)) + ` <<'EOF'
+` + validatorVerdictJSON(task) + `
+EOF
+`
+	runner := testAdapter{
+		command:                writeEngineScript(t, initialScript),
+		validatorRepairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairValidatorVerdictOnce:    true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected validator verdict repair success, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+}
+
+func TestRunHeadlessProviderRepairsMissingValidatorVerdictAfterNoArtifactStall(t *testing.T) {
+	t.Parallel()
+
+	task := newValidatorTask(t, "run-validator-stall-repair")
+	repairScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ValidatorVerdictFileName)) + ` <<'EOF'
+` + validatorVerdictJSON(task) + `
+EOF
+`
+	runner := testAdapter{
+		command:                writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 5\n"),
+		validatorRepairCommand: writeEngineScript(t, repairScript),
+		activity: ActivityPolicy{
+			MonitorArtifacts:        true,
+			MonitorPreArtifact:      true,
+			PreArtifactStallWindow:  20 * time.Millisecond,
+			PostArtifactStallWindow: 20 * time.Millisecond,
+			PollInterval:            5 * time.Millisecond,
+			PostTerminateDrain:      10 * time.Millisecond,
+			TerminateGrace:          10 * time.Millisecond,
+		},
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:            true,
+			RepairValidatorVerdictOnce:               true,
+			RetryInvalidOrMissingArtifactsOnce:       true,
+			ClassifySilentRetryExhaustionUnavailable: true,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	result, err := RunHeadlessProvider(ctx, task, runner)
+	if err != nil {
+		t.Fatalf("expected validator verdict repair after no-artifact stall, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+}
+
+func TestRunHeadlessProviderRepairsInvalidValidatorVerdict(t *testing.T) {
+	t.Parallel()
+
+	task := newValidatorTask(t, "run-validator-invalid-repair")
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ValidatorVerdictFileName)) + ` <<'EOF'
+{"version":1,"run_id":"` + task.RunID + `","generated_at":"2026-04-16T12:00:02Z","verdict":"FAIL","checked_paths":["reports/taskruns/` + task.RunID + `/staging/final/final-run-index.json"],"issues":[{"id":"legacy","severity":"high","title":"Legacy issue","description":"Wrong shape","rule_id":"legacy.rule","related_paths":["reports/as-is/overview.md"]}]}
+EOF
+`
+	repairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ValidatorVerdictFileName)) + ` <<'EOF'
+` + validatorVerdictJSON(task) + `
+EOF
+`
+	runner := testAdapter{
+		command:                writeEngineScript(t, initialScript),
+		validatorRepairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairValidatorVerdictOnce:    true,
+		},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected invalid validator verdict repair success, got %v", err)
+	}
+}
+
+func TestRunHeadlessProviderRejectsValidatorRepairExtraWrites(t *testing.T) {
+	t.Parallel()
+
+	task := newValidatorTask(t, "run-validator-repair-extra-write")
+	repairScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ValidatorVerdictFileName)) + ` <<'EOF'
+` + validatorVerdictJSON(task) + `
+EOF
+printf '%s\n' '# Notes' > ` + shellQuote(filepath.Join(task.WriteRoot, "notes.md")) + `
+`
+	runner := testAdapter{
+		command:                writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nexit 0\n"),
+		validatorRepairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairValidatorVerdictOnce:    true,
+		},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected validator repair write-set contract failure")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "verdict-only validator repair wrote forbidden files") {
+		t.Fatalf("expected validator write-set failure, got %v", err)
+	}
+}
+
+func TestRunHeadlessProviderRepairsDraftArtifactsWithDraftFinalWrites(t *testing.T) {
+	t.Parallel()
+
+	task := newDraftTask(t, "run-draft-repair")
+	repairScript := draftScript(task, "exit 0")
+	runner := testAdapter{
+		command:            writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nexit 0\n"),
+		draftRepairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairDraftArtifactsOnce:      true,
+		},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected draft artifact repair success, got %v", err)
+	}
+}
+
+func TestRunHeadlessProviderRejectsDraftRepairExtraWriteRootFiles(t *testing.T) {
+	t.Parallel()
+
+	task := newDraftTask(t, "run-draft-repair-extra-write")
+	repairScript := draftScript(task, "printf '%s\\n' '# Extra' > "+shellQuote(filepath.Join(task.WriteRoot, "extra.md"))+"\n")
+	runner := testAdapter{
+		command:            writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nexit 0\n"),
+		draftRepairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairDraftArtifactsOnce:      true,
+		},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected draft repair write-set contract failure")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "draft repair wrote forbidden write_root files") {
+		t.Fatalf("expected draft write-set failure, got %v", err)
+	}
+}
+
 func TestSilentRetryExhaustionUnavailableRequiresNoAuthoredArtifacts(t *testing.T) {
 	t.Parallel()
 
@@ -520,6 +863,30 @@ func TestMonitorArtifactStallObservesDraftArtifactMutationWindow(t *testing.T) {
 	}
 }
 
+func TestDraftArtifactSnapshotObservesNestedDraftFinalFiles(t *testing.T) {
+	t.Parallel()
+
+	task := newDraftTask(t, "run-monitor-nested-draft")
+	nestedPath := filepath.Join(task.DraftFinalRoot, "reports", "changelog", "runtime-proposals.md")
+	if err := os.MkdirAll(filepath.Dir(nestedPath), 0o755); err != nil {
+		t.Fatalf("mkdir nested draft path: %v", err)
+	}
+	if err := os.WriteFile(nestedPath, []byte("# Runtime Proposals\n"), 0o644); err != nil {
+		t.Fatalf("write nested draft artifact: %v", err)
+	}
+
+	snapshot := draftArtifactSnapshot(task)
+	if !snapshot.ArtifactObserved {
+		t.Fatalf("expected nested draft final file to count as observed artifact: %#v", snapshot)
+	}
+	if snapshot.AuthoredFiles != 1 {
+		t.Fatalf("authored draft files = %d, want 1: %#v", snapshot.AuthoredFiles, snapshot)
+	}
+	if snapshot.LastMutation.IsZero() {
+		t.Fatalf("expected nested draft final file to update last mutation: %#v", snapshot)
+	}
+}
+
 func TestMonitorArtifactStallTripsPreArtifactWindow(t *testing.T) {
 	t.Parallel()
 
@@ -596,10 +963,13 @@ func TestCollectArtifactSnapshotIgnoresRuntimeExecutionMetadata(t *testing.T) {
 }
 
 type testAdapter struct {
-	command       string
-	repairCommand string
-	activity      ActivityPolicy
-	recovery      RecoveryPolicy
+	command                string
+	repairCommand          string
+	pairRepairCommand      string
+	validatorRepairCommand string
+	draftRepairCommand     string
+	activity               ActivityPolicy
+	recovery               RecoveryPolicy
 }
 
 func (a testAdapter) Provider() acpruntime.Provider {
@@ -619,6 +989,27 @@ func (a testAdapter) CollectManifestRepairCommandSpec(acpruntime.Task, error) (C
 		return CommandSpec{}, errors.New("repair command is unavailable")
 	}
 	return CommandSpec{Command: a.repairCommand}, nil
+}
+
+func (a testAdapter) CollectArtifactPairRepairCommandSpec(acpruntime.Task, error) (CommandSpec, error) {
+	if strings.TrimSpace(a.pairRepairCommand) == "" {
+		return CommandSpec{}, errors.New("collect pair repair command is unavailable")
+	}
+	return CommandSpec{Command: a.pairRepairCommand}, nil
+}
+
+func (a testAdapter) ValidatorVerdictRepairCommandSpec(acpruntime.Task, error) (CommandSpec, error) {
+	if strings.TrimSpace(a.validatorRepairCommand) == "" {
+		return CommandSpec{}, errors.New("validator repair command is unavailable")
+	}
+	return CommandSpec{Command: a.validatorRepairCommand}, nil
+}
+
+func (a testAdapter) DraftArtifactRepairCommandSpec(acpruntime.Task, error) (CommandSpec, error) {
+	if strings.TrimSpace(a.draftRepairCommand) == "" {
+		return CommandSpec{}, errors.New("draft repair command is unavailable")
+	}
+	return CommandSpec{Command: a.draftRepairCommand}, nil
 }
 
 func (a testAdapter) ValidateArtifacts(task acpruntime.Task) error {
@@ -687,6 +1078,56 @@ func newCollectTask(t *testing.T, runID string) acpruntime.Task {
 		ExpectedArtifacts: []string{ShardPackManifestFileName},
 		StartedAtUTC:      time.Now().UTC(),
 	}
+}
+
+func newValidatorTask(t *testing.T, runID string) acpruntime.Task {
+	t.Helper()
+
+	workspace := t.TempDir()
+	writeRoot := filepath.Join(workspace, "reports", "taskruns", runID, "validator")
+	stagedRoot := filepath.Join(workspace, "reports", "taskruns", runID, "staging", "final")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(stagedRoot, 0o755); err != nil {
+		t.Fatalf("mkdir staged root: %v", err)
+	}
+	for _, name := range []string{"final-run-index.json", "citation-index.json"} {
+		if err := os.WriteFile(filepath.Join(stagedRoot, name), []byte(`{"version":1}`+"\n"), 0o644); err != nil {
+			t.Fatalf("write staged %s: %v", name, err)
+		}
+	}
+	return acpruntime.Task{
+		TaskID:            "task-" + runID,
+		RunID:             runID,
+		StepID:            "init.step3.findings",
+		StepContract:      "validator",
+		AgentRole:         "architect",
+		Workspace:         workspace,
+		WriteRoot:         writeRoot,
+		DraftFinalRoot:    stagedRoot,
+		ReadContextRoots:  []string{stagedRoot},
+		ExpectedArtifacts: []string{ValidatorVerdictFileName},
+		StartedAtUTC:      time.Now().UTC(),
+	}
+}
+
+func validatorVerdictJSON(task acpruntime.Task) string {
+	return `{
+  "version": 1,
+  "run_id": "` + task.RunID + `",
+  "generated_at": "2026-04-16T12:00:02Z",
+  "verdict": "PASS",
+  "summary": "No blocking technical validator issues remain.",
+  "checked_paths": [
+    "reports/taskruns/` + task.RunID + `/staging/final/final-run-index.json",
+    "reports/taskruns/` + task.RunID + `/staging/final/citation-index.json"
+  ],
+  "fixed_paths": [],
+  "findings": [],
+  "questions": [],
+  "issues": []
+}`
 }
 
 func collectManifestJSON(task acpruntime.Task) string {
