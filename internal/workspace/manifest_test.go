@@ -95,7 +95,7 @@ runtime:
 	}
 }
 
-func TestOpenRejectsManifestWithInvalidRepoAnalysisRole(t *testing.T) {
+func TestOpenRejectsManifestWithRepoAnalysisRole(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -105,15 +105,15 @@ repos:
   - name: payments
     path: /tmp/payments
     analysis:
-      role: data
+      role: backend
 `)
 
 	_, err := Open(root)
 	if err == nil {
 		t.Fatalf("expected validation error")
 	}
-	if !strings.Contains(err.Error(), "analysis.role must be one of: backend, frontend, mixed, unknown") {
-		t.Fatalf("expected analysis.role validation error, got %v", err)
+	if !strings.Contains(err.Error(), "additionalProperties 'role' not allowed") {
+		t.Fatalf("expected schema rejection for removed analysis.role field, got %v", err)
 	}
 }
 

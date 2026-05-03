@@ -24,7 +24,6 @@
   - ровно одно из `path | git_url`
   - optional `ref`
   - optional `analysis.include[] | analysis.exclude[]` (glob overrides для shard planner)
-  - optional `analysis.role` (`backend|frontend|mixed|unknown`)
 - `repo.name` значения должны быть уникальными; это semantic validation rule workspace validator-а поверх JSON Schema
 - `docs.imports_path` optional, default `./docs/imports`
 - `runtime.profile.timeouts.*` optional persisted timeout profile:
@@ -42,7 +41,8 @@
 - precedence:
   - timeouts: `env > workspace.yaml(runtime.profile.timeouts) > defaults`
   - execution: `CLI > env > workspace.yaml(runtime.profile.execution) > defaults`
-  - step providers: `workspace step override > CLI/env global provider > claude-code`
+- step providers: `workspace step override > CLI/env global provider > claude-code`
+- `analysis.role` удалён из active workspace contract; manifests с этим legacy полем reject-ятся schema validation-ом
 
 Sharding policy в MVP:
 - `heuristics` строит structural full-coverage partition repo без overlap в `path_scopes`.
@@ -109,6 +109,7 @@ Semantic role:
 - описывает authored shard docs внутри shard staging root
 - связывает документы с canonical stable paths, topics и citation ids
 - несёт semantic snapshot для derived model layer
+- schema-level rejection блокирует known legacy aliases: `covered_topics`, `question`, `relation`, `source`, `target`, finding `summary`/`inference`, `evidence_citation_ids`, top-level `step_contract`/`compatibility`
 
 ## 4) Final Run Index Schema
 

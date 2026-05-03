@@ -194,6 +194,10 @@ type Runner interface {
 	Run(context.Context, Task) (Result, error)
 }
 
+type MetadataRunner interface {
+	RuntimeMeta() contracts.RuntimeMeta
+}
+
 type PreflightRunner interface {
 	Preflight(context.Context) error
 }

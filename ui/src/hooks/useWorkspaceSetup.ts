@@ -1,9 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo, useReducer, useState } from "react";
 
-import { fetchJSON, getErrorMessage } from "../lib/api";
 import {
-  makeGuidedRepo,
-  type BaselineBundleResponse,
   type Diagnostic,
   type EditableArtifactOption,
   type GuidedRepo,
@@ -11,6 +8,17 @@ import {
   type WizardContract,
 } from "../lib/appContracts";
 import { splitListInput } from "../lib/runState";
+import { guidedReposReducer, initialGuidedRepos } from "../lib/workspaceSetupState";
+import {
+  commitWorkspaceArtifacts,
+  createProposalBranch,
+  loadArtifactText,
+  loadBaselineBundleAPI,
+  loadWorkspaceManifest,
+  saveEditableArtifact,
+  saveWorkspaceManifest,
+  validateWorkspaceAPI,
+} from "../lib/workspaceApi";
 
 type UseWorkspaceSetupOptions = {
   setBusy: (busy: boolean) => void;
@@ -27,13 +35,7 @@ export function useWorkspaceSetup({ setBusy, setError }: UseWorkspaceSetupOption
   const [selectedEditorContent, setSelectedEditorContent] = useState("");
   const [editorStatus, setEditorStatus] = useState("");
 
-  const [guidedRepos, setGuidedRepos] = useState<GuidedRepo[]>(() => [
-    makeGuidedRepo({
-      name: "payments-service",
-      mode: "path",
-      path: "/absolute/path/to/payments-service",
-    }),
-  ]);
+  const [guidedRepos, dispatchGuidedRepos] = useReducer(guidedReposReducer, undefined, initialGuidedRepos);
   const [guidedDocsImportsPath, setGuidedDocsImportsPath] = useState("./docs/imports");
 
   const [wizardProjectName, setWizardProjectName] = useState("ProvenArch MVP");
@@ -63,8 +65,7 @@ export function useWorkspaceSetup({ setBusy, setError }: UseWorkspaceSetupOption
 
   async function bootstrapWorkspaceSetup() {
     try {
-      const manifest = await fetchJSON<{ content: string }>("/api/workspace/manifest");
-      setManifestContent(manifest.content ?? "");
+      setManifestContent(await loadWorkspaceManifest());
     } catch {
       setManifestContent("");
     }
@@ -75,7 +76,7 @@ export function useWorkspaceSetup({ setBusy, setError }: UseWorkspaceSetupOption
 
   async function loadBaselineBundle() {
     try {
-      const payload = await fetchJSON<BaselineBundleResponse>("/api/workspace/bundle");
+      const payload = await loadBaselineBundleAPI();
       const artifacts = (payload.manifest?.editable_artifacts ?? []).map((artifact) => ({
         path: artifact.path,
         label: artifact.label,
@@ -100,11 +101,7 @@ export function useWorkspaceSetup({ setBusy, setError }: UseWorkspaceSetupOption
 
   async function loadWizardContract() {
     try {
-      const response = await fetch("/api/artifacts?path=charter/wizard/step0-contract.json");
-      if (!response.ok) {
-        return;
-      }
-      const content = (await response.text()).trim();
+      const content = (await loadArtifactText("charter/wizard/step0-contract.json"))?.trim() ?? "";
       if (!content) {
         return;
       }
@@ -128,12 +125,7 @@ export function useWorkspaceSetup({ setBusy, setError }: UseWorkspaceSetupOption
 
   async function loadTextArtifact(path: string, setter: (value: string) => void) {
     try {
-      const response = await fetch(`/api/artifacts?path=${encodeURIComponent(path)}`);
-      if (!response.ok) {
-        setter("");
-        return;
-      }
-      setter(await response.text());
+      setter((await loadArtifactText(path)) ?? "");
     } catch {
       setter("");
     }
@@ -143,15 +135,7 @@ export function useWorkspaceSetup({ setBusy, setError }: UseWorkspaceSetupOption
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch("/api/workspace/validate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      const payload = await response.json();
-      setValidateResult(payload as ValidateResponse);
-      if (!response.ok) {
-        throw new Error(getErrorMessage(payload, "workspace validation failed"));
-      }
+      setValidateResult(await validateWorkspaceAPI());
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "workspace validation failed");
     } finally {
@@ -160,20 +144,15 @@ export function useWorkspaceSetup({ setBusy, setError }: UseWorkspaceSetupOption
   }
 
   function updateGuidedRepo(id: string, patch: Partial<GuidedRepo>) {
-    setGuidedRepos((previous) => previous.map((repo) => (repo.id === id ? { ...repo, ...patch } : repo)));
+    dispatchGuidedRepos({ type: "update", id, patch });
   }
 
   function handleAddGuidedRepo() {
-    setGuidedRepos((previous) => [...previous, makeGuidedRepo()]);
+    dispatchGuidedRepos({ type: "add" });
   }
 
   function handleRemoveGuidedRepo(id: string) {
-    setGuidedRepos((previous) => {
-      if (previous.length <= 1) {
-        return previous;
-      }
-      return previous.filter((repo) => repo.id !== id);
-    });
+    dispatchGuidedRepos({ type: "remove", id });
   }
 
   function buildManifestFromGuidedForm(): string {
@@ -235,25 +214,13 @@ export function useWorkspaceSetup({ setBusy, setError }: UseWorkspaceSetupOption
     setBusy(true);
     setError(null);
     try {
-      await fetchJSON<{ ok: boolean }>("/api/workspace/manifest", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: manifestContent }),
-      });
+      await saveWorkspaceManifest(manifestContent);
       await handleValidateWorkspace();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "failed to save manifest");
     } finally {
       setBusy(false);
     }
-  }
-
-  async function saveEditableArtifact(path: string, content: string) {
-    await fetchJSON<{ ok: boolean }>("/api/artifacts/write", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path, content }),
-    });
   }
 
   async function handleSaveStep0WizardContract() {
@@ -311,11 +278,7 @@ export function useWorkspaceSetup({ setBusy, setError }: UseWorkspaceSetupOption
     setError(null);
     setGitStatus("");
     try {
-      const payload = await fetchJSON<{ status: string; message?: string; output?: string }>("/api/git/commit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: gitMessage }),
-      });
+      const payload = await commitWorkspaceArtifacts(gitMessage);
       setGitStatus(payload.output ?? payload.message ?? payload.status);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "git commit failed");
@@ -329,11 +292,7 @@ export function useWorkspaceSetup({ setBusy, setError }: UseWorkspaceSetupOption
     setError(null);
     setGitStatus("");
     try {
-      const payload = await fetchJSON<{ branch: string }>("/api/git/proposal-branch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: proposalBranch }),
-      });
+      const payload = await createProposalBranch(proposalBranch);
       setGitStatus(`checked out ${payload.branch}`);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "failed to create proposal branch");

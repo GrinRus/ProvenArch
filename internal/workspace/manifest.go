@@ -32,7 +32,6 @@ type RepoSource struct {
 type RepoAnalysisConfig struct {
 	Include []string `yaml:"include,omitempty" json:"include,omitempty"`
 	Exclude []string `yaml:"exclude,omitempty" json:"exclude,omitempty"`
-	Role    string   `yaml:"role,omitempty" json:"role,omitempty"`
 }
 
 type DocsConfig struct {
@@ -82,13 +81,6 @@ type RuntimeTimeoutsConfig struct {
 	UIInitPollTimeoutSec   *int `yaml:"ui_init_poll_timeout_sec,omitempty" json:"ui_init_poll_timeout_sec,omitempty"`
 	UICancelPollTimeoutSec *int `yaml:"ui_cancel_poll_timeout_sec,omitempty" json:"ui_cancel_poll_timeout_sec,omitempty"`
 }
-
-const (
-	RepoRoleBackend  = "backend"
-	RepoRoleFrontend = "frontend"
-	RepoRoleMixed    = "mixed"
-	RepoRoleUnknown  = "unknown"
-)
 
 func (cfg *RuntimeTimeoutsConfig) IsZero() bool {
 	if cfg == nil {
@@ -143,7 +135,7 @@ func (cfg *RuntimeConfig) IsZero() bool {
 }
 
 func (cfg *RepoAnalysisConfig) IsZero() bool {
-	return cfg == nil || (len(cfg.Include) == 0 && len(cfg.Exclude) == 0 && strings.TrimSpace(cfg.Role) == "")
+	return cfg == nil || (len(cfg.Include) == 0 && len(cfg.Exclude) == 0)
 }
 
 func LoadManifest(path string) (Manifest, error) {
@@ -189,7 +181,6 @@ func applyManifestDefaults(manifest *Manifest) {
 		if manifest.Repos[idx].Analysis != nil {
 			manifest.Repos[idx].Analysis.Include = normalizeOrderedUniqueStrings(manifest.Repos[idx].Analysis.Include)
 			manifest.Repos[idx].Analysis.Exclude = normalizeOrderedUniqueStrings(manifest.Repos[idx].Analysis.Exclude)
-			manifest.Repos[idx].Analysis.Role = strings.TrimSpace(strings.ToLower(manifest.Repos[idx].Analysis.Role))
 			if manifest.Repos[idx].Analysis.IsZero() {
 				manifest.Repos[idx].Analysis = nil
 			}
@@ -284,13 +275,6 @@ func validateManifest(manifest Manifest) error {
 				if strings.TrimSpace(exclude) == "" {
 					problems = append(problems, fmt.Sprintf("%s.analysis.exclude[%d] must not be empty", indexLabel, idx))
 				}
-			}
-			if role := strings.TrimSpace(strings.ToLower(repo.Analysis.Role)); role != "" &&
-				role != RepoRoleBackend &&
-				role != RepoRoleFrontend &&
-				role != RepoRoleMixed &&
-				role != RepoRoleUnknown {
-				problems = append(problems, "analysis.role must be one of: backend, frontend, mixed, unknown")
 			}
 		}
 	}

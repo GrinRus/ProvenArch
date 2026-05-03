@@ -70,7 +70,7 @@ func TestValidateRequiredManifestAcceptsCanonicalConstitutionDraft(t *testing.T)
 	}
 }
 
-func TestValidateRequiredManifestRejectsObservedLegacyStep0Shapes(t *testing.T) {
+func TestValidateRequiredManifestRejectsObservedContractInvalidStep0Shapes(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -79,18 +79,18 @@ func TestValidateRequiredManifestRejectsObservedLegacyStep0Shapes(t *testing.T) 
 		wantError string
 	}{
 		{
-			name:      "bank single legacy schema_version",
-			fixture:   "legacy-rejection/qwen_step0_bank_single_legacy_constitution_draft.json",
+			name:      "bank single schema_version",
+			fixture:   "contract-rejection/qwen_step0_bank_single_contract_invalid_constitution_draft.json",
 			wantError: `unknown field "schema_version"`,
 		},
 		{
 			name:      "openedx version string",
-			fixture:   "legacy-rejection/qwen_step0_openedx_multi_version_string_constitution_draft.json",
+			fixture:   "contract-rejection/qwen_step0_openedx_multi_version_string_constitution_draft.json",
 			wantError: "cannot unmarshal string into Go struct field Manifest.version of type int",
 		},
 		{
 			name:      "openstack schema_version v1 string",
-			fixture:   "legacy-rejection/qwen_step0_openstack_multi_schema_version_constitution_draft.json",
+			fixture:   "contract-rejection/qwen_step0_openstack_multi_schema_version_constitution_draft.json",
 			wantError: `unknown field "schema_version"`,
 		},
 	}
@@ -121,7 +121,7 @@ func TestValidateRequiredManifestRejectsObservedLegacyStep0Shapes(t *testing.T) 
 
 			_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "init.step0.constitution", "constitution", []string{ConstitutionManifestFile})
 			if err == nil {
-				t.Fatalf("expected legacy manifest to be rejected")
+				t.Fatalf("expected contract-invalid manifest to be rejected")
 			}
 			if !strings.Contains(err.Error(), tc.wantError) {
 				t.Fatalf("expected %q in error, got %v", tc.wantError, err)
@@ -351,7 +351,7 @@ func TestValidateRequiredManifestAcceptsCanonicalProposalsDraft(t *testing.T) {
 	}
 }
 
-func TestValidateRequiredManifestRejectsObservedLegacyProposalsEnvelope(t *testing.T) {
+func TestValidateRequiredManifestRejectsObservedContractInvalidProposalsEnvelope(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
@@ -363,13 +363,13 @@ func TestValidateRequiredManifestRejectsObservedLegacyProposalsEnvelope(t *testi
 	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
 		t.Fatalf("mkdir draft root: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), readRuntimeFixture(t, "legacy-rejection/claude_step4_bank_legacy_proposals_draft.json"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), readRuntimeFixture(t, "contract-rejection/claude_step4_bank_contract_invalid_proposals_draft.json"), 0o644); err != nil {
 		t.Fatalf("write fixture manifest: %v", err)
 	}
 
 	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "init.step4.proposals", "proposals", []string{ProposalsManifestFile})
 	if err == nil {
-		t.Fatalf("expected legacy proposals envelope to be rejected")
+		t.Fatalf("expected contract-invalid proposals envelope to be rejected")
 	}
 	if !strings.Contains(err.Error(), `unknown field "pipeline"`) {
 		t.Fatalf("expected strict parser unknown field error, got %v", err)

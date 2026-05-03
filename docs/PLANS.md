@@ -194,6 +194,62 @@ Diagnostic `smoke tiny` на `qwen-code` (`smoke-tiny-bank-20260501T172519Z`) с
 - 2026-05-02: Live evidence confirmed marker-preserving coalescing worked (`26` coverage roots -> `10` shard groups, including `4` preserved module marker leaves); collect improved from the prior `3/6` pass shape to `4/10` succeeded shards, but residual qwen stalls remained: markdown-only collect shards still exhausted manifest-only repair with empty stdout/stderr, `iac` had no artifacts after retry, and `step3.findings` ended `runner_unavailable`.
 
 ### Plan ID
+EP-20260503-breaking-complexity-cleanup
+
+### Context
+Аудит текущего кода показал несколько подтверждённых источников сложности: unused legacy `repos[].analysis.role` в workspace contract, недостижимые `repo_selection` ветки в orchestrator, ad hoc legacy collect-manifest scanner поверх уже strict schemas, provider metadata через adapter type-switch imports, монолитные run/shard/providercommon flows и дублированные headless test stubs. Срез намеренно breaking: старые manifests/artifacts с legacy полями должны fail-fast через schema/contract validation без migration shims.
+
+### Goals (must have)
+- [x] Удалить `repos[].analysis.role` из workspace schema/parser/examples/docs
+- [x] Удалить недостижимое repo-selection состояние из orchestrator
+- [x] Перенести known legacy collect alias rejection в schema-level constraints
+- [x] Сократить сложность run finalization, sharded execution и domain collect preparation
+- [x] Добавить runner metadata seam и убрать provider adapter imports из orchestrator
+- [x] Разнести `providercommon` engine по focused файлам без изменения lifecycle semantics
+- [x] Дедуплицировать Go headless runner test stubs и синхронизировать UI/docs/tests
+
+### Non-goals
+- [ ] Не добавлять backward compatibility/migration shims для удалённых legacy fields
+- [ ] Не расширять provider set, hosted mode, security/compliance или public API endpoints
+- [ ] Не делать live provider matrix required CI gate
+
+### Approach
+1) Обновить workspace schema/spec/examples/parser/tests под removal `analysis.role`.
+2) Убрать repo-selection fields/branches из `pipelineExecution`, сохранив all-repos behavior.
+3) Ужесточить shard-pack schema для known alias fields и удалить raw legacy scanner.
+4) Вынести helpers вокруг run finalization, domain collect preparation и sharded scheduler/apply flow.
+5) Добавить runtime metadata interface на runners и разнести providercommon engine internals по файлам.
+6) Перенести повторяющиеся headless runner stubs в `internal/testutil`, обновить UI helpers/docs.
+7) Прогнать contract, targeted и full DoD checks.
+
+### Files expected to change
+- `schemas/*`, `examples/*`, `fixtures/*`
+- `internal/workspace/*`, `internal/contracts/*`, `internal/artifactquality/*`
+- `internal/orchestrator/*`, `internal/runtime/*`, `internal/testutil/*`
+- `ui/src/*`
+- `README.md`, `docs/*`
+
+### Acceptance criteria
+- [x] `analysis.role` rejected as unsupported schema field
+- [x] Legacy collect aliases rejected by schema/contract validation
+- [x] Sharded execution preserves deterministic all-repo behavior
+- [x] Orchestrator no longer imports provider adapter packages for metadata
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`
+
+### Risks
+- Breaking schema change can invalidate user workspaces that still contain `analysis.role`; this is intentional for the cleanup.
+- Moving rejection from raw scanner to schema can change exact error text; tests should assert actionable contract failure, not brittle full messages.
+
+### Progress log
+- 2026-05-03: Started implementation from requested Breaking Complexity Cleanup Plan.
+- 2026-05-03: Removed `analysis.role`, repo-selection state, raw collect legacy scanner, provider metadata type-switching; split sharded scheduler/finalization/domain collect prep and providercommon internals; moved repeated script stubs into `internal/testutil`; UI fetch details moved to typed API helpers. Targeted Go checks are green; full DoD pending dependency bootstrap.
+- 2026-05-03: `make bootstrap`, `make contracts`, `make test`, `make lint` и `make build` passed. `make build` refreshed embedded UI assets in `internal/api/ui_dist`.
+- 2026-05-03: Follow-up audit closed remaining plan gaps: command process execution and artifact recovery moved out of `providercommon/engine.go`, UI hook state moved behind focused reducers/actions, and explicit regressions now cover all-workspace repo scopes plus deterministic sharded scheduler result ordering. Re-ran `make contracts`, `make test`, `make lint`, `make build`, and `git diff --check` successfully.
+- 2026-05-03: Final checklist audit found one stale active-doc reference to removed `repo-selection-summary`; synchronized `docs/ARCHITECTURE.md` with all-repo direct workspace scope behavior. Re-ran full requested verification: `make bootstrap`, `make contracts`, targeted Go tests, UI typecheck/tests, `make test`, `make lint`, and `make build`.
+- 2026-05-03: Final bug sweep fixed stale run artifact UI state when manually selecting another run; `handleSelectRun` now clears artifacts before loading the new run. Re-ran UI typecheck/tests, `make test`, `make lint`, and `make build`.
+- 2026-05-03: Additional scheduler audit found a fail-fast race where sequential sharded execution could dispatch one extra shard after the first failure. Reworked `scheduleRuntimeShardRuns` to worker-pull scheduling and added a regression that keeps the next sequential shard undispatched after fail-fast terminal error.
+
+### Plan ID
 EP-20260501-qwen-smoke-tiny-collect-manifest-hardening
 
 ### Context

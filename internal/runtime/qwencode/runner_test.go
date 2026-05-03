@@ -10,6 +10,7 @@ import (
 	"time"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/testutil"
 )
 
 func TestRunClassifiesProviderUnavailableWhenArtifactsAreMissingAfterSuccessfulProcess(t *testing.T) {
@@ -413,12 +414,7 @@ func newQwenDraftTask(t *testing.T, runID string) acpruntime.Task {
 
 func writeQwenScript(t *testing.T, script string) string {
 	t.Helper()
-
-	path := filepath.Join(t.TempDir(), "qwen-stub.sh")
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("write qwen stub: %v", err)
-	}
-	return path
+	return testutil.WriteExecutableScript(t, "qwen-stub.sh", script)
 }
 
 func qwenValidDraftScript(task acpruntime.Task, tail string) string {

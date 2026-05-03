@@ -1,12 +1,14 @@
 package orchestrator
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/claudecode"
 	"github.com/GrinRus/ProvenArch/internal/runtime/codexcode"
@@ -39,6 +41,149 @@ func TestRuntimeMetaForRunnerCoversReleaseProviders(t *testing.T) {
 				t.Fatalf("unexpected runtime meta: got=%+v want name=%q version=%q", meta, tc.wantName, tc.wantVersion)
 			}
 		})
+	}
+}
+
+type customMetadataRunner struct{}
+
+func (customMetadataRunner) Run(context.Context, acpruntime.Task) (acpruntime.Result, error) {
+	return acpruntime.Result{}, nil
+}
+
+func (customMetadataRunner) RuntimeMeta() contracts.RuntimeMeta {
+	return contracts.RuntimeMeta{Name: "custom-runtime", Version: "v1"}
+}
+
+func TestRuntimeMetaForRunnerUsesMetadataInterface(t *testing.T) {
+	t.Parallel()
+
+	meta := runtimeMetaForRunner(customMetadataRunner{})
+	if meta.Name != "custom-runtime" || meta.Version != "v1" {
+		t.Fatalf("unexpected runtime meta from interface: %+v", meta)
+	}
+}
+
+func TestPipelineExecutionRepoScopesUsesAllWorkspaceRepos(t *testing.T) {
+	t.Parallel()
+
+	execution := pipelineExecution{
+		workspace: workspace.Root{
+			Manifest: workspace.Manifest{
+				Repos: []workspace.RepoSource{
+					{Name: "zeta"},
+					{Name: "alpha"},
+					{Name: "alpha"},
+					{Name: " "},
+				},
+			},
+		},
+	}
+
+	got := execution.repoScopes()
+	want := []string{"alpha", "zeta"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected repo scopes: got=%v want=%v", got, want)
+	}
+}
+
+func TestScheduleRuntimeShardRunsReturnsPlanOrder(t *testing.T) {
+	t.Parallel()
+
+	plans := []runtimeShardPlan{
+		{ShardID: "shard-b"},
+		{ShardID: "shard-a"},
+		{ShardID: "shard-c"},
+	}
+	summaryState := &runtimeShardSummaryState{
+		singleShard: false,
+		entries: []runtimeShardSummaryEntry{
+			{ShardID: "shard-b", Status: "failed", Error: "b failed"},
+			{ShardID: "shard-a", Status: "failed", Error: "a failed"},
+			{ShardID: "shard-c", Status: "failed", Error: "c failed"},
+		},
+		index: map[string]int{
+			"shard-b": 0,
+			"shard-a": 1,
+			"shard-c": 2,
+		},
+	}
+	execution := pipelineExecution{}
+
+	results, terminalErr := execution.scheduleRuntimeShardRuns(
+		context.Background(),
+		"refresh.step1.collect",
+		"domain-test",
+		plans,
+		summaryState,
+		runtimeShardExecutionOptions{
+			Strategy:      "parallel",
+			MaxParallel:   2,
+			FailurePolicy: "best_effort",
+			BestEffort:    true,
+		},
+		"domain-test",
+	)
+	if terminalErr != nil {
+		t.Fatalf("unexpected terminal error: %v", terminalErr)
+	}
+	if len(results) != len(plans) {
+		t.Fatalf("unexpected result count: got=%d want=%d", len(results), len(plans))
+	}
+	for idx, result := range results {
+		if result.Plan.ShardID != plans[idx].ShardID {
+			t.Fatalf("result %d out of plan order: got=%q want=%q", idx, result.Plan.ShardID, plans[idx].ShardID)
+		}
+		if result.Err == nil {
+			t.Fatalf("result %d unexpectedly succeeded", idx)
+		}
+	}
+}
+
+func TestScheduleRuntimeShardRunsFailFastDoesNotStartNextSequentialShard(t *testing.T) {
+	t.Parallel()
+
+	plans := []runtimeShardPlan{
+		{ShardID: "shard-failed"},
+		{ShardID: "shard-pending"},
+	}
+	summaryState := &runtimeShardSummaryState{
+		singleShard: false,
+		entries: []runtimeShardSummaryEntry{
+			{ShardID: "shard-failed", Status: "failed", Error: "first shard failed"},
+			{ShardID: "shard-pending", Status: "pending"},
+		},
+		index: map[string]int{
+			"shard-failed":  0,
+			"shard-pending": 1,
+		},
+	}
+	execution := pipelineExecution{}
+
+	results, terminalErr := execution.scheduleRuntimeShardRuns(
+		context.Background(),
+		"refresh.step1.collect",
+		"domain-test",
+		plans,
+		summaryState,
+		runtimeShardExecutionOptions{
+			Strategy:      "sequential",
+			MaxParallel:   1,
+			FailurePolicy: "fail_fast",
+			BestEffort:    false,
+		},
+		"domain-test",
+	)
+	if terminalErr == nil {
+		t.Fatalf("expected terminal error from failed first shard")
+	}
+	if len(results) != len(plans) {
+		t.Fatalf("unexpected result count: got=%d want=%d", len(results), len(plans))
+	}
+	if results[0].Err == nil {
+		t.Fatalf("expected first shard to fail")
+	}
+	if results[1].Prepared.Task.TaskID != "" || results[1].Err != nil {
+		t.Fatalf("expected second shard to remain undispatched, got prepared=%+v err=%v", results[1].Prepared.Task, results[1].Err)
 	}
 }
 
@@ -267,11 +412,9 @@ func TestShardPlanItemsInvariantAcrossBaselineAndParallelDefault(t *testing.T) {
 	planFor := func(profile acpruntime.ExecutionValues) []runtimeShardPlan {
 		t.Helper()
 		execution := &pipelineExecution{
-			workspace:          ws,
-			executionProfile:   profile,
-			resolvedRepoPaths:  map[string]string{"nova": repoPath},
-			repoSelectionMode:  "all",
-			selectedRepoScopes: []string{"nova"},
+			workspace:         ws,
+			executionProfile:  profile,
+			resolvedRepoPaths: map[string]string{"nova": repoPath},
 		}
 		plans, warnings, _ := execution.planRuntimeShards([]string{"nova"})
 		if len(plans) == 0 {

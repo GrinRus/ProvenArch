@@ -93,15 +93,6 @@
             "type": "string",
             "minLength": 1
           }
-        },
-        "role": {
-          "type": "string",
-          "enum": [
-            "backend",
-            "frontend",
-            "mixed",
-            "unknown"
-          ]
         }
       },
       "additionalProperties": false

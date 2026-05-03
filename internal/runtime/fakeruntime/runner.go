@@ -17,6 +17,10 @@ const providerFake acpruntime.Provider = "fake"
 
 type Runner struct{}
 
+func (Runner) RuntimeMeta() contracts.RuntimeMeta {
+	return contracts.RuntimeMeta{Name: string(providerFake), Version: "fake"}
+}
+
 func (Runner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
 	semantic := fakeSemanticSnapshot(task)
 	summary := fakeSummary(task)

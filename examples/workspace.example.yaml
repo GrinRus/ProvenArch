@@ -7,13 +7,9 @@ repos:
   # configured through `workspace.yaml`.
   - name: payments-service
     path: /absolute/path/to/payments-service
-    analysis:
-      role: backend
   - name: users-service
     git_url: https://gitlab.example.com/platform/users-service.git
     ref: main
-    analysis:
-      role: backend
 docs:
   imports_path: ./docs/imports
 runtime:

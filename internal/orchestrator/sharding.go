@@ -19,10 +19,6 @@ import (
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
-	"github.com/GrinRus/ProvenArch/internal/runtime/claudecode"
-	"github.com/GrinRus/ProvenArch/internal/runtime/codexcode"
-	"github.com/GrinRus/ProvenArch/internal/runtime/fakeruntime"
-	"github.com/GrinRus/ProvenArch/internal/runtime/qwencode"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
@@ -41,6 +37,13 @@ type runtimeShardRunResult struct {
 	Err            error
 	AlreadyApplied bool
 	FromCheckpoint bool
+}
+
+type runtimeShardExecutionOptions struct {
+	Strategy      string
+	MaxParallel   int
+	FailurePolicy string
+	BestEffort    bool
 }
 
 type runtimeShardSummary struct {
@@ -122,18 +125,13 @@ const (
 )
 
 func runtimeMetaForRunner(runner acpruntime.Runner) contracts.RuntimeMeta {
-	switch runner.(type) {
-	case fakeruntime.Runner, *fakeruntime.Runner:
-		return contracts.RuntimeMeta{Name: "fake", Version: "fake"}
-	case claudecode.HeadlessRunner, *claudecode.HeadlessRunner:
-		return contracts.RuntimeMeta{Name: string(acpruntime.ProviderClaudeCode), Version: "headless"}
-	case qwencode.HeadlessRunner, *qwencode.HeadlessRunner:
-		return contracts.RuntimeMeta{Name: string(acpruntime.ProviderQwenCode), Version: "headless"}
-	case codexcode.HeadlessRunner, *codexcode.HeadlessRunner:
-		return contracts.RuntimeMeta{Name: string(acpruntime.ProviderCodexCode), Version: "headless"}
-	default:
-		return contracts.RuntimeMeta{Name: "unknown"}
+	if metadataRunner, ok := runner.(acpruntime.MetadataRunner); ok {
+		meta := metadataRunner.RuntimeMeta()
+		if strings.TrimSpace(meta.Name) != "" {
+			return meta
+		}
 	}
+	return contracts.RuntimeMeta{Name: "unknown"}
 }
 
 func (e *pipelineExecution) runtimeMetaForStep(stepID string) contracts.RuntimeMeta {
@@ -219,24 +217,8 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 		}}
 	}
 
-	strategy := strings.TrimSpace(e.executionProfile.Strategy)
-	if strategy == "" {
-		strategy = "sequential"
-	}
-	maxParallel := e.executionProfile.MaxParallel
-	if maxParallel <= 0 {
-		maxParallel = 1
-	}
-	if strategy != "parallel" {
-		maxParallel = 1
-	}
-	failurePolicy := strings.TrimSpace(e.executionProfile.FailurePolicy)
-	if failurePolicy == "" {
-		failurePolicy = "best_effort"
-	}
-	bestEffort := failurePolicy == "best_effort"
-
-	if err := e.persistShardPlan(stepID, domainID, plans, plannerWarnings, semanticGraph, strategy, maxParallel, failurePolicy); err != nil {
+	options := normalizeRuntimeShardExecutionOptions(e.executionProfile)
+	if err := e.persistShardPlan(stepID, domainID, plans, plannerWarnings, semanticGraph, options.Strategy, options.MaxParallel, options.FailurePolicy); err != nil {
 		return nil, runtimeShardOutcome{}, err
 	}
 
@@ -248,158 +230,24 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 
 	e.logInfo(stepID, domainID, "runtime shard execution prepared", map[string]any{
 		"shards":         len(plans),
-		"strategy":       strategy,
-		"max_parallel":   maxParallel,
-		"failure_policy": failurePolicy,
+		"strategy":       options.Strategy,
+		"max_parallel":   options.MaxParallel,
+		"failure_policy": options.FailurePolicy,
 		"shard_mode":     e.executionProfile.ShardMode,
 	})
 
-	results := make([]runtimeShardRunResult, len(plans))
-	for idx, plan := range plans {
-		results[idx].Plan = plan
-	}
-	var terminalErr error
-	if maxParallel <= 1 || len(plans) <= 1 {
-		for idx, plan := range plans {
-			entry := summaryState.entry(plan.ShardID)
-			if handled, result := e.loadReplayableShardResult(stepID, domainID, plan, entry, summaryState.singleShard); handled {
-				if result.Err != nil {
-					taskID := strings.TrimSpace(entry.TaskID)
-					if markErr := summaryState.markFailed(plan, taskID, strings.TrimSpace(result.Err.Error())); markErr != nil {
-						return nil, runtimeShardOutcome{}, markErr
-					}
-					if !bestEffort {
-						results[idx] = result
-						terminalErr = result.Err
-						break
-					}
-				}
-				results[idx] = result
-				continue
-			}
-			if entry.Status == "failed" {
-				result := runtimeShardRunResult{
-					Plan: plan,
-					Err:  fmt.Errorf("%s", shardFailureMessage(entry)),
-				}
-				results[idx] = result
-				if !bestEffort {
-					terminalErr = result.Err
-					break
-				}
-				continue
-			}
-			taskSuffix := buildShardTaskSuffix(taskSuffixPrefix, plan.ShardID)
-			prepared, err := e.runRuntimeTaskNormalized(ctx, stepID, taskSuffix, plan.RepoScopes, plan.PathScopes, domainID, plan.ShardID)
-			if err == nil {
-				taskrunPath := shardTaskrunPath(e.runID, stepID, domainID, plan.ShardID, summaryState.singleShard)
-				taskrunLabel := shardTaskrunLabel(stepID, domainID, plan.ShardID, summaryState.singleShard)
-				if checkpointErr := summaryState.markCheckpointed(plan, prepared.Task.TaskID, taskrunPath, taskrunLabel, prepared.ExecutionRaw); checkpointErr != nil {
-					err = checkpointErr
-				}
-			}
-			if err != nil {
-				message := strings.TrimSpace(err.Error())
-				if markErr := summaryState.markFailed(plan, prepared.Task.TaskID, message); markErr != nil {
-					return nil, runtimeShardOutcome{}, markErr
-				}
-			}
-			results[idx] = runtimeShardRunResult{Plan: plan, Prepared: prepared, Err: err}
-			if err != nil && !bestEffort {
-				terminalErr = err
-				break
-			}
-		}
-	} else {
-		runCtx := ctx
-		cancel := func() {}
-		if !bestEffort {
-			runCtx, cancel = context.WithCancel(ctx)
-		}
-		defer cancel()
-
-		sem := make(chan struct{}, maxParallel)
-		var wg sync.WaitGroup
-		var mu sync.Mutex
-		var firstErr error
-
-		for idx, plan := range plans {
-			wg.Add(1)
-			go func(index int, shard runtimeShardPlan) {
-				defer wg.Done()
-				entry := summaryState.entry(shard.ShardID)
-				if handled, result := e.loadReplayableShardResult(stepID, domainID, shard, entry, summaryState.singleShard); handled {
-					if result.Err != nil {
-						taskID := strings.TrimSpace(entry.TaskID)
-						if markErr := summaryState.markFailed(shard, taskID, strings.TrimSpace(result.Err.Error())); markErr != nil {
-							result.Err = markErr
-						}
-						if !bestEffort {
-							mu.Lock()
-							if firstErr == nil {
-								firstErr = result.Err
-								cancel()
-							}
-							mu.Unlock()
-						}
-					}
-					mu.Lock()
-					results[index] = result
-					mu.Unlock()
-					return
-				}
-				if entry.Status == "failed" {
-					result := runtimeShardRunResult{
-						Plan: shard,
-						Err:  fmt.Errorf("%s", shardFailureMessage(entry)),
-					}
-					mu.Lock()
-					results[index] = result
-					if !bestEffort && firstErr == nil {
-						firstErr = result.Err
-						cancel()
-					}
-					mu.Unlock()
-					return
-				}
-				sem <- struct{}{}
-				defer func() { <-sem }()
-
-				taskSuffix := buildShardTaskSuffix(taskSuffixPrefix, shard.ShardID)
-				prepared, err := e.runRuntimeTaskNormalized(runCtx, stepID, taskSuffix, shard.RepoScopes, shard.PathScopes, domainID, shard.ShardID)
-				if err == nil {
-					taskrunPath := shardTaskrunPath(e.runID, stepID, domainID, shard.ShardID, summaryState.singleShard)
-					taskrunLabel := shardTaskrunLabel(stepID, domainID, shard.ShardID, summaryState.singleShard)
-					if checkpointErr := summaryState.markCheckpointed(shard, prepared.Task.TaskID, taskrunPath, taskrunLabel, prepared.ExecutionRaw); checkpointErr != nil {
-						err = checkpointErr
-					}
-				}
-				if err != nil {
-					message := strings.TrimSpace(err.Error())
-					if markErr := summaryState.markFailed(shard, prepared.Task.TaskID, message); markErr != nil {
-						err = markErr
-					}
-				}
-				mu.Lock()
-				results[index] = runtimeShardRunResult{Plan: shard, Prepared: prepared, Err: err}
-				if err != nil && !bestEffort && firstErr == nil {
-					firstErr = err
-					cancel()
-				}
-				mu.Unlock()
-			}(idx, plan)
-		}
-		wg.Wait()
-		if firstErr != nil {
-			terminalErr = firstErr
-		}
+	results, terminalErr := e.scheduleRuntimeShardRuns(ctx, stepID, domainID, plans, summaryState, options, taskSuffixPrefix)
+	if terminalErr != nil && !options.BestEffort {
+		e.logWarn(stepID, domainID, "runtime shard scheduler stopped after terminal failure", map[string]any{
+			"error": strings.TrimSpace(terminalErr.Error()),
+		})
 	}
 
 	executions := make([]runtimeTaskExecution, 0, len(plans))
 	outcome := runtimeShardOutcome{PlannedShards: len(plans)}
 
 	for _, result := range results {
-		if result.Err == nil && result.Prepared.Task.TaskID == "" && terminalErr != nil && !bestEffort {
+		if result.Err == nil && result.Prepared.Task.TaskID == "" && terminalErr != nil && !options.BestEffort {
 			if err := summaryState.markAborted(result.Plan); err != nil {
 				return nil, runtimeShardOutcome{}, err
 			}
@@ -408,7 +256,7 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 		}
 		if result.Err != nil {
 			outcome.FailedShards++
-			if bestEffort {
+			if options.BestEffort {
 				e.registerPartialShardFailure(stepID, domainID, result.Plan, result.Err)
 				continue
 			}
@@ -429,7 +277,7 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 			if markErr := summaryState.markFailed(result.Plan, result.Prepared.Task.TaskID, strings.TrimSpace(err.Error())); markErr != nil {
 				return nil, runtimeShardOutcome{}, markErr
 			}
-			if bestEffort {
+			if options.BestEffort {
 				e.registerPartialShardFailure(stepID, domainID, result.Plan, err)
 				continue
 			}
@@ -480,6 +328,154 @@ func (e *pipelineExecution) registerPartialShardFailure(stepID string, domainID 
 		"path_scopes": plan.PathScopes,
 		"error":       message,
 	})
+}
+
+func normalizeRuntimeShardExecutionOptions(profile acpruntime.ExecutionValues) runtimeShardExecutionOptions {
+	strategy := strings.TrimSpace(profile.Strategy)
+	if strategy == "" {
+		strategy = "sequential"
+	}
+	maxParallel := profile.MaxParallel
+	if maxParallel <= 0 {
+		maxParallel = 1
+	}
+	if strategy != "parallel" {
+		maxParallel = 1
+	}
+	failurePolicy := strings.TrimSpace(profile.FailurePolicy)
+	if failurePolicy == "" {
+		failurePolicy = "best_effort"
+	}
+	return runtimeShardExecutionOptions{
+		Strategy:      strategy,
+		MaxParallel:   maxParallel,
+		FailurePolicy: failurePolicy,
+		BestEffort:    failurePolicy == "best_effort",
+	}
+}
+
+func (e *pipelineExecution) scheduleRuntimeShardRuns(
+	ctx context.Context,
+	stepID string,
+	domainID string,
+	plans []runtimeShardPlan,
+	summaryState *runtimeShardSummaryState,
+	options runtimeShardExecutionOptions,
+	taskSuffixPrefix string,
+) ([]runtimeShardRunResult, error) {
+	results := make([]runtimeShardRunResult, len(plans))
+	for idx, plan := range plans {
+		results[idx].Plan = plan
+	}
+	if len(plans) == 0 {
+		return results, nil
+	}
+
+	workerCount := options.MaxParallel
+	if workerCount <= 0 {
+		workerCount = 1
+	}
+	if workerCount > len(plans) {
+		workerCount = len(plans)
+	}
+
+	runCtx := ctx
+	cancel := func() {}
+	if !options.BestEffort {
+		runCtx, cancel = context.WithCancel(ctx)
+	}
+	defer cancel()
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+	nextIndex := 0
+
+	recordResult := func(index int, result runtimeShardRunResult) {
+		mu.Lock()
+		defer mu.Unlock()
+		results[index] = result
+		if result.Err != nil && !options.BestEffort && firstErr == nil {
+			firstErr = result.Err
+			cancel()
+		}
+	}
+	nextJob := func() (int, runtimeShardPlan, bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		if firstErr != nil && !options.BestEffort {
+			return 0, runtimeShardPlan{}, false
+		}
+		if nextIndex >= len(plans) {
+			return 0, runtimeShardPlan{}, false
+		}
+		index := nextIndex
+		nextIndex++
+		return index, plans[index], true
+	}
+
+	for worker := 0; worker < workerCount; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				index, plan, ok := nextJob()
+				if !ok {
+					return
+				}
+				result := e.runRuntimeShard(runCtx, stepID, domainID, plan, summaryState, taskSuffixPrefix)
+				recordResult(index, result)
+			}
+		}()
+	}
+	wg.Wait()
+
+	mu.Lock()
+	defer mu.Unlock()
+	return results, firstErr
+}
+
+func (e *pipelineExecution) runRuntimeShard(
+	ctx context.Context,
+	stepID string,
+	domainID string,
+	plan runtimeShardPlan,
+	summaryState *runtimeShardSummaryState,
+	taskSuffixPrefix string,
+) runtimeShardRunResult {
+	entry := summaryState.entry(plan.ShardID)
+	if handled, result := e.loadReplayableShardResult(stepID, domainID, plan, entry, summaryState.singleShard); handled {
+		if result.Err != nil {
+			taskID := strings.TrimSpace(entry.TaskID)
+			if markErr := summaryState.markFailed(plan, taskID, strings.TrimSpace(result.Err.Error())); markErr != nil {
+				result.Err = markErr
+			}
+		}
+		return result
+	}
+	if entry.Status == "failed" {
+		return runtimeShardRunResult{
+			Plan: plan,
+			Err:  fmt.Errorf("%s", shardFailureMessage(entry)),
+		}
+	}
+
+	taskSuffix := buildShardTaskSuffix(taskSuffixPrefix, plan.ShardID)
+	prepared, err := e.runRuntimeTaskNormalized(ctx, stepID, taskSuffix, plan.RepoScopes, plan.PathScopes, domainID, plan.ShardID)
+	if err == nil {
+		taskrunPath := shardTaskrunPath(e.runID, stepID, domainID, plan.ShardID, summaryState.singleShard)
+		taskrunLabel := shardTaskrunLabel(stepID, domainID, plan.ShardID, summaryState.singleShard)
+		if checkpointErr := summaryState.markCheckpointed(plan, prepared.Task.TaskID, taskrunPath, taskrunLabel, prepared.ExecutionRaw); checkpointErr != nil {
+			err = checkpointErr
+		}
+	}
+	if err != nil {
+		message := strings.TrimSpace(err.Error())
+		if markErr := summaryState.markFailed(plan, prepared.Task.TaskID, message); markErr != nil {
+			err = markErr
+		}
+	}
+	return runtimeShardRunResult{Plan: plan, Prepared: prepared, Err: err}
 }
 
 func (e *pipelineExecution) loadRuntimeShardSummaryState(
