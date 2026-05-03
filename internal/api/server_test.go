@@ -2296,7 +2296,6 @@ repos:
 func writeHeadlessRunnerStub(t *testing.T, runtimeName string) string {
 	t.Helper()
 
-	path := filepath.Join(t.TempDir(), "headless-runner-stub.sh")
 	script := `#!/usr/bin/env bash
 set -eu
 TASK_PAYLOAD="$(cat)"
@@ -2530,10 +2529,7 @@ if step_id in {"init.step1.collect", "refresh.step1.collect"} and write_root:
         json.dump(manifest, handle)
 PY
 `
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("write runner stub: %v", err)
-	}
-	return path
+	return testutil.WriteExecutableScript(t, "headless-runner-stub.sh", script)
 }
 
 func writeManifestRoot(t *testing.T, manifest string) string {

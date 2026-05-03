@@ -1,18 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useReducer } from "react";
 
-import { fetchJSON, getErrorMessage } from "../lib/api";
+import { getPipelineRunStatus, listPipelineRuns, requestRunCancel, startPipelineRun } from "../lib/runApi";
+import { initialRunExplorerState, runExplorerReducer } from "../lib/runExplorerState";
 import {
   activeStatuses,
   finalStatuses,
   pickBootstrapRun,
   reconcileSelectedRunID,
 } from "../lib/runState";
-import type {
-  RunListItem,
-  RunListResponse,
-  RunStartResponse,
-  RunStatusResponse,
-} from "../lib/appContracts";
+import type { RunListItem, RunStatusResponse } from "../lib/appContracts";
 import { useRunArtifacts } from "./useRunArtifacts";
 import { useRunLogs } from "./useRunLogs";
 
@@ -22,11 +18,8 @@ type UseRunExplorerOptions = {
 };
 
 export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
-  const [runId, setRunID] = useState<string | null>(null);
-  const [runStatus, setRunStatus] = useState<RunStatusResponse | null>(null);
-  const [runList, setRunList] = useState<RunListItem[]>([]);
-  const [runActionStatus, setRunActionStatus] = useState("");
-  const [cancelBusy, setCancelBusy] = useState(false);
+  const [state, dispatch] = useReducer(runExplorerReducer, initialRunExplorerState);
+  const { runId, runStatus, runList, runActionStatus, cancelBusy } = state;
   const artifactsState = useRunArtifacts();
   const logsState = useRunLogs({ runId });
 
@@ -61,6 +54,15 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     handleCopyRunLogs,
     handleDownloadRunLogs,
   } = logsState;
+
+  const setRunID = (nextRunID: string | null) => dispatch({ type: "setRunID", runId: nextRunID });
+  const setRunStatus = (nextRunStatus: RunStatusResponse | null) =>
+    dispatch({ type: "setRunStatus", runStatus: nextRunStatus });
+  const setRunList = (nextRunList: RunListItem[]) => dispatch({ type: "setRunList", runList: nextRunList });
+  const setRunActionStatus = (nextRunActionStatus: string) =>
+    dispatch({ type: "setRunActionStatus", runActionStatus: nextRunActionStatus });
+  const setCancelBusy = (nextCancelBusy: boolean) =>
+    dispatch({ type: "setCancelBusy", cancelBusy: nextCancelBusy });
 
   const hasActiveRuns = useMemo(() => runList.some((run) => activeStatuses.has(run.status)), [runList]);
   const runCounters = useMemo(
@@ -131,7 +133,7 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
   }
 
   async function loadRunList(limit = 100): Promise<RunListItem[]> {
-    const payload = await fetchJSON<RunListResponse>(`/api/pipeline/runs?limit=${limit}`);
+    const payload = await listPipelineRuns(limit);
     const items = payload.items ?? [];
     setRunList(items);
     return items;
@@ -146,12 +148,7 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
       const nextSelectedRunID = reconcileSelectedRunID(runId, latestRuns);
       if (nextSelectedRunID !== runId) {
         if (nextSelectedRunID && latestRuns.length > 0) {
-          setRunStatus((previous) => {
-            if (previous && previous.run_id === runId) {
-              return null;
-            }
-            return previous;
-          });
+          dispatch({ type: "clearRunStatusForRun", runId });
           resetRunLogs();
           clearArtifacts();
           await handleSelectRun(nextSelectedRunID, { silentErrors: true });
@@ -171,12 +168,7 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
           }
           return;
         }
-        setRunStatus((previous) => {
-          if (previous && previous.run_id === runId) {
-            return null;
-          }
-          return previous;
-        });
+        dispatch({ type: "clearRunStatusForRun", runId });
         resetRunLogs();
         clearArtifacts();
         if (nextSelectedRunID) {
@@ -212,13 +204,10 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     clearArtifacts();
     resetRunLogs();
     try {
-      const payload = await fetchJSON<RunStartResponse>(`/api/pipeline/${pipeline}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ trigger: "ui", commit: false, create_proposal_branch: false }),
-      });
-      setRunList((previous) => [
-        {
+      const payload = await startPipelineRun(pipeline);
+      dispatch({
+        type: "upsertRunListItem",
+        item: {
           run_id: payload.run_id,
           pipeline,
           status: "queued",
@@ -228,8 +217,7 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
           error_code: null,
           error: null,
         },
-        ...previous.filter((run) => run.run_id !== payload.run_id),
-      ]);
+      });
       setRunID(payload.run_id);
       const status = await fetchRunStatus(payload.run_id);
       await fetchRunLogs(payload.run_id, true);
@@ -245,15 +233,10 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
   }
 
   async function fetchRunStatus(id: string, allowMissing = false): Promise<RunStatusResponse | null> {
-    const response = await fetch(`/api/pipeline/runs/${id}`);
-    const payload = await response.json();
-    if (response.status === 404 && allowMissing) {
+    const typed = await getPipelineRunStatus(id, allowMissing);
+    if (!typed) {
       return null;
     }
-    if (!response.ok) {
-      throw new Error(getErrorMessage(payload, `request failed: /api/pipeline/runs/${id}`));
-    }
-    const typed = payload as RunStatusResponse;
     setRunStatus(typed);
     if (finalStatuses.has(typed.status)) {
       await fetchArtifacts(id);
@@ -272,6 +255,7 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
       setRunActionStatus("");
       setRunID(id);
       resetRunLogs();
+      clearArtifacts();
       const status = await fetchRunStatus(id);
       await fetchArtifacts(id);
       await fetchRunLogs(id, true);
@@ -294,10 +278,7 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     setError(null);
     setRunActionStatus("");
     try {
-      const response = await fetch(`/api/pipeline/runs/${runId}/cancel`, {
-        method: "POST",
-      });
-      const payload = await response.json();
+      const response = await requestRunCancel(runId);
 
       if (response.status === 202) {
         setRunActionStatus(`Cancel requested for ${runId}`);
@@ -315,12 +296,7 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
         const latestRuns = await loadRunList(100);
         const nextSelectedRunID = reconcileSelectedRunID(runId, latestRuns);
         if (nextSelectedRunID !== runId) {
-          setRunStatus((previous) => {
-            if (previous && previous.run_id === runId) {
-              return null;
-            }
-            return previous;
-          });
+          dispatch({ type: "clearRunStatusForRun", runId });
           resetRunLogs();
           clearArtifacts();
           if (nextSelectedRunID) {
@@ -346,7 +322,7 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
         return;
       }
 
-      throw new Error(getErrorMessage(payload, "failed to cancel selected run"));
+      throw new Error("failed to cancel selected run");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "failed to cancel selected run");
     } finally {

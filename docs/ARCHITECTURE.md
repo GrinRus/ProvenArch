@@ -133,7 +133,7 @@
      - heartbeat-log `runtime task heartbeat` публикуется раз в `heartbeat_sec`
      - timeout/cancel причины добавляются в error message без изменения `error_code` контракта
    - Materialize-ит per-run quality summary `reports/taskruns/<run_id>-quality.json` (signal metrics/runtime versions + `evidence_state.collect/findings/report_mode/reasons`)
-   - Materialize-ит per-run repo selection summary `reports/taskruns/<run_id>-repo-selection-summary.json` (mode + selected scopes + include/exclude reasons)
+   - Runtime repo scopes для all-repo шагов вычисляются напрямую из `workspace.yaml`; legacy repo-selection mode/summary artifact не входят в active contract
    - trusted batch/matrix harness не оставляет terminal-less child runs: если per-run `run-status.env` отсутствует или остаётся `running` после завершения child batch, outer reconciliation переводит его в terminal `failed` с `failure_reason=infra_incomplete_cycle`
    - child batch публикует `batch-owner.env` heartbeat в `BATCH_ROOT`; stale `profile-status/*.json = running` без живого owner pid или со stale owner heartbeat reconciles-ится в terminal `failed/infra_incomplete_cycle`
    - terminal `validator verdict is FAIL` классифицируется как `runtime_flow_failed`; `runtime_contract_failed` остаётся только для active runtime artifact/manifest/required-output failures
@@ -165,7 +165,7 @@
    - transcript outputs с provider transport/API failures (например `[API Error: ... SSL ...]`) не считаются generic `runtime_contract_failed`: runtime сохраняет raw stdout/stderr и классифицирует их как `runner_unavailable`
    - collect step не считается успешным, если после разрешённых focused collect recovery попыток `shard-pack-manifest.json` остаётся missing/invalid; такой случай поднимается как runtime contract failure (`runtime_contract_failed`) и hard pass невозможен. Fully silent no-artifact qwen path остаётся `runner_unavailable`
    - collect contract требует полного `semantic` block в `shard-pack-manifest.json` (`coverage/questions/entities/edges/findings`) и repo-specific citation surface; generic-only `cite.runtime-summary` допустим только вне multi-document refresh evidence collapse
-   - canonical collect vocabulary жёсткая: `coverage.observed`, `questions[*].text`, `edges[*].type`, object-shaped `provenance`, numeric `confidence`; legacy aliases (`covered_topics`, `question`, `relation`, array provenance, string confidence, `evidence_citation_ids`, top-level `step_contract`, `compatibility`) reject-ятся до strict parse
+   - canonical collect vocabulary жёсткая: `coverage.observed`, `questions[*].text`, `edges[*].type/from/to`, object-shaped `provenance`, numeric `confidence`; legacy aliases (`covered_topics`, `question`, `relation`, `source`, `target`, finding `summary`/`inference`, string confidence, `evidence_citation_ids`, top-level `step_contract`, `compatibility`) reject-ятся schema/contract validation-ом без отдельного compatibility scanner
    - `step1.collect` не использует `reports/taskruns/**`, raw logs, старые manifests или archive docs как schema/reference surface; headless provider получает selected repo roots, `write_root` и explicit `read_context_roots`, collect cwd фиксируется на `write_root`, root-file shard prompt ограничивает анализ перечисленными root files, а repair path дополнительно исключает workspace-level taskrun history
    - если collect evidence стал `unusable`, live runtime для `init|refresh.step2.asis_docs`, `init|refresh.step3.findings` и `init|refresh.step4.proposals` не вызывается: orchestrator детерминированно пересобирает incomplete staged docflow из persisted shard packs, помечает triage reasons (`asis_docs_skipped_due_to_unusable_collect`, `findings_skipped_due_to_unusable_collect`, `proposals_skipped_due_to_unusable_collect`) и не позволяет downstream draft errors перезаписать collect root cause
    - `init.step0.constitution`, `init|refresh.step2.asis_docs` и `init|refresh.step4.proposals` проходят provider-agnostic required-artifact gate: runtime принимает шаг только если draft manifest валиден и все referenced draft files существуют под `draft_final_root`
@@ -195,7 +195,7 @@
    - валидирует manifest по `schemas/workspace.schema.json`
    - поддерживает `docs/imports/index.yaml` как metadata index для imported docs
    - поддерживает repo entries с `path` или `git_url` + optional `ref`
-   - поддерживает optional `repos[].analysis.role` (`backend|frontend|mixed|unknown`) для runtime repo-selection policy
+   - поддерживает optional `repos[].analysis.include/exclude` для shard planner; legacy `repos[].analysis.role` удалён из active workspace contract
    - поддерживает optional persisted runtime profile в `runtime.profile` (`timeouts + execution`, см. `WORKSPACE_SPEC`)
    - verify `ref` для `path` source использует fallback (`ref` -> `origin/ref` -> `refs/remotes/origin/ref`) и выдаёт warning при `HEAD` mismatch
    - clone/fetch для `git_url` выполняет на той же машине через локальный `git` и текущий user/runner auth context

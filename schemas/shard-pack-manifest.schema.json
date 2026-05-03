@@ -335,7 +335,10 @@
         },
         "provenance": {
           "$ref": "#/$defs/provenance"
-        }
+        },
+        "relation": false,
+        "source": false,
+        "target": false
       },
       "additionalProperties": true
     },
@@ -374,7 +377,11 @@
         },
         "provenance": {
           "$ref": "#/$defs/provenance"
-        }
+        },
+        "summary": false,
+        "inference": false,
+        "evidence_citation_ids": false,
+        "confidence": false
       },
       "additionalProperties": true
     },
@@ -401,7 +408,9 @@
           "items": {
             "type": "string"
           }
-        }
+        },
+        "question": false,
+        "confidence": false
       },
       "additionalProperties": true
     },

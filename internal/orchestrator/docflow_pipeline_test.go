@@ -357,7 +357,7 @@ func (r *collectFailureRunner) Run(ctx context.Context, task acpruntime.Task) (a
 			acpruntime.ProviderClaudeCode,
 			acpruntime.ErrorCodeRuntimeContract,
 			"collect manifest contract invalid",
-			errors.New("legacy collect manifest fields are forbidden"),
+			errors.New("shard pack manifest is invalid"),
 		)
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
 		r.mu.Lock()

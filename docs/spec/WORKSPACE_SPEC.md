@@ -36,7 +36,6 @@ Layout `charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/` не �
 - `analysis` optional:
   - `include[]` glob-паттерны shard include
   - `exclude[]` glob-паттерны shard exclude
-  - `role` optional enum: `backend|frontend|mixed|unknown`
 
 Правила:
 - `name` используется как stable repo scope identifier в persisted runtime execution metadata, warnings и evidence references
@@ -45,7 +44,7 @@ Layout `charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/` не �
 - `path` означает локально доступный checkout
 - `git_url` означает remote source, который ACP разрешает через локальный `git` context пользователя/runner
 - `ref` задаёт желаемую ветку/тег/sha, если repo source поддерживает checkout/fetch semantics
-- `analysis.role` сохранён как legacy metadata (`backend|frontend|mixed|unknown`) и не влияет на runtime execution/sharding contract
+- `analysis.role` удалён из active contract; manifest с этим полем считается invalid breaking legacy input
 - для `path`-source ACP не делает checkout (non-mutating policy в пользовательском репозитории)
 - verify `ref` для `path`-source использует fallback-резолвинг: `<ref>` -> `origin/<ref>` -> `refs/remotes/origin/<ref>`
 - при fallback/расхождении с `HEAD` validator возвращает warnings (не блокирующие), а не изменяет checkout
@@ -127,6 +126,7 @@ Effective precedence:
 Допустимые значения provider:
 - `claude-code`
 - `qwen-code`
+- `codex-code`
 
 Назначение:
 - step-scoped override для headless provider resolution;
@@ -153,7 +153,7 @@ repos:
       include:
         - services/**
       exclude:
-        - services/legacy/**
+        - services/archive/**
   - name: users-service
     git_url: https://gitlab.example.com/platform/users-service.git
     ref: main
@@ -195,7 +195,7 @@ Manifest считается невалидным, если:
 - запись repo содержит одновременно `path` и `git_url`
 - запись repo не содержит ни `path`, ни `git_url`
 - `analysis.include[]`/`analysis.exclude[]` содержит пустые элементы
-- `analysis.role` не в `backend|frontend|mixed|unknown`
+- manifest содержит удалённое legacy поле `analysis.role`
 - любое значение `runtime.profile.timeouts.* <= 0`
 - `runtime.profile.execution.max_parallel_tasks <= 0`
 - `runtime.profile.execution.strategy` не в `sequential|parallel`

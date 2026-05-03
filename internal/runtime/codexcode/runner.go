@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/promptcontract"
 	"github.com/GrinRus/ProvenArch/internal/runtime/providercommon"
@@ -18,6 +19,10 @@ var ErrRunnerUnavailable = errors.New("codex-code runner is unavailable")
 type HeadlessRunner struct {
 	Command string
 	Args    []string
+}
+
+func (r HeadlessRunner) RuntimeMeta() contracts.RuntimeMeta {
+	return contracts.RuntimeMeta{Name: string(acpruntime.ProviderCodexCode), Version: "headless"}
 }
 
 func (r HeadlessRunner) commandName() string {

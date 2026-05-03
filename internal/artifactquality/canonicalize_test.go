@@ -12,7 +12,7 @@ import (
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
 
-func TestValidateCollectManifestRejectsLegacyCompatibilityPayload(t *testing.T) {
+func TestValidateCollectManifestRejectsContractInvalidCompatibilityPayload(t *testing.T) {
 	t.Parallel()
 
 	writeRoot := t.TempDir()
@@ -21,9 +21,9 @@ func TestValidateCollectManifestRejectsLegacyCompatibilityPayload(t *testing.T) 
 
 	task := testCollectTask(writeRoot, "bank-of-anthos-extras", "bank-of-anthos")
 	if err := ValidateCollectManifest(task); err == nil {
-		t.Fatalf("expected validation to fail for legacy compatibility payload")
-	} else if !strings.Contains(err.Error(), "legacy collect manifest fields are forbidden") {
-		t.Fatalf("expected explicit legacy rejection error, got %v", err)
+		t.Fatalf("expected validation to fail for contract-invalid compatibility payload")
+	} else if !strings.Contains(err.Error(), "shard pack manifest is invalid") {
+		t.Fatalf("expected schema/contract rejection error, got %v", err)
 	}
 
 	raw, err := os.ReadFile(filepath.Join(writeRoot, shardPackManifestFile))
@@ -35,115 +35,125 @@ func TestValidateCollectManifestRejectsLegacyCompatibilityPayload(t *testing.T) 
 	}
 }
 
-func TestValidateCollectManifestRejectsLegacySemanticAliasesBeforeDecode(t *testing.T) {
+func TestValidateCollectManifestRejectsForbiddenSemanticAliasesBySchema(t *testing.T) {
 	t.Parallel()
 
-	writeRoot := t.TempDir()
-	writeDoc(t, writeRoot, "overview.md", "# Overview\n")
-
-	raw := []byte(`{
-  "version": 1,
-  "run_id": "run-1",
-  "step_id": "refresh.step1.collect",
-  "step_contract": "collect",
-  "shard_id": "payments",
-  "domain_id": "payments",
-  "agent_role": "shard-analyst",
-  "artifact_root": "reports/taskruns/run-1/staging/shards/payments",
-  "repo_scopes": ["payments-service"],
-  "path_scopes": ["src"],
-  "documents": [
-    {
-      "id": "doc.payments.overview",
-      "kind": "report",
-      "title": "Payments Overview",
-      "path": "overview.md",
-      "canonical_path": "reports/as-is/payments/overview.md",
-      "topics": ["payments"],
-      "citation_ids": ["cite.payments.readme"]
-    }
-  ],
-  "citations": [
-    {
-      "id": "cite.payments.readme",
-      "repo": "payments-service",
-      "path": "README.md",
-      "claim_ids": ["claim.payments.readme"],
-      "document_ids": ["doc.payments.overview"]
-    }
-  ],
-  "semantic": {
-    "coverage": {
-      "covered_topics": ["services"],
-      "missing": ["owner mappings"],
-      "notes": ["legacy payload"]
-    },
-    "questions": [
-      {
-        "id": "q.payments.owner",
-        "question": "Who owns payments?"
-      }
-    ],
-    "entities": [
-      {
-        "id": "svc.payments",
-        "name": "payments",
-        "type": "service",
-        "provenance": [
-          {
-            "citation_id": "cite.payments.readme"
-          }
-        ]
-      }
-    ],
-    "edges": [
-      {
-        "id": "edge.payments.depends-on",
-        "relation": "depends_on",
-        "from": "svc.payments",
-        "to": "svc.ledger",
-        "provenance": {
-          "kind": "observation",
-          "confidence": "0.7"
-        }
-      }
-    ],
-    "findings": [
-      {
-        "id": "finding.payments.owner",
-        "severity": "medium",
-        "title": "Missing owner",
-        "description": "Owner mapping is absent.",
-        "summary": "legacy summary",
-        "evidence_citation_ids": ["cite.payments.readme"]
-      }
-    ]
-  }
-}`)
-	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), raw, 0o644); err != nil {
-		t.Fatalf("write manifest: %v", err)
+	cases := []struct {
+		name      string
+		mutate    func(map[string]any)
+		wantToken string
+	}{
+		{
+			name: "coverage covered_topics",
+			mutate: func(payload map[string]any) {
+				semanticMap(payload)["coverage"].(map[string]any)["covered_topics"] = []any{"services"}
+			},
+			wantToken: "covered_topics",
+		},
+		{
+			name: "question text alias",
+			mutate: func(payload map[string]any) {
+				semanticSliceItem(payload, "questions", 0)["question"] = "Who owns payments?"
+			},
+			wantToken: "question",
+		},
+		{
+			name: "question confidence alias",
+			mutate: func(payload map[string]any) {
+				semanticSliceItem(payload, "questions", 0)["confidence"] = "0.7"
+			},
+			wantToken: "confidence",
+		},
+		{
+			name: "edge relation alias",
+			mutate: func(payload map[string]any) {
+				semanticSliceItem(payload, "edges", 0)["relation"] = "depends_on"
+			},
+			wantToken: "relation",
+		},
+		{
+			name: "edge source alias",
+			mutate: func(payload map[string]any) {
+				semanticSliceItem(payload, "edges", 0)["source"] = "svc.payments"
+			},
+			wantToken: "source",
+		},
+		{
+			name: "edge target alias",
+			mutate: func(payload map[string]any) {
+				semanticSliceItem(payload, "edges", 0)["target"] = "svc.ledger"
+			},
+			wantToken: "target",
+		},
+		{
+			name: "entity provenance array",
+			mutate: func(payload map[string]any) {
+				semanticSliceItem(payload, "entities", 0)["provenance"] = []any{
+					map[string]any{"citation_id": "cite.payments.readme"},
+				}
+			},
+			wantToken: "provenance",
+		},
+		{
+			name: "edge string confidence",
+			mutate: func(payload map[string]any) {
+				provenance := semanticSliceItem(payload, "edges", 0)["provenance"].(map[string]any)
+				provenance["confidence"] = "0.7"
+			},
+			wantToken: "confidence",
+		},
+		{
+			name: "finding summary alias",
+			mutate: func(payload map[string]any) {
+				semanticSliceItem(payload, "findings", 0)["summary"] = "legacy summary"
+			},
+			wantToken: "summary",
+		},
+		{
+			name: "finding inference alias",
+			mutate: func(payload map[string]any) {
+				semanticSliceItem(payload, "findings", 0)["inference"] = "legacy inference"
+			},
+			wantToken: "inference",
+		},
+		{
+			name: "finding citation alias",
+			mutate: func(payload map[string]any) {
+				semanticSliceItem(payload, "findings", 0)["evidence_citation_ids"] = []any{"cite.payments.readme"}
+			},
+			wantToken: "evidence_citation_ids",
+		},
+		{
+			name: "finding confidence alias",
+			mutate: func(payload map[string]any) {
+				semanticSliceItem(payload, "findings", 0)["confidence"] = "0.7"
+			},
+			wantToken: "confidence",
+		},
 	}
 
-	task := testCollectTask(writeRoot, "payments", "payments-service")
-	err := ValidateCollectManifest(task)
-	if err == nil {
-		t.Fatalf("expected validation to fail for legacy semantic aliases")
-	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	message := err.Error()
-	for _, token := range []string{
-		"step_contract",
-		"semantic.coverage.covered_topics",
-		"semantic.questions[0].question",
-		"semantic.entities[0].provenance",
-		"semantic.edges[0].relation",
-		"semantic.edges[0].provenance.confidence",
-		"semantic.findings[0].summary",
-		"semantic.findings[0].evidence_citation_ids",
-	} {
-		if !strings.Contains(message, token) {
-			t.Fatalf("expected legacy rejection message to mention %q, got %v", token, err)
-		}
+			payload := validCollectManifestPayload()
+			tc.mutate(payload)
+			raw, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatalf("marshal payload: %v", err)
+			}
+			err = ValidateCollectManifestBytes(raw)
+			if err == nil {
+				t.Fatalf("expected schema validation to fail for %s", tc.name)
+			}
+			if !strings.Contains(err.Error(), "shard pack manifest is invalid") {
+				t.Fatalf("expected shard manifest schema error, got %v", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantToken) {
+				t.Fatalf("expected validation error to mention %q, got %v", tc.wantToken, err)
+			}
+		})
 	}
 }
 
@@ -219,10 +229,10 @@ func TestValidateCollectManifestRejectsCitationOnlySemanticEvidenceObjects(t *te
 	if err == nil {
 		t.Fatalf("expected validation to fail for citation-only semantic evidence")
 	}
-	if !strings.Contains(err.Error(), "semantic.entities[0].provenance.evidence[0]") {
+	if !strings.Contains(err.Error(), "/semantic/entities/0/provenance/evidence/0") {
 		t.Fatalf("expected explicit semantic evidence path in error, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "repo/path") {
+	if !strings.Contains(err.Error(), "'repo', 'path'") {
 		t.Fatalf("expected repo/path requirement in error, got %v", err)
 	}
 }
@@ -414,6 +424,101 @@ func TestValidateCollectManifestRejectsUnknownTopLevelFieldWithoutRewrite(t *tes
 	if string(after) != string(raw) {
 		t.Fatalf("expected strict validation not to rewrite manifest")
 	}
+}
+
+func validCollectManifestPayload() map[string]any {
+	evidence := []any{
+		map[string]any{
+			"repo": "payments-service",
+			"path": "README.md",
+		},
+	}
+	provenance := func(confidence float64) map[string]any {
+		return map[string]any{
+			"kind":       "observation",
+			"confidence": confidence,
+			"evidence":   evidence,
+		}
+	}
+	return map[string]any{
+		"version":       float64(1),
+		"run_id":        "run-1",
+		"step_id":       "refresh.step1.collect",
+		"shard_id":      "payments",
+		"domain_id":     "payments",
+		"agent_role":    "shard-analyst",
+		"artifact_root": "reports/taskruns/run-1/staging/shards/payments",
+		"repo_scopes":   []any{"payments-service"},
+		"path_scopes":   []any{"src"},
+		"documents": []any{
+			map[string]any{
+				"id":             "doc.payments.overview",
+				"kind":           "report",
+				"title":          "Payments Overview",
+				"path":           "overview.md",
+				"canonical_path": "reports/as-is/payments/overview.md",
+				"topics":         []any{"payments"},
+				"citation_ids":   []any{"cite.payments.readme"},
+			},
+		},
+		"citations": []any{
+			map[string]any{
+				"id":           "cite.payments.readme",
+				"repo":         "payments-service",
+				"path":         "README.md",
+				"claim_ids":    []any{"claim.payments.readme"},
+				"document_ids": []any{"doc.payments.overview"},
+			},
+		},
+		"semantic": map[string]any{
+			"coverage": map[string]any{
+				"observed": []any{"services"},
+				"missing":  []any{"owner mappings"},
+				"notes":    []any{"canonical payload"},
+			},
+			"questions": []any{
+				map[string]any{
+					"id":       "q.payments.owner",
+					"text":     "Who owns payments?",
+					"priority": "high",
+				},
+			},
+			"entities": []any{
+				map[string]any{
+					"id":         "svc.payments",
+					"name":       "payments",
+					"type":       "service",
+					"provenance": provenance(0.8),
+				},
+			},
+			"edges": []any{
+				map[string]any{
+					"id":         "edge.payments.depends-on",
+					"type":       "depends_on",
+					"from":       "svc.payments",
+					"to":         "svc.ledger",
+					"provenance": provenance(0.7),
+				},
+			},
+			"findings": []any{
+				map[string]any{
+					"id":          "finding.payments.owner",
+					"severity":    "medium",
+					"title":       "Missing owner",
+					"description": "Owner mapping is absent.",
+					"provenance":  provenance(0.6),
+				},
+			},
+		},
+	}
+}
+
+func semanticMap(payload map[string]any) map[string]any {
+	return payload["semantic"].(map[string]any)
+}
+
+func semanticSliceItem(payload map[string]any, key string, index int) map[string]any {
+	return semanticMap(payload)[key].([]any)[index].(map[string]any)
 }
 
 func testCollectTask(writeRoot string, shardID string, repo string) acpruntime.Task {

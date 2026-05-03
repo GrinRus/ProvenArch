@@ -88,6 +88,7 @@ Epic matrix:
 - В MVP используем один отдельный git‑репозиторий `arch-workspace/` как единый рабочий контур ACP.
 - `workspace.yaml` валидируется по отдельному schema-contract и хранит только repo sources + `docs.imports_path`.
 - В `workspace.yaml` хранятся локальные пути к продуктовым репозиториям и/или GitHub/GitLab URL.
+- `repos[].analysis.role` удалён из active contract; workspace manifest хранит только source metadata и optional `analysis.include/exclude`.
 - Если указан `git_url`, clone/fetch выполняется через локальный `git` на устройстве пользователя или в runner-контексте CI.
 - В `docs/imports/` лежат вручную импортированные документы (например, выгрузки из Confluence).
 - Layout `charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/` не конфигурируется через manifest и считается fixed MVP convention.

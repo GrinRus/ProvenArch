@@ -470,8 +470,8 @@ func TestActiveSurfacesRejectLegacyArtifactOnlyMarkers(t *testing.T) {
 	}
 	allowPrefixes := []string{
 		"docs/archive/",
-		"fixtures/legacy-rejection/",
-		"internal/runtime/testdata/legacy-rejection/",
+		"fixtures/contract-rejection/",
+		"internal/runtime/testdata/contract-rejection/",
 		"internal/api/ui_dist/",
 	}
 	roots := []string{

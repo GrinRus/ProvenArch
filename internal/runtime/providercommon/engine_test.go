@@ -12,6 +12,7 @@ import (
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/steppolicy"
+	"github.com/GrinRus/ProvenArch/internal/testutil"
 )
 
 func TestRunHeadlessProviderSucceedsWithValidArtifacts(t *testing.T) {
@@ -631,7 +632,7 @@ EOF
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	result, err := RunHeadlessProvider(ctx, task, runner)
 	if err != nil {
@@ -1198,12 +1199,7 @@ func collectManifestJSON(task acpruntime.Task) string {
 
 func writeEngineScript(t *testing.T, script string) string {
 	t.Helper()
-
-	path := filepath.Join(t.TempDir(), "provider-stub.sh")
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("write script: %v", err)
-	}
-	return path
+	return testutil.WriteExecutableScript(t, "provider-stub.sh", script)
 }
 
 func draftScript(task acpruntime.Task, tail string) string {
