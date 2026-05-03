@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GrinRus/ProvenArch/internal/artifactquality"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
 
@@ -46,6 +47,7 @@ func TestComposeArtifactOnlyPromptKeepsSharedOrderAcrossProviders(t *testing.T) 
 	expectedOrder := []string{
 		"Artifact-only contract:",
 		"Write ONLY inside write_root.",
+		"Every required artifact write/check MUST use the exact absolute write_root or draft_final_root paths above.",
 		"Write validator-verdict.json in write_root.",
 		"WORKSPACE PROMPT PACK CONTENT LAYER:",
 		"Completion rule:",
@@ -77,19 +79,23 @@ func TestComposeArtifactOnlyPromptAddsCollectLegacyHygieneSection(t *testing.T) 
 
 	prompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderClaudeCode, task)
 	expectedTokens := []string{
-		"COLLECT MANIFEST CANONICAL SHAPE:",
+		"COLLECT MANIFEST CONTRACT CHECKLIST:",
+		"Early pair-write requirement",
+		"Absolute collect targets for the early pair-write",
 		"semantic.coverage MUST use observed/missing/notes",
 		"Do NOT add top-level step_contract, compatibility",
 		"semantic provenance.evidence[*] objects MUST carry repo/path",
-		"Canonical fragment below is normative",
+		"The task-specific collect manifest JSON skeleton above is normative",
 		`"artifact_root": "reports/taskruns/run-1/staging/shards/payments"`,
 		`"repo": "payments-service"`,
-		`"description": "Repository evidence names the payments service but does not identify an owning team."`,
 	}
 	for _, token := range expectedTokens {
 		if !strings.Contains(prompt, token) {
 			t.Fatalf("expected collect prompt to contain %q, got:\n%s", token, prompt)
 		}
+	}
+	if strings.Contains(prompt, artifactquality.CollectManifestCanonicalExample()) {
+		t.Fatalf("collect prompt should not include the generic collect manifest example:\n%s", prompt)
 	}
 }
 
@@ -134,32 +140,33 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 	prompt := ComposeCollectManifestRepairPrompt(acpruntime.ProviderQwenCode, task, os.ErrNotExist)
 	expectedTokens := []string{
 		"collect manifest repair mode",
+		"Run the preferred file write command below",
+		"mkdir -p ",
+		"cat > ",
+		"<<'ACP_MANIFEST_JSON'",
+		"do not inspect or patch it; overwrite it from the heredoc command",
+		"Copy the heredoc JSON exactly during repair",
 		"Write or replace only write_root/shard-pack-manifest.json.",
+		"Exact allowed write target:",
 		"Final action must be: write only write_root/shard-pack-manifest.json, then exit successfully.",
-		"Existing authored documents in write_root are the source surface to describe.",
-		"Do not search the filesystem for schemas/*, docs/spec/*, examples, or prior manifests",
-		"Do not inspect reports/taskruns outside the current write_root",
-		"prior manifests, or raw logs as examples",
+		"Existing authored documents in write_root are already encoded in the task-specific skeleton; do not rewrite them.",
+		"Do not search the filesystem for schemas/*, docs/spec/*, examples, prior manifests",
+		"sibling shards, raw logs, or reports/taskruns history",
 		"Existing authored document files in write_root:",
 		"docs/deep-dive.md",
 		"overview.md",
-		"Use these repository evidence path candidates before any broader lookup:",
-		"src/README.md",
-		"TASK-SPECIFIC MANIFEST SCAFFOLD:",
-		`run_id: "run-1"`,
-		`artifact_root: "reports/taskruns/run-1/staging/shards/payments"`,
-		`repo_scopes: ["payments-service"]`,
-		`path_scopes: ["src"]`,
-		"Create one documents[] item per authored file",
+		"Repository evidence candidates are already encoded in the skeleton",
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
 		`"path": "docs/deep-dive.md"`,
 		`"path": "overview.md"`,
 		`"path": "src/README.md"`,
-		"Final repair action: write write_root/shard-pack-manifest.json",
 		"COLLECT MANIFEST REPAIR INSTRUCTIONS:",
-		"Copy the task-specific JSON skeleton first",
-		"COLLECT MANIFEST CANONICAL SHAPE:",
-		"Previous artifact contract failure",
+		"Execute the preferred heredoc write command",
+		"Do not read, diff, or patch an existing invalid shard-pack-manifest.json; replace it.",
+		"COLLECT MANIFEST REPAIR CHECKLIST:",
+		`artifact_root must remain exactly "reports/taskruns/run-1/staging/shards/payments"`,
+		"forbidden legacy aliases:",
+		"complete repair artifact; write it exactly from the heredoc command",
 	}
 	for _, token := range expectedTokens {
 		if !strings.Contains(prompt, token) {
@@ -169,14 +176,163 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 	if strings.Contains(prompt, "Produce runtime-authored documents in write_root") {
 		t.Fatalf("repair prompt must not ask the provider to rewrite authored docs:\n%s", prompt)
 	}
+	if strings.Contains(prompt, "Previous artifact contract failure") {
+		t.Fatalf("repair prompt should not include validation-error cues that invite patching instead of heredoc overwrite:\n%s", prompt)
+	}
 	skeletonIndex := strings.Index(prompt, "TASK-SPECIFIC MANIFEST JSON SKELETON:")
+	contractIndex := strings.Index(prompt, "Artifact-only repair contract:")
 	instructionIndex := strings.Index(prompt, "COLLECT MANIFEST REPAIR INSTRUCTIONS:")
-	canonicalIndex := strings.Index(prompt, "COLLECT MANIFEST CANONICAL SHAPE:")
-	if skeletonIndex < 0 || instructionIndex < 0 || canonicalIndex < 0 {
+	checklistIndex := strings.Index(prompt, "COLLECT MANIFEST REPAIR CHECKLIST:")
+	if skeletonIndex < 0 || contractIndex < 0 || instructionIndex < 0 || checklistIndex < 0 {
 		t.Fatalf("expected repair prompt to contain skeleton, instructions, and canonical sections:\n%s", prompt)
 	}
-	if !(skeletonIndex < instructionIndex && instructionIndex < canonicalIndex) {
-		t.Fatalf("expected compact repair prompt to put exact skeleton before repair instructions and canonical reference:\n%s", prompt)
+	if !(skeletonIndex < contractIndex && contractIndex < instructionIndex && instructionIndex < checklistIndex) {
+		t.Fatalf("expected compact repair prompt to put exact skeleton before contract, repair instructions, and canonical reference:\n%s", prompt)
+	}
+	if strings.Count(prompt, "TASK-SPECIFIC MANIFEST JSON SKELETON:") != 1 {
+		t.Fatalf("repair prompt should include exactly one task-specific JSON skeleton section:\n%s", prompt)
+	}
+	if strings.Count(prompt, "ACP_MANIFEST_JSON") != 2 {
+		t.Fatalf("repair prompt should include a single heredoc command around the skeleton:\n%s", prompt)
+	}
+	if strings.Contains(prompt, artifactquality.CollectManifestCanonicalExample()) {
+		t.Fatalf("repair prompt should not include a second generic canonical JSON example after the task skeleton:\n%s", prompt)
+	}
+}
+
+func TestComposeCollectArtifactPairRepairPromptWritesExactPairFirst(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step1.collect",
+		ArtifactRoot:      "reports/taskruns/run-1/staging/shards/payments",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments",
+		ShardID:           "payments",
+		DomainID:          "payments",
+		AgentRole:         "shard-analyst",
+		RepoScopes:        []string{"payments-service"},
+		PathScopes:        []string{"."},
+		ExpectedArtifacts: []string{"shard-pack-manifest.json"},
+	}
+
+	prompt := ComposeCollectArtifactPairRepairPrompt(acpruntime.ProviderCodexCode, task, os.ErrNotExist)
+	expectedTokens := []string{
+		"collect artifact pair focused recovery mode",
+		"Run the exact shell command below as your next command. Do not inspect repository files first.",
+		`Write exactly two files now: "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md" and "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json".`,
+		"COLLECT PAIR WRITE COMMAND:",
+		"cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md' <<'ACP_COLLECT_DOC'",
+		"cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json' <<'ACP_MANIFEST_JSON'",
+		`"path": "payments-overview.md"`,
+		`"artifact_root": "reports/taskruns/run-1/staging/shards/payments"`,
+		"exact authored document target = \"/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md\"",
+		"exact manifest target = \"/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json\"",
+		"Do not infer schema from prior reports/taskruns artifacts or raw logs.",
+		"Previous collect artifact validation failure",
+	}
+	for _, token := range expectedTokens {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected collect pair repair prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"collect manifest repair mode",
+		"Existing authored documents in write_root",
+		"Do not rewrite existing authored markdown documents",
+		"read, diff, or patch an existing invalid shard-pack-manifest.json",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("collect pair repair prompt must not use manifest-only repair wording %q:\n%s", forbidden, prompt)
+		}
+	}
+	if strings.Count(prompt, "ACP_COLLECT_DOC") != 2 || strings.Count(prompt, "ACP_MANIFEST_JSON") != 2 {
+		t.Fatalf("expected one collect doc heredoc and one manifest heredoc:\n%s", prompt)
+	}
+}
+
+func TestComposeValidatorVerdictRepairPromptIsVerdictOnly(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step3.findings",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/validator",
+		ReadContextRoots:  []string{"/tmp/workspace/reports/taskruns/run-1/staging/final"},
+		ExpectedArtifacts: []string{"validator-verdict.json"},
+	}
+
+	prompt := ComposeValidatorVerdictRepairPrompt(acpruntime.ProviderCodexCode, task, os.ErrNotExist)
+	expectedTokens := []string{
+		"validator verdict focused recovery mode",
+		"Immediate validator verdict repair action:",
+		"Run the exact shell command below as your next command",
+		"Write exactly one file now:",
+		"/tmp/workspace/reports/taskruns/run-1/validator/validator-verdict.json",
+		"VALIDATOR VERDICT WRITE COMMAND:",
+		"<<'ACP_VALIDATOR_VERDICT_JSON'",
+		"VALIDATOR VERDICT JSON SKELETON:",
+		`"issues": []`,
+		"VALIDATOR VERDICT REPAIR INSTRUCTIONS:",
+		"The heredoc JSON is the complete first repair artifact",
+		"issues[] items must use only: code, severity, message, path, document_id, citation_id",
+		"Legacy issue fields are forbidden inside issues[]: id, title, description, rule_id, related_paths, related_ids, provenance",
+		`"code": "staged_index_missing"`,
+		`"severity": "error"`,
+		"Previous validator artifact validation failure",
+	}
+	for _, token := range expectedTokens {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected validator repair prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	if strings.Contains(prompt, "shard-pack-manifest.json") && !strings.Contains(prompt, "Do not write shard-pack-manifest.json") {
+		t.Fatalf("validator repair prompt must only mention shard manifest as forbidden:\n%s", prompt)
+	}
+	if strings.Count(prompt, "ACP_VALIDATOR_VERDICT_JSON") != 2 {
+		t.Fatalf("expected one validator verdict heredoc:\n%s", prompt)
+	}
+}
+
+func TestComposeDraftArtifactRepairPromptNamesExactTargets(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step2.asis_docs",
+		StepContract:      "as_is",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/asis",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
+	}
+
+	prompt := ComposeDraftArtifactRepairPrompt(acpruntime.ProviderQwenCode, task, os.ErrNotExist)
+	expectedTokens := []string{
+		"draft artifact focused recovery mode",
+		"Immediate draft artifact repair action:",
+		"/tmp/workspace/reports/taskruns/run-1/asis/asis-draft-manifest.json",
+		"/tmp/workspace/reports/taskruns/run-1/staging/final",
+		"Do not begin with broad analysis. Run the preferred file write command below",
+		"overwrite them from the heredoc artifacts",
+		"RUNTIME DRAFT MANIFEST JSON SKELETON:",
+		"cat > '/tmp/workspace/reports/taskruns/run-1/asis/asis-draft-manifest.json' <<'ACP_DRAFT_MANIFEST_JSON'",
+		"cat > '/tmp/workspace/reports/taskruns/run-1/staging/final/overview.md' <<'ACP_DRAFT_FILE'",
+		"cat > '/tmp/workspace/reports/taskruns/run-1/staging/final/summary.md' <<'ACP_DRAFT_FILE'",
+		"cat > '/tmp/workspace/reports/taskruns/run-1/staging/final/architect-summary.md' <<'ACP_DRAFT_FILE'",
+		`"step_contract": "as_is"`,
+		`"path": "overview.md"`,
+		"# Coverage Summary",
+		"Every outputs[].path must be relative to draft_final_root",
+		"Absolute target checks must use write_root/draft_final_root exactly",
+	}
+	for _, token := range expectedTokens {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected draft repair prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	if strings.Contains(prompt, artifactquality.AsIsDraftManifestCanonicalExample()) {
+		t.Fatalf("draft repair prompt should stay compact and not include the full generic as-is canonical example")
 	}
 }
 
@@ -194,8 +350,11 @@ func TestComposeArtifactOnlyPromptAddsValidatorVerdictCanonicalSection(t *testin
 	expectedTokens := []string{
 		"VALIDATOR VERDICT CANONICAL SHAPE:",
 		"validator-verdict.json MUST include version=1, run_id, generated_at, verdict, and checked_paths.",
+		"issues[] items MUST use exactly the canonical validator issue shape",
+		"Do NOT put legacy finding-shaped fields inside issues[]",
 		"owner-only residual evidence gaps may still return verdict=PASS when no technical validator issues remain.",
 		`"generated_at": "2026-04-16T12:00:02Z"`,
+		`"code": "staged_index_missing"`,
 		`"title": "Owner mapping remains unresolved"`,
 		`"repo": "payments-service"`,
 		`"path": "README.md"`,

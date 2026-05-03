@@ -130,6 +130,60 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self._write_snapshot(run_dir, "init-run", "init")
         self._write_snapshot(run_dir, "refresh-run", "refresh")
 
+    def _create_passed_run_dir_with_raw_runner_noise(self, run_dir: Path) -> None:
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: passed",
+                    "- quality_gates: passed",
+                    "- failure_reason: none",
+                    "- expected_runs: 4",
+                    "- completed_runs: 4",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 2",
+                    "- running_runs_detected: 0",
+                    "- termination_signal: none",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=completed",
+                    "process_exit=0",
+                    "termination_signal=none",
+                    "failure_reason=none",
+                    "summary_written=yes",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "full-run.log",
+            'recovered earlier event: {"error_code":"runner_unavailable","message":"provider unavailable during prior repair"}\n'
+            "GET https://chatgpt.com/backend-api/plugins/featured -> 429 Too Many Requests\n"
+            "Cloudflare\n",
+        )
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            '{"level":"error","kind":"event","error_code":"runner_unavailable","message":"recovered provider diagnostic"}\n',
+        )
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/raw/runtime.stderr.txt",
+            "429 Too Many Requests\n",
+        )
+
     def _write_snapshot(self, run_dir: Path, run_id: str, pipeline: str) -> None:
         reports_root = run_dir / "snapshots" / run_id / "reports"
         write_text(
@@ -769,6 +823,231 @@ class BatchFailureClassificationTest(unittest.TestCase):
 
         self.assertTrue(self.module.text_has_runner_unavailable_signal(text))
 
+    def test_python_report_ignores_raw_provider_runner_unavailable_word_when_structured_contract_failed(self) -> None:
+        run_dir = self.root / "run-raw-word-contract-python"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: passed",
+                    "- failure_reason: runtime_contract_failed",
+                    "- expected_runs: 4",
+                    "- completed_runs: 4",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 2",
+                    "- running_runs_detected: 0",
+                    "- termination_signal: none",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/raw/runtime.stderr.txt",
+            "model narrative mentioned runner_unavailable as a category, but no provider capacity signal exists\n",
+        )
+
+        result = self.module.evaluate_run(
+            provider="codex-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "none",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("runtime_contract_failed", result.failure_class)
+        self.assertTrue(result.runtime_contract_failed)
+        self.assertFalse(result.runner_unavailable)
+
+    def test_python_report_ignores_runtime_output_runner_unavailable_word_when_structured_contract_failed(self) -> None:
+        run_dir = self.root / "run-structured-runtime-output-word-contract-python"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: passed",
+                    "- failure_reason: runtime_contract_failed",
+                    "- expected_runs: 4",
+                    "- completed_runs: 4",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 2",
+                    "- running_runs_detected: 0",
+                    "- termination_signal: none",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            '{"kind":"runtime_output","stream":"stderr","message":"model narrative mentioned runner_unavailable as a category, but no provider capacity signal exists"}\n',
+        )
+
+        result = self.module.evaluate_run(
+            provider="codex-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "none",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("runtime_contract_failed", result.failure_class)
+        self.assertTrue(result.runtime_contract_failed)
+        self.assertFalse(result.runner_unavailable)
+
+    def test_python_report_ignores_raw_runner_unavailable_on_terminal_success(self) -> None:
+        run_dir = self.root / "run-terminal-success-with-raw-runner-noise"
+        self._create_passed_run_dir_with_raw_runner_noise(run_dir)
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "none",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "0",
+            },
+        )
+
+        self.assertEqual("none", result.failure_class)
+        self.assertFalse(result.runner_unavailable)
+        self.assertTrue(result.hard_pass)
+
+    def test_python_report_ignores_stale_classifier_failure_on_terminal_success(self) -> None:
+        run_dir = self.root / "run-terminal-success-with-stale-classifier"
+        self._create_passed_run_dir_with_raw_runner_noise(run_dir)
+
+        result = self.module.evaluate_run(
+            provider="codex-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "runner_unavailable",
+                "failure_subclass": "cancellation_like",
+                "cancellation_like": "1",
+                "process_exit": "0",
+            },
+        )
+
+        self.assertEqual("none", result.failure_class)
+        self.assertFalse(result.runner_unavailable)
+        self.assertFalse(result.cancellation_like)
+
+    def test_python_report_requires_run_status_for_terminal_success_classifier_override(self) -> None:
+        run_dir = self.root / "run-terminal-success-summary-without-run-status"
+        self._create_passed_run_dir_with_raw_runner_noise(run_dir)
+        (run_dir / "run-status.env").unlink()
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "runner_unavailable",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("runner_unavailable", result.failure_class)
+        self.assertTrue(result.runner_unavailable)
+
+    def test_python_report_keeps_structured_runner_unavailable_error_code(self) -> None:
+        run_dir = self.root / "run-structured-runner-unavailable-python"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: passed",
+                    "- expected_runs: 4",
+                    "- completed_runs: 4",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 2",
+                    "- running_runs_detected: 0",
+                    "- termination_signal: none",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            '{"level":"error","kind":"event","error_code":"runner_unavailable","message":"provider unavailable during verdict-only validator repair"}\n',
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "none",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("runner_unavailable", result.failure_class)
+        self.assertTrue(result.runner_unavailable)
+
+    def test_python_report_surfaces_focused_recovery_reasons(self) -> None:
+        run_dir = self.root / "run-focused-recovery-python"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            "\n".join(
+                [
+                    '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"validator_verdict_repair"}',
+                    '{"level":"error","message":"draft recovery wrote outside the draft artifact write set"}',
+                ]
+            )
+            + "\n",
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "runtime_contract_failed",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        focused_details = "\n".join(result.issue_details)
+        self.assertIn("reliability/focused-recovery", focused_details)
+        self.assertIn("validator_verdict_repair_exhausted", focused_details)
+        self.assertIn("draft_artifact_repair_write_set_violation", focused_details)
+
     def test_python_report_prefers_parse_signature_contract_failure_over_runner_unavailable(self) -> None:
         run_dir = self.root / "run-parse-signature-python"
         self._create_fixture_run_dir(run_dir)
@@ -840,6 +1119,28 @@ class BatchFailureClassificationTest(unittest.TestCase):
 
         self.assertEqual("runtime_contract_failed", result.failure_class)
         self.assertTrue(result.runtime_contract_failed)
+
+    def test_python_report_notes_runtime_logs_when_headless_rows_missing(self) -> None:
+        run_dir = self.root / "run-headless-rows-missing-with-logs"
+        self._create_fixture_run_dir(run_dir)
+        (run_dir / "run-results.tsv").unlink()
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "infra_incomplete_cycle",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertTrue(
+            any("runtime artifacts/logs found despite missing or failed run-results rows" in detail for detail in result.issue_details)
+        )
 
     def test_runtime_flow_best_effort_partial_skips_run_partial_enforcement_on_runner_unavailable(self) -> None:
         run_dir = self.root / "run-best-effort-capacity"
@@ -1187,6 +1488,31 @@ class BatchFailureClassificationTest(unittest.TestCase):
         )
         self.assertEqual("no", completed.stdout.strip(), completed.stdout)
 
+    def test_shell_classifier_ignores_raw_runner_unavailable_on_terminal_success(self) -> None:
+        run_dir = self.root / "run-terminal-success-with-raw-runner-noise-shell"
+        self._create_passed_run_dir_with_raw_runner_noise(run_dir)
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        classifications_tsv = self.root / "backend-run-classifications-terminal-success.tsv"
+        command = (
+            prelude
+            + "\n"
+            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
+            + f'classify_run_failure "qwen-code" "1" {shlex.quote(str(run_dir))} "0"\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("", completed.stdout.strip(), completed.stdout)
+        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
+        self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("none", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+
     def test_shell_runner_unavailable_signature_keeps_real_capacity_when_noise_is_separate(self) -> None:
         script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
         prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
@@ -1215,6 +1541,28 @@ class BatchFailureClassificationTest(unittest.TestCase):
             env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
         )
         self.assertEqual("yes", completed.stdout.strip(), completed.stdout)
+
+    def test_shell_runner_unavailable_signature_ignores_unstructured_category_word(self) -> None:
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        narrative_log = self.root / "runner-unavailable-narrative.log"
+        write_text(
+            narrative_log,
+            "model narrative mentioned runner_unavailable as a possible category without capacity signal\n",
+        )
+        command = (
+            prelude
+            + "\n"
+            + f'if contains_runner_unavailable_signature {shlex.quote(str(narrative_log))}; then echo yes; else echo no; fi\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("no", completed.stdout.strip(), completed.stdout)
 
     def test_shell_runner_unavailable_signature_detects_bare_429_line(self) -> None:
         script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
@@ -1847,6 +2195,107 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertFalse(result.runtime_flow_failed)
         self.assertNotIn("analysis:cross-repo-missing", result.issues)
 
+    def test_python_report_accepts_multi_repo_citations_and_cross_repo_findings_without_edges(self) -> None:
+        run_dir = self.root / "run-multi-repo-citations-finding-links"
+        self._create_passed_run_dir_with_raw_runner_noise(run_dir)
+
+        declared = []
+        repo_names = ["course-discovery", "credentials", "devstack", "frontend-platform", "openedx-platform"]
+        for repo_name in repo_names:
+            repo_root = run_dir / "repos" / repo_name
+            write_text(repo_root / "README.md", f"# {repo_name}\n")
+            declared.append({"name": repo_name, "source": "path", "path": str(repo_root)})
+
+        manifest_path = (
+            run_dir
+            / "snapshots/refresh-run/reports/taskruns/refresh-run/staging/shards/domain-a/shard-pack-manifest.json"
+        )
+        write_json(
+            manifest_path,
+            {
+                "version": 1,
+                "run_id": "refresh-run",
+                "step_id": "refresh.step1.collect",
+                "shard_id": "domain-a",
+                "domain_id": "domain-a",
+                "agent_role": "shard-analyst",
+                "artifact_root": "reports/taskruns/refresh-run/staging/shards/domain-a",
+                "repo_scopes": ["course-discovery"],
+                "path_scopes": ["src"],
+                "documents": [
+                    {
+                        "id": "doc.arch",
+                        "title": "Architecture",
+                        "path": "architecture.md",
+                        "kind": "report",
+                    }
+                ],
+                "citations": [
+                    {
+                        "id": f"cite.{repo_name}",
+                        "repo": repo_name,
+                        "path": "README.md",
+                        "claim_ids": ["claim.repo"],
+                        "document_ids": ["doc.arch"],
+                    }
+                    for repo_name in repo_names
+                ],
+                "semantic": {
+                    "coverage": {
+                        "observed": repo_names,
+                        "missing": ["owner mappings"],
+                        "notes": ["multi-repo evidence is represented by citations and a cross-repo finding"],
+                    },
+                    "questions": [{"id": "q.owner", "text": "Which owners map across the Open edX repositories?"}],
+                    "entities": [],
+                    "edges": [],
+                    "findings": [
+                        {
+                            "id": "finding.owner",
+                            "severity": "medium",
+                            "title": "Owner mapping spans repositories",
+                            "description": "The same owner mapping gap appears across multiple repository scopes.",
+                            "rule_id": "rule.owner.required",
+                            "related_ids": ["course-discovery", "frontend-platform", "openedx-platform"],
+                            "provenance": {
+                                "kind": "observation",
+                                "confidence": 0.8,
+                                "evidence": [
+                                    {"repo": "course-discovery", "path": "README.md"},
+                                    {"repo": "frontend-platform", "path": "README.md"},
+                                    {"repo": "openedx-platform", "path": "README.md"},
+                                ],
+                            },
+                        }
+                    ],
+                },
+            },
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={
+                "declared_repos_meta": {
+                    "expected_repo_count": 5,
+                    "profile_id": "multi-path",
+                    "profile_source_kind": "path",
+                    "declared_repos": declared,
+                }
+            },
+            classification_row={
+                "failure_class": "none",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "0",
+            },
+        )
+
+        self.assertNotIn("analysis:cross-repo-missing", result.issues)
+        self.assertFalse(result.semantic_hard_fail)
+        self.assertTrue(result.hard_pass)
+
     def test_python_report_treats_incomplete_reports_as_triage_only_not_empty_analysis(self) -> None:
         run_dir = self.root / "run-incomplete"
         self._create_incomplete_fixture_run_dir(run_dir)
@@ -1891,6 +2340,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertNotIn("analysis:coverage", result.issues)
         self.assertNotIn("analysis:questions", result.issues)
         self.assertNotIn("analysis:findings", result.issues)
+        self.assertTrue(any("collect_partial_shard_failures" in detail for detail in result.issue_details))
 
     def test_shell_frontend_mode_helpers_support_per_run(self) -> None:
         script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
@@ -1966,6 +2416,48 @@ class BatchFailureClassificationTest(unittest.TestCase):
             env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
         )
         self.assertEqual("/tmp/provenarch-batch/qwen-code/run2\t2", completed.stdout.strip())
+
+    def test_shell_frontend_snapshot_missing_after_backend_failure_is_skipped(self) -> None:
+        backend_run_dir = self.root / "frontend-backend-failed-run"
+        output_dir = self.root / "frontend-output"
+        (backend_run_dir / "arch-workspace").mkdir(parents=True, exist_ok=True)
+        write_text(
+            backend_run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=process_failed",
+                    "process_exit=1",
+                    "termination_signal=none",
+                    "failure_reason=runtime_contract_failed",
+                    "summary_written=yes",
+                ]
+            )
+            + "\n",
+        )
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        result_path = output_dir / "frontend-e2e-result.json"
+        command = (
+            prelude
+            + "\n"
+            + f'run_frontend_live_e2e "qwen-code" {shlex.quote(str(backend_run_dir))} {shlex.quote(str(output_dir))} "1"\n'
+            + "python3 - <<'PY'\n"
+            + "import json\n"
+            + f"from pathlib import Path\np = Path({str(result_path)!r})\n"
+            + "payload = json.loads(p.read_text(encoding='utf-8'))\n"
+            + "print(payload['status'] + ':' + payload['reason'])\n"
+            + "PY\n"
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertIn("skipped:snapshot_reports_missing", completed.stdout.strip(), completed.stdout)
 
     def test_python_frontend_matrix_supports_per_run_results(self) -> None:
         batch_root = self.root / "batch"

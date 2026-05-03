@@ -84,6 +84,7 @@ func resolveCollectHeadlessIncludeDirectories(task Task) []string {
 	}
 
 	addDir(task.WriteRoot)
+	addDir(task.DraftFinalRoot)
 	for _, path := range task.ReadContextRoots {
 		addDir(path)
 	}
@@ -139,6 +140,82 @@ func ResolveHeadlessCollectRepairIncludeDirectories(task Task) []string {
 	}
 	if workspace != "." {
 		addResolvedRepoScopeDirectories(addDir, workspace, headlessRepoScopeFilter(task))
+	}
+	return dirs
+}
+
+// ResolveHeadlessValidatorRepairIncludeDirectories returns the narrow read
+// scope for verdict-only recovery: current write root plus staged final
+// evidence. Repository source roots are intentionally omitted because the
+// validator contract should repair/author only from assembled staged artifacts.
+func ResolveHeadlessValidatorRepairIncludeDirectories(task Task) []string {
+	dirs := make([]string, 0, 4)
+	seen := map[string]struct{}{}
+	addDir := func(path string) {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			return
+		}
+		cleaned := filepath.Clean(path)
+		info, err := os.Stat(cleaned)
+		if err != nil || !info.IsDir() {
+			return
+		}
+		if _, ok := seen[cleaned]; ok {
+			return
+		}
+		seen[cleaned] = struct{}{}
+		dirs = append(dirs, cleaned)
+	}
+
+	addDir(task.WriteRoot)
+	for _, path := range task.ReadContextRoots {
+		if isStagedFinalRuntimeRoot(path) {
+			addDir(path)
+		}
+	}
+	return dirs
+}
+
+func isStagedFinalRuntimeRoot(path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false
+	}
+	slash := filepath.ToSlash(filepath.Clean(path))
+	return strings.HasSuffix(slash, "/staging/final") || strings.Contains(slash, "/staging/final/")
+}
+
+// ResolveHeadlessDraftRepairIncludeDirectories returns the draft recovery
+// scope: current write/draft roots plus staged context and repository evidence.
+func ResolveHeadlessDraftRepairIncludeDirectories(task Task) []string {
+	dirs := make([]string, 0, 6)
+	seen := map[string]struct{}{}
+	addDir := func(path string) {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			return
+		}
+		cleaned := filepath.Clean(path)
+		info, err := os.Stat(cleaned)
+		if err != nil || !info.IsDir() {
+			return
+		}
+		if _, ok := seen[cleaned]; ok {
+			return
+		}
+		seen[cleaned] = struct{}{}
+		dirs = append(dirs, cleaned)
+	}
+
+	addDir(task.WriteRoot)
+	addDir(task.DraftFinalRoot)
+	for _, path := range task.ReadContextRoots {
+		addDir(path)
+	}
+	workspace := strings.TrimSpace(task.Workspace)
+	if workspace != "" {
+		addResolvedRepoScopeDirectories(addDir, filepath.Clean(workspace), headlessRepoScopeFilter(task))
 	}
 	return dirs
 }

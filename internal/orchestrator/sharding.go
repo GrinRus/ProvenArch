@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -113,7 +115,11 @@ type heuristicShardDiscoveryResult struct {
 	FallbackNoMarkers bool
 }
 
-const maxAutoShardsPerRepo = 16
+const (
+	maxAutoShardsPerRepo     = 16
+	maxRuntimeShardIDLength  = 96
+	runtimeShardIDHashLength = 12
+)
 
 func runtimeMetaForRunner(runner acpruntime.Runner) contracts.RuntimeMeta {
 	switch runner.(type) {
@@ -1005,7 +1011,7 @@ func (e *pipelineExecution) planRuntimeShards(repoScopes []string) ([]runtimeSha
 			seenShardIDs[baseID] = sequence + 1
 			shardID := baseID
 			if sequence > 0 {
-				shardID = fmt.Sprintf("%s-%d", baseID, sequence+1)
+				shardID = appendShardIDSequence(baseID, sequence+1)
 			}
 			sortKey := fmt.Sprintf("%s:%s:%03d", scope, strings.Join(normalizedGroup, "|"), idx)
 			plans = append(plans, runtimeShardPlan{
@@ -1046,7 +1052,47 @@ func buildShardID(scope string, pathScopes []string) string {
 	if strings.TrimSpace(slug) == "" {
 		return "shard"
 	}
-	return slug
+	return boundRuntimeShardID(slug)
+}
+
+func appendShardIDSequence(base string, sequence int) string {
+	if sequence <= 1 {
+		return base
+	}
+	suffix := fmt.Sprintf("-%d", sequence)
+	if len(base)+len(suffix) <= maxRuntimeShardIDLength {
+		return base + suffix
+	}
+	limit := maxRuntimeShardIDLength - len(suffix)
+	if limit <= 0 {
+		return strings.TrimPrefix(suffix, "-")
+	}
+	prefix := strings.Trim(base[:limit], "-")
+	if prefix == "" {
+		prefix = "shard"
+	}
+	return prefix + suffix
+}
+
+func boundRuntimeShardID(slug string) string {
+	slug = strings.Trim(strings.TrimSpace(slug), "-")
+	if slug == "" {
+		return "shard"
+	}
+	if len(slug) <= maxRuntimeShardIDLength {
+		return slug
+	}
+	sum := sha256.Sum256([]byte(slug))
+	hash := hex.EncodeToString(sum[:])[:runtimeShardIDHashLength]
+	limit := maxRuntimeShardIDLength - len(hash) - 1
+	if limit <= 0 {
+		return hash
+	}
+	prefix := strings.Trim(slug[:limit], "-")
+	if prefix == "" {
+		prefix = "shard"
+	}
+	return prefix + "-" + hash
 }
 
 func (e *pipelineExecution) resolveRepoPath(scope string) string {
@@ -1135,11 +1181,55 @@ func discoverHeuristicShardPathsWithMeta(repoPath string) (heuristicShardDiscove
 			FallbackNoMarkers: true,
 		}, nil
 	}
+	if hasOnlyRootModuleMarker(markerRoots) {
+		coverageRoots, err := discoverRootMarkerCoverageRoots(root)
+		if err != nil {
+			return heuristicShardDiscoveryResult{}, err
+		}
+		return heuristicShardDiscoveryResult{Paths: coverageRoots}, nil
+	}
 	coverageRoots, err := buildStructuralCoverageRoots(root, markerRoots)
 	if err != nil {
 		return heuristicShardDiscoveryResult{}, err
 	}
 	return heuristicShardDiscoveryResult{Paths: coverageRoots}, nil
+}
+
+func hasOnlyRootModuleMarker(markerRoots []string) bool {
+	normalized := normalizeAndSortShardPaths(markerRoots)
+	return len(normalized) == 1 && normalized[0] == "."
+}
+
+func discoverRootMarkerCoverageRoots(repoPath string) ([]string, error) {
+	root := strings.TrimSpace(repoPath)
+	if root == "" {
+		return []string{"."}, nil
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, err
+	}
+	roots := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		name := strings.TrimSpace(entry.Name())
+		if name == "" {
+			continue
+		}
+		if entry.IsDir() {
+			lowerName := strings.ToLower(name)
+			if _, skip := shardSkippedDirs[lowerName]; skip {
+				continue
+			}
+			if strings.HasPrefix(lowerName, ".") {
+				continue
+			}
+		}
+		roots = append(roots, normalizeShardPath(name))
+	}
+	if len(roots) == 0 {
+		return []string{"."}, nil
+	}
+	return normalizeAndSortShardPaths(roots), nil
 }
 
 func discoverShardModuleMarkerRoots(repoPath string) ([]string, error) {
@@ -1400,6 +1490,11 @@ func buildStructuralShardGroups(repoPath string, coverageRoots []string) ([][]st
 		return [][]string{{"."}}, nil
 	}
 	if len(normalized) <= maxAutoShardsPerRepo || strings.TrimSpace(repoPath) == "" {
+		if strings.TrimSpace(repoPath) != "" && len(normalized) <= maxAutoShardsPerRepo {
+			if grouped, ok := groupRootFilesWithinCap(repoPath, normalized); ok {
+				return grouped, nil
+			}
+		}
 		groups := make([][]string, 0, len(normalized))
 		for _, value := range normalized {
 			groups = append(groups, []string{value})
@@ -1474,6 +1569,37 @@ func buildStructuralShardGroups(repoPath string, coverageRoots []string) ([][]st
 		)
 	}
 	return groups, warnings
+}
+
+func groupRootFilesWithinCap(repoPath string, normalized []string) ([][]string, bool) {
+	rootFiles := make([]string, 0, len(normalized))
+	others := make([]string, 0, len(normalized))
+	for _, rel := range normalized {
+		if rel == "." {
+			return nil, false
+		}
+		abs := filepath.Join(repoPath, filepath.FromSlash(rel))
+		info, err := os.Stat(abs)
+		if err != nil {
+			return nil, false
+		}
+		if !info.IsDir() && !strings.Contains(rel, "/") {
+			rootFiles = append(rootFiles, rel)
+			continue
+		}
+		others = append(others, rel)
+	}
+	if len(rootFiles) <= 1 {
+		return nil, false
+	}
+	sort.Strings(rootFiles)
+	sort.Strings(others)
+	groups := make([][]string, 0, len(others)+1)
+	groups = append(groups, append([]string(nil), rootFiles...))
+	for _, rel := range others {
+		groups = append(groups, []string{rel})
+	}
+	return groups, true
 }
 
 func preserveMarkerLeafShardGroups(repoPath string, baseGroups [][]string, rootFiles []string, keys []string, topLevelRoots map[string][]string) ([][]string, []string) {

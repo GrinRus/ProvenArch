@@ -101,6 +101,72 @@ func (a claudeAdapter) CollectManifestRepairCommandSpec(task acpruntime.Task, va
 	}, nil
 }
 
+func (a claudeAdapter) CollectArtifactPairRepairCommandSpec(task acpruntime.Task, validationErr error) (providercommon.CommandSpec, error) {
+	includeDirs := acpruntime.ResolveHeadlessCollectRepairIncludeDirectories(task)
+	repairTask := task
+	repairTask.ReadContextRoots = append([]string(nil), includeDirs...)
+	prompt := promptcontract.ComposeCollectArtifactPairRepairPrompt(acpruntime.ProviderClaudeCode, repairTask, validationErr)
+	commandArgs := append([]string(nil), a.runner.Args...)
+	if len(commandArgs) == 0 {
+		commandArgs = buildClaudeArgsWithIncludeDirectories(includeDirs, prompt)
+	}
+	stdin, err := providercommon.JSONTaskStdin(repairTask)
+	if err != nil {
+		return providercommon.CommandSpec{}, err
+	}
+	return providercommon.CommandSpec{
+		Command:     a.runner.commandName(),
+		Args:        commandArgs,
+		Stdin:       stdin,
+		Dir:         strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task)),
+		IncludeDirs: includeDirs,
+	}, nil
+}
+
+func (a claudeAdapter) ValidatorVerdictRepairCommandSpec(task acpruntime.Task, validationErr error) (providercommon.CommandSpec, error) {
+	includeDirs := acpruntime.ResolveHeadlessValidatorRepairIncludeDirectories(task)
+	repairTask := task
+	repairTask.ReadContextRoots = append([]string(nil), includeDirs...)
+	prompt := promptcontract.ComposeValidatorVerdictRepairPrompt(acpruntime.ProviderClaudeCode, repairTask, validationErr)
+	commandArgs := append([]string(nil), a.runner.Args...)
+	if len(commandArgs) == 0 {
+		commandArgs = buildClaudeArgsWithIncludeDirectories(includeDirs, prompt)
+	}
+	stdin, err := providercommon.JSONTaskStdin(repairTask)
+	if err != nil {
+		return providercommon.CommandSpec{}, err
+	}
+	return providercommon.CommandSpec{
+		Command:     a.runner.commandName(),
+		Args:        commandArgs,
+		Stdin:       stdin,
+		Dir:         strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task)),
+		IncludeDirs: includeDirs,
+	}, nil
+}
+
+func (a claudeAdapter) DraftArtifactRepairCommandSpec(task acpruntime.Task, validationErr error) (providercommon.CommandSpec, error) {
+	includeDirs := acpruntime.ResolveHeadlessDraftRepairIncludeDirectories(task)
+	repairTask := task
+	repairTask.ReadContextRoots = append([]string(nil), includeDirs...)
+	prompt := promptcontract.ComposeDraftArtifactRepairPrompt(acpruntime.ProviderClaudeCode, repairTask, validationErr)
+	commandArgs := append([]string(nil), a.runner.Args...)
+	if len(commandArgs) == 0 {
+		commandArgs = buildClaudeArgsWithIncludeDirectories(includeDirs, prompt)
+	}
+	stdin, err := providercommon.JSONTaskStdin(repairTask)
+	if err != nil {
+		return providercommon.CommandSpec{}, err
+	}
+	return providercommon.CommandSpec{
+		Command:     a.runner.commandName(),
+		Args:        commandArgs,
+		Stdin:       stdin,
+		Dir:         strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task)),
+		IncludeDirs: includeDirs,
+	}, nil
+}
+
 func (a claudeAdapter) ValidateArtifacts(task acpruntime.Task) error {
 	return providercommon.ValidateRuntimeArtifacts(task, acpruntime.ProviderClaudeCode)
 }
@@ -117,6 +183,9 @@ func (a claudeAdapter) RecoveryPolicy(_ acpruntime.Task) providercommon.Recovery
 	return providercommon.RecoveryPolicy{
 		AcceptValidArtifactsAfterStop: true,
 		RepairCollectManifestOnce:     true,
+		RepairCollectArtifactPairOnce: true,
+		RepairValidatorVerdictOnce:    true,
+		RepairDraftArtifactsOnce:      true,
 	}
 }
 

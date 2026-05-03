@@ -55,6 +55,91 @@ EP-YYYYMMDD-<slug>
 
 ## Active Plans
 ### Plan ID
+EP-20260502-qwen-codex-regres-fast-live-hardening
+
+### Context
+Diagnostic `regres fast` на `qwen-code,codex-code` дошёл до harness/provider execution, но failed на runtime artifact production. Qwen чаще всего зависал в `step3.findings` без `validator-verdict.json`; Codex на OpenStack/Nova collect читал evidence, но проверял/писал relative paths вместо absolute `write_root`, а validator verdict использовал legacy issue-shaped `issues[]`. Дополнительно reports/classifiers переучитывали raw provider text как `runner_unavailable`, а frontend snapshot absence после backend failure выглядел как отдельная frontend regression.
+
+### Goals (must have)
+- [x] Усилить artifact-only prompts: exact absolute `write_root`/`draft_final_root`, validator skeleton, canonical `issues[]`, legacy issue bans
+- [x] Добавить provider-authored collect pair recovery для non-silent no-artifact collect stalls без ACP-side artifact synthesis
+- [x] Добавить provider-authored focused recovery для missing/invalid `validator-verdict.json`
+- [x] Добавить focused draft-artifact recovery для `step0/2/4` с write-set guard
+- [x] Сохранить strict validation: без ACP-side manifest/verdict/draft synthesis и без silent legacy shape acceptance
+- [x] Починить root-marker-only sharding: root-file group + top-level dirs вместо single `"."` shard на больших repos
+- [x] Уточнить report classifiers: raw provider text не создаёт secondary `runner_unavailable` без real availability signal; backend-failed snapshot absence становится dependent skipped frontend status
+- [x] Добавить targeted prompt/provider/engine/sharding/report tests
+- [x] Прогнать full DoD (`make contracts`, `make test`, `make lint`, `make build`)
+- [ ] Выполнить trusted-machine diagnostic rerun `regres-fast.bank-openedx` + `regres-fast.openstack` на `qwen-code,codex-code`
+
+### Non-goals
+- [x] Не менять public schemas, provider IDs, matrix files, release verdict shape или live harness interfaces
+- [x] Не добавлять wrapper над `scripts/full-run-batch-matrix.sh`
+- [x] Не ослаблять artifact validation и не делать ACP-side artifact autofill
+
+### Approach
+1) Обновить enforced prompt contracts и generated baseline findings prompt pack.
+2) Расширить shared provider engine focused recovery adapters: collect получает pair-recovery для non-silent no-artifact stalls и manifest-only repair для authored docs; validator and draft recovery get separate prompts and write-set guards.
+3) Обновить thin adapters (`qwen`, `codex`, `claude`) для validator/draft repair command specs and include dirs.
+4) Исправить sharding discovery for root-marker-only repos and keep marker-preserving coalescing bounded by cap.
+5) Сузить batch/report classifier raw scanning and mark dependent frontend snapshot absence as skipped after backend failure.
+6) Синхронизировать docs/tests, затем выполнить DoD и live diagnostic rerun.
+
+### Files expected to change
+- `internal/runtime/{providercommon,promptcontract,steppolicy,qwencode,codexcode,claudecode}/*`
+- `internal/orchestrator/sharding*`
+- `internal/workspace/baseline*`
+- `scripts/full-run-batch.sh`
+- `scripts/e2e_batch_report.py`
+- `scripts/tests/batch_failure_classification_test.py`
+- `README.md`, `docs/ARCHITECTURE.md`, `docs/spec/PIPELINE_SPEC.md`, `docs/TESTING_STRATEGY.md`, `docs/RELEASE_LIVE_E2E_RUNBOOK.md`, `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Prompt tests cover absolute writes, validator skeleton/canonical issues and draft recovery targets
+- [x] Engine tests cover collect pair recovery, missing/invalid validator repair, write-set guard, draft repair and strict failure lanes
+- [x] Qwen adapter repair specs keep empty stdin and prompt via CLI `-p`
+- [x] Sharding tests prove root-marker-only large repo does not collapse to `"."`
+- [x] Report tests prove raw category-word noise and backend-failed snapshot absence do not become independent failures
+- [x] DoD passes
+- [ ] Diagnostic live rerun reaches `release_verdict_<matrix-id>.json.verdict == "PASS"` or records a narrower residual provider blocker
+
+### Risks
+- Focused recovery can still fail if provider is truly silent/unavailable; qwen fully silent no-artifact remains `runner_unavailable`.
+- Root-marker-only splitting may increase live runtime duration; cap/coalescing remains bounded by `maxAutoShardsPerRepo`.
+- Classifier narrowing must not hide real capacity/rate-limit incidents; generic 429/rate-limit/capacity lines still count after noise filtering.
+
+### Refactoring follow-up (non-blocking)
+- [ ] После trusted live rerun решить, делать refactor до merge или отдельным PR; если rerun still fails on product behavior, сначала чинить blocker, а не косметику.
+- [ ] Снизить повторение focused recovery lifecycle в `internal/runtime/providercommon/engine.go`: выделить общий internal helper для `snapshot -> command spec -> run -> write-set guard -> validate -> classify`, сохранив mode-specific eligibility, diagnostics, write-set guards и error codes без изменения поведения.
+- [ ] Дедуплицировать include-dir helpers в `internal/runtime/headless_include_dirs.go`: общий small helper для ordered unique existing dirs, без расширения validator repair read surface beyond `write_root + /staging/final`.
+- [ ] Разделить prompt contract code по доменам (`collect`, `validator`, `draft`) или выделить small prompt-builder helpers, но не менять literal prompt intent/tokens без обновления focused prompt tests.
+- [ ] Зафиксировать reporting cleanup как отдельный behavior-preserving slice: вынести runner-noise/terminal-success/focused-recovery classifiers из `scripts/e2e_batch_report.py` в локальные helper functions/modules only if tests keep `release_verdict_*`, `profile_matrix_*`, `run_matrix_*` and `quality_report_*` shapes identical.
+- [ ] Для каждого refactor step сначала добавить/оставить characterization tests на current behavior, затем гонять `make contracts`, `make test`, `make lint`, `make build`; live harness interfaces and public schemas remain unchanged.
+
+### Progress log
+- 2026-05-02: Implemented prompt hardening, validator/draft focused recovery adapters, write-set guards, qwen/codex/claude repair specs, root-marker-only sharding, classifier/frontend dependent-status fixes and targeted tests.
+- 2026-05-02: Full DoD passed: `make contracts`, `make test`, `make lint`, `make build`. Generated `internal/api/ui_dist` remained pre-existing unrelated churn and is excluded from this implementation slice.
+- 2026-05-02: Follow-up audit tightened report evidence details for `collect_partial_shard_failures`, focused recovery exhaustion/write-set violations and missing headless rows with runtime logs present.
+- 2026-05-02: Added sharding-level invariant coverage proving `baseline` and `parallel-default` profiles produce identical shard plan items for a Nova-like root-marker repo.
+- 2026-05-02: Live `regres-fast.bank-openedx` exposed two residual blockers before provider artifact validation: flaky controlled-stop unit precheck (`PartialArtifactStallWindow` too small for draft writes) and legacy overlong coalesced shard IDs causing `file name too long` on Open edX root-file groups. Fixed both with bounded hashed shard IDs and a stable partial-artifact test window.
+- 2026-05-02: Second live diagnostic reached qwen collect manifest repair and exposed residual repair stall: qwen wrote authored shard docs but did not materialize `shard-pack-manifest.json` before the 90s repair window. Tightened collect repair prompt to put the exact task JSON skeleton at the top, removed the second generic manifest JSON example from repair mode and extended the collect repair window to 3 minutes while keeping strict provider-authored manifest validation.
+- 2026-05-02: Third live diagnostic confirmed focused draft repair works in qwen (`step0.constitution` recovered), bounded shard IDs are effective, and collect still fails specifically on provider-authored manifest JSON production: qwen writes `root-overview.md`, then ignores manifest-only repair with zero stdout/stderr until `runtime_contract_failed`. Removed generic `payments` manifest examples from initial collect prompts too and replaced repair-mode canonical bulk with a compact validation checklist so the task-specific skeleton is the only JSON template.
+- 2026-05-02: Fourth live diagnostic (`regres-fast-bank-openedx-20260502T145323Z`) confirmed the generic examples are gone, but qwen still stalled in collect repair: root shard wrote `root-overview.md`, then the manifest-only repair produced zero stdout/stderr for 3 minutes and failed `runtime_contract_failed`; a direct qwen probe with a short command-first heredoc prompt wrote `shard-pack-manifest.json` in 21 seconds. Updated collect repair to present one preferred absolute heredoc write command around the task-specific skeleton before any contract text, while preserving provider-authored write-set guard and no ACP-side manifest synthesis.
+- 2026-05-02: Fifth live diagnostic (`regres-fast-bank-openedx-20260502T152857Z`) proved command-first repair fixes missing manifests and some invalid manifests (`root`, `docs`, `extras` reached valid manifests), but `iac` still stalled when an invalid manifest already existed. Tightened repair again to overwrite invalid `shard-pack-manifest.json` from the heredoc without reading/diffing/patching the existing JSON and without factual edits before validation.
+- 2026-05-02: Sixth live diagnostic (`regres-fast-bank-openedx-20260502T162238Z`) proved collect hardening across all 10 Bank shards, including missing-manifest and invalid-manifest repairs, but exposed the same prompt-shape weakness in `init.step2.asis_docs`: focused draft repair stalled with zero stdout/stderr and no draft artifacts. Tightened draft repair to start with command-first heredoc writes for the step manifest plus referenced `draft_final_root` files, removed full generic draft manifest examples from repair mode, and kept the write-set guard as the source of truth.
+- 2026-05-02: Seventh live diagnostic (`regres-fast-bank-openedx-20260502T173735Z`) confirmed the draft repair patch compiled and prechecked, but qwen collect repair still had a nondeterministic stall on `extras`: initial manifest failed on `semantic.edges[0].provenance.kind`, then repair saw the validation error and produced zero stdout/stderr for 3 minutes. Tightened collect repair to be command-only: authored docs/evidence remain encoded in the skeleton, validation-error details are not repeated, and the final instruction is to write the heredoc JSON exactly without factual edits.
+- 2026-05-02: Eighth live diagnostic (`regres-fast-bank-openedx-20260502T192507Z`) proved qwen collect/validator/draft focused repair paths across the bank/openedx slice, but exposed a codex gap: no-artifact collect stalls with provider diagnostics had no focused recovery because manifest-only repair only applies after authored docs exist. Added provider-authored collect pair recovery that writes only suggested overview doc + `shard-pack-manifest.json`, keeps fully silent qwen no-artifact in `runner_unavailable`, and added prompt/engine/qwen adapter regression coverage.
+- 2026-05-02: Ninth live diagnostic (`regres-fast-bank-openedx-20260502T215450Z`) used an older verification worktree and showed qwen still stalling in focused `validator_verdict_repair` after valid staged final artifacts existed. Tightened validator repair to command-first heredoc `validator-verdict.json`, added qwen/prompt tests for that compact repair contract, made draft artifact monitoring recursive under `draft_final_root`, and split structured report scanning so `kind=runtime_output` provider narration cannot create a secondary `runner_unavailable` without a real availability signal.
+- 2026-05-03: Fresh final-snapshot live diagnostic exposed a reporting metadata gap: qwen refresh failed after terminal runtime artifacts/logs existed, but `run-results.tsv` missed the failed headless refresh row because `full-run-ai-advent.sh` wrote rows only after successful CLI status/quality gates. Added idempotent failed-row persistence before every post-run `die` path with known `run_id`, preserving the existing 17-field TSV shape and making reports show failed headless rows instead of missing rows.
+- 2026-05-03: Post-DoD review found one more failed-row gap: known-`run_id` cycles could still die before row persistence when `reports/taskruns/<run_id>-quality.json` was missing or invalid. Made failed-row append best-effort around quality parsing and snapshot known runtime artifacts/logs before writing the row, then reran `make contracts`, `make test`, `make lint`, and `make build`.
+- 2026-05-03: Live run then exposed remaining legacy classifier behavior: a terminal-success `codex-code` backend (`result=passed`, `quality_gates=passed`, `run-status.env state=completed`) was still marked `runner_unavailable` by `full-run-batch.sh` from recovered raw provider diagnostics. Updated shell and Python classifiers so terminal-success runs keep `failure_class=none`; added regression tests and confirmed the current classifier returns `none` on the live codex artifact.
+- 2026-05-03: Live qwen validator repair exposed one more prompt skeleton bug: repair include dirs put validator `write_root` before staged final roots, so generated `checked_paths` could point at `.../validator/final-run-index.json` while still schema-valid. Updated the validator skeleton to skip `write_root` and prefer `/staging/final` roots; added regression coverage.
+- 2026-05-03: Final audit found the validator repair include-dir helper still passed the full `ReadContextRoots` set into focused verdict recovery, including workspace and repo roots. Narrowed it to `write_root + /staging/final` only, added regression coverage, and reran full DoD successfully.
+- 2026-05-03: Final live report replay found one more stale-classifier path: Python report regeneration ignored raw runner noise for terminal success but still trusted an old `run-classifications.tsv` row with `failure_class=runner_unavailable`/`cancellation_like`. Terminal-success report evaluation now discards stale classified failure/subclass values and has regression coverage.
+- 2026-05-03: The same replay exposed legacy `analysis:cross-repo-missing` logic on the successful codex backend: staged artifacts cited all 5 Open edX repos and had a multi-repo owner-gap finding, but the evaluator required explicit `semantic.edges[]`. Updated the report gate to count `citations[].repo` coverage plus multi-repo finding provenance as valid cross-repo signal, preserving the hard fail when both explicit edges and multi-repo finding evidence are absent.
+- 2026-05-03: Follow-up audit tightened the Python terminal-success classifier override to match the shell classifier: summary success must be paired with `run-status.env state=completed process_exit=0`. A passed summary without run-status no longer suppresses stale failure classes; regression coverage added.
+
+### Plan ID
 EP-20260502-qwen-smoke-tiny-marker-collect-hardening
 
 ### Context

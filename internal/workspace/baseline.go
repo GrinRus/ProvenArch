@@ -92,6 +92,8 @@ var baselinePromptPacks = map[string]string{
 		},
 		RequiredOutputShape: []string{
 			"`validator-verdict.json` only, with version/run_id/generated_at/verdict/summary/checked_paths and optional fixed_paths/issues/findings/questions",
+			"issues[] items use only code/severity/message plus optional path/document_id/citation_id; severity is error|warning",
+			"Do not put legacy finding-shaped fields in issues[]: id/title/description/rule_id/related_paths/related_ids/provenance",
 			"Each finding includes stable id/title/severity/description and provenance",
 			"Questions live inside the verdict payload when evidence is incomplete",
 			"Owner-gap may remain visible in findings/questions while verdict stays PASS when no technical validator issues remain",

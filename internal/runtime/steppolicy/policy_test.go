@@ -53,11 +53,17 @@ func TestDocFirstFilesystemPolicyDefinesSharedCollectRepairSurface(t *testing.T)
 		`Write ONLY inside write_root.`,
 		`Suggested collect authored doc path for this shard:`,
 		`Early pair-write requirement: write the suggested overview doc and shard-pack-manifest.json as one focused artifact pair`,
-		`Tiny smoke target shape: write "payments-overview.md" + "shard-pack-manifest.json" early`,
+		`Minimal collect target shape: write "payments-overview.md" + "shard-pack-manifest.json" early`,
 		`Do not wait for a complete broad repository sweep before writing shard-pack-manifest.json`,
-		`TASK-SPECIFIC COLLECT MANIFEST JSON SKELETON:`,
+		`FIRST COLLECT ARTIFACT PAIR COMMAND:`,
+		`Run this exact command as the next filesystem action after checking whether both target files already exist`,
+		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md' <<'ACP_COLLECT_DOC'`,
+		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json' <<'ACP_MANIFEST_JSON'`,
+		`TASK-SPECIFIC COLLECT MANIFEST JSON SKELETON: use the heredoc JSON embedded in FIRST COLLECT ARTIFACT PAIR COMMAND above`,
 		`"path": "payments-overview.md"`,
 		`"artifact_root": "reports/taskruns/run-1/staging/shards/payments"`,
+		`COLLECT MANIFEST CONTRACT CHECKLIST:`,
+		`The task-specific collect manifest JSON skeleton above is normative`,
 		`Do not exit after writing markdown only; every collect shard must finish with a valid shard-pack-manifest.json.`,
 		`After the first filesystem write inside write_root, stop broad repository exploration; only minimal manifest/JSON repair is allowed afterwards.`,
 		`After writing shard-pack-manifest.json, do NOT continue broad list_directory/read_file sweeps across repo roots.`,
@@ -165,6 +171,9 @@ func TestCollectManifestTaskSkeletonParsesAsShardPackManifest(t *testing.T) {
 	if got, want := manifest.Citations[0].Path, "src/main.go"; got != want {
 		t.Fatalf("citation path = %q, want %q", got, want)
 	}
+	if strings.Contains(raw, "scaffold") {
+		t.Fatalf("collect manifest skeleton should avoid scaffold wording in provider-authored artifacts:\n%s", raw)
+	}
 }
 
 func TestDocFirstFilesystemPolicyDefinesCanonicalValidatorVerdictSurface(t *testing.T) {
@@ -185,9 +194,13 @@ func TestDocFirstFilesystemPolicyDefinesCanonicalValidatorVerdictSurface(t *test
 	policy := DocFirstFilesystemPolicy(task)
 	required := []string{
 		`Write validator-verdict.json in write_root.`,
+		`Absolute validator verdict target: "/tmp/workspace/reports/taskruns/run-1/validator/validator-verdict.json".`,
 		`validator-verdict.json MUST include version=1, run_id, generated_at, verdict, and checked_paths.`,
+		`issues[] items MUST use exactly the canonical validator issue shape`,
+		`Do NOT put legacy finding-shaped fields inside issues[]`,
 		`Canonical validator-verdict fragment below is normative`,
 		`"generated_at": "2026-04-16T12:00:02Z"`,
+		`"code": "staged_index_missing"`,
 		`"repo": "payments-service"`,
 		`"verdict": "PASS"`,
 		`owner-only residual evidence gaps may still return verdict=PASS when no technical validator issues remain.`,
@@ -196,6 +209,61 @@ func TestDocFirstFilesystemPolicyDefinesCanonicalValidatorVerdictSurface(t *test
 	for _, needle := range required {
 		if !strings.Contains(policy, needle) {
 			t.Fatalf("expected findings doc-first policy to contain %q, got:\n%s", needle, policy)
+		}
+	}
+}
+
+func TestValidatorVerdictTaskSkeletonParsesWithCanonicalIssueShape(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:            "run-1",
+		StepID:           "init.step3.findings",
+		ReadContextRoots: []string{"/tmp/workspace/reports/taskruns/run-1/staging/final"},
+	}
+
+	raw := ValidatorVerdictTaskSkeleton(task)
+	verdict, err := contracts.ParseValidatorVerdict([]byte(raw))
+	if err != nil {
+		t.Fatalf("expected validator verdict skeleton to parse, got %v\n%s", err, raw)
+	}
+	if verdict.RunID != "run-1" || verdict.Verdict != "PASS" {
+		t.Fatalf("unexpected validator verdict skeleton: %+v", verdict)
+	}
+	if len(verdict.Issues) != 0 {
+		t.Fatalf("expected empty canonical issues skeleton, got %+v", verdict.Issues)
+	}
+}
+
+func TestValidatorVerdictTaskSkeletonUsesStagedFinalRootNotWriteRoot(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:     "run-1",
+		StepID:    "init.step3.findings",
+		WriteRoot: "/tmp/workspace/reports/taskruns/run-1/validator",
+		ReadContextRoots: []string{
+			"/tmp/workspace/reports/taskruns/run-1/validator",
+			"/tmp/workspace",
+			"/tmp/workspace/reports/taskruns/run-1/staging/final",
+			"/tmp/repos/bank",
+		},
+	}
+
+	raw := ValidatorVerdictTaskSkeleton(task)
+	verdict, err := contracts.ParseValidatorVerdict([]byte(raw))
+	if err != nil {
+		t.Fatalf("expected validator verdict skeleton to parse, got %v\n%s", err, raw)
+	}
+	if len(verdict.CheckedPaths) != 2 {
+		t.Fatalf("checked_paths = %#v, want final-run-index and citation-index", verdict.CheckedPaths)
+	}
+	for _, checkedPath := range verdict.CheckedPaths {
+		if strings.Contains(checkedPath, "/validator/") {
+			t.Fatalf("validator repair skeleton must not point checked_paths at write_root, got %#v", verdict.CheckedPaths)
+		}
+		if !strings.Contains(checkedPath, "/staging/final/") {
+			t.Fatalf("validator repair skeleton must point checked_paths at staged final artifacts, got %#v", verdict.CheckedPaths)
 		}
 	}
 }

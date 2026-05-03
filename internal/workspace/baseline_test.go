@@ -227,6 +227,8 @@ func TestBaselineFindingsPromptPackRequiresCanonicalVerdictMetadata(t *testing.T
 
 	expected := []string{
 		"`validator-verdict.json` only, with version/run_id/generated_at/verdict/summary/checked_paths",
+		"issues[] items use only code/severity/message plus optional path/document_id/citation_id; severity is error|warning",
+		"Do not put legacy finding-shaped fields in issues[]: id/title/description/rule_id/related_paths/related_ids/provenance",
 		"Observation provenance evidence must include repo/path for every cited file-level fact",
 		"If owner linkage is missing, surface owner-gap finding with explicit uncertainty without forcing FAIL on its own",
 	}

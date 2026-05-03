@@ -114,6 +114,23 @@ def text_has_runner_unavailable_signal(text: str) -> bool:
     for pattern in EXPLICIT_RUNNER_UNAVAILABLE_PATTERNS:
         if re.search(pattern, haystack, flags=re.IGNORECASE):
             return True
+    return text_has_raw_provider_runner_unavailable_signal(haystack)
+
+
+def text_has_structured_runner_unavailable_signal(text: str) -> bool:
+    haystack = str(text or "")
+    for line in haystack.splitlines():
+        if '"kind":"runtime_output"' in line or '"kind": "runtime_output"' in line:
+            if text_has_raw_provider_runner_unavailable_signal(line):
+                return True
+            continue
+        if text_has_runner_unavailable_signal(line):
+            return True
+    return False
+
+
+def text_has_raw_provider_runner_unavailable_signal(text: str) -> bool:
+    haystack = str(text or "")
     for line in haystack.splitlines():
         for pattern in GENERIC_RUNNER_UNAVAILABLE_PATTERNS:
             if re.search(pattern, line, flags=re.IGNORECASE):
@@ -129,6 +146,43 @@ def text_has_runtime_contract_parse_signature(text: str) -> bool:
         re.search(r"parse runtime draft manifest", haystack, flags=re.IGNORECASE)
         and re.search(r"unknown field", haystack, flags=re.IGNORECASE)
     )
+
+
+def extract_focused_recovery_reason_tags(text: str) -> set[str]:
+    haystack = str(text or "").lower()
+    tags: set[str] = set()
+    if (
+        "collect manifest repair exhausted" in haystack
+        or "manifest-only collect repair stalled" in haystack
+        or "manifest-only collect repair did not produce valid collect artifacts" in haystack
+    ):
+        tags.add("collect_manifest_repair_exhausted")
+    if (
+        ("focused artifact repair exhausted" in haystack and "validator_verdict_repair" in haystack)
+        or "verdict-only validator repair stalled" in haystack
+        or "verdict-only validator repair did not produce a valid validator verdict contract" in haystack
+    ):
+        tags.add("validator_verdict_repair_exhausted")
+    if (
+        "validator verdict recovery write-set precheck failed" in haystack
+        or "verdict-only validator repair wrote outside validator-verdict.json" in haystack
+        or "validator repair wrote forbidden" in haystack
+    ):
+        tags.add("validator_verdict_repair_write_set_violation")
+    if (
+        ("focused artifact repair exhausted" in haystack and "draft_artifact_repair" in haystack)
+        or "draft artifact repair stalled" in haystack
+        or "draft artifact repair did not produce valid draft artifact contract" in haystack
+    ):
+        tags.add("draft_artifact_repair_exhausted")
+    if (
+        "draft recovery write_root precheck failed" in haystack
+        or "draft recovery draft_final_root precheck failed" in haystack
+        or "draft recovery wrote outside the draft artifact write set" in haystack
+        or "draft repair wrote forbidden write_root files" in haystack
+    ):
+        tags.add("draft_artifact_repair_write_set_violation")
+    return tags
 
 
 def workspace_candidates(run_dir: Path) -> list[Path]:
@@ -779,6 +833,14 @@ def collect_repo_mentions(payload: dict[str, Any]) -> set[str]:
             value = str(item).strip()
             if value:
                 mentions.add(normalize_text(value))
+    citations = payload.get("citations")
+    if isinstance(citations, list):
+        for item in citations:
+            if not isinstance(item, dict):
+                continue
+            value = str(item.get("repo", "")).strip()
+            if value:
+                mentions.add(normalize_text(value))
 
     def walk(node: Any) -> None:
         if isinstance(node, dict):
@@ -808,6 +870,37 @@ def count_semantic_edges(payload: dict[str, Any]) -> int:
         return 0
     edges = semantic.get("edges") or []
     return len(edges) if isinstance(edges, list) else 0
+
+
+def count_cross_repo_finding_links(payload: dict[str, Any]) -> int:
+    semantic = payload.get("semantic") or {}
+    if not isinstance(semantic, dict):
+        return 0
+    findings = semantic.get("findings") or []
+    if not isinstance(findings, list):
+        return 0
+    count = 0
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        related = {
+            normalize_text(str(item))
+            for item in (finding.get("related_ids") or [])
+            if str(item).strip()
+        }
+        repos: set[str] = set()
+        provenance = finding.get("provenance")
+        if isinstance(provenance, dict):
+            evidence = provenance.get("evidence") or []
+            if isinstance(evidence, list):
+                for item in evidence:
+                    if isinstance(item, dict):
+                        repo_name = str(item.get("repo", "")).strip()
+                        if repo_name:
+                            repos.add(normalize_text(repo_name))
+        if len(repos) >= 2 and len(related | repos) >= 2:
+            count += 1
+    return count
 
 
 def collect_off_topic_hits(payload: dict[str, Any]) -> list[str]:
@@ -1130,7 +1223,8 @@ def evaluate_run(
 
     summary_text = read_text_file(summary_path) if summary_path.exists() else ""
     full_run_log_text = read_text_file(full_run_log) if full_run_log.exists() else ""
-    run_status = parse_run_status_file(run_dir / "run-status.env")
+    run_status_path = run_dir / "run-status.env"
+    run_status = parse_run_status_file(run_status_path)
     run_history_counts = parse_run_history_status_counts(workspace / "reports" / "taskruns" / "run-history.json")
     summary_missing = not summary_path.exists()
     result_value = first_token(parse_markdown_scalar(summary_text, "result")) if summary_text else ""
@@ -1149,6 +1243,23 @@ def evaluate_run(
         and str(run_status.get("state", "")).strip() == "process_failed"
         and str(run_status.get("summary_written", "")).strip() == "yes"
     )
+    terminal_success = (
+        summary_path.exists()
+        and run_status_path.exists()
+        and result_value == "passed"
+        and quality_gates_value == "passed"
+        and api_status == "succeeded"
+        and str(run_status.get("state", "")).strip() == "completed"
+        and parse_int(run_status.get("process_exit", "-1"), -1) == 0
+    )
+    if terminal_success and classified_failure not in {"", "none"}:
+        details.append(
+            "reliability/classifier-override -> ignored stale classified failure "
+            f"{classified_failure} because run-status.env/session-summary mark terminal success"
+        )
+        classified_failure = "none"
+        classified_subclass = "none"
+        cancellation_like = False
 
     rows = parse_run_results(run_results_path)
     headless_rows = parse_headless_rows(rows, provider)
@@ -1192,34 +1303,64 @@ def evaluate_run(
     runner_error_hit = False
     parse_stages: set[str] = set()
     raw_outputs: set[str] = set()
-    runner_error_sources = [summary_path, full_run_log]
-    runner_error_sources.extend(sorted((run_dir / "logs").glob("run-iter*-*.log")))
+    focused_recovery_reasons: set[str] = set()
+    runtime_metadata_count = 0
+    runtime_log_count = 0
+    structured_runner_error_sources = [summary_path, full_run_log]
+    structured_runner_error_sources.extend(sorted((run_dir / "logs").glob("run-iter*-*.log")))
+    raw_runner_error_sources: list[Path] = []
     for workspace_root in workspace_roots:
-        runner_error_sources.extend(sorted((workspace_root / "reports" / "taskruns" / "logs").glob("*.ndjson")))
-        runner_error_sources.extend(
-            sorted(path for path in (workspace_root / "reports" / "taskruns" / "raw").rglob("*") if path.is_file())
+        taskruns_root = workspace_root / "reports" / "taskruns"
+        runtime_metadata_count += sum(1 for _ in taskruns_root.glob("**/runtime-execution.json"))
+        workspace_structured_logs = sorted((taskruns_root / "logs").glob("*.ndjson"))
+        runtime_log_count += len(workspace_structured_logs)
+        structured_runner_error_sources.extend(workspace_structured_logs)
+        workspace_raw_outputs = sorted(path for path in (taskruns_root / "raw").rglob("*") if path.is_file())
+        runtime_log_count += len(workspace_raw_outputs)
+        raw_runner_error_sources.extend(workspace_raw_outputs)
+    if not h2 and (runtime_metadata_count > 0 or runtime_log_count > 0):
+        details.append(
+            "reliability/headless-status -> runtime artifacts/logs found despite missing or failed run-results rows: "
+            f"runtime_execution={runtime_metadata_count} task_logs={runtime_log_count}"
         )
-    for source_path in runner_error_sources:
+    for source_path in structured_runner_error_sources:
         if not source_path.exists():
             continue
         text = read_text_file(source_path)
-        if text_has_runtime_contract_parse_signature(text):
-            runtime_contract_parse_failed_hit = True
-            runtime_contract_failed_hit = True
-            runner_error_hit = True
-            error_codes.append("runtime_contract_failed")
-        if text_has_runner_unavailable_signal(text):
-            runner_unavailable_hit = True
-            runner_error_hit = True
-            error_codes.append("runner_unavailable")
-        if "runtime_contract_failed" in text:
-            runtime_contract_failed_hit = True
-            runner_error_hit = True
-            error_codes.append("runtime_contract_failed")
-        if "validator verdict is FAIL" in text:
-            validator_verdict_failed_hit = True
-        parse_stages.update(match.group(1).strip() for match in re.finditer(r"parse_stage=([a-z_]+)", text))
-        raw_outputs.update(match.group(1).strip() for match in re.finditer(r"raw_output=([^\s)]+)", text))
+        focused_recovery_reasons.update(extract_focused_recovery_reason_tags(text))
+        if not terminal_success:
+            if text_has_runtime_contract_parse_signature(text):
+                runtime_contract_parse_failed_hit = True
+                runtime_contract_failed_hit = True
+                runner_error_hit = True
+                error_codes.append("runtime_contract_failed")
+            if text_has_structured_runner_unavailable_signal(text):
+                runner_unavailable_hit = True
+                runner_error_hit = True
+                error_codes.append("runner_unavailable")
+            if "runtime_contract_failed" in text:
+                runtime_contract_failed_hit = True
+                runner_error_hit = True
+                error_codes.append("runtime_contract_failed")
+            if "validator verdict is FAIL" in text:
+                validator_verdict_failed_hit = True
+            parse_stages.update(match.group(1).strip() for match in re.finditer(r"parse_stage=([a-z_]+)", text))
+            raw_outputs.update(match.group(1).strip() for match in re.finditer(r"raw_output=([^\s)]+)", text))
+    for source_path in raw_runner_error_sources:
+        if not source_path.exists():
+            continue
+        text = read_text_file(source_path)
+        focused_recovery_reasons.update(extract_focused_recovery_reason_tags(text))
+        if not terminal_success:
+            if text_has_runtime_contract_parse_signature(text):
+                runtime_contract_parse_failed_hit = True
+                runtime_contract_failed_hit = True
+                runner_error_hit = True
+                error_codes.append("runtime_contract_failed")
+            if text_has_raw_provider_runner_unavailable_signal(text):
+                runner_unavailable_hit = True
+                runner_error_hit = True
+                error_codes.append("runner_unavailable")
     h3 = not runner_error_hit
     if not h3:
         issues.append("reliability:runner-errors")
@@ -1228,6 +1369,8 @@ def evaluate_run(
             details.append(f"reliability/runner-errors -> parse_stages={sorted(parse_stages)}")
         if raw_outputs:
             details.append(f"reliability/runner-errors -> raw_outputs={sorted(raw_outputs)[:5]}")
+    if focused_recovery_reasons:
+        details.append(f"reliability/focused-recovery -> reasons={sorted(focused_recovery_reasons)}")
     if runtime_contract_failed_hit:
         issues.append("reliability:runtime-contract-failed")
     if runner_unavailable_hit:
@@ -1420,6 +1563,7 @@ def evaluate_run(
     analysis_report_mode = ""
     analysis_collect_status = ""
     analysis_findings_status = ""
+    analysis_evidence_reasons: list[str] = []
     analysis_quality_row = refresh_row or init_row
     artifact_quality_warnings: list[str] = []
     if analysis_quality_row:
@@ -1436,11 +1580,22 @@ def evaluate_run(
                     analysis_collect_status = str(collect_state.get("status", "")).strip()
                 if isinstance(findings_state, dict):
                     analysis_findings_status = str(findings_state.get("status", "")).strip()
+                evidence_reasons = evidence_state.get("reasons") or []
+                if isinstance(evidence_reasons, list):
+                    analysis_evidence_reasons.extend(
+                        str(reason).strip() for reason in evidence_reasons if str(reason).strip()
+                    )
             if artifact_quality_warnings:
                 issues.append("quality:artifact-quality")
                 for warning in artifact_quality_warnings:
                     details.append(f"quality/artifact-quality -> {analysis_quality_path}: {warning}")
                 quality_gates_failed = True
+            if analysis_evidence_reasons:
+                details.append(
+                    "analysis/evidence-state -> "
+                    f"report_mode={analysis_report_mode or '-'} collect_status={analysis_collect_status or '-'} "
+                    f"findings_status={analysis_findings_status or '-'} reasons={sorted(set(analysis_evidence_reasons))}"
+                )
     findings_path = analysis_reports_root / "findings/findings.md"
     overview_path = analysis_reports_root / "as-is/overview.md"
     coverage_path = analysis_reports_root / "coverage/summary.md"
@@ -1572,16 +1727,19 @@ def evaluate_run(
             else:
                 repo_mentions: set[str] = set()
                 edge_upserts = 0
+                cross_repo_finding_links = 0
                 for step_file in refresh_step_files:
                     payload = read_json(step_file)
                     repo_mentions.update(collect_repo_mentions(payload))
                     edge_upserts += count_semantic_edges(payload)
-                if len(repo_mentions) < 2 or edge_upserts < 1:
+                    cross_repo_finding_links += count_cross_repo_finding_links(payload)
+                if len(repo_mentions) < 2 or (edge_upserts < 1 and cross_repo_finding_links < 1):
                     semantic_hard_fail = True
                     issues.append("analysis:cross-repo-missing")
                     details.append(
                         f"analysis/cross-repo-missing -> run_dir={run_dir} expected_repo_count={expected_repo_count} "
-                        f"repo_mentions={len(repo_mentions)} edge_upserts={edge_upserts}"
+                        f"repo_mentions={len(repo_mentions)} edge_upserts={edge_upserts} "
+                        f"cross_repo_finding_links={cross_repo_finding_links}"
                     )
     elif expected_repo_count >= 2:
         if terminal_runtime_provider_failure:

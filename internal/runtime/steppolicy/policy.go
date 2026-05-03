@@ -98,6 +98,8 @@ func StepSpecificPolicy(stepID string) string {
 			fmt.Sprintf(`STEP POLICY %s:`, strings.TrimSpace(stepID)),
 			`- Write validator-verdict.json only; do not write shard manifests or semantic snapshots for this step.`,
 			`- validator-verdict.json must include version=1, run_id, generated_at, verdict, and checked_paths.`,
+			`- validator-verdict.json issues[] must use code/severity/message plus optional path/document_id/citation_id only.`,
+			`- Do NOT use legacy issue fields id/title/description/rule_id/related_paths inside issues[].`,
 			`- findings[] items must use title + description + provenance; do NOT use summary as a finding alias.`,
 			`- For observation provenance, findings[*].provenance.evidence[] must be non-empty and each evidence item must include repo/path.`,
 			`- If owner mapping remains unresolved in evidence, include at least one finding and at least one question in validator-verdict.json.`,
@@ -145,6 +147,8 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 		fmt.Sprintf(`- agent_role = %q`, strings.TrimSpace(task.AgentRole)),
 		fmt.Sprintf(`- step_contract = %q`, strings.TrimSpace(task.StepContract)),
 		fmt.Sprintf(`- expected_artifacts = %s`, strings.Join(task.ExpectedArtifacts, ", ")),
+		`- Every required artifact write/check MUST use the exact absolute write_root or draft_final_root paths above.`,
+		`- Relative CWD checks/writes such as test -f validator-verdict.json or test -f overview.md are invalid for runtime artifacts.`,
 	}
 	if entrypointHints := CollectRepoEntrypointHints(task); len(entrypointHints) > 0 {
 		lines = append(lines, fmt.Sprintf(`- Existing repo entrypoint hints (read only these first when relevant): %s`, strings.Join(entrypointHints, ", ")))
@@ -171,9 +175,13 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Early pair-write requirement: write the suggested overview doc and shard-pack-manifest.json as one focused artifact pair before any broad second-pass repository sweep.`,
 			`- Produce runtime-authored documents in write_root and then write shard-pack-manifest.json in write_root.`,
 			fmt.Sprintf(`- Suggested collect authored doc path for this shard: %q. Prefer exactly this single doc path unless already writing an existing clearer authored doc.`, SuggestedCollectDocumentPath(task)),
-			fmt.Sprintf(`- Tiny smoke target shape: write %q + "shard-pack-manifest.json" early, then record remaining uncertainty in coverage/questions instead of continuing open-ended exploration.`, SuggestedCollectDocumentPath(task)),
+			fmt.Sprintf(`- Absolute collect targets for the early pair-write: %q and %q.`, filepath.Join(strings.TrimSpace(task.WriteRoot), filepath.FromSlash(SuggestedCollectDocumentPath(task))), filepath.Join(strings.TrimSpace(task.WriteRoot), "shard-pack-manifest.json")),
+			fmt.Sprintf(`- Minimal collect target shape: write %q + "shard-pack-manifest.json" early, then record remaining uncertainty in coverage/questions instead of continuing open-ended exploration.`, SuggestedCollectDocumentPath(task)),
 			`- Do not wait for a complete broad repository sweep before writing shard-pack-manifest.json; once the first authored doc covers the assigned shard scope, write the manifest and record remaining gaps in semantic.coverage.missing.`,
-			`- Immediately after writing the first authored doc, write shard-pack-manifest.json by adapting the task-specific JSON skeleton below; keep exact metadata keys and replace only evidence/content values you actually observed.`,
+			`- Immediately after writing the first authored doc, write shard-pack-manifest.json by adapting the task-specific JSON skeleton embedded in the command; keep exact metadata keys and replace only evidence/content values you actually observed.`,
+			`FIRST COLLECT ARTIFACT PAIR COMMAND:`,
+			`Run this exact command as the next filesystem action after checking whether both target files already exist; do not run find/rg/list_directory over path_scopes before this command:`,
+			CollectEarlyPairWriteCommand(task),
 			`- Do not exit after writing markdown only; every collect shard must finish with a valid shard-pack-manifest.json.`,
 			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and semantic snapshot.`,
 			`- In shard-pack-manifest.json, semantic MUST include coverage, questions, entities, edges, and findings.`,
@@ -193,13 +201,12 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			)
 		}
 		lines = append(lines,
-			`TASK-SPECIFIC COLLECT MANIFEST JSON SKELETON:`,
-			CollectManifestTaskSkeleton(task, []string{SuggestedCollectDocumentPath(task)}, nil),
+			`TASK-SPECIFIC COLLECT MANIFEST JSON SKELETON: use the heredoc JSON embedded in FIRST COLLECT ARTIFACT PAIR COMMAND above; do not copy a generic manifest example.`,
+			`COLLECT MANIFEST CONTRACT CHECKLIST:`,
 		)
 		lines = append(lines, artifactquality.CollectManifestContractLines(strings.TrimSpace(task.ArtifactRoot))...)
 		lines = append(lines,
-			`- Canonical collect fragment below is normative for field names and value types; do not substitute legacy aliases.`,
-			artifactquality.CollectManifestCanonicalExample(),
+			`- The task-specific collect manifest JSON skeleton above is normative for field names and value types; copy that skeleton, not a generic example.`,
 		)
 		lines = append(lines, artifactquality.ClaimIDContractLines()...)
 		lines = append(lines,
@@ -210,6 +217,7 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 		lines = append(lines,
 			`- Inspect staged final artifacts under reports/taskruns/<run_id>/staging/final from read_context_roots.`,
 			`- Write validator-verdict.json in write_root.`,
+			fmt.Sprintf(`- Absolute validator verdict target: %q.`, filepath.Join(strings.TrimSpace(task.WriteRoot), "validator-verdict.json")),
 			`- Validator may fix only indexes, references, or technical document issues inside write_root; do not rewrite document meaning wholesale.`,
 			`- Do NOT shard this step and do NOT emit findings through stdout; validator-verdict.json is the only primary output.`,
 		)
@@ -217,6 +225,8 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 		lines = append(lines,
 			`- Canonical validator-verdict fragment below is normative for metadata fields and finding evidence shape; copy keys/types exactly and only change IDs/content.`,
 			artifactquality.ValidatorVerdictCanonicalExample(),
+			`- Canonical issues[] item example (use only when verdict has a technical validator issue):`,
+			artifactquality.ValidatorVerdictIssueCanonicalExample(),
 		)
 		lines = append(lines, artifactquality.ClaimIDContractLines()...)
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
@@ -263,6 +273,58 @@ func SuggestedCollectDocumentPath(task acpruntime.Task) string {
 		return slug + "-overview.md"
 	}
 	return "overview.md"
+}
+
+func CollectEarlyPairWriteCommand(task acpruntime.Task) string {
+	writeRoot := strings.TrimSpace(task.WriteRoot)
+	docRel := SuggestedCollectDocumentPath(task)
+	docTarget := filepath.Join(writeRoot, filepath.FromSlash(docRel))
+	manifestTarget := filepath.Join(writeRoot, "shard-pack-manifest.json")
+	skeleton := CollectManifestTaskSkeleton(task, []string{docRel}, nil)
+	return strings.Join([]string{
+		"mkdir -p " + shellSingleQuote(writeRoot),
+		"cat > " + shellSingleQuote(docTarget) + " <<'ACP_COLLECT_DOC'",
+		collectDocumentInitialTemplate(task, docRel),
+		"ACP_COLLECT_DOC",
+		"cat > " + shellSingleQuote(manifestTarget) + " <<'ACP_MANIFEST_JSON'",
+		strings.TrimSpace(skeleton),
+		"ACP_MANIFEST_JSON",
+	}, "\n")
+}
+
+func collectDocumentInitialTemplate(task acpruntime.Task, docRel string) string {
+	repo := PrimaryTaskRepoScope(task.RepoScope, task.RepoScopes)
+	if repo == "" {
+		repo = "repo"
+	}
+	evidencePath := firstNonEmptyPath(task.PathScopes)
+	if evidencePath == "" {
+		evidencePath = "README.md"
+	}
+	scopeText := strings.Join(nonEmptyList(task.PathScopes), ", ")
+	if scopeText == "" {
+		scopeText = evidencePath
+	}
+	titleSlug := slugComponent(strings.TrimSuffix(filepath.Base(docRel), filepath.Ext(docRel)))
+	title := titleFromSlug(titleSlug)
+	return strings.Join([]string{
+		"# " + title,
+		"",
+		"## Scope",
+		"- Repository: " + repo,
+		"- Path scopes: " + scopeText,
+		"",
+		"## Observations",
+		"- Repository evidence under `" + evidencePath + "` is the first citation surface for this shard.",
+		"- Record concrete service, module, data-flow, or ownership observations from the scoped files before exit.",
+		"",
+		"## Evidence",
+		"- Primary evidence path: `" + evidencePath + "`",
+		"",
+		"## Follow-up",
+		"- Record owner mapping gaps as questions when repository evidence does not name an owner.",
+		"",
+	}, "\n")
 }
 
 func CollectManifestTaskSkeleton(task acpruntime.Task, docPaths []string, evidencePaths []string) string {
@@ -349,7 +411,7 @@ func CollectManifestTaskSkeleton(task acpruntime.Task, docPaths []string, eviden
 			Coverage: contracts.Coverage{
 				Observed: []string{topic},
 				Missing:  []string{"owner mappings if absent from repository evidence"},
-				Notes:    []string{"Replace this scaffold content with concrete repository observations before exiting."},
+				Notes:    []string{"Record concrete repository observations in the authored document before exiting."},
 			},
 			Questions: []contracts.Question{},
 			Entities:  []contracts.Entity{},
@@ -362,6 +424,106 @@ func CollectManifestTaskSkeleton(task acpruntime.Task, docPaths []string, eviden
 		return "{}"
 	}
 	return string(raw)
+}
+
+func shellSingleQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+}
+
+func ValidatorVerdictTaskSkeleton(task acpruntime.Task) string {
+	runID := firstNonEmpty(task.RunID, "run-1")
+	checkedPaths := validatorCheckedPathSkeleton(task)
+	verdict := contracts.ValidatorVerdict{
+		Version:      1,
+		RunID:        runID,
+		GeneratedAt:  "2026-04-16T12:00:02Z",
+		Verdict:      "PASS",
+		Summary:      "No blocking technical validator issues remain after inspecting the staged final artifacts.",
+		CheckedPaths: checkedPaths,
+		FixedPaths:   []string{},
+		Findings:     []contracts.Finding{},
+		Questions:    []contracts.Question{},
+		Issues:       []contracts.ValidatorIssue{},
+	}
+	raw, err := json.MarshalIndent(verdict, "", "  ")
+	if err != nil {
+		return `{"version":1,"run_id":"run-1","generated_at":"2026-04-16T12:00:02Z","verdict":"PASS","checked_paths":["reports/taskruns/run-1/staging/final/final-run-index.json"],"fixed_paths":[],"findings":[],"questions":[],"issues":[]}`
+	}
+	return string(raw)
+}
+
+func validatorCheckedPathSkeleton(task acpruntime.Task) []string {
+	runID := firstNonEmpty(task.RunID, "run-1")
+	if root := validatorStagedFinalRoot(task); root != "" {
+		return []string{
+			filepath.ToSlash(filepath.Join(root, "final-run-index.json")),
+			filepath.ToSlash(filepath.Join(root, "citation-index.json")),
+		}
+	}
+	return []string{
+		fmt.Sprintf("reports/taskruns/%s/staging/final/final-run-index.json", runID),
+		fmt.Sprintf("reports/taskruns/%s/staging/final/citation-index.json", runID),
+	}
+}
+
+func validatorStagedFinalRoot(task acpruntime.Task) string {
+	writeRoot := filepath.Clean(strings.TrimSpace(task.WriteRoot))
+	for _, root := range task.ReadContextRoots {
+		trimmed := strings.TrimSpace(root)
+		if trimmed == "" {
+			continue
+		}
+		cleaned := filepath.Clean(trimmed)
+		if writeRoot != "." && cleaned == writeRoot {
+			continue
+		}
+		slash := filepath.ToSlash(cleaned)
+		if strings.HasSuffix(slash, "/staging/final") || strings.Contains(slash, "/staging/final/") {
+			return cleaned
+		}
+	}
+	return ""
+}
+
+func RuntimeDraftManifestTaskSkeleton(task acpruntime.Task) string {
+	manifest := runtimedrafts.Manifest{
+		Version:      1,
+		RunID:        firstNonEmpty(task.RunID, "run-1"),
+		StepID:       firstNonEmpty(task.StepID, "init.step2.asis_docs"),
+		StepContract: firstNonEmpty(task.StepContract, runtimedrafts.StepContractForStep(task.StepID)),
+		AgentRole:    firstNonEmpty(task.AgentRole, "architect"),
+		Summary:      "Drafted required runtime artifacts for this step.",
+		Outputs:      runtimeDraftOutputSkeleton(task),
+	}
+	raw, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return `{"version":1,"run_id":"run-1","step_id":"init.step2.asis_docs","step_contract":"as_is","agent_role":"architect","outputs":[{"path":"overview.md","canonical_path":"reports/as-is/overview.md","kind":"report","title":"System Overview"}]}`
+	}
+	return string(raw)
+}
+
+func runtimeDraftOutputSkeleton(task acpruntime.Task) []runtimedrafts.Output {
+	switch strings.TrimSpace(task.StepID) {
+	case "init.step0.constitution":
+		return []runtimedrafts.Output{
+			{Path: "charter-overview.md", CanonicalPath: "charter/overview.md", Kind: "charter", Title: "Constitution"},
+			{Path: "baseline-subagents.yaml", CanonicalPath: "skills/subagents.yaml", Kind: "bundle", Title: "Baseline Subagents"},
+		}
+	case "init.step4.proposals", "refresh.step4.proposals":
+		return []runtimedrafts.Output{
+			{Path: "proposal.md", CanonicalPath: "proposals/runtime-recommendations.md", Kind: "proposal", Title: "Runtime Recommendations"},
+			{Path: "changelog.md", CanonicalPath: "reports/changelog/runtime-proposals.md", Kind: "changelog", Title: "Runtime Proposal Changelog"},
+		}
+	default:
+		return []runtimedrafts.Output{
+			{Path: "overview.md", CanonicalPath: "reports/as-is/overview.md", Kind: "report", Title: "System Overview"},
+			{Path: "summary.md", CanonicalPath: "reports/coverage/summary.md", Kind: "report", Title: "Coverage Summary"},
+			{Path: "architect-summary.md", CanonicalPath: "reports/agent-outputs/architect/summary.md", Kind: "agent-output", Title: "Architect Summary"},
+		}
+	}
 }
 
 func rootFileShardPathScopes(pathScopes []string) []string {
