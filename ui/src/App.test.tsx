@@ -14,6 +14,9 @@ type FetchMockState = {
   artifactText?: Record<string, string>;
   baselineBundleWarnings?: MockJSON[];
   cancelResponses?: Record<string, { status: number; body?: MockJSON }>;
+  validateResponse?: MockJSON;
+  validateStatus?: number;
+  manifestContent?: string;
 };
 
 function jsonResponse(body: MockJSON, status = 200): Response {
@@ -141,8 +144,14 @@ function createFetchMock(state: FetchMockState = {}) {
 
     if (method === "GET" && url === "/api/workspace/manifest") {
       return jsonResponse({
-        content: "version: 1\nrepos:\n  - name: payments-service\n    path: /tmp/payments-service\n",
+        content:
+          state.manifestContent ??
+          'version: 1\nrepos:\n  - name: "my-service"\n    git_url: "https://github.com/org/my-service.git"\ndocs:\n  imports_path: "./docs/imports"\n',
       });
+    }
+
+    if (method === "PUT" && url === "/api/workspace/manifest") {
+      return jsonResponse({ ok: true });
     }
 
     if (method === "GET" && url === "/api/workspace/bundle") {
@@ -195,6 +204,19 @@ function createFetchMock(state: FetchMockState = {}) {
       });
     }
 
+    if (method === "GET" && url.startsWith("/api/system/doctor")) {
+      return jsonResponse({
+        ok: true,
+        summary: "ready",
+        checks: [
+          { id: "git", label: "Git", status: "pass", message: "git found" },
+          { id: "workspace", label: "Workspace", status: "pass", message: "workspace is writable" },
+          { id: "embedded_ui", label: "Embedded UI", status: "pass", message: "embedded UI assets are present" },
+          { id: "runtime_provider", label: "Runtime provider", status: "pass", message: "fake runtime selected" },
+        ],
+      });
+    }
+
     if (method === "GET" && url.startsWith("/api/artifacts?path=")) {
       const encodedPath = url.slice("/api/artifacts?path=".length);
       const decodedPath = decodeURIComponent(encodedPath);
@@ -208,12 +230,15 @@ function createFetchMock(state: FetchMockState = {}) {
     }
 
     if (method === "POST" && url === "/api/workspace/validate") {
-      return jsonResponse({
-        ok: true,
-        workspace: "/tmp/workspace",
-        warnings: [],
-        errors: [],
-      });
+      return jsonResponse(
+        state.validateResponse ?? {
+          ok: true,
+          workspace: "/tmp/workspace",
+          warnings: [],
+          errors: [],
+        },
+        state.validateStatus ?? 200,
+      );
     }
 
     if (method === "POST" && url === "/api/pipeline/init") {
@@ -339,6 +364,126 @@ describe("App", () => {
     expect(screen.getByTestId("runtime-step-providers-panel")).toBeInTheDocument();
     expect(screen.getByText("runtime.profile.steps.step2_as_is.provider")).toBeInTheDocument();
     expect(screen.getAllByText("qwen-code").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("guides first-run setup through validate, doctor, and run", async () => {
+    const fetchMock = createFetchMock({ runID: "run-first" });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(screen.getByTestId("setup-stepper")).toHaveTextContent("Source");
+    expect(screen.getByDisplayValue("https://github.com/org/my-service.git")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Apply guided workspace form"));
+    fireEvent.click(screen.getByTestId("workspace-save-btn"));
+
+    await screen.findByTestId("workspace-validate-result");
+    expect(screen.getByTestId("setup-run-first-btn")).not.toBeDisabled();
+
+    fireEvent.click(screen.getByTestId("setup-doctor-btn"));
+    await screen.findByTestId("setup-doctor-result");
+    expect(screen.getByText("Local readiness passed.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("setup-run-first-btn"));
+    await screen.findByTestId("results-coverage-panel");
+    expect(fetchMock).toHaveBeenCalledWith("/api/pipeline/init", expect.anything());
+  });
+
+  it("supports local-folder source mode in first-run setup", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText("Repo source type"), { target: { value: "path" } });
+    fireEvent.change(await screen.findByLabelText("Local checkout path"), { target: { value: "/tmp/my-service" } });
+    fireEvent.click(screen.getByText("Apply guided workspace form"));
+    fireEvent.click(screen.getByText("Advanced workspace.yaml editor"));
+
+    const manifest = screen.getByDisplayValue((content) => content.includes('path: "/tmp/my-service"'));
+    expect(manifest).toBeInTheDocument();
+    expect((manifest as HTMLTextAreaElement).value).not.toContain("git_url:");
+  });
+
+  it("hydrates guided first-run form from loaded workspace manifest", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        manifestContent:
+          'version: 1\nrepos:\n  - name: "loaded-service"\n    path: "/tmp/loaded-service"\n    ref: "main"\ndocs:\n  imports_path: "./docs/imported"\n',
+      }),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByDisplayValue("loaded-service")).toBeInTheDocument();
+    expect(screen.getByLabelText("Repo source type")).toHaveValue("path");
+    expect(screen.getByDisplayValue("/tmp/loaded-service")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("main")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("./docs/imported")).toBeInTheDocument();
+  });
+
+  it("shows validation suggestions as next actions", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        validateStatus: 400,
+        validateResponse: {
+          ok: false,
+          workspace: "/tmp/workspace",
+          warnings: [],
+          errors: [
+            {
+              level: "error",
+              code: "workspace.repo.git_url.fetch_failed",
+              message: "git cannot clone this repo",
+              suggestion: "Check the repository URL and your local git authentication.",
+              repo: "my-service",
+            },
+          ],
+          resolved_repos: [],
+        },
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("workspace-validate-btn"));
+
+    await screen.findByTestId("workspace-validate-result");
+    expect(screen.getByText(/Next: Check the repository URL and your local git authentication./)).toBeInTheDocument();
+    expect(screen.getByTestId("setup-run-first-btn")).toBeDisabled();
+  });
+
+  it("requires revalidation after first-run setup changes", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(<App />);
+
+    fireEvent.click(screen.getByText("Apply guided workspace form"));
+    fireEvent.click(screen.getByTestId("workspace-save-btn"));
+    await screen.findByTestId("workspace-validate-result");
+    expect(screen.getByTestId("setup-run-first-btn")).not.toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Repository URL"), { target: { value: "https://github.com/org/changed.git" } });
+
+    expect(screen.queryByTestId("workspace-validate-result")).not.toBeInTheDocument();
+    expect(screen.getByTestId("setup-run-first-btn")).toBeDisabled();
+  });
+
+  it("clears readiness checklist after runtime selection changes", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("setup-doctor-btn"));
+    await screen.findByTestId("setup-doctor-result");
+    expect(screen.getByText("Local readiness passed.")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Runtime mode"), { target: { value: "headless" } });
+
+    expect(screen.queryByTestId("setup-doctor-result")).not.toBeInTheDocument();
+    expect(screen.queryByText("Local readiness passed.")).not.toBeInTheDocument();
   });
 
   it("runs init from Runs tab and supports event/raw log modes", async () => {

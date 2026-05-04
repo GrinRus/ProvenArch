@@ -14,12 +14,14 @@ import {
   runtimeStepProviderOrder,
   runtimeTimeoutKeys,
   runtimeTimeoutLabels,
+  type GuidedRepo,
   type RuntimeExecutionKey,
   type RuntimeTimeoutKey,
 } from "./lib/appContracts";
 import { useRunExplorer } from "./hooks/useRunExplorer";
 import { useRuntimeSettings } from "./hooks/useRuntimeSettings";
 import { useWorkspaceSetup } from "./hooks/useWorkspaceSetup";
+import { loadSystemDoctor } from "./lib/systemApi";
 
 type TopTab = "setup" | "baseline" | "runs" | "results" | "settings";
 type ResultsTab = "coverage" | "artifacts" | "diagrams";
@@ -43,6 +45,11 @@ export default function App() {
   const [resultsTab, setResultsTab] = useState<ResultsTab>("coverage");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [setupRuntime, setSetupRuntime] = useState("fake");
+  const [setupRuntimeProvider, setSetupRuntimeProvider] = useState("claude-code");
+  const [setupDoctorResult, setSetupDoctorResult] = useState<Awaited<ReturnType<typeof loadSystemDoctor>> | null>(null);
+  const [setupDoctorStatus, setSetupDoctorStatus] = useState("");
+  const [firstRunStatus, setFirstRunStatus] = useState("");
 
   const runtimeSettings = useRuntimeSettings({
     setBusy,
@@ -169,6 +176,87 @@ export default function App() {
     await loadRuntimeProfile();
   }
 
+  async function handleSetupDoctorCheck() {
+    setBusy(true);
+    setError(null);
+    setSetupDoctorStatus("");
+    try {
+      const firstRepo = guidedRepos[0];
+      const repoPayload =
+        firstRepo?.mode === "path"
+          ? { repo_path: firstRepo.path }
+          : firstRepo?.mode === "git_url"
+            ? { repo_git_url: firstRepo.git_url }
+            : {};
+      const result = await loadSystemDoctor({
+        runtime: setupRuntime,
+        runtime_provider: setupRuntimeProvider,
+        ...repoPayload,
+      });
+      setSetupDoctorResult(result);
+      setSetupDoctorStatus(result.ok ? "Local readiness passed." : "Local readiness needs attention.");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "local readiness check failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function clearFirstRunReadiness() {
+    setSetupDoctorResult(null);
+    setSetupDoctorStatus("");
+    setFirstRunStatus("");
+  }
+
+  function handleSetupRepoChange(id: string, patch: Partial<GuidedRepo>) {
+    updateGuidedRepo(id, patch);
+    clearFirstRunReadiness();
+  }
+
+  function handleSetupAddRepo() {
+    handleAddGuidedRepo();
+    clearFirstRunReadiness();
+  }
+
+  function handleSetupRemoveRepo(id: string) {
+    handleRemoveGuidedRepo(id);
+    clearFirstRunReadiness();
+  }
+
+  function handleSetupDocsImportsPathChange(value: string) {
+    setGuidedDocsImportsPath(value);
+    clearFirstRunReadiness();
+  }
+
+  function handleSetupManifestChange(value: string) {
+    setManifestContent(value);
+    clearFirstRunReadiness();
+  }
+
+  function handleSetupApplyGuidedWorkspaceSetup() {
+    handleApplyGuidedWorkspaceSetup();
+    clearFirstRunReadiness();
+  }
+
+  function handleSetupRuntimeChange(value: string) {
+    setSetupRuntime(value);
+    clearFirstRunReadiness();
+  }
+
+  function handleSetupRuntimeProviderChange(value: string) {
+    setSetupRuntimeProvider(value);
+    clearFirstRunReadiness();
+  }
+
+  async function handleSetupFirstRun() {
+    setFirstRunStatus("");
+    const started = await handleRunPipeline("init");
+    if (started) {
+      setFirstRunStatus("First analysis started. Results will update as the run finishes.");
+      setActiveTab("results");
+    }
+  }
+
   return (
     <main className="shell">
       <section className="hero">
@@ -191,14 +279,23 @@ export default function App() {
             manifestContent={manifestContent}
             validateResult={validateResult}
             validationDiagnosticsByRepo={validationDiagnosticsByRepo}
-            onRepoChange={updateGuidedRepo}
-            onAddRepo={handleAddGuidedRepo}
-            onRemoveRepo={handleRemoveGuidedRepo}
-            onDocsImportsPathChange={setGuidedDocsImportsPath}
-            onApplyGuidedWorkspaceSetup={handleApplyGuidedWorkspaceSetup}
-            onManifestChange={setManifestContent}
+            doctorResult={setupDoctorResult}
+            doctorStatus={setupDoctorStatus}
+            firstRunStatus={firstRunStatus}
+            setupRuntime={setupRuntime}
+            setupRuntimeProvider={setupRuntimeProvider}
+            onRepoChange={handleSetupRepoChange}
+            onAddRepo={handleSetupAddRepo}
+            onRemoveRepo={handleSetupRemoveRepo}
+            onDocsImportsPathChange={handleSetupDocsImportsPathChange}
+            onApplyGuidedWorkspaceSetup={handleSetupApplyGuidedWorkspaceSetup}
+            onManifestChange={handleSetupManifestChange}
             onSaveManifest={() => void handleSaveManifest()}
             onValidateWorkspace={() => void handleValidateWorkspace()}
+            onSetupRuntimeChange={handleSetupRuntimeChange}
+            onSetupRuntimeProviderChange={handleSetupRuntimeProviderChange}
+            onCheckDoctor={() => void handleSetupDoctorCheck()}
+            onRunFirstAnalysis={() => void handleSetupFirstRun()}
           />
 
           <WizardContractPanel

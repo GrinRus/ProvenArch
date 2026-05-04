@@ -30,6 +30,49 @@
 { "status": "ok" }
 ```
 
+### GET `/api/system/doctor`
+Возвращает read-only readiness checklist для first-run UI и локальной диагностики.
+Endpoint не меняет workspace.
+
+Query params optional:
+- `runtime=fake|headless`
+- `runtime_provider=claude-code|qwen-code|codex-code`
+- `repo_path=/abs/path/to/repo`
+- `repo_git_url=https://github.com/org/repo.git`
+
+`repo_path` и `repo_git_url` взаимоисключающие. Для `repo_git_url` проверка использует локальный `git ls-remote --heads` и текущий auth context пользователя/runner.
+
+**200**
+```json
+{
+  "ok": true,
+  "summary": "ready",
+  "checks": [
+    {
+      "id": "git",
+      "label": "Git",
+      "status": "pass",
+      "message": "git found at /usr/bin/git"
+    },
+    {
+      "id": "runtime_provider",
+      "label": "Runtime provider",
+      "status": "pass",
+      "message": "fake runtime selected; no headless provider command required"
+    }
+  ]
+}
+```
+
+`checks[].status`:
+- `pass` — готово
+- `warn` — не блокирует первый fake walkthrough, но пользователь может улучшить конфигурацию
+- `fail` — user-fixable blocker
+
+**400**
+- `invalid_doctor_request`
+- `doctor_failed`
+
 ### POST `/api/workspace/validate`
 Проверяет bound workspace:
 - `workspace.yaml` contract + semantic validation

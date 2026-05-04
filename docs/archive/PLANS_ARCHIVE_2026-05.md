@@ -3,6 +3,59 @@
 Closed ExecPlans archived from `docs/PLANS.md` in May 2026.
 
 ### Plan ID
+EP-20260504-user-friendly-distribution
+
+### Context
+MVP feature matrix закрыта, но текущий GitHub-only путь остаётся developer-oriented: пользователь должен ставить Go/Node, собирать бинарь из исходников и понимать `workspace.yaml` до первого результата. Для beta adoption нужен user-first local-first flow: установить готовый `acp`, открыть embedded UI, подключить GitHub/GitLab URL или локальный checkout, пройти readiness checks и запустить первый `init`.
+
+### Goals (must have)
+- [x] Добавить release packaging через GoReleaser для macOS/Linux `amd64/arm64`
+- [x] Добавить GitHub Actions release workflow для tag `v*`
+- [x] Добавить `install.sh` с checksum verification и тестами
+- [x] Добавить read-only `acp doctor` для install/workspace/repo/runtime/UI readiness
+- [x] Добавить `GET /api/system/doctor` для UI readiness checklist
+- [x] Переработать Setup UI в first-run stepper `Source -> Workspace -> Runtime -> Validate -> Run`
+- [x] Спрятать raw `workspace.yaml` editor в Advanced и добавить first-run CTA
+- [x] Обновить README/install/troubleshooting/API/architecture docs
+- [x] Прогнать full DoD (`make contracts`, `make test`, `make lint`, `make build`)
+
+### Non-goals
+- [x] Не добавлять hosted mode, credential store или запись в user repos
+- [x] Не менять runtime artifact schemas/contracts
+- [x] Не делать Docker primary distribution path
+- [x] Не публиковать Homebrew tap в этом slice; зафиксировать как next release follow-up
+
+### Approach
+1) Добавить native release artifacts: GoReleaser config, tag-based GitHub release workflow, checksum-aware installer.
+2) Вынести readiness checks в reusable `internal/doctor`, подключить CLI `doctor` и API `/api/system/doctor`.
+3) Обновить Setup UI до guided first-run flow поверх существующих hooks/API без изменения process-scoped runtime semantics.
+4) Синхронизировать docs и добавить focused Go/UI/script tests.
+
+### Files expected to change
+- `cmd/acp/main.go`, `internal/doctor/*`, `internal/api/*`
+- `ui/src/components/SetupWorkspacePanel.tsx`, `ui/src/App.tsx`, `ui/src/lib/*`, `ui/src/hooks/*`, `ui/src/styles.css`
+- `.goreleaser.yml`, `.github/workflows/release.yml`, `install.sh`, `scripts/tests/install_script_test.py`, `scripts/tests/release_distribution_test.py`
+- `README.md`, `docs/INSTALL.md`, `docs/TROUBLESHOOTING.md`, `docs/ARCHITECTURE.md`, `docs/spec/API_SPEC.md`, `cmd/acp/README.md`, `docs/PLANS.md`, `docs/archive/PLANS_ARCHIVE_2026-05.md`
+
+### Acceptance criteria
+- [x] `acp doctor --json` reports pass/warn/fail checks and exits `0` when ready, `1` for user-fixable issues, `2` for invalid flags/internal request errors
+- [x] `/api/system/doctor` returns the same readiness report shape without mutating workspace
+- [x] UI first-run flow supports GitHub/GitLab URL default, local folder mode, validation diagnostics, doctor checklist and `Run first analysis`
+- [x] Installer downloads expected release archive, verifies `checksums.txt`, installs `acp` into `INSTALL_DIR`
+- [x] Release config targets `darwin/linux` `amd64/arm64` with embedded UI
+- [x] DoD passes
+
+### Risks
+- `git ls-remote` for private repos depends on local git auth and may fail until the user configures SSH/token credentials.
+- Headless readiness only verifies provider command presence; provider auth/model/runtime failures are still surfaced during live runs.
+- Homebrew needs a stable first release artifact before creating a tap formula.
+
+### Progress log
+- 2026-05-04: Implemented GoReleaser release config, tag release workflow, installer, `doctor` CLI/API, first-run Setup UI and focused tests/docs.
+- 2026-05-04: Post-implementation audit fixed remaining gaps: release distribution contract tests, CLI text output coverage, UI local-folder/validation-suggestion coverage, installer version/repo URL coverage, supported GoReleaser `archives.ids`, local `goreleaser check`, and snapshot release build without publish.
+- 2026-05-04: Final UI audit fixed stale readiness state after setup edits and hydrated guided first-run form from loaded `workspace.yaml`; full DoD, release snapshot and fake live UI smoke passed.
+
+### Plan ID
 EP-20260504-qa-api-imports-hardening
 
 ### Context

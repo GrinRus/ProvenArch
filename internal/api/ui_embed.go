@@ -20,6 +20,16 @@ func mustUISubFS() fs.FS {
 	return sub
 }
 
+func EmbeddedUIAvailable() bool {
+	if uiFS == nil {
+		return false
+	}
+	if _, err := fs.Stat(uiFS, "index.html"); err != nil {
+		return false
+	}
+	return true
+}
+
 func serveEmbeddedUI(writer http.ResponseWriter, request *http.Request) {
 	if uiFS == nil {
 		http.NotFound(writer, request)

@@ -12,6 +12,63 @@ ACP не является "рисовалкой диаграмм". Архите�
 
 ---
 
+## Install -> Start UI -> First Analysis
+
+Для обычного пользователя основной путь — готовый single-binary `acp` из GitHub Releases. Go и Node нужны только для разработки ProvenArch из исходников.
+
+### 1) Установите `acp`
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/GrinRus/ProvenArch/main/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Проверьте локальную готовность:
+
+```bash
+acp doctor \
+  --workspace "$HOME/acp-workspaces/my-service" \
+  --repo-git-url https://github.com/org/my-service.git
+```
+
+### 2) Запустите UI
+
+```bash
+acp serve \
+  --workspace "$HOME/acp-workspaces/my-service" \
+  --auto-init \
+  --repo-name my-service \
+  --repo-git-url https://github.com/org/my-service.git \
+  --runtime fake
+```
+
+Откройте [http://127.0.0.1:8080](http://127.0.0.1:8080).
+
+### 3) Пройдите first-run flow в UI
+
+1. `Setup -> Source`: укажите GitHub/GitLab URL или local folder.
+2. `Workspace`: оставьте `docs.imports_path` или укажите папку импортированных документов.
+3. `Runtime`: для первого walkthrough используйте `fake`.
+4. `Validate`: нажмите `Save and validate workspace.yaml`, затем `Check local readiness`.
+5. `Run`: нажмите `Run first analysis`.
+
+Результаты появятся в `Results`: coverage, artifacts, diagrams. История и логи run'ов доступны в `Runs`.
+
+### 4) Переключитесь на real AI runtime
+
+После первого walkthrough установите provider command и перезапустите сервис:
+
+```bash
+acp serve \
+  --workspace "$HOME/acp-workspaces/my-service" \
+  --runtime headless \
+  --runtime-provider claude-code
+```
+
+Подробно: [docs/INSTALL.md](docs/INSTALL.md), [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+
+---
+
 ## Статус репозитория
 
 Сейчас репозиторий содержит:
@@ -20,7 +77,8 @@ ACP не является "рисовалкой диаграмм". Архите�
 - рабочий local-first backend/API/CLI baseline (`init|refresh` execution path),
 - staged docs-first runtime pipeline для `reports/taskruns/*` с validator-gated promotion в стабильные `reports/*` и `proposals/*`,
 - deterministic derived materialization для `model/*`, `reports/*`, `proposals/*`, `changelog`,
-- UI shell + `make` entrypoints + repo CI.
+- UI shell + first-run guided setup + `make` entrypoints + repo CI,
+- release packaging для GitHub Releases (`darwin/linux` `amd64/arm64`) и checksum-aware `install.sh`.
 
 Реализация остаётся incremental по `docs/BACKLOG.md`, но базовый e2e поток уже исполним: `workspace validate -> run pipeline -> inspect artifacts`.
 
@@ -141,9 +199,10 @@ MVP policy: Observation + Assertion отображаются как рабоча
 
 ### Минимальные prerequisites для первого запуска
 - Git
-- Go 1.20.x
-- локальный клон хотя бы одного анализируемого репозитория
-- Node.js 22.21.1 + npm 10.x (нужно для UI dev/build в этом репозитории)
+- release binary `acp` из [docs/INSTALL.md](docs/INSTALL.md)
+- GitHub/GitLab URL или локальный клон хотя бы одного анализируемого репозитория
+
+Go 1.20.x и Node.js 22.21.1/npm 10.x нужны только при сборке из исходников через `make bootstrap && make build`.
 
 Для первого запуска достаточно `--runtime fake`.
 Для реальных запусков `--runtime headless` нужен установленный provider command (`claude-code`/`qwen`/`codex`) либо env override (`ACP_CLAUDE_CMD`/`ACP_QWEN_CMD`/`ACP_CODEX_CMD`).
@@ -152,7 +211,7 @@ Direct режим `ACP_CLAUDE_CMD=claude` поддерживается нати�
 ### 1) Поднимите сервис одной командой (auto-init)
 
 ```bash
-acp serve --workspace /path/to/arch-workspace --auto-init --repo-name payments-service --repo-path /path/to/payments-service --runtime fake
+acp serve --workspace /path/to/arch-workspace --auto-init --repo-name payments-service --repo-git-url https://github.com/org/payments-service.git --runtime fake
 ```
 
 Эта команда:
@@ -171,7 +230,7 @@ acp serve --workspace /path/to/arch-workspace --auto-init --repos-file /path/to/
 
 ### 2) Запустите первый анализ
 
-Можно из UI (кнопка `Run init`) или CLI:
+Можно из UI (`Setup -> Run first analysis`) или CLI:
 
 ```bash
 acp run --workspace /path/to/arch-workspace --pipeline init --runtime fake --non-interactive

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/api"
+	"github.com/GrinRus/ProvenArch/internal/doctor"
 	"github.com/GrinRus/ProvenArch/internal/orchestrator"
 	"github.com/GrinRus/ProvenArch/internal/qa"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
@@ -25,6 +27,7 @@ import (
 
 const (
 	exitCodeOK             = 0
+	exitCodeDoctorIssues   = 1
 	exitCodeInvalidCommand = 2
 	exitCodeValidation     = 3
 )
@@ -67,6 +70,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runPipeline(args[1:], stdout, stderr)
 	case "qa":
 		return runQA(args[1:], stdout, stderr)
+	case "doctor":
+		return runDoctor(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n", args[0])
 		printRootUsage(stderr)
@@ -542,6 +547,66 @@ func runQA(args []string, stdout, stderr io.Writer) int {
 	return exitCodeOK
 }
 
+func runDoctor(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	workspacePath := fs.String("workspace", "", "absolute path to arch-workspace")
+	repoPath := fs.String("repo-path", "", "local repo checkout path to verify")
+	repoGitURL := fs.String("repo-git-url", "", "git repository URL to verify through local git auth")
+	runtimeMode := fs.String("runtime", "fake", "runtime mode to verify: fake or headless")
+	runtimeProvider := fs.String("runtime-provider", "", "runtime provider for headless mode: claude-code, qwen-code, or codex-code")
+	listenAddress := fs.String("listen", "127.0.0.1:8080", "listen address to verify as available")
+	jsonOutput := fs.Bool("json", false, "print machine-readable JSON report")
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "Usage: acp doctor [--workspace <abs-path>] [--repo-path <path> | --repo-git-url <url>] [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--listen 127.0.0.1:8080] [--json]")
+		fs.PrintDefaults()
+	}
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return exitCodeOK
+		}
+		return exitCodeInvalidCommand
+	}
+	if len(fs.Args()) > 0 {
+		fmt.Fprintf(stderr, "unexpected positional arguments: %s\n", strings.Join(fs.Args(), " "))
+		fs.Usage()
+		return exitCodeInvalidCommand
+	}
+	if strings.TrimSpace(*repoPath) != "" && strings.TrimSpace(*repoGitURL) != "" {
+		fmt.Fprintln(stderr, "doctor validation failed: set at most one of --repo-path or --repo-git-url")
+		return exitCodeInvalidCommand
+	}
+
+	report, err := doctor.Run(context.Background(), doctor.Options{
+		WorkspacePath:       *workspacePath,
+		RepoPath:            *repoPath,
+		RepoGitURL:          *repoGitURL,
+		RuntimeMode:         *runtimeMode,
+		RuntimeProvider:     *runtimeProvider,
+		ListenAddress:       *listenAddress,
+		CheckPort:           true,
+		EmbeddedUIAvailable: api.EmbeddedUIAvailable(),
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "doctor failed: %v\n", err)
+		return exitCodeInvalidCommand
+	}
+
+	if *jsonOutput {
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		_ = encoder.Encode(report)
+	} else {
+		printDoctorReport(stdout, report)
+	}
+	if report.OK {
+		return exitCodeOK
+	}
+	return exitCodeDoctorIssues
+}
+
 func isHelp(arg string) bool {
 	return arg == "-h" || arg == "--help" || arg == "help"
 }
@@ -554,12 +619,14 @@ func printRootUsage(w io.Writer) {
 	fmt.Fprintln(w, "  acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]")
 	fmt.Fprintln(w, "  acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]")
 	fmt.Fprintln(w, "  acp qa --workspace <abs-path> --question \"<text>\"")
+	fmt.Fprintln(w, "  acp doctor [--workspace <abs-path>] [--repo-path <path> | --repo-git-url <url>] [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--json]")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Commands:")
 	fmt.Fprintln(w, "  init-workspace create/update workspace.yaml and bootstrap workspace layout")
 	fmt.Fprintln(w, "  serve   load workspace and start local API+UI service")
 	fmt.Fprintln(w, "  run     validate workspace path and execute init/refresh pipeline")
 	fmt.Fprintln(w, "  qa      ask read-only questions over workspace artifacts")
+	fmt.Fprintln(w, "  doctor  check local install, workspace, repo access, runtime provider, and embedded UI")
 }
 
 func printValidationReport(w io.Writer, report workspace.ValidationReport) {
@@ -572,6 +639,17 @@ func printValidationReport(w io.Writer, report workspace.ValidationReport) {
 	}
 	for _, diagnostic := range report.Warnings {
 		fmt.Fprintf(w, "- [warning] %s: %s\n", diagnostic.Code, diagnostic.Message)
+	}
+}
+
+func printDoctorReport(w io.Writer, report doctor.Report) {
+	fmt.Fprintln(w, "ACP doctor")
+	fmt.Fprintf(w, "status: %s\n", report.Summary)
+	for _, check := range report.Checks {
+		fmt.Fprintf(w, "- [%s] %s: %s\n", check.Status, check.Label, check.Message)
+		if strings.TrimSpace(check.Suggestion) != "" {
+			fmt.Fprintf(w, "  next: %s\n", check.Suggestion)
+		}
 	}
 }
 

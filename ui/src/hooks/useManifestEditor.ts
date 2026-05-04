@@ -1,7 +1,7 @@
-import { useMemo, useReducer, useState } from "react";
+import { useMemo, useReducer, useRef, useState } from "react";
 
 import type { Diagnostic, GuidedRepo, ValidateResponse } from "../lib/appContracts";
-import { guidedReposReducer, initialGuidedRepos } from "../lib/workspaceSetupState";
+import { guidedReposReducer, initialGuidedRepos, parseGuidedSetupFromManifest } from "../lib/workspaceSetupState";
 import { loadWorkspaceManifest, saveWorkspaceManifest, validateWorkspaceAPI } from "../lib/workspaceApi";
 
 type UseManifestEditorOptions = {
@@ -14,6 +14,7 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
   const [manifestContent, setManifestContent] = useState("");
   const [guidedRepos, dispatchGuidedRepos] = useReducer(guidedReposReducer, undefined, initialGuidedRepos);
   const [guidedDocsImportsPath, setGuidedDocsImportsPath] = useState("./docs/imports");
+  const setupDirtyRef = useRef(false);
 
   const validationDiagnosticsByRepo = useMemo(() => {
     if (!validateResult) {
@@ -32,7 +33,18 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
 
   async function loadManifest() {
     try {
-      setManifestContent(await loadWorkspaceManifest());
+      const content = await loadWorkspaceManifest();
+      if (setupDirtyRef.current) {
+        return;
+      }
+      setManifestContent(content);
+      const guidedSetup = parseGuidedSetupFromManifest(content);
+      if (guidedSetup?.repos.length) {
+        dispatchGuidedRepos({ type: "replace", repos: guidedSetup.repos });
+      }
+      if (guidedSetup?.docsImportsPath) {
+        setGuidedDocsImportsPath(guidedSetup.docsImportsPath);
+      }
     } catch {
       setManifestContent("");
     }
@@ -51,15 +63,33 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
   }
 
   function updateGuidedRepo(id: string, patch: Partial<GuidedRepo>) {
+    setupDirtyRef.current = true;
+    setValidateResult(null);
     dispatchGuidedRepos({ type: "update", id, patch });
   }
 
   function handleAddGuidedRepo() {
+    setupDirtyRef.current = true;
+    setValidateResult(null);
     dispatchGuidedRepos({ type: "add" });
   }
 
   function handleRemoveGuidedRepo(id: string) {
+    setupDirtyRef.current = true;
+    setValidateResult(null);
     dispatchGuidedRepos({ type: "remove", id });
+  }
+
+  function updateGuidedDocsImportsPath(value: string) {
+    setupDirtyRef.current = true;
+    setValidateResult(null);
+    setGuidedDocsImportsPath(value);
+  }
+
+  function updateManifestContent(value: string) {
+    setupDirtyRef.current = true;
+    setValidateResult(null);
+    setManifestContent(value);
   }
 
   function buildManifestFromGuidedForm(): string {
@@ -92,26 +122,28 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
         throw new Error(`repo "${name}" with git_url source requires repository URL`);
       }
 
-      lines.push(`  - name: ${name}`);
+      lines.push(`  - name: ${yamlScalar(name)}`);
       if (repo.mode === "path") {
-        lines.push(`    path: ${pathValue}`);
+        lines.push(`    path: ${yamlScalar(pathValue)}`);
       } else {
-        lines.push(`    git_url: ${gitURLValue}`);
+        lines.push(`    git_url: ${yamlScalar(gitURLValue)}`);
       }
       if (refValue) {
-        lines.push(`    ref: ${refValue}`);
+        lines.push(`    ref: ${yamlScalar(refValue)}`);
       }
     }
 
     lines.push("docs:");
-    lines.push(`  imports_path: ${importsPath}`);
+    lines.push(`  imports_path: ${yamlScalar(importsPath)}`);
     return `${lines.join("\n")}\n`;
   }
 
   function handleApplyGuidedWorkspaceSetup() {
+    setupDirtyRef.current = true;
     setError(null);
     try {
       setManifestContent(buildManifestFromGuidedForm());
+      setValidateResult(null);
     } catch (buildError) {
       setError(buildError instanceof Error ? buildError.message : "failed to apply guided setup");
     }
@@ -137,8 +169,8 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
     guidedRepos,
     guidedDocsImportsPath,
     loadManifest,
-    setManifestContent,
-    setGuidedDocsImportsPath,
+    setManifestContent: updateManifestContent,
+    setGuidedDocsImportsPath: updateGuidedDocsImportsPath,
     updateGuidedRepo,
     handleAddGuidedRepo,
     handleRemoveGuidedRepo,
@@ -146,4 +178,8 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
     handleSaveManifest,
     handleValidateWorkspace,
   };
+}
+
+function yamlScalar(value: string): string {
+  return JSON.stringify(value);
 }

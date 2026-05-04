@@ -8,6 +8,7 @@
 - Тот же entrypoint поддерживает non-interactive batch execution в GitHub/GitLab CI jobs
 - Runtime (analysis): **headless multi-provider** (`claude-code` default, `qwen-code` optional, `codex-code` release peer) + deterministic `fake` baseline
 - Реализация продукта: **Go backend/orchestrator + embedded React UI**
+- Distribution: GitHub Releases single-binary `acp` для macOS/Linux `amd64/arm64`; Homebrew tap planned after first stable release; Docker не является primary happy path в MVP
 - Единая workspace-конвенция MVP: central `arch-workspace` git-репозиторий (Variant 2)
 - Agent operating model MVP: идеи `1,2,3,5,7` (domain-first cards/agents/changelog/Q&A)
 - Нет hosted режима и нет security/compliance enforcement в MVP
@@ -26,6 +27,7 @@
    - Поддерживает batch/non-interactive режим для CI jobs
    - `run` выполняет deterministic `init|refresh` pipeline в local/batch/non-interactive execution
    - `qa` даёт read-only ответы по артефактам workspace
+   - `doctor` выполняет read-only readiness checks для local install/workspace/repo/runtime/UI; CLI exit codes: `0` ready, `1` user-fixable issues, `2` invalid flags/internal request error
    - runtime selector process-scoped: `fake` default для required CI, `headless` opt-in
    - global provider selector остаётся process-level fallback: `--runtime-provider` > `ACP_RUNTIME_PROVIDER` > `claude-code`
    - effective provider resolution внутри run step-scoped: `workspace.yaml.runtime.profile.steps.<step>.provider` переопределяет global fallback только для выбранного шага
@@ -62,6 +64,7 @@
    - runtime profile patch validation/merge/manifest rewrite живёт в shared internal package `internal/runtimeprofile`, а API handlers остаются только HTTP adapter layer
    - live e2e poll timeout-ы берутся из effective config (`/api/runtime/timeouts`) с env override
    - Критичные UI-контролы для live e2e снабжены стабильными `data-testid` (`validate/run/status/artifacts/logs`)
+   - Setup first-run flow оформлен как stepper `Source / Workspace / Runtime / Validate / Run`: GitHub/GitLab URL является default entry, local folder остаётся supported mode, raw `workspace.yaml` editor спрятан в Advanced, readiness checklist берётся из `GET /api/system/doctor`, первый `init` запускается кнопкой `Run first analysis`
 
 3) **Orchestrator (`internal/orchestrator`)** *(implemented baseline)*
    - Step registry (шаги init pipeline)

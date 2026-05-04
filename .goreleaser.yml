@@ -1,0 +1,58 @@
+version: 2
+
+project_name: acp
+
+before:
+  hooks:
+    - npm ci --prefix ui
+    - npm run build --prefix ui
+    - rm -rf internal/api/ui_dist/assets internal/api/ui_dist/index.html
+    - mkdir -p internal/api/ui_dist/assets
+    - cp -R ui/dist/assets/. internal/api/ui_dist/assets/
+    - cp ui/dist/index.html internal/api/ui_dist/index.html
+
+builds:
+  - id: acp
+    main: ./cmd/acp
+    binary: acp
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: acp
+    ids:
+      - acp
+    formats:
+      - tar.gz
+    name_template: "acp_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - docs/INSTALL.md
+      - docs/TROUBLESHOOTING.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore: update generated UI assets$"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+release:
+  github:
+    owner: GrinRus
+    name: ProvenArch
+  draft: false
+  prerelease: auto
