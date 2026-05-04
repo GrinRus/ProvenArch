@@ -2,7 +2,7 @@
 
 > **Статус:** MVP beta foundation / runnable local docs-first pipeline baseline + strict contracts
 > **Принятый стек реализации:** Go (backend/orchestrator) + React/TypeScript UI (embedded), runtime анализа в MVP: **headless multi-provider** (`claude-code` default, `qwen-code` optional, `codex-code` release peer)
-> **Последняя ревизия:** 2026-04-19
+> **Последняя ревизия:** 2026-05-04
 
 ## Что это
 
@@ -33,7 +33,7 @@ ACP не является "рисовалкой диаграмм". Архите�
 ✅ В MVP включено:
 - step-scoped runtime provider selection для headless режима: `claude-code` (default fallback), `qwen-code` и `codex-code` (release peer)
 - local-first режим (всё запускается локально)
-- запуск того же standalone orchestrator в CI/CD через GitHub/GitLab hooks и/или manual pipeline/job trigger
+- запуск того же standalone orchestrator в external CI/CD jobs, инициированных GitHub/GitLab hooks и/или manual pipeline/job trigger; ACP не поднимает native SCM webhook listener
 - единый формат хранения: central `arch-workspace` git-репозиторий (Variant 2)
 - источники репозиториев: локальные checkout-папки и/или GitHub/GitLab `git_url`, разрешаемые через локальный `git` контекст пользователя/runner
 - локально импортированные документы
@@ -43,7 +43,7 @@ ACP не является "рисовалкой диаграмм". Архите�
 - domain-first иерархия агентов (domain analysts + architect aggregator)
 - docs-first runtime contract: shard analysts пишут dossier packs в run-scoped staging, validator даёт canonical verdict, promotion переносит только approved final set
 - markdown-карточки доменов/команд как source-of-truth в `charter/cards`
-- internal Q&A capability системного аналитика поверх артефактов workspace (`internal/qa` + `acp qa`, без публичного API endpoint в beta surface)
+- read-only Q&A capability системного аналитика поверх артефактов workspace (`internal/qa`, `acp qa`, `POST /api/qa/ask`)
 - итерационный changelog в `reports/changelog`
 - детальный анализ каждого сервиса: архитектура, внешние интеграции, БД, CI/CD
 - анализ arbitrary stacks через выбранный headless provider (`claude-code|qwen-code|codex-code`) + baseline prompt bundle, без фиксированного whitelist парсеров в MVP
@@ -105,23 +105,23 @@ Protected read-only surfaces для runtime:
 - на каждый домен работает Domain Analyst Agent;
 - Team overlay фиксируется отдельными team cards;
 - 1 Architect Aggregator Agent собирает и нормализует результаты domain-агентов;
-- System Analyst Q&A Agent отвечает на вопросы по артефактам `charter/cards + model + reports + docs/imports`;
+- System Analyst Q&A capability в beta работает как deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask`; это не headless runtime agent и не consumer `skills/prompt-packs/qa.md`;
 - каждая итерация фиксируется в markdown changelog.
 
-Q&A API follow-up в baseline зарезервирован как read-only endpoint `POST /api/qa/ask` (post-beta slice).
+Q&A API baseline surface: read-only endpoint `POST /api/qa/ask` возвращает `answer`, `citations`, `unresolved`, `confidence` и не меняет workspace.
 Полная матрица статусов epics и boundary зафиксирована в canonical stakeholder matrix: [docs/STAKEHOLDER_DOC.md](docs/STAKEHOLDER_DOC.md).
 
 ### Baseline Bundle (MVP)
 
 В продукт поставляется обязательный baseline bundle, который хранится в workspace и редактируется как git-tracked assets:
 - agents: `domain-analyst`, `architect-aggregator`, `system-analyst-qa`
-- skills: `service-inventory`, `interface-extraction`, `integration-mapping`, `datastore-mapping`, `cicd-mapping`, `ownership-coverage`, `findings`, `proposals`
+- skills: `service-inventory`, `interface-extraction`, `integration-mapping`, `datastore-mapping`, `cicd-mapping`, `ownership-coverage`, `findings`, `proposals`, `qa`
 - prompt packs: `constitution`, `collect-context`, `findings`, `proposals`, `qa`
 
 Bundle bootstrap policy:
 - `init-workspace` и `serve --auto-init` создают baseline artifacts по стратегии create-if-missing;
 - существующие пользовательские правки в baseline файлах не перезаписываются.
-- workspace prompt packs участвуют в runtime prompt composition как editable content layer; merge order фиксирован: provider header -> artifact-only contract/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer. Enforced safety/contract rules приходят из internal runtime step policy и не могут быть ослаблены содержимым prompt pack.
+- workspace prompt packs участвуют в runtime prompt composition как editable content layer; merge order фиксирован: provider header -> artifact-only contract/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer. Enforced safety/contract rules приходят из internal runtime step policy и не могут быть ослаблены содержимым prompt pack. Editable prompt pack layer подключён к `step0.constitution`, `step1.collect`, `step3.findings` и `step4.proposals`; `step2.asis_docs` использует enforced policy only и не имеет отдельного editable `as-is` prompt pack.
 - baseline prompt defaults структурированы по обязательным секциям (`Goal`, `Inputs`, `Required Output Shape`, `Evidence Policy`, `Forbidden Behavior`, `Fallback When Unknown`) и покрыты quality-тестом на минимальную насыщенность.
 
 ---
@@ -221,6 +221,9 @@ acp init-workspace --workspace /path/to/arch-workspace --repos-file /path/to/rep
 
 ```bash
 acp qa --workspace /path/to/arch-workspace --question "Who owns payments-service?"
+curl -fsS -X POST http://127.0.0.1:8080/api/qa/ask \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"Who owns payments-service?"}'
 ```
 
 ### 4) Самый короткий локальный flow через Makefile
@@ -233,8 +236,9 @@ make quickstart-local WORKSPACE=/path/to/arch-workspace REPO_PATH=/path/to/payme
 
 ### 5) Импортируйте документы вручную (MVP)
 
-Документы (например, выгрузки из Confluence) кладутся в `docs/imports/`.
-Для импортов рекомендуется вести `docs/imports/index.yaml` с metadata: источник, путь, checksum, imported_at, source_updated_at.
+Документы (например, выгрузки из Confluence) кладутся в `docs.imports_path` (default `docs/imports/`).
+Для импортов рекомендуется вести `<docs.imports_path>/index.yaml` с metadata: required `id`/`path`, optional `source`, `checksum`, `imported_at`, `source_updated_at`, `status`.
+Отсутствие index не считается diagnostic; malformed/semantic issues в index дают warning-only workspace diagnostics.
 
 ### 6) Когда переходить на headless runtime
 
@@ -325,7 +329,7 @@ Repo CI по умолчанию живёт в GitHub Actions:
 
 - **arch-workspace/**: charter, skills, model, reports, proposals
 - **Repo source resolver**: локальные `path` или `git_url`, разрешаемые в локальные checkout через системный `git` текущего пользователя/runner
-- **Agent topology**: domain analysts, architect aggregator, system analyst Q&A + baseline bundle skills/prompts
+- **Agent topology**: domain analysts, architect aggregator, deterministic system analyst Q&A capability + baseline bundle skills/prompts
 - **UI**: guided workspace setup + baseline editors для `charter/*` и `skills/*`, запуск pipeline, просмотр результатов
 - **Orchestrator (Go)**: шаги pipeline, context/prompt packs, вызов runtime, local execution и CI/CD trigger execution
 - **Runtime providers**: headless jobs анализа через `claude-code|qwen-code|codex-code`; `fake` остаётся deterministic baseline, default fallback остаётся `claude-code`
@@ -388,11 +392,10 @@ MVP-модель должна покрывать как минимум:
 
 ## Контракт runtime output: artifact-only docs-first
 
-Primary runtime contract для live `step1.collect`/`step3.findings`:
-- `shard-pack-manifest.json`
-- `final-run-index.json`
-- `citation-index.json`
-- `validator-verdict.json`
+Artifact ownership для live docs-first pipeline:
+- provider-authored runtime artifacts: `shard-pack-manifest.json`, `constitution-draft.json`, `asis-draft-manifest.json`, `proposals-draft-manifest.json`, draft files и `validator-verdict.json`
+- orchestrator-authored staged indexes/metadata: `final-run-index.json`, `citation-index.json`, run history/logs, shard plans и shard summaries
+- compiler-derived promoted surfaces: `model/*`, `reports/diagrams/*`, normalized coverage/findings renderers и canonical `reports/*` / `proposals/*` после validator-gated promotion
 
 Docs-first semantic rules:
 - `citation-index.json.claim_ids` образуют глобальное пространство имён в пределах assembled staged final set; один и тот же `claim_id` нельзя переиспользовать между разными shard/citation surfaces.
@@ -454,7 +457,8 @@ Primary promotion gate:
 
 ### CI/CD mode (MVP)
 - тот же `acp run ... --non-interactive` может выполняться в GitHub/GitLab pipeline job
-- запуск инициируется через SCM hooks и/или manual pipeline button/job
+- запуск инициируется через SCM hooks и/или manual pipeline button/job на стороне CI provider
+- ACP не принимает public SCM webhooks сам: native webhook listener / external SCM app integration остаются вне MVP
 - входы: workspace repo + локальные checkout и/или доступ к declared `git_url` через локальный `git` контекст пользователя/runner
 - ACP не хранит отдельные git credentials и не требует hosted control plane
 - выходы: обновлённые артефакты workspace и явные gaps по недостающей информации
@@ -511,6 +515,7 @@ Run-specific поверхность (исключена из strict golden compa
 - `reports/changelog/*`
 - `reports/taskruns/*`
 - runtime run registry/status (`/api/pipeline/runs/*`)
+- read-only Q&A surface (`/api/qa/ask`)
 - runtime contract/runtime и lifecycle ошибки после async start отражаются в `GET /api/pipeline/runs/<run_id>.error_code` (например, `runtime_contract_failed`, `run_canceled`, `run_reconciled_after_restart`)
 
 Статус покрытия epics (single source): `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.

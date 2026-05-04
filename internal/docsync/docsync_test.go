@@ -17,11 +17,14 @@ func TestStakeholderMatrixIsCanonicalSource(t *testing.T) {
 
 	assertContains(t, content, "Canonical Stakeholder Matrix (source of truth)")
 	assertContains(t, content, "Runtime policy `fake` default + `headless` opt-in")
-	assertContains(t, content, "Q&A capability without public beta API surface")
+	assertContains(t, content, "Q&A capability with CLI + public read-only beta API surface")
 	assertContains(t, content, "POST /api/qa/ask")
 
-	if !strings.Contains(lower, "follow-up") && !strings.Contains(lower, "post-beta") {
-		t.Fatalf("expected follow-up boundary for /api/qa/ask in stakeholder matrix")
+	if !strings.Contains(lower, "public `post /api/qa/ask` | done") {
+		t.Fatalf("expected stakeholder matrix to mark /api/qa/ask as done")
+	}
+	if strings.Contains(lower, "not in current beta api surface") {
+		t.Fatalf("expected stakeholder matrix not to mark /api/qa/ask outside beta surface")
 	}
 }
 
@@ -74,8 +77,14 @@ func TestRuntimeAndQABoundaryConsistentAcrossDocs(t *testing.T) {
 			if !strings.Contains(content, "/api/qa/ask") {
 				t.Fatalf("expected %s to mention /api/qa/ask boundary", path)
 			}
-			if !strings.Contains(content, "follow-up") && !strings.Contains(content, "post-beta") {
-				t.Fatalf("expected %s to mark /api/qa/ask as follow-up/post-beta", path)
+			if !strings.Contains(content, "read-only") && !strings.Contains(content, "read only") {
+				t.Fatalf("expected %s to mark /api/qa/ask as read-only", path)
+			}
+			if !strings.Contains(content, "headless") {
+				t.Fatalf("expected %s to keep non-headless Q&A boundary", path)
+			}
+			if strings.Contains(content, "/api/qa/ask не входит") || strings.Contains(content, "/api/qa/ask remains follow-up") {
+				t.Fatalf("expected %s not to mark /api/qa/ask as outside beta surface", path)
 			}
 		})
 	}
@@ -105,6 +114,200 @@ func TestPromptLayerTruthConsistentAcrossCoreDocs(t *testing.T) {
 				t.Fatalf("expected %s to describe enforced runtime policy invariants", path)
 			}
 		})
+	}
+}
+
+func TestBaselineBundleInventoryDocumentsQASkill(t *testing.T) {
+	t.Parallel()
+
+	code := readDoc(t, "internal/workspace/baseline.go")
+	assertContains(t, code, `"qa",`)
+	assertContains(t, code, "skills: [qa]")
+
+	requiredSkillsLineByPath := map[string]string{
+		"README.md":               "skills: `service-inventory`, `interface-extraction`, `integration-mapping`, `datastore-mapping`, `cicd-mapping`, `ownership-coverage`, `findings`, `proposals`, `qa`",
+		"docs/STAKEHOLDER_DOC.md": "skills: `service-inventory`, `interface-extraction`, `integration-mapping`, `datastore-mapping`, `cicd-mapping`, `ownership-coverage`, `findings`, `proposals`, `qa`",
+		"docs/BACKLOG.md":         "baseline skills фиксированы: `service-inventory`, `interface-extraction`, `integration-mapping`, `datastore-mapping`, `cicd-mapping`, `ownership-coverage`, `findings`, `proposals`, `qa`",
+	}
+	for path, required := range requiredSkillsLineByPath {
+		path := path
+		required := required
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			assertContains(t, readDoc(t, path), required)
+		})
+	}
+
+	pipelineBaseline := extractBetween(t, readDoc(t, "docs/spec/PIPELINE_SPEC.md"), "## Baseline Agents/Skills/Prompts (MVP)", "Bundle поставляется")
+	assertContains(t, pipelineBaseline, "- skills:")
+	assertContains(t, pipelineBaseline, "  - `qa`")
+	assertContains(t, pipelineBaseline, "- prompt packs:")
+	assertContains(t, pipelineBaseline, "  - `qa`")
+}
+
+func TestQABetaBoundaryDocumentsDeterministicService(t *testing.T) {
+	t.Parallel()
+
+	requiredByPath := map[string]string{
+		"README.md":                  "deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask`; это не headless runtime agent",
+		"docs/ARCHITECTURE.md":       "deterministic workspace-backed read-only service + CLI `acp qa` + `POST /api/qa/ask`; не headless runtime agent",
+		"docs/STAKEHOLDER_DOC.md":    "deterministic workspace-backed read-only capability доступна как internal service + CLI `acp qa` + public read-only `POST /api/qa/ask`; это не headless runtime agent",
+		"docs/spec/PIPELINE_SPEC.md": "deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask`",
+		"docs/BACKLOG.md":            "deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask`",
+	}
+	for path, required := range requiredByPath {
+		path := path
+		required := required
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			content := readDoc(t, path)
+			assertContains(t, content, required)
+			assertContains(t, content, "POST /api/qa/ask")
+			assertContains(t, content, "skills/prompt-packs/qa.md")
+			assertNotContains(t, content, "System Analyst Q&A Agent")
+		})
+	}
+}
+
+func TestQAPublicAPIDocsMatchImplementedRoute(t *testing.T) {
+	t.Parallel()
+
+	apiSpec := readDoc(t, "docs/spec/API_SPEC.md")
+	server := readDoc(t, "internal/api/server.go")
+	assertContains(t, server, `mux.HandleFunc("/api/qa/ask", s.handleQAAsk)`)
+	assertContains(t, apiSpec, "### POST `/api/qa/ask`")
+	assertContains(t, apiSpec, "question_required")
+	assertContains(t, apiSpec, "qa_failed")
+	assertContains(t, apiSpec, "does not call headless runtime providers, git helpers or pipeline runs")
+}
+
+func TestSCMWebhookBoundaryDocumentsExternalCIOnly(t *testing.T) {
+	t.Parallel()
+
+	requiredByPath := map[string]string{
+		"README.md":                  "ACP не принимает public SCM webhooks сам: native webhook listener / external SCM app integration остаются вне MVP",
+		"docs/spec/PIPELINE_SPEC.md": "Webhook принимает CI provider, не ACP: native SCM webhook listener / external SCM app integration остаются вне MVP",
+		"docs/BACKLOG.md":            "SCM hooks обрабатываются CI provider; native ACP webhook listener / external SCM app integration остаются вне MVP",
+		"docs/ARCHITECTURE.md":       "Native GitHub/GitLab webhook listener, hosted control plane and external SCM app integration остаются вне MVP",
+		"docs/spec/API_SPEC.md":      "Native SCM webhook listener/hosted control plane остаются вне MVP",
+	}
+	for path, required := range requiredByPath {
+		path := path
+		required := required
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			assertContains(t, readDoc(t, path), required)
+		})
+	}
+}
+
+func TestDocsImportsMetadataIndexContractDocumented(t *testing.T) {
+	t.Parallel()
+
+	requiredByPath := map[string]string{
+		"README.md":                   "<docs.imports_path>/index.yaml",
+		"docs/spec/WORKSPACE_SPEC.md": "Canonical metadata index: `<imports_path>/index.yaml`",
+		"docs/spec/PIPELINE_SPEC.md":  "<docs.imports_path>/index.yaml",
+		"docs/STAKEHOLDER_DOC.md":     "<docs.imports_path>/index.yaml",
+	}
+	for path, required := range requiredByPath {
+		path := path
+		required := required
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			content := readDoc(t, path)
+			assertContains(t, content, required)
+			assertContains(t, content, "warning")
+			assertContains(t, content, "id")
+			assertContains(t, content, "path")
+		})
+	}
+}
+
+func TestUIBaselineEditorPromptPackHintMatchesStepPolicy(t *testing.T) {
+	t.Parallel()
+
+	content := readDoc(t, "ui/src/components/BaselineEditorsPanel.tsx")
+	assertContains(t, content, "step0/step1/step3/step4")
+	assertContains(t, content, "step2 uses enforced as-is policy without an editable prompt pack")
+	assertNotContains(t, content, "collect`/`findings")
+}
+
+func TestPromptPackCoverageDocumentsStep2Boundary(t *testing.T) {
+	t.Parallel()
+
+	policy := readDoc(t, "internal/runtime/steppolicy/policy.go")
+	packFunc := extractBetween(t, policy, "func WorkspacePromptPackPath(stepID string) string {", "func WorkspacePromptPackSection")
+	for _, expected := range []string{
+		"skills/prompt-packs/constitution.md",
+		"skills/prompt-packs/collect-context.md",
+		"skills/prompt-packs/findings.md",
+		"skills/prompt-packs/proposals.md",
+	} {
+		assertContains(t, packFunc, expected)
+	}
+	assertNotContains(t, packFunc, "step2.asis_docs")
+	assertNotContains(t, packFunc, "as-is.md")
+
+	required := map[string][]string{
+		"README.md": {
+			"Editable prompt pack layer",
+			"`step2.asis_docs` использует enforced policy only и не имеет отдельного editable `as-is` prompt pack",
+		},
+		"docs/ARCHITECTURE.md": {
+			"Editable prompt pack layer",
+			"`step2.asis_docs` остаётся enforced-policy-only и не имеет отдельного editable `as-is` prompt pack",
+		},
+		"docs/spec/PIPELINE_SPEC.md": {
+			"Editable prompt pack layer",
+			"`step2.asis_docs` работает через enforced policy only без отдельного editable `as-is` prompt pack",
+			"`step2.asis_docs` не имеет отдельного editable workspace prompt pack",
+		},
+	}
+	for path, tokens := range required {
+		path := path
+		tokens := tokens
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			content := readDoc(t, path)
+			for _, token := range tokens {
+				assertContains(t, content, token)
+			}
+		})
+	}
+}
+
+func TestArtifactOwnershipTaxonomyDocumented(t *testing.T) {
+	t.Parallel()
+
+	for _, path := range []string{"README.md", "docs/ARCHITECTURE.md", "docs/spec/PIPELINE_SPEC.md"} {
+		path := path
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			content := readDoc(t, path)
+			for _, token := range []string{"provider-authored", "orchestrator-authored", "compiler-derived"} {
+				assertContains(t, content, token)
+			}
+		})
+	}
+}
+
+func TestActivePlansHaveOpenGoals(t *testing.T) {
+	t.Parallel()
+
+	active := extractAfter(t, readDoc(t, "docs/PLANS.md"), "## Active Plans")
+	for _, section := range splitPlanSections(active) {
+		lines := strings.Split(section, "\n")
+		if len(lines) < 2 {
+			continue
+		}
+		planID := strings.TrimSpace(lines[1])
+		goals := extractBetween(t, section, "### Goals (must have)", "\n### ")
+		checked := strings.Count(goals, "- [x]")
+		open := strings.Count(goals, "- [ ]")
+		if checked > 0 && open == 0 {
+			t.Fatalf("expected active plan %s to keep at least one open goal or move to docs/archive", planID)
+		}
 	}
 }
 
@@ -579,6 +782,42 @@ func TestMultiRepoE2EDocsAreConsistent(t *testing.T) {
 			}
 		})
 	}
+}
+
+func extractBetween(t *testing.T, content string, start string, end string) string {
+	t.Helper()
+	startIdx := strings.Index(content, start)
+	if startIdx < 0 {
+		t.Fatalf("expected content to include start marker %q", start)
+	}
+	afterStart := content[startIdx+len(start):]
+	endIdx := strings.Index(afterStart, end)
+	if endIdx < 0 {
+		t.Fatalf("expected content after %q to include end marker %q", start, end)
+	}
+	return afterStart[:endIdx]
+}
+
+func extractAfter(t *testing.T, content string, marker string) string {
+	t.Helper()
+	idx := strings.Index(content, marker)
+	if idx < 0 {
+		t.Fatalf("expected content to include marker %q", marker)
+	}
+	return content[idx+len(marker):]
+}
+
+func splitPlanSections(content string) []string {
+	parts := strings.Split(content, "\n### Plan ID\n")
+	sections := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		sections = append(sections, "### Plan ID\n"+part)
+	}
+	return sections
 }
 
 func assertContains(t *testing.T, content string, needle string) {

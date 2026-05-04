@@ -4,6 +4,8 @@
 Для MVP-эпиков `Suggested PR slices` зафиксированы прямо в этом файле.
 Required CI для MVP опирается на schema/contracts, synthetic fixtures, fake runner + recorded artifacts и не требует live headless provider binaries.
 
+Статус выполнения и текущие активные engineering slices ведутся в `docs/STAKEHOLDER_DOC.md` (Canonical Stakeholder Matrix) и `docs/PLANS.md`; этот файл остаётся reference/acceptance backlog, а не единственным active tracker.
+
 ## Epic 1 — Управление workspace
 Acceptance:
 - `workspace.yaml` валидируется по `schemas/workspace.schema.json`
@@ -132,12 +134,13 @@ Suggested PR slices:
 
 ## Epic 9 — System Analyst Q&A Capability (MVP)
 Acceptance:
-- on-demand Q&A capability доступна поверх `charter/cards + model + reports + docs/imports`
+- on-demand Q&A capability доступна как deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask` поверх `charter/cards + model + reports + docs.imports_path`
 - ответы содержат ссылки на evidence/артефакты workspace
-- capability работает без расширения API-контракта на текущем шаге
+- capability работает без headless runtime agent, без workspace mutation и без использования `skills/prompt-packs/qa.md` как runtime prompt
 
 Suggested PR slices:
 - `9A workspace-backed QA service`
+- `9B public read-only Q&A API`
 
 ## Epic 10 — Iteration Changelog (MVP)
 Acceptance:
@@ -148,15 +151,14 @@ Acceptance:
 Suggested PR slices:
 - `10A changelog compiler integration`
 
-## Epic 11 — Q&A API Contracting Step (separate follow-up)
+## Epic 11 — Q&A API Contracting Step (implemented beta)
 Acceptance:
-- отдельный design/contract шаг в backlog для будущего API Q&A
-- фиксируется read-only endpoint `POST /api/qa/ask`
+- read-only endpoint `POST /api/qa/ask` реализован поверх deterministic workspace-backed QA service
 - response shape содержит `answer`, `citations`, `unresolved`, `confidence`
 - endpoint не меняет workspace и не требует изменения runtime artifact contracts
 
 Suggested PR slices:
-- `11A /api/qa/ask contract + read-only semantics`
+- `11A /api/qa/ask contract + read-only semantics` (done)
 
 ## Epic 12 — Autodocs Integration (Wave 1+)
 Acceptance:
@@ -182,6 +184,7 @@ Acceptance:
 - `acp serve --workspace <abs-path>` поднимает single-workspace-per-process service
 - batch mode работает с тем же `workspace.yaml` и теми же pipeline step IDs
 - hook-triggered workflow и manual pipeline button/job запускают тот же ACP flow
+- SCM hooks обрабатываются CI provider; native ACP webhook listener / external SCM app integration остаются вне MVP
 - default auto-trigger: `push` в default branch
 - `merge request` / `pull request` updates в MVP идут как manual/preview trigger
 - одновременно активен только один run на workspace; debounce window 5 минут, policy `last event wins`
@@ -202,7 +205,7 @@ Suggested PR slices:
 Acceptance:
 - product поставляется с baseline `skills/subagents.yaml`
 - baseline agents фиксированы: `domain-analyst`, `architect-aggregator`, `system-analyst-qa`
-- baseline skills фиксированы: `service-inventory`, `interface-extraction`, `integration-mapping`, `datastore-mapping`, `cicd-mapping`, `ownership-coverage`, `findings`, `proposals`
+- baseline skills фиксированы: `service-inventory`, `interface-extraction`, `integration-mapping`, `datastore-mapping`, `cicd-mapping`, `ownership-coverage`, `findings`, `proposals`, `qa`
 - baseline prompt packs фиксированы: `constitution`, `collect-context`, `findings`, `proposals`, `qa`
 - bundle редактируется пользователем и версионируется в Git
 

@@ -70,7 +70,7 @@
    - baseline bundle seeding выполняется create-if-missing, без перезаписи пользовательских правок; support-only bundle не пишет canonical `skills/subagents.yaml`, поэтому source of truth для него остаётся validated `constitution-draft.json`
    - Готовит ContextPack/PromptPack
    - Загружает baseline bundle agents/skills/prompts из workspace
-   - workspace prompt packs подключаются к runtime prompt composition как editable content layer по фиксированному merge order: provider header -> artifact-only/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer; содержимое prompt pack не может ослаблять enforced contract rules
+   - workspace prompt packs подключаются к runtime prompt composition как editable content layer по фиксированному merge order: provider header -> artifact-only/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer; содержимое prompt pack не может ослаблять enforced contract rules. Editable prompt pack layer применяется к `step0.constitution`, `step1.collect`, `step3.findings` и `step4.proposals`; `step2.asis_docs` остаётся enforced-policy-only и не имеет отдельного editable `as-is` prompt pack.
    - `internal/orchestrator/orchestrator.go` остаётся entry shell/pipeline glue; `pipelineExecution` state сгруппирован во вложенные run-progress/artifact-registry/runtime/quality/semantic-docflow/draft buckets, а run finalization, step handlers, artifact registry methods, service run-registry/history lifecycle и semantic/card enrichment вынесены в dedicated package files
    - Работает с единым central workspace (`arch-workspace`) как корнем артефактов MVP
    - Валидирует `workspace.yaml` по `schemas/workspace.schema.json`
@@ -103,6 +103,7 @@
    - Генерирует и валидирует `final-run-index.json` и `citation-index.json`
    - `final-run-index.json` и `citation-index.json` используют один deterministic `document_id` mapping: canonical staged document ids берутся из `manifest.Documents[*].id`, а не пересобираются независимо на citation/final-index сторонах
    - `citation-index.json.claim_ids` трактуются как global staged-final namespace; duplicate claim ids в validator scope детерминированно repair-ятся на index/reference уровне с shard suffix без semantic rewrite authored docs
+   - Artifact ownership разделён явно: provider-authored artifacts включают shard manifests, runtime draft manifests/files и validator verdict; orchestrator-authored artifacts включают staged indexes, run logs/history, shard plans/summaries; compiler-derived artifacts включают `model/*`, diagrams и normalized report/proposal renderers после validator-gated promotion.
    - Step 3 runtime primary output: `validator-verdict.json`
    - `validator-verdict.json` использует canonical contract с обязательными `version=1`, `run_id`, `generated_at`, `verdict`, `checked_paths`; validator findings сохраняют `title + description + provenance`, а observation evidence требует non-empty `repo/path`
    - staged semantic snapshot нормализует `evidence.repo` к логическому repo scope, сводит generated checkout-dir aliases и детерминированно дедуплицирует entity/edge/finding references до validator/promotion
@@ -147,7 +148,7 @@
    - Domain Analyst Agent (per domain)
    - Team overlay через `charter/cards/teams/*`
    - Architect Aggregator Agent (анализ outputs domain-агентов)
-   - System Analyst Q&A Agent (on-demand ответы по артефактам workspace, internal capability + `acp qa`)
+   - System Analyst Q&A capability (deterministic workspace-backed read-only service + CLI `acp qa` + `POST /api/qa/ask`; не headless runtime agent)
    - Базовые skill/prompt bundles поставляются вместе с продуктом и versioned в workspace
 
 5) **Runtime providers (`internal/runtime/*`)** *(implemented baseline)*
@@ -194,7 +195,7 @@
    - реализует/валидирует структуру central `arch-workspace` (Variant 2)
    - парсит `workspace.yaml`
    - валидирует manifest по `schemas/workspace.schema.json`
-   - поддерживает `docs/imports/index.yaml` как metadata index для imported docs
+   - поддерживает `<docs.imports_path>/index.yaml` как metadata index для imported docs; отсутствие index silent, malformed/semantic issues warning-only
    - поддерживает repo entries с `path` или `git_url` + optional `ref`
    - поддерживает optional `repos[].analysis.include/exclude` для shard planner; legacy `repos[].analysis.role` удалён из active workspace contract
    - поддерживает optional persisted runtime profile в `runtime.profile` (`timeouts + execution`, см. `WORKSPACE_SPEC`)
@@ -256,7 +257,7 @@
 4) Proposals -> agent-authored drafts + automatic promotion + derived model rebuild
 
 On-demand capability:
-- Q&A агент использует `charter/cards + model + reports + docs/imports`; в beta доступен как internal service + CLI `acp qa` без публичного API endpoint.
+- Q&A capability использует `charter/cards + model + reports + configured docs.imports_path`; в beta доступна как deterministic internal service + CLI `acp qa` + public read-only `POST /api/qa/ask`, без headless runtime provider и без runtime consumption `skills/prompt-packs/qa.md`.
 
 Execution modes:
 - local interactive: UI + local process
@@ -279,8 +280,9 @@ Execution modes:
   - `reports/taskruns/run-history.json`
   - run status registry (`/api/pipeline/runs/*`)
 
-## Follow-up boundary
-- `POST /api/qa/ask` остаётся post-beta slice (Epic 11) до отдельного release-требования.
+## Boundary notes
+- Native GitHub/GitLab webhook listener, hosted control plane and external SCM app integration остаются вне MVP; required integration surface — CLI batch job, optional trusted internal API trigger.
+- Q&A API is read-only and deterministic; it does not call headless providers, git helpers or pipeline runs.
 
 ## Progress tracking
 - Каноническая матрица stakeholder-статусов: `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.

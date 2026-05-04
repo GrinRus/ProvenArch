@@ -25,4 +25,4 @@ Baseline scenarios для MVP:
 - `validator-duplicate-claim`
 
 Required CI использует только synthetic scenarios, staged manifests/verdicts и golden snapshots.
-Live Claude Code runs в этом контуре не требуются.
+Live headless provider runs в этом контуре не требуются.

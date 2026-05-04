@@ -12,11 +12,16 @@
 
 ## Docs-first runtime contract
 
-Primary runtime outputs для live pipeline:
+Docs-first contract schemas для live pipeline:
 - `schemas/shard-pack-manifest.schema.json`
 - `schemas/final-run-index.schema.json`
 - `schemas/citation-index.schema.json`
 - `schemas/validator-verdict.schema.json`
+
+Artifact ownership:
+- provider-authored runtime artifacts: `shard-pack-manifest.json`, runtime draft manifests/files и `validator-verdict.json`
+- orchestrator-authored staged artifacts: `final-run-index.json`, `citation-index.json`, shard plans/summaries и run logs/history
+- compiler-derived promoted artifacts: `model/*`, diagrams, normalized coverage/findings renderers и approved `reports/*` / `proposals/*`
 
 Staged write model:
 - runtime шаги пишут только в step-local `write_root` и `draft_final_root`
@@ -116,6 +121,7 @@ skills/<skill_name>/
   - `ownership-coverage`
   - `findings`
   - `proposals`
+  - `qa`
 - prompt packs:
   - `constitution`
   - `collect-context`
@@ -128,19 +134,20 @@ Bundle поставляется вместе с продуктом, хранит
 ## Docs imports metadata (MVP)
 
 Для imported docs используется metadata index:
-- `docs/imports/index.yaml`
+- `<docs.imports_path>/index.yaml` (default `docs/imports/index.yaml`)
 
-Минимальные поля записи:
+Required поля записи:
 - `id`
-- `title`
-- `source_kind`
 - `path`
+
+Optional поля записи:
+- `source`
 - `checksum`
 - `imported_at`
-- optional `source_url`
-- optional `source_updated_at`
-- optional `status`
-- optional `tags`
+- `source_updated_at`
+- `status`
+
+Отсутствие index допустимо и не создаёт diagnostic. Malformed/index semantic issues (`duplicate id`, path traversal/absolute/outside imports root, missing referenced file) surfacing как warning-only workspace diagnostics.
 
 ## Canonical step IDs
 
@@ -196,14 +203,14 @@ Step 0 materialization policy:
 Inputs:
 - `workspace.yaml` из корня central `arch-workspace`
 - локальные checkout репозиториев, полученные из `path` и/или local git resolution of `git_url` на той же машине
-- `docs/imports/index.yaml` (если есть) + `docs/imports/*`
-- `docs/imports/*`, `docs/rfcs/*`, `docs/meetings/*`, `docs/decisions/*`
+- `<docs.imports_path>/index.yaml` (если есть) + configured imports files
+- `docs/rfcs/*`, `docs/meetings/*`, `docs/decisions/*`
 - `charter/*`
 - `skills/*`
 
 Runtime focuses on:
 - arbitrary stacks через выбранный headless provider (`claude-code|qwen-code|codex-code`) + baseline skill/prompt bundle, без фиксированного whitelist parser implementations в MVP
-- workspace prompt packs участвуют в composed prompt как editable content layer; merge order фиксирован: provider header -> artifact-only/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer. Enforced runtime policy/invariants задаются internal shared step-policy слоем и не могут быть ослаблены содержимым prompt pack
+- workspace prompt packs участвуют в composed prompt как editable content layer; merge order фиксирован: provider header -> artifact-only/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer. Enforced runtime policy/invariants задаются internal shared step-policy слоем и не могут быть ослаблены содержимым prompt pack. Editable prompt pack layer подключён к `step0.constitution`, `step1.collect`, `step3.findings` и `step4.proposals`; `step2.asis_docs` работает через enforced policy only без отдельного editable `as-is` prompt pack.
 - service topology и entrypoints
 - interfaces (HTTP/gRPC/events)
 - external systems/integrations
@@ -265,6 +272,7 @@ Step 2 policy:
 - domain outputs и финальные analysis/proposal surfaces собираются как authored/staged docs-first set из shard packs
 - orchestrator compiler допускается только как deterministic renderer/materializer для technical derived surfaces
 - `model/*` и диаграммы остаются derived layer
+- `step2.asis_docs` не имеет отдельного editable workspace prompt pack; live runtime получает enforced step policy + artifact-only contract, а не `skills/prompt-packs/as-is.md`
 - `asis-draft-manifest.json` обязан использовать strict canonical contract: `version=1`, `run_id`, `step_id`, `step_contract="as_is"`, `agent_role`, `outputs[]`
 - для `step2.asis_docs` обязательны canonical publish mappings `reports/as-is/overview.md`, `reports/coverage/summary.md`, `reports/agent-outputs/architect/summary.md`; дополнительные outputs разрешены только под `reports/as-is/<domain>/overview.md`
 - runtime draft parsing для `step2` strict: unknown top-level fields и legacy envelopes (`repo_scopes`, `compatibility`, `step_contract=null`, неканонические coverage outputs) reject-ятся до publish
@@ -338,14 +346,13 @@ Runtime proposal contract:
 - Unknown owner не создаёт auto-team entity и не создаёт auto-card; это question/finding path.
 
 ## On-demand Q&A capability (MVP)
-- System Analyst Q&A Agent работает поверх:
+- System Analyst Q&A capability в текущей beta работает как deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask` поверх:
   - `charter/cards/*`
   - `model/*`
   - `reports/*`
-  - `docs/imports/*`
-- В текущем beta surface доступен internal service слой + CLI `acp qa` (read-only).
-- Follow-up API endpoint: read-only `POST /api/qa/ask`.
-- Planned response shape: `answer`, `citations`, `unresolved`, `confidence`.
+  - configured `docs.imports_path`
+- Capability не вызывает headless runtime provider, не использует `skills/prompt-packs/qa.md` как runtime prompt и не меняет workspace.
+- API response shape: `answer`, `citations`, `unresolved`, `confidence`.
 - Канонический stakeholder статус/границы по Q&A API фиксируются в `docs/STAKEHOLDER_DOC.md` (Canonical Stakeholder Matrix).
 
 ## Нефункциональные требования (MVP)
@@ -360,6 +367,7 @@ Runtime proposal contract:
 ## CI/CD trigger modes (MVP)
 - Required MVP integration surface: `acp run --workspace ... --pipeline ... --non-interactive`.
 - SCM hook mode: GitHub/GitLab webhook инициирует native pipeline/job, который запускает ACP batch mode.
+- Webhook принимает CI provider, не ACP: native SCM webhook listener / external SCM app integration остаются вне MVP.
 - Default auto-trigger: `push` в default branch.
 - `merge request` / `pull request` updates в MVP идут как manual/preview trigger, а не auto-write trigger.
 - Manual trigger mode: пользователь запускает ту же job через manual pipeline button/job.

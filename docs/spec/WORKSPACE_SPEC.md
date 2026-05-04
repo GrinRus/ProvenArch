@@ -60,6 +60,7 @@ Default:
 - `./docs/imports`
 
 `imports_path` указывает только папку raw imports.
+Canonical metadata index: `<imports_path>/index.yaml`. Его отсутствие допустимо; malformed/semantic issues дают warning-only diagnostics. Entry contract: required `id`/`path`, optional `source`, `checksum`, `imported_at`, `source_updated_at`, `status`; `path` workspace-relative and must resolve under `imports_path`.
 Пути `docs/rfcs/`, `docs/meetings/`, `docs/decisions/` считаются фиксированной частью workspace layout и не конфигурируются через manifest.
 
 ## 5) `runtime.profile`

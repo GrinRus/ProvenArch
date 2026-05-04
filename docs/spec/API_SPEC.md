@@ -675,7 +675,41 @@ Partial update persisted execution-полей в `workspace.yaml`.
 { "ok": true, "branch": "proposal/beta-refresh" }
 ```
 
-## 6) Deterministic scope
+## 6) Q&A endpoint
+
+### POST `/api/qa/ask`
+Read-only Q&A over workspace artifacts. Endpoint uses deterministic `internal/qa` service and does not call headless runtime providers, git helpers or pipeline runs.
+
+**Request**
+```json
+{ "question": "Who owns payments-service?" }
+```
+
+Unknown fields and malformed JSON are rejected.
+
+**200**
+```json
+{
+  "answer": "Workspace evidence matched 2 artifact(s): reports/coverage/summary.md, docs/imports/architecture-notes.md",
+  "citations": [
+    {
+      "path": "reports/coverage/summary.md",
+      "reason": "matched 2 keyword(s): owner, payments"
+    }
+  ],
+  "unresolved": [],
+  "confidence": 0.82
+}
+```
+
+**400**
+- `invalid_request_body`
+- `question_required`
+
+**500**
+- `qa_failed`
+
+## 7) Deterministic scope
 
 Детерминированно сравниваемые артефакты (при одинаковом input и одинаковом наборе artifact fixtures):
 - `charter/`
@@ -693,12 +727,13 @@ Run-specific поверхность (не входит в strict deterministic g
 - `reports/taskruns/logs/*`
 - runtime run registry/status (`/api/pipeline/runs/*`)
 
-## 7) Follow-up boundary (post-beta)
+## 8) Boundary notes
 
-`POST /api/qa/ask` не входит в текущий beta required surface и остаётся follow-up slice (Epic 11), если не появится отдельное release-требование.
+`POST /api/qa/ask` входит в текущий beta API surface как read-only endpoint.
 Каноническая фиксация runtime/Q&A boundary: `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.
+Native SCM webhook listener/hosted control plane остаются вне MVP; required CI/CD surface — CLI batch mode, optional trusted API trigger — local/private deployment only.
 
-## 8) Deployment boundary
+## 9) Deployment boundary
 - CLI deployment surface остаётся explicit: bootstrap через `acp init-workspace`, local service через `acp serve`, required CI/CD через `acp run`.
 - bootstrap behavior: если workspace root не является git-репозиторием, ACP автоматически выполняет `git init` (без auto-commit/auto-push).
 - `serve` startup работает в lenient mode: сервис стартует без блокирующего repo preflight; readiness diagnostics доступны через `POST /api/workspace/validate`.

@@ -1229,6 +1229,9 @@ describe("App", () => {
 
     fireEvent.click(screen.getByTestId("tab-baseline"));
 
+    expect(await screen.findByText(/step0\/step1\/step3\/step4/i)).toBeInTheDocument();
+    expect(screen.queryByText(/collect`\/`findings/i)).not.toBeInTheDocument();
+
     const select = await screen.findByLabelText(/select artifact/i);
     fireEvent.change(select, { target: { value: "skills/prompt-packs/qa.md" } });
 

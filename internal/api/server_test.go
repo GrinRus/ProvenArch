@@ -102,6 +102,117 @@ func TestWorkspaceValidateEndpoint(t *testing.T) {
 	}
 }
 
+func TestQAAskEndpointReturnsWorkspaceBackedResponseAndDoesNotMutateWorkspace(t *testing.T) {
+	t.Parallel()
+
+	server := newQATestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	before := snapshotWorkspaceFiles(t, server.getWorkspace().Path)
+	response, err := http.Post(
+		httpServer.URL+"/api/qa/ask",
+		"application/json",
+		bytes.NewBufferString(`{"question":"What does coverage say about owner mappings and architecture notes?"}`),
+	)
+	if err != nil {
+		t.Fatalf("POST /api/qa/ask: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("expected status 200, got %d body=%s", response.StatusCode, string(body))
+	}
+	var payload struct {
+		Answer     string          `json:"answer"`
+		Citations  []qaAPICitation `json:"citations"`
+		Unresolved []string        `json:"unresolved"`
+		Confidence float64         `json:"confidence"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode qa response: %v", err)
+	}
+	if strings.TrimSpace(payload.Answer) == "" {
+		t.Fatalf("expected answer")
+	}
+	if payload.Confidence <= 0 {
+		t.Fatalf("expected positive confidence, got %f", payload.Confidence)
+	}
+	if len(payload.Citations) == 0 {
+		t.Fatalf("expected citations")
+	}
+	if !hasAPICitationPathPrefix(payload.Citations, "docs/imports/") {
+		t.Fatalf("expected docs/imports citation, got %+v", payload.Citations)
+	}
+
+	after := snapshotWorkspaceFiles(t, server.getWorkspace().Path)
+	assertWorkspaceSnapshotEqual(t, before, after)
+}
+
+func TestQAAskEndpointRejectsInvalidRequests(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		body       string
+		statusCode int
+		errorCode  string
+	}{
+		{
+			name:       "empty question",
+			body:       `{"question":"   "}`,
+			statusCode: http.StatusBadRequest,
+			errorCode:  "question_required",
+		},
+		{
+			name:       "unknown field",
+			body:       `{"question":"owners","extra":true}`,
+			statusCode: http.StatusBadRequest,
+			errorCode:  "invalid_request_body",
+		},
+		{
+			name:       "malformed json",
+			body:       `{"question":`,
+			statusCode: http.StatusBadRequest,
+			errorCode:  "invalid_request_body",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := newQATestServer(t)
+			httpServer := httptest.NewServer(server.Handler())
+			defer httpServer.Close()
+
+			response, err := http.Post(httpServer.URL+"/api/qa/ask", "application/json", bytes.NewBufferString(tc.body))
+			if err != nil {
+				t.Fatalf("POST /api/qa/ask: %v", err)
+			}
+			defer response.Body.Close()
+
+			if response.StatusCode != tc.statusCode {
+				body, _ := io.ReadAll(response.Body)
+				t.Fatalf("expected status %d, got %d body=%s", tc.statusCode, response.StatusCode, string(body))
+			}
+			var payload struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode error payload: %v", err)
+			}
+			if payload.Error.Code != tc.errorCode {
+				t.Fatalf("expected error code %q, got %q", tc.errorCode, payload.Error.Code)
+			}
+		})
+	}
+}
+
 func TestWorkspaceBundleEndpointReturnsEffectiveManifestAndWarnings(t *testing.T) {
 	t.Parallel()
 
@@ -2253,6 +2364,107 @@ repos:
     path: ` + repoPath + `
 `
 	return newTestServerFromManifest(t, manifest)
+}
+
+type qaAPICitation struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+}
+
+func newQATestServer(t *testing.T) *Server {
+	t.Helper()
+
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "repos", "payments-service")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("create repo path: %v", err)
+	}
+	manifest := `version: 1
+repos:
+  - name: payments-service
+    path: ` + repoPath + `
+`
+	root = writeManifestRootWithRoot(t, root, manifest)
+	ws, err := workspace.Open(root)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure layout: %v", err)
+	}
+	fixtures := map[string]string{
+		"reports/coverage/summary.md":        "Missing: owner mappings",
+		"reports/coverage/open-questions.md": "Who owns payments deployment?",
+		"reports/as-is/overview.md":          "Services: payments-service",
+		"docs/imports/index.yaml":            "- id: architecture-notes\n  path: docs/imports/architecture-notes.md\n",
+		"docs/imports/architecture-notes.md": "Architecture notes mention owner mappings and deployment concerns.",
+	}
+	for path, content := range fixtures {
+		if err := ws.WriteFile(path, []byte(content)); err != nil {
+			t.Fatalf("write fixture %s: %v", path, err)
+		}
+	}
+
+	service := orchestrator.NewService(orchestrator.WithHistoryWorkspace(ws))
+	return NewServer(ws, service)
+}
+
+func hasAPICitationPathPrefix(citations []qaAPICitation, prefix string) bool {
+	for _, citation := range citations {
+		if strings.HasPrefix(citation.Path, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func snapshotWorkspaceFiles(t *testing.T, root string) map[string]string {
+	t.Helper()
+
+	files := map[string]string{}
+	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files[filepath.ToSlash(rel)] = string(content)
+		return nil
+	}); err != nil {
+		t.Fatalf("snapshot workspace files: %v", err)
+	}
+	return files
+}
+
+func assertWorkspaceSnapshotEqual(t *testing.T, before map[string]string, after map[string]string) {
+	t.Helper()
+
+	if len(before) != len(after) {
+		t.Fatalf("expected workspace file count to remain %d, got %d", len(before), len(after))
+	}
+	for path, beforeContent := range before {
+		afterContent, ok := after[path]
+		if !ok {
+			t.Fatalf("expected workspace file %s to remain present", path)
+		}
+		if afterContent != beforeContent {
+			t.Fatalf("expected workspace file %s to remain unchanged", path)
+		}
+	}
+	for path := range after {
+		if _, ok := before[path]; !ok {
+			t.Fatalf("expected no new workspace file, got %s", path)
+		}
+	}
 }
 
 func newTestServerFromManifest(t *testing.T, manifest string) *Server {
