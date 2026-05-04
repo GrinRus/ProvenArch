@@ -652,16 +652,72 @@ func buildStructuralShardGroups(repoPath string, coverageRoots []string) ([][]st
 		warnings = append(warnings, preservedWarnings...)
 	}
 	if len(groups) > maxAutoShardsPerRepo {
+		before := len(groups)
+		groups = coalesceShardGroupsWithinCap(groups, rootFiles)
 		warnings = append(
 			warnings,
 			fmt.Sprintf(
-				"structural shard coalescing kept %d shard groups because cross-top-level merges are forbidden (target cap=%d)",
+				"structural shard coalescing merged %d shard groups to %d groups to enforce target cap=%d",
+				before,
 				len(groups),
 				maxAutoShardsPerRepo,
 			),
 		)
 	}
 	return groups, warnings
+}
+
+func coalesceShardGroupsWithinCap(groups [][]string, rootFiles []string) [][]string {
+	if len(groups) <= maxAutoShardsPerRepo {
+		return cloneShardGroups(groups)
+	}
+	result := make([][]string, 0, maxAutoShardsPerRepo)
+	start := 0
+	if len(rootFiles) > 0 && len(groups) > 0 && sameShardGroup(groups[0], rootFiles) {
+		result = append(result, append([]string(nil), groups[0]...))
+		start = 1
+	}
+	available := maxAutoShardsPerRepo - len(result)
+	if available <= 0 {
+		return result
+	}
+	remaining := groups[start:]
+	if len(remaining) <= available {
+		result = append(result, cloneShardGroups(remaining)...)
+		return result
+	}
+	for idx := 0; idx < available; idx++ {
+		from := idx * len(remaining) / available
+		to := (idx + 1) * len(remaining) / available
+		merged := make([]string, 0, to-from)
+		for _, group := range remaining[from:to] {
+			merged = append(merged, group...)
+		}
+		result = append(result, normalizeAndSortShardPaths(merged))
+	}
+	return result
+}
+
+func cloneShardGroups(groups [][]string) [][]string {
+	cloned := make([][]string, 0, len(groups))
+	for _, group := range groups {
+		cloned = append(cloned, append([]string(nil), group...))
+	}
+	return cloned
+}
+
+func sameShardGroup(a []string, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	aa := normalizeAndSortShardPaths(a)
+	bb := normalizeAndSortShardPaths(b)
+	for idx := range aa {
+		if aa[idx] != bb[idx] {
+			return false
+		}
+	}
+	return true
 }
 
 func groupRootFilesWithinCap(repoPath string, normalized []string) ([][]string, bool) {

@@ -210,13 +210,17 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 frontend_cancel_matrix_md="${REPORTS_ROOT}/frontend_cancel_e2e_matrix_${BATCH_ID}.md"
 
                 {
-                  printf 'hard_pass\\truntime_contract_failed\\trunner_unavailable\\truntime_timeout\\tinfra_signal_terminated\\tinfra_incomplete_cycle\\tquality_gates_failed\\tsummary_missing\\tprecheck_failed\\tcancellation_like\\truntime_flow_failed\\tsemantic_hard_fail\\toff_topic_hits\\tartifact_source\\tissues\\n'
-                  for idx in $(seq 1 $((provider_count * RUN_COUNT))); do
-                    if [[ "${MATRIX_TEST_RUNTIME_FLOW_FAILED:-0}" == "1" && "${PROFILE_ID}" == "single-path" && "${SWEEP_ID}" == "baseline" && "$idx" -eq 1 ]]; then
-                      printf '0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t1\\t0\\t0\\tsnapshot\\treliability:runtime-flow-failed\\n'
-                    else
-                      printf '1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\tsnapshot\\t-\\n'
-                    fi
+                  printf 'provider\\trun\\thard_pass\\truntime_contract_failed\\trunner_unavailable\\truntime_timeout\\tinfra_signal_terminated\\tinfra_incomplete_cycle\\tquality_gates_failed\\tsummary_missing\\tprecheck_failed\\tcancellation_like\\truntime_flow_failed\\tsemantic_hard_fail\\toff_topic_hits\\tartifact_source\\tissues\\n'
+                  for provider in "${selected_providers[@]}"; do
+                    for run_idx in $(seq 1 "${RUN_COUNT}"); do
+                      if [[ "${MATRIX_TEST_RUNTIME_FLOW_FAILED:-0}" == "1" && "${PROFILE_ID}" == "single-path" && "${SWEEP_ID}" == "baseline" && "${provider}" == "qwen-code" && "$run_idx" -eq 1 ]]; then
+                        printf '%s\\t%s\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t1\\t0\\t0\\tsnapshot\\treliability:runtime-flow-failed\\n' "${provider}" "${run_idx}"
+                      elif [[ "${MATRIX_TEST_QWEN_BACKEND_FAILURE:-0}" == "1" && "${provider}" == "qwen-code" && "$run_idx" -eq 1 ]]; then
+                        printf '%s\\t%s\\t0\\t0\\t1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\tsnapshot\\treliability:runner-unavailable\\n' "${provider}" "${run_idx}"
+                      else
+                        printf '%s\\t%s\\t1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\tsnapshot\\t-\\n' "${provider}" "${run_idx}"
+                      fi
+                    done
                   done
                 } > "${run_matrix_tsv}"
 
@@ -263,25 +267,27 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 fi
 
                 {
-                  printf '| provider | status | runs |\\n'
-                  printf '|---|---|---|\\n'
+                  printf '| provider | status | runs | reasons |\\n'
+                  printf '|---|---|---|---|\\n'
                   for provider in "${selected_providers[@]}"; do
                     if [[ "${BATCH_FRONTEND_MODE:-}" == "never" ]]; then
-                      printf '| %s | skipped | 0 |\\n' "${provider}"
+                      printf '| %s | skipped | 0 | disabled=1 |\\n' "${provider}"
+                    elif [[ "${MATRIX_TEST_QWEN_FRONTEND_SNAPSHOT_MISSING:-0}" == "1" && "${provider}" == "qwen-code" ]]; then
+                      printf '| %s | skipped | 1 | snapshot_reports_missing=1 |\\n' "${provider}"
                     else
-                      printf '| %s | passed | 1 |\\n' "${provider}"
+                      printf '| %s | passed | 1 | ok=1 |\\n' "${provider}"
                     fi
                   done
                 } > "${frontend_matrix_md}"
 
                 {
-                  printf '| provider | status | runs |\\n'
-                  printf '|---|---|---|\\n'
+                  printf '| provider | status | runs | reasons |\\n'
+                  printf '|---|---|---|---|\\n'
                   for provider in "${selected_providers[@]}"; do
                     if [[ "${BATCH_FRONTEND_CANCEL_MODE:-}" == "never" ]]; then
-                      printf '| %s | skipped | 0 |\\n' "${provider}"
+                      printf '| %s | skipped | 0 | disabled=1 |\\n' "${provider}"
                     else
-                      printf '| %s | passed | 1 |\\n' "${provider}"
+                      printf '| %s | passed | 1 | ok=1 |\\n' "${provider}"
                     fi
                   done
                 } > "${frontend_cancel_matrix_md}"
@@ -1095,6 +1101,35 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 and not rec.get("blocking_reasons")
                 for rec in verdict.get("records", [])
             )
+        )
+
+    def test_snapshot_missing_after_backend_failure_is_not_independent_frontend_blocker(self) -> None:
+        matrix_file = self._write_matrix_file(
+            None,
+            include_profiles=["single-path"],
+        )
+        matrix_id = "matrix-test-dependent-frontend-snapshot-missing"
+        result = self._run_matrix(
+            matrix_file,
+            matrix_id,
+            extra_env={
+                "BATCH_PROVIDER_FILTER": "qwen-code,codex-code",
+                "MATRIX_TEST_QWEN_BACKEND_FAILURE": "1",
+                "MATRIX_TEST_QWEN_FRONTEND_SNAPSHOT_MISSING": "1",
+            },
+            release_mode="0",
+        )
+        self.assertNotEqual(result.returncode, 0)
+
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual(verdict["verdict"], "FAIL")
+        record = verdict["records"][0]
+        self.assertEqual(record.get("frontend", {}).get("frontend_qwen_status"), "skipped")
+        blockers = record.get("blocking_reasons", [])
+        self.assertTrue(any(reason.startswith("runner_unavailable=1") for reason in blockers), blockers)
+        self.assertFalse(
+            any("frontend_qwen_status=skipped (expected passed)" in reason for reason in blockers),
+            blockers,
         )
 
     def test_release_matrix_still_requires_dual_provider_execution(self) -> None:

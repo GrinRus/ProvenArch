@@ -100,7 +100,7 @@ Baseline scenario set:
   - runtime profile patch service покрывается через API characterization: validation, merge/prune, manifest rewrite/reopen and unchanged error-code surface
 - runtime sharding control:
   - heuristics planner (module markers + leaf-pruning) и `analysis.include/exclude` фильтры
-  - structural coalescing для больших repos сохраняет module marker leaf shard groups внутри top-level dirs, если итоговый shard count остаётся в `maxAutoShardsPerRepo`
+  - structural coalescing для больших repos сохраняет module marker leaf shard groups внутри top-level dirs, если итоговый shard count остаётся в `maxAutoShardsPerRepo`, и детерминированно merge-ит excess top-level groups в bounded buckets
   - root-marker-only repos планируются как root-file group + top-level directory shards, а не single `"."` shard, если структура repo большая
   - fallback warning + root shard `.` при пустом результате фильтров
   - scheduler semantics `sequential|parallel` (`max_parallel_tasks`) и deterministic apply order

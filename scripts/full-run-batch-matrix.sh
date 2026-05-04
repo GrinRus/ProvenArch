@@ -1597,13 +1597,20 @@ release_profile_order = ("single-path", "single-git_url", "multi-path", "multi-g
 required_release_providers = ("qwen-code", "claude-code", "codex-code")
 
 
-def parse_frontend_status(path: Path, provider: str) -> str:
+def parse_frontend_row(path: Path, provider: str) -> dict[str, str]:
     if not path.exists() or not path.is_file():
-        return "missing"
-    text = path.read_text(encoding="utf-8")
-    match = re.search(rf"^\|\s*{re.escape(provider)}\s*\|\s*([^|]+)\|", text, flags=re.MULTILINE)
-    return match.group(1).strip() if match else "missing"
-
+        return {"status": "missing", "reasons": ""}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) < 2 or cells[0] != provider:
+            continue
+        return {
+            "status": cells[1] if cells[1] else "missing",
+            "reasons": cells[3] if len(cells) > 3 else "",
+        }
+    return {"status": "missing", "reasons": ""}
 
 def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
     stats: dict[str, object] = {
@@ -1626,6 +1633,8 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
         "cross_repo_missing_hits": 0,
         "runtime_flow_issue_hits": 0,
         "issues_counter": Counter(),
+        "provider_total": Counter(),
+        "provider_hard": Counter(),
     }
 
     if not tsv_path.exists() or not tsv_path.is_file():
@@ -1656,8 +1665,16 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
     for line in lines[1:]:
         parts = line.split("\t")
         stats["total"] = int(stats["total"]) + 1
-        if field_bool(parts, "hard_pass"):
+        provider = field(parts, "provider", "")
+        hard_pass = field_bool(parts, "hard_pass")
+        if provider:
+            provider_total: Counter = stats["provider_total"]  # type: ignore[assignment]
+            provider_total.update([provider])
+        if hard_pass:
             stats["hard"] = int(stats["hard"]) + 1
+            if provider:
+                provider_hard: Counter = stats["provider_hard"]  # type: ignore[assignment]
+                provider_hard.update([provider])
 
         for key in (
             "runtime_contract_failed",
@@ -1767,9 +1784,11 @@ def strict_blockers(
     rec: dict[str, object],
     stats: dict[str, object],
     frontend: dict[str, str],
+    frontend_reasons: dict[str, str],
     shard_plan_invariant: str,
     release_mode: bool,
     expected_backend_runs: int,
+    expected_provider_runs: int,
     required_frontend_providers: list[str],
     frontend_init_required: bool,
     frontend_cancel_required: bool,
@@ -1820,9 +1839,29 @@ def strict_blockers(
         "claude-code": ("frontend_claude_status", "frontend_cancel_claude_status"),
         "codex-code": ("frontend_codex_status", "frontend_cancel_codex_status"),
     }
+
+    def provider_backend_passed(provider: str) -> bool:
+        provider_total = stats.get("provider_total")
+        provider_hard = stats.get("provider_hard")
+        if isinstance(provider_total, Counter) and provider_total:
+            return (
+                provider_total.get(provider, 0) == expected_provider_runs
+                and isinstance(provider_hard, Counter)
+                and provider_hard.get(provider, 0) == expected_provider_runs
+            )
+        return int(stats["total"]) == expected_backend_runs and int(stats["hard"]) == expected_backend_runs
+
+    def frontend_depends_on_backend_failure(provider: str, key: str) -> bool:
+        status = frontend.get(key, "missing")
+        if status not in {"skipped", "missing"}:
+            return False
+        if "snapshot_reports_missing" not in frontend_reasons.get(key, ""):
+            return False
+        return not provider_backend_passed(provider)
+
     for provider in required_frontend_providers:
         init_key, cancel_key = frontend_provider_keys[provider]
-        if frontend_init_required and frontend.get(init_key) != "passed":
+        if frontend_init_required and frontend.get(init_key) != "passed" and not frontend_depends_on_backend_failure(provider, init_key):
             reasons.append(f"{init_key}={frontend.get(init_key, 'missing')} (expected passed)")
         if frontend_cancel_required and frontend.get(cancel_key) != "passed":
             reasons.append(f"{cancel_key}={frontend.get(cancel_key, 'missing')} (expected passed)")
@@ -2017,13 +2056,21 @@ for rec in records:
     frontend_cancel_matrix_md = Path(str(rec["frontend_cancel_matrix_md"]))
 
     stats = parse_backend_stats(run_matrix_tsv)
+    frontend_rows = {
+        "frontend_qwen_status": parse_frontend_row(frontend_matrix_md, "qwen-code"),
+        "frontend_claude_status": parse_frontend_row(frontend_matrix_md, "claude-code"),
+        "frontend_codex_status": parse_frontend_row(frontend_matrix_md, "codex-code"),
+        "frontend_cancel_qwen_status": parse_frontend_row(frontend_cancel_matrix_md, "qwen-code"),
+        "frontend_cancel_claude_status": parse_frontend_row(frontend_cancel_matrix_md, "claude-code"),
+        "frontend_cancel_codex_status": parse_frontend_row(frontend_cancel_matrix_md, "codex-code"),
+    }
     frontend_statuses = {
-        "frontend_qwen_status": parse_frontend_status(frontend_matrix_md, "qwen-code"),
-        "frontend_claude_status": parse_frontend_status(frontend_matrix_md, "claude-code"),
-        "frontend_codex_status": parse_frontend_status(frontend_matrix_md, "codex-code"),
-        "frontend_cancel_qwen_status": parse_frontend_status(frontend_cancel_matrix_md, "qwen-code"),
-        "frontend_cancel_claude_status": parse_frontend_status(frontend_cancel_matrix_md, "claude-code"),
-        "frontend_cancel_codex_status": parse_frontend_status(frontend_cancel_matrix_md, "codex-code"),
+        key: row["status"]
+        for key, row in frontend_rows.items()
+    }
+    frontend_reasons = {
+        key: row["reasons"]
+        for key, row in frontend_rows.items()
     }
 
     shard_plan_invariant = invariant_status_by_batch.get(str(rec["batch_id"]), "not_compared")
@@ -2031,9 +2078,11 @@ for rec in records:
         rec,
         stats,
         frontend_statuses,
+        frontend_reasons,
         shard_plan_invariant,
         release_mode,
         expected_backend_runs,
+        len(selected_run_indexes) if not release_mode else run_count,
         required_frontend_providers,
         frontend_init_required,
         frontend_cancel_required,
