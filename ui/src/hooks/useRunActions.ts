@@ -197,7 +197,7 @@ export function useRunActions({
   ]);
 
   const handleRunPipeline = useCallback(
-    async (pipeline: "init" | "refresh") => {
+    async (pipeline: "init" | "refresh"): Promise<boolean> => {
       setBusy(true);
       setError(null);
       setRunActionStatus("");
@@ -225,8 +225,10 @@ export function useRunActions({
           await fetchRunLogsUntilEOF(payload.run_id);
         }
         await loadRunList(100);
+        return true;
       } catch (requestError) {
         setError(requestError instanceof Error ? requestError.message : "failed to start pipeline");
+        return false;
       } finally {
         setBusy(false);
       }

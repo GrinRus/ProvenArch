@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GrinRus/ProvenArch/internal/doctor"
 	"github.com/GrinRus/ProvenArch/internal/orchestrator"
 	"github.com/GrinRus/ProvenArch/internal/qa"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
@@ -39,6 +40,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/health", s.handleHealth)
+	mux.HandleFunc("/api/system/doctor", s.handleSystemDoctor)
 	mux.HandleFunc("/api/workspace/validate", s.handleWorkspaceValidate)
 	mux.HandleFunc("/api/workspace/bundle", s.handleWorkspaceBundle)
 	mux.HandleFunc("/api/workspace/manifest", s.handleWorkspaceManifest)
@@ -100,6 +102,35 @@ func (s *Server) handleHealth(writer http.ResponseWriter, request *http.Request)
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleSystemDoctor(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		writeMethodNotAllowed(writer, http.MethodGet)
+		return
+	}
+
+	query := request.URL.Query()
+	if strings.TrimSpace(query.Get("repo_path")) != "" && strings.TrimSpace(query.Get("repo_git_url")) != "" {
+		writeError(writer, http.StatusBadRequest, "invalid_doctor_request", "set at most one of repo_path or repo_git_url")
+		return
+	}
+
+	ws := s.getWorkspace()
+	report, err := doctor.Run(request.Context(), doctor.Options{
+		WorkspacePath:       ws.Path,
+		RepoPath:            query.Get("repo_path"),
+		RepoGitURL:          query.Get("repo_git_url"),
+		RuntimeMode:         query.Get("runtime"),
+		RuntimeProvider:     query.Get("runtime_provider"),
+		CheckPort:           false,
+		EmbeddedUIAvailable: EmbeddedUIAvailable(),
+	})
+	if err != nil {
+		writeError(writer, http.StatusBadRequest, "doctor_failed", err.Error())
+		return
+	}
+	writeJSON(writer, http.StatusOK, report)
 }
 
 func (s *Server) handleWorkspaceValidate(writer http.ResponseWriter, request *http.Request) {

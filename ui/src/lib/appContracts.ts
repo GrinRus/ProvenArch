@@ -20,6 +20,20 @@ export type ValidateResponse = {
   }>;
 };
 
+export type DoctorCheck = {
+  id: string;
+  label: string;
+  status: "pass" | "warn" | "fail";
+  message: string;
+  suggestion?: string;
+};
+
+export type DoctorResponse = {
+  ok: boolean;
+  summary: string;
+  checks: DoctorCheck[];
+};
+
 export type BaselineBundleEditableArtifact = {
   path: string;
   label: string;
@@ -260,9 +274,9 @@ export function makeGuidedRepo(partial?: Partial<GuidedRepo>): GuidedRepo {
   return {
     id: partial?.id ?? `repo-${guidedRepoSeed}`,
     name: partial?.name ?? `repo-${guidedRepoSeed}`,
-    mode: partial?.mode ?? "path",
+    mode: partial?.mode ?? "git_url",
     path: partial?.path ?? "/absolute/path/to/repository",
-    git_url: partial?.git_url ?? "https://gitlab.example.com/group/repository.git",
+    git_url: partial?.git_url ?? "https://github.com/org/repository.git",
     ref: partial?.ref ?? "",
   };
 }

@@ -7,6 +7,7 @@ High-level commands:
 - `serve` — локальный backend + embedded UI для одного workspace на процесс
 - `run` — deterministic `init|refresh` pipeline для local/batch execution
 - `qa` — read-only вопросы по артефактам workspace
+- `doctor` — read-only readiness check для install/workspace/repo/runtime/UI перед первым запуском
 
 Canonical sources:
 - exact flag/help surface: `acp --help`, `acp <command> --help`, [cmd/acp/main.go](main.go)
@@ -21,3 +22,4 @@ Operational notes:
 - provider selection precedence: `--runtime-provider` > `ACP_RUNTIME_PROVIDER` > `claude-code`
 - provider commands: `ACP_CLAUDE_CMD`, `ACP_QWEN_CMD`, `ACP_CODEX_CMD`
 - `serve` остаётся lenient startup surface; readiness diagnostics идут через `/api/workspace/validate`
+- `doctor` использует exit codes: `0` ready, `1` user-fixable issues, `2` invalid flags/internal request error

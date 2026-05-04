@@ -43,6 +43,44 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 }
 
+func TestSystemDoctorEndpointReturnsReadinessChecks(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Get(httpServer.URL + "/api/system/doctor?runtime=fake&runtime_provider=claude-code")
+	if err != nil {
+		t.Fatalf("GET /api/system/doctor: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("expected status 200, got %d body=%s", response.StatusCode, string(body))
+	}
+	var payload struct {
+		OK     bool `json:"ok"`
+		Checks []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"checks"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode doctor payload: %v", err)
+	}
+	if !payload.OK {
+		t.Fatalf("expected doctor ok=true, got %+v", payload.Checks)
+	}
+	if !hasDoctorCheck(payload.Checks, "embedded_ui", "pass") {
+		t.Fatalf("expected embedded_ui pass, got %+v", payload.Checks)
+	}
+	if !hasDoctorCheck(payload.Checks, "runtime_provider", "pass") {
+		t.Fatalf("expected runtime_provider pass, got %+v", payload.Checks)
+	}
+}
+
 func TestEmbeddedUIIsServedFromRoot(t *testing.T) {
 	t.Parallel()
 
@@ -66,6 +104,18 @@ func TestEmbeddedUIIsServedFromRoot(t *testing.T) {
 	if !strings.Contains(strings.ToLower(string(content)), "<!doctype html") {
 		t.Fatalf("expected html shell, got %q", string(content))
 	}
+}
+
+func hasDoctorCheck(checks []struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}, id string, status string) bool {
+	for _, check := range checks {
+		if check.ID == id && check.Status == status {
+			return true
+		}
+	}
+	return false
 }
 
 func TestWorkspaceValidateEndpoint(t *testing.T) {

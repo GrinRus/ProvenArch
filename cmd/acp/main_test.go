@@ -23,6 +23,9 @@ func TestRunHelp(t *testing.T) {
 	if !strings.Contains(stdout.String(), "acp serve --workspace <abs-path>") {
 		t.Fatalf("expected help output, got %q", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "acp doctor") {
+		t.Fatalf("expected doctor command in help output, got %q", stdout.String())
+	}
 }
 
 func TestServeHelpReturnsZero(t *testing.T) {
@@ -82,6 +85,104 @@ func TestQAHelpReturnsZero(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "Usage: acp qa --workspace <abs-path> --question") {
 		t.Fatalf("expected qa usage in stderr, got %q", stderr.String())
+	}
+}
+
+func TestDoctorHelpReturnsZero(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"doctor", "--help"}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d", exitCodeOK, code)
+	}
+	if !strings.Contains(stderr.String(), "Usage: acp doctor") {
+		t.Fatalf("expected doctor usage in stderr, got %q", stderr.String())
+	}
+}
+
+func TestDoctorReportsUserFixableIssuesAsExitOne(t *testing.T) {
+	t.Setenv("ACP_CODEX_CMD", "definitely-missing-acp-doctor-command")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"doctor",
+		"--workspace", t.TempDir(),
+		"--runtime", "headless",
+		"--runtime-provider", "codex-code",
+		"--listen", "127.0.0.1:0",
+		"--json",
+	}, &stdout, &stderr)
+	if code != exitCodeDoctorIssues {
+		t.Fatalf("expected exit code %d, got %d stderr=%q stdout=%q", exitCodeDoctorIssues, code, stderr.String(), stdout.String())
+	}
+	var payload struct {
+		OK     bool `json:"ok"`
+		Checks []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode doctor json: %v\n%s", err, stdout.String())
+	}
+	if payload.OK {
+		t.Fatalf("expected ok=false")
+	}
+	if !hasDoctorCLIResultCheck(payload.Checks, "runtime_provider", "fail") {
+		t.Fatalf("expected runtime_provider failure, got %+v", payload.Checks)
+	}
+}
+
+func TestDoctorTextOutputReportsReadyChecks(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"doctor",
+		"--workspace", t.TempDir(),
+		"--runtime", "fake",
+		"--listen", "127.0.0.1:0",
+	}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d stderr=%q stdout=%q", exitCodeOK, code, stderr.String(), stdout.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"ACP doctor",
+		"status: ready",
+		"[pass] Git",
+		"[pass] Embedded UI",
+		"[warn] Repository source",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected doctor text output to contain %q, got %q", want, output)
+		}
+	}
+}
+
+func TestDoctorRejectsAmbiguousRepoSources(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"doctor",
+		"--repo-path", "/tmp/repo",
+		"--repo-git-url", "https://github.com/org/repo.git",
+	}, &stdout, &stderr)
+	if code != exitCodeInvalidCommand {
+		t.Fatalf("expected exit code %d, got %d", exitCodeInvalidCommand, code)
+	}
+	if !strings.Contains(stderr.String(), "set at most one") {
+		t.Fatalf("expected ambiguous source error, got %q", stderr.String())
 	}
 }
 
@@ -1678,4 +1779,16 @@ func outputField(output string, key string) string {
 		}
 	}
 	return ""
+}
+
+func hasDoctorCLIResultCheck(checks []struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}, id string, status string) bool {
+	for _, check := range checks {
+		if check.ID == id && check.Status == status {
+			return true
+		}
+	}
+	return false
 }

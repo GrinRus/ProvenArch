@@ -1,4 +1,4 @@
-import { fetchJSON, getErrorMessage } from "./api";
+import { fetchJSON } from "./api";
 import type { BaselineBundleResponse, ValidateResponse } from "./appContracts";
 
 export async function loadWorkspaceManifest(): Promise<string> {
@@ -24,9 +24,6 @@ export async function validateWorkspaceAPI(): Promise<ValidateResponse> {
     headers: { "Content-Type": "application/json" },
   });
   const payload = (await response.json()) as ValidateResponse;
-  if (!response.ok) {
-    throw new Error(getErrorMessage(payload, "workspace validation failed"));
-  }
   return payload;
 }
 
