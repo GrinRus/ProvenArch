@@ -279,29 +279,33 @@ export default function App() {
 
       {activeTab === "runs" ? (
         <RunPanels
-          busy={busy}
-          cancelBusy={cancelBusy}
-          runId={runId}
-          runStatus={runStatus}
-          runList={runList}
-          runActionStatus={runActionStatus}
-          selectedRunWarnings={selectedRunWarnings}
-          selectedRunIsActive={selectedRunIsActive}
-          runCounters={runCounters}
-          runLogsMode={runLogsMode}
-          runLogsViewMode={runLogsViewMode}
-          filteredRunLogs={filteredRunLogs}
-          runLogsStatus={runLogsStatus}
-          runLogTaskrunPaths={runLogTaskrunPaths}
-          runLogsRendered={runLogsRendered}
-          onRunLogsModeChange={setRunLogsMode}
-          onRunLogsViewModeChange={setRunLogsViewMode}
-          onRunPipeline={(pipeline) => void handleRunPipeline(pipeline)}
-          onCancelSelectedRun={() => void handleCancelSelectedRun()}
-          onSelectRun={(id) => void handleSelectRun(id)}
-          onCopyRunLogs={() => void handleCopyRunLogs()}
-          onDownloadRunLogs={handleDownloadRunLogs}
-          onOpenArtifact={(path) => void handleOpenArtifact(path)}
+          model={{
+            busy,
+            cancelBusy,
+            runId,
+            runStatus,
+            runList,
+            runActionStatus,
+            selectedRunWarnings,
+            selectedRunIsActive,
+            runCounters,
+            runLogsMode,
+            runLogsViewMode,
+            filteredRunLogs,
+            runLogsStatus,
+            runLogTaskrunPaths,
+            runLogsRendered,
+          }}
+          actions={{
+            onRunLogsModeChange: setRunLogsMode,
+            onRunLogsViewModeChange: setRunLogsViewMode,
+            onRunPipeline: (pipeline) => void handleRunPipeline(pipeline),
+            onCancelSelectedRun: () => void handleCancelSelectedRun(),
+            onSelectRun: (id) => void handleSelectRun(id),
+            onCopyRunLogs: () => void handleCopyRunLogs(),
+            onDownloadRunLogs: handleDownloadRunLogs,
+            onOpenArtifact: (path) => void handleOpenArtifact(path),
+          }}
         />
       ) : null}
 

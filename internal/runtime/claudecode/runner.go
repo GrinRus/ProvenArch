@@ -67,9 +67,13 @@ func (a claudeAdapter) RuntimeVersion() string {
 
 func (a claudeAdapter) CommandSpec(task acpruntime.Task) (providercommon.CommandSpec, error) {
 	includeDirs := acpruntime.ResolveHeadlessIncludeDirectories(task)
+	return a.commandSpecWithPrompt(task, includeDirs, buildPrompt(task))
+}
+
+func (a claudeAdapter) commandSpecWithPrompt(task acpruntime.Task, includeDirs []string, prompt string) (providercommon.CommandSpec, error) {
 	commandArgs := append([]string(nil), a.runner.Args...)
 	if len(commandArgs) == 0 {
-		commandArgs = buildClaudeArgsWithIncludeDirectories(includeDirs, buildPrompt(task))
+		commandArgs = buildClaudeArgsWithIncludeDirectories(includeDirs, prompt)
 	}
 	stdin, err := providercommon.JSONTaskStdin(task)
 	if err != nil {
@@ -85,91 +89,19 @@ func (a claudeAdapter) CommandSpec(task acpruntime.Task) (providercommon.Command
 }
 
 func (a claudeAdapter) CollectManifestRepairCommandSpec(task acpruntime.Task, validationErr error) (providercommon.CommandSpec, error) {
-	includeDirs := acpruntime.ResolveHeadlessCollectRepairIncludeDirectories(task)
-	repairTask := task
-	repairTask.ReadContextRoots = append([]string(nil), includeDirs...)
-	prompt := promptcontract.ComposeCollectManifestRepairPrompt(acpruntime.ProviderClaudeCode, repairTask, validationErr)
-	commandArgs := append([]string(nil), a.runner.Args...)
-	if len(commandArgs) == 0 {
-		commandArgs = buildClaudeArgsWithIncludeDirectories(includeDirs, prompt)
-	}
-	stdin, err := providercommon.JSONTaskStdin(repairTask)
-	if err != nil {
-		return providercommon.CommandSpec{}, err
-	}
-	return providercommon.CommandSpec{
-		Command:     a.runner.commandName(),
-		Args:        commandArgs,
-		Stdin:       stdin,
-		Dir:         strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task)),
-		IncludeDirs: includeDirs,
-	}, nil
+	return providercommon.BuildFocusedRepairCommandSpec(task, acpruntime.ProviderClaudeCode, providercommon.FocusedRepairCollectManifest, validationErr, a.commandSpecWithPrompt)
 }
 
 func (a claudeAdapter) CollectArtifactPairRepairCommandSpec(task acpruntime.Task, validationErr error) (providercommon.CommandSpec, error) {
-	includeDirs := acpruntime.ResolveHeadlessCollectRepairIncludeDirectories(task)
-	repairTask := task
-	repairTask.ReadContextRoots = append([]string(nil), includeDirs...)
-	prompt := promptcontract.ComposeCollectArtifactPairRepairPrompt(acpruntime.ProviderClaudeCode, repairTask, validationErr)
-	commandArgs := append([]string(nil), a.runner.Args...)
-	if len(commandArgs) == 0 {
-		commandArgs = buildClaudeArgsWithIncludeDirectories(includeDirs, prompt)
-	}
-	stdin, err := providercommon.JSONTaskStdin(repairTask)
-	if err != nil {
-		return providercommon.CommandSpec{}, err
-	}
-	return providercommon.CommandSpec{
-		Command:     a.runner.commandName(),
-		Args:        commandArgs,
-		Stdin:       stdin,
-		Dir:         strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task)),
-		IncludeDirs: includeDirs,
-	}, nil
+	return providercommon.BuildFocusedRepairCommandSpec(task, acpruntime.ProviderClaudeCode, providercommon.FocusedRepairCollectArtifactPair, validationErr, a.commandSpecWithPrompt)
 }
 
 func (a claudeAdapter) ValidatorVerdictRepairCommandSpec(task acpruntime.Task, validationErr error) (providercommon.CommandSpec, error) {
-	includeDirs := acpruntime.ResolveHeadlessValidatorRepairIncludeDirectories(task)
-	repairTask := task
-	repairTask.ReadContextRoots = append([]string(nil), includeDirs...)
-	prompt := promptcontract.ComposeValidatorVerdictRepairPrompt(acpruntime.ProviderClaudeCode, repairTask, validationErr)
-	commandArgs := append([]string(nil), a.runner.Args...)
-	if len(commandArgs) == 0 {
-		commandArgs = buildClaudeArgsWithIncludeDirectories(includeDirs, prompt)
-	}
-	stdin, err := providercommon.JSONTaskStdin(repairTask)
-	if err != nil {
-		return providercommon.CommandSpec{}, err
-	}
-	return providercommon.CommandSpec{
-		Command:     a.runner.commandName(),
-		Args:        commandArgs,
-		Stdin:       stdin,
-		Dir:         strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task)),
-		IncludeDirs: includeDirs,
-	}, nil
+	return providercommon.BuildFocusedRepairCommandSpec(task, acpruntime.ProviderClaudeCode, providercommon.FocusedRepairValidatorVerdict, validationErr, a.commandSpecWithPrompt)
 }
 
 func (a claudeAdapter) DraftArtifactRepairCommandSpec(task acpruntime.Task, validationErr error) (providercommon.CommandSpec, error) {
-	includeDirs := acpruntime.ResolveHeadlessDraftRepairIncludeDirectories(task)
-	repairTask := task
-	repairTask.ReadContextRoots = append([]string(nil), includeDirs...)
-	prompt := promptcontract.ComposeDraftArtifactRepairPrompt(acpruntime.ProviderClaudeCode, repairTask, validationErr)
-	commandArgs := append([]string(nil), a.runner.Args...)
-	if len(commandArgs) == 0 {
-		commandArgs = buildClaudeArgsWithIncludeDirectories(includeDirs, prompt)
-	}
-	stdin, err := providercommon.JSONTaskStdin(repairTask)
-	if err != nil {
-		return providercommon.CommandSpec{}, err
-	}
-	return providercommon.CommandSpec{
-		Command:     a.runner.commandName(),
-		Args:        commandArgs,
-		Stdin:       stdin,
-		Dir:         strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task)),
-		IncludeDirs: includeDirs,
-	}, nil
+	return providercommon.BuildFocusedRepairCommandSpec(task, acpruntime.ProviderClaudeCode, providercommon.FocusedRepairDraftArtifacts, validationErr, a.commandSpecWithPrompt)
 }
 
 func (a claudeAdapter) ValidateArtifacts(task acpruntime.Task) error {

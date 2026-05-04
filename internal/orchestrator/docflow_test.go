@@ -203,8 +203,10 @@ func TestPromoteValidatedArtifactsRejectsFailVerdict(t *testing.T) {
 	t.Parallel()
 
 	execution := &pipelineExecution{
-		finalRunIndex:    &contracts.FinalRunIndex{},
-		validatorVerdict: &contracts.ValidatorVerdict{Verdict: "FAIL"},
+		pipelineSemanticDocflowState: pipelineSemanticDocflowState{
+			finalRunIndex:    &contracts.FinalRunIndex{},
+			validatorVerdict: &contracts.ValidatorVerdict{Verdict: "FAIL"},
+		},
 	}
 	err := execution.promoteValidatedArtifacts()
 	if err == nil {
@@ -247,24 +249,28 @@ func TestPromoteValidatedArtifactsRemovesStaleManagedCanonicalFiles(t *testing.T
 	}
 
 	execution := &pipelineExecution{
-		workspace:  ws,
-		store:      model.NewStore(ws),
-		compiler:   reports.NewCompiler(ws),
-		stepStatus: RunInfo{CurrentStep: "init.step4.proposals"},
-		finalRunIndex: &contracts.FinalRunIndex{
-			RunID: "run-1",
-			CanonicalDocuments: []contracts.FinalRunDocument{
-				{
-					ID:            "doc.overview",
-					Kind:          "report",
-					Title:         "System Overview",
-					CanonicalPath: "reports/as-is/overview.md",
-					StagedPath:    stagedPath,
-				},
-			},
-			Semantic: contracts.SemanticSnapshot{},
+		workspace: ws,
+		store:     model.NewStore(ws),
+		compiler:  reports.NewCompiler(ws),
+		pipelineRunProgressState: pipelineRunProgressState{
+			stepStatus: RunInfo{CurrentStep: "init.step4.proposals"},
 		},
-		validatorVerdict: &contracts.ValidatorVerdict{Verdict: "PASS"},
+		pipelineSemanticDocflowState: pipelineSemanticDocflowState{
+			finalRunIndex: &contracts.FinalRunIndex{
+				RunID: "run-1",
+				CanonicalDocuments: []contracts.FinalRunDocument{
+					{
+						ID:            "doc.overview",
+						Kind:          "report",
+						Title:         "System Overview",
+						CanonicalPath: "reports/as-is/overview.md",
+						StagedPath:    stagedPath,
+					},
+				},
+				Semantic: contracts.SemanticSnapshot{},
+			},
+			validatorVerdict: &contracts.ValidatorVerdict{Verdict: "PASS"},
+		},
 	}
 
 	if err := execution.promoteValidatedArtifacts(); err != nil {
@@ -291,30 +297,32 @@ func TestValidateStagedArtifactsReportsMissingStagedDocument(t *testing.T) {
 	workspaceRoot := t.TempDir()
 	execution := &pipelineExecution{
 		workspace: workspace.Root{Path: workspaceRoot},
-		finalRunIndex: &contracts.FinalRunIndex{
-			RunID: "run-1",
-			CanonicalDocuments: []contracts.FinalRunDocument{
-				{
-					ID:            "doc.report",
-					Kind:          "report",
-					CanonicalPath: "reports/as-is/overview.md",
-					StagedPath:    "reports/taskruns/run-1/staging/final/reports/as-is/overview.md",
+		pipelineSemanticDocflowState: pipelineSemanticDocflowState{
+			finalRunIndex: &contracts.FinalRunIndex{
+				RunID: "run-1",
+				CanonicalDocuments: []contracts.FinalRunDocument{
+					{
+						ID:            "doc.report",
+						Kind:          "report",
+						CanonicalPath: "reports/as-is/overview.md",
+						StagedPath:    "reports/taskruns/run-1/staging/final/reports/as-is/overview.md",
+					},
+				},
+				Topics: []contracts.TopicIndexEntry{
+					{ID: "as-is", DocumentIDs: []string{"doc.report"}},
 				},
 			},
-			Topics: []contracts.TopicIndexEntry{
-				{ID: "as-is", DocumentIDs: []string{"doc.report"}},
+			citationIndex: &contracts.CitationIndex{
+				RunID:     "run-1",
+				Citations: []contracts.DocumentCitation{},
 			},
-		},
-		citationIndex: &contracts.CitationIndex{
-			RunID:     "run-1",
-			Citations: []contracts.DocumentCitation{},
-		},
-		shardPacks: []contracts.ShardPackManifest{
-			{
-				ShardID:      "payments",
-				Documents:    []contracts.AuthoredDocument{{ID: "doc.report", CanonicalPath: "reports/as-is/overview.md", CitationIDs: []string{"cite.1"}}},
-				Citations:    []contracts.DocumentCitation{{ID: "cite.1", Repo: "payments-service", Path: "README.md", ClaimIDs: []string{"claim.1"}, DocumentIDs: []string{"doc.report"}}},
-				ArtifactRoot: workspaceRoot,
+			shardPacks: []contracts.ShardPackManifest{
+				{
+					ShardID:      "payments",
+					Documents:    []contracts.AuthoredDocument{{ID: "doc.report", CanonicalPath: "reports/as-is/overview.md", CitationIDs: []string{"cite.1"}}},
+					Citations:    []contracts.DocumentCitation{{ID: "cite.1", Repo: "payments-service", Path: "README.md", ClaimIDs: []string{"claim.1"}, DocumentIDs: []string{"doc.report"}}},
+					ArtifactRoot: workspaceRoot,
+				},
 			},
 		},
 	}
@@ -350,50 +358,52 @@ func TestValidateStagedArtifactsDetectsCitationAndTopicIssues(t *testing.T) {
 
 	execution := &pipelineExecution{
 		workspace: workspace.Root{Path: workspaceRoot},
-		finalRunIndex: &contracts.FinalRunIndex{
-			RunID: "run-1",
-			CanonicalDocuments: []contracts.FinalRunDocument{
-				{
-					ID:            "doc.findings",
-					Kind:          "report",
-					CanonicalPath: "reports/findings/findings.md",
-					StagedPath:    stagedPath,
-					CitationIDs:   []string{},
+		pipelineSemanticDocflowState: pipelineSemanticDocflowState{
+			finalRunIndex: &contracts.FinalRunIndex{
+				RunID: "run-1",
+				CanonicalDocuments: []contracts.FinalRunDocument{
+					{
+						ID:            "doc.findings",
+						Kind:          "report",
+						CanonicalPath: "reports/findings/findings.md",
+						StagedPath:    stagedPath,
+						CitationIDs:   []string{},
+					},
+				},
+				Topics: []contracts.TopicIndexEntry{
+					{ID: "topic.dup", DocumentIDs: []string{"doc.findings"}},
+					{ID: "topic.dup", DocumentIDs: []string{"doc.findings"}},
+					{ID: "topic.broken", DocumentIDs: []string{"doc.unknown"}},
 				},
 			},
-			Topics: []contracts.TopicIndexEntry{
-				{ID: "topic.dup", DocumentIDs: []string{"doc.findings"}},
-				{ID: "topic.dup", DocumentIDs: []string{"doc.findings"}},
-				{ID: "topic.broken", DocumentIDs: []string{"doc.unknown"}},
-			},
-		},
-		citationIndex: &contracts.CitationIndex{
-			RunID: "run-1",
-			Citations: []contracts.DocumentCitation{
-				{
-					ID:       "cite.1",
-					Repo:     "payments-service",
-					Path:     "README.md",
-					ClaimIDs: []string{"claim.same"},
-				},
-				{
-					ID:       "cite.2",
-					Repo:     "payments-service",
-					Path:     "service.yaml",
-					ClaimIDs: []string{"claim.same"},
-				},
-			},
-		},
-		shardPacks: []contracts.ShardPackManifest{
-			{
-				ShardID:      "payments",
-				ArtifactRoot: workspaceRoot,
-				Documents: []contracts.AuthoredDocument{
-					{ID: "doc.findings", CanonicalPath: "reports/findings/findings.md"},
-				},
+			citationIndex: &contracts.CitationIndex{
+				RunID: "run-1",
 				Citations: []contracts.DocumentCitation{
-					{ID: "cite.1", Repo: "payments-service", Path: "README.md", ClaimIDs: []string{"claim.same"}, DocumentIDs: []string{"doc.findings"}},
-					{ID: "cite.2", Repo: "payments-service", Path: "service.yaml", ClaimIDs: []string{"claim.same"}, DocumentIDs: []string{"doc.findings"}},
+					{
+						ID:       "cite.1",
+						Repo:     "payments-service",
+						Path:     "README.md",
+						ClaimIDs: []string{"claim.same"},
+					},
+					{
+						ID:       "cite.2",
+						Repo:     "payments-service",
+						Path:     "service.yaml",
+						ClaimIDs: []string{"claim.same"},
+					},
+				},
+			},
+			shardPacks: []contracts.ShardPackManifest{
+				{
+					ShardID:      "payments",
+					ArtifactRoot: workspaceRoot,
+					Documents: []contracts.AuthoredDocument{
+						{ID: "doc.findings", CanonicalPath: "reports/findings/findings.md"},
+					},
+					Citations: []contracts.DocumentCitation{
+						{ID: "cite.1", Repo: "payments-service", Path: "README.md", ClaimIDs: []string{"claim.same"}, DocumentIDs: []string{"doc.findings"}},
+						{ID: "cite.2", Repo: "payments-service", Path: "service.yaml", ClaimIDs: []string{"claim.same"}, DocumentIDs: []string{"doc.findings"}},
+					},
 				},
 			},
 		},

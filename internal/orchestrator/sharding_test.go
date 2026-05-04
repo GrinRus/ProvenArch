@@ -412,9 +412,11 @@ func TestShardPlanItemsInvariantAcrossBaselineAndParallelDefault(t *testing.T) {
 	planFor := func(profile acpruntime.ExecutionValues) []runtimeShardPlan {
 		t.Helper()
 		execution := &pipelineExecution{
-			workspace:         ws,
-			executionProfile:  profile,
-			resolvedRepoPaths: map[string]string{"nova": repoPath},
+			workspace: ws,
+			pipelineRuntimeState: pipelineRuntimeState{
+				executionProfile:  profile,
+				resolvedRepoPaths: map[string]string{"nova": repoPath},
+			},
 		}
 		plans, warnings, _ := execution.planRuntimeShards([]string{"nova"})
 		if len(plans) == 0 {

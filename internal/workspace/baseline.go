@@ -6,6 +6,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/GrinRus/ProvenArch/internal/artifactquality"
 )
 
 var baselineSkillIDs = []string{
@@ -56,27 +58,14 @@ var baselinePromptPacks = map[string]string{
 			"source code, CI/CD manifests, deployment configs, docs/imports",
 			"charter cards, glossary, and runtime step policy",
 		},
-		RequiredOutputShape: []string{
-			"`shard-pack-manifest.json` plus authored shard documents inside the assigned write root",
-			"Populate semantic.coverage.observed/missing/notes, semantic.questions[*].text, semantic.entities[*], semantic.edges[*].type/from/to, and semantic.findings[*].provenance deterministically",
-			"Keep all semantic structure inside canonical manifest fields only; do not invent alternate metadata envelopes, compatibility blocks, or top-level step_contract fields",
-			"Use object-shaped provenance with numeric confidence values; do not use array provenance or string confidence aliases",
-			"Each semantic provenance.evidence[*] item must include non-empty repo/path fields; citation-only semantic evidence objects are invalid",
-			"Findings use title + description + provenance; do not use summary as a finding alias",
-		},
+		RequiredOutputShape: baselineCollectRequiredOutputShape(),
 		EvidencePolicy: []string{
 			"Observation requires concrete evidence path/repo references",
 			"Inference must be explicitly marked and confidence-scored",
 			"Prefer precise file-level evidence over broad repository claims",
 			"Treat schemas/spec plus the enforced runtime prompt as the only manifest schema source of truth",
 		},
-		ForbiddenBehavior: []string{
-			"Do not treat stdout/stderr as semantic output surfaces",
-			"Do not guess runtime metrics, ownership, or external contracts without evidence",
-			"Do not introduce non-deterministic timestamps or unstable identifiers outside allowed meta fields",
-			"Do not read reports/taskruns, raw runtime logs, archived plans, or prior shard-pack manifests as schema templates",
-			"Do not use legacy collect aliases such as covered_topics, question, relation, evidence_citation_ids, or top-level compatibility blocks",
-		},
+		ForbiddenBehavior: baselineCollectForbiddenBehavior(),
 		FallbackWhenUnknown: []string{
 			"Emit canonical semantic.coverage.missing values and actionable semantic.questions",
 			"Keep partial but valid shard manifest artifacts even under sparse repository signal",
@@ -90,14 +79,7 @@ var baselinePromptPacks = map[string]string{
 			"charter/rules.yaml and coverage/open-questions context",
 			"runtime task scopes and prior domain outputs",
 		},
-		RequiredOutputShape: []string{
-			"`validator-verdict.json` only, with version/run_id/generated_at/verdict/summary/checked_paths and optional fixed_paths/issues/findings/questions",
-			"issues[] items use only code/severity/message plus optional path/document_id/citation_id; severity is error|warning",
-			"Do not put legacy finding-shaped fields in issues[]: id/title/description/rule_id/related_paths/related_ids/provenance",
-			"Each finding includes stable id/title/severity/description and provenance",
-			"Questions live inside the verdict payload when evidence is incomplete",
-			"Owner-gap may remain visible in findings/questions while verdict stays PASS when no technical validator issues remain",
-		},
+		RequiredOutputShape: baselineFindingsRequiredOutputShape(),
 		EvidencePolicy: []string{
 			"Findings must point to concrete evidence references or explicit inference rationale",
 			"Observation provenance evidence must include repo/path for every cited file-level fact",
@@ -122,13 +104,7 @@ var baselinePromptPacks = map[string]string{
 			"charter constraints, NFR priorities, and migration boundaries",
 			"existing proposal templates and ADR/RFC stubs",
 		},
-		RequiredOutputShape: []string{
-			"`proposals-draft-manifest.json` with version=1, run_id, step_id, step_contract=\"proposals\", agent_role, optional summary, and outputs[]",
-			"Draft proposal/changelog files written under draft_final_root with outputs[].path relative to draft_final_root",
-			"outputs[].canonical_path values only under proposals/* or reports/changelog/*, and unique",
-			"Structured proposal artifacts with explicit scope, rollout, and risk notes",
-			"Deterministic ordering of finding references and migration checklist items",
-		},
+		RequiredOutputShape: baselineProposalsRequiredOutputShape(),
 		EvidencePolicy: []string{
 			"Every proposal item references one or more concrete findings or coverage gaps",
 			"State assumptions explicitly when evidence cannot prove implementation details",
@@ -138,8 +114,6 @@ var baselinePromptPacks = map[string]string{
 			"Do not propose features unrelated to current findings scope",
 			"Do not promise runtime/security/compliance guarantees outside MVP boundary",
 			"Do not mutate schema contracts from proposal generation step",
-			"Do not add legacy manifest fields: pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps",
-			"Do not emit final-index-like proposal envelopes as proposals-draft-manifest.json",
 		},
 		FallbackWhenUnknown: []string{
 			"When effort or ownership is unknown, add deterministic TODO markers",
@@ -493,17 +467,12 @@ var baselineSkillPromptSpecs = map[string]skillPromptSpec{
 		Inputs: []string{
 			"findings set, charter constraints, proposal templates",
 		},
-		RequiredOutputShape: []string{
-			"proposals-draft-manifest.json with version=1, run_id, step_id, step_contract=\"proposals\", agent_role, optional summary, and outputs[]",
-			"outputs[].canonical_path values only under proposals/* or reports/changelog/*",
-			"deterministic proposal outline with rollout and risk sections",
-		},
+		RequiredOutputShape: baselineProposalSkillRequiredOutputShape(),
 		EvidencePolicy: []string{
 			"Proposal scope must map back to one or more findings",
 		},
 		ForbiddenBehavior: []string{
 			"Do not prescribe broad rewrites without supporting findings",
-			"Do not emit legacy proposal manifest envelopes with pipeline/step/proposals[] top-level fields",
 		},
 		FallbackWhenUnknown: []string{
 			"Use phased TODO markers for unknown owners or effort estimates",
@@ -552,6 +521,69 @@ func skillPromptSpecFor(skill string) skillPromptSpec {
 			"Emit questions and coverage gaps using canonical terms",
 		},
 	}
+}
+
+func baselineCollectRequiredOutputShape() []string {
+	lines := []string{
+		"`shard-pack-manifest.json` plus authored shard documents inside the assigned write root",
+		"Populate semantic.coverage.observed/missing/notes, semantic.questions[*].text, semantic.entities[*], semantic.edges[*].type/from/to, and semantic.findings[*].provenance deterministically",
+		"Populate semantic coverage/questions/entities/edges/findings deterministically inside canonical manifest fields only",
+		"Each semantic provenance.evidence[*] item must include non-empty repo/path fields; citation-only semantic evidence objects are invalid",
+	}
+	lines = append(lines, baselinePolicyLines(artifactquality.CompactCollectManifestValidationChecklist("<artifact_root>"))...)
+	return lines
+}
+
+func baselineCollectForbiddenBehavior() []string {
+	lines := []string{
+		"Do not treat stdout/stderr as semantic output surfaces",
+		"Do not guess runtime metrics, ownership, or external contracts without evidence",
+		"Do not introduce non-deterministic timestamps or unstable identifiers outside allowed meta fields",
+		"Do not read reports/taskruns, raw runtime logs, archived plans, or prior shard-pack manifests as schema templates",
+	}
+	lines = append(lines, baselinePolicyLines(artifactquality.CollectManifestLegacyHygieneLines())...)
+	return lines
+}
+
+func baselineFindingsRequiredOutputShape() []string {
+	lines := []string{
+		"`validator-verdict.json` only, with version/run_id/generated_at/verdict/summary/checked_paths",
+		"`validator-verdict.json` only; stdout/stderr are diagnostics, not semantic payloads",
+		"issues[] items use only code/severity/message plus optional path/document_id/citation_id; severity is error|warning",
+	}
+	lines = append(lines, baselinePolicyLines(artifactquality.ValidatorVerdictContractLines())...)
+	return lines
+}
+
+func baselineProposalsRequiredOutputShape() []string {
+	lines := []string{
+		"Draft proposal/changelog files written under draft_final_root with outputs[].path relative to draft_final_root",
+		"Structured proposal artifacts with explicit scope, rollout, and risk notes",
+		"Deterministic ordering of finding references and migration checklist items",
+	}
+	lines = append(lines, baselinePolicyLines(artifactquality.ProposalsDraftManifestContractLines())...)
+	return lines
+}
+
+func baselineProposalSkillRequiredOutputShape() []string {
+	lines := []string{
+		"deterministic proposal outline with rollout and risk sections",
+	}
+	lines = append(lines, baselinePolicyLines(artifactquality.ProposalsDraftManifestContractLines())...)
+	return lines
+}
+
+func baselinePolicyLines(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		trimmed = strings.TrimPrefix(trimmed, "- ")
+		trimmed = strings.TrimSpace(trimmed)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func renderStructuredPrompt(title string, spec structuredPromptSpec) string {

@@ -6,10 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
-	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
 
 func TestValidateCollectManifestRejectsContractInvalidCompatibilityPayload(t *testing.T) {
@@ -19,8 +17,7 @@ func TestValidateCollectManifestRejectsContractInvalidCompatibilityPayload(t *te
 	writeFixtureManifest(t, writeRoot, "bank_extras_invalid_manifest.json")
 	writeDoc(t, writeRoot, "extras-overview.md", "# Extras\n")
 
-	task := testCollectTask(writeRoot, "bank-of-anthos-extras", "bank-of-anthos")
-	if err := ValidateCollectManifest(task); err == nil {
+	if err := ValidateCollectManifestInRoot(writeRoot); err == nil {
 		t.Fatalf("expected validation to fail for contract-invalid compatibility payload")
 	} else if !strings.Contains(err.Error(), "shard pack manifest is invalid") {
 		t.Fatalf("expected schema/contract rejection error, got %v", err)
@@ -224,8 +221,7 @@ func TestValidateCollectManifestRejectsCitationOnlySemanticEvidenceObjects(t *te
 		t.Fatalf("write manifest: %v", err)
 	}
 
-	task := testCollectTask(writeRoot, "payments", "payments-service")
-	err := ValidateCollectManifest(task)
+	err := ValidateCollectManifestInRoot(writeRoot)
 	if err == nil {
 		t.Fatalf("expected validation to fail for citation-only semantic evidence")
 	}
@@ -244,19 +240,13 @@ func TestValidateCollectManifestRejectsArtifactRootPrefixedDocumentPathWithoutRe
 	writeFixtureManifest(t, writeRoot, "bank_of_anthos_doubled_path_manifest.json")
 	writeDoc(t, writeRoot, "iac-overview.md", "# IAC Overview\n")
 
-	task := testCollectTask(writeRoot, "bank-of-anthos-iac", "bank-of-anthos")
-	task.RunID = "run_20260420_054749_001"
-	task.StepID = "init.step1.collect"
-	task.ArtifactRoot = "reports/taskruns/run_20260420_054749_001/staging/shards/bank-of-anthos-iac"
-	task.PathScopes = []string{"iac"}
-
 	manifestPath := filepath.Join(writeRoot, shardPackManifestFile)
 	before, err := os.ReadFile(manifestPath)
 	if err != nil {
 		t.Fatalf("read original manifest: %v", err)
 	}
 
-	if err := ValidateCollectManifest(task); err == nil {
+	if err := ValidateCollectManifestInRoot(writeRoot); err == nil {
 		t.Fatalf("expected artifact-root-prefixed document path to fail strict validation")
 	} else if !strings.Contains(err.Error(), "must be artifact_root-relative") {
 		t.Fatalf("expected strict document path error, got %v", err)
@@ -326,8 +316,7 @@ func TestValidateCollectManifestRejectsAbsoluteDocumentPathWithoutRewrite(t *tes
 		t.Fatalf("read original manifest: %v", err)
 	}
 
-	task := testCollectTask(writeRoot, "openedx-platform", "openedx-platform")
-	if err := ValidateCollectManifest(task); err == nil {
+	if err := ValidateCollectManifestInRoot(writeRoot); err == nil {
 		t.Fatalf("expected absolute document path to fail strict validation")
 	} else if !strings.Contains(err.Error(), "must be relative") {
 		t.Fatalf("expected strict document path error, got %v", err)
@@ -367,8 +356,7 @@ func TestValidateCollectManifestRejectsMissingRequiredMetadataWithoutAutofill(t 
 		t.Fatalf("write manifest: %v", err)
 	}
 
-	task := testCollectTask(writeRoot, "payments", "payments-service")
-	if err := ValidateCollectManifest(task); err != nil {
+	if err := ValidateCollectManifestInRoot(writeRoot); err != nil {
 		t.Fatalf("expected valid manifest without optional repo/path/domain metadata to pass: %v", err)
 	}
 
@@ -376,7 +364,7 @@ func TestValidateCollectManifestRejectsMissingRequiredMetadataWithoutAutofill(t 
 	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), []byte(missingRunID), 0o644); err != nil {
 		t.Fatalf("write missing run_id manifest: %v", err)
 	}
-	if err := ValidateCollectManifest(task); err == nil {
+	if err := ValidateCollectManifestInRoot(writeRoot); err == nil {
 		t.Fatalf("expected missing run_id to fail strict validation")
 	} else if !strings.Contains(err.Error(), "run_id") {
 		t.Fatalf("expected run_id validation error, got %v", err)
@@ -410,8 +398,7 @@ func TestValidateCollectManifestRejectsUnknownTopLevelFieldWithoutRewrite(t *tes
 		t.Fatalf("write manifest: %v", err)
 	}
 
-	task := testCollectTask(writeRoot, "payments", "payments-service")
-	if err := ValidateCollectManifest(task); err == nil {
+	if err := ValidateCollectManifestInRoot(writeRoot); err == nil {
 		t.Fatalf("expected unknown top-level field to fail strict validation")
 	} else if !strings.Contains(err.Error(), "unknown_runtime_wrapper") {
 		t.Fatalf("expected unknown field name in validation error, got %v", err)
@@ -519,24 +506,6 @@ func semanticMap(payload map[string]any) map[string]any {
 
 func semanticSliceItem(payload map[string]any, key string, index int) map[string]any {
 	return semanticMap(payload)[key].([]any)[index].(map[string]any)
-}
-
-func testCollectTask(writeRoot string, shardID string, repo string) acpruntime.Task {
-	return acpruntime.Task{
-		TaskID:       "task-" + shardID,
-		RunID:        "run-1",
-		StepID:       "refresh.step1.collect",
-		Workspace:    filepath.Clean(filepath.Join(writeRoot, "..", "workspace")),
-		WriteRoot:    writeRoot,
-		ArtifactRoot: "reports/taskruns/run-1/staging/shards/" + shardID,
-		ShardID:      shardID,
-		DomainID:     shardID,
-		AgentRole:    "shard-analyst",
-		RepoScope:    repo,
-		RepoScopes:   []string{repo},
-		PathScopes:   []string{"."},
-		StartedAtUTC: time.Date(2026, 4, 19, 9, 0, 0, 0, time.UTC),
-	}
 }
 
 func writeFixtureManifest(t *testing.T, writeRoot string, fixtureName string) {

@@ -17,6 +17,7 @@ import (
 
 	"github.com/GrinRus/ProvenArch/internal/orchestrator"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtimeprofile"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
@@ -219,45 +220,19 @@ func (s *Server) handleRuntimeTimeouts(writer http.ResponseWriter, request *http
 			writeError(writer, http.StatusBadRequest, "runtime_timeouts_empty", "timeouts payload must include at least one field")
 			return
 		}
-		if err := validateRuntimeTimeoutPatch(payload.Timeouts); err != nil {
+		if err := runtimeprofile.ValidateRuntimeTimeoutPatch(payload.Timeouts); err != nil {
 			writeError(writer, http.StatusBadRequest, "runtime_timeouts_invalid", err.Error())
 			return
 		}
 
 		ws := s.getWorkspace()
-		manifest := ws.Manifest
-		if manifest.Runtime == nil {
-			manifest.Runtime = &workspace.RuntimeConfig{}
-		}
-		if manifest.Runtime.Profile == nil {
-			manifest.Runtime.Profile = &workspace.RuntimeProfileConfig{}
-		}
-		if manifest.Runtime.Profile.Timeouts == nil {
-			manifest.Runtime.Profile.Timeouts = &workspace.RuntimeTimeoutsConfig{}
-		}
-		mergeRuntimeTimeoutPatch(manifest.Runtime.Profile.Timeouts, payload.Timeouts)
-		if manifest.Runtime.Profile.Timeouts.IsZero() {
-			manifest.Runtime.Profile.Timeouts = nil
-		}
-		if manifest.Runtime.Profile.IsZero() {
-			manifest.Runtime.Profile = nil
-		}
-		if manifest.Runtime.IsZero() {
-			manifest.Runtime = nil
-		}
-
-		rawManifest, err := workspace.RenderManifest(manifest)
+		reopened, err := (runtimeprofile.RuntimeProfilePatchService{}).ApplyTimeouts(ws, payload.Timeouts)
 		if err != nil {
-			writeError(writer, http.StatusInternalServerError, "runtime_timeouts_render_failed", err.Error())
-			return
-		}
-		if err := ws.WriteFile(workspace.ManifestFileName, rawManifest); err != nil {
+			if typed := (runtimeprofile.PatchError{}); errors.As(err, &typed) {
+				writeError(writer, http.StatusInternalServerError, typed.Code, typed.Error())
+				return
+			}
 			writeError(writer, http.StatusInternalServerError, "runtime_timeouts_write_failed", err.Error())
-			return
-		}
-		reopened, err := workspace.Open(ws.Path)
-		if err != nil {
-			writeError(writer, http.StatusInternalServerError, "runtime_timeouts_reopen_failed", err.Error())
 			return
 		}
 		s.setWorkspace(reopened)
@@ -271,90 +246,6 @@ func (s *Server) handleRuntimeTimeouts(writer http.ResponseWriter, request *http
 	default:
 		writeMethodNotAllowed(writer, http.MethodGet+", "+http.MethodPut)
 	}
-}
-
-func validateRuntimeTimeoutPatch(patch workspace.RuntimeTimeoutsConfig) error {
-	checks := []struct {
-		name  string
-		value *int
-	}{
-		{name: "step_timeout_sec", value: patch.StepTimeoutSec},
-		{name: "heartbeat_sec", value: patch.HeartbeatSec},
-		{name: "pipeline_timeout_sec", value: patch.PipelineTimeoutSec},
-		{name: "pipeline_kill_grace_sec", value: patch.PipelineKillGraceSec},
-		{name: "api_ready_timeout_sec", value: patch.APIReadyTimeoutSec},
-		{name: "api_init_timeout_sec", value: patch.APIInitTimeoutSec},
-		{name: "ui_init_poll_timeout_sec", value: patch.UIInitPollTimeoutSec},
-		{name: "ui_cancel_poll_timeout_sec", value: patch.UICancelPollTimeoutSec},
-	}
-	for _, check := range checks {
-		if check.value != nil && *check.value <= 0 {
-			return fmt.Errorf("%s must be > 0", check.name)
-		}
-	}
-	return nil
-}
-
-func mergeRuntimeTimeoutPatch(dst *workspace.RuntimeTimeoutsConfig, patch workspace.RuntimeTimeoutsConfig) {
-	if dst == nil {
-		return
-	}
-	if patch.StepTimeoutSec != nil {
-		dst.StepTimeoutSec = patch.StepTimeoutSec
-	}
-	if patch.HeartbeatSec != nil {
-		dst.HeartbeatSec = patch.HeartbeatSec
-	}
-	if patch.PipelineTimeoutSec != nil {
-		dst.PipelineTimeoutSec = patch.PipelineTimeoutSec
-	}
-	if patch.PipelineKillGraceSec != nil {
-		dst.PipelineKillGraceSec = patch.PipelineKillGraceSec
-	}
-	if patch.APIReadyTimeoutSec != nil {
-		dst.APIReadyTimeoutSec = patch.APIReadyTimeoutSec
-	}
-	if patch.APIInitTimeoutSec != nil {
-		dst.APIInitTimeoutSec = patch.APIInitTimeoutSec
-	}
-	if patch.UIInitPollTimeoutSec != nil {
-		dst.UIInitPollTimeoutSec = patch.UIInitPollTimeoutSec
-	}
-	if patch.UICancelPollTimeoutSec != nil {
-		dst.UICancelPollTimeoutSec = patch.UICancelPollTimeoutSec
-	}
-}
-
-type runtimeExecutionPatch struct {
-	Strategy           *string                    `json:"strategy"`
-	MaxParallelTasks   *int                       `json:"max_parallel_tasks"`
-	FailurePolicy      *string                    `json:"failure_policy"`
-	ShardDiscoveryMode *string                    `json:"shard_discovery_mode"`
-	Steps              *runtimeStepProvidersPatch `json:"steps"`
-}
-
-func (patch runtimeExecutionPatch) IsZero() bool {
-	return patch.Strategy == nil &&
-		patch.MaxParallelTasks == nil &&
-		patch.FailurePolicy == nil &&
-		patch.ShardDiscoveryMode == nil &&
-		(patch.Steps == nil || patch.Steps.IsZero())
-}
-
-type runtimeStepProvidersPatch struct {
-	Step0Constitution *string `json:"step0_constitution"`
-	Step1Collect      *string `json:"step1_collect"`
-	Step2AsIs         *string `json:"step2_as_is"`
-	Step3Findings     *string `json:"step3_findings"`
-	Step4Proposals    *string `json:"step4_proposals"`
-}
-
-func (patch runtimeStepProvidersPatch) IsZero() bool {
-	return patch.Step0Constitution == nil &&
-		patch.Step1Collect == nil &&
-		patch.Step2AsIs == nil &&
-		patch.Step3Findings == nil &&
-		patch.Step4Proposals == nil
 }
 
 func (s *Server) handleRuntimeExecution(writer http.ResponseWriter, request *http.Request) {
@@ -375,7 +266,7 @@ func (s *Server) handleRuntimeExecution(writer http.ResponseWriter, request *htt
 		})
 	case http.MethodPut:
 		var payload struct {
-			Execution runtimeExecutionPatch `json:"execution"`
+			Execution runtimeprofile.RuntimeExecutionPatch `json:"execution"`
 		}
 		if err := decodeStrictJSON(request, &payload); err != nil {
 			writeError(writer, http.StatusBadRequest, "invalid_request_body", "invalid request body")
@@ -385,54 +276,19 @@ func (s *Server) handleRuntimeExecution(writer http.ResponseWriter, request *htt
 			writeError(writer, http.StatusBadRequest, "runtime_execution_empty", "execution payload must include at least one field")
 			return
 		}
-		if err := validateRuntimeExecutionPatch(payload.Execution); err != nil {
+		if err := runtimeprofile.ValidateRuntimeExecutionPatch(payload.Execution); err != nil {
 			writeError(writer, http.StatusBadRequest, "runtime_execution_invalid", err.Error())
 			return
 		}
 
 		ws := s.getWorkspace()
-		manifest := ws.Manifest
-		if manifest.Runtime == nil {
-			manifest.Runtime = &workspace.RuntimeConfig{}
-		}
-		if manifest.Runtime.Profile == nil {
-			manifest.Runtime.Profile = &workspace.RuntimeProfileConfig{}
-		}
-		if manifest.Runtime.Profile.Execution == nil {
-			manifest.Runtime.Profile.Execution = &workspace.RuntimeExecutionConfig{}
-		}
-		if manifest.Runtime.Profile.Steps == nil {
-			manifest.Runtime.Profile.Steps = &workspace.RuntimeStepsConfig{}
-		}
-		mergeRuntimeExecutionPatch(manifest.Runtime.Profile.Execution, payload.Execution)
-		if payload.Execution.Steps != nil {
-			mergeRuntimeStepProvidersPatch(manifest.Runtime.Profile.Steps, *payload.Execution.Steps)
-		}
-		if manifest.Runtime.Profile.Execution.IsZero() {
-			manifest.Runtime.Profile.Execution = nil
-		}
-		if manifest.Runtime.Profile.Steps.IsZero() {
-			manifest.Runtime.Profile.Steps = nil
-		}
-		if manifest.Runtime.Profile.IsZero() {
-			manifest.Runtime.Profile = nil
-		}
-		if manifest.Runtime.IsZero() {
-			manifest.Runtime = nil
-		}
-
-		rawManifest, err := workspace.RenderManifest(manifest)
+		reopened, err := (runtimeprofile.RuntimeProfilePatchService{}).ApplyExecution(ws, payload.Execution)
 		if err != nil {
-			writeError(writer, http.StatusInternalServerError, "runtime_execution_render_failed", err.Error())
-			return
-		}
-		if err := ws.WriteFile(workspace.ManifestFileName, rawManifest); err != nil {
+			if typed := (runtimeprofile.PatchError{}); errors.As(err, &typed) {
+				writeError(writer, http.StatusInternalServerError, typed.Code, typed.Error())
+				return
+			}
 			writeError(writer, http.StatusInternalServerError, "runtime_execution_write_failed", err.Error())
-			return
-		}
-		reopened, err := workspace.Open(ws.Path)
-		if err != nil {
-			writeError(writer, http.StatusInternalServerError, "runtime_execution_reopen_failed", err.Error())
 			return
 		}
 		s.setWorkspace(reopened)
@@ -484,97 +340,6 @@ func (s *Server) handleRuntimeProfile(writer http.ResponseWriter, request *http.
 			"source":    runtimeStepProvidersSourcePayload(stepProviders.Source),
 		},
 	})
-}
-
-func validateRuntimeExecutionPatch(patch runtimeExecutionPatch) error {
-	if patch.Strategy != nil {
-		value := strings.TrimSpace(strings.ToLower(*patch.Strategy))
-		if value != acpruntime.ExecutionStrategySequential && value != acpruntime.ExecutionStrategyParallel {
-			return fmt.Errorf("strategy must be one of: %s, %s", acpruntime.ExecutionStrategySequential, acpruntime.ExecutionStrategyParallel)
-		}
-	}
-	if patch.MaxParallelTasks != nil && *patch.MaxParallelTasks <= 0 {
-		return errors.New("max_parallel_tasks must be > 0")
-	}
-	if patch.FailurePolicy != nil {
-		value := strings.TrimSpace(strings.ToLower(*patch.FailurePolicy))
-		if value != acpruntime.ExecutionFailurePolicyFailFast && value != acpruntime.ExecutionFailurePolicyBestEffort {
-			return fmt.Errorf("failure_policy must be one of: %s, %s", acpruntime.ExecutionFailurePolicyFailFast, acpruntime.ExecutionFailurePolicyBestEffort)
-		}
-	}
-	if patch.ShardDiscoveryMode != nil {
-		value := strings.TrimSpace(strings.ToLower(*patch.ShardDiscoveryMode))
-		if value != acpruntime.ExecutionShardDiscoveryHeuristics && value != acpruntime.ExecutionShardDiscoverySemantic {
-			return fmt.Errorf("shard_discovery_mode must be one of: %s, %s", acpruntime.ExecutionShardDiscoveryHeuristics, acpruntime.ExecutionShardDiscoverySemantic)
-		}
-	}
-	if patch.Steps != nil {
-		for label, value := range map[string]*string{
-			"step0_constitution": patch.Steps.Step0Constitution,
-			"step1_collect":      patch.Steps.Step1Collect,
-			"step2_as_is":        patch.Steps.Step2AsIs,
-			"step3_findings":     patch.Steps.Step3Findings,
-			"step4_proposals":    patch.Steps.Step4Proposals,
-		} {
-			if value == nil {
-				continue
-			}
-			provider := strings.TrimSpace(strings.ToLower(*value))
-			if provider != string(acpruntime.ProviderClaudeCode) &&
-				provider != string(acpruntime.ProviderQwenCode) &&
-				provider != string(acpruntime.ProviderCodexCode) {
-				return fmt.Errorf("%s must be one of: %s, %s, %s", label, acpruntime.ProviderClaudeCode, acpruntime.ProviderQwenCode, acpruntime.ProviderCodexCode)
-			}
-		}
-	}
-	return nil
-}
-
-func mergeRuntimeExecutionPatch(dst *workspace.RuntimeExecutionConfig, patch runtimeExecutionPatch) {
-	if dst == nil {
-		return
-	}
-	if patch.Strategy != nil {
-		value := strings.TrimSpace(strings.ToLower(*patch.Strategy))
-		dst.Strategy = value
-	}
-	if patch.MaxParallelTasks != nil {
-		dst.MaxParallel = patch.MaxParallelTasks
-	}
-	if patch.FailurePolicy != nil {
-		value := strings.TrimSpace(strings.ToLower(*patch.FailurePolicy))
-		dst.FailurePolicy = value
-	}
-	if patch.ShardDiscoveryMode != nil {
-		value := strings.TrimSpace(strings.ToLower(*patch.ShardDiscoveryMode))
-		if dst.ShardDiscovery == nil {
-			dst.ShardDiscovery = &workspace.RuntimeShardDiscoveryConfig{}
-		}
-		dst.ShardDiscovery.Mode = value
-	}
-}
-
-func mergeRuntimeStepProvidersPatch(dst *workspace.RuntimeStepsConfig, patch runtimeStepProvidersPatch) {
-	if dst == nil {
-		return
-	}
-	mergeStep := func(target **workspace.RuntimeStepConfig, raw *string) {
-		if raw == nil {
-			return
-		}
-		if *target == nil {
-			*target = &workspace.RuntimeStepConfig{}
-		}
-		(*target).Provider = strings.TrimSpace(strings.ToLower(*raw))
-		if (*target).IsZero() {
-			*target = nil
-		}
-	}
-	mergeStep(&dst.Step0Constitution, patch.Step0Constitution)
-	mergeStep(&dst.Step1Collect, patch.Step1Collect)
-	mergeStep(&dst.Step2AsIs, patch.Step2AsIs)
-	mergeStep(&dst.Step3Findings, patch.Step3Findings)
-	mergeStep(&dst.Step4Proposals, patch.Step4Proposals)
 }
 
 func runtimeExecutionPersistedPayload(persisted workspace.RuntimeExecutionConfig, steps workspace.RuntimeStepsConfig) map[string]any {
@@ -884,32 +649,7 @@ func (s *Server) handlePipelineRuns(writer http.ResponseWriter, request *http.Re
 
 func (s *Server) handlePipelineRunsGet(writer http.ResponseWriter, request *http.Request) {
 	if request.URL.Path == "/api/pipeline/runs" || request.URL.Path == "/api/pipeline/runs/" {
-		const (
-			defaultLimit = 50
-			maxLimit     = 500
-		)
-		limit := defaultLimit
-		rawLimit := strings.TrimSpace(request.URL.Query().Get("limit"))
-		if rawLimit != "" {
-			parsedLimit, err := strconv.Atoi(rawLimit)
-			if err != nil || parsedLimit <= 0 {
-				writeError(writer, http.StatusBadRequest, "invalid_limit", "limit must be a positive integer")
-				return
-			}
-			if parsedLimit > maxLimit {
-				parsedLimit = maxLimit
-			}
-			limit = parsedLimit
-		}
-
-		runs := s.service.ListRuns(limit)
-		items := make([]map[string]any, 0, len(runs))
-		for _, runInfo := range runs {
-			items = append(items, formatRunInfoPayload(runInfo))
-		}
-		writeJSON(writer, http.StatusOK, map[string]any{
-			"items": items,
-		})
+		s.handlePipelineRunsList(writer, request)
 		return
 	}
 
@@ -922,73 +662,114 @@ func (s *Server) handlePipelineRunsGet(writer http.ResponseWriter, request *http
 	runID := parts[0]
 
 	if len(parts) == 1 {
-		runInfo, ok := s.service.GetRun(runID)
-		if !ok {
-			writeError(writer, http.StatusNotFound, "run_not_found", "run not found")
-			return
-		}
-		writeJSON(writer, http.StatusOK, formatRunInfoPayload(runInfo))
+		s.handlePipelineRunStatus(writer, runID)
 		return
 	}
 
 	if len(parts) == 2 && parts[1] == "artifacts" {
-		artifacts, ok := s.service.GetRunArtifacts(runID)
-		if !ok {
-			writeError(writer, http.StatusNotFound, "run_not_found", "run not found")
-			return
-		}
-		writeJSON(writer, http.StatusOK, map[string]any{
-			"run_id":    runID,
-			"artifacts": artifacts,
-		})
+		s.handlePipelineRunArtifacts(writer, runID)
 		return
 	}
 
 	if len(parts) == 2 && parts[1] == "logs" {
-		cursor := 0
-		rawCursor := strings.TrimSpace(request.URL.Query().Get("cursor"))
-		if rawCursor != "" {
-			parsedCursor, err := strconv.Atoi(rawCursor)
-			if err != nil || parsedCursor < 0 {
-				writeError(writer, http.StatusBadRequest, "invalid_cursor", "cursor must be a non-negative integer")
-				return
-			}
-			cursor = parsedCursor
-		}
-
-		limit := 200
-		rawLimit := strings.TrimSpace(request.URL.Query().Get("limit"))
-		if rawLimit != "" {
-			parsedLimit, err := strconv.Atoi(rawLimit)
-			if err != nil || parsedLimit <= 0 {
-				writeError(writer, http.StatusBadRequest, "invalid_limit", "limit must be a positive integer")
-				return
-			}
-			if parsedLimit > 500 {
-				parsedLimit = 500
-			}
-			limit = parsedLimit
-		}
-
-		page, ok, err := s.service.GetRunLogs(runID, cursor, limit)
-		if !ok {
-			writeError(writer, http.StatusNotFound, "run_not_found", "run not found")
-			return
-		}
-		if err != nil {
-			writeError(writer, http.StatusInternalServerError, "run_logs_unavailable", err.Error())
-			return
-		}
-		writeJSON(writer, http.StatusOK, map[string]any{
-			"run_id":      page.RunID,
-			"items":       page.Items,
-			"next_cursor": page.NextCursor,
-			"eof":         page.EOF,
-		})
+		s.handlePipelineRunLogs(writer, request, runID)
 		return
 	}
 
 	writeError(writer, http.StatusNotFound, "endpoint_not_found", "endpoint not found")
+}
+
+func (s *Server) handlePipelineRunsList(writer http.ResponseWriter, request *http.Request) {
+	const (
+		defaultLimit = 50
+		maxLimit     = 500
+	)
+	limit := defaultLimit
+	rawLimit := strings.TrimSpace(request.URL.Query().Get("limit"))
+	if rawLimit != "" {
+		parsedLimit, err := strconv.Atoi(rawLimit)
+		if err != nil || parsedLimit <= 0 {
+			writeError(writer, http.StatusBadRequest, "invalid_limit", "limit must be a positive integer")
+			return
+		}
+		if parsedLimit > maxLimit {
+			parsedLimit = maxLimit
+		}
+		limit = parsedLimit
+	}
+
+	runs := s.service.ListRuns(limit)
+	items := make([]map[string]any, 0, len(runs))
+	for _, runInfo := range runs {
+		items = append(items, formatRunInfoPayload(runInfo))
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"items": items,
+	})
+}
+
+func (s *Server) handlePipelineRunStatus(writer http.ResponseWriter, runID string) {
+	runInfo, ok := s.service.GetRun(runID)
+	if !ok {
+		writeError(writer, http.StatusNotFound, "run_not_found", "run not found")
+		return
+	}
+	writeJSON(writer, http.StatusOK, formatRunInfoPayload(runInfo))
+}
+
+func (s *Server) handlePipelineRunArtifacts(writer http.ResponseWriter, runID string) {
+	artifacts, ok := s.service.GetRunArtifacts(runID)
+	if !ok {
+		writeError(writer, http.StatusNotFound, "run_not_found", "run not found")
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"run_id":    runID,
+		"artifacts": artifacts,
+	})
+}
+
+func (s *Server) handlePipelineRunLogs(writer http.ResponseWriter, request *http.Request, runID string) {
+	cursor := 0
+	rawCursor := strings.TrimSpace(request.URL.Query().Get("cursor"))
+	if rawCursor != "" {
+		parsedCursor, err := strconv.Atoi(rawCursor)
+		if err != nil || parsedCursor < 0 {
+			writeError(writer, http.StatusBadRequest, "invalid_cursor", "cursor must be a non-negative integer")
+			return
+		}
+		cursor = parsedCursor
+	}
+
+	limit := 200
+	rawLimit := strings.TrimSpace(request.URL.Query().Get("limit"))
+	if rawLimit != "" {
+		parsedLimit, err := strconv.Atoi(rawLimit)
+		if err != nil || parsedLimit <= 0 {
+			writeError(writer, http.StatusBadRequest, "invalid_limit", "limit must be a positive integer")
+			return
+		}
+		if parsedLimit > 500 {
+			parsedLimit = 500
+		}
+		limit = parsedLimit
+	}
+
+	page, ok, err := s.service.GetRunLogs(runID, cursor, limit)
+	if !ok {
+		writeError(writer, http.StatusNotFound, "run_not_found", "run not found")
+		return
+	}
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "run_logs_unavailable", err.Error())
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"run_id":      page.RunID,
+		"items":       page.Items,
+		"next_cursor": page.NextCursor,
+		"eof":         page.EOF,
+	})
 }
 
 func (s *Server) handlePipelineRunsPost(writer http.ResponseWriter, request *http.Request) {
