@@ -161,44 +161,121 @@ func loadValidatorVerdictFromRoot(root string) (contracts.ValidatorVerdict, []by
 	return verdict, raw, nil
 }
 
-func (e *pipelineExecution) assembleStagedDocFlow() error {
-	stageRootRel := runtimeFinalArtifactRoot(e.runID)
-	stageRootAbs, err := e.workspace.Resolve(stageRootRel)
-	if err != nil {
-		return err
-	}
-	if err := os.RemoveAll(stageRootAbs); err != nil {
-		return fmt.Errorf("reset staged final root: %w", err)
-	}
-	if err := os.MkdirAll(stageRootAbs, 0o755); err != nil {
-		return fmt.Errorf("create staged final root: %w", err)
-	}
-	stageRoot := workspace.Root{Path: stageRootAbs}
+type DocflowBuildInput struct {
+	RunID             string
+	Pipeline          Pipeline
+	GeneratedAt       time.Time
+	Workspace         workspace.Root
+	ShardPacks        []contracts.ShardPackManifest
+	ResolvedRepoPaths map[string]string
+	Semantic          contracts.SemanticSnapshot
+	RenderContext     reports.ReportRenderContext
+	AsIsDraftManifest *runtimeDraftManifest
+	AsIsDraftRoot     string
+	DomainReports     func() (map[string]string, error)
+	DomainEnvelopes   func() []reports.DomainTaskEnvelope
+}
 
+type DocflowBuildResult struct {
+	StageArtifacts []Artifact
+	CitationIndex  contracts.CitationIndex
+	FinalRunIndex  contracts.FinalRunIndex
+	Semantic       contracts.SemanticSnapshot
+	EntitiesCount  int
+	EdgesCount     int
+}
+
+func (e *pipelineExecution) assembleStagedDocFlow() error {
 	repoAliases := newSemanticRepoAliasResolver(e.resolvedRepoPaths, e.shardPacks)
 	baseSemantic := aggregateSemanticSnapshot(e.shardPacks, repoAliases)
 	e.semanticBase = &baseSemantic
-	semantic := e.effectiveSemanticSnapshot()
-	semantic = normalizeSemanticSnapshot(semantic, repoAliases)
-	documentInfos := aggregateDocumentInfos(e.shardPacks)
+	result, err := buildStagedDocflow(DocflowBuildInput{
+		RunID:             e.runID,
+		Pipeline:          e.pipeline,
+		GeneratedAt:       e.clock().UTC(),
+		Workspace:         e.workspace,
+		ShardPacks:        append([]contracts.ShardPackManifest(nil), e.shardPacks...),
+		ResolvedRepoPaths: cloneStringMap(e.resolvedRepoPaths),
+		Semantic:          e.effectiveSemanticSnapshot(),
+		RenderContext:     e.renderContext(),
+		AsIsDraftManifest: e.asIsDraftManifest,
+		AsIsDraftRoot:     e.asIsDraftRoot,
+		DomainReports:     e.authoredDomainReports,
+		DomainEnvelopes:   e.stagedDomainEnvelopes,
+	})
+	if err != nil {
+		return err
+	}
+	for _, artifact := range result.StageArtifacts {
+		e.addArtifacts(artifact)
+	}
+	e.addArtifacts(Artifact{
+		Path:  runtimeCitationIndexPath(e.runID),
+		Kind:  "taskrun",
+		Label: "Citation Index",
+	})
+	e.addArtifacts(Artifact{
+		Path:  runtimeFinalRunIndexPath(e.runID),
+		Kind:  "taskrun",
+		Label: "Final Run Index",
+	})
+	e.finalRunIndex = &result.FinalRunIndex
+	e.citationIndex = &result.CitationIndex
+	if e.pipeline == PipelineRefresh {
+		for _, warning := range assessRefreshArtifactWarnings(e.shardPacks, result.FinalRunIndex, result.CitationIndex) {
+			e.addWarning(warning)
+		}
+	}
+	e.findings = append([]contracts.Finding(nil), result.Semantic.Findings...)
+	e.questions = append([]contracts.Question(nil), result.Semantic.Questions...)
+	e.coverage = mergeCoverage(nil, &result.Semantic.Coverage)
+	e.logInfo(e.stepStatus.CurrentStep, "", "staged doc flow assembled", map[string]any{
+		"shard_packs":    len(e.shardPacks),
+		"staged_docs":    len(result.FinalRunIndex.CanonicalDocuments),
+		"citation_count": len(result.CitationIndex.Citations),
+		"entities":       result.EntitiesCount,
+		"edges":          result.EdgesCount,
+		"findings":       len(result.Semantic.Findings),
+		"questions":      len(result.Semantic.Questions),
+	})
+	return nil
+}
+
+func buildStagedDocflow(input DocflowBuildInput) (DocflowBuildResult, error) {
+	stageRootRel := runtimeFinalArtifactRoot(input.RunID)
+	stageRootAbs, err := input.Workspace.Resolve(stageRootRel)
+	if err != nil {
+		return DocflowBuildResult{}, err
+	}
+	if err := os.RemoveAll(stageRootAbs); err != nil {
+		return DocflowBuildResult{}, fmt.Errorf("reset staged final root: %w", err)
+	}
+	if err := os.MkdirAll(stageRootAbs, 0o755); err != nil {
+		return DocflowBuildResult{}, fmt.Errorf("create staged final root: %w", err)
+	}
+	stageRoot := workspace.Root{Path: stageRootAbs}
+
+	repoAliases := newSemanticRepoAliasResolver(input.ResolvedRepoPaths, input.ShardPacks)
+	semantic := normalizeSemanticSnapshot(input.Semantic, repoAliases)
+	documentInfos := aggregateDocumentInfos(input.ShardPacks)
 	stageStore := model.NewStore(stageRoot)
 	if _, err := stageStore.ApplySemanticSnapshot(contracts.SemanticSnapshot{
 		Entities: semantic.Entities,
 		Edges:    semantic.Edges,
 	}); err != nil {
-		return fmt.Errorf("apply staged semantic model: %w", err)
+		return DocflowBuildResult{}, fmt.Errorf("apply staged semantic model: %w", err)
 	}
 	entities, err := stageStore.ListEntities()
 	if err != nil {
-		return err
+		return DocflowBuildResult{}, err
 	}
 	edges, err := stageStore.ListEdges()
 	if err != nil {
-		return err
+		return DocflowBuildResult{}, err
 	}
 
 	stageCompiler := reports.NewCompiler(stageRoot)
-	renderCtx := e.renderContext()
+	renderCtx := input.RenderContext
 	stageArtifactsByPath := map[string]Artifact{}
 	canonicalPaths := map[string]struct{}{}
 
@@ -231,9 +308,9 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 		return nil
 	}
 
-	authoredDocs, err := collectAuthoredStageDocuments(e.shardPacks, e.workspace.Path)
+	authoredDocs, err := collectAuthoredStageDocuments(input.ShardPacks, input.Workspace.Path)
 	if err != nil {
-		return err
+		return DocflowBuildResult{}, err
 	}
 	for _, document := range authoredDocs {
 		content := document.Content
@@ -241,7 +318,7 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 			content += "\n"
 		}
 		if err := stageRoot.WriteFile(document.CanonicalPath, []byte(content)); err != nil {
-			return err
+			return DocflowBuildResult{}, err
 		}
 		registerStagedArtifact(Artifact{
 			Path:  path.Join(stageRootRel, document.CanonicalPath),
@@ -249,11 +326,11 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 			Label: document.Title,
 		})
 	}
-	if e.asIsDraftManifest != nil {
+	if input.AsIsDraftManifest != nil {
 		draftArtifacts, draftErr := applyRuntimeDraftOutputs(
 			stageRoot,
-			e.asIsDraftRoot,
-			*e.asIsDraftManifest,
+			input.AsIsDraftRoot,
+			*input.AsIsDraftManifest,
 			stageRootRel,
 			func(target string) bool {
 				return strings.HasPrefix(target, "reports/as-is/") ||
@@ -262,7 +339,7 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 			},
 		)
 		if draftErr != nil {
-			return draftErr
+			return DocflowBuildResult{}, draftErr
 		}
 		for _, artifact := range draftArtifacts {
 			registerStagedArtifact(artifact)
@@ -289,26 +366,32 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 	// Canonical narratives are runtime-authored only.
 	// Compiler materializes derived technical artifacts and indexes, not fallback prose.
 	if err := registerCompiledArtifacts(stageCompiler.WriteCoverage(&semantic.Coverage, semantic.Questions, renderCtx)); err != nil {
-		return err
+		return DocflowBuildResult{}, err
 	}
 	if err := registerCompiledArtifacts(stageCompiler.WriteFindings(semantic.Findings, renderCtx)); err != nil {
-		return err
+		return DocflowBuildResult{}, err
 	}
 	if !hasCanonicalPrefix("reports/agent-outputs/domains/") {
-		if domainReports, domainErr := e.authoredDomainReports(); domainErr != nil {
-			return domainErr
+		if input.DomainReports == nil {
+			return DocflowBuildResult{}, fmt.Errorf("domain report builder is not configured")
+		}
+		if domainReports, domainErr := input.DomainReports(); domainErr != nil {
+			return DocflowBuildResult{}, domainErr
 		} else if err := registerCompiledArtifacts(stageCompiler.WriteDomainOutputs(domainReports)); err != nil {
-			return err
+			return DocflowBuildResult{}, err
 		}
 	}
 	if !hasCanonicalSuffix(".task-envelope.json") {
-		if err := registerCompiledArtifacts(stageCompiler.WriteDomainTaskEnvelopes(e.stagedDomainEnvelopes())); err != nil {
-			return err
+		if input.DomainEnvelopes == nil {
+			return DocflowBuildResult{}, fmt.Errorf("domain envelope builder is not configured")
+		}
+		if err := registerCompiledArtifacts(stageCompiler.WriteDomainTaskEnvelopes(input.DomainEnvelopes())); err != nil {
+			return DocflowBuildResult{}, err
 		}
 	}
 
 	if err := registerCompiledArtifacts(stageCompiler.CompileC4Diagrams(entities, edges)); err != nil {
-		return err
+		return DocflowBuildResult{}, err
 	}
 
 	stageArtifactPaths := make([]string, 0, len(stageArtifactsByPath))
@@ -321,80 +404,53 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 		stageArtifacts = append(stageArtifacts, stageArtifactsByPath[stagedPath])
 	}
 
-	citationIndex := aggregateCitationIndex(e.runID, e.clock().UTC(), e.shardPacks, documentInfos)
+	citationIndex := aggregateCitationIndex(input.RunID, input.GeneratedAt, input.ShardPacks, documentInfos)
 	citationRaw, err := json.MarshalIndent(citationIndex, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal citation index: %w", err)
+		return DocflowBuildResult{}, fmt.Errorf("marshal citation index: %w", err)
 	}
 	citationRaw = append(citationRaw, '\n')
 	if err := stageRoot.WriteFile(citationIndexFile, citationRaw); err != nil {
-		return err
+		return DocflowBuildResult{}, err
 	}
 	parsedCitationIndex, err := contracts.ParseCitationIndex(citationRaw)
 	if err != nil {
-		return err
+		return DocflowBuildResult{}, err
 	}
-
-	for _, artifact := range stageArtifacts {
-		e.addArtifacts(artifact)
-	}
-	e.addArtifacts(Artifact{
-		Path:  runtimeCitationIndexPath(e.runID),
-		Kind:  "taskrun",
-		Label: "Citation Index",
-	})
 
 	finalRunIndex, err := buildFinalRunIndex(
-		e.runID,
-		string(e.pipeline),
-		e.clock().UTC(),
+		input.RunID,
+		string(input.Pipeline),
+		input.GeneratedAt,
 		stageArtifacts,
-		e.shardPacks,
+		input.ShardPacks,
 		documentInfos,
 		parsedCitationIndex,
 		semantic,
 	)
 	if err != nil {
-		return err
+		return DocflowBuildResult{}, err
 	}
 	finalIndexRaw, err := json.MarshalIndent(finalRunIndex, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal final run index: %w", err)
+		return DocflowBuildResult{}, fmt.Errorf("marshal final run index: %w", err)
 	}
 	finalIndexRaw = append(finalIndexRaw, '\n')
 	if err := stageRoot.WriteFile(finalRunIndexFile, finalIndexRaw); err != nil {
-		return err
+		return DocflowBuildResult{}, err
 	}
 	parsedFinalRunIndex, err := contracts.ParseFinalRunIndex(finalIndexRaw)
 	if err != nil {
-		return err
+		return DocflowBuildResult{}, err
 	}
-
-	e.addArtifacts(Artifact{
-		Path:  runtimeFinalRunIndexPath(e.runID),
-		Kind:  "taskrun",
-		Label: "Final Run Index",
-	})
-	e.finalRunIndex = &parsedFinalRunIndex
-	e.citationIndex = &parsedCitationIndex
-	if e.pipeline == PipelineRefresh {
-		for _, warning := range assessRefreshArtifactWarnings(e.shardPacks, parsedFinalRunIndex, parsedCitationIndex) {
-			e.addWarning(warning)
-		}
-	}
-	e.findings = append([]contracts.Finding(nil), semantic.Findings...)
-	e.questions = append([]contracts.Question(nil), semantic.Questions...)
-	e.coverage = mergeCoverage(nil, &semantic.Coverage)
-	e.logInfo(e.stepStatus.CurrentStep, "", "staged doc flow assembled", map[string]any{
-		"shard_packs":    len(e.shardPacks),
-		"staged_docs":    len(parsedFinalRunIndex.CanonicalDocuments),
-		"citation_count": len(parsedCitationIndex.Citations),
-		"entities":       len(entities),
-		"edges":          len(edges),
-		"findings":       len(semantic.Findings),
-		"questions":      len(semantic.Questions),
-	})
-	return nil
+	return DocflowBuildResult{
+		StageArtifacts: stageArtifacts,
+		CitationIndex:  parsedCitationIndex,
+		FinalRunIndex:  parsedFinalRunIndex,
+		Semantic:       semantic,
+		EntitiesCount:  len(entities),
+		EdgesCount:     len(edges),
+	}, nil
 }
 
 func assessRefreshArtifactWarnings(

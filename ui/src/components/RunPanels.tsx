@@ -2,7 +2,7 @@ import { RunStatusPanel } from "./RunStatusPanel";
 import { formatTimestamp } from "../lib/runState";
 import type { RunListItem, RunStatusResponse } from "../lib/appContracts";
 
-type RunPanelsProps = {
+type RunPanelsModel = {
   busy: boolean;
   cancelBusy: boolean;
   runId: string | null;
@@ -18,6 +18,9 @@ type RunPanelsProps = {
   runLogsStatus: string;
   runLogTaskrunPaths: string[];
   runLogsRendered: string;
+};
+
+type RunPanelsActions = {
   onRunLogsModeChange: (value: "events" | "raw" | "all") => void;
   onRunLogsViewModeChange: (value: "line" | "line+fields") => void;
   onRunPipeline: (pipeline: "init" | "refresh") => void;
@@ -28,31 +31,39 @@ type RunPanelsProps = {
   onOpenArtifact: (path: string) => void;
 };
 
-export function RunPanels({
-  busy,
-  cancelBusy,
-  runId,
-  runStatus,
-  runList,
-  runActionStatus,
-  selectedRunWarnings,
-  selectedRunIsActive,
-  runCounters,
-  runLogsMode,
-  runLogsViewMode,
-  filteredRunLogs,
-  runLogsStatus,
-  runLogTaskrunPaths,
-  runLogsRendered,
-  onRunLogsModeChange,
-  onRunLogsViewModeChange,
-  onRunPipeline,
-  onCancelSelectedRun,
-  onSelectRun,
-  onCopyRunLogs,
-  onDownloadRunLogs,
-  onOpenArtifact,
-}: RunPanelsProps) {
+type RunPanelsProps = {
+  model: RunPanelsModel;
+  actions: RunPanelsActions;
+};
+
+export function RunPanels({ model, actions }: RunPanelsProps) {
+  const {
+    busy,
+    cancelBusy,
+    runId,
+    runStatus,
+    runList,
+    runActionStatus,
+    selectedRunWarnings,
+    selectedRunIsActive,
+    runCounters,
+    runLogsMode,
+    runLogsViewMode,
+    filteredRunLogs,
+    runLogsStatus,
+    runLogTaskrunPaths,
+    runLogsRendered,
+  } = model;
+  const {
+    onRunLogsModeChange,
+    onRunLogsViewModeChange,
+    onRunPipeline,
+    onCancelSelectedRun,
+    onSelectRun,
+    onCopyRunLogs,
+    onDownloadRunLogs,
+    onOpenArtifact,
+  } = actions;
   return (
     <>
       <section className="panel" data-testid="runs-control-panel">

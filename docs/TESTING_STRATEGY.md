@@ -97,6 +97,7 @@ Baseline scenario set:
   - persisted profile в `workspace.yaml.runtime.profile.timeouts`
   - effective precedence `env > workspace > defaults`
   - новые API endpoints `GET/PUT /api/runtime/timeouts`
+  - runtime profile patch service покрывается через API characterization: validation, merge/prune, manifest rewrite/reopen and unchanged error-code surface
 - runtime sharding control:
   - heuristics planner (module markers + leaf-pruning) и `analysis.include/exclude` фильтры
   - structural coalescing для больших repos сохраняет module marker leaf shard groups внутри top-level dirs, если итоговый shard count остаётся в `maxAutoShardsPerRepo`
@@ -105,6 +106,11 @@ Baseline scenario set:
   - scheduler semantics `sequential|parallel` (`max_parallel_tasks`) и deterministic apply order
   - `fail_fast` останавливает step/pipeline на первой shard error без перехода в downstream runtime steps
   - `best_effort` partial shard failures: pipeline продолжается, но итоговый status `failed` + `error_code=run_partial_failed`
+- docflow builder seam:
+  - staged artifacts, citation index, final run index and semantic snapshot remain characterization-covered before promotion
+  - promotion still copies only the validated final set into canonical `reports/*`/`proposals/*` and rebuilds derived `model/*`
+- UI route-shell seams:
+  - `RunPanels` receives grouped `model/actions`, while run selection, stale artifact clearing, logs polling and stable `data-testid` controls remain covered by UI tests
 - docs truth-sync gate проверяет:
   - согласованность runtime policy/Q&A boundary и ссылок на canonical stakeholder matrix;
   - prompt-layer truth: exact merge order (`provider header -> artifact-only/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer`) и invariant `workspace prompt pack = editable content layer only`;
@@ -118,6 +124,14 @@ Baseline scenario set:
 - injectable clock/run-id provider для deterministic golden outputs
 - injectable git executor/repo resolver для local test doubles
 - workspace sandbox root для integration tests без записи вне test workspace
+- internal runtime/orchestration seams:
+  - `internal/runtimeprofile` keeps runtime profile patch validation/merge/manifest rewrite shared below API adapters
+  - `RuntimeTaskExecutor` keeps task envelope/timeout/heartbeat/provider execution behavior characterization-covered without coupling it to sharding planner tests
+  - `run_finalization.go`, `step_handlers.go` and `artifact_registry.go` keep terminal status, step dispatch and artifact list behavior in narrow files while existing async/docflow/sharding tests preserve external run contracts
+  - `sharding_coordinator.go`, `sharding_scheduler.go`, `sharding_summary_store.go`, `sharding_artifacts.go` and `sharding_planner.go` keep planning, scheduling, summary/checkpoint persistence, artifact materialization and apply/replay coordination in separate files while preserving the existing sharding characterization tests
+  - `ShardSummaryStore` keeps persisted shard-summary/checkpoint behavior covered separately from scheduler ordering and apply/replay coordinator behavior
+  - `artifactquality` remains canonical wording source for collect/validator prompt snippets reused by runtime prompt contracts and baseline prompt packs
+- UI hook facades stay stable while internal hooks isolate run selection/polling/actions and workspace manifest/baseline/wizard/git actions; App tests preserve route-shell behavior and stable `data-testid` surfaces
 
 ## 6) Required CI jobs
 

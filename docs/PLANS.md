@@ -55,6 +55,99 @@ EP-YYYYMMDD-<slug>
 
 ## Active Plans
 ### Plan ID
+EP-20260503-refactor-boundary-cleanup
+
+### Context
+Запрошенный behavior-preserving срез снижает текущую сложность ACP MVP без изменения public schemas, API routes, CLI flags, provider IDs, release verdict shape или workspace contract. Главная цель — закрепить internal ownership seams вокруг runtime profile patching, provider repair command construction, docflow assembly, sharding planning/scheduling и UI run panels.
+
+### Goals (must have)
+- [x] Вынести runtime profile patch/merge/render/reopen из API handlers в internal helper/service
+- [x] Разделить `GET /api/pipeline/runs*` handler на list/status/artifacts/logs helpers без изменения route payloads
+- [x] Дедуплицировать provider repair command specs для `claude-code`, `qwen-code`, `codex-code`
+- [x] Выделить `DocflowBuildInput`/`DocflowBuildResult`, чтобы staged docflow assembly возвращал явный result и не размазывал state mutation по builder logic
+- [x] Выделить `ShardPlanner`/`ShardScheduler` seams вокруг deterministic planning и worker-pull scheduling
+- [x] Добавить `RuntimeTaskExecutor` seam для runtime task lifecycle и `ShardSummaryStore` seam для summary/checkpoint persistence
+- [x] Разбить плоский `pipelineExecution` state на вложенные группы: run-progress, artifact registry, runtime, quality, semantic/docflow, draft
+- [x] Физически вынести из `orchestrator.go` run finalization, step handlers и artifact registry methods в dedicated files
+- [x] Централизовать compact collect/validator wording в `artifactquality` и переиспользовать его в promptcontract/baseline prompt generation
+- [x] Сгруппировать UI `RunPanels` props в `model/actions`, сохранив route shell и test ids
+- [x] Прогнать full DoD после документации
+
+### Non-goals
+- [x] Не менять public schemas, API routes, CLI flags, provider IDs, release verdict format или workspace contract
+- [x] Не добавлять hosted mode, security/compliance enforcement, новых providers или live network required CI gates
+- [x] Не добавлять wrapper над `scripts/full-run-batch-matrix.sh`
+- [x] Не удалять tracked embedded UI release surface `internal/api/ui_dist`
+
+### Approach
+1) Сначала оставить characterization surface неизменным: API error codes/routes, provider command transport, qwen `-p`, codex stdin, sharding fail-fast/best-effort and staged docflow outputs.
+2) В API вынести patch lifecycle в `RuntimeProfilePatchService`, а route dispatcher разбить на малые helpers.
+3) В runtime adapters оставить thin provider-specific transport, а focused repair prompt/include-dir selection централизовать в `providercommon`.
+4) В orchestrator ввести internal builder/planner/scheduler seams без смены promotion, validation, history/log contracts.
+5) В UI уменьшить prop-sprawl на route boundary через grouped `model/actions`.
+6) Синхронизировать docs и выполнить required checks.
+
+### Files expected to change
+- `internal/api/server.go`
+- `internal/runtimeprofile/patch_service.go`
+- `internal/orchestrator/docflow.go`
+- `internal/orchestrator/artifact_registry.go`
+- `internal/orchestrator/run_finalization.go`
+- `internal/orchestrator/runtime_task_executor.go`
+- `internal/orchestrator/sharding.go`
+- `internal/orchestrator/sharding_artifacts.go`
+- `internal/orchestrator/sharding_coordinator.go`
+- `internal/orchestrator/sharding_planner.go`
+- `internal/orchestrator/sharding_scheduler.go`
+- `internal/orchestrator/sharding_summary_store.go`
+- `internal/orchestrator/step_handlers.go`
+- `internal/artifactquality/*`
+- `internal/workspace/baseline.go`
+- `internal/runtime/providercommon/repair_command.go`
+- `internal/runtime/{claudecode,qwencode,codexcode}/runner.go`
+- `ui/src/App.tsx`
+- `ui/src/components/RunPanels.tsx`
+- `ui/src/hooks/useRunActions.ts`
+- `ui/src/hooks/useRunPolling.ts`
+- `ui/src/hooks/useRunSelection.ts`
+- `ui/src/hooks/useManifestEditor.ts`
+- `ui/src/hooks/useBaselineEditor.ts`
+- `ui/src/hooks/useWizardEditor.ts`
+- `ui/src/hooks/useGitActions.ts`
+- `ui/src/hooks/useRunExplorer.ts`
+- `ui/src/hooks/useWorkspaceSetup.ts`
+- `docs/ARCHITECTURE.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Public API route shapes and error codes remain unchanged
+- [x] Provider adapter repair specs preserve include-dir surfaces, qwen prompt-via-`-p`, codex stdin behavior and write-set guard ownership
+- [x] Staged docflow still emits artifacts, citation index, final run index and semantic snapshot before existing promotion flow
+- [x] Shard planner output remains deterministic and scheduler keeps fail-fast worker-pull semantics
+- [x] Runtime task execution, shard summary/checkpoint persistence, run finalization, step handlers, artifact registry and pipeline execution state are split behind internal seams without public API changes
+- [x] Baseline prompt packs and runtime prompt contracts reuse `artifactquality` policy wording for collect/validator contract text
+- [x] UI run selection/log/artifact controls keep stable `data-testid` surfaces
+- [x] `make contracts`, `make test`, `make lint`, `make build` pass
+
+### Risks
+- Internal seam extraction can accidentally change exact transient error text even when error code stays stable; API tests should prefer code/status assertions for public behavior.
+- `make build` may refresh tracked embedded UI assets because `internal/api/ui_dist` is intentional release output.
+
+### Progress log
+- 2026-05-03: Implemented runtime profile patch service, pipeline run route helpers, shared focused repair command builder, docflow builder result, sharding planner/scheduler seams and UI `RunPanels` model/actions grouping. Targeted Go checks for API/orchestrator/runtime adapters passed; full DoD pending.
+- 2026-05-03: Full verification passed: `make contracts`, `go test ./...`, `python3 -m unittest discover -s scripts/tests -p '*_test.py'`, `npm ci --prefix ui`, `npm run typecheck --prefix ui`, `npm run test --prefix ui -- --run`, `make test`, `make lint`, `make build`, `git diff --check`. `make build` refreshed tracked embedded UI assets in `internal/api/ui_dist`.
+- 2026-05-03: Follow-up plan audit found missing internal seams from the requested plan. Added `RuntimeTaskExecutor`, `ShardSummaryStore`, embedded pipeline execution state groups and artifactquality-backed baseline/prompt wording reuse. Fresh verification passed: `make contracts`, `go test ./...`, `python3 -m unittest discover -s scripts/tests -p '*_test.py'`, `npm ci --prefix ui`, `npm run typecheck --prefix ui`, `npm run test --prefix ui -- --run`, `make test`, `make lint`, `make build`, `git diff --check`; `make build` refreshed tracked embedded UI assets.
+- 2026-05-03: Second follow-up audit found that `run finalization`, `step handlers` and artifact registry methods were still physically in `orchestrator.go`, and quality metrics were grouped under runtime state. Moved these layers to `run_finalization.go`, `step_handlers.go`, `artifact_registry.go`, added `pipelineQualityState`, rebuilt `ast-index` (222 files / 8.1k symbols) and passed `go test ./internal/orchestrator`; full DoD rerun pending.
+- 2026-05-03: Runtime profile patch service was still API-package local. Moved patch service, validation and merge logic to shared internal package `internal/runtimeprofile`, leaving API handlers as HTTP adapters; `go test ./internal/api ./internal/runtimeprofile` passed, full DoD rerun pending.
+- 2026-05-03: UI hook split was still partial. Split run explorer into selection/polling/actions facade hooks and workspace setup into manifest/baseline/wizard/git hooks while preserving `useRunExplorer`/`useWorkspaceSetup` facade exports; `npm run typecheck --prefix ui` passed, full DoD rerun pending.
+- 2026-05-03: Final verification passed after second follow-up: `make contracts`, `go test ./...`, `python3 -m unittest discover -s scripts/tests -p '*_test.py'`, `npm ci --prefix ui`, `npm run typecheck --prefix ui`, `npm run test --prefix ui -- --run`, `make test`, `make lint`, `make build`, `git diff --check`; `ast-index` rebuilt with 229 files / 8130 symbols. One parallel `npm ci` + Vitest race was rerun sequentially and passed. `make build` refreshed tracked embedded UI assets.
+- 2026-05-03: Final plan audit found sharding ownership was still physically concentrated in `sharding.go` despite internal seams. Split coordinator, scheduler, summary/checkpoint store, shard artifacts and planner into dedicated files without behavior changes; `go test ./internal/orchestrator` passed, full DoD rerun pending.
+- 2026-05-03: Final verification after sharding file split passed: `git diff --check`, `go test ./...`, `python3 -m unittest discover -s scripts/tests -p '*_test.py'`, `npm run typecheck --prefix ui`, `npm run test --prefix ui -- --run`, `make contracts`, `make test`, `make lint`, `make build`; `ast-index rebuild` indexed 234 files. `make build` refreshed tracked embedded UI assets and emitted only the existing Vite chunk-size warning for Mermaid bundles.
+- 2026-05-03: Re-audit found baseline prompt generation still had direct copies of legacy-ban wording after `artifactquality` became canonical. Removed the remaining baseline-local copies for collect/findings/proposals prompt packs and proposal skill prompt generation; tests now assert the canonical `artifactquality` wording. Targeted `go test ./internal/workspace ./internal/artifactquality ./internal/runtime/promptcontract ./internal/runtime/steppolicy` passed with sandbox-local `GOCACHE`; full DoD rerun pending.
+- 2026-05-03: Final verification after baseline prompt dedupe passed with sandbox-local caches: `git diff --check`, `go test ./...`, `npm run typecheck --prefix ui`, `npm run test --prefix ui -- --run`, `make contracts`, `make test`, `make lint`, `make build`; `make test` covered 110 script regression tests and 18 UI tests. `ast-index rebuild` indexed 234 files. `make build` refreshed tracked embedded UI assets and emitted only the existing Vite Mermaid chunk-size warning.
+
+### Plan ID
 EP-20260502-qwen-codex-regres-fast-live-hardening
 
 ### Context

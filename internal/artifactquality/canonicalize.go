@@ -7,11 +7,10 @@ import (
 	"strings"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
-	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
 
-func ValidateCollectManifest(task acpruntime.Task) error {
-	writeRoot := strings.TrimSpace(task.WriteRoot)
+func ValidateCollectManifestInRoot(writeRoot string) error {
+	writeRoot = strings.TrimSpace(writeRoot)
 	if writeRoot == "" {
 		return fmt.Errorf("collect write_root is empty")
 	}

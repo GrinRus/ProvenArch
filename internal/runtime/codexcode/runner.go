@@ -70,6 +70,10 @@ func (a codexAdapter) RuntimeVersion() string {
 
 func (a codexAdapter) CommandSpec(task acpruntime.Task) (providercommon.CommandSpec, error) {
 	includeDirs := acpruntime.ResolveHeadlessIncludeDirectories(task)
+	return a.commandSpecWithPrompt(task, includeDirs, buildPrompt(task))
+}
+
+func (a codexAdapter) commandSpecWithPrompt(task acpruntime.Task, includeDirs []string, prompt string) (providercommon.CommandSpec, error) {
 	cwd := strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task))
 	commandArgs := append([]string(nil), a.runner.Args...)
 	if len(commandArgs) == 0 {
@@ -78,82 +82,26 @@ func (a codexAdapter) CommandSpec(task acpruntime.Task) (providercommon.CommandS
 	return providercommon.CommandSpec{
 		Command:     a.runner.commandName(),
 		Args:        commandArgs,
-		Stdin:       strings.NewReader(buildPrompt(task)),
+		Stdin:       strings.NewReader(prompt),
 		Dir:         cwd,
 		IncludeDirs: includeDirs,
 	}, nil
 }
 
 func (a codexAdapter) CollectManifestRepairCommandSpec(task acpruntime.Task, validationErr error) (providercommon.CommandSpec, error) {
-	includeDirs := acpruntime.ResolveHeadlessCollectRepairIncludeDirectories(task)
-	repairTask := task
-	repairTask.ReadContextRoots = append([]string(nil), includeDirs...)
-	cwd := strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task))
-	commandArgs := append([]string(nil), a.runner.Args...)
-	if len(commandArgs) == 0 {
-		commandArgs = buildCodexArgsWithIncludeDirectories(cwd, includeDirs)
-	}
-	return providercommon.CommandSpec{
-		Command:     a.runner.commandName(),
-		Args:        commandArgs,
-		Stdin:       strings.NewReader(promptcontract.ComposeCollectManifestRepairPrompt(acpruntime.ProviderCodexCode, repairTask, validationErr)),
-		Dir:         cwd,
-		IncludeDirs: includeDirs,
-	}, nil
+	return providercommon.BuildFocusedRepairCommandSpec(task, acpruntime.ProviderCodexCode, providercommon.FocusedRepairCollectManifest, validationErr, a.commandSpecWithPrompt)
 }
 
 func (a codexAdapter) CollectArtifactPairRepairCommandSpec(task acpruntime.Task, validationErr error) (providercommon.CommandSpec, error) {
-	includeDirs := acpruntime.ResolveHeadlessCollectRepairIncludeDirectories(task)
-	repairTask := task
-	repairTask.ReadContextRoots = append([]string(nil), includeDirs...)
-	cwd := strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task))
-	commandArgs := append([]string(nil), a.runner.Args...)
-	if len(commandArgs) == 0 {
-		commandArgs = buildCodexArgsWithIncludeDirectories(cwd, includeDirs)
-	}
-	return providercommon.CommandSpec{
-		Command:     a.runner.commandName(),
-		Args:        commandArgs,
-		Stdin:       strings.NewReader(promptcontract.ComposeCollectArtifactPairRepairPrompt(acpruntime.ProviderCodexCode, repairTask, validationErr)),
-		Dir:         cwd,
-		IncludeDirs: includeDirs,
-	}, nil
+	return providercommon.BuildFocusedRepairCommandSpec(task, acpruntime.ProviderCodexCode, providercommon.FocusedRepairCollectArtifactPair, validationErr, a.commandSpecWithPrompt)
 }
 
 func (a codexAdapter) ValidatorVerdictRepairCommandSpec(task acpruntime.Task, validationErr error) (providercommon.CommandSpec, error) {
-	includeDirs := acpruntime.ResolveHeadlessValidatorRepairIncludeDirectories(task)
-	repairTask := task
-	repairTask.ReadContextRoots = append([]string(nil), includeDirs...)
-	cwd := strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task))
-	commandArgs := append([]string(nil), a.runner.Args...)
-	if len(commandArgs) == 0 {
-		commandArgs = buildCodexArgsWithIncludeDirectories(cwd, includeDirs)
-	}
-	return providercommon.CommandSpec{
-		Command:     a.runner.commandName(),
-		Args:        commandArgs,
-		Stdin:       strings.NewReader(promptcontract.ComposeValidatorVerdictRepairPrompt(acpruntime.ProviderCodexCode, repairTask, validationErr)),
-		Dir:         cwd,
-		IncludeDirs: includeDirs,
-	}, nil
+	return providercommon.BuildFocusedRepairCommandSpec(task, acpruntime.ProviderCodexCode, providercommon.FocusedRepairValidatorVerdict, validationErr, a.commandSpecWithPrompt)
 }
 
 func (a codexAdapter) DraftArtifactRepairCommandSpec(task acpruntime.Task, validationErr error) (providercommon.CommandSpec, error) {
-	includeDirs := acpruntime.ResolveHeadlessDraftRepairIncludeDirectories(task)
-	repairTask := task
-	repairTask.ReadContextRoots = append([]string(nil), includeDirs...)
-	cwd := strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task))
-	commandArgs := append([]string(nil), a.runner.Args...)
-	if len(commandArgs) == 0 {
-		commandArgs = buildCodexArgsWithIncludeDirectories(cwd, includeDirs)
-	}
-	return providercommon.CommandSpec{
-		Command:     a.runner.commandName(),
-		Args:        commandArgs,
-		Stdin:       strings.NewReader(promptcontract.ComposeDraftArtifactRepairPrompt(acpruntime.ProviderCodexCode, repairTask, validationErr)),
-		Dir:         cwd,
-		IncludeDirs: includeDirs,
-	}, nil
+	return providercommon.BuildFocusedRepairCommandSpec(task, acpruntime.ProviderCodexCode, providercommon.FocusedRepairDraftArtifacts, validationErr, a.commandSpecWithPrompt)
 }
 
 func (a codexAdapter) ValidateArtifacts(task acpruntime.Task) error {

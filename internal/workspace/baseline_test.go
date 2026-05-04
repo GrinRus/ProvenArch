@@ -208,7 +208,8 @@ func TestBaselineCollectPromptPackEncodesLegacyHygieneRules(t *testing.T) {
 		"Each semantic provenance.evidence[*] item must include non-empty repo/path fields",
 		"Treat schemas/spec plus the enforced runtime prompt as the only manifest schema source of truth",
 		"Do not read reports/taskruns, raw runtime logs, archived plans, or prior shard-pack manifests as schema templates",
-		"Do not use legacy collect aliases such as covered_topics, question, relation, evidence_citation_ids, or top-level compatibility blocks",
+		"semantic.coverage MUST use observed/missing/notes; do NOT use covered_topics or alternate coverage keys.",
+		"semantic.questions[*] MUST use text; do NOT use question or other alias keys.",
 	}
 	for _, token := range expected {
 		if !strings.Contains(content, token) {
@@ -228,7 +229,7 @@ func TestBaselineFindingsPromptPackRequiresCanonicalVerdictMetadata(t *testing.T
 	expected := []string{
 		"`validator-verdict.json` only, with version/run_id/generated_at/verdict/summary/checked_paths",
 		"issues[] items use only code/severity/message plus optional path/document_id/citation_id; severity is error|warning",
-		"Do not put legacy finding-shaped fields in issues[]: id/title/description/rule_id/related_paths/related_ids/provenance",
+		"Do NOT put legacy finding-shaped fields inside issues[]: id, title, description, rule_id, related_paths, related_ids, provenance.",
 		"Observation provenance evidence must include repo/path for every cited file-level fact",
 		"If owner linkage is missing, surface owner-gap finding with explicit uncertainty without forcing FAIL on its own",
 	}
@@ -248,10 +249,10 @@ func TestBaselineProposalsPromptPackRequiresCanonicalDraftManifest(t *testing.T)
 	}
 
 	expected := []string{
-		"`proposals-draft-manifest.json` with version=1, run_id, step_id, step_contract=\"proposals\", agent_role, optional summary, and outputs[]",
-		"outputs[].canonical_path values only under proposals/* or reports/changelog/*, and unique",
-		"Do not add legacy manifest fields: pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps",
-		"Do not emit final-index-like proposal envelopes as proposals-draft-manifest.json",
+		"proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract=\"proposals\", agent_role, optional summary, and outputs[].",
+		"outputs[].canonical_path values are allowed only under proposals/* or reports/changelog/*.",
+		"Do NOT add legacy top-level fields such as pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps.",
+		"Do NOT emit final-index-like proposal envelopes; proposals-draft-manifest.json is only the runtime draft publish map.",
 	}
 	for _, token := range expected {
 		if !strings.Contains(content, token) {
@@ -262,8 +263,8 @@ func TestBaselineProposalsPromptPackRequiresCanonicalDraftManifest(t *testing.T)
 	system := renderSkillSystemPrompt("proposals")
 	for _, token := range []string{
 		"step_contract=\"proposals\"",
-		"outputs[].canonical_path values only under proposals/* or reports/changelog/*",
-		"pipeline/step/proposals[] top-level fields",
+		"outputs[].canonical_path values are allowed only under proposals/* or reports/changelog/*.",
+		"Do NOT add legacy top-level fields such as pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps.",
 	} {
 		if !strings.Contains(system, token) {
 			t.Fatalf("expected proposals skill prompt to contain %q, got:\n%s", token, system)

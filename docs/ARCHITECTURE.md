@@ -43,8 +43,8 @@
    - Показывает repo overview в validate surface: `resolved_repos` + diagnostics, сгруппированные по repo
    - Редактирует baseline bundle artifacts через guided selector (`charter/*`, `skills/*`, prompt packs, `skills/subagents.yaml`)
    - UI разбит на top-level tabs `Setup / Baseline / Runs / Results / Settings`
-   - `App.tsx` остаётся route shell, а крупные sections вынесены в dedicated panels (`SetupWorkspacePanel`, `WizardContractPanel`, `BaselineEditorsPanel`, `RunPanels`, `ResultsPanels`)
-   - setup/baseline/wizard/git state и actions вынесены в `useWorkspaceSetup`; runtime settings живут в отдельном hook, а внутри run explorer logs/artifacts разделены на internal hook modules
+   - `App.tsx` остаётся route shell, а крупные sections вынесены в dedicated panels (`SetupWorkspacePanel`, `WizardContractPanel`, `BaselineEditorsPanel`, `RunPanels`, `ResultsPanels`); heavy run panel inputs передаются как grouped `model/actions`, чтобы route shell не разрастался flat prop/action списками
+   - setup/baseline/wizard/git state и actions остаются за facade `useWorkspaceSetup`, но внутри разделены на `useManifestEditor`, `useBaselineEditor`, `useWizardEditor` и `useGitActions`; runtime settings живут в отдельном hook, а run explorer разделён на `useRunSelection`, `useRunPolling`, `useRunActions`, `useRunArtifacts` и `useRunLogs`
    - Runtime profile (`timeouts` + `execution`) полностью вынесен в вкладку `Settings`, включая effective per-step providers
    - Показывает run dashboard (queued/running/succeeded/failed), включая завершённые run'ы из persisted history
    - При bootstrap авто-выбирает newest active run (`queued/running`), иначе первый run в history
@@ -59,6 +59,7 @@
    - Runtime Execution settings panel:
      - load/save/reset через `GET/PUT /api/runtime/execution`
      - показывает persisted/effective/source для strategy/parallelism/failure/discovery
+   - runtime profile patch validation/merge/manifest rewrite живёт в shared internal package `internal/runtimeprofile`, а API handlers остаются только HTTP adapter layer
    - live e2e poll timeout-ы берутся из effective config (`/api/runtime/timeouts`) с env override
    - Критичные UI-контролы для live e2e снабжены стабильными `data-testid` (`validate/run/status/artifacts/logs`)
 
@@ -70,7 +71,7 @@
    - Готовит ContextPack/PromptPack
    - Загружает baseline bundle agents/skills/prompts из workspace
    - workspace prompt packs подключаются к runtime prompt composition как editable content layer по фиксированному merge order: provider header -> artifact-only/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer; содержимое prompt pack не может ослаблять enforced contract rules
-   - `internal/orchestrator/orchestrator.go` остаётся entry shell/pipeline glue; service run-registry/history lifecycle и semantic/card enrichment вынесены в dedicated package files
+   - `internal/orchestrator/orchestrator.go` остаётся entry shell/pipeline glue; `pipelineExecution` state сгруппирован во вложенные run-progress/artifact-registry/runtime/quality/semantic-docflow/draft buckets, а run finalization, step handlers, artifact registry methods, service run-registry/history lifecycle и semantic/card enrichment вынесены в dedicated package files
    - Работает с единым central workspace (`arch-workspace`) как корнем артефактов MVP
    - Валидирует `workspace.yaml` по `schemas/workspace.schema.json`
    - Разрешает repo sources (`path`/`git_url`) в локальные checkout перед анализом через системный `git` текущего пользователя/runner
@@ -88,17 +89,17 @@
    - Collect validation read-only: ACP не нормализует provider manifest после выполнения и не логирует compatibility rule ids
    - Collect recovery остаётся явной provider-authored поверхностью: non-silent no-artifact collect может выполнить одну pair-recovery попытку (`suggested overview doc + shard-pack-manifest.json`), а collect с authored docs — одну manifest-only provider попытку; write-set guards запрещают любые лишние файлы
    - Сохраняет raw runtime execution metadata и shard summaries в `reports/taskruns/*` для recovery/auditability
-   - Runtime sharding planner (heuristics/semantic) materialize-ит deterministic shard-plan artifacts `reports/taskruns/*-shard-plan*.json` и shard-summary artifacts `reports/taskruns/*-shard-summary*.json`
+   - Runtime sharding planner (heuristics/semantic) materialize-ит deterministic shard-plan artifacts `reports/taskruns/*-shard-plan*.json` и shard-summary artifacts `reports/taskruns/*-shard-summary*.json`; internal `ShardPlanner` принимает workspace manifest + resolved repo paths + execution profile и возвращает plans/warnings/semantic graph без scheduling side effects
    - shard-plan публикует полный неперекрывающийся coverage partition repo через `path_scopes` (directory/file scopes); для больших repo применяется structural coalescing по filesystem ancestry, но module marker leaf shards внутри крупных top-level dirs сохраняются, пока итоговый plan не превышает `maxAutoShardsPerRepo`; repos только с root marker (`pyproject.toml`, `pom.xml`, etc. в корне) планируются как root-file group + top-level directory shards, а не как один `"."`
    - Per-shard persistence crash-safe: shard-summary materialize-ится сразу со status=`pending`; после validated runtime execution metadata internal `runtime-execution.json` пишется до `apply`, shard переходит в `checkpointed`, после успешного `apply` — в `succeeded`; runtime/apply failure фиксируется как `failed` без ожидания конца шага
    - Internal shard-summary contract: `taskrun_path` обязателен для `checkpointed/succeeded`; он должен ссылаться на persisted `runtime-execution.json` с `shard_id/repo_scopes/path_scopes`
    - Internal shard-plan/shard-summary artifacts materialize-ят non-empty `meta.runtime.name/meta.runtime.version`, чтобы internal batch/contract checks не трактовали их как runtime-name drift
-   - Scheduler поддерживает `sequential|parallel` execution с worker-pool (`max_parallel_tasks`) и `fail_fast|best_effort` failure-policy
+   - Scheduler поддерживает `sequential|parallel` execution с worker-pool (`max_parallel_tasks`) и `fail_fast|best_effort` failure-policy; internal `ShardScheduler` отвечает за dispatch ordered runtime results, `ShardSummaryStore` держит summary/checkpoint persistence, а semantic/model apply остаётся в orchestration coordinator после scheduler result. Ownership физически разделён по файлам: coordinator, scheduler, summary store, artifact persistence и planner.
    - При `best_effort` downstream шаги продолжаются на partial model, но итог run фиксируется как `failed` с `error_code=run_partial_failed`; если `step1.collect` становится `unusable`, live `step3.findings` не выполняется, а downstream markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) materialize-ятся в `report_mode=incomplete` с явным banner/triage-only wording
    - Вызывает runtime adapter через `StepRunnerResolver` с per-provider cache/preflight внутри одного run
    - `step0..step4` становятся agent-first шагами, но runtime получает только staged surfaces (`write_root`, `draft_final_root`, `read_context_roots`, `step_contract`, `expected_artifacts`)
    - canonical publish для `step0/2/4` выполняется только из validated runtime draft artifacts через deterministic compile/publish path; direct orchestrator writer больше не является альтернативным source of truth
-   - Собирает staged final doc set в `reports/taskruns/<run_id>/staging/final/`
+   - Собирает staged final doc set в `reports/taskruns/<run_id>/staging/final/`; internal docflow builder принимает `DocflowBuildInput` и возвращает `DocflowBuildResult` (`artifacts`, `citation-index`, `final-run-index`, `semantic snapshot`), после чего execution state mutates только в thin adapter/promotion path
    - Генерирует и валидирует `final-run-index.json` и `citation-index.json`
    - `final-run-index.json` и `citation-index.json` используют один deterministic `document_id` mapping: canonical staged document ids берутся из `manifest.Documents[*].id`, а не пересобираются независимо на citation/final-index сторонах
    - `citation-index.json.claim_ids` трактуются как global staged-final namespace; duplicate claim ids в validator scope детерминированно repair-ятся на index/reference уровне с shard suffix без semantic rewrite authored docs
@@ -157,8 +158,8 @@
    - `shard-pack-manifest.json.documents[].path` — strict `artifact_root`-relative contract; workspace-level prefixes (`reports/...`, `charter/...`, `proposals/...`), duplicated `artifact_root` prefix и absolute paths считаются invalid collect artifact drift и не нормализуются ACP
    - collect prompt включает early pair-write requirement: suggested authored doc path и literal task-specific `shard-pack-manifest.json` skeleton должны быть записаны как focused artifact pair до broad second-pass sweep; для `init.step1.collect` / `refresh.step1.collect` runtime выполняет максимум одну collect pair-recovery попытку, если provider оставил stdout/stderr diagnostics, но не записал authored artifacts, и максимум одну manifest-only repair попытку, если provider уже записал authored docs в `write_root`, но `shard-pack-manifest.json` отсутствует или невалиден; repair prompts начинаются с command-first absolute heredoc write targets вокруг task-specific skeletons, instruct overwrite instead of reading/diffing/patching invalid manifests, не повторяют validation-error field cues, а engine write-set guards разрешают только expected pair или `write_root/shard-pack-manifest.json`
    - collect repair запускается с narrow include dirs: текущий `write_root` плюс repo evidence roots. Broader ACP workspace, sibling `reports/taskruns`, raw logs и старые shard manifests намеренно не входят в repair read surface; embedded prompt contract является authoritative schema text, если `schemas/*` или `docs/spec/*` отсутствуют внутри runtime workspace
-   - artifact-repair и provider retry разведены: collect pair repair, manifest-only collect repair, validator-verdict-only repair и draft-artifact repair общие для `claude-code`/`qwen-code`/`codex-code`, а fresh-process retry остаётся provider policy; semantic stdout parse больше не является success surface
-   - `claude-code`, `qwen-code` и `codex-code` используют общий artifact-only process engine в `internal/runtime/providercommon`: launch, stdout/stderr capture, process-group kill, deadline handling, raw diagnostics, activity monitor, controlled stop и artifact validation находятся в одном lifecycle path
+   - artifact-repair и provider retry разведены: collect pair repair, manifest-only collect repair, validator-verdict-only repair и draft-artifact repair общие для `claude-code`/`qwen-code`/`codex-code`, а fresh-process retry остаётся provider policy; focused repair command construction централизован в `providercommon`, provider adapters задают только command transport; collect/validator contract wording canonically живёт в `artifactquality` и переиспользуется runtime prompt contract + baseline prompt generation; semantic stdout parse больше не является success surface
+   - `claude-code`, `qwen-code` и `codex-code` используют общий artifact-only process engine в `internal/runtime/providercommon`: launch, stdout/stderr capture, process-group kill, deadline handling, raw diagnostics, activity monitor, controlled stop и artifact validation находятся в одном lifecycle path; orchestrator вызывает этот lifecycle через internal `RuntimeTaskExecutor`, после чего отдельно выполняет persistence/apply/promotion decisions
    - provider-specific остаётся только в thin adapters: command/args/stdin/workdir/include dirs, unavailable markers, activity policy и recovery policy; stdout/stderr transcript сохраняется как diagnostics и не является semantic success payload
    - shared activity monitor отслеживает pipe activity вместе с мутациями `write_root`/`draft_final_root`; pre-artifact silent/no-artifact hangs bounded для всех live adapters, post-artifact stop разрешён только когда оба сигнала stale, валидные required artifacts уже можно принять без повторного provider call, а partial artifacts могут иметь более длинное provider policy grace window
    - `qwen-code` policy дополнительно разрешает один fresh retry для missing/invalid artifacts; fully silent no-artifact path или silent retry exhaustion классифицируется как `runner_unavailable`, но partial authored artifacts без валидного manifest остаются `runtime_contract_failed`
@@ -225,6 +226,7 @@
    - `GET /api/runtime/execution`: persisted + effective + source
    - `PUT /api/runtime/execution`: partial update persisted execution profile, write-through в `workspace.yaml`
    - `GET /api/runtime/profile`: aggregate view `timeouts + execution + step_providers`
+   - runtime profile PUT handlers используют общий internal patch service для validate/merge/prune/render/write/reopen, чтобы API route code не дублировал workspace manifest mutation lifecycle
    - active run не прерывается при изменении timeout settings; новые значения применяются к следующим run
    - frontend live E2E differentiates explicit Playwright/backend failure (`playwright_failed`) from productive timeout (`active_run_timeout`), чтобы живой long-running run не выглядел как тот же failure class, что и terminal backend crash
 

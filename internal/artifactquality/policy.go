@@ -51,6 +51,18 @@ func CollectManifestLegacyHygieneLines() []string {
 	}
 }
 
+func CompactCollectManifestValidationChecklist(artifactRoot string) []string {
+	return []string{
+		fmt.Sprintf(`- artifact_root must remain exactly %q.`, artifactRoot),
+		`- version must be integer 1.`,
+		`- documents[] items use only id, kind, title, path, canonical_path, topics, citation_ids; documents[].path is artifact_root-relative.`,
+		`- citations[] items use id, repo, path, claim_ids, document_ids; every documents[].citation_ids value references a citations[].id.`,
+		`- semantic must include coverage, questions, entities, edges, findings; use coverage.observed/missing/notes and questions[].text.`,
+		`- semantic provenance/evidence objects, when present, must include concrete repo/path values; citation-only semantic evidence is forbidden.`,
+		`- forbidden legacy aliases: step_contract, compatibility, covered_topics, question, relation, source, target, evidence_citation_ids, string confidence, summary as finding alias.`,
+	}
+}
+
 func CollectManifestCanonicalExample() string {
 	return strings.TrimSpace(`{
   "version": 1,

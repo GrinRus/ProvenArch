@@ -31,7 +31,7 @@ func ValidateRuntimeArtifacts(task acpruntime.Task, provider acpruntime.Provider
 }
 
 func ValidateCollectArtifacts(task acpruntime.Task, provider acpruntime.Provider) error {
-	return artifactquality.ValidateCollectManifest(task)
+	return artifactquality.ValidateCollectManifestInRoot(task.WriteRoot)
 }
 
 func ValidateDraftArtifacts(task acpruntime.Task) error {
