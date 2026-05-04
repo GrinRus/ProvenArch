@@ -141,6 +141,48 @@ func TestAskRanksFindingsBeforeImportedDocsWhenKeywordsOverlap(t *testing.T) {
 	}
 }
 
+func TestAskUsesConfiguredDocsImportsPath(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "repos", "payments-service")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("create repo path: %v", err)
+	}
+	manifest := "version: 1\nrepos:\n  - name: payments-service\n    path: " + repoPath + "\ndocs:\n  imports_path: ./external/imports\n"
+	if err := os.WriteFile(filepath.Join(root, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	ws, err := workspace.Open(root)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure layout: %v", err)
+	}
+	if err := ws.WriteFile("external/imports/index.yaml", []byte("- id: external-architecture-notes\n  path: external/imports/architecture-notes.md\n")); err != nil {
+		t.Fatalf("write custom imports index: %v", err)
+	}
+	if err := ws.WriteFile("external/imports/architecture-notes.md", []byte("External architecture notes mention routing ownership.")); err != nil {
+		t.Fatalf("write custom import: %v", err)
+	}
+	if err := ws.WriteFile("docs/imports/legacy-notes.md", []byte("Legacy notes mention routing ownership but should not be indexed for custom imports path.")); err != nil {
+		t.Fatalf("write legacy import: %v", err)
+	}
+
+	service := NewService()
+	response, err := service.Ask(context.Background(), ws, "routing ownership architecture")
+	if err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+	if !hasCitationPathPrefix(response.Citations, "external/imports/") {
+		t.Fatalf("expected custom imports citation, got %+v", response.Citations)
+	}
+	if hasCitationPathPrefix(response.Citations, "docs/imports/") {
+		t.Fatalf("expected hardcoded docs/imports not to be indexed when custom imports path is configured, got %+v", response.Citations)
+	}
+}
+
 func TestAskIncludesExplainableReasons(t *testing.T) {
 	t.Parallel()
 

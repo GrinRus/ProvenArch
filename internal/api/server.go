@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/orchestrator"
+	"github.com/GrinRus/ProvenArch/internal/qa"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtimeprofile"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
@@ -48,6 +49,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/artifacts/write", s.handleArtifactsWrite)
 	mux.HandleFunc("/api/git/commit", s.handleGitCommit)
 	mux.HandleFunc("/api/git/proposal-branch", s.handleGitProposalBranch)
+	mux.HandleFunc("/api/qa/ask", s.handleQAAsk)
 	mux.HandleFunc("/api/pipeline/init", s.handlePipelineInit)
 	mux.HandleFunc("/api/pipeline/refresh", s.handlePipelineRefresh)
 	mux.HandleFunc("/api/pipeline/runs", s.handlePipelineRuns)
@@ -556,6 +558,32 @@ func (s *Server) handleArtifacts(writer http.ResponseWriter, request *http.Reque
 	writer.Header().Set("Content-Type", contentType)
 	writer.WriteHeader(http.StatusOK)
 	_, _ = writer.Write(content)
+}
+
+func (s *Server) handleQAAsk(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		writeMethodNotAllowed(writer, http.MethodPost)
+		return
+	}
+	var payload struct {
+		Question string `json:"question"`
+	}
+	if err := decodeStrictJSON(request, &payload); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid_request_body", "invalid request body")
+		return
+	}
+	question := strings.TrimSpace(payload.Question)
+	if question == "" {
+		writeError(writer, http.StatusBadRequest, "question_required", "question is required")
+		return
+	}
+
+	response, err := qa.NewService().Ask(request.Context(), s.getWorkspace(), question)
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "qa_failed", err.Error())
+		return
+	}
+	writeJSON(writer, http.StatusOK, response)
 }
 
 func (s *Server) handlePipelineInit(writer http.ResponseWriter, request *http.Request) {

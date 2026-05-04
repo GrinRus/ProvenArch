@@ -25,4 +25,4 @@ Generated artifacts policy:
 - Эти файлы используются для review diffability и не считаются случайными артефактами.
 
 Required CI использует только local fixtures, synthetic repos и recorded artifacts.
-Live Claude Code runs в этом контуре не требуются.
+Live headless provider runs в этом контуре не требуются.

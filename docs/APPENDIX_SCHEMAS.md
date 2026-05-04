@@ -26,6 +26,7 @@
   - optional `analysis.include[] | analysis.exclude[]` (glob overrides для shard planner)
 - `repo.name` значения должны быть уникальными; это semantic validation rule workspace validator-а поверх JSON Schema
 - `docs.imports_path` optional, default `./docs/imports`
+- `<docs.imports_path>/index.yaml` не входит в `workspace.yaml` schema; validator проверяет его warning-only как imports metadata artifact (`id`/`path` required)
 - `runtime.profile.timeouts.*` optional persisted timeout profile:
   - `step_timeout_sec`, `heartbeat_sec`, `pipeline_timeout_sec`, `pipeline_kill_grace_sec`
   - `api_ready_timeout_sec`, `api_init_timeout_sec`, `ui_init_poll_timeout_sec`, `ui_cancel_poll_timeout_sec`

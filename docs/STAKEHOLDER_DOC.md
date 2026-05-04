@@ -1,11 +1,11 @@
-# Документ для стейкхолдеров и лидов (v1.0 implementation-aligned)
+# Документ для стейкхолдеров и лидов (v1.2 implementation-aligned)
 
 > **Название:** AI-native Architecture Control Plane (Local-first MVP)  
-> **Версия:** v1.0 (implementation-aligned)  
-> **Дата:** 05 Apr 2026  
+> **Версия:** v1.2 (implementation-aligned)
+> **Дата:** 04 May 2026
 > **Аудитория:** tech leads, staff/principal engineers, архитекторы, platform teams, engineering managers  
 > **Важно:** required CI и deterministic baseline работают на process-scoped runtime policy: `fake` default, `headless` opt-in для реальных локальных прогонов.  
-> **Q&A boundary (beta):** workspace-backed capability доступна как internal service + CLI `acp qa`; публичный endpoint `POST /api/qa/ask` остаётся Epic 11 follow-up.
+> **Q&A boundary (beta):** deterministic workspace-backed read-only capability доступна как internal service + CLI `acp qa` + public read-only `POST /api/qa/ask`; это не headless runtime agent и не consumer `skills/prompt-packs/qa.md`.
 
 ---
 
@@ -21,12 +21,12 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 | Schema-driven workspace/runtime artifact validation + actionable diagnostics | done | `internal/workspace/validation.go`, `internal/contracts/runtimeexecution.go`, `internal/api/server_test.go` |
 | Domain-first per-domain execution with persisted runtime execution metadata + domain outputs | done | `internal/orchestrator/orchestrator.go`, `internal/orchestrator/orchestrator_test.go`, `internal/orchestrator/scenario_test.go` |
 | Architect aggregation deterministic output | done | `reports/agent-outputs/architect/summary.md`, `TestArchitectSummaryIsDeterministicAcrossRuns`, scenario golden snapshot |
-| Q&A capability without public beta API surface | done (boundary-complete) | `internal/qa/service.go`, `cmd/acp/main.go` (`acp qa`), `docs/spec/API_SPEC.md` (`/api/qa/ask` follow-up) |
-| Public `POST /api/qa/ask` | follow-up (Epic 11) | not in current beta API surface |
+| Q&A capability with CLI + public read-only beta API surface | done | `internal/qa/service.go`, `cmd/acp/main.go` (`acp qa`), `internal/api/server.go` (`POST /api/qa/ask`), `docs/spec/API_SPEC.md` |
+| Public `POST /api/qa/ask` | done (Epic 11) | read-only wrapper over deterministic workspace-backed QA service |
 
 Epic matrix:
-- done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 14, 15
-- follow-up: 11
+- done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15
+- follow-up: none in current beta matrix
 - out of MVP: 12, 13
 
 ---
@@ -55,8 +55,8 @@ Epic matrix:
 - пользователь поднимает сервис одной командой `acp serve --workspace ... --auto-init ((--repo-name ... (--repo-path ... | --repo-git-url ...) [--repo-ref ...]) | --repos-file ...) [--docs-imports-path ...]`;
 - при `--auto-init` ACP создаёт `workspace.yaml` и fixed layout автоматически;
 - при bootstrap ACP автоматически выполняет `git init` в workspace root, если `.git` отсутствует;
-- складывает выгрузки docs (например из Confluence) в `docs/imports/`;
-- ведёт `docs/imports/index.yaml` как metadata index импортированных материалов.
+- складывает выгрузки docs (например из Confluence) в `docs.imports_path` (default `docs/imports/`);
+- ведёт `<docs.imports_path>/index.yaml` как metadata index импортированных материалов.
 
 2) **Шаг 0: Конституция проекта**
 - открывает UI → мастер (wizard) по “Конституции”:
@@ -134,12 +134,12 @@ arch-workspace/
 - Domain Analyst Agent на каждый домен.
 - Team overlay через markdown team cards.
 - 1 Architect Aggregator Agent, который анализирует outputs domain-агентов и формирует общий синтез.
-- System Analyst Q&A Agent, который отвечает на вопросы по артефактам `charter/cards + model + reports + docs/imports`.
+- System Analyst Q&A capability, которая детерминированно отвечает через workspace-backed read-only service + CLI `acp qa` по артефактам `charter/cards + model + reports + docs/imports`.
 - На каждую итерацию формируется markdown changelog.
 
 Обязательный baseline bundle для MVP:
 - agents: `domain-analyst`, `architect-aggregator`, `system-analyst-qa`
-- skills: `service-inventory`, `interface-extraction`, `integration-mapping`, `datastore-mapping`, `cicd-mapping`, `ownership-coverage`, `findings`, `proposals`
+- skills: `service-inventory`, `interface-extraction`, `integration-mapping`, `datastore-mapping`, `cicd-mapping`, `ownership-coverage`, `findings`, `proposals`, `qa`
 - prompt packs: `constitution`, `collect-context`, `findings`, `proposals`, `qa`
 - prompt packs остаются редактируемыми Git-tracked artifacts, но используются как content layer; enforced runtime policy и contract guardrails задаются internal step-policy слоем
 
@@ -229,7 +229,7 @@ arch-workspace/
   - Domain Analyst Agent per domain,
   - Team overlay через team cards,
   - 1 Architect Aggregator Agent.
-- **System Analyst Q&A capability** (on-demand ответы по артефактам workspace).  
+- **System Analyst Q&A capability** (deterministic workspace-backed read-only service + CLI `acp qa` + `POST /api/qa/ask`, без headless runtime agent).
 - **Итерационный changelog** в `reports/changelog/`.  
 - **Подробный analysis scope на каждый сервис**:
   - архитектура и интерфейсы,
@@ -306,7 +306,7 @@ arch-workspace/
    - Domain Analyst Agent (per domain)  
    - Team overlay через team cards  
    - Architect Aggregator Agent (1 на workspace)  
-   - System Analyst Q&A Agent (on-demand capability)
+   - System Analyst Q&A capability (deterministic read-only service + CLI `acp qa`)
 
 6) **Model & Reports (файлы)**  
    - каноническая модель как файлы (git-tracked)  
@@ -339,7 +339,7 @@ MVP должен стабильно производить следующий н
 - `reports/agent-outputs/domains/<domain-id>.md` — outputs domain-агентов  
 - `reports/agent-outputs/architect/summary.md` — синтез Architect Aggregator Agent  
 - `reports/changelog/<yyyy-mm-dd>-<iteration-id>.md` — changelog по итерациям
-- `docs/imports/index.yaml` — metadata index импортированных документов
+- `<docs.imports_path>/index.yaml` — metadata index импортированных документов
 
 ---
 
@@ -431,12 +431,13 @@ Wizard из блоков-шаблонов:
 - список шагов (миграционный чеклист уровня MVP)
 
 ### 9.5. On-demand Q&A capability (MVP)
-- System Analyst Q&A Agent отвечает на вопросы, используя:
+- System Analyst Q&A capability в текущей beta отвечает через deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask`, используя:
   - `charter/cards/*`
   - `model/*`
   - `reports/*`
-  - `docs/imports/*`
-- Follow-up API фиксируется как read-only `POST /api/qa/ask`, который возвращает `answer`, `citations`, `unresolved`, `confidence`.
+  - configured `docs.imports_path` (`docs/imports/*` по умолчанию)
+- Capability не вызывает headless runtime provider, не использует `skills/prompt-packs/qa.md` как runtime prompt и не меняет workspace.
+- API возвращает `answer`, `citations`, `unresolved`, `confidence`; empty/invalid request идёт через standard API error envelope.
 
 ---
 
@@ -558,8 +559,9 @@ flowchart TD
 - Если стек или артефакт не удаётся надёжно интерпретировать, система фиксирует gaps через coverage/questions/findings.
 
 ### 13.5. Документы и metadata index
-- Raw imports хранятся в `docs/imports/`.
-- Metadata фиксируется в `docs/imports/index.yaml` с source/checksum/timestamps/status.
+- Raw imports хранятся в `docs.imports_path` (default `docs/imports/`).
+- Metadata фиксируется в `<docs.imports_path>/index.yaml`: required `id`/`path`, optional `source`, `checksum`, `imported_at`, `source_updated_at`, `status`.
+- Отсутствие metadata index допустимо; malformed/semantic index issues surface как warning-only workspace diagnostics.
 - `workspace.yaml` получает отдельный schema-contract; layout workspace beyond repo sources и imports path не конфигурируется через manifest.
 
 ### 13.6. GitHub/GitLab trigger policy
@@ -570,9 +572,10 @@ flowchart TD
 - Internal API trigger optional и допустим только для trusted local/private deployment.
 - Debounce policy: один активный run на workspace, окно 5 минут, `last event wins`.
 
-### 13.7. Q&A API follow-up
-- Read-only endpoint резервируется как `POST /api/qa/ask`.
-- Планируемый ответ: `answer`, `citations`, `unresolved`, `confidence`.
+### 13.7. Q&A API baseline
+- Read-only endpoint реализован как `POST /api/qa/ask`.
+- Ответ: `answer`, `citations`, `unresolved`, `confidence`.
+- Endpoint не меняет workspace, не запускает pipeline/git и не вызывает headless runtime provider.
 
 ---
 

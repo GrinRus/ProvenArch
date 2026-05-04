@@ -75,6 +75,8 @@ func (r Root) Validate(ctx context.Context, options ValidateOptions) ValidationR
 				Path:       importsPath,
 				Suggestion: "Update workspace.yaml docs.imports_path to a directory",
 			})
+		} else {
+			report.Warnings = append(report.Warnings, r.validateDocsImportsIndex(importsPath)...)
 		}
 	}
 

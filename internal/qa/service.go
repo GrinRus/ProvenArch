@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -82,7 +83,7 @@ func (Service) Ask(ctx context.Context, ws workspace.Root, question string) (Res
 			matchedTokens[token] = struct{}{}
 		}
 
-		score := hits*100 + weightForPath(candidate.Path)*10 - pathDepthPenalty(candidate.Path)
+		score := hits*100 + candidate.Weight*10 - pathDepthPenalty(candidate.Path)
 		scored = append(scored, scoredCitation{
 			Citation: Citation{
 				Path:   candidate.Path,
@@ -169,6 +170,7 @@ type scoredCitation struct {
 type indexedDocument struct {
 	Path    string
 	Content string
+	Weight  int
 }
 
 func tokenize(input string) []string {
@@ -247,6 +249,7 @@ func citationPathList(citations []Citation) string {
 }
 
 func collectCandidates(ctx context.Context, ws workspace.Root) ([]indexedDocument, error) {
+	importsRoot := workspaceRelativePath(ws.Manifest.Docs.ImportsPath)
 	fixed := []string{
 		"charter/overview.md",
 		"reports/as-is/overview.md",
@@ -254,13 +257,17 @@ func collectCandidates(ctx context.Context, ws workspace.Root) ([]indexedDocumen
 		"reports/findings/findings.md",
 		"reports/coverage/open-questions.md",
 		"reports/coverage/summary.md",
-		"docs/imports/index.yaml",
+	}
+	if importsRoot != "" {
+		fixed = append(fixed, path.Join(importsRoot, "index.yaml"))
 	}
 	walkRoots := []string{
 		"charter/cards",
 		"model",
 		"reports",
-		"docs/imports",
+	}
+	if importsRoot != "" {
+		walkRoots = append(walkRoots, importsRoot)
 	}
 
 	paths := map[string]struct{}{}
@@ -330,9 +337,23 @@ func collectCandidates(ctx context.Context, ws workspace.Root) ([]indexedDocumen
 		out = append(out, indexedDocument{
 			Path:    path,
 			Content: string(content),
+			Weight:  weightForPath(path, importsRoot),
 		})
 	}
 	return out, nil
+}
+
+func workspaceRelativePath(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		trimmed = "./docs/imports"
+	}
+	cleaned := filepath.ToSlash(filepath.Clean(trimmed))
+	cleaned = strings.TrimPrefix(cleaned, "./")
+	if cleaned == "." || cleaned == "" {
+		return ""
+	}
+	return cleaned
 }
 
 func isIndexableExtension(ext string) bool {
@@ -344,7 +365,7 @@ func isIndexableExtension(ext string) bool {
 	}
 }
 
-func weightForPath(path string) int {
+func weightForPath(path string, importsRoot string) int {
 	switch {
 	case strings.HasPrefix(path, "reports/findings/"):
 		return 8
@@ -358,7 +379,7 @@ func weightForPath(path string) int {
 		return 5
 	case strings.HasPrefix(path, "charter/"):
 		return 4
-	case strings.HasPrefix(path, "docs/imports/"):
+	case importsRoot != "" && (path == importsRoot || strings.HasPrefix(path, strings.TrimSuffix(importsRoot, "/")+"/")):
 		return 3
 	default:
 		return 1
