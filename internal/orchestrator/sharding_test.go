@@ -338,6 +338,51 @@ func TestRootMarkerOnlyLargeRepoDoesNotCollapseToRootShard(t *testing.T) {
 	}
 }
 
+func TestStructuralShardCoalescingEnforcesCapForManyTopLevelRoots(t *testing.T) {
+	t.Parallel()
+
+	repoPath := t.TempDir()
+	coverageRoots := []string{"README.rst", "pyproject.toml"}
+	for idx := 0; idx < 40; idx++ {
+		rel := "project-" + string(rune('a'+idx/26)) + string(rune('a'+idx%26))
+		coverageRoots = append(coverageRoots, rel)
+		if err := os.MkdirAll(filepath.Join(repoPath, rel), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", rel, err)
+		}
+	}
+	for _, rel := range []string{"README.rst", "pyproject.toml"} {
+		writeShardFixturePath(t, repoPath, rel)
+	}
+
+	groups, warnings := buildStructuralShardGroups(repoPath, coverageRoots)
+	if got := len(groups); got != maxAutoShardsPerRepo {
+		t.Fatalf("groups = %d, want %d: %#v warnings=%#v", got, maxAutoShardsPerRepo, groups, warnings)
+	}
+	if hasSinglePathGroup(groups, ".") {
+		t.Fatalf("did not expect root shard group for many-top-level repo: %#v", groups)
+	}
+	if !hasGroupWithAllPaths(groups, []string{"README.rst", "pyproject.toml"}) {
+		t.Fatalf("expected root-file group to preserve root metadata files, got %#v", groups)
+	}
+	if !hasWarningContaining(warnings, "to enforce target cap") {
+		t.Fatalf("expected cap enforcement warning, got %#v", warnings)
+	}
+	if !hasMultiPathNonRootGroup(groups) {
+		t.Fatalf("expected at least one merged top-level group, got %#v", groups)
+	}
+	seen := map[string]int{}
+	for _, group := range groups {
+		for _, rel := range group {
+			seen[rel]++
+		}
+	}
+	for _, rel := range coverageRoots {
+		if seen[rel] != 1 {
+			t.Fatalf("coverage root %q seen %d times in groups %#v", rel, seen[rel], groups)
+		}
+	}
+}
+
 func TestBuildShardIDBoundsLongRootFileGroups(t *testing.T) {
 	t.Parallel()
 
@@ -518,6 +563,28 @@ func hasGroupWithAllPaths(groups [][]string, paths []string) bool {
 			}
 		}
 		if !missing {
+			return true
+		}
+	}
+	return false
+}
+
+func hasMultiPathNonRootGroup(groups [][]string) bool {
+	for _, group := range groups {
+		if len(group) <= 1 {
+			continue
+		}
+		if hasRootFileLikePath(group) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func hasRootFileLikePath(group []string) bool {
+	for _, rel := range group {
+		if !strings.Contains(rel, "/") && strings.Contains(filepath.Base(rel), ".") {
 			return true
 		}
 	}

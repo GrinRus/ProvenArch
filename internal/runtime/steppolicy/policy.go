@@ -315,14 +315,14 @@ func collectDocumentInitialTemplate(task acpruntime.Task, docRel string) string 
 		"- Path scopes: " + scopeText,
 		"",
 		"## Observations",
-		"- Repository evidence under `" + evidencePath + "` is the first citation surface for this shard.",
-		"- Record concrete service, module, data-flow, or ownership observations from the scoped files before exit.",
+		"- Repository scope: " + repo + ".",
+		"- Primary scoped evidence path: `" + evidencePath + "`.",
 		"",
 		"## Evidence",
 		"- Primary evidence path: `" + evidencePath + "`",
 		"",
 		"## Follow-up",
-		"- Record owner mapping gaps as questions when repository evidence does not name an owner.",
+		"- Owner mapping evidence not confirmed from the initial scoped evidence path.",
 		"",
 	}, "\n")
 }
@@ -410,8 +410,8 @@ func CollectManifestTaskSkeleton(task acpruntime.Task, docPaths []string, eviden
 		Semantic: contracts.SemanticSnapshot{
 			Coverage: contracts.Coverage{
 				Observed: []string{topic},
-				Missing:  []string{"owner mappings if absent from repository evidence"},
-				Notes:    []string{"Record concrete repository observations in the authored document before exiting."},
+				Missing:  []string{"owner mapping evidence not confirmed from scoped repository files"},
+				Notes:    []string{"Collect manifest covers the assigned shard scope with evidence paths listed in citations."},
 			},
 			Questions: []contracts.Question{},
 			Entities:  []contracts.Entity{},

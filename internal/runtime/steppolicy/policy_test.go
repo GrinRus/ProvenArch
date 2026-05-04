@@ -174,6 +174,46 @@ func TestCollectManifestTaskSkeletonParsesAsShardPackManifest(t *testing.T) {
 	if strings.Contains(raw, "scaffold") {
 		t.Fatalf("collect manifest skeleton should avoid scaffold wording in provider-authored artifacts:\n%s", raw)
 	}
+	for _, forbidden := range []string{
+		"Record concrete",
+		"first citation surface",
+		"before exit",
+		"before exiting",
+		"owner mappings if absent",
+	} {
+		if strings.Contains(raw, forbidden) {
+			t.Fatalf("collect manifest skeleton should not persist authoring instruction %q:\n%s", forbidden, raw)
+		}
+	}
+}
+
+func TestCollectEarlyPairWriteCommandAvoidsAuthoringInstructionsInArtifacts(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		ArtifactRoot: "reports/taskruns/run-1/staging/shards/source-docs",
+		WriteRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/shards/source-docs",
+		RepoScopes:   []string{"bank"},
+		PathScopes:   []string{"src"},
+		ShardID:      "bank-source-docs",
+		DomainID:     "payments",
+		AgentRole:    "shard-analyst",
+	}
+
+	command := CollectEarlyPairWriteCommand(task)
+	for _, forbidden := range []string{
+		"Record concrete",
+		"first citation surface",
+		"before exit",
+		"before exiting",
+		"owner mappings if absent",
+	} {
+		if strings.Contains(command, forbidden) {
+			t.Fatalf("collect early pair command should not persist authoring instruction %q:\n%s", forbidden, command)
+		}
+	}
 }
 
 func TestDocFirstFilesystemPolicyDefinesCanonicalValidatorVerdictSurface(t *testing.T) {

@@ -159,7 +159,7 @@ Diagnostic `regres fast` на `qwen-code,codex-code` дошёл до harness/pro
 - [x] Добавить provider-authored focused recovery для missing/invalid `validator-verdict.json`
 - [x] Добавить focused draft-artifact recovery для `step0/2/4` с write-set guard
 - [x] Сохранить strict validation: без ACP-side manifest/verdict/draft synthesis и без silent legacy shape acceptance
-- [x] Починить root-marker-only sharding: root-file group + top-level dirs вместо single `"."` shard на больших repos
+- [x] Починить root-marker-only sharding: root-file group + top-level dirs вместо single `"."` shard на больших repos; many-top-level repos enforce `maxAutoShardsPerRepo` через deterministic buckets
 - [x] Уточнить report classifiers: raw provider text не создаёт secondary `runner_unavailable` без real availability signal; backend-failed snapshot absence становится dependent skipped frontend status
 - [x] Добавить targeted prompt/provider/engine/sharding/report tests
 - [x] Прогнать full DoD (`make contracts`, `make test`, `make lint`, `make build`)
@@ -191,14 +191,14 @@ Diagnostic `regres fast` на `qwen-code,codex-code` дошёл до harness/pro
 - [x] Prompt tests cover absolute writes, validator skeleton/canonical issues and draft recovery targets
 - [x] Engine tests cover collect pair recovery, missing/invalid validator repair, write-set guard, draft repair and strict failure lanes
 - [x] Qwen adapter repair specs keep empty stdin and prompt via CLI `-p`
-- [x] Sharding tests prove root-marker-only large repo does not collapse to `"."`
+- [x] Sharding tests prove root-marker-only large repo does not collapse to `"."` and many-top-level super-repos stay within `maxAutoShardsPerRepo`
 - [x] Report tests prove raw category-word noise and backend-failed snapshot absence do not become independent failures
 - [x] DoD passes
 - [ ] Diagnostic live rerun reaches `release_verdict_<matrix-id>.json.verdict == "PASS"` or records a narrower residual provider blocker
 
 ### Risks
 - Focused recovery can still fail if provider is truly silent/unavailable; qwen fully silent no-artifact remains `runner_unavailable`.
-- Root-marker-only splitting may increase live runtime duration; cap/coalescing remains bounded by `maxAutoShardsPerRepo`.
+- Root-marker-only splitting may increase live runtime duration; cap/coalescing is enforced by deterministic bucket coalescing, which can reduce per-project granularity for very large super-repos.
 - Classifier narrowing must not hide real capacity/rate-limit incidents; generic 429/rate-limit/capacity lines still count after noise filtering.
 
 ### Refactoring follow-up (non-blocking)
@@ -231,6 +231,8 @@ Diagnostic `regres fast` на `qwen-code,codex-code` дошёл до harness/pro
 - 2026-05-03: Final live report replay found one more stale-classifier path: Python report regeneration ignored raw runner noise for terminal success but still trusted an old `run-classifications.tsv` row with `failure_class=runner_unavailable`/`cancellation_like`. Terminal-success report evaluation now discards stale classified failure/subclass values and has regression coverage.
 - 2026-05-03: The same replay exposed legacy `analysis:cross-repo-missing` logic on the successful codex backend: staged artifacts cited all 5 Open edX repos and had a multi-repo owner-gap finding, but the evaluator required explicit `semantic.edges[]`. Updated the report gate to count `citations[].repo` coverage plus multi-repo finding provenance as valid cross-repo signal, preserving the hard fail when both explicit edges and multi-repo finding evidence are absent.
 - 2026-05-03: Follow-up audit tightened the Python terminal-success classifier override to match the shell classifier: summary success must be paired with `run-status.env state=completed process_exit=0`. A passed summary without run-status no longer suppresses stale failure classes; regression coverage added.
+- 2026-05-04: Post-merge trusted-machine `regres fast` rerun was executed without wrapper on `qwen-code,codex-code`. `regres-fast-bank-openedx-20260503T143529Z` remained `FAIL` with qwen fully silent no-artifact collect retries (`runner_unavailable`), codex single-git_url `runtime_flow_failed` from unresolved authoring text in staged docs, and codex frontend `active_run_timeout`. `regres-fast-openstack-20260503T200727Z` remained `FAIL` with both providers timing out in `init.step1.collect`; root cause was `openstack/openstack` shard explosion (`687` collect shards for that repo, `735` total backend signal).
+- 2026-05-04: Follow-up fix enforces `maxAutoShardsPerRepo` for many-top-level repos by deterministic bucket coalescing instead of warning-only overflow, removes persisted authoring instructions from collect early-pair doc/manifest skeletons, and restores the dependent `snapshot_reports_missing` frontend blocker suppression in matrix strict verdicts.
 
 ### Plan ID
 EP-20260502-qwen-smoke-tiny-marker-collect-hardening
