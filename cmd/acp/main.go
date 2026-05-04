@@ -32,6 +32,12 @@ const (
 	exitCodeValidation     = 3
 )
 
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 type runtimeCommandFlags struct {
 	runtimeMode       *string
 	runtimeProvider   *string
@@ -60,8 +66,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		printRootUsage(stdout)
 		return exitCodeOK
 	}
+	if isVersion(args[0]) {
+		printVersion(stdout)
+		return exitCodeOK
+	}
 
 	switch args[0] {
+	case "version":
+		return runVersion(args[1:], stdout, stderr)
 	case "init-workspace":
 		return runInitWorkspace(args[1:], stdout, stderr)
 	case "serve":
@@ -77,6 +89,28 @@ func run(args []string, stdout, stderr io.Writer) int {
 		printRootUsage(stderr)
 		return exitCodeInvalidCommand
 	}
+}
+
+func runVersion(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("version", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "Usage: acp version")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return exitCodeOK
+		}
+		return exitCodeInvalidCommand
+	}
+	if len(fs.Args()) > 0 {
+		fmt.Fprintf(stderr, "unexpected positional arguments: %s\n", strings.Join(fs.Args(), " "))
+		fs.Usage()
+		return exitCodeInvalidCommand
+	}
+	printVersion(stdout)
+	return exitCodeOK
 }
 
 func runServe(args []string, stdout, stderr io.Writer) int {
@@ -611,10 +645,21 @@ func isHelp(arg string) bool {
 	return arg == "-h" || arg == "--help" || arg == "help"
 }
 
+func isVersion(arg string) bool {
+	return arg == "-v" || arg == "--version"
+}
+
+func printVersion(w io.Writer) {
+	fmt.Fprintf(w, "acp version %s\n", version)
+	fmt.Fprintf(w, "commit: %s\n", commit)
+	fmt.Fprintf(w, "built: %s\n", date)
+}
+
 func printRootUsage(w io.Writer) {
 	fmt.Fprintln(w, "ACP CLI")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Usage:")
+	fmt.Fprintln(w, "  acp version")
 	fmt.Fprintln(w, "  acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]")
 	fmt.Fprintln(w, "  acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]")
 	fmt.Fprintln(w, "  acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]")
@@ -622,6 +667,7 @@ func printRootUsage(w io.Writer) {
 	fmt.Fprintln(w, "  acp doctor [--workspace <abs-path>] [--repo-path <path> | --repo-git-url <url>] [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--json]")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  version print build version metadata")
 	fmt.Fprintln(w, "  init-workspace create/update workspace.yaml and bootstrap workspace layout")
 	fmt.Fprintln(w, "  serve   load workspace and start local API+UI service")
 	fmt.Fprintln(w, "  run     validate workspace path and execute init/refresh pipeline")

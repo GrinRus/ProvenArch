@@ -16,11 +16,28 @@ ACP не является "рисовалкой диаграмм". Архите�
 
 Для обычного пользователя основной путь — готовый single-binary `acp` из GitHub Releases. Go и Node нужны только для разработки ProvenArch из исходников.
 
+### Release status
+
+- Latest public release: `v0.1.0`
+- Supported platforms: macOS/Linux on `amd64` and `arm64`
+- License: Apache-2.0
+- Install command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/GrinRus/ProvenArch/main/install.sh | sh
+```
+
 ### 1) Установите `acp`
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/GrinRus/ProvenArch/main/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
+```
+
+Проверьте установленный binary:
+
+```bash
+acp version
 ```
 
 Проверьте локальную готовность:
