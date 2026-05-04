@@ -23,7 +23,7 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 | Architect aggregation deterministic output | done | `reports/agent-outputs/architect/summary.md`, `TestArchitectSummaryIsDeterministicAcrossRuns`, scenario golden snapshot |
 | Q&A capability with CLI + public read-only beta API surface | done | `internal/qa/service.go`, `cmd/acp/main.go` (`acp qa`), `internal/api/server.go` (`POST /api/qa/ask`), `docs/spec/API_SPEC.md` |
 | Public `POST /api/qa/ask` | done (Epic 11) | read-only wrapper over deterministic workspace-backed QA service |
-| User-friendly install + first-run readiness surface | done (usability hardening) | `.goreleaser.yml`, `.github/workflows/release.yml`, `install.sh`, `cmd/acp/main.go` (`acp doctor`), `internal/api/server.go` (`GET /api/system/doctor`), `ui/src/components/SetupWorkspacePanel.tsx` |
+| User-friendly install + first-run readiness surface | done (usability hardening) | `.goreleaser.yml`, `.github/workflows/release.yml`, `install.sh`, `LICENSE`, `cmd/acp/main.go` (`acp version`, `acp doctor`), `internal/api/server.go` (`GET /api/system/doctor`), `ui/src/components/SetupWorkspacePanel.tsx` |
 
 Epic matrix:
 - done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15

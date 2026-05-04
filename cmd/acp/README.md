@@ -3,6 +3,7 @@
 Go CLI entrypoint for ACP.
 
 High-level commands:
+- `version` — вывести release/build metadata без workspace
 - `init-workspace` — bootstrap `workspace.yaml`, fixed layout, baseline bundle и dry validation
 - `serve` — локальный backend + embedded UI для одного workspace на процесс
 - `run` — deterministic `init|refresh` pipeline для local/batch execution
@@ -17,6 +18,7 @@ Canonical sources:
 
 Operational notes:
 - required CI/CD surface в MVP: CLI batch mode через `acp run`
+- release binary check: `acp version` или `acp --version`
 - runtime policy: `fake` default, `headless` opt-in
 - headless providers в MVP: `claude-code` (default), `qwen-code`, `codex-code`
 - provider selection precedence: `--runtime-provider` > `ACP_RUNTIME_PROVIDER` > `claude-code`

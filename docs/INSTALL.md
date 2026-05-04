@@ -2,6 +2,16 @@
 
 > Primary distribution для beta: native single-binary `acp` из GitHub Releases. Go/Node нужны только разработчикам, которые собирают проект из исходников.
 
+## Release status
+
+- Latest public release: `v0.1.0`
+- Supported platforms: macOS/Linux on `amd64` and `arm64`
+- License: Apache-2.0
+- Primary install command:
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/GrinRus/ProvenArch/main/install.sh | sh
+  ```
+
 ## Быстрый путь через install.sh
 
 ```bash
@@ -13,6 +23,12 @@ curl -fsSL https://raw.githubusercontent.com/GrinRus/ProvenArch/main/install.sh 
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
+```
+
+Проверьте установленный binary:
+
+```bash
+acp version
 ```
 
 Опциональные переменные:
@@ -75,5 +91,6 @@ git clone https://github.com/GrinRus/ProvenArch.git
 cd ProvenArch
 make bootstrap
 make build
+./bin/acp version
 ./bin/acp doctor --workspace "$HOME/acp-workspaces/my-service"
 ```

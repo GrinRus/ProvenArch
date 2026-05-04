@@ -26,6 +26,49 @@ func TestRunHelp(t *testing.T) {
 	if !strings.Contains(stdout.String(), "acp doctor") {
 		t.Fatalf("expected doctor command in help output, got %q", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "acp version") {
+		t.Fatalf("expected version command in help output, got %q", stdout.String())
+	}
+}
+
+func TestVersionCommand(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"version"}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d", exitCodeOK, code)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr, got %q", stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"acp version ",
+		"commit: ",
+		"built: ",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected version output to contain %q, got %q", want, output)
+		}
+	}
+}
+
+func TestVersionFlag(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"--version"}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d", exitCodeOK, code)
+	}
+	if !strings.Contains(stdout.String(), "acp version ") {
+		t.Fatalf("expected version output, got %q", stdout.String())
+	}
 }
 
 func TestServeHelpReturnsZero(t *testing.T) {

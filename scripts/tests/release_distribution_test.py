@@ -24,6 +24,9 @@ class ReleaseDistributionTest(unittest.TestCase):
         self.assertEqual(["darwin", "linux"], build["goos"])
         self.assertEqual(["amd64", "arm64"], build["goarch"])
         self.assertIn("CGO_ENABLED=0", build["env"])
+        self.assertIn("-X main.version={{ .Version }}", build["ldflags"][0])
+        self.assertIn("-X main.commit={{ .Commit }}", build["ldflags"][0])
+        self.assertIn("-X main.date={{ .Date }}", build["ldflags"][0])
 
         archives = config["archives"]
         self.assertEqual(1, len(archives))

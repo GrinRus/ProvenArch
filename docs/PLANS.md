@@ -56,6 +56,52 @@ EP-YYYYMMDD-<slug>
 
 ## Active Plans
 ### Plan ID
+EP-20260504-public-oss-release-readiness
+
+### Context
+Репозиторий переведён в public visibility, а release workflow уже умеет публиковать single-binary `acp` по тегам `v*`. Перед первым public release нужно закрыть OSS-readiness gaps: license, release metadata в binary, user-facing release status и smoke проверка installed binary без workspace.
+
+### Goals (must have)
+- [x] Добавить Apache-2.0 `LICENSE`
+- [x] Добавить `acp version` / `acp --version`
+- [x] Inject release metadata через GoReleaser ldflags
+- [x] Обновить README/install/architecture/stakeholder/CLI docs
+- [x] Обновить installer/release tests под version smoke
+- [x] Выполнить local DoD и release snapshot перед PR
+- [ ] После merge опубликовать `v0.1.0`, проверить GitHub Release artifacts и public install smoke
+
+### Non-goals
+- [x] Не менять pipeline/runtime schemas или workspace contract
+- [x] Не добавлять Homebrew tap в этот slice
+- [x] Не менять primary distribution beyond GitHub Releases + `install.sh`
+
+### Approach
+1) Добавить release metadata command и ldflags.
+2) Добавить Apache-2.0 license и синхронизировать user-facing docs.
+3) Обновить тесты installer/release distribution.
+4) Прогнать DoD/snapshot, открыть PR, дождаться CI, merge, затем опубликовать `v0.1.0`.
+
+### Files expected to change
+- `LICENSE`
+- `cmd/acp/main.go`, `cmd/acp/main_test.go`, `cmd/acp/README.md`
+- `.goreleaser.yml`, `scripts/tests/*release*_test.py`, `README.md`, `docs/INSTALL.md`, `docs/ARCHITECTURE.md`, `docs/STAKEHOLDER_DOC.md`
+
+### Acceptance criteria
+- [x] `acp version` works from source build and snapshot release archive
+- [x] Local release snapshot contains 4 platform archives and `checksums.txt`
+- [x] Local install smoke from snapshot passes
+- [ ] GitHub identifies repository license as Apache-2.0 after merge
+- [ ] Public `install.sh` path is reachable after merge
+
+### Risks
+- Release tag workflow is first-run only; unexpected GitHub token or GoReleaser publish issue may require a follow-up fix and retag.
+- README mentions `v0.1.0` before tag exists during the short PR-to-release window.
+
+### Progress log
+- 2026-05-04: Started public OSS release readiness after repository visibility changed to public.
+- 2026-05-04: Added Apache-2.0 license, version command, GoReleaser ldflags, docs/tests sync; local DoD, snapshot release and snapshot install smoke passed.
+
+### Plan ID
 EP-20260502-qwen-codex-regres-fast-live-hardening
 
 ### Context

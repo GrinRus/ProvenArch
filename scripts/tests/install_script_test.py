@@ -29,7 +29,17 @@ def write_mock_release(release_dir: Path, archive_name: str, checksum_ok: bool =
     payload_dir = release_dir / "payload"
     payload_dir.mkdir()
     binary = payload_dir / "acp"
-    binary.write_text("#!/usr/bin/env sh\necho acp-test\n", encoding="utf-8")
+    binary.write_text(
+        "#!/usr/bin/env sh\n"
+        "if [ \"${1:-}\" = \"version\" ] || [ \"${1:-}\" = \"--version\" ]; then\n"
+        "  echo 'acp version test'\n"
+        "  echo 'commit: test'\n"
+        "  echo 'built: test'\n"
+        "  exit 0\n"
+        "fi\n"
+        "echo acp-test\n",
+        encoding="utf-8",
+    )
     binary.chmod(0o755)
 
     archive = release_dir / archive_name
@@ -69,6 +79,15 @@ class InstallScriptTest(unittest.TestCase):
             installed = install_dir / "acp"
             self.assertTrue(installed.exists())
             self.assertIn("acp installed", result.stdout)
+            version_result = subprocess.run(
+                [str(installed), "version"],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(version_result.returncode, 0, version_result.stderr)
+            self.assertIn("acp version test", version_result.stdout)
 
     def test_rejects_checksum_mismatch(self) -> None:
         archive_name = release_asset_name()
