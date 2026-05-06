@@ -11,6 +11,20 @@ import subprocess
 import sys
 from pathlib import Path
 
+PROVIDER_UNAVAILABLE_MARKERS = (
+    "permission_error",
+    "permission error",
+    "usage limit",
+    "quota exceeded",
+    "quota",
+    "rate limit",
+    "rate_limit",
+    "api error: 403",
+    "api error: 429",
+    "status code: 403",
+    "status code: 429",
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Write batch preflight payload")
@@ -94,6 +108,95 @@ def codex_model_version_blocker(version_line: str, config_text: str | None = Non
     return ""
 
 
+def probe_timeout_sec() -> int:
+    raw = os.environ.get("ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC", "").strip()
+    if not raw:
+        return 30
+    try:
+        value = int(raw)
+    except ValueError:
+        return 30
+    return value if value > 0 else 30
+
+
+def headless_probe_invocation(provider: str) -> tuple[list[str], str]:
+    prompt = "ACP live preflight: reply with exactly ACP_READY. Do not write files."
+    if provider == "qwen":
+        return ["-p", prompt], ""
+    if provider == "claude":
+        return ["--output-format", "json", "--permission-mode", "bypassPermissions", "-p", prompt], ""
+    if provider == "codex":
+        return [
+            "exec",
+            "--json",
+            "--color",
+            "never",
+            "--skip-git-repo-check",
+            "--sandbox",
+            "danger-full-access",
+            "--ephemeral",
+            "-",
+        ], prompt
+    return [], ""
+
+
+def run_probe_command(command: str, args: list[str], repo_root: str, stdin_text: str = "") -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [command, *args],
+        cwd=repo_root or None,
+        env=os.environ.copy(),
+        input=stdin_text if stdin_text else None,
+        text=True,
+        capture_output=True,
+        timeout=probe_timeout_sec(),
+        check=False,
+    )
+
+
+def extract_observed_models(text: str) -> list[str]:
+    observed: list[str] = []
+    seen: set[str] = set()
+    candidates = [str(text or "")]
+    unescaped = candidates[0].replace(r"\"", '"').replace(r"\'", "'")
+    if unescaped != candidates[0]:
+        candidates.append(unescaped)
+    patterns = (
+        r"['\"]model['\"]\s*:\s*['\"]([^'\"]+)['\"]",
+        r"\bmodelUsage\.([A-Za-z0-9_.:/-]+)",
+        r"\bmodel\s*=\s*['\"]([^'\"]+)['\"]",
+    )
+    for pattern in patterns:
+        for candidate in candidates:
+            for match in re.finditer(pattern, candidate, flags=re.IGNORECASE):
+                value = match.group(1).strip()
+                key = value.lower()
+                if value and key not in seen:
+                    seen.add(key)
+                    observed.append(value)
+    return observed
+
+
+def _contains_any(value: str, needles: tuple[str, ...]) -> bool:
+    return any(needle in value for needle in needles)
+
+
+def provider_model_mismatch(provider: str, models: list[str]) -> str:
+    for model in models:
+        normalized = model.strip().lower()
+        if not normalized:
+            continue
+        if provider == "qwen":
+            if _contains_any(normalized, ("claude", "opus", "sonnet", "haiku", "kimi", "gpt", "codex", "openai")) and "qwen" not in normalized:
+                return f"qwen provider emitted non-qwen model telemetry: {model}"
+        elif provider == "claude":
+            if _contains_any(normalized, ("qwen", "kimi", "gpt", "codex", "openai")) and not _contains_any(normalized, ("claude", "opus", "sonnet", "haiku")):
+                return f"claude provider emitted non-claude model telemetry: {model}"
+        elif provider == "codex":
+            if _contains_any(normalized, ("qwen", "claude", "opus", "sonnet", "haiku", "kimi")) and not _contains_any(normalized, ("gpt", "codex", "openai")):
+                return f"codex provider emitted non-codex model telemetry: {model}"
+    return ""
+
+
 def probe_provider_readiness(
     provider: str,
     command: str,
@@ -110,17 +213,8 @@ def probe_provider_readiness(
             "reason": "",
         }
 
-    env = os.environ.copy()
     try:
-        completed = subprocess.run(
-            [command, "--version"],
-            cwd=repo_root or None,
-            env=env,
-            text=True,
-            capture_output=True,
-            timeout=15,
-            check=False,
-        )
+        completed = run_probe_command(command, ["--version"], repo_root)
     except FileNotFoundError:
         return {
             "provider": provider,
@@ -138,20 +232,7 @@ def probe_provider_readiness(
 
     combined = "\n".join(part for part in [version_line, completed.stdout, completed.stderr] if part).strip()
     normalized = combined.lower()
-    quota_markers = (
-        "permission_error",
-        "permission error",
-        "usage limit",
-        "quota exceeded",
-        "quota",
-        "rate limit",
-        "rate_limit",
-        "api error: 403",
-        "api error: 429",
-        "status code: 403",
-        "status code: 429",
-    )
-    if any(marker in normalized for marker in quota_markers):
+    if any(marker in normalized for marker in PROVIDER_UNAVAILABLE_MARKERS):
         return {
             "provider": provider,
             "status": "unavailable",
@@ -174,11 +255,62 @@ def probe_provider_readiness(
                 "subclass": "codex_model_requires_newer_cli",
                 "reason": blocker,
             }
+    probe_args, probe_stdin = headless_probe_invocation(provider)
+    if probe_args:
+        try:
+            headless_completed = run_probe_command(command, probe_args, repo_root, probe_stdin)
+        except subprocess.TimeoutExpired as exc:
+            return {
+                "provider": provider,
+                "status": "unavailable",
+                "subclass": "headless_probe_timeout",
+                "reason": f"{provider} headless probe timed out after {exc.timeout}s",
+            }
+        except Exception as exc:  # pragma: no cover - defensive shell failure path
+            return {
+                "provider": provider,
+                "status": "unavailable",
+                "subclass": "headless_probe_failed",
+                "reason": str(exc),
+            }
+        headless_combined = "\n".join(
+            part for part in [headless_completed.stdout, headless_completed.stderr] if part
+        ).strip()
+        if headless_combined:
+            combined = "\n".join(part for part in [combined, headless_combined] if part).strip()
+        normalized = combined.lower()
+        if any(marker in normalized for marker in PROVIDER_UNAVAILABLE_MARKERS):
+            return {
+                "provider": provider,
+                "status": "unavailable",
+                "subclass": "quota_or_permission",
+                "reason": combined or f"{provider} headless probe reported quota or permission failure",
+            }
+        if headless_completed.returncode != 0:
+            return {
+                "provider": provider,
+                "status": "unavailable",
+                "subclass": "headless_probe_failed",
+                "reason": combined or f"{provider} headless probe exited with code {headless_completed.returncode}",
+            }
+    observed_models = extract_observed_models(combined)
+    mismatch_reason = provider_model_mismatch(provider, observed_models)
+    if mismatch_reason:
+        return {
+            "provider": provider,
+            "status": "unavailable",
+            "subclass": "provider_model_mismatch",
+            "reason": mismatch_reason,
+            "observed_models": ",".join(observed_models),
+            "model_mismatch": "1",
+        }
     return {
         "provider": provider,
         "status": "ready",
         "subclass": "",
         "reason": combined,
+        "observed_models": ",".join(observed_models),
+        "model_mismatch": "0",
     }
 
 

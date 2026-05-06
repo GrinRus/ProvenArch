@@ -104,6 +104,46 @@ CODEX_RUNTIME_NOISE_PATTERNS = (
 )
 
 
+def extract_observed_models(text: str) -> list[str]:
+    observed: list[str] = []
+    seen: set[str] = set()
+    candidates = [str(text or "")]
+    unescaped = candidates[0].replace(r"\"", '"').replace(r"\'", "'")
+    if unescaped != candidates[0]:
+        candidates.append(unescaped)
+    for pattern in (
+        r"['\"]model['\"]\s*:\s*['\"]([^'\"]+)['\"]",
+        r"\bmodelUsage\.([A-Za-z0-9_.:/-]+)",
+        r"\bmodel\s*=\s*['\"]([^'\"]+)['\"]",
+    ):
+        for candidate in candidates:
+            for match in re.finditer(pattern, candidate, flags=re.IGNORECASE):
+                value = match.group(1).strip()
+                key = value.lower()
+                if value and key not in seen:
+                    seen.add(key)
+                    observed.append(value)
+    return observed
+
+
+def provider_model_mismatch(provider: str, models: list[str]) -> str:
+    normalized_provider = provider.strip().lower()
+    for model in models:
+        normalized = model.strip().lower()
+        if not normalized:
+            continue
+        if normalized_provider == "qwen-code":
+            if any(token in normalized for token in ("claude", "opus", "sonnet", "haiku", "kimi", "gpt", "codex", "openai")) and "qwen" not in normalized:
+                return f"provider={provider} observed_model={model}"
+        elif normalized_provider == "claude-code":
+            if any(token in normalized for token in ("qwen", "kimi", "gpt", "codex", "openai")) and not any(token in normalized for token in ("claude", "opus", "sonnet", "haiku")):
+                return f"provider={provider} observed_model={model}"
+        elif normalized_provider == "codex-code":
+            if any(token in normalized for token in ("qwen", "claude", "opus", "sonnet", "haiku", "kimi")) and not any(token in normalized for token in ("gpt", "codex", "openai")):
+                return f"provider={provider} observed_model={model}"
+    return ""
+
+
 def normalize_text(value: str) -> str:
     cleaned = value.strip().lower().replace("_", " ").replace("-", " ")
     return " ".join(cleaned.split())
@@ -1304,6 +1344,7 @@ def evaluate_run(
     parse_stages: set[str] = set()
     raw_outputs: set[str] = set()
     focused_recovery_reasons: set[str] = set()
+    provider_model_mismatches: set[str] = set()
     runtime_metadata_count = 0
     runtime_log_count = 0
     structured_runner_error_sources = [summary_path, full_run_log]
@@ -1328,6 +1369,10 @@ def evaluate_run(
             continue
         text = read_text_file(source_path)
         focused_recovery_reasons.update(extract_focused_recovery_reason_tags(text))
+        observed_models = extract_observed_models(text)
+        mismatch = provider_model_mismatch(provider, observed_models)
+        if mismatch:
+            provider_model_mismatches.add(f"{source_path}: {mismatch}")
         if not terminal_success:
             if text_has_runtime_contract_parse_signature(text):
                 runtime_contract_parse_failed_hit = True
@@ -1351,6 +1396,10 @@ def evaluate_run(
             continue
         text = read_text_file(source_path)
         focused_recovery_reasons.update(extract_focused_recovery_reason_tags(text))
+        observed_models = extract_observed_models(text)
+        mismatch = provider_model_mismatch(provider, observed_models)
+        if mismatch:
+            provider_model_mismatches.add(f"{source_path}: {mismatch}")
         if not terminal_success:
             if text_has_runtime_contract_parse_signature(text):
                 runtime_contract_parse_failed_hit = True
@@ -1371,6 +1420,10 @@ def evaluate_run(
             details.append(f"reliability/runner-errors -> raw_outputs={sorted(raw_outputs)[:5]}")
     if focused_recovery_reasons:
         details.append(f"reliability/focused-recovery -> reasons={sorted(focused_recovery_reasons)}")
+    if provider_model_mismatches:
+        issues.append("reliability:provider-model-mismatch")
+        for item in sorted(provider_model_mismatches)[:5]:
+            details.append(f"reliability/provider-model-mismatch -> {item}")
     if runtime_contract_failed_hit:
         issues.append("reliability:runtime-contract-failed")
     if runner_unavailable_hit:
@@ -1733,13 +1786,20 @@ def evaluate_run(
                     repo_mentions.update(collect_repo_mentions(payload))
                     edge_upserts += count_semantic_edges(payload)
                     cross_repo_finding_links += count_cross_repo_finding_links(payload)
-                if len(repo_mentions) < 2 or (edge_upserts < 1 and cross_repo_finding_links < 1):
+                missing_dimensions: list[str] = []
+                if len(repo_mentions) < 2:
+                    missing_dimensions.append("repo_mentions<2")
+                if edge_upserts < 1 and cross_repo_finding_links < 1:
+                    missing_dimensions.append("no_semantic_edges_or_cross_repo_finding_links")
+                if missing_dimensions:
                     semantic_hard_fail = True
                     issues.append("analysis:cross-repo-missing")
                     details.append(
                         f"analysis/cross-repo-missing -> run_dir={run_dir} expected_repo_count={expected_repo_count} "
                         f"repo_mentions={len(repo_mentions)} edge_upserts={edge_upserts} "
-                        f"cross_repo_finding_links={cross_repo_finding_links}"
+                        f"cross_repo_finding_links={cross_repo_finding_links} "
+                        f"missing_dimensions={','.join(missing_dimensions)} "
+                        "required_fix=add repo-specific citations plus at least one semantic edge or cross-repo finding/question with repo/path provenance"
                     )
     elif expected_repo_count >= 2:
         if terminal_runtime_provider_failure:

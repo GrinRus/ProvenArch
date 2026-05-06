@@ -1125,6 +1125,8 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertEqual(verdict["verdict"], "FAIL")
         record = verdict["records"][0]
         self.assertEqual(record.get("frontend", {}).get("frontend_qwen_status"), "skipped")
+        frontend_matrix = Path(record["artifacts"]["frontend_matrix_md"])
+        self.assertIn("snapshot_reports_missing=1", frontend_matrix.read_text(encoding="utf-8"))
         blockers = record.get("blocking_reasons", [])
         self.assertTrue(any(reason.startswith("runner_unavailable=1") for reason in blockers), blockers)
         self.assertFalse(

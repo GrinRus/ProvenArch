@@ -146,6 +146,7 @@ func draftArtifactRepairWriteCommand(task acpruntime.Task, manifestTarget string
 		"cat > " + shellSingleQuote(strings.TrimSpace(manifestTarget)) + " <<'ACP_DRAFT_MANIFEST_JSON'",
 		strings.TrimSpace(skeleton),
 		"ACP_DRAFT_MANIFEST_JSON",
+		"test -s " + shellSingleQuote(strings.TrimSpace(manifestTarget)),
 	}
 	var manifest runtimedrafts.Manifest
 	if err := json.Unmarshal([]byte(skeleton), &manifest); err != nil {
@@ -162,6 +163,7 @@ func draftArtifactRepairWriteCommand(task acpruntime.Task, manifestTarget string
 			"cat > "+shellSingleQuote(target)+" <<'ACP_DRAFT_FILE'",
 			draftArtifactRepairFileTemplate(task, output),
 			"ACP_DRAFT_FILE",
+			"test -s "+shellSingleQuote(target),
 		)
 	}
 	return strings.Join(lines, "\n")

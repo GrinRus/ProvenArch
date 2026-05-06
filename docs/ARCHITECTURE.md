@@ -167,7 +167,7 @@
    - `claude-code`, `qwen-code` и `codex-code` используют общий artifact-only process engine в `internal/runtime/providercommon`: launch, stdout/stderr capture, process-group kill, deadline handling, raw diagnostics, activity monitor, controlled stop и artifact validation находятся в одном lifecycle path; orchestrator вызывает этот lifecycle через internal `RuntimeTaskExecutor`, после чего отдельно выполняет persistence/apply/promotion decisions
    - provider-specific остаётся только в thin adapters: command/args/stdin/workdir/include dirs, unavailable markers, activity policy и recovery policy; stdout/stderr transcript сохраняется как diagnostics и не является semantic success payload
    - shared activity monitor отслеживает pipe activity вместе с мутациями `write_root`/`draft_final_root`; pre-artifact silent/no-artifact hangs bounded для всех live adapters, post-artifact stop разрешён только когда оба сигнала stale, валидные required artifacts уже можно принять без повторного provider call, а partial artifacts могут иметь более длинное provider policy grace window
-   - `qwen-code` policy дополнительно разрешает один fresh retry для missing/invalid artifacts; fully silent no-artifact path или silent retry exhaustion классифицируется как `runner_unavailable`, но partial authored artifacts без валидного manifest остаются `runtime_contract_failed`
+   - `qwen-code` и `claude-code` policies дополнительно разрешают один fresh retry для missing/invalid artifacts; fully silent no-artifact path или silent retry exhaustion классифицируется как `runner_unavailable`, но partial authored artifacts без валидного manifest остаются `runtime_contract_failed`
    - transcript outputs с provider transport/API failures (например `[API Error: ... SSL ...]`) не считаются generic `runtime_contract_failed`: runtime сохраняет raw stdout/stderr и классифицирует их как `runner_unavailable`
    - collect step не считается успешным, если после разрешённых focused collect recovery попыток `shard-pack-manifest.json` остаётся missing/invalid; такой случай поднимается как runtime contract failure (`runtime_contract_failed`) и hard pass невозможен. Fully silent no-artifact qwen path остаётся `runner_unavailable`
    - collect contract требует полного `semantic` block в `shard-pack-manifest.json` (`coverage/questions/entities/edges/findings`) и repo-specific citation surface; generic-only `cite.runtime-summary` допустим только вне multi-document refresh evidence collapse
@@ -193,7 +193,7 @@
      - `ACP_CLAUDE_CMD` (default `claude-code`)
      - `ACP_QWEN_CMD` (default `qwen`)
      - `ACP_CODEX_CMD` (default `codex`)
-   - live batch preflight records selected-provider readiness before deep matrix execution; known codex model/CLI mismatch (for example `gpt-5.5` on an old Codex CLI) is an operational blocker, not a product verdict
+   - live batch preflight records selected-provider readiness before deep matrix execution; known model/version/auth blockers, including codex model/CLI mismatch (for example `gpt-5.5` on an old Codex CLI) and cross-family provider/model telemetry mismatch, are operational blockers, not product verdicts
 
 6) **Workspace (`internal/workspace`)** *(implemented baseline)*
    - реализует/валидирует структуру central `arch-workspace` (Variant 2)
@@ -233,7 +233,7 @@
    - `GET /api/runtime/profile`: aggregate view `timeouts + execution + step_providers`
    - runtime profile PUT handlers используют общий internal patch service для validate/merge/prune/render/write/reopen, чтобы API route code не дублировал workspace manifest mutation lifecycle
    - active run не прерывается при изменении timeout settings; новые значения применяются к следующим run
-   - frontend live E2E differentiates explicit Playwright/backend failure (`playwright_failed`) from productive timeout (`active_run_timeout`), чтобы живой long-running run не выглядел как тот же failure class, что и terminal backend crash
+   - frontend live E2E differentiates explicit Playwright/backend failure (`playwright_failed`) from productive timeout (`active_run_timeout`), чтобы живой long-running run не выглядел как тот же failure class, что и terminal backend crash; init poll budget comes from effective runtime timeout profile and can follow `pipeline_timeout+30s` without a default fixed cap
 
 ## Agent Topology Artifacts (MVP)
 - `charter/cards/domains/<domain-id>.md`

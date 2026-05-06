@@ -126,6 +126,15 @@ require_cmd() {
   fi
 }
 
+provider_version_line() {
+  local cmd="$1"
+  local output
+  set +e
+  output="$("$cmd" --version 2>&1 | head -n1 | tr -d '\r')"
+  set -e
+  printf '%s' "$output"
+}
+
 run_status_file() {
   local run_dir="$1"
   printf '%s' "$run_dir/run-status.env"
@@ -1475,15 +1484,15 @@ QWEN_VERSION="not-selected"
 CODEX_VERSION="not-selected"
 if provider_selected "claude-code"; then
   CLAUDE_PATH="$(command -v "$ACP_CLAUDE_CMD_BIN")"
-  CLAUDE_VERSION="$("$ACP_CLAUDE_CMD_BIN" --version | head -n1 | tr -d '\r')"
+  CLAUDE_VERSION="$(provider_version_line "$ACP_CLAUDE_CMD_BIN")"
 fi
 if provider_selected "qwen-code"; then
   QWEN_PATH="$(command -v "$ACP_QWEN_CMD_BIN")"
-  QWEN_VERSION="$("$ACP_QWEN_CMD_BIN" --version | head -n1 | tr -d '\r')"
+  QWEN_VERSION="$(provider_version_line "$ACP_QWEN_CMD_BIN")"
 fi
 if provider_selected "codex-code"; then
   CODEX_PATH="$(command -v "$ACP_CODEX_CMD_BIN")"
-  CODEX_VERSION="$("$ACP_CODEX_CMD_BIN" --version | head -n1 | tr -d '\r')"
+  CODEX_VERSION="$(provider_version_line "$ACP_CODEX_CMD_BIN")"
 fi
 GENERATED_AT_UTC="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 preflight_meta_lines="$(python3 "$PROVENARCH_ROOT/scripts/write-batch-preflight.py" \

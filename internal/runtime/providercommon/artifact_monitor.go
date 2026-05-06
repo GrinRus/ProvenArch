@@ -19,11 +19,13 @@ import (
 )
 
 type artifactSnapshot struct {
-	ArtifactObserved bool
-	Valid            bool
-	State            string
-	AuthoredFiles    int
-	LastMutation     time.Time
+	ArtifactObserved       bool
+	Valid                  bool
+	State                  string
+	AuthoredFiles          int
+	WriteRootAuthoredFiles int
+	DraftRootAuthoredFiles int
+	LastMutation           time.Time
 }
 
 func (s artifactSnapshot) diagnosticFields() map[string]any {
@@ -32,6 +34,12 @@ func (s artifactSnapshot) diagnosticFields() map[string]any {
 		"artifact_observed":   s.ArtifactObserved,
 		"artifact_valid":      s.Valid,
 		"authored_file_count": s.AuthoredFiles,
+	}
+	if s.WriteRootAuthoredFiles > 0 {
+		fields["write_root_authored_file_count"] = s.WriteRootAuthoredFiles
+	}
+	if s.DraftRootAuthoredFiles > 0 || s.AuthoredFiles > 0 {
+		fields["draft_final_root_authored_file_count"] = s.DraftRootAuthoredFiles
 	}
 	if !s.LastMutation.IsZero() {
 		fields["last_write_root_mutation_at"] = s.LastMutation.UTC().Format(time.RFC3339)
@@ -378,8 +386,10 @@ func draftArtifactSnapshot(task acpruntime.Task) artifactSnapshot {
 			}
 		}
 	}
-	snapshot.AuthoredFiles += countFiles(task.WriteRoot, manifestFile)
-	snapshot.AuthoredFiles += countFilesRecursive(task.DraftFinalRoot, "")
+	snapshot.WriteRootAuthoredFiles = countFiles(task.WriteRoot, manifestFile)
+	snapshot.DraftRootAuthoredFiles = countFilesRecursive(task.DraftFinalRoot, "")
+	snapshot.AuthoredFiles += snapshot.WriteRootAuthoredFiles
+	snapshot.AuthoredFiles += snapshot.DraftRootAuthoredFiles
 	snapshot.LastMutation = latestMutation(snapshot.LastMutation, latestFileMutation(task.WriteRoot))
 	snapshot.LastMutation = latestMutation(snapshot.LastMutation, latestFileMutationRecursive(task.DraftFinalRoot))
 	if snapshot.AuthoredFiles > 0 {

@@ -60,7 +60,9 @@ func StepSpecificPolicy(stepID string) string {
 			`- Do NOT inspect reports/taskruns, prior shard-pack-manifest.json files, raw logs, or archive docs to infer collect manifest shape.`,
 			`- Every semantic provenance.evidence[] item must include non-empty repo and path values that resolve to real repository evidence.`,
 			`- Citation-only semantic evidence objects such as {"citation_id":"..."} are forbidden.`,
-			`- semantic.findings[*] must use title + description + provenance; do NOT use summary as a compatibility alias.`,
+			`- semantic.questions[*] must use id + text; do NOT omit stable question ids.`,
+			`- semantic.findings[*] must use id + severity + title + description + provenance; do NOT use summary as a compatibility alias.`,
+			`- If this shard includes evidence from multiple repositories, encode at least one semantic edge, finding, or question that names the cross-repo relationship/gap.`,
 		}, "\n")
 	case "refresh.step1.collect":
 		return strings.Join([]string{
@@ -81,6 +83,9 @@ func StepSpecificPolicy(stepID string) string {
 			`- Citation-only semantic evidence objects such as {"citation_id":"..."} are forbidden.`,
 			`- Do NOT introduce unrelated incident domains (for example bidding/tender/power-system topics) unless explicitly present in repository evidence.`,
 			`- If evidence is incomplete, capture gap via coverage.missing instead of synthetic placeholder entities.`,
+			`- semantic.questions[*] must use id + text; do NOT omit stable question ids.`,
+			`- semantic.findings[*] must use id + severity + title + description + provenance; do NOT use summary as a compatibility alias.`,
+			`- If refresh evidence spans multiple repositories, encode at least one semantic edge, finding, or question that names the cross-repo relationship/gap.`,
 			`- Include at least one question and at least three items in coverage.missing.`,
 		}, "\n")
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
@@ -185,7 +190,8 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Do not exit after writing markdown only; every collect shard must finish with a valid shard-pack-manifest.json.`,
 			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and semantic snapshot.`,
 			`- In shard-pack-manifest.json, semantic MUST include coverage, questions, entities, edges, and findings.`,
-			`- Use only canonical collect vocabulary: semantic.coverage.observed, semantic.questions[*].text, semantic.edges[*].type, and object-shaped provenance blocks.`,
+			`- Use only canonical collect vocabulary: semantic.coverage.observed, semantic.questions[*].id + semantic.questions[*].text, semantic.edges[*].type, and object-shaped provenance blocks.`,
+			`- Every semantic.questions[] item must include id and text; every semantic.findings[] item must include id, severity, title, and provenance.`,
 			`- Do NOT emit semantic payloads on stdout; keep semantic only inside shard-pack-manifest.json.`,
 			`- You may be flexible in document structure, but promotion and rendering depend on manifest citations/topics remaining accurate.`,
 			`- After the first filesystem write inside write_root, stop broad repository exploration; only minimal manifest/JSON repair is allowed afterwards.`,
@@ -212,6 +218,7 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 		lines = append(lines,
 			`- Do NOT collapse a multi-document refresh surface to one generic "cite.runtime-summary" citation when repository evidence exists.`,
 			`- Preserve repo-specific citations in shard-pack-manifest.json whenever repository files support them.`,
+			`- For multi-repo evidence, include at least one semantic edge or a finding/question whose provenance/evidence names the related repositories.`,
 		)
 	case "init.step3.findings", "refresh.step3.findings":
 		lines = append(lines,
@@ -647,11 +654,12 @@ func CollectArtifactRepairHints(initialProblem string) []string {
 	lines := []string{
 		`- Rebuild shard-pack-manifest.json to the canonical ACP schema before exiting successfully.`,
 		`- In shard-pack-manifest.json, semantic.coverage/questions/entities/edges/findings are all required; questions/entities/edges/findings must be arrays even when empty.`,
+		`- semantic.questions[*] must include id and text; do not emit question-only aliases.`,
 		`- documents[].path MUST stay relative to artifact_root only; valid example: "iac-overview.md". Invalid examples: "reports/taskruns/run-1/staging/shards/bank-of-anthos-iac/iac-overview.md", "charter/overview.md".`,
 		`- Do NOT emit top-level semantic payloads on stdout; keep semantic only inside shard-pack-manifest.json.`,
 		`- semantic.entities[*] MUST remain full entity objects with provenance included; do not drop entities[*].provenance during repair.`,
 		`- semantic.edges[*] MUST remain objects with canonical keys type/from/to; do not use kind/source/target aliases.`,
-		`- semantic.findings[*] MUST remain objects and each finding MUST include title; never replace findings with plain strings or bullet text.`,
+		`- semantic.findings[*] MUST remain objects and each finding MUST include id, severity, title, and provenance; never replace findings with plain strings or bullet text.`,
 		`- semantic.questions/entities/edges/findings must stay object-only arrays; booleans, nulls, and string-valued findings are invalid.`,
 		`- Do NOT leave claim_ids empty for cited repository evidence; preserve concrete repo-backed claim ids whenever the evidence supports them.`,
 		`- Repair mode is artifact-only: do not invent extra repository file reads/writes after authored docs already exist.`,

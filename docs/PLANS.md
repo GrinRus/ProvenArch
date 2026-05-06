@@ -56,6 +56,62 @@ EP-YYYYMMDD-<slug>
 
 ## Active Plans
 ### Plan ID
+EP-20260506-regres-small-live-bugfix-matrix
+
+### Context
+Live `regres fast` small на `qwen-code` и `claude-code` от 2026-05-06 дал подтверждённые runtime/product blockers:
+`regres-fast-bank-openedx-20260506T052600Z` и `regres-fast-openstack-20260506T112333Z`.
+Основные failure classes: silent no-artifact provider stalls, `runtime_contract_failed` на draft repair, incomplete collect semantic shape,
+`analysis:cross-repo-missing`, productive frontend `active_run_timeout`, provider/model attribution drift и dependent frontend `snapshot_reports_missing`.
+
+### Goals (must have)
+- [x] Усилить selected-provider readiness и unavailable diagnostics для `qwen-code` без обхода artifact-only success contract
+- [x] Привести `claude-code` missing/no-artifact recovery lane к shared provider behavior, сохранив malformed/partial artifacts как `runtime_contract_failed`
+- [x] Ужесточить draft artifact repair: manifest + files под `draft_final_root`, absolute `test -s` checks, validation remains final authority
+- [x] Синхронизировать collect prompt checklist/repair hints с canonical semantic required fields
+- [x] Усилить multi-repo semantic prompt/report details для `analysis:cross-repo-missing`
+- [x] Согласовать frontend init timeout с effective timeout profile и сохранить `active_run_timeout` как отдельный reason
+- [x] Добавить provider/model audit diagnostics в runtime/preflight/reporting
+- [x] Закрепить dependent `snapshot_reports_missing` after backend terminal failure как skipped/blocked evidence
+- [ ] Выполнить trusted-machine live rerun через direct `scripts/full-run-batch-matrix.sh` на clean committed workspace
+
+### Non-goals
+- [x] Не менять public provider list, workspace schema, release verdict JSON shape или canonical matrix files
+- [x] Не добавлять wrapper поверх `scripts/full-run-batch-matrix.sh`
+- [x] Не синтезировать provider artifacts ACP-side и не ослаблять runtime validators
+- [x] Не чинить `codex-code` runtime behavior вне provider/model audit surface
+
+### Approach
+1) Обновить shared provider policies/classification и thin adapters для bounded silent missing-artifact recovery.
+2) Harden focused draft repair prompt/write-set diagnostics so stdout success never overrides missing files.
+3) Update collect semantic instructions/checklists and batch report details without schema changes.
+4) Update frontend timeout guard to consume effective matrix/API timeout budget without hiding productive timeout failures.
+5) Add provider/model mismatch detection in preflight/report/runtime log diagnostics.
+6) Add targeted Go/Python regression tests, sync runbook/testing docs, then run DoD checks.
+
+### Files expected to change
+- `internal/runtime/{providercommon,promptcontract,steppolicy,qwencode,claudecode}/*`
+- `internal/artifactquality/policy.go`
+- `internal/orchestrator/runtime_logging.go`
+- `scripts/{write-batch-preflight.py,e2e_batch_report.py,frontend-live-e2e.sh,full-run-batch.sh}`
+- `scripts/tests/*`, `docs/RELEASE_LIVE_E2E_RUNBOOK.md`, `docs/TESTING_STRATEGY.md`
+
+### Acceptance criteria
+- [x] Targeted Go tests cover silent no-artifact, partial/malformed artifacts, draft repair missing/valid files and provider/model log audit
+- [x] Python tests cover deeper preflight readiness/model mismatch, cross-repo-missing details, frontend dependent skip and timeout budget behavior
+- [x] `make contracts`, `make test`, `make lint`, `make build` complete or any blocker is documented
+- [ ] Trusted-machine rerun uses only direct `scripts/full-run-batch-matrix.sh`; expected verdict has no `runtime_contract_failed`, `runner_unavailable`, `semantic_hard_fail`, or independent frontend failure for the fixed scenarios
+
+### Risks
+- Provider preflight can become too expensive if it performs real model calls too often; keep it bounded and selected-provider scoped.
+- Overbroad provider/model mismatch matching could flag benign CLI telemetry; only known cross-family model tokens should block.
+- Timeout budget increases can hide real UI hangs; keep `active_run_timeout` explicit when backend remains productive but non-terminal.
+
+### Progress log
+- 2026-05-06: Plan opened from live matrix triage and bug-fix matrix.
+- 2026-05-06: Local implementation complete; targeted Go/Python regressions and DoD checks passed. Live rerun remains pending for a clean trusted-machine workspace.
+
+### Plan ID
 EP-20260502-qwen-codex-regres-fast-live-hardening
 
 ### Context
