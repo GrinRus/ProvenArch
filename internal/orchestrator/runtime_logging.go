@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
@@ -32,29 +33,116 @@ func (e *pipelineExecution) logError(stepID string, domainID string, message str
 	e.logRunEvent(RunLogLevelError, stepID, domainID, message, fields)
 }
 
-func (e *pipelineExecution) logRuntimeOutput(stepID string, domainID string, chunk acpruntime.OutputChunk) {
+func (e *pipelineExecution) logRuntimeOutput(stepID string, domainID string, provider acpruntime.Provider, chunk acpruntime.OutputChunk) {
 	message := strings.TrimRight(chunk.Text, "\r\n")
 	if strings.TrimSpace(message) == "" {
 		return
 	}
+	fields := map[string]any{}
+	level := RunLogLevelInfo
+	if chunk.Truncated {
+		fields["output_truncated"] = true
+		fields["stream"] = strings.TrimSpace(string(chunk.Stream))
+	}
+	observedModels := observedModelIDs(message)
+	if len(observedModels) > 0 {
+		fields["observed_models"] = observedModels
+		if providerModelMismatch(provider, observedModels) {
+			level = RunLogLevelWarning
+			fields["provider"] = string(provider)
+			fields["provider_model_mismatch"] = true
+			e.addWarning("runtime provider/model mismatch: provider " + string(provider) + " emitted model telemetry " + strings.Join(observedModels, ","))
+		}
+	}
 	entry := RunLogEntry{
 		Timestamp: e.clock().UTC(),
-		Level:     RunLogLevelInfo,
+		Level:     level,
 		Kind:      RunLogKindRuntimeOutput,
 		Stream:    strings.TrimSpace(string(chunk.Stream)),
 		StepID:    strings.TrimSpace(stepID),
 		DomainID:  strings.TrimSpace(domainID),
 		Message:   message,
 	}
-	if chunk.Truncated {
-		entry.Fields = map[string]any{
-			"output_truncated": true,
-			"stream":           entry.Stream,
-		}
+	if len(fields) > 0 {
+		entry.Fields = fields
 	}
 	if e.onLog != nil {
 		e.onLog(entry)
 	}
+}
+
+var (
+	jsonModelPattern       = regexp.MustCompile(`(?i)['"]model['"]\s*:\s*['"]([^'"]+)['"]`)
+	modelUsagePattern      = regexp.MustCompile(`(?i)\bmodelUsage\.([A-Za-z0-9_.:/-]+)`)
+	modelAssignmentPattern = regexp.MustCompile(`(?i)\bmodel\s*=\s*['"]([^'"]+)['"]`)
+)
+
+func observedModelIDs(text string) []string {
+	seen := map[string]struct{}{}
+	models := []string{}
+	candidates := []string{text}
+	unescaped := strings.NewReplacer(`\"`, `"`, `\'`, `'`).Replace(text)
+	if unescaped != text {
+		candidates = append(candidates, unescaped)
+	}
+	for _, pattern := range []*regexp.Regexp{jsonModelPattern, modelUsagePattern, modelAssignmentPattern} {
+		for _, candidate := range candidates {
+			for _, match := range pattern.FindAllStringSubmatch(candidate, -1) {
+				if len(match) < 2 {
+					continue
+				}
+				model := strings.TrimSpace(match[1])
+				if model == "" {
+					continue
+				}
+				key := strings.ToLower(model)
+				if _, exists := seen[key]; exists {
+					continue
+				}
+				seen[key] = struct{}{}
+				models = append(models, model)
+			}
+		}
+	}
+	return models
+}
+
+func providerModelMismatch(provider acpruntime.Provider, models []string) bool {
+	for _, model := range models {
+		if modelConflictsWithProvider(provider, model) {
+			return true
+		}
+	}
+	return false
+}
+
+func modelConflictsWithProvider(provider acpruntime.Provider, model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	if normalized == "" {
+		return false
+	}
+	switch provider {
+	case acpruntime.ProviderQwenCode:
+		return containsAny(normalized, "claude", "opus", "sonnet", "haiku", "kimi", "gpt", "codex", "openai") &&
+			!strings.Contains(normalized, "qwen")
+	case acpruntime.ProviderClaudeCode:
+		return containsAny(normalized, "qwen", "kimi", "gpt", "codex", "openai") &&
+			!containsAny(normalized, "claude", "opus", "sonnet", "haiku")
+	case acpruntime.ProviderCodexCode:
+		return containsAny(normalized, "qwen", "claude", "opus", "sonnet", "haiku", "kimi") &&
+			!containsAny(normalized, "gpt", "codex", "openai")
+	default:
+		return false
+	}
+}
+
+func containsAny(value string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(value, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *pipelineExecution) logRunEvent(level RunLogLevel, stepID string, domainID string, message string, fields map[string]any) {

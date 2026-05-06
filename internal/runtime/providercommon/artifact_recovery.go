@@ -327,10 +327,12 @@ func recoverDraftArtifactRepair(ctx context.Context, task acpruntime.Task, adapt
 		if errors.As(repairErr, &repairStalled) {
 			if policy.AcceptValidArtifactsAfterStop {
 				if err := adapter.ValidateArtifacts(task); err == nil {
+					emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "completed_after_controlled_stop", runtimeArtifactSnapshot(task))
 					emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "draft_artifact_repair", repairStalled.Diagnostic.StallPhase)
 					return true, repairResult, nil
 				}
 			}
+			emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "stalled", runtimeArtifactSnapshot(task))
 			emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_repair", repairStalled.Diagnostic, repairErr)
 			if shouldClassifySilentRetryExhaustionUnavailable(policy, task, repairResult) {
 				return true, acpruntime.Result{}, wrapProviderUnavailable(adapter, task, "draft_artifact_repair", repairResult, "provider unavailable during draft artifact repair", repairErr)
@@ -340,9 +342,11 @@ func recoverDraftArtifactRepair(ctx context.Context, task acpruntime.Task, adapt
 		return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, repairResult, repairErr)
 	}
 	if err := adapter.ValidateArtifacts(task); err != nil {
+		emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "invalid", runtimeArtifactSnapshot(task))
 		emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_repair", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "draft_artifact_repair", "draft artifact repair did not produce valid draft artifact contract", err)
 	}
+	emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "completed", runtimeArtifactSnapshot(task))
 	emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "draft_artifact_repair", "")
 	return true, repairResult, nil
 }

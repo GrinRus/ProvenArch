@@ -2296,6 +2296,102 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertFalse(result.semantic_hard_fail)
         self.assertTrue(result.hard_pass)
 
+    def test_python_report_explains_cross_repo_missing_dimensions(self) -> None:
+        run_dir = self.root / "run-multi-repo-no-cross-links"
+        self._create_passed_run_dir_with_raw_runner_noise(run_dir)
+
+        declared = []
+        repo_names = ["course-discovery", "credentials", "devstack"]
+        for repo_name in repo_names:
+            repo_root = run_dir / "repos" / repo_name
+            write_text(repo_root / "README.md", f"# {repo_name}\n")
+            declared.append({"name": repo_name, "source": "path", "path": str(repo_root)})
+
+        manifest_path = (
+            run_dir
+            / "snapshots/refresh-run/reports/taskruns/refresh-run/staging/shards/domain-a/shard-pack-manifest.json"
+        )
+        write_json(
+            manifest_path,
+            {
+                "version": 1,
+                "run_id": "refresh-run",
+                "step_id": "refresh.step1.collect",
+                "shard_id": "domain-a",
+                "domain_id": "domain-a",
+                "agent_role": "shard-analyst",
+                "artifact_root": "reports/taskruns/refresh-run/staging/shards/domain-a",
+                "repo_scopes": repo_names,
+                "path_scopes": ["src"],
+                "documents": [{"id": "doc.arch", "title": "Architecture", "path": "architecture.md", "kind": "report"}],
+                "citations": [
+                    {
+                        "id": f"cite.{repo_name}",
+                        "repo": repo_name,
+                        "path": "README.md",
+                        "claim_ids": [f"claim.{repo_name}"],
+                        "document_ids": ["doc.arch"],
+                    }
+                    for repo_name in repo_names
+                ],
+                "semantic": {
+                    "coverage": {"observed": repo_names, "missing": [], "notes": []},
+                    "questions": [],
+                    "entities": [],
+                    "edges": [],
+                    "findings": [],
+                },
+            },
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={
+                "declared_repos_meta": {
+                    "expected_repo_count": 3,
+                    "profile_id": "multi-path",
+                    "profile_source_kind": "path",
+                    "declared_repos": declared,
+                }
+            },
+            classification_row={
+                "failure_class": "none",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "0",
+            },
+        )
+
+        self.assertIn("analysis:cross-repo-missing", result.issues)
+        self.assertTrue(result.semantic_hard_fail)
+        self.assertTrue(any("missing_dimensions=no_semantic_edges_or_cross_repo_finding_links" in detail for detail in result.issue_details))
+
+    def test_python_report_flags_provider_model_mismatch_diagnostics(self) -> None:
+        run_dir = self.root / "run-provider-model-mismatch"
+        self._create_passed_run_dir_with_raw_runner_noise(run_dir)
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            '{"kind":"runtime_output","stream":"stdout","message":"{\\"model\\":\\"claude-opus-4-5-20251101\\"}"}\n',
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "none",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "0",
+            },
+        )
+
+        self.assertIn("reliability:provider-model-mismatch", result.issues)
+        self.assertTrue(any("claude-opus" in detail for detail in result.issue_details))
+
     def test_python_report_treats_incomplete_reports_as_triage_only_not_empty_analysis(self) -> None:
         run_dir = self.root / "run-incomplete"
         self._create_incomplete_fixture_run_dir(run_dir)

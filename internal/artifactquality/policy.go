@@ -18,11 +18,13 @@ func CollectManifestContractLines(artifactRoot string) []string {
 		`- Build claim_ids as a semantic stem plus shard slug (example: claim.owner.<shard-slug>), and add a deterministic numeric suffix when a shard-local collision remains.`,
 		`- citations[].document_ids MUST point back to ids that exist in documents[].id.`,
 		`- semantic MUST include coverage, questions, entities, edges, and findings; questions/entities/edges/findings MUST be arrays even when empty.`,
+		`- semantic.questions[*] MUST include id and text; do NOT omit stable question ids.`,
 		`- semantic.entities[*] MUST remain full entity objects with provenance; do not drop provenance during repair or retry flows.`,
 		`- semantic.findings[*] MUST remain structured finding objects; never collapse findings to strings.`,
+		`- semantic.findings[*] MUST include id, severity, title, and provenance; severity must be one of the canonical schema values.`,
 		`- Every semantic.entities[*].provenance.evidence[*], semantic.edges[*].provenance.evidence[*], and semantic.findings[*].provenance.evidence[*] item MUST include non-empty repo and path values that point to concrete repository evidence.`,
 		`- Citation-only semantic evidence objects are forbidden; do NOT use {"citation_id":"..."} without repo/path inside semantic provenance.evidence[].`,
-		`- semantic.findings[*] MUST use title + description + provenance; do NOT use summary as a compatibility alias.`,
+		`- semantic.findings[*] MUST use id + severity + title + description + provenance; do NOT use summary as a compatibility alias.`,
 		`- canonical_path MUST be a stable promoted path under reports/as-is, reports/findings, reports/coverage, reports/agent-outputs, reports/diagrams, or proposals.`,
 		`- Do NOT use reports/taskruns/... staging paths as canonical_path.`,
 	}
@@ -41,11 +43,11 @@ func CollectManifestLegacyHygieneLines() []string {
 	return []string{
 		`- Treat schemas/*, docs/spec/*, and the enforced collect prompt contract as the only schema source of truth; do NOT infer manifest shape from prior reports/taskruns artifacts, raw logs, or archived examples.`,
 		`- semantic.coverage MUST use observed/missing/notes; do NOT use covered_topics or alternate coverage keys.`,
-		`- semantic.questions[*] MUST use text; do NOT use question or other alias keys.`,
+		`- semantic.questions[*] MUST use id + text; do NOT use question or other alias keys.`,
 		`- semantic.edges[*] MUST use canonical keys id/type/from/to/provenance; do NOT use relation/source/target aliases.`,
 		`- semantic.entities[*].provenance, semantic.edges[*].provenance, and semantic.findings[*].provenance MUST be objects; do NOT use arrays of legacy citation records.`,
 		`- provenance.confidence values MUST stay numeric; string confidence values are invalid.`,
-		`- semantic.findings[*] MUST keep evidence inside provenance.evidence; do NOT use evidence_citation_ids or legacy inference/summary compatibility fields.`,
+		`- semantic.findings[*] MUST keep id/severity/title/provenance and evidence inside provenance.evidence; do NOT use evidence_citation_ids or legacy inference/summary compatibility fields.`,
 		`- semantic provenance.evidence[*] objects MUST carry repo/path; citation-only evidence objects and empty repo/path strings are invalid legacy drift.`,
 		`- Do NOT add top-level step_contract, compatibility, or any alternate semantic wrapper fields to shard-pack-manifest.json.`,
 	}
@@ -57,7 +59,8 @@ func CompactCollectManifestValidationChecklist(artifactRoot string) []string {
 		`- version must be integer 1.`,
 		`- documents[] items use only id, kind, title, path, canonical_path, topics, citation_ids; documents[].path is artifact_root-relative.`,
 		`- citations[] items use id, repo, path, claim_ids, document_ids; every documents[].citation_ids value references a citations[].id.`,
-		`- semantic must include coverage, questions, entities, edges, findings; use coverage.observed/missing/notes and questions[].text.`,
+		`- semantic must include coverage, questions, entities, edges, findings; use coverage.observed/missing/notes and questions[].id + questions[].text.`,
+		`- semantic.findings[] items, when present, must include id, severity, title, and provenance.`,
 		`- semantic provenance/evidence objects, when present, must include concrete repo/path values; citation-only semantic evidence is forbidden.`,
 		`- forbidden legacy aliases: step_contract, compatibility, covered_topics, question, relation, source, target, evidence_citation_ids, string confidence, summary as finding alias.`,
 	}

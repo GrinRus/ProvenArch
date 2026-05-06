@@ -883,6 +883,9 @@ func TestDraftArtifactSnapshotObservesNestedDraftFinalFiles(t *testing.T) {
 	if snapshot.AuthoredFiles != 1 {
 		t.Fatalf("authored draft files = %d, want 1: %#v", snapshot.AuthoredFiles, snapshot)
 	}
+	if snapshot.WriteRootAuthoredFiles != 0 || snapshot.DraftRootAuthoredFiles != 1 {
+		t.Fatalf("expected split draft counts write_root=0 draft_final_root=1, got %#v", snapshot)
+	}
 	if snapshot.LastMutation.IsZero() {
 		t.Fatalf("expected nested draft final file to update last mutation: %#v", snapshot)
 	}

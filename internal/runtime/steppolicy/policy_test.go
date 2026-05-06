@@ -424,6 +424,28 @@ func TestDraftArtifactRepairHintsBanLegacyRepairSurface(t *testing.T) {
 	}
 }
 
+func TestCollectPolicyRequiresStableQuestionAndFindingFields(t *testing.T) {
+	t.Parallel()
+
+	policy := StepSpecificPolicy("refresh.step1.collect") + "\n" + DocFirstFilesystemPolicy(acpruntime.Task{
+		StepID:       "refresh.step1.collect",
+		WriteRoot:    "/tmp/write-root",
+		ArtifactRoot: "reports/taskruns/run-1/staging/shards/openedx",
+		RepoScopes:   []string{"openedx-platform", "frontend-platform"},
+		PathScopes:   []string{"openedx", "frontend"},
+	})
+	for _, needle := range []string{
+		`semantic.questions[*] must use id + text`,
+		`semantic.findings[*] must use id + severity + title + description + provenance`,
+		`If refresh evidence spans multiple repositories, encode at least one semantic edge, finding, or question`,
+		`For multi-repo evidence, include at least one semantic edge or a finding/question`,
+	} {
+		if !strings.Contains(policy, needle) {
+			t.Fatalf("expected collect policy to contain %q, got:\n%s", needle, policy)
+		}
+	}
+}
+
 func TestWorkspacePromptPackSectionLoadsEditableContentLayer(t *testing.T) {
 	t.Parallel()
 

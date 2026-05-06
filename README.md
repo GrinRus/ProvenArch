@@ -361,7 +361,7 @@ Root entrypoints:
 - `scripts/full-run-ai-advent.sh` — полный локальный cycle over `TARGET_REPOS_FILE`
 - `scripts/full-run-batch.sh` — batch re-audit + frontend live e2e
 - `scripts/full-run-batch-matrix.sh` — multi-profile matrix orchestrator; пишет durable profile status + per-batch inventory с key log/report paths и bounded raw-output refs
-- `scripts/frontend-live-e2e.sh` — локальный UI smoke для выбранного provider; различает generic `playwright_failed` и `active_run_timeout`, если run остаётся продуктивным, но не успевает дойти до `succeeded`
+- `scripts/frontend-live-e2e.sh` — локальный UI smoke для выбранного provider; различает generic `playwright_failed` и `active_run_timeout`, если run остаётся продуктивным, но не успевает дойти до `succeeded`; init poll budget берётся из effective runtime timeouts без default fixed cap
 - generic capacity/429 сигналы из `codex` plugin/Cloudflare/state-db noise не считаются root-cause `runner_unavailable`, а raw provider text не поднимает secondary `runner_unavailable` только из-за упоминания имени категории без реального availability signal
 - terminal-success backend runs (`result=passed`, `quality_gates=passed`, `run-status.env state=completed process_exit=0`) не получают failure class из recovered raw provider diagnostics
 - multi-repo report gate считает cross-repo signal по explicit `semantic.edges[]` или по `citations[].repo` coverage вместе с multi-repo finding provenance, чтобы не помечать schema-valid focused recovery outputs как `analysis:cross-repo-missing`
@@ -490,7 +490,7 @@ Docs-first semantic rules:
 Persisted runtime execution metadata:
 - сериализуется как internal `runtime-execution.json` payload рядом с taskrun artifacts
 - используется для replay/recovery, taskrun diagnostics и raw-output linking
-- live headless providers (`claude-code`, `qwen-code`, `codex-code`) проходят через общий artifact-only process engine; provider adapters задают только CLI invocation и explicit activity/recovery policy
+- live headless providers (`claude-code`, `qwen-code`, `codex-code`) проходят через общий artifact-only process engine; provider adapters задают только CLI invocation и explicit activity/recovery policy; selected-provider preflight/reporting дополнительно фиксируют auth/quota/model readiness и provider/model attribution drift
 - `qwen-code` adapter invocation передаёт artifact prompt только через CLI `-p` без JSON task stdin; custom qwen args нормализуются так, чтобы не подменять artifact prompt. `claude-code`/`codex-code` сохраняют свои transport-specific stdin/machine-mode surfaces
 - selected-provider preflight фиксирует command/model/version readiness до deep live run; такие blockers являются operational, не product verdict
 - provider/API transport transcripts (например `[API Error: ... SSL ...]`) классифицируются как `runner_unavailable` с обязательным сохранением raw stdout/stderr artifacts

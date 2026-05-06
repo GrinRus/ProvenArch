@@ -274,12 +274,12 @@ Implemented additional jobs:
 - `scripts/full-run-batch.sh` — canonical live batch + frontend live e2e:
   - canonical input: `TARGET_REPOS_FILE`
   - direct-only runtime commands: `claude`, `qwen`, `codex`
-  - selected-provider readiness записывается в `preflight.json`; known model/version/auth blockers должны завершаться operational preflight failure до deep run
+  - selected-provider readiness записывается в `preflight.json`; version + bounded headless probe ловят missing binary, auth/quota/model blockers и provider/model mismatch до deep run
   - backend quality source-of-truth: только `snapshots/<run_id>/reports/*`
-  - hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`, `analysis:cross-repo-missing`; cross-repo presence can be satisfied by explicit `semantic.edges[]` or by repo-wide `citations[].repo` coverage plus findings with multi-repo provenance evidence
+  - hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`, `analysis:cross-repo-missing`; cross-repo presence can be satisfied by explicit `semantic.edges[]` or by repo-wide `citations[].repo` coverage plus findings/questions with multi-repo provenance evidence, and report details must name the missing dimension
   - frontend smoke работает на отдельной `frontend-workspace` копии run snapshot и не мутирует backend baseline; `snapshot_reports_missing` после terminal backend failure записывается как dependent skipped frontend status, а не independent frontend regression
   - terminal-success backend runs (`result=passed`, `quality_gates=passed`, `run-status.env state=completed process_exit=0`) остаются `failure_class=none`, даже если raw provider logs содержат recovered `runner_unavailable`/429 diagnostics
-  - batch report evidence tests проверяют, что `collect_partial_shard_failures`, focused recovery exhaustion/write-set violations и missing headless rows with runtime logs surfaced as per-run issue details, а не теряются за aggregate failure class
+  - batch report evidence tests проверяют, что `collect_partial_shard_failures`, focused recovery exhaustion/write-set violations, provider/model mismatch и missing headless rows with runtime logs surfaced as per-run issue details, а не теряются за aggregate failure class
 - `scripts/full-run-batch-matrix.sh` — официальный local trusted-machine harness:
   - canonical input: `E2E_MATRIX_FILE`
   - approved profile ids: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
@@ -294,6 +294,7 @@ Implemented additional jobs:
   - canonical toggles: `UI_E2E_EXPECTED_REPO_COUNT`, `UI_E2E_SCENARIO=init-inspect|cancel-refresh`, `UI_E2E_OUTPUT_DIR`
   - cancel flow остаётся guarded сценарием с явным `run_canceled`
   - init inspect обязан различать `playwright_failed` и `active_run_timeout`, если run остаётся продуктивным, но не доходит до `succeeded` в UI poll budget
+  - init poll budget берётся из effective runtime timeouts and may be raised to `ACP_PIPELINE_TIMEOUT_SEC+30`; fixed cap is opt-in diagnostic only
 - Этот документ фиксирует policy, invariants и required gates; пошаговые live/release cookbook команды не дублируются здесь.
 
 ## 8) Acceptance для testing strategy

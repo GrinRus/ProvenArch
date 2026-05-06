@@ -78,7 +78,7 @@ func (executor defaultRuntimeTaskExecutor) RunRuntimeTask(ctx context.Context, r
 		PathScopes:        pathScopes,
 		StartedAtUTC:      e.clock().UTC(),
 		OnOutput: func(chunk acpruntime.OutputChunk) {
-			e.logRuntimeOutput(stepID, domainID, chunk)
+			e.logRuntimeOutput(stepID, domainID, resolvedProvider, chunk)
 		},
 		OnDiagnostic: func(event acpruntime.DiagnosticEvent) {
 			e.logInfo(stepID, domainID, event.Message, event.Fields)

@@ -20,7 +20,7 @@ UI_E2E_CANCEL_STUB_SLEEP_SEC="${UI_E2E_CANCEL_STUB_SLEEP_SEC:-90}"
 UI_INIT_POLL_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-}"
 UI_CANCEL_POLL_TIMEOUT_SEC="${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-}"
 UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC="${UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC:-30}"
-UI_E2E_INIT_TIMEOUT_CAP_SEC="${UI_E2E_INIT_TIMEOUT_CAP_SEC:-1800}"
+UI_E2E_INIT_TIMEOUT_CAP_SEC="${UI_E2E_INIT_TIMEOUT_CAP_SEC:-0}"
 UI_E2E_HEADED="${UI_E2E_HEADED:-0}"
 FRONTEND_RESULT_FILENAME="${FRONTEND_RESULT_FILENAME:-frontend-e2e-result.json}"
 
@@ -288,13 +288,16 @@ resolve_ui_poll_timeouts
 if [[ "$UI_E2E_SCENARIO" == "init-inspect" ]]; then
   init_timeout_sec="$(parse_positive_int_or_die "$UI_INIT_POLL_TIMEOUT_SEC" "ACP_UI_INIT_POLL_TIMEOUT_SEC")"
   pipeline_timeout_sec=0
-  init_timeout_cap_sec="$(parse_positive_int_or_die "$UI_E2E_INIT_TIMEOUT_CAP_SEC" "UI_E2E_INIT_TIMEOUT_CAP_SEC")"
+  if [[ ! "$UI_E2E_INIT_TIMEOUT_CAP_SEC" =~ ^[0-9]+$ ]]; then
+    die "UI_E2E_INIT_TIMEOUT_CAP_SEC must be a non-negative integer, got '$UI_E2E_INIT_TIMEOUT_CAP_SEC'"
+  fi
+  init_timeout_cap_sec=$((10#$UI_E2E_INIT_TIMEOUT_CAP_SEC))
   if [[ -n "${ACP_PIPELINE_TIMEOUT_SEC:-}" ]]; then
     pipeline_timeout_sec="$(parse_positive_int_or_die "$ACP_PIPELINE_TIMEOUT_SEC" "ACP_PIPELINE_TIMEOUT_SEC")"
   fi
   if (( pipeline_timeout_sec > 0 )); then
     min_init_timeout_sec=$((pipeline_timeout_sec + 30))
-    if (( min_init_timeout_sec > init_timeout_cap_sec )); then
+    if (( init_timeout_cap_sec > 0 && min_init_timeout_sec > init_timeout_cap_sec )); then
       log "init-inspect timeout guard: suggested=${min_init_timeout_sec}s exceeds cap=${init_timeout_cap_sec}s; applying bounded cap"
       min_init_timeout_sec="$init_timeout_cap_sec"
     fi

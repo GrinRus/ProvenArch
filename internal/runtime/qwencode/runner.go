@@ -2,9 +2,7 @@ package qwencode
 
 import (
 	"context"
-	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -34,16 +32,7 @@ func (r HeadlessRunner) commandName() string {
 }
 
 func (r HeadlessRunner) Preflight(_ context.Context) error {
-	command := r.commandName()
-	if _, err := exec.LookPath(command); err != nil {
-		return acpruntime.WrapRunnerError(
-			acpruntime.ProviderQwenCode,
-			acpruntime.ErrorCodeRunnerUnavailable,
-			fmt.Sprintf("headless provider %q command %q is unavailable: %v", acpruntime.ProviderQwenCode, command, err),
-			err,
-		)
-	}
-	return nil
+	return providercommon.PreflightCommand(acpruntime.ProviderQwenCode, r.commandName())
 }
 
 func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {

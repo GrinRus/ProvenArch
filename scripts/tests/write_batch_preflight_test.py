@@ -57,6 +57,46 @@ class WriteBatchPreflightTest(unittest.TestCase):
         self.assertEqual("ready", result["status"])
         self.assertEqual("", result["subclass"])
 
+    def test_probe_provider_readiness_checks_headless_invocation(self) -> None:
+        command = self._write_script(
+            "qwen-headless-quota-stub",
+            "#!/bin/sh\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' 'qwen 1.0'; exit 0; fi\n"
+            "printf '%s\n' 'API Error: 429 rate limit'\n",
+        )
+
+        result = self.module.probe_provider_readiness("qwen", command, str(REPO_ROOT))
+        self.assertEqual("unavailable", result["status"])
+        self.assertEqual("quota_or_permission", result["subclass"])
+        self.assertIn("rate limit", result["reason"])
+
+    def test_probe_provider_readiness_blocks_provider_model_mismatch(self) -> None:
+        command = self._write_script(
+            "qwen-claude-model-stub",
+            "#!/bin/sh\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' 'qwen 1.0'; exit 0; fi\n"
+            "printf '%s\n' '{\"model\":\"claude-opus-4-5-20251101\",\"status\":\"ok\"}'\n",
+        )
+
+        result = self.module.probe_provider_readiness("qwen", command, str(REPO_ROOT))
+        self.assertEqual("unavailable", result["status"])
+        self.assertEqual("provider_model_mismatch", result["subclass"])
+        self.assertEqual("1", result["model_mismatch"])
+        self.assertIn("claude-opus", result["observed_models"])
+
+    def test_probe_provider_readiness_blocks_escaped_provider_model_mismatch(self) -> None:
+        command = self._write_script(
+            "qwen-escaped-claude-model-stub",
+            "#!/bin/sh\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' 'qwen 1.0'; exit 0; fi\n"
+            "printf '%s\n' '{\\\"model\\\":\\\"claude-opus-4-5-20251101\\\",\\\"status\\\":\\\"ok\\\"}'\n",
+        )
+
+        result = self.module.probe_provider_readiness("qwen", command, str(REPO_ROOT))
+        self.assertEqual("unavailable", result["status"])
+        self.assertEqual("provider_model_mismatch", result["subclass"])
+        self.assertIn("claude-opus", result["observed_models"])
+
     def test_probe_provider_readiness_blocks_old_codex_for_gpt55(self) -> None:
         command = self._write_script("codex-stub", "#!/bin/sh\nprintf '%s\n' 'codex-cli 0.118.0'\n")
 

@@ -2,9 +2,7 @@ package claudecode
 
 import (
 	"context"
-	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
@@ -34,16 +32,7 @@ func (r HeadlessRunner) commandName() string {
 }
 
 func (r HeadlessRunner) Preflight(_ context.Context) error {
-	command := r.commandName()
-	if _, err := exec.LookPath(command); err != nil {
-		return acpruntime.WrapRunnerError(
-			acpruntime.ProviderClaudeCode,
-			acpruntime.ErrorCodeRunnerUnavailable,
-			fmt.Sprintf("headless provider %q command %q is unavailable: %v", acpruntime.ProviderClaudeCode, command, err),
-			err,
-		)
-	}
-	return nil
+	return providercommon.PreflightCommand(acpruntime.ProviderClaudeCode, r.commandName())
 }
 
 func (r HeadlessRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
@@ -118,11 +107,13 @@ func (a claudeAdapter) ActivityPolicy(task acpruntime.Task) providercommon.Activ
 
 func (a claudeAdapter) RecoveryPolicy(_ acpruntime.Task) providercommon.RecoveryPolicy {
 	return providercommon.RecoveryPolicy{
-		AcceptValidArtifactsAfterStop: true,
-		RepairCollectManifestOnce:     true,
-		RepairCollectArtifactPairOnce: true,
-		RepairValidatorVerdictOnce:    true,
-		RepairDraftArtifactsOnce:      true,
+		AcceptValidArtifactsAfterStop:            true,
+		RepairCollectManifestOnce:                true,
+		RepairCollectArtifactPairOnce:            true,
+		RepairValidatorVerdictOnce:               true,
+		RepairDraftArtifactsOnce:                 true,
+		RetryInvalidOrMissingArtifactsOnce:       true,
+		ClassifySilentRetryExhaustionUnavailable: true,
 	}
 }
 

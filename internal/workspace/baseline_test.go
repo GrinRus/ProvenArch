@@ -209,7 +209,7 @@ func TestBaselineCollectPromptPackEncodesLegacyHygieneRules(t *testing.T) {
 		"Treat schemas/spec plus the enforced runtime prompt as the only manifest schema source of truth",
 		"Do not read reports/taskruns, raw runtime logs, archived plans, or prior shard-pack manifests as schema templates",
 		"semantic.coverage MUST use observed/missing/notes; do NOT use covered_topics or alternate coverage keys.",
-		"semantic.questions[*] MUST use text; do NOT use question or other alias keys.",
+		"semantic.questions[*] MUST use id + text; do NOT use question or other alias keys.",
 	}
 	for _, token := range expected {
 		if !strings.Contains(content, token) {
