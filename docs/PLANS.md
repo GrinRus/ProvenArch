@@ -111,11 +111,15 @@ EP-20260507-cleanup-owner-decisions
 Safe cleanup is already complete, but `docs/PLANS.md` and `docs/BACKLOG.md` retain owner-gated cleanup decisions where deleting or moving tracked surfaces could damage discoverability, review UX, or hidden tooling usage. These items must remain explicit and blocked until owner intent is known.
 
 ### Goals (must have)
-- [ ] Gather usage evidence for whether `internal/docsync` and `internal/scriptsmeta` should remain test-only packages under `internal/*`
-- [ ] Gather evidence and owner decision on retaining both `docs/archive/PLANS_ARCHIVE_2026-04.md` and `docs/archive/PLANS_SNAPSHOT_2026-04-21.md`
-- [ ] Gather evidence and owner decision on persisted `fixtures/scenarios/*/golden/readable`
-- [ ] Gather evidence and owner decision on duplicated readable scenario fixtures
-- [ ] Gather evidence and owner decision on retaining `docs/LOCAL_FULL_RUN_AI_ADVENT.md` as a separate convenience runbook vs pointer/appendix
+- [x] Gather usage evidence for whether `internal/docsync` and `internal/scriptsmeta` should remain test-only packages under `internal/*`
+- [x] Gather evidence on retaining both `docs/archive/PLANS_ARCHIVE_2026-04.md` and `docs/archive/PLANS_SNAPSHOT_2026-04-21.md`
+- [x] Gather evidence on persisted `fixtures/scenarios/*/golden/readable`
+- [x] Gather evidence on duplicated readable scenario fixtures
+- [x] Gather evidence on retaining `docs/LOCAL_FULL_RUN_AI_ADVENT.md` as a separate convenience runbook vs pointer/appendix
+- [ ] Owner decision: retain/move `internal/docsync` and `internal/scriptsmeta`
+- [ ] Owner decision: retain/remove/dedupe April plan archive + snapshot docs
+- [ ] Owner decision: retain/remove/dedupe readable golden fixtures
+- [ ] Owner decision: retain `docs/LOCAL_FULL_RUN_AI_ADVENT.md` as a separate runbook or fold into another doc
 - [ ] If approved by owners, implement each cleanup as a separate small change set with tests/docs sync
 
 ### Non-goals
@@ -129,16 +133,26 @@ Safe cleanup is already complete, but `docs/PLANS.md` and `docs/BACKLOG.md` reta
 3) Request owner decisions; retain by default if no answer is available.
 4) Implement approved cleanup items one at a time with focused tests and full DoD when tracked files change.
 
+### Owner-decision evidence (2026-05-07)
+
+| Candidate | Evidence gathered | Options for owner | Default until decision |
+|---|---|---|---|
+| `internal/docsync`, `internal/scriptsmeta` | Only test files are present under those packages: `internal/docsync/docsync_test.go`, `internal/scriptsmeta/resolve_repos_meta_test.go`. `go test ./...` runs them as repo-level consistency gates; `docs/TESTING_STRATEGY.md` names `internal/docsync` as a docs-consistency gate. | Retain under `internal/*`; move to a dedicated test-support location; collapse into script tests. | Retain under `internal/*`; moving them is layout churn without owner-confirmed value. |
+| `docs/archive/PLANS_ARCHIVE_2026-04.md` + `docs/archive/PLANS_SNAPSHOT_2026-04-21.md` | `docs/PLANS.md` lists both archives; the snapshot records that completed historical plans moved to the April archive. Current sizes are 912 and 1176 lines, respectively, so they are substantial historical evidence. | Retain both; collapse snapshot into archive; keep snapshot but remove cross-links. | Retain both until owner decides the audit/history surface can be reduced. |
+| `fixtures/scenarios/*/golden/readable/*` | 90 tracked readable files exist. `docs/BASELINE_POLICY.md`, `docs/TESTING_STRATEGY.md`, `fixtures/README.md`, and `internal/docsync/docsync_test.go` explicitly describe them as tracked baseline/release surface and human-readable deterministic export. | Retain tracked readable exports; remove and rely on machine-readable golden only; generate on demand without tracking. | Retain; current docs/tests make them intentional, not accidental generated output. |
+| Duplicated readable scenario fixtures | Hash scan shows many identical files repeated across the three readable scenario exports, including `reports/as-is/*`, `reports/diagrams/*`, `model/entities/svc.payments.yaml`, and proposal docs. | Keep duplicated per-scenario snapshots; dedupe via shared fixture layer; remove readable exports after replacing review-diff workflow. | Retain duplicated snapshots; dedupe needs a QA/tooling owner decision because per-scenario full-tree diffs are the current review UX. |
+| `docs/LOCAL_FULL_RUN_AI_ADVENT.md` | Referenced from README, `docs/TESTING_STRATEGY.md`, `internal/docsync/docsync_test.go`, historical archives, and `docs/RELEASE_LIVE_E2E_RUNBOOK.md`; `scripts/tests/full_run_ai_advent_layout_test.py` directly asserts behavior of the paired script. | Keep as separate local runbook; fold into release runbook appendix; replace with pointer-only doc. | Retain as a separate runbook until trusted live validation is complete and docs owner approves consolidation. |
+
 ### Files expected to change
 - `docs/PLANS.md`
 - `docs/BACKLOG.md` only if owner-gated backlog wording changes
 - candidate files only after explicit owner approval
 
 ### Acceptance criteria
-- [ ] Each owner-gated item has usage evidence and an explicit retain/remove/dedupe recommendation
-- [ ] No destructive cleanup happens without owner approval
+- [x] Each owner-gated item has usage evidence and an explicit retain/remove/dedupe recommendation
+- [x] No destructive cleanup happens without owner approval
 - [ ] Approved cleanup items are implemented in separate commits
-- [ ] Active plan surface keeps owner-gated decisions visible until resolved
+- [x] Active plan surface keeps owner-gated decisions visible until resolved
 
 ### Risks
 - Removing historical docs or readable fixtures can degrade review workflows even if tests do not fail.
@@ -146,6 +160,7 @@ Safe cleanup is already complete, but `docs/PLANS.md` and `docs/BACKLOG.md` reta
 
 ### Progress log
 - 2026-05-07: Created by tracker reconciliation from `EP-20260421-cleanup-owner-followups` and `docs/BACKLOG.md` cleanup follow-ups.
+- 2026-05-07: Gathered usage evidence and documented retain-by-default recommendations. No files were deleted, moved, or deduplicated; owner decisions remain open and blocked.
 
 ---
 
