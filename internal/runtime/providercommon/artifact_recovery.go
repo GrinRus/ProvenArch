@@ -69,18 +69,25 @@ func recoverAfterStall(ctx context.Context, task acpruntime.Task, adapter Provid
 		if err := adapter.ValidateArtifacts(task); err == nil {
 			emitRetryCompletedDiagnostic(task, adapter.Provider(), stalled.Diagnostic.StallPhase, "artifact_only")
 			return true, result, nil
+		} else if shouldClassifyZeroOutputPreArtifactStallUnavailable(policy, task, result, stalled.Diagnostic) {
+			emitZeroOutputPreArtifactStallDiagnostic(task, adapter.Provider(), stalled.Diagnostic, "pre_artifact_fail_fast")
+			return true, acpruntime.Result{}, wrapProviderUnavailable(adapter, task, "stall", result, "provider unavailable after zero-output pre-artifact stall", runErr)
 		} else if recovered, recoveredResult, recoveredErr := recoverFocusedArtifactRepair(ctx, task, adapter, result, err, "stall"); recovered {
 			return true, recoveredResult, recoveredErr
 		}
 	}
+	if shouldClassifyZeroOutputPreArtifactStallUnavailable(policy, task, result, stalled.Diagnostic) {
+		emitZeroOutputPreArtifactStallDiagnostic(task, adapter.Provider(), stalled.Diagnostic, "pre_artifact_fail_fast")
+		return true, acpruntime.Result{}, wrapProviderUnavailable(adapter, task, "stall", result, "provider unavailable after zero-output pre-artifact stall", runErr)
+	}
 	if !policy.RetryInvalidOrMissingArtifactsOnce {
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "stall", "runtime stalled before valid artifacts were available", runErr)
 	}
-
 	retryPolicy := normalizeActivityPolicy(adapter.ActivityPolicy(task))
 	if stalled.Diagnostic.StallPhase == StallPhasePreArtifact && retryPolicy.RetryPreArtifactStallWindow > 0 {
 		retryPolicy.PreArtifactStallWindow = retryPolicy.RetryPreArtifactStallWindow
 	}
+	emitStallRetryScheduledDiagnostic(task, adapter.Provider(), stalled.Diagnostic)
 	retryResult, retryErr := runProviderCommand(ctx, task, adapter, retryPolicy)
 	if retryErr != nil {
 		var retryStalled StallError

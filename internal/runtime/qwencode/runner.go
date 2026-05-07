@@ -65,6 +65,7 @@ func (a qwenAdapter) commandSpecWithPrompt(task acpruntime.Task, includeDirs []s
 		commandArgs = buildQwenArgsWithIncludeDirectories(includeDirs, prompt)
 	}
 	return providercommon.CommandSpec{
+		Provider:    acpruntime.ProviderQwenCode,
 		Command:     a.runner.commandName(),
 		Args:        commandArgs,
 		Dir:         strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task)),
@@ -93,9 +94,6 @@ func (a qwenAdapter) ValidateArtifacts(task acpruntime.Task) error {
 }
 
 func (a qwenAdapter) ActivityPolicy(task acpruntime.Task) providercommon.ActivityPolicy {
-	if len(a.runner.Args) != 0 {
-		return providercommon.ActivityPolicy{}
-	}
 	monitorArtifacts := providercommon.MonitorsRuntimeArtifacts(task)
 	return providercommon.ActivityPolicy{
 		MonitorArtifacts:           monitorArtifacts,

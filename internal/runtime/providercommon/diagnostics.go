@@ -91,6 +91,13 @@ func emitRetryExhaustedDiagnostic(task acpruntime.Task, provider acpruntime.Prov
 	emitDiagnostic(task, "retry exhausted", fields)
 }
 
+func emitZeroOutputPreArtifactStallDiagnostic(task acpruntime.Task, provider acpruntime.Provider, diagnostic StallDiagnostic, recoveryMode string) {
+	fields := diagnostic.fields(provider, task, "classify_runner_unavailable")
+	fields["recovery_mode"] = strings.TrimSpace(recoveryMode)
+	fields["zero_output_pre_artifact_stall"] = true
+	emitDiagnostic(task, "zero-output pre-artifact stall classified unavailable", fields)
+}
+
 func emitArtifactRetryScheduledDiagnostic(task acpruntime.Task, provider acpruntime.Provider, cause error) {
 	fields := map[string]any{
 		"provider":      string(provider),
@@ -100,6 +107,17 @@ func emitArtifactRetryScheduledDiagnostic(task acpruntime.Task, provider acprunt
 	}
 	if cause != nil {
 		fields["validation_error"] = strings.TrimSpace(cause.Error())
+	}
+	emitDiagnostic(task, "retry scheduled", fields)
+}
+
+func emitStallRetryScheduledDiagnostic(task acpruntime.Task, provider acpruntime.Provider, diagnostic StallDiagnostic) {
+	fields := map[string]any{
+		"provider":            string(provider),
+		"shard_id":            strings.TrimSpace(task.ShardID),
+		"action":              "fresh_process_after_stall",
+		"recovery_mode":       "fresh_process",
+		"initial_stall_phase": strings.TrimSpace(string(diagnostic.StallPhase)),
 	}
 	emitDiagnostic(task, "retry scheduled", fields)
 }
@@ -213,7 +231,10 @@ func (d StallDiagnostic) fields(provider acpruntime.Provider, task acpruntime.Ta
 		"shard_id":            strings.TrimSpace(task.ShardID),
 		"stall_phase":         strings.TrimSpace(string(d.StallPhase)),
 		"manifest_state":      strings.TrimSpace(d.ArtifactState),
+		"artifact_observed":   d.ArtifactObserved,
 		"authored_file_count": d.AuthoredFileCount,
+		"stdout_bytes":        d.StdoutBytes,
+		"stderr_bytes":        d.StderrBytes,
 	}
 	if strings.TrimSpace(action) != "" {
 		fields["action"] = strings.TrimSpace(action)

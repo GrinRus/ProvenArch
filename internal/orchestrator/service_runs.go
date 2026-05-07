@@ -246,6 +246,62 @@ func (s *Service) storeRun(record runRecord) {
 	s.upsertRunLocked(record)
 }
 
+func (s *Service) terminalizeActiveRunAfterUnexpectedExit(runID string, err error, logMessage string) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" || err == nil {
+		return
+	}
+	errorCode, errorMessage := s.classifyRunFailure(runID, err)
+	if strings.TrimSpace(errorCode) == "" {
+		switch {
+		case errors.Is(err, context.Canceled):
+			errorCode = runErrorCodeCanceled
+		case errors.Is(err, context.DeadlineExceeded):
+			errorCode = string(acpruntime.ErrorCodeRuntimeTimeout)
+		default:
+			errorCode = "internal_failure"
+		}
+	}
+	if strings.TrimSpace(errorMessage) == "" {
+		errorMessage = err.Error()
+	}
+	now := s.clock().UTC()
+
+	updated := false
+	s.mu.Lock()
+	record, ok := s.runs[runID]
+	if ok && record != nil && (record.info.Status == RunStatusQueued || record.info.Status == RunStatusRunning) {
+		failedInfo := record.info
+		failedInfo.Status = RunStatusFailed
+		failedInfo.ErrorCode = errorCode
+		failedInfo.Error = errorMessage
+		failedInfo.FinishedAt = &now
+		s.upsertRunLocked(runRecord{
+			info:      failedInfo,
+			artifacts: append([]Artifact(nil), record.artifacts...),
+		})
+		updated = true
+	}
+	s.mu.Unlock()
+	if !updated {
+		return
+	}
+
+	message := strings.TrimSpace(logMessage)
+	if message == "" {
+		message = "run failed: unexpected exit"
+	}
+	s.appendRunLog(runID, RunLogEntry{
+		Timestamp: now,
+		Level:     RunLogLevelError,
+		Message:   message,
+		Fields: map[string]any{
+			"error_code": errorCode,
+			"error":      errorMessage,
+		},
+	})
+}
+
 func (s *Service) loadExistingRunRecord(runID string) (runRecord, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -486,6 +542,12 @@ func classifyExecutionError(err error) (code string, message string) {
 			message = runtimeMessage
 		}
 		return runtimeCode, message
+	}
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return string(acpruntime.ErrorCodeRuntimeTimeout), message
+	case errors.Is(err, context.Canceled):
+		return runErrorCodeCanceled, message
 	}
 	return "", message
 }

@@ -44,6 +44,20 @@ func shouldClassifySilentRetryExhaustionUnavailable(policy RecoveryPolicy, task 
 		snapshot.AuthoredFiles == 0
 }
 
+func shouldClassifyZeroOutputPreArtifactStallUnavailable(policy RecoveryPolicy, task acpruntime.Task, result acpruntime.Result, diagnostic StallDiagnostic) bool {
+	if !policy.ClassifySilentRetryExhaustionUnavailable || diagnostic.StallPhase != StallPhasePreArtifact {
+		return false
+	}
+	if strings.TrimSpace(result.Stdout) != "" || strings.TrimSpace(result.Stderr) != "" {
+		return false
+	}
+	snapshot := runtimeArtifactSnapshot(task)
+	return !diagnostic.ArtifactObserved &&
+		diagnostic.AuthoredFileCount == 0 &&
+		!snapshot.ArtifactObserved &&
+		snapshot.AuthoredFiles == 0
+}
+
 func isMissingArtifactFailure(err error) bool {
 	if err == nil {
 		return false
@@ -127,6 +141,9 @@ func buildEngineFailureMessage(adapter ProviderAdapter, task acpruntime.Task, st
 		"current_step":      strings.TrimSpace(task.StepID),
 		"last_stdout_bytes": len([]byte(result.Stdout)),
 		"last_stderr_bytes": len([]byte(result.Stderr)),
+	}
+	for key, value := range result.Diagnostics {
+		diagnostics[key] = value
 	}
 	for key, value := range runtimeArtifactSnapshot(task).diagnosticFields() {
 		diagnostics[key] = value

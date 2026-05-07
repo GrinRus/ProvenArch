@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 PROVIDER_UNAVAILABLE_MARKERS = (
@@ -24,6 +25,8 @@ PROVIDER_UNAVAILABLE_MARKERS = (
     "status code: 403",
     "status code: 429",
 )
+
+ARTIFACT_SMOKE_SENTINEL_TEXT = "ACP_ARTIFACT_SMOKE_READY"
 
 
 def parse_args() -> argparse.Namespace:
@@ -140,17 +143,83 @@ def headless_probe_invocation(provider: str) -> tuple[list[str], str]:
     return [], ""
 
 
-def run_probe_command(command: str, args: list[str], repo_root: str, stdin_text: str = "") -> subprocess.CompletedProcess[str]:
+def artifact_smoke_invocation(provider: str, sentinel_path: Path) -> tuple[list[str], str]:
+    prompt = (
+        "ACP live artifact smoke: create parent directories if needed, write exactly "
+        f"{ARTIFACT_SMOKE_SENTINEL_TEXT} to this file, then exit: {sentinel_path}"
+    )
+    if provider == "qwen":
+        return ["-p", prompt], ""
+    if provider == "claude":
+        return ["--output-format", "json", "--permission-mode", "bypassPermissions", "-p", prompt], ""
+    if provider == "codex":
+        return [
+            "exec",
+            "--json",
+            "--color",
+            "never",
+            "--skip-git-repo-check",
+            "--sandbox",
+            "danger-full-access",
+            "--ephemeral",
+            "-",
+        ], prompt
+    return [], ""
+
+
+def run_probe_command(
+    command: str,
+    args: list[str],
+    repo_root: str,
+    stdin_text: str = "",
+    env_extra: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    if env_extra:
+        env.update(env_extra)
     return subprocess.run(
         [command, *args],
         cwd=repo_root or None,
-        env=os.environ.copy(),
+        env=env,
         input=stdin_text if stdin_text else None,
         text=True,
         capture_output=True,
         timeout=probe_timeout_sec(),
         check=False,
     )
+
+
+def run_artifact_smoke(provider: str, command: str, repo_root: str) -> tuple[bool, str, str]:
+    with tempfile.TemporaryDirectory(prefix="acp-provider-smoke-") as tempdir:
+        sentinel_path = Path(tempdir) / "write-dir" / "sentinel.txt"
+        smoke_args, smoke_stdin = artifact_smoke_invocation(provider, sentinel_path)
+        if not smoke_args:
+            return True, "", ""
+        try:
+            completed = run_probe_command(
+                command,
+                smoke_args,
+                repo_root,
+                smoke_stdin,
+                {
+                    "ACP_PREFLIGHT_SMOKE_SENTINEL": str(sentinel_path),
+                    "ACP_PREFLIGHT_SMOKE_TEXT": ARTIFACT_SMOKE_SENTINEL_TEXT,
+                },
+            )
+        except subprocess.TimeoutExpired as exc:
+            return False, f"{provider} artifact smoke timed out after {exc.timeout}s", ""
+        except Exception as exc:  # pragma: no cover - defensive shell failure path
+            return False, f"{provider} artifact smoke failed: {exc}", ""
+        combined = "\n".join(part for part in [completed.stdout, completed.stderr] if part).strip()
+        if completed.returncode != 0:
+            return False, combined or f"{provider} artifact smoke exited with code {completed.returncode}", combined
+        try:
+            observed = sentinel_path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            return False, f"{provider} artifact smoke did not create sentinel: {exc}", combined
+        if observed != ARTIFACT_SMOKE_SENTINEL_TEXT:
+            return False, f"{provider} artifact smoke wrote unexpected sentinel content", combined
+        return True, combined, combined
 
 
 def extract_observed_models(text: str) -> list[str]:
@@ -203,7 +272,7 @@ def probe_provider_readiness(
     repo_root: str,
     version_line: str = "",
     codex_config_text: str | None = None,
-) -> dict[str, str]:
+) -> dict[str, object]:
     command = (command or "").strip()
     if command in {"", "not-selected"}:
         return {
@@ -304,6 +373,39 @@ def probe_provider_readiness(
             "observed_models": ",".join(observed_models),
             "model_mismatch": "1",
         }
+    smoke_ok, smoke_reason, smoke_output = run_artifact_smoke(provider, command, repo_root)
+    if smoke_output:
+        combined = "\n".join(part for part in [combined, smoke_output] if part).strip()
+    if smoke_reason:
+        normalized_smoke = "\n".join(part for part in [smoke_reason, smoke_output] if part).lower()
+        if any(marker in normalized_smoke for marker in PROVIDER_UNAVAILABLE_MARKERS):
+            return {
+                "provider": provider,
+                "status": "unavailable",
+                "subclass": "quota_or_permission",
+                "reason": combined or smoke_reason,
+                "artifact_smoke": "failed",
+            }
+    if not smoke_ok:
+        return {
+            "provider": provider,
+            "status": "unavailable",
+            "subclass": "operational_host_preflight_failed",
+            "reason": smoke_reason,
+            "artifact_smoke": "failed",
+        }
+    observed_models = extract_observed_models(combined)
+    mismatch_reason = provider_model_mismatch(provider, observed_models)
+    if mismatch_reason:
+        return {
+            "provider": provider,
+            "status": "unavailable",
+            "subclass": "provider_model_mismatch",
+            "reason": mismatch_reason,
+            "observed_models": ",".join(observed_models),
+            "model_mismatch": "1",
+            "artifact_smoke": "passed",
+        }
     return {
         "provider": provider,
         "status": "ready",
@@ -311,6 +413,7 @@ def probe_provider_readiness(
         "reason": combined,
         "observed_models": ",".join(observed_models),
         "model_mismatch": "0",
+        "artifact_smoke": "passed",
     }
 
 

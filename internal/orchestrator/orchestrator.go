@@ -282,7 +282,7 @@ func (s *Service) ValidateRuntime(ctx context.Context, manifests ...workspace.Ma
 	return resolver.Preflight(ctx)
 }
 
-func (s *Service) runWithID(ctx context.Context, request RunRequest, runID string) (RunInfo, []Artifact, error) {
+func (s *Service) runWithID(ctx context.Context, request RunRequest, runID string) (finalInfo RunInfo, finalArtifacts []Artifact, finalErr error) {
 	_ = s.cleanupRunLogs()
 	now := s.clock().UTC()
 	resumedRecord, resumed := s.loadExistingRunRecord(runID)
@@ -320,6 +320,16 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		info:      initialInfo,
 		artifacts: append([]Artifact(nil), initialArtifacts...),
 	})
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			panicErr := fmt.Errorf("run panic: %v", recovered)
+			s.terminalizeActiveRunAfterUnexpectedExit(runID, panicErr, "run failed: panic")
+			panic(recovered)
+		}
+		if finalErr != nil {
+			s.terminalizeActiveRunAfterUnexpectedExit(runID, finalErr, "run failed: unexpected exit")
+		}
+	}()
 	s.appendRunLog(runID, RunLogEntry{
 		Timestamp: now,
 		Level:     RunLogLevelInfo,
@@ -393,7 +403,8 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 			stepProviders:     resolvedStepProviders.Effective,
 		},
 		pipelineQualityState: pipelineQualityState{
-			runtimeStepMetrics: []runtimeStepQuality{},
+			runtimeStepMetrics:      []runtimeStepQuality{},
+			runtimeRecoveryCounters: runtimeRecoveryCounters{},
 		},
 		pipelineSemanticDocflowState: pipelineSemanticDocflowState{
 			findings:      []contracts.Finding{},
@@ -504,7 +515,8 @@ type pipelineRuntimeState struct {
 }
 
 type pipelineQualityState struct {
-	runtimeStepMetrics []runtimeStepQuality
+	runtimeStepMetrics      []runtimeStepQuality
+	runtimeRecoveryCounters runtimeRecoveryCounters
 }
 
 type pipelineSemanticDocflowState struct {

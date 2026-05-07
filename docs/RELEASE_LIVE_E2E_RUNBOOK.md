@@ -63,6 +63,8 @@ Artifact-quality policy для generated regress/release команд остаё
 - каждый backend run должен иметь `reports/taskruns/<run_id>-quality.json`;
 - `quality_report_<batch-id>.md` должен агрегировать только реально выбранные providers/run indexes;
 - `artifact_quality:*` warning поднимается в `quality_gates_failed` и блокирует strict verdict.
+- `totals.repair_attempts`, `fresh_retries`, `focused_repairs`, `repair_exhausted`, `stall_count`, `pre_artifact_stalls`, `post_artifact_stalls`, `zero_output_pre_artifact_stalls` и `partial_failure_count` являются обязательной visible telemetry в quality/matrix reports;
+- non-exhausted repair/stall pressure не превращает successful backend run в failure само по себе, но `partial_failure_count > 0` остаётся strict blocker.
 
 ## 1) Scope и ограничения
 
@@ -143,6 +145,13 @@ PY
 ```
 
 Если любой шаг выше падает, фиксировать как `operational_host_preflight_failed` и не интерпретировать как продуктовый ACP дефект.
+
+Matrix preflight также выполняет selected-provider live smoke перед deep batch:
+- `--version` probe;
+- короткий headless `ACP_READY` probe;
+- artifact smoke: выбранный provider должен записать sentinel-файл в temp write dir.
+
+Artifact smoke failure или timeout считается `operational_host_preflight_failed` и должен останавливать batch/matrix до запуска дорогой runtime matrix. Это host/provider readiness blocker, а не ACP product verdict.
 
 ### 2.2) One-time canonical path bootstrap
 

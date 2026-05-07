@@ -69,6 +69,7 @@ func (a codexAdapter) commandSpecWithPrompt(task acpruntime.Task, includeDirs []
 		commandArgs = buildCodexArgsWithIncludeDirectories(cwd, includeDirs)
 	}
 	return providercommon.CommandSpec{
+		Provider:    acpruntime.ProviderCodexCode,
 		Command:     a.runner.commandName(),
 		Args:        commandArgs,
 		Stdin:       strings.NewReader(prompt),

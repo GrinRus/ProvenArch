@@ -51,6 +51,7 @@ func (s artifactSnapshot) stallDiagnostic() StallDiagnostic {
 	return StallDiagnostic{
 		StallPhase:            StallPhasePostArtifact,
 		ArtifactState:         s.State,
+		ArtifactObserved:      s.ArtifactObserved,
 		AuthoredFileCount:     s.AuthoredFiles,
 		LastWriteRootMutation: s.LastMutation,
 	}
@@ -82,6 +83,7 @@ func monitorArtifactStall(ctx context.Context, task acpruntime.Task, tracker *co
 				Diagnostic: StallDiagnostic{
 					StallPhase:            StallPhasePostArtifact,
 					ArtifactState:         snapshot.State,
+					ArtifactObserved:      snapshot.ArtifactObserved,
 					AuthoredFileCount:     snapshot.AuthoredFiles,
 					LastPipeActivity:      lastPipe,
 					LastWriteRootMutation: lastMutation,
@@ -102,6 +104,7 @@ func monitorArtifactStall(ctx context.Context, task acpruntime.Task, tracker *co
 			Diagnostic: StallDiagnostic{
 				StallPhase:            StallPhasePreArtifact,
 				ArtifactState:         snapshot.State,
+				ArtifactObserved:      snapshot.ArtifactObserved,
 				AuthoredFileCount:     snapshot.AuthoredFiles,
 				LastPipeActivity:      lastPipe,
 				LastWriteRootMutation: lastMutation,

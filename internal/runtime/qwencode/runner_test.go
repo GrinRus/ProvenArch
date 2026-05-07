@@ -89,6 +89,15 @@ func TestQwenAdapterMonitorsPreArtifactStallsForArtifactSteps(t *testing.T) {
 	}
 }
 
+func TestQwenAdapterKeepsArtifactMonitorWithCustomArgs(t *testing.T) {
+	t.Parallel()
+
+	policy := (qwenAdapter{runner: HeadlessRunner{Args: []string{"--prompt"}}}).ActivityPolicy(acpruntime.Task{StepID: "init.step1.collect"})
+	if !policy.MonitorArtifacts || !policy.MonitorPreArtifact {
+		t.Fatalf("custom args must not disable collect artifact monitoring, got %+v", policy)
+	}
+}
+
 func TestQwenCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 	t.Parallel()
 

@@ -77,10 +77,15 @@ func (executor defaultRuntimeTaskExecutor) RunRuntimeTask(ctx context.Context, r
 		RepoScopes:        repoScopes,
 		PathScopes:        pathScopes,
 		StartedAtUTC:      e.clock().UTC(),
+		RuntimeTimeoutProfile: map[string]any{
+			"step_timeout_sec":      int(e.runtimeStepTimeout.Seconds()),
+			"heartbeat_timeout_sec": int(e.runtimeHeartbeatInterval.Seconds()),
+		},
 		OnOutput: func(chunk acpruntime.OutputChunk) {
 			e.logRuntimeOutput(stepID, domainID, resolvedProvider, chunk)
 		},
 		OnDiagnostic: func(event acpruntime.DiagnosticEvent) {
+			e.recordRuntimeDiagnosticCounters(event)
 			e.logInfo(stepID, domainID, event.Message, event.Fields)
 		},
 	}

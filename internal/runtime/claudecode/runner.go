@@ -69,6 +69,7 @@ func (a claudeAdapter) commandSpecWithPrompt(task acpruntime.Task, includeDirs [
 		return providercommon.CommandSpec{}, err
 	}
 	return providercommon.CommandSpec{
+		Provider:    acpruntime.ProviderClaudeCode,
 		Command:     a.runner.commandName(),
 		Args:        commandArgs,
 		Stdin:       stdin,

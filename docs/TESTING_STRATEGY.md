@@ -55,10 +55,10 @@
 
 ### Headless provider conformance
 - required tests используют stub provider adapters без live network dependencies
-- общий process engine проверяется на success by valid artifacts, controlled stop after valid artifacts, collect pair recovery, collect manifest-only repair success/failure, validator-verdict-only repair, draft-artifact repair, bounded pre-artifact and repair stall windows, silent no-artifact classification, invalid artifact contract failures, deadline timeout и raw stdout/stderr diagnostics
-- provider-specific tests проверяют только adapter policy/args: `qwen` не требует semantic JSON stdout, не передаёт JSON task stdin при `-p` invocation и нормализует custom prompt args к artifact prompt, а `claude`/`codex` machine-mode flags остаются diagnostic transport mode
+- общий process engine проверяется на success by valid artifacts, controlled stop after valid artifacts, collect pair recovery, collect manifest-only repair success/failure, validator-verdict-only repair, draft-artifact repair, bounded pre-artifact and repair stall windows, zero-output pre-artifact fail-fast classification, silent no-artifact classification, invalid artifact contract failures, deadline timeout и raw stdout/stderr + redacted lifecycle diagnostics, включая resolved timeout profile
+- provider-specific tests проверяют только adapter policy/args: `qwen` не требует semantic JSON stdout, не передаёт JSON task stdin при `-p` invocation, нормализует custom prompt args к artifact prompt и не отключает artifact/pre-artifact monitoring при custom args, а `claude`/`codex` machine-mode flags остаются diagnostic transport mode
 - prompt contract tests покрывают collect pair recovery command-first doc+manifest heredoc targets, collect manifest-only repair command-first heredoc write target, literal manifest JSON skeleton, validator issue canonical shape/legacy bans, draft recovery command-first manifest+draft-file heredocs, exact targets и root-file shard hints без live network dependency
-- batch preflight tests покрывают selected-provider readiness без live network dependency, включая codex `gpt-5.5`/CLI version mismatch guard
+- batch preflight tests покрывают selected-provider readiness без live network dependency, включая codex `gpt-5.5`/CLI version mismatch guard и artifact smoke pass/fail/timeout paths
 
 ## 3) Обязательная структура test assets
 
@@ -269,16 +269,18 @@ Implemented additional jobs:
   - bootstrap в `tmp`, runtime циклы `fake + headless`, strict anti-mock/anti-zero-signal guardrails
   - completion invariants: expected/completed runtime counts, per-iteration headless `init+refresh`, отсутствие `running` в `run-history`
   - failed CLI cycles with a known `run_id` append the same 17-field `run-results.tsv` row and best-effort snapshot before terminal cleanup, including missing/invalid quality summary cases, so failed headless init/refresh evidence is not reported as a missing-row infra gap
+  - failed/timeout CLI cycles terminalize `reports/taskruns/run-history.json`; if child process exits before graceful cleanup, harness reconciliation marks stale `queued/running` as `failed` with `runtime_timeout` or `infra_incomplete_cycle`
   - signal handling: `TERM/INT/HUP/PIPE` => `infra_signal_terminated`
   - debug artifacts и raw diagnostics: `TMP_ROOT/session-summary.md`, `TMP_ROOT/full-run.log`, `TMP_ROOT/snapshots/*`, `reports/taskruns/raw/*`
 - `scripts/full-run-batch.sh` — canonical live batch + frontend live e2e:
   - canonical input: `TARGET_REPOS_FILE`
   - direct-only runtime commands: `claude`, `qwen`, `codex`
-  - selected-provider readiness записывается в `preflight.json`; version + bounded headless probe ловят missing binary, auth/quota/model blockers и provider/model mismatch до deep run
+  - selected-provider readiness записывается в `preflight.json`; version + bounded headless probe + artifact smoke ловят missing binary, auth/quota/model blockers, provider/model mismatch и no-write host/provider failures до deep run
   - backend quality source-of-truth: только `snapshots/<run_id>/reports/*`
   - hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`, `analysis:cross-repo-missing`; cross-repo presence can be satisfied by explicit `semantic.edges[]` or by repo-wide `citations[].repo` coverage plus findings/questions with multi-repo provenance evidence, and report details must name the missing dimension
   - frontend smoke работает на отдельной `frontend-workspace` копии run snapshot и не мутирует backend baseline; `snapshot_reports_missing` после terminal backend failure записывается как dependent skipped frontend status, а не independent frontend regression
   - terminal-success backend runs (`result=passed`, `quality_gates=passed`, `run-status.env state=completed process_exit=0`) остаются `failure_class=none`, даже если raw provider logs содержат recovered `runner_unavailable`/429 diagnostics
+  - quality summary/matrix counters агрегируют `repair_attempts`, `repair_exhausted`, `fresh_retries`, `focused_repairs`, `stall_count`, `pre_artifact_stalls`, `post_artifact_stalls`, `zero_output_pre_artifact_stalls`, `partial_failure_count` и `quality_alerts`; non-exhausted repair/stall pressure visible but non-blocking, partial failures remain blockers
   - batch report evidence tests проверяют, что `collect_partial_shard_failures`, focused recovery exhaustion/write-set violations, provider/model mismatch и missing headless rows with runtime logs surfaced as per-run issue details, а не теряются за aggregate failure class
 - `scripts/full-run-batch-matrix.sh` — официальный local trusted-machine harness:
   - canonical input: `E2E_MATRIX_FILE`

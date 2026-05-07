@@ -204,6 +204,56 @@ print(running)
 PY
 }
 
+reconcile_active_runs_in_history() {
+  local workspace_path="$1"
+  local error_code="$2"
+  local error_message="$3"
+  local run_history_path="$workspace_path/reports/taskruns/run-history.json"
+  if [[ ! -f "$run_history_path" ]]; then
+    return 0
+  fi
+  local reconciled
+  reconciled="$(python3 - "$run_history_path" "$error_code" "$error_message" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+
+path, error_code, error_message = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(path, encoding="utf-8") as f:
+    payload = json.load(f)
+
+items = payload.get("items") if isinstance(payload, dict) else None
+if not isinstance(items, list):
+    items = payload.get("runs") if isinstance(payload, dict) else None
+if not isinstance(items, list):
+    items = payload if isinstance(payload, list) else []
+
+finished_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+updated = 0
+for item in items:
+    if not isinstance(item, dict):
+        continue
+    status = str(item.get("status", "")).strip().lower()
+    if status not in {"queued", "running"}:
+        continue
+    item["status"] = "failed"
+    item["finished_at"] = finished_at
+    item["error_code"] = error_code
+    item["error"] = error_message
+    updated += 1
+
+if updated:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=True, indent=2)
+        f.write("\n")
+print(updated)
+PY
+)"
+  if [[ "${reconciled:-0}" != "0" ]]; then
+    log "reconciled active run-history entries after child failure: workspace=$workspace_path count=$reconciled error_code=$error_code"
+  fi
+}
+
 run_result_row_exists() {
   local iteration="$1"
   local runtime_mode="$2"
@@ -894,6 +944,7 @@ run_cli_pipeline() {
     rm -f "$timeout_flag"
     status="$(sed -n 's/^status: //p' "$output_path" | tail -n1 | tr -d '\r')"
     run_id="$(sed -n 's/^run_id: //p' "$output_path" | tail -n1 | tr -d '\r')"
+    reconcile_active_runs_in_history "$workspace_path" "runtime_timeout" "pipeline timed out after ${PIPELINE_TIMEOUT_SEC}s (grace ${PIPELINE_KILL_GRACE_SEC}s)"
     append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "${status:-failed}" "$workspace_path" "$output_path"
     FAILURE_REASON="runtime_timeout"
     TERMINATION_SIGNAL="timeout"
@@ -904,6 +955,7 @@ run_cli_pipeline() {
   if [[ "$run_exit" -ne 0 ]]; then
     status="$(sed -n 's/^status: //p' "$output_path" | tail -n1 | tr -d '\r')"
     run_id="$(sed -n 's/^run_id: //p' "$output_path" | tail -n1 | tr -d '\r')"
+    reconcile_active_runs_in_history "$workspace_path" "infra_incomplete_cycle" "pipeline command exited with code ${run_exit}"
     append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "${status:-failed}" "$workspace_path" "$output_path"
     echo "pipeline failed: runtime=$runtime_label pipeline=$pipeline (see $output_path)" >&2
     tail -n 120 "$output_path" >&2 || true

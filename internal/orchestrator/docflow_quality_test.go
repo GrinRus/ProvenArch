@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
+	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
 
 func TestAssessRefreshArtifactWarningsFlagsBankLikeCollapseFixture(t *testing.T) {
@@ -46,6 +47,75 @@ func TestAssessRefreshArtifactWarningsAllowsOpenstackRichReuseFixture(t *testing
 	warnings := assessRefreshArtifactWarnings(manifests, finalIndex, citationIndex)
 	if len(warnings) != 0 {
 		t.Fatalf("expected no artifact-quality warnings for acceptable rich reuse fixture, got %#v", warnings)
+	}
+}
+
+func TestRuntimeDiagnosticCountersSurfaceRepairStallPressure(t *testing.T) {
+	t.Parallel()
+
+	execution := &pipelineExecution{}
+	execution.recordRuntimeDiagnosticCounters(acpruntime.DiagnosticEvent{
+		Message: "retry scheduled",
+		Fields: map[string]any{
+			"action":      "terminate_and_validate",
+			"stall_phase": "pre_artifact",
+		},
+	})
+	execution.recordRuntimeDiagnosticCounters(acpruntime.DiagnosticEvent{
+		Message: "retry scheduled",
+		Fields: map[string]any{
+			"action":        "fresh_process_after_stall",
+			"recovery_mode": "fresh_process",
+		},
+	})
+	execution.recordRuntimeDiagnosticCounters(acpruntime.DiagnosticEvent{
+		Message: "focused artifact repair scheduled",
+		Fields: map[string]any{
+			"action": "focused_artifact_repair",
+		},
+	})
+	execution.recordRuntimeDiagnosticCounters(acpruntime.DiagnosticEvent{
+		Message: "zero-output pre-artifact stall classified unavailable",
+		Fields: map[string]any{
+			"zero_output_pre_artifact_stall": true,
+			"stall_phase":                    "pre_artifact",
+		},
+	})
+	execution.recordRuntimeDiagnosticCounters(acpruntime.DiagnosticEvent{
+		Message: "focused artifact repair exhausted",
+		Fields: map[string]any{
+			"stall_phase":      "post_artifact",
+			"validation_error": "validator verdict is invalid",
+		},
+	})
+	execution.recordRuntimeDiagnosticCounters(acpruntime.DiagnosticEvent{
+		Message: "retry exhausted",
+		Fields: map[string]any{
+			"stall_phase":      "pre_artifact",
+			"validation_error": "runtime_stalled_before_artifacts",
+		},
+	})
+
+	counters := execution.runtimeRecoveryCounters
+	if counters.RepairAttempts != 2 || counters.FreshRetries != 1 || counters.FocusedRepairs != 1 {
+		t.Fatalf("unexpected repair counters: %+v", counters)
+	}
+	if counters.RepairExhausted != 2 {
+		t.Fatalf("expected exhausted repair counter, got %+v", counters)
+	}
+	if counters.StallCount != 2 || counters.PreArtifactStalls != 2 || counters.PostArtifactStalls != 0 {
+		t.Fatalf("unexpected stall counters: %+v", counters)
+	}
+	if counters.ZeroOutputPreArtifactStalls != 1 {
+		t.Fatalf("expected zero-output pre-artifact counter, got %+v", counters)
+	}
+
+	signals := runtimeRecoveryQualitySignals(counters, 1)
+	if !hasRunQualitySignal(signals, "runtime_quality.repair_heavy") ||
+		!hasRunQualitySignal(signals, "runtime_quality.stall_pressure") ||
+		!hasRunQualitySignal(signals, "runtime_quality.zero_output_pre_artifact_stalls") ||
+		!hasRunQualitySignal(signals, "runtime_quality.partial_failures") {
+		t.Fatalf("expected runtime quality signals, got %#v", signals)
 	}
 }
 
@@ -104,6 +174,15 @@ func loadRefreshArtifactFixtureSet(
 	}
 
 	return manifests, finalIndex, citationIndex, validatorVerdict
+}
+
+func hasRunQualitySignal(signals []runQualitySignal, code string) bool {
+	for _, signal := range signals {
+		if signal.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 func containsArtifactWarning(warnings []string, needle string) bool {
