@@ -86,6 +86,15 @@ Historical active plans from 2026-04-20 through 2026-05-06 repeatedly ended with
 4) Classify failures into product/runtime/harness/operational buckets and open a focused fix slice before broad reruns when needed.
 5) Close historical live-gate tasks only with concrete matrix/report evidence.
 
+### Non-live prerequisite check (2026-05-07)
+
+| Check | Status | Evidence / note |
+|---|---|---|
+| Clean committed local worktree | ready | `git status --short` was empty at `c1f58b5`. |
+| Required provider binaries in PATH | ready for auth check | `qwen=/opt/homebrew/bin/qwen`, `claude=/Users/griogrii_riabov/.local/bin/claude`, `codex=/opt/homebrew/bin/codex`. Provider auth/quota was not probed. |
+| Canonical harness inputs present | ready | `examples/e2e-matrix.regres-fast.bank-openedx.yaml`, `examples/e2e-matrix.regres-fast.openstack.yaml`, `scripts/full-run-batch-matrix.sh`, and `scripts/verify-release-verdict.py` exist. |
+| Live execution permission | blocked | No live matrix was started in this local implementation pass. Running live validation still needs explicit trusted-machine approval and direct `scripts/full-run-batch-matrix.sh` invocation. |
+
 ### Files expected to change
 - `docs/PLANS.md`
 - `docs/archive/*` for execution reports or reconciliation notes
@@ -103,6 +112,7 @@ Historical active plans from 2026-04-20 through 2026-05-06 repeatedly ended with
 
 ### Progress log
 - 2026-05-07: Created by tracker reconciliation. Consolidates live rerun gates from historical active plans; no live matrix was run in this reconciliation slice.
+- 2026-05-07: Performed non-live prerequisite check only. Worktree and provider binary paths look ready for an owner-approved trusted-machine run, but provider auth/quota and pinned repo/path prerequisites are unverified. Live matrix execution remains blocked until explicit approval.
 
 ### Plan ID
 EP-20260507-cleanup-owner-decisions
