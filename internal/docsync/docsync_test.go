@@ -315,6 +315,8 @@ func TestPlansRemainActiveOnlyAfterCleanupClosure(t *testing.T) {
 	t.Parallel()
 
 	content := readDoc(t, "docs/PLANS.md")
+	archive := readDoc(t, "docs/archive/PLANS_ARCHIVE_2026-05.md")
+	reconciliation := readDoc(t, "docs/archive/TRACKER_RECONCILIATION_2026-05-07.md")
 	if strings.Contains(content, "cleanup/refactor closure") {
 		t.Fatalf("expected docs/PLANS.md active section to exclude closed cleanup closure notes")
 	}
@@ -328,7 +330,16 @@ func TestPlansRemainActiveOnlyAfterCleanupClosure(t *testing.T) {
 			t.Fatalf("expected docs/PLANS.md to stay active-only and exclude closed cleanup plan %q", marker)
 		}
 	}
-	assertContains(t, content, "EP-20260420-regres-small-live-triage")
+	for _, marker := range []string{
+		"EP-20260507-trusted-live-validation",
+		"EP-20260507-provider-reporting-refactor",
+		"EP-20260507-cleanup-owner-decisions",
+	} {
+		assertContains(t, content, marker)
+		assertContains(t, reconciliation, marker)
+	}
+	assertContains(t, archive, "Reconciled active plans from 2026-05-07")
+	assertContains(t, archive, "EP-20260420-regres-small-live-triage")
 }
 
 func TestDocsDoNotAdvertiseActiveCompatibilityInventory(t *testing.T) {
@@ -810,11 +821,15 @@ func extractAfter(t *testing.T, content string, marker string) string {
 func splitPlanSections(content string) []string {
 	parts := strings.Split(content, "\n### Plan ID\n")
 	sections := make([]string, 0, len(parts))
-	for _, part := range parts {
+	for idx, part := range parts {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
 		}
+		if idx == 0 && !strings.HasPrefix(part, "### Plan ID\n") {
+			continue
+		}
+		part = strings.TrimPrefix(part, "### Plan ID\n")
 		sections = append(sections, "### Plan ID\n"+part)
 	}
 	return sections
