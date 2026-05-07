@@ -29,10 +29,11 @@ const (
 // CommandSpec is the provider-specific process invocation surface. Success is
 // still determined by artifact validation, not by stdout/stderr shape.
 type CommandSpec struct {
-	Command string
-	Args    []string
-	Stdin   io.Reader
-	Dir     string
+	Provider acpruntime.Provider
+	Command  string
+	Args     []string
+	Stdin    io.Reader
+	Dir      string
 	// IncludeDirs records the read scope the adapter encoded into provider CLI
 	// args. The shared engine does not interpret it as a success contract.
 	IncludeDirs []string
@@ -139,7 +140,10 @@ var (
 type StallDiagnostic struct {
 	StallPhase            StallPhase
 	ArtifactState         string
+	ArtifactObserved      bool
 	AuthoredFileCount     int
+	StdoutBytes           int
+	StderrBytes           int
 	LastPipeActivity      time.Time
 	LastWriteRootMutation time.Time
 }

@@ -51,11 +51,17 @@ class WriteBatchPreflightTest(unittest.TestCase):
         self.assertIn("permission_error", result["reason"])
 
     def test_probe_provider_readiness_marks_successful_probe_ready(self) -> None:
-        command = self._write_script("claude-stub", "#!/bin/sh\nprintf '%s\n' '{\"ok\":true}'\n")
+        command = self._write_script(
+            "claude-stub",
+            "#!/bin/sh\n"
+            "if [ -n \"${ACP_PREFLIGHT_SMOKE_SENTINEL:-}\" ]; then mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"; printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"; exit 0; fi\n"
+            "printf '%s\n' '{\"ok\":true}'\n",
+        )
 
         result = self.module.probe_provider_readiness("claude", command, str(REPO_ROOT))
         self.assertEqual("ready", result["status"])
         self.assertEqual("", result["subclass"])
+        self.assertEqual("passed", result["artifact_smoke"])
 
     def test_probe_provider_readiness_checks_headless_invocation(self) -> None:
         command = self._write_script(
@@ -112,7 +118,12 @@ class WriteBatchPreflightTest(unittest.TestCase):
         self.assertEqual("codex_model_requires_newer_cli", result["subclass"])
 
     def test_probe_provider_readiness_allows_updated_codex_for_gpt55(self) -> None:
-        command = self._write_script("codex-stub", "#!/bin/sh\nprintf '%s\n' 'codex-cli 0.125.0'\n")
+        command = self._write_script(
+            "codex-stub",
+            "#!/bin/sh\n"
+            "if [ -n \"${ACP_PREFLIGHT_SMOKE_SENTINEL:-}\" ]; then mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"; printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"; exit 0; fi\n"
+            "printf '%s\n' 'codex-cli 0.125.0'\n",
+        )
 
         result = self.module.probe_provider_readiness(
             "codex",
@@ -124,6 +135,20 @@ class WriteBatchPreflightTest(unittest.TestCase):
 
         self.assertEqual("ready", result["status"])
         self.assertEqual("", result["subclass"])
+        self.assertEqual("passed", result["artifact_smoke"])
+
+    def test_probe_provider_readiness_blocks_artifact_smoke_failure(self) -> None:
+        command = self._write_script(
+            "qwen-no-artifact-stub",
+            "#!/bin/sh\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' 'qwen 1.0'; exit 0; fi\n"
+            "printf '%s\n' 'ACP_READY'\n",
+        )
+
+        result = self.module.probe_provider_readiness("qwen", command, str(REPO_ROOT))
+        self.assertEqual("unavailable", result["status"])
+        self.assertEqual("operational_host_preflight_failed", result["subclass"])
+        self.assertEqual("failed", result["artifact_smoke"])
 
     def test_selected_readiness_keys_limits_non_release_provider_filter(self) -> None:
         self.assertEqual(["qwen"], self.module.selected_readiness_keys(["qwen-code"]))

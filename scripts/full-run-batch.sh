@@ -949,7 +949,17 @@ prepare_frontend_cancel_workspace() {
   mkdir -p "$output_dir"
   rm -rf "$frontend_workspace"
   cp -a "$workspace" "$frontend_workspace"
+  sanitize_frontend_cancel_workspace "$frontend_workspace"
   printf '%s\n' "$frontend_workspace"
+}
+
+sanitize_frontend_cancel_workspace() {
+  local frontend_workspace="$1"
+  if [[ -z "$frontend_workspace" || ! -d "$frontend_workspace" ]]; then
+    return 0
+  fi
+  rm -f "$frontend_workspace/reports/taskruns/run-history.json"
+  rm -rf "$frontend_workspace/reports/taskruns/logs" "$frontend_workspace/reports/taskruns/raw"
 }
 
 run_frontend_cancel_e2e() {
@@ -993,6 +1003,7 @@ run_frontend_cancel_e2e() {
       "UI_E2E_EXPECTED_REPO_COUNT=$EXPECTED_REPO_COUNT_RESOLVED" \
       "ACP_CLAUDE_CMD=$ACP_CLAUDE_CMD_BIN" \
       "ACP_QWEN_CMD=$ACP_QWEN_CMD_BIN" \
+      "ACP_CODEX_CMD=$ACP_CODEX_CMD_BIN" \
       "UI_E2E_HEADED=$UI_E2E_HEADED" \
       "FRONTEND_RESULT_FILENAME=$FRONTEND_CANCEL_RESULT_FILENAME" \
       ./scripts/frontend-live-e2e.sh

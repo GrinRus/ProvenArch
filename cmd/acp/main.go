@@ -9,10 +9,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/api"
@@ -474,7 +476,10 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "pipeline validation failed: %v\n", err)
 		return exitCodeValidation
 	}
-	report := ws.Validate(context.Background(), workspace.ValidateOptions{
+	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	defer stopSignals()
+
+	report := ws.Validate(ctx, workspace.ValidateOptions{
 		ResolveRepos: true,
 		FetchGit:     true,
 		VerifyRefs:   true,
@@ -486,7 +491,7 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 
 	service := newCLIService(ws, runtimeConfig)
 	service.ReconcileStaleRunsAfterRestart()
-	runInfo, artifacts, err := service.Run(context.Background(), orchestrator.RunRequest{
+	runInfo, artifacts, err := service.Run(ctx, orchestrator.RunRequest{
 		Workspace:      ws,
 		Pipeline:       pipeline,
 		NonInteractive: *nonInteractive,

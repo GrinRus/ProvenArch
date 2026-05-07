@@ -129,6 +129,7 @@
    - На старте сервиса stale `queued` run по-прежнему reconcile-ится в `failed` с `error_code=run_reconciled_after_restart`
    - Для async service-managed run stale `running` run auto-resume-ится с тем же `run_id`, если есть resumable shard artifacts; resume cursor стартует с persisted `runtime-execution.json` для `step1.collect`, `step2.asis_docs` при resume после более позднего шага может быть детерминированно пересобран из persisted collect artifacts без live provider rerun
    - Ведёт persisted run history в `reports/taskruns/run-history.json` (versioned index, retention 500)
+   - Синхронный `acp run` использует signal-aware context (`SIGTERM`/`SIGINT`/`SIGHUP`) и terminal guard: после записи `running` любой error/panic best-effort переводит history в terminal `failed` с `finished_at`/`error_code`
    - Ведёт run-level logs в `reports/taskruns/logs/<run_id>.ndjson` с cursor query API (`GET /api/pipeline/runs/<run_id>/logs`)
    - Runtime seam поддерживает live forwarding stdout/stderr от headless providers в run logs (`kind=runtime_output`, `stream=stdout|stderr`), event stream и raw stream сосуществуют
    - Internal safeguard ограничивает raw runtime stream hard-cap и публикует явный truncation marker (`fields.output_truncated=true`)
@@ -168,6 +169,7 @@
    - provider-specific остаётся только в thin adapters: command/args/stdin/workdir/include dirs, unavailable markers, activity policy и recovery policy; stdout/stderr transcript сохраняется как diagnostics и не является semantic success payload
    - shared activity monitor отслеживает pipe activity вместе с мутациями `write_root`/`draft_final_root`; pre-artifact silent/no-artifact hangs bounded для всех live adapters, post-artifact stop разрешён только когда оба сигнала stale, валидные required artifacts уже можно принять без повторного provider call, а partial artifacts могут иметь более длинное provider policy grace window
    - `qwen-code` и `claude-code` policies дополнительно разрешают один fresh retry для missing/invalid artifacts; fully silent no-artifact path или silent retry exhaustion классифицируется как `runner_unavailable`, но partial authored artifacts без валидного manifest остаются `runtime_contract_failed`
+   - `qwen-code`/`claude-code` zero-output `pre_artifact` stall (`stdout=0`, `stderr=0`, no observed artifacts, authored file count `0`) fail-fast классифицируется как `runner_unavailable` без fresh retry; `codex-code` не получает этот policy change, кроме shared lifecycle diagnostics
    - transcript outputs с provider transport/API failures (например `[API Error: ... SSL ...]`) не считаются generic `runtime_contract_failed`: runtime сохраняет raw stdout/stderr и классифицирует их как `runner_unavailable`
    - collect step не считается успешным, если после разрешённых focused collect recovery попыток `shard-pack-manifest.json` остаётся missing/invalid; такой случай поднимается как runtime contract failure (`runtime_contract_failed`) и hard pass невозможен. Fully silent no-artifact qwen path остаётся `runner_unavailable`
    - collect contract требует полного `semantic` block в `shard-pack-manifest.json` (`coverage/questions/entities/edges/findings`) и repo-specific citation surface; generic-only `cite.runtime-summary` допустим только вне multi-document refresh evidence collapse
@@ -193,7 +195,8 @@
      - `ACP_CLAUDE_CMD` (default `claude-code`)
      - `ACP_QWEN_CMD` (default `qwen`)
      - `ACP_CODEX_CMD` (default `codex`)
-   - live batch preflight records selected-provider readiness before deep matrix execution; known model/version/auth blockers, including codex model/CLI mismatch (for example `gpt-5.5` on an old Codex CLI) and cross-family provider/model telemetry mismatch, are operational blockers, not product verdicts
+   - live batch preflight records selected-provider readiness before deep matrix execution; known model/version/auth blockers, including codex model/CLI mismatch (for example `gpt-5.5` on an old Codex CLI), cross-family provider/model telemetry mismatch and selected-provider artifact smoke failure are operational blockers, not product verdicts
+   - raw provider failure metadata includes redacted lifecycle diagnostics: resolved command path, argv, cwd, include dirs, pid, duration/exit reason, stdout/stderr byte counts, selected provider, resolved runtime timeout profile and allowlisted `ACP_*_CMD`/timeout env presence/hash; secret-like values are never dumped raw
 
 6) **Workspace (`internal/workspace`)** *(implemented baseline)*
    - реализует/валидирует структуру central `arch-workspace` (Variant 2)

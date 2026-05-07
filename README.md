@@ -366,6 +366,8 @@ Root entrypoints:
 - terminal-success backend runs (`result=passed`, `quality_gates=passed`, `run-status.env state=completed process_exit=0`) не получают failure class из recovered raw provider diagnostics
 - multi-repo report gate считает cross-repo signal по explicit `semantic.edges[]` или по `citations[].repo` coverage вместе с multi-repo finding provenance, чтобы не помечать schema-valid focused recovery outputs как `analysis:cross-repo-missing`
 - failed CLI cycles с известным `run_id` сохраняют fixed-shape `run-results.tsv` row и best-effort snapshot до terminal cleanup, даже если quality summary отсутствует/битый; provider/runtime failures отображаются как failed headless rows, а не как missing-row infra gaps
+- live batch preflight делает selected-provider artifact smoke до deep matrix; smoke failure/timeout классифицируется как `operational_host_preflight_failed`
+- quality/matrix reports показывают repair/stall/partial pressure counters; non-exhausted repair/stall pressure visible but non-blocking, `partial_failure_count > 0` остаётся blocker
 
 Быстрый локальный запуск:
 
@@ -491,8 +493,9 @@ Persisted runtime execution metadata:
 - сериализуется как internal `runtime-execution.json` payload рядом с taskrun artifacts
 - используется для replay/recovery, taskrun diagnostics и raw-output linking
 - live headless providers (`claude-code`, `qwen-code`, `codex-code`) проходят через общий artifact-only process engine; provider adapters задают только CLI invocation и explicit activity/recovery policy; selected-provider preflight/reporting дополнительно фиксируют auth/quota/model readiness и provider/model attribution drift
-- `qwen-code` adapter invocation передаёт artifact prompt только через CLI `-p` без JSON task stdin; custom qwen args нормализуются так, чтобы не подменять artifact prompt. `claude-code`/`codex-code` сохраняют свои transport-specific stdin/machine-mode surfaces
-- selected-provider preflight фиксирует command/model/version readiness до deep live run; такие blockers являются operational, не product verdict
+- `qwen-code` adapter invocation передаёт artifact prompt только через CLI `-p` без JSON task stdin; custom qwen args нормализуются так, чтобы не подменять artifact prompt и не отключать artifact/pre-artifact monitor. `claude-code`/`codex-code` сохраняют свои transport-specific stdin/machine-mode surfaces
+- selected-provider preflight фиксирует command/model/version readiness и artifact smoke до deep live run; такие blockers являются operational, не product verdict
+- qwen/claude zero-output `pre_artifact` stall без authored artifacts fail-fast классифицируется как `runner_unavailable`; partial authored artifacts остаются `runtime_contract_failed`
 - provider/API transport transcripts (например `[API Error: ... SSL ...]`) классифицируются как `runner_unavailable` с обязательным сохранением raw stdout/stderr artifacts
 - не является semantic source of truth для canonical `reports/*`/`proposals/*` promotion path
 

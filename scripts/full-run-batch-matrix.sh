@@ -1632,6 +1632,16 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
         "evidence_scope_hits": 0,
         "cross_repo_missing_hits": 0,
         "runtime_flow_issue_hits": 0,
+        "repair_attempts": 0,
+        "repair_exhausted": 0,
+        "fresh_retries": 0,
+        "focused_repairs": 0,
+        "stall_count": 0,
+        "pre_artifact_stalls": 0,
+        "post_artifact_stalls": 0,
+        "zero_output_pre_artifact_stalls": 0,
+        "partial_failure_count": 0,
+        "quality_alerts": 0,
         "issues_counter": Counter(),
         "provider_total": Counter(),
         "provider_hard": Counter(),
@@ -1693,6 +1703,19 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
                 stats[key] = int(stats[key]) + 1
 
         stats["off_topic_hits"] = int(stats["off_topic_hits"]) + field_int(parts, "off_topic_hits", 0)
+        for key in (
+            "repair_attempts",
+            "repair_exhausted",
+            "fresh_retries",
+            "focused_repairs",
+            "stall_count",
+            "pre_artifact_stalls",
+            "post_artifact_stalls",
+            "zero_output_pre_artifact_stalls",
+            "partial_failure_count",
+            "quality_alerts",
+        ):
+            stats[key] = int(stats[key]) + field_int(parts, key, 0)
 
         artifact_source = field(parts, "artifact_source", "")
         if artifact_source != "snapshot":
@@ -1826,6 +1849,8 @@ def strict_blockers(
         reasons.append(f"analysis:evidence-scope hits={stats['evidence_scope_hits']} (expected 0)")
     if int(stats["cross_repo_missing_hits"]) != 0:
         reasons.append(f"analysis:cross-repo-missing hits={stats['cross_repo_missing_hits']} (expected 0)")
+    if int(stats["partial_failure_count"]) != 0:
+        reasons.append(f"partial_failure_count={stats['partial_failure_count']} (expected 0)")
 
     runtime_flow_violations = int(stats["runtime_flow_issue_hits"]) + int(stats["runtime_flow_failed"])
     if runtime_flow_violations != 0:
@@ -1970,6 +1995,16 @@ header = [
     "evidence_scope_hits",
     "cross_repo_missing_hits",
     "runtime_flow_issue_hits",
+    "repair_attempts",
+    "repair_exhausted",
+    "fresh_retries",
+    "focused_repairs",
+    "stall_count",
+    "pre_artifact_stalls",
+    "post_artifact_stalls",
+    "zero_output_pre_artifact_stalls",
+    "partial_failure_count",
+    "quality_alerts",
     "frontend_qwen_status",
     "frontend_claude_status",
     "frontend_codex_status",
@@ -1987,8 +2022,8 @@ tsv_lines = ["\t".join(header)]
 md_lines = [
     "# Profile Matrix",
     "",
-    "| profile_id | sweep_id | batch_id | status | strict | shard_plan_invariant | backend_hard/total | semantic_hard_fail | off_topic_hits | artifact_non_snapshot | evidence_scope | cross_repo_missing | runtime_flow | frontend init (qwen/claude/codex) | frontend cancel (qwen/claude/codex) | blockers | run_matrix | quality_report |",
-    "|---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|---|",
+    "| profile_id | sweep_id | batch_id | status | strict | shard_plan_invariant | backend_hard/total | semantic_hard_fail | off_topic_hits | artifact_non_snapshot | evidence_scope | cross_repo_missing | runtime_flow | repair/stall/partial | frontend init (qwen/claude/codex) | frontend cancel (qwen/claude/codex) | blockers | run_matrix | quality_report |",
+    "|---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|---|---|",
 ]
 
 invariant_status_by_batch, invariant_blockers_by_batch = shard_plan_invariant_status(records)
@@ -2131,6 +2166,16 @@ for rec in records:
                 str(stats["evidence_scope_hits"]),
                 str(stats["cross_repo_missing_hits"]),
                 str(stats["runtime_flow_issue_hits"]),
+                str(stats["repair_attempts"]),
+                str(stats["repair_exhausted"]),
+                str(stats["fresh_retries"]),
+                str(stats["focused_repairs"]),
+                str(stats["stall_count"]),
+                str(stats["pre_artifact_stalls"]),
+                str(stats["post_artifact_stalls"]),
+                str(stats["zero_output_pre_artifact_stalls"]),
+                str(stats["partial_failure_count"]),
+                str(stats["quality_alerts"]),
                 frontend_statuses["frontend_qwen_status"],
                 frontend_statuses["frontend_claude_status"],
                 frontend_statuses["frontend_codex_status"],
@@ -2153,6 +2198,7 @@ for rec in records:
         f"{stats['hard']}/{stats['total']} | {stats['semantic_hard_fail']} | {stats['off_topic_hits']} | {stats['artifact_non_snapshot']} | "
         f"{stats['evidence_scope_hits']} | {stats['cross_repo_missing_hits']} | "
         f"{int(stats['runtime_flow_failed']) + int(stats['runtime_flow_issue_hits'])} | "
+        f"repair={stats['repair_attempts']}; stalls={stats['stall_count']} (pre={stats['pre_artifact_stalls']}; post={stats['post_artifact_stalls']}); zero_pre={stats['zero_output_pre_artifact_stalls']}; partial={stats['partial_failure_count']}; alerts={stats['quality_alerts']} | "
         f"{frontend_statuses['frontend_qwen_status']}/{frontend_statuses['frontend_claude_status']}/{frontend_statuses['frontend_codex_status']} | "
         f"{frontend_statuses['frontend_cancel_qwen_status']}/{frontend_statuses['frontend_cancel_claude_status']}/{frontend_statuses['frontend_cancel_codex_status']} | "
         f"{'; '.join(blockers) if blockers else '-'} | {rec['run_matrix_md']} | {rec['quality_report_md']} |"
@@ -2191,6 +2237,16 @@ for rec in records:
                 "evidence_scope_hits": int(stats["evidence_scope_hits"]),
                 "cross_repo_missing_hits": int(stats["cross_repo_missing_hits"]),
                 "runtime_flow_issue_hits": int(stats["runtime_flow_issue_hits"]),
+                "repair_attempts": int(stats["repair_attempts"]),
+                "repair_exhausted": int(stats["repair_exhausted"]),
+                "fresh_retries": int(stats["fresh_retries"]),
+                "focused_repairs": int(stats["focused_repairs"]),
+                "stall_count": int(stats["stall_count"]),
+                "pre_artifact_stalls": int(stats["pre_artifact_stalls"]),
+                "post_artifact_stalls": int(stats["post_artifact_stalls"]),
+                "zero_output_pre_artifact_stalls": int(stats["zero_output_pre_artifact_stalls"]),
+                "partial_failure_count": int(stats["partial_failure_count"]),
+                "quality_alerts": int(stats["quality_alerts"]),
             },
             "frontend": frontend_statuses,
             "artifacts": {

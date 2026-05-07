@@ -169,8 +169,11 @@ type Task struct {
 	RepoScopes        []string
 	PathScopes        []string
 	StartedAtUTC      time.Time
-	OnOutput          func(OutputChunk)     `json:"-"`
-	OnDiagnostic      func(DiagnosticEvent) `json:"-"`
+	// RuntimeTimeoutProfile is internal lifecycle diagnostics only. It should
+	// not become part of provider task stdin or the runtime artifact contract.
+	RuntimeTimeoutProfile map[string]any        `json:"-"`
+	OnOutput              func(OutputChunk)     `json:"-"`
+	OnDiagnostic          func(DiagnosticEvent) `json:"-"`
 }
 
 type OutputChunk struct {
@@ -188,6 +191,9 @@ type Result struct {
 	Execution contracts.RuntimeExecution
 	Stdout    string
 	Stderr    string
+	// Diagnostics carries provider lifecycle metadata for internal run logs and
+	// raw failure metadata. It is intentionally not part of RuntimeExecution.
+	Diagnostics map[string]any
 }
 
 type Runner interface {

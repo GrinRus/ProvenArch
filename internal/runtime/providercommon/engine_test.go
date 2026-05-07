@@ -60,13 +60,17 @@ func TestRunHeadlessProviderClassifiesSilentRetryExhaustionUnavailable(t *testin
 	t.Parallel()
 
 	task := newDraftTask(t, "run-silent-retry")
+	task.RuntimeTimeoutProfile = map[string]any{
+		"step_timeout_sec":      123,
+		"heartbeat_timeout_sec": 7,
+	}
 	runner := testAdapter{
-		command: writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 5\n"),
+		command: writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 10\n"),
 		activity: ActivityPolicy{
 			MonitorArtifacts:            true,
 			MonitorPreArtifact:          true,
 			PreArtifactStallWindow:      time.Second,
-			RetryPreArtifactStallWindow: time.Second,
+			RetryPreArtifactStallWindow: 5 * time.Second,
 			PostArtifactStallWindow:     20 * time.Millisecond,
 			PollInterval:                5 * time.Millisecond,
 			PostTerminateDrain:          10 * time.Millisecond,
@@ -80,6 +84,84 @@ func TestRunHeadlessProviderClassifiesSilentRetryExhaustionUnavailable(t *testin
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	startedAt := time.Now()
+	_, err := RunHeadlessProvider(ctx, task, runner)
+	elapsed := time.Since(startedAt)
+	if err == nil {
+		t.Fatal("expected runner error")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRunnerUnavailable {
+		t.Fatalf("expected runner_unavailable, got %s (%v)", runnerErr.Code, err)
+	}
+	if elapsed >= 3*time.Second {
+		t.Fatalf("expected fail-fast before 5s fresh retry window, elapsed %s", elapsed)
+	}
+	if runnerErr.RawOutputRefs.Metadata == "" {
+		t.Fatal("expected raw metadata refs to be persisted")
+	}
+	rawMeta, readErr := os.ReadFile(filepath.Join(task.Workspace, runnerErr.RawOutputRefs.Metadata))
+	if readErr != nil {
+		t.Fatalf("read raw metadata: %v", readErr)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(rawMeta, &meta); err != nil {
+		t.Fatalf("parse raw metadata: %v", err)
+	}
+	diagnostics, ok := meta["diagnostics"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected diagnostics map in raw metadata: %#v", meta)
+	}
+	lifecycle, ok := diagnostics["provider_lifecycle"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected provider lifecycle diagnostics: %#v", diagnostics)
+	}
+	if lifecycle["selected_provider"] != string(acpruntime.ProviderQwenCode) {
+		t.Fatalf("expected selected provider diagnostic, got %#v", lifecycle["selected_provider"])
+	}
+	if _, ok := lifecycle["command_path"].(string); !ok {
+		t.Fatalf("expected resolved command path diagnostic, got %#v", lifecycle["command_path"])
+	}
+	timeoutProfile, ok := lifecycle["timeout_profile"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected timeout profile diagnostics: %#v", lifecycle)
+	}
+	if got := int(timeoutProfile["step_timeout_sec"].(float64)); got != 123 {
+		t.Fatalf("expected step timeout diagnostic 123, got %d", got)
+	}
+}
+
+func TestRunHeadlessProviderClassifiesSilentPreArtifactStallBeforeDraftRepair(t *testing.T) {
+	t.Parallel()
+
+	task := newDraftTask(t, "run-silent-before-draft-repair")
+	repairMarker := filepath.Join(task.Workspace, "draft-repair-called")
+	runner := testAdapter{
+		command:            writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 10\n"),
+		draftRepairCommand: writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nprintf called > "+shellQuote(repairMarker)+"\n"),
+		activity: ActivityPolicy{
+			MonitorArtifacts:            true,
+			MonitorPreArtifact:          true,
+			PreArtifactStallWindow:      20 * time.Millisecond,
+			RetryPreArtifactStallWindow: 5 * time.Second,
+			PostArtifactStallWindow:     20 * time.Millisecond,
+			PollInterval:                5 * time.Millisecond,
+			PostTerminateDrain:          10 * time.Millisecond,
+			TerminateGrace:              10 * time.Millisecond,
+		},
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:            true,
+			RepairDraftArtifactsOnce:                 true,
+			RetryInvalidOrMissingArtifactsOnce:       true,
+			ClassifySilentRetryExhaustionUnavailable: true,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	_, err := RunHeadlessProvider(ctx, task, runner)
 	if err == nil {
 		t.Fatal("expected runner error")
@@ -90,6 +172,9 @@ func TestRunHeadlessProviderClassifiesSilentRetryExhaustionUnavailable(t *testin
 	}
 	if runnerErr.Code != acpruntime.ErrorCodeRunnerUnavailable {
 		t.Fatalf("expected runner_unavailable, got %s (%v)", runnerErr.Code, err)
+	}
+	if _, statErr := os.Stat(repairMarker); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("draft repair should not run for silent zero-output pre-artifact stall, statErr=%v", statErr)
 	}
 }
 
@@ -110,6 +195,43 @@ func TestRunHeadlessProviderKeepsInvalidArtifactsAsContractFailure(t *testing.T)
 	}
 	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
 		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+}
+
+func TestRedactArgsMasksInlineSecretFlags(t *testing.T) {
+	t.Parallel()
+
+	got := redactArgs([]string{
+		"--api-key=super-secret",
+		"--token",
+		"next-secret",
+		"--model=qwen",
+	})
+	joined := strings.Join(got, " ")
+	if strings.Contains(joined, "super-secret") || strings.Contains(joined, "next-secret") {
+		t.Fatalf("secret values leaked in redacted args: %#v", got)
+	}
+	if !strings.Contains(joined, "--api-key=<redacted sha256=") {
+		t.Fatalf("expected inline secret flag to be redacted, got %#v", got)
+	}
+	if !strings.Contains(joined, "--model=qwen") {
+		t.Fatalf("non-secret model arg should remain visible, got %#v", got)
+	}
+}
+
+func TestRedactedEnvValueOmitsSecretLikeCommandValues(t *testing.T) {
+	t.Parallel()
+
+	safe := redactedEnvValue("ACP_QWEN_CMD", "/usr/local/bin/qwen")
+	if safe["value"] != "/usr/local/bin/qwen" {
+		t.Fatalf("expected safe provider command value to be visible, got %#v", safe)
+	}
+	secretLike := redactedEnvValue("ACP_QWEN_CMD", "qwen --api-key=super-secret")
+	if _, ok := secretLike["value"]; ok {
+		t.Fatalf("secret-like provider command value should not be exposed: %#v", secretLike)
+	}
+	if secretLike["present"] != true || secretLike["sha256"] == "" {
+		t.Fatalf("expected presence/hash diagnostics for secret-like command value, got %#v", secretLike)
 	}
 }
 
@@ -613,22 +735,21 @@ cat >` + shellQuote(filepath.Join(task.WriteRoot, ValidatorVerdictFileName)) + `
 EOF
 `
 	runner := testAdapter{
-		command:                writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 5\n"),
+		command:                writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nfor i in 1 2 3 4 5; do printf '%s\\n' \"validator diagnostic before stall $i\"; sleep 0.05; done\nsleep 5\n"),
 		validatorRepairCommand: writeEngineScript(t, repairScript),
 		activity: ActivityPolicy{
 			MonitorArtifacts:        true,
 			MonitorPreArtifact:      true,
-			PreArtifactStallWindow:  20 * time.Millisecond,
+			PreArtifactStallWindow:  100 * time.Millisecond,
 			PostArtifactStallWindow: 20 * time.Millisecond,
 			PollInterval:            5 * time.Millisecond,
 			PostTerminateDrain:      10 * time.Millisecond,
 			TerminateGrace:          10 * time.Millisecond,
 		},
 		recovery: RecoveryPolicy{
-			AcceptValidArtifactsAfterStop:            true,
-			RepairValidatorVerdictOnce:               true,
-			RetryInvalidOrMissingArtifactsOnce:       true,
-			ClassifySilentRetryExhaustionUnavailable: true,
+			AcceptValidArtifactsAfterStop:      true,
+			RepairValidatorVerdictOnce:         true,
+			RetryInvalidOrMissingArtifactsOnce: true,
 		},
 	}
 

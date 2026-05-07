@@ -72,6 +72,10 @@ Live `regres fast` small на `qwen-code` и `claude-code` от 2026-05-06 да�
 - [x] Усилить multi-repo semantic prompt/report details для `analysis:cross-repo-missing`
 - [x] Согласовать frontend init timeout с effective timeout profile и сохранить `active_run_timeout` как отдельный reason
 - [x] Добавить provider/model audit diagnostics в runtime/preflight/reporting
+- [x] Добавить fail-fast selected-provider artifact smoke до batch/matrix, чтобы silent host/provider failures становились `operational_host_preflight_failed`
+- [x] Гарантировать terminal run-history cleanup для CLI timeout/cancel/error/panic и harness fallback reconciliation
+- [x] Изолировать frontend cancel smoke от stale cloned run-history/logs/raw и передавать симметричные provider command envs
+- [x] Добавить runtime repair/stall/partial counters в quality summary, batch reports и release verdict aggregation
 - [x] Закрепить dependent `snapshot_reports_missing` after backend terminal failure как skipped/blocked evidence
 - [ ] Выполнить trusted-machine live rerun через direct `scripts/full-run-batch-matrix.sh` на clean committed workspace
 
@@ -93,12 +97,13 @@ Live `regres fast` small на `qwen-code` и `claude-code` от 2026-05-06 да�
 - `internal/runtime/{providercommon,promptcontract,steppolicy,qwencode,claudecode}/*`
 - `internal/artifactquality/policy.go`
 - `internal/orchestrator/runtime_logging.go`
-- `scripts/{write-batch-preflight.py,e2e_batch_report.py,frontend-live-e2e.sh,full-run-batch.sh}`
+- `scripts/{write-batch-preflight.py,e2e_batch_report.py,frontend-live-e2e.sh,full-run-ai-advent.sh,full-run-batch.sh,full-run-batch-matrix.sh}`
 - `scripts/tests/*`, `docs/RELEASE_LIVE_E2E_RUNBOOK.md`, `docs/TESTING_STRATEGY.md`
 
 ### Acceptance criteria
 - [x] Targeted Go tests cover silent no-artifact, partial/malformed artifacts, draft repair missing/valid files and provider/model log audit
-- [x] Python tests cover deeper preflight readiness/model mismatch, cross-repo-missing details, frontend dependent skip and timeout budget behavior
+- [x] Go tests cover zero-output pre-artifact fail-fast, qwen custom-args monitoring, provider lifecycle metadata, run-history terminal guard on cancellation/panic and quality recovery counters
+- [x] Python tests cover deeper preflight readiness/model mismatch/artifact smoke, cross-repo-missing details, frontend dependent skip/isolation/env symmetry, timeout cleanup and quality counter aggregation
 - [x] `make contracts`, `make test`, `make lint`, `make build` complete or any blocker is documented
 - [ ] Trusted-machine rerun uses only direct `scripts/full-run-batch-matrix.sh`; expected verdict has no `runtime_contract_failed`, `runner_unavailable`, `semantic_hard_fail`, or independent frontend failure for the fixed scenarios
 
@@ -110,6 +115,8 @@ Live `regres fast` small на `qwen-code` и `claude-code` от 2026-05-06 да�
 ### Progress log
 - 2026-05-06: Plan opened from live matrix triage and bug-fix matrix.
 - 2026-05-06: Local implementation complete; targeted Go/Python regressions and DoD checks passed. Live rerun remains pending for a clean trusted-machine workspace.
+- 2026-05-07: Implemented live reliability hardening slice: qwen/claude zero-output pre-artifact stalls fail fast as `runner_unavailable`, provider lifecycle diagnostics are persisted/redacted, preflight uses selected-provider artifact smoke, CLI/harness terminalize stale `running` history, frontend cancel uses a sanitized cloned workspace, and quality/batch/matrix reports expose repair/stall/partial counters without blocking successful runs on non-exhausted repair pressure.
+- 2026-05-07: Audit pass tightened context cancellation classification, argv/env secret redaction, zero-output fail-fast ordering before draft/validator repair, actual-stall counter filtering, and full pre/post stall counter reporting in quality/provider/matrix outputs. Local DoD passed; trusted rerun remains pending for a clean committed workspace.
 
 ### Plan ID
 EP-20260502-qwen-codex-regres-fast-live-hardening

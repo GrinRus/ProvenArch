@@ -33,6 +33,20 @@ def write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+def extract_bash_function(script_text: str, name: str) -> str:
+    marker = f"{name}() {{"
+    start = script_text.index(marker)
+    lines = script_text[start:].splitlines()
+    selected: list[str] = []
+    depth = 0
+    for line in lines:
+        selected.append(line)
+        depth += line.count("{") - line.count("}")
+        if selected and depth == 0:
+            return "\n".join(selected)
+    raise AssertionError(f"failed to extract bash function {name}")
+
+
 class BatchFailureClassificationTest(unittest.TestCase):
     def setUp(self) -> None:
         self.module = load_e2e_batch_report_module()
@@ -558,6 +572,107 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual("runtime_contract_failed", result.failure_class)
         self.assertTrue(result.runtime_contract_failed)
         self.assertTrue(result.infra_incomplete_cycle)
+
+    def test_frontend_cancel_workspace_sanitizes_stale_taskrun_history(self) -> None:
+        script = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        functions = "\n\n".join(
+            extract_bash_function(script, name)
+            for name in (
+                "backend_workspace_candidates",
+                "resolve_backend_workspace_dir",
+                "sanitize_frontend_cancel_workspace",
+                "prepare_frontend_cancel_workspace",
+            )
+        )
+        backend_run_dir = self.root / "frontend-cancel-backend" / "qwen-code" / "run1"
+        backend_workspace = backend_run_dir / "headless" / "arch-workspace"
+        output_dir = self.root / "frontend-cancel-output"
+        write_json(
+            backend_workspace / "reports/taskruns/run-history.json",
+            {
+                "items": [
+                    {
+                        "run_id": "run-stale",
+                        "pipeline": "refresh",
+                        "status": "running",
+                        "started_at": "2026-05-07T10:00:00Z",
+                    }
+                ]
+            },
+        )
+        write_text(backend_workspace / "reports/taskruns/logs/run-stale.ndjson", "{}\n")
+        write_text(backend_workspace / "reports/taskruns/raw/run-stale.json", "{}\n")
+        write_text(backend_workspace / "reports/as-is/overview.md", "# Canonical report\n")
+
+        completed = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f"set -euo pipefail\n{functions}\nprepare_frontend_cancel_workspace \"$1\" \"$2\"",
+                "bash",
+                str(backend_run_dir),
+                str(output_dir),
+            ],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        frontend_workspace = Path(completed.stdout.strip())
+        self.assertEqual(output_dir / "frontend-workspace", frontend_workspace)
+        self.assertFalse((frontend_workspace / "reports/taskruns/run-history.json").exists())
+        self.assertFalse((frontend_workspace / "reports/taskruns/logs").exists())
+        self.assertFalse((frontend_workspace / "reports/taskruns/raw").exists())
+        self.assertTrue((frontend_workspace / "reports/as-is/overview.md").is_file())
+        self.assertTrue((backend_workspace / "reports/taskruns/run-history.json").is_file())
+
+    def test_frontend_cancel_passes_codex_command_env(self) -> None:
+        script = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        self.assertGreaterEqual(script.count('"ACP_CODEX_CMD=$ACP_CODEX_CMD_BIN"'), 2)
+
+    def test_python_report_aggregates_runtime_repair_stall_counters(self) -> None:
+        quality_path = self.run_dir / "snapshots" / "refresh-run" / "reports" / "taskruns" / "refresh-run-quality.json"
+        payload = json.loads(quality_path.read_text(encoding="utf-8"))
+        payload.setdefault("totals", {}).update(
+            {
+                "repair_attempts": 2,
+                "repair_exhausted": 1,
+                "fresh_retries": 1,
+                "focused_repairs": 1,
+                "stall_count": 2,
+                "pre_artifact_stalls": 1,
+                "post_artifact_stalls": 1,
+                "zero_output_pre_artifact_stalls": 1,
+                "partial_failure_count": 1,
+            }
+        )
+        payload["quality_signals"] = [
+            {"code": "runtime_quality.stall_pressure", "severity": "warning", "message": "runtime_quality: provider stall pressure was observed"}
+        ]
+        write_json(quality_path, payload)
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=self.run_dir,
+            preflight={},
+        )
+
+        self.assertEqual(2, result.repair_attempts)
+        self.assertEqual(1, result.repair_exhausted)
+        self.assertEqual(1, result.fresh_retries)
+        self.assertEqual(1, result.focused_repairs)
+        self.assertEqual(2, result.stall_count)
+        self.assertEqual(1, result.pre_artifact_stalls)
+        self.assertEqual(1, result.post_artifact_stalls)
+        self.assertEqual(1, result.zero_output_pre_artifact_stalls)
+        self.assertEqual(1, result.partial_failure_count)
+        self.assertEqual(1, result.quality_alerts)
+        self.assertIn("quality:repair-heavy", result.issues)
+        self.assertIn("quality:stall-pressure", result.issues)
+        self.assertIn("quality:partial-failures", result.issues)
+        self.assertTrue(result.quality_gates_failed)
 
     def test_python_report_prefers_runtime_flow_failed_when_validator_verdict_failed(self) -> None:
         run_dir = self.root / "run-validator-verdict-fail-python"

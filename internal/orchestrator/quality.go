@@ -36,15 +36,35 @@ type runtimeStepQuality struct {
 }
 
 type runQualityTotals struct {
-	Steps            int `json:"steps"`
-	SemanticEntities int `json:"semantic_entities"`
-	SemanticEdges    int `json:"semantic_edges"`
-	FindingsCount    int `json:"findings_count"`
-	QuestionsCount   int `json:"questions_count"`
-	CoverageObserved int `json:"coverage_observed"`
-	CoverageMissing  int `json:"coverage_missing"`
-	WarningsCount    int `json:"warnings_count"`
-	SignalScore      int `json:"signal_score"`
+	Steps                       int `json:"steps"`
+	SemanticEntities            int `json:"semantic_entities"`
+	SemanticEdges               int `json:"semantic_edges"`
+	FindingsCount               int `json:"findings_count"`
+	QuestionsCount              int `json:"questions_count"`
+	CoverageObserved            int `json:"coverage_observed"`
+	CoverageMissing             int `json:"coverage_missing"`
+	WarningsCount               int `json:"warnings_count"`
+	SignalScore                 int `json:"signal_score"`
+	RepairAttempts              int `json:"repair_attempts"`
+	RepairExhausted             int `json:"repair_exhausted"`
+	FreshRetries                int `json:"fresh_retries"`
+	FocusedRepairs              int `json:"focused_repairs"`
+	StallCount                  int `json:"stall_count"`
+	PreArtifactStalls           int `json:"pre_artifact_stalls"`
+	PostArtifactStalls          int `json:"post_artifact_stalls"`
+	ZeroOutputPreArtifactStalls int `json:"zero_output_pre_artifact_stalls"`
+	PartialFailureCount         int `json:"partial_failure_count"`
+}
+
+type runtimeRecoveryCounters struct {
+	RepairAttempts              int
+	RepairExhausted             int
+	FreshRetries                int
+	FocusedRepairs              int
+	StallCount                  int
+	PreArtifactStalls           int
+	PostArtifactStalls          int
+	ZeroOutputPreArtifactStalls int
 }
 
 type runFailureClassification struct {
@@ -91,6 +111,7 @@ func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode s
 	runWarnings := append([]string(nil), e.warnings...)
 	qualitySignals := artifactQualitySignalsFromWarnings(e.warnings)
 	qualitySignals = append(qualitySignals, assessLiveReportSurfaceSignals(e.workspace, renderContext, status)...)
+	qualitySignals = append(qualitySignals, runtimeRecoveryQualitySignals(e.runtimeRecoveryCounters, len(e.partialFailures))...)
 	for _, signal := range qualitySignals {
 		runWarnings = append(runWarnings, signal.Message)
 	}
@@ -121,6 +142,15 @@ func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode s
 		totals.QuestionsCount +
 		totals.CoverageObserved +
 		totals.CoverageMissing
+	totals.RepairAttempts = e.runtimeRecoveryCounters.RepairAttempts
+	totals.RepairExhausted = e.runtimeRecoveryCounters.RepairExhausted
+	totals.FreshRetries = e.runtimeRecoveryCounters.FreshRetries
+	totals.FocusedRepairs = e.runtimeRecoveryCounters.FocusedRepairs
+	totals.StallCount = e.runtimeRecoveryCounters.StallCount
+	totals.PreArtifactStalls = e.runtimeRecoveryCounters.PreArtifactStalls
+	totals.PostArtifactStalls = e.runtimeRecoveryCounters.PostArtifactStalls
+	totals.ZeroOutputPreArtifactStalls = e.runtimeRecoveryCounters.ZeroOutputPreArtifactStalls
+	totals.PartialFailureCount = len(e.partialFailures)
 
 	summary := runQualitySummary{
 		Version:         1,
@@ -149,9 +179,18 @@ func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode s
 		return Artifact{}, err
 	}
 	e.logInfo(e.stepStatus.CurrentStep, "", "run quality summary persisted", map[string]any{
-		"path":           path,
-		"signal_score":   totals.SignalScore,
-		"quality_alerts": len(qualitySignals),
+		"path":                            path,
+		"signal_score":                    totals.SignalScore,
+		"quality_alerts":                  len(qualitySignals),
+		"repair_attempts":                 totals.RepairAttempts,
+		"repair_exhausted":                totals.RepairExhausted,
+		"fresh_retries":                   totals.FreshRetries,
+		"focused_repairs":                 totals.FocusedRepairs,
+		"stall_count":                     totals.StallCount,
+		"pre_artifact_stalls":             totals.PreArtifactStalls,
+		"post_artifact_stalls":            totals.PostArtifactStalls,
+		"zero_output_pre_artifact_stalls": totals.ZeroOutputPreArtifactStalls,
+		"partial_failure_count":           totals.PartialFailureCount,
 	})
 	return Artifact{Path: path, Kind: "taskrun", Label: "Run Quality Summary"}, nil
 }
@@ -163,6 +202,152 @@ func assessLiveReportSurfaceWarnings(ws workspace.Root, ctx reports.ReportRender
 		warnings = append(warnings, signal.Message)
 	}
 	return normalizeOrderedUniqueStrings(warnings)
+}
+
+func runtimeRecoveryQualitySignals(counters runtimeRecoveryCounters, partialFailureCount int) []runQualitySignal {
+	signals := []runQualitySignal{}
+	if counters.RepairAttempts >= 2 {
+		signals = append(signals, runQualitySignal{
+			Code:     "runtime_quality.repair_heavy",
+			Severity: "warning",
+			Message:  "runtime_quality: provider recovery was repair-heavy",
+		})
+	}
+	if counters.RepairExhausted > 0 {
+		signals = append(signals, runQualitySignal{
+			Code:     "runtime_quality.repair_exhausted",
+			Severity: "warning",
+			Message:  "runtime_quality: provider recovery was exhausted",
+		})
+	}
+	if counters.StallCount > 0 {
+		signals = append(signals, runQualitySignal{
+			Code:     "runtime_quality.stall_pressure",
+			Severity: "warning",
+			Message:  "runtime_quality: provider stall pressure was observed",
+		})
+	}
+	if counters.ZeroOutputPreArtifactStalls > 0 {
+		signals = append(signals, runQualitySignal{
+			Code:     "runtime_quality.zero_output_pre_artifact_stalls",
+			Severity: "warning",
+			Message:  "runtime_quality: zero-output pre-artifact stalls were observed",
+		})
+	}
+	if partialFailureCount > 0 {
+		signals = append(signals, runQualitySignal{
+			Code:     "runtime_quality.partial_failures",
+			Severity: "warning",
+			Message:  "runtime_quality: partial shard failures were recorded",
+		})
+	}
+	return normalizeRunQualitySignals(signals)
+}
+
+func (e *pipelineExecution) recordRuntimeDiagnosticCounters(event acpruntime.DiagnosticEvent) {
+	message := strings.ToLower(strings.TrimSpace(event.Message))
+	fields := event.Fields
+	recoveryMode := diagnosticFieldString(fields, "recovery_mode")
+	action := diagnosticFieldString(fields, "action")
+
+	if strings.Contains(message, "repair scheduled") {
+		e.runtimeRecoveryCounters.RepairAttempts++
+		if strings.Contains(message, "focused artifact repair") ||
+			strings.Contains(action, "repair") ||
+			strings.Contains(recoveryMode, "repair") {
+			e.runtimeRecoveryCounters.FocusedRepairs++
+		}
+	}
+	if message == "retry scheduled" && (recoveryMode == "fresh_process" || action == "fresh_process_after_invalid_artifacts") {
+		e.runtimeRecoveryCounters.RepairAttempts++
+		e.runtimeRecoveryCounters.FreshRetries++
+	}
+	if strings.Contains(message, "exhausted") {
+		e.runtimeRecoveryCounters.RepairExhausted++
+	}
+	if diagnosticFieldBool(fields, "zero_output_pre_artifact_stall") {
+		e.runtimeRecoveryCounters.ZeroOutputPreArtifactStalls++
+	}
+
+	phase := diagnosticFieldString(fields, "stall_phase")
+	if phase == "" || !isActualRuntimeStallDiagnostic(message, fields) {
+		return
+	}
+	switch phase {
+	case "pre_artifact":
+		e.runtimeRecoveryCounters.StallCount++
+		e.runtimeRecoveryCounters.PreArtifactStalls++
+	case "post_artifact":
+		e.runtimeRecoveryCounters.StallCount++
+		e.runtimeRecoveryCounters.PostArtifactStalls++
+	}
+}
+
+func isActualRuntimeStallDiagnostic(message string, fields map[string]any) bool {
+	action := diagnosticFieldString(fields, "action")
+	recoveryMode := diagnosticFieldString(fields, "recovery_mode")
+	validationError := diagnosticFieldString(fields, "validation_error")
+	switch message {
+	case "retry scheduled":
+		return action == "terminate_and_validate"
+	case "retry exhausted":
+		return true
+	case "retry completed":
+		return recoveryMode == "fresh_process_artifact_only"
+	case "focused artifact repair completed", "collect manifest repair completed":
+		return true
+	case "focused artifact repair exhausted", "collect manifest repair exhausted":
+		return strings.Contains(validationError, "runtime_stalled")
+	default:
+		return false
+	}
+}
+
+func diagnosticFieldString(fields map[string]any, key string) string {
+	if len(fields) == 0 {
+		return ""
+	}
+	value, ok := fields[key]
+	if !ok || value == nil {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return strings.ToLower(strings.TrimSpace(typed))
+	default:
+		return strings.ToLower(strings.TrimSpace(jsonScalarString(typed)))
+	}
+}
+
+func diagnosticFieldBool(fields map[string]any, key string) bool {
+	if len(fields) == 0 {
+		return false
+	}
+	value, ok := fields[key]
+	if !ok || value == nil {
+		return false
+	}
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(strings.TrimSpace(typed), "true") || strings.TrimSpace(typed) == "1"
+	default:
+		return false
+	}
+}
+
+func jsonScalarString(value any) string {
+	switch typed := value.(type) {
+	case []byte:
+		return string(typed)
+	default:
+		raw, err := json.Marshal(typed)
+		if err != nil {
+			return ""
+		}
+		return strings.Trim(string(raw), `"`)
+	}
 }
 
 func assessLiveReportSurfaceSignals(ws workspace.Root, ctx reports.ReportRenderContext, status RunStatus) []runQualitySignal {
