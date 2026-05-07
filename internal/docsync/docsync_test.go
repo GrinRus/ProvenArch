@@ -332,12 +332,13 @@ func TestPlansRemainActiveOnlyAfterCleanupClosure(t *testing.T) {
 	}
 	for _, marker := range []string{
 		"EP-20260507-trusted-live-validation",
-		"EP-20260507-provider-reporting-refactor",
 		"EP-20260507-cleanup-owner-decisions",
 	} {
 		assertContains(t, content, marker)
 		assertContains(t, reconciliation, marker)
 	}
+	assertContains(t, archive, "EP-20260507-provider-reporting-refactor")
+	assertContains(t, reconciliation, "EP-20260507-provider-reporting-refactor")
 	assertContains(t, archive, "Reconciled active plans from 2026-05-07")
 	assertContains(t, archive, "EP-20260420-regres-small-live-triage")
 }

@@ -55,7 +55,7 @@ EP-YYYYMMDD-<slug>
 ---
 
 ## Active Plans
-Tracker reconciliation from 2026-05-07 consolidated historical active plans into the three open slices below. Detailed evidence and classification are archived in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`; original historical active plan text was moved to `docs/archive/PLANS_ARCHIVE_2026-05.md` under "Reconciled active plans from 2026-05-07".
+Tracker reconciliation from 2026-05-07 consolidated historical active plans into the remaining open slices below. Detailed evidence and classification are archived in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`; original historical active plan text was moved to `docs/archive/PLANS_ARCHIVE_2026-05.md` under "Reconciled active plans from 2026-05-07".
 
 ### Plan ID
 EP-20260507-trusted-live-validation
@@ -103,52 +103,6 @@ Historical active plans from 2026-04-20 through 2026-05-06 repeatedly ended with
 
 ### Progress log
 - 2026-05-07: Created by tracker reconciliation. Consolidates live rerun gates from historical active plans; no live matrix was run in this reconciliation slice.
-
-### Plan ID
-EP-20260507-provider-reporting-refactor
-
-### Context
-The local runtime/reporting behavior is already protected by targeted tests, but `EP-20260502-qwen-codex-regres-fast-live-hardening` left explicit non-blocking maintainability follow-ups: focused recovery lifecycle duplication, include-dir helper duplication, prompt builder density, and report classifier sprawl.
-
-### Goals (must have)
-- [ ] Extract a shared focused-recovery lifecycle helper in `internal/runtime/providercommon` while preserving mode-specific eligibility, diagnostics, write-set guards, validation, and error codes
-- [ ] Deduplicate headless include-dir helpers without broadening validator repair read surface beyond `write_root + /staging/final`
-- [ ] Split or factor prompt contract builders by collect, validator, and draft domains without changing literal prompt intent unless tests change first
-- [ ] Extract runner-noise, terminal-success, focused-recovery, and stale-classification helpers from `scripts/e2e_batch_report.py`
-- [ ] Keep public JSON/TSV/Markdown report shapes identical where tests assert them
-- [ ] Run characterization tests before each extraction and full DoD after the slice
-
-### Non-goals
-- [x] Do not change schemas, provider ids, public API, live matrix contracts, release verdict shape, or required CI
-- [x] Do not change prompt intent/tokens as part of a pure refactor without updating prompt tests and docs first
-- [x] Do not run live E2E just for behavior-preserving refactors
-
-### Approach
-1) Add or identify characterization tests for current recovery, include-dir, prompt, and report classifier behavior.
-2) Extract one helper family at a time and run targeted tests after each extraction.
-3) Keep diffs mechanical; if behavior changes are discovered, split them into a separate fix slice.
-4) Run `make contracts`, `make test`, `make lint`, `make build` before commit.
-
-### Files expected to change
-- `internal/runtime/providercommon/*`
-- `internal/runtime/headless_include_dirs.go`
-- `internal/runtime/promptcontract/*`
-- `scripts/e2e_batch_report.py`
-- related Go/Python tests
-
-### Acceptance criteria
-- [ ] Existing provider recovery tests pass with unchanged failure classes and diagnostics
-- [ ] Include-dir tests prove validator repair still reads only verdict and staged final roots
-- [ ] Prompt contract tests prove collect/validator/draft prompt intent remains stable
-- [ ] Report tests prove `release_verdict_*`, `profile_matrix_*`, `run_matrix_*`, and `quality_report_*` shapes remain compatible
-- [ ] Full DoD passes
-
-### Risks
-- Over-eager extraction can hide mode-specific recovery behavior; keep helper APIs narrow and test-driven.
-- Report helper extraction can accidentally alter classifier precedence; require shape and precedence tests before commit.
-
-### Progress log
-- 2026-05-07: Created by tracker reconciliation from non-blocking refactor follow-ups in `EP-20260502-qwen-codex-regres-fast-live-hardening`.
 
 ### Plan ID
 EP-20260507-cleanup-owner-decisions

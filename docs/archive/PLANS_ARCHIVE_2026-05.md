@@ -3,6 +3,59 @@
 Closed ExecPlans archived from `docs/PLANS.md` in May 2026.
 
 ### Plan ID
+EP-20260507-provider-reporting-refactor
+
+### Context
+The local runtime/reporting behavior was already protected by targeted tests, but `EP-20260502-qwen-codex-regres-fast-live-hardening` left explicit non-blocking maintainability follow-ups: focused recovery lifecycle duplication, include-dir helper duplication, prompt builder density, and report classifier sprawl.
+
+### Goals (must have)
+- [x] Extract a shared focused-recovery lifecycle helper in `internal/runtime/providercommon` while preserving mode-specific eligibility, diagnostics, write-set guards, validation, and error codes
+- [x] Deduplicate headless include-dir helpers without broadening validator repair read surface beyond `write_root + /staging/final`
+- [x] Split or factor prompt contract builders by collect, validator, and draft domains without changing literal prompt intent unless tests change first
+- [x] Extract runner-noise, terminal-success, focused-recovery, and stale-classification helpers from `scripts/e2e_batch_report.py`
+- [x] Keep public JSON/TSV/Markdown report shapes identical where tests assert them
+- [x] Run characterization tests before each extraction and full DoD after the slice
+
+### Non-goals
+- [x] Do not change schemas, provider ids, public API, live matrix contracts, release verdict shape, or required CI
+- [x] Do not change prompt intent/tokens as part of a pure refactor without updating prompt tests and docs first
+- [x] Do not run live E2E just for behavior-preserving refactors
+
+### Approach
+1) Use existing characterization coverage for provider recovery, include-dir, prompt, and report classifier behavior.
+2) Extract one helper family at a time and run targeted tests after extraction.
+3) Keep diffs mechanical; if behavior changes are discovered, split them into a separate fix slice.
+4) Run `make contracts`, `make test`, `make lint`, `make build` before commit.
+
+### Files changed
+- `internal/runtime/providercommon/artifact_recovery.go`
+- `internal/runtime/headless_include_dirs.go`
+- `internal/runtime/promptcontract/*`
+- `scripts/e2e_batch_report.py`
+- `scripts/e2e_report_classifiers.py`
+- `docs/PLANS.md`
+- `docs/archive/PLANS_ARCHIVE_2026-05.md`
+- `internal/docsync/docsync_test.go`
+
+### Acceptance criteria
+- [x] Existing provider recovery tests pass with unchanged failure classes and diagnostics
+- [x] Include-dir tests prove validator repair still reads only verdict and staged final roots
+- [x] Prompt contract tests prove collect/validator/draft prompt intent remains stable
+- [x] Report tests prove `release_verdict_*`, `profile_matrix_*`, `run_matrix_*`, and `quality_report_*` shapes remain compatible
+- [x] Full DoD passes
+
+### Critical analysis
+- Focused recovery extraction is intentionally narrow: `runFocusedArtifactRepairCommand` centralizes command-spec construction, activity policy selection, execution, and command-error classification, while mode-specific snapshot timing, write-set prechecks, post-run write-set guards, artifact validation, and failure codes remain in their existing collect/validator/draft functions.
+- Include-dir extraction uses a single ordered existing-directory accumulator. Targeted tests confirm validator repair remains bounded to `write_root` and staged final roots; repository roots are still excluded from validator repair.
+- Prompt builders were split into collect, validator, and draft files without moving contract text across domains. Existing prompt tests cover shared ordering and focused repair prompt intent; no public prompt pack or schema changed.
+- Report classifier extraction moved pure classifier helpers into `scripts/e2e_report_classifiers.py`. The `e2e_batch_report.py` entrypoint keeps its existing JSON/TSV/Markdown writer ownership and imports helpers through the script directory for direct file-load test compatibility.
+- Residual risk: this is a behavior-preserving refactor, so confidence comes from existing characterization tests and full DoD, not live matrix evidence. Live validation remains in `EP-20260507-trusted-live-validation`.
+
+### Progress log
+- 2026-05-07: Confirmed characterization coverage before extraction with targeted Go runtime/providercommon tests and Python batch classifier tests.
+- 2026-05-07: Extracted focused recovery command execution helper, deduplicated include-dir accumulator logic, split prompt builders by domain, and moved report classifier helpers into a focused Python module. Live E2E was not run for this refactor-only slice.
+
+### Plan ID
 EP-20260507-mvp-hardening-roadmap
 
 ### Context
