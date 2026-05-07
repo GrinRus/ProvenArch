@@ -34,6 +34,7 @@ Runtime write policy:
 - `workspace root` больше не трактуется как implicit write target
 - runtime получает explicit `artifact_root`, `write_root`, `draft_final_root`, `read_context_roots[]`, `step_contract`, `expected_artifacts[]`
 - runtime не имеет права писать в `workspace.yaml`, `schemas/*`, `docs/spec/*`, `charter/*` и анализируемые user repos
+- MVP runtime write audit is detect-only: unexpected mutations of protected workspace surfaces or analyzed repo working trees are surfaced as run warnings/logs (`runtime_write_audit_unexpected_mutation`, `runtime_write_audit_repo_skipped`) and do not fail, restore, or sandbox the provider process
 
 > MVP policy фиксирует step-scoped runtime provider contract: effective provider для шага выбирается как `workspace step override > CLI/env global provider > claude-code`; semantic stdout payloads не поддерживаются.
 > CLI/process runtime mode задаётся флагом `--runtime fake|headless` (`fake` default, `headless` opt-in), global fallback provider — `--runtime-provider claude-code|qwen-code|codex-code` (env fallback `ACP_RUNTIME_PROVIDER`).
@@ -175,6 +176,7 @@ Canonical MVP runtime shape:
 - `step1` semantic provenance evidence (`entities/edges/findings[].provenance.evidence[]`) обязаны содержать non-empty `repo` + `path`; citation-only semantic evidence objects невалидны
 - semantic source of truth для `step3` — `validator-verdict.json.findings[]` и `validator-verdict.json.questions[]`
 - runtime execution metadata сохраняют только execution context, status, warnings и raw-output references
+- raw provider stdout/stderr diagnostics are redacted for common secret-like bearer/token/password/api-key forms before persistence and run-log streaming; stdout/stderr remain diagnostic only
 - deterministic fake runtime пишет provider `fake`; headless adapters пишут `claude-code`, `qwen-code` или `codex-code`
 
 ## Init pipeline

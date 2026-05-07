@@ -149,7 +149,9 @@ func (executor defaultRuntimeTaskExecutor) RunRuntimeTask(ctx context.Context, r
 	}
 	defer stopHeartbeat()
 
+	writeAudit := beginRuntimeWriteAudit(task)
 	result, err := runner.Run(taskCtx, task)
+	e.completeRuntimeWriteAudit(stepID, domainID, task, writeAudit)
 	if err != nil {
 		if isDraftOnlyRuntimeStep(stepID) {
 			if _, _, draftErr := validateRequiredRuntimeDraftArtifacts(task); draftErr != nil {

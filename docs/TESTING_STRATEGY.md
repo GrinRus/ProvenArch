@@ -287,10 +287,11 @@ Implemented additional jobs:
   - approved profile ids: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
   - non-release slices: `examples/e2e-matrix.regres-*.yaml`
   - diagnostic slices for generated selectors: `examples/e2e-matrix.smoke-tiny.bank.yaml`, `examples/e2e-matrix.diagnostic.sentry.yaml`
-  - release-specific slices, `baseline` + `parallel-default`, strict blockers и release verdict policy живут только в `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
-  - matrix invariant: для одного `profile_id` shard-plan должен совпадать между `baseline` и `parallel-default`
-  - для `source_kind=git_url` refs должны быть pinned
-  - итоговый release decision брать только из `reports/release_verdict_<matrix-id>.json`
+	  - release-specific slices, `baseline` + `parallel-default`, strict blockers и release verdict policy живут только в `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+	  - matrix invariant: для одного `profile_id` shard-plan должен совпадать между `baseline` и `parallel-default`
+	  - для `source_kind=git_url` refs должны быть pinned
+	  - итоговый release decision брать только из `reports/release_verdict_<matrix-id>.json`
+	  - pre-tag/offline verifier: `python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json`; скрипт только проверяет существующий verdict JSON и не запускает live harness
 - `scripts/frontend-live-e2e.sh` и `npm run e2e:live --prefix ui` используют Playwright:
   - local wrapper поддерживает `claude-code`, `qwen-code`, `codex-code`
   - canonical toggles: `UI_E2E_EXPECTED_REPO_COUNT`, `UI_E2E_SCENARIO=init-inspect|cancel-refresh`, `UI_E2E_OUTPUT_DIR`
@@ -305,6 +306,7 @@ Implemented additional jobs:
 - любое изменение schema/spec/examples требует update fixtures/golden в том же PR
 - live headless provider smoke не блокирует merge; для обязательного CI используется только `contracts`, `backend`, `ui`, `golden`, `smoke-cli`, `smoke-api`
 - release gate выполняется вручную перед релизом на trusted машине по `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- pre-tag release check использует `scripts/verify-release-verdict.py` поверх уже созданного `reports/release_verdict_<matrix-id>.json`; это не required CI и не live runner
 - scenario fixtures и golden outputs считаются канонической regression surface до появления production-scale test corpus
 - optional readable golden export доступен для review-diff:
   - `ACP_EXPORT_SCENARIO_GOLDEN=1 go test ./internal/orchestrator -run TestScenarioFixturesDeterministicInitPipeline -count=1`

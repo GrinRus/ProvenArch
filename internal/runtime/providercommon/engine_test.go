@@ -235,6 +235,58 @@ func TestRedactedEnvValueOmitsSecretLikeCommandValues(t *testing.T) {
 	}
 }
 
+func TestForwardStreamOutputRedactsSecretLikeText(t *testing.T) {
+	t.Parallel()
+
+	var chunks []acpruntime.OutputChunk
+	task := acpruntime.Task{
+		OnOutput: func(chunk acpruntime.OutputChunk) {
+			chunks = append(chunks, chunk)
+		},
+	}
+	budget := &streamedOutputBudget{}
+
+	forwardStreamOutput(task, acpruntime.OutputStreamStdout, "Authorization: Bearer stream-secret\n--token stream-token\nordinary text\n", budget)
+
+	if len(chunks) != 3 {
+		t.Fatalf("expected 3 chunks, got %#v", chunks)
+	}
+	combined := chunks[0].Text + "\n" + chunks[1].Text + "\n" + chunks[2].Text
+	if strings.Contains(combined, "stream-secret") || strings.Contains(combined, "stream-token") {
+		t.Fatalf("streamed output leaked secrets:\n%s", combined)
+	}
+	if !strings.Contains(combined, "ordinary text") {
+		t.Fatalf("streamed output lost non-secret text:\n%s", combined)
+	}
+}
+
+func TestForwardStreamOutputCountsRedactedBytesForCap(t *testing.T) {
+	t.Parallel()
+
+	var chunks []acpruntime.OutputChunk
+	task := acpruntime.Task{
+		OnOutput: func(chunk acpruntime.OutputChunk) {
+			chunks = append(chunks, chunk)
+		},
+	}
+	redactedLine := "--token <redacted>"
+	budget := &streamedOutputBudget{
+		forwardedBytes: acpruntime.RuntimeOutputStreamHardCapBytes - len([]byte(redactedLine)),
+	}
+
+	forwardStreamOutput(task, acpruntime.OutputStreamStdout, "--token "+strings.Repeat("s", 1024)+"\n", budget)
+
+	if len(chunks) != 1 {
+		t.Fatalf("expected one forwarded chunk, got %#v", chunks)
+	}
+	if chunks[0].Truncated {
+		t.Fatalf("expected redacted line to fit output cap, got truncated chunk: %#v", chunks[0])
+	}
+	if chunks[0].Text != redactedLine {
+		t.Fatalf("expected redacted line %q, got %q", redactedLine, chunks[0].Text)
+	}
+}
+
 func TestRunHeadlessProviderClassifiesUnavailableMarkerWhenArtifactsMissing(t *testing.T) {
 	t.Parallel()
 

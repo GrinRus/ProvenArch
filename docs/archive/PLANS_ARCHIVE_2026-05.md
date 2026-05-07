@@ -3,6 +3,57 @@
 Closed ExecPlans archived from `docs/PLANS.md` in May 2026.
 
 ### Plan ID
+EP-20260507-mvp-hardening-roadmap
+
+### Context
+Read-only MVP architecture audit found three active hardening risks: editable artifact write path authorization, missing detect-only diagnostics for headless runtime writes outside staged roots, and raw provider transcript persistence without content redaction. The same slice also adds a non-live release verdict verifier and small behavior-preserving maintainability extractions.
+
+### Goals (must have)
+- [x] Harden `POST /api/artifacts/write` path normalization before authorization without changing endpoint shape
+- [x] Add detect-only runtime write audit diagnostics for protected workspace surfaces and analyzed repo roots
+- [x] Redact secret-like provider stdout/stderr before persisted raw artifacts and streamed run logs
+- [x] Add non-live `scripts/verify-release-verdict.py` pre-tag verifier for existing release verdict JSON
+- [x] Sync docs/testing/runbook and keep required CI free of live provider dependencies
+- [x] Perform behavior-preserving refactor extractions only where tests keep contracts stable
+- [x] Run DoD: `make contracts`, `make test`, `make lint`, `make build`
+
+### Non-goals
+- [x] Do not add provider sandboxing, fail-run write enforcement, file restore, or schema changes
+- [x] Do not change provider IDs, CLI flags, runtime artifact schemas, release matrix contract, or required CI
+- [x] Do not add wrapper scripts around `scripts/full-run-batch-matrix.sh`
+- [x] Do not run live E2E/release gate as part of this implementation
+
+### Approach
+1) Normalize editable artifact paths with a shared server-side helper and add traversal/absolute negative tests.
+2) Capture before/after runtime write audit snapshots around `runner.Run`; log warnings only, never fail or restore.
+3) Introduce shared runtime text redaction and apply it to raw-output persistence and runtime output forwarding.
+4) Add release verdict verifier script + Python tests and document the manual pre-tag check.
+5) Extract low-risk docflow/UI helpers without changing behavior, then run full DoD.
+
+### Files expected to change
+- `internal/api/server.go`, `internal/api/server_test.go`
+- `internal/orchestrator/*`, `internal/runtime/*`
+- `scripts/verify-release-verdict.py`, `scripts/tests/*`
+- `docs/PLANS.md`, `docs/TESTING_STRATEGY.md`, `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- selected UI/orchestrator refactor files
+
+### Acceptance criteria
+- [x] API rejects `charter/../workspace.yaml`, `skills/../schemas/x`, `../charter/x`, `/tmp/x`, `charter`, and `skills`
+- [x] Runtime write audit emits warnings for protected workspace/repo mutations and skip diagnostics for non-git roots without failing runs
+- [x] Raw provider outputs and streamed logs redact bearer/token/password/api-key forms while preserving truncation behavior
+- [x] Release verifier accepts PASS/READY/passed and rejects FAIL, missing, invalid, or incomplete verdict JSON
+- [x] Existing contracts, tests, lint, and build pass
+
+### Risks
+- Detect-only audit can produce warnings for intentionally dirty local repos; compare before/after state to avoid noisy baseline dirt.
+- Redaction patterns can over-redact diagnostic text; keep patterns limited to secret-like keys and bearer tokens.
+- Refactors can destabilize a large orchestrator surface; keep changes mechanical and covered by existing tests.
+
+### Progress log
+- 2026-05-07: Plan opened from architecture audit remediation roadmap; implementation in progress.
+- 2026-05-07: Hardened artifact write path normalization, added detect-only runtime write audit, redacted provider output surfaces, added release verdict verifier, and completed behavior-preserving docflow/UI extractions. DoD passed: `make contracts`, `make test`, `make lint`, `make build`. Live E2E/release gate was not run.
+
+### Plan ID
 EP-20260504-public-oss-release-readiness
 
 ### Context

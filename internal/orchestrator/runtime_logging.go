@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtime/secretredact"
 )
 
 func (e *pipelineExecution) addWarning(message string) {
@@ -34,7 +35,7 @@ func (e *pipelineExecution) logError(stepID string, domainID string, message str
 }
 
 func (e *pipelineExecution) logRuntimeOutput(stepID string, domainID string, provider acpruntime.Provider, chunk acpruntime.OutputChunk) {
-	message := strings.TrimRight(chunk.Text, "\r\n")
+	message := secretredact.RedactText(strings.TrimRight(chunk.Text, "\r\n"))
 	if strings.TrimSpace(message) == "" {
 		return
 	}
