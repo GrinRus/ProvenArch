@@ -27,7 +27,7 @@ No live matrix was run as part of this reconciliation.
 | `EP-20260422-docflow-runtime-residuals` | already implemented locally; needs trusted live rerun | Evidence includes strict as-is manifest tests in `internal/runtimedrafts/manifest_test.go`, non-collect working directory tests in `internal/runtime/headless_include_dirs_test.go`, document-id and semantic alias tests in `internal/orchestrator/docflow_test.go`, owner-gap downgrade in `internal/orchestrator/docflow_pipeline_test.go`, and `runtime_flow_failed` classifier tests. | Consolidated into `EP-20260507-trusted-live-validation`. |
 | `EP-20260421-cleanup-owner-followups` | owner-gated | Its open items require explicit owner decisions before moving packages or deleting archive/history surfaces. | Consolidated into `EP-20260507-cleanup-owner-decisions`. |
 | `EP-20260420-regres-small-live-triage` | superseded by later triage/fix cycles; remaining work is live validation | Later active plans record multiple live triage cycles and local fixes; the original triage process is no longer the active unit of work. | Consolidated into `EP-20260507-trusted-live-validation`. |
-| `docs/BACKLOG.md` cleanup follow-ups | owner-gated | Items explicitly name owners and risks for readable fixtures, duplicated readable fixtures, and `docs/LOCAL_FULL_RUN_AI_ADVENT.md`. | Consolidated into `EP-20260507-cleanup-owner-decisions`. |
+| `docs/BACKLOG.md` cleanup follow-ups | owner-gated | Items explicitly name owners and risks for readable fixtures, duplicated readable fixtures, `docs/LOCAL_FULL_RUN_AI_ADVENT.md`, and the long-term role of `docs/BACKLOG.md` as active planning surface vs reference/history backlog. | Consolidated into `EP-20260507-cleanup-owner-decisions`. |
 
 ## Critical Analysis
 
