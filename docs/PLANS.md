@@ -91,9 +91,19 @@ Historical active plans from 2026-04-20 through 2026-05-06 repeatedly ended with
 | Check | Status | Evidence / note |
 |---|---|---|
 | Clean committed local worktree | ready | `git status --short` was empty at `c1f58b5`. |
-| Required provider binaries in PATH | ready for auth check | `qwen=/opt/homebrew/bin/qwen`, `claude=/Users/griogrii_riabov/.local/bin/claude`, `codex=/opt/homebrew/bin/codex`. Provider auth/quota was not probed. |
+| Required provider binaries in PATH | ready for auth check | `command -v qwen`, `command -v claude`, and `command -v codex` returned local paths. Exact machine-local paths are intentionally omitted from the versioned plan; provider auth/quota was not probed. |
 | Canonical harness inputs present | ready | `examples/e2e-matrix.regres-fast.bank-openedx.yaml`, `examples/e2e-matrix.regres-fast.openstack.yaml`, `scripts/full-run-batch-matrix.sh`, and `scripts/verify-release-verdict.py` exist. |
 | Live execution permission | blocked | No live matrix was started in this local implementation pass. Running live validation still needs explicit trusted-machine approval and direct `scripts/full-run-batch-matrix.sh` invocation. |
+
+### Critical analysis (2026-05-08)
+
+This slice is not closed and must not be treated as release evidence. The local worktree check and provider binary discovery only prove that the current machine can find command names; they do not prove provider authentication, quota availability, pinned repo/path readiness, matrix pass/fail status, or release readiness.
+
+Residual blockers:
+- live matrix execution still requires explicit trusted-machine approval;
+- provider auth/quota remains unverified;
+- pass criteria remain completely open until direct `scripts/full-run-batch-matrix.sh` runs produce matrix/report artifacts;
+- release readiness still requires `reports/release_verdict_<matrix-id>.json` plus `scripts/verify-release-verdict.py` when a release verdict is used.
 
 ### Files expected to change
 - `docs/PLANS.md`
@@ -152,6 +162,17 @@ Safe cleanup is already complete, but `docs/PLANS.md` and `docs/BACKLOG.md` reta
 | `fixtures/scenarios/*/golden/readable/*` | 90 tracked readable files exist. `docs/BASELINE_POLICY.md`, `docs/TESTING_STRATEGY.md`, `fixtures/README.md`, and `internal/docsync/docsync_test.go` explicitly describe them as tracked baseline/release surface and human-readable deterministic export. | Retain tracked readable exports; remove and rely on machine-readable golden only; generate on demand without tracking. | Retain; current docs/tests make them intentional, not accidental generated output. |
 | Duplicated readable scenario fixtures | Hash scan shows many identical files repeated across the three readable scenario exports, including `reports/as-is/*`, `reports/diagrams/*`, `model/entities/svc.payments.yaml`, and proposal docs. | Keep duplicated per-scenario snapshots; dedupe via shared fixture layer; remove readable exports after replacing review-diff workflow. | Retain duplicated snapshots; dedupe needs a QA/tooling owner decision because per-scenario full-tree diffs are the current review UX. |
 | `docs/LOCAL_FULL_RUN_AI_ADVENT.md` | Referenced from README, `docs/TESTING_STRATEGY.md`, `internal/docsync/docsync_test.go`, historical archives, and `docs/RELEASE_LIVE_E2E_RUNBOOK.md`; `scripts/tests/full_run_ai_advent_layout_test.py` directly asserts behavior of the paired script. | Keep as separate local runbook; fold into release runbook appendix; replace with pointer-only doc. | Retain as a separate runbook until trusted live validation is complete and docs owner approves consolidation. |
+
+### Critical analysis (2026-05-08)
+
+This slice is evidence-complete but decision-blocked. The gathered evidence points toward retaining all cleanup candidates by default because the candidates are referenced by tests/docs or are intentionally tracked review surfaces. However, retaining by default is not the same as resolving ownership: no package move, archive collapse, fixture deletion, fixture dedupe, or runbook consolidation should happen until maintainers/docs/tooling owners choose an option.
+
+Residual blockers:
+- no owner decision has been provided for test-only package placement;
+- no owner decision has been provided for archive/snapshot retention;
+- no owner decision has been provided for readable fixture retention or dedupe;
+- no owner decision has been provided for `docs/LOCAL_FULL_RUN_AI_ADVENT.md` consolidation;
+- no destructive cleanup was performed, so the final implementation goal remains intentionally open.
 
 ### Files expected to change
 - `docs/PLANS.md`
