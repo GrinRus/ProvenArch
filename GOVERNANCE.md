@@ -15,6 +15,8 @@ Maintainers are responsible for:
 
 Changes that affect public CLI behavior, workspace contracts, schemas, release policy, or runtime trust boundaries require maintainer review.
 
+While ProvenArch has a single maintainer, the protected-branch gate is required CI plus maintainer self-review before merge. Mandatory approving reviews and CODEOWNERS review are enabled once there is a second maintainer/collaborator who can independently approve changes.
+
 Breaking changes before `v1.0.0` are allowed when they are documented in `CHANGELOG.md`, release notes, and affected specs. After `v1.0.0`, breaking changes should require a major version.
 
 ## Release policy
