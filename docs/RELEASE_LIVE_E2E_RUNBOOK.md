@@ -534,6 +534,13 @@ Release guard rules:
 - `frontend_e2e_matrix_<batch-id>.md`
 - `frontend_cancel_e2e_matrix_<batch-id>.md`
 
+Pre-tag/offline check:
+```bash
+python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json
+```
+
+Скрипт только проверяет уже созданный `release_verdict_<matrix-id>.json` (`verdict=PASS`, `release_state=RELEASE READY`, `release_contract.contract_status=passed`). Он не запускает live harness и не является wrapper-скриптом поверх `scripts/full-run-batch-matrix.sh`.
+
 Дополнительные для triage:
 - `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/*`
 - `backend-run-classifications.tsv`
@@ -747,6 +754,11 @@ Release `PASS` только если одновременно:
 
 Источник истины для финального решения:
 - `release_verdict_<matrix-id>.md/.json`
+
+Перед tag/release выполнить offline verifier:
+```bash
+python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json
+```
 
 ## 9) Common blockers (операционный triage)
 

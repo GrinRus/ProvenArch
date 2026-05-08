@@ -149,7 +149,7 @@ Primary execution path для `step0..step4`:
 - validator пишет `validator-verdict.json`
 - если collect evidence стал `unusable`, live runtime для `step2.asis_docs`, `step3.findings` и `step4.proposals` не вызывается; orchestrator собирает только triage-only incomplete surface и сохраняет collect как primary root cause
 - owner-gap остаётся visible signal в coverage/findings/questions, но owner-only residual больше не блокирует verdict сам по себе; terminal `validator verdict is FAIL` классифицируется как `runtime_flow_failed`, а не как `runtime_contract_failed`
-- provider-side hard sandbox в текущих headless CLI нет; filesystem isolation обеспечивается только через separated temp roots и step-local `cwd` (`draft_final_root` для draft steps, `write_root` для validator)
+- provider-side hard sandbox в текущих headless CLI нет; filesystem isolation обеспечивается только через separated temp roots и step-local `cwd` (`draft_final_root` для draft steps, `write_root` для validator). Дополнительно ACP делает detect-only audit protected workspace surfaces и analyzed repo working trees, surfacing `runtime_write_audit_unexpected_mutation` / `runtime_write_audit_repo_skipped` как warnings/logs без fail-run/restore/sandbox.
 - только schema/semantic/validator gates разрешают promotion в канонические `reports/as-is/*`, `reports/findings/*`, `reports/coverage/*`, `reports/agent-outputs/*`, `proposals/*`
 - обязательного human gate перед publish больше нет
 
@@ -497,6 +497,7 @@ Persisted runtime execution metadata:
 - selected-provider preflight фиксирует command/model/version readiness и artifact smoke до deep live run; такие blockers являются operational, не product verdict
 - qwen/claude zero-output `pre_artifact` stall без authored artifacts fail-fast классифицируется как `runner_unavailable`; partial authored artifacts остаются `runtime_contract_failed`
 - provider/API transport transcripts (например `[API Error: ... SSL ...]`) классифицируются как `runner_unavailable` с обязательным сохранением raw stdout/stderr artifacts
+- raw stdout/stderr artifacts и runtime output logs redacted for common bearer/token/password/api-key forms before persistence/streaming; transcripts remain diagnostic and never become semantic source of truth
 - не является semantic source of truth для canonical `reports/*`/`proposals/*` promotion path
 
 Primary promotion gate:

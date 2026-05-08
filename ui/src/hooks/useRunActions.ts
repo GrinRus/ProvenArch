@@ -4,7 +4,8 @@ import type { Dispatch } from "react";
 import type { RunListItem, RunStatusResponse } from "../lib/appContracts";
 import { getPipelineRunStatus, listPipelineRuns, requestRunCancel, startPipelineRun } from "../lib/runApi";
 import type { RunExplorerAction } from "../lib/runExplorerState";
-import { activeStatuses, finalStatuses, pickBootstrapRun, reconcileSelectedRunID } from "../lib/runState";
+import { finalStatuses, pickBootstrapRun, reconcileSelectedRunID } from "../lib/runState";
+import { useRunUpdatePolling } from "./useRunUpdatePolling";
 
 type RunActionsContext = {
   dispatch: Dispatch<RunExplorerAction>;
@@ -124,63 +125,7 @@ export function useRunActions({
     }
   }, [handleSelectRun, loadRunList, setRunList]);
 
-  const pollRunUpdates = useCallback(async () => {
-    try {
-      const latestRuns = await loadRunList(100);
-      if (!runId) {
-        return;
-      }
-      const nextSelectedRunID = reconcileSelectedRunID(runId, latestRuns);
-      if (nextSelectedRunID !== runId) {
-        if (nextSelectedRunID && latestRuns.length > 0) {
-          dispatch({ type: "clearRunStatusForRun", runId });
-          resetRunLogs();
-          clearArtifacts();
-          await handleSelectRun(nextSelectedRunID, { silentErrors: true });
-          setRunActionStatus(`Selected run no longer exists; switched to ${nextSelectedRunID}.`);
-          return;
-        }
-        const previousStatus = runStatus?.status ?? null;
-        const currentStatus = await fetchRunStatus(runId, true);
-        if (currentStatus) {
-          if (activeStatuses.has(currentStatus.status)) {
-            await fetchRunLogs(runId, false);
-            return;
-          }
-          const statusChanged = previousStatus !== currentStatus.status;
-          if (statusChanged || !runLogsEOF) {
-            await fetchRunLogsUntilEOF(runId);
-          }
-          return;
-        }
-        dispatch({ type: "clearRunStatusForRun", runId });
-        resetRunLogs();
-        clearArtifacts();
-        if (nextSelectedRunID) {
-          await handleSelectRun(nextSelectedRunID, { silentErrors: true });
-          setRunActionStatus(`Selected run no longer exists; switched to ${nextSelectedRunID}.`);
-        } else {
-          setRunID(null);
-        }
-        return;
-      }
-      const previousStatus = runStatus?.status ?? null;
-      const status = await fetchRunStatus(runId);
-      if (!status) {
-        return;
-      }
-      if (activeStatuses.has(status.status)) {
-        await fetchRunLogs(runId, false);
-        return;
-      }
-      const statusChanged = previousStatus !== status.status;
-      if (statusChanged || !runLogsEOF) {
-        await fetchRunLogsUntilEOF(runId);
-      }
-    } catch {
-      // keep UI responsive even if polling fails temporarily
-    }
-  }, [
+  const pollRunUpdates = useRunUpdatePolling({
     clearArtifacts,
     dispatch,
     fetchRunLogs,
@@ -191,10 +136,10 @@ export function useRunActions({
     resetRunLogs,
     runId,
     runLogsEOF,
-    runStatus?.status,
+    runStatus,
     setRunActionStatus,
     setRunID,
-  ]);
+  });
 
   const handleRunPipeline = useCallback(
     async (pipeline: "init" | "refresh"): Promise<boolean> => {

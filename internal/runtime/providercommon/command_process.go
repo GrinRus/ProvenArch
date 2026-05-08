@@ -18,6 +18,7 @@ import (
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/runnerdiag"
+	"github.com/GrinRus/ProvenArch/internal/runtime/secretredact"
 )
 
 func runProviderCommand(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, policy ActivityPolicy) (acpruntime.Result, error) {
@@ -548,11 +549,12 @@ func forwardStreamOutput(task acpruntime.Task, stream acpruntime.OutputStream, c
 		if budget.truncated {
 			continue
 		}
-		lineBytes := len([]byte(line))
+		redactedLine := secretredact.RedactText(line)
+		lineBytes := len([]byte(redactedLine))
 		nextBytes := budget.forwardedBytes + lineBytes
 		if nextBytes <= acpruntime.RuntimeOutputStreamHardCapBytes {
 			budget.forwardedBytes = nextBytes
-			task.OnOutput(acpruntime.OutputChunk{Stream: stream, Text: line})
+			task.OnOutput(acpruntime.OutputChunk{Stream: stream, Text: redactedLine})
 			continue
 		}
 		budget.truncated = true

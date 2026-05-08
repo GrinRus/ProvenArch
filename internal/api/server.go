@@ -9,6 +9,7 @@ import (
 	"mime"
 	"net/http"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -470,21 +471,57 @@ func (s *Server) handleArtifactsWrite(writer http.ResponseWriter, request *http.
 		writeError(writer, http.StatusBadRequest, "invalid_request_body", "invalid request body")
 		return
 	}
-	path := strings.TrimSpace(payload.Path)
-	if path == "" {
+	artifactPath := strings.TrimSpace(payload.Path)
+	if artifactPath == "" {
 		writeError(writer, http.StatusBadRequest, "artifact_path_required", "path is required")
 		return
 	}
-	if !strings.HasPrefix(path, "charter/") && !strings.HasPrefix(path, "skills/") {
+	artifactPath, ok := normalizeEditableArtifactPath(artifactPath)
+	if !ok {
 		writeError(writer, http.StatusBadRequest, "artifact_path_forbidden", "only charter/* and skills/* are editable through this endpoint")
 		return
 	}
 	ws := s.getWorkspace()
-	if err := ws.WriteFile(path, []byte(payload.Content)); err != nil {
+	if err := ws.WriteFile(artifactPath, []byte(payload.Content)); err != nil {
 		writeError(writer, http.StatusBadRequest, "artifact_write_failed", err.Error())
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"ok": true})
+}
+
+func normalizeEditableArtifactPath(rawPath string) (string, bool) {
+	rawPath = strings.TrimSpace(rawPath)
+	if rawPath == "" || strings.ContainsRune(rawPath, 0) {
+		return "", false
+	}
+	if filepath.IsAbs(rawPath) {
+		return "", false
+	}
+	normalized := strings.ReplaceAll(rawPath, "\\", "/")
+	if path.IsAbs(normalized) || isWindowsAbsolutePath(normalized) {
+		return "", false
+	}
+	for _, segment := range strings.Split(normalized, "/") {
+		if segment == ".." {
+			return "", false
+		}
+	}
+	clean := path.Clean(normalized)
+	if clean == "." || clean == "charter" || clean == "skills" {
+		return "", false
+	}
+	if !strings.HasPrefix(clean, "charter/") && !strings.HasPrefix(clean, "skills/") {
+		return "", false
+	}
+	return clean, true
+}
+
+func isWindowsAbsolutePath(pathValue string) bool {
+	if len(pathValue) >= 3 && pathValue[1] == ':' && pathValue[2] == '/' {
+		drive := pathValue[0]
+		return (drive >= 'A' && drive <= 'Z') || (drive >= 'a' && drive <= 'z')
+	}
+	return strings.HasPrefix(pathValue, "//")
 }
 
 func (s *Server) handleGitCommit(writer http.ResponseWriter, request *http.Request) {

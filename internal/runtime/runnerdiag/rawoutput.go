@@ -14,6 +14,7 @@ import (
 	"time"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtime/secretredact"
 )
 
 const maxStoredOutputBytes = 256 * 1024
@@ -63,11 +64,14 @@ func WriteFailureArtifactsWithMetadata(task acpruntime.Task, provider acpruntime
 	stderrFile := filepath.Join(rawDir, base+"-stderr.log")
 	metaFile := filepath.Join(rawDir, base+"-meta.json")
 
-	stdoutArtifact, err := writeBoundedArtifactFile(stdoutFile, []byte(stdout))
+	redactedStdout := secretredact.RedactText(stdout)
+	redactedStderr := secretredact.RedactText(stderr)
+
+	stdoutArtifact, err := writeBoundedArtifactFile(stdoutFile, []byte(redactedStdout))
 	if err != nil {
 		return FailureArtifacts{}, err
 	}
-	stderrArtifact, err := writeBoundedArtifactFile(stderrFile, []byte(stderr))
+	stderrArtifact, err := writeBoundedArtifactFile(stderrFile, []byte(redactedStderr))
 	if err != nil {
 		return FailureArtifacts{}, err
 	}

@@ -415,6 +415,7 @@ Partial update persisted execution-полей в `workspace.yaml`.
 
 Ограничения:
 - разрешены только `charter/*` и `skills/*`
+- server normalizes path before authorization; absolute paths, `..` traversal and bare `charter`/`skills` roots return `artifact_path_forbidden`
 
 **Request**
 ```json

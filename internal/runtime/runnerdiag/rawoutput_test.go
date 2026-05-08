@@ -95,6 +95,46 @@ func TestWriteFailureArtifactsTruncatesLargeOutput(t *testing.T) {
 	}
 }
 
+func TestWriteFailureArtifactsRedactsSecretLikeOutput(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	task := acpruntime.Task{
+		TaskID:    "task-redact",
+		RunID:     "run-redact",
+		StepID:    "refresh.step1.collect",
+		Workspace: workspace,
+	}
+
+	artifacts, err := WriteFailureArtifacts(
+		task,
+		acpruntime.ProviderQwenCode,
+		"Authorization: Bearer stdout-secret\n--api-key stdout-key\n",
+		"password=stderr-secret token=stderr-token",
+	)
+	if err != nil {
+		t.Fatalf("write failure artifacts: %v", err)
+	}
+
+	stdoutRaw, err := os.ReadFile(filepath.Clean(artifacts.Stdout.Path))
+	if err != nil {
+		t.Fatalf("read stdout artifact: %v", err)
+	}
+	stderrRaw, err := os.ReadFile(filepath.Clean(artifacts.Stderr.Path))
+	if err != nil {
+		t.Fatalf("read stderr artifact: %v", err)
+	}
+	combined := string(stdoutRaw) + "\n" + string(stderrRaw)
+	for _, secret := range []string{"stdout-secret", "stdout-key", "stderr-secret", "stderr-token"} {
+		if strings.Contains(combined, secret) {
+			t.Fatalf("secret %q leaked in raw output artifacts:\n%s", secret, combined)
+		}
+	}
+	if !strings.Contains(combined, "<redacted>") {
+		t.Fatalf("expected redaction marker in raw output artifacts:\n%s", combined)
+	}
+}
+
 func TestWriteFailureArtifactsMetadataIncludesTaskScopes(t *testing.T) {
 	t.Parallel()
 

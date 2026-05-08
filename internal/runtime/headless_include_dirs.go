@@ -26,30 +26,13 @@ func ResolveHeadlessIncludeDirectories(task Task) []string {
 		return resolveCollectHeadlessIncludeDirectories(task)
 	}
 
-	dirs := make([]string, 0, 4)
-	seen := map[string]struct{}{}
-	addDir := func(path string) {
-		path = strings.TrimSpace(path)
-		if path == "" {
-			return
-		}
-		cleaned := filepath.Clean(path)
-		info, err := os.Stat(cleaned)
-		if err != nil || !info.IsDir() {
-			return
-		}
-		if _, ok := seen[cleaned]; ok {
-			return
-		}
-		seen[cleaned] = struct{}{}
-		dirs = append(dirs, cleaned)
-	}
+	dirs := newOrderedExistingDirs(4)
 
 	for _, path := range task.ReadContextRoots {
-		addDir(path)
+		dirs.add(path)
 	}
-	if len(dirs) > 0 {
-		return dirs
+	if dirs.len() > 0 {
+		return dirs.values()
 	}
 
 	workspace := strings.TrimSpace(task.Workspace)
@@ -57,44 +40,27 @@ func ResolveHeadlessIncludeDirectories(task Task) []string {
 		return nil
 	}
 
-	addDir(workspace)
-	addResolvedRepoScopeDirectories(addDir, workspace, headlessRepoScopeFilter(task))
+	dirs.add(workspace)
+	addResolvedRepoScopeDirectories(dirs.add, workspace, headlessRepoScopeFilter(task))
 
-	return dirs
+	return dirs.values()
 }
 
 func resolveCollectHeadlessIncludeDirectories(task Task) []string {
-	dirs := make([]string, 0, 4)
-	seen := map[string]struct{}{}
-	addDir := func(path string) {
-		path = strings.TrimSpace(path)
-		if path == "" {
-			return
-		}
-		cleaned := filepath.Clean(path)
-		info, err := os.Stat(cleaned)
-		if err != nil || !info.IsDir() {
-			return
-		}
-		if _, ok := seen[cleaned]; ok {
-			return
-		}
-		seen[cleaned] = struct{}{}
-		dirs = append(dirs, cleaned)
-	}
+	dirs := newOrderedExistingDirs(4)
 
-	addDir(task.WriteRoot)
-	addDir(task.DraftFinalRoot)
+	dirs.add(task.WriteRoot)
+	dirs.add(task.DraftFinalRoot)
 	for _, path := range task.ReadContextRoots {
-		addDir(path)
+		dirs.add(path)
 	}
 
 	workspace := strings.TrimSpace(task.Workspace)
 	if workspace == "" {
-		return dirs
+		return dirs.values()
 	}
-	addResolvedRepoScopeDirectories(addDir, workspace, headlessRepoScopeFilter(task))
-	return dirs
+	addResolvedRepoScopeDirectories(dirs.add, workspace, headlessRepoScopeFilter(task))
+	return dirs.values()
 }
 
 // ResolveHeadlessCollectRepairIncludeDirectories returns the narrow read scope
@@ -103,26 +69,9 @@ func resolveCollectHeadlessIncludeDirectories(task Task) []string {
 // where sibling shard manifests and reports/taskruns history can be mistaken
 // for schema examples.
 func ResolveHeadlessCollectRepairIncludeDirectories(task Task) []string {
-	dirs := make([]string, 0, 4)
-	seen := map[string]struct{}{}
-	addDir := func(path string) {
-		path = strings.TrimSpace(path)
-		if path == "" {
-			return
-		}
-		cleaned := filepath.Clean(path)
-		info, err := os.Stat(cleaned)
-		if err != nil || !info.IsDir() {
-			return
-		}
-		if _, ok := seen[cleaned]; ok {
-			return
-		}
-		seen[cleaned] = struct{}{}
-		dirs = append(dirs, cleaned)
-	}
+	dirs := newOrderedExistingDirs(4)
 
-	addDir(task.WriteRoot)
+	dirs.add(task.WriteRoot)
 	workspace := filepath.Clean(strings.TrimSpace(task.Workspace))
 	for _, root := range task.ReadContextRoots {
 		root = strings.TrimSpace(root)
@@ -136,12 +85,12 @@ func ResolveHeadlessCollectRepairIncludeDirectories(task Task) []string {
 		if strings.Contains(filepath.ToSlash(cleaned), "/reports/taskruns/") && cleaned != filepath.Clean(strings.TrimSpace(task.WriteRoot)) {
 			continue
 		}
-		addDir(cleaned)
+		dirs.add(cleaned)
 	}
 	if workspace != "." {
-		addResolvedRepoScopeDirectories(addDir, workspace, headlessRepoScopeFilter(task))
+		addResolvedRepoScopeDirectories(dirs.add, workspace, headlessRepoScopeFilter(task))
 	}
-	return dirs
+	return dirs.values()
 }
 
 // ResolveHeadlessValidatorRepairIncludeDirectories returns the narrow read
@@ -149,32 +98,15 @@ func ResolveHeadlessCollectRepairIncludeDirectories(task Task) []string {
 // evidence. Repository source roots are intentionally omitted because the
 // validator contract should repair/author only from assembled staged artifacts.
 func ResolveHeadlessValidatorRepairIncludeDirectories(task Task) []string {
-	dirs := make([]string, 0, 4)
-	seen := map[string]struct{}{}
-	addDir := func(path string) {
-		path = strings.TrimSpace(path)
-		if path == "" {
-			return
-		}
-		cleaned := filepath.Clean(path)
-		info, err := os.Stat(cleaned)
-		if err != nil || !info.IsDir() {
-			return
-		}
-		if _, ok := seen[cleaned]; ok {
-			return
-		}
-		seen[cleaned] = struct{}{}
-		dirs = append(dirs, cleaned)
-	}
+	dirs := newOrderedExistingDirs(4)
 
-	addDir(task.WriteRoot)
+	dirs.add(task.WriteRoot)
 	for _, path := range task.ReadContextRoots {
 		if isStagedFinalRuntimeRoot(path) {
-			addDir(path)
+			dirs.add(path)
 		}
 	}
-	return dirs
+	return dirs.values()
 }
 
 func isStagedFinalRuntimeRoot(path string) bool {
@@ -189,35 +121,61 @@ func isStagedFinalRuntimeRoot(path string) bool {
 // ResolveHeadlessDraftRepairIncludeDirectories returns the draft recovery
 // scope: current write/draft roots plus staged context and repository evidence.
 func ResolveHeadlessDraftRepairIncludeDirectories(task Task) []string {
-	dirs := make([]string, 0, 6)
-	seen := map[string]struct{}{}
-	addDir := func(path string) {
-		path = strings.TrimSpace(path)
-		if path == "" {
-			return
-		}
-		cleaned := filepath.Clean(path)
-		info, err := os.Stat(cleaned)
-		if err != nil || !info.IsDir() {
-			return
-		}
-		if _, ok := seen[cleaned]; ok {
-			return
-		}
-		seen[cleaned] = struct{}{}
-		dirs = append(dirs, cleaned)
-	}
+	dirs := newOrderedExistingDirs(6)
 
-	addDir(task.WriteRoot)
-	addDir(task.DraftFinalRoot)
+	dirs.add(task.WriteRoot)
+	dirs.add(task.DraftFinalRoot)
 	for _, path := range task.ReadContextRoots {
-		addDir(path)
+		dirs.add(path)
 	}
 	workspace := strings.TrimSpace(task.Workspace)
 	if workspace != "" {
-		addResolvedRepoScopeDirectories(addDir, filepath.Clean(workspace), headlessRepoScopeFilter(task))
+		addResolvedRepoScopeDirectories(dirs.add, filepath.Clean(workspace), headlessRepoScopeFilter(task))
 	}
-	return dirs
+	return dirs.values()
+}
+
+type orderedExistingDirs struct {
+	valuesList []string
+	seen       map[string]struct{}
+}
+
+func newOrderedExistingDirs(capacity int) *orderedExistingDirs {
+	return &orderedExistingDirs{
+		valuesList: make([]string, 0, capacity),
+		seen:       map[string]struct{}{},
+	}
+}
+
+func (dirs *orderedExistingDirs) add(path string) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return
+	}
+	cleaned := filepath.Clean(path)
+	info, err := os.Stat(cleaned)
+	if err != nil || !info.IsDir() {
+		return
+	}
+	if _, ok := dirs.seen[cleaned]; ok {
+		return
+	}
+	dirs.seen[cleaned] = struct{}{}
+	dirs.valuesList = append(dirs.valuesList, cleaned)
+}
+
+func (dirs *orderedExistingDirs) len() int {
+	if dirs == nil {
+		return 0
+	}
+	return len(dirs.valuesList)
+}
+
+func (dirs *orderedExistingDirs) values() []string {
+	if dirs == nil {
+		return nil
+	}
+	return dirs.valuesList
 }
 
 func addResolvedRepoScopeDirectories(addDir func(string), workspace string, scopeFilter repoScopeFilter) {

@@ -2079,6 +2079,64 @@ func TestArtifactsWriteEndpoint(t *testing.T) {
 	if string(content) != "# Updated Charter" {
 		t.Fatalf("unexpected artifact content: %q", string(content))
 	}
+
+	skillBody := `{"path":"skills/prompt-packs/qa.md","content":"qa prompt"}`
+	skillResponse, err := http.Post(httpServer.URL+"/api/artifacts/write", "application/json", strings.NewReader(skillBody))
+	if err != nil {
+		t.Fatalf("POST /api/artifacts/write skill: %v", err)
+	}
+	defer skillResponse.Body.Close()
+	if skillResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected skill write status 200, got %d", skillResponse.StatusCode)
+	}
+}
+
+func TestArtifactsWriteEndpointRejectsForbiddenPaths(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	for _, artifactPath := range []string{
+		"charter/../workspace.yaml",
+		"skills/../schemas/x",
+		"../charter/x",
+		"/tmp/x",
+		`C:\tmp\x`,
+		"charter",
+		"skills",
+	} {
+		artifactPath := artifactPath
+		t.Run(artifactPath, func(t *testing.T) {
+			body, err := json.Marshal(map[string]string{
+				"path":    artifactPath,
+				"content": "blocked",
+			})
+			if err != nil {
+				t.Fatalf("marshal request: %v", err)
+			}
+			response, err := http.Post(httpServer.URL+"/api/artifacts/write", "application/json", bytes.NewReader(body))
+			if err != nil {
+				t.Fatalf("POST /api/artifacts/write forbidden path: %v", err)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusBadRequest {
+				t.Fatalf("expected status 400 for %q, got %d", artifactPath, response.StatusCode)
+			}
+			var payload struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if payload.Error.Code != "artifact_path_forbidden" {
+				t.Fatalf("expected artifact_path_forbidden for %q, got %q", artifactPath, payload.Error.Code)
+			}
+		})
+	}
 }
 
 func TestArtifactsEndpointRejectsPathTraversal(t *testing.T) {

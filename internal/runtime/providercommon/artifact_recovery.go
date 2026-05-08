@@ -153,12 +153,12 @@ func recoverCollectArtifactPairRepair(ctx context.Context, task acpruntime.Task,
 	}
 
 	emitFocusedArtifactRepairScheduledDiagnostic(task, adapter.Provider(), "collect_pair_repair", stage, snapshot, validationErr)
-	spec, err := repairAdapter.CollectArtifactPairRepairCommandSpec(task, validationErr)
-	if err != nil {
-		return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, result, err)
+	repairResult, repairErr, commandErr := runFocusedArtifactRepairCommand(ctx, task, adapter, result, func() (CommandSpec, error) {
+		return repairAdapter.CollectArtifactPairRepairCommandSpec(task, validationErr)
+	})
+	if commandErr != nil {
+		return true, acpruntime.Result{}, commandErr
 	}
-	repairPolicy := focusedRepairActivityPolicy(adapter.ActivityPolicy(task), true)
-	repairResult, repairErr := runCommandSpec(ctx, task, spec, repairPolicy)
 	if writeSetErr := validateCollectArtifactPairRepairWriteSet(task, beforeRepairFiles); writeSetErr != nil {
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_pair_repair", "collect pair recovery wrote outside the collect pair write set", writeSetErr)
 	}
@@ -267,12 +267,12 @@ func recoverValidatorVerdictRepair(ctx context.Context, task acpruntime.Task, ad
 	}
 
 	emitFocusedArtifactRepairScheduledDiagnostic(task, adapter.Provider(), "validator_verdict_repair", stage, runtimeArtifactSnapshot(task), validationErr)
-	spec, err := repairAdapter.ValidatorVerdictRepairCommandSpec(task, validationErr)
-	if err != nil {
-		return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, result, err)
+	repairResult, repairErr, commandErr := runFocusedArtifactRepairCommand(ctx, task, adapter, result, func() (CommandSpec, error) {
+		return repairAdapter.ValidatorVerdictRepairCommandSpec(task, validationErr)
+	})
+	if commandErr != nil {
+		return true, acpruntime.Result{}, commandErr
 	}
-	repairPolicy := focusedRepairActivityPolicy(adapter.ActivityPolicy(task), true)
-	repairResult, repairErr := runCommandSpec(ctx, task, spec, repairPolicy)
 	if writeSetErr := validateValidatorVerdictRepairWriteSet(task, beforeRepairFiles); writeSetErr != nil {
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "validator_verdict_repair", "verdict-only validator repair wrote outside validator-verdict.json", writeSetErr)
 	}
@@ -320,12 +320,12 @@ func recoverDraftArtifactRepair(ctx context.Context, task acpruntime.Task, adapt
 	}
 
 	emitFocusedArtifactRepairScheduledDiagnostic(task, adapter.Provider(), "draft_artifact_repair", stage, runtimeArtifactSnapshot(task), validationErr)
-	spec, err := repairAdapter.DraftArtifactRepairCommandSpec(task, validationErr)
-	if err != nil {
-		return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, result, err)
+	repairResult, repairErr, commandErr := runFocusedArtifactRepairCommand(ctx, task, adapter, result, func() (CommandSpec, error) {
+		return repairAdapter.DraftArtifactRepairCommandSpec(task, validationErr)
+	})
+	if commandErr != nil {
+		return true, acpruntime.Result{}, commandErr
 	}
-	repairPolicy := focusedRepairActivityPolicy(adapter.ActivityPolicy(task), true)
-	repairResult, repairErr := runCommandSpec(ctx, task, spec, repairPolicy)
 	if writeSetErr := validateDraftArtifactRepairWriteSet(task, beforeWriteRoot, beforeDraftRoot); writeSetErr != nil {
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "draft_artifact_repair", "draft recovery wrote outside the draft artifact write set", writeSetErr)
 	}
@@ -356,6 +356,16 @@ func recoverDraftArtifactRepair(ctx context.Context, task acpruntime.Task, adapt
 	emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "completed", runtimeArtifactSnapshot(task))
 	emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "draft_artifact_repair", "")
 	return true, repairResult, nil
+}
+
+func runFocusedArtifactRepairCommand(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, baseResult acpruntime.Result, buildSpec func() (CommandSpec, error)) (acpruntime.Result, error, error) {
+	spec, err := buildSpec()
+	if err != nil {
+		return acpruntime.Result{}, nil, classifyCommandFailure(adapter, task, baseResult, err)
+	}
+	repairPolicy := focusedRepairActivityPolicy(adapter.ActivityPolicy(task), true)
+	repairResult, repairErr := runCommandSpec(ctx, task, spec, repairPolicy)
+	return repairResult, repairErr, nil
 }
 
 func focusedRepairActivityPolicy(base ActivityPolicy, monitorPreArtifact bool) ActivityPolicy {
