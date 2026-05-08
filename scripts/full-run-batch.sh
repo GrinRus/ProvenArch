@@ -1455,7 +1455,7 @@ case "$UI_E2E_HEADED" in
 esac
 
 require_cmd git
-require_cmd go
+"$PROVENARCH_ROOT/scripts/run-go.sh" version >/dev/null || die "Install Go version from .go-version or set ACP_GO_BIN=/path/to/go."
 require_cmd npm
 require_cmd make
 require_cmd python3

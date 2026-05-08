@@ -1,8 +1,13 @@
 # Architecture Control Plane (Local-first MVP)
 
+[![License](https://img.shields.io/github/license/GrinRus/ProvenArch)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/GrinRus/ProvenArch?include_prereleases)](https://github.com/GrinRus/ProvenArch/releases)
+[![backend](https://github.com/GrinRus/ProvenArch/actions/workflows/backend.yml/badge.svg)](https://github.com/GrinRus/ProvenArch/actions/workflows/backend.yml)
+[![ui](https://github.com/GrinRus/ProvenArch/actions/workflows/ui.yml/badge.svg)](https://github.com/GrinRus/ProvenArch/actions/workflows/ui.yml)
+
 > **Статус:** MVP beta foundation / runnable local docs-first pipeline baseline + strict contracts
 > **Принятый стек реализации:** Go (backend/orchestrator) + React/TypeScript UI (embedded), runtime анализа в MVP: **headless multi-provider** (`claude-code` default, `qwen-code` optional, `codex-code` release peer)
-> **Последняя ревизия:** 2026-05-04
+> **Последняя ревизия:** 2026-05-08
 
 ## Что это
 
@@ -21,6 +26,7 @@ ACP не является "рисовалкой диаграмм". Архите�
 - Latest public release: `v0.1.0`
 - Supported platforms: macOS/Linux on `amd64` and `arm64`
 - License: Apache-2.0
+- Maturity: MVP beta / pre-release foundation; public API and artifact contracts can still evolve before a stable `v1.0.0`.
 - Install command:
 
 ```bash
@@ -71,6 +77,18 @@ acp serve \
 
 Результаты появятся в `Results`: coverage, artifacts, diagrams. История и логи run'ов доступны в `Runs`.
 
+Expected workspace output после успешного fake walkthrough:
+
+```text
+reports/as-is/overview.md
+reports/coverage/summary.md
+reports/findings/findings.md
+reports/agent-outputs/architect/summary.md
+reports/taskruns/<run_id>/
+model/entities/*.yaml
+model/edges/*.yaml
+```
+
 ### 4) Переключитесь на real AI runtime
 
 После первого walkthrough установите provider command и перезапустите сервис:
@@ -83,6 +101,14 @@ acp serve \
 ```
 
 Подробно: [docs/INSTALL.md](docs/INSTALL.md), [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+
+## Security, support, contributions
+
+- Security reports: [SECURITY.md](SECURITY.md). Не открывайте public issue для уязвимостей; используйте GitHub private vulnerability reporting.
+- User support: [SUPPORT.md](SUPPORT.md).
+- Contributions and local DoD: [CONTRIBUTING.md](CONTRIBUTING.md).
+- Governance and release ownership: [GOVERNANCE.md](GOVERNANCE.md).
+- Release history: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -219,7 +245,8 @@ MVP policy: Observation + Assertion отображаются как рабоча
 - release binary `acp` из [docs/INSTALL.md](docs/INSTALL.md)
 - GitHub/GitLab URL или локальный клон хотя бы одного анализируемого репозитория
 
-Go 1.20.x и Node.js 22.21.1/npm 10.x нужны только при сборке из исходников через `make bootstrap && make build`.
+Go exact version из `.go-version` и Node.js exact version из `.node-version` нужны только при сборке из исходников через `make bootstrap && make build`.
+`go.mod` сохраняет language compatibility level `go 1.20`, но release/CI/local build toolchain собирает бинарь security-patched Go из `.go-version`.
 
 Для первого запуска достаточно `--runtime fake`.
 Для реальных запусков `--runtime headless` нужен установленный provider command (`claude-code`/`qwen`/`codex`) либо env override (`ACP_CLAUDE_CMD`/`ACP_QWEN_CMD`/`ACP_CODEX_CMD`).
@@ -631,11 +658,12 @@ Run-specific поверхность (исключена из strict golden compa
 
 ---
 
-## Порядок реализации
+## Roadmap and known limits
 
-1) финализировать artifact-only docs-first runtime contracts + derived model rebuild
-2) реализовать baseline bundle agents/skills/prompts
-3) реализовать CI/CD trigger surface: hooks/manual pipeline button/job + batch mode
-4) реализовать orchestrator + runtime provider adapters (`claude-code`, `qwen-code`, `codex-code`)
-5) реализовать model store (entity-per-file) и extraction coverage for integrations/datastores/CI-CD
-6) реализовать UI (workspace setup, charter/skills/run/results)
+Public roadmap и active engineering slices живут в [docs/PLANS.md](docs/PLANS.md) и [docs/BACKLOG.md](docs/BACKLOG.md).
+
+Known MVP limits:
+- no hosted/multi-tenant mode;
+- no security/compliance enforcement engine;
+- no Docker/npm/PyPI/Maven/crates.io distribution as primary channel;
+- live release readiness requires trusted-machine evidence from `reports/release_verdict_<matrix-id>.json`.

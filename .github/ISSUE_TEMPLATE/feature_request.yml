@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest a focused ProvenArch improvement.
+title: "[Feature]: "
+labels: ["enhancement", "needs triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or maintainer problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the smallest useful behavior change.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - CLI
+        - UI
+        - runtime pipeline
+        - release/distribution
+        - docs
+        - CI/security
+    validations:
+      required: true

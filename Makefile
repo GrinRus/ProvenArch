@@ -1,4 +1,4 @@
-GO ?= go
+GO ?= ./scripts/run-go.sh
 NPM ?= ./scripts/run-npm.sh
 UI_DIR := ui
 GO_FILES := $(shell find cmd internal -name '*.go' -type f 2>/dev/null)

@@ -37,7 +37,8 @@ acp version
 ACP_VERSION=v0.1.0 INSTALL_DIR=/usr/local/bin sh install.sh
 ```
 
-Installer скачивает archive `acp_<os>_<arch>.tar.gz`, проверяет `checksums.txt` и устанавливает только бинарь `acp`.
+По умолчанию `ACP_VERSION=latest`: installer разрешает последний GitHub Release через Releases API, включая beta/prerelease releases, затем скачивает archive `acp_<os>_<arch>.tar.gz`, проверяет `checksums.txt` и устанавливает только бинарь `acp`.
+Начиная со следующего hardening-релиза release workflow также публикует SBOM/provenance artifacts; installer продолжает доверять checksum verification как обязательному install gate.
 
 ## Ручная установка из GitHub Release
 
@@ -82,9 +83,23 @@ Provider commands:
 - `qwen` или `ACP_QWEN_CMD`
 - `codex` или `ACP_CODEX_CMD`
 
+Перед live-анализом проверьте provider:
+
+```bash
+acp doctor \
+  --workspace "$HOME/acp-workspaces/my-service" \
+  --runtime headless \
+  --runtime-provider claude-code
+```
+
 ## Установка из исходников
 
 Этот путь нужен разработчикам ProvenArch:
+
+Prerequisites:
+- Go exact version из `.go-version` для security-patched local/release builds.
+- Node.js exact version из `.node-version`.
+- npm 10.x.
 
 ```bash
 git clone https://github.com/GrinRus/ProvenArch.git
@@ -94,3 +109,6 @@ make build
 ./bin/acp version
 ./bin/acp doctor --workspace "$HOME/acp-workspaces/my-service"
 ```
+
+Source build требует exact Node.js version из `.node-version`. Если локальный `node` отличается, `make bootstrap`, `make test`, `make lint` и `make build` завершаются до генерации UI assets с ошибкой resolver-а.
+`go.mod` сохраняет language compatibility level `go 1.20`, но release/local builds должны выполняться Go version из `.go-version`.

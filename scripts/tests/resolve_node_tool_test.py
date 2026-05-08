@@ -19,7 +19,7 @@ class ResolveNodeToolTest(unittest.TestCase):
         else:
             cls.expected_host_node_arch = ""
 
-    def _write_fake_toolchain(self, root: Path, node_arch: str) -> None:
+    def _write_fake_toolchain(self, root: Path, node_arch: str, node_version: str = "22.21.1") -> None:
         root.mkdir(parents=True, exist_ok=True)
         node_path = root / "node"
         node_path.write_text(
@@ -27,8 +27,13 @@ class ResolveNodeToolTest(unittest.TestCase):
                 [
                     "#!/usr/bin/env bash",
                     "set -Eeuo pipefail",
+                    'expr="${2:-}"',
                     'if [[ "${1:-}" == "-p" ]]; then',
-                    f"  printf '%s\\n' '{node_arch}'",
+                    '  case "$expr" in',
+                    f'    *process.arch*) printf "%s\\n" "{node_arch}" ;;',
+                    f'    *process.versions.node*) printf "%s\\n" "{node_version}" ;;',
+                    '    *) printf "%s\\n" "" ;;',
+                    "  esac",
                     "  exit 0",
                     "fi",
                     "printf '%s\\n' \"$0\"",
@@ -80,7 +85,7 @@ class ResolveNodeToolTest(unittest.TestCase):
             else:
                 self.assertEqual(x64_dir / "npm", resolved)
 
-    def test_falls_back_to_first_available_when_no_matching_arch_exists(self) -> None:
+    def test_falls_back_to_first_version_compatible_when_no_matching_arch_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_root = Path(tmpdir)
             odd_dir = tmp_root / "odd"
@@ -99,6 +104,26 @@ class ResolveNodeToolTest(unittest.TestCase):
                 check=True,
             )
             self.assertEqual(str(odd_dir / "npm"), result.stdout.strip())
+
+    def test_rejects_toolchain_with_wrong_node_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_root = Path(tmpdir)
+            old_dir = tmp_root / "old"
+            self._write_fake_toolchain(old_dir, self.expected_host_node_arch or "x64", "22.20.0")
+            result = subprocess.run(
+                [str(self.resolver), "npm"],
+                cwd=self.repo_root,
+                env={
+                    **os.environ,
+                    "ACP_NODE_TOOL_CANDIDATES": str(old_dir),
+                    "ACP_NODE_TOOL_CANDIDATES_ONLY": "1",
+                    "PATH": "/usr/bin:/bin",
+                },
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Node.js 22.21.1 is required", result.stderr)
 
 
 if __name__ == "__main__":

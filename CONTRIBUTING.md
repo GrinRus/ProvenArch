@@ -8,7 +8,8 @@ ACP — **AI-native** и **spec-first** проект.
 3) Относитесь к `schemas/*` и `docs/spec/*` как к контрактам
 
 ## Local bootstrap
-- Требуемый стек: Go 1.20.x, Node 22.21.1, npm 10.x, Git
+- Требуемый стек: Go exact version из `.go-version`, Node exact version из `.node-version`, npm 10.x, Git
+- `go.mod` остаётся на language compatibility level `go 1.20`; не используйте это как разрешение собирать release устаревшим Go toolchain.
 - Установите зависимости: `make bootstrap`
 - Прогоните DoD-проверки:
   - `make contracts`
@@ -30,3 +31,14 @@ ACP — **AI-native** и **spec-first** проект.
 
 ## Planning
 Используйте `docs/PLANS.md` для многосоставных задач.
+
+## Community and security
+
+- Следуйте [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+- Уязвимости не публикуйте в issues; используйте [SECURITY.md](SECURITY.md).
+- Пользовательские вопросы и bug reports оформляйте по [SUPPORT.md](SUPPORT.md).
+- User-facing изменения отражайте в [CHANGELOG.md](CHANGELOG.md) и release notes.
+
+## Review expectations
+
+Pull request должен быть небольшим, воспроизводимо проверенным и не должен добавлять live network/provider dependency в required CI. Изменения `schemas/*` и `docs/spec/*` требуют синхронного обновления docs, examples/fixtures, валидаторов и тестов.

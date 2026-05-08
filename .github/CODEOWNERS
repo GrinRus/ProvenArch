@@ -1,0 +1,3 @@
+# Default ownership signal for public OSS review.
+# Required CODEOWNERS approval is enabled after a second maintainer exists.
+* @GrinRus

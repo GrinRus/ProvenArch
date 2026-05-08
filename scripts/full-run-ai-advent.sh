@@ -1257,7 +1257,7 @@ trap 'on_termination_signal PIPE' PIPE
 trap 'cleanup $?' EXIT
 
 require_cmd git "Install git and ensure it is available in PATH."
-require_cmd go "Install Go 1.20+ and ensure it is available in PATH."
+"$PROVENARCH_ROOT/scripts/run-go.sh" version >/dev/null || die "Install Go version from .go-version or set ACP_GO_BIN=/path/to/go."
 require_cmd npm "Install Node.js/npm and ensure it is available in PATH."
 require_cmd make "Install make and ensure it is available in PATH."
 require_cmd curl "Install curl and ensure it is available in PATH."

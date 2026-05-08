@@ -34,14 +34,6 @@ esac
 archive_name="acp_${os_name}_${arch_name}.tar.gz"
 checksum_name="checksums.txt"
 
-if [ -z "$base_url" ]; then
-  if [ "$version" = "latest" ]; then
-    base_url="https://github.com/${repo}/releases/latest/download"
-  else
-    base_url="https://github.com/${repo}/releases/download/${version}"
-  fi
-fi
-
 tmp_dir="$(mktemp -d)"
 cleanup() {
   rm -rf "$tmp_dir"
@@ -62,6 +54,24 @@ download() {
   echo "curl or wget is required" >&2
   exit 1
 }
+
+resolve_latest_version() {
+  releases_path="$tmp_dir/releases.json"
+  download "https://api.github.com/repos/${repo}/releases?per_page=1" "$releases_path"
+  resolved_version="$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$releases_path" | head -n 1)"
+  if [ -z "$resolved_version" ]; then
+    echo "could not resolve latest release for ${repo}" >&2
+    exit 1
+  fi
+  printf '%s\n' "$resolved_version"
+}
+
+if [ -z "$base_url" ]; then
+  if [ "$version" = "latest" ]; then
+    version="$(resolve_latest_version)"
+  fi
+  base_url="https://github.com/${repo}/releases/download/${version}"
+fi
 
 archive_path="$tmp_dir/$archive_name"
 checksum_path="$tmp_dir/$checksum_name"
