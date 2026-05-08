@@ -3,6 +3,7 @@ set -euo pipefail
 
 tmpdir="$(mktemp -d)"
 server_log="$tmpdir/server.log"
+GO_BIN="${GO:-./scripts/run-go.sh}"
 workspace="$tmpdir/workspace"
 repo="$tmpdir/repos/payments-service"
 api_port="${ACP_SMOKE_API_PORT:-}"
@@ -42,7 +43,7 @@ print(code)
 PY
 }
 
-go run ./cmd/acp serve \
+"$GO_BIN" run ./cmd/acp serve \
   --workspace "$workspace" \
   --auto-init \
   --repo-name "payments-service" \

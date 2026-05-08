@@ -4,8 +4,8 @@ project_name: acp
 
 before:
   hooks:
-    - npm ci --prefix ui
-    - npm run build --prefix ui
+    - ./scripts/run-npm.sh ci --prefix ui
+    - ./scripts/run-npm.sh run build --prefix ui
     - rm -rf internal/api/ui_dist/assets internal/api/ui_dist/index.html
     - mkdir -p internal/api/ui_dist/assets
     - cp -R ui/dist/assets/. internal/api/ui_dist/assets/
@@ -41,6 +41,13 @@ archives:
 checksum:
   name_template: checksums.txt
 
+sboms:
+  - id: acp-archives
+    artifacts: archive
+    documents:
+      - "{{ .ArtifactName }}.sbom.json"
+    disable: false
+
 changelog:
   sort: asc
   filters:
@@ -57,4 +64,17 @@ release:
     owner: GrinRus
     name: ProvenArch
   draft: false
-  prerelease: auto
+  prerelease: true
+  header: |
+    ## Architecture Control Plane MVP beta
+
+    ProvenArch ships as local-first single-binary `acp` archives for macOS/Linux `amd64` and `arm64`.
+
+    Install:
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/GrinRus/ProvenArch/main/install.sh | sh
+    ```
+
+    Verify downloaded archives with `checksums.txt`. Release artifacts include archive SBOMs and GitHub artifact attestations when the release workflow is used.
+
+    MVP limits: no hosted/SaaS mode, no security/compliance enforcement engine, and live release readiness requires trusted-machine `reports/release_verdict_<matrix-id>.json` evidence.

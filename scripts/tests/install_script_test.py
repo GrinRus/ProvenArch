@@ -190,6 +190,85 @@ esac
                 urls,
             )
 
+    def test_latest_resolves_prerelease_release_via_github_api(self) -> None:
+        archive_name = release_asset_name()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            release_dir = root / "release"
+            release_dir.mkdir()
+            install_dir = root / "bin"
+            fake_bin = root / "fake-bin"
+            fake_bin.mkdir()
+            curl_log = root / "curl.log"
+            write_mock_release(release_dir, archive_name)
+
+            fake_curl = fake_bin / "curl"
+            fake_curl.write_text(
+                f"""#!/usr/bin/env sh
+set -eu
+url=""
+target=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o)
+      shift
+      target="$1"
+      ;;
+    http*)
+      url="$1"
+      ;;
+  esac
+  shift
+done
+printf '%s\\n' "$url" >> "$ACP_CURL_LOG"
+case "$url" in
+  https://api.github.com/repos/example/repo/releases\\?per_page=1)
+    printf '%s\\n' '[{{"tag_name":"v0.1.0","prerelease":true}}]' > "$target"
+    ;;
+  */checksums.txt)
+    cp "$ACP_MOCK_RELEASE_DIR/checksums.txt" "$target"
+    ;;
+  */{archive_name})
+    cp "$ACP_MOCK_RELEASE_DIR/{archive_name}" "$target"
+    ;;
+  *)
+    echo "unexpected URL: $url" >&2
+    exit 2
+    ;;
+esac
+""",
+                encoding="utf-8",
+            )
+            fake_curl.chmod(0o755)
+
+            env = os.environ.copy()
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+            env["ACP_REPO"] = "example/repo"
+            env["ACP_CURL_LOG"] = str(curl_log)
+            env["ACP_MOCK_RELEASE_DIR"] = str(release_dir)
+            env["INSTALL_DIR"] = str(install_dir)
+            result = subprocess.run(
+                ["sh", str(REPO_ROOT / "install.sh")],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            urls = curl_log.read_text(encoding="utf-8").splitlines()
+            self.assertIn("https://api.github.com/repos/example/repo/releases?per_page=1", urls)
+            self.assertIn(
+                f"https://github.com/example/repo/releases/download/v0.1.0/{archive_name}",
+                urls,
+            )
+            self.assertIn(
+                "https://github.com/example/repo/releases/download/v0.1.0/checksums.txt",
+                urls,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -135,6 +135,10 @@ Baseline scenario set:
 
 ## 6) Required CI jobs
 
+Toolchain policy:
+- Go module compatibility remains `go 1.20`, but required CI, release builds, and Makefile entrypoints use the exact Go version from `.go-version` to avoid shipping binaries built with an unsupported/vulnerable standard library.
+- UI/source-build jobs require exact Node.js version from `.node-version`.
+
 Implemented required jobs:
 - `contracts`
   - `make contracts`
@@ -169,6 +173,15 @@ Implemented additional jobs:
   - `/api/workspace/validate`
   - pipeline status/artifacts/logs endpoints
   - dynamic free port + explicit fail on run polling timeout
+
+Security/advisory workflows:
+- `dependency-review` runs on pull requests and blocks newly introduced vulnerable dependencies.
+- `codeql` runs Go and JavaScript/TypeScript analysis on pull requests, pushes to `main`, and weekly schedule.
+- `scorecard` runs OpenSSF Scorecard on push/schedule with read-only repo permissions and publishes security events when permitted.
+
+Release workflow hardening:
+- tag-only release workflow uses job-level write permissions, an explicit `github-release` environment, pinned actions, timeouts, and provenance/SBOM artifact generation.
+- GitHub environment required reviewers, protected tags, branch protection, Dependabot alerts/security updates, secret scanning, and push protection are repository settings and must be enforced by owners/admins.
 ## 7) Базовый набор тестов
 
 ### Contract tests

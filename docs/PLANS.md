@@ -58,6 +58,76 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-05-07 consolidated historical active plans into the remaining open slices below. Detailed evidence and classification are archived in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`; original historical active plan text was moved to `docs/archive/PLANS_ARCHIVE_2026-05.md` under "Reconciled active plans from 2026-05-07".
 
 ### Plan ID
+EP-20260508-oss-readiness-hardening
+
+### Context
+Public OSS readiness audit found that the release binary path works, but repository governance, security reporting, CI trust boundaries, dependency hygiene, and README/community surfaces were below public distribution standards.
+
+### Goals (must have)
+- [x] Add security disclosure, support, governance, changelog, code of conduct, CODEOWNERS, PR template, and issue templates
+- [x] Harden GitHub Actions permissions, timeouts, action pinning, release environment, SBOM/provenance, and required test alignment
+- [x] Add Dependabot, CodeQL, Dependency Review, and Scorecard workflows/configuration
+- [x] Fix UI dependency audit issues and enforce exact Node version from `.node-version`
+- [x] Move required CI/release/local build toolchain to security-patched Go from `.go-version` while keeping `go.mod` compatibility at `go 1.20`
+- [x] Update README/install/testing docs for OSS beta distribution and release evidence boundaries
+- [x] Best-effort apply GitHub repository settings where current credentials have permission; otherwise record owner/admin manual tasks
+- [ ] Owner/admin manual verification: GitHub still reports `secret_scanning_non_provider_patterns` and `secret_scanning_validity_checks` as disabled after API PATCH; enable them if available for the account/plan, or document the platform limitation
+- [ ] Owner/admin manual verification: add a safe `creation` rule to the `v*` tag ruleset once bypass actors are confirmed, so release tag creation is restricted to maintainers without locking out the release owner
+
+### Non-goals
+- [x] Do not make Docker/npm/PyPI/Maven/crates.io a primary distribution path
+- [x] Do not add hosted/SaaS mode or security/compliance enforcement
+- [x] Do not run trusted live release matrix without explicit owner approval
+- [x] Do not treat release readiness as passed without `reports/release_verdict_<matrix-id>.json`
+
+### Approach
+1) Add OSS community/security files and front-load README quickstart/release/security links.
+2) Harden workflows with read-only defaults, job-level release writes, pinned actions, timeouts, and advisory security jobs.
+3) Update UI dependencies and Node resolver so source builds are deterministic against `.node-version`.
+4) Attempt admin-level GitHub settings changes through `gh`; record any settings that require owner/admin manual verification.
+5) Run local DoD and targeted security/install checks.
+
+### Files expected to change
+- `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md`, `CODE_OF_CONDUCT.md`, `CHANGELOG.md`, `GOVERNANCE.md`
+- `.github/*`
+- `.goreleaser.yml`
+- `scripts/resolve-node-tool.sh`, `scripts/tests/*`
+- `ui/package.json`, `ui/package-lock.json`
+- `docs/INSTALL.md`, `docs/TESTING_STRATEGY.md`, `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] `make contracts`
+- [x] `make test`
+- [x] `make lint`
+- [x] `make build`
+- [x] `npm audit --prefix ui --audit-level=moderate`
+- [x] `govulncheck ./...` when available
+- [x] `bash ./scripts/smoke-cli.sh`
+- [x] `bash ./scripts/smoke-api.sh`
+- [x] GitHub owner/admin-only settings are either applied or explicitly listed as manual residual tasks
+
+### Risks
+- Branch protection, rulesets, secret scanning, private vulnerability reporting, and environment reviewers may require owner/admin permissions.
+- Exact Node enforcement can block local builds until Node `22.21.1` is installed or selected through `ACP_NODE_TOOL_CANDIDATES`.
+- Exact Go enforcement can block local builds until Go from `.go-version` is installed or selected through `ACP_GO_BIN`.
+- GoReleaser SBOM generation requires `syft` in the release workflow.
+- Local Go 1.20.x remains useful for compatibility checks, but `govulncheck` on May 8, 2026 reports vulnerable standard-library call paths when scanning binaries built with Go 1.20.3.
+
+### Progress log
+- 2026-05-08: Started OSS readiness hardening slice from the public distribution audit plan. Live matrix was not run.
+- 2026-05-08: `govulncheck` against local Go 1.20.3 reported standard-library vulnerabilities; CI/release toolchain was moved to Go 1.25.10 while preserving `go.mod` language compatibility.
+- 2026-05-08: Second audit found local `make build` and smoke scripts could still use stale `go` from PATH; added `.go-version`, `scripts/run-go.sh`, and wired Makefile/smoke scripts to fail fast on mismatched Go toolchains.
+- 2026-05-08: Follow-up `make test` correctly failed `TestActivePlansHaveOpenGoals` because this active plan had all goals checked. Reopened the only real residual owner/admin task for GitHub secret scanning non-provider/validity features.
+- 2026-05-08: Added OSS community/security files, issue/PR templates, Dependabot, CodeQL, Dependency Review, Scorecard, pinned GitHub Actions, release environment, SBOM/provenance release hooks, UI dependency updates, and exact Node resolver enforcement.
+- 2026-05-08: Applied GitHub settings with admin token: `main` branch protection, `v*` tag ruleset for deletion/non-fast-forward blocking, `github-release` environment reviewer, private vulnerability reporting, Dependabot alerts/security updates, secret scanning, push protection, repo description/topics, labels, milestones, and curated `v0.1.0` release notes. GitHub still reports `secret_scanning_non_provider_patterns` and `secret_scanning_validity_checks` as disabled after PATCH; owners should manually verify whether these features are available for the account/plan.
+- 2026-05-08: Tag ruleset creation restriction was left as owner/admin verification instead of being enabled blindly. GitHub's ruleset model restricts creations to bypass actors, and the safe bypass role/team set for this personal repository should be confirmed before enforcement.
+- 2026-05-08: Verification passed with Go 1.25.10 + Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`, `npm audit --prefix ui --audit-level=moderate`, `govulncheck ./...`, `bash ./scripts/smoke-cli.sh`, `bash ./scripts/smoke-api.sh`, `git diff --check`, YAML parse smoke, and `goreleaser check`.
+- 2026-05-08: Final workflow audit found two release-readiness bugs: `dependency-review` was pinned to a SHA from the wrong action repository, and Go workflows duplicated the exact version instead of reading `.go-version`. Fixed both and added regression coverage.
+- 2026-05-08: Second-pass verification passed after Go guard and issue-template fixes: `make contracts`, `make test`, `make lint`, `make build`, `npm audit --prefix ui --audit-level=moderate`, `govulncheck ./...`, `bash ./scripts/smoke-cli.sh`, `bash ./scripts/smoke-api.sh`, `git diff --check`, YAML parse smoke, `goreleaser check`, and targeted Go/Node resolver tests.
+- 2026-05-08: Final release metadata audit found `v0.1.0` was published as a normal GitHub Release while docs call the line MVP beta/pre-release. Changed GoReleaser to keep future beta releases prerelease and fixed `install.sh` so `ACP_VERSION=latest` resolves prerelease releases through the GitHub Releases API instead of relying on `/releases/latest/download`.
+- 2026-05-08: Tried marking the already-published `v0.1.0` as prerelease, but reverted the remote release to latest/non-prerelease because the current public `main/install.sh` still uses GitHub's `/releases/latest/download` endpoint. Public install smoke passed again after restoring `v0.1.0` as latest. After this installer fix is merged to `main`, owners can mark beta releases as GitHub prereleases without breaking the default install command.
+
+### Plan ID
 EP-20260507-trusted-live-validation
 
 ### Context

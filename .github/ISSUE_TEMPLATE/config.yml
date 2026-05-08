@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a vulnerability
+    url: https://github.com/GrinRus/ProvenArch/security/advisories/new
+    about: Report security vulnerabilities privately.
+  - name: Support policy
+    url: https://github.com/GrinRus/ProvenArch/blob/main/SUPPORT.md
+    about: Read support expectations before opening an issue.

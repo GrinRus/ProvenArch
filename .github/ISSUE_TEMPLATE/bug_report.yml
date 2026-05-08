@@ -1,0 +1,43 @@
+name: Bug report
+description: Report a reproducible ProvenArch problem.
+title: "[Bug]: "
+labels: ["bug", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For vulnerabilities, do not use this form. Use GitHub private vulnerability reporting from the Security tab.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Include commands, workspace setup, and whether runtime was fake or headless.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: acp version
+      placeholder: acp version 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS / architecture
+      placeholder: macOS arm64, Linux amd64
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Paste redacted `acp doctor` output, logs, or relevant `reports/taskruns/<run_id>/` paths.
+      render: text

@@ -81,7 +81,7 @@ Artifact-quality policy для generated regress/release команд остаё
 ## 2) Prerequisites
 
 Проверить на машине:
-- `go`
+- Go exact version from `.go-version`
 - `npm`
 - `python3`
 - `curl`
