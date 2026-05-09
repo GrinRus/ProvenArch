@@ -226,6 +226,32 @@ class WriteBatchPreflightTest(unittest.TestCase):
         self.assertEqual("operational_host_preflight_failed", result["subclass"])
         self.assertEqual("failed", result["artifact_smoke"])
 
+    def test_qwen_artifact_smoke_uses_runtime_like_tool_args(self) -> None:
+        command = self._write_script(
+            "qwen-runtime-like-artifact-stub",
+            "#!/bin/sh\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' 'qwen 1.0'; exit 0; fi\n"
+            "has_yolo=0\n"
+            "has_channel_ci=0\n"
+            "prev=''\n"
+            "for arg in \"$@\"; do\n"
+            "  if [ \"$arg\" = \"--yolo\" ]; then has_yolo=1; fi\n"
+            "  if [ \"$prev\" = \"--channel\" ] && [ \"$arg\" = \"CI\" ]; then has_channel_ci=1; fi\n"
+            "  prev=\"$arg\"\n"
+            "done\n"
+            "if [ -n \"${ACP_PREFLIGHT_SMOKE_SENTINEL:-}\" ] && [ \"$has_yolo\" = \"1\" ] && [ \"$has_channel_ci\" = \"1\" ]; then\n"
+            "  mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"\n"
+            "  printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"\n"
+            "  exit 0\n"
+            "fi\n"
+            "printf '%s\n' 'ACP_READY'\n",
+        )
+
+        result = self.module.probe_provider_readiness("qwen", command, str(REPO_ROOT))
+        self.assertEqual("ready", result["status"])
+        self.assertEqual("", result["subclass"])
+        self.assertEqual("passed", result["artifact_smoke"])
+
     def test_selected_readiness_keys_limits_non_release_provider_filter(self) -> None:
         self.assertEqual(["qwen"], self.module.selected_readiness_keys(["qwen-code"]))
         self.assertEqual(["claude", "codex"], self.module.selected_readiness_keys(["claude-code", "codex-code"]))
