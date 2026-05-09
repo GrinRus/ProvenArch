@@ -96,6 +96,8 @@ pipeline wiring, validators и publication artifacts без AI provider.
 `--repo-path "$HOME/src/my-service"` на `--repo-git-url https://github.com/org/my-service.git`.
 
 ```bash
+mkdir -p "$HOME/acp-workspaces"
+
 acp doctor \
   --workspace "$HOME/acp-workspaces/my-service" \
   --repo-path "$HOME/src/my-service"
