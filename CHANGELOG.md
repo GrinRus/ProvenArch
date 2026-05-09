@@ -2,15 +2,27 @@
 
 All notable user-facing changes are tracked here. ProvenArch uses SemVer-style release tags, with `v0.x` treated as beta/pre-release foundation.
 
-## Unreleased
+## v0.1.1 - 2026-05-09
 
-OSS readiness hardening:
+Beta hardening and onboarding release.
+
+Highlights:
+- Reworked README onboarding around what ACP does, local install, first fake analysis, runtime choice, artifacts, workspace model, and release evidence.
 - Added security reporting, support, governance, code of conduct, CODEOWNERS, PR template, and issue templates.
 - Hardened GitHub Actions with pinned actions, read-only defaults, timeouts, release environment, SBOM generation, and artifact attestations.
 - Added Dependabot, Dependency Review, CodeQL, and OpenSSF Scorecard workflows.
 - Updated UI dependency chain to remove moderate `npm audit` findings.
 - Enforced exact Node.js version from `.node-version` for source builds.
 - Enforced exact Go version from `.go-version` for CI, release, local Makefile, and smoke builds while preserving `go.mod` compatibility level `go 1.20`.
+
+Verification notes:
+- Public `install.sh` smoke was verified against the current published release path with checksum validation.
+- Local fake walkthrough smoke was verified with `acp doctor`, `acp serve --auto-init --dry-run`, `acp run --pipeline init --runtime fake --non-interactive`, and local UI/API endpoints.
+
+Known limitations:
+- `v0.1.1` remains a beta/pre-v1 release. Public behavior and artifact contracts can still evolve before `v1.0.0`.
+- Hosted/multi-tenant mode and security/compliance enforcement remain out of scope.
+- Release readiness still requires trusted-machine release gate evidence from `reports/release_verdict_<matrix-id>.json`.
 
 ## v0.1.0 - 2026-05-04
 
