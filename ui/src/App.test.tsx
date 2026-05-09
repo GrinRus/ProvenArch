@@ -335,9 +335,14 @@ vi.mock("mermaid", () => {
   return {
     default: {
       initialize: vi.fn(),
-      render: vi.fn(async (_id: string, graph: string) => ({
-        svg: `<svg data-graph="${graph.replace(/"/g, "&quot;")}"></svg>`,
-      })),
+      render: vi.fn(async (id: string, graph: string) => {
+        if (!/^diagram-[A-Za-z0-9_-]+$/.test(id)) {
+          throw new Error(`invalid Mermaid render id: ${id}`);
+        }
+        return {
+          svg: `<svg data-graph="${graph.replace(/"/g, "&quot;")}"></svg>`,
+        };
+      }),
     },
   };
 });

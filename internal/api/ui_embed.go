@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-//go:embed ui_dist/**
+//go:embed all:ui_dist
 var embeddedUIDist embed.FS
 
 var uiFS = mustUISubFS()

@@ -32,7 +32,7 @@ export function MermaidPreview(props: MermaidPreviewProps) {
           theme: "base",
         });
         const graph = extractMermaidGraph(trimmed);
-        const rendered = await mermaid.default.render(`diagram-${Date.now()}-${Math.random()}`, graph);
+        const rendered = await mermaid.default.render(createMermaidRenderID(), graph);
         if (disposed || requestRef.current !== currentRequest) {
           return;
         }
@@ -68,4 +68,8 @@ function extractMermaidGraph(content: string): string {
     return blockMatch[1].trim();
   }
   return trimmed;
+}
+
+function createMermaidRenderID(): string {
+  return `diagram-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }

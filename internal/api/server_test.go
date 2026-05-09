@@ -106,6 +106,61 @@ func TestEmbeddedUIIsServedFromRoot(t *testing.T) {
 	}
 }
 
+func TestEmbeddedUIServesUnderscoreAssets(t *testing.T) {
+	t.Parallel()
+
+	assetName := findSourceUnderscoreJSAsset(t)
+	expected, err := os.ReadFile(filepath.Join("ui_dist", "assets", assetName))
+	if err != nil {
+		t.Fatalf("read source asset: %v", err)
+	}
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Get(httpServer.URL + "/assets/" + assetName)
+	if err != nil {
+		t.Fatalf("GET underscore asset: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", response.StatusCode)
+	}
+	contentType := response.Header.Get("Content-Type")
+	if !strings.Contains(contentType, "javascript") {
+		t.Fatalf("expected javascript content type, got %q", contentType)
+	}
+	content, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if strings.Contains(strings.ToLower(string(content)), "<!doctype html") {
+		t.Fatalf("expected asset body, got html shell")
+	}
+	if !bytes.Equal(content, expected) {
+		t.Fatalf("served asset does not match source asset")
+	}
+}
+
+func findSourceUnderscoreJSAsset(t *testing.T) string {
+	t.Helper()
+
+	entries, err := os.ReadDir(filepath.Join("ui_dist", "assets"))
+	if err != nil {
+		t.Fatalf("read embedded ui asset directory: %v", err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if !entry.IsDir() && strings.HasPrefix(name, "_") && strings.HasSuffix(name, ".js") {
+			return name
+		}
+	}
+	t.Skip("embedded UI has no underscore-prefixed JavaScript asset")
+	return ""
+}
+
 func hasDoctorCheck(checks []struct {
 	ID     string `json:"id"`
 	Status string `json:"status"`
