@@ -69,24 +69,29 @@ acp serve \
 ## Реальный headless runtime
 
 Для первого walkthrough используйте `--runtime fake`.
-Для live анализа установите один из provider commands и перезапустите сервис:
+Для live анализа установите один из provider commands и перезапустите сервис.
+Provider ID передается через `--runtime-provider`, а executable command можно переопределить
+через env var:
+
+| Provider ID | Default/override command |
+| --- | --- |
+| `claude-code` | `claude-code`, либо `ACP_CLAUDE_CMD=claude` |
+| `qwen-code` | `qwen`, либо `ACP_QWEN_CMD=<command>` |
+| `codex-code` | `codex`, либо `ACP_CODEX_CMD=<command>` |
+
+Перед live-анализом проверьте provider. Для Claude CLI чаще всего достаточно явного
+`ACP_CLAUDE_CMD=claude`:
 
 ```bash
-acp serve \
+export ACP_CLAUDE_CMD=claude
+
+acp doctor \
   --workspace "$HOME/acp-workspaces/my-service" \
+  --repo-git-url https://github.com/org/my-service.git \
   --runtime headless \
   --runtime-provider claude-code
-```
 
-Provider commands:
-- `claude-code` или `ACP_CLAUDE_CMD`
-- `qwen` или `ACP_QWEN_CMD`
-- `codex` или `ACP_CODEX_CMD`
-
-Перед live-анализом проверьте provider:
-
-```bash
-acp doctor \
+acp serve \
   --workspace "$HOME/acp-workspaces/my-service" \
   --runtime headless \
   --runtime-provider claude-code

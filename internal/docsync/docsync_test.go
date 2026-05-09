@@ -32,7 +32,6 @@ func TestCoreDocsReferenceCanonicalStakeholderMatrix(t *testing.T) {
 	t.Parallel()
 
 	paths := []string{
-		"README.md",
 		"docs/ARCHITECTURE.md",
 		"docs/PLANS.md",
 		"docs/spec/PIPELINE_SPEC.md",
@@ -537,28 +536,31 @@ func TestCLIDocsPointToCanonicalSources(t *testing.T) {
 	}
 }
 
-func TestREADMEFullRunSectionPointsToRunbooks(t *testing.T) {
+func TestREADMEStaysUserFacing(t *testing.T) {
 	t.Parallel()
 
 	content := readDoc(t, "README.md")
 	for _, required := range []string{
+		"## Первый анализ",
+		"## Выбор runtime",
+		"ACP_CLAUDE_CMD=claude",
+		"## Проверка установки и качества",
+		"## Пользовательские документы",
+	} {
+		assertContains(t, content, required)
+	}
+	for _, forbidden := range []string{
 		"docs/LOCAL_FULL_RUN_AI_ADVENT.md",
 		"docs/RELEASE_LIVE_E2E_RUNBOOK.md",
 		"TARGET_REPOS_FILE",
 		"E2E_MATRIX_FILE",
 		"scripts/full-run-ai-advent.sh",
 		"scripts/full-run-batch-matrix.sh",
-	} {
-		assertContains(t, content, required)
-	}
-	for _, forbidden := range []string{
-		"BATCH_PROVIDER_FILTER",
-		"UI_E2E_CANCEL_STUB_SLEEP_SEC",
-		"profile-status/*.json",
-		"parallel-default",
+		"release_verdict",
+		"trusted-machine",
 	} {
 		if strings.Contains(content, forbidden) {
-			t.Fatalf("expected README.md full-run section to stay high-level and avoid %q", forbidden)
+			t.Fatalf("expected README.md to stay user-facing and avoid internal marker %q", forbidden)
 		}
 	}
 }
@@ -584,7 +586,6 @@ func TestArtifactFixtureTerminologyIsConsistent(t *testing.T) {
 	t.Parallel()
 
 	required := map[string][]string{
-		"README.md":                             {"synthetic fixtures and recorded artifacts", "artifact fixtures"},
 		"docs/ARCHITECTURE.md":                  {"artifact fixtures"},
 		"docs/spec/API_SPEC.md":                 {"artifact fixtures"},
 		"docs/TESTING_STRATEGY.md":              {"artifact fixtures", "recorded artifacts"},
@@ -716,15 +717,6 @@ func TestMultiRepoE2EDocsAreConsistent(t *testing.T) {
 	t.Parallel()
 
 	required := map[string][]string{
-		"README.md": {
-			"docs/LOCAL_FULL_RUN_AI_ADVENT.md",
-			"docs/RELEASE_LIVE_E2E_RUNBOOK.md",
-			"TARGET_REPOS_FILE",
-			"E2E_MATRIX_FILE",
-			"docs/LOCAL_FULL_RUN_AI_ADVENT.md",
-			"docs/RELEASE_LIVE_E2E_RUNBOOK.md",
-			"trusted-machine",
-		},
 		"docs/LOCAL_FULL_RUN_AI_ADVENT.md": {
 			"docs/RELEASE_LIVE_E2E_RUNBOOK.md",
 			"TARGET_REPOS_FILE",
@@ -751,6 +743,14 @@ func TestMultiRepoE2EDocsAreConsistent(t *testing.T) {
 	}
 	forbidden := map[string][]string{
 		"README.md": {
+			"docs/LOCAL_FULL_RUN_AI_ADVENT.md",
+			"docs/RELEASE_LIVE_E2E_RUNBOOK.md",
+			"TARGET_REPOS_FILE",
+			"E2E_MATRIX_FILE",
+			"scripts/full-run-ai-advent.sh",
+			"scripts/full-run-batch-matrix.sh",
+			"release_verdict",
+			"trusted-machine",
 			"MATRIX_ID=release-fast-",
 			"ACP_APPLY_TIMEOUTS_VIA_API=1",
 		},

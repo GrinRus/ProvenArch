@@ -65,6 +65,8 @@ EP-20260509-v011-hardening-release
 
 ### Goals (must have)
 - [x] Keep README aligned with the actual local-first install/run path and current public `v0.1.0` status until `v0.1.1` is published
+- [x] Keep README user-facing by removing internal live E2E/release-gate/runbook navigation and making fake/live onboarding standalone
+- [x] Sync `docs/INSTALL.md` provider command wording without changing public latest-release status
 - [x] Move user-facing hardening notes from `Unreleased` into `CHANGELOG.md` entry `v0.1.1 - 2026-05-09`
 - [x] Preserve `.goreleaser.yml` prerelease behavior for the next beta release
 - [x] Run local DoD and release-prep smoke checks
@@ -88,7 +90,7 @@ EP-20260509-v011-hardening-release
 - `README.md`
 - `CHANGELOG.md`
 - `docs/PLANS.md`
-- `docs/INSTALL.md` only after `v0.1.1` is published
+- `docs/INSTALL.md` for provider command wording; latest-release values only after `v0.1.1` is published
 
 ### Acceptance criteria
 - [x] `make contracts`
@@ -99,6 +101,9 @@ EP-20260509-v011-hardening-release
 - [x] Public install smoke against current `main/install.sh`
 - [x] Source fake walkthrough smoke on a temporary local Git repo
 - [x] UI/API smoke against local `acp serve`
+- [x] README user-facing guard: no internal live E2E/runbook/matrix/verdict navigation
+- [x] README relative links check
+- [x] README provider example check with `ACP_CLAUDE_CMD=claude`
 - [ ] Trusted release verdict JSON verified with `scripts/verify-release-verdict.py`
 
 ### Risks
@@ -109,6 +114,7 @@ EP-20260509-v011-hardening-release
 ### Progress log
 - 2026-05-09: Started `v0.1.1` hardening/onboarding release prep. README rewrite already exists in the worktree; changelog moved to `v0.1.1`. Trusted live release gate not run yet.
 - 2026-05-09: Local release-prep verification passed: `make contracts`, `make test`, `make lint`, `make build`, `goreleaser check` via `go run`, public installer smoke, source fake walkthrough smoke, and local UI/API smoke. Canonical live release gate remains blocked until a clean committed tree and complete trusted-host curated checkout set are available; current host is missing `/tmp/provenarch-live-e2e/posthog/posthog` for `release long`.
+- 2026-05-09: Refined README as standalone user onboarding artifact: removed public navigation to internal live E2E/release-gate/runbook surfaces, added explicit provider ID vs executable command wording, documented `ACP_CLAUDE_CMD=claude` live smoke, and synced `docs/INSTALL.md` wording without changing latest public release status.
 
 ### Plan ID
 EP-20260508-oss-readiness-hardening

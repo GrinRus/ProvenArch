@@ -150,24 +150,43 @@ ACP пишет эти файлы в `arch-workspace`, а не в анализи�
 ## Выбор runtime
 
 Используйте `acp doctor`, чтобы проверить local readiness и provider availability.
+Provider ID - это значение для `--runtime-provider`; executable command - это реальная CLI
+команда, установленная на вашей машине.
 
-| Runtime mode/provider | External dependency | Typical use |
+| Runtime mode/provider ID | Executable command | Typical use |
 | --- | --- | --- |
-| `--runtime fake` | нет | Первый walkthrough, deterministic tests, required CI baseline |
-| `--runtime headless --runtime-provider claude-code` | `claude-code` command или `ACP_CLAUDE_CMD` | Default live analysis provider |
-| `--runtime headless --runtime-provider qwen-code` | `qwen` command или `ACP_QWEN_CMD` | Optional live analysis provider |
-| `--runtime headless --runtime-provider codex-code` | `codex` command или `ACP_CODEX_CMD` | Release peer live analysis provider |
+| `--runtime fake` | не требуется | Первый walkthrough и deterministic baseline |
+| `--runtime headless --runtime-provider claude-code` | `claude-code`, либо `ACP_CLAUDE_CMD=claude` | Default live analysis provider |
+| `--runtime headless --runtime-provider qwen-code` | `qwen`, либо `ACP_QWEN_CMD=<command>` | Optional live analysis provider |
+| `--runtime headless --runtime-provider codex-code` | `codex`, либо `ACP_CODEX_CMD=<command>` | Optional live analysis provider |
 
 `--runtime headless` - opt-in режим для live анализа; default локальный baseline остается
 `--runtime fake`.
 
-Пример live run:
+Пример live CLI smoke через Claude CLI. Если ваш binary называется `claude-code`, строку
+`export ACP_CLAUDE_CMD=claude` можно не задавать.
 
 ```bash
+export ACP_CLAUDE_CMD=claude
+
 acp doctor \
   --workspace "$HOME/acp-workspaces/my-service" \
+  --repo-path "$HOME/src/my-service" \
   --runtime headless \
   --runtime-provider claude-code
+
+acp run \
+  --workspace "$HOME/acp-workspaces/my-service" \
+  --pipeline init \
+  --runtime headless \
+  --runtime-provider claude-code \
+  --non-interactive
+```
+
+Тот же workspace можно открыть в UI:
+
+```bash
+export ACP_CLAUDE_CMD=claude
 
 acp serve \
   --workspace "$HOME/acp-workspaces/my-service" \
@@ -241,7 +260,7 @@ Refresh runs переиспользуют steps `1..4`.
 
 - `workspace.yaml` объявляет repositories, imported docs и runtime profile settings.
 - `charter/` и `skills/` хранят human-owned project context и editable baseline prompts.
-- Headless providers пишут staged shard/final artifacts, manifests и validator verdicts.
+- Headless providers пишут staged shard/final artifacts, manifests и validator outputs.
 - Orchestrator валидирует manifests, строит indexes, выводит `model/*` и публикует reports.
 - Promotion в stable `reports/*` и `proposals/*` требует validator approval.
 - Required CI использует deterministic fixtures и fake runtime, без live network/provider dependencies.
@@ -253,17 +272,9 @@ Editable prompt pack layer подключается к `step0.constitution`, `st
 
 Artifact ownership taxonomy:
 
-- provider-authored: runtime manifests, draft files, shard packs и validator verdicts;
+- provider-authored: runtime manifests, draft files, shard packs и validator outputs;
 - orchestrator-authored: run indexes, citation indexes, shard plans/summaries, logs/history;
 - compiler-derived: promoted reports, diagrams, normalized renderers и `model/*`.
-
-Подробные contracts:
-
-- [docs/spec/WORKSPACE_SPEC.md](docs/spec/WORKSPACE_SPEC.md)
-- [docs/spec/PIPELINE_SPEC.md](docs/spec/PIPELINE_SPEC.md)
-- [docs/spec/MODEL_SPEC.md](docs/spec/MODEL_SPEC.md)
-- [docs/spec/API_SPEC.md](docs/spec/API_SPEC.md)
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ## Workspace model
 
@@ -290,97 +301,44 @@ required поля `id` и `path`, optional поля `source`, `checksum`, `impor
 `source_updated_at`, `status`. Отсутствие index допустимо, malformed/index semantic issues
 surfacing как warning-only diagnostics.
 
-## Разработка из исходников
+## Проверка установки и качества
 
-Prerequisites:
-
-- Go exact version из [.go-version](.go-version)
-- Node.js exact version из [.node-version](.node-version)
-- npm 10.x
-- optional provider CLIs для live runtime development
-
-Bootstrap и проверка repository:
+Минимальная проверка установленного binary:
 
 ```bash
-make bootstrap
-make contracts
-make test
-make lint
-make build
-./bin/acp version
-```
-
-Полезные local commands:
-
-```bash
-make quickstart-local WORKSPACE=/path/to/arch-workspace REPO_PATH=/path/to/repo REPO_NAME=my-service
-make run-backend WORKSPACE=/path/to/arch-workspace
-make run-ui
-```
-
-Root CLI commands:
-
-```text
-acp init-workspace
-acp serve
-acp run
-acp qa
-acp doctor
 acp version
+
+acp doctor \
+  --workspace "$HOME/acp-workspaces/my-service" \
+  --repo-path "$HOME/src/my-service"
+
+acp run \
+  --workspace "$HOME/acp-workspaces/my-service" \
+  --pipeline init \
+  --runtime fake \
+  --non-interactive
 ```
 
-Contribution guide: [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Test and release evidence
-
-Required CI спроектирован без live AI provider dependencies и использует synthetic fixtures and recorded artifacts, включая artifact fixtures. Local Definition of Done для завершенного slice:
+После этого проверьте, что появились ключевые файлы:
 
 ```bash
-make contracts
-make test
-make lint
-make build
+test -f "$HOME/acp-workspaces/my-service/reports/as-is/overview.md"
+test -f "$HOME/acp-workspaces/my-service/reports/coverage/summary.md"
+test -f "$HOME/acp-workspaces/my-service/reports/findings/findings.md"
 ```
 
-Manual live E2E и release-gate работа отделены от required CI.
-Локальный full-run описан в [docs/LOCAL_FULL_RUN_AI_ADVENT.md](docs/LOCAL_FULL_RUN_AI_ADVENT.md):
-он использует `TARGET_REPOS_FILE` и entrypoint `scripts/full-run-ai-advent.sh`.
-Канонический trusted-machine runbook:
-[docs/RELEASE_LIVE_E2E_RUNBOOK.md](docs/RELEASE_LIVE_E2E_RUNBOOK.md). Для live matrix harness
-используйте `E2E_MATRIX_FILE` и запускайте `scripts/full-run-batch-matrix.sh` напрямую; не
-добавляйте wrapper поверх release gate. Release readiness берется только из
-`reports/release_verdict_<matrix-id>.json`.
+Installer проверяет `checksums.txt` перед установкой binary. Для hardening-релизов GitHub
+Release artifacts также могут включать SBOM/provenance files; используйте их как
+дополнительный supply-chain evidence при внутренней политике вашей команды.
 
-Testing strategy: [docs/TESTING_STRATEGY.md](docs/TESTING_STRATEGY.md).
-
-## Docs map
+## Пользовательские документы
 
 - [docs/INSTALL.md](docs/INSTALL.md) - install paths и source build prerequisites.
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - local diagnostics и common failures.
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - implementation architecture и boundaries.
-- [docs/spec/PIPELINE_SPEC.md](docs/spec/PIPELINE_SPEC.md) - pipeline inputs, outputs и artifact ownership.
-- [docs/spec/WORKSPACE_SPEC.md](docs/spec/WORKSPACE_SPEC.md) - `workspace.yaml` contract.
-- [docs/spec/API_SPEC.md](docs/spec/API_SPEC.md) - local API contracts.
-- [docs/spec/MODEL_SPEC.md](docs/spec/MODEL_SPEC.md) - derived model format.
-- [docs/STAKEHOLDER_DOC.md](docs/STAKEHOLDER_DOC.md) - canonical stakeholder matrix и implemented/planned status.
-- [docs/BACKLOG.md](docs/BACKLOG.md) - backlog и acceptance criteria.
-- [docs/PLANS.md](docs/PLANS.md) - active engineering plans.
-- [docs/RELEASE_LIVE_E2E_RUNBOOK.md](docs/RELEASE_LIVE_E2E_RUNBOOK.md) - trusted-machine live release gate.
-
-## Repository map
-
-- `cmd/acp/` - CLI entrypoint и command surface.
-- `internal/orchestrator/` - pipeline, staging, validation, promotion, run lifecycle.
-- `internal/runtime/` - fake runtime, headless provider adapters, runtime policies.
-- `internal/workspace/` - workspace manifest, layout, repo resolution, baseline bundle.
-- `internal/model/` - derived entity-per-file model store.
-- `internal/reports/` - report и diagram materialization.
-- `internal/api/` - local API и embedded UI server.
-- `ui/` - React/TypeScript UI.
-- `schemas/` - JSON Schemas для workspace и runtime artifacts.
-- `examples/` - contract examples и matrix inputs.
-- `fixtures/` - deterministic test fixtures и golden outputs.
-- `scripts/` - smoke checks, release/live E2E harnesses и CI helpers.
+- [SUPPORT.md](SUPPORT.md) - support scope и evidence expectations.
+- [SECURITY.md](SECURITY.md) - vulnerability reporting.
+- [CHANGELOG.md](CHANGELOG.md) - user-visible release notes.
+- [LICENSE](LICENSE) - Apache-2.0 license.
 
 ## Known MVP limits
 
@@ -398,8 +356,7 @@ Testing strategy: [docs/TESTING_STRATEGY.md](docs/TESTING_STRATEGY.md).
 с secrets, private repository content, raw provider logs или tokens.
 
 Используйте [SUPPORT.md](SUPPORT.md) для support scope и evidence expectations. Release notes
-и user-visible changes tracked в [CHANGELOG.md](CHANGELOG.md). Governance и release ownership
-описаны в [GOVERNANCE.md](GOVERNANCE.md).
+и user-visible changes tracked в [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
