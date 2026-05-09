@@ -32,7 +32,6 @@ func TestCoreDocsReferenceCanonicalStakeholderMatrix(t *testing.T) {
 	t.Parallel()
 
 	paths := []string{
-		"README.md",
 		"docs/ARCHITECTURE.md",
 		"docs/PLANS.md",
 		"docs/spec/PIPELINE_SPEC.md",
@@ -149,7 +148,7 @@ func TestQABetaBoundaryDocumentsDeterministicService(t *testing.T) {
 	t.Parallel()
 
 	requiredByPath := map[string]string{
-		"README.md":                  "deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask`; это не headless runtime agent",
+		"README.md":                  "deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask`; он не запускает новый live analysis и не меняет workspace",
 		"docs/ARCHITECTURE.md":       "deterministic workspace-backed read-only service + CLI `acp qa` + `POST /api/qa/ask`; не headless runtime agent",
 		"docs/STAKEHOLDER_DOC.md":    "deterministic workspace-backed read-only capability доступна как internal service + CLI `acp qa` + public read-only `POST /api/qa/ask`; это не headless runtime agent",
 		"docs/spec/PIPELINE_SPEC.md": "deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask`",
@@ -163,7 +162,11 @@ func TestQABetaBoundaryDocumentsDeterministicService(t *testing.T) {
 			content := readDoc(t, path)
 			assertContains(t, content, required)
 			assertContains(t, content, "POST /api/qa/ask")
-			assertContains(t, content, "skills/prompt-packs/qa.md")
+			if path == "README.md" {
+				assertNotContains(t, content, "skills/prompt-packs/qa.md")
+			} else {
+				assertContains(t, content, "skills/prompt-packs/qa.md")
+			}
 			assertNotContains(t, content, "System Analyst Q&A Agent")
 		})
 	}
@@ -537,28 +540,31 @@ func TestCLIDocsPointToCanonicalSources(t *testing.T) {
 	}
 }
 
-func TestREADMEFullRunSectionPointsToRunbooks(t *testing.T) {
+func TestREADMEStaysUserFacing(t *testing.T) {
 	t.Parallel()
 
 	content := readDoc(t, "README.md")
 	for _, required := range []string{
+		"## Первый анализ",
+		"## Выбор runtime",
+		"ACP_CLAUDE_CMD=claude",
+		"## Проверка установки и качества",
+		"## Пользовательские документы",
+	} {
+		assertContains(t, content, required)
+	}
+	for _, forbidden := range []string{
 		"docs/LOCAL_FULL_RUN_AI_ADVENT.md",
 		"docs/RELEASE_LIVE_E2E_RUNBOOK.md",
 		"TARGET_REPOS_FILE",
 		"E2E_MATRIX_FILE",
 		"scripts/full-run-ai-advent.sh",
 		"scripts/full-run-batch-matrix.sh",
-	} {
-		assertContains(t, content, required)
-	}
-	for _, forbidden := range []string{
-		"BATCH_PROVIDER_FILTER",
-		"UI_E2E_CANCEL_STUB_SLEEP_SEC",
-		"profile-status/*.json",
-		"parallel-default",
+		"release_verdict",
+		"trusted-machine",
 	} {
 		if strings.Contains(content, forbidden) {
-			t.Fatalf("expected README.md full-run section to stay high-level and avoid %q", forbidden)
+			t.Fatalf("expected README.md to stay user-facing and avoid internal marker %q", forbidden)
 		}
 	}
 }
@@ -584,7 +590,6 @@ func TestArtifactFixtureTerminologyIsConsistent(t *testing.T) {
 	t.Parallel()
 
 	required := map[string][]string{
-		"README.md":                             {"synthetic fixtures and recorded artifacts", "artifact fixtures"},
 		"docs/ARCHITECTURE.md":                  {"artifact fixtures"},
 		"docs/spec/API_SPEC.md":                 {"artifact fixtures"},
 		"docs/TESTING_STRATEGY.md":              {"artifact fixtures", "recorded artifacts"},
@@ -716,15 +721,6 @@ func TestMultiRepoE2EDocsAreConsistent(t *testing.T) {
 	t.Parallel()
 
 	required := map[string][]string{
-		"README.md": {
-			"docs/LOCAL_FULL_RUN_AI_ADVENT.md",
-			"docs/RELEASE_LIVE_E2E_RUNBOOK.md",
-			"TARGET_REPOS_FILE",
-			"E2E_MATRIX_FILE",
-			"docs/LOCAL_FULL_RUN_AI_ADVENT.md",
-			"docs/RELEASE_LIVE_E2E_RUNBOOK.md",
-			"trusted-machine",
-		},
 		"docs/LOCAL_FULL_RUN_AI_ADVENT.md": {
 			"docs/RELEASE_LIVE_E2E_RUNBOOK.md",
 			"TARGET_REPOS_FILE",
@@ -751,6 +747,14 @@ func TestMultiRepoE2EDocsAreConsistent(t *testing.T) {
 	}
 	forbidden := map[string][]string{
 		"README.md": {
+			"docs/LOCAL_FULL_RUN_AI_ADVENT.md",
+			"docs/RELEASE_LIVE_E2E_RUNBOOK.md",
+			"TARGET_REPOS_FILE",
+			"E2E_MATRIX_FILE",
+			"scripts/full-run-ai-advent.sh",
+			"scripts/full-run-batch-matrix.sh",
+			"release_verdict",
+			"trusted-machine",
 			"MATRIX_ID=release-fast-",
 			"ACP_APPLY_TIMEOUTS_VIA_API=1",
 		},
