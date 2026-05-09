@@ -58,6 +58,59 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-05-07 consolidated historical active plans into the remaining open slices below. Detailed evidence and classification are archived in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`; original historical active plan text was moved to `docs/archive/PLANS_ARCHIVE_2026-05.md` under "Reconciled active plans from 2026-05-07".
 
 ### Plan ID
+EP-20260509-v011-hardening-release
+
+### Context
+`v0.1.0` is the only public release, while `main` has accumulated OSS readiness, release hardening, exact toolchain, and onboarding documentation improvements. Prepare `v0.1.1` as a beta hardening/onboarding release without changing runtime contracts, schemas, CLI flags, or public API.
+
+### Goals (must have)
+- [x] Keep README aligned with the actual local-first install/run path and current public `v0.1.0` status until `v0.1.1` is published
+- [x] Move user-facing hardening notes from `Unreleased` into `CHANGELOG.md` entry `v0.1.1 - 2026-05-09`
+- [x] Preserve `.goreleaser.yml` prerelease behavior for the next beta release
+- [x] Run local DoD and release-prep smoke checks
+- [ ] Run trusted-machine release gate through direct `scripts/full-run-batch-matrix.sh` invocation and record `reports/release_verdict_<matrix-id>.json`
+- [ ] After the GitHub release is published, update public latest-release docs from `v0.1.0` to `v0.1.1`
+
+### Non-goals
+- [x] Do not change runtime contracts, schemas, CLI flags, or public API
+- [x] Do not add wrapper scripts around the release matrix harness
+- [x] Do not edit canonical release matrices or curated repo files to fit the current host
+- [x] Do not mark release readiness as passed without verifier-backed `PASS`
+
+### Approach
+1) Prepare release docs on a dedicated branch with README and changelog aligned to the release plan.
+2) Run local required checks and smoke checks against fake runtime and public install path.
+3) Execute trusted-host live release gate only from a clean committed tree that satisfies canonical path/provider prerequisites.
+4) Publish `v0.1.1` as a prerelease through existing GoReleaser config after release verdict evidence is present.
+5) Update latest-release docs to `v0.1.1` after publication.
+
+### Files expected to change
+- `README.md`
+- `CHANGELOG.md`
+- `docs/PLANS.md`
+- `docs/INSTALL.md` only after `v0.1.1` is published
+
+### Acceptance criteria
+- [x] `make contracts`
+- [x] `make test`
+- [x] `make lint`
+- [x] `make build`
+- [x] `goreleaser check`
+- [x] Public install smoke against current `main/install.sh`
+- [x] Source fake walkthrough smoke on a temporary local Git repo
+- [x] UI/API smoke against local `acp serve`
+- [ ] Trusted release verdict JSON verified with `scripts/verify-release-verdict.py`
+
+### Risks
+- Current local host may not satisfy trusted-machine prerequisites for canonical release slices.
+- `v0.1.1` docs must not claim latest public release until the GitHub release is actually published.
+- Owner/admin GitHub residual tasks remain manual and must not be misrepresented as completed release evidence.
+
+### Progress log
+- 2026-05-09: Started `v0.1.1` hardening/onboarding release prep. README rewrite already exists in the worktree; changelog moved to `v0.1.1`. Trusted live release gate not run yet.
+- 2026-05-09: Local release-prep verification passed: `make contracts`, `make test`, `make lint`, `make build`, `goreleaser check` via `go run`, public installer smoke, source fake walkthrough smoke, and local UI/API smoke. Canonical live release gate remains blocked until a clean committed tree and complete trusted-host curated checkout set are available; current host is missing `/tmp/provenarch-live-e2e/posthog/posthog` for `release long`.
+
+### Plan ID
 EP-20260508-oss-readiness-hardening
 
 ### Context
