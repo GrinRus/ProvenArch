@@ -149,6 +149,7 @@ EP-20260509-v011-hardening-release
 - `CHANGELOG.md`
 - `docs/PLANS.md`
 - `docs/INSTALL.md` for provider command wording; latest-release values only after `v0.1.1` is published
+- `scripts/write-batch-preflight.py` and `scripts/tests/write_batch_preflight_test.py` for release-fast qwen preflight alignment
 
 ### Acceptance criteria
 - [x] `make contracts`
@@ -177,6 +178,7 @@ EP-20260509-v011-hardening-release
 - 2026-05-09: Fixed README quality-check flow to be standalone for a fresh workspace by adding `serve --auto-init --dry-run` before the fake `run` command.
 - 2026-05-09: README-only live E2E audit: README supports install, fake walkthrough, and single-provider Claude live smoke, but intentionally contains no matrix/runbook/verdict route; a README-only user cannot complete the full live E2E/release gate. Local provider binaries `qwen`, `claude`, and `codex` are present, `/tmp/provenarch-live-e2e` is writable, but the canonical checkout set is incomplete (`bank-of-anthos`, `posthog`, `ftgo`, and `sentry-ecosystem` missing).
 - 2026-05-09: Started README + release-fast live E2E candidate slice. Target is current candidate fixes, not published `v0.1.0`: close clean-`HOME` README doctor gap, verify fake README walkthrough including diagram preview and QA, then run canonical `release fast` from a clean committed worktree through direct `scripts/full-run-batch-matrix.sh`.
+- 2026-05-09: First canonical `release fast` attempt on commit `99de15b` stopped before backend runs with `operational_host_preflight_failed`: qwen artifact smoke used bare `qwen -p`, while the runtime adapter needs `--chat-recording false --yolo --channel CI` to enable filesystem artifact writes. Current follow-up aligns preflight with runtime invocation and reruns `release fast`.
 
 ### Plan ID
 EP-20260508-oss-readiness-hardening
