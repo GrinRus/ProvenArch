@@ -148,7 +148,7 @@ func TestQABetaBoundaryDocumentsDeterministicService(t *testing.T) {
 	t.Parallel()
 
 	requiredByPath := map[string]string{
-		"README.md":                  "deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask`; это не headless runtime agent",
+		"README.md":                  "deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask`; он не запускает новый live analysis и не меняет workspace",
 		"docs/ARCHITECTURE.md":       "deterministic workspace-backed read-only service + CLI `acp qa` + `POST /api/qa/ask`; не headless runtime agent",
 		"docs/STAKEHOLDER_DOC.md":    "deterministic workspace-backed read-only capability доступна как internal service + CLI `acp qa` + public read-only `POST /api/qa/ask`; это не headless runtime agent",
 		"docs/spec/PIPELINE_SPEC.md": "deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask`",
@@ -162,7 +162,11 @@ func TestQABetaBoundaryDocumentsDeterministicService(t *testing.T) {
 			content := readDoc(t, path)
 			assertContains(t, content, required)
 			assertContains(t, content, "POST /api/qa/ask")
-			assertContains(t, content, "skills/prompt-packs/qa.md")
+			if path == "README.md" {
+				assertNotContains(t, content, "skills/prompt-packs/qa.md")
+			} else {
+				assertContains(t, content, "skills/prompt-packs/qa.md")
+			}
 			assertNotContains(t, content, "System Analyst Q&A Agent")
 		})
 	}

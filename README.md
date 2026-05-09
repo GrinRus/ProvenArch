@@ -237,7 +237,7 @@ curl -fsS -X POST http://127.0.0.1:8080/api/qa/ask \
   -d '{"question":"Who owns payments-service?"}'
 ```
 
-Q&A beta boundary: deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask`; это не headless runtime agent и не consumer `skills/prompt-packs/qa.md`.
+Q&A beta boundary: deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask`; он не запускает новый live analysis и не меняет workspace.
 
 Troubleshooting: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
@@ -311,6 +311,14 @@ acp version
 acp doctor \
   --workspace "$HOME/acp-workspaces/my-service" \
   --repo-path "$HOME/src/my-service"
+
+acp serve \
+  --workspace "$HOME/acp-workspaces/my-service" \
+  --auto-init \
+  --repo-name my-service \
+  --repo-path "$HOME/src/my-service" \
+  --runtime fake \
+  --dry-run
 
 acp run \
   --workspace "$HOME/acp-workspaces/my-service" \

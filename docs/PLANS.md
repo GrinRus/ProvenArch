@@ -103,6 +103,7 @@ EP-20260509-v011-hardening-release
 - [x] UI/API smoke against local `acp serve`
 - [x] README user-facing guard: no internal live E2E/runbook/matrix/verdict navigation
 - [x] README relative links check
+- [x] README standalone fake quality check includes `serve --auto-init --dry-run` before `run`
 - [x] README provider example check with `ACP_CLAUDE_CMD=claude`
 - [ ] Trusted release verdict JSON verified with `scripts/verify-release-verdict.py`
 
@@ -115,6 +116,7 @@ EP-20260509-v011-hardening-release
 - 2026-05-09: Started `v0.1.1` hardening/onboarding release prep. README rewrite already exists in the worktree; changelog moved to `v0.1.1`. Trusted live release gate not run yet.
 - 2026-05-09: Local release-prep verification passed: `make contracts`, `make test`, `make lint`, `make build`, `goreleaser check` via `go run`, public installer smoke, source fake walkthrough smoke, and local UI/API smoke. Canonical live release gate remains blocked until a clean committed tree and complete trusted-host curated checkout set are available; current host is missing `/tmp/provenarch-live-e2e/posthog/posthog` for `release long`.
 - 2026-05-09: Refined README as standalone user onboarding artifact: removed public navigation to internal live E2E/release-gate/runbook surfaces, added explicit provider ID vs executable command wording, documented `ACP_CLAUDE_CMD=claude` live smoke, and synced `docs/INSTALL.md` wording without changing latest public release status.
+- 2026-05-09: Fixed README quality-check flow to be standalone for a fresh workspace by adding `serve --auto-init --dry-run` before the fake `run` command.
 
 ### Plan ID
 EP-20260508-oss-readiness-hardening
