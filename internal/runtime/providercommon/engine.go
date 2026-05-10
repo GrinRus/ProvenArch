@@ -34,6 +34,9 @@ type CommandSpec struct {
 	Args     []string
 	Stdin    io.Reader
 	Dir      string
+	// PromptBytes records the provider prompt payload size without requiring
+	// diagnostics to inspect or consume stdin readers.
+	PromptBytes int
 	// IncludeDirs records the read scope the adapter encoded into provider CLI
 	// args. The shared engine does not interpret it as a success contract.
 	IncludeDirs []string

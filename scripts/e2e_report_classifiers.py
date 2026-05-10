@@ -92,6 +92,7 @@ def extract_observed_models(text: str) -> list[str]:
         candidates.append(unescaped)
     for pattern in (
         r"['\"]model['\"]\s*:\s*['\"]([^'\"]+)['\"]",
+        r"['\"]modelUsage['\"]\s*:\s*\{\s*['\"]([^'\"]+)['\"]\s*:",
         r"\bmodelUsage\.([A-Za-z0-9_.:/-]+)",
         r"\bmodel\s*=\s*['\"]([^'\"]+)['\"]",
     ):

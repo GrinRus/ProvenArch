@@ -178,6 +178,51 @@ def extract_quality_runtime_counters(quality_payload: dict[str, Any]) -> dict[st
     return counters
 
 
+def extract_raw_runtime_stall_counters(paths: list[Path]) -> Counter[str]:
+    counters: Counter[str] = Counter()
+    for path in paths:
+        if not path.exists() or not path.name.endswith("-meta.json"):
+            continue
+        try:
+            payload = read_json(path)
+        except Exception:
+            continue
+        diagnostics = payload.get("diagnostics") or {}
+        if not isinstance(diagnostics, dict):
+            continue
+        lifecycle = diagnostics.get("provider_lifecycle") or {}
+        if not isinstance(lifecycle, dict):
+            lifecycle = {}
+        exit_reason = str(lifecycle.get("exit_reason", "")).strip()
+        error_text = str(lifecycle.get("error", "")).strip()
+        if exit_reason != "stall" and "runtime_stalled" not in error_text:
+            continue
+        stall_phase = str(diagnostics.get("stall_phase", "")).strip()
+        if not stall_phase:
+            if "runtime_stalled_before_artifacts" in error_text:
+                stall_phase = "pre_artifact"
+            elif "runtime_stalled_after_artifacts" in error_text:
+                stall_phase = "post_artifact"
+        counters["stall_count"] += 1
+        if stall_phase == "pre_artifact":
+            counters["pre_artifact_stalls"] += 1
+        elif stall_phase == "post_artifact":
+            counters["post_artifact_stalls"] += 1
+        stdout_bytes = parse_int(lifecycle.get("stdout_bytes", diagnostics.get("stdout_bytes", 0)), 0)
+        stderr_bytes = parse_int(lifecycle.get("stderr_bytes", diagnostics.get("stderr_bytes", 0)), 0)
+        artifact_observed = bool(diagnostics.get("artifact_observed", False))
+        authored_count = parse_int(diagnostics.get("authored_file_count", 0), 0)
+        if (
+            stall_phase == "pre_artifact"
+            and stdout_bytes == 0
+            and stderr_bytes == 0
+            and not artifact_observed
+            and authored_count == 0
+        ):
+            counters["zero_output_pre_artifact_stalls"] += 1
+    return counters
+
+
 def parse_run_results(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     if not path.exists():
@@ -1254,6 +1299,15 @@ def evaluate_run(
             quality_counter_totals.update(extract_quality_runtime_counters(read_json(quality_path)))
         except Exception:
             continue
+    raw_stall_sources: list[Path] = []
+    for workspace_root in workspace_roots:
+        raw_stall_sources.extend(sorted((workspace_root / "reports" / "taskruns" / "raw").glob("*-meta.json")))
+    raw_stall_counter_totals = extract_raw_runtime_stall_counters(raw_stall_sources)
+    for key in QUALITY_COUNTER_KEYS:
+        quality_counter_totals[key] = max(
+            int(quality_counter_totals.get(key, 0)),
+            int(raw_stall_counter_totals.get(key, 0)),
+        )
 
     repair_attempts = int(quality_counter_totals.get("repair_attempts", 0))
     repair_exhausted = int(quality_counter_totals.get("repair_exhausted", 0))
@@ -1277,6 +1331,12 @@ def evaluate_run(
             f"quality/runtime-stalls -> stall_count={stall_count} pre_artifact={pre_artifact_stalls} "
             f"post_artifact={post_artifact_stalls} zero_output_pre_artifact={zero_output_pre_artifact_stalls}"
         )
+        if raw_stall_counter_totals:
+            details.append(
+                "quality/runtime-stalls-raw -> "
+                f"raw_meta_stalls={int(raw_stall_counter_totals.get('stall_count', 0))} "
+                f"zero_output_pre_artifact={int(raw_stall_counter_totals.get('zero_output_pre_artifact_stalls', 0))}"
+            )
     if partial_failure_count > 0:
         issues.append("quality:partial-failures")
         details.append(f"quality/partial-failures -> partial_failure_count={partial_failure_count}")

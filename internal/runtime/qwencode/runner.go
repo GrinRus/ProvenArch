@@ -69,6 +69,7 @@ func (a qwenAdapter) commandSpecWithPrompt(task acpruntime.Task, includeDirs []s
 		Command:     a.runner.commandName(),
 		Args:        commandArgs,
 		Dir:         strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task)),
+		PromptBytes: len([]byte(prompt)),
 		IncludeDirs: includeDirs,
 	}, nil
 }
@@ -98,6 +99,7 @@ func (a qwenAdapter) ActivityPolicy(task acpruntime.Task) providercommon.Activit
 	return providercommon.ActivityPolicy{
 		MonitorArtifacts:           monitorArtifacts,
 		MonitorPreArtifact:         monitorArtifacts,
+		PreArtifactStallWindow:     180 * time.Second,
 		PartialArtifactStallWindow: 90 * time.Second,
 	}
 }

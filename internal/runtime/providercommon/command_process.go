@@ -33,7 +33,7 @@ func runProviderCommand(ctx context.Context, task acpruntime.Task, adapter Provi
 }
 
 func runCommandSpec(ctx context.Context, task acpruntime.Task, spec CommandSpec, policy ActivityPolicy) (acpruntime.Result, error) {
-	commandDiag := newProviderCommandDiagnostics(spec, task)
+	commandDiag := newProviderCommandDiagnostics(spec, task, policy)
 	cmd := exec.CommandContext(ctx, strings.TrimSpace(spec.Command), append([]string(nil), spec.Args...)...)
 	configureCommandProcessGroup(cmd)
 	if dir := strings.TrimSpace(spec.Dir); dir != "" {
@@ -198,6 +198,8 @@ type providerCommandDiagnostics struct {
 	Args           []string
 	Dir            string
 	IncludeDirs    []string
+	PromptBytes    int
+	ActivityPolicy map[string]any
 	Environment    map[string]any
 	TimeoutProfile map[string]any
 	PID            int
@@ -210,7 +212,7 @@ type providerCommandDiagnostics struct {
 	StderrBytes    int
 }
 
-func newProviderCommandDiagnostics(spec CommandSpec, task acpruntime.Task) *providerCommandDiagnostics {
+func newProviderCommandDiagnostics(spec CommandSpec, task acpruntime.Task, policy ActivityPolicy) *providerCommandDiagnostics {
 	command := strings.TrimSpace(spec.Command)
 	commandPath := ""
 	if command != "" {
@@ -225,6 +227,8 @@ func newProviderCommandDiagnostics(spec CommandSpec, task acpruntime.Task) *prov
 		Args:           redactArgs(spec.Args),
 		Dir:            strings.TrimSpace(spec.Dir),
 		IncludeDirs:    normalizeDiagnosticPaths(spec.IncludeDirs),
+		PromptBytes:    spec.PromptBytes,
+		ActivityPolicy: activityPolicyDiagnostics(policy),
 		Environment:    allowlistedProviderEnvDiagnostics(),
 		TimeoutProfile: cloneDiagnosticMap(task.RuntimeTimeoutProfile),
 		StartedAt:      time.Now().UTC(),
@@ -263,6 +267,8 @@ func (d *providerCommandDiagnostics) fields() map[string]any {
 		"argv":              append([]string(nil), d.Args...),
 		"cwd":               d.Dir,
 		"include_dirs":      append([]string(nil), d.IncludeDirs...),
+		"prompt_bytes":      d.PromptBytes,
+		"activity_policy":   cloneDiagnosticMap(d.ActivityPolicy),
 		"env":               d.Environment,
 		"timeout_profile":   cloneDiagnosticMap(d.TimeoutProfile),
 		"pid":               d.PID,
@@ -333,6 +339,20 @@ func cloneDiagnosticMap(values map[string]any) map[string]any {
 		out[trimmed] = value
 	}
 	return out
+}
+
+func activityPolicyDiagnostics(policy ActivityPolicy) map[string]any {
+	return map[string]any{
+		"monitor_artifacts":                  policy.MonitorArtifacts,
+		"monitor_pre_artifact":               policy.MonitorPreArtifact,
+		"pre_artifact_stall_window_ms":       policy.PreArtifactStallWindow.Milliseconds(),
+		"retry_pre_artifact_stall_window_ms": policy.RetryPreArtifactStallWindow.Milliseconds(),
+		"post_artifact_stall_window_ms":      policy.PostArtifactStallWindow.Milliseconds(),
+		"partial_artifact_stall_window_ms":   policy.PartialArtifactStallWindow.Milliseconds(),
+		"poll_interval_ms":                   policy.PollInterval.Milliseconds(),
+		"terminate_grace_ms":                 policy.TerminateGrace.Milliseconds(),
+		"post_terminate_drain_ms":            policy.PostTerminateDrain.Milliseconds(),
+	}
 }
 
 func allowlistedProviderEnvDiagnostics() map[string]any {

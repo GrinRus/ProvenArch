@@ -65,7 +65,8 @@ func TestRunHeadlessProviderClassifiesSilentRetryExhaustionUnavailable(t *testin
 		"heartbeat_timeout_sec": 7,
 	}
 	runner := testAdapter{
-		command: writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 10\n"),
+		command:     writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 10\n"),
+		promptBytes: 42,
 		activity: ActivityPolicy{
 			MonitorArtifacts:            true,
 			MonitorPreArtifact:          true,
@@ -131,6 +132,16 @@ func TestRunHeadlessProviderClassifiesSilentRetryExhaustionUnavailable(t *testin
 	}
 	if got := int(timeoutProfile["step_timeout_sec"].(float64)); got != 123 {
 		t.Fatalf("expected step timeout diagnostic 123, got %d", got)
+	}
+	if got := int(lifecycle["prompt_bytes"].(float64)); got != 42 {
+		t.Fatalf("expected prompt_bytes diagnostic 42, got %d", got)
+	}
+	activityPolicy, ok := lifecycle["activity_policy"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected activity policy diagnostics: %#v", lifecycle)
+	}
+	if got := int(activityPolicy["pre_artifact_stall_window_ms"].(float64)); got != 1000 {
+		t.Fatalf("expected pre-artifact window diagnostic 1000ms, got %d", got)
 	}
 }
 
@@ -1145,6 +1156,7 @@ type testAdapter struct {
 	pairRepairCommand      string
 	validatorRepairCommand string
 	draftRepairCommand     string
+	promptBytes            int
 	activity               ActivityPolicy
 	recovery               RecoveryPolicy
 }
@@ -1158,7 +1170,7 @@ func (a testAdapter) RuntimeVersion() string {
 }
 
 func (a testAdapter) CommandSpec(acpruntime.Task) (CommandSpec, error) {
-	return CommandSpec{Command: a.command}, nil
+	return CommandSpec{Command: a.command, PromptBytes: a.promptBytes}, nil
 }
 
 func (a testAdapter) CollectManifestRepairCommandSpec(acpruntime.Task, error) (CommandSpec, error) {

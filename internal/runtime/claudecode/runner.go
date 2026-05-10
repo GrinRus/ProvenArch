@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
@@ -74,6 +75,7 @@ func (a claudeAdapter) commandSpecWithPrompt(task acpruntime.Task, includeDirs [
 		Args:        commandArgs,
 		Stdin:       stdin,
 		Dir:         strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task)),
+		PromptBytes: len([]byte(prompt)),
 		IncludeDirs: includeDirs,
 	}, nil
 }
@@ -101,8 +103,9 @@ func (a claudeAdapter) ValidateArtifacts(task acpruntime.Task) error {
 func (a claudeAdapter) ActivityPolicy(task acpruntime.Task) providercommon.ActivityPolicy {
 	monitorArtifacts := providercommon.MonitorsRuntimeArtifacts(task)
 	return providercommon.ActivityPolicy{
-		MonitorArtifacts:   monitorArtifacts,
-		MonitorPreArtifact: monitorArtifacts,
+		MonitorArtifacts:       monitorArtifacts,
+		MonitorPreArtifact:     monitorArtifacts,
+		PreArtifactStallWindow: 180 * time.Second,
 	}
 }
 

@@ -925,6 +925,37 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertIn("quality:partial-failures", result.issues)
         self.assertTrue(result.quality_gates_failed)
 
+    def test_python_report_aggregates_failed_raw_stall_metadata(self) -> None:
+        write_json(
+            self.run_dir / "arch-workspace/reports/taskruns/raw/qwen-step2-meta.json",
+            {
+                "diagnostics": {
+                    "artifact_observed": False,
+                    "authored_file_count": 0,
+                    "provider_lifecycle": {
+                        "exit_reason": "stall",
+                        "error": "runtime_stalled_before_artifacts",
+                        "stdout_bytes": 0,
+                        "stderr_bytes": 0,
+                    },
+                }
+            },
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=self.run_dir,
+            preflight={},
+        )
+
+        self.assertEqual(1, result.stall_count)
+        self.assertEqual(1, result.pre_artifact_stalls)
+        self.assertEqual(0, result.post_artifact_stalls)
+        self.assertEqual(1, result.zero_output_pre_artifact_stalls)
+        self.assertIn("quality:stall-pressure", result.issues)
+        self.assertTrue(any("quality/runtime-stalls-raw" in detail for detail in result.issue_details))
+
     def test_python_report_prefers_runtime_flow_failed_when_validator_verdict_failed(self) -> None:
         run_dir = self.root / "run-validator-verdict-fail-python"
         self._create_fixture_run_dir(run_dir)
@@ -2757,6 +2788,30 @@ class BatchFailureClassificationTest(unittest.TestCase):
 
         self.assertIn("reliability:provider-model-mismatch", result.issues)
         self.assertTrue(any("claude-opus" in detail for detail in result.issue_details))
+
+    def test_python_report_flags_nested_provider_model_usage_mismatch(self) -> None:
+        run_dir = self.root / "run-nested-provider-model-mismatch"
+        self._create_passed_run_dir_with_raw_runner_noise(run_dir)
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            '{"kind":"runtime_output","stream":"stdout","message":"{\\"modelUsage\\":{\\"kimi-for-coding\\":{\\"inputTokens\\":1}}}"}\n',
+        )
+
+        result = self.module.evaluate_run(
+            provider="claude-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "none",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "0",
+            },
+        )
+
+        self.assertIn("reliability:provider-model-mismatch", result.issues)
+        self.assertTrue(any("kimi-for-coding" in detail for detail in result.issue_details))
 
     def test_python_report_treats_incomplete_reports_as_triage_only_not_empty_analysis(self) -> None:
         run_dir = self.root / "run-incomplete"

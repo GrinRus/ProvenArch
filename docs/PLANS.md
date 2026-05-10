@@ -149,7 +149,8 @@ EP-20260509-v011-hardening-release
 - `CHANGELOG.md`
 - `docs/PLANS.md`
 - `docs/INSTALL.md` for provider command wording; latest-release values only after `v0.1.1` is published
-- `scripts/write-batch-preflight.py` and `scripts/tests/write_batch_preflight_test.py` for release-fast qwen preflight alignment
+- `scripts/write-batch-preflight.py`, `scripts/e2e_report_classifiers.py`, `scripts/e2e_batch_report.py`, and related tests for release-fast provider readiness/diagnostic alignment
+- `internal/runtime/{qwencode,claudecode,codexcode,providercommon}` tests and adapters for qwen/claude pre-artifact stall policy and raw diagnostics
 
 ### Acceptance criteria
 - [x] `make contracts`
@@ -179,6 +180,7 @@ EP-20260509-v011-hardening-release
 - 2026-05-09: README-only live E2E audit: README supports install, fake walkthrough, and single-provider Claude live smoke, but intentionally contains no matrix/runbook/verdict route; a README-only user cannot complete the full live E2E/release gate. Local provider binaries `qwen`, `claude`, and `codex` are present, `/tmp/provenarch-live-e2e` is writable, but the canonical checkout set is incomplete (`bank-of-anthos`, `posthog`, `ftgo`, and `sentry-ecosystem` missing).
 - 2026-05-09: Started README + release-fast live E2E candidate slice. Target is current candidate fixes, not published `v0.1.0`: close clean-`HOME` README doctor gap, verify fake README walkthrough including diagram preview and QA, then run canonical `release fast` from a clean committed worktree through direct `scripts/full-run-batch-matrix.sh`.
 - 2026-05-09: First canonical `release fast` attempt on commit `99de15b` stopped before backend runs with `operational_host_preflight_failed`: qwen artifact smoke used bare `qwen -p`, while the runtime adapter needs `--chat-recording false --yolo --channel CI` to enable filesystem artifact writes. Current follow-up aligns preflight with runtime invocation and reruns `release fast`.
+- 2026-05-10: Second canonical `release fast` attempt on commit `c343c5c` passed provider preflight but failed baseline backend hard-pass `1/3`: `qwen-code` and `claude-code` both ended as zero-output `runtime_stalled_before_artifacts` before `asis-draft-manifest.json`, while `codex-code` passed. Current remediation tightens nested provider model telemetry detection, treats `claude` non-Claude telemetry as an operational blocker, extends qwen/claude initial pre-artifact stall windows to 180s, preserves strict artifact-only success, and surfaces failed raw zero-output pre-artifact stalls in quality reports before rerunning release-fast.
 
 ### Plan ID
 EP-20260508-oss-readiness-hardening
