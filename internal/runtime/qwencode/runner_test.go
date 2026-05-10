@@ -82,10 +82,16 @@ func TestQwenAdapterMonitorsPreArtifactStallsForArtifactSteps(t *testing.T) {
 	if !policy.MonitorArtifacts || !policy.MonitorPreArtifact {
 		t.Fatalf("expected collect artifact and pre-artifact monitoring, got %+v", policy)
 	}
+	if got, want := policy.PreArtifactStallWindow, 180*time.Second; got != want {
+		t.Fatalf("expected qwen pre-artifact window %s, got %s", want, got)
+	}
 
 	policy = (qwenAdapter{}).ActivityPolicy(acpruntime.Task{StepID: "init.step0.constitution"})
 	if !policy.MonitorArtifacts || !policy.MonitorPreArtifact {
 		t.Fatalf("expected draft artifact and pre-artifact monitoring, got %+v", policy)
+	}
+	if got, want := policy.PreArtifactStallWindow, 180*time.Second; got != want {
+		t.Fatalf("expected qwen draft pre-artifact window %s, got %s", want, got)
 	}
 }
 

@@ -74,6 +74,7 @@ func (a codexAdapter) commandSpecWithPrompt(task acpruntime.Task, includeDirs []
 		Args:        commandArgs,
 		Stdin:       strings.NewReader(prompt),
 		Dir:         cwd,
+		PromptBytes: len([]byte(prompt)),
 		IncludeDirs: includeDirs,
 	}, nil
 }

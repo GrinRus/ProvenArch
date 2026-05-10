@@ -174,6 +174,23 @@ class WriteBatchPreflightTest(unittest.TestCase):
         )
 
         result = self.module.probe_provider_readiness("qwen", command, str(REPO_ROOT))
+
+        self.assertEqual("unavailable", result["status"])
+        self.assertEqual("provider_model_mismatch", result["subclass"])
+        self.assertEqual("1", result["model_mismatch"])
+        self.assertIn("kimi-for-coding", result["observed_models"])
+
+    def test_probe_provider_readiness_blocks_nested_model_usage_mismatch(self) -> None:
+        command = self._write_script(
+            "claude-kimi-model-usage-stub",
+            "#!/bin/sh\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' '2.1.85 (Claude Code)'; exit 0; fi\n"
+            "if [ -n \"${ACP_PREFLIGHT_SMOKE_SENTINEL:-}\" ]; then mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"; printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"; exit 0; fi\n"
+            "printf '%s\n' '{\"type\":\"result\",\"modelUsage\":{\"kimi-for-coding\":{\"inputTokens\":1,\"outputTokens\":1}},\"result\":\"ACP_READY\"}'\n",
+        )
+
+        result = self.module.probe_provider_readiness("claude", command, str(REPO_ROOT))
+
         self.assertEqual("unavailable", result["status"])
         self.assertEqual("provider_model_mismatch", result["subclass"])
         self.assertEqual("1", result["model_mismatch"])

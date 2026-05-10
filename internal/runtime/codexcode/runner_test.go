@@ -62,10 +62,16 @@ func TestCodexAdapterMonitorsPreArtifactStallsForArtifactSteps(t *testing.T) {
 	if !policy.MonitorArtifacts || !policy.MonitorPreArtifact {
 		t.Fatalf("expected collect artifact and pre-artifact monitoring, got %+v", policy)
 	}
+	if policy.PreArtifactStallWindow != 0 {
+		t.Fatalf("codex must keep default shared pre-artifact window, got %+v", policy)
+	}
 
 	policy = (codexAdapter{}).ActivityPolicy(acpruntime.Task{StepID: "init.step0.constitution"})
 	if !policy.MonitorArtifacts || !policy.MonitorPreArtifact {
 		t.Fatalf("expected draft artifact and pre-artifact monitoring, got %+v", policy)
+	}
+	if policy.PreArtifactStallWindow != 0 {
+		t.Fatalf("codex draft policy must keep default shared pre-artifact window, got %+v", policy)
 	}
 }
 
