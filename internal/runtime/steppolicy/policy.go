@@ -181,12 +181,9 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Early pair-write requirement: write the suggested overview doc and shard-pack-manifest.json as one focused artifact pair before any broad second-pass repository sweep.`,
 			fmt.Sprintf(`- Suggested collect authored doc path for this shard: %q. Prefer exactly this single doc path unless already writing an existing clearer authored doc.`, SuggestedCollectDocumentPath(task)),
 			fmt.Sprintf(`- Absolute collect targets for the early pair-write: %q and %q.`, filepath.Join(strings.TrimSpace(task.WriteRoot), filepath.FromSlash(SuggestedCollectDocumentPath(task))), filepath.Join(strings.TrimSpace(task.WriteRoot), "shard-pack-manifest.json")),
-			`FIRST COLLECT ARTIFACT PAIR COMMAND:`,
-			`Run this exact command as the next filesystem action after checking whether both target files already exist; do not run find/rg/list_directory over path_scopes before this command:`,
-			CollectEarlyPairWriteCommand(task),
 			fmt.Sprintf(`- Minimal collect target shape: write %q + "shard-pack-manifest.json" early, then record remaining uncertainty in coverage/questions instead of continuing open-ended exploration.`, SuggestedCollectDocumentPath(task)),
 			`- Do not wait for a complete broad repository sweep before writing shard-pack-manifest.json; once the first authored doc covers the assigned shard scope, write the manifest and record remaining gaps in semantic.coverage.missing.`,
-			`- Immediately after writing the first authored doc, write shard-pack-manifest.json by adapting the task-specific JSON skeleton embedded in the command; keep exact metadata keys and replace only evidence/content values you actually observed.`,
+			`- Immediately after writing the first authored doc, write shard-pack-manifest.json by adapting the task-specific JSON skeleton embedded in the first-action command section; keep exact metadata keys and replace only evidence/content values you actually observed.`,
 			`- Do not exit after writing markdown only; every collect shard must finish with a valid shard-pack-manifest.json.`,
 			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and semantic snapshot.`,
 			`- In shard-pack-manifest.json, semantic MUST include coverage, questions, entities, edges, and findings.`,
@@ -207,7 +204,7 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			)
 		}
 		lines = append(lines,
-			`TASK-SPECIFIC COLLECT MANIFEST JSON SKELETON: use the heredoc JSON embedded in FIRST COLLECT ARTIFACT PAIR COMMAND above; do not copy a generic manifest example.`,
+			`TASK-SPECIFIC COLLECT MANIFEST JSON SKELETON: use the heredoc JSON embedded in the first-action command section above; do not copy a generic manifest example.`,
 			`COLLECT MANIFEST CONTRACT CHECKLIST:`,
 		)
 		lines = append(lines, artifactquality.CollectManifestContractLines(strings.TrimSpace(task.ArtifactRoot))...)
@@ -296,6 +293,24 @@ func CollectEarlyPairWriteCommand(task acpruntime.Task) string {
 		"cat > " + shellSingleQuote(manifestTarget) + " <<'ACP_MANIFEST_JSON'",
 		strings.TrimSpace(skeleton),
 		"ACP_MANIFEST_JSON",
+	}, "\n")
+}
+
+func CollectFirstActionSection(task acpruntime.Task) string {
+	if !acpruntime.IsCollectStep(task.StepID) {
+		return ""
+	}
+	writeRoot := strings.TrimSpace(task.WriteRoot)
+	docTarget := filepath.Join(writeRoot, filepath.FromSlash(SuggestedCollectDocumentPath(task)))
+	manifestTarget := filepath.Join(writeRoot, "shard-pack-manifest.json")
+	return strings.Join([]string{
+		"COLLECT FIRST-ACTION ARTIFACT PAIR:",
+		"- This collect step must start by writing the task-specific artifact pair before broad repository instructions.",
+		fmt.Sprintf(`- Exact authored document target: %q.`, docTarget),
+		fmt.Sprintf(`- Exact manifest target: %q.`, manifestTarget),
+		"FIRST COLLECT ARTIFACT PAIR COMMAND:",
+		"Run this exact command as the next filesystem action after checking whether both target files already exist; do not run find/rg/list_directory over path_scopes before this command:",
+		CollectEarlyPairWriteCommand(task),
 	}, "\n")
 }
 

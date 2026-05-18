@@ -55,13 +55,7 @@ func TestDocFirstFilesystemPolicyDefinesSharedCollectRepairSurface(t *testing.T)
 		`Early pair-write requirement: write the suggested overview doc and shard-pack-manifest.json as one focused artifact pair`,
 		`Minimal collect target shape: write "payments-overview.md" + "shard-pack-manifest.json" early`,
 		`Do not wait for a complete broad repository sweep before writing shard-pack-manifest.json`,
-		`FIRST COLLECT ARTIFACT PAIR COMMAND:`,
-		`Run this exact command as the next filesystem action after checking whether both target files already exist`,
-		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md' <<'ACP_COLLECT_DOC'`,
-		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json' <<'ACP_MANIFEST_JSON'`,
-		`TASK-SPECIFIC COLLECT MANIFEST JSON SKELETON: use the heredoc JSON embedded in FIRST COLLECT ARTIFACT PAIR COMMAND above`,
-		`"path": "payments-overview.md"`,
-		`"artifact_root": "reports/taskruns/run-1/staging/shards/payments"`,
+		`TASK-SPECIFIC COLLECT MANIFEST JSON SKELETON: use the heredoc JSON embedded in the first-action command section above`,
 		`COLLECT MANIFEST CONTRACT CHECKLIST:`,
 		`The task-specific collect manifest JSON skeleton above is normative`,
 		`Do not exit after writing markdown only; every collect shard must finish with a valid shard-pack-manifest.json.`,
@@ -77,6 +71,49 @@ func TestDocFirstFilesystemPolicyDefinesSharedCollectRepairSurface(t *testing.T)
 		if !strings.Contains(policy, needle) {
 			t.Fatalf("expected collect doc-first policy to contain %q, got:\n%s", needle, policy)
 		}
+	}
+	for _, forbidden := range []string{
+		`FIRST COLLECT ARTIFACT PAIR COMMAND:`,
+		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md' <<'ACP_COLLECT_DOC'`,
+		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json' <<'ACP_MANIFEST_JSON'`,
+	} {
+		if strings.Contains(policy, forbidden) {
+			t.Fatalf("doc-first collect policy must not duplicate first-action command %q:\n%s", forbidden, policy)
+		}
+	}
+}
+
+func TestCollectFirstActionSectionWritesExactPair(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		TaskID:       "task-1",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		WriteRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments",
+		ArtifactRoot: "reports/taskruns/run-1/staging/shards/payments",
+		RepoScopes:   []string{"payments"},
+		PathScopes:   []string{"payments"},
+		ShardID:      "payments",
+	}
+
+	section := CollectFirstActionSection(task)
+	required := []string{
+		`COLLECT FIRST-ACTION ARTIFACT PAIR:`,
+		`FIRST COLLECT ARTIFACT PAIR COMMAND:`,
+		`Run this exact command as the next filesystem action after checking whether both target files already exist`,
+		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md' <<'ACP_COLLECT_DOC'`,
+		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json' <<'ACP_MANIFEST_JSON'`,
+		`"path": "payments-overview.md"`,
+		`"artifact_root": "reports/taskruns/run-1/staging/shards/payments"`,
+	}
+	for _, needle := range required {
+		if !strings.Contains(section, needle) {
+			t.Fatalf("expected first-action section to contain %q, got:\n%s", needle, section)
+		}
+	}
+	if got := strings.Count(section, "FIRST COLLECT ARTIFACT PAIR COMMAND:"); got != 1 {
+		t.Fatalf("expected one first-action command heading, got %d:\n%s", got, section)
 	}
 }
 
@@ -105,7 +142,6 @@ func TestDocFirstFilesystemPolicyAddsRootFileShardHint(t *testing.T) {
 		`.gitignore, LICENSE, Makefile, README.md, pom.xml`,
 		`read only the listed root files first; do not recursively sweep top-level directories`,
 		`Produce one concise root overview document in write_root, then write shard-pack-manifest.json`,
-		`"path": "root-overview.md"`,
 	}
 	for _, needle := range required {
 		if !strings.Contains(policy, needle) {
@@ -134,7 +170,7 @@ func TestDocFirstFilesystemPolicyDoesNotTreatTopLevelDirsAsRootFileShard(t *test
 	if strings.Contains(policy, "Root-file collect shard detected") {
 		t.Fatalf("top-level directory scopes must not receive root-file shard hint:\n%s", policy)
 	}
-	if !strings.Contains(policy, `"path": "bank-source-docs-overview.md"`) {
+	if !strings.Contains(policy, `Suggested collect authored doc path for this shard: "bank-source-docs-overview.md"`) {
 		t.Fatalf("expected non-root shard to use shard-based doc suggestion, got:\n%s", policy)
 	}
 
