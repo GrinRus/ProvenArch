@@ -231,6 +231,49 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 	}
 }
 
+func TestComposeCollectManifestRepairPromptPrefersUsefulRootEvidence(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeRoot := filepath.Join(root, "write-root")
+	repoRoot := filepath.Join(root, "bank-repo")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	for _, name := range []string{".gitignore", "LICENSE", "Makefile", "README.md", "pom.xml"} {
+		if err := os.WriteFile(filepath.Join(repoRoot, name), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatalf("write repo file %s: %v", name, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "root-overview.md"), []byte("# Root Overview\n"), 0o644); err != nil {
+		t.Fatalf("write authored doc: %v", err)
+	}
+
+	task := acpruntime.Task{
+		RunID:            "run-1",
+		StepID:           "refresh.step1.collect",
+		ArtifactRoot:     "reports/taskruns/run-1/staging/shards/bank-root-files",
+		WriteRoot:        writeRoot,
+		ReadContextRoots: []string{repoRoot},
+		ShardID:          "bank-root-files",
+		DomainID:         "bank",
+		AgentRole:        "shard-analyst",
+		RepoScopes:       []string{"bank"},
+		PathScopes:       []string{".gitignore", "LICENSE", "Makefile", "README.md", "pom.xml"},
+	}
+
+	prompt := ComposeCollectManifestRepairPrompt(acpruntime.ProviderQwenCode, task, os.ErrNotExist)
+	if !strings.Contains(prompt, `"path": "README.md"`) {
+		t.Fatalf("expected repair prompt skeleton to prefer README.md citation, got:\n%s", prompt)
+	}
+	if strings.Contains(prompt, `"path": ".gitignore"`) {
+		t.Fatalf("repair prompt skeleton must not choose .gitignore as primary root evidence, got:\n%s", prompt)
+	}
+}
+
 func TestComposeCollectArtifactPairRepairPromptWritesExactPairFirst(t *testing.T) {
 	t.Parallel()
 
