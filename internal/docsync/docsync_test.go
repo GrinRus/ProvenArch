@@ -723,6 +723,10 @@ func TestMultiRepoE2EDocsAreConsistent(t *testing.T) {
 	required := map[string][]string{
 		".agents/skills/e2e-live-gate/SKILL.md": {
 			"Black-box operator protocol",
+			"local `manual-live-e2e workflow`",
+			"not GitHub Actions workflow",
+			"internal evaluator helper",
+			"source-only implementation detail",
 			"goal:",
 			"action:",
 			"observed evidence:",
@@ -733,6 +737,11 @@ func TestMultiRepoE2EDocsAreConsistent(t *testing.T) {
 		},
 		"docs/RELEASE_LIVE_E2E_RUNBOOK.md": {
 			"Black-box evaluator protocol",
+			"local `manual-live-e2e workflow`",
+			"operator procedure on trusted host",
+			"not GitHub Actions workflow",
+			"scripts/internal/live-e2e-evaluator.sh",
+			"source-only implementation detail",
 			"Canonical flow",
 			"host/tree/provider/path preflight",
 			"selector and direct command planning",
@@ -747,6 +756,10 @@ func TestMultiRepoE2EDocsAreConsistent(t *testing.T) {
 		},
 		"docs/TESTING_STRATEGY.md": {
 			"docs/RELEASE_LIVE_E2E_RUNBOOK.md",
+			"Local `manual-live-e2e workflow`",
+			"not a GitHub Actions workflow",
+			"scripts/internal/live-e2e-evaluator.sh",
+			"source-only internal evaluator helper",
 			"TARGET_REPOS_FILE",
 			"E2E_MATRIX_FILE",
 			"analysis:cross-repo-missing",
@@ -797,6 +810,9 @@ func TestMultiRepoE2EDocsAreConsistent(t *testing.T) {
 			"full-run-ai-advent.sh",
 		},
 		"scripts/full-run-batch-matrix.sh": {
+			"full-run-ai-advent.sh",
+		},
+		"scripts/internal/live-e2e-evaluator.sh": {
 			"full-run-ai-advent.sh",
 		},
 	}

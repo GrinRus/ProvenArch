@@ -10,6 +10,8 @@ source "$PROVENARCH_ROOT/scripts/repos-meta-fields.sh"
 source "$PROVENARCH_ROOT/scripts/frontend-status-reasons.sh"
 # shellcheck source=scripts/preflight-log.sh
 source "$PROVENARCH_ROOT/scripts/preflight-log.sh"
+# shellcheck source=scripts/internal/live-e2e-evaluator.sh
+source "$PROVENARCH_ROOT/scripts/internal/live-e2e-evaluator.sh"
 # shellcheck source=scripts/timeout-env-keys.sh
 source "$PROVENARCH_ROOT/scripts/timeout-env-keys.sh"
 # shellcheck source=scripts/execution-env-keys.sh
@@ -126,32 +128,12 @@ init_blackbox_step_report() {
   if [[ "$BLACKBOX_STEPS_INITIALIZED" == "1" ]]; then
     return 0
   fi
-  mkdir -p "$REPORTS_ROOT"
-  : >"$BLACKBOX_STEPS_JSONL"
-  python3 - "$BLACKBOX_STEPS_MD" "$BATCH_ID" "${PROFILE_ID:-adhoc}" "${SWEEP_ID:-baseline}" <<'PY'
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-batch_id = sys.argv[2]
-profile_id = sys.argv[3]
-sweep_id = sys.argv[4]
-path.write_text(
-    "\n".join(
-        [
-            f"# Black-Box E2E Steps: {batch_id}",
-            "",
-            f"- profile_id: {profile_id}",
-            f"- sweep_id: {sweep_id}",
-            "",
-            "| step_id | status | classification | goal | action | observed_evidence | next_decision |",
-            "|---|---|---|---|---|---|---|",
-        ]
-    )
-    + "\n",
-    encoding="utf-8",
-)
-PY
+  live_e2e_evaluator_init_batch_report \
+    "$BLACKBOX_STEPS_JSONL" \
+    "$BLACKBOX_STEPS_MD" \
+    "$BATCH_ID" \
+    "${PROFILE_ID:-adhoc}" \
+    "${SWEEP_ID:-baseline}"
   BLACKBOX_STEPS_INITIALIZED=1
 }
 
@@ -164,64 +146,19 @@ write_blackbox_step_report() {
   local next_decision="$6"
   shift 6
   init_blackbox_step_report
-  python3 - "$BLACKBOX_STEPS_JSONL" "$BLACKBOX_STEPS_MD" "$BATCH_ID" "${PROFILE_ID:-adhoc}" "${SWEEP_ID:-baseline}" "$step_id" "$goal" "$action" "$status" "$primary_classification" "$next_decision" "$@" <<'PY'
-import json
-import sys
-from datetime import datetime, timezone
-from pathlib import Path
-
-jsonl_path = Path(sys.argv[1])
-md_path = Path(sys.argv[2])
-batch_id = sys.argv[3]
-profile_id = sys.argv[4]
-sweep_id = sys.argv[5]
-step_id = sys.argv[6]
-goal = sys.argv[7]
-action = sys.argv[8]
-status = sys.argv[9]
-primary_classification = sys.argv[10]
-next_decision = sys.argv[11]
-evidence = [item for item in sys.argv[12:] if item and item != "-"]
-now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-payload = {
-    "generated_at_utc": now,
-    "batch_id": batch_id,
-    "profile_id": profile_id,
-    "sweep_id": sweep_id,
-    "step_id": step_id,
-    "goal": goal,
-    "action": action,
-    "observed_evidence": evidence,
-    "status": status,
-    "primary_classification": primary_classification,
-    "evidence_paths": evidence,
-    "next_decision": next_decision,
-}
-with jsonl_path.open("a", encoding="utf-8") as f:
-    f.write(json.dumps(payload, ensure_ascii=True, sort_keys=True))
-    f.write("\n")
-
-def cell(value: object) -> str:
-    text = str(value).replace("\n", " ").replace("|", "\\|").strip()
-    return text if text else "-"
-
-with md_path.open("a", encoding="utf-8") as f:
-    f.write(
-        "| "
-        + " | ".join(
-            [
-                cell(step_id),
-                cell(status),
-                cell(primary_classification),
-                cell(goal),
-                cell(action),
-                cell("; ".join(evidence)),
-                cell(next_decision),
-            ]
-        )
-        + " |\n"
-    )
-PY
+  live_e2e_evaluator_write_batch_step \
+    "$BLACKBOX_STEPS_JSONL" \
+    "$BLACKBOX_STEPS_MD" \
+    "$BATCH_ID" \
+    "${PROFILE_ID:-adhoc}" \
+    "${SWEEP_ID:-baseline}" \
+    "$step_id" \
+    "$goal" \
+    "$action" \
+    "$status" \
+    "$primary_classification" \
+    "$next_decision" \
+    "$@"
 }
 
 frontend_result_summary() {

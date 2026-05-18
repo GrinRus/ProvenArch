@@ -269,6 +269,8 @@ Release workflow hardening:
 - Подробный command cookbook по trusted-machine live/release gate intentionally вынесен в `docs/RELEASE_LIVE_E2E_RUNBOOK.md`.
 
 ### Optional live-runner smoke
+- Local `manual-live-e2e workflow` is the trusted-machine operator procedure from `docs/RELEASE_LIVE_E2E_RUNBOOK.md`, not a GitHub Actions workflow.
+- `scripts/internal/live-e2e-evaluator.sh` is a source-only internal evaluator helper for durable step evidence; it is not a public entrypoint and must not call `scripts/full-run-batch-matrix.sh`.
 - `scripts/live-e2e-plan.py` — catalog-driven command generator for direct matrix harness invocations:
   - does not execute the harness and does not replace `scripts/full-run-batch-matrix.sh`
   - supports flexible selectors `smoke tiny`, `regres fast|long|full`, `release fast|long|full`
@@ -284,7 +286,7 @@ Release workflow hardening:
   - terminal-success backend runs (`result=passed`, `quality_gates=passed`, `run-status.env state=completed process_exit=0`) остаются `failure_class=none`, даже если raw provider logs содержат recovered `runner_unavailable`/429 diagnostics
   - quality summary/matrix counters агрегируют `repair_attempts`, `repair_exhausted`, `fresh_retries`, `focused_repairs`, `stall_count`, `pre_artifact_stalls`, `post_artifact_stalls`, `zero_output_pre_artifact_stalls`, `partial_failure_count` и `quality_alerts`; non-exhausted repair/stall pressure visible but non-blocking, partial failures remain blockers
   - batch report evidence tests проверяют, что `collect_partial_shard_failures`, focused recovery exhaustion/write-set violations, provider/model mismatch и missing headless rows with runtime logs surfaced as per-run issue details, а не теряются за aggregate failure class
-  - black-box step evidence пишется в `reports/blackbox_e2e_steps_<batch-id>.jsonl/.md` после preflight, backend run, frontend init/cancel, report synthesis и final classification
+  - black-box step evidence через internal evaluator helper пишется в `reports/blackbox_e2e_steps_<batch-id>.jsonl/.md` после preflight, backend run, frontend init/cancel, report synthesis и final classification
 - `scripts/full-run-batch-matrix.sh` — официальный local trusted-machine harness:
   - canonical input: `E2E_MATRIX_FILE`
   - approved profile ids: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
@@ -293,7 +295,7 @@ Release workflow hardening:
   - release-specific slices, `baseline` + `parallel-default`, strict blockers и release verdict policy живут только в `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
   - matrix invariant: для одного `profile_id` shard-plan должен совпадать между `baseline` и `parallel-default`
   - для `source_kind=git_url` refs должны быть pinned
-  - black-box matrix evidence пишется в `reports/blackbox_e2e_steps_<matrix-id>.jsonl/.md` после preflight, planning, каждого profile/sweep и verdict verification
+  - black-box matrix evidence через internal evaluator helper пишется в `reports/blackbox_e2e_steps_<matrix-id>.jsonl/.md` после preflight, planning, каждого profile/sweep и verdict verification
   - итоговый release decision брать только из `reports/release_verdict_<matrix-id>.json`
   - pre-tag/offline verifier: `python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json`; скрипт только проверяет существующий verdict JSON и не запускает live harness
 - `scripts/frontend-live-e2e.sh` и `npm run e2e:live --prefix ui` используют Playwright:

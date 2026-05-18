@@ -1,7 +1,8 @@
 # Release Live E2E Runbook (Agent, no wrapper)
 
 Этот runbook фиксирует manual pre-release gate на trusted локальной машине.
-Новый wrapper-скрипт не используется: агент запускает существующий matrix harness напрямую (`full-run-batch-matrix.sh` -> `full-run-batch.sh` -> internal backend-cycle helper -> `e2e_batch_report.py`).
+Новый wrapper-скрипт не используется: local `manual-live-e2e workflow` является operator procedure on trusted host, not GitHub Actions workflow. Агент запускает существующий matrix harness напрямую (`full-run-batch-matrix.sh` -> `full-run-batch.sh` -> internal backend-cycle helper -> `e2e_batch_report.py`).
+Layering: live-e2e skill -> local manual-live-e2e workflow -> internal evaluator helper -> existing project flow. `scripts/internal/live-e2e-evaluator.sh` является source-only implementation detail для durable step evidence; он не является public release command и не вызывает matrix harness.
 
 Canonical source of truth для live profile taxonomy:
 - `examples/e2e-profile-catalog.yaml`
@@ -33,7 +34,7 @@ next decision: <continue|stop|rerun diagnostic|verify verdict|final report>
 
 Запрещено использовать compatibility aliases, command shims или править canonical matrix/curated repo files под текущую машину. Host/provider/path blockers останавливают прогон как `operational_host_preflight_failed`.
 
-Harness пишет step evidence в existing report roots:
+Harness через internal evaluator helper пишет step evidence в existing report roots:
 - `reports/blackbox_e2e_steps_<batch-id>.jsonl`
 - `reports/blackbox_e2e_steps_<batch-id>.md`
 - `reports/blackbox_e2e_steps_<matrix-id>.jsonl`

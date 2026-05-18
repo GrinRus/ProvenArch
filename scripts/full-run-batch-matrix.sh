@@ -8,6 +8,8 @@ source "$PROVENARCH_ROOT/scripts/legacy-env-guard.sh"
 source "$PROVENARCH_ROOT/scripts/repos-meta-fields.sh"
 # shellcheck source=scripts/preflight-log.sh
 source "$PROVENARCH_ROOT/scripts/preflight-log.sh"
+# shellcheck source=scripts/internal/live-e2e-evaluator.sh
+source "$PROVENARCH_ROOT/scripts/internal/live-e2e-evaluator.sh"
 # shellcheck source=scripts/timeout-env-keys.sh
 source "$PROVENARCH_ROOT/scripts/timeout-env-keys.sh"
 # shellcheck source=scripts/execution-env-keys.sh
@@ -96,30 +98,11 @@ init_matrix_blackbox_step_report() {
   if ! command -v python3 >/dev/null 2>&1; then
     return 0
   fi
-  mkdir -p "$REPORTS_ROOT"
-  : >"$MATRIX_BLACKBOX_STEPS_JSONL"
-  python3 - "$MATRIX_BLACKBOX_STEPS_MD" "$MATRIX_ID" "$E2E_MATRIX_FILE" <<'PY'
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-matrix_id = sys.argv[2]
-matrix_file = sys.argv[3]
-path.write_text(
-    "\n".join(
-        [
-            f"# Black-Box E2E Matrix Steps: {matrix_id}",
-            "",
-            f"- matrix_file: {matrix_file}",
-            "",
-            "| step_id | status | classification | goal | action | observed_evidence | next_decision |",
-            "|---|---|---|---|---|---|---|",
-        ]
-    )
-    + "\n",
-    encoding="utf-8",
-)
-PY
+  live_e2e_evaluator_init_matrix_report \
+    "$MATRIX_BLACKBOX_STEPS_JSONL" \
+    "$MATRIX_BLACKBOX_STEPS_MD" \
+    "$MATRIX_ID" \
+    "$E2E_MATRIX_FILE"
   MATRIX_BLACKBOX_STEPS_INITIALIZED=1
 }
 
@@ -135,62 +118,18 @@ write_matrix_blackbox_step_report() {
     return 0
   fi
   init_matrix_blackbox_step_report
-  python3 - "$MATRIX_BLACKBOX_STEPS_JSONL" "$MATRIX_BLACKBOX_STEPS_MD" "$MATRIX_ID" "$E2E_MATRIX_FILE" "$step_id" "$goal" "$action" "$status" "$primary_classification" "$next_decision" "$@" <<'PY'
-import json
-import sys
-from datetime import datetime, timezone
-from pathlib import Path
-
-jsonl_path = Path(sys.argv[1])
-md_path = Path(sys.argv[2])
-matrix_id = sys.argv[3]
-matrix_file = sys.argv[4]
-step_id = sys.argv[5]
-goal = sys.argv[6]
-action = sys.argv[7]
-status = sys.argv[8]
-primary_classification = sys.argv[9]
-next_decision = sys.argv[10]
-evidence = [item for item in sys.argv[11:] if item and item != "-"]
-now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-payload = {
-    "generated_at_utc": now,
-    "matrix_id": matrix_id,
-    "matrix_file": matrix_file,
-    "step_id": step_id,
-    "goal": goal,
-    "action": action,
-    "observed_evidence": evidence,
-    "status": status,
-    "primary_classification": primary_classification,
-    "evidence_paths": evidence,
-    "next_decision": next_decision,
-}
-with jsonl_path.open("a", encoding="utf-8") as f:
-    f.write(json.dumps(payload, ensure_ascii=True, sort_keys=True))
-    f.write("\n")
-
-def cell(value: object) -> str:
-    text = str(value).replace("\n", " ").replace("|", "\\|").strip()
-    return text if text else "-"
-
-with md_path.open("a", encoding="utf-8") as f:
-    f.write(
-        "| "
-        + " | ".join(
-            [
-                cell(step_id),
-                cell(status),
-                cell(primary_classification),
-                cell(goal),
-                cell(action),
-                cell("; ".join(evidence)),
-                cell(next_decision),
-            ]
-        )
-        + " |\n"
-    )
-PY
+  live_e2e_evaluator_write_matrix_step \
+    "$MATRIX_BLACKBOX_STEPS_JSONL" \
+    "$MATRIX_BLACKBOX_STEPS_MD" \
+    "$MATRIX_ID" \
+    "$E2E_MATRIX_FILE" \
+    "$step_id" \
+    "$goal" \
+    "$action" \
+    "$status" \
+    "$primary_classification" \
+    "$next_decision" \
+    "$@"
 }
 
 write_matrix_operational_blocker_report() {

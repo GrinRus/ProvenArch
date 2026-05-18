@@ -66,6 +66,7 @@ Live E2E должен стать black-box operator flow: план шага, п�
 ### Goals (must have)
 - [x] Обновить live E2E skill и release runbook под обязательный step-by-step black-box evaluator protocol
 - [x] Добавить durable per-step JSONL/Markdown evidence в существующие report roots batch/matrix harness без wrapper поверх `scripts/full-run-batch-matrix.sh`
+- [x] Сделать explicit layering: live-e2e skill -> local manual-live-e2e workflow -> internal evaluator helper -> existing project flow, без GitHub Actions live workflow
 - [x] Оставить `scripts/full-run-batch-matrix.sh` direct top-level release harness
 - [x] Перенести backend-cycle logic за `scripts/full-run-batch.sh` в internal helper и удалить публичный legacy entrypoint
 - [x] Удалить legacy live E2E matrices/docs/tests and references without compatibility shims
@@ -79,9 +80,10 @@ Live E2E должен стать black-box operator flow: план шага, п�
 
 ### Approach
 1) Встроить `blackbox_e2e_steps_<id>.jsonl/.md` в batch и matrix harness.
-2) Перевести старый backend-cycle в non-public helper, вызываемый только из `scripts/full-run-batch.sh`.
-3) Переписать skill/runbook/testing docs под новый protocol и удалить legacy live E2E surfaces.
-4) Обновить docsync/script tests так, чтобы они требовали новый step-report shape и отклоняли старые live E2E references.
+2) Вынести shared black-box step evidence writing в source-only internal evaluator helper; batch/matrix scripts только source helper and pass context.
+3) Перевести старый backend-cycle в non-public helper, вызываемый только из `scripts/full-run-batch.sh`.
+4) Переписать skill/runbook/testing docs под новый protocol и удалить legacy live E2E surfaces.
+5) Обновить docsync/script tests так, чтобы они требовали новый step-report shape, local manual workflow wording, internal evaluator helper, и отклоняли старые live E2E references.
 
 ### Files expected to change
 - `.agents/skills/e2e-live-gate/SKILL.md`
@@ -92,6 +94,7 @@ Live E2E должен стать black-box operator flow: план шага, п�
 - `scripts/full-run-batch.sh`
 - `scripts/full-run-batch-matrix.sh`
 - `scripts/internal/live-e2e-backend-cycle.sh`
+- `scripts/internal/live-e2e-evaluator.sh`
 - `internal/docsync/docsync_test.go`
 - `scripts/tests/*`
 - legacy live E2E files removed from `docs/`, `examples/`, and `scripts/`

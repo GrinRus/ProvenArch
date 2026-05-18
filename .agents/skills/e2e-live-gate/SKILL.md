@@ -26,6 +26,8 @@ description: Используй для trusted-machine pre-release live E2E gate
 ## Black-box operator protocol
 Live E2E skill теперь работает как step-by-step black-box evaluator, а не как report-first cookbook.
 
+Layering для local `manual-live-e2e workflow`: live-e2e skill -> local trusted-machine manual workflow -> internal evaluator helper -> existing project flow. Это operator procedure on trusted host, not GitHub Actions workflow. `scripts/internal/live-e2e-evaluator.sh` является source-only implementation detail для durable step evidence; он не является public entrypoint и не заменяет direct harness commands.
+
 После каждой фазы фиксируй короткий step report в формате:
 
 ```text
@@ -45,9 +47,9 @@ next decision: <continue|stop|rerun diagnostic|verify verdict|final report>
 - matrix inventories/status files;
 - `scripts/verify-release-verdict.py` output.
 
-Запрещено чинить прогон изменением canonical matrix files, curated repo files или compatibility aliases. Host/provider/path blockers надо остановить и классифицировать как operational blocker.
+Запрещено чинить прогон изменением canonical matrix files, curated repo files или compatibility aliases. Host/provider/path blockers надо остановить и классифицировать как operational blocker. Не добавлять GitHub-hosted `manual-live-e2e` workflow для live providers в этом flow.
 
-Harness дополнительно пишет durable evidence:
+Harness через internal evaluator helper дополнительно пишет durable evidence:
 - `reports/blackbox_e2e_steps_<batch-id>.jsonl`
 - `reports/blackbox_e2e_steps_<batch-id>.md`
 - `reports/blackbox_e2e_steps_<matrix-id>.jsonl`
