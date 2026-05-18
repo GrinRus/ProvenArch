@@ -197,7 +197,7 @@
      - `ACP_QWEN_CMD` (default `qwen`)
      - `ACP_CODEX_CMD` (default `codex`)
    - live batch preflight records selected-provider readiness before deep matrix execution; known model/version/auth blockers, including codex model/CLI mismatch (for example `gpt-5.5` on an old Codex CLI), cross-family provider/model telemetry mismatch and selected-provider artifact smoke failure are operational blockers, not product verdicts
-   - raw provider failure metadata includes redacted lifecycle diagnostics: resolved command path, argv, cwd, include dirs, pid, duration/exit reason, stdout/stderr byte counts, selected provider, prompt byte count/hash, resolved runtime timeout profile and allowlisted `ACP_*_CMD`/timeout env presence/hash; prompt payload argv values and stdout/stderr diagnostics are redacted before persistence/streaming
+   - raw provider failure metadata includes redacted lifecycle diagnostics: resolved command path, argv, cwd, include dirs, pid, duration/exit reason, stdout/stderr byte counts, selected provider, prompt byte count, resolved runtime timeout profile and allowlisted `ACP_*_CMD`/timeout env presence/hash; prompt payload argv values are replaced with byte count + hash when present, and stdout/stderr diagnostics are redacted before persistence/streaming
 
 6) **Workspace (`internal/workspace`)** *(implemented baseline)*
    - реализует/валидирует структуру central `arch-workspace` (Variant 2)
