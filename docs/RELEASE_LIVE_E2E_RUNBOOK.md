@@ -700,7 +700,7 @@ Zero tolerance:
 - provider-side hard sandbox в текущих headless CLI нет; поэтому runtime isolation надо оценивать через temp-root layout и step-local `cwd`, а не ожидать отдельного sandbox enforcement от provider tooling.
 - `claude-code`, `qwen-code` и `codex-code` используют общий artifact-only process engine: stdout/stderr capture, process-group termination, timeout/cancel handling, raw diagnostics, activity monitor и artifact validation находятся в shared `providercommon` path.
 - pre/post-artifact recovery provider-agnostic: до появления artifacts silent/no-artifact hangs bounded для всех live adapters; после появления required artifacts runtime ждёт stale pipe activity и stale mutations `write_root`/`draft_final_root`; если artifacts уже валидны, controlled stop считается successful artifact-only completion, а не provider failure. Partial artifacts могут ждать отдельное более длинное provider policy grace window.
-- provider-specific recovery задаётся adapter policy: `qwen-code` adapter invocation передаёт artifact prompt только через CLI `-p` без JSON task stdin и нормализует custom qwen prompt args к artifact prompt. `qwen-code` и `claude-code` разрешают один fresh retry для missing/invalid artifacts и классифицируют fully silent no-artifact path / silent retry exhaustion как `runner_unavailable`; partial authored artifacts без валидного manifest, malformed validator verdict и malformed manifest/draft contract остаются `runtime_contract_failed` после focused repair exhaustion.
+- provider-specific recovery задаётся adapter policy: `qwen-code` adapter invocation передаёт artifact prompt только через CLI `-p` без JSON task stdin, нормализует custom qwen prompt args к artifact prompt и использует `stream-json` activity output. `qwen-code` и `claude-code` разрешают один fresh retry для missing/invalid artifacts; `qwen-code` дополнительно делает первый zero-output pre-artifact stall retryable warning, но exhausted silent no-artifact retry остаётся `runner_unavailable`. `claude-code` сохраняет zero-output pre-artifact fail-fast в `runner_unavailable`; partial authored artifacts без валидного manifest, malformed validator verdict и malformed manifest/draft contract остаются `runtime_contract_failed` после focused repair exhaustion.
 - если после разрешённых collect recovery попыток `shard-pack-manifest.json` всё ещё missing/invalid, collect step обязан завершиться runtime contract failure (`runtime_contract_failed`), а не продолжать прогон как nominal success.
 - transcript outputs с provider transport/API errors (например `[API Error: ... SSL ...]`) считаются `runner_unavailable`, а не `runtime_contract_failed`; raw stdout/stderr artifacts в `reports/taskruns/raw/*` обязательны.
 - collect contract требует полного `semantic` block и global uniqueness для `citations[].claim_ids`; staged duplicate claim ids считаются blocking contract drift, если validator-scope repair не смог детерминированно снять коллизию на index/reference surface.
@@ -740,7 +740,7 @@ Zero tolerance:
 - frontend live E2E должен различать explicit Playwright/backend fail (`playwright_failed`) и productive timeout (`active_run_timeout`), когда run остаётся `running`, двигает `current_step`/artifacts, но не успевает дойти до `succeeded` в отведённый UI budget.
 - frontend init-inspect budget берётся из effective runtime timeout profile/API и, если задан `ACP_PIPELINE_TIMEOUT_SEC`, может быть поднят до `pipeline_timeout+30s`; fixed cap не применяется по умолчанию. Diagnostic `UI_E2E_INIT_TIMEOUT_CAP_SEC` допустим только как явное manual ограничение и не должен использоваться в canonical release slices.
 - `snapshot_reports_missing` после terminal backend failure считается dependent frontend skipped/blocked evidence, а не independent frontend regression.
-- runtime/preflight/reporting должны фиксировать provider/model attribution drift: если structured provider telemetry содержит cross-family model id (например `claude`/`kimi` под `qwen-code`), selected-provider readiness или batch report поднимает `provider_model_mismatch`/`reliability:provider-model-mismatch` как operational diagnostic.
+- provider `model` / `modelUsage` telemetry в stdout/stderr считается обычной diagnostic transcript частью: readiness/reporting не блокируют release по model-family attribution, если command probe, auth/quota checks и artifact smoke успешны.
 - generic `codex` plugin/Cloudflare/state-db noise (`chatgpt.com/backend-api/plugins/featured`, Cloudflare HTML, `failed to renew cache TTL`, `state db`, `Operation not permitted`) учитывать как secondary telemetry; сами по себе такие строки не должны поднимать `runner_unavailable`, если raw runtime/session-summary не зафиксировали terminal provider failure.
 - для release decision использовать только прогон без diagnostic timeout overrides.
 
@@ -836,12 +836,12 @@ python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.js
 - Политика triage: primary incident class = `runtime_timeout` при явном timeout signal в summary/classifier; `runner_unavailable` остаётся secondary evidence.
 
 4. `operational_host_preflight_failed` до старта backend runs
-- Причина: невалидный runtime binary surface (`qwen`/`claude`/`codex` в PATH), provider readiness blocker, known codex model/CLI mismatch, либо нерелевантный writable state/tmp surface.
+- Причина: невалидный runtime binary surface (`qwen`/`claude`/`codex` в PATH), provider readiness blocker, known codex CLI compatibility issue, либо нерелевантный writable state/tmp surface.
 - Действие: починить host prerequisites и повторить запуск; не считать это продуктовым ACP багом.
 
 5. `collect_manifest_missing` / `shard-pack-manifest.json is missing` на `init.step1.collect`
 - Политика triage: если provider оставил diagnostics, но не написал authored artifacts, общий engine должен сделать одну collect pair-recovery попытку с command-first suggested doc + manifest skeleton targets; если в `write_root` есть authored docs, общий engine должен сделать один manifest-only repair с command-first task-specific skeleton write target. Writes outside allowed collect repair set или failure после repair остаются `runtime_contract_failed`.
-- Если authored docs отсутствуют и provider был полностью silent, `qwen-code` и `claude-code` классифицируют exhausted missing-artifact retry как `runner_unavailable`; partial authored artifacts у всех providers остаются `runtime_contract_failed`, если manifest/draft/verdict невалиден после focused repair.
+- Если authored docs отсутствуют и provider был полностью silent, `qwen-code` делает один bounded fresh retry с warning telemetry; exhausted silent retry остаётся `runner_unavailable`. `claude-code` сохраняет zero-output fail-fast в `runner_unavailable`. Partial authored artifacts у всех providers остаются `runtime_contract_failed`, если manifest/draft/verdict невалиден после focused repair.
 
 6. `Selected model is at capacity` / `429` / `rate limited` в task logs
 - Политика triage: классифицировать как `runner_unavailable` (если одновременно нет explicit timeout signal).
@@ -854,9 +854,9 @@ python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.js
 8. `parse runtime draft manifest ... unknown field ...` вместе с `runner_unavailable`/capacity сигналами
 - Политика triage: primary incident class = `runtime_contract_failed` (parse-signature override); capacity/429 остаются secondary evidence.
 
-9. `provider_model_mismatch` / `reliability:provider-model-mismatch`
-- Причина: selected provider label не совпадает с фактической model telemetry в preflight/runtime logs.
-- Действие: проверить CLI wrapper/config (`ACP_QWEN_CMD`, `ACP_CLAUDE_CMD`, provider auth profile) и повторить preflight; это operational readiness blocker, а не evidence-quality regression.
+9. Provider `model` / `modelUsage` telemetry выглядит неожиданно
+- Политика triage: не считать это release blocker само по себе. ACP запускает выбранную provider command surface (`qwen`, `claude`, `codex`) и проверяет command/probe/artifact-smoke/auth/quota behavior; модель под капотом остаётся provider CLI configuration detail.
+- Действие: если это мешает операторскому доверию, проверить CLI wrapper/config (`ACP_QWEN_CMD`, `ACP_CLAUDE_CMD`, provider auth profile`) вне release verdict; не править canonical matrices ради model telemetry.
 
 Минимальный формат публикации агентом:
 

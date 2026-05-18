@@ -83,47 +83,6 @@ def should_ignore_classified_incomplete_for_terminal_process(
     )
 
 
-def extract_observed_models(text: str) -> list[str]:
-    observed: list[str] = []
-    seen: set[str] = set()
-    candidates = [str(text or "")]
-    unescaped = candidates[0].replace(r"\"", '"').replace(r"\'", "'")
-    if unescaped != candidates[0]:
-        candidates.append(unescaped)
-    for pattern in (
-        r"['\"]model['\"]\s*:\s*['\"]([^'\"]+)['\"]",
-        r"['\"]modelUsage['\"]\s*:\s*\{\s*['\"]([^'\"]+)['\"]\s*:",
-        r"\bmodelUsage\.([A-Za-z0-9_.:/-]+)",
-        r"\bmodel\s*=\s*['\"]([^'\"]+)['\"]",
-    ):
-        for candidate in candidates:
-            for match in re.finditer(pattern, candidate, flags=re.IGNORECASE):
-                value = match.group(1).strip()
-                key = value.lower()
-                if value and key not in seen:
-                    seen.add(key)
-                    observed.append(value)
-    return observed
-
-
-def provider_model_mismatch(provider: str, models: list[str]) -> str:
-    normalized_provider = provider.strip().lower()
-    for model in models:
-        normalized = model.strip().lower()
-        if not normalized:
-            continue
-        if normalized_provider == "qwen-code":
-            if any(token in normalized for token in ("claude", "opus", "sonnet", "haiku", "kimi", "gpt", "codex", "openai")) and "qwen" not in normalized:
-                return f"provider={provider} observed_model={model}"
-        elif normalized_provider == "claude-code":
-            if any(token in normalized for token in ("qwen", "kimi", "gpt", "codex", "openai")) and not any(token in normalized for token in ("claude", "opus", "sonnet", "haiku")):
-                return f"provider={provider} observed_model={model}"
-        elif normalized_provider == "codex-code":
-            if any(token in normalized for token in ("qwen", "claude", "opus", "sonnet", "haiku", "kimi")) and not any(token in normalized for token in ("gpt", "codex", "openai")):
-                return f"provider={provider} observed_model={model}"
-    return ""
-
-
 def text_has_runner_unavailable_signal(text: str) -> bool:
     haystack = str(text or "")
     for pattern in EXPLICIT_RUNNER_UNAVAILABLE_PATTERNS:

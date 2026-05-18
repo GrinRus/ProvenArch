@@ -160,7 +160,18 @@ def artifact_smoke_invocation(provider: str, sentinel_path: Path) -> tuple[list[
         f"{ARTIFACT_SMOKE_SENTINEL_TEXT} to this file, then exit: {sentinel_path}"
     )
     if provider == "qwen":
-        return ["--chat-recording", "false", "--yolo", "--channel", "CI", "-p", prompt], ""
+        return [
+            "--chat-recording",
+            "false",
+            "--yolo",
+            "--channel",
+            "CI",
+            "--output-format",
+            "stream-json",
+            "--include-partial-messages",
+            "-p",
+            prompt,
+        ], ""
     if provider == "claude":
         return ["--output-format", "json", "--permission-mode", "bypassPermissions", "-p", prompt], ""
     if provider == "codex":
@@ -233,51 +244,6 @@ def run_artifact_smoke(provider: str, command: str, repo_root: str) -> tuple[boo
         if observed != ARTIFACT_SMOKE_SENTINEL_TEXT:
             return False, f"{provider} artifact smoke wrote unexpected sentinel content", combined
         return True, combined, combined
-
-
-def extract_observed_models(text: str) -> list[str]:
-    observed: list[str] = []
-    seen: set[str] = set()
-    candidates = [str(text or "")]
-    unescaped = candidates[0].replace(r"\"", '"').replace(r"\'", "'")
-    if unescaped != candidates[0]:
-        candidates.append(unescaped)
-    patterns = (
-        r"['\"]model['\"]\s*:\s*['\"]([^'\"]+)['\"]",
-        r"['\"]modelUsage['\"]\s*:\s*\{\s*['\"]([^'\"]+)['\"]\s*:",
-        r"\bmodelUsage\.([A-Za-z0-9_.:/-]+)",
-        r"\bmodel\s*=\s*['\"]([^'\"]+)['\"]",
-    )
-    for pattern in patterns:
-        for candidate in candidates:
-            for match in re.finditer(pattern, candidate, flags=re.IGNORECASE):
-                value = match.group(1).strip()
-                key = value.lower()
-                if value and key not in seen:
-                    seen.add(key)
-                    observed.append(value)
-    return observed
-
-
-def _contains_any(value: str, needles: tuple[str, ...]) -> bool:
-    return any(needle in value for needle in needles)
-
-
-def provider_model_mismatch(provider: str, models: list[str]) -> str:
-    for model in models:
-        normalized = model.strip().lower()
-        if not normalized:
-            continue
-        if provider == "qwen":
-            if _contains_any(normalized, ("claude", "opus", "sonnet", "haiku", "kimi", "gpt", "codex", "openai")) and "qwen" not in normalized:
-                return f"qwen provider emitted non-qwen model telemetry: {model}"
-        elif provider == "claude":
-            if _contains_any(normalized, ("qwen", "kimi", "gpt", "codex", "openai")) and not _contains_any(normalized, ("claude", "opus", "sonnet", "haiku")):
-                return f"claude provider emitted non-claude model telemetry: {model}"
-        elif provider == "codex":
-            if _contains_any(normalized, ("qwen", "claude", "opus", "sonnet", "haiku", "kimi")) and not _contains_any(normalized, ("gpt", "codex", "openai")):
-                return f"codex provider emitted non-codex model telemetry: {model}"
-    return ""
 
 
 def probe_provider_readiness(
@@ -376,17 +342,6 @@ def probe_provider_readiness(
                 "subclass": "headless_probe_failed",
                 "reason": combined or f"{provider} headless probe exited with code {headless_completed.returncode}",
             }
-    observed_models = extract_observed_models(combined)
-    mismatch_reason = provider_model_mismatch(provider, observed_models)
-    if mismatch_reason:
-        return {
-            "provider": provider,
-            "status": "unavailable",
-            "subclass": "provider_model_mismatch",
-            "reason": mismatch_reason,
-            "observed_models": ",".join(observed_models),
-            "model_mismatch": "1",
-        }
     smoke_ok, smoke_reason, smoke_output = run_artifact_smoke(provider, command, repo_root)
     if smoke_output:
         combined = "\n".join(part for part in [combined, smoke_output] if part).strip()
@@ -408,25 +363,11 @@ def probe_provider_readiness(
             "reason": smoke_reason,
             "artifact_smoke": "failed",
         }
-    observed_models = extract_observed_models(combined)
-    mismatch_reason = provider_model_mismatch(provider, observed_models)
-    if mismatch_reason:
-        return {
-            "provider": provider,
-            "status": "unavailable",
-            "subclass": "provider_model_mismatch",
-            "reason": mismatch_reason,
-            "observed_models": ",".join(observed_models),
-            "model_mismatch": "1",
-            "artifact_smoke": "passed",
-        }
     return {
         "provider": provider,
         "status": "ready",
         "subclass": "",
         "reason": combined,
-        "observed_models": ",".join(observed_models),
-        "model_mismatch": "0",
         "artifact_smoke": "passed",
     }
 

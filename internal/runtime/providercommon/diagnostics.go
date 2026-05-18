@@ -98,6 +98,14 @@ func emitZeroOutputPreArtifactStallDiagnostic(task acpruntime.Task, provider acp
 	emitDiagnostic(task, "zero-output pre-artifact stall classified unavailable", fields)
 }
 
+func emitZeroOutputPreArtifactStallRetryDiagnostic(task acpruntime.Task, provider acpruntime.Provider, diagnostic StallDiagnostic) {
+	fields := diagnostic.fields(provider, task, "warn_and_retry")
+	fields["recovery_mode"] = "fresh_process"
+	fields["severity"] = "warning"
+	fields["zero_output_pre_artifact_stall"] = true
+	emitDiagnostic(task, "zero-output pre-artifact stall will retry", fields)
+}
+
 func emitArtifactRetryScheduledDiagnostic(task acpruntime.Task, provider acpruntime.Provider, cause error) {
 	fields := map[string]any{
 		"provider":      string(provider),

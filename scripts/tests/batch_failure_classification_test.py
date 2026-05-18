@@ -2765,7 +2765,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertTrue(result.semantic_hard_fail)
         self.assertTrue(any("missing_dimensions=no_semantic_edges_or_cross_repo_finding_links" in detail for detail in result.issue_details))
 
-    def test_python_report_flags_provider_model_mismatch_diagnostics(self) -> None:
+    def test_python_report_ignores_provider_model_telemetry_diagnostics(self) -> None:
         run_dir = self.root / "run-provider-model-mismatch"
         self._create_passed_run_dir_with_raw_runner_noise(run_dir)
         write_text(
@@ -2786,10 +2786,10 @@ class BatchFailureClassificationTest(unittest.TestCase):
             },
         )
 
-        self.assertIn("reliability:provider-model-mismatch", result.issues)
-        self.assertTrue(any("claude-opus" in detail for detail in result.issue_details))
+        self.assertNotIn("reliability:provider-model-mismatch", result.issues)
+        self.assertFalse(any("claude-opus" in detail for detail in result.issue_details))
 
-    def test_python_report_flags_nested_provider_model_usage_mismatch(self) -> None:
+    def test_python_report_ignores_nested_provider_model_usage_telemetry(self) -> None:
         run_dir = self.root / "run-nested-provider-model-mismatch"
         self._create_passed_run_dir_with_raw_runner_noise(run_dir)
         write_text(
@@ -2810,8 +2810,8 @@ class BatchFailureClassificationTest(unittest.TestCase):
             },
         )
 
-        self.assertIn("reliability:provider-model-mismatch", result.issues)
-        self.assertTrue(any("kimi-for-coding" in detail for detail in result.issue_details))
+        self.assertNotIn("reliability:provider-model-mismatch", result.issues)
+        self.assertFalse(any("kimi-for-coding" in detail for detail in result.issue_details))
 
     def test_python_report_treats_incomplete_reports_as_triage_only_not_empty_analysis(self) -> None:
         run_dir = self.root / "run-incomplete"

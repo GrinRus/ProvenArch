@@ -104,6 +104,21 @@ func TestQwenAdapterKeepsArtifactMonitorWithCustomArgs(t *testing.T) {
 	}
 }
 
+func TestQwenAdapterRetriesZeroOutputPreArtifactStallOnce(t *testing.T) {
+	t.Parallel()
+
+	policy := (qwenAdapter{}).RecoveryPolicy(acpruntime.Task{StepID: "init.step1.collect"})
+	if !policy.RetryInvalidOrMissingArtifactsOnce {
+		t.Fatalf("expected qwen missing-artifact retry policy, got %+v", policy)
+	}
+	if !policy.RetryZeroOutputPreArtifactStallOnce {
+		t.Fatalf("expected qwen zero-output pre-artifact retry policy, got %+v", policy)
+	}
+	if !policy.ClassifySilentRetryExhaustionUnavailable {
+		t.Fatalf("expected qwen exhausted silence to use runner_unavailable lane, got %+v", policy)
+	}
+}
+
 func TestQwenCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 	t.Parallel()
 
@@ -127,6 +142,9 @@ func TestQwenCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 	for _, token := range []string{
 		"--chat-recording",
 		"--yolo",
+		"--output-format",
+		"stream-json",
+		"--include-partial-messages",
 		"-p",
 		"Artifact-only contract:",
 		task.WriteRoot,
@@ -158,6 +176,9 @@ func TestQwenCommandSpecAppendsPromptForCustomArgsWithoutTaskJSONStdin(t *testin
 	for _, token := range []string{
 		"--chat-recording",
 		"--yolo",
+		"--output-format",
+		"stream-json",
+		"--include-partial-messages",
 		"-p",
 		"Artifact-only contract:",
 		task.WriteRoot,
@@ -166,6 +187,32 @@ func TestQwenCommandSpecAppendsPromptForCustomArgsWithoutTaskJSONStdin(t *testin
 		if !strings.Contains(args, token) {
 			t.Fatalf("expected qwen custom args to contain %q, got %v", token, spec.Args)
 		}
+	}
+}
+
+func TestQwenCommandSpecRespectsCustomNonStreamOutputFormat(t *testing.T) {
+	t.Parallel()
+
+	task := newQwenDraftTask(t, "run-custom-output-format")
+	spec, err := (qwenAdapter{runner: HeadlessRunner{
+		Command: "qwen-test",
+		Args:    []string{"--chat-recording", "false", "--output-format", "json"},
+	}}).CommandSpec(task)
+	if err != nil {
+		t.Fatalf("command spec: %v", err)
+	}
+
+	args := strings.Join(spec.Args, "\n")
+	for _, token := range []string{"--output-format", "json", "-p", "Artifact-only contract:"} {
+		if !strings.Contains(args, token) {
+			t.Fatalf("expected qwen custom args to contain %q, got %v", token, spec.Args)
+		}
+	}
+	if strings.Contains(args, "stream-json") {
+		t.Fatalf("custom output format should not be overwritten, got %v", spec.Args)
+	}
+	if strings.Contains(args, "--include-partial-messages") {
+		t.Fatalf("partial messages should only be injected for stream-json output, got %v", spec.Args)
 	}
 }
 
@@ -192,6 +239,9 @@ func TestQwenCommandSpecNormalizesCustomPromptArgsToArtifactPrompt(t *testing.T)
 	for _, token := range []string{
 		"--chat-recording",
 		"--yolo",
+		"--output-format",
+		"stream-json",
+		"--include-partial-messages",
 		"--prompt",
 		"Artifact-only contract:",
 		task.WriteRoot,

@@ -169,9 +169,9 @@ Optional поля записи:
 
 Canonical MVP runtime shape:
 - `claude-code`, `qwen-code` и `codex-code` используют общий artifact-only process engine; provider adapters задают CLI args/stdin/workdir, unavailable markers и bounded activity/recovery policy
-- `qwen-code` adapter invocation передаёт artifact prompt только через CLI `-p`; JSON task stdin не используется, а custom qwen args нормализуются, чтобы не смешивать или подменять machine envelope с пользовательским prompt. `claude-code` и `codex-code` сохраняют свои transport-specific stdin/machine-mode surfaces.
+- `qwen-code` adapter invocation передаёт artifact prompt только через CLI `-p`; JSON task stdin не используется, custom qwen args нормализуются, чтобы не смешивать или подменять machine envelope с пользовательским prompt, а default invocation использует `stream-json` activity output без semantic stdout contract. `claude-code` и `codex-code` сохраняют свои transport-specific stdin/machine-mode surfaces.
 - stdout/stderr provider transcripts сохраняются как diagnostics/raw-output refs и никогда не трактуются как semantic success payload
-- selected-provider readiness фиксируется в batch preflight; provider command/model/auth/version blockers являются operational failures до deep run
+- selected-provider readiness фиксируется в batch preflight; provider command/probe/auth/quota/version и codex CLI compatibility blockers являются operational failures до deep run. Provider `model`/`modelUsage` telemetry не является readiness contract и не блокирует release сама по себе
 - semantic source of truth для `step1` — `shard-pack-manifest.json.semantic`
 - `step1` semantic provenance evidence (`entities/edges/findings[].provenance.evidence[]`) обязаны содержать non-empty `repo` + `path`; citation-only semantic evidence objects невалидны
 - semantic source of truth для `step3` — `validator-verdict.json.findings[]` и `validator-verdict.json.questions[]`
