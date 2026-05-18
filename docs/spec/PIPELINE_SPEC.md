@@ -176,7 +176,7 @@ Canonical MVP runtime shape:
 - `step1` semantic provenance evidence (`entities/edges/findings[].provenance.evidence[]`) обязаны содержать non-empty `repo` + `path`; citation-only semantic evidence objects невалидны
 - semantic source of truth для `step3` — `validator-verdict.json.findings[]` и `validator-verdict.json.questions[]`
 - runtime execution metadata сохраняют только execution context, status, warnings и raw-output references
-- raw provider stdout/stderr diagnostics are redacted for common secret-like bearer/token/password/api-key forms before persistence and run-log streaming; stdout/stderr remain diagnostic only
+- raw provider prompt argv payloads and stdout/stderr diagnostics are redacted before persistence and run-log streaming; prompt size/hash remains in lifecycle diagnostics, and stdout/stderr remain diagnostic only
 - deterministic fake runtime пишет provider `fake`; headless adapters пишут `claude-code`, `qwen-code` или `codex-code`
 
 ## Init pipeline

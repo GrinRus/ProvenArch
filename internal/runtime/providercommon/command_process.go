@@ -289,21 +289,39 @@ func (d *providerCommandDiagnostics) fields() map[string]any {
 
 func redactArgs(args []string) []string {
 	redacted := make([]string, 0, len(args))
-	redactNext := false
+	redactNext := ""
 	for _, arg := range args {
 		trimmed := strings.TrimSpace(arg)
-		if redactNext {
+		if redactNext == "secret" {
 			redacted = append(redacted, redactSecretLikeValue(trimmed))
-			redactNext = false
+			redactNext = ""
 			continue
 		}
-		if idx := strings.Index(trimmed, "="); idx > 0 && isSecretKey(trimmed[:idx]) {
-			redacted = append(redacted, trimmed[:idx+1]+redactSecretLikeValue(trimmed[idx+1:]))
+		if redactNext == "prompt" {
+			redacted = append(redacted, redactPromptPayloadValue(trimmed))
+			redactNext = ""
 			continue
+		}
+		if idx := strings.Index(trimmed, "="); idx > 0 {
+			key := trimmed[:idx]
+			value := trimmed[idx+1:]
+			if isSecretKey(key) {
+				redacted = append(redacted, key+"="+redactSecretLikeValue(value))
+				continue
+			}
+			if isPromptPayloadFlag(key) {
+				redacted = append(redacted, key+"="+redactPromptPayloadValue(value))
+				continue
+			}
 		}
 		if isSecretFlag(trimmed) {
 			redacted = append(redacted, trimmed)
-			redactNext = true
+			redactNext = "secret"
+			continue
+		}
+		if isPromptPayloadFlag(trimmed) {
+			redacted = append(redacted, trimmed)
+			redactNext = "prompt"
 			continue
 		}
 		redacted = append(redacted, arg)
@@ -426,6 +444,24 @@ func isSecretFlag(arg string) bool {
 	return isSecretKey(trimmed)
 }
 
+func isPromptPayloadFlag(arg string) bool {
+	trimmed := strings.TrimSpace(arg)
+	if trimmed == "-p" {
+		return true
+	}
+	if !strings.HasPrefix(trimmed, "-") {
+		return false
+	}
+	normalized := strings.ToLower(strings.TrimLeft(trimmed, "-"))
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+	switch normalized {
+	case "prompt", "prompt_text", "message":
+		return true
+	default:
+		return false
+	}
+}
+
 func isSecretKey(key string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(key))
 	normalized = strings.TrimLeft(normalized, "-")
@@ -454,6 +490,13 @@ func redactSecretLikeValue(value string) string {
 		return "<empty>"
 	}
 	return "<redacted sha256=" + sha256Hex(value) + ">"
+}
+
+func redactPromptPayloadValue(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "<empty prompt>"
+	}
+	return fmt.Sprintf("<redacted prompt bytes=%d sha256=%s>", len([]byte(value)), sha256Hex(value))
 }
 
 func sha256Hex(value string) string {

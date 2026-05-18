@@ -230,6 +230,33 @@ func TestRedactArgsMasksInlineSecretFlags(t *testing.T) {
 	}
 }
 
+func TestRedactArgsMasksPromptPayloadFlags(t *testing.T) {
+	t.Parallel()
+
+	prompt := "You are ACP runtime provider \"qwen-code\".\n\nFIRST COLLECT ARTIFACT PAIR COMMAND:\ncat > artifact"
+	got := redactArgs([]string{
+		"--chat-recording",
+		"false",
+		"-p",
+		prompt,
+		"--prompt=second prompt body",
+		"--model=qwen",
+	})
+	joined := strings.Join(got, " ")
+	if strings.Contains(joined, "FIRST COLLECT ARTIFACT PAIR COMMAND") || strings.Contains(joined, "second prompt body") {
+		t.Fatalf("prompt payload leaked in redacted args: %#v", got)
+	}
+	if !strings.Contains(joined, "-p <redacted prompt bytes=") {
+		t.Fatalf("expected -p payload to be redacted with byte count, got %#v", got)
+	}
+	if !strings.Contains(joined, "--prompt=<redacted prompt bytes=") {
+		t.Fatalf("expected inline prompt payload to be redacted with byte count, got %#v", got)
+	}
+	if !strings.Contains(joined, "--model=qwen") {
+		t.Fatalf("non-prompt args should remain visible, got %#v", got)
+	}
+}
+
 func TestRedactedEnvValueOmitsSecretLikeCommandValues(t *testing.T) {
 	t.Parallel()
 
