@@ -314,6 +314,33 @@ func CollectFirstActionSection(task acpruntime.Task) string {
 	}, "\n")
 }
 
+func ValidatorVerdictWriteCommand(task acpruntime.Task) string {
+	writeRoot := strings.TrimSpace(task.WriteRoot)
+	target := filepath.Join(writeRoot, "validator-verdict.json")
+	skeleton := ValidatorVerdictTaskSkeleton(task)
+	return strings.Join([]string{
+		"mkdir -p " + shellSingleQuote(writeRoot),
+		"cat > " + shellSingleQuote(target) + " <<'ACP_VALIDATOR_VERDICT_JSON'",
+		strings.TrimSpace(skeleton),
+		"ACP_VALIDATOR_VERDICT_JSON",
+	}, "\n")
+}
+
+func ValidatorFirstActionSection(task acpruntime.Task) string {
+	if acpruntime.StepProviderKeyForStepID(task.StepID) != acpruntime.StepProviderStep3Findings {
+		return ""
+	}
+	target := filepath.Join(strings.TrimSpace(task.WriteRoot), "validator-verdict.json")
+	return strings.Join([]string{
+		"VALIDATOR FIRST-ACTION ARTIFACT:",
+		"- This validator step must start by writing validator-verdict.json before broad validation instructions.",
+		fmt.Sprintf(`- Exact validator verdict target: %q.`, target),
+		"FIRST VALIDATOR VERDICT COMMAND:",
+		"Run this exact command as the next filesystem action after checking whether the target file already exists; do not inspect repository files, sibling taskruns, or raw logs before this command:",
+		ValidatorVerdictWriteCommand(task),
+	}, "\n")
+}
+
 func collectDocumentInitialTemplate(task acpruntime.Task, docRel string) string {
 	repo := PrimaryTaskRepoScope(task.RepoScope, task.RepoScopes)
 	if repo == "" {
@@ -457,7 +484,19 @@ func shellSingleQuote(value string) string {
 func ValidatorVerdictTaskSkeleton(task acpruntime.Task) string {
 	runID := firstNonEmpty(task.RunID, "run-1")
 	checkedPaths := validatorCheckedPathSkeleton(task)
-	verdict := contracts.ValidatorVerdict{
+	type validatorVerdictSkeleton struct {
+		Version      int                        `json:"version"`
+		RunID        string                     `json:"run_id"`
+		GeneratedAt  string                     `json:"generated_at"`
+		Verdict      string                     `json:"verdict"`
+		Summary      string                     `json:"summary"`
+		CheckedPaths []string                   `json:"checked_paths"`
+		FixedPaths   []string                   `json:"fixed_paths"`
+		Findings     []contracts.Finding        `json:"findings"`
+		Questions    []contracts.Question       `json:"questions"`
+		Issues       []contracts.ValidatorIssue `json:"issues"`
+	}
+	verdict := validatorVerdictSkeleton{
 		Version:      1,
 		RunID:        runID,
 		GeneratedAt:  "2026-04-16T12:00:02Z",

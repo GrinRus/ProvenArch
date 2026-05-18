@@ -382,6 +382,39 @@ func TestDocFirstFilesystemPolicyDefinesCanonicalValidatorVerdictSurface(t *test
 	}
 }
 
+func TestValidatorFirstActionSectionWritesExactVerdictFirst(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:            "run-1",
+		StepID:           "init.step3.findings",
+		WriteRoot:        "/tmp/workspace/reports/taskruns/run-1/validator",
+		ReadContextRoots: []string{"/tmp/workspace/reports/taskruns/run-1/staging/final"},
+	}
+
+	section := ValidatorFirstActionSection(task)
+	required := []string{
+		`VALIDATOR FIRST-ACTION ARTIFACT:`,
+		`FIRST VALIDATOR VERDICT COMMAND:`,
+		`cat > '/tmp/workspace/reports/taskruns/run-1/validator/validator-verdict.json' <<'ACP_VALIDATOR_VERDICT_JSON'`,
+		`"run_id": "run-1"`,
+		`"verdict": "PASS"`,
+		`"checked_paths": [`,
+		`"issues": []`,
+	}
+	for _, needle := range required {
+		if !strings.Contains(section, needle) {
+			t.Fatalf("expected validator first-action section to contain %q, got:\n%s", needle, section)
+		}
+	}
+	if got := strings.Count(section, "FIRST VALIDATOR VERDICT COMMAND:"); got != 1 {
+		t.Fatalf("expected first validator command once, got %d:\n%s", got, section)
+	}
+	if got := strings.Count(section, "ACP_VALIDATOR_VERDICT_JSON"); got != 2 {
+		t.Fatalf("expected one validator verdict heredoc, got delimiter count %d:\n%s", got, section)
+	}
+}
+
 func TestValidatorVerdictTaskSkeletonParsesWithCanonicalIssueShape(t *testing.T) {
 	t.Parallel()
 

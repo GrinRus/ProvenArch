@@ -45,6 +45,9 @@ func TestComposeArtifactOnlyPromptKeepsSharedOrderAcrossProviders(t *testing.T) 
 	}
 
 	expectedOrder := []string{
+		"VALIDATOR FIRST-ACTION ARTIFACT:",
+		"FIRST VALIDATOR VERDICT COMMAND:",
+		"cat > ",
 		"Artifact-only contract:",
 		"Write ONLY inside write_root.",
 		"Every required artifact write/check MUST use the exact absolute write_root or draft_final_root paths above.",
@@ -62,6 +65,12 @@ func TestComposeArtifactOnlyPromptKeepsSharedOrderAcrossProviders(t *testing.T) 
 			t.Fatalf("expected prompt token %q to appear after previous token; prompt:\n%s", token, claudePrompt)
 		}
 		lastIndex = index
+	}
+	if got := strings.Count(claudePrompt, "FIRST VALIDATOR VERDICT COMMAND:"); got != 1 {
+		t.Fatalf("expected validator first-action command heading exactly once, got %d:\n%s", got, claudePrompt)
+	}
+	if got := strings.Count(claudePrompt, "ACP_VALIDATOR_VERDICT_JSON"); got != 2 {
+		t.Fatalf("expected one validator verdict heredoc in normal prompt, got delimiter count %d:\n%s", got, claudePrompt)
 	}
 }
 
@@ -371,9 +380,8 @@ func TestComposeValidatorVerdictRepairPromptIsVerdictOnly(t *testing.T) {
 		"Run the exact shell command below as your next command",
 		"Write exactly one file now:",
 		"/tmp/workspace/reports/taskruns/run-1/validator/validator-verdict.json",
-		"VALIDATOR VERDICT WRITE COMMAND:",
+		"FIRST VALIDATOR VERDICT COMMAND:",
 		"<<'ACP_VALIDATOR_VERDICT_JSON'",
-		"VALIDATOR VERDICT JSON SKELETON:",
 		`"issues": []`,
 		"VALIDATOR VERDICT REPAIR INSTRUCTIONS:",
 		"The heredoc JSON is the complete first repair artifact",
@@ -393,6 +401,9 @@ func TestComposeValidatorVerdictRepairPromptIsVerdictOnly(t *testing.T) {
 	}
 	if strings.Count(prompt, "ACP_VALIDATOR_VERDICT_JSON") != 2 {
 		t.Fatalf("expected one validator verdict heredoc:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "VALIDATOR VERDICT JSON SKELETON:") {
+		t.Fatalf("validator repair prompt must not duplicate the heredoc skeleton in a later section:\n%s", prompt)
 	}
 }
 
@@ -454,6 +465,9 @@ func TestComposeArtifactOnlyPromptAddsValidatorVerdictCanonicalSection(t *testin
 
 	prompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderQwenCode, task)
 	expectedTokens := []string{
+		"VALIDATOR FIRST-ACTION ARTIFACT:",
+		"FIRST VALIDATOR VERDICT COMMAND:",
+		"cat > '/tmp/write-root/validator-verdict.json' <<'ACP_VALIDATOR_VERDICT_JSON'",
 		"VALIDATOR VERDICT CANONICAL SHAPE:",
 		"validator-verdict.json MUST include version=1, run_id, generated_at, verdict, and checked_paths.",
 		"issues[] items MUST use exactly the canonical validator issue shape",
@@ -469,6 +483,14 @@ func TestComposeArtifactOnlyPromptAddsValidatorVerdictCanonicalSection(t *testin
 		if !strings.Contains(prompt, token) {
 			t.Fatalf("expected findings prompt to contain %q, got:\n%s", token, prompt)
 		}
+	}
+	firstActionIndex := strings.Index(prompt, "FIRST VALIDATOR VERDICT COMMAND:")
+	artifactContractIndex := strings.Index(prompt, "Artifact-only contract:")
+	if firstActionIndex < 0 || artifactContractIndex < 0 || firstActionIndex > artifactContractIndex {
+		t.Fatalf("expected validator first-action command before broad artifact-only contract:\n%s", prompt)
+	}
+	if got := strings.Count(prompt, "FIRST VALIDATOR VERDICT COMMAND:"); got != 1 {
+		t.Fatalf("expected one validator first-action command heading, got %d:\n%s", got, prompt)
 	}
 }
 
