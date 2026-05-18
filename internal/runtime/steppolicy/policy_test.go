@@ -221,6 +221,34 @@ func TestRefreshCollectManifestTaskSkeletonMatchesRefreshPolicyMinimums(t *testi
 	}
 }
 
+func TestCollectManifestTaskSkeletonPrefersUsefulRootEvidenceWithRepairCandidates(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		ArtifactRoot: "reports/taskruns/run-1/staging/shards/root-files",
+		RepoScopes:   []string{"bank"},
+		PathScopes:   []string{".gitignore", "LICENSE", "Makefile", "README.md", "pom.xml"},
+		ShardID:      "bank-root-files",
+		DomainID:     "bank",
+		AgentRole:    "shard-analyst",
+	}
+
+	raw := CollectManifestTaskSkeleton(
+		task,
+		[]string{"root-overview.md"},
+		[]string{".gitignore", "LICENSE", "Makefile", "README.md", "pom.xml"},
+	)
+	manifest, err := contracts.ParseShardPackManifest([]byte(raw))
+	if err != nil {
+		t.Fatalf("expected repair skeleton to parse as a valid shard pack manifest, got %v\n%s", err, raw)
+	}
+	if got, want := manifest.Citations[0].Path, "README.md"; got != want {
+		t.Fatalf("root-file repair citation path = %q, want %q", got, want)
+	}
+}
+
 func TestCollectEarlyPairWriteCommandPrefersUsefulRootEvidence(t *testing.T) {
 	t.Parallel()
 

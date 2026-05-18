@@ -833,11 +833,14 @@ func firstNonEmptyPath(values []string) string {
 }
 
 func collectEvidencePath(task acpruntime.Task, evidencePaths []string) string {
+	if rootFileScopes := rootFileShardPathScopes(task.PathScopes); len(rootFileScopes) > 0 {
+		if rootFileEvidence := rootFileShardPathScopes(evidencePaths); len(rootFileEvidence) > 0 {
+			return preferredRootFileEvidencePath(rootFileEvidence)
+		}
+		return preferredRootFileEvidencePath(rootFileScopes)
+	}
 	if value := firstNonEmptyPath(evidencePaths); value != "" {
 		return value
-	}
-	if rootFileScopes := rootFileShardPathScopes(task.PathScopes); len(rootFileScopes) > 0 {
-		return preferredRootFileEvidencePath(rootFileScopes)
 	}
 	return firstNonEmptyPath(task.PathScopes)
 }
