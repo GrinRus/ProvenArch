@@ -112,6 +112,7 @@ func (a qwenAdapter) RecoveryPolicy(_ acpruntime.Task) providercommon.RecoveryPo
 		RepairValidatorVerdictOnce:               true,
 		RepairDraftArtifactsOnce:                 true,
 		RetryInvalidOrMissingArtifactsOnce:       true,
+		RetryZeroOutputPreArtifactStallOnce:      true,
 		ClassifySilentRetryExhaustionUnavailable: true,
 	}
 }
@@ -159,10 +160,57 @@ func qwenArgsWithPrompt(args []string, prompt string) []string {
 	if !promptSet {
 		normalized = append(normalized, "-p", prompt)
 	}
-	return normalized
+	return ensureQwenActivityArgs(normalized)
 }
 
 func qwenPromptFlagValueLooksPresent(arg string) bool {
 	trimmed := strings.TrimSpace(arg)
 	return trimmed == "" || !strings.HasPrefix(trimmed, "-")
+}
+
+func ensureQwenActivityArgs(args []string) []string {
+	hasOutputFormat := false
+	outputFormat := ""
+	hasPartialMessages := false
+	for i, arg := range args {
+		trimmed := strings.TrimSpace(arg)
+		if trimmed == "--output-format" {
+			hasOutputFormat = true
+			if i+1 < len(args) {
+				outputFormat = strings.TrimSpace(args[i+1])
+			}
+		}
+		if strings.HasPrefix(trimmed, "--output-format=") {
+			hasOutputFormat = true
+			outputFormat = strings.TrimSpace(strings.TrimPrefix(trimmed, "--output-format="))
+		}
+		if trimmed == "--include-partial-messages" {
+			hasPartialMessages = true
+		}
+	}
+	addOutputFormat := !hasOutputFormat
+	addPartialMessages := !hasPartialMessages && (!hasOutputFormat || outputFormat == "stream-json")
+	if !addOutputFormat && !addPartialMessages {
+		return args
+	}
+	extra := []string{}
+	if addOutputFormat {
+		extra = append(extra, "--output-format", "stream-json")
+	}
+	if addPartialMessages {
+		extra = append(extra, "--include-partial-messages")
+	}
+	promptIndex := len(args)
+	for i, arg := range args {
+		trimmed := strings.TrimSpace(arg)
+		if trimmed == "-p" || trimmed == "--prompt" || strings.HasPrefix(trimmed, "-p=") || strings.HasPrefix(trimmed, "--prompt=") {
+			promptIndex = i
+			break
+		}
+	}
+	normalized := make([]string, 0, len(args)+len(extra))
+	normalized = append(normalized, args[:promptIndex]...)
+	normalized = append(normalized, extra...)
+	normalized = append(normalized, args[promptIndex:]...)
+	return normalized
 }

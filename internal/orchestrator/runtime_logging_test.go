@@ -2,41 +2,41 @@ package orchestrator
 
 import (
 	"testing"
+	"time"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
 
-func TestObservedModelIDsExtractsRuntimeTelemetry(t *testing.T) {
+func TestLogRuntimeOutputLeavesModelTelemetryAsPlainDiagnostics(t *testing.T) {
 	t.Parallel()
 
-	models := observedModelIDs(`{"model":"claude-opus-4-5-20251101"} modelUsage.kimi-for-coding model = "gpt-5.5" "{\"model\":\"qwen3-coder\"}"`)
-	if len(models) != 4 {
-		t.Fatalf("expected four unique observed models, got %v", models)
+	logs := []RunLogEntry{}
+	execution := &pipelineExecution{
+		pipelineRunProgressState: pipelineRunProgressState{
+			onLog: func(entry RunLogEntry) {
+				logs = append(logs, entry)
+			},
+		},
 	}
-	if !containsModel(models, "qwen3-coder") {
-		t.Fatalf("expected escaped JSON model telemetry to be extracted, got %v", models)
+	execution.clock = func() time.Time {
+		return time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
 	}
-}
 
-func TestProviderModelMismatchFlagsCrossFamilyTelemetry(t *testing.T) {
-	t.Parallel()
+	execution.logRuntimeOutput("init.step1.collect", "domain-a", acpruntime.ProviderClaudeCode, acpruntime.OutputChunk{
+		Stream: acpruntime.OutputStreamStdout,
+		Text:   `{"type":"result","modelUsage":{"kimi-for-coding":{"inputTokens":1}}}` + "\n",
+	})
 
-	if !providerModelMismatch(acpruntime.ProviderQwenCode, []string{"claude-opus-4-5-20251101"}) {
-		t.Fatal("expected qwen provider to flag claude model telemetry")
+	if len(logs) != 1 {
+		t.Fatalf("expected one runtime log entry, got %d", len(logs))
 	}
-	if !providerModelMismatch(acpruntime.ProviderClaudeCode, []string{"kimi-for-coding"}) {
-		t.Fatal("expected claude provider to flag kimi model telemetry")
+	if got := logs[0].Level; got != RunLogLevelInfo {
+		t.Fatalf("model telemetry should remain info-level diagnostics, got %s", got)
 	}
-	if providerModelMismatch(acpruntime.ProviderClaudeCode, []string{"claude-sonnet-4"}) {
-		t.Fatal("expected claude model telemetry to be accepted for claude provider")
+	if len(logs[0].Fields) != 0 {
+		t.Fatalf("model telemetry must not create structured attribution fields, got %#v", logs[0].Fields)
 	}
-}
-
-func containsModel(models []string, want string) bool {
-	for _, model := range models {
-		if model == want {
-			return true
-		}
+	if len(execution.warnings) != 0 {
+		t.Fatalf("model telemetry must not add runtime warnings, got %v", execution.warnings)
 	}
-	return false
 }

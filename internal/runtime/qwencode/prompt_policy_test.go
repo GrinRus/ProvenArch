@@ -4,13 +4,10 @@ import (
 	"testing"
 )
 
-func TestBuildQwenArgsDoesNotRequireSemanticJSONOutput(t *testing.T) {
+func TestBuildQwenArgsUsesStreamJSONActivityOutput(t *testing.T) {
 	t.Parallel()
 
 	args := buildQwenArgsWithIncludeDirectories([]string{"/tmp/repo"}, "prompt")
-	if containsArg(args, "--output-format") {
-		t.Fatalf("qwen args must not force semantic JSON output: %v", args)
-	}
 	for idx, arg := range args {
 		if arg == "json" && idx > 0 && args[idx-1] == "--output-format" {
 			t.Fatalf("qwen args must not request output-format json: %v", args)
@@ -18,6 +15,9 @@ func TestBuildQwenArgsDoesNotRequireSemanticJSONOutput(t *testing.T) {
 	}
 	if !containsArg(args, "--chat-recording") || !containsArg(args, "--yolo") || !containsArg(args, "-p") {
 		t.Fatalf("expected qwen noninteractive args to be preserved, got %v", args)
+	}
+	if !containsArg(args, "--output-format") || !containsArg(args, "stream-json") || !containsArg(args, "--include-partial-messages") {
+		t.Fatalf("expected qwen stream-json activity args, got %v", args)
 	}
 }
 

@@ -17,9 +17,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from e2e_report_classifiers import (
     extract_focused_recovery_reason_tags,
-    extract_observed_models,
     failure_class_rank,
-    provider_model_mismatch,
     should_ignore_classified_incomplete_for_terminal_process,
     should_ignore_stale_classified_failure,
     terminal_process_failed_summary,
@@ -1379,7 +1377,6 @@ def evaluate_run(
     parse_stages: set[str] = set()
     raw_outputs: set[str] = set()
     focused_recovery_reasons: set[str] = set()
-    provider_model_mismatches: set[str] = set()
     runtime_metadata_count = 0
     runtime_log_count = 0
     structured_runner_error_sources = [summary_path, full_run_log]
@@ -1404,10 +1401,6 @@ def evaluate_run(
             continue
         text = read_text_file(source_path)
         focused_recovery_reasons.update(extract_focused_recovery_reason_tags(text))
-        observed_models = extract_observed_models(text)
-        mismatch = provider_model_mismatch(provider, observed_models)
-        if mismatch:
-            provider_model_mismatches.add(f"{source_path}: {mismatch}")
         if not terminal_success:
             if text_has_runtime_contract_parse_signature(text):
                 runtime_contract_parse_failed_hit = True
@@ -1431,10 +1424,6 @@ def evaluate_run(
             continue
         text = read_text_file(source_path)
         focused_recovery_reasons.update(extract_focused_recovery_reason_tags(text))
-        observed_models = extract_observed_models(text)
-        mismatch = provider_model_mismatch(provider, observed_models)
-        if mismatch:
-            provider_model_mismatches.add(f"{source_path}: {mismatch}")
         if not terminal_success:
             if text_has_runtime_contract_parse_signature(text):
                 runtime_contract_parse_failed_hit = True
@@ -1455,10 +1444,6 @@ def evaluate_run(
             details.append(f"reliability/runner-errors -> raw_outputs={sorted(raw_outputs)[:5]}")
     if focused_recovery_reasons:
         details.append(f"reliability/focused-recovery -> reasons={sorted(focused_recovery_reasons)}")
-    if provider_model_mismatches:
-        issues.append("reliability:provider-model-mismatch")
-        for item in sorted(provider_model_mismatches)[:5]:
-            details.append(f"reliability/provider-model-mismatch -> {item}")
     if runtime_contract_failed_hit:
         issues.append("reliability:runtime-contract-failed")
     if runner_unavailable_hit:

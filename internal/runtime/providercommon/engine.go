@@ -100,6 +100,7 @@ type RecoveryPolicy struct {
 	RepairValidatorVerdictOnce               bool
 	RepairDraftArtifactsOnce                 bool
 	RetryInvalidOrMissingArtifactsOnce       bool
+	RetryZeroOutputPreArtifactStallOnce      bool
 	ClassifySilentRetryExhaustionUnavailable bool
 }
 

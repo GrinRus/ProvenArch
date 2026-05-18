@@ -145,6 +145,90 @@ func TestRunHeadlessProviderClassifiesSilentRetryExhaustionUnavailable(t *testin
 	}
 }
 
+func TestRunHeadlessProviderRetriesZeroOutputPreArtifactStallWhenPolicyAllows(t *testing.T) {
+	task := newDraftTask(t, "run-silent-then-success")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	runner := &sequenceAdapter{
+		testAdapter: testAdapter{
+			activity: ActivityPolicy{
+				MonitorArtifacts:            true,
+				MonitorPreArtifact:          true,
+				PreArtifactStallWindow:      20 * time.Millisecond,
+				RetryPreArtifactStallWindow: 5 * time.Second,
+				PostArtifactStallWindow:     20 * time.Millisecond,
+				PollInterval:                5 * time.Millisecond,
+				PostTerminateDrain:          10 * time.Millisecond,
+				TerminateGrace:              10 * time.Millisecond,
+			},
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:            true,
+				RetryInvalidOrMissingArtifactsOnce:       true,
+				RetryZeroOutputPreArtifactStallOnce:      true,
+				ClassifySilentRetryExhaustionUnavailable: true,
+			},
+		},
+		commands: []string{
+			writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 10\n"),
+			writeEngineScript(t, compactDraftScript(task)),
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := RunHeadlessProvider(ctx, task, runner)
+	if err != nil {
+		t.Fatalf("expected retry to recover valid artifacts, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("expected succeeded execution, got %+v", result.Execution)
+	}
+	if !hasDiagnostic(diagnostics, "zero-output pre-artifact stall will retry", "warning") {
+		t.Fatalf("expected warning diagnostic for recovered zero-output stall, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderKeepsExhaustedZeroOutputRetryUnavailable(t *testing.T) {
+	t.Parallel()
+
+	task := newDraftTask(t, "run-silent-retry-exhausted")
+	runner := testAdapter{
+		command: writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 10\n"),
+		activity: ActivityPolicy{
+			MonitorArtifacts:            true,
+			MonitorPreArtifact:          true,
+			PreArtifactStallWindow:      20 * time.Millisecond,
+			RetryPreArtifactStallWindow: 20 * time.Millisecond,
+			PostArtifactStallWindow:     20 * time.Millisecond,
+			PollInterval:                5 * time.Millisecond,
+			PostTerminateDrain:          10 * time.Millisecond,
+			TerminateGrace:              10 * time.Millisecond,
+		},
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:            true,
+			RetryInvalidOrMissingArtifactsOnce:       true,
+			RetryZeroOutputPreArtifactStallOnce:      true,
+			ClassifySilentRetryExhaustionUnavailable: true,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := RunHeadlessProvider(ctx, task, runner)
+	if err == nil {
+		t.Fatal("expected exhausted zero-output retry to fail")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRunnerUnavailable {
+		t.Fatalf("expected runner_unavailable, got %s (%v)", runnerErr.Code, err)
+	}
+}
+
 func TestRunHeadlessProviderClassifiesSilentPreArtifactStallBeforeDraftRepair(t *testing.T) {
 	t.Parallel()
 
@@ -1188,6 +1272,24 @@ type testAdapter struct {
 	recovery               RecoveryPolicy
 }
 
+type sequenceAdapter struct {
+	testAdapter
+	commands []string
+	calls    int
+}
+
+func (a *sequenceAdapter) CommandSpec(acpruntime.Task) (CommandSpec, error) {
+	if len(a.commands) == 0 {
+		return CommandSpec{}, errors.New("sequence command is unavailable")
+	}
+	index := a.calls
+	if index >= len(a.commands) {
+		index = len(a.commands) - 1
+	}
+	a.calls++
+	return CommandSpec{Command: a.commands[index], PromptBytes: a.promptBytes}, nil
+}
+
 func (a testAdapter) Provider() acpruntime.Provider {
 	return acpruntime.ProviderQwenCode
 }
@@ -1456,6 +1558,32 @@ EOF
 ` + tail + "\n"
 }
 
+func compactDraftScript(task acpruntime.Task) string {
+	manifest := `{"version":1,"run_id":"` + task.RunID + `","step_id":"init.step0.constitution","step_contract":"constitution","agent_role":"architect","outputs":[{"path":"charter-overview.md","canonical_path":"charter/overview.md","kind":"charter","title":"Constitution"},{"path":"baseline-subagents.yaml","canonical_path":"skills/subagents.yaml","kind":"bundle","title":"Baseline Subagents"}]}`
+	return "#!/usr/bin/env bash\nset -eu\n" +
+		"write_root=" + shellQuote(task.WriteRoot) + "\n" +
+		"draft_root=" + shellQuote(task.DraftFinalRoot) + "\n" +
+		"mkdir -p \"$write_root\" \"$draft_root\"\n" +
+		"printf '%s\\n' " + shellQuote(manifest) + " > \"$write_root/constitution-draft.json\"\n" +
+		"printf '%s\\n' '# Constitution' > \"$draft_root/charter-overview.md\"\n" +
+		"printf '%s\\n' 'version: 1' > \"$draft_root/baseline-subagents.yaml\"\n"
+}
+
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func hasDiagnostic(events []acpruntime.DiagnosticEvent, message string, severity string) bool {
+	for _, event := range events {
+		if event.Message != message {
+			continue
+		}
+		if strings.TrimSpace(severity) == "" {
+			return true
+		}
+		if got, ok := event.Fields["severity"].(string); ok && got == severity {
+			return true
+		}
+	}
+	return false
 }

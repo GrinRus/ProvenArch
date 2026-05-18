@@ -131,56 +131,37 @@ class WriteBatchPreflightTest(unittest.TestCase):
         self.assertEqual("quota_or_permission", result["subclass"])
         self.assertIn("rate limit", result["reason"])
 
-    def test_probe_provider_readiness_blocks_provider_model_mismatch(self) -> None:
+    def test_probe_provider_readiness_ignores_cross_family_model_telemetry(self) -> None:
         command = self._write_script(
             "qwen-claude-model-stub",
             "#!/bin/sh\n"
             "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' 'qwen 1.0'; exit 0; fi\n"
+            "if [ -n \"${ACP_PREFLIGHT_SMOKE_SENTINEL:-}\" ]; then mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"; printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"; exit 0; fi\n"
             "printf '%s\n' '{\"model\":\"claude-opus-4-5-20251101\",\"status\":\"ok\"}'\n",
         )
 
         result = self.module.probe_provider_readiness("qwen", command, str(REPO_ROOT))
-        self.assertEqual("unavailable", result["status"])
-        self.assertEqual("provider_model_mismatch", result["subclass"])
-        self.assertEqual("1", result["model_mismatch"])
-        self.assertIn("claude-opus", result["observed_models"])
+        self.assertEqual("ready", result["status"])
+        self.assertEqual("", result["subclass"])
+        self.assertEqual("passed", result["artifact_smoke"])
+        self.assertNotIn("model_mismatch", result)
+        self.assertNotIn("observed_models", result)
 
-    def test_probe_provider_readiness_blocks_escaped_provider_model_mismatch(self) -> None:
+    def test_probe_provider_readiness_ignores_escaped_model_telemetry(self) -> None:
         command = self._write_script(
             "qwen-escaped-claude-model-stub",
             "#!/bin/sh\n"
             "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' 'qwen 1.0'; exit 0; fi\n"
+            "if [ -n \"${ACP_PREFLIGHT_SMOKE_SENTINEL:-}\" ]; then mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"; printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"; exit 0; fi\n"
             "printf '%s\n' '{\\\"model\\\":\\\"claude-opus-4-5-20251101\\\",\\\"status\\\":\\\"ok\\\"}'\n",
         )
 
         result = self.module.probe_provider_readiness("qwen", command, str(REPO_ROOT))
-        self.assertEqual("unavailable", result["status"])
-        self.assertEqual("provider_model_mismatch", result["subclass"])
-        self.assertIn("claude-opus", result["observed_models"])
+        self.assertEqual("ready", result["status"])
+        self.assertEqual("", result["subclass"])
+        self.assertEqual("passed", result["artifact_smoke"])
 
-    def test_probe_provider_readiness_blocks_model_mismatch_from_artifact_smoke_output(self) -> None:
-        command = self._write_script(
-            "qwen-kimi-smoke-model-stub",
-            "#!/bin/sh\n"
-            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' 'qwen 1.0'; exit 0; fi\n"
-            "if [ \"${1:-}\" = \"-p\" ]; then printf '%s\n' 'ACP_READY'; exit 0; fi\n"
-            "if [ -n \"${ACP_PREFLIGHT_SMOKE_SENTINEL:-}\" ]; then\n"
-            "  mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"\n"
-            "  printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"\n"
-            "  printf '%s\n' '{\"model\":\"kimi-for-coding\",\"status\":\"ok\"}'\n"
-            "  exit 0\n"
-            "fi\n"
-            "exit 2\n",
-        )
-
-        result = self.module.probe_provider_readiness("qwen", command, str(REPO_ROOT))
-
-        self.assertEqual("unavailable", result["status"])
-        self.assertEqual("provider_model_mismatch", result["subclass"])
-        self.assertEqual("1", result["model_mismatch"])
-        self.assertIn("kimi-for-coding", result["observed_models"])
-
-    def test_probe_provider_readiness_blocks_nested_model_usage_mismatch(self) -> None:
+    def test_probe_provider_readiness_ignores_nested_model_usage_telemetry(self) -> None:
         command = self._write_script(
             "claude-kimi-model-usage-stub",
             "#!/bin/sh\n"
@@ -190,11 +171,11 @@ class WriteBatchPreflightTest(unittest.TestCase):
         )
 
         result = self.module.probe_provider_readiness("claude", command, str(REPO_ROOT))
-
-        self.assertEqual("unavailable", result["status"])
-        self.assertEqual("provider_model_mismatch", result["subclass"])
-        self.assertEqual("1", result["model_mismatch"])
-        self.assertIn("kimi-for-coding", result["observed_models"])
+        self.assertEqual("ready", result["status"])
+        self.assertEqual("", result["subclass"])
+        self.assertEqual("passed", result["artifact_smoke"])
+        self.assertNotIn("model_mismatch", result)
+        self.assertNotIn("observed_models", result)
 
     def test_probe_provider_readiness_blocks_old_codex_for_gpt55(self) -> None:
         command = self._write_script("codex-stub", "#!/bin/sh\nprintf '%s\n' 'codex-cli 0.118.0'\n")
@@ -250,13 +231,17 @@ class WriteBatchPreflightTest(unittest.TestCase):
             "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' 'qwen 1.0'; exit 0; fi\n"
             "has_yolo=0\n"
             "has_channel_ci=0\n"
+            "has_stream_json=0\n"
+            "has_partial_messages=0\n"
             "prev=''\n"
             "for arg in \"$@\"; do\n"
             "  if [ \"$arg\" = \"--yolo\" ]; then has_yolo=1; fi\n"
             "  if [ \"$prev\" = \"--channel\" ] && [ \"$arg\" = \"CI\" ]; then has_channel_ci=1; fi\n"
+            "  if [ \"$prev\" = \"--output-format\" ] && [ \"$arg\" = \"stream-json\" ]; then has_stream_json=1; fi\n"
+            "  if [ \"$arg\" = \"--include-partial-messages\" ]; then has_partial_messages=1; fi\n"
             "  prev=\"$arg\"\n"
             "done\n"
-            "if [ -n \"${ACP_PREFLIGHT_SMOKE_SENTINEL:-}\" ] && [ \"$has_yolo\" = \"1\" ] && [ \"$has_channel_ci\" = \"1\" ]; then\n"
+            "if [ -n \"${ACP_PREFLIGHT_SMOKE_SENTINEL:-}\" ] && [ \"$has_yolo\" = \"1\" ] && [ \"$has_channel_ci\" = \"1\" ] && [ \"$has_stream_json\" = \"1\" ] && [ \"$has_partial_messages\" = \"1\" ]; then\n"
             "  mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"\n"
             "  printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"\n"
             "  exit 0\n"
