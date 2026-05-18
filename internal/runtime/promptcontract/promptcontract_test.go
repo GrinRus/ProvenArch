@@ -116,9 +116,22 @@ func TestComposeArtifactOnlyPromptKeepsRefreshCollectFirstActionTaskSpecific(t *
 		AgentRole:    "shard-analyst",
 	}
 
-	prompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderQwenCode, task)
+	claudePrompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderClaudeCode, task)
+	qwenPrompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderQwenCode, task)
+	codexPrompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderCodexCode, task)
+
+	claudeTail := strings.TrimPrefix(claudePrompt, "You are ACP runtime provider \"claude-code\".\n\n")
+	qwenTail := strings.TrimPrefix(qwenPrompt, "You are ACP runtime provider \"qwen-code\".\n\n")
+	codexTail := strings.TrimPrefix(codexPrompt, "You are ACP runtime provider \"codex-code\".\n\n")
+	if claudeTail != qwenTail || claudeTail != codexTail {
+		t.Fatalf("expected collect providers to share identical enforced prompt body\nclaude:\n%s\n\nqwen:\n%s\n\ncodex:\n%s", claudeTail, qwenTail, codexTail)
+	}
+	prompt := qwenPrompt
 	for _, token := range []string{
+		"COLLECT FIRST-ACTION ARTIFACT PAIR:",
 		"FIRST COLLECT ARTIFACT PAIR COMMAND:",
+		"Artifact-only contract:",
+		"DOCS-FIRST FILESYSTEM CONTRACT:",
 		`"step_id": "refresh.step1.collect"`,
 		`"path": "README.md"`,
 		`"questions": [`,
@@ -127,6 +140,21 @@ func TestComposeArtifactOnlyPromptKeepsRefreshCollectFirstActionTaskSpecific(t *
 		if !strings.Contains(prompt, token) {
 			t.Fatalf("expected refresh collect prompt to contain %q, got:\n%s", token, prompt)
 		}
+	}
+	if !strings.HasPrefix(prompt, "You are ACP runtime provider \"qwen-code\".\n\nCOLLECT FIRST-ACTION ARTIFACT PAIR:") {
+		t.Fatalf("expected collect first-action section immediately after provider identity, got:\n%s", prompt)
+	}
+	if got := strings.Count(prompt, "FIRST COLLECT ARTIFACT PAIR COMMAND:"); got != 1 {
+		t.Fatalf("expected first-action command heading exactly once, got %d:\n%s", got, prompt)
+	}
+	firstActionIndex := strings.Index(prompt, "FIRST COLLECT ARTIFACT PAIR COMMAND:")
+	artifactContractIndex := strings.Index(prompt, "Artifact-only contract:")
+	docFirstIndex := strings.Index(prompt, "DOCS-FIRST FILESYSTEM CONTRACT:")
+	if firstActionIndex < 0 || artifactContractIndex < 0 || docFirstIndex < 0 {
+		t.Fatalf("expected first-action, artifact contract, and doc-first sections:\n%s", prompt)
+	}
+	if !(firstActionIndex < artifactContractIndex && artifactContractIndex < docFirstIndex) {
+		t.Fatalf("expected collect first-action command before broad artifact/doc-first contract:\n%s", prompt)
 	}
 }
 

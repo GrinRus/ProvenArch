@@ -13,6 +13,9 @@ func ComposeArtifactOnlyPrompt(provider acpruntime.Provider, task acpruntime.Tas
 	sections := []string{
 		fmt.Sprintf("You are ACP runtime provider %q.", provider),
 	}
+	if firstAction := strings.TrimSpace(steppolicy.CollectFirstActionSection(task)); firstAction != "" {
+		sections = append(sections, firstAction)
+	}
 	sections = append(sections, SharedSections(task)...)
 	return strings.Join(sections, "\n\n")
 }
