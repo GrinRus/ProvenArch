@@ -109,8 +109,8 @@ func (a claudeAdapter) ActivityPolicy(task acpruntime.Task) providercommon.Activ
 	}
 }
 
-func (a claudeAdapter) RecoveryPolicy(_ acpruntime.Task) providercommon.RecoveryPolicy {
-	return providercommon.RecoveryPolicy{
+func (a claudeAdapter) RecoveryPolicy(task acpruntime.Task) providercommon.RecoveryPolicy {
+	policy := providercommon.RecoveryPolicy{
 		AcceptValidArtifactsAfterStop:            true,
 		RepairCollectManifestOnce:                true,
 		RepairCollectArtifactPairOnce:            true,
@@ -119,6 +119,10 @@ func (a claudeAdapter) RecoveryPolicy(_ acpruntime.Task) providercommon.Recovery
 		RetryInvalidOrMissingArtifactsOnce:       true,
 		ClassifySilentRetryExhaustionUnavailable: true,
 	}
+	if acpruntime.StepProviderKeyForStepID(task.StepID) == acpruntime.StepProviderStep3Findings {
+		policy.RetryZeroOutputPreArtifactStallOnce = true
+	}
+	return policy
 }
 
 func (a claudeAdapter) UnavailableMarkers() []string {

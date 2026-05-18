@@ -10,18 +10,8 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/runtime/steppolicy"
 )
 
-func validatorVerdictRepairWriteCommand(writeRoot string, target string, skeleton string) string {
-	return strings.Join([]string{
-		"mkdir -p " + shellSingleQuote(strings.TrimSpace(writeRoot)),
-		"cat > " + shellSingleQuote(strings.TrimSpace(target)) + " <<'ACP_VALIDATOR_VERDICT_JSON'",
-		strings.TrimSpace(skeleton),
-		"ACP_VALIDATOR_VERDICT_JSON",
-	}, "\n")
-}
-
 func ComposeValidatorVerdictRepairPrompt(provider acpruntime.Provider, task acpruntime.Task, validationErr error) string {
 	target := filepath.Join(strings.TrimSpace(task.WriteRoot), "validator-verdict.json")
-	skeleton := steppolicy.ValidatorVerdictTaskSkeleton(task)
 	lines := []string{
 		fmt.Sprintf("You are ACP runtime provider %q in validator verdict focused recovery mode.", provider),
 		"Immediate validator verdict repair action:",
@@ -30,8 +20,8 @@ func ComposeValidatorVerdictRepairPrompt(provider acpruntime.Provider, task acpr
 		"- Do not browse for more evidence before this write. The embedded skeleton is the first valid artifact set.",
 		"- If validator-verdict.json already exists but is invalid, overwrite it from the heredoc command.",
 		"- Copy the heredoc JSON exactly first. Do not make factual edits before the verdict validates.",
-		"VALIDATOR VERDICT WRITE COMMAND:",
-		validatorVerdictRepairWriteCommand(task.WriteRoot, target, skeleton),
+		"FIRST VALIDATOR VERDICT COMMAND:",
+		steppolicy.ValidatorVerdictWriteCommand(task),
 		"Artifact-only recovery contract:",
 		"- Do not return semantic JSON or any semantic payload on stdout.",
 		"- Do not write shard-pack-manifest.json, draft manifests, markdown reports, raw logs, or sibling taskrun files.",
@@ -40,8 +30,6 @@ func ComposeValidatorVerdictRepairPrompt(provider acpruntime.Provider, task acpr
 		fmt.Sprintf(`- write_root (absolute) = %q`, strings.TrimSpace(task.WriteRoot)),
 		fmt.Sprintf(`- validator-verdict.json absolute target = %q`, target),
 		fmt.Sprintf(`- read_context_roots = %q`, strings.Join(task.ReadContextRoots, ", ")),
-		"VALIDATOR VERDICT JSON SKELETON:",
-		skeleton,
 		"VALIDATOR VERDICT REPAIR INSTRUCTIONS:",
 		"- The heredoc JSON is the complete first repair artifact; write it first, then exit if it validates.",
 		"- Do not inspect sibling baseline workspaces, prior reports/taskruns history, or raw provider logs as examples.",

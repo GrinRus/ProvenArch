@@ -398,9 +398,8 @@ func TestQwenValidatorRepairCommandSpecUsesPromptOnly(t *testing.T) {
 	for _, token := range []string{
 		"validator verdict focused recovery mode",
 		"Immediate validator verdict repair action:",
-		"VALIDATOR VERDICT WRITE COMMAND:",
+		"FIRST VALIDATOR VERDICT COMMAND:",
 		"<<'ACP_VALIDATOR_VERDICT_JSON'",
-		"VALIDATOR VERDICT JSON SKELETON:",
 		"issues[] items must use only: code, severity, message, path, document_id, citation_id",
 		"Legacy issue fields are forbidden inside issues[]",
 		`"issues": []`,

@@ -938,6 +938,148 @@ EOF
 	}
 }
 
+func TestRunHeadlessProviderRetriesZeroOutputValidatorStallWhenPolicyAllows(t *testing.T) {
+	task := newValidatorTask(t, "run-validator-silent-then-success")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	verdictScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ValidatorVerdictFileName)) + ` <<'EOF'
+` + validatorVerdictJSON(task) + `
+EOF
+`
+	runner := &sequenceAdapter{
+		testAdapter: testAdapter{
+			activity: ActivityPolicy{
+				MonitorArtifacts:            true,
+				MonitorPreArtifact:          true,
+				PreArtifactStallWindow:      20 * time.Millisecond,
+				RetryPreArtifactStallWindow: 5 * time.Second,
+				PostArtifactStallWindow:     20 * time.Millisecond,
+				PollInterval:                5 * time.Millisecond,
+				PostTerminateDrain:          10 * time.Millisecond,
+				TerminateGrace:              10 * time.Millisecond,
+			},
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:            true,
+				RetryInvalidOrMissingArtifactsOnce:       true,
+				RetryZeroOutputPreArtifactStallOnce:      true,
+				ClassifySilentRetryExhaustionUnavailable: true,
+			},
+		},
+		commands: []string{
+			writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 10\n"),
+			writeEngineScript(t, verdictScript),
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := RunHeadlessProvider(ctx, task, runner)
+	if err != nil {
+		t.Fatalf("expected validator retry to recover valid artifacts, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("expected succeeded execution, got %+v", result.Execution)
+	}
+	if !hasDiagnostic(diagnostics, "zero-output pre-artifact stall will retry", "warning") {
+		t.Fatalf("expected warning diagnostic for recovered validator zero-output stall, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderKeepsExhaustedZeroOutputValidatorRetryUnavailable(t *testing.T) {
+	t.Parallel()
+
+	task := newValidatorTask(t, "run-validator-silent-retry-exhausted")
+	runner := testAdapter{
+		command: writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 10\n"),
+		activity: ActivityPolicy{
+			MonitorArtifacts:            true,
+			MonitorPreArtifact:          true,
+			PreArtifactStallWindow:      20 * time.Millisecond,
+			RetryPreArtifactStallWindow: 20 * time.Millisecond,
+			PostArtifactStallWindow:     20 * time.Millisecond,
+			PollInterval:                5 * time.Millisecond,
+			PostTerminateDrain:          10 * time.Millisecond,
+			TerminateGrace:              10 * time.Millisecond,
+		},
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:            true,
+			RetryInvalidOrMissingArtifactsOnce:       true,
+			RetryZeroOutputPreArtifactStallOnce:      true,
+			ClassifySilentRetryExhaustionUnavailable: true,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := RunHeadlessProvider(ctx, task, runner)
+	if err == nil {
+		t.Fatal("expected exhausted validator zero-output retry to fail")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRunnerUnavailable {
+		t.Fatalf("expected runner_unavailable, got %s (%v)", runnerErr.Code, err)
+	}
+}
+
+func TestRunHeadlessProviderKeepsInvalidValidatorAfterZeroOutputRetryAsContractFailure(t *testing.T) {
+	t.Parallel()
+
+	task := newValidatorTask(t, "run-validator-silent-then-invalid")
+	invalidVerdictScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ValidatorVerdictFileName)) + ` <<'EOF'
+{"version":1,"run_id":"` + task.RunID + `","generated_at":"2026-04-16T12:00:02Z","verdict":"FAIL","checked_paths":["reports/taskruns/` + task.RunID + `/staging/final/final-run-index.json"],"issues":[{"id":"legacy","severity":"high","title":"Legacy issue","description":"Wrong shape"}]}
+EOF
+`
+	runner := &sequenceAdapter{
+		testAdapter: testAdapter{
+			activity: ActivityPolicy{
+				MonitorArtifacts:            true,
+				MonitorPreArtifact:          true,
+				PreArtifactStallWindow:      20 * time.Millisecond,
+				RetryPreArtifactStallWindow: 5 * time.Second,
+				PostArtifactStallWindow:     20 * time.Millisecond,
+				PollInterval:                5 * time.Millisecond,
+				PostTerminateDrain:          10 * time.Millisecond,
+				TerminateGrace:              10 * time.Millisecond,
+			},
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:            true,
+				RetryInvalidOrMissingArtifactsOnce:       true,
+				RetryZeroOutputPreArtifactStallOnce:      true,
+				ClassifySilentRetryExhaustionUnavailable: true,
+			},
+		},
+		commands: []string{
+			writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 10\n"),
+			writeEngineScript(t, invalidVerdictScript),
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := RunHeadlessProvider(ctx, task, runner)
+	if err == nil {
+		t.Fatal("expected invalid validator retry artifact to fail")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+}
+
 func TestRunHeadlessProviderRepairsInvalidValidatorVerdict(t *testing.T) {
 	t.Parallel()
 
