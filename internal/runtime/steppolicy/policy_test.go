@@ -187,6 +187,71 @@ func TestCollectManifestTaskSkeletonParsesAsShardPackManifest(t *testing.T) {
 	}
 }
 
+func TestRefreshCollectManifestTaskSkeletonMatchesRefreshPolicyMinimums(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		ArtifactRoot: "reports/taskruns/run-1/staging/shards/root-files",
+		RepoScopes:   []string{"bank"},
+		PathScopes:   []string{".gitignore", "LICENSE", "Makefile", "README.md", "pom.xml"},
+		ShardID:      "bank-root-files",
+		DomainID:     "bank",
+		AgentRole:    "shard-analyst",
+	}
+
+	raw := CollectManifestTaskSkeleton(task, []string{"root-overview.md"}, nil)
+	manifest, err := contracts.ParseShardPackManifest([]byte(raw))
+	if err != nil {
+		t.Fatalf("expected refresh task skeleton to parse as a valid shard pack manifest, got %v\n%s", err, raw)
+	}
+	if got := len(manifest.Semantic.Coverage.Missing); got < 3 {
+		t.Fatalf("refresh coverage.missing length = %d, want >= 3 in skeleton:\n%s", got, raw)
+	}
+	if got := len(manifest.Semantic.Questions); got < 1 {
+		t.Fatalf("refresh questions length = %d, want >= 1 in skeleton:\n%s", got, raw)
+	}
+	question := manifest.Semantic.Questions[0]
+	if strings.TrimSpace(question.ID) == "" || strings.TrimSpace(question.Text) == "" {
+		t.Fatalf("refresh skeleton question must include id and text, got %+v in:\n%s", question, raw)
+	}
+	if got, want := manifest.Citations[0].Path, "README.md"; got != want {
+		t.Fatalf("root-file citation path = %q, want %q", got, want)
+	}
+}
+
+func TestCollectEarlyPairWriteCommandPrefersUsefulRootEvidence(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		ArtifactRoot: "reports/taskruns/run-1/staging/shards/root-files",
+		WriteRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/shards/root-files",
+		RepoScopes:   []string{"bank"},
+		PathScopes:   []string{".gitignore", "LICENSE", "Makefile", "README.md", "pom.xml"},
+		ShardID:      "bank-root-files",
+		DomainID:     "bank",
+		AgentRole:    "shard-analyst",
+	}
+
+	command := CollectEarlyPairWriteCommand(task)
+	for _, needle := range []string{
+		"Primary scoped evidence path: `README.md`",
+		`"path": "README.md"`,
+		`"questions": [`,
+		`"coverage": {`,
+	} {
+		if !strings.Contains(command, needle) {
+			t.Fatalf("expected early pair command to contain %q, got:\n%s", needle, command)
+		}
+	}
+	if strings.Contains(command, "Primary scoped evidence path: `.gitignore`") || strings.Contains(command, "Primary evidence path: `.gitignore`") {
+		t.Fatalf("root-file shard should prefer README.md over .gitignore evidence, got:\n%s", command)
+	}
+}
+
 func TestCollectEarlyPairWriteCommandAvoidsAuthoringInstructionsInArtifacts(t *testing.T) {
 	t.Parallel()
 

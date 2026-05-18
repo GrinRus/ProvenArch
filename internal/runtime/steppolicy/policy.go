@@ -177,16 +177,16 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 		lines = append(lines,
 			`- Do NOT delegate to agent/subagent helpers and do NOT use todo_write-style planning.`,
 			`- Before the first filesystem write inside write_root, keep repository exploration minimal and converge quickly on the first authored doc plus shard-pack-manifest.json.`,
-			`- Early pair-write requirement: write the suggested overview doc and shard-pack-manifest.json as one focused artifact pair before any broad second-pass repository sweep.`,
 			`- Produce runtime-authored documents in write_root and then write shard-pack-manifest.json in write_root.`,
+			`- Early pair-write requirement: write the suggested overview doc and shard-pack-manifest.json as one focused artifact pair before any broad second-pass repository sweep.`,
 			fmt.Sprintf(`- Suggested collect authored doc path for this shard: %q. Prefer exactly this single doc path unless already writing an existing clearer authored doc.`, SuggestedCollectDocumentPath(task)),
 			fmt.Sprintf(`- Absolute collect targets for the early pair-write: %q and %q.`, filepath.Join(strings.TrimSpace(task.WriteRoot), filepath.FromSlash(SuggestedCollectDocumentPath(task))), filepath.Join(strings.TrimSpace(task.WriteRoot), "shard-pack-manifest.json")),
-			fmt.Sprintf(`- Minimal collect target shape: write %q + "shard-pack-manifest.json" early, then record remaining uncertainty in coverage/questions instead of continuing open-ended exploration.`, SuggestedCollectDocumentPath(task)),
-			`- Do not wait for a complete broad repository sweep before writing shard-pack-manifest.json; once the first authored doc covers the assigned shard scope, write the manifest and record remaining gaps in semantic.coverage.missing.`,
-			`- Immediately after writing the first authored doc, write shard-pack-manifest.json by adapting the task-specific JSON skeleton embedded in the command; keep exact metadata keys and replace only evidence/content values you actually observed.`,
 			`FIRST COLLECT ARTIFACT PAIR COMMAND:`,
 			`Run this exact command as the next filesystem action after checking whether both target files already exist; do not run find/rg/list_directory over path_scopes before this command:`,
 			CollectEarlyPairWriteCommand(task),
+			fmt.Sprintf(`- Minimal collect target shape: write %q + "shard-pack-manifest.json" early, then record remaining uncertainty in coverage/questions instead of continuing open-ended exploration.`, SuggestedCollectDocumentPath(task)),
+			`- Do not wait for a complete broad repository sweep before writing shard-pack-manifest.json; once the first authored doc covers the assigned shard scope, write the manifest and record remaining gaps in semantic.coverage.missing.`,
+			`- Immediately after writing the first authored doc, write shard-pack-manifest.json by adapting the task-specific JSON skeleton embedded in the command; keep exact metadata keys and replace only evidence/content values you actually observed.`,
 			`- Do not exit after writing markdown only; every collect shard must finish with a valid shard-pack-manifest.json.`,
 			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and semantic snapshot.`,
 			`- In shard-pack-manifest.json, semantic MUST include coverage, questions, entities, edges, and findings.`,
@@ -304,7 +304,7 @@ func collectDocumentInitialTemplate(task acpruntime.Task, docRel string) string 
 	if repo == "" {
 		repo = "repo"
 	}
-	evidencePath := firstNonEmptyPath(task.PathScopes)
+	evidencePath := collectEvidencePath(task, nil)
 	if evidencePath == "" {
 		evidencePath = "README.md"
 	}
@@ -356,10 +356,7 @@ func CollectManifestTaskSkeleton(task acpruntime.Task, docPaths []string, eviden
 	if strings.TrimSpace(repo) == "" {
 		repo = "repo"
 	}
-	evidencePath := firstNonEmptyPath(evidencePaths)
-	if evidencePath == "" {
-		evidencePath = firstNonEmptyPath(task.PathScopes)
-	}
+	evidencePath := collectEvidencePath(task, evidencePaths)
 	if evidencePath == "" {
 		evidencePath = "README.md"
 	}
@@ -402,6 +399,8 @@ func CollectManifestTaskSkeleton(task acpruntime.Task, docPaths []string, eviden
 		})
 	}
 
+	coverageMissing := collectCoverageMissingSkeleton(task)
+	questions := collectQuestionsSkeleton(task, idStem, topic)
 	manifest := contracts.ShardPackManifest{
 		Version:      1,
 		RunID:        runID,
@@ -417,10 +416,10 @@ func CollectManifestTaskSkeleton(task acpruntime.Task, docPaths []string, eviden
 		Semantic: contracts.SemanticSnapshot{
 			Coverage: contracts.Coverage{
 				Observed: []string{topic},
-				Missing:  []string{"owner mapping evidence not confirmed from scoped repository files"},
+				Missing:  coverageMissing,
 				Notes:    []string{"Collect manifest covers the assigned shard scope with evidence paths listed in citations."},
 			},
-			Questions: []contracts.Question{},
+			Questions: questions,
 			Entities:  []contracts.Entity{},
 			Edges:     []contracts.Edge{},
 			Findings:  []contracts.Finding{},
@@ -831,6 +830,77 @@ func firstNonEmptyPath(values []string) string {
 		}
 	}
 	return ""
+}
+
+func collectEvidencePath(task acpruntime.Task, evidencePaths []string) string {
+	if value := firstNonEmptyPath(evidencePaths); value != "" {
+		return value
+	}
+	if rootFileScopes := rootFileShardPathScopes(task.PathScopes); len(rootFileScopes) > 0 {
+		return preferredRootFileEvidencePath(rootFileScopes)
+	}
+	return firstNonEmptyPath(task.PathScopes)
+}
+
+func preferredRootFileEvidencePath(pathScopes []string) string {
+	preferred := []func(string) bool{
+		func(value string) bool {
+			lower := strings.ToLower(value)
+			return lower == "readme" || strings.HasPrefix(lower, "readme.")
+		},
+		func(value string) bool {
+			return strings.EqualFold(value, "makefile")
+		},
+		func(value string) bool {
+			lower := strings.ToLower(value)
+			switch lower {
+			case "pom.xml", "package.json", "go.mod", "build.gradle", "build.gradle.kts", "gradlew", "mvnw", "dockerfile", "justfile":
+				return true
+			default:
+				return strings.HasPrefix(lower, "skaffold") || strings.HasPrefix(lower, "docker-compose")
+			}
+		},
+	}
+	for _, match := range preferred {
+		for _, value := range pathScopes {
+			if match(value) {
+				return value
+			}
+		}
+	}
+	return firstNonEmptyPath(pathScopes)
+}
+
+func collectCoverageMissingSkeleton(task acpruntime.Task) []string {
+	if strings.TrimSpace(task.StepID) != "refresh.step1.collect" {
+		return []string{"owner mapping evidence not confirmed from scoped repository files"}
+	}
+	return []string{
+		"owner mapping evidence not confirmed from scoped repository files",
+		"operational runbook evidence not confirmed from scoped repository files",
+		"external dependency evidence not confirmed from scoped repository files",
+	}
+}
+
+func collectQuestionsSkeleton(task acpruntime.Task, idStem string, topic string) []contracts.Question {
+	if strings.TrimSpace(task.StepID) != "refresh.step1.collect" {
+		return []contracts.Question{}
+	}
+	stem := idComponent(firstNonEmpty(idStem, topic, "refresh"))
+	if stem == "" {
+		stem = "refresh"
+	}
+	subject := strings.TrimSpace(topic)
+	if subject == "" {
+		subject = "scoped repository surface"
+	}
+	return []contracts.Question{
+		{
+			ID:       fmt.Sprintf("question.%s.owner.mapping", stem),
+			Text:     fmt.Sprintf("Which team owns the %s surface and its operational escalation path?", subject),
+			Priority: "medium",
+		},
+	}
 }
 
 func nonEmptyList(values []string) []string {

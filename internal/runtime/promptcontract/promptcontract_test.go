@@ -101,6 +101,35 @@ func TestComposeArtifactOnlyPromptAddsCollectLegacyHygieneSection(t *testing.T) 
 	}
 }
 
+func TestComposeArtifactOnlyPromptKeepsRefreshCollectFirstActionTaskSpecific(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:        "run-1",
+		StepID:       "refresh.step1.collect",
+		ArtifactRoot: "reports/taskruns/run-1/staging/shards/root-files",
+		WriteRoot:    "/tmp/write-root",
+		RepoScopes:   []string{"bank"},
+		PathScopes:   []string{".gitignore", "LICENSE", "Makefile", "README.md", "pom.xml"},
+		ShardID:      "bank-root-files",
+		DomainID:     "bank",
+		AgentRole:    "shard-analyst",
+	}
+
+	prompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderQwenCode, task)
+	for _, token := range []string{
+		"FIRST COLLECT ARTIFACT PAIR COMMAND:",
+		`"step_id": "refresh.step1.collect"`,
+		`"path": "README.md"`,
+		`"questions": [`,
+		`"missing": [`,
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected refresh collect prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
 func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 	t.Parallel()
 
