@@ -21,12 +21,37 @@ description: Используй для trusted-machine pre-release live E2E gate
    - `examples/e2e-matrix.release-long.yaml`
    - `examples/e2e-matrix.release-full.ftgo-sentry.yaml`
 
-Legacy compatibility only:
-- `examples/e2e-matrix.regression-wave1.yaml`
-- `examples/e2e-matrix.release-wave1.yaml`
-- `examples/e2e-matrix.release-wave2.yaml`
-
 Не подменяй canonical profile taxonomy ad-hoc matrix-файлами, если пользователь явно не просит diagnostic/custom run.
+
+## Black-box operator protocol
+Live E2E skill теперь работает как step-by-step black-box evaluator, а не как report-first cookbook.
+
+После каждой фазы фиксируй короткий step report в формате:
+
+```text
+goal: <что проверяем>
+action: <какую публичную поверхность вызвали/прочитали>
+observed evidence: <команды, UI/API/log/report/artifact/verifier paths>
+status: passed|failed|skipped|blocked
+primary classification: none|operational_host_preflight_failed|precheck_failed|runtime_timeout|runner_unavailable|runtime_contract_failed|runtime_flow_failed|quality_gates_failed|release_verdict_FAIL|...
+next decision: <continue|stop|rerun diagnostic|verify verdict|final report>
+```
+
+Разрешённые поверхности только публичные/operator-facing:
+- direct harness commands (`scripts/full-run-batch-matrix.sh`, `scripts/full-run-batch.sh`, `scripts/live-e2e-plan.py --format shell`);
+- UI/API surfaces;
+- generated reports under `reports/*`;
+- taskrun artifacts/logs/raw metadata under workspace/report roots;
+- matrix inventories/status files;
+- `scripts/verify-release-verdict.py` output.
+
+Запрещено чинить прогон изменением canonical matrix files, curated repo files или compatibility aliases. Host/provider/path blockers надо остановить и классифицировать как operational blocker.
+
+Harness дополнительно пишет durable evidence:
+- `reports/blackbox_e2e_steps_<batch-id>.jsonl`
+- `reports/blackbox_e2e_steps_<batch-id>.md`
+- `reports/blackbox_e2e_steps_<matrix-id>.jsonl`
+- `reports/blackbox_e2e_steps_<matrix-id>.md`
 
 ## Operational rules
 1) Release gate запускать только на trusted машине, где доступны canonical `path` checkout'ы из curated presets под `/tmp/provenarch-live-e2e/...`.
@@ -86,21 +111,13 @@ PY
   - `extended-window`: step `10800s`, pipeline `21600s`, ui-init `1800s`
 
 ## Required flow
-1) Для самого быстрого trusted-machine signal выполнить generated `smoke tiny`, например `python3 scripts/live-e2e-plan.py --mode smoke --size tiny --providers qwen --format shell`, затем запустить напечатанную direct command.
-2) Для базовой отладки/regression по умолчанию выполнить `regres fast` или `regres long` через catalog-approved slices с `BATCH_PROVIDER_FILTER=qwen-code` или сгенерировать direct commands через `scripts/live-e2e-plan.py`.
-3) Если нужен full pre-release verdict, выполнить preflight:
-   `make contracts test lint build`
-   `npm ci --prefix ui`
-   `npm exec --prefix ui playwright install chromium`
-4) Выполнить нужный canonical release slice:
-   - `release fast`
-   - `release long`
-   - или весь `release full` как три последовательных matrix invocation
-5) При дополнительной отладке повторить нужный regression/non-release diagnostic slice с `BATCH_PROVIDER_FILTER=claude-code` или `BATCH_PROVIDER_FILTER=codex-code`, если нужен isolated provider diagnostic вне canonical regression totals; release-mode provider subsets не использовать.
-6) Выполнить additional non-release checks:
-   - parallel smoke: два параллельных `full-run-batch.sh` с разными `BATCH_ID` и разными single-provider `BATCH_PROVIDER_FILTER` (например, `qwen-code` и `claude-code`; при необходимости заменить один из них на `codex-code`)
-   - forced-incomplete diagnostic run с `ACP_EXECUTION_STRATEGY=parallel`, `ACP_MAX_PARALLEL_TASKS=4`, `ACP_FAILURE_POLICY=best_effort`, `ACP_SHARD_DISCOVERY_MODE=heuristics`
-7) Проверить matrix invariant: для одного `profile_id` sweeps `baseline` и `parallel-default` дают одинаковый shard-plan.
+1) Host/tree/provider/path preflight: проверить trusted host, clean tree/worktree, provider binaries, writable roots, canonical path checkout'ы и pinned SHA. Зафиксировать step report и остановиться на blockers.
+2) Selector and direct command planning: выбрать catalog slice или сгенерировать direct command через `scripts/live-e2e-plan.py --format shell`; не запускать wrapper и не править canonical matrices. Зафиксировать planned command/evidence.
+3) Matrix execution monitoring: запускать только `scripts/full-run-batch-matrix.sh`, отслеживать matrix/profile status, batch owner heartbeat, driver logs и durable inventories.
+4) Backend artifact and quality inspection: читать `run_matrix_*`, `quality_report_*`, taskrun quality JSON, raw metadata/logs и batch black-box step report; классифицировать primary failure после каждого профиля.
+5) Frontend UI/cancel inspection: читать frontend init/cancel result JSON/MD reports, Playwright/server logs и UI/API evidence; dependent skips после backend failure не считать independent frontend regression.
+6) Release verdict verification: readiness брать только из `reports/release_verdict_<matrix-id>.json`; проверить `python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json`.
+7) Final black-box report: свести по шагам `goal / action / observed evidence / status / primary classification / next decision`; для `release full` все constituent verdict JSON должны иметь `PASS`.
 
 ## Acceptance focus
 - Во всех release slice verdicts: `strict_status=passed`
@@ -127,4 +144,4 @@ PY
 - `operational_host_preflight_failed` с codex model/version текстом
   Это host/provider readiness blocker до deep run. Обновить `codex` или явно задать `ACP_CODEX_CMD_BIN` на совместимый binary; не считать product verdict.
 - `runtime_timeout` на clean canonical slice
-  Причина: либо запускается legacy matrix без committed `timeout_profile`, либо даже native time budget оказался недостаточным; сначала проверить `timeout_profile` matrix-файла и `full-run.log`, затем уже считать это реальной runtime/provider деградацией.
+  Причина: либо native time budget оказался недостаточным, либо provider/runtime завис; сначала проверить `timeout_profile` matrix-файла, `blackbox_e2e_steps_*`, `full-run.log` и taskrun raw logs, затем считать это runtime/provider деградацией.

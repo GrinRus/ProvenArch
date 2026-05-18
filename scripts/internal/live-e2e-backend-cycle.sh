@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-PROVENARCH_ROOT="${PROVENARCH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+PROVENARCH_ROOT="${PROVENARCH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+# Internal backend-cycle helper for scripts/full-run-batch.sh.
+# Public live E2E entrypoints are scripts/full-run-batch-matrix.sh and scripts/full-run-batch.sh.
 # shellcheck source=scripts/legacy-env-guard.sh
 source "$PROVENARCH_ROOT/scripts/legacy-env-guard.sh"
 # shellcheck source=scripts/repos-meta-fields.sh

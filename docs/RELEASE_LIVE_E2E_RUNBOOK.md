@@ -1,12 +1,52 @@
 # Release Live E2E Runbook (Agent, no wrapper)
 
 Этот runbook фиксирует manual pre-release gate на trusted локальной машине.
-Новый wrapper-скрипт не используется: агент запускает существующий matrix harness напрямую (`full-run-batch-matrix.sh` -> `full-run-batch.sh` -> `e2e_batch_report.py`).
+Новый wrapper-скрипт не используется: агент запускает существующий matrix harness напрямую (`full-run-batch-matrix.sh` -> `full-run-batch.sh` -> internal backend-cycle helper -> `e2e_batch_report.py`).
 
 Canonical source of truth для live profile taxonomy:
 - `examples/e2e-profile-catalog.yaml`
 - runnable slice-файлы `examples/e2e-matrix.regres-*.yaml` и `examples/e2e-matrix.release-*.yaml`
 - diagnostic selector slice-файлы `examples/e2e-matrix.smoke-tiny.bank.yaml` и `examples/e2e-matrix.diagnostic.sentry.yaml`
+
+## Black-box evaluator protocol
+
+Canonical live E2E flow теперь является operator-driven black-box evaluation. Агент не начинает с чтения итогового отчёта: он планирует шаг, запускает или инспектирует только публичную поверхность, фиксирует evidence, классифицирует результат и принимает следующее решение.
+
+После каждой фазы в ответе оператора и в durable artifacts должен быть шаг:
+
+```text
+goal: <что доказываем>
+action: <какую публичную поверхность вызвали/прочитали>
+observed evidence: <команды, UI/API/log/report/artifact/verifier paths>
+status: passed|failed|skipped|blocked
+primary classification: none|operational_host_preflight_failed|precheck_failed|runtime_timeout|runner_unavailable|runtime_contract_failed|runtime_flow_failed|quality_gates_failed|release_verdict_FAIL|...
+next decision: <continue|stop|rerun diagnostic|verify verdict|final report>
+```
+
+Разрешённые evidence surfaces:
+- direct harness commands (`scripts/full-run-batch-matrix.sh`, `scripts/full-run-batch.sh`, `scripts/live-e2e-plan.py --format shell`);
+- UI/API состояния;
+- generated reports under `reports/*`;
+- taskrun artifacts/logs/raw metadata;
+- batch/matrix status, inventories and driver logs;
+- verifier output from `scripts/verify-release-verdict.py`.
+
+Запрещено использовать compatibility aliases, command shims или править canonical matrix/curated repo files под текущую машину. Host/provider/path blockers останавливают прогон как `operational_host_preflight_failed`.
+
+Harness пишет step evidence в existing report roots:
+- `reports/blackbox_e2e_steps_<batch-id>.jsonl`
+- `reports/blackbox_e2e_steps_<batch-id>.md`
+- `reports/blackbox_e2e_steps_<matrix-id>.jsonl`
+- `reports/blackbox_e2e_steps_<matrix-id>.md`
+
+Canonical flow:
+1. host/tree/provider/path preflight;
+2. selector and direct command planning;
+3. matrix execution monitoring;
+4. backend artifact and quality inspection;
+5. frontend UI/cancel inspection;
+6. release verdict verification;
+7. final black-box report.
 
 ## 0) Canonical profile catalog
 
@@ -533,6 +573,8 @@ Release guard rules:
 - `quality_report_<batch-id>.md`
 - `frontend_e2e_matrix_<batch-id>.md`
 - `frontend_cancel_e2e_matrix_<batch-id>.md`
+- `blackbox_e2e_steps_<batch-id>.jsonl/.md`
+- `blackbox_e2e_steps_<matrix-id>.jsonl/.md`
 
 Pre-tag/offline check:
 ```bash
@@ -634,7 +676,7 @@ Zero tolerance:
 - `init.step0.constitution`, `init|refresh.step2.asis_docs` и `init|refresh.step4.proposals` считаются successful только если runtime draft manifest валиден и все referenced draft files реально существуют под `draft_final_root`.
 - `init|refresh.step2.asis_docs` использует strict shared draft contract: `step_contract="as_is"`, required outputs `reports/as-is/overview.md`, `reports/coverage/summary.md`, `reports/agent-outputs/architect/summary.md`; дополнительные outputs допустимы только под `reports/as-is/<domain>/overview.md`, а legacy top-level fields вроде `repo_scopes` или `compatibility` должны hard-fail-иться.
 - `init|refresh.step4.proposals` использует strict shared draft contract: `step_contract="proposals"`, required top-level shape `version=1/run_id/step_id/step_contract/agent_role/summary?/outputs[]`; `outputs[].canonical_path` допустим только под `proposals/*` или `reports/changelog/*`, duplicate canonical paths запрещены, а legacy fields `pipeline`, `step`, `generated_at`, `domain_id`, `proposals[]`, `info_findings_noted`, `orphan_coverage_gaps` должны hard-fail-иться как `runtime_contract_failed`.
-- non-collect runtime шаги не должны стартовать из workspace root: draft steps используют `draft_final_root` как cwd, validator использует `write_root`, а `full-run-ai-advent.sh` разводит headless и baseline workspaces по разным temp roots, чтобы sibling baseline artifacts не были implicit template source.
+- non-collect runtime шаги не должны стартовать из workspace root: draft steps используют `draft_final_root` как cwd, validator использует `write_root`, а backend-cycle helper под `scripts/full-run-batch.sh` разводит headless и baseline workspaces по разным temp roots, чтобы sibling baseline artifacts не были implicit template source.
 - provider-side hard sandbox в текущих headless CLI нет; поэтому runtime isolation надо оценивать через temp-root layout и step-local `cwd`, а не ожидать отдельного sandbox enforcement от provider tooling.
 - `claude-code`, `qwen-code` и `codex-code` используют общий artifact-only process engine: stdout/stderr capture, process-group termination, timeout/cancel handling, raw diagnostics, activity monitor и artifact validation находятся в shared `providercommon` path.
 - pre/post-artifact recovery provider-agnostic: до появления artifacts silent/no-artifact hangs bounded для всех live adapters; после появления required artifacts runtime ждёт stale pipe activity и stale mutations `write_root`/`draft_final_root`; если artifacts уже валидны, controlled stop считается successful artifact-only completion, а не provider failure. Partial artifacts могут ждать отдельное более длинное provider policy grace window.
@@ -651,7 +693,7 @@ Zero tolerance:
 - internal shard-plan/shard-summary JSON обязаны содержать non-empty `meta.runtime.name` / `meta.runtime.version`; пустой runtime meta считается contract drift, а не допустимым partial state.
 - structural shard coalescing для больших repos сохраняет module marker leaf shard groups внутри top-level dirs, пока итоговый shard count остаётся в `maxAutoShardsPerRepo`; если top-level groups не помещаются в cap, они детерминированно merge-ятся в bounded buckets и получают warning.
 - live triage от `2026-04-17` зафиксировал один надёжный blocker для canonical `regres fast`: `single-git_url` на `qwen-code` завершился runtime contract failure после event-stream chatter и неполного artifact-only collect recovery; последующий `multi-path`/Open edX run был прерван вручную и не считается самостоятельным продуктовым failure signal.
-- subsequent clean rerun от `2026-04-17` подтвердил, что после фикса qwen prompt/retry + `cwd/chat-recording` этот parse blocker снимается; оставшийся canonical blocker сместился в legacy `pipeline_timeout=2400s`, поэтому canonical matrix slices получили checked-in `timeout_profile` с matrix-native budget.
+- subsequent clean rerun от `2026-04-17` подтвердил, что после фикса qwen prompt/retry + `cwd/chat-recording` этот parse blocker снимается; оставшийся canonical blocker сместился в устаревший `pipeline_timeout=2400s`, поэтому canonical matrix slices получили checked-in `timeout_profile` с matrix-native budget.
 
 ### 6.7 Triage rule for runtime timeout/infra signals
 
@@ -667,9 +709,9 @@ Zero tolerance:
 - если `session-summary.md` фиксирует terminal success (`result=passed`, `quality_gates=passed`, API `succeeded`) и `run-status.env state=completed process_exit=0`, shell/Python classifiers не должны поднимать `runner_unavailable`/`runtime_contract_failed` только из-за raw provider diagnostics from recovered attempts;
 - для terminal runtime/provider failures (`runtime_timeout`, `runner_unavailable`, `runtime_contract_failed`) не эскалировать secondary `runtime_flow_failed`/`analysis:cross-repo-missing` только из-за неполных refresh/runtime artifacts;
 - per-run evidence в batch report должен явно показывать `collect_partial_shard_failures`, focused recovery exhaustion/write-set violations и наличие runtime logs/metadata, если `run-results.tsv` не содержит ожидаемые headless rows;
-- inner `full-run-ai-advent.sh` должен писать failed headless `init`/`refresh` rows в существующем 17-field `run-results.tsv` формате, когда CLI уже вернул `run_id`, и делать best-effort snapshot даже при missing/invalid quality summary; runtime artifacts/logs после terminal provider/runtime failure не должны выглядеть как missing-row infra gap;
+- backend-cycle helper под `scripts/full-run-batch.sh` должен писать failed headless `init`/`refresh` rows в существующем 17-field `run-results.tsv` формате, когда CLI уже вернул `run_id`, и делать best-effort snapshot даже при missing/invalid quality summary; runtime artifacts/logs после terminal provider/runtime failure не должны выглядеть как missing-row infra gap;
 - terminal `session-summary.md` вместе с `run-status.env state=process_failed summary_written=yes` считать завершившимся deterministic pipeline failure; такой run не должен переопределяться в `infra_incomplete_cycle` только из-за mismatch `completed_*`, неполного `run-results.tsv` или classifier fallback.
-- inner `full-run-ai-advent.sh` обязан поддерживать running-heartbeat в `run-status.env` (`updated_at`, `last_pipeline_stage`, `last_runtime_provider`, `last_progress_at`) и сам писать terminal sentinel при `completed|process_failed|signal_terminated`.
+- backend-cycle helper обязан поддерживать running-heartbeat в `run-status.env` (`updated_at`, `last_pipeline_stage`, `last_runtime_provider`, `last_progress_at`) и сам писать terminal sentinel при `completed|process_failed|signal_terminated`.
 - если `session-summary.md` отсутствует, но batch shell успел дойти до classifier или завершился через `EXIT` trap, trusted harness обязан materialize-ить `infra_incomplete_cycle` или `infra_signal_terminated` через per-run `run-status.env`; отсутствие summary больше не считается допустимым silent gap.
 - если child batch завершился, а `run-status.env` отсутствует или остаётся `state=running`, outer batch обязан синтезировать terminal `process_failed` с `failure_reason=infra_incomplete_cycle`; `profile-status/*.json` должны отражать тот же terminal reason, а не generic `child_failed`.
 - child `full-run-batch.sh` обязан публиковать `batch-owner.env` heartbeat в `BATCH_ROOT`; lingering `profile-status/*.json = running` без живого owner pid или со stale owner heartbeat считаются terminal `infra_incomplete_cycle`.

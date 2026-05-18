@@ -266,9 +266,7 @@ Release workflow hardening:
   - save/reset `Runtime Execution`
 - UI quick actions:
   - `Open runtime execution artifact` открывает persisted taskrun artifact без live e2e-only допущений
-- Подробный command cookbook по live/full-run intentionally вынесен в runbook'и:
-  - `docs/LOCAL_FULL_RUN_AI_ADVENT.md`
-  - `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- Подробный command cookbook по trusted-machine live/release gate intentionally вынесен в `docs/RELEASE_LIVE_E2E_RUNBOOK.md`.
 
 ### Optional live-runner smoke
 - `scripts/live-e2e-plan.py` — catalog-driven command generator for direct matrix harness invocations:
@@ -276,15 +274,6 @@ Release workflow hardening:
   - supports flexible selectors `smoke tiny`, `regres fast|long|full`, `release fast|long|full`
   - `smoke tiny` is `1 repo × 1 run × 1 provider` for fastest trusted-machine signal
   - generated `regres`/`release` commands rely on the existing quality path: `reports/taskruns/<run_id>-quality.json`, `quality_report_<batch-id>.md`, `quality_gates_failed=0`, no `artifact_quality:*`
-- `scripts/full-run-ai-advent.sh` — canonical local scenario/full-run loop:
-  - supported headless providers: `claude-code`, `qwen-code`, `codex-code`
-  - canonical input: `TARGET_REPOS_FILE`
-  - bootstrap в `tmp`, runtime циклы `fake + headless`, strict anti-mock/anti-zero-signal guardrails
-  - completion invariants: expected/completed runtime counts, per-iteration headless `init+refresh`, отсутствие `running` в `run-history`
-  - failed CLI cycles with a known `run_id` append the same 17-field `run-results.tsv` row and best-effort snapshot before terminal cleanup, including missing/invalid quality summary cases, so failed headless init/refresh evidence is not reported as a missing-row infra gap
-  - failed/timeout CLI cycles terminalize `reports/taskruns/run-history.json`; if child process exits before graceful cleanup, harness reconciliation marks stale `queued/running` as `failed` with `runtime_timeout` or `infra_incomplete_cycle`
-  - signal handling: `TERM/INT/HUP/PIPE` => `infra_signal_terminated`
-  - debug artifacts и raw diagnostics: `TMP_ROOT/session-summary.md`, `TMP_ROOT/full-run.log`, `TMP_ROOT/snapshots/*`, `reports/taskruns/raw/*`
 - `scripts/full-run-batch.sh` — canonical live batch + frontend live e2e:
   - canonical input: `TARGET_REPOS_FILE`
   - direct-only runtime commands: `claude`, `qwen`, `codex`
@@ -295,16 +284,18 @@ Release workflow hardening:
   - terminal-success backend runs (`result=passed`, `quality_gates=passed`, `run-status.env state=completed process_exit=0`) остаются `failure_class=none`, даже если raw provider logs содержат recovered `runner_unavailable`/429 diagnostics
   - quality summary/matrix counters агрегируют `repair_attempts`, `repair_exhausted`, `fresh_retries`, `focused_repairs`, `stall_count`, `pre_artifact_stalls`, `post_artifact_stalls`, `zero_output_pre_artifact_stalls`, `partial_failure_count` и `quality_alerts`; non-exhausted repair/stall pressure visible but non-blocking, partial failures remain blockers
   - batch report evidence tests проверяют, что `collect_partial_shard_failures`, focused recovery exhaustion/write-set violations, provider/model mismatch и missing headless rows with runtime logs surfaced as per-run issue details, а не теряются за aggregate failure class
+  - black-box step evidence пишется в `reports/blackbox_e2e_steps_<batch-id>.jsonl/.md` после preflight, backend run, frontend init/cancel, report synthesis и final classification
 - `scripts/full-run-batch-matrix.sh` — официальный local trusted-machine harness:
   - canonical input: `E2E_MATRIX_FILE`
   - approved profile ids: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
   - non-release slices: `examples/e2e-matrix.regres-*.yaml`
   - diagnostic slices for generated selectors: `examples/e2e-matrix.smoke-tiny.bank.yaml`, `examples/e2e-matrix.diagnostic.sentry.yaml`
-	  - release-specific slices, `baseline` + `parallel-default`, strict blockers и release verdict policy живут только в `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
-	  - matrix invariant: для одного `profile_id` shard-plan должен совпадать между `baseline` и `parallel-default`
-	  - для `source_kind=git_url` refs должны быть pinned
-	  - итоговый release decision брать только из `reports/release_verdict_<matrix-id>.json`
-	  - pre-tag/offline verifier: `python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json`; скрипт только проверяет существующий verdict JSON и не запускает live harness
+  - release-specific slices, `baseline` + `parallel-default`, strict blockers и release verdict policy живут только в `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+  - matrix invariant: для одного `profile_id` shard-plan должен совпадать между `baseline` и `parallel-default`
+  - для `source_kind=git_url` refs должны быть pinned
+  - black-box matrix evidence пишется в `reports/blackbox_e2e_steps_<matrix-id>.jsonl/.md` после preflight, planning, каждого profile/sweep и verdict verification
+  - итоговый release decision брать только из `reports/release_verdict_<matrix-id>.json`
+  - pre-tag/offline verifier: `python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json`; скрипт только проверяет существующий verdict JSON и не запускает live harness
 - `scripts/frontend-live-e2e.sh` и `npm run e2e:live --prefix ui` используют Playwright:
   - local wrapper поддерживает `claude-code`, `qwen-code`, `codex-code`
   - canonical toggles: `UI_E2E_EXPECTED_REPO_COUNT`, `UI_E2E_SCENARIO=init-inspect|cancel-refresh`, `UI_E2E_OUTPUT_DIR`
@@ -351,7 +342,6 @@ Release workflow hardening:
 - `make build`
 - `make run-backend WORKSPACE=/abs/path/to/arch-workspace`
 - `make run-ui`
-- `./scripts/full-run-ai-advent.sh`
 - `./scripts/full-run-batch.sh`
 - `./scripts/full-run-batch-matrix.sh`
 - `./scripts/frontend-live-e2e.sh`
