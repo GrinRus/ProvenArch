@@ -249,6 +249,19 @@ def run_artifact_smoke(provider: str, command: str, repo_root: str) -> tuple[boo
                 stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
                 combined = "\n".join(part for part in [stdout, stderr] if part).strip()
                 last_combined = combined
+                if provider == "claude":
+                    try:
+                        observed = sentinel_path.read_text(encoding="utf-8").strip()
+                    except OSError:
+                        observed = ""
+                    if observed == ARTIFACT_SMOKE_SENTINEL_TEXT:
+                        timeout_reason = (
+                            f"{provider} artifact smoke wrote expected sentinel before timeout "
+                            f"(attempt {attempt}/{max_attempts}, timeout={exc.timeout}s)"
+                        )
+                        return True, timeout_reason, "\n".join(
+                            part for part in [combined, timeout_reason] if part
+                        ).strip()
                 last_reason = (
                     f"{provider} artifact smoke timed out after {exc.timeout}s "
                     f"(attempt {attempt}/{max_attempts})"

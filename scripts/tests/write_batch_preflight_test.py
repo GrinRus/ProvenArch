@@ -247,6 +247,34 @@ class WriteBatchPreflightTest(unittest.TestCase):
         self.assertEqual("passed", result["artifact_smoke"])
         self.assertEqual("2", attempts.read_text(encoding="utf-8").strip())
 
+    def test_claude_artifact_smoke_accepts_expected_sentinel_before_timeout(self) -> None:
+        command = self._write_script(
+            "claude-sentinel-before-timeout-stub",
+            "#!/bin/sh\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' '2.1.85 (Claude Code)'; exit 0; fi\n"
+            "if [ -n \"${ACP_PREFLIGHT_SMOKE_SENTINEL:-}\" ]; then\n"
+            "  mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"\n"
+            "  printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"\n"
+            "  sleep 3\n"
+            "  exit 0\n"
+            "fi\n"
+            "printf '%s\n' 'ACP_READY'\n",
+        )
+        old_timeout = os.environ.get("ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC")
+        os.environ["ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC"] = "2"
+        try:
+            result = self.module.probe_provider_readiness("claude", command, str(REPO_ROOT))
+        finally:
+            if old_timeout is None:
+                os.environ.pop("ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC", None)
+            else:
+                os.environ["ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC"] = old_timeout
+
+        self.assertEqual("ready", result["status"])
+        self.assertEqual("", result["subclass"])
+        self.assertEqual("passed", result["artifact_smoke"])
+        self.assertIn("wrote expected sentinel before timeout", result["reason"])
+
     def test_claude_artifact_smoke_exhausted_timeout_blocks_preflight(self) -> None:
         attempts = self.root / "claude-smoke-attempts"
         command = self._write_script(
