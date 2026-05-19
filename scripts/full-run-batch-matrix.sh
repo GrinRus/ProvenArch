@@ -8,6 +8,8 @@ source "$PROVENARCH_ROOT/scripts/legacy-env-guard.sh"
 source "$PROVENARCH_ROOT/scripts/repos-meta-fields.sh"
 # shellcheck source=scripts/preflight-log.sh
 source "$PROVENARCH_ROOT/scripts/preflight-log.sh"
+# shellcheck source=scripts/internal/live-e2e-evaluator.sh
+source "$PROVENARCH_ROOT/scripts/internal/live-e2e-evaluator.sh"
 # shellcheck source=scripts/timeout-env-keys.sh
 source "$PROVENARCH_ROOT/scripts/timeout-env-keys.sh"
 # shellcheck source=scripts/execution-env-keys.sh
@@ -64,6 +66,9 @@ CURRENT_SWEEP_MAX_PARALLEL=""
 CURRENT_SWEEP_FAILURE_POLICY=""
 CURRENT_SWEEP_SHARD_MODE=""
 CURRENT_PROFILE_STATUS_HEARTBEAT_PID=""
+MATRIX_BLACKBOX_STEPS_JSONL="$REPORTS_ROOT/blackbox_e2e_steps_${MATRIX_ID}.jsonl"
+MATRIX_BLACKBOX_STEPS_MD="$REPORTS_ROOT/blackbox_e2e_steps_${MATRIX_ID}.md"
+MATRIX_BLACKBOX_STEPS_INITIALIZED=0
 
 log() {
   local line
@@ -84,6 +89,47 @@ die() {
     printf '%s\n' "$line" >>"$MATRIX_DRIVER_LOG"
   fi
   exit 1
+}
+
+init_matrix_blackbox_step_report() {
+  if [[ "$MATRIX_BLACKBOX_STEPS_INITIALIZED" == "1" ]]; then
+    return 0
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    return 0
+  fi
+  live_e2e_evaluator_init_matrix_report \
+    "$MATRIX_BLACKBOX_STEPS_JSONL" \
+    "$MATRIX_BLACKBOX_STEPS_MD" \
+    "$MATRIX_ID" \
+    "$E2E_MATRIX_FILE"
+  MATRIX_BLACKBOX_STEPS_INITIALIZED=1
+}
+
+write_matrix_blackbox_step_report() {
+  local step_id="$1"
+  local goal="$2"
+  local action="$3"
+  local status="$4"
+  local primary_classification="$5"
+  local next_decision="$6"
+  shift 6
+  if ! command -v python3 >/dev/null 2>&1; then
+    return 0
+  fi
+  init_matrix_blackbox_step_report
+  live_e2e_evaluator_write_matrix_step \
+    "$MATRIX_BLACKBOX_STEPS_JSONL" \
+    "$MATRIX_BLACKBOX_STEPS_MD" \
+    "$MATRIX_ID" \
+    "$E2E_MATRIX_FILE" \
+    "$step_id" \
+    "$goal" \
+    "$action" \
+    "$status" \
+    "$primary_classification" \
+    "$next_decision" \
+    "$@"
 }
 
 write_matrix_operational_blocker_report() {
@@ -295,6 +341,17 @@ PY
 
 operational_host_preflight_failed() {
   local reason="$1"
+  write_matrix_blackbox_step_report \
+    "matrix.preflight" \
+    "Verify host, selected providers, writable paths, and matrix prerequisites before execution." \
+    "Inspect configured provider binaries, temp/report roots, matrix path, and release-mode requirements." \
+    "failed" \
+    "operational_host_preflight_failed" \
+    "Stop on the current host; repair host/provider/path readiness without editing canonical matrices or curated repo files." \
+    "$E2E_MATRIX_FILE" \
+    "$MATRIX_DRIVER_LOG" \
+    "$MATRIX_ROOT" \
+    "$REPORTS_ROOT" || true
   write_matrix_operational_blocker_report "$reason" || true
   die "operational_host_preflight_failed: $reason"
 }
@@ -976,6 +1033,7 @@ run_host_preflight_checks
 
 mkdir -p "$MATRIX_ROOT" "$REPORTS_ROOT"
 mkdir -p "$MATRIX_STATUS_ROOT"
+init_matrix_blackbox_step_report
 reconcile_stale_profile_statuses
 
 ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES="$(normalize_binary_flag "$E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES" "E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES")"
@@ -1012,9 +1070,33 @@ if [[ "${#DIAGNOSTIC_TIMEOUT_OVERRIDES[@]}" -gt 0 ]]; then
   acp_log_diagnostic_timeout_overrides log "${DIAGNOSTIC_TIMEOUT_OVERRIDES[*]}"
 fi
 if [[ "$RELEASE_MODE" == "1" && "$ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES" != "1" && "${#DIAGNOSTIC_TIMEOUT_OVERRIDES[@]}" -gt 0 ]]; then
+  write_matrix_blackbox_step_report \
+    "matrix.preflight" \
+    "Verify host, selected providers, writable paths, release guard, and matrix prerequisites before execution." \
+    "Inspect provider binaries, temp/report roots, selected providers/run indexes, direct batch script availability, and release timeout guard." \
+    "failed" \
+    "release_guard_blocked" \
+    "Stop this matrix run; remove diagnostic timeout overrides or rerun only as explicit diagnostic evidence." \
+    "$E2E_MATRIX_FILE" \
+    "$MATRIX_DRIVER_LOG" \
+    "$BATCH_SCRIPT" \
+    "$MATRIX_ROOT" \
+    "$REPORTS_ROOT"
   die "$(acp_release_guard_blocked_message)"
 fi
 log "release frontend defaults: frontend_mode=${BATCH_FRONTEND_MODE:-default} frontend_cancel_mode=${BATCH_FRONTEND_CANCEL_MODE:-default} headed=${UI_E2E_HEADED:-default}"
+write_matrix_blackbox_step_report \
+  "matrix.preflight" \
+  "Verify host, selected providers, writable paths, release guard, and matrix prerequisites before execution." \
+  "Inspect provider binaries, temp/report roots, selected providers/run indexes, direct batch script availability, and release timeout guard." \
+  "passed" \
+  "none" \
+  "Plan matrix profile/sweep direct commands." \
+  "$E2E_MATRIX_FILE" \
+  "$MATRIX_DRIVER_LOG" \
+  "$BATCH_SCRIPT" \
+  "$MATRIX_ROOT" \
+  "$REPORTS_ROOT"
 
 COMBINATIONS_TSV="$MATRIX_ROOT/profile-sweep-combinations.tsv"
 RECORDS_JSONL="$MATRIX_ROOT/profile-runs.jsonl"
@@ -1026,7 +1108,7 @@ trap 'on_matrix_signal INT' INT
 trap 'on_matrix_signal HUP' HUP
 trap 'on_matrix_exit $?' EXIT
 
-python3 - "$E2E_MATRIX_FILE" "$COMBINATIONS_TSV" "$RELEASE_MODE" "$MATRIX_TIMEOUT_PROFILE_FILE" <<'PY'
+if ! python3 - "$E2E_MATRIX_FILE" "$COMBINATIONS_TSV" "$RELEASE_MODE" "$MATRIX_TIMEOUT_PROFILE_FILE" <<'PY'
 import sys
 from pathlib import Path
 
@@ -1268,6 +1350,31 @@ out_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
 timeout_profile_path.parent.mkdir(parents=True, exist_ok=True)
 timeout_profile_path.write_text((timeout_profile + "\n") if timeout_profile else "", encoding="utf-8")
 PY
+then
+  write_matrix_blackbox_step_report \
+    "matrix.plan" \
+    "Resolve the matrix into direct profile/sweep batch executions." \
+    "Parse matrix YAML, validate release-mode profile/sweep contract, and write profile-sweep combinations." \
+    "failed" \
+    "matrix_plan_failed" \
+    "Stop before launching child batches; inspect matrix YAML and release-mode contract errors." \
+    "$E2E_MATRIX_FILE" \
+    "$COMBINATIONS_TSV" \
+    "$MATRIX_TIMEOUT_PROFILE_FILE" \
+    "$MATRIX_DRIVER_LOG"
+  die "matrix planning failed: matrix_file=$E2E_MATRIX_FILE"
+fi
+write_matrix_blackbox_step_report \
+  "matrix.plan" \
+  "Resolve the matrix into direct profile/sweep batch executions." \
+  "Parse matrix YAML, validate release-mode profile/sweep contract, and write profile-sweep combinations." \
+  "passed" \
+  "none" \
+  "Execute each planned profile/sweep through scripts/full-run-batch.sh." \
+  "$E2E_MATRIX_FILE" \
+  "$COMBINATIONS_TSV" \
+  "$MATRIX_TIMEOUT_PROFILE_FILE" \
+  "$MATRIX_DRIVER_LOG"
 
 if [[ -f "$MATRIX_TIMEOUT_PROFILE_FILE" ]]; then
   MATRIX_TIMEOUT_PROFILE="$(tr -d '\r' < "$MATRIX_TIMEOUT_PROFILE_FILE" | head -n1 | xargs)"
@@ -1364,6 +1471,18 @@ with path.open("a", encoding="utf-8") as f:
     f.write(json.dumps(payload, ensure_ascii=True))
     f.write("\n")
 PY
+      write_matrix_blackbox_step_report \
+        "matrix.profile.${profile_slug}.${sweep_slug}" \
+        "Execute one planned profile/sweep through the public batch harness." \
+        "Validate profile repo metadata before launching batch_id=$batch_id." \
+        "$status" \
+        "$profile_failure_reason" \
+        "Stop this profile/sweep on operational preflight failure; repair repo path/SHA metadata without editing canonical matrices." \
+        "$driver_log" \
+        "$CURRENT_PROFILE_STATUS_FILE" \
+        "$inventory_json" \
+        "$run_matrix_md" \
+        "$quality_report_md"
       continue
     fi
     PROFILE_META_CACHE_KEY="$profile_meta_key"
@@ -1490,6 +1609,26 @@ with path.open("a", encoding="utf-8") as f:
     f.write(json.dumps(payload, ensure_ascii=True))
     f.write("\n")
 PY
+  profile_next_decision="Continue to the next profile/sweep or synthesize the matrix verdict."
+  if [[ "$status" != "passed" ]]; then
+    profile_next_decision="Inspect batch step report, profile inventory, driver log, and generated reports before continuing."
+  fi
+  write_matrix_blackbox_step_report \
+    "matrix.profile.${profile_slug}.${sweep_slug}" \
+    "Execute one planned profile/sweep through the public batch harness." \
+    "Run batch_id=$batch_id via $BATCH_SCRIPT and inspect generated backend/frontend/quality artifacts." \
+    "$status" \
+    "$profile_failure_reason" \
+    "$profile_next_decision" \
+    "$driver_log" \
+    "$CURRENT_PROFILE_STATUS_FILE" \
+    "$inventory_json" \
+    "$REPORTS_ROOT/blackbox_e2e_steps_${batch_id}.jsonl" \
+    "$REPORTS_ROOT/blackbox_e2e_steps_${batch_id}.md" \
+    "$run_matrix_md" \
+    "$frontend_matrix_md" \
+    "$frontend_cancel_matrix_md" \
+    "$quality_report_md"
 done < "$COMBINATIONS_TSV"
 CURRENT_PROFILE_STATUS_FILE=""
 
@@ -2379,8 +2518,35 @@ PY
 )"
 
 if [[ "$MATRIX_VERDICT" != "PASS" ]]; then
+  write_matrix_blackbox_step_report \
+    "matrix.verdict" \
+    "Verify the official release decision from the canonical release verdict artifact." \
+    "Read reports/release_verdict_${MATRIX_ID}.json and classify the matrix outcome." \
+    "failed" \
+    "release_verdict_FAIL" \
+    "Treat the release as blocked; inspect verdict records and referenced batch evidence." \
+    "$VERDICT_JSON" \
+    "$VERDICT_MD" \
+    "$MATRIX_REPORT_TSV" \
+    "$MATRIX_REPORT_MD" \
+    "$MATRIX_BLACKBOX_STEPS_JSONL" \
+    "$MATRIX_BLACKBOX_STEPS_MD"
   die "RELEASE BLOCKED for matrix=$MATRIX_ID (see $VERDICT_MD)"
 fi
+
+write_matrix_blackbox_step_report \
+  "matrix.verdict" \
+  "Verify the official release decision from the canonical release verdict artifact." \
+  "Read reports/release_verdict_${MATRIX_ID}.json and classify the matrix outcome." \
+  "passed" \
+  "release_verdict_PASS" \
+  "Publish the final black-box report using the matrix step report and canonical verdict artifacts." \
+  "$VERDICT_JSON" \
+  "$VERDICT_MD" \
+  "$MATRIX_REPORT_TSV" \
+  "$MATRIX_REPORT_MD" \
+  "$MATRIX_BLACKBOX_STEPS_JSONL" \
+  "$MATRIX_BLACKBOX_STEPS_MD"
 
 log "matrix completed successfully (RELEASE READY)"
 exit 0

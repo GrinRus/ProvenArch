@@ -81,6 +81,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                 ]
             ),
         )
+
         write_text(run_dir / "full-run.log", "batch ended with incomplete cycle\n")
         write_text(run_dir / "batch-driver.log", "driver completed with process_exit=1\n")
         write_text(
@@ -143,6 +144,256 @@ class BatchFailureClassificationTest(unittest.TestCase):
         )
         self._write_snapshot(run_dir, "init-run", "init")
         self._write_snapshot(run_dir, "refresh-run", "refresh")
+
+    def test_full_run_batch_provider_preflight_failure_materializes_reports(self) -> None:
+        repos_file = self.root / "repos.yaml"
+        write_text(
+            repos_file,
+            "\n".join(
+                [
+                    "repos:",
+                    "  - name: provider-preflight",
+                    "    git_url: https://example.invalid/provider-preflight.git",
+                    "    ref: 1111111111111111111111111111111111111111",
+                    "",
+                ]
+            ),
+        )
+        qwen_stub = self.root / "qwen-preflight-stub.sh"
+        write_text(
+            qwen_stub,
+            "#!/bin/sh\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' 'qwen 1.0'; exit 0; fi\n"
+            "if [ \"${1:-}\" = \"-p\" ]; then printf '%s\n' 'ACP_READY'; exit 0; fi\n"
+            "if [ \"${1:-}\" = \"--chat-recording\" ]; then printf '%s\n' 'ACP_READY'; exit 0; fi\n"
+            "printf 'unexpected args: %s\\n' \"$*\" >&2\n"
+            "exit 2\n",
+        )
+        qwen_stub.chmod(0o755)
+
+        batch_id = "provider-preflight-failure"
+        e2e_root = self.root / "e2e"
+        reports_root = e2e_root / "reports"
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key
+            in {
+                "PATH",
+                "HOME",
+                "TMPDIR",
+                "TMP",
+                "TEMP",
+                "USER",
+                "LOGNAME",
+                "LANG",
+                "LC_ALL",
+                "LC_CTYPE",
+                "SHELL",
+                "PYENV_ROOT",
+            }
+        }
+        env.update(
+            {
+                "BATCH_ID": batch_id,
+                "E2E_TMP_ROOT": str(e2e_root),
+                "REPORTS_ROOT": str(reports_root),
+                "TARGET_REPOS_FILE": str(repos_file),
+                "PROFILE_ID": "single-git_url",
+                "PROFILE_SOURCE_KIND": "git_url",
+                "PROFILE_EXPECTED_REPO_COUNT": "1",
+                "RUN_COUNT": "1",
+                "BATCH_PROVIDER_FILTER": "qwen-code",
+                "BATCH_RUN_SELECTION": "1",
+                "BATCH_FRONTEND_MODE": "never",
+                "BATCH_FRONTEND_CANCEL_MODE": "never",
+                "ACP_QWEN_CMD_BIN": str(qwen_stub),
+                "ACP_CLAUDE_CMD_BIN": "true",
+                "ACP_CODEX_CMD_BIN": "true",
+                "ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC": "5",
+                "BATCH_OWNER_HEARTBEAT_SEC": "1",
+            }
+        )
+
+        completed = subprocess.run(
+            [str(FULL_RUN_BATCH_SCRIPT)],
+            cwd=REPO_ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=90,
+            check=False,
+        )
+
+        self.assertNotEqual(0, completed.returncode, msg=completed.stdout + completed.stderr)
+        self.assertIn("operational_host_preflight_failed", completed.stderr + completed.stdout)
+        for path in [
+            reports_root / f"run_matrix_{batch_id}.md",
+            reports_root / f"run_matrix_{batch_id}.tsv",
+            reports_root / f"quality_report_{batch_id}.md",
+            reports_root / f"frontend_e2e_matrix_{batch_id}.md",
+            reports_root / f"frontend_cancel_e2e_matrix_{batch_id}.md",
+            reports_root / f"blackbox_e2e_steps_{batch_id}.jsonl",
+            e2e_root / "runs" / batch_id / "report-paths.txt",
+        ]:
+            self.assertTrue(path.exists(), f"missing expected preflight failure artifact: {path}")
+
+        run_matrix = (reports_root / f"run_matrix_{batch_id}.md").read_text(encoding="utf-8")
+        self.assertIn("operational_host_preflight_failed", run_matrix)
+        self.assertNotIn("| qwen-code | 1 | 0 | 0 | 0 | 0 | 0 | Poor | snapshot", run_matrix)
+
+        rows = [
+            json.loads(line)
+            for line in (reports_root / f"blackbox_e2e_steps_{batch_id}.jsonl").read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        self.assertEqual(["batch.preflight"], [row["step_id"] for row in rows])
+        self.assertEqual("failed", rows[0]["status"])
+        self.assertEqual("operational_host_preflight_failed", rows[0]["primary_classification"])
+        for key in ("goal", "action", "observed_evidence", "next_decision", "evidence_paths"):
+            self.assertIn(key, rows[0])
+
+    def test_full_run_batch_node_toolchain_precheck_failure_records_evidence(self) -> None:
+        repos_file = self.root / "repos.yaml"
+        write_text(
+            repos_file,
+            "\n".join(
+                [
+                    "repos:",
+                    "  - name: node-precheck",
+                    "    git_url: https://example.invalid/node-precheck.git",
+                    "    ref: 1111111111111111111111111111111111111111",
+                    "",
+                ]
+            ),
+        )
+        qwen_stub = self.root / "qwen-ready-stub.sh"
+        write_text(
+            qwen_stub,
+            "#!/bin/sh\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' 'qwen 1.0'; exit 0; fi\n"
+            "if [ \"${1:-}\" = \"-p\" ]; then printf '%s\n' 'ACP_READY'; exit 0; fi\n"
+            "if [ \"${1:-}\" = \"--chat-recording\" ]; then\n"
+            "  mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"\n"
+            "  printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"\n"
+            "  printf '%s\n' 'Done.'\n"
+            "  exit 0\n"
+            "fi\n"
+            "printf 'unexpected args: %s\\n' \"$*\" >&2\n"
+            "exit 2\n",
+        )
+        qwen_stub.chmod(0o755)
+
+        wrong_node_dir = self.root / "wrong-node"
+        wrong_node_dir.mkdir()
+        wrong_node = wrong_node_dir / "node"
+        write_text(
+            wrong_node,
+            "#!/usr/bin/env bash\n"
+            "set -Eeuo pipefail\n"
+            "if [[ \"${1:-}\" == '-p' ]]; then\n"
+            "  case \"${2:-}\" in\n"
+            "    *process.versions.node*) printf '%s\\n' '22.22.3' ;;\n"
+            "    *process.arch*) printf '%s\\n' 'arm64' ;;\n"
+            "    *) printf '\\n' ;;\n"
+            "  esac\n"
+            "  exit 0\n"
+            "fi\n"
+            "if [[ \"${1:-}\" == '--version' ]]; then printf '%s\\n' 'v22.22.3'; exit 0; fi\n"
+            "printf '%s\\n' \"$0\"\n",
+        )
+        wrong_npm = wrong_node_dir / "npm"
+        write_text(
+            wrong_npm,
+            "#!/usr/bin/env bash\n"
+            "set -Eeuo pipefail\n"
+            "if [[ \"${1:-}\" == '--version' ]]; then printf '%s\\n' '10.9.8'; exit 0; fi\n"
+            "printf '%s\\n' \"$0\"\n",
+        )
+        wrong_node.chmod(0o755)
+        wrong_npm.chmod(0o755)
+
+        batch_id = "node-toolchain-precheck-failure"
+        e2e_root = self.root / "e2e-node"
+        reports_root = e2e_root / "reports"
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key
+            in {
+                "PATH",
+                "HOME",
+                "TMPDIR",
+                "TMP",
+                "TEMP",
+                "USER",
+                "LOGNAME",
+                "LANG",
+                "LC_ALL",
+                "LC_CTYPE",
+                "SHELL",
+                "PYENV_ROOT",
+            }
+        }
+        env.update(
+            {
+                "BATCH_ID": batch_id,
+                "E2E_TMP_ROOT": str(e2e_root),
+                "REPORTS_ROOT": str(reports_root),
+                "TARGET_REPOS_FILE": str(repos_file),
+                "PROFILE_ID": "single-git_url",
+                "PROFILE_SOURCE_KIND": "git_url",
+                "PROFILE_EXPECTED_REPO_COUNT": "1",
+                "RUN_COUNT": "1",
+                "BATCH_PROVIDER_FILTER": "qwen-code",
+                "BATCH_RUN_SELECTION": "1",
+                "BATCH_FRONTEND_MODE": "never",
+                "BATCH_FRONTEND_CANCEL_MODE": "never",
+                "ACP_QWEN_CMD_BIN": str(qwen_stub),
+                "ACP_CLAUDE_CMD_BIN": "true",
+                "ACP_CODEX_CMD_BIN": "true",
+                "ACP_NODE_TOOL_CANDIDATES": str(wrong_node_dir),
+                "ACP_NODE_TOOL_CANDIDATES_ONLY": "1",
+                "ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC": "5",
+                "ACP_PREFLIGHT_ARTIFACT_SMOKE_TIMEOUT_SEC": "5",
+                "BATCH_OWNER_HEARTBEAT_SEC": "1",
+            }
+        )
+
+        completed = subprocess.run(
+            [str(FULL_RUN_BATCH_SCRIPT)],
+            cwd=REPO_ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=90,
+            check=False,
+        )
+
+        self.assertNotEqual(0, completed.returncode, msg=completed.stdout + completed.stderr)
+        self.assertIn("precheck_failed", completed.stderr + completed.stdout)
+        node_log = e2e_root / "runs" / batch_id / "precheck-node-toolchain.log"
+        self.assertTrue(node_log.exists())
+        node_log_text = node_log.read_text(encoding="utf-8")
+        self.assertIn("node_status=failed", node_log_text)
+        self.assertIn("Node.js 22.21.1 is required", node_log_text)
+        self.assertIn("22.22.3", node_log_text)
+
+        run_matrix = (reports_root / f"run_matrix_{batch_id}.md").read_text(encoding="utf-8")
+        self.assertIn("precheck_failed", run_matrix)
+
+        rows = [
+            json.loads(line)
+            for line in (reports_root / f"blackbox_e2e_steps_{batch_id}.jsonl").read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        self.assertEqual(["batch.preflight"], [row["step_id"] for row in rows])
+        self.assertEqual("failed", rows[0]["status"])
+        self.assertEqual("precheck_failed", rows[0]["primary_classification"])
+        self.assertTrue(
+            any(path.endswith("precheck-node-toolchain.log") for path in rows[0]["evidence_paths"]),
+            rows[0]["evidence_paths"],
+        )
 
     def _create_passed_run_dir_with_raw_runner_noise(self, run_dir: Path) -> None:
         self._create_fixture_run_dir(run_dir)

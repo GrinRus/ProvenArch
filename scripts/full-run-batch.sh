@@ -10,6 +10,8 @@ source "$PROVENARCH_ROOT/scripts/repos-meta-fields.sh"
 source "$PROVENARCH_ROOT/scripts/frontend-status-reasons.sh"
 # shellcheck source=scripts/preflight-log.sh
 source "$PROVENARCH_ROOT/scripts/preflight-log.sh"
+# shellcheck source=scripts/internal/live-e2e-evaluator.sh
+source "$PROVENARCH_ROOT/scripts/internal/live-e2e-evaluator.sh"
 # shellcheck source=scripts/timeout-env-keys.sh
 source "$PROVENARCH_ROOT/scripts/timeout-env-keys.sh"
 # shellcheck source=scripts/execution-env-keys.sh
@@ -71,10 +73,14 @@ LAST_RUN_FAILURE_CLASS="none"
 LAST_RUN_FAILURE_SUBCLASS="none"
 LAST_RUN_CANCELLATION_LIKE=0
 PRECHECK_FAILURE_RECORDED=0
+OPERATIONAL_PREFLIGHT_FAILURE_RECORDED=0
 FRONTEND_CANCEL_FAILURES=0
 FRONTEND_CANCEL_SKIPPED=0
 FRONTEND_LIVE_RESULT_FILENAME="frontend-e2e-result.json"
 FRONTEND_CANCEL_RESULT_FILENAME="frontend-cancel-result.json"
+BLACKBOX_STEPS_JSONL="$REPORTS_ROOT/blackbox_e2e_steps_${BATCH_ID}.jsonl"
+BLACKBOX_STEPS_MD="$REPORTS_ROOT/blackbox_e2e_steps_${BATCH_ID}.md"
+BLACKBOX_STEPS_INITIALIZED=0
 TIMEOUT_PRECHECK_UNSET_KEYS=(
   "${ACP_TIMEOUT_ENV_KEYS[@]}"
   "${ACP_EXECUTION_ENV_KEYS[@]}"
@@ -119,11 +125,91 @@ die() {
   exit 1
 }
 
+init_blackbox_step_report() {
+  if [[ "$BLACKBOX_STEPS_INITIALIZED" == "1" ]]; then
+    return 0
+  fi
+  live_e2e_evaluator_init_batch_report \
+    "$BLACKBOX_STEPS_JSONL" \
+    "$BLACKBOX_STEPS_MD" \
+    "$BATCH_ID" \
+    "${PROFILE_ID:-adhoc}" \
+    "${SWEEP_ID:-baseline}"
+  BLACKBOX_STEPS_INITIALIZED=1
+}
+
+write_blackbox_step_report() {
+  local step_id="$1"
+  local goal="$2"
+  local action="$3"
+  local status="$4"
+  local primary_classification="$5"
+  local next_decision="$6"
+  shift 6
+  init_blackbox_step_report
+  live_e2e_evaluator_write_batch_step \
+    "$BLACKBOX_STEPS_JSONL" \
+    "$BLACKBOX_STEPS_MD" \
+    "$BATCH_ID" \
+    "${PROFILE_ID:-adhoc}" \
+    "${SWEEP_ID:-baseline}" \
+    "$step_id" \
+    "$goal" \
+    "$action" \
+    "$status" \
+    "$primary_classification" \
+    "$next_decision" \
+    "$@"
+}
+
+frontend_result_summary() {
+  local path="$1"
+  python3 - "$path" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+if not path.exists():
+    print("failed\tmissing_result_json")
+    raise SystemExit(0)
+try:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+except Exception as exc:
+    print(f"failed\tinvalid_result_json:{exc}")
+    raise SystemExit(0)
+status = str(payload.get("status", "")).strip()
+reason = str(payload.get("reason", "")).strip() or "-"
+if status not in {"passed", "failed", "skipped", "blocked"}:
+    reason = reason if reason != "-" else f"unexpected_status:{status or 'missing'}"
+    status = "failed"
+print(f"{status}\t{reason}")
+PY
+}
+
 require_cmd() {
   local cmd="$1"
   if ! command -v "$cmd" >/dev/null 2>&1; then
     die "required command is unavailable: $cmd"
   fi
+}
+
+require_provider_cmd() {
+  local provider="$1"
+  local cmd="$2"
+  if command -v "$cmd" >/dev/null 2>&1; then
+    return 0
+  fi
+  write_blackbox_step_report \
+    "batch.preflight" \
+    "Verify host, provider, path, timeout, and execution prerequisites before running backend/UI flows." \
+    "Check selected provider binary availability before generating batch preflight." \
+    "failed" \
+    "operational_host_preflight_failed" \
+    "Stop before live execution; install or configure the selected provider command." \
+    "$cmd" \
+    "$provider"
+  die "required command is unavailable: $cmd"
 }
 
 provider_version_line() {
@@ -1033,6 +1119,41 @@ run_dod_precheck_make() {
   "${env_cmd[@]}" make contracts test lint build
 }
 
+run_node_toolchain_precheck() {
+  local required_node_version="${ACP_NODE_VERSION:-}"
+  if [[ -z "$required_node_version" && -f "$PROVENARCH_ROOT/.node-version" ]]; then
+    required_node_version="$(tr -d '[:space:]' < "$PROVENARCH_ROOT/.node-version")"
+  fi
+
+  printf 'required_node_version=%s\n' "${required_node_version:-}"
+  printf 'ACP_NODE_TOOL_CANDIDATES=%s\n' "${ACP_NODE_TOOL_CANDIDATES:-}"
+  printf 'ACP_NODE_TOOL_CANDIDATES_ONLY=%s\n' "${ACP_NODE_TOOL_CANDIDATES_ONLY:-0}"
+  printf 'ACP_NODE_VERSION_CHECK=%s\n' "${ACP_NODE_VERSION_CHECK:-1}"
+
+  local resolved_node
+  printf 'resolve_node_command=%s\n' "$PROVENARCH_ROOT/scripts/resolve-node-tool.sh node"
+  if ! resolved_node="$("$PROVENARCH_ROOT/scripts/resolve-node-tool.sh" node 2>&1)"; then
+    printf 'node_status=failed\n'
+    printf '%s\n' "$resolved_node"
+    return 1
+  fi
+  printf 'node_status=ready\n'
+  printf 'node_bin=%s\n' "$resolved_node"
+  printf 'node_version=%s\n' "$("$resolved_node" -p 'process.versions.node' 2>/dev/null || true)"
+  printf 'node_arch=%s\n' "$("$resolved_node" -p 'process.arch' 2>/dev/null || true)"
+
+  local resolved_npm
+  printf 'resolve_npm_command=%s\n' "$PROVENARCH_ROOT/scripts/resolve-node-tool.sh npm"
+  if ! resolved_npm="$("$PROVENARCH_ROOT/scripts/resolve-node-tool.sh" npm 2>&1)"; then
+    printf 'npm_status=failed\n'
+    printf '%s\n' "$resolved_npm"
+    return 1
+  fi
+  printf 'npm_status=ready\n'
+  printf 'npm_bin=%s\n' "$resolved_npm"
+  printf 'npm_version=%s\n' "$("$resolved_npm" --version 2>/dev/null || true)"
+}
+
 classify_run_failure() {
   local provider="$1"
   local run_index="$2"
@@ -1320,6 +1441,8 @@ increment_failure_class_counter() {
     runtime_flow_failed)
       RUNTIME_FLOW_FAILED_FAILURES=$((RUNTIME_FLOW_FAILED_FAILURES + 1))
       ;;
+    operational_host_preflight_failed)
+      ;;
     none)
       ;;
     *)
@@ -1361,6 +1484,76 @@ record_precheck_failed_classifications() {
   PRECHECK_FAILURE_RECORDED=1
 }
 
+record_operational_preflight_failed_classifications() {
+  local reason="${1:-operational_host_preflight_failed}"
+  if [[ "$OPERATIONAL_PREFLIGHT_FAILURE_RECORDED" == "1" ]]; then
+    return 0
+  fi
+  reason="${reason//$'\t'/ }"
+  reason="${reason//$'\n'/ }"
+  local provider
+  local run_index
+  for provider in "${SELECTED_PROVIDERS[@]}"; do
+    for run_index in "${SELECTED_RUN_INDEXES[@]}"; do
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$provider" \
+        "$run_index" \
+        "operational_host_preflight_failed" \
+        "1" \
+        "operational_host_preflight_failed" \
+        "$reason" \
+        "none" \
+        "-" \
+        "-" \
+        "-" \
+        "-" \
+        "-" \
+        "0" \
+        "none" \
+        "0" >>"$RUN_CLASSIFICATIONS_TSV"
+      increment_failure_class_counter "operational_host_preflight_failed" "none" "0"
+    done
+  done
+  OPERATIONAL_PREFLIGHT_FAILURE_RECORDED=1
+}
+
+finalize_provider_readiness_failure() {
+  local reason="${1:-unknown provider readiness failure}"
+  record_operational_preflight_failed_classifications "$reason"
+  log "provider readiness failed: $reason"
+  log "generating quality reports for batch=$BATCH_ID (operational_host_preflight_failed)"
+  if (
+    cd "$PROVENARCH_ROOT"
+    python3 scripts/e2e_batch_report.py \
+      --batch-id "$BATCH_ID" \
+      --batch-root "$BATCH_ROOT" \
+      --reports-root "$REPORTS_ROOT" >"$BATCH_ROOT/report-paths.txt"
+  ); then
+    log "report paths:"
+    cat "$BATCH_ROOT/report-paths.txt"
+  else
+    log "report generation failed after provider readiness failure (see $BATCH_ROOT/report-paths.txt if present)"
+  fi
+  write_blackbox_step_report \
+    "batch.preflight" \
+    "Verify host, provider, path, timeout, and execution prerequisites before running backend/UI flows." \
+    "Read selected provider binaries, target repo metadata, generated batch preflight, and synthesized preflight-failure reports." \
+    "failed" \
+    "operational_host_preflight_failed" \
+    "Stop and move the run to a trusted host or repair provider/path readiness; do not edit canonical matrices." \
+    "$BATCH_ROOT/preflight.json" \
+    "$DECLARED_REPOS_JSON" \
+    "$BATCH_ROOT/report-paths.txt" \
+    "$REPORTS_ROOT/run_matrix_${BATCH_ID}.tsv" \
+    "$REPORTS_ROOT/run_matrix_${BATCH_ID}.md" \
+    "$REPORTS_ROOT/frontend_e2e_matrix_${BATCH_ID}.md" \
+    "$REPORTS_ROOT/frontend_cancel_e2e_matrix_${BATCH_ID}.md" \
+    "$REPORTS_ROOT/quality_report_${BATCH_ID}.md" \
+    "$RUN_CLASSIFICATIONS_TSV"
+  log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
+  die "operational_host_preflight_failed: selected provider readiness failed: $reason"
+}
+
 finalize_precheck_failure() {
   local reason="$1"
   record_precheck_failed_classifications
@@ -1378,6 +1571,20 @@ finalize_precheck_failure() {
   else
     log "report generation failed after precheck failure (see $BATCH_ROOT/report-paths.txt if present)"
   fi
+  write_blackbox_step_report \
+    "batch.preflight" \
+    "Verify host, provider, path, timeout, execution, and DoD prerequisites before live flow execution." \
+    "Run DoD/UI precheck and synthesize batch reports from the failed preflight state." \
+    "failed" \
+    "precheck_failed" \
+    "Stop before live provider execution; inspect precheck logs and rerun the same direct harness command after repair." \
+    "$BATCH_ROOT/precheck-node-toolchain.log" \
+    "$BATCH_ROOT/precheck-make.log" \
+    "$BATCH_ROOT/precheck-ui-npm.log" \
+    "$BATCH_ROOT/precheck-playwright.log" \
+    "$BATCH_ROOT/report-paths.txt" \
+    "$REPORTS_ROOT/quality_report_${BATCH_ID}.md" \
+    "$RUN_CLASSIFICATIONS_TSV"
   log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
   die "batch precheck failed: reason=$reason precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
 }
@@ -1385,23 +1592,51 @@ finalize_precheck_failure() {
 prepare_target_repos_file() {
   if [[ -n "$TARGET_REPOS_FILE" ]]; then
     if [[ ! -f "$TARGET_REPOS_FILE" ]]; then
+      write_blackbox_step_report \
+        "batch.preflight" \
+        "Verify target repo input before live flow execution." \
+        "Check TARGET_REPOS_FILE exists and is readable." \
+        "failed" \
+        "operational_host_preflight_failed" \
+        "Stop before live execution; provide a valid absolute TARGET_REPOS_FILE." \
+        "$TARGET_REPOS_FILE"
       die "TARGET_REPOS_FILE does not exist: $TARGET_REPOS_FILE"
     fi
     RESOLVED_TARGET_REPOS_FILE="$(cd "$(dirname "$TARGET_REPOS_FILE")" && pwd)/$(basename "$TARGET_REPOS_FILE")"
     return 0
   fi
 
+  write_blackbox_step_report \
+    "batch.preflight" \
+    "Verify target repo input before live flow execution." \
+    "Check TARGET_REPOS_FILE is set." \
+    "failed" \
+    "operational_host_preflight_failed" \
+    "Stop before live execution; set TARGET_REPOS_FILE=/abs/path/to/repos.yaml." \
+    "$BATCH_ROOT" \
+    "$REPORTS_ROOT"
   die "missing target input: set TARGET_REPOS_FILE=/abs/path/to/repos.yaml"
 }
 
 collect_declared_repos() {
   DECLARED_REPOS_JSON="$BATCH_ROOT/declared-repos.json"
-  python3 "$PROVENARCH_ROOT/scripts/resolve-repos-meta.py" \
+  if ! python3 "$PROVENARCH_ROOT/scripts/resolve-repos-meta.py" \
     --repos-file "$RESOLVED_TARGET_REPOS_FILE" \
     --expected-repo-count "$EXPECTED_REPO_COUNT" \
     --source-kind "$PROFILE_SOURCE_KIND" \
     --profile-id "$PROFILE_ID" \
-    --out "$DECLARED_REPOS_JSON"
+    --out "$DECLARED_REPOS_JSON"; then
+    write_blackbox_step_report \
+      "batch.preflight" \
+      "Resolve and validate target repo metadata before live flow execution." \
+      "Run resolve-repos-meta.py against TARGET_REPOS_FILE/profile settings." \
+      "failed" \
+      "operational_host_preflight_failed" \
+      "Stop before live execution; repair target repo metadata/path/SHA inputs." \
+      "$RESOLVED_TARGET_REPOS_FILE" \
+      "$DECLARED_REPOS_JSON"
+    die "target repos metadata preflight failed: $RESOLVED_TARGET_REPOS_FILE"
+  fi
 }
 
 read_declared_repos_meta() {
@@ -1460,16 +1695,18 @@ require_cmd npm
 require_cmd make
 require_cmd python3
 require_cmd curl
+mkdir -p "$BATCH_ROOT" "$REPORTS_ROOT"
+init_blackbox_step_report
 resolve_selected_providers
 resolve_selected_run_indexes
 if provider_selected "claude-code"; then
-  require_cmd "$ACP_CLAUDE_CMD_BIN"
+  require_provider_cmd "claude-code" "$ACP_CLAUDE_CMD_BIN"
 fi
 if provider_selected "qwen-code"; then
-  require_cmd "$ACP_QWEN_CMD_BIN"
+  require_provider_cmd "qwen-code" "$ACP_QWEN_CMD_BIN"
 fi
 if provider_selected "codex-code"; then
-  require_cmd "$ACP_CODEX_CMD_BIN"
+  require_provider_cmd "codex-code" "$ACP_CODEX_CMD_BIN"
 fi
 
 mkdir -p "$BATCH_ROOT" "$REPORTS_ROOT"
@@ -1540,7 +1777,7 @@ if [[ -z "$TIMEOUT_PROFILE_LINE" || -z "$EXECUTION_PROFILE_LINE" ]]; then
   die "preflight helper did not return timeout/execution profile lines"
 fi
 if [[ "$PROVIDER_READINESS_STATUS" == "unavailable" ]]; then
-  die "operational_host_preflight_failed: selected provider readiness failed: ${PROVIDER_READINESS_REASON:-unknown provider readiness failure}"
+  finalize_provider_readiness_failure "${PROVIDER_READINESS_REASON:-unknown provider readiness failure}"
 fi
 
 read_declared_repos_meta
@@ -1564,6 +1801,14 @@ log "batch shard selection: providers=$SELECTED_PROVIDERS_CSV runs=$SELECTED_RUN
 if [[ "$BATCH_SKIP_PRECHECK" == "1" ]]; then
   log "skipping DoD/UI precheck (BATCH_SKIP_PRECHECK=1)"
 else
+  log "checking Node.js/npm toolchain"
+  if ! (
+    cd "$PROVENARCH_ROOT"
+    run_node_toolchain_precheck >"$BATCH_ROOT/precheck-node-toolchain.log" 2>&1
+  ); then
+    finalize_precheck_failure "Node.js/npm toolchain precheck failed (see $BATCH_ROOT/precheck-node-toolchain.log)"
+  fi
+
   log "running DoD precheck: make contracts test lint build"
   if ! (
     cd "$PROVENARCH_ROOT"
@@ -1575,12 +1820,25 @@ else
   log "installing UI dependencies and Playwright browser"
   if ! (
     cd "$PROVENARCH_ROOT"
-    npm ci --prefix ui >"$BATCH_ROOT/precheck-ui-npm.log" 2>&1
-    npm exec --prefix ui playwright install chromium >"$BATCH_ROOT/precheck-playwright.log" 2>&1
+    "$PROVENARCH_ROOT/scripts/run-npm.sh" ci --prefix ui >"$BATCH_ROOT/precheck-ui-npm.log" 2>&1
+    "$PROVENARCH_ROOT/scripts/run-npm.sh" exec --prefix ui playwright install chromium >"$BATCH_ROOT/precheck-playwright.log" 2>&1
   ); then
     finalize_precheck_failure "UI precheck failed (see $BATCH_ROOT/precheck-ui-npm.log and $BATCH_ROOT/precheck-playwright.log)"
   fi
 fi
+write_blackbox_step_report \
+  "batch.preflight" \
+  "Verify host, provider, path, timeout, execution, and DoD prerequisites before live flow execution." \
+  "Inspect generated preflight metadata and complete or intentionally skip DoD/UI precheck." \
+  "passed" \
+  "none" \
+  "Run backend cycles through the batch harness." \
+  "$BATCH_ROOT/preflight.json" \
+  "$DECLARED_REPOS_JSON" \
+  "$BATCH_ROOT/precheck-node-toolchain.log" \
+  "$BATCH_ROOT/precheck-make.log" \
+  "$BATCH_ROOT/precheck-ui-npm.log" \
+  "$BATCH_ROOT/precheck-playwright.log"
 
 failed_runs=0
 for provider in "${SELECTED_PROVIDERS[@]}"; do
@@ -1615,16 +1873,33 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
         "ACP_CODEX_CMD=$ACP_CODEX_CMD_BIN" \
         "ACP_APPLY_TIMEOUTS_VIA_API=$ACP_APPLY_TIMEOUTS_VIA_API" \
         "SWEEP_ID=${SWEEP_ID:-baseline}" \
-        ./scripts/full-run-ai-advent.sh
+        ./scripts/internal/live-e2e-backend-cycle.sh
     ) >"$run_dir/batch-driver.log" 2>&1 || process_exit=$?
 
     ensure_terminal_run_status "$run_dir" "$provider" "$i" "$process_exit"
     classify_run_failure "$provider" "$i" "$run_dir" "$process_exit"
+    backend_step_status="passed"
+    backend_next_decision="Inspect frontend surfaces or advance to the next selected backend run."
     if [[ "$LAST_RUN_FAILURE_CLASS" != "none" ]]; then
+      backend_step_status="failed"
+      backend_next_decision="Inspect backend artifacts, raw logs, quality report, and classifier output before continuing."
       failed_runs=$((failed_runs + 1))
       increment_failure_class_counter "$LAST_RUN_FAILURE_CLASS" "$LAST_RUN_FAILURE_SUBCLASS" "$LAST_RUN_CANCELLATION_LIKE"
       log "run failed provider=$provider run=$i class=$LAST_RUN_FAILURE_CLASS subclass=$LAST_RUN_FAILURE_SUBCLASS cancellation_like=$LAST_RUN_CANCELLATION_LIKE (see $run_dir/batch-driver.log)"
     fi
+    write_blackbox_step_report \
+      "backend.${provider}.run${i}" \
+      "Execute the backend flow only through the public batch harness and generated workspace artifacts." \
+      "Run provider=$provider run=$i and classify the resulting reports, taskrun artifacts, and logs." \
+      "$backend_step_status" \
+      "$LAST_RUN_FAILURE_CLASS" \
+      "$backend_next_decision" \
+      "$run_dir/session-summary.md" \
+      "$run_dir/run-results.tsv" \
+      "$run_dir/run-status.env" \
+      "$run_dir/batch-driver.log" \
+      "$run_dir/headless/arch-workspace/reports/taskruns" \
+      "$RUN_CLASSIFICATIONS_TSV"
   done
 done
 
@@ -1635,9 +1910,26 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
     backend_run_dir="${resolved_frontend_run%%$'\t'*}"
     frontend_run_index="${resolved_frontend_run#*$'\t'}"
     output_dir="$(frontend_live_output_dir "$provider")"
-    if ! run_frontend_live_e2e "$provider" "$backend_run_dir" "$output_dir" "$frontend_run_index"; then
+    frontend_result=0
+    run_frontend_live_e2e "$provider" "$backend_run_dir" "$output_dir" "$frontend_run_index" || frontend_result=$?
+    frontend_summary="$(frontend_result_summary "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME")"
+    frontend_status="${frontend_summary%%$'\t'*}"
+    frontend_reason="${frontend_summary#*$'\t'}"
+    if [[ "$frontend_result" != "0" ]]; then
       frontend_failures=$((frontend_failures + 1))
     fi
+    write_blackbox_step_report \
+      "frontend.init.${provider}" \
+      "Inspect the generated workspace through the public frontend flow." \
+      "Run frontend init inspection for provider=$provider using backend run=${frontend_run_index:-summary}." \
+      "$frontend_status" \
+      "$frontend_reason" \
+      "Inspect UI result JSON, driver log, server log, and Playwright evidence before release verdict verification." \
+      "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME" \
+      "$output_dir/driver.log" \
+      "$output_dir/server.log" \
+      "$output_dir/playwright.log" \
+      "$output_dir/frontend-workspace/reports"
     continue
   fi
 
@@ -1647,9 +1939,26 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
         continue
       fi
       output_dir="$(frontend_live_output_dir "$provider" "$i")"
-      if ! run_frontend_live_e2e "$provider" "$BATCH_ROOT/$provider/run${i}" "$output_dir" "$i"; then
+      frontend_result=0
+      run_frontend_live_e2e "$provider" "$BATCH_ROOT/$provider/run${i}" "$output_dir" "$i" || frontend_result=$?
+      frontend_summary="$(frontend_result_summary "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME")"
+      frontend_status="${frontend_summary%%$'\t'*}"
+      frontend_reason="${frontend_summary#*$'\t'}"
+      if [[ "$frontend_result" != "0" ]]; then
         frontend_failures=$((frontend_failures + 1))
       fi
+      write_blackbox_step_report \
+        "frontend.init.${provider}.run${i}" \
+        "Inspect the generated workspace through the public frontend flow." \
+        "Run frontend init inspection for provider=$provider run=$i." \
+        "$frontend_status" \
+        "$frontend_reason" \
+        "Inspect UI result JSON, driver log, server log, and Playwright evidence before continuing." \
+        "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME" \
+        "$output_dir/driver.log" \
+        "$output_dir/server.log" \
+        "$output_dir/playwright.log" \
+        "$output_dir/frontend-workspace/reports"
     done
     continue
   fi
@@ -1668,6 +1977,14 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
       "$output_dir" \
       "$runtime_cmd"
     log "frontend live e2e skipped provider=$provider mode=$BATCH_FRONTEND_MODE runs=$SELECTED_RUN_INDEXES_CSV"
+    write_blackbox_step_report \
+      "frontend.init.${provider}" \
+      "Inspect the generated workspace through the public frontend flow when selected." \
+      "Record frontend init inspection as skipped by batch selection." \
+      "skipped" \
+      "$ACP_FRONTEND_REASON_SELECTION_SKIPPED" \
+      "Continue with cancel inspection or report synthesis according to selected modes." \
+      "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME"
     continue
   fi
 done
@@ -1682,11 +1999,26 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
     frontend_workspace="$(prepare_frontend_cancel_workspace "$backend_run_dir" "$cancel_output_dir")"
     cancel_result=0
     run_frontend_cancel_e2e "$provider" "$frontend_workspace" "$cancel_output_dir" "$cancel_run_index" || cancel_result=$?
+    cancel_summary="$(frontend_result_summary "$cancel_output_dir/$FRONTEND_CANCEL_RESULT_FILENAME")"
+    cancel_status="${cancel_summary%%$'\t'*}"
+    cancel_reason="${cancel_summary#*$'\t'}"
     if [[ "$cancel_result" == "1" ]]; then
       FRONTEND_CANCEL_FAILURES=$((FRONTEND_CANCEL_FAILURES + 1))
     elif [[ "$cancel_result" == "2" ]]; then
       FRONTEND_CANCEL_SKIPPED=$((FRONTEND_CANCEL_SKIPPED + 1))
     fi
+    write_blackbox_step_report \
+      "frontend.cancel.${provider}" \
+      "Verify cancellation behavior through the public frontend flow." \
+      "Run frontend cancel inspection for provider=$provider using backend run=${cancel_run_index:-summary}." \
+      "$cancel_status" \
+      "$cancel_reason" \
+      "Inspect cancel result JSON and UI/log evidence before release verdict verification." \
+      "$cancel_output_dir/$FRONTEND_CANCEL_RESULT_FILENAME" \
+      "$cancel_output_dir/driver.log" \
+      "$cancel_output_dir/server.log" \
+      "$cancel_output_dir/playwright.log" \
+      "$cancel_output_dir/frontend-workspace/reports"
     continue
   fi
 
@@ -1699,11 +2031,26 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
       frontend_workspace="$(prepare_frontend_cancel_workspace "$BATCH_ROOT/$provider/run${i}" "$cancel_output_dir")"
       cancel_result=0
       run_frontend_cancel_e2e "$provider" "$frontend_workspace" "$cancel_output_dir" "$i" || cancel_result=$?
+      cancel_summary="$(frontend_result_summary "$cancel_output_dir/$FRONTEND_CANCEL_RESULT_FILENAME")"
+      cancel_status="${cancel_summary%%$'\t'*}"
+      cancel_reason="${cancel_summary#*$'\t'}"
       if [[ "$cancel_result" == "1" ]]; then
         FRONTEND_CANCEL_FAILURES=$((FRONTEND_CANCEL_FAILURES + 1))
       elif [[ "$cancel_result" == "2" ]]; then
         FRONTEND_CANCEL_SKIPPED=$((FRONTEND_CANCEL_SKIPPED + 1))
       fi
+      write_blackbox_step_report \
+        "frontend.cancel.${provider}.run${i}" \
+        "Verify cancellation behavior through the public frontend flow." \
+        "Run frontend cancel inspection for provider=$provider run=$i." \
+        "$cancel_status" \
+        "$cancel_reason" \
+        "Inspect cancel result JSON and UI/log evidence before continuing." \
+        "$cancel_output_dir/$FRONTEND_CANCEL_RESULT_FILENAME" \
+        "$cancel_output_dir/driver.log" \
+        "$cancel_output_dir/server.log" \
+        "$cancel_output_dir/playwright.log" \
+        "$cancel_output_dir/frontend-workspace/reports"
     done
     continue
   fi
@@ -1722,17 +2069,53 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
       "$cancel_output_dir" \
       "$runtime_cmd"
     log "frontend cancel smoke skipped provider=$provider mode=$BATCH_FRONTEND_CANCEL_MODE runs=$SELECTED_RUN_INDEXES_CSV"
+    write_blackbox_step_report \
+      "frontend.cancel.${provider}" \
+      "Verify cancellation behavior through the public frontend flow when selected." \
+      "Record frontend cancel inspection as skipped by batch selection." \
+      "skipped" \
+      "$ACP_FRONTEND_REASON_SELECTION_SKIPPED" \
+      "Continue with report synthesis." \
+      "$cancel_output_dir/$FRONTEND_CANCEL_RESULT_FILENAME"
   fi
 done
 
 log "generating quality reports for batch=$BATCH_ID"
-(
+if ! (
   cd "$PROVENARCH_ROOT"
   python3 scripts/e2e_batch_report.py \
     --batch-id "$BATCH_ID" \
     --batch-root "$BATCH_ROOT" \
     --reports-root "$REPORTS_ROOT" >"$BATCH_ROOT/report-paths.txt"
-)
+); then
+  write_blackbox_step_report \
+    "batch.report" \
+    "Synthesize backend, frontend, quality, and taskrun artifacts into public reports." \
+    "Run e2e_batch_report.py and inspect generated report paths." \
+    "failed" \
+    "report_generation_failed" \
+    "Stop this direct batch run; inspect report generation output and upstream artifacts." \
+    "$BATCH_ROOT/report-paths.txt" \
+    "$RUN_CLASSIFICATIONS_TSV" \
+    "$BLACKBOX_STEPS_JSONL" \
+    "$BLACKBOX_STEPS_MD"
+  die "batch report generation failed: batch_id=$BATCH_ID (see $BATCH_ROOT/report-paths.txt)"
+fi
+write_blackbox_step_report \
+  "batch.report" \
+  "Synthesize backend, frontend, quality, and taskrun artifacts into public reports." \
+  "Run e2e_batch_report.py and inspect generated report paths." \
+  "passed" \
+  "none" \
+  "Use batch reports as evidence for matrix synthesis and verdict verification." \
+  "$BATCH_ROOT/report-paths.txt" \
+  "$REPORTS_ROOT/run_matrix_${BATCH_ID}.tsv" \
+  "$REPORTS_ROOT/run_matrix_${BATCH_ID}.md" \
+  "$REPORTS_ROOT/frontend_e2e_matrix_${BATCH_ID}.md" \
+  "$REPORTS_ROOT/frontend_cancel_e2e_matrix_${BATCH_ID}.md" \
+  "$REPORTS_ROOT/quality_report_${BATCH_ID}.md" \
+  "$BLACKBOX_STEPS_JSONL" \
+  "$BLACKBOX_STEPS_MD"
 
 log "report paths:"
 cat "$BATCH_ROOT/report-paths.txt"
@@ -1740,8 +2123,35 @@ cat "$BATCH_ROOT/report-paths.txt"
 log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
 
 if [[ "$failed_runs" -ne 0 || "$frontend_failures" -ne 0 || "$FRONTEND_CANCEL_FAILURES" -ne 0 ]]; then
+  write_blackbox_step_report \
+    "batch.final" \
+    "Classify the full batch outcome from public reports and counters." \
+    "Compare backend/frontend/cancel failure counters after report synthesis." \
+    "failed" \
+    "batch_failures" \
+    "Stop this direct batch run; inspect evidence paths and rerun after repair." \
+    "$BATCH_ROOT/report-paths.txt" \
+    "$RUN_CLASSIFICATIONS_TSV" \
+    "$REPORTS_ROOT/run_matrix_${BATCH_ID}.tsv" \
+    "$REPORTS_ROOT/quality_report_${BATCH_ID}.md" \
+    "$BLACKBOX_STEPS_JSONL" \
+    "$BLACKBOX_STEPS_MD"
   die "batch completed with failures: full_run_failed=$failed_runs frontend_failed=$frontend_failures frontend_cancel_failed=$FRONTEND_CANCEL_FAILURES frontend_cancel_skipped=$FRONTEND_CANCEL_SKIPPED precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
 fi
+
+write_blackbox_step_report \
+  "batch.final" \
+  "Classify the full batch outcome from public reports and counters." \
+  "Confirm backend/frontend/cancel counters are zero after report synthesis." \
+  "passed" \
+  "none" \
+  "Return to matrix harness for profile aggregation and release verdict verification." \
+  "$BATCH_ROOT/report-paths.txt" \
+  "$RUN_CLASSIFICATIONS_TSV" \
+  "$REPORTS_ROOT/run_matrix_${BATCH_ID}.tsv" \
+  "$REPORTS_ROOT/quality_report_${BATCH_ID}.md" \
+  "$BLACKBOX_STEPS_JSONL" \
+  "$BLACKBOX_STEPS_MD"
 
 log "batch completed successfully"
 exit 0

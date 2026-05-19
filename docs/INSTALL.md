@@ -116,4 +116,5 @@ make build
 ```
 
 Source build требует exact Node.js version из `.node-version`. Если локальный `node` отличается, `make bootstrap`, `make test`, `make lint` и `make build` завершаются до генерации UI assets с ошибкой resolver-а.
+Если exact Node установлен не первым в `PATH`, укажите каталог с matching `node` и `npm` через `ACP_NODE_TOOL_CANDIDATES=/path/to/node-22.21.1/bin`. Minor drift не принимается: `22.22.3` не заменяет требуемый `22.21.1`.
 `go.mod` сохраняет language compatibility level `go 1.20`, но release/local builds должны выполняться Go version из `.go-version`.

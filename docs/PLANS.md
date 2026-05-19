@@ -58,6 +58,64 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-05-07 consolidated historical active plans into the remaining open slices below. Detailed evidence and classification are archived in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`; original historical active plan text was moved to `docs/archive/PLANS_ARCHIVE_2026-05.md` under "Reconciled active plans from 2026-05-07".
 
 ### Plan ID
+EP-20260518-live-e2e-blackbox
+
+### Context
+Live E2E должен стать black-box operator flow: план шага, прямой harness/UI/API вызов, evidence inspection, classification, next decision. Official release readiness остаётся только в `reports/release_verdict_<matrix-id>.json`, проверяемом `scripts/verify-release-verdict.py`. После wiring нового flow legacy live E2E entrypoints/docs/matrices удаляются без compatibility aliases.
+
+### Goals (must have)
+- [x] Обновить live E2E skill и release runbook под обязательный step-by-step black-box evaluator protocol
+- [x] Добавить durable per-step JSONL/Markdown evidence в существующие report roots batch/matrix harness без wrapper поверх `scripts/full-run-batch-matrix.sh`
+- [x] Сделать explicit layering: live-e2e skill -> local manual-live-e2e workflow -> internal evaluator helper -> existing project flow, без GitHub Actions live workflow
+- [x] Оставить `scripts/full-run-batch-matrix.sh` direct top-level release harness
+- [x] Перенести backend-cycle logic за `scripts/full-run-batch.sh` в internal helper и удалить публичный legacy entrypoint
+- [x] Удалить legacy live E2E matrices/docs/tests and references without compatibility shims
+- [x] Выполнить DoD checks после implementation
+- [ ] Когда owner запросит pre-release validation, выполнить trusted-machine live gate через новый black-box protocol и сохранить verifier-backed verdict evidence
+
+### Non-goals
+- [x] Не менять release verdict contract
+- [x] Не запускать trusted live E2E в рамках implementation slice
+- [x] Не менять runtime artifact schemas или rejection tests for old runtime payloads
+
+### Approach
+1) Встроить `blackbox_e2e_steps_<id>.jsonl/.md` в batch и matrix harness.
+2) Вынести shared black-box step evidence writing в source-only internal evaluator helper; batch/matrix scripts только source helper and pass context.
+3) Перевести старый backend-cycle в non-public helper, вызываемый только из `scripts/full-run-batch.sh`.
+4) Переписать skill/runbook/testing docs под новый protocol и удалить legacy live E2E surfaces.
+5) Обновить docsync/script tests так, чтобы они требовали новый step-report shape, local manual workflow wording, internal evaluator helper, и отклоняли старые live E2E references.
+
+### Files expected to change
+- `.agents/skills/e2e-live-gate/SKILL.md`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/PLANS.md`
+- `docs/BACKLOG.md`
+- `scripts/full-run-batch.sh`
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/internal/live-e2e-backend-cycle.sh`
+- `scripts/internal/live-e2e-evaluator.sh`
+- `internal/docsync/docsync_test.go`
+- `scripts/tests/*`
+- legacy live E2E files removed from `docs/`, `examples/`, and `scripts/`
+
+### Acceptance criteria
+- [x] `go test ./internal/docsync`
+- [x] `python3 -m unittest discover -s scripts/tests -p '*_test.py'`
+- [x] `make contracts`
+- [x] `make test`
+- [x] `make lint`
+- [x] `make build`
+
+### Risks
+- Shell harness changes can affect long trusted-machine runs; targeted tests must cover the new step-report artifacts and direct harness integration.
+- Active docs must distinguish removed live E2E surfaces from unrelated runtime contract rejection tests that intentionally mention old payload shapes.
+
+### Progress log
+- 2026-05-18: Started implementation. Added black-box step reports, moved backend-cycle behind batch harness, and began docs/test cleanup. Trusted live E2E was not run.
+- 2026-05-18: Local verification passed: `go test ./internal/docsync`, `python3 -m unittest discover -s scripts/tests -p '*_test.py'`, `make contracts`, `make test`, `make lint`, `make build`. Make targets used `ACP_NODE_TOOL_CANDIDATES=/tmp/provenarch-node22-wrapper/bin` because Homebrew `node@22` needed older simdjson/simdutf dylib paths on this host.
+
+### Plan ID
 EP-20260509-v011-hardening-release
 
 ### Context
@@ -267,18 +325,16 @@ Safe cleanup is already complete, but `docs/PLANS.md` and `docs/BACKLOG.md` reta
 - [x] Gather evidence on retaining both `docs/archive/PLANS_ARCHIVE_2026-04.md` and `docs/archive/PLANS_SNAPSHOT_2026-04-21.md`
 - [x] Gather evidence on persisted `fixtures/scenarios/*/golden/readable`
 - [x] Gather evidence on duplicated readable scenario fixtures
-- [x] Gather evidence on retaining `docs/LOCAL_FULL_RUN_AI_ADVENT.md` as a separate convenience runbook vs pointer/appendix
 - [x] Gather evidence on `docs/BACKLOG.md` role as active planning surface vs reference/history backlog
 - [ ] Owner decision: retain/move `internal/docsync` and `internal/scriptsmeta`
 - [ ] Owner decision: retain/remove/dedupe April plan archive + snapshot docs
 - [ ] Owner decision: retain/remove/dedupe readable golden fixtures
-- [ ] Owner decision: retain `docs/LOCAL_FULL_RUN_AI_ADVENT.md` as a separate runbook or fold into another doc
 - [ ] Owner decision: keep `docs/BACKLOG.md` as reference/acceptance backlog or change its planning-surface role
 - [ ] If approved by owners, implement each cleanup as a separate small change set with tests/docs sync
 
 ### Non-goals
 - [x] Do not move `internal/docsync` or `internal/scriptsmeta` without owner approval
-- [x] Do not delete archive snapshots, readable fixtures, duplicated fixtures, or local runbooks without owner approval
+- [x] Do not delete archive snapshots, readable fixtures, or duplicated fixtures without owner approval
 - [x] Do not mix destructive cleanup with runtime/live fixes
 
 ### Approach
@@ -295,7 +351,6 @@ Safe cleanup is already complete, but `docs/PLANS.md` and `docs/BACKLOG.md` reta
 | `docs/archive/PLANS_ARCHIVE_2026-04.md` + `docs/archive/PLANS_SNAPSHOT_2026-04-21.md` | `docs/PLANS.md` lists both archives; the snapshot records that completed historical plans moved to the April archive. Current sizes are 912 and 1176 lines, respectively, so they are substantial historical evidence. | Retain both; collapse snapshot into archive; keep snapshot but remove cross-links. | Retain both until owner decides the audit/history surface can be reduced. |
 | `fixtures/scenarios/*/golden/readable/*` | 90 tracked readable files exist. `docs/BASELINE_POLICY.md`, `docs/TESTING_STRATEGY.md`, `fixtures/README.md`, and `internal/docsync/docsync_test.go` explicitly describe them as tracked baseline/release surface and human-readable deterministic export. | Retain tracked readable exports; remove and rely on machine-readable golden only; generate on demand without tracking. | Retain; current docs/tests make them intentional, not accidental generated output. |
 | Duplicated readable scenario fixtures | Hash scan shows many identical files repeated across the three readable scenario exports, including `reports/as-is/*`, `reports/diagrams/*`, `model/entities/svc.payments.yaml`, and proposal docs. | Keep duplicated per-scenario snapshots; dedupe via shared fixture layer; remove readable exports after replacing review-diff workflow. | Retain duplicated snapshots; dedupe needs a QA/tooling owner decision because per-scenario full-tree diffs are the current review UX. |
-| `docs/LOCAL_FULL_RUN_AI_ADVENT.md` | Referenced from README, `docs/TESTING_STRATEGY.md`, `internal/docsync/docsync_test.go`, historical archives, and `docs/RELEASE_LIVE_E2E_RUNBOOK.md`; `scripts/tests/full_run_ai_advent_layout_test.py` directly asserts behavior of the paired script. | Keep as separate local runbook; fold into release runbook appendix; replace with pointer-only doc. | Retain as a separate runbook until trusted live validation is complete and docs owner approves consolidation. |
 | `docs/BACKLOG.md` role | README still points to `docs/BACKLOG.md` for epics/acceptance criteria, AGENTS instructs agents to take reviewable slices from it, and `internal/docsync/docsync_test.go` asserts several backlog truth-sync strings. The backlog itself says active engineering slices live in `docs/STAKEHOLDER_DOC.md` and `docs/PLANS.md`, while a 2026-04-22 follow-up asks owners to decide active planning surface vs reference/history role. | Keep as reference/acceptance backlog; promote it back to active planning surface; archive/freeze it after migrating acceptance criteria elsewhere. | Keep current reference/acceptance role until owners decide; active execution remains in `docs/PLANS.md`. |
 
 ### Critical analysis (2026-05-08)
@@ -306,7 +361,6 @@ Residual blockers:
 - no owner decision has been provided for test-only package placement;
 - no owner decision has been provided for archive/snapshot retention;
 - no owner decision has been provided for readable fixture retention or dedupe;
-- no owner decision has been provided for `docs/LOCAL_FULL_RUN_AI_ADVENT.md` consolidation;
 - no owner decision has been provided for the long-term role of `docs/BACKLOG.md`;
 - no destructive cleanup was performed, so the final implementation goal remains intentionally open.
 
@@ -328,6 +382,7 @@ Residual blockers:
 ### Progress log
 - 2026-05-07: Created by tracker reconciliation from `EP-20260421-cleanup-owner-followups` and `docs/BACKLOG.md` cleanup follow-ups.
 - 2026-05-07: Gathered usage evidence and documented retain-by-default recommendations. No files were deleted, moved, or deduplicated; owner decisions remain open and blocked.
+- 2026-05-18: Removed the live E2E convenience-runbook owner decision from this cleanup plan because the black-box live E2E slice deletes old live E2E surfaces without compatibility.
 
 ---
 

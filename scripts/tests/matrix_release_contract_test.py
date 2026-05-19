@@ -208,6 +208,8 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 quality_report_md="${REPORTS_ROOT}/quality_report_${BATCH_ID}.md"
                 frontend_matrix_md="${REPORTS_ROOT}/frontend_e2e_matrix_${BATCH_ID}.md"
                 frontend_cancel_matrix_md="${REPORTS_ROOT}/frontend_cancel_e2e_matrix_${BATCH_ID}.md"
+                blackbox_steps_jsonl="${REPORTS_ROOT}/blackbox_e2e_steps_${BATCH_ID}.jsonl"
+                blackbox_steps_md="${REPORTS_ROOT}/blackbox_e2e_steps_${BATCH_ID}.md"
 
                 {
                   printf 'provider\\trun\\thard_pass\\truntime_contract_failed\\trunner_unavailable\\truntime_timeout\\tinfra_signal_terminated\\tinfra_incomplete_cycle\\tquality_gates_failed\\tsummary_missing\\tprecheck_failed\\tcancellation_like\\truntime_flow_failed\\tsemantic_hard_fail\\toff_topic_hits\\tartifact_source\\tissues\\n'
@@ -226,6 +228,39 @@ class MatrixReleaseContractTest(unittest.TestCase):
 
                 printf '# run matrix\\n' > "${run_matrix_md}"
                 printf '# quality\\n' > "${quality_report_md}"
+                python3 - "${blackbox_steps_jsonl}" "${blackbox_steps_md}" "${BATCH_ID}" "${PROFILE_ID}" "${SWEEP_ID}" <<'PY'
+                import json
+                import sys
+                from pathlib import Path
+
+                jsonl_path = Path(sys.argv[1])
+                md_path = Path(sys.argv[2])
+                batch_id = sys.argv[3]
+                profile_id = sys.argv[4]
+                sweep_id = sys.argv[5]
+                record = {
+                    "batch_id": batch_id,
+                    "profile_id": profile_id,
+                    "sweep_id": sweep_id,
+                    "step_id": "batch.final",
+                    "goal": "classify dummy batch",
+                    "action": "write dummy batch reports",
+                    "observed_evidence": [str(jsonl_path)],
+                    "status": "passed",
+                    "primary_classification": "none",
+                    "evidence_paths": [str(jsonl_path)],
+                    "next_decision": "return to matrix harness",
+                }
+                jsonl_path.write_text(json.dumps(record, ensure_ascii=True) + "\\n", encoding="utf-8")
+                md_path.write_text(
+                    "# Black-Box E2E Steps\\n\\n"
+                    "| step_id | status | classification | goal | action | observed_evidence | next_decision |\\n"
+                    "|---|---|---|---|---|---|---|\\n"
+                    "| batch.final | passed | none | classify dummy batch | write dummy batch reports | "
+                    f"{jsonl_path} | return to matrix harness |\\n",
+                    encoding="utf-8",
+                )
+                PY
 
                 if [[ "${MATRIX_TEST_RAW_METADATA:-0}" == "1" ]]; then
                   raw_dir="${BATCH_ROOT}/qwen-code/run1/arch-workspace/reports/taskruns/raw"
@@ -450,6 +485,15 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertTrue(verdict_path.exists(), f"missing verdict file: {verdict_path}")
         return json.loads(verdict_path.read_text(encoding="utf-8"))
 
+    def _load_blackbox_steps(self, matrix_id: str) -> list[dict]:
+        steps_path = self.e2e_tmp_root / "reports" / f"blackbox_e2e_steps_{matrix_id}.jsonl"
+        self.assertTrue(steps_path.exists(), f"missing black-box step report: {steps_path}")
+        return [
+            json.loads(line)
+            for line in steps_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
     def _load_yaml(self, path: Path) -> dict:
         try:
             import yaml  # type: ignore
@@ -497,6 +541,10 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("missing required ids: parallel-default", combined_output)
         self.assertFalse(self.sentinel_path.exists(), "batch script should not run when release sweeps are invalid")
+        steps = self._load_blackbox_steps(matrix_id)
+        self.assertEqual("matrix.plan", steps[-1]["step_id"])
+        self.assertEqual("failed", steps[-1]["status"])
+        self.assertEqual("matrix_plan_failed", steps[-1]["primary_classification"])
 
     def test_release_matrix_rejects_extra_sweep(self) -> None:
         matrix_file = self._write_matrix_file(["baseline", "parallel-default", "extra-sweep"])
@@ -560,6 +608,45 @@ class MatrixReleaseContractTest(unittest.TestCase):
 
         calls = self.sentinel_path.read_text(encoding="utf-8").splitlines()
         self.assertEqual(len(calls), 4)
+
+    def test_matrix_writes_blackbox_step_report_shape(self) -> None:
+        matrix_file = self._write_matrix_file(["baseline", "parallel-default"])
+        matrix_id = "release-test-blackbox-steps"
+        result = self._run_matrix(matrix_file, matrix_id)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        steps = self._load_blackbox_steps(matrix_id)
+        step_ids = [step["step_id"] for step in steps]
+        self.assertIn("matrix.preflight", step_ids)
+        self.assertIn("matrix.plan", step_ids)
+        self.assertIn("matrix.profile.single-path.baseline", step_ids)
+        self.assertIn("matrix.profile.multi-git-url.parallel-default", step_ids)
+        self.assertEqual("matrix.verdict", step_ids[-1])
+
+        required_keys = {
+            "step_id",
+            "goal",
+            "action",
+            "observed_evidence",
+            "status",
+            "primary_classification",
+            "evidence_paths",
+            "next_decision",
+        }
+        for step in steps:
+            self.assertTrue(required_keys.issubset(step.keys()), step)
+            self.assertIsInstance(step["observed_evidence"], list)
+            self.assertIsInstance(step["evidence_paths"], list)
+            self.assertIn(step["status"], {"passed", "failed", "skipped", "blocked"})
+
+        batch_step_path = self.e2e_tmp_root / "reports" / f"blackbox_e2e_steps_{matrix_id}-single-path-baseline.jsonl"
+        self.assertTrue(batch_step_path.exists(), f"missing batch black-box report: {batch_step_path}")
+        batch_steps = [
+            json.loads(line)
+            for line in batch_step_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        self.assertEqual("batch.final", batch_steps[-1]["step_id"])
 
     def test_release_mode_blocks_artifact_error_invariant(self) -> None:
         matrix_file = self._write_matrix_file(["baseline", "parallel-default"])

@@ -721,20 +721,45 @@ func TestMultiRepoE2EDocsAreConsistent(t *testing.T) {
 	t.Parallel()
 
 	required := map[string][]string{
-		"docs/LOCAL_FULL_RUN_AI_ADVENT.md": {
-			"docs/RELEASE_LIVE_E2E_RUNBOOK.md",
-			"TARGET_REPOS_FILE",
-			"E2E_MATRIX_FILE",
-			"single-path",
-			"single-git_url",
-			"multi-path",
-			"multi-git_url",
-			"analysis:cross-repo-missing",
-			"trusted machine",
+		".agents/skills/e2e-live-gate/SKILL.md": {
+			"Black-box operator protocol",
+			"local `manual-live-e2e workflow`",
+			"not GitHub Actions workflow",
+			"internal evaluator helper",
+			"source-only implementation detail",
+			"goal:",
+			"action:",
+			"observed evidence:",
+			"primary classification:",
+			"next decision:",
+			"blackbox_e2e_steps_<batch-id>.jsonl",
+			"blackbox_e2e_steps_<matrix-id>.jsonl",
+		},
+		"docs/RELEASE_LIVE_E2E_RUNBOOK.md": {
+			"Black-box evaluator protocol",
+			"local `manual-live-e2e workflow`",
+			"operator procedure on trusted host",
+			"not GitHub Actions workflow",
+			"scripts/internal/live-e2e-evaluator.sh",
+			"source-only implementation detail",
+			"Canonical flow",
+			"host/tree/provider/path preflight",
+			"selector and direct command planning",
+			"matrix execution monitoring",
+			"backend artifact and quality inspection",
+			"frontend UI/cancel inspection",
+			"release verdict verification",
+			"final black-box report",
+			"blackbox_e2e_steps_<batch-id>.jsonl",
+			"blackbox_e2e_steps_<matrix-id>.jsonl",
+			"scripts/verify-release-verdict.py",
 		},
 		"docs/TESTING_STRATEGY.md": {
-			"docs/LOCAL_FULL_RUN_AI_ADVENT.md",
 			"docs/RELEASE_LIVE_E2E_RUNBOOK.md",
+			"Local `manual-live-e2e workflow`",
+			"not a GitHub Actions workflow",
+			"scripts/internal/live-e2e-evaluator.sh",
+			"source-only internal evaluator helper",
 			"TARGET_REPOS_FILE",
 			"E2E_MATRIX_FILE",
 			"analysis:cross-repo-missing",
@@ -743,6 +768,8 @@ func TestMultiRepoE2EDocsAreConsistent(t *testing.T) {
 			"multi-path",
 			"multi-git_url",
 			"UI_E2E_EXPECTED_REPO_COUNT",
+			"blackbox_e2e_steps_<batch-id>.jsonl/.md",
+			"blackbox_e2e_steps_<matrix-id>.jsonl/.md",
 		},
 	}
 	forbidden := map[string][]string{
@@ -758,13 +785,35 @@ func TestMultiRepoE2EDocsAreConsistent(t *testing.T) {
 			"MATRIX_ID=release-fast-",
 			"ACP_APPLY_TIMEOUTS_VIA_API=1",
 		},
-		"docs/LOCAL_FULL_RUN_AI_ADVENT.md": {
-			"MATRIX_ID=release-fast-",
-			"`release full` = `24` backend runs total",
+		".agents/skills/e2e-live-gate/SKILL.md": {
+			"full-run-ai-advent.sh",
+			"LOCAL_FULL_RUN_AI_ADVENT",
+			"e2e-matrix.regression-wave1.yaml",
+			"release-wave",
+			"Legacy compatibility only",
+		},
+		"docs/RELEASE_LIVE_E2E_RUNBOOK.md": {
+			"full-run-ai-advent.sh",
+			"LOCAL_FULL_RUN_AI_ADVENT",
+			"e2e-matrix.regression-wave1.yaml",
+			"release-wave",
 		},
 		"docs/TESTING_STRATEGY.md": {
 			"MATRIX_ID=release-fast-",
 			"ACP_APPLY_TIMEOUTS_VIA_API=1",
+			"full-run-ai-advent.sh",
+			"LOCAL_FULL_RUN_AI_ADVENT",
+			"e2e-matrix.regression-wave1.yaml",
+			"release-wave",
+		},
+		"scripts/full-run-batch.sh": {
+			"full-run-ai-advent.sh",
+		},
+		"scripts/full-run-batch-matrix.sh": {
+			"full-run-ai-advent.sh",
+		},
+		"scripts/internal/live-e2e-evaluator.sh": {
+			"full-run-ai-advent.sh",
 		},
 	}
 

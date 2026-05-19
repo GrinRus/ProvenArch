@@ -231,11 +231,6 @@ Suggested PR slices:
 - Risk: medium/high (риск удалить скрыто используемые файлы или ухудшить regression/review UX)
 - Next step: подтвердить explicit ownership и usage contracts, затем принять retain/remove/dedupe решение отдельным PR.
 
-3) Owner decision по `docs/LOCAL_FULL_RUN_AI_ADVENT.md`
-- Owner: ACP maintainers + docs owner
-- Risk: low/medium (риск держать ещё один reference runbook и накапливать drift)
-- Next step: после merge подтвердить, остаётся ли документ отдельным convenience runbook, либо схлопывается в pointer/appendix после дополнительного сокращения.
-
 Resolved (2026-04-05):
 - `slugify` дедупликация между подсистемами выполнена через `internal/slugutil` + regression tests.
 - `.codex/model_instructions.md` удалён из tracked surface в cleanup-срезе.
