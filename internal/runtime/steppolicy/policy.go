@@ -341,6 +341,22 @@ func ValidatorFirstActionSection(task acpruntime.Task) string {
 	}, "\n")
 }
 
+func ConstitutionFirstActionSection(task acpruntime.Task) string {
+	if strings.TrimSpace(task.StepID) != "init.step0.constitution" {
+		return ""
+	}
+	manifestTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), runtimedrafts.ConstitutionManifestFile)
+	return strings.Join([]string{
+		"CONSTITUTION FIRST-ACTION DRAFT ARTIFACTS:",
+		"- This constitution step must start by writing constitution-draft.json and its referenced draft files before broad workspace analysis.",
+		fmt.Sprintf(`- Exact constitution draft manifest target: %q.`, manifestTarget),
+		fmt.Sprintf(`- Draft files must be written only under draft_final_root: %q.`, strings.TrimSpace(task.DraftFinalRoot)),
+		"FIRST CONSTITUTION DRAFT COMMAND:",
+		"Run this exact command as the next filesystem action after checking whether the manifest and referenced draft files already exist; do not inspect repository files, sibling taskruns, or raw logs before this command:",
+		RuntimeDraftFirstActionWriteCommand(task),
+	}, "\n")
+}
+
 func RuntimeDraftFirstActionWriteCommand(task acpruntime.Task) string {
 	writeRoot := strings.TrimSpace(task.WriteRoot)
 	draftRoot := strings.TrimSpace(task.DraftFinalRoot)

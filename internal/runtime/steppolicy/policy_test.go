@@ -415,6 +415,48 @@ func TestValidatorFirstActionSectionWritesExactVerdictFirst(t *testing.T) {
 	}
 }
 
+func TestConstitutionFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step0.constitution",
+		StepContract:      "constitution",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/constitution",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"constitution-draft.json", "charter-overview.md", "baseline-subagents.yaml"},
+	}
+
+	section := ConstitutionFirstActionSection(task)
+	required := []string{
+		`CONSTITUTION FIRST-ACTION DRAFT ARTIFACTS:`,
+		`FIRST CONSTITUTION DRAFT COMMAND:`,
+		`cat > '/tmp/workspace/reports/taskruns/run-1/constitution/constitution-draft.json' <<'ACP_DRAFT_MANIFEST_JSON'`,
+		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/final/charter-overview.md' <<'ACP_DRAFT_FILE'`,
+		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/final/baseline-subagents.yaml' <<'ACP_DRAFT_FILE'`,
+		`"run_id": "run-1"`,
+		`"step_id": "init.step0.constitution"`,
+		`"step_contract": "constitution"`,
+		`"canonical_path": "charter/overview.md"`,
+		`"canonical_path": "skills/subagents.yaml"`,
+	}
+	for _, needle := range required {
+		if !strings.Contains(section, needle) {
+			t.Fatalf("expected constitution first-action section to contain %q, got:\n%s", needle, section)
+		}
+	}
+	if got := strings.Count(section, "FIRST CONSTITUTION DRAFT COMMAND:"); got != 1 {
+		t.Fatalf("expected constitution first-action command once, got %d:\n%s", got, section)
+	}
+	if got := strings.Count(section, "ACP_DRAFT_MANIFEST_JSON"); got != 2 {
+		t.Fatalf("expected one constitution manifest heredoc, got delimiter count %d:\n%s", got, section)
+	}
+	if got := strings.Count(section, "ACP_DRAFT_FILE"); got != 4 {
+		t.Fatalf("expected two constitution draft file heredocs, got delimiter count %d:\n%s", got, section)
+	}
+}
+
 func TestProposalsFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
 	t.Parallel()
 

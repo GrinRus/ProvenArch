@@ -21,6 +21,11 @@ func TestClaudeAdapterClassifiesSilentRetryExhaustionAsUnavailable(t *testing.T)
 		t.Fatalf("expected claude collect zero-output pre-artifact stall to be retryable, got %+v", policy)
 	}
 
+	policy = (claudeAdapter{}).RecoveryPolicy(acpruntime.Task{StepID: "init.step0.constitution"})
+	if !policy.RetryZeroOutputPreArtifactStallOnce {
+		t.Fatalf("expected claude constitution zero-output pre-artifact stall to be retryable, got %+v", policy)
+	}
+
 	policy = (claudeAdapter{}).RecoveryPolicy(acpruntime.Task{StepID: "init.step3.findings"})
 	if !policy.RetryZeroOutputPreArtifactStallOnce {
 		t.Fatalf("expected claude validator zero-output pre-artifact stall to be retryable, got %+v", policy)
