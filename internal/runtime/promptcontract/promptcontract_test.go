@@ -541,6 +541,11 @@ func TestComposeArtifactOnlyPromptAddsProposalsDraftCanonicalSection(t *testing.
 	}
 
 	expectedTokens := []string{
+		"PROPOSALS FIRST-ACTION DRAFT ARTIFACTS:",
+		"FIRST PROPOSALS DRAFT COMMAND:",
+		"cat > '/tmp/write-root/proposals-draft-manifest.json' <<'ACP_DRAFT_MANIFEST_JSON'",
+		"cat > '/tmp/draft-root/proposal.md' <<'ACP_DRAFT_FILE'",
+		"cat > '/tmp/draft-root/changelog.md' <<'ACP_DRAFT_FILE'",
 		"PROPOSALS DRAFT MANIFEST CANONICAL SHAPE:",
 		`proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="proposals", agent_role, optional summary, and outputs[].`,
 		`outputs[].canonical_path values are allowed only under proposals/* or reports/changelog/*.`,
@@ -553,5 +558,19 @@ func TestComposeArtifactOnlyPromptAddsProposalsDraftCanonicalSection(t *testing.
 		if !strings.Contains(claudePrompt, token) {
 			t.Fatalf("expected proposals prompt to contain %q, got:\n%s", token, claudePrompt)
 		}
+	}
+	firstActionIndex := strings.Index(claudePrompt, "FIRST PROPOSALS DRAFT COMMAND:")
+	artifactContractIndex := strings.Index(claudePrompt, "Artifact-only contract:")
+	if firstActionIndex < 0 || artifactContractIndex < 0 || firstActionIndex > artifactContractIndex {
+		t.Fatalf("expected proposals first-action command before broad artifact-only contract:\n%s", claudePrompt)
+	}
+	if got := strings.Count(claudePrompt, "FIRST PROPOSALS DRAFT COMMAND:"); got != 1 {
+		t.Fatalf("expected one proposals first-action command heading, got %d:\n%s", got, claudePrompt)
+	}
+	if got := strings.Count(claudePrompt, "ACP_DRAFT_MANIFEST_JSON"); got != 2 {
+		t.Fatalf("expected one proposals manifest heredoc in normal prompt, got delimiter count %d:\n%s", got, claudePrompt)
+	}
+	if got := strings.Count(claudePrompt, "ACP_DRAFT_FILE"); got != 4 {
+		t.Fatalf("expected two proposals draft file heredocs in normal prompt, got delimiter count %d:\n%s", got, claudePrompt)
 	}
 }

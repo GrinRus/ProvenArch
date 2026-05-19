@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1035,10 +1036,12 @@ func TestRunHeadlessProviderKeepsInvalidValidatorAfterZeroOutputRetryAsContractF
 	task := newValidatorTask(t, "run-validator-silent-then-invalid")
 	invalidVerdictScript := `#!/usr/bin/env bash
 set -eu
-mkdir -p ` + shellQuote(task.WriteRoot) + `
-cat >` + shellQuote(filepath.Join(task.WriteRoot, ValidatorVerdictFileName)) + ` <<'EOF'
+write_root=` + shellQuote(task.WriteRoot) + `
+mkdir -p "$write_root"
+cat >"$write_root/` + ValidatorVerdictFileName + `" <<'EOF'
 {"version":1,"run_id":"` + task.RunID + `","generated_at":"2026-04-16T12:00:02Z","verdict":"FAIL","checked_paths":["reports/taskruns/` + task.RunID + `/staging/final/final-run-index.json"],"issues":[{"id":"legacy","severity":"high","title":"Legacy issue","description":"Wrong shape"}]}
 EOF
+printf '%s\n' 'wrote invalid validator verdict'
 `
 	runner := &sequenceAdapter{
 		testAdapter: testAdapter{
@@ -1194,6 +1197,144 @@ func TestRunHeadlessProviderRejectsDraftRepairExtraWriteRootFiles(t *testing.T) 
 	}
 	if !strings.Contains(runnerErr.Error(), "draft repair wrote forbidden write_root files") {
 		t.Fatalf("expected draft write-set failure, got %v", err)
+	}
+}
+
+func TestRunHeadlessProviderRetriesZeroOutputProposalsStallWhenPolicyAllows(t *testing.T) {
+	task := newProposalsDraftTask(t, "run-proposals-silent-then-success")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	runner := &sequenceAdapter{
+		testAdapter: testAdapter{
+			activity: ActivityPolicy{
+				MonitorArtifacts:            true,
+				MonitorPreArtifact:          true,
+				PreArtifactStallWindow:      20 * time.Millisecond,
+				RetryPreArtifactStallWindow: 5 * time.Second,
+				PostArtifactStallWindow:     20 * time.Millisecond,
+				PollInterval:                5 * time.Millisecond,
+				PostTerminateDrain:          10 * time.Millisecond,
+				TerminateGrace:              10 * time.Millisecond,
+			},
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:            true,
+				RetryInvalidOrMissingArtifactsOnce:       true,
+				RetryZeroOutputPreArtifactStallOnce:      true,
+				ClassifySilentRetryExhaustionUnavailable: true,
+			},
+		},
+		commands: []string{
+			writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 10\n"),
+			writeEngineScript(t, proposalsDraftScript(task, "exit 0")),
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := RunHeadlessProvider(ctx, task, runner)
+	if err != nil {
+		t.Fatalf("expected proposals retry to recover valid artifacts, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("expected succeeded execution, got %+v", result.Execution)
+	}
+	if !hasDiagnostic(diagnostics, "zero-output pre-artifact stall will retry", "warning") {
+		t.Fatalf("expected warning diagnostic for recovered proposals zero-output stall, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderKeepsExhaustedZeroOutputProposalsRetryUnavailable(t *testing.T) {
+	t.Parallel()
+
+	task := newProposalsDraftTask(t, "run-proposals-silent-retry-exhausted")
+	runner := testAdapter{
+		command: writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 10\n"),
+		activity: ActivityPolicy{
+			MonitorArtifacts:            true,
+			MonitorPreArtifact:          true,
+			PreArtifactStallWindow:      20 * time.Millisecond,
+			RetryPreArtifactStallWindow: 20 * time.Millisecond,
+			PostArtifactStallWindow:     20 * time.Millisecond,
+			PollInterval:                5 * time.Millisecond,
+			PostTerminateDrain:          10 * time.Millisecond,
+			TerminateGrace:              10 * time.Millisecond,
+		},
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:            true,
+			RetryInvalidOrMissingArtifactsOnce:       true,
+			RetryZeroOutputPreArtifactStallOnce:      true,
+			ClassifySilentRetryExhaustionUnavailable: true,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := RunHeadlessProvider(ctx, task, runner)
+	if err == nil {
+		t.Fatal("expected exhausted proposals zero-output retry to fail")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRunnerUnavailable {
+		t.Fatalf("expected runner_unavailable, got %s (%v)", runnerErr.Code, err)
+	}
+}
+
+func TestRunHeadlessProviderKeepsInvalidProposalsAfterZeroOutputRetryAsContractFailure(t *testing.T) {
+	t.Parallel()
+
+	task := newProposalsDraftTask(t, "run-proposals-silent-then-invalid")
+	invalidDraftScript := `#!/usr/bin/env bash
+set -eu
+write_root=` + shellQuote(task.WriteRoot) + `
+draft_root=` + shellQuote(task.DraftFinalRoot) + `
+mkdir -p "$write_root" "$draft_root"
+cat >"$write_root/proposals-draft-manifest.json" <<'EOF'
+{"version":1,"run_id":"` + task.RunID + `","step_id":"init.step4.proposals","step_contract":"proposals","agent_role":"architect","outputs":[{"path":"missing.md","canonical_path":"proposals/runtime-recommendations.md","kind":"proposal","title":"Missing"}]}
+EOF
+printf '%s\n' 'wrote invalid proposals manifest'
+`
+	runner := &sequenceAdapter{
+		testAdapter: testAdapter{
+			activity: ActivityPolicy{
+				MonitorArtifacts:            true,
+				MonitorPreArtifact:          true,
+				PreArtifactStallWindow:      20 * time.Millisecond,
+				RetryPreArtifactStallWindow: 5 * time.Second,
+				PostArtifactStallWindow:     20 * time.Millisecond,
+				PollInterval:                5 * time.Millisecond,
+				PostTerminateDrain:          10 * time.Millisecond,
+				TerminateGrace:              10 * time.Millisecond,
+			},
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:            true,
+				RetryInvalidOrMissingArtifactsOnce:       true,
+				RetryZeroOutputPreArtifactStallOnce:      true,
+				ClassifySilentRetryExhaustionUnavailable: true,
+			},
+		},
+		commands: []string{
+			writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 10\n"),
+			writeEngineScript(t, invalidDraftScript),
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := RunHeadlessProvider(ctx, task, runner)
+	if err == nil {
+		t.Fatal("expected invalid proposals retry artifact to fail")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
 	}
 }
 
@@ -1417,10 +1558,13 @@ type testAdapter struct {
 type sequenceAdapter struct {
 	testAdapter
 	commands []string
+	mu       sync.Mutex
 	calls    int
 }
 
 func (a *sequenceAdapter) CommandSpec(acpruntime.Task) (CommandSpec, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	if len(a.commands) == 0 {
 		return CommandSpec{}, errors.New("sequence command is unavailable")
 	}
@@ -1572,6 +1716,32 @@ func newValidatorTask(t *testing.T, runID string) acpruntime.Task {
 	}
 }
 
+func newProposalsDraftTask(t *testing.T, runID string) acpruntime.Task {
+	t.Helper()
+
+	workspace := t.TempDir()
+	writeRoot := filepath.Join(workspace, "reports", "taskruns", runID, "proposals")
+	draftRoot := filepath.Join(workspace, "reports", "taskruns", runID, "staging", "final")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	return acpruntime.Task{
+		TaskID:            "task-" + runID,
+		RunID:             runID,
+		StepID:            "init.step4.proposals",
+		StepContract:      "proposals",
+		AgentRole:         "architect",
+		Workspace:         workspace,
+		WriteRoot:         writeRoot,
+		DraftFinalRoot:    draftRoot,
+		ExpectedArtifacts: []string{"proposals-draft-manifest.json"},
+		StartedAtUTC:      time.Now().UTC(),
+	}
+}
+
 func validatorVerdictJSON(task acpruntime.Task) string {
 	return `{
   "version": 1,
@@ -1696,6 +1866,30 @@ cat >"$draft_root/charter-overview.md" <<'EOF'
 EOF
 cat >"$draft_root/baseline-subagents.yaml" <<'EOF'
 version: 1
+EOF
+` + tail + "\n"
+}
+
+func proposalsDraftScript(task acpruntime.Task, tail string) string {
+	return `#!/usr/bin/env bash
+set -eu
+write_root=` + shellQuote(task.WriteRoot) + `
+draft_root=` + shellQuote(task.DraftFinalRoot) + `
+mkdir -p "$write_root" "$draft_root"
+cat >"$write_root/proposals-draft-manifest.json" <<'EOF'
+` + steppolicy.RuntimeDraftManifestTaskSkeleton(task) + `
+EOF
+cat >"$draft_root/proposal.md" <<'EOF'
+# Runtime Recommendations
+
+## Summary
+- Provider authored proposal draft.
+EOF
+cat >"$draft_root/changelog.md" <<'EOF'
+# Runtime Proposal Changelog
+
+## Changes
+- Provider authored proposal changelog.
 EOF
 ` + tail + "\n"
 }

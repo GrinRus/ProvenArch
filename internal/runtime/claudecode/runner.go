@@ -119,7 +119,8 @@ func (a claudeAdapter) RecoveryPolicy(task acpruntime.Task) providercommon.Recov
 		RetryInvalidOrMissingArtifactsOnce:       true,
 		ClassifySilentRetryExhaustionUnavailable: true,
 	}
-	if acpruntime.StepProviderKeyForStepID(task.StepID) == acpruntime.StepProviderStep3Findings {
+	switch acpruntime.StepProviderKeyForStepID(task.StepID) {
+	case acpruntime.StepProviderStep3Findings, acpruntime.StepProviderStep4Proposals:
 		policy.RetryZeroOutputPreArtifactStallOnce = true
 	}
 	return policy

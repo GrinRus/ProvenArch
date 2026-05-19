@@ -1292,6 +1292,12 @@ classify_run_failure() {
     fi
   fi
 
+  if [[ "$run_class" == "none" ]]; then
+    if [[ "$failure_reason" == "quality" || "$quality_gates_status" == "failed" ]]; then
+      run_class="quality_gates_failed"
+    fi
+  fi
+
   if [[ "$run_class" == "none" && "$terminal_success" != "1" ]] && contains_runtime_contract_parse_signature "${classify_log_paths[@]}"; then
     run_class="runtime_contract_failed"
   fi
@@ -1310,12 +1316,6 @@ classify_run_failure() {
       run_class="infra_signal_terminated"
     elif [[ "$termination_signal" != "" && "$termination_signal" != "none" ]]; then
       run_class="infra_signal_terminated"
-    fi
-  fi
-
-  if [[ "$run_class" == "none" ]]; then
-    if [[ "$failure_reason" == "quality" || "$quality_gates_status" == "failed" ]]; then
-      run_class="quality_gates_failed"
     fi
   fi
 

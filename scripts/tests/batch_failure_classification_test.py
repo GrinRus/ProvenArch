@@ -2,6 +2,7 @@ import importlib.util
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1624,6 +1625,69 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertFalse(result.hard_pass)
         self.assertIn("quality:artifact-quality", result.issues)
 
+    def test_python_report_quality_failure_ignores_stale_runner_unavailable_classifier(self) -> None:
+        run_dir = self.root / "run-quality-with-stale-runner-classifier"
+        self._create_fixture_run_dir(run_dir)
+        shutil.rmtree(run_dir / "arch-workspace", ignore_errors=True)
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: failed",
+                    "- failure_reason: quality",
+                    "- expected_runs: 4",
+                    "- completed_runs: 4",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 2",
+                    "- running_runs_detected: 0",
+                    "- termination_signal: none",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=codex-code",
+                    "run_index=1",
+                    "state=process_failed",
+                    "process_exit=1",
+                    "termination_signal=none",
+                    "failure_reason=quality",
+                    "summary_written=yes",
+                    "",
+                ]
+            ),
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "runner_unavailable",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("quality_gates_failed", result.failure_class)
+        self.assertTrue(result.quality_gates_failed)
+        self.assertFalse(result.runner_unavailable)
+        self.assertTrue(
+            any("ignored stale runner_unavailable" in detail for detail in result.issue_details),
+            result.issue_details,
+        )
+
     def test_shell_classifier_reads_taskrun_logs_and_returns_runtime_contract_failed(self) -> None:
         script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
         prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
@@ -1909,6 +1973,70 @@ class BatchFailureClassificationTest(unittest.TestCase):
         fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
         self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
         self.assertEqual("none", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+
+    def test_shell_classifier_prefers_quality_gate_failure_over_runner_noise(self) -> None:
+        run_dir = self.root / "run-quality-with-runner-noise-shell"
+        self._create_fixture_run_dir(run_dir)
+        shutil.rmtree(run_dir / "arch-workspace", ignore_errors=True)
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: failed",
+                    "- failure_reason: quality",
+                    "- expected_runs: 4",
+                    "- completed_runs: 4",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 2",
+                    "- running_runs_detected: 0",
+                    "- termination_signal: none",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=codex-code",
+                    "run_index=1",
+                    "state=process_failed",
+                    "process_exit=1",
+                    "termination_signal=none",
+                    "failure_reason=quality",
+                    "summary_written=yes",
+                    "",
+                ]
+            ),
+        )
+        write_text(run_dir / "full-run.log", "run failed (runner_unavailable): stale raw provider noise\n")
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        classifications_tsv = self.root / "backend-run-classifications-quality-vs-runner.tsv"
+        command = (
+            prelude
+            + "\n"
+            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
+            + f'classify_run_failure "codex-code" "1" {shlex.quote(str(run_dir))} "1"\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("", completed.stdout.strip(), completed.stdout)
+        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
+        self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("quality_gates_failed", fields[2], classifications_tsv.read_text(encoding="utf-8"))
 
     def test_shell_runner_unavailable_signature_keeps_real_capacity_when_noise_is_separate(self) -> None:
         script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")

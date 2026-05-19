@@ -415,6 +415,48 @@ func TestValidatorFirstActionSectionWritesExactVerdictFirst(t *testing.T) {
 	}
 }
 
+func TestProposalsFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step4.proposals",
+		StepContract:      "proposals",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/proposals",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"proposals-draft-manifest.json"},
+	}
+
+	section := ProposalsFirstActionSection(task)
+	required := []string{
+		`PROPOSALS FIRST-ACTION DRAFT ARTIFACTS:`,
+		`FIRST PROPOSALS DRAFT COMMAND:`,
+		`cat > '/tmp/workspace/reports/taskruns/run-1/proposals/proposals-draft-manifest.json' <<'ACP_DRAFT_MANIFEST_JSON'`,
+		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/final/proposal.md' <<'ACP_DRAFT_FILE'`,
+		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/final/changelog.md' <<'ACP_DRAFT_FILE'`,
+		`"run_id": "run-1"`,
+		`"step_id": "init.step4.proposals"`,
+		`"step_contract": "proposals"`,
+		`"canonical_path": "proposals/runtime-recommendations.md"`,
+		`"canonical_path": "reports/changelog/runtime-proposals.md"`,
+	}
+	for _, needle := range required {
+		if !strings.Contains(section, needle) {
+			t.Fatalf("expected proposals first-action section to contain %q, got:\n%s", needle, section)
+		}
+	}
+	if got := strings.Count(section, "FIRST PROPOSALS DRAFT COMMAND:"); got != 1 {
+		t.Fatalf("expected proposals first-action command once, got %d:\n%s", got, section)
+	}
+	if got := strings.Count(section, "ACP_DRAFT_MANIFEST_JSON"); got != 2 {
+		t.Fatalf("expected one proposals manifest heredoc, got delimiter count %d:\n%s", got, section)
+	}
+	if got := strings.Count(section, "ACP_DRAFT_FILE"); got != 4 {
+		t.Fatalf("expected two proposals draft file heredocs, got delimiter count %d:\n%s", got, section)
+	}
+}
+
 func TestValidatorVerdictTaskSkeletonParsesWithCanonicalIssueShape(t *testing.T) {
 	t.Parallel()
 
