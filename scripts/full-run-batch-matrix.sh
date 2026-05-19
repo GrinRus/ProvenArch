@@ -1390,7 +1390,7 @@ fi
 TIMEOUT_PROFILE_LINE="$("${TIMEOUT_PROFILE_CMD[@]}")"
 acp_log_preflight_timeout log "$ACP_APPLY_TIMEOUTS_VIA_API" "$TIMEOUT_PROFILE_LINE"
 
-while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sweep_id sweep_strategy sweep_max_parallel sweep_failure_policy sweep_shard_mode; do
+while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sweep_id sweep_strategy sweep_max_parallel sweep_failure_policy sweep_shard_mode <&3; do
   [[ -z "$profile_id" ]] && continue
 
   profile_slug="$(slugify "$profile_id")"
@@ -1544,7 +1544,7 @@ PY
       "ACP_QWEN_CMD_BIN=$ACP_QWEN_CMD_BIN" \
       "ACP_CODEX_CMD_BIN=$ACP_CODEX_CMD_BIN" \
       "ACP_APPLY_TIMEOUTS_VIA_API=$ACP_APPLY_TIMEOUTS_VIA_API" \
-      "$BATCH_SCRIPT"
+      "$BATCH_SCRIPT" < /dev/null
   ) >"$driver_log" 2>&1; then
     status="failed"
     log "profile+sweep failed: profile=$profile_id sweep=$sweep_id (see $driver_log)"
@@ -1629,7 +1629,7 @@ PY
     "$frontend_matrix_md" \
     "$frontend_cancel_matrix_md" \
     "$quality_report_md"
-done < "$COMBINATIONS_TSV"
+done 3< "$COMBINATIONS_TSV"
 CURRENT_PROFILE_STATUS_FILE=""
 
 reconcile_stale_profile_statuses

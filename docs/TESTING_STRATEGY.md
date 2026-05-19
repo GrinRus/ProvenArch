@@ -296,6 +296,7 @@ Release workflow hardening:
   - release-specific slices, `baseline` + `parallel-default`, strict blockers и release verdict policy живут только в `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
   - matrix invariant: для одного `profile_id` shard-plan должен совпадать между `baseline` и `parallel-default`
   - для `source_kind=git_url` refs должны быть pinned
+  - child batch stdin is detached from the planned profile/sweep combinations file; regression coverage forces a dummy child to drain stdin and still requires all matrix rows to execute
   - black-box matrix evidence через internal evaluator helper пишется в `reports/blackbox_e2e_steps_<matrix-id>.jsonl/.md` после preflight, planning, каждого profile/sweep и verdict verification
   - итоговый release decision брать только из `reports/release_verdict_<matrix-id>.json`
   - pre-tag/offline verifier: `python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json`; скрипт только проверяет существующий verdict JSON и не запускает live harness
