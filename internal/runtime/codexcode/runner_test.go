@@ -200,8 +200,8 @@ func TestHeadlessRunnerClassifiesTimeoutAndWritesDiagnostics(t *testing.T) {
 	}
 
 	runner := HeadlessRunner{
-		Command: writeSleepingStubRunner(t),
-		Args:    []string{"sleep"},
+		Command: "bash",
+		Args:    []string{"-c", "printf '%s\n' 'codex stub started'; sleep 5"},
 	}
 	task := acpruntime.Task{
 		TaskID:            "task-timeout",
@@ -309,13 +309,6 @@ func writeFailingStubRunner(t *testing.T) string {
 
 	script := "#!/usr/bin/env bash\nset -eu\nprintf '%s\\n' 'codex stub failed after emitting output'\nexit 1\n"
 	return testutil.WriteExecutableScript(t, "codex-failing-stub.sh", script)
-}
-
-func writeSleepingStubRunner(t *testing.T) string {
-	t.Helper()
-
-	script := "#!/usr/bin/env bash\nset -eu\nprintf '%s\\n' 'codex stub started'\nsleep 5\n"
-	return testutil.WriteExecutableScript(t, "codex-sleeping-stub.sh", script)
 }
 
 func assertCodexArg(t *testing.T, args []string, want string) {
