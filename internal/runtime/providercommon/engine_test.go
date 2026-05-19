@@ -152,6 +152,12 @@ func TestRunHeadlessProviderRetriesZeroOutputPreArtifactStallWhenPolicyAllows(t 
 	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
 		diagnostics = append(diagnostics, event)
 	}
+	retryScript := strings.Replace(
+		compactDraftScript(task),
+		"set -eu\n",
+		"set -eu\nprintf '%s\\n' 'retry writing artifacts'\n",
+		1,
+	)
 	runner := &sequenceAdapter{
 		testAdapter: testAdapter{
 			activity: ActivityPolicy{
@@ -173,7 +179,7 @@ func TestRunHeadlessProviderRetriesZeroOutputPreArtifactStallWhenPolicyAllows(t 
 		},
 		commands: []string{
 			writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 10\n"),
-			writeEngineScript(t, compactDraftScript(task)),
+			writeEngineScript(t, retryScript),
 		},
 	}
 
