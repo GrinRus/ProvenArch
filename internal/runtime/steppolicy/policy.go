@@ -12,6 +12,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
+	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
 func PrimaryTaskRepoScope(explicit string, scopes []string) string {
@@ -428,6 +429,8 @@ func runtimeDraftFirstActionFileTemplate(task acpruntime.Task, output runtimedra
 		title = strings.TrimSpace(output.Path)
 	}
 	switch canonicalPath {
+	case "skills/subagents.yaml":
+		return strings.TrimSpace(string(workspace.BaselineSubagentsContent()))
 	case "proposals/runtime-recommendations.md":
 		return strings.Join([]string{
 			"# Runtime Recommendations",

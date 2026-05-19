@@ -71,7 +71,7 @@
    - Step registry (шаги init pipeline)
    - Step 0 support-artifacts materialization читает persisted wizard contract `charter/wizard/step0-contract.json`
    - при missing/invalid wizard contract применяется deterministic baseline fallback только для support artifacts, а warning фиксируется в run diagnostics
-   - baseline bundle seeding выполняется create-if-missing, без перезаписи пользовательских правок; support-only bundle не пишет canonical `skills/subagents.yaml`, поэтому source of truth для него остаётся validated `constitution-draft.json`
+   - baseline bundle seeding выполняется create-if-missing, без перезаписи пользовательских правок; support-only bundle не пишет canonical `skills/subagents.yaml`, поэтому source of truth для него остаётся validated `constitution-draft.json`; constitution first-action `baseline-subagents.yaml` обязан быть валидным `skills/subagents.yaml` YAML bundle, а не markdown-заглушкой
    - Готовит ContextPack/PromptPack
    - Загружает baseline bundle agents/skills/prompts из workspace
    - workspace prompt packs подключаются к runtime prompt composition как editable content layer по фиксированному merge order: provider header -> task-specific first-action artifact command -> artifact-only/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer; содержимое prompt pack не может ослаблять enforced contract rules. Editable prompt pack layer применяется к `step0.constitution`, `step1.collect`, `step3.findings` и `step4.proposals`; `step2.asis_docs` остаётся enforced-policy-only и не имеет отдельного editable `as-is` prompt pack.

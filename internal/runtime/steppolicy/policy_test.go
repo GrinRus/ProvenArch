@@ -9,6 +9,8 @@ import (
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
+	"gopkg.in/yaml.v3"
 )
 
 func TestStepSpecificPolicyDefinesSharedDraftOnlyObligationsForStep0(t *testing.T) {
@@ -435,6 +437,10 @@ func TestConstitutionFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
 		`cat > '/tmp/workspace/reports/taskruns/run-1/constitution/constitution-draft.json' <<'ACP_DRAFT_MANIFEST_JSON'`,
 		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/final/charter-overview.md' <<'ACP_DRAFT_FILE'`,
 		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/final/baseline-subagents.yaml' <<'ACP_DRAFT_FILE'`,
+		`agents:`,
+		`id: domain-analyst`,
+		`id: architect-aggregator`,
+		`id: system-analyst-qa`,
 		`"run_id": "run-1"`,
 		`"step_id": "init.step0.constitution"`,
 		`"step_contract": "constitution"`,
@@ -454,6 +460,28 @@ func TestConstitutionFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
 	}
 	if got := strings.Count(section, "ACP_DRAFT_FILE"); got != 4 {
 		t.Fatalf("expected two constitution draft file heredocs, got delimiter count %d:\n%s", got, section)
+	}
+	if strings.Contains(section, "# Baseline Subagents") {
+		t.Fatalf("constitution first action must write YAML subagents, not markdown:\n%s", section)
+	}
+
+	var bundle struct {
+		Agents []struct {
+			ID     string   `yaml:"id"`
+			Skills []string `yaml:"skills"`
+		} `yaml:"agents"`
+	}
+	subagents := runtimeDraftFirstActionFileTemplate(task, runtimedrafts.Output{
+		Path:          "baseline-subagents.yaml",
+		CanonicalPath: "skills/subagents.yaml",
+		Kind:          "bundle",
+		Title:         "Baseline Subagents",
+	})
+	if err := yaml.Unmarshal([]byte(subagents), &bundle); err != nil {
+		t.Fatalf("subagents first-action draft must parse as YAML: %v\n%s", err, subagents)
+	}
+	if got, want := len(bundle.Agents), 3; got != want {
+		t.Fatalf("subagents agent count = %d, want %d in:\n%s", got, want, subagents)
 	}
 }
 
