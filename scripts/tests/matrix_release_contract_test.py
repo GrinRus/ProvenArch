@@ -177,6 +177,10 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 PY
                 fi
 
+                if [[ "${MATRIX_TEST_DRAIN_STDIN:-0}" == "1" ]]; then
+                  cat >/dev/null || true
+                fi
+
                 if [[ "${MATRIX_TEST_FAIL_BEFORE_REPORT:-0}" == "1" ]]; then
                   mkdir -p "${BATCH_ROOT}/qwen-code/run1"
                   cat > "${BATCH_ROOT}/qwen-code/run1/run-status.env" <<'EOF'
@@ -608,6 +612,28 @@ class MatrixReleaseContractTest(unittest.TestCase):
 
         calls = self.sentinel_path.read_text(encoding="utf-8").splitlines()
         self.assertEqual(len(calls), 4)
+
+    def test_release_matrix_runs_all_combinations_when_child_batch_reads_stdin(self) -> None:
+        matrix_file = self._write_matrix_file(["baseline", "parallel-default"])
+        matrix_id = "release-test-child-stdin"
+        result = self._run_matrix(matrix_file, matrix_id, extra_env={"MATRIX_TEST_DRAIN_STDIN": "1"})
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual(verdict["verdict"], "PASS")
+        self.assertEqual(verdict["release_contract"]["observed_profile_sweep_runs"], 4)
+        self.assertEqual(verdict["release_contract"]["observed_sweeps"], ["baseline", "parallel-default"])
+
+        calls = self.sentinel_path.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(
+            calls,
+            [
+                "single-path/baseline",
+                "single-path/parallel-default",
+                "multi-git_url/baseline",
+                "multi-git_url/parallel-default",
+            ],
+        )
 
     def test_matrix_writes_blackbox_step_report_shape(self) -> None:
         matrix_file = self._write_matrix_file(["baseline", "parallel-default"])
