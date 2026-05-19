@@ -212,6 +212,7 @@ Matrix preflight также выполняет selected-provider live smoke пе
 - `--version` probe;
 - короткий headless `ACP_READY` probe для providers, где он остаётся устойчивым readiness signal;
 - artifact smoke: выбранный provider должен записать sentinel-файл в temp write dir. Для `claude` artifact smoke является основным headless readiness gate, temp write dir передаётся через runtime-like `--add-dir`, потому что отдельный text-only probe может флейкать по latency без проверки filesystem write path; первый timeout/no-output artifact-smoke attempt допускает один bounded retry.
+- Для `claude` artifact smoke timeout после записи expected sentinel считается ready: это доказывает headless response + filesystem write path, а runtime artifact-only engine умеет controlled stop after valid artifacts. Timeout без expected sentinel остаётся blocker и допускает только bounded retry.
 
 Artifact smoke failure или timeout считается `operational_host_preflight_failed` и должен останавливать batch/matrix до запуска дорогой runtime matrix. Это host/provider readiness blocker, а не ACP product verdict.
 
