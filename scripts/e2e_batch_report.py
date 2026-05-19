@@ -24,6 +24,7 @@ from e2e_report_classifiers import (
     terminal_success_summary,
     text_has_raw_provider_runner_unavailable_signal,
     text_has_runner_unavailable_signal,
+    text_has_collect_document_path_contract_signature,
     text_has_runtime_contract_parse_signature,
     text_has_structured_runner_unavailable_signal,
 )
@@ -1407,6 +1408,10 @@ def evaluate_run(
                 runtime_contract_failed_hit = True
                 runner_error_hit = True
                 error_codes.append("runtime_contract_failed")
+            if text_has_collect_document_path_contract_signature(text):
+                runtime_contract_failed_hit = True
+                runner_error_hit = True
+                error_codes.append("runtime_contract_failed")
             if text_has_structured_runner_unavailable_signal(text):
                 runner_unavailable_hit = True
                 runner_error_hit = True
@@ -1427,6 +1432,10 @@ def evaluate_run(
         if not terminal_success:
             if text_has_runtime_contract_parse_signature(text):
                 runtime_contract_parse_failed_hit = True
+                runtime_contract_failed_hit = True
+                runner_error_hit = True
+                error_codes.append("runtime_contract_failed")
+            if text_has_collect_document_path_contract_signature(text):
                 runtime_contract_failed_hit = True
                 runner_error_hit = True
                 error_codes.append("runtime_contract_failed")

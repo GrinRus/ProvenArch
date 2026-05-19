@@ -556,6 +556,53 @@ EOF
 	}
 }
 
+func TestRunHeadlessProviderRepairsCollectManifestWithMissingReferencedDocumentPath(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-repair-missing-doc-ref")
+	badManifest := strings.Replace(collectManifestJSON(task), `"path": "overview.md"`, `"path": "overivew.md"`, 1)
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + badManifest + `
+EOF
+`
+	repairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+`
+	runner := testAdapter{
+		command:       writeEngineScript(t, initialScript),
+		repairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected collect manifest reference repair success, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName))
+	if err != nil {
+		t.Fatalf("read repaired manifest: %v", err)
+	}
+	if strings.Contains(string(raw), "overivew.md") {
+		t.Fatalf("expected repair manifest to replace missing document reference, got %s", raw)
+	}
+	if !strings.Contains(string(raw), `"path": "overview.md"`) {
+		t.Fatalf("expected repaired manifest to reference authored document, got %s", raw)
+	}
+}
+
 func TestRunHeadlessProviderRepairsNonSilentNoArtifactCollectWithPairRepair(t *testing.T) {
 	t.Parallel()
 
