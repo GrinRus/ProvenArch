@@ -73,6 +73,7 @@ LAST_RUN_FAILURE_CLASS="none"
 LAST_RUN_FAILURE_SUBCLASS="none"
 LAST_RUN_CANCELLATION_LIKE=0
 PRECHECK_FAILURE_RECORDED=0
+OPERATIONAL_PREFLIGHT_FAILURE_RECORDED=0
 FRONTEND_CANCEL_FAILURES=0
 FRONTEND_CANCEL_SKIPPED=0
 FRONTEND_LIVE_RESULT_FILENAME="frontend-e2e-result.json"
@@ -1118,6 +1119,41 @@ run_dod_precheck_make() {
   "${env_cmd[@]}" make contracts test lint build
 }
 
+run_node_toolchain_precheck() {
+  local required_node_version="${ACP_NODE_VERSION:-}"
+  if [[ -z "$required_node_version" && -f "$PROVENARCH_ROOT/.node-version" ]]; then
+    required_node_version="$(tr -d '[:space:]' < "$PROVENARCH_ROOT/.node-version")"
+  fi
+
+  printf 'required_node_version=%s\n' "${required_node_version:-}"
+  printf 'ACP_NODE_TOOL_CANDIDATES=%s\n' "${ACP_NODE_TOOL_CANDIDATES:-}"
+  printf 'ACP_NODE_TOOL_CANDIDATES_ONLY=%s\n' "${ACP_NODE_TOOL_CANDIDATES_ONLY:-0}"
+  printf 'ACP_NODE_VERSION_CHECK=%s\n' "${ACP_NODE_VERSION_CHECK:-1}"
+
+  local resolved_node
+  printf 'resolve_node_command=%s\n' "$PROVENARCH_ROOT/scripts/resolve-node-tool.sh node"
+  if ! resolved_node="$("$PROVENARCH_ROOT/scripts/resolve-node-tool.sh" node 2>&1)"; then
+    printf 'node_status=failed\n'
+    printf '%s\n' "$resolved_node"
+    return 1
+  fi
+  printf 'node_status=ready\n'
+  printf 'node_bin=%s\n' "$resolved_node"
+  printf 'node_version=%s\n' "$("$resolved_node" -p 'process.versions.node' 2>/dev/null || true)"
+  printf 'node_arch=%s\n' "$("$resolved_node" -p 'process.arch' 2>/dev/null || true)"
+
+  local resolved_npm
+  printf 'resolve_npm_command=%s\n' "$PROVENARCH_ROOT/scripts/resolve-node-tool.sh npm"
+  if ! resolved_npm="$("$PROVENARCH_ROOT/scripts/resolve-node-tool.sh" npm 2>&1)"; then
+    printf 'npm_status=failed\n'
+    printf '%s\n' "$resolved_npm"
+    return 1
+  fi
+  printf 'npm_status=ready\n'
+  printf 'npm_bin=%s\n' "$resolved_npm"
+  printf 'npm_version=%s\n' "$("$resolved_npm" --version 2>/dev/null || true)"
+}
+
 classify_run_failure() {
   local provider="$1"
   local run_index="$2"
@@ -1405,6 +1441,8 @@ increment_failure_class_counter() {
     runtime_flow_failed)
       RUNTIME_FLOW_FAILED_FAILURES=$((RUNTIME_FLOW_FAILED_FAILURES + 1))
       ;;
+    operational_host_preflight_failed)
+      ;;
     none)
       ;;
     *)
@@ -1446,6 +1484,76 @@ record_precheck_failed_classifications() {
   PRECHECK_FAILURE_RECORDED=1
 }
 
+record_operational_preflight_failed_classifications() {
+  local reason="${1:-operational_host_preflight_failed}"
+  if [[ "$OPERATIONAL_PREFLIGHT_FAILURE_RECORDED" == "1" ]]; then
+    return 0
+  fi
+  reason="${reason//$'\t'/ }"
+  reason="${reason//$'\n'/ }"
+  local provider
+  local run_index
+  for provider in "${SELECTED_PROVIDERS[@]}"; do
+    for run_index in "${SELECTED_RUN_INDEXES[@]}"; do
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$provider" \
+        "$run_index" \
+        "operational_host_preflight_failed" \
+        "1" \
+        "operational_host_preflight_failed" \
+        "$reason" \
+        "none" \
+        "-" \
+        "-" \
+        "-" \
+        "-" \
+        "-" \
+        "0" \
+        "none" \
+        "0" >>"$RUN_CLASSIFICATIONS_TSV"
+      increment_failure_class_counter "operational_host_preflight_failed" "none" "0"
+    done
+  done
+  OPERATIONAL_PREFLIGHT_FAILURE_RECORDED=1
+}
+
+finalize_provider_readiness_failure() {
+  local reason="${1:-unknown provider readiness failure}"
+  record_operational_preflight_failed_classifications "$reason"
+  log "provider readiness failed: $reason"
+  log "generating quality reports for batch=$BATCH_ID (operational_host_preflight_failed)"
+  if (
+    cd "$PROVENARCH_ROOT"
+    python3 scripts/e2e_batch_report.py \
+      --batch-id "$BATCH_ID" \
+      --batch-root "$BATCH_ROOT" \
+      --reports-root "$REPORTS_ROOT" >"$BATCH_ROOT/report-paths.txt"
+  ); then
+    log "report paths:"
+    cat "$BATCH_ROOT/report-paths.txt"
+  else
+    log "report generation failed after provider readiness failure (see $BATCH_ROOT/report-paths.txt if present)"
+  fi
+  write_blackbox_step_report \
+    "batch.preflight" \
+    "Verify host, provider, path, timeout, and execution prerequisites before running backend/UI flows." \
+    "Read selected provider binaries, target repo metadata, generated batch preflight, and synthesized preflight-failure reports." \
+    "failed" \
+    "operational_host_preflight_failed" \
+    "Stop and move the run to a trusted host or repair provider/path readiness; do not edit canonical matrices." \
+    "$BATCH_ROOT/preflight.json" \
+    "$DECLARED_REPOS_JSON" \
+    "$BATCH_ROOT/report-paths.txt" \
+    "$REPORTS_ROOT/run_matrix_${BATCH_ID}.tsv" \
+    "$REPORTS_ROOT/run_matrix_${BATCH_ID}.md" \
+    "$REPORTS_ROOT/frontend_e2e_matrix_${BATCH_ID}.md" \
+    "$REPORTS_ROOT/frontend_cancel_e2e_matrix_${BATCH_ID}.md" \
+    "$REPORTS_ROOT/quality_report_${BATCH_ID}.md" \
+    "$RUN_CLASSIFICATIONS_TSV"
+  log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
+  die "operational_host_preflight_failed: selected provider readiness failed: $reason"
+}
+
 finalize_precheck_failure() {
   local reason="$1"
   record_precheck_failed_classifications
@@ -1470,6 +1578,7 @@ finalize_precheck_failure() {
     "failed" \
     "precheck_failed" \
     "Stop before live provider execution; inspect precheck logs and rerun the same direct harness command after repair." \
+    "$BATCH_ROOT/precheck-node-toolchain.log" \
     "$BATCH_ROOT/precheck-make.log" \
     "$BATCH_ROOT/precheck-ui-npm.log" \
     "$BATCH_ROOT/precheck-playwright.log" \
@@ -1668,16 +1777,7 @@ if [[ -z "$TIMEOUT_PROFILE_LINE" || -z "$EXECUTION_PROFILE_LINE" ]]; then
   die "preflight helper did not return timeout/execution profile lines"
 fi
 if [[ "$PROVIDER_READINESS_STATUS" == "unavailable" ]]; then
-  write_blackbox_step_report \
-    "batch.preflight" \
-    "Verify host, provider, path, timeout, and execution prerequisites before running backend/UI flows." \
-    "Read selected provider binaries, target repo metadata, and generated batch preflight." \
-    "failed" \
-    "operational_host_preflight_failed" \
-    "Stop and move the run to a trusted host or repair provider/path readiness; do not edit canonical matrices." \
-    "$BATCH_ROOT/preflight.json" \
-    "$DECLARED_REPOS_JSON"
-  die "operational_host_preflight_failed: selected provider readiness failed: ${PROVIDER_READINESS_REASON:-unknown provider readiness failure}"
+  finalize_provider_readiness_failure "${PROVIDER_READINESS_REASON:-unknown provider readiness failure}"
 fi
 
 read_declared_repos_meta
@@ -1701,6 +1801,14 @@ log "batch shard selection: providers=$SELECTED_PROVIDERS_CSV runs=$SELECTED_RUN
 if [[ "$BATCH_SKIP_PRECHECK" == "1" ]]; then
   log "skipping DoD/UI precheck (BATCH_SKIP_PRECHECK=1)"
 else
+  log "checking Node.js/npm toolchain"
+  if ! (
+    cd "$PROVENARCH_ROOT"
+    run_node_toolchain_precheck >"$BATCH_ROOT/precheck-node-toolchain.log" 2>&1
+  ); then
+    finalize_precheck_failure "Node.js/npm toolchain precheck failed (see $BATCH_ROOT/precheck-node-toolchain.log)"
+  fi
+
   log "running DoD precheck: make contracts test lint build"
   if ! (
     cd "$PROVENARCH_ROOT"
@@ -1712,8 +1820,8 @@ else
   log "installing UI dependencies and Playwright browser"
   if ! (
     cd "$PROVENARCH_ROOT"
-    npm ci --prefix ui >"$BATCH_ROOT/precheck-ui-npm.log" 2>&1
-    npm exec --prefix ui playwright install chromium >"$BATCH_ROOT/precheck-playwright.log" 2>&1
+    "$PROVENARCH_ROOT/scripts/run-npm.sh" ci --prefix ui >"$BATCH_ROOT/precheck-ui-npm.log" 2>&1
+    "$PROVENARCH_ROOT/scripts/run-npm.sh" exec --prefix ui playwright install chromium >"$BATCH_ROOT/precheck-playwright.log" 2>&1
   ); then
     finalize_precheck_failure "UI precheck failed (see $BATCH_ROOT/precheck-ui-npm.log and $BATCH_ROOT/precheck-playwright.log)"
   fi
@@ -1727,6 +1835,7 @@ write_blackbox_step_report \
   "Run backend cycles through the batch harness." \
   "$BATCH_ROOT/preflight.json" \
   "$DECLARED_REPOS_JSON" \
+  "$BATCH_ROOT/precheck-node-toolchain.log" \
   "$BATCH_ROOT/precheck-make.log" \
   "$BATCH_ROOT/precheck-ui-npm.log" \
   "$BATCH_ROOT/precheck-playwright.log"

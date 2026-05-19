@@ -1129,9 +1129,12 @@ def evaluate_run(
         details.append(
             f"reliability/precheck-failed -> failure_class={classified_failure} process_exit={classification_row.get('process_exit', '-')}"
         )
-        precheck_log = run_dir.parent.parent / "precheck-make.log"
-        if precheck_log.exists():
-            details.append(f"reliability/precheck-failed -> precheck_log={precheck_log}")
+        for precheck_log in (
+            run_dir.parent.parent / "precheck-node-toolchain.log",
+            run_dir.parent.parent / "precheck-make.log",
+        ):
+            if precheck_log.exists():
+                details.append(f"reliability/precheck-failed -> precheck_log={precheck_log}")
         return RunEvaluation(
             provider=provider,
             run_index=run_index,
@@ -1154,6 +1157,41 @@ def evaluate_run(
             quality_gates_failed=False,
             summary_missing=False,
             precheck_failed=True,
+            runtime_flow_failed=False,
+            cancellation_like=cancellation_like,
+            issues=issues,
+            issue_details=details,
+            error_codes=[],
+        )
+
+    if classified_failure == "operational_host_preflight_failed":
+        issues.append("reliability:operational-host-preflight-failed")
+        details.append(
+            "reliability/operational-host-preflight-failed -> "
+            f"failure_reason={classification_row.get('failure_reason', '-')}"
+        )
+        return RunEvaluation(
+            provider=provider,
+            run_index=run_index,
+            run_dir=run_dir,
+            hard_pass=False,
+            reliability=0,
+            contract=0,
+            analysis=0,
+            total=0,
+            verdict=verdict(0),
+            artifact_source="preflight",
+            semantic_hard_fail=False,
+            off_topic_hits=0,
+            failure_class="operational_host_preflight_failed",
+            runtime_contract_failed=False,
+            runner_unavailable=False,
+            runtime_timeout=False,
+            infra_signal_terminated=False,
+            infra_incomplete_cycle=False,
+            quality_gates_failed=False,
+            summary_missing=False,
+            precheck_failed=False,
             runtime_flow_failed=False,
             cancellation_like=cancellation_like,
             issues=issues,

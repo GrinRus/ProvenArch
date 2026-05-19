@@ -152,10 +152,10 @@ Implemented required jobs:
   - `make test-stress` (coordinator debounce/queue regression loop)
   - `go build ./cmd/acp`
 - `ui`
-  - `npm ci --prefix ui`
-  - `npm run typecheck --prefix ui`
-  - `npm run test --prefix ui -- --run`
-  - `npm run build --prefix ui`
+  - `./scripts/run-npm.sh ci --prefix ui`
+  - `./scripts/run-npm.sh run typecheck --prefix ui`
+  - `./scripts/run-npm.sh run test --prefix ui -- --run`
+  - `./scripts/run-npm.sh run build --prefix ui`
 
 Implemented additional jobs:
 - `golden`

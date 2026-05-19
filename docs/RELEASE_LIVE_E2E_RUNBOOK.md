@@ -123,7 +123,7 @@ Artifact-quality policy для generated regress/release команд остаё
 
 Проверить на машине:
 - Go exact version from `.go-version`
-- `npm`
+- Node.js exact version from `.node-version` and npm from the same toolchain
 - `python3`
 - `curl`
 - `qwen`
@@ -138,9 +138,28 @@ Canonical profile runs нужно выполнять из clean committed tree �
 
 Практическое правило:
 - если в основном worktree есть незакоммиченные изменения в harness/runtime/docs, сначала вынести canonical прогон в отдельный clean worktree;
-- если используется отдельный clean worktree, заранее установить локальные UI deps в этом worktree: минимум `npm ci --prefix ui`; для frontend live surface дополнительно `npm exec --prefix ui playwright install chromium`;
+- если используется отдельный clean worktree, заранее установить локальные UI deps в этом worktree через exact Node resolver: минимум `./scripts/run-npm.sh ci --prefix ui`; для frontend live surface дополнительно `./scripts/run-npm.sh exec --prefix ui playwright install chromium`;
 - не использовать `BATCH_SKIP_PRECHECK=1` как способ обойти локальное расхождение между committed contract и текущими незакоммиченными правками;
 - diagnostic прогон с `BATCH_SKIP_PRECHECK=1` допустим только как triage-only evidence и не считается canonical acceptance run.
+
+### 2.0.1) Exact Node/npm toolchain
+
+Live harness выполняет DoD/UI precheck только на exact Node.js из `.node-version`. Совместимая minor версия не считается валидной: например, если `.node-version` требует `22.21.1`, то Homebrew `node@22` с `22.22.3` остаётся `precheck_failed`.
+
+Проверить выбранный toolchain до запуска:
+
+```bash
+./scripts/resolve-node-tool.sh node
+./scripts/resolve-node-tool.sh npm
+```
+
+Если exact версия установлена не первой в `PATH`, передать её явно:
+
+```bash
+ACP_NODE_TOOL_CANDIDATES=/path/to/node-22.21.1/bin ./scripts/full-run-batch-matrix.sh
+```
+
+Не использовать `ACP_NODE_VERSION_CHECK=0` или `BATCH_SKIP_PRECHECK=1` для canonical acceptance. Эти обходы допустимы только как triage-only evidence.
 
 ### 2.1) Fail-fast host eligibility
 
@@ -421,8 +440,8 @@ python3 scripts/live-e2e-plan.py --mode regres --size full --providers claude --
 
 ```bash
 make contracts test lint build
-npm ci --prefix ui
-npm exec --prefix ui playwright install chromium
+./scripts/run-npm.sh ci --prefix ui
+./scripts/run-npm.sh exec --prefix ui playwright install chromium
 ```
 
 4. Проверка path targets (exist + pinned SHA):

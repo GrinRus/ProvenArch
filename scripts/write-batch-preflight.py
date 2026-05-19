@@ -122,6 +122,17 @@ def probe_timeout_sec() -> int:
     return value if value > 0 else 30
 
 
+def artifact_smoke_timeout_sec() -> int:
+    raw = os.environ.get("ACP_PREFLIGHT_ARTIFACT_SMOKE_TIMEOUT_SEC", "").strip()
+    if not raw:
+        return 120
+    try:
+        value = int(raw)
+    except ValueError:
+        return 120
+    return value if value > 0 else 120
+
+
 def headless_probe_invocation(provider: str) -> tuple[list[str], str]:
     prompt = "ACP live preflight: reply with exactly ACP_READY. Do not write files."
     if provider == "qwen":
@@ -149,7 +160,7 @@ def artifact_smoke_invocation(provider: str, sentinel_path: Path) -> tuple[list[
         f"{ARTIFACT_SMOKE_SENTINEL_TEXT} to this file, then exit: {sentinel_path}"
     )
     if provider == "qwen":
-        return ["-p", prompt], ""
+        return ["--chat-recording", "false", "--yolo", "--channel", "CI", "-p", prompt], ""
     if provider == "claude":
         return ["--output-format", "json", "--permission-mode", "bypassPermissions", "-p", prompt], ""
     if provider == "codex":
@@ -173,6 +184,7 @@ def run_probe_command(
     repo_root: str,
     stdin_text: str = "",
     env_extra: dict[str, str] | None = None,
+    timeout_sec: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     if env_extra:
@@ -184,7 +196,7 @@ def run_probe_command(
         input=stdin_text if stdin_text else None,
         text=True,
         capture_output=True,
-        timeout=probe_timeout_sec(),
+        timeout=timeout_sec if timeout_sec is not None else probe_timeout_sec(),
         check=False,
     )
 
@@ -205,6 +217,7 @@ def run_artifact_smoke(provider: str, command: str, repo_root: str) -> tuple[boo
                     "ACP_PREFLIGHT_SMOKE_SENTINEL": str(sentinel_path),
                     "ACP_PREFLIGHT_SMOKE_TEXT": ARTIFACT_SMOKE_SENTINEL_TEXT,
                 },
+                timeout_sec=artifact_smoke_timeout_sec(),
             )
         except subprocess.TimeoutExpired as exc:
             return False, f"{provider} artifact smoke timed out after {exc.timeout}s", ""
