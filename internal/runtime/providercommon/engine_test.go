@@ -991,6 +991,104 @@ EOF
 	}
 }
 
+func TestRunHeadlessProviderRetriesZeroOutputCollectStallWhenPolicyAllows(t *testing.T) {
+	task := newCollectTask(t, "run-collect-silent-then-success")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	collectScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Bank Overview
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+`
+	runner := &sequenceAdapter{
+		testAdapter: testAdapter{
+			activity: ActivityPolicy{
+				MonitorArtifacts:            true,
+				MonitorPreArtifact:          true,
+				PreArtifactStallWindow:      20 * time.Millisecond,
+				RetryPreArtifactStallWindow: 5 * time.Second,
+				PostArtifactStallWindow:     20 * time.Millisecond,
+				PollInterval:                5 * time.Millisecond,
+				PostTerminateDrain:          10 * time.Millisecond,
+				TerminateGrace:              10 * time.Millisecond,
+			},
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:            true,
+				RepairCollectManifestOnce:                true,
+				RepairCollectArtifactPairOnce:            true,
+				RetryInvalidOrMissingArtifactsOnce:       true,
+				RetryZeroOutputPreArtifactStallOnce:      true,
+				ClassifySilentRetryExhaustionUnavailable: true,
+			},
+		},
+		commands: []string{
+			writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 10\n"),
+			writeEngineScript(t, collectScript),
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := RunHeadlessProvider(ctx, task, runner)
+	if err != nil {
+		t.Fatalf("expected collect retry to recover valid artifacts, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("expected succeeded execution, got %+v", result.Execution)
+	}
+	if !hasDiagnostic(diagnostics, "zero-output pre-artifact stall will retry", "warning") {
+		t.Fatalf("expected warning diagnostic for recovered collect zero-output stall, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderKeepsExhaustedZeroOutputCollectRetryUnavailable(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-silent-retry-exhausted")
+	runner := testAdapter{
+		command: writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 10\n"),
+		activity: ActivityPolicy{
+			MonitorArtifacts:            true,
+			MonitorPreArtifact:          true,
+			PreArtifactStallWindow:      20 * time.Millisecond,
+			RetryPreArtifactStallWindow: 20 * time.Millisecond,
+			PostArtifactStallWindow:     20 * time.Millisecond,
+			PollInterval:                5 * time.Millisecond,
+			PostTerminateDrain:          10 * time.Millisecond,
+			TerminateGrace:              10 * time.Millisecond,
+		},
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:            true,
+			RepairCollectManifestOnce:                true,
+			RepairCollectArtifactPairOnce:            true,
+			RetryInvalidOrMissingArtifactsOnce:       true,
+			RetryZeroOutputPreArtifactStallOnce:      true,
+			ClassifySilentRetryExhaustionUnavailable: true,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := RunHeadlessProvider(ctx, task, runner)
+	if err == nil {
+		t.Fatal("expected exhausted collect zero-output retry to fail")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRunnerUnavailable {
+		t.Fatalf("expected runner_unavailable, got %s (%v)", runnerErr.Code, err)
+	}
+}
+
 func TestRunHeadlessProviderKeepsExhaustedZeroOutputValidatorRetryUnavailable(t *testing.T) {
 	t.Parallel()
 
