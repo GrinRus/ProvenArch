@@ -138,7 +138,7 @@ def headless_probe_invocation(provider: str) -> tuple[list[str], str]:
     if provider == "qwen":
         return ["-p", prompt], ""
     if provider == "claude":
-        return ["--output-format", "json", "--permission-mode", "bypassPermissions", "-p", prompt], ""
+        return [], ""
     if provider == "codex":
         return [
             "exec",
@@ -173,7 +173,16 @@ def artifact_smoke_invocation(provider: str, sentinel_path: Path) -> tuple[list[
             prompt,
         ], ""
     if provider == "claude":
-        return ["--output-format", "json", "--permission-mode", "bypassPermissions", "-p", prompt], ""
+        return [
+            "--output-format",
+            "json",
+            "--permission-mode",
+            "bypassPermissions",
+            "--add-dir",
+            str(sentinel_path.parent),
+            "-p",
+            prompt,
+        ], ""
     if provider == "codex":
         return [
             "exec",
@@ -218,32 +227,59 @@ def run_artifact_smoke(provider: str, command: str, repo_root: str) -> tuple[boo
         smoke_args, smoke_stdin = artifact_smoke_invocation(provider, sentinel_path)
         if not smoke_args:
             return True, "", ""
-        try:
-            completed = run_probe_command(
-                command,
-                smoke_args,
-                repo_root,
-                smoke_stdin,
-                {
-                    "ACP_PREFLIGHT_SMOKE_SENTINEL": str(sentinel_path),
-                    "ACP_PREFLIGHT_SMOKE_TEXT": ARTIFACT_SMOKE_SENTINEL_TEXT,
-                },
-                timeout_sec=artifact_smoke_timeout_sec(),
-            )
-        except subprocess.TimeoutExpired as exc:
-            return False, f"{provider} artifact smoke timed out after {exc.timeout}s", ""
-        except Exception as exc:  # pragma: no cover - defensive shell failure path
-            return False, f"{provider} artifact smoke failed: {exc}", ""
-        combined = "\n".join(part for part in [completed.stdout, completed.stderr] if part).strip()
-        if completed.returncode != 0:
-            return False, combined or f"{provider} artifact smoke exited with code {completed.returncode}", combined
-        try:
-            observed = sentinel_path.read_text(encoding="utf-8").strip()
-        except OSError as exc:
-            return False, f"{provider} artifact smoke did not create sentinel: {exc}", combined
-        if observed != ARTIFACT_SMOKE_SENTINEL_TEXT:
-            return False, f"{provider} artifact smoke wrote unexpected sentinel content", combined
-        return True, combined, combined
+        max_attempts = 2 if provider == "claude" else 1
+        last_reason = ""
+        last_combined = ""
+        for attempt in range(1, max_attempts + 1):
+            timeout_sec = probe_timeout_sec() if provider == "claude" else artifact_smoke_timeout_sec()
+            try:
+                completed = run_probe_command(
+                    command,
+                    smoke_args,
+                    repo_root,
+                    smoke_stdin,
+                    {
+                        "ACP_PREFLIGHT_SMOKE_SENTINEL": str(sentinel_path),
+                        "ACP_PREFLIGHT_SMOKE_TEXT": ARTIFACT_SMOKE_SENTINEL_TEXT,
+                    },
+                    timeout_sec=timeout_sec,
+                )
+            except subprocess.TimeoutExpired as exc:
+                stdout = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+                stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+                combined = "\n".join(part for part in [stdout, stderr] if part).strip()
+                last_combined = combined
+                last_reason = (
+                    f"{provider} artifact smoke timed out after {exc.timeout}s "
+                    f"(attempt {attempt}/{max_attempts})"
+                )
+                if provider == "claude" and not combined and attempt < max_attempts:
+                    continue
+                return False, last_reason, combined
+            except Exception as exc:  # pragma: no cover - defensive shell failure path
+                return False, f"{provider} artifact smoke failed: {exc}", ""
+            combined = "\n".join(part for part in [completed.stdout, completed.stderr] if part).strip()
+            last_combined = combined
+            if completed.returncode != 0:
+                last_reason = (
+                    combined
+                    or f"{provider} artifact smoke exited with code {completed.returncode} "
+                    f"(attempt {attempt}/{max_attempts})"
+                )
+                if provider == "claude" and not combined and attempt < max_attempts:
+                    continue
+                return False, last_reason, combined
+            try:
+                observed = sentinel_path.read_text(encoding="utf-8").strip()
+            except OSError as exc:
+                last_reason = f"{provider} artifact smoke did not create sentinel: {exc} (attempt {attempt}/{max_attempts})"
+                if provider == "claude" and not combined and attempt < max_attempts:
+                    continue
+                return False, last_reason, combined
+            if observed != ARTIFACT_SMOKE_SENTINEL_TEXT:
+                return False, f"{provider} artifact smoke wrote unexpected sentinel content", combined
+            return True, combined, combined
+        return False, last_reason, last_combined
 
 
 def probe_provider_readiness(

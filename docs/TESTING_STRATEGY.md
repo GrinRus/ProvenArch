@@ -279,7 +279,7 @@ Release workflow hardening:
 - `scripts/full-run-batch.sh` — canonical live batch + frontend live e2e:
   - canonical input: `TARGET_REPOS_FILE`
   - direct-only runtime commands: `claude`, `qwen`, `codex`
-  - selected-provider readiness записывается в `preflight.json`; version + bounded headless probe + artifact smoke ловят missing binary, auth/quota, codex CLI compatibility и no-write host/provider failures до deep run; provider `model`/`modelUsage` telemetry не является blocker
+  - selected-provider readiness записывается в `preflight.json`; version + provider-specific bounded headless probe + artifact smoke ловят missing binary, auth/quota, codex CLI compatibility и no-write host/provider failures до deep run; для `claude` artifact smoke является основным headless readiness gate, allowlist-ит temp write dir через `--add-dir` и получает один bounded retry на timeout/no-output; provider `model`/`modelUsage` telemetry не является blocker
   - backend quality source-of-truth: только `snapshots/<run_id>/reports/*`
   - hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`, `analysis:cross-repo-missing`; cross-repo presence can be satisfied by explicit `semantic.edges[]` or by repo-wide `citations[].repo` coverage plus findings/questions with multi-repo provenance evidence, and report details must name the missing dimension
   - frontend smoke работает на отдельной `frontend-workspace` копии run snapshot и не мутирует backend baseline; `snapshot_reports_missing` после terminal backend failure записывается как dependent skipped frontend status, а не independent frontend regression

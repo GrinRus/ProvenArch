@@ -208,8 +208,8 @@ PY
 
 Matrix preflight также выполняет selected-provider live smoke перед deep batch:
 - `--version` probe;
-- короткий headless `ACP_READY` probe;
-- artifact smoke: выбранный provider должен записать sentinel-файл в temp write dir.
+- короткий headless `ACP_READY` probe для providers, где он остаётся устойчивым readiness signal;
+- artifact smoke: выбранный provider должен записать sentinel-файл в temp write dir. Для `claude` artifact smoke является основным headless readiness gate, temp write dir передаётся через runtime-like `--add-dir`, потому что отдельный text-only probe может флейкать по latency без проверки filesystem write path; первый timeout/no-output artifact-smoke attempt допускает один bounded retry.
 
 Artifact smoke failure или timeout считается `operational_host_preflight_failed` и должен останавливать batch/matrix до запуска дорогой runtime matrix. Это host/provider readiness blocker, а не ACP product verdict.
 
@@ -838,6 +838,7 @@ python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.js
 4. `operational_host_preflight_failed` до старта backend runs
 - Причина: невалидный runtime binary surface (`qwen`/`claude`/`codex` в PATH), provider readiness blocker, known codex CLI compatibility issue, либо нерелевантный writable state/tmp surface.
 - Действие: починить host prerequisites и повторить запуск; не считать это продуктовым ACP багом.
+- Для `claude` отдельный text-only `ACP_READY` timeout не является release blocker: readiness должна подтверждаться `--version` + artifact smoke с sentinel write. Exhausted artifact-smoke timeout остаётся host/provider blocker.
 
 5. `collect_manifest_missing` / `shard-pack-manifest.json is missing` на `init.step1.collect`
 - Политика triage: если provider оставил diagnostics, но не написал authored artifacts, общий engine должен сделать одну collect pair-recovery попытку с command-first suggested doc + manifest skeleton targets; если в `write_root` есть authored docs, общий engine должен сделать один manifest-only repair с command-first task-specific skeleton write target. Writes outside allowed collect repair set или failure после repair остаются `runtime_contract_failed`.

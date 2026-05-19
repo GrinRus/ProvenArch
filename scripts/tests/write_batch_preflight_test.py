@@ -54,10 +54,20 @@ class WriteBatchPreflightTest(unittest.TestCase):
         args, stdin_text = self.module.artifact_smoke_invocation("qwen", sentinel_path)
 
         self.assertEqual(
-            ["--chat-recording", "false", "--yolo", "--channel", "CI", "-p"],
-            args[:6],
+            [
+                "--chat-recording",
+                "false",
+                "--yolo",
+                "--channel",
+                "CI",
+                "--output-format",
+                "stream-json",
+                "--include-partial-messages",
+                "-p",
+            ],
+            args[:9],
         )
-        self.assertIn(str(sentinel_path), args[6])
+        self.assertIn(str(sentinel_path), args[9])
         self.assertEqual("", stdin_text)
 
     def test_artifact_smoke_timeout_default_is_longer_than_read_only_probe(self) -> None:
@@ -103,7 +113,7 @@ class WriteBatchPreflightTest(unittest.TestCase):
             "#!/bin/sh\n"
             "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' 'qwen 1.0'; exit 0; fi\n"
             "if [ \"${1:-}\" = \"-p\" ]; then printf '%s\n' 'ACP_READY'; exit 0; fi\n"
-            "if [ \"${1:-}\" = \"--chat-recording\" ] && [ \"${2:-}\" = \"false\" ] && [ \"${3:-}\" = \"--yolo\" ] && [ \"${4:-}\" = \"--channel\" ] && [ \"${5:-}\" = \"CI\" ] && [ \"${6:-}\" = \"-p\" ]; then\n"
+            "if [ \"${1:-}\" = \"--chat-recording\" ] && [ \"${2:-}\" = \"false\" ] && [ \"${3:-}\" = \"--yolo\" ] && [ \"${4:-}\" = \"--channel\" ] && [ \"${5:-}\" = \"CI\" ] && [ \"${6:-}\" = \"--output-format\" ] && [ \"${7:-}\" = \"stream-json\" ] && [ \"${8:-}\" = \"--include-partial-messages\" ] && [ \"${9:-}\" = \"-p\" ]; then\n"
             "  mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"\n"
             "  printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"\n"
             "  printf '%s\n' 'Done.'\n"
@@ -176,6 +186,99 @@ class WriteBatchPreflightTest(unittest.TestCase):
         self.assertEqual("passed", result["artifact_smoke"])
         self.assertNotIn("model_mismatch", result)
         self.assertNotIn("observed_models", result)
+
+    def test_claude_readiness_uses_artifact_smoke_not_text_probe(self) -> None:
+        command = self._write_script(
+            "claude-text-probe-timeout-stub",
+            "#!/bin/sh\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' '2.1.85 (Claude Code)'; exit 0; fi\n"
+            "if [ -n \"${ACP_PREFLIGHT_SMOKE_SENTINEL:-}\" ]; then mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"; printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"; exit 0; fi\n"
+            "sleep 2\n"
+            "exit 42\n",
+        )
+
+        result = self.module.probe_provider_readiness("claude", command, str(REPO_ROOT))
+        self.assertEqual("ready", result["status"])
+        self.assertEqual("", result["subclass"])
+        self.assertEqual("passed", result["artifact_smoke"])
+
+    def test_claude_artifact_smoke_uses_runtime_like_add_dir(self) -> None:
+        sentinel = self.root / "write-dir" / "sentinel.txt"
+
+        args, stdin_text = self.module.artifact_smoke_invocation("claude", sentinel)
+
+        self.assertEqual("", stdin_text)
+        self.assertIn("--add-dir", args)
+        add_dir_index = args.index("--add-dir")
+        self.assertEqual(str(sentinel.parent), args[add_dir_index + 1])
+        self.assertIn("-p", args)
+
+    def test_claude_artifact_smoke_retries_timeout_once(self) -> None:
+        attempts = self.root / "claude-smoke-attempts"
+        command = self._write_script(
+            "claude-flaky-artifact-smoke-stub",
+            "#!/bin/sh\n"
+            f"attempts='{attempts}'\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' '2.1.85 (Claude Code)'; exit 0; fi\n"
+            "if [ -n \"${ACP_PREFLIGHT_SMOKE_SENTINEL:-}\" ]; then\n"
+            "  count=0\n"
+            "  if [ -f \"$attempts\" ]; then count=$(cat \"$attempts\"); fi\n"
+            "  count=$((count + 1))\n"
+            "  printf '%s\\n' \"$count\" > \"$attempts\"\n"
+            "  if [ \"$count\" = \"1\" ]; then sleep 2; exit 0; fi\n"
+            "  mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"\n"
+            "  printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"\n"
+            "  exit 0\n"
+            "fi\n"
+            "printf '%s\n' 'ACP_READY'\n",
+        )
+        old_timeout = os.environ.get("ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC")
+        os.environ["ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC"] = "1"
+        try:
+            result = self.module.probe_provider_readiness("claude", command, str(REPO_ROOT))
+        finally:
+            if old_timeout is None:
+                os.environ.pop("ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC", None)
+            else:
+                os.environ["ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC"] = old_timeout
+
+        self.assertEqual("ready", result["status"])
+        self.assertEqual("", result["subclass"])
+        self.assertEqual("passed", result["artifact_smoke"])
+        self.assertEqual("2", attempts.read_text(encoding="utf-8").strip())
+
+    def test_claude_artifact_smoke_exhausted_timeout_blocks_preflight(self) -> None:
+        attempts = self.root / "claude-smoke-attempts"
+        command = self._write_script(
+            "claude-timeout-artifact-smoke-stub",
+            "#!/bin/sh\n"
+            f"attempts='{attempts}'\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' '2.1.85 (Claude Code)'; exit 0; fi\n"
+            "if [ -n \"${ACP_PREFLIGHT_SMOKE_SENTINEL:-}\" ]; then\n"
+            "  count=0\n"
+            "  if [ -f \"$attempts\" ]; then count=$(cat \"$attempts\"); fi\n"
+            "  count=$((count + 1))\n"
+            "  printf '%s\\n' \"$count\" > \"$attempts\"\n"
+            "  sleep 2\n"
+            "  exit 0\n"
+            "fi\n"
+            "printf '%s\n' 'ACP_READY'\n",
+        )
+        old_timeout = os.environ.get("ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC")
+        os.environ["ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC"] = "1"
+        try:
+            result = self.module.probe_provider_readiness("claude", command, str(REPO_ROOT))
+        finally:
+            if old_timeout is None:
+                os.environ.pop("ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC", None)
+            else:
+                os.environ["ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC"] = old_timeout
+
+        self.assertEqual("unavailable", result["status"])
+        self.assertEqual("operational_host_preflight_failed", result["subclass"])
+        self.assertEqual("failed", result["artifact_smoke"])
+        self.assertIn("attempt 2/2", result["reason"])
+        self.assertIn("timed out", result["reason"])
 
     def test_probe_provider_readiness_blocks_old_codex_for_gpt55(self) -> None:
         command = self._write_script("codex-stub", "#!/bin/sh\nprintf '%s\n' 'codex-cli 0.118.0'\n")
