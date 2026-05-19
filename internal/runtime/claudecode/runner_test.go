@@ -17,8 +17,8 @@ func TestClaudeAdapterClassifiesSilentRetryExhaustionAsUnavailable(t *testing.T)
 	if !policy.ClassifySilentRetryExhaustionUnavailable {
 		t.Fatalf("expected claude silent retry exhaustion to use runner_unavailable lane, got %+v", policy)
 	}
-	if policy.RetryZeroOutputPreArtifactStallOnce {
-		t.Fatalf("claude collect zero-output pre-artifact fail-fast behavior must remain unchanged, got %+v", policy)
+	if !policy.RetryZeroOutputPreArtifactStallOnce {
+		t.Fatalf("expected claude collect zero-output pre-artifact stall to be retryable, got %+v", policy)
 	}
 
 	policy = (claudeAdapter{}).RecoveryPolicy(acpruntime.Task{StepID: "init.step3.findings"})

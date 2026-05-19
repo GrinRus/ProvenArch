@@ -120,7 +120,7 @@ func (a claudeAdapter) RecoveryPolicy(task acpruntime.Task) providercommon.Recov
 		ClassifySilentRetryExhaustionUnavailable: true,
 	}
 	switch acpruntime.StepProviderKeyForStepID(task.StepID) {
-	case acpruntime.StepProviderStep3Findings, acpruntime.StepProviderStep4Proposals:
+	case acpruntime.StepProviderStep1Collect, acpruntime.StepProviderStep3Findings, acpruntime.StepProviderStep4Proposals:
 		policy.RetryZeroOutputPreArtifactStallOnce = true
 	}
 	return policy
