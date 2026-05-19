@@ -122,6 +122,18 @@ def text_has_runtime_contract_parse_signature(text: str) -> bool:
     )
 
 
+def text_has_collect_document_path_contract_signature(text: str) -> bool:
+    haystack = str(text or "")
+    patterns = (
+        r"read shard document\b",
+        r"manifest document path\b",
+        r"documents\[[0-9]+\]\.path references missing document file\b",
+        r"documents\[[0-9]+\]\.path references a directory\b",
+        r"documents\[[0-9]+\]\.path stat document file\b",
+    )
+    return any(re.search(pattern, haystack, flags=re.IGNORECASE) for pattern in patterns)
+
+
 def extract_focused_recovery_reason_tags(text: str) -> set[str]:
     haystack = str(text or "").lower()
     tags: set[str] = set()

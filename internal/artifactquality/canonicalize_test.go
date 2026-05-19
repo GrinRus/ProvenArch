@@ -331,6 +331,52 @@ func TestValidateCollectManifestRejectsAbsoluteDocumentPathWithoutRewrite(t *tes
 	}
 }
 
+func TestValidateCollectManifestRejectsMissingReferencedDocumentPath(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	payload := validCollectManifestPayload()
+	documents := payload["documents"].([]any)
+	documents[0].(map[string]any)["path"] = "src-ledger-balereader-overview.md"
+	raw, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), append(raw, '\n'), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	writeDoc(t, writeRoot, "src-ledger-balancereader-overview.md", "# Balance Reader\n")
+
+	if err := ValidateCollectManifestInRoot(writeRoot); err == nil {
+		t.Fatalf("expected missing referenced document path to fail strict validation")
+	} else if !strings.Contains(err.Error(), `documents[0].path references missing document file "src-ledger-balereader-overview.md"`) {
+		t.Fatalf("expected missing document path error, got %v", err)
+	}
+}
+
+func TestValidateCollectManifestRejectsDirectoryDocumentPath(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	payload := validCollectManifestPayload()
+	if err := os.Mkdir(filepath.Join(writeRoot, "overview.md"), 0o755); err != nil {
+		t.Fatalf("mkdir document directory: %v", err)
+	}
+	raw, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), append(raw, '\n'), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	if err := ValidateCollectManifestInRoot(writeRoot); err == nil {
+		t.Fatalf("expected directory referenced as document path to fail strict validation")
+	} else if !strings.Contains(err.Error(), `documents[0].path references a directory`) {
+		t.Fatalf("expected directory document path error, got %v", err)
+	}
+}
+
 func TestValidateCollectManifestRejectsMissingRequiredMetadataWithoutAutofill(t *testing.T) {
 	t.Parallel()
 

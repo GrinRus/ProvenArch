@@ -783,6 +783,18 @@ contains_runtime_contract_parse_signature() {
   return 1
 }
 
+contains_collect_document_path_contract_signature() {
+  local -a paths=("$@")
+  local path
+  local pattern="(read shard document|manifest document path|documents\\[[0-9]+\\]\\.path references missing document file|documents\\[[0-9]+\\]\\.path references a directory|documents\\[[0-9]+\\]\\.path stat document file)"
+  for path in "${paths[@]}"; do
+    if [[ -f "$path" ]] && grep -E -q "$pattern" "$path"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 is_explicit_failure_class() {
   local value="$1"
   case "$value" in
@@ -1299,6 +1311,9 @@ classify_run_failure() {
   fi
 
   if [[ "$run_class" == "none" && "$terminal_success" != "1" ]] && contains_runtime_contract_parse_signature "${classify_log_paths[@]}"; then
+    run_class="runtime_contract_failed"
+  fi
+  if [[ "$run_class" == "none" && "$terminal_success" != "1" ]] && contains_collect_document_path_contract_signature "${classify_log_paths[@]}"; then
     run_class="runtime_contract_failed"
   fi
   if [[ "$run_class" == "none" && "$validator_verdict_failed" == "1" ]]; then

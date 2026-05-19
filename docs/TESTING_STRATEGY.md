@@ -193,7 +193,7 @@ Release workflow hardening:
 - invalid runtime execution metadata
 - invalid artifact contracts (`shard-pack-manifest`, `validator-verdict`, draft manifests)
 - strict collect validation:
-  - artifact-root-prefixed и absolute `documents[].path` fail-ятся без rewrite
+  - artifact-root-prefixed, absolute, missing-file, and directory `documents[].path` fail-ятся без rewrite
   - missing required metadata fail-ится без autofill
   - collect pair recovery запускается один раз только при no authored artifacts + non-empty provider diagnostics и разрешает писать только suggested authored doc + `shard-pack-manifest.json`
   - manifest-only runtime repair запускается один раз только при authored docs + missing/invalid `shard-pack-manifest.json`

@@ -1126,6 +1126,73 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertTrue(result.runtime_contract_failed)
         self.assertTrue(result.runner_unavailable)
 
+    def test_python_report_classifies_missing_collect_doc_reference_as_runtime_contract_failed(self) -> None:
+        run_dir = self.root / "run-missing-collect-doc-ref-python"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: passed",
+                    "- failure_reason: pipeline_command_failed",
+                    "- expected_runs: 4",
+                    "- completed_runs: 4",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 2",
+                    "- running_runs_detected: 0",
+                    "- termination_signal: none",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=qwen-code",
+                    "run_index=1",
+                    "state=process_failed",
+                    "process_exit=1",
+                    "termination_signal=none",
+                    "failure_reason=pipeline_command_failed",
+                    "summary_written=yes",
+                ]
+            )
+            + "\n",
+        )
+        write_text(
+            run_dir / "full-run.log",
+            'run failed: refresh.step2.asis_docs: read shard document "doc.bank.reader": '
+            "open staging/shards/bank/src-ledger-balereader-overview.md: no such file or directory\n",
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "runner_unavailable",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("runtime_contract_failed", result.failure_class)
+        self.assertTrue(result.runtime_contract_failed)
+        self.assertFalse(result.runner_unavailable)
+        self.assertTrue(
+            any("ignored runner/runtime-flow override" in detail for detail in result.issue_details),
+            result.issue_details,
+        )
+
     def test_python_report_prefers_runtime_timeout_over_runner_unavailable_when_timeout_signaled(self) -> None:
         run_dir = self.root / "run-timeout-python"
         self._create_fixture_run_dir(run_dir)
@@ -1743,6 +1810,58 @@ class BatchFailureClassificationTest(unittest.TestCase):
         script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
         prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
         classifications_tsv = self.root / "backend-run-classifications-contract-vs-runner.tsv"
+        command = (
+            prelude
+            + "\n"
+            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
+            + f'classify_run_failure "qwen-code" "1" {shlex.quote(str(run_dir))} "1"\n'
+        )
+        subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
+        self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("runtime_contract_failed", fields[2], classifications_tsv.read_text(encoding="utf-8"))
+
+    def test_shell_classifier_classifies_missing_collect_doc_reference_as_runtime_contract_failed(self) -> None:
+        run_dir = self.root / "run-missing-collect-doc-ref-shell"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- quality_gates: passed",
+                    "- failure_reason: pipeline_command_failed",
+                    "- expected_runs: 4",
+                    "- completed_runs: 4",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 2",
+                    "- running_runs_detected: 0",
+                    "- termination_signal: none",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+        write_text(
+            run_dir / "full-run.log",
+            'run failed: refresh.step2.asis_docs: read shard document "doc.bank.reader": '
+            "open staging/shards/bank/src-ledger-balereader-overview.md: no such file or directory\n"
+            "provider returned status=429 model at capacity\n",
+        )
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        classifications_tsv = self.root / "backend-run-classifications-missing-doc-ref.tsv"
         command = (
             prelude
             + "\n"
