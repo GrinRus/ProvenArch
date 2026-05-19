@@ -170,7 +170,8 @@ Optional поля записи:
 Canonical MVP runtime shape:
 - `claude-code`, `qwen-code` и `codex-code` используют общий artifact-only process engine; provider adapters задают CLI args/stdin/workdir, unavailable markers и bounded activity/recovery policy
 - `qwen-code` adapter invocation передаёт artifact prompt только через CLI `-p`; JSON task stdin не используется, custom qwen args нормализуются, чтобы не смешивать или подменять machine envelope с пользовательским prompt, а default invocation использует `stream-json` activity output без semantic stdout contract. `claude-code` и `codex-code` сохраняют свои transport-specific stdin/machine-mode surfaces.
-- zero-output `pre_artifact` recovery остаётся adapter policy: `qwen-code` может сделать один warning/retry для любого artifact-monitored шага, а `claude-code` делает такой warning/retry только для collect/validator/proposals steps (`init|refresh.step1.collect`, `init|refresh.step3.findings`, `init|refresh.step4.proposals`); exhausted silent no-artifact retry остаётся `runner_unavailable`
+- `init.step0.constitution` normal prompt начинается с `FIRST CONSTITUTION DRAFT COMMAND`: `constitution-draft.json` и referenced draft files под `draft_final_root` должны быть first authored artifact set до broad analysis.
+- zero-output `pre_artifact` recovery остаётся adapter policy: `qwen-code` может сделать один warning/retry для любого artifact-monitored шага, а `claude-code` делает такой warning/retry только для constitution/collect/validator/proposals steps (`init.step0.constitution`, `init|refresh.step1.collect`, `init|refresh.step3.findings`, `init|refresh.step4.proposals`); exhausted silent no-artifact retry остаётся `runner_unavailable`
 - stdout/stderr provider transcripts сохраняются как diagnostics/raw-output refs и никогда не трактуются как semantic success payload
 - selected-provider readiness фиксируется в batch preflight; provider command/probe/auth/quota/version и codex CLI compatibility blockers являются operational failures до deep run. Provider `model`/`modelUsage` telemetry не является readiness contract и не блокирует release сама по себе
 - semantic source of truth для `step1` — `shard-pack-manifest.json.semantic`
@@ -213,7 +214,7 @@ Inputs:
 
 Runtime focuses on:
 - arbitrary stacks через выбранный headless provider (`claude-code|qwen-code|codex-code`) + baseline skill/prompt bundle, без фиксированного whitelist parser implementations в MVP
-- workspace prompt packs участвуют в composed prompt как editable content layer; merge order фиксирован: provider header -> artifact-only/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer. Enforced runtime policy/invariants задаются internal shared step-policy слоем и не могут быть ослаблены содержимым prompt pack. Editable prompt pack layer подключён к `step0.constitution`, `step1.collect`, `step3.findings` и `step4.proposals`; `step2.asis_docs` работает через enforced policy only без отдельного editable `as-is` prompt pack.
+- workspace prompt packs участвуют в composed prompt как editable content layer; merge order фиксирован: provider header -> task-specific first-action artifact command -> artifact-only/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer. Enforced runtime policy/invariants задаются internal shared step-policy слоем и не могут быть ослаблены содержимым prompt pack. Editable prompt pack layer подключён к `step0.constitution`, `step1.collect`, `step3.findings` и `step4.proposals`; `step2.asis_docs` работает через enforced policy only без отдельного editable `as-is` prompt pack.
 - service topology и entrypoints
 - interfaces (HTTP/gRPC/events)
 - external systems/integrations

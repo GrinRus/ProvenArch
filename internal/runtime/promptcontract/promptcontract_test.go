@@ -519,6 +519,67 @@ func TestComposeArtifactOnlyPromptAddsAsIsDraftCanonicalSection(t *testing.T) {
 	}
 }
 
+func TestComposeArtifactOnlyPromptAddsConstitutionFirstActionCommand(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step0.constitution",
+		StepContract:      "constitution",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/write-root",
+		DraftFinalRoot:    "/tmp/draft-root",
+		ExpectedArtifacts: []string{"constitution-draft.json", "charter-overview.md", "baseline-subagents.yaml"},
+	}
+
+	claudePrompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderClaudeCode, task)
+	qwenPrompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderQwenCode, task)
+	codexPrompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderCodexCode, task)
+
+	claudeTail := strings.TrimPrefix(claudePrompt, "You are ACP runtime provider \"claude-code\".\n\n")
+	qwenTail := strings.TrimPrefix(qwenPrompt, "You are ACP runtime provider \"qwen-code\".\n\n")
+	codexTail := strings.TrimPrefix(codexPrompt, "You are ACP runtime provider \"codex-code\".\n\n")
+	if claudeTail != qwenTail || claudeTail != codexTail {
+		t.Fatalf("expected constitution enforced prompt body to be provider-independent")
+	}
+
+	expectedTokens := []string{
+		"CONSTITUTION FIRST-ACTION DRAFT ARTIFACTS:",
+		"FIRST CONSTITUTION DRAFT COMMAND:",
+		"cat > '/tmp/write-root/constitution-draft.json' <<'ACP_DRAFT_MANIFEST_JSON'",
+		"cat > '/tmp/draft-root/charter-overview.md' <<'ACP_DRAFT_FILE'",
+		"cat > '/tmp/draft-root/baseline-subagents.yaml' <<'ACP_DRAFT_FILE'",
+		"Artifact-only contract:",
+		`"step_id": "init.step0.constitution"`,
+		`"step_contract": "constitution"`,
+		`"canonical_path": "charter/overview.md"`,
+		`"canonical_path": "skills/subagents.yaml"`,
+		"constitution-draft.json must use the exact runtime draft manifest shape shown below",
+	}
+	for _, token := range expectedTokens {
+		if !strings.Contains(claudePrompt, token) {
+			t.Fatalf("expected constitution prompt to contain %q, got:\n%s", token, claudePrompt)
+		}
+	}
+	if !strings.HasPrefix(claudePrompt, "You are ACP runtime provider \"claude-code\".\n\nCONSTITUTION FIRST-ACTION DRAFT ARTIFACTS:") {
+		t.Fatalf("expected constitution first-action section immediately after provider identity, got:\n%s", claudePrompt)
+	}
+	firstActionIndex := strings.Index(claudePrompt, "FIRST CONSTITUTION DRAFT COMMAND:")
+	artifactContractIndex := strings.Index(claudePrompt, "Artifact-only contract:")
+	if firstActionIndex < 0 || artifactContractIndex < 0 || firstActionIndex > artifactContractIndex {
+		t.Fatalf("expected constitution first-action command before broad artifact-only contract:\n%s", claudePrompt)
+	}
+	if got := strings.Count(claudePrompt, "FIRST CONSTITUTION DRAFT COMMAND:"); got != 1 {
+		t.Fatalf("expected one constitution first-action command heading, got %d:\n%s", got, claudePrompt)
+	}
+	if got := strings.Count(claudePrompt, "ACP_DRAFT_MANIFEST_JSON"); got != 2 {
+		t.Fatalf("expected one constitution manifest heredoc in normal prompt, got delimiter count %d:\n%s", got, claudePrompt)
+	}
+	if got := strings.Count(claudePrompt, "ACP_DRAFT_FILE"); got != 4 {
+		t.Fatalf("expected two constitution draft file heredocs in normal prompt, got delimiter count %d:\n%s", got, claudePrompt)
+	}
+}
+
 func TestComposeArtifactOnlyPromptAddsProposalsDraftCanonicalSection(t *testing.T) {
 	t.Parallel()
 

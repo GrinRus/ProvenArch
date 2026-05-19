@@ -92,7 +92,7 @@ func TestRuntimeAndQABoundaryConsistentAcrossDocs(t *testing.T) {
 func TestPromptLayerTruthConsistentAcrossCoreDocs(t *testing.T) {
 	t.Parallel()
 
-	const mergeOrder = "provider header -> artifact-only/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer"
+	const mergeOrder = "provider header -> task-specific first-action artifact command -> artifact-only/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer"
 	paths := []string{
 		"docs/ARCHITECTURE.md",
 		"docs/spec/PIPELINE_SPEC.md",
