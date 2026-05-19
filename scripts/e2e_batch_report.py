@@ -1517,6 +1517,15 @@ def evaluate_run(
             f"reliability/cancellation-like -> failure_subclass={classified_subclass or '-'} process_exit={classification_row.get('process_exit', '-')}"
         )
 
+    if quality_gates_failed and classified_failure == "runner_unavailable":
+        details.append(
+            "reliability/classifier-override -> ignored stale runner_unavailable because "
+            "session-summary marks terminal quality gate failure"
+        )
+        classified_failure = "none"
+        classified_subclass = "none"
+        cancellation_like = False
+
     classified_terminal_runtime_provider_failure = classified_failure in {
         "runtime_timeout",
         "runner_unavailable",
@@ -1914,12 +1923,12 @@ def evaluate_run(
         failure_class = "runtime_flow_failed"
     elif runtime_contract_failed_hit:
         failure_class = "runtime_contract_failed"
-    elif runner_unavailable_hit:
-        failure_class = "runner_unavailable"
     elif infra_signal_terminated:
         failure_class = "infra_signal_terminated"
     elif quality_gates_failed:
         failure_class = "quality_gates_failed"
+    elif runner_unavailable_hit:
+        failure_class = "runner_unavailable"
     elif infra_incomplete_cycle:
         failure_class = "infra_incomplete_cycle"
 

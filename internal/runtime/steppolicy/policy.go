@@ -341,6 +341,111 @@ func ValidatorFirstActionSection(task acpruntime.Task) string {
 	}, "\n")
 }
 
+func RuntimeDraftFirstActionWriteCommand(task acpruntime.Task) string {
+	writeRoot := strings.TrimSpace(task.WriteRoot)
+	draftRoot := strings.TrimSpace(task.DraftFinalRoot)
+	manifestFile := runtimedrafts.ManifestFileForStep(task.StepID)
+	manifestTarget := filepath.Join(writeRoot, manifestFile)
+	skeleton := RuntimeDraftManifestTaskSkeleton(task)
+	lines := []string{
+		"mkdir -p " + shellSingleQuote(writeRoot) + " " + shellSingleQuote(draftRoot),
+		"cat > " + shellSingleQuote(manifestTarget) + " <<'ACP_DRAFT_MANIFEST_JSON'",
+		strings.TrimSpace(skeleton),
+		"ACP_DRAFT_MANIFEST_JSON",
+		"test -s " + shellSingleQuote(manifestTarget),
+	}
+	var manifest runtimedrafts.Manifest
+	if err := json.Unmarshal([]byte(skeleton), &manifest); err != nil {
+		return strings.Join(lines, "\n")
+	}
+	for _, output := range manifest.Outputs {
+		rel, ok := safeDraftOutputPath(output.Path)
+		if !ok {
+			continue
+		}
+		target := filepath.Join(draftRoot, filepath.FromSlash(rel))
+		lines = append(lines,
+			"mkdir -p "+shellSingleQuote(filepath.Dir(target)),
+			"cat > "+shellSingleQuote(target)+" <<'ACP_DRAFT_FILE'",
+			runtimeDraftFirstActionFileTemplate(task, output),
+			"ACP_DRAFT_FILE",
+			"test -s "+shellSingleQuote(target),
+		)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func ProposalsFirstActionSection(task acpruntime.Task) string {
+	if acpruntime.StepProviderKeyForStepID(task.StepID) != acpruntime.StepProviderStep4Proposals {
+		return ""
+	}
+	manifestTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), runtimedrafts.ProposalsManifestFile)
+	return strings.Join([]string{
+		"PROPOSALS FIRST-ACTION DRAFT ARTIFACTS:",
+		"- This proposals step must start by writing proposals-draft-manifest.json and its referenced draft files before broad proposal analysis.",
+		fmt.Sprintf(`- Exact proposals draft manifest target: %q.`, manifestTarget),
+		fmt.Sprintf(`- Draft files must be written only under draft_final_root: %q.`, strings.TrimSpace(task.DraftFinalRoot)),
+		"FIRST PROPOSALS DRAFT COMMAND:",
+		"Run this exact command as the next filesystem action after checking whether the manifest and referenced draft files already exist; do not inspect repository files, sibling taskruns, or raw logs before this command:",
+		RuntimeDraftFirstActionWriteCommand(task),
+	}, "\n")
+}
+
+func safeDraftOutputPath(raw string) (string, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if filepath.IsAbs(trimmed) || strings.HasPrefix(filepath.ToSlash(trimmed), "/") {
+		return "", false
+	}
+	rel := filepath.ToSlash(trimmed)
+	rel = strings.TrimPrefix(rel, "./")
+	rel = strings.Trim(rel, "/")
+	if rel == "" || rel == "." || strings.HasPrefix(rel, "../") || strings.Contains(rel, "/../") {
+		return "", false
+	}
+	return rel, true
+}
+
+func runtimeDraftFirstActionFileTemplate(task acpruntime.Task, output runtimedrafts.Output) string {
+	canonicalPath := strings.TrimSpace(output.CanonicalPath)
+	title := strings.TrimSpace(output.Title)
+	if title == "" {
+		title = strings.TrimSpace(output.Path)
+	}
+	switch canonicalPath {
+	case "proposals/runtime-recommendations.md":
+		return strings.Join([]string{
+			"# Runtime Recommendations",
+			"",
+			"## Summary",
+			"- Provider wrote the required proposals draft artifact set for this run.",
+			"",
+			"## Recommendation",
+			"- Review collected evidence, validator findings, and coverage gaps before promotion.",
+		}, "\n")
+	case "reports/changelog/runtime-proposals.md":
+		return strings.Join([]string{
+			"# Runtime Proposal Changelog",
+			"",
+			"## Changes",
+			"- Provider wrote the required proposal draft surface.",
+			"",
+			"## Notes",
+			"- Promote only after artifact validation succeeds.",
+		}, "\n")
+	default:
+		return strings.Join([]string{
+			"# " + title,
+			"",
+			"## Scope",
+			"- Run: " + strings.TrimSpace(task.RunID),
+			"- Step: " + strings.TrimSpace(task.StepID),
+			"",
+			"## Summary",
+			"- Provider wrote this draft artifact under the required draft_final_root.",
+		}, "\n")
+	}
+}
+
 func collectDocumentInitialTemplate(task acpruntime.Task, docRel string) string {
 	repo := PrimaryTaskRepoScope(task.RepoScope, task.RepoScopes)
 	if repo == "" {

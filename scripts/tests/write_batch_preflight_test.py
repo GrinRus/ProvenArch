@@ -225,7 +225,7 @@ class WriteBatchPreflightTest(unittest.TestCase):
             "  if [ -f \"$attempts\" ]; then count=$(cat \"$attempts\"); fi\n"
             "  count=$((count + 1))\n"
             "  printf '%s\\n' \"$count\" > \"$attempts\"\n"
-            "  if [ \"$count\" = \"1\" ]; then sleep 2; exit 0; fi\n"
+            "  if [ \"$count\" = \"1\" ]; then sleep 3; exit 0; fi\n"
             "  mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"\n"
             "  printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"\n"
             "  exit 0\n"
@@ -233,7 +233,7 @@ class WriteBatchPreflightTest(unittest.TestCase):
             "printf '%s\n' 'ACP_READY'\n",
         )
         old_timeout = os.environ.get("ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC")
-        os.environ["ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC"] = "1"
+        os.environ["ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC"] = "2"
         try:
             result = self.module.probe_provider_readiness("claude", command, str(REPO_ROOT))
         finally:
@@ -259,13 +259,13 @@ class WriteBatchPreflightTest(unittest.TestCase):
             "  if [ -f \"$attempts\" ]; then count=$(cat \"$attempts\"); fi\n"
             "  count=$((count + 1))\n"
             "  printf '%s\\n' \"$count\" > \"$attempts\"\n"
-            "  sleep 2\n"
+            "  sleep 3\n"
             "  exit 0\n"
             "fi\n"
             "printf '%s\n' 'ACP_READY'\n",
         )
         old_timeout = os.environ.get("ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC")
-        os.environ["ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC"] = "1"
+        os.environ["ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC"] = "2"
         try:
             result = self.module.probe_provider_readiness("claude", command, str(REPO_ROOT))
         finally:
