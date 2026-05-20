@@ -85,6 +85,43 @@ func TestDocFirstFilesystemPolicyDefinesSharedCollectRepairSurface(t *testing.T)
 	}
 }
 
+func TestDocFirstFilesystemPolicyDefersCollectEntrypointHintsUntilFirstPair(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	repoRoot := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	for _, name := range []string{"README.md", "Makefile"} {
+		if err := os.WriteFile(filepath.Join(repoRoot, name), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	task := acpruntime.Task{
+		TaskID:           "task-1",
+		RunID:            "run-1",
+		StepID:           "init.step1.collect",
+		Workspace:        filepath.Join(root, "workspace"),
+		WriteRoot:        filepath.Join(root, "workspace", "reports", "taskruns", "run-1", "staging", "shards", "root-files"),
+		ArtifactRoot:     "reports/taskruns/run-1/staging/shards/root-files",
+		ReadContextRoots: []string{repoRoot},
+		RepoScopes:       []string{"repo"},
+		PathScopes:       []string{"README.md", "Makefile"},
+		ExpectedArtifacts: []string{
+			"shard-pack-manifest.json",
+		},
+	}
+
+	policy := DocFirstFilesystemPolicy(task)
+	if !strings.Contains(policy, "Existing repo entrypoint hints (after the first collect artifact pair exists, read only these first when further evidence is needed):") {
+		t.Fatalf("collect entrypoint hints must be deferred until after first pair write, got:\n%s", policy)
+	}
+	if strings.Contains(policy, "Existing repo entrypoint hints (read only these first when relevant):") {
+		t.Fatalf("collect entrypoint hints must not instruct provider to read before first pair write, got:\n%s", policy)
+	}
+}
+
 func TestCollectFirstActionSectionWritesExactPair(t *testing.T) {
 	t.Parallel()
 
@@ -104,6 +141,8 @@ func TestCollectFirstActionSectionWritesExactPair(t *testing.T) {
 		`COLLECT FIRST-ACTION ARTIFACT PAIR:`,
 		`FIRST COLLECT ARTIFACT PAIR COMMAND:`,
 		`Run this exact command as the next filesystem action after checking whether both target files already exist`,
+		`do not call read_file, list_directory, grep_search, glob, find, rg, or any repository exploration before this command`,
+		`The embedded skeleton is intentionally valid before additional evidence; do not improve or rewrite it before the first pair exists.`,
 		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md' <<'ACP_COLLECT_DOC'`,
 		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json' <<'ACP_MANIFEST_JSON'`,
 		`"path": "payments-overview.md"`,

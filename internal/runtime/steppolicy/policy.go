@@ -157,7 +157,11 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 		`- Relative CWD checks/writes such as test -f validator-verdict.json or test -f overview.md are invalid for runtime artifacts.`,
 	}
 	if entrypointHints := CollectRepoEntrypointHints(task); len(entrypointHints) > 0 {
-		lines = append(lines, fmt.Sprintf(`- Existing repo entrypoint hints (read only these first when relevant): %s`, strings.Join(entrypointHints, ", ")))
+		if isCollectStep(task.StepID) {
+			lines = append(lines, fmt.Sprintf(`- Existing repo entrypoint hints (after the first collect artifact pair exists, read only these first when further evidence is needed): %s`, strings.Join(entrypointHints, ", ")))
+		} else {
+			lines = append(lines, fmt.Sprintf(`- Existing repo entrypoint hints (read only these first when relevant): %s`, strings.Join(entrypointHints, ", ")))
+		}
 	} else if isPromptHintedStep(task.StepID) {
 		lines = append(lines, `- Repo entrypoint hints are limited to actually existing files; do not assume README.md exists when it is absent.`)
 	}
@@ -310,7 +314,8 @@ func CollectFirstActionSection(task acpruntime.Task) string {
 		fmt.Sprintf(`- Exact authored document target: %q.`, docTarget),
 		fmt.Sprintf(`- Exact manifest target: %q.`, manifestTarget),
 		"FIRST COLLECT ARTIFACT PAIR COMMAND:",
-		"Run this exact command as the next filesystem action after checking whether both target files already exist; do not run find/rg/list_directory over path_scopes before this command:",
+		"Run this exact command as the next filesystem action after checking whether both target files already exist; do not call read_file, list_directory, grep_search, glob, find, rg, or any repository exploration before this command:",
+		"- The embedded skeleton is intentionally valid before additional evidence; do not improve or rewrite it before the first pair exists.",
 		CollectEarlyPairWriteCommand(task),
 	}, "\n")
 }

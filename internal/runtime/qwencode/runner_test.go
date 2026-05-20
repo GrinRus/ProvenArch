@@ -300,7 +300,8 @@ func TestQwenRepairCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 	args := strings.Join(spec.Args, "\n")
 	for _, token := range []string{
 		"collect manifest repair mode",
-		"Run the preferred file write command below",
+		"FIRST COLLECT MANIFEST REPAIR COMMAND:",
+		"Run this exact command as your next filesystem action",
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
 		"<<'ACP_MANIFEST_JSON'",
 		"Copy the heredoc JSON exactly during repair",

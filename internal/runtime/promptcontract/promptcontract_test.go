@@ -208,7 +208,8 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 	prompt := ComposeCollectManifestRepairPrompt(acpruntime.ProviderQwenCode, task, os.ErrNotExist)
 	expectedTokens := []string{
 		"collect manifest repair mode",
-		"Run the preferred file write command below",
+		"FIRST COLLECT MANIFEST REPAIR COMMAND:",
+		"Run this exact command as your next filesystem action. Do not analyze, browse, read, diff, patch, or inspect repository files before this write:",
 		"mkdir -p ",
 		"cat > ",
 		"<<'ACP_MANIFEST_JSON'",
@@ -248,17 +249,21 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		t.Fatalf("repair prompt should not include validation-error cues that invite patching instead of heredoc overwrite:\n%s", prompt)
 	}
 	skeletonIndex := strings.Index(prompt, "TASK-SPECIFIC MANIFEST JSON SKELETON:")
+	firstCommandIndex := strings.Index(prompt, "FIRST COLLECT MANIFEST REPAIR COMMAND:")
 	contractIndex := strings.Index(prompt, "Artifact-only repair contract:")
 	instructionIndex := strings.Index(prompt, "COLLECT MANIFEST REPAIR INSTRUCTIONS:")
 	checklistIndex := strings.Index(prompt, "COLLECT MANIFEST REPAIR CHECKLIST:")
-	if skeletonIndex < 0 || contractIndex < 0 || instructionIndex < 0 || checklistIndex < 0 {
+	if firstCommandIndex < 0 || skeletonIndex < 0 || contractIndex < 0 || instructionIndex < 0 || checklistIndex < 0 {
 		t.Fatalf("expected repair prompt to contain skeleton, instructions, and canonical sections:\n%s", prompt)
 	}
-	if !(skeletonIndex < contractIndex && contractIndex < instructionIndex && instructionIndex < checklistIndex) {
-		t.Fatalf("expected compact repair prompt to put exact skeleton before contract, repair instructions, and canonical reference:\n%s", prompt)
+	if !(firstCommandIndex < skeletonIndex && skeletonIndex < contractIndex && contractIndex < instructionIndex && instructionIndex < checklistIndex) {
+		t.Fatalf("expected compact repair prompt to put exact first command before skeleton note, contract, repair instructions, and canonical reference:\n%s", prompt)
 	}
 	if strings.Count(prompt, "TASK-SPECIFIC MANIFEST JSON SKELETON:") != 1 {
 		t.Fatalf("repair prompt should include exactly one task-specific JSON skeleton section:\n%s", prompt)
+	}
+	if strings.Count(prompt, "FIRST COLLECT MANIFEST REPAIR COMMAND:") != 1 {
+		t.Fatalf("repair prompt should include exactly one first repair command section:\n%s", prompt)
 	}
 	if strings.Count(prompt, "ACP_MANIFEST_JSON") != 2 {
 		t.Fatalf("repair prompt should include a single heredoc command around the skeleton:\n%s", prompt)
