@@ -431,18 +431,20 @@ func TestComposeDraftArtifactRepairPromptNamesExactTargets(t *testing.T) {
 		"Immediate draft artifact repair action:",
 		"/tmp/workspace/reports/taskruns/run-1/asis/asis-draft-manifest.json",
 		"/tmp/workspace/reports/taskruns/run-1/staging/final",
-		"Do not begin with broad analysis. Run the preferred file write command below",
+		"Do not begin with broad analysis. Run the exact shell command below as a single command",
 		"overwrite them from the heredoc artifacts",
 		"FIRST AS-IS DRAFT COMMAND:",
-		"Run this exact command as the next filesystem action; it writes asis-draft-manifest.json plus overview.md, summary.md, and architect-summary.md",
-		"cat > '/tmp/workspace/reports/taskruns/run-1/asis/asis-draft-manifest.json' <<'ACP_DRAFT_MANIFEST_JSON'",
-		"cat > '/tmp/workspace/reports/taskruns/run-1/staging/final/overview.md' <<'ACP_DRAFT_FILE'",
-		"cat > '/tmp/workspace/reports/taskruns/run-1/staging/final/summary.md' <<'ACP_DRAFT_FILE'",
-		"cat > '/tmp/workspace/reports/taskruns/run-1/staging/final/architect-summary.md' <<'ACP_DRAFT_FILE'",
-		"test -s '/tmp/workspace/reports/taskruns/run-1/asis/asis-draft-manifest.json'",
-		"test -s '/tmp/workspace/reports/taskruns/run-1/staging/final/overview.md'",
-		"test -s '/tmp/workspace/reports/taskruns/run-1/staging/final/summary.md'",
-		"test -s '/tmp/workspace/reports/taskruns/run-1/staging/final/architect-summary.md'",
+		"Run this exact shell command as the next filesystem action; it writes asis-draft-manifest.json plus overview.md, summary.md, and architect-summary.md",
+		"write_root='/tmp/workspace/reports/taskruns/run-1/asis'",
+		"draft_root='/tmp/workspace/reports/taskruns/run-1/staging/final'",
+		"cat > \"$write_root/asis-draft-manifest.json\" <<'ACP_DRAFT_MANIFEST_JSON'",
+		"cat > \"$draft_root/overview.md\" <<'ACP_DRAFT_FILE'",
+		"cat > \"$draft_root/summary.md\" <<'ACP_DRAFT_FILE'",
+		"cat > \"$draft_root/architect-summary.md\" <<'ACP_DRAFT_FILE'",
+		"test -s \"$write_root/asis-draft-manifest.json\"",
+		"test -s \"$draft_root/overview.md\"",
+		"test -s \"$draft_root/summary.md\"",
+		"test -s \"$draft_root/architect-summary.md\"",
 		`"step_contract": "as_is"`,
 		`"path": "overview.md"`,
 		"# Coverage Summary",
@@ -481,7 +483,10 @@ func TestComposeDraftArtifactRepairPromptWritesValidConstitutionSubagentsYaml(t 
 	prompt := ComposeDraftArtifactRepairPrompt(acpruntime.ProviderClaudeCode, task, os.ErrNotExist)
 	for _, token := range []string{
 		"FIRST CONSTITUTION DRAFT COMMAND:",
-		"cat > '/tmp/workspace/reports/taskruns/run-1/staging/final/baseline-subagents.yaml' <<'ACP_DRAFT_FILE'",
+		"write_root='/tmp/workspace/reports/taskruns/run-1/constitution'",
+		"draft_root='/tmp/workspace/reports/taskruns/run-1/staging/final'",
+		"cat > \"$draft_root/baseline-subagents.yaml\" <<'ACP_DRAFT_FILE'",
+		"test -s \"$draft_root/baseline-subagents.yaml\"",
 		"agents:",
 		"id: domain-analyst",
 		"id: architect-aggregator",
@@ -493,6 +498,38 @@ func TestComposeDraftArtifactRepairPromptWritesValidConstitutionSubagentsYaml(t 
 	}
 	if strings.Contains(prompt, "generated_by: acp-runtime-provider-focused-recovery") {
 		t.Fatalf("constitution draft repair must write canonical subagents YAML, not generic YAML:\n%s", prompt)
+	}
+}
+
+func TestComposeDraftArtifactRepairPromptAvoidsRetypingLongDraftPaths(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:          "run-1",
+		StepID:         "init.step0.constitution",
+		StepContract:   "constitution",
+		WriteRoot:      "/tmp/e2e/frontend/claude-code/frontend-workspace/reports/taskruns/run-1/runtime/step0_constitution",
+		DraftFinalRoot: "/tmp/e2e/frontend/claude-code/frontend-workspace/reports/taskruns/run-1/staging/drafts/step0_constitution",
+	}
+
+	prompt := ComposeDraftArtifactRepairPrompt(acpruntime.ProviderClaudeCode, task, os.ErrNotExist)
+	required := []string{
+		"Do not manually retype or transform absolute paths; keep slash-separated path components unchanged.",
+		"write_root='/tmp/e2e/frontend/claude-code/frontend-workspace/reports/taskruns/run-1/runtime/step0_constitution'",
+		"draft_root='/tmp/e2e/frontend/claude-code/frontend-workspace/reports/taskruns/run-1/staging/drafts/step0_constitution'",
+		"cat > \"$draft_root/baseline-subagents.yaml\" <<'ACP_DRAFT_FILE'",
+		"test -s \"$draft_root/baseline-subagents.yaml\"",
+	}
+	for _, token := range required {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected draft repair prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	if strings.Contains(prompt, "frontend-claude-code") {
+		t.Fatalf("draft repair prompt must not collapse slash-separated provider path components:\n%s", prompt)
+	}
+	if got := strings.Count(prompt, "/tmp/e2e/frontend/claude-code/frontend-workspace/reports/taskruns/run-1/staging/drafts/step0_constitution"); got != 3 {
+		t.Fatalf("expected draft root absolute path to appear only in policy lines and variable assignment, got %d:\n%s", got, prompt)
 	}
 }
 
@@ -561,10 +598,12 @@ func TestComposeArtifactOnlyPromptAddsAsIsDraftCanonicalSection(t *testing.T) {
 	expectedTokens := []string{
 		"AS-IS FIRST-ACTION DRAFT ARTIFACTS:",
 		"FIRST AS-IS DRAFT COMMAND:",
-		"cat > '/tmp/write-root/asis-draft-manifest.json' <<'ACP_DRAFT_MANIFEST_JSON'",
-		"cat > '/tmp/draft-root/overview.md' <<'ACP_DRAFT_FILE'",
-		"cat > '/tmp/draft-root/summary.md' <<'ACP_DRAFT_FILE'",
-		"cat > '/tmp/draft-root/architect-summary.md' <<'ACP_DRAFT_FILE'",
+		"write_root='/tmp/write-root'",
+		"draft_root='/tmp/draft-root'",
+		"cat > \"$write_root/asis-draft-manifest.json\" <<'ACP_DRAFT_MANIFEST_JSON'",
+		"cat > \"$draft_root/overview.md\" <<'ACP_DRAFT_FILE'",
+		"cat > \"$draft_root/summary.md\" <<'ACP_DRAFT_FILE'",
+		"cat > \"$draft_root/architect-summary.md\" <<'ACP_DRAFT_FILE'",
 		"AS-IS DRAFT MANIFEST CANONICAL SHAPE:",
 		`asis-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="as_is", agent_role, and outputs[].`,
 		`overview.md -> reports/as-is/overview.md`,
@@ -622,9 +661,11 @@ func TestComposeArtifactOnlyPromptAddsConstitutionFirstActionCommand(t *testing.
 	expectedTokens := []string{
 		"CONSTITUTION FIRST-ACTION DRAFT ARTIFACTS:",
 		"FIRST CONSTITUTION DRAFT COMMAND:",
-		"cat > '/tmp/write-root/constitution-draft.json' <<'ACP_DRAFT_MANIFEST_JSON'",
-		"cat > '/tmp/draft-root/charter-overview.md' <<'ACP_DRAFT_FILE'",
-		"cat > '/tmp/draft-root/baseline-subagents.yaml' <<'ACP_DRAFT_FILE'",
+		"write_root='/tmp/write-root'",
+		"draft_root='/tmp/draft-root'",
+		"cat > \"$write_root/constitution-draft.json\" <<'ACP_DRAFT_MANIFEST_JSON'",
+		"cat > \"$draft_root/charter-overview.md\" <<'ACP_DRAFT_FILE'",
+		"cat > \"$draft_root/baseline-subagents.yaml\" <<'ACP_DRAFT_FILE'",
 		"Artifact-only contract:",
 		`"step_id": "init.step0.constitution"`,
 		`"step_contract": "constitution"`,
@@ -680,9 +721,11 @@ func TestComposeArtifactOnlyPromptAddsProposalsDraftCanonicalSection(t *testing.
 	expectedTokens := []string{
 		"PROPOSALS FIRST-ACTION DRAFT ARTIFACTS:",
 		"FIRST PROPOSALS DRAFT COMMAND:",
-		"cat > '/tmp/write-root/proposals-draft-manifest.json' <<'ACP_DRAFT_MANIFEST_JSON'",
-		"cat > '/tmp/draft-root/proposal.md' <<'ACP_DRAFT_FILE'",
-		"cat > '/tmp/draft-root/changelog.md' <<'ACP_DRAFT_FILE'",
+		"write_root='/tmp/write-root'",
+		"draft_root='/tmp/draft-root'",
+		"cat > \"$write_root/proposals-draft-manifest.json\" <<'ACP_DRAFT_MANIFEST_JSON'",
+		"cat > \"$draft_root/proposal.md\" <<'ACP_DRAFT_FILE'",
+		"cat > \"$draft_root/changelog.md\" <<'ACP_DRAFT_FILE'",
 		"PROPOSALS DRAFT MANIFEST CANONICAL SHAPE:",
 		`proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="proposals", agent_role, optional summary, and outputs[].`,
 		`outputs[].canonical_path values are allowed only under proposals/* or reports/changelog/*.`,
