@@ -363,7 +363,7 @@ func ConstitutionFirstActionSection(task acpruntime.Task) string {
 		fmt.Sprintf(`- Exact constitution draft manifest target: %q.`, manifestTarget),
 		fmt.Sprintf(`- Draft files must be written only under draft_final_root: %q.`, strings.TrimSpace(task.DraftFinalRoot)),
 		"FIRST CONSTITUTION DRAFT COMMAND:",
-		"Run this exact command as the next filesystem action after checking whether the manifest and referenced draft files already exist; do not inspect repository files, sibling taskruns, or raw logs before this command:",
+		"Run this exact shell command as the next filesystem action; do not manually retype paths, rewrite slash-separated path components, inspect repository files, inspect sibling taskruns, or inspect raw logs before this command:",
 		RuntimeDraftFirstActionWriteCommand(task),
 	}, "\n")
 }
@@ -381,7 +381,7 @@ func AsIsFirstActionSection(task acpruntime.Task) string {
 		fmt.Sprintf(`- Exact as-is draft manifest target: %q.`, manifestTarget),
 		fmt.Sprintf(`- Draft files must be written only under draft_final_root: %q.`, strings.TrimSpace(task.DraftFinalRoot)),
 		"FIRST AS-IS DRAFT COMMAND:",
-		"Run this exact command as the next filesystem action after checking whether the manifest and referenced draft files already exist; do not inspect sibling taskruns, prior reports, or raw logs before this command:",
+		"Run this exact shell command as the next filesystem action; do not manually retype paths, rewrite slash-separated path components, inspect sibling taskruns, prior reports, or raw logs before this command:",
 		RuntimeDraftFirstActionWriteCommand(task),
 	}, "\n")
 }
@@ -390,14 +390,15 @@ func RuntimeDraftFirstActionWriteCommand(task acpruntime.Task) string {
 	writeRoot := strings.TrimSpace(task.WriteRoot)
 	draftRoot := strings.TrimSpace(task.DraftFinalRoot)
 	manifestFile := runtimedrafts.ManifestFileForStep(task.StepID)
-	manifestTarget := filepath.Join(writeRoot, manifestFile)
 	skeleton := RuntimeDraftManifestTaskSkeleton(task)
 	lines := []string{
-		"mkdir -p " + shellSingleQuote(writeRoot) + " " + shellSingleQuote(draftRoot),
-		"cat > " + shellSingleQuote(manifestTarget) + " <<'ACP_DRAFT_MANIFEST_JSON'",
+		"write_root=" + shellSingleQuote(writeRoot),
+		"draft_root=" + shellSingleQuote(draftRoot),
+		"mkdir -p \"$write_root\" \"$draft_root\"",
+		"cat > \"$write_root/" + manifestFile + "\" <<'ACP_DRAFT_MANIFEST_JSON'",
 		strings.TrimSpace(skeleton),
 		"ACP_DRAFT_MANIFEST_JSON",
-		"test -s " + shellSingleQuote(manifestTarget),
+		"test -s \"$write_root/" + manifestFile + "\"",
 	}
 	var manifest runtimedrafts.Manifest
 	if err := json.Unmarshal([]byte(skeleton), &manifest); err != nil {
@@ -408,13 +409,22 @@ func RuntimeDraftFirstActionWriteCommand(task acpruntime.Task) string {
 		if !ok {
 			continue
 		}
-		target := filepath.Join(draftRoot, filepath.FromSlash(rel))
+		rel = filepath.ToSlash(filepath.FromSlash(rel))
+		dir := filepath.ToSlash(filepath.Dir(filepath.FromSlash(rel)))
+		if dir == "." {
+			dir = ""
+		}
+		target := "$draft_root/" + rel
+		mkdirTarget := "$draft_root"
+		if dir != "" {
+			mkdirTarget = "$draft_root/" + dir
+		}
 		lines = append(lines,
-			"mkdir -p "+shellSingleQuote(filepath.Dir(target)),
-			"cat > "+shellSingleQuote(target)+" <<'ACP_DRAFT_FILE'",
+			"mkdir -p \""+mkdirTarget+"\"",
+			"cat > \""+target+"\" <<'ACP_DRAFT_FILE'",
 			runtimeDraftFirstActionFileTemplate(task, output),
 			"ACP_DRAFT_FILE",
-			"test -s "+shellSingleQuote(target),
+			"test -s \""+target+"\"",
 		)
 	}
 	return strings.Join(lines, "\n")
@@ -431,7 +441,7 @@ func ProposalsFirstActionSection(task acpruntime.Task) string {
 		fmt.Sprintf(`- Exact proposals draft manifest target: %q.`, manifestTarget),
 		fmt.Sprintf(`- Draft files must be written only under draft_final_root: %q.`, strings.TrimSpace(task.DraftFinalRoot)),
 		"FIRST PROPOSALS DRAFT COMMAND:",
-		"Run this exact command as the next filesystem action after checking whether the manifest and referenced draft files already exist; do not inspect repository files, sibling taskruns, or raw logs before this command:",
+		"Run this exact shell command as the next filesystem action; do not manually retype paths, rewrite slash-separated path components, inspect repository files, inspect sibling taskruns, or inspect raw logs before this command:",
 		RuntimeDraftFirstActionWriteCommand(task),
 	}, "\n")
 }

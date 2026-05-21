@@ -17,12 +17,15 @@ import (
 func draftArtifactRepairWriteCommand(task acpruntime.Task, manifestTarget string, skeleton string) string {
 	writeRoot := strings.TrimSpace(task.WriteRoot)
 	draftRoot := strings.TrimSpace(task.DraftFinalRoot)
+	manifestFile := filepath.Base(strings.TrimSpace(manifestTarget))
 	lines := []string{
-		"mkdir -p " + shellSingleQuote(writeRoot) + " " + shellSingleQuote(draftRoot),
-		"cat > " + shellSingleQuote(strings.TrimSpace(manifestTarget)) + " <<'ACP_DRAFT_MANIFEST_JSON'",
+		"write_root=" + shellSingleQuote(writeRoot),
+		"draft_root=" + shellSingleQuote(draftRoot),
+		"mkdir -p \"$write_root\" \"$draft_root\"",
+		"cat > \"$write_root/" + manifestFile + "\" <<'ACP_DRAFT_MANIFEST_JSON'",
 		strings.TrimSpace(skeleton),
 		"ACP_DRAFT_MANIFEST_JSON",
-		"test -s " + shellSingleQuote(strings.TrimSpace(manifestTarget)),
+		"test -s \"$write_root/" + manifestFile + "\"",
 	}
 	var manifest runtimedrafts.Manifest
 	if err := json.Unmarshal([]byte(skeleton), &manifest); err != nil {
@@ -33,13 +36,22 @@ func draftArtifactRepairWriteCommand(task acpruntime.Task, manifestTarget string
 		if !ok {
 			continue
 		}
-		target := filepath.Join(draftRoot, filepath.FromSlash(rel))
+		rel = filepath.ToSlash(filepath.FromSlash(rel))
+		dir := filepath.ToSlash(filepath.Dir(filepath.FromSlash(rel)))
+		if dir == "." {
+			dir = ""
+		}
+		target := "$draft_root/" + rel
+		mkdirTarget := "$draft_root"
+		if dir != "" {
+			mkdirTarget = "$draft_root/" + dir
+		}
 		lines = append(lines,
-			"mkdir -p "+shellSingleQuote(filepath.Dir(target)),
-			"cat > "+shellSingleQuote(target)+" <<'ACP_DRAFT_FILE'",
+			"mkdir -p \""+mkdirTarget+"\"",
+			"cat > \""+target+"\" <<'ACP_DRAFT_FILE'",
 			draftArtifactRepairFileTemplate(task, output),
 			"ACP_DRAFT_FILE",
-			"test -s "+shellSingleQuote(target),
+			"test -s \""+target+"\"",
 		)
 	}
 	return strings.Join(lines, "\n")
@@ -140,9 +152,10 @@ func ComposeDraftArtifactRepairPrompt(provider acpruntime.Provider, task acprunt
 		"- Do not return semantic JSON or any semantic payload on stdout.",
 		fmt.Sprintf("- Write exactly this manifest target in write_root: %q.", manifestTarget),
 		fmt.Sprintf("- Write draft content only under draft_final_root: %q.", strings.TrimSpace(task.DraftFinalRoot)),
-		"- Do not begin with broad analysis. Run the preferred file write command below, or perform exactly the same bounded writes.",
+		"- Do not begin with broad analysis. Run the exact shell command below as a single command before any other filesystem action.",
 		"- If the draft manifest or referenced draft files already exist but are invalid, overwrite them from the heredoc artifacts instead of reading/diffing/patching.",
-		"- Copy the heredoc artifacts exactly first. Do not make factual edits before the manifest and draft files validate.",
+		"- Copy the heredoc artifacts exactly first. Do not manually retype or transform absolute paths; keep slash-separated path components unchanged.",
+		"- Do not claim files are written or verified unless the exact test -s checks in the command pass.",
 		"- Do not write shard-pack-manifest.json, validator-verdict.json, raw logs, sibling taskruns, or repository files.",
 		"- Final action must be: write the draft manifest plus its referenced draft_final_root files, then exit successfully.",
 		fmt.Sprintf(`- write_root (absolute) = %q`, strings.TrimSpace(task.WriteRoot)),
@@ -176,15 +189,15 @@ func draftRepairFirstCommandIntro(task acpruntime.Task) (string, string) {
 	switch strings.TrimSpace(task.StepID) {
 	case "init.step0.constitution":
 		return "FIRST CONSTITUTION DRAFT COMMAND:",
-			"Run this exact command as the next filesystem action; it writes constitution-draft.json plus every referenced draft file as the first valid artifact set:"
+			"Run this exact shell command as the next filesystem action; it writes constitution-draft.json plus every referenced draft file as the first valid artifact set:"
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
 		return "FIRST AS-IS DRAFT COMMAND:",
-			"Run this exact command as the next filesystem action; it writes asis-draft-manifest.json plus overview.md, summary.md, and architect-summary.md as the first valid artifact set:"
+			"Run this exact shell command as the next filesystem action; it writes asis-draft-manifest.json plus overview.md, summary.md, and architect-summary.md as the first valid artifact set:"
 	case "init.step4.proposals", "refresh.step4.proposals":
 		return "FIRST PROPOSALS DRAFT COMMAND:",
-			"Run this exact command as the next filesystem action; it writes proposals-draft-manifest.json plus every referenced draft file as the first valid artifact set:"
+			"Run this exact shell command as the next filesystem action; it writes proposals-draft-manifest.json plus every referenced draft file as the first valid artifact set:"
 	default:
 		return "FIRST RUNTIME DRAFT COMMAND:",
-			"Run this exact command as the next filesystem action; it writes the runtime draft manifest plus every referenced draft file as the first valid artifact set:"
+			"Run this exact shell command as the next filesystem action; it writes the runtime draft manifest plus every referenced draft file as the first valid artifact set:"
 	}
 }
