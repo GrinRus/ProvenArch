@@ -11,6 +11,7 @@ import (
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/steppolicy"
 	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
+	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
 func draftArtifactRepairWriteCommand(task acpruntime.Task, manifestTarget string, skeleton string) string {
@@ -62,6 +63,9 @@ func draftArtifactRepairFileTemplate(task acpruntime.Task, output runtimedrafts.
 	title := strings.TrimSpace(output.Title)
 	if title == "" {
 		title = strings.TrimSpace(output.Path)
+	}
+	if canonicalPath == "skills/subagents.yaml" {
+		return strings.TrimSpace(string(workspace.BaselineSubagentsContent()))
 	}
 	if strings.HasSuffix(strings.ToLower(output.Path), ".yaml") || strings.HasSuffix(strings.ToLower(output.Path), ".yml") {
 		return strings.Join([]string{
@@ -129,6 +133,7 @@ func ComposeDraftArtifactRepairPrompt(provider acpruntime.Provider, task acprunt
 	manifestFile := runtimedrafts.ManifestFileForStep(task.StepID)
 	manifestTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), manifestFile)
 	skeleton := steppolicy.RuntimeDraftManifestTaskSkeleton(task)
+	firstCommandHeading, firstCommandInstruction := draftRepairFirstCommandIntro(task)
 	lines := []string{
 		fmt.Sprintf("You are ACP runtime provider %q in draft artifact focused recovery mode.", provider),
 		"Immediate draft artifact repair action:",
@@ -145,8 +150,8 @@ func ComposeDraftArtifactRepairPrompt(provider acpruntime.Provider, task acprunt
 		fmt.Sprintf(`- manifest_file = %q`, manifestFile),
 		fmt.Sprintf(`- step_contract = %q`, strings.TrimSpace(task.StepContract)),
 		fmt.Sprintf(`- expected_artifacts = %s`, strings.Join(task.ExpectedArtifacts, ", ")),
-		"RUNTIME DRAFT MANIFEST JSON SKELETON:",
-		"Use the JSON and draft files embedded in this command as the first valid artifact set:",
+		firstCommandHeading,
+		firstCommandInstruction,
 		draftArtifactRepairWriteCommand(task, manifestTarget, skeleton),
 		"DRAFT ARTIFACT REPAIR INSTRUCTIONS:",
 	}
@@ -165,4 +170,21 @@ func ComposeDraftArtifactRepairPrompt(provider acpruntime.Provider, task acprunt
 		lines = append(lines, artifactquality.ProposalsDraftManifestContractLines()...)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func draftRepairFirstCommandIntro(task acpruntime.Task) (string, string) {
+	switch strings.TrimSpace(task.StepID) {
+	case "init.step0.constitution":
+		return "FIRST CONSTITUTION DRAFT COMMAND:",
+			"Run this exact command as the next filesystem action; it writes constitution-draft.json plus every referenced draft file as the first valid artifact set:"
+	case "init.step2.asis_docs", "refresh.step2.asis_docs":
+		return "FIRST AS-IS DRAFT COMMAND:",
+			"Run this exact command as the next filesystem action; it writes asis-draft-manifest.json plus overview.md, summary.md, and architect-summary.md as the first valid artifact set:"
+	case "init.step4.proposals", "refresh.step4.proposals":
+		return "FIRST PROPOSALS DRAFT COMMAND:",
+			"Run this exact command as the next filesystem action; it writes proposals-draft-manifest.json plus every referenced draft file as the first valid artifact set:"
+	default:
+		return "FIRST RUNTIME DRAFT COMMAND:",
+			"Run this exact command as the next filesystem action; it writes the runtime draft manifest plus every referenced draft file as the first valid artifact set:"
+	}
 }

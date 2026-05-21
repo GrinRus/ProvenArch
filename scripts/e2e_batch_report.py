@@ -846,13 +846,24 @@ def count_semantic_edges(payload: dict[str, Any]) -> int:
     return len(edges) if isinstance(edges, list) else 0
 
 
-def count_cross_repo_finding_links(payload: dict[str, Any]) -> int:
+def count_cross_repo_semantic_links(payload: dict[str, Any]) -> int:
     semantic = payload.get("semantic") or {}
-    if not isinstance(semantic, dict):
-        return 0
-    findings = semantic.get("findings") or []
-    if not isinstance(findings, list):
-        return 0
+    payload_repo_mentions = collect_repo_mentions(payload)
+    findings: list[Any] = []
+    questions: list[Any] = []
+    if isinstance(semantic, dict):
+        semantic_findings = semantic.get("findings") or []
+        if isinstance(semantic_findings, list):
+            findings.extend(semantic_findings)
+        semantic_questions = semantic.get("questions") or []
+        if isinstance(semantic_questions, list):
+            questions.extend(semantic_questions)
+    top_level_findings = payload.get("findings") or []
+    if isinstance(top_level_findings, list):
+        findings.extend(top_level_findings)
+    top_level_questions = payload.get("questions") or []
+    if isinstance(top_level_questions, list):
+        questions.extend(top_level_questions)
     count = 0
     for finding in findings:
         if not isinstance(finding, dict):
@@ -873,6 +884,16 @@ def count_cross_repo_finding_links(payload: dict[str, Any]) -> int:
                         if repo_name:
                             repos.add(normalize_text(repo_name))
         if len(repos) >= 2 and len(related | repos) >= 2:
+            count += 1
+    for question in questions:
+        if not isinstance(question, dict):
+            continue
+        related = {
+            normalize_text(str(item))
+            for item in (question.get("related_ids") or [])
+            if str(item).strip()
+        }
+        if len(related & payload_repo_mentions) >= 2:
             count += 1
     return count
 
@@ -1820,26 +1841,26 @@ def evaluate_run(
             else:
                 repo_mentions: set[str] = set()
                 edge_upserts = 0
-                cross_repo_finding_links = 0
+                cross_repo_semantic_links = 0
                 for step_file in refresh_step_files:
                     payload = read_json(step_file)
                     repo_mentions.update(collect_repo_mentions(payload))
                     edge_upserts += count_semantic_edges(payload)
-                    cross_repo_finding_links += count_cross_repo_finding_links(payload)
+                    cross_repo_semantic_links += count_cross_repo_semantic_links(payload)
                 missing_dimensions: list[str] = []
                 if len(repo_mentions) < 2:
                     missing_dimensions.append("repo_mentions<2")
-                if edge_upserts < 1 and cross_repo_finding_links < 1:
-                    missing_dimensions.append("no_semantic_edges_or_cross_repo_finding_links")
+                if edge_upserts < 1 and cross_repo_semantic_links < 1:
+                    missing_dimensions.append("no_semantic_edges_or_cross_repo_links")
                 if missing_dimensions:
                     semantic_hard_fail = True
                     issues.append("analysis:cross-repo-missing")
                     details.append(
                         f"analysis/cross-repo-missing -> run_dir={run_dir} expected_repo_count={expected_repo_count} "
                         f"repo_mentions={len(repo_mentions)} edge_upserts={edge_upserts} "
-                        f"cross_repo_finding_links={cross_repo_finding_links} "
+                        f"cross_repo_semantic_links={cross_repo_semantic_links} "
                         f"missing_dimensions={','.join(missing_dimensions)} "
-                        "required_fix=add repo-specific citations plus at least one semantic edge or cross-repo finding/question with repo/path provenance"
+                        "required_fix=add repo-specific citations plus at least one semantic edge, cross-repo finding with repo/path provenance, or cross-repo question with related repo ids"
                     )
     elif expected_repo_count >= 2:
         if terminal_runtime_provider_failure:

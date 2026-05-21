@@ -1321,6 +1321,55 @@ func TestRunHeadlessProviderRepairsDraftArtifactsWithDraftFinalWrites(t *testing
 	}
 }
 
+func TestRunHeadlessProviderRepairsAsIsDraftArtifactsWithAllDraftFiles(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-repair")
+	repairScript := asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, "exit 0")
+	runner := testAdapter{
+		command:            writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nexit 0\n"),
+		draftRepairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairDraftArtifactsOnce:      true,
+		},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected as-is draft artifact repair success, got %v", err)
+	}
+}
+
+func TestRunHeadlessProviderRejectsAsIsDraftRepairMissingReferencedFiles(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-repair-missing")
+	repairScript := asIsDraftScript(task, []string{"summary.md"}, "exit 0")
+	runner := testAdapter{
+		command:            writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nexit 0\n"),
+		draftRepairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairDraftArtifactsOnce:      true,
+		},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected as-is draft repair missing referenced files to fail")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "referenced draft file") || !strings.Contains(runnerErr.Error(), "overview.md") {
+		t.Fatalf("expected missing referenced draft file details, got %v", err)
+	}
+}
+
 func TestRunHeadlessProviderRejectsDraftRepairExtraWriteRootFiles(t *testing.T) {
 	t.Parallel()
 
@@ -1867,6 +1916,33 @@ func newValidatorTask(t *testing.T, runID string) acpruntime.Task {
 	}
 }
 
+func newAsIsDraftTask(t *testing.T, runID string) acpruntime.Task {
+	t.Helper()
+
+	workspace := t.TempDir()
+	writeRoot := filepath.Join(workspace, "reports", "taskruns", runID, "asis")
+	draftRoot := filepath.Join(workspace, "reports", "taskruns", runID, "staging", "final")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	return acpruntime.Task{
+		TaskID:            "task-" + runID,
+		RunID:             runID,
+		StepID:            "init.step2.asis_docs",
+		StepContract:      "as_is",
+		AgentRole:         "architect",
+		Workspace:         workspace,
+		WriteRoot:         writeRoot,
+		DraftFinalRoot:    draftRoot,
+		ReadContextRoots:  []string{draftRoot},
+		ExpectedArtifacts: []string{"asis-draft-manifest.json"},
+		StartedAtUTC:      time.Now().UTC(),
+	}
+}
+
 func newProposalsDraftTask(t *testing.T, runID string) acpruntime.Task {
 	t.Helper()
 
@@ -2043,6 +2119,30 @@ cat >"$draft_root/changelog.md" <<'EOF'
 - Provider authored proposal changelog.
 EOF
 ` + tail + "\n"
+}
+
+func asIsDraftScript(task acpruntime.Task, files []string, tail string) string {
+	lines := []string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"write_root=" + shellQuote(task.WriteRoot),
+		"draft_root=" + shellQuote(task.DraftFinalRoot),
+		"mkdir -p \"$write_root\" \"$draft_root\"",
+		"cat >\"$write_root/asis-draft-manifest.json\" <<'EOF'",
+		steppolicy.RuntimeDraftManifestTaskSkeleton(task),
+		"EOF",
+	}
+	for _, name := range files {
+		lines = append(lines,
+			"cat >\"$draft_root/"+name+"\" <<'EOF'",
+			"# "+strings.TrimSuffix(name, filepath.Ext(name)),
+			"",
+			"Provider authored as-is draft artifact.",
+			"EOF",
+		)
+	}
+	lines = append(lines, tail)
+	return strings.Join(lines, "\n") + "\n"
 }
 
 func compactDraftScript(task acpruntime.Task) string {

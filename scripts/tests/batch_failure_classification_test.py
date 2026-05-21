@@ -2940,6 +2940,150 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertFalse(result.semantic_hard_fail)
         self.assertTrue(result.hard_pass)
 
+    def test_python_report_accepts_validator_cross_repo_finding_without_edges(self) -> None:
+        run_dir = self.root / "run-multi-repo-validator-cross-finding"
+        self._create_passed_run_dir_with_raw_runner_noise(run_dir)
+
+        declared = []
+        repo_names = ["course-discovery", "frontend-platform", "openedx-platform"]
+        for repo_name in repo_names:
+            repo_root = run_dir / "repos" / repo_name
+            write_text(repo_root / "README.md", f"# {repo_name}\n")
+            declared.append({"name": repo_name, "source": "path", "path": str(repo_root)})
+
+        verdict_path = run_dir / "snapshots/refresh-run/reports/taskruns/refresh-run/validator/validator-verdict.json"
+        write_json(
+            verdict_path,
+            {
+                "version": 1,
+                "run_id": "refresh-run",
+                "generated_at": "2026-05-20T01:26:13Z",
+                "verdict": "PASS",
+                "checked_paths": ["reports/taskruns/refresh-run/staging/final/final-run-index.json"],
+                "findings": [
+                    {
+                        "id": "finding.cross_repo_owner_gap",
+                        "severity": "medium",
+                        "title": "Owner mapping spans Open edX repositories",
+                        "description": "Ownership evidence is spread across multiple repository scopes.",
+                        "related_ids": ["course-discovery", "frontend-platform"],
+                        "provenance": {
+                            "kind": "observation",
+                            "confidence": 0.8,
+                            "evidence": [
+                                {"repo": "course-discovery", "path": "README.md"},
+                                {"repo": "frontend-platform", "path": "README.md"},
+                            ],
+                        },
+                    }
+                ],
+                "questions": [],
+                "issues": [],
+            },
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={
+                "declared_repos_meta": {
+                    "expected_repo_count": 3,
+                    "profile_id": "multi-path",
+                    "profile_source_kind": "path",
+                    "declared_repos": declared,
+                }
+            },
+            classification_row={
+                "failure_class": "none",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "0",
+            },
+        )
+
+        self.assertNotIn("analysis:cross-repo-missing", result.issues)
+        self.assertFalse(result.semantic_hard_fail)
+        self.assertTrue(result.hard_pass)
+
+    def test_python_report_accepts_cross_repo_question_with_repo_citations(self) -> None:
+        run_dir = self.root / "run-multi-repo-cross-question"
+        self._create_passed_run_dir_with_raw_runner_noise(run_dir)
+
+        declared = []
+        repo_names = ["course-discovery", "frontend-platform"]
+        for repo_name in repo_names:
+            repo_root = run_dir / "repos" / repo_name
+            write_text(repo_root / "README.md", f"# {repo_name}\n")
+            declared.append({"name": repo_name, "source": "path", "path": str(repo_root)})
+
+        manifest_path = (
+            run_dir
+            / "snapshots/refresh-run/reports/taskruns/refresh-run/staging/shards/domain-a/shard-pack-manifest.json"
+        )
+        write_json(
+            manifest_path,
+            {
+                "version": 1,
+                "run_id": "refresh-run",
+                "step_id": "refresh.step1.collect",
+                "shard_id": "domain-a",
+                "domain_id": "domain-a",
+                "agent_role": "shard-analyst",
+                "artifact_root": "reports/taskruns/refresh-run/staging/shards/domain-a",
+                "repo_scopes": repo_names,
+                "path_scopes": ["src"],
+                "documents": [{"id": "doc.arch", "title": "Architecture", "path": "architecture.md", "kind": "report"}],
+                "citations": [
+                    {
+                        "id": f"cite.{repo_name}",
+                        "repo": repo_name,
+                        "path": "README.md",
+                        "claim_ids": [f"claim.{repo_name}"],
+                        "document_ids": ["doc.arch"],
+                    }
+                    for repo_name in repo_names
+                ],
+                "semantic": {
+                    "coverage": {"observed": repo_names, "missing": ["cross-repo ownership"], "notes": []},
+                    "questions": [
+                        {
+                            "id": "q.cross_repo_owner",
+                            "text": "Which owner contract connects course-discovery and frontend-platform?",
+                            "related_ids": repo_names,
+                        }
+                    ],
+                    "entities": [],
+                    "edges": [],
+                    "findings": [],
+                },
+            },
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={
+                "declared_repos_meta": {
+                    "expected_repo_count": 2,
+                    "profile_id": "multi-path",
+                    "profile_source_kind": "path",
+                    "declared_repos": declared,
+                }
+            },
+            classification_row={
+                "failure_class": "none",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "0",
+            },
+        )
+
+        self.assertNotIn("analysis:cross-repo-missing", result.issues)
+        self.assertFalse(result.semantic_hard_fail)
+        self.assertTrue(result.hard_pass)
+
     def test_python_report_explains_cross_repo_missing_dimensions(self) -> None:
         run_dir = self.root / "run-multi-repo-no-cross-links"
         self._create_passed_run_dir_with_raw_runner_noise(run_dir)
@@ -3010,7 +3154,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
 
         self.assertIn("analysis:cross-repo-missing", result.issues)
         self.assertTrue(result.semantic_hard_fail)
-        self.assertTrue(any("missing_dimensions=no_semantic_edges_or_cross_repo_finding_links" in detail for detail in result.issue_details))
+        self.assertTrue(any("missing_dimensions=no_semantic_edges_or_cross_repo_links" in detail for detail in result.issue_details))
 
     def test_python_report_ignores_provider_model_telemetry_diagnostics(self) -> None:
         run_dir = self.root / "run-provider-model-mismatch"
