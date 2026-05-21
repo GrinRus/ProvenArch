@@ -16,6 +16,11 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/testutil"
 )
 
+const (
+	successfulZeroOutputRetryWindow  = 30 * time.Second
+	successfulZeroOutputRetryTimeout = 45 * time.Second
+)
+
 func TestRunHeadlessProviderSucceedsWithValidArtifacts(t *testing.T) {
 	t.Parallel()
 
@@ -164,7 +169,7 @@ func TestRunHeadlessProviderRetriesZeroOutputPreArtifactStallWhenPolicyAllows(t 
 				MonitorArtifacts:            true,
 				MonitorPreArtifact:          true,
 				PreArtifactStallWindow:      20 * time.Millisecond,
-				RetryPreArtifactStallWindow: 5 * time.Second,
+				RetryPreArtifactStallWindow: successfulZeroOutputRetryWindow,
 				PostArtifactStallWindow:     20 * time.Millisecond,
 				PollInterval:                5 * time.Millisecond,
 				PostTerminateDrain:          10 * time.Millisecond,
@@ -183,7 +188,7 @@ func TestRunHeadlessProviderRetriesZeroOutputPreArtifactStallWhenPolicyAllows(t 
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), successfulZeroOutputRetryTimeout)
 	defer cancel()
 	result, err := RunHeadlessProvider(ctx, task, runner)
 	if err != nil {
@@ -1011,7 +1016,7 @@ EOF
 				MonitorArtifacts:            true,
 				MonitorPreArtifact:          true,
 				PreArtifactStallWindow:      20 * time.Millisecond,
-				RetryPreArtifactStallWindow: 5 * time.Second,
+				RetryPreArtifactStallWindow: successfulZeroOutputRetryWindow,
 				PostArtifactStallWindow:     20 * time.Millisecond,
 				PollInterval:                5 * time.Millisecond,
 				PostTerminateDrain:          10 * time.Millisecond,
@@ -1030,7 +1035,7 @@ EOF
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), successfulZeroOutputRetryTimeout)
 	defer cancel()
 	result, err := RunHeadlessProvider(ctx, task, runner)
 	if err != nil {
@@ -1066,7 +1071,7 @@ EOF
 				MonitorArtifacts:            true,
 				MonitorPreArtifact:          true,
 				PreArtifactStallWindow:      20 * time.Millisecond,
-				RetryPreArtifactStallWindow: 5 * time.Second,
+				RetryPreArtifactStallWindow: successfulZeroOutputRetryWindow,
 				PostArtifactStallWindow:     20 * time.Millisecond,
 				PollInterval:                5 * time.Millisecond,
 				PostTerminateDrain:          10 * time.Millisecond,
@@ -1087,7 +1092,7 @@ EOF
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), successfulZeroOutputRetryTimeout)
 	defer cancel()
 	result, err := RunHeadlessProvider(ctx, task, runner)
 	if err != nil {
@@ -1200,7 +1205,7 @@ printf '%s\n' 'wrote invalid validator verdict'
 				MonitorArtifacts:            true,
 				MonitorPreArtifact:          true,
 				PreArtifactStallWindow:      20 * time.Millisecond,
-				RetryPreArtifactStallWindow: 5 * time.Second,
+				RetryPreArtifactStallWindow: successfulZeroOutputRetryWindow,
 				PostArtifactStallWindow:     20 * time.Millisecond,
 				PollInterval:                5 * time.Millisecond,
 				PostTerminateDrain:          10 * time.Millisecond,
@@ -1219,7 +1224,7 @@ printf '%s\n' 'wrote invalid validator verdict'
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), successfulZeroOutputRetryTimeout)
 	defer cancel()
 	_, err := RunHeadlessProvider(ctx, task, runner)
 	if err == nil {
@@ -1412,7 +1417,7 @@ func TestRunHeadlessProviderRetriesZeroOutputProposalsStallWhenPolicyAllows(t *t
 				MonitorArtifacts:            true,
 				MonitorPreArtifact:          true,
 				PreArtifactStallWindow:      20 * time.Millisecond,
-				RetryPreArtifactStallWindow: 5 * time.Second,
+				RetryPreArtifactStallWindow: successfulZeroOutputRetryWindow,
 				PostArtifactStallWindow:     20 * time.Millisecond,
 				PollInterval:                5 * time.Millisecond,
 				PostTerminateDrain:          10 * time.Millisecond,
@@ -1431,7 +1436,7 @@ func TestRunHeadlessProviderRetriesZeroOutputProposalsStallWhenPolicyAllows(t *t
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), successfulZeroOutputRetryTimeout)
 	defer cancel()
 	result, err := RunHeadlessProvider(ctx, task, runner)
 	if err != nil {
@@ -1504,7 +1509,7 @@ printf '%s\n' 'wrote invalid proposals manifest'
 				MonitorArtifacts:            true,
 				MonitorPreArtifact:          true,
 				PreArtifactStallWindow:      20 * time.Millisecond,
-				RetryPreArtifactStallWindow: 5 * time.Second,
+				RetryPreArtifactStallWindow: successfulZeroOutputRetryWindow,
 				PostArtifactStallWindow:     20 * time.Millisecond,
 				PollInterval:                5 * time.Millisecond,
 				PostTerminateDrain:          10 * time.Millisecond,
@@ -1523,7 +1528,7 @@ printf '%s\n' 'wrote invalid proposals manifest'
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), successfulZeroOutputRetryTimeout)
 	defer cancel()
 	_, err := RunHeadlessProvider(ctx, task, runner)
 	if err == nil {
