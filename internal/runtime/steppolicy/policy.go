@@ -97,6 +97,7 @@ func StepSpecificPolicy(stepID string) string {
 			`- Use staged final evidence from read_context_roots; do not treat sibling baseline workspaces, prior draft manifests, or prior reports as template sources.`,
 			`- Treat schemas/*, docs/spec/*, and the enforced prompt contract as the only manifest source of truth for asis-draft-manifest.json.`,
 			`- Keep step_contract exactly "as_is"; null, empty, or alternate values are invalid.`,
+			`- The first authored draft set must include asis-draft-manifest.json plus overview.md, summary.md, and architect-summary.md under draft_final_root.`,
 			`- Do NOT register legacy metadata envelopes or repo_scopes/path_scopes fields in asis-draft-manifest.json.`,
 		}, "\n")
 	case "init.step3.findings", "refresh.step3.findings":
@@ -108,6 +109,8 @@ func StepSpecificPolicy(stepID string) string {
 			`- Do NOT use legacy issue fields id/title/description/rule_id/related_paths inside issues[].`,
 			`- findings[] items must use title + description + provenance; do NOT use summary as a finding alias.`,
 			`- For observation provenance, findings[*].provenance.evidence[] must be non-empty and each evidence item must include repo/path.`,
+			`- If repo_scopes contains multiple repositories or staged citations span multiple repositories, include at least one semantic edge or a PASS-compatible finding/question that names the cross-repo relationship/gap and links at least two repository scopes.`,
+			`- Cross-repo findings must cite concrete repo/path evidence for every related repository; cross-repo questions must use stable related_ids for at least two repository scopes and be backed by repo-specific citations in checked artifacts.`,
 			`- If owner mapping remains unresolved in evidence, include at least one finding and at least one question in validator-verdict.json.`,
 			`- Owner-gap findings/questions may coexist with verdict PASS when no technical validator issues remain.`,
 		}, "\n")
@@ -229,6 +232,7 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			fmt.Sprintf(`- Absolute validator verdict target: %q.`, filepath.Join(strings.TrimSpace(task.WriteRoot), "validator-verdict.json")),
 			`- Validator may fix only indexes, references, or technical document issues inside write_root; do not rewrite document meaning wholesale.`,
 			`- Do NOT shard this step and do NOT emit findings through stdout; validator-verdict.json is the only primary output.`,
+			`- Multi-repo release profiles require explicit cross-repo semantic signal: if repo_scopes or staged citations cover multiple repositories, encode at least one edge, finding, or question that relates two repository scopes instead of only listing repositories separately.`,
 		)
 		lines = append(lines, artifactquality.ValidatorVerdictContractLines()...)
 		lines = append(lines,
@@ -241,7 +245,8 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
 		lines = append(lines,
 			`- Write asis-draft-manifest.json in write_root.`,
-			`- Draft final docs only under draft_final_root.`,
+			`- Write overview.md, summary.md, and architect-summary.md only under draft_final_root.`,
+			`- Use the FIRST AS-IS DRAFT COMMAND skeleton above as the first draft artifact set; do not wait for broad analysis before creating the required files.`,
 			`- Use staged final evidence from read_context_roots only; do NOT read sibling baseline workspaces or previously published as-is drafts as templates.`,
 			`- If asis-draft-manifest.json already describes the publish surface, stop after artifact validation; do NOT re-register draft artifacts through any legacy metadata op.`,
 			`- Compiler may materialize indexes and derived technical artifacts only; canonical narratives come from your drafts.`,
@@ -359,6 +364,24 @@ func ConstitutionFirstActionSection(task acpruntime.Task) string {
 		fmt.Sprintf(`- Draft files must be written only under draft_final_root: %q.`, strings.TrimSpace(task.DraftFinalRoot)),
 		"FIRST CONSTITUTION DRAFT COMMAND:",
 		"Run this exact command as the next filesystem action after checking whether the manifest and referenced draft files already exist; do not inspect repository files, sibling taskruns, or raw logs before this command:",
+		RuntimeDraftFirstActionWriteCommand(task),
+	}, "\n")
+}
+
+func AsIsFirstActionSection(task acpruntime.Task) string {
+	switch strings.TrimSpace(task.StepID) {
+	case "init.step2.asis_docs", "refresh.step2.asis_docs":
+	default:
+		return ""
+	}
+	manifestTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), runtimedrafts.AsIsManifestFile)
+	return strings.Join([]string{
+		"AS-IS FIRST-ACTION DRAFT ARTIFACTS:",
+		"- This as-is step must start by writing asis-draft-manifest.json and its referenced draft files before broad as-is assembly.",
+		fmt.Sprintf(`- Exact as-is draft manifest target: %q.`, manifestTarget),
+		fmt.Sprintf(`- Draft files must be written only under draft_final_root: %q.`, strings.TrimSpace(task.DraftFinalRoot)),
+		"FIRST AS-IS DRAFT COMMAND:",
+		"Run this exact command as the next filesystem action after checking whether the manifest and referenced draft files already exist; do not inspect sibling taskruns, prior reports, or raw logs before this command:",
 		RuntimeDraftFirstActionWriteCommand(task),
 	}, "\n")
 }

@@ -433,7 +433,8 @@ func TestComposeDraftArtifactRepairPromptNamesExactTargets(t *testing.T) {
 		"/tmp/workspace/reports/taskruns/run-1/staging/final",
 		"Do not begin with broad analysis. Run the preferred file write command below",
 		"overwrite them from the heredoc artifacts",
-		"RUNTIME DRAFT MANIFEST JSON SKELETON:",
+		"FIRST AS-IS DRAFT COMMAND:",
+		"Run this exact command as the next filesystem action; it writes asis-draft-manifest.json plus overview.md, summary.md, and architect-summary.md",
 		"cat > '/tmp/workspace/reports/taskruns/run-1/asis/asis-draft-manifest.json' <<'ACP_DRAFT_MANIFEST_JSON'",
 		"cat > '/tmp/workspace/reports/taskruns/run-1/staging/final/overview.md' <<'ACP_DRAFT_FILE'",
 		"cat > '/tmp/workspace/reports/taskruns/run-1/staging/final/summary.md' <<'ACP_DRAFT_FILE'",
@@ -455,6 +456,43 @@ func TestComposeDraftArtifactRepairPromptNamesExactTargets(t *testing.T) {
 	}
 	if strings.Contains(prompt, artifactquality.AsIsDraftManifestCanonicalExample()) {
 		t.Fatalf("draft repair prompt should stay compact and not include the full generic as-is canonical example")
+	}
+	if strings.Count(prompt, "FIRST AS-IS DRAFT COMMAND:") != 1 {
+		t.Fatalf("draft repair prompt must contain one as-is first command heading:\n%s", prompt)
+	}
+	if strings.Count(prompt, "ACP_DRAFT_FILE") != 6 {
+		t.Fatalf("draft repair prompt must contain exactly three draft file heredocs:\n%s", prompt)
+	}
+}
+
+func TestComposeDraftArtifactRepairPromptWritesValidConstitutionSubagentsYaml(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step0.constitution",
+		StepContract:      "constitution",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/constitution",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"constitution-draft.json", "charter-overview.md", "baseline-subagents.yaml"},
+	}
+
+	prompt := ComposeDraftArtifactRepairPrompt(acpruntime.ProviderClaudeCode, task, os.ErrNotExist)
+	for _, token := range []string{
+		"FIRST CONSTITUTION DRAFT COMMAND:",
+		"cat > '/tmp/workspace/reports/taskruns/run-1/staging/final/baseline-subagents.yaml' <<'ACP_DRAFT_FILE'",
+		"agents:",
+		"id: domain-analyst",
+		"id: architect-aggregator",
+		"id: system-analyst-qa",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected constitution draft repair prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	if strings.Contains(prompt, "generated_by: acp-runtime-provider-focused-recovery") {
+		t.Fatalf("constitution draft repair must write canonical subagents YAML, not generic YAML:\n%s", prompt)
 	}
 }
 
@@ -509,8 +547,24 @@ func TestComposeArtifactOnlyPromptAddsAsIsDraftCanonicalSection(t *testing.T) {
 		ExpectedArtifacts: []string{"asis-draft-manifest.json"},
 	}
 
-	prompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderCodexCode, task)
+	claudePrompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderClaudeCode, task)
+	qwenPrompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderQwenCode, task)
+	codexPrompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderCodexCode, task)
+
+	claudeTail := strings.TrimPrefix(claudePrompt, "You are ACP runtime provider \"claude-code\".\n\n")
+	qwenTail := strings.TrimPrefix(qwenPrompt, "You are ACP runtime provider \"qwen-code\".\n\n")
+	codexTail := strings.TrimPrefix(codexPrompt, "You are ACP runtime provider \"codex-code\".\n\n")
+	if claudeTail != qwenTail || claudeTail != codexTail {
+		t.Fatalf("expected as-is enforced prompt body to be provider-independent")
+	}
+
 	expectedTokens := []string{
+		"AS-IS FIRST-ACTION DRAFT ARTIFACTS:",
+		"FIRST AS-IS DRAFT COMMAND:",
+		"cat > '/tmp/write-root/asis-draft-manifest.json' <<'ACP_DRAFT_MANIFEST_JSON'",
+		"cat > '/tmp/draft-root/overview.md' <<'ACP_DRAFT_FILE'",
+		"cat > '/tmp/draft-root/summary.md' <<'ACP_DRAFT_FILE'",
+		"cat > '/tmp/draft-root/architect-summary.md' <<'ACP_DRAFT_FILE'",
 		"AS-IS DRAFT MANIFEST CANONICAL SHAPE:",
 		`asis-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="as_is", agent_role, and outputs[].`,
 		`overview.md -> reports/as-is/overview.md`,
@@ -518,9 +572,26 @@ func TestComposeArtifactOnlyPromptAddsAsIsDraftCanonicalSection(t *testing.T) {
 		`"canonical_path": "reports/as-is/payments/overview.md"`,
 	}
 	for _, token := range expectedTokens {
-		if !strings.Contains(prompt, token) {
-			t.Fatalf("expected as-is prompt to contain %q, got:\n%s", token, prompt)
+		if !strings.Contains(claudePrompt, token) {
+			t.Fatalf("expected as-is prompt to contain %q, got:\n%s", token, claudePrompt)
 		}
+	}
+	if !strings.HasPrefix(claudePrompt, "You are ACP runtime provider \"claude-code\".\n\nAS-IS FIRST-ACTION DRAFT ARTIFACTS:") {
+		t.Fatalf("expected as-is first-action section immediately after provider identity, got:\n%s", claudePrompt)
+	}
+	firstActionIndex := strings.Index(claudePrompt, "FIRST AS-IS DRAFT COMMAND:")
+	artifactContractIndex := strings.Index(claudePrompt, "Artifact-only contract:")
+	if firstActionIndex < 0 || artifactContractIndex < 0 || firstActionIndex > artifactContractIndex {
+		t.Fatalf("expected as-is first-action command before broad artifact-only contract:\n%s", claudePrompt)
+	}
+	if got := strings.Count(claudePrompt, "FIRST AS-IS DRAFT COMMAND:"); got != 1 {
+		t.Fatalf("expected one as-is first-action command heading, got %d:\n%s", got, claudePrompt)
+	}
+	if got := strings.Count(claudePrompt, "ACP_DRAFT_MANIFEST_JSON"); got != 2 {
+		t.Fatalf("expected one as-is manifest heredoc in normal prompt, got delimiter count %d:\n%s", got, claudePrompt)
+	}
+	if got := strings.Count(claudePrompt, "ACP_DRAFT_FILE"); got != 6 {
+		t.Fatalf("expected three as-is draft file heredocs in normal prompt, got delimiter count %d:\n%s", got, claudePrompt)
 	}
 }
 

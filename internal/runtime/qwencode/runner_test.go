@@ -429,7 +429,7 @@ func TestQwenDraftRepairCommandSpecUsesPromptOnly(t *testing.T) {
 	for _, token := range []string{
 		"draft artifact focused recovery mode",
 		"Immediate draft artifact repair action:",
-		"RUNTIME DRAFT MANIFEST JSON SKELETON:",
+		"FIRST CONSTITUTION DRAFT COMMAND:",
 		"<<'ACP_DRAFT_MANIFEST_JSON'",
 		"<<'ACP_DRAFT_FILE'",
 		"Copy the heredoc artifacts exactly first",

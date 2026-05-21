@@ -524,6 +524,50 @@ func TestConstitutionFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
 	}
 }
 
+func TestAsIsFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step2.asis_docs",
+		StepContract:      "as_is",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/asis",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"asis-draft-manifest.json"},
+	}
+
+	section := AsIsFirstActionSection(task)
+	required := []string{
+		`AS-IS FIRST-ACTION DRAFT ARTIFACTS:`,
+		`FIRST AS-IS DRAFT COMMAND:`,
+		`cat > '/tmp/workspace/reports/taskruns/run-1/asis/asis-draft-manifest.json' <<'ACP_DRAFT_MANIFEST_JSON'`,
+		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/final/overview.md' <<'ACP_DRAFT_FILE'`,
+		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/final/summary.md' <<'ACP_DRAFT_FILE'`,
+		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/final/architect-summary.md' <<'ACP_DRAFT_FILE'`,
+		`"run_id": "run-1"`,
+		`"step_id": "init.step2.asis_docs"`,
+		`"step_contract": "as_is"`,
+		`"canonical_path": "reports/as-is/overview.md"`,
+		`"canonical_path": "reports/coverage/summary.md"`,
+		`"canonical_path": "reports/agent-outputs/architect/summary.md"`,
+	}
+	for _, needle := range required {
+		if !strings.Contains(section, needle) {
+			t.Fatalf("expected as-is first-action section to contain %q, got:\n%s", needle, section)
+		}
+	}
+	if got := strings.Count(section, "FIRST AS-IS DRAFT COMMAND:"); got != 1 {
+		t.Fatalf("expected as-is first-action command once, got %d:\n%s", got, section)
+	}
+	if got := strings.Count(section, "ACP_DRAFT_MANIFEST_JSON"); got != 2 {
+		t.Fatalf("expected one as-is manifest heredoc, got delimiter count %d:\n%s", got, section)
+	}
+	if got := strings.Count(section, "ACP_DRAFT_FILE"); got != 6 {
+		t.Fatalf("expected three as-is draft file heredocs, got delimiter count %d:\n%s", got, section)
+	}
+}
+
 func TestProposalsFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
 	t.Parallel()
 
@@ -639,6 +683,8 @@ func TestDocFirstFilesystemPolicyDefinesCanonicalAsIsDraftSurface(t *testing.T) 
 	policy := DocFirstFilesystemPolicy(task)
 	required := []string{
 		`Write asis-draft-manifest.json in write_root.`,
+		`Write overview.md, summary.md, and architect-summary.md only under draft_final_root.`,
+		`Use the FIRST AS-IS DRAFT COMMAND skeleton above as the first draft artifact set`,
 		`Use staged final evidence from read_context_roots only; do NOT read sibling baseline workspaces`,
 		`asis-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="as_is", agent_role, and outputs[].`,
 		`"step_contract": "as_is"`,
@@ -648,6 +694,9 @@ func TestDocFirstFilesystemPolicyDefinesCanonicalAsIsDraftSurface(t *testing.T) 
 		if !strings.Contains(policy, needle) {
 			t.Fatalf("expected as-is doc-first policy to contain %q, got:\n%s", needle, policy)
 		}
+	}
+	if strings.Contains(policy, "FIRST AS-IS DRAFT COMMAND:") {
+		t.Fatalf("doc-first as-is policy must reference but not duplicate first-action command:\n%s", policy)
 	}
 }
 
