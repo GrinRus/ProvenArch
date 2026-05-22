@@ -646,6 +646,7 @@ func shellSingleQuote(value string) string {
 func ValidatorVerdictTaskSkeleton(task acpruntime.Task) string {
 	runID := firstNonEmpty(task.RunID, "run-1")
 	checkedPaths := validatorCheckedPathSkeleton(task)
+	findings, questions := validatorCrossRepoSignalSkeleton(task)
 	type validatorVerdictSkeleton struct {
 		Version      int                        `json:"version"`
 		RunID        string                     `json:"run_id"`
@@ -666,15 +667,153 @@ func ValidatorVerdictTaskSkeleton(task acpruntime.Task) string {
 		Summary:      "No blocking technical validator issues remain after inspecting the staged final artifacts.",
 		CheckedPaths: checkedPaths,
 		FixedPaths:   []string{},
-		Findings:     []contracts.Finding{},
-		Questions:    []contracts.Question{},
+		Findings:     findings,
+		Questions:    questions,
 		Issues:       []contracts.ValidatorIssue{},
+	}
+	if len(findings) > 0 || len(questions) > 0 {
+		verdict.Summary = "No blocking technical validator issues remain after inspecting the staged final artifacts. Multi-repo semantic follow-up is recorded in findings/questions until concrete cross-repo edges are confirmed."
 	}
 	raw, err := json.MarshalIndent(verdict, "", "  ")
 	if err != nil {
 		return `{"version":1,"run_id":"run-1","generated_at":"2026-04-16T12:00:02Z","verdict":"PASS","checked_paths":["reports/taskruns/run-1/staging/final/final-run-index.json"],"fixed_paths":[],"findings":[],"questions":[],"issues":[]}`
 	}
 	return string(raw)
+}
+
+func validatorCrossRepoSignalSkeleton(task acpruntime.Task) ([]contracts.Finding, []contracts.Question) {
+	repos := uniqueRepoScopes(task)
+	if len(repos) < 2 {
+		return []contracts.Finding{}, []contracts.Question{}
+	}
+	evidence := make([]contracts.Evidence, 0, len(repos))
+	for _, repo := range repos {
+		evidence = append(evidence, contracts.Evidence{
+			Repo: repo,
+			Path: validatorEvidencePathForRepo(task, repo),
+		})
+	}
+	description := fmt.Sprintf(
+		"Validator observed multiple repository scopes (%s) and records the required cross-repo semantic follow-up until a concrete integration edge or ownership relationship is promoted from staged evidence.",
+		strings.Join(repos, ", "),
+	)
+	questionText := fmt.Sprintf(
+		"Which ownership or integration contract connects %s and %s, and should it be promoted as an explicit semantic edge?",
+		repos[0],
+		repos[1],
+	)
+	return []contracts.Finding{
+			{
+				ID:          "finding.cross_repo.semantic_signal.required",
+				Severity:    "medium",
+				Title:       "Cross-repo semantic relationship needs explicit validation",
+				Description: description,
+				RuleID:      "analysis.cross_repo_semantic_signal",
+				RelatedIDs:  repos,
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.7,
+					Evidence:   evidence,
+				},
+			},
+		}, []contracts.Question{
+			{
+				ID:         "q.cross_repo.integration_contract",
+				Text:       questionText,
+				Priority:   "medium",
+				RelatedIDs: repos,
+			},
+		}
+}
+
+func uniqueRepoScopes(task acpruntime.Task) []string {
+	values := append([]string{}, task.RepoScopes...)
+	if strings.TrimSpace(task.RepoScope) != "" {
+		values = append([]string{task.RepoScope}, values...)
+	}
+	result := []string{}
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		key := repoScopeMatchKey(trimmed)
+		if key == "" {
+			key = strings.ToLower(trimmed)
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, trimmed)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func validatorEvidencePathForRepo(task acpruntime.Task, repo string) string {
+	if path := repoEntrypointEvidencePath(task, repo); path != "" {
+		return path
+	}
+	if path := collectEvidencePath(task, nil); path != "" {
+		return path
+	}
+	return "README.md"
+}
+
+func repoEntrypointEvidencePath(task acpruntime.Task, repo string) string {
+	repoKey := repoScopeMatchKey(repo)
+	if repoKey == "" {
+		return ""
+	}
+	patterns := []string{
+		"README.md",
+		"README.rst",
+		"README",
+		"Makefile",
+		"catalog-info.yaml",
+		"pyproject.toml",
+		"package.json",
+	}
+	for _, root := range task.ReadContextRoots {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		candidates := []string{}
+		cleaned := filepath.Clean(root)
+		if repoScopeMatchKey(filepath.Base(cleaned)) == repoKey {
+			candidates = append(candidates, cleaned)
+		}
+		for _, child := range []string{repo, filepath.Base(repo)} {
+			if strings.TrimSpace(child) == "" {
+				continue
+			}
+			candidates = append(candidates, filepath.Join(cleaned, child))
+		}
+		for _, candidate := range candidates {
+			info, err := os.Stat(candidate)
+			if err != nil || !info.IsDir() {
+				continue
+			}
+			for _, pattern := range patterns {
+				matches, err := filepath.Glob(filepath.Join(candidate, pattern))
+				if err != nil || len(matches) == 0 {
+					continue
+				}
+				sort.Strings(matches)
+				return filepath.ToSlash(strings.TrimPrefix(matches[0], strings.TrimRight(candidate, string(filepath.Separator))+string(filepath.Separator)))
+			}
+		}
+	}
+	return ""
+}
+
+func repoScopeMatchKey(value string) string {
+	value = strings.ToLower(filepath.Base(filepath.ToSlash(strings.TrimSpace(value))))
+	replacer := strings.NewReplacer("-", "", "_", "", ".", "", " ", "")
+	return replacer.Replace(value)
 }
 
 func validatorCheckedPathSkeleton(task acpruntime.Task) []string {

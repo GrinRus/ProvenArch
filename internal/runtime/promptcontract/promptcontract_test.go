@@ -412,6 +412,51 @@ func TestComposeValidatorVerdictRepairPromptIsVerdictOnly(t *testing.T) {
 	}
 }
 
+func TestComposeValidatorVerdictRepairPromptIncludesMultiRepoSkeletonSignal(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	for _, repo := range []string{"course-discovery", "frontend-platform"} {
+		repoDir := filepath.Join(repoRoot, repo)
+		if err := os.MkdirAll(repoDir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", repo, err)
+		}
+		if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte(repo+"\n"), 0o644); err != nil {
+			t.Fatalf("write %s readme: %v", repo, err)
+		}
+	}
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "refresh.step3.findings",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/validator",
+		ReadContextRoots:  []string{filepath.Join(repoRoot, "course-discovery"), filepath.Join(repoRoot, "frontend-platform")},
+		RepoScopes:        []string{"course-discovery", "frontend-platform"},
+		ExpectedArtifacts: []string{"validator-verdict.json"},
+	}
+
+	prompt := ComposeValidatorVerdictRepairPrompt(acpruntime.ProviderQwenCode, task, os.ErrInvalid)
+	required := []string{
+		"FIRST VALIDATOR VERDICT COMMAND:",
+		`"id": "finding.cross_repo.semantic_signal.required"`,
+		`"related_ids": [`,
+		`"course-discovery"`,
+		`"frontend-platform"`,
+		`"id": "q.cross_repo.integration_contract"`,
+		`"issues": []`,
+	}
+	for _, token := range required {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected validator repair prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	if got := strings.Count(prompt, "FIRST VALIDATOR VERDICT COMMAND:"); got != 1 {
+		t.Fatalf("expected one validator first-action command heading, got %d:\n%s", got, prompt)
+	}
+	if got := strings.Count(prompt, "finding.cross_repo.semantic_signal.required"); got != 1 {
+		t.Fatalf("expected cross-repo finding only inside first heredoc, got %d:\n%s", got, prompt)
+	}
+}
+
 func TestComposeDraftArtifactRepairPromptNamesExactTargets(t *testing.T) {
 	t.Parallel()
 
@@ -571,6 +616,58 @@ func TestComposeArtifactOnlyPromptAddsValidatorVerdictCanonicalSection(t *testin
 	}
 	if got := strings.Count(prompt, "FIRST VALIDATOR VERDICT COMMAND:"); got != 1 {
 		t.Fatalf("expected one validator first-action command heading, got %d:\n%s", got, prompt)
+	}
+}
+
+func TestComposeArtifactOnlyPromptAddsValidatorCrossRepoFirstActionSignal(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	for _, repo := range []string{"course-discovery", "frontend-platform"} {
+		repoDir := filepath.Join(repoRoot, repo)
+		if err := os.MkdirAll(repoDir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", repo, err)
+		}
+		if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte(repo+"\n"), 0o644); err != nil {
+			t.Fatalf("write %s readme: %v", repo, err)
+		}
+	}
+	task := acpruntime.Task{
+		StepID:            "refresh.step3.findings",
+		WriteRoot:         "/tmp/write-root",
+		ReadContextRoots:  []string{filepath.Join(repoRoot, "course-discovery"), filepath.Join(repoRoot, "frontend-platform")},
+		RepoScopes:        []string{"course-discovery", "frontend-platform"},
+		ExpectedArtifacts: []string{"validator-verdict.json"},
+	}
+
+	claudePrompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderClaudeCode, task)
+	qwenPrompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderQwenCode, task)
+	codexPrompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderCodexCode, task)
+	claudeTail := strings.TrimPrefix(claudePrompt, "You are ACP runtime provider \"claude-code\".\n\n")
+	qwenTail := strings.TrimPrefix(qwenPrompt, "You are ACP runtime provider \"qwen-code\".\n\n")
+	codexTail := strings.TrimPrefix(codexPrompt, "You are ACP runtime provider \"codex-code\".\n\n")
+	if claudeTail != qwenTail || claudeTail != codexTail {
+		t.Fatalf("expected validator providers to share identical multi-repo enforced prompt body")
+	}
+
+	for _, token := range []string{
+		"VALIDATOR FIRST-ACTION ARTIFACT:",
+		"FIRST VALIDATOR VERDICT COMMAND:",
+		`"id": "finding.cross_repo.semantic_signal.required"`,
+		`"id": "q.cross_repo.integration_contract"`,
+		`"repo": "course-discovery"`,
+		`"repo": "frontend-platform"`,
+		"Artifact-only contract:",
+	} {
+		if !strings.Contains(claudePrompt, token) {
+			t.Fatalf("expected validator prompt to contain %q, got:\n%s", token, claudePrompt)
+		}
+	}
+	if strings.Index(claudePrompt, "finding.cross_repo.semantic_signal.required") > strings.Index(claudePrompt, "Artifact-only contract:") {
+		t.Fatalf("expected cross-repo skeleton in first-action section before artifact-only contract:\n%s", claudePrompt)
+	}
+	if got := strings.Count(claudePrompt, "finding.cross_repo.semantic_signal.required"); got != 1 {
+		t.Fatalf("expected cross-repo finding only inside first heredoc, got %d:\n%s", got, claudePrompt)
 	}
 }
 
