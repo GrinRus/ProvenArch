@@ -162,9 +162,10 @@ func recoverCollectArtifactPairRepair(ctx context.Context, task acpruntime.Task,
 	}
 
 	emitFocusedArtifactRepairScheduledDiagnostic(task, adapter.Provider(), "collect_pair_repair", stage, snapshot, validationErr)
-	repairResult, repairErr, commandErr := runFocusedArtifactRepairCommand(ctx, task, adapter, result, func() (CommandSpec, error) {
+	buildRepairSpec := func() (CommandSpec, error) {
 		return repairAdapter.CollectArtifactPairRepairCommandSpec(task, validationErr)
-	})
+	}
+	repairResult, repairErr, commandErr := runFocusedArtifactRepairCommand(ctx, task, adapter, result, buildRepairSpec)
 	if commandErr != nil {
 		return true, acpruntime.Result{}, commandErr
 	}
@@ -189,6 +190,39 @@ func recoverCollectArtifactPairRepair(ctx context.Context, task acpruntime.Task,
 		return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, repairResult, repairErr)
 	}
 	if err := adapter.ValidateArtifacts(task); err != nil {
+		if shouldRetryTransientProviderUnavailableArtifactRepair(policy, repairResult, err, adapter.UnavailableMarkers()) {
+			emitFocusedArtifactRepairRetryScheduledDiagnostic(task, adapter.Provider(), "collect_pair_repair", err)
+			retryResult, retryErr, retryCommandErr := runFocusedArtifactRepairCommand(ctx, task, adapter, repairResult, buildRepairSpec)
+			if retryCommandErr != nil {
+				return true, acpruntime.Result{}, retryCommandErr
+			}
+			if writeSetErr := validateCollectArtifactPairRepairWriteSet(task, beforeRepairFiles); writeSetErr != nil {
+				return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "collect_pair_repair", "collect pair recovery wrote outside the collect pair write set", writeSetErr)
+			}
+			if retryErr != nil {
+				var retryStalled StallError
+				if errors.As(retryErr, &retryStalled) {
+					if policy.AcceptValidArtifactsAfterStop {
+						if err := adapter.ValidateArtifacts(task); err == nil {
+							emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "collect_pair_repair", retryStalled.Diagnostic.StallPhase)
+							return true, retryResult, nil
+						}
+					}
+					emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", retryStalled.Diagnostic, retryErr)
+					if shouldClassifySilentRetryExhaustionUnavailable(policy, task, retryResult) {
+						return true, acpruntime.Result{}, wrapProviderUnavailable(adapter, task, "collect_pair_repair", retryResult, "provider unavailable during collect pair recovery", retryErr)
+					}
+					return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "collect_pair_repair", "collect pair recovery stalled before valid artifacts were available", retryErr)
+				}
+				return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, retryResult, retryErr)
+			}
+			if err := adapter.ValidateArtifacts(task); err != nil {
+				emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
+				return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "collect_pair_repair", "collect pair recovery did not produce valid collect artifacts", err)
+			}
+			emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "collect_pair_repair", "")
+			return true, retryResult, nil
+		}
 		emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_pair_repair", "collect pair recovery did not produce valid collect artifacts", err)
 	}

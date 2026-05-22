@@ -106,14 +106,15 @@ func (a qwenAdapter) ActivityPolicy(task acpruntime.Task) providercommon.Activit
 
 func (a qwenAdapter) RecoveryPolicy(_ acpruntime.Task) providercommon.RecoveryPolicy {
 	return providercommon.RecoveryPolicy{
-		AcceptValidArtifactsAfterStop:            true,
-		RepairCollectManifestOnce:                true,
-		RepairCollectArtifactPairOnce:            true,
-		RepairValidatorVerdictOnce:               true,
-		RepairDraftArtifactsOnce:                 true,
-		RetryInvalidOrMissingArtifactsOnce:       true,
-		RetryZeroOutputPreArtifactStallOnce:      true,
-		ClassifySilentRetryExhaustionUnavailable: true,
+		AcceptValidArtifactsAfterStop:               true,
+		RepairCollectManifestOnce:                   true,
+		RepairCollectArtifactPairOnce:               true,
+		RepairValidatorVerdictOnce:                  true,
+		RepairDraftArtifactsOnce:                    true,
+		RetryInvalidOrMissingArtifactsOnce:          true,
+		RetryZeroOutputPreArtifactStallOnce:         true,
+		RetryTransientProviderUnavailableRepairOnce: true,
+		ClassifySilentRetryExhaustionUnavailable:    true,
 	}
 }
 

@@ -663,6 +663,98 @@ EOF
 	}
 }
 
+func TestRunHeadlessProviderRetriesTransientAPIErrorCollectPairRepair(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-pair-repair-api-retry")
+	docRel := steppolicy.SuggestedCollectDocumentPath(task)
+	manifest := strings.Replace(collectManifestJSON(task), `"path": "overview.md"`, `"path": "`+docRel+`"`, 1)
+	statePath := filepath.Join(task.Workspace, "repair-attempt-state")
+	initialScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'qwen collect started'
+`
+	docAbs := filepath.Join(task.WriteRoot, filepath.FromSlash(docRel))
+	repairScript := `#!/usr/bin/env bash
+set -eu
+state=` + shellQuote(statePath) + `
+if [[ ! -f "$state" ]]; then
+  printf '%s\n' 'first' > "$state"
+  printf '%s\n' '[API Error: Premature close]'
+  exit 0
+fi
+mkdir -p ` + shellQuote(filepath.Dir(docAbs)) + `
+printf '%s\n' '# Collect Overview' > ` + shellQuote(docAbs) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + manifest + `
+EOF
+`
+	runner := testAdapter{
+		command:           writeEngineScript(t, initialScript),
+		pairRepairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:               true,
+			RepairCollectArtifactPairOnce:               true,
+			RetryTransientProviderUnavailableRepairOnce: true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected collect pair repair retry success, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if _, err := os.Stat(filepath.Join(task.WriteRoot, ShardPackManifestFileName)); err != nil {
+		t.Fatalf("expected repaired manifest: %v", err)
+	}
+	if _, err := os.Stat(docAbs); err != nil {
+		t.Fatalf("expected repaired document: %v", err)
+	}
+}
+
+func TestRunHeadlessProviderClassifiesExhaustedTransientAPIErrorCollectPairRepairUnavailable(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-pair-repair-api-exhausted")
+	initialScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'qwen collect started'
+`
+	repairScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' '[API Error: Premature close]'
+`
+	runner := testAdapter{
+		command:           writeEngineScript(t, initialScript),
+		pairRepairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:               true,
+			RepairCollectArtifactPairOnce:               true,
+			RetryTransientProviderUnavailableRepairOnce: true,
+		},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected exhausted provider API repair to fail")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRunnerUnavailable {
+		t.Fatalf("expected runner_unavailable, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Stdout, "Premature close") {
+		t.Fatalf("expected provider API error diagnostics, got %q", runnerErr.Stdout)
+	}
+	if strings.TrimSpace(runnerErr.RawOutputRefs.Stdout) == "" || strings.TrimSpace(runnerErr.RawOutputRefs.Metadata) == "" {
+		t.Fatalf("expected raw output refs, got %+v", runnerErr.RawOutputRefs)
+	}
+}
+
 func TestRunHeadlessProviderRejectsCollectPairRepairExtraWrites(t *testing.T) {
 	t.Parallel()
 
