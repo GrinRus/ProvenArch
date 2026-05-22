@@ -94,14 +94,15 @@ type ActivityPolicy struct {
 }
 
 type RecoveryPolicy struct {
-	AcceptValidArtifactsAfterStop            bool
-	RepairCollectManifestOnce                bool
-	RepairCollectArtifactPairOnce            bool
-	RepairValidatorVerdictOnce               bool
-	RepairDraftArtifactsOnce                 bool
-	RetryInvalidOrMissingArtifactsOnce       bool
-	RetryZeroOutputPreArtifactStallOnce      bool
-	ClassifySilentRetryExhaustionUnavailable bool
+	AcceptValidArtifactsAfterStop               bool
+	RepairCollectManifestOnce                   bool
+	RepairCollectArtifactPairOnce               bool
+	RepairValidatorVerdictOnce                  bool
+	RepairDraftArtifactsOnce                    bool
+	RetryInvalidOrMissingArtifactsOnce          bool
+	RetryZeroOutputPreArtifactStallOnce         bool
+	RetryTransientProviderUnavailableRepairOnce bool
+	ClassifySilentRetryExhaustionUnavailable    bool
 }
 
 func DefaultUnavailableMarkers() []string {
@@ -117,8 +118,10 @@ func DefaultUnavailableMarkers() []string {
 		"rate_limit",
 		"status code: 403",
 		"status code: 429",
+		"api error:",
 		"api error: 403",
 		"api error: 429",
+		"premature close",
 		"ssl",
 		"tls",
 		"certificate",

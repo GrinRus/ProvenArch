@@ -213,6 +213,21 @@ func emitFocusedArtifactRepairCompletedDiagnostic(task acpruntime.Task, provider
 	emitDiagnostic(task, "focused artifact repair completed", fields)
 }
 
+func emitFocusedArtifactRepairRetryScheduledDiagnostic(task acpruntime.Task, provider acpruntime.Provider, mode string, cause error) {
+	fields := map[string]any{
+		"provider":      string(provider),
+		"shard_id":      strings.TrimSpace(task.ShardID),
+		"step_id":       strings.TrimSpace(task.StepID),
+		"action":        "retry_transient_provider_unavailable",
+		"recovery_mode": strings.TrimSpace(mode),
+		"severity":      "warning",
+	}
+	if cause != nil {
+		fields["validation_error"] = strings.TrimSpace(cause.Error())
+	}
+	emitDiagnostic(task, "focused artifact repair retry scheduled", fields)
+}
+
 func emitFocusedArtifactRepairExhaustedDiagnostic(task acpruntime.Task, provider acpruntime.Provider, mode string, diagnostic StallDiagnostic, cause error) {
 	fields := diagnostic.fields(provider, task, "")
 	fields["step_id"] = strings.TrimSpace(task.StepID)

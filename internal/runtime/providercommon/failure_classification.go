@@ -172,6 +172,8 @@ func shouldTreatArtifactFailureAsProviderUnavailable(result acpruntime.Result, e
 	switch {
 	case text == "":
 		return true
+	case strings.Contains(text, "runtime draft manifest") && strings.Contains(text, "is unavailable"):
+		return true
 	case strings.Contains(text, "parse runtime draft manifest"):
 		return false
 	case strings.Contains(text, "runtime draft manifest step_id must equal"):
@@ -184,6 +186,10 @@ func shouldTreatArtifactFailureAsProviderUnavailable(result acpruntime.Result, e
 		return false
 	case strings.Contains(text, "runtime draft manifest outputs are invalid"):
 		return false
+	case strings.Contains(text, "shard pack manifest") && strings.Contains(text, "is unavailable"):
+		return true
+	case strings.Contains(text, "validator verdict") && strings.Contains(text, "is unavailable"):
+		return true
 	case strings.Contains(text, "shard pack manifest"):
 		return false
 	case strings.Contains(text, "validator verdict"):
@@ -197,6 +203,38 @@ func shouldTreatArtifactFailureAsProviderUnavailable(result acpruntime.Result, e
 	default:
 		return false
 	}
+}
+
+func shouldRetryTransientProviderUnavailableArtifactRepair(policy RecoveryPolicy, result acpruntime.Result, err error, markers []string) bool {
+	if !policy.RetryTransientProviderUnavailableRepairOnce {
+		return false
+	}
+	if !shouldTreatArtifactFailureAsProviderUnavailable(result, err, markers) {
+		return false
+	}
+	return textHasTransientUnavailableMarker(result.Stdout, result.Stderr, err)
+}
+
+func textHasTransientUnavailableMarker(stdout string, stderr string, err error) bool {
+	text := strings.ToLower(strings.Join([]string{stdout, stderr, errorText(err)}, "\n"))
+	for _, marker := range []string{
+		"premature close",
+		"connection reset",
+		"connection closed",
+		"socket hang up",
+		"unexpected eof",
+		"stream error",
+		"api error: 500",
+		"api error: 502",
+		"api error: 503",
+		"api error: 504",
+		"api error: 529",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func textHasUnavailableMarker(stdout string, stderr string, err error, markers []string) bool {
