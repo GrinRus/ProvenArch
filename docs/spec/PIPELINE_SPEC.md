@@ -177,6 +177,7 @@ Canonical MVP runtime shape:
 - semantic source of truth для `step1` — `shard-pack-manifest.json.semantic`
 - `step1` semantic provenance evidence (`entities/edges/findings[].provenance.evidence[]`) обязаны содержать non-empty `repo` + `path`; citation-only semantic evidence objects невалидны
 - semantic source of truth для `step3` — `validator-verdict.json.findings[]` и `validator-verdict.json.questions[]`
+- для multi-repo `init|refresh.step3.findings` first-action `validator-verdict.json` skeleton обязан включать минимум один PASS-compatible cross-repo finding и один question с repo/path provenance и `related_ids` по нескольким repo scopes; пустой валидный verdict skeleton допустим только для single-repo validator tasks
 - для multi-repo release profiles cross-repo signal считается валидным только через explicit `semantic.edges[]`, finding provenance по нескольким repos или question `related_ids` по нескольким repo scopes при наличии repo-specific citation coverage; простое перечисление repos без связи остаётся `analysis:cross-repo-missing`
 - runtime execution metadata сохраняют только execution context, status, warnings и raw-output references
 - raw provider prompt argv payloads and stdout/stderr diagnostics are redacted before persistence and run-log streaming; lifecycle diagnostics keep prompt size, and prompt argv payloads are replaced with byte count + hash when present; stdout/stderr remain diagnostic only

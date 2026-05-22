@@ -638,6 +638,72 @@ func TestValidatorVerdictTaskSkeletonParsesWithCanonicalIssueShape(t *testing.T)
 	}
 }
 
+func TestValidatorVerdictTaskSkeletonIncludesCrossRepoSignalForMultiRepo(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	courseDiscovery := filepath.Join(repoRoot, "course-discovery")
+	frontendPlatform := filepath.Join(repoRoot, "frontend-platform")
+	if err := os.MkdirAll(courseDiscovery, 0o755); err != nil {
+		t.Fatalf("mkdir course-discovery: %v", err)
+	}
+	if err := os.MkdirAll(frontendPlatform, 0o755); err != nil {
+		t.Fatalf("mkdir frontend-platform: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(courseDiscovery, "README.rst"), []byte("Course discovery\n"), 0o644); err != nil {
+		t.Fatalf("write course-discovery readme: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(frontendPlatform, "README.md"), []byte("Frontend platform\n"), 0o644); err != nil {
+		t.Fatalf("write frontend-platform readme: %v", err)
+	}
+
+	task := acpruntime.Task{
+		RunID:      "run-1",
+		StepID:     "refresh.step3.findings",
+		RepoScopes: []string{"frontend-platform", "course-discovery", "course-discovery"},
+		ReadContextRoots: []string{
+			"/tmp/workspace/reports/taskruns/run-1/staging/final",
+			courseDiscovery,
+			frontendPlatform,
+		},
+	}
+
+	raw := ValidatorVerdictTaskSkeleton(task)
+	verdict, err := contracts.ParseValidatorVerdict([]byte(raw))
+	if err != nil {
+		t.Fatalf("expected validator verdict skeleton to parse, got %v\n%s", err, raw)
+	}
+	if len(verdict.Findings) != 1 {
+		t.Fatalf("expected one cross-repo finding, got %+v", verdict.Findings)
+	}
+	if len(verdict.Questions) != 1 {
+		t.Fatalf("expected one cross-repo question, got %+v", verdict.Questions)
+	}
+	if len(verdict.Issues) != 0 {
+		t.Fatalf("expected cross-repo semantic signal to stay out of technical issues, got %+v", verdict.Issues)
+	}
+	finding := verdict.Findings[0]
+	if finding.ID != "finding.cross_repo.semantic_signal.required" {
+		t.Fatalf("unexpected finding id: %+v", finding)
+	}
+	if len(finding.RelatedIDs) != 2 {
+		t.Fatalf("expected deduplicated related repo scopes, got %+v", finding.RelatedIDs)
+	}
+	evidenceByRepo := map[string]string{}
+	for _, item := range finding.Provenance.Evidence {
+		evidenceByRepo[item.Repo] = item.Path
+	}
+	if evidenceByRepo["course-discovery"] != "README.rst" {
+		t.Fatalf("expected course-discovery README.rst evidence, got %+v", evidenceByRepo)
+	}
+	if evidenceByRepo["frontend-platform"] != "README.md" {
+		t.Fatalf("expected frontend-platform README.md evidence, got %+v", evidenceByRepo)
+	}
+	if len(verdict.Questions[0].RelatedIDs) != 2 {
+		t.Fatalf("expected question to relate both repo scopes, got %+v", verdict.Questions[0])
+	}
+}
+
 func TestValidatorVerdictTaskSkeletonUsesStagedFinalRootNotWriteRoot(t *testing.T) {
 	t.Parallel()
 
