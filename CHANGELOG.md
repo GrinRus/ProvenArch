@@ -2,9 +2,9 @@
 
 All notable user-facing changes are tracked here. ProvenArch uses SemVer-style release tags, with `v0.x` treated as beta/pre-release foundation.
 
-## v0.1.1 - 2026-05-09
+## v0.1.1 - 2026-05-23
 
-Beta hardening and onboarding release.
+Beta hardening, onboarding, and live release-gate release.
 
 Highlights:
 - Reworked README onboarding around what ACP does, local install, first fake analysis, runtime choice, artifacts, workspace model, and release evidence.
@@ -14,10 +14,13 @@ Highlights:
 - Updated UI dependency chain to remove moderate `npm audit` findings.
 - Enforced exact Node.js version from `.node-version` for source builds.
 - Enforced exact Go version from `.go-version` for CI, release, local Makefile, and smoke builds while preserving `go.mod` compatibility level `go 1.20`.
+- Hardened headless runtime release behavior for `qwen-code`, `claude-code`, and `codex-code` around artifact-only success, bounded silent-runner recovery, provider readiness, prompt-first artifact commands, draft repair validation, and multi-repo semantic quality gates.
+- Fixed embedded UI release assets so Mermaid diagram previews render from the released single binary.
 
 Verification notes:
 - Public `install.sh` smoke was verified against the current published release path with checksum validation.
 - Local fake walkthrough smoke was verified with `acp doctor`, `acp serve --auto-init --dry-run`, `acp run --pipeline init --runtime fake --non-interactive`, and local UI/API endpoints.
+- Trusted-machine release-fast gate `release-fast-20260522T114156Z` passed with all release providers (`qwen-code`, `claude-code`, `codex-code`), baseline and parallel-default sweeps, frontend init/cancel checks, artifact quality gates, and shard-plan invariant.
 
 Known limitations:
 - `v0.1.1` remains a beta/pre-v1 release. Public behavior and artifact contracts can still evolve before `v1.0.0`.
