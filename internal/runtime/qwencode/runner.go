@@ -9,6 +9,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/providercommon"
+	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 )
 
 type HeadlessRunner struct {
@@ -96,12 +97,16 @@ func (a qwenAdapter) ValidateArtifacts(task acpruntime.Task) error {
 
 func (a qwenAdapter) ActivityPolicy(task acpruntime.Task) providercommon.ActivityPolicy {
 	monitorArtifacts := providercommon.MonitorsRuntimeArtifacts(task)
-	return providercommon.ActivityPolicy{
+	policy := providercommon.ActivityPolicy{
 		MonitorArtifacts:           monitorArtifacts,
 		MonitorPreArtifact:         monitorArtifacts,
 		PreArtifactStallWindow:     180 * time.Second,
 		PartialArtifactStallWindow: 90 * time.Second,
 	}
+	if runtimedrafts.IsDraftStep(task.StepID) {
+		policy.ValidArtifactStopWindow = 2 * time.Minute
+	}
+	return policy
 }
 
 func (a qwenAdapter) RecoveryPolicy(_ acpruntime.Task) providercommon.RecoveryPolicy {

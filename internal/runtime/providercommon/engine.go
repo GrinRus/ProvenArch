@@ -88,6 +88,7 @@ type ActivityPolicy struct {
 	RetryPreArtifactStallWindow time.Duration
 	PostArtifactStallWindow     time.Duration
 	PartialArtifactStallWindow  time.Duration
+	ValidArtifactStopWindow     time.Duration
 	PollInterval                time.Duration
 	TerminateGrace              time.Duration
 	PostTerminateDrain          time.Duration

@@ -62,6 +62,50 @@ func TestRunHeadlessProviderAcceptsValidArtifactsAfterControlledStop(t *testing.
 	}
 }
 
+func TestRunHeadlessProviderAcceptsQwenDraftArtifactsAfterValidWindow(t *testing.T) {
+	task := newAsIsDraftTask(t, "run-valid-draft-overrun")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	tail := `while true; do
+  printf '%s\n' 'still refining as-is draft'
+  printf '%s\n' '- Provider is still refining after valid artifacts.' >> "$draft_root/architect-summary.md"
+  sleep 0.01
+done`
+	runner := testAdapter{
+		command: writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, tail)),
+		activity: ActivityPolicy{
+			MonitorArtifacts:           true,
+			MonitorPreArtifact:         true,
+			PreArtifactStallWindow:     5 * time.Second,
+			PostArtifactStallWindow:    time.Second,
+			PartialArtifactStallWindow: time.Second,
+			ValidArtifactStopWindow:    50 * time.Millisecond,
+			PollInterval:               5 * time.Millisecond,
+			PostTerminateDrain:         10 * time.Millisecond,
+			TerminateGrace:             10 * time.Millisecond,
+		},
+		recovery: RecoveryPolicy{AcceptValidArtifactsAfterStop: true},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := RunHeadlessProvider(ctx, task, runner)
+	if err != nil {
+		t.Fatalf("expected valid draft artifact stop to recover success, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if _, _, err := ValidateRequiredRuntimeDraftArtifacts(task); err != nil {
+		t.Fatalf("expected valid as-is draft artifacts: %v", err)
+	}
+	if !hasDiagnosticField(diagnostics, "retry completed", "recovery_mode", "artifact_only") {
+		t.Fatalf("expected artifact_only recovery diagnostic, got %#v", diagnostics)
+	}
+}
+
 func TestRunHeadlessProviderClassifiesSilentRetryExhaustionUnavailable(t *testing.T) {
 	t.Parallel()
 
@@ -2352,6 +2396,18 @@ func hasDiagnostic(events []acpruntime.DiagnosticEvent, message string, severity
 			return true
 		}
 		if got, ok := event.Fields["severity"].(string); ok && got == severity {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDiagnosticField(events []acpruntime.DiagnosticEvent, message string, key string, value string) bool {
+	for _, event := range events {
+		if event.Message != message {
+			continue
+		}
+		if got, ok := event.Fields[key].(string); ok && got == value {
 			return true
 		}
 	}
