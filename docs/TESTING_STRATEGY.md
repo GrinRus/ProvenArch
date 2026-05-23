@@ -177,7 +177,7 @@ Implemented additional jobs:
 Security/advisory workflows:
 - `dependency-review` runs on pull requests and blocks newly introduced vulnerable dependencies.
 - `codeql` runs Go and JavaScript/TypeScript analysis on pull requests, pushes to `main`, and weekly schedule.
-- `scorecard` runs OpenSSF Scorecard on push/schedule with read-only repo permissions and publishes security events when permitted.
+- `scorecard` runs OpenSSF Scorecard on push/schedule with top-level read-only workflow permissions; the scorecard job alone gets `id-token: write` and `security-events: write` for result publishing/SARIF upload.
 
 Release workflow hardening:
 - tag-only release workflow uses job-level write permissions, an explicit `github-release` environment, pinned actions, timeouts, and provenance/SBOM artifact generation.
