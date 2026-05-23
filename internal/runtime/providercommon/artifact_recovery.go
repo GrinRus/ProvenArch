@@ -363,9 +363,10 @@ func recoverDraftArtifactRepair(ctx context.Context, task acpruntime.Task, adapt
 	}
 
 	emitFocusedArtifactRepairScheduledDiagnostic(task, adapter.Provider(), "draft_artifact_repair", stage, runtimeArtifactSnapshot(task), validationErr)
-	repairResult, repairErr, commandErr := runFocusedArtifactRepairCommand(ctx, task, adapter, result, func() (CommandSpec, error) {
+	buildRepairSpec := func() (CommandSpec, error) {
 		return repairAdapter.DraftArtifactRepairCommandSpec(task, validationErr)
-	})
+	}
+	repairResult, repairErr, commandErr := runFocusedArtifactRepairCommand(ctx, task, adapter, result, buildRepairSpec)
 	if commandErr != nil {
 		return true, acpruntime.Result{}, commandErr
 	}
@@ -392,6 +393,43 @@ func recoverDraftArtifactRepair(ctx context.Context, task acpruntime.Task, adapt
 		return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, repairResult, repairErr)
 	}
 	if err := adapter.ValidateArtifacts(task); err != nil {
+		if shouldRetryTransientProviderUnavailableArtifactRepair(policy, repairResult, err, adapter.UnavailableMarkers()) {
+			emitFocusedArtifactRepairRetryScheduledDiagnostic(task, adapter.Provider(), "draft_artifact_repair", err)
+			retryResult, retryErr, retryCommandErr := runFocusedArtifactRepairCommand(ctx, task, adapter, repairResult, buildRepairSpec)
+			if retryCommandErr != nil {
+				return true, acpruntime.Result{}, retryCommandErr
+			}
+			if writeSetErr := validateDraftArtifactRepairWriteSet(task, beforeWriteRoot, beforeDraftRoot); writeSetErr != nil {
+				return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "draft_artifact_repair", "draft recovery wrote outside the draft artifact write set", writeSetErr)
+			}
+			if retryErr != nil {
+				var retryStalled StallError
+				if errors.As(retryErr, &retryStalled) {
+					if policy.AcceptValidArtifactsAfterStop {
+						if err := adapter.ValidateArtifacts(task); err == nil {
+							emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "completed_after_controlled_stop", runtimeArtifactSnapshot(task))
+							emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "draft_artifact_repair", retryStalled.Diagnostic.StallPhase)
+							return true, retryResult, nil
+						}
+					}
+					emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "stalled", runtimeArtifactSnapshot(task))
+					emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_repair", retryStalled.Diagnostic, retryErr)
+					if shouldClassifySilentRetryExhaustionUnavailable(policy, task, retryResult) {
+						return true, acpruntime.Result{}, wrapProviderUnavailable(adapter, task, "draft_artifact_repair", retryResult, "provider unavailable during draft artifact repair", retryErr)
+					}
+					return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "draft_artifact_repair", "draft artifact repair stalled before valid artifacts were available", retryErr)
+				}
+				return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, retryResult, retryErr)
+			}
+			if err := adapter.ValidateArtifacts(task); err != nil {
+				emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "invalid", runtimeArtifactSnapshot(task))
+				emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_repair", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
+				return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "draft_artifact_repair", "draft artifact repair did not produce valid draft artifact contract", err)
+			}
+			emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "completed", runtimeArtifactSnapshot(task))
+			emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "draft_artifact_repair", "")
+			return true, retryResult, nil
+		}
 		emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "invalid", runtimeArtifactSnapshot(task))
 		emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_repair", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "draft_artifact_repair", "draft artifact repair did not produce valid draft artifact contract", err)

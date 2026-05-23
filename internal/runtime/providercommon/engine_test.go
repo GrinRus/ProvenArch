@@ -1437,6 +1437,92 @@ func TestRunHeadlessProviderRepairsAsIsDraftArtifactsWithAllDraftFiles(t *testin
 	}
 }
 
+func TestRunHeadlessProviderRetriesTransientAPIErrorDraftArtifactRepair(t *testing.T) {
+	task := newAsIsDraftTask(t, "run-asis-draft-repair-api-retry")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	statePath := filepath.Join(task.Workspace, "draft-repair-attempt-state")
+	initialScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'qwen as-is started'
+`
+	successScript := asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, "exit 0")
+	repairScript := strings.Replace(
+		successScript,
+		"#!/usr/bin/env bash\nset -eu\n",
+		"#!/usr/bin/env bash\nset -eu\nstate="+shellQuote(statePath)+"\nif [[ ! -f \"$state\" ]]; then\n  printf '%s\\n' 'first' > \"$state\"\n  printf '%s\\n' '[API Error: Connection error. (cause: request to https://api.kimi.com/coding/v1/messages failed, reason: Client network socket disconnected before secure TLS connection was established)]'\n  exit 0\nfi\n",
+		1,
+	)
+	runner := testAdapter{
+		command:            writeEngineScript(t, initialScript),
+		draftRepairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:               true,
+			RepairDraftArtifactsOnce:                    true,
+			RetryTransientProviderUnavailableRepairOnce: true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected draft artifact repair retry success, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	for _, name := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		if _, err := os.Stat(filepath.Join(task.DraftFinalRoot, name)); err != nil {
+			t.Fatalf("expected repaired draft file %s: %v", name, err)
+		}
+	}
+	if !hasDiagnostic(diagnostics, "focused artifact repair retry scheduled", "warning") {
+		t.Fatalf("expected warning diagnostic for transient draft repair retry, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderClassifiesExhaustedTransientAPIErrorDraftArtifactRepairUnavailable(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-repair-api-exhausted")
+	initialScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'qwen as-is started'
+`
+	repairScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' '[API Error: Connection error. (cause: request to https://api.kimi.com/coding/v1/messages failed, reason: Client network socket disconnected before secure TLS connection was established)]'
+`
+	runner := testAdapter{
+		command:            writeEngineScript(t, initialScript),
+		draftRepairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:               true,
+			RepairDraftArtifactsOnce:                    true,
+			RetryTransientProviderUnavailableRepairOnce: true,
+		},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected exhausted provider API draft repair to fail")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRunnerUnavailable {
+		t.Fatalf("expected runner_unavailable, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Stdout, "Connection error") {
+		t.Fatalf("expected provider API error diagnostics, got %q", runnerErr.Stdout)
+	}
+	if strings.TrimSpace(runnerErr.RawOutputRefs.Stdout) == "" || strings.TrimSpace(runnerErr.RawOutputRefs.Metadata) == "" {
+		t.Fatalf("expected raw output refs, got %+v", runnerErr.RawOutputRefs)
+	}
+}
+
 func TestRunHeadlessProviderRejectsAsIsDraftRepairMissingReferencedFiles(t *testing.T) {
 	t.Parallel()
 
