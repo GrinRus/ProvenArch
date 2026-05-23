@@ -367,6 +367,7 @@ func activityPolicyDiagnostics(policy ActivityPolicy) map[string]any {
 		"retry_pre_artifact_stall_window_ms": policy.RetryPreArtifactStallWindow.Milliseconds(),
 		"post_artifact_stall_window_ms":      policy.PostArtifactStallWindow.Milliseconds(),
 		"partial_artifact_stall_window_ms":   policy.PartialArtifactStallWindow.Milliseconds(),
+		"valid_artifact_stop_window_ms":      policy.ValidArtifactStopWindow.Milliseconds(),
 		"poll_interval_ms":                   policy.PollInterval.Milliseconds(),
 		"terminate_grace_ms":                 policy.TerminateGrace.Milliseconds(),
 		"post_terminate_drain_ms":            policy.PostTerminateDrain.Milliseconds(),
