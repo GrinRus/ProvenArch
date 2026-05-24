@@ -20,7 +20,7 @@ Highlights:
 Verification notes:
 - Public `install.sh` smoke was verified against the current published release path with checksum validation.
 - Local fake walkthrough smoke was verified with `acp doctor`, `acp serve --auto-init --dry-run`, `acp run --pipeline init --runtime fake --non-interactive`, and local UI/API endpoints.
-- Trusted-machine release-fast gate `release-fast-20260522T114156Z` passed with all release providers (`qwen-code`, `claude-code`, `codex-code`), baseline and parallel-default sweeps, frontend init/cancel checks, artifact quality gates, and shard-plan invariant.
+- Trusted-machine release-fast gate `release-fast-20260523T171925Z` passed with all release providers (`qwen-code`, `claude-code`, `codex-code`), baseline and parallel-default sweeps, frontend init/cancel checks, artifact quality gates, and shard-plan invariant.
 
 Known limitations:
 - `v0.1.1` remains a beta/pre-v1 release. Public behavior and artifact contracts can still evolve before `v1.0.0`.
