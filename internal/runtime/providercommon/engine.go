@@ -21,6 +21,7 @@ const (
 	defaultRetryPreArtifactWindow  = 3 * time.Minute
 	defaultCollectRepairWindow     = 3 * time.Minute
 	defaultFocusedRepairWindow     = 90 * time.Second
+	defaultRepairValidStopWindow   = 250 * time.Millisecond
 	defaultStallPollInterval       = 2 * time.Second
 	defaultStallTerminateGrace     = 2 * time.Second
 	defaultPostTerminateDrain      = 500 * time.Millisecond
