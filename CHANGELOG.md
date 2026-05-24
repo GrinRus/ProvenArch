@@ -15,6 +15,7 @@ Highlights:
 - Enforced exact Node.js version from `.node-version` for source builds.
 - Enforced exact Go version from `.go-version` for CI, release, local Makefile, and smoke builds while preserving `go.mod` compatibility level `go 1.20`.
 - Hardened headless runtime release behavior for `qwen-code`, `claude-code`, and `codex-code` around artifact-only success, bounded silent-runner recovery, provider readiness, prompt-first artifact commands, draft repair validation, and multi-repo semantic quality gates.
+- Added controlled stop after valid focused repair artifacts, so collect/validator/draft repair attempts do not wait for a still-running provider once required artifacts validate.
 - Fixed embedded UI release assets so Mermaid diagram previews render from the released single binary.
 
 Verification notes:

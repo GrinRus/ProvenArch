@@ -266,6 +266,9 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 	if repairPolicy.PartialArtifactStallWindow < defaultCollectRepairWindow {
 		repairPolicy.PartialArtifactStallWindow = defaultCollectRepairWindow
 	}
+	if repairPolicy.ValidArtifactStopWindow <= 0 {
+		repairPolicy.ValidArtifactStopWindow = defaultRepairValidStopWindow
+	}
 	repairResult, repairErr := runCommandSpec(ctx, task, spec, repairPolicy)
 	if repairErr != nil {
 		if err := validateCollectManifestRepairWriteSet(task, beforeRepairFiles); err != nil {
@@ -461,6 +464,9 @@ func focusedRepairActivityPolicy(base ActivityPolicy, monitorPreArtifact bool) A
 	}
 	if repairPolicy.PartialArtifactStallWindow < defaultFocusedRepairWindow {
 		repairPolicy.PartialArtifactStallWindow = defaultFocusedRepairWindow
+	}
+	if repairPolicy.ValidArtifactStopWindow <= 0 {
+		repairPolicy.ValidArtifactStopWindow = defaultRepairValidStopWindow
 	}
 	return repairPolicy
 }

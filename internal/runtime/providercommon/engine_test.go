@@ -628,6 +628,50 @@ EOF
 	}
 }
 
+func TestRunHeadlessProviderStopsCollectManifestRepairAfterValidArtifact(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-repair-valid-stop")
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + `
+`
+	repairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+while true; do
+  touch ` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + `
+  sleep 0.02
+done
+`
+	runner := testAdapter{
+		command:       writeEngineScript(t, initialScript),
+		repairCommand: writeEngineScript(t, repairScript),
+		activity: ActivityPolicy{
+			PollInterval:       5 * time.Millisecond,
+			PostTerminateDrain: 10 * time.Millisecond,
+			TerminateGrace:     10 * time.Millisecond,
+		},
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := RunHeadlessProvider(ctx, task, runner)
+	if err != nil {
+		t.Fatalf("expected collect manifest repair to stop after valid artifact, got %v; snapshot=%+v", err, collectArtifactSnapshot(task.WriteRoot))
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+}
+
 func TestRunHeadlessProviderRepairsCollectManifestWithMissingReferencedDocumentPath(t *testing.T) {
 	t.Parallel()
 
