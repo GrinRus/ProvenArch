@@ -15,6 +15,7 @@ export function useWizardEditor({ setBusy, setError }: UseWizardEditorOptions) {
   const [wizardNfr, setWizardNfr] = useState("availability, traceability");
   const [wizardRules, setWizardRules] = useState("no silent re-key, evidence-first findings");
   const [wizardStatus, setWizardStatus] = useState("");
+  const [wizardContractLoaded, setWizardContractLoaded] = useState(false);
 
   async function loadWizardContract() {
     try {
@@ -37,6 +38,8 @@ export function useWizardEditor({ setBusy, setError }: UseWizardEditorOptions) {
       }
     } catch {
       // Wizard contract remains optional during bootstrap.
+    } finally {
+      setWizardContractLoaded(true);
     }
   }
 
@@ -77,6 +80,7 @@ export function useWizardEditor({ setBusy, setError }: UseWizardEditorOptions) {
     wizardNfr,
     wizardRules,
     wizardStatus,
+    wizardContractLoaded,
     loadWizardContract,
     setWizardProjectName,
     setWizardScope,

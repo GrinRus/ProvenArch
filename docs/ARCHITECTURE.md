@@ -37,24 +37,26 @@
    - Internal API trigger остаётся optional trusted-mode capability, а не обязательной CI/CD поверхностью
    - Раздаёт embedded UI shell и API в одном процессе `acp serve`
 
-2) **UI (`ui/`)** *(baseline shell)*
+2) **UI (`ui/`)** *(operator console shell)*
    - React + TypeScript + Vite
    - Dev: `npm run dev` с proxy на backend
    - Prod: `npm run build` → `ui/dist` встраивается в Go бинарь
    - Live browser e2e: Playwright optional smoke (`ui/e2e/live-flow.spec.ts`, `npm run e2e:live --prefix ui`)
+   - UI shell организован как Proven Arch console: top status bar, product-flow rail `Source / Readiness / Charter / Analysis / Review / Proposals / Ask / Publish`, центральная рабочая область, right inspector (`Next action`, blockers, evidence refs, workspace health, runtime safety) и bottom activity drawer для logs/events
    - Guided setup поддерживает multi-repo (`repos[]`) с add/remove rows и optional `ref`
    - Показывает repo overview в validate surface: `resolved_repos` + diagnostics, сгруппированные по repo
    - Редактирует baseline bundle artifacts через guided selector (`charter/*`, `skills/*`, prompt packs, `skills/subagents.yaml`)
-   - UI разбит на top-level tabs `Setup / Baseline / Runs / Results / Settings`
-   - `App.tsx` остаётся route shell, а крупные sections вынесены в dedicated panels (`SetupWorkspacePanel`, `WizardContractPanel`, `BaselineEditorsPanel`, `RunPanels`, `ResultsPanels`); heavy run panel inputs передаются как grouped `model/actions`, чтобы route shell не разрастался flat prop/action списками
+   - `App.tsx` остаётся route shell, а крупные sections вынесены в dedicated stage panels (`SourceStagePanel`, `ReadinessStagePanel`, `CharterStagePanel`, `AnalysisStagePanel`, `ReviewStagePanel`, `ProposalsStagePanel`, `AskStagePanel`, `PublishStagePanel`); shell components отвечают за top bar, rail, inspector и activity drawer
    - setup/baseline/wizard/git state и actions остаются за facade `useWorkspaceSetup`, но внутри разделены на `useManifestEditor`, `useBaselineEditor`, `useWizardEditor` и `useGitActions`; runtime settings живут в отдельном hook, а run explorer разделён на `useRunSelection`, `useRunPolling`, `useRunActions`, `useRunArtifacts` и `useRunLogs`
-   - Runtime profile (`timeouts` + `execution` + `permissions`) полностью вынесен в вкладку `Settings`, включая effective per-step providers
+   - Runtime profile (`timeouts` + `execution` + `permissions`) доступен в `Readiness -> Advanced runtime settings`, включая effective per-step providers; это не отдельная primary stage
    - Показывает run dashboard (queued/running/succeeded/failed), включая завершённые run'ы из persisted history
    - При bootstrap авто-выбирает newest active run (`queued/running`), иначе первый run в history
+   - При bootstrap UI остаётся на `Source` для пустого workspace, но автоматически открывает `Analysis` для active run и `Review` для выбранного completed run с уже доступными artifacts
    - Если выбранный run исчезает из history и есть новый доступный run, UI переключается на него; если history временно пуста, но status endpoint ещё возвращает выбранный run, UI сохраняет текущий selection и не делает ложный auto-switch
    - Показывает `Run status` выбранного run с полным warnings list (`RunInfo.warnings`), `error_code` и `error`
-   - Показывает `Runs: Logs` для выбранного run (`timestamp/level/step/domain/message`) с dual-view `event timeline | raw agent stream | all`, переключателем `line | line+fields` и quick actions `Copy logs`, `Download logs`, `Open runtime execution artifact`
-   - `Results` включает sub-tabs `Coverage / Artifacts / Diagrams`, где `Diagrams` рендерит Mermaid previews для `reports/diagrams/*`
+   - Bottom activity drawer показывает logs для выбранного run (`timestamp/level/step/domain/message`) с dual-view `event timeline | raw agent stream | all`, переключателем `line | line+fields` и quick actions `Copy logs`, `Download logs`, `Open runtime execution artifact`
+   - `Review` объединяет coverage, open questions, artifacts и `reports/diagrams/*` Mermaid previews; `Proposals` фокусируется на proposal/changelog artifacts
+   - `Ask` stage вызывает существующий read-only `POST /api/qa/ask` и показывает answer, citations, unresolved и confidence; этот flow deterministic workspace-backed и не вызывает headless provider/runtime mutation
    - Поддерживает `Cancel selected run` для active run через `POST /api/pipeline/runs/<run_id>/cancel`
    - Runtime Timeouts settings panel:
      - load/save/reset через `GET/PUT /api/runtime/timeouts`
@@ -65,11 +67,11 @@
    - Runtime Permissions settings panel:
      - load/save/reset через `GET/PUT /api/runtime/permissions`
      - показывает persisted/effective/source для `trusted_full_access|managed` и `fail_fast|ui`
-   - Runs tab показывает pending runtime permission requests выбранного run вместе с `decision/rule_id`; approve/deny broker остаётся отдельным будущим slice
+   - `Analysis` показывает pending runtime permission requests выбранного run вместе с `decision/rule_id`; approve/deny broker остаётся отдельным будущим slice
    - runtime profile patch validation/merge/manifest rewrite живёт в shared internal package `internal/runtimeprofile`, а API handlers остаются только HTTP adapter layer
    - live e2e poll timeout-ы берутся из effective config (`/api/runtime/timeouts`) с env override
    - Критичные UI-контролы для live e2e снабжены стабильными `data-testid` (`validate/run/status/artifacts/logs`)
-   - Setup first-run flow оформлен как stepper `Source / Workspace / Runtime / Validate / Run`: GitHub/GitLab URL является default entry, local folder остаётся supported mode, raw `workspace.yaml` editor спрятан в Advanced, readiness checklist берётся из `GET /api/system/doctor`, первый `init` запускается кнопкой `Run first analysis`
+   - First-run flow оформлен как stages `Source / Readiness / Charter / Analysis`: GitHub/GitLab URL является default entry, local folder остаётся supported mode, raw `workspace.yaml` editor спрятан в Advanced, readiness checklist берётся из `GET /api/system/doctor`, первый `init` запускается кнопкой `Run first analysis`
 
 3) **Orchestrator (`internal/orchestrator`)** *(implemented baseline)*
    - Step registry (шаги init pipeline)
@@ -158,7 +160,7 @@
    - Domain Analyst Agent (per domain)
    - Team overlay через `charter/cards/teams/*`
    - Architect Aggregator Agent (анализ outputs domain-агентов)
-   - System Analyst Q&A capability (deterministic workspace-backed read-only service + CLI `acp qa` + `POST /api/qa/ask`; не headless runtime agent)
+   - System Analyst Q&A capability (UI stage `Ask` + deterministic workspace-backed read-only service + CLI `acp qa` + `POST /api/qa/ask`; не headless runtime agent)
    - Базовые skill/prompt bundles поставляются вместе с продуктом и versioned в workspace
 
 5) **Runtime providers (`internal/runtime/*`)** *(implemented baseline)*
@@ -274,7 +276,7 @@
 4) Proposals -> agent-authored drafts + automatic promotion + derived model rebuild
 
 On-demand capability:
-- Q&A capability использует `charter/cards + model + reports + configured docs.imports_path`; в beta доступна как deterministic internal service + CLI `acp qa` + public read-only `POST /api/qa/ask`, без headless runtime provider и без runtime consumption `skills/prompt-packs/qa.md`.
+- Q&A capability использует `charter/cards + model + reports + configured docs.imports_path`; в beta доступна как UI stage `Ask` + deterministic internal service + CLI `acp qa` + public read-only `POST /api/qa/ask`, без headless runtime provider и без runtime consumption `skills/prompt-packs/qa.md`.
 
 Execution modes:
 - local interactive: UI + local process

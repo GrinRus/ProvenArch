@@ -113,6 +113,62 @@ EP-20260525-frontend-live-e2e-diagnostics
 - 2026-05-25: Implemented additive reason taxonomy, post-failure diagnostics, independent API polling, stub regression coverage, diagnostic page-close smoke, and docs sync; local DoD passed.
 
 ### Plan ID
+EP-20260525-proven-arch-ui-console
+
+### Context
+Текущий React UI отражает internal modules (`Setup / Baseline / Runs / Results / Settings`) и начинается с hero-блока, из-за чего пользователь видит админку настроек вместо рабочего flow Proven Arch. Нужно перестроить surface в stage-based console без изменения backend/API contracts.
+
+### Goals (must have)
+- [x] Заменить hero/top tabs на Proven Arch console shell: top bar, stage rail, center work area, right inspector, bottom activity drawer
+- [x] Разложить существующие setup/runtime/run/results/git surfaces по stages `Source / Readiness / Charter / Analysis / Review / Proposals / Ask / Publish`
+- [x] Подключить существующий read-only `POST /api/qa/ask` как UI stage `Ask`
+- [x] Добавить derived stage status, next action, blockers, evidence refs и runtime/workspace health
+- [x] Обновить CSS под light operator-console style без backend изменений
+- [x] Обновить UI tests, live E2E selectors и пользовательские docs
+- [x] Выполнить доступные проверки slice
+- [ ] Перенести этот ExecPlan в архив после owner review/merge
+
+### Non-goals
+- [ ] Не менять schemas, runtime artifact contracts, Go API wire shapes или CLI flags
+- [ ] Не добавлять hosted/security/compliance UX
+- [ ] Не менять pipeline semantics или provider execution policy
+
+### Approach
+1) Добавить UI-only view model types и Q&A API wrapper.
+2) Вынести reusable console components (`AppShell`, top bar, rail, inspector, activity drawer, small primitives).
+3) Refactor `App.tsx` так, чтобы existing hooks остались источником данных, а central content переключался по stage.
+4) Добавить stage panels поверх текущих API/hook actions и сохранить стабильные `data-testid` для core flows.
+5) Синхронизировать README/ARCHITECTURE и тесты с stage-based console.
+
+### Files expected to change
+- `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/lib/*`
+- `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`
+- `README.md`, `docs/ARCHITECTURE.md`, `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Stage rail renders all 8 stages and switches central content
+- [x] Readiness blockers/next actions reflect workspace validation, doctor, run errors and pending permissions
+- [x] Review stage shows coverage/questions/artifacts/diagrams from existing artifact APIs
+- [x] Ask stage calls `/api/qa/ask` and renders answer/citations/confidence
+- [x] Existing first-run, runtime settings, logs, diagrams, baseline editor and git helper coverage remain covered
+- [x] `npm run typecheck --prefix ui`
+- [x] `npm test --prefix ui`
+- [x] `make lint`
+- [x] `make build`
+
+### Risks
+- Existing UI tests have many tab-specific selectors; preserve important test IDs where practical and update navigation selectors deliberately.
+- Dense console layout can overflow on small viewports; responsive collapse must be part of the slice.
+
+### Progress log
+- 2026-05-25: Started implementation from approved UI/UX plan.
+- 2026-05-25: Implemented console shell, stage panels, Q&A UI, docs/tests/e2e updates, embedded UI rebuild and DoD checks (`make contracts`, `make test`, `make lint`, `make build`).
+- 2026-05-25: Follow-up UX audit against the accepted mockup found lower visual fidelity in the top bar/rail density and hidden compatibility controls still participating in keyboard focus; applying a focused UI polish and a11y fix without backend contract changes.
+- 2026-05-25: Browser QA follow-up fixed rail a11y duplicate labels, unlabeled advanced manifest textarea, and initial optional Charter artifact 404 console noise by lazy-loading Charter content only when the stage opens.
+- 2026-05-25: Second UX pass tightened Source density, added top-bar status icons/server status, and made bootstrap open `Review` automatically when a completed run already has artifacts.
+- 2026-05-25: Final browser QA found stale Mermaid syntax-error SVGs caused by rendering `.mmd` artifacts while text content still said `Loading...`; fixed diagram loading guard/cleanup and changed inspector next-action status from `ready` to `attention` when warning blockers exist.
+
+### Plan ID
 EP-20260518-live-e2e-blackbox
 
 ### Context

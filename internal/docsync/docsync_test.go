@@ -17,7 +17,7 @@ func TestStakeholderMatrixIsCanonicalSource(t *testing.T) {
 
 	assertContains(t, content, "Canonical Stakeholder Matrix (source of truth)")
 	assertContains(t, content, "Runtime policy `fake` default + `headless` opt-in")
-	assertContains(t, content, "Q&A capability with CLI + public read-only beta API surface")
+	assertContains(t, content, "Q&A capability with UI + CLI + public read-only beta API surface")
 	assertContains(t, content, "POST /api/qa/ask")
 
 	if !strings.Contains(lower, "public `post /api/qa/ask` | done") {
@@ -148,9 +148,9 @@ func TestQABetaBoundaryDocumentsDeterministicService(t *testing.T) {
 	t.Parallel()
 
 	requiredByPath := map[string]string{
-		"README.md":                  "deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask`; он не запускает новый live analysis и не меняет workspace",
-		"docs/ARCHITECTURE.md":       "deterministic workspace-backed read-only service + CLI `acp qa` + `POST /api/qa/ask`; не headless runtime agent",
-		"docs/STAKEHOLDER_DOC.md":    "deterministic workspace-backed read-only capability доступна как internal service + CLI `acp qa` + public read-only `POST /api/qa/ask`; это не headless runtime agent",
+		"README.md":                  "deterministic workspace-backed read-only service + UI stage `Ask` + CLI `acp qa` + public read-only `POST /api/qa/ask`; он не запускает новый live analysis и не меняет workspace",
+		"docs/ARCHITECTURE.md":       "UI stage `Ask` + deterministic workspace-backed read-only service + CLI `acp qa` + `POST /api/qa/ask`; не headless runtime agent",
+		"docs/STAKEHOLDER_DOC.md":    "deterministic workspace-backed read-only capability доступна как UI stage `Ask` + internal service + CLI `acp qa` + public read-only `POST /api/qa/ask`; это не headless runtime agent",
 		"docs/spec/PIPELINE_SPEC.md": "deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask`",
 		"docs/BACKLOG.md":            "deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask`",
 	}

@@ -11,8 +11,10 @@ type UseBaselineEditorOptions = {
 export function useBaselineEditor({ setBusy, setError }: UseBaselineEditorOptions) {
   const [baselineEditorArtifacts, setBaselineEditorArtifacts] = useState<EditableArtifactOption[]>([]);
   const [baselineBundleWarnings, setBaselineBundleWarnings] = useState<Diagnostic[]>([]);
+  const [workspaceRootPath, setWorkspaceRootPath] = useState("");
   const [selectedEditorPath, setSelectedEditorPath] = useState<string>("");
   const [selectedEditorContent, setSelectedEditorContent] = useState("");
+  const [selectedEditorLoadedPath, setSelectedEditorLoadedPath] = useState("");
   const [editorStatus, setEditorStatus] = useState("");
 
   async function loadTextArtifact(path: string, setter: (value: string) => void) {
@@ -23,9 +25,20 @@ export function useBaselineEditor({ setBusy, setError }: UseBaselineEditorOption
     }
   }
 
+  async function loadSelectedEditorContent(path = selectedEditorPath) {
+    if (!path) {
+      setSelectedEditorContent("");
+      setSelectedEditorLoadedPath("");
+      return;
+    }
+    await loadTextArtifact(path, setSelectedEditorContent);
+    setSelectedEditorLoadedPath(path);
+  }
+
   async function loadBaselineBundle() {
     try {
       const payload = await loadBaselineBundleAPI();
+      setWorkspaceRootPath(payload.workspace ?? "");
       const artifacts = (payload.manifest?.editable_artifacts ?? []).map((artifact) => ({
         path: artifact.path,
         label: artifact.label,
@@ -35,22 +48,21 @@ export function useBaselineEditor({ setBusy, setError }: UseBaselineEditorOption
       const hasCurrentSelection = artifacts.some((artifact) => artifact.path === selectedEditorPath);
       const nextPath = hasCurrentSelection ? selectedEditorPath : (artifacts[0]?.path ?? "");
       setSelectedEditorPath(nextPath);
-      if (nextPath) {
-        await loadTextArtifact(nextPath, setSelectedEditorContent);
-      } else {
-        setSelectedEditorContent("");
-      }
+      setSelectedEditorContent("");
+      setSelectedEditorLoadedPath("");
     } catch {
       setBaselineEditorArtifacts([]);
       setBaselineBundleWarnings([]);
+      setWorkspaceRootPath("");
       setSelectedEditorPath("");
       setSelectedEditorContent("");
+      setSelectedEditorLoadedPath("");
     }
   }
 
   async function handleEditorSelectionChange(path: string) {
     setSelectedEditorPath(path);
-    await loadTextArtifact(path, setSelectedEditorContent);
+    await loadSelectedEditorContent(path);
   }
 
   async function handleSaveSelectedEditorArtifact() {
@@ -70,10 +82,13 @@ export function useBaselineEditor({ setBusy, setError }: UseBaselineEditorOption
   return {
     baselineEditorArtifacts,
     baselineBundleWarnings,
+    workspaceRootPath,
     selectedEditorPath,
     selectedEditorContent,
+    selectedEditorLoadedPath,
     editorStatus,
     loadBaselineBundle,
+    loadSelectedEditorContent,
     setSelectedEditorContent,
     handleEditorSelectionChange,
     handleSaveSelectedEditorArtifact,

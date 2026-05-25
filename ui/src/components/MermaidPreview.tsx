@@ -32,8 +32,19 @@ export function MermaidPreview(props: MermaidPreviewProps) {
           theme: "base",
         });
         const graph = extractMermaidGraph(trimmed);
-        const rendered = await mermaid.default.render(createMermaidRenderID(), graph);
+        if (!isSupportedMermaidGraph(graph)) {
+          setSVG("");
+          setError("Diagram content is not a supported Mermaid graph.");
+          return;
+        }
+        const renderID = createMermaidRenderID();
+        const rendered = await renderMermaid(mermaid.default, renderID, graph);
         if (disposed || requestRef.current !== currentRequest) {
+          return;
+        }
+        if (isMermaidErrorSVG(rendered.svg)) {
+          setSVG("");
+          setError("Mermaid reported a diagram syntax error.");
           return;
         }
         setSVG(rendered.svg);
@@ -61,6 +72,9 @@ export function MermaidPreview(props: MermaidPreviewProps) {
   return <div className="diagram-svg" dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
+const mermaidGraphStartPattern =
+  /^(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|journey|pie|gitGraph|mindmap|timeline|quadrantChart|requirementDiagram|c4Context|c4Container|block-beta|architecture-beta)\b/i;
+
 function extractMermaidGraph(content: string): string {
   const trimmed = content.trim();
   const blockMatch = trimmed.match(/```mermaid\s*([\s\S]*?)```/i);
@@ -68,6 +82,26 @@ function extractMermaidGraph(content: string): string {
     return blockMatch[1].trim();
   }
   return trimmed;
+}
+
+function isSupportedMermaidGraph(graph: string): boolean {
+  return mermaidGraphStartPattern.test(graph.trim());
+}
+
+function isMermaidErrorSVG(svg: string): boolean {
+  return /aria-roledescription=["']error["']/.test(svg) || svg.includes("Syntax error in text");
+}
+
+function cleanupMermaidScratch(renderID: string) {
+  document.getElementById(`d${renderID}`)?.remove();
+}
+
+async function renderMermaid(mermaid: { render: (id: string, graph: string) => Promise<{ svg: string }> }, renderID: string, graph: string) {
+  try {
+    return await mermaid.render(renderID, graph);
+  } finally {
+    cleanupMermaidScratch(renderID);
+  }
 }
 
 function createMermaidRenderID(): string {

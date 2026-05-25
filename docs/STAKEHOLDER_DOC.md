@@ -5,7 +5,7 @@
 > **Дата:** 04 May 2026
 > **Аудитория:** tech leads, staff/principal engineers, архитекторы, platform teams, engineering managers  
 > **Важно:** required CI и deterministic baseline работают на process-scoped runtime policy: `fake` default, `headless` opt-in для реальных локальных прогонов; live provider permission mode по умолчанию `trusted_full_access`, `managed` включается явно в `workspace.yaml`.
-> **Q&A boundary (beta):** deterministic workspace-backed read-only capability доступна как internal service + CLI `acp qa` + public read-only `POST /api/qa/ask`; это не headless runtime agent и не consumer `skills/prompt-packs/qa.md`.
+> **Q&A boundary (beta):** deterministic workspace-backed read-only capability доступна как UI stage `Ask` + internal service + CLI `acp qa` + public read-only `POST /api/qa/ask`; это не headless runtime agent и не consumer `skills/prompt-packs/qa.md`.
 
 ---
 
@@ -22,7 +22,7 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 | Schema-driven workspace/runtime artifact validation + actionable diagnostics | done | `internal/workspace/validation.go`, `internal/contracts/runtimeexecution.go`, `internal/api/server_test.go` |
 | Domain-first per-domain execution with persisted runtime execution metadata + domain outputs | done | `internal/orchestrator/orchestrator.go`, `internal/orchestrator/orchestrator_test.go`, `internal/orchestrator/scenario_test.go` |
 | Architect aggregation deterministic output | done | `reports/agent-outputs/architect/summary.md`, `TestArchitectSummaryIsDeterministicAcrossRuns`, scenario golden snapshot |
-| Q&A capability with CLI + public read-only beta API surface | done | `internal/qa/service.go`, `cmd/acp/main.go` (`acp qa`), `internal/api/server.go` (`POST /api/qa/ask`), `docs/spec/API_SPEC.md` |
+| Q&A capability with UI + CLI + public read-only beta API surface | done | `ui/src/lib/qaApi.ts`, `internal/qa/service.go`, `cmd/acp/main.go` (`acp qa`), `internal/api/server.go` (`POST /api/qa/ask`), `docs/spec/API_SPEC.md` |
 | Public `POST /api/qa/ask` | done (Epic 11) | read-only wrapper over deterministic workspace-backed QA service |
 | User-friendly install + first-run readiness surface | done (usability hardening) | `.goreleaser.yml`, `.github/workflows/release.yml`, `install.sh`, `LICENSE`, `cmd/acp/main.go` (`acp version`, `acp doctor`), `internal/api/server.go` (`GET /api/system/doctor`), `ui/src/components/SetupWorkspacePanel.tsx` |
 
@@ -231,7 +231,7 @@ arch-workspace/
   - Domain Analyst Agent per domain,
   - Team overlay через team cards,
   - 1 Architect Aggregator Agent.
-- **System Analyst Q&A capability** (deterministic workspace-backed read-only service + CLI `acp qa` + `POST /api/qa/ask`, без headless runtime agent).
+- **System Analyst Q&A capability** (UI stage `Ask` + deterministic workspace-backed read-only service + CLI `acp qa` + `POST /api/qa/ask`, без headless runtime agent).
 - **Итерационный changelog** в `reports/changelog/`.  
 - **Подробный analysis scope на каждый сервис**:
   - архитектура и интерфейсы,
@@ -279,16 +279,16 @@ arch-workspace/
    хранит: “Конституцию”, rules, skills, model, отчёты, findings, предложения
 
 2) **UI (локальный web-интерфейс)**  
-   - wizard для “Конституции”  
-   - настройка источников репозиториев (`path` или `git_url`)  
+   - Proven Arch console с top status bar, product-flow rail `Source / Readiness / Charter / Analysis / Review / Proposals / Ask / Publish`, центральной рабочей областью, правым inspector и bottom activity drawer  
+   - wizard для “Конституции” в `Charter`  
+   - настройка источников репозиториев (`path` или `git_url`) в `Source`  
+   - readiness validation, doctor checklist и runtime profile (`timeouts` + `execution` + `permissions`) в `Readiness`  
    - редактор baseline skills/prompts (с версионированием через git)  
-   - top-level tabs: `Setup / Baseline / Runs / Results / Settings`  
-  - runtime profile (`timeouts` + `execution` + `permissions`) в отдельной вкладке `Settings`
-  - запуск пайплайнов (init / update / report)
-  - `Runs: Logs` с dual-view (`event timeline` + `raw agent stream`)
-  - `Runs: Pending Permissions` показывает requests, которые managed policy не auto-approved
-   - `Results -> Diagrams` для C4 Mermaid artifacts (filter/open/preview)  
-   - просмотр остальных результатов (as‑is docs, findings, proposals)
+   - запуск пайплайнов (init / refresh) и pending permissions в `Analysis`
+   - logs activity drawer с dual-view (`event timeline` + `raw agent stream`)
+   - `Review` для coverage, artifacts и C4 Mermaid previews (`reports/diagrams/*`)  
+   - `Ask` для deterministic read-only Q&A через `POST /api/qa/ask`
+   - `Publish` для git helper actions и proposal branch
 
 3) **Orchestrator (локальный сервис, Go)**  
    - управляет шагами pipeline  
@@ -434,7 +434,7 @@ Wizard из блоков-шаблонов:
 - список шагов (миграционный чеклист уровня MVP)
 
 ### 9.5. On-demand Q&A capability (MVP)
-- System Analyst Q&A capability в текущей beta отвечает через deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask`, используя:
+- System Analyst Q&A capability в текущей beta отвечает через UI stage `Ask` + deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask`, используя:
   - `charter/cards/*`
   - `model/*`
   - `reports/*`

@@ -17,6 +17,7 @@ type FetchMockState = {
   validateResponse?: MockJSON;
   validateStatus?: number;
   manifestContent?: string;
+  qaResponse?: MockJSON;
 };
 
 function jsonResponse(body: MockJSON, status = 200): Response {
@@ -287,6 +288,17 @@ function createFetchMock(state: FetchMockState = {}) {
       return jsonResponse({ ok: true });
     }
 
+    if (method === "POST" && url === "/api/qa/ask") {
+      return jsonResponse(
+        state.qaResponse ?? {
+          answer: "payments-service is owned by Platform Architecture.",
+          citations: [{ path: "reports/as-is/overview.md", reason: "ownership evidence" }],
+          unresolved: ["confirm escalation owner"],
+          confidence: 0.82,
+        },
+      );
+    }
+
     if (method === "PUT" && url === "/api/runtime/timeouts") {
       const payload = JSON.parse(String(init?.body ?? "{}")) as { timeouts?: Record<string, number> };
       runtimeTimeoutPersisted = { ...(payload.timeouts ?? {}) };
@@ -410,6 +422,122 @@ describe("App", () => {
     expect(screen.getByText("runtime.profile.permissions.mode")).toBeInTheDocument();
     expect(screen.getByText("runtime.profile.steps.step2_as_is.provider")).toBeInTheDocument();
     expect(screen.getAllByText("qwen-code").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("renders the stage rail and switches product-flow stages", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(<App />);
+
+    for (const stage of ["source", "readiness", "charter", "analysis", "review", "proposals", "ask", "publish"]) {
+      expect(screen.getByTestId(`stage-${stage}`)).toBeInTheDocument();
+    }
+
+    fireEvent.click(screen.getByTestId("stage-ask"));
+    expect(await screen.findByTestId("qa-panel")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("stage-analysis"));
+    expect(await screen.findByTestId("runs-control-panel")).toBeInTheDocument();
+  });
+
+  it("opens Review by default when a completed run already has artifacts", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runStarted: true,
+        runArtifacts: {
+          "run-1": {
+            run_id: "run-1",
+            artifacts: [
+              { path: "reports/as-is/overview.md", kind: "report", label: "As-is overview" },
+              { path: "reports/diagrams/c4-context.mmd", kind: "diagram", label: "C4 context" },
+            ],
+          },
+        },
+      }),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByTestId("review-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("stage-review")).toHaveClass("is-selected");
+    expect(screen.queryByTestId("workspace-panel")).not.toBeInTheDocument();
+    expect(screen.getByTestId("right-inspector")).toHaveTextContent(/attention/i);
+  });
+
+  it("renders diagram artifacts without sending loading placeholder text to Mermaid", async () => {
+    const mermaid = await import("mermaid");
+    vi.mocked(mermaid.default.render).mockClear();
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runStarted: true,
+        runArtifacts: {
+          "run-1": {
+            run_id: "run-1",
+            artifacts: [{ path: "reports/diagrams/c4-context.mmd", kind: "diagram", label: "C4 context" }],
+          },
+        },
+        artifactText: {
+          "reports/coverage/open-questions.md": "",
+          "reports/diagrams/c4-context.mmd": "flowchart LR\n  A --> B\n",
+        },
+      }),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByTestId("review-panel")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "reports/diagrams/c4-context.mmd" })[0]);
+
+    await waitFor(() => expect(mermaid.default.render).toHaveBeenCalledWith(expect.stringMatching(/^diagram-/), "flowchart LR\n  A --> B"));
+    expect(mermaid.default.render).not.toHaveBeenCalledWith(expect.any(String), "Loading...");
+  });
+
+  it("calls read-only architecture Q&A and renders answer, citations, unresolved, and confidence", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("stage-ask"));
+    fireEvent.change(await screen.findByTestId("qa-question-input"), { target: { value: "Who owns payments?" } });
+    fireEvent.click(screen.getByTestId("qa-ask-btn"));
+
+    expect(await screen.findByTestId("qa-answer")).toHaveTextContent("payments-service is owned by Platform Architecture.");
+    expect(screen.getByText("reports/as-is/overview.md")).toBeInTheDocument();
+    expect(screen.getByText(/Unresolved: confirm escalation owner/)).toBeInTheDocument();
+    expect(screen.getByText("Confidence: 82%")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/qa/ask",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ question: "Who owns payments?" }),
+      }),
+    );
+  });
+
+  it("renders read-only Q&A when the API returns nullable evidence arrays", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        qaResponse: {
+          answer: "Not enough indexed workspace evidence to answer confidently yet.",
+          citations: null,
+          unresolved: null,
+          confidence: null,
+        },
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("stage-ask"));
+    fireEvent.click(await screen.findByTestId("qa-ask-btn"));
+
+    expect(await screen.findByTestId("qa-answer")).toHaveTextContent("Not enough indexed workspace evidence");
+    expect(screen.getByText("No citations returned.")).toBeInTheDocument();
+    expect(screen.getByText("Confidence: 0%")).toBeInTheDocument();
   });
 
   it("guides first-run setup through validate, doctor, and run", async () => {
