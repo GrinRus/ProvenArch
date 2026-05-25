@@ -2686,6 +2686,94 @@ runtime:
 	}
 }
 
+func TestRunPermissionsEndpointReturnsEmptyArrays(t *testing.T) {
+	t.Parallel()
+
+	repoPath := t.TempDir()
+	manifest := `version: 1
+repos:
+  - name: payments-service
+    path: ` + repoPath + `
+runtime:
+  profile:
+    permissions:
+      mode: managed
+      approval_channel: fail_fast
+`
+	server := newTestServerFromManifestWithRunner(t, manifest, fakeruntime.Runner{})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Post(
+		httpServer.URL+"/api/pipeline/init",
+		"application/json",
+		bytes.NewBufferString(`{"trigger":"ui"}`),
+	)
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/init fake runner: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", response.StatusCode)
+	}
+
+	var startPayload struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&startPayload); err != nil {
+		t.Fatalf("decode start payload: %v", err)
+	}
+
+	runStatus := waitForRunTerminalStatus(t, httpServer.URL, startPayload.RunID, 8*time.Second)
+	if runStatus.Status != string(orchestrator.RunStatusSucceeded) {
+		t.Fatalf("expected succeeded run status, got %q", runStatus.Status)
+	}
+
+	detailResp, err := http.Get(httpServer.URL + "/api/pipeline/runs/" + startPayload.RunID)
+	if err != nil {
+		t.Fatalf("GET /api/pipeline/runs/<id>: %v", err)
+	}
+	defer detailResp.Body.Close()
+	var detailPayload map[string]json.RawMessage
+	if err := json.NewDecoder(detailResp.Body).Decode(&detailPayload); err != nil {
+		t.Fatalf("decode run detail payload: %v", err)
+	}
+	if got := strings.TrimSpace(string(detailPayload["pending_permissions"])); got != "[]" {
+		t.Fatalf("expected pending_permissions to be [], got %s", got)
+	}
+
+	listResp, err := http.Get(httpServer.URL + "/api/pipeline/runs?limit=1")
+	if err != nil {
+		t.Fatalf("GET /api/pipeline/runs: %v", err)
+	}
+	defer listResp.Body.Close()
+	var listPayload struct {
+		Items []map[string]json.RawMessage `json:"items"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&listPayload); err != nil {
+		t.Fatalf("decode run list payload: %v", err)
+	}
+	if len(listPayload.Items) != 1 {
+		t.Fatalf("expected one run list item, got %d", len(listPayload.Items))
+	}
+	if got := strings.TrimSpace(string(listPayload.Items[0]["pending_permissions"])); got != "[]" {
+		t.Fatalf("expected list pending_permissions to be [], got %s", got)
+	}
+
+	permissionsResp, err := http.Get(httpServer.URL + "/api/pipeline/runs/" + startPayload.RunID + "/permissions")
+	if err != nil {
+		t.Fatalf("GET /api/pipeline/runs/<id>/permissions: %v", err)
+	}
+	defer permissionsResp.Body.Close()
+	var permissionsPayload map[string]json.RawMessage
+	if err := json.NewDecoder(permissionsResp.Body).Decode(&permissionsPayload); err != nil {
+		t.Fatalf("decode run permissions payload: %v", err)
+	}
+	if got := strings.TrimSpace(string(permissionsPayload["requests"])); got != "[]" {
+		t.Fatalf("expected requests to be [], got %s", got)
+	}
+}
+
 func TestPipelineStartWithRuntimeContractFailureStillReturnsAccepted(t *testing.T) {
 	t.Parallel()
 
