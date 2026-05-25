@@ -907,7 +907,7 @@ func (s *Server) handlePipelineRunPermissions(writer http.ResponseWriter, runID 
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"run_id":   runID,
-		"requests": permissions,
+		"requests": formatPermissionRequests(permissions),
 	})
 }
 
@@ -1090,10 +1090,17 @@ func formatRunInfoPayload(runInfo orchestrator.RunInfo) map[string]any {
 		"current_step":        runInfo.CurrentStep,
 		"step_providers":      runInfo.StepProviders,
 		"warnings":            runInfo.Warnings,
-		"pending_permissions": runInfo.PendingPermissions,
+		"pending_permissions": formatPermissionRequests(runInfo.PendingPermissions),
 		"error_code":          formatOptionalString(runInfo.ErrorCode),
 		"error":               formatOptionalString(runInfo.Error),
 	}
+}
+
+func formatPermissionRequests(requests []acpruntime.PermissionRequest) []acpruntime.PermissionRequest {
+	if requests == nil {
+		return []acpruntime.PermissionRequest{}
+	}
+	return requests
 }
 
 func mapTypedRunnerAPIError(err error) (statusCode int, code string, message string, ok bool) {
