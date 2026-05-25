@@ -9,6 +9,7 @@ workspace_cases=(
   "fixtures/workspace/valid-path.yaml:valid"
   "fixtures/workspace/valid-git-url.yaml:valid"
   "fixtures/workspace/valid-with-runtime-timeouts.yaml:valid"
+  "fixtures/workspace/valid-with-runtime-permissions.yaml:valid"
   "fixtures/workspace/invalid-both.yaml:invalid"
   "fixtures/workspace/invalid-neither.yaml:invalid"
 )

@@ -66,7 +66,9 @@ func (a codexAdapter) commandSpecWithPrompt(task acpruntime.Task, includeDirs []
 	cwd := strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task))
 	commandArgs := append([]string(nil), a.runner.Args...)
 	if len(commandArgs) == 0 {
-		commandArgs = buildCodexArgsWithIncludeDirectories(cwd, includeDirs)
+		commandArgs = buildCodexArgsWithPermissions(cwd, includeDirs, task.RuntimePermissions)
+	} else if strings.TrimSpace(task.RuntimePermissions.Mode) == acpruntime.PermissionModeManaged {
+		commandArgs = stripCodexDangerFullAccessArgs(commandArgs)
 	}
 	return providercommon.CommandSpec{
 		Provider:    acpruntime.ProviderCodexCode,
@@ -77,6 +79,22 @@ func (a codexAdapter) commandSpecWithPrompt(task acpruntime.Task, includeDirs []
 		PromptBytes: len([]byte(prompt)),
 		IncludeDirs: includeDirs,
 	}, nil
+}
+
+func stripCodexDangerFullAccessArgs(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		trimmed := strings.TrimSpace(args[i])
+		if strings.HasPrefix(trimmed, "--sandbox=") && strings.TrimSpace(strings.TrimPrefix(trimmed, "--sandbox=")) == "danger-full-access" {
+			continue
+		}
+		if trimmed == "--sandbox" && i+1 < len(args) && strings.TrimSpace(args[i+1]) == "danger-full-access" {
+			i++
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return out
 }
 
 func (a codexAdapter) CollectManifestRepairCommandSpec(task acpruntime.Task, validationErr error) (providercommon.CommandSpec, error) {
@@ -127,12 +145,20 @@ func buildDefaultCodexArgs(task acpruntime.Task) []string {
 }
 
 func buildCodexArgsWithIncludeDirectories(cwd string, includeDirs []string) []string {
+	return buildCodexArgsWithPermissions(cwd, includeDirs, acpruntime.DefaultPermissions())
+}
+
+func buildCodexArgsWithPermissions(cwd string, includeDirs []string, permissions acpruntime.PermissionValues) []string {
 	args := []string{
 		"exec",
 		"--json",
 		"--color", "never",
 		"--skip-git-repo-check",
-		"--sandbox", "danger-full-access",
+	}
+	if strings.TrimSpace(permissions.Mode) == acpruntime.PermissionModeManaged {
+		args = append(args, "--sandbox", "workspace-write")
+	} else {
+		args = append(args, "--sandbox", "danger-full-access")
 	}
 	if cwd != "" {
 		args = append(args, "--cd", cwd)

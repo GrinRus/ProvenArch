@@ -199,6 +199,29 @@ func TestQwenCommandSpecAppendsPromptForCustomArgsWithoutTaskJSONStdin(t *testin
 	}
 }
 
+func TestQwenManagedCustomArgsStripYoloForms(t *testing.T) {
+	t.Parallel()
+
+	task := newQwenDraftTask(t, "run-managed-custom-yolo")
+	task.RuntimePermissions = acpruntime.PermissionValues{Mode: acpruntime.PermissionModeManaged}
+	spec, err := (qwenAdapter{runner: HeadlessRunner{
+		Command: "qwen-test",
+		Args:    []string{"--chat-recording", "false", "--yolo=true", "--yolo"},
+	}}).CommandSpec(task)
+	if err != nil {
+		t.Fatalf("command spec: %v", err)
+	}
+	args := strings.Join(spec.Args, "\n")
+	for _, forbidden := range []string{"--yolo=true", "--yolo"} {
+		if strings.Contains(args, forbidden) {
+			t.Fatalf("managed mode must strip %q from custom args, got %v", forbidden, spec.Args)
+		}
+	}
+	if !strings.Contains(args, "--chat-recording") || !strings.Contains(args, "Artifact-only contract:") {
+		t.Fatalf("managed mode must keep non-permission args and artifact prompt, got %v", spec.Args)
+	}
+}
+
 func TestQwenCommandSpecRespectsCustomNonStreamOutputFormat(t *testing.T) {
 	t.Parallel()
 

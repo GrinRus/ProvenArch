@@ -68,6 +68,7 @@ Canonical metadata index: `<imports_path>/index.yaml`. Его отсутстви
 Поддерживается optional блок `runtime.profile`:
 - `runtime.profile.timeouts`
 - `runtime.profile.execution`
+- `runtime.profile.permissions`
 - `runtime.profile.steps`
 
 ### 5.1) `runtime.profile.timeouts`
@@ -115,7 +116,38 @@ Effective precedence:
 - `semantic`: metadata-only mode; использует тот же shard-plan, но дополняет его graph/debug metadata и не меняет count/boundaries shard-ов.
 - runtime execution всегда использует все repo scopes из `workspace.yaml`; frontend/backend filtering не входит в execution contract этого slice.
 
-### 5.3) `runtime.profile.steps`
+### 5.3) `runtime.profile.permissions`
+
+Поддерживаемые optional поля:
+- `mode`: `trusted_full_access|managed`
+- `approval_channel`: `fail_fast|ui`
+
+Default values:
+- `mode=trusted_full_access`
+- `approval_channel=fail_fast`
+
+Effective precedence:
+- `workspace.yaml > defaults`
+
+Назначение:
+- `trusted_full_access` сохраняет текущий live-provider UX и включает provider full-access args там, где они уже поддерживаются:
+  - Claude: `--permission-mode bypassPermissions`
+  - Qwen: `--yolo`
+  - Codex: `--sandbox danger-full-access`
+- `managed` отключает full-access provider flags и включает orchestrator permission policy поверх runtime task envelope.
+
+Managed policy первого slice:
+- auto-approve `read|list|glob|grep` только внутри `read_context_roots`;
+- auto-approve `create|write|overwrite|mkdir` только внутри `write_root` и `draft_final_root`;
+- deny writes в analyzed repos, `workspace.yaml`, `schemas/*`, `docs/spec/*`, `charter/*`, path traversal, absolute/symlink escape outside allowed roots;
+- `network|package_install|shell|unknown` требуют пользователя; в non-interactive `fail_fast` это terminal `runtime_permission_required`;
+- live provider approve-loop включается только provider-by-provider при наличии structured permission events. Если structured protocol недоступен, `managed` fail-fast без PTY text parsing.
+
+`approval_channel`:
+- `fail_fast`: unknown/unsafe permission request завершает run с `runtime_permission_required`;
+- `ui`: backend сохраняет pending requests для UI flow; approve/deny POST broker не входит в первый slice.
+
+### 5.4) `runtime.profile.steps`
 
 Поддерживаемые optional поля:
 - `step0_constitution.provider`
@@ -177,6 +209,9 @@ runtime:
       failure_policy: best_effort
       shard_discovery:
         mode: heuristics
+    permissions:
+      mode: trusted_full_access
+      approval_channel: fail_fast
     steps:
       step0_constitution:
         provider: claude-code
@@ -202,6 +237,8 @@ Manifest считается невалидным, если:
 - `runtime.profile.execution.strategy` не в `sequential|parallel`
 - `runtime.profile.execution.failure_policy` не в `fail_fast|best_effort`
 - `runtime.profile.execution.shard_discovery.mode` не в `heuristics|semantic`
+- `runtime.profile.permissions.mode` не в `trusted_full_access|managed`
+- `runtime.profile.permissions.approval_channel` не в `fail_fast|ui`
 - `runtime.profile.steps.*.provider` не в `claude-code|qwen-code|codex-code`
 - manifest пытается использовать legacy path `runtime.timeouts` (breaking change, intentional)
 - manifest пытается конфигурировать workspace layout beyond supported fields

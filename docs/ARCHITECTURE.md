@@ -32,7 +32,7 @@
    - runtime selector process-scoped: `fake` default для required CI, `headless` opt-in
    - global provider selector остаётся process-level fallback: `--runtime-provider` > `ACP_RUNTIME_PROVIDER` > `claude-code`
    - effective provider resolution внутри run step-scoped: `workspace.yaml.runtime.profile.steps.<step>.provider` переопределяет global fallback только для выбранного шага
-   - timeout и execution control остаются process/workspace-aware: persisted профиль живёт в `workspace.yaml.runtime.profile.*`, а точные precedence/API surfaces удерживаются в `docs/spec/API_SPEC.md` вместо дублирования здесь
+   - timeout, execution и permission control остаются process/workspace-aware: persisted профиль живёт в `workspace.yaml.runtime.profile.*`, а точные precedence/API surfaces удерживаются в `docs/spec/API_SPEC.md` вместо дублирования здесь
    - Используется как локально, так и из SCM-triggered pipeline jobs/manual buttons
    - Internal API trigger остаётся optional trusted-mode capability, а не обязательной CI/CD поверхностью
    - Раздаёт embedded UI shell и API в одном процессе `acp serve`
@@ -48,7 +48,7 @@
    - UI разбит на top-level tabs `Setup / Baseline / Runs / Results / Settings`
    - `App.tsx` остаётся route shell, а крупные sections вынесены в dedicated panels (`SetupWorkspacePanel`, `WizardContractPanel`, `BaselineEditorsPanel`, `RunPanels`, `ResultsPanels`); heavy run panel inputs передаются как grouped `model/actions`, чтобы route shell не разрастался flat prop/action списками
    - setup/baseline/wizard/git state и actions остаются за facade `useWorkspaceSetup`, но внутри разделены на `useManifestEditor`, `useBaselineEditor`, `useWizardEditor` и `useGitActions`; runtime settings живут в отдельном hook, а run explorer разделён на `useRunSelection`, `useRunPolling`, `useRunActions`, `useRunArtifacts` и `useRunLogs`
-   - Runtime profile (`timeouts` + `execution`) полностью вынесен в вкладку `Settings`, включая effective per-step providers
+   - Runtime profile (`timeouts` + `execution` + `permissions`) полностью вынесен в вкладку `Settings`, включая effective per-step providers
    - Показывает run dashboard (queued/running/succeeded/failed), включая завершённые run'ы из persisted history
    - При bootstrap авто-выбирает newest active run (`queued/running`), иначе первый run в history
    - Если выбранный run исчезает из history и есть новый доступный run, UI переключается на него; если history временно пуста, но status endpoint ещё возвращает выбранный run, UI сохраняет текущий selection и не делает ложный auto-switch
@@ -62,6 +62,10 @@
    - Runtime Execution settings panel:
      - load/save/reset через `GET/PUT /api/runtime/execution`
      - показывает persisted/effective/source для strategy/parallelism/failure/discovery
+   - Runtime Permissions settings panel:
+     - load/save/reset через `GET/PUT /api/runtime/permissions`
+     - показывает persisted/effective/source для `trusted_full_access|managed` и `fail_fast|ui`
+   - Runs tab показывает pending runtime permission requests выбранного run вместе с `decision/rule_id`; approve/deny broker остаётся отдельным будущим slice
    - runtime profile patch validation/merge/manifest rewrite живёт в shared internal package `internal/runtimeprofile`, а API handlers остаются только HTTP adapter layer
    - live e2e poll timeout-ы берутся из effective config (`/api/runtime/timeouts`) с env override
    - Критичные UI-контролы для live e2e снабжены стабильными `data-testid` (`validate/run/status/artifacts/logs`)
@@ -160,6 +164,8 @@
 5) **Runtime providers (`internal/runtime/*`)** *(implemented baseline)*
    - headless providers: `claude-code` (`internal/runtime/claudecode`), `qwen-code` (`internal/runtime/qwencode`) и `codex-code` (`internal/runtime/codexcode`); deterministic baseline: `fake` (`internal/runtime/fakeruntime`)
    - общий runtime layer + provider factory: `internal/runtime/runtime.go`, `internal/runtime/providers/factory.go`
+   - default permission mode `trusted_full_access` сохраняет существующие full-access flags для live providers (`bypassPermissions`, `--yolo`, `danger-full-access`); opt-in `managed` отключает эти flags и включает orchestrator policy decisions
+   - managed permission policy auto-approves только envelope операции: reads под `read_context_roots`, writes под `write_root`/`draft_final_root`; writes в analyzed repos/protected workspace paths, path traversal и symlink escape deny; shell/network/package install/unknown tool become `needs_user` and non-interactive fail-fast produces `runtime_permission_required`
    - каждый provider получает explicit staged-write contract (`artifact_root`, `write_root`, `draft_final_root`, `read_context_roots`, `step_contract`, `expected_artifacts`) и должен писать runtime-authored artifacts только внутрь `write_root`/`draft_final_root`; required artifact checks/writes должны использовать exact absolute paths, а не relative CWD targets
    - live headless providers считаются успешными только по valid required artifacts: normal process exit или controlled stop после появления валидных artifacts оба допустимы; missing/invalid artifacts классифицируются как `runtime_contract_failed`, кроме явных provider availability incidents
    - `shard-pack-manifest.json.documents[].path` — strict `artifact_root`-relative contract and must reference an existing provider-authored file under `write_root`; workspace-level prefixes (`reports/...`, `charter/...`, `proposals/...`), duplicated `artifact_root` prefix, absolute paths, missing file references и directory references считаются invalid collect artifact drift и не нормализуются ACP
@@ -190,7 +196,8 @@
    - `claude-code`, `qwen-code` и `codex-code` используют shared provider-agnostic step-policy/prompt layer для required artifacts, retry bans и explicit negative rules; `qwen` получает artifact prompt только через CLI `-p` без JSON task stdin, custom qwen args не могут подменить artifact prompt, `qwen` использует `--output-format stream-json --include-partial-messages` для activity telemetry без semantic stdout contract, а `claude`/`codex` machine-mode flags считаются только transport/diagnostic transcript mode
    - runtime metadata для `fake`, `claude-code`, `qwen-code`, `codex-code` обязана иметь non-empty `meta.runtime.name` и `meta.runtime.version`; для headless providers version = `headless`, для fake name/version = `fake`
    - non-collect headless шаги больше не стартуют из workspace root: draft steps используют `draft_final_root` как cwd, validator использует `write_root`, а live harness разводит headless и baseline workspaces по разным temp roots вместо sibling layout
-   - provider-side hard sandbox в текущих CLI surface нет; isolation достигается layout-ом temp roots и step-local `cwd`, а не отдельной sandbox policy
+   - provider-side hard sandbox в текущих CLI surface нет; isolation достигается layout-ом temp roots, step-local `cwd` и opt-in managed permission policy, а не security/compliance sandbox enforcement
+   - live provider approve-loop включается только если provider даёт structured permission events; без stable protocol `managed` fail-fast без PTY/expect text parsing
    - headless provider scope включает `arch-workspace` и resolved repo directories для текущих `repo_scope/repo_scopes`, чтобы provider видел source evidence из реальных checkout-ов
    - command overrides:
      - `ACP_CLAUDE_CMD` (default `claude-code`)
@@ -206,7 +213,7 @@
    - поддерживает `<docs.imports_path>/index.yaml` как metadata index для imported docs; отсутствие index silent, malformed/semantic issues warning-only
    - поддерживает repo entries с `path` или `git_url` + optional `ref`
    - поддерживает optional `repos[].analysis.include/exclude` для shard planner; legacy `repos[].analysis.role` удалён из active workspace contract
-   - поддерживает optional persisted runtime profile в `runtime.profile` (`timeouts + execution`, см. `WORKSPACE_SPEC`)
+   - поддерживает optional persisted runtime profile в `runtime.profile` (`timeouts + execution + permissions`, см. `WORKSPACE_SPEC`)
    - verify `ref` для `path` source использует fallback (`ref` -> `origin/ref` -> `refs/remotes/origin/ref`) и выдаёт warning при `HEAD` mismatch
    - clone/fetch для `git_url` выполняет на той же машине через локальный `git` и текущий user/runner auth context
    - git_url cache key использует только `slug(repo.name)+hash(git_url)` (legacy slug-only cache fallback удалён из active behavior)
@@ -234,7 +241,9 @@
    - `PUT /api/runtime/timeouts`: partial update persisted timeout profile, write-through в `workspace.yaml`
    - `GET /api/runtime/execution`: persisted + effective + source
    - `PUT /api/runtime/execution`: partial update persisted execution profile, write-through в `workspace.yaml`
-   - `GET /api/runtime/profile`: aggregate view `timeouts + execution + step_providers`
+   - `GET /api/runtime/permissions`: persisted + effective + source
+   - `PUT /api/runtime/permissions`: partial update persisted permission profile, write-through в `workspace.yaml`
+   - `GET /api/runtime/profile`: aggregate view `timeouts + execution + permissions + step_providers`
    - runtime profile PUT handlers используют общий internal patch service для validate/merge/prune/render/write/reopen, чтобы API route code не дублировал workspace manifest mutation lifecycle
    - active run не прерывается при изменении timeout settings; новые значения применяются к следующим run
    - frontend live E2E differentiates explicit Playwright/backend failure (`playwright_failed`) from productive timeout (`active_run_timeout`), чтобы живой long-running run не выглядел как тот же failure class, что и terminal backend crash; init poll budget comes from effective runtime timeout profile and can follow `pipeline_timeout+30s` without a default fixed cap

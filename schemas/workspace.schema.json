@@ -128,6 +128,29 @@
         },
         "steps": {
           "$ref": "#/$defs/runtimeSteps"
+        },
+        "permissions": {
+          "$ref": "#/$defs/runtimePermissions"
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtimePermissions": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "trusted_full_access",
+            "managed"
+          ]
+        },
+        "approval_channel": {
+          "type": "string",
+          "enum": [
+            "fail_fast",
+            "ui"
+          ]
         }
       },
       "additionalProperties": false

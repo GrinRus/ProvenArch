@@ -17,6 +17,7 @@ import (
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/fakeruntime"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
+	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
 func TestDocFirstStageThenPromoteFlow(t *testing.T) {
@@ -277,6 +278,96 @@ func TestDocFlowSkipsAsIsRuntimeWhenCollectEvidenceIsUnusable(t *testing.T) {
 	}
 }
 
+func TestManagedFakeRuntimeAutoApprovesEnvelopePermissionRequests(t *testing.T) {
+	t.Parallel()
+
+	ws := createManagedPermissionWorkspace(t)
+	service := NewService(
+		WithHistoryWorkspace(ws),
+		WithClock(func() time.Time {
+			return time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+		}),
+	)
+
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("run managed fake pipeline: %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
+	}
+	if len(info.PendingPermissions) != 0 {
+		t.Fatalf("expected no pending permissions for auto-approved fixture requests, got %+v", info.PendingPermissions)
+	}
+
+	logs := collectRunLogsForTest(t, service, info.RunID)
+	autoApproved := 0
+	for _, entry := range logs {
+		if entry.Message != "runtime permission decision" {
+			continue
+		}
+		if entry.Fields["decision"] == acpruntime.PermissionDecisionAutoApproved {
+			autoApproved++
+		}
+		if entry.Fields["permissions_mode"] != acpruntime.PermissionModeManaged {
+			t.Fatalf("expected managed permission diagnostics, got %+v", entry.Fields)
+		}
+	}
+	if autoApproved == 0 {
+		t.Fatalf("expected auto-approved permission decisions in run logs; sample=%s", summarizeLogSample(logs))
+	}
+}
+
+func TestManagedRuntimeNeedsUserPermissionBecomesPendingFailure(t *testing.T) {
+	t.Parallel()
+
+	ws := createManagedPermissionWorkspace(t)
+	service := NewService(
+		WithHistoryWorkspace(ws),
+		WithRunner(permissionRequiredRunner{}),
+		WithClock(func() time.Time {
+			return time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+		}),
+	)
+
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err == nil {
+		t.Fatalf("expected managed permission request to fail non-interactive run")
+	}
+	if info.Status != RunStatusFailed {
+		t.Fatalf("expected failed status, got %s", info.Status)
+	}
+	if info.ErrorCode != string(acpruntime.ErrorCodePermissionRequired) {
+		t.Fatalf("expected %s error code, got %q (%s)", acpruntime.ErrorCodePermissionRequired, info.ErrorCode, info.Error)
+	}
+	if len(info.PendingPermissions) != 1 {
+		t.Fatalf("expected one pending permission request, got %+v", info.PendingPermissions)
+	}
+	if info.PendingPermissions[0].Action != "shell" || info.PendingPermissions[0].PathOrCommand != "npm install" {
+		t.Fatalf("unexpected pending permission request: %+v", info.PendingPermissions[0])
+	}
+	if info.PendingPermissions[0].Decision == nil ||
+		info.PendingPermissions[0].Decision.Decision != acpruntime.PermissionDecisionNeedsUser ||
+		info.PendingPermissions[0].Decision.RuleID != "ask_unsafe_operation" {
+		t.Fatalf("expected pending permission decision metadata, got %+v", info.PendingPermissions[0].Decision)
+	}
+	permissions, ok := service.GetRunPermissions(info.RunID)
+	if !ok {
+		t.Fatalf("expected permission requests endpoint backing data for %s", info.RunID)
+	}
+	if len(permissions) != 1 || permissions[0].RequestID != "perm-shell" {
+		t.Fatalf("unexpected run permission requests: %+v", permissions)
+	}
+}
+
 type docflowCustomProposalRunner struct{}
 
 func (docflowCustomProposalRunner) Preflight(context.Context) error { return nil }
@@ -306,10 +397,13 @@ type collectFailureRunner struct {
 	proposalsInvoked int
 }
 
+type permissionRequiredRunner struct{}
+
 func (docflowFailingValidatorRunner) Preflight(context.Context) error  { return nil }
 func (docflowPartialCanonicalRunner) Preflight(context.Context) error  { return nil }
 func (docflowOwnerGapValidatorRunner) Preflight(context.Context) error { return nil }
 func (*collectFailureRunner) Preflight(context.Context) error          { return nil }
+func (permissionRequiredRunner) Preflight(context.Context) error       { return nil }
 
 func (docflowFailingValidatorRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
 	result, err := docflowCustomProposalRunner{}.Run(ctx, task)
@@ -374,6 +468,30 @@ func (r *collectFailureRunner) Run(ctx context.Context, task acpruntime.Task) (a
 	}
 }
 
+func (permissionRequiredRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	if task.RuntimePermissions.Mode != acpruntime.PermissionModeManaged {
+		return acpruntime.Result{}, fmt.Errorf("expected managed runtime permissions, got %q", task.RuntimePermissions.Mode)
+	}
+	if task.OnPermissionRequest == nil {
+		return acpruntime.Result{}, fmt.Errorf("expected runtime permission hook")
+	}
+	decision := task.OnPermissionRequest(acpruntime.PermissionRequest{
+		RequestID:     "perm-shell",
+		Action:        "shell",
+		PathOrCommand: "npm install",
+		Reason:        "package install requires review",
+	})
+	if decision.Approved() {
+		return fakeruntime.Runner{}.Run(ctx, task)
+	}
+	return acpruntime.Result{}, acpruntime.WrapRunnerError(
+		acpruntime.Provider("fake"),
+		acpruntime.ErrorCodePermissionRequired,
+		"runtime permission required",
+		fmt.Errorf("permission request %s resolved as %s", decision.RuleID, decision.Decision),
+	)
+}
+
 func (r *collectFailureRunner) asIsInvocationCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -384,6 +502,55 @@ func (r *collectFailureRunner) proposalsInvocationCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.proposalsInvoked
+}
+
+func createManagedPermissionWorkspace(t *testing.T) workspace.Root {
+	t.Helper()
+
+	ws := createWorkspace(t)
+	ws.Manifest.Runtime = &workspace.RuntimeConfig{
+		Profile: &workspace.RuntimeProfileConfig{
+			Permissions: &workspace.RuntimePermissionsConfig{
+				Mode:            acpruntime.PermissionModeManaged,
+				ApprovalChannel: acpruntime.PermissionApprovalFailFast,
+			},
+		},
+	}
+	return ws
+}
+
+func collectRunLogsForTest(t *testing.T, service *Service, runID string) []RunLogEntry {
+	t.Helper()
+
+	out := []RunLogEntry{}
+	cursor := 0
+	for {
+		page, ok, err := service.GetRunLogs(runID, cursor, 500)
+		if err != nil {
+			t.Fatalf("read run logs: %v", err)
+		}
+		if !ok {
+			t.Fatalf("expected run logs for %s", runID)
+		}
+		out = append(out, page.Items...)
+		if page.EOF {
+			return out
+		}
+		cursor = page.NextCursor
+	}
+}
+
+func summarizeLogSample(logs []RunLogEntry) string {
+	parts := []string{}
+	for _, entry := range logs {
+		if entry.Message == "runtime task started" || strings.Contains(entry.Message, "permission") {
+			parts = append(parts, fmt.Sprintf("%s fields=%v", entry.Message, entry.Fields))
+		}
+		if len(parts) >= 8 {
+			break
+		}
+	}
+	return strings.Join(parts, " | ")
 }
 
 func appendCustomProposalToManifest(task acpruntime.Task) error {

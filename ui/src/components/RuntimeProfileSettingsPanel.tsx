@@ -23,6 +23,16 @@ type RuntimeProfileSettingsPanelProps = {
   onSaveExecution: () => void;
   onResetExecution: () => void;
   onExecutionChange: (key: string, value: string) => void;
+  runtimePermissionLabels: Record<string, string>;
+  runtimePermissionDraft: Record<string, string>;
+  runtimePermissionPersisted: Record<string, string | undefined>;
+  runtimePermissionEffective: Record<string, string>;
+  runtimePermissionSource: Record<string, string | undefined>;
+  runtimePermissionStatus: string;
+  onReloadPermissions: () => void;
+  onSavePermissions: () => void;
+  onResetPermissions: () => void;
+  onPermissionChange: (key: string, value: string) => void;
   stepProviderLabels: Record<string, string>;
   stepProviderOrder: string[];
   stepProviderPersisted: Partial<Record<string, string>>;
@@ -54,6 +64,16 @@ export function RuntimeProfileSettingsPanel({
   onSaveExecution,
   onResetExecution,
   onExecutionChange,
+  runtimePermissionLabels,
+  runtimePermissionDraft,
+  runtimePermissionPersisted,
+  runtimePermissionEffective,
+  runtimePermissionSource,
+  runtimePermissionStatus,
+  onReloadPermissions,
+  onSavePermissions,
+  onResetPermissions,
+  onPermissionChange,
   stepProviderLabels,
   stepProviderOrder,
   stepProviderPersisted,
@@ -167,6 +187,54 @@ export function RuntimeProfileSettingsPanel({
         </p>
 
         {runtimeExecutionStatus ? <p className="status ok">{runtimeExecutionStatus}</p> : null}
+      </section>
+
+      <section className="panel" data-testid="runtime-permissions-panel">
+        <h2>Settings: Runtime Permissions</h2>
+        <p className="hint">Persisted in `workspace.yaml` (`runtime.profile.permissions`) with precedence `workspace &gt; defaults`.</p>
+        <div className="actions">
+          <button type="button" onClick={onReloadPermissions} disabled={busy}>
+            Reload runtime permissions
+          </button>
+          <button type="button" onClick={onSavePermissions} disabled={busy} data-testid="runtime-permissions-save-btn">
+            Save runtime permissions
+          </button>
+          <button type="button" onClick={onResetPermissions} disabled={busy}>
+            Reset permission defaults
+          </button>
+        </div>
+
+        <label htmlFor="runtime-permission-mode">{runtimePermissionLabels.mode}</label>
+        <select
+          id="runtime-permission-mode"
+          data-testid="runtime-permission-mode-select"
+          value={runtimePermissionDraft.mode}
+          onChange={(event) => onPermissionChange("mode", event.target.value)}
+        >
+          <option value="trusted_full_access">trusted_full_access</option>
+          <option value="managed">managed</option>
+        </select>
+        <p className="hint">
+          persisted: {String(runtimePermissionPersisted.mode ?? "-")} | effective: {String(runtimePermissionEffective.mode)} | source:{" "}
+          {runtimePermissionSource.mode ?? "default"}
+        </p>
+
+        <label htmlFor="runtime-permission-approval-channel">{runtimePermissionLabels.approval_channel}</label>
+        <select
+          id="runtime-permission-approval-channel"
+          data-testid="runtime-permission-approval-channel-select"
+          value={runtimePermissionDraft.approval_channel}
+          onChange={(event) => onPermissionChange("approval_channel", event.target.value)}
+        >
+          <option value="fail_fast">fail_fast</option>
+          <option value="ui">ui</option>
+        </select>
+        <p className="hint">
+          persisted: {String(runtimePermissionPersisted.approval_channel ?? "-")} | effective:{" "}
+          {String(runtimePermissionEffective.approval_channel)} | source: {runtimePermissionSource.approval_channel ?? "default"}
+        </p>
+
+        {runtimePermissionStatus ? <p className="status ok">{runtimePermissionStatus}</p> : null}
       </section>
 
       <section className="panel" data-testid="runtime-step-providers-panel">

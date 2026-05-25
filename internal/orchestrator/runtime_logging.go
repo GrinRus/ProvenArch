@@ -61,6 +61,45 @@ func (e *pipelineExecution) logRuntimeOutput(stepID string, domainID string, pro
 	}
 }
 
+func (e *pipelineExecution) decideRuntimePermission(task acpruntime.Task, request acpruntime.PermissionRequest) acpruntime.PermissionDecision {
+	if strings.TrimSpace(request.RunID) == "" {
+		request.RunID = task.RunID
+	}
+	if strings.TrimSpace(request.StepID) == "" {
+		request.StepID = task.StepID
+	}
+	decision := acpruntime.DecideRuntimePermission(task, request)
+	fields := map[string]any{
+		"request_id":       request.RequestID,
+		"action":           request.Action,
+		"path_or_command":  request.PathOrCommand,
+		"decision":         decision.Decision,
+		"rule_id":          decision.RuleID,
+		"permissions_mode": task.RuntimePermissions.Mode,
+		"approval_channel": task.RuntimePermissions.ApprovalChannel,
+	}
+	if strings.TrimSpace(decision.Message) != "" {
+		fields["message"] = decision.Message
+	}
+	level := RunLogLevelInfo
+	message := "runtime permission decision"
+	if decision.Decision == acpruntime.PermissionDecisionDenied {
+		level = RunLogLevelWarning
+	}
+	if decision.Decision == acpruntime.PermissionDecisionNeedsUser {
+		level = RunLogLevelWarning
+		message = "runtime permission request requires user approval"
+		storedDecision := decision
+		request.Decision = &storedDecision
+		e.pendingPermissions = append(e.pendingPermissions, request)
+		if e.onPermissions != nil {
+			e.onPermissions(append([]acpruntime.PermissionRequest(nil), e.pendingPermissions...))
+		}
+	}
+	e.logRunEvent(level, request.StepID, task.DomainID, message, fields)
+	return decision
+}
+
 func (e *pipelineExecution) logRunEvent(level RunLogLevel, stepID string, domainID string, message string, fields map[string]any) {
 	if e.onLog == nil {
 		return

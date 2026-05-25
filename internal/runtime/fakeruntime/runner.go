@@ -3,6 +3,7 @@ package fakeruntime
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -22,6 +23,9 @@ func (Runner) RuntimeMeta() contracts.RuntimeMeta {
 }
 
 func (Runner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	if err := runFakePermissionFixture(task); err != nil {
+		return acpruntime.Result{}, err
+	}
 	semantic := fakeSemanticSnapshot(task)
 	summary := fakeSummary(task)
 	var verdict *contracts.ValidatorVerdict
@@ -46,6 +50,41 @@ func (Runner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, e
 	return acpruntime.Result{
 		Execution: acpruntime.NewExecution(task, providerFake, "fake", "succeeded", task.StartedAtUTC.UTC().Add(2*time.Second), nil),
 	}, nil
+}
+
+func runFakePermissionFixture(task acpruntime.Task) error {
+	if strings.TrimSpace(task.RuntimePermissions.Mode) != acpruntime.PermissionModeManaged || task.OnPermissionRequest == nil {
+		return nil
+	}
+	if len(task.ReadContextRoots) > 0 {
+		decision := task.OnPermissionRequest(acpruntime.PermissionRequest{
+			RequestID:     "fake-read-context",
+			RunID:         task.RunID,
+			StepID:        task.StepID,
+			Provider:      providerFake,
+			Action:        "read",
+			PathOrCommand: task.ReadContextRoots[0],
+			Reason:        "fake permission fixture read",
+		})
+		if !decision.Approved() {
+			return acpruntime.WrapRunnerError(providerFake, acpruntime.ErrorCodePermissionRequired, fmt.Sprintf("fake read permission was not approved: %s", decision.RuleID), nil)
+		}
+	}
+	if strings.TrimSpace(task.WriteRoot) != "" {
+		decision := task.OnPermissionRequest(acpruntime.PermissionRequest{
+			RequestID:     "fake-write-root",
+			RunID:         task.RunID,
+			StepID:        task.StepID,
+			Provider:      providerFake,
+			Action:        "write",
+			PathOrCommand: filepath.Join(task.WriteRoot, "permission-fixture.tmp"),
+			Reason:        "fake permission fixture write",
+		})
+		if !decision.Approved() {
+			return acpruntime.WrapRunnerError(providerFake, acpruntime.ErrorCodePermissionRequired, fmt.Sprintf("fake write permission was not approved: %s", decision.RuleID), nil)
+		}
+	}
+	return nil
 }
 
 func fakeSummary(task acpruntime.Task) string {

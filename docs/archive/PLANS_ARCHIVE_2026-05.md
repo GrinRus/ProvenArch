@@ -3,6 +3,63 @@
 Closed ExecPlans archived from `docs/PLANS.md` in May 2026.
 
 ### Plan ID
+EP-20260525-runtime-permission-policy
+
+### Context
+Headless providers previously ran with provider-specific full-access flags by default (`claude` bypass permissions, `qwen` yolo mode, `codex` danger-full-access). ACP needed an opt-in managed permission policy that keeps the current trusted default, removes full-access flags when selected, and makes permission decisions from the runtime task envelope instead of provider trust.
+
+### Goals (must have)
+- [x] Add `runtime.profile.permissions` workspace/API contract with `trusted_full_access` default and opt-in `managed`
+- [x] Keep current provider full-access args in `trusted_full_access`
+- [x] Remove full-access provider args in `managed`
+- [x] Add an orchestrator/runtime permission decisioner that auto-approves only envelope-safe read/write requests and records decisions
+- [x] Fail fast for unsupported live managed approval instead of hanging on provider prompts
+- [x] Add UI settings surface and run permission request visibility
+- [x] Sync schemas/docs/tests for the new contract
+
+### Non-goals
+- [x] Do not add hard sandboxing, file restore, or security/compliance enforcement
+- [x] Do not allow runtime writes into analyzed source repositories
+- [x] Do not parse provider TTY prompts with brittle expect-style logic
+- [x] Do not make live provider approval loops active until a stable structured provider protocol is confirmed
+
+### Approach
+1) Extend workspace manifest/schema/runtime profile APIs with `permissions`.
+2) Resolve effective permission policy in runtime and carry it into task/provider diagnostics.
+3) Gate provider full-access args on the resolved mode.
+4) Add a deterministic permission decisioner and fake/custom-runner tests for auto-approve/deny/fail-fast.
+5) Add Settings and Runs UI visibility for permissions.
+6) Update docs/spec/schema appendix and run focused checks before full DoD.
+
+### Files changed
+- `schemas/workspace.schema.json`
+- `internal/workspace`, `internal/runtime`, `internal/runtimeprofile`, `internal/api`, `internal/orchestrator`
+- `internal/runtime/{claudecode,qwencode,codexcode,fakeruntime}`
+- `ui/src/*`
+- `docs/spec/*`, `docs/ARCHITECTURE.md`, `docs/APPENDIX_SCHEMAS.md`, `docs/PLANS.md`, `docs/archive/PLANS_ARCHIVE_2026-05.md`
+
+### Acceptance criteria
+- [x] Workspace schema accepts/rejects permission modes/channels correctly
+- [x] Runtime args preserve/remove full-access flags by effective mode
+- [x] Permission decisioner auto-approves envelope-safe requests and blocks unsafe/unknown requests
+- [x] API/UI expose permissions settings and run permission requests
+- [x] `make contracts`
+- [x] `make test`
+- [x] `make lint`
+- [x] `make build`
+
+### Critical analysis
+- Default `trusted_full_access` preserves the live-provider onboarding path and existing provider flags, while opt-in `managed` strips provider bypass flags and enables ACP decisioning.
+- Auto-approve is intentionally bounded to the runtime envelope: reads under `read_context_roots` plus runtime staging roots, writes only under `write_root`/`draft_final_root`, and explicit denials for source repo writes, protected workspace paths, traversal, and symlink escape.
+- Live providers fail fast in `managed` unless a future adapter declares a structured permission protocol; this avoids fragile PTY prompt parsing.
+- Review follow-up fixed a nested-workspace repo-root edge case so writes to analyzed repositories under the workspace still resolve to `deny_source_repo_write`, added symlink escape coverage, and included resolved `decision/rule_id` metadata in pending permission requests.
+
+### Progress log
+- 2026-05-25: Started implementation. Scope kept `trusted_full_access` default and implemented managed-mode foundations without enabling brittle live approval loops.
+- 2026-05-25: Implemented workspace/API/UI/runtime permission policy, provider arg gating, fake/custom permission fixtures, docs/schema sync, and full DoD (`make contracts`, `make test`, `make lint`, `make build`) with Node 22.21.1 toolchain override.
+- 2026-05-25: Review pass fixed nested repo-root denial classification, pending request decision metadata, and extra custom-arg bypass stripping coverage.
+
+### Plan ID
 EP-20260507-provider-reporting-refactor
 
 ### Context

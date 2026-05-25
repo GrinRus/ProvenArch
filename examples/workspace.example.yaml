@@ -30,6 +30,11 @@ runtime:
       failure_policy: best_effort
       shard_discovery:
         mode: heuristics
+    permissions:
+      # Default keeps provider full-access flags. Use `managed` to disable those
+      # flags and let the orchestrator auto-approve only task-envelope operations.
+      mode: trusted_full_access
+      approval_channel: fail_fast
     steps:
       # Optional step-scoped provider overrides.
       step0_constitution:

@@ -88,6 +88,12 @@ function createFetchMock(state: FetchMockState = {}) {
     shard_discovery_mode: "heuristics",
   };
   let runtimeExecutionSource: Record<string, string> = { strategy: "workspace" };
+  let runtimePermissionPersisted: Record<string, string> = { mode: "trusted_full_access" };
+  let runtimePermissionEffective: Record<string, string> = {
+    mode: "trusted_full_access",
+    approval_channel: "fail_fast",
+  };
+  let runtimePermissionSource: Record<string, string> = { mode: "workspace" };
   const baselineBundleManifest = {
     schema_version: 1,
     bundle_version: 1,
@@ -181,9 +187,23 @@ function createFetchMock(state: FetchMockState = {}) {
       });
     }
 
+    if (method === "GET" && url === "/api/runtime/permissions") {
+      return jsonResponse({
+        ok: true,
+        persisted: runtimePermissionPersisted,
+        effective: runtimePermissionEffective,
+        source: runtimePermissionSource,
+      });
+    }
+
     if (method === "GET" && url === "/api/runtime/profile") {
       return jsonResponse({
         ok: true,
+        permissions: {
+          persisted: runtimePermissionPersisted,
+          effective: runtimePermissionEffective,
+          source: runtimePermissionSource,
+        },
         step_providers: {
           persisted: { step2_as_is: "qwen-code" },
           effective: {
@@ -302,6 +322,25 @@ function createFetchMock(state: FetchMockState = {}) {
       });
     }
 
+    if (method === "PUT" && url === "/api/runtime/permissions") {
+      const payload = JSON.parse(String(init?.body ?? "{}")) as { permissions?: Record<string, string> };
+      runtimePermissionPersisted = { ...(payload.permissions ?? {}) };
+      runtimePermissionSource = {};
+      for (const key of Object.keys(runtimePermissionPersisted)) {
+        runtimePermissionSource[key] = "workspace";
+      }
+      runtimePermissionEffective = {
+        ...runtimePermissionEffective,
+        ...runtimePermissionPersisted,
+      };
+      return jsonResponse({
+        ok: true,
+        persisted: runtimePermissionPersisted,
+        effective: runtimePermissionEffective,
+        source: runtimePermissionSource,
+      });
+    }
+
     if (method === "POST" && url === "/api/git/commit") {
       const payload = JSON.parse(String(init?.body ?? "{}")) as { message?: string };
       return jsonResponse({
@@ -366,7 +405,9 @@ describe("App", () => {
 
     expect(await screen.findByTestId("runtime-timeouts-panel")).toBeInTheDocument();
     expect(screen.getByTestId("runtime-execution-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("runtime-permissions-panel")).toBeInTheDocument();
     expect(screen.getByTestId("runtime-step-providers-panel")).toBeInTheDocument();
+    expect(screen.getByText("runtime.profile.permissions.mode")).toBeInTheDocument();
     expect(screen.getByText("runtime.profile.steps.step2_as_is.provider")).toBeInTheDocument();
     expect(screen.getAllByText("qwen-code").length).toBeGreaterThanOrEqual(1);
   });
@@ -561,6 +602,56 @@ describe("App", () => {
       expect(rawOnly).toContain("[RAW]");
       expect(rawOnly).not.toContain("[EVENT]");
     });
+  });
+
+  it("renders pending runtime permission requests for the selected run", async () => {
+    const runID = "run-permissions";
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runID,
+        runStarted: true,
+        runStatus: {
+          [runID]: {
+            run_id: runID,
+            pipeline: "init",
+            status: "failed",
+            started_at: "2026-04-03T12:00:00Z",
+            finished_at: "2026-04-03T12:00:02Z",
+            warnings: [],
+            pending_permissions: [
+              {
+                request_id: "perm-1",
+                run_id: runID,
+                step_id: "init.step1.collect",
+                provider: "fake",
+                action: "shell",
+                path_or_command: "npm install",
+                reason: "package install requires review",
+                decision: {
+                  request_id: "perm-1",
+                  decision: "needs_user",
+                  rule_id: "ask_unsafe_operation",
+                  message: "operation requires explicit user approval",
+                },
+              },
+            ],
+            error_code: "runtime_permission_required",
+            error: "runtime permission required",
+          },
+        },
+      }),
+    );
+
+    render(<App />);
+    fireEvent.click(screen.getByTestId("tab-runs"));
+
+    expect(await screen.findByTestId("runs-pending-permissions-table")).toBeInTheDocument();
+    expect(screen.getByText("perm-1")).toBeInTheDocument();
+    expect(screen.getByText("needs_user")).toBeInTheDocument();
+    expect(screen.getByText("ask_unsafe_operation")).toBeInTheDocument();
+    expect(screen.getByText("npm install")).toBeInTheDocument();
+    expect(screen.getByText("package install requires review")).toBeInTheDocument();
   });
 
   it("copies run logs using the active line+fields view", async () => {
@@ -800,7 +891,7 @@ describe("App", () => {
     expect(await screen.findByText("Selected run is already terminal.")).toBeInTheDocument();
   });
 
-  it("saves and resets runtime timeout and execution settings", async () => {
+  it("saves and resets runtime timeout, execution, and permission settings", async () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -838,6 +929,24 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Reset execution defaults" }));
     expect(await screen.findByText("Runtime execution profile reset to defaults")).toBeInTheDocument();
+
+    const permissionMode = screen.getByTestId("runtime-permission-mode-select");
+    fireEvent.change(permissionMode, { target: { value: "managed" } });
+    fireEvent.change(screen.getByTestId("runtime-permission-approval-channel-select"), { target: { value: "ui" } });
+    fireEvent.click(screen.getByTestId("runtime-permissions-save-btn"));
+    expect(await screen.findByText("Runtime permissions saved")).toBeInTheDocument();
+
+    const permissionsPutCalls = fetchMock.mock.calls.filter((call) => call[0] === "/api/runtime/permissions" && call[1]?.method === "PUT");
+    expect(permissionsPutCalls).toHaveLength(1);
+    expect(JSON.parse(String(permissionsPutCalls[0][1]?.body ?? "{}"))).toMatchObject({
+      permissions: {
+        mode: "managed",
+        approval_channel: "ui",
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset permission defaults" }));
+    expect(await screen.findByText("Runtime permissions reset to defaults")).toBeInTheDocument();
   });
 
   it("opens runtime execution artifacts from run logs quick action", async () => {

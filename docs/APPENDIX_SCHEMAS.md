@@ -36,12 +36,17 @@
   - `max_parallel_tasks > 0`
   - `failure_policy: fail_fast|best_effort`
   - `shard_discovery.mode: heuristics|semantic`
+- `runtime.profile.permissions.*` optional persisted permission profile:
+  - `mode: trusted_full_access|managed`
+  - `approval_channel: fail_fast|ui`
+  - default `trusted_full_access/fail_fast`, so existing live-provider behavior remains unchanged unless managed mode is explicitly selected
 - `runtime.profile.steps.*.provider` optional step-scoped provider override:
   - `step0_constitution|step1_collect|step2_as_is|step3_findings|step4_proposals`
   - allowed values: `claude-code|qwen-code|codex-code`
 - precedence:
   - timeouts: `env > workspace.yaml(runtime.profile.timeouts) > defaults`
   - execution: `CLI > env > workspace.yaml(runtime.profile.execution) > defaults`
+  - permissions: `workspace.yaml(runtime.profile.permissions) > defaults`
 - step providers: `workspace step override > CLI/env global provider > claude-code`
 - `analysis.role` удалён из active workspace contract; manifests с этим legacy полем reject-ятся schema validation-ом
 

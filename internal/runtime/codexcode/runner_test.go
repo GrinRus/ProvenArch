@@ -46,6 +46,17 @@ func TestDefaultCodexArgsKeepNoninteractiveDiagnosticMode(t *testing.T) {
 	assertCodexArg(t, args, "-")
 }
 
+func TestManagedCodexArgsOmitDangerFullAccess(t *testing.T) {
+	t.Parallel()
+
+	args := buildCodexArgsWithPermissions("/tmp/work", []string{"/tmp/work", "/tmp/repo"}, acpruntime.PermissionValues{Mode: acpruntime.PermissionModeManaged})
+	if codexSliceContains(args, "danger-full-access") {
+		t.Fatalf("managed mode must omit danger-full-access, got %v", args)
+	}
+	assertCodexArg(t, args, "--sandbox")
+	assertCodexArg(t, args, "workspace-write")
+}
+
 func TestCodexAdapterUsesSharedUnavailableMarkers(t *testing.T) {
 	t.Parallel()
 

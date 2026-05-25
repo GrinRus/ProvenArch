@@ -166,6 +166,60 @@ runtime:
 	}
 }
 
+func TestOpenRejectsManifestWithInvalidRuntimePermissions(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeManifestFile(t, root, `
+version: 1
+repos:
+  - name: payments
+    path: /tmp/payments
+runtime:
+  profile:
+    permissions:
+      mode: prompt_everything
+      approval_channel: browser
+`)
+
+	_, err := Open(root)
+	if err == nil {
+		t.Fatalf("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "runtime.profile.permissions.approval_channel") ||
+		!strings.Contains(err.Error(), "runtime.profile.permissions.mode") {
+		t.Fatalf("expected runtime permissions validation errors, got %v", err)
+	}
+}
+
+func TestOpenAcceptsManagedRuntimePermissions(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeManifestFile(t, root, `
+version: 1
+repos:
+  - name: payments
+    path: /tmp/payments
+runtime:
+  profile:
+    permissions:
+      mode: managed
+      approval_channel: fail_fast
+`)
+
+	ws, err := Open(root)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+	if ws.Manifest.Runtime == nil || ws.Manifest.Runtime.Profile == nil || ws.Manifest.Runtime.Profile.Permissions == nil {
+		t.Fatalf("expected runtime permissions in manifest")
+	}
+	if got := ws.Manifest.Runtime.Profile.Permissions.Mode; got != "managed" {
+		t.Fatalf("expected managed mode, got %q", got)
+	}
+}
+
 func TestRenderManifestIncludesRuntimeTimeouts(t *testing.T) {
 	t.Parallel()
 
@@ -197,6 +251,34 @@ func TestRenderManifestIncludesRuntimeTimeouts(t *testing.T) {
 	}
 	if !strings.Contains(text, "pipeline_timeout_sec: 2400") {
 		t.Fatalf("expected pipeline timeout in manifest, got:\n%s", text)
+	}
+}
+
+func TestRenderManifestIncludesRuntimePermissions(t *testing.T) {
+	t.Parallel()
+
+	raw, err := RenderManifest(Manifest{
+		Version: 1,
+		Repos: []RepoSource{
+			{Name: "payments", Path: "/tmp/payments"},
+		},
+		Runtime: &RuntimeConfig{
+			Profile: &RuntimeProfileConfig{
+				Permissions: &RuntimePermissionsConfig{
+					Mode:            "managed",
+					ApprovalChannel: "fail_fast",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("render manifest: %v", err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, "permissions:") ||
+		!strings.Contains(text, "mode: managed") ||
+		!strings.Contains(text, "approval_channel: fail_fast") {
+		t.Fatalf("expected runtime permissions section, got:\n%s", text)
 	}
 }
 

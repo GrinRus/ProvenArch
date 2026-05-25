@@ -4,7 +4,7 @@
 > **Версия:** v1.2 (implementation-aligned)
 > **Дата:** 04 May 2026
 > **Аудитория:** tech leads, staff/principal engineers, архитекторы, platform teams, engineering managers  
-> **Важно:** required CI и deterministic baseline работают на process-scoped runtime policy: `fake` default, `headless` opt-in для реальных локальных прогонов.  
+> **Важно:** required CI и deterministic baseline работают на process-scoped runtime policy: `fake` default, `headless` opt-in для реальных локальных прогонов; live provider permission mode по умолчанию `trusted_full_access`, `managed` включается явно в `workspace.yaml`.
 > **Q&A boundary (beta):** deterministic workspace-backed read-only capability доступна как internal service + CLI `acp qa` + public read-only `POST /api/qa/ask`; это не headless runtime agent и не consumer `skills/prompt-packs/qa.md`.
 
 ---
@@ -17,6 +17,7 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 | Stakeholder requirement | Implementation status | Evidence (artifact/test) |
 |---|---|---|
 | Runtime policy `fake` default + `headless` opt-in | done | `cmd/acp/main.go` (`--runtime ...`, `--runtime-provider ...`, `ACP_RUNTIME_PROVIDER`, `ACP_CLAUDE_CMD`, `ACP_QWEN_CMD`, `ACP_CODEX_CMD`), `cmd/acp/main_test.go`, `internal/api/server_test.go` |
+| Runtime permission policy `trusted_full_access` default + opt-in `managed` auto-approve envelope | done | `schemas/workspace.schema.json`, `internal/runtime/permissions.go`, `internal/orchestrator/runtime_logging.go`, `internal/api/server.go`, `ui/src/App.test.tsx` |
 | Baseline flow `validate -> init|refresh -> inspect` (CLI/API/UI) | done | `scripts/smoke-cli.sh`, `scripts/smoke-api.sh`, `ui/src/App.test.tsx` |
 | Schema-driven workspace/runtime artifact validation + actionable diagnostics | done | `internal/workspace/validation.go`, `internal/contracts/runtimeexecution.go`, `internal/api/server_test.go` |
 | Domain-first per-domain execution with persisted runtime execution metadata + domain outputs | done | `internal/orchestrator/orchestrator.go`, `internal/orchestrator/orchestrator_test.go`, `internal/orchestrator/scenario_test.go` |
@@ -282,9 +283,10 @@ arch-workspace/
    - настройка источников репозиториев (`path` или `git_url`)  
    - редактор baseline skills/prompts (с версионированием через git)  
    - top-level tabs: `Setup / Baseline / Runs / Results / Settings`  
-   - runtime profile (`timeouts` + `execution`) в отдельной вкладке `Settings`  
-   - запуск пайплайнов (init / update / report)  
-   - `Runs: Logs` с dual-view (`event timeline` + `raw agent stream`)  
+  - runtime profile (`timeouts` + `execution` + `permissions`) в отдельной вкладке `Settings`
+  - запуск пайплайнов (init / update / report)
+  - `Runs: Logs` с dual-view (`event timeline` + `raw agent stream`)
+  - `Runs: Pending Permissions` показывает requests, которые managed policy не auto-approved
    - `Results -> Diagrams` для C4 Mermaid artifacts (filter/open/preview)  
    - просмотр остальных результатов (as‑is docs, findings, proposals)
 
@@ -548,6 +550,7 @@ flowchart TD
 - MVP использует только artifact-only runtime contract.
 - Runtime пишет required step artifacts в `write_root` / `draft_final_root` и завершает процесс без semantic JSON на stdout.
 - Orchestrator принимает шаг только после read-only validation artifacts и persisted runtime execution metadata.
+- В `managed` permission mode orchestrator auto-approves только reads под `read_context_roots` и writes под `write_root`/`draft_final_root`; shell/network/package install/unknown requests не auto-approved и в non-interactive режиме завершаются `runtime_permission_required`.
 - Observation без evidence запрещён policy и examples.
 
 ### 13.3. Skills/prompts editing через UI

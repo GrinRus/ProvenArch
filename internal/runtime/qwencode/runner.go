@@ -61,9 +61,9 @@ func (a qwenAdapter) CommandSpec(task acpruntime.Task) (providercommon.CommandSp
 }
 
 func (a qwenAdapter) commandSpecWithPrompt(task acpruntime.Task, includeDirs []string, prompt string) (providercommon.CommandSpec, error) {
-	commandArgs := qwenArgsWithPrompt(append([]string(nil), a.runner.Args...), prompt)
+	commandArgs := qwenArgsWithPrompt(append([]string(nil), a.runner.Args...), prompt, task.RuntimePermissions)
 	if len(commandArgs) == 0 {
-		commandArgs = buildQwenArgsWithIncludeDirectories(includeDirs, prompt)
+		commandArgs = buildQwenArgsWithPermissions(includeDirs, prompt, task.RuntimePermissions)
 	}
 	return providercommon.CommandSpec{
 		Provider:    acpruntime.ProviderQwenCode,
@@ -127,7 +127,7 @@ func (a qwenAdapter) UnavailableMarkers() []string {
 	return providercommon.DefaultUnavailableMarkers()
 }
 
-func qwenArgsWithPrompt(args []string, prompt string) []string {
+func qwenArgsWithPrompt(args []string, prompt string, permissions acpruntime.PermissionValues) []string {
 	if len(args) == 0 {
 		return nil
 	}
@@ -159,6 +159,9 @@ func qwenArgsWithPrompt(args []string, prompt string) []string {
 			if i+1 < len(args) && qwenPromptFlagValueLooksPresent(args[i+1]) {
 				i++
 			}
+			continue
+		}
+		if strings.TrimSpace(permissions.Mode) == acpruntime.PermissionModeManaged && (trimmed == "--yolo" || strings.HasPrefix(trimmed, "--yolo=")) {
 			continue
 		}
 		normalized = append(normalized, arg)

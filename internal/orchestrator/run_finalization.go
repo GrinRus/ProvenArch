@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
 
 func (s *Service) failRunBeforeExecution(
@@ -52,6 +54,7 @@ func (s *Service) finishExecutionFailure(runID string, initialInfo RunInfo, exec
 	failedInfo.CurrentStep = execution.stepStatus.CurrentStep
 	execution.rewriteTerminalReports(RunStatusFailed)
 	failedInfo.Warnings = append([]string(nil), execution.warnings...)
+	failedInfo.PendingPermissions = append([]acpruntime.PermissionRequest(nil), execution.pendingPermissions...)
 	failedInfo.FinishedAt = &finishedAt
 	if qualityArtifact, qualityErr := execution.writeRunQualitySummary(
 		RunStatusFailed,
@@ -87,6 +90,7 @@ func (s *Service) finishPartialExecutionFailure(runID string, initialInfo RunInf
 	failedInfo.CurrentStep = execution.stepStatus.CurrentStep
 	execution.rewriteTerminalReports(RunStatusFailed)
 	failedInfo.Warnings = append([]string(nil), execution.warnings...)
+	failedInfo.PendingPermissions = append([]acpruntime.PermissionRequest(nil), execution.pendingPermissions...)
 	failedInfo.FinishedAt = &finishedAt
 	if qualityArtifact, qualityErr := execution.writeRunQualitySummary(
 		RunStatusFailed,
@@ -121,6 +125,7 @@ func (s *Service) finishExecutionSuccess(runID string, initialInfo RunInfo, exec
 	succeeded.Status = RunStatusSucceeded
 	succeeded.CurrentStep = execution.stepStatus.CurrentStep
 	succeeded.Warnings = append([]string(nil), execution.warnings...)
+	succeeded.PendingPermissions = append([]acpruntime.PermissionRequest(nil), execution.pendingPermissions...)
 	succeeded.FinishedAt = &finishedAt
 	if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusSucceeded, "", "", runFailureClassification{}); qualityErr == nil {
 		execution.addArtifacts(qualityArtifact)

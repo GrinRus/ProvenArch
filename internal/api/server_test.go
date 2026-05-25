@@ -1732,6 +1732,134 @@ func TestRuntimeExecutionPutRejectsInvalidStepProvider(t *testing.T) {
 	}
 }
 
+func TestRuntimePermissionsGetReturnsEffectiveDefaults(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Get(httpServer.URL + "/api/runtime/permissions")
+	if err != nil {
+		t.Fatalf("GET /api/runtime/permissions: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", response.StatusCode)
+	}
+
+	var payload struct {
+		OK        bool                         `json:"ok"`
+		Persisted map[string]any               `json:"persisted"`
+		Effective acpruntime.PermissionValues  `json:"effective"`
+		Source    acpruntime.PermissionSources `json:"source"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode runtime permissions payload: %v", err)
+	}
+	if !payload.OK {
+		t.Fatalf("expected ok=true")
+	}
+	if payload.Effective.Mode != acpruntime.PermissionModeTrustedFullAccess {
+		t.Fatalf("expected default permission mode %q, got %q", acpruntime.PermissionModeTrustedFullAccess, payload.Effective.Mode)
+	}
+	if payload.Effective.ApprovalChannel != acpruntime.PermissionApprovalFailFast {
+		t.Fatalf("expected default approval channel %q, got %q", acpruntime.PermissionApprovalFailFast, payload.Effective.ApprovalChannel)
+	}
+	if payload.Source.Mode != acpruntime.PermissionSourceDefault {
+		t.Fatalf("expected default mode source, got %s", payload.Source.Mode)
+	}
+}
+
+func TestRuntimePermissionsPutSupportsManagedUpdate(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	requestBody := `{"permissions":{"mode":"managed","approval_channel":"ui"}}`
+	request, err := http.NewRequest(http.MethodPut, httpServer.URL+"/api/runtime/permissions", strings.NewReader(requestBody))
+	if err != nil {
+		t.Fatalf("create PUT /api/runtime/permissions request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("PUT /api/runtime/permissions: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", response.StatusCode)
+	}
+
+	var putPayload struct {
+		Effective acpruntime.PermissionValues  `json:"effective"`
+		Source    acpruntime.PermissionSources `json:"source"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&putPayload); err != nil {
+		t.Fatalf("decode PUT runtime permissions payload: %v", err)
+	}
+	if putPayload.Effective.Mode != acpruntime.PermissionModeManaged || putPayload.Effective.ApprovalChannel != acpruntime.PermissionApprovalUI {
+		t.Fatalf("unexpected effective permissions: %+v", putPayload.Effective)
+	}
+	if putPayload.Source.Mode != acpruntime.PermissionSourceWorkspace || putPayload.Source.ApprovalChannel != acpruntime.PermissionSourceWorkspace {
+		t.Fatalf("expected workspace sources, got %+v", putPayload.Source)
+	}
+
+	manifestResp, err := http.Get(httpServer.URL + "/api/workspace/manifest")
+	if err != nil {
+		t.Fatalf("GET /api/workspace/manifest: %v", err)
+	}
+	defer manifestResp.Body.Close()
+	var manifestPayload struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(manifestResp.Body).Decode(&manifestPayload); err != nil {
+		t.Fatalf("decode manifest payload: %v", err)
+	}
+	if !strings.Contains(manifestPayload.Content, "permissions:") || !strings.Contains(manifestPayload.Content, "mode: managed") {
+		t.Fatalf("expected runtime permissions in manifest content, got:\n%s", manifestPayload.Content)
+	}
+	if !strings.Contains(manifestPayload.Content, "approval_channel: ui") {
+		t.Fatalf("expected approval_channel in manifest content, got:\n%s", manifestPayload.Content)
+	}
+}
+
+func TestRuntimePermissionsPutRejectsInvalidValues(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	requestBody := `{"permissions":{"mode":"superuser"}}`
+	request, err := http.NewRequest(http.MethodPut, httpServer.URL+"/api/runtime/permissions", strings.NewReader(requestBody))
+	if err != nil {
+		t.Fatalf("create PUT /api/runtime/permissions request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("PUT /api/runtime/permissions: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", response.StatusCode)
+	}
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	if payload.Error.Code != "runtime_permissions_invalid" {
+		t.Fatalf("expected runtime_permissions_invalid code, got %q", payload.Error.Code)
+	}
+}
+
 func TestRuntimeProfileGetIncludesStepProviders(t *testing.T) {
 	t.Parallel()
 
@@ -1746,6 +1874,9 @@ repos:
     path: ` + repoPath + `
 runtime:
   profile:
+    permissions:
+      mode: managed
+      approval_channel: ui
     execution:
       strategy: parallel
       max_parallel_tasks: 2
@@ -1778,6 +1909,11 @@ runtime:
 		Execution struct {
 			Effective map[string]any `json:"effective"`
 		} `json:"execution"`
+		Permissions struct {
+			Persisted map[string]string `json:"persisted"`
+			Effective map[string]string `json:"effective"`
+			Source    map[string]string `json:"source"`
+		} `json:"permissions"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode runtime profile payload: %v", err)
@@ -1802,6 +1938,12 @@ runtime:
 	}
 	if payload.StepProviders.Source["step2_as_is"] != "workspace" {
 		t.Fatalf("expected workspace source for step2_as_is, got %+v", payload.StepProviders.Source)
+	}
+	if payload.Permissions.Persisted["mode"] != "managed" || payload.Permissions.Persisted["approval_channel"] != "ui" {
+		t.Fatalf("expected persisted managed permissions, got %+v", payload.Permissions.Persisted)
+	}
+	if payload.Permissions.Effective["mode"] != "managed" || payload.Permissions.Source["mode"] != "workspace" {
+		t.Fatalf("expected effective workspace permissions, got effective=%+v source=%+v", payload.Permissions.Effective, payload.Permissions.Source)
 	}
 	effectiveSteps, ok := payload.Execution.Effective["steps"].(map[string]any)
 	if !ok {
@@ -2455,6 +2597,95 @@ repos:
 	}
 }
 
+func TestRunPermissionsEndpointReturnsPendingRequests(t *testing.T) {
+	t.Parallel()
+
+	repoPath := t.TempDir()
+	manifest := `version: 1
+repos:
+  - name: payments-service
+    path: ` + repoPath + `
+runtime:
+  profile:
+    permissions:
+      mode: managed
+      approval_channel: fail_fast
+`
+	server := newTestServerFromManifestWithRunner(t, manifest, apiPermissionRequiredRunner{})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Post(
+		httpServer.URL+"/api/pipeline/init",
+		"application/json",
+		bytes.NewBufferString(`{"trigger":"ui"}`),
+	)
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/init permission runner: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", response.StatusCode)
+	}
+
+	var startPayload struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&startPayload); err != nil {
+		t.Fatalf("decode start payload: %v", err)
+	}
+
+	runStatus := waitForRunTerminalStatus(t, httpServer.URL, startPayload.RunID, 8*time.Second)
+	if runStatus.Status != string(orchestrator.RunStatusFailed) {
+		t.Fatalf("expected failed run status, got %q", runStatus.Status)
+	}
+	if runStatus.ErrorCode != string(acpruntime.ErrorCodePermissionRequired) {
+		t.Fatalf("expected runtime_permission_required, got %q", runStatus.ErrorCode)
+	}
+
+	detailResp, err := http.Get(httpServer.URL + "/api/pipeline/runs/" + startPayload.RunID)
+	if err != nil {
+		t.Fatalf("GET /api/pipeline/runs/<id>: %v", err)
+	}
+	defer detailResp.Body.Close()
+	var detailPayload struct {
+		PendingPermissions []acpruntime.PermissionRequest `json:"pending_permissions"`
+	}
+	if err := json.NewDecoder(detailResp.Body).Decode(&detailPayload); err != nil {
+		t.Fatalf("decode run detail payload: %v", err)
+	}
+	if len(detailPayload.PendingPermissions) != 1 {
+		t.Fatalf("expected one pending permission in run status, got %+v", detailPayload.PendingPermissions)
+	}
+
+	permissionsResp, err := http.Get(httpServer.URL + "/api/pipeline/runs/" + startPayload.RunID + "/permissions")
+	if err != nil {
+		t.Fatalf("GET /api/pipeline/runs/<id>/permissions: %v", err)
+	}
+	defer permissionsResp.Body.Close()
+	if permissionsResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", permissionsResp.StatusCode)
+	}
+	var permissionsPayload struct {
+		RunID    string                         `json:"run_id"`
+		Requests []acpruntime.PermissionRequest `json:"requests"`
+	}
+	if err := json.NewDecoder(permissionsResp.Body).Decode(&permissionsPayload); err != nil {
+		t.Fatalf("decode run permissions payload: %v", err)
+	}
+	if permissionsPayload.RunID != startPayload.RunID {
+		t.Fatalf("expected run_id %q, got %q", startPayload.RunID, permissionsPayload.RunID)
+	}
+	if len(permissionsPayload.Requests) != 1 || permissionsPayload.Requests[0].RequestID != "perm-api-shell" {
+		t.Fatalf("unexpected permission requests: %+v", permissionsPayload.Requests)
+	}
+	if permissionsPayload.Requests[0].Decision == nil ||
+		permissionsPayload.Requests[0].Decision.Decision != acpruntime.PermissionDecisionNeedsUser ||
+		permissionsPayload.Requests[0].Decision.RuleID != "ask_unsafe_operation" {
+		t.Fatalf("expected pending permission decision metadata, got %+v", permissionsPayload.Requests[0].Decision)
+	}
+}
+
 func TestPipelineStartWithRuntimeContractFailureStillReturnsAccepted(t *testing.T) {
 	t.Parallel()
 
@@ -2640,6 +2871,22 @@ func newTestServerFromManifest(t *testing.T, manifest string) *Server {
 	}
 
 	return NewServer(ws, orchestrator.NewService(orchestrator.WithHistoryWorkspace(ws)))
+}
+
+func newTestServerFromManifestWithRunner(t *testing.T, manifest string, runner acpruntime.Runner) *Server {
+	t.Helper()
+
+	root := writeManifestRoot(t, manifest)
+	ws, err := workspace.Open(root)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+
+	service := orchestrator.NewService(
+		orchestrator.WithHistoryWorkspace(ws),
+		orchestrator.WithRunner(runner),
+	)
+	return NewServer(ws, service)
 }
 
 func newTestServerWithRunner(t *testing.T, runner acpruntime.Runner) *Server {
@@ -2999,6 +3246,33 @@ func (parseFailureRunner) Run(context.Context, acpruntime.Task) (acpruntime.Resu
 }
 
 func (parseFailureRunner) Preflight(context.Context) error {
+	return nil
+}
+
+type apiPermissionRequiredRunner struct{}
+
+func (apiPermissionRequiredRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	if task.OnPermissionRequest == nil {
+		return acpruntime.Result{}, errors.New("expected runtime permission hook")
+	}
+	decision := task.OnPermissionRequest(acpruntime.PermissionRequest{
+		RequestID:     "perm-api-shell",
+		Action:        "shell",
+		PathOrCommand: "npm install",
+		Reason:        "package install requires review",
+	})
+	if decision.Approved() {
+		return fakeruntime.Runner{}.Run(ctx, task)
+	}
+	return acpruntime.Result{}, acpruntime.WrapRunnerError(
+		acpruntime.Provider("fake"),
+		acpruntime.ErrorCodePermissionRequired,
+		"runtime permission required",
+		errors.New("package install requires review"),
+	)
+}
+
+func (apiPermissionRequiredRunner) Preflight(context.Context) error {
 	return nil
 }
 

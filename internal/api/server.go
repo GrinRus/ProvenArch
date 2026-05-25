@@ -47,6 +47,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/workspace/manifest", s.handleWorkspaceManifest)
 	mux.HandleFunc("/api/runtime/timeouts", s.handleRuntimeTimeouts)
 	mux.HandleFunc("/api/runtime/execution", s.handleRuntimeExecution)
+	mux.HandleFunc("/api/runtime/permissions", s.handleRuntimePermissions)
 	mux.HandleFunc("/api/runtime/profile", s.handleRuntimeProfile)
 	mux.HandleFunc("/api/artifacts", s.handleArtifacts)
 	mux.HandleFunc("/api/artifacts/write", s.handleArtifactsWrite)
@@ -343,6 +344,57 @@ func (s *Server) handleRuntimeExecution(writer http.ResponseWriter, request *htt
 	}
 }
 
+func (s *Server) handleRuntimePermissions(writer http.ResponseWriter, request *http.Request) {
+	switch request.Method {
+	case http.MethodGet:
+		ws := s.getWorkspace()
+		resolved := acpruntime.ResolvePermissions(ws.Manifest)
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"ok":        true,
+			"persisted": runtimePermissionsPersistedPayload(resolved.Persisted),
+			"effective": resolved.Effective,
+			"source":    resolved.Source,
+		})
+	case http.MethodPut:
+		var payload struct {
+			Permissions runtimeprofile.RuntimePermissionsPatch `json:"permissions"`
+		}
+		if err := decodeStrictJSON(request, &payload); err != nil {
+			writeError(writer, http.StatusBadRequest, "invalid_request_body", "invalid request body")
+			return
+		}
+		if payload.Permissions.IsZero() {
+			writeError(writer, http.StatusBadRequest, "runtime_permissions_empty", "permissions payload must include at least one field")
+			return
+		}
+		if err := runtimeprofile.ValidateRuntimePermissionsPatch(payload.Permissions); err != nil {
+			writeError(writer, http.StatusBadRequest, "runtime_permissions_invalid", err.Error())
+			return
+		}
+
+		ws := s.getWorkspace()
+		reopened, err := (runtimeprofile.RuntimeProfilePatchService{}).ApplyPermissions(ws, payload.Permissions)
+		if err != nil {
+			if typed := (runtimeprofile.PatchError{}); errors.As(err, &typed) {
+				writeError(writer, http.StatusInternalServerError, typed.Code, typed.Error())
+				return
+			}
+			writeError(writer, http.StatusInternalServerError, "runtime_permissions_write_failed", err.Error())
+			return
+		}
+		s.setWorkspace(reopened)
+		resolved := acpruntime.ResolvePermissions(reopened.Manifest)
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"ok":        true,
+			"persisted": runtimePermissionsPersistedPayload(resolved.Persisted),
+			"effective": resolved.Effective,
+			"source":    resolved.Source,
+		})
+	default:
+		writeMethodNotAllowed(writer, http.MethodGet+", "+http.MethodPut)
+	}
+}
+
 func (s *Server) handleRuntimeProfile(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodGet {
 		writeMethodNotAllowed(writer, http.MethodGet)
@@ -351,6 +403,7 @@ func (s *Server) handleRuntimeProfile(writer http.ResponseWriter, request *http.
 	ws := s.getWorkspace()
 	timeouts := acpruntime.ResolveTimeouts(ws.Manifest)
 	execution := s.service.ResolveExecutionProfile(ws.Manifest)
+	permissions := acpruntime.ResolvePermissions(ws.Manifest)
 	stepProviders, err := s.service.ResolveStepProviderProfile(ws.Manifest)
 	if err != nil {
 		writeError(writer, http.StatusInternalServerError, "runtime_step_provider_resolution_failed", err.Error())
@@ -367,6 +420,11 @@ func (s *Server) handleRuntimeProfile(writer http.ResponseWriter, request *http.
 			"persisted": runtimeExecutionPersistedPayload(execution.Persisted, stepProviders.Persisted),
 			"effective": runtimeExecutionEffectivePayload(execution.Effective, stepProviders.Effective),
 			"source":    runtimeExecutionSourcePayload(execution.Source, stepProviders.Source),
+		},
+		"permissions": map[string]any{
+			"persisted": runtimePermissionsPersistedPayload(permissions.Persisted),
+			"effective": permissions.Effective,
+			"source":    permissions.Source,
 		},
 		"step_providers": map[string]any{
 			"persisted": runtimeStepProvidersPersistedPayload(stepProviders.Persisted),
@@ -420,6 +478,17 @@ func runtimeExecutionSourcePayload(source acpruntime.ExecutionSources, steps acp
 	}
 	if runtimeSteps := runtimeStepProvidersSourcePayload(steps); len(runtimeSteps) > 0 {
 		payload["steps"] = runtimeSteps
+	}
+	return payload
+}
+
+func runtimePermissionsPersistedPayload(persisted workspace.RuntimePermissionsConfig) map[string]any {
+	payload := map[string]any{}
+	if value := strings.TrimSpace(persisted.Mode); value != "" {
+		payload["mode"] = value
+	}
+	if value := strings.TrimSpace(persisted.ApprovalChannel); value != "" {
+		payload["approval_channel"] = value
 	}
 	return payload
 }
@@ -767,6 +836,11 @@ func (s *Server) handlePipelineRunsGet(writer http.ResponseWriter, request *http
 		return
 	}
 
+	if len(parts) == 2 && parts[1] == "permissions" {
+		s.handlePipelineRunPermissions(writer, runID)
+		return
+	}
+
 	if len(parts) == 2 && parts[1] == "logs" {
 		s.handlePipelineRunLogs(writer, request, runID)
 		return
@@ -822,6 +896,18 @@ func (s *Server) handlePipelineRunArtifacts(writer http.ResponseWriter, runID st
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"run_id":    runID,
 		"artifacts": artifacts,
+	})
+}
+
+func (s *Server) handlePipelineRunPermissions(writer http.ResponseWriter, runID string) {
+	permissions, ok := s.service.GetRunPermissions(runID)
+	if !ok {
+		writeError(writer, http.StatusNotFound, "run_not_found", "run not found")
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"run_id":   runID,
+		"requests": permissions,
 	})
 }
 
@@ -996,16 +1082,17 @@ func formatOptionalString(value string) any {
 
 func formatRunInfoPayload(runInfo orchestrator.RunInfo) map[string]any {
 	return map[string]any{
-		"run_id":         runInfo.RunID,
-		"pipeline":       runInfo.Pipeline,
-		"status":         runInfo.Status,
-		"started_at":     runInfo.StartedAt.UTC().Format(time.RFC3339),
-		"finished_at":    formatOptionalTime(runInfo.FinishedAt),
-		"current_step":   runInfo.CurrentStep,
-		"step_providers": runInfo.StepProviders,
-		"warnings":       runInfo.Warnings,
-		"error_code":     formatOptionalString(runInfo.ErrorCode),
-		"error":          formatOptionalString(runInfo.Error),
+		"run_id":              runInfo.RunID,
+		"pipeline":            runInfo.Pipeline,
+		"status":              runInfo.Status,
+		"started_at":          runInfo.StartedAt.UTC().Format(time.RFC3339),
+		"finished_at":         formatOptionalTime(runInfo.FinishedAt),
+		"current_step":        runInfo.CurrentStep,
+		"step_providers":      runInfo.StepProviders,
+		"warnings":            runInfo.Warnings,
+		"pending_permissions": runInfo.PendingPermissions,
+		"error_code":          formatOptionalString(runInfo.ErrorCode),
+		"error":               formatOptionalString(runInfo.Error),
 	}
 }
 
