@@ -58,6 +58,61 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-05-07 consolidated historical active plans into the remaining open slices below. Detailed evidence and classification are archived in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`; original historical active plan text was moved to `docs/archive/PLANS_ARCHIVE_2026-05.md` under "Reconciled active plans from 2026-05-07".
 
 ### Plan ID
+EP-20260525-frontend-live-e2e-diagnostics
+
+### Context
+`release-fast-20260525T104842Z` proved the runtime permission slice did not break trusted provider args or backend hard gates, but exposed weak frontend live E2E classification. `qwen-code` frontend init passed, while `claude-code` failed with `Target page, context or browser has been closed` while the run was still active in `init.step1.collect`, and `codex-code` failed with API `ECONNREFUSED` while the fresh init run was still in `init.step0.constitution`. Both collapsed into `playwright_failed`, which blocks useful triage and makes it unclear whether the issue is browser lifecycle, API/server lifecycle, or product UI.
+
+### Goals (must have)
+- [x] Keep Playwright as the canonical CLI/release-gate harness; Browser/Chrome MCP remains manual diagnostic only.
+- [x] Split frontend live failure reasons into `browser_closed`, `api_unreachable`, `server_exited`, `active_run_timeout`, and fallback `playwright_failed`.
+- [x] Make long backend polling independent from the browser page object.
+- [x] Persist frontend result diagnostics: server PID/exit code, post-failure health, run id, last run status/current step, and diagnostic refs.
+- [x] Add stub regression tests for the new frontend classifications.
+- [x] Add a diagnostic-only Playwright smoke proving API request polling survives a closed browser page.
+- [ ] After merge, run focused frontend init diagnostics for `claude-code` and `codex-code`, then rerun canonical `release fast` if both focused checks pass.
+
+### Non-goals
+- [x] Do not change canonical matrices, timeout profiles, provider contracts, permission behavior, or public HTTP API.
+- [x] Do not replace Playwright release-gate acceptance with MCP automation.
+- [x] Do not fix any discovered `acp serve` lifecycle bug in this slice; classify it first.
+
+### Approach
+1) Extend frontend reason allowlist and batch/report aggregation coverage.
+2) Harden `scripts/frontend-live-e2e.sh` post-failure diagnostics around `acp serve` PID, `/api/health`, Playwright log signatures, and run-history/API state.
+3) Refactor `ui/e2e/live-flow.spec.ts` to use independent API request polling and promise-based sleeps for long polling.
+4) Add shell-stub tests that simulate server exit, API unreachable, browser closed, and active timeout without live providers.
+5) Sync testing/runbook architecture docs with the narrower failure taxonomy.
+
+### Files expected to change
+- `scripts/frontend-live-e2e.sh`
+- `scripts/frontend-status-reasons.sh`
+- `ui/e2e/live-flow.spec.ts`
+- `scripts/tests/*`
+- `docs/PLANS.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/ARCHITECTURE.md`
+
+### Acceptance criteria
+- [x] `python3 -m unittest scripts.tests.frontend_live_e2e_contract_test`
+- [x] relevant batch/report script tests
+- [x] UI unit/build checks
+- [x] diagnostic-only Playwright `api-context-page-close-smoke` passes against a fake API
+- [x] `make contracts`
+- [x] `make test`
+- [x] `make lint`
+- [x] `make build`
+
+### Risks
+- Shell lifecycle checks must not kill or wait on a still-running `acp serve` before cleanup.
+- New reason codes must remain additive so historical result JSON and report aggregation keep working.
+
+### Progress log
+- 2026-05-25: Started implementation after stopping `release-fast-20260525T104842Z`; evidence showed independent frontend init failures for Claude browser lifecycle and Codex API/server reachability.
+- 2026-05-25: Implemented additive reason taxonomy, post-failure diagnostics, independent API polling, stub regression coverage, diagnostic page-close smoke, and docs sync; local DoD passed.
+
+### Plan ID
 EP-20260518-live-e2e-blackbox
 
 ### Context

@@ -3385,7 +3385,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
             batch_root / "frontend/qwen-code/run3/frontend-e2e-result.json",
             {
                 "status": "failed",
-                "reason": "playwright_failed",
+                "reason": "browser_closed",
                 "runtime_provider": "qwen-code",
                 "workspace": "/tmp/qwen-run3",
                 "base_url": "http://127.0.0.1:18083",
@@ -3414,7 +3414,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertIn("| qwen-code | failed | 2 |", matrix_text)
         self.assertIn("| claude-code | passed | 1 |", matrix_text)
         self.assertIn("| qwen-code | 1 | passed | ok |", matrix_text)
-        self.assertIn("| qwen-code | 3 | failed | playwright_failed |", matrix_text)
+        self.assertIn("| qwen-code | 3 | failed | browser_closed |", matrix_text)
 
     def test_python_frontend_cancel_matrix_supports_per_run_results(self) -> None:
         batch_root = self.root / "batch-cancel"

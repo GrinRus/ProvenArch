@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext } from "@playwright/test";
 
 const scenario = (process.env.UI_E2E_SCENARIO ?? "init-inspect").trim().toLowerCase();
 const initTimeoutSec = Number.parseInt(process.env.ACP_UI_INIT_POLL_TIMEOUT_SEC ?? "900", 10);
@@ -25,11 +25,15 @@ type RunObservation = {
   artifactCount: number;
 };
 
-async function fetchRunObservation(page: Page, runID: string): Promise<RunObservation> {
-  const response = await page.request.get(`/api/pipeline/runs/${runID}`);
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchRunObservation(api: APIRequestContext, runID: string): Promise<RunObservation> {
+  const response = await api.get(`/api/pipeline/runs/${runID}`);
   const payload = (await response.json()) as RunStatusPollResponse;
   let artifactCount = 0;
-  const artifactsResponse = await page.request.get(`/api/pipeline/runs/${runID}/artifacts`);
+  const artifactsResponse = await api.get(`/api/pipeline/runs/${runID}/artifacts`);
   if (artifactsResponse.ok()) {
     const artifactsPayload = (await artifactsResponse.json()) as RunArtifactsPollResponse;
     artifactCount = Array.isArray(artifactsPayload.artifacts) ? artifactsPayload.artifacts.length : 0;
@@ -58,12 +62,12 @@ function observationShowsProductiveProgress(previous: RunObservation | null, cur
   return current.artifactCount > previous.artifactCount || current.warningsCount > previous.warningsCount;
 }
 
-async function waitForInitInspectRun(page: Page, runID: string): Promise<void> {
+async function waitForInitInspectRun(api: APIRequestContext, runID: string): Promise<void> {
   const initDeadline = Date.now() + initTimeoutMs;
   let lastObservation: RunObservation | null = null;
   let sawProductiveProgress = false;
   while (Date.now() < initDeadline) {
-    const observation = await fetchRunObservation(page, runID);
+    const observation = await fetchRunObservation(api, runID);
     if (observationShowsProductiveProgress(lastObservation, observation)) {
       sawProductiveProgress = true;
     }
@@ -76,7 +80,7 @@ async function waitForInitInspectRun(page: Page, runID: string): Promise<void> {
       );
     }
     lastObservation = observation;
-    await page.waitForTimeout(500);
+    await sleep(500);
   }
 
   if (sawProductiveProgress) {
@@ -87,7 +91,7 @@ async function waitForInitInspectRun(page: Page, runID: string): Promise<void> {
   throw new Error(`run ${runID} did not reach succeeded within ${initTimeoutSec}s`);
 }
 
-test("live ui flow: validate -> run init -> inspect artifacts", async ({ page }) => {
+test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, request }) => {
   test.skip(scenario !== "init-inspect", `scenario ${scenario} skips init-inspect flow`);
   test.setTimeout(Math.max(initTimeoutMs + 120_000, 6 * 60 * 1000));
   const runtimeProvider = process.env.UI_E2E_RUNTIME_PROVIDER ?? "unknown";
@@ -113,7 +117,12 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page })
   await expect(page.getByTestId("run-status-panel")).toBeVisible();
   const runID = ((await page.getByTestId("run-status-run-id").textContent()) ?? "").trim();
   expect(runID).not.toBe("");
-  await waitForInitInspectRun(page, runID);
+  console.log(`ACP_UI_E2E_RUN_ID=${runID}`);
+  await test.info().attach("run-id", {
+    body: runID,
+    contentType: "text/plain"
+  });
+  await waitForInitInspectRun(request, runID);
 
   const selectedRunButton = page.getByRole("button", { name: runID }).first();
   await expect(selectedRunButton).toBeVisible();
@@ -197,7 +206,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page })
   });
 });
 
-test("live ui flow: run refresh -> cancel -> failed(run_canceled)", async ({ page }) => {
+test("live ui flow: run refresh -> cancel -> failed(run_canceled)", async ({ page, request }) => {
   test.skip(scenario !== "cancel-refresh", `scenario ${scenario} skips cancel-refresh flow`);
   test.setTimeout(Math.max(cancelTimeoutMs + 120_000, 6 * 60 * 1000));
   const runtimeProvider = process.env.UI_E2E_RUNTIME_PROVIDER ?? "unknown";
@@ -223,15 +232,20 @@ test("live ui flow: run refresh -> cancel -> failed(run_canceled)", async ({ pag
       if (currentRunID !== "" && currentRunID !== previousRunID) {
         return currentRunID;
       }
-      await page.waitForTimeout(250);
+      await sleep(250);
     }
     throw new Error(`did not observe new refresh run id within timeout (previous=${previousRunID || "none"})`);
   });
   expect(runID).not.toBe("");
+  console.log(`ACP_UI_E2E_RUN_ID=${runID}`);
+  await test.info().attach("run-id", {
+    body: runID,
+    contentType: "text/plain"
+  });
   await expect
     .poll(
       async () => {
-        const response = await page.request.get(`/api/pipeline/runs/${runID}`);
+        const response = await request.get(`/api/pipeline/runs/${runID}`);
         const payload = (await response.json()) as { status?: string };
         return (payload.status ?? "").trim();
       },
@@ -241,7 +255,7 @@ test("live ui flow: run refresh -> cancel -> failed(run_canceled)", async ({ pag
   const activeDeadline = Date.now() + Math.max(cancelTimeoutMs, 180_000);
   let activeStatus = "";
   while (Date.now() < activeDeadline) {
-    const response = await page.request.get(`/api/pipeline/runs/${runID}`);
+    const response = await request.get(`/api/pipeline/runs/${runID}`);
     const payload = (await response.json()) as { status?: string; error_code?: string | null };
     const status = (payload.status ?? "").trim();
     const errorCode = (payload.error_code ?? "").trim();
@@ -252,7 +266,7 @@ test("live ui flow: run refresh -> cancel -> failed(run_canceled)", async ({ pag
     if (status === "failed") {
       throw new Error(`run ${runID} terminated before cancel: status=failed error_code=${errorCode || "-"}`);
     }
-    await page.waitForTimeout(1000);
+    await sleep(1000);
   }
   if (activeStatus !== "running") {
     throw new Error(`run ${runID} did not reach running status before cancel deadline (${Math.max(cancelTimeoutSec, 180)}s)`);
@@ -265,7 +279,7 @@ test("live ui flow: run refresh -> cancel -> failed(run_canceled)", async ({ pag
   await expect
     .poll(
       async () => {
-        const response = await page.request.get(`/api/pipeline/runs/${runID}`);
+        const response = await request.get(`/api/pipeline/runs/${runID}`);
         const payload = (await response.json()) as { status?: string; error_code?: string | null };
         const status = (payload.status ?? "").trim();
         const errorCode = (payload.error_code ?? "").trim();
@@ -293,4 +307,30 @@ test("live ui flow: run refresh -> cancel -> failed(run_canceled)", async ({ pag
     body: runtimeProvider,
     contentType: "text/plain"
   });
+});
+
+test("live ui diagnostic: api request context survives page close", async ({ page, request }) => {
+  test.skip(
+    scenario !== "api-context-page-close-smoke",
+    `scenario ${scenario} skips api-context-page-close-smoke flow`
+  );
+  test.setTimeout(60_000);
+
+  const beforeClose = await request.get("/api/health");
+  expect(beforeClose.ok()).toBe(true);
+
+  await page.close();
+
+  const deadline = Date.now() + 10_000;
+  let lastStatus = beforeClose.status();
+  while (Date.now() < deadline) {
+    const response = await request.get("/api/health");
+    lastStatus = response.status();
+    if (response.ok()) {
+      return;
+    }
+    await sleep(250);
+  }
+
+  throw new Error(`api request context did not survive page close: last_health_status=${lastStatus}`);
 });
