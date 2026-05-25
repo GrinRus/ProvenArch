@@ -71,6 +71,7 @@ export type RunStatusResponse = {
   finished_at?: string | null;
   current_step?: string;
   warnings?: string[];
+  pending_permissions?: RuntimePermissionRequest[];
   error_code?: string | null;
   error?: string | null;
 };
@@ -83,8 +84,27 @@ export type RunListItem = {
   finished_at?: string | null;
   current_step?: string;
   warnings?: string[];
+  pending_permissions?: RuntimePermissionRequest[];
   error_code?: string | null;
   error?: string | null;
+};
+
+export type RuntimePermissionRequest = {
+  request_id: string;
+  run_id: string;
+  step_id: string;
+  provider: string;
+  action: string;
+  path_or_command: string;
+  reason?: string;
+  decision?: RuntimePermissionDecision;
+};
+
+export type RuntimePermissionDecision = {
+  request_id: string;
+  decision: string;
+  rule_id: string;
+  message?: string;
 };
 
 export type RunListResponse = {
@@ -188,8 +208,24 @@ export type RuntimeExecutionDraft = Record<RuntimeExecutionKey, string>;
 
 export type RuntimeStepProviderValues = Record<string, string>;
 
+export type RuntimePermissionKey = "mode" | "approval_channel";
+export type RuntimePermissionValues = Record<RuntimePermissionKey, string>;
+export type RuntimePermissionSources = Record<RuntimePermissionKey, string>;
+export type RuntimePermissionsResponse = {
+  ok: boolean;
+  persisted?: Partial<RuntimePermissionValues>;
+  effective?: Partial<RuntimePermissionValues>;
+  source?: Partial<RuntimePermissionSources>;
+};
+export type RuntimePermissionDraft = Record<RuntimePermissionKey, string>;
+
 export type RuntimeProfileResponse = {
   ok: boolean;
+  permissions?: {
+    persisted?: Partial<RuntimePermissionValues>;
+    effective?: Partial<RuntimePermissionValues>;
+    source?: Partial<RuntimePermissionSources>;
+  };
   step_providers?: {
     persisted?: Partial<RuntimeStepProviderValues>;
     effective?: Partial<RuntimeStepProviderValues>;
@@ -265,6 +301,18 @@ export const runtimeStepProviderLabels: Record<(typeof runtimeStepProviderOrder)
   step2_as_is: "runtime.profile.steps.step2_as_is.provider",
   step3_findings: "runtime.profile.steps.step3_findings.provider",
   step4_proposals: "runtime.profile.steps.step4_proposals.provider",
+};
+
+export const runtimePermissionKeys: RuntimePermissionKey[] = ["mode", "approval_channel"];
+
+export const defaultRuntimePermissionValues: RuntimePermissionValues = {
+  mode: "trusted_full_access",
+  approval_channel: "fail_fast",
+};
+
+export const runtimePermissionLabels: Record<RuntimePermissionKey, string> = {
+  mode: "runtime.profile.permissions.mode",
+  approval_channel: "runtime.profile.permissions.approval_channel",
 };
 
 let guidedRepoSeed = 0;
@@ -371,5 +419,43 @@ export function parseRuntimeExecutionPatch(draft: RuntimeExecutionDraft): Runtim
     max_parallel_tasks: maxParallel,
     failure_policy: failurePolicy,
     shard_discovery_mode: shardMode,
+  };
+}
+
+export function normalizeRuntimePermissionValues(
+  partial: Partial<RuntimePermissionValues> | undefined,
+  fallback: RuntimePermissionValues
+): RuntimePermissionValues {
+  const modeRaw = String(partial?.mode ?? "").trim().toLowerCase();
+  const mode = modeRaw === "managed" || modeRaw === "trusted_full_access" ? modeRaw : fallback.mode;
+
+  const channelRaw = String(partial?.approval_channel ?? "").trim().toLowerCase();
+  const approvalChannel = channelRaw === "ui" || channelRaw === "fail_fast" ? channelRaw : fallback.approval_channel;
+
+  return {
+    mode,
+    approval_channel: approvalChannel,
+  };
+}
+
+export function runtimePermissionDraftFromValues(values: RuntimePermissionValues): RuntimePermissionDraft {
+  return {
+    mode: String(values.mode),
+    approval_channel: String(values.approval_channel),
+  };
+}
+
+export function parseRuntimePermissionPatch(draft: RuntimePermissionDraft): RuntimePermissionValues {
+  const mode = draft.mode.trim().toLowerCase();
+  if (mode !== "trusted_full_access" && mode !== "managed") {
+    throw new Error("runtime permissions mode must be trusted_full_access or managed");
+  }
+  const approvalChannel = draft.approval_channel.trim().toLowerCase();
+  if (approvalChannel !== "fail_fast" && approvalChannel !== "ui") {
+    throw new Error("runtime permissions approval_channel must be fail_fast or ui");
+  }
+  return {
+    mode,
+    approval_channel: approvalChannel,
   };
 }

@@ -10,12 +10,14 @@ import { TabNav, type TabOption } from "./components/TabNav";
 import { WizardContractPanel } from "./components/WizardContractPanel";
 import {
   runtimeExecutionLabels,
+  runtimePermissionLabels,
   runtimeStepProviderLabels,
   runtimeStepProviderOrder,
   runtimeTimeoutKeys,
   runtimeTimeoutLabels,
   type GuidedRepo,
   type RuntimeExecutionKey,
+  type RuntimePermissionKey,
   type RuntimeTimeoutKey,
 } from "./lib/appContracts";
 import { useRunExplorer } from "./hooks/useRunExplorer";
@@ -75,18 +77,27 @@ export default function App() {
     runtimeExecutionSource,
     runtimeExecutionDraft,
     runtimeExecutionStatus,
+    runtimePermissionPersisted,
+    runtimePermissionEffective,
+    runtimePermissionSource,
+    runtimePermissionDraft,
+    runtimePermissionStatus,
     runtimeStepProviderPersisted,
     runtimeStepProviderEffective,
     runtimeStepProviderSource,
     loadRuntimeTimeouts,
     loadRuntimeExecution,
+    loadRuntimePermissions,
     loadRuntimeProfile,
     updateRuntimeTimeoutDraft,
     updateRuntimeExecutionDraft,
+    updateRuntimePermissionDraft,
     handleSaveRuntimeTimeouts,
     handleResetRuntimeTimeouts,
     handleSaveRuntimeExecution,
     handleResetRuntimeExecution,
+    handleSaveRuntimePermissions,
+    handleResetRuntimePermissions,
   } = runtimeSettings;
 
   const {
@@ -173,6 +184,7 @@ export default function App() {
     await bootstrapWorkspaceSetup();
     await loadRuntimeTimeouts();
     await loadRuntimeExecution();
+    await loadRuntimePermissions();
     await loadRuntimeProfile();
   }
 
@@ -338,6 +350,16 @@ export default function App() {
           onSaveExecution={() => void handleSaveRuntimeExecution()}
           onResetExecution={() => void handleResetRuntimeExecution()}
           onExecutionChange={(key, value) => updateRuntimeExecutionDraft(key as RuntimeExecutionKey, value)}
+          runtimePermissionLabels={runtimePermissionLabels}
+          runtimePermissionDraft={runtimePermissionDraft}
+          runtimePermissionPersisted={runtimePermissionPersisted}
+          runtimePermissionEffective={runtimePermissionEffective}
+          runtimePermissionSource={runtimePermissionSource}
+          runtimePermissionStatus={runtimePermissionStatus}
+          onReloadPermissions={() => void loadRuntimePermissions()}
+          onSavePermissions={() => void handleSaveRuntimePermissions()}
+          onResetPermissions={() => void handleResetRuntimePermissions()}
+          onPermissionChange={(key, value) => updateRuntimePermissionDraft(key as RuntimePermissionKey, value)}
           stepProviderLabels={runtimeStepProviderLabels}
           stepProviderOrder={[...runtimeStepProviderOrder]}
           stepProviderPersisted={runtimeStepProviderPersisted}
@@ -392,6 +414,7 @@ export default function App() {
             runLogsStatus,
             runLogTaskrunPaths,
             runLogsRendered,
+            pendingPermissions: runStatus?.pending_permissions ?? [],
           }}
           actions={{
             onRunLogsModeChange: setRunLogsMode,

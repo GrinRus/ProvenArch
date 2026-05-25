@@ -1,0 +1,11 @@
+version: 1
+repos:
+  - name: payments-service
+    path: /absolute/path/to/payments-service
+runtime:
+  profile:
+    permissions:
+      mode: managed
+      approval_channel: fail_fast
+docs:
+  imports_path: ./docs/imports

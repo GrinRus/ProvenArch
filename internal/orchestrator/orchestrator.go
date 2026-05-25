@@ -94,16 +94,17 @@ type runRecord struct {
 }
 
 type RunInfo struct {
-	RunID         string            `json:"run_id"`
-	Pipeline      string            `json:"pipeline"`
-	Status        RunStatus         `json:"status"`
-	StartedAt     time.Time         `json:"started_at"`
-	FinishedAt    *time.Time        `json:"finished_at,omitempty"`
-	CurrentStep   string            `json:"current_step,omitempty"`
-	StepProviders map[string]string `json:"step_providers,omitempty"`
-	Warnings      []string          `json:"warnings,omitempty"`
-	ErrorCode     string            `json:"error_code,omitempty"`
-	Error         string            `json:"error,omitempty"`
+	RunID              string                         `json:"run_id"`
+	Pipeline           string                         `json:"pipeline"`
+	Status             RunStatus                      `json:"status"`
+	StartedAt          time.Time                      `json:"started_at"`
+	FinishedAt         *time.Time                     `json:"finished_at,omitempty"`
+	CurrentStep        string                         `json:"current_step,omitempty"`
+	StepProviders      map[string]string              `json:"step_providers,omitempty"`
+	Warnings           []string                       `json:"warnings,omitempty"`
+	PendingPermissions []acpruntime.PermissionRequest `json:"pending_permissions,omitempty"`
+	ErrorCode          string                         `json:"error_code,omitempty"`
+	Error              string                         `json:"error,omitempty"`
 }
 
 type Artifact struct {
@@ -124,17 +125,18 @@ type runHistorySnapshot struct {
 }
 
 type runHistoryItem struct {
-	RunID         string            `json:"run_id"`
-	Pipeline      string            `json:"pipeline"`
-	Status        RunStatus         `json:"status"`
-	StartedAt     string            `json:"started_at"`
-	FinishedAt    *string           `json:"finished_at,omitempty"`
-	CurrentStep   string            `json:"current_step,omitempty"`
-	StepProviders map[string]string `json:"step_providers,omitempty"`
-	Warnings      []string          `json:"warnings,omitempty"`
-	ErrorCode     string            `json:"error_code,omitempty"`
-	Error         string            `json:"error,omitempty"`
-	Artifacts     []Artifact        `json:"artifacts,omitempty"`
+	RunID              string                         `json:"run_id"`
+	Pipeline           string                         `json:"pipeline"`
+	Status             RunStatus                      `json:"status"`
+	StartedAt          string                         `json:"started_at"`
+	FinishedAt         *string                        `json:"finished_at,omitempty"`
+	CurrentStep        string                         `json:"current_step,omitempty"`
+	StepProviders      map[string]string              `json:"step_providers,omitempty"`
+	Warnings           []string                       `json:"warnings,omitempty"`
+	PendingPermissions []acpruntime.PermissionRequest `json:"pending_permissions,omitempty"`
+	ErrorCode          string                         `json:"error_code,omitempty"`
+	Error              string                         `json:"error,omitempty"`
+	Artifacts          []Artifact                     `json:"artifacts,omitempty"`
 }
 
 type stepRunnerFactory interface {
@@ -359,6 +361,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		)
 	}
 	resolvedExecution := s.ResolveExecutionProfile(request.Workspace.Manifest)
+	resolvedPermissions := acpruntime.ResolvePermissions(request.Workspace.Manifest)
 	stepRunnerResolver := newStepRunnerResolver(s.runnerFactory, resolvedStepProviders.Effective)
 	validation := request.Workspace.Validate(ctx, workspace.ValidateOptions{
 		ResolveRepos: true,
@@ -401,6 +404,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 			runtimeVersions:   map[string]struct{}{},
 			resolvedRepoPaths: map[string]string{},
 			stepProviders:     resolvedStepProviders.Effective,
+			permissionProfile: resolvedPermissions.Effective,
 		},
 		pipelineQualityState: pipelineQualityState{
 			runtimeStepMetrics:      []runtimeStepQuality{},
@@ -437,14 +441,16 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		s.appendRunLog(runID, entry)
 	}
 	execution.logInfo("", "", "runtime execution profile resolved", map[string]any{
-		"strategy":         execution.executionProfile.Strategy,
-		"max_parallel":     execution.executionProfile.MaxParallel,
-		"failure_policy":   execution.executionProfile.FailurePolicy,
-		"shard_discovery":  execution.executionProfile.ShardMode,
-		"step_providers":   execution.stepProviders.StringMap(),
-		"repo_scopes":      execution.repoScopes(),
-		"timeout_step_sec": resolvedTimeouts.Effective.StepTimeoutSec,
-		"timeout_hb_sec":   resolvedTimeouts.Effective.HeartbeatSec,
+		"strategy":                     execution.executionProfile.Strategy,
+		"max_parallel":                 execution.executionProfile.MaxParallel,
+		"failure_policy":               execution.executionProfile.FailurePolicy,
+		"shard_discovery":              execution.executionProfile.ShardMode,
+		"permissions_mode":             resolvedPermissions.Effective.Mode,
+		"permissions_approval_channel": resolvedPermissions.Effective.ApprovalChannel,
+		"step_providers":               execution.stepProviders.StringMap(),
+		"repo_scopes":                  execution.repoScopes(),
+		"timeout_step_sec":             resolvedTimeouts.Effective.StepTimeoutSec,
+		"timeout_hb_sec":               resolvedTimeouts.Effective.HeartbeatSec,
 	})
 	execution.onStep = func(stepID string) {
 		progress := initialInfo
@@ -452,11 +458,24 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		progress.CurrentStep = stepID
 		progress.StepProviders = execution.stepProviders.StringMap()
 		progress.Warnings = append([]string(nil), execution.warnings...)
+		progress.PendingPermissions = append([]acpruntime.PermissionRequest(nil), execution.pendingPermissions...)
 		s.storeRun(runRecord{
 			info:      progress,
 			artifacts: append([]Artifact(nil), execution.artifacts...),
 		})
 		execution.logInfo(stepID, "", "step started", nil)
+	}
+	execution.onPermissions = func(pending []acpruntime.PermissionRequest) {
+		progress := initialInfo
+		progress.Status = RunStatusRunning
+		progress.CurrentStep = execution.stepStatus.CurrentStep
+		progress.StepProviders = execution.stepProviders.StringMap()
+		progress.Warnings = append([]string(nil), execution.warnings...)
+		progress.PendingPermissions = append([]acpruntime.PermissionRequest(nil), pending...)
+		s.storeRun(runRecord{
+			info:      progress,
+			artifacts: append([]Artifact(nil), execution.artifacts...),
+		})
 	}
 
 	if err := execution.run(ctx); err != nil {
@@ -486,13 +505,15 @@ type pipelineExecution struct {
 }
 
 type pipelineRunProgressState struct {
-	startedAt        time.Time
-	stepStatus       RunInfo
-	onStep           func(stepID string)
-	onLog            func(entry RunLogEntry)
-	warnings         []string
-	resumeFromStep   string
-	resumeSourceStep string
+	startedAt          time.Time
+	stepStatus         RunInfo
+	onStep             func(stepID string)
+	onLog              func(entry RunLogEntry)
+	onPermissions      func([]acpruntime.PermissionRequest)
+	warnings           []string
+	pendingPermissions []acpruntime.PermissionRequest
+	resumeFromStep     string
+	resumeSourceStep   string
 }
 
 type pipelineArtifactRegistry struct {
@@ -506,6 +527,7 @@ type pipelineRuntimeState struct {
 	runtimeStepTimeout       time.Duration
 	runtimeHeartbeatInterval time.Duration
 	executionProfile         acpruntime.ExecutionValues
+	permissionProfile        acpruntime.PermissionValues
 	partialFailures          []runtimeShardFailure
 	resolvedRepoPaths        map[string]string
 	stepProviders            acpruntime.StepProviderValues

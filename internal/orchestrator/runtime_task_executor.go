@@ -60,23 +60,24 @@ func (executor defaultRuntimeTaskExecutor) RunRuntimeTask(ctx context.Context, r
 		}
 	}
 	task := acpruntime.Task{
-		TaskID:            taskID,
-		RunID:             e.runID,
-		StepID:            stepID,
-		ShardID:           shardID,
-		DomainID:          domainID,
-		Workspace:         e.workspace.Path,
-		ArtifactRoot:      artifactRootRel,
-		WriteRoot:         writeRootAbs,
-		DraftFinalRoot:    draftFinalRootAbs,
-		ReadContextRoots:  append([]string(nil), readContextRoots...),
-		AgentRole:         runtimeAgentRole(stepID),
-		StepContract:      runtimeStepContract(stepID),
-		ExpectedArtifacts: append([]string(nil), runtimeExpectedArtifacts(stepID)...),
-		RepoScope:         repoScope,
-		RepoScopes:        repoScopes,
-		PathScopes:        pathScopes,
-		StartedAtUTC:      e.clock().UTC(),
+		TaskID:             taskID,
+		RunID:              e.runID,
+		StepID:             stepID,
+		ShardID:            shardID,
+		DomainID:           domainID,
+		Workspace:          e.workspace.Path,
+		ArtifactRoot:       artifactRootRel,
+		WriteRoot:          writeRootAbs,
+		DraftFinalRoot:     draftFinalRootAbs,
+		ReadContextRoots:   append([]string(nil), readContextRoots...),
+		AgentRole:          runtimeAgentRole(stepID),
+		StepContract:       runtimeStepContract(stepID),
+		ExpectedArtifacts:  append([]string(nil), runtimeExpectedArtifacts(stepID)...),
+		RepoScope:          repoScope,
+		RepoScopes:         repoScopes,
+		PathScopes:         pathScopes,
+		StartedAtUTC:       e.clock().UTC(),
+		RuntimePermissions: e.permissionProfile,
 		RuntimeTimeoutProfile: map[string]any{
 			"step_timeout_sec":      int(e.runtimeStepTimeout.Seconds()),
 			"heartbeat_timeout_sec": int(e.runtimeHeartbeatInterval.Seconds()),
@@ -89,6 +90,12 @@ func (executor defaultRuntimeTaskExecutor) RunRuntimeTask(ctx context.Context, r
 			e.logInfo(stepID, domainID, event.Message, event.Fields)
 		},
 	}
+	task.OnPermissionRequest = func(request acpruntime.PermissionRequest) acpruntime.PermissionDecision {
+		if strings.TrimSpace(string(request.Provider)) == "" {
+			request.Provider = resolvedProvider
+		}
+		return e.decideRuntimePermission(task, request)
+	}
 	e.logInfo(stepID, domainID, "runtime task started", map[string]any{
 		"task_id":            task.TaskID,
 		"shard_id":           task.ShardID,
@@ -100,6 +107,8 @@ func (executor defaultRuntimeTaskExecutor) RunRuntimeTask(ctx context.Context, r
 		"write_root":         task.WriteRoot,
 		"draft_final_root":   task.DraftFinalRoot,
 		"read_context_roots": task.ReadContextRoots,
+		"permissions_mode":   task.RuntimePermissions.Mode,
+		"approval_channel":   task.RuntimePermissions.ApprovalChannel,
 	})
 
 	taskCtx := ctx

@@ -47,6 +47,15 @@ type RuntimeStepProvidersPatch struct {
 	Step4Proposals    *string `json:"step4_proposals"`
 }
 
+type RuntimePermissionsPatch struct {
+	Mode            *string `json:"mode"`
+	ApprovalChannel *string `json:"approval_channel"`
+}
+
+func (patch RuntimePermissionsPatch) IsZero() bool {
+	return patch.Mode == nil && patch.ApprovalChannel == nil
+}
+
 func (patch RuntimeStepProvidersPatch) IsZero() bool {
 	return patch.Step0Constitution == nil &&
 		patch.Step1Collect == nil &&
@@ -89,6 +98,20 @@ func (RuntimeProfilePatchService) ApplyExecution(ws workspace.Root, patch Runtim
 	return writeRuntimeProfileManifest(ws, manifest, "runtime_execution")
 }
 
+func (RuntimeProfilePatchService) ApplyPermissions(ws workspace.Root, patch RuntimePermissionsPatch) (workspace.Root, error) {
+	if err := ValidateRuntimePermissionsPatch(patch); err != nil {
+		return workspace.Root{}, err
+	}
+	manifest := ws.Manifest
+	ensureRuntimeProfile(&manifest)
+	if manifest.Runtime.Profile.Permissions == nil {
+		manifest.Runtime.Profile.Permissions = &workspace.RuntimePermissionsConfig{}
+	}
+	mergeRuntimePermissionsPatch(manifest.Runtime.Profile.Permissions, patch)
+	pruneRuntimeProfile(&manifest)
+	return writeRuntimeProfileManifest(ws, manifest, "runtime_permissions")
+}
+
 func ValidateRuntimeTimeoutPatch(patch workspace.RuntimeTimeoutsConfig) error {
 	checks := []struct {
 		name  string
@@ -106,6 +129,22 @@ func ValidateRuntimeTimeoutPatch(patch workspace.RuntimeTimeoutsConfig) error {
 	for _, check := range checks {
 		if check.value != nil && *check.value <= 0 {
 			return fmt.Errorf("%s must be > 0", check.name)
+		}
+	}
+	return nil
+}
+
+func ValidateRuntimePermissionsPatch(patch RuntimePermissionsPatch) error {
+	if patch.Mode != nil {
+		value := strings.TrimSpace(strings.ToLower(*patch.Mode))
+		if value != acpruntime.PermissionModeTrustedFullAccess && value != acpruntime.PermissionModeManaged {
+			return fmt.Errorf("mode must be one of: %s, %s", acpruntime.PermissionModeTrustedFullAccess, acpruntime.PermissionModeManaged)
+		}
+	}
+	if patch.ApprovalChannel != nil {
+		value := strings.TrimSpace(strings.ToLower(*patch.ApprovalChannel))
+		if value != acpruntime.PermissionApprovalFailFast && value != acpruntime.PermissionApprovalUI {
+			return fmt.Errorf("approval_channel must be one of: %s, %s", acpruntime.PermissionApprovalFailFast, acpruntime.PermissionApprovalUI)
 		}
 	}
 	return nil
@@ -153,6 +192,18 @@ func ValidateRuntimeExecutionPatch(patch RuntimeExecutionPatch) error {
 		}
 	}
 	return nil
+}
+
+func mergeRuntimePermissionsPatch(dst *workspace.RuntimePermissionsConfig, patch RuntimePermissionsPatch) {
+	if dst == nil {
+		return
+	}
+	if patch.Mode != nil {
+		dst.Mode = strings.TrimSpace(strings.ToLower(*patch.Mode))
+	}
+	if patch.ApprovalChannel != nil {
+		dst.ApprovalChannel = strings.TrimSpace(strings.ToLower(*patch.ApprovalChannel))
+	}
 }
 
 func mergeRuntimeTimeoutPatch(dst *workspace.RuntimeTimeoutsConfig, patch workspace.RuntimeTimeoutsConfig) {
@@ -253,6 +304,9 @@ func pruneRuntimeProfile(manifest *workspace.Manifest) {
 	}
 	if manifest.Runtime.Profile.Steps != nil && manifest.Runtime.Profile.Steps.IsZero() {
 		manifest.Runtime.Profile.Steps = nil
+	}
+	if manifest.Runtime.Profile.Permissions != nil && manifest.Runtime.Profile.Permissions.IsZero() {
+		manifest.Runtime.Profile.Permissions = nil
 	}
 	if manifest.Runtime.Profile.IsZero() {
 		manifest.Runtime.Profile = nil

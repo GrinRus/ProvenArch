@@ -329,10 +329,82 @@ Partial update persisted execution-полей в `workspace.yaml`.
 - `runtime_execution_write_failed`
 - `runtime_execution_reopen_failed`
 
+### GET `/api/runtime/permissions`
+Возвращает permission-профиль для текущего workspace:
+- `persisted` — значения из `workspace.yaml` (`runtime.profile.permissions`);
+- `effective` — значения после resolve (`workspace > defaults`);
+- `source` — источник каждого effective значения (`workspace|default`).
+
+**200**
+```json
+{
+  "ok": true,
+  "persisted": {
+    "mode": "managed"
+  },
+  "effective": {
+    "mode": "managed",
+    "approval_channel": "fail_fast"
+  },
+  "source": {
+    "mode": "workspace",
+    "approval_channel": "default"
+  }
+}
+```
+
+### PUT `/api/runtime/permissions`
+Partial update persisted permission-полей в `workspace.yaml`.
+
+**Request**
+```json
+{
+  "permissions": {
+    "mode": "managed",
+    "approval_channel": "ui"
+  }
+}
+```
+
+Правила:
+- payload должен содержать хотя бы одно поле в `permissions`;
+- `mode` в `trusted_full_access|managed`;
+- `approval_channel` в `fail_fast|ui`.
+
+**200**
+```json
+{
+  "ok": true,
+  "persisted": {
+    "mode": "managed",
+    "approval_channel": "ui"
+  },
+  "effective": {
+    "mode": "managed",
+    "approval_channel": "ui"
+  },
+  "source": {
+    "mode": "workspace",
+    "approval_channel": "workspace"
+  }
+}
+```
+
+**400**
+- `invalid_request_body`
+- `runtime_permissions_empty`
+- `runtime_permissions_invalid`
+
+**500**
+- `runtime_permissions_render_failed`
+- `runtime_permissions_write_failed`
+- `runtime_permissions_reopen_failed`
+
 ### GET `/api/runtime/profile`
 Возвращает aggregate runtime profile:
 - `timeouts`
 - `execution`
+- `permissions`
 - `step_providers`
 
 `step_providers` дублируется отдельно для UI/CLI, чтобы не требовать парсинг execution payload:
@@ -375,6 +447,19 @@ Partial update persisted execution-полей в `workspace.yaml`.
       "steps": {
         "step2_as_is": "workspace"
       }
+    }
+  },
+  "permissions": {
+    "persisted": {
+      "mode": "managed"
+    },
+    "effective": {
+      "mode": "managed",
+      "approval_channel": "fail_fast"
+    },
+    "source": {
+      "mode": "workspace",
+      "approval_channel": "default"
     }
   },
   "step_providers": {
@@ -528,6 +613,7 @@ Partial update persisted execution-полей в `workspace.yaml`.
     "step3_findings": "claude-code",
     "step4_proposals": "claude-code"
   },
+  "pending_permissions": [],
   "warnings": [],
   "error_code": null,
   "error": null
@@ -542,6 +628,10 @@ Partial update persisted execution-полей в `workspace.yaml`.
 
 Для runtime parse/runtime ошибок после успешного async start используется run-level статус:
 - `error_code: "runtime_contract_failed"` (или другой actionable code) в `failed` run.
+
+Для non-interactive managed permission запросов, которые не auto-approved:
+- `error_code: "runtime_permission_required"` в `failed` run;
+- `pending_permissions[]` содержит normalized requests с resolved `decision` для UI/diagnostics.
 
 Для lifecycle сценариев используются дополнительные `error_code`:
 - `run_canceled` — run отменён пользователем;
@@ -572,6 +662,7 @@ Partial update persisted execution-полей в `workspace.yaml`.
         "step3_findings": "claude-code",
         "step4_proposals": "claude-code"
       },
+      "pending_permissions": [],
       "warnings": [],
       "error_code": null,
       "error": null
@@ -582,6 +673,36 @@ Partial update persisted execution-полей в `workspace.yaml`.
 
 **400**
 - `invalid_limit`
+
+### GET `/api/pipeline/runs/<run_id>/permissions`
+Возвращает normalized pending permission requests для выбранного run.
+
+**200**
+```json
+{
+  "run_id": "run_20260403_001",
+  "requests": [
+    {
+      "request_id": "perm-1",
+      "run_id": "run_20260403_001",
+      "step_id": "init.step1.collect",
+      "provider": "claude-code",
+      "action": "shell",
+      "path_or_command": "npm install",
+      "reason": "package install requires review",
+      "decision": {
+        "request_id": "perm-1",
+        "decision": "needs_user",
+        "rule_id": "ask_unsafe_operation",
+        "message": "operation requires explicit user approval"
+      }
+    }
+  ]
+}
+```
+
+**404**
+- `run_not_found`
 
 ### GET `/api/pipeline/runs/<run_id>/logs?cursor=<n>&limit=<n>`
 Возвращает run-level лог-стрим (cursor pagination) для выбранного run.

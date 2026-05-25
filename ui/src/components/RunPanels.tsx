@@ -1,6 +1,6 @@
 import { RunStatusPanel } from "./RunStatusPanel";
 import { formatTimestamp } from "../lib/runState";
-import type { RunListItem, RunStatusResponse } from "../lib/appContracts";
+import type { RunListItem, RuntimePermissionRequest, RunStatusResponse } from "../lib/appContracts";
 
 type RunPanelsModel = {
   busy: boolean;
@@ -18,6 +18,7 @@ type RunPanelsModel = {
   runLogsStatus: string;
   runLogTaskrunPaths: string[];
   runLogsRendered: string;
+  pendingPermissions: RuntimePermissionRequest[];
 };
 
 type RunPanelsActions = {
@@ -53,6 +54,7 @@ export function RunPanels({ model, actions }: RunPanelsProps) {
     runLogsStatus,
     runLogTaskrunPaths,
     runLogsRendered,
+    pendingPermissions,
   } = model;
   const {
     onRunLogsModeChange,
@@ -87,6 +89,44 @@ export function RunPanels({ model, actions }: RunPanelsProps) {
         {runActionStatus ? <p className="status warn">{runActionStatus}</p> : null}
 
         <RunStatusPanel runStatus={runStatus} warnings={selectedRunWarnings} />
+      </section>
+
+      <section className="panel" data-testid="runs-pending-permissions-panel">
+        <h2>Runs: Pending Permissions</h2>
+        {pendingPermissions.length === 0 ? (
+          <p>No pending runtime permission requests.</p>
+        ) : (
+          <div className="run-table-wrap">
+            <table className="run-table" data-testid="runs-pending-permissions-table">
+              <thead>
+                <tr>
+                  <th>Request ID</th>
+                  <th>Provider</th>
+                  <th>Step</th>
+                  <th>Action</th>
+                  <th>Decision</th>
+                  <th>Rule</th>
+                  <th>Path or command</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingPermissions.map((request) => (
+                  <tr key={request.request_id || `${request.step_id}-${request.action}-${request.path_or_command}`}>
+                    <td>{request.request_id || "-"}</td>
+                    <td>{request.provider || "-"}</td>
+                    <td>{request.step_id || "-"}</td>
+                    <td>{request.action || "-"}</td>
+                    <td>{request.decision?.decision || "-"}</td>
+                    <td>{request.decision?.rule_id || "-"}</td>
+                    <td>{request.path_or_command || "-"}</td>
+                    <td>{request.reason || "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       <section className="panel" data-testid="runs-history-panel">

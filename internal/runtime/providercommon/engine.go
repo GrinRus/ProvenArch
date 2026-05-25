@@ -54,6 +54,10 @@ type ProviderAdapter interface {
 	UnavailableMarkers() []string
 }
 
+type ManagedPermissionAdapter interface {
+	SupportsManagedPermissions() bool
+}
+
 // CollectManifestRepairAdapter is implemented by provider adapters that can run
 // a narrow collect-manifest repair prompt after a provider already wrote
 // authored collect documents but missed or malformed shard-pack-manifest.json.
@@ -204,6 +208,16 @@ func JSONTaskStdin(task acpruntime.Task) (io.Reader, error) {
 func RunHeadlessProvider(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter) (acpruntime.Result, error) {
 	if adapter == nil {
 		return acpruntime.Result{}, errors.New("provider adapter is nil")
+	}
+	if strings.TrimSpace(task.RuntimePermissions.Mode) == acpruntime.PermissionModeManaged {
+		if managed, ok := adapter.(ManagedPermissionAdapter); !ok || !managed.SupportsManagedPermissions() {
+			return acpruntime.Result{}, acpruntime.WrapRunnerError(
+				adapter.Provider(),
+				acpruntime.ErrorCodePermissionRequired,
+				fmt.Sprintf("managed runtime permissions require a structured permission protocol for provider %q", adapter.Provider()),
+				nil,
+			)
+		}
 	}
 	result, runErr := runProviderCommand(ctx, task, adapter, normalizeActivityPolicy(adapter.ActivityPolicy(task)))
 	if runErr != nil {

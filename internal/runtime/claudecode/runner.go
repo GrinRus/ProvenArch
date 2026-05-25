@@ -63,7 +63,9 @@ func (a claudeAdapter) CommandSpec(task acpruntime.Task) (providercommon.Command
 func (a claudeAdapter) commandSpecWithPrompt(task acpruntime.Task, includeDirs []string, prompt string) (providercommon.CommandSpec, error) {
 	commandArgs := append([]string(nil), a.runner.Args...)
 	if len(commandArgs) == 0 {
-		commandArgs = buildClaudeArgsWithIncludeDirectories(includeDirs, prompt)
+		commandArgs = buildClaudeArgsWithPermissions(includeDirs, prompt, task.RuntimePermissions)
+	} else if strings.TrimSpace(task.RuntimePermissions.Mode) == acpruntime.PermissionModeManaged {
+		commandArgs = stripClaudeBypassPermissionArgs(commandArgs)
 	}
 	stdin, err := providercommon.JSONTaskStdin(task)
 	if err != nil {
@@ -78,6 +80,25 @@ func (a claudeAdapter) commandSpecWithPrompt(task acpruntime.Task, includeDirs [
 		PromptBytes: len([]byte(prompt)),
 		IncludeDirs: includeDirs,
 	}, nil
+}
+
+func stripClaudeBypassPermissionArgs(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		trimmed := strings.TrimSpace(args[i])
+		if trimmed == "--dangerously-skip-permissions" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "--permission-mode=") && strings.TrimSpace(strings.TrimPrefix(trimmed, "--permission-mode=")) == "bypassPermissions" {
+			continue
+		}
+		if trimmed == "--permission-mode" && i+1 < len(args) && strings.TrimSpace(args[i+1]) == "bypassPermissions" {
+			i++
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return out
 }
 
 func (a claudeAdapter) CollectManifestRepairCommandSpec(task acpruntime.Task, validationErr error) (providercommon.CommandSpec, error) {
@@ -135,7 +156,14 @@ func buildDefaultClaudeArgs(task acpruntime.Task, prompt string) []string {
 }
 
 func buildClaudeArgsWithIncludeDirectories(includeDirs []string, prompt string) []string {
-	args := []string{"--output-format", "json", "--permission-mode", "bypassPermissions"}
+	return buildClaudeArgsWithPermissions(includeDirs, prompt, acpruntime.DefaultPermissions())
+}
+
+func buildClaudeArgsWithPermissions(includeDirs []string, prompt string, permissions acpruntime.PermissionValues) []string {
+	args := []string{"--output-format", "json"}
+	if strings.TrimSpace(permissions.Mode) != acpruntime.PermissionModeManaged {
+		args = append(args, "--permission-mode", "bypassPermissions")
+	}
 	for _, dir := range includeDirs {
 		args = append(args, "--add-dir", dir)
 	}

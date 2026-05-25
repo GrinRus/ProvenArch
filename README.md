@@ -51,8 +51,12 @@ ACP находится в beta-состоянии и рассчитан на л�
 Go orchestrator пишет generated architecture state в настроенный `arch-workspace`.
 Анализируемые source repositories задуманы как read-only inputs. Но в live headless mode
 ACP запускает внешние provider CLI на той же машине. MVP isolation строится на explicit
-staging directories и audit warnings, а не на hard sandbox. Для чувствительных или рискованных
-прогонов используйте disposable checkout или чистую branch и ревьюйте результат перед commit.
+staging directories, managed permission policy и audit warnings, а не на hard sandbox.
+Default остаётся `trusted_full_access`: ACP передаёт provider CLI текущие full-access flags.
+Opt-in `runtime.profile.permissions.mode: managed` отключает эти flags и auto-approves
+только операции внутри runtime task envelope; неизвестные запросы в non-interactive run
+завершаются `runtime_permission_required`. Для чувствительных или рискованных прогонов
+используйте disposable checkout или чистую branch и ревьюйте результат перед commit.
 
 Workspace может содержать prompts, raw runtime logs, repository context, findings, questions
 и другие evidence анализа. Считайте его project data и коммитьте только по политике вашей
@@ -207,6 +211,21 @@ workspace.yaml runtime.profile.steps.<step>.provider
 В `--runtime fake` configured provider только валидируется как fallback config;
 live provider command не запускается, а runtime metadata записывает `fake`.
 
+Runtime permission mode хранится в `workspace.yaml`:
+
+```yaml
+runtime:
+  profile:
+    permissions:
+      mode: trusted_full_access # default; managed is opt-in
+      approval_channel: fail_fast # or ui
+```
+
+В UI это настраивается в `Settings -> Runtime Permissions`. В managed mode orchestrator
+auto-approves reads under `read_context_roots` и writes under `write_root`/`draft_final_root`.
+Shell/network/package-install/unknown requests не auto-approve-ятся; pending requests видны
+в `Runs -> Pending Permissions`.
+
 ## Артефакты и логи
 
 ACP хранит evidence анализа как обычные файлы внутри workspace:
@@ -225,7 +244,7 @@ UI показывает то же состояние через:
 
 - `Runs`: run status, warnings, event timeline, raw agent stream и cancel;
 - `Results`: coverage, artifacts и diagram previews;
-- `Settings`: persisted runtime timeouts, execution profile и effective step providers.
+- `Settings`: persisted runtime timeouts, execution profile, permission profile и effective step providers.
 
 Можно задавать read-only вопросы по generated workspace artifacts:
 

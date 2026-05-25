@@ -25,6 +25,47 @@ func TestClaudeDefaultArgsKeepNoninteractiveDiagnosticMode(t *testing.T) {
 	assertClaudeArg(t, args, "artifact-only prompt")
 }
 
+func TestClaudeManagedArgsOmitBypassPermissions(t *testing.T) {
+	t.Parallel()
+
+	args := buildClaudeArgsWithPermissions([]string{"/tmp/workspace"}, "artifact-only prompt", acpruntime.PermissionValues{Mode: acpruntime.PermissionModeManaged})
+	if stringSliceContains(args, "--permission-mode") || stringSliceContains(args, "bypassPermissions") {
+		t.Fatalf("managed mode must omit bypass permissions args, got %v", args)
+	}
+}
+
+func TestClaudeManagedCustomArgsStripBypassAliases(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:              "run-claude-managed",
+		StepID:             "init.step1.collect",
+		Workspace:          t.TempDir(),
+		RuntimePermissions: acpruntime.PermissionValues{Mode: acpruntime.PermissionModeManaged},
+	}
+	spec, err := (claudeAdapter{runner: HeadlessRunner{
+		Command: "claude-test",
+		Args: []string{
+			"--model", "sonnet",
+			"--dangerously-skip-permissions",
+			"--permission-mode=bypassPermissions",
+			"--permission-mode", "bypassPermissions",
+		},
+	}}).CommandSpec(task)
+	if err != nil {
+		t.Fatalf("command spec: %v", err)
+	}
+	args := strings.Join(spec.Args, "\n")
+	for _, forbidden := range []string{"--dangerously-skip-permissions", "--permission-mode", "bypassPermissions"} {
+		if strings.Contains(args, forbidden) {
+			t.Fatalf("managed mode must strip %q from custom args, got %v", forbidden, spec.Args)
+		}
+	}
+	if !strings.Contains(args, "--model") || !strings.Contains(args, "sonnet") {
+		t.Fatalf("managed mode must keep non-permission args, got %v", spec.Args)
+	}
+}
+
 func TestClaudeAdapterCommandSpecExposesRuntimeContractSurface(t *testing.T) {
 	t.Parallel()
 

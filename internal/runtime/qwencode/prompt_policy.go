@@ -12,15 +12,21 @@ func buildDefaultQwenArgs(task acpruntime.Task, prompt string) []string {
 }
 
 func buildQwenArgsWithIncludeDirectories(includeDirs []string, prompt string) []string {
+	return buildQwenArgsWithPermissions(includeDirs, prompt, acpruntime.DefaultPermissions())
+}
+
+func buildQwenArgsWithPermissions(includeDirs []string, prompt string, permissions acpruntime.PermissionValues) []string {
 	args := []string{
 		"--chat-recording",
 		"false",
-		"--yolo",
 		"--channel",
 		"CI",
 		"--output-format",
 		"stream-json",
 		"--include-partial-messages",
+	}
+	if strings.TrimSpace(permissions.Mode) != acpruntime.PermissionModeManaged {
+		args = append(args, "--yolo")
 	}
 	for _, dir := range includeDirs {
 		if strings.TrimSpace(dir) == "" {

@@ -36,6 +36,23 @@ func TestRunHeadlessProviderSucceedsWithValidArtifacts(t *testing.T) {
 	}
 }
 
+func TestRunHeadlessProviderManagedPermissionsFailFastWithoutProtocol(t *testing.T) {
+	t.Parallel()
+
+	task := newDraftTask(t, "run-managed-no-protocol")
+	task.RuntimePermissions = acpruntime.PermissionValues{Mode: acpruntime.PermissionModeManaged, ApprovalChannel: acpruntime.PermissionApprovalFailFast}
+	runner := testAdapter{command: writeEngineScript(t, draftScript(task, "exit 0"))}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatalf("expected managed permission protocol error")
+	}
+	code, _, ok := acpruntime.ClassifyError(err)
+	if !ok || code != string(acpruntime.ErrorCodePermissionRequired) {
+		t.Fatalf("expected runtime_permission_required, got code=%q err=%v", code, err)
+	}
+}
+
 func TestRunHeadlessProviderAcceptsValidArtifactsAfterControlledStop(t *testing.T) {
 	task := newDraftTask(t, "run-hang-valid")
 	runner := testAdapter{

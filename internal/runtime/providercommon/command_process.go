@@ -202,6 +202,7 @@ type providerCommandDiagnostics struct {
 	ActivityPolicy map[string]any
 	Environment    map[string]any
 	TimeoutProfile map[string]any
+	Permissions    map[string]any
 	PID            int
 	StartedAt      time.Time
 	FinishedAt     time.Time
@@ -231,7 +232,11 @@ func newProviderCommandDiagnostics(spec CommandSpec, task acpruntime.Task, polic
 		ActivityPolicy: activityPolicyDiagnostics(policy),
 		Environment:    allowlistedProviderEnvDiagnostics(),
 		TimeoutProfile: cloneDiagnosticMap(task.RuntimeTimeoutProfile),
-		StartedAt:      time.Now().UTC(),
+		Permissions: map[string]any{
+			"mode":             strings.TrimSpace(task.RuntimePermissions.Mode),
+			"approval_channel": strings.TrimSpace(task.RuntimePermissions.ApprovalChannel),
+		},
+		StartedAt: time.Now().UTC(),
 	}
 }
 
@@ -271,6 +276,7 @@ func (d *providerCommandDiagnostics) fields() map[string]any {
 		"activity_policy":   cloneDiagnosticMap(d.ActivityPolicy),
 		"env":               d.Environment,
 		"timeout_profile":   cloneDiagnosticMap(d.TimeoutProfile),
+		"permissions":       cloneDiagnosticMap(d.Permissions),
 		"pid":               d.PID,
 		"started_at":        d.StartedAt.Format(time.RFC3339Nano),
 		"stdout_bytes":      d.StdoutBytes,

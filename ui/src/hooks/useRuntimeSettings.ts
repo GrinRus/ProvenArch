@@ -3,18 +3,27 @@ import { useState } from "react";
 import { fetchJSON } from "../lib/api";
 import {
   defaultRuntimeExecutionValues,
+  defaultRuntimePermissionValues,
   defaultRuntimeTimeoutValues,
   normalizeRuntimeExecutionValues,
+  normalizeRuntimePermissionValues,
   normalizeRuntimeTimeoutValues,
   parseRuntimeExecutionPatch,
+  parseRuntimePermissionPatch,
   parseRuntimeTimeoutPatch,
   runtimeExecutionDraftFromValues,
+  runtimePermissionDraftFromValues,
   runtimeTimeoutDraftFromValues,
   type RuntimeExecutionDraft,
   type RuntimeExecutionKey,
   type RuntimeExecutionResponse,
   type RuntimeExecutionSources,
   type RuntimeExecutionValues,
+  type RuntimePermissionDraft,
+  type RuntimePermissionKey,
+  type RuntimePermissionsResponse,
+  type RuntimePermissionSources,
+  type RuntimePermissionValues,
   type RuntimeProfileResponse,
   type RuntimeStepProviderValues,
   type RuntimeTimeoutKey,
@@ -44,6 +53,14 @@ export function useRuntimeSettings({ setBusy, setError }: UseRuntimeSettingsOpti
     runtimeExecutionDraftFromValues(defaultRuntimeExecutionValues)
   );
   const [runtimeExecutionStatus, setRuntimeExecutionStatus] = useState("");
+
+  const [runtimePermissionPersisted, setRuntimePermissionPersisted] = useState<Partial<RuntimePermissionValues>>({});
+  const [runtimePermissionEffective, setRuntimePermissionEffective] = useState<RuntimePermissionValues>(defaultRuntimePermissionValues);
+  const [runtimePermissionSource, setRuntimePermissionSource] = useState<Partial<RuntimePermissionSources>>({});
+  const [runtimePermissionDraft, setRuntimePermissionDraft] = useState<RuntimePermissionDraft>(
+    runtimePermissionDraftFromValues(defaultRuntimePermissionValues)
+  );
+  const [runtimePermissionStatus, setRuntimePermissionStatus] = useState("");
 
   const [runtimeStepProviderPersisted, setRuntimeStepProviderPersisted] = useState<Partial<RuntimeStepProviderValues>>({});
   const [runtimeStepProviderEffective, setRuntimeStepProviderEffective] = useState<Partial<RuntimeStepProviderValues>>({});
@@ -84,13 +101,38 @@ export function useRuntimeSettings({ setBusy, setError }: UseRuntimeSettingsOpti
   async function loadRuntimeProfile() {
     try {
       const payload = await fetchJSON<RuntimeProfileResponse>("/api/runtime/profile");
+      const nextPermissions = normalizeRuntimePermissionValues(payload.permissions?.effective, defaultRuntimePermissionValues);
+      setRuntimePermissionPersisted(payload.permissions?.persisted ?? {});
+      setRuntimePermissionEffective(nextPermissions);
+      setRuntimePermissionSource(payload.permissions?.source ?? {});
+      setRuntimePermissionDraft(runtimePermissionDraftFromValues(nextPermissions));
       setRuntimeStepProviderPersisted(payload.step_providers?.persisted ?? {});
       setRuntimeStepProviderEffective(payload.step_providers?.effective ?? {});
       setRuntimeStepProviderSource(payload.step_providers?.source ?? {});
     } catch {
+      setRuntimePermissionPersisted({});
+      setRuntimePermissionEffective(defaultRuntimePermissionValues);
+      setRuntimePermissionSource({});
+      setRuntimePermissionDraft(runtimePermissionDraftFromValues(defaultRuntimePermissionValues));
       setRuntimeStepProviderPersisted({});
       setRuntimeStepProviderEffective({});
       setRuntimeStepProviderSource({});
+    }
+  }
+
+  async function loadRuntimePermissions() {
+    try {
+      const payload = await fetchJSON<RuntimePermissionsResponse>("/api/runtime/permissions");
+      const nextEffective = normalizeRuntimePermissionValues(payload.effective, defaultRuntimePermissionValues);
+      setRuntimePermissionPersisted(payload.persisted ?? {});
+      setRuntimePermissionEffective(nextEffective);
+      setRuntimePermissionSource(payload.source ?? {});
+      setRuntimePermissionDraft(runtimePermissionDraftFromValues(nextEffective));
+    } catch {
+      setRuntimePermissionPersisted({});
+      setRuntimePermissionEffective(defaultRuntimePermissionValues);
+      setRuntimePermissionSource({});
+      setRuntimePermissionDraft(runtimePermissionDraftFromValues(defaultRuntimePermissionValues));
     }
   }
 
@@ -100,6 +142,10 @@ export function useRuntimeSettings({ setBusy, setError }: UseRuntimeSettingsOpti
 
   function updateRuntimeExecutionDraft(key: RuntimeExecutionKey, value: string) {
     setRuntimeExecutionDraft((previous) => ({ ...previous, [key]: value }));
+  }
+
+  function updateRuntimePermissionDraft(key: RuntimePermissionKey, value: string) {
+    setRuntimePermissionDraft((previous) => ({ ...previous, [key]: value }));
   }
 
   async function handleSaveRuntimeTimeouts() {
@@ -180,6 +226,45 @@ export function useRuntimeSettings({ setBusy, setError }: UseRuntimeSettingsOpti
     }
   }
 
+  async function handleSaveRuntimePermissions() {
+    setBusy(true);
+    setError(null);
+    setRuntimePermissionStatus("");
+    try {
+      const patch = parseRuntimePermissionPatch(runtimePermissionDraft);
+      await fetchJSON<RuntimePermissionsResponse>("/api/runtime/permissions", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ permissions: patch }),
+      });
+      await loadRuntimePermissions();
+      setRuntimePermissionStatus("Runtime permissions saved");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "failed to save runtime permissions");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleResetRuntimePermissions() {
+    setBusy(true);
+    setError(null);
+    setRuntimePermissionStatus("");
+    try {
+      await fetchJSON<RuntimePermissionsResponse>("/api/runtime/permissions", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ permissions: defaultRuntimePermissionValues }),
+      });
+      await loadRuntimePermissions();
+      setRuntimePermissionStatus("Runtime permissions reset to defaults");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "failed to reset runtime permissions");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return {
     runtimeTimeoutPersisted,
     runtimeTimeoutEffective,
@@ -191,17 +276,26 @@ export function useRuntimeSettings({ setBusy, setError }: UseRuntimeSettingsOpti
     runtimeExecutionSource,
     runtimeExecutionDraft,
     runtimeExecutionStatus,
+    runtimePermissionPersisted,
+    runtimePermissionEffective,
+    runtimePermissionSource,
+    runtimePermissionDraft,
+    runtimePermissionStatus,
     runtimeStepProviderPersisted,
     runtimeStepProviderEffective,
     runtimeStepProviderSource,
     loadRuntimeTimeouts,
     loadRuntimeExecution,
+    loadRuntimePermissions,
     loadRuntimeProfile,
     updateRuntimeTimeoutDraft,
     updateRuntimeExecutionDraft,
+    updateRuntimePermissionDraft,
     handleSaveRuntimeTimeouts,
     handleResetRuntimeTimeouts,
     handleSaveRuntimeExecution,
     handleResetRuntimeExecution,
+    handleSaveRuntimePermissions,
+    handleResetRuntimePermissions,
   };
 }

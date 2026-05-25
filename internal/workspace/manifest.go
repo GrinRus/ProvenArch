@@ -43,9 +43,10 @@ type RuntimeConfig struct {
 }
 
 type RuntimeProfileConfig struct {
-	Timeouts  *RuntimeTimeoutsConfig  `yaml:"timeouts,omitempty" json:"timeouts,omitempty"`
-	Execution *RuntimeExecutionConfig `yaml:"execution,omitempty" json:"execution,omitempty"`
-	Steps     *RuntimeStepsConfig     `yaml:"steps,omitempty" json:"steps,omitempty"`
+	Timeouts    *RuntimeTimeoutsConfig    `yaml:"timeouts,omitempty" json:"timeouts,omitempty"`
+	Execution   *RuntimeExecutionConfig   `yaml:"execution,omitempty" json:"execution,omitempty"`
+	Steps       *RuntimeStepsConfig       `yaml:"steps,omitempty" json:"steps,omitempty"`
+	Permissions *RuntimePermissionsConfig `yaml:"permissions,omitempty" json:"permissions,omitempty"`
 }
 
 type RuntimeExecutionConfig struct {
@@ -69,6 +70,11 @@ type RuntimeStepsConfig struct {
 
 type RuntimeStepConfig struct {
 	Provider string `yaml:"provider,omitempty" json:"provider,omitempty"`
+}
+
+type RuntimePermissionsConfig struct {
+	Mode            string `yaml:"mode,omitempty" json:"mode,omitempty"`
+	ApprovalChannel string `yaml:"approval_channel,omitempty" json:"approval_channel,omitempty"`
 }
 
 type RuntimeTimeoutsConfig struct {
@@ -121,13 +127,22 @@ func (cfg *RuntimeStepsConfig) IsZero() bool {
 		(cfg.Step4Proposals == nil || cfg.Step4Proposals.IsZero())
 }
 
+func (cfg *RuntimePermissionsConfig) IsZero() bool {
+	if cfg == nil {
+		return true
+	}
+	return strings.TrimSpace(cfg.Mode) == "" &&
+		strings.TrimSpace(cfg.ApprovalChannel) == ""
+}
+
 func (cfg *RuntimeProfileConfig) IsZero() bool {
 	if cfg == nil {
 		return true
 	}
 	return (cfg.Timeouts == nil || cfg.Timeouts.IsZero()) &&
 		(cfg.Execution == nil || cfg.Execution.IsZero()) &&
-		(cfg.Steps == nil || cfg.Steps.IsZero())
+		(cfg.Steps == nil || cfg.Steps.IsZero()) &&
+		(cfg.Permissions == nil || cfg.Permissions.IsZero())
 }
 
 func (cfg *RuntimeConfig) IsZero() bool {
@@ -223,6 +238,13 @@ func applyManifestDefaults(manifest *Manifest) {
 				manifest.Runtime.Profile.Steps.Step4Proposals = normalizeStep(manifest.Runtime.Profile.Steps.Step4Proposals)
 				if manifest.Runtime.Profile.Steps.IsZero() {
 					manifest.Runtime.Profile.Steps = nil
+				}
+			}
+			if manifest.Runtime.Profile.Permissions != nil {
+				manifest.Runtime.Profile.Permissions.Mode = strings.TrimSpace(strings.ToLower(manifest.Runtime.Profile.Permissions.Mode))
+				manifest.Runtime.Profile.Permissions.ApprovalChannel = strings.TrimSpace(strings.ToLower(manifest.Runtime.Profile.Permissions.ApprovalChannel))
+				if manifest.Runtime.Profile.Permissions.IsZero() {
+					manifest.Runtime.Profile.Permissions = nil
 				}
 			}
 			if manifest.Runtime.Profile.IsZero() {
@@ -339,6 +361,15 @@ func validateManifest(manifest Manifest) error {
 			validateStepProvider("runtime.profile.steps.step2_as_is", manifest.Runtime.Profile.Steps.Step2AsIs)
 			validateStepProvider("runtime.profile.steps.step3_findings", manifest.Runtime.Profile.Steps.Step3Findings)
 			validateStepProvider("runtime.profile.steps.step4_proposals", manifest.Runtime.Profile.Steps.Step4Proposals)
+		}
+		if manifest.Runtime.Profile.Permissions != nil {
+			permissions := manifest.Runtime.Profile.Permissions
+			if mode := strings.TrimSpace(permissions.Mode); mode != "" && mode != "trusted_full_access" && mode != "managed" {
+				problems = append(problems, "runtime.profile.permissions.mode must be one of: trusted_full_access, managed")
+			}
+			if channel := strings.TrimSpace(permissions.ApprovalChannel); channel != "" && channel != "fail_fast" && channel != "ui" {
+				problems = append(problems, "runtime.profile.permissions.approval_channel must be one of: fail_fast, ui")
+			}
 		}
 	}
 

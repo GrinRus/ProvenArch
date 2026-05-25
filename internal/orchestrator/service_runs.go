@@ -188,6 +188,17 @@ func (s *Service) GetRunArtifacts(runID string) ([]Artifact, bool) {
 	return artifacts, true
 }
 
+func (s *Service) GetRunPermissions(runID string) ([]acpruntime.PermissionRequest, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	record, ok := s.runs[runID]
+	if !ok {
+		return nil, false
+	}
+	return append([]acpruntime.PermissionRequest(nil), record.info.PendingPermissions...), true
+}
+
 func (s *Service) GetRunLogs(runID string, cursor int, limit int) (RunLogPage, bool, error) {
 	s.mu.RLock()
 	_, ok := s.runs[runID]
@@ -211,6 +222,7 @@ func (s *Service) ListRuns(limit int) []RunInfo {
 	for _, record := range s.runs {
 		info := record.info
 		info.Warnings = append([]string(nil), record.info.Warnings...)
+		info.PendingPermissions = append([]acpruntime.PermissionRequest(nil), record.info.PendingPermissions...)
 		infos = append(infos, info)
 	}
 	sort.Slice(infos, func(i, j int) bool {
@@ -312,15 +324,17 @@ func (s *Service) loadExistingRunRecord(runID string) (runRecord, bool) {
 	}
 	return runRecord{
 		info: RunInfo{
-			RunID:       record.info.RunID,
-			Pipeline:    record.info.Pipeline,
-			Status:      record.info.Status,
-			StartedAt:   record.info.StartedAt,
-			FinishedAt:  record.info.FinishedAt,
-			CurrentStep: record.info.CurrentStep,
-			Warnings:    append([]string(nil), record.info.Warnings...),
-			ErrorCode:   record.info.ErrorCode,
-			Error:       record.info.Error,
+			RunID:              record.info.RunID,
+			Pipeline:           record.info.Pipeline,
+			Status:             record.info.Status,
+			StartedAt:          record.info.StartedAt,
+			FinishedAt:         record.info.FinishedAt,
+			CurrentStep:        record.info.CurrentStep,
+			StepProviders:      cloneStringMap(record.info.StepProviders),
+			Warnings:           append([]string(nil), record.info.Warnings...),
+			PendingPermissions: append([]acpruntime.PermissionRequest(nil), record.info.PendingPermissions...),
+			ErrorCode:          record.info.ErrorCode,
+			Error:              record.info.Error,
 		},
 		artifacts: append([]Artifact(nil), record.artifacts...),
 	}, true
@@ -487,16 +501,17 @@ func (s *Service) persistHistoryLocked() {
 
 func runRecordToHistoryItem(record runRecord) runHistoryItem {
 	item := runHistoryItem{
-		RunID:         record.info.RunID,
-		Pipeline:      record.info.Pipeline,
-		Status:        record.info.Status,
-		StartedAt:     record.info.StartedAt.UTC().Format(time.RFC3339),
-		CurrentStep:   record.info.CurrentStep,
-		StepProviders: cloneStringMap(record.info.StepProviders),
-		Warnings:      append([]string(nil), record.info.Warnings...),
-		ErrorCode:     record.info.ErrorCode,
-		Error:         record.info.Error,
-		Artifacts:     append([]Artifact(nil), record.artifacts...),
+		RunID:              record.info.RunID,
+		Pipeline:           record.info.Pipeline,
+		Status:             record.info.Status,
+		StartedAt:          record.info.StartedAt.UTC().Format(time.RFC3339),
+		CurrentStep:        record.info.CurrentStep,
+		StepProviders:      cloneStringMap(record.info.StepProviders),
+		Warnings:           append([]string(nil), record.info.Warnings...),
+		PendingPermissions: append([]acpruntime.PermissionRequest(nil), record.info.PendingPermissions...),
+		ErrorCode:          record.info.ErrorCode,
+		Error:              record.info.Error,
+		Artifacts:          append([]Artifact(nil), record.artifacts...),
 	}
 	if record.info.FinishedAt != nil {
 		finished := record.info.FinishedAt.UTC().Format(time.RFC3339)
@@ -520,16 +535,17 @@ func historyItemToRunRecord(item runHistoryItem) (runRecord, bool) {
 	}
 	return runRecord{
 		info: RunInfo{
-			RunID:         item.RunID,
-			Pipeline:      item.Pipeline,
-			Status:        item.Status,
-			StartedAt:     startedAt.UTC(),
-			FinishedAt:    finishedAt,
-			CurrentStep:   item.CurrentStep,
-			StepProviders: cloneStringMap(item.StepProviders),
-			Warnings:      append([]string(nil), item.Warnings...),
-			ErrorCode:     item.ErrorCode,
-			Error:         item.Error,
+			RunID:              item.RunID,
+			Pipeline:           item.Pipeline,
+			Status:             item.Status,
+			StartedAt:          startedAt.UTC(),
+			FinishedAt:         finishedAt,
+			CurrentStep:        item.CurrentStep,
+			StepProviders:      cloneStringMap(item.StepProviders),
+			Warnings:           append([]string(nil), item.Warnings...),
+			PendingPermissions: append([]acpruntime.PermissionRequest(nil), item.PendingPermissions...),
+			ErrorCode:          item.ErrorCode,
+			Error:              item.Error,
 		},
 		artifacts: append([]Artifact(nil), item.Artifacts...),
 	}, true

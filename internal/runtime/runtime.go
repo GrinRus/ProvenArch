@@ -78,10 +78,11 @@ func NormalizeMode(mode string) (string, error) {
 type ErrorCode string
 
 const (
-	ErrorCodeRunnerUnavailable ErrorCode = "runner_unavailable"
-	ErrorCodeRuntimeContract   ErrorCode = "runtime_contract_failed"
-	ErrorCodeRuntimeTimeout    ErrorCode = "runtime_timeout"
-	ErrorCodeRunCanceled       ErrorCode = "run_canceled"
+	ErrorCodeRunnerUnavailable  ErrorCode = "runner_unavailable"
+	ErrorCodeRuntimeContract    ErrorCode = "runtime_contract_failed"
+	ErrorCodeRuntimeTimeout     ErrorCode = "runtime_timeout"
+	ErrorCodeRunCanceled        ErrorCode = "run_canceled"
+	ErrorCodePermissionRequired ErrorCode = "runtime_permission_required"
 )
 
 type RunnerError struct {
@@ -152,28 +153,30 @@ func ClassifyError(err error) (code string, message string, ok bool) {
 }
 
 type Task struct {
-	TaskID            string
-	RunID             string
-	StepID            string
-	ShardID           string
-	DomainID          string
-	Workspace         string
-	ArtifactRoot      string
-	WriteRoot         string
-	DraftFinalRoot    string
-	ReadContextRoots  []string
-	AgentRole         string
-	StepContract      string
-	ExpectedArtifacts []string
-	RepoScope         string
-	RepoScopes        []string
-	PathScopes        []string
-	StartedAtUTC      time.Time
+	TaskID             string
+	RunID              string
+	StepID             string
+	ShardID            string
+	DomainID           string
+	Workspace          string
+	ArtifactRoot       string
+	WriteRoot          string
+	DraftFinalRoot     string
+	ReadContextRoots   []string
+	AgentRole          string
+	StepContract       string
+	ExpectedArtifacts  []string
+	RepoScope          string
+	RepoScopes         []string
+	PathScopes         []string
+	StartedAtUTC       time.Time
+	RuntimePermissions PermissionValues `json:"-"`
 	// RuntimeTimeoutProfile is internal lifecycle diagnostics only. It should
 	// not become part of provider task stdin or the runtime artifact contract.
-	RuntimeTimeoutProfile map[string]any        `json:"-"`
-	OnOutput              func(OutputChunk)     `json:"-"`
-	OnDiagnostic          func(DiagnosticEvent) `json:"-"`
+	RuntimeTimeoutProfile map[string]any                             `json:"-"`
+	OnOutput              func(OutputChunk)                          `json:"-"`
+	OnDiagnostic          func(DiagnosticEvent)                      `json:"-"`
+	OnPermissionRequest   func(PermissionRequest) PermissionDecision `json:"-"`
 }
 
 type OutputChunk struct {

@@ -2,6 +2,8 @@ package qwencode
 
 import (
 	"testing"
+
+	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
 
 func TestBuildQwenArgsUsesStreamJSONActivityOutput(t *testing.T) {
@@ -18,6 +20,18 @@ func TestBuildQwenArgsUsesStreamJSONActivityOutput(t *testing.T) {
 	}
 	if !containsArg(args, "--output-format") || !containsArg(args, "stream-json") || !containsArg(args, "--include-partial-messages") {
 		t.Fatalf("expected qwen stream-json activity args, got %v", args)
+	}
+}
+
+func TestBuildQwenManagedArgsOmitYolo(t *testing.T) {
+	t.Parallel()
+
+	args := buildQwenArgsWithPermissions([]string{"/tmp/repo"}, "prompt", acpruntime.PermissionValues{Mode: acpruntime.PermissionModeManaged})
+	if containsArg(args, "--yolo") {
+		t.Fatalf("managed mode must omit --yolo, got %v", args)
+	}
+	if !containsArg(args, "-p") || !containsArg(args, "--output-format") || !containsArg(args, "stream-json") {
+		t.Fatalf("expected qwen artifact prompt and activity args, got %v", args)
 	}
 }
 
