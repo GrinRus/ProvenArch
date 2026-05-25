@@ -102,6 +102,94 @@ wait_for_health() {
   return 1
 }
 
+server_is_running() {
+  [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" >/dev/null 2>&1
+}
+
+capture_server_exit_code_if_stopped() {
+  if [[ -z "$SERVER_PID" ]]; then
+    printf ''
+    return 0
+  fi
+  if server_is_running; then
+    printf ''
+    return 0
+  fi
+  local exit_code
+  set +e
+  wait "$SERVER_PID" >/dev/null 2>&1
+  exit_code="$?"
+  set -e
+  SERVER_PID=""
+  printf '%s' "$exit_code"
+}
+
+check_health_once() {
+  if curl -fsS "$BASE_URL/api/health" >/dev/null 2>&1; then
+    printf 'ok'
+  else
+    printf 'failed'
+  fi
+}
+
+extract_frontend_run_id() {
+  if [[ ! -f "$PLAYWRIGHT_LOG" ]]; then
+    printf ''
+    return 0
+  fi
+  grep -Eo 'ACP_UI_E2E_RUN_ID=[A-Za-z0-9_.:-]+' "$PLAYWRIGHT_LOG" 2>/dev/null \
+    | tail -n 1 \
+    | cut -d= -f2- \
+    || true
+}
+
+resolve_last_run_snapshot() {
+  local run_id="$1"
+  local health_status="$2"
+  local api_payload=""
+  if [[ -n "$run_id" && "$health_status" == "ok" ]]; then
+    api_payload="$(curl -fsS "$BASE_URL/api/pipeline/runs/$run_id" 2>/dev/null || true)"
+  fi
+  python3 - "$WORKSPACE" "$run_id" "$api_payload" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+workspace = Path(sys.argv[1])
+run_id = sys.argv[2].strip()
+api_payload = sys.argv[3]
+
+candidate = None
+if api_payload:
+    try:
+        payload = json.loads(api_payload)
+        if isinstance(payload, dict):
+            candidate = payload
+    except Exception:
+        candidate = None
+
+if candidate is None:
+    history_path = workspace / "reports" / "taskruns" / "run-history.json"
+    try:
+        history = json.loads(history_path.read_text(encoding="utf-8"))
+    except Exception:
+        history = {}
+    items = history.get("items") if isinstance(history, dict) else []
+    if isinstance(items, list):
+        if run_id:
+            candidate = next((item for item in items if isinstance(item, dict) and item.get("run_id") == run_id), None)
+        if candidate is None and items:
+            dict_items = [item for item in items if isinstance(item, dict)]
+            if dict_items:
+                candidate = dict_items[0]
+
+if not isinstance(candidate, dict):
+    candidate = {}
+print(f"last_run_status={str(candidate.get('status') or '').strip()}")
+print(f"last_run_current_step={str(candidate.get('current_step') or '').strip()}")
+PY
+}
+
 resolve_ui_poll_timeouts() {
   local payload
   payload="$(curl -fsS "$BASE_URL/api/runtime/timeouts" 2>/dev/null || true)"
@@ -180,10 +268,10 @@ else
 fi
 
 case "$UI_E2E_SCENARIO" in
-  init-inspect|cancel-refresh)
+  init-inspect|cancel-refresh|api-context-page-close-smoke)
     ;;
   *)
-    die "unsupported UI_E2E_SCENARIO '$UI_E2E_SCENARIO' (allowed: init-inspect, cancel-refresh)"
+    die "unsupported UI_E2E_SCENARIO '$UI_E2E_SCENARIO' (allowed: init-inspect, cancel-refresh, api-context-page-close-smoke)"
     ;;
 esac
 case "$UI_E2E_HEADED" in
@@ -280,6 +368,7 @@ else
     --run-logs-max-runs "$RUN_LOGS_MAX_RUNS" >"$SERVER_LOG" 2>&1 &
 fi
 SERVER_PID="$!"
+SERVER_PID_STARTED="$SERVER_PID"
 
 if ! wait_for_health "$BASE_URL"; then
   die "ACP server did not become healthy in ${API_READY_TIMEOUT_SEC}s (see $SERVER_LOG)"
@@ -321,6 +410,11 @@ fi
 
 status="passed"
 reason="$ACP_FRONTEND_REASON_OK"
+server_exit_code=""
+health_after_failure="not_checked"
+frontend_run_id=""
+last_run_status=""
+last_run_current_step=""
 playwright_cmd=("$NPM_BIN" run --prefix ui e2e:live)
 if [[ "$UI_E2E_HEADED" == "1" ]]; then
   playwright_cmd+=(-- --headed)
@@ -339,9 +433,33 @@ if ! (
 ) >"$PLAYWRIGHT_LOG" 2>&1; then
   status="failed"
   reason="$ACP_FRONTEND_REASON_PLAYWRIGHT_FAILED"
-  if grep -q "ACTIVE_RUN_TIMEOUT:" "$PLAYWRIGHT_LOG"; then
-    reason="$ACP_FRONTEND_REASON_ACTIVE_RUN_TIMEOUT"
+  frontend_run_id="$(extract_frontend_run_id)"
+  server_exit_code="$(capture_server_exit_code_if_stopped)"
+  if [[ -n "$server_exit_code" ]]; then
+    reason="$ACP_FRONTEND_REASON_SERVER_EXITED"
+    health_after_failure="server_exited"
+  else
+    health_after_failure="$(check_health_once)"
+    if grep -q "ACTIVE_RUN_TIMEOUT:" "$PLAYWRIGHT_LOG"; then
+      reason="$ACP_FRONTEND_REASON_ACTIVE_RUN_TIMEOUT"
+    elif [[ "$health_after_failure" != "ok" ]]; then
+      reason="$ACP_FRONTEND_REASON_API_UNREACHABLE"
+    elif grep -E -q "Target (page, context or browser|page|context|browser) has been closed" "$PLAYWRIGHT_LOG"; then
+      reason="$ACP_FRONTEND_REASON_BROWSER_CLOSED"
+    fi
   fi
+  while IFS='=' read -r key value; do
+    case "$key" in
+      last_run_status)
+        last_run_status="$value"
+        ;;
+      last_run_current_step)
+        last_run_current_step="$value"
+        ;;
+    esac
+  done < <(resolve_last_run_snapshot "$frontend_run_id" "$health_after_failure")
+else
+  health_after_failure="not_applicable"
 fi
 
 finished_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
@@ -356,6 +474,13 @@ export FRONTEND_E2E_SCENARIO="$UI_E2E_SCENARIO"
 export FRONTEND_E2E_SERVER_LOG="$SERVER_LOG"
 export FRONTEND_E2E_PLAYWRIGHT_LOG="$PLAYWRIGHT_LOG"
 export FRONTEND_E2E_REASON="$reason"
+export FRONTEND_E2E_SERVER_PID="$SERVER_PID_STARTED"
+export FRONTEND_E2E_SERVER_EXIT_CODE="$server_exit_code"
+export FRONTEND_E2E_HEALTH_AFTER_FAILURE="$health_after_failure"
+export FRONTEND_E2E_RUN_ID="$frontend_run_id"
+export FRONTEND_E2E_LAST_RUN_STATUS="$last_run_status"
+export FRONTEND_E2E_LAST_RUN_CURRENT_STEP="$last_run_current_step"
+export FRONTEND_E2E_PLAYWRIGHT_RESULTS_DIR="$PLAYWRIGHT_RESULTS_DIR"
 acp_frontend_reason_validate "$FRONTEND_E2E_REASON" die
 python3 - "$RESULT_JSON" <<'PY'
 import json
@@ -375,6 +500,18 @@ payload = {
     "reason": os.environ.get("FRONTEND_E2E_REASON", "unknown"),
     "server_log": os.environ.get("FRONTEND_E2E_SERVER_LOG"),
     "playwright_log": os.environ.get("FRONTEND_E2E_PLAYWRIGHT_LOG"),
+    "server_pid": int(os.environ["FRONTEND_E2E_SERVER_PID"]) if os.environ.get("FRONTEND_E2E_SERVER_PID", "").isdigit() else None,
+    "server_exit_code": int(os.environ["FRONTEND_E2E_SERVER_EXIT_CODE"]) if os.environ.get("FRONTEND_E2E_SERVER_EXIT_CODE", "").isdigit() else None,
+    "health_after_failure": os.environ.get("FRONTEND_E2E_HEALTH_AFTER_FAILURE"),
+    "run_id": os.environ.get("FRONTEND_E2E_RUN_ID") or None,
+    "last_run_status": os.environ.get("FRONTEND_E2E_LAST_RUN_STATUS") or None,
+    "last_run_current_step": os.environ.get("FRONTEND_E2E_LAST_RUN_CURRENT_STEP") or None,
+    "diagnostic_refs": {
+        "server_log": os.environ.get("FRONTEND_E2E_SERVER_LOG"),
+        "playwright_log": os.environ.get("FRONTEND_E2E_PLAYWRIGHT_LOG"),
+        "playwright_results": os.environ.get("FRONTEND_E2E_PLAYWRIGHT_RESULTS_DIR"),
+        "run_history": os.path.join(os.environ.get("FRONTEND_E2E_WORKSPACE", ""), "reports", "taskruns", "run-history.json"),
+    },
 }
 with open(path, "w", encoding="utf-8") as f:
     json.dump(payload, f, ensure_ascii=True, indent=2)
@@ -387,6 +524,9 @@ log "playwright_log=$PLAYWRIGHT_LOG"
 log "result_json=$RESULT_JSON"
 
 if [[ "$status" != "passed" ]]; then
+  if [[ "$reason" == "$ACP_FRONTEND_REASON_SERVER_EXITED" ]]; then
+    tail -n 80 "$SERVER_LOG" >&2 || true
+  fi
   tail -n 80 "$PLAYWRIGHT_LOG" >&2 || true
   exit 1
 fi

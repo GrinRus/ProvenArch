@@ -246,7 +246,7 @@
    - `GET /api/runtime/profile`: aggregate view `timeouts + execution + permissions + step_providers`
    - runtime profile PUT handlers используют общий internal patch service для validate/merge/prune/render/write/reopen, чтобы API route code не дублировал workspace manifest mutation lifecycle
    - active run не прерывается при изменении timeout settings; новые значения применяются к следующим run
-   - frontend live E2E differentiates explicit Playwright/backend failure (`playwright_failed`) from productive timeout (`active_run_timeout`), чтобы живой long-running run не выглядел как тот же failure class, что и terminal backend crash; init poll budget comes from effective runtime timeout profile and can follow `pipeline_timeout+30s` without a default fixed cap
+   - frontend live E2E differentiates productive timeout (`active_run_timeout`), browser/page/context closure (`browser_closed`), post-failure API health loss (`api_unreachable`), early `acp serve` exit (`server_exited`) and fallback Playwright assertion failure (`playwright_failed`), while long backend polling uses an API request context independent from the browser page; init poll budget comes from effective runtime timeout profile and can follow `pipeline_timeout+30s` without a default fixed cap
 
 ## Agent Topology Artifacts (MVP)
 - `charter/cards/domains/<domain-id>.md`
