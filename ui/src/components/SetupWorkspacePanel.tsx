@@ -172,7 +172,14 @@ export function SetupWorkspacePanel({
 
       <details className="advanced-block">
         <summary>Advanced workspace.yaml editor</summary>
-        <textarea value={manifestContent} onChange={(event) => onManifestChange(event.target.value)} rows={12} />
+        <textarea
+          id="legacyWorkspaceManifestEditor"
+          name="legacyWorkspaceManifestEditor"
+          aria-label="workspace.yaml content"
+          value={manifestContent}
+          onChange={(event) => onManifestChange(event.target.value)}
+          rows={12}
+        />
       </details>
 
       <div className="setup-band">

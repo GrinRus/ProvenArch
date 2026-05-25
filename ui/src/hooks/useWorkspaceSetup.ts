@@ -17,7 +17,6 @@ export function useWorkspaceSetup({ setBusy, setError }: UseWorkspaceSetupOption
   async function bootstrapWorkspaceSetup() {
     await manifestEditor.loadManifest();
     await baselineEditor.loadBaselineBundle();
-    await wizardEditor.loadWizardContract();
   }
 
   return {

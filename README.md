@@ -18,7 +18,7 @@ operator CLI / UI -> ACP Go orchestrator -> runtime provider -> staged artifacts
 > **Статус:** MVP beta / pre-v1 foundation. Public API, artifact contracts и UX могут меняться до `v1.0.0`.
 > **Стек реализации:** Go backend/orchestrator + embedded React/TypeScript UI.
 > **Runtime анализа:** deterministic `fake` baseline или headless providers `claude-code`, `qwen-code`, `codex-code`.
-> **Последняя ревизия README:** 2026-05-23.
+> **Последняя ревизия README:** 2026-05-25.
 
 ## Что это
 
@@ -118,11 +118,11 @@ acp serve \
 
 В UI:
 
-1. `Setup -> Source`: выберите GitHub/GitLab URL или local checkout folder.
-2. `Workspace`: оставьте default `docs.imports_path` или выберите imports folder.
-3. `Runtime`: для первого walkthrough используйте `fake`.
-4. `Validate`: сохраните и провалидируйте `workspace.yaml`, затем запустите readiness checks.
-5. `Run`: запустите первый `init` analysis.
+1. `Source`: выберите GitHub/GitLab URL или local checkout folder и docs imports folder.
+2. `Readiness`: сохраните и провалидируйте `workspace.yaml`, затем запустите readiness checks; для первого walkthrough используйте `fake`.
+3. `Charter`: проверьте стартовый architecture charter и baseline prompts.
+4. `Analysis`: запустите первый `init` analysis и следите за run status/logs.
+5. `Review` / `Proposals` / `Ask` / `Publish`: просмотрите coverage, artifacts, diagrams, proposals, задайте read-only Q&A и подготовьте git changes.
 
 Тот же первый анализ можно запустить из CLI:
 
@@ -221,10 +221,10 @@ runtime:
       approval_channel: fail_fast # or ui
 ```
 
-В UI это настраивается в `Settings -> Runtime Permissions`. В managed mode orchestrator
+В UI это настраивается в `Readiness -> Advanced runtime settings -> Runtime Permissions`. В managed mode orchestrator
 auto-approves reads under `read_context_roots` и writes under `write_root`/`draft_final_root`.
 Shell/network/package-install/unknown requests не auto-approve-ятся; pending requests видны
-в `Runs -> Pending Permissions`.
+в `Analysis -> Pending permissions` и правом inspector.
 
 ## Артефакты и логи
 
@@ -240,11 +240,13 @@ proposals/                        # proposed follow-up changes
 model/entities/, model/edges/     # derived entity-per-file model
 ```
 
-UI показывает то же состояние через:
+UI показывает то же состояние через stage-based console:
 
-- `Runs`: run status, warnings, event timeline, raw agent stream и cancel;
-- `Results`: coverage, artifacts и diagram previews;
-- `Settings`: persisted runtime timeouts, execution profile, permission profile и effective step providers.
+- `Source` / `Readiness`: repo sources, `workspace.yaml`, validation diagnostics, doctor checklist и runtime profile;
+- `Analysis`: run status, warnings, event timeline, raw agent stream, pending permissions и cancel;
+- `Review` / `Proposals`: coverage, artifacts, diagram previews, changelog/proposal artifacts;
+- `Ask`: deterministic read-only Q&A поверх workspace artifacts через `POST /api/qa/ask`;
+- `Publish`: git commit/proposal branch helper actions.
 
 Можно задавать read-only вопросы по generated workspace artifacts:
 
@@ -258,7 +260,7 @@ curl -fsS -X POST http://127.0.0.1:8080/api/qa/ask \
   -d '{"question":"Who owns payments-service?"}'
 ```
 
-Q&A beta boundary: deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask`; он не запускает новый live analysis и не меняет workspace.
+Q&A beta boundary: deterministic workspace-backed read-only service + UI stage `Ask` + CLI `acp qa` + public read-only `POST /api/qa/ask`; он не запускает новый live analysis и не меняет workspace.
 
 Troubleshooting: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 

@@ -35,6 +35,7 @@ export function ResultsPanels({
   onResultsTabChange,
   onOpenArtifact,
 }: ResultsPanelsProps) {
+  const selectedArtifactIsLoading = selectedArtifactContent === "Loading...";
   return (
     <>
       <TabNav value={resultsTab} onChange={onResultsTabChange} options={resultsTabOptions} testId="results-tabs" />
@@ -101,9 +102,13 @@ export function ResultsPanels({
               <div data-testid="run-diagram-content-panel">
                 <h3 data-testid="run-diagram-selected-path">{selectedArtifact || "Diagram Preview"}</h3>
                 {selectedArtifactIsMermaid ? (
-                  <Suspense fallback={<p className="hint">Loading diagram renderer...</p>}>
-                    <MermaidPreview source={selectedArtifactContent} title={selectedArtifact || "diagram"} />
-                  </Suspense>
+                  selectedArtifactIsLoading ? (
+                    <p className="hint">Loading diagram...</p>
+                  ) : (
+                    <Suspense fallback={<p className="hint">Loading diagram renderer...</p>}>
+                      <MermaidPreview source={selectedArtifactContent} title={selectedArtifact || "diagram"} />
+                    </Suspense>
+                  )
                 ) : (
                   <pre data-testid="run-diagram-content">{selectedArtifactContent || "Select a `.mmd` diagram artifact to preview."}</pre>
                 )}

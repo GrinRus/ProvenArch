@@ -99,20 +99,22 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   const expectedRepoCount = Number.isFinite(expectedRepoCountRaw) && expectedRepoCountRaw > 0 ? expectedRepoCountRaw : 1;
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Local-first architecture control plane" })).toBeVisible();
+  await expect(page.getByTestId("console-shell")).toBeVisible();
+  await expect(page.getByTestId("top-status-bar")).toContainText("Proven Arch");
 
-  await page.getByTestId("tab-settings").click();
+  await page.getByTestId("stage-readiness").click();
+  await page.getByText("Advanced runtime settings").click();
   await expect(page.getByRole("heading", { name: "Settings: Runtime Timeouts" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Settings: Runtime Execution" })).toBeVisible();
 
-  await page.getByTestId("tab-setup").click();
+  await page.getByTestId("stage-readiness").click();
   await page.getByTestId("workspace-validate-btn").click();
   await expect(page.getByTestId("workspace-validate-result")).toBeVisible();
   await expect(page.getByText("Status: valid")).toBeVisible();
   const resolvedRepoRows = page.getByTestId("workspace-validate-resolved-repos").locator("li");
   await expect(resolvedRepoRows).toHaveCount(expectedRepoCount);
 
-  await page.getByTestId("tab-runs").click();
+  await page.getByTestId("stage-analysis").click();
   await page.getByTestId("run-init-btn").click();
   await expect(page.getByTestId("run-status-panel")).toBeVisible();
   const runID = ((await page.getByTestId("run-status-run-id").textContent()) ?? "").trim();
@@ -149,8 +151,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
 
   await page.getByTestId("run-logs-mode-select").selectOption("all");
 
-  await page.getByTestId("tab-results").click();
-  await page.getByTestId("results-tab-diagrams").click();
+  await page.getByTestId("stage-review").click();
   const diagramButtons = page.getByTestId("run-diagrams-list").locator("button.link-button");
   await expect(diagramButtons.first()).toBeVisible();
 
@@ -188,7 +189,6 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
     )
     .toBe(true);
 
-  await page.getByTestId("results-tab-artifacts").click();
   const firstArtifactButton = page.getByTestId("results-artifacts-panel").locator("button.link-button").first();
   await expect(firstArtifactButton).toBeVisible();
   await firstArtifactButton.click();
@@ -212,13 +212,15 @@ test("live ui flow: run refresh -> cancel -> failed(run_canceled)", async ({ pag
   const runtimeProvider = process.env.UI_E2E_RUNTIME_PROVIDER ?? "unknown";
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Local-first architecture control plane" })).toBeVisible();
+  await expect(page.getByTestId("console-shell")).toBeVisible();
+  await expect(page.getByTestId("top-status-bar")).toContainText("Proven Arch");
 
+  await page.getByTestId("stage-readiness").click();
   await page.getByTestId("workspace-validate-btn").click();
   await expect(page.getByTestId("workspace-validate-result")).toBeVisible();
   await expect(page.getByText("Status: valid")).toBeVisible();
 
-  await page.getByTestId("tab-runs").click();
+  await page.getByTestId("stage-analysis").click();
   const previousRunIDLocator = page.getByTestId("run-status-run-id");
   const previousRunID =
     (await previousRunIDLocator.count()) > 0 ? ((await previousRunIDLocator.first().textContent()) ?? "").trim() : "";
