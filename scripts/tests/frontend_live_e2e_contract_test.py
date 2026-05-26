@@ -34,6 +34,7 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         self.assertIn('ACP_FRONTEND_REASON_BROWSER_CLOSED="browser_closed"', body)
         self.assertIn('ACP_FRONTEND_REASON_API_UNREACHABLE="api_unreachable"', body)
         self.assertIn('ACP_FRONTEND_REASON_SERVER_EXITED="server_exited"', body)
+        self.assertIn('ACP_FRONTEND_REASON_RUNTIME_RUN_FAILED="runtime_run_failed"', body)
 
     def test_live_flow_uses_independent_api_request_context(self) -> None:
         spec_path = self.repo_root / "ui" / "e2e" / "live-flow.spec.ts"
@@ -78,6 +79,15 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         self.assertEqual("active_run_timeout", result["reason"])
         self.assertEqual("ok", result["health_after_failure"])
 
+    def test_runtime_run_failure_is_classified(self) -> None:
+        result = self._run_frontend_harness("runtime_failed", acp_mode="run_failed")
+        self.assertEqual("failed", result["status"])
+        self.assertEqual("runtime_run_failed", result["reason"])
+        self.assertEqual("ok", result["health_after_failure"])
+        self.assertEqual("failed", result["last_run_status"])
+        self.assertEqual("runner_unavailable", result["last_run_error_code"])
+        self.assertEqual("init.step2.asis_docs", result["last_run_current_step"])
+
     def _run_frontend_harness(self, npm_mode: str, acp_mode: str = "healthy") -> dict[str, object]:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
@@ -85,6 +95,9 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
             output_dir = tmp / "output"
             marker = tmp / "health-fail.marker"
             workspace.joinpath("reports", "taskruns").mkdir(parents=True)
+            run_status = "failed" if acp_mode == "run_failed" else "running"
+            current_step = "init.step2.asis_docs" if acp_mode == "run_failed" else "init.step1.collect"
+            error_code = "runner_unavailable" if acp_mode == "run_failed" else None
             (workspace / "reports" / "taskruns" / "run-history.json").write_text(
                 json.dumps(
                     {
@@ -93,8 +106,9 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
                             {
                                 "run_id": "run_stub",
                                 "pipeline": "init",
-                                "status": "running",
-                                "current_step": "init.step1.collect",
+                                "status": run_status,
+                                "error_code": error_code,
+                                "current_step": current_step,
                             }
                         ],
                     }
@@ -189,7 +203,10 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
                         self._json(200, {"effective": {"ui_init_poll_timeout_sec": 900, "ui_cancel_poll_timeout_sec": 420}})
                         return
                     if self.path.startswith("/api/pipeline/runs/"):
-                        self._json(200, {"status": "running", "current_step": "init.step1.collect", "warnings": []})
+                        if mode == "run_failed":
+                            self._json(200, {"status": "failed", "error_code": "runner_unavailable", "current_step": "init.step2.asis_docs", "warnings": []})
+                        else:
+                            self._json(200, {"status": "running", "current_step": "init.step1.collect", "warnings": []})
                         return
                     self._json(404, {"error": "not found"})
 
@@ -234,6 +251,9 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
                 sys.exit(1)
             if mode == "active_timeout":
                 print("ACTIVE_RUN_TIMEOUT: run run_stub stayed productive", file=sys.stderr)
+                sys.exit(1)
+            if mode == "runtime_failed":
+                print("Error: run run_stub terminated before inspect stage: status=failed error_code=runner_unavailable current_step=init.step2.asis_docs", file=sys.stderr)
                 sys.exit(1)
             if mode == "browser_closed":
                 print("Error: page.waitForTimeout: Target page, context or browser has been closed", file=sys.stderr)

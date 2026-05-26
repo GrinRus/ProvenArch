@@ -3393,6 +3393,17 @@ class BatchFailureClassificationTest(unittest.TestCase):
             },
         )
         write_json(
+            batch_root / "frontend/qwen-code/run4/frontend-e2e-result.json",
+            {
+                "status": "failed",
+                "reason": "runtime_run_failed",
+                "runtime_provider": "qwen-code",
+                "workspace": "/tmp/qwen-run4",
+                "base_url": "http://127.0.0.1:18084",
+                "runtime_command": "qwen",
+            },
+        )
+        write_json(
             batch_root / "frontend/claude-code/frontend-e2e-result.json",
             {
                 "status": "passed",
@@ -3405,16 +3416,17 @@ class BatchFailureClassificationTest(unittest.TestCase):
         )
 
         frontend = self.module.load_frontend_results(batch_root)
-        self.assertEqual(3, len(frontend))
+        self.assertEqual(4, len(frontend))
 
         matrix_path = reports_root / "frontend-matrix.md"
         self.module.write_frontend_matrix(matrix_path, frontend)
         matrix_text = matrix_path.read_text(encoding="utf-8")
 
-        self.assertIn("| qwen-code | failed | 2 |", matrix_text)
+        self.assertIn("| qwen-code | failed | 3 | browser_closed=1, ok=1, runtime_run_failed=1 |", matrix_text)
         self.assertIn("| claude-code | passed | 1 |", matrix_text)
         self.assertIn("| qwen-code | 1 | passed | ok |", matrix_text)
         self.assertIn("| qwen-code | 3 | failed | browser_closed |", matrix_text)
+        self.assertIn("| qwen-code | 4 | failed | runtime_run_failed |", matrix_text)
 
     def test_python_frontend_cancel_matrix_supports_per_run_results(self) -> None:
         batch_root = self.root / "batch-cancel"

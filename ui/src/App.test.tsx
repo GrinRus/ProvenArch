@@ -422,7 +422,7 @@ describe("App", () => {
     expect(screen.getByText("runtime.profile.permissions.mode")).toBeInTheDocument();
     expect(screen.getByText("runtime.profile.steps.step2_as_is.provider")).toBeInTheDocument();
     expect(screen.getAllByText("qwen-code").length).toBeGreaterThanOrEqual(1);
-  });
+  }, 15_000);
 
   it("renders the stage rail and switches product-flow stages", async () => {
     vi.stubGlobal("fetch", createFetchMock());

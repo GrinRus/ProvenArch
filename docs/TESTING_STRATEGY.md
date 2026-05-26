@@ -305,7 +305,7 @@ Release workflow hardening:
   - canonical toggles: `UI_E2E_EXPECTED_REPO_COUNT`, `UI_E2E_SCENARIO=init-inspect|cancel-refresh`, `UI_E2E_OUTPUT_DIR`
   - diagnostic-only `UI_E2E_SCENARIO=api-context-page-close-smoke` proves Playwright API polling survives a closed page; it is not part of release acceptance
   - cancel flow остаётся guarded сценарием с явным `run_canceled`
-  - init inspect обязан различать `active_run_timeout`, `browser_closed`, `api_unreachable`, `server_exited` и fallback `playwright_failed`, чтобы browser lifecycle, API/server lifecycle и productive runtime timeout не выглядели одним failure class
+  - init inspect обязан различать `active_run_timeout`, `runtime_run_failed`, `browser_closed`, `api_unreachable`, `server_exited` и fallback `playwright_failed`, чтобы backend run failure, browser lifecycle, API/server lifecycle и productive runtime timeout не выглядели одним failure class
   - long-running run polling использует independent API request context и не зависит от lifetime browser page, которая нужна только для UI assertions
   - init poll budget берётся из effective runtime timeouts and may be raised to `ACP_PIPELINE_TIMEOUT_SEC+30`; fixed cap is opt-in diagnostic only
 - Этот документ фиксирует policy, invariants и required gates; пошаговые live/release cookbook команды не дублируются здесь.
