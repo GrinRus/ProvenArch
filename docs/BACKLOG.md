@@ -134,13 +134,17 @@ Suggested PR slices:
 
 ## Epic 9 — System Analyst Q&A Capability (MVP)
 Acceptance:
-- on-demand Q&A capability доступна как deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask` поверх `charter/cards + model + reports + docs.imports_path`
+- target on-demand Q&A capability доступна как async runtime-backed UI/API flow: `POST /api/qa/runs`, `GET /api/qa/runs/<run_id>`, step id `qa.ask`, agent role `system-analyst-qa`
+- deterministic workspace-backed read-only service остаётся compatibility/fake baseline для CLI `acp qa` + public read-only `POST /api/qa/ask`
 - ответы содержат ссылки на evidence/артефакты workspace
-- capability работает без headless runtime agent, без workspace mutation и без использования `skills/prompt-packs/qa.md` как runtime prompt
+- runtime-backed capability использует `skills/prompt-packs/qa.md`, пишет только `reports/taskruns/<run_id>/qa/{context-pack.json,qa-answer.json,runtime-execution.json}` и не мутирует source repos/canonical workspace outputs
+- context pack excludes `reports/taskruns/**` by default
 
 Suggested PR slices:
 - `9A workspace-backed QA service`
 - `9B public read-only Q&A API`
+- `9C async runtime-backed QA runs`
+- `9D legacy /api/qa/ask deprecation plan`
 
 ## Epic 10 — Iteration Changelog (MVP)
 Acceptance:
@@ -156,6 +160,7 @@ Acceptance:
 - read-only endpoint `POST /api/qa/ask` реализован поверх deterministic workspace-backed QA service
 - response shape содержит `answer`, `citations`, `unresolved`, `confidence`
 - endpoint не меняет workspace и не требует изменения runtime artifact contracts
+- endpoint remains compatibility-only while UI target moves to async `/api/qa/runs`
 
 Suggested PR slices:
 - `11A /api/qa/ask contract + read-only semantics` (done)

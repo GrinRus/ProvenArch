@@ -673,8 +673,6 @@ done
 }
 
 func TestRunHeadlessProviderRepairsCollectManifestWithMissingReferencedDocumentPath(t *testing.T) {
-	t.Parallel()
-
 	task := newCollectTask(t, "run-collect-repair-missing-doc-ref")
 	badManifest := strings.Replace(collectManifestJSON(task), `"path": "overview.md"`, `"path": "overivew.md"`, 1)
 	initialScript := `#!/usr/bin/env bash

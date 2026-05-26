@@ -18,6 +18,9 @@ func (s *Service) ReconcileStaleRunsAfterRestart() {
 
 func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string, error) {
 	_ = s.cleanupRunLogs()
+	if request.Pipeline == PipelineQA && strings.TrimSpace(request.Question) == "" {
+		return "", fmt.Errorf("question is required for qa runs")
+	}
 	resolvedStepProviders, err := s.ResolveStepProviderProfile(request.Workspace.Manifest)
 	if err != nil {
 		return "", err
@@ -33,6 +36,7 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 				Pipeline:      string(request.Pipeline),
 				Status:        RunStatusQueued,
 				StartedAt:     now,
+				Question:      strings.TrimSpace(request.Question),
 				StepProviders: resolvedStepProviders.Effective.StringMap(),
 			},
 		})
@@ -329,6 +333,7 @@ func (s *Service) loadExistingRunRecord(runID string) (runRecord, bool) {
 			Status:             record.info.Status,
 			StartedAt:          record.info.StartedAt,
 			FinishedAt:         record.info.FinishedAt,
+			Question:           record.info.Question,
 			CurrentStep:        record.info.CurrentStep,
 			StepProviders:      cloneStringMap(record.info.StepProviders),
 			Warnings:           append([]string(nil), record.info.Warnings...),
@@ -506,6 +511,7 @@ func runRecordToHistoryItem(record runRecord) runHistoryItem {
 		Status:             record.info.Status,
 		StartedAt:          record.info.StartedAt.UTC().Format(time.RFC3339),
 		CurrentStep:        record.info.CurrentStep,
+		Question:           record.info.Question,
 		StepProviders:      cloneStringMap(record.info.StepProviders),
 		Warnings:           append([]string(nil), record.info.Warnings...),
 		PendingPermissions: append([]acpruntime.PermissionRequest(nil), record.info.PendingPermissions...),
@@ -540,6 +546,7 @@ func historyItemToRunRecord(item runHistoryItem) (runRecord, bool) {
 			Status:             item.Status,
 			StartedAt:          startedAt.UTC(),
 			FinishedAt:         finishedAt,
+			Question:           item.Question,
 			CurrentStep:        item.CurrentStep,
 			StepProviders:      cloneStringMap(item.StepProviders),
 			Warnings:           append([]string(nil), item.Warnings...),

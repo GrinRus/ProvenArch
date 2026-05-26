@@ -910,6 +910,35 @@ func TestWorkspacePromptPackSectionLoadsEditableContentLayer(t *testing.T) {
 	}
 }
 
+func TestQAPolicyUsesContextPackAndAnswerOnly(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:           "run-qa-1",
+		StepID:          acpruntime.StepIDQAAsk,
+		Question:        "Who owns payments-service?",
+		ContextPackPath: "/tmp/workspace/reports/taskruns/run-qa-1/qa/context-pack.json",
+		WriteRoot:       "/tmp/workspace/reports/taskruns/run-qa-1/qa",
+	}
+	policy := StepSpecificPolicy(task.StepID) + "\n" + QAFirstActionSection(task) + "\n" + DocFirstFilesystemPolicy(task)
+	for _, needle := range []string{
+		`STEP POLICY qa.ask:`,
+		`Answer the user question only from the provided QA context pack.`,
+		`Do NOT inspect source repositories, reports/taskruns history, raw logs, or sibling workspaces.`,
+		`FIRST QA ANSWER COMMAND:`,
+		`question = "Who owns payments-service?"`,
+		`context_pack_path = "/tmp/workspace/reports/taskruns/run-qa-1/qa/context-pack.json"`,
+		`qa_answer_path = "/tmp/workspace/reports/taskruns/run-qa-1/qa/qa-answer.json"`,
+	} {
+		if !strings.Contains(policy, needle) {
+			t.Fatalf("expected qa policy to contain %q, got:\n%s", needle, policy)
+		}
+	}
+	if !strings.Contains(policy, `"question": "Who owns payments-service?"`) {
+		t.Fatalf("expected qa canonical example to include question, got:\n%s", policy)
+	}
+}
+
 func TestCollectRepoEntrypointHintsIncludesOwnershipFiles(t *testing.T) {
 	t.Parallel()
 

@@ -2,13 +2,16 @@ package fakeruntime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
+	"github.com/GrinRus/ProvenArch/internal/qa"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/providercommon"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
@@ -25,6 +28,17 @@ func (Runner) RuntimeMeta() contracts.RuntimeMeta {
 func (Runner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
 	if err := runFakePermissionFixture(task); err != nil {
 		return acpruntime.Result{}, err
+	}
+	if acpruntime.StepProviderKeyForStepID(task.StepID) == acpruntime.StepProviderQA {
+		if err := persistFakeQAAnswer(task); err != nil {
+			return acpruntime.Result{}, err
+		}
+		if err := providercommon.ValidateRuntimeArtifacts(task, providerFake); err != nil {
+			return acpruntime.Result{}, err
+		}
+		return acpruntime.Result{
+			Execution: acpruntime.NewExecution(task, providerFake, "fake", "succeeded", task.StartedAtUTC.UTC().Add(2*time.Second), nil),
+		}, nil
 	}
 	semantic := fakeSemanticSnapshot(task)
 	summary := fakeSummary(task)
@@ -50,6 +64,65 @@ func (Runner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, e
 	return acpruntime.Result{
 		Execution: acpruntime.NewExecution(task, providerFake, "fake", "succeeded", task.StartedAtUTC.UTC().Add(2*time.Second), nil),
 	}, nil
+}
+
+func persistFakeQAAnswer(task acpruntime.Task) error {
+	if err := os.MkdirAll(filepath.Clean(task.WriteRoot), 0o755); err != nil {
+		return err
+	}
+	contextPack, _ := loadQAContextPack(task.ContextPackPath)
+	citations := []qa.Citation{}
+	for _, doc := range contextPack.Documents {
+		if strings.TrimSpace(doc.Path) == "" {
+			continue
+		}
+		citations = append(citations, qa.Citation{
+			Path:   doc.Path,
+			Reason: "selected from QA context pack by fake runtime",
+		})
+		if len(citations) >= 3 {
+			break
+		}
+	}
+	if len(citations) == 0 {
+		citations = []qa.Citation{}
+	}
+	answer := qa.Answer{
+		Version:     1,
+		RunID:       strings.TrimSpace(task.RunID),
+		Question:    strings.TrimSpace(task.Question),
+		Answer:      fmt.Sprintf("Fake runtime QA inspected %d workspace artifact(s) for this question.", len(contextPack.Documents)),
+		Citations:   citations,
+		Unresolved:  []string{},
+		Confidence:  0.7,
+		Provider:    string(providerFake),
+		GeneratedAt: task.StartedAtUTC.UTC().Add(2 * time.Second).Format(time.RFC3339),
+	}
+	if len(contextPack.Documents) == 0 {
+		answer.Unresolved = []string{"no indexed workspace evidence available in context pack"}
+		answer.Confidence = 0.2
+	}
+	raw, err := json.MarshalIndent(answer, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	return os.WriteFile(filepath.Join(filepath.Clean(task.WriteRoot), "qa-answer.json"), raw, 0o644)
+}
+
+func loadQAContextPack(path string) (qa.ContextPack, error) {
+	if strings.TrimSpace(path) == "" {
+		return qa.ContextPack{}, fmt.Errorf("context pack path is required")
+	}
+	raw, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return qa.ContextPack{}, err
+	}
+	var pack qa.ContextPack
+	if err := json.Unmarshal(raw, &pack); err != nil {
+		return qa.ContextPack{}, err
+	}
+	return pack, nil
 }
 
 func runFakePermissionFixture(task acpruntime.Task) error {

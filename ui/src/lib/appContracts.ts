@@ -293,6 +293,7 @@ export const runtimeStepProviderOrder = [
   "step2_as_is",
   "step3_findings",
   "step4_proposals",
+  "qa",
 ] as const;
 
 export const runtimeStepProviderLabels: Record<(typeof runtimeStepProviderOrder)[number], string> = {
@@ -301,6 +302,7 @@ export const runtimeStepProviderLabels: Record<(typeof runtimeStepProviderOrder)
   step2_as_is: "runtime.profile.steps.step2_as_is.provider",
   step3_findings: "runtime.profile.steps.step3_findings.provider",
   step4_proposals: "runtime.profile.steps.step4_proposals.provider",
+  qa: "runtime.profile.steps.qa.provider",
 };
 
 export const runtimePermissionKeys: RuntimePermissionKey[] = ["mode", "approval_channel"];

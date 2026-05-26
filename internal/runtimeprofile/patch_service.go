@@ -45,6 +45,7 @@ type RuntimeStepProvidersPatch struct {
 	Step2AsIs         *string `json:"step2_as_is"`
 	Step3Findings     *string `json:"step3_findings"`
 	Step4Proposals    *string `json:"step4_proposals"`
+	QA                *string `json:"qa"`
 }
 
 type RuntimePermissionsPatch struct {
@@ -61,7 +62,8 @@ func (patch RuntimeStepProvidersPatch) IsZero() bool {
 		patch.Step1Collect == nil &&
 		patch.Step2AsIs == nil &&
 		patch.Step3Findings == nil &&
-		patch.Step4Proposals == nil
+		patch.Step4Proposals == nil &&
+		patch.QA == nil
 }
 
 func (RuntimeProfilePatchService) ApplyTimeouts(ws workspace.Root, patch workspace.RuntimeTimeoutsConfig) (workspace.Root, error) {
@@ -179,6 +181,7 @@ func ValidateRuntimeExecutionPatch(patch RuntimeExecutionPatch) error {
 			"step2_as_is":        patch.Steps.Step2AsIs,
 			"step3_findings":     patch.Steps.Step3Findings,
 			"step4_proposals":    patch.Steps.Step4Proposals,
+			"qa":                 patch.Steps.QA,
 		} {
 			if value == nil {
 				continue
@@ -281,6 +284,7 @@ func mergeRuntimeStepProvidersPatch(dst *workspace.RuntimeStepsConfig, patch Run
 	mergeStep(&dst.Step2AsIs, patch.Step2AsIs)
 	mergeStep(&dst.Step3Findings, patch.Step3Findings)
 	mergeStep(&dst.Step4Proposals, patch.Step4Proposals)
+	mergeStep(&dst.QA, patch.QA)
 }
 
 func ensureRuntimeProfile(manifest *workspace.Manifest) {

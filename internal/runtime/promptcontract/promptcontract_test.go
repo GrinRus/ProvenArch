@@ -512,6 +512,42 @@ func TestComposeDraftArtifactRepairPromptNamesExactTargets(t *testing.T) {
 	}
 }
 
+func TestComposeArtifactOnlyPromptIncludesQAFirstActionAndPromptPack(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	packDir := filepath.Join(workspaceDir, "skills", "prompt-packs")
+	if err := os.MkdirAll(packDir, 0o755); err != nil {
+		t.Fatalf("mkdir prompt pack dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(packDir, "qa.md"), []byte("Use concise workspace-backed answers.\n"), 0o644); err != nil {
+		t.Fatalf("write qa prompt pack: %v", err)
+	}
+
+	task := acpruntime.Task{
+		RunID:             "run-qa-1",
+		StepID:            acpruntime.StepIDQAAsk,
+		Workspace:         workspaceDir,
+		WriteRoot:         filepath.Join(workspaceDir, "reports", "taskruns", "run-qa-1", "qa"),
+		Question:          "Who owns payments-service?",
+		ContextPackPath:   filepath.Join(workspaceDir, "reports", "taskruns", "run-qa-1", "qa", "context-pack.json"),
+		ExpectedArtifacts: []string{"qa-answer.json"},
+	}
+
+	prompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderCodexCode, task)
+	for _, needle := range []string{
+		`FIRST QA ANSWER COMMAND:`,
+		`STEP POLICY qa.ask:`,
+		`Source file: "skills/prompt-packs/qa.md"`,
+		`Use concise workspace-backed answers.`,
+		`qa-answer.json`,
+	} {
+		if !strings.Contains(prompt, needle) {
+			t.Fatalf("expected qa prompt to contain %q, got:\n%s", needle, prompt)
+		}
+	}
+}
+
 func TestComposeDraftArtifactRepairPromptWritesValidConstitutionSubagentsYaml(t *testing.T) {
 	t.Parallel()
 

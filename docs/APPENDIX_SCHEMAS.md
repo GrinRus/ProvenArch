@@ -41,7 +41,7 @@
   - `approval_channel: fail_fast|ui`
   - default `trusted_full_access/fail_fast`, so existing live-provider behavior remains unchanged unless managed mode is explicitly selected
 - `runtime.profile.steps.*.provider` optional step-scoped provider override:
-  - `step0_constitution|step1_collect|step2_as_is|step3_findings|step4_proposals`
+  - `step0_constitution|step1_collect|step2_as_is|step3_findings|step4_proposals|qa`
   - allowed values: `claude-code|qwen-code|codex-code`
 - precedence:
   - timeouts: `env > workspace.yaml(runtime.profile.timeouts) > defaults`
@@ -250,7 +250,29 @@ Output mapping rules:
 }
 ```
 
-## 8) Model conventions
+## 8) QA Answer Schema
+
+- **Source of truth:** `schemas/qa-answer.schema.json`
+- Primary runtime output для async Ask step `qa.ask`.
+
+Required fields:
+- `version` — integer `1`
+- `run_id`
+- `question`
+- `answer`
+- `citations[]`
+- `unresolved[]`
+- `confidence` (`0..1`)
+- `provider`
+- `generated_at`
+
+Semantic role:
+- structured answer contract consumed by `GET /api/qa/runs/<run_id>`;
+- schema validates the answer shape; runtime validation also requires citations to point to workspace-relative paths from the generated context pack;
+- file is written only under `reports/taskruns/<run_id>/qa/qa-answer.json`;
+- it is run/audit output, not a promoted canonical architecture artifact.
+
+## 9) Model conventions
 
 - **Source of truth:** `docs/spec/MODEL_SPEC.md`
 - Каноническая модель хранится как entity-per-file:
@@ -259,14 +281,14 @@ Output mapping rules:
 - Stable ID patterns и normalization rules зафиксированы в `MODEL_SPEC`.
 - Канонические patterns в MVP: `svc.<slug>`, `team.<slug>`, `repo.<slug>`, `ext.<slug>`, `db.<engine>.<slug>`, `api.http.<service-slug>.<method>.<path-slug>`, `api.grpc.<service-slug>.<service>.<method>`, `topic.<slug>`, `edge.<from>.<type>.<to>`.
 
-## 9) Charter и skills conventions
+## 10) Charter и skills conventions
 
 - **Source of truth:** `docs/spec/PIPELINE_SPEC.md`
 - Charter хранится в `charter/`.
 - Cards `charter/cards/domains/*` и `charter/cards/teams/*` являются canonical human-owned source of truth; runtime pipeline не пишет в них напрямую.
 - Skills хранятся в `skills/` в версионируемом формате (manifest + prompts + templates).
 
-## 10) Изменения схем/контрактов
+## 11) Изменения схем/контрактов
 
 Любые изменения в `schemas/` и контрактах сопровождаются:
 - обновлением `docs/spec/*` и `docs/APPENDIX_SCHEMAS.md`

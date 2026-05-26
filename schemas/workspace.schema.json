@@ -237,6 +237,9 @@
         },
         "step4_proposals": {
           "$ref": "#/$defs/runtimeStep"
+        },
+        "qa": {
+          "$ref": "#/$defs/runtimeStep"
         }
       },
       "additionalProperties": false

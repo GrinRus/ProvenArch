@@ -8,6 +8,7 @@
 - `final-run-index.schema.json` — canonical staged final set index.
 - `citation-index.schema.json` — citation graph for promoted reports.
 - `validator-verdict.schema.json` — validator/findings primary verdict surface.
+- `qa-answer.schema.json` — async Ask runtime answer artifact.
 
 ## Правила
 Меняя schema, обновляйте также:

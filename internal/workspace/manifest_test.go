@@ -166,6 +166,31 @@ runtime:
 	}
 }
 
+func TestOpenRejectsManifestWithInvalidQAStepProvider(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeManifestFile(t, root, `
+version: 1
+repos:
+  - name: payments
+    path: /tmp/payments
+runtime:
+  profile:
+    steps:
+      qa:
+        provider: bogus
+`)
+
+	_, err := Open(root)
+	if err == nil {
+		t.Fatalf("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "runtime.profile.steps.qa.provider") {
+		t.Fatalf("expected qa step provider validation error, got %v", err)
+	}
+}
+
 func TestOpenRejectsManifestWithInvalidRuntimePermissions(t *testing.T) {
 	t.Parallel()
 
@@ -295,6 +320,7 @@ func TestRenderManifestIncludesRuntimeStepProviders(t *testing.T) {
 				Steps: &RuntimeStepsConfig{
 					Step1Collect:   &RuntimeStepConfig{Provider: "qwen-code"},
 					Step4Proposals: &RuntimeStepConfig{Provider: "claude-code"},
+					QA:             &RuntimeStepConfig{Provider: "codex-code"},
 				},
 			},
 		},
@@ -311,6 +337,9 @@ func TestRenderManifestIncludesRuntimeStepProviders(t *testing.T) {
 	}
 	if !strings.Contains(text, "step4_proposals:") || !strings.Contains(text, "provider: claude-code") {
 		t.Fatalf("expected step4 provider in manifest, got:\n%s", text)
+	}
+	if !strings.Contains(text, "qa:") || !strings.Contains(text, "provider: codex-code") {
+		t.Fatalf("expected qa provider in manifest, got:\n%s", text)
 	}
 }
 

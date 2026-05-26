@@ -58,6 +58,66 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-05-07 consolidated historical active plans into the remaining open slices below. Detailed evidence and classification are archived in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`; original historical active plan text was moved to `docs/archive/PLANS_ARCHIVE_2026-05.md` under "Reconciled active plans from 2026-05-07".
 
 ### Plan ID
+EP-20260526-async-runtime-backed-ask
+
+### Context
+Текущий `POST /api/qa/ask` и `acp qa` остаются compatibility/beta baseline: deterministic workspace search в `internal/qa`, без runtime provider. Target architecture для UI Ask меняется на async agentic Q&A run: ACP собирает deterministic context pack из существующих workspace artifacts, запускает выбранный runtime provider с ролью `system-analyst-qa`, валидирует `qa-answer.json` и показывает результат в UI polling flow.
+
+### Goals (must have)
+- [x] Добавить Q&A runtime family `qa.ask` с agent role `system-analyst-qa`, prompt pack `skills/prompt-packs/qa.md` и write scope только `reports/taskruns/<run_id>/qa/`.
+- [x] Добавить async API `POST /api/qa/runs`, `GET /api/qa/runs/{run_id}`, `GET /api/qa/runs?limit=...`; оставить `POST /api/qa/ask` как legacy deterministic endpoint.
+- [x] Добавить `runtime.profile.steps.qa.provider` в manifest/schema/validator/API runtime profile.
+- [x] Ввести `qa-answer.json` contract/schema and validation; сохранять `context-pack.json` и `runtime-execution.json` рядом с answer для audit/debug.
+- [x] Context pack строится deterministic из canonical workspace artifacts and imported docs; `reports/taskruns/**` исключается из evidence corpus.
+- [x] Fake runtime умеет выполнять `qa.ask` для required CI/local smoke.
+- [x] Headless runtime получает artifact-only QA prompt через shared provider engine and validates `qa-answer.json`.
+- [x] UI Ask stage использует async submit + polling and shows run status/provider/answer/citations/unresolved/confidence.
+- [x] Обновить README, architecture/spec docs, stakeholder docs and schema appendix под target/current split.
+- [ ] После owner review/merge перенести план в архив.
+
+### Non-goals
+- [x] Не удалять `POST /api/qa/ask` и `acp qa` в этом slice.
+- [x] Не менять init/refresh artifact schemas beyond adding QA answer schema and workspace qa provider field.
+- [x] Не добавлять hosted/security hardening.
+- [x] Не мутировать source repos или canonical architecture outputs из QA run.
+
+### Approach
+1) Reuse orchestrator run history/log infrastructure with `pipeline="qa"` while keeping QA runs out of the normal Analysis run list.
+2) Build `context-pack.json` before runtime execution from `charter/cards`, `model`, `reports/as-is`, `reports/findings`, `reports/coverage`, `proposals`, `reports/changelog`, and configured docs imports.
+3) Route `qa.ask` through shared runtime task execution and providercommon artifact validation.
+4) Return structured QA run status over `/api/qa/runs/*`; UI polls that endpoint and links to existing run logs/artifacts.
+5) Keep legacy deterministic QA service as retriever/context builder and compatibility fallback.
+
+### Files expected to change
+- `internal/orchestrator/*`
+- `internal/api/server.go`
+- `internal/qa/*`
+- `internal/runtime/*`
+- `internal/workspace/manifest.go`
+- `internal/runtimeprofile/patch_service.go`
+- `schemas/workspace.schema.json`
+- `schemas/qa-answer.schema.json`
+- `ui/src/components/StagePanels.tsx`
+- `ui/src/lib/qaApi.ts`
+- `ui/src/App.test.tsx`
+- docs/spec/README/stakeholder/backlog/schema appendix docs
+
+### Acceptance criteria
+- [x] Schema validation accepts `runtime.profile.steps.qa.provider` and rejects invalid providers.
+- [x] Fake Q&A run writes valid `reports/taskruns/<run_id>/qa/qa-answer.json`.
+- [x] Context pack excludes `reports/taskruns/**`.
+- [x] Async API covers start/status/list while legacy `POST /api/qa/ask` still works.
+- [x] UI Ask submit creates a Q&A run and renders succeeded answer state.
+- [x] Full DoD completed: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Risks
+- QA runs share the existing single active/pending run queue; future UX may need a dedicated lightweight queue if operators ask questions during long init runs.
+- Headless answer quality depends on provider following `qa-answer.json`; fake remains deterministic baseline, but live QA should get focused smoke coverage before release claims.
+
+### Progress log
+- 2026-05-26: Implemented async QA run family/API/schema/fake runtime/UI polling, context-pack citation validation, docs/test sync, full DoD, and fake async QA smoke.
+
+### Plan ID
 EP-20260525-frontend-live-e2e-diagnostics
 
 ### Context
@@ -123,7 +183,7 @@ EP-20260525-proven-arch-ui-console
 ### Goals (must have)
 - [x] Заменить hero/top tabs на Proven Arch console shell: top bar, stage rail, center work area, right inspector, bottom activity drawer
 - [x] Разложить существующие setup/runtime/run/results/git surfaces по stages `Source / Readiness / Charter / Analysis / Review / Proposals / Ask / Publish`
-- [x] Подключить существующий read-only `POST /api/qa/ask` как UI stage `Ask`
+- [x] Подключить существующий read-only `POST /api/qa/ask` как UI stage `Ask` (historical slice; superseded by EP-20260526 async `/api/qa/runs` target)
 - [x] Добавить derived stage status, next action, blockers, evidence refs и runtime/workspace health
 - [x] Обновить CSS под light operator-console style без backend изменений
 - [x] Обновить UI tests, live E2E selectors и пользовательские docs
@@ -151,7 +211,7 @@ EP-20260525-proven-arch-ui-console
 - [x] Stage rail renders all 8 stages and switches central content
 - [x] Readiness blockers/next actions reflect workspace validation, doctor, run errors and pending permissions
 - [x] Review stage shows coverage/questions/artifacts/diagrams from existing artifact APIs
-- [x] Ask stage calls `/api/qa/ask` and renders answer/citations/confidence
+- [x] Ask stage originally called `/api/qa/ask` and rendered answer/citations/confidence; current target is async `/api/qa/runs` under EP-20260526
 - [x] Existing first-run, runtime settings, logs, diagrams, baseline editor and git helper coverage remain covered
 - [x] `npm run typecheck --prefix ui`
 - [x] `npm test --prefix ui`
@@ -544,9 +604,9 @@ Residual blockers:
 | 6 UI baseline | done (beta baseline) | Setup/validate/run/inspect + editors + git helpers |
 | 7 Domain-first layer | done (beta baseline) | Per-domain contracts + deterministic Step 1 enrichment canonical domain/team cards without auto-create |
 | 8 Baseline bundle | done (beta baseline) | `skills/subagents.yaml` + prompt packs + validation |
-| 9 Q&A capability | done (beta boundary) | Workspace-backed QA service + read-only CLI `acp qa` + public read-only `POST /api/qa/ask` |
+| 9 Q&A capability | target upgraded | Async runtime-backed Ask via `/api/qa/runs`; deterministic service remains `acp qa` + legacy `POST /api/qa/ask` compatibility |
 | 10 Changelog compilers | done (beta baseline) | Iteration changelog materialization в `reports/changelog/*` |
-| 11 `POST /api/qa/ask` | done (beta baseline) | Read-only API wrapper over deterministic Q&A service |
+| 11 `POST /api/qa/ask` | done (compatibility baseline) | Read-only API wrapper over deterministic Q&A service while UI target uses async QA runs |
 | 12–13 | out of MVP | Вне текущего beta scope |
 | 14 CI trigger mode | done (beta baseline) | CLI batch required, smoke/golden jobs без live network deps |
 | 15 Domain/baseline pack hardening | done (beta baseline) | Baseline skills/prompts wired и versioned в workspace |

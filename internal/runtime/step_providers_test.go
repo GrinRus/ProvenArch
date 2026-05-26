@@ -31,6 +31,7 @@ func TestResolveStepProvidersWorkspaceOverridesGlobalFallback(t *testing.T) {
 			Profile: &workspace.RuntimeProfileConfig{
 				Steps: &workspace.RuntimeStepsConfig{
 					Step2AsIs: &workspace.RuntimeStepConfig{Provider: "qwen-code"},
+					QA:        &workspace.RuntimeStepConfig{Provider: "codex-code"},
 				},
 			},
 		},
@@ -50,6 +51,12 @@ func TestResolveStepProvidersWorkspaceOverridesGlobalFallback(t *testing.T) {
 	}
 	if resolved.Source[StepProviderStep3Findings] != ProviderSourceOverride {
 		t.Fatalf("expected override source for step3, got %q", resolved.Source[StepProviderStep3Findings])
+	}
+	if resolved.Effective.ProviderForStep(StepIDQAAsk) != ProviderCodexCode {
+		t.Fatalf("expected workspace qa provider codex-code, got %q", resolved.Effective.ProviderForStep(StepIDQAAsk))
+	}
+	if resolved.Source[StepProviderQA] != ProviderSourceWorkspace {
+		t.Fatalf("expected workspace source for qa, got %q", resolved.Source[StepProviderQA])
 	}
 }
 
@@ -80,6 +87,7 @@ func TestStepProviderKeyForStepID(t *testing.T) {
 		"init.step2.asis_docs":    StepProviderStep2AsIs,
 		"refresh.step3.findings":  StepProviderStep3Findings,
 		"init.step4.proposals":    StepProviderStep4Proposals,
+		"qa.ask":                  StepProviderQA,
 	}
 	for stepID, want := range tests {
 		if got := StepProviderKeyForStepID(stepID); got != want {

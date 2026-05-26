@@ -272,7 +272,7 @@ func normalizeActivityPolicy(policy ActivityPolicy) ActivityPolicy {
 
 func MonitorsRuntimeArtifacts(task acpruntime.Task) bool {
 	switch acpruntime.StepProviderKeyForStepID(task.StepID) {
-	case acpruntime.StepProviderStep1Collect, acpruntime.StepProviderStep3Findings:
+	case acpruntime.StepProviderStep1Collect, acpruntime.StepProviderStep3Findings, acpruntime.StepProviderQA:
 		return true
 	default:
 		return runtimedrafts.IsDraftStep(task.StepID)

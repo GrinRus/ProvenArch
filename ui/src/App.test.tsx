@@ -18,6 +18,7 @@ type FetchMockState = {
   validateStatus?: number;
   manifestContent?: string;
   qaResponse?: MockJSON;
+  qaRunID?: string;
 };
 
 function jsonResponse(body: MockJSON, status = 200): Response {
@@ -62,6 +63,7 @@ function createFetchMock(state: FetchMockState = {}) {
       artifacts: [],
     },
   };
+  const qaRunID = state.qaRunID ?? "qa-run-1";
 
   const artifactText: Record<string, string> = {
     "charter/overview.md": "# Charter\n",
@@ -288,6 +290,38 @@ function createFetchMock(state: FetchMockState = {}) {
       return jsonResponse({ ok: true });
     }
 
+    if (method === "POST" && url === "/api/qa/runs") {
+      return jsonResponse({ run_id: qaRunID, status: "queued" }, 202);
+    }
+
+    if (method === "GET" && url === `/api/qa/runs/${qaRunID}`) {
+      const qaPayload = state.qaResponse ?? {
+        answer: "payments-service is owned by Platform Architecture.",
+        citations: [{ path: "reports/as-is/overview.md", reason: "ownership evidence" }],
+        unresolved: ["confirm escalation owner"],
+        confidence: 0.82,
+      };
+      return jsonResponse(
+        {
+          run_id: qaRunID,
+          pipeline: "qa",
+          status: "succeeded",
+          started_at: "2026-04-03T12:00:03Z",
+          finished_at: "2026-04-03T12:00:04Z",
+          question: "Who owns payments?",
+          current_step: "qa.ask",
+          runtime_provider: "claude-code",
+          provider: "fake",
+          generated_at: "2026-04-03T12:00:04Z",
+          ...qaPayload,
+        },
+      );
+    }
+
+    if (method === "GET" && url.startsWith("/api/qa/runs?")) {
+      return jsonResponse({ items: [] });
+    }
+
     if (method === "POST" && url === "/api/qa/ask") {
       return jsonResponse(
         state.qaResponse ?? {
@@ -494,7 +528,7 @@ describe("App", () => {
     expect(mermaid.default.render).not.toHaveBeenCalledWith(expect.any(String), "Loading...");
   });
 
-  it("calls read-only architecture Q&A and renders answer, citations, unresolved, and confidence", async () => {
+  it("starts agent-backed architecture Q&A and renders answer, citations, unresolved, and confidence", async () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -508,13 +542,15 @@ describe("App", () => {
     expect(screen.getByText("reports/as-is/overview.md")).toBeInTheDocument();
     expect(screen.getByText(/Unresolved: confirm escalation owner/)).toBeInTheDocument();
     expect(screen.getByText("Confidence: 82%")).toBeInTheDocument();
+    expect(screen.getByTestId("qa-run-status")).toHaveTextContent("Runtime provider: fake");
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/qa/ask",
+      "/api/qa/runs",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ question: "Who owns payments?" }),
       }),
     );
+    expect(fetchMock).toHaveBeenCalledWith("/api/qa/runs/qa-run-1", undefined);
   });
 
   it("renders read-only Q&A when the API returns nullable evidence arrays", async () => {
@@ -533,6 +569,7 @@ describe("App", () => {
     render(<App />);
 
     fireEvent.click(screen.getByTestId("stage-ask"));
+    fireEvent.change(await screen.findByTestId("qa-question-input"), { target: { value: "What is known?" } });
     fireEvent.click(await screen.findByTestId("qa-ask-btn"));
 
     expect(await screen.findByTestId("qa-answer")).toHaveTextContent("Not enough indexed workspace evidence");

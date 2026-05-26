@@ -122,19 +122,19 @@ var baselinePromptPacks = map[string]string{
 		},
 	}),
 	"qa": renderStructuredPrompt("QA Prompt Pack", structuredPromptSpec{
-		Goal: "Answer read-only architecture questions using workspace artifacts with explicit citations and uncertainty handling.",
+		Goal: "Answer read-only architecture questions from the provided QA context pack with explicit citations and uncertainty handling.",
 		Inputs: []string{
-			"charter/cards, model, reports, docs/imports, and run artifacts",
-			"user question and optional scope hints",
-			"current evidence policy and confidence model",
+			"generated context-pack.json containing allowed workspace evidence documents",
+			"user question carried by the qa.ask runtime task",
+			"qa-answer.json schema and enforced runtime step policy",
 		},
 		RequiredOutputShape: []string{
-			"Short answer followed by citation set (repo/path oriented)",
-			"Unresolved section when evidence is missing or contradictory",
-			"Confidence statement calibrated to evidence quality",
+			"Valid qa-answer.json object with version, run_id, question, answer, citations, unresolved, confidence, provider, generated_at",
+			"citations[].path values must exactly match context-pack.json documents[].path values",
+			"unresolved and low confidence when context-pack evidence is missing or contradictory",
 		},
 		EvidencePolicy: []string{
-			"Prefer direct workspace citations over inferred memory",
+			"Use only context-pack documents as evidence",
 			"When sources disagree, surface disagreement explicitly",
 			"Never present inference as confirmed assertion",
 		},
@@ -145,8 +145,8 @@ var baselinePromptPacks = map[string]string{
 		},
 		FallbackWhenUnknown: []string{
 			"Return explicit unresolved reasons and next evidence needed",
-			"Ask bounded follow-up questions when clarification is required",
-			"Keep response deterministic and concise under low signal",
+			"Use an empty citations array when no context-pack document supports the answer",
+			"Keep response concise under low signal",
 		},
 	}),
 }

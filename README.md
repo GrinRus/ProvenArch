@@ -200,13 +200,15 @@ acp serve \
   --runtime-provider claude-code
 ```
 
-Provider selection precedence для каждого pipeline step:
+Provider selection precedence для каждого pipeline/QA step:
 
 ```text
 workspace.yaml runtime.profile.steps.<step>.provider
   -> CLI --runtime-provider or ACP_RUNTIME_PROVIDER
   -> claude-code
 ```
+
+For Ask, `<step>` is `qa`, mapped to runtime step id `qa.ask`.
 
 В `--runtime fake` configured provider только валидируется как fallback config;
 live provider command не запускается, а runtime metadata записывает `fake`.
@@ -245,10 +247,10 @@ UI показывает то же состояние через stage-based cons
 - `Source` / `Readiness`: repo sources, `workspace.yaml`, validation diagnostics, doctor checklist и runtime profile;
 - `Analysis`: run status, warnings, event timeline, raw agent stream, pending permissions и cancel;
 - `Review` / `Proposals`: coverage, artifacts, diagram previews, changelog/proposal artifacts;
-- `Ask`: deterministic read-only Q&A поверх workspace artifacts через `POST /api/qa/ask`;
+- `Ask`: async agent-backed Q&A поверх existing workspace artifacts через `POST /api/qa/runs`; legacy deterministic `POST /api/qa/ask` остаётся compatibility endpoint;
 - `Publish`: git commit/proposal branch helper actions.
 
-Можно задавать read-only вопросы по generated workspace artifacts:
+Можно задавать вопросы по generated workspace artifacts. В UI целевой путь — async Q&A run: ACP собирает deterministic `context-pack.json`, запускает runtime step `qa.ask` через selected provider/fake baseline, валидирует `qa-answer.json` и сохраняет audit artifacts только в `reports/taskruns/<run_id>/qa/`.
 
 ```bash
 acp qa \
@@ -260,7 +262,11 @@ curl -fsS -X POST http://127.0.0.1:8080/api/qa/ask \
   -d '{"question":"Who owns payments-service?"}'
 ```
 
-Q&A beta boundary: deterministic workspace-backed read-only service + UI stage `Ask` + CLI `acp qa` + public read-only `POST /api/qa/ask`; он не запускает новый live analysis и не меняет workspace.
+Current/compatibility split:
+
+- UI stage `Ask` uses async runtime-backed `POST /api/qa/runs` + polling `GET /api/qa/runs/<run_id>`.
+- `acp qa` and public read-only `POST /api/qa/ask` remain deterministic workspace-backed compatibility surfaces.
+- QA runs do not mutate source repos or canonical `charter/`, `model/`, `reports/*`, or `proposals/*`; they write only taskrun/audit artifacts under `reports/taskruns/<run_id>/qa/`.
 
 Troubleshooting: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 

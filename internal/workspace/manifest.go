@@ -66,6 +66,7 @@ type RuntimeStepsConfig struct {
 	Step2AsIs         *RuntimeStepConfig `yaml:"step2_as_is,omitempty" json:"step2_as_is,omitempty"`
 	Step3Findings     *RuntimeStepConfig `yaml:"step3_findings,omitempty" json:"step3_findings,omitempty"`
 	Step4Proposals    *RuntimeStepConfig `yaml:"step4_proposals,omitempty" json:"step4_proposals,omitempty"`
+	QA                *RuntimeStepConfig `yaml:"qa,omitempty" json:"qa,omitempty"`
 }
 
 type RuntimeStepConfig struct {
@@ -124,7 +125,8 @@ func (cfg *RuntimeStepsConfig) IsZero() bool {
 		(cfg.Step1Collect == nil || cfg.Step1Collect.IsZero()) &&
 		(cfg.Step2AsIs == nil || cfg.Step2AsIs.IsZero()) &&
 		(cfg.Step3Findings == nil || cfg.Step3Findings.IsZero()) &&
-		(cfg.Step4Proposals == nil || cfg.Step4Proposals.IsZero())
+		(cfg.Step4Proposals == nil || cfg.Step4Proposals.IsZero()) &&
+		(cfg.QA == nil || cfg.QA.IsZero())
 }
 
 func (cfg *RuntimePermissionsConfig) IsZero() bool {
@@ -236,6 +238,7 @@ func applyManifestDefaults(manifest *Manifest) {
 				manifest.Runtime.Profile.Steps.Step2AsIs = normalizeStep(manifest.Runtime.Profile.Steps.Step2AsIs)
 				manifest.Runtime.Profile.Steps.Step3Findings = normalizeStep(manifest.Runtime.Profile.Steps.Step3Findings)
 				manifest.Runtime.Profile.Steps.Step4Proposals = normalizeStep(manifest.Runtime.Profile.Steps.Step4Proposals)
+				manifest.Runtime.Profile.Steps.QA = normalizeStep(manifest.Runtime.Profile.Steps.QA)
 				if manifest.Runtime.Profile.Steps.IsZero() {
 					manifest.Runtime.Profile.Steps = nil
 				}
@@ -361,6 +364,7 @@ func validateManifest(manifest Manifest) error {
 			validateStepProvider("runtime.profile.steps.step2_as_is", manifest.Runtime.Profile.Steps.Step2AsIs)
 			validateStepProvider("runtime.profile.steps.step3_findings", manifest.Runtime.Profile.Steps.Step3Findings)
 			validateStepProvider("runtime.profile.steps.step4_proposals", manifest.Runtime.Profile.Steps.Step4Proposals)
+			validateStepProvider("runtime.profile.steps.qa", manifest.Runtime.Profile.Steps.QA)
 		}
 		if manifest.Runtime.Profile.Permissions != nil {
 			permissions := manifest.Runtime.Profile.Permissions

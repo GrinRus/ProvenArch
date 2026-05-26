@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
@@ -236,6 +237,67 @@ func TestAskIsDeterministicForSameQuestion(t *testing.T) {
 		if first.Citations[idx] != second.Citations[idx] {
 			t.Fatalf("expected deterministic citations, got %+v vs %+v", first.Citations, second.Citations)
 		}
+	}
+}
+
+func TestBuildContextPackExcludesTaskrunsAndIncludesProposals(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	if err := ws.WriteFile("proposals/runtime-recommendations.md", []byte("Proposal recommends codex runtime for QA answers.")); err != nil {
+		t.Fatalf("write proposal fixture: %v", err)
+	}
+	if err := ws.WriteFile("reports/changelog/runtime-proposals.md", []byte("Changelog records runtime QA proposal.")); err != nil {
+		t.Fatalf("write changelog fixture: %v", err)
+	}
+	if err := ws.WriteFile("reports/taskruns/old-run/qa/qa-answer.json", []byte("old taskrun evidence should not be indexed")); err != nil {
+		t.Fatalf("write old taskrun fixture: %v", err)
+	}
+
+	contextPack, err := NewService().BuildContextPack(context.Background(), ws, "What runtime proposal exists for QA?", "qa-run-1", time.Date(2026, 4, 21, 10, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("build context pack: %v", err)
+	}
+	if contextPack.RunID != "qa-run-1" || contextPack.Question == "" || contextPack.GeneratedAt != "2026-04-21T10:00:00Z" {
+		t.Fatalf("unexpected context pack metadata: %+v", contextPack)
+	}
+	if len(contextPack.Documents) == 0 {
+		t.Fatalf("expected context documents")
+	}
+	foundProposal := false
+	foundChangelog := false
+	for _, document := range contextPack.Documents {
+		if strings.HasPrefix(document.Path, "reports/taskruns/") || strings.Contains(document.Content, "old taskrun evidence") {
+			t.Fatalf("context pack included taskrun evidence: %+v", document)
+		}
+		if document.Path == "proposals/runtime-recommendations.md" {
+			foundProposal = true
+		}
+		if document.Path == "reports/changelog/runtime-proposals.md" {
+			foundChangelog = true
+		}
+	}
+	if !foundProposal {
+		t.Fatalf("expected proposals document in context pack: %+v", contextPack.Documents)
+	}
+	if !foundChangelog {
+		t.Fatalf("expected changelog document in context pack: %+v", contextPack.Documents)
+	}
+}
+
+func TestParseAnswerExample(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile(filepath.Join("..", "..", "examples", "qa-answer.example.json"))
+	if err != nil {
+		t.Fatalf("read qa answer example: %v", err)
+	}
+	answer, err := ParseAnswer(raw)
+	if err != nil {
+		t.Fatalf("parse qa answer example: %v", err)
+	}
+	if answer.Version != 1 || answer.RunID != "run-qa-123" || answer.Provider != "codex-code" {
+		t.Fatalf("unexpected answer example payload: %+v", answer)
 	}
 }
 

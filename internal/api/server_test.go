@@ -318,6 +318,230 @@ func TestQAAskEndpointRejectsInvalidRequests(t *testing.T) {
 	}
 }
 
+func TestQARunsEndpointStartsFakeRuntimeRunAndWritesAuditArtifacts(t *testing.T) {
+	t.Parallel()
+
+	server := newQATestServer(t)
+	ws := server.getWorkspace()
+	if err := ws.WriteFile("reports/taskruns/old-run/qa/qa-answer.json", []byte(`{"secret":"old taskrun should not enter context"}`)); err != nil {
+		t.Fatalf("write old taskrun fixture: %v", err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Post(
+		httpServer.URL+"/api/qa/runs",
+		"application/json",
+		bytes.NewBufferString(`{"question":"What does coverage say about owner mappings and architecture notes?"}`),
+	)
+	if err != nil {
+		t.Fatalf("POST /api/qa/runs: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("expected status 202, got %d body=%s", response.StatusCode, string(body))
+	}
+	var started struct {
+		RunID  string `json:"run_id"`
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&started); err != nil {
+		t.Fatalf("decode start payload: %v", err)
+	}
+	if strings.TrimSpace(started.RunID) == "" {
+		t.Fatalf("expected qa run id")
+	}
+	if started.Status != string(orchestrator.RunStatusQueued) {
+		t.Fatalf("expected queued status, got %q", started.Status)
+	}
+
+	var detail struct {
+		RunID           string          `json:"run_id"`
+		Pipeline        string          `json:"pipeline"`
+		Status          string          `json:"status"`
+		Question        string          `json:"question"`
+		CurrentStep     string          `json:"current_step"`
+		RuntimeProvider string          `json:"runtime_provider"`
+		Provider        string          `json:"provider"`
+		Answer          string          `json:"answer"`
+		Citations       []qaAPICitation `json:"citations"`
+		Confidence      float64         `json:"confidence"`
+	}
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(httpServer.URL + "/api/qa/runs/" + started.RunID)
+		if err != nil {
+			t.Fatalf("GET /api/qa/runs/%s: %v", started.RunID, err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			t.Fatalf("expected status 200, got %d body=%s", resp.StatusCode, string(body))
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
+			_ = resp.Body.Close()
+			t.Fatalf("decode qa run detail: %v", err)
+		}
+		_ = resp.Body.Close()
+		if detail.Status == string(orchestrator.RunStatusSucceeded) || detail.Status == string(orchestrator.RunStatusFailed) {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if detail.Status != string(orchestrator.RunStatusSucceeded) {
+		t.Fatalf("expected qa run succeeded, got %+v", detail)
+	}
+	if detail.Pipeline != string(orchestrator.PipelineQA) || detail.CurrentStep != acpruntime.StepIDQAAsk {
+		t.Fatalf("expected qa pipeline/current_step, got pipeline=%q step=%q", detail.Pipeline, detail.CurrentStep)
+	}
+	if detail.Provider != "fake" {
+		t.Fatalf("expected fake answer provider, got %q", detail.Provider)
+	}
+	if detail.RuntimeProvider != string(acpruntime.ProviderClaudeCode) {
+		t.Fatalf("expected default qa runtime provider claude-code, got %q", detail.RuntimeProvider)
+	}
+	if !strings.Contains(detail.Answer, "Fake runtime QA inspected") {
+		t.Fatalf("expected fake qa answer, got %q", detail.Answer)
+	}
+	if len(detail.Citations) == 0 || detail.Confidence <= 0 {
+		t.Fatalf("expected citations/confidence, got citations=%+v confidence=%f", detail.Citations, detail.Confidence)
+	}
+
+	contextPack, err := ws.ReadFile(filepath.Join("reports", "taskruns", started.RunID, "qa", "context-pack.json"))
+	if err != nil {
+		t.Fatalf("read context pack: %v", err)
+	}
+	if strings.Contains(string(contextPack), "old taskrun should not enter context") {
+		t.Fatalf("context pack included reports/taskruns evidence:\n%s", string(contextPack))
+	}
+	if _, err := ws.ReadFile(filepath.Join("reports", "taskruns", started.RunID, "qa", "runtime-execution.json")); err != nil {
+		t.Fatalf("expected runtime execution artifact: %v", err)
+	}
+
+	listResp, err := http.Get(httpServer.URL + "/api/pipeline/runs?limit=100")
+	if err != nil {
+		t.Fatalf("GET /api/pipeline/runs: %v", err)
+	}
+	defer listResp.Body.Close()
+	var listPayload struct {
+		Items []struct {
+			RunID    string `json:"run_id"`
+			Pipeline string `json:"pipeline"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&listPayload); err != nil {
+		t.Fatalf("decode pipeline run list: %v", err)
+	}
+	for _, item := range listPayload.Items {
+		if item.RunID == started.RunID || item.Pipeline == string(orchestrator.PipelineQA) {
+			t.Fatalf("qa run leaked into pipeline run list: %+v", listPayload.Items)
+		}
+	}
+}
+
+func TestQARunsEndpointRejectsInvalidRequests(t *testing.T) {
+	t.Parallel()
+
+	server := newQATestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Post(httpServer.URL+"/api/qa/runs", "application/json", bytes.NewBufferString(`{"question":"   "}`))
+	if err != nil {
+		t.Fatalf("POST /api/qa/runs: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("expected status 400, got %d body=%s", response.StatusCode, string(body))
+	}
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	if payload.Error.Code != "question_required" {
+		t.Fatalf("expected question_required, got %q", payload.Error.Code)
+	}
+}
+
+func TestQARunsEndpointReportsFailedProviderAnswerWithoutParsingPartialArtifact(t *testing.T) {
+	t.Parallel()
+
+	server := newQATestServerWithService(t, func(ws workspace.Root) *orchestrator.Service {
+		return orchestrator.NewService(
+			orchestrator.WithHistoryWorkspace(ws),
+			orchestrator.WithRunner(qaInvalidCitationRunner{}),
+		)
+	})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Post(
+		httpServer.URL+"/api/qa/runs",
+		"application/json",
+		bytes.NewBufferString(`{"question":"Which overview exists?"}`),
+	)
+	if err != nil {
+		t.Fatalf("POST /api/qa/runs: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("expected status 202, got %d body=%s", response.StatusCode, string(body))
+	}
+	var started struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&started); err != nil {
+		t.Fatalf("decode start payload: %v", err)
+	}
+
+	var detail struct {
+		Status    string  `json:"status"`
+		ErrorCode string  `json:"error_code"`
+		Error     string  `json:"error"`
+		Answer    *string `json:"answer"`
+	}
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(httpServer.URL + "/api/qa/runs/" + started.RunID)
+		if err != nil {
+			t.Fatalf("GET /api/qa/runs/%s: %v", started.RunID, err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			t.Fatalf("expected status 200 while polling failed QA run, got %d body=%s", resp.StatusCode, string(body))
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
+			_ = resp.Body.Close()
+			t.Fatalf("decode qa run detail: %v", err)
+		}
+		_ = resp.Body.Close()
+		if detail.Status == string(orchestrator.RunStatusSucceeded) || detail.Status == string(orchestrator.RunStatusFailed) {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if detail.Status != string(orchestrator.RunStatusFailed) {
+		t.Fatalf("expected failed QA run, got %+v", detail)
+	}
+	if detail.ErrorCode != string(acpruntime.ErrorCodeRuntimeContract) {
+		t.Fatalf("expected runtime_contract_failed, got %+v", detail)
+	}
+	if !strings.Contains(detail.Error, "not present in context pack") {
+		t.Fatalf("expected context-pack citation error, got %+v", detail)
+	}
+	if detail.Answer != nil {
+		t.Fatalf("failed QA run should not expose partial answer, got %q", *detail.Answer)
+	}
+}
+
 func TestWorkspaceBundleEndpointReturnsEffectiveManifestAndWarnings(t *testing.T) {
 	t.Parallel()
 
@@ -2856,6 +3080,14 @@ type qaAPICitation struct {
 func newQATestServer(t *testing.T) *Server {
 	t.Helper()
 
+	return newQATestServerWithService(t, func(ws workspace.Root) *orchestrator.Service {
+		return orchestrator.NewService(orchestrator.WithHistoryWorkspace(ws))
+	})
+}
+
+func newQATestServerWithService(t *testing.T, newService func(workspace.Root) *orchestrator.Service) *Server {
+	t.Helper()
+
 	root := t.TempDir()
 	repoPath := filepath.Join(root, "repos", "payments-service")
 	if err := os.MkdirAll(repoPath, 0o755); err != nil {
@@ -2887,7 +3119,7 @@ repos:
 		}
 	}
 
-	service := orchestrator.NewService(orchestrator.WithHistoryWorkspace(ws))
+	service := newService(ws)
 	return NewServer(ws, service)
 }
 
@@ -3088,6 +3320,8 @@ if not repo_scopes:
     if repo_scope:
         repo_scopes = [repo_scope]
 path_scopes = first_non_empty_list(task, ["path_scopes", "PathScopes"])
+question = first_non_empty(task, ["question", "Question"]) or from_prompt("question") or from_prompt("Question")
+context_pack_path = first_non_empty(task, ["context_pack_path", "ContextPackPath"]) or from_prompt("context_pack_path") or from_prompt("ContextPackPath")
 
 def write_runtime_draft(manifest_name, outputs, default_step_contract="draft"):
     if not write_root or not draft_root:
@@ -3183,6 +3417,35 @@ elif step_id in {"init.step4.proposals", "refresh.step4.proposals"}:
             }
         ],
     )
+elif step_id == "qa.ask" and write_root:
+    os.makedirs(write_root, exist_ok=True)
+    documents = []
+    if context_pack_path:
+        try:
+            with open(context_pack_path, "r", encoding="utf-8") as handle:
+                documents = json.load(handle).get("documents", [])
+        except Exception:
+            documents = []
+    citations = []
+    for document in documents[:3]:
+        path = str(document.get("path", "")).strip()
+        if path:
+            citations.append({"path": path, "reason": "selected from QA context pack by headless test stub"})
+    if not citations:
+        citations = [{"path": "reports/taskruns/" + (run_id or "run-1") + "/qa/context-pack.json", "reason": "context pack was available but no source document was selected"}]
+    answer = {
+        "version": 1,
+        "run_id": run_id or "run-1",
+        "question": question or "test question",
+        "answer": "Headless test stub answered from the QA context pack.",
+        "citations": citations,
+        "unresolved": [],
+        "confidence": 0.74,
+        "provider": "headless-test-stub",
+        "generated_at": "2026-04-21T10:00:00Z",
+    }
+    with open(os.path.join(write_root, "qa-answer.json"), "w", encoding="utf-8") as handle:
+        json.dump(answer, handle)
 
 if step_id in {"init.step1.collect", "refresh.step1.collect"} and write_root:
     os.makedirs(write_root, exist_ok=True)
@@ -3334,6 +3597,40 @@ func (parseFailureRunner) Run(context.Context, acpruntime.Task) (acpruntime.Resu
 }
 
 func (parseFailureRunner) Preflight(context.Context) error {
+	return nil
+}
+
+type qaInvalidCitationRunner struct{}
+
+func (qaInvalidCitationRunner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	if err := os.MkdirAll(task.WriteRoot, 0o755); err != nil {
+		return acpruntime.Result{}, err
+	}
+	answer := map[string]any{
+		"version":      1,
+		"run_id":       task.RunID,
+		"question":     task.Question,
+		"answer":       "This answer cites a taskrun audit artifact instead of context-pack evidence.",
+		"citations":    []map[string]string{{"path": "reports/taskruns/" + task.RunID + "/qa/context-pack.json", "reason": "invalid audit citation"}},
+		"unresolved":   []string{},
+		"confidence":   0.8,
+		"provider":     "qa-invalid-citation",
+		"generated_at": "2026-05-26T18:30:00Z",
+	}
+	raw, err := json.MarshalIndent(answer, "", "  ")
+	if err != nil {
+		return acpruntime.Result{}, err
+	}
+	raw = append(raw, '\n')
+	if err := os.WriteFile(filepath.Join(task.WriteRoot, "qa-answer.json"), raw, 0o644); err != nil {
+		return acpruntime.Result{}, err
+	}
+	return acpruntime.Result{
+		Execution: acpruntime.NewExecution(task, acpruntime.ProviderClaudeCode, "test", "succeeded", task.StartedAtUTC.Add(time.Second), nil),
+	}, nil
+}
+
+func (qaInvalidCitationRunner) Preflight(context.Context) error {
 	return nil
 }
 
