@@ -66,6 +66,7 @@ EP-20260525-frontend-live-e2e-diagnostics
 ### Goals (must have)
 - [x] Keep Playwright as the canonical CLI/release-gate harness; Browser/Chrome MCP remains manual diagnostic only.
 - [x] Split frontend live failure reasons into `browser_closed`, `api_unreachable`, `server_exited`, `active_run_timeout`, and fallback `playwright_failed`.
+- [x] Split post-merge frontend live backend-run failures into `runtime_run_failed` instead of collapsing them into fallback `playwright_failed`.
 - [x] Make long backend polling independent from the browser page object.
 - [x] Persist frontend result diagnostics: server PID/exit code, post-failure health, run id, last run status/current step, and diagnostic refs.
 - [x] Add stub regression tests for the new frontend classifications.
@@ -111,6 +112,7 @@ EP-20260525-frontend-live-e2e-diagnostics
 ### Progress log
 - 2026-05-25: Started implementation after stopping `release-fast-20260525T104842Z`; evidence showed independent frontend init failures for Claude browser lifecycle and Codex API/server reachability.
 - 2026-05-25: Implemented additive reason taxonomy, post-failure diagnostics, independent API polling, stub regression coverage, diagnostic page-close smoke, and docs sync; local DoD passed.
+- 2026-05-26: Follow-up release-fast triage found a stable `claude-code` init failure where Playwright correctly observed the backend run had already failed with `runner_unavailable`; adding `runtime_run_failed` classification plus `last_run_error_code` diagnostics.
 
 ### Plan ID
 EP-20260525-proven-arch-ui-console

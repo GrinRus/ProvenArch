@@ -186,6 +186,7 @@ if candidate is None:
 if not isinstance(candidate, dict):
     candidate = {}
 print(f"last_run_status={str(candidate.get('status') or '').strip()}")
+print(f"last_run_error_code={str(candidate.get('error_code') or '').strip()}")
 print(f"last_run_current_step={str(candidate.get('current_step') or '').strip()}")
 PY
 }
@@ -414,6 +415,7 @@ server_exit_code=""
 health_after_failure="not_checked"
 frontend_run_id=""
 last_run_status=""
+last_run_error_code=""
 last_run_current_step=""
 playwright_cmd=("$NPM_BIN" run --prefix ui e2e:live)
 if [[ "$UI_E2E_HEADED" == "1" ]]; then
@@ -453,11 +455,19 @@ if ! (
       last_run_status)
         last_run_status="$value"
         ;;
+      last_run_error_code)
+        last_run_error_code="$value"
+        ;;
       last_run_current_step)
         last_run_current_step="$value"
         ;;
     esac
   done < <(resolve_last_run_snapshot "$frontend_run_id" "$health_after_failure")
+  if [[ "$reason" == "$ACP_FRONTEND_REASON_PLAYWRIGHT_FAILED" && "$last_run_status" == "failed" ]]; then
+    reason="$ACP_FRONTEND_REASON_RUNTIME_RUN_FAILED"
+  elif [[ "$reason" == "$ACP_FRONTEND_REASON_PLAYWRIGHT_FAILED" ]] && grep -q "terminated before inspect stage: status=failed" "$PLAYWRIGHT_LOG"; then
+    reason="$ACP_FRONTEND_REASON_RUNTIME_RUN_FAILED"
+  fi
 else
   health_after_failure="not_applicable"
 fi
@@ -479,6 +489,7 @@ export FRONTEND_E2E_SERVER_EXIT_CODE="$server_exit_code"
 export FRONTEND_E2E_HEALTH_AFTER_FAILURE="$health_after_failure"
 export FRONTEND_E2E_RUN_ID="$frontend_run_id"
 export FRONTEND_E2E_LAST_RUN_STATUS="$last_run_status"
+export FRONTEND_E2E_LAST_RUN_ERROR_CODE="$last_run_error_code"
 export FRONTEND_E2E_LAST_RUN_CURRENT_STEP="$last_run_current_step"
 export FRONTEND_E2E_PLAYWRIGHT_RESULTS_DIR="$PLAYWRIGHT_RESULTS_DIR"
 acp_frontend_reason_validate "$FRONTEND_E2E_REASON" die
@@ -505,6 +516,7 @@ payload = {
     "health_after_failure": os.environ.get("FRONTEND_E2E_HEALTH_AFTER_FAILURE"),
     "run_id": os.environ.get("FRONTEND_E2E_RUN_ID") or None,
     "last_run_status": os.environ.get("FRONTEND_E2E_LAST_RUN_STATUS") or None,
+    "last_run_error_code": os.environ.get("FRONTEND_E2E_LAST_RUN_ERROR_CODE") or None,
     "last_run_current_step": os.environ.get("FRONTEND_E2E_LAST_RUN_CURRENT_STEP") or None,
     "diagnostic_refs": {
         "server_log": os.environ.get("FRONTEND_E2E_SERVER_LOG"),
