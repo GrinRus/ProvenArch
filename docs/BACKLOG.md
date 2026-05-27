@@ -220,6 +220,89 @@ Suggested PR slices:
 - `15C baseline prompt packs`
 - `15D UI editing/validation integration`
 
+## Epic 16 — ACP Console V2 UX + Live E2E Coverage
+
+Acceptance:
+- целевой UI baseline зафиксирован в `docs/UI_CONSOLE_V2_DESIGN.md`
+- approved visual references сохранены в `docs/assets/ui-console-v2/*.png`
+- UI остаётся stage-based console с 8 стадиями `Source / Readiness / Charter / Analysis / Review / Proposals / Ask / Publish`
+- общий shell включает top health strip, compact stage rail, center workbench, right inspector и bottom activity drawer
+- `Analysis` показывает run timeline, shard table, blockers, evidence refs, runtime safety и live logs на одном экране
+- `Review` получает две первичные рабочие поверхности: evidence workbench и domain map
+- `Proposals` показывает proposal/changelog review, linked evidence, unresolved blockers и publication path
+- `Ask` показывает async read-only Q&A run history, answer trust, citations, unresolved assumptions и runtime safety
+- `Publish` показывает Git review room: folder diff summary, preview/diff/evidence tabs, publish gate, checklist, commit plan и proposal branch
+- существующие backend API, runtime artifact schemas, CLI flags и workspace contracts не меняются в UI-only slice
+- screen data source map зафиксирован в design baseline; недостающие данные показываются как explicit partial/empty state вместо неявного backend/API изменения
+- стабильные `data-testid` либо сохраняются, либо мигрируются вместе с UI/unit/live E2E tests
+- live E2E логика обновлена под новый shell/stages и проверяет не только happy path, но и evidence/logs/runtime safety/Git publication surfaces
+- V2 live E2E сохраняет существующую reason taxonomy (`active_run_timeout`, `runtime_run_failed`, `browser_closed`, `api_unreachable`, `server_exited`, `playwright_failed`) и не вводит новые failure classes без отдельного slice
+- frontend result JSON и Playwright diagnostics содержат scenario, reason, run id, last run status/error/current step, screenshots/traces/log refs и black-box evidence refs when available
+- required CI остаётся deterministic/fake; live provider checks остаются manual trusted-machine release gate по runbook
+
+Suggested PR slices:
+- `16A UI V2 shell foundation`
+  - unified top health strip/stage rail/right inspector/activity drawer primitives
+  - shared stage status model and responsive density rules
+  - baseline a11y/keyboard focus contract for rail, inspector and drawer
+  - data adapters stay on existing hooks/API clients; no new backend contract in this slice
+- `16B Source + Readiness consolidation`
+  - repo table, Git URL/local path mode, docs imports and advanced `workspace.yaml`
+  - readiness cards for workspace/repos/runtime/permissions/artifacts
+  - runtime profile summary without making advanced settings the primary flow
+- `16C Charter workbench`
+  - charter wizard summary + artifact preview/editor
+  - domain/team card overview and baseline prompt bundle status
+  - charter readiness and Git path in inspector
+- `16D Analysis mission control`
+  - run timeline for canonical step IDs
+  - shard table with failed shard drilldown
+  - blocker/evidence/runtime safety inspector and log adjacency
+- `16E Review evidence workbench`
+  - artifact explorer grouped by workspace folders
+  - markdown/diagram preview with claims/citations/coverage
+  - findings, coverage gaps, trust status and approve/flag actions
+- `16F Review domain map`
+  - domain/service map using existing derived model and edge artifacts
+  - ownership/coverage/cross-repo blocker inspector
+  - navigation from map entity to evidence/proposal/Git diff
+- `16G Proposals review room`
+  - ADR/RFC/proposal list and preview/diff/evidence/changelog tabs
+  - proposal quality, linked evidence and unresolved blocker handling
+  - proposal branch path surfaced before Publish
+- `16H Ask read-only Q&A console`
+  - async Q&A run history and selected answer view
+  - confidence/citations/unresolved/related entities and edges
+  - explicit no-mutation runtime safety messaging
+- `16I Publish gate`
+  - folder-level diff summary and selected artifact preview
+  - publish gate/checklist/blockers/commit plan/proposal branch
+  - prepared commit message copy/export actions
+- `16J UI V2 unit and accessibility coverage`
+  - stage rendering, inspector priority, drawer controls, keyboard navigation
+  - empty/loading/error/blocked states per critical stage
+  - responsive desktop/tablet collapse behavior
+- `16K Live E2E selector migration`
+  - update Playwright navigation to stage rail and V2 primary actions
+  - preserve core `data-testid` compatibility where possible
+  - add regression for hidden compatibility controls not receiving focus
+  - update `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact behavior changes, `scripts/frontend-live-e2e.sh`, `scripts/tests/frontend_live_e2e_contract_test.py` and any selector docs together
+- `16L Live E2E operator journey`
+  - fake-runtime required flow: Source -> Readiness -> Analysis -> Review -> Publish
+  - assert run status, blocker/evidence/logs/runtime safety/Git path surfaces
+  - capture diagnostic screenshots for each major stage on failure
+  - preserve trace/screenshot/video failure artifacts under Playwright `UI_E2E_OUTPUT_DIR`
+  - keep `init-inspect` and `cancel-refresh` as canonical release scenarios, with V2 assertions replacing legacy panel assumptions
+- `16M Live E2E Ask and domain-map diagnostics`
+  - async Ask submit/poll/result/citation checks
+  - domain-map render and selected domain evidence link checks
+  - keep provider-live variants optional and classified by existing reason taxonomy
+  - add `ask-readonly` as required fake/stub smoke and `domain-map-diagnostic` as optional release diagnostic until stable map fixtures exist
+- `16N Docs/runbook sync`
+  - update README/ARCHITECTURE UI description only after implementation
+  - update `docs/TESTING_STRATEGY.md` and `docs/RELEASE_LIVE_E2E_RUNBOOK.md` with V2 live E2E flow
+  - archive or update the active ExecPlan after owner review/merge
+
 ## Cleanup follow-up (post-beta, owner confirmation required)
 
 Открытые пункты после cleanup slice:
