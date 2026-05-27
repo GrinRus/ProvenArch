@@ -14,6 +14,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	"github.com/GrinRus/ProvenArch/internal/model"
 	"github.com/GrinRus/ProvenArch/internal/reports"
+	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
@@ -80,6 +81,8 @@ func runtimeAgentRole(stepID string) string {
 		return "shard-analyst"
 	case strings.HasSuffix(stepID, "step3.findings"):
 		return "validator-findings"
+	case acpruntime.IsQAStep(stepID):
+		return "system-analyst-qa"
 	default:
 		return "runtime"
 	}
@@ -92,6 +95,8 @@ func (e *pipelineExecution) runtimeArtifactContext(stepID string, shardID string
 		rel = runtimeShardArtifactRoot(e.runID, shardID)
 	case strings.HasSuffix(stepID, "step3.findings"):
 		rel = runtimeValidatorArtifactRoot(e.runID)
+	case acpruntime.IsQAStep(stepID):
+		rel = runtimeQATaskRoot(e.runID)
 	default:
 		rel = runtimeStepWriteRoot(e.runID, stepID)
 	}
@@ -113,6 +118,9 @@ func (e *pipelineExecution) runtimeArtifactContext(stepID string, shardID string
 	}
 
 	roots := []string{e.workspace.Path}
+	if acpruntime.IsQAStep(stepID) {
+		return rel, abs, abs, []string{abs}, nil
+	}
 	if strings.HasSuffix(stepID, "step3.findings") {
 		if finalAbs, resolveErr := e.workspace.Resolve(runtimeFinalArtifactRoot(e.runID)); resolveErr == nil {
 			roots = append(roots, finalAbs)

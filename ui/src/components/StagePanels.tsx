@@ -1,11 +1,11 @@
-import { Suspense, lazy, useState, type ComponentProps, type ReactNode } from "react";
+import { Suspense, lazy, useEffect, useState, type ComponentProps, type ReactNode } from "react";
 
 import { BaselineEditorsPanel } from "./BaselineEditorsPanel";
 import { BaselineGitPanel } from "./BaselineGitPanel";
 import { RuntimeProfileSettingsPanel } from "./RuntimeProfileSettingsPanel";
 import { RunStatusPanel } from "./RunStatusPanel";
 import { StatusBadge } from "./ConsolePrimitives";
-import { askArchitectureQuestion, type QAAskResponse } from "../lib/qaApi";
+import { getQARun, startQAQuestion, type QARunResponse } from "../lib/qaApi";
 import { formatTimestamp } from "../lib/runState";
 import type {
   Artifact,
@@ -750,10 +750,36 @@ export function ProposalsStagePanel({
 }
 
 export function AskStagePanel({ onOpenArtifact }: { onOpenArtifact: (path: string) => void }) {
-  const [question, setQuestion] = useState("Who owns payments-service?");
-  const [answer, setAnswer] = useState<QAAskResponse | null>(null);
+  const [question, setQuestion] = useState("");
+  const [qaRun, setQARun] = useState<QARunResponse | null>(null);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const qaRunActive = qaRun?.status === "queued" || qaRun?.status === "running";
+
+  useEffect(() => {
+    if (!qaRun?.run_id || !qaRunActive) {
+      return;
+    }
+    let canceled = false;
+    const refresh = async () => {
+      try {
+        const next = await getQARun(qaRun.run_id);
+        if (!canceled) {
+          setQARun(next);
+          setStatus(next.status === "succeeded" ? "Q&A run completed." : next.status === "failed" ? "Q&A run failed." : "Q&A run is running.");
+        }
+      } catch (error) {
+        if (!canceled) {
+          setStatus(error instanceof Error ? error.message : "Q&A run polling failed");
+        }
+      }
+    };
+    const interval = window.setInterval(() => void refresh(), 1000);
+    return () => {
+      canceled = true;
+      window.clearInterval(interval);
+    };
+  }, [qaRun?.run_id, qaRunActive]);
 
   async function handleAsk() {
     const trimmed = question.trim();
@@ -762,9 +788,20 @@ export function AskStagePanel({ onOpenArtifact }: { onOpenArtifact: (path: strin
       return;
     }
     setBusy(true);
+    setQARun(null);
     setStatus("");
     try {
-      setAnswer(await askArchitectureQuestion(trimmed));
+      const started = await startQAQuestion(trimmed);
+      setStatus("Q&A run queued.");
+      const detail = await getQARun(started.run_id);
+      setQARun(detail);
+      if (detail.status === "succeeded") {
+        setStatus("Q&A run completed.");
+      } else if (detail.status === "failed") {
+        setStatus("Q&A run failed.");
+      } else {
+        setStatus("Q&A run is running.");
+      }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Q&A request failed");
     } finally {
@@ -777,28 +814,59 @@ export function AskStagePanel({ onOpenArtifact }: { onOpenArtifact: (path: strin
       <div className="stage-header">
         <div>
           <h1>Ask</h1>
-          <p className="hint">Ask read-only questions over charter cards, model, reports, and imported docs.</p>
+          <p className="hint">Ask agent-backed questions over existing workspace artifacts. Source repos and canonical outputs stay unchanged.</p>
         </div>
-        <StatusBadge tone="ok">read-only</StatusBadge>
+        <StatusBadge tone={qaRun?.status === "failed" ? "error" : qaRunActive ? "warn" : qaRun?.status === "succeeded" ? "ok" : "info"}>
+          {qaRun?.provider || qaRun?.runtime_provider || "agent-backed"}
+        </StatusBadge>
       </div>
       <label htmlFor="qaQuestion">Architecture question</label>
-      <textarea id="qaQuestion" value={question} onChange={(event) => setQuestion(event.target.value)} rows={3} data-testid="qa-question-input" />
-      <button type="button" onClick={handleAsk} disabled={busy} data-testid="qa-ask-btn">
-        Ask workspace
+      <textarea
+        id="qaQuestion"
+        value={question}
+        onChange={(event) => setQuestion(event.target.value)}
+        rows={3}
+        placeholder="Ask about ownership, dependencies, findings, proposals, or coverage in this workspace."
+        data-testid="qa-question-input"
+      />
+      <button type="button" onClick={handleAsk} disabled={busy || qaRunActive} data-testid="qa-ask-btn">
+        {qaRunActive ? "Agent is answering" : "Ask workspace"}
       </button>
       {status ? <p className="status warn">{status}</p> : null}
-      {answer ? (
+      {qaRun ? (
+        <div className="run-summary" data-testid="qa-run-status">
+          <p>
+            Run <code>{qaRun.run_id}</code> status: <strong>{qaRun.status}</strong>
+          </p>
+          <p>Runtime provider: {qaRun.provider || qaRun.runtime_provider || "pending"}</p>
+          <p>
+            <a href={`/api/pipeline/runs/${encodeURIComponent(qaRun.run_id)}/logs`} target="_blank" rel="noreferrer">
+              Open run logs
+            </a>
+          </p>
+          {qaRun.error ? <p className="status err">{qaRun.error}</p> : null}
+          <div className="actions">
+            <button type="button" className="link-button" onClick={() => onOpenArtifact(`reports/taskruns/${qaRun.run_id}/qa/context-pack.json`)}>
+              context-pack.json
+            </button>
+            <button type="button" className="link-button" onClick={() => onOpenArtifact(`reports/taskruns/${qaRun.run_id}/qa/runtime-execution.json`)}>
+              runtime-execution.json
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {qaRun?.answer ? (
         <div className="qa-answer" data-testid="qa-answer">
           <h2>Answer</h2>
-          <p>{answer.answer}</p>
-          <p className="hint">Confidence: {Math.round(answer.confidence * 100)}%</p>
-          {answer.unresolved.length > 0 ? <p className="status warn">Unresolved: {answer.unresolved.join(", ")}</p> : null}
+          <p>{qaRun.answer}</p>
+          <p className="hint">Confidence: {typeof qaRun.confidence === "number" ? Math.round(qaRun.confidence * 100) : 0}%</p>
+          {(qaRun.unresolved ?? []).length > 0 ? <p className="status warn">Unresolved: {(qaRun.unresolved ?? []).join(", ")}</p> : null}
           <h3>Citations</h3>
-          {answer.citations.length === 0 ? (
+          {(qaRun.citations ?? []).length === 0 ? (
             <p>No citations returned.</p>
           ) : (
             <ul>
-              {answer.citations.map((citation) => (
+              {(qaRun.citations ?? []).map((citation) => (
                 <li key={`${citation.path}-${citation.reason}`}>
                   <button type="button" className="link-button" onClick={() => onOpenArtifact(citation.path)}>
                     {citation.path}

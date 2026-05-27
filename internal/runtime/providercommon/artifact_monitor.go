@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
+	"github.com/GrinRus/ProvenArch/internal/qa"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/steppolicy"
 	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
@@ -142,12 +143,43 @@ func runtimeArtifactSnapshot(task acpruntime.Task) artifactSnapshot {
 		return collectArtifactSnapshot(task.WriteRoot)
 	case acpruntime.StepProviderStep3Findings:
 		return validatorArtifactSnapshot(task.WriteRoot)
+	case acpruntime.StepProviderQA:
+		return qaAnswerArtifactSnapshot(task)
 	default:
 		if runtimedrafts.IsDraftStep(task.StepID) {
 			return draftArtifactSnapshot(task)
 		}
 		return artifactSnapshot{}
 	}
+}
+
+func qaAnswerArtifactSnapshot(task acpruntime.Task) artifactSnapshot {
+	snapshot := artifactSnapshot{}
+	writeRoot := strings.TrimSpace(task.WriteRoot)
+	if writeRoot == "" {
+		return snapshot
+	}
+	answerPath := filepath.Join(filepath.Clean(writeRoot), "qa-answer.json")
+	if info, err := os.Stat(answerPath); err == nil && !info.IsDir() {
+		snapshot.ArtifactObserved = true
+		snapshot.LastMutation = info.ModTime().UTC()
+		snapshot.AuthoredFiles = 1
+		snapshot.WriteRootAuthoredFiles = 1
+		snapshot.State = "present"
+		answer, parseErr := qa.ValidateAnswerFile(answerPath)
+		contextPack, contextErr := readQAContextPack(task.ContextPackPath)
+		var validationErr error
+		if parseErr == nil && contextErr == nil {
+			validationErr = qa.ValidateAnswerAgainstContext(answer, contextPack)
+		}
+		if parseErr != nil || contextErr != nil || validationErr != nil {
+			snapshot.State = "invalid"
+		} else {
+			snapshot.Valid = true
+			snapshot.State = "valid"
+		}
+	}
+	return snapshot
 }
 
 func collectArtifactSnapshot(writeRoot string) artifactSnapshot {

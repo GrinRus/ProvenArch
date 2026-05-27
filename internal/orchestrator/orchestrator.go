@@ -24,6 +24,7 @@ type Pipeline string
 const (
 	PipelineInit    Pipeline = "init"
 	PipelineRefresh Pipeline = "refresh"
+	PipelineQA      Pipeline = "qa"
 )
 
 const (
@@ -99,6 +100,7 @@ type RunInfo struct {
 	Status             RunStatus                      `json:"status"`
 	StartedAt          time.Time                      `json:"started_at"`
 	FinishedAt         *time.Time                     `json:"finished_at,omitempty"`
+	Question           string                         `json:"question,omitempty"`
 	CurrentStep        string                         `json:"current_step,omitempty"`
 	StepProviders      map[string]string              `json:"step_providers,omitempty"`
 	Warnings           []string                       `json:"warnings,omitempty"`
@@ -117,6 +119,7 @@ type RunRequest struct {
 	Workspace      workspace.Root
 	Pipeline       Pipeline
 	NonInteractive bool
+	Question       string
 }
 
 type runHistorySnapshot struct {
@@ -130,6 +133,7 @@ type runHistoryItem struct {
 	Status             RunStatus                      `json:"status"`
 	StartedAt          string                         `json:"started_at"`
 	FinishedAt         *string                        `json:"finished_at,omitempty"`
+	Question           string                         `json:"question,omitempty"`
 	CurrentStep        string                         `json:"current_step,omitempty"`
 	StepProviders      map[string]string              `json:"step_providers,omitempty"`
 	Warnings           []string                       `json:"warnings,omitempty"`
@@ -311,6 +315,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		Pipeline:      string(request.Pipeline),
 		Status:        RunStatusRunning,
 		StartedAt:     startedAt,
+		Question:      strings.TrimSpace(request.Question),
 		CurrentStep:   resumeFromStep,
 		StepProviders: map[string]string{},
 		Warnings:      append([]string(nil), initialWarnings...),
@@ -359,6 +364,9 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 			"run failed: ensure workspace layout",
 			nil,
 		)
+	}
+	if request.Pipeline == PipelineQA {
+		return s.runQAWithID(ctx, request, runID, initialInfo, initialArtifacts, resolvedStepProviders)
 	}
 	resolvedExecution := s.ResolveExecutionProfile(request.Workspace.Manifest)
 	resolvedPermissions := acpruntime.ResolvePermissions(request.Workspace.Manifest)

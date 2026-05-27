@@ -217,7 +217,7 @@ func ensureQwenActivityArgs(args []string) []string {
 			break
 		}
 	}
-	normalized := make([]string, 0, len(args)+len(extra))
+	normalized := []string{}
 	normalized = append(normalized, args[:promptIndex]...)
 	normalized = append(normalized, extra...)
 	normalized = append(normalized, args[promptIndex:]...)

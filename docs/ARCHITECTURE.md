@@ -26,7 +26,7 @@
    - startup для `serve` lenient: без блокирующего repo preflight; readiness diagnostics доступны через `/api/workspace/validate`
    - Поддерживает batch/non-interactive режим для CI jobs
    - `run` выполняет deterministic `init|refresh` pipeline в local/batch/non-interactive execution
-   - `qa` даёт read-only ответы по артефактам workspace
+   - `qa` даёт deterministic compatibility ответы по артефактам workspace; UI target Ask использует async runtime-backed Q&A runs
    - `doctor` выполняет read-only readiness checks для local install/workspace/repo/runtime/UI; CLI exit codes: `0` ready, `1` user-fixable issues, `2` invalid flags/internal request error
    - `version` / `--version` печатает build metadata (`version`, `commit`, `built`) для проверки release binary без workspace
    - runtime selector process-scoped: `fake` default для required CI, `headless` opt-in
@@ -56,7 +56,7 @@
    - Показывает `Run status` выбранного run с полным warnings list (`RunInfo.warnings`), `error_code` и `error`
    - Bottom activity drawer показывает logs для выбранного run (`timestamp/level/step/domain/message`) с dual-view `event timeline | raw agent stream | all`, переключателем `line | line+fields` и quick actions `Copy logs`, `Download logs`, `Open runtime execution artifact`
    - `Review` объединяет coverage, open questions, artifacts и `reports/diagrams/*` Mermaid previews; `Proposals` фокусируется на proposal/changelog artifacts
-   - `Ask` stage вызывает существующий read-only `POST /api/qa/ask` и показывает answer, citations, unresolved и confidence; этот flow deterministic workspace-backed и не вызывает headless provider/runtime mutation
+   - `Ask` stage вызывает async `POST /api/qa/runs`, poll-ит `GET /api/qa/runs/<run_id>` и показывает runtime/provider identity, answer, citations, unresolved и confidence; legacy deterministic `POST /api/qa/ask` остаётся compatibility endpoint для CLI/API consumers
    - Поддерживает `Cancel selected run` для active run через `POST /api/pipeline/runs/<run_id>/cancel`
    - Runtime Timeouts settings panel:
      - load/save/reset через `GET/PUT /api/runtime/timeouts`
@@ -160,7 +160,7 @@
    - Domain Analyst Agent (per domain)
    - Team overlay через `charter/cards/teams/*`
    - Architect Aggregator Agent (анализ outputs domain-агентов)
-   - System Analyst Q&A capability (UI stage `Ask` + deterministic workspace-backed read-only service + CLI `acp qa` + `POST /api/qa/ask`; не headless runtime agent)
+   - System Analyst Q&A capability: target UI flow is async runtime-backed `qa.ask` with agent role `system-analyst-qa`; deterministic workspace-backed `acp qa` + `POST /api/qa/ask` remain compatibility/fake baseline surfaces
    - Базовые skill/prompt bundles поставляются вместе с продуктом и versioned в workspace
 
 5) **Runtime providers (`internal/runtime/*`)** *(implemented baseline)*
@@ -276,7 +276,8 @@
 4) Proposals -> agent-authored drafts + automatic promotion + derived model rebuild
 
 On-demand capability:
-- Q&A capability использует `charter/cards + model + reports + configured docs.imports_path`; в beta доступна как UI stage `Ask` + deterministic internal service + CLI `acp qa` + public read-only `POST /api/qa/ask`, без headless runtime provider и без runtime consumption `skills/prompt-packs/qa.md`.
+- Target Q&A capability использует async runtime-backed run `pipeline="qa"` / step id `qa.ask`: orchestrator собирает deterministic `reports/taskruns/<run_id>/qa/context-pack.json` из `charter/cards`, `model`, `reports/as-is`, `reports/findings`, `reports/coverage`, `proposals`, `reports/changelog` и configured `docs.imports_path`, исключая `reports/taskruns/**`; runtime provider с role `system-analyst-qa` и `skills/prompt-packs/qa.md` пишет только `reports/taskruns/<run_id>/qa/qa-answer.json`.
+- Current compatibility surfaces `acp qa` и `POST /api/qa/ask` остаются deterministic workspace-backed read-only service без runtime invocation до полной миграции внешних consumers.
 
 Execution modes:
 - local interactive: UI + local process
@@ -301,7 +302,7 @@ Execution modes:
 
 ## Boundary notes
 - Native GitHub/GitLab webhook listener, hosted control plane and external SCM app integration остаются вне MVP; required integration surface — CLI batch job, optional trusted internal API trigger.
-- Q&A API is read-only and deterministic; it does not call headless providers, git helpers or pipeline runs.
+- Async Q&A API writes only run-scoped audit artifacts under `reports/taskruns/<run_id>/qa/` and must not mutate source repos or canonical architecture outputs. Legacy `POST /api/qa/ask` remains read-only and deterministic.
 
 ## Progress tracking
 - Каноническая матрица stakeholder-статусов: `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.

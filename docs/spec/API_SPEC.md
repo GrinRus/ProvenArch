@@ -439,7 +439,8 @@ Partial update persisted permission-полей в `workspace.yaml`.
         "step1_collect": "claude-code",
         "step2_as_is": "qwen-code",
         "step3_findings": "claude-code",
-        "step4_proposals": "claude-code"
+        "step4_proposals": "claude-code",
+        "qa": "claude-code"
       }
     },
     "source": {
@@ -471,7 +472,8 @@ Partial update persisted permission-полей в `workspace.yaml`.
       "step1_collect": "claude-code",
       "step2_as_is": "qwen-code",
       "step3_findings": "claude-code",
-      "step4_proposals": "claude-code"
+      "step4_proposals": "claude-code",
+      "qa": "claude-code"
     },
     "source": {
       "step2_as_is": "workspace"
@@ -639,7 +641,7 @@ Partial update persisted permission-полей в `workspace.yaml`.
 - `run_partial_failed` — run завершён после `best_effort` shard execution, но один или более shard-ов завершились ошибкой.
 
 ### GET `/api/pipeline/runs?limit=<n>`
-Возвращает список запусков pipeline (queued/running/succeeded/failed), отсортированный по `started_at desc`.
+Возвращает список запусков analysis pipeline (`init|refresh`, queued/running/succeeded/failed), отсортированный по `started_at desc`. Q&A runs (`pipeline="qa"`) имеют отдельный endpoint `/api/qa/runs` и в этот список не включаются.
 
 Параметры:
 - `limit` optional, default `50`, max `500`
@@ -660,7 +662,8 @@ Partial update persisted permission-полей в `workspace.yaml`.
         "step1_collect": "claude-code",
         "step2_as_is": "qwen-code",
         "step3_findings": "claude-code",
-        "step4_proposals": "claude-code"
+        "step4_proposals": "claude-code",
+        "qa": "claude-code"
       },
       "pending_permissions": [],
       "warnings": [],
@@ -840,10 +843,107 @@ Partial update persisted permission-полей в `workspace.yaml`.
 { "ok": true, "branch": "proposal/beta-refresh" }
 ```
 
-## 6) Q&A endpoint
+## 6) Q&A endpoints
+
+### POST `/api/qa/runs`
+Starts an async agent-backed Q&A run over existing workspace artifacts.
+
+Target flow:
+- API creates run with `pipeline="qa"` and current step `qa.ask`;
+- orchestrator writes `reports/taskruns/<run_id>/qa/context-pack.json`;
+- selected runtime provider/fake baseline writes `reports/taskruns/<run_id>/qa/qa-answer.json`;
+- ACP validates `qa-answer.json` and returns the structured answer via `GET /api/qa/runs/<run_id>`.
+
+Request:
+```json
+{ "question": "Who owns payments-service?" }
+```
+
+Unknown fields and malformed JSON are rejected.
+
+**202**
+```json
+{
+  "run_id": "run_20260403_001",
+  "status": "queued"
+}
+```
+
+**400**
+- `invalid_request_body`
+- `question_required`
+- `qa_run_start_failed`
+
+### GET `/api/qa/runs/<run_id>`
+Returns Q&A run status and answer fields when ready.
+
+**200**
+```json
+{
+  "run_id": "run_20260403_001",
+  "pipeline": "qa",
+  "status": "succeeded",
+  "started_at": "2026-04-03T12:00:00Z",
+  "finished_at": "2026-04-03T12:00:02Z",
+  "question": "Who owns payments-service?",
+  "current_step": "qa.ask",
+  "step_providers": {
+    "qa": "codex-code"
+  },
+  "runtime_provider": "codex-code",
+  "provider": "codex-code",
+  "answer": "The available workspace evidence identifies Platform Architecture as owner.",
+  "citations": [
+    {
+      "path": "reports/as-is/overview.md",
+      "reason": "ownership evidence"
+    }
+  ],
+  "unresolved": [],
+  "confidence": 0.82,
+  "generated_at": "2026-04-03T12:00:02Z",
+  "pending_permissions": [],
+  "warnings": [],
+  "error_code": null,
+  "error": null
+}
+```
+
+While queued/running, answer fields are `null`/empty and provider identity comes from resolved `runtime.profile.steps.qa.provider`. Failed runs return the failed run envelope without parsing partial `qa-answer.json` content. Succeeded runs expose citations only after the runtime answer has passed schema validation and citation paths have been cross-checked against `context-pack.json` `documents[].path`.
+
+**404**
+- `qa_run_not_found`
+
+**500**
+- `qa_answer_unavailable`
+
+### GET `/api/qa/runs?limit=<n>`
+Lists Q&A runs only, sorted by `started_at desc`.
+
+Parameters:
+- `limit` optional, default `20`, max `100`
+
+**200**
+```json
+{
+  "items": [
+    {
+      "run_id": "run_20260403_001",
+      "pipeline": "qa",
+      "status": "succeeded",
+      "question": "Who owns payments-service?",
+      "runtime_provider": "codex-code",
+      "provider": "codex-code"
+    }
+  ]
+}
+```
+
+**400**
+- `invalid_limit`
 
 ### POST `/api/qa/ask`
-Read-only Q&A over workspace artifacts. Endpoint uses deterministic `internal/qa` service and does not call headless runtime providers, git helpers or pipeline runs.
+Legacy compatibility endpoint for deterministic read-only Q&A over workspace artifacts. Endpoint uses deterministic `internal/qa` service and does not call headless runtime providers, git helpers or pipeline runs. New UI Ask uses `/api/qa/runs`.
 
 **Request**
 ```json
@@ -888,13 +988,16 @@ Unknown fields and malformed JSON are rejected.
 Run-specific поверхность (не входит в strict deterministic golden compare):
 - `reports/changelog/*`
 - `reports/taskruns/*`
+- `reports/taskruns/<run_id>/qa/context-pack.json`
+- `reports/taskruns/<run_id>/qa/qa-answer.json`
 - `reports/taskruns/run-history.json`
 - `reports/taskruns/logs/*`
 - runtime run registry/status (`/api/pipeline/runs/*`)
+- Q&A run registry/status (`/api/qa/runs/*`)
 
 ## 8) Boundary notes
 
-`POST /api/qa/ask` входит в текущий beta API surface как read-only endpoint.
+`POST /api/qa/runs` / `GET /api/qa/runs/*` are the target UI Ask API surface. `POST /api/qa/ask` remains in the beta API surface as a read-only deterministic compatibility endpoint.
 Каноническая фиксация runtime/Q&A boundary: `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.
 Native SCM webhook listener/hosted control plane остаются вне MVP; required CI/CD surface — CLI batch mode, optional trusted API trigger — local/private deployment only.
 

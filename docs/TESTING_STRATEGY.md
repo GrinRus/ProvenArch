@@ -22,6 +22,7 @@
   - `schemas/final-run-index.schema.json`
   - `schemas/citation-index.schema.json`
   - `schemas/validator-verdict.schema.json`
+  - `schemas/qa-answer.schema.json`
 - persisted `runtime-execution.json` metadata и artifact-only step contracts проходят parse/semantic validation
 - examples и fixture cases должны парситься и проходить contract validation, где это ожидается
 

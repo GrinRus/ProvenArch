@@ -28,6 +28,9 @@ func ComposeArtifactOnlyPrompt(provider acpruntime.Provider, task acpruntime.Tas
 	if firstAction := strings.TrimSpace(steppolicy.ProposalsFirstActionSection(task)); firstAction != "" {
 		sections = append(sections, firstAction)
 	}
+	if firstAction := strings.TrimSpace(steppolicy.QAFirstActionSection(task)); firstAction != "" {
+		sections = append(sections, firstAction)
+	}
 	sections = append(sections, SharedSections(task)...)
 	return strings.Join(sections, "\n\n")
 }

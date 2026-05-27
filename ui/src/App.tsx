@@ -39,7 +39,7 @@ const stageLabels: Record<StageId, { label: string; description: string }> = {
   analysis: { label: "Analysis", description: "Run pipeline" },
   review: { label: "Review", description: "Evidence & findings" },
   proposals: { label: "Proposals", description: "ADR/RFC drafts" },
-  ask: { label: "Ask", description: "Read-only Q&A" },
+  ask: { label: "Ask", description: "Agent-backed workspace Q&A" },
   publish: { label: "Publish", description: "Git workflow" },
 };
 
@@ -810,7 +810,7 @@ function deriveNextAction(
     case "ask":
       return {
         label: "Ask workspace",
-        description: "Submit a read-only architecture question from the Ask stage.",
+        description: "Submit an agent-backed question over existing workspace artifacts.",
         primaryActionId: "ask",
       };
     case "publish":

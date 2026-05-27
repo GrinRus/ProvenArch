@@ -17,7 +17,8 @@ func TestStakeholderMatrixIsCanonicalSource(t *testing.T) {
 
 	assertContains(t, content, "Canonical Stakeholder Matrix (source of truth)")
 	assertContains(t, content, "Runtime policy `fake` default + `headless` opt-in")
-	assertContains(t, content, "Q&A capability with UI + CLI + public read-only beta API surface")
+	assertContains(t, content, "Q&A capability with UI + CLI + public API surface")
+	assertContains(t, content, "/api/qa/runs")
 	assertContains(t, content, "POST /api/qa/ask")
 
 	if !strings.Contains(lower, "public `post /api/qa/ask` | done") {
@@ -73,14 +74,17 @@ func TestRuntimeAndQABoundaryConsistentAcrossDocs(t *testing.T) {
 					t.Fatalf("expected %s to mention runtime policy token %q", path, required)
 				}
 			}
+			if !strings.Contains(content, "/api/qa/runs") {
+				t.Fatalf("expected %s to mention /api/qa/runs target", path)
+			}
 			if !strings.Contains(content, "/api/qa/ask") {
-				t.Fatalf("expected %s to mention /api/qa/ask boundary", path)
+				t.Fatalf("expected %s to mention /api/qa/ask compatibility boundary", path)
 			}
 			if !strings.Contains(content, "read-only") && !strings.Contains(content, "read only") {
 				t.Fatalf("expected %s to mark /api/qa/ask as read-only", path)
 			}
-			if !strings.Contains(content, "headless") {
-				t.Fatalf("expected %s to keep non-headless Q&A boundary", path)
+			if !strings.Contains(content, "async") || !strings.Contains(content, "qa.ask") {
+				t.Fatalf("expected %s to document async qa.ask target", path)
 			}
 			if strings.Contains(content, "/api/qa/ask не входит") || strings.Contains(content, "/api/qa/ask remains follow-up") {
 				t.Fatalf("expected %s not to mark /api/qa/ask as outside beta surface", path)
@@ -144,15 +148,15 @@ func TestBaselineBundleInventoryDocumentsQASkill(t *testing.T) {
 	assertContains(t, pipelineBaseline, "  - `qa`")
 }
 
-func TestQABetaBoundaryDocumentsDeterministicService(t *testing.T) {
+func TestQABoundaryDocumentsAsyncTargetAndDeterministicCompatibility(t *testing.T) {
 	t.Parallel()
 
 	requiredByPath := map[string]string{
-		"README.md":                  "deterministic workspace-backed read-only service + UI stage `Ask` + CLI `acp qa` + public read-only `POST /api/qa/ask`; он не запускает новый live analysis и не меняет workspace",
-		"docs/ARCHITECTURE.md":       "UI stage `Ask` + deterministic workspace-backed read-only service + CLI `acp qa` + `POST /api/qa/ask`; не headless runtime agent",
-		"docs/STAKEHOLDER_DOC.md":    "deterministic workspace-backed read-only capability доступна как UI stage `Ask` + internal service + CLI `acp qa` + public read-only `POST /api/qa/ask`; это не headless runtime agent",
-		"docs/spec/PIPELINE_SPEC.md": "deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask`",
-		"docs/BACKLOG.md":            "deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask`",
+		"README.md":                  "UI stage `Ask` uses async runtime-backed `POST /api/qa/runs`",
+		"docs/ARCHITECTURE.md":       "Target Q&A capability использует async runtime-backed run `pipeline=\"qa\"` / step id `qa.ask`",
+		"docs/STAKEHOLDER_DOC.md":    "UI stage `Ask` target — async runtime-backed `qa.ask` run",
+		"docs/spec/PIPELINE_SPEC.md": "Target System Analyst Q&A capability работает как async runtime-backed run",
+		"docs/BACKLOG.md":            "target on-demand Q&A capability доступна как async runtime-backed UI/API flow",
 	}
 	for path, required := range requiredByPath {
 		path := path
@@ -161,13 +165,12 @@ func TestQABetaBoundaryDocumentsDeterministicService(t *testing.T) {
 			t.Parallel()
 			content := readDoc(t, path)
 			assertContains(t, content, required)
+			assertContains(t, content, "/api/qa/runs")
 			assertContains(t, content, "POST /api/qa/ask")
-			if path == "README.md" {
-				assertNotContains(t, content, "skills/prompt-packs/qa.md")
-			} else {
+			assertContains(t, content, "compat")
+			if path != "README.md" {
 				assertContains(t, content, "skills/prompt-packs/qa.md")
 			}
-			assertNotContains(t, content, "System Analyst Q&A Agent")
 		})
 	}
 }
@@ -178,10 +181,15 @@ func TestQAPublicAPIDocsMatchImplementedRoute(t *testing.T) {
 	apiSpec := readDoc(t, "docs/spec/API_SPEC.md")
 	server := readDoc(t, "internal/api/server.go")
 	assertContains(t, server, `mux.HandleFunc("/api/qa/ask", s.handleQAAsk)`)
+	assertContains(t, server, `mux.HandleFunc("/api/qa/runs", s.handleQARuns)`)
+	assertContains(t, apiSpec, "### POST `/api/qa/runs`")
+	assertContains(t, apiSpec, "### GET `/api/qa/runs/<run_id>`")
 	assertContains(t, apiSpec, "### POST `/api/qa/ask`")
 	assertContains(t, apiSpec, "question_required")
 	assertContains(t, apiSpec, "qa_failed")
-	assertContains(t, apiSpec, "does not call headless runtime providers, git helpers or pipeline runs")
+	assertContains(t, apiSpec, "qa_run_start_failed")
+	assertContains(t, apiSpec, "qa_answer_unavailable")
+	assertContains(t, apiSpec, "Legacy compatibility endpoint")
 }
 
 func TestSCMWebhookBoundaryDocumentsExternalCIOnly(t *testing.T) {

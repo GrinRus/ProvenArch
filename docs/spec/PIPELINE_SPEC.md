@@ -17,6 +17,7 @@ Docs-first contract schemas для live pipeline:
 - `schemas/final-run-index.schema.json`
 - `schemas/citation-index.schema.json`
 - `schemas/validator-verdict.schema.json`
+- `schemas/qa-answer.schema.json`
 
 Artifact ownership:
 - provider-authored runtime artifacts: `shard-pack-manifest.json`, runtime draft manifests/files и `validator-verdict.json`
@@ -167,6 +168,9 @@ Optional поля записи:
 - `refresh.step3.findings`
 - `refresh.step4.proposals`
 
+### Q&A run
+- `qa.ask`
+
 ## Runtime execution semantics
 
 Canonical MVP runtime shape:
@@ -183,6 +187,7 @@ Canonical MVP runtime shape:
 - для multi-repo `init|refresh.step3.findings` first-action `validator-verdict.json` skeleton обязан включать минимум один PASS-compatible cross-repo finding и один question с repo/path provenance и `related_ids` по нескольким repo scopes; пустой валидный verdict skeleton допустим только для single-repo validator tasks
 - для multi-repo release profiles cross-repo signal считается валидным только через explicit `semantic.edges[]`, finding provenance по нескольким repos или question `related_ids` по нескольким repo scopes при наличии repo-specific citation coverage; простое перечисление repos без связи остаётся `analysis:cross-repo-missing`
 - runtime execution metadata сохраняют только execution context, status, warnings и raw-output references
+- `qa.ask` is a runtime task family, not an init/refresh promotion step: ACP prepares `context-pack.json`, selected provider writes `qa-answer.json`, and canonical workspace artifacts/source repos are not mutated.
 - raw provider prompt argv payloads and stdout/stderr diagnostics are redacted before persistence and run-log streaming; lifecycle diagnostics keep prompt size, and prompt argv payloads are replaced with byte count + hash when present; stdout/stderr remain diagnostic only
 - deterministic fake runtime пишет provider `fake`; headless adapters пишут `claude-code`, `qwen-code` или `codex-code`
 
@@ -358,13 +363,25 @@ Runtime proposal contract:
 - Unknown owner не создаёт auto-team entity и не создаёт auto-card; это question/finding path.
 
 ## On-demand Q&A capability (MVP)
-- System Analyst Q&A capability в текущей beta работает как deterministic workspace-backed read-only service + CLI `acp qa` + public read-only `POST /api/qa/ask` поверх:
+- Target System Analyst Q&A capability работает как async runtime-backed run через API `POST /api/qa/runs` + `GET /api/qa/runs/<run_id>`:
+  - step id: `qa.ask`
+  - agent role: `system-analyst-qa`
+  - prompt pack: `skills/prompt-packs/qa.md`
+  - write scope: `reports/taskruns/<run_id>/qa/`
+  - required runtime artifact: `qa-answer.json`
+- Перед runtime invocation ACP собирает deterministic context pack из:
   - `charter/cards/*`
   - `model/*`
-  - `reports/*`
+  - `reports/as-is/*`
+  - `reports/findings/*`
+  - `reports/coverage/*`
+  - `proposals/*`
+  - `reports/changelog/*`
   - configured `docs.imports_path`
-- Capability не вызывает headless runtime provider, не использует `skills/prompt-packs/qa.md` как runtime prompt и не меняет workspace.
-- API response shape: `answer`, `citations`, `unresolved`, `confidence`.
+- `reports/taskruns/**` is excluded from the evidence corpus by default.
+- Runtime answer contract: `qa-answer.json` includes `version`, `run_id`, `question`, `answer`, `citations`, `unresolved`, `confidence`, `provider`, `generated_at`.
+- Runtime validator additionally rejects citation paths that are not workspace-relative paths present in `context-pack.json` `documents[].path`; `citations` may be empty when evidence is insufficient.
+- Current compatibility surfaces `acp qa` and public read-only `POST /api/qa/ask` remain deterministic workspace-backed service/fallback during migration.
 - Канонический stakeholder статус/границы по Q&A API фиксируются в `docs/STAKEHOLDER_DOC.md` (Canonical Stakeholder Matrix).
 
 ## Нефункциональные требования (MVP)

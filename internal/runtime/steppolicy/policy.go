@@ -125,12 +125,37 @@ func StepSpecificPolicy(stepID string) string {
 			`- outputs[].canonical_path values are allowed only under proposals/* or reports/changelog/*.`,
 			`- Do NOT register legacy top-level fields: pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps.`,
 		}, "\n")
+	case acpruntime.StepIDQAAsk:
+		return strings.Join([]string{
+			`STEP POLICY qa.ask:`,
+			`- Answer the user question only from the provided QA context pack.`,
+			`- Do NOT inspect source repositories, reports/taskruns history, raw logs, or sibling workspaces.`,
+			`- Do NOT mutate canonical workspace artifacts, source repositories, schemas, docs/spec, charter, reports, model, or proposals.`,
+			`- Write exactly one semantic answer artifact: qa-answer.json under write_root.`,
+			`- Every citation path must be one of the workspace-relative paths listed in context-pack.json documents[].path.`,
+			`- If context evidence is insufficient or contradictory, say so in unresolved instead of inventing owners, paths, decisions, or runtime outcomes.`,
+		}, "\n")
 	default:
 		if strings.HasPrefix(strings.TrimSpace(stepID), "refresh.") {
 			return `For refresh steps, keep unresolved gaps explicit in artifacts instead of inventing placeholder semantic payloads.`
 		}
 		return ""
 	}
+}
+
+func QAFirstActionSection(task acpruntime.Task) string {
+	if !acpruntime.IsQAStep(task.StepID) {
+		return ""
+	}
+	return strings.Join([]string{
+		`FIRST QA ANSWER COMMAND:`,
+		`- First read context-pack.json from the exact context_pack_path below.`,
+		`- Then write qa-answer.json to the exact absolute write_root target below before exiting successfully.`,
+		`- The JSON object must follow the canonical qa-answer shape exactly.`,
+		fmt.Sprintf(`- question = %q`, strings.TrimSpace(task.Question)),
+		fmt.Sprintf(`- context_pack_path = %q`, strings.TrimSpace(task.ContextPackPath)),
+		fmt.Sprintf(`- qa_answer_path = %q`, filepath.Join(strings.TrimSpace(task.WriteRoot), "qa-answer.json")),
+	}, "\n")
 }
 
 func DocFirstFilesystemPolicy(task acpruntime.Task) string {
@@ -169,6 +194,15 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 		lines = append(lines, `- Repo entrypoint hints are limited to actually existing files; do not assume README.md exists when it is absent.`)
 	}
 	switch strings.TrimSpace(task.StepID) {
+	case acpruntime.StepIDQAAsk:
+		lines = append(lines,
+			`- QA mode reads only the generated context pack and writes only qa-answer.json in write_root.`,
+			fmt.Sprintf(`- User question = %q`, strings.TrimSpace(task.Question)),
+			fmt.Sprintf(`- Context pack path = %q`, strings.TrimSpace(task.ContextPackPath)),
+			fmt.Sprintf(`- Absolute QA answer target: %q.`, filepath.Join(strings.TrimSpace(task.WriteRoot), "qa-answer.json")),
+			`- qa-answer.json canonical shape:`,
+			QAAnswerCanonicalExample(task),
+		)
 	case "init.step0.constitution":
 		lines = append(lines,
 			`- Do NOT delegate to agent/subagent helpers and do NOT use todo_write-style planning.`,
@@ -1036,9 +1070,39 @@ func WorkspacePromptPackPath(stepID string) string {
 		return "skills/prompt-packs/findings.md"
 	case "init.step4.proposals", "refresh.step4.proposals":
 		return "skills/prompt-packs/proposals.md"
+	case acpruntime.StepIDQAAsk:
+		return "skills/prompt-packs/qa.md"
 	default:
 		return ""
 	}
+}
+
+func QAAnswerCanonicalExample(task acpruntime.Task) string {
+	runID := strings.TrimSpace(task.RunID)
+	if runID == "" {
+		runID = "run_qa"
+	}
+	question := strings.TrimSpace(task.Question)
+	if question == "" {
+		question = "What architecture evidence is available?"
+	}
+	provider := strings.TrimSpace(string(acpruntime.StepProviderQA))
+	example := map[string]any{
+		"version":      1,
+		"run_id":       runID,
+		"question":     question,
+		"answer":       "Short answer grounded only in context-pack evidence.",
+		"citations":    []map[string]string{{"path": "reports/as-is/overview.md", "reason": "supports the stated architecture fact"}},
+		"unresolved":   []string{"missing owner evidence for the requested service"},
+		"confidence":   0.6,
+		"provider":     provider,
+		"generated_at": "2026-01-01T00:00:00Z",
+	}
+	raw, err := json.MarshalIndent(example, "", "  ")
+	if err != nil {
+		return `{"version":1}`
+	}
+	return string(raw)
 }
 
 func WorkspacePromptPackSection(task acpruntime.Task) string {

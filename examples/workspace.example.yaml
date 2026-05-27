@@ -43,3 +43,5 @@ runtime:
         provider: qwen-code
       step3_findings:
         provider: codex-code
+      qa:
+        provider: codex-code

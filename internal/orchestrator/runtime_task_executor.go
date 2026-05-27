@@ -14,12 +14,14 @@ import (
 )
 
 type RuntimeTaskRequest struct {
-	StepID     string
-	TaskSuffix string
-	RepoScopes []string
-	PathScopes []string
-	DomainID   string
-	ShardID    string
+	StepID          string
+	TaskSuffix      string
+	RepoScopes      []string
+	PathScopes      []string
+	DomainID        string
+	ShardID         string
+	Question        string
+	ContextPackPath string
 }
 
 type RuntimeTaskExecutor interface {
@@ -73,6 +75,8 @@ func (executor defaultRuntimeTaskExecutor) RunRuntimeTask(ctx context.Context, r
 		AgentRole:          runtimeAgentRole(stepID),
 		StepContract:       runtimeStepContract(stepID),
 		ExpectedArtifacts:  append([]string(nil), runtimeExpectedArtifacts(stepID)...),
+		Question:           strings.TrimSpace(request.Question),
+		ContextPackPath:    strings.TrimSpace(request.ContextPackPath),
 		RepoScope:          repoScope,
 		RepoScopes:         repoScopes,
 		PathScopes:         pathScopes,

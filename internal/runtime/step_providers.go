@@ -24,6 +24,8 @@ const (
 	StepProviderStep2AsIs         = "step2_as_is"
 	StepProviderStep3Findings     = "step3_findings"
 	StepProviderStep4Proposals    = "step4_proposals"
+	StepProviderQA                = "qa"
+	StepIDQAAsk                   = "qa.ask"
 )
 
 var orderedStepProviderKeys = []string{
@@ -32,6 +34,7 @@ var orderedStepProviderKeys = []string{
 	StepProviderStep2AsIs,
 	StepProviderStep3Findings,
 	StepProviderStep4Proposals,
+	StepProviderQA,
 }
 
 type StepProviderValues map[string]Provider
@@ -156,6 +159,8 @@ func StepProviderKeyForStepID(stepID string) string {
 		return StepProviderStep3Findings
 	case "init.step4.proposals", "refresh.step4.proposals":
 		return StepProviderStep4Proposals
+	case StepIDQAAsk:
+		return StepProviderQA
 	default:
 		return ""
 	}
@@ -185,6 +190,10 @@ func stepProviderValueForKey(cfg *workspace.RuntimeStepsConfig, key string) stri
 	case StepProviderStep4Proposals:
 		if cfg.Step4Proposals != nil {
 			return cfg.Step4Proposals.Provider
+		}
+	case StepProviderQA:
+		if cfg.QA != nil {
+			return cfg.QA.Provider
 		}
 	}
 	return ""

@@ -14,7 +14,7 @@
 7) При недостатке evidence система должна фиксировать gaps через coverage/questions/findings, а не выдумывать факты; canonical MVP shape для runtime — top-level `questions` и `coverage`.
 8) MVP extraction strategy не ограничивается фиксированным whitelist языков/стэков; используются headless providers (`claude-code|qwen-code|codex-code`) + baseline prompt/skill bundle, а при нехватке evidence фиксируются unknowns.
 9) В MVP обязателен встроенный baseline bundle agents/skills/prompts, versioned в workspace.
-10) Q&A API baseline фиксируется как read-only `POST /api/qa/ask` без mutation surface, headless runtime или prompt-backed QA agent.
+10) Q&A target фиксируется как async runtime-backed `POST /api/qa/runs` / `qa.ask` over existing workspace artifacts; deterministic read-only `POST /api/qa/ask` остаётся compatibility baseline. QA writes only `reports/taskruns/<run_id>/qa/*` and does not mutate source repos or canonical workspace outputs.
 11) `<docs.imports_path>/index.yaml` валидируется warning-only; отсутствие index допустимо.
 
 ## Policy для generated артефактов в репозитории

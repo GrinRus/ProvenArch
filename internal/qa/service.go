@@ -2,6 +2,7 @@ package qa
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -9,7 +10,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/GrinRus/ProvenArch/internal/validation"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
@@ -25,10 +28,217 @@ type Response struct {
 	Confidence float64    `json:"confidence"`
 }
 
+type Answer struct {
+	Version     int        `json:"version"`
+	RunID       string     `json:"run_id"`
+	Question    string     `json:"question"`
+	Answer      string     `json:"answer"`
+	Citations   []Citation `json:"citations"`
+	Unresolved  []string   `json:"unresolved"`
+	Confidence  float64    `json:"confidence"`
+	Provider    string     `json:"provider"`
+	GeneratedAt string     `json:"generated_at"`
+}
+
+type ContextPack struct {
+	Version     int               `json:"version"`
+	RunID       string            `json:"run_id"`
+	Question    string            `json:"question"`
+	GeneratedAt string            `json:"generated_at"`
+	Documents   []ContextDocument `json:"documents"`
+}
+
+type ContextDocument struct {
+	Path    string `json:"path"`
+	Weight  int    `json:"weight"`
+	Content string `json:"content"`
+}
+
 type Service struct{}
 
 func NewService() Service {
 	return Service{}
+}
+
+func (service Service) BuildContextPack(ctx context.Context, ws workspace.Root, question string, runID string, generatedAt time.Time) (ContextPack, error) {
+	question = strings.TrimSpace(question)
+	if question == "" {
+		return ContextPack{}, fmt.Errorf("question is required")
+	}
+	if generatedAt.IsZero() {
+		generatedAt = time.Now().UTC()
+	}
+	candidates, err := collectCandidates(ctx, ws)
+	if err != nil {
+		return ContextPack{}, err
+	}
+	tokens := tokenize(question)
+	ranked := rankContextCandidates(candidates, tokens)
+
+	const (
+		maxDocuments    = 60
+		maxTotalSize    = 2 * 1024 * 1024
+		maxDocumentSize = 96 * 1024
+	)
+	documents := make([]ContextDocument, 0, minInt(len(ranked), maxDocuments))
+	totalSize := 0
+	for _, candidate := range ranked {
+		select {
+		case <-ctx.Done():
+			return ContextPack{}, ctx.Err()
+		default:
+		}
+		content := candidate.Content
+		if len(content) > maxDocumentSize {
+			content = content[:maxDocumentSize]
+		}
+		if totalSize+len(content) > maxTotalSize && len(documents) > 0 {
+			continue
+		}
+		documents = append(documents, ContextDocument{
+			Path:    candidate.Path,
+			Weight:  candidate.Weight,
+			Content: content,
+		})
+		totalSize += len(content)
+		if len(documents) >= maxDocuments {
+			break
+		}
+	}
+
+	return ContextPack{
+		Version:     1,
+		RunID:       strings.TrimSpace(runID),
+		Question:    question,
+		GeneratedAt: generatedAt.UTC().Format(time.RFC3339),
+		Documents:   documents,
+	}, nil
+}
+
+func ParseAnswer(raw []byte) (Answer, error) {
+	if err := validation.ValidateRawJSON(validation.QAAnswerSchema, raw); err != nil {
+		return Answer{}, fmt.Errorf("qa answer is invalid: %w", err)
+	}
+	var answer Answer
+	if err := json.Unmarshal(raw, &answer); err != nil {
+		return Answer{}, fmt.Errorf("decode qa answer: %w", err)
+	}
+	if err := validateAnswer(answer); err != nil {
+		return Answer{}, err
+	}
+	return answer, nil
+}
+
+func ParseContextPack(raw []byte) (ContextPack, error) {
+	var pack ContextPack
+	if err := json.Unmarshal(raw, &pack); err != nil {
+		return ContextPack{}, fmt.Errorf("decode qa context pack: %w", err)
+	}
+	problems := []string{}
+	if pack.Version != 1 {
+		problems = append(problems, "version must be 1")
+	}
+	if strings.TrimSpace(pack.RunID) == "" {
+		problems = append(problems, "run_id is required")
+	}
+	if strings.TrimSpace(pack.Question) == "" {
+		problems = append(problems, "question is required")
+	}
+	if _, err := time.Parse(time.RFC3339, strings.TrimSpace(pack.GeneratedAt)); err != nil {
+		problems = append(problems, "generated_at must be RFC3339")
+	}
+	for idx, document := range pack.Documents {
+		label := fmt.Sprintf("documents[%d]", idx)
+		if _, ok := normalizeWorkspaceRelativeEvidencePath(document.Path); !ok {
+			problems = append(problems, label+".path must be workspace-relative")
+		}
+	}
+	if len(problems) > 0 {
+		sort.Strings(problems)
+		return ContextPack{}, fmt.Errorf("qa context pack is invalid: %s", strings.Join(problems, "; "))
+	}
+	return pack, nil
+}
+
+func ValidateAnswerFile(path string) (Answer, error) {
+	raw, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return Answer{}, err
+	}
+	return ParseAnswer(raw)
+}
+
+func ValidateAnswerAgainstContext(answer Answer, pack ContextPack) error {
+	if strings.TrimSpace(answer.RunID) != strings.TrimSpace(pack.RunID) {
+		return fmt.Errorf("qa answer run_id %q does not match context pack run_id %q", answer.RunID, pack.RunID)
+	}
+	if strings.TrimSpace(answer.Question) != strings.TrimSpace(pack.Question) {
+		return fmt.Errorf("qa answer question does not match context pack question")
+	}
+	contextPaths := map[string]struct{}{}
+	for _, document := range pack.Documents {
+		if normalized, ok := normalizeWorkspaceRelativeEvidencePath(document.Path); ok {
+			contextPaths[normalized] = struct{}{}
+		}
+	}
+	for _, citation := range answer.Citations {
+		normalized, ok := normalizeWorkspaceRelativeEvidencePath(citation.Path)
+		if !ok {
+			return fmt.Errorf("qa answer citation path %q is not a workspace-relative path", citation.Path)
+		}
+		if _, exists := contextPaths[normalized]; !exists {
+			return fmt.Errorf("qa answer citation path %q is not present in context pack documents", citation.Path)
+		}
+	}
+	return nil
+}
+
+func validateAnswer(answer Answer) error {
+	problems := []string{}
+	if answer.Version != 1 {
+		problems = append(problems, "version must be 1")
+	}
+	if strings.TrimSpace(answer.RunID) == "" {
+		problems = append(problems, "run_id is required")
+	}
+	if strings.TrimSpace(answer.Question) == "" {
+		problems = append(problems, "question is required")
+	}
+	if strings.TrimSpace(answer.Answer) == "" {
+		problems = append(problems, "answer is required")
+	}
+	if strings.TrimSpace(answer.Provider) == "" {
+		problems = append(problems, "provider is required")
+	}
+	if _, err := time.Parse(time.RFC3339, strings.TrimSpace(answer.GeneratedAt)); err != nil {
+		problems = append(problems, "generated_at must be RFC3339")
+	}
+	for idx, citation := range answer.Citations {
+		label := fmt.Sprintf("citations[%d]", idx)
+		if strings.TrimSpace(citation.Path) == "" {
+			problems = append(problems, label+".path is required")
+		}
+		if strings.TrimSpace(citation.Reason) == "" {
+			problems = append(problems, label+".reason is required")
+		}
+	}
+	if len(problems) > 0 {
+		sort.Strings(problems)
+		return fmt.Errorf("qa answer is invalid: %s", strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+func normalizeWorkspaceRelativeEvidencePath(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" || filepath.IsAbs(value) {
+		return "", false
+	}
+	cleaned := filepath.ToSlash(filepath.Clean(value))
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", false
+	}
+	return cleaned, true
 }
 
 func (Service) Ask(ctx context.Context, ws workspace.Root, question string) (Response, error) {
@@ -173,6 +383,21 @@ type indexedDocument struct {
 	Weight  int
 }
 
+func rankContextCandidates(candidates []indexedDocument, tokens []string) []indexedDocument {
+	ranked := append([]indexedDocument(nil), candidates...)
+	sort.SliceStable(ranked, func(i, j int) bool {
+		leftHits, _ := countTokenHits(strings.ToLower(ranked[i].Content), tokens)
+		rightHits, _ := countTokenHits(strings.ToLower(ranked[j].Content), tokens)
+		leftScore := leftHits*100 + ranked[i].Weight*10 - pathDepthPenalty(ranked[i].Path)
+		rightScore := rightHits*100 + ranked[j].Weight*10 - pathDepthPenalty(ranked[j].Path)
+		if leftScore == rightScore {
+			return ranked[i].Path < ranked[j].Path
+		}
+		return leftScore > rightScore
+	})
+	return ranked
+}
+
 func tokenize(input string) []string {
 	input = strings.ToLower(strings.TrimSpace(input))
 	if input == "" {
@@ -265,6 +490,7 @@ func collectCandidates(ctx context.Context, ws workspace.Root) ([]indexedDocumen
 		"charter/cards",
 		"model",
 		"reports",
+		"proposals",
 	}
 	if importsRoot != "" {
 		walkRoots = append(walkRoots, importsRoot)
@@ -293,6 +519,10 @@ func collectCandidates(ctx context.Context, ws workspace.Root) ([]indexedDocumen
 				return walkErr
 			}
 			if entry.IsDir() {
+				rel, relErr := filepath.Rel(ws.Path, path)
+				if relErr == nil && shouldSkipContextWalkDir(filepath.ToSlash(rel)) {
+					return filepath.SkipDir
+				}
 				return nil
 			}
 			if !isIndexableExtension(filepath.Ext(entry.Name())) {
@@ -341,6 +571,16 @@ func collectCandidates(ctx context.Context, ws workspace.Root) ([]indexedDocumen
 		})
 	}
 	return out, nil
+}
+
+func shouldSkipContextWalkDir(rel string) bool {
+	rel = strings.Trim(filepath.ToSlash(filepath.Clean(rel)), "/")
+	switch rel {
+	case "reports/taskruns":
+		return true
+	default:
+		return false
+	}
 }
 
 func workspaceRelativePath(value string) string {

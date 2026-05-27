@@ -155,6 +155,7 @@ Managed policy первого slice:
 - `step2_as_is.provider`
 - `step3_findings.provider`
 - `step4_proposals.provider`
+- `qa.provider`
 
 Допустимые значения provider:
 - `claude-code`
@@ -164,6 +165,7 @@ Managed policy первого slice:
 Назначение:
 - step-scoped override для headless provider resolution;
 - позволяет смешивать providers между соседними шагами одного run, не меняя global execution knobs.
+- `qa.provider` управляет provider для async Ask step id `qa.ask`.
 
 Precedence effective provider для конкретного шага:
 - `runtime.profile.steps.<step>.provider`
@@ -219,6 +221,8 @@ runtime:
         provider: qwen-code
       step4_proposals:
         provider: claude-code
+      qa:
+        provider: codex-code
 ```
 
 ## 7) Validation expectations

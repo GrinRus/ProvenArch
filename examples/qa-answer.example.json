@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "run_id": "run-qa-123",
+  "question": "Who owns payments-service?",
+  "answer": "The available workspace evidence identifies Platform Architecture as owner.",
+  "citations": [
+    {
+      "path": "reports/as-is/overview.md",
+      "reason": "ownership evidence"
+    },
+    {
+      "path": "model/entities/svc.payments-service.yaml",
+      "reason": "service owner metadata"
+    }
+  ],
+  "unresolved": [],
+  "confidence": 0.82,
+  "provider": "codex-code",
+  "generated_at": "2026-04-03T12:00:02Z"
+}

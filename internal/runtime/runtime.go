@@ -166,6 +166,8 @@ type Task struct {
 	AgentRole          string
 	StepContract       string
 	ExpectedArtifacts  []string
+	Question           string
+	ContextPackPath    string
 	RepoScope          string
 	RepoScopes         []string
 	PathScopes         []string
@@ -250,6 +252,10 @@ func IsCollectStep(stepID string) bool {
 	default:
 		return false
 	}
+}
+
+func IsQAStep(stepID string) bool {
+	return strings.TrimSpace(stepID) == StepIDQAAsk
 }
 
 func ResolveHeadlessWorkingDirectory(task Task) string {

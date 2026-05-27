@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
@@ -54,6 +55,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/git/commit", s.handleGitCommit)
 	mux.HandleFunc("/api/git/proposal-branch", s.handleGitProposalBranch)
 	mux.HandleFunc("/api/qa/ask", s.handleQAAsk)
+	mux.HandleFunc("/api/qa/runs", s.handleQARuns)
+	mux.HandleFunc("/api/qa/runs/", s.handleQARuns)
 	mux.HandleFunc("/api/pipeline/init", s.handlePipelineInit)
 	mux.HandleFunc("/api/pipeline/refresh", s.handlePipelineRefresh)
 	mux.HandleFunc("/api/pipeline/runs", s.handlePipelineRuns)
@@ -508,6 +511,7 @@ func runtimeStepProvidersPersistedPayload(persisted workspace.RuntimeStepsConfig
 	appendStep("step2_as_is", persisted.Step2AsIs)
 	appendStep("step3_findings", persisted.Step3Findings)
 	appendStep("step4_proposals", persisted.Step4Proposals)
+	appendStep("qa", persisted.QA)
 	return payload
 }
 
@@ -723,6 +727,117 @@ func (s *Server) handleQAAsk(writer http.ResponseWriter, request *http.Request) 
 	writeJSON(writer, http.StatusOK, response)
 }
 
+func (s *Server) handleQARuns(writer http.ResponseWriter, request *http.Request) {
+	switch request.Method {
+	case http.MethodGet:
+		s.handleQARunsGet(writer, request)
+	case http.MethodPost:
+		s.handleQARunsPost(writer, request)
+	default:
+		writeMethodNotAllowed(writer, http.MethodGet+", "+http.MethodPost)
+	}
+}
+
+func (s *Server) handleQARunsPost(writer http.ResponseWriter, request *http.Request) {
+	if request.URL.Path != "/api/qa/runs" && request.URL.Path != "/api/qa/runs/" {
+		writeError(writer, http.StatusNotFound, "endpoint_not_found", "endpoint not found")
+		return
+	}
+	var payload struct {
+		Question string `json:"question"`
+	}
+	if err := decodeStrictJSON(request, &payload); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid_request_body", "invalid request body")
+		return
+	}
+	question := strings.TrimSpace(payload.Question)
+	if question == "" {
+		writeError(writer, http.StatusBadRequest, "question_required", "question is required")
+		return
+	}
+	runID, err := s.service.StartAsyncRun(context.Background(), orchestrator.RunRequest{
+		Workspace:      s.getWorkspace(),
+		Pipeline:       orchestrator.PipelineQA,
+		NonInteractive: true,
+		Question:       question,
+	})
+	if err != nil {
+		if statusCode, code, message, ok := mapTypedRunnerAPIError(err); ok {
+			writeError(writer, statusCode, code, message)
+			return
+		}
+		writeError(writer, http.StatusBadRequest, "qa_run_start_failed", err.Error())
+		return
+	}
+	writeJSON(writer, http.StatusAccepted, map[string]any{
+		"run_id": runID,
+		"status": string(orchestrator.RunStatusQueued),
+	})
+}
+
+func (s *Server) handleQARunsGet(writer http.ResponseWriter, request *http.Request) {
+	if request.URL.Path == "/api/qa/runs" || request.URL.Path == "/api/qa/runs/" {
+		s.handleQARunsList(writer, request)
+		return
+	}
+	rest := strings.TrimPrefix(request.URL.Path, "/api/qa/runs/")
+	parts := strings.Split(strings.Trim(rest, "/"), "/")
+	if len(parts) != 1 || strings.TrimSpace(parts[0]) == "" {
+		writeError(writer, http.StatusNotFound, "qa_run_not_found", "qa run not found")
+		return
+	}
+	s.handleQARunStatus(writer, strings.TrimSpace(parts[0]))
+}
+
+func (s *Server) handleQARunsList(writer http.ResponseWriter, request *http.Request) {
+	const (
+		defaultLimit = 20
+		maxLimit     = 100
+	)
+	limit := defaultLimit
+	rawLimit := strings.TrimSpace(request.URL.Query().Get("limit"))
+	if rawLimit != "" {
+		parsedLimit, err := strconv.Atoi(rawLimit)
+		if err != nil || parsedLimit <= 0 {
+			writeError(writer, http.StatusBadRequest, "invalid_limit", "limit must be a positive integer")
+			return
+		}
+		if parsedLimit > maxLimit {
+			parsedLimit = maxLimit
+		}
+		limit = parsedLimit
+	}
+
+	runs := s.service.ListRuns(0)
+	items := []map[string]any{}
+	for _, runInfo := range runs {
+		if runInfo.Pipeline != string(orchestrator.PipelineQA) {
+			continue
+		}
+		items = append(items, formatQARunSummaryPayload(runInfo))
+		if len(items) >= limit {
+			break
+		}
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"items": items,
+	})
+}
+
+func (s *Server) handleQARunStatus(writer http.ResponseWriter, runID string) {
+	runInfo, ok := s.service.GetRun(runID)
+	if !ok || runInfo.Pipeline != string(orchestrator.PipelineQA) {
+		writeError(writer, http.StatusNotFound, "qa_run_not_found", "qa run not found")
+		return
+	}
+	payload, err := s.formatQARunPayload(runInfo)
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "qa_answer_unavailable", err.Error())
+		return
+	}
+	writeJSON(writer, http.StatusOK, payload)
+}
+
 func (s *Server) handlePipelineInit(writer http.ResponseWriter, request *http.Request) {
 	s.handlePipelineStart(writer, request, orchestrator.PipelineInit, "ui")
 }
@@ -868,10 +983,16 @@ func (s *Server) handlePipelineRunsList(writer http.ResponseWriter, request *htt
 		limit = parsedLimit
 	}
 
-	runs := s.service.ListRuns(limit)
+	runs := s.service.ListRuns(0)
 	items := make([]map[string]any, 0, len(runs))
 	for _, runInfo := range runs {
+		if runInfo.Pipeline == string(orchestrator.PipelineQA) {
+			continue
+		}
 		items = append(items, formatRunInfoPayload(runInfo))
+		if len(items) >= limit {
+			break
+		}
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"items": items,
@@ -1087,6 +1208,7 @@ func formatRunInfoPayload(runInfo orchestrator.RunInfo) map[string]any {
 		"status":              runInfo.Status,
 		"started_at":          runInfo.StartedAt.UTC().Format(time.RFC3339),
 		"finished_at":         formatOptionalTime(runInfo.FinishedAt),
+		"question":            formatOptionalString(runInfo.Question),
 		"current_step":        runInfo.CurrentStep,
 		"step_providers":      runInfo.StepProviders,
 		"warnings":            runInfo.Warnings,
@@ -1094,6 +1216,58 @@ func formatRunInfoPayload(runInfo orchestrator.RunInfo) map[string]any {
 		"error_code":          formatOptionalString(runInfo.ErrorCode),
 		"error":               formatOptionalString(runInfo.Error),
 	}
+}
+
+func formatQARunSummaryPayload(runInfo orchestrator.RunInfo) map[string]any {
+	payload := formatRunInfoPayload(runInfo)
+	runtimeProvider := strings.TrimSpace(runInfo.StepProviders[acpruntime.StepProviderQA])
+	payload["runtime_provider"] = formatOptionalString(runtimeProvider)
+	payload["provider"] = formatOptionalString(runtimeProvider)
+	return payload
+}
+
+func (s *Server) formatQARunPayload(runInfo orchestrator.RunInfo) (map[string]any, error) {
+	payload := formatQARunSummaryPayload(runInfo)
+	payload["answer"] = nil
+	payload["citations"] = []qa.Citation{}
+	payload["unresolved"] = []string{}
+	payload["confidence"] = nil
+	payload["generated_at"] = nil
+	if runInfo.Status != orchestrator.RunStatusSucceeded {
+		return payload, nil
+	}
+
+	answerRel := path.Join("reports", "taskruns", runInfo.RunID, "qa", "qa-answer.json")
+	answerRaw, err := s.getWorkspace().ReadFile(answerRel)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return payload, nil
+		}
+		return nil, fmt.Errorf("read %s: %w", answerRel, err)
+	}
+	answer, err := qa.ParseAnswer(answerRaw)
+	if err != nil {
+		return nil, err
+	}
+	contextRel := path.Join("reports", "taskruns", runInfo.RunID, "qa", "context-pack.json")
+	contextRaw, err := s.getWorkspace().ReadFile(contextRel)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", contextRel, err)
+	}
+	contextPack, err := qa.ParseContextPack(contextRaw)
+	if err != nil {
+		return nil, err
+	}
+	if err := qa.ValidateAnswerAgainstContext(answer, contextPack); err != nil {
+		return nil, err
+	}
+	payload["answer"] = answer.Answer
+	payload["citations"] = answer.Citations
+	payload["unresolved"] = answer.Unresolved
+	payload["confidence"] = answer.Confidence
+	payload["provider"] = answer.Provider
+	payload["generated_at"] = answer.GeneratedAt
+	return payload, nil
 }
 
 func formatPermissionRequests(requests []acpruntime.PermissionRequest) []acpruntime.PermissionRequest {
