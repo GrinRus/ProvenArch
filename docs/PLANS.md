@@ -128,10 +128,10 @@ EP-20260527-ui-console-v2
 - [x] Зафиксировать screen data source map so implementation stays on existing APIs unless a later slice changes scope.
 - [ ] Реализовать unified shell V2: top health strip, stage rail, center workbench, right inspector, bottom activity drawer.
 - [ ] Реализовать stage surfaces: Source, Readiness, Charter, Analysis, Review Evidence, Review Domain Map, Proposals, Ask, Publish.
-- [ ] Сохранить или явно мигрировать стабильные `data-testid` для UI/unit/live E2E.
+- [ ] Сохранить или явно мигрировать стабильные operator-facing `data-testid` для UI/unit/live E2E; hidden compatibility controls не возвращать.
 - [ ] Обновить Playwright live E2E operator journey под V2 shell/stages, включая evidence/logs/runtime safety/Git publication assertions.
-- [ ] Добавить/обновить V2 scenarios: `init-inspect`, `cancel-refresh`, `ask-readonly`, optional `domain-map-diagnostic`; сохранить `api-context-page-close-smoke`.
-- [ ] Обновить frontend live E2E diagnostics: screenshots/traces refs, stage context and existing reason taxonomy.
+- [ ] Сохранить текущий public live shell как `UI_E2E_SCENARIO=init-inspect`; Ask покрывать optional `UI_E2E_QA_SMOKE=1`, а cancel/page-close/domain-map держать в deterministic или optional diagnostic coverage до отдельного live-gate решения.
+- [ ] Сохранить frontend live E2E diagnostics: screenshots/traces refs, stage context and existing reason taxonomy.
 - [ ] Обновить testing docs/runbook после implementation.
 - [ ] Выполнить full DoD для implementation slice: `make contracts`, `make test`, `make lint`, `make build`.
 - [ ] После owner review/merge перенести план в архив.
@@ -147,21 +147,20 @@ EP-20260527-ui-console-v2
 2) Implement in reviewable PR slices from `docs/BACKLOG.md` Epic 16, starting with shared shell primitives and stage status model.
 3) Reuse existing hooks/API clients; keep backend/API schemas unchanged unless a later slice explicitly changes scope.
 4) Use the data source map in `docs/UI_CONSOLE_V2_DESIGN.md`; render explicit empty/partial states for missing data instead of silently adding API fields.
-5) Move stage surfaces one by one, preserving existing critical selectors or adding compatibility selectors deliberately.
+5) Move stage surfaces one by one, preserving existing critical operator-facing selectors or migrating tests deliberately; do not reintroduce hidden compatibility DOM.
 6) Update `ui/e2e/live-flow.spec.ts` in the same wave:
    - `init-inspect`: validate Source/Readiness, run Analysis, inspect Review Evidence, check Publish gate, and assert top strip/right inspector/activity drawer on each transition.
-   - `cancel-refresh`: cancel from Analysis V2 controls and assert `run_canceled` in status/log surfaces.
-   - `ask-readonly`: submit async QA, poll result, assert confidence/citations/unresolved/read-only safety.
-   - `domain-map-diagnostic`: render Review Domain Map and inspect selected-domain evidence path where fixture data exists.
-   - `api-context-page-close-smoke`: keep diagnostic-only unchanged unless Playwright fixture setup changes.
+   - optional `UI_E2E_QA_SMOKE=1`: submit async QA inside `init-inspect`, poll result, assert confidence/citations/unresolved/read-only safety and context/runtime artifact links.
+   - cancellation/page-close: keep deterministic fake-runtime UI/API coverage outside the provider-live release gate.
+   - domain map: add unit/component/fake-fixture diagnostics first; add a live diagnostic only after stable model fixtures and owner-approved release-gate semantics exist.
 7) Preserve Playwright failure artifacts from `ui/playwright.live.config.ts` (`trace=retain-on-failure`, `screenshot=only-on-failure`, `video=retain-on-failure`) and make sure result JSON diagnostic refs lead to the `UI_E2E_OUTPUT_DIR` results.
-8) Update `scripts/frontend-live-e2e.sh` and script tests only as needed for new scenario allowlist, diagnostic refs and screenshot/trace paths; do not change frontend reason codes unless a separate classification slice is approved.
+8) Update `scripts/frontend-live-e2e.sh` and script tests only if the public live shell or diagnostic refs change; do not add `ask-readonly`/`domain-map-diagnostic`/page-close scenarios or new frontend reason codes unless a separate classification/release-gate slice is approved.
 9) Sync README/ARCHITECTURE/testing/runbook docs only when the implemented UI behavior changes.
 
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes
-- `scripts/frontend-live-e2e.sh`, `scripts/frontend-status-reasons.sh` only if reason validation needs explicit preservation, and `scripts/tests/frontend_live_e2e_contract_test.py`
+- `scripts/frontend-live-e2e.sh` only if the public live shell changes; `scripts/frontend-status-reasons.sh` only if a separate classification slice changes reason taxonomy; `scripts/tests/frontend_live_e2e_contract_test.py`
 - `docs/UI_CONSOLE_V2_DESIGN.md`, `docs/BACKLOG.md`, `docs/PLANS.md`
 - implementation docs: `README.md`, `docs/ARCHITECTURE.md`, `docs/TESTING_STRATEGY.md`, `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
 
@@ -174,11 +173,12 @@ EP-20260527-ui-console-v2
 - [ ] Publish gate shows changed folders, blocker checklist, commit plan and proposal branch.
 - [ ] Each screen uses existing APIs/data hooks or renders an explicit partial/empty state; no implicit backend contract changes.
 - [ ] UI tests cover stage navigation, inspector priority and drawer behavior.
-- [ ] Live E2E validates Source -> Readiness -> Analysis -> Review -> Publish and captures diagnostics on failure.
-- [ ] Async Ask and domain-map checks are covered by fake/stub or optional live diagnostics.
+- [ ] Live E2E `init-inspect` validates Source -> Readiness -> Analysis -> Review -> Publish and captures diagnostics on failure.
+- [ ] Async Ask is covered by optional `UI_E2E_QA_SMOKE=1` and deterministic tests; domain-map checks are covered by fake-fixture/unit/component diagnostics before any live shell expansion.
 - [ ] `frontend-e2e-result.json` still records scenario, reason, run id, last run status/error/current step and diagnostic refs.
 - [ ] Playwright trace/screenshot/video artifacts remain available for failed V2 live E2E stages.
 - [ ] Existing reason taxonomy remains additive-compatible with release report aggregation.
+- [ ] Hidden compatibility controls remain absent.
 
 ### Risks
 - Dense shell can regress responsive layout; visual QA must include desktop and narrow viewport checks.
@@ -187,6 +187,7 @@ EP-20260527-ui-console-v2
 
 ### Progress log
 - 2026-05-27: Approved unified 9-screen design vision and fixed design baseline, visual references, data-source map, backlog, ExecPlan and V2 live E2E contract without product code changes.
+- 2026-05-27: Rebased on `origin/main` `3aa458a`; latest main already removed compatibility controls, compacted activity/artifact surfaces, added optional `UI_E2E_QA_SMOKE=1` and screenshot refs, so V2 backlog was corrected to keep release-facing live frontend on `init-inspect` only.
 
 ### Plan ID
 EP-20260526-async-runtime-backed-ask

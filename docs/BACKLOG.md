@@ -225,6 +225,9 @@ Suggested PR slices:
 Acceptance:
 - целевой UI baseline зафиксирован в `docs/UI_CONSOLE_V2_DESIGN.md`
 - approved visual references сохранены в `docs/assets/ui-console-v2/*.png`
+- implementation baseline после rebase на `origin/main` `3aa458a`: текущий UI уже имеет
+  stage shell, компактный activity drawer/artifact links, optional `UI_E2E_QA_SMOKE=1`,
+  screenshot refs в frontend result JSON и удалённые hidden compatibility controls
 - UI остаётся stage-based console с 8 стадиями `Source / Readiness / Charter / Analysis / Review / Proposals / Ask / Publish`
 - общий shell включает top health strip, compact stage rail, center workbench, right inspector и bottom activity drawer
 - `Analysis` показывает run timeline, shard table, blockers, evidence refs, runtime safety и live logs на одном экране
@@ -234,15 +237,16 @@ Acceptance:
 - `Publish` показывает Git review room: folder diff summary, preview/diff/evidence tabs, publish gate, checklist, commit plan и proposal branch
 - существующие backend API, runtime artifact schemas, CLI flags и workspace contracts не меняются в UI-only slice
 - screen data source map зафиксирован в design baseline; недостающие данные показываются как explicit partial/empty state вместо неявного backend/API изменения
-- стабильные `data-testid` либо сохраняются, либо мигрируются вместе с UI/unit/live E2E tests
-- live E2E логика обновлена под новый shell/stages и проверяет не только happy path, но и evidence/logs/runtime safety/Git publication surfaces
+- стабильные operator-facing `data-testid` либо сохраняются, либо мигрируются вместе с UI/unit/live E2E tests; hidden compatibility controls не возвращаются
+- live E2E логика обновлена под новый shell/stages и проверяет evidence/logs/runtime safety/Git publication surfaces внутри текущего `init-inspect` release-facing flow
+- Ask/cancel/page-close/domain-map coverage остаётся deterministic или optional diagnostic, пока отдельный owner-approved slice не расширит public live shell за пределы `UI_E2E_SCENARIO=init-inspect`
 - V2 live E2E сохраняет существующую reason taxonomy (`active_run_timeout`, `runtime_run_failed`, `browser_closed`, `api_unreachable`, `server_exited`, `playwright_failed`) и не вводит новые failure classes без отдельного slice
 - frontend result JSON и Playwright diagnostics содержат scenario, reason, run id, last run status/error/current step, screenshots/traces/log refs и black-box evidence refs when available
 - required CI остаётся deterministic/fake; live provider checks остаются manual trusted-machine release gate по runbook
 
 Suggested PR slices:
 - `16A UI V2 shell foundation`
-  - unified top health strip/stage rail/right inspector/activity drawer primitives
+  - refine current `AppShell`/`TopStatusBar`/`StageRail`/`RightInspector`/`ActivityDrawer` primitives instead of restoring removed legacy panels
   - shared stage status model and responsive density rules
   - baseline a11y/keyboard focus contract for rail, inspector and drawer
   - data adapters stay on existing hooks/API clients; no new backend contract in this slice
@@ -284,20 +288,20 @@ Suggested PR slices:
   - responsive desktop/tablet collapse behavior
 - `16K Live E2E selector migration`
   - update Playwright navigation to stage rail and V2 primary actions
-  - preserve core `data-testid` compatibility where possible
-  - add regression for hidden compatibility controls not receiving focus
-  - update `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact behavior changes, `scripts/frontend-live-e2e.sh`, `scripts/tests/frontend_live_e2e_contract_test.py` and any selector docs together
+  - preserve or migrate only visible operator-facing `data-testid`; do not add hidden compatibility controls
+  - keep regression coverage that hidden compatibility controls are absent from the UI shell
+  - update `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact behavior changes, `scripts/frontend-live-e2e.sh` only if the public live shell changes, `scripts/tests/frontend_live_e2e_contract_test.py` and selector docs together
 - `16L Live E2E operator journey`
   - fake-runtime required flow: Source -> Readiness -> Analysis -> Review -> Publish
   - assert run status, blocker/evidence/logs/runtime safety/Git path surfaces
   - capture diagnostic screenshots for each major stage on failure
   - preserve trace/screenshot/video failure artifacts under Playwright `UI_E2E_OUTPUT_DIR`
-  - keep `init-inspect` and `cancel-refresh` as canonical release scenarios, with V2 assertions replacing legacy panel assumptions
+  - keep release-facing frontend live shell on `UI_E2E_SCENARIO=init-inspect`; cancellation/page-close coverage remains deterministic fake-runtime UI/API tests outside the live release gate
 - `16M Live E2E Ask and domain-map diagnostics`
-  - async Ask submit/poll/result/citation checks
-  - domain-map render and selected domain evidence link checks
-  - keep provider-live variants optional and classified by existing reason taxonomy
-  - add `ask-readonly` as required fake/stub smoke and `domain-map-diagnostic` as optional release diagnostic until stable map fixtures exist
+  - async Ask submit/poll/result/citation checks through optional `UI_E2E_QA_SMOKE=1` on `init-inspect`, not a separate required shell scenario
+  - domain-map render and selected domain evidence link checks through unit/component/fake-fixture coverage first
+  - keep provider-live variants optional diagnostics and classified by existing reason taxonomy
+  - do not add `ask-readonly` or `domain-map-diagnostic` to `scripts/frontend-live-e2e.sh` allowlist without a separate release-gate owner decision
 - `16N Docs/runbook sync`
   - update README/ARCHITECTURE UI description only after implementation
   - update `docs/TESTING_STRATEGY.md` and `docs/RELEASE_LIVE_E2E_RUNBOOK.md` with V2 live E2E flow

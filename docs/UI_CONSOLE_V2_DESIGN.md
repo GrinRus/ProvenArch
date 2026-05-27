@@ -191,10 +191,28 @@ Every stage must have explicit surfaces for:
 
 - Do not change backend API, artifact schemas, runtime contracts or CLI flags unless a separate
   slice explicitly requires it.
-- Preserve or intentionally migrate stable `data-testid` selectors used by UI and live E2E.
+- Preserve or intentionally migrate stable operator-facing `data-testid` selectors used by UI and
+  live E2E; do not reintroduce hidden compatibility controls.
 - Prefer current React/Vite component model and existing hooks; avoid inventing a second data layer.
 - Treat right inspector and activity drawer as shared shell primitives, not per-screen one-off panels.
 - Live E2E must be updated with the UI changes in the same feature wave.
+
+## Current code baseline after latest main
+
+Rebase on `origin/main` commit `3aa458a` ("Improve live E2E operator flow") changed the
+starting point for V2 implementation:
+
+- current code already has `AppShell`, `TopStatusBar`, `StageRail`, `RightInspector`,
+  `ActivityDrawer`, `StagePanels` and `ConsolePrimitives`; V2 should refine these surfaces rather
+  than recreate the removed legacy panels;
+- `ResultsPanels.tsx`, `RunPanels.tsx` and `SetupWorkspacePanel.tsx` have been deleted, so future
+  implementation slices must not plan work against those files or restore their compatibility DOM;
+- hidden compatibility controls/testids were removed from the UI shell; selector migration must use
+  visible operator controls only;
+- the live frontend harness currently supports only `UI_E2E_SCENARIO=init-inspect`; optional Ask
+  coverage is controlled by `UI_E2E_QA_SMOKE=1` and is diagnostic/non-release evidence;
+- `frontend-e2e-result.json` already includes screenshot refs when screenshots are produced, while
+  Playwright trace/screenshot/video retention stays in `ui/playwright.live.config.ts`.
 
 ## Data source map
 
@@ -247,13 +265,19 @@ empty/partial state rather than changing backend contracts implicitly.
 Console V2 implementation must update the current Playwright surface instead of leaving live E2E
 on legacy panel assumptions.
 
-Canonical live scenarios:
-- `init-inspect`: fake/headless run journey from Source/Readiness through Analysis, Review and Publish.
-- `cancel-refresh`: Analysis refresh run cancellation with visible cancel state and log evidence.
-- `ask-readonly`: async `qa.ask` smoke over existing workspace artifacts using fake/stubbed runtime.
-- `domain-map-diagnostic`: Review Domain Map render smoke using fake/fixture data; optional for release
-  until the map is backed by stable model fixtures.
-- `api-context-page-close-smoke`: keep as diagnostic-only browser lifecycle guard.
+Release-facing live scenario:
+- `init-inspect`: headless/fake run journey from Source/Readiness through Analysis, Review and
+  Publish. The public `scripts/frontend-live-e2e.sh` shell should remain `init-inspect`-only unless
+  a separate owner-approved live-gate slice expands the release surface.
+
+Non-release and deterministic UI coverage:
+- `UI_E2E_QA_SMOKE=1`: optional Ask smoke layered on `init-inspect`; it checks async `qa.ask`,
+  citations, context-pack/runtime-execution links and screenshots, but is not a release readiness
+  input.
+- cancellation/page-close behavior: cover through deterministic fake-runtime UI/API tests and
+  frontend reason taxonomy, not through provider-live release scenarios.
+- Review Domain Map: cover with unit/component/fake-fixture diagnostics first; do not add a live
+  shell allowlist entry until stable model fixtures and release-gate semantics are approved.
 
 V2 selectors should be stable and explicit:
 - shell: `console-shell`, `top-status-bar`, `stage-rail`, `right-inspector`, `activity-drawer`;
@@ -276,7 +300,7 @@ unless they reveal one of the more specific infrastructure/runtime states.
 
 Failure diagnostics must include:
 - `frontend-e2e-result.json` with scenario, reason, run id, last run status/error/current step and
-  diagnostic refs;
+  diagnostic refs, including screenshot refs when screenshots were produced;
 - Playwright screenshots/traces/videos for the failing stage where available; current
   `ui/playwright.live.config.ts` already uses `trace=retain-on-failure`,
   `screenshot=only-on-failure` and `video=retain-on-failure`;
