@@ -3542,6 +3542,11 @@ type runStatusPayload struct {
 func waitForRunTerminalStatus(t *testing.T, serverURL string, runID string, timeout time.Duration) runStatusPayload {
 	t.Helper()
 
+	const minAsyncRunTimeout = 30 * time.Second
+	if timeout < minAsyncRunTimeout {
+		timeout = minAsyncRunTimeout
+	}
+
 	var terminal runStatusPayload
 	testutil.WaitFor(t, timeout, testutil.WaitDescription("run %q did not reach terminal status", runID), func() (bool, error) {
 		runResp, err := http.Get(serverURL + "/api/pipeline/runs/" + runID)

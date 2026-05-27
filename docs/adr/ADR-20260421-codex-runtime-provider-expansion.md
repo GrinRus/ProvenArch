@@ -51,7 +51,7 @@ ACP MVP runtime policy расширяется до трёх headless providers:
 ## Consequences
 
 - Runtime/config/docs/schema surfaces должны принимать `codex-code` везде, где ранее были допустимы `claude-code|qwen-code`.
-- Live harness/reporting расширяется инкрементально через явные поля `runtimes.codex`, `frontend_codex_status`, `frontend_cancel_codex_status`, без большого generic refactor.
+- Live harness/reporting расширяется инкрементально через явные поля `runtimes.codex` и `frontend_codex_status`, без большого generic refactor. Frontend cancellation больше не является live release-gate signal.
 - Release catalog totals пересчитываются:
   - `release-fast=12`
   - `release-long=12`

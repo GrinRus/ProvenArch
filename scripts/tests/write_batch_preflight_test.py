@@ -247,6 +247,73 @@ class WriteBatchPreflightTest(unittest.TestCase):
         self.assertEqual("passed", result["artifact_smoke"])
         self.assertEqual("2", attempts.read_text(encoding="utf-8").strip())
 
+    def test_claude_artifact_smoke_retries_timeout_even_with_output(self) -> None:
+        attempts = self.root / "claude-smoke-output-attempts"
+        command = self._write_script(
+            "claude-flaky-artifact-smoke-output-stub",
+            "#!/bin/sh\n"
+            f"attempts='{attempts}'\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' '2.1.85 (Claude Code)'; exit 0; fi\n"
+            "if [ -n \"${ACP_PREFLIGHT_SMOKE_SENTINEL:-}\" ]; then\n"
+            "  count=0\n"
+            "  if [ -f \"$attempts\" ]; then count=$(cat \"$attempts\"); fi\n"
+            "  count=$((count + 1))\n"
+            "  printf '%s\\n' \"$count\" > \"$attempts\"\n"
+            "  if [ \"$count\" = \"1\" ]; then printf '%s\\n' 'transient smoke output'; sleep 3; exit 0; fi\n"
+            "  mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"\n"
+            "  printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"\n"
+            "  exit 0\n"
+            "fi\n"
+            "printf '%s\n' 'ACP_READY'\n",
+        )
+        old_timeout = os.environ.get("ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC")
+        os.environ["ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC"] = "2"
+        try:
+            result = self.module.probe_provider_readiness("claude", command, str(REPO_ROOT))
+        finally:
+            if old_timeout is None:
+                os.environ.pop("ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC", None)
+            else:
+                os.environ["ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC"] = old_timeout
+
+        self.assertEqual("ready", result["status"])
+        self.assertEqual("", result["subclass"])
+        self.assertEqual("passed", result["artifact_smoke"])
+        self.assertEqual("2", attempts.read_text(encoding="utf-8").strip())
+
+    def test_claude_artifact_smoke_preserves_timeout_output_after_exhausted_retry(self) -> None:
+        attempts = self.root / "claude-smoke-output-exhausted-attempts"
+        command = self._write_script(
+            "claude-exhausted-artifact-smoke-output-stub",
+            "#!/bin/sh\n"
+            f"attempts='{attempts}'\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' '2.1.85 (Claude Code)'; exit 0; fi\n"
+            "if [ -n \"${ACP_PREFLIGHT_SMOKE_SENTINEL:-}\" ]; then\n"
+            "  count=0\n"
+            "  if [ -f \"$attempts\" ]; then count=$(cat \"$attempts\"); fi\n"
+            "  count=$((count + 1))\n"
+            "  printf '%s\\n' \"$count\" > \"$attempts\"\n"
+            "  if [ \"$count\" = \"1\" ]; then printf '%s\\n' 'API Error: 403 permission_error usage limit'; fi\n"
+            "  sleep 3\n"
+            "  exit 0\n"
+            "fi\n"
+            "printf '%s\n' 'ACP_READY'\n",
+        )
+        old_timeout = os.environ.get("ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC")
+        os.environ["ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC"] = "2"
+        try:
+            result = self.module.probe_provider_readiness("claude", command, str(REPO_ROOT))
+        finally:
+            if old_timeout is None:
+                os.environ.pop("ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC", None)
+            else:
+                os.environ["ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC"] = old_timeout
+
+        self.assertEqual("unavailable", result["status"])
+        self.assertEqual("quota_or_permission", result["subclass"])
+        self.assertEqual("failed", result["artifact_smoke"])
+        self.assertEqual("2", attempts.read_text(encoding="utf-8").strip())
+
     def test_claude_artifact_smoke_accepts_expected_sentinel_before_timeout(self) -> None:
         command = self._write_script(
             "claude-sentinel-before-timeout-stub",

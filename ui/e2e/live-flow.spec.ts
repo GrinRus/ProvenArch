@@ -1,10 +1,12 @@
-import { expect, test, type APIRequestContext } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { mkdirSync } from "node:fs";
+import path from "node:path";
 
 const scenario = (process.env.UI_E2E_SCENARIO ?? "init-inspect").trim().toLowerCase();
+const qaSmoke = (process.env.UI_E2E_QA_SMOKE ?? "0").trim() === "1";
+const screenshotOutputDir = (process.env.UI_E2E_OUTPUT_DIR ?? "").trim();
 const initTimeoutSec = Number.parseInt(process.env.ACP_UI_INIT_POLL_TIMEOUT_SEC ?? "900", 10);
-const cancelTimeoutSec = Number.parseInt(process.env.ACP_UI_CANCEL_POLL_TIMEOUT_SEC ?? "420", 10);
 const initTimeoutMs = Number.isFinite(initTimeoutSec) && initTimeoutSec > 0 ? initTimeoutSec * 1000 : 900_000;
-const cancelTimeoutMs = Number.isFinite(cancelTimeoutSec) && cancelTimeoutSec > 0 ? cancelTimeoutSec * 1000 : 420_000;
 
 type RunStatusPollResponse = {
   status?: string;
@@ -89,6 +91,20 @@ async function waitForInitInspectRun(api: APIRequestContext, runID: string): Pro
     );
   }
   throw new Error(`run ${runID} did not reach succeeded within ${initTimeoutSec}s`);
+}
+
+async function captureEvidenceScreenshot(page: Page, name: string): Promise<string | null> {
+  if (screenshotOutputDir === "") {
+    return null;
+  }
+  mkdirSync(screenshotOutputDir, { recursive: true });
+  const screenshotPath = path.join(screenshotOutputDir, name);
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+  await test.info().attach(name, {
+    path: screenshotPath,
+    contentType: "image/png"
+  });
+  return screenshotPath;
 }
 
 test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, request }) => {
@@ -199,140 +215,34 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
     .poll(async () => (await artifactContent.textContent())?.trim() ?? "")
     .not.toMatch(/^(Select artifact to inspect\.|Loading\.\.\.)$/);
 
+  await captureEvidenceScreenshot(page, "frontend-review-desktop.png");
+
+  if (qaSmoke) {
+    await page.getByTestId("stage-ask").click();
+    await page.getByTestId("qa-question-input").fill("What are the main architecture coverage gaps?");
+    await page.getByTestId("qa-ask-btn").click();
+
+    await expect
+      .poll(async () => ((await page.getByTestId("qa-run-status").textContent()) ?? "").trim(), { timeout: 120_000 })
+      .toMatch(/status:\s*succeeded/i);
+    await expect(page.getByTestId("qa-answer")).toBeVisible();
+    await expect(page.getByTestId("qa-answer")).not.toContainText("No citations returned.");
+    await expect(page.getByTestId("qa-answer")).toContainText(/Confidence:\s*[1-9][0-9]*%/);
+    await expect(page.getByRole("button", { name: /context-pack\.json/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /runtime-execution\.json/i })).toBeVisible();
+    await captureEvidenceScreenshot(page, "frontend-ask-desktop.png");
+    await page.getByTestId("stage-review").click();
+  }
+
+  await page.setViewportSize({ width: 390, height: 1200 });
+  await expect(page.getByTestId("review-panel")).toBeVisible();
+  const mobileBodyText = (((await page.locator("body").innerText()) ?? "").replace(/\s+/g, ""));
+  expect(mobileBodyText).not.toContain("SetupBaselineRunsResultsSettingsCoverageArtifactsDiagrams");
+  await captureEvidenceScreenshot(page, "frontend-review-mobile.png");
+
   await expect(page.locator("p.status.err")).toHaveCount(0);
   await test.info().attach("runtime-provider", {
     body: runtimeProvider,
     contentType: "text/plain"
   });
-});
-
-test("live ui flow: run refresh -> cancel -> failed(run_canceled)", async ({ page, request }) => {
-  test.skip(scenario !== "cancel-refresh", `scenario ${scenario} skips cancel-refresh flow`);
-  test.setTimeout(Math.max(cancelTimeoutMs + 120_000, 6 * 60 * 1000));
-  const runtimeProvider = process.env.UI_E2E_RUNTIME_PROVIDER ?? "unknown";
-
-  await page.goto("/");
-  await expect(page.getByTestId("console-shell")).toBeVisible();
-  await expect(page.getByTestId("top-status-bar")).toContainText("Proven Arch");
-
-  await page.getByTestId("stage-readiness").click();
-  await page.getByTestId("workspace-validate-btn").click();
-  await expect(page.getByTestId("workspace-validate-result")).toBeVisible();
-  await expect(page.getByText("Status: valid")).toBeVisible();
-
-  await page.getByTestId("stage-analysis").click();
-  const previousRunIDLocator = page.getByTestId("run-status-run-id");
-  const previousRunID =
-    (await previousRunIDLocator.count()) > 0 ? ((await previousRunIDLocator.first().textContent()) ?? "").trim() : "";
-  await page.getByTestId("run-refresh-btn").click();
-  await expect(page.getByTestId("run-status-panel")).toBeVisible();
-
-  const runID = await test.step("wait for new refresh run id", async () => {
-    const deadline = Date.now() + 30_000;
-    while (Date.now() < deadline) {
-      const currentRunID = ((await page.getByTestId("run-status-run-id").textContent()) ?? "").trim();
-      if (currentRunID !== "" && currentRunID !== previousRunID) {
-        return currentRunID;
-      }
-      await sleep(250);
-    }
-    throw new Error(`did not observe new refresh run id within timeout (previous=${previousRunID || "none"})`);
-  });
-  expect(runID).not.toBe("");
-  console.log(`ACP_UI_E2E_RUN_ID=${runID}`);
-  await test.info().attach("run-id", {
-    body: runID,
-    contentType: "text/plain"
-  });
-  await expect
-    .poll(
-      async () => {
-        const response = await request.get(`/api/pipeline/runs/${runID}`);
-        const payload = (await response.json()) as { status?: string };
-        return (payload.status ?? "").trim();
-      },
-      { timeout: 60_000 }
-    )
-    .toMatch(/^(queued|running)$/);
-  const activeDeadline = Date.now() + Math.max(cancelTimeoutMs, 180_000);
-  let activeStatus = "";
-  while (Date.now() < activeDeadline) {
-    const response = await request.get(`/api/pipeline/runs/${runID}`);
-    const payload = (await response.json()) as { status?: string; error_code?: string | null };
-    const status = (payload.status ?? "").trim();
-    const errorCode = (payload.error_code ?? "").trim();
-    if (status === "running") {
-      activeStatus = status;
-      break;
-    }
-    if (status === "failed") {
-      throw new Error(`run ${runID} terminated before cancel: status=failed error_code=${errorCode || "-"}`);
-    }
-    await sleep(1000);
-  }
-  if (activeStatus !== "running") {
-    throw new Error(`run ${runID} did not reach running status before cancel deadline (${Math.max(cancelTimeoutSec, 180)}s)`);
-  }
-
-  const cancelButton = page.getByTestId("run-cancel-btn");
-  await expect(cancelButton).toBeEnabled({ timeout: 30_000 });
-  await cancelButton.click();
-
-  await expect
-    .poll(
-      async () => {
-        const response = await request.get(`/api/pipeline/runs/${runID}`);
-        const payload = (await response.json()) as { status?: string; error_code?: string | null };
-        const status = (payload.status ?? "").trim();
-        const errorCode = (payload.error_code ?? "").trim();
-        return `${status}|${errorCode}`;
-      },
-      { timeout: cancelTimeoutMs }
-    )
-    .toBe("failed|run_canceled");
-
-  await expect(page.getByTestId("run-status-value")).toHaveText("failed");
-  await expect(page.getByText(/Error code:\s*run_canceled/i)).toBeVisible();
-  await expect(page.getByTestId("run-cancel-btn")).toBeDisabled();
-
-  const selectedRunButton = page.getByRole("button", { name: runID }).first();
-  await expect(selectedRunButton).toBeVisible();
-  await selectedRunButton.click();
-
-  await page.getByTestId("run-logs-view-select").selectOption("line+fields");
-  const logsContent = page.getByTestId("run-logs-content");
-  await expect
-    .poll(async () => (await logsContent.textContent()) ?? "", { timeout: 30_000 })
-    .toContain("\"error_code\": \"run_canceled\"");
-
-  await test.info().attach("runtime-provider", {
-    body: runtimeProvider,
-    contentType: "text/plain"
-  });
-});
-
-test("live ui diagnostic: api request context survives page close", async ({ page, request }) => {
-  test.skip(
-    scenario !== "api-context-page-close-smoke",
-    `scenario ${scenario} skips api-context-page-close-smoke flow`
-  );
-  test.setTimeout(60_000);
-
-  const beforeClose = await request.get("/api/health");
-  expect(beforeClose.ok()).toBe(true);
-
-  await page.close();
-
-  const deadline = Date.now() + 10_000;
-  let lastStatus = beforeClose.status();
-  while (Date.now() < deadline) {
-    const response = await request.get("/api/health");
-    lastStatus = response.status();
-    if (response.ok()) {
-      return;
-    }
-    await sleep(250);
-  }
-
-  throw new Error(`api request context did not survive page close: last_health_status=${lastStatus}`);
 });

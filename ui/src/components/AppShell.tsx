@@ -70,32 +70,6 @@ export function AppShell({
 }: AppShellProps) {
   return (
     <main className="console-shell" data-testid="console-shell">
-      <div className="compat-controls" aria-hidden="true">
-        <button type="button" tabIndex={-1} data-testid="tab-setup" onClick={() => onStageChange("source")}>
-          Setup
-        </button>
-        <button type="button" tabIndex={-1} data-testid="tab-baseline" onClick={() => onStageChange("charter")}>
-          Baseline
-        </button>
-        <button type="button" tabIndex={-1} data-testid="tab-runs" onClick={() => onStageChange("analysis")}>
-          Runs
-        </button>
-        <button type="button" tabIndex={-1} data-testid="tab-results" onClick={() => onStageChange("review")}>
-          Results
-        </button>
-        <button type="button" tabIndex={-1} data-testid="tab-settings" onClick={() => onStageChange("readiness")}>
-          Settings
-        </button>
-        <button type="button" tabIndex={-1} data-testid="results-tab-coverage" onClick={() => onStageChange("review")}>
-          Coverage
-        </button>
-        <button type="button" tabIndex={-1} data-testid="results-tab-artifacts" onClick={() => onStageChange("review")}>
-          Artifacts
-        </button>
-        <button type="button" tabIndex={-1} data-testid="results-tab-diagrams" onClick={() => onStageChange("review")}>
-          Diagrams
-        </button>
-      </div>
       <TopStatusBar
         workspacePath={workspacePath}
         repoCount={repoCount}

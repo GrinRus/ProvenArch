@@ -36,5 +36,5 @@ acp_log_diagnostic_timeout_overrides() {
 
 acp_release_guard_blocked_message() {
   printf '%s' \
-    "release guard blocked diagnostic timeout overrides; clear env or set E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES=1 for explicit debug-only override"
+    "release guard blocked diagnostic timeout overrides; clear env and rerun diagnostics outside release mode"
 }

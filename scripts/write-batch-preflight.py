@@ -248,7 +248,8 @@ def run_artifact_smoke(provider: str, command: str, repo_root: str) -> tuple[boo
                 stdout = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
                 stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
                 combined = "\n".join(part for part in [stdout, stderr] if part).strip()
-                last_combined = combined
+                if combined:
+                    last_combined = combined
                 if provider == "claude":
                     try:
                         observed = sentinel_path.read_text(encoding="utf-8").strip()
@@ -266,9 +267,9 @@ def run_artifact_smoke(provider: str, command: str, repo_root: str) -> tuple[boo
                     f"{provider} artifact smoke timed out after {exc.timeout}s "
                     f"(attempt {attempt}/{max_attempts})"
                 )
-                if provider == "claude" and not combined and attempt < max_attempts:
+                if provider == "claude" and attempt < max_attempts:
                     continue
-                return False, last_reason, combined
+                return False, last_reason, combined or last_combined
             except Exception as exc:  # pragma: no cover - defensive shell failure path
                 return False, f"{provider} artifact smoke failed: {exc}", ""
             combined = "\n".join(part for part in [completed.stdout, completed.stderr] if part).strip()

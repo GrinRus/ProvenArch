@@ -8,8 +8,6 @@ source "$PROVENARCH_ROOT/scripts/legacy-env-guard.sh"
 source "$PROVENARCH_ROOT/scripts/repos-meta-fields.sh"
 # shellcheck source=scripts/preflight-log.sh
 source "$PROVENARCH_ROOT/scripts/preflight-log.sh"
-# shellcheck source=scripts/internal/live-e2e-evaluator.sh
-source "$PROVENARCH_ROOT/scripts/internal/live-e2e-evaluator.sh"
 # shellcheck source=scripts/timeout-env-keys.sh
 source "$PROVENARCH_ROOT/scripts/timeout-env-keys.sh"
 # shellcheck source=scripts/execution-env-keys.sh
@@ -26,11 +24,9 @@ ACP_QWEN_CMD_BIN="${ACP_QWEN_CMD_BIN:-qwen}"
 ACP_CODEX_CMD_BIN="${ACP_CODEX_CMD_BIN:-codex}"
 ACP_APPLY_TIMEOUTS_VIA_API="${ACP_APPLY_TIMEOUTS_VIA_API:-1}"
 E2E_MATRIX_RELEASE_MODE="${E2E_MATRIX_RELEASE_MODE:-auto}"
-E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES="${E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES:-0}"
 BATCH_PROVIDER_FILTER="${BATCH_PROVIDER_FILTER:-all}"
 BATCH_RUN_SELECTION="${BATCH_RUN_SELECTION:-all}"
 BATCH_FRONTEND_MODE="${BATCH_FRONTEND_MODE:-}"
-BATCH_FRONTEND_CANCEL_MODE="${BATCH_FRONTEND_CANCEL_MODE:-}"
 UI_E2E_HEADED="${UI_E2E_HEADED:-}"
 MATRIX_DRIVER_LOG="${MATRIX_DRIVER_LOG:-$MATRIX_ROOT/driver.log}"
 MATRIX_TIMEOUT_PROFILE_FILE="${MATRIX_TIMEOUT_PROFILE_FILE:-$MATRIX_ROOT/timeout-profile.txt}"
@@ -66,9 +62,6 @@ CURRENT_SWEEP_MAX_PARALLEL=""
 CURRENT_SWEEP_FAILURE_POLICY=""
 CURRENT_SWEEP_SHARD_MODE=""
 CURRENT_PROFILE_STATUS_HEARTBEAT_PID=""
-MATRIX_BLACKBOX_STEPS_JSONL="$REPORTS_ROOT/blackbox_e2e_steps_${MATRIX_ID}.jsonl"
-MATRIX_BLACKBOX_STEPS_MD="$REPORTS_ROOT/blackbox_e2e_steps_${MATRIX_ID}.md"
-MATRIX_BLACKBOX_STEPS_INITIALIZED=0
 
 log() {
   local line
@@ -91,53 +84,12 @@ die() {
   exit 1
 }
 
-init_matrix_blackbox_step_report() {
-  if [[ "$MATRIX_BLACKBOX_STEPS_INITIALIZED" == "1" ]]; then
-    return 0
-  fi
-  if ! command -v python3 >/dev/null 2>&1; then
-    return 0
-  fi
-  live_e2e_evaluator_init_matrix_report \
-    "$MATRIX_BLACKBOX_STEPS_JSONL" \
-    "$MATRIX_BLACKBOX_STEPS_MD" \
-    "$MATRIX_ID" \
-    "$E2E_MATRIX_FILE"
-  MATRIX_BLACKBOX_STEPS_INITIALIZED=1
-}
-
-write_matrix_blackbox_step_report() {
-  local step_id="$1"
-  local goal="$2"
-  local action="$3"
-  local status="$4"
-  local primary_classification="$5"
-  local next_decision="$6"
-  shift 6
-  if ! command -v python3 >/dev/null 2>&1; then
-    return 0
-  fi
-  init_matrix_blackbox_step_report
-  live_e2e_evaluator_write_matrix_step \
-    "$MATRIX_BLACKBOX_STEPS_JSONL" \
-    "$MATRIX_BLACKBOX_STEPS_MD" \
-    "$MATRIX_ID" \
-    "$E2E_MATRIX_FILE" \
-    "$step_id" \
-    "$goal" \
-    "$action" \
-    "$status" \
-    "$primary_classification" \
-    "$next_decision" \
-    "$@"
-}
-
 write_matrix_operational_blocker_report() {
   local reason="$1"
   if ! command -v python3 >/dev/null 2>&1; then
     return 0
   fi
-  python3 - "$MATRIX_ID" "$E2E_MATRIX_FILE" "$MATRIX_ROOT" "$REPORTS_ROOT" "$MATRIX_STATUS_ROOT" "$MATRIX_DRIVER_LOG" "$reason" "$MATRIX_SELECTED_PROVIDERS_CSV" "$MATRIX_SELECTED_RUN_INDEXES_CSV" <<'PY'
+  python3 - "$MATRIX_ID" "$E2E_MATRIX_FILE" "$MATRIX_ROOT" "$REPORTS_ROOT" "$MATRIX_STATUS_ROOT" "$MATRIX_DRIVER_LOG" "$reason" "$MATRIX_SELECTED_PROVIDERS_CSV" "$MATRIX_SELECTED_RUN_INDEXES_CSV" "${RELEASE_MODE:-0}" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
@@ -152,6 +104,7 @@ driver_log = sys.argv[6]
 reason = sys.argv[7]
 selected_providers = [item for item in sys.argv[8].split(",") if item]
 selected_run_indexes = [item for item in sys.argv[9].split(",") if item]
+release_mode = str(sys.argv[10]).strip() == "1"
 
 now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 status_root.mkdir(parents=True, exist_ok=True)
@@ -163,8 +116,12 @@ status_path = status_root / "matrix-operational-preflight.json"
 inventory_path = inventory_root / "matrix-operational-preflight.json"
 profile_matrix_md = reports_root / f"profile_matrix_{matrix_id}.md"
 profile_matrix_tsv = reports_root / f"profile_matrix_{matrix_id}.tsv"
-verdict_md = reports_root / f"release_verdict_{matrix_id}.md"
-verdict_json = reports_root / f"release_verdict_{matrix_id}.json"
+if release_mode:
+    verdict_md = reports_root / f"release_verdict_{matrix_id}.md"
+    verdict_json = reports_root / f"release_verdict_{matrix_id}.json"
+else:
+    verdict_md = reports_root / f"matrix_result_{matrix_id}.md"
+    verdict_json = reports_root / f"matrix_result_{matrix_id}.json"
 records_path = matrix_root / "profile-runs.jsonl"
 records_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -188,7 +145,6 @@ inventory_payload = {
         "run_matrix_tsv": "-",
         "run_matrix_md": "-",
         "frontend_matrix_md": "-",
-        "frontend_cancel_matrix_md": "-",
         "quality_report_md": "-",
     },
     "raw_output_refs": [],
@@ -219,7 +175,6 @@ status_payload = {
     "run_matrix_tsv": "-",
     "run_matrix_md": "-",
     "frontend_matrix_md": "-",
-    "frontend_cancel_matrix_md": "-",
     "quality_report_md": "-",
     "driver_log": driver_log,
     "inventory_json": str(inventory_path),
@@ -277,55 +232,69 @@ profile_matrix_md.write_text(
     encoding="utf-8",
 )
 
-verdict_payload = {
-    "matrix_id": matrix_id,
-    "generated_at_utc": now,
-    "verdict": "FAIL",
-    "release_state": "RELEASE BLOCKED",
-    "profile_sweep_runs": 1,
-    "strict_pass_runs": 0,
-    "strict_fail_runs": 1,
-    "release_contract": {
-        "mode": "operational-preflight",
-        "selected_providers": selected_providers,
-        "selected_run_indexes": selected_run_indexes,
-        "contract_status": "failed",
-        "blocking_reasons": [reason],
+record_payload = {
+    "profile_id": "matrix-operational-preflight",
+    "sweep_id": "preflight",
+    "batch_id": batch_id,
+    "status": "failed",
+    "strict_status": "failed",
+    "blocking_reasons": [reason],
+    "backend": {
+        "hard_pass": 0,
+        "total_runs": 0,
+        "runtime_contract_failed_failures": 0,
+        "runner_unavailable_failures": 0,
+        "runtime_timeout_failures": 0,
+        "precheck_failed_failures": 1,
     },
-    "records": [
-        {
-            "profile_id": "matrix-operational-preflight",
-            "sweep_id": "preflight",
-            "batch_id": batch_id,
-            "status": "failed",
-            "strict_status": "failed",
-            "blocking_reasons": [reason],
-            "backend": {
-                "hard_pass": 0,
-                "total_runs": 0,
-                "runtime_contract_failed_failures": 0,
-                "runner_unavailable_failures": 0,
-                "runtime_timeout_failures": 0,
-                "precheck_failed_failures": 1,
-            },
-            "artifacts": {
-                "driver_log": driver_log,
-                "inventory_json": str(inventory_path),
-                "raw_output_ref_count": 0,
-            },
-        }
-    ],
+    "artifacts": {
+        "driver_log": driver_log,
+        "inventory_json": str(inventory_path),
+        "raw_output_ref_count": 0,
+    },
 }
+if release_mode:
+    verdict_payload = {
+        "matrix_id": matrix_id,
+        "generated_at_utc": now,
+        "verdict": "FAIL",
+        "release_state": "RELEASE BLOCKED",
+        "profile_sweep_runs": 1,
+        "strict_pass_runs": 0,
+        "strict_fail_runs": 1,
+        "release_contract": {
+            "mode": "release",
+            "selected_providers": selected_providers,
+            "selected_run_indexes": selected_run_indexes,
+            "contract_status": "failed",
+            "blocking_reasons": [reason],
+        },
+        "records": [record_payload],
+    }
+else:
+    verdict_payload = {
+        "matrix_id": matrix_id,
+        "generated_at_utc": now,
+        "result": "FAIL",
+        "mode": "non-release",
+        "profile_sweep_runs": 1,
+        "strict_pass_runs": 0,
+        "strict_fail_runs": 1,
+        "blocking_reasons": [reason],
+        "records": [record_payload],
+    }
 verdict_json.write_text(json.dumps(verdict_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+title = "Release Verdict" if release_mode else "Matrix Result"
+status_key = "- verdict: FAIL" if release_mode else "- result: FAIL"
+extra_lines = ["- release_state: RELEASE BLOCKED", "- release_contract_status: failed"] if release_mode else ["- mode: non-release"]
 verdict_md.write_text(
     "\n".join(
         [
-            f"# Release Verdict: {matrix_id}",
+            f"# {title}: {matrix_id}",
             "",
             f"- generated_at_utc: {now}",
-            "- verdict: FAIL",
-            "- release_state: RELEASE BLOCKED",
-            "- release_contract_status: failed",
+            status_key,
+            *extra_lines,
             "",
             "## Blocking Items",
             f"- matrix-operational-preflight / preflight ({batch_id}):",
@@ -341,17 +310,6 @@ PY
 
 operational_host_preflight_failed() {
   local reason="$1"
-  write_matrix_blackbox_step_report \
-    "matrix.preflight" \
-    "Verify host, selected providers, writable paths, and matrix prerequisites before execution." \
-    "Inspect configured provider binaries, temp/report roots, matrix path, and release-mode requirements." \
-    "failed" \
-    "operational_host_preflight_failed" \
-    "Stop on the current host; repair host/provider/path readiness without editing canonical matrices or curated repo files." \
-    "$E2E_MATRIX_FILE" \
-    "$MATRIX_DRIVER_LOG" \
-    "$MATRIX_ROOT" \
-    "$REPORTS_ROOT" || true
   write_matrix_operational_blocker_report "$reason" || true
   die "operational_host_preflight_failed: $reason"
 }
@@ -490,7 +448,6 @@ payload = {
     "run_matrix_tsv": "-",
     "run_matrix_md": "-",
     "frontend_matrix_md": "-",
-    "frontend_cancel_matrix_md": "-",
     "quality_report_md": "-",
     "driver_log": sys.argv[16],
     "inventory_json": "-",
@@ -507,11 +464,10 @@ update_current_profile_status_artifacts() {
   local run_matrix_tsv="$3"
   local run_matrix_md="$4"
   local frontend_matrix_md="$5"
-  local frontend_cancel_matrix_md="$6"
-  local quality_report_md="$7"
-  local inventory_json="${8:--}"
+  local quality_report_md="$6"
+  local inventory_json="${7:--}"
   [[ -z "$CURRENT_PROFILE_STATUS_FILE" ]] && return 0
-  python3 - "$CURRENT_PROFILE_STATUS_FILE" "$status" "$failure_reason" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md" "$inventory_json" <<'PY'
+  python3 - "$CURRENT_PROFILE_STATUS_FILE" "$status" "$failure_reason" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$quality_report_md" "$inventory_json" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
@@ -529,12 +485,11 @@ payload["failure_reason"] = sys.argv[3]
 payload["run_matrix_tsv"] = sys.argv[4]
 payload["run_matrix_md"] = sys.argv[5]
 payload["frontend_matrix_md"] = sys.argv[6]
-payload["frontend_cancel_matrix_md"] = sys.argv[7]
-payload["quality_report_md"] = sys.argv[8]
-payload["inventory_json"] = sys.argv[9]
-if sys.argv[9] and sys.argv[9] != "-":
+payload["quality_report_md"] = sys.argv[7]
+payload["inventory_json"] = sys.argv[8]
+if sys.argv[8] and sys.argv[8] != "-":
     try:
-        inventory = json.loads(Path(sys.argv[9]).read_text(encoding="utf-8"))
+        inventory = json.loads(Path(sys.argv[8]).read_text(encoding="utf-8"))
         payload["raw_output_refs"] = inventory.get("raw_output_refs", [])
     except Exception:
         payload["raw_output_refs"] = []
@@ -549,11 +504,10 @@ write_current_profile_inventory() {
   local run_matrix_tsv="$3"
   local run_matrix_md="$4"
   local frontend_matrix_md="$5"
-  local frontend_cancel_matrix_md="$6"
-  local quality_report_md="$7"
+  local quality_report_md="$6"
   local inventory_json="$MATRIX_ROOT/inventory/${CURRENT_BATCH_ID}.json"
   mkdir -p "$(dirname "$inventory_json")"
-  python3 - "$inventory_json" "$MATRIX_ID" "$E2E_MATRIX_FILE" "$CURRENT_PROFILE_ID" "$CURRENT_SWEEP_ID" "$CURRENT_BATCH_ID" "$CURRENT_BATCH_ROOT" "$status" "$failure_reason" "$CURRENT_DRIVER_LOG" "$CURRENT_PROFILE_STATUS_FILE" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md" "$MATRIX_SELECTED_PROVIDERS_CSV" "$MATRIX_SELECTED_RUN_INDEXES_CSV" <<'PY'
+  python3 - "$inventory_json" "$MATRIX_ID" "$E2E_MATRIX_FILE" "$CURRENT_PROFILE_ID" "$CURRENT_SWEEP_ID" "$CURRENT_BATCH_ID" "$CURRENT_BATCH_ROOT" "$status" "$failure_reason" "$CURRENT_DRIVER_LOG" "$CURRENT_PROFILE_STATUS_FILE" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$quality_report_md" "$MATRIX_SELECTED_PROVIDERS_CSV" "$MATRIX_SELECTED_RUN_INDEXES_CSV" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
@@ -616,16 +570,15 @@ payload = {
     "batch_root": sys.argv[7],
     "terminal_status": sys.argv[8],
     "failure_reason": sys.argv[9],
-    "selected_providers": [item for item in sys.argv[17].split(",") if item],
-    "selected_run_indexes": [item for item in sys.argv[18].split(",") if item],
+    "selected_providers": [item for item in sys.argv[16].split(",") if item],
+    "selected_run_indexes": [item for item in sys.argv[17].split(",") if item],
     "key_paths": {
         "driver_log": sys.argv[10],
         "profile_status_file": sys.argv[11],
         "run_matrix_tsv": sys.argv[12],
         "run_matrix_md": sys.argv[13],
         "frontend_matrix_md": sys.argv[14],
-        "frontend_cancel_matrix_md": sys.argv[15],
-        "quality_report_md": sys.argv[16],
+        "quality_report_md": sys.argv[15],
     },
     "raw_output_refs": raw_output_refs,
 }
@@ -998,6 +951,10 @@ fi
 if [[ "$ACP_APPLY_TIMEOUTS_VIA_API" != "0" && "$ACP_APPLY_TIMEOUTS_VIA_API" != "1" ]]; then
   die "ACP_APPLY_TIMEOUTS_VIA_API must be 0 or 1, got '$ACP_APPLY_TIMEOUTS_VIA_API'"
 fi
+DEFAULT_BATCH_SCRIPT="$PROVENARCH_ROOT/scripts/full-run-batch.sh"
+if [[ "$RELEASE_MODE" == "1" && "$BATCH_SCRIPT" != "$DEFAULT_BATCH_SCRIPT" && "${ACP_TEST_ALLOW_BATCH_SCRIPT_OVERRIDE:-0}" != "1" ]]; then
+  die "release-mode requires the canonical batch script: $DEFAULT_BATCH_SCRIPT"
+fi
 if [[ ! -x "$BATCH_SCRIPT" ]]; then
   die "batch script is unavailable: $BATCH_SCRIPT"
 fi
@@ -1007,6 +964,12 @@ require_cmd python3
 acp_ensure_no_legacy_env_set die
 resolve_selected_providers
 resolve_selected_run_indexes
+if [[ "$RELEASE_MODE" == "1" && "$MATRIX_SELECTED_PROVIDERS_CSV" != "qwen-code,claude-code,codex-code" ]]; then
+  die "release-mode requires all providers with no BATCH_PROVIDER_FILTER override"
+fi
+if [[ "$RELEASE_MODE" == "1" && "$MATRIX_SELECTED_RUN_INDEXES_CSV" != "1" ]]; then
+  die "release-mode requires selected run indexes to be exactly 1"
+fi
 if ! mkdir -p "$(dirname "$MATRIX_DRIVER_LOG")"; then
   die "operational_host_preflight_failed: cannot create matrix driver log directory for $MATRIX_DRIVER_LOG"
 fi
@@ -1033,16 +996,11 @@ run_host_preflight_checks
 
 mkdir -p "$MATRIX_ROOT" "$REPORTS_ROOT"
 mkdir -p "$MATRIX_STATUS_ROOT"
-init_matrix_blackbox_step_report
 reconcile_stale_profile_statuses
 
-ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES="$(normalize_binary_flag "$E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES" "E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES")"
 if [[ "$RELEASE_MODE" == "1" ]]; then
   if [[ -z "$BATCH_FRONTEND_MODE" ]]; then
     BATCH_FRONTEND_MODE="per_run"
-  fi
-  if [[ -z "$BATCH_FRONTEND_CANCEL_MODE" ]]; then
-    BATCH_FRONTEND_CANCEL_MODE="once_per_provider"
   fi
   if [[ -z "$UI_E2E_HEADED" ]]; then
     UI_E2E_HEADED="1"
@@ -1065,38 +1023,14 @@ TIMEOUT_PROFILE_CMD=(
   --format
   line
 )
-acp_log_release_guard log "$RELEASE_MODE" "$MATRIX_ID" "$ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES" "${#DIAGNOSTIC_TIMEOUT_OVERRIDES[@]}"
+acp_log_release_guard log "$RELEASE_MODE" "$MATRIX_ID" "0" "${#DIAGNOSTIC_TIMEOUT_OVERRIDES[@]}"
 if [[ "${#DIAGNOSTIC_TIMEOUT_OVERRIDES[@]}" -gt 0 ]]; then
   acp_log_diagnostic_timeout_overrides log "${DIAGNOSTIC_TIMEOUT_OVERRIDES[*]}"
 fi
-if [[ "$RELEASE_MODE" == "1" && "$ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES" != "1" && "${#DIAGNOSTIC_TIMEOUT_OVERRIDES[@]}" -gt 0 ]]; then
-  write_matrix_blackbox_step_report \
-    "matrix.preflight" \
-    "Verify host, selected providers, writable paths, release guard, and matrix prerequisites before execution." \
-    "Inspect provider binaries, temp/report roots, selected providers/run indexes, direct batch script availability, and release timeout guard." \
-    "failed" \
-    "release_guard_blocked" \
-    "Stop this matrix run; remove diagnostic timeout overrides or rerun only as explicit diagnostic evidence." \
-    "$E2E_MATRIX_FILE" \
-    "$MATRIX_DRIVER_LOG" \
-    "$BATCH_SCRIPT" \
-    "$MATRIX_ROOT" \
-    "$REPORTS_ROOT"
+if [[ "$RELEASE_MODE" == "1" && "${#DIAGNOSTIC_TIMEOUT_OVERRIDES[@]}" -gt 0 ]]; then
   die "$(acp_release_guard_blocked_message)"
 fi
-log "release frontend defaults: frontend_mode=${BATCH_FRONTEND_MODE:-default} frontend_cancel_mode=${BATCH_FRONTEND_CANCEL_MODE:-default} headed=${UI_E2E_HEADED:-default}"
-write_matrix_blackbox_step_report \
-  "matrix.preflight" \
-  "Verify host, selected providers, writable paths, release guard, and matrix prerequisites before execution." \
-  "Inspect provider binaries, temp/report roots, selected providers/run indexes, direct batch script availability, and release timeout guard." \
-  "passed" \
-  "none" \
-  "Plan matrix profile/sweep direct commands." \
-  "$E2E_MATRIX_FILE" \
-  "$MATRIX_DRIVER_LOG" \
-  "$BATCH_SCRIPT" \
-  "$MATRIX_ROOT" \
-  "$REPORTS_ROOT"
+log "release frontend defaults: frontend_mode=${BATCH_FRONTEND_MODE:-default} headed=${UI_E2E_HEADED:-default}"
 
 COMBINATIONS_TSV="$MATRIX_ROOT/profile-sweep-combinations.tsv"
 RECORDS_JSONL="$MATRIX_ROOT/profile-runs.jsonl"
@@ -1351,30 +1285,8 @@ timeout_profile_path.parent.mkdir(parents=True, exist_ok=True)
 timeout_profile_path.write_text((timeout_profile + "\n") if timeout_profile else "", encoding="utf-8")
 PY
 then
-  write_matrix_blackbox_step_report \
-    "matrix.plan" \
-    "Resolve the matrix into direct profile/sweep batch executions." \
-    "Parse matrix YAML, validate release-mode profile/sweep contract, and write profile-sweep combinations." \
-    "failed" \
-    "matrix_plan_failed" \
-    "Stop before launching child batches; inspect matrix YAML and release-mode contract errors." \
-    "$E2E_MATRIX_FILE" \
-    "$COMBINATIONS_TSV" \
-    "$MATRIX_TIMEOUT_PROFILE_FILE" \
-    "$MATRIX_DRIVER_LOG"
   die "matrix planning failed: matrix_file=$E2E_MATRIX_FILE"
 fi
-write_matrix_blackbox_step_report \
-  "matrix.plan" \
-  "Resolve the matrix into direct profile/sweep batch executions." \
-  "Parse matrix YAML, validate release-mode profile/sweep contract, and write profile-sweep combinations." \
-  "passed" \
-  "none" \
-  "Execute each planned profile/sweep through scripts/full-run-batch.sh." \
-  "$E2E_MATRIX_FILE" \
-  "$COMBINATIONS_TSV" \
-  "$MATRIX_TIMEOUT_PROFILE_FILE" \
-  "$MATRIX_DRIVER_LOG"
 
 if [[ -f "$MATRIX_TIMEOUT_PROFILE_FILE" ]]; then
   MATRIX_TIMEOUT_PROFILE="$(tr -d '\r' < "$MATRIX_TIMEOUT_PROFILE_FILE" | head -n1 | xargs)"
@@ -1428,15 +1340,14 @@ while IFS=$'\t' read -r profile_id repos_file expected_repo_count source_kind sw
       run_matrix_tsv="$REPORTS_ROOT/run_matrix_${batch_id}.tsv"
       run_matrix_md="$REPORTS_ROOT/run_matrix_${batch_id}.md"
       frontend_matrix_md="$REPORTS_ROOT/frontend_e2e_matrix_${batch_id}.md"
-      frontend_cancel_matrix_md="$REPORTS_ROOT/frontend_cancel_e2e_matrix_${batch_id}.md"
       quality_report_md="$REPORTS_ROOT/quality_report_${batch_id}.md"
-      inventory_json="$(write_current_profile_inventory "$status" "$profile_failure_reason" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md")"
-      update_current_profile_status_artifacts "$status" "$profile_failure_reason" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md" "$inventory_json"
+      inventory_json="$(write_current_profile_inventory "$status" "$profile_failure_reason" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$quality_report_md")"
+      update_current_profile_status_artifacts "$status" "$profile_failure_reason" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$quality_report_md" "$inventory_json"
 
       python3 - "$RECORDS_JSONL" \
         "$profile_id" "$profile_slug" "$batch_id" "$source_kind" "$expected_repo_count" "$repos_file" "$status" "$profile_failure_reason" \
         "$sweep_id" "$sweep_strategy" "$sweep_max_parallel" "$sweep_failure_policy" "$sweep_shard_mode" \
-        "$batch_root" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md" "$driver_log" "$inventory_json" <<'PY'
+        "$batch_root" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$quality_report_md" "$driver_log" "$inventory_json" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -1462,27 +1373,14 @@ payload = {
     "run_matrix_tsv": sys.argv[16],
     "run_matrix_md": sys.argv[17],
     "frontend_matrix_md": sys.argv[18],
-    "frontend_cancel_matrix_md": sys.argv[19],
-    "quality_report_md": sys.argv[20],
-    "driver_log": sys.argv[21],
-    "inventory_json": sys.argv[22],
+    "quality_report_md": sys.argv[19],
+    "driver_log": sys.argv[20],
+    "inventory_json": sys.argv[21],
 }
 with path.open("a", encoding="utf-8") as f:
     f.write(json.dumps(payload, ensure_ascii=True))
     f.write("\n")
 PY
-      write_matrix_blackbox_step_report \
-        "matrix.profile.${profile_slug}.${sweep_slug}" \
-        "Execute one planned profile/sweep through the public batch harness." \
-        "Validate profile repo metadata before launching batch_id=$batch_id." \
-        "$status" \
-        "$profile_failure_reason" \
-        "Stop this profile/sweep on operational preflight failure; repair repo path/SHA metadata without editing canonical matrices." \
-        "$driver_log" \
-        "$CURRENT_PROFILE_STATUS_FILE" \
-        "$inventory_json" \
-        "$run_matrix_md" \
-        "$quality_report_md"
       continue
     fi
     PROFILE_META_CACHE_KEY="$profile_meta_key"
@@ -1514,9 +1412,6 @@ PY
     EXTRA_BATCH_ENV_ASSIGNMENTS=()
     if [[ -n "$BATCH_FRONTEND_MODE" ]]; then
       EXTRA_BATCH_ENV_ASSIGNMENTS+=("BATCH_FRONTEND_MODE=$BATCH_FRONTEND_MODE")
-    fi
-    if [[ -n "$BATCH_FRONTEND_CANCEL_MODE" ]]; then
-      EXTRA_BATCH_ENV_ASSIGNMENTS+=("BATCH_FRONTEND_CANCEL_MODE=$BATCH_FRONTEND_CANCEL_MODE")
     fi
     if [[ -n "$UI_E2E_HEADED" ]]; then
       EXTRA_BATCH_ENV_ASSIGNMENTS+=("UI_E2E_HEADED=$UI_E2E_HEADED")
@@ -1566,15 +1461,14 @@ PY
   run_matrix_tsv="$REPORTS_ROOT/run_matrix_${batch_id}.tsv"
   run_matrix_md="$REPORTS_ROOT/run_matrix_${batch_id}.md"
   frontend_matrix_md="$REPORTS_ROOT/frontend_e2e_matrix_${batch_id}.md"
-  frontend_cancel_matrix_md="$REPORTS_ROOT/frontend_cancel_e2e_matrix_${batch_id}.md"
   quality_report_md="$REPORTS_ROOT/quality_report_${batch_id}.md"
-  inventory_json="$(write_current_profile_inventory "$status" "$profile_failure_reason" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md")"
-  update_current_profile_status_artifacts "$status" "$profile_failure_reason" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md" "$inventory_json"
+  inventory_json="$(write_current_profile_inventory "$status" "$profile_failure_reason" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$quality_report_md")"
+  update_current_profile_status_artifacts "$status" "$profile_failure_reason" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$quality_report_md" "$inventory_json"
 
   python3 - "$RECORDS_JSONL" \
     "$profile_id" "$profile_slug" "$batch_id" "$PROFILE_META_CACHE_SOURCE_KIND" "$PROFILE_META_CACHE_EXPECTED_REPO_COUNT" "$PROFILE_META_CACHE_REPOS_FILE" "$status" "$profile_failure_reason" \
     "$sweep_id" "$sweep_strategy" "$sweep_max_parallel" "$sweep_failure_policy" "$sweep_shard_mode" \
-    "$batch_root" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$frontend_cancel_matrix_md" "$quality_report_md" "$driver_log" "$inventory_json" <<'PY'
+    "$batch_root" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$quality_report_md" "$driver_log" "$inventory_json" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -1600,35 +1494,14 @@ payload = {
     "run_matrix_tsv": sys.argv[16],
     "run_matrix_md": sys.argv[17],
     "frontend_matrix_md": sys.argv[18],
-    "frontend_cancel_matrix_md": sys.argv[19],
-    "quality_report_md": sys.argv[20],
-    "driver_log": sys.argv[21],
-    "inventory_json": sys.argv[22],
+    "quality_report_md": sys.argv[19],
+    "driver_log": sys.argv[20],
+    "inventory_json": sys.argv[21],
 }
 with path.open("a", encoding="utf-8") as f:
     f.write(json.dumps(payload, ensure_ascii=True))
     f.write("\n")
 PY
-  profile_next_decision="Continue to the next profile/sweep or synthesize the matrix verdict."
-  if [[ "$status" != "passed" ]]; then
-    profile_next_decision="Inspect batch step report, profile inventory, driver log, and generated reports before continuing."
-  fi
-  write_matrix_blackbox_step_report \
-    "matrix.profile.${profile_slug}.${sweep_slug}" \
-    "Execute one planned profile/sweep through the public batch harness." \
-    "Run batch_id=$batch_id via $BATCH_SCRIPT and inspect generated backend/frontend/quality artifacts." \
-    "$status" \
-    "$profile_failure_reason" \
-    "$profile_next_decision" \
-    "$driver_log" \
-    "$CURRENT_PROFILE_STATUS_FILE" \
-    "$inventory_json" \
-    "$REPORTS_ROOT/blackbox_e2e_steps_${batch_id}.jsonl" \
-    "$REPORTS_ROOT/blackbox_e2e_steps_${batch_id}.md" \
-    "$run_matrix_md" \
-    "$frontend_matrix_md" \
-    "$frontend_cancel_matrix_md" \
-    "$quality_report_md"
 done 3< "$COMBINATIONS_TSV"
 CURRENT_PROFILE_STATUS_FILE=""
 
@@ -1636,13 +1509,18 @@ reconcile_stale_profile_statuses
 
 MATRIX_REPORT_MD="$REPORTS_ROOT/profile_matrix_${MATRIX_ID}.md"
 MATRIX_REPORT_TSV="$REPORTS_ROOT/profile_matrix_${MATRIX_ID}.tsv"
-VERDICT_MD="$REPORTS_ROOT/release_verdict_${MATRIX_ID}.md"
-VERDICT_JSON="$REPORTS_ROOT/release_verdict_${MATRIX_ID}.json"
+if [[ "$RELEASE_MODE" == "1" ]]; then
+  RESULT_MD="$REPORTS_ROOT/release_verdict_${MATRIX_ID}.md"
+  RESULT_JSON="$REPORTS_ROOT/release_verdict_${MATRIX_ID}.json"
+else
+  RESULT_MD="$REPORTS_ROOT/matrix_result_${MATRIX_ID}.md"
+  RESULT_JSON="$REPORTS_ROOT/matrix_result_${MATRIX_ID}.json"
+fi
 if [[ "${MATRIX_TEST_TRUNCATE_RECORDS_JSONL:-0}" == "1" ]]; then
   : > "$RECORDS_JSONL"
 fi
 
-python3 - "$RECORDS_JSONL" "$MATRIX_STATUS_ROOT" "$MATRIX_REPORT_MD" "$MATRIX_REPORT_TSV" "$VERDICT_MD" "$VERDICT_JSON" "$MATRIX_ID" "$RELEASE_MODE" "$RUN_COUNT" "$MATRIX_SELECTED_PROVIDERS_CSV" "$MATRIX_SELECTED_RUN_INDEXES_CSV" <<'PY'
+python3 - "$RECORDS_JSONL" "$MATRIX_STATUS_ROOT" "$MATRIX_REPORT_MD" "$MATRIX_REPORT_TSV" "$RESULT_MD" "$RESULT_JSON" "$MATRIX_ID" "$RELEASE_MODE" "$RUN_COUNT" "$MATRIX_SELECTED_PROVIDERS_CSV" "$MATRIX_SELECTED_RUN_INDEXES_CSV" <<'PY'
 import json
 import os
 import re
@@ -1703,7 +1581,6 @@ if status_root.exists():
             "run_matrix_tsv",
             "run_matrix_md",
             "frontend_matrix_md",
-            "frontend_cancel_matrix_md",
             "quality_report_md",
             "driver_log",
             "inventory_json",
@@ -1953,7 +1830,6 @@ def strict_blockers(
     expected_provider_runs: int,
     required_frontend_providers: list[str],
     frontend_init_required: bool,
-    frontend_cancel_required: bool,
 ) -> list[str]:
     reasons: list[str] = []
 
@@ -1999,9 +1875,9 @@ def strict_blockers(
         )
 
     frontend_provider_keys = {
-        "qwen-code": ("frontend_qwen_status", "frontend_cancel_qwen_status"),
-        "claude-code": ("frontend_claude_status", "frontend_cancel_claude_status"),
-        "codex-code": ("frontend_codex_status", "frontend_cancel_codex_status"),
+        "qwen-code": "frontend_qwen_status",
+        "claude-code": "frontend_claude_status",
+        "codex-code": "frontend_codex_status",
     }
 
     def provider_backend_passed(provider: str) -> bool:
@@ -2024,11 +1900,9 @@ def strict_blockers(
         return not provider_backend_passed(provider)
 
     for provider in required_frontend_providers:
-        init_key, cancel_key = frontend_provider_keys[provider]
+        init_key = frontend_provider_keys[provider]
         if frontend_init_required and frontend.get(init_key) != "passed" and not frontend_depends_on_backend_failure(provider, init_key):
             reasons.append(f"{init_key}={frontend.get(init_key, 'missing')} (expected passed)")
-        if frontend_cancel_required and frontend.get(cancel_key) != "passed":
-            reasons.append(f"{cancel_key}={frontend.get(cancel_key, 'missing')} (expected passed)")
     if release_mode and shard_plan_invariant != "passed":
         reasons.append(f"shard_plan_invariant={shard_plan_invariant} (release requires passed)")
 
@@ -2147,9 +2021,6 @@ header = [
     "frontend_qwen_status",
     "frontend_claude_status",
     "frontend_codex_status",
-    "frontend_cancel_qwen_status",
-    "frontend_cancel_claude_status",
-    "frontend_cancel_codex_status",
     "blocking_reasons",
     "raw_output_ref_count",
     "run_matrix_tsv",
@@ -2161,8 +2032,8 @@ tsv_lines = ["\t".join(header)]
 md_lines = [
     "# Profile Matrix",
     "",
-    "| profile_id | sweep_id | batch_id | status | strict | shard_plan_invariant | backend_hard/total | semantic_hard_fail | off_topic_hits | artifact_non_snapshot | evidence_scope | cross_repo_missing | runtime_flow | repair/stall/partial | frontend init (qwen/claude/codex) | frontend cancel (qwen/claude/codex) | blockers | run_matrix | quality_report |",
-    "|---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|---|---|",
+    "| profile_id | sweep_id | batch_id | status | strict | shard_plan_invariant | backend_hard/total | semantic_hard_fail | off_topic_hits | artifact_non_snapshot | evidence_scope | cross_repo_missing | runtime_flow | repair/stall/partial | frontend init (qwen/claude/codex) | blockers | run_matrix | quality_report |",
+    "|---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|---|",
 ]
 
 invariant_status_by_batch, invariant_blockers_by_batch = shard_plan_invariant_status(records)
@@ -2222,21 +2093,16 @@ if not release_mode:
     expected_backend_runs = len(selected_run_indexes) * len(selected_providers)
     required_frontend_providers = list(selected_providers)
 frontend_init_required = release_mode or os.environ.get("BATCH_FRONTEND_MODE", "").strip().lower() != "never"
-frontend_cancel_required = release_mode or os.environ.get("BATCH_FRONTEND_CANCEL_MODE", "").strip().lower() != "never"
 
 for rec in records:
     run_matrix_tsv = Path(str(rec["run_matrix_tsv"]))
     frontend_matrix_md = Path(str(rec["frontend_matrix_md"]))
-    frontend_cancel_matrix_md = Path(str(rec["frontend_cancel_matrix_md"]))
 
     stats = parse_backend_stats(run_matrix_tsv)
     frontend_rows = {
         "frontend_qwen_status": parse_frontend_row(frontend_matrix_md, "qwen-code"),
         "frontend_claude_status": parse_frontend_row(frontend_matrix_md, "claude-code"),
         "frontend_codex_status": parse_frontend_row(frontend_matrix_md, "codex-code"),
-        "frontend_cancel_qwen_status": parse_frontend_row(frontend_cancel_matrix_md, "qwen-code"),
-        "frontend_cancel_claude_status": parse_frontend_row(frontend_cancel_matrix_md, "claude-code"),
-        "frontend_cancel_codex_status": parse_frontend_row(frontend_cancel_matrix_md, "codex-code"),
     }
     frontend_statuses = {
         key: row["status"]
@@ -2259,7 +2125,6 @@ for rec in records:
         len(selected_run_indexes) if not release_mode else run_count,
         required_frontend_providers,
         frontend_init_required,
-        frontend_cancel_required,
     )
     blockers.extend(invariant_blockers_by_batch.get(str(rec["batch_id"]), []))
     strict_status = "passed" if not blockers else "failed"
@@ -2318,9 +2183,6 @@ for rec in records:
                 frontend_statuses["frontend_qwen_status"],
                 frontend_statuses["frontend_claude_status"],
                 frontend_statuses["frontend_codex_status"],
-                frontend_statuses["frontend_cancel_qwen_status"],
-                frontend_statuses["frontend_cancel_claude_status"],
-                frontend_statuses["frontend_cancel_codex_status"],
                 "; ".join(blockers) if blockers else "-",
                 str(len(raw_output_refs)),
                 str(rec["run_matrix_tsv"]),
@@ -2339,7 +2201,6 @@ for rec in records:
         f"{int(stats['runtime_flow_failed']) + int(stats['runtime_flow_issue_hits'])} | "
         f"repair={stats['repair_attempts']}; stalls={stats['stall_count']} (pre={stats['pre_artifact_stalls']}; post={stats['post_artifact_stalls']}); zero_pre={stats['zero_output_pre_artifact_stalls']}; partial={stats['partial_failure_count']}; alerts={stats['quality_alerts']} | "
         f"{frontend_statuses['frontend_qwen_status']}/{frontend_statuses['frontend_claude_status']}/{frontend_statuses['frontend_codex_status']} | "
-        f"{frontend_statuses['frontend_cancel_qwen_status']}/{frontend_statuses['frontend_cancel_claude_status']}/{frontend_statuses['frontend_cancel_codex_status']} | "
         f"{'; '.join(blockers) if blockers else '-'} | {rec['run_matrix_md']} | {rec['quality_report_md']} |"
     )
 
@@ -2392,7 +2253,6 @@ for rec in records:
                 "run_matrix_tsv": rec["run_matrix_tsv"],
                 "run_matrix_md": rec["run_matrix_md"],
                 "frontend_matrix_md": rec["frontend_matrix_md"],
-                "frontend_cancel_matrix_md": rec["frontend_cancel_matrix_md"],
                 "quality_report_md": rec["quality_report_md"],
                 "driver_log": rec["driver_log"],
                 "inventory_json": rec.get("inventory_json", "-"),
@@ -2420,20 +2280,35 @@ out_md.parent.mkdir(parents=True, exist_ok=True)
 out_md.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
 out_tsv.write_text("\n".join(tsv_lines) + "\n", encoding="utf-8")
 
-verdict_lines = [
-    f"# Release Verdict: {matrix_id}",
-    "",
-    f"- generated_at_utc: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}",
-    f"- verdict: {verdict}",
-    f"- release_state: {release_state}",
-    f"- profile_sweep_runs: {len(verdict_records)}",
-    f"- strict_pass_runs: {len(verdict_records) - strict_fail_count}",
-    f"- strict_fail_runs: {strict_fail_count}",
-    f"- release_mode: {'1' if release_mode else '0'}",
-    f"- release_contract_status: {release_contract_status}",
-    "",
-    "## Blocking Items",
-]
+generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+if release_mode:
+    verdict_lines = [
+        f"# Release Verdict: {matrix_id}",
+        "",
+        f"- generated_at_utc: {generated_at}",
+        f"- verdict: {verdict}",
+        f"- release_state: {release_state}",
+        f"- profile_sweep_runs: {len(verdict_records)}",
+        f"- strict_pass_runs: {len(verdict_records) - strict_fail_count}",
+        f"- strict_fail_runs: {strict_fail_count}",
+        "- release_mode: 1",
+        f"- release_contract_status: {release_contract_status}",
+        "",
+        "## Blocking Items",
+    ]
+else:
+    verdict_lines = [
+        f"# Matrix Result: {matrix_id}",
+        "",
+        f"- generated_at_utc: {generated_at}",
+        f"- result: {verdict}",
+        "- mode: non-release",
+        f"- profile_sweep_runs: {len(verdict_records)}",
+        f"- strict_pass_runs: {len(verdict_records) - strict_fail_count}",
+        f"- strict_fail_runs: {strict_fail_count}",
+        "",
+        "## Blocking Items",
+    ]
 
 if strict_fail_count == 0 and not release_contract_failed:
     verdict_lines.append("- none")
@@ -2450,55 +2325,74 @@ else:
         verdict_lines.append(f"  - run_matrix: {artifacts['run_matrix_md']}")
         verdict_lines.append(f"  - quality_report: {artifacts['quality_report_md']}")
         verdict_lines.append(f"  - frontend_matrix: {artifacts['frontend_matrix_md']}")
-        verdict_lines.append(f"  - frontend_cancel_matrix: {artifacts['frontend_cancel_matrix_md']}")
         verdict_lines.append(f"  - inventory: {artifacts['inventory_json']} (raw_output_refs={artifacts['raw_output_ref_count']})")
-    if release_contract_failed:
+    if release_mode and release_contract_failed:
         verdict_lines.append("- release_contract:")
         for blocker in release_contract_blockers:
             verdict_lines.append(f"  - {blocker}")
 
-verdict_lines.extend(
-    [
-        "",
-        "## Release Contract",
-        f"- required_sweeps: {', '.join(required_sweeps) if required_sweeps else '-'}",
-        f"- observed_sweeps: {', '.join(observed_sweeps) if observed_sweeps else '-'}",
-        f"- expected_profile_sweep_runs: {expected_profile_sweep_runs}",
-        f"- observed_profile_sweep_runs: {observed_profile_sweep_runs}",
-        f"- shard_plan_invariant_status: {invariant_aggregate_status}",
-        f"- contract_status: {release_contract_status}",
+if release_mode:
+    verdict_lines.extend(
+        [
+            "",
+            "## Release Contract",
+            f"- required_sweeps: {', '.join(required_sweeps) if required_sweeps else '-'}",
+            f"- observed_sweeps: {', '.join(observed_sweeps) if observed_sweeps else '-'}",
+            f"- expected_profile_sweep_runs: {expected_profile_sweep_runs}",
+            f"- observed_profile_sweep_runs: {observed_profile_sweep_runs}",
+            f"- shard_plan_invariant_status: {invariant_aggregate_status}",
+            f"- contract_status: {release_contract_status}",
+        ]
+    )
+    verdict_payload = {
+        "matrix_id": matrix_id,
+        "generated_at_utc": generated_at,
+        "verdict": verdict,
+        "release_state": release_state,
+        "profile_sweep_runs": len(verdict_records),
+        "strict_pass_runs": len(verdict_records) - strict_fail_count,
+        "strict_fail_runs": strict_fail_count,
+        "backend": backend_aggregate,
+        "release_contract": {
+            "mode": "release",
+            "required_sweeps": required_sweeps,
+            "observed_sweeps": observed_sweeps,
+            "expected_profile_sweep_runs": expected_profile_sweep_runs,
+            "observed_profile_sweep_runs": observed_profile_sweep_runs,
+            "selected_providers": selected_providers,
+            "selected_run_indexes": selected_run_indexes,
+            "expected_backend_runs_per_profile_sweep": expected_backend_runs,
+            "required_profiles": list(required_release_profiles),
+            "observed_profiles": observed_profiles,
+            "missing_profile_sweep_pairs": missing_profile_sweep_pairs,
+            "extra_profile_sweep_pairs": extra_profile_sweep_pairs,
+            "shard_plan_invariant_status": invariant_aggregate_status,
+            "shard_plan_invariant_counts": dict(invariant_status_counts),
+            "contract_status": release_contract_status,
+            "blocking_reasons": release_contract_blockers,
+        },
+        "records": verdict_records,
+    }
+else:
+    matrix_blockers = [
+        f"{item['profile_id']}/{item['sweep_id']}:{reason}"
+        for item in verdict_records
+        for reason in item.get("blocking_reasons", [])
     ]
-)
-
-verdict_payload = {
-    "matrix_id": matrix_id,
-    "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    "verdict": verdict,
-    "release_state": release_state,
-    "profile_sweep_runs": len(verdict_records),
-    "strict_pass_runs": len(verdict_records) - strict_fail_count,
-    "strict_fail_runs": strict_fail_count,
-    "backend": backend_aggregate,
-    "release_contract": {
-        "mode": "release" if release_mode else "non-release",
-        "required_sweeps": required_sweeps,
-        "observed_sweeps": observed_sweeps,
-        "expected_profile_sweep_runs": expected_profile_sweep_runs,
-        "observed_profile_sweep_runs": observed_profile_sweep_runs,
+    verdict_payload = {
+        "matrix_id": matrix_id,
+        "generated_at_utc": generated_at,
+        "result": verdict,
+        "mode": "non-release",
+        "profile_sweep_runs": len(verdict_records),
+        "strict_pass_runs": len(verdict_records) - strict_fail_count,
+        "strict_fail_runs": strict_fail_count,
+        "backend": backend_aggregate,
         "selected_providers": selected_providers,
         "selected_run_indexes": selected_run_indexes,
-        "expected_backend_runs_per_profile_sweep": expected_backend_runs,
-        "required_profiles": list(required_release_profiles) if release_mode else [],
-        "observed_profiles": observed_profiles,
-        "missing_profile_sweep_pairs": missing_profile_sweep_pairs,
-        "extra_profile_sweep_pairs": extra_profile_sweep_pairs,
-        "shard_plan_invariant_status": invariant_aggregate_status,
-        "shard_plan_invariant_counts": dict(invariant_status_counts),
-        "contract_status": release_contract_status,
-        "blocking_reasons": release_contract_blockers,
-    },
-    "records": verdict_records,
-}
+        "blocking_reasons": matrix_blockers,
+        "records": verdict_records,
+    }
 
 verdict_md.write_text("\n".join(verdict_lines) + "\n", encoding="utf-8")
 verdict_json.write_text(json.dumps(verdict_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
@@ -2506,47 +2400,34 @@ PY
 
 log "profile matrix markdown: $MATRIX_REPORT_MD"
 log "profile matrix tsv: $MATRIX_REPORT_TSV"
-log "release verdict markdown: $VERDICT_MD"
-log "release verdict json: $VERDICT_JSON"
+if [[ "$RELEASE_MODE" == "1" ]]; then
+  log "release verdict markdown: $RESULT_MD"
+  log "release verdict json: $RESULT_JSON"
+else
+  log "matrix result markdown: $RESULT_MD"
+  log "matrix result json: $RESULT_JSON"
+fi
 
-MATRIX_VERDICT="$(python3 - "$VERDICT_JSON" <<'PY'
+MATRIX_RESULT="$(python3 - "$RESULT_JSON" "$RELEASE_MODE" <<'PY'
 import json
 import sys
 payload = json.load(open(sys.argv[1], encoding="utf-8"))
-print(str(payload.get("verdict", "FAIL")).strip().upper())
+release_mode = str(sys.argv[2]).strip() == "1"
+key = "verdict" if release_mode else "result"
+print(str(payload.get(key, "FAIL")).strip().upper())
 PY
 )"
 
-if [[ "$MATRIX_VERDICT" != "PASS" ]]; then
-  write_matrix_blackbox_step_report \
-    "matrix.verdict" \
-    "Verify the official release decision from the canonical release verdict artifact." \
-    "Read reports/release_verdict_${MATRIX_ID}.json and classify the matrix outcome." \
-    "failed" \
-    "release_verdict_FAIL" \
-    "Treat the release as blocked; inspect verdict records and referenced batch evidence." \
-    "$VERDICT_JSON" \
-    "$VERDICT_MD" \
-    "$MATRIX_REPORT_TSV" \
-    "$MATRIX_REPORT_MD" \
-    "$MATRIX_BLACKBOX_STEPS_JSONL" \
-    "$MATRIX_BLACKBOX_STEPS_MD"
-  die "RELEASE BLOCKED for matrix=$MATRIX_ID (see $VERDICT_MD)"
+if [[ "$MATRIX_RESULT" != "PASS" ]]; then
+  if [[ "$RELEASE_MODE" == "1" ]]; then
+    die "RELEASE BLOCKED for matrix=$MATRIX_ID (see $RESULT_MD)"
+  fi
+  die "matrix result failed for matrix=$MATRIX_ID (see $RESULT_MD)"
 fi
 
-write_matrix_blackbox_step_report \
-  "matrix.verdict" \
-  "Verify the official release decision from the canonical release verdict artifact." \
-  "Read reports/release_verdict_${MATRIX_ID}.json and classify the matrix outcome." \
-  "passed" \
-  "release_verdict_PASS" \
-  "Publish the final black-box report using the matrix step report and canonical verdict artifacts." \
-  "$VERDICT_JSON" \
-  "$VERDICT_MD" \
-  "$MATRIX_REPORT_TSV" \
-  "$MATRIX_REPORT_MD" \
-  "$MATRIX_BLACKBOX_STEPS_JSONL" \
-  "$MATRIX_BLACKBOX_STEPS_MD"
-
-log "matrix completed successfully (RELEASE READY)"
+if [[ "$RELEASE_MODE" == "1" ]]; then
+  log "matrix completed successfully (RELEASE READY)"
+else
+  log "matrix completed successfully (non-release PASS)"
+fi
 exit 0

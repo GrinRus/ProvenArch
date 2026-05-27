@@ -487,7 +487,14 @@ export default function App() {
     hasProposals: proposalArtifacts.length > 0,
     hasRun: Boolean(runStatus),
     blockersCount: blockers.length,
-  }), [activeStage, artifactCount, blockers.length, proposalArtifacts.length, runStatus, setupDoctorResult, validateResult]);
+    hardBlockersCount:
+      validationErrors.length +
+      doctorFailures.length +
+      (runStatus?.pending_permissions?.length ?? 0) +
+      (runStatus?.error_code ? 1 : 0),
+    reviewFindingsCount: openQuestions.trim() ? 1 : 0,
+    releaseBlockersCount: runStatus?.error_code === "release_verdict_FAIL" ? 1 : 0,
+  }), [activeStage, artifactCount, blockers.length, doctorFailures.length, openQuestions, proposalArtifacts.length, runStatus, setupDoctorResult, validateResult, validationErrors.length]);
 
   const runtimeSettingsPanel = (
     <RuntimeProfileSettingsPanel
@@ -616,11 +623,6 @@ export default function App() {
           onApplyGuidedWorkspaceSetup={handleSetupApplyGuidedWorkspaceSetup}
           onManifestChange={handleSetupManifestChange}
           onSaveManifest={() => void handleSaveManifest()}
-          onValidateWorkspace={() => void handleValidateWorkspace()}
-          onCheckDoctor={() => void handleSetupDoctorCheck()}
-          onRunFirstAnalysis={() => void handleSetupFirstRun("review")}
-          onSetupRuntimeChange={handleSetupRuntimeChange}
-          onSetupRuntimeProviderChange={handleSetupRuntimeProviderChange}
         />
       ) : null}
 
@@ -638,7 +640,7 @@ export default function App() {
           onSetupRuntimeProviderChange={handleSetupRuntimeProviderChange}
           onValidateWorkspace={() => void handleValidateWorkspace()}
           onCheckDoctor={() => void handleSetupDoctorCheck()}
-          onRunFirstAnalysis={() => void handleSetupFirstRun()}
+          onRunFirstAnalysis={() => void handleSetupFirstRun("review")}
           runtimeSettingsPanel={runtimeSettingsPanel}
         />
       ) : null}
@@ -746,12 +748,29 @@ function deriveNextAction(
     hasProposals: boolean;
     hasRun: boolean;
     blockersCount: number;
+    hardBlockersCount: number;
+    reviewFindingsCount: number;
+    releaseBlockersCount: number;
   },
 ): NextAction {
   if (state.blockersCount > 0 && activeStage !== "readiness") {
+    if (state.releaseBlockersCount > 0) {
+      return {
+        label: "Verify release blockers",
+        description: "Inspect release verdict evidence before making a release decision.",
+        primaryActionId: "review",
+      };
+    }
+    if (state.hardBlockersCount === 0 && state.reviewFindingsCount > 0) {
+      return {
+        label: "Review findings",
+        description: "Inspect coverage questions and findings before publishing.",
+        primaryActionId: "review",
+      };
+    }
     return {
-      label: "Review blockers",
-      description: "Resolve workspace, doctor, runtime or coverage blockers before publishing.",
+      label: "Resolve blockers",
+      description: "Resolve workspace, doctor or runtime blockers before publishing.",
       primaryActionId: "readiness",
     };
   }

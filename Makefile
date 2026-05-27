@@ -5,6 +5,7 @@ GO_FILES := $(shell find cmd internal -name '*.go' -type f 2>/dev/null)
 RUNTIME ?= fake
 REPO_NAME ?= primary-repo
 DOCS_IMPORTS_PATH ?= ./docs/imports
+STRESS_TEST ?= TestStartAsyncRunRejectsWhenPendingOutsideDebounceWindow
 
 .PHONY: bootstrap contracts test test-stress lint build run-backend run-ui quickstart-local
 
@@ -21,7 +22,8 @@ test: contracts
 	$(NPM) run test --prefix $(UI_DIR) -- --run
 
 test-stress:
-	$(GO) test ./internal/orchestrator -run TestStartAsyncRunRejectsWhenPendingOutsideDebounceWindow -count=30
+	@$(GO) test ./internal/orchestrator -list '$(STRESS_TEST)' | grep -Fxq '$(STRESS_TEST)' || (echo "No stress tests matched $(STRESS_TEST)"; exit 1)
+	$(GO) test ./internal/orchestrator -run '^$(STRESS_TEST)$$' -count=30
 
 lint:
 	@fmt_files="$$(gofmt -l $(GO_FILES))"; \

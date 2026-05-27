@@ -111,7 +111,7 @@ Baseline scenario set:
   - staged artifacts, citation index, final run index and semantic snapshot remain characterization-covered before promotion
   - promotion still copies only the validated final set into canonical `reports/*`/`proposals/*` and rebuilds derived `model/*`
 - UI route-shell seams:
-  - `RunPanels` receives grouped `model/actions`, while run selection, stale artifact clearing, logs polling and stable `data-testid` controls remain covered by UI tests
+  - stage-based console seams (`AppShell`/`StageRail`/`StagePanels`/`ActivityDrawer`) receive grouped `model/actions`, while run selection, stale artifact clearing, logs polling, Ask evidence and stable stage `data-testid` controls remain covered by UI tests
 - docs truth-sync gate проверяет:
   - согласованность runtime policy/Q&A boundary и ссылок на canonical stakeholder matrix;
   - prompt-layer truth: exact merge order (`provider header -> artifact-only/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer`) и invariant `workspace prompt pack = editable content layer only`;
@@ -247,16 +247,19 @@ Release workflow hardening:
 - run cancel endpoint:
   - `POST /api/pipeline/runs/<run_id>/cancel`
   - happy-path `202`, `404 run_not_found`, `409 run_not_cancelable`, `400 invalid_request_body`
-- UI path: open workspace, validate, run, inspect coverage/questions
+- UI path: open workspace, validate, run, inspect coverage/questions through stage rail controls (`Source / Readiness / Analysis / Review / Ask`)
 - UI run logs surface:
-  - log panel render (`Runs: Logs`)
+  - compact activity drawer render
   - log polling/append without duplicates
   - view toggle `line | line+fields`
   - mode toggle `event timeline | raw agent stream | all`
-  - quick action `Open runtime execution artifact`
+  - collapsed runtime execution artifact quick actions
 - UI results diagrams surface:
-  - navigation `Results -> Diagrams`
+  - navigation through `Review`
   - diagram artifact listing and Mermaid preview render
+- UI Ask UX smoke:
+  - optional `UI_E2E_QA_SMOKE=1` checks answer/citations/context-pack/runtime-execution links
+  - screenshot refs are evidence-only and do not influence release verdicts
 - UI run lifecycle operability:
   - bootstrap auto-select newest active run
   - если выбранный run исчезает из list endpoint и replacement доступен, UI переключается на следующий run; если list endpoint временно пуст, но status endpoint ещё жив, selection сохраняется
@@ -266,12 +269,12 @@ Release workflow hardening:
   - save/reset `Runtime Timeouts`
   - save/reset `Runtime Execution`
 - UI quick actions:
-  - `Open runtime execution artifact` открывает persisted taskrun artifact без live e2e-only допущений
+  - collapsed runtime execution artifact action открывает persisted taskrun artifact без live e2e-only допущений
 - Подробный command cookbook по trusted-machine live/release gate intentionally вынесен в `docs/RELEASE_LIVE_E2E_RUNBOOK.md`.
 
 ### Optional live-runner smoke
 - Local `manual-live-e2e workflow` is the trusted-machine operator procedure from `docs/RELEASE_LIVE_E2E_RUNBOOK.md`, not a GitHub Actions workflow.
-- `scripts/internal/live-e2e-evaluator.sh` is a source-only internal evaluator helper for durable step evidence; it is not a public entrypoint and must not call `scripts/full-run-batch-matrix.sh`.
+- Scripts produce machine evidence and verifier-backed verdicts only. Operator/SWE-agent produces the separate black-box assessment over public evidence; harness no longer generates `blackbox_e2e_steps_*`.
 - `scripts/live-e2e-plan.py` — catalog-driven command generator for direct matrix harness invocations:
   - does not execute the harness and does not replace `scripts/full-run-batch-matrix.sh`
   - supports flexible selectors `smoke tiny`, `regres fast|long|full`, `release fast|long|full`
@@ -288,7 +291,6 @@ Release workflow hardening:
   - terminal quality failures (`failure_reason=quality` или `quality_gates=failed`) классифицируются как `quality_gates_failed`, даже если stale classifier rows/raw logs содержат `runner_unavailable`
   - quality summary/matrix counters агрегируют `repair_attempts`, `repair_exhausted`, `fresh_retries`, `focused_repairs`, `stall_count`, `pre_artifact_stalls`, `post_artifact_stalls`, `zero_output_pre_artifact_stalls`, `partial_failure_count` и `quality_alerts`; non-exhausted repair/stall pressure visible but non-blocking, partial failures remain blockers
   - batch report evidence tests проверяют, что `collect_partial_shard_failures`, focused recovery exhaustion/write-set violations и missing headless rows with runtime logs surfaced as per-run issue details, а не теряются за aggregate failure class
-  - black-box step evidence через internal evaluator helper пишется в `reports/blackbox_e2e_steps_<batch-id>.jsonl/.md` после preflight, backend run, frontend init/cancel, report synthesis и final classification
 - `scripts/full-run-batch-matrix.sh` — официальный local trusted-machine harness:
   - canonical input: `E2E_MATRIX_FILE`
   - approved profile ids: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
@@ -298,14 +300,13 @@ Release workflow hardening:
   - matrix invariant: для одного `profile_id` shard-plan должен совпадать между `baseline` и `parallel-default`
   - для `source_kind=git_url` refs должны быть pinned
   - child batch stdin is detached from the planned profile/sweep combinations file; regression coverage forces a dummy child to drain stdin and still requires all matrix rows to execute
-  - black-box matrix evidence через internal evaluator helper пишется в `reports/blackbox_e2e_steps_<matrix-id>.jsonl/.md` после preflight, planning, каждого profile/sweep и verdict verification
-  - итоговый release decision брать только из `reports/release_verdict_<matrix-id>.json`
-  - pre-tag/offline verifier: `python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json`; скрипт только проверяет существующий verdict JSON и не запускает live harness
+  - release-mode пишет только `reports/release_verdict_<matrix-id>.json/.md`; non-release/diagnostic mode пишет neutral `reports/matrix_result_<matrix-id>.json/.md` без `release_state`
+  - итоговый release decision брать только из release-mode `reports/release_verdict_<matrix-id>.json`
+  - pre-tag/offline verifier: `python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json`; скрипт проверяет release-mode contract/providers/run indexes/records и не запускает live harness
 - `scripts/frontend-live-e2e.sh` и `npm run e2e:live --prefix ui` используют Playwright:
   - local wrapper поддерживает `claude-code`, `qwen-code`, `codex-code`
-  - canonical toggles: `UI_E2E_EXPECTED_REPO_COUNT`, `UI_E2E_SCENARIO=init-inspect|cancel-refresh`, `UI_E2E_OUTPUT_DIR`
-  - diagnostic-only `UI_E2E_SCENARIO=api-context-page-close-smoke` proves Playwright API polling survives a closed page; it is not part of release acceptance
-  - cancel flow остаётся guarded сценарием с явным `run_canceled`
+  - canonical toggles: `UI_E2E_EXPECTED_REPO_COUNT`, `UI_E2E_SCENARIO=init-inspect`, `UI_E2E_OUTPUT_DIR`
+  - cancellation/page-close behavior проверяется deterministic fake-runtime UI/API tests, а не live provider release gate
   - init inspect обязан различать `active_run_timeout`, `runtime_run_failed`, `browser_closed`, `api_unreachable`, `server_exited` и fallback `playwright_failed`, чтобы backend run failure, browser lifecycle, API/server lifecycle и productive runtime timeout не выглядели одним failure class
   - long-running run polling использует independent API request context и не зависит от lifetime browser page, которая нужна только для UI assertions
   - init poll budget берётся из effective runtime timeouts and may be raised to `ACP_PIPELINE_TIMEOUT_SEC+30`; fixed cap is opt-in diagnostic only

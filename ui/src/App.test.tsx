@@ -439,15 +439,17 @@ describe("App", () => {
     vi.restoreAllMocks();
   });
 
-  it("supports top tab navigation and settings relocation", async () => {
+  it("supports stage navigation and settings relocation without compatibility controls", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 
     render(<App />);
 
     expect(screen.getByTestId("workspace-panel")).toBeInTheDocument();
     expect(screen.queryByTestId("runtime-timeouts-panel")).not.toBeInTheDocument();
+    expect(screen.queryByTestId(`tab-${"settings"}`)).not.toBeInTheDocument();
+    expect(screen.queryByTestId(`setup-${"stepper"}`)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId("tab-settings"));
+    fireEvent.click(screen.getByTestId("stage-readiness"));
 
     expect(await screen.findByTestId("runtime-timeouts-panel")).toBeInTheDocument();
     expect(screen.getByTestId("runtime-execution-panel")).toBeInTheDocument();
@@ -522,7 +524,7 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByTestId("review-panel")).toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole("button", { name: "reports/diagrams/c4-context.mmd" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /reports\/diagrams\/c4-context\.mmd/i })[0]);
 
     await waitFor(() => expect(mermaid.default.render).toHaveBeenCalledWith(expect.stringMatching(/^diagram-/), "flowchart LR\n  A --> B"));
     expect(mermaid.default.render).not.toHaveBeenCalledWith(expect.any(String), "Loading...");
@@ -539,7 +541,7 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("qa-ask-btn"));
 
     expect(await screen.findByTestId("qa-answer")).toHaveTextContent("payments-service is owned by Platform Architecture.");
-    expect(screen.getByText("reports/as-is/overview.md")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /reports\/as-is\/overview\.md/i })).toBeInTheDocument();
     expect(screen.getByText(/Unresolved: confirm escalation owner/)).toBeInTheDocument();
     expect(screen.getByText("Confidence: 82%")).toBeInTheDocument();
     expect(screen.getByTestId("qa-run-status")).toHaveTextContent("Runtime provider: fake");
@@ -583,13 +585,14 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(screen.getByTestId("setup-stepper")).toHaveTextContent("Source");
+    expect(screen.getByTestId("stage-source")).toHaveClass("is-selected");
     expect(screen.getByDisplayValue("https://github.com/org/my-service.git")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Apply guided workspace form"));
     fireEvent.click(screen.getByTestId("workspace-save-btn"));
 
     await screen.findByTestId("workspace-validate-result");
+    fireEvent.click(screen.getByTestId("stage-readiness"));
     expect(screen.getByTestId("setup-run-first-btn")).not.toBeDisabled();
 
     fireEvent.click(screen.getByTestId("setup-doctor-btn"));
@@ -659,6 +662,7 @@ describe("App", () => {
 
     render(<App />);
 
+    fireEvent.click(screen.getByTestId("stage-readiness"));
     fireEvent.click(screen.getByTestId("workspace-validate-btn"));
 
     await screen.findByTestId("workspace-validate-result");
@@ -674,11 +678,14 @@ describe("App", () => {
     fireEvent.click(screen.getByText("Apply guided workspace form"));
     fireEvent.click(screen.getByTestId("workspace-save-btn"));
     await screen.findByTestId("workspace-validate-result");
+    fireEvent.click(screen.getByTestId("stage-readiness"));
     expect(screen.getByTestId("setup-run-first-btn")).not.toBeDisabled();
 
+    fireEvent.click(screen.getByTestId("stage-source"));
     fireEvent.change(screen.getByLabelText("Repository URL"), { target: { value: "https://github.com/org/changed.git" } });
 
     expect(screen.queryByTestId("workspace-validate-result")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("stage-readiness"));
     expect(screen.getByTestId("setup-run-first-btn")).toBeDisabled();
   });
 
@@ -687,6 +694,7 @@ describe("App", () => {
 
     render(<App />);
 
+    fireEvent.click(screen.getByTestId("stage-readiness"));
     fireEvent.click(screen.getByTestId("setup-doctor-btn"));
     await screen.findByTestId("setup-doctor-result");
     expect(screen.getByText("Local readiness passed.")).toBeInTheDocument();
@@ -752,7 +760,7 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByTestId("tab-runs"));
+    fireEvent.click(screen.getByTestId("stage-analysis"));
     fireEvent.click(screen.getByTestId("run-init-btn"));
 
     await screen.findByTestId("run-status-panel");
@@ -809,7 +817,7 @@ describe("App", () => {
     );
 
     render(<App />);
-    fireEvent.click(screen.getByTestId("tab-runs"));
+    fireEvent.click(screen.getByTestId("stage-analysis"));
 
     expect(await screen.findByTestId("runs-pending-permissions-table")).toBeInTheDocument();
     expect(screen.getByText("perm-1")).toBeInTheDocument();
@@ -858,7 +866,7 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByTestId("tab-runs"));
+    fireEvent.click(screen.getByTestId("stage-analysis"));
     await screen.findByTestId("run-logs-content");
 
     fireEvent.change(screen.getByTestId("run-logs-view-select"), { target: { value: "line+fields" } });
@@ -902,7 +910,7 @@ describe("App", () => {
     );
 
     render(<App />);
-    fireEvent.click(screen.getByTestId("tab-runs"));
+    fireEvent.click(screen.getByTestId("stage-analysis"));
     await screen.findByTestId("run-status-panel");
     fireEvent.click(screen.getByTestId("run-cancel-btn"));
     expect(await screen.findByText(`Cancel requested for ${acceptedRunID}`)).toBeInTheDocument();
@@ -1006,7 +1014,7 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.click(screen.getByTestId("tab-runs"));
+    fireEvent.click(screen.getByTestId("stage-analysis"));
 
     await waitFor(() => {
       expect(screen.getByTestId("run-status-run-id").textContent).toBe("run-stale");
@@ -1050,7 +1058,7 @@ describe("App", () => {
     );
 
     render(<App />);
-    fireEvent.click(screen.getByTestId("tab-runs"));
+    fireEvent.click(screen.getByTestId("stage-analysis"));
     await screen.findByTestId("run-status-panel");
     fireEvent.click(screen.getByTestId("run-cancel-btn"));
     expect(await screen.findByText("Selected run is already terminal.")).toBeInTheDocument();
@@ -1061,7 +1069,7 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.click(screen.getByTestId("tab-settings"));
+    fireEvent.click(screen.getByTestId("stage-readiness"));
 
     const timeoutInput = await screen.findByTestId("runtime-timeout-input-step_timeout_sec");
     fireEvent.change(timeoutInput, { target: { value: "2400" } });
@@ -1155,13 +1163,13 @@ describe("App", () => {
     );
 
     render(<App />);
-    fireEvent.click(screen.getByTestId("tab-runs"));
+    fireEvent.click(screen.getByTestId("stage-analysis"));
 
-    const quickAction = await screen.findByRole("button", { name: `Open runtime execution artifact: ${taskrunPath}` });
+    fireEvent.click(await screen.findByText("Runtime execution artifacts (1)"));
+    const quickAction = await screen.findByTitle(taskrunPath);
     fireEvent.click(quickAction);
 
-    fireEvent.click(screen.getByTestId("tab-results"));
-    fireEvent.click(screen.getByTestId("results-tab-artifacts"));
+    fireEvent.click(screen.getByTestId("stage-review"));
 
     await waitFor(() => {
       expect(screen.getByTestId("run-artifact-selected-path").textContent).toBe(taskrunPath);
@@ -1268,24 +1276,24 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByTestId("tab-results"));
-    fireEvent.click(screen.getByTestId("results-tab-artifacts"));
-    fireEvent.click(await screen.findByRole("button", { name: "reports/as-is/old.md" }));
+    fireEvent.click(screen.getByTestId("stage-review"));
+    fireEvent.click(screen.getByTestId("stage-review"));
+    fireEvent.click(await screen.findByRole("button", { name: /reports\/as-is\/old\.md/i }));
 
     await waitFor(() => {
       expect(screen.getByTestId("run-artifact-selected-path").textContent).toBe("reports/as-is/old.md");
       expect(screen.getByTestId("run-artifact-content").textContent ?? "").toContain("# Old artifact");
     });
 
-    fireEvent.click(screen.getByTestId("tab-runs"));
+    fireEvent.click(screen.getByTestId("stage-analysis"));
     fireEvent.click(screen.getByRole("button", { name: "run-new" }));
 
     await waitFor(() => {
       expect(screen.getByTestId("run-status-run-id").textContent).toBe("run-new");
     });
 
-    fireEvent.click(screen.getByTestId("tab-results"));
-    fireEvent.click(screen.getByTestId("results-tab-artifacts"));
+    fireEvent.click(screen.getByTestId("stage-review"));
+    fireEvent.click(screen.getByTestId("stage-review"));
 
     await waitFor(() => {
       expect(screen.getByTestId("run-artifact-selected-path").textContent).toBe("Artifact Content");
@@ -1318,7 +1326,7 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByTestId("tab-runs"));
+    fireEvent.click(screen.getByTestId("stage-analysis"));
 
     await screen.findByTestId("run-status-panel");
     expect(screen.getByTestId("run-status-value").textContent).toBe("failed");
@@ -1354,7 +1362,7 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByTestId("tab-runs"));
+    fireEvent.click(screen.getByTestId("stage-analysis"));
 
     await screen.findByTestId("run-status-panel");
     expect(screen.getByTestId("run-status-value").textContent).toBe("running");
@@ -1388,7 +1396,7 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByTestId("tab-runs"));
+    fireEvent.click(screen.getByTestId("stage-analysis"));
 
     await screen.findByTestId("run-status-panel");
     expect(screen.getByTestId("run-lifecycle-value").textContent).toBe("incomplete");
@@ -1419,7 +1427,7 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByTestId("tab-runs"));
+    fireEvent.click(screen.getByTestId("stage-analysis"));
 
     await screen.findByTestId("run-status-panel");
     expect(screen.getByTestId("run-lifecycle-value").textContent).toBe("recovered");
@@ -1524,7 +1532,7 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.click(screen.getByTestId("tab-runs"));
+    fireEvent.click(screen.getByTestId("stage-analysis"));
 
     await waitFor(() => {
       expect(screen.getByTestId("run-status-run-id").textContent).toBe("run-stale");
@@ -1591,7 +1599,7 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.click(screen.getByTestId("tab-runs"));
+    fireEvent.click(screen.getByTestId("stage-analysis"));
 
     await waitFor(() => {
       expect(screen.getByTestId("run-status-run-id").textContent).toBe("run-stale");
@@ -1605,7 +1613,7 @@ describe("App", () => {
     expect(screen.queryByText(/Selected run no longer exists;/)).not.toBeInTheDocument();
   }, 10000);
 
-  it("shows diagrams surface in Results tab and renders Mermaid preview", async () => {
+  it("shows diagrams surface in Review stage and renders Mermaid preview", async () => {
     const runID = "run-diagrams";
     const fetchMock = createFetchMock({
       runID,
@@ -1629,8 +1637,8 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByTestId("tab-results"));
-    fireEvent.click(screen.getByTestId("results-tab-diagrams"));
+    fireEvent.click(screen.getByTestId("stage-review"));
+    fireEvent.click(screen.getByTestId("stage-review"));
 
     const diagramButton = await screen.findByRole("button", { name: /reports\/diagrams\/c4-context\.mmd/i });
     fireEvent.click(diagramButton);
@@ -1641,7 +1649,7 @@ describe("App", () => {
     });
   });
 
-  it("edits baseline prompt file in Baseline tab and saves it", async () => {
+  it("edits baseline prompt file in Charter stage and saves it", async () => {
     const fetchMock = createFetchMock({
       artifactText: {
         "skills/prompt-packs/qa.md": "qa prompt baseline\n",
@@ -1651,7 +1659,7 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByTestId("tab-baseline"));
+    fireEvent.click(screen.getByTestId("stage-charter"));
 
     expect(await screen.findByText(/step0\/step1\/step3\/step4/i)).toBeInTheDocument();
     expect(screen.queryByText(/collect`\/`findings/i)).not.toBeInTheDocument();
@@ -1669,13 +1677,13 @@ describe("App", () => {
     expect(saveCalls.length).toBe(1);
   });
 
-  it("executes git-helper commit and proposal-branch actions from Baseline tab", async () => {
+  it("executes git-helper commit and proposal-branch actions from Charter stage", async () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
 
-    fireEvent.click(screen.getByTestId("tab-baseline"));
+    fireEvent.click(screen.getByTestId("stage-charter"));
 
     const commitInput = await screen.findByLabelText("Commit message");
     fireEvent.change(commitInput, { target: { value: "feat: tighten prompt policy" } });

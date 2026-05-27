@@ -4,7 +4,7 @@ import { BaselineEditorsPanel } from "./BaselineEditorsPanel";
 import { BaselineGitPanel } from "./BaselineGitPanel";
 import { RuntimeProfileSettingsPanel } from "./RuntimeProfileSettingsPanel";
 import { RunStatusPanel } from "./RunStatusPanel";
-import { StatusBadge } from "./ConsolePrimitives";
+import { ArtifactPathButton, StatusBadge } from "./ConsolePrimitives";
 import { getQARun, startQAQuestion, type QARunResponse } from "../lib/qaApi";
 import { formatTimestamp } from "../lib/runState";
 import type {
@@ -44,11 +44,6 @@ export type SourceStageProps = {
   onApplyGuidedWorkspaceSetup: () => void;
   onManifestChange: (value: string) => void;
   onSaveManifest: () => void;
-  onValidateWorkspace: () => void;
-  onCheckDoctor: () => void;
-  onRunFirstAnalysis: () => void;
-  onSetupRuntimeChange: (value: string) => void;
-  onSetupRuntimeProviderChange: (value: string) => void;
 };
 
 export function SourceStagePanel({
@@ -69,11 +64,6 @@ export function SourceStagePanel({
   onApplyGuidedWorkspaceSetup,
   onManifestChange,
   onSaveManifest,
-  onValidateWorkspace,
-  onCheckDoctor,
-  onRunFirstAnalysis,
-  onSetupRuntimeChange,
-  onSetupRuntimeProviderChange,
 }: SourceStageProps) {
   const firstRepo = guidedRepos[0];
   const suggestedWorkspace = `~/arch-workspaces/${slugify(firstRepo?.name || "my-service")}`;
@@ -198,40 +188,6 @@ export function SourceStagePanel({
           rows={12}
         />
       </details>
-      <div className="compat-controls" aria-hidden="true">
-        <label htmlFor="setupRuntimeCompat">Runtime mode</label>
-        <select id="setupRuntimeCompat" tabIndex={-1} value={setupRuntime} onChange={(event) => onSetupRuntimeChange(event.target.value)}>
-          <option value="fake">fake</option>
-          <option value="headless">headless</option>
-        </select>
-        <label htmlFor="setupRuntimeProviderCompat">Headless provider</label>
-        <select
-          id="setupRuntimeProviderCompat"
-          tabIndex={-1}
-          value={setupRuntimeProvider}
-          onChange={(event) => onSetupRuntimeProviderChange(event.target.value)}
-          disabled={setupRuntime !== "headless"}
-        >
-          <option value="claude-code">claude-code</option>
-          <option value="qwen-code">qwen-code</option>
-          <option value="codex-code">codex-code</option>
-        </select>
-        <button type="button" tabIndex={-1} onClick={onValidateWorkspace} disabled={busy} data-testid="workspace-validate-btn">
-          Validate workspace
-        </button>
-        <button type="button" tabIndex={-1} onClick={onCheckDoctor} disabled={busy} data-testid="setup-doctor-btn">
-          Check local readiness
-        </button>
-        <button
-          type="button"
-          tabIndex={-1}
-          onClick={onRunFirstAnalysis}
-          disabled={busy || validateResult?.ok !== true}
-          data-testid="setup-run-first-btn"
-        >
-          Run first analysis
-        </button>
-      </div>
       <WorkspaceValidationResult validateResult={validateResult} validationDiagnosticsByRepo={validationDiagnosticsByRepo} />
       {doctorStatus ? <p className="status">{doctorStatus}</p> : null}
       {doctorResult ? <DoctorChecklist doctorResult={doctorResult} /> : null}
@@ -662,10 +618,7 @@ export function ReviewStagePanel({
             <ul data-testid="run-artifacts-list">
               {nonDiagramArtifacts.map((artifact) => (
                 <li key={`${artifact.kind}-${artifact.path}`}>
-                  <button type="button" className="link-button" onClick={() => onOpenArtifact(artifact.path)}>
-                    {artifact.path}
-                  </button>{" "}
-                  ({artifact.kind})
+                  <ArtifactPathButton path={artifact.path} label={artifact.label} kind={artifact.kind} onOpenArtifact={onOpenArtifact} />
                 </li>
               ))}
             </ul>
@@ -686,10 +639,7 @@ export function ReviewStagePanel({
             <ul data-testid="run-diagrams-list">
               {diagramArtifacts.map((artifact) => (
                 <li key={`${artifact.kind}-${artifact.path}`}>
-                  <button type="button" className="link-button" onClick={() => onOpenArtifact(artifact.path)}>
-                    {artifact.path}
-                  </button>{" "}
-                  ({artifact.kind})
+                  <ArtifactPathButton path={artifact.path} label={artifact.label} kind={artifact.kind} onOpenArtifact={onOpenArtifact} />
                 </li>
               ))}
             </ul>
@@ -737,10 +687,8 @@ export function ProposalsStagePanel({
         <ul className="artifact-list">
           {proposalArtifacts.map((artifact) => (
             <li key={`${artifact.kind}-${artifact.path}`}>
-              <button type="button" className="link-button" onClick={() => onOpenArtifact(artifact.path)}>
-                {artifact.path}
-              </button>
-              <span>{artifact.label || artifact.kind}</span>
+              <ArtifactPathButton path={artifact.path} label={artifact.label} kind={artifact.kind} onOpenArtifact={onOpenArtifact} />
+              <span>{artifact.kind}</span>
             </li>
           ))}
         </ul>
@@ -868,9 +816,7 @@ export function AskStagePanel({ onOpenArtifact }: { onOpenArtifact: (path: strin
             <ul>
               {(qaRun.citations ?? []).map((citation) => (
                 <li key={`${citation.path}-${citation.reason}`}>
-                  <button type="button" className="link-button" onClick={() => onOpenArtifact(citation.path)}>
-                    {citation.path}
-                  </button>{" "}
+                  <ArtifactPathButton path={citation.path} onOpenArtifact={onOpenArtifact} />{" "}
                   {citation.reason}
                 </li>
               ))}

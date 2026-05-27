@@ -6,11 +6,84 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
+
+func TestStartAsyncRunRejectsWhenPendingOutsideDebounceWindow(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	releaseRunner := make(chan struct{})
+	currentTime := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
+	var clockMu sync.Mutex
+	clock := func() time.Time {
+		clockMu.Lock()
+		defer clockMu.Unlock()
+		return currentTime
+	}
+	advanceClock := func(delta time.Duration) {
+		clockMu.Lock()
+		currentTime = currentTime.Add(delta)
+		clockMu.Unlock()
+	}
+
+	service := NewService(
+		WithRunner(blockingRunner{release: releaseRunner}),
+		WithHistoryWorkspace(ws),
+		WithClock(clock),
+		WithDebounceWindow(time.Minute),
+	)
+
+	firstRunID, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("start first async run: %v", err)
+	}
+
+	advanceClock(10 * time.Second)
+	secondRunID, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("queue pending run inside debounce window: %v", err)
+	}
+	if secondRunID == firstRunID {
+		t.Fatalf("expected distinct pending run id")
+	}
+	secondInfo, ok := service.GetRun(secondRunID)
+	if !ok {
+		t.Fatalf("expected pending run %q to be stored", secondRunID)
+	}
+	if secondInfo.Status != RunStatusQueued {
+		t.Fatalf("expected second run queued, got %s", secondInfo.Status)
+	}
+
+	advanceClock(2 * time.Minute)
+	_, err = service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err == nil {
+		t.Fatalf("expected third async run to be rejected outside debounce window")
+	}
+	if !strings.Contains(err.Error(), "outside debounce window") {
+		t.Fatalf("expected outside-debounce error, got %v", err)
+	}
+
+	close(releaseRunner)
+	waitForRunTerminalInfo(t, service, firstRunID, 2*time.Second)
+	waitForRunTerminalInfo(t, service, secondRunID, 2*time.Second)
+}
 
 func TestRunWithIDTerminalGuardPersistsFailedHistoryOnPanic(t *testing.T) {
 	t.Parallel()
@@ -116,6 +189,41 @@ type panicRunner struct{}
 
 func (panicRunner) Run(context.Context, acpruntime.Task) (acpruntime.Result, error) {
 	panic("boom")
+}
+
+type blockingRunner struct {
+	release <-chan struct{}
+}
+
+func (runner blockingRunner) Run(ctx context.Context, _ acpruntime.Task) (acpruntime.Result, error) {
+	select {
+	case <-ctx.Done():
+		return acpruntime.Result{}, ctx.Err()
+	case <-runner.release:
+		return acpruntime.Result{}, nil
+	}
+}
+
+func waitForRunTerminalInfo(t *testing.T, service *Service, runID string, timeout time.Duration) RunInfo {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		info, ok := service.GetRun(runID)
+		if !ok {
+			t.Fatalf("run %q not found", runID)
+		}
+		if info.Status == RunStatusSucceeded || info.Status == RunStatusFailed {
+			return info
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	info, ok := service.GetRun(runID)
+	if !ok {
+		t.Fatalf("run %q not found", runID)
+	}
+	t.Fatalf("run %q did not reach terminal status before timeout; last status=%s", runID, info.Status)
+	return RunInfo{}
 }
 
 func readRunHistorySnapshot(t *testing.T, root string) runHistorySnapshot {

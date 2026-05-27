@@ -16,16 +16,13 @@ OUTPUT_DIR="${OUTPUT_DIR:-}"
 LISTEN="${LISTEN:-}"
 UI_E2E_EXPECTED_REPO_COUNT="${UI_E2E_EXPECTED_REPO_COUNT:-1}"
 UI_E2E_SCENARIO="${UI_E2E_SCENARIO:-init-inspect}"
-UI_E2E_CANCEL_STUB_SLEEP_SEC="${UI_E2E_CANCEL_STUB_SLEEP_SEC:-90}"
 UI_INIT_POLL_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-}"
-UI_CANCEL_POLL_TIMEOUT_SEC="${ACP_UI_CANCEL_POLL_TIMEOUT_SEC:-}"
-UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC="${UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC:-30}"
 UI_E2E_INIT_TIMEOUT_CAP_SEC="${UI_E2E_INIT_TIMEOUT_CAP_SEC:-0}"
 UI_E2E_HEADED="${UI_E2E_HEADED:-0}"
+UI_E2E_QA_SMOKE="${UI_E2E_QA_SMOKE:-0}"
 FRONTEND_RESULT_FILENAME="${FRONTEND_RESULT_FILENAME:-frontend-e2e-result.json}"
 
 DEFAULT_UI_INIT_POLL_TIMEOUT_SEC=900
-DEFAULT_UI_CANCEL_POLL_TIMEOUT_SEC=420
 
 SERVER_PID=""
 BASE_URL=""
@@ -209,11 +206,8 @@ effective = payload.get("effective") if isinstance(payload, dict) else {}
 if not isinstance(effective, dict):
     effective = {}
 init_value = effective.get("ui_init_poll_timeout_sec")
-cancel_value = effective.get("ui_cancel_poll_timeout_sec")
 if isinstance(init_value, int) and init_value > 0:
     print(f"init={init_value}")
-if isinstance(cancel_value, int) and cancel_value > 0:
-    print(f"cancel={cancel_value}")
 PY
 )"
     while IFS='=' read -r key value; do
@@ -224,19 +218,11 @@ PY
             UI_INIT_POLL_TIMEOUT_SEC="$value"
           fi
           ;;
-        cancel)
-          if [[ -z "$UI_CANCEL_POLL_TIMEOUT_SEC" ]]; then
-            UI_CANCEL_POLL_TIMEOUT_SEC="$value"
-          fi
-          ;;
       esac
     done <<<"$resolved"
   fi
   if [[ -z "$UI_INIT_POLL_TIMEOUT_SEC" ]]; then
     UI_INIT_POLL_TIMEOUT_SEC="$DEFAULT_UI_INIT_POLL_TIMEOUT_SEC"
-  fi
-  if [[ -z "$UI_CANCEL_POLL_TIMEOUT_SEC" ]]; then
-    UI_CANCEL_POLL_TIMEOUT_SEC="$DEFAULT_UI_CANCEL_POLL_TIMEOUT_SEC"
   fi
 }
 # shellcheck disable=SC2329
@@ -269,10 +255,10 @@ else
 fi
 
 case "$UI_E2E_SCENARIO" in
-  init-inspect|cancel-refresh|api-context-page-close-smoke)
+  init-inspect)
     ;;
   *)
-    die "unsupported UI_E2E_SCENARIO '$UI_E2E_SCENARIO' (allowed: init-inspect, cancel-refresh, api-context-page-close-smoke)"
+    die "unsupported UI_E2E_SCENARIO '$UI_E2E_SCENARIO' (allowed: init-inspect)"
     ;;
 esac
 case "$UI_E2E_HEADED" in
@@ -280,6 +266,13 @@ case "$UI_E2E_HEADED" in
     ;;
   *)
     die "UI_E2E_HEADED must be 0 or 1, got '$UI_E2E_HEADED'"
+    ;;
+esac
+case "$UI_E2E_QA_SMOKE" in
+  0|1)
+    ;;
+  *)
+    die "UI_E2E_QA_SMOKE must be 0 or 1, got '$UI_E2E_QA_SMOKE'"
     ;;
 esac
 
@@ -307,32 +300,6 @@ case "$RUNTIME_PROVIDER" in
     ;;
 esac
 
-if [[ "$UI_E2E_SCENARIO" == "cancel-refresh" ]]; then
-  stub_runner="$OUTPUT_DIR/runtime-cancel-stub.sh"
-  cat >"$stub_runner" <<EOF
-#!/usr/bin/env bash
-set -Eeuo pipefail
-trap 'exit 130' TERM INT HUP PIPE
-sleep ${UI_E2E_CANCEL_STUB_SLEEP_SEC}
-# Artifact-only cancel stub: if cancellation does not arrive in time, the
-# missing required shard artifacts will still fail the step contract.
-exit 0
-EOF
-  chmod +x "$stub_runner"
-  runtime_cmd="$stub_runner"
-  case "$RUNTIME_PROVIDER" in
-    claude-code)
-      server_env+=("ACP_CLAUDE_CMD=$runtime_cmd")
-      ;;
-    qwen-code)
-      server_env+=("ACP_QWEN_CMD=$runtime_cmd")
-      ;;
-    codex-code)
-      server_env+=("ACP_CODEX_CMD=$runtime_cmd")
-      ;;
-  esac
-fi
-
 require_cmd "$runtime_cmd"
 
 if [[ -z "$LISTEN" ]]; then
@@ -349,6 +316,73 @@ fi
 RESULT_JSON="$OUTPUT_DIR/$FRONTEND_RESULT_FILENAME"
 started_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 mkdir -p "$PLAYWRIGHT_RESULTS_DIR"
+
+write_frontend_result_json() {
+  export FRONTEND_E2E_STARTED_AT="$started_at"
+  export FRONTEND_E2E_FINISHED_AT="$finished_at"
+  export FRONTEND_E2E_STATUS="$status"
+  export FRONTEND_E2E_PROVIDER="$RUNTIME_PROVIDER"
+  export FRONTEND_E2E_BASE_URL="$BASE_URL"
+  export FRONTEND_E2E_WORKSPACE="$WORKSPACE"
+  export FRONTEND_E2E_RUNTIME_CMD="$runtime_cmd"
+  export FRONTEND_E2E_SCENARIO="$UI_E2E_SCENARIO"
+  export FRONTEND_E2E_SERVER_LOG="$SERVER_LOG"
+  export FRONTEND_E2E_PLAYWRIGHT_LOG="$PLAYWRIGHT_LOG"
+  export FRONTEND_E2E_REASON="$reason"
+  export FRONTEND_E2E_SERVER_PID="$SERVER_PID_STARTED"
+  export FRONTEND_E2E_SERVER_EXIT_CODE="$server_exit_code"
+  export FRONTEND_E2E_HEALTH_AFTER_FAILURE="$health_after_failure"
+  export FRONTEND_E2E_RUN_ID="$frontend_run_id"
+  export FRONTEND_E2E_LAST_RUN_STATUS="$last_run_status"
+  export FRONTEND_E2E_LAST_RUN_ERROR_CODE="$last_run_error_code"
+  export FRONTEND_E2E_LAST_RUN_CURRENT_STEP="$last_run_current_step"
+  export FRONTEND_E2E_PLAYWRIGHT_RESULTS_DIR="$PLAYWRIGHT_RESULTS_DIR"
+  acp_frontend_reason_validate "$FRONTEND_E2E_REASON" die
+  python3 - "$RESULT_JSON" <<'PY'
+import json
+import os
+import sys
+
+path = sys.argv[1]
+payload = {
+    "started_at": os.environ.get("FRONTEND_E2E_STARTED_AT"),
+    "finished_at": os.environ.get("FRONTEND_E2E_FINISHED_AT"),
+    "status": os.environ.get("FRONTEND_E2E_STATUS"),
+    "runtime_provider": os.environ.get("FRONTEND_E2E_PROVIDER"),
+    "base_url": os.environ.get("FRONTEND_E2E_BASE_URL"),
+    "workspace": os.environ.get("FRONTEND_E2E_WORKSPACE"),
+    "runtime_command": os.environ.get("FRONTEND_E2E_RUNTIME_CMD"),
+    "scenario": os.environ.get("FRONTEND_E2E_SCENARIO"),
+    "reason": os.environ.get("FRONTEND_E2E_REASON", "unknown"),
+    "server_log": os.environ.get("FRONTEND_E2E_SERVER_LOG"),
+    "playwright_log": os.environ.get("FRONTEND_E2E_PLAYWRIGHT_LOG"),
+    "server_pid": int(os.environ["FRONTEND_E2E_SERVER_PID"]) if os.environ.get("FRONTEND_E2E_SERVER_PID", "").isdigit() else None,
+    "server_exit_code": int(os.environ["FRONTEND_E2E_SERVER_EXIT_CODE"]) if os.environ.get("FRONTEND_E2E_SERVER_EXIT_CODE", "").isdigit() else None,
+    "health_after_failure": os.environ.get("FRONTEND_E2E_HEALTH_AFTER_FAILURE"),
+    "run_id": os.environ.get("FRONTEND_E2E_RUN_ID") or None,
+    "last_run_status": os.environ.get("FRONTEND_E2E_LAST_RUN_STATUS") or None,
+    "last_run_error_code": os.environ.get("FRONTEND_E2E_LAST_RUN_ERROR_CODE") or None,
+    "last_run_current_step": os.environ.get("FRONTEND_E2E_LAST_RUN_CURRENT_STEP") or None,
+    "diagnostic_refs": {
+        "server_log": os.environ.get("FRONTEND_E2E_SERVER_LOG"),
+        "playwright_log": os.environ.get("FRONTEND_E2E_PLAYWRIGHT_LOG"),
+        "playwright_results": os.environ.get("FRONTEND_E2E_PLAYWRIGHT_RESULTS_DIR"),
+        "screenshots": [],
+        "run_history": os.path.join(os.environ.get("FRONTEND_E2E_WORKSPACE", ""), "reports", "taskruns", "run-history.json"),
+    },
+}
+screenshots_dir = os.environ.get("FRONTEND_E2E_PLAYWRIGHT_RESULTS_DIR", "")
+if screenshots_dir and os.path.isdir(screenshots_dir):
+    payload["diagnostic_refs"]["screenshots"] = [
+        os.path.join(screenshots_dir, name)
+        for name in sorted(os.listdir(screenshots_dir))
+        if name.endswith(".png") and name.startswith("frontend-")
+    ]
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(payload, f, ensure_ascii=True, indent=2)
+    f.write("\n")
+PY
+}
 
 log "starting ACP server (provider=$RUNTIME_PROVIDER listen=$LISTEN)"
 if [[ "${#server_env[@]}" -gt 0 ]]; then
@@ -372,7 +406,39 @@ SERVER_PID="$!"
 SERVER_PID_STARTED="$SERVER_PID"
 
 if ! wait_for_health "$BASE_URL"; then
-  die "ACP server did not become healthy in ${API_READY_TIMEOUT_SEC}s (see $SERVER_LOG)"
+  status="failed"
+  reason="$ACP_FRONTEND_REASON_API_UNREACHABLE"
+  health_after_failure="failed"
+  server_exit_code="$(capture_server_exit_code_if_stopped)"
+  if [[ -n "$server_exit_code" ]]; then
+    reason="$ACP_FRONTEND_REASON_SERVER_EXITED"
+    health_after_failure="server_exited"
+  fi
+  frontend_run_id=""
+  last_run_status=""
+  last_run_error_code=""
+  last_run_current_step=""
+  while IFS='=' read -r key value; do
+    case "$key" in
+      last_run_status)
+        last_run_status="$value"
+        ;;
+      last_run_error_code)
+        last_run_error_code="$value"
+        ;;
+      last_run_current_step)
+        last_run_current_step="$value"
+        ;;
+    esac
+  done < <(resolve_last_run_snapshot "" "$health_after_failure")
+  finished_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+  write_frontend_result_json
+  log "frontend e2e status=$status"
+  log "server_log=$SERVER_LOG"
+  log "playwright_log=$PLAYWRIGHT_LOG"
+  log "result_json=$RESULT_JSON"
+  tail -n 80 "$SERVER_LOG" >&2 || true
+  exit 1
 fi
 resolve_ui_poll_timeouts
 if [[ "$UI_E2E_SCENARIO" == "init-inspect" ]]; then
@@ -397,17 +463,7 @@ if [[ "$UI_E2E_SCENARIO" == "init-inspect" ]]; then
     fi
   fi
 fi
-log "effective UI polling timeouts: init=${UI_INIT_POLL_TIMEOUT_SEC}s cancel=${UI_CANCEL_POLL_TIMEOUT_SEC}s"
-if [[ "$UI_E2E_SCENARIO" == "cancel-refresh" ]]; then
-  cancel_timeout_sec="$(parse_positive_int_or_die "$UI_CANCEL_POLL_TIMEOUT_SEC" "ACP_UI_CANCEL_POLL_TIMEOUT_SEC")"
-  cancel_stub_sleep_sec="$(parse_positive_int_or_die "$UI_E2E_CANCEL_STUB_SLEEP_SEC" "UI_E2E_CANCEL_STUB_SLEEP_SEC")"
-  cancel_margin_sec="$(parse_positive_int_or_die "$UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC" "UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC")"
-  min_cancel_timeout_sec=$((cancel_stub_sleep_sec + cancel_margin_sec))
-  log "cancel-refresh timeout guard: timeout=${cancel_timeout_sec}s stub_sleep=${cancel_stub_sleep_sec}s margin=${cancel_margin_sec}s min_required=${min_cancel_timeout_sec}s"
-  if (( cancel_timeout_sec < min_cancel_timeout_sec )); then
-    die "cancel-refresh preflight failed: ACP_UI_CANCEL_POLL_TIMEOUT_SEC=${cancel_timeout_sec}s must be >= ${min_cancel_timeout_sec}s (UI_E2E_CANCEL_STUB_SLEEP_SEC=${cancel_stub_sleep_sec}s + margin=${cancel_margin_sec}s)"
-  fi
-fi
+log "effective UI polling timeouts: init=${UI_INIT_POLL_TIMEOUT_SEC}s"
 
 status="passed"
 reason="$ACP_FRONTEND_REASON_OK"
@@ -427,9 +483,9 @@ if ! (
   UI_E2E_BASE_URL="$BASE_URL" \
   UI_E2E_RUNTIME_PROVIDER="$RUNTIME_PROVIDER" \
   UI_E2E_SCENARIO="$UI_E2E_SCENARIO" \
+  UI_E2E_QA_SMOKE="$UI_E2E_QA_SMOKE" \
   UI_E2E_EXPECTED_REPO_COUNT="$UI_E2E_EXPECTED_REPO_COUNT" \
   ACP_UI_INIT_POLL_TIMEOUT_SEC="$UI_INIT_POLL_TIMEOUT_SEC" \
-  ACP_UI_CANCEL_POLL_TIMEOUT_SEC="$UI_CANCEL_POLL_TIMEOUT_SEC" \
   UI_E2E_OUTPUT_DIR="$PLAYWRIGHT_RESULTS_DIR" \
   "${playwright_cmd[@]}"
 ) >"$PLAYWRIGHT_LOG" 2>&1; then
@@ -470,65 +526,11 @@ if ! (
   fi
 else
   health_after_failure="not_applicable"
+  frontend_run_id="$(extract_frontend_run_id)"
 fi
 
 finished_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-export FRONTEND_E2E_STARTED_AT="$started_at"
-export FRONTEND_E2E_FINISHED_AT="$finished_at"
-export FRONTEND_E2E_STATUS="$status"
-export FRONTEND_E2E_PROVIDER="$RUNTIME_PROVIDER"
-export FRONTEND_E2E_BASE_URL="$BASE_URL"
-export FRONTEND_E2E_WORKSPACE="$WORKSPACE"
-export FRONTEND_E2E_RUNTIME_CMD="$runtime_cmd"
-export FRONTEND_E2E_SCENARIO="$UI_E2E_SCENARIO"
-export FRONTEND_E2E_SERVER_LOG="$SERVER_LOG"
-export FRONTEND_E2E_PLAYWRIGHT_LOG="$PLAYWRIGHT_LOG"
-export FRONTEND_E2E_REASON="$reason"
-export FRONTEND_E2E_SERVER_PID="$SERVER_PID_STARTED"
-export FRONTEND_E2E_SERVER_EXIT_CODE="$server_exit_code"
-export FRONTEND_E2E_HEALTH_AFTER_FAILURE="$health_after_failure"
-export FRONTEND_E2E_RUN_ID="$frontend_run_id"
-export FRONTEND_E2E_LAST_RUN_STATUS="$last_run_status"
-export FRONTEND_E2E_LAST_RUN_ERROR_CODE="$last_run_error_code"
-export FRONTEND_E2E_LAST_RUN_CURRENT_STEP="$last_run_current_step"
-export FRONTEND_E2E_PLAYWRIGHT_RESULTS_DIR="$PLAYWRIGHT_RESULTS_DIR"
-acp_frontend_reason_validate "$FRONTEND_E2E_REASON" die
-python3 - "$RESULT_JSON" <<'PY'
-import json
-import os
-import sys
-
-path = sys.argv[1]
-payload = {
-    "started_at": os.environ.get("FRONTEND_E2E_STARTED_AT"),
-    "finished_at": os.environ.get("FRONTEND_E2E_FINISHED_AT"),
-    "status": os.environ.get("FRONTEND_E2E_STATUS"),
-    "runtime_provider": os.environ.get("FRONTEND_E2E_PROVIDER"),
-    "base_url": os.environ.get("FRONTEND_E2E_BASE_URL"),
-    "workspace": os.environ.get("FRONTEND_E2E_WORKSPACE"),
-    "runtime_command": os.environ.get("FRONTEND_E2E_RUNTIME_CMD"),
-    "scenario": os.environ.get("FRONTEND_E2E_SCENARIO"),
-    "reason": os.environ.get("FRONTEND_E2E_REASON", "unknown"),
-    "server_log": os.environ.get("FRONTEND_E2E_SERVER_LOG"),
-    "playwright_log": os.environ.get("FRONTEND_E2E_PLAYWRIGHT_LOG"),
-    "server_pid": int(os.environ["FRONTEND_E2E_SERVER_PID"]) if os.environ.get("FRONTEND_E2E_SERVER_PID", "").isdigit() else None,
-    "server_exit_code": int(os.environ["FRONTEND_E2E_SERVER_EXIT_CODE"]) if os.environ.get("FRONTEND_E2E_SERVER_EXIT_CODE", "").isdigit() else None,
-    "health_after_failure": os.environ.get("FRONTEND_E2E_HEALTH_AFTER_FAILURE"),
-    "run_id": os.environ.get("FRONTEND_E2E_RUN_ID") or None,
-    "last_run_status": os.environ.get("FRONTEND_E2E_LAST_RUN_STATUS") or None,
-    "last_run_error_code": os.environ.get("FRONTEND_E2E_LAST_RUN_ERROR_CODE") or None,
-    "last_run_current_step": os.environ.get("FRONTEND_E2E_LAST_RUN_CURRENT_STEP") or None,
-    "diagnostic_refs": {
-        "server_log": os.environ.get("FRONTEND_E2E_SERVER_LOG"),
-        "playwright_log": os.environ.get("FRONTEND_E2E_PLAYWRIGHT_LOG"),
-        "playwright_results": os.environ.get("FRONTEND_E2E_PLAYWRIGHT_RESULTS_DIR"),
-        "run_history": os.path.join(os.environ.get("FRONTEND_E2E_WORKSPACE", ""), "reports", "taskruns", "run-history.json"),
-    },
-}
-with open(path, "w", encoding="utf-8") as f:
-    json.dump(payload, f, ensure_ascii=True, indent=2)
-    f.write("\n")
-PY
+write_frontend_result_json
 
 log "frontend e2e status=$status"
 log "server_log=$SERVER_LOG"
