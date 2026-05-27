@@ -10,8 +10,6 @@ source "$PROVENARCH_ROOT/scripts/repos-meta-fields.sh"
 source "$PROVENARCH_ROOT/scripts/frontend-status-reasons.sh"
 # shellcheck source=scripts/preflight-log.sh
 source "$PROVENARCH_ROOT/scripts/preflight-log.sh"
-# shellcheck source=scripts/internal/live-e2e-evaluator.sh
-source "$PROVENARCH_ROOT/scripts/internal/live-e2e-evaluator.sh"
 # shellcheck source=scripts/timeout-env-keys.sh
 source "$PROVENARCH_ROOT/scripts/timeout-env-keys.sh"
 # shellcheck source=scripts/execution-env-keys.sh
@@ -35,7 +33,6 @@ BATCH_PROVIDER_FILTER="${BATCH_PROVIDER_FILTER:-all}"
 BATCH_RUN_SELECTION="${BATCH_RUN_SELECTION:-all}"
 BATCH_SKIP_PRECHECK="${BATCH_SKIP_PRECHECK:-0}"
 BATCH_FRONTEND_MODE="${BATCH_FRONTEND_MODE:-auto}"
-BATCH_FRONTEND_CANCEL_MODE="${BATCH_FRONTEND_CANCEL_MODE:-once_per_provider}"
 UI_E2E_HEADED="${UI_E2E_HEADED:-0}"
 E2E_TMP_ROOT="${E2E_TMP_ROOT:-/tmp/provenarch-test_arch_project}"
 BATCH_ROOT="${BATCH_ROOT:-$E2E_TMP_ROOT/runs/$BATCH_ID}"
@@ -74,13 +71,7 @@ LAST_RUN_FAILURE_SUBCLASS="none"
 LAST_RUN_CANCELLATION_LIKE=0
 PRECHECK_FAILURE_RECORDED=0
 OPERATIONAL_PREFLIGHT_FAILURE_RECORDED=0
-FRONTEND_CANCEL_FAILURES=0
-FRONTEND_CANCEL_SKIPPED=0
 FRONTEND_LIVE_RESULT_FILENAME="frontend-e2e-result.json"
-FRONTEND_CANCEL_RESULT_FILENAME="frontend-cancel-result.json"
-BLACKBOX_STEPS_JSONL="$REPORTS_ROOT/blackbox_e2e_steps_${BATCH_ID}.jsonl"
-BLACKBOX_STEPS_MD="$REPORTS_ROOT/blackbox_e2e_steps_${BATCH_ID}.md"
-BLACKBOX_STEPS_INITIALIZED=0
 TIMEOUT_PRECHECK_UNSET_KEYS=(
   "${ACP_TIMEOUT_ENV_KEYS[@]}"
   "${ACP_EXECUTION_ENV_KEYS[@]}"
@@ -95,8 +86,6 @@ TIMEOUT_PRECHECK_UNSET_KEYS=(
   BATCH_ROOT
   BATCH_SKIP_PRECHECK
   BATCH_FRONTEND_MODE
-  BATCH_FRONTEND_CANCEL_MODE
-  E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES
   E2E_MATRIX_FILE
   E2E_MATRIX_RELEASE_MODE
   E2E_TMP_ROOT
@@ -123,43 +112,6 @@ log() {
 die() {
   echo "[batch][error] $*" >&2
   exit 1
-}
-
-init_blackbox_step_report() {
-  if [[ "$BLACKBOX_STEPS_INITIALIZED" == "1" ]]; then
-    return 0
-  fi
-  live_e2e_evaluator_init_batch_report \
-    "$BLACKBOX_STEPS_JSONL" \
-    "$BLACKBOX_STEPS_MD" \
-    "$BATCH_ID" \
-    "${PROFILE_ID:-adhoc}" \
-    "${SWEEP_ID:-baseline}"
-  BLACKBOX_STEPS_INITIALIZED=1
-}
-
-write_blackbox_step_report() {
-  local step_id="$1"
-  local goal="$2"
-  local action="$3"
-  local status="$4"
-  local primary_classification="$5"
-  local next_decision="$6"
-  shift 6
-  init_blackbox_step_report
-  live_e2e_evaluator_write_batch_step \
-    "$BLACKBOX_STEPS_JSONL" \
-    "$BLACKBOX_STEPS_MD" \
-    "$BATCH_ID" \
-    "${PROFILE_ID:-adhoc}" \
-    "${SWEEP_ID:-baseline}" \
-    "$step_id" \
-    "$goal" \
-    "$action" \
-    "$status" \
-    "$primary_classification" \
-    "$next_decision" \
-    "$@"
 }
 
 frontend_result_summary() {
@@ -200,15 +152,6 @@ require_provider_cmd() {
   if command -v "$cmd" >/dev/null 2>&1; then
     return 0
   fi
-  write_blackbox_step_report \
-    "batch.preflight" \
-    "Verify host, provider, path, timeout, and execution prerequisites before running backend/UI flows." \
-    "Check selected provider binary availability before generating batch preflight." \
-    "failed" \
-    "operational_host_preflight_failed" \
-    "Stop before live execution; install or configure the selected provider command." \
-    "$cmd" \
-    "$provider"
   die "required command is unavailable: $cmd"
 }
 
@@ -630,31 +573,6 @@ should_write_frontend_skip_result() {
   esac
 }
 
-should_run_frontend_cancel_once() {
-  case "$BATCH_FRONTEND_CANCEL_MODE" in
-    never)
-      return 1
-      ;;
-    once_per_provider)
-      return 0
-      ;;
-    per_run)
-      return 1
-      ;;
-    *)
-      die "BATCH_FRONTEND_CANCEL_MODE must be once_per_provider|per_run|never (got '$BATCH_FRONTEND_CANCEL_MODE')"
-      ;;
-  esac
-}
-
-should_run_frontend_cancel_for_run() {
-  local run_index="$1"
-  if [[ "$BATCH_FRONTEND_CANCEL_MODE" != "per_run" ]]; then
-    return 1
-  fi
-  run_index_selected "$run_index"
-}
-
 frontend_live_output_dir() {
   local provider="$1"
   local run_index="${2:-}"
@@ -663,16 +581,6 @@ frontend_live_output_dir() {
     return 0
   fi
   printf '%s' "$BATCH_ROOT/frontend/$provider"
-}
-
-frontend_cancel_output_dir() {
-  local provider="$1"
-  local run_index="${2:-}"
-  if [[ -n "$run_index" ]]; then
-    printf '%s' "$BATCH_ROOT/frontend-cancel/$provider/run${run_index}"
-    return 0
-  fi
-  printf '%s' "$BATCH_ROOT/frontend-cancel/$provider"
 }
 
 resolve_frontend_live_backend_run() {
@@ -865,26 +773,6 @@ runtime_cmd_for_provider() {
   esac
 }
 
-write_frontend_cancel_failed_result_json() {
-  local provider="$1"
-  local frontend_workspace="$2"
-  local cancel_output_dir="$3"
-  local runtime_cmd="$4"
-  local run_index="${5:-}"
-  write_frontend_status_json \
-    "$cancel_output_dir/$FRONTEND_CANCEL_RESULT_FILENAME" \
-    "$provider" \
-    "cancel-refresh" \
-    "failed" \
-    "$ACP_FRONTEND_REASON_FRONTEND_LIVE_E2E_FAILED" \
-    "$frontend_workspace" \
-    "$cancel_output_dir" \
-    "$runtime_cmd" \
-    "$cancel_output_dir/server.log" \
-    "$cancel_output_dir/playwright.log" \
-    "$run_index"
-}
-
 run_frontend_live_e2e() {
   local provider="$1"
   local backend_run_dir="$2"
@@ -1022,100 +910,6 @@ run_frontend_live_e2e() {
       "$output_dir/playwright.log" \
       "$run_index"
     log "frontend e2e failed provider=$provider run=${run_index:-summary} reason=missing_result_json (see $output_dir/driver.log)"
-    return 1
-  fi
-
-  return 0
-}
-
-prepare_frontend_cancel_workspace() {
-  local backend_run_dir="$1"
-  local output_dir="$2"
-  if [[ -z "$backend_run_dir" ]]; then
-    printf ''
-    return 0
-  fi
-  local workspace
-  workspace="$(resolve_backend_workspace_dir "$backend_run_dir")"
-  local frontend_workspace="$output_dir/frontend-workspace"
-
-  if [[ -z "$workspace" || ! -d "$workspace" ]]; then
-    printf ''
-    return 0
-  fi
-
-  mkdir -p "$output_dir"
-  rm -rf "$frontend_workspace"
-  cp -a "$workspace" "$frontend_workspace"
-  sanitize_frontend_cancel_workspace "$frontend_workspace"
-  printf '%s\n' "$frontend_workspace"
-}
-
-sanitize_frontend_cancel_workspace() {
-  local frontend_workspace="$1"
-  if [[ -z "$frontend_workspace" || ! -d "$frontend_workspace" ]]; then
-    return 0
-  fi
-  rm -f "$frontend_workspace/reports/taskruns/run-history.json"
-  rm -rf "$frontend_workspace/reports/taskruns/logs" "$frontend_workspace/reports/taskruns/raw"
-}
-
-run_frontend_cancel_e2e() {
-  local provider="$1"
-  local frontend_workspace="$2"
-  local output_dir="$3"
-  local run_index="${4:-}"
-  local runtime_cmd
-  runtime_cmd="$(runtime_cmd_for_provider "$provider")"
-
-  mkdir -p "$output_dir"
-  if [[ ! -d "$frontend_workspace" ]]; then
-    write_frontend_status_json \
-      "$output_dir/$FRONTEND_CANCEL_RESULT_FILENAME" \
-      "$provider" \
-      "cancel-refresh" \
-      "skipped" \
-      "$ACP_FRONTEND_REASON_FRONTEND_WORKSPACE_MISSING" \
-      "$frontend_workspace" \
-      "$output_dir" \
-      "$runtime_cmd" \
-      "$output_dir/server.log" \
-      "$output_dir/playwright.log" \
-      "$run_index"
-    log "frontend cancel smoke skipped provider=$provider run=${run_index:-summary} reason=$ACP_FRONTEND_REASON_FRONTEND_WORKSPACE_MISSING"
-    return 2
-  fi
-
-  log "frontend cancel smoke provider=$provider run=${run_index:-summary} workspace=$frontend_workspace"
-  if ! (
-    cd "$PROVENARCH_ROOT"
-    acp_build_timeout_env_assignments
-    acp_build_execution_env_assignments
-    env \
-      "${ACP_TIMEOUT_ENV_ASSIGNMENTS[@]}" \
-      "${ACP_EXECUTION_ENV_ASSIGNMENTS[@]}" \
-      "WORKSPACE=$frontend_workspace" \
-      "RUNTIME_PROVIDER=$provider" \
-      "OUTPUT_DIR=$output_dir" \
-      "UI_E2E_SCENARIO=cancel-refresh" \
-      "UI_E2E_EXPECTED_REPO_COUNT=$EXPECTED_REPO_COUNT_RESOLVED" \
-      "ACP_CLAUDE_CMD=$ACP_CLAUDE_CMD_BIN" \
-      "ACP_QWEN_CMD=$ACP_QWEN_CMD_BIN" \
-      "ACP_CODEX_CMD=$ACP_CODEX_CMD_BIN" \
-      "UI_E2E_HEADED=$UI_E2E_HEADED" \
-      "FRONTEND_RESULT_FILENAME=$FRONTEND_CANCEL_RESULT_FILENAME" \
-      ./scripts/frontend-live-e2e.sh
-  ) >"$output_dir/driver.log" 2>&1; then
-    if [[ ! -f "$output_dir/$FRONTEND_CANCEL_RESULT_FILENAME" ]]; then
-      write_frontend_cancel_failed_result_json "$provider" "$frontend_workspace" "$output_dir" "$runtime_cmd" "$run_index"
-    fi
-    log "frontend cancel smoke failed provider=$provider run=${run_index:-summary} (see $output_dir/driver.log)"
-    return 1
-  fi
-
-  if [[ ! -f "$output_dir/$FRONTEND_CANCEL_RESULT_FILENAME" ]]; then
-    write_frontend_cancel_failed_result_json "$provider" "$frontend_workspace" "$output_dir" "$runtime_cmd" "$run_index"
-    log "frontend cancel smoke failed provider=$provider run=${run_index:-summary} reason=missing_result_json (see $output_dir/driver.log)"
     return 1
   fi
 
@@ -1549,22 +1343,6 @@ finalize_provider_readiness_failure() {
   else
     log "report generation failed after provider readiness failure (see $BATCH_ROOT/report-paths.txt if present)"
   fi
-  write_blackbox_step_report \
-    "batch.preflight" \
-    "Verify host, provider, path, timeout, and execution prerequisites before running backend/UI flows." \
-    "Read selected provider binaries, target repo metadata, generated batch preflight, and synthesized preflight-failure reports." \
-    "failed" \
-    "operational_host_preflight_failed" \
-    "Stop and move the run to a trusted host or repair provider/path readiness; do not edit canonical matrices." \
-    "$BATCH_ROOT/preflight.json" \
-    "$DECLARED_REPOS_JSON" \
-    "$BATCH_ROOT/report-paths.txt" \
-    "$REPORTS_ROOT/run_matrix_${BATCH_ID}.tsv" \
-    "$REPORTS_ROOT/run_matrix_${BATCH_ID}.md" \
-    "$REPORTS_ROOT/frontend_e2e_matrix_${BATCH_ID}.md" \
-    "$REPORTS_ROOT/frontend_cancel_e2e_matrix_${BATCH_ID}.md" \
-    "$REPORTS_ROOT/quality_report_${BATCH_ID}.md" \
-    "$RUN_CLASSIFICATIONS_TSV"
   log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
   die "operational_host_preflight_failed: selected provider readiness failed: $reason"
 }
@@ -1586,20 +1364,6 @@ finalize_precheck_failure() {
   else
     log "report generation failed after precheck failure (see $BATCH_ROOT/report-paths.txt if present)"
   fi
-  write_blackbox_step_report \
-    "batch.preflight" \
-    "Verify host, provider, path, timeout, execution, and DoD prerequisites before live flow execution." \
-    "Run DoD/UI precheck and synthesize batch reports from the failed preflight state." \
-    "failed" \
-    "precheck_failed" \
-    "Stop before live provider execution; inspect precheck logs and rerun the same direct harness command after repair." \
-    "$BATCH_ROOT/precheck-node-toolchain.log" \
-    "$BATCH_ROOT/precheck-make.log" \
-    "$BATCH_ROOT/precheck-ui-npm.log" \
-    "$BATCH_ROOT/precheck-playwright.log" \
-    "$BATCH_ROOT/report-paths.txt" \
-    "$REPORTS_ROOT/quality_report_${BATCH_ID}.md" \
-    "$RUN_CLASSIFICATIONS_TSV"
   log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
   die "batch precheck failed: reason=$reason precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
 }
@@ -1607,29 +1371,12 @@ finalize_precheck_failure() {
 prepare_target_repos_file() {
   if [[ -n "$TARGET_REPOS_FILE" ]]; then
     if [[ ! -f "$TARGET_REPOS_FILE" ]]; then
-      write_blackbox_step_report \
-        "batch.preflight" \
-        "Verify target repo input before live flow execution." \
-        "Check TARGET_REPOS_FILE exists and is readable." \
-        "failed" \
-        "operational_host_preflight_failed" \
-        "Stop before live execution; provide a valid absolute TARGET_REPOS_FILE." \
-        "$TARGET_REPOS_FILE"
       die "TARGET_REPOS_FILE does not exist: $TARGET_REPOS_FILE"
     fi
     RESOLVED_TARGET_REPOS_FILE="$(cd "$(dirname "$TARGET_REPOS_FILE")" && pwd)/$(basename "$TARGET_REPOS_FILE")"
     return 0
   fi
 
-  write_blackbox_step_report \
-    "batch.preflight" \
-    "Verify target repo input before live flow execution." \
-    "Check TARGET_REPOS_FILE is set." \
-    "failed" \
-    "operational_host_preflight_failed" \
-    "Stop before live execution; set TARGET_REPOS_FILE=/abs/path/to/repos.yaml." \
-    "$BATCH_ROOT" \
-    "$REPORTS_ROOT"
   die "missing target input: set TARGET_REPOS_FILE=/abs/path/to/repos.yaml"
 }
 
@@ -1641,15 +1388,6 @@ collect_declared_repos() {
     --source-kind "$PROFILE_SOURCE_KIND" \
     --profile-id "$PROFILE_ID" \
     --out "$DECLARED_REPOS_JSON"; then
-    write_blackbox_step_report \
-      "batch.preflight" \
-      "Resolve and validate target repo metadata before live flow execution." \
-      "Run resolve-repos-meta.py against TARGET_REPOS_FILE/profile settings." \
-      "failed" \
-      "operational_host_preflight_failed" \
-      "Stop before live execution; repair target repo metadata/path/SHA inputs." \
-      "$RESOLVED_TARGET_REPOS_FILE" \
-      "$DECLARED_REPOS_JSON"
     die "target repos metadata preflight failed: $RESOLVED_TARGET_REPOS_FILE"
   fi
 }
@@ -1682,18 +1420,14 @@ fi
 if [[ "$BATCH_SKIP_PRECHECK" != "0" && "$BATCH_SKIP_PRECHECK" != "1" ]]; then
   die "BATCH_SKIP_PRECHECK must be 0 or 1, got '$BATCH_SKIP_PRECHECK'"
 fi
+if [[ "$BATCH_SKIP_PRECHECK" == "1" && "${ACP_TEST_ALLOW_BATCH_SKIP_PRECHECK:-0}" != "1" ]]; then
+  die "BATCH_SKIP_PRECHECK is no longer a public live E2E shortcut; run precheck or set ACP_TEST_ALLOW_BATCH_SKIP_PRECHECK=1 only in hermetic tests"
+fi
 case "$BATCH_FRONTEND_MODE" in
   auto|always|never|per_run)
     ;;
   *)
     die "BATCH_FRONTEND_MODE must be auto|always|never|per_run (got '$BATCH_FRONTEND_MODE')"
-    ;;
-esac
-case "$BATCH_FRONTEND_CANCEL_MODE" in
-  once_per_provider|per_run|never)
-    ;;
-  *)
-    die "BATCH_FRONTEND_CANCEL_MODE must be once_per_provider|per_run|never (got '$BATCH_FRONTEND_CANCEL_MODE')"
     ;;
 esac
 case "$UI_E2E_HEADED" in
@@ -1711,7 +1445,6 @@ require_cmd make
 require_cmd python3
 require_cmd curl
 mkdir -p "$BATCH_ROOT" "$REPORTS_ROOT"
-init_blackbox_step_report
 resolve_selected_providers
 resolve_selected_run_indexes
 if provider_selected "claude-code"; then
@@ -1812,7 +1545,7 @@ log "target repos input: file=$RESOLVED_TARGET_REPOS_FILE profile_id=${PROFILE_I
 log "preflight versions: claude='$CLAUDE_VERSION' qwen='$QWEN_VERSION' codex='$CODEX_VERSION'"
 acp_log_preflight_timeout log "$ACP_APPLY_TIMEOUTS_VIA_API" "$TIMEOUT_PROFILE_LINE"
 acp_log_preflight_execution log "${SWEEP_ID:-baseline}" "$EXECUTION_PROFILE_LINE"
-log "batch shard selection: providers=$SELECTED_PROVIDERS_CSV runs=$SELECTED_RUN_INDEXES_CSV skip_precheck=$BATCH_SKIP_PRECHECK frontend_mode=$BATCH_FRONTEND_MODE frontend_cancel_mode=$BATCH_FRONTEND_CANCEL_MODE headed=$UI_E2E_HEADED"
+log "batch shard selection: providers=$SELECTED_PROVIDERS_CSV runs=$SELECTED_RUN_INDEXES_CSV skip_precheck=$BATCH_SKIP_PRECHECK frontend_mode=$BATCH_FRONTEND_MODE headed=$UI_E2E_HEADED"
 if [[ "$BATCH_SKIP_PRECHECK" == "1" ]]; then
   log "skipping DoD/UI precheck (BATCH_SKIP_PRECHECK=1)"
 else
@@ -1841,19 +1574,6 @@ else
     finalize_precheck_failure "UI precheck failed (see $BATCH_ROOT/precheck-ui-npm.log and $BATCH_ROOT/precheck-playwright.log)"
   fi
 fi
-write_blackbox_step_report \
-  "batch.preflight" \
-  "Verify host, provider, path, timeout, execution, and DoD prerequisites before live flow execution." \
-  "Inspect generated preflight metadata and complete or intentionally skip DoD/UI precheck." \
-  "passed" \
-  "none" \
-  "Run backend cycles through the batch harness." \
-  "$BATCH_ROOT/preflight.json" \
-  "$DECLARED_REPOS_JSON" \
-  "$BATCH_ROOT/precheck-node-toolchain.log" \
-  "$BATCH_ROOT/precheck-make.log" \
-  "$BATCH_ROOT/precheck-ui-npm.log" \
-  "$BATCH_ROOT/precheck-playwright.log"
 
 failed_runs=0
 for provider in "${SELECTED_PROVIDERS[@]}"; do
@@ -1893,28 +1613,11 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
 
     ensure_terminal_run_status "$run_dir" "$provider" "$i" "$process_exit"
     classify_run_failure "$provider" "$i" "$run_dir" "$process_exit"
-    backend_step_status="passed"
-    backend_next_decision="Inspect frontend surfaces or advance to the next selected backend run."
     if [[ "$LAST_RUN_FAILURE_CLASS" != "none" ]]; then
-      backend_step_status="failed"
-      backend_next_decision="Inspect backend artifacts, raw logs, quality report, and classifier output before continuing."
       failed_runs=$((failed_runs + 1))
       increment_failure_class_counter "$LAST_RUN_FAILURE_CLASS" "$LAST_RUN_FAILURE_SUBCLASS" "$LAST_RUN_CANCELLATION_LIKE"
       log "run failed provider=$provider run=$i class=$LAST_RUN_FAILURE_CLASS subclass=$LAST_RUN_FAILURE_SUBCLASS cancellation_like=$LAST_RUN_CANCELLATION_LIKE (see $run_dir/batch-driver.log)"
     fi
-    write_blackbox_step_report \
-      "backend.${provider}.run${i}" \
-      "Execute the backend flow only through the public batch harness and generated workspace artifacts." \
-      "Run provider=$provider run=$i and classify the resulting reports, taskrun artifacts, and logs." \
-      "$backend_step_status" \
-      "$LAST_RUN_FAILURE_CLASS" \
-      "$backend_next_decision" \
-      "$run_dir/session-summary.md" \
-      "$run_dir/run-results.tsv" \
-      "$run_dir/run-status.env" \
-      "$run_dir/batch-driver.log" \
-      "$run_dir/headless/arch-workspace/reports/taskruns" \
-      "$RUN_CLASSIFICATIONS_TSV"
   done
 done
 
@@ -1933,18 +1636,6 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
     if [[ "$frontend_result" != "0" ]]; then
       frontend_failures=$((frontend_failures + 1))
     fi
-    write_blackbox_step_report \
-      "frontend.init.${provider}" \
-      "Inspect the generated workspace through the public frontend flow." \
-      "Run frontend init inspection for provider=$provider using backend run=${frontend_run_index:-summary}." \
-      "$frontend_status" \
-      "$frontend_reason" \
-      "Inspect UI result JSON, driver log, server log, and Playwright evidence before release verdict verification." \
-      "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME" \
-      "$output_dir/driver.log" \
-      "$output_dir/server.log" \
-      "$output_dir/playwright.log" \
-      "$output_dir/frontend-workspace/reports"
     continue
   fi
 
@@ -1962,18 +1653,6 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
       if [[ "$frontend_result" != "0" ]]; then
         frontend_failures=$((frontend_failures + 1))
       fi
-      write_blackbox_step_report \
-        "frontend.init.${provider}.run${i}" \
-        "Inspect the generated workspace through the public frontend flow." \
-        "Run frontend init inspection for provider=$provider run=$i." \
-        "$frontend_status" \
-        "$frontend_reason" \
-        "Inspect UI result JSON, driver log, server log, and Playwright evidence before continuing." \
-        "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME" \
-        "$output_dir/driver.log" \
-        "$output_dir/server.log" \
-        "$output_dir/playwright.log" \
-        "$output_dir/frontend-workspace/reports"
     done
     continue
   fi
@@ -1992,106 +1671,7 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
       "$output_dir" \
       "$runtime_cmd"
     log "frontend live e2e skipped provider=$provider mode=$BATCH_FRONTEND_MODE runs=$SELECTED_RUN_INDEXES_CSV"
-    write_blackbox_step_report \
-      "frontend.init.${provider}" \
-      "Inspect the generated workspace through the public frontend flow when selected." \
-      "Record frontend init inspection as skipped by batch selection." \
-      "skipped" \
-      "$ACP_FRONTEND_REASON_SELECTION_SKIPPED" \
-      "Continue with cancel inspection or report synthesis according to selected modes." \
-      "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME"
     continue
-  fi
-done
-
-for provider in "${SELECTED_PROVIDERS[@]}"; do
-  runtime_cmd="$(runtime_cmd_for_provider "$provider")"
-  if should_run_frontend_cancel_once; then
-    cancel_output_dir="$(frontend_cancel_output_dir "$provider")"
-    resolved_frontend_run="$(resolve_frontend_live_backend_run "$provider")"
-    backend_run_dir="${resolved_frontend_run%%$'\t'*}"
-    cancel_run_index="${resolved_frontend_run#*$'\t'}"
-    frontend_workspace="$(prepare_frontend_cancel_workspace "$backend_run_dir" "$cancel_output_dir")"
-    cancel_result=0
-    run_frontend_cancel_e2e "$provider" "$frontend_workspace" "$cancel_output_dir" "$cancel_run_index" || cancel_result=$?
-    cancel_summary="$(frontend_result_summary "$cancel_output_dir/$FRONTEND_CANCEL_RESULT_FILENAME")"
-    cancel_status="${cancel_summary%%$'\t'*}"
-    cancel_reason="${cancel_summary#*$'\t'}"
-    if [[ "$cancel_result" == "1" ]]; then
-      FRONTEND_CANCEL_FAILURES=$((FRONTEND_CANCEL_FAILURES + 1))
-    elif [[ "$cancel_result" == "2" ]]; then
-      FRONTEND_CANCEL_SKIPPED=$((FRONTEND_CANCEL_SKIPPED + 1))
-    fi
-    write_blackbox_step_report \
-      "frontend.cancel.${provider}" \
-      "Verify cancellation behavior through the public frontend flow." \
-      "Run frontend cancel inspection for provider=$provider using backend run=${cancel_run_index:-summary}." \
-      "$cancel_status" \
-      "$cancel_reason" \
-      "Inspect cancel result JSON and UI/log evidence before release verdict verification." \
-      "$cancel_output_dir/$FRONTEND_CANCEL_RESULT_FILENAME" \
-      "$cancel_output_dir/driver.log" \
-      "$cancel_output_dir/server.log" \
-      "$cancel_output_dir/playwright.log" \
-      "$cancel_output_dir/frontend-workspace/reports"
-    continue
-  fi
-
-  if [[ "$BATCH_FRONTEND_CANCEL_MODE" == "per_run" ]]; then
-    for i in "${SELECTED_RUN_INDEXES[@]}"; do
-      if ! should_run_frontend_cancel_for_run "$i"; then
-        continue
-      fi
-      cancel_output_dir="$(frontend_cancel_output_dir "$provider" "$i")"
-      frontend_workspace="$(prepare_frontend_cancel_workspace "$BATCH_ROOT/$provider/run${i}" "$cancel_output_dir")"
-      cancel_result=0
-      run_frontend_cancel_e2e "$provider" "$frontend_workspace" "$cancel_output_dir" "$i" || cancel_result=$?
-      cancel_summary="$(frontend_result_summary "$cancel_output_dir/$FRONTEND_CANCEL_RESULT_FILENAME")"
-      cancel_status="${cancel_summary%%$'\t'*}"
-      cancel_reason="${cancel_summary#*$'\t'}"
-      if [[ "$cancel_result" == "1" ]]; then
-        FRONTEND_CANCEL_FAILURES=$((FRONTEND_CANCEL_FAILURES + 1))
-      elif [[ "$cancel_result" == "2" ]]; then
-        FRONTEND_CANCEL_SKIPPED=$((FRONTEND_CANCEL_SKIPPED + 1))
-      fi
-      write_blackbox_step_report \
-        "frontend.cancel.${provider}.run${i}" \
-        "Verify cancellation behavior through the public frontend flow." \
-        "Run frontend cancel inspection for provider=$provider run=$i." \
-        "$cancel_status" \
-        "$cancel_reason" \
-        "Inspect cancel result JSON and UI/log evidence before continuing." \
-        "$cancel_output_dir/$FRONTEND_CANCEL_RESULT_FILENAME" \
-        "$cancel_output_dir/driver.log" \
-        "$cancel_output_dir/server.log" \
-        "$cancel_output_dir/playwright.log" \
-        "$cancel_output_dir/frontend-workspace/reports"
-    done
-    continue
-  fi
-
-  if [[ "$BATCH_FRONTEND_CANCEL_MODE" == "never" ]]; then
-    cancel_output_dir="$(frontend_cancel_output_dir "$provider")"
-    mkdir -p "$cancel_output_dir"
-    FRONTEND_CANCEL_SKIPPED=$((FRONTEND_CANCEL_SKIPPED + 1))
-    write_frontend_status_json \
-      "$cancel_output_dir/$FRONTEND_CANCEL_RESULT_FILENAME" \
-      "$provider" \
-      "cancel-refresh" \
-      "skipped" \
-      "$ACP_FRONTEND_REASON_SELECTION_SKIPPED" \
-      "$BATCH_ROOT/frontend/$provider/frontend-workspace" \
-      "$cancel_output_dir" \
-      "$runtime_cmd"
-    log "frontend cancel smoke skipped provider=$provider mode=$BATCH_FRONTEND_CANCEL_MODE runs=$SELECTED_RUN_INDEXES_CSV"
-    write_blackbox_step_report \
-      "frontend.cancel.${provider}" \
-      "Verify cancellation behavior through the public frontend flow when selected." \
-      "Record frontend cancel inspection as skipped by batch selection." \
-      "skipped" \
-      "$ACP_FRONTEND_REASON_SELECTION_SKIPPED" \
-      "Continue with report synthesis." \
-      "$cancel_output_dir/$FRONTEND_CANCEL_RESULT_FILENAME"
   fi
 done
 
@@ -2103,70 +1683,17 @@ if ! (
     --batch-root "$BATCH_ROOT" \
     --reports-root "$REPORTS_ROOT" >"$BATCH_ROOT/report-paths.txt"
 ); then
-  write_blackbox_step_report \
-    "batch.report" \
-    "Synthesize backend, frontend, quality, and taskrun artifacts into public reports." \
-    "Run e2e_batch_report.py and inspect generated report paths." \
-    "failed" \
-    "report_generation_failed" \
-    "Stop this direct batch run; inspect report generation output and upstream artifacts." \
-    "$BATCH_ROOT/report-paths.txt" \
-    "$RUN_CLASSIFICATIONS_TSV" \
-    "$BLACKBOX_STEPS_JSONL" \
-    "$BLACKBOX_STEPS_MD"
   die "batch report generation failed: batch_id=$BATCH_ID (see $BATCH_ROOT/report-paths.txt)"
 fi
-write_blackbox_step_report \
-  "batch.report" \
-  "Synthesize backend, frontend, quality, and taskrun artifacts into public reports." \
-  "Run e2e_batch_report.py and inspect generated report paths." \
-  "passed" \
-  "none" \
-  "Use batch reports as evidence for matrix synthesis and verdict verification." \
-  "$BATCH_ROOT/report-paths.txt" \
-  "$REPORTS_ROOT/run_matrix_${BATCH_ID}.tsv" \
-  "$REPORTS_ROOT/run_matrix_${BATCH_ID}.md" \
-  "$REPORTS_ROOT/frontend_e2e_matrix_${BATCH_ID}.md" \
-  "$REPORTS_ROOT/frontend_cancel_e2e_matrix_${BATCH_ID}.md" \
-  "$REPORTS_ROOT/quality_report_${BATCH_ID}.md" \
-  "$BLACKBOX_STEPS_JSONL" \
-  "$BLACKBOX_STEPS_MD"
 
 log "report paths:"
 cat "$BATCH_ROOT/report-paths.txt"
 
 log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
 
-if [[ "$failed_runs" -ne 0 || "$frontend_failures" -ne 0 || "$FRONTEND_CANCEL_FAILURES" -ne 0 ]]; then
-  write_blackbox_step_report \
-    "batch.final" \
-    "Classify the full batch outcome from public reports and counters." \
-    "Compare backend/frontend/cancel failure counters after report synthesis." \
-    "failed" \
-    "batch_failures" \
-    "Stop this direct batch run; inspect evidence paths and rerun after repair." \
-    "$BATCH_ROOT/report-paths.txt" \
-    "$RUN_CLASSIFICATIONS_TSV" \
-    "$REPORTS_ROOT/run_matrix_${BATCH_ID}.tsv" \
-    "$REPORTS_ROOT/quality_report_${BATCH_ID}.md" \
-    "$BLACKBOX_STEPS_JSONL" \
-    "$BLACKBOX_STEPS_MD"
-  die "batch completed with failures: full_run_failed=$failed_runs frontend_failed=$frontend_failures frontend_cancel_failed=$FRONTEND_CANCEL_FAILURES frontend_cancel_skipped=$FRONTEND_CANCEL_SKIPPED precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
+if [[ "$failed_runs" -ne 0 || "$frontend_failures" -ne 0 ]]; then
+  die "batch completed with failures: full_run_failed=$failed_runs frontend_failed=$frontend_failures precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
 fi
-
-write_blackbox_step_report \
-  "batch.final" \
-  "Classify the full batch outcome from public reports and counters." \
-  "Confirm backend/frontend/cancel counters are zero after report synthesis." \
-  "passed" \
-  "none" \
-  "Return to matrix harness for profile aggregation and release verdict verification." \
-  "$BATCH_ROOT/report-paths.txt" \
-  "$RUN_CLASSIFICATIONS_TSV" \
-  "$REPORTS_ROOT/run_matrix_${BATCH_ID}.tsv" \
-  "$REPORTS_ROOT/quality_report_${BATCH_ID}.md" \
-  "$BLACKBOX_STEPS_JSONL" \
-  "$BLACKBOX_STEPS_MD"
 
 log "batch completed successfully"
 exit 0

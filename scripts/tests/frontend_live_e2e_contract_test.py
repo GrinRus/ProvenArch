@@ -41,13 +41,16 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         body = spec_path.read_text(encoding="utf-8")
         self.assertIn("type APIRequestContext", body)
         self.assertIn("fetchRunObservation(api: APIRequestContext", body)
-        self.assertIn('scenario !== "api-context-page-close-smoke"', body)
+        self.assertNotIn("api-context-page-close-smoke", body)
+        self.assertNotIn("cancel-refresh", body)
         self.assertNotIn("page.request", body)
         self.assertNotIn("page.waitForTimeout", body)
 
-    def test_shell_allows_api_context_page_close_smoke(self) -> None:
+    def test_shell_only_allows_init_inspect(self) -> None:
         body = self.script_path.read_text(encoding="utf-8")
-        self.assertIn("init-inspect|cancel-refresh|api-context-page-close-smoke)", body)
+        self.assertIn("allowed: init-inspect", body)
+        self.assertNotIn("cancel-refresh|api-context-page-close-smoke", body)
+        self.assertNotIn("runtime-cancel-stub", body)
 
     def test_server_exit_is_classified(self) -> None:
         result = self._run_frontend_harness("server_exited", acp_mode="server_exited")

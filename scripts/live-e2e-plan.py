@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -38,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-count", type=int, default=0)
     parser.add_argument("--run-selection", default="")
     parser.add_argument("--frontend-mode", choices=tuple(sorted(FRONTEND_MODES)), default="")
-    parser.add_argument("--format", choices=("shell", "json", "markdown"), default="shell")
+    parser.add_argument("--format", choices=("shell",), default="shell")
     parser.add_argument(
         "--catalog",
         default="examples/e2e-profile-catalog.yaml",
@@ -234,8 +233,6 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             env["BATCH_RUN_SELECTION"] = ",".join(str(value) for value in run_indexes)
         if frontend_mode:
             env["BATCH_FRONTEND_MODE"] = frontend_mode
-            if frontend_mode == "never":
-                env["BATCH_FRONTEND_CANCEL_MODE"] = "never"
 
         commands.append(
             {
@@ -289,28 +286,6 @@ def render_shell(plan: dict[str, Any]) -> str:
     return "\n".join(rendered).rstrip() + "\n"
 
 
-def render_markdown(plan: dict[str, Any]) -> str:
-    lines = [
-        f"# Live E2E Plan: {plan['selector']['slug']}",
-        "",
-        f"- selected_providers: {', '.join(plan['selected_providers'])}",
-        f"- selected_run_indexes: {', '.join(plan['selected_run_indexes'])}",
-        f"- expected_backend_runs: {plan['expected_backend_runs']}",
-        f"- quality_required: {str(plan['quality']['required']).lower()}",
-        "",
-        "| matrix_file | matrix_id_template | release_mode | expected_backend_runs |",
-        "|---|---|---:|---:|",
-    ]
-    for command in plan["commands"]:
-        lines.append(
-            "| "
-            f"{command['matrix_file']} | {command['matrix_id_template']} | "
-            f"{int(command['release_mode'])} | {command['expected_backend_runs']} |"
-        )
-    lines.extend(["", "```bash", render_shell(plan).rstrip(), "```", ""])
-    return "\n".join(lines)
-
-
 def main() -> int:
     args = parse_args()
     try:
@@ -319,12 +294,7 @@ def main() -> int:
         print(f"live-e2e-plan: {exc}", file=sys.stderr)
         return 2
 
-    if args.format == "json":
-        print(json.dumps(plan, ensure_ascii=True, indent=2))
-    elif args.format == "markdown":
-        print(render_markdown(plan), end="")
-    else:
-        print(render_shell(plan), end="")
+    print(render_shell(plan), end="")
     return 0
 
 

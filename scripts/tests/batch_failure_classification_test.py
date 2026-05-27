@@ -207,7 +207,6 @@ class BatchFailureClassificationTest(unittest.TestCase):
                 "BATCH_PROVIDER_FILTER": "qwen-code",
                 "BATCH_RUN_SELECTION": "1",
                 "BATCH_FRONTEND_MODE": "never",
-                "BATCH_FRONTEND_CANCEL_MODE": "never",
                 "ACP_QWEN_CMD_BIN": str(qwen_stub),
                 "ACP_CLAUDE_CMD_BIN": "true",
                 "ACP_CODEX_CMD_BIN": "true",
@@ -233,8 +232,6 @@ class BatchFailureClassificationTest(unittest.TestCase):
             reports_root / f"run_matrix_{batch_id}.tsv",
             reports_root / f"quality_report_{batch_id}.md",
             reports_root / f"frontend_e2e_matrix_{batch_id}.md",
-            reports_root / f"frontend_cancel_e2e_matrix_{batch_id}.md",
-            reports_root / f"blackbox_e2e_steps_{batch_id}.jsonl",
             e2e_root / "runs" / batch_id / "report-paths.txt",
         ]:
             self.assertTrue(path.exists(), f"missing expected preflight failure artifact: {path}")
@@ -242,17 +239,8 @@ class BatchFailureClassificationTest(unittest.TestCase):
         run_matrix = (reports_root / f"run_matrix_{batch_id}.md").read_text(encoding="utf-8")
         self.assertIn("operational_host_preflight_failed", run_matrix)
         self.assertNotIn("| qwen-code | 1 | 0 | 0 | 0 | 0 | 0 | Poor | snapshot", run_matrix)
-
-        rows = [
-            json.loads(line)
-            for line in (reports_root / f"blackbox_e2e_steps_{batch_id}.jsonl").read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-        self.assertEqual(["batch.preflight"], [row["step_id"] for row in rows])
-        self.assertEqual("failed", rows[0]["status"])
-        self.assertEqual("operational_host_preflight_failed", rows[0]["primary_classification"])
-        for key in ("goal", "action", "observed_evidence", "next_decision", "evidence_paths"):
-            self.assertIn(key, rows[0])
+        self.assertFalse((reports_root / f"blackbox_e2e_steps_{batch_id}.jsonl").exists())
+        self.assertFalse((reports_root / f"blackbox_e2e_steps_{batch_id}.md").exists())
 
     def test_full_run_batch_node_toolchain_precheck_failure_records_evidence(self) -> None:
         repos_file = self.root / "repos.yaml"
@@ -349,7 +337,6 @@ class BatchFailureClassificationTest(unittest.TestCase):
                 "BATCH_PROVIDER_FILTER": "qwen-code",
                 "BATCH_RUN_SELECTION": "1",
                 "BATCH_FRONTEND_MODE": "never",
-                "BATCH_FRONTEND_CANCEL_MODE": "never",
                 "ACP_QWEN_CMD_BIN": str(qwen_stub),
                 "ACP_CLAUDE_CMD_BIN": "true",
                 "ACP_CODEX_CMD_BIN": "true",
@@ -382,19 +369,8 @@ class BatchFailureClassificationTest(unittest.TestCase):
 
         run_matrix = (reports_root / f"run_matrix_{batch_id}.md").read_text(encoding="utf-8")
         self.assertIn("precheck_failed", run_matrix)
-
-        rows = [
-            json.loads(line)
-            for line in (reports_root / f"blackbox_e2e_steps_{batch_id}.jsonl").read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-        self.assertEqual(["batch.preflight"], [row["step_id"] for row in rows])
-        self.assertEqual("failed", rows[0]["status"])
-        self.assertEqual("precheck_failed", rows[0]["primary_classification"])
-        self.assertTrue(
-            any(path.endswith("precheck-node-toolchain.log") for path in rows[0]["evidence_paths"]),
-            rows[0]["evidence_paths"],
-        )
+        self.assertFalse((reports_root / f"blackbox_e2e_steps_{batch_id}.jsonl").exists())
+        self.assertFalse((reports_root / f"blackbox_e2e_steps_{batch_id}.md").exists())
 
     def _create_passed_run_dir_with_raw_runner_noise(self, run_dir: Path) -> None:
         self._create_fixture_run_dir(run_dir)
@@ -825,63 +801,15 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertTrue(result.runtime_contract_failed)
         self.assertTrue(result.infra_incomplete_cycle)
 
-    def test_frontend_cancel_workspace_sanitizes_stale_taskrun_history(self) -> None:
+    def test_shell_no_longer_exposes_frontend_cancel_workspace_helpers(self) -> None:
         script = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
-        functions = "\n\n".join(
-            extract_bash_function(script, name)
-            for name in (
-                "backend_workspace_candidates",
-                "resolve_backend_workspace_dir",
-                "sanitize_frontend_cancel_workspace",
-                "prepare_frontend_cancel_workspace",
-            )
-        )
-        backend_run_dir = self.root / "frontend-cancel-backend" / "qwen-code" / "run1"
-        backend_workspace = backend_run_dir / "headless" / "arch-workspace"
-        output_dir = self.root / "frontend-cancel-output"
-        write_json(
-            backend_workspace / "reports/taskruns/run-history.json",
-            {
-                "items": [
-                    {
-                        "run_id": "run-stale",
-                        "pipeline": "refresh",
-                        "status": "running",
-                        "started_at": "2026-05-07T10:00:00Z",
-                    }
-                ]
-            },
-        )
-        write_text(backend_workspace / "reports/taskruns/logs/run-stale.ndjson", "{}\n")
-        write_text(backend_workspace / "reports/taskruns/raw/run-stale.json", "{}\n")
-        write_text(backend_workspace / "reports/as-is/overview.md", "# Canonical report\n")
+        self.assertNotIn("sanitize_frontend_cancel_workspace() {", script)
+        self.assertNotIn("prepare_frontend_cancel_workspace() {", script)
+        self.assertNotIn("run_frontend_cancel_e2e() {", script)
 
-        completed = subprocess.run(
-            [
-                "bash",
-                "-c",
-                f"set -euo pipefail\n{functions}\nprepare_frontend_cancel_workspace \"$1\" \"$2\"",
-                "bash",
-                str(backend_run_dir),
-                str(output_dir),
-            ],
-            cwd=REPO_ROOT,
-            text=True,
-            capture_output=True,
-            check=True,
-        )
-
-        frontend_workspace = Path(completed.stdout.strip())
-        self.assertEqual(output_dir / "frontend-workspace", frontend_workspace)
-        self.assertFalse((frontend_workspace / "reports/taskruns/run-history.json").exists())
-        self.assertFalse((frontend_workspace / "reports/taskruns/logs").exists())
-        self.assertFalse((frontend_workspace / "reports/taskruns/raw").exists())
-        self.assertTrue((frontend_workspace / "reports/as-is/overview.md").is_file())
-        self.assertTrue((backend_workspace / "reports/taskruns/run-history.json").is_file())
-
-    def test_frontend_cancel_passes_codex_command_env(self) -> None:
+    def test_frontend_live_passes_codex_command_env(self) -> None:
         script = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
-        self.assertGreaterEqual(script.count('"ACP_CODEX_CMD=$ACP_CODEX_CMD_BIN"'), 2)
+        self.assertIn('"ACP_CODEX_CMD=$ACP_CODEX_CMD_BIN"', script)
 
     def test_python_report_aggregates_runtime_repair_stall_counters(self) -> None:
         quality_path = self.run_dir / "snapshots" / "refresh-run" / "reports" / "taskruns" / "refresh-run-quality.json"
@@ -3259,13 +3187,10 @@ class BatchFailureClassificationTest(unittest.TestCase):
             + "RUN_COUNT=5\n"
             + "BATCH_RUN_SELECTION=2,4\n"
             + "BATCH_FRONTEND_MODE=per_run\n"
-            + "BATCH_FRONTEND_CANCEL_MODE=per_run\n"
             + "resolve_selected_run_indexes\n"
             + 'if should_run_frontend_once; then echo "live_once=1"; else echo "live_once=0"; fi\n'
             + 'if should_run_frontend_for_run 2; then echo "live_run2=1"; else echo "live_run2=0"; fi\n'
             + 'if should_run_frontend_for_run 1; then echo "live_run1=1"; else echo "live_run1=0"; fi\n'
-            + 'if should_run_frontend_cancel_once; then echo "cancel_once=1"; else echo "cancel_once=0"; fi\n'
-            + 'if should_run_frontend_cancel_for_run 4; then echo "cancel_run4=1"; else echo "cancel_run4=0"; fi\n'
         )
         completed = subprocess.run(
             ["bash", "-lc", command],
@@ -3276,7 +3201,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
         )
         observed = set(line.strip() for line in completed.stdout.splitlines() if line.strip())
         self.assertSetEqual(
-            {"live_once=0", "live_run2=1", "live_run1=0", "cancel_once=0", "cancel_run4=1"},
+            {"live_once=0", "live_run2=1", "live_run1=0"},
             observed,
         )
 
@@ -3428,56 +3353,6 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertIn("| qwen-code | 3 | failed | browser_closed |", matrix_text)
         self.assertIn("| qwen-code | 4 | failed | runtime_run_failed |", matrix_text)
 
-    def test_python_frontend_cancel_matrix_supports_per_run_results(self) -> None:
-        batch_root = self.root / "batch-cancel"
-        reports_root = self.root / "reports-cancel"
-        write_json(
-            batch_root / "frontend-cancel/qwen-code/run2/frontend-cancel-result.json",
-            {
-                "status": "passed",
-                "reason": "ok",
-                "scenario": "cancel-refresh",
-                "runtime_provider": "qwen-code",
-                "workspace": "/tmp/qwen-cancel-run2",
-                "runtime_command": "qwen",
-            },
-        )
-        write_json(
-            batch_root / "frontend-cancel/qwen-code/run4/frontend-cancel-result.json",
-            {
-                "status": "skipped",
-                "reason": "frontend_workspace_missing",
-                "scenario": "cancel-refresh",
-                "runtime_provider": "qwen-code",
-                "workspace": "/tmp/qwen-cancel-run4",
-                "runtime_command": "qwen",
-            },
-        )
-        write_json(
-            batch_root / "frontend-cancel/claude-code/frontend-cancel-result.json",
-            {
-                "status": "failed",
-                "reason": "frontend_live_e2e_failed",
-                "scenario": "cancel-refresh",
-                "runtime_provider": "claude-code",
-                "workspace": "/tmp/claude-cancel",
-                "runtime_command": "claude",
-            },
-        )
-
-        frontend_cancel = self.module.load_frontend_cancel_results(batch_root)
-        self.assertEqual(3, len(frontend_cancel))
-
-        matrix_path = reports_root / "frontend-cancel-matrix.md"
-        self.module.write_frontend_cancel_matrix(matrix_path, frontend_cancel)
-        matrix_text = matrix_path.read_text(encoding="utf-8")
-
-        self.assertIn("| qwen-code | mixed | 2 | frontend_workspace_missing=1, ok=1 |", matrix_text)
-        self.assertIn("| claude-code | failed | 1 | frontend_live_e2e_failed=1 |", matrix_text)
-        self.assertIn("| qwen-code | 2 | passed | ok | cancel-refresh |", matrix_text)
-        self.assertIn("| qwen-code | 4 | skipped | frontend_workspace_missing | cancel-refresh |", matrix_text)
-        self.assertIn("| claude-code | - | failed | frontend_live_e2e_failed | cancel-refresh |", matrix_text)
-
     def test_quality_report_respects_selected_provider_surface(self) -> None:
         reports_root = self.root / "reports-selected"
         quality_path = reports_root / "quality.md"
@@ -3485,17 +3360,6 @@ class BatchFailureClassificationTest(unittest.TestCase):
             {
                 "status": "passed",
                 "reason": "ok",
-                "runtime_provider": "qwen-code",
-                "run_index": 1,
-                "workspace": "/tmp/qwen-run1",
-                "runtime_command": "qwen",
-            }
-        ]
-        frontend_cancel = [
-            {
-                "status": "passed",
-                "reason": "ok",
-                "scenario": "cancel-refresh",
                 "runtime_provider": "qwen-code",
                 "run_index": 1,
                 "workspace": "/tmp/qwen-run1",
@@ -3538,7 +3402,6 @@ class BatchFailureClassificationTest(unittest.TestCase):
             "batch-qwen-only",
             runs,
             frontend,
-            frontend_cancel,
             preflight,
             ["qwen-code"],
         )
@@ -3548,6 +3411,62 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertNotIn("10/10", report)
         self.assertNotIn("2/2", report)
         self.assertNotIn("| claude-code |", report)
+
+    def test_quality_report_marks_frontend_skipped_as_not_run(self) -> None:
+        reports_root = self.root / "reports-frontend-skipped"
+        quality_path = reports_root / "quality.md"
+        frontend = [
+            {
+                "status": "skipped",
+                "reason": "frontend_disabled",
+                "runtime_provider": "codex-code",
+                "run_index": 1,
+                "workspace": "/tmp/codex-run1",
+                "runtime_command": "codex",
+            }
+        ]
+        runs = [
+            self.module.RunEvaluation(
+                provider="codex-code",
+                run_index=1,
+                run_dir=self.root / "codex-run1",
+                hard_pass=True,
+                reliability=40,
+                contract=20,
+                analysis=30,
+                total=90,
+                verdict="PASS",
+            )
+        ]
+        preflight = {
+            "generated_at_utc": "2026-04-18T00:00:00Z",
+            "provenarch_sha": "abc123",
+            "target_repos_file": "examples/repos.txt",
+            "declared_repos_meta": {
+                "profile_id": "single-git_url",
+                "profile_source_kind": "git_url",
+                "expected_repo_count": 1,
+                "declared_repos": [{"name": "bank-of-anthos"}],
+            },
+            "selected_providers": ["codex-code"],
+            "selected_run_indexes": ["1"],
+            "runtimes": {
+                "codex": {"version_line": "codex-cli 0.131.0"},
+            },
+        }
+
+        self.module.write_quality_report(
+            quality_path,
+            "batch-codex-skipped-frontend",
+            runs,
+            frontend,
+            preflight,
+            ["codex-code"],
+        )
+        report = quality_path.read_text(encoding="utf-8")
+        self.assertIn("Frontend live e2e не запускался для этого batch", report)
+        self.assertNotIn("Frontend live e2e не полностью стабилен", report)
+        self.assertIn("frontend live smoke обязателен только для frontend-enabled/release surfaces", report)
 
     def test_selected_surface_is_resolved_from_preflight(self) -> None:
         batch_root = self.root / "selected-surface"

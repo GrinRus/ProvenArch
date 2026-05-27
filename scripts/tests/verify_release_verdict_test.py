@@ -25,14 +25,25 @@ class VerifyReleaseVerdictTest(unittest.TestCase):
         path.write_text(json.dumps(payload), encoding="utf-8")
         return path
 
+    def ready_payload(self) -> dict[str, object]:
+        return {
+            "verdict": "PASS",
+            "release_state": "RELEASE READY",
+            "release_contract": {
+                "mode": "release",
+                "contract_status": "passed",
+                "selected_providers": ["qwen-code", "claude-code", "codex-code"],
+                "selected_run_indexes": ["1"],
+            },
+            "records": [{"strict_status": "passed"}],
+        }
+
     def test_accepts_pass_ready_verdict_with_passed_release_contract(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = self.write_verdict(
                 Path(tmp),
                 {
-                    "verdict": "PASS",
-                    "release_state": "RELEASE READY",
-                    "release_contract": {"contract_status": "passed"},
+                    **self.ready_payload(),
                 },
             )
 
@@ -48,7 +59,13 @@ class VerifyReleaseVerdictTest(unittest.TestCase):
                 {
                     "verdict": "FAIL",
                     "release_state": "RELEASE BLOCKED",
-                    "release_contract": {"contract_status": "failed"},
+                    "release_contract": {
+                        "mode": "release",
+                        "contract_status": "failed",
+                        "selected_providers": ["qwen-code", "claude-code", "codex-code"],
+                        "selected_run_indexes": ["1"],
+                    },
+                    "records": [{"strict_status": "failed"}],
                 },
             )
 
@@ -88,6 +105,56 @@ class VerifyReleaseVerdictTest(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("release_contract must be an object", result.stderr)
+
+    def test_rejects_non_release_matrix_result_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self.write_verdict(
+                Path(tmp),
+                {
+                    "result": "PASS",
+                    "mode": "non-release",
+                    "records": [{"strict_status": "passed"}],
+                },
+            )
+
+            result = self.run_verifier(path)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("verdict must be PASS", result.stderr)
+        self.assertIn("release_contract must be an object", result.stderr)
+
+    def test_rejects_release_verdict_without_release_contract_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = self.ready_payload()
+            payload["release_contract"] = {
+                "contract_status": "passed",
+                "selected_providers": ["qwen-code", "claude-code", "codex-code"],
+                "selected_run_indexes": ["1"],
+            }
+            path = self.write_verdict(Path(tmp), payload)
+
+            result = self.run_verifier(path)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("release_contract.mode must be release", result.stderr)
+
+    def test_rejects_provider_subset_or_failed_record(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = self.ready_payload()
+            payload["release_contract"] = {
+                "mode": "release",
+                "contract_status": "passed",
+                "selected_providers": ["qwen-code"],
+                "selected_run_indexes": ["1"],
+            }
+            payload["records"] = [{"strict_status": "failed"}]
+            path = self.write_verdict(Path(tmp), payload)
+
+            result = self.run_verifier(path)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("selected_providers must be", result.stderr)
+        self.assertIn("records[0].strict_status must be passed", result.stderr)
 
 
 if __name__ == "__main__":

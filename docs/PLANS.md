@@ -118,6 +118,64 @@ EP-20260526-async-runtime-backed-ask
 - 2026-05-26: Implemented async QA run family/API/schema/fake runtime/UI polling, context-pack citation validation, docs/test sync, full DoD, and fake async QA smoke.
 
 ### Plan ID
+EP-20260526-live-e2e-operator-blackbox-simplification
+
+### Context
+Live E2E/release gate накопил двусмысленные surfaces: harness сам пишет `blackbox_e2e_steps_*` как будто это operator reasoning, non-release diagnostic matrices пишут `release_verdict_*`, planner публикует JSON/Markdown как будто это second-order API, а release strict verdict включает stubbed frontend cancel smoke. Breaking compatibility допустима: лучше удалить старую логику сразу и оставить один machine-verifiable release gate плюс отдельный operator assessment поверх evidence.
+
+### Goals (must have)
+- [x] Удалить internal black-box evaluator helper и генерацию `blackbox_e2e_steps_*`.
+- [x] Развести release artifacts (`release_verdict_*`) и non-release artifacts (`matrix_result_*`).
+- [x] Ужесточить `verify-release-verdict.py`, чтобы он принимал только canonical release-mode verdict.
+- [x] Оставить `live-e2e-plan.py` shell-only direct command printer.
+- [x] Убрать stubbed frontend cancel из release gate и public live frontend harness.
+- [x] Обновить runbook/skill/testing docs и добавить шаблон operator assessment.
+- [x] Обновить regression tests под breaking protocol.
+- [x] Rerun full DoD on a host with exact Node.js `22.21.1`.
+- [ ] После owner review/merge перенести план в архив.
+
+### Non-goals
+- [x] Не добавлять wrapper поверх `scripts/full-run-batch-matrix.sh`.
+- [x] Не менять canonical release matrices или curated repos для обхода host prerequisites.
+- [x] Не делать operator assessment источником release readiness.
+
+### Approach
+1) Удалить evaluator helper и все script-authored black-box decision calls из batch/matrix harness.
+2) Изменить matrix synthesis: release mode пишет только release verdict, non-release mode пишет neutral matrix result без `release_state`/`release_contract`.
+3) Ужесточить verifier и planner public surface.
+4) Убрать frontend cancel strict path из release aggregation и live shell harness; оставить frontend release check на init/artifact inspection.
+5) Синхронизировать docs/tests и template для ручного assessment.
+
+### Files expected to change
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/full-run-batch.sh`
+- `scripts/frontend-live-e2e.sh`
+- `scripts/live-e2e-plan.py`
+- `scripts/verify-release-verdict.py`
+- `scripts/tests/*`
+- `.agents/skills/e2e-live-gate/SKILL.md`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/templates/LIVE_E2E_OPERATOR_ASSESSMENT.md`
+
+### Acceptance criteria
+- [x] Focused script tests updated and passing.
+- [x] `make contracts`
+- [x] `make test`
+- [x] `make lint`
+- [x] `make build`
+- [x] Canonical release gate is not run unless trusted-host prerequisites are satisfied.
+
+### Risks
+- Large shell harness changes can break hermetic tests; mitigate by keeping execution flow unchanged except removed surfaces.
+- Historical docs may mention old artifacts; sync source-of-truth docs first and ignore archive snapshots unless tests read them.
+
+### Progress log
+- 2026-05-26: Started breaking simplification implementation from audit follow-up.
+- 2026-05-26: Implemented breaking simplification and updated focused script suite.
+- 2026-05-26: Installed exact local Node.js `22.21.1`, fixed frontend health-start result JSON, fixed async API test timeout flake under live quality gate, updated skipped-frontend report wording, completed full DoD (`make contracts`, `make test`, `make lint`, `make build`), and passed codex-code non-release diagnostic `smoke-tiny-bank-20260526T195844Z`.
+
+### Plan ID
 EP-20260525-frontend-live-e2e-diagnostics
 
 ### Context
@@ -130,7 +188,7 @@ EP-20260525-frontend-live-e2e-diagnostics
 - [x] Make long backend polling independent from the browser page object.
 - [x] Persist frontend result diagnostics: server PID/exit code, post-failure health, run id, last run status/current step, and diagnostic refs.
 - [x] Add stub regression tests for the new frontend classifications.
-- [x] Add a diagnostic-only Playwright smoke proving API request polling survives a closed browser page.
+- [x] Keep API request polling independent from page lifecycle inside the init-inspect flow; the old page-close live scenario is superseded by EP-20260526.
 - [ ] After merge, run focused frontend init diagnostics for `claude-code` and `codex-code`, then rerun canonical `release fast` if both focused checks pass.
 
 ### Non-goals
@@ -159,7 +217,7 @@ EP-20260525-frontend-live-e2e-diagnostics
 - [x] `python3 -m unittest scripts.tests.frontend_live_e2e_contract_test`
 - [x] relevant batch/report script tests
 - [x] UI unit/build checks
-- [x] diagnostic-only Playwright `api-context-page-close-smoke` passes against a fake API
+- [x] frontend live shell exposes only `init-inspect`; page-close/cancel coverage moved out of live gate
 - [x] `make contracts`
 - [x] `make test`
 - [x] `make lint`
@@ -171,7 +229,7 @@ EP-20260525-frontend-live-e2e-diagnostics
 
 ### Progress log
 - 2026-05-25: Started implementation after stopping `release-fast-20260525T104842Z`; evidence showed independent frontend init failures for Claude browser lifecycle and Codex API/server reachability.
-- 2026-05-25: Implemented additive reason taxonomy, post-failure diagnostics, independent API polling, stub regression coverage, diagnostic page-close smoke, and docs sync; local DoD passed.
+- 2026-05-25: Implemented additive reason taxonomy, post-failure diagnostics, independent API polling, stub regression coverage, and docs sync; local DoD passed.
 - 2026-05-26: Follow-up release-fast triage found a stable `claude-code` init failure where Playwright correctly observed the backend run had already failed with `runner_unavailable`; adding `runtime_run_failed` classification plus `last_run_error_code` diagnostics.
 
 ### Plan ID
@@ -234,12 +292,12 @@ EP-20260525-proven-arch-ui-console
 EP-20260518-live-e2e-blackbox
 
 ### Context
-Live E2E должен стать black-box operator flow: план шага, прямой harness/UI/API вызов, evidence inspection, classification, next decision. Official release readiness остаётся только в `reports/release_verdict_<matrix-id>.json`, проверяемом `scripts/verify-release-verdict.py`. После wiring нового flow legacy live E2E entrypoints/docs/matrices удаляются без compatibility aliases.
+Live E2E должен стать black-box operator flow: план шага, прямой harness/UI/API вызов, evidence inspection, classification, next decision. Official release readiness остаётся только в release-mode `reports/release_verdict_<matrix-id>.json`, проверяемом `scripts/verify-release-verdict.py`. EP-20260526 superseded the earlier machine-generated step-report approach: scripts now produce facts/verdicts only, and operator assessment is separate.
 
 ### Goals (must have)
 - [x] Обновить live E2E skill и release runbook под обязательный step-by-step black-box evaluator protocol
-- [x] Добавить durable per-step JSONL/Markdown evidence в существующие report roots batch/matrix harness без wrapper поверх `scripts/full-run-batch-matrix.sh`
-- [x] Сделать explicit layering: live-e2e skill -> local manual-live-e2e workflow -> internal evaluator helper -> existing project flow, без GitHub Actions live workflow
+- [x] Удалить durable machine-authored step evidence из batch/matrix harness; reasoning layer остаётся operator-owned
+- [x] Сделать explicit layering: live-e2e skill -> local manual-live-e2e workflow -> direct public harness commands -> ACP runtime/provider/UI evidence, без GitHub Actions live workflow
 - [x] Оставить `scripts/full-run-batch-matrix.sh` direct top-level release harness
 - [x] Перенести backend-cycle logic за `scripts/full-run-batch.sh` в internal helper и удалить публичный legacy entrypoint
 - [x] Удалить legacy live E2E matrices/docs/tests and references without compatibility shims
@@ -252,11 +310,11 @@ Live E2E должен стать black-box operator flow: план шага, п�
 - [x] Не менять runtime artifact schemas или rejection tests for old runtime payloads
 
 ### Approach
-1) Встроить `blackbox_e2e_steps_<id>.jsonl/.md` в batch и matrix harness.
-2) Вынести shared black-box step evidence writing в source-only internal evaluator helper; batch/matrix scripts только source helper and pass context.
+1) Удалить script-authored pseudo-reasoning reports из batch/matrix harness.
+2) Оставить release readiness только в verifier-backed release verdict; non-release matrices пишут neutral matrix result.
 3) Перевести старый backend-cycle в non-public helper, вызываемый только из `scripts/full-run-batch.sh`.
 4) Переписать skill/runbook/testing docs под новый protocol и удалить legacy live E2E surfaces.
-5) Обновить docsync/script tests так, чтобы они требовали новый step-report shape, local manual workflow wording, internal evaluator helper, и отклоняли старые live E2E references.
+5) Обновить docsync/script tests так, чтобы они требовали operator-owned assessment wording и отклоняли старые live E2E references.
 
 ### Files expected to change
 - `.agents/skills/e2e-live-gate/SKILL.md`
@@ -267,7 +325,7 @@ Live E2E должен стать black-box operator flow: план шага, п�
 - `scripts/full-run-batch.sh`
 - `scripts/full-run-batch-matrix.sh`
 - `scripts/internal/live-e2e-backend-cycle.sh`
-- `scripts/internal/live-e2e-evaluator.sh`
+- deleted internal live E2E evaluator helper
 - `internal/docsync/docsync_test.go`
 - `scripts/tests/*`
 - legacy live E2E files removed from `docs/`, `examples/`, and `scripts/`

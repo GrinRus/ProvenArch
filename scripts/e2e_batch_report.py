@@ -100,7 +100,6 @@ QUALITY_COUNTER_KEYS = (
 
 FRONTEND_PROVIDERS = ("qwen-code", "claude-code", "codex-code")
 FRONTEND_LIVE_RESULT_FILENAME = "frontend-e2e-result.json"
-FRONTEND_CANCEL_RESULT_FILENAME = "frontend-cancel-result.json"
 
 
 def normalize_text(value: str) -> str:
@@ -2126,10 +2125,6 @@ def load_frontend_results(batch_root: Path, providers: list[str] | None = None) 
     return load_frontend_result_entries(batch_root, "frontend", FRONTEND_LIVE_RESULT_FILENAME, providers)
 
 
-def load_frontend_cancel_results(batch_root: Path, providers: list[str] | None = None) -> list[dict[str, Any]]:
-    return load_frontend_result_entries(batch_root, "frontend-cancel", FRONTEND_CANCEL_RESULT_FILENAME, providers)
-
-
 def frontend_entries_by_provider(
     entries: list[dict[str, Any]], providers: list[str] | None = None
 ) -> dict[str, list[dict[str, Any]]]:
@@ -2241,52 +2236,6 @@ def write_frontend_matrix(path: Path, frontend: list[dict[str, Any]], providers:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def write_frontend_cancel_matrix(
-    path: Path, frontend_cancel: list[dict[str, Any]], providers: list[str] | None = None
-) -> None:
-    ensure_parent_dir(path)
-    active_providers = providers or list(FRONTEND_PROVIDERS)
-    grouped = frontend_entries_by_provider(frontend_cancel, active_providers)
-    lines = [
-        "# Frontend Cancel E2E Matrix",
-        "",
-        "## Summary",
-        "",
-        "| provider | status | runs | reasons |",
-        "|---|---|---:|---|",
-    ]
-    for provider in active_providers:
-        items = grouped.get(provider, [])
-        lines.append(
-            f"| {provider} | {aggregate_frontend_status(items)} | {len(items)} | {aggregate_frontend_reasons(items)} |"
-        )
-
-    lines.extend(
-        [
-            "",
-            "## Run Details",
-            "",
-            "| provider | run | status | reason | scenario | workspace | runtime_command | server_log | playwright_log |",
-            "|---|---:|---|---|---|---|---|---|---|",
-        ]
-    )
-    for provider in active_providers:
-        items = grouped.get(provider, [])
-        if not items:
-            lines.append(f"| {provider} | 0 | missing | missing_result | cancel-refresh | - | - | - | - |")
-            continue
-        for payload in items:
-            run_index = int(payload.get("run_index", 0) or 0)
-            run_label = str(run_index) if run_index > 0 else "-"
-            lines.append(
-                "| "
-                f"{provider} | {run_label} | {payload.get('status', '-')} | {payload.get('reason', '-')} | "
-                f"{payload.get('scenario', '-')} | {payload.get('workspace', '-')} | "
-                f"{payload.get('runtime_command', '-')} | {payload.get('server_log', '-')} | {payload.get('playwright_log', '-')} |"
-            )
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
 def frontend_live_verdict_lines(frontend: list[dict[str, Any]], providers: list[str] | None = None) -> list[str]:
     active_providers = providers or list(FRONTEND_PROVIDERS)
     grouped = frontend_entries_by_provider(frontend, active_providers)
@@ -2295,25 +2244,9 @@ def frontend_live_verdict_lines(frontend: list[dict[str, Any]], providers: list[
         for provider in active_providers
     ]
 
-
-def frontend_cancel_verdict_lines(
-    frontend_cancel: list[dict[str, Any]], providers: list[str] | None = None
-) -> list[str]:
-    active_providers = providers or list(FRONTEND_PROVIDERS)
-    grouped = frontend_entries_by_provider(frontend_cancel, active_providers)
-    lines: list[str] = []
-    for provider in active_providers:
-        items = grouped.get(provider, [])
-        lines.append(
-            f"- {provider}: {aggregate_frontend_status(items)} (runs={len(items)}, reasons: {aggregate_frontend_reasons(items)})"
-        )
-    return lines
-
-
 def provider_matrix_rows(
     runs: list[RunEvaluation],
     frontend: list[dict[str, Any]],
-    frontend_cancel: list[dict[str, Any]],
     providers: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     active_providers = providers or list(FRONTEND_PROVIDERS)
@@ -2321,7 +2254,6 @@ def provider_matrix_rows(
     for run in runs:
         grouped[run.provider].append(run)
     frontend_grouped = frontend_entries_by_provider(frontend, active_providers)
-    frontend_cancel_grouped = frontend_entries_by_provider(frontend_cancel, active_providers)
 
     rows: list[dict[str, Any]] = []
     for provider in active_providers:
@@ -2336,15 +2268,9 @@ def provider_matrix_rows(
             error_codes_counter.update(item.error_codes)
             artifact_sources.update([item.artifact_source])
         frontend_items = frontend_grouped.get(provider, [])
-        frontend_cancel_items = frontend_cancel_grouped.get(provider, [])
         frontend_pass_rate = (
             sum(1 for payload in frontend_items if str(payload.get("status", "")).strip() == "passed") / len(frontend_items)
             if frontend_items
-            else 0.0
-        )
-        frontend_cancel_pass_rate = (
-            sum(1 for payload in frontend_cancel_items if str(payload.get("status", "")).strip() == "passed") / len(frontend_cancel_items)
-            if frontend_cancel_items
             else 0.0
         )
         rows.append(
@@ -2388,9 +2314,7 @@ def provider_matrix_rows(
                 "issues_top": ", ".join(f"{name}={count}" for name, count in issues_counter.most_common(3)) or "-",
                 "artifact_sources": ", ".join(f"{name}={count}" for name, count in sorted(artifact_sources.items())) or "-",
                 "frontend_pass_rate": frontend_pass_rate,
-                "frontend_cancel_pass_rate": frontend_cancel_pass_rate,
                 "frontend_status": aggregate_frontend_status(frontend_items),
-                "frontend_cancel_status": aggregate_frontend_status(frontend_cancel_items),
             }
         )
     return rows
@@ -2401,13 +2325,12 @@ def write_quality_report(
     batch_id: str,
     runs: list[RunEvaluation],
     frontend: list[dict[str, Any]],
-    frontend_cancel: list[dict[str, Any]],
     preflight: dict[str, Any],
     providers: list[str] | None = None,
 ) -> None:
     ensure_parent_dir(path)
     active_providers = providers or list(FRONTEND_PROVIDERS)
-    provider_rows = provider_matrix_rows(runs, frontend, frontend_cancel, active_providers)
+    provider_rows = provider_matrix_rows(runs, frontend, active_providers)
     hard_pass_all = sum(1 for run in runs if run.hard_pass)
     semantic_hard_fail_runs = sum(1 for run in runs if run.semantic_hard_fail)
     runtime_flow_failed_runs = sum(1 for run in runs if run.runtime_flow_failed)
@@ -2462,13 +2385,10 @@ def write_quality_report(
         "## Frontend Live Smoke Verdict",
         *frontend_live_verdict_lines(frontend, active_providers),
         "",
-        "## Frontend Cancel Smoke Verdict",
-        *frontend_cancel_verdict_lines(frontend_cancel, active_providers),
-        "",
         "## Provider Matrix",
         "",
-        "| provider | runs | pass_rate | avg_total | std_total | avg_reliability | avg_contract | avg_analysis | avg_refresh_signal | std_refresh_signal | avg_refresh_findings | avg_refresh_questions | avg_refresh_cov_missing | repair_attempts | repair_exhausted | fresh_retries | focused_repairs | stall_count | pre_artifact_stalls | post_artifact_stalls | zero_output_pre_artifact_stalls | partial_failure_count | quality_alerts | off_topic_hits | semantic_hard_fail_runs | runtime_contract_failed_failures | runner_unavailable_failures | runtime_timeout_failures | infra_signal_terminated_failures | infra_incomplete_cycle_failures | quality_gates_failed_failures | summary_missing_failures | precheck_failed_failures | runtime_flow_failed_failures | cancellation_like_failures | artifact_sources | error_codes | frontend_live_pass_rate | frontend_cancel_pass_rate |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---:|---:|",
+        "| provider | runs | pass_rate | avg_total | std_total | avg_reliability | avg_contract | avg_analysis | avg_refresh_signal | std_refresh_signal | avg_refresh_findings | avg_refresh_questions | avg_refresh_cov_missing | repair_attempts | repair_exhausted | fresh_retries | focused_repairs | stall_count | pre_artifact_stalls | post_artifact_stalls | zero_output_pre_artifact_stalls | partial_failure_count | quality_alerts | off_topic_hits | semantic_hard_fail_runs | runtime_contract_failed_failures | runner_unavailable_failures | runtime_timeout_failures | infra_signal_terminated_failures | infra_incomplete_cycle_failures | quality_gates_failed_failures | summary_missing_failures | precheck_failed_failures | runtime_flow_failed_failures | cancellation_like_failures | artifact_sources | error_codes | frontend_live_pass_rate |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---:|",
     ]
     for row in provider_rows:
         lines.append(
@@ -2482,7 +2402,7 @@ def write_quality_report(
             f"{row['partial_failure_count']} | {row['quality_alerts']} | {row['off_topic_hits']} | {row['semantic_hard_fail_runs']} | "
             f"{row['runtime_contract_failed_failures']} | {row['runner_unavailable_failures']} | {row['runtime_timeout_failures']} | {row['infra_signal_terminated_failures']} | "
             f"{row['infra_incomplete_cycle_failures']} | {row['quality_gates_failed_failures']} | {row['summary_missing_failures']} | {row['precheck_failed_failures']} | {row['runtime_flow_failed_failures']} | {row['cancellation_like_failures']} | "
-            f"{row['artifact_sources']} | {row['error_codes']} | {row['frontend_pass_rate']:.2f} | {row['frontend_cancel_pass_rate']:.2f} |"
+            f"{row['artifact_sources']} | {row['error_codes']} | {row['frontend_pass_rate']:.2f} |"
         )
 
     lines.extend(
@@ -2492,22 +2412,25 @@ def write_quality_report(
         ]
     )
     frontend_grouped = frontend_entries_by_provider(frontend, active_providers)
-    frontend_cancel_grouped = frontend_entries_by_provider(frontend_cancel, active_providers)
+    frontend_statuses = {
+        provider: aggregate_frontend_status(frontend_grouped.get(provider, []))
+        for provider in active_providers
+    }
+    frontend_all_passed = bool(active_providers) and all(status == "passed" for status in frontend_statuses.values())
+    frontend_all_skipped = bool(active_providers) and all(status == "skipped" for status in frontend_statuses.values())
+    frontend_has_evidence = any(frontend_grouped.get(provider, []) for provider in active_providers)
     if hard_pass_all == len(runs):
         lines.append(f"- Все `{hard_pass_all}/{len(runs)}` backend full-runs прошли hard-gates без падений pipeline и signal regression.")
     else:
         lines.append("- Часть run прошла hard-gates, но есть деградации стабильности (см. matrix).")
-    if all(aggregate_frontend_status(frontend_grouped.get(provider, [])) == "passed" for provider in active_providers):
+    if frontend_all_passed:
         lines.append(f"- Frontend live e2e прошёл для выбранных провайдеров (`{len(active_providers)}/{len(active_providers)}`).")
+    elif frontend_all_skipped:
+        lines.append("- Frontend live e2e не запускался для этого batch (`skipped` для выбранных провайдеров).")
+    elif not frontend_has_evidence:
+        lines.append("- Frontend live e2e evidence отсутствует для выбранных провайдеров.")
     else:
-        lines.append(f"- Frontend live e2e не полностью стабилен (`<{len(active_providers)}/{len(active_providers)}`).")
-    if all(
-        aggregate_frontend_status(frontend_cancel_grouped.get(provider, [])) == "passed"
-        for provider in active_providers
-    ):
-        lines.append(f"- Frontend cancel-refresh smoke прошёл для выбранных провайдеров (`{len(active_providers)}/{len(active_providers)}`).")
-    else:
-        lines.append(f"- Frontend cancel-refresh smoke не полностью стабилен (`<{len(active_providers)}/{len(active_providers)}`) или был пропущен.")
+        lines.append(f"- Frontend live e2e не полностью прошёл для выбранных провайдеров (`<{len(active_providers)}/{len(active_providers)}`).")
     lines.append("- Контрактная совместимость runtime/report артефактов проверена автоматически для каждого run.")
 
     lines.extend(
@@ -2541,7 +2464,7 @@ def write_quality_report(
         [
             "",
             "## P0/P1 Actions",
-            f"- P0: держать nightly batch regression с direct binaries (`qwen`/`claude`/`codex`) и обязательным frontend live smoke `{len(active_providers)}/{len(active_providers)}` для выбранного provider surface.",
+            "- P0: держать nightly batch regression с direct binaries (`qwen`/`claude`/`codex`); frontend live smoke обязателен только для frontend-enabled/release surfaces.",
             "- P0: если встречается `runtime_contract_failed`/`runner_unavailable`, блокировать rollout до фикса runtime contract/provider invocation.",
             "- P1: расширить semantic quality rubric на richer evidence density в findings (rule/evidence refs) и cross-doc consistency checks.",
         ]
@@ -2673,23 +2596,19 @@ def main() -> int:
     runs.sort(key=lambda item: (item.provider, item.run_index))
 
     frontend = load_frontend_results(batch_root, selected_providers)
-    frontend_cancel = load_frontend_cancel_results(batch_root, selected_providers)
 
     run_matrix_path = reports_root / f"run_matrix_{args.batch_id}.md"
     frontend_matrix_path = reports_root / f"frontend_e2e_matrix_{args.batch_id}.md"
-    frontend_cancel_matrix_path = reports_root / f"frontend_cancel_e2e_matrix_{args.batch_id}.md"
     quality_report_path = reports_root / f"quality_report_{args.batch_id}.md"
     meta_tsv_path = reports_root / f"run_matrix_{args.batch_id}.tsv"
 
     write_run_matrix(run_matrix_path, runs)
     write_frontend_matrix(frontend_matrix_path, frontend, selected_providers)
-    write_frontend_cancel_matrix(frontend_cancel_matrix_path, frontend_cancel, selected_providers)
-    write_quality_report(quality_report_path, args.batch_id, runs, frontend, frontend_cancel, preflight, selected_providers)
+    write_quality_report(quality_report_path, args.batch_id, runs, frontend, preflight, selected_providers)
     write_meta_tsv(meta_tsv_path, runs)
 
     print(str(run_matrix_path))
     print(str(frontend_matrix_path))
-    print(str(frontend_cancel_matrix_path))
     print(str(quality_report_path))
     print(str(meta_tsv_path))
     return 0

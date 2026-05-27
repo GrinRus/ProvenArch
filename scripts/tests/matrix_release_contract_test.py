@@ -211,9 +211,6 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 run_matrix_md="${REPORTS_ROOT}/run_matrix_${BATCH_ID}.md"
                 quality_report_md="${REPORTS_ROOT}/quality_report_${BATCH_ID}.md"
                 frontend_matrix_md="${REPORTS_ROOT}/frontend_e2e_matrix_${BATCH_ID}.md"
-                frontend_cancel_matrix_md="${REPORTS_ROOT}/frontend_cancel_e2e_matrix_${BATCH_ID}.md"
-                blackbox_steps_jsonl="${REPORTS_ROOT}/blackbox_e2e_steps_${BATCH_ID}.jsonl"
-                blackbox_steps_md="${REPORTS_ROOT}/blackbox_e2e_steps_${BATCH_ID}.md"
 
                 {
                   printf 'provider\\trun\\thard_pass\\truntime_contract_failed\\trunner_unavailable\\truntime_timeout\\tinfra_signal_terminated\\tinfra_incomplete_cycle\\tquality_gates_failed\\tsummary_missing\\tprecheck_failed\\tcancellation_like\\truntime_flow_failed\\tsemantic_hard_fail\\toff_topic_hits\\tartifact_source\\tissues\\n'
@@ -232,40 +229,6 @@ class MatrixReleaseContractTest(unittest.TestCase):
 
                 printf '# run matrix\\n' > "${run_matrix_md}"
                 printf '# quality\\n' > "${quality_report_md}"
-                python3 - "${blackbox_steps_jsonl}" "${blackbox_steps_md}" "${BATCH_ID}" "${PROFILE_ID}" "${SWEEP_ID}" <<'PY'
-                import json
-                import sys
-                from pathlib import Path
-
-                jsonl_path = Path(sys.argv[1])
-                md_path = Path(sys.argv[2])
-                batch_id = sys.argv[3]
-                profile_id = sys.argv[4]
-                sweep_id = sys.argv[5]
-                record = {
-                    "batch_id": batch_id,
-                    "profile_id": profile_id,
-                    "sweep_id": sweep_id,
-                    "step_id": "batch.final",
-                    "goal": "classify dummy batch",
-                    "action": "write dummy batch reports",
-                    "observed_evidence": [str(jsonl_path)],
-                    "status": "passed",
-                    "primary_classification": "none",
-                    "evidence_paths": [str(jsonl_path)],
-                    "next_decision": "return to matrix harness",
-                }
-                jsonl_path.write_text(json.dumps(record, ensure_ascii=True) + "\\n", encoding="utf-8")
-                md_path.write_text(
-                    "# Black-Box E2E Steps\\n\\n"
-                    "| step_id | status | classification | goal | action | observed_evidence | next_decision |\\n"
-                    "|---|---|---|---|---|---|---|\\n"
-                    "| batch.final | passed | none | classify dummy batch | write dummy batch reports | "
-                    f"{jsonl_path} | return to matrix harness |\\n",
-                    encoding="utf-8",
-                )
-                PY
-
                 if [[ "${MATRIX_TEST_RAW_METADATA:-0}" == "1" ]]; then
                   raw_dir="${BATCH_ROOT}/qwen-code/run1/arch-workspace/reports/taskruns/raw"
                   mkdir -p "${raw_dir}"
@@ -318,18 +281,6 @@ class MatrixReleaseContractTest(unittest.TestCase):
                     fi
                   done
                 } > "${frontend_matrix_md}"
-
-                {
-                  printf '| provider | status | runs | reasons |\\n'
-                  printf '|---|---|---|---|\\n'
-                  for provider in "${selected_providers[@]}"; do
-                    if [[ "${BATCH_FRONTEND_CANCEL_MODE:-}" == "never" ]]; then
-                      printf '| %s | skipped | 0 | disabled=1 |\\n' "${provider}"
-                    else
-                      printf '| %s | passed | 1 | ok=1 |\\n' "${provider}"
-                    fi
-                  done
-                } > "${frontend_cancel_matrix_md}"
 
                 shard_plan_path="${BATCH_ROOT}/qwen-code/run1/reports/taskruns/${BATCH_ID}-init-step1-collect-shard-plan.json"
                 if [[ "${MATRIX_TEST_ARTIFACT_ERROR:-0}" == "1" && "${PROFILE_ID}" == "single-path" && "${SWEEP_ID}" == "parallel-default" ]]; then
@@ -459,6 +410,7 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 "MATRIX_ROOT": str(self.e2e_tmp_root / "matrix" / matrix_id),
                 "MATRIX_TEST_SENTINEL": str(self.sentinel_path),
                 "MATRIX_TEST_TIMEOUT_SENTINEL": str(self.timeout_sentinel_path),
+                "ACP_TEST_ALLOW_BATCH_SCRIPT_OVERRIDE": "1",
                 **(extra_env or {}),
             }
         )
@@ -489,14 +441,10 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertTrue(verdict_path.exists(), f"missing verdict file: {verdict_path}")
         return json.loads(verdict_path.read_text(encoding="utf-8"))
 
-    def _load_blackbox_steps(self, matrix_id: str) -> list[dict]:
-        steps_path = self.e2e_tmp_root / "reports" / f"blackbox_e2e_steps_{matrix_id}.jsonl"
-        self.assertTrue(steps_path.exists(), f"missing black-box step report: {steps_path}")
-        return [
-            json.loads(line)
-            for line in steps_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
+    def _load_matrix_result(self, matrix_id: str) -> dict:
+        result_path = self.e2e_tmp_root / "reports" / f"matrix_result_{matrix_id}.json"
+        self.assertTrue(result_path.exists(), f"missing matrix result file: {result_path}")
+        return json.loads(result_path.read_text(encoding="utf-8"))
 
     def _load_yaml(self, path: Path) -> dict:
         try:
@@ -545,10 +493,6 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("missing required ids: parallel-default", combined_output)
         self.assertFalse(self.sentinel_path.exists(), "batch script should not run when release sweeps are invalid")
-        steps = self._load_blackbox_steps(matrix_id)
-        self.assertEqual("matrix.plan", steps[-1]["step_id"])
-        self.assertEqual("failed", steps[-1]["status"])
-        self.assertEqual("matrix_plan_failed", steps[-1]["primary_classification"])
 
     def test_release_matrix_rejects_extra_sweep(self) -> None:
         matrix_file = self._write_matrix_file(["baseline", "parallel-default", "extra-sweep"])
@@ -635,44 +579,15 @@ class MatrixReleaseContractTest(unittest.TestCase):
             ],
         )
 
-    def test_matrix_writes_blackbox_step_report_shape(self) -> None:
+    def test_matrix_does_not_write_script_authored_blackbox_step_reports(self) -> None:
         matrix_file = self._write_matrix_file(["baseline", "parallel-default"])
-        matrix_id = "release-test-blackbox-steps"
+        matrix_id = "release-test-no-blackbox-steps"
         result = self._run_matrix(matrix_file, matrix_id)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
 
-        steps = self._load_blackbox_steps(matrix_id)
-        step_ids = [step["step_id"] for step in steps]
-        self.assertIn("matrix.preflight", step_ids)
-        self.assertIn("matrix.plan", step_ids)
-        self.assertIn("matrix.profile.single-path.baseline", step_ids)
-        self.assertIn("matrix.profile.multi-git-url.parallel-default", step_ids)
-        self.assertEqual("matrix.verdict", step_ids[-1])
-
-        required_keys = {
-            "step_id",
-            "goal",
-            "action",
-            "observed_evidence",
-            "status",
-            "primary_classification",
-            "evidence_paths",
-            "next_decision",
-        }
-        for step in steps:
-            self.assertTrue(required_keys.issubset(step.keys()), step)
-            self.assertIsInstance(step["observed_evidence"], list)
-            self.assertIsInstance(step["evidence_paths"], list)
-            self.assertIn(step["status"], {"passed", "failed", "skipped", "blocked"})
-
-        batch_step_path = self.e2e_tmp_root / "reports" / f"blackbox_e2e_steps_{matrix_id}-single-path-baseline.jsonl"
-        self.assertTrue(batch_step_path.exists(), f"missing batch black-box report: {batch_step_path}")
-        batch_steps = [
-            json.loads(line)
-            for line in batch_step_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-        self.assertEqual("batch.final", batch_steps[-1]["step_id"])
+        reports_root = self.e2e_tmp_root / "reports"
+        self.assertFalse(list(reports_root.glob(f"blackbox_e2e_steps_{matrix_id}*")))
+        self.assertTrue((reports_root / f"release_verdict_{matrix_id}.json").exists())
 
     def test_release_mode_blocks_artifact_error_invariant(self) -> None:
         matrix_file = self._write_matrix_file(["baseline", "parallel-default"])
@@ -705,14 +620,12 @@ class MatrixReleaseContractTest(unittest.TestCase):
         result = self._run_matrix(matrix_file, matrix_id, release_mode="0")
         self.assertEqual(result.returncode, 0, msg=result.stderr)
 
-        verdict = self._load_verdict(matrix_id)
-        self.assertEqual(verdict["verdict"], "PASS")
-        release_contract = verdict["release_contract"]
-        self.assertEqual(release_contract["mode"], "non-release")
-        self.assertEqual(release_contract["required_sweeps"], [])
-        self.assertEqual(release_contract["observed_sweeps"], ["baseline"])
-        self.assertEqual(release_contract["contract_status"], "passed")
-        self.assertEqual(release_contract["observed_profile_sweep_runs"], 4)
+        verdict = self._load_matrix_result(matrix_id)
+        self.assertEqual(verdict["result"], "PASS")
+        self.assertEqual(verdict["mode"], "non-release")
+        self.assertNotIn("release_state", verdict)
+        self.assertNotIn("release_contract", verdict)
+        self.assertEqual(verdict["profile_sweep_runs"], 4)
         self.assertTrue(
             any(
                 rec.get("shard_plan_invariant") == "not_compared" and rec.get("strict_status") == "passed"
@@ -742,8 +655,8 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertEqual("failed", records[0]["status"])
         self.assertEqual("infra_incomplete_cycle", records[0]["failure_reason"])
 
-        verdict = self._load_verdict(matrix_id)
-        self.assertEqual("FAIL", verdict["verdict"])
+        verdict = self._load_matrix_result(matrix_id)
+        self.assertEqual("FAIL", verdict["result"])
         self.assertEqual("failed", verdict["records"][0]["status"])
 
     def test_matrix_reconstructs_failed_record_from_status_files_when_jsonl_is_empty(self) -> None:
@@ -771,8 +684,8 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertEqual("failed", status_payload["status"])
         self.assertEqual("infra_incomplete_cycle", status_payload["failure_reason"])
 
-        verdict = self._load_verdict(matrix_id)
-        self.assertEqual("FAIL", verdict["verdict"])
+        verdict = self._load_matrix_result(matrix_id)
+        self.assertEqual("FAIL", verdict["result"])
         self.assertEqual(1, len(verdict["records"]))
         self.assertEqual("failed", verdict["records"][0]["status"])
 
@@ -787,8 +700,8 @@ class MatrixReleaseContractTest(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
 
-        verdict = self._load_verdict(matrix_id)
-        self.assertEqual("FAIL", verdict["verdict"])
+        verdict = self._load_matrix_result(matrix_id)
+        self.assertEqual("FAIL", verdict["result"])
         self.assertEqual(1, len(verdict["records"]))
         record = verdict["records"][0]
         self.assertEqual("failed", record["status"])
@@ -816,8 +729,8 @@ class MatrixReleaseContractTest(unittest.TestCase):
         )
         self.assertEqual(0, result.returncode, msg=result.stderr or result.stdout)
 
-        verdict = self._load_verdict(matrix_id)
-        self.assertEqual("PASS", verdict["verdict"])
+        verdict = self._load_matrix_result(matrix_id)
+        self.assertEqual("PASS", verdict["result"])
         record = verdict["records"][0]
         inventory_path = Path(record["artifacts"]["inventory_json"])
         self.assertTrue(inventory_path.exists(), f"missing inventory file: {inventory_path}")
@@ -847,10 +760,10 @@ class MatrixReleaseContractTest(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
 
-        verdict = self._load_verdict(matrix_id)
-        self.assertEqual("FAIL", verdict["verdict"])
-        self.assertEqual("operational-preflight", verdict["release_contract"]["mode"])
-        self.assertIn("required command is unavailable", verdict["release_contract"]["blocking_reasons"][0])
+        verdict = self._load_matrix_result(matrix_id)
+        self.assertEqual("FAIL", verdict["result"])
+        self.assertEqual("non-release", verdict["mode"])
+        self.assertIn("required command is unavailable", verdict["blocking_reasons"][0])
 
         status_path = self.e2e_tmp_root / "matrix" / matrix_id / "profile-status" / "matrix-operational-preflight.json"
         self.assertTrue(status_path.exists(), f"missing operational profile status: {status_path}")
@@ -883,8 +796,8 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
 
         self.assertFalse(self.sentinel_path.exists(), "child batch must not start after path SHA mismatch")
-        verdict = self._load_verdict(matrix_id)
-        self.assertEqual("FAIL", verdict["verdict"])
+        verdict = self._load_matrix_result(matrix_id)
+        self.assertEqual("FAIL", verdict["result"])
         self.assertEqual(1, len(verdict["records"]))
         record = verdict["records"][0]
         self.assertEqual("failed", record["status"])
@@ -917,6 +830,7 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 "MATRIX_TEST_TIMEOUT_SENTINEL": str(self.timeout_sentinel_path),
                 "MATRIX_TEST_SLEEP_SEC": "3",
                 "MATRIX_PROFILE_STATUS_HEARTBEAT_SEC": "1",
+                "ACP_TEST_ALLOW_BATCH_SCRIPT_OVERRIDE": "1",
             }
         )
         proc = subprocess.Popen(
@@ -1026,12 +940,10 @@ class MatrixReleaseContractTest(unittest.TestCase):
         result = self._run_matrix(matrix_file, matrix_id, release_mode="0")
         self.assertEqual(result.returncode, 0, msg=result.stderr)
 
-        verdict = self._load_verdict(matrix_id)
-        self.assertEqual(verdict["verdict"], "PASS")
-        release_contract = verdict["release_contract"]
-        self.assertEqual(release_contract["mode"], "non-release")
-        self.assertEqual(release_contract["observed_sweeps"], ["baseline"])
-        self.assertEqual(release_contract["observed_profile_sweep_runs"], 2)
+        verdict = self._load_matrix_result(matrix_id)
+        self.assertEqual(verdict["result"], "PASS")
+        self.assertEqual(verdict["mode"], "non-release")
+        self.assertEqual(verdict["profile_sweep_runs"], 2)
 
     def test_non_release_single_profile_matrix_allows_implicit_baseline(self) -> None:
         matrix_file = self._write_matrix_file(
@@ -1042,12 +954,10 @@ class MatrixReleaseContractTest(unittest.TestCase):
         result = self._run_matrix(matrix_file, matrix_id, release_mode="0")
         self.assertEqual(result.returncode, 0, msg=result.stderr)
 
-        verdict = self._load_verdict(matrix_id)
-        self.assertEqual(verdict["verdict"], "PASS")
-        release_contract = verdict["release_contract"]
-        self.assertEqual(release_contract["mode"], "non-release")
-        self.assertEqual(release_contract["observed_sweeps"], ["baseline"])
-        self.assertEqual(release_contract["observed_profile_sweep_runs"], 1)
+        verdict = self._load_matrix_result(matrix_id)
+        self.assertEqual(verdict["result"], "PASS")
+        self.assertEqual(verdict["mode"], "non-release")
+        self.assertEqual(verdict["profile_sweep_runs"], 1)
 
     def test_non_release_matrix_allows_positive_run_count_without_release_guard(self) -> None:
         matrix_file = self._write_matrix_file(
@@ -1063,12 +973,10 @@ class MatrixReleaseContractTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
 
-        verdict = self._load_verdict(matrix_id)
-        self.assertEqual(verdict["verdict"], "PASS")
-        release_contract = verdict["release_contract"]
-        self.assertEqual(release_contract["mode"], "non-release")
-        self.assertEqual(release_contract["observed_sweeps"], ["baseline"])
-        self.assertEqual(release_contract["observed_profile_sweep_runs"], 2)
+        verdict = self._load_matrix_result(matrix_id)
+        self.assertEqual(verdict["result"], "PASS")
+        self.assertEqual(verdict["mode"], "non-release")
+        self.assertEqual(verdict["profile_sweep_runs"], 2)
         self.assertTrue(
             all(
                 int(rec.get("backend", {}).get("total_runs", 0)) == 6
@@ -1135,13 +1043,11 @@ class MatrixReleaseContractTest(unittest.TestCase):
             )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
 
-        verdict = self._load_verdict(matrix_id)
-        self.assertEqual(verdict["verdict"], "PASS")
-        release_contract = verdict["release_contract"]
-        self.assertEqual(release_contract["mode"], "non-release")
-        self.assertEqual(release_contract["selected_providers"], ["qwen-code", "claude-code", "codex-code"])
-        self.assertEqual(release_contract["selected_run_indexes"], ["1", "2"])
-        self.assertEqual(release_contract["expected_backend_runs_per_profile_sweep"], 6)
+        verdict = self._load_matrix_result(matrix_id)
+        self.assertEqual(verdict["result"], "PASS")
+        self.assertEqual(verdict["mode"], "non-release")
+        self.assertEqual(verdict["selected_providers"], ["qwen-code", "claude-code", "codex-code"])
+        self.assertEqual(verdict["selected_run_indexes"], ["1", "2"])
         self.assertTrue(
             all(
                 int(rec.get("backend", {}).get("total_runs", 0)) == 6
@@ -1165,13 +1071,11 @@ class MatrixReleaseContractTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
 
-        verdict = self._load_verdict(matrix_id)
-        self.assertEqual(verdict["verdict"], "PASS")
-        release_contract = verdict["release_contract"]
-        self.assertEqual(release_contract["mode"], "non-release")
-        self.assertEqual(release_contract["selected_providers"], ["qwen-code"])
-        self.assertEqual(release_contract["selected_run_indexes"], ["1"])
-        self.assertEqual(release_contract["expected_backend_runs_per_profile_sweep"], 1)
+        verdict = self._load_matrix_result(matrix_id)
+        self.assertEqual(verdict["result"], "PASS")
+        self.assertEqual(verdict["mode"], "non-release")
+        self.assertEqual(verdict["selected_providers"], ["qwen-code"])
+        self.assertEqual(verdict["selected_run_indexes"], ["1"])
         self.assertEqual(len(verdict.get("records", [])), int(verdict["backend"]["total_runs"]))
         self.assertEqual(len(verdict.get("records", [])), int(verdict["backend"]["hard_pass"]))
         self.assertTrue(
@@ -1198,18 +1102,16 @@ class MatrixReleaseContractTest(unittest.TestCase):
             extra_env={
                 "BATCH_PROVIDER_FILTER": "qwen-code",
                 "BATCH_FRONTEND_MODE": "never",
-                "BATCH_FRONTEND_CANCEL_MODE": "never",
             },
             release_mode="0",
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
 
-        verdict = self._load_verdict(matrix_id)
-        self.assertEqual(verdict["verdict"], "PASS")
+        verdict = self._load_matrix_result(matrix_id)
+        self.assertEqual(verdict["result"], "PASS")
         self.assertTrue(
             all(
                 rec.get("frontend", {}).get("frontend_qwen_status") == "skipped"
-                and rec.get("frontend", {}).get("frontend_cancel_qwen_status") == "skipped"
                 and rec.get("strict_status") == "passed"
                 and not rec.get("blocking_reasons")
                 for rec in verdict.get("records", [])
@@ -1234,8 +1136,8 @@ class MatrixReleaseContractTest(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
 
-        verdict = self._load_verdict(matrix_id)
-        self.assertEqual(verdict["verdict"], "FAIL")
+        verdict = self._load_matrix_result(matrix_id)
+        self.assertEqual(verdict["result"], "FAIL")
         record = verdict["records"][0]
         self.assertEqual(record.get("frontend", {}).get("frontend_qwen_status"), "skipped")
         frontend_matrix = Path(record["artifacts"]["frontend_matrix_md"])
@@ -1247,7 +1149,7 @@ class MatrixReleaseContractTest(unittest.TestCase):
             blockers,
         )
 
-    def test_release_matrix_still_requires_dual_provider_execution(self) -> None:
+    def test_release_matrix_rejects_provider_filter_before_execution(self) -> None:
         matrix_file = self._write_matrix_file(["baseline", "parallel-default"])
         matrix_id = "release-test-qwen-only-blocked"
         result = self._run_matrix(
@@ -1257,18 +1159,8 @@ class MatrixReleaseContractTest(unittest.TestCase):
         )
         combined_output = result.stdout + "\n" + result.stderr
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("RELEASE BLOCKED", combined_output)
-
-        verdict = self._load_verdict(matrix_id)
-        self.assertEqual(verdict["verdict"], "FAIL")
-        self.assertTrue(
-            any(
-                any("backend_total_runs=1 (expected 3)" in reason for reason in rec.get("blocking_reasons", []))
-                or any("frontend_claude_status=missing (expected passed)" in reason for reason in rec.get("blocking_reasons", []))
-                or any("frontend_codex_status=missing (expected passed)" in reason for reason in rec.get("blocking_reasons", []))
-                for rec in verdict.get("records", [])
-            )
-        )
+        self.assertIn("release-mode requires all providers", combined_output)
+        self.assertFalse((self.e2e_tmp_root / "reports" / f"release_verdict_{matrix_id}.json").exists())
 
     def test_release_slice_with_single_git_and_multi_path_passes(self) -> None:
         matrix_file = self._write_matrix_file(

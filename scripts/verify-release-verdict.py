@@ -9,6 +9,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+RELEASE_PROVIDERS = ["qwen-code", "claude-code", "codex-code"]
+RELEASE_RUN_INDEXES = ["1"]
+
 
 def load_payload(path: Path) -> dict[str, Any]:
     try:
@@ -35,11 +38,34 @@ def verify_payload(payload: dict[str, Any]) -> list[str]:
     release_contract = payload.get("release_contract")
     if not isinstance(release_contract, dict):
         failures.append("release_contract must be an object")
-    elif release_contract.get("contract_status") != "passed":
-        failures.append(
-            "release_contract.contract_status must be passed, "
-            f"got {release_contract.get('contract_status')!r}"
-        )
+    else:
+        if release_contract.get("mode") != "release":
+            failures.append(f"release_contract.mode must be release, got {release_contract.get('mode')!r}")
+        if release_contract.get("contract_status") != "passed":
+            failures.append(
+                "release_contract.contract_status must be passed, "
+                f"got {release_contract.get('contract_status')!r}"
+            )
+        if release_contract.get("selected_providers") != RELEASE_PROVIDERS:
+            failures.append(
+                "release_contract.selected_providers must be "
+                f"{RELEASE_PROVIDERS!r}, got {release_contract.get('selected_providers')!r}"
+            )
+        if release_contract.get("selected_run_indexes") != RELEASE_RUN_INDEXES:
+            failures.append(
+                "release_contract.selected_run_indexes must be "
+                f"{RELEASE_RUN_INDEXES!r}, got {release_contract.get('selected_run_indexes')!r}"
+            )
+    records = payload.get("records")
+    if not isinstance(records, list) or not records:
+        failures.append("records must be a non-empty list")
+    else:
+        for index, record in enumerate(records):
+            if not isinstance(record, dict):
+                failures.append(f"records[{index}] must be an object")
+                continue
+            if record.get("strict_status") != "passed":
+                failures.append(f"records[{index}].strict_status must be passed, got {record.get('strict_status')!r}")
     return failures
 
 

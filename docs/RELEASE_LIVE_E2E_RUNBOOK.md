@@ -2,7 +2,7 @@
 
 Этот runbook фиксирует manual pre-release gate на trusted локальной машине.
 Новый wrapper-скрипт не используется: local `manual-live-e2e workflow` является operator procedure on trusted host, not GitHub Actions workflow. Агент запускает существующий matrix harness напрямую (`full-run-batch-matrix.sh` -> `full-run-batch.sh` -> internal backend-cycle helper -> `e2e_batch_report.py`).
-Layering: live-e2e skill -> local manual-live-e2e workflow -> internal evaluator helper -> existing project flow. `scripts/internal/live-e2e-evaluator.sh` является source-only implementation detail для durable step evidence; он не является public release command и не вызывает matrix harness.
+Layering: live-e2e skill -> local trusted-machine operator procedure -> direct public harness commands -> ACP runtime/provider/UI evidence. Scripts produce setup/execution artifacts and machine verdicts only; operator/SWE-agent produces the separate black-box assessment over that evidence.
 
 Canonical source of truth для live profile taxonomy:
 - `examples/e2e-profile-catalog.yaml`
@@ -13,7 +13,7 @@ Canonical source of truth для live profile taxonomy:
 
 Canonical live E2E flow теперь является operator-driven black-box evaluation. Агент не начинает с чтения итогового отчёта: он планирует шаг, запускает или инспектирует только публичную поверхность, фиксирует evidence, классифицирует результат и принимает следующее решение.
 
-После каждой фазы в ответе оператора и в durable artifacts должен быть шаг:
+После каждой фазы оператор фиксирует шаг в текущем ответе или в manual report `reports/operator_blackbox_assessment_<matrix-id>.md`:
 
 ```text
 goal: <что доказываем>
@@ -32,20 +32,16 @@ next decision: <continue|stop|rerun diagnostic|verify verdict|final report>
 - batch/matrix status, inventories and driver logs;
 - verifier output from `scripts/verify-release-verdict.py`.
 
-Запрещено использовать compatibility aliases, command shims или править canonical matrix/curated repo files под текущую машину. Host/provider/path blockers останавливают прогон как `operational_host_preflight_failed`.
+Запрещено использовать compatibility aliases, command shims, test-only overrides или править canonical matrix/curated repo files под текущую машину. Host/provider/path blockers останавливают прогон как `operational_host_preflight_failed`.
 
-Harness через internal evaluator helper пишет step evidence в existing report roots:
-- `reports/blackbox_e2e_steps_<batch-id>.jsonl`
-- `reports/blackbox_e2e_steps_<batch-id>.md`
-- `reports/blackbox_e2e_steps_<matrix-id>.jsonl`
-- `reports/blackbox_e2e_steps_<matrix-id>.md`
+Harness не пишет machine-authored black-box step reports. Удалённые `blackbox_e2e_steps_*` не являются release evidence; их заменяет ручной operator assessment поверх фактических artifacts/reports/verifier output.
 
 Canonical flow:
 1. host/tree/provider/path preflight;
 2. selector and direct command planning;
 3. matrix execution monitoring;
 4. backend artifact and quality inspection;
-5. frontend UI/cancel inspection;
+5. frontend UI/API init inspection;
 6. release verdict verification;
 7. final black-box report.
 
@@ -87,7 +83,7 @@ python3 scripts/live-e2e-plan.py --mode release --size full --format shell
 
 `scripts/live-e2e-plan.py` только печатает команды `scripts/full-run-batch-matrix.sh`; он не запускает batch и не является release wrapper.
 Оператор копирует/запускает напечатанные прямые команды, поэтому official release verdict contract не меняется.
-Если selector задаёт `--frontend-mode never`, generator выставляет и `BATCH_FRONTEND_MODE=never`, и `BATCH_FRONTEND_CANCEL_MODE=never`, чтобы не запускать ни init, ни cancel frontend smoke.
+Если selector задаёт `--frontend-mode never`, generator выставляет `BATCH_FRONTEND_MODE=never`, чтобы не запускать frontend init smoke.
 В non-release diagnostic verdict такие frontend statuses считаются non-applicable; в release-mode strict frontend `passed` для всех release providers остаётся обязательным.
 
 Flexible selectors:
@@ -113,7 +109,7 @@ Artifact-quality policy для generated regress/release команд остаё
 - `release*` профили идут как three-provider run (`qwen + claude + codex`) с explicit `baseline + parallel-default`.
 - Дополнительная ручная debug-фаза на `claude` или `codex` остаётся вне regression profile definition и запускается через `BATCH_PROVIDER_FILTER=<provider>`.
 - `smoke tiny` и `regres full` являются generated diagnostic selectors, а не новыми release verdict профилями.
-- Gate покрывает backend `3 providers × RUN_COUNT=1` на каждый `profile+sweep` + frontend `init-inspect` + frontend `cancel-refresh` для release slices.
+- Gate покрывает backend `3 providers × RUN_COUNT=1` на каждый `profile+sweep` + frontend `init-inspect` для release slices.
 - Product API/schema contracts не меняются.
 - Gate режим: manual pre-release, не required CI merge gate.
 - Verdict policy: strict zero-failure (`PASS|FAIL`).
@@ -140,7 +136,7 @@ Canonical profile runs нужно выполнять из clean committed tree �
 - если в основном worktree есть незакоммиченные изменения в harness/runtime/docs, сначала вынести canonical прогон в отдельный clean worktree;
 - если используется отдельный clean worktree, заранее установить локальные UI deps в этом worktree через exact Node resolver: минимум `./scripts/run-npm.sh ci --prefix ui`; для frontend live surface дополнительно `./scripts/run-npm.sh exec --prefix ui playwright install chromium`;
 - не использовать `BATCH_SKIP_PRECHECK=1` как способ обойти локальное расхождение между committed contract и текущими незакоммиченными правками;
-- diagnostic прогон с `BATCH_SKIP_PRECHECK=1` допустим только как triage-only evidence и не считается canonical acceptance run.
+- `BATCH_SKIP_PRECHECK=1` больше не является public live shortcut; он допускается только в hermetic tests с `ACP_TEST_ALLOW_BATCH_SKIP_PRECHECK=1`.
 
 ### 2.0.1) Exact Node/npm toolchain
 
@@ -161,7 +157,7 @@ ACP_NODE_TOOL_CANDIDATES=/path/to/node-22.21.1/bin ./scripts/full-run-batch-matr
 
 Для release evidence использовать стабильный toolchain path вне `/tmp`: временные распаковки Node могут исчезнуть между diagnostic и release runs и превратить backend/frontend checks в `quality_gates_failed`/`precheck_failed` без продуктового ACP дефекта.
 
-Не использовать `ACP_NODE_VERSION_CHECK=0` или `BATCH_SKIP_PRECHECK=1` для canonical acceptance. Эти обходы допустимы только как triage-only evidence.
+Не использовать `ACP_NODE_VERSION_CHECK=0` или `BATCH_SKIP_PRECHECK=1` для canonical acceptance или manual diagnostics; исправить toolchain/host вместо обхода precheck.
 
 ### 2.1) Fail-fast host eligibility
 
@@ -419,15 +415,13 @@ ACP_CLAUDE_CMD_BIN=claude \
 ACP_QWEN_CMD_BIN=qwen \
 ACP_CODEX_CMD_BIN=codex \
 BATCH_PROVIDER_FILTER=codex-code \
-BATCH_SKIP_PRECHECK=1 \
 ./scripts/full-run-batch-matrix.sh
 ```
 
 Если после regression нужна дополнительная debug-фаза на `claude`, повторить нужный regression slice с:
 
 ```bash
-BATCH_PROVIDER_FILTER=claude-code \
-BATCH_SKIP_PRECHECK=1
+BATCH_PROVIDER_FILTER=claude-code
 ```
 
 Альтернативно для provider/size combinations использовать generator:
@@ -573,15 +567,12 @@ Composite readiness rule:
 
 В release-mode (`MATRIX_ID=release-*`) matrix harness автоматически выставляет:
 - `BATCH_FRONTEND_MODE=per_run`
-- `BATCH_FRONTEND_CANCEL_MODE=once_per_provider`
 - `UI_E2E_HEADED=1`
 
 Release guard rules:
 - Не задавать diagnostic timeout env для релизного запуска:
   - `ACP_RUNTIME_*`, `ACP_PIPELINE_*`, `ACP_API_*`, `ACP_UI_*`.
-- Если нужен диагностический прогон с override, явно включать:
-  - `E2E_MATRIX_ALLOW_DIAGNOSTIC_TIMEOUT_OVERRIDES=1`
-  - Такой прогон не использовать как release verdict.
+- Если нужен диагностический прогон с timeout override, запускать non-release matrix/diagnostic command; release-mode обязан fail-fast без allow flag.
 - Native `timeout_profile` внутри checked-in canonical matrix не считается diagnostic override и является частью штатного release/regression surface.
 
 ## 5) Release evidence artifacts
@@ -595,16 +586,18 @@ Release guard rules:
 - `run_matrix_<batch-id>.tsv`
 - `quality_report_<batch-id>.md`
 - `frontend_e2e_matrix_<batch-id>.md`
-- `frontend_cancel_e2e_matrix_<batch-id>.md`
-- `blackbox_e2e_steps_<batch-id>.jsonl/.md`
-- `blackbox_e2e_steps_<matrix-id>.jsonl/.md`
+- `reports/operator_blackbox_assessment_<matrix-id>.md` (manual, если нужен durable reasoning report)
+
+Non-release/diagnostic matrix пишет neutral result:
+- `matrix_result_<matrix-id>.md`
+- `matrix_result_<matrix-id>.json`
 
 Pre-tag/offline check:
 ```bash
 python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json
 ```
 
-Скрипт только проверяет уже созданный `release_verdict_<matrix-id>.json` (`verdict=PASS`, `release_state=RELEASE READY`, `release_contract.contract_status=passed`). Он не запускает live harness и не является wrapper-скриптом поверх `scripts/full-run-batch-matrix.sh`.
+Скрипт только проверяет уже созданный release-mode `release_verdict_<matrix-id>.json`: `verdict=PASS`, `release_state=RELEASE READY`, `release_contract.mode=release`, `release_contract.contract_status=passed`, exact release providers `qwen-code|claude-code|codex-code`, selected run indexes `["1"]`, и `strict_status=passed` во всех records. Он не запускает live harness и не является wrapper-скриптом поверх `scripts/full-run-batch-matrix.sh`.
 
 Дополнительные для triage:
 - `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/*`
@@ -659,15 +652,12 @@ Blocking signals:
 Blocking signals:
 - `runtime_timeout`
 
-### 6.5 Run lifecycle + cancel
+### 6.5 Run lifecycle + frontend init
 
 Проверяем:
 - frontend `init-inspect` = `passed` для всех трёх release providers (`qwen-code`, `claude-code`, `codex-code`);
-- frontend `cancel-refresh` = `passed` для всех трёх release providers (`qwen-code`, `claude-code`, `codex-code`);
-- frontend cancel smoke стартует из свежей копии `arch-workspace` выбранного backend run; reuse уже мутированного `frontend-workspace` из init-smoke не допускается;
-- preflight cancel-timeout guard соблюдён: `ACP_UI_CANCEL_POLL_TIMEOUT_SEC >= UI_E2E_CANCEL_STUB_SLEEP_SEC + UI_E2E_CANCEL_TIMEOUT_MARGIN_SEC`;
-- cancel сценарий завершается `failed + run_canceled`;
-- если cancel request пришёл раньше конкурирующего layout/validation failure, terminal `error_code` остаётся `run_canceled`, а competing validation signal уходит только в logs/warnings.
+- frontend init smoke стартует из snapshot/backend `arch-workspace` выбранного backend run и проверяет пользовательский результат через UI/API/artifact inspection;
+- cancellation coverage не является live provider release gate: её проверять в deterministic fake-runtime UI/API tests, где можно надёжно доказать `run_canceled` без provider/runtime flakiness.
 
 Blocking signals:
 - любой frontend status != `passed`
@@ -746,7 +736,7 @@ Zero tolerance:
 - `full-run-batch-matrix.sh` обязан писать durable inventory per started profile/sweep (`matrix/<matrix-id>/inventory/<batch-id>.json`) с `matrix_id`, matrix file, selected providers/run indexes, `batch_id`, output root, terminal status, key report/log paths и bounded `raw_output_refs` metadata (provider, run_id/task_id/step_id, stdout/stderr bytes/hash/truncation). Этот inventory является decision-support evidence после cleanup temp roots, но не заменяет terminal status/verdict fields.
 - frontend live E2E должен различать productive timeout (`active_run_timeout`), backend run terminal failure observed by UI polling (`runtime_run_failed`), browser/page/context closure (`browser_closed`), post-failure API health loss (`api_unreachable`), early `acp serve` exit (`server_exited`) и fallback explicit Playwright assertion failure (`playwright_failed`).
 - frontend result JSON должен сохранять server PID/exit code, post-failure health, run id, last run status/error code/current step и diagnostic refs, чтобы release blocker можно было классифицировать без повторного запуска.
-- Diagnostic-only `UI_E2E_SCENARIO=api-context-page-close-smoke` проверяет, что Playwright API polling не зависит от закрытой browser page; canonical release gate по-прежнему использует только `init-inspect` и `cancel-refresh`.
+- Live frontend shell поддерживает только `UI_E2E_SCENARIO=init-inspect`; cancellation/page-close behavior покрывается deterministic fake-runtime UI/API tests вне live release gate.
 - frontend init-inspect budget берётся из effective runtime timeout profile/API и, если задан `ACP_PIPELINE_TIMEOUT_SEC`, может быть поднят до `pipeline_timeout+30s`; fixed cap не применяется по умолчанию. Diagnostic `UI_E2E_INIT_TIMEOUT_CAP_SEC` допустим только как явное manual ограничение и не должен использоваться в canonical release slices.
 - `snapshot_reports_missing` после terminal backend failure считается dependent frontend skipped/blocked evidence, а не independent frontend regression.
 - provider `model` / `modelUsage` telemetry в stdout/stderr считается обычной diagnostic transcript частью: readiness/reporting не блокируют release по model-family attribution, если command probe, auth/quota checks и artifact smoke успешны.
@@ -756,7 +746,7 @@ Zero tolerance:
 ### 6.8 Additional Non-Release Checks
 
 После official release matrices выполнить отдельно:
-- parallel shard smoke: два параллельных `full-run-batch.sh` с разными `BATCH_ID`, разными single-provider `BATCH_PROVIDER_FILTER` (например, `qwen-code` и `claude-code`; при необходимости можно заменить один из них на `codex-code`), `BATCH_RUN_SELECTION=1`, `BATCH_FRONTEND_MODE=never`, `BATCH_FRONTEND_CANCEL_MODE=never`;
+- parallel shard smoke: два параллельных `full-run-batch.sh` с разными `BATCH_ID`, разными single-provider `BATCH_PROVIDER_FILTER` (например, `qwen-code` и `claude-code`; при необходимости можно заменить один из них на `codex-code`), `BATCH_RUN_SELECTION=1`, `BATCH_FRONTEND_MODE=never`;
 - forced-incomplete diagnostic run: large multi-repo batch с diagnostic timeout override, чтобы проверить `report_mode=incomplete`, triage-only wording и failure-class precedence.
 
 Эти прогоны не использовать для release verdict; они нужны только как additional evidence по новому функционалу.
@@ -772,7 +762,6 @@ TS="$(date -u +%Y%m%dT%H%M%SZ)"
   BATCH_PROVIDER_FILTER=qwen-code \
   BATCH_RUN_SELECTION=1 \
   BATCH_FRONTEND_MODE=never \
-  BATCH_FRONTEND_CANCEL_MODE=never \
   ./scripts/full-run-batch.sh
 ) &
 (
@@ -781,8 +770,6 @@ TS="$(date -u +%Y%m%dT%H%M%SZ)"
   BATCH_PROVIDER_FILTER=claude-code \
   BATCH_RUN_SELECTION=1 \
   BATCH_FRONTEND_MODE=never \
-  BATCH_FRONTEND_CANCEL_MODE=never \
-  BATCH_SKIP_PRECHECK=1 \
   ./scripts/full-run-batch.sh
 ) &
 wait || true
@@ -794,8 +781,6 @@ TARGET_REPOS_FILE=examples/repos/curated/multi-path.openstack.repos.yaml \
 BATCH_PROVIDER_FILTER=qwen-code \
 BATCH_RUN_SELECTION=1 \
 BATCH_FRONTEND_MODE=never \
-BATCH_FRONTEND_CANCEL_MODE=never \
-BATCH_SKIP_PRECHECK=1 \
 ACP_EXECUTION_STRATEGY=parallel \
 ACP_MAX_PARALLEL_TASKS=4 \
 ACP_FAILURE_POLICY=best_effort \
@@ -816,20 +801,22 @@ Release `PASS` только если одновременно:
 5. `artifact_source` только `snapshot` (без `workspace-fallback`).
 6. Нет `analysis:evidence-scope` и `analysis:cross-repo-missing`.
 7. Нет runtime flow violations (`runtime:*`, `runtime_flow_failed`).
-8. Frontend live/cancel smoke: `passed` для всех трёх release providers (`qwen`, `claude`, `codex`).
+8. Frontend live init-inspect smoke: `passed` для всех трёх release providers (`qwen`, `claude`, `codex`).
 9. Нет artifact-quality blockers (`artifact_quality:*` в run warnings / batch quality report).
 
 Любое нарушение => `RELEASE BLOCKED`.
 
 ## 8) Agent verdict output
 
-Источник истины для финального решения:
+Machine source of truth для release readiness:
 - `release_verdict_<matrix-id>.md/.json`
 
 Перед tag/release выполнить offline verifier:
 ```bash
 python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json
 ```
+
+Operator/SWE-agent assessment не заменяет verifier-backed verdict. Если нужен durable reasoning layer, заполнить `reports/operator_blackbox_assessment_<matrix-id>.md` по шаблону `docs/templates/LIVE_E2E_OPERATOR_ASSESSMENT.md` и связать final decision с concrete evidence paths.
 
 ## 9) Common blockers (операционный triage)
 
