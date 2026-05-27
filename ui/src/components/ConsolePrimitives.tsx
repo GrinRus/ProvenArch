@@ -28,6 +28,28 @@ export function EvidenceLink({ path, label, onOpenArtifact }: EvidenceLinkProps)
   );
 }
 
+type ArtifactPathButtonProps = {
+  path: string;
+  label?: string;
+  kind?: string;
+  actionLabel?: string;
+  onOpenArtifact: (path: string) => void;
+};
+
+export function ArtifactPathButton({ path, label, kind, actionLabel = "Open artifact", onOpenArtifact }: ArtifactPathButtonProps) {
+  const trimmed = path.trim();
+  const parts = trimmed.split("/").filter(Boolean);
+  const basename = label?.trim() || parts[parts.length - 1] || trimmed;
+  const context = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
+  const accessibleLabel = kind ? `${actionLabel}: ${trimmed} (${kind})` : `${actionLabel}: ${trimmed}`;
+  return (
+    <button type="button" className="artifact-path-button link-button" title={trimmed} aria-label={accessibleLabel} onClick={() => onOpenArtifact(trimmed)}>
+      <span className="artifact-path-name">{basename}</span>
+      {context ? <span className="artifact-path-context">{context}</span> : null}
+    </button>
+  );
+}
+
 type PrimaryActionProps = {
   children: ReactNode;
   disabled?: boolean;

@@ -58,6 +58,63 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-05-07 consolidated historical active plans into the remaining open slices below. Detailed evidence and classification are archived in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`; original historical active plan text was moved to `docs/archive/PLANS_ARCHIVE_2026-05.md` under "Reconciled active plans from 2026-05-07".
 
 ### Plan ID
+EP-20260527-live-e2e-ui-ux-operator-flow
+
+### Context
+После breaking simplification live E2E scripts больше не генерируют pseudo black-box reasoning, а operator/SWE-agent отвечает за assessment поверх evidence. Post-rebase UI walkthrough показал оставшиеся legacy compatibility controls, слабое покрытие async Ask UX, слишком шумный activity drawer и отсутствие durable screenshot refs в frontend live evidence.
+
+### Goals (must have)
+- [x] Удалить hidden compatibility UI controls/testids из operator console.
+- [x] Добавить optional non-release `UI_E2E_QA_SMOKE=1` в live Playwright flow без включения в canonical release readiness.
+- [x] Сохранять frontend screenshots как diagnostic evidence refs в `frontend-e2e-result.json`.
+- [x] Сделать activity drawer и artifact/diagram links компактнее и сканируемее.
+- [x] Уточнить next-action wording для blockers/findings/release blockers.
+- [x] Обновить operator assessment template, live gate skill и runbook.
+- [x] Обновить unit/contract/live tests и пройти focused checks plus DoD.
+- [ ] После owner review/merge перенести план в архив.
+
+### Non-goals
+- [x] Не менять `release_verdict_*` contract и `verify-release-verdict.py`.
+- [x] Не добавлять wrapper поверх `scripts/full-run-batch-matrix.sh`.
+- [x] Не включать Ask/UX smoke в canonical release matrices.
+- [x] Не делать screenshots или operator UX assessment источником release readiness.
+
+### Approach
+1) Remove compatibility DOM and migrate tests to stage rail/operator-facing controls.
+2) Extend live Playwright init-inspect with optional QA smoke and deterministic screenshots.
+3) Add screenshot refs to frontend result JSON and keep them evidence-only.
+4) Compact operator console evidence surfaces while preserving logs/artifact access.
+5) Sync runbook/skill/template/docs and focused tests.
+
+### Files expected to change
+- `ui/src/components/*`
+- `ui/src/App.test.tsx`
+- `ui/e2e/live-flow.spec.ts`
+- `scripts/frontend-live-e2e.sh`
+- `scripts/tests/frontend_live_e2e_contract_test.py`
+- `.agents/skills/e2e-live-gate/SKILL.md`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/templates/LIVE_E2E_OPERATOR_ASSESSMENT.md`
+
+### Acceptance criteria
+- [x] Legacy compatibility controls/testids are absent from the UI shell.
+- [x] Default live frontend flow remains `init-inspect` without QA smoke.
+- [x] `UI_E2E_QA_SMOKE=1` verifies Ask answer/citations/context/runtime links.
+- [x] Frontend result JSON includes screenshot refs when screenshots are produced.
+- [x] Mobile first viewport does not expose legacy labels.
+- [x] Focused Python/UI tests pass.
+- [x] `make contracts`, `make test`, `make lint`, `make build`.
+
+### Risks
+- Removing legacy testids requires broad UI test migration.
+- Screenshot refs must remain diagnostic metadata and must not leak into release verdict semantics.
+- Activity drawer compaction must not hide failure triage evidence from operators.
+
+### Progress log
+- 2026-05-27: Started UI/UX live E2E operator-flow hardening slice.
+- 2026-05-27: Implemented compatibility DOM removal, optional Ask UX smoke, screenshot evidence refs, compact activity/artifact UX, docs sync, full DoD, and fake-runtime UX smoke with screenshots.
+
+### Plan ID
 EP-20260526-async-runtime-backed-ask
 
 ### Context

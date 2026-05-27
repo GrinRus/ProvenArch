@@ -34,6 +34,16 @@
 - UI/API observation:
 - classification:
 
+## UI/UX Evidence
+- desktop review screenshot:
+- desktop Ask screenshot (if QA smoke ran):
+- mobile review screenshot:
+- stage walkthrough:
+- artifact readability:
+- activity/log usability:
+- Ask evidence classification:
+- operator UX decision:
+
 ## Verifier Output
 ```text
 # python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json

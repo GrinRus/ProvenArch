@@ -19,6 +19,7 @@ UI_E2E_SCENARIO="${UI_E2E_SCENARIO:-init-inspect}"
 UI_INIT_POLL_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-}"
 UI_E2E_INIT_TIMEOUT_CAP_SEC="${UI_E2E_INIT_TIMEOUT_CAP_SEC:-0}"
 UI_E2E_HEADED="${UI_E2E_HEADED:-0}"
+UI_E2E_QA_SMOKE="${UI_E2E_QA_SMOKE:-0}"
 FRONTEND_RESULT_FILENAME="${FRONTEND_RESULT_FILENAME:-frontend-e2e-result.json}"
 
 DEFAULT_UI_INIT_POLL_TIMEOUT_SEC=900
@@ -267,6 +268,13 @@ case "$UI_E2E_HEADED" in
     die "UI_E2E_HEADED must be 0 or 1, got '$UI_E2E_HEADED'"
     ;;
 esac
+case "$UI_E2E_QA_SMOKE" in
+  0|1)
+    ;;
+  *)
+    die "UI_E2E_QA_SMOKE must be 0 or 1, got '$UI_E2E_QA_SMOKE'"
+    ;;
+esac
 
 require_cmd curl
 require_cmd python3
@@ -359,9 +367,17 @@ payload = {
         "server_log": os.environ.get("FRONTEND_E2E_SERVER_LOG"),
         "playwright_log": os.environ.get("FRONTEND_E2E_PLAYWRIGHT_LOG"),
         "playwright_results": os.environ.get("FRONTEND_E2E_PLAYWRIGHT_RESULTS_DIR"),
+        "screenshots": [],
         "run_history": os.path.join(os.environ.get("FRONTEND_E2E_WORKSPACE", ""), "reports", "taskruns", "run-history.json"),
     },
 }
+screenshots_dir = os.environ.get("FRONTEND_E2E_PLAYWRIGHT_RESULTS_DIR", "")
+if screenshots_dir and os.path.isdir(screenshots_dir):
+    payload["diagnostic_refs"]["screenshots"] = [
+        os.path.join(screenshots_dir, name)
+        for name in sorted(os.listdir(screenshots_dir))
+        if name.endswith(".png") and name.startswith("frontend-")
+    ]
 with open(path, "w", encoding="utf-8") as f:
     json.dump(payload, f, ensure_ascii=True, indent=2)
     f.write("\n")
@@ -467,6 +483,7 @@ if ! (
   UI_E2E_BASE_URL="$BASE_URL" \
   UI_E2E_RUNTIME_PROVIDER="$RUNTIME_PROVIDER" \
   UI_E2E_SCENARIO="$UI_E2E_SCENARIO" \
+  UI_E2E_QA_SMOKE="$UI_E2E_QA_SMOKE" \
   UI_E2E_EXPECTED_REPO_COUNT="$UI_E2E_EXPECTED_REPO_COUNT" \
   ACP_UI_INIT_POLL_TIMEOUT_SEC="$UI_INIT_POLL_TIMEOUT_SEC" \
   UI_E2E_OUTPUT_DIR="$PLAYWRIGHT_RESULTS_DIR" \
@@ -509,6 +526,7 @@ if ! (
   fi
 else
   health_after_failure="not_applicable"
+  frontend_run_id="$(extract_frontend_run_id)"
 fi
 
 finished_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"

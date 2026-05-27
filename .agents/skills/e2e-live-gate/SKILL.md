@@ -67,7 +67,7 @@ Harness больше не пишет `blackbox_e2e_steps_*`: эти файлы �
 13) Canonical matrix slices уже несут native `timeout_profile`; не задавай `ACP_*TIMEOUT*` вручную для штатного запуска. В non-release manual diagnostic внешние timeout env допустимы, в release-mode они остаются blocked-by-default.
 14) Batch/profile reports нужно читать только в рамках реально выбранной поверхности (`selected_providers`, `selected_run_indexes`); qwen-only `run1` regression run не должен интерпретироваться как synthetic `2x5` matrix.
 15) Для headless providers runtime использует общий artifact-only process engine и тонкие adapters; stdout/stderr являются diagnostics, а success берётся только из валидных artifacts.
-16) Frontend live release check покрывает только real user-facing `init-inspect` artifact/UI/API inspection. Cancellation coverage должна жить в deterministic fake-runtime UI/API tests, не в trusted live provider release gate.
+16) Frontend live release check покрывает только real user-facing `init-inspect` artifact/UI/API inspection. Cancellation coverage должна жить в deterministic fake-runtime UI/API tests, не в trusted live provider release gate. Optional `UI_E2E_QA_SMOKE=1` допускается только для non-release/fake-runtime UX evidence и не является release readiness input.
 17) Для flexible combinations можно использовать `python3 scripts/live-e2e-plan.py ... --format shell`; этот tool только печатает прямые `full-run-batch-matrix.sh` команды и не заменяет release harness.
 18) Regress/release acceptance всегда включает artifact quality: `reports/taskruns/<run_id>-quality.json`, `quality_report_<batch-id>.md`, `quality_gates_failed=0`, отсутствие `artifact_quality:*`.
 
@@ -114,7 +114,7 @@ PY
 2) Selector and direct command planning: выбрать catalog slice или сгенерировать direct command через `scripts/live-e2e-plan.py --format shell`; не запускать wrapper и не править canonical matrices. Зафиксировать planned command/evidence.
 3) Matrix execution monitoring: запускать только `scripts/full-run-batch-matrix.sh`, отслеживать matrix/profile status, batch owner heartbeat, driver logs и durable inventories.
 4) Backend artifact and quality inspection: читать `run_matrix_*`, `quality_report_*`, taskrun quality JSON, raw metadata/logs и inventory/status evidence; классифицировать primary failure после каждого профиля.
-5) Frontend UI/API inspection: читать frontend init result JSON/MD reports, Playwright/server logs и UI/API evidence; dependent skips после backend failure не считать independent frontend regression.
+5) Frontend UI/API inspection: читать frontend init result JSON/MD reports, Playwright/server logs, screenshot refs и UI/API evidence; dependent skips после backend failure не считать independent frontend regression. Ask UX smoke evidence учитывать только как diagnostic/operator assessment layer, не как release verdict source.
 6) Release verdict verification: readiness брать только из `reports/release_verdict_<matrix-id>.json`; проверить `python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json`.
 7) Final black-box report: свести по шагам `goal / action / observed evidence / status / primary classification / next decision`; для `release full` все constituent verdict JSON должны иметь `PASS`.
 

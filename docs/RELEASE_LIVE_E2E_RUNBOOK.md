@@ -735,8 +735,9 @@ Zero tolerance:
 - `full-run-batch-matrix.sh` обязан держать durable `profile-status/*.json`, выполнять stale sweep на старте/перед report synthesis и переводить lingering `running` в terminal `failed`; reconstruction в `e2e_batch_report.py` использует `run-status.env`, `profile-status/*.json`, `batch-owner.env` и `run-history.json` как равноправные источники истины для partial roots.
 - `full-run-batch-matrix.sh` обязан писать durable inventory per started profile/sweep (`matrix/<matrix-id>/inventory/<batch-id>.json`) с `matrix_id`, matrix file, selected providers/run indexes, `batch_id`, output root, terminal status, key report/log paths и bounded `raw_output_refs` metadata (provider, run_id/task_id/step_id, stdout/stderr bytes/hash/truncation). Этот inventory является decision-support evidence после cleanup temp roots, но не заменяет terminal status/verdict fields.
 - frontend live E2E должен различать productive timeout (`active_run_timeout`), backend run terminal failure observed by UI polling (`runtime_run_failed`), browser/page/context closure (`browser_closed`), post-failure API health loss (`api_unreachable`), early `acp serve` exit (`server_exited`) и fallback explicit Playwright assertion failure (`playwright_failed`).
-- frontend result JSON должен сохранять server PID/exit code, post-failure health, run id, last run status/error code/current step и diagnostic refs, чтобы release blocker можно было классифицировать без повторного запуска.
+- frontend result JSON должен сохранять server PID/exit code, post-failure health, run id, last run status/error code/current step и diagnostic refs, включая evidence-only screenshot refs, чтобы release blocker можно было классифицировать без повторного запуска.
 - Live frontend shell поддерживает только `UI_E2E_SCENARIO=init-inspect`; cancellation/page-close behavior покрывается deterministic fake-runtime UI/API tests вне live release gate.
+- `UI_E2E_QA_SMOKE=1` включает дополнительный non-release Ask UX smoke поверх `init-inspect`: вопрос отправляется через stage `Ask`, проверяются answer/citations/context-pack/runtime-execution links и сохраняются screenshots. Этот флаг не является canonical release readiness input и не должен включаться в release matrices.
 - frontend init-inspect budget берётся из effective runtime timeout profile/API и, если задан `ACP_PIPELINE_TIMEOUT_SEC`, может быть поднят до `pipeline_timeout+30s`; fixed cap не применяется по умолчанию. Diagnostic `UI_E2E_INIT_TIMEOUT_CAP_SEC` допустим только как явное manual ограничение и не должен использоваться в canonical release slices.
 - `snapshot_reports_missing` после terminal backend failure считается dependent frontend skipped/blocked evidence, а не independent frontend regression.
 - provider `model` / `modelUsage` telemetry в stdout/stderr считается обычной diagnostic transcript частью: readiness/reporting не блокируют release по model-family attribution, если command probe, auth/quota checks и artifact smoke успешны.
@@ -750,6 +751,27 @@ Zero tolerance:
 - forced-incomplete diagnostic run: large multi-repo batch с diagnostic timeout override, чтобы проверить `report_mode=incomplete`, triage-only wording и failure-class precedence.
 
 Эти прогоны не использовать для release verdict; они нужны только как additional evidence по новому функционалу.
+
+Optional frontend UX smoke выполняется отдельно от release gate и не требует live providers:
+
+```bash
+make build
+WORKSPACE="$(mktemp -d /tmp/provenarch-ui-ux-smoke.XXXXXX)"
+./bin/acp serve \
+  --workspace "$WORKSPACE" \
+  --auto-init \
+  --repo-name provenarch \
+  --repo-path "$PWD" \
+  --runtime fake \
+  --listen 127.0.0.1:18180
+
+UI_E2E_BASE_URL=http://127.0.0.1:18180 \
+UI_E2E_QA_SMOKE=1 \
+UI_E2E_OUTPUT_DIR=/tmp/provenarch-ui-ux-smoke-results \
+npm run --prefix ui e2e:live
+```
+
+Результат этого smoke использовать как UI/UX evidence в operator assessment; он не пишет и не заменяет `release_verdict_*`.
 
 Рекомендуемые команды (без wrapper):
 

@@ -111,7 +111,7 @@ Baseline scenario set:
   - staged artifacts, citation index, final run index and semantic snapshot remain characterization-covered before promotion
   - promotion still copies only the validated final set into canonical `reports/*`/`proposals/*` and rebuilds derived `model/*`
 - UI route-shell seams:
-  - `RunPanels` receives grouped `model/actions`, while run selection, stale artifact clearing, logs polling and stable `data-testid` controls remain covered by UI tests
+  - stage-based console seams (`AppShell`/`StageRail`/`StagePanels`/`ActivityDrawer`) receive grouped `model/actions`, while run selection, stale artifact clearing, logs polling, Ask evidence and stable stage `data-testid` controls remain covered by UI tests
 - docs truth-sync gate проверяет:
   - согласованность runtime policy/Q&A boundary и ссылок на canonical stakeholder matrix;
   - prompt-layer truth: exact merge order (`provider header -> artifact-only/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer`) и invariant `workspace prompt pack = editable content layer only`;
@@ -247,16 +247,19 @@ Release workflow hardening:
 - run cancel endpoint:
   - `POST /api/pipeline/runs/<run_id>/cancel`
   - happy-path `202`, `404 run_not_found`, `409 run_not_cancelable`, `400 invalid_request_body`
-- UI path: open workspace, validate, run, inspect coverage/questions
+- UI path: open workspace, validate, run, inspect coverage/questions through stage rail controls (`Source / Readiness / Analysis / Review / Ask`)
 - UI run logs surface:
-  - log panel render (`Runs: Logs`)
+  - compact activity drawer render
   - log polling/append without duplicates
   - view toggle `line | line+fields`
   - mode toggle `event timeline | raw agent stream | all`
-  - quick action `Open runtime execution artifact`
+  - collapsed runtime execution artifact quick actions
 - UI results diagrams surface:
-  - navigation `Results -> Diagrams`
+  - navigation through `Review`
   - diagram artifact listing and Mermaid preview render
+- UI Ask UX smoke:
+  - optional `UI_E2E_QA_SMOKE=1` checks answer/citations/context-pack/runtime-execution links
+  - screenshot refs are evidence-only and do not influence release verdicts
 - UI run lifecycle operability:
   - bootstrap auto-select newest active run
   - если выбранный run исчезает из list endpoint и replacement доступен, UI переключается на следующий run; если list endpoint временно пуст, но status endpoint ещё жив, selection сохраняется
@@ -266,7 +269,7 @@ Release workflow hardening:
   - save/reset `Runtime Timeouts`
   - save/reset `Runtime Execution`
 - UI quick actions:
-  - `Open runtime execution artifact` открывает persisted taskrun artifact без live e2e-only допущений
+  - collapsed runtime execution artifact action открывает persisted taskrun artifact без live e2e-only допущений
 - Подробный command cookbook по trusted-machine live/release gate intentionally вынесен в `docs/RELEASE_LIVE_E2E_RUNBOOK.md`.
 
 ### Optional live-runner smoke

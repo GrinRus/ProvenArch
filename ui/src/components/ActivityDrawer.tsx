@@ -1,5 +1,6 @@
 import { formatTimestamp } from "../lib/runState";
 import type { RunLogEntry } from "../lib/appContracts";
+import { ArtifactPathButton } from "./ConsolePrimitives";
 
 type ActivityDrawerProps = {
   logs: RunLogEntry[];
@@ -73,13 +74,14 @@ export function ActivityDrawer({
 
       {runLogsStatus ? <p className="status ok">{runLogsStatus}</p> : null}
       {taskrunPaths.length > 0 ? (
-        <div className="taskrun-actions">
-          {taskrunPaths.map((path) => (
-            <button key={`taskrun-log-open-${path}`} type="button" className="link-button" onClick={() => onOpenArtifact(path)}>
-              Open runtime execution artifact: {path}
-            </button>
-          ))}
-        </div>
+        <details className="taskrun-actions-details">
+          <summary>Runtime execution artifacts ({taskrunPaths.length})</summary>
+          <div className="taskrun-actions">
+            {taskrunPaths.map((path) => (
+              <ArtifactPathButton key={`taskrun-log-open-${path}`} path={path} label="runtime-execution.json" kind="taskrun" actionLabel="Open runtime execution artifact" onOpenArtifact={onOpenArtifact} />
+            ))}
+          </div>
+        </details>
       ) : null}
 
       {recentLogs.length === 0 ? (

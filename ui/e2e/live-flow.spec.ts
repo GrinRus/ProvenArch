@@ -1,6 +1,10 @@
-import { expect, test, type APIRequestContext } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { mkdirSync } from "node:fs";
+import path from "node:path";
 
 const scenario = (process.env.UI_E2E_SCENARIO ?? "init-inspect").trim().toLowerCase();
+const qaSmoke = (process.env.UI_E2E_QA_SMOKE ?? "0").trim() === "1";
+const screenshotOutputDir = (process.env.UI_E2E_OUTPUT_DIR ?? "").trim();
 const initTimeoutSec = Number.parseInt(process.env.ACP_UI_INIT_POLL_TIMEOUT_SEC ?? "900", 10);
 const initTimeoutMs = Number.isFinite(initTimeoutSec) && initTimeoutSec > 0 ? initTimeoutSec * 1000 : 900_000;
 
@@ -87,6 +91,20 @@ async function waitForInitInspectRun(api: APIRequestContext, runID: string): Pro
     );
   }
   throw new Error(`run ${runID} did not reach succeeded within ${initTimeoutSec}s`);
+}
+
+async function captureEvidenceScreenshot(page: Page, name: string): Promise<string | null> {
+  if (screenshotOutputDir === "") {
+    return null;
+  }
+  mkdirSync(screenshotOutputDir, { recursive: true });
+  const screenshotPath = path.join(screenshotOutputDir, name);
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+  await test.info().attach(name, {
+    path: screenshotPath,
+    contentType: "image/png"
+  });
+  return screenshotPath;
 }
 
 test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, request }) => {
@@ -196,6 +214,31 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect
     .poll(async () => (await artifactContent.textContent())?.trim() ?? "")
     .not.toMatch(/^(Select artifact to inspect\.|Loading\.\.\.)$/);
+
+  await captureEvidenceScreenshot(page, "frontend-review-desktop.png");
+
+  if (qaSmoke) {
+    await page.getByTestId("stage-ask").click();
+    await page.getByTestId("qa-question-input").fill("What are the main architecture coverage gaps?");
+    await page.getByTestId("qa-ask-btn").click();
+
+    await expect
+      .poll(async () => ((await page.getByTestId("qa-run-status").textContent()) ?? "").trim(), { timeout: 120_000 })
+      .toMatch(/status:\s*succeeded/i);
+    await expect(page.getByTestId("qa-answer")).toBeVisible();
+    await expect(page.getByTestId("qa-answer")).not.toContainText("No citations returned.");
+    await expect(page.getByTestId("qa-answer")).toContainText(/Confidence:\s*[1-9][0-9]*%/);
+    await expect(page.getByRole("button", { name: /context-pack\.json/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /runtime-execution\.json/i })).toBeVisible();
+    await captureEvidenceScreenshot(page, "frontend-ask-desktop.png");
+    await page.getByTestId("stage-review").click();
+  }
+
+  await page.setViewportSize({ width: 390, height: 1200 });
+  await expect(page.getByTestId("review-panel")).toBeVisible();
+  const mobileBodyText = (((await page.locator("body").innerText()) ?? "").replace(/\s+/g, ""));
+  expect(mobileBodyText).not.toContain("SetupBaselineRunsResultsSettingsCoverageArtifactsDiagrams");
+  await captureEvidenceScreenshot(page, "frontend-review-mobile.png");
 
   await expect(page.locator("p.status.err")).toHaveCount(0);
   await test.info().attach("runtime-provider", {

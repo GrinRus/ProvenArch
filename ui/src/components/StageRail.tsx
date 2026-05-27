@@ -32,11 +32,6 @@ export function StageRail({ stages, activeStage, onStageChange }: StageRailProps
   return (
     <nav className={`stage-rail ${collapsed ? "is-collapsed" : ""}`} aria-label="Proven Arch workflow" data-testid="stage-rail">
       <p className="rail-title">Workflow</p>
-      <ol className="compat-controls" data-testid="setup-stepper" hidden aria-hidden="true">
-        {stages.map((stage) => (
-          <li key={`compat-${stage.id}`}>{stage.label}</li>
-        ))}
-      </ol>
       {stages.map((stage, index) => (
         <button
           key={stage.id}

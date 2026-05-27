@@ -41,16 +41,38 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         body = spec_path.read_text(encoding="utf-8")
         self.assertIn("type APIRequestContext", body)
         self.assertIn("fetchRunObservation(api: APIRequestContext", body)
+        self.assertIn("UI_E2E_QA_SMOKE", body)
+        self.assertIn("frontend-review-mobile.png", body)
         self.assertNotIn("api-context-page-close-smoke", body)
         self.assertNotIn("cancel-refresh", body)
         self.assertNotIn("page.request", body)
         self.assertNotIn("page.waitForTimeout", body)
+
+    def test_live_playwright_config_has_no_cancel_timeout_budget(self) -> None:
+        config_path = self.repo_root / "ui" / "playwright.live.config.ts"
+        body = config_path.read_text(encoding="utf-8")
+        self.assertNotIn("ACP_UI_CANCEL_POLL_TIMEOUT_SEC", body)
+        self.assertNotIn("cancelTimeout", body)
 
     def test_shell_only_allows_init_inspect(self) -> None:
         body = self.script_path.read_text(encoding="utf-8")
         self.assertIn("allowed: init-inspect", body)
         self.assertNotIn("cancel-refresh|api-context-page-close-smoke", body)
         self.assertNotIn("runtime-cancel-stub", body)
+
+    def test_qa_smoke_defaults_to_disabled_and_is_forwarded(self) -> None:
+        body = self.script_path.read_text(encoding="utf-8")
+        self.assertIn('UI_E2E_QA_SMOKE="${UI_E2E_QA_SMOKE:-0}"', body)
+        self.assertIn('UI_E2E_QA_SMOKE="$UI_E2E_QA_SMOKE"', body)
+
+    def test_success_result_includes_screenshot_refs(self) -> None:
+        result = self._run_frontend_harness("success_with_screenshots", expect_success=True)
+        self.assertEqual("passed", result["status"])
+        screenshots = result["diagnostic_refs"]["screenshots"]
+        self.assertEqual(2, len(screenshots))
+        self.assertTrue(any(str(path).endswith("frontend-review-desktop.png") for path in screenshots))
+        self.assertTrue(any(str(path).endswith("frontend-review-mobile.png") for path in screenshots))
+        self.assertEqual("run_stub", result["run_id"])
 
     def test_server_exit_is_classified(self) -> None:
         result = self._run_frontend_harness("server_exited", acp_mode="server_exited")
@@ -91,7 +113,7 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         self.assertEqual("runner_unavailable", result["last_run_error_code"])
         self.assertEqual("init.step2.asis_docs", result["last_run_current_step"])
 
-    def _run_frontend_harness(self, npm_mode: str, acp_mode: str = "healthy") -> dict[str, object]:
+    def _run_frontend_harness(self, npm_mode: str, acp_mode: str = "healthy", expect_success: bool = False) -> dict[str, object]:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
             workspace = tmp / "workspace"
@@ -145,7 +167,10 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
                 text=True,
                 timeout=15,
             )
-            self.assertNotEqual(0, completed.returncode, completed.stdout + completed.stderr)
+            if expect_success:
+                self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+            else:
+                self.assertNotEqual(0, completed.returncode, completed.stdout + completed.stderr)
             result_path = output_dir / "frontend-e2e-result.json"
             self.assertTrue(result_path.is_file(), completed.stdout + completed.stderr)
             return json.loads(result_path.read_text(encoding="utf-8"))
@@ -242,6 +267,12 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
 
             mode = os.environ.get("FAKE_NPM_MODE", "browser_closed")
             print("ACP_UI_E2E_RUN_ID=run_stub")
+            if mode == "success_with_screenshots":
+                output_dir = Path(os.environ.get("UI_E2E_OUTPUT_DIR", ""))
+                output_dir.mkdir(parents=True, exist_ok=True)
+                for name in ["frontend-review-desktop.png", "frontend-review-mobile.png"]:
+                    (output_dir / name).write_bytes(b"\\x89PNG\\r\\n\\x1a\\n")
+                sys.exit(0)
             if mode == "server_exited":
                 time.sleep(1.5)
                 print("playwright failed after server exit", file=sys.stderr)
