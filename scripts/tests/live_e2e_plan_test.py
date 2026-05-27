@@ -43,6 +43,7 @@ class LiveE2EPlanTest(unittest.TestCase):
         payload = self.build_plan(mode="smoke", size="tiny", providers="codex")
 
         self.assertEqual(payload["expected_backend_runs"], 1)
+        self.assertEqual(payload["expected_backend_pipeline_executions"], 4)
         self.assertEqual(payload["selected_providers"], ["codex-code"])
         self.assertEqual(payload["selected_run_indexes"], ["1"])
         self.assertEqual(payload["target_repo_sets"], ["bank-of-anthos"])
@@ -57,6 +58,9 @@ class LiveE2EPlanTest(unittest.TestCase):
         self.assertEqual(env["BATCH_RUN_SELECTION"], "1")
         self.assertEqual(env["BATCH_PROVIDER_FILTER"], "codex-code")
         self.assertEqual(env["BATCH_FRONTEND_MODE"], "never")
+        self.assertEqual(commands[0]["expected_backend_pipeline_executions"], 4)
+        self.assertEqual(commands[0]["profile_ids"], ["single-git_url"])
+        self.assertEqual(commands[0]["sweep_ids"], ["baseline"])
 
     def test_regres_fast_accepts_provider_shorthand_csv(self) -> None:
         payload = self.build_plan(mode="regres", size="fast", providers="qwen,codex")
@@ -145,6 +149,12 @@ class LiveE2EPlanTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("./scripts/full-run-batch-matrix.sh", result.stdout)
         self.assertIn("BATCH_PROVIDER_FILTER=codex-code", result.stdout)
+        self.assertIn("# live-e2e selector: regres-fast (diagnostic/non-release)", result.stdout)
+        self.assertIn("# selected providers: codex-code", result.stdout)
+        self.assertIn("# selected run indexes: 1 (RUN_COUNT=1)", result.stdout)
+        self.assertIn("# frontend: auto (first selected run when run 1 is selected)", result.stdout)
+        self.assertIn("# backend cycle per provider/run slot: fake init, fake refresh, headless init, headless refresh", result.stdout)
+        self.assertIn("# expected result artifact: reports/matrix_result_${MATRIX_ID}.json/.md", result.stdout)
         self.assertNotIn("live-e2e-plan.py", result.stdout)
 
     def test_json_and_markdown_formats_are_rejected(self) -> None:

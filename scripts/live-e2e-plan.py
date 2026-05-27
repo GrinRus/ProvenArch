@@ -141,7 +141,7 @@ def repo_relative(path: Path, repo_root: Path) -> str:
         return str(path.resolve())
 
 
-def matrix_backend_runs(matrix_path: Path, providers: list[str], run_indexes: list[int]) -> int:
+def matrix_execution_scope(matrix_path: Path) -> dict[str, Any]:
     payload = load_yaml_file(matrix_path)
     if not isinstance(payload, dict):
         raise ValueError(f"matrix file must be a YAML object: {matrix_path}")
@@ -149,8 +149,28 @@ def matrix_backend_runs(matrix_path: Path, providers: list[str], run_indexes: li
     if not isinstance(profiles, list) or not profiles:
         raise ValueError(f"matrix file must contain profiles[]: {matrix_path}")
     sweeps = payload.get("sweeps")
-    sweep_count = len(sweeps) if isinstance(sweeps, list) and sweeps else 1
-    return len(profiles) * sweep_count * len(providers) * len(run_indexes)
+    sweep_items = sweeps if isinstance(sweeps, list) and sweeps else [{"id": "baseline"}]
+    profile_ids = [
+        str(item.get("id", "")).strip()
+        for item in profiles
+        if isinstance(item, dict) and str(item.get("id", "")).strip()
+    ]
+    sweep_ids = [
+        str(item.get("id", "")).strip()
+        for item in sweep_items
+        if isinstance(item, dict) and str(item.get("id", "")).strip()
+    ]
+    return {
+        "profile_count": len(profiles),
+        "profile_ids": profile_ids,
+        "sweep_count": len(sweep_items),
+        "sweep_ids": sweep_ids,
+    }
+
+
+def matrix_backend_runs(matrix_path: Path, providers: list[str], run_indexes: list[int]) -> int:
+    scope = matrix_execution_scope(matrix_path)
+    return int(scope["profile_count"]) * int(scope["sweep_count"]) * len(providers) * len(run_indexes)
 
 
 def build_plan(args: argparse.Namespace) -> dict[str, Any]:
@@ -214,6 +234,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         if not matrix_path.is_file():
             raise ValueError(f"matrix file does not exist: {matrix_path}")
         matrix_command_path = repo_relative(matrix_path, repo_root)
+        scope = matrix_execution_scope(matrix_path)
         expected_runs = matrix_backend_runs(matrix_path, providers, run_indexes)
         total_expected += expected_runs
 
@@ -240,6 +261,11 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                 "matrix_id_template": env["MATRIX_ID"],
                 "release_mode": release_mode,
                 "expected_backend_runs": expected_runs,
+                "expected_backend_pipeline_executions": expected_runs * 4,
+                "profile_count": scope["profile_count"],
+                "profile_ids": scope["profile_ids"],
+                "sweep_count": scope["sweep_count"],
+                "sweep_ids": scope["sweep_ids"],
                 "env": env,
                 "command": "./scripts/full-run-batch-matrix.sh",
             }
@@ -261,6 +287,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         "frontend_mode": frontend_mode,
         "target_repo_sets": [str(value) for value in selector.get("target_repo_sets", [])],
         "expected_backend_runs": total_expected,
+        "expected_backend_pipeline_executions": total_expected * 4,
         "quality": {
             "required": quality_required,
             "run_quality_json": "reports/taskruns/<run_id>-quality.json",
@@ -272,11 +299,57 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def render_frontend_summary(plan: dict[str, Any], command: dict[str, Any]) -> str:
+    env = command["env"]
+    mode = str(env.get("BATCH_FRONTEND_MODE") or plan.get("frontend_mode") or "").strip()
+    if not mode:
+        mode = "per_run" if command.get("release_mode") else "auto"
+    if mode == "never":
+        return "skipped (BATCH_FRONTEND_MODE=never)"
+    if mode == "per_run":
+        return "per selected run"
+    if mode == "always":
+        return "single frontend pass for first selected run"
+    return "auto (first selected run when run 1 is selected)"
+
+
+def render_result_artifact_summary(command: dict[str, Any]) -> str:
+    if command.get("release_mode"):
+        return "reports/release_verdict_${MATRIX_ID}.json/.md"
+    return "reports/matrix_result_${MATRIX_ID}.json/.md"
+
+
+def render_shell_comments(plan: dict[str, Any], command: dict[str, Any]) -> list[str]:
+    selector = plan["selector"]
+    mode_label = "release" if command.get("release_mode") else "diagnostic/non-release"
+    profile_ids = ", ".join(command.get("profile_ids") or []) or "-"
+    sweep_ids = ", ".join(command.get("sweep_ids") or []) or "-"
+    providers = ", ".join(plan["selected_providers"])
+    run_indexes = ", ".join(plan["selected_run_indexes"])
+    return [
+        f"# live-e2e selector: {selector['slug']} ({mode_label})",
+        f"# selected providers: {providers}",
+        f"# selected run indexes: {run_indexes} (RUN_COUNT={plan['run_count']})",
+        f"# matrix profiles: {command['profile_count']} ({profile_ids})",
+        f"# matrix sweeps: {command['sweep_count']} ({sweep_ids})",
+        f"# frontend: {render_frontend_summary(plan, command)}",
+        "# backend cycle per provider/run slot: fake init, fake refresh, headless init, headless refresh",
+        (
+            "# backend scope: "
+            f"{command['expected_backend_runs']} provider/run slot(s), "
+            f"{command['expected_backend_pipeline_executions']} pipeline execution(s)"
+        ),
+        "# expected matrix artifacts: reports/profile_matrix_${MATRIX_ID}.md/.tsv",
+        f"# expected result artifact: {render_result_artifact_summary(command)}",
+    ]
+
+
 def render_shell(plan: dict[str, Any]) -> str:
     rendered: list[str] = []
     for index, command in enumerate(plan["commands"], start=1):
         if len(plan["commands"]) > 1:
             rendered.append(f"# {plan['selector']['slug']} invocation {index}/{len(plan['commands'])}")
+        rendered.extend(render_shell_comments(plan, command))
         env = command["env"]
         keys = list(env.keys())
         for key in keys:

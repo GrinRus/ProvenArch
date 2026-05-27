@@ -188,6 +188,8 @@ Live E2E/release gate накопил двусмысленные surfaces: harnes
 - [x] Убрать stubbed frontend cancel из release gate и public live frontend harness.
 - [x] Обновить runbook/skill/testing docs и добавить шаблон operator assessment.
 - [x] Обновить regression tests под breaking protocol.
+- [x] Сделать planner shell output явным про diagnostic/release mode, provider/run scope, frontend skip и fake/headless init/refresh цикл.
+- [x] Починить `make test-stress`, чтобы zero-match Go test pattern не давал ложный зелёный сигнал.
 - [x] Rerun full DoD on a host with exact Node.js `22.21.1`.
 - [ ] После owner review/merge перенести план в архив.
 
@@ -209,7 +211,9 @@ Live E2E/release gate накопил двусмысленные surfaces: harnes
 - `scripts/frontend-live-e2e.sh`
 - `scripts/live-e2e-plan.py`
 - `scripts/verify-release-verdict.py`
+- `Makefile`
 - `scripts/tests/*`
+- `internal/orchestrator/run_lifecycle_test.go`
 - `.agents/skills/e2e-live-gate/SKILL.md`
 - `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
 - `docs/TESTING_STRATEGY.md`
@@ -231,6 +235,8 @@ Live E2E/release gate накопил двусмысленные surfaces: harnes
 - 2026-05-26: Started breaking simplification implementation from audit follow-up.
 - 2026-05-26: Implemented breaking simplification and updated focused script suite.
 - 2026-05-26: Installed exact local Node.js `22.21.1`, fixed frontend health-start result JSON, fixed async API test timeout flake under live quality gate, updated skipped-frontend report wording, completed full DoD (`make contracts`, `make test`, `make lint`, `make build`), and passed codex-code non-release diagnostic `smoke-tiny-bank-20260526T195844Z`.
+- 2026-05-27: Added explicit planner comments for diagnostic/release scope and fixed `make test-stress` with a zero-match guard plus async debounce regression coverage.
+- 2026-05-27: Re-ran direct codex-code non-release diagnostic `smoke-tiny-bank-20260527T114046Z`; it wrote `matrix_result_*` only, verifier rejected the diagnostic payload, and reports surfaced runtime pressure (`stall_count=5`, `post_artifact_stalls=5`, `quality_alerts=2`) for operator review.
 
 ### Plan ID
 EP-20260525-frontend-live-e2e-diagnostics
@@ -621,7 +627,7 @@ Residual blockers:
 ### Acceptance criteria
 - [ ] No unresolved `runtime_contract_failed`, `runner_unavailable`, `semantic_hard_fail`, independent frontend failure, stale `running`, or unexpected `analysis:cross-repo-missing` remains for fixed scenarios
 - [ ] Every live run has a recorded `matrix_id`, `driver.log`, `profile_matrix_<matrix-id>.*`, quality reports, and taskrun diagnostics
-- [ ] Release readiness uses only `reports/release_verdict_<matrix-id>.json`; verifier exits 0 only for `PASS` / `RELEASE READY` / `passed`
+- [x] Release readiness uses only `reports/release_verdict_<matrix-id>.json`; verifier exits 0 only for `PASS` / `RELEASE READY` / `passed`
 - [ ] Any live failure produces a narrower follow-up fix slice instead of ad-hoc matrix edits
 
 ### Risks
