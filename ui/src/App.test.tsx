@@ -476,6 +476,45 @@ describe("App", () => {
     expect(await screen.findByTestId("runs-control-panel")).toBeInTheDocument();
   });
 
+  it("renders V2 shell shared surfaces without hidden compatibility controls", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(<App />);
+
+    expect(await screen.findByTestId("workspace-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("top-status-bar")).toHaveTextContent(/Permissions trusted_full_access/i);
+    expect(screen.getByTestId("top-status-bar")).toHaveTextContent(/Git review pending/i);
+    expect(screen.getByTestId("next-action-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("blockers-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("evidence-refs-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-health-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("runtime-safety-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("git-publication-panel")).toHaveTextContent("proposal/beta-refresh");
+    expect(screen.getByTestId("activity-drawer")).toHaveAccessibleName("Selected run activity drawer");
+    expect(screen.queryByTestId(`setup-${"stepper"}`)).not.toBeInTheDocument();
+  });
+
+  it("supports keyboard navigation across the V2 stage rail", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(<App />);
+
+    const sourceStage = screen.getByTestId("stage-source");
+    sourceStage.focus();
+    fireEvent.keyDown(sourceStage, { key: "End" });
+
+    expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("stage-publish")).toHaveAttribute("aria-current", "step");
+
+    fireEvent.keyDown(screen.getByTestId("stage-publish"), { key: "Home" });
+    expect(await screen.findByTestId("workspace-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("stage-source")).toHaveAttribute("aria-current", "step");
+
+    fireEvent.keyDown(screen.getByTestId("stage-source"), { key: "ArrowRight" });
+    expect(await screen.findByTestId("readiness-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("stage-readiness")).toHaveAttribute("aria-current", "step");
+  });
+
   it("opens Review by default when a completed run already has artifacts", async () => {
     vi.stubGlobal(
       "fetch",
@@ -1689,13 +1728,19 @@ describe("App", () => {
     fireEvent.change(commitInput, { target: { value: "feat: tighten prompt policy" } });
     fireEvent.click(screen.getByTestId("git-commit-btn"));
 
-    await screen.findByText("committed: feat: tighten prompt policy");
+    await waitFor(() => {
+      expect(screen.getByTestId("baseline-git-helper-panel")).toHaveTextContent("committed: feat: tighten prompt policy");
+      expect(screen.getByTestId("git-publication-panel")).toHaveTextContent("committed: feat: tighten prompt policy");
+    });
 
     const branchInput = screen.getByLabelText("Proposal branch");
     fireEvent.change(branchInput, { target: { value: "proposal/prompt-policy" } });
     fireEvent.click(screen.getByTestId("git-proposal-branch-btn"));
 
-    await screen.findByText("checked out proposal/prompt-policy");
+    await waitFor(() => {
+      expect(screen.getByTestId("baseline-git-helper-panel")).toHaveTextContent("checked out proposal/prompt-policy");
+      expect(screen.getByTestId("git-publication-panel")).toHaveTextContent("checked out proposal/prompt-policy");
+    });
 
     const commitCalls = fetchMock.mock.calls.filter((call) => call[0] === "/api/git/commit");
     expect(commitCalls).toHaveLength(1);

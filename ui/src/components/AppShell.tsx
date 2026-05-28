@@ -12,6 +12,8 @@ type AppShellProps = {
   repoCount: number;
   runtimeMode: string;
   runtimeProvider: string;
+  permissionMode: string;
+  gitStatus: string;
   healthLabel: string;
   stages: StageOption[];
   activeStage: StageId;
@@ -20,6 +22,7 @@ type AppShellProps = {
   evidenceRefs: InspectorItem[];
   workspaceHealth: InspectorItem[];
   runtimeSafety: InspectorItem[];
+  gitPublication: InspectorItem[];
   logs: RunLogEntry[];
   renderedLogs: string;
   runLogsStatus: string;
@@ -43,6 +46,8 @@ export function AppShell({
   repoCount,
   runtimeMode,
   runtimeProvider,
+  permissionMode,
+  gitStatus,
   healthLabel,
   stages,
   activeStage,
@@ -51,6 +56,7 @@ export function AppShell({
   evidenceRefs,
   workspaceHealth,
   runtimeSafety,
+  gitPublication,
   logs,
   renderedLogs,
   runLogsStatus,
@@ -75,6 +81,8 @@ export function AppShell({
         repoCount={repoCount}
         runtimeMode={runtimeMode}
         runtimeProvider={runtimeProvider}
+        permissionMode={permissionMode}
+        gitStatus={gitStatus}
         healthLabel={healthLabel}
         onRefresh={onRefresh}
       />
@@ -89,6 +97,7 @@ export function AppShell({
           evidenceRefs={evidenceRefs}
           workspaceHealth={workspaceHealth}
           runtimeSafety={runtimeSafety}
+          gitPublication={gitPublication}
           onPrimaryAction={onPrimaryAction}
           onOpenArtifact={onOpenArtifact}
         />

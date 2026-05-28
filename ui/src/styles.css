@@ -51,6 +51,15 @@ button:disabled {
   cursor: default;
 }
 
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible {
+  outline: 2px solid rgba(15, 118, 110, 0.75);
+  outline-offset: 2px;
+}
+
 code {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 0.86em;
@@ -135,6 +144,8 @@ code {
 
 .top-meta-item {
   min-height: 1.75rem;
+  min-width: 0;
+  max-width: 100%;
   display: inline-flex;
   align-items: center;
   gap: 0.34rem;
@@ -142,6 +153,9 @@ code {
   border: 1px solid var(--line-soft);
   border-radius: 0.38rem;
   background: var(--surface-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .top-meta-icon {
@@ -180,6 +194,10 @@ code {
   text-overflow: ellipsis;
   white-space: nowrap;
   display: inline-block;
+}
+
+.top-meta-item:not(.server-status) {
+  max-width: min(100%, 34rem);
 }
 
 .top-actions,
@@ -243,6 +261,11 @@ code {
 .stage-row:hover {
   border-color: var(--line);
   background: var(--surface);
+}
+
+.stage-row:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.16);
 }
 
 .stage-row.is-selected {
@@ -396,6 +419,7 @@ code {
   background: #fbfcfd;
   padding: 0.75rem;
   overflow: auto;
+  scrollbar-gutter: stable;
 }
 
 .activity-drawer {
@@ -405,6 +429,7 @@ code {
   background: var(--surface);
   padding: 0.7rem 1rem 0.9rem;
   overflow: auto;
+  scrollbar-gutter: stable;
 }
 
 .activity-head {

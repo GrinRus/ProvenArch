@@ -109,6 +109,32 @@ EP-20260527-ui-console-v2
 8) Update `scripts/frontend-live-e2e.sh` and script tests only if the public live shell or diagnostic refs change; do not add `ask-readonly`/`domain-map-diagnostic`/page-close scenarios or new frontend reason codes unless a separate classification/release-gate slice is approved.
 9) Sync README/ARCHITECTURE/testing/runbook docs only when the implemented UI behavior changes.
 
+### Slice ExecPlan - 16A UI V2 shell foundation
+
+Status: done.
+
+Goals:
+- [x] Refine existing shell primitives (`AppShell`, `TopStatusBar`, `StageRail`, `RightInspector`, `ActivityDrawer`) toward the approved V2 shell without restoring legacy panels.
+- [x] Extract a shared stage status model for the eight-stage rail.
+- [x] Add baseline keyboard/focus contract for rail navigation and shared inspector/drawer surfaces.
+- [x] Surface runtime permission mode and Git publication path in the shared shell using existing UI state.
+
+Non-goals:
+- [x] No backend API, schema, runtime contract, CLI flag or workspace contract changes.
+- [x] No stage-specific redesign beyond shared shell foundation.
+- [x] No `UI_E2E_SCENARIO` expansion, no new frontend reason taxonomy, no hidden compatibility controls.
+
+Implementation notes:
+- Use current React/Vite components and hooks only.
+- Add/keep visible operator-facing `data-testid` selectors for V2 shared shell surfaces.
+- Render missing Git/publication data as explicit partial/empty state in the inspector.
+
+Validation:
+- [x] Focused UI unit tests for stage rail keyboard navigation and shell shared surfaces.
+- [x] Browser visual QA for desktop and narrow viewport on embedded build.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes
@@ -141,6 +167,7 @@ EP-20260527-ui-console-v2
 - 2026-05-27: Approved unified 9-screen design vision and fixed design baseline, visual references, data-source map, backlog, ExecPlan and V2 live E2E contract without product code changes.
 - 2026-05-27: Rebased on `origin/main` `3aa458a`; latest main already removed compatibility controls, compacted activity/artifact surfaces, added optional `UI_E2E_QA_SMOKE=1` and screenshot refs, so V2 backlog was corrected to keep release-facing live frontend on `init-inspect` only.
 - 2026-05-28: Continuous backlog queue normalized this plan to the first active workstream; next implementation slice is `16A UI V2 shell foundation`.
+- 2026-05-28: Completed `16A UI V2 shell foundation`: shared stage status model, top strip runtime/Git metadata, V2 inspector selectors, Git publication panel, rail keyboard navigation and drawer a11y baseline. No backend/API/schema/live-shell changes.
 
 ### Plan ID
 EP-20260527-live-e2e-ui-ux-operator-flow

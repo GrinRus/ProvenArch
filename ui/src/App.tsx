@@ -26,24 +26,12 @@ import {
   type RuntimePermissionKey,
   type RuntimeTimeoutKey,
 } from "./lib/appContracts";
-import type { InspectorItem, NextAction, StageId, StageOption, StageStatus } from "./lib/consoleTypes";
+import type { InspectorItem, NextAction, StageId } from "./lib/consoleTypes";
+import { buildStageOptions } from "./lib/stageModel";
 import { useRunExplorer } from "./hooks/useRunExplorer";
 import { useRuntimeSettings } from "./hooks/useRuntimeSettings";
 import { useWorkspaceSetup } from "./hooks/useWorkspaceSetup";
 import { loadSystemDoctor } from "./lib/systemApi";
-
-const stageLabels: Record<StageId, { label: string; description: string }> = {
-  source: { label: "Source", description: "Repos & imports" },
-  readiness: { label: "Readiness", description: "Validate & doctor" },
-  charter: { label: "Charter", description: "Scope & rules" },
-  analysis: { label: "Analysis", description: "Run pipeline" },
-  review: { label: "Review", description: "Evidence & findings" },
-  proposals: { label: "Proposals", description: "ADR/RFC drafts" },
-  ask: { label: "Ask", description: "Agent-backed workspace Q&A" },
-  publish: { label: "Publish", description: "Git workflow" },
-};
-
-const stageOrder: StageId[] = ["source", "readiness", "charter", "analysis", "review", "proposals", "ask", "publish"];
 
 export default function App() {
   const [activeStage, setActiveStage] = useState<StageId>("source");
@@ -329,46 +317,38 @@ export default function App() {
     }
   }, [artifactCount, selectedRunIsActive]);
 
-  const stageStatuses = useMemo<Record<StageId, StageStatus>>(() => {
-    const readinessBlocked = validationErrors.length > 0 || doctorFailures.length > 0;
-    const analysisBlocked = runStatus?.status === "failed" || (runStatus?.pending_permissions?.length ?? 0) > 0;
-    return {
-      source: manifestContent.trim() ? "done" : "active",
-      readiness: readinessBlocked ? "blocked" : validateResult?.ok && setupDoctorResult?.ok ? "done" : activeStage === "readiness" ? "active" : "pending",
-      charter: wizardProjectName.trim() || selectedEditorPath ? "done" : activeStage === "charter" ? "active" : "pending",
-      analysis: analysisBlocked ? "blocked" : selectedRunIsActive ? "active" : runStatus?.status === "succeeded" ? "done" : activeStage === "analysis" ? "active" : "pending",
-      review: artifactCount > 0 ? "done" : activeStage === "review" ? "active" : "pending",
-      proposals: proposalArtifacts.length > 0 ? "done" : activeStage === "proposals" ? "active" : "pending",
-      ask: activeStage === "ask" ? "active" : "pending",
-      publish: gitStatus ? "done" : activeStage === "publish" ? "active" : "pending",
-    };
-  }, [
-    activeStage,
-    artifactCount,
-    doctorFailures.length,
-    gitStatus,
-    manifestContent,
-    proposalArtifacts.length,
-    runStatus,
-    selectedEditorPath,
-    selectedRunIsActive,
-    setupDoctorResult,
-    validateResult,
-    validationErrors.length,
-    wizardProjectName,
-  ]);
-
-  const stages = useMemo<StageOption[]>(
+  const stages = useMemo(
     () =>
-      stageOrder.map((id) => ({
-        id,
-        label: stageLabels[id].label,
-        description: stageLabels[id].description,
-        status: id === activeStage && stageStatuses[id] !== "blocked" ? "active" : stageStatuses[id],
-        count: id === "review" && artifactCount > 0 ? artifactCount : id === "analysis" && runCounters.running > 0 ? runCounters.running : undefined,
-        testId: `stage-${id}`,
-      })),
-    [activeStage, artifactCount, runCounters.running, stageStatuses],
+      buildStageOptions({
+        activeStage,
+        hasManifest: Boolean(manifestContent.trim()),
+        readinessBlocked: validationErrors.length > 0 || doctorFailures.length > 0,
+        readinessDone: Boolean(validateResult?.ok && setupDoctorResult?.ok),
+        charterStarted: Boolean(wizardProjectName.trim() || selectedEditorPath),
+        analysisBlocked: runStatus?.status === "failed" || (runStatus?.pending_permissions?.length ?? 0) > 0,
+        selectedRunIsActive,
+        runSucceeded: runStatus?.status === "succeeded",
+        artifactCount,
+        proposalArtifactCount: proposalArtifacts.length,
+        runningRunCount: runCounters.running,
+        hasGitStatus: Boolean(gitStatus),
+      }),
+    [
+      activeStage,
+      artifactCount,
+      doctorFailures.length,
+      gitStatus,
+      manifestContent,
+      proposalArtifacts.length,
+      runCounters.running,
+      runStatus,
+      selectedEditorPath,
+      selectedRunIsActive,
+      setupDoctorResult,
+      validateResult,
+      validationErrors.length,
+      wizardProjectName,
+    ],
   );
 
   const blockers = useMemo<InspectorItem[]>(() => {
@@ -480,6 +460,27 @@ export default function App() {
     [runtimePermissionEffective.approval_channel, runtimePermissionEffective.mode, setupRuntime, setupRuntimeProvider],
   );
 
+  const gitPublication = useMemo<InspectorItem[]>(
+    () => [
+      {
+        severity: gitStatus ? "ok" : proposalArtifacts.length > 0 || artifactCount > 0 ? "info" : "warn",
+        label: gitStatus ? "Last Git action" : "Publication state",
+        detail: gitStatus || (artifactCount > 0 ? "Workspace artifacts are available for review before commit." : "No generated artifacts are ready to publish yet."),
+      },
+      {
+        severity: "info",
+        label: "Commit message",
+        detail: gitMessage || "not prepared",
+      },
+      {
+        severity: "info",
+        label: "Proposal branch",
+        detail: proposalBranch || "not prepared",
+      },
+    ],
+    [artifactCount, gitMessage, gitStatus, proposalArtifacts.length, proposalBranch],
+  );
+
   const nextAction = useMemo<NextAction>(() => deriveNextAction(activeStage, {
     validateOK: Boolean(validateResult?.ok),
     doctorOK: Boolean(setupDoctorResult?.ok),
@@ -580,6 +581,8 @@ export default function App() {
       repoCount={validateResult?.resolved_repos?.length ?? guidedRepos.length}
       runtimeMode={setupRuntime}
       runtimeProvider={setupRuntimeProvider}
+      permissionMode={String(runtimePermissionEffective.mode ?? "trusted_full_access")}
+      gitStatus={gitStatus}
       healthLabel={setupDoctorResult?.ok ? "local ready" : validateResult?.ok ? "workspace valid" : "local connected"}
       stages={stages}
       activeStage={activeStage}
@@ -588,6 +591,7 @@ export default function App() {
       evidenceRefs={evidenceRefs}
       workspaceHealth={workspaceHealth}
       runtimeSafety={runtimeSafety}
+      gitPublication={gitPublication}
       logs={filteredRunLogs}
       renderedLogs={runLogsRendered}
       runLogsStatus={runLogsStatus}

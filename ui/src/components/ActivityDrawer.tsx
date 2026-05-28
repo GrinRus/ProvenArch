@@ -33,7 +33,7 @@ export function ActivityDrawer({
 }: ActivityDrawerProps) {
   const recentLogs = logs.slice(-6).reverse();
   return (
-    <section className="activity-drawer" data-testid="activity-drawer">
+    <section className="activity-drawer" aria-label="Selected run activity drawer" data-testid="activity-drawer">
       <div className="activity-head">
         <div>
           <h2>Activity / Events</h2>
@@ -72,7 +72,11 @@ export function ActivityDrawer({
         </div>
       </div>
 
-      {runLogsStatus ? <p className="status ok">{runLogsStatus}</p> : null}
+      {runLogsStatus ? (
+        <p className="status ok" aria-live="polite">
+          {runLogsStatus}
+        </p>
+      ) : null}
       {taskrunPaths.length > 0 ? (
         <details className="taskrun-actions-details">
           <summary>Runtime execution artifacts ({taskrunPaths.length})</summary>

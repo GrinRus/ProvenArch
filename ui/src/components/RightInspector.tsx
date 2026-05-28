@@ -7,6 +7,7 @@ type RightInspectorProps = {
   evidenceRefs: InspectorItem[];
   workspaceHealth: InspectorItem[];
   runtimeSafety: InspectorItem[];
+  gitPublication: InspectorItem[];
   onPrimaryAction: () => void;
   onOpenArtifact: (path: string) => void;
 };
@@ -24,6 +25,7 @@ export function RightInspector({
   evidenceRefs,
   workspaceHealth,
   runtimeSafety,
+  gitPublication,
   onPrimaryAction,
   onOpenArtifact,
 }: RightInspectorProps) {
@@ -31,7 +33,7 @@ export function RightInspector({
   const nextActionStatus = nextAction.disabledReason ? "blocked" : blockers.length > 0 ? "attention" : "ready";
   return (
     <aside className="right-inspector" data-testid="right-inspector">
-      <section className="inspector-section next-action-section">
+      <section className="inspector-section next-action-section" data-testid="next-action-panel">
         <div className="section-heading-row">
           <h2>Next action</h2>
           <StatusBadge tone={nextActionSeverity}>{nextActionStatus}</StatusBadge>
@@ -44,24 +46,26 @@ export function RightInspector({
         </PrimaryAction>
       </section>
 
-      <InspectorList title="Blockers" emptyLabel="No blockers detected." items={blockers} onOpenArtifact={onOpenArtifact} />
-      <InspectorList title="Evidence refs" emptyLabel="No evidence yet." items={evidenceRefs} onOpenArtifact={onOpenArtifact} />
-      <InspectorList title="Workspace health" emptyLabel="Workspace status unavailable." items={workspaceHealth} onOpenArtifact={onOpenArtifact} />
-      <InspectorList title="Runtime safety" emptyLabel="Runtime profile unavailable." items={runtimeSafety} onOpenArtifact={onOpenArtifact} />
+      <InspectorList testId="blockers-panel" title="Blockers" emptyLabel="No blockers detected." items={blockers} onOpenArtifact={onOpenArtifact} />
+      <InspectorList testId="evidence-refs-panel" title="Evidence refs" emptyLabel="No evidence yet." items={evidenceRefs} onOpenArtifact={onOpenArtifact} />
+      <InspectorList testId="workspace-health-panel" title="Workspace health" emptyLabel="Workspace status unavailable." items={workspaceHealth} onOpenArtifact={onOpenArtifact} />
+      <InspectorList testId="runtime-safety-panel" title="Runtime safety" emptyLabel="Runtime profile unavailable." items={runtimeSafety} onOpenArtifact={onOpenArtifact} />
+      <InspectorList testId="git-publication-panel" title="Git publication" emptyLabel="Git publication path unavailable." items={gitPublication} onOpenArtifact={onOpenArtifact} />
     </aside>
   );
 }
 
 type InspectorListProps = {
+  testId: string;
   title: string;
   emptyLabel: string;
   items: InspectorItem[];
   onOpenArtifact: (path: string) => void;
 };
 
-function InspectorList({ title, emptyLabel, items, onOpenArtifact }: InspectorListProps) {
+function InspectorList({ testId, title, emptyLabel, items, onOpenArtifact }: InspectorListProps) {
   return (
-    <section className="inspector-section">
+    <section className="inspector-section" data-testid={testId}>
       <div className="section-heading-row">
         <h2>{title}</h2>
         <span className="count-pill">{items.length}</span>

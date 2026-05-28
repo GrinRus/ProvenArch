@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type KeyboardEvent } from "react";
 
 import type { StageId, StageOption } from "../lib/consoleTypes";
 
@@ -29,6 +29,43 @@ const stageIconPaths: Record<StageId, string[]> = {
 export function StageRail({ stages, activeStage, onStageChange }: StageRailProps) {
   const [collapsed, setCollapsed] = useState(false);
 
+  function focusStage(stage: StageOption) {
+    const testId = stage.testId ?? `stage-${stage.id}`;
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`)?.focus();
+    });
+  }
+
+  function moveFocusToStage(index: number) {
+    const boundedIndex = Math.max(0, Math.min(stages.length - 1, index));
+    const nextStage = stages[boundedIndex];
+    onStageChange(nextStage.id);
+    focusStage(nextStage);
+  }
+
+  function handleStageKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    switch (event.key) {
+      case "ArrowDown":
+      case "ArrowRight":
+        event.preventDefault();
+        moveFocusToStage(index + 1);
+        break;
+      case "ArrowUp":
+      case "ArrowLeft":
+        event.preventDefault();
+        moveFocusToStage(index - 1);
+        break;
+      case "Home":
+        event.preventDefault();
+        moveFocusToStage(0);
+        break;
+      case "End":
+        event.preventDefault();
+        moveFocusToStage(stages.length - 1);
+        break;
+    }
+  }
+
   return (
     <nav className={`stage-rail ${collapsed ? "is-collapsed" : ""}`} aria-label="Proven Arch workflow" data-testid="stage-rail">
       <p className="rail-title">Workflow</p>
@@ -38,8 +75,11 @@ export function StageRail({ stages, activeStage, onStageChange }: StageRailProps
           type="button"
           className={`stage-row ${stage.status} ${stage.id === activeStage ? "is-selected" : ""}`}
           aria-label={`${stage.label}: ${stage.description}; ${stage.status}`}
+          aria-current={stage.id === activeStage ? "step" : undefined}
           onClick={() => onStageChange(stage.id)}
+          onKeyDown={(event) => handleStageKeyDown(event, index)}
           data-testid={stage.testId ?? `stage-${stage.id}`}
+          title={`${stage.label}: ${stage.description}`}
         >
           <span className="stage-index" aria-hidden="true">
             {index + 1}
