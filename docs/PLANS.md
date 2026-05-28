@@ -371,6 +371,34 @@ Validation:
 Progress log:
 - 2026-05-28: Implemented Publish Git Review Room with folder artifact summary, selected artifact preview, advisory publish gate, commit plan, prepared message copy action and preserved Git commit/proposal branch mutations/selectors. Added V2 selectors (`publish-diff-summary`, `publish-preview-tabs`, `publish-gate-panel`, `publish-commit-plan`, `publish-commit-selected-btn`), explicit partial state for real Git diff data and desktop/mobile browser QA screenshots. No backend/API/schema/runtime contract/live-shell expansion changes.
 
+### Slice ExecPlan - 16J UI V2 unit and accessibility coverage
+
+Status: done.
+
+Goals:
+- [x] Add focused UI tests for V2 shell primitives: stage rail rendering/keyboard/collapse, right inspector priority/disabled action/empty sections and activity drawer controls/export/log states.
+- [x] Cover critical empty/blocked/operator-visible states without adding hidden compatibility controls.
+- [x] Keep tests fast and component-level where possible so they complement the heavier App integration tests from 16A-16I.
+
+Non-goals:
+- [x] No product UI redesign, backend API, schema, runtime artifact contract, CLI flag or workspace contract changes.
+- [x] Do not expand release-facing live E2E scenarios, Playwright reason taxonomy or provider-live release gates.
+- [x] Do not add hidden DOM controls solely for test compatibility.
+
+Implementation notes:
+- Add a small component test file around `StageRail`, `RightInspector` and `ActivityDrawer`.
+- Reuse existing visible labels/selectors and verify accessibility-facing attributes (`aria-current`, `aria-pressed`, disabled primary actions, accessible drawer labels).
+- Treat responsive collapse as the operator-facing rail collapse state; CSS breakpoint visual QA remains covered by implementation slices and live/Playwright slices.
+
+Validation:
+- [x] Focused UI component tests for shell primitives.
+- [x] Existing App focused tests still pass.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-28: Added fast component-level coverage for V2 shell primitives: stage rail accessible labels/keyboard/collapse state, right inspector blocked/attention priority with empty sections and evidence links, and activity drawer empty/populated/export/log-control states. Existing App-focused tests still pass; no product UI, backend/API/schema/runtime contract/live-shell changes.
+
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes
