@@ -585,9 +585,33 @@ function DoctorChecklist({ doctorResult }: { doctorResult: DoctorResponse }) {
 export type CharterStageProps = ComponentProps<typeof BaselineEditorsPanel> & {
   wizardPanel: ReactNode;
   gitPanel: ReactNode;
+  wizardProjectName: string;
+  wizardScope: string;
+  wizardNfr: string;
+  wizardRules: string;
+  gitStatus: string;
+  proposalBranch: string;
 };
 
-export function CharterStagePanel({ wizardPanel, gitPanel, ...baselineProps }: CharterStageProps) {
+export function CharterStagePanel({
+  wizardPanel,
+  gitPanel,
+  wizardProjectName,
+  wizardScope,
+  wizardNfr,
+  wizardRules,
+  gitStatus,
+  proposalBranch,
+  ...baselineProps
+}: CharterStageProps) {
+  const charterArtifacts = baselineProps.baselineEditorArtifacts.filter((artifact) => artifact.path.startsWith("charter/"));
+  const domainCards = baselineProps.baselineEditorArtifacts.filter((artifact) => artifact.path.startsWith("charter/cards/domains/"));
+  const teamCards = baselineProps.baselineEditorArtifacts.filter((artifact) => artifact.path.startsWith("charter/cards/teams/"));
+  const promptPacks = baselineProps.baselineEditorArtifacts.filter((artifact) => artifact.path.startsWith("skills/prompt-packs/"));
+  const livePromptPacks = promptPacks.filter((artifact) => artifact.prompt_usage === "live-consumed");
+  const referenceOnlyPrompts = baselineProps.baselineEditorArtifacts.filter((artifact) => artifact.prompt_usage === "reference-only");
+  const wizardReady = Boolean(wizardProjectName.trim() && wizardScope.trim());
+
   return (
     <div className="stage-stack" data-testid="charter-panel">
       <section className="panel stage-panel">
@@ -596,14 +620,171 @@ export function CharterStagePanel({ wizardPanel, gitPanel, ...baselineProps }: C
             <h1>Charter</h1>
             <p className="hint">Define project scope, rules, NFRs, domain cards and editable baseline prompts.</p>
           </div>
-          <StatusBadge tone="info">human-owned</StatusBadge>
+          <StatusBadge tone={wizardReady ? "ok" : "info"}>{wizardReady ? "ready draft" : "human-owned"}</StatusBadge>
         </div>
+        <CharterWizardSummary wizardProjectName={wizardProjectName} wizardScope={wizardScope} wizardNfr={wizardNfr} wizardRules={wizardRules} />
       </section>
+
+      <section className="charter-workbench-grid" data-testid="charter-workbench">
+        <CharterCardOverview domainCards={domainCards} teamCards={teamCards} charterArtifacts={charterArtifacts} />
+        <CharterPromptBundleStatus
+          baselineBundleWarnings={baselineProps.baselineBundleWarnings}
+          promptPacks={promptPacks}
+          livePromptPacks={livePromptPacks}
+          referenceOnlyPrompts={referenceOnlyPrompts}
+          selectedEditorPath={baselineProps.selectedEditorPath}
+          gitStatus={gitStatus}
+          proposalBranch={proposalBranch}
+        />
+      </section>
+
       {wizardPanel}
       <BaselineEditorsPanel {...baselineProps} />
       {gitPanel}
     </div>
   );
+}
+
+function CharterWizardSummary({
+  wizardProjectName,
+  wizardScope,
+  wizardNfr,
+  wizardRules,
+}: {
+  wizardProjectName: string;
+  wizardScope: string;
+  wizardNfr: string;
+  wizardRules: string;
+}) {
+  const nfrCount = splitSummaryList(wizardNfr).length;
+  const ruleCount = splitSummaryList(wizardRules).length;
+  return (
+    <div className="charter-summary-grid" data-testid="charter-wizard-summary">
+      <article className="charter-summary-card">
+        <span className="metric-label">Project</span>
+        <strong>{wizardProjectName.trim() || "unnamed project"}</strong>
+      </article>
+      <article className="charter-summary-card">
+        <span className="metric-label">Scope</span>
+        <strong>{wizardScope.trim() || "scope required"}</strong>
+      </article>
+      <article className="charter-summary-card">
+        <span className="metric-label">NFR priorities</span>
+        <strong>{nfrCount > 0 ? `${nfrCount} listed` : "none listed"}</strong>
+      </article>
+      <article className="charter-summary-card">
+        <span className="metric-label">Rules</span>
+        <strong>{ruleCount > 0 ? `${ruleCount} listed` : "none listed"}</strong>
+      </article>
+    </div>
+  );
+}
+
+function CharterCardOverview({
+  domainCards,
+  teamCards,
+  charterArtifacts,
+}: {
+  domainCards: EditableArtifactOption[];
+  teamCards: EditableArtifactOption[];
+  charterArtifacts: EditableArtifactOption[];
+}) {
+  return (
+    <section className="charter-overview-panel" data-testid="charter-card-overview">
+      <div className="section-heading-row">
+        <h2>Domain and team cards</h2>
+        <StatusBadge tone={domainCards.length + teamCards.length > 0 ? "ok" : "info"}>
+          {domainCards.length + teamCards.length > 0 ? "available" : "partial"}
+        </StatusBadge>
+      </div>
+      <div className="charter-card-stats">
+        <div>
+          <span className="metric-label">Domain cards</span>
+          <strong>{domainCards.length}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Team cards</span>
+          <strong>{teamCards.length}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Charter artifacts</span>
+          <strong>{charterArtifacts.length}</strong>
+        </div>
+      </div>
+      {domainCards.length + teamCards.length > 0 ? (
+        <ul className="compact-list">
+          {[...domainCards, ...teamCards].slice(0, 5).map((artifact) => (
+            <li key={artifact.path}>
+              <span>{artifact.label}</span>
+              <code>{artifact.path}</code>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="hint">No domain/team card artifacts are exposed by the baseline bundle yet. Keep ownership updates in the existing charter files until a cards API exists.</p>
+      )}
+    </section>
+  );
+}
+
+function CharterPromptBundleStatus({
+  baselineBundleWarnings,
+  promptPacks,
+  livePromptPacks,
+  referenceOnlyPrompts,
+  selectedEditorPath,
+  gitStatus,
+  proposalBranch,
+}: {
+  baselineBundleWarnings: Diagnostic[];
+  promptPacks: EditableArtifactOption[];
+  livePromptPacks: EditableArtifactOption[];
+  referenceOnlyPrompts: EditableArtifactOption[];
+  selectedEditorPath: string;
+  gitStatus: string;
+  proposalBranch: string;
+}) {
+  return (
+    <section className="charter-overview-panel" data-testid="charter-prompt-bundle-status">
+      <div className="section-heading-row">
+        <h2>Baseline prompt bundle</h2>
+        <StatusBadge tone={baselineBundleWarnings.some((warning) => warning.level === "error") ? "error" : baselineBundleWarnings.length > 0 ? "warn" : "ok"}>
+          {baselineBundleWarnings.length > 0 ? `${baselineBundleWarnings.length} warnings` : "ready"}
+        </StatusBadge>
+      </div>
+      <div className="charter-card-stats">
+        <div>
+          <span className="metric-label">Prompt packs</span>
+          <strong>{promptPacks.length}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Live consumed</span>
+          <strong>{livePromptPacks.length}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Reference-only</span>
+          <strong>{referenceOnlyPrompts.length}</strong>
+        </div>
+      </div>
+      <dl className="compact-defs">
+        <div>
+          <dt>Selected artifact</dt>
+          <dd>{selectedEditorPath || "none selected"}</dd>
+        </div>
+        <div>
+          <dt>Git path</dt>
+          <dd>{gitStatus || `proposal branch ${proposalBranch || "not prepared"}`}</dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
+function splitSummaryList(value: string): string[] {
+  return value
+    .split(/[,\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 export type AnalysisStageProps = {

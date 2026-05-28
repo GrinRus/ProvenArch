@@ -46,7 +46,7 @@
    - Guided setup поддерживает multi-repo (`repos[]`) с add/remove rows и optional `ref`; Source показывает repo table с name/source/ref, validation state и явным advanced-only статусом для analysis include/exclude
    - Readiness показывает summary cards для workspace, repositories, runtime provider, permissions и artifacts, а также compact runtime profile summary перед advanced settings
    - Показывает repo overview в validate surface: `resolved_repos` + diagnostics, сгруппированные по repo
-   - Редактирует baseline bundle artifacts через guided selector (`charter/*`, `skills/*`, prompt packs, `skills/subagents.yaml`)
+   - `Charter` показывает wizard summary, domain/team card overview, baseline prompt bundle status, explicit partial state для missing card artifacts и editor для baseline bundle artifacts (`charter/*`, `skills/*`, prompt packs, `skills/subagents.yaml`)
    - `App.tsx` остаётся route shell, а крупные sections вынесены в dedicated stage panels (`SourceStagePanel`, `ReadinessStagePanel`, `CharterStagePanel`, `AnalysisStagePanel`, `ReviewStagePanel`, `ProposalsStagePanel`, `AskStagePanel`, `PublishStagePanel`); shell components отвечают за top bar, rail, inspector и activity drawer
    - setup/baseline/wizard/git state и actions остаются за facade `useWorkspaceSetup`, но внутри разделены на `useManifestEditor`, `useBaselineEditor`, `useWizardEditor` и `useGitActions`; runtime settings живут в отдельном hook, а run explorer разделён на `useRunSelection`, `useRunPolling`, `useRunActions`, `useRunArtifacts` и `useRunLogs`
    - Runtime profile (`timeouts` + `execution` + `permissions`) доступен в `Readiness -> Advanced runtime settings`, включая effective per-step providers; это не отдельная primary stage

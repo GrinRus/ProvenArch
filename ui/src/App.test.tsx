@@ -106,6 +106,8 @@ function createFetchMock(state: FetchMockState = {}) {
     },
     editable_artifacts: [
       { path: "charter/overview.md", label: "charter/overview.md", category: "charter" },
+      { path: "charter/cards/domains/payments.md", label: "payments domain", category: "domain-card" },
+      { path: "charter/cards/teams/platform.md", label: "platform team", category: "team-card" },
       {
         path: "skills/prompt-packs/findings.md",
         label: "skills/prompt-packs/findings.md",
@@ -529,6 +531,34 @@ describe("App", () => {
     expect(runtimeSummary).toHaveTextContent("best_effort");
     expect(runtimeSummary).toHaveTextContent("qwen-code");
     expect(runtimeSummary).toHaveTextContent("Advanced runtime settings remain available below");
+  });
+
+  it("renders Charter V2 workbench summary, card overview, and prompt bundle status", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("stage-charter"));
+
+    const wizardSummary = await screen.findByTestId("charter-wizard-summary");
+    expect(wizardSummary).toHaveTextContent("ProvenArch MVP");
+    expect(wizardSummary).toHaveTextContent("payments, users, ci-cd");
+    expect(wizardSummary).toHaveTextContent("2 listed");
+
+    const cardOverview = screen.getByTestId("charter-card-overview");
+    expect(cardOverview).toHaveTextContent("Domain cards");
+    expect(cardOverview).toHaveTextContent("1");
+    expect(cardOverview).toHaveTextContent("payments domain");
+    expect(cardOverview).toHaveTextContent("platform team");
+
+    const promptStatus = screen.getByTestId("charter-prompt-bundle-status");
+    expect(promptStatus).toHaveTextContent("Baseline prompt bundle");
+    expect(promptStatus).toHaveTextContent("Prompt packs");
+    expect(promptStatus).toHaveTextContent("Live consumed");
+    expect(promptStatus).toHaveTextContent("Reference-only");
+    expect(promptStatus).toHaveTextContent("proposal/beta-refresh");
+
+    expect(screen.getByTestId("charter-artifact-editor")).toHaveTextContent("Baseline: Editors");
   });
 
   it("supports keyboard navigation across the V2 stage rail", async () => {

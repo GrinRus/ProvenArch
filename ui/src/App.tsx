@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AppShell } from "./components/AppShell";
+import { BaselineGitPanel } from "./components/BaselineGitPanel";
 import { RuntimeProfileSettingsPanel } from "./components/RuntimeProfileSettingsPanel";
 import {
   AnalysisStagePanel,
@@ -180,13 +181,14 @@ export default function App() {
     if (activeStage !== "charter") {
       return;
     }
-    if (!wizardContractLoaded) {
+    const wizardContractPathAvailable = baselineEditorArtifacts.some((artifact) => artifact.path === "charter/wizard/step0-contract.json");
+    if (!wizardContractLoaded && wizardContractPathAvailable) {
       void loadWizardContract();
     }
     if (selectedEditorPath && selectedEditorLoadedPath !== selectedEditorPath) {
       void loadSelectedEditorContent(selectedEditorPath);
     }
-  }, [activeStage, loadSelectedEditorContent, loadWizardContract, selectedEditorLoadedPath, selectedEditorPath, wizardContractLoaded]);
+  }, [activeStage, baselineEditorArtifacts, loadSelectedEditorContent, loadWizardContract, selectedEditorLoadedPath, selectedEditorPath, wizardContractLoaded]);
 
   async function bootstrapApp() {
     await bootstrapRuns();
@@ -656,6 +658,12 @@ export default function App() {
 
       {activeStage === "charter" ? (
         <CharterStagePanel
+          wizardProjectName={wizardProjectName}
+          wizardScope={wizardScope}
+          wizardNfr={wizardNfr}
+          wizardRules={wizardRules}
+          gitStatus={gitStatus}
+          proposalBranch={proposalBranch}
           wizardPanel={
             <WizardContractPanel
               busy={busy}
@@ -672,7 +680,7 @@ export default function App() {
             />
           }
           gitPanel={
-            <PublishStagePanel
+            <BaselineGitPanel
               busy={busy}
               gitMessage={gitMessage}
               proposalBranch={proposalBranch}

@@ -161,6 +161,32 @@ Validation:
 - [x] `git diff --check`.
 - [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
 
+### Slice ExecPlan - 16C Charter workbench
+
+Status: done.
+
+Goals:
+- [x] Add a Charter wizard summary for project, scope, NFR priorities and rules before the editable form.
+- [x] Add domain/team card overview using existing baseline bundle artifact metadata, with explicit empty/partial states.
+- [x] Add baseline prompt bundle status covering prompt packs, live-consumed prompts, reference-only prompts and bundle warnings.
+- [x] Keep the existing charter artifact editor and Git helper actions available without changing backend APIs.
+
+Non-goals:
+- [x] No backend API, schema, runtime contract, CLI flag or workspace contract changes.
+- [x] Do not add a new cards API or infer domain/team ownership beyond existing artifact paths/metadata.
+- [x] No live E2E shell expansion beyond existing `init-inspect`.
+
+Implementation notes:
+- Reuse current wizard state, baseline bundle response and Git helper state.
+- Preserve existing baseline editor labels/buttons/tests while adding V2 summary surfaces.
+- Render missing card artifacts as explicit empty/partial state rather than inventing data.
+
+Validation:
+- [x] Focused UI unit tests for Charter summary, card overview and prompt bundle status.
+- [x] Browser visual QA for Charter on desktop and narrow viewport.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes
@@ -195,6 +221,7 @@ Validation:
 - 2026-05-28: Continuous backlog queue normalized this plan to the first active workstream; next implementation slice is `16A UI V2 shell foundation`.
 - 2026-05-28: Completed `16A UI V2 shell foundation`: shared stage status model, top strip runtime/Git metadata, V2 inspector selectors, Git publication panel, rail keyboard navigation and drawer a11y baseline. No backend/API/schema/live-shell changes.
 - 2026-05-28: Completed `16B Source + Readiness consolidation`: Source now has a repo table with explicit advanced-only analysis scope state, Readiness has workspace/repo/runtime/permission/artifact summary cards plus a compact runtime profile summary. No backend/API/schema/live-shell changes.
+- 2026-05-28: Completed `16C Charter workbench`: Charter now shows wizard summary, domain/team card overview, baseline prompt bundle status, explicit partial states for missing cards, and a no-404 empty editor selection before existing artifact editor/Git helper actions. No backend/API/schema/live-shell changes.
 
 ### Plan ID
 EP-20260527-live-e2e-ui-ux-operator-flow
