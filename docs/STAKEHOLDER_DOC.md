@@ -286,7 +286,7 @@ arch-workspace/
    - редактор baseline skills/prompts (с версионированием через git)  
    - запуск пайплайнов (init / refresh) в `Analysis` с run mission control, canonical step timeline, shard/log table, warning/error drilldown и pending permissions
    - logs activity drawer с dual-view (`event timeline` + `raw agent stream`)
-   - `Review` для evidence tabs, grouped artifact explorer, markdown/Mermaid preview, coverage/open-question/trust summary и explicit Domain Map partial state
+   - `Review` для evidence tabs, grouped artifact explorer, markdown/Mermaid preview, coverage/open-question/trust summary и artifact-derived Domain Map по `model/entities/*`, `model/edges/*`, `reports/agent-outputs/domains/*` с explicit partial states
    - `Ask` для async agent-backed Q&A через `POST /api/qa/runs`, with deterministic `POST /api/qa/ask` compatibility API
    - `Publish` для git helper actions и proposal branch
 

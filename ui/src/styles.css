@@ -1338,7 +1338,9 @@ code {
 .review-artifact-explorer,
 .review-evidence-preview,
 .review-intel,
-.review-domain-map-placeholder {
+.review-domain-map-placeholder,
+.domain-map-canvas,
+.domain-map-inspector {
   min-width: 0;
   padding: 0.72rem;
   border: 1px solid var(--line-soft);
@@ -1423,6 +1425,179 @@ code {
   grid-template-columns: minmax(0, 1fr) minmax(220px, 0.5fr);
   gap: 0.8rem;
   align-items: start;
+}
+
+.review-domain-map {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.48fr) minmax(260px, 0.62fr);
+  gap: 0.8rem;
+  align-items: start;
+}
+
+.domain-map-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 0.7rem;
+}
+
+.domain-map-empty {
+  display: grid;
+  gap: 0.24rem;
+  padding: 0.8rem;
+  border: 1px dashed var(--line);
+  border-radius: 0.48rem;
+  background: var(--surface);
+}
+
+.domain-map-empty span {
+  color: var(--ink-muted);
+  font-size: 0.86rem;
+}
+
+.domain-map-lanes {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.domain-map-lane {
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 0.48rem;
+  background: var(--surface);
+}
+
+.domain-map-lane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.55rem 0.62rem;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.domain-map-lane-head h3 {
+  margin: 0;
+  font-size: 0.86rem;
+}
+
+.domain-map-lane-head span {
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+  font-weight: 780;
+}
+
+.domain-map-node-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.55rem;
+  padding: 0.62rem;
+}
+
+.domain-map-node {
+  min-width: 0;
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.58rem;
+  border: 1px solid var(--line-soft);
+  border-left: 0.25rem solid var(--accent);
+  border-radius: 0.42rem;
+  background: var(--surface-muted);
+}
+
+.domain-map-node.domains {
+  border-left-color: var(--warn);
+}
+
+.domain-map-node.interfaces {
+  border-left-color: var(--ok);
+}
+
+.domain-map-node.data,
+.domain-map-node.external {
+  border-left-color: var(--err);
+}
+
+.domain-map-node.ownership {
+  border-left-color: var(--ink-muted);
+}
+
+.domain-map-node strong,
+.domain-map-node code {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.domain-map-node code {
+  margin-top: 0.18rem;
+  color: var(--ink-muted);
+  font-size: 0.76rem;
+}
+
+.domain-map-edge-list {
+  margin-top: 0.75rem;
+}
+
+.domain-map-edge-list ul,
+.domain-map-blockers ul,
+.domain-map-navigation ul {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.domain-map-edge {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(10rem, auto);
+  gap: 0.55rem;
+  align-items: center;
+  padding: 0.55rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 0.42rem;
+  background: var(--surface);
+}
+
+.domain-map-edge span {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.34rem;
+  align-items: center;
+}
+
+.domain-map-edge code {
+  overflow-wrap: anywhere;
+}
+
+.domain-map-inspector {
+  display: grid;
+  gap: 0.72rem;
+}
+
+.domain-map-blockers,
+.domain-map-navigation {
+  min-width: 0;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--line-soft);
+}
+
+.domain-map-blockers h3,
+.domain-map-navigation h3 {
+  margin: 0 0 0.42rem;
+  font-size: 0.9rem;
+}
+
+.domain-map-blockers li {
+  padding: 0.48rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 0.42rem;
+  background: var(--surface);
+  color: var(--ink-muted);
+  font-size: 0.84rem;
 }
 
 .run-table tbody tr {
@@ -1600,8 +1775,13 @@ code {
   }
 
   .review-workbench,
-  .review-domain-map-placeholder {
+  .review-domain-map-placeholder,
+  .review-domain-map {
     grid-template-columns: 1fr;
+  }
+
+  .domain-map-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -1642,7 +1822,12 @@ code {
     min-width: 0;
   }
 
-  .review-intel-grid {
+  .review-intel-grid,
+  .domain-map-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .domain-map-edge {
     grid-template-columns: 1fr;
   }
 

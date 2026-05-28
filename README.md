@@ -247,7 +247,7 @@ UI показывает то же состояние через stage-based cons
 - `Source` / `Readiness`: repo table, repo sources, `workspace.yaml`, validation diagnostics, readiness cards, doctor checklist и runtime profile summary;
 - `Charter`: wizard summary, domain/team card overview, baseline prompt bundle status и editor для `charter/*`/`skills/*`;
 - `Analysis`: run mission control, canonical `step0..step4` timeline, shard/log table with drilldown, event timeline, raw agent stream, pending permissions и cancel;
-- `Review`: evidence tabs, grouped artifact explorer, markdown/Mermaid preview, coverage/open-question/trust summary and Domain Map partial state for the next slice;
+- `Review`: evidence tabs, grouped artifact explorer, markdown/Mermaid preview, coverage/open-question/trust summary и artifact-derived Domain Map по `model/entities/*`, `model/edges/*`, `reports/agent-outputs/domains/*`;
 - `Proposals`: changelog/proposal artifacts and publication path;
 - `Ask`: async agent-backed Q&A поверх existing workspace artifacts через `POST /api/qa/runs`; legacy deterministic `POST /api/qa/ask` остаётся compatibility endpoint;
 - `Publish`: git commit/proposal branch helper actions.

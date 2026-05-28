@@ -620,6 +620,12 @@ describe("App", () => {
               { path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" },
               { path: "reports/findings/findings.md", kind: "report", label: "Findings" },
               { path: "reports/diagrams/c4-context.mmd", kind: "diagram", label: "C4 context" },
+              { path: "reports/agent-outputs/domains/payments-service.md", kind: "domain-report", label: "Payments domain" },
+              { path: "model/entities/repo.payments-service.yaml", kind: "model-entity", label: "Payments repo" },
+              { path: "model/entities/svc.payments.yaml", kind: "model-entity", label: "Payments Service" },
+              { path: "model/entities/team.platform.yaml", kind: "model-entity", label: "Platform Team" },
+              { path: "model/edges/edge.svc.payments.calls.svc.users.yaml", kind: "model-edge", label: "Payments calls Users" },
+              { path: "proposals/proposal-payments/proposal.md", kind: "proposal", label: "Payments proposal" },
             ],
           },
         },
@@ -629,6 +635,7 @@ describe("App", () => {
           "reports/coverage/open-questions.md": "- Clarify owners\n",
           "reports/findings/findings.md": "# Findings\n- Owner gap\n",
           "reports/diagrams/c4-context.mmd": "flowchart LR\n  A --> B\n",
+          "model/entities/svc.payments.yaml": "id: svc.payments\ntype: service\nname: Payments Service\n",
         },
       }),
     );
@@ -650,10 +657,53 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByTestId("run-artifact-content")).toHaveTextContent("# System overview"));
 
     fireEvent.click(screen.getByTestId("review-view-domain-map-tab"));
-    expect(screen.getByTestId("review-domain-map")).toHaveTextContent("planned for slice 16F");
+    const domainMap = screen.getByTestId("review-domain-map");
+    expect(screen.getByTestId("review-domain-map-canvas")).toHaveTextContent("Domain/service map");
+    expect(domainMap).toHaveTextContent("Payments domain");
+    expect(domainMap).toHaveTextContent("Payments Service");
+    expect(domainMap).toHaveTextContent("Platform Team");
+    expect(screen.getByTestId("review-domain-map-edge-list")).toHaveTextContent("calls");
+    expect(screen.getByTestId("review-domain-map-edge-list")).toHaveTextContent("svc.payments");
+    expect(screen.getByTestId("review-domain-map-edge-list")).toHaveTextContent("svc.users");
+    expect(screen.getByTestId("review-domain-map-inspector")).toHaveTextContent("coverage summary linked");
+    expect(screen.getByTestId("review-domain-map-inspector")).toHaveTextContent("Proposal artifacts ready");
+    expect(screen.getAllByTestId("review-domain-map-node").length).toBeGreaterThanOrEqual(4);
+
+    fireEvent.click(within(domainMap).getByRole("button", { name: /open map entity: model\/entities\/svc\.payments\.yaml/i }));
+    await waitFor(() => expect(screen.getByTestId("run-artifact-content")).toHaveTextContent("id: svc.payments"));
 
     fireEvent.click(screen.getByTestId("review-view-evidence-tab"));
     expect(screen.getByTestId("review-evidence-preview")).toHaveTextContent("Evidence preview");
+  });
+
+  it("renders an explicit sparse state for Review domain map without model artifacts", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runStarted: true,
+        runArtifacts: {
+          "run-1": {
+            run_id: "run-1",
+            artifacts: [
+              { path: "reports/as-is/overview.md", kind: "report", label: "As-is overview" },
+              { path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" },
+            ],
+          },
+        },
+        artifactText: {
+          "reports/coverage/open-questions.md": "",
+        },
+      }),
+    );
+
+    render(<App />);
+
+    await screen.findByTestId("review-panel");
+    fireEvent.click(screen.getByTestId("review-view-domain-map-tab"));
+
+    expect(screen.getByTestId("review-domain-map-empty")).toHaveTextContent("No derived model artifacts yet.");
+    expect(screen.getByTestId("review-domain-map-inspector")).toHaveTextContent("partial");
+    expect(screen.getByTestId("review-domain-map-inspector")).toHaveTextContent("Derived model entities are missing");
   });
 
   it("renders diagram artifacts without sending loading placeholder text to Mermaid", async () => {

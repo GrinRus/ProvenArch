@@ -247,6 +247,37 @@ Validation:
 Progress log:
 - 2026-05-28: Implemented Review Evidence Workbench with visible V2 selectors (`review-view-evidence-tab`, `review-view-domain-map-tab`, `review-artifact-explorer`, `review-evidence-preview`, `review-domain-map`, `review-citation-coverage`), grouped artifacts by workspace folder, preserved artifact/diagram open flow, and kept Domain Map as an explicit 16F partial state.
 
+### Slice ExecPlan - 16F Review domain map
+
+Status: done.
+
+Goals:
+- [x] Replace the Review Domain Map placeholder with a useful map workbench derived from existing selected-run artifacts.
+- [x] Show domain/service/model nodes from `model/entities/*` and domain agent outputs from `reports/agent-outputs/domains/*`.
+- [x] Show model edges from `model/edges/*` with relationship direction, relation type and evidence navigation.
+- [x] Add an ownership/coverage/cross-repo inspector that makes sparse or missing model data explicit.
+- [x] Preserve Review Evidence tab behavior and artifact open flow for model/entity/domain artifacts.
+
+Non-goals:
+- [x] No backend API, schema, runtime artifact contract, CLI flag or workspace contract changes.
+- [x] Do not parse or validate full model YAML in the browser; derive the map from artifact paths/labels and show partial states where content would be required.
+- [x] Do not add graph editing, approval persistence, proposal branch mutations or Publish gate behavior in this slice.
+- [x] No live E2E shell expansion beyond existing `init-inspect`.
+
+Implementation notes:
+- Reuse `nonDiagramArtifacts`, `diagramArtifacts`, `coverageSummary`, `openQuestions` and `onOpenArtifact`.
+- Add stable V2 selectors: `review-domain-map-canvas`, `review-domain-map-inspector`, `review-domain-map-node`, `review-domain-map-edge-list`, `review-domain-map-empty`.
+- Keep navigation artifact-backed via existing `ArtifactPathButton` and render missing ownership/cross-repo data as explicit partial state.
+
+Validation:
+- [x] Focused UI unit tests for populated model map, edge list, artifact navigation and sparse-model empty state.
+- [x] Browser visual QA for Review Domain Map on desktop and narrow viewport.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-28: Implemented Review Domain Map with visible V2 selectors (`review-domain-map-canvas`, `review-domain-map-inspector`, `review-domain-map-node`, `review-domain-map-edge-list`, `review-domain-map-empty`), model/entity/edge/domain artifact navigation, explicit sparse-model partial states, and no backend/API/schema/live-shell changes.
+
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes
