@@ -2567,21 +2567,336 @@ function mergeQARunHistory(run: QARunResponse, history: QARunResponse[], mode: "
   return [run, ...history].slice(0, 20);
 }
 
-export function PublishStagePanel(props: ComponentProps<typeof BaselineGitPanel>) {
+type PublishStageProps = ComponentProps<typeof BaselineGitPanel> & {
+  artifacts: Artifact[];
+  selectedArtifact: string;
+  selectedArtifactContent: string;
+  openQuestions: string;
+  onPreviewArtifact: (path: string) => void;
+};
+
+export function PublishStagePanel({
+  busy,
+  gitMessage,
+  proposalBranch,
+  gitStatus,
+  artifacts,
+  selectedArtifact,
+  selectedArtifactContent,
+  openQuestions,
+  onGitMessageChange,
+  onProposalBranchChange,
+  onCommit,
+  onCreateProposalBranch,
+  onPreviewArtifact,
+}: PublishStageProps) {
+  const [publishView, setPublishView] = useState<"preview" | "diff" | "evidence" | "checklist">("preview");
+  const [localSelectedPath, setLocalSelectedPath] = useState("");
+  const [copyStatus, setCopyStatus] = useState("");
+  const publishArtifacts = artifacts.filter((artifact) => artifact.path.trim().length > 0);
+  const effectiveSelectedPath =
+    (localSelectedPath && publishArtifacts.some((artifact) => artifact.path === localSelectedPath) ? localSelectedPath : "") ||
+    (selectedArtifact && publishArtifacts.some((artifact) => artifact.path === selectedArtifact) ? selectedArtifact : "") ||
+    publishArtifacts[0]?.path ||
+    "";
+  const selectedPublishArtifact = publishArtifacts.find((artifact) => artifact.path === effectiveSelectedPath);
+  const selectedPublishContent = selectedArtifact === effectiveSelectedPath ? selectedArtifactContent : "";
+  const folderSummaries = buildPublishFolderSummaries(publishArtifacts);
+  const gateItems = buildPublishGateItems({
+    artifactCount: publishArtifacts.length,
+    folderCount: folderSummaries.length,
+    gitMessage,
+    proposalBranch,
+    openQuestions,
+  });
+  const blockingGateItems = gateItems.filter((item) => item.tone === "error");
+  const warningGateItems = gateItems.filter((item) => item.tone === "warn");
+
+  useEffect(() => {
+    if (effectiveSelectedPath && selectedArtifact !== effectiveSelectedPath) {
+      onPreviewArtifact(effectiveSelectedPath);
+    }
+  }, [effectiveSelectedPath, selectedArtifact, onPreviewArtifact]);
+
+  function handleSelectPublishArtifact(path: string) {
+    setLocalSelectedPath(path);
+    setPublishView("preview");
+    onPreviewArtifact(path);
+  }
+
+  async function handleCopyCommitMessage() {
+    if (!navigator.clipboard) {
+      setCopyStatus("Clipboard unavailable in this browser.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(gitMessage);
+      setCopyStatus("Commit message copied.");
+    } catch (error) {
+      setCopyStatus(error instanceof Error ? error.message : "Commit message copy failed.");
+    }
+  }
+
   return (
     <div className="stage-stack" data-testid="publish-panel">
       <section className="panel stage-panel">
         <div className="stage-header">
           <div>
             <h1>Publish</h1>
-            <p className="hint">Commit architecture workspace changes or switch to a proposal branch for review.</p>
+            <p className="hint">Review workspace artifacts, check publication blockers and prepare Git commit/proposal branch handoff.</p>
           </div>
-          <StatusBadge tone="info">git-backed</StatusBadge>
+          <StatusBadge tone={blockingGateItems.length > 0 ? "error" : warningGateItems.length > 0 ? "warn" : publishArtifacts.length > 0 ? "ok" : "info"}>
+            {blockingGateItems.length > 0 ? "blocked" : warningGateItems.length > 0 ? "review" : publishArtifacts.length > 0 ? "ready" : "partial"}
+          </StatusBadge>
         </div>
       </section>
-      <BaselineGitPanel {...props} />
+
+      <div className="publish-review-room">
+        <section className="publish-diff-summary" data-testid="publish-diff-summary">
+          <div className="panel-subheader">
+            <div>
+              <h2>Folder diff summary</h2>
+              <p className="hint">Derived from current run artifacts; real Git diff remains a partial state until a backend diff API exists.</p>
+            </div>
+            <StatusBadge tone={publishArtifacts.length > 0 ? "ok" : "info"}>{publishArtifacts.length} refs</StatusBadge>
+          </div>
+          {folderSummaries.length === 0 ? (
+            <p className="empty-state">No generated workspace artifacts are available for publication yet.</p>
+          ) : (
+            <div className="publish-folder-list">
+              {folderSummaries.map((summary) => (
+                <div key={summary.folder} className="publish-folder-row">
+                  <div>
+                    <strong>{summary.folder}</strong>
+                    <span>{summary.count} artifact refs</span>
+                  </div>
+                  <span>{summary.sample}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="publish-artifact-list" role="list" aria-label="publish artifact preview list">
+            {publishArtifacts.slice(0, 12).map((artifact) => (
+              <div key={artifact.path} role="listitem">
+                <button
+                  type="button"
+                  className={`publish-artifact-row${effectiveSelectedPath === artifact.path ? " is-selected" : ""}`}
+                  onClick={() => handleSelectPublishArtifact(artifact.path)}
+                  aria-pressed={effectiveSelectedPath === artifact.path}
+                >
+                  <span>{artifact.label || artifact.path}</span>
+                  <code>{artifact.path}</code>
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="publish-preview-panel">
+          <div className="publish-preview-tabs" role="tablist" aria-label="Publish preview tabs" data-testid="publish-preview-tabs">
+            {(["preview", "diff", "evidence", "checklist"] as const).map((view) => (
+              <button
+                key={view}
+                type="button"
+                className={publishView === view ? "is-active" : ""}
+                onClick={() => setPublishView(view)}
+                aria-selected={publishView === view}
+                role="tab"
+              >
+                {publishTabLabel(view)}
+              </button>
+            ))}
+          </div>
+          <div className="publish-tab-panel">
+            {publishView === "preview" ? (
+              <>
+                <h2>Selected artifact preview</h2>
+                {selectedPublishArtifact ? (
+                  <>
+                    <p className="hint">{selectedPublishArtifact.path}</p>
+                    {selectedPublishContent ? <pre>{selectedPublishContent}</pre> : <p className="empty-state">Select an artifact to load its preview in this Publish room.</p>}
+                  </>
+                ) : (
+                  <p className="empty-state">No artifact selected for publication preview.</p>
+                )}
+              </>
+            ) : null}
+            {publishView === "diff" ? (
+              <>
+                <h2>Git diff</h2>
+                <p className="empty-state">Partial state: current UI APIs expose generated artifact refs and Git actions, but not line-level Git diff data.</p>
+                <p className="hint">Use the folder summary and selected artifact preview before committing; a future backend slice can replace this with real diff hunks.</p>
+              </>
+            ) : null}
+            {publishView === "evidence" ? (
+              <>
+                <h2>Evidence before commit</h2>
+                {openQuestions.trim() ? <pre>{openQuestions}</pre> : <p className="hint">No open-question artifact content is currently loaded.</p>}
+                <p className="hint">{folderSummaries.length} workspace folders have artifact refs in this publication view.</p>
+              </>
+            ) : null}
+            {publishView === "checklist" ? (
+              <>
+                <h2>Publication checklist</h2>
+                <ul className="publish-checklist">
+                  {gateItems.map((item) => (
+                    <li key={item.label}>
+                      <StatusBadge tone={item.tone}>{item.label}</StatusBadge>
+                      <span>{item.detail}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+          </div>
+        </section>
+
+        <aside className="publish-side-column">
+          <section className="publish-gate-panel" data-testid="publish-gate-panel">
+            <div className="panel-subheader">
+              <div>
+                <h2>Publish gate</h2>
+                <p className="hint">Checks are advisory in this UI-only slice; Git commands stay explicit operator actions.</p>
+              </div>
+              <StatusBadge tone={blockingGateItems.length > 0 ? "error" : warningGateItems.length > 0 ? "warn" : "ok"}>
+                {blockingGateItems.length > 0 ? "blocked" : warningGateItems.length > 0 ? "warnings" : "ready"}
+              </StatusBadge>
+            </div>
+            <ul className="publish-checklist">
+              {gateItems.map((item) => (
+                <li key={item.label}>
+                  <StatusBadge tone={item.tone}>{item.label}</StatusBadge>
+                  <span>{item.detail}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <section className="publish-commit-plan" data-testid="publish-commit-plan">
+            <div className="panel-subheader">
+              <div>
+                <h2>Commit plan</h2>
+                <p className="hint">Prepared commit/proposal branch actions use the existing Git API.</p>
+              </div>
+              <StatusBadge tone={gitStatus ? "ok" : "info"}>{gitStatus ? "updated" : "pending"}</StatusBadge>
+            </div>
+            <dl className="compact-defs">
+              <div>
+                <dt>Folders</dt>
+                <dd>{folderSummaries.map((summary) => summary.folder).join(", ") || "No generated artifact folders yet"}</dd>
+              </div>
+              <div>
+                <dt>Proposal branch</dt>
+                <dd>{proposalBranch || "proposal branch not prepared"}</dd>
+              </div>
+            </dl>
+            <label htmlFor="publishGitMessage">Commit message</label>
+            <input id="publishGitMessage" value={gitMessage} onChange={(event) => onGitMessageChange(event.target.value)} />
+            <div className="actions publish-actions">
+              <button type="button" onClick={onCommit} disabled={busy} data-testid="publish-commit-selected-btn">
+                <span data-testid="git-commit-btn">Commit selected artifacts</span>
+              </button>
+              <button type="button" className="link-button" onClick={() => void handleCopyCommitMessage()}>
+                Copy commit message
+              </button>
+            </div>
+            <label htmlFor="publishProposalBranch">Proposal branch</label>
+            <input id="publishProposalBranch" value={proposalBranch} onChange={(event) => onProposalBranchChange(event.target.value)} />
+            <button type="button" onClick={onCreateProposalBranch} disabled={busy}>
+              <span data-testid="git-proposal-branch-btn">Create/Switch proposal branch</span>
+            </button>
+            {copyStatus ? <p className="status ok">{copyStatus}</p> : null}
+            {gitStatus ? <p className="status ok">{gitStatus}</p> : null}
+          </section>
+        </aside>
+      </div>
     </div>
   );
+}
+
+type PublishGateItem = {
+  label: string;
+  detail: string;
+  tone: "info" | "ok" | "warn" | "error";
+};
+
+function buildPublishFolderSummaries(artifacts: Artifact[]): Array<{ folder: string; count: number; sample: string }> {
+  const grouped = new Map<string, Artifact[]>();
+  for (const artifact of artifacts) {
+    const folder = publishFolderLabel(artifact.path);
+    grouped.set(folder, [...(grouped.get(folder) ?? []), artifact]);
+  }
+  return Array.from(grouped.entries())
+    .map(([folder, items]) => ({
+      folder,
+      count: items.length,
+      sample: items.slice(0, 2).map((item) => item.label || item.path).join(", "),
+    }))
+    .sort((left, right) => left.folder.localeCompare(right.folder));
+}
+
+function publishFolderLabel(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  if (parts[0] === "reports" && parts[1]) {
+    return `reports/${parts[1]}`;
+  }
+  return parts[0] || "workspace";
+}
+
+function buildPublishGateItems({
+  artifactCount,
+  folderCount,
+  gitMessage,
+  proposalBranch,
+  openQuestions,
+}: {
+  artifactCount: number;
+  folderCount: number;
+  gitMessage: string;
+  proposalBranch: string;
+  openQuestions: string;
+}): PublishGateItem[] {
+  const openQuestionLines = openQuestions
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^[-*]\s*/, ""))
+    .filter((line) => line.length > 0 && !line.startsWith("#"));
+  const openQuestionCount = openQuestionLines.length;
+  const firstOpenQuestion = openQuestionLines[0];
+  return [
+    {
+      label: artifactCount > 0 ? "Artifacts" : "Blocked",
+      detail: artifactCount > 0 ? `${artifactCount} artifact refs across ${folderCount} folders.` : "Run analysis before publishing workspace artifacts.",
+      tone: artifactCount > 0 ? "ok" : "error",
+    },
+    {
+      label: openQuestionCount > 0 ? "Questions" : "Evidence",
+      detail: openQuestionCount > 0 ? `${openQuestionCount} open question lines should be reviewed before commit. First: ${firstOpenQuestion}` : "No loaded open-question blockers.",
+      tone: openQuestionCount > 0 ? "warn" : "ok",
+    },
+    {
+      label: gitMessage.trim() ? "Message" : "Message",
+      detail: gitMessage.trim() ? gitMessage : "Commit message is empty.",
+      tone: gitMessage.trim() ? "ok" : "warn",
+    },
+    {
+      label: proposalBranch.trim() ? "Branch" : "Branch",
+      detail: proposalBranch.trim() ? proposalBranch : "Proposal branch is optional but recommended for review.",
+      tone: proposalBranch.trim() ? "ok" : "info",
+    },
+  ];
+}
+
+function publishTabLabel(view: "preview" | "diff" | "evidence" | "checklist"): string {
+  if (view === "preview") {
+    return "Preview";
+  }
+  if (view === "diff") {
+    return "Diff";
+  }
+  if (view === "evidence") {
+    return "Evidence";
+  }
+  return "Checklist";
 }
 
 export function RuntimeSettingsStagePanel(props: ComponentProps<typeof RuntimeProfileSettingsPanel>) {

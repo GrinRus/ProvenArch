@@ -761,10 +761,15 @@ export default function App() {
           gitMessage={gitMessage}
           proposalBranch={proposalBranch}
           gitStatus={gitStatus}
+          artifacts={[...nonDiagramArtifacts, ...diagramArtifacts]}
+          selectedArtifact={selectedArtifact}
+          selectedArtifactContent={selectedArtifactContent}
+          openQuestions={openQuestions}
           onGitMessageChange={setGitMessage}
           onProposalBranchChange={setProposalBranch}
           onCommit={() => void handleGitCommit()}
           onCreateProposalBranch={() => void handleCreateProposalBranch()}
+          onPreviewArtifact={(path) => void handleOpenArtifact(path)}
         />
       ) : null}
 

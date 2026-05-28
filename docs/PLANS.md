@@ -340,6 +340,37 @@ Validation:
 Progress log:
 - 2026-05-28: Implemented Ask read-only Q&A console with V2 selectors (`qa-run-history`, `qa-answer-panel`, `qa-citations-panel`, `qa-readonly-safety-panel`), existing async QA APIs, selected-run audit links (`context-pack.json`, `qa-answer.json`, `runtime-execution.json`), optional QA-smoke assertions and explicit partial state for structured related entities/edges. No backend/API/schema/runtime contract/live-shell expansion changes.
 
+### Slice ExecPlan - 16I Publish gate
+
+Status: done.
+
+Goals:
+- [x] Replace the basic Publish Git helper surface with a Git Review Room layout.
+- [x] Show folder-level workspace artifact summary, selected artifact preview and explicit diff partial state using existing artifact data only.
+- [x] Add publish gate/checklist/blockers, commit plan, proposal branch path and prepared commit-message copy action.
+- [x] Preserve existing Git commit/proposal branch mutations and visible operator selectors while adding V2 selectors.
+
+Non-goals:
+- [x] No backend API, schema, runtime artifact contract, CLI flag or workspace contract changes.
+- [x] Do not implement a Git diff API, artifact selection persistence or approval workflow in this slice.
+- [x] Do not expand release-facing live E2E scenarios or reason taxonomy.
+- [x] Do not restore hidden compatibility controls.
+
+Implementation notes:
+- Reuse existing selected-run artifact index, selected artifact content, open questions, Git message/status and proposal branch state.
+- Add stable V2 selectors: `publish-diff-summary`, `publish-preview-tabs`, `publish-gate-panel`, `publish-commit-plan`, `publish-commit-selected-btn`.
+- Keep current Git helper actions visible and mutation-compatible with `/api/git/commit` and `/api/git/proposal-branch`.
+- Render missing real Git diff/dirty folder data as explicit partial state until a separate backend slice exposes it.
+
+Validation:
+- [x] Focused UI unit tests for folder summary, selected artifact preview, publish gate/checklist, commit plan and Git actions.
+- [x] Browser visual QA for Publish on desktop and narrow viewport.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-28: Implemented Publish Git Review Room with folder artifact summary, selected artifact preview, advisory publish gate, commit plan, prepared message copy action and preserved Git commit/proposal branch mutations/selectors. Added V2 selectors (`publish-diff-summary`, `publish-preview-tabs`, `publish-gate-panel`, `publish-commit-plan`, `publish-commit-selected-btn`), explicit partial state for real Git diff data and desktop/mobile browser QA screenshots. No backend/API/schema/runtime contract/live-shell expansion changes.
+
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes

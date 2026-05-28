@@ -289,7 +289,7 @@ arch-workspace/
    - `Review` для evidence tabs, grouped artifact explorer, markdown/Mermaid preview, coverage/open-question/trust summary и artifact-derived Domain Map по `model/entities/*`, `model/edges/*`, `reports/agent-outputs/domains/*` с explicit partial states
    - `Proposals` для review room по proposal/changelog packages: preview/evidence/changelog/diff tabs, quality blockers и publication path перед `Publish`
    - `Ask` для async agent-backed Q&A через `POST /api/qa/runs`, with deterministic `POST /api/qa/ask` compatibility API
-   - `Publish` для git helper actions и proposal branch
+   - `Publish` для Git Review Room: folder-level artifact summary, selected artifact preview, explicit diff partial state, publish gate/checklist, commit plan, prepared commit-message copy action и proposal branch
 
 3) **Orchestrator (локальный сервис, Go)**  
    - управляет шагами pipeline  

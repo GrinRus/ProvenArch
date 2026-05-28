@@ -250,7 +250,7 @@ UI показывает то же состояние через stage-based cons
 - `Review`: evidence tabs, grouped artifact explorer, markdown/Mermaid preview, coverage/open-question/trust summary и artifact-derived Domain Map по `model/entities/*`, `model/edges/*`, `reports/agent-outputs/domains/*`;
 - `Proposals`: proposal/changelog review room with package list, preview/evidence/changelog/diff tabs, quality blockers and publication path;
 - `Ask`: async agent-backed Q&A поверх existing workspace artifacts через `POST /api/qa/runs`, with run history, selected answer, confidence/citations/unresolved and read-only safety/audit artifact links; legacy deterministic `POST /api/qa/ask` остаётся compatibility endpoint;
-- `Publish`: git commit/proposal branch helper actions.
+- `Publish`: Git Review Room with folder-level artifact summary, selected artifact preview, explicit diff partial state, publish gate/checklist, commit plan, prepared commit-message copy action and proposal branch helper.
 
 Можно задавать вопросы по generated workspace artifacts. В UI целевой путь — async Q&A run: ACP собирает deterministic `context-pack.json`, запускает runtime step `qa.ask` через selected provider/fake baseline, валидирует `qa-answer.json` и сохраняет audit artifacts только в `reports/taskruns/<run_id>/qa/`.
 

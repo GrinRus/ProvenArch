@@ -771,6 +771,59 @@ describe("App", () => {
     expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
   });
 
+  it("renders the Publish gate with folder summary, preview tabs, commit plan, and Git actions", async () => {
+    const fetchMock = createFetchMock({
+      runStarted: true,
+      runArtifacts: {
+        "run-1": {
+          run_id: "run-1",
+          artifacts: [
+            { path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" },
+            { path: "model/entities/payments-service.yaml", kind: "model", label: "payments-service" },
+            { path: "proposals/adr-001.md", kind: "proposal", label: "ADR 001" },
+            { path: "reports/changelog/2026-04-03.md", kind: "changelog", label: "Iteration changelog" },
+          ],
+        },
+      },
+      artifactText: {
+        "reports/coverage/summary.md": "Coverage ready for publication.\n",
+        "reports/coverage/open-questions.md": "- Confirm owner sign-off\n",
+        "model/entities/payments-service.yaml": "id: payments-service\n",
+        "proposals/adr-001.md": "# ADR 001\n",
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("stage-publish"));
+
+    expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("reports/coverage"));
+    expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("model");
+    expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("proposals");
+    expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("Confirm owner sign-off");
+    expect(screen.getByTestId("publish-commit-plan")).toHaveTextContent("proposal/beta-refresh");
+    expect(screen.getByTestId("publish-commit-selected-btn")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Coverage summary.*reports\/coverage\/summary\.md/i }));
+    await waitFor(() => expect(screen.getByTestId("publish-panel")).toHaveTextContent("Coverage ready for publication."));
+
+    fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
+    expect(screen.getByText(/current UI APIs expose generated artifact refs/i)).toBeInTheDocument();
+
+    const commitInput = screen.getByLabelText("Commit message");
+    fireEvent.change(commitInput, { target: { value: "docs: publish architecture workspace" } });
+    fireEvent.click(screen.getByTestId("publish-commit-selected-btn"));
+    await waitFor(() => expect(screen.getByTestId("publish-commit-plan")).toHaveTextContent("committed: docs: publish architecture workspace"));
+
+    fireEvent.click(screen.getByTestId("git-proposal-branch-btn"));
+    await waitFor(() => expect(screen.getByTestId("publish-commit-plan")).toHaveTextContent("checked out proposal/beta-refresh"));
+
+    expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/commit")).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/proposal-branch")).toHaveLength(1);
+  });
+
   it("renders diagram artifacts without sending loading placeholder text to Mermaid", async () => {
     const mermaid = await import("mermaid");
     vi.mocked(mermaid.default.render).mockClear();

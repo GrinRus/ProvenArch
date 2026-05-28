@@ -247,7 +247,7 @@ Release workflow hardening:
 - run cancel endpoint:
   - `POST /api/pipeline/runs/<run_id>/cancel`
   - happy-path `202`, `404 run_not_found`, `409 run_not_cancelable`, `400 invalid_request_body`
-- UI path: open workspace, validate, run, inspect coverage/questions through stage rail controls (`Source / Readiness / Analysis / Review / Ask`)
+- UI path: open workspace, validate, run, inspect coverage/questions/publish gate through stage rail controls (`Source / Readiness / Analysis / Review / Ask / Publish`)
 - UI run logs surface:
   - compact activity drawer render
   - log polling/append without duplicates
@@ -260,6 +260,8 @@ Release workflow hardening:
 - UI Ask UX smoke:
   - optional `UI_E2E_QA_SMOKE=1` checks run history, read-only safety, answer panel, citations panel and context-pack/runtime-execution links
   - screenshot refs are evidence-only and do not influence release verdicts
+- UI Publish gate coverage:
+  - deterministic UI tests check folder summary, selected artifact preview, explicit diff partial state, publish gate/checklist, commit plan and existing Git actions
 - UI run lifecycle operability:
   - bootstrap auto-select newest active run
   - если выбранный run исчезает из list endpoint и replacement доступен, UI переключается на следующий run; если list endpoint временно пуст, но status endpoint ещё жив, selection сохраняется
