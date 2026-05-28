@@ -118,8 +118,8 @@ acp serve \
 
 В UI:
 
-1. `Source`: выберите GitHub/GitLab URL или local checkout folder и docs imports folder.
-2. `Readiness`: сохраните и провалидируйте `workspace.yaml`, затем запустите readiness checks; для первого walkthrough используйте `fake`.
+1. `Source`: выберите GitHub/GitLab URL или local checkout folder и docs imports folder; repo table покажет источник, ref и validation state.
+2. `Readiness`: сохраните и провалидируйте `workspace.yaml`, затем запустите readiness checks; summary cards покажут workspace/repo/runtime/permissions/artifacts, для первого walkthrough используйте `fake`.
 3. `Charter`: проверьте стартовый architecture charter и baseline prompts.
 4. `Analysis`: запустите первый `init` analysis и следите за run status/logs.
 5. `Review` / `Proposals` / `Ask` / `Publish`: просмотрите coverage, artifacts, diagrams, proposals, задайте read-only Q&A и подготовьте git changes.
@@ -244,7 +244,7 @@ model/entities/, model/edges/     # derived entity-per-file model
 
 UI показывает то же состояние через stage-based console:
 
-- `Source` / `Readiness`: repo sources, `workspace.yaml`, validation diagnostics, doctor checklist и runtime profile;
+- `Source` / `Readiness`: repo table, repo sources, `workspace.yaml`, validation diagnostics, readiness cards, doctor checklist и runtime profile summary;
 - `Analysis`: run status, warnings, event timeline, raw agent stream, pending permissions и cancel;
 - `Review` / `Proposals`: coverage, artifacts, diagram previews, changelog/proposal artifacts;
 - `Ask`: async agent-backed Q&A поверх existing workspace artifacts через `POST /api/qa/runs`; legacy deterministic `POST /api/qa/ask` остаётся compatibility endpoint;

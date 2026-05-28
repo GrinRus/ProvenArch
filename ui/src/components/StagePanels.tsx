@@ -14,7 +14,11 @@ import type {
   EditableArtifactOption,
   GuidedRepo,
   RepoSourceMode,
+  RuntimeExecutionValues,
+  RuntimePermissionValues,
   RuntimePermissionRequest,
+  RuntimeStepProviderValues,
+  RuntimeTimeoutValues,
   RunListItem,
   RunLogEntry,
   RunStatusResponse,
@@ -91,6 +95,8 @@ export function SourceStagePanel({
           <strong>{setupRuntime === "headless" ? setupRuntimeProvider : setupRuntime}</strong>
         </div>
       </div>
+
+      <SourceRepoTable guidedRepos={guidedRepos} validateResult={validateResult} validationDiagnosticsByRepo={validationDiagnosticsByRepo} />
 
       <div className="form-section">
         <h2>Repository sources</h2>
@@ -210,6 +216,11 @@ export type ReadinessStageProps = {
   onCheckDoctor: () => void;
   onRunFirstAnalysis: () => void;
   runtimeSettingsPanel: ReactNode;
+  artifactCount: number;
+  runtimeTimeoutEffective: RuntimeTimeoutValues;
+  runtimeExecutionEffective: RuntimeExecutionValues;
+  runtimePermissionEffective: RuntimePermissionValues;
+  runtimeStepProviderEffective: Partial<RuntimeStepProviderValues>;
 };
 
 export function ReadinessStagePanel({
@@ -227,6 +238,11 @@ export function ReadinessStagePanel({
   onCheckDoctor,
   onRunFirstAnalysis,
   runtimeSettingsPanel,
+  artifactCount,
+  runtimeTimeoutEffective,
+  runtimeExecutionEffective,
+  runtimePermissionEffective,
+  runtimeStepProviderEffective,
 }: ReadinessStageProps) {
   const validated = validateResult?.ok === true;
   return (
@@ -238,6 +254,23 @@ export function ReadinessStagePanel({
         </div>
         <StatusBadge tone={validated ? "ok" : validateResult ? "error" : "info"}>{validated ? "ready" : validateResult ? "blocked" : "unchecked"}</StatusBadge>
       </div>
+
+      <ReadinessSummaryCards
+        validateResult={validateResult}
+        validationDiagnosticsByRepo={validationDiagnosticsByRepo}
+        doctorResult={doctorResult}
+        setupRuntime={setupRuntime}
+        setupRuntimeProvider={setupRuntimeProvider}
+        artifactCount={artifactCount}
+        runtimePermissionEffective={runtimePermissionEffective}
+      />
+
+      <RuntimeProfileSummary
+        runtimeTimeoutEffective={runtimeTimeoutEffective}
+        runtimeExecutionEffective={runtimeExecutionEffective}
+        runtimePermissionEffective={runtimePermissionEffective}
+        runtimeStepProviderEffective={runtimeStepProviderEffective}
+      />
 
       <div className="columns compact">
         <div>
@@ -292,6 +325,71 @@ export function ReadinessStagePanel({
   );
 }
 
+function SourceRepoTable({
+  guidedRepos,
+  validateResult,
+  validationDiagnosticsByRepo,
+}: {
+  guidedRepos: GuidedRepo[];
+  validateResult: ValidateResponse | null;
+  validationDiagnosticsByRepo: Array<[string, Diagnostic[]]>;
+}) {
+  const diagnosticsByRepo = new Map(validationDiagnosticsByRepo);
+  const resolvedByName = new Map((validateResult?.resolved_repos ?? []).map((repo) => [repo.name, repo]));
+
+  return (
+    <section className="subsection source-table-section" data-testid="source-repo-table">
+      <div className="section-heading-row">
+        <h2>Source repository table</h2>
+        <StatusBadge tone={validateResult?.ok ? "ok" : validateResult ? "error" : "info"}>{validateResult?.ok ? "resolved" : validateResult ? "blocked" : "draft"}</StatusBadge>
+      </div>
+      <div className="run-table-wrap">
+        <table className="run-table source-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Source</th>
+              <th>Ref</th>
+              <th>Analysis include/exclude</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {guidedRepos.map((repo) => {
+              const diagnostics = diagnosticsByRepo.get(repo.name) ?? [];
+              const hasErrors = diagnostics.some((diagnostic) => diagnostic.level === "error");
+              const hasWarnings = diagnostics.some((diagnostic) => diagnostic.level === "warning");
+              const resolved = resolvedByName.get(repo.name);
+              const statusTone = hasErrors ? "error" : hasWarnings ? "warn" : resolved ? "ok" : validateResult ? "warn" : "info";
+              const statusLabel = hasErrors ? "blocked" : hasWarnings ? "warning" : resolved ? "resolved" : validateResult ? "not resolved" : "draft";
+              const sourceValue = repo.mode === "path" ? repo.path || "local path missing" : repo.git_url || "Git URL missing";
+              return (
+                <tr key={`source-row-${repo.id}`}>
+                  <td>
+                    <strong>{repo.name || "unnamed repo"}</strong>
+                  </td>
+                  <td>
+                    <span className="source-mode-label">{repo.mode === "path" ? "Local" : "Git URL"}</span>
+                    <code>{sourceValue}</code>
+                  </td>
+                  <td>{repo.ref || resolved?.ref || "current/default"}</td>
+                  <td>
+                    <span className="status warn">Advanced workspace.yaml only</span>
+                  </td>
+                  <td>
+                    <StatusBadge tone={statusTone}>{statusLabel}</StatusBadge>
+                    {diagnostics.length > 0 ? <p className="hint">{diagnostics.length} diagnostic(s)</p> : null}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 export function WorkspaceValidationResult({
   validateResult,
   validationDiagnosticsByRepo,
@@ -336,6 +434,136 @@ export function WorkspaceValidationResult({
       ))}
     </div>
   );
+}
+
+function ReadinessSummaryCards({
+  validateResult,
+  validationDiagnosticsByRepo,
+  doctorResult,
+  setupRuntime,
+  setupRuntimeProvider,
+  artifactCount,
+  runtimePermissionEffective,
+}: {
+  validateResult: ValidateResponse | null;
+  validationDiagnosticsByRepo: Array<[string, Diagnostic[]]>;
+  doctorResult: DoctorResponse | null;
+  setupRuntime: string;
+  setupRuntimeProvider: string;
+  artifactCount: number;
+  runtimePermissionEffective: RuntimePermissionValues;
+}) {
+  const diagnostics = validationDiagnosticsByRepo.flatMap(([, items]) => items);
+  const runtimeCheck = doctorResult?.checks.find((check) => check.id === "runtime_provider");
+  const artifactCheck = doctorResult?.checks.find((check) => check.id === "embedded_ui");
+  const permissionMode = String(runtimePermissionEffective.mode ?? "trusted_full_access");
+  return (
+    <section className="readiness-card-grid" aria-label="readiness summary" data-testid="readiness-summary-cards">
+      <ReadinessCard
+        title="Workspace"
+        tone={validateResult?.ok ? "ok" : validateResult ? "error" : "info"}
+        status={validateResult?.ok ? "valid" : validateResult ? "blocked" : "unchecked"}
+        detail={validateResult?.workspace ?? "workspace manifest has not been validated yet"}
+      />
+      <ReadinessCard
+        title="Repositories"
+        tone={diagnostics.some((diagnostic) => diagnostic.level === "error") ? "error" : diagnostics.length > 0 ? "warn" : validateResult?.ok ? "ok" : "info"}
+        status={`${validateResult?.resolved_repos?.length ?? 0} resolved`}
+        detail={diagnostics.length > 0 ? `${diagnostics.length} diagnostic(s) across repo/workspace sources` : "repo source diagnostics clear or not checked yet"}
+      />
+      <ReadinessCard
+        title="Runtime provider"
+        tone={doctorTone(runtimeCheck?.status) ?? (setupRuntime === "fake" ? "ok" : "warn")}
+        status={setupRuntime === "headless" ? setupRuntimeProvider : "fake"}
+        detail={runtimeCheck?.message ?? "doctor check has not run in this session"}
+      />
+      <ReadinessCard
+        title="Permissions"
+        tone={permissionMode === "trusted_full_access" ? "warn" : "ok"}
+        status={permissionMode}
+        detail={`approval channel: ${String(runtimePermissionEffective.approval_channel ?? "fail_fast")}`}
+      />
+      <ReadinessCard
+        title="Artifacts"
+        tone={artifactCount > 0 ? "ok" : (doctorTone(artifactCheck?.status) ?? "info")}
+        status={artifactCount > 0 ? `${artifactCount} available` : "none yet"}
+        detail={artifactCount > 0 ? "selected run artifacts are ready for review" : artifactCheck?.message ?? "run analysis to produce review artifacts"}
+      />
+    </section>
+  );
+}
+
+function RuntimeProfileSummary({
+  runtimeTimeoutEffective,
+  runtimeExecutionEffective,
+  runtimePermissionEffective,
+  runtimeStepProviderEffective,
+}: {
+  runtimeTimeoutEffective: RuntimeTimeoutValues;
+  runtimeExecutionEffective: RuntimeExecutionValues;
+  runtimePermissionEffective: RuntimePermissionValues;
+  runtimeStepProviderEffective: Partial<RuntimeStepProviderValues>;
+}) {
+  const providerValues = Object.values(runtimeStepProviderEffective).filter(Boolean);
+  const uniqueProviders = [...new Set(providerValues)];
+  return (
+    <section className="runtime-profile-summary" data-testid="readiness-runtime-summary">
+      <div className="section-heading-row">
+        <h2>Runtime profile summary</h2>
+        <StatusBadge tone={String(runtimePermissionEffective.mode) === "trusted_full_access" ? "warn" : "ok"}>
+          {String(runtimePermissionEffective.mode ?? "trusted_full_access")}
+        </StatusBadge>
+      </div>
+      <div className="runtime-summary-grid">
+        <div>
+          <span className="metric-label">Timeouts</span>
+          <strong>
+            step {runtimeTimeoutEffective.step_timeout_sec}s / pipeline {runtimeTimeoutEffective.pipeline_timeout_sec}s
+          </strong>
+        </div>
+        <div>
+          <span className="metric-label">Execution</span>
+          <strong>
+            {String(runtimeExecutionEffective.strategy)} / max {String(runtimeExecutionEffective.max_parallel_tasks)}
+          </strong>
+        </div>
+        <div>
+          <span className="metric-label">Failure policy</span>
+          <strong>{String(runtimeExecutionEffective.failure_policy)}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Step providers</span>
+          <strong>{uniqueProviders.length > 0 ? uniqueProviders.join(", ") : "default provider"}</strong>
+        </div>
+      </div>
+      <p className="hint">Advanced runtime settings remain available below for exact persisted/effective/source values.</p>
+    </section>
+  );
+}
+
+function ReadinessCard({ title, tone, status, detail }: { title: string; tone: "info" | "ok" | "warn" | "error"; status: string; detail: string }) {
+  return (
+    <article className={`readiness-card ${tone}`}>
+      <div className="section-heading-row">
+        <h3>{title}</h3>
+        <StatusBadge tone={tone}>{status}</StatusBadge>
+      </div>
+      <p className="hint">{detail}</p>
+    </article>
+  );
+}
+
+function doctorTone(status?: DoctorResponse["checks"][number]["status"]): "ok" | "warn" | "error" | undefined {
+  if (status === "pass") {
+    return "ok";
+  }
+  if (status === "warn") {
+    return "warn";
+  }
+  if (status === "fail") {
+    return "error";
+  }
+  return undefined;
 }
 
 function DoctorChecklist({ doctorResult }: { doctorResult: DoctorResponse }) {

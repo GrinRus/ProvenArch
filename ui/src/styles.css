@@ -784,6 +784,89 @@ code {
   margin-bottom: 0.55rem;
 }
 
+.source-table-section {
+  margin-bottom: 0.75rem;
+}
+
+.source-table td {
+  min-width: 8rem;
+}
+
+.source-table code {
+  display: block;
+  max-width: 24rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-mode-label {
+  display: inline-flex;
+  margin-bottom: 0.16rem;
+  color: var(--ink-muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.readiness-card-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.62rem;
+  margin-bottom: 0.75rem;
+}
+
+.readiness-card,
+.runtime-profile-summary {
+  min-width: 0;
+  padding: 0.72rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 0.48rem;
+  background: var(--surface-muted);
+}
+
+.readiness-card.ok {
+  border-color: rgba(21, 128, 61, 0.2);
+  background: var(--ok-soft);
+}
+
+.readiness-card.warn {
+  border-color: rgba(161, 98, 7, 0.2);
+  background: var(--warn-soft);
+}
+
+.readiness-card.error {
+  border-color: rgba(180, 35, 24, 0.2);
+  background: var(--err-soft);
+}
+
+.runtime-profile-summary {
+  margin-bottom: 0.8rem;
+  background: var(--surface);
+}
+
+.runtime-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.62rem;
+  margin-top: 0.62rem;
+}
+
+.runtime-summary-grid > div {
+  min-width: 0;
+  padding: 0.6rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 0.42rem;
+  background: var(--surface-muted);
+}
+
+.runtime-summary-grid strong {
+  display: block;
+  margin-top: 0.18rem;
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+}
+
 .metric-tile {
   min-height: 4rem;
   display: grid;
@@ -1080,6 +1163,11 @@ code {
   .repo-field-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .readiness-card-grid,
+  .runtime-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 900px) {
@@ -1173,7 +1261,9 @@ code {
   .columns,
   .columns.compact,
   .metric-grid,
-  .repo-field-grid {
+  .repo-field-grid,
+  .readiness-card-grid,
+  .runtime-summary-grid {
     grid-template-columns: 1fr;
   }
 

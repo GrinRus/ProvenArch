@@ -135,6 +135,32 @@ Validation:
 - [x] `git diff --check`.
 - [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
 
+### Slice ExecPlan - 16B Source + Readiness consolidation
+
+Status: done.
+
+Goals:
+- [x] Add a Source repo table with name, source, ref, analysis include/exclude and validation status.
+- [x] Preserve Git URL/local path editing, docs imports path and advanced `workspace.yaml` editor.
+- [x] Add Readiness cards for workspace, repositories, runtime provider, permissions and artifacts.
+- [x] Add a compact runtime profile summary without making advanced runtime settings the primary flow.
+
+Non-goals:
+- [x] No backend API, schema, runtime contract, CLI flag or workspace contract changes.
+- [x] Do not add guided include/exclude editing until a separate workspace-contract slice approves it.
+- [x] No live E2E shell expansion beyond existing `init-inspect`.
+
+Implementation notes:
+- Use existing `ValidateResponse`, `DoctorResponse`, runtime settings state and artifact counters.
+- Show include/exclude as an explicit advanced-only/partial state because `GuidedRepo` does not own that contract today.
+- Keep existing Source/Readiness actions and `data-testid` selectors stable.
+
+Validation:
+- [x] Focused UI unit tests for Source table and Readiness summary cards.
+- [x] Browser visual QA for Source and Readiness on desktop and narrow viewport.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes
@@ -168,6 +194,7 @@ Validation:
 - 2026-05-27: Rebased on `origin/main` `3aa458a`; latest main already removed compatibility controls, compacted activity/artifact surfaces, added optional `UI_E2E_QA_SMOKE=1` and screenshot refs, so V2 backlog was corrected to keep release-facing live frontend on `init-inspect` only.
 - 2026-05-28: Continuous backlog queue normalized this plan to the first active workstream; next implementation slice is `16A UI V2 shell foundation`.
 - 2026-05-28: Completed `16A UI V2 shell foundation`: shared stage status model, top strip runtime/Git metadata, V2 inspector selectors, Git publication panel, rail keyboard navigation and drawer a11y baseline. No backend/API/schema/live-shell changes.
+- 2026-05-28: Completed `16B Source + Readiness consolidation`: Source now has a repo table with explicit advanced-only analysis scope state, Readiness has workspace/repo/runtime/permission/artifact summary cards plus a compact runtime profile summary. No backend/API/schema/live-shell changes.
 
 ### Plan ID
 EP-20260527-live-e2e-ui-ux-operator-flow

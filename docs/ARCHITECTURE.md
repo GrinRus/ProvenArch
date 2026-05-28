@@ -43,7 +43,8 @@
    - Prod: `npm run build` → `ui/dist` встраивается в Go бинарь
    - Live browser e2e: Playwright optional smoke (`ui/e2e/live-flow.spec.ts`, `npm run e2e:live --prefix ui`)
    - UI shell организован как Proven Arch console: top health strip (workspace path, repo count, runtime/provider, permission mode, Git publication state), product-flow rail `Source / Readiness / Charter / Analysis / Review / Proposals / Ask / Publish`, центральная рабочая область, right inspector (`Next action`, blockers, evidence refs, workspace health, runtime safety, Git publication) и bottom activity drawer для logs/events
-   - Guided setup поддерживает multi-repo (`repos[]`) с add/remove rows и optional `ref`
+   - Guided setup поддерживает multi-repo (`repos[]`) с add/remove rows и optional `ref`; Source показывает repo table с name/source/ref, validation state и явным advanced-only статусом для analysis include/exclude
+   - Readiness показывает summary cards для workspace, repositories, runtime provider, permissions и artifacts, а также compact runtime profile summary перед advanced settings
    - Показывает repo overview в validate surface: `resolved_repos` + diagnostics, сгруппированные по repo
    - Редактирует baseline bundle artifacts через guided selector (`charter/*`, `skills/*`, prompt packs, `skills/subagents.yaml`)
    - `App.tsx` остаётся route shell, а крупные sections вынесены в dedicated stage panels (`SourceStagePanel`, `ReadinessStagePanel`, `CharterStagePanel`, `AnalysisStagePanel`, `ReviewStagePanel`, `ProposalsStagePanel`, `AskStagePanel`, `PublishStagePanel`); shell components отвечают за top bar, rail, inspector и activity drawer

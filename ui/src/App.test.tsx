@@ -494,6 +494,43 @@ describe("App", () => {
     expect(screen.queryByTestId(`setup-${"stepper"}`)).not.toBeInTheDocument();
   });
 
+  it("renders the Source V2 repo table with explicit advanced-only analysis scope", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(<App />);
+
+    const sourceTable = await screen.findByTestId("source-repo-table");
+    expect(sourceTable).toHaveTextContent("Name");
+    expect(sourceTable).toHaveTextContent("Source");
+    expect(sourceTable).toHaveTextContent("Ref");
+    expect(sourceTable).toHaveTextContent("Analysis include/exclude");
+    expect(sourceTable).toHaveTextContent("Advanced workspace.yaml only");
+    expect(sourceTable).toHaveTextContent("Git URL");
+    expect(sourceTable).toHaveTextContent("https://github.com/org/my-service.git");
+  });
+
+  it("renders Readiness V2 cards and compact runtime profile summary", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("stage-readiness"));
+
+    const readinessCards = await screen.findByTestId("readiness-summary-cards");
+    expect(readinessCards).toHaveTextContent("Workspace");
+    expect(readinessCards).toHaveTextContent("Repositories");
+    expect(readinessCards).toHaveTextContent("Runtime provider");
+    expect(readinessCards).toHaveTextContent("Permissions");
+    expect(readinessCards).toHaveTextContent("Artifacts");
+
+    const runtimeSummary = screen.getByTestId("readiness-runtime-summary");
+    expect(runtimeSummary).toHaveTextContent("step 1800s / pipeline 2400s");
+    expect(runtimeSummary).toHaveTextContent("sequential / max 1");
+    expect(runtimeSummary).toHaveTextContent("best_effort");
+    expect(runtimeSummary).toHaveTextContent("qwen-code");
+    expect(runtimeSummary).toHaveTextContent("Advanced runtime settings remain available below");
+  });
+
   it("supports keyboard navigation across the V2 stage rail", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 

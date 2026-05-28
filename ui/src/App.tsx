@@ -646,6 +646,11 @@ export default function App() {
           onCheckDoctor={() => void handleSetupDoctorCheck()}
           onRunFirstAnalysis={() => void handleSetupFirstRun("review")}
           runtimeSettingsPanel={runtimeSettingsPanel}
+          artifactCount={artifactCount}
+          runtimeTimeoutEffective={runtimeTimeoutEffective}
+          runtimeExecutionEffective={runtimeExecutionEffective}
+          runtimePermissionEffective={runtimePermissionEffective}
+          runtimeStepProviderEffective={runtimeStepProviderEffective}
         />
       ) : null}
 
