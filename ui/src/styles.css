@@ -1600,6 +1600,167 @@ code {
   font-size: 0.84rem;
 }
 
+.proposals-review-room {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 0.75fr) minmax(360px, 1.35fr) minmax(250px, 0.72fr);
+  gap: 0.8rem;
+  align-items: start;
+}
+
+.proposals-artifact-list,
+.proposal-preview-panel,
+.proposal-quality-panel {
+  min-width: 0;
+  padding: 0.72rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 0.48rem;
+  background: var(--surface-muted);
+}
+
+.proposal-package-list,
+.proposal-evidence-list,
+.proposal-blocker-list ul {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.proposal-package {
+  min-width: 0;
+  padding: 0.55rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 0.42rem;
+  background: var(--surface);
+}
+
+.proposal-package h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.84rem;
+}
+
+.proposal-package ul {
+  display: grid;
+  gap: 0.32rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.proposal-package li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.proposal-package li > span {
+  color: var(--ink-muted);
+  font-size: 0.76rem;
+  font-weight: 780;
+  text-transform: uppercase;
+}
+
+.proposal-preview-tabs {
+  display: inline-grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.22rem;
+  margin: 0.55rem 0 0.7rem;
+  padding: 0.18rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 0.48rem;
+  background: var(--surface);
+}
+
+.proposal-preview-tabs button {
+  min-width: 0;
+  border: 0;
+  border-radius: 0.34rem;
+  background: transparent;
+  color: var(--ink-muted);
+  font-weight: 780;
+}
+
+.proposal-preview-tabs button.is-active {
+  background: var(--surface-muted);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line-soft);
+}
+
+.proposal-tab-panel {
+  min-width: 0;
+  padding: 0.62rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 0.42rem;
+  background: var(--surface);
+}
+
+.proposal-tab-panel h3 {
+  margin: 0 0 0.45rem;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.proposal-tab-panel pre {
+  margin: 0;
+  max-height: 390px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.proposal-evidence-list li {
+  min-width: 0;
+}
+
+.proposal-quality-panel {
+  display: grid;
+  gap: 0.72rem;
+}
+
+.proposal-quality-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.proposal-publication-path {
+  display: grid;
+  gap: 0.36rem;
+  padding: 0.6rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 0.42rem;
+  background: var(--surface);
+}
+
+.proposal-publication-path span {
+  color: var(--ink-muted);
+  font-size: 0.84rem;
+  overflow-wrap: anywhere;
+}
+
+.proposal-blocker-list {
+  min-width: 0;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--line-soft);
+}
+
+.proposal-blocker-list h3 {
+  margin: 0 0 0.42rem;
+  font-size: 0.9rem;
+}
+
+.proposal-blocker-list li {
+  padding: 0.48rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 0.42rem;
+  background: var(--surface);
+  color: var(--ink-muted);
+  font-size: 0.84rem;
+}
+
 .run-table tbody tr {
   cursor: pointer;
 }
@@ -1689,11 +1850,13 @@ code {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .review-workbench {
+  .review-workbench,
+  .proposals-review-room {
     grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.2fr);
   }
 
-  .review-intel {
+  .review-intel,
+  .proposal-quality-panel {
     grid-column: 1 / -1;
   }
 }
@@ -1776,7 +1939,8 @@ code {
 
   .review-workbench,
   .review-domain-map-placeholder,
-  .review-domain-map {
+  .review-domain-map,
+  .proposals-review-room {
     grid-template-columns: 1fr;
   }
 
@@ -1823,12 +1987,17 @@ code {
   }
 
   .review-intel-grid,
-  .domain-map-summary-grid {
+  .domain-map-summary-grid,
+  .proposal-quality-grid {
     grid-template-columns: 1fr;
   }
 
   .domain-map-edge {
     grid-template-columns: 1fr;
+  }
+
+  .proposal-preview-tabs {
+    width: 100%;
   }
 
   .run-table,

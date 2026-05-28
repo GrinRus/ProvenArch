@@ -248,7 +248,7 @@ UI показывает то же состояние через stage-based cons
 - `Charter`: wizard summary, domain/team card overview, baseline prompt bundle status и editor для `charter/*`/`skills/*`;
 - `Analysis`: run mission control, canonical `step0..step4` timeline, shard/log table with drilldown, event timeline, raw agent stream, pending permissions и cancel;
 - `Review`: evidence tabs, grouped artifact explorer, markdown/Mermaid preview, coverage/open-question/trust summary и artifact-derived Domain Map по `model/entities/*`, `model/edges/*`, `reports/agent-outputs/domains/*`;
-- `Proposals`: changelog/proposal artifacts and publication path;
+- `Proposals`: proposal/changelog review room with package list, preview/evidence/changelog/diff tabs, quality blockers and publication path;
 - `Ask`: async agent-backed Q&A поверх existing workspace artifacts через `POST /api/qa/runs`; legacy deterministic `POST /api/qa/ask` остаётся compatibility endpoint;
 - `Publish`: git commit/proposal branch helper actions.
 

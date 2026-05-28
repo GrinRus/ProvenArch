@@ -1928,12 +1928,27 @@ function deriveReviewTrustStatus({
 
 export function ProposalsStagePanel({
   artifacts,
+  selectedArtifact,
+  selectedArtifactContent,
+  openQuestions,
+  proposalBranch,
+  gitStatus,
   onOpenArtifact,
+  onGoPublish,
 }: {
   artifacts: Artifact[];
+  selectedArtifact: string;
+  selectedArtifactContent: string;
+  openQuestions: string;
+  proposalBranch: string;
+  gitStatus: string;
   onOpenArtifact: (path: string) => void;
+  onGoPublish: () => void;
 }) {
-  const proposalArtifacts = artifacts.filter((artifact) => artifact.path.startsWith("proposals/") || artifact.path.startsWith("reports/changelog/"));
+  const [proposalView, setProposalView] = useState<"preview" | "evidence" | "changelog" | "diff">("preview");
+  const proposalReview = deriveProposalReviewModel({ artifacts, openQuestions });
+  const selectedProposalArtifact = proposalReview.proposalArtifacts.find((artifact) => artifact.path === selectedArtifact);
+  const selectedProposalIsLoading = selectedArtifactContent === "Loading...";
   return (
     <section className="panel stage-panel" data-testid="proposals-panel">
       <div className="stage-header">
@@ -1941,22 +1956,277 @@ export function ProposalsStagePanel({
           <h1>Proposals</h1>
           <p className="hint">Review generated proposal packages, ADR/RFC drafts and iteration changelog.</p>
         </div>
-        <StatusBadge tone={proposalArtifacts.length > 0 ? "ok" : "info"}>{proposalArtifacts.length} refs</StatusBadge>
+        <StatusBadge tone={proposalReview.proposalArtifacts.length > 0 ? "ok" : "info"}>{proposalReview.proposalArtifacts.length} refs</StatusBadge>
       </div>
-      {proposalArtifacts.length === 0 ? (
-        <p>No proposal or changelog artifacts yet.</p>
-      ) : (
-        <ul className="artifact-list">
-          {proposalArtifacts.map((artifact) => (
-            <li key={`${artifact.kind}-${artifact.path}`}>
-              <ArtifactPathButton path={artifact.path} label={artifact.label} kind={artifact.kind} onOpenArtifact={onOpenArtifact} />
-              <span>{artifact.kind}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      <div className="proposals-review-room" data-testid="proposals-review-room">
+        <aside className="proposals-artifact-list" data-testid="proposals-artifact-list">
+          <div className="section-heading-row">
+            <h2>Proposal packages</h2>
+            <StatusBadge tone={proposalReview.proposalArtifacts.length > 0 ? "ok" : "info"}>{proposalReview.packages.length} groups</StatusBadge>
+          </div>
+          {proposalReview.packages.length === 0 ? (
+            <p className="hint">No proposal or changelog artifacts yet. Run Analysis through `step4.proposals` before publication review.</p>
+          ) : (
+            <div className="proposal-package-list">
+              {proposalReview.packages.map((group) => (
+                <section className="proposal-package" key={group.name}>
+                  <h3>{group.name}</h3>
+                  <ul>
+                    {group.artifacts.map((artifact) => (
+                      <li key={`${artifact.kind}-${artifact.path}`}>
+                        <ArtifactPathButton
+                          path={artifact.path}
+                          label={artifact.label}
+                          kind={artifact.kind}
+                          actionLabel="Open proposal artifact"
+                          onOpenArtifact={onOpenArtifact}
+                        />
+                        <span>{deriveProposalArtifactType(artifact.path)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          )}
+        </aside>
+
+        <section className="proposal-preview-panel" data-testid="proposal-preview-panel">
+          <div className="section-heading-row">
+            <div>
+              <h2>Proposal review</h2>
+              <p className="hint">Inspect proposal text, linked evidence and publication readiness before moving to Publish.</p>
+            </div>
+            <button type="button" disabled title="Proposal approval persistence is planned for the Publish gate slice.">
+              Approve proposal
+            </button>
+          </div>
+          <div className="proposal-preview-tabs" role="tablist" aria-label="Proposal review tabs" data-testid="proposal-preview-tabs">
+            {(["preview", "evidence", "changelog", "diff"] as const).map((view) => (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={proposalView === view}
+                className={proposalView === view ? "is-active" : ""}
+                key={view}
+                onClick={() => setProposalView(view)}
+              >
+                {proposalTabLabel(view)}
+              </button>
+            ))}
+          </div>
+
+          {proposalView === "preview" ? (
+            <div className="proposal-tab-panel">
+              <h3>{selectedProposalArtifact?.path || "Select a proposal artifact"}</h3>
+              <pre>{selectedProposalArtifact ? (selectedProposalIsLoading ? "Loading proposal..." : selectedArtifactContent || "No preview content returned.") : "Select a proposal, ADR, RFC or checklist artifact from the package list."}</pre>
+            </div>
+          ) : null}
+
+          {proposalView === "evidence" ? (
+            <div className="proposal-tab-panel">
+              <h3>Linked evidence</h3>
+              {proposalReview.evidenceArtifacts.length === 0 ? (
+                <p className="hint">No findings, coverage or as-is evidence artifacts are available in the selected run.</p>
+              ) : (
+                <ul className="proposal-evidence-list">
+                  {proposalReview.evidenceArtifacts.map((artifact) => (
+                    <li key={`${artifact.kind}-${artifact.path}`}>
+                      <ArtifactPathButton path={artifact.path} label={artifact.label} kind={artifact.kind} onOpenArtifact={onOpenArtifact} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : null}
+
+          {proposalView === "changelog" ? (
+            <div className="proposal-tab-panel">
+              <h3>Changelog</h3>
+              {proposalReview.changelogArtifacts.length === 0 ? (
+                <p className="hint">No changelog artifact is available yet. Keep this as a publication blocker or generate proposals again.</p>
+              ) : (
+                <ul className="proposal-evidence-list">
+                  {proposalReview.changelogArtifacts.map((artifact) => (
+                    <li key={`${artifact.kind}-${artifact.path}`}>
+                      <ArtifactPathButton path={artifact.path} label={artifact.label} kind={artifact.kind} onOpenArtifact={onOpenArtifact} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : null}
+
+          {proposalView === "diff" ? (
+            <div className="proposal-tab-panel">
+              <h3>Diff preview</h3>
+              <p className="hint">Folder-level Git diff belongs to the Publish gate slice. This review room keeps the proposal artifacts ready and surfaces the publication path without adding a Git diff API.</p>
+            </div>
+          ) : null}
+        </section>
+
+        <aside className="proposal-quality-panel" data-testid="proposal-quality-panel">
+          <div className="section-heading-row">
+            <h2>Quality / blockers</h2>
+            <StatusBadge tone={proposalReview.blockers.length > 0 ? "warn" : proposalReview.proposalArtifacts.length > 0 ? "ok" : "info"}>
+              {proposalReview.blockers.length > 0 ? "review" : proposalReview.proposalArtifacts.length > 0 ? "ready" : "partial"}
+            </StatusBadge>
+          </div>
+          <div className="proposal-quality-grid">
+            <div className="metric-tile">
+              <span className="metric-label">Proposal docs</span>
+              <strong>{proposalReview.proposalDocumentCount}</strong>
+            </div>
+            <div className="metric-tile">
+              <span className="metric-label">ADR/RFC</span>
+              <strong>{proposalReview.adrRfcCount}</strong>
+            </div>
+            <div className="metric-tile">
+              <span className="metric-label">Changelog</span>
+              <strong>{proposalReview.changelogArtifacts.length}</strong>
+            </div>
+            <div className="metric-tile">
+              <span className="metric-label">Evidence refs</span>
+              <strong>{proposalReview.evidenceArtifacts.length}</strong>
+            </div>
+          </div>
+          <div className="proposal-publication-path" data-testid="proposal-publication-path">
+            <strong>Publication path</strong>
+            <span>{proposalBranch ? `Proposal branch: ${proposalBranch}` : "Proposal branch is not prepared."}</span>
+            <span>{gitStatus || "Git action pending; commit and branch actions stay in Publish."}</span>
+            <button type="button" onClick={onGoPublish}>
+              Review in Publish
+            </button>
+          </div>
+          <section className="proposal-blocker-list">
+            <h3>Unresolved blockers</h3>
+            {proposalReview.blockers.length === 0 ? (
+              <p className="hint">No proposal-specific blockers detected from available artifact refs.</p>
+            ) : (
+              <ul>
+                {proposalReview.blockers.map((blocker) => (
+                  <li key={blocker}>{blocker}</li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </aside>
+      </div>
     </section>
   );
+}
+
+type ProposalReviewPackage = {
+  name: string;
+  artifacts: Artifact[];
+};
+
+type ProposalReviewModel = {
+  proposalArtifacts: Artifact[];
+  changelogArtifacts: Artifact[];
+  evidenceArtifacts: Artifact[];
+  packages: ProposalReviewPackage[];
+  proposalDocumentCount: number;
+  adrRfcCount: number;
+  blockers: string[];
+};
+
+function deriveProposalReviewModel({
+  artifacts,
+  openQuestions,
+}: {
+  artifacts: Artifact[];
+  openQuestions: string;
+}): ProposalReviewModel {
+  const proposalArtifacts = artifacts
+    .filter((artifact) => artifact.path.startsWith("proposals/") || artifact.path.startsWith("reports/changelog/"))
+    .sort((left, right) => left.path.localeCompare(right.path));
+  const changelogArtifacts = proposalArtifacts.filter((artifact) => artifact.path.startsWith("reports/changelog/"));
+  const proposalDocumentArtifacts = proposalArtifacts.filter((artifact) => artifact.path.startsWith("proposals/"));
+  const evidenceArtifacts = artifacts
+    .filter((artifact) => artifact.path.startsWith("reports/findings/") || artifact.path.startsWith("reports/coverage/") || artifact.path.startsWith("reports/as-is/"))
+    .sort((left, right) => left.path.localeCompare(right.path));
+  const packages = groupProposalArtifacts(proposalArtifacts);
+  const adrRfcCount = proposalDocumentArtifacts.filter((artifact) => /(^|\/)(ADR|RFC)\.md$/i.test(artifact.path)).length;
+  const proposalDocumentCount = proposalDocumentArtifacts.filter((artifact) => artifact.path.endsWith(".md")).length;
+  const blockers: string[] = [];
+  if (proposalDocumentArtifacts.length === 0) {
+    blockers.push("No proposal package artifacts are available.");
+  }
+  if (proposalDocumentArtifacts.length > 0 && adrRfcCount === 0) {
+    blockers.push("Proposal package has no ADR or RFC draft artifact.");
+  }
+  if (proposalDocumentArtifacts.length > 0 && changelogArtifacts.length === 0) {
+    blockers.push("No changelog artifact is linked to this proposal run.");
+  }
+  const openQuestionCount = countMarkdownItems(openQuestions);
+  if (openQuestionCount > 0) {
+    blockers.push(`${openQuestionCount} open questions remain from evidence review.`);
+  }
+  return {
+    proposalArtifacts,
+    changelogArtifacts,
+    evidenceArtifacts,
+    packages,
+    proposalDocumentCount,
+    adrRfcCount,
+    blockers,
+  };
+}
+
+function groupProposalArtifacts(artifacts: Artifact[]): ProposalReviewPackage[] {
+  const groups = new Map<string, Artifact[]>();
+  for (const artifact of artifacts) {
+    const name = proposalPackageName(artifact.path);
+    groups.set(name, [...(groups.get(name) ?? []), artifact]);
+  }
+  return Array.from(groups.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, groupArtifacts]) => ({ name, artifacts: groupArtifacts.sort((left, right) => left.path.localeCompare(right.path)) }));
+}
+
+function proposalPackageName(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  if (parts[0] === "proposals" && parts[1]) {
+    return `${parts[0]}/${parts[1]}`;
+  }
+  if (parts[0] === "reports" && parts[1]) {
+    return `${parts[0]}/${parts[1]}`;
+  }
+  return parts[0] || "root";
+}
+
+function deriveProposalArtifactType(path: string): string {
+  const basename = path.split("/").pop()?.toLowerCase() ?? "";
+  if (path.startsWith("reports/changelog/")) {
+    return "changelog";
+  }
+  if (basename === "adr.md") {
+    return "ADR";
+  }
+  if (basename === "rfc.md") {
+    return "RFC";
+  }
+  if (basename.includes("checklist")) {
+    return "checklist";
+  }
+  if (basename.includes("proposal")) {
+    return "proposal";
+  }
+  return "artifact";
+}
+
+function proposalTabLabel(view: "preview" | "evidence" | "changelog" | "diff"): string {
+  if (view === "preview") {
+    return "Preview";
+  }
+  if (view === "evidence") {
+    return "Evidence";
+  }
+  if (view === "changelog") {
+    return "Changelog";
+  }
+  return "Diff";
 }
 
 export function AskStagePanel({ onOpenArtifact }: { onOpenArtifact: (path: string) => void }) {

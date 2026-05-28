@@ -706,6 +706,63 @@ describe("App", () => {
     expect(screen.getByTestId("review-domain-map-inspector")).toHaveTextContent("Derived model entities are missing");
   });
 
+  it("renders Proposals V2 review room with preview tabs and publication path", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runStarted: true,
+        runArtifacts: {
+          "run-1": {
+            run_id: "run-1",
+            artifacts: [
+              { path: "reports/as-is/overview.md", kind: "report", label: "As-is overview" },
+              { path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" },
+              { path: "reports/findings/findings.md", kind: "report", label: "Findings" },
+              { path: "proposals/proposal-payments/proposal.md", kind: "proposal", label: "Payments proposal" },
+              { path: "proposals/proposal-payments/ADR.md", kind: "proposal", label: "Payments ADR" },
+              { path: "proposals/proposal-payments/RFC.md", kind: "proposal", label: "Payments RFC" },
+              { path: "proposals/proposal-payments/migration-checklist.md", kind: "proposal", label: "Migration checklist" },
+              { path: "reports/changelog/2026-05-28-payments.md", kind: "changelog", label: "Payments changelog" },
+            ],
+          },
+        },
+        artifactText: {
+          "reports/coverage/open-questions.md": "",
+          "proposals/proposal-payments/proposal.md": "# Proposal\nTighten payment ownership review.\n",
+        },
+      }),
+    );
+
+    render(<App />);
+
+    await screen.findByTestId("review-panel");
+    fireEvent.click(screen.getByTestId("stage-proposals"));
+
+    expect(await screen.findByTestId("proposals-review-room")).toBeInTheDocument();
+    const artifactList = screen.getByTestId("proposals-artifact-list");
+    expect(artifactList).toHaveTextContent("proposals/proposal-payments");
+    expect(artifactList).toHaveTextContent("reports/changelog");
+    expect(screen.getByTestId("proposal-quality-panel")).toHaveTextContent("Proposal docs");
+    expect(screen.getByTestId("proposal-quality-panel")).toHaveTextContent("4");
+    expect(screen.getByTestId("proposal-publication-path")).toHaveTextContent("proposal/beta-refresh");
+
+    fireEvent.click(within(artifactList).getByRole("button", { name: /open proposal artifact: proposals\/proposal-payments\/proposal\.md/i }));
+    await waitFor(() => expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("# Proposal"));
+
+    const tabs = screen.getByTestId("proposal-preview-tabs");
+    fireEvent.click(within(tabs).getByRole("tab", { name: "Evidence" }));
+    expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("reports/findings");
+
+    fireEvent.click(within(tabs).getByRole("tab", { name: "Changelog" }));
+    expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("Payments changelog");
+
+    fireEvent.click(within(tabs).getByRole("tab", { name: "Diff" }));
+    expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("Git diff belongs to the Publish gate slice");
+
+    fireEvent.click(screen.getByRole("button", { name: "Review in Publish" }));
+    expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
+  });
+
   it("renders diagram artifacts without sending loading placeholder text to Mermaid", async () => {
     const mermaid = await import("mermaid");
     vi.mocked(mermaid.default.render).mockClear();

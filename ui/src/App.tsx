@@ -740,7 +740,18 @@ export default function App() {
         />
       ) : null}
 
-      {activeStage === "proposals" ? <ProposalsStagePanel artifacts={nonDiagramArtifacts} onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)} /> : null}
+      {activeStage === "proposals" ? (
+        <ProposalsStagePanel
+          artifacts={[...nonDiagramArtifacts, ...diagramArtifacts]}
+          selectedArtifact={selectedArtifact}
+          selectedArtifactContent={selectedArtifactContent}
+          openQuestions={openQuestions}
+          proposalBranch={proposalBranch}
+          gitStatus={gitStatus}
+          onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
+          onGoPublish={() => setActiveStage("publish")}
+        />
+      ) : null}
 
       {activeStage === "ask" ? <AskStagePanel onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)} /> : null}
 

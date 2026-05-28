@@ -278,6 +278,37 @@ Validation:
 Progress log:
 - 2026-05-28: Implemented Review Domain Map with visible V2 selectors (`review-domain-map-canvas`, `review-domain-map-inspector`, `review-domain-map-node`, `review-domain-map-edge-list`, `review-domain-map-empty`), model/entity/edge/domain artifact navigation, explicit sparse-model partial states, and no backend/API/schema/live-shell changes.
 
+### Slice ExecPlan - 16G Proposals review room
+
+Status: done.
+
+Goals:
+- [x] Replace the basic Proposals artifact list with a review-room layout for proposal/changelog artifacts.
+- [x] Add proposal package list and preview tabs for proposal body, linked evidence, changelog and explicit diff partial state.
+- [x] Add proposal quality, unresolved blocker and publication path panels using existing artifacts, `openQuestions`, `proposalBranch` and `gitStatus`.
+- [x] Preserve existing artifact open flow and proposal/changelog routing from Review/inspector.
+- [x] Surface proposal branch path before Publish without adding Git mutations to this slice.
+
+Non-goals:
+- [x] No backend API, schema, runtime artifact contract, CLI flag or workspace contract changes.
+- [x] Do not implement proposal approval persistence, Git diff API, commit actions or branch creation in Proposals; keep those in Publish.
+- [x] Do not parse full proposal markdown for semantic quality; derive package/type/status from artifact paths and labels.
+- [x] No live E2E shell expansion beyond existing `init-inspect`.
+
+Implementation notes:
+- Reuse `nonDiagramArtifacts`, `selectedArtifact`, `selectedArtifactContent`, `openQuestions`, `proposalBranch`, `gitStatus` and `onOpenArtifact`.
+- Add stable V2 selectors: `proposals-review-room`, `proposals-artifact-list`, `proposal-preview-tabs`, `proposal-preview-panel`, `proposal-quality-panel`, `proposal-publication-path`.
+- Render missing ADR/RFC/changelog/diff data as explicit partial states.
+
+Validation:
+- [x] Focused UI unit tests for proposal grouping, preview tabs, evidence/changelog partial states and publication path panel.
+- [x] Browser visual QA for Proposals on desktop and narrow viewport.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-28: Implemented Proposals Review Room with V2 selectors (`proposals-review-room`, `proposals-artifact-list`, `proposal-preview-tabs`, `proposal-preview-panel`, `proposal-quality-panel`, `proposal-publication-path`), artifact-derived package grouping, preview/evidence/changelog/diff tabs, publication path handoff to Publish, and no backend/API/schema/live-shell changes.
+
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes
