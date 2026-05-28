@@ -933,6 +933,80 @@ describe("App", () => {
     expect(screen.getByText("package install requires review")).toBeInTheDocument();
   });
 
+  it("renders Analysis V2 run progress, timeline, and shard drilldown", async () => {
+    const runID = "run-analysis-v2";
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runID,
+        runStarted: true,
+        runStatus: {
+          [runID]: {
+            run_id: runID,
+            pipeline: "init",
+            status: "failed",
+            current_step: "init.step1.collect",
+            started_at: "2026-04-03T12:00:00Z",
+            finished_at: "2026-04-03T12:00:02Z",
+            warnings: ["collect warning"],
+            error_code: "runtime_contract_failed",
+            error: "collect manifest missing",
+          },
+        },
+        runLogs: {
+          [runID]: {
+            run_id: runID,
+            items: [
+              {
+                cursor: 1,
+                timestamp: "2026-04-03T12:00:01Z",
+                level: "error",
+                kind: "event",
+                step_id: "init.step1.collect",
+                domain_id: "payments",
+                message: "collect manifest missing",
+                taskrun_path: "reports/taskruns/run-analysis-v2/staging/shards/payments/runtime-execution.json",
+                fields: { provider: "qwen-code", shard_id: "payments" },
+              },
+            ],
+            next_cursor: 2,
+            eof: true,
+          },
+        },
+        runArtifacts: {
+          [runID]: {
+            run_id: runID,
+            artifacts: [{ path: "reports/taskruns/run-analysis-v2/staging/shards/payments/runtime-execution.json", kind: "runtime", label: "runtime execution" }],
+          },
+        },
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("stage-analysis"));
+
+    const progress = await screen.findByTestId("analysis-run-progress");
+    expect(progress).toHaveTextContent(runID);
+    expect(progress).toHaveTextContent("fake");
+    expect(progress).toHaveTextContent("init.step1.collect");
+    expect(screen.getByTestId("analysis-review-blocker-btn")).not.toBeDisabled();
+
+    const timeline = screen.getByTestId("analysis-run-timeline");
+    expect(timeline).toHaveTextContent("init.step0.constitution");
+    expect(timeline).toHaveTextContent("init.step1.collect");
+    expect(timeline).toHaveTextContent("blocked");
+
+    const shardTable = await screen.findByTestId("analysis-shard-table");
+    expect(shardTable).toHaveTextContent("payments");
+    expect(shardTable).toHaveTextContent("qwen-code");
+    expect(shardTable).toHaveTextContent("failed");
+    expect(shardTable).toHaveTextContent("runtime-execution.json");
+
+    const drilldown = screen.getByTestId("analysis-failed-shard-details");
+    expect(drilldown).toHaveTextContent("collect manifest missing");
+  });
+
   it("copies run logs using the active line+fields view", async () => {
     const runID = "run-copy-fields";
     const writeText = vi.fn(async (_text: string) => undefined);

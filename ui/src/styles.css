@@ -960,6 +960,93 @@ code {
   font-weight: 780;
 }
 
+.analysis-progress {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.72rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 0.48rem;
+  background: var(--surface-muted);
+}
+
+.analysis-progress-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.analysis-progress-grid > div {
+  min-width: 0;
+  padding: 0.54rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 0.42rem;
+  background: var(--surface);
+}
+
+.analysis-progress-grid strong {
+  display: block;
+  margin-top: 0.16rem;
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+}
+
+.analysis-timeline {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.analysis-step {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.45rem;
+  align-items: start;
+  padding: 0.58rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 0.42rem;
+  background: var(--surface-muted);
+}
+
+.analysis-step.done {
+  border-color: rgba(21, 128, 61, 0.22);
+  background: var(--ok-soft);
+}
+
+.analysis-step.active {
+  border-color: rgba(3, 105, 161, 0.24);
+  background: #eff6ff;
+}
+
+.analysis-step.failed {
+  border-color: rgba(180, 35, 24, 0.28);
+  background: var(--err-soft);
+}
+
+.analysis-step code,
+.analysis-step span {
+  display: block;
+  margin-top: 0.16rem;
+  overflow-wrap: anywhere;
+  color: var(--ink-muted);
+  font-size: 0.74rem;
+}
+
+.step-index {
+  width: 1.42rem;
+  height: 1.42rem;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
 .metric-tile {
   min-height: 4rem;
   display: grid;
@@ -1177,6 +1264,43 @@ code {
   background: var(--accent-soft);
 }
 
+.analysis-shard-wrap {
+  overflow-x: visible;
+}
+
+.analysis-shard-table {
+  table-layout: fixed;
+}
+
+.analysis-shard-table th:nth-child(1),
+.analysis-shard-table td:nth-child(1) {
+  width: 18%;
+}
+
+.analysis-shard-table th:nth-child(2),
+.analysis-shard-table td:nth-child(2),
+.analysis-shard-table th:nth-child(3),
+.analysis-shard-table td:nth-child(3),
+.analysis-shard-table th:nth-child(4),
+.analysis-shard-table td:nth-child(4) {
+  width: 10%;
+}
+
+.analysis-shard-table th:nth-child(5),
+.analysis-shard-table td:nth-child(5) {
+  width: 30%;
+}
+
+.analysis-shard-table th:nth-child(6),
+.analysis-shard-table td:nth-child(6) {
+  width: 22%;
+}
+
+.analysis-shard-table td {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .run-table tbody tr {
   cursor: pointer;
 }
@@ -1260,7 +1384,9 @@ code {
   .readiness-card-grid,
   .runtime-summary-grid,
   .charter-summary-grid,
-  .charter-workbench-grid {
+  .charter-workbench-grid,
+  .analysis-progress-grid,
+  .analysis-timeline {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1361,7 +1487,9 @@ code {
   .runtime-summary-grid,
   .charter-summary-grid,
   .charter-workbench-grid,
-  .charter-card-stats {
+  .charter-card-stats,
+  .analysis-progress-grid,
+  .analysis-timeline {
     grid-template-columns: 1fr;
   }
 
@@ -1372,6 +1500,53 @@ code {
   .run-table,
   .activity-table {
     min-width: 760px;
+  }
+
+  .analysis-shard-table {
+    min-width: 0;
+  }
+
+  .analysis-shard-table,
+  .analysis-shard-table thead,
+  .analysis-shard-table tbody,
+  .analysis-shard-table tr,
+  .analysis-shard-table th,
+  .analysis-shard-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .analysis-shard-table thead {
+    display: none;
+  }
+
+  .analysis-shard-table tbody tr {
+    margin-bottom: 0.52rem;
+    padding: 0.5rem;
+    border: 1px solid var(--line-soft);
+    border-radius: 0.42rem;
+    background: var(--surface);
+  }
+
+  .analysis-shard-table td {
+    display: grid;
+    grid-template-columns: minmax(5.7rem, 0.35fr) minmax(0, 1fr);
+    gap: 0.42rem;
+    padding: 0.22rem 0;
+    border-bottom: 0;
+  }
+
+  .analysis-shard-table td::before {
+    content: attr(data-label);
+    color: var(--ink-muted);
+    font-size: 0.68rem;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .analysis-shard-table td:nth-child(5),
+  .analysis-shard-table td:nth-child(6) {
+    grid-template-columns: 1fr;
   }
 
   .diagram-svg svg {

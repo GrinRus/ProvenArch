@@ -110,6 +110,7 @@ export default function App() {
     openQuestions,
     runCounters,
     runLogTaskrunPaths,
+    runLogs,
     filteredRunLogs,
     diagramArtifacts,
     nonDiagramArtifacts,
@@ -715,6 +716,11 @@ export default function App() {
           selectedRunIsActive={selectedRunIsActive}
           runCounters={runCounters}
           pendingPermissions={runStatus?.pending_permissions ?? []}
+          runLogs={runLogs}
+          artifacts={[...nonDiagramArtifacts, ...diagramArtifacts]}
+          setupRuntime={setupRuntime}
+          setupRuntimeProvider={setupRuntimeProvider}
+          onReviewBlocker={() => setActiveStage("review")}
           onRunPipeline={(pipeline) => void handleRunPipeline(pipeline)}
           onCancelSelectedRun={() => void handleCancelSelectedRun()}
           onSelectRun={(id) => void handleSelectRun(id)}

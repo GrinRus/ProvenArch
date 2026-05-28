@@ -798,6 +798,11 @@ export type AnalysisStageProps = {
   selectedRunIsActive: boolean;
   runCounters: { running: number; succeeded: number; failed: number };
   pendingPermissions: RuntimePermissionRequest[];
+  runLogs: RunLogEntry[];
+  artifacts: Artifact[];
+  setupRuntime: string;
+  setupRuntimeProvider: string;
+  onReviewBlocker: () => void;
   onRunPipeline: (pipeline: "init" | "refresh") => void;
   onCancelSelectedRun: () => void;
   onSelectRun: (runId: string) => void;
@@ -814,10 +819,21 @@ export function AnalysisStagePanel({
   selectedRunIsActive,
   runCounters,
   pendingPermissions,
+  runLogs,
+  artifacts,
+  setupRuntime,
+  setupRuntimeProvider,
+  onReviewBlocker,
   onRunPipeline,
   onCancelSelectedRun,
   onSelectRun,
 }: AnalysisStageProps) {
+  const stepTimeline = buildAnalysisStepTimeline(runStatus, runLogs);
+  const shardRows = buildAnalysisShardRows(runStatus, runLogs, artifacts, setupRuntime, setupRuntimeProvider);
+  const issueRows = shardRows.filter((row) => row.status === "failed" || row.status === "warning");
+  const blockerRows = shardRows.filter((row) => row.status === "failed");
+  const runtimeLabel = setupRuntime === "fake" ? "fake" : `${setupRuntime}/${setupRuntimeProvider}`;
+
   return (
     <section className="panel stage-panel" data-testid="runs-control-panel">
       <div className="stage-header">
@@ -843,11 +859,287 @@ export function AnalysisStagePanel({
       </div>
       {runActionStatus ? <p className="status warn">{runActionStatus}</p> : null}
 
+      <AnalysisRunProgress
+        runId={runId}
+        runStatus={runStatus}
+        runtimeLabel={runtimeLabel}
+        selectedRunWarnings={selectedRunWarnings}
+        stepTimeline={stepTimeline}
+        issueCount={issueRows.length}
+        blockerCount={blockerRows.length}
+        onReviewBlocker={onReviewBlocker}
+      />
+      <AnalysisRunTimeline steps={stepTimeline} />
+      <AnalysisShardTable rows={shardRows} />
+      <AnalysisFailedShardDetails rows={issueRows} />
+
       <RunStatusPanel runStatus={runStatus} warnings={selectedRunWarnings} />
       <PendingPermissionsTable pendingPermissions={pendingPermissions} />
       <RunHistoryTable runId={runId} runList={runList} runCounters={runCounters} onSelectRun={onSelectRun} />
     </section>
   );
+}
+
+type AnalysisStepState = "done" | "active" | "failed" | "pending";
+
+type AnalysisStep = {
+  id: string;
+  label: string;
+  state: AnalysisStepState;
+  detail: string;
+};
+
+type AnalysisShardRow = {
+  key: string;
+  stepId: string;
+  scope: string;
+  provider: string;
+  status: "succeeded" | "active" | "failed" | "warning" | "observed";
+  artifactRef: string;
+  lastMessage: string;
+};
+
+const canonicalAnalysisSteps = [
+  { suffix: "step0.constitution", label: "Charter" },
+  { suffix: "step1.collect", label: "Collect" },
+  { suffix: "step2.asis_docs", label: "As-is docs" },
+  { suffix: "step3.findings", label: "Findings" },
+  { suffix: "step4.proposals", label: "Proposals" },
+];
+
+function AnalysisRunProgress({
+  runId,
+  runStatus,
+  runtimeLabel,
+  selectedRunWarnings,
+  stepTimeline,
+  issueCount,
+  blockerCount,
+  onReviewBlocker,
+}: {
+  runId: string | null;
+  runStatus: RunStatusResponse | null;
+  runtimeLabel: string;
+  selectedRunWarnings: string[];
+  stepTimeline: AnalysisStep[];
+  issueCount: number;
+  blockerCount: number;
+  onReviewBlocker: () => void;
+}) {
+  const completedSteps = stepTimeline.filter((step) => step.state === "done").length;
+  const activeOrFailed = stepTimeline.find((step) => step.state === "active" || step.state === "failed");
+  const hasBlocker = blockerCount > 0 || runStatus?.status === "failed" || Boolean(runStatus?.error_code);
+  return (
+    <section className="analysis-progress" data-testid="analysis-run-progress">
+      <div className="section-heading-row">
+        <h2>Run mission control</h2>
+        <StatusBadge tone={runStatus?.status === "succeeded" ? "ok" : runStatus?.status === "failed" ? "error" : runStatus ? "warn" : "info"}>
+          {runStatus?.status ?? "idle"}
+        </StatusBadge>
+      </div>
+      <div className="analysis-progress-grid">
+        <div>
+          <span className="metric-label">Run ID</span>
+          <strong>{runId ?? "none selected"}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Runtime/provider</span>
+          <strong>{runtimeLabel}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Current step</span>
+          <strong>{runStatus?.current_step ?? activeOrFailed?.id ?? "not running"}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Progress</span>
+          <strong>
+            {completedSteps}/{stepTimeline.length} steps
+          </strong>
+        </div>
+        <div>
+          <span className="metric-label">Warnings/errors</span>
+          <strong>{selectedRunWarnings.length + issueCount + (runStatus?.error_code ? 1 : 0)}</strong>
+        </div>
+      </div>
+      <button type="button" data-testid="analysis-review-blocker-btn" onClick={onReviewBlocker} disabled={!hasBlocker}>
+        Review blocker
+      </button>
+    </section>
+  );
+}
+
+function AnalysisRunTimeline({ steps }: { steps: AnalysisStep[] }) {
+  return (
+    <section className="subsection" data-testid="analysis-run-timeline">
+      <h2>Run timeline</h2>
+      <ol className="analysis-timeline">
+        {steps.map((step, index) => (
+          <li key={step.id} className={`analysis-step ${step.state}`}>
+            <span className="step-index">{index}</span>
+            <div>
+              <strong>{step.label}</strong>
+              <code>{step.id}</code>
+              <span>{step.detail}</span>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function AnalysisShardTable({ rows }: { rows: AnalysisShardRow[] }) {
+  return (
+    <section className="subsection" data-testid="analysis-shard-panel">
+      <h2>Shard/log table</h2>
+      {rows.length === 0 ? (
+        <p className="hint">No shard or runtime log rows are available yet. Start analysis or load a run with persisted logs.</p>
+      ) : (
+        <div className="run-table-wrap analysis-shard-wrap">
+          <table className="run-table analysis-shard-table" data-testid="analysis-shard-table">
+            <thead>
+              <tr>
+                <th>Step</th>
+                <th>Scope</th>
+                <th>Provider</th>
+                <th>Status</th>
+                <th>Artifact/log ref</th>
+                <th>Last message</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.key} className={row.status === "failed" ? "failed" : row.status === "warning" ? "warn" : ""}>
+                  <td data-label="Step">{row.stepId}</td>
+                  <td data-label="Scope">{row.scope}</td>
+                  <td data-label="Provider">{row.provider}</td>
+                  <td data-label="Status">{row.status}</td>
+                  <td data-label="Artifact/log ref">{row.artifactRef}</td>
+                  <td data-label="Last message">{row.lastMessage}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function AnalysisFailedShardDetails({ rows }: { rows: AnalysisShardRow[] }) {
+  return (
+    <section className="subsection" data-testid="analysis-failed-shard-details">
+      <h2>Blocker drilldown</h2>
+      {rows.length === 0 ? (
+        <p className="hint">No failed shard or warning log entries for the selected run.</p>
+      ) : (
+        <ul className="compact-list">
+          {rows.slice(0, 4).map((row) => (
+            <li key={`${row.key}-detail`}>
+              <span>
+                {row.status.toUpperCase()} · {row.stepId} · {row.scope}
+              </span>
+              <code>{row.lastMessage}</code>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function buildAnalysisStepTimeline(runStatus: RunStatusResponse | null, runLogs: RunLogEntry[]): AnalysisStep[] {
+  const pipeline = runStatus?.pipeline || "init";
+  const currentIndex = findStepIndex(runStatus?.current_step);
+  const loggedIndex = runLogs.reduce((maxIndex, entry) => Math.max(maxIndex, findStepIndex(entry.step_id)), -1);
+  const activeIndex = currentIndex >= 0 ? currentIndex : loggedIndex >= 0 ? loggedIndex : 0;
+  return canonicalAnalysisSteps.map((step, index) => {
+    const id = `${pipeline}.${step.suffix}`;
+    let state: AnalysisStepState = "pending";
+    if (runStatus?.status === "succeeded") {
+      state = "done";
+    } else if (runStatus?.status === "failed") {
+      state = index < activeIndex ? "done" : index === activeIndex ? "failed" : "pending";
+    } else if (runStatus?.status === "running" || runStatus?.status === "queued") {
+      state = index < activeIndex ? "done" : index === activeIndex ? "active" : "pending";
+    } else if (loggedIndex >= index && loggedIndex >= 0) {
+      state = "done";
+    }
+    return { id, label: step.label, state, detail: stepTimelineDetail(state) };
+  });
+}
+
+function buildAnalysisShardRows(
+  runStatus: RunStatusResponse | null,
+  runLogs: RunLogEntry[],
+  artifacts: Artifact[],
+  setupRuntime: string,
+  setupRuntimeProvider: string,
+): AnalysisShardRow[] {
+  const grouped = new Map<string, RunLogEntry[]>();
+  for (const entry of runLogs) {
+    const key = entry.taskrun_path || `${entry.step_id || "run"}/${entry.domain_id || "workspace"}`;
+    grouped.set(key, [...(grouped.get(key) ?? []), entry]);
+  }
+  const provider = setupRuntime === "fake" ? "fake" : setupRuntimeProvider;
+  const rows: AnalysisShardRow[] = [];
+  for (const [key, entries] of grouped.entries()) {
+    const last = entries[entries.length - 1];
+    const stepId = last?.step_id || entries.find((entry) => entry.step_id)?.step_id || runStatus?.current_step || "-";
+    const hasError = entries.some((entry) => entry.level === "error");
+    const hasWarning = entries.some((entry) => entry.level === "warning");
+    rows.push({
+      key,
+      stepId,
+      scope: last?.domain_id || fieldString(last?.fields, "domain_id") || fieldString(last?.fields, "repo") || fieldString(last?.fields, "shard_id") || "workspace",
+      provider: fieldString(last?.fields, "provider") || provider,
+      status: hasError ? "failed" : hasWarning ? "warning" : runStatus?.status === "succeeded" ? "succeeded" : runStatus?.current_step && stepMatches(runStatus.current_step, stepId) ? "active" : "observed",
+      artifactRef: last?.taskrun_path || (artifacts.length > 0 ? `${artifacts.length} selected-run artifacts` : "logs only"),
+      lastMessage: last?.message || "-",
+    });
+  }
+  if (rows.length === 0 && runStatus) {
+    rows.push({
+      key: runStatus.run_id,
+      stepId: runStatus.current_step || `${runStatus.pipeline}.pending`,
+      scope: "workspace",
+      provider,
+      status: runStatus.status === "failed" ? "failed" : runStatus.status === "succeeded" ? "succeeded" : runStatus.status === "running" ? "active" : "observed",
+      artifactRef: artifacts.length > 0 ? `${artifacts.length} selected-run artifacts` : "status only",
+      lastMessage: runStatus.error || runStatus.error_code || "No shard logs loaded yet.",
+    });
+  }
+  return rows;
+}
+
+function findStepIndex(stepId?: string): number {
+  if (!stepId) {
+    return -1;
+  }
+  const normalized = stepId.replace(/_/g, ".").toLowerCase();
+  return canonicalAnalysisSteps.findIndex((step) => normalized.includes(step.suffix.replace(/_/g, ".")));
+}
+
+function stepMatches(left: string, right: string): boolean {
+  return findStepIndex(left) >= 0 && findStepIndex(left) === findStepIndex(right);
+}
+
+function stepTimelineDetail(state: AnalysisStepState): string {
+  if (state === "done") {
+    return "completed";
+  }
+  if (state === "active") {
+    return "current";
+  }
+  if (state === "failed") {
+    return "blocked";
+  }
+  return "pending";
+}
+
+function fieldString(fields: Record<string, unknown> | undefined, key: string): string {
+  const value = fields?.[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : "";
 }
 
 function PendingPermissionsTable({ pendingPermissions }: { pendingPermissions: RuntimePermissionRequest[] }) {

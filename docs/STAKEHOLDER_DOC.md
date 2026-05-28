@@ -284,7 +284,7 @@ arch-workspace/
    - настройка источников репозиториев (`path` или `git_url`) в `Source` с repo table для source/ref/validation state
    - readiness validation, summary cards, doctor checklist и runtime profile (`timeouts` + `execution` + `permissions`) в `Readiness`
    - редактор baseline skills/prompts (с версионированием через git)  
-   - запуск пайплайнов (init / refresh) и pending permissions в `Analysis`
+   - запуск пайплайнов (init / refresh) в `Analysis` с run mission control, canonical step timeline, shard/log table, warning/error drilldown и pending permissions
    - logs activity drawer с dual-view (`event timeline` + `raw agent stream`)
    - `Review` для coverage, artifacts и C4 Mermaid previews (`reports/diagrams/*`)  
    - `Ask` для async agent-backed Q&A через `POST /api/qa/runs`, with deterministic `POST /api/qa/ask` compatibility API

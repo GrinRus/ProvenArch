@@ -78,7 +78,7 @@ EP-20260527-ui-console-v2
 - [x] Добавить Epic 16 в `docs/BACKLOG.md` с кодовыми, UX и live E2E slices.
 - [x] Зафиксировать V2 live E2E contract: scenarios, selectors, diagnostics and reason taxonomy.
 - [x] Зафиксировать screen data source map so implementation stays on existing APIs unless a later slice changes scope.
-- [ ] Реализовать unified shell V2: top health strip, stage rail, center workbench, right inspector, bottom activity drawer.
+- [x] Реализовать unified shell V2: top health strip, stage rail, center workbench, right inspector, bottom activity drawer.
 - [ ] Реализовать stage surfaces: Source, Readiness, Charter, Analysis, Review Evidence, Review Domain Map, Proposals, Ask, Publish.
 - [ ] Сохранить или явно мигрировать стабильные operator-facing `data-testid` для UI/unit/live E2E; hidden compatibility controls не возвращать.
 - [ ] Обновить Playwright live E2E operator journey под V2 shell/stages, включая evidence/logs/runtime safety/Git publication assertions.
@@ -186,6 +186,35 @@ Validation:
 - [x] Browser visual QA for Charter on desktop and narrow viewport.
 - [x] `git diff --check`.
 - [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Slice ExecPlan - 16D Analysis mission control
+
+Status: done.
+
+Goals:
+- [x] Add Analysis run progress summary with selected run id, runtime/provider, status, current step and warnings/errors.
+- [x] Add canonical step timeline for `step0..step4` using existing run status and logs.
+- [x] Add shard/log-derived table with step, scope, provider, status, artifact/log reference and failed-row drilldown.
+- [x] Keep existing run actions, pending permissions, run history and bottom activity drawer behavior.
+
+Non-goals:
+- [x] No backend API, schema, runtime artifact contract, CLI flag or workspace contract changes.
+- [x] Do not add a new shard API; derive table rows from existing run logs/status/artifacts and show partial state when data is sparse.
+- [x] No live E2E shell expansion beyond existing `init-inspect`.
+
+Implementation notes:
+- Reuse `RunStatusResponse`, `RunLogEntry`, current artifacts and existing runtime setup state.
+- Add stable V2 selectors: `analysis-run-progress`, `analysis-run-timeline`, `analysis-shard-table`, `analysis-review-blocker-btn`.
+- Keep logs adjacent through the existing activity drawer and add warning/error summary in the Analysis workbench.
+
+Validation:
+- [x] Focused UI unit tests for run progress, timeline and shard/log table.
+- [x] Browser visual QA for Analysis on desktop and narrow viewport.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-28: Implemented Analysis mission control using existing run status/log/artifact data, added V2 selectors (`analysis-run-progress`, `analysis-run-timeline`, `analysis-shard-table`, `analysis-review-blocker-btn`), verified terminal fake runs do not leave active shard rows, and kept warning-only runs from enabling the blocker action.
 
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`

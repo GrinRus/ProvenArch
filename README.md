@@ -121,7 +121,7 @@ acp serve \
 1. `Source`: выберите GitHub/GitLab URL или local checkout folder и docs imports folder; repo table покажет источник, ref и validation state.
 2. `Readiness`: сохраните и провалидируйте `workspace.yaml`, затем запустите readiness checks; summary cards покажут workspace/repo/runtime/permissions/artifacts, для первого walkthrough используйте `fake`.
 3. `Charter`: проверьте wizard summary, domain/team card overview, стартовый architecture charter и baseline prompts.
-4. `Analysis`: запустите первый `init` analysis и следите за run status/logs.
+4. `Analysis`: запустите первый `init` analysis и следите за mission control, step timeline, shard/log table и warning/error drilldown.
 5. `Review` / `Proposals` / `Ask` / `Publish`: просмотрите coverage, artifacts, diagrams, proposals, задайте read-only Q&A и подготовьте git changes.
 
 Тот же первый анализ можно запустить из CLI:
@@ -246,7 +246,7 @@ UI показывает то же состояние через stage-based cons
 
 - `Source` / `Readiness`: repo table, repo sources, `workspace.yaml`, validation diagnostics, readiness cards, doctor checklist и runtime profile summary;
 - `Charter`: wizard summary, domain/team card overview, baseline prompt bundle status и editor для `charter/*`/`skills/*`;
-- `Analysis`: run status, warnings, event timeline, raw agent stream, pending permissions и cancel;
+- `Analysis`: run mission control, canonical `step0..step4` timeline, shard/log table with drilldown, event timeline, raw agent stream, pending permissions и cancel;
 - `Review` / `Proposals`: coverage, artifacts, diagram previews, changelog/proposal artifacts;
 - `Ask`: async agent-backed Q&A поверх existing workspace artifacts через `POST /api/qa/runs`; legacy deterministic `POST /api/qa/ask` остаётся compatibility endpoint;
 - `Publish`: git commit/proposal branch helper actions.
