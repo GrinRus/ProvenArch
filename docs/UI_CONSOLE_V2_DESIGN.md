@@ -272,8 +272,8 @@ Release-facing live scenario:
 
 Non-release and deterministic UI coverage:
 - `UI_E2E_QA_SMOKE=1`: optional Ask smoke layered on `init-inspect`; it checks async `qa.ask`,
-  citations, context-pack/runtime-execution links and screenshots, but is not a release readiness
-  input.
+  run history, read-only safety, answer/citations panels, context-pack/runtime-execution links and
+  screenshots, but is not a release readiness input.
 - cancellation/page-close behavior: cover through deterministic fake-runtime UI/API tests and
   frontend reason taxonomy, not through provider-live release scenarios.
 - Review Domain Map: cover with unit/component/fake-fixture diagnostics first; do not add a live

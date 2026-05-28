@@ -309,6 +309,37 @@ Validation:
 Progress log:
 - 2026-05-28: Implemented Proposals Review Room with V2 selectors (`proposals-review-room`, `proposals-artifact-list`, `proposal-preview-tabs`, `proposal-preview-panel`, `proposal-quality-panel`, `proposal-publication-path`), artifact-derived package grouping, preview/evidence/changelog/diff tabs, publication path handoff to Publish, and no backend/API/schema/live-shell changes.
 
+### Slice ExecPlan - 16H Ask read-only Q&A console
+
+Status: done.
+
+Goals:
+- [x] Add an Ask workbench with async Q&A run history and selected-run answer view.
+- [x] Show answer confidence, citations, unresolved assumptions and explicit related-entity/edge partial state using existing QA response fields only.
+- [x] Add a read-only runtime safety panel that explains taskrun-only QA writes and links context-pack/runtime-execution audit artifacts.
+- [x] Preserve current async Ask flow, visible operator selectors and optional `UI_E2E_QA_SMOKE=1` assertions.
+
+Non-goals:
+- [x] No backend API, schema, runtime artifact contract, CLI flag or workspace contract changes.
+- [x] Do not add mutation actions, canonical artifact writes, approval persistence or new QA result fields in this slice.
+- [x] Do not expand release-facing live E2E scenarios or reason taxonomy.
+- [x] Do not restore hidden compatibility controls.
+
+Implementation notes:
+- Reuse `POST /api/qa/runs`, `GET /api/qa/runs/<run_id>` and `GET /api/qa/runs?limit=20` via the existing QA API client.
+- Add stable V2 selectors: `qa-run-history`, `qa-answer-panel`, `qa-citations-panel`, `qa-readonly-safety-panel`.
+- Keep existing visible selectors (`qa-panel`, `qa-question-input`, `qa-ask-btn`, `qa-run-status`, `qa-answer`) so current unit/live diagnostics remain valid.
+- Render missing citations/unresolved/related entities as explicit empty/partial state rather than inventing API data.
+
+Validation:
+- [x] Focused UI unit tests for QA run history, selected answer, citations/unresolved/confidence and read-only safety/audit links.
+- [x] Browser visual QA for Ask on desktop and narrow viewport.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-28: Implemented Ask read-only Q&A console with V2 selectors (`qa-run-history`, `qa-answer-panel`, `qa-citations-panel`, `qa-readonly-safety-panel`), existing async QA APIs, selected-run audit links (`context-pack.json`, `qa-answer.json`, `runtime-execution.json`), optional QA-smoke assertions and explicit partial state for structured related entities/edges. No backend/API/schema/runtime contract/live-shell expansion changes.
+
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes

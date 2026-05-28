@@ -19,6 +19,8 @@ type FetchMockState = {
   manifestContent?: string;
   qaResponse?: MockJSON;
   qaRunID?: string;
+  qaRuns?: MockJSON[];
+  qaRunResponses?: Record<string, MockJSON>;
 };
 
 function jsonResponse(body: MockJSON, status = 200): Response {
@@ -296,16 +298,22 @@ function createFetchMock(state: FetchMockState = {}) {
       return jsonResponse({ run_id: qaRunID, status: "queued" }, 202);
     }
 
-    if (method === "GET" && url === `/api/qa/runs/${qaRunID}`) {
+    if (method === "GET" && url.startsWith("/api/qa/runs/")) {
+      const requestedQARunID = decodeURIComponent(url.slice("/api/qa/runs/".length));
       const qaPayload = state.qaResponse ?? {
         answer: "payments-service is owned by Platform Architecture.",
         citations: [{ path: "reports/as-is/overview.md", reason: "ownership evidence" }],
         unresolved: ["confirm escalation owner"],
         confidence: 0.82,
       };
+      const configuredPayload =
+        state.qaRunResponses?.[requestedQARunID] ??
+        (requestedQARunID === qaRunID ? qaPayload : undefined) ??
+        state.qaRuns?.find((item) => item.run_id === requestedQARunID) ??
+        qaPayload;
       return jsonResponse(
         {
-          run_id: qaRunID,
+          run_id: requestedQARunID,
           pipeline: "qa",
           status: "succeeded",
           started_at: "2026-04-03T12:00:03Z",
@@ -315,13 +323,13 @@ function createFetchMock(state: FetchMockState = {}) {
           runtime_provider: "claude-code",
           provider: "fake",
           generated_at: "2026-04-03T12:00:04Z",
-          ...qaPayload,
+          ...configuredPayload,
         },
       );
     }
 
     if (method === "GET" && url.startsWith("/api/qa/runs?")) {
-      return jsonResponse({ items: [] });
+      return jsonResponse({ items: state.qaRuns ?? [] });
     }
 
     if (method === "POST" && url === "/api/qa/ask") {
@@ -803,8 +811,12 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("qa-ask-btn"));
 
     expect(await screen.findByTestId("qa-answer")).toHaveTextContent("payments-service is owned by Platform Architecture.");
+    expect(screen.getByTestId("qa-run-history")).toHaveTextContent("Who owns payments?");
+    expect(screen.getByTestId("qa-answer-panel")).toHaveTextContent("Confidence: 82%");
+    expect(screen.getByTestId("qa-readonly-safety-panel")).toHaveTextContent("no canonical writes");
+    expect(screen.getByTestId("qa-citations-panel")).toHaveTextContent("ownership evidence");
     expect(screen.getByRole("button", { name: /reports\/as-is\/overview\.md/i })).toBeInTheDocument();
-    expect(screen.getByText(/Unresolved: confirm escalation owner/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Unresolved: confirm escalation owner/).length).toBeGreaterThan(0);
     expect(screen.getByText("Confidence: 82%")).toBeInTheDocument();
     expect(screen.getByTestId("qa-run-status")).toHaveTextContent("Runtime provider: fake");
     expect(fetchMock).toHaveBeenCalledWith(
@@ -815,6 +827,48 @@ describe("App", () => {
       }),
     );
     expect(fetchMock).toHaveBeenCalledWith("/api/qa/runs/qa-run-1", undefined);
+  });
+
+  it("renders the Ask workbench with history, selected answer, audit safety, and citation drilldown", async () => {
+    const historyRun = {
+      run_id: "qa-history-1",
+      pipeline: "qa",
+      status: "succeeded",
+      started_at: "2026-04-03T12:00:03Z",
+      finished_at: "2026-04-03T12:00:04Z",
+      question: "Which service owns checkout?",
+      current_step: "qa.ask",
+      runtime_provider: "claude-code",
+      provider: "fake",
+      answer: "checkout-service is owned by Payments Platform.",
+      citations: [{ path: "model/entities/checkout-service.yaml", reason: "entity owner record" }],
+      unresolved: ["confirm production support rotation"],
+      confidence: 0.91,
+      generated_at: "2026-04-03T12:00:04Z",
+    };
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        qaRuns: [historyRun],
+        qaRunResponses: { "qa-history-1": historyRun },
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("stage-ask"));
+
+    expect(await screen.findByTestId("qa-run-history")).toHaveTextContent("Which service owns checkout?");
+    expect(await screen.findByTestId("qa-answer-panel")).toHaveTextContent("checkout-service is owned by Payments Platform.");
+    expect(screen.getByTestId("qa-answer-panel")).toHaveTextContent("Confidence: 91%");
+    expect(screen.getByTestId("qa-answer-panel")).toHaveTextContent("Related entities and edges");
+    expect(screen.getByTestId("qa-readonly-safety-panel")).toHaveTextContent("reports/taskruns/<run_id>/qa/");
+    expect(screen.getByRole("button", { name: /context-pack\.json/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /qa-answer\.json/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /runtime-execution\.json/i })).toBeInTheDocument();
+    expect(screen.getByTestId("qa-citations-panel")).toHaveTextContent("entity owner record");
+    expect(screen.getByRole("button", { name: /model\/entities\/checkout-service\.yaml/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/Unresolved: confirm production support rotation/).length).toBeGreaterThan(0);
   });
 
   it("renders read-only Q&A when the API returns nullable evidence arrays", async () => {

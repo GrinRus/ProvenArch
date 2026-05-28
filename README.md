@@ -122,7 +122,7 @@ acp serve \
 2. `Readiness`: сохраните и провалидируйте `workspace.yaml`, затем запустите readiness checks; summary cards покажут workspace/repo/runtime/permissions/artifacts, для первого walkthrough используйте `fake`.
 3. `Charter`: проверьте wizard summary, domain/team card overview, стартовый architecture charter и baseline prompts.
 4. `Analysis`: запустите первый `init` analysis и следите за mission control, step timeline, shard/log table и warning/error drilldown.
-5. `Review` / `Proposals` / `Ask` / `Publish`: просмотрите coverage, artifacts, diagrams, proposals, задайте read-only Q&A и подготовьте git changes.
+5. `Review` / `Proposals` / `Ask` / `Publish`: просмотрите coverage, artifacts, diagrams, proposals, задайте read-only Q&A с run history/citations/safety panel и подготовьте git changes.
 
 Тот же первый анализ можно запустить из CLI:
 
@@ -249,7 +249,7 @@ UI показывает то же состояние через stage-based cons
 - `Analysis`: run mission control, canonical `step0..step4` timeline, shard/log table with drilldown, event timeline, raw agent stream, pending permissions и cancel;
 - `Review`: evidence tabs, grouped artifact explorer, markdown/Mermaid preview, coverage/open-question/trust summary и artifact-derived Domain Map по `model/entities/*`, `model/edges/*`, `reports/agent-outputs/domains/*`;
 - `Proposals`: proposal/changelog review room with package list, preview/evidence/changelog/diff tabs, quality blockers and publication path;
-- `Ask`: async agent-backed Q&A поверх existing workspace artifacts через `POST /api/qa/runs`; legacy deterministic `POST /api/qa/ask` остаётся compatibility endpoint;
+- `Ask`: async agent-backed Q&A поверх existing workspace artifacts через `POST /api/qa/runs`, with run history, selected answer, confidence/citations/unresolved and read-only safety/audit artifact links; legacy deterministic `POST /api/qa/ask` остаётся compatibility endpoint;
 - `Publish`: git commit/proposal branch helper actions.
 
 Можно задавать вопросы по generated workspace artifacts. В UI целевой путь — async Q&A run: ACP собирает deterministic `context-pack.json`, запускает runtime step `qa.ask` через selected provider/fake baseline, валидирует `qa-answer.json` и сохраняет audit artifacts только в `reports/taskruns/<run_id>/qa/`.
@@ -266,7 +266,7 @@ curl -fsS -X POST http://127.0.0.1:8080/api/qa/ask \
 
 Current/compatibility split:
 
-- UI stage `Ask` uses async runtime-backed `POST /api/qa/runs` + polling `GET /api/qa/runs/<run_id>`.
+- UI stage `Ask` uses async runtime-backed `POST /api/qa/runs` + polling `GET /api/qa/runs/<run_id>` and `GET /api/qa/runs?limit=20` history.
 - `acp qa` and public read-only `POST /api/qa/ask` remain deterministic workspace-backed compatibility surfaces.
 - QA runs do not mutate source repos or canonical `charter/`, `model/`, `reports/*`, or `proposals/*`; they write only taskrun/audit artifacts under `reports/taskruns/<run_id>/qa/`.
 

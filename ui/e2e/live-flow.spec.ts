@@ -219,12 +219,16 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
 
   if (qaSmoke) {
     await page.getByTestId("stage-ask").click();
+    await expect(page.getByTestId("qa-run-history")).toBeVisible();
+    await expect(page.getByTestId("qa-readonly-safety-panel")).toContainText("no canonical writes");
     await page.getByTestId("qa-question-input").fill("What are the main architecture coverage gaps?");
     await page.getByTestId("qa-ask-btn").click();
 
     await expect
       .poll(async () => ((await page.getByTestId("qa-run-status").textContent()) ?? "").trim(), { timeout: 120_000 })
       .toMatch(/status:\s*succeeded/i);
+    await expect(page.getByTestId("qa-answer-panel")).toBeVisible();
+    await expect(page.getByTestId("qa-citations-panel")).toBeVisible();
     await expect(page.getByTestId("qa-answer")).toBeVisible();
     await expect(page.getByTestId("qa-answer")).not.toContainText("No citations returned.");
     await expect(page.getByTestId("qa-answer")).toContainText(/Confidence:\s*[1-9][0-9]*%/);

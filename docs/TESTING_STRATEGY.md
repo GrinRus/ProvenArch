@@ -258,7 +258,7 @@ Release workflow hardening:
   - navigation through `Review`
   - diagram artifact listing and Mermaid preview render
 - UI Ask UX smoke:
-  - optional `UI_E2E_QA_SMOKE=1` checks answer/citations/context-pack/runtime-execution links
+  - optional `UI_E2E_QA_SMOKE=1` checks run history, read-only safety, answer panel, citations panel and context-pack/runtime-execution links
   - screenshot refs are evidence-only and do not influence release verdicts
 - UI run lifecycle operability:
   - bootstrap auto-select newest active run
