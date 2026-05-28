@@ -455,6 +455,35 @@ Validation:
 Progress log:
 - 2026-05-28: Extended `init-inspect` live Playwright flow into the required V2 operator journey Source -> Readiness -> Analysis -> Review -> Publish, with assertions for run status/logs, blockers/evidence refs, runtime safety and Git publication path. Added durable `frontend-source-desktop.png`, `frontend-readiness-desktop.png`, `frontend-analysis-desktop.png`, `frontend-review-desktop.png`, `frontend-publish-desktop.png` and `frontend-review-mobile.png` screenshot refs and updated the fake harness contract fixture accordingly. No new public scenario, reason taxonomy, release gate, wrapper script or backend/API/schema/runtime contract changes.
 
+### Slice ExecPlan - 16M Live E2E Ask and domain-map diagnostics
+
+Status: done.
+
+Goals:
+- [x] Keep async Ask checks inside optional `UI_E2E_QA_SMOKE=1` on `init-inspect`, with explicit answer/citation/confidence/read-only audit assertions.
+- [x] Add deterministic domain-map diagnostics for render, edge navigation and proposal/evidence links through UI unit/fake-fixture coverage before any live shell expansion.
+- [x] Add contract coverage that `ask-readonly` and `domain-map-diagnostic` are not public `scripts/frontend-live-e2e.sh` scenarios.
+
+Non-goals:
+- [x] Do not add new public live scenarios, provider-live release gates, reason classes or wrapper scripts.
+- [x] Do not make Ask/domain-map required release readiness; Ask remains optional and domain-map remains deterministic/fake-fixture coverage.
+- [x] Do not change backend API, schemas, runtime artifacts, CLI flags or workspace contracts.
+
+Implementation notes:
+- Update `ui/e2e/live-flow.spec.ts` only within the existing optional `UI_E2E_QA_SMOKE=1` block.
+- Add focused `App.test.tsx` domain-map fixture assertions rather than provider-live domain-map execution.
+- Update script contract tests, not the shell allowlist itself.
+
+Validation:
+- [x] Focused UI unit tests for domain-map diagnostics.
+- [x] Focused frontend live E2E contract tests.
+- [x] UI typecheck/full UI tests through DoD.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-28: Tightened optional `UI_E2E_QA_SMOKE=1` assertions for citations panel and read-only QA audit path, added deterministic App-level domain-map diagnostics for edge navigation and proposal artifact drilldown, and added shell contract coverage that `ask-readonly`/`domain-map-diagnostic` remain absent from the public frontend live allowlist. Ask remains optional; domain-map remains deterministic/fake-fixture coverage; no new public scenario, reason taxonomy, release gate, wrapper script or backend/API/schema/runtime contract changes.
+
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes

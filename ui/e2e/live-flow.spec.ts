@@ -265,6 +265,8 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
     await expect(page.getByTestId("qa-citations-panel")).toBeVisible();
     await expect(page.getByTestId("qa-answer")).toBeVisible();
     await expect(page.getByTestId("qa-answer")).not.toContainText("No citations returned.");
+    await expect(page.getByTestId("qa-citations-panel")).not.toContainText("No citations returned.");
+    await expect(page.getByTestId("qa-readonly-safety-panel")).toContainText("reports/taskruns/<run_id>/qa/");
     await expect(page.getByTestId("qa-answer")).toContainText(/Confidence:\s*[1-9][0-9]*%/);
     await expect(page.getByRole("button", { name: /context-pack\.json/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /runtime-execution\.json/i })).toBeVisible();

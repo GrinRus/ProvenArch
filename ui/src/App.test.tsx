@@ -714,6 +714,52 @@ describe("App", () => {
     expect(screen.getByTestId("review-domain-map-inspector")).toHaveTextContent("Derived model entities are missing");
   });
 
+  it("keeps Review domain-map diagnostic navigation for edges and proposal artifacts", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runStarted: true,
+        runArtifacts: {
+          "run-1": {
+            run_id: "run-1",
+            artifacts: [
+              { path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" },
+              { path: "reports/agent-outputs/domains/payments-service.md", kind: "domain-report", label: "Payments domain" },
+              { path: "model/entities/svc.payments.yaml", kind: "model-entity", label: "Payments Service" },
+              { path: "model/entities/svc.users.yaml", kind: "model-entity", label: "Users Service" },
+              { path: "model/edges/edge.svc.payments.calls.svc.users.yaml", kind: "model-edge", label: "Payments calls Users" },
+              { path: "proposals/proposal-payments/proposal.md", kind: "proposal", label: "Payments proposal" },
+            ],
+          },
+        },
+        artifactText: {
+          "reports/coverage/open-questions.md": "",
+          "model/edges/edge.svc.payments.calls.svc.users.yaml": "from: svc.payments\ntype: calls\nto: svc.users\n",
+          "proposals/proposal-payments/proposal.md": "# Proposal\nReview payments/users integration ownership.\n",
+        },
+      }),
+    );
+
+    render(<App />);
+
+    await screen.findByTestId("review-panel");
+    fireEvent.click(screen.getByTestId("review-view-domain-map-tab"));
+
+    const edgeList = screen.getByTestId("review-domain-map-edge-list");
+    const inspector = screen.getByTestId("review-domain-map-inspector");
+    expect(edgeList).toHaveTextContent("svc.payments");
+    expect(edgeList).toHaveTextContent("svc.users");
+    expect(inspector).toHaveTextContent("Proposal artifacts ready");
+
+    fireEvent.click(within(edgeList).getByRole("button", { name: /model\/edges\/edge\.svc\.payments\.calls\.svc\.users\.yaml/i }));
+    await waitFor(() => expect(screen.getByTestId("run-artifact-content")).toHaveTextContent("type: calls"));
+
+    fireEvent.click(screen.getByTestId("review-view-domain-map-tab"));
+    const refreshedInspector = screen.getByTestId("review-domain-map-inspector");
+    fireEvent.click(within(refreshedInspector).getByRole("button", { name: /proposals\/proposal-payments\/proposal\.md/i }));
+    await waitFor(() => expect(screen.getByTestId("run-artifact-content")).toHaveTextContent("# Proposal"));
+  });
+
   it("renders Proposals V2 review room with preview tabs and publication path", async () => {
     vi.stubGlobal(
       "fetch",

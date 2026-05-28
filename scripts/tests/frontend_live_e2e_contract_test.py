@@ -99,6 +99,8 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         body = self.script_path.read_text(encoding="utf-8")
         self.assertIn("allowed: init-inspect", body)
         self.assertNotIn("cancel-refresh|api-context-page-close-smoke", body)
+        self.assertNotIn("ask-readonly", body)
+        self.assertNotIn("domain-map-diagnostic", body)
         self.assertNotIn("runtime-cancel-stub", body)
 
     def test_qa_smoke_defaults_to_disabled_and_is_forwarded(self) -> None:
