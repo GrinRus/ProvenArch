@@ -79,20 +79,20 @@ EP-20260527-ui-console-v2
 - [x] Зафиксировать V2 live E2E contract: scenarios, selectors, diagnostics and reason taxonomy.
 - [x] Зафиксировать screen data source map so implementation stays on existing APIs unless a later slice changes scope.
 - [x] Реализовать unified shell V2: top health strip, stage rail, center workbench, right inspector, bottom activity drawer.
-- [ ] Реализовать stage surfaces: Source, Readiness, Charter, Analysis, Review Evidence, Review Domain Map, Proposals, Ask, Publish.
-- [ ] Сохранить или явно мигрировать стабильные operator-facing `data-testid` для UI/unit/live E2E; hidden compatibility controls не возвращать.
-- [ ] Обновить Playwright live E2E operator journey под V2 shell/stages, включая evidence/logs/runtime safety/Git publication assertions.
-- [ ] Сохранить текущий public live shell как `UI_E2E_SCENARIO=init-inspect`; Ask покрывать optional `UI_E2E_QA_SMOKE=1`, а cancel/page-close/domain-map держать в deterministic или optional diagnostic coverage до отдельного live-gate решения.
-- [ ] Сохранить frontend live E2E diagnostics: screenshots/traces refs, stage context and existing reason taxonomy.
-- [ ] Обновить testing docs/runbook после implementation.
-- [ ] Выполнить full DoD для implementation slice: `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Реализовать stage surfaces: Source, Readiness, Charter, Analysis, Review Evidence, Review Domain Map, Proposals, Ask, Publish.
+- [x] Сохранить или явно мигрировать стабильные operator-facing `data-testid` для UI/unit/live E2E; hidden compatibility controls не возвращать.
+- [x] Обновить Playwright live E2E operator journey под V2 shell/stages, включая evidence/logs/runtime safety/Git publication assertions.
+- [x] Сохранить текущий public live shell как `UI_E2E_SCENARIO=init-inspect`; Ask покрывать optional `UI_E2E_QA_SMOKE=1`, а cancel/page-close/domain-map держать в deterministic или optional diagnostic coverage до отдельного live-gate решения.
+- [x] Сохранить frontend live E2E diagnostics: screenshots/traces refs, stage context and existing reason taxonomy.
+- [x] Обновить testing docs/runbook после implementation.
+- [x] Выполнить full DoD для implementation slice: `make contracts`, `make test`, `make lint`, `make build`.
 - [ ] После owner review/merge перенести план в архив.
 
 ### Non-goals
-- [ ] Не менять backend API, schemas, runtime artifact contracts, workspace contracts или CLI flags в UI-only slice.
-- [ ] Не добавлять hosted/security/compliance enforcement.
-- [ ] Не делать provider-live checks required CI; live provider matrix остаётся manual trusted-machine gate.
-- [ ] Не коммитить сгенерированные PNG mockups как product assets без отдельного owner decision.
+- [x] Не менять backend API, schemas, runtime artifact contracts, workspace contracts или CLI flags в UI-only slice.
+- [x] Не добавлять hosted/security/compliance enforcement.
+- [x] Не делать provider-live checks required CI; live provider matrix остаётся manual trusted-machine gate.
+- [x] Не коммитить сгенерированные PNG mockups как product assets без отдельного owner decision.
 
 ### Approach
 1) Use `docs/UI_CONSOLE_V2_DESIGN.md` as the product/UX source for screen inventory, shell contract, state model and acceptance checklist.
@@ -484,6 +484,35 @@ Validation:
 Progress log:
 - 2026-05-28: Tightened optional `UI_E2E_QA_SMOKE=1` assertions for citations panel and read-only QA audit path, added deterministic App-level domain-map diagnostics for edge navigation and proposal artifact drilldown, and added shell contract coverage that `ask-readonly`/`domain-map-diagnostic` remain absent from the public frontend live allowlist. Ask remains optional; domain-map remains deterministic/fake-fixture coverage; no new public scenario, reason taxonomy, release gate, wrapper script or backend/API/schema/runtime contract changes.
 
+### Slice ExecPlan - 16N Docs/runbook sync
+
+Status: done.
+
+Goals:
+- [x] Sync the active plan acceptance and progress log with the completed Console V2 implementation slices.
+- [x] Update testing strategy docs so the required UI/live surfaces describe the V2 Source -> Readiness -> Analysis -> Review -> Publish journey, optional Ask smoke and deterministic domain-map coverage.
+- [x] Update the release live E2E runbook so trusted-machine operators understand which V2 screenshots, diagnostics and non-release Ask/domain-map signals are evidence-only.
+- [x] Confirm README, ARCHITECTURE and stakeholder docs remain consistent with the implemented UI behavior.
+
+Non-goals:
+- [x] No product code, backend API, schema, runtime contract, CLI flag, workspace contract or public live shell changes.
+- [x] Do not add release-gate scenarios for Ask, domain map, cancel or page-close behavior.
+- [x] Do not alter release verdict semantics, provider matrices, curated repo presets or matrix harness wrappers.
+
+Implementation notes:
+- Keep `UI_E2E_SCENARIO=init-inspect` as the only release-facing frontend live scenario.
+- Keep `UI_E2E_QA_SMOKE=1` optional/non-release and document screenshots as diagnostics, not release readiness inputs.
+- Keep domain-map coverage deterministic/fake-fixture until a separate owner-approved live-gate slice exists.
+
+Validation:
+- [x] Focused docs sync test: `go test ./internal/docsync`.
+- [x] Focused frontend live E2E contract test.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-28: Synced Console V2 testing strategy and release live E2E runbook with the implemented Source -> Readiness -> Analysis -> Review -> Publish journey, evidence-only screenshot refs, optional `UI_E2E_QA_SMOKE=1`, deterministic domain-map diagnostics and unchanged release-facing `UI_E2E_SCENARIO=init-inspect`. README, ARCHITECTURE and stakeholder docs were checked as already consistent with the implemented UI behavior. No code/API/schema/runtime contract, public live shell, reason taxonomy, release verdict, provider matrix or wrapper-script changes.
+
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes
@@ -492,20 +521,20 @@ Progress log:
 - implementation docs: `README.md`, `docs/ARCHITECTURE.md`, `docs/TESTING_STRATEGY.md`, `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
 
 ### Acceptance criteria
-- [ ] All 8 rail stages render and route to the V2 surfaces.
-- [ ] First viewport shows workspace readiness, current run status, blocker/next action and evidence/Git path where relevant.
-- [ ] Analysis keeps run timeline, failed shard details and logs adjacent.
-- [ ] Review supports evidence workbench and domain map without raw-path-first review.
-- [ ] Ask is explicit read-only Q&A and shows confidence/citations/unresolved assumptions.
-- [ ] Publish gate shows changed folders, blocker checklist, commit plan and proposal branch.
-- [ ] Each screen uses existing APIs/data hooks or renders an explicit partial/empty state; no implicit backend contract changes.
-- [ ] UI tests cover stage navigation, inspector priority and drawer behavior.
-- [ ] Live E2E `init-inspect` validates Source -> Readiness -> Analysis -> Review -> Publish and captures diagnostics on failure.
-- [ ] Async Ask is covered by optional `UI_E2E_QA_SMOKE=1` and deterministic tests; domain-map checks are covered by fake-fixture/unit/component diagnostics before any live shell expansion.
-- [ ] `frontend-e2e-result.json` still records scenario, reason, run id, last run status/error/current step and diagnostic refs.
-- [ ] Playwright trace/screenshot/video artifacts remain available for failed V2 live E2E stages.
-- [ ] Existing reason taxonomy remains additive-compatible with release report aggregation.
-- [ ] Hidden compatibility controls remain absent.
+- [x] All 8 rail stages render and route to the V2 surfaces.
+- [x] First viewport shows workspace readiness, current run status, blocker/next action and evidence/Git path where relevant.
+- [x] Analysis keeps run timeline, failed shard details and logs adjacent.
+- [x] Review supports evidence workbench and domain map without raw-path-first review.
+- [x] Ask is explicit read-only Q&A and shows confidence/citations/unresolved assumptions.
+- [x] Publish gate shows changed folders, blocker checklist, commit plan and proposal branch.
+- [x] Each screen uses existing APIs/data hooks or renders an explicit partial/empty state; no implicit backend contract changes.
+- [x] UI tests cover stage navigation, inspector priority and drawer behavior.
+- [x] Live E2E `init-inspect` validates Source -> Readiness -> Analysis -> Review -> Publish and captures diagnostics on failure.
+- [x] Async Ask is covered by optional `UI_E2E_QA_SMOKE=1` and deterministic tests; domain-map checks are covered by fake-fixture/unit/component diagnostics before any live shell expansion.
+- [x] `frontend-e2e-result.json` still records scenario, reason, run id, last run status/error/current step and diagnostic refs.
+- [x] Playwright trace/screenshot/video artifacts remain available for failed V2 live E2E stages.
+- [x] Existing reason taxonomy remains additive-compatible with release report aggregation.
+- [x] Hidden compatibility controls remain absent.
 
 ### Risks
 - Dense shell can regress responsive layout; visual QA must include desktop and narrow viewport checks.
@@ -519,6 +548,7 @@ Progress log:
 - 2026-05-28: Completed `16A UI V2 shell foundation`: shared stage status model, top strip runtime/Git metadata, V2 inspector selectors, Git publication panel, rail keyboard navigation and drawer a11y baseline. No backend/API/schema/live-shell changes.
 - 2026-05-28: Completed `16B Source + Readiness consolidation`: Source now has a repo table with explicit advanced-only analysis scope state, Readiness has workspace/repo/runtime/permission/artifact summary cards plus a compact runtime profile summary. No backend/API/schema/live-shell changes.
 - 2026-05-28: Completed `16C Charter workbench`: Charter now shows wizard summary, domain/team card overview, baseline prompt bundle status, explicit partial states for missing cards, and a no-404 empty editor selection before existing artifact editor/Git helper actions. No backend/API/schema/live-shell changes.
+- 2026-05-28: Completed `16D` through `16N`, finishing Analysis mission control, Review evidence/domain map, Proposals review room, Ask read-only console, Publish gate, UI coverage, live E2E selector/operator-journey migration, optional Ask/domain-map diagnostics and testing/runbook sync. Epic 16 implementation acceptance is complete; remaining item is owner review/merge/archive bookkeeping.
 
 ### Plan ID
 EP-20260527-live-e2e-ui-ux-operator-flow

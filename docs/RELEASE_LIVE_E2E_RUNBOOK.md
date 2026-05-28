@@ -656,7 +656,9 @@ Blocking signals:
 
 Проверяем:
 - frontend `init-inspect` = `passed` для всех трёх release providers (`qwen-code`, `claude-code`, `codex-code`);
-- frontend init smoke стартует из snapshot/backend `arch-workspace` выбранного backend run и проверяет пользовательский результат через UI/API/artifact inspection;
+- frontend init smoke стартует из snapshot/backend `arch-workspace` выбранного backend run и проверяет Console V2 пользовательский результат через UI/API/artifact inspection: `Source -> Readiness -> Analysis -> Review -> Publish`;
+- V2 shell assertions должны видеть top health strip, stage rail, right inspector, bottom activity drawer, workspace health, runtime safety, blocker/next action, evidence/artifact refs и Git publication path;
+- diagnostic screenshot refs должны помогать triage, но не менять release verdict semantics: `frontend-source-desktop.png`, `frontend-readiness-desktop.png`, `frontend-analysis-desktop.png`, `frontend-review-desktop.png`, `frontend-publish-desktop.png` и `frontend-review-mobile.png`;
 - cancellation coverage не является live provider release gate: её проверять в deterministic fake-runtime UI/API tests, где можно надёжно доказать `run_canceled` без provider/runtime flakiness.
 
 Blocking signals:
@@ -737,7 +739,8 @@ Zero tolerance:
 - frontend live E2E должен различать productive timeout (`active_run_timeout`), backend run terminal failure observed by UI polling (`runtime_run_failed`), browser/page/context closure (`browser_closed`), post-failure API health loss (`api_unreachable`), early `acp serve` exit (`server_exited`) и fallback explicit Playwright assertion failure (`playwright_failed`).
 - frontend result JSON должен сохранять server PID/exit code, post-failure health, run id, last run status/error code/current step и diagnostic refs, включая evidence-only screenshot refs, чтобы release blocker можно было классифицировать без повторного запуска.
 - Live frontend shell поддерживает только `UI_E2E_SCENARIO=init-inspect`; cancellation/page-close behavior покрывается deterministic fake-runtime UI/API tests вне live release gate.
-- `UI_E2E_QA_SMOKE=1` включает дополнительный non-release Ask UX smoke поверх `init-inspect`: вопрос отправляется через stage `Ask`, проверяются answer/citations/context-pack/runtime-execution links и сохраняются screenshots. Этот флаг не является canonical release readiness input и не должен включаться в release matrices.
+- `UI_E2E_QA_SMOKE=1` включает дополнительный non-release Ask UX smoke поверх `init-inspect`: вопрос отправляется через stage `Ask`, проверяются run history, read-only audit/safety path, answer, confidence, citations, unresolved assumptions, context-pack/runtime-execution links и сохраняется `frontend-ask-desktop.png` when produced. Этот флаг не является canonical release readiness input и не должен включаться в release matrices.
+- Domain Map, cancel and page-close coverage остаются deterministic UI/API или fake-fixture diagnostics до отдельного owner-approved live-gate slice; не добавлять `ask-readonly`, `domain-map-diagnostic` или page-close как public frontend live scenarios.
 - frontend init-inspect budget берётся из effective runtime timeout profile/API и, если задан `ACP_PIPELINE_TIMEOUT_SEC`, может быть поднят до `pipeline_timeout+30s`; fixed cap не применяется по умолчанию. Diagnostic `UI_E2E_INIT_TIMEOUT_CAP_SEC` допустим только как явное manual ограничение и не должен использоваться в canonical release slices.
 - `snapshot_reports_missing` после terminal backend failure считается dependent frontend skipped/blocked evidence, а не independent frontend regression.
 - provider `model` / `modelUsage` telemetry в stdout/stderr считается обычной diagnostic transcript частью: readiness/reporting не блокируют release по model-family attribution, если command probe, auth/quota checks и artifact smoke успешны.

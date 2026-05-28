@@ -247,7 +247,7 @@ Release workflow hardening:
 - run cancel endpoint:
   - `POST /api/pipeline/runs/<run_id>/cancel`
   - happy-path `202`, `404 run_not_found`, `409 run_not_cancelable`, `400 invalid_request_body`
-- UI path: open workspace, validate, run, inspect coverage/questions/publish gate through stage rail controls (`Source / Readiness / Analysis / Review / Ask / Publish`)
+- UI path: open workspace, validate, run, inspect evidence and publish gate through Console V2 stage rail controls (`Source / Readiness / Analysis / Review / Publish`). `Charter`, `Proposals` and `Ask` stay covered by deterministic UI/unit surfaces and optional diagnostics where applicable.
 - UI run logs surface:
   - compact activity drawer render
   - log polling/append without duplicates
@@ -257,8 +257,11 @@ Release workflow hardening:
 - UI results diagrams surface:
   - navigation through `Review`
   - diagram artifact listing and Mermaid preview render
+- UI domain-map surface:
+  - deterministic UI/fake-fixture tests cover artifact-derived entity/edge rendering, sparse-model partial states, edge navigation and proposal/evidence drilldown
+  - provider-live domain-map execution is not part of release readiness until a separate owner-approved live-gate slice defines stable semantics
 - UI Ask UX smoke:
-  - optional `UI_E2E_QA_SMOKE=1` checks run history, read-only safety, answer panel, citations panel and context-pack/runtime-execution links
+  - optional `UI_E2E_QA_SMOKE=1` checks run history, read-only safety, answer panel, citations panel, confidence/unresolved signals and context-pack/runtime-execution links
   - screenshot refs are evidence-only and do not influence release verdicts
 - UI Publish gate coverage:
   - deterministic UI tests check folder summary, selected artifact preview, explicit diff partial state, publish gate/checklist, commit plan and existing Git actions
@@ -308,10 +311,13 @@ Release workflow hardening:
 - `scripts/frontend-live-e2e.sh` и `npm run e2e:live --prefix ui` используют Playwright:
   - local wrapper поддерживает `claude-code`, `qwen-code`, `codex-code`
   - canonical toggles: `UI_E2E_EXPECTED_REPO_COUNT`, `UI_E2E_SCENARIO=init-inspect`, `UI_E2E_OUTPUT_DIR`
+  - release-facing `init-inspect` validates the Console V2 operator journey: `Source -> Readiness -> Analysis -> Review -> Publish`
+  - durable V2 screenshot refs are diagnostic evidence only: `frontend-source-desktop.png`, `frontend-readiness-desktop.png`, `frontend-analysis-desktop.png`, `frontend-review-desktop.png`, `frontend-publish-desktop.png` and `frontend-review-mobile.png`; optional Ask smoke may add `frontend-ask-desktop.png`
   - cancellation/page-close behavior проверяется deterministic fake-runtime UI/API tests, а не live provider release gate
   - init inspect обязан различать `active_run_timeout`, `runtime_run_failed`, `browser_closed`, `api_unreachable`, `server_exited` и fallback `playwright_failed`, чтобы backend run failure, browser lifecycle, API/server lifecycle и productive runtime timeout не выглядели одним failure class
   - long-running run polling использует independent API request context и не зависит от lifetime browser page, которая нужна только для UI assertions
   - init poll budget берётся из effective runtime timeouts and may be raised to `ACP_PIPELINE_TIMEOUT_SEC+30`; fixed cap is opt-in diagnostic only
+  - `frontend-e2e-result.json` keeps scenario, reason, run id, last run status/error/current step and diagnostic refs stable; screenshots, traces and videos remain evidence metadata and do not change release verdict semantics
 - Этот документ фиксирует policy, invariants и required gates; пошаговые live/release cookbook команды не дублируются здесь.
 
 ## 8) Acceptance для testing strategy
