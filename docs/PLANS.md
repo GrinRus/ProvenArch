@@ -399,6 +399,34 @@ Validation:
 Progress log:
 - 2026-05-28: Added fast component-level coverage for V2 shell primitives: stage rail accessible labels/keyboard/collapse state, right inspector blocked/attention priority with empty sections and evidence links, and activity drawer empty/populated/export/log-control states. Existing App-focused tests still pass; no product UI, backend/API/schema/runtime contract/live-shell changes.
 
+### Slice ExecPlan - 16K Live E2E selector migration
+
+Status: done.
+
+Goals:
+- [x] Migrate `ui/e2e/live-flow.spec.ts` assertions from legacy/raw-path-first surfaces to visible V2 operator selectors where those selectors now exist.
+- [x] Keep the release-facing shell on `UI_E2E_SCENARIO=init-inspect` and preserve optional `UI_E2E_QA_SMOKE=1`.
+- [x] Add contract-test coverage that the live flow uses V2 visible selectors and does not rely on hidden compatibility controls.
+
+Non-goals:
+- [x] Do not add new public live scenarios, provider-live release gates, failure reason classes or wrapper scripts.
+- [x] Do not change backend API, schemas, runtime artifacts, CLI flags or workspace contracts.
+- [x] Do not add hidden compatibility controls or hidden test-only DOM.
+
+Implementation notes:
+- Keep `scripts/frontend-live-e2e.sh` unchanged unless the public shell or result JSON changes.
+- Update only Playwright selectors and Python script contract tests needed to protect the selector migration.
+- Leave deeper Source -> Readiness -> Analysis -> Review -> Publish operator journey assertions for 16L.
+
+Validation:
+- [x] Focused Playwright/spec contract tests for selector migration.
+- [x] UI typecheck/full UI tests through DoD.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-28: Migrated `init-inspect` live Playwright assertions to visible V2 selectors (`source-repo-table`, readiness cards/runtime summary, analysis progress/timeline, activity table, review artifact explorer/evidence/citation panels) and added an explicit hidden-compatibility-control absence check. Added Python contract coverage for the selector migration. Public shell remains `UI_E2E_SCENARIO=init-inspect`; optional `UI_E2E_QA_SMOKE=1`, reason taxonomy, result JSON shape, backend/API/schema/runtime contracts and scripts remain unchanged.
+
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes

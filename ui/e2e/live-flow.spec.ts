@@ -107,6 +107,11 @@ async function captureEvidenceScreenshot(page: Page, name: string): Promise<stri
   return screenshotPath;
 }
 
+async function expectHiddenCompatibilityControlsAbsent(page: Page): Promise<void> {
+  await expect(page.getByTestId("tab-settings")).toHaveCount(0);
+  await expect(page.getByTestId("setup-stepper")).toHaveCount(0);
+}
+
 test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, request }) => {
   test.skip(scenario !== "init-inspect", `scenario ${scenario} skips init-inspect flow`);
   test.setTimeout(Math.max(initTimeoutMs + 120_000, 6 * 60 * 1000));
@@ -117,8 +122,15 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await page.goto("/");
   await expect(page.getByTestId("console-shell")).toBeVisible();
   await expect(page.getByTestId("top-status-bar")).toContainText("Proven Arch");
+  await expect(page.getByTestId("stage-rail")).toBeVisible();
+  await expect(page.getByTestId("right-inspector")).toBeVisible();
+  await expect(page.getByTestId("activity-drawer")).toBeVisible();
+  await expect(page.getByTestId("source-repo-table")).toBeVisible();
+  await expectHiddenCompatibilityControlsAbsent(page);
 
   await page.getByTestId("stage-readiness").click();
+  await expect(page.getByTestId("readiness-summary-cards")).toBeVisible();
+  await expect(page.getByTestId("readiness-runtime-summary")).toBeVisible();
   await page.getByText("Advanced runtime settings").click();
   await expect(page.getByRole("heading", { name: "Settings: Runtime Timeouts" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Settings: Runtime Execution" })).toBeVisible();
@@ -131,6 +143,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect(resolvedRepoRows).toHaveCount(expectedRepoCount);
 
   await page.getByTestId("stage-analysis").click();
+  await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
   await page.getByTestId("run-init-btn").click();
   await expect(page.getByTestId("run-status-panel")).toBeVisible();
   const runID = ((await page.getByTestId("run-status-run-id").textContent()) ?? "").trim();
@@ -166,12 +179,19 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
     .toBe(true);
 
   await page.getByTestId("run-logs-mode-select").selectOption("all");
+  await expect(page.getByTestId("activity-events-table")).toBeVisible();
+  await expect(page.getByTestId("analysis-run-timeline")).toBeVisible();
 
   await page.getByTestId("stage-review").click();
-  const diagramButtons = page.getByTestId("run-diagrams-list").locator("button.link-button");
+  await expect(page.getByTestId("review-panel")).toBeVisible();
+  await expect(page.getByTestId("review-artifact-explorer")).toBeVisible();
+  await expect(page.getByTestId("review-evidence-preview")).toBeVisible();
+  await expect(page.getByTestId("review-citation-coverage")).toBeVisible();
+  const reviewArtifactExplorer = page.getByTestId("review-artifact-explorer");
+  const diagramButtons = reviewArtifactExplorer.getByRole("button", { name: /reports\/diagrams\//i });
   await expect(diagramButtons.first()).toBeVisible();
 
-  const c4ContextButton = page.getByRole("button", { name: /reports\/diagrams\/c4-context\.mmd/i });
+  const c4ContextButton = reviewArtifactExplorer.getByRole("button", { name: /reports\/diagrams\/c4-context\.mmd/i });
   if ((await c4ContextButton.count()) > 0) {
     await c4ContextButton.first().click();
   } else {
@@ -205,7 +225,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
     )
     .toBe(true);
 
-  const firstArtifactButton = page.getByTestId("results-artifacts-panel").locator("button.link-button").first();
+  const firstArtifactButton = reviewArtifactExplorer.locator("button.link-button").first();
   await expect(firstArtifactButton).toBeVisible();
   await firstArtifactButton.click();
 
