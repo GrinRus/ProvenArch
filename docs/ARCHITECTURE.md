@@ -57,7 +57,7 @@
    - Если выбранный run исчезает из history и есть новый доступный run, UI переключается на него; если history временно пуста, но status endpoint ещё возвращает выбранный run, UI сохраняет текущий selection и не делает ложный auto-switch
    - Показывает `Run status` выбранного run с полным warnings list (`RunInfo.warnings`), `error_code` и `error`
    - Bottom activity drawer показывает compact recent logs для выбранного run (`timestamp/level/step/domain/message`) с dual-view `event timeline | raw agent stream | all`, переключателем `line | line+fields`, collapsed runtime execution artifact refs и quick actions `Copy logs`, `Download logs`
-   - `Review` объединяет coverage, open questions, artifacts и `reports/diagrams/*` Mermaid previews; `Proposals` фокусируется на proposal/changelog artifacts
+   - `Review` объединяет evidence tabs, grouped artifact explorer, markdown/Mermaid preview, coverage/open-question/trust summary и explicit Domain Map partial state for the next UI slice; `Proposals` фокусируется на proposal/changelog artifacts
    - `Ask` stage вызывает async `POST /api/qa/runs`, poll-ит `GET /api/qa/runs/<run_id>` и показывает runtime/provider identity, answer, citations, unresolved и confidence; optional frontend UX smoke покрывает этот flow только как diagnostic evidence; legacy deterministic `POST /api/qa/ask` остаётся compatibility endpoint для CLI/API consumers
    - Поддерживает `Cancel selected run` для active run через `POST /api/pipeline/runs/<run_id>/cancel`
    - Runtime Timeouts settings panel:

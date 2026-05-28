@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { vi } from "vitest";
 
 import App from "./App";
@@ -605,6 +605,55 @@ describe("App", () => {
     expect(screen.getByTestId("stage-review")).toHaveClass("is-selected");
     expect(screen.queryByTestId("workspace-panel")).not.toBeInTheDocument();
     expect(screen.getByTestId("right-inspector")).toHaveTextContent(/attention/i);
+  });
+
+  it("renders Review V2 evidence workbench and domain-map partial state", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runStarted: true,
+        runArtifacts: {
+          "run-1": {
+            run_id: "run-1",
+            artifacts: [
+              { path: "reports/as-is/overview.md", kind: "report", label: "As-is overview" },
+              { path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" },
+              { path: "reports/findings/findings.md", kind: "report", label: "Findings" },
+              { path: "reports/diagrams/c4-context.mmd", kind: "diagram", label: "C4 context" },
+            ],
+          },
+        },
+        artifactText: {
+          "reports/as-is/overview.md": "# System overview\nPayments owns checkout.\n",
+          "reports/coverage/summary.md": "Coverage: 84%\n",
+          "reports/coverage/open-questions.md": "- Clarify owners\n",
+          "reports/findings/findings.md": "# Findings\n- Owner gap\n",
+          "reports/diagrams/c4-context.mmd": "flowchart LR\n  A --> B\n",
+        },
+      }),
+    );
+
+    render(<App />);
+
+    const explorer = await screen.findByTestId("review-artifact-explorer");
+    expect(explorer).toHaveTextContent("reports/as-is");
+    expect(explorer).toHaveTextContent("reports/coverage");
+    expect(explorer).toHaveTextContent("reports/diagrams");
+
+    const citationCoverage = screen.getByTestId("review-citation-coverage");
+    expect(citationCoverage).toHaveTextContent("Coverage summary");
+    expect(citationCoverage).toHaveTextContent("ready");
+    expect(citationCoverage).toHaveTextContent("Open questions");
+    expect(citationCoverage).toHaveTextContent("Review required");
+
+    fireEvent.click(within(explorer).getByRole("button", { name: /reports\/as-is\/overview\.md/i }));
+    await waitFor(() => expect(screen.getByTestId("run-artifact-content")).toHaveTextContent("# System overview"));
+
+    fireEvent.click(screen.getByTestId("review-view-domain-map-tab"));
+    expect(screen.getByTestId("review-domain-map")).toHaveTextContent("planned for slice 16F");
+
+    fireEvent.click(screen.getByTestId("review-view-evidence-tab"));
+    expect(screen.getByTestId("review-evidence-preview")).toHaveTextContent("Evidence preview");
   });
 
   it("renders diagram artifacts without sending loading placeholder text to Mermaid", async () => {

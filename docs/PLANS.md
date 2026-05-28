@@ -216,6 +216,37 @@ Validation:
 Progress log:
 - 2026-05-28: Implemented Analysis mission control using existing run status/log/artifact data, added V2 selectors (`analysis-run-progress`, `analysis-run-timeline`, `analysis-shard-table`, `analysis-review-blocker-btn`), verified terminal fake runs do not leave active shard rows, and kept warning-only runs from enabling the blocker action.
 
+### Slice ExecPlan - 16E Review evidence workbench
+
+Status: done.
+
+Goals:
+- [x] Add Review Evidence tabs for evidence workbench and domain map placeholder routing, preserving the single `Review` stage.
+- [x] Add grouped artifact explorer by workspace folder using existing selected-run artifacts.
+- [x] Add primary evidence preview that handles markdown/text and existing Mermaid diagram rendering without raw-path-first layout.
+- [x] Add citation/coverage/trust summary surfaces derived from existing coverage summary, open questions, findings/diagram artifacts and selected artifact state.
+- [x] Keep current artifact open flow, selected artifact selectors and diagram preview behavior available for unit/live E2E migration.
+
+Non-goals:
+- [x] No backend API, schema, runtime artifact contract, CLI flag or workspace contract changes.
+- [x] Do not implement the interactive domain map; reserve `review-domain-map` as an explicit future/partial state for `16F`.
+- [x] Do not add approve/flag persistence or Git publish gating mutations in this slice.
+- [x] No live E2E shell expansion beyond existing `init-inspect`.
+
+Implementation notes:
+- Reuse `nonDiagramArtifacts`, `diagramArtifacts`, `selectedArtifact`, `selectedArtifactContent`, `coverageSummary`, `openQuestions` and `onOpenArtifact`.
+- Add stable V2 selectors: `review-view-evidence-tab`, `review-view-domain-map-tab`, `review-artifact-explorer`, `review-evidence-preview`, `review-domain-map`, `review-citation-coverage`.
+- Render missing data as explicit empty/partial states; do not infer citations or claim coverage beyond existing artifacts/text.
+
+Validation:
+- [x] Focused UI unit tests for artifact grouping, evidence preview, citation/coverage/trust panels and domain-map partial state.
+- [x] Browser visual QA for Review on desktop and narrow viewport.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-28: Implemented Review Evidence Workbench with visible V2 selectors (`review-view-evidence-tab`, `review-view-domain-map-tab`, `review-artifact-explorer`, `review-evidence-preview`, `review-domain-map`, `review-citation-coverage`), grouped artifacts by workspace folder, preserved artifact/diagram open flow, and kept Domain Map as an explicit 16F partial state.
+
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes

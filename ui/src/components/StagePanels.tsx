@@ -1269,9 +1269,19 @@ export function ReviewStagePanel({
   selectedArtifactIsMermaid,
   onOpenArtifact,
 }: ReviewStageProps) {
+  const [reviewView, setReviewView] = useState<"evidence" | "domain-map">("evidence");
   const overviewArtifact = nonDiagramArtifacts.find((artifact) => artifact.path === "reports/as-is/overview.md");
   const findingsArtifact = nonDiagramArtifacts.find((artifact) => artifact.path.startsWith("reports/findings/"));
+  const allArtifacts = [...nonDiagramArtifacts, ...diagramArtifacts];
+  const artifactGroups = groupArtifactsByFolder(allArtifacts);
   const selectedArtifactIsLoading = selectedArtifactContent === "Loading...";
+  const openQuestionCount = countMarkdownItems(openQuestions);
+  const trustStatus = deriveReviewTrustStatus({
+    artifactCount: allArtifacts.length,
+    hasCoverage: Boolean(coverageSummary),
+    findingsCount: findingsArtifact ? 1 : 0,
+    openQuestionCount,
+  });
   return (
     <div className="stage-stack" data-testid="review-panel">
       <section className="panel stage-panel" data-testid="results-coverage-panel">
@@ -1284,7 +1294,157 @@ export function ReviewStagePanel({
             {nonDiagramArtifacts.length + diagramArtifacts.length} artifacts
           </StatusBadge>
         </div>
-        <div className="metric-grid">
+        <div className="review-tabs" role="tablist" aria-label="Review views">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={reviewView === "evidence"}
+            className={reviewView === "evidence" ? "is-active" : ""}
+            data-testid="review-view-evidence-tab"
+            onClick={() => setReviewView("evidence")}
+          >
+            Evidence
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={reviewView === "domain-map"}
+            className={reviewView === "domain-map" ? "is-active" : ""}
+            data-testid="review-view-domain-map-tab"
+            onClick={() => setReviewView("domain-map")}
+          >
+            Domain map
+          </button>
+        </div>
+        {reviewView === "domain-map" ? (
+          <section className="review-domain-map-placeholder" data-testid="review-domain-map">
+            <div>
+              <h2>Domain map</h2>
+              <p className="hint">Domain/service ownership map is planned for slice 16F. Evidence review remains available without adding a model API in this slice.</p>
+            </div>
+            <dl className="compact-defs">
+              <dt>Available model inputs</dt>
+              <dd>{nonDiagramArtifacts.filter((artifact) => artifact.path.startsWith("model/") || artifact.path.startsWith("reports/agent-outputs/")).length} artifacts</dd>
+              <dt>Current fallback</dt>
+              <dd>Use grouped evidence, findings and coverage gaps until the map view is implemented.</dd>
+            </dl>
+          </section>
+        ) : (
+          <ReviewEvidenceWorkbench
+            coverageSummary={coverageSummary}
+            openQuestions={openQuestions}
+            openQuestionCount={openQuestionCount}
+            trustStatus={trustStatus}
+            overviewArtifact={overviewArtifact}
+            findingsArtifact={findingsArtifact}
+            artifactGroups={artifactGroups}
+            nonDiagramArtifacts={nonDiagramArtifacts}
+            diagramArtifacts={diagramArtifacts}
+            selectedArtifact={selectedArtifact}
+            selectedArtifactContent={selectedArtifactContent}
+            selectedArtifactIsMermaid={selectedArtifactIsMermaid}
+            selectedArtifactIsLoading={selectedArtifactIsLoading}
+            onOpenArtifact={onOpenArtifact}
+          />
+        )}
+      </section>
+    </div>
+  );
+}
+
+function ReviewEvidenceWorkbench({
+  coverageSummary,
+  openQuestions,
+  openQuestionCount,
+  trustStatus,
+  overviewArtifact,
+  findingsArtifact,
+  artifactGroups,
+  nonDiagramArtifacts,
+  diagramArtifacts,
+  selectedArtifact,
+  selectedArtifactContent,
+  selectedArtifactIsMermaid,
+  selectedArtifactIsLoading,
+  onOpenArtifact,
+}: {
+  coverageSummary: string;
+  openQuestions: string;
+  openQuestionCount: number;
+  trustStatus: ReviewTrustStatus;
+  overviewArtifact?: Artifact;
+  findingsArtifact?: Artifact;
+  artifactGroups: ArtifactGroup[];
+  nonDiagramArtifacts: Artifact[];
+  diagramArtifacts: Artifact[];
+  selectedArtifact: string;
+  selectedArtifactContent: string;
+  selectedArtifactIsMermaid: boolean;
+  selectedArtifactIsLoading: boolean;
+  onOpenArtifact: (path: string) => void;
+}) {
+  return (
+    <div className="review-workbench">
+      <aside className="review-artifact-explorer" data-testid="review-artifact-explorer">
+        <div className="section-heading-row">
+          <h2>Artifact explorer</h2>
+          <StatusBadge tone={artifactGroups.length > 0 ? "ok" : "info"}>{artifactGroups.length} groups</StatusBadge>
+        </div>
+        {artifactGroups.length === 0 ? (
+          <p className="hint">No selected-run artifacts yet. Run Analysis before evidence review.</p>
+        ) : (
+          <div className="artifact-group-list" data-testid="results-artifacts-panel">
+            {artifactGroups.map((group) => (
+              <section key={group.name} className="artifact-group">
+                <h3>{group.name}</h3>
+                <ul data-testid={group.name === "reports/diagrams" ? "run-diagrams-list" : undefined}>
+                  {group.artifacts.map((artifact) => (
+                    <li key={`${artifact.kind}-${artifact.path}`}>
+                      <ArtifactPathButton path={artifact.path} label={artifact.label} kind={artifact.kind} onOpenArtifact={onOpenArtifact} />
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </div>
+        )}
+      </aside>
+
+      <section className="review-evidence-preview" data-testid="review-evidence-preview">
+        <div className="section-heading-row">
+          <div>
+            <h2>Evidence preview</h2>
+            <p className="hint">Select an artifact to inspect the reviewable evidence body.</p>
+          </div>
+          <button type="button" disabled title="Evidence approval persistence is planned for a later publish gate slice.">
+            Approve selected evidence
+          </button>
+        </div>
+        {selectedArtifactIsMermaid ? (
+          <div data-testid="run-diagram-content-panel">
+            <h3 data-testid="run-diagram-selected-path">{selectedArtifact || "Diagram Preview"}</h3>
+            {selectedArtifactIsLoading ? (
+              <p className="hint">Loading diagram...</p>
+            ) : (
+              <Suspense fallback={<p className="hint">Loading diagram renderer...</p>}>
+                <MermaidPreview source={selectedArtifactContent} title={selectedArtifact || "diagram"} />
+              </Suspense>
+            )}
+          </div>
+        ) : (
+          <div data-testid="run-artifact-content-panel">
+            <h3 data-testid="run-artifact-selected-path">{selectedArtifact || "Artifact Content"}</h3>
+            <pre data-testid="run-artifact-content">{selectedArtifactContent || "Select artifact to inspect."}</pre>
+          </div>
+        )}
+      </section>
+
+      <aside className="review-intel" data-testid="review-citation-coverage">
+        <div className="section-heading-row">
+          <h2>Citations / coverage</h2>
+          <StatusBadge tone={trustStatus.tone}>{trustStatus.label}</StatusBadge>
+        </div>
+        <div className="review-intel-grid">
           <div className="metric-tile">
             <span className="metric-label">Architecture overview</span>
             <strong>{overviewArtifact ? "ready" : "missing"}</strong>
@@ -1297,8 +1457,20 @@ export function ReviewStagePanel({
             <span className="metric-label">Findings</span>
             <strong>{findingsArtifact ? "ready" : "missing"}</strong>
           </div>
+          <div className="metric-tile">
+            <span className="metric-label">Open questions</span>
+            <strong>{openQuestionCount}</strong>
+          </div>
+          <div className="metric-tile">
+            <span className="metric-label">Diagrams</span>
+            <strong>{diagramArtifacts.length}</strong>
+          </div>
         </div>
-        <div className="columns">
+        <div className="trust-panel">
+          <strong>{trustStatus.title}</strong>
+          <span>{trustStatus.detail}</span>
+        </div>
+        <div className="review-source-lists">
           <div>
             <h2>Coverage Summary</h2>
             <pre data-testid="coverage-summary-content">{coverageSummary || "No coverage summary yet."}</pre>
@@ -1308,61 +1480,77 @@ export function ReviewStagePanel({
             <pre data-testid="open-questions-content">{openQuestions || "No open questions yet."}</pre>
           </div>
         </div>
-      </section>
+      </aside>
 
-      <section className="panel stage-panel" data-testid="results-artifacts-panel">
-        <h2>Artifacts</h2>
-        {nonDiagramArtifacts.length === 0 ? (
-          <p>No non-diagram artifacts yet.</p>
-        ) : (
-          <div className="columns">
-            <ul data-testid="run-artifacts-list">
-              {nonDiagramArtifacts.map((artifact) => (
-                <li key={`${artifact.kind}-${artifact.path}`}>
-                  <ArtifactPathButton path={artifact.path} label={artifact.label} kind={artifact.kind} onOpenArtifact={onOpenArtifact} />
-                </li>
-              ))}
-            </ul>
-            <div data-testid="run-artifact-content-panel">
-              <h3 data-testid="run-artifact-selected-path">{selectedArtifact || "Artifact Content"}</h3>
-              <pre data-testid="run-artifact-content">{selectedArtifactContent || "Select artifact to inspect."}</pre>
-            </div>
-          </div>
-        )}
-      </section>
-
-      <section className="panel stage-panel" data-testid="results-diagrams-panel">
-        <h2>Generated diagrams</h2>
-        {diagramArtifacts.length === 0 ? (
-          <p>No diagram artifacts yet.</p>
-        ) : (
-          <div className="columns">
-            <ul data-testid="run-diagrams-list">
-              {diagramArtifacts.map((artifact) => (
-                <li key={`${artifact.kind}-${artifact.path}`}>
-                  <ArtifactPathButton path={artifact.path} label={artifact.label} kind={artifact.kind} onOpenArtifact={onOpenArtifact} />
-                </li>
-              ))}
-            </ul>
-            <div data-testid="run-diagram-content-panel">
-              <h3 data-testid="run-diagram-selected-path">{selectedArtifact || "Diagram Preview"}</h3>
-              {selectedArtifactIsMermaid ? (
-                selectedArtifactIsLoading ? (
-                  <p className="hint">Loading diagram...</p>
-                ) : (
-                  <Suspense fallback={<p className="hint">Loading diagram renderer...</p>}>
-                    <MermaidPreview source={selectedArtifactContent} title={selectedArtifact || "diagram"} />
-                  </Suspense>
-                )
-              ) : (
-                <pre data-testid="run-diagram-content">{selectedArtifactContent || "Select a `.mmd` diagram artifact to preview."}</pre>
-              )}
-            </div>
-          </div>
-        )}
-      </section>
     </div>
   );
+}
+
+type ArtifactGroup = {
+  name: string;
+  artifacts: Artifact[];
+};
+
+type ReviewTrustStatus = {
+  label: string;
+  title: string;
+  detail: string;
+  tone: "ok" | "warn" | "info";
+};
+
+function groupArtifactsByFolder(artifacts: Artifact[]): ArtifactGroup[] {
+  const groups = new Map<string, Artifact[]>();
+  for (const artifact of artifacts) {
+    const name = reviewArtifactGroupName(artifact.path);
+    groups.set(name, [...(groups.get(name) ?? []), artifact]);
+  }
+  return Array.from(groups.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, groupArtifacts]) => ({ name, artifacts: groupArtifacts.sort((left, right) => left.path.localeCompare(right.path)) }));
+}
+
+function reviewArtifactGroupName(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length === 0) {
+    return "root";
+  }
+  if (parts[0] === "reports" && parts[1]) {
+    return `${parts[0]}/${parts[1]}`;
+  }
+  if (parts[0] === "model" && parts[1]) {
+    return `${parts[0]}/${parts[1]}`;
+  }
+  return parts[0];
+}
+
+function countMarkdownItems(content: string): number {
+  return content
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("- ") || /^\d+\./.test(line)).length;
+}
+
+function deriveReviewTrustStatus({
+  artifactCount,
+  hasCoverage,
+  findingsCount,
+  openQuestionCount,
+}: {
+  artifactCount: number;
+  hasCoverage: boolean;
+  findingsCount: number;
+  openQuestionCount: number;
+}): ReviewTrustStatus {
+  if (artifactCount === 0) {
+    return { label: "partial", title: "No evidence selected", detail: "Run Analysis to generate reviewable artifacts.", tone: "info" };
+  }
+  if (openQuestionCount > 0) {
+    return { label: "review", title: "Review required", detail: "Open questions are present and should be resolved or accepted before publication.", tone: "warn" };
+  }
+  if (hasCoverage && findingsCount > 0) {
+    return { label: "ready", title: "Evidence ready", detail: "Coverage and findings artifacts are available for human review.", tone: "ok" };
+  }
+  return { label: "partial", title: "Partial evidence", detail: "Some review artifacts are missing; inspect generated outputs before publication.", tone: "info" };
 }
 
 export function ProposalsStagePanel({
