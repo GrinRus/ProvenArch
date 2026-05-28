@@ -61,13 +61,33 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
             "review-artifact-explorer",
             "review-evidence-preview",
             "review-citation-coverage",
+            "publish-diff-summary",
+            "publish-preview-tabs",
+            "publish-gate-panel",
+            "publish-commit-plan",
+            "git-publication-panel",
+            "runtime-safety-panel",
         ]:
             self.assertIn(f'getByTestId("{selector}")', body)
         self.assertIn("expectHiddenCompatibilityControlsAbsent", body)
+        self.assertIn("expectOperatorInspectorSurfaces", body)
         self.assertIn('getByTestId("tab-settings")).toHaveCount(0)', body)
         self.assertIn('getByTestId("setup-stepper")).toHaveCount(0)', body)
         self.assertNotIn('getByTestId("run-diagrams-list")', body)
         self.assertNotIn('getByTestId("results-artifacts-panel")', body)
+
+    def test_live_flow_captures_v2_operator_stage_screenshots(self) -> None:
+        spec_path = self.repo_root / "ui" / "e2e" / "live-flow.spec.ts"
+        body = spec_path.read_text(encoding="utf-8")
+        for name in [
+            "frontend-source-desktop.png",
+            "frontend-readiness-desktop.png",
+            "frontend-analysis-desktop.png",
+            "frontend-review-desktop.png",
+            "frontend-publish-desktop.png",
+            "frontend-review-mobile.png",
+        ]:
+            self.assertIn(name, body)
 
     def test_live_playwright_config_has_no_cancel_timeout_budget(self) -> None:
         config_path = self.repo_root / "ui" / "playwright.live.config.ts"
@@ -90,9 +110,16 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         result = self._run_frontend_harness("success_with_screenshots", expect_success=True)
         self.assertEqual("passed", result["status"])
         screenshots = result["diagnostic_refs"]["screenshots"]
-        self.assertEqual(2, len(screenshots))
-        self.assertTrue(any(str(path).endswith("frontend-review-desktop.png") for path in screenshots))
-        self.assertTrue(any(str(path).endswith("frontend-review-mobile.png") for path in screenshots))
+        self.assertEqual(6, len(screenshots))
+        for name in [
+            "frontend-source-desktop.png",
+            "frontend-readiness-desktop.png",
+            "frontend-analysis-desktop.png",
+            "frontend-review-desktop.png",
+            "frontend-publish-desktop.png",
+            "frontend-review-mobile.png",
+        ]:
+            self.assertTrue(any(str(path).endswith(name) for path in screenshots))
         self.assertEqual("run_stub", result["run_id"])
 
     def test_server_exit_is_classified(self) -> None:
@@ -291,7 +318,14 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
             if mode == "success_with_screenshots":
                 output_dir = Path(os.environ.get("UI_E2E_OUTPUT_DIR", ""))
                 output_dir.mkdir(parents=True, exist_ok=True)
-                for name in ["frontend-review-desktop.png", "frontend-review-mobile.png"]:
+                for name in [
+                    "frontend-source-desktop.png",
+                    "frontend-readiness-desktop.png",
+                    "frontend-analysis-desktop.png",
+                    "frontend-review-desktop.png",
+                    "frontend-publish-desktop.png",
+                    "frontend-review-mobile.png",
+                ]:
                     (output_dir / name).write_bytes(b"\\x89PNG\\r\\n\\x1a\\n")
                 sys.exit(0)
             if mode == "server_exited":

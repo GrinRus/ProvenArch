@@ -112,6 +112,13 @@ async function expectHiddenCompatibilityControlsAbsent(page: Page): Promise<void
   await expect(page.getByTestId("setup-stepper")).toHaveCount(0);
 }
 
+async function expectOperatorInspectorSurfaces(page: Page): Promise<void> {
+  await expect(page.getByTestId("blockers-panel")).toBeVisible();
+  await expect(page.getByTestId("evidence-refs-panel")).toBeVisible();
+  await expect(page.getByTestId("runtime-safety-panel")).toBeVisible();
+  await expect(page.getByTestId("git-publication-panel")).toBeVisible();
+}
+
 test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, request }) => {
   test.skip(scenario !== "init-inspect", `scenario ${scenario} skips init-inspect flow`);
   test.setTimeout(Math.max(initTimeoutMs + 120_000, 6 * 60 * 1000));
@@ -127,6 +134,8 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect(page.getByTestId("activity-drawer")).toBeVisible();
   await expect(page.getByTestId("source-repo-table")).toBeVisible();
   await expectHiddenCompatibilityControlsAbsent(page);
+  await expectOperatorInspectorSurfaces(page);
+  await captureEvidenceScreenshot(page, "frontend-source-desktop.png");
 
   await page.getByTestId("stage-readiness").click();
   await expect(page.getByTestId("readiness-summary-cards")).toBeVisible();
@@ -141,6 +150,8 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect(page.getByText("Status: valid")).toBeVisible();
   const resolvedRepoRows = page.getByTestId("workspace-validate-resolved-repos").locator("li");
   await expect(resolvedRepoRows).toHaveCount(expectedRepoCount);
+  await expectOperatorInspectorSurfaces(page);
+  await captureEvidenceScreenshot(page, "frontend-readiness-desktop.png");
 
   await page.getByTestId("stage-analysis").click();
   await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
@@ -181,6 +192,8 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await page.getByTestId("run-logs-mode-select").selectOption("all");
   await expect(page.getByTestId("activity-events-table")).toBeVisible();
   await expect(page.getByTestId("analysis-run-timeline")).toBeVisible();
+  await expectOperatorInspectorSurfaces(page);
+  await captureEvidenceScreenshot(page, "frontend-analysis-desktop.png");
 
   await page.getByTestId("stage-review").click();
   await expect(page.getByTestId("review-panel")).toBeVisible();
@@ -235,6 +248,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
     .poll(async () => (await artifactContent.textContent())?.trim() ?? "")
     .not.toMatch(/^(Select artifact to inspect\.|Loading\.\.\.)$/);
 
+  await expectOperatorInspectorSurfaces(page);
   await captureEvidenceScreenshot(page, "frontend-review-desktop.png");
 
   if (qaSmoke) {
@@ -258,6 +272,17 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
     await page.getByTestId("stage-review").click();
   }
 
+  await page.getByTestId("stage-publish").click();
+  await expect(page.getByTestId("publish-panel")).toBeVisible();
+  await expect(page.getByTestId("publish-diff-summary")).toBeVisible();
+  await expect(page.getByTestId("publish-preview-tabs")).toBeVisible();
+  await expect(page.getByTestId("publish-gate-panel")).toBeVisible();
+  await expect(page.getByTestId("publish-commit-plan")).toBeVisible();
+  await expect(page.getByTestId("git-publication-panel")).toContainText("proposal/beta-refresh");
+  await expectOperatorInspectorSurfaces(page);
+  await captureEvidenceScreenshot(page, "frontend-publish-desktop.png");
+
+  await page.getByTestId("stage-review").click();
   await page.setViewportSize({ width: 390, height: 1200 });
   await expect(page.getByTestId("review-panel")).toBeVisible();
   const mobileBodyText = (((await page.locator("body").innerText()) ?? "").replace(/\s+/g, ""));

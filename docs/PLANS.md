@@ -427,6 +427,34 @@ Validation:
 Progress log:
 - 2026-05-28: Migrated `init-inspect` live Playwright assertions to visible V2 selectors (`source-repo-table`, readiness cards/runtime summary, analysis progress/timeline, activity table, review artifact explorer/evidence/citation panels) and added an explicit hidden-compatibility-control absence check. Added Python contract coverage for the selector migration. Public shell remains `UI_E2E_SCENARIO=init-inspect`; optional `UI_E2E_QA_SMOKE=1`, reason taxonomy, result JSON shape, backend/API/schema/runtime contracts and scripts remain unchanged.
 
+### Slice ExecPlan - 16L Live E2E operator journey
+
+Status: done.
+
+Goals:
+- [x] Extend the existing `init-inspect` Playwright flow to assert the V2 operator journey: Source -> Readiness -> Analysis -> Review -> Publish.
+- [x] Assert operator-critical surfaces: run status, blockers/evidence refs, activity logs, runtime safety and Git publication path.
+- [x] Capture durable stage screenshots for Source, Readiness, Analysis, Review and Publish diagnostics while preserving Playwright trace/screenshot/video failure artifacts.
+
+Non-goals:
+- [x] Do not add a new public `UI_E2E_SCENARIO`, provider-live release gate, reason taxonomy value or wrapper script.
+- [x] Do not move Ask/domain-map/cancel/page-close into release readiness; Ask remains optional `UI_E2E_QA_SMOKE=1`.
+- [x] Do not change backend API, schemas, runtime artifacts, CLI flags or workspace contracts.
+
+Implementation notes:
+- Keep `scripts/frontend-live-e2e.sh` result JSON shape stable; it already discovers `frontend-*.png` under `UI_E2E_OUTPUT_DIR`.
+- Update the fake harness contract fixture to emit the same screenshot names the Playwright spec now captures on success.
+- Leave deeper optional Ask/domain-map diagnostics for 16M.
+
+Validation:
+- [x] Focused frontend live E2E contract tests.
+- [x] UI typecheck/full UI tests through DoD.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-28: Extended `init-inspect` live Playwright flow into the required V2 operator journey Source -> Readiness -> Analysis -> Review -> Publish, with assertions for run status/logs, blockers/evidence refs, runtime safety and Git publication path. Added durable `frontend-source-desktop.png`, `frontend-readiness-desktop.png`, `frontend-analysis-desktop.png`, `frontend-review-desktop.png`, `frontend-publish-desktop.png` and `frontend-review-mobile.png` screenshot refs and updated the fake harness contract fixture accordingly. No new public scenario, reason taxonomy, release gate, wrapper script or backend/API/schema/runtime contract changes.
+
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes
