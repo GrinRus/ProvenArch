@@ -543,6 +543,36 @@ Validation:
 Progress log:
 - 2026-05-31: Re-audited Console V2 against Epic 16, the approved design baseline and saved PNG references. Fixed Source primary action so it saves and validates guided source settings in one step, kept raw `workspace.yaml` save inside Advanced, routed `Run first analysis` to Analysis mission control instead of empty Review, added explicit duration/partial-state column to the Analysis shard/log table, tuned the table layout for desktop/mobile visual QA, and fixed the node/npm resolver so `ACP_NODE_TOOL_CANDIDATES_ONLY=1` remains hermetic for live E2E precheck evidence. No backend/API/schema/runtime contract, live E2E public shell, reason taxonomy, Git diff API or approval persistence changes.
 
+### Slice ExecPlan - 16P Post-audit UI/UX interaction hardening
+
+Status: done.
+
+Goals:
+- [x] Re-audit the current Console V2 implementation against Epic 16, `docs/UI_CONSOLE_V2_DESIGN.md` and rendered local UI evidence.
+- [x] Fix confirmed operator-flow bugs in Source, Analysis, Ask and Publish without changing backend API, schemas, runtime contracts, CLI flags or workspace contracts.
+- [x] Keep the first viewport aligned with the target Mission Control questions: workspace health, current pipeline status, blocker, reviewable evidence/logs and Git publication path.
+
+Non-goals:
+- [x] Do not add new API fields, approval persistence, Git diff APIs, live E2E scenarios, reason taxonomy, provider-live release gates or hidden compatibility controls.
+- [x] Do not rework the approved visual baseline, saved PNG references or domain model.
+- [x] Do not change release readiness semantics; provider-live checks remain manual trusted-machine gates.
+
+Implementation notes:
+- Source secondary action must be named as draft preview work, so it does not compete with the primary save-and-validate path.
+- Analysis blocker review must keep the operator in Analysis and focus the failed-shard/log drilldown instead of navigating away from the run context.
+- Ask inspector primary action must submit the visible Q&A form when Ask is already active, including normal validation for empty questions.
+- Publish commit actions, including the inspector primary, must stay disabled while the publish gate has hard blockers such as missing generated artifacts.
+
+Validation:
+- [x] Rendered desktop/mobile UI QA against the local fake server for Source, Analysis, Ask and Publish interactions.
+- [x] Focused UI tests for Source wording, Analysis blocker focus, Ask inspector submit and Publish no-artifacts gate.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-31: Started post-audit interaction hardening after comparing the current branch with Epic 16, the target design baseline and rendered local UI screenshots.
+- 2026-05-31: Completed 16P after rendered QA found and verified four interaction gaps: Source draft-preview wording, Analysis blocker focus, Ask inspector submit, and Publish hard-blocker disabled state. Verified no backend/API/schema/runtime contract, public live E2E shell, reason taxonomy or release-readiness changes.
+
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes

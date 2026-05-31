@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState, type ComponentProps, type ReactNode } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from "react";
 
 import { BaselineEditorsPanel } from "./BaselineEditorsPanel";
 import { BaselineGitPanel } from "./BaselineGitPanel";
@@ -178,7 +178,7 @@ export function SourceStagePanel({
           Add repo
         </button>
         <button type="button" onClick={onApplyGuidedWorkspaceSetup} disabled={busy}>
-          Apply guided workspace form
+          Preview workspace.yaml draft
         </button>
         <button type="button" onClick={onSaveGuidedWorkspaceSetup} disabled={busy} data-testid="workspace-save-btn">
           Save and validate sources
@@ -807,7 +807,7 @@ export type AnalysisStageProps = {
   artifacts: Artifact[];
   setupRuntime: string;
   setupRuntimeProvider: string;
-  onReviewBlocker: () => void;
+  focusBlockerSignal: number;
   onRunPipeline: (pipeline: "init" | "refresh") => void;
   onCancelSelectedRun: () => void;
   onSelectRun: (runId: string) => void;
@@ -828,16 +828,33 @@ export function AnalysisStagePanel({
   artifacts,
   setupRuntime,
   setupRuntimeProvider,
-  onReviewBlocker,
+  focusBlockerSignal,
   onRunPipeline,
   onCancelSelectedRun,
   onSelectRun,
 }: AnalysisStageProps) {
+  const blockerDetailsRef = useRef<HTMLElement>(null);
   const stepTimeline = buildAnalysisStepTimeline(runStatus, runLogs);
   const shardRows = buildAnalysisShardRows(runStatus, runLogs, artifacts, setupRuntime, setupRuntimeProvider);
   const issueRows = shardRows.filter((row) => row.status === "failed" || row.status === "warning");
   const blockerRows = shardRows.filter((row) => row.status === "failed");
   const runtimeLabel = setupRuntime === "fake" ? "fake" : `${setupRuntime}/${setupRuntimeProvider}`;
+
+  const focusBlockerDetails = useCallback(() => {
+    blockerDetailsRef.current?.scrollIntoView?.({ block: "center" });
+    blockerDetailsRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (focusBlockerSignal <= 0) {
+      return;
+    }
+    focusBlockerDetails();
+  }, [focusBlockerDetails, focusBlockerSignal]);
+
+  function handleReviewBlocker() {
+    focusBlockerDetails();
+  }
 
   return (
     <section className="panel stage-panel" data-testid="runs-control-panel">
@@ -872,11 +889,11 @@ export function AnalysisStagePanel({
         stepTimeline={stepTimeline}
         issueCount={issueRows.length}
         blockerCount={blockerRows.length}
-        onReviewBlocker={onReviewBlocker}
+        onReviewBlocker={handleReviewBlocker}
       />
       <AnalysisRunTimeline steps={stepTimeline} />
       <AnalysisShardTable rows={shardRows} />
-      <AnalysisFailedShardDetails rows={issueRows} />
+      <AnalysisFailedShardDetails rows={issueRows} detailsRef={blockerDetailsRef} />
 
       <RunStatusPanel runStatus={runStatus} warnings={selectedRunWarnings} />
       <PendingPermissionsTable pendingPermissions={pendingPermissions} />
@@ -1034,9 +1051,9 @@ function AnalysisShardTable({ rows }: { rows: AnalysisShardRow[] }) {
   );
 }
 
-function AnalysisFailedShardDetails({ rows }: { rows: AnalysisShardRow[] }) {
+function AnalysisFailedShardDetails({ rows, detailsRef }: { rows: AnalysisShardRow[]; detailsRef: RefObject<HTMLElement> }) {
   return (
-    <section className="subsection" data-testid="analysis-failed-shard-details">
+    <section className="subsection" data-testid="analysis-failed-shard-details" ref={detailsRef} tabIndex={-1}>
       <h2>Blocker drilldown</h2>
       {rows.length === 0 ? (
         <p className="hint">No failed shard or warning log entries for the selected run.</p>
@@ -2280,7 +2297,13 @@ function proposalTabLabel(view: "preview" | "evidence" | "changelog" | "diff"): 
   return "Diff";
 }
 
-export function AskStagePanel({ onOpenArtifact }: { onOpenArtifact: (path: string) => void }) {
+export function AskStagePanel({
+  primaryActionSignal = 0,
+  onOpenArtifact,
+}: {
+  primaryActionSignal?: number;
+  onOpenArtifact: (path: string) => void;
+}) {
   const [question, setQuestion] = useState("");
   const [qaRun, setQARun] = useState<QARunResponse | null>(null);
   const [runHistory, setRunHistory] = useState<QARunResponse[]>([]);
@@ -2423,6 +2446,13 @@ export function AskStagePanel({ onOpenArtifact }: { onOpenArtifact: (path: strin
       setBusy(false);
     }
   }
+
+  useEffect(() => {
+    if (primaryActionSignal <= 0) {
+      return;
+    }
+    void handleAsk();
+  }, [primaryActionSignal]);
 
   return (
     <section className="panel stage-panel" data-testid="qa-panel">
@@ -2662,6 +2692,7 @@ export function PublishStagePanel({
   });
   const blockingGateItems = gateItems.filter((item) => item.tone === "error");
   const warningGateItems = gateItems.filter((item) => item.tone === "warn");
+  const commitDisabled = busy || blockingGateItems.length > 0;
 
   useEffect(() => {
     if (effectiveSelectedPath && selectedArtifact !== effectiveSelectedPath) {
@@ -2844,7 +2875,14 @@ export function PublishStagePanel({
             <label htmlFor="publishGitMessage">Commit message</label>
             <input id="publishGitMessage" value={gitMessage} onChange={(event) => onGitMessageChange(event.target.value)} />
             <div className="actions publish-actions">
-              <button type="button" onClick={onCommit} disabled={busy} data-testid="publish-commit-selected-btn">
+              <button
+                type="button"
+                className="publish-primary-action"
+                onClick={onCommit}
+                disabled={commitDisabled}
+                title={blockingGateItems.length > 0 ? "Resolve publish gate blockers before committing." : "Commit reviewed workspace artifacts."}
+                data-testid="publish-commit-selected-btn"
+              >
                 <span data-testid="git-commit-btn">Commit selected artifacts</span>
               </button>
               <button type="button" className="link-button" onClick={() => void handleCopyCommitMessage()}>

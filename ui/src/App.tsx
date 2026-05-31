@@ -45,6 +45,8 @@ export default function App() {
   const [setupDoctorResult, setSetupDoctorResult] = useState<Awaited<ReturnType<typeof loadSystemDoctor>> | null>(null);
   const [setupDoctorStatus, setSetupDoctorStatus] = useState("");
   const [firstRunStatus, setFirstRunStatus] = useState("");
+  const [analysisFocusSignal, setAnalysisFocusSignal] = useState(0);
+  const [askPrimaryActionSignal, setAskPrimaryActionSignal] = useState(0);
 
   const runtimeSettings = useRuntimeSettings({
     setBusy,
@@ -399,8 +401,15 @@ export default function App() {
         path: "reports/coverage/open-questions.md",
       });
     }
+    if (activeStage === "publish" && artifactCount === 0) {
+      items.push({
+        severity: "error",
+        label: "No publishable artifacts",
+        detail: "Run Analysis before committing workspace artifacts.",
+      });
+    }
     return items;
-  }, [doctorFailures, openQuestions, runStatus, validationErrors]);
+  }, [activeStage, artifactCount, doctorFailures, openQuestions, runStatus, validationErrors]);
 
   const evidenceRefs = useMemo<InspectorItem[]>(() => {
     const refs: InspectorItem[] = [];
@@ -501,7 +510,9 @@ export default function App() {
       validationErrors.length +
       doctorFailures.length +
       (runStatus?.pending_permissions?.length ?? 0) +
-      (runStatus?.error_code ? 1 : 0),
+      (runStatus?.error_code ? 1 : 0) +
+      (activeStage === "publish" && artifactCount === 0 ? 1 : 0),
+    runBlockersCount: (runStatus?.pending_permissions?.length ?? 0) + (runStatus?.error_code ? 1 : 0) + (runStatus?.status === "failed" ? 1 : 0),
     reviewFindingsCount: openQuestions.trim() ? 1 : 0,
     releaseBlockersCount: runStatus?.error_code === "release_verdict_FAIL" ? 1 : 0,
   }), [activeStage, artifactCount, blockers.length, doctorFailures.length, openQuestions, proposalArtifacts.length, runStatus, setupDoctorResult, validateResult, validationErrors.length]);
@@ -567,7 +578,12 @@ export default function App() {
         void handleSaveStep0WizardContract();
         break;
       case "analysis":
-        void handleRunPipeline(runStatus ? "refresh" : "init");
+        if (nextAction.intent === "focus-analysis-blocker") {
+          setActiveStage("analysis");
+          setAnalysisFocusSignal((value) => value + 1);
+        } else {
+          void handleRunPipeline(runStatus ? "refresh" : "init");
+        }
         break;
       case "review":
         setActiveStage("review");
@@ -576,7 +592,12 @@ export default function App() {
         setActiveStage("proposals");
         break;
       case "ask":
-        setActiveStage("ask");
+        if (activeStage === "ask") {
+          setAskPrimaryActionSignal((value) => value + 1);
+        } else {
+          setActiveStage("ask");
+          window.requestAnimationFrame(() => document.getElementById("qaQuestion")?.focus());
+        }
         break;
       case "publish":
         void handleGitCommit();
@@ -727,7 +748,7 @@ export default function App() {
           artifacts={[...nonDiagramArtifacts, ...diagramArtifacts]}
           setupRuntime={setupRuntime}
           setupRuntimeProvider={setupRuntimeProvider}
-          onReviewBlocker={() => setActiveStage("review")}
+          focusBlockerSignal={analysisFocusSignal}
           onRunPipeline={(pipeline) => void handleRunPipeline(pipeline)}
           onCancelSelectedRun={() => void handleCancelSelectedRun()}
           onSelectRun={(id) => void handleSelectRun(id)}
@@ -760,7 +781,7 @@ export default function App() {
         />
       ) : null}
 
-      {activeStage === "ask" ? <AskStagePanel onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)} /> : null}
+      {activeStage === "ask" ? <AskStagePanel primaryActionSignal={askPrimaryActionSignal} onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)} /> : null}
 
       {activeStage === "publish" ? (
         <PublishStagePanel
@@ -795,10 +816,32 @@ function deriveNextAction(
     hasRun: boolean;
     blockersCount: number;
     hardBlockersCount: number;
+    runBlockersCount: number;
     reviewFindingsCount: number;
     releaseBlockersCount: number;
   },
 ): NextAction {
+  if (activeStage === "publish") {
+    const disabledReason = !state.hasArtifacts
+      ? "No generated workspace artifacts are ready to publish."
+      : state.hardBlockersCount > 0
+        ? "Resolve hard blockers before committing workspace artifacts."
+        : undefined;
+    return {
+      label: "Commit selected artifacts",
+      description: disabledReason ? "Resolve publish blockers before creating a Git commit." : "Create a Git commit for reviewed architecture workspace updates.",
+      primaryActionId: "publish",
+      disabledReason,
+    };
+  }
+  if (activeStage === "analysis" && state.runBlockersCount > 0) {
+    return {
+      label: "Review blocker",
+      description: "Focus the failed shard, pending permission or runtime error before retrying analysis.",
+      primaryActionId: "analysis",
+      intent: "focus-analysis-blocker",
+    };
+  }
   if (state.blockersCount > 0 && activeStage !== "readiness") {
     if (state.releaseBlockersCount > 0) {
       return {
@@ -877,12 +920,7 @@ function deriveNextAction(
         label: "Ask workspace",
         description: "Submit an agent-backed question over existing workspace artifacts.",
         primaryActionId: "ask",
-      };
-    case "publish":
-      return {
-        label: "Commit workspace changes",
-        description: "Create a Git commit for reviewed architecture workspace updates.",
-        primaryActionId: "publish",
+        intent: "submit-ask",
       };
   }
 }

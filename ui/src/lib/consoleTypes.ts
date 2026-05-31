@@ -17,6 +17,7 @@ export type NextAction = {
   label: string;
   description: string;
   primaryActionId?: StageId;
+  intent?: "focus-analysis-blocker" | "submit-ask";
   disabledReason?: string;
 };
 

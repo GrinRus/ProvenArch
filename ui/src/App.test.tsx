@@ -870,6 +870,24 @@ describe("App", () => {
     expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/proposal-branch")).toHaveLength(1);
   });
 
+  it("blocks Publish commit actions until generated artifacts exist", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("stage-publish"));
+
+    expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("Run analysis before publishing workspace artifacts.");
+    expect(screen.getByTestId("blockers-panel")).toHaveTextContent("No publishable artifacts");
+    expect(screen.getByTestId("next-action-panel")).toHaveTextContent("No generated workspace artifacts are ready to publish.");
+    expect(screen.getByTestId("publish-commit-selected-btn")).toBeDisabled();
+
+    fireEvent.click(screen.getByTestId("inspector-primary-action"));
+    expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/commit")).toHaveLength(0);
+  });
+
   it("renders diagram artifacts without sending loading placeholder text to Mermaid", async () => {
     const mermaid = await import("mermaid");
     vi.mocked(mermaid.default.render).mockClear();
@@ -926,6 +944,26 @@ describe("App", () => {
       }),
     );
     expect(fetchMock).toHaveBeenCalledWith("/api/qa/runs/qa-run-1", undefined);
+  });
+
+  it("routes the inspector Ask primary action to the visible Q&A submit flow", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("stage-ask"));
+    fireEvent.change(await screen.findByTestId("qa-question-input"), { target: { value: "Who owns payments?" } });
+    fireEvent.click(screen.getByTestId("inspector-primary-action"));
+
+    expect(await screen.findByTestId("qa-answer")).toHaveTextContent("payments-service is owned by Platform Architecture.");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/qa/runs",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ question: "Who owns payments?" }),
+      }),
+    );
   });
 
   it("renders the Ask workbench with history, selected answer, audit safety, and citation drilldown", async () => {
@@ -1095,7 +1133,7 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByText("Apply guided workspace form"));
+    fireEvent.click(screen.getByText("Preview workspace.yaml draft"));
     fireEvent.click(screen.getByTestId("workspace-save-btn"));
     await screen.findByTestId("workspace-validate-result");
     fireEvent.click(screen.getByTestId("stage-readiness"));
@@ -1831,6 +1869,11 @@ describe("App", () => {
     expect(screen.getByText("Error: runtime draft manifest invalid")).toBeInTheDocument();
     expect(screen.getByTestId("run-status-warnings").textContent ?? "").toContain("collect coverage incomplete");
     expect(screen.getByTestId("run-status-warnings").textContent ?? "").toContain("draft promotion skipped");
+    expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Review blocker");
+
+    fireEvent.click(screen.getByTestId("inspector-primary-action"));
+    expect(screen.getByTestId("stage-analysis")).toHaveClass("is-selected");
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("analysis-failed-shard-details")));
   });
 
   it("renders running run status for active live progress state", async () => {

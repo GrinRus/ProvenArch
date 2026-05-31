@@ -2096,8 +2096,24 @@ code {
 
 .publish-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 1fr;
   gap: 0.42rem;
+}
+
+.publish-primary-action {
+  width: 100%;
+  justify-content: center;
+}
+
+.publish-primary-action:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.publish-primary-action:hover:not(:disabled) {
+  border-color: #0b5f59;
+  background: #0b5f59;
 }
 
 .raw-log-details {
