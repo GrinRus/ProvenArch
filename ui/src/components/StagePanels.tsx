@@ -1348,6 +1348,11 @@ export function ReviewStagePanel({
   const overviewArtifact = nonDiagramArtifacts.find((artifact) => artifact.path === "reports/as-is/overview.md");
   const findingsArtifact = nonDiagramArtifacts.find((artifact) => artifact.path.startsWith("reports/findings/"));
   const allArtifacts = [...nonDiagramArtifacts, ...diagramArtifacts];
+  const preferredReviewArtifact =
+    overviewArtifact ??
+    nonDiagramArtifacts.find((artifact) => artifact.path.startsWith("reports/") && !artifact.path.startsWith("reports/changelog/")) ??
+    nonDiagramArtifacts.find((artifact) => artifact.path.startsWith("model/")) ??
+    diagramArtifacts[0];
   const artifactGroups = groupArtifactsByFolder(allArtifacts);
   const selectedArtifactIsLoading = selectedArtifactContent === "Loading...";
   const openQuestionCount = countMarkdownItems(openQuestions);
@@ -1366,6 +1371,13 @@ export function ReviewStagePanel({
     onOpenArtifact(path);
     setReviewView("evidence");
   }
+
+  useEffect(() => {
+    if (reviewView === "evidence" && !selectedArtifact && preferredReviewArtifact) {
+      onOpenArtifact(preferredReviewArtifact.path);
+    }
+  }, [onOpenArtifact, preferredReviewArtifact, reviewView, selectedArtifact]);
+
   return (
     <div className="stage-stack" data-testid="review-panel">
       <section className="panel stage-panel" data-testid="results-coverage-panel">
@@ -2680,7 +2692,7 @@ export function PublishStagePanel({
   onCreateProposalBranch,
   onPreviewArtifact,
 }: PublishStageProps) {
-  const [publishView, setPublishView] = useState<"preview" | "diff" | "evidence" | "checklist">("preview");
+  const [publishView, setPublishView] = useState<"preview" | "diff" | "evidence" | "changelog">("preview");
   const [localSelectedPath, setLocalSelectedPath] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
   const publishArtifacts = artifacts.filter((artifact) => artifact.path.trim().length > 0);
@@ -2689,9 +2701,18 @@ export function PublishStagePanel({
     (selectedArtifact && publishArtifacts.some((artifact) => artifact.path === selectedArtifact) ? selectedArtifact : "") ||
     publishArtifacts[0]?.path ||
     "";
-  const selectedPublishArtifact = publishArtifacts.find((artifact) => artifact.path === effectiveSelectedPath);
-  const selectedPublishContent = selectedArtifact === effectiveSelectedPath ? selectedArtifactContent : "";
   const folderSummaries = buildPublishFolderSummaries(publishArtifacts);
+  const changelogArtifacts = publishArtifacts.filter((artifact) => artifact.kind === "changelog" || artifact.path.startsWith("reports/changelog/"));
+  const selectedChangelogPath =
+    (localSelectedPath && changelogArtifacts.some((artifact) => artifact.path === localSelectedPath) ? localSelectedPath : "") ||
+    (selectedArtifact && changelogArtifacts.some((artifact) => artifact.path === selectedArtifact) ? selectedArtifact : "") ||
+    changelogArtifacts[0]?.path ||
+    "";
+  const activePreviewPath = publishView === "changelog" && selectedChangelogPath ? selectedChangelogPath : effectiveSelectedPath;
+  const selectedPublishArtifact = publishArtifacts.find((artifact) => artifact.path === activePreviewPath);
+  const selectedPublishContent = selectedArtifact === activePreviewPath ? selectedArtifactContent : "";
+  const selectedChangelogArtifact = changelogArtifacts.find((artifact) => artifact.path === selectedChangelogPath);
+  const selectedChangelogContent = selectedArtifact === selectedChangelogPath ? selectedArtifactContent : "";
   const gateItems = [
     ...externalGateItems,
     ...buildPublishGateItems({
@@ -2709,14 +2730,19 @@ export function PublishStagePanel({
     blockingGateItems.length > 0 ? "Resolve publish gate blockers before changing Git publication state." : undefined;
 
   useEffect(() => {
-    if (effectiveSelectedPath && selectedArtifact !== effectiveSelectedPath) {
-      onPreviewArtifact(effectiveSelectedPath);
+    if (activePreviewPath && selectedArtifact !== activePreviewPath) {
+      onPreviewArtifact(activePreviewPath);
     }
-  }, [effectiveSelectedPath, selectedArtifact, onPreviewArtifact]);
+  }, [activePreviewPath, selectedArtifact, onPreviewArtifact]);
 
   function handleSelectPublishArtifact(path: string) {
     setLocalSelectedPath(path);
     setPublishView("preview");
+    onPreviewArtifact(path);
+  }
+
+  function handleSelectChangelogArtifact(path: string) {
+    setLocalSelectedPath(path);
     onPreviewArtifact(path);
   }
 
@@ -2776,9 +2802,9 @@ export function PublishStagePanel({
               <div key={artifact.path} role="listitem">
                 <button
                   type="button"
-                  className={`publish-artifact-row${effectiveSelectedPath === artifact.path ? " is-selected" : ""}`}
+                  className={`publish-artifact-row${activePreviewPath === artifact.path ? " is-selected" : ""}`}
                   onClick={() => handleSelectPublishArtifact(artifact.path)}
-                  aria-pressed={effectiveSelectedPath === artifact.path}
+                  aria-pressed={activePreviewPath === artifact.path}
                 >
                   <span>{artifact.label || artifact.path}</span>
                   <code>{artifact.path}</code>
@@ -2790,7 +2816,7 @@ export function PublishStagePanel({
 
         <section className="publish-preview-panel">
           <div className="publish-preview-tabs" role="tablist" aria-label="Publish preview tabs" data-testid="publish-preview-tabs">
-            {(["preview", "diff", "evidence", "checklist"] as const).map((view) => (
+            {(["preview", "diff", "evidence", "changelog"] as const).map((view) => (
               <button
                 key={view}
                 type="button"
@@ -2831,17 +2857,44 @@ export function PublishStagePanel({
                 <p className="hint">{folderSummaries.length} workspace folders have artifact refs in this publication view.</p>
               </>
             ) : null}
-            {publishView === "checklist" ? (
+            {publishView === "changelog" ? (
               <>
-                <h2>Publication checklist</h2>
-                <ul className="publish-checklist">
-                  {gateItems.map((item) => (
-                    <li key={item.label}>
-                      <StatusBadge tone={item.tone}>{item.label}</StatusBadge>
-                      <span>{item.detail}</span>
-                    </li>
-                  ))}
-                </ul>
+                <h2>Changelog</h2>
+                {changelogArtifacts.length === 0 ? (
+                  <>
+                    <p className="empty-state">No changelog artifact is available from the selected run.</p>
+                    <p className="hint">Keep publication review focused on the selected artifact preview, evidence tab and Publish gate until a changelog artifact is generated.</p>
+                  </>
+                ) : (
+                  <>
+                    <div className="publish-artifact-list compact" role="list" aria-label="publish changelog artifacts">
+                      {changelogArtifacts.map((artifact) => (
+                        <div key={artifact.path} role="listitem">
+                          <button
+                            type="button"
+                            className={`publish-artifact-row${selectedChangelogPath === artifact.path ? " is-selected" : ""}`}
+                            onClick={() => handleSelectChangelogArtifact(artifact.path)}
+                            aria-pressed={selectedChangelogPath === artifact.path}
+                          >
+                            <span>{artifact.label || artifact.path}</span>
+                            <code>{artifact.path}</code>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="publish-changelog-preview">
+                      <h3>Selected changelog preview</h3>
+                      {selectedChangelogArtifact ? (
+                        <>
+                          <p className="hint">{selectedChangelogArtifact.path}</p>
+                          {selectedChangelogContent ? <pre>{selectedChangelogContent}</pre> : <p className="empty-state">Loading changelog preview...</p>}
+                        </>
+                      ) : (
+                        <p className="empty-state">No changelog selected.</p>
+                      )}
+                    </div>
+                  </>
+                )}
               </>
             ) : null}
           </div>
@@ -2989,7 +3042,7 @@ function buildPublishGateItems({
   ];
 }
 
-function publishTabLabel(view: "preview" | "diff" | "evidence" | "checklist"): string {
+function publishTabLabel(view: "preview" | "diff" | "evidence" | "changelog"): string {
   if (view === "preview") {
     return "Preview";
   }
@@ -2999,7 +3052,7 @@ function publishTabLabel(view: "preview" | "diff" | "evidence" | "checklist"): s
   if (view === "evidence") {
     return "Evidence";
   }
-  return "Checklist";
+  return "Changelog";
 }
 
 export function RuntimeSettingsStagePanel(props: ComponentProps<typeof RuntimeProfileSettingsPanel>) {

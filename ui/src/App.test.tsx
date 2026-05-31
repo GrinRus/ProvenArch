@@ -680,6 +680,8 @@ describe("App", () => {
     expect(citationCoverage).toHaveTextContent("Open questions");
     expect(citationCoverage).toHaveTextContent("Review required");
 
+    await waitFor(() => expect(screen.getByTestId("run-artifact-content")).toHaveTextContent("# System overview"));
+
     fireEvent.click(within(explorer).getByRole("button", { name: /reports\/as-is\/overview\.md/i }));
     await waitFor(() => expect(screen.getByTestId("run-artifact-content")).toHaveTextContent("# System overview"));
 
@@ -855,6 +857,7 @@ describe("App", () => {
         "reports/coverage/open-questions.md": "- Confirm owner sign-off\n",
         "model/entities/payments-service.yaml": "id: payments-service\n",
         "proposals/adr-001.md": "# ADR 001\n",
+        "reports/changelog/2026-04-03.md": "# Iteration changelog\n- Published architecture workspace artifacts.\n",
       },
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -879,6 +882,11 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
     expect(screen.getByText(/current UI APIs expose generated artifact refs/i)).toBeInTheDocument();
 
+    expect(screen.getByTestId("publish-preview-tabs")).toHaveTextContent("Changelog");
+    expect(screen.getByTestId("publish-preview-tabs")).not.toHaveTextContent("Checklist");
+    fireEvent.click(screen.getByRole("tab", { name: "Changelog" }));
+    expect(screen.getByTestId("publish-panel")).toHaveTextContent("Iteration changelog");
+
     const commitInput = screen.getByLabelText("Commit message");
     fireEvent.change(commitInput, { target: { value: "docs: publish architecture workspace" } });
     fireEvent.click(screen.getByTestId("publish-commit-selected-btn"));
@@ -889,6 +897,64 @@ describe("App", () => {
 
     expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/commit")).toHaveLength(1);
     expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/proposal-branch")).toHaveLength(1);
+  });
+
+  it("keeps raw proposal and changelog artifacts when a final run index is available", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runStarted: true,
+        runArtifacts: {
+          "run-1": {
+            run_id: "run-1",
+            artifacts: [
+              { path: "reports/as-is/overview.md", kind: "report", label: "As-is overview" },
+              { path: "proposals/proposal-baseline/proposal.md", kind: "proposal", label: "Baseline proposal" },
+              { path: "reports/changelog/2026-05-31-run-1.md", kind: "changelog", label: "Run changelog" },
+              { path: "reports/taskruns/run-1/staging/final/final-run-index.json", kind: "taskrun", label: "Final Run Index" },
+            ],
+          },
+        },
+        artifactText: {
+          "reports/as-is/overview.md": "# As-is overview\n",
+          "proposals/proposal-baseline/proposal.md": "# Proposal\n",
+          "reports/changelog/2026-05-31-run-1.md": "# Run changelog\n- Proposal package compiled.\n",
+          "reports/coverage/open-questions.md": "",
+          "reports/taskruns/run-1/staging/final/final-run-index.json": JSON.stringify({
+            version: 1,
+            run_id: "run-1",
+            pipeline: "init",
+            generated_at: "2026-05-31T12:00:00Z",
+            canonical_documents: [
+              {
+                id: "doc.reports-as-is-overview-md",
+                kind: "report",
+                title: "As-is overview",
+                canonical_path: "reports/as-is/overview.md",
+                staged_path: "reports/taskruns/run-1/staging/final/reports/as-is/overview.md",
+              },
+            ],
+          }),
+        },
+      }),
+    );
+
+    render(<App />);
+
+    await screen.findByTestId("review-panel");
+    fireEvent.click(screen.getByTestId("stage-proposals"));
+    const proposalList = await screen.findByTestId("proposals-artifact-list");
+    expect(proposalList).toHaveTextContent("proposals/proposal-baseline");
+    expect(proposalList).toHaveTextContent("reports/changelog");
+
+    fireEvent.click(screen.getByTestId("stage-publish"));
+    expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Changelog" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("publish-panel")).toHaveTextContent("reports/changelog/2026-05-31-run-1.md");
+      expect(screen.getByTestId("publish-panel")).toHaveTextContent("Proposal package compiled.");
+    });
   });
 
   it("blocks Publish Git actions until generated artifacts exist", async () => {
@@ -1900,8 +1966,9 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("stage-review"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("run-artifact-selected-path").textContent).toBe("Artifact Content");
-      expect(screen.getByTestId("run-artifact-content").textContent ?? "").toContain("Select artifact to inspect.");
+      expect(screen.getByTestId("run-artifact-selected-path").textContent).toBe("reports/as-is/new.md");
+      expect(screen.getByTestId("run-artifact-content").textContent ?? "").toContain("# New artifact");
+      expect(screen.getByTestId("run-artifact-content").textContent ?? "").not.toContain("# Old artifact");
     });
   });
 

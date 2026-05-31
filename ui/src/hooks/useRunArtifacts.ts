@@ -95,7 +95,10 @@ export function useRunArtifacts() {
           label: "Citation Index",
         });
       }
-      applyArtifacts(dedupeArtifactsByPath([...canonicalArtifacts, ...indexArtifacts]));
+      const publicationArtifacts = runArtifacts.filter(
+        (artifact) => artifact.path.startsWith("proposals/") || artifact.path.startsWith("reports/changelog/"),
+      );
+      applyArtifacts(dedupeArtifactsByPath([...canonicalArtifacts, ...publicationArtifacts, ...indexArtifacts]));
     } catch {
       applyArtifacts(runArtifacts);
     }

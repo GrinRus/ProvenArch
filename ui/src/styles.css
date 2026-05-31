@@ -225,18 +225,19 @@ code {
 }
 
 .stage-rail {
-  border-right: 1px solid var(--line);
-  background: #fbfcfd;
+  border-right: 1px solid rgba(125, 211, 252, 0.16);
+  background: #061923;
   padding: 0.75rem 0.65rem;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  color: #ecfeff;
 }
 
 .rail-title {
   margin: 0 0 0.55rem;
   padding: 0 0.36rem;
-  color: var(--ink-muted);
+  color: rgba(236, 254, 255, 0.68);
   font-size: 0.72rem;
   font-weight: 800;
   text-transform: uppercase;
@@ -254,46 +255,48 @@ code {
   border: 1px solid transparent;
   border-radius: 0.48rem;
   background: transparent;
-  color: var(--ink);
+  color: rgba(236, 254, 255, 0.86);
   text-align: left;
 }
 
 .stage-row:hover {
-  border-color: var(--line);
-  background: var(--surface);
+  border-color: rgba(45, 212, 191, 0.28);
+  background: rgba(15, 118, 110, 0.16);
 }
 
 .stage-row:focus-visible {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.16);
+  border-color: rgba(45, 212, 191, 0.78);
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.2);
 }
 
 .stage-row.is-selected {
-  border-color: rgba(15, 118, 110, 0.35);
-  background: var(--accent-soft);
+  border-color: rgba(45, 212, 191, 0.48);
+  background: rgba(15, 118, 110, 0.36);
+  color: #ffffff;
 }
 
 .stage-row.is-selected .stage-index,
 .stage-row.is-selected .stage-icon {
-  border-color: rgba(15, 118, 110, 0.35);
-  color: var(--accent);
+  border-color: rgba(45, 212, 191, 0.52);
+  color: #99f6e4;
+  background: rgba(6, 95, 70, 0.46);
 }
 
 .stage-row.blocked {
-  color: var(--err);
+  color: #fecaca;
 }
 
 .stage-row.done .stage-state {
-  color: var(--ok);
+  color: #86efac;
 }
 
 .stage-row.blocked .stage-state {
-  color: var(--err);
+  color: #fca5a5;
 }
 
 .stage-row.active .stage-state,
 .stage-row.is-selected .stage-state {
-  color: var(--accent);
+  color: #5eead4;
 }
 
 .stage-index {
@@ -301,10 +304,10 @@ code {
   height: 1.48rem;
   display: grid;
   place-items: center;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(148, 163, 184, 0.24);
   border-radius: 0.35rem;
-  background: var(--surface);
-  color: var(--ink-muted);
+  background: rgba(15, 23, 42, 0.26);
+  color: rgba(236, 254, 255, 0.76);
   font-size: 0.78rem;
   font-weight: 760;
 }
@@ -316,7 +319,7 @@ code {
   place-items: center;
   border: 1px solid transparent;
   border-radius: 0.35rem;
-  color: var(--ink-muted);
+  color: rgba(236, 254, 255, 0.68);
 }
 
 .stage-icon svg {
@@ -345,7 +348,7 @@ code {
 
 .stage-description {
   overflow: hidden;
-  color: var(--ink-muted);
+  color: rgba(236, 254, 255, 0.64);
   font-size: 0.72rem;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -365,17 +368,18 @@ code {
   align-items: center;
   justify-content: center;
   gap: 0.38rem;
-  border: 1px solid var(--line-soft);
+  border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 0.42rem;
-  background: var(--surface);
-  color: var(--ink-muted);
+  background: rgba(15, 23, 42, 0.32);
+  color: rgba(236, 254, 255, 0.76);
   font-size: 0.78rem;
   font-weight: 760;
 }
 
 .rail-collapse-btn:hover {
-  border-color: var(--line);
-  color: var(--ink);
+  border-color: rgba(45, 212, 191, 0.4);
+  color: #ffffff;
+  background: rgba(15, 118, 110, 0.18);
 }
 
 .rail-collapse-icon {
@@ -403,8 +407,8 @@ code {
 }
 
 .stage-rail.is-collapsed .stage-icon {
-  border-color: var(--line-soft);
-  background: var(--surface);
+  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.32);
 }
 
 .work-area {
@@ -2068,6 +2072,15 @@ code {
   font-size: 0.98rem;
 }
 
+.publish-changelog-preview {
+  margin-top: 0.65rem;
+}
+
+.publish-changelog-preview h3 {
+  margin: 0;
+  font-size: 0.84rem;
+}
+
 .publish-tab-panel pre {
   margin: 0.4rem 0 0;
   max-height: 430px;
@@ -2225,7 +2238,7 @@ code {
 
   .stage-rail {
     border-right: 0;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid rgba(125, 211, 252, 0.16);
     display: flex;
     flex-direction: row;
     overflow-x: auto;

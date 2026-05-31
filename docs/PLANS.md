@@ -631,6 +631,35 @@ Progress log:
 - 2026-05-31: Started publication gate hardening after code audit found Publish commit and proposal-branch actions were not gated consistently with the approved Git Review Room design.
 - 2026-05-31: Completed 16R: Publish now carries shell hard blockers into the gate panel, disables both commit and proposal-branch Git mutations under hard blockers, removes misleading advisory gate copy, and makes disabled inspector primary actions visually non-primary. Verified with focused UI tests, rendered desktop/mobile QA, `git diff --check` and full DoD. No backend/API/schema/runtime contract, public live E2E shell, reason taxonomy, Git diff API or provider-live release gate changes.
 
+### Slice ExecPlan - 16S Target UI reference alignment audit
+
+Status: done.
+
+Goals:
+- [x] Re-audit all saved `docs/assets/ui-console-v2/*.png` references against the current rendered Console V2 screens.
+- [x] Fix confirmed target-design mismatches that are UI-only and can be solved without backend/API/schema/runtime contract changes.
+- [x] Keep the first screen of Review and Publish immediately reviewable when artifacts exist.
+
+Non-goals:
+- [x] Do not add approval persistence, Git diff APIs, new backend fields, schemas, runtime contracts, CLI flags, workspace contract changes, live E2E scenarios, reason taxonomy or provider-live release gates.
+- [x] Do not convert saved PNG references into runtime assets.
+- [x] Do not change fake runtime artifact generation or provider behavior.
+
+Implementation notes:
+- Review Evidence should auto-load the first reviewable artifact when selected-run artifacts exist and no artifact is selected, matching the saved Review Evidence reference.
+- Publish preview tabs must match the saved Publish reference and design contract: `Preview`, `Diff`, `Evidence`, `Changelog`; checklist remains in the side publish gate.
+- The shared workflow rail should visually align with the saved reference screens as a dark compact ops rail while preserving selectors, keyboard behavior and responsive collapse.
+
+Validation:
+- [x] Rendered desktop/mobile UI QA against the local fake server for Source, Review Evidence, Review Domain Map, Publish and shared shell.
+- [x] Focused UI tests for Review auto-selection and Publish Changelog tab.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-31: Started target UI reference alignment after comparing the saved 9-screen PNG baseline with current rendered Source, Analysis, Review, Proposals, Ask and Publish screens.
+- 2026-05-31: Completed 16S target alignment: Review Evidence auto-selects the first reviewable artifact, Publish uses `Preview`/`Diff`/`Evidence`/`Changelog`, raw proposal/changelog artifacts survive final-run-index normalization, and the shared workflow rail matches the saved dark ops-console references. No backend/API/schema/runtime/live-shell changes.
+
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes
