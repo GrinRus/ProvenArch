@@ -582,6 +582,7 @@ export default function App() {
           setActiveStage("analysis");
           setAnalysisFocusSignal((value) => value + 1);
         } else {
+          setActiveStage("analysis");
           void handleRunPipeline(runStatus ? "refresh" : "init");
         }
         break;
@@ -905,9 +906,8 @@ function deriveNextAction(
     case "review":
       return {
         label: state.hasArtifacts ? "Ask about evidence" : "Run analysis first",
-        description: state.hasArtifacts ? "Use workspace-backed Q&A to inspect unresolved architecture context." : "No review artifacts are available yet.",
+        description: state.hasArtifacts ? "Use workspace-backed Q&A to inspect unresolved architecture context." : "Start analysis to generate reviewable evidence artifacts.",
         primaryActionId: state.hasArtifacts ? "ask" : "analysis",
-        disabledReason: state.hasArtifacts ? undefined : "No analysis artifacts yet.",
       };
     case "proposals":
       return {

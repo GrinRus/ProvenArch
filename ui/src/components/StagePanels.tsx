@@ -250,6 +250,7 @@ export function ReadinessStagePanel({
   runtimeStepProviderEffective,
 }: ReadinessStageProps) {
   const validated = validateResult?.ok === true;
+  const localReady = doctorResult?.ok === true;
   return (
     <section className="panel stage-panel" data-testid="readiness-panel">
       <div className="stage-header">
@@ -312,7 +313,13 @@ export function ReadinessStagePanel({
         <button type="button" onClick={onCheckDoctor} disabled={busy} data-testid="setup-doctor-btn">
           Check local readiness
         </button>
-        <button type="button" onClick={onRunFirstAnalysis} disabled={busy || !validated} data-testid="setup-run-first-btn">
+        <button
+          type="button"
+          onClick={onRunFirstAnalysis}
+          disabled={busy || !validated || !localReady}
+          title={validated && !localReady ? "Run local readiness before starting analysis." : undefined}
+          data-testid="setup-run-first-btn"
+        >
           Run first analysis
         </button>
       </div>

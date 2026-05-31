@@ -504,6 +504,25 @@ describe("App", () => {
     expect(screen.queryByTestId(`setup-${"stepper"}`)).not.toBeInTheDocument();
   });
 
+  it("routes Review empty-state recovery to Analysis instead of disabling the primary action", async () => {
+    const fetchMock = createFetchMock({ runID: "run-review-recovery" });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("stage-review"));
+
+    expect(await screen.findByTestId("review-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Run analysis first");
+    expect(screen.getByTestId("inspector-primary-action")).not.toBeDisabled();
+
+    fireEvent.click(screen.getByTestId("inspector-primary-action"));
+
+    expect(await screen.findByTestId("analysis-run-progress")).toBeInTheDocument();
+    expect(screen.getByTestId("stage-analysis")).toHaveClass("is-selected");
+    expect(fetchMock).toHaveBeenCalledWith("/api/pipeline/init", expect.anything());
+  });
+
   it("renders the Source V2 repo table with explicit advanced-only analysis scope", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 
@@ -1045,11 +1064,13 @@ describe("App", () => {
 
     await screen.findByTestId("workspace-validate-result");
     fireEvent.click(screen.getByTestId("stage-readiness"));
-    expect(screen.getByTestId("setup-run-first-btn")).not.toBeDisabled();
+    expect(screen.getByTestId("setup-run-first-btn")).toBeDisabled();
+    expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Check local readiness");
 
     fireEvent.click(screen.getByTestId("setup-doctor-btn"));
     await screen.findByTestId("setup-doctor-result");
     expect(screen.getByText("Local readiness passed.")).toBeInTheDocument();
+    expect(screen.getByTestId("setup-run-first-btn")).not.toBeDisabled();
 
     fireEvent.click(screen.getByTestId("setup-run-first-btn"));
     await screen.findByTestId("analysis-run-progress");
@@ -1137,6 +1158,9 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("workspace-save-btn"));
     await screen.findByTestId("workspace-validate-result");
     fireEvent.click(screen.getByTestId("stage-readiness"));
+    expect(screen.getByTestId("setup-run-first-btn")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("setup-doctor-btn"));
+    await screen.findByTestId("setup-doctor-result");
     expect(screen.getByTestId("setup-run-first-btn")).not.toBeDisabled();
 
     fireEvent.click(screen.getByTestId("stage-source"));

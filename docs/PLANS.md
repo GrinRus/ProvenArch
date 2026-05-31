@@ -573,6 +573,35 @@ Progress log:
 - 2026-05-31: Started post-audit interaction hardening after comparing the current branch with Epic 16, the target design baseline and rendered local UI screenshots.
 - 2026-05-31: Completed 16P after rendered QA found and verified four interaction gaps: Source draft-preview wording, Analysis blocker focus, Ask inspector submit, and Publish hard-blocker disabled state. Verified no backend/API/schema/runtime contract, public live E2E shell, reason taxonomy or release-readiness changes.
 
+### Slice ExecPlan - 16Q Post-audit recovery path hardening
+
+Status: done.
+
+Goals:
+- [x] Re-audit Console V2 recovery actions against Epic 16, `docs/UI_CONSOLE_V2_DESIGN.md` and rendered local UI evidence.
+- [x] Fix confirmed operator-flow bugs where an empty-stage recovery action is shown but blocked, or readiness can be bypassed by a competing local action.
+- [x] Keep Source -> Readiness -> Analysis -> Review recovery behavior aligned with the approved Mission Control design.
+
+Non-goals:
+- [x] Do not add backend API fields, schemas, runtime contracts, CLI flags, workspace contract changes, live E2E scenarios, reason taxonomy or hidden compatibility controls.
+- [x] Do not change provider-live release readiness or trusted-machine gate semantics.
+- [x] Do not add approval persistence, Git diff APIs or new publication mutations.
+
+Implementation notes:
+- Review empty state must make `Run analysis first` a real recovery action and route the operator into Analysis mission control.
+- Readiness stage-level `Run first analysis` must require both workspace validation and local readiness pass, matching the right-inspector validate -> doctor -> analysis sequence.
+- Analysis direct actions remain available from the Analysis stage for operators who intentionally jump there.
+
+Validation:
+- [x] Rendered desktop/mobile UI QA against the local fake server for Review empty recovery and Readiness doctor gating.
+- [x] Focused UI tests for Review recovery action routing and Readiness first-run gating.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-31: Started recovery path hardening after rendered QA showed Review empty-state primary action disabled and Readiness `Run first analysis` enabled before local doctor pass.
+- 2026-05-31: Completed 16Q: Review empty-state `Run analysis first` now starts `init` and routes to Analysis mission control, while Readiness `Run first analysis` requires both valid workspace and successful local doctor. Verified with rendered desktop/mobile QA, focused UI tests and full DoD. No backend/API/schema/runtime contract, public live E2E shell, reason taxonomy or release-readiness changes.
+
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes
