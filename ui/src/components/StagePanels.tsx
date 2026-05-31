@@ -46,6 +46,7 @@ export type SourceStageProps = {
   onRemoveRepo: (id: string) => void;
   onDocsImportsPathChange: (value: string) => void;
   onApplyGuidedWorkspaceSetup: () => void;
+  onSaveGuidedWorkspaceSetup: () => void;
   onManifestChange: (value: string) => void;
   onSaveManifest: () => void;
 };
@@ -66,6 +67,7 @@ export function SourceStagePanel({
   onRemoveRepo,
   onDocsImportsPathChange,
   onApplyGuidedWorkspaceSetup,
+  onSaveGuidedWorkspaceSetup,
   onManifestChange,
   onSaveManifest,
 }: SourceStageProps) {
@@ -178,8 +180,8 @@ export function SourceStagePanel({
         <button type="button" onClick={onApplyGuidedWorkspaceSetup} disabled={busy}>
           Apply guided workspace form
         </button>
-        <button type="button" onClick={onSaveManifest} disabled={busy} data-testid="workspace-save-btn">
-          Save and validate workspace.yaml
+        <button type="button" onClick={onSaveGuidedWorkspaceSetup} disabled={busy} data-testid="workspace-save-btn">
+          Save and validate sources
         </button>
       </div>
 
@@ -193,6 +195,9 @@ export function SourceStagePanel({
           onChange={(event) => onManifestChange(event.target.value)}
           rows={12}
         />
+        <button type="button" onClick={onSaveManifest} disabled={busy} data-testid="workspace-raw-save-btn">
+          Save raw workspace.yaml
+        </button>
       </details>
       <WorkspaceValidationResult validateResult={validateResult} validationDiagnosticsByRepo={validationDiagnosticsByRepo} />
       {doctorStatus ? <p className="status">{doctorStatus}</p> : null}
@@ -896,6 +901,7 @@ type AnalysisShardRow = {
   provider: string;
   status: "succeeded" | "active" | "failed" | "warning" | "observed";
   artifactRef: string;
+  duration: string;
   lastMessage: string;
 };
 
@@ -1004,6 +1010,7 @@ function AnalysisShardTable({ rows }: { rows: AnalysisShardRow[] }) {
                 <th>Provider</th>
                 <th>Status</th>
                 <th>Artifact/log ref</th>
+                <th>Duration</th>
                 <th>Last message</th>
               </tr>
             </thead>
@@ -1015,6 +1022,7 @@ function AnalysisShardTable({ rows }: { rows: AnalysisShardRow[] }) {
                   <td data-label="Provider">{row.provider}</td>
                   <td data-label="Status">{row.status}</td>
                   <td data-label="Artifact/log ref">{row.artifactRef}</td>
+                  <td data-label="Duration">{row.duration}</td>
                   <td data-label="Last message">{row.lastMessage}</td>
                 </tr>
               ))}
@@ -1095,6 +1103,7 @@ function buildAnalysisShardRows(
       provider: fieldString(last?.fields, "provider") || provider,
       status: hasError ? "failed" : hasWarning ? "warning" : runStatus?.status === "succeeded" ? "succeeded" : runStatus?.current_step && stepMatches(runStatus.current_step, stepId) ? "active" : "observed",
       artifactRef: last?.taskrun_path || (artifacts.length > 0 ? `${artifacts.length} selected-run artifacts` : "logs only"),
+      duration: durationFromLogFields(last?.fields),
       lastMessage: last?.message || "-",
     });
   }
@@ -1106,6 +1115,7 @@ function buildAnalysisShardRows(
       provider,
       status: runStatus.status === "failed" ? "failed" : runStatus.status === "succeeded" ? "succeeded" : runStatus.status === "running" ? "active" : "observed",
       artifactRef: artifacts.length > 0 ? `${artifacts.length} selected-run artifacts` : "status only",
+      duration: "partial: not exposed",
       lastMessage: runStatus.error || runStatus.error_code || "No shard logs loaded yet.",
     });
   }
@@ -1140,6 +1150,47 @@ function stepTimelineDetail(state: AnalysisStepState): string {
 function fieldString(fields: Record<string, unknown> | undefined, key: string): string {
   const value = fields?.[key];
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : "";
+}
+
+function durationFromLogFields(fields: Record<string, unknown> | undefined): string {
+  const direct = fieldString(fields, "duration") || fieldString(fields, "elapsed") || fieldString(fields, "runtime_duration");
+  if (direct) {
+    return direct;
+  }
+  const millis = numericField(fields, "duration_ms") ?? numericField(fields, "elapsed_ms") ?? numericField(fields, "runtime_duration_ms");
+  if (millis !== undefined) {
+    return formatDurationMillis(millis);
+  }
+  const seconds = numericField(fields, "duration_sec") ?? numericField(fields, "elapsed_sec") ?? numericField(fields, "runtime_duration_sec");
+  if (seconds !== undefined) {
+    return formatDurationMillis(seconds * 1000);
+  }
+  return "partial: not exposed";
+}
+
+function numericField(fields: Record<string, unknown> | undefined, key: string): number | undefined {
+  const value = fields?.[key];
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function formatDurationMillis(milliseconds: number): string {
+  if (milliseconds < 1000) {
+    return `${Math.round(milliseconds)}ms`;
+  }
+  const totalSeconds = Math.round(milliseconds / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) {
+    return `${seconds}s`;
+  }
+  return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
 }
 
 function PendingPermissionsTable({ pendingPermissions }: { pendingPermissions: RuntimePermissionRequest[] }) {

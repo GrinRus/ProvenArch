@@ -513,6 +513,36 @@ Validation:
 Progress log:
 - 2026-05-28: Synced Console V2 testing strategy and release live E2E runbook with the implemented Source -> Readiness -> Analysis -> Review -> Publish journey, evidence-only screenshot refs, optional `UI_E2E_QA_SMOKE=1`, deterministic domain-map diagnostics and unchanged release-facing `UI_E2E_SCENARIO=init-inspect`. README, ARCHITECTURE and stakeholder docs were checked as already consistent with the implemented UI behavior. No code/API/schema/runtime contract, public live shell, reason taxonomy, release verdict, provider matrix or wrapper-script changes.
 
+### Slice ExecPlan - 16O Post-implementation UI/UX alignment audit
+
+Status: done.
+
+Goals:
+- [x] Re-audit the implemented Console V2 against `docs/BACKLOG.md` Epic 16, `docs/UI_CONSOLE_V2_DESIGN.md` and the saved PNG references.
+- [x] Fix operator-flow mismatches found by rendered UI QA without changing backend API, schemas, runtime contracts, CLI flags or workspace contracts.
+- [x] Keep Source, Readiness and Analysis primary paths aligned with the target `Source -> Readiness -> Analysis -> Review -> Publish` journey.
+
+Non-goals:
+- [x] Do not add approval persistence, Git diff API, new live E2E scenarios, provider-live release gates or new reason taxonomy.
+- [x] Do not reintroduce hidden compatibility controls or test-only DOM.
+- [x] Do not convert saved design PNGs into runtime product assets.
+
+Implementation notes:
+- Source inspector primary action must persist and validate sources, not only update the unsaved `workspace.yaml` draft.
+- `Run first analysis` must route to Analysis mission control so operators can watch progress and logs before Review.
+- Analysis shard/log table must show duration as available data or an explicit partial state.
+- Toolchain-only live E2E precheck tests must not fall back to ambient `node`/`npm` when `ACP_NODE_TOOL_CANDIDATES_ONLY=1`; otherwise validation can recurse into full DoD instead of materializing expected precheck evidence.
+
+Validation:
+- [x] Rendered desktop/mobile UI QA against the local fake server and saved design baseline.
+- [x] Focused UI tests for first-run routing, source save semantics and Analysis shard duration.
+- [x] Focused resolver and batch-precheck tests for hermetic live E2E node/npm toolchain evidence.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-31: Re-audited Console V2 against Epic 16, the approved design baseline and saved PNG references. Fixed Source primary action so it saves and validates guided source settings in one step, kept raw `workspace.yaml` save inside Advanced, routed `Run first analysis` to Analysis mission control instead of empty Review, added explicit duration/partial-state column to the Analysis shard/log table, tuned the table layout for desktop/mobile visual QA, and fixed the node/npm resolver so `ACP_NODE_TOOL_CANDIDATES_ONLY=1` remains hermetic for live E2E precheck evidence. No backend/API/schema/runtime contract, live E2E public shell, reason taxonomy, Git diff API or approval persistence changes.
+
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes

@@ -149,12 +149,29 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
     }
   }
 
+  async function handleSaveGuidedWorkspaceSetup() {
+    setBusy(true);
+    setError(null);
+    try {
+      const nextManifest = buildManifestFromGuidedForm();
+      setManifestContent(nextManifest);
+      await saveWorkspaceManifest(nextManifest);
+      setValidateResult(await validateWorkspaceAPI());
+      setupDirtyRef.current = false;
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "failed to save guided workspace setup");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleSaveManifest() {
     setBusy(true);
     setError(null);
     try {
       await saveWorkspaceManifest(manifestContent);
-      await handleValidateWorkspace();
+      setValidateResult(await validateWorkspaceAPI());
+      setupDirtyRef.current = false;
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "failed to save manifest");
     } finally {
@@ -175,6 +192,7 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
     handleAddGuidedRepo,
     handleRemoveGuidedRepo,
     handleApplyGuidedWorkspaceSetup,
+    handleSaveGuidedWorkspaceSetup,
     handleSaveManifest,
     handleValidateWorkspace,
   };

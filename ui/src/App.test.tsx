@@ -1003,7 +1003,6 @@ describe("App", () => {
     expect(screen.getByTestId("stage-source")).toHaveClass("is-selected");
     expect(screen.getByDisplayValue("https://github.com/org/my-service.git")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText("Apply guided workspace form"));
     fireEvent.click(screen.getByTestId("workspace-save-btn"));
 
     await screen.findByTestId("workspace-validate-result");
@@ -1015,23 +1014,29 @@ describe("App", () => {
     expect(screen.getByText("Local readiness passed.")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("setup-run-first-btn"));
-    await screen.findByTestId("results-coverage-panel");
+    await screen.findByTestId("analysis-run-progress");
+    expect(screen.getByTestId("stage-analysis")).toHaveClass("is-selected");
     expect(fetchMock).toHaveBeenCalledWith("/api/pipeline/init", expect.anything());
   });
 
   it("supports local-folder source mode in first-run setup", async () => {
-    vi.stubGlobal("fetch", createFetchMock());
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
 
     fireEvent.change(screen.getByLabelText("Repo source type"), { target: { value: "path" } });
     fireEvent.change(await screen.findByLabelText("Local checkout path"), { target: { value: "/tmp/my-service" } });
-    fireEvent.click(screen.getByText("Apply guided workspace form"));
+    fireEvent.click(screen.getByTestId("workspace-save-btn"));
+    await screen.findByTestId("workspace-validate-result");
     fireEvent.click(screen.getByText("Advanced workspace.yaml editor"));
 
     const manifest = screen.getByDisplayValue((content) => content.includes('path: "/tmp/my-service"'));
     expect(manifest).toBeInTheDocument();
     expect((manifest as HTMLTextAreaElement).value).not.toContain("git_url:");
+    const putCall = fetchMock.mock.calls.find(([url, init]) => url === "/api/workspace/manifest" && (init as RequestInit | undefined)?.method === "PUT");
+    const savedManifest = JSON.parse(String((putCall?.[1] as RequestInit | undefined)?.body ?? "{}")) as { content?: string };
+    expect(savedManifest.content).toContain('path: "/tmp/my-service"');
   });
 
   it("hydrates guided first-run form from loaded workspace manifest", async () => {
@@ -1275,7 +1280,7 @@ describe("App", () => {
                 domain_id: "payments",
                 message: "collect manifest missing",
                 taskrun_path: "reports/taskruns/run-analysis-v2/staging/shards/payments/runtime-execution.json",
-                fields: { provider: "qwen-code", shard_id: "payments" },
+                fields: { provider: "qwen-code", shard_id: "payments", duration_ms: 2140 },
               },
             ],
             next_cursor: 2,
@@ -1311,6 +1316,7 @@ describe("App", () => {
     expect(shardTable).toHaveTextContent("qwen-code");
     expect(shardTable).toHaveTextContent("failed");
     expect(shardTable).toHaveTextContent("runtime-execution.json");
+    expect(shardTable).toHaveTextContent("2s");
 
     const drilldown = screen.getByTestId("analysis-failed-shard-details");
     expect(drilldown).toHaveTextContent("collect manifest missing");

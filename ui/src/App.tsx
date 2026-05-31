@@ -165,6 +165,7 @@ export default function App() {
     handleAddGuidedRepo,
     handleRemoveGuidedRepo,
     handleApplyGuidedWorkspaceSetup,
+    handleSaveGuidedWorkspaceSetup,
     handleSaveManifest,
     handleValidateWorkspace,
     handleSaveStep0WizardContract,
@@ -260,6 +261,11 @@ export default function App() {
   function handleSetupApplyGuidedWorkspaceSetup() {
     handleApplyGuidedWorkspaceSetup();
     clearFirstRunReadiness();
+  }
+
+  async function handleSetupSaveGuidedWorkspaceSetup() {
+    clearFirstRunReadiness();
+    await handleSaveGuidedWorkspaceSetup();
   }
 
   function handleSetupRuntimeChange(value: string) {
@@ -546,7 +552,7 @@ export default function App() {
   function handleInspectorPrimaryAction() {
     switch (nextAction.primaryActionId) {
       case "source":
-        handleSetupApplyGuidedWorkspaceSetup();
+        void handleSetupSaveGuidedWorkspaceSetup();
         break;
       case "readiness":
         if (!validateResult?.ok) {
@@ -628,6 +634,7 @@ export default function App() {
           onRemoveRepo={handleSetupRemoveRepo}
           onDocsImportsPathChange={handleSetupDocsImportsPathChange}
           onApplyGuidedWorkspaceSetup={handleSetupApplyGuidedWorkspaceSetup}
+          onSaveGuidedWorkspaceSetup={() => void handleSetupSaveGuidedWorkspaceSetup()}
           onManifestChange={handleSetupManifestChange}
           onSaveManifest={() => void handleSaveManifest()}
         />
@@ -647,7 +654,7 @@ export default function App() {
           onSetupRuntimeProviderChange={handleSetupRuntimeProviderChange}
           onValidateWorkspace={() => void handleValidateWorkspace()}
           onCheckDoctor={() => void handleSetupDoctorCheck()}
-          onRunFirstAnalysis={() => void handleSetupFirstRun("review")}
+          onRunFirstAnalysis={() => void handleSetupFirstRun("analysis")}
           runtimeSettingsPanel={runtimeSettingsPanel}
           artifactCount={artifactCount}
           runtimeTimeoutEffective={runtimeTimeoutEffective}
@@ -816,8 +823,8 @@ function deriveNextAction(
   switch (activeStage) {
     case "source":
       return {
-        label: "Apply source form",
-        description: "Render the guided source fields into workspace.yaml before validation.",
+        label: "Save and validate source",
+        description: "Persist source settings to workspace.yaml and run workspace validation.",
         primaryActionId: "source",
       };
     case "readiness":
