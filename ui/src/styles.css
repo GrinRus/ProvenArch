@@ -1194,6 +1194,12 @@ code {
   vertical-align: top;
 }
 
+.artifact-path-button.is-selected {
+  border-color: rgba(15, 118, 110, 0.38);
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
 .artifact-path-name {
   min-width: 0;
   color: #0f5dbd;

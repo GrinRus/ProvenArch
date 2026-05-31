@@ -675,6 +675,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 root = Path(sys.argv[1]).resolve()
 try:
@@ -690,7 +691,7 @@ now = datetime.now(timezone.utc)
 changed = 0
 
 
-def parse_ts(value: str | None) -> datetime | None:
+def parse_ts(value: Optional[str]) -> Optional[datetime]:
     text = str(value or "").strip()
     if not text:
         return None
@@ -700,13 +701,13 @@ def parse_ts(value: str | None) -> datetime | None:
         return None
 
 
-def is_recent(value: datetime | None) -> bool:
+def is_recent(value: Optional[datetime]) -> bool:
     if value is None:
         return False
     return (now - value).total_seconds() <= stale_sec
 
 
-def pid_alive(pid_value: str | None) -> bool:
+def pid_alive(pid_value: Optional[str]) -> bool:
     text = str(pid_value or "").strip()
     if not text:
         return False
@@ -1528,6 +1529,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 records_path = Path(sys.argv[1]).resolve()
 status_root = Path(sys.argv[2]).resolve()
@@ -1766,7 +1768,7 @@ def normalize_scope_list(values: object) -> list[str]:
     return sorted(set(normalized))
 
 
-def collect_batch_shard_plan_signature(batch_root: Path) -> tuple[str | None, list[str]]:
+def collect_batch_shard_plan_signature(batch_root: Path) -> tuple[Optional[str], list[str]]:
     if not batch_root.exists():
         return None, [f"shard_plan_artifacts=missing_batch_root:{batch_root}"]
 
@@ -1928,7 +1930,7 @@ def collect_raw_output_refs(rec: dict[str, object]) -> list[object]:
 def shard_plan_invariant_status(records: list[dict[str, object]]) -> tuple[dict[str, str], dict[str, list[str]]]:
     status_by_batch: dict[str, str] = {}
     blockers_by_batch: dict[str, list[str]] = {}
-    signatures_by_batch: dict[str, str | None] = {}
+    signatures_by_batch: dict[str, Optional[str]] = {}
 
     for rec in records:
         batch_id = str(rec.get("batch_id", ""))

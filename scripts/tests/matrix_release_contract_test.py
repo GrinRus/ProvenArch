@@ -8,6 +8,7 @@ import time
 import unittest
 from unittest import mock
 from pathlib import Path
+from typing import Optional
 
 
 class MatrixReleaseContractTest(unittest.TestCase):
@@ -310,9 +311,9 @@ class MatrixReleaseContractTest(unittest.TestCase):
 
     def _write_matrix_file(
         self,
-        sweeps: list[str] | None,
-        include_profiles: list[str] | None = None,
-        timeout_profile: str | None = None,
+        sweeps: Optional[list[str]],
+        include_profiles: Optional[list[str]] = None,
+        timeout_profile: Optional[str] = None,
     ) -> Path:
         ordered_profiles = ["single-path", "multi-git_url"]
         selected_profiles = include_profiles or ordered_profiles
@@ -393,7 +394,7 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self,
         matrix_file: Path,
         matrix_id: str,
-        extra_env: dict[str, str] | None = None,
+        extra_env: Optional[dict[str, str]] = None,
         release_mode: str = "1",
     ) -> subprocess.CompletedProcess[str]:
         env = self._build_subprocess_env(
@@ -714,7 +715,7 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertGreaterEqual(len(lines), 2, f"expected header + row in {profile_matrix_tsv}")
         header = lines[0].split("\t")
         values = lines[1].split("\t")
-        row = dict(zip(header, values, strict=False))
+        row = dict(zip(header, values))
         self.assertEqual("1", row["runtime_flow_failed_runs"])
         self.assertEqual("0", row["infra_incomplete_cycle_failures"])
 

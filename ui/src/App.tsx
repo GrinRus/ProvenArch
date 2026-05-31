@@ -874,31 +874,10 @@ function deriveNextAction(
       intent: "focus-analysis-blocker",
     };
   }
-  if (state.blockersCount > 0 && activeStage !== "readiness") {
-    if (state.releaseBlockersCount > 0) {
-      return {
-        label: "Verify release blockers",
-        description: "Inspect release verdict evidence before making a release decision.",
-        primaryActionId: "review",
-      };
-    }
-    if (state.hardBlockersCount === 0 && state.reviewFindingsCount > 0) {
-      return {
-        label: "Review findings",
-        description: "Inspect coverage questions and findings before publishing.",
-        primaryActionId: "review",
-      };
-    }
-    return {
-      label: "Resolve blockers",
-      description: "Resolve workspace, doctor or runtime blockers before publishing.",
-      primaryActionId: "readiness",
-    };
-  }
   switch (activeStage) {
     case "source":
       return {
-        label: "Save and validate source",
+        label: "Save and validate sources",
         description: "Persist source settings to workspace.yaml and run workspace validation.",
         primaryActionId: "source",
       };
@@ -935,6 +914,27 @@ function deriveNextAction(
         primaryActionId: "analysis",
       };
     case "review":
+      if (state.blockersCount > 0) {
+        if (state.releaseBlockersCount > 0) {
+          return {
+            label: "Verify release blockers",
+            description: "Inspect release verdict evidence before making a release decision.",
+            primaryActionId: "review",
+          };
+        }
+        if (state.hardBlockersCount === 0 && state.reviewFindingsCount > 0) {
+          return {
+            label: "Review findings",
+            description: "Inspect coverage questions and findings before publishing.",
+            primaryActionId: "review",
+          };
+        }
+        return {
+          label: "Resolve blockers",
+          description: "Resolve workspace, doctor or runtime blockers before publishing.",
+          primaryActionId: "readiness",
+        };
+      }
       return {
         label: state.hasArtifacts ? "Ask about evidence" : "Run analysis first",
         description: state.hasArtifacts ? "Use workspace-backed Q&A to inspect unresolved architecture context." : "Start analysis to generate reviewable evidence artifacts.",
@@ -942,9 +942,9 @@ function deriveNextAction(
       };
     case "proposals":
       return {
-        label: state.hasProposals ? "Publish changes" : "Review results first",
-        description: state.hasProposals ? "Commit or branch the generated proposal package." : "No proposal artifacts are available yet.",
-        primaryActionId: state.hasProposals ? "publish" : "review",
+        label: state.hasProposals ? "Review proposal" : "Review results first",
+        description: state.hasProposals ? "Inspect the generated proposal package, linked evidence and publication readiness." : "No proposal artifacts are available yet.",
+        primaryActionId: state.hasProposals ? "proposals" : "review",
       };
     case "ask":
       return {

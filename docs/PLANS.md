@@ -660,6 +660,35 @@ Progress log:
 - 2026-05-31: Started target UI reference alignment after comparing the saved 9-screen PNG baseline with current rendered Source, Analysis, Review, Proposals, Ask and Publish screens.
 - 2026-05-31: Completed 16S target alignment: Review Evidence auto-selects the first reviewable artifact, Publish uses `Preview`/`Diff`/`Evidence`/`Changelog`, raw proposal/changelog artifacts survive final-run-index normalization, and the shared workflow rail matches the saved dark ops-console references. No backend/API/schema/runtime/live-shell changes.
 
+### Slice ExecPlan - 16T Stage contextual action and review defaults audit
+
+Status: done.
+
+Goals:
+- [x] Re-audit the rendered Console V2 screens against the saved `docs/assets/ui-console-v2/*.png` references after 16S.
+- [x] Keep each stage's right-inspector primary action contextual to that stage while still surfacing global blockers in the blocker panel.
+- [x] Make Review and Proposals immediately reviewable when selected-run artifacts exist.
+
+Non-goals:
+- [x] Do not add Git diff APIs, approval persistence, new backend fields, schemas, runtime contracts, CLI flags, workspace contract changes, live E2E scenarios, reason taxonomy or provider-live release gates.
+- [x] Do not convert design PNGs into runtime assets or rewrite the existing shell architecture.
+- [x] Do not change fake runtime artifact generation or provider behavior.
+
+Implementation notes:
+- Open-question blockers should remain visible in `Blockers`, but should not hijack Source, Charter, Proposals or Ask primary next actions.
+- Review artifact explorer should be evidence-first (`reports/as-is`, coverage, findings, diagrams, model/domain outputs) with proposal/changelog artifacts later in the list.
+- Proposals should auto-load the first proposal/ADR/RFC/checklist artifact when artifacts exist and no proposal artifact is selected, matching the saved Proposals review-room reference.
+
+Validation:
+- [x] Rendered desktop/mobile UI QA against the local fake server for Source, Review Evidence, Proposals, Ask, Publish and shared shell.
+- [x] Focused UI tests for contextual next action, Review explorer order/selection and Proposals auto-preview.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-31: Started 16T after rendered audit found Source/Charter/Proposals/Ask next actions were globally overridden by review findings, Proposals opened with an empty preview despite available proposal artifacts, and Review grouped proposal artifacts before evidence groups.
+- 2026-05-31: Completed 16T: right-inspector next action is stage-contextual while blockers remain visible, Review explorer is evidence-first with visible selected artifact state, and Proposals auto-loads the first proposal artifact for immediate review. Verified with focused UI tests, rendered desktop/mobile QA, `git diff --check` and full DoD. Also restored local Python 3.9 compatibility for the matrix release contract test and matrix harness type hints so DoD imports and scripted matrix paths run cleanly, with no release behavior change. No backend/API/schema/runtime/live-shell changes.
+
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes

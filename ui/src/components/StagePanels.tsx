@@ -1641,7 +1641,13 @@ function ReviewEvidenceWorkbench({
                 <ul data-testid={group.name === "reports/diagrams" ? "run-diagrams-list" : undefined}>
                   {group.artifacts.map((artifact) => (
                     <li key={`${artifact.kind}-${artifact.path}`}>
-                      <ArtifactPathButton path={artifact.path} label={artifact.label} kind={artifact.kind} onOpenArtifact={onOpenArtifact} />
+                      <ArtifactPathButton
+                        path={artifact.path}
+                        label={artifact.label}
+                        kind={artifact.kind}
+                        selected={artifact.path === selectedArtifact}
+                        onOpenArtifact={onOpenArtifact}
+                      />
                     </li>
                   ))}
                 </ul>
@@ -1784,7 +1790,7 @@ function groupArtifactsByFolder(artifacts: Artifact[]): ArtifactGroup[] {
     groups.set(name, [...(groups.get(name) ?? []), artifact]);
   }
   return Array.from(groups.entries())
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => reviewArtifactGroupPriority(left) - reviewArtifactGroupPriority(right) || left.localeCompare(right))
     .map(([name, groupArtifacts]) => ({ name, artifacts: groupArtifacts.sort((left, right) => left.path.localeCompare(right.path)) }));
 }
 
@@ -1800,6 +1806,37 @@ function reviewArtifactGroupName(path: string): string {
     return `${parts[0]}/${parts[1]}`;
   }
   return parts[0];
+}
+
+function reviewArtifactGroupPriority(name: string): number {
+  if (name === "reports/as-is") {
+    return 0;
+  }
+  if (name === "reports/coverage") {
+    return 1;
+  }
+  if (name === "reports/findings") {
+    return 2;
+  }
+  if (name === "reports/diagrams") {
+    return 3;
+  }
+  if (name.startsWith("model/")) {
+    return 4;
+  }
+  if (name === "reports/agent-outputs") {
+    return 5;
+  }
+  if (name === "proposals") {
+    return 6;
+  }
+  if (name === "reports/changelog") {
+    return 7;
+  }
+  if (name === "reports/taskruns") {
+    return 8;
+  }
+  return 20;
 }
 
 const MODEL_EDGE_TYPES = ["publishes", "subscribes", "calls", "reads", "writes", "exposes"] as const;
@@ -2035,7 +2072,18 @@ export function ProposalsStagePanel({
   const [proposalView, setProposalView] = useState<"preview" | "evidence" | "changelog" | "diff">("preview");
   const proposalReview = deriveProposalReviewModel({ artifacts, openQuestions });
   const selectedProposalArtifact = proposalReview.proposalArtifacts.find((artifact) => artifact.path === selectedArtifact);
+  const preferredProposalArtifact =
+    proposalReview.proposalArtifacts.find((artifact) => artifact.path.startsWith("proposals/") && /(^|\/)proposal\.md$/i.test(artifact.path)) ??
+    proposalReview.proposalArtifacts.find((artifact) => artifact.path.startsWith("proposals/")) ??
+    proposalReview.changelogArtifacts[0];
   const selectedProposalIsLoading = selectedArtifactContent === "Loading...";
+
+  useEffect(() => {
+    if (!selectedProposalArtifact && preferredProposalArtifact && selectedArtifact !== preferredProposalArtifact.path) {
+      onOpenArtifact(preferredProposalArtifact.path);
+    }
+  }, [onOpenArtifact, preferredProposalArtifact, selectedArtifact, selectedProposalArtifact]);
+
   return (
     <section className="panel stage-panel" data-testid="proposals-panel">
       <div className="stage-header">
@@ -2066,6 +2114,7 @@ export function ProposalsStagePanel({
                           label={artifact.label}
                           kind={artifact.kind}
                           actionLabel="Open proposal artifact"
+                          selected={artifact.path === selectedArtifact}
                           onOpenArtifact={onOpenArtifact}
                         />
                         <span>{deriveProposalArtifactType(artifact.path)}</span>
