@@ -870,6 +870,8 @@ describe("App", () => {
     expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("Confirm owner sign-off");
     expect(screen.getByTestId("publish-commit-plan")).toHaveTextContent("proposal/beta-refresh");
     expect(screen.getByTestId("publish-commit-selected-btn")).toBeInTheDocument();
+    const proposalBranchButton = screen.getByTestId("git-proposal-branch-btn").closest("button") as HTMLButtonElement;
+    expect(proposalBranchButton).not.toBeDisabled();
 
     fireEvent.click(screen.getByRole("button", { name: /Coverage summary.*reports\/coverage\/summary\.md/i }));
     await waitFor(() => expect(screen.getByTestId("publish-panel")).toHaveTextContent("Coverage ready for publication."));
@@ -882,14 +884,14 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("publish-commit-selected-btn"));
     await waitFor(() => expect(screen.getByTestId("publish-commit-plan")).toHaveTextContent("committed: docs: publish architecture workspace"));
 
-    fireEvent.click(screen.getByTestId("git-proposal-branch-btn"));
+    fireEvent.click(proposalBranchButton);
     await waitFor(() => expect(screen.getByTestId("publish-commit-plan")).toHaveTextContent("checked out proposal/beta-refresh"));
 
     expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/commit")).toHaveLength(1);
     expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/proposal-branch")).toHaveLength(1);
   });
 
-  it("blocks Publish commit actions until generated artifacts exist", async () => {
+  it("blocks Publish Git actions until generated artifacts exist", async () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -902,9 +904,54 @@ describe("App", () => {
     expect(screen.getByTestId("blockers-panel")).toHaveTextContent("No publishable artifacts");
     expect(screen.getByTestId("next-action-panel")).toHaveTextContent("No generated workspace artifacts are ready to publish.");
     expect(screen.getByTestId("publish-commit-selected-btn")).toBeDisabled();
+    const proposalBranchButton = screen.getByTestId("git-proposal-branch-btn").closest("button") as HTMLButtonElement;
+    expect(proposalBranchButton).toBeDisabled();
 
     fireEvent.click(screen.getByTestId("inspector-primary-action"));
+    fireEvent.click(proposalBranchButton);
     expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/commit")).toHaveLength(0);
+    expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/proposal-branch")).toHaveLength(0);
+  });
+
+  it("blocks Publish Git actions when generated artifacts still have runtime blockers", async () => {
+    const fetchMock = createFetchMock({
+      runStarted: true,
+      runStatus: {
+        "run-1": {
+          run_id: "run-1",
+          pipeline: "init",
+          status: "failed",
+          started_at: "2026-04-03T12:00:00Z",
+          finished_at: "2026-04-03T12:00:02Z",
+          warnings: [],
+          error_code: "runtime_contract_failed",
+          error: "artifact validation failed",
+        },
+      },
+      runArtifacts: {
+        "run-1": {
+          run_id: "run-1",
+          artifacts: [{ path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" }],
+        },
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("stage-publish"));
+
+    expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("reports/coverage"));
+    expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("runtime_contract_failed");
+    expect(screen.getByTestId("publish-commit-selected-btn")).toBeDisabled();
+    const proposalBranchButton = screen.getByTestId("git-proposal-branch-btn").closest("button") as HTMLButtonElement;
+    expect(proposalBranchButton).toBeDisabled();
+
+    fireEvent.click(screen.getByTestId("publish-commit-selected-btn"));
+    fireEvent.click(proposalBranchButton);
+    expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/commit")).toHaveLength(0);
+    expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/proposal-branch")).toHaveLength(0);
   });
 
   it("renders diagram artifacts without sending loading placeholder text to Mermaid", async () => {

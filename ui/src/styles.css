@@ -583,9 +583,15 @@ code {
 }
 
 .panel button:disabled,
-.secondary-action:disabled,
-.primary-action:disabled {
+.secondary-action:disabled {
   opacity: 0.55;
+}
+
+.primary-action:disabled {
+  border-color: var(--line);
+  background: var(--surface-muted);
+  color: var(--muted);
+  opacity: 1;
 }
 
 .hint {

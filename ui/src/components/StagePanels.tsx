@@ -2660,6 +2660,7 @@ type PublishStageProps = ComponentProps<typeof BaselineGitPanel> & {
   selectedArtifact: string;
   selectedArtifactContent: string;
   openQuestions: string;
+  externalGateItems?: PublishGateItem[];
   onPreviewArtifact: (path: string) => void;
 };
 
@@ -2672,6 +2673,7 @@ export function PublishStagePanel({
   selectedArtifact,
   selectedArtifactContent,
   openQuestions,
+  externalGateItems = [],
   onGitMessageChange,
   onProposalBranchChange,
   onCommit,
@@ -2690,16 +2692,21 @@ export function PublishStagePanel({
   const selectedPublishArtifact = publishArtifacts.find((artifact) => artifact.path === effectiveSelectedPath);
   const selectedPublishContent = selectedArtifact === effectiveSelectedPath ? selectedArtifactContent : "";
   const folderSummaries = buildPublishFolderSummaries(publishArtifacts);
-  const gateItems = buildPublishGateItems({
-    artifactCount: publishArtifacts.length,
-    folderCount: folderSummaries.length,
-    gitMessage,
-    proposalBranch,
-    openQuestions,
-  });
+  const gateItems = [
+    ...externalGateItems,
+    ...buildPublishGateItems({
+      artifactCount: publishArtifacts.length,
+      folderCount: folderSummaries.length,
+      gitMessage,
+      proposalBranch,
+      openQuestions,
+    }),
+  ];
   const blockingGateItems = gateItems.filter((item) => item.tone === "error");
   const warningGateItems = gateItems.filter((item) => item.tone === "warn");
-  const commitDisabled = busy || blockingGateItems.length > 0;
+  const gitMutationDisabled = busy || blockingGateItems.length > 0;
+  const gitMutationBlockedTitle =
+    blockingGateItems.length > 0 ? "Resolve publish gate blockers before changing Git publication state." : undefined;
 
   useEffect(() => {
     if (effectiveSelectedPath && selectedArtifact !== effectiveSelectedPath) {
@@ -2845,7 +2852,7 @@ export function PublishStagePanel({
             <div className="panel-subheader">
               <div>
                 <h2>Publish gate</h2>
-                <p className="hint">Checks are advisory in this UI-only slice; Git commands stay explicit operator actions.</p>
+                <p className="hint">Checks gate Git commit and proposal branch actions; Git commands stay explicit operator actions.</p>
               </div>
               <StatusBadge tone={blockingGateItems.length > 0 ? "error" : warningGateItems.length > 0 ? "warn" : "ok"}>
                 {blockingGateItems.length > 0 ? "blocked" : warningGateItems.length > 0 ? "warnings" : "ready"}
@@ -2886,8 +2893,8 @@ export function PublishStagePanel({
                 type="button"
                 className="publish-primary-action"
                 onClick={onCommit}
-                disabled={commitDisabled}
-                title={blockingGateItems.length > 0 ? "Resolve publish gate blockers before committing." : "Commit reviewed workspace artifacts."}
+                disabled={gitMutationDisabled}
+                title={gitMutationBlockedTitle ?? "Commit reviewed workspace artifacts."}
                 data-testid="publish-commit-selected-btn"
               >
                 <span data-testid="git-commit-btn">Commit selected artifacts</span>
@@ -2898,7 +2905,7 @@ export function PublishStagePanel({
             </div>
             <label htmlFor="publishProposalBranch">Proposal branch</label>
             <input id="publishProposalBranch" value={proposalBranch} onChange={(event) => onProposalBranchChange(event.target.value)} />
-            <button type="button" onClick={onCreateProposalBranch} disabled={busy}>
+            <button type="button" onClick={onCreateProposalBranch} disabled={gitMutationDisabled} title={gitMutationBlockedTitle}>
               <span data-testid="git-proposal-branch-btn">Create/Switch proposal branch</span>
             </button>
             {copyStatus ? <p className="status ok">{copyStatus}</p> : null}

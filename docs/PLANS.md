@@ -602,6 +602,35 @@ Progress log:
 - 2026-05-31: Started recovery path hardening after rendered QA showed Review empty-state primary action disabled and Readiness `Run first analysis` enabled before local doctor pass.
 - 2026-05-31: Completed 16Q: Review empty-state `Run analysis first` now starts `init` and routes to Analysis mission control, while Readiness `Run first analysis` requires both valid workspace and successful local doctor. Verified with rendered desktop/mobile QA, focused UI tests and full DoD. No backend/API/schema/runtime contract, public live E2E shell, reason taxonomy or release-readiness changes.
 
+### Slice ExecPlan - 16R Post-audit publication gate hardening
+
+Status: done.
+
+Goals:
+- [x] Re-audit Publish Git Review Room against Epic 16, `docs/UI_CONSOLE_V2_DESIGN.md` and the approved saved PNG baseline.
+- [x] Fix confirmed publication-gate UI/UX bugs so commit and proposal-branch Git mutations are blocked consistently when hard publish blockers exist.
+- [x] Keep operator recovery clear: publication blockers must be visible in the gate panel, right inspector and action disabled states.
+
+Non-goals:
+- [x] Do not add backend API fields, schemas, runtime contracts, CLI flags, workspace contract changes, Git diff APIs, live E2E scenarios, reason taxonomy or provider-live release gates.
+- [x] Do not change Charter/Baseline Git helper behavior; this slice only hardens the Publish room.
+- [x] Do not add approval persistence or convert saved design PNGs into product runtime assets.
+
+Implementation notes:
+- Publish gate must treat generated artifact absence and shell hard blockers consistently for all publication mutations.
+- The proposal branch action is a Git publication mutation in the Publish room, so it must not remain enabled while the gate is blocked.
+- Gate copy must not describe checks as merely advisory if the UI blocks Git mutations.
+
+Validation:
+- [x] Rendered desktop/mobile UI QA against the local fake server for empty/blocked Publish states.
+- [x] Focused UI tests for Publish commit/proposal-branch disabled states and allowed state after artifacts exist.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-31: Started publication gate hardening after code audit found Publish commit and proposal-branch actions were not gated consistently with the approved Git Review Room design.
+- 2026-05-31: Completed 16R: Publish now carries shell hard blockers into the gate panel, disables both commit and proposal-branch Git mutations under hard blockers, removes misleading advisory gate copy, and makes disabled inspector primary actions visually non-primary. Verified with focused UI tests, rendered desktop/mobile QA, `git diff --check` and full DoD. No backend/API/schema/runtime contract, public live E2E shell, reason taxonomy, Git diff API or provider-live release gate changes.
+
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes

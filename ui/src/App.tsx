@@ -499,6 +499,36 @@ export default function App() {
     [artifactCount, gitMessage, gitStatus, proposalArtifacts.length, proposalBranch],
   );
 
+  const publishExternalGateItems = useMemo(
+    () => [
+      ...validationErrors.map((diagnostic) => ({
+        label: diagnostic.code,
+        detail: diagnostic.suggestion ? `${diagnostic.message} Suggested fix available.` : diagnostic.message,
+        tone: "error" as const,
+      })),
+      ...doctorFailures.map((check) => ({
+        label: check.label,
+        detail: check.suggestion ? `${check.message} Suggested fix available.` : check.message,
+        tone: "error" as const,
+      })),
+      ...(runStatus?.pending_permissions ?? []).map((request) => ({
+        label: request.action || "Runtime permission",
+        detail: "Runtime permission request is pending before publication.",
+        tone: "error" as const,
+      })),
+      ...(runStatus?.error_code
+        ? [
+            {
+              label: runStatus.error_code,
+              detail: runStatus.error || "Selected run failed before publication.",
+              tone: "error" as const,
+            },
+          ]
+        : []),
+    ],
+    [doctorFailures, runStatus, validationErrors],
+  );
+
   const nextAction = useMemo<NextAction>(() => deriveNextAction(activeStage, {
     validateOK: Boolean(validateResult?.ok),
     doctorOK: Boolean(setupDoctorResult?.ok),
@@ -794,6 +824,7 @@ export default function App() {
           selectedArtifact={selectedArtifact}
           selectedArtifactContent={selectedArtifactContent}
           openQuestions={openQuestions}
+          externalGateItems={publishExternalGateItems}
           onGitMessageChange={setGitMessage}
           onProposalBranchChange={setProposalBranch}
           onCommit={() => void handleGitCommit()}
