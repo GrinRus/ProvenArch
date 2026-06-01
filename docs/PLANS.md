@@ -1141,17 +1141,17 @@ Live E2E должен стать black-box operator flow: план шага, п�
 EP-20260509-v011-hardening-release
 
 ### Context
-`v0.1.0` is the only public release, while `main` has accumulated OSS readiness, release hardening, exact toolchain, and onboarding documentation improvements. Prepare `v0.1.1` as a beta hardening/onboarding release without changing runtime contracts, schemas, CLI flags, or public API.
+`v0.1.1` is now published as a beta prerelease. The final tag was cut from `7548fdc4` after owner-approved no-gate release handling, GitHub main CI, release workflow success, and install smoke checks. Fresh trusted-machine `release-fast` was intentionally skipped, so this plan records the release but does not claim canonical `RELEASE READY` status.
 
 ### Goals (must have)
-- [x] Keep README aligned with the actual local-first install/run path and current public `v0.1.0` status until `v0.1.1` is published
+- [x] Keep README aligned with the actual local-first install/run path and public release status across `v0.1.1` publication
 - [x] Keep README user-facing by removing internal live E2E/release-gate/runbook navigation and making fake/live onboarding standalone
-- [x] Sync `docs/INSTALL.md` provider command wording without changing public latest-release status
-- [x] Move user-facing hardening notes from `Unreleased` into `CHANGELOG.md` entry `v0.1.1 - 2026-05-09`
+- [x] Sync `docs/INSTALL.md` provider command wording and post-publication latest-release status
+- [x] Move user-facing hardening notes from `Unreleased` into `CHANGELOG.md` entry `v0.1.1`
 - [x] Preserve `.goreleaser.yml` prerelease behavior for the next beta release
 - [x] Run local DoD and release-prep smoke checks
-- [ ] Run trusted-machine release gate through direct `scripts/full-run-batch-matrix.sh` invocation and record `reports/release_verdict_<matrix-id>.json`
-- [ ] After the GitHub release is published, update public latest-release docs from `v0.1.0` to `v0.1.1`
+- [ ] Optional follow-up: run trusted-machine release gate through direct `scripts/full-run-batch-matrix.sh` invocation and record `reports/release_verdict_<matrix-id>.json` if canonical release-ready status is needed later
+- [x] After the GitHub release is published, update public latest-release docs from `v0.1.0` to `v0.1.1`
 
 ### Non-goals
 - [x] Do not change runtime contracts, schemas, CLI flags, or public API
@@ -1162,15 +1162,15 @@ EP-20260509-v011-hardening-release
 ### Approach
 1) Prepare release docs on a dedicated branch with README and changelog aligned to the release plan.
 2) Run local required checks and smoke checks against fake runtime and public install path.
-3) Execute trusted-host live release gate only from a clean committed tree that satisfies canonical path/provider prerequisites.
-4) Publish `v0.1.1` as a prerelease through existing GoReleaser config after release verdict evidence is present.
-5) Update latest-release docs to `v0.1.1` after publication.
+3) Execute trusted-host live release gate only from a clean committed tree that satisfies canonical path/provider prerequisites when a canonical release-ready verdict is required.
+4) For the owner-approved no-gate path, publish `v0.1.1` as a prerelease through existing GoReleaser config after release metadata is explicit and main CI is green.
+5) Keep latest-release docs at `v0.1.1` after publication.
 
 ### Files expected to change
 - `README.md`
 - `CHANGELOG.md`
 - `docs/PLANS.md`
-- `docs/INSTALL.md` for provider command wording; latest-release values only after `v0.1.1` is published
+- `docs/INSTALL.md` for provider command wording and post-publication latest-release values
 - `scripts/write-batch-preflight.py`, `scripts/e2e_report_classifiers.py`, `scripts/e2e_batch_report.py`, and related tests for release-fast provider readiness/diagnostic alignment
 - `internal/runtime/{qwencode,claudecode,codexcode,providercommon}` tests and adapters for qwen/claude pre-artifact stall policy and raw diagnostics
 
@@ -1191,7 +1191,7 @@ EP-20260509-v011-hardening-release
 
 ### Risks
 - Current local host may not satisfy trusted-machine prerequisites for canonical release slices.
-- `v0.1.1` docs must not claim latest public release until the GitHub release is actually published.
+- `v0.1.1` docs may claim latest public release after publication, but must not imply canonical `RELEASE READY` without a verifier-backed release verdict.
 - Owner/admin GitHub residual tasks remain manual and must not be misrepresented as completed release evidence.
 
 ### Progress log
@@ -1227,6 +1227,7 @@ EP-20260509-v011-hardening-release
 - 2026-05-23: Fresh `v0.1.1` release candidate gate on main `488e173` (`release-fast-20260523T101656Z`) failed: qwen passed init but `refresh.step2.asis_docs` focused draft repair returned `[API Error: Connection error ... network socket disconnected before secure TLS connection]` with process `success` and no `asis-draft-manifest.json`; the runtime correctly reported `runner_unavailable`, but the existing transient retry covered only collect-pair repairs and did not recognize the TLS/socket transcript as retryable. The remediation keeps canonical matrices, schemas, provider contracts, and timeout budgets unchanged: qwen transient provider-unavailable focused retry now also covers draft-artifact repairs (`step0/2/4`) and recognizes connection/TLS/socket API text; exhausted no-artifact repair still fails as `runner_unavailable`. The same release attempt also showed host/network operational failures (`git clone` TLS errors, qwen/codex provider connectivity, occasional Claude smoke timeout), so a new release tag remains blocked until this fix is committed and a fresh clean-worktree release-fast PASS is produced on a stable trusted host.
 - 2026-05-23: Fresh gate on main `4147d2c` (`release-fast-20260523T113202Z`) advanced past the transient draft-repair failure but hit a new qwen frontend blocker in `init.step2.asis_docs`: required as-is draft artifacts (`asis-draft-manifest.json`, `overview.md`, `summary.md`, `architect-summary.md`) were valid, while qwen kept streaming and mutating `architect-summary.md` until the global step runtime timeout. This is not a silence/preflight/provider-auth failure; it is an active overrun after valid draft artifacts. The remediation keeps canonical matrices, schemas, provider contracts, and timeout budgets unchanged: only `qwen-code` draft steps (`step0/2/4`) get a bounded valid-artifact controlled stop, so continued stream/mutation after a valid manifest+file set is accepted through the existing artifact validation gate instead of waiting for `runtime_timeout`. Collect/validator, Claude, and Codex behavior remain unchanged.
 - 2026-05-24: Fresh release-prep gate on `e4db0ac` (`release-fast-20260524T081756Z`) passed the single-repo sweeps and multi-path backend, then exposed a Claude frontend product blocker in `init.step1.collect`: manifest-only repair for `devstack-docs` wrote a schema-valid `shard-pack-manifest.json` but the provider kept running and mutating it, while repair policy had `valid_artifact_stop_window_ms=0`; the old runtime could wait until timeout instead of accepting the valid repair artifact through validation. The remediation keeps canonical matrices, schemas, provider contracts, and timeout budgets unchanged: focused repair policies now add a short valid-artifact controlled stop for collect/validator/draft repairs across providers; partial/invalid repair artifacts remain `runtime_contract_failed`.
+- 2026-06-01: Published `v0.1.1` as a GitHub prerelease after PR #88 (`7548fdc4`) updated release notes for the owner-approved no-gate path. Main CI passed, release workflow `26761305996` succeeded, and install smoke passed for `ACP_VERSION=v0.1.1` plus authenticated `ACP_VERSION=latest`. Release URL: `https://github.com/GrinRus/ProvenArch/releases/tag/v0.1.1`. Fresh trusted-machine `release-fast` was skipped by owner decision; no final-tag `release_verdict_*.json` exists, so canonical `RELEASE READY` is not claimed.
 
 ### Plan ID
 EP-20260508-oss-readiness-hardening
