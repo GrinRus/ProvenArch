@@ -132,6 +132,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect(page.getByTestId("stage-rail")).toBeVisible();
   await expect(page.getByTestId("right-inspector")).toBeVisible();
   await expect(page.getByTestId("activity-drawer")).toBeVisible();
+  await page.getByTestId("stage-source").click();
   await expect(page.getByTestId("source-repo-table")).toBeVisible();
   await expectHiddenCompatibilityControlsAbsent(page);
   await expectOperatorInspectorSurfaces(page);
@@ -140,7 +141,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await page.getByTestId("stage-readiness").click();
   await expect(page.getByTestId("readiness-summary-cards")).toBeVisible();
   await expect(page.getByTestId("readiness-runtime-summary")).toBeVisible();
-  await page.getByText("Advanced runtime settings").click();
+  await page.locator("summary").filter({ hasText: /^Advanced runtime settings$/ }).click();
   await expect(page.getByRole("heading", { name: "Settings: Runtime Timeouts" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Settings: Runtime Execution" })).toBeVisible();
 
