@@ -27,7 +27,7 @@ const stageIconPaths: Record<StageId, string[]> = {
 };
 
 export function StageRail({ stages, activeStage, onStageChange }: StageRailProps) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => (typeof window === "undefined" || !window.matchMedia ? false : window.matchMedia("(max-width: 900px)").matches));
 
   function focusStage(stage: StageOption) {
     const testId = stage.testId ?? `stage-${stage.id}`;

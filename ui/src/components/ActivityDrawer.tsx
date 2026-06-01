@@ -3,6 +3,9 @@ import type { RunLogEntry } from "../lib/appContracts";
 import { ArtifactPathButton } from "./ConsolePrimitives";
 
 type ActivityDrawerProps = {
+  selectedRunId?: string;
+  selectedRunStatus?: string;
+  selectedRunError?: string;
   logs: RunLogEntry[];
   renderedLogs: string;
   runLogsStatus: string;
@@ -18,6 +21,9 @@ type ActivityDrawerProps = {
 };
 
 export function ActivityDrawer({
+  selectedRunId,
+  selectedRunStatus,
+  selectedRunError,
   logs,
   renderedLogs,
   runLogsStatus,
@@ -32,12 +38,19 @@ export function ActivityDrawer({
   onOpenArtifact,
 }: ActivityDrawerProps) {
   const recentLogs = logs.slice(-6).reverse();
+  const hasSelectedRun = Boolean(selectedRunId);
+  const emptyLogMessage = !hasSelectedRun
+    ? "No selected run. Start or select a run to stream activity."
+    : selectedRunStatus === "failed"
+      ? `Run failed before log entries were captured${selectedRunError ? `: ${selectedRunError}` : "."}`
+      : "No run logs yet. Logs will appear when the selected run emits events or raw output.";
+  const drawerSummary = hasSelectedRun ? `${logs.length} log entries for ${selectedRunId}` : "No selected run";
   return (
     <section className="activity-drawer" aria-label="Selected run activity drawer" data-testid="activity-drawer">
       <div className="activity-head">
         <div>
           <h2>Activity / Events</h2>
-          <p className="hint">{logs.length} log entries for the selected run</p>
+          <p className="hint">{drawerSummary}</p>
         </div>
         <div className="activity-controls">
           <label htmlFor="runLogsMode">Mode</label>
@@ -89,7 +102,10 @@ export function ActivityDrawer({
       ) : null}
 
       {recentLogs.length === 0 ? (
-        <p className="hint">No run logs yet.</p>
+        <div className={`activity-empty-state${selectedRunStatus === "failed" ? " failed" : ""}`} data-testid="activity-empty-state">
+          <strong>{hasSelectedRun ? "No log entries" : "No run selected"}</strong>
+          <span>{emptyLogMessage}</span>
+        </div>
       ) : (
         <div className="activity-table-wrap">
           <table className="activity-table" data-testid="activity-events-table">
@@ -118,7 +134,7 @@ export function ActivityDrawer({
       )}
       <details className="raw-log-details">
         <summary>Full selected log view</summary>
-        {logs.length === 0 ? <p>No run logs yet.</p> : <pre data-testid="run-logs-content">{renderedLogs}</pre>}
+        {logs.length === 0 ? <p>{emptyLogMessage}</p> : <pre data-testid="run-logs-content">{renderedLogs}</pre>}
       </details>
     </section>
   );

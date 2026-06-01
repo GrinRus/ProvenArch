@@ -29,8 +29,11 @@ export function RightInspector({
   onPrimaryAction,
   onOpenArtifact,
 }: RightInspectorProps) {
-  const nextActionSeverity = blockers.some((item) => item.severity === "error") || nextAction.disabledReason ? "warn" : blockers.length > 0 ? "warn" : "ok";
-  const nextActionStatus = nextAction.disabledReason ? "blocked" : blockers.length > 0 ? "attention" : "ready";
+  const hardBlockers = blockers.filter((item) => item.severity === "error");
+  const openQuestionItems = blockers.filter((item) => item.severity === "warn" && item.label.toLowerCase().includes("open question"));
+  const reviewWarnings = blockers.filter((item) => item.severity === "warn" && !openQuestionItems.includes(item));
+  const nextActionSeverity = nextAction.disabledReason || hardBlockers.length > 0 ? "error" : reviewWarnings.length > 0 || openQuestionItems.length > 0 ? "warn" : "ok";
+  const nextActionStatus = nextAction.disabledReason ? "blocked" : hardBlockers.length > 0 ? "needs fix" : reviewWarnings.length > 0 || openQuestionItems.length > 0 ? "review" : "ready";
   return (
     <aside className="right-inspector" data-testid="right-inspector">
       <section className="inspector-section next-action-section" data-testid="next-action-panel">
@@ -46,7 +49,9 @@ export function RightInspector({
         </PrimaryAction>
       </section>
 
-      <InspectorList testId="blockers-panel" title="Blockers" emptyLabel="No blockers detected." items={blockers} onOpenArtifact={onOpenArtifact} />
+      <InspectorList testId="blockers-panel" title="Hard blockers" emptyLabel="No hard blockers detected." items={hardBlockers} onOpenArtifact={onOpenArtifact} />
+      <InspectorList testId="review-warnings-panel" title="Review warnings" emptyLabel="No review warnings." items={reviewWarnings} onOpenArtifact={onOpenArtifact} />
+      <InspectorList testId="open-questions-panel" title="Open questions" emptyLabel="No open questions loaded." items={openQuestionItems} onOpenArtifact={onOpenArtifact} />
       <InspectorList testId="evidence-refs-panel" title="Evidence refs" emptyLabel="No evidence yet." items={evidenceRefs} onOpenArtifact={onOpenArtifact} />
       <InspectorList testId="workspace-health-panel" title="Workspace health" emptyLabel="Workspace status unavailable." items={workspaceHealth} onOpenArtifact={onOpenArtifact} />
       <InspectorList testId="runtime-safety-panel" title="Runtime safety" emptyLabel="Runtime profile unavailable." items={runtimeSafety} onOpenArtifact={onOpenArtifact} />

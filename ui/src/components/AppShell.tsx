@@ -23,6 +23,9 @@ type AppShellProps = {
   workspaceHealth: InspectorItem[];
   runtimeSafety: InspectorItem[];
   gitPublication: InspectorItem[];
+  selectedRunId?: string;
+  selectedRunStatus?: string;
+  selectedRunError?: string;
   logs: RunLogEntry[];
   renderedLogs: string;
   runLogsStatus: string;
@@ -57,6 +60,9 @@ export function AppShell({
   workspaceHealth,
   runtimeSafety,
   gitPublication,
+  selectedRunId,
+  selectedRunStatus,
+  selectedRunError,
   logs,
   renderedLogs,
   runLogsStatus,
@@ -103,6 +109,9 @@ export function AppShell({
         />
       </div>
       <ActivityDrawer
+        selectedRunId={selectedRunId}
+        selectedRunStatus={selectedRunStatus}
+        selectedRunError={selectedRunError}
         logs={logs}
         renderedLogs={renderedLogs}
         runLogsStatus={runLogsStatus}

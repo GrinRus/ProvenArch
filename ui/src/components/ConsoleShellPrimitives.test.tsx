@@ -57,6 +57,34 @@ describe("console shell primitives", () => {
     expect(collapseButton).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("starts the stage rail collapsed in narrow inspection viewports", () => {
+    const originalMatchMedia = window.matchMedia;
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: vi.fn().mockReturnValue({
+        matches: true,
+        media: "(max-width: 900px)",
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }),
+    });
+
+    render(<StageRailHarness />);
+
+    expect(screen.getByTestId("stage-rail")).toHaveClass("is-collapsed");
+
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: originalMatchMedia,
+    });
+  });
+
   it("prioritizes inspector blockers while keeping empty sections and artifact links accessible", () => {
     const onPrimaryAction = vi.fn();
     const onOpenArtifact = vi.fn();
@@ -81,7 +109,10 @@ describe("console shell primitives", () => {
     expect(screen.getByTestId("next-action-panel")).toHaveTextContent("blocked");
     expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Workspace validation is blocked.");
     expect(screen.getByTestId("inspector-primary-action")).toBeDisabled();
+    expect(screen.getByTestId("blockers-panel")).toHaveTextContent("Hard blockers");
     expect(screen.getByTestId("blockers-panel")).toHaveTextContent("Workspace invalid");
+    expect(screen.getByTestId("review-warnings-panel")).toHaveTextContent("No review warnings.");
+    expect(screen.getByTestId("open-questions-panel")).toHaveTextContent("No open questions loaded.");
     expect(screen.getByTestId("evidence-refs-panel")).toHaveTextContent("No evidence yet.");
     expect(screen.getByTestId("workspace-health-panel")).toHaveTextContent("Workspace status unavailable.");
     expect(screen.getByTestId("runtime-safety-panel")).toHaveTextContent("Runtime profile unavailable.");
@@ -109,8 +140,10 @@ describe("console shell primitives", () => {
       />,
     );
 
-    expect(screen.getByTestId("next-action-panel")).toHaveTextContent("attention");
+    expect(screen.getByTestId("next-action-panel")).toHaveTextContent("review");
     expect(screen.getByTestId("inspector-primary-action")).toBeEnabled();
+    expect(screen.getByTestId("blockers-panel")).toHaveTextContent("No hard blockers detected.");
+    expect(screen.getByTestId("open-questions-panel")).toHaveTextContent("Open questions");
 
     fireEvent.click(screen.getByTestId("inspector-primary-action"));
 
@@ -120,15 +153,40 @@ describe("console shell primitives", () => {
   it("renders activity drawer empty/export-disabled state without hiding log controls", () => {
     const handlers = activityHandlers();
 
-    render(<ActivityDrawer {...handlers} logs={[]} renderedLogs="" runLogsStatus="" canExport={false} taskrunPaths={[]} />);
+    render(<ActivityDrawer {...handlers} selectedRunId="run-empty" selectedRunStatus="running" logs={[]} renderedLogs="" runLogsStatus="" canExport={false} taskrunPaths={[]} />);
 
     expect(screen.getByTestId("activity-drawer")).toHaveAccessibleName("Selected run activity drawer");
-    expect(screen.getByText("0 log entries for the selected run")).toBeInTheDocument();
-    expect(screen.getAllByText("No run logs yet.")).toHaveLength(2);
+    expect(screen.getByText("0 log entries for run-empty")).toBeInTheDocument();
+    expect(screen.getByTestId("activity-empty-state")).toHaveTextContent("Logs will appear when the selected run emits events or raw output.");
     expect(screen.getByTestId("run-logs-copy-btn")).toBeDisabled();
     expect(screen.getByTestId("run-logs-download-btn")).toBeDisabled();
     expect(screen.getByTestId("run-logs-mode-select")).toHaveValue("all");
     expect(screen.getByTestId("run-logs-view-select")).toHaveValue("line");
+  });
+
+  it("renders activity drawer selected-run recovery states for missing or failed logs", () => {
+    const handlers = activityHandlers();
+
+    const { rerender } = render(<ActivityDrawer {...handlers} logs={[]} renderedLogs="" runLogsStatus="" canExport={false} taskrunPaths={[]} />);
+
+    expect(screen.getByText("No selected run")).toBeInTheDocument();
+    expect(screen.getByTestId("activity-empty-state")).toHaveTextContent("Start or select a run to stream activity.");
+
+    rerender(
+      <ActivityDrawer
+        {...handlers}
+        selectedRunId="run-failed"
+        selectedRunStatus="failed"
+        selectedRunError="runtime_contract_failed"
+        logs={[]}
+        renderedLogs=""
+        runLogsStatus=""
+        canExport={false}
+        taskrunPaths={[]}
+      />,
+    );
+
+    expect(screen.getByTestId("activity-empty-state")).toHaveTextContent("Run failed before log entries were captured: runtime_contract_failed");
   });
 
   it("renders activity drawer logs, taskrun artifact links and control callbacks", () => {
@@ -160,6 +218,8 @@ describe("console shell primitives", () => {
     render(
       <ActivityDrawer
         {...handlers}
+        selectedRunId="run-logs"
+        selectedRunStatus="succeeded"
         logs={logs}
         renderedLogs={"line one\nline two"}
         runLogsStatus="Logs copied."
@@ -168,7 +228,7 @@ describe("console shell primitives", () => {
       />,
     );
 
-    expect(screen.getByText("2 log entries for the selected run")).toBeInTheDocument();
+    expect(screen.getByText("2 log entries for run-logs")).toBeInTheDocument();
     expect(screen.getByText("Logs copied.")).toBeInTheDocument();
     expect(screen.getByTestId("activity-events-table")).toHaveTextContent("runtime output");
     expect(screen.getByTestId("activity-events-table")).toHaveTextContent("provider emitted warning");

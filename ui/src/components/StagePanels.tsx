@@ -98,6 +98,11 @@ export function SourceStagePanel({
         </div>
       </div>
 
+      <div className="stage-local-next-action" data-testid="source-next-action">
+        <strong>Next in Source</strong>
+        <span>Keep this screen focused on repository inventory, refs and imports; then save and validate before readiness gates.</span>
+      </div>
+
       <SourceRepoTable guidedRepos={guidedRepos} validateResult={validateResult} validationDiagnosticsByRepo={validationDiagnosticsByRepo} />
 
       <div className="form-section">
@@ -270,6 +275,17 @@ export function ReadinessStagePanel({
         artifactCount={artifactCount}
         runtimePermissionEffective={runtimePermissionEffective}
       />
+
+      <div className="stage-local-next-action" data-testid="readiness-next-action">
+        <strong>Next in Readiness</strong>
+        <span>
+          {!validated
+            ? "Validate workspace before checking local runtime readiness."
+            : !localReady
+              ? "Run local readiness checks before starting analysis."
+              : "Readiness gates are clear; run first analysis when you are ready to generate evidence."}
+        </span>
+      </div>
 
       <RuntimeProfileSummary
         runtimeTimeoutEffective={runtimeTimeoutEffective}
@@ -1346,13 +1362,13 @@ export function ReviewStagePanel({
 }: ReviewStageProps) {
   const [reviewView, setReviewView] = useState<"evidence" | "domain-map">("evidence");
   const overviewArtifact = nonDiagramArtifacts.find((artifact) => artifact.path === "reports/as-is/overview.md");
+  const coverageArtifact = nonDiagramArtifacts.find((artifact) => artifact.path === "reports/coverage/summary.md");
   const findingsArtifact = nonDiagramArtifacts.find((artifact) => artifact.path.startsWith("reports/findings/"));
   const allArtifacts = [...nonDiagramArtifacts, ...diagramArtifacts];
   const preferredReviewArtifact =
     overviewArtifact ??
-    nonDiagramArtifacts.find((artifact) => artifact.path.startsWith("reports/") && !artifact.path.startsWith("reports/changelog/")) ??
-    nonDiagramArtifacts.find((artifact) => artifact.path.startsWith("model/")) ??
-    diagramArtifacts[0];
+    coverageArtifact ??
+    allArtifacts[0];
   const artifactGroups = groupArtifactsByFolder(allArtifacts);
   const selectedArtifactIsLoading = selectedArtifactContent === "Loading...";
   const openQuestionCount = countMarkdownItems(openQuestions);
@@ -1636,8 +1652,11 @@ function ReviewEvidenceWorkbench({
         ) : (
           <div className="artifact-group-list" data-testid="results-artifacts-panel">
             {artifactGroups.map((group) => (
-              <section key={group.name} className="artifact-group">
-                <h3>{group.name}</h3>
+              <section key={group.name} className={`artifact-group ${reviewArtifactGroupCategory(group.name)}`}>
+                <div className="artifact-group-heading">
+                  <h3>{group.name}</h3>
+                  <span>{reviewArtifactGroupCategoryLabel(group.name)}</span>
+                </div>
                 <ul data-testid={group.name === "reports/diagrams" ? "run-diagrams-list" : undefined}>
                   {group.artifacts.map((artifact) => (
                     <li key={`${artifact.kind}-${artifact.path}`}>
@@ -1716,6 +1735,7 @@ function ReviewEvidenceWorkbench({
         <div className="trust-panel">
           <strong>{trustStatus.title}</strong>
           <span>{trustStatus.detail}</span>
+          <span className="review-decision-summary" data-testid="review-decision-summary">{reviewDecisionSummary(trustStatus, openQuestionCount)}</span>
         </div>
         <div className="review-source-lists">
           <div>
@@ -1837,6 +1857,38 @@ function reviewArtifactGroupPriority(name: string): number {
     return 8;
   }
   return 20;
+}
+
+function reviewArtifactGroupCategory(name: string): string {
+  if (name.startsWith("reports/diagrams")) {
+    return "is-diagram-group";
+  }
+  if (name.startsWith("reports/")) {
+    return "is-report-group";
+  }
+  if (name.startsWith("model/")) {
+    return "is-model-group";
+  }
+  if (name === "proposals" || name === "reports/changelog") {
+    return "is-proposal-group";
+  }
+  return "is-supporting-group";
+}
+
+function reviewArtifactGroupCategoryLabel(name: string): string {
+  if (name.startsWith("reports/diagrams")) {
+    return "diagram";
+  }
+  if (name.startsWith("reports/")) {
+    return "report";
+  }
+  if (name.startsWith("model/")) {
+    return "model";
+  }
+  if (name === "proposals" || name === "reports/changelog") {
+    return "proposal";
+  }
+  return "support";
 }
 
 const MODEL_EDGE_TYPES = ["publishes", "subscribes", "calls", "reads", "writes", "exposes"] as const;
@@ -2048,6 +2100,16 @@ function deriveReviewTrustStatus({
     return { label: "ready", title: "Evidence ready", detail: "Coverage and findings artifacts are available for human review.", tone: "ok" };
   }
   return { label: "partial", title: "Partial evidence", detail: "Some review artifacts are missing; inspect generated outputs before publication.", tone: "info" };
+}
+
+function reviewDecisionSummary(trustStatus: ReviewTrustStatus, openQuestionCount: number): string {
+  if (openQuestionCount > 0) {
+    return `${openQuestionCount} open question${openQuestionCount === 1 ? "" : "s"} require review, but they are not a hard publish blocker.`;
+  }
+  if (trustStatus.tone === "ok") {
+    return "Evidence can move to proposal or publish review after human confirmation.";
+  }
+  return "Treat this as partial evidence and inspect generated artifacts before publication.";
 }
 
 export function ProposalsStagePanel({
@@ -2773,7 +2835,9 @@ export function PublishStagePanel({
     }),
   ];
   const blockingGateItems = gateItems.filter((item) => item.tone === "error");
-  const warningGateItems = gateItems.filter((item) => item.tone === "warn");
+  const openQuestionGateItems = gateItems.filter((item) => item.tone === "warn" && item.label.toLowerCase().includes("open question"));
+  const warningGateItems = gateItems.filter((item) => item.tone === "warn" && !openQuestionGateItems.includes(item));
+  const readyGateItems = gateItems.filter((item) => item.tone === "ok" || item.tone === "info");
   const gitMutationDisabled = busy || blockingGateItems.length > 0;
   const gitMutationBlockedTitle =
     blockingGateItems.length > 0 ? "Resolve publish gate blockers before changing Git publication state." : undefined;
@@ -2956,18 +3020,14 @@ export function PublishStagePanel({
                 <h2>Publish gate</h2>
                 <p className="hint">Checks gate Git commit and proposal branch actions; Git commands stay explicit operator actions.</p>
               </div>
-              <StatusBadge tone={blockingGateItems.length > 0 ? "error" : warningGateItems.length > 0 ? "warn" : "ok"}>
-                {blockingGateItems.length > 0 ? "blocked" : warningGateItems.length > 0 ? "warnings" : "ready"}
+              <StatusBadge tone={blockingGateItems.length > 0 ? "error" : warningGateItems.length > 0 || openQuestionGateItems.length > 0 ? "warn" : "ok"}>
+                {blockingGateItems.length > 0 ? "blocked" : warningGateItems.length > 0 || openQuestionGateItems.length > 0 ? "review" : "ready"}
               </StatusBadge>
             </div>
-            <ul className="publish-checklist">
-              {gateItems.map((item) => (
-                <li key={item.label}>
-                  <StatusBadge tone={item.tone}>{item.label}</StatusBadge>
-                  <span>{item.detail}</span>
-                </li>
-              ))}
-            </ul>
+            <PublishGateSection testId="publish-hard-blockers" title="Hard blockers" emptyLabel="No hard blockers. Git actions are allowed." items={blockingGateItems} />
+            <PublishGateSection testId="publish-review-warnings" title="Review warnings" emptyLabel="No review warnings." items={warningGateItems} />
+            <PublishGateSection testId="publish-open-questions" title="Open questions" emptyLabel="No open questions loaded." items={openQuestionGateItems} />
+            <PublishGateSection testId="publish-ready-checks" title="Ready checks" emptyLabel="No ready checks yet." items={readyGateItems} />
           </section>
 
           <section className="publish-commit-plan" data-testid="publish-commit-plan">
@@ -3074,8 +3134,8 @@ function buildPublishGateItems({
       tone: artifactCount > 0 ? "ok" : "error",
     },
     {
-      label: openQuestionCount > 0 ? "Questions" : "Evidence",
-      detail: openQuestionCount > 0 ? `${openQuestionCount} open question lines should be reviewed before commit. First: ${firstOpenQuestion}` : "No loaded open-question blockers.",
+      label: "Open questions",
+      detail: openQuestionCount > 0 ? `${openQuestionCount} open question lines should be reviewed before commit. First: ${firstOpenQuestion}` : "No loaded open questions.",
       tone: openQuestionCount > 0 ? "warn" : "ok",
     },
     {
@@ -3089,6 +3149,39 @@ function buildPublishGateItems({
       tone: proposalBranch.trim() ? "ok" : "info",
     },
   ];
+}
+
+function PublishGateSection({
+  testId,
+  title,
+  emptyLabel,
+  items,
+}: {
+  testId: string;
+  title: string;
+  emptyLabel: string;
+  items: PublishGateItem[];
+}) {
+  return (
+    <section className="publish-gate-section" data-testid={testId}>
+      <div className="publish-gate-section-head">
+        <h3>{title}</h3>
+        <span>{items.length}</span>
+      </div>
+      {items.length === 0 ? (
+        <p className="hint">{emptyLabel}</p>
+      ) : (
+        <ul className="publish-checklist">
+          {items.map((item) => (
+            <li key={`${title}-${item.label}`}>
+              <StatusBadge tone={item.tone}>{item.label}</StatusBadge>
+              <span>{item.detail}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
 }
 
 function publishTabLabel(view: "preview" | "diff" | "evidence" | "changelog"): string {

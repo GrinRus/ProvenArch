@@ -400,7 +400,7 @@ export default function App() {
     }
     for (const request of runStatus?.pending_permissions ?? []) {
       items.push({
-        severity: "warn",
+        severity: "error",
         label: request.action || "runtime permission",
         detail: "Runtime permission request is pending.",
       });
@@ -672,6 +672,9 @@ export default function App() {
       workspaceHealth={workspaceHealth}
       runtimeSafety={runtimeSafety}
       gitPublication={gitPublication}
+      selectedRunId={runStatus?.run_id}
+      selectedRunStatus={runStatus?.status}
+      selectedRunError={runStatus?.error_code ?? runStatus?.error ?? undefined}
       logs={filteredRunLogs}
       renderedLogs={runLogsRendered}
       runLogsStatus={runLogsStatus}

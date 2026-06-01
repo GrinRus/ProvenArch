@@ -119,6 +119,36 @@ async function expectOperatorInspectorSurfaces(page: Page): Promise<void> {
   await expect(page.getByTestId("git-publication-panel")).toBeVisible();
 }
 
+async function expectAlreadyInitializedWorkspaceNavigation(page: Page): Promise<void> {
+  await page.reload();
+  await expect(page.getByTestId("review-panel")).toBeVisible();
+  await expect(page.getByTestId("stage-review")).toHaveAttribute("aria-current", "step");
+
+  await page.getByTestId("stage-source").click();
+  await expect(page.getByTestId("source-repo-table")).toBeVisible();
+  await expectOperatorInspectorSurfaces(page);
+
+  await page.getByTestId("stage-readiness").click();
+  await expect(page.getByTestId("readiness-summary-cards")).toBeVisible();
+  await expect(page.getByTestId("readiness-runtime-summary")).toBeVisible();
+  await expectOperatorInspectorSurfaces(page);
+
+  await page.getByTestId("stage-analysis").click();
+  await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
+  await expect(page.getByTestId("analysis-run-timeline")).toBeVisible();
+  await expectOperatorInspectorSurfaces(page);
+
+  await page.getByTestId("stage-review").click();
+  await expect(page.getByTestId("review-panel")).toBeVisible();
+  await expect(page.getByTestId("review-artifact-explorer")).toBeVisible();
+  await expectOperatorInspectorSurfaces(page);
+
+  await page.getByTestId("stage-publish").click();
+  await expect(page.getByTestId("publish-panel")).toBeVisible();
+  await expect(page.getByTestId("publish-gate-panel")).toBeVisible();
+  await expectOperatorInspectorSurfaces(page);
+}
+
 test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, request }) => {
   test.skip(scenario !== "init-inspect", `scenario ${scenario} skips init-inspect flow`);
   test.setTimeout(Math.max(initTimeoutMs + 120_000, 6 * 60 * 1000));
@@ -284,6 +314,8 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect(page.getByTestId("git-publication-panel")).toContainText("proposal/beta-refresh");
   await expectOperatorInspectorSurfaces(page);
   await captureEvidenceScreenshot(page, "frontend-publish-desktop.png");
+
+  await expectAlreadyInitializedWorkspaceNavigation(page);
 
   await page.getByTestId("stage-review").click();
   await page.setViewportSize({ width: 390, height: 1200 });

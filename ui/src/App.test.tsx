@@ -529,6 +529,8 @@ describe("App", () => {
     render(<App />);
 
     const sourceTable = await screen.findByTestId("source-repo-table");
+    expect(screen.getByTestId("source-next-action")).toHaveTextContent("repository inventory");
+    expect(screen.getByTestId("source-next-action")).toHaveTextContent("save and validate");
     expect(sourceTable).toHaveTextContent("Name");
     expect(sourceTable).toHaveTextContent("Source");
     expect(sourceTable).toHaveTextContent("Ref");
@@ -567,19 +569,20 @@ describe("App", () => {
 
     fireEvent.click(screen.getByTestId("stage-source"));
     expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Save and validate sources");
-    expect(screen.getByTestId("blockers-panel")).toHaveTextContent("Open questions");
+    expect(screen.getByTestId("blockers-panel")).toHaveTextContent("No hard blockers detected.");
+    expect(screen.getByTestId("open-questions-panel")).toHaveTextContent("Open questions");
 
     fireEvent.click(screen.getByTestId("stage-charter"));
     expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Save charter contract");
-    expect(screen.getByTestId("blockers-panel")).toHaveTextContent("Open questions");
+    expect(screen.getByTestId("open-questions-panel")).toHaveTextContent("Open questions");
 
     fireEvent.click(screen.getByTestId("stage-proposals"));
     expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Review proposal");
-    expect(screen.getByTestId("blockers-panel")).toHaveTextContent("Open questions");
+    expect(screen.getByTestId("open-questions-panel")).toHaveTextContent("Open questions");
 
     fireEvent.click(screen.getByTestId("stage-ask"));
     expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Ask workspace");
-    expect(screen.getByTestId("blockers-panel")).toHaveTextContent("Open questions");
+    expect(screen.getByTestId("open-questions-panel")).toHaveTextContent("Open questions");
   });
 
   it("renders Readiness V2 cards and compact runtime profile summary", async () => {
@@ -590,6 +593,7 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("stage-readiness"));
 
     const readinessCards = await screen.findByTestId("readiness-summary-cards");
+    expect(screen.getByTestId("readiness-next-action")).toHaveTextContent("Validate workspace before checking local runtime readiness.");
     expect(readinessCards).toHaveTextContent("Workspace");
     expect(readinessCards).toHaveTextContent("Repositories");
     expect(readinessCards).toHaveTextContent("Runtime provider");
@@ -675,7 +679,7 @@ describe("App", () => {
     expect(await screen.findByTestId("review-panel")).toBeInTheDocument();
     expect(screen.getByTestId("stage-review")).toHaveClass("is-selected");
     expect(screen.queryByTestId("workspace-panel")).not.toBeInTheDocument();
-    expect(screen.getByTestId("right-inspector")).toHaveTextContent(/attention/i);
+    expect(screen.getByTestId("right-inspector")).toHaveTextContent(/review/i);
   });
 
   it("renders Review V2 evidence workbench and domain-map partial state", async () => {
@@ -715,6 +719,10 @@ describe("App", () => {
 
     const explorer = await screen.findByTestId("review-artifact-explorer");
     expect(explorer).toHaveTextContent("reports/as-is");
+    expect(explorer).toHaveTextContent("report");
+    expect(explorer).toHaveTextContent("diagram");
+    expect(explorer).toHaveTextContent("model");
+    expect(explorer).toHaveTextContent("proposal");
     expect(explorer).toHaveTextContent("reports/coverage");
     expect(explorer).toHaveTextContent("reports/diagrams");
     expect((explorer.textContent ?? "").indexOf("reports/as-is")).toBeLessThan((explorer.textContent ?? "").indexOf("proposals"));
@@ -724,6 +732,7 @@ describe("App", () => {
     expect(citationCoverage).toHaveTextContent("ready");
     expect(citationCoverage).toHaveTextContent("Open questions");
     expect(citationCoverage).toHaveTextContent("Review required");
+    expect(screen.getByTestId("review-decision-summary")).toHaveTextContent("not a hard publish blocker");
 
     await waitFor(() => expect(screen.getByTestId("run-artifact-content")).toHaveTextContent("# System overview"));
     await waitFor(() => expect(within(explorer).getByRole("button", { name: /reports\/as-is\/overview\.md/i })).toHaveClass("is-selected"));
@@ -987,6 +996,9 @@ describe("App", () => {
     expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("model");
     expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("proposals");
     expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("Confirm owner sign-off");
+    expect(screen.getByTestId("publish-hard-blockers")).toHaveTextContent("No hard blockers");
+    expect(screen.getByTestId("publish-open-questions")).toHaveTextContent("Confirm owner sign-off");
+    expect(screen.getByTestId("publish-ready-checks")).toHaveTextContent("Artifacts");
     expect(screen.getByTestId("publish-commit-plan")).toHaveTextContent("proposal/beta-refresh");
     expect(screen.getByTestId("publish-commit-selected-btn")).toBeInTheDocument();
     const proposalBranchButton = screen.getByTestId("git-proposal-branch-btn").closest("button") as HTMLButtonElement;
