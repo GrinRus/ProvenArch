@@ -2,9 +2,9 @@
 
 All notable user-facing changes are tracked here. ProvenArch uses SemVer-style release tags, with `v0.x` treated as beta/pre-release foundation.
 
-## v0.1.1 - 2026-05-23
+## v0.1.1 - 2026-06-01
 
-Beta hardening, onboarding, and live release-gate release.
+Beta hardening, onboarding, Console V2, and no-gate prerelease candidate.
 
 Highlights:
 - Reworked README onboarding around what ACP does, local install, first fake analysis, runtime choice, artifacts, workspace model, and release evidence.
@@ -14,6 +14,9 @@ Highlights:
 - Updated UI dependency chain to remove moderate `npm audit` findings.
 - Enforced exact Node.js version from `.node-version` for source builds.
 - Enforced exact Go version from `.go-version` for CI, release, local Makefile, and smoke builds while preserving `go.mod` compatibility level `go 1.20`.
+- Redesigned the embedded UI as Console V2 with mission-control layout, stage rail, health strip, right inspector, activity drawer, review workbench, publish gate, and saved visual references.
+- Refined Console V2 daily-use UX: hard blockers, review warnings, and open questions are distinct; Source and Readiness have clearer responsibilities; Review chooses better default artifacts; Activity Drawer has explicit empty/recovery states.
+- Hardened frontend live E2E `init-inspect` for already-initialized workspaces and preserved deterministic fake-runtime coverage for required CI.
 - Hardened headless runtime release behavior for `qwen-code`, `claude-code`, and `codex-code` around artifact-only success, bounded silent-runner recovery, provider readiness, prompt-first artifact commands, draft repair validation, and multi-repo semantic quality gates.
 - Added controlled stop after valid focused repair artifacts, so collect/validator/draft repair attempts do not wait for a still-running provider once required artifacts validate.
 - Fixed embedded UI release assets so Mermaid diagram previews render from the released single binary.
@@ -21,12 +24,15 @@ Highlights:
 Verification notes:
 - Public `install.sh` smoke was verified against the current published release path with checksum validation.
 - Local fake walkthrough smoke was verified with `acp doctor`, `acp serve --auto-init --dry-run`, `acp run --pipeline init --runtime fake --non-interactive`, and local UI/API endpoints.
-- Trusted-machine release-fast gate `release-fast-20260523T171925Z` passed with all release providers (`qwen-code`, `claude-code`, `codex-code`), baseline and parallel-default sweeps, frontend init/cancel checks, artifact quality gates, and shard-plan invariant.
+- Main CI was green for the final `v0.1.1` release candidate branch before tagging.
+- Local release-prep checks passed: `git diff --check`, release distribution/install tests, `make contracts`, `make test`, `make lint`, and `make build`.
+- Non-release codex diagnostic smoke `smoke-tiny-bank-20260601T123637Z` passed with frontend `init-inspect` screenshots for Source, Readiness, Analysis, Review, Publish, and mobile Review.
+- Fresh trusted-machine `release-fast` was skipped by owner decision for this prerelease. This release does not claim canonical `RELEASE READY` status for the final tag SHA.
 
 Known limitations:
 - `v0.1.1` remains a beta/pre-v1 release. Public behavior and artifact contracts can still evolve before `v1.0.0`.
 - Hosted/multi-tenant mode and security/compliance enforcement remain out of scope.
-- Release readiness still requires trusted-machine release gate evidence from `reports/release_verdict_<matrix-id>.json`.
+- Canonical release readiness still requires trusted-machine release gate evidence from `reports/release_verdict_<matrix-id>.json` verified by `scripts/verify-release-verdict.py`.
 
 ## v0.1.0 - 2026-05-04
 
