@@ -112,7 +112,7 @@ if [[ -n "$first_version_compatible" ]]; then
   exit 0
 fi
 
-if command -v "$tool" >/dev/null 2>&1; then
+if [[ "${ACP_NODE_TOOL_CANDIDATES_ONLY:-0}" != "1" ]] && command -v "$tool" >/dev/null 2>&1; then
   tool_path="$(command -v "$tool")"
   tool_dir="$(cd "$(dirname "$tool_path")" && pwd)"
   node_path="$tool_dir/node"

@@ -236,6 +236,8 @@ export type RuntimeProfileResponse = {
 export type EditableArtifactOption = {
   path: string;
   label: string;
+  category?: string;
+  prompt_usage?: string;
 };
 
 export const runtimeTimeoutKeys: RuntimeTimeoutKey[] = [

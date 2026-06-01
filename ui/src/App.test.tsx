@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { vi } from "vitest";
 
 import App from "./App";
@@ -19,6 +19,8 @@ type FetchMockState = {
   manifestContent?: string;
   qaResponse?: MockJSON;
   qaRunID?: string;
+  qaRuns?: MockJSON[];
+  qaRunResponses?: Record<string, MockJSON>;
 };
 
 function jsonResponse(body: MockJSON, status = 200): Response {
@@ -106,6 +108,8 @@ function createFetchMock(state: FetchMockState = {}) {
     },
     editable_artifacts: [
       { path: "charter/overview.md", label: "charter/overview.md", category: "charter" },
+      { path: "charter/cards/domains/payments.md", label: "payments domain", category: "domain-card" },
+      { path: "charter/cards/teams/platform.md", label: "platform team", category: "team-card" },
       {
         path: "skills/prompt-packs/findings.md",
         label: "skills/prompt-packs/findings.md",
@@ -294,16 +298,22 @@ function createFetchMock(state: FetchMockState = {}) {
       return jsonResponse({ run_id: qaRunID, status: "queued" }, 202);
     }
 
-    if (method === "GET" && url === `/api/qa/runs/${qaRunID}`) {
+    if (method === "GET" && url.startsWith("/api/qa/runs/")) {
+      const requestedQARunID = decodeURIComponent(url.slice("/api/qa/runs/".length));
       const qaPayload = state.qaResponse ?? {
         answer: "payments-service is owned by Platform Architecture.",
         citations: [{ path: "reports/as-is/overview.md", reason: "ownership evidence" }],
         unresolved: ["confirm escalation owner"],
         confidence: 0.82,
       };
+      const configuredPayload =
+        state.qaRunResponses?.[requestedQARunID] ??
+        (requestedQARunID === qaRunID ? qaPayload : undefined) ??
+        state.qaRuns?.find((item) => item.run_id === requestedQARunID) ??
+        qaPayload;
       return jsonResponse(
         {
-          run_id: qaRunID,
+          run_id: requestedQARunID,
           pipeline: "qa",
           status: "succeeded",
           started_at: "2026-04-03T12:00:03Z",
@@ -313,13 +323,13 @@ function createFetchMock(state: FetchMockState = {}) {
           runtime_provider: "claude-code",
           provider: "fake",
           generated_at: "2026-04-03T12:00:04Z",
-          ...qaPayload,
+          ...configuredPayload,
         },
       );
     }
 
     if (method === "GET" && url.startsWith("/api/qa/runs?")) {
-      return jsonResponse({ items: [] });
+      return jsonResponse({ items: state.qaRuns ?? [] });
     }
 
     if (method === "POST" && url === "/api/qa/ask") {
@@ -476,6 +486,177 @@ describe("App", () => {
     expect(await screen.findByTestId("runs-control-panel")).toBeInTheDocument();
   });
 
+  it("renders V2 shell shared surfaces without hidden compatibility controls", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(<App />);
+
+    expect(await screen.findByTestId("workspace-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("top-status-bar")).toHaveTextContent(/Permissions trusted_full_access/i);
+    expect(screen.getByTestId("top-status-bar")).toHaveTextContent(/Git review pending/i);
+    expect(screen.getByTestId("next-action-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("blockers-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("evidence-refs-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-health-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("runtime-safety-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("git-publication-panel")).toHaveTextContent("proposal/beta-refresh");
+    expect(screen.getByTestId("activity-drawer")).toHaveAccessibleName("Selected run activity drawer");
+    expect(screen.queryByTestId(`setup-${"stepper"}`)).not.toBeInTheDocument();
+  });
+
+  it("routes Review empty-state recovery to Analysis instead of disabling the primary action", async () => {
+    const fetchMock = createFetchMock({ runID: "run-review-recovery" });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("stage-review"));
+
+    expect(await screen.findByTestId("review-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Run analysis first");
+    expect(screen.getByTestId("inspector-primary-action")).not.toBeDisabled();
+
+    fireEvent.click(screen.getByTestId("inspector-primary-action"));
+
+    expect(await screen.findByTestId("analysis-run-progress")).toBeInTheDocument();
+    expect(screen.getByTestId("stage-analysis")).toHaveClass("is-selected");
+    expect(fetchMock).toHaveBeenCalledWith("/api/pipeline/init", expect.anything());
+  });
+
+  it("renders the Source V2 repo table with explicit advanced-only analysis scope", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(<App />);
+
+    const sourceTable = await screen.findByTestId("source-repo-table");
+    expect(screen.getByTestId("source-next-action")).toHaveTextContent("repository inventory");
+    expect(screen.getByTestId("source-next-action")).toHaveTextContent("save and validate");
+    expect(sourceTable).toHaveTextContent("Name");
+    expect(sourceTable).toHaveTextContent("Source");
+    expect(sourceTable).toHaveTextContent("Ref");
+    expect(sourceTable).toHaveTextContent("Analysis include/exclude");
+    expect(sourceTable).toHaveTextContent("Advanced workspace.yaml only");
+    expect(sourceTable).toHaveTextContent("Git URL");
+    expect(sourceTable).toHaveTextContent("https://github.com/org/my-service.git");
+  });
+
+  it("keeps the inspector primary action contextual for each V2 stage when review blockers exist", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runStarted: true,
+        runArtifacts: {
+          "run-1": {
+            run_id: "run-1",
+            artifacts: [
+              { path: "reports/as-is/overview.md", kind: "report", label: "As-is overview" },
+              { path: "reports/coverage/open-questions.md", kind: "report", label: "Open questions" },
+              { path: "proposals/proposal-payments/proposal.md", kind: "proposal", label: "Payments proposal" },
+            ],
+          },
+        },
+        artifactText: {
+          "reports/as-is/overview.md": "# System overview\n",
+          "reports/coverage/open-questions.md": "- Clarify owners\n",
+          "proposals/proposal-payments/proposal.md": "# Proposal\n",
+        },
+      }),
+    );
+
+    render(<App />);
+
+    await screen.findByTestId("review-panel");
+
+    fireEvent.click(screen.getByTestId("stage-source"));
+    expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Save and validate sources");
+    expect(screen.getByTestId("blockers-panel")).toHaveTextContent("No hard blockers detected.");
+    expect(screen.getByTestId("open-questions-panel")).toHaveTextContent("Open questions");
+
+    fireEvent.click(screen.getByTestId("stage-charter"));
+    expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Save charter contract");
+    expect(screen.getByTestId("open-questions-panel")).toHaveTextContent("Open questions");
+
+    fireEvent.click(screen.getByTestId("stage-proposals"));
+    expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Review proposal");
+    expect(screen.getByTestId("open-questions-panel")).toHaveTextContent("Open questions");
+
+    fireEvent.click(screen.getByTestId("stage-ask"));
+    expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Ask workspace");
+    expect(screen.getByTestId("open-questions-panel")).toHaveTextContent("Open questions");
+  });
+
+  it("renders Readiness V2 cards and compact runtime profile summary", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("stage-readiness"));
+
+    const readinessCards = await screen.findByTestId("readiness-summary-cards");
+    expect(screen.getByTestId("readiness-next-action")).toHaveTextContent("Validate workspace before checking local runtime readiness.");
+    expect(readinessCards).toHaveTextContent("Workspace");
+    expect(readinessCards).toHaveTextContent("Repositories");
+    expect(readinessCards).toHaveTextContent("Runtime provider");
+    expect(readinessCards).toHaveTextContent("Permissions");
+    expect(readinessCards).toHaveTextContent("Artifacts");
+
+    const runtimeSummary = screen.getByTestId("readiness-runtime-summary");
+    expect(runtimeSummary).toHaveTextContent("step 1800s / pipeline 2400s");
+    expect(runtimeSummary).toHaveTextContent("sequential / max 1");
+    expect(runtimeSummary).toHaveTextContent("best_effort");
+    expect(runtimeSummary).toHaveTextContent("qwen-code");
+    expect(runtimeSummary).toHaveTextContent("Advanced runtime settings remain available below");
+  });
+
+  it("renders Charter V2 workbench summary, card overview, and prompt bundle status", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("stage-charter"));
+
+    const wizardSummary = await screen.findByTestId("charter-wizard-summary");
+    expect(wizardSummary).toHaveTextContent("ProvenArch MVP");
+    expect(wizardSummary).toHaveTextContent("payments, users, ci-cd");
+    expect(wizardSummary).toHaveTextContent("2 listed");
+
+    const cardOverview = screen.getByTestId("charter-card-overview");
+    expect(cardOverview).toHaveTextContent("Domain cards");
+    expect(cardOverview).toHaveTextContent("1");
+    expect(cardOverview).toHaveTextContent("payments domain");
+    expect(cardOverview).toHaveTextContent("platform team");
+
+    const promptStatus = screen.getByTestId("charter-prompt-bundle-status");
+    expect(promptStatus).toHaveTextContent("Baseline prompt bundle");
+    expect(promptStatus).toHaveTextContent("Prompt packs");
+    expect(promptStatus).toHaveTextContent("Live consumed");
+    expect(promptStatus).toHaveTextContent("Reference-only");
+    expect(promptStatus).toHaveTextContent("proposal/beta-refresh");
+
+    expect(screen.getByTestId("charter-artifact-editor")).toHaveTextContent("Baseline: Editors");
+  });
+
+  it("supports keyboard navigation across the V2 stage rail", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+
+    render(<App />);
+
+    const sourceStage = screen.getByTestId("stage-source");
+    sourceStage.focus();
+    fireEvent.keyDown(sourceStage, { key: "End" });
+
+    expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("stage-publish")).toHaveAttribute("aria-current", "step");
+
+    fireEvent.keyDown(screen.getByTestId("stage-publish"), { key: "Home" });
+    expect(await screen.findByTestId("workspace-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("stage-source")).toHaveAttribute("aria-current", "step");
+
+    fireEvent.keyDown(screen.getByTestId("stage-source"), { key: "ArrowRight" });
+    expect(await screen.findByTestId("readiness-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("stage-readiness")).toHaveAttribute("aria-current", "step");
+  });
+
   it("opens Review by default when a completed run already has artifacts", async () => {
     vi.stubGlobal(
       "fetch",
@@ -498,7 +679,473 @@ describe("App", () => {
     expect(await screen.findByTestId("review-panel")).toBeInTheDocument();
     expect(screen.getByTestId("stage-review")).toHaveClass("is-selected");
     expect(screen.queryByTestId("workspace-panel")).not.toBeInTheDocument();
-    expect(screen.getByTestId("right-inspector")).toHaveTextContent(/attention/i);
+    expect(screen.getByTestId("right-inspector")).toHaveTextContent(/review/i);
+  });
+
+  it("renders Review V2 evidence workbench and domain-map partial state", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runStarted: true,
+        runArtifacts: {
+          "run-1": {
+            run_id: "run-1",
+            artifacts: [
+              { path: "reports/as-is/overview.md", kind: "report", label: "As-is overview" },
+              { path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" },
+              { path: "reports/findings/findings.md", kind: "report", label: "Findings" },
+              { path: "reports/diagrams/c4-context.mmd", kind: "diagram", label: "C4 context" },
+              { path: "reports/agent-outputs/domains/payments-service.md", kind: "domain-report", label: "Payments domain" },
+              { path: "model/entities/repo.payments-service.yaml", kind: "model-entity", label: "Payments repo" },
+              { path: "model/entities/svc.payments.yaml", kind: "model-entity", label: "Payments Service" },
+              { path: "model/entities/team.platform.yaml", kind: "model-entity", label: "Platform Team" },
+              { path: "model/edges/edge.svc.payments.calls.svc.users.yaml", kind: "model-edge", label: "Payments calls Users" },
+              { path: "proposals/proposal-payments/proposal.md", kind: "proposal", label: "Payments proposal" },
+            ],
+          },
+        },
+        artifactText: {
+          "reports/as-is/overview.md": "# System overview\nPayments owns checkout.\n",
+          "reports/coverage/summary.md": "Coverage: 84%\n",
+          "reports/coverage/open-questions.md": "- Clarify owners\n",
+          "reports/findings/findings.md": "# Findings\n- Owner gap\n",
+          "reports/diagrams/c4-context.mmd": "flowchart LR\n  A --> B\n",
+          "model/entities/svc.payments.yaml": "id: svc.payments\ntype: service\nname: Payments Service\n",
+        },
+      }),
+    );
+
+    render(<App />);
+
+    const explorer = await screen.findByTestId("review-artifact-explorer");
+    expect(explorer).toHaveTextContent("reports/as-is");
+    expect(explorer).toHaveTextContent("report");
+    expect(explorer).toHaveTextContent("diagram");
+    expect(explorer).toHaveTextContent("model");
+    expect(explorer).toHaveTextContent("proposal");
+    expect(explorer).toHaveTextContent("reports/coverage");
+    expect(explorer).toHaveTextContent("reports/diagrams");
+    expect((explorer.textContent ?? "").indexOf("reports/as-is")).toBeLessThan((explorer.textContent ?? "").indexOf("proposals"));
+
+    const citationCoverage = screen.getByTestId("review-citation-coverage");
+    expect(citationCoverage).toHaveTextContent("Coverage summary");
+    expect(citationCoverage).toHaveTextContent("ready");
+    expect(citationCoverage).toHaveTextContent("Open questions");
+    expect(citationCoverage).toHaveTextContent("Review required");
+    expect(screen.getByTestId("review-decision-summary")).toHaveTextContent("not a hard publish blocker");
+
+    await waitFor(() => expect(screen.getByTestId("run-artifact-content")).toHaveTextContent("# System overview"));
+    await waitFor(() => expect(within(explorer).getByRole("button", { name: /reports\/as-is\/overview\.md/i })).toHaveClass("is-selected"));
+
+    fireEvent.click(within(explorer).getByRole("button", { name: /reports\/as-is\/overview\.md/i }));
+    await waitFor(() => expect(screen.getByTestId("run-artifact-content")).toHaveTextContent("# System overview"));
+
+    fireEvent.click(screen.getByTestId("review-view-domain-map-tab"));
+    const domainMap = screen.getByTestId("review-domain-map");
+    expect(screen.getByTestId("review-domain-map-canvas")).toHaveTextContent("Domain/service map");
+    expect(domainMap).toHaveTextContent("Payments domain");
+    expect(domainMap).toHaveTextContent("Payments Service");
+    expect(domainMap).toHaveTextContent("Platform Team");
+    expect(screen.getByTestId("review-domain-map-edge-list")).toHaveTextContent("calls");
+    expect(screen.getByTestId("review-domain-map-edge-list")).toHaveTextContent("svc.payments");
+    expect(screen.getByTestId("review-domain-map-edge-list")).toHaveTextContent("svc.users");
+    expect(screen.getByTestId("review-domain-map-inspector")).toHaveTextContent("coverage summary linked");
+    expect(screen.getByTestId("review-domain-map-inspector")).toHaveTextContent("Proposal artifacts ready");
+    expect(screen.getAllByTestId("review-domain-map-node").length).toBeGreaterThanOrEqual(4);
+
+    fireEvent.click(within(domainMap).getByRole("button", { name: /open map entity: model\/entities\/svc\.payments\.yaml/i }));
+    await waitFor(() => expect(screen.getByTestId("run-artifact-content")).toHaveTextContent("id: svc.payments"));
+
+    fireEvent.click(screen.getByTestId("review-view-evidence-tab"));
+    expect(screen.getByTestId("review-evidence-preview")).toHaveTextContent("Evidence preview");
+  });
+
+  it("renders an explicit sparse state for Review domain map without model artifacts", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runStarted: true,
+        runArtifacts: {
+          "run-1": {
+            run_id: "run-1",
+            artifacts: [
+              { path: "reports/as-is/overview.md", kind: "report", label: "As-is overview" },
+              { path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" },
+            ],
+          },
+        },
+        artifactText: {
+          "reports/coverage/open-questions.md": "",
+        },
+      }),
+    );
+
+    render(<App />);
+
+    await screen.findByTestId("review-panel");
+    fireEvent.click(screen.getByTestId("review-view-domain-map-tab"));
+
+    expect(screen.getByTestId("review-domain-map-empty")).toHaveTextContent("No derived model artifacts yet.");
+    expect(screen.getByTestId("review-domain-map-inspector")).toHaveTextContent("partial");
+    expect(screen.getByTestId("review-domain-map-inspector")).toHaveTextContent("Derived model entities are missing");
+  });
+
+  it("keeps Review domain-map diagnostic navigation for edges and proposal artifacts", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runStarted: true,
+        runArtifacts: {
+          "run-1": {
+            run_id: "run-1",
+            artifacts: [
+              { path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" },
+              { path: "reports/agent-outputs/domains/payments-service.md", kind: "domain-report", label: "Payments domain" },
+              { path: "model/entities/svc.payments.yaml", kind: "model-entity", label: "Payments Service" },
+              { path: "model/entities/svc.users.yaml", kind: "model-entity", label: "Users Service" },
+              { path: "model/edges/edge.svc.payments.calls.svc.users.yaml", kind: "model-edge", label: "Payments calls Users" },
+              { path: "proposals/proposal-payments/proposal.md", kind: "proposal", label: "Payments proposal" },
+            ],
+          },
+        },
+        artifactText: {
+          "reports/coverage/open-questions.md": "",
+          "model/edges/edge.svc.payments.calls.svc.users.yaml": "from: svc.payments\ntype: calls\nto: svc.users\n",
+          "proposals/proposal-payments/proposal.md": "# Proposal\nReview payments/users integration ownership.\n",
+        },
+      }),
+    );
+
+    render(<App />);
+
+    await screen.findByTestId("review-panel");
+    fireEvent.click(screen.getByTestId("review-view-domain-map-tab"));
+
+    const edgeList = screen.getByTestId("review-domain-map-edge-list");
+    const inspector = screen.getByTestId("review-domain-map-inspector");
+    expect(edgeList).toHaveTextContent("svc.payments");
+    expect(edgeList).toHaveTextContent("svc.users");
+    expect(inspector).toHaveTextContent("Proposal artifacts ready");
+
+    fireEvent.click(within(edgeList).getByRole("button", { name: /model\/edges\/edge\.svc\.payments\.calls\.svc\.users\.yaml/i }));
+    await waitFor(() => expect(screen.getByTestId("run-artifact-content")).toHaveTextContent("type: calls"));
+
+    fireEvent.click(screen.getByTestId("review-view-domain-map-tab"));
+    const refreshedInspector = screen.getByTestId("review-domain-map-inspector");
+    fireEvent.click(within(refreshedInspector).getByRole("button", { name: /proposals\/proposal-payments\/proposal\.md/i }));
+    await waitFor(() => expect(screen.getByTestId("run-artifact-content")).toHaveTextContent("# Proposal"));
+  });
+
+  it("renders Proposals V2 review room with preview tabs and publication path", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runStarted: true,
+        runArtifacts: {
+          "run-1": {
+            run_id: "run-1",
+            artifacts: [
+              { path: "reports/as-is/overview.md", kind: "report", label: "As-is overview" },
+              { path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" },
+              { path: "reports/findings/findings.md", kind: "report", label: "Findings" },
+              { path: "proposals/proposal-payments/proposal.md", kind: "proposal", label: "Payments proposal" },
+              { path: "proposals/proposal-payments/ADR.md", kind: "proposal", label: "Payments ADR" },
+              { path: "proposals/proposal-payments/RFC.md", kind: "proposal", label: "Payments RFC" },
+              { path: "proposals/proposal-payments/migration-checklist.md", kind: "proposal", label: "Migration checklist" },
+              { path: "reports/changelog/2026-05-28-payments.md", kind: "changelog", label: "Payments changelog" },
+            ],
+          },
+        },
+        artifactText: {
+          "reports/coverage/open-questions.md": "",
+          "proposals/proposal-payments/proposal.md": "# Proposal\nTighten payment ownership review.\n",
+        },
+      }),
+    );
+
+    render(<App />);
+
+    await screen.findByTestId("review-panel");
+    fireEvent.click(screen.getByTestId("stage-proposals"));
+
+    expect(await screen.findByTestId("proposals-review-room")).toBeInTheDocument();
+    const artifactList = screen.getByTestId("proposals-artifact-list");
+    expect(artifactList).toHaveTextContent("proposals/proposal-payments");
+    expect(artifactList).toHaveTextContent("reports/changelog");
+    expect(screen.getByTestId("proposal-quality-panel")).toHaveTextContent("Proposal docs");
+    expect(screen.getByTestId("proposal-quality-panel")).toHaveTextContent("4");
+    expect(screen.getByTestId("proposal-publication-path")).toHaveTextContent("proposal/beta-refresh");
+    await waitFor(() => expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("# Proposal"));
+
+    fireEvent.click(within(artifactList).getByRole("button", { name: /open proposal artifact: proposals\/proposal-payments\/proposal\.md/i }));
+    await waitFor(() => expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("# Proposal"));
+
+    const tabs = screen.getByTestId("proposal-preview-tabs");
+    fireEvent.click(within(tabs).getByRole("tab", { name: "Evidence" }));
+    expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("reports/findings");
+
+    fireEvent.click(within(tabs).getByRole("tab", { name: "Changelog" }));
+    expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("Payments changelog");
+
+    fireEvent.click(within(tabs).getByRole("tab", { name: "Diff" }));
+    expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("Git diff belongs to the Publish gate slice");
+
+    fireEvent.click(screen.getByRole("button", { name: "Review in Publish" }));
+    expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
+  });
+
+  it("opens a changelog-only proposal run without an empty Proposals preview", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runStarted: true,
+        runArtifacts: {
+          "run-1": {
+            run_id: "run-1",
+            artifacts: [
+              { path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" },
+              { path: "reports/changelog/2026-05-31-run-1.md", kind: "changelog", label: "Run changelog" },
+            ],
+          },
+        },
+        artifactText: {
+          "reports/coverage/open-questions.md": "",
+          "reports/changelog/2026-05-31-run-1.md": "# Run changelog\n- Proposal package pending.\n",
+        },
+      }),
+    );
+
+    render(<App />);
+
+    await screen.findByTestId("review-panel");
+    fireEvent.click(screen.getByTestId("stage-proposals"));
+
+    const artifactList = await screen.findByTestId("proposals-artifact-list");
+    await waitFor(() => expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("# Run changelog"));
+    expect(within(artifactList).getByRole("button", { name: /reports\/changelog\/2026-05-31-run-1\.md/i })).toHaveClass("is-selected");
+  });
+
+  it("restores the Review evidence artifact when returning from Proposals", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runStarted: true,
+        runArtifacts: {
+          "run-1": {
+            run_id: "run-1",
+            artifacts: [
+              { path: "reports/as-is/overview.md", kind: "report", label: "As-is overview" },
+              { path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" },
+              { path: "proposals/proposal-payments/proposal.md", kind: "proposal", label: "Payments proposal" },
+            ],
+          },
+        },
+        artifactText: {
+          "reports/as-is/overview.md": "# System overview\nReviewable evidence body.\n",
+          "reports/coverage/open-questions.md": "",
+          "reports/coverage/summary.md": "# Coverage\n",
+          "proposals/proposal-payments/proposal.md": "# Proposal\nProposal body.\n",
+        },
+      }),
+    );
+
+    render(<App />);
+
+    await screen.findByTestId("review-panel");
+    await waitFor(() => expect(screen.getByTestId("run-artifact-selected-path")).toHaveTextContent("reports/as-is/overview.md"));
+
+    fireEvent.click(screen.getByTestId("stage-proposals"));
+    await waitFor(() => expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("# Proposal"));
+
+    fireEvent.click(screen.getByTestId("stage-review"));
+    await waitFor(() => expect(screen.getByTestId("run-artifact-selected-path")).toHaveTextContent("reports/as-is/overview.md"));
+    expect(screen.getByTestId("run-artifact-content")).toHaveTextContent("# System overview");
+    expect(within(screen.getByTestId("review-artifact-explorer")).getByRole("button", { name: /reports\/as-is\/overview\.md/i })).toHaveClass("is-selected");
+  });
+
+  it("renders the Publish gate with folder summary, preview tabs, commit plan, and Git actions", async () => {
+    const fetchMock = createFetchMock({
+      runStarted: true,
+      runArtifacts: {
+        "run-1": {
+          run_id: "run-1",
+          artifacts: [
+            { path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" },
+            { path: "model/entities/payments-service.yaml", kind: "model", label: "payments-service" },
+            { path: "proposals/adr-001.md", kind: "proposal", label: "ADR 001" },
+            { path: "reports/changelog/2026-04-03.md", kind: "changelog", label: "Iteration changelog" },
+          ],
+        },
+      },
+      artifactText: {
+        "reports/coverage/summary.md": "Coverage ready for publication.\n",
+        "reports/coverage/open-questions.md": "- Confirm owner sign-off\n",
+        "model/entities/payments-service.yaml": "id: payments-service\n",
+        "proposals/adr-001.md": "# ADR 001\n",
+        "reports/changelog/2026-04-03.md": "# Iteration changelog\n- Published architecture workspace artifacts.\n",
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("stage-publish"));
+
+    expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("reports/coverage"));
+    expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("model");
+    expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("proposals");
+    expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("Confirm owner sign-off");
+    expect(screen.getByTestId("publish-hard-blockers")).toHaveTextContent("No hard blockers");
+    expect(screen.getByTestId("publish-open-questions")).toHaveTextContent("Confirm owner sign-off");
+    expect(screen.getByTestId("publish-ready-checks")).toHaveTextContent("Artifacts");
+    expect(screen.getByTestId("publish-commit-plan")).toHaveTextContent("proposal/beta-refresh");
+    expect(screen.getByTestId("publish-commit-selected-btn")).toBeInTheDocument();
+    const proposalBranchButton = screen.getByTestId("git-proposal-branch-btn").closest("button") as HTMLButtonElement;
+    expect(proposalBranchButton).not.toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Coverage summary.*reports\/coverage\/summary\.md/i }));
+    await waitFor(() => expect(screen.getByTestId("publish-panel")).toHaveTextContent("Coverage ready for publication."));
+
+    fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
+    expect(screen.getByText(/current UI APIs expose generated artifact refs/i)).toBeInTheDocument();
+
+    expect(screen.getByTestId("publish-preview-tabs")).toHaveTextContent("Changelog");
+    expect(screen.getByTestId("publish-preview-tabs")).not.toHaveTextContent("Checklist");
+    fireEvent.click(screen.getByRole("tab", { name: "Changelog" }));
+    expect(screen.getByTestId("publish-panel")).toHaveTextContent("Iteration changelog");
+
+    const commitInput = screen.getByLabelText("Commit message");
+    fireEvent.change(commitInput, { target: { value: "docs: publish architecture workspace" } });
+    fireEvent.click(screen.getByTestId("publish-commit-selected-btn"));
+    await waitFor(() => expect(screen.getByTestId("publish-commit-plan")).toHaveTextContent("committed: docs: publish architecture workspace"));
+
+    fireEvent.click(proposalBranchButton);
+    await waitFor(() => expect(screen.getByTestId("publish-commit-plan")).toHaveTextContent("checked out proposal/beta-refresh"));
+
+    expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/commit")).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/proposal-branch")).toHaveLength(1);
+  });
+
+  it("keeps raw proposal and changelog artifacts when a final run index is available", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runStarted: true,
+        runArtifacts: {
+          "run-1": {
+            run_id: "run-1",
+            artifacts: [
+              { path: "reports/as-is/overview.md", kind: "report", label: "As-is overview" },
+              { path: "proposals/proposal-baseline/proposal.md", kind: "proposal", label: "Baseline proposal" },
+              { path: "reports/changelog/2026-05-31-run-1.md", kind: "changelog", label: "Run changelog" },
+              { path: "reports/taskruns/run-1/staging/final/final-run-index.json", kind: "taskrun", label: "Final Run Index" },
+            ],
+          },
+        },
+        artifactText: {
+          "reports/as-is/overview.md": "# As-is overview\n",
+          "proposals/proposal-baseline/proposal.md": "# Proposal\n",
+          "reports/changelog/2026-05-31-run-1.md": "# Run changelog\n- Proposal package compiled.\n",
+          "reports/coverage/open-questions.md": "",
+          "reports/taskruns/run-1/staging/final/final-run-index.json": JSON.stringify({
+            version: 1,
+            run_id: "run-1",
+            pipeline: "init",
+            generated_at: "2026-05-31T12:00:00Z",
+            canonical_documents: [
+              {
+                id: "doc.reports-as-is-overview-md",
+                kind: "report",
+                title: "As-is overview",
+                canonical_path: "reports/as-is/overview.md",
+                staged_path: "reports/taskruns/run-1/staging/final/reports/as-is/overview.md",
+              },
+            ],
+          }),
+        },
+      }),
+    );
+
+    render(<App />);
+
+    await screen.findByTestId("review-panel");
+    fireEvent.click(screen.getByTestId("stage-proposals"));
+    const proposalList = await screen.findByTestId("proposals-artifact-list");
+    expect(proposalList).toHaveTextContent("proposals/proposal-baseline");
+    expect(proposalList).toHaveTextContent("reports/changelog");
+
+    fireEvent.click(screen.getByTestId("stage-publish"));
+    expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Changelog" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("publish-panel")).toHaveTextContent("reports/changelog/2026-05-31-run-1.md");
+      expect(screen.getByTestId("publish-panel")).toHaveTextContent("Proposal package compiled.");
+    });
+  });
+
+  it("blocks Publish Git actions until generated artifacts exist", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("stage-publish"));
+
+    expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("Run analysis before publishing workspace artifacts.");
+    expect(screen.getByTestId("blockers-panel")).toHaveTextContent("No publishable artifacts");
+    expect(screen.getByTestId("next-action-panel")).toHaveTextContent("No generated workspace artifacts are ready to publish.");
+    expect(screen.getByTestId("publish-commit-selected-btn")).toBeDisabled();
+    const proposalBranchButton = screen.getByTestId("git-proposal-branch-btn").closest("button") as HTMLButtonElement;
+    expect(proposalBranchButton).toBeDisabled();
+
+    fireEvent.click(screen.getByTestId("inspector-primary-action"));
+    fireEvent.click(proposalBranchButton);
+    expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/commit")).toHaveLength(0);
+    expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/proposal-branch")).toHaveLength(0);
+  });
+
+  it("blocks Publish Git actions when generated artifacts still have runtime blockers", async () => {
+    const fetchMock = createFetchMock({
+      runStarted: true,
+      runStatus: {
+        "run-1": {
+          run_id: "run-1",
+          pipeline: "init",
+          status: "failed",
+          started_at: "2026-04-03T12:00:00Z",
+          finished_at: "2026-04-03T12:00:02Z",
+          warnings: [],
+          error_code: "runtime_contract_failed",
+          error: "artifact validation failed",
+        },
+      },
+      runArtifacts: {
+        "run-1": {
+          run_id: "run-1",
+          artifacts: [{ path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" }],
+        },
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("stage-publish"));
+
+    expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("reports/coverage"));
+    expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("runtime_contract_failed");
+    expect(screen.getByTestId("publish-commit-selected-btn")).toBeDisabled();
+    const proposalBranchButton = screen.getByTestId("git-proposal-branch-btn").closest("button") as HTMLButtonElement;
+    expect(proposalBranchButton).toBeDisabled();
+
+    fireEvent.click(screen.getByTestId("publish-commit-selected-btn"));
+    fireEvent.click(proposalBranchButton);
+    expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/commit")).toHaveLength(0);
+    expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/proposal-branch")).toHaveLength(0);
   });
 
   it("renders diagram artifacts without sending loading placeholder text to Mermaid", async () => {
@@ -541,8 +1188,12 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("qa-ask-btn"));
 
     expect(await screen.findByTestId("qa-answer")).toHaveTextContent("payments-service is owned by Platform Architecture.");
+    expect(screen.getByTestId("qa-run-history")).toHaveTextContent("Who owns payments?");
+    expect(screen.getByTestId("qa-answer-panel")).toHaveTextContent("Confidence: 82%");
+    expect(screen.getByTestId("qa-readonly-safety-panel")).toHaveTextContent("no canonical writes");
+    expect(screen.getByTestId("qa-citations-panel")).toHaveTextContent("ownership evidence");
     expect(screen.getByRole("button", { name: /reports\/as-is\/overview\.md/i })).toBeInTheDocument();
-    expect(screen.getByText(/Unresolved: confirm escalation owner/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Unresolved: confirm escalation owner/).length).toBeGreaterThan(0);
     expect(screen.getByText("Confidence: 82%")).toBeInTheDocument();
     expect(screen.getByTestId("qa-run-status")).toHaveTextContent("Runtime provider: fake");
     expect(fetchMock).toHaveBeenCalledWith(
@@ -553,6 +1204,68 @@ describe("App", () => {
       }),
     );
     expect(fetchMock).toHaveBeenCalledWith("/api/qa/runs/qa-run-1", undefined);
+  });
+
+  it("routes the inspector Ask primary action to the visible Q&A submit flow", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("stage-ask"));
+    fireEvent.change(await screen.findByTestId("qa-question-input"), { target: { value: "Who owns payments?" } });
+    fireEvent.click(screen.getByTestId("inspector-primary-action"));
+
+    expect(await screen.findByTestId("qa-answer")).toHaveTextContent("payments-service is owned by Platform Architecture.");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/qa/runs",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ question: "Who owns payments?" }),
+      }),
+    );
+  });
+
+  it("renders the Ask workbench with history, selected answer, audit safety, and citation drilldown", async () => {
+    const historyRun = {
+      run_id: "qa-history-1",
+      pipeline: "qa",
+      status: "succeeded",
+      started_at: "2026-04-03T12:00:03Z",
+      finished_at: "2026-04-03T12:00:04Z",
+      question: "Which service owns checkout?",
+      current_step: "qa.ask",
+      runtime_provider: "claude-code",
+      provider: "fake",
+      answer: "checkout-service is owned by Payments Platform.",
+      citations: [{ path: "model/entities/checkout-service.yaml", reason: "entity owner record" }],
+      unresolved: ["confirm production support rotation"],
+      confidence: 0.91,
+      generated_at: "2026-04-03T12:00:04Z",
+    };
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        qaRuns: [historyRun],
+        qaRunResponses: { "qa-history-1": historyRun },
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("stage-ask"));
+
+    expect(await screen.findByTestId("qa-run-history")).toHaveTextContent("Which service owns checkout?");
+    expect(await screen.findByTestId("qa-answer-panel")).toHaveTextContent("checkout-service is owned by Payments Platform.");
+    expect(screen.getByTestId("qa-answer-panel")).toHaveTextContent("Confidence: 91%");
+    expect(screen.getByTestId("qa-answer-panel")).toHaveTextContent("Related entities and edges");
+    expect(screen.getByTestId("qa-readonly-safety-panel")).toHaveTextContent("reports/taskruns/<run_id>/qa/");
+    expect(screen.getByRole("button", { name: /context-pack\.json/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /qa-answer\.json/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /runtime-execution\.json/i })).toBeInTheDocument();
+    expect(screen.getByTestId("qa-citations-panel")).toHaveTextContent("entity owner record");
+    expect(screen.getByRole("button", { name: /model\/entities\/checkout-service\.yaml/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/Unresolved: confirm production support rotation/).length).toBeGreaterThan(0);
   });
 
   it("renders read-only Q&A when the API returns nullable evidence arrays", async () => {
@@ -588,35 +1301,42 @@ describe("App", () => {
     expect(screen.getByTestId("stage-source")).toHaveClass("is-selected");
     expect(screen.getByDisplayValue("https://github.com/org/my-service.git")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText("Apply guided workspace form"));
     fireEvent.click(screen.getByTestId("workspace-save-btn"));
 
     await screen.findByTestId("workspace-validate-result");
     fireEvent.click(screen.getByTestId("stage-readiness"));
-    expect(screen.getByTestId("setup-run-first-btn")).not.toBeDisabled();
+    expect(screen.getByTestId("setup-run-first-btn")).toBeDisabled();
+    expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Check local readiness");
 
     fireEvent.click(screen.getByTestId("setup-doctor-btn"));
     await screen.findByTestId("setup-doctor-result");
     expect(screen.getByText("Local readiness passed.")).toBeInTheDocument();
+    expect(screen.getByTestId("setup-run-first-btn")).not.toBeDisabled();
 
     fireEvent.click(screen.getByTestId("setup-run-first-btn"));
-    await screen.findByTestId("results-coverage-panel");
+    await screen.findByTestId("analysis-run-progress");
+    expect(screen.getByTestId("stage-analysis")).toHaveClass("is-selected");
     expect(fetchMock).toHaveBeenCalledWith("/api/pipeline/init", expect.anything());
   });
 
   it("supports local-folder source mode in first-run setup", async () => {
-    vi.stubGlobal("fetch", createFetchMock());
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
 
     fireEvent.change(screen.getByLabelText("Repo source type"), { target: { value: "path" } });
     fireEvent.change(await screen.findByLabelText("Local checkout path"), { target: { value: "/tmp/my-service" } });
-    fireEvent.click(screen.getByText("Apply guided workspace form"));
+    fireEvent.click(screen.getByTestId("workspace-save-btn"));
+    await screen.findByTestId("workspace-validate-result");
     fireEvent.click(screen.getByText("Advanced workspace.yaml editor"));
 
     const manifest = screen.getByDisplayValue((content) => content.includes('path: "/tmp/my-service"'));
     expect(manifest).toBeInTheDocument();
     expect((manifest as HTMLTextAreaElement).value).not.toContain("git_url:");
+    const putCall = fetchMock.mock.calls.find(([url, init]) => url === "/api/workspace/manifest" && (init as RequestInit | undefined)?.method === "PUT");
+    const savedManifest = JSON.parse(String((putCall?.[1] as RequestInit | undefined)?.body ?? "{}")) as { content?: string };
+    expect(savedManifest.content).toContain('path: "/tmp/my-service"');
   });
 
   it("hydrates guided first-run form from loaded workspace manifest", async () => {
@@ -675,10 +1395,13 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByText("Apply guided workspace form"));
+    fireEvent.click(screen.getByText("Preview workspace.yaml draft"));
     fireEvent.click(screen.getByTestId("workspace-save-btn"));
     await screen.findByTestId("workspace-validate-result");
     fireEvent.click(screen.getByTestId("stage-readiness"));
+    expect(screen.getByTestId("setup-run-first-btn")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("setup-doctor-btn"));
+    await screen.findByTestId("setup-doctor-result");
     expect(screen.getByTestId("setup-run-first-btn")).not.toBeDisabled();
 
     fireEvent.click(screen.getByTestId("stage-source"));
@@ -825,6 +1548,81 @@ describe("App", () => {
     expect(screen.getByText("ask_unsafe_operation")).toBeInTheDocument();
     expect(screen.getByText("npm install")).toBeInTheDocument();
     expect(screen.getByText("package install requires review")).toBeInTheDocument();
+  });
+
+  it("renders Analysis V2 run progress, timeline, and shard drilldown", async () => {
+    const runID = "run-analysis-v2";
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runID,
+        runStarted: true,
+        runStatus: {
+          [runID]: {
+            run_id: runID,
+            pipeline: "init",
+            status: "failed",
+            current_step: "init.step1.collect",
+            started_at: "2026-04-03T12:00:00Z",
+            finished_at: "2026-04-03T12:00:02Z",
+            warnings: ["collect warning"],
+            error_code: "runtime_contract_failed",
+            error: "collect manifest missing",
+          },
+        },
+        runLogs: {
+          [runID]: {
+            run_id: runID,
+            items: [
+              {
+                cursor: 1,
+                timestamp: "2026-04-03T12:00:01Z",
+                level: "error",
+                kind: "event",
+                step_id: "init.step1.collect",
+                domain_id: "payments",
+                message: "collect manifest missing",
+                taskrun_path: "reports/taskruns/run-analysis-v2/staging/shards/payments/runtime-execution.json",
+                fields: { provider: "qwen-code", shard_id: "payments", duration_ms: 2140 },
+              },
+            ],
+            next_cursor: 2,
+            eof: true,
+          },
+        },
+        runArtifacts: {
+          [runID]: {
+            run_id: runID,
+            artifacts: [{ path: "reports/taskruns/run-analysis-v2/staging/shards/payments/runtime-execution.json", kind: "runtime", label: "runtime execution" }],
+          },
+        },
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("stage-analysis"));
+
+    const progress = await screen.findByTestId("analysis-run-progress");
+    expect(progress).toHaveTextContent(runID);
+    expect(progress).toHaveTextContent("fake");
+    expect(progress).toHaveTextContent("init.step1.collect");
+    expect(screen.getByTestId("analysis-review-blocker-btn")).not.toBeDisabled();
+
+    const timeline = screen.getByTestId("analysis-run-timeline");
+    expect(timeline).toHaveTextContent("init.step0.constitution");
+    expect(timeline).toHaveTextContent("init.step1.collect");
+    expect(timeline).toHaveTextContent("blocked");
+
+    const shardTable = await screen.findByTestId("analysis-shard-table");
+    expect(shardTable).toHaveTextContent("payments");
+    expect(shardTable).toHaveTextContent("qwen-code");
+    expect(shardTable).toHaveTextContent("failed");
+    expect(shardTable).toHaveTextContent("runtime-execution.json");
+    expect(shardTable).toHaveTextContent("2s");
+
+    const drilldown = screen.getByTestId("analysis-failed-shard-details");
+    expect(drilldown).toHaveTextContent("collect manifest missing");
   });
 
   it("copies run logs using the active line+fields view", async () => {
@@ -1296,8 +2094,9 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("stage-review"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("run-artifact-selected-path").textContent).toBe("Artifact Content");
-      expect(screen.getByTestId("run-artifact-content").textContent ?? "").toContain("Select artifact to inspect.");
+      expect(screen.getByTestId("run-artifact-selected-path").textContent).toBe("reports/as-is/new.md");
+      expect(screen.getByTestId("run-artifact-content").textContent ?? "").toContain("# New artifact");
+      expect(screen.getByTestId("run-artifact-content").textContent ?? "").not.toContain("# Old artifact");
     });
   });
 
@@ -1336,6 +2135,11 @@ describe("App", () => {
     expect(screen.getByText("Error: runtime draft manifest invalid")).toBeInTheDocument();
     expect(screen.getByTestId("run-status-warnings").textContent ?? "").toContain("collect coverage incomplete");
     expect(screen.getByTestId("run-status-warnings").textContent ?? "").toContain("draft promotion skipped");
+    expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Review blocker");
+
+    fireEvent.click(screen.getByTestId("inspector-primary-action"));
+    expect(screen.getByTestId("stage-analysis")).toHaveClass("is-selected");
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("analysis-failed-shard-details")));
   });
 
   it("renders running run status for active live progress state", async () => {
@@ -1689,13 +2493,19 @@ describe("App", () => {
     fireEvent.change(commitInput, { target: { value: "feat: tighten prompt policy" } });
     fireEvent.click(screen.getByTestId("git-commit-btn"));
 
-    await screen.findByText("committed: feat: tighten prompt policy");
+    await waitFor(() => {
+      expect(screen.getByTestId("baseline-git-helper-panel")).toHaveTextContent("committed: feat: tighten prompt policy");
+      expect(screen.getByTestId("git-publication-panel")).toHaveTextContent("committed: feat: tighten prompt policy");
+    });
 
     const branchInput = screen.getByLabelText("Proposal branch");
     fireEvent.change(branchInput, { target: { value: "proposal/prompt-policy" } });
     fireEvent.click(screen.getByTestId("git-proposal-branch-btn"));
 
-    await screen.findByText("checked out proposal/prompt-policy");
+    await waitFor(() => {
+      expect(screen.getByTestId("baseline-git-helper-panel")).toHaveTextContent("checked out proposal/prompt-policy");
+      expect(screen.getByTestId("git-publication-panel")).toHaveTextContent("checked out proposal/prompt-policy");
+    });
 
     const commitCalls = fetchMock.mock.calls.filter((call) => call[0] === "/api/git/commit");
     expect(commitCalls).toHaveLength(1);

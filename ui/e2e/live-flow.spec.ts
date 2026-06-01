@@ -107,6 +107,48 @@ async function captureEvidenceScreenshot(page: Page, name: string): Promise<stri
   return screenshotPath;
 }
 
+async function expectHiddenCompatibilityControlsAbsent(page: Page): Promise<void> {
+  await expect(page.getByTestId("tab-settings")).toHaveCount(0);
+  await expect(page.getByTestId("setup-stepper")).toHaveCount(0);
+}
+
+async function expectOperatorInspectorSurfaces(page: Page): Promise<void> {
+  await expect(page.getByTestId("blockers-panel")).toBeVisible();
+  await expect(page.getByTestId("evidence-refs-panel")).toBeVisible();
+  await expect(page.getByTestId("runtime-safety-panel")).toBeVisible();
+  await expect(page.getByTestId("git-publication-panel")).toBeVisible();
+}
+
+async function expectAlreadyInitializedWorkspaceNavigation(page: Page): Promise<void> {
+  await page.reload();
+  await expect(page.getByTestId("review-panel")).toBeVisible();
+  await expect(page.getByTestId("stage-review")).toHaveAttribute("aria-current", "step");
+
+  await page.getByTestId("stage-source").click();
+  await expect(page.getByTestId("source-repo-table")).toBeVisible();
+  await expectOperatorInspectorSurfaces(page);
+
+  await page.getByTestId("stage-readiness").click();
+  await expect(page.getByTestId("readiness-summary-cards")).toBeVisible();
+  await expect(page.getByTestId("readiness-runtime-summary")).toBeVisible();
+  await expectOperatorInspectorSurfaces(page);
+
+  await page.getByTestId("stage-analysis").click();
+  await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
+  await expect(page.getByTestId("analysis-run-timeline")).toBeVisible();
+  await expectOperatorInspectorSurfaces(page);
+
+  await page.getByTestId("stage-review").click();
+  await expect(page.getByTestId("review-panel")).toBeVisible();
+  await expect(page.getByTestId("review-artifact-explorer")).toBeVisible();
+  await expectOperatorInspectorSurfaces(page);
+
+  await page.getByTestId("stage-publish").click();
+  await expect(page.getByTestId("publish-panel")).toBeVisible();
+  await expect(page.getByTestId("publish-gate-panel")).toBeVisible();
+  await expectOperatorInspectorSurfaces(page);
+}
+
 test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, request }) => {
   test.skip(scenario !== "init-inspect", `scenario ${scenario} skips init-inspect flow`);
   test.setTimeout(Math.max(initTimeoutMs + 120_000, 6 * 60 * 1000));
@@ -117,9 +159,19 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await page.goto("/");
   await expect(page.getByTestId("console-shell")).toBeVisible();
   await expect(page.getByTestId("top-status-bar")).toContainText("Proven Arch");
+  await expect(page.getByTestId("stage-rail")).toBeVisible();
+  await expect(page.getByTestId("right-inspector")).toBeVisible();
+  await expect(page.getByTestId("activity-drawer")).toBeVisible();
+  await page.getByTestId("stage-source").click();
+  await expect(page.getByTestId("source-repo-table")).toBeVisible();
+  await expectHiddenCompatibilityControlsAbsent(page);
+  await expectOperatorInspectorSurfaces(page);
+  await captureEvidenceScreenshot(page, "frontend-source-desktop.png");
 
   await page.getByTestId("stage-readiness").click();
-  await page.getByText("Advanced runtime settings").click();
+  await expect(page.getByTestId("readiness-summary-cards")).toBeVisible();
+  await expect(page.getByTestId("readiness-runtime-summary")).toBeVisible();
+  await page.locator("summary").filter({ hasText: /^Advanced runtime settings$/ }).click();
   await expect(page.getByRole("heading", { name: "Settings: Runtime Timeouts" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Settings: Runtime Execution" })).toBeVisible();
 
@@ -129,8 +181,11 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect(page.getByText("Status: valid")).toBeVisible();
   const resolvedRepoRows = page.getByTestId("workspace-validate-resolved-repos").locator("li");
   await expect(resolvedRepoRows).toHaveCount(expectedRepoCount);
+  await expectOperatorInspectorSurfaces(page);
+  await captureEvidenceScreenshot(page, "frontend-readiness-desktop.png");
 
   await page.getByTestId("stage-analysis").click();
+  await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
   await page.getByTestId("run-init-btn").click();
   await expect(page.getByTestId("run-status-panel")).toBeVisible();
   const runID = ((await page.getByTestId("run-status-run-id").textContent()) ?? "").trim();
@@ -166,12 +221,21 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
     .toBe(true);
 
   await page.getByTestId("run-logs-mode-select").selectOption("all");
+  await expect(page.getByTestId("activity-events-table")).toBeVisible();
+  await expect(page.getByTestId("analysis-run-timeline")).toBeVisible();
+  await expectOperatorInspectorSurfaces(page);
+  await captureEvidenceScreenshot(page, "frontend-analysis-desktop.png");
 
   await page.getByTestId("stage-review").click();
-  const diagramButtons = page.getByTestId("run-diagrams-list").locator("button.link-button");
+  await expect(page.getByTestId("review-panel")).toBeVisible();
+  await expect(page.getByTestId("review-artifact-explorer")).toBeVisible();
+  await expect(page.getByTestId("review-evidence-preview")).toBeVisible();
+  await expect(page.getByTestId("review-citation-coverage")).toBeVisible();
+  const reviewArtifactExplorer = page.getByTestId("review-artifact-explorer");
+  const diagramButtons = reviewArtifactExplorer.getByRole("button", { name: /reports\/diagrams\//i });
   await expect(diagramButtons.first()).toBeVisible();
 
-  const c4ContextButton = page.getByRole("button", { name: /reports\/diagrams\/c4-context\.mmd/i });
+  const c4ContextButton = reviewArtifactExplorer.getByRole("button", { name: /reports\/diagrams\/c4-context\.mmd/i });
   if ((await c4ContextButton.count()) > 0) {
     await c4ContextButton.first().click();
   } else {
@@ -205,7 +269,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
     )
     .toBe(true);
 
-  const firstArtifactButton = page.getByTestId("results-artifacts-panel").locator("button.link-button").first();
+  const firstArtifactButton = reviewArtifactExplorer.locator("button.link-button").first();
   await expect(firstArtifactButton).toBeVisible();
   await firstArtifactButton.click();
 
@@ -215,18 +279,25 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
     .poll(async () => (await artifactContent.textContent())?.trim() ?? "")
     .not.toMatch(/^(Select artifact to inspect\.|Loading\.\.\.)$/);
 
+  await expectOperatorInspectorSurfaces(page);
   await captureEvidenceScreenshot(page, "frontend-review-desktop.png");
 
   if (qaSmoke) {
     await page.getByTestId("stage-ask").click();
+    await expect(page.getByTestId("qa-run-history")).toBeVisible();
+    await expect(page.getByTestId("qa-readonly-safety-panel")).toContainText("no canonical writes");
     await page.getByTestId("qa-question-input").fill("What are the main architecture coverage gaps?");
     await page.getByTestId("qa-ask-btn").click();
 
     await expect
       .poll(async () => ((await page.getByTestId("qa-run-status").textContent()) ?? "").trim(), { timeout: 120_000 })
       .toMatch(/status:\s*succeeded/i);
+    await expect(page.getByTestId("qa-answer-panel")).toBeVisible();
+    await expect(page.getByTestId("qa-citations-panel")).toBeVisible();
     await expect(page.getByTestId("qa-answer")).toBeVisible();
     await expect(page.getByTestId("qa-answer")).not.toContainText("No citations returned.");
+    await expect(page.getByTestId("qa-citations-panel")).not.toContainText("No citations returned.");
+    await expect(page.getByTestId("qa-readonly-safety-panel")).toContainText("reports/taskruns/<run_id>/qa/");
     await expect(page.getByTestId("qa-answer")).toContainText(/Confidence:\s*[1-9][0-9]*%/);
     await expect(page.getByRole("button", { name: /context-pack\.json/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /runtime-execution\.json/i })).toBeVisible();
@@ -234,6 +305,19 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
     await page.getByTestId("stage-review").click();
   }
 
+  await page.getByTestId("stage-publish").click();
+  await expect(page.getByTestId("publish-panel")).toBeVisible();
+  await expect(page.getByTestId("publish-diff-summary")).toBeVisible();
+  await expect(page.getByTestId("publish-preview-tabs")).toBeVisible();
+  await expect(page.getByTestId("publish-gate-panel")).toBeVisible();
+  await expect(page.getByTestId("publish-commit-plan")).toBeVisible();
+  await expect(page.getByTestId("git-publication-panel")).toContainText("proposal/beta-refresh");
+  await expectOperatorInspectorSurfaces(page);
+  await captureEvidenceScreenshot(page, "frontend-publish-desktop.png");
+
+  await expectAlreadyInitializedWorkspaceNavigation(page);
+
+  await page.getByTestId("stage-review").click();
   await page.setViewportSize({ width: 390, height: 1200 });
   await expect(page.getByTestId("review-panel")).toBeVisible();
   const mobileBodyText = (((await page.locator("body").innerText()) ?? "").replace(/\s+/g, ""));

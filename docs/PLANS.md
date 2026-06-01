@@ -57,6 +57,733 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 Tracker reconciliation from 2026-05-07 consolidated historical active plans into the remaining open slices below. Detailed evidence and classification are archived in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`; original historical active plan text was moved to `docs/archive/PLANS_ARCHIVE_2026-05.md` under "Reconciled active plans from 2026-05-07".
 
+### Continuous Backlog Queue Policy
+
+Current engineering queue starts with `EP-20260527-ui-console-v2`; implement Epic 16 slices in `docs/BACKLOG.md` order (`16A` -> `16N`) unless a blocker creates a narrower prerequisite slice.
+
+Task selection rules:
+- Completed plans whose only remaining item is owner review, merge/archive bookkeeping, or historical evidence retention are not next engineering work.
+- Owner-decision and trusted-host/live-release items remain explicit blockers; do not run or edit them as normal backlog tasks without the required owner/trusted-machine prerequisites.
+- Each selected slice gets a decision-complete ExecPlan/update before implementation, one focused implementation pass, self-review/fix loops, Full DoD (`make contracts`, `make test`, `make lint`, `make build`), then one commit.
+
+### Plan ID
+EP-20260527-ui-console-v2
+
+### Context
+После утверждения 9-screen UI vision нужно зафиксировать Console V2 как реализуемый backlog поверх текущего stage-based UI baseline. Цель - собрать лучший вариант из Mission Control, Evidence Review Workbench, Domain Map, Run Timeline и Git Review Room без изменения backend/API contracts. В этот же feature wave должна войти миграция live E2E логики, иначе новый shell может пройти code review, но сломать trusted-machine release diagnostics.
+
+### Goals (must have)
+- [x] Зафиксировать целевой design baseline в `docs/UI_CONSOLE_V2_DESIGN.md`.
+- [x] Сохранить approved PNG references в `docs/assets/ui-console-v2/`.
+- [x] Добавить Epic 16 в `docs/BACKLOG.md` с кодовыми, UX и live E2E slices.
+- [x] Зафиксировать V2 live E2E contract: scenarios, selectors, diagnostics and reason taxonomy.
+- [x] Зафиксировать screen data source map so implementation stays on existing APIs unless a later slice changes scope.
+- [x] Реализовать unified shell V2: top health strip, stage rail, center workbench, right inspector, bottom activity drawer.
+- [x] Реализовать stage surfaces: Source, Readiness, Charter, Analysis, Review Evidence, Review Domain Map, Proposals, Ask, Publish.
+- [x] Сохранить или явно мигрировать стабильные operator-facing `data-testid` для UI/unit/live E2E; hidden compatibility controls не возвращать.
+- [x] Обновить Playwright live E2E operator journey под V2 shell/stages, включая evidence/logs/runtime safety/Git publication assertions.
+- [x] Сохранить текущий public live shell как `UI_E2E_SCENARIO=init-inspect`; Ask покрывать optional `UI_E2E_QA_SMOKE=1`, а cancel/page-close/domain-map держать в deterministic или optional diagnostic coverage до отдельного live-gate решения.
+- [x] Сохранить frontend live E2E diagnostics: screenshots/traces refs, stage context and existing reason taxonomy.
+- [x] Обновить testing docs/runbook после implementation.
+- [x] Выполнить full DoD для implementation slice: `make contracts`, `make test`, `make lint`, `make build`.
+- [ ] После owner review/merge перенести план в архив.
+
+### Non-goals
+- [x] Не менять backend API, schemas, runtime artifact contracts, workspace contracts или CLI flags в UI-only slice.
+- [x] Не добавлять hosted/security/compliance enforcement.
+- [x] Не делать provider-live checks required CI; live provider matrix остаётся manual trusted-machine gate.
+- [x] Не коммитить сгенерированные PNG mockups как product assets без отдельного owner decision.
+
+### Approach
+1) Use `docs/UI_CONSOLE_V2_DESIGN.md` as the product/UX source for screen inventory, shell contract, state model and acceptance checklist.
+2) Implement in reviewable PR slices from `docs/BACKLOG.md` Epic 16, starting with shared shell primitives and stage status model.
+3) Reuse existing hooks/API clients; keep backend/API schemas unchanged unless a later slice explicitly changes scope.
+4) Use the data source map in `docs/UI_CONSOLE_V2_DESIGN.md`; render explicit empty/partial states for missing data instead of silently adding API fields.
+5) Move stage surfaces one by one, preserving existing critical operator-facing selectors or migrating tests deliberately; do not reintroduce hidden compatibility DOM.
+6) Update `ui/e2e/live-flow.spec.ts` in the same wave:
+   - `init-inspect`: validate Source/Readiness, run Analysis, inspect Review Evidence, check Publish gate, and assert top strip/right inspector/activity drawer on each transition.
+   - optional `UI_E2E_QA_SMOKE=1`: submit async QA inside `init-inspect`, poll result, assert confidence/citations/unresolved/read-only safety and context/runtime artifact links.
+   - cancellation/page-close: keep deterministic fake-runtime UI/API coverage outside the provider-live release gate.
+   - domain map: add unit/component/fake-fixture diagnostics first; add a live diagnostic only after stable model fixtures and owner-approved release-gate semantics exist.
+7) Preserve Playwright failure artifacts from `ui/playwright.live.config.ts` (`trace=retain-on-failure`, `screenshot=only-on-failure`, `video=retain-on-failure`) and make sure result JSON diagnostic refs lead to the `UI_E2E_OUTPUT_DIR` results.
+8) Update `scripts/frontend-live-e2e.sh` and script tests only if the public live shell or diagnostic refs change; do not add `ask-readonly`/`domain-map-diagnostic`/page-close scenarios or new frontend reason codes unless a separate classification/release-gate slice is approved.
+9) Sync README/ARCHITECTURE/testing/runbook docs only when the implemented UI behavior changes.
+
+### Slice ExecPlan - 16A UI V2 shell foundation
+
+Status: done.
+
+Goals:
+- [x] Refine existing shell primitives (`AppShell`, `TopStatusBar`, `StageRail`, `RightInspector`, `ActivityDrawer`) toward the approved V2 shell without restoring legacy panels.
+- [x] Extract a shared stage status model for the eight-stage rail.
+- [x] Add baseline keyboard/focus contract for rail navigation and shared inspector/drawer surfaces.
+- [x] Surface runtime permission mode and Git publication path in the shared shell using existing UI state.
+
+Non-goals:
+- [x] No backend API, schema, runtime contract, CLI flag or workspace contract changes.
+- [x] No stage-specific redesign beyond shared shell foundation.
+- [x] No `UI_E2E_SCENARIO` expansion, no new frontend reason taxonomy, no hidden compatibility controls.
+
+Implementation notes:
+- Use current React/Vite components and hooks only.
+- Add/keep visible operator-facing `data-testid` selectors for V2 shared shell surfaces.
+- Render missing Git/publication data as explicit partial/empty state in the inspector.
+
+Validation:
+- [x] Focused UI unit tests for stage rail keyboard navigation and shell shared surfaces.
+- [x] Browser visual QA for desktop and narrow viewport on embedded build.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Slice ExecPlan - 16B Source + Readiness consolidation
+
+Status: done.
+
+Goals:
+- [x] Add a Source repo table with name, source, ref, analysis include/exclude and validation status.
+- [x] Preserve Git URL/local path editing, docs imports path and advanced `workspace.yaml` editor.
+- [x] Add Readiness cards for workspace, repositories, runtime provider, permissions and artifacts.
+- [x] Add a compact runtime profile summary without making advanced runtime settings the primary flow.
+
+Non-goals:
+- [x] No backend API, schema, runtime contract, CLI flag or workspace contract changes.
+- [x] Do not add guided include/exclude editing until a separate workspace-contract slice approves it.
+- [x] No live E2E shell expansion beyond existing `init-inspect`.
+
+Implementation notes:
+- Use existing `ValidateResponse`, `DoctorResponse`, runtime settings state and artifact counters.
+- Show include/exclude as an explicit advanced-only/partial state because `GuidedRepo` does not own that contract today.
+- Keep existing Source/Readiness actions and `data-testid` selectors stable.
+
+Validation:
+- [x] Focused UI unit tests for Source table and Readiness summary cards.
+- [x] Browser visual QA for Source and Readiness on desktop and narrow viewport.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Slice ExecPlan - 16C Charter workbench
+
+Status: done.
+
+Goals:
+- [x] Add a Charter wizard summary for project, scope, NFR priorities and rules before the editable form.
+- [x] Add domain/team card overview using existing baseline bundle artifact metadata, with explicit empty/partial states.
+- [x] Add baseline prompt bundle status covering prompt packs, live-consumed prompts, reference-only prompts and bundle warnings.
+- [x] Keep the existing charter artifact editor and Git helper actions available without changing backend APIs.
+
+Non-goals:
+- [x] No backend API, schema, runtime contract, CLI flag or workspace contract changes.
+- [x] Do not add a new cards API or infer domain/team ownership beyond existing artifact paths/metadata.
+- [x] No live E2E shell expansion beyond existing `init-inspect`.
+
+Implementation notes:
+- Reuse current wizard state, baseline bundle response and Git helper state.
+- Preserve existing baseline editor labels/buttons/tests while adding V2 summary surfaces.
+- Render missing card artifacts as explicit empty/partial state rather than inventing data.
+
+Validation:
+- [x] Focused UI unit tests for Charter summary, card overview and prompt bundle status.
+- [x] Browser visual QA for Charter on desktop and narrow viewport.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Slice ExecPlan - 16D Analysis mission control
+
+Status: done.
+
+Goals:
+- [x] Add Analysis run progress summary with selected run id, runtime/provider, status, current step and warnings/errors.
+- [x] Add canonical step timeline for `step0..step4` using existing run status and logs.
+- [x] Add shard/log-derived table with step, scope, provider, status, artifact/log reference and failed-row drilldown.
+- [x] Keep existing run actions, pending permissions, run history and bottom activity drawer behavior.
+
+Non-goals:
+- [x] No backend API, schema, runtime artifact contract, CLI flag or workspace contract changes.
+- [x] Do not add a new shard API; derive table rows from existing run logs/status/artifacts and show partial state when data is sparse.
+- [x] No live E2E shell expansion beyond existing `init-inspect`.
+
+Implementation notes:
+- Reuse `RunStatusResponse`, `RunLogEntry`, current artifacts and existing runtime setup state.
+- Add stable V2 selectors: `analysis-run-progress`, `analysis-run-timeline`, `analysis-shard-table`, `analysis-review-blocker-btn`.
+- Keep logs adjacent through the existing activity drawer and add warning/error summary in the Analysis workbench.
+
+Validation:
+- [x] Focused UI unit tests for run progress, timeline and shard/log table.
+- [x] Browser visual QA for Analysis on desktop and narrow viewport.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-28: Implemented Analysis mission control using existing run status/log/artifact data, added V2 selectors (`analysis-run-progress`, `analysis-run-timeline`, `analysis-shard-table`, `analysis-review-blocker-btn`), verified terminal fake runs do not leave active shard rows, and kept warning-only runs from enabling the blocker action.
+
+### Slice ExecPlan - 16E Review evidence workbench
+
+Status: done.
+
+Goals:
+- [x] Add Review Evidence tabs for evidence workbench and domain map placeholder routing, preserving the single `Review` stage.
+- [x] Add grouped artifact explorer by workspace folder using existing selected-run artifacts.
+- [x] Add primary evidence preview that handles markdown/text and existing Mermaid diagram rendering without raw-path-first layout.
+- [x] Add citation/coverage/trust summary surfaces derived from existing coverage summary, open questions, findings/diagram artifacts and selected artifact state.
+- [x] Keep current artifact open flow, selected artifact selectors and diagram preview behavior available for unit/live E2E migration.
+
+Non-goals:
+- [x] No backend API, schema, runtime artifact contract, CLI flag or workspace contract changes.
+- [x] Do not implement the interactive domain map; reserve `review-domain-map` as an explicit future/partial state for `16F`.
+- [x] Do not add approve/flag persistence or Git publish gating mutations in this slice.
+- [x] No live E2E shell expansion beyond existing `init-inspect`.
+
+Implementation notes:
+- Reuse `nonDiagramArtifacts`, `diagramArtifacts`, `selectedArtifact`, `selectedArtifactContent`, `coverageSummary`, `openQuestions` and `onOpenArtifact`.
+- Add stable V2 selectors: `review-view-evidence-tab`, `review-view-domain-map-tab`, `review-artifact-explorer`, `review-evidence-preview`, `review-domain-map`, `review-citation-coverage`.
+- Render missing data as explicit empty/partial states; do not infer citations or claim coverage beyond existing artifacts/text.
+
+Validation:
+- [x] Focused UI unit tests for artifact grouping, evidence preview, citation/coverage/trust panels and domain-map partial state.
+- [x] Browser visual QA for Review on desktop and narrow viewport.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-28: Implemented Review Evidence Workbench with visible V2 selectors (`review-view-evidence-tab`, `review-view-domain-map-tab`, `review-artifact-explorer`, `review-evidence-preview`, `review-domain-map`, `review-citation-coverage`), grouped artifacts by workspace folder, preserved artifact/diagram open flow, and kept Domain Map as an explicit 16F partial state.
+
+### Slice ExecPlan - 16F Review domain map
+
+Status: done.
+
+Goals:
+- [x] Replace the Review Domain Map placeholder with a useful map workbench derived from existing selected-run artifacts.
+- [x] Show domain/service/model nodes from `model/entities/*` and domain agent outputs from `reports/agent-outputs/domains/*`.
+- [x] Show model edges from `model/edges/*` with relationship direction, relation type and evidence navigation.
+- [x] Add an ownership/coverage/cross-repo inspector that makes sparse or missing model data explicit.
+- [x] Preserve Review Evidence tab behavior and artifact open flow for model/entity/domain artifacts.
+
+Non-goals:
+- [x] No backend API, schema, runtime artifact contract, CLI flag or workspace contract changes.
+- [x] Do not parse or validate full model YAML in the browser; derive the map from artifact paths/labels and show partial states where content would be required.
+- [x] Do not add graph editing, approval persistence, proposal branch mutations or Publish gate behavior in this slice.
+- [x] No live E2E shell expansion beyond existing `init-inspect`.
+
+Implementation notes:
+- Reuse `nonDiagramArtifacts`, `diagramArtifacts`, `coverageSummary`, `openQuestions` and `onOpenArtifact`.
+- Add stable V2 selectors: `review-domain-map-canvas`, `review-domain-map-inspector`, `review-domain-map-node`, `review-domain-map-edge-list`, `review-domain-map-empty`.
+- Keep navigation artifact-backed via existing `ArtifactPathButton` and render missing ownership/cross-repo data as explicit partial state.
+
+Validation:
+- [x] Focused UI unit tests for populated model map, edge list, artifact navigation and sparse-model empty state.
+- [x] Browser visual QA for Review Domain Map on desktop and narrow viewport.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-28: Implemented Review Domain Map with visible V2 selectors (`review-domain-map-canvas`, `review-domain-map-inspector`, `review-domain-map-node`, `review-domain-map-edge-list`, `review-domain-map-empty`), model/entity/edge/domain artifact navigation, explicit sparse-model partial states, and no backend/API/schema/live-shell changes.
+
+### Slice ExecPlan - 16G Proposals review room
+
+Status: done.
+
+Goals:
+- [x] Replace the basic Proposals artifact list with a review-room layout for proposal/changelog artifacts.
+- [x] Add proposal package list and preview tabs for proposal body, linked evidence, changelog and explicit diff partial state.
+- [x] Add proposal quality, unresolved blocker and publication path panels using existing artifacts, `openQuestions`, `proposalBranch` and `gitStatus`.
+- [x] Preserve existing artifact open flow and proposal/changelog routing from Review/inspector.
+- [x] Surface proposal branch path before Publish without adding Git mutations to this slice.
+
+Non-goals:
+- [x] No backend API, schema, runtime artifact contract, CLI flag or workspace contract changes.
+- [x] Do not implement proposal approval persistence, Git diff API, commit actions or branch creation in Proposals; keep those in Publish.
+- [x] Do not parse full proposal markdown for semantic quality; derive package/type/status from artifact paths and labels.
+- [x] No live E2E shell expansion beyond existing `init-inspect`.
+
+Implementation notes:
+- Reuse `nonDiagramArtifacts`, `selectedArtifact`, `selectedArtifactContent`, `openQuestions`, `proposalBranch`, `gitStatus` and `onOpenArtifact`.
+- Add stable V2 selectors: `proposals-review-room`, `proposals-artifact-list`, `proposal-preview-tabs`, `proposal-preview-panel`, `proposal-quality-panel`, `proposal-publication-path`.
+- Render missing ADR/RFC/changelog/diff data as explicit partial states.
+
+Validation:
+- [x] Focused UI unit tests for proposal grouping, preview tabs, evidence/changelog partial states and publication path panel.
+- [x] Browser visual QA for Proposals on desktop and narrow viewport.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-28: Implemented Proposals Review Room with V2 selectors (`proposals-review-room`, `proposals-artifact-list`, `proposal-preview-tabs`, `proposal-preview-panel`, `proposal-quality-panel`, `proposal-publication-path`), artifact-derived package grouping, preview/evidence/changelog/diff tabs, publication path handoff to Publish, and no backend/API/schema/live-shell changes.
+
+### Slice ExecPlan - 16H Ask read-only Q&A console
+
+Status: done.
+
+Goals:
+- [x] Add an Ask workbench with async Q&A run history and selected-run answer view.
+- [x] Show answer confidence, citations, unresolved assumptions and explicit related-entity/edge partial state using existing QA response fields only.
+- [x] Add a read-only runtime safety panel that explains taskrun-only QA writes and links context-pack/runtime-execution audit artifacts.
+- [x] Preserve current async Ask flow, visible operator selectors and optional `UI_E2E_QA_SMOKE=1` assertions.
+
+Non-goals:
+- [x] No backend API, schema, runtime artifact contract, CLI flag or workspace contract changes.
+- [x] Do not add mutation actions, canonical artifact writes, approval persistence or new QA result fields in this slice.
+- [x] Do not expand release-facing live E2E scenarios or reason taxonomy.
+- [x] Do not restore hidden compatibility controls.
+
+Implementation notes:
+- Reuse `POST /api/qa/runs`, `GET /api/qa/runs/<run_id>` and `GET /api/qa/runs?limit=20` via the existing QA API client.
+- Add stable V2 selectors: `qa-run-history`, `qa-answer-panel`, `qa-citations-panel`, `qa-readonly-safety-panel`.
+- Keep existing visible selectors (`qa-panel`, `qa-question-input`, `qa-ask-btn`, `qa-run-status`, `qa-answer`) so current unit/live diagnostics remain valid.
+- Render missing citations/unresolved/related entities as explicit empty/partial state rather than inventing API data.
+
+Validation:
+- [x] Focused UI unit tests for QA run history, selected answer, citations/unresolved/confidence and read-only safety/audit links.
+- [x] Browser visual QA for Ask on desktop and narrow viewport.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-28: Implemented Ask read-only Q&A console with V2 selectors (`qa-run-history`, `qa-answer-panel`, `qa-citations-panel`, `qa-readonly-safety-panel`), existing async QA APIs, selected-run audit links (`context-pack.json`, `qa-answer.json`, `runtime-execution.json`), optional QA-smoke assertions and explicit partial state for structured related entities/edges. No backend/API/schema/runtime contract/live-shell expansion changes.
+
+### Slice ExecPlan - 16I Publish gate
+
+Status: done.
+
+Goals:
+- [x] Replace the basic Publish Git helper surface with a Git Review Room layout.
+- [x] Show folder-level workspace artifact summary, selected artifact preview and explicit diff partial state using existing artifact data only.
+- [x] Add publish gate/checklist/blockers, commit plan, proposal branch path and prepared commit-message copy action.
+- [x] Preserve existing Git commit/proposal branch mutations and visible operator selectors while adding V2 selectors.
+
+Non-goals:
+- [x] No backend API, schema, runtime artifact contract, CLI flag or workspace contract changes.
+- [x] Do not implement a Git diff API, artifact selection persistence or approval workflow in this slice.
+- [x] Do not expand release-facing live E2E scenarios or reason taxonomy.
+- [x] Do not restore hidden compatibility controls.
+
+Implementation notes:
+- Reuse existing selected-run artifact index, selected artifact content, open questions, Git message/status and proposal branch state.
+- Add stable V2 selectors: `publish-diff-summary`, `publish-preview-tabs`, `publish-gate-panel`, `publish-commit-plan`, `publish-commit-selected-btn`.
+- Keep current Git helper actions visible and mutation-compatible with `/api/git/commit` and `/api/git/proposal-branch`.
+- Render missing real Git diff/dirty folder data as explicit partial state until a separate backend slice exposes it.
+
+Validation:
+- [x] Focused UI unit tests for folder summary, selected artifact preview, publish gate/checklist, commit plan and Git actions.
+- [x] Browser visual QA for Publish on desktop and narrow viewport.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-28: Implemented Publish Git Review Room with folder artifact summary, selected artifact preview, advisory publish gate, commit plan, prepared message copy action and preserved Git commit/proposal branch mutations/selectors. Added V2 selectors (`publish-diff-summary`, `publish-preview-tabs`, `publish-gate-panel`, `publish-commit-plan`, `publish-commit-selected-btn`), explicit partial state for real Git diff data and desktop/mobile browser QA screenshots. No backend/API/schema/runtime contract/live-shell expansion changes.
+
+### Slice ExecPlan - 16J UI V2 unit and accessibility coverage
+
+Status: done.
+
+Goals:
+- [x] Add focused UI tests for V2 shell primitives: stage rail rendering/keyboard/collapse, right inspector priority/disabled action/empty sections and activity drawer controls/export/log states.
+- [x] Cover critical empty/blocked/operator-visible states without adding hidden compatibility controls.
+- [x] Keep tests fast and component-level where possible so they complement the heavier App integration tests from 16A-16I.
+
+Non-goals:
+- [x] No product UI redesign, backend API, schema, runtime artifact contract, CLI flag or workspace contract changes.
+- [x] Do not expand release-facing live E2E scenarios, Playwright reason taxonomy or provider-live release gates.
+- [x] Do not add hidden DOM controls solely for test compatibility.
+
+Implementation notes:
+- Add a small component test file around `StageRail`, `RightInspector` and `ActivityDrawer`.
+- Reuse existing visible labels/selectors and verify accessibility-facing attributes (`aria-current`, `aria-pressed`, disabled primary actions, accessible drawer labels).
+- Treat responsive collapse as the operator-facing rail collapse state; CSS breakpoint visual QA remains covered by implementation slices and live/Playwright slices.
+
+Validation:
+- [x] Focused UI component tests for shell primitives.
+- [x] Existing App focused tests still pass.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-28: Added fast component-level coverage for V2 shell primitives: stage rail accessible labels/keyboard/collapse state, right inspector blocked/attention priority with empty sections and evidence links, and activity drawer empty/populated/export/log-control states. Existing App-focused tests still pass; no product UI, backend/API/schema/runtime contract/live-shell changes.
+
+### Slice ExecPlan - 16K Live E2E selector migration
+
+Status: done.
+
+Goals:
+- [x] Migrate `ui/e2e/live-flow.spec.ts` assertions from legacy/raw-path-first surfaces to visible V2 operator selectors where those selectors now exist.
+- [x] Keep the release-facing shell on `UI_E2E_SCENARIO=init-inspect` and preserve optional `UI_E2E_QA_SMOKE=1`.
+- [x] Add contract-test coverage that the live flow uses V2 visible selectors and does not rely on hidden compatibility controls.
+
+Non-goals:
+- [x] Do not add new public live scenarios, provider-live release gates, failure reason classes or wrapper scripts.
+- [x] Do not change backend API, schemas, runtime artifacts, CLI flags or workspace contracts.
+- [x] Do not add hidden compatibility controls or hidden test-only DOM.
+
+Implementation notes:
+- Keep `scripts/frontend-live-e2e.sh` unchanged unless the public shell or result JSON changes.
+- Update only Playwright selectors and Python script contract tests needed to protect the selector migration.
+- Leave deeper Source -> Readiness -> Analysis -> Review -> Publish operator journey assertions for 16L.
+
+Validation:
+- [x] Focused Playwright/spec contract tests for selector migration.
+- [x] UI typecheck/full UI tests through DoD.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-28: Migrated `init-inspect` live Playwright assertions to visible V2 selectors (`source-repo-table`, readiness cards/runtime summary, analysis progress/timeline, activity table, review artifact explorer/evidence/citation panels) and added an explicit hidden-compatibility-control absence check. Added Python contract coverage for the selector migration. Public shell remains `UI_E2E_SCENARIO=init-inspect`; optional `UI_E2E_QA_SMOKE=1`, reason taxonomy, result JSON shape, backend/API/schema/runtime contracts and scripts remain unchanged.
+
+### Slice ExecPlan - 16L Live E2E operator journey
+
+Status: done.
+
+Goals:
+- [x] Extend the existing `init-inspect` Playwright flow to assert the V2 operator journey: Source -> Readiness -> Analysis -> Review -> Publish.
+- [x] Assert operator-critical surfaces: run status, blockers/evidence refs, activity logs, runtime safety and Git publication path.
+- [x] Capture durable stage screenshots for Source, Readiness, Analysis, Review and Publish diagnostics while preserving Playwright trace/screenshot/video failure artifacts.
+
+Non-goals:
+- [x] Do not add a new public `UI_E2E_SCENARIO`, provider-live release gate, reason taxonomy value or wrapper script.
+- [x] Do not move Ask/domain-map/cancel/page-close into release readiness; Ask remains optional `UI_E2E_QA_SMOKE=1`.
+- [x] Do not change backend API, schemas, runtime artifacts, CLI flags or workspace contracts.
+
+Implementation notes:
+- Keep `scripts/frontend-live-e2e.sh` result JSON shape stable; it already discovers `frontend-*.png` under `UI_E2E_OUTPUT_DIR`.
+- Update the fake harness contract fixture to emit the same screenshot names the Playwright spec now captures on success.
+- Leave deeper optional Ask/domain-map diagnostics for 16M.
+
+Validation:
+- [x] Focused frontend live E2E contract tests.
+- [x] UI typecheck/full UI tests through DoD.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-28: Extended `init-inspect` live Playwright flow into the required V2 operator journey Source -> Readiness -> Analysis -> Review -> Publish, with assertions for run status/logs, blockers/evidence refs, runtime safety and Git publication path. Added durable `frontend-source-desktop.png`, `frontend-readiness-desktop.png`, `frontend-analysis-desktop.png`, `frontend-review-desktop.png`, `frontend-publish-desktop.png` and `frontend-review-mobile.png` screenshot refs and updated the fake harness contract fixture accordingly. No new public scenario, reason taxonomy, release gate, wrapper script or backend/API/schema/runtime contract changes.
+
+### Slice ExecPlan - 16M Live E2E Ask and domain-map diagnostics
+
+Status: done.
+
+Goals:
+- [x] Keep async Ask checks inside optional `UI_E2E_QA_SMOKE=1` on `init-inspect`, with explicit answer/citation/confidence/read-only audit assertions.
+- [x] Add deterministic domain-map diagnostics for render, edge navigation and proposal/evidence links through UI unit/fake-fixture coverage before any live shell expansion.
+- [x] Add contract coverage that `ask-readonly` and `domain-map-diagnostic` are not public `scripts/frontend-live-e2e.sh` scenarios.
+
+Non-goals:
+- [x] Do not add new public live scenarios, provider-live release gates, reason classes or wrapper scripts.
+- [x] Do not make Ask/domain-map required release readiness; Ask remains optional and domain-map remains deterministic/fake-fixture coverage.
+- [x] Do not change backend API, schemas, runtime artifacts, CLI flags or workspace contracts.
+
+Implementation notes:
+- Update `ui/e2e/live-flow.spec.ts` only within the existing optional `UI_E2E_QA_SMOKE=1` block.
+- Add focused `App.test.tsx` domain-map fixture assertions rather than provider-live domain-map execution.
+- Update script contract tests, not the shell allowlist itself.
+
+Validation:
+- [x] Focused UI unit tests for domain-map diagnostics.
+- [x] Focused frontend live E2E contract tests.
+- [x] UI typecheck/full UI tests through DoD.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-28: Tightened optional `UI_E2E_QA_SMOKE=1` assertions for citations panel and read-only QA audit path, added deterministic App-level domain-map diagnostics for edge navigation and proposal artifact drilldown, and added shell contract coverage that `ask-readonly`/`domain-map-diagnostic` remain absent from the public frontend live allowlist. Ask remains optional; domain-map remains deterministic/fake-fixture coverage; no new public scenario, reason taxonomy, release gate, wrapper script or backend/API/schema/runtime contract changes.
+
+### Slice ExecPlan - 16N Docs/runbook sync
+
+Status: done.
+
+Goals:
+- [x] Sync the active plan acceptance and progress log with the completed Console V2 implementation slices.
+- [x] Update testing strategy docs so the required UI/live surfaces describe the V2 Source -> Readiness -> Analysis -> Review -> Publish journey, optional Ask smoke and deterministic domain-map coverage.
+- [x] Update the release live E2E runbook so trusted-machine operators understand which V2 screenshots, diagnostics and non-release Ask/domain-map signals are evidence-only.
+- [x] Confirm README, ARCHITECTURE and stakeholder docs remain consistent with the implemented UI behavior.
+
+Non-goals:
+- [x] No product code, backend API, schema, runtime contract, CLI flag, workspace contract or public live shell changes.
+- [x] Do not add release-gate scenarios for Ask, domain map, cancel or page-close behavior.
+- [x] Do not alter release verdict semantics, provider matrices, curated repo presets or matrix harness wrappers.
+
+Implementation notes:
+- Keep `UI_E2E_SCENARIO=init-inspect` as the only release-facing frontend live scenario.
+- Keep `UI_E2E_QA_SMOKE=1` optional/non-release and document screenshots as diagnostics, not release readiness inputs.
+- Keep domain-map coverage deterministic/fake-fixture until a separate owner-approved live-gate slice exists.
+
+Validation:
+- [x] Focused docs sync test: `go test ./internal/docsync`.
+- [x] Focused frontend live E2E contract test.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-28: Synced Console V2 testing strategy and release live E2E runbook with the implemented Source -> Readiness -> Analysis -> Review -> Publish journey, evidence-only screenshot refs, optional `UI_E2E_QA_SMOKE=1`, deterministic domain-map diagnostics and unchanged release-facing `UI_E2E_SCENARIO=init-inspect`. README, ARCHITECTURE and stakeholder docs were checked as already consistent with the implemented UI behavior. No code/API/schema/runtime contract, public live shell, reason taxonomy, release verdict, provider matrix or wrapper-script changes.
+
+### Slice ExecPlan - 16O Post-implementation UI/UX alignment audit
+
+Status: done.
+
+Goals:
+- [x] Re-audit the implemented Console V2 against `docs/BACKLOG.md` Epic 16, `docs/UI_CONSOLE_V2_DESIGN.md` and the saved PNG references.
+- [x] Fix operator-flow mismatches found by rendered UI QA without changing backend API, schemas, runtime contracts, CLI flags or workspace contracts.
+- [x] Keep Source, Readiness and Analysis primary paths aligned with the target `Source -> Readiness -> Analysis -> Review -> Publish` journey.
+
+Non-goals:
+- [x] Do not add approval persistence, Git diff API, new live E2E scenarios, provider-live release gates or new reason taxonomy.
+- [x] Do not reintroduce hidden compatibility controls or test-only DOM.
+- [x] Do not convert saved design PNGs into runtime product assets.
+
+Implementation notes:
+- Source inspector primary action must persist and validate sources, not only update the unsaved `workspace.yaml` draft.
+- `Run first analysis` must route to Analysis mission control so operators can watch progress and logs before Review.
+- Analysis shard/log table must show duration as available data or an explicit partial state.
+- Toolchain-only live E2E precheck tests must not fall back to ambient `node`/`npm` when `ACP_NODE_TOOL_CANDIDATES_ONLY=1`; otherwise validation can recurse into full DoD instead of materializing expected precheck evidence.
+
+Validation:
+- [x] Rendered desktop/mobile UI QA against the local fake server and saved design baseline.
+- [x] Focused UI tests for first-run routing, source save semantics and Analysis shard duration.
+- [x] Focused resolver and batch-precheck tests for hermetic live E2E node/npm toolchain evidence.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-31: Re-audited Console V2 against Epic 16, the approved design baseline and saved PNG references. Fixed Source primary action so it saves and validates guided source settings in one step, kept raw `workspace.yaml` save inside Advanced, routed `Run first analysis` to Analysis mission control instead of empty Review, added explicit duration/partial-state column to the Analysis shard/log table, tuned the table layout for desktop/mobile visual QA, and fixed the node/npm resolver so `ACP_NODE_TOOL_CANDIDATES_ONLY=1` remains hermetic for live E2E precheck evidence. No backend/API/schema/runtime contract, live E2E public shell, reason taxonomy, Git diff API or approval persistence changes.
+
+### Slice ExecPlan - 16P Post-audit UI/UX interaction hardening
+
+Status: done.
+
+Goals:
+- [x] Re-audit the current Console V2 implementation against Epic 16, `docs/UI_CONSOLE_V2_DESIGN.md` and rendered local UI evidence.
+- [x] Fix confirmed operator-flow bugs in Source, Analysis, Ask and Publish without changing backend API, schemas, runtime contracts, CLI flags or workspace contracts.
+- [x] Keep the first viewport aligned with the target Mission Control questions: workspace health, current pipeline status, blocker, reviewable evidence/logs and Git publication path.
+
+Non-goals:
+- [x] Do not add new API fields, approval persistence, Git diff APIs, live E2E scenarios, reason taxonomy, provider-live release gates or hidden compatibility controls.
+- [x] Do not rework the approved visual baseline, saved PNG references or domain model.
+- [x] Do not change release readiness semantics; provider-live checks remain manual trusted-machine gates.
+
+Implementation notes:
+- Source secondary action must be named as draft preview work, so it does not compete with the primary save-and-validate path.
+- Analysis blocker review must keep the operator in Analysis and focus the failed-shard/log drilldown instead of navigating away from the run context.
+- Ask inspector primary action must submit the visible Q&A form when Ask is already active, including normal validation for empty questions.
+- Publish commit actions, including the inspector primary, must stay disabled while the publish gate has hard blockers such as missing generated artifacts.
+
+Validation:
+- [x] Rendered desktop/mobile UI QA against the local fake server for Source, Analysis, Ask and Publish interactions.
+- [x] Focused UI tests for Source wording, Analysis blocker focus, Ask inspector submit and Publish no-artifacts gate.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-31: Started post-audit interaction hardening after comparing the current branch with Epic 16, the target design baseline and rendered local UI screenshots.
+- 2026-05-31: Completed 16P after rendered QA found and verified four interaction gaps: Source draft-preview wording, Analysis blocker focus, Ask inspector submit, and Publish hard-blocker disabled state. Verified no backend/API/schema/runtime contract, public live E2E shell, reason taxonomy or release-readiness changes.
+
+### Slice ExecPlan - 16Q Post-audit recovery path hardening
+
+Status: done.
+
+Goals:
+- [x] Re-audit Console V2 recovery actions against Epic 16, `docs/UI_CONSOLE_V2_DESIGN.md` and rendered local UI evidence.
+- [x] Fix confirmed operator-flow bugs where an empty-stage recovery action is shown but blocked, or readiness can be bypassed by a competing local action.
+- [x] Keep Source -> Readiness -> Analysis -> Review recovery behavior aligned with the approved Mission Control design.
+
+Non-goals:
+- [x] Do not add backend API fields, schemas, runtime contracts, CLI flags, workspace contract changes, live E2E scenarios, reason taxonomy or hidden compatibility controls.
+- [x] Do not change provider-live release readiness or trusted-machine gate semantics.
+- [x] Do not add approval persistence, Git diff APIs or new publication mutations.
+
+Implementation notes:
+- Review empty state must make `Run analysis first` a real recovery action and route the operator into Analysis mission control.
+- Readiness stage-level `Run first analysis` must require both workspace validation and local readiness pass, matching the right-inspector validate -> doctor -> analysis sequence.
+- Analysis direct actions remain available from the Analysis stage for operators who intentionally jump there.
+
+Validation:
+- [x] Rendered desktop/mobile UI QA against the local fake server for Review empty recovery and Readiness doctor gating.
+- [x] Focused UI tests for Review recovery action routing and Readiness first-run gating.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-31: Started recovery path hardening after rendered QA showed Review empty-state primary action disabled and Readiness `Run first analysis` enabled before local doctor pass.
+- 2026-05-31: Completed 16Q: Review empty-state `Run analysis first` now starts `init` and routes to Analysis mission control, while Readiness `Run first analysis` requires both valid workspace and successful local doctor. Verified with rendered desktop/mobile QA, focused UI tests and full DoD. No backend/API/schema/runtime contract, public live E2E shell, reason taxonomy or release-readiness changes.
+
+### Slice ExecPlan - 16R Post-audit publication gate hardening
+
+Status: done.
+
+Goals:
+- [x] Re-audit Publish Git Review Room against Epic 16, `docs/UI_CONSOLE_V2_DESIGN.md` and the approved saved PNG baseline.
+- [x] Fix confirmed publication-gate UI/UX bugs so commit and proposal-branch Git mutations are blocked consistently when hard publish blockers exist.
+- [x] Keep operator recovery clear: publication blockers must be visible in the gate panel, right inspector and action disabled states.
+
+Non-goals:
+- [x] Do not add backend API fields, schemas, runtime contracts, CLI flags, workspace contract changes, Git diff APIs, live E2E scenarios, reason taxonomy or provider-live release gates.
+- [x] Do not change Charter/Baseline Git helper behavior; this slice only hardens the Publish room.
+- [x] Do not add approval persistence or convert saved design PNGs into product runtime assets.
+
+Implementation notes:
+- Publish gate must treat generated artifact absence and shell hard blockers consistently for all publication mutations.
+- The proposal branch action is a Git publication mutation in the Publish room, so it must not remain enabled while the gate is blocked.
+- Gate copy must not describe checks as merely advisory if the UI blocks Git mutations.
+
+Validation:
+- [x] Rendered desktop/mobile UI QA against the local fake server for empty/blocked Publish states.
+- [x] Focused UI tests for Publish commit/proposal-branch disabled states and allowed state after artifacts exist.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-31: Started publication gate hardening after code audit found Publish commit and proposal-branch actions were not gated consistently with the approved Git Review Room design.
+- 2026-05-31: Completed 16R: Publish now carries shell hard blockers into the gate panel, disables both commit and proposal-branch Git mutations under hard blockers, removes misleading advisory gate copy, and makes disabled inspector primary actions visually non-primary. Verified with focused UI tests, rendered desktop/mobile QA, `git diff --check` and full DoD. No backend/API/schema/runtime contract, public live E2E shell, reason taxonomy, Git diff API or provider-live release gate changes.
+
+### Slice ExecPlan - 16S Target UI reference alignment audit
+
+Status: done.
+
+Goals:
+- [x] Re-audit all saved `docs/assets/ui-console-v2/*.png` references against the current rendered Console V2 screens.
+- [x] Fix confirmed target-design mismatches that are UI-only and can be solved without backend/API/schema/runtime contract changes.
+- [x] Keep the first screen of Review and Publish immediately reviewable when artifacts exist.
+
+Non-goals:
+- [x] Do not add approval persistence, Git diff APIs, new backend fields, schemas, runtime contracts, CLI flags, workspace contract changes, live E2E scenarios, reason taxonomy or provider-live release gates.
+- [x] Do not convert saved PNG references into runtime assets.
+- [x] Do not change fake runtime artifact generation or provider behavior.
+
+Implementation notes:
+- Review Evidence should auto-load the first reviewable artifact when selected-run artifacts exist and no artifact is selected, matching the saved Review Evidence reference.
+- Publish preview tabs must match the saved Publish reference and design contract: `Preview`, `Diff`, `Evidence`, `Changelog`; checklist remains in the side publish gate.
+- The shared workflow rail should visually align with the saved reference screens as a dark compact ops rail while preserving selectors, keyboard behavior and responsive collapse.
+
+Validation:
+- [x] Rendered desktop/mobile UI QA against the local fake server for Source, Review Evidence, Review Domain Map, Publish and shared shell.
+- [x] Focused UI tests for Review auto-selection and Publish Changelog tab.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-31: Started target UI reference alignment after comparing the saved 9-screen PNG baseline with current rendered Source, Analysis, Review, Proposals, Ask and Publish screens.
+- 2026-05-31: Completed 16S target alignment: Review Evidence auto-selects the first reviewable artifact, Publish uses `Preview`/`Diff`/`Evidence`/`Changelog`, raw proposal/changelog artifacts survive final-run-index normalization, and the shared workflow rail matches the saved dark ops-console references. No backend/API/schema/runtime/live-shell changes.
+
+### Slice ExecPlan - 16T Stage contextual action and review defaults audit
+
+Status: done.
+
+Goals:
+- [x] Re-audit the rendered Console V2 screens against the saved `docs/assets/ui-console-v2/*.png` references after 16S.
+- [x] Keep each stage's right-inspector primary action contextual to that stage while still surfacing global blockers in the blocker panel.
+- [x] Make Review and Proposals immediately reviewable when selected-run artifacts exist.
+
+Non-goals:
+- [x] Do not add Git diff APIs, approval persistence, new backend fields, schemas, runtime contracts, CLI flags, workspace contract changes, live E2E scenarios, reason taxonomy or provider-live release gates.
+- [x] Do not convert design PNGs into runtime assets or rewrite the existing shell architecture.
+- [x] Do not change fake runtime artifact generation or provider behavior.
+
+Implementation notes:
+- Open-question blockers should remain visible in `Blockers`, but should not hijack Source, Charter, Proposals or Ask primary next actions.
+- Review artifact explorer should be evidence-first (`reports/as-is`, coverage, findings, diagrams, model/domain outputs) with proposal/changelog artifacts later in the list.
+- Proposals should auto-load the first proposal/ADR/RFC/checklist artifact when artifacts exist and no proposal artifact is selected, matching the saved Proposals review-room reference.
+
+Validation:
+- [x] Rendered desktop/mobile UI QA against the local fake server for Source, Review Evidence, Proposals, Ask, Publish and shared shell.
+- [x] Focused UI tests for contextual next action, Review explorer order/selection and Proposals auto-preview.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-05-31: Started 16T after rendered audit found Source/Charter/Proposals/Ask next actions were globally overridden by review findings, Proposals opened with an empty preview despite available proposal artifacts, and Review grouped proposal artifacts before evidence groups.
+- 2026-05-31: Completed 16T: right-inspector next action is stage-contextual while blockers remain visible, Review explorer is evidence-first with visible selected artifact state, and Proposals auto-loads the first proposal artifact for immediate review. Verified with focused UI tests, rendered desktop/mobile QA, `git diff --check` and full DoD. Also restored local Python 3.9 compatibility for the matrix release contract test and matrix harness type hints so DoD imports and scripted matrix paths run cleanly, with no release behavior change. No backend/API/schema/runtime/live-shell changes.
+
+### Slice ExecPlan - 16U Desktop shell and stage artifact-context audit
+
+Status: done.
+
+Goals:
+- [x] Re-audit all saved `docs/assets/ui-console-v2/*.png` target references against rendered desktop/mobile Console V2 screens after 16T.
+- [x] Keep the shared activity drawer visible in the desktop first viewport, matching the approved bottom ops-console drawer pattern.
+- [x] Prevent proposal/changelog artifact selection from leaking into the Review Evidence first screen when operators return from Proposals, Ask or Publish.
+
+Non-goals:
+- [x] Do not add backend API fields, schemas, runtime contracts, CLI flags, workspace contract changes, Git diff APIs, approval persistence, live E2E scenarios, reason taxonomy or provider-live release gates.
+- [x] Do not convert saved PNG references into runtime assets or rewrite the shell architecture.
+- [x] Do not remove access to proposal/changelog artifacts from the Review explorer; only restore stage-appropriate default context on stage entry.
+
+Implementation notes:
+- Desktop shell should behave like a fixed-height operator console: top health strip, rail/workbench/inspector and bottom activity drawer all visible, with workbench/inspector scrolling internally.
+- Mobile should remain page-scroll friendly and must not introduce horizontal overflow.
+- Review stage entry from another stage should re-open the preferred evidence artifact when the selected artifact belongs to Proposals/Changelog; user selection inside Review remains available afterward.
+
+Validation:
+- [x] Rendered desktop/mobile UI QA against the local fake server for Source, Readiness, Charter, Analysis, Review Evidence, Review Domain Map, Proposals, Ask, Publish and shared shell.
+- [x] Focused UI tests for returning to Review from Proposals after proposal auto-preview.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-06-01: Started 16U after rendered reference audit found the desktop activity drawer below the first viewport and stale proposal artifact context leaking into Review Evidence after cross-stage navigation.
+- 2026-06-01: Completed 16U: wide desktop now behaves as a fixed-height operator console with rail, workbench, inspector and activity drawer visible in the first viewport; 901-1180px keeps the same shell without clipping the inspector or rail; Review stage entry restores evidence-first artifact context after Proposals/Changelog navigation. Verified against all saved target references with rendered desktop/mobile QA, focused UI tests, `git diff --check` and full DoD. No backend/API/schema/runtime/live-shell changes.
+
+### Slice ExecPlan - 16V Narrow desktop workbench overflow audit
+
+Status: done.
+
+Goals:
+- [x] Re-audit current Console V2 against `docs/BACKLOG.md` Epic 16, `docs/UI_CONSOLE_V2_DESIGN.md` and all saved `docs/assets/ui-console-v2/*.png` references after 16U.
+- [x] Fix confirmed narrow desktop UI overflow where the fixed three-column shell leaves the central workbench too narrow for Review/Proposals/Publish stage grids.
+- [x] Preserve wide desktop first-viewport shell behavior and mobile page-scroll behavior.
+
+Non-goals:
+- [x] Do not add backend API fields, schemas, runtime contracts, CLI flags, workspace contract changes, Git diff APIs, approval persistence, live E2E scenarios, reason taxonomy or provider-live release gates.
+- [x] Do not convert saved PNG references into runtime assets or rewrite the shell architecture.
+- [x] Do not hide operator-facing controls or restore hidden compatibility DOM.
+
+Implementation notes:
+- Keep the shared rail, inspector and activity drawer visible in the fixed desktop shell.
+- At narrow desktop widths, stage-specific workbench grids should collapse inside the central work area before content clips or creates confusing horizontal work-area scroll.
+- Shared section heading rows should wrap controls instead of forcing action buttons outside their card.
+
+Validation:
+- [x] Rendered desktop/mobile UI QA against the local fake server for all 9 target screens plus narrow desktop breakpoints.
+- [x] Focused UI/type tests for changed frontend behavior where applicable.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-06-01: Started 16V after rendered breakpoint audit found Review evidence controls clipping and central work-area horizontal overflow at 901px while the shared shell itself remained visible.
+- 2026-06-01: Completed 16V: stage workbench grids now adapt before fixed desktop shells get too narrow, shared heading rows wrap controls, and Source/Readiness/Charter/Analysis/Review/Proposals/Ask/Publish render without document or central work-area horizontal overflow at 1536px, 1440px, 1366px, 1180px, 1100px, 1024px and the 901px desktop boundary. Mobile/tablet page-scroll behavior remains unchanged below 901px, and no backend/API/schema/runtime/live E2E contract changed.
+
+### Files expected to change
+- `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
+- `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes
+- `scripts/frontend-live-e2e.sh` only if the public live shell changes; `scripts/frontend-status-reasons.sh` only if a separate classification slice changes reason taxonomy; `scripts/tests/frontend_live_e2e_contract_test.py`
+- `docs/UI_CONSOLE_V2_DESIGN.md`, `docs/BACKLOG.md`, `docs/PLANS.md`
+- implementation docs: `README.md`, `docs/ARCHITECTURE.md`, `docs/TESTING_STRATEGY.md`, `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+
+### Acceptance criteria
+- [x] All 8 rail stages render and route to the V2 surfaces.
+- [x] First viewport shows workspace readiness, current run status, blocker/next action and evidence/Git path where relevant.
+- [x] Analysis keeps run timeline, failed shard details and logs adjacent.
+- [x] Review supports evidence workbench and domain map without raw-path-first review.
+- [x] Ask is explicit read-only Q&A and shows confidence/citations/unresolved assumptions.
+- [x] Publish gate shows changed folders, blocker checklist, commit plan and proposal branch.
+- [x] Each screen uses existing APIs/data hooks or renders an explicit partial/empty state; no implicit backend contract changes.
+- [x] UI tests cover stage navigation, inspector priority and drawer behavior.
+- [x] Live E2E `init-inspect` validates Source -> Readiness -> Analysis -> Review -> Publish and captures diagnostics on failure.
+- [x] Async Ask is covered by optional `UI_E2E_QA_SMOKE=1` and deterministic tests; domain-map checks are covered by fake-fixture/unit/component diagnostics before any live shell expansion.
+- [x] `frontend-e2e-result.json` still records scenario, reason, run id, last run status/error/current step and diagnostic refs.
+- [x] Playwright trace/screenshot/video artifacts remain available for failed V2 live E2E stages.
+- [x] Existing reason taxonomy remains additive-compatible with release report aggregation.
+- [x] Hidden compatibility controls remain absent.
+
+### Risks
+- Dense shell can regress responsive layout; visual QA must include desktop and narrow viewport checks.
+- Selector migration can weaken release diagnostics if compatibility aliases are dropped without E2E updates.
+- Domain map may overpromise if model/edge data is sparse; empty and partial states must be explicit.
+
+### Progress log
+- 2026-05-27: Approved unified 9-screen design vision and fixed design baseline, visual references, data-source map, backlog, ExecPlan and V2 live E2E contract without product code changes.
+- 2026-05-27: Rebased on `origin/main` `3aa458a`; latest main already removed compatibility controls, compacted activity/artifact surfaces, added optional `UI_E2E_QA_SMOKE=1` and screenshot refs, so V2 backlog was corrected to keep release-facing live frontend on `init-inspect` only.
+- 2026-05-28: Continuous backlog queue normalized this plan to the first active workstream; next implementation slice is `16A UI V2 shell foundation`.
+- 2026-05-28: Completed `16A UI V2 shell foundation`: shared stage status model, top strip runtime/Git metadata, V2 inspector selectors, Git publication panel, rail keyboard navigation and drawer a11y baseline. No backend/API/schema/live-shell changes.
+- 2026-05-28: Completed `16B Source + Readiness consolidation`: Source now has a repo table with explicit advanced-only analysis scope state, Readiness has workspace/repo/runtime/permission/artifact summary cards plus a compact runtime profile summary. No backend/API/schema/live-shell changes.
+- 2026-05-28: Completed `16C Charter workbench`: Charter now shows wizard summary, domain/team card overview, baseline prompt bundle status, explicit partial states for missing cards, and a no-404 empty editor selection before existing artifact editor/Git helper actions. No backend/API/schema/live-shell changes.
+- 2026-05-28: Completed `16D` through `16N`, finishing Analysis mission control, Review evidence/domain map, Proposals review room, Ask read-only console, Publish gate, UI coverage, live E2E selector/operator-journey migration, optional Ask/domain-map diagnostics and testing/runbook sync. Epic 16 implementation acceptance is complete; remaining item is owner review/merge/archive bookkeeping.
+
 ### Plan ID
 EP-20260527-live-e2e-ui-ux-operator-flow
 
@@ -113,6 +840,7 @@ EP-20260527-live-e2e-ui-ux-operator-flow
 ### Progress log
 - 2026-05-27: Started UI/UX live E2E operator-flow hardening slice.
 - 2026-05-27: Implemented compatibility DOM removal, optional Ask UX smoke, screenshot evidence refs, compact activity/artifact UX, docs sync, full DoD, and fake-runtime UX smoke with screenshots.
+- 2026-05-28: Queue normalization classified this plan as implementation-complete/archive-only; do not pick it as the next engineering slice.
 
 ### Plan ID
 EP-20260526-async-runtime-backed-ask

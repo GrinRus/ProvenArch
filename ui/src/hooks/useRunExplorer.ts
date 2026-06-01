@@ -34,6 +34,7 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     clearArtifacts,
   } = artifactsState;
   const {
+    runLogs,
     runLogsCursor,
     runLogsEOF,
     runLogsStatus,
@@ -135,6 +136,7 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     hasActiveRuns,
     runCounters,
     runLogTaskrunPaths,
+    runLogs,
     filteredRunLogs,
     diagramArtifacts,
     nonDiagramArtifacts,

@@ -153,6 +153,7 @@ export function useRunLogs({ runId }: UseRunLogsOptions) {
   }
 
   return {
+    runLogs,
     runLogsCursor,
     runLogsEOF,
     runLogsStatus,

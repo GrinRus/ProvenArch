@@ -42,11 +42,13 @@ export function useBaselineEditor({ setBusy, setError }: UseBaselineEditorOption
       const artifacts = (payload.manifest?.editable_artifacts ?? []).map((artifact) => ({
         path: artifact.path,
         label: artifact.label,
+        category: artifact.category,
+        prompt_usage: artifact.prompt_usage,
       }));
       setBaselineEditorArtifacts(artifacts);
       setBaselineBundleWarnings(payload.warnings ?? []);
       const hasCurrentSelection = artifacts.some((artifact) => artifact.path === selectedEditorPath);
-      const nextPath = hasCurrentSelection ? selectedEditorPath : (artifacts[0]?.path ?? "");
+      const nextPath = hasCurrentSelection ? selectedEditorPath : "";
       setSelectedEditorPath(nextPath);
       setSelectedEditorContent("");
       setSelectedEditorLoadedPath("");

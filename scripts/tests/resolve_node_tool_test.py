@@ -125,6 +125,29 @@ class ResolveNodeToolTest(unittest.TestCase):
             self.assertNotEqual(0, result.returncode)
             self.assertIn("Node.js 22.21.1 is required", result.stderr)
 
+    def test_candidates_only_does_not_fall_back_to_path_toolchain(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_root = Path(tmpdir)
+            old_dir = tmp_root / "old"
+            path_dir = tmp_root / "path"
+            self._write_fake_toolchain(old_dir, self.expected_host_node_arch or "x64", "22.20.0")
+            self._write_fake_toolchain(path_dir, self.expected_host_node_arch or "x64")
+            result = subprocess.run(
+                [str(self.resolver), "npm"],
+                cwd=self.repo_root,
+                env={
+                    **os.environ,
+                    "ACP_NODE_TOOL_CANDIDATES": str(old_dir),
+                    "ACP_NODE_TOOL_CANDIDATES_ONLY": "1",
+                    "PATH": f"{path_dir}:/usr/bin:/bin",
+                },
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Node.js 22.21.1 is required", result.stderr)
+            self.assertNotIn(str(path_dir / "npm"), result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

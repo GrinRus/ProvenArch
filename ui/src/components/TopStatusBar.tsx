@@ -3,11 +3,20 @@ type TopStatusBarProps = {
   repoCount: number;
   runtimeMode: string;
   runtimeProvider: string;
+  permissionMode: string;
+  gitStatus: string;
   healthLabel: string;
   onRefresh: () => void;
 };
 
-export function TopStatusBar({ workspacePath, repoCount, runtimeMode, runtimeProvider, healthLabel, onRefresh }: TopStatusBarProps) {
+export function TopStatusBar({ workspacePath, repoCount, runtimeMode, runtimeProvider, permissionMode, gitStatus, healthLabel, onRefresh }: TopStatusBarProps) {
+  const localTime = new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date());
+
   return (
     <header className="top-status-bar" data-testid="top-status-bar">
       <div className="brand-block">
@@ -39,6 +48,18 @@ export function TopStatusBar({ workspacePath, repoCount, runtimeMode, runtimePro
           Runtime {runtimeMode}
           {runtimeMode === "headless" ? ` / ${runtimeProvider}` : ""}
         </span>
+        <span className="top-meta-item">
+          <TopMetaIcon type="permission" />
+          Permissions {permissionMode}
+        </span>
+        <span className="top-meta-item" title={gitStatus || "Git publication is pending review"}>
+          <TopMetaIcon type="git" />
+          Git {gitStatus ? "updated" : "review pending"}
+        </span>
+        <span className="top-meta-item">
+          <TopMetaIcon type="time" />
+          Local time {localTime}
+        </span>
         <span className="top-meta-item server-status">
           <span className="server-dot" aria-hidden="true" />
           Server {healthLabel}
@@ -57,11 +78,14 @@ export function TopStatusBar({ workspacePath, repoCount, runtimeMode, runtimePro
   );
 }
 
-function TopMetaIcon({ type }: { type: "workspace" | "repos" | "runtime" }) {
+function TopMetaIcon({ type }: { type: "workspace" | "repos" | "runtime" | "permission" | "git" | "time" }) {
   const paths = {
     workspace: ["M4 6h6l2 2h8v10H4z", "M4 6V4h7l2 2"],
     repos: ["M8 7a3 3 0 1 0 0 6a3 3 0 0 0 0-6", "M16 4a3 3 0 1 0 0 6a3 3 0 0 0 0-6", "M16 14a3 3 0 1 0 0 6a3 3 0 0 0 0-6", "M10.5 10.5l3-2", "M10.5 12.5l3 2"],
     runtime: ["M8 6l-4 6 4 6", "M16 6l4 6-4 6", "M13 5l-2 14"],
+    permission: ["M12 3l7 3v5c0 4.5-2.8 8.2-7 10-4.2-1.8-7-5.5-7-10V6z", "M9 12l2 2 4-5"],
+    git: ["M6 6h.01", "M18 6h.01", "M12 18h.01", "M6 6l6 12 6-12", "M6 6h12"],
+    time: ["M12 3a9 9 0 1 0 0 18a9 9 0 0 0 0-18", "M12 7v5l3 2"],
   }[type];
   return (
     <svg className="top-meta-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
