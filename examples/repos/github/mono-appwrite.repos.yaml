@@ -1,0 +1,7 @@
+version: 1
+repos:
+  - name: appwrite
+    git_url: https://github.com/appwrite/appwrite.git
+    ref: fa4de8e7cae4327e61c9b6530c3e6eeb81640729
+docs:
+  imports_path: ./docs/imports

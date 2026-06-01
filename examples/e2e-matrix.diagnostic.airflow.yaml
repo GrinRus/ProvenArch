@@ -1,0 +1,7 @@
+version: 1
+timeout_profile: extended-window
+profiles:
+  - id: single-git_url
+    source_kind: git_url
+    expected_repo_count: 1
+    repos_file: ./repos/github/mono-airflow.repos.yaml

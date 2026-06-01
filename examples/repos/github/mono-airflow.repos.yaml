@@ -1,0 +1,7 @@
+version: 1
+repos:
+  - name: airflow
+    git_url: https://github.com/apache/airflow.git
+    ref: 8d1c8338154c42c8a6b3fa730892261d4c08ff1a
+docs:
+  imports_path: ./docs/imports

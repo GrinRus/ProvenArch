@@ -1243,17 +1243,17 @@ class MatrixReleaseContractTest(unittest.TestCase):
 
         repo_sets = catalog.get("repo_sets")
         self.assertIsInstance(repo_sets, dict)
-        self.assertEqual(len(repo_sets), 6)
+        self.assertEqual(len(repo_sets), 11)
 
         policies = catalog.get("execution_policies")
         self.assertIsInstance(policies, dict)
 
         profiles = catalog.get("profiles")
         self.assertIsInstance(profiles, list)
-        self.assertEqual(len(profiles), 5)
+        self.assertEqual(len(profiles), 6)
 
         profile_by_slug = {item["slug"]: item for item in profiles}
-        self.assertEqual(len(profile_by_slug), 5)
+        self.assertEqual(len(profile_by_slug), 6)
 
         all_target_repo_sets: set[str] = set()
         matrix_refs: dict[str, list[str]] = {}
@@ -1381,6 +1381,19 @@ class MatrixReleaseContractTest(unittest.TestCase):
             self._load_yaml(self.repo_root / "examples" / "e2e-matrix.regres-long.yaml").get("timeout_profile"),
             "medium-window",
         )
+        for matrix_name, profile_ids in {
+            "e2e-matrix.diagnostic.temporal.yaml": ["multi-git_url"],
+            "e2e-matrix.diagnostic.backstage.yaml": ["single-git_url"],
+            "e2e-matrix.diagnostic.airflow.yaml": ["single-git_url"],
+            "e2e-matrix.diagnostic.appwrite.yaml": ["single-git_url"],
+            "e2e-matrix.diagnostic.saleor.yaml": ["multi-git_url"],
+        }.items():
+            matrix_path = self.repo_root / "examples" / matrix_name
+            self._assert_non_release_slice_shape(matrix_path, profile_ids)
+            self.assertEqual(
+                self._load_yaml(matrix_path).get("timeout_profile"),
+                "extended-window",
+            )
 
 
 if __name__ == "__main__":

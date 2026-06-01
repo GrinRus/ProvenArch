@@ -97,6 +97,38 @@ class LiveE2EPlanTest(unittest.TestCase):
             self.assertEqual(env["BATCH_PROVIDER_FILTER"], "claude-code")
             self.assertEqual(env["BATCH_FRONTEND_MODE"], "never")
 
+    def test_regres_complex_is_diagnostic_product_rotation_surface(self) -> None:
+        payload = self.build_plan(mode="regres", size="complex", providers="qwen", frontend_mode="never")
+
+        self.assertEqual(payload["selected_providers"], ["qwen-code"])
+        self.assertEqual(payload["expected_backend_runs"], 5)
+        self.assertEqual(
+            payload["target_repo_sets"],
+            [
+                "temporal-platform",
+                "backstage-portal",
+                "airflow-orchestration",
+                "appwrite-baas",
+                "saleor-commerce",
+            ],
+        )
+        matrix_files = [command["matrix_file"] for command in payload["commands"]]
+        self.assertEqual(
+            matrix_files,
+            [
+                "examples/e2e-matrix.diagnostic.temporal.yaml",
+                "examples/e2e-matrix.diagnostic.backstage.yaml",
+                "examples/e2e-matrix.diagnostic.airflow.yaml",
+                "examples/e2e-matrix.diagnostic.appwrite.yaml",
+                "examples/e2e-matrix.diagnostic.saleor.yaml",
+            ],
+        )
+        for command in payload["commands"]:
+            env = command["env"]
+            self.assertEqual(env["E2E_MATRIX_RELEASE_MODE"], "0")
+            self.assertEqual(env["BATCH_PROVIDER_FILTER"], "qwen-code")
+            self.assertEqual(env["BATCH_FRONTEND_MODE"], "never")
+
     def test_release_selector_rejects_provider_subset(self) -> None:
         result = self.run_plan(
             "--mode",
@@ -133,6 +165,7 @@ class LiveE2EPlanTest(unittest.TestCase):
     def test_regres_and_release_plans_declare_existing_quality_gate(self) -> None:
         for args in (
             ("--mode", "regres", "--size", "fast", "--providers", "codex"),
+            ("--mode", "regres", "--size", "complex", "--providers", "qwen"),
             ("--mode", "release", "--size", "full"),
         ):
             payload = self.build_plan(mode=args[1], size=args[3], providers=args[5] if len(args) > 5 else "")

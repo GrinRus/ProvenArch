@@ -1,0 +1,7 @@
+version: 1
+repos:
+  - name: backstage
+    git_url: https://github.com/backstage/backstage.git
+    ref: 1f709a386b8ce0ab9a994f64634fde4ead00f78e
+docs:
+  imports_path: ./docs/imports

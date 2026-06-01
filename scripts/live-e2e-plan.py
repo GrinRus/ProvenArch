@@ -28,7 +28,7 @@ def parse_args() -> argparse.Namespace:
         description="Print direct scripts/full-run-batch-matrix.sh commands for live E2E selectors.",
     )
     parser.add_argument("--mode", required=True, choices=("smoke", "regres", "release"))
-    parser.add_argument("--size", required=True, choices=("tiny", "fast", "long", "full"))
+    parser.add_argument("--size", required=True, choices=("tiny", "fast", "long", "full", "complex"))
     parser.add_argument(
         "--providers",
         default="",

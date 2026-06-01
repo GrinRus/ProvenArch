@@ -7,7 +7,7 @@ Layering: live-e2e skill -> local trusted-machine operator procedure -> direct p
 Canonical source of truth для live profile taxonomy:
 - `examples/e2e-profile-catalog.yaml`
 - runnable slice-файлы `examples/e2e-matrix.regres-*.yaml` и `examples/e2e-matrix.release-*.yaml`
-- diagnostic selector slice-файлы `examples/e2e-matrix.smoke-tiny.bank.yaml` и `examples/e2e-matrix.diagnostic.sentry.yaml`
+- diagnostic selector slice-файлы `examples/e2e-matrix.smoke-tiny.bank.yaml`, `examples/e2e-matrix.diagnostic.sentry.yaml` и `examples/e2e-matrix.diagnostic.*.yaml`
 
 ## Black-box evaluator protocol
 
@@ -47,7 +47,7 @@ Canonical flow:
 
 ## 0) Canonical profile catalog
 
-Пять high-level профилей задаются как composite presets поверх одного или нескольких прямых вызовов `scripts/full-run-batch-matrix.sh`.
+Пять canonical high-level профилей задаются как composite presets поверх одного или нескольких прямых вызовов `scripts/full-run-batch-matrix.sh`; дополнительные `diagnostic` selectors не расширяют release taxonomy.
 
 | Profile | Mode | Constituent matrix files | Target repo sets | Shard bucket | Backend runs | Rough time band |
 |---|---|---|---|---|---:|---|
@@ -78,6 +78,7 @@ Release verdict для readiness берётся только из `reports/relea
 python3 scripts/live-e2e-plan.py --mode smoke --size tiny --providers codex --format shell
 python3 scripts/live-e2e-plan.py --mode regres --size fast --providers codex --format shell
 python3 scripts/live-e2e-plan.py --mode regres --size full --providers claude --frontend-mode never --format shell
+python3 scripts/live-e2e-plan.py --mode regres --size complex --providers qwen --frontend-mode never --format shell
 python3 scripts/live-e2e-plan.py --mode release --size full --format shell
 ```
 
@@ -94,6 +95,7 @@ Flexible selectors:
 | `regres fast` | diagnostic/regression | `bank-of-anthos`, `openedx`, `openstack` | selected provider(s) | implicit baseline | `3 × providers × RUN_COUNT` |
 | `regres long` | diagnostic/regression | `posthog`, `ftgo` | selected provider(s) | implicit baseline | `2 × providers × RUN_COUNT` |
 | `regres full` | diagnostic/regression | all 6 canonical repo sets, including Sentry | selected provider(s) | implicit baseline | `6 × providers × RUN_COUNT` |
+| `regres complex` | diagnostic/regression | Temporal, Backstage, Airflow, Appwrite, Saleor | selected provider(s) | implicit baseline | `5 × providers × RUN_COUNT` |
 | `release fast|long|full` | release | canonical release slices | all three providers only | `baseline + parallel-default` | unchanged |
 
 Artifact-quality policy для generated regress/release команд остаётся штатной:
@@ -108,7 +110,8 @@ Artifact-quality policy для generated regress/release команд остаё
 - Canonical `regres*` профили по умолчанию идут как `qwen-only` non-release baseline с implicit `baseline`; flexible diagnostic selectors могут явно выбрать provider set через generator/`BATCH_PROVIDER_FILTER`.
 - `release*` профили идут как three-provider run (`qwen + claude + codex`) с explicit `baseline + parallel-default`.
 - Дополнительная ручная debug-фаза на `claude` или `codex` остаётся вне regression profile definition и запускается через `BATCH_PROVIDER_FILTER=<provider>`.
-- `smoke tiny` и `regres full` являются generated diagnostic selectors, а не новыми release verdict профилями.
+- `smoke tiny`, `regres full` и `regres complex` являются generated diagnostic selectors, а не новыми release verdict профилями.
+- Для diagnostic/non-release прогонов желательно ротировать продукты и feature focus: не считать успешность live E2E доказанной только повтором одного привычного продукта или одной фичи. В operator assessment фиксировать выбранный продуктовый домен и feature areas, например `workflow history`, `plugin catalog`, `scheduler/executor`, `functions/messaging`, `checkout/order lifecycle`.
 - Gate покрывает backend `3 providers × RUN_COUNT=1` на каждый `profile+sweep` + frontend `init-inspect` для release slices.
 - Product API/schema contracts не меняются.
 - Gate режим: manual pre-release, не required CI merge gate.
@@ -316,6 +319,11 @@ git -C /real/local/path/posthog checkout --detach 14d29a548d63665d60b506cf13bd5c
 - `examples/e2e-matrix.regres-fast.openstack.yaml`
 - `examples/e2e-matrix.regres-long.yaml`
 - `examples/e2e-matrix.diagnostic.sentry.yaml`
+- `examples/e2e-matrix.diagnostic.temporal.yaml`
+- `examples/e2e-matrix.diagnostic.backstage.yaml`
+- `examples/e2e-matrix.diagnostic.airflow.yaml`
+- `examples/e2e-matrix.diagnostic.appwrite.yaml`
+- `examples/e2e-matrix.diagnostic.saleor.yaml`
 - `examples/e2e-matrix.release-fast.yaml`
 - `examples/e2e-matrix.release-long.yaml`
 - `examples/e2e-matrix.release-full.ftgo-sentry.yaml`
@@ -330,6 +338,11 @@ Pinned presets (commit SHA) добавлены в:
 - `examples/repos/github/multi-sentry-ecosystem.repos.yaml`
 - `examples/repos/github/multi-openstack-ecosystem.repos.yaml`
 - `examples/repos/github/multi-openedx-ecosystem.repos.yaml`
+- `examples/repos/github/multi-temporal-platform.repos.yaml`
+- `examples/repos/github/multi-saleor-commerce.repos.yaml`
+- `examples/repos/github/mono-backstage.repos.yaml`
+- `examples/repos/github/mono-airflow.repos.yaml`
+- `examples/repos/github/mono-appwrite.repos.yaml`
 
 Monorepo выбор (single):
 - `microservices-patterns/ftgo-application` (`master`, pinned SHA в preset)
@@ -340,6 +353,18 @@ Multi-repo выбор (multi):
 - Sentry ecosystem: `getsentry/sentry`, `getsentry/self-hosted`, `getsentry/snuba`, `getsentry/relay`, `getsentry/symbolicator`
 - OpenStack ecosystem: `openstack/openstack`, `openstack/nova`, `openstack/neutron`, `openstack/cinder`, `openstack/keystone`
 - Open edX ecosystem: `openedx/openedx-platform`, `openedx/frontend-platform`, `openedx/course-discovery`, `openedx/credentials`, `openedx/devstack`
+
+Diagnostic complex выбор (non-release only):
+- Temporal platform: `temporalio/temporal`, `temporalio/ui`, `temporalio/sdk-go`; feature focus rotation: workflow history/matching, persistence/task queues, UI/SDK boundaries.
+- Backstage portal: `backstage/backstage`; feature focus rotation: service catalog, plugin packages, backend/frontend app composition.
+- Airflow orchestration: `apache/airflow`; feature focus rotation: scheduler/executor, DAG/provider/plugin contracts, Helm/deployment surfaces.
+- Appwrite BaaS: `appwrite/appwrite`; feature focus rotation: auth/database/storage, functions/messaging workers, realtime/API gateway.
+- Saleor commerce: `saleor/saleor`, `saleor/saleor-dashboard`, `saleor/storefront`; feature focus rotation: checkout/orders, GraphQL API/dashboard boundaries, storefront integration.
+
+Rotation policy для diagnostic complex:
+- при повторных trusted-machine прогонах по возможности выбирать другой product domain и другую feature area, а не только повторять последний successful target;
+- matrix id или operator assessment должны фиксировать выбранный focus, чтобы success history показывала разнообразие продуктов/фич;
+- первые successful прогоны complex repo sets используются для измерения shard counts и stability; они не повышают release readiness без отдельного owner decision.
 
 Примечание по Open edX:
 - в preset используется canonical `git_url` для devstack: `openedx-unsupported/devstack` (репозиторий `openedx/devstack` редиректит туда).
@@ -429,11 +454,14 @@ BATCH_PROVIDER_FILTER=claude-code
 ```bash
 python3 scripts/live-e2e-plan.py --mode regres --size fast --providers codex --format shell
 python3 scripts/live-e2e-plan.py --mode regres --size full --providers claude --frontend-mode never --format shell
+python3 scripts/live-e2e-plan.py --mode regres --size complex --providers qwen --frontend-mode never --format shell
 ```
 
 `regres full` добавляет diagnostic Sentry baseline slice и покрывает все 6 canonical repo sets, но остаётся non-release.
 
-3. Preflight ACP quality для release slices:
+`regres complex` добавляет diagnostic-only продукты/фичи. Проверить напечатанные команды и запустить нужные invocation напрямую. Для targeted rotation можно выполнить не все пять commands, а только выбранный product/feature focus; это остаётся non-release diagnostic и не заменяет canonical `release*`.
+
+4. Preflight ACP quality для release slices:
 
 ```bash
 make contracts test lint build
@@ -441,7 +469,7 @@ make contracts test lint build
 ./scripts/run-npm.sh exec --prefix ui playwright install chromium
 ```
 
-4. Проверка path targets (exist + pinned SHA):
+5. Проверка path targets (exist + pinned SHA):
 
 ```bash
 python3 - <<'PY'
@@ -503,7 +531,7 @@ PY
 - не править canonical matrix/curated preset под текущий хост;
 - остановить release gate как operational blocker и перенести прогон на подходящую trusted машину.
 
-5. `release fast` (small repos, 12 backend runs total):
+6. `release fast` (small repos, 12 backend runs total):
 
 ```bash
 MATRIX_ID=release-fast-$(date -u +%Y%m%dT%H%M%SZ) \
@@ -517,7 +545,7 @@ ACP_APPLY_TIMEOUTS_VIA_API=1 \
 
 `examples/e2e-matrix.release-fast.yaml` несёт `timeout_profile=short-window`.
 
-6. `release long` (medium repos, 12 backend runs total):
+7. `release long` (medium repos, 12 backend runs total):
 
 ```bash
 MATRIX_ID=release-long-$(date -u +%Y%m%dT%H%M%SZ) \
@@ -531,7 +559,7 @@ ACP_APPLY_TIMEOUTS_VIA_API=1 \
 
 `examples/e2e-matrix.release-long.yaml` несёт `timeout_profile=medium-window`.
 
-7. `release full` (all canonical repo sets, 36 backend runs total):
+8. `release full` (all canonical repo sets, 36 backend runs total):
 
 ```bash
 MATRIX_ID=release-full-fast-$(date -u +%Y%m%dT%H%M%SZ) \

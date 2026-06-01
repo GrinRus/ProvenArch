@@ -1,0 +1,13 @@
+version: 1
+repos:
+  - name: temporal
+    git_url: https://github.com/temporalio/temporal.git
+    ref: 42c26fc2376d867181613eec3fc39dccca4d8fac
+  - name: temporal-ui
+    git_url: https://github.com/temporalio/ui.git
+    ref: f7be7b6c00f5873bf140965aad3ce0c6e384f48b
+  - name: temporal-sdk-go
+    git_url: https://github.com/temporalio/sdk-go.git
+    ref: f2fb1ce1200a9373b21e32c0c4937d64d9c05e17
+docs:
+  imports_path: ./docs/imports

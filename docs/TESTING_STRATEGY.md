@@ -282,8 +282,9 @@ Release workflow hardening:
 - Scripts produce machine evidence and verifier-backed verdicts only. Operator/SWE-agent produces the separate black-box assessment over public evidence; harness no longer generates `blackbox_e2e_steps_*`.
 - `scripts/live-e2e-plan.py` — catalog-driven command generator for direct matrix harness invocations:
   - does not execute the harness and does not replace `scripts/full-run-batch-matrix.sh`
-  - supports flexible selectors `smoke tiny`, `regres fast|long|full`, `release fast|long|full`
+  - supports flexible selectors `smoke tiny`, `regres fast|long|full|complex`, `release fast|long|full`
   - `smoke tiny` is `1 repo × 1 run × 1 provider` for fastest trusted-machine signal
+  - `regres complex` is diagnostic-only product/feature rotation over Temporal, Backstage, Airflow, Appwrite and Saleor; it is not a release readiness signal
   - generated `regres`/`release` commands rely on the existing quality path: `reports/taskruns/<run_id>-quality.json`, `quality_report_<batch-id>.md`, `quality_gates_failed=0`, no `artifact_quality:*`
 - `scripts/full-run-batch.sh` — canonical live batch + frontend live e2e:
   - canonical input: `TARGET_REPOS_FILE`
@@ -300,7 +301,8 @@ Release workflow hardening:
   - canonical input: `E2E_MATRIX_FILE`
   - approved profile ids: `single-path`, `single-git_url`, `multi-path`, `multi-git_url`
   - non-release slices: `examples/e2e-matrix.regres-*.yaml`
-  - diagnostic slices for generated selectors: `examples/e2e-matrix.smoke-tiny.bank.yaml`, `examples/e2e-matrix.diagnostic.sentry.yaml`
+  - diagnostic slices for generated selectors: `examples/e2e-matrix.smoke-tiny.bank.yaml`, `examples/e2e-matrix.diagnostic.sentry.yaml`, `examples/e2e-matrix.diagnostic.temporal.yaml`, `examples/e2e-matrix.diagnostic.backstage.yaml`, `examples/e2e-matrix.diagnostic.airflow.yaml`, `examples/e2e-matrix.diagnostic.appwrite.yaml`, `examples/e2e-matrix.diagnostic.saleor.yaml`
+  - diagnostic live evidence should rotate product domains and feature areas between runs where feasible, so success history is not based on a single product or one repeated feature path
   - release-specific slices, `baseline` + `parallel-default`, strict blockers и release verdict policy живут только в `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
   - matrix invariant: для одного `profile_id` shard-plan должен совпадать между `baseline` и `parallel-default`
   - для `source_kind=git_url` refs должны быть pinned

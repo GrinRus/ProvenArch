@@ -66,6 +66,76 @@ repo_sets:
     repos_file: ./repos/github/multi-sentry-ecosystem.repos.yaml
     shard_count: 104
     shard_bucket: full
+  temporal-platform:
+    concrete_profile_id: multi-git_url
+    source_kind: git_url
+    expected_repo_count: 3
+    repos_file: ./repos/github/multi-temporal-platform.repos.yaml
+    shard_count: null
+    shard_bucket: unmeasured
+    diagnostic_only: true
+    diagnostic_focus:
+      product: Durable workflow orchestration platform
+      feature_areas:
+        - workflow history and matching services
+        - persistence and task queues
+        - UI and SDK integration boundaries
+  backstage-portal:
+    concrete_profile_id: single-git_url
+    source_kind: git_url
+    expected_repo_count: 1
+    repos_file: ./repos/github/mono-backstage.repos.yaml
+    shard_count: null
+    shard_bucket: unmeasured
+    diagnostic_only: true
+    diagnostic_focus:
+      product: Developer portal and plugin platform
+      feature_areas:
+        - service catalog
+        - plugin package boundaries
+        - backend/frontend app composition
+  airflow-orchestration:
+    concrete_profile_id: single-git_url
+    source_kind: git_url
+    expected_repo_count: 1
+    repos_file: ./repos/github/mono-airflow.repos.yaml
+    shard_count: null
+    shard_bucket: unmeasured
+    diagnostic_only: true
+    diagnostic_focus:
+      product: Workflow scheduler and data orchestration platform
+      feature_areas:
+        - scheduler and executor model
+        - DAG/provider/plugin contracts
+        - deployment and Helm surfaces
+  appwrite-baas:
+    concrete_profile_id: single-git_url
+    source_kind: git_url
+    expected_repo_count: 1
+    repos_file: ./repos/github/mono-appwrite.repos.yaml
+    shard_count: null
+    shard_bucket: unmeasured
+    diagnostic_only: true
+    diagnostic_focus:
+      product: Backend-as-a-service platform
+      feature_areas:
+        - auth, databases and storage
+        - functions and messaging workers
+        - realtime/API gateway boundaries
+  saleor-commerce:
+    concrete_profile_id: multi-git_url
+    source_kind: git_url
+    expected_repo_count: 3
+    repos_file: ./repos/github/multi-saleor-commerce.repos.yaml
+    shard_count: null
+    shard_bucket: unmeasured
+    diagnostic_only: true
+    diagnostic_focus:
+      product: Headless commerce platform
+      feature_areas:
+        - checkout and order lifecycle
+        - GraphQL API and dashboard boundaries
+        - storefront integration
 
 execution_policies:
   regres-default:
@@ -187,6 +257,39 @@ selectors:
         matrix_id_prefix: regres-full-posthog-ftgo
       - matrix_file: ./e2e-matrix.diagnostic.sentry.yaml
         matrix_id_prefix: regres-full-sentry
+  - slug: regres-complex
+    mode: regres
+    size: complex
+    description: Diagnostic sweep over more complex product and feature surfaces; rotate targets between runs.
+    release_mode: false
+    diagnostic: true
+    provider_policy: one-or-more
+    default_providers:
+      - qwen-code
+    default_run_count: 1
+    default_run_selection: all
+    default_frontend_mode: never
+    quality_required: true
+    target_repo_sets:
+      - temporal-platform
+      - backstage-portal
+      - airflow-orchestration
+      - appwrite-baas
+      - saleor-commerce
+    feature_rotation_guidance:
+      recommended: true
+      note: Pick different products and feature areas across diagnostic runs; do not use this selector as a fixed release readiness signal.
+    matrix_invocations:
+      - matrix_file: ./e2e-matrix.diagnostic.temporal.yaml
+        matrix_id_prefix: regres-complex-temporal
+      - matrix_file: ./e2e-matrix.diagnostic.backstage.yaml
+        matrix_id_prefix: regres-complex-backstage
+      - matrix_file: ./e2e-matrix.diagnostic.airflow.yaml
+        matrix_id_prefix: regres-complex-airflow
+      - matrix_file: ./e2e-matrix.diagnostic.appwrite.yaml
+        matrix_id_prefix: regres-complex-appwrite
+      - matrix_file: ./e2e-matrix.diagnostic.saleor.yaml
+        matrix_id_prefix: regres-complex-saleor
   - slug: release-fast
     mode: release
     size: fast
@@ -283,6 +386,29 @@ profiles:
       - ftgo-application
     matrix_files:
       - ./e2e-matrix.regres-long.yaml
+  - slug: regres-complex
+    mode: regres
+    policy: regres-default
+    shard_bucket: unmeasured
+    timeout_profile: extended-window
+    expected_backend_runs: 5
+    rough_duration_band: extended-window
+    diagnostic_only: true
+    target_repo_sets:
+      - temporal-platform
+      - backstage-portal
+      - airflow-orchestration
+      - appwrite-baas
+      - saleor-commerce
+    matrix_files:
+      - ./e2e-matrix.diagnostic.temporal.yaml
+      - ./e2e-matrix.diagnostic.backstage.yaml
+      - ./e2e-matrix.diagnostic.airflow.yaml
+      - ./e2e-matrix.diagnostic.appwrite.yaml
+      - ./e2e-matrix.diagnostic.saleor.yaml
+    notes:
+      - Diagnostic-only product and feature rotation surface; not a release readiness profile.
+      - First trusted-machine runs should record measured shard counts before any promotion into canonical release coverage.
   - slug: release-fast
     mode: release
     policy: release-default
