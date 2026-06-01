@@ -916,6 +916,44 @@ describe("App", () => {
     expect(within(artifactList).getByRole("button", { name: /reports\/changelog\/2026-05-31-run-1\.md/i })).toHaveClass("is-selected");
   });
 
+  it("restores the Review evidence artifact when returning from Proposals", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runStarted: true,
+        runArtifacts: {
+          "run-1": {
+            run_id: "run-1",
+            artifacts: [
+              { path: "reports/as-is/overview.md", kind: "report", label: "As-is overview" },
+              { path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" },
+              { path: "proposals/proposal-payments/proposal.md", kind: "proposal", label: "Payments proposal" },
+            ],
+          },
+        },
+        artifactText: {
+          "reports/as-is/overview.md": "# System overview\nReviewable evidence body.\n",
+          "reports/coverage/open-questions.md": "",
+          "reports/coverage/summary.md": "# Coverage\n",
+          "proposals/proposal-payments/proposal.md": "# Proposal\nProposal body.\n",
+        },
+      }),
+    );
+
+    render(<App />);
+
+    await screen.findByTestId("review-panel");
+    await waitFor(() => expect(screen.getByTestId("run-artifact-selected-path")).toHaveTextContent("reports/as-is/overview.md"));
+
+    fireEvent.click(screen.getByTestId("stage-proposals"));
+    await waitFor(() => expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("# Proposal"));
+
+    fireEvent.click(screen.getByTestId("stage-review"));
+    await waitFor(() => expect(screen.getByTestId("run-artifact-selected-path")).toHaveTextContent("reports/as-is/overview.md"));
+    expect(screen.getByTestId("run-artifact-content")).toHaveTextContent("# System overview");
+    expect(within(screen.getByTestId("review-artifact-explorer")).getByRole("button", { name: /reports\/as-is\/overview\.md/i })).toHaveClass("is-selected");
+  });
+
   it("renders the Publish gate with folder summary, preview tabs, commit plan, and Git actions", async () => {
     const fetchMock = createFetchMock({
       runStarted: true,

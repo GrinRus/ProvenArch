@@ -72,6 +72,27 @@ code {
   gap: 0;
 }
 
+@media (min-width: 901px) {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    overflow: hidden;
+  }
+
+  .console-shell {
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .console-grid {
+    overflow: hidden;
+  }
+}
+
 .top-status-bar {
   min-height: 3.1rem;
   display: grid;
@@ -231,6 +252,9 @@ code {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
   color: #ecfeff;
 }
 
@@ -413,12 +437,14 @@ code {
 
 .work-area {
   min-width: 0;
+  min-height: 0;
   padding: 0.8rem;
   overflow: auto;
 }
 
 .right-inspector {
   min-width: 0;
+  min-height: 0;
   border-left: 1px solid var(--line);
   background: #fbfcfd;
   padding: 0.75rem;
@@ -2223,6 +2249,27 @@ code {
   }
 }
 
+@media (min-width: 901px) and (max-width: 1180px) {
+  .console-grid {
+    grid-template-columns: 13.5rem minmax(0, 1fr) 18rem;
+  }
+
+  .console-grid:has(.stage-rail.is-collapsed) {
+    grid-template-columns: 4.25rem minmax(0, 1fr) 18rem;
+  }
+
+  .right-inspector {
+    grid-column: auto;
+    border-left: 1px solid var(--line);
+    border-top: 0;
+    display: block;
+  }
+
+  .right-inspector .inspector-section + .inspector-section {
+    margin-top: 0.62rem;
+  }
+}
+
 @media (max-width: 900px) {
   .top-status-bar {
     position: static;
@@ -2248,6 +2295,7 @@ code {
     display: flex;
     flex-direction: row;
     overflow-x: auto;
+    overflow-y: hidden;
     gap: 0.35rem;
     padding: 0.55rem 0.65rem;
     scroll-snap-type: x proximity;

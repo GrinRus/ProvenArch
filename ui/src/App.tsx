@@ -300,6 +300,10 @@ export default function App() {
 
   function handleStageChange(stage: StageId) {
     userSelectedStageRef.current = true;
+    if (stage === "review") {
+      enterReviewStage();
+      return;
+    }
     setActiveStage(stage);
   }
 
@@ -312,6 +316,21 @@ export default function App() {
     () => nonDiagramArtifacts.filter((artifact) => artifact.path.startsWith("proposals/") || artifact.path.startsWith("reports/changelog/")),
     [nonDiagramArtifacts],
   );
+  const preferredReviewArtifactPath = useMemo(() => {
+    const preferredArtifact =
+      nonDiagramArtifacts.find((artifact) => artifact.path === "reports/as-is/overview.md") ??
+      nonDiagramArtifacts.find((artifact) => artifact.path.startsWith("reports/") && !artifact.path.startsWith("reports/changelog/")) ??
+      nonDiagramArtifacts.find((artifact) => artifact.path.startsWith("model/")) ??
+      diagramArtifacts[0];
+    return preferredArtifact?.path ?? "";
+  }, [diagramArtifacts, nonDiagramArtifacts]);
+
+  function enterReviewStage() {
+    setActiveStage("review");
+    if (preferredReviewArtifactPath && isProposalReviewArtifact(selectedArtifact) && selectedArtifact !== preferredReviewArtifactPath) {
+      void handleOpenArtifact(preferredReviewArtifactPath);
+    }
+  }
 
   useEffect(() => {
     if (userSelectedStageRef.current || autoOpenedStageRef.current) {
@@ -617,7 +636,7 @@ export default function App() {
         }
         break;
       case "review":
-        setActiveStage("review");
+        enterReviewStage();
         break;
       case "proposals":
         setActiveStage("proposals");
@@ -836,6 +855,10 @@ export default function App() {
       {error ? <p className="status err">Error: {error}</p> : null}
     </AppShell>
   );
+}
+
+function isProposalReviewArtifact(path: string): boolean {
+  return path.startsWith("proposals/") || path.startsWith("reports/changelog/");
 }
 
 function deriveNextAction(

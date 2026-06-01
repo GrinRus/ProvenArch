@@ -689,6 +689,35 @@ Progress log:
 - 2026-05-31: Started 16T after rendered audit found Source/Charter/Proposals/Ask next actions were globally overridden by review findings, Proposals opened with an empty preview despite available proposal artifacts, and Review grouped proposal artifacts before evidence groups.
 - 2026-05-31: Completed 16T: right-inspector next action is stage-contextual while blockers remain visible, Review explorer is evidence-first with visible selected artifact state, and Proposals auto-loads the first proposal artifact for immediate review. Verified with focused UI tests, rendered desktop/mobile QA, `git diff --check` and full DoD. Also restored local Python 3.9 compatibility for the matrix release contract test and matrix harness type hints so DoD imports and scripted matrix paths run cleanly, with no release behavior change. No backend/API/schema/runtime/live-shell changes.
 
+### Slice ExecPlan - 16U Desktop shell and stage artifact-context audit
+
+Status: done.
+
+Goals:
+- [x] Re-audit all saved `docs/assets/ui-console-v2/*.png` target references against rendered desktop/mobile Console V2 screens after 16T.
+- [x] Keep the shared activity drawer visible in the desktop first viewport, matching the approved bottom ops-console drawer pattern.
+- [x] Prevent proposal/changelog artifact selection from leaking into the Review Evidence first screen when operators return from Proposals, Ask or Publish.
+
+Non-goals:
+- [x] Do not add backend API fields, schemas, runtime contracts, CLI flags, workspace contract changes, Git diff APIs, approval persistence, live E2E scenarios, reason taxonomy or provider-live release gates.
+- [x] Do not convert saved PNG references into runtime assets or rewrite the shell architecture.
+- [x] Do not remove access to proposal/changelog artifacts from the Review explorer; only restore stage-appropriate default context on stage entry.
+
+Implementation notes:
+- Desktop shell should behave like a fixed-height operator console: top health strip, rail/workbench/inspector and bottom activity drawer all visible, with workbench/inspector scrolling internally.
+- Mobile should remain page-scroll friendly and must not introduce horizontal overflow.
+- Review stage entry from another stage should re-open the preferred evidence artifact when the selected artifact belongs to Proposals/Changelog; user selection inside Review remains available afterward.
+
+Validation:
+- [x] Rendered desktop/mobile UI QA against the local fake server for Source, Readiness, Charter, Analysis, Review Evidence, Review Domain Map, Proposals, Ask, Publish and shared shell.
+- [x] Focused UI tests for returning to Review from Proposals after proposal auto-preview.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-06-01: Started 16U after rendered reference audit found the desktop activity drawer below the first viewport and stale proposal artifact context leaking into Review Evidence after cross-stage navigation.
+- 2026-06-01: Completed 16U: wide desktop now behaves as a fixed-height operator console with rail, workbench, inspector and activity drawer visible in the first viewport; 901-1180px keeps the same shell without clipping the inspector or rail; Review stage entry restores evidence-first artifact context after Proposals/Changelog navigation. Verified against all saved target references with rendered desktop/mobile QA, focused UI tests, `git diff --check` and full DoD. No backend/API/schema/runtime/live-shell changes.
+
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes
