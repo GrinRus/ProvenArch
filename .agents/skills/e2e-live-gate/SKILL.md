@@ -17,6 +17,11 @@ description: Используй для trusted-machine pre-release live E2E gate
    - `examples/e2e-matrix.regres-fast.openstack.yaml`
    - `examples/e2e-matrix.regres-long.yaml`
    - `examples/e2e-matrix.diagnostic.sentry.yaml` (diagnostic selector only)
+   - `examples/e2e-matrix.diagnostic.temporal.yaml` (diagnostic selector only)
+   - `examples/e2e-matrix.diagnostic.backstage.yaml` (diagnostic selector only)
+   - `examples/e2e-matrix.diagnostic.airflow.yaml` (diagnostic selector only)
+   - `examples/e2e-matrix.diagnostic.appwrite.yaml` (diagnostic selector only)
+   - `examples/e2e-matrix.diagnostic.saleor.yaml` (diagnostic selector only)
    - `examples/e2e-matrix.release-fast.yaml`
    - `examples/e2e-matrix.release-long.yaml`
    - `examples/e2e-matrix.release-full.ftgo-sentry.yaml`
@@ -101,6 +106,7 @@ PY
 - `regres fast`: qwen-only default, provider-selectable for generated diagnostic runs, implicit baseline, composite из `bank-of-anthos + openedx` и отдельного `openstack` slice, `3 × providers × RUN_COUNT` backend runs total.
 - `regres long`: qwen-only default, provider-selectable for generated diagnostic runs, implicit baseline, `posthog + ftgo`, `2 × providers × RUN_COUNT` backend runs total.
 - `regres full`: diagnostic-only provider-selectable baseline over all 6 canonical repo sets, including Sentry, `6 × providers × RUN_COUNT` backend runs total.
+- `regres complex`: diagnostic-only provider-selectable baseline over product/feature rotation targets (Temporal, Backstage, Airflow, Appwrite, Saleor), `5 × providers × RUN_COUNT` backend runs total; rotate products and feature areas between runs where feasible and do not treat this as release readiness.
 - `release fast`: three-provider, explicit `baseline + parallel-default`, `bank-of-anthos + openedx`, `12` backend runs total.
 - `release long`: three-provider, explicit `baseline + parallel-default`, `posthog + openstack`, `12` backend runs total.
 - `release full`: composite из `release fast` + `release long` + `ftgo + sentry-ecosystem`, `36` backend runs total.

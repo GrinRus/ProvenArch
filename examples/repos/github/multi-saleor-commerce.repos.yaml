@@ -1,0 +1,13 @@
+version: 1
+repos:
+  - name: saleor
+    git_url: https://github.com/saleor/saleor.git
+    ref: 11756ee6b65a255869f551e838edec1742b1c2ce
+  - name: saleor-dashboard
+    git_url: https://github.com/saleor/saleor-dashboard.git
+    ref: 3f7e21db9af16ec2e3acc2ca1d3510d9f3f128d1
+  - name: saleor-storefront
+    git_url: https://github.com/saleor/storefront.git
+    ref: 221be2247f5b1a8ef94f007639fe83f53a6384b8
+docs:
+  imports_path: ./docs/imports
