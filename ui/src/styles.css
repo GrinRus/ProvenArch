@@ -722,6 +722,12 @@ code {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.section-heading-row > * {
+  min-width: 0;
 }
 
 .panel button.inline-danger {
@@ -2194,6 +2200,27 @@ code {
   max-height: 220px;
 }
 
+@media (min-width: 1181px) and (max-width: 1480px) {
+  .review-workbench,
+  .proposals-review-room,
+  .qa-workbench,
+  .publish-review-room {
+    grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.2fr);
+  }
+
+  .review-intel,
+  .proposal-quality-panel,
+  .qa-side-column,
+  .publish-side-column {
+    grid-column: 1 / -1;
+  }
+
+  .qa-side-column,
+  .publish-side-column {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 1180px) {
   .console-grid {
     grid-template-columns: 13.5rem minmax(0, 1fr);
@@ -2267,6 +2294,39 @@ code {
 
   .right-inspector .inspector-section + .inspector-section {
     margin-top: 0.62rem;
+  }
+}
+
+@media (min-width: 901px) and (max-width: 1100px) {
+  .repo-field-grid,
+  .workspace-source-section,
+  .columns.compact,
+  .review-workbench,
+  .review-domain-map-placeholder,
+  .review-domain-map,
+  .proposals-review-room,
+  .qa-workbench,
+  .qa-side-column,
+  .publish-review-room,
+  .publish-side-column {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .readiness-card-grid,
+  .runtime-summary-grid,
+  .charter-summary-grid,
+  .charter-workbench-grid,
+  .analysis-progress-grid,
+  .analysis-timeline,
+  .domain-map-summary-grid {
+    grid-template-columns: repeat(auto-fit, minmax(11.5rem, 1fr));
+  }
+
+  .review-intel,
+  .proposal-quality-panel,
+  .qa-side-column,
+  .publish-side-column {
+    grid-column: auto;
   }
 }
 

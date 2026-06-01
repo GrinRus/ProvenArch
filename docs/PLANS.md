@@ -718,6 +718,35 @@ Progress log:
 - 2026-06-01: Started 16U after rendered reference audit found the desktop activity drawer below the first viewport and stale proposal artifact context leaking into Review Evidence after cross-stage navigation.
 - 2026-06-01: Completed 16U: wide desktop now behaves as a fixed-height operator console with rail, workbench, inspector and activity drawer visible in the first viewport; 901-1180px keeps the same shell without clipping the inspector or rail; Review stage entry restores evidence-first artifact context after Proposals/Changelog navigation. Verified against all saved target references with rendered desktop/mobile QA, focused UI tests, `git diff --check` and full DoD. No backend/API/schema/runtime/live-shell changes.
 
+### Slice ExecPlan - 16V Narrow desktop workbench overflow audit
+
+Status: done.
+
+Goals:
+- [x] Re-audit current Console V2 against `docs/BACKLOG.md` Epic 16, `docs/UI_CONSOLE_V2_DESIGN.md` and all saved `docs/assets/ui-console-v2/*.png` references after 16U.
+- [x] Fix confirmed narrow desktop UI overflow where the fixed three-column shell leaves the central workbench too narrow for Review/Proposals/Publish stage grids.
+- [x] Preserve wide desktop first-viewport shell behavior and mobile page-scroll behavior.
+
+Non-goals:
+- [x] Do not add backend API fields, schemas, runtime contracts, CLI flags, workspace contract changes, Git diff APIs, approval persistence, live E2E scenarios, reason taxonomy or provider-live release gates.
+- [x] Do not convert saved PNG references into runtime assets or rewrite the shell architecture.
+- [x] Do not hide operator-facing controls or restore hidden compatibility DOM.
+
+Implementation notes:
+- Keep the shared rail, inspector and activity drawer visible in the fixed desktop shell.
+- At narrow desktop widths, stage-specific workbench grids should collapse inside the central work area before content clips or creates confusing horizontal work-area scroll.
+- Shared section heading rows should wrap controls instead of forcing action buttons outside their card.
+
+Validation:
+- [x] Rendered desktop/mobile UI QA against the local fake server for all 9 target screens plus narrow desktop breakpoints.
+- [x] Focused UI/type tests for changed frontend behavior where applicable.
+- [x] `git diff --check`.
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+Progress log:
+- 2026-06-01: Started 16V after rendered breakpoint audit found Review evidence controls clipping and central work-area horizontal overflow at 901px while the shared shell itself remained visible.
+- 2026-06-01: Completed 16V: stage workbench grids now adapt before fixed desktop shells get too narrow, shared heading rows wrap controls, and Source/Readiness/Charter/Analysis/Review/Proposals/Ask/Publish render without document or central work-area horizontal overflow at 1536px, 1440px, 1366px, 1180px, 1100px, 1024px and the 901px desktop boundary. Mobile/tablet page-scroll behavior remains unchanged below 901px, and no backend/API/schema/runtime/live E2E contract changed.
+
 ### Files expected to change
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes
