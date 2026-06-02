@@ -153,6 +153,83 @@ export type RunLogsResponse = {
   eof: boolean;
 };
 
+export type RunReviewStep = {
+  step_id: string;
+  key: string;
+  label: string;
+  state: "done" | "active" | "failed" | "pending";
+  provider?: string;
+  artifact_count: number;
+  artifact_paths: string[];
+  taskrun_paths: string[];
+  warnings_count: number;
+  errors_count: number;
+  last_message?: string;
+};
+
+export type RunReviewSummaryResponse = {
+  run_id: string;
+  pipeline: string;
+  status: "queued" | "running" | "succeeded" | "failed";
+  started_at: string;
+  finished_at?: string | null;
+  current_step?: string;
+  warnings?: string[];
+  error_code?: string | null;
+  error?: string | null;
+  steps: RunReviewStep[];
+};
+
+export type GitDiffFile = {
+  path: string;
+  folder: string;
+  status: "new" | "modified" | "deleted" | "untracked" | "renamed" | "copied" | "changed" | "unchanged";
+  additions: number;
+  deletions: number;
+  binary: boolean;
+};
+
+export type GitDiffFolder = {
+  folder: string;
+  files: number;
+  additions: number;
+  deletions: number;
+};
+
+export type GitDiffLine = {
+  kind: "context" | "add" | "delete" | "meta";
+  old_line?: number;
+  new_line?: number;
+  content: string;
+};
+
+export type GitDiffHunk = {
+  header: string;
+  lines: GitDiffLine[];
+};
+
+export type GitDiffResponse = {
+  ok: boolean;
+  workspace: string;
+  run_id?: string | null;
+  step_id?: string | null;
+  selected_path?: string | null;
+  selected_file?: GitDiffFile | null;
+  files: GitDiffFile[];
+  folders: GitDiffFolder[];
+  hunks: GitDiffHunk[];
+  message?: string;
+  empty: boolean;
+};
+
+export type ReviewQueueItem = {
+  id: string;
+  kind: "report" | "coverage" | "finding" | "question" | "proposal" | "model" | "diagram" | "artifact";
+  title: string;
+  path: string;
+  severity: "info" | "warn" | "error";
+};
+
 export type RepoSourceMode = "path" | "git_url";
 
 export type GuidedRepo = {

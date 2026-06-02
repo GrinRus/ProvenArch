@@ -11,6 +11,8 @@ type FetchMockState = {
   runLogs?: Record<string, MockJSON>;
   runStatus?: Record<string, MockJSON>;
   runArtifacts?: Record<string, MockJSON>;
+  runReviewSummary?: Record<string, MockJSON>;
+  gitDiff?: MockJSON;
   artifactText?: Record<string, string>;
   baselineBundleWarnings?: MockJSON[];
   cancelResponses?: Record<string, { status: number; body?: MockJSON }>;
@@ -66,6 +68,138 @@ function createFetchMock(state: FetchMockState = {}) {
       run_id: runID,
       artifacts: [],
     },
+  };
+  const runReviewSummary = state.runReviewSummary ?? {
+    [runID]: {
+      run_id: runID,
+      pipeline: "init",
+      status: "succeeded",
+      started_at: "2026-04-03T12:00:00Z",
+      finished_at: "2026-04-03T12:00:02Z",
+      current_step: "init.step4.proposals",
+      warnings: [],
+      error_code: null,
+      error: null,
+      steps: [
+        {
+          step_id: "step0_constitution",
+          label: "Charter",
+          state: "done",
+          provider: "fake",
+          artifact_count: 0,
+          artifact_paths: [],
+          taskrun_paths: [],
+          warnings_count: 0,
+          errors_count: 0,
+          last_message: "charter ready",
+        },
+        {
+          step_id: "step1_collect",
+          label: "Collect",
+          state: "done",
+          provider: "fake",
+          artifact_count: 0,
+          artifact_paths: [],
+          taskrun_paths: [],
+          warnings_count: 0,
+          errors_count: 0,
+          last_message: "sources collected",
+        },
+        {
+          step_id: "step2_as_is",
+          label: "As-is docs",
+          state: "done",
+          provider: "fake",
+          artifact_count: 1,
+          artifact_paths: ["reports/as-is/overview.md"],
+          taskrun_paths: [],
+          warnings_count: 0,
+          errors_count: 0,
+          last_message: "overview generated",
+        },
+        {
+          step_id: "step3_findings",
+          label: "Findings",
+          state: "done",
+          provider: "fake",
+          artifact_count: 1,
+          artifact_paths: ["reports/findings/findings.md"],
+          taskrun_paths: [],
+          warnings_count: 0,
+          errors_count: 0,
+          last_message: "findings generated",
+        },
+        {
+          step_id: "step4_proposals",
+          label: "Proposals",
+          state: "done",
+          provider: "fake",
+          artifact_count: 1,
+          artifact_paths: ["proposals/proposal-payments/proposal.md"],
+          taskrun_paths: [],
+          warnings_count: 0,
+          errors_count: 0,
+          last_message: "proposals generated",
+        },
+      ],
+    },
+  };
+  const defaultGitDiff = state.gitDiff ?? {
+    ok: true,
+    workspace: "/tmp/workspace",
+    run_id: runID,
+    step_id: null,
+    selected_path: "reports/coverage/summary.md",
+    selected_file: {
+      path: "reports/coverage/summary.md",
+      folder: "reports/coverage",
+      status: "modified",
+      additions: 1,
+      deletions: 0,
+      binary: false,
+    },
+    files: [
+      {
+        path: "reports/coverage/summary.md",
+        folder: "reports/coverage",
+        status: "modified",
+        additions: 1,
+        deletions: 0,
+        binary: false,
+      },
+      {
+        path: "model/entities/payments-service.yaml",
+        folder: "model/entities",
+        status: "new",
+        additions: 1,
+        deletions: 0,
+        binary: false,
+      },
+      {
+        path: "proposals/adr-001.md",
+        folder: "proposals",
+        status: "new",
+        additions: 1,
+        deletions: 0,
+        binary: false,
+      },
+    ],
+    folders: [
+      { folder: "reports/coverage", files: 1, additions: 1, deletions: 0 },
+      { folder: "model/entities", files: 1, additions: 1, deletions: 0 },
+      { folder: "proposals", files: 1, additions: 1, deletions: 0 },
+    ],
+    hunks: [
+      {
+        header: "@@ -1 +1,2 @@",
+        lines: [
+          { kind: "context", old_line: 1, new_line: 1, content: "Coverage: 84%" },
+          { kind: "add", new_line: 2, content: "Workspace Git diff is reviewable." },
+        ],
+      },
+    ],
+    message: "Workspace Git diff loaded.",
+    empty: false,
   };
   const qaRunID = state.qaRunID ?? "qa-run-1";
   let onboardingStatus: MockJSON = state.onboardingStatus ?? {
@@ -336,6 +470,10 @@ function createFetchMock(state: FetchMockState = {}) {
       return jsonResponse((runStatus[runID] ?? {}) as MockJSON);
     }
 
+    if (method === "GET" && url === `/api/pipeline/runs/${runID}/review-summary`) {
+      return jsonResponse((runReviewSummary[runID] ?? {}) as MockJSON);
+    }
+
     if (method === "GET" && url === `/api/pipeline/runs/${runID}/artifacts`) {
       return jsonResponse((runArtifacts[runID] ?? { run_id: runID, artifacts: [] }) as MockJSON);
     }
@@ -463,6 +601,28 @@ function createFetchMock(state: FetchMockState = {}) {
       const payload = JSON.parse(String(init?.body ?? "{}")) as { name?: string };
       return jsonResponse({
         branch: payload.name ?? "proposal/beta-refresh",
+      });
+    }
+
+    if (method === "GET" && url.startsWith("/api/git/diff")) {
+      const parsed = new URL(url, "http://localhost");
+      const selectedPath = parsed.searchParams.get("path");
+      if (!selectedPath) {
+        return jsonResponse(defaultGitDiff);
+      }
+      const files = (defaultGitDiff.files as MockJSON[] | undefined) ?? [];
+      const selectedFile = files.find((file) => file.path === selectedPath) ?? {
+        path: selectedPath,
+        folder: selectedPath.includes("/") ? selectedPath.slice(0, selectedPath.lastIndexOf("/")) : ".",
+        status: "unchanged",
+        additions: 0,
+        deletions: 0,
+        binary: false,
+      };
+      return jsonResponse({
+        ...defaultGitDiff,
+        selected_path: selectedPath,
+        selected_file: selectedFile,
       });
     }
 
@@ -934,6 +1094,9 @@ describe("App", () => {
     expect(explorer).toHaveTextContent("reports/coverage");
     expect(explorer).toHaveTextContent("reports/diagrams");
     expect((explorer.textContent ?? "").indexOf("reports/as-is")).toBeLessThan((explorer.textContent ?? "").indexOf("proposals"));
+    const reviewQueue = screen.getByTestId("review-queue");
+    expect(reviewQueue).toHaveTextContent("Review Queue");
+    expect(reviewQueue).toHaveTextContent("reports/coverage/summary.md");
 
     const citationCoverage = screen.getByTestId("review-citation-coverage");
     expect(citationCoverage).toHaveTextContent("Coverage summary");
@@ -944,6 +1107,9 @@ describe("App", () => {
 
     await waitFor(() => expect(screen.getByTestId("run-artifact-content")).toHaveTextContent("# System overview"));
     await waitFor(() => expect(within(explorer).getByRole("button", { name: /reports\/as-is\/overview\.md/i })).toHaveClass("is-selected"));
+
+    fireEvent.click(within(reviewQueue).getByRole("button", { name: /review queue item: review coverage summary/i }));
+    await waitFor(() => expect(screen.getByTestId("run-artifact-selected-path")).toHaveTextContent("reports/coverage/summary.md"));
 
     fireEvent.click(within(explorer).getByRole("button", { name: /reports\/as-is\/overview\.md/i }));
     await waitFor(() => expect(screen.getByTestId("run-artifact-content")).toHaveTextContent("# System overview"));
@@ -1096,7 +1262,8 @@ describe("App", () => {
     expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("Payments changelog");
 
     fireEvent.click(within(tabs).getByRole("tab", { name: "Diff" }));
-    expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("Git diff belongs to the Publish gate slice");
+    expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("Workspace Git diff loaded.");
+    expect(screen.getByTestId("git-diff-view")).toHaveTextContent("reports/coverage/summary.md");
 
     fireEvent.click(screen.getByRole("button", { name: "Review in Publish" }));
     expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
@@ -1217,7 +1384,8 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByTestId("publish-panel")).toHaveTextContent("Coverage ready for publication."));
 
     fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
-    expect(screen.getByText(/current UI APIs expose generated artifact refs/i)).toBeInTheDocument();
+    expect(screen.getByTestId("git-diff-view")).toHaveTextContent("Workspace Git diff loaded.");
+    expect(screen.getByTestId("git-diff-hunks")).toHaveTextContent("Workspace Git diff is reviewable.");
 
     expect(screen.getByTestId("publish-preview-tabs")).toHaveTextContent("Changelog");
     expect(screen.getByTestId("publish-preview-tabs")).not.toHaveTextContent("Checklist");
@@ -1696,7 +1864,15 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("stage-analysis"));
     fireEvent.click(screen.getByTestId("run-init-btn"));
 
+    const activeRunStrip = await screen.findByTestId("active-run-strip");
+    expect(activeRunStrip).toHaveTextContent(runID);
+    expect(activeRunStrip).toHaveTextContent("5/5 steps");
+
     await screen.findByTestId("run-status-panel");
+    expect(await screen.findAllByTestId("analysis-step-review-card")).toHaveLength(5);
+    fireEvent.click(screen.getByTestId("analysis-step-tab-diff"));
+    await waitFor(() => expect(screen.getByTestId("git-diff-view")).toHaveTextContent("Workspace Git diff loaded."));
+
     const logs = await screen.findByTestId("run-logs-content");
     expect(logs.textContent ?? "").toContain("[EVENT]");
     expect(logs.textContent ?? "").toContain("[RAW]");

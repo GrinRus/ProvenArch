@@ -229,6 +229,81 @@ Validation:
 - 2026-06-02: Implemented onboarding-first beta baseline: `acp serve` launcher mode, optional `--workspace` direct mode, `/api/onboarding/status|workspace|runtime`, workspace draft/session service state, pre-console OnboardingShell, multi-repo source diagnostics, mandatory runner selection and transition into Console V2. Updated README/INSTALL/TROUBLESHOOTING/ARCHITECTURE/STAKEHOLDER docs. Validation passed: focused Go/API tests, focused UI tests, `git diff --check`, `make contracts`, `make test`, `make lint` with Go toolchain in PATH, and `make build`. Provider-live release gate was not expanded.
 
 ### Plan ID
+EP-20260602-long-run-review-diff
+
+### Context
+Console V2 made long runs observable through mission control, stage timeline and activity logs, but the daily operator workflow still has a gap: during a long provider run the user needs to understand which step is producing reviewable evidence, which artifacts are already available, and what changed in the workspace Git tree without leaving the UI. The approved follow-up scope is local UI/API only: expose run review summaries and real workspace Git diffs, then wire them into Analysis, Review, Proposals and Publish.
+
+Constraints:
+- runtime artifact schemas, `workspace.yaml`, CLI `acp run`, provider contracts and public live E2E shell stay unchanged;
+- Git diff source of truth is the architecture workspace Git repository, never target repos;
+- long-run states must be reviewable through artifacts, logs, evidence and diff, not only through raw logs;
+- existing operator-facing selectors remain stable where possible.
+
+### Goals (must have)
+- [x] Add `GET /api/pipeline/runs/<run_id>/review-summary` with canonical `step0..step4` summaries built from existing run status, logs, artifacts and taskrun refs.
+- [x] Add `GET /api/git/diff` for workspace-only Git status, folder summaries, selected file status and text hunks with strict path normalization.
+- [x] Add a persistent active-run strip across Console V2 stages with run status, current step, provider, progress, warnings/errors and cancel.
+- [x] Rework `Analysis` toward step-level review: step cards and selected-step tabs for artifacts, logs, evidence and diff.
+- [x] Add a Review Queue and use real diff data in `Review`, `Proposals` and `Publish`.
+- [x] Turn `Publish` into a real Git Review Room: folder summary, changed file list, selected hunks and existing publish gate/actions.
+- [x] Cover queued/no logs/partial artifacts/failed/canceled/stale/no changes/binary diff states with explicit UI/API states where data is available.
+- [x] Keep direct-mode live E2E contract unchanged.
+
+### Non-goals
+- [x] Do not change workspace manifest schema, runtime artifact schemas, provider contracts, CLI flags or `acp run` behavior.
+- [x] Do not add approval persistence, hosted mode, source repo mutation, new provider-live release gate or new release-facing UI E2E scenario.
+- [x] Do not introduce a second artifact source of truth beyond existing workspace files, run logs, run artifacts and Git status.
+
+### Approach
+1) Add narrow backend local APIs for run review summaries and workspace Git diff, with tests for path safety, empty diffs, binary files and step mapping.
+2) Add frontend contracts and hooks for review summary and Git diff loading, reusing current run selection/polling.
+3) Add `ActiveRunStrip` into the existing shell without changing the stage rail or onboarding boundary.
+4) Update Analysis, Review, Proposals and Publish to expose artifacts/logs/evidence/diff in consistent tabs.
+5) Add UI tests for the new surfaces and preserve existing selectors/live-shell expectations.
+6) Run focused tests and Full DoD before committing the follow-up slice.
+
+### Files expected to change
+- `internal/api/server.go`
+- `internal/api/review_diff.go`
+- `internal/api/server_test.go`
+- `ui/src/lib/*`
+- `ui/src/hooks/*`
+- `ui/src/components/*`
+- `ui/src/App.tsx`, `ui/src/App.test.tsx`, `ui/src/styles.css`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Review summary returns five canonical steps for init runs and handles no logs, failed/canceled/stale and partial artifact states without panics.
+- [x] Git diff returns valid empty diffs, rejects unsafe paths, reports untracked/modified/deleted/binary files and filters by folder/file/run/step where applicable.
+- [x] Active run strip remains visible after console entry across stages.
+- [x] Analysis exposes current/failed step details with artifacts, logs, evidence and diff.
+- [x] Review Queue is visible and can navigate to reviewable artifacts.
+- [x] Proposals and Publish no longer show the old partial line-level diff placeholder when real Git diff data is available.
+- [x] Publish shows real workspace folder/file/hunk diff data while preserving hard blockers, warnings, open questions and explicit Git actions.
+- [x] `git diff --check`, focused tests and Full DoD pass.
+
+### Test plan
+- Go/API:
+  - review summary step mapping from run status/logs/artifacts;
+  - review summary no-log failed/partial cases;
+  - Git diff untracked/modified/deleted/folder filter/file filter/empty/binary/invalid traversal.
+- UI:
+  - active run strip persistence;
+  - step cards and selected-step tabs;
+  - Review Queue counts/navigation;
+  - real diff state in Review/Proposals/Publish.
+- Deterministic checks:
+  - focused Go/API tests;
+  - focused UI test suite;
+  - `git diff --check`;
+  - Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Progress log
+- 2026-06-02: Started long-run review/diff follow-up after UX review found long provider runs were observable through logs but not sufficiently reviewable through step-level artifacts and workspace Git diff. Scope is local UI/API only; no schema/runtime/provider/live-shell changes.
+- 2026-06-02: Implemented long-run review/diff follow-up: local `review-summary` and workspace Git diff APIs, persistent active-run strip, Analysis step review tabs, Review Queue, real diff tabs in Review/Proposals/Publish and Git Review Room folder/file/hunk view. Found and fixed a real infinite-update bug when opening Diff tabs by stabilizing the Git diff callback. Validation passed: `git diff --check`, focused `./scripts/run-go.sh test ./internal/api`, UI suite `61/61`, `make contracts`, `make test`, `make lint`, `make build`, plus rendered in-app browser smoke on a temporary fake workspace through Analysis/Review/Proposals/Publish with no browser console errors. Runtime schemas, `workspace.yaml`, CLI `acp run`, provider contracts and live shell were unchanged.
+
+### Plan ID
 EP-20260527-ui-console-v2
 
 ### Context

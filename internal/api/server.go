@@ -110,6 +110,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/runtime/profile", s.handleRuntimeProfile)
 	mux.HandleFunc("/api/artifacts", s.handleArtifacts)
 	mux.HandleFunc("/api/artifacts/write", s.handleArtifactsWrite)
+	mux.HandleFunc("/api/git/diff", s.handleGitDiff)
 	mux.HandleFunc("/api/git/commit", s.handleGitCommit)
 	mux.HandleFunc("/api/git/proposal-branch", s.handleGitProposalBranch)
 	mux.HandleFunc("/api/qa/ask", s.handleQAAsk)
@@ -1162,6 +1163,11 @@ func (s *Server) handlePipelineRunsGet(writer http.ResponseWriter, request *http
 
 	if len(parts) == 2 && parts[1] == "artifacts" {
 		s.handlePipelineRunArtifacts(writer, runID)
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "review-summary" {
+		s.handlePipelineRunReviewSummary(writer, runID)
 		return
 	}
 

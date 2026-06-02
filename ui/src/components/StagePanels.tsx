@@ -12,8 +12,10 @@ import type {
   Diagnostic,
   DoctorResponse,
   EditableArtifactOption,
+  GitDiffResponse,
   GuidedRepo,
   RepoSourceMode,
+  ReviewQueueItem,
   RuntimeExecutionValues,
   RuntimePermissionValues,
   RuntimePermissionRequest,
@@ -21,9 +23,12 @@ import type {
   RuntimeTimeoutValues,
   RunListItem,
   RunLogEntry,
+  RunReviewStep,
+  RunReviewSummaryResponse,
   RunStatusResponse,
   ValidateResponse,
 } from "../lib/appContracts";
+import type { LoadGitDiffOptions } from "../lib/gitDiffApi";
 
 const MermaidPreview = lazy(async () => {
   const module = await import("./MermaidPreview");
@@ -830,10 +835,16 @@ export type AnalysisStageProps = {
   artifacts: Artifact[];
   setupRuntime: string;
   setupRuntimeProvider: string;
+  runReviewSummary: RunReviewSummaryResponse | null;
+  runReviewStatus: string;
+  gitDiff: GitDiffResponse | null;
+  gitDiffStatus: string;
+  onLoadGitDiff: (options: LoadGitDiffOptions) => void;
   focusBlockerSignal: number;
   onRunPipeline: (pipeline: "init" | "refresh") => void;
   onCancelSelectedRun: () => void;
   onSelectRun: (runId: string) => void;
+  onOpenArtifact: (path: string) => void;
 };
 
 export function AnalysisStagePanel({
@@ -851,13 +862,31 @@ export function AnalysisStagePanel({
   artifacts,
   setupRuntime,
   setupRuntimeProvider,
+  runReviewSummary,
+  runReviewStatus,
+  gitDiff,
+  gitDiffStatus,
+  onLoadGitDiff,
   focusBlockerSignal,
   onRunPipeline,
   onCancelSelectedRun,
   onSelectRun,
+  onOpenArtifact,
 }: AnalysisStageProps) {
   const blockerDetailsRef = useRef<HTMLElement>(null);
+  const [selectedStepID, setSelectedStepID] = useState("");
+  const [stepReviewView, setStepReviewView] = useState<"artifacts" | "logs" | "evidence" | "diff">("artifacts");
   const stepTimeline = buildAnalysisStepTimeline(runStatus, runLogs);
+  const reviewSteps = runReviewSummary?.steps ?? [];
+  const preferredReviewStep =
+    reviewSteps.find((step) => step.state === "failed") ??
+    reviewSteps.find((step) => step.state === "active") ??
+    reviewSteps.find((step) => step.artifact_count > 0) ??
+    reviewSteps[0];
+  const selectedReviewStep =
+    reviewSteps.find((step) => step.step_id === selectedStepID) ??
+    preferredReviewStep ??
+    null;
   const shardRows = buildAnalysisShardRows(runStatus, runLogs, artifacts, setupRuntime, setupRuntimeProvider);
   const issueRows = shardRows.filter((row) => row.status === "failed" || row.status === "warning");
   const blockerRows = shardRows.filter((row) => row.status === "failed");
@@ -874,6 +903,18 @@ export function AnalysisStagePanel({
     }
     focusBlockerDetails();
   }, [focusBlockerDetails, focusBlockerSignal]);
+
+  useEffect(() => {
+    if (preferredReviewStep && !reviewSteps.some((step) => step.step_id === selectedStepID)) {
+      setSelectedStepID(preferredReviewStep.step_id);
+    }
+  }, [preferredReviewStep, reviewSteps, selectedStepID]);
+
+  useEffect(() => {
+    if (selectedReviewStep?.step_id && stepReviewView === "diff") {
+      onLoadGitDiff({ stepId: selectedReviewStep.step_id });
+    }
+  }, [onLoadGitDiff, selectedReviewStep?.step_id, stepReviewView]);
 
   function handleReviewBlocker() {
     focusBlockerDetails();
@@ -915,6 +956,22 @@ export function AnalysisStagePanel({
         onReviewBlocker={handleReviewBlocker}
       />
       <AnalysisRunTimeline steps={stepTimeline} />
+      <AnalysisStepReview
+        steps={reviewSteps}
+        selectedStep={selectedReviewStep}
+        runReviewStatus={runReviewStatus}
+        runLogs={runLogs}
+        gitDiff={gitDiff}
+        gitDiffStatus={gitDiffStatus}
+        view={stepReviewView}
+        onViewChange={setStepReviewView}
+        onSelectStep={(stepID) => {
+          setSelectedStepID(stepID);
+          setStepReviewView("artifacts");
+        }}
+        onOpenArtifact={onOpenArtifact}
+        onLoadGitDiff={onLoadGitDiff}
+      />
       <AnalysisShardTable rows={shardRows} />
       <AnalysisFailedShardDetails rows={issueRows} detailsRef={blockerDetailsRef} />
 
@@ -1034,6 +1091,145 @@ function AnalysisRunTimeline({ steps }: { steps: AnalysisStep[] }) {
   );
 }
 
+function AnalysisStepReview({
+  steps,
+  selectedStep,
+  runReviewStatus,
+  runLogs,
+  gitDiff,
+  gitDiffStatus,
+  view,
+  onViewChange,
+  onSelectStep,
+  onOpenArtifact,
+  onLoadGitDiff,
+}: {
+  steps: RunReviewStep[];
+  selectedStep: RunReviewStep | null;
+  runReviewStatus: string;
+  runLogs: RunLogEntry[];
+  gitDiff: GitDiffResponse | null;
+  gitDiffStatus: string;
+  view: "artifacts" | "logs" | "evidence" | "diff";
+  onViewChange: (view: "artifacts" | "logs" | "evidence" | "diff") => void;
+  onSelectStep: (stepID: string) => void;
+  onOpenArtifact: (path: string) => void;
+  onLoadGitDiff: (options: LoadGitDiffOptions) => void;
+}) {
+  const stepLogs = selectedStep ? runLogs.filter((entry) => stepMatches(entry.step_id || "", selectedStep.step_id) || stepMatches(entry.taskrun_path || "", selectedStep.key)) : [];
+  return (
+    <section className="analysis-step-review" data-testid="analysis-step-review-panel">
+      <div className="section-heading-row">
+        <div>
+          <h2>Step review</h2>
+          <p className="hint">Review step-level artifacts, logs, evidence and workspace diff without waiting for final publication.</p>
+        </div>
+        <StatusBadge tone={selectedStepTone(selectedStep?.state)}>{selectedStep?.state ?? "empty"}</StatusBadge>
+      </div>
+      {runReviewStatus ? <p className="status warn">{runReviewStatus}</p> : null}
+      {steps.length === 0 ? (
+        <p className="empty-state">No review summary is available for the selected run yet. Status and logs still appear below.</p>
+      ) : (
+        <>
+          <div className="analysis-step-card-grid">
+            {steps.map((step, index) => (
+              <button
+                type="button"
+                key={step.step_id}
+                className={`analysis-step-review-card ${step.state}${selectedStep?.step_id === step.step_id ? " is-selected" : ""}`}
+                data-testid="analysis-step-review-card"
+                onClick={() => onSelectStep(step.step_id)}
+                aria-pressed={selectedStep?.step_id === step.step_id}
+              >
+                <span className="step-index">{index}</span>
+                <strong>{step.label}</strong>
+                <code>{step.step_id}</code>
+                <span>{step.provider || "provider pending"}</span>
+                <span>
+                  {step.artifact_count} artifacts · {step.warnings_count}/{step.errors_count} warn/error
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <div className="step-review-tabs" role="tablist" aria-label="Step review tabs">
+            {(["artifacts", "logs", "evidence", "diff"] as const).map((tab) => (
+              <button
+                type="button"
+                key={tab}
+                role="tab"
+                aria-selected={view === tab}
+                className={view === tab ? "is-active" : ""}
+                data-testid={`analysis-step-tab-${tab}`}
+                onClick={() => {
+                  onViewChange(tab);
+                  if (tab === "diff" && selectedStep?.step_id) {
+                    onLoadGitDiff({ stepId: selectedStep.step_id });
+                  }
+                }}
+              >
+                {capitalize(tab)}
+              </button>
+            ))}
+          </div>
+
+          <div className="step-review-body">
+            {view === "artifacts" ? (
+              selectedStep && selectedStep.artifact_paths.length > 0 ? (
+                <ul className="compact-list">
+                  {selectedStep.artifact_paths.map((path) => (
+                    <li key={path}>
+                      <button type="button" className="link-button" onClick={() => onOpenArtifact(path)}>
+                        {path}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="empty-state">No artifacts have been attached to this step yet. Logs may still be streaming.</p>
+              )
+            ) : null}
+
+            {view === "logs" ? (
+              stepLogs.length > 0 ? (
+                <ul className="compact-list">
+                  {stepLogs.slice(-8).map((entry) => (
+                    <li key={entry.cursor}>
+                      <span>
+                        {entry.level.toUpperCase()} · {entry.step_id || selectedStep?.step_id}
+                      </span>
+                      <code>{entry.message}</code>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="empty-state">{selectedStep?.state === "active" ? "Provider is silent; still waiting for logs." : "No logs are available for this step."}</p>
+              )
+            ) : null}
+
+            {view === "evidence" ? (
+              <div className="step-evidence-summary">
+                <dl className="compact-defs">
+                  <div>
+                    <dt>Last message</dt>
+                    <dd>{selectedStep?.last_message || "No step message yet."}</dd>
+                  </div>
+                  <div>
+                    <dt>Taskrun refs</dt>
+                    <dd>{selectedStep?.taskrun_paths.join(", ") || "No taskrun refs."}</dd>
+                  </div>
+                </dl>
+              </div>
+            ) : null}
+
+            {view === "diff" ? <GitDiffView gitDiff={gitDiff} status={gitDiffStatus} onSelectFile={(path) => onLoadGitDiff({ path, stepId: selectedStep?.step_id })} /> : null}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 function AnalysisShardTable({ rows }: { rows: AnalysisShardRow[] }) {
   return (
     <section className="subsection" data-testid="analysis-shard-panel">
@@ -1071,6 +1267,92 @@ function AnalysisShardTable({ rows }: { rows: AnalysisShardRow[] }) {
         </div>
       )}
     </section>
+  );
+}
+
+function GitDiffView({
+  gitDiff,
+  status,
+  onSelectFile,
+}: {
+  gitDiff: GitDiffResponse | null;
+  status: string;
+  onSelectFile: (path: string) => void;
+}) {
+  if (!gitDiff) {
+    return <p className="empty-state">{status || "Workspace Git diff is not loaded yet."}</p>;
+  }
+  const selected = gitDiff.selected_file;
+  return (
+    <div className="git-diff-view" data-testid="git-diff-view">
+      {status ? <p className={gitDiff.empty ? "status ok" : "status warn"}>{status}</p> : null}
+      {gitDiff.empty ? (
+        <p className="empty-state">No workspace Git changes. Generated artifacts may already be committed or this run has not produced publishable file changes yet.</p>
+      ) : null}
+      <div className="git-diff-layout">
+        <aside className="git-diff-file-list" aria-label="changed files">
+          <div className="section-heading-row">
+            <h3>Changed files</h3>
+            <StatusBadge tone={gitDiff.files.length > 0 ? "ok" : "info"}>{gitDiff.files.length}</StatusBadge>
+          </div>
+          {gitDiff.folders.length > 0 ? (
+            <div className="git-diff-folder-summary">
+              {gitDiff.folders.map((folder) => (
+                <span key={folder.folder}>
+                  {folder.folder}: {folder.files} files, +{folder.additions}/-{folder.deletions}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {gitDiff.files.length === 0 ? (
+            <p className="hint">No changed files match the current filter.</p>
+          ) : (
+            <ul>
+              {gitDiff.files.slice(0, 40).map((file) => (
+                <li key={file.path}>
+                  <button
+                    type="button"
+                    className={`git-diff-file${selected?.path === file.path ? " is-selected" : ""}`}
+                    onClick={() => onSelectFile(file.path)}
+                    aria-pressed={selected?.path === file.path}
+                  >
+                    <span>
+                      <StatusBadge tone={diffFileTone(file.status)}>{file.status}</StatusBadge>
+                      {file.path}
+                    </span>
+                    <code>
+                      +{file.additions} / -{file.deletions}
+                      {file.binary ? " / binary" : ""}
+                    </code>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </aside>
+        <section className="git-diff-hunks" data-testid="git-diff-hunks">
+          <div className="section-heading-row">
+            <h3>{selected?.path || gitDiff.selected_path || "No file selected"}</h3>
+            <StatusBadge tone={selected ? diffFileTone(selected.status) : "info"}>{selected?.status ?? "none"}</StatusBadge>
+          </div>
+          {gitDiff.message ? <p className="hint">{gitDiff.message}</p> : null}
+          {selected?.binary ? <p className="empty-state">Binary/non-text diff. Review the file path and status, then use Git tooling for binary inspection.</p> : null}
+          {!selected?.binary && gitDiff.hunks.length === 0 ? <p className="empty-state">No line-level hunks for the selected file.</p> : null}
+          {gitDiff.hunks.map((hunk, index) => (
+            <div className="git-diff-hunk" key={`${hunk.header}-${index}`}>
+              <div className="git-diff-hunk-header">{hunk.header}</div>
+              {hunk.lines.map((line, lineIndex) => (
+                <div className={`git-diff-line ${line.kind}`} key={`${hunk.header}-${lineIndex}`}>
+                  <span className="git-diff-line-number">{line.old_line ?? ""}</span>
+                  <span className="git-diff-line-number">{line.new_line ?? ""}</span>
+                  <code>{line.content || " "}</code>
+                </div>
+              ))}
+            </div>
+          ))}
+        </section>
+      </div>
+    </div>
   );
 }
 
@@ -1185,6 +1467,36 @@ function stepTimelineDetail(state: AnalysisStepState): string {
     return "blocked";
   }
   return "pending";
+}
+
+function selectedStepTone(state?: RunReviewStep["state"]): "info" | "ok" | "warn" | "error" {
+  if (state === "done") {
+    return "ok";
+  }
+  if (state === "failed") {
+    return "error";
+  }
+  if (state === "active") {
+    return "warn";
+  }
+  return "info";
+}
+
+function diffFileTone(status?: string): "info" | "ok" | "warn" | "error" {
+  if (status === "deleted") {
+    return "error";
+  }
+  if (status === "modified" || status === "renamed" || status === "changed") {
+    return "warn";
+  }
+  if (status === "new" || status === "untracked" || status === "copied") {
+    return "ok";
+  }
+  return "info";
+}
+
+function capitalize(value: string): string {
+  return value.slice(0, 1).toUpperCase() + value.slice(1);
 }
 
 function fieldString(fields: Record<string, unknown> | undefined, key: string): string {
@@ -1347,6 +1659,11 @@ export type ReviewStageProps = {
   selectedArtifact: string;
   selectedArtifactContent: string;
   selectedArtifactIsMermaid: boolean;
+  runLogs: RunLogEntry[];
+  reviewSummary: RunReviewSummaryResponse | null;
+  gitDiff: GitDiffResponse | null;
+  gitDiffStatus: string;
+  onLoadGitDiff: (options: LoadGitDiffOptions) => void;
   onOpenArtifact: (path: string) => void;
 };
 
@@ -1358,6 +1675,11 @@ export function ReviewStagePanel({
   selectedArtifact,
   selectedArtifactContent,
   selectedArtifactIsMermaid,
+  runLogs,
+  reviewSummary,
+  gitDiff,
+  gitDiffStatus,
+  onLoadGitDiff,
   onOpenArtifact,
 }: ReviewStageProps) {
   const [reviewView, setReviewView] = useState<"evidence" | "domain-map">("evidence");
@@ -1370,6 +1692,11 @@ export function ReviewStagePanel({
     coverageArtifact ??
     allArtifacts[0];
   const artifactGroups = groupArtifactsByFolder(allArtifacts);
+  const reviewQueue = buildReviewQueue({
+    artifacts: allArtifacts,
+    openQuestions,
+    coverageSummary,
+  });
   const selectedArtifactIsLoading = selectedArtifactContent === "Loading...";
   const openQuestionCount = countMarkdownItems(openQuestions);
   const trustStatus = deriveReviewTrustStatus({
@@ -1445,6 +1772,12 @@ export function ReviewStagePanel({
             selectedArtifactContent={selectedArtifactContent}
             selectedArtifactIsMermaid={selectedArtifactIsMermaid}
             selectedArtifactIsLoading={selectedArtifactIsLoading}
+            runLogs={runLogs}
+            reviewSummary={reviewSummary}
+            reviewQueue={reviewQueue}
+            gitDiff={gitDiff}
+            gitDiffStatus={gitDiffStatus}
+            onLoadGitDiff={onLoadGitDiff}
             onOpenArtifact={onOpenArtifact}
           />
         )}
@@ -1623,6 +1956,12 @@ function ReviewEvidenceWorkbench({
   selectedArtifactContent,
   selectedArtifactIsMermaid,
   selectedArtifactIsLoading,
+  runLogs,
+  reviewSummary,
+  reviewQueue,
+  gitDiff,
+  gitDiffStatus,
+  onLoadGitDiff,
   onOpenArtifact,
 }: {
   coverageSummary: string;
@@ -1638,11 +1977,26 @@ function ReviewEvidenceWorkbench({
   selectedArtifactContent: string;
   selectedArtifactIsMermaid: boolean;
   selectedArtifactIsLoading: boolean;
+  runLogs: RunLogEntry[];
+  reviewSummary: RunReviewSummaryResponse | null;
+  reviewQueue: ReviewQueueItem[];
+  gitDiff: GitDiffResponse | null;
+  gitDiffStatus: string;
+  onLoadGitDiff: (options: LoadGitDiffOptions) => void;
   onOpenArtifact: (path: string) => void;
 }) {
+  const [evidenceView, setEvidenceView] = useState<"preview" | "diff" | "evidence" | "logs">("preview");
+
+  useEffect(() => {
+    if (evidenceView === "diff" && selectedArtifact) {
+      onLoadGitDiff({ path: selectedArtifact });
+    }
+  }, [evidenceView, onLoadGitDiff, selectedArtifact]);
+
   return (
     <div className="review-workbench">
       <aside className="review-artifact-explorer" data-testid="review-artifact-explorer">
+        <ReviewQueuePanel queue={reviewQueue} onOpenArtifact={onOpenArtifact} />
         <div className="section-heading-row">
           <h2>Artifact explorer</h2>
           <StatusBadge tone={artifactGroups.length > 0 ? "ok" : "info"}>{artifactGroups.length} groups</StatusBadge>
@@ -1686,23 +2040,79 @@ function ReviewEvidenceWorkbench({
             Approve selected evidence
           </button>
         </div>
-        {selectedArtifactIsMermaid ? (
-          <div data-testid="run-diagram-content-panel">
-            <h3 data-testid="run-diagram-selected-path">{selectedArtifact || "Diagram Preview"}</h3>
-            {selectedArtifactIsLoading ? (
-              <p className="hint">Loading diagram...</p>
+        <div className="evidence-preview-tabs" role="tablist" aria-label="Artifact workbench tabs">
+          {(["preview", "diff", "evidence", "logs"] as const).map((tab) => (
+            <button
+              type="button"
+              key={tab}
+              role="tab"
+              aria-selected={evidenceView === tab}
+              className={evidenceView === tab ? "is-active" : ""}
+              onClick={() => setEvidenceView(tab)}
+            >
+              {capitalize(tab)}
+            </button>
+          ))}
+        </div>
+        {evidenceView === "preview" ? (
+          selectedArtifactIsMermaid ? (
+            <div data-testid="run-diagram-content-panel">
+              <h3 data-testid="run-diagram-selected-path">{selectedArtifact || "Diagram Preview"}</h3>
+              {selectedArtifactIsLoading ? (
+                <p className="hint">Loading diagram...</p>
+              ) : (
+                <Suspense fallback={<p className="hint">Loading diagram renderer...</p>}>
+                  <MermaidPreview source={selectedArtifactContent} title={selectedArtifact || "diagram"} />
+                </Suspense>
+              )}
+            </div>
+          ) : (
+            <div data-testid="run-artifact-content-panel">
+              <h3 data-testid="run-artifact-selected-path">{selectedArtifact || "Artifact Content"}</h3>
+              <pre data-testid="run-artifact-content">{selectedArtifactContent || "Select artifact to inspect."}</pre>
+            </div>
+          )
+        ) : null}
+        {evidenceView === "diff" ? <GitDiffView gitDiff={gitDiff} status={gitDiffStatus} onSelectFile={(path) => onLoadGitDiff({ path })} /> : null}
+        {evidenceView === "evidence" ? (
+          <div className="review-tab-summary">
+            <h3>Decision evidence</h3>
+            <dl className="compact-defs">
+              <div>
+                <dt>Selected artifact</dt>
+                <dd>{selectedArtifact || "none"}</dd>
+              </div>
+              <div>
+                <dt>Current run</dt>
+                <dd>{reviewSummary?.run_id || "none selected"}</dd>
+              </div>
+              <div>
+                <dt>Review queue</dt>
+                <dd>{reviewQueue.length} item(s)</dd>
+              </div>
+            </dl>
+            <p className="hint">{reviewDecisionSummary(trustStatus, openQuestionCount)}</p>
+          </div>
+        ) : null}
+        {evidenceView === "logs" ? (
+          <div className="review-tab-summary">
+            <h3>Related logs</h3>
+            {runLogs.length === 0 ? (
+              <p className="empty-state">No logs are loaded for the selected run.</p>
             ) : (
-              <Suspense fallback={<p className="hint">Loading diagram renderer...</p>}>
-                <MermaidPreview source={selectedArtifactContent} title={selectedArtifact || "diagram"} />
-              </Suspense>
+              <ul className="compact-list">
+                {runLogs.slice(-8).map((entry) => (
+                  <li key={`review-log-${entry.cursor}`}>
+                    <span>
+                      {entry.level.toUpperCase()} · {entry.step_id || "run"}
+                    </span>
+                    <code>{entry.message}</code>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
-        ) : (
-          <div data-testid="run-artifact-content-panel">
-            <h3 data-testid="run-artifact-selected-path">{selectedArtifact || "Artifact Content"}</h3>
-            <pre data-testid="run-artifact-content">{selectedArtifactContent || "Select artifact to inspect."}</pre>
-          </div>
-        )}
+        ) : null}
       </section>
 
       <aside className="review-intel" data-testid="review-citation-coverage">
@@ -1751,6 +2161,94 @@ function ReviewEvidenceWorkbench({
 
     </div>
   );
+}
+
+function ReviewQueuePanel({ queue, onOpenArtifact }: { queue: ReviewQueueItem[]; onOpenArtifact: (path: string) => void }) {
+  return (
+    <section className="review-queue" data-testid="review-queue">
+      <div className="section-heading-row">
+        <h2>Review Queue</h2>
+        <StatusBadge tone={queue.length > 0 ? "warn" : "ok"}>{queue.length}</StatusBadge>
+      </div>
+      {queue.length === 0 ? (
+        <p className="hint">No generated review items are waiting. Run Analysis or select a completed run.</p>
+      ) : (
+        <ul>
+          {queue.slice(0, 10).map((item) => (
+            <li key={item.id}>
+              <button
+                type="button"
+                className="review-queue-item"
+                aria-label={`Review queue item: ${item.title}`}
+                onClick={() => onOpenArtifact(item.path)}
+              >
+                <StatusBadge tone={item.severity === "error" ? "error" : item.severity === "warn" ? "warn" : "info"}>{item.kind}</StatusBadge>
+                <span>{item.title}</span>
+                <code>{item.path}</code>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function buildReviewQueue({
+  artifacts,
+  openQuestions,
+  coverageSummary,
+}: {
+  artifacts: Artifact[];
+  openQuestions: string;
+  coverageSummary: string;
+}): ReviewQueueItem[] {
+  const queue: ReviewQueueItem[] = [];
+  const addArtifact = (artifact: Artifact, kind: ReviewQueueItem["kind"], severity: ReviewQueueItem["severity"], title?: string) => {
+    queue.push({
+      id: `${kind}:${artifact.path}`,
+      kind,
+      severity,
+      title: title || artifact.label || artifact.path,
+      path: artifact.path,
+    });
+  };
+  for (const artifact of artifacts) {
+    if (artifact.path === "reports/as-is/overview.md") {
+      addArtifact(artifact, "report", "info", "Review as-is overview");
+    } else if (artifact.path === "reports/coverage/summary.md") {
+      addArtifact(artifact, "coverage", coverageSummary.trim() ? "info" : "warn", "Review coverage summary");
+    } else if (artifact.path === "reports/coverage/open-questions.md") {
+      addArtifact(artifact, "question", openQuestions.trim() ? "warn" : "info", "Review open questions");
+    } else if (artifact.path.startsWith("reports/findings/")) {
+      addArtifact(artifact, "finding", "warn", "Review findings");
+    } else if (artifact.path.startsWith("proposals/")) {
+      addArtifact(artifact, "proposal", "info", "Review proposal");
+    } else if (artifact.path.startsWith("model/")) {
+      addArtifact(artifact, "model", "info", "Inspect derived model");
+    } else if (artifact.path.startsWith("reports/diagrams/")) {
+      addArtifact(artifact, "diagram", "info", "Inspect diagram");
+    }
+  }
+  return queue
+    .sort((left, right) => reviewQueuePriority(left) - reviewQueuePriority(right) || left.path.localeCompare(right.path))
+    .slice(0, 16);
+}
+
+function reviewQueuePriority(item: ReviewQueueItem): number {
+  if (item.kind === "question") {
+    return 0;
+  }
+  if (item.kind === "finding") {
+    return 1;
+  }
+  if (item.kind === "report" || item.kind === "coverage") {
+    return 2;
+  }
+  if (item.kind === "proposal") {
+    return 3;
+  }
+  return 5;
 }
 
 type ArtifactGroup = {
@@ -2119,6 +2617,10 @@ export function ProposalsStagePanel({
   openQuestions,
   proposalBranch,
   gitStatus,
+  runLogs,
+  gitDiff,
+  gitDiffStatus,
+  onLoadGitDiff,
   onOpenArtifact,
   onGoPublish,
 }: {
@@ -2128,10 +2630,14 @@ export function ProposalsStagePanel({
   openQuestions: string;
   proposalBranch: string;
   gitStatus: string;
+  runLogs: RunLogEntry[];
+  gitDiff: GitDiffResponse | null;
+  gitDiffStatus: string;
+  onLoadGitDiff: (options: LoadGitDiffOptions) => void;
   onOpenArtifact: (path: string) => void;
   onGoPublish: () => void;
 }) {
-  const [proposalView, setProposalView] = useState<"preview" | "evidence" | "changelog" | "diff">("preview");
+  const [proposalView, setProposalView] = useState<"preview" | "evidence" | "changelog" | "diff" | "logs">("preview");
   const proposalReview = deriveProposalReviewModel({ artifacts, openQuestions });
   const selectedProposalArtifact = proposalReview.proposalArtifacts.find((artifact) => artifact.path === selectedArtifact);
   const preferredProposalArtifact =
@@ -2145,6 +2651,12 @@ export function ProposalsStagePanel({
       onOpenArtifact(preferredProposalArtifact.path);
     }
   }, [onOpenArtifact, preferredProposalArtifact, selectedArtifact, selectedProposalArtifact]);
+
+  useEffect(() => {
+    if (proposalView === "diff") {
+      onLoadGitDiff({ path: selectedArtifact || preferredProposalArtifact?.path });
+    }
+  }, [onLoadGitDiff, preferredProposalArtifact?.path, proposalView, selectedArtifact]);
 
   return (
     <section className="panel stage-panel" data-testid="proposals-panel">
@@ -2200,7 +2712,7 @@ export function ProposalsStagePanel({
             </button>
           </div>
           <div className="proposal-preview-tabs" role="tablist" aria-label="Proposal review tabs" data-testid="proposal-preview-tabs">
-            {(["preview", "evidence", "changelog", "diff"] as const).map((view) => (
+            {(["preview", "evidence", "changelog", "diff", "logs"] as const).map((view) => (
               <button
                 type="button"
                 role="tab"
@@ -2258,7 +2770,27 @@ export function ProposalsStagePanel({
           {proposalView === "diff" ? (
             <div className="proposal-tab-panel">
               <h3>Diff preview</h3>
-              <p className="hint">Folder-level Git diff belongs to the Publish gate slice. This review room keeps the proposal artifacts ready and surfaces the publication path without adding a Git diff API.</p>
+              <GitDiffView gitDiff={gitDiff} status={gitDiffStatus} onSelectFile={(path) => onLoadGitDiff({ path })} />
+            </div>
+          ) : null}
+
+          {proposalView === "logs" ? (
+            <div className="proposal-tab-panel">
+              <h3>Run logs</h3>
+              {runLogs.length === 0 ? (
+                <p className="empty-state">No logs are loaded for the selected run.</p>
+              ) : (
+                <ul className="compact-list">
+                  {runLogs.slice(-8).map((entry) => (
+                    <li key={`proposal-log-${entry.cursor}`}>
+                      <span>
+                        {entry.level.toUpperCase()} · {entry.step_id || "run"}
+                      </span>
+                      <code>{entry.message}</code>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           ) : null}
         </section>
@@ -2414,7 +2946,7 @@ function deriveProposalArtifactType(path: string): string {
   return "artifact";
 }
 
-function proposalTabLabel(view: "preview" | "evidence" | "changelog" | "diff"): string {
+function proposalTabLabel(view: "preview" | "evidence" | "changelog" | "diff" | "logs"): string {
   if (view === "preview") {
     return "Preview";
   }
@@ -2424,7 +2956,10 @@ function proposalTabLabel(view: "preview" | "evidence" | "changelog" | "diff"): 
   if (view === "changelog") {
     return "Changelog";
   }
-  return "Diff";
+  if (view === "diff") {
+    return "Diff";
+  }
+  return "Logs";
 }
 
 export function AskStagePanel({
@@ -2784,6 +3319,9 @@ type PublishStageProps = ComponentProps<typeof BaselineGitPanel> & {
   selectedArtifactContent: string;
   openQuestions: string;
   externalGateItems?: PublishGateItem[];
+  gitDiff: GitDiffResponse | null;
+  gitDiffStatus: string;
+  onLoadGitDiff: (options: LoadGitDiffOptions) => void;
   onPreviewArtifact: (path: string) => void;
 };
 
@@ -2797,6 +3335,9 @@ export function PublishStagePanel({
   selectedArtifactContent,
   openQuestions,
   externalGateItems = [],
+  gitDiff,
+  gitDiffStatus,
+  onLoadGitDiff,
   onGitMessageChange,
   onProposalBranchChange,
   onCommit,
@@ -2841,12 +3382,25 @@ export function PublishStagePanel({
   const gitMutationDisabled = busy || blockingGateItems.length > 0;
   const gitMutationBlockedTitle =
     blockingGateItems.length > 0 ? "Resolve publish gate blockers before changing Git publication state." : undefined;
+  const realFolderSummaries =
+    gitDiff?.folders.map((summary) => ({
+      folder: summary.folder,
+      count: summary.files,
+      sample: `+${summary.additions} / -${summary.deletions}`,
+    })) ?? [];
+  const visibleFolderSummaries = realFolderSummaries.length > 0 ? realFolderSummaries : folderSummaries;
 
   useEffect(() => {
     if (activePreviewPath && selectedArtifact !== activePreviewPath) {
       onPreviewArtifact(activePreviewPath);
     }
   }, [activePreviewPath, selectedArtifact, onPreviewArtifact]);
+
+  useEffect(() => {
+    if (publishView === "diff") {
+      onLoadGitDiff({});
+    }
+  }, [onLoadGitDiff, publishView]);
 
   function handleSelectPublishArtifact(path: string) {
     setLocalSelectedPath(path);
@@ -2891,25 +3445,50 @@ export function PublishStagePanel({
           <div className="panel-subheader">
             <div>
               <h2>Folder diff summary</h2>
-              <p className="hint">Derived from current run artifacts; real Git diff remains a partial state until a backend diff API exists.</p>
+              <p className="hint">Workspace Git diff from the local architecture workspace repository.</p>
             </div>
-            <StatusBadge tone={publishArtifacts.length > 0 ? "ok" : "info"}>{publishArtifacts.length} refs</StatusBadge>
+            <StatusBadge tone={gitDiff && !gitDiff.empty ? "ok" : publishArtifacts.length > 0 ? "info" : "warn"}>
+              {gitDiff ? `${gitDiff.files.length} changed` : `${publishArtifacts.length} refs`}
+            </StatusBadge>
           </div>
-          {folderSummaries.length === 0 ? (
-            <p className="empty-state">No generated workspace artifacts are available for publication yet.</p>
+          {gitDiffStatus ? <p className={gitDiff?.empty ? "status ok" : "status warn"}>{gitDiffStatus}</p> : null}
+          {visibleFolderSummaries.length === 0 ? (
+            <p className="empty-state">No workspace Git changes are available for publication yet.</p>
           ) : (
             <div className="publish-folder-list">
-              {folderSummaries.map((summary) => (
+              {visibleFolderSummaries.map((summary) => (
                 <div key={summary.folder} className="publish-folder-row">
                   <div>
                     <strong>{summary.folder}</strong>
-                    <span>{summary.count} artifact refs</span>
+                    <span>{summary.count} file refs</span>
                   </div>
                   <span>{summary.sample}</span>
                 </div>
               ))}
             </div>
           )}
+          {gitDiff?.files.length ? (
+            <div className="publish-artifact-list compact" role="list" aria-label="changed workspace files">
+              {gitDiff.files.slice(0, 16).map((file) => (
+                <div key={file.path} role="listitem">
+                  <button
+                    type="button"
+                    className={`publish-artifact-row${gitDiff.selected_file?.path === file.path ? " is-selected" : ""}`}
+                    onClick={() => {
+                      setPublishView("diff");
+                      onLoadGitDiff({ path: file.path });
+                    }}
+                    aria-pressed={gitDiff.selected_file?.path === file.path}
+                  >
+                    <span>{file.path}</span>
+                    <code>
+                      {file.status} · +{file.additions}/-{file.deletions}
+                    </code>
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
           <div className="publish-artifact-list" role="list" aria-label="publish artifact preview list">
             {publishArtifacts.slice(0, 12).map((artifact) => (
               <div key={artifact.path} role="listitem">
@@ -2959,15 +3538,14 @@ export function PublishStagePanel({
             {publishView === "diff" ? (
               <>
                 <h2>Git diff</h2>
-                <p className="empty-state">Partial state: current UI APIs expose generated artifact refs and Git actions, but not line-level Git diff data.</p>
-                <p className="hint">Use the folder summary and selected artifact preview before committing; a future backend slice can replace this with real diff hunks.</p>
+                <GitDiffView gitDiff={gitDiff} status={gitDiffStatus} onSelectFile={(path) => onLoadGitDiff({ path })} />
               </>
             ) : null}
             {publishView === "evidence" ? (
               <>
                 <h2>Evidence before commit</h2>
                 {openQuestions.trim() ? <pre>{openQuestions}</pre> : <p className="hint">No open-question artifact content is currently loaded.</p>}
-                <p className="hint">{folderSummaries.length} workspace folders have artifact refs in this publication view.</p>
+                <p className="hint">{visibleFolderSummaries.length} workspace folders have Git diff or artifact refs in this publication view.</p>
               </>
             ) : null}
             {publishView === "changelog" ? (
@@ -3041,7 +3619,7 @@ export function PublishStagePanel({
             <dl className="compact-defs">
               <div>
                 <dt>Folders</dt>
-                <dd>{folderSummaries.map((summary) => summary.folder).join(", ") || "No generated artifact folders yet"}</dd>
+                <dd>{visibleFolderSummaries.map((summary) => summary.folder).join(", ") || "No changed folders yet"}</dd>
               </div>
               <div>
                 <dt>Proposal branch</dt>

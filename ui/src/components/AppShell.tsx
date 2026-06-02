@@ -1,11 +1,12 @@
 import type { ReactNode } from "react";
 
 import { ActivityDrawer } from "./ActivityDrawer";
+import { ActiveRunStrip } from "./ActiveRunStrip";
 import { RightInspector } from "./RightInspector";
 import { StageRail } from "./StageRail";
 import { TopStatusBar } from "./TopStatusBar";
 import type { InspectorItem, NextAction, StageId, StageOption } from "../lib/consoleTypes";
-import type { RunLogEntry } from "../lib/appContracts";
+import type { RunLogEntry, RunReviewSummaryResponse, RunStatusResponse } from "../lib/appContracts";
 
 type AppShellProps = {
   workspacePath: string;
@@ -23,6 +24,11 @@ type AppShellProps = {
   workspaceHealth: InspectorItem[];
   runtimeSafety: InspectorItem[];
   gitPublication: InspectorItem[];
+  runStatus: RunStatusResponse | null;
+  runReviewSummary: RunReviewSummaryResponse | null;
+  runtimeLabel: string;
+  cancelBusy: boolean;
+  selectedRunIsActive: boolean;
   selectedRunId?: string;
   selectedRunStatus?: string;
   selectedRunError?: string;
@@ -37,6 +43,7 @@ type AppShellProps = {
   onRefresh: () => void;
   onStageChange: (stage: StageId) => void;
   onPrimaryAction: () => void;
+  onCancelRun: () => void;
   onOpenArtifact: (path: string) => void;
   onRunLogsModeChange: (value: "events" | "raw" | "all") => void;
   onRunLogsViewModeChange: (value: "line" | "line+fields") => void;
@@ -60,6 +67,11 @@ export function AppShell({
   workspaceHealth,
   runtimeSafety,
   gitPublication,
+  runStatus,
+  runReviewSummary,
+  runtimeLabel,
+  cancelBusy,
+  selectedRunIsActive,
   selectedRunId,
   selectedRunStatus,
   selectedRunError,
@@ -74,6 +86,7 @@ export function AppShell({
   onRefresh,
   onStageChange,
   onPrimaryAction,
+  onCancelRun,
   onOpenArtifact,
   onRunLogsModeChange,
   onRunLogsViewModeChange,
@@ -91,6 +104,15 @@ export function AppShell({
         gitStatus={gitStatus}
         healthLabel={healthLabel}
         onRefresh={onRefresh}
+      />
+      <ActiveRunStrip
+        runStatus={runStatus}
+        reviewSummary={runReviewSummary}
+        runtimeLabel={runtimeLabel}
+        cancelBusy={cancelBusy}
+        selectedRunIsActive={selectedRunIsActive}
+        onCancel={onCancelRun}
+        onOpenAnalysis={() => onStageChange("analysis")}
       />
       <div className="console-grid">
         <StageRail stages={stages} activeStage={activeStage} onStageChange={onStageChange} />

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppShell } from "./components/AppShell";
 import { BaselineGitPanel } from "./components/BaselineGitPanel";
@@ -30,6 +30,7 @@ import {
   type RuntimeTimeoutKey,
 } from "./lib/appContracts";
 import type { InspectorItem, NextAction, StageId } from "./lib/consoleTypes";
+import type { LoadGitDiffOptions } from "./lib/gitDiffApi";
 import { buildStageOptions } from "./lib/stageModel";
 import { useRunExplorer } from "./hooks/useRunExplorer";
 import { useRuntimeSettings } from "./hooks/useRuntimeSettings";
@@ -127,7 +128,12 @@ export default function App() {
     selectedRunWarnings,
     selectedRunIsActive,
     runLogsRendered,
+    runReviewSummary,
+    runReviewStatus,
+    gitDiff,
+    gitDiffStatus,
     bootstrapRuns,
+    loadGitDiff,
     handleRunPipeline,
     handleSelectRun,
     handleCancelSelectedRun,
@@ -448,6 +454,21 @@ export default function App() {
     }
   }, [artifactCount, selectedRunIsActive]);
 
+  useEffect(() => {
+    if (!consoleReady || onboardingStatus?.can_enter_console !== true) {
+      return;
+    }
+    const path = activeStage === "publish" ? undefined : selectedArtifact || undefined;
+    void loadGitDiff({ runId, path });
+  }, [activeStage, consoleReady, loadGitDiff, onboardingStatus?.can_enter_console, runId, selectedArtifact]);
+
+  const handleLoadGitDiff = useCallback(
+    (options: LoadGitDiffOptions) => {
+      void loadGitDiff({ runId, ...options });
+    },
+    [loadGitDiff, runId],
+  );
+
   const stages = useMemo(
     () =>
       buildStageOptions({
@@ -618,6 +639,8 @@ export default function App() {
     ],
     [artifactCount, gitMessage, gitStatus, proposalArtifacts.length, proposalBranch],
   );
+
+  const runtimeLabel = setupRuntime === "fake" ? "fake" : `${setupRuntime}/${setupRuntimeProvider}`;
 
   const publishExternalGateItems = useMemo(
     () => [
@@ -806,6 +829,11 @@ export default function App() {
       workspaceHealth={workspaceHealth}
       runtimeSafety={runtimeSafety}
       gitPublication={gitPublication}
+      runStatus={runStatus}
+      runReviewSummary={runReviewSummary}
+      runtimeLabel={runtimeLabel}
+      cancelBusy={cancelBusy}
+      selectedRunIsActive={selectedRunIsActive}
       selectedRunId={runStatus?.run_id}
       selectedRunStatus={runStatus?.status}
       selectedRunError={runStatus?.error_code ?? runStatus?.error ?? undefined}
@@ -819,6 +847,7 @@ export default function App() {
       onRefresh={() => void bootstrapApp()}
       onStageChange={handleStageChange}
       onPrimaryAction={handleInspectorPrimaryAction}
+      onCancelRun={() => void handleCancelSelectedRun()}
       onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
       onRunLogsModeChange={setRunLogsMode}
       onRunLogsViewModeChange={setRunLogsViewMode}
@@ -935,10 +964,16 @@ export default function App() {
           artifacts={[...nonDiagramArtifacts, ...diagramArtifacts]}
           setupRuntime={setupRuntime}
           setupRuntimeProvider={setupRuntimeProvider}
+          runReviewSummary={runReviewSummary}
+          runReviewStatus={runReviewStatus}
+          gitDiff={gitDiff}
+          gitDiffStatus={gitDiffStatus}
+          onLoadGitDiff={handleLoadGitDiff}
           focusBlockerSignal={analysisFocusSignal}
           onRunPipeline={(pipeline) => void handleRunPipeline(pipeline)}
           onCancelSelectedRun={() => void handleCancelSelectedRun()}
           onSelectRun={(id) => void handleSelectRun(id)}
+          onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
         />
       ) : null}
 
@@ -951,6 +986,11 @@ export default function App() {
           selectedArtifact={selectedArtifact}
           selectedArtifactContent={selectedArtifactContent}
           selectedArtifactIsMermaid={selectedArtifactIsMermaid}
+          runLogs={runLogs}
+          reviewSummary={runReviewSummary}
+          gitDiff={gitDiff}
+          gitDiffStatus={gitDiffStatus}
+          onLoadGitDiff={handleLoadGitDiff}
           onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
         />
       ) : null}
@@ -963,6 +1003,10 @@ export default function App() {
           openQuestions={openQuestions}
           proposalBranch={proposalBranch}
           gitStatus={gitStatus}
+          runLogs={runLogs}
+          gitDiff={gitDiff}
+          gitDiffStatus={gitDiffStatus}
+          onLoadGitDiff={handleLoadGitDiff}
           onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
           onGoPublish={() => setActiveStage("publish")}
         />
@@ -981,6 +1025,9 @@ export default function App() {
           selectedArtifactContent={selectedArtifactContent}
           openQuestions={openQuestions}
           externalGateItems={publishExternalGateItems}
+          gitDiff={gitDiff}
+          gitDiffStatus={gitDiffStatus}
+          onLoadGitDiff={handleLoadGitDiff}
           onGitMessageChange={setGitMessage}
           onProposalBranchChange={setProposalBranch}
           onCommit={() => void handleGitCommit()}
