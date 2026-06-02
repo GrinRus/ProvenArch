@@ -173,6 +173,53 @@ func TestLauncherWorkspaceManifestAndRuntimeSelection(t *testing.T) {
 	}
 }
 
+func TestNormalizeOnboardingWorkspacePath(t *testing.T) {
+	t.Parallel()
+
+	validTemp := filepath.Join(os.TempDir(), "acp-onboarding-test")
+	normalized, err := normalizeOnboardingWorkspacePath(validTemp)
+	if err != nil {
+		t.Fatalf("expected temp workspace path to be accepted: %+v", err)
+	}
+	if normalized != filepath.Clean(validTemp) {
+		t.Fatalf("expected cleaned temp path %q, got %q", filepath.Clean(validTemp), normalized)
+	}
+
+	if home, homeErr := os.UserHomeDir(); homeErr == nil && strings.TrimSpace(home) != "" {
+		validHome := filepath.Join(home, "acp-workspaces", "sample")
+		normalized, err := normalizeOnboardingWorkspacePath(validHome)
+		if err != nil {
+			t.Fatalf("expected home workspace path to be accepted: %+v", err)
+		}
+		if normalized != filepath.Clean(validHome) {
+			t.Fatalf("expected cleaned home path %q, got %q", filepath.Clean(validHome), normalized)
+		}
+	}
+
+	cases := []struct {
+		name string
+		path string
+		code string
+	}{
+		{name: "empty", path: " ", code: "workspace_path_required"},
+		{name: "relative", path: "workspace", code: "workspace_path_not_absolute"},
+		{name: "traversal", path: filepath.Join(os.TempDir(), "..", "acp"), code: "workspace_path_traversal"},
+		{name: "root", path: string(filepath.Separator), code: "workspace_path_invalid"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := normalizeOnboardingWorkspacePath(tc.path)
+			if err == nil {
+				t.Fatalf("expected %s to be rejected", tc.path)
+			}
+			if err.code != tc.code {
+				t.Fatalf("expected code %q, got %q", tc.code, err.code)
+			}
+		})
+	}
+}
+
 func TestSystemDoctorEndpointReturnsReadinessChecks(t *testing.T) {
 	t.Parallel()
 

@@ -66,6 +66,9 @@ acp serve --runtime fake
 3. `Runner`: выберите `fake` для первого deterministic walkthrough.
 4. `Ready`: откройте Console V2 или запустите первый analysis.
 
+Launcher workspace path должен быть dedicated directory под текущим `$HOME` или system temp
+directory; используйте direct-mode `--workspace` для automation/advanced paths.
+
 Direct-mode для scripts, CI и опытных пользователей остаётся доступным:
 
 ```bash

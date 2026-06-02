@@ -52,7 +52,7 @@ acp doctor --workspace "$HOME/acp-workspaces/my-service"
 
 `acp serve` без `--workspace` стартует launcher/onboarding режим. До выбора workspace доступны `/api/health` и `/api/onboarding/*`; workspace-bound endpoints возвращают `428 workspace_not_selected`.
 
-Решение: откройте UI, выберите или создайте workspace в шаге `Workspace`, затем сохраните sources и runner. Для scripts/CI используйте direct-mode:
+Решение: откройте UI, выберите или создайте dedicated workspace в шаге `Workspace`. Launcher принимает paths под текущим `$HOME` или system temp directory; relative paths, root directories и `..` segments отклоняются. Затем сохраните sources и runner. Для scripts/CI используйте direct-mode:
 
 ```bash
 acp serve --workspace "$HOME/acp-workspaces/my-service" --runtime fake

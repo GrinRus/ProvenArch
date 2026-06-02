@@ -35,13 +35,9 @@ func (s *Server) handleOnboardingWorkspace(writer http.ResponseWriter, request *
 		writeError(writer, http.StatusBadRequest, "invalid_request_body", "invalid request body")
 		return
 	}
-	workspacePath := strings.TrimSpace(payload.Path)
-	if workspacePath == "" {
-		writeError(writer, http.StatusBadRequest, "workspace_path_required", "workspace path is required")
-		return
-	}
-	if !filepath.IsAbs(workspacePath) {
-		writeError(writer, http.StatusBadRequest, "workspace_path_not_absolute", "workspace path must be absolute")
+	workspacePath, pathErr := normalizeOnboardingWorkspacePath(payload.Path)
+	if pathErr != nil {
+		writeError(writer, http.StatusBadRequest, pathErr.code, pathErr.message)
 		return
 	}
 
@@ -207,4 +203,83 @@ func ensureWorkspaceGitRepository(workspacePath string) error {
 		return fmt.Errorf("workspace.git.init.failed: git init failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+type onboardingPathError struct {
+	code    string
+	message string
+}
+
+func normalizeOnboardingWorkspacePath(rawPath string) (string, *onboardingPathError) {
+	trimmed := strings.TrimSpace(rawPath)
+	if trimmed == "" {
+		return "", &onboardingPathError{code: "workspace_path_required", message: "workspace path is required"}
+	}
+	if strings.ContainsRune(trimmed, '\x00') {
+		return "", &onboardingPathError{code: "workspace_path_invalid", message: "workspace path must not contain NUL bytes"}
+	}
+	if hasParentPathSegment(trimmed) {
+		return "", &onboardingPathError{code: "workspace_path_traversal", message: "workspace path must not contain '..' path segments"}
+	}
+	cleaned := filepath.Clean(trimmed)
+	if !filepath.IsAbs(cleaned) {
+		return "", &onboardingPathError{code: "workspace_path_not_absolute", message: "workspace path must be absolute"}
+	}
+	if isFilesystemRoot(cleaned) {
+		return "", &onboardingPathError{code: "workspace_path_invalid", message: "workspace path must point to a dedicated workspace directory"}
+	}
+	if !isUnderAnyRoot(cleaned, onboardingWorkspaceAllowedRoots()) {
+		return "", &onboardingPathError{code: "workspace_path_outside_allowed_roots", message: "workspace path must be under the current user home directory or system temp directory"}
+	}
+	return cleaned, nil
+}
+
+func hasParentPathSegment(rawPath string) bool {
+	for _, part := range strings.FieldsFunc(rawPath, func(r rune) bool {
+		return r == '/' || r == '\\'
+	}) {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+func onboardingWorkspaceAllowedRoots() []string {
+	roots := []string{}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		roots = append(roots, filepath.Clean(home))
+	}
+	if tmp := strings.TrimSpace(os.TempDir()); tmp != "" {
+		roots = append(roots, filepath.Clean(tmp))
+	}
+	return roots
+}
+
+func isUnderAnyRoot(candidate string, roots []string) bool {
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		if isPathWithinRoot(candidate, root) {
+			return true
+		}
+	}
+	return false
+}
+
+func isPathWithinRoot(candidate, root string) bool {
+	candidate = filepath.Clean(candidate)
+	root = filepath.Clean(root)
+	rel, err := filepath.Rel(root, candidate)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+func isFilesystemRoot(pathValue string) bool {
+	cleaned := filepath.Clean(pathValue)
+	parent := filepath.Dir(cleaned)
+	return cleaned == parent
 }
