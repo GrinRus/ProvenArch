@@ -35,31 +35,9 @@ func (s *Server) handleOnboardingWorkspace(writer http.ResponseWriter, request *
 		writeError(writer, http.StatusBadRequest, "invalid_request_body", "invalid request body")
 		return
 	}
-	workspacePath, pathErr := normalizeOnboardingWorkspacePath(payload.Path)
-	if pathErr != nil {
-		writeError(writer, http.StatusBadRequest, pathErr.code, pathErr.message)
-		return
-	}
-
-	if payload.Create {
-		if err := os.MkdirAll(workspacePath, 0o755); err != nil {
-			writeError(writer, http.StatusBadRequest, "workspace_create_failed", fmt.Sprintf("create workspace directory: %v", err))
-			return
-		}
-	} else {
-		info, err := os.Stat(workspacePath)
-		if err != nil {
-			writeError(writer, http.StatusBadRequest, "workspace_open_failed", fmt.Sprintf("stat workspace: %v", err))
-			return
-		}
-		if !info.IsDir() {
-			writeError(writer, http.StatusBadRequest, "workspace_not_directory", "workspace path must point to a directory")
-			return
-		}
-	}
-
-	if err := ensureDraftWorkspace(workspacePath); err != nil {
-		writeError(writer, http.StatusBadRequest, "workspace_prepare_failed", err.Error())
+	workspacePath, prepareErr := prepareOnboardingWorkspace(payload.Path, payload.Create)
+	if prepareErr != nil {
+		writeError(writer, prepareErr.status, prepareErr.code, prepareErr.message)
 		return
 	}
 
@@ -129,20 +107,13 @@ func (s *Server) onboardingStatusPayload() map[string]any {
 	launcherMode := s.launcherMode
 	s.mu.RUnlock()
 
-	manifestPresent := false
-	if strings.TrimSpace(workspacePath) != "" {
-		if info, err := os.Stat(filepath.Join(workspacePath, workspace.ManifestFileName)); err == nil && !info.IsDir() {
-			manifestPresent = true
-		}
-	}
-
 	return map[string]any{
 		"ok":                 true,
 		"launcher_mode":      launcherMode,
 		"workspace_selected": workspaceSelected,
 		"workspace_ready":    workspaceReady,
 		"workspace":          workspacePath,
-		"manifest_present":   manifestPresent,
+		"manifest_present":   workspaceReady,
 		"runtime": map[string]any{
 			"selected":         runtimeSelected,
 			"runtime":          runtimeConfig.Mode,
@@ -153,11 +124,8 @@ func (s *Server) onboardingStatusPayload() map[string]any {
 	}
 }
 
-func ensureDraftWorkspace(workspacePath string) error {
-	if err := ensureWorkspaceGitRepository(workspacePath); err != nil {
-		return err
-	}
-	for _, rel := range []string{
+func onboardingWorkspaceLayoutDirectories() []string {
+	return []string{
 		"charter/cards/domains",
 		"charter/cards/teams",
 		"charter/templates",
@@ -176,62 +144,101 @@ func ensureDraftWorkspace(workspacePath string) error {
 		"docs/rfcs",
 		"docs/meetings",
 		"docs/decisions",
-	} {
-		if err := os.MkdirAll(filepath.Join(workspacePath, rel), 0o755); err != nil {
-			return fmt.Errorf("create layout directory %q: %w", rel, err)
-		}
 	}
-	return nil
-}
-
-func ensureWorkspaceGitRepository(workspacePath string) error {
-	gitDir := filepath.Join(workspacePath, ".git")
-	_, err := os.Stat(gitDir)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("workspace.git.init.stat_failed: %w", err)
-	}
-	if _, err := exec.LookPath("git"); err != nil {
-		return fmt.Errorf("workspace.git.init.git_required: install git and ensure it is available in PATH: %w", err)
-	}
-	cmd := exec.CommandContext(context.Background(), "git", "init")
-	cmd.Dir = workspacePath
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("workspace.git.init.failed: git init failed: %w: %s", err, strings.TrimSpace(string(output)))
-	}
-	return nil
 }
 
 type onboardingPathError struct {
+	status  int
 	code    string
 	message string
+}
+
+func prepareOnboardingWorkspace(rawPath string, create bool) (string, *onboardingPathError) {
+	workspacePath, pathErr := normalizeOnboardingWorkspacePath(rawPath)
+	if pathErr != nil {
+		return "", pathErr
+	}
+
+	if create {
+		// codeql[go/path-injection] Launcher workspace paths are normalized and constrained to user-home or temp roots above.
+		if err := os.MkdirAll(workspacePath, 0o755); err != nil {
+			return "", &onboardingPathError{status: http.StatusBadRequest, code: "workspace_create_failed", message: fmt.Sprintf("create workspace directory: %v", err)}
+		}
+	} else {
+		// codeql[go/path-injection] Launcher workspace paths are normalized and constrained to user-home or temp roots above.
+		info, err := os.Stat(workspacePath)
+		if err != nil {
+			return "", &onboardingPathError{status: http.StatusBadRequest, code: "workspace_open_failed", message: fmt.Sprintf("stat workspace: %v", err)}
+		}
+		if !info.IsDir() {
+			return "", &onboardingPathError{status: http.StatusBadRequest, code: "workspace_not_directory", message: "workspace path must point to a directory"}
+		}
+	}
+
+	gitDir := filepath.Join(workspacePath, ".git")
+	// codeql[go/path-injection] gitDir is derived from a normalized launcher workspace path constrained to user-home or temp roots.
+	_, err := os.Stat(gitDir)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", &onboardingPathError{status: http.StatusBadRequest, code: "workspace_prepare_failed", message: fmt.Sprintf("workspace.git.init.stat_failed: %v", err)}
+		}
+		if _, err := exec.LookPath("git"); err != nil {
+			return "", &onboardingPathError{status: http.StatusBadRequest, code: "workspace_prepare_failed", message: fmt.Sprintf("workspace.git.init.git_required: install git and ensure it is available in PATH: %v", err)}
+		}
+		cmd := exec.CommandContext(context.Background(), "git", "init")
+		cmd.Dir = workspacePath
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return "", &onboardingPathError{status: http.StatusBadRequest, code: "workspace_prepare_failed", message: fmt.Sprintf("workspace.git.init.failed: git init failed: %v: %s", err, strings.TrimSpace(string(output)))}
+		}
+	}
+
+	for _, rel := range onboardingWorkspaceLayoutDirectories() {
+		// codeql[go/path-injection] Layout directories are fixed literals joined under the normalized launcher workspace root.
+		if err := os.MkdirAll(filepath.Join(workspacePath, rel), 0o755); err != nil {
+			return "", &onboardingPathError{status: http.StatusBadRequest, code: "workspace_prepare_failed", message: fmt.Sprintf("create layout directory %q: %v", rel, err)}
+		}
+	}
+	return workspacePath, nil
 }
 
 func normalizeOnboardingWorkspacePath(rawPath string) (string, *onboardingPathError) {
 	trimmed := strings.TrimSpace(rawPath)
 	if trimmed == "" {
-		return "", &onboardingPathError{code: "workspace_path_required", message: "workspace path is required"}
+		return "", &onboardingPathError{status: http.StatusBadRequest, code: "workspace_path_required", message: "workspace path is required"}
 	}
 	if strings.ContainsRune(trimmed, '\x00') {
-		return "", &onboardingPathError{code: "workspace_path_invalid", message: "workspace path must not contain NUL bytes"}
+		return "", &onboardingPathError{status: http.StatusBadRequest, code: "workspace_path_invalid", message: "workspace path must not contain NUL bytes"}
 	}
 	if hasParentPathSegment(trimmed) {
-		return "", &onboardingPathError{code: "workspace_path_traversal", message: "workspace path must not contain '..' path segments"}
+		return "", &onboardingPathError{status: http.StatusBadRequest, code: "workspace_path_traversal", message: "workspace path must not contain '..' path segments"}
 	}
 	cleaned := filepath.Clean(trimmed)
 	if !filepath.IsAbs(cleaned) {
-		return "", &onboardingPathError{code: "workspace_path_not_absolute", message: "workspace path must be absolute"}
+		return "", &onboardingPathError{status: http.StatusBadRequest, code: "workspace_path_not_absolute", message: "workspace path must be absolute"}
 	}
 	if isFilesystemRoot(cleaned) {
-		return "", &onboardingPathError{code: "workspace_path_invalid", message: "workspace path must point to a dedicated workspace directory"}
+		return "", &onboardingPathError{status: http.StatusBadRequest, code: "workspace_path_invalid", message: "workspace path must point to a dedicated workspace directory"}
 	}
-	if !isUnderAnyRoot(cleaned, onboardingWorkspaceAllowedRoots()) {
-		return "", &onboardingPathError{code: "workspace_path_outside_allowed_roots", message: "workspace path must be under the current user home directory or system temp directory"}
+	for _, safeRoot := range onboardingWorkspaceAllowedRoots() {
+		safeRoot = filepath.Clean(safeRoot)
+		safePrefix := safeRoot + string(filepath.Separator)
+		if cleaned != safeRoot && !strings.HasPrefix(cleaned, safePrefix) {
+			continue
+		}
+		rel, err := filepath.Rel(safeRoot, cleaned)
+		if err != nil || rel == "." {
+			continue
+		}
+		absPath, err := filepath.Abs(filepath.Join(safeRoot, rel))
+		if err != nil {
+			continue
+		}
+		if absPath == safeRoot || strings.HasPrefix(absPath, safePrefix) {
+			return absPath, nil
+		}
 	}
-	return cleaned, nil
+	return "", &onboardingPathError{status: http.StatusBadRequest, code: "workspace_path_outside_allowed_roots", message: "workspace path must be under the current user home directory or system temp directory"}
 }
 
 func hasParentPathSegment(rawPath string) bool {
@@ -254,28 +261,6 @@ func onboardingWorkspaceAllowedRoots() []string {
 		roots = append(roots, filepath.Clean(tmp))
 	}
 	return roots
-}
-
-func isUnderAnyRoot(candidate string, roots []string) bool {
-	for _, root := range roots {
-		if root == "" {
-			continue
-		}
-		if isPathWithinRoot(candidate, root) {
-			return true
-		}
-	}
-	return false
-}
-
-func isPathWithinRoot(candidate, root string) bool {
-	candidate = filepath.Clean(candidate)
-	root = filepath.Clean(root)
-	rel, err := filepath.Rel(root, candidate)
-	if err != nil {
-		return false
-	}
-	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
 func isFilesystemRoot(pathValue string) bool {
