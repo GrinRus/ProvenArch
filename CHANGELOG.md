@@ -2,6 +2,31 @@
 
 All notable user-facing changes are tracked here. ProvenArch uses SemVer-style release tags, with `v0.x` treated as beta/pre-release foundation.
 
+## v0.1.2 - 2026-06-02
+
+CI-only beta release for onboarding-first startup and long-run review UX.
+
+Highlights:
+- Added UI-first launcher mode for `acp serve` without `--workspace`: operators can create/open an architecture workspace, configure sources, select a runner, review readiness, and then enter Console V2.
+- Kept direct-mode compatibility for scripts, CI, live E2E, and experienced users through `acp serve --workspace <path>`.
+- Added multi-repo source setup in onboarding and Source, using the existing `workspace.yaml.repos[]` model for local paths or Git URLs with optional refs.
+- Added mandatory runner selection in onboarding for `fake`, `claude-code`, `qwen-code`, and `codex-code`, with `fake` as the recommended deterministic first walkthrough.
+- Added long-run review UX: persistent active-run strip, canonical step review model, step-level artifacts/logs/evidence/diff tabs, and clearer partial/failure states for long provider runs.
+- Added Review Queue and integrated real workspace Git diff into Review, Proposals, and Publish, including a fuller Git Review Room for publication decisions.
+- Added local UI APIs for onboarding, run review summaries, and workspace Git diff: `/api/onboarding/*`, `/api/pipeline/runs/<run_id>/review-summary`, and `/api/git/diff`.
+- Hardened frontend live E2E and already-initialized workspace regressions while preserving the release-facing `UI_E2E_SCENARIO=init-inspect` shell.
+- Hardened launcher workspace path handling for UI onboarding: launcher paths are normalized, constrained to user-home or system temp roots, and documented; direct-mode remains the advanced path.
+
+Verification notes:
+- PR #91 was merged after green PR checks and green `main` CI for merge commit `24301e2`.
+- Local release-prep checks for the release metadata patch passed: `git diff --check`, release distribution/install tests, `make contracts`, `make test`, `make lint`, and `make build`.
+- Fresh trusted-machine `release-fast` was skipped by owner decision for this prerelease. This release does not claim canonical `RELEASE READY` status without a fresh `reports/release_verdict_<matrix-id>.json`.
+
+Known limitations:
+- `v0.1.2` remains a beta/pre-v1 release. Public behavior and artifact contracts can still evolve before `v1.0.0`.
+- Hosted/multi-tenant mode and security/compliance enforcement remain out of scope.
+- Canonical release readiness still requires trusted-machine release gate evidence from `reports/release_verdict_<matrix-id>.json` verified by `scripts/verify-release-verdict.py`.
+
 ## v0.1.1 - 2026-06-01
 
 Beta hardening, onboarding, Console V2, and no-gate prerelease candidate.
