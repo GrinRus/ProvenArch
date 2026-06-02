@@ -1437,7 +1437,7 @@ function buildAnalysisShardRows(
       provider,
       status: runStatus.status === "failed" ? "failed" : runStatus.status === "succeeded" ? "succeeded" : runStatus.status === "running" ? "active" : "observed",
       artifactRef: artifacts.length > 0 ? `${artifacts.length} selected-run artifacts` : "status only",
-      duration: "partial: not exposed",
+      duration: "Duration unavailable",
       lastMessage: runStatus.error || runStatus.error_code || "No shard logs loaded yet.",
     });
   }
@@ -1517,7 +1517,7 @@ function durationFromLogFields(fields: Record<string, unknown> | undefined): str
   if (seconds !== undefined) {
     return formatDurationMillis(seconds * 1000);
   }
-  return "partial: not exposed";
+  return "Duration unavailable";
 }
 
 function numericField(fields: Record<string, unknown> | undefined, key: string): number | undefined {

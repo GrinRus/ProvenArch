@@ -1971,6 +1971,16 @@ describe("App", () => {
                 taskrun_path: "reports/taskruns/run-analysis-v2/staging/shards/payments/runtime-execution.json",
                 fields: { provider: "qwen-code", shard_id: "payments", duration_ms: 2140 },
               },
+              {
+                cursor: 2,
+                timestamp: "2026-04-03T12:00:02Z",
+                level: "info",
+                kind: "event",
+                step_id: "init.step1.collect",
+                domain_id: "invoices",
+                message: "runtime execution persisted",
+                fields: { provider: "qwen-code", shard_id: "invoices" },
+              },
             ],
             next_cursor: 2,
             eof: true,
@@ -2008,6 +2018,8 @@ describe("App", () => {
     expect(shardTable).toHaveTextContent("failed");
     expect(shardTable).toHaveTextContent("runtime-execution.json");
     expect(shardTable).toHaveTextContent("2s");
+    expect(shardTable).toHaveTextContent("Duration unavailable");
+    expect(shardTable).not.toHaveTextContent("not exposed");
 
     const drilldown = screen.getByTestId("analysis-failed-shard-details");
     expect(drilldown).toHaveTextContent("collect manifest missing");
