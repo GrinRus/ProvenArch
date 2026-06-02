@@ -249,6 +249,7 @@ Constraints:
 - [x] Turn `Publish` into a real Git Review Room: folder summary, changed file list, selected hunks and existing publish gate/actions.
 - [x] Cover queued/no logs/partial artifacts/failed/canceled/stale/no changes/binary diff states with explicit UI/API states where data is available.
 - [x] Keep direct-mode live E2E contract unchanged.
+- [ ] After owner review/merge, move this completed follow-up plan to archive.
 
 ### Non-goals
 - [x] Do not change workspace manifest schema, runtime artifact schemas, provider contracts, CLI flags or `acp run` behavior.
