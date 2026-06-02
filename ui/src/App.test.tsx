@@ -11,6 +11,8 @@ type FetchMockState = {
   runLogs?: Record<string, MockJSON>;
   runStatus?: Record<string, MockJSON>;
   runArtifacts?: Record<string, MockJSON>;
+  runReviewSummary?: Record<string, MockJSON>;
+  gitDiff?: MockJSON;
   artifactText?: Record<string, string>;
   baselineBundleWarnings?: MockJSON[];
   cancelResponses?: Record<string, { status: number; body?: MockJSON }>;
@@ -21,6 +23,8 @@ type FetchMockState = {
   qaRunID?: string;
   qaRuns?: MockJSON[];
   qaRunResponses?: Record<string, MockJSON>;
+  onboardingStatus?: MockJSON;
+  onboardingWorkspaceSelectionStatus?: MockJSON;
 };
 
 function jsonResponse(body: MockJSON, status = 200): Response {
@@ -65,7 +69,154 @@ function createFetchMock(state: FetchMockState = {}) {
       artifacts: [],
     },
   };
+  const runReviewSummary = state.runReviewSummary ?? {
+    [runID]: {
+      run_id: runID,
+      pipeline: "init",
+      status: "succeeded",
+      started_at: "2026-04-03T12:00:00Z",
+      finished_at: "2026-04-03T12:00:02Z",
+      current_step: "init.step4.proposals",
+      warnings: [],
+      error_code: null,
+      error: null,
+      steps: [
+        {
+          step_id: "step0_constitution",
+          label: "Charter",
+          state: "done",
+          provider: "fake",
+          artifact_count: 0,
+          artifact_paths: [],
+          taskrun_paths: [],
+          warnings_count: 0,
+          errors_count: 0,
+          last_message: "charter ready",
+        },
+        {
+          step_id: "step1_collect",
+          label: "Collect",
+          state: "done",
+          provider: "fake",
+          artifact_count: 0,
+          artifact_paths: [],
+          taskrun_paths: [],
+          warnings_count: 0,
+          errors_count: 0,
+          last_message: "sources collected",
+        },
+        {
+          step_id: "step2_as_is",
+          label: "As-is docs",
+          state: "done",
+          provider: "fake",
+          artifact_count: 1,
+          artifact_paths: ["reports/as-is/overview.md"],
+          taskrun_paths: [],
+          warnings_count: 0,
+          errors_count: 0,
+          last_message: "overview generated",
+        },
+        {
+          step_id: "step3_findings",
+          label: "Findings",
+          state: "done",
+          provider: "fake",
+          artifact_count: 1,
+          artifact_paths: ["reports/findings/findings.md"],
+          taskrun_paths: [],
+          warnings_count: 0,
+          errors_count: 0,
+          last_message: "findings generated",
+        },
+        {
+          step_id: "step4_proposals",
+          label: "Proposals",
+          state: "done",
+          provider: "fake",
+          artifact_count: 1,
+          artifact_paths: ["proposals/proposal-payments/proposal.md"],
+          taskrun_paths: [],
+          warnings_count: 0,
+          errors_count: 0,
+          last_message: "proposals generated",
+        },
+      ],
+    },
+  };
+  const defaultGitDiff = state.gitDiff ?? {
+    ok: true,
+    workspace: "/tmp/workspace",
+    run_id: runID,
+    step_id: null,
+    selected_path: "reports/coverage/summary.md",
+    selected_file: {
+      path: "reports/coverage/summary.md",
+      folder: "reports/coverage",
+      status: "modified",
+      additions: 1,
+      deletions: 0,
+      binary: false,
+    },
+    files: [
+      {
+        path: "reports/coverage/summary.md",
+        folder: "reports/coverage",
+        status: "modified",
+        additions: 1,
+        deletions: 0,
+        binary: false,
+      },
+      {
+        path: "model/entities/payments-service.yaml",
+        folder: "model/entities",
+        status: "new",
+        additions: 1,
+        deletions: 0,
+        binary: false,
+      },
+      {
+        path: "proposals/adr-001.md",
+        folder: "proposals",
+        status: "new",
+        additions: 1,
+        deletions: 0,
+        binary: false,
+      },
+    ],
+    folders: [
+      { folder: "reports/coverage", files: 1, additions: 1, deletions: 0 },
+      { folder: "model/entities", files: 1, additions: 1, deletions: 0 },
+      { folder: "proposals", files: 1, additions: 1, deletions: 0 },
+    ],
+    hunks: [
+      {
+        header: "@@ -1 +1,2 @@",
+        lines: [
+          { kind: "context", old_line: 1, new_line: 1, content: "Coverage: 84%" },
+          { kind: "add", new_line: 2, content: "Workspace Git diff is reviewable." },
+        ],
+      },
+    ],
+    message: "Workspace Git diff loaded.",
+    empty: false,
+  };
   const qaRunID = state.qaRunID ?? "qa-run-1";
+  let onboardingStatus: MockJSON = state.onboardingStatus ?? {
+    ok: true,
+    launcher_mode: false,
+    workspace_selected: true,
+    workspace_ready: true,
+    workspace: "/tmp/workspace",
+    manifest_present: true,
+    runtime: {
+      selected: true,
+      runtime: "fake",
+      runtime_provider: "claude-code",
+      provider_source: "default",
+    },
+    can_enter_console: true,
+  };
 
   const artifactText: Record<string, string> = {
     "charter/overview.md": "# Charter\n",
@@ -135,6 +286,37 @@ function createFetchMock(state: FetchMockState = {}) {
     const url = typeof input === "string" ? input : input.toString();
     const method = (init?.method ?? "GET").toUpperCase();
 
+    if (method === "GET" && url === "/api/onboarding/status") {
+      return jsonResponse(onboardingStatus);
+    }
+
+    if (method === "POST" && url === "/api/onboarding/workspace") {
+      onboardingStatus =
+        state.onboardingWorkspaceSelectionStatus ?? {
+          ...onboardingStatus,
+          workspace_selected: true,
+          workspace_ready: false,
+          manifest_present: false,
+          workspace: "/tmp/onboarding-workspace",
+          can_enter_console: false,
+        };
+      return jsonResponse(onboardingStatus);
+    }
+
+    if (method === "POST" && url === "/api/onboarding/runtime") {
+      onboardingStatus = {
+        ...onboardingStatus,
+        runtime: {
+          selected: true,
+          runtime: "fake",
+          runtime_provider: "claude-code",
+          provider_source: "override",
+        },
+        can_enter_console: onboardingStatus.workspace_ready === true,
+      };
+      return jsonResponse(onboardingStatus);
+    }
+
     if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
       if (state.runStarted) {
         return jsonResponse({
@@ -164,6 +346,12 @@ function createFetchMock(state: FetchMockState = {}) {
     }
 
     if (method === "PUT" && url === "/api/workspace/manifest") {
+      onboardingStatus = {
+        ...onboardingStatus,
+        workspace_ready: true,
+        manifest_present: true,
+        can_enter_console: ((onboardingStatus.runtime as MockJSON | undefined)?.selected as boolean | undefined) === true,
+      };
       return jsonResponse({ ok: true });
     }
 
@@ -280,6 +468,10 @@ function createFetchMock(state: FetchMockState = {}) {
 
     if (method === "GET" && url === `/api/pipeline/runs/${runID}`) {
       return jsonResponse((runStatus[runID] ?? {}) as MockJSON);
+    }
+
+    if (method === "GET" && url === `/api/pipeline/runs/${runID}/review-summary`) {
+      return jsonResponse((runReviewSummary[runID] ?? {}) as MockJSON);
     }
 
     if (method === "GET" && url === `/api/pipeline/runs/${runID}/artifacts`) {
@@ -412,6 +604,28 @@ function createFetchMock(state: FetchMockState = {}) {
       });
     }
 
+    if (method === "GET" && url.startsWith("/api/git/diff")) {
+      const parsed = new URL(url, "http://localhost");
+      const selectedPath = parsed.searchParams.get("path");
+      if (!selectedPath) {
+        return jsonResponse(defaultGitDiff);
+      }
+      const files = (defaultGitDiff.files as MockJSON[] | undefined) ?? [];
+      const selectedFile = files.find((file) => file.path === selectedPath) ?? {
+        path: selectedPath,
+        folder: selectedPath.includes("/") ? selectedPath.slice(0, selectedPath.lastIndexOf("/")) : ".",
+        status: "unchanged",
+        additions: 0,
+        deletions: 0,
+        binary: false,
+      };
+      return jsonResponse({
+        ...defaultGitDiff,
+        selected_path: selectedPath,
+        selected_file: selectedFile,
+      });
+    }
+
     return jsonResponse(
       {
         error: {
@@ -442,6 +656,12 @@ vi.mock("mermaid", () => {
   };
 });
 
+async function renderConsoleApp() {
+  const view = render(<App />);
+  await screen.findByTestId("top-status-bar");
+  return view;
+}
+
 describe("App", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -452,7 +672,7 @@ describe("App", () => {
   it("supports stage navigation and settings relocation without compatibility controls", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 
-    render(<App />);
+    await renderConsoleApp();
 
     expect(screen.getByTestId("workspace-panel")).toBeInTheDocument();
     expect(screen.queryByTestId("runtime-timeouts-panel")).not.toBeInTheDocument();
@@ -470,10 +690,158 @@ describe("App", () => {
     expect(screen.getAllByText("qwen-code").length).toBeGreaterThanOrEqual(1);
   }, 15_000);
 
+  it("guides launcher onboarding through workspace, sources, runner, and console entry", async () => {
+    const fetchMock = createFetchMock({
+      onboardingStatus: {
+        ok: true,
+        launcher_mode: true,
+        workspace_selected: false,
+        workspace_ready: false,
+        workspace: "",
+        manifest_present: false,
+        runtime: {
+          selected: false,
+          runtime: "fake",
+          runtime_provider: "claude-code",
+          provider_source: "default",
+        },
+        can_enter_console: false,
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByTestId("onboarding-shell")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Architecture workspace path"), {
+      target: { value: "/tmp/onboarding-workspace" },
+    });
+    fireEvent.click(screen.getByTestId("onboarding-workspace-save"));
+
+    await screen.findByText("Selected: /tmp/onboarding-workspace");
+    fireEvent.click(screen.getByTestId("onboarding-sources-save"));
+
+    expect(await screen.findByText("Sources validated.")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("onboarding-runtime-save"));
+
+    await waitFor(() => expect(screen.getByTestId("onboarding-enter-console")).not.toBeDisabled());
+    fireEvent.click(screen.getByTestId("onboarding-enter-console"));
+
+    expect(await screen.findByTestId("top-status-bar")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/onboarding/workspace", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/workspace/manifest", expect.objectContaining({ method: "PUT" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/onboarding/runtime", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("reopens an existing workspace and enters console after validation without rewriting sources", async () => {
+    const fetchMock = createFetchMock({
+      onboardingStatus: {
+        ok: true,
+        launcher_mode: true,
+        workspace_selected: false,
+        workspace_ready: false,
+        workspace: "",
+        manifest_present: false,
+        runtime: {
+          selected: false,
+          runtime: "fake",
+          runtime_provider: "claude-code",
+          provider_source: "default",
+        },
+        can_enter_console: false,
+      },
+      onboardingWorkspaceSelectionStatus: {
+        ok: true,
+        launcher_mode: true,
+        workspace_selected: true,
+        workspace_ready: true,
+        workspace: "/tmp/existing-workspace",
+        manifest_present: true,
+        runtime: {
+          selected: false,
+          runtime: "fake",
+          runtime_provider: "claude-code",
+          provider_source: "default",
+        },
+        can_enter_console: false,
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByTestId("onboarding-shell")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Architecture workspace path"), {
+      target: { value: "/tmp/existing-workspace" },
+    });
+    fireEvent.click(screen.getByTestId("onboarding-workspace-save"));
+
+    await screen.findByText("Selected: /tmp/existing-workspace");
+    await waitFor(() => expect(fetchMock.mock.calls.some((call) => call[0] === "/api/workspace/validate")).toBe(true));
+
+    fireEvent.click(screen.getByTestId("onboarding-runtime-save"));
+
+    await waitFor(() => expect(screen.getByTestId("onboarding-enter-console")).not.toBeDisabled());
+    expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/workspace/manifest" && (call[1] as RequestInit | undefined)?.method === "PUT")).toHaveLength(0);
+
+    fireEvent.click(screen.getByTestId("onboarding-enter-console"));
+    expect(await screen.findByTestId("top-status-bar")).toBeInTheDocument();
+  });
+
+  it("restores workspace validation state when booting an already ready console", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+
+    await waitFor(() => expect(fetchMock.mock.calls.some((call) => call[0] === "/api/workspace/validate")).toBe(true));
+    expect(screen.getByTestId("source-repo-table")).toHaveTextContent("resolved");
+    expect(screen.getByTestId("top-status-bar")).toHaveTextContent("workspace valid");
+  });
+
+  it("shows recoverable duplicate repo-name errors during onboarding source setup", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        onboardingStatus: {
+          ok: true,
+          launcher_mode: true,
+          workspace_selected: false,
+          workspace_ready: false,
+          workspace: "",
+          manifest_present: false,
+          runtime: {
+            selected: false,
+            runtime: "fake",
+            runtime_provider: "claude-code",
+            provider_source: "default",
+          },
+          can_enter_console: false,
+        },
+      }),
+    );
+
+    render(<App />);
+
+    await screen.findByTestId("onboarding-shell");
+    fireEvent.change(screen.getByLabelText("Architecture workspace path"), {
+      target: { value: "/tmp/onboarding-workspace" },
+    });
+    fireEvent.click(screen.getByTestId("onboarding-workspace-save"));
+
+    await screen.findByText("Selected: /tmp/onboarding-workspace");
+    fireEvent.click(screen.getByText("Add repo"));
+    const nameInputs = screen.getAllByLabelText("Name");
+    fireEvent.change(nameInputs[1], { target: { value: "my-service" } });
+
+    await waitFor(() => expect(screen.getAllByText(/repo_name_duplicate/i)).toHaveLength(2));
+    expect(screen.getByTestId("onboarding-sources-save")).toBeDisabled();
+  });
+
   it("renders the stage rail and switches product-flow stages", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 
-    render(<App />);
+    await renderConsoleApp();
 
     for (const stage of ["source", "readiness", "charter", "analysis", "review", "proposals", "ask", "publish"]) {
       expect(screen.getByTestId(`stage-${stage}`)).toBeInTheDocument();
@@ -489,7 +857,7 @@ describe("App", () => {
   it("renders V2 shell shared surfaces without hidden compatibility controls", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 
-    render(<App />);
+    await renderConsoleApp();
 
     expect(await screen.findByTestId("workspace-panel")).toBeInTheDocument();
     expect(screen.getByTestId("top-status-bar")).toHaveTextContent(/Permissions trusted_full_access/i);
@@ -508,7 +876,7 @@ describe("App", () => {
     const fetchMock = createFetchMock({ runID: "run-review-recovery" });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<App />);
+    await renderConsoleApp();
 
     fireEvent.click(screen.getByTestId("stage-review"));
 
@@ -526,7 +894,7 @@ describe("App", () => {
   it("renders the Source V2 repo table with explicit advanced-only analysis scope", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 
-    render(<App />);
+    await renderConsoleApp();
 
     const sourceTable = await screen.findByTestId("source-repo-table");
     expect(screen.getByTestId("source-next-action")).toHaveTextContent("repository inventory");
@@ -563,7 +931,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
 
     await screen.findByTestId("review-panel");
 
@@ -588,12 +956,12 @@ describe("App", () => {
   it("renders Readiness V2 cards and compact runtime profile summary", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 
-    render(<App />);
+    await renderConsoleApp();
 
     fireEvent.click(screen.getByTestId("stage-readiness"));
 
     const readinessCards = await screen.findByTestId("readiness-summary-cards");
-    expect(screen.getByTestId("readiness-next-action")).toHaveTextContent("Validate workspace before checking local runtime readiness.");
+    expect(screen.getByTestId("readiness-next-action")).toHaveTextContent("Run local readiness checks before starting analysis.");
     expect(readinessCards).toHaveTextContent("Workspace");
     expect(readinessCards).toHaveTextContent("Repositories");
     expect(readinessCards).toHaveTextContent("Runtime provider");
@@ -611,7 +979,7 @@ describe("App", () => {
   it("renders Charter V2 workbench summary, card overview, and prompt bundle status", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 
-    render(<App />);
+    await renderConsoleApp();
 
     fireEvent.click(screen.getByTestId("stage-charter"));
 
@@ -639,7 +1007,7 @@ describe("App", () => {
   it("supports keyboard navigation across the V2 stage rail", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 
-    render(<App />);
+    await renderConsoleApp();
 
     const sourceStage = screen.getByTestId("stage-source");
     sourceStage.focus();
@@ -674,7 +1042,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
 
     expect(await screen.findByTestId("review-panel")).toBeInTheDocument();
     expect(screen.getByTestId("stage-review")).toHaveClass("is-selected");
@@ -715,7 +1083,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
 
     const explorer = await screen.findByTestId("review-artifact-explorer");
     expect(explorer).toHaveTextContent("reports/as-is");
@@ -726,6 +1094,9 @@ describe("App", () => {
     expect(explorer).toHaveTextContent("reports/coverage");
     expect(explorer).toHaveTextContent("reports/diagrams");
     expect((explorer.textContent ?? "").indexOf("reports/as-is")).toBeLessThan((explorer.textContent ?? "").indexOf("proposals"));
+    const reviewQueue = screen.getByTestId("review-queue");
+    expect(reviewQueue).toHaveTextContent("Review Queue");
+    expect(reviewQueue).toHaveTextContent("reports/coverage/summary.md");
 
     const citationCoverage = screen.getByTestId("review-citation-coverage");
     expect(citationCoverage).toHaveTextContent("Coverage summary");
@@ -736,6 +1107,9 @@ describe("App", () => {
 
     await waitFor(() => expect(screen.getByTestId("run-artifact-content")).toHaveTextContent("# System overview"));
     await waitFor(() => expect(within(explorer).getByRole("button", { name: /reports\/as-is\/overview\.md/i })).toHaveClass("is-selected"));
+
+    fireEvent.click(within(reviewQueue).getByRole("button", { name: /review queue item: review coverage summary/i }));
+    await waitFor(() => expect(screen.getByTestId("run-artifact-selected-path")).toHaveTextContent("reports/coverage/summary.md"));
 
     fireEvent.click(within(explorer).getByRole("button", { name: /reports\/as-is\/overview\.md/i }));
     await waitFor(() => expect(screen.getByTestId("run-artifact-content")).toHaveTextContent("# System overview"));
@@ -780,7 +1154,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
 
     await screen.findByTestId("review-panel");
     fireEvent.click(screen.getByTestId("review-view-domain-map-tab"));
@@ -816,7 +1190,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
 
     await screen.findByTestId("review-panel");
     fireEvent.click(screen.getByTestId("review-view-domain-map-tab"));
@@ -863,7 +1237,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
 
     await screen.findByTestId("review-panel");
     fireEvent.click(screen.getByTestId("stage-proposals"));
@@ -888,7 +1262,8 @@ describe("App", () => {
     expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("Payments changelog");
 
     fireEvent.click(within(tabs).getByRole("tab", { name: "Diff" }));
-    expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("Git diff belongs to the Publish gate slice");
+    expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("Workspace Git diff loaded.");
+    expect(screen.getByTestId("git-diff-view")).toHaveTextContent("reports/coverage/summary.md");
 
     fireEvent.click(screen.getByRole("button", { name: "Review in Publish" }));
     expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
@@ -915,7 +1290,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
 
     await screen.findByTestId("review-panel");
     fireEvent.click(screen.getByTestId("stage-proposals"));
@@ -949,7 +1324,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
 
     await screen.findByTestId("review-panel");
     await waitFor(() => expect(screen.getByTestId("run-artifact-selected-path")).toHaveTextContent("reports/as-is/overview.md"));
@@ -987,7 +1362,8 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<App />);
+    await renderConsoleApp();
+    await screen.findByTestId("review-panel");
 
     fireEvent.click(screen.getByTestId("stage-publish"));
 
@@ -1008,7 +1384,8 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByTestId("publish-panel")).toHaveTextContent("Coverage ready for publication."));
 
     fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
-    expect(screen.getByText(/current UI APIs expose generated artifact refs/i)).toBeInTheDocument();
+    expect(screen.getByTestId("git-diff-view")).toHaveTextContent("Workspace Git diff loaded.");
+    expect(screen.getByTestId("git-diff-hunks")).toHaveTextContent("Workspace Git diff is reviewable.");
 
     expect(screen.getByTestId("publish-preview-tabs")).toHaveTextContent("Changelog");
     expect(screen.getByTestId("publish-preview-tabs")).not.toHaveTextContent("Checklist");
@@ -1067,7 +1444,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
 
     await screen.findByTestId("review-panel");
     fireEvent.click(screen.getByTestId("stage-proposals"));
@@ -1089,7 +1466,7 @@ describe("App", () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<App />);
+    await renderConsoleApp();
 
     fireEvent.click(screen.getByTestId("stage-publish"));
 
@@ -1131,7 +1508,8 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<App />);
+    await renderConsoleApp();
+    await screen.findByTestId("review-panel");
 
     fireEvent.click(screen.getByTestId("stage-publish"));
 
@@ -1168,7 +1546,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
 
     expect(await screen.findByTestId("review-panel")).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: /reports\/diagrams\/c4-context\.mmd/i })[0]);
@@ -1181,7 +1559,7 @@ describe("App", () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<App />);
+    await renderConsoleApp();
 
     fireEvent.click(screen.getByTestId("stage-ask"));
     fireEvent.change(await screen.findByTestId("qa-question-input"), { target: { value: "Who owns payments?" } });
@@ -1210,7 +1588,7 @@ describe("App", () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<App />);
+    await renderConsoleApp();
 
     fireEvent.click(screen.getByTestId("stage-ask"));
     fireEvent.change(await screen.findByTestId("qa-question-input"), { target: { value: "Who owns payments?" } });
@@ -1251,7 +1629,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
 
     fireEvent.click(screen.getByTestId("stage-ask"));
 
@@ -1281,7 +1659,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
 
     fireEvent.click(screen.getByTestId("stage-ask"));
     fireEvent.change(await screen.findByTestId("qa-question-input"), { target: { value: "What is known?" } });
@@ -1296,7 +1674,7 @@ describe("App", () => {
     const fetchMock = createFetchMock({ runID: "run-first" });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<App />);
+    await renderConsoleApp();
 
     expect(screen.getByTestId("stage-source")).toHaveClass("is-selected");
     expect(screen.getByDisplayValue("https://github.com/org/my-service.git")).toBeInTheDocument();
@@ -1323,7 +1701,7 @@ describe("App", () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<App />);
+    await renderConsoleApp();
 
     fireEvent.change(screen.getByLabelText("Repo source type"), { target: { value: "path" } });
     fireEvent.change(await screen.findByLabelText("Local checkout path"), { target: { value: "/tmp/my-service" } });
@@ -1348,7 +1726,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
 
     expect(await screen.findByDisplayValue("loaded-service")).toBeInTheDocument();
     expect(screen.getByLabelText("Repo source type")).toHaveValue("path");
@@ -1380,7 +1758,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
 
     fireEvent.click(screen.getByTestId("stage-readiness"));
     fireEvent.click(screen.getByTestId("workspace-validate-btn"));
@@ -1393,7 +1771,7 @@ describe("App", () => {
   it("requires revalidation after first-run setup changes", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 
-    render(<App />);
+    await renderConsoleApp();
 
     fireEvent.click(screen.getByText("Preview workspace.yaml draft"));
     fireEvent.click(screen.getByTestId("workspace-save-btn"));
@@ -1415,7 +1793,7 @@ describe("App", () => {
   it("clears readiness checklist after runtime selection changes", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 
-    render(<App />);
+    await renderConsoleApp();
 
     fireEvent.click(screen.getByTestId("stage-readiness"));
     fireEvent.click(screen.getByTestId("setup-doctor-btn"));
@@ -1481,12 +1859,20 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<App />);
+    await renderConsoleApp();
 
     fireEvent.click(screen.getByTestId("stage-analysis"));
     fireEvent.click(screen.getByTestId("run-init-btn"));
 
+    const activeRunStrip = await screen.findByTestId("active-run-strip");
+    expect(activeRunStrip).toHaveTextContent(runID);
+    expect(activeRunStrip).toHaveTextContent("5/5 steps");
+
     await screen.findByTestId("run-status-panel");
+    expect(await screen.findAllByTestId("analysis-step-review-card")).toHaveLength(5);
+    fireEvent.click(screen.getByTestId("analysis-step-tab-diff"));
+    await waitFor(() => expect(screen.getByTestId("git-diff-view")).toHaveTextContent("Workspace Git diff loaded."));
+
     const logs = await screen.findByTestId("run-logs-content");
     expect(logs.textContent ?? "").toContain("[EVENT]");
     expect(logs.textContent ?? "").toContain("[RAW]");
@@ -1539,7 +1925,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
     fireEvent.click(screen.getByTestId("stage-analysis"));
 
     expect(await screen.findByTestId("runs-pending-permissions-table")).toBeInTheDocument();
@@ -1585,6 +1971,16 @@ describe("App", () => {
                 taskrun_path: "reports/taskruns/run-analysis-v2/staging/shards/payments/runtime-execution.json",
                 fields: { provider: "qwen-code", shard_id: "payments", duration_ms: 2140 },
               },
+              {
+                cursor: 2,
+                timestamp: "2026-04-03T12:00:02Z",
+                level: "info",
+                kind: "event",
+                step_id: "init.step1.collect",
+                domain_id: "invoices",
+                message: "runtime execution persisted",
+                fields: { provider: "qwen-code", shard_id: "invoices" },
+              },
             ],
             next_cursor: 2,
             eof: true,
@@ -1599,15 +1995,17 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
+    await screen.findByTestId("review-panel");
 
     fireEvent.click(screen.getByTestId("stage-analysis"));
+    await waitFor(() => expect(screen.getByTestId("stage-analysis")).toHaveClass("is-selected"));
 
     const progress = await screen.findByTestId("analysis-run-progress");
     expect(progress).toHaveTextContent(runID);
     expect(progress).toHaveTextContent("fake");
     expect(progress).toHaveTextContent("init.step1.collect");
-    expect(screen.getByTestId("analysis-review-blocker-btn")).not.toBeDisabled();
+    expect(within(progress).getByTestId("analysis-review-blocker-btn")).not.toBeDisabled();
 
     const timeline = screen.getByTestId("analysis-run-timeline");
     expect(timeline).toHaveTextContent("init.step0.constitution");
@@ -1620,6 +2018,8 @@ describe("App", () => {
     expect(shardTable).toHaveTextContent("failed");
     expect(shardTable).toHaveTextContent("runtime-execution.json");
     expect(shardTable).toHaveTextContent("2s");
+    expect(shardTable).toHaveTextContent("Duration unavailable");
+    expect(shardTable).not.toHaveTextContent("not exposed");
 
     const drilldown = screen.getByTestId("analysis-failed-shard-details");
     expect(drilldown).toHaveTextContent("collect manifest missing");
@@ -1662,7 +2062,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
 
     fireEvent.click(screen.getByTestId("stage-analysis"));
     await screen.findByTestId("run-logs-content");
@@ -1707,7 +2107,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
     fireEvent.click(screen.getByTestId("stage-analysis"));
     await screen.findByTestId("run-status-panel");
     fireEvent.click(screen.getByTestId("run-cancel-btn"));
@@ -1811,7 +2211,7 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<App />);
+    await renderConsoleApp();
     fireEvent.click(screen.getByTestId("stage-analysis"));
 
     await waitFor(() => {
@@ -1855,7 +2255,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
     fireEvent.click(screen.getByTestId("stage-analysis"));
     await screen.findByTestId("run-status-panel");
     fireEvent.click(screen.getByTestId("run-cancel-btn"));
@@ -1866,7 +2266,7 @@ describe("App", () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<App />);
+    await renderConsoleApp();
     fireEvent.click(screen.getByTestId("stage-readiness"));
 
     const timeoutInput = await screen.findByTestId("runtime-timeout-input-step_timeout_sec");
@@ -1960,11 +2360,11 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
     fireEvent.click(screen.getByTestId("stage-analysis"));
 
     fireEvent.click(await screen.findByText("Runtime execution artifacts (1)"));
-    const quickAction = await screen.findByTitle(taskrunPath);
+    const quickAction = await screen.findByRole("button", { name: /open runtime execution artifact:/i });
     fireEvent.click(quickAction);
 
     fireEvent.click(screen.getByTestId("stage-review"));
@@ -2072,7 +2472,7 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<App />);
+    await renderConsoleApp();
 
     fireEvent.click(screen.getByTestId("stage-review"));
     fireEvent.click(screen.getByTestId("stage-review"));
@@ -2123,7 +2523,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
 
     fireEvent.click(screen.getByTestId("stage-analysis"));
 
@@ -2164,7 +2564,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
 
     fireEvent.click(screen.getByTestId("stage-analysis"));
 
@@ -2198,7 +2598,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
 
     fireEvent.click(screen.getByTestId("stage-analysis"));
 
@@ -2229,7 +2629,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    await renderConsoleApp();
 
     fireEvent.click(screen.getByTestId("stage-analysis"));
 
@@ -2335,7 +2735,7 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<App />);
+    await renderConsoleApp();
     fireEvent.click(screen.getByTestId("stage-analysis"));
 
     await waitFor(() => {
@@ -2402,7 +2802,7 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<App />);
+    await renderConsoleApp();
     fireEvent.click(screen.getByTestId("stage-analysis"));
 
     await waitFor(() => {
@@ -2439,7 +2839,7 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<App />);
+    await renderConsoleApp();
 
     fireEvent.click(screen.getByTestId("stage-review"));
     fireEvent.click(screen.getByTestId("stage-review"));
@@ -2461,7 +2861,7 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<App />);
+    await renderConsoleApp();
 
     fireEvent.click(screen.getByTestId("stage-charter"));
 
@@ -2485,7 +2885,7 @@ describe("App", () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<App />);
+    await renderConsoleApp();
 
     fireEvent.click(screen.getByTestId("stage-charter"));
 

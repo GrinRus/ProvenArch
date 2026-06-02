@@ -20,7 +20,7 @@ func TestRunHelp(t *testing.T) {
 	if code != exitCodeOK {
 		t.Fatalf("expected exit code %d, got %d", exitCodeOK, code)
 	}
-	if !strings.Contains(stdout.String(), "acp serve --workspace <abs-path>") {
+	if !strings.Contains(stdout.String(), "acp serve [--workspace <abs-path>]") {
 		t.Fatalf("expected help output, got %q", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "acp doctor") {
@@ -81,7 +81,7 @@ func TestServeHelpReturnsZero(t *testing.T) {
 	if code != exitCodeOK {
 		t.Fatalf("expected exit code %d, got %d", exitCodeOK, code)
 	}
-	if !strings.Contains(stderr.String(), "Usage: acp serve --workspace <abs-path>") {
+	if !strings.Contains(stderr.String(), "Usage: acp serve [--workspace <abs-path>]") {
 		t.Fatalf("expected serve usage in stderr, got %q", stderr.String())
 	}
 }
@@ -644,6 +644,42 @@ func TestServeBootstrapSkeleton(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("expected empty stderr, got %q", stderr.String())
+	}
+}
+
+func TestServeDryRunWithoutWorkspaceStartsLauncher(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"serve", "--dry-run"}, &stdout, &stderr)
+	if code != exitCodeOK {
+		t.Fatalf("expected exit code %d, got %d: stderr=%q", exitCodeOK, code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "launcher ready") {
+		t.Fatalf("expected launcher dry-run output, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "runtime mode: fake") {
+		t.Fatalf("expected runtime mode output, got %q", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr, got %q", stderr.String())
+	}
+}
+
+func TestServeLauncherRejectsAutoInitFlagsWithoutWorkspace(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"serve", "--auto-init", "--repo-name", "sample", "--repo-path", "/tmp/sample", "--dry-run"}, &stdout, &stderr)
+	if code != exitCodeValidation {
+		t.Fatalf("expected exit code %d, got %d", exitCodeValidation, code)
+	}
+	if !strings.Contains(stderr.String(), "--auto-init and repo flags require --workspace") {
+		t.Fatalf("expected auto-init workspace error, got %q", stderr.String())
 	}
 }
 

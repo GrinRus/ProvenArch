@@ -18,7 +18,7 @@ operator CLI / UI -> ACP Go orchestrator -> runtime provider -> staged artifacts
 > **Статус:** MVP beta / pre-v1 foundation. Public API, artifact contracts и UX могут меняться до `v1.0.0`.
 > **Стек реализации:** Go backend/orchestrator + embedded React/TypeScript UI.
 > **Runtime анализа:** deterministic `fake` baseline или headless providers `claude-code`, `qwen-code`, `codex-code`.
-> **Последняя ревизия README:** 2026-05-25.
+> **Последняя ревизия README:** 2026-06-02.
 
 ## Что это
 
@@ -96,12 +96,34 @@ Installer резолвит последний GitHub Release, скачивает
 Начинайте с deterministic `fake` runtime. Он проверяет install, workspace setup, UI,
 pipeline wiring, validators и publication artifacts без AI provider.
 
-Ниже используется уже склонированный локальный Git checkout. Для GitHub/GitLab URL замените
-`--repo-path "$HOME/src/my-service"` на `--repo-git-url https://github.com/org/my-service.git`.
+Самый простой путь - запустить локальную UI-консоль без заранее выбранного workspace:
 
 ```bash
 mkdir -p "$HOME/acp-workspaces"
 
+acp serve --runtime fake
+```
+
+Откройте [http://127.0.0.1:8080](http://127.0.0.1:8080).
+
+В onboarding UI:
+
+1. `Workspace`: создайте или откройте `arch-workspace`, например `$HOME/acp-workspaces/my-service`. ACP инициализирует fixed layout и git в workspace.
+2. `Sources`: добавьте один или несколько target repos через GitHub/GitLab URL или local checkout path, optional `ref` и `docs.imports_path`.
+3. `Runner`: выберите runner. Для первого walkthrough используйте `fake`; live providers (`claude-code`, `qwen-code`, `codex-code`) включаются явно.
+4. `Ready`: проверьте summary и откройте Console V2 или сразу запустите первый `init` analysis.
+
+После onboarding основной UI остаётся прежним:
+
+1. `Source`: редактируйте repo inventory и docs imports; repo table покажет источник, ref и validation state.
+2. `Readiness`: провалидируйте `workspace.yaml`, запустите readiness checks и проверьте runtime/permissions/artifacts.
+3. `Charter`: проверьте wizard summary, domain/team card overview, стартовый architecture charter и baseline prompts.
+4. `Analysis`: запустите или отслеживайте `init`/`refresh` analysis через mission control, timeline, shard/log table и warning/error drilldown.
+5. `Review` / `Proposals` / `Ask` / `Publish`: просмотрите coverage, artifacts, diagrams, proposals, задайте read-only Q&A с run history/citations/safety panel и подготовьте git changes.
+
+Опытные пользователи, scripts, CI и live E2E могут по-прежнему открыть direct-mode console сразу на известном workspace. Ниже используется уже склонированный локальный Git checkout. Для GitHub/GitLab URL замените `--repo-path "$HOME/src/my-service"` на `--repo-git-url https://github.com/org/my-service.git`.
+
+```bash
 acp doctor \
   --workspace "$HOME/acp-workspaces/my-service" \
   --repo-path "$HOME/src/my-service"
@@ -113,16 +135,6 @@ acp serve \
   --repo-path "$HOME/src/my-service" \
   --runtime fake
 ```
-
-Откройте [http://127.0.0.1:8080](http://127.0.0.1:8080).
-
-В UI:
-
-1. `Source`: выберите GitHub/GitLab URL или local checkout folder и docs imports folder; repo table покажет источник, ref и validation state.
-2. `Readiness`: сохраните и провалидируйте `workspace.yaml`, затем запустите readiness checks; summary cards покажут workspace/repo/runtime/permissions/artifacts, для первого walkthrough используйте `fake`.
-3. `Charter`: проверьте wizard summary, domain/team card overview, стартовый architecture charter и baseline prompts.
-4. `Analysis`: запустите первый `init` analysis и следите за mission control, step timeline, shard/log table и warning/error drilldown.
-5. `Review` / `Proposals` / `Ask` / `Publish`: просмотрите coverage, artifacts, diagrams, proposals, задайте read-only Q&A с run history/citations/safety panel и подготовьте git changes.
 
 Тот же первый анализ можно запустить из CLI:
 

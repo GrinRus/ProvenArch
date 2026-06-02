@@ -851,13 +851,44 @@ code {
   margin-bottom: 0.75rem;
 }
 
+.source-table {
+  min-width: 820px;
+  table-layout: fixed;
+}
+
+.source-table th:nth-child(1),
+.source-table td:nth-child(1) {
+  width: 18%;
+}
+
+.source-table th:nth-child(2),
+.source-table td:nth-child(2) {
+  width: 36%;
+}
+
+.source-table th:nth-child(3),
+.source-table td:nth-child(3) {
+  width: 16%;
+}
+
+.source-table th:nth-child(4),
+.source-table td:nth-child(4) {
+  width: 18%;
+}
+
+.source-table th:nth-child(5),
+.source-table td:nth-child(5) {
+  width: 12%;
+}
+
+.source-table th,
 .source-table td {
-  min-width: 8rem;
+  overflow-wrap: anywhere;
 }
 
 .source-table code {
   display: block;
-  max-width: 24rem;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2324,6 +2355,416 @@ code {
   max-height: 220px;
 }
 
+.onboarding-shell {
+  min-height: 100vh;
+  padding: 1.25rem;
+  background: var(--page);
+  color: var(--ink);
+}
+
+.onboarding-panel {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+}
+
+.onboarding-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 0 1.1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.onboarding-header h1 {
+  margin: 0.1rem 0 0.35rem;
+  font-size: 1.45rem;
+}
+
+.onboarding-status-stack {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.status-pill {
+  padding: 0.34rem 0.58rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-muted);
+  background: var(--surface);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.status-pill.is-ready {
+  border-color: var(--ok-line);
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+
+.onboarding-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  padding-top: 1rem;
+}
+
+.onboarding-card {
+  min-width: 0;
+  padding: 0.95rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--surface);
+}
+
+.card-heading,
+.repo-row-title,
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.card-heading {
+  align-items: flex-start;
+  margin-bottom: 0.85rem;
+}
+
+.card-heading h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.step-index {
+  display: inline-grid;
+  width: 1.65rem;
+  height: 1.65rem;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.onboarding-repo-row {
+  padding: 0.72rem;
+  margin-bottom: 0.65rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 0.42rem;
+  background: var(--surface-muted);
+}
+
+.repo-row-title {
+  justify-content: space-between;
+  margin-bottom: 0.55rem;
+}
+
+.checkbox-row {
+  margin: 0.7rem 0;
+  color: var(--ink-muted);
+  font-size: 0.88rem;
+}
+
+.checklist {
+  display: grid;
+  gap: 0.45rem;
+  padding-left: 1.15rem;
+  color: var(--ink-muted);
+}
+
+.checklist li.is-ready {
+  color: var(--ok);
+  font-weight: 800;
+}
+
+.error-text {
+  color: var(--err);
+  font-weight: 800;
+}
+
+.diagnostic-list {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.65rem;
+}
+
+.diagnostic-list .status {
+  margin: 0;
+}
+
+.active-run-strip {
+  min-height: 3.15rem;
+  display: grid;
+  grid-template-columns: minmax(16rem, 1.4fr) repeat(4, minmax(7rem, 0.7fr)) auto;
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.55rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.active-run-main,
+.active-run-actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.active-run-main > div,
+.active-run-stat {
+  min-width: 0;
+  display: grid;
+  gap: 0.05rem;
+}
+
+.active-run-main strong,
+.active-run-stat strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+}
+
+.active-run-main span,
+.active-run-stat span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-muted);
+  font-size: 0.72rem;
+}
+
+.active-run-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.active-run-actions button,
+.active-run-strip button {
+  min-height: 1.9rem;
+  padding: 0.32rem 0.56rem;
+  border: 1px solid var(--line);
+  border-radius: 0.38rem;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 720;
+}
+
+.analysis-step-review {
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line-soft);
+}
+
+.analysis-step-card-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.52rem;
+  margin-top: 0.65rem;
+}
+
+.analysis-step-review-card {
+  min-width: 0;
+  display: grid;
+  gap: 0.16rem;
+  align-content: start;
+  text-align: left;
+  border-color: var(--line-soft);
+  background: var(--surface-muted);
+}
+
+.analysis-step-review-card.is-selected {
+  border-color: rgba(15, 118, 110, 0.42);
+  background: var(--accent-soft);
+}
+
+.analysis-step-review-card.done {
+  border-color: rgba(21, 128, 61, 0.2);
+}
+
+.analysis-step-review-card.active {
+  border-color: rgba(161, 98, 7, 0.28);
+}
+
+.analysis-step-review-card.failed {
+  border-color: rgba(180, 35, 24, 0.28);
+  background: var(--err-soft);
+}
+
+.analysis-step-review-card code,
+.analysis-step-review-card span,
+.review-queue-item code,
+.git-diff-file code,
+.git-diff-file span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step-review-tabs,
+.evidence-preview-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.7rem;
+}
+
+.step-review-tabs button,
+.evidence-preview-tabs button {
+  min-height: 1.9rem;
+  padding: 0.3rem 0.56rem;
+}
+
+.step-review-tabs button.is-active,
+.evidence-preview-tabs button.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: #0f4f4a;
+}
+
+.step-review-body,
+.review-tab-summary {
+  margin-top: 0.65rem;
+  padding: 0.68rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 0.46rem;
+  background: var(--surface-muted);
+}
+
+.review-queue {
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.review-queue ul,
+.git-diff-file-list ul {
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.review-queue li,
+.git-diff-file-list li {
+  margin-bottom: 0.35rem;
+}
+
+.review-queue-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.28rem 0.48rem;
+  align-items: center;
+  text-align: left;
+}
+
+.review-queue-item code {
+  grid-column: 2;
+  color: var(--ink-muted);
+}
+
+.git-diff-view {
+  min-width: 0;
+}
+
+.git-diff-layout {
+  display: grid;
+  grid-template-columns: minmax(14rem, 0.9fr) minmax(0, 1.4fr);
+  gap: 0.72rem;
+  align-items: start;
+}
+
+.git-diff-file-list,
+.git-diff-hunks {
+  min-width: 0;
+  padding: 0.65rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 0.46rem;
+  background: var(--surface);
+}
+
+.git-diff-folder-summary {
+  display: grid;
+  gap: 0.22rem;
+  margin-top: 0.45rem;
+  color: var(--ink-muted);
+  font-size: 0.76rem;
+}
+
+.git-diff-file {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  gap: 0.18rem;
+  text-align: left;
+  background: var(--surface-muted);
+}
+
+.git-diff-file.is-selected {
+  border-color: rgba(15, 118, 110, 0.42);
+  background: var(--accent-soft);
+}
+
+.git-diff-file span {
+  display: flex;
+  gap: 0.32rem;
+  align-items: center;
+}
+
+.git-diff-hunk {
+  margin-top: 0.6rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 0.42rem;
+  overflow: hidden;
+  background: #fff;
+}
+
+.git-diff-hunk-header {
+  padding: 0.42rem 0.55rem;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--surface-muted);
+  color: var(--ink-muted);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.76rem;
+}
+
+.git-diff-line {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 3rem 3rem minmax(0, 1fr);
+  gap: 0.34rem;
+  padding: 0.12rem 0.45rem;
+  font-size: 0.78rem;
+}
+
+.git-diff-line.add {
+  background: rgba(21, 128, 61, 0.08);
+}
+
+.git-diff-line.delete {
+  background: rgba(180, 35, 24, 0.08);
+}
+
+.git-diff-line-number {
+  color: var(--ink-faint);
+  text-align: right;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.git-diff-line code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 @media (min-width: 1181px) and (max-width: 1480px) {
   .review-workbench,
   .proposals-review-room,
@@ -2371,13 +2812,27 @@ code {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .active-run-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .active-run-main,
+  .active-run-actions {
+    grid-column: span 3;
+  }
+
   .readiness-card-grid,
   .runtime-summary-grid,
   .charter-summary-grid,
   .charter-workbench-grid,
   .analysis-progress-grid,
-  .analysis-timeline {
+  .analysis-timeline,
+  .analysis-step-card-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .git-diff-layout {
+    grid-template-columns: 1fr;
   }
 
   .review-workbench,
@@ -2442,6 +2897,7 @@ code {
   .charter-workbench-grid,
   .analysis-progress-grid,
   .analysis-timeline,
+  .analysis-step-card-grid,
   .domain-map-summary-grid {
     grid-template-columns: repeat(auto-fit, minmax(11.5rem, 1fr));
   }
@@ -2455,10 +2911,36 @@ code {
 }
 
 @media (max-width: 900px) {
+  .onboarding-shell {
+    padding: 0.8rem;
+  }
+
+  .onboarding-header,
+  .onboarding-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .onboarding-header {
+    display: grid;
+  }
+
+  .onboarding-status-stack {
+    justify-content: flex-start;
+  }
+
   .top-status-bar {
     position: static;
     grid-template-columns: 1fr;
     gap: 0.55rem;
+  }
+
+  .active-run-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .active-run-main,
+  .active-run-actions {
+    grid-column: auto;
   }
 
   .top-actions {
@@ -2569,7 +3051,9 @@ code {
   .charter-workbench-grid,
   .charter-card-stats,
   .analysis-progress-grid,
-  .analysis-timeline {
+  .analysis-timeline,
+  .analysis-step-card-grid,
+  .git-diff-layout {
     grid-template-columns: 1fr;
   }
 

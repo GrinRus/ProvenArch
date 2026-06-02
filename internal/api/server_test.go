@@ -43,6 +43,183 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 }
 
+func TestLauncherBlocksWorkspaceAPIsUntilWorkspaceSelected(t *testing.T) {
+	t.Parallel()
+
+	server := NewLauncherServer(testServerRuntimeConfig(), testLauncherServiceFactory())
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Post(httpServer.URL+"/api/workspace/validate", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatalf("POST /api/workspace/validate: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusPreconditionRequired {
+		t.Fatalf("expected 428 before workspace selection, got %d", response.StatusCode)
+	}
+
+	statusResponse, err := http.Get(httpServer.URL + "/api/onboarding/status")
+	if err != nil {
+		t.Fatalf("GET /api/onboarding/status: %v", err)
+	}
+	defer statusResponse.Body.Close()
+	if statusResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected onboarding status 200, got %d", statusResponse.StatusCode)
+	}
+	var status map[string]any
+	if err := json.NewDecoder(statusResponse.Body).Decode(&status); err != nil {
+		t.Fatalf("decode onboarding status: %v", err)
+	}
+	if status["workspace_selected"].(bool) {
+		t.Fatalf("expected no workspace selected in launcher status: %#v", status)
+	}
+}
+
+func TestDirectModeOnboardingStatusReflectsRuntimeConfig(t *testing.T) {
+	t.Parallel()
+
+	wsServer := newTestServer(t)
+	ws := wsServer.getWorkspace()
+	server := NewServerWithRuntime(ws, orchestrator.NewService(orchestrator.WithHistoryWorkspace(ws)), ServerRuntimeConfig{
+		Mode:           acpruntime.RuntimeModeHeadless,
+		Provider:       acpruntime.ProviderQwenCode,
+		ProviderSource: acpruntime.ProviderSourceOverride,
+	})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Get(httpServer.URL + "/api/onboarding/status")
+	if err != nil {
+		t.Fatalf("GET /api/onboarding/status: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected onboarding status 200, got %d", response.StatusCode)
+	}
+	var status struct {
+		CanEnterConsole bool `json:"can_enter_console"`
+		Runtime         struct {
+			Selected        bool   `json:"selected"`
+			Runtime         string `json:"runtime"`
+			RuntimeProvider string `json:"runtime_provider"`
+			ProviderSource  string `json:"provider_source"`
+		} `json:"runtime"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&status); err != nil {
+		t.Fatalf("decode onboarding status: %v", err)
+	}
+	if !status.CanEnterConsole || !status.Runtime.Selected {
+		t.Fatalf("expected direct mode ready runtime status, got %+v", status)
+	}
+	if status.Runtime.Runtime != acpruntime.RuntimeModeHeadless {
+		t.Fatalf("expected headless runtime, got %q", status.Runtime.Runtime)
+	}
+	if status.Runtime.RuntimeProvider != string(acpruntime.ProviderQwenCode) {
+		t.Fatalf("expected qwen provider, got %q", status.Runtime.RuntimeProvider)
+	}
+	if status.Runtime.ProviderSource != string(acpruntime.ProviderSourceOverride) {
+		t.Fatalf("expected override provider source, got %q", status.Runtime.ProviderSource)
+	}
+}
+
+func TestLauncherWorkspaceManifestAndRuntimeSelection(t *testing.T) {
+	t.Parallel()
+
+	server := NewLauncherServer(testServerRuntimeConfig(), testLauncherServiceFactory())
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	root := t.TempDir()
+	workspacePath := filepath.Join(root, "arch-workspace")
+	repoPath := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("create repo path: %v", err)
+	}
+
+	workspaceResponse := postJSON(t, httpServer.URL+"/api/onboarding/workspace", fmt.Sprintf(`{"path":%q,"create":true}`, workspacePath))
+	defer workspaceResponse.Body.Close()
+	if workspaceResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected workspace selection 200, got %d", workspaceResponse.StatusCode)
+	}
+	if _, err := os.Stat(filepath.Join(workspacePath, ".git")); err != nil {
+		t.Fatalf("expected draft workspace git init: %v", err)
+	}
+
+	manifest := fmt.Sprintf("version: 1\nrepos:\n  - name: sample\n    path: %q\ndocs:\n  imports_path: %q\n", repoPath, "./docs/imports")
+	manifestResponse := postJSONWithMethod(t, http.MethodPut, httpServer.URL+"/api/workspace/manifest", fmt.Sprintf(`{"content":%q}`, manifest))
+	defer manifestResponse.Body.Close()
+	if manifestResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected manifest save 200, got %d", manifestResponse.StatusCode)
+	}
+
+	runtimeResponse := postJSON(t, httpServer.URL+"/api/onboarding/runtime", `{"runtime":"fake","runtime_provider":"claude-code"}`)
+	if runtimeResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected runtime selection 200, got %d", runtimeResponse.StatusCode)
+	}
+	defer runtimeResponse.Body.Close()
+	var status map[string]any
+	if err := json.NewDecoder(runtimeResponse.Body).Decode(&status); err != nil {
+		t.Fatalf("decode runtime status: %v", err)
+	}
+	if !status["can_enter_console"].(bool) {
+		t.Fatalf("expected launcher ready after workspace manifest and runtime selection: %#v", status)
+	}
+
+	validateResponse := postJSON(t, httpServer.URL+"/api/workspace/validate", "{}")
+	defer validateResponse.Body.Close()
+	if validateResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected workspace validate 200 after manifest save, got %d", validateResponse.StatusCode)
+	}
+}
+
+func TestNormalizeOnboardingWorkspacePath(t *testing.T) {
+	t.Parallel()
+
+	validTemp := filepath.Join(os.TempDir(), "acp-onboarding-test")
+	normalized, err := normalizeOnboardingWorkspacePath(validTemp)
+	if err != nil {
+		t.Fatalf("expected temp workspace path to be accepted: %+v", err)
+	}
+	if normalized != filepath.Clean(validTemp) {
+		t.Fatalf("expected cleaned temp path %q, got %q", filepath.Clean(validTemp), normalized)
+	}
+
+	if home, homeErr := os.UserHomeDir(); homeErr == nil && strings.TrimSpace(home) != "" {
+		validHome := filepath.Join(home, "acp-workspaces", "sample")
+		normalized, err := normalizeOnboardingWorkspacePath(validHome)
+		if err != nil {
+			t.Fatalf("expected home workspace path to be accepted: %+v", err)
+		}
+		if normalized != filepath.Clean(validHome) {
+			t.Fatalf("expected cleaned home path %q, got %q", filepath.Clean(validHome), normalized)
+		}
+	}
+
+	cases := []struct {
+		name string
+		path string
+		code string
+	}{
+		{name: "empty", path: " ", code: "workspace_path_required"},
+		{name: "relative", path: "workspace", code: "workspace_path_not_absolute"},
+		{name: "traversal", path: filepath.Join(os.TempDir(), "..", "acp"), code: "workspace_path_traversal"},
+		{name: "root", path: string(filepath.Separator), code: "workspace_path_invalid"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := normalizeOnboardingWorkspacePath(tc.path)
+			if err == nil {
+				t.Fatalf("expected %s to be rejected", tc.path)
+			}
+			if err.code != tc.code {
+				t.Fatalf("expected code %q, got %q", tc.code, err.code)
+			}
+		})
+	}
+}
+
 func TestSystemDoctorEndpointReturnsReadinessChecks(t *testing.T) {
 	t.Parallel()
 
@@ -1560,6 +1737,347 @@ func TestPipelineRunsListEndpointRejectsInvalidLimit(t *testing.T) {
 	}
 	if payload.Error.Code != "invalid_limit" {
 		t.Fatalf("expected invalid_limit code, got %q", payload.Error.Code)
+	}
+}
+
+func TestPipelineRunReviewSummaryEndpointMapsCanonicalSteps(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServerWithRunner(t, streamingRunLogsRunner{})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Post(httpServer.URL+"/api/pipeline/init", "application/json", bytes.NewBufferString(`{"trigger":"ui"}`))
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/init: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", response.StatusCode)
+	}
+	var started struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&started); err != nil {
+		t.Fatalf("decode start payload: %v", err)
+	}
+	if strings.TrimSpace(started.RunID) == "" {
+		t.Fatalf("expected run id")
+	}
+	terminal := waitForRunTerminalStatus(t, httpServer.URL, started.RunID, 8*time.Second)
+	if terminal.Status != string(orchestrator.RunStatusSucceeded) {
+		t.Fatalf("expected succeeded run, got %+v", terminal)
+	}
+
+	summaryResp, err := http.Get(httpServer.URL + "/api/pipeline/runs/" + started.RunID + "/review-summary")
+	if err != nil {
+		t.Fatalf("GET review-summary: %v", err)
+	}
+	defer summaryResp.Body.Close()
+	if summaryResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(summaryResp.Body)
+		t.Fatalf("expected status 200, got %d body=%s", summaryResp.StatusCode, string(body))
+	}
+	var payload struct {
+		RunID       string `json:"run_id"`
+		Pipeline    string `json:"pipeline"`
+		Status      string `json:"status"`
+		CurrentStep string `json:"current_step"`
+		Steps       []struct {
+			StepID        string   `json:"step_id"`
+			Key           string   `json:"key"`
+			State         string   `json:"state"`
+			ArtifactCount int      `json:"artifact_count"`
+			ArtifactPaths []string `json:"artifact_paths"`
+			LastMessage   string   `json:"last_message"`
+		} `json:"steps"`
+	}
+	if err := json.NewDecoder(summaryResp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode review summary: %v", err)
+	}
+	if payload.RunID != started.RunID || payload.Pipeline != "init" || payload.Status != "succeeded" {
+		t.Fatalf("unexpected summary identity: %+v", payload)
+	}
+	if len(payload.Steps) != 5 {
+		t.Fatalf("expected five canonical steps, got %d", len(payload.Steps))
+	}
+	expected := []struct {
+		stepID string
+		key    string
+	}{
+		{"init.step0.constitution", acpruntime.StepProviderStep0Constitution},
+		{"init.step1.collect", acpruntime.StepProviderStep1Collect},
+		{"init.step2.asis_docs", acpruntime.StepProviderStep2AsIs},
+		{"init.step3.findings", acpruntime.StepProviderStep3Findings},
+		{"init.step4.proposals", acpruntime.StepProviderStep4Proposals},
+	}
+	for index, want := range expected {
+		got := payload.Steps[index]
+		if got.StepID != want.stepID || got.Key != want.key || got.State != "done" {
+			t.Fatalf("unexpected step %d: got %+v want step=%q key=%q state=done", index, got, want.stepID, want.key)
+		}
+	}
+	if payload.Steps[2].ArtifactCount == 0 || !containsString(payload.Steps[2].ArtifactPaths, "reports/as-is/overview.md") {
+		t.Fatalf("expected as-is step artifacts to include overview.md, got %+v", payload.Steps[2])
+	}
+}
+
+func TestPipelineRunReviewSummaryEndpointHandlesFailedRun(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServerWithRunner(t, parseFailureRunner{})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Post(httpServer.URL+"/api/pipeline/init", "application/json", bytes.NewBufferString(`{"trigger":"ui"}`))
+	if err != nil {
+		t.Fatalf("POST /api/pipeline/init: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", response.StatusCode)
+	}
+	var started struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&started); err != nil {
+		t.Fatalf("decode start payload: %v", err)
+	}
+	terminal := waitForRunTerminalStatus(t, httpServer.URL, started.RunID, 8*time.Second)
+	if terminal.Status != string(orchestrator.RunStatusFailed) {
+		t.Fatalf("expected failed run, got %+v", terminal)
+	}
+
+	summaryResp, err := http.Get(httpServer.URL + "/api/pipeline/runs/" + started.RunID + "/review-summary")
+	if err != nil {
+		t.Fatalf("GET review-summary failed run: %v", err)
+	}
+	defer summaryResp.Body.Close()
+	if summaryResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(summaryResp.Body)
+		t.Fatalf("expected status 200, got %d body=%s", summaryResp.StatusCode, string(body))
+	}
+	var payload struct {
+		Status string `json:"status"`
+		Steps  []struct {
+			StepID      string `json:"step_id"`
+			State       string `json:"state"`
+			LastMessage string `json:"last_message"`
+		} `json:"steps"`
+	}
+	if err := json.NewDecoder(summaryResp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode failed review summary: %v", err)
+	}
+	if payload.Status != "failed" || len(payload.Steps) != 5 {
+		t.Fatalf("unexpected failed summary: %+v", payload)
+	}
+	failedIndex := -1
+	for index, step := range payload.Steps {
+		if step.State == "failed" {
+			failedIndex = index
+			break
+		}
+	}
+	if failedIndex < 0 {
+		t.Fatalf("expected one failed step in summary, got %+v", payload.Steps)
+	}
+	if strings.TrimSpace(payload.Steps[failedIndex].LastMessage) == "" {
+		t.Fatalf("expected failed step last_message to carry recovery context, got %+v", payload.Steps[failedIndex])
+	}
+}
+
+func TestGitDiffEndpointReturnsWorkspaceFolderAndLineHunks(t *testing.T) {
+	t.Parallel()
+
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary is required for git diff API tests")
+	}
+
+	server := newTestServer(t)
+	ws := initGitWorkspaceForDiffTest(t, server)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	if err := ws.WriteFile("reports/as-is/overview.md", []byte("old overview\n")); err != nil {
+		t.Fatalf("write overview baseline: %v", err)
+	}
+	if err := ws.WriteFile("reports/coverage/summary.md", []byte("old coverage\n")); err != nil {
+		t.Fatalf("write coverage baseline: %v", err)
+	}
+	commitWorkspaceForDiffTest(t, ws, "baseline")
+	if err := ws.WriteFile("reports/as-is/overview.md", []byte("old overview\nnew evidence\n")); err != nil {
+		t.Fatalf("modify overview: %v", err)
+	}
+	if err := os.Remove(filepath.Join(ws.Path, "reports", "coverage", "summary.md")); err != nil {
+		t.Fatalf("delete coverage baseline: %v", err)
+	}
+	if err := ws.WriteFile("proposals/proposal-baseline/proposal.md", []byte("# Proposal\n")); err != nil {
+		t.Fatalf("write proposal: %v", err)
+	}
+
+	diffResp, err := http.Get(httpServer.URL + "/api/git/diff?path=reports/as-is/overview.md")
+	if err != nil {
+		t.Fatalf("GET git diff selected file: %v", err)
+	}
+	defer diffResp.Body.Close()
+	if diffResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(diffResp.Body)
+		t.Fatalf("expected status 200, got %d body=%s", diffResp.StatusCode, string(body))
+	}
+	var payload struct {
+		Empty        bool `json:"empty"`
+		Files        []gitDiffFile
+		Folders      []gitDiffFolderSummary
+		SelectedFile *gitDiffFile  `json:"selected_file"`
+		Hunks        []gitDiffHunk `json:"hunks"`
+	}
+	if err := json.NewDecoder(diffResp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode git diff payload: %v", err)
+	}
+	if payload.Empty || len(payload.Files) != 1 {
+		t.Fatalf("expected only selected workspace file in path-filtered diff, got %+v", payload)
+	}
+	if payload.SelectedFile == nil || payload.SelectedFile.Path != "reports/as-is/overview.md" || payload.SelectedFile.Status != "modified" {
+		t.Fatalf("expected selected modified overview file, got %+v", payload.SelectedFile)
+	}
+	if !gitDiffHunksContain(payload.Hunks, "add", "new evidence") {
+		t.Fatalf("expected added line in overview diff, got %+v", payload.Hunks)
+	}
+	if !gitDiffFolderPresent(payload.Folders, "reports") {
+		t.Fatalf("expected reports folder summary, got %+v", payload.Folders)
+	}
+
+	allResp, err := http.Get(httpServer.URL + "/api/git/diff")
+	if err != nil {
+		t.Fatalf("GET full git diff: %v", err)
+	}
+	defer allResp.Body.Close()
+	if allResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(allResp.Body)
+		t.Fatalf("expected full diff status 200, got %d body=%s", allResp.StatusCode, string(body))
+	}
+	var allPayload struct {
+		Files []gitDiffFile `json:"files"`
+	}
+	if err := json.NewDecoder(allResp.Body).Decode(&allPayload); err != nil {
+		t.Fatalf("decode full diff payload: %v", err)
+	}
+	if !gitDiffFileStatus(allPayload.Files, "reports/coverage/summary.md", "deleted") {
+		t.Fatalf("expected deleted coverage file, got %+v", allPayload.Files)
+	}
+
+	folderResp, err := http.Get(httpServer.URL + "/api/git/diff?folder=proposals")
+	if err != nil {
+		t.Fatalf("GET git diff folder: %v", err)
+	}
+	defer folderResp.Body.Close()
+	if folderResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(folderResp.Body)
+		t.Fatalf("expected folder status 200, got %d body=%s", folderResp.StatusCode, string(body))
+	}
+	var folderPayload struct {
+		Files []gitDiffFile `json:"files"`
+	}
+	if err := json.NewDecoder(folderResp.Body).Decode(&folderPayload); err != nil {
+		t.Fatalf("decode folder diff payload: %v", err)
+	}
+	if len(folderPayload.Files) != 1 || folderPayload.Files[0].Path != "proposals/proposal-baseline/proposal.md" || folderPayload.Files[0].Status != "untracked" {
+		t.Fatalf("expected only untracked proposal in folder filter, got %+v", folderPayload.Files)
+	}
+}
+
+func TestGitDiffEndpointHandlesEmptyAndInvalidPath(t *testing.T) {
+	t.Parallel()
+
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary is required for git diff API tests")
+	}
+
+	server := newTestServer(t)
+	ws := initGitWorkspaceForDiffTest(t, server)
+	commitWorkspaceForDiffTest(t, ws, "baseline")
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	emptyResp, err := http.Get(httpServer.URL + "/api/git/diff")
+	if err != nil {
+		t.Fatalf("GET empty git diff: %v", err)
+	}
+	defer emptyResp.Body.Close()
+	if emptyResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(emptyResp.Body)
+		t.Fatalf("expected empty diff 200, got %d body=%s", emptyResp.StatusCode, string(body))
+	}
+	var emptyPayload struct {
+		Empty bool          `json:"empty"`
+		Files []gitDiffFile `json:"files"`
+	}
+	if err := json.NewDecoder(emptyResp.Body).Decode(&emptyPayload); err != nil {
+		t.Fatalf("decode empty diff: %v", err)
+	}
+	if !emptyPayload.Empty || len(emptyPayload.Files) != 0 {
+		t.Fatalf("expected valid empty diff, got %+v", emptyPayload)
+	}
+
+	invalidResp, err := http.Get(httpServer.URL + "/api/git/diff?path=..%2Fworkspace.yaml")
+	if err != nil {
+		t.Fatalf("GET invalid path git diff: %v", err)
+	}
+	defer invalidResp.Body.Close()
+	if invalidResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected invalid path status 400, got %d", invalidResp.StatusCode)
+	}
+	var invalidPayload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(invalidResp.Body).Decode(&invalidPayload); err != nil {
+		t.Fatalf("decode invalid path payload: %v", err)
+	}
+	if invalidPayload.Error.Code != "path_invalid" {
+		t.Fatalf("expected path_invalid, got %q", invalidPayload.Error.Code)
+	}
+}
+
+func TestGitDiffEndpointReportsBinarySelectedFile(t *testing.T) {
+	t.Parallel()
+
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary is required for git diff API tests")
+	}
+
+	server := newTestServer(t)
+	ws := initGitWorkspaceForDiffTest(t, server)
+	commitWorkspaceForDiffTest(t, ws, "baseline")
+	if err := ws.WriteFile("reports/as-is/blob.bin", []byte{0, 1, 2, 3}); err != nil {
+		t.Fatalf("write binary fixture: %v", err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	diffResp, err := http.Get(httpServer.URL + "/api/git/diff?path=reports/as-is/blob.bin")
+	if err != nil {
+		t.Fatalf("GET binary git diff: %v", err)
+	}
+	defer diffResp.Body.Close()
+	if diffResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(diffResp.Body)
+		t.Fatalf("expected binary diff 200, got %d body=%s", diffResp.StatusCode, string(body))
+	}
+	var payload struct {
+		SelectedFile *gitDiffFile  `json:"selected_file"`
+		Hunks        []gitDiffHunk `json:"hunks"`
+		Message      string        `json:"message"`
+	}
+	if err := json.NewDecoder(diffResp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode binary diff payload: %v", err)
+	}
+	if payload.SelectedFile == nil || !payload.SelectedFile.Binary {
+		t.Fatalf("expected selected file to be marked binary, got %+v", payload.SelectedFile)
+	}
+	if len(payload.Hunks) != 0 || !strings.Contains(payload.Message, "binary") {
+		t.Fatalf("expected binary file message without hunks, got message=%q hunks=%+v", payload.Message, payload.Hunks)
 	}
 }
 
@@ -3235,6 +3753,44 @@ repos:
 	return NewServer(ws, service)
 }
 
+func testServerRuntimeConfig() ServerRuntimeConfig {
+	return ServerRuntimeConfig{
+		Mode:           acpruntime.RuntimeModeFake,
+		Provider:       acpruntime.ProviderClaudeCode,
+		ProviderSource: acpruntime.ProviderSourceDefault,
+		RunLogsTTL:     168 * time.Hour,
+		RunLogsMaxRuns: 200,
+	}
+}
+
+func testLauncherServiceFactory() ServiceFactory {
+	return func(ws workspace.Root, _ ServerRuntimeConfig) *orchestrator.Service {
+		return orchestrator.NewService(
+			orchestrator.WithHistoryWorkspace(ws),
+			orchestrator.WithRunner(fakeruntime.Runner{}),
+		)
+	}
+}
+
+func postJSON(t *testing.T, url string, body string) *http.Response {
+	t.Helper()
+	return postJSONWithMethod(t, http.MethodPost, url, body)
+}
+
+func postJSONWithMethod(t *testing.T, method string, url string, body string) *http.Response {
+	t.Helper()
+	request, err := http.NewRequest(method, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("create %s request: %v", method, err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, url, err)
+	}
+	return response
+}
+
 func writeHeadlessRunnerStub(t *testing.T, runtimeName string) string {
 	t.Helper()
 
@@ -3532,6 +4088,59 @@ func runGitTestCommand(t *testing.T, dir string, args ...string) {
 	if err != nil {
 		t.Fatalf("git %s failed: %v (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
 	}
+}
+
+func initGitWorkspaceForDiffTest(t *testing.T, server *Server) workspace.Root {
+	t.Helper()
+	ws := server.getWorkspace()
+	runGitTestCommand(t, ws.Path, "init")
+	runGitTestCommand(t, ws.Path, "config", "user.email", "acp-test@example.test")
+	runGitTestCommand(t, ws.Path, "config", "user.name", "ACP Test")
+	return ws
+}
+
+func commitWorkspaceForDiffTest(t *testing.T, ws workspace.Root, message string) {
+	t.Helper()
+	runGitTestCommand(t, ws.Path, "add", "-A")
+	runGitTestCommand(t, ws.Path, "commit", "-m", message)
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func gitDiffHunksContain(hunks []gitDiffHunk, kind string, content string) bool {
+	for _, hunk := range hunks {
+		for _, line := range hunk.Lines {
+			if line.Kind == kind && line.Content == content {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func gitDiffFileStatus(files []gitDiffFile, path string, status string) bool {
+	for _, file := range files {
+		if file.Path == path && file.Status == status {
+			return true
+		}
+	}
+	return false
+}
+
+func gitDiffFolderPresent(folders []gitDiffFolderSummary, folder string) bool {
+	for _, summary := range folders {
+		if summary.Folder == folder {
+			return true
+		}
+	}
+	return false
 }
 
 type runStatusPayload struct {

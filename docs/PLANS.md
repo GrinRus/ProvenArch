@@ -59,12 +59,250 @@ Tracker reconciliation from 2026-05-07 consolidated historical active plans into
 
 ### Continuous Backlog Queue Policy
 
-Current engineering queue starts with `EP-20260527-ui-console-v2`; implement Epic 16 slices in `docs/BACKLOG.md` order (`16A` -> `16N`) unless a blocker creates a narrower prerequisite slice.
+Current engineering queue starts with `EP-20260602-onboarding-first-startup`; implement Epic 17 slices in `docs/BACKLOG.md` order (`17A` -> `17E`) unless a blocker creates a narrower prerequisite slice. `EP-20260527-ui-console-v2` remains visible for owner review/archive bookkeeping, but it is not the next engineering workstream.
 
 Task selection rules:
 - Completed plans whose only remaining item is owner review, merge/archive bookkeeping, or historical evidence retention are not next engineering work.
 - Owner-decision and trusted-host/live-release items remain explicit blockers; do not run or edit them as normal backlog tasks without the required owner/trusted-machine prerequisites.
 - Each selected slice gets a decision-complete ExecPlan/update before implementation, one focused implementation pass, self-review/fix loops, Full DoD (`make contracts`, `make test`, `make lint`, `make build`), then one commit.
+
+### Plan ID
+EP-20260602-onboarding-first-startup
+
+### Context
+Current `v0.1.1` onboarding is too CLI-first: the operator must choose `--workspace` before the UI exists and must often seed at least one repo through `--auto-init` before the `Source` screen can take over. That contradicts the desired first-run UX for a local-first operator console: start ACP, choose or create an architecture workspace in the UI, add one or more target repositories from Git URL or local checkout path, choose the runner, validate readiness, then run analysis.
+
+The current architecture still has important constraints that should be preserved:
+- one active architecture workspace per served console session;
+- `repos[]` is already the multi-repo source of truth in `workspace.yaml`;
+- source repositories remain read-only inputs;
+- deterministic `fake` stays the required-CI default and recommended first walkthrough runner;
+- live providers remain explicit opt-in (`claude-code`, `qwen-code`, `codex-code`);
+- existing `acp serve --workspace ...` direct mode must remain for CI, scripts, existing live E2E and users who already have a workspace.
+
+### UX spec
+Users:
+- local operator / architect / tech lead starting ACP for the first time;
+- existing ACP user reopening a known architecture workspace;
+- multi-repo system owner who needs to analyze several local checkouts and/or Git URLs together.
+
+Flow:
+1) Operator runs `acp serve` with no workspace, or opens a direct-mode `acp serve --workspace ...` session.
+2) If no workspace is selected, the UI opens an onboarding screen instead of the normal stage shell.
+3) Step 1 `Workspace`: create a new architecture workspace path or reopen a recent/existing one; validate writable path, git availability and fixed layout readiness.
+4) Step 2 `Sources`: add one or more target repos using `GitHub/GitLab URL` or `Local folder`, optional `ref`, and docs imports path; save `workspace.yaml` only after repo validation can produce a valid manifest.
+5) Step 3 `Runner`: choose runner before analysis. `fake` is the recommended default and requires no provider command; `claude-code`, `qwen-code`, `codex-code` show command/auth availability via readiness checks and require explicit selection.
+6) Step 4 `Ready`: show workspace/repo/runner/permission summary, then enter the existing `Source -> Readiness -> Charter -> Analysis -> Review -> Proposals -> Ask -> Publish` console.
+
+Screens:
+- `Welcome / Workspace`: local-only explanation, create/reopen workspace, recent workspaces, path validation, no marketing hero.
+- `Repository Sources`: dense multi-repo table/cards with add/remove, source type, path/URL, ref, per-row diagnostics and docs imports path.
+- `Runner`: segmented runner choice, provider availability, command override hints, permission mode summary, fake-first recommendation.
+- `Ready`: compact checklist and primary action `Open console` / `Run first analysis`.
+- Existing console shell: unchanged after onboarding completion, with `Source` still editable for later repo changes.
+
+States:
+- no workspace selected: only onboarding APIs are active; pipeline/run/publish actions disabled;
+- new workspace without manifest: layout can exist, but `workspace.yaml` is draft until at least one repo is configured;
+- existing workspace: parse manifest, hydrate onboarding fields, allow skip to console after validation;
+- invalid path/not writable/not git-initable: inline error with remedy near workspace path;
+- repo path missing, duplicate repo name, invalid URL/ref, private git auth failure: row-level diagnostics and no run action;
+- runner unavailable: selectable only as draft with explicit blocker, or disabled until command/auth is fixed; `fake` remains always available;
+- direct mode with `--workspace`: bypass onboarding unless manifest is missing and explicit onboarding mode is enabled.
+
+Information architecture:
+- Onboarding is a pre-console setup surface, not a ninth stage.
+- `arch-workspace` path is process/session-level app context.
+- target repos and docs imports are workspace manifest data.
+- runner choice is setup-time execution context plus persisted runtime profile where applicable; live provider selection must be visible before the first run.
+
+Risks:
+- letting the UI choose arbitrary local paths is acceptable only because ACP is local-first and bound to loopback, but errors must be explicit and no source repo mutation should happen;
+- browser directory pickers are not portable enough for the MVP path, so typed paths/recent workspaces are the safe baseline;
+- adding no-workspace `serve` changes public CLI behavior and live E2E startup assumptions; direct `--workspace` compatibility must be tested;
+- runtime mode is partly process-scoped today, so onboarding runner selection requires a deliberate service lifecycle design instead of only editing `workspace.yaml`.
+
+### Goals (must have)
+- [x] Add an onboarding-first startup path where `acp serve` can start a local UI without a preselected workspace.
+- [x] Let the UI create or reopen an architecture workspace before entering the normal console.
+- [x] Let the UI configure one or more target repositories in `repos[]` using Git URL or local checkout path, with optional `ref`.
+- [x] Require an explicit runner choice before first analysis; show `fake` as recommended and live providers as opt-in with availability diagnostics.
+- [x] Keep existing `acp serve --workspace ...`, `--auto-init`, `--repos-file`, `acp init-workspace`, `acp run` and CI/batch flows working.
+- [x] Keep backend API/schema/runtime artifact/workspace manifest contracts unchanged unless a slice explicitly updates docs, validators, fixtures and tests in the same change.
+- [x] Update README/INSTALL/TROUBLESHOOTING only after implementation matches the new behavior.
+- [x] Add deterministic CLI/API/UI coverage for onboarding and retain existing direct-mode `init-inspect` live E2E behavior without adding a new provider-live release scenario.
+- [ ] After owner review/merge, move this completed implementation plan to archive.
+
+### Non-goals
+- [x] No hosted workspace picker, cloud storage, remote credential store or SCM OAuth flow.
+- [x] No file browser integration that enumerates arbitrary local directories server-side.
+- [x] No change to source repo write policy; target repositories stay read-only inputs.
+- [x] No expansion of required live provider release gates.
+- [x] No removal of direct CLI/bootstrap mode.
+
+### Approach
+1) Implement a launcher/no-workspace server mode behind `acp serve` while preserving direct `--workspace` service construction.
+2) Add onboarding APIs for workspace path validation/create/open, recent workspace metadata, repo manifest draft save/validate and runner readiness.
+3) Refactor service construction so the backend can attach a selected workspace/runtime after onboarding without restarting the process, or use a narrowly scoped launcher server that swaps into the existing workspace server.
+4) Build the onboarding UI as a pre-console surface; keep the current stage shell unchanged after setup completion.
+5) Persist valid repo sources through existing `workspace.yaml` rendering/validation; do not introduce a second source-of-truth file for repos.
+6) Treat runner selection as required UI state before `Run first analysis`; use `fake` for deterministic onboarding e2e and show provider diagnostics for headless choices.
+7) Update live/deterministic e2e carefully: add onboarding coverage without breaking release-facing direct-mode `UI_E2E_SCENARIO=init-inspect`.
+8) Sync docs after behavior lands, making README/INSTALL distinguish UI-first setup, direct workspace mode and multi-repo setup.
+
+### Files expected to change
+- `cmd/acp/main.go`, `cmd/acp/main_test.go`
+- `internal/api/*`
+- `internal/workspace/*` only if workspace open/create helpers need narrow extraction
+- `internal/doctor/*` only if runner/workspace checks need reusable launcher diagnostics
+- `ui/src/App.tsx`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`, `ui/src/App.test.tsx`
+- `ui/e2e/live-flow.spec.ts`, `scripts/frontend-live-e2e.sh` only if startup flow/test harness changes
+- `docs/PLANS.md`, `docs/BACKLOG.md`, `docs/STAKEHOLDER_DOC.md`, then README/INSTALL/TROUBLESHOOTING after implementation
+
+### Acceptance criteria
+- [x] `acp serve` without `--workspace` starts a loopback onboarding UI and does not require a repo CLI flag.
+- [x] `acp serve --workspace <path>` still starts the existing single-workspace console path.
+- [x] Onboarding can create a new workspace, initialize fixed layout/git, configure multiple repos, choose `fake`, validate readiness and enter the console.
+- [x] Onboarding can reopen an existing workspace and either skip to console or edit sources/runner before continuing.
+- [x] The first analysis cannot start until workspace, at least one repo and runner are valid.
+- [x] Multi-repo `repos[]` names are unique, path/git URL modes are validated, and row-level errors are recoverable in the UI.
+- [x] Runner selection distinguishes `fake` availability from live provider command/auth blockers.
+- [x] Source repos are not mutated during onboarding validation or fake analysis.
+- [x] Existing direct-mode live E2E contract remains compatible; onboarding gets deterministic/fake CLI/API/UI coverage.
+- [x] `git diff --check`, focused tests and Full DoD pass.
+
+### Test plan
+- Go CLI tests:
+  - `serve` without workspace starts launcher/dry-run successfully;
+  - `serve --workspace` direct mode still validates and serves;
+  - invalid workspace paths and missing git/writable surfaces return actionable errors;
+  - auto-init and repos-file compatibility are unchanged.
+- API tests:
+  - onboarding status, workspace create/open, repo draft validate/save and runner readiness;
+  - no pipeline actions are allowed before workspace selection;
+  - selected workspace uses the same service/API behavior as direct mode.
+- UI unit tests:
+  - onboarding workspace path states;
+  - multi-repo add/remove/path/git URL/ref validation;
+  - runner required state and provider availability copy;
+  - transition into existing Console V2 shell.
+- E2E:
+  - deterministic onboarding fake flow from blank launch to Source/Readiness/Analysis;
+  - existing `UI_E2E_SCENARIO=init-inspect` direct-mode regression;
+  - no new required provider-live scenario without owner-approved release-gate slice.
+- Full DoD:
+  - `git diff --check`
+  - `make contracts`
+  - `make test`
+  - `make lint`
+  - `make build`
+
+### Slice ExecPlan - 17A-17E Onboarding-first beta baseline
+
+Status: done.
+
+Goals:
+- [x] Add `acp serve` launcher mode when `--workspace` is omitted, with `--workspace` direct mode preserved.
+- [x] Add onboarding status/workspace create-or-open API, runtime selection API and session service reattachment.
+- [x] Support a new workspace draft state where layout/git can exist before `workspace.yaml` is valid.
+- [x] Add a UI pre-console onboarding shell for workspace, sources, runner and ready summary.
+- [x] Save multi-repo sources through existing `workspace.yaml` semantics and keep Source editable after onboarding.
+
+Non-goals:
+- [x] Do not change workspace schema, runtime artifact contracts, CLI `run` behavior or provider contracts.
+- [x] Do not remove or weaken `--workspace` direct mode.
+- [x] Do not add browser directory picker, hosted mode or new provider-live release scenario.
+
+Implementation notes:
+- Prefer reusing existing `workspace.InitLayout`/`EnsureLayout`/git-init helpers rather than adding a parallel workspace model.
+- Treat recent workspaces as optional local UI metadata only if it can be done without new cross-machine contracts; otherwise defer recents to 17B.
+- Keep launcher APIs loopback-only with the same local server assumption as the rest of ACP.
+
+Validation:
+- [x] Focused Go tests for launcher/direct serve modes.
+- [x] Focused UI tests for workspace/source/runner onboarding and Console V2 transition.
+- [x] `git diff --check`.
+- [x] Full DoD after the slice implementation.
+
+### Progress log
+- 2026-06-02: Created onboarding-first startup plan after UX review found that current first-run flow is too CLI-first: workspace is chosen before UI, while target repos and runner should be selected in UI. No code implemented in this planning slice.
+- 2026-06-02: Implemented onboarding-first beta baseline: `acp serve` launcher mode, optional `--workspace` direct mode, `/api/onboarding/status|workspace|runtime`, workspace draft/session service state, pre-console OnboardingShell, multi-repo source diagnostics, mandatory runner selection and transition into Console V2. Updated README/INSTALL/TROUBLESHOOTING/ARCHITECTURE/STAKEHOLDER docs. Validation passed: focused Go/API tests, focused UI tests, `git diff --check`, `make contracts`, `make test`, `make lint` with Go toolchain in PATH, and `make build`. Provider-live release gate was not expanded.
+
+### Plan ID
+EP-20260602-long-run-review-diff
+
+### Context
+Console V2 made long runs observable through mission control, stage timeline and activity logs, but the daily operator workflow still has a gap: during a long provider run the user needs to understand which step is producing reviewable evidence, which artifacts are already available, and what changed in the workspace Git tree without leaving the UI. The approved follow-up scope is local UI/API only: expose run review summaries and real workspace Git diffs, then wire them into Analysis, Review, Proposals and Publish.
+
+Constraints:
+- runtime artifact schemas, `workspace.yaml`, CLI `acp run`, provider contracts and public live E2E shell stay unchanged;
+- Git diff source of truth is the architecture workspace Git repository, never target repos;
+- long-run states must be reviewable through artifacts, logs, evidence and diff, not only through raw logs;
+- existing operator-facing selectors remain stable where possible.
+
+### Goals (must have)
+- [x] Add `GET /api/pipeline/runs/<run_id>/review-summary` with canonical `step0..step4` summaries built from existing run status, logs, artifacts and taskrun refs.
+- [x] Add `GET /api/git/diff` for workspace-only Git status, folder summaries, selected file status and text hunks with strict path normalization.
+- [x] Add a persistent active-run strip across Console V2 stages with run status, current step, provider, progress, warnings/errors and cancel.
+- [x] Rework `Analysis` toward step-level review: step cards and selected-step tabs for artifacts, logs, evidence and diff.
+- [x] Add a Review Queue and use real diff data in `Review`, `Proposals` and `Publish`.
+- [x] Turn `Publish` into a real Git Review Room: folder summary, changed file list, selected hunks and existing publish gate/actions.
+- [x] Cover queued/no logs/partial artifacts/failed/canceled/stale/no changes/binary diff states with explicit UI/API states where data is available.
+- [x] Keep direct-mode live E2E contract unchanged.
+- [ ] After owner review/merge, move this completed follow-up plan to archive.
+
+### Non-goals
+- [x] Do not change workspace manifest schema, runtime artifact schemas, provider contracts, CLI flags or `acp run` behavior.
+- [x] Do not add approval persistence, hosted mode, source repo mutation, new provider-live release gate or new release-facing UI E2E scenario.
+- [x] Do not introduce a second artifact source of truth beyond existing workspace files, run logs, run artifacts and Git status.
+
+### Approach
+1) Add narrow backend local APIs for run review summaries and workspace Git diff, with tests for path safety, empty diffs, binary files and step mapping.
+2) Add frontend contracts and hooks for review summary and Git diff loading, reusing current run selection/polling.
+3) Add `ActiveRunStrip` into the existing shell without changing the stage rail or onboarding boundary.
+4) Update Analysis, Review, Proposals and Publish to expose artifacts/logs/evidence/diff in consistent tabs.
+5) Add UI tests for the new surfaces and preserve existing selectors/live-shell expectations.
+6) Run focused tests and Full DoD before committing the follow-up slice.
+
+### Files expected to change
+- `internal/api/server.go`
+- `internal/api/review_diff.go`
+- `internal/api/server_test.go`
+- `ui/src/lib/*`
+- `ui/src/hooks/*`
+- `ui/src/components/*`
+- `ui/src/App.tsx`, `ui/src/App.test.tsx`, `ui/src/styles.css`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Review summary returns five canonical steps for init runs and handles no logs, failed/canceled/stale and partial artifact states without panics.
+- [x] Git diff returns valid empty diffs, rejects unsafe paths, reports untracked/modified/deleted/binary files and filters by folder/file/run/step where applicable.
+- [x] Active run strip remains visible after console entry across stages.
+- [x] Analysis exposes current/failed step details with artifacts, logs, evidence and diff.
+- [x] Review Queue is visible and can navigate to reviewable artifacts.
+- [x] Proposals and Publish no longer show the old partial line-level diff placeholder when real Git diff data is available.
+- [x] Publish shows real workspace folder/file/hunk diff data while preserving hard blockers, warnings, open questions and explicit Git actions.
+- [x] `git diff --check`, focused tests and Full DoD pass.
+
+### Test plan
+- Go/API:
+  - review summary step mapping from run status/logs/artifacts;
+  - review summary no-log failed/partial cases;
+  - Git diff untracked/modified/deleted/folder filter/file filter/empty/binary/invalid traversal.
+- UI:
+  - active run strip persistence;
+  - step cards and selected-step tabs;
+  - Review Queue counts/navigation;
+  - real diff state in Review/Proposals/Publish.
+- Deterministic checks:
+  - focused Go/API tests;
+  - focused UI test suite;
+  - `git diff --check`;
+  - Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Progress log
+- 2026-06-02: Started long-run review/diff follow-up after UX review found long provider runs were observable through logs but not sufficiently reviewable through step-level artifacts and workspace Git diff. Scope is local UI/API only; no schema/runtime/provider/live-shell changes.
+- 2026-06-02: Implemented long-run review/diff follow-up: local `review-summary` and workspace Git diff APIs, persistent active-run strip, Analysis step review tabs, Review Queue, real diff tabs in Review/Proposals/Publish and Git Review Room folder/file/hunk view. Found and fixed a real infinite-update bug when opening Diff tabs by stabilizing the Git diff callback. Validation passed: `git diff --check`, focused `./scripts/run-go.sh test ./internal/api`, UI suite `61/61`, `make contracts`, `make test`, `make lint`, `make build`, plus rendered in-app browser smoke on a temporary fake workspace through Analysis/Review/Proposals/Publish with no browser console errors. Runtime schemas, `workspace.yaml`, CLI `acp run`, provider contracts and live shell were unchanged.
 
 ### Plan ID
 EP-20260527-ui-console-v2
@@ -1460,3 +1698,5 @@ Residual blockers:
 | 12–13 | out of MVP | Вне текущего beta scope |
 | 14 CI trigger mode | done (beta baseline) | CLI batch required, smoke/golden jobs без live network deps |
 | 15 Domain/baseline pack hardening | done (beta baseline) | Baseline skills/prompts wired и versioned в workspace |
+| 16 Console V2 UX | done (beta baseline) | Mission-control shell, Source/Readiness/Review/Publish surfaces, live E2E selector migration and fake/direct-mode coverage |
+| 17 Onboarding-first setup | done (beta baseline) | `acp serve` launcher/onboarding, workspace create/open, multi-repo sources, mandatory runner choice and direct `--workspace` compatibility path |

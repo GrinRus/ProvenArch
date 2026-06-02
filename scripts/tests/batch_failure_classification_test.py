@@ -59,6 +59,19 @@ class BatchFailureClassificationTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.tempdir.cleanup()
 
+    def _prepend_fake_host_npm(self, env: dict[str, str]) -> None:
+        bin_dir = self.root / "fake-host-bin"
+        bin_dir.mkdir(exist_ok=True)
+        npm = bin_dir / "npm"
+        write_text(
+            npm,
+            "#!/bin/sh\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\\n' '10.9.8'; exit 0; fi\n"
+            "printf '%s\\n' \"$0\"\n",
+        )
+        npm.chmod(0o755)
+        env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+
     def _create_fixture_run_dir(self, run_dir: Path) -> None:
         write_text(
             run_dir / "session-summary.md",
@@ -214,6 +227,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                 "BATCH_OWNER_HEARTBEAT_SEC": "1",
             }
         )
+        self._prepend_fake_host_npm(env)
 
         completed = subprocess.run(
             [str(FULL_RUN_BATCH_SCRIPT)],
@@ -347,6 +361,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                 "BATCH_OWNER_HEARTBEAT_SEC": "1",
             }
         )
+        self._prepend_fake_host_npm(env)
 
         completed = subprocess.run(
             [str(FULL_RUN_BATCH_SCRIPT)],

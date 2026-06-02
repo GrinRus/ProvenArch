@@ -20,7 +20,9 @@
    - `init-workspace` создаёт/обновляет `workspace.yaml`, bootstrap-ит fixed layout/baseline bundle и выполняет dry validation для первого старта
    - Раздаёт UI (embedded static assets из `ui/dist`)
    - Экспортирует API под `/api/*`
-   - `serve` поднимает single-workspace-per-process local API+UI service
+   - `serve` без `--workspace` поднимает loopback launcher/onboarding UI: workspace выбирается или создаётся в UI, затем server session attaches ровно один active workspace без restart процесса
+   - `serve --workspace <path>` сохраняет direct-mode single-workspace-per-process local API+UI service для scripts, CI, live E2E и опытных пользователей
+   - launcher API поддерживает `/api/onboarding/status`, `/api/onboarding/workspace`, `/api/onboarding/runtime`; workspace-bound endpoints до выбора workspace возвращают `428 workspace_not_selected`
    - `serve --auto-init` bootstrap-ит workspace manifest/layout при отсутствии `workspace.yaml`
    - bootstrap (`init-workspace`/`serve --auto-init`) автоматически делает `git init` для workspace root при отсутствии `.git`
    - startup для `serve` lenient: без блокирующего repo preflight; readiness diagnostics доступны через `/api/workspace/validate`
@@ -42,6 +44,7 @@
    - Dev: `npm run dev` с proxy на backend
    - Prod: `npm run build` → `ui/dist` встраивается в Go бинарь
    - Live browser e2e: Playwright optional smoke (`ui/e2e/live-flow.spec.ts`, `npm run e2e:live --prefix ui`)
+   - UI first-run entrypoint использует pre-console `OnboardingShell`, а не девятую product stage: `Workspace -> Sources -> Runner -> Ready`, затем переход в Console V2
    - UI shell организован как Proven Arch console: top health strip (workspace path, repo count, runtime/provider, permission mode, Git publication state), product-flow rail `Source / Readiness / Charter / Analysis / Review / Proposals / Ask / Publish`, центральная рабочая область, right inspector (`Next action`, blockers, evidence refs, workspace health, runtime safety, Git publication) и bottom activity drawer для logs/events
    - Guided setup поддерживает multi-repo (`repos[]`) с add/remove rows и optional `ref`; Source показывает repo table с name/source/ref, validation state и явным advanced-only статусом для analysis include/exclude
    - Readiness показывает summary cards для workspace, repositories, runtime provider, permissions и artifacts, а также compact runtime profile summary перед advanced settings
@@ -74,7 +77,8 @@
    - runtime profile patch validation/merge/manifest rewrite живёт в shared internal package `internal/runtimeprofile`, а API handlers остаются только HTTP adapter layer
    - live e2e poll timeout-ы берутся из effective config (`/api/runtime/timeouts`) с env override
    - Критичные UI-контролы для live e2e снабжены стабильными `data-testid` (`validate/run/status/artifacts/logs`)
-   - First-run flow оформлен как stages `Source / Readiness / Charter / Analysis`: GitHub/GitLab URL является default entry, local folder остаётся supported mode, raw `workspace.yaml` editor спрятан в Advanced, readiness checklist берётся из `GET /api/system/doctor`, первый `init` запускается кнопкой `Run first analysis`
+   - First-run flow начинается до Console V2: пользователь выбирает/создаёт workspace, добавляет один или несколько repos через существующее `workspace.yaml.repos[]`, выбирает runner (`fake` recommended, live providers explicit opt-in), проходит readiness summary и только затем входит в stages `Source / Readiness / Charter / Analysis`
+   - После onboarding `Source` остаётся editable для изменения repos/imports; GitHub/GitLab URL является default entry, local folder остаётся supported mode, raw `workspace.yaml` editor спрятан в Advanced, readiness checklist берётся из `GET /api/system/doctor`, первый `init` запускается кнопкой `Run first analysis`
 
 3) **Orchestrator (`internal/orchestrator`)** *(implemented baseline)*
    - Step registry (шаги init pipeline)

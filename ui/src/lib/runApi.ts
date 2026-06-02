@@ -1,5 +1,5 @@
 import { fetchJSON, getErrorMessage } from "./api";
-import type { RunListResponse, RunStartResponse, RunStatusResponse } from "./appContracts";
+import type { RunListResponse, RunReviewSummaryResponse, RunStartResponse, RunStatusResponse } from "./appContracts";
 
 export async function listPipelineRuns(limit = 100): Promise<RunListResponse> {
   return fetchJSON<RunListResponse>(`/api/pipeline/runs?limit=${limit}`);
@@ -23,6 +23,18 @@ export async function getPipelineRunStatus(id: string, allowMissing = false): Pr
     throw new Error(getErrorMessage(payload, `request failed: /api/pipeline/runs/${id}`));
   }
   return payload as RunStatusResponse;
+}
+
+export async function getPipelineRunReviewSummary(id: string, allowMissing = false): Promise<RunReviewSummaryResponse | null> {
+  const response = await fetch(`/api/pipeline/runs/${id}/review-summary`);
+  const payload = await response.json();
+  if (response.status === 404 && allowMissing) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(getErrorMessage(payload, `request failed: /api/pipeline/runs/${id}/review-summary`));
+  }
+  return payload as RunReviewSummaryResponse;
 }
 
 export type CancelRunResponse =

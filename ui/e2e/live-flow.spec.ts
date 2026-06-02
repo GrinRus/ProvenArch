@@ -197,6 +197,8 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   });
   await waitForInitInspectRun(request, runID);
 
+  await page.getByTestId("stage-analysis").click();
+  await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
   const selectedRunButton = page.getByRole("button", { name: runID }).first();
   await expect(selectedRunButton).toBeVisible();
   await selectedRunButton.click();
@@ -222,6 +224,8 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
 
   await page.getByTestId("run-logs-mode-select").selectOption("all");
   await expect(page.getByTestId("activity-events-table")).toBeVisible();
+  await page.getByTestId("stage-analysis").click();
+  await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
   await expect(page.getByTestId("analysis-run-timeline")).toBeVisible();
   await expectOperatorInspectorSurfaces(page);
   await captureEvidenceScreenshot(page, "frontend-analysis-desktop.png");

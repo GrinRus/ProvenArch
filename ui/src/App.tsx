@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppShell } from "./components/AppShell";
 import { BaselineGitPanel } from "./components/BaselineGitPanel";
+import { OnboardingShell } from "./components/OnboardingShell";
 import { RuntimeProfileSettingsPanel } from "./components/RuntimeProfileSettingsPanel";
 import {
   AnalysisStagePanel,
@@ -23,15 +24,18 @@ import {
   runtimeTimeoutLabels,
   type Diagnostic,
   type GuidedRepo,
+  type OnboardingStatusResponse,
   type RuntimeExecutionKey,
   type RuntimePermissionKey,
   type RuntimeTimeoutKey,
 } from "./lib/appContracts";
 import type { InspectorItem, NextAction, StageId } from "./lib/consoleTypes";
+import type { LoadGitDiffOptions } from "./lib/gitDiffApi";
 import { buildStageOptions } from "./lib/stageModel";
 import { useRunExplorer } from "./hooks/useRunExplorer";
 import { useRuntimeSettings } from "./hooks/useRuntimeSettings";
 import { useWorkspaceSetup } from "./hooks/useWorkspaceSetup";
+import { loadOnboardingStatus, selectOnboardingRuntime, selectOnboardingWorkspace } from "./lib/onboardingApi";
 import { loadSystemDoctor } from "./lib/systemApi";
 
 export default function App() {
@@ -45,6 +49,10 @@ export default function App() {
   const [setupDoctorResult, setSetupDoctorResult] = useState<Awaited<ReturnType<typeof loadSystemDoctor>> | null>(null);
   const [setupDoctorStatus, setSetupDoctorStatus] = useState("");
   const [firstRunStatus, setFirstRunStatus] = useState("");
+  const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatusResponse | null>(null);
+  const [onboardingWorkspacePath, setOnboardingWorkspacePath] = useState("");
+  const [onboardingCreateWorkspace, setOnboardingCreateWorkspace] = useState(true);
+  const [consoleReady, setConsoleReady] = useState(false);
   const [analysisFocusSignal, setAnalysisFocusSignal] = useState(0);
   const [askPrimaryActionSignal, setAskPrimaryActionSignal] = useState(0);
 
@@ -120,7 +128,12 @@ export default function App() {
     selectedRunWarnings,
     selectedRunIsActive,
     runLogsRendered,
+    runReviewSummary,
+    runReviewStatus,
+    gitDiff,
+    gitDiffStatus,
     bootstrapRuns,
+    loadGitDiff,
     handleRunPipeline,
     handleSelectRun,
     handleCancelSelectedRun,
@@ -195,12 +208,106 @@ export default function App() {
   }, [activeStage, baselineEditorArtifacts, loadSelectedEditorContent, loadWizardContract, selectedEditorLoadedPath, selectedEditorPath, wizardContractLoaded]);
 
   async function bootstrapApp() {
+    const status = await loadOnboardingStatus();
+    syncOnboardingStatus(status);
+    if (!status.can_enter_console) {
+      setConsoleReady(false);
+      return;
+    }
+    await bootstrapConsoleData({ validateWorkspace: true });
+    setConsoleReady(true);
+  }
+
+  async function bootstrapConsoleData(options: { validateWorkspace?: boolean } = {}) {
     await bootstrapRuns();
     await bootstrapWorkspaceSetup();
     await loadRuntimeTimeouts();
     await loadRuntimeExecution();
     await loadRuntimePermissions();
     await loadRuntimeProfile();
+    if (options.validateWorkspace) {
+      await handleValidateWorkspace();
+    }
+  }
+
+  function syncOnboardingStatus(status: OnboardingStatusResponse) {
+    setOnboardingStatus(status);
+    if (status.workspace && !onboardingWorkspacePath.trim()) {
+      setOnboardingWorkspacePath(status.workspace);
+    }
+    if (status.runtime.runtime) {
+      setSetupRuntime(status.runtime.runtime);
+    }
+    if (status.runtime.runtime_provider) {
+      setSetupRuntimeProvider(status.runtime.runtime_provider);
+    }
+  }
+
+  async function refreshOnboardingStatus() {
+    const status = await loadOnboardingStatus();
+    syncOnboardingStatus(status);
+    return status;
+  }
+
+  async function handleOnboardingWorkspaceSelect() {
+    setBusy(true);
+    setError(null);
+    try {
+      const status = await selectOnboardingWorkspace(onboardingWorkspacePath, onboardingCreateWorkspace);
+      syncOnboardingStatus(status);
+      await bootstrapWorkspaceSetup();
+      if (status.workspace_ready && status.manifest_present) {
+        await handleValidateWorkspace();
+      }
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "workspace selection failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleOnboardingSaveSources() {
+    await handleSetupSaveGuidedWorkspaceSetup();
+    const status = await refreshOnboardingStatus();
+    if (status.can_enter_console) {
+      await bootstrapConsoleData({ validateWorkspace: false });
+    }
+  }
+
+  async function handleOnboardingSaveRuntime() {
+    setBusy(true);
+    setError(null);
+    try {
+      const status = await selectOnboardingRuntime(setupRuntime, setupRuntimeProvider);
+      syncOnboardingStatus(status);
+      const validation = status.can_enter_console && validateResult?.ok !== true ? await handleValidateWorkspace() : validateResult;
+      if (status.can_enter_console) {
+        await bootstrapConsoleData({ validateWorkspace: validation?.ok !== true });
+      }
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "runner selection failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleOnboardingEnterConsole(): Promise<boolean> {
+    const status = await refreshOnboardingStatus();
+    const validation = validateResult?.ok === true ? validateResult : await handleValidateWorkspace();
+    if (!status.can_enter_console || validation?.ok !== true) {
+      setError("Validate sources and select a runner before opening the console.");
+      return false;
+    }
+    await bootstrapConsoleData({ validateWorkspace: false });
+    setConsoleReady(true);
+    return true;
+  }
+
+  async function handleOnboardingRunFirstAnalysis() {
+    const entered = await handleOnboardingEnterConsole();
+    if (entered) {
+      await handleSetupFirstRun("analysis");
+    }
   }
 
   async function handleSetupDoctorCheck() {
@@ -346,6 +453,21 @@ export default function App() {
       setActiveStage("analysis");
     }
   }, [artifactCount, selectedRunIsActive]);
+
+  useEffect(() => {
+    if (!consoleReady || onboardingStatus?.can_enter_console !== true) {
+      return;
+    }
+    const path = activeStage === "publish" ? undefined : selectedArtifact || undefined;
+    void loadGitDiff({ runId, path });
+  }, [activeStage, consoleReady, loadGitDiff, onboardingStatus?.can_enter_console, runId, selectedArtifact]);
+
+  const handleLoadGitDiff = useCallback(
+    (options: LoadGitDiffOptions) => {
+      void loadGitDiff({ runId, ...options });
+    },
+    [loadGitDiff, runId],
+  );
 
   const stages = useMemo(
     () =>
@@ -518,6 +640,8 @@ export default function App() {
     [artifactCount, gitMessage, gitStatus, proposalArtifacts.length, proposalBranch],
   );
 
+  const runtimeLabel = setupRuntime === "fake" ? "fake" : `${setupRuntime}/${setupRuntimeProvider}`;
+
   const publishExternalGateItems = useMemo(
     () => [
       ...validationErrors.map((diagnostic) => ({
@@ -655,6 +779,39 @@ export default function App() {
     }
   }
 
+  if (!consoleReady || onboardingStatus?.can_enter_console !== true) {
+    return (
+      <OnboardingShell
+        busy={busy}
+        error={error}
+        status={onboardingStatus}
+        workspacePath={onboardingWorkspacePath}
+        createWorkspace={onboardingCreateWorkspace}
+        guidedRepos={guidedRepos}
+        guidedDocsImportsPath={guidedDocsImportsPath}
+        validateResult={validateResult}
+        doctorResult={setupDoctorResult}
+        setupRuntime={setupRuntime}
+        setupRuntimeProvider={setupRuntimeProvider}
+        firstRunStatus={firstRunStatus}
+        onWorkspacePathChange={setOnboardingWorkspacePath}
+        onCreateWorkspaceChange={setOnboardingCreateWorkspace}
+        onSelectWorkspace={() => void handleOnboardingWorkspaceSelect()}
+        onRepoChange={handleSetupRepoChange}
+        onAddRepo={handleSetupAddRepo}
+        onRemoveRepo={handleSetupRemoveRepo}
+        onDocsImportsPathChange={handleSetupDocsImportsPathChange}
+        onSaveSources={() => void handleOnboardingSaveSources()}
+        onRuntimeChange={handleSetupRuntimeChange}
+        onRuntimeProviderChange={handleSetupRuntimeProviderChange}
+        onSaveRuntime={() => void handleOnboardingSaveRuntime()}
+        onCheckDoctor={() => void handleSetupDoctorCheck()}
+        onEnterConsole={() => void handleOnboardingEnterConsole()}
+        onRunFirstAnalysis={() => void handleOnboardingRunFirstAnalysis()}
+      />
+    );
+  }
+
   return (
     <AppShell
       workspacePath={validateResult?.workspace ?? workspaceRootPath ?? "bound workspace"}
@@ -672,6 +829,11 @@ export default function App() {
       workspaceHealth={workspaceHealth}
       runtimeSafety={runtimeSafety}
       gitPublication={gitPublication}
+      runStatus={runStatus}
+      runReviewSummary={runReviewSummary}
+      runtimeLabel={runtimeLabel}
+      cancelBusy={cancelBusy}
+      selectedRunIsActive={selectedRunIsActive}
       selectedRunId={runStatus?.run_id}
       selectedRunStatus={runStatus?.status}
       selectedRunError={runStatus?.error_code ?? runStatus?.error ?? undefined}
@@ -685,6 +847,7 @@ export default function App() {
       onRefresh={() => void bootstrapApp()}
       onStageChange={handleStageChange}
       onPrimaryAction={handleInspectorPrimaryAction}
+      onCancelRun={() => void handleCancelSelectedRun()}
       onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
       onRunLogsModeChange={setRunLogsMode}
       onRunLogsViewModeChange={setRunLogsViewMode}
@@ -801,10 +964,16 @@ export default function App() {
           artifacts={[...nonDiagramArtifacts, ...diagramArtifacts]}
           setupRuntime={setupRuntime}
           setupRuntimeProvider={setupRuntimeProvider}
+          runReviewSummary={runReviewSummary}
+          runReviewStatus={runReviewStatus}
+          gitDiff={gitDiff}
+          gitDiffStatus={gitDiffStatus}
+          onLoadGitDiff={handleLoadGitDiff}
           focusBlockerSignal={analysisFocusSignal}
           onRunPipeline={(pipeline) => void handleRunPipeline(pipeline)}
           onCancelSelectedRun={() => void handleCancelSelectedRun()}
           onSelectRun={(id) => void handleSelectRun(id)}
+          onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
         />
       ) : null}
 
@@ -817,6 +986,11 @@ export default function App() {
           selectedArtifact={selectedArtifact}
           selectedArtifactContent={selectedArtifactContent}
           selectedArtifactIsMermaid={selectedArtifactIsMermaid}
+          runLogs={runLogs}
+          reviewSummary={runReviewSummary}
+          gitDiff={gitDiff}
+          gitDiffStatus={gitDiffStatus}
+          onLoadGitDiff={handleLoadGitDiff}
           onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
         />
       ) : null}
@@ -829,6 +1003,10 @@ export default function App() {
           openQuestions={openQuestions}
           proposalBranch={proposalBranch}
           gitStatus={gitStatus}
+          runLogs={runLogs}
+          gitDiff={gitDiff}
+          gitDiffStatus={gitDiffStatus}
+          onLoadGitDiff={handleLoadGitDiff}
           onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
           onGoPublish={() => setActiveStage("publish")}
         />
@@ -847,6 +1025,9 @@ export default function App() {
           selectedArtifactContent={selectedArtifactContent}
           openQuestions={openQuestions}
           externalGateItems={publishExternalGateItems}
+          gitDiff={gitDiff}
+          gitDiffStatus={gitDiffStatus}
+          onLoadGitDiff={handleLoadGitDiff}
           onGitMessageChange={setGitMessage}
           onProposalBranchChange={setProposalBranch}
           onCommit={() => void handleGitCommit()}

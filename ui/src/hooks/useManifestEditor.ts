@@ -50,13 +50,16 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
     }
   }
 
-  async function handleValidateWorkspace() {
+  async function handleValidateWorkspace(): Promise<ValidateResponse | null> {
     setBusy(true);
     setError(null);
     try {
-      setValidateResult(await validateWorkspaceAPI());
+      const result = await validateWorkspaceAPI();
+      setValidateResult(result);
+      return result;
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "workspace validation failed");
+      return null;
     } finally {
       setBusy(false);
     }
