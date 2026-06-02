@@ -131,7 +131,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	reposFile := fs.String("repos-file", "", "YAML file with repos[] entries for --auto-init")
 	docsImportsPath := fs.String("docs-imports-path", "./docs/imports", "docs imports path in workspace.yaml for --auto-init")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--listen 127.0.0.1:8080] [--dry-run] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]")
+		fmt.Fprintln(stderr, "Usage: acp serve [--workspace <abs-path>] [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--listen 127.0.0.1:8080] [--dry-run] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]")
 		fs.PrintDefaults()
 	}
 
@@ -150,6 +150,31 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return exitCodeValidation
+	}
+
+	if strings.TrimSpace(*workspacePath) == "" {
+		if *autoInit || strings.TrimSpace(*repoName) != "" || strings.TrimSpace(*repoPath) != "" || strings.TrimSpace(*repoGitURL) != "" || strings.TrimSpace(*repoRef) != "" || strings.TrimSpace(*reposFile) != "" {
+			fmt.Fprintln(stderr, "workspace validation failed: --auto-init and repo flags require --workspace; run plain `acp serve` for UI onboarding")
+			return exitCodeValidation
+		}
+		server := api.NewLauncherServer(toAPIRuntimeConfig(runtimeConfig), func(ws workspace.Root, config api.ServerRuntimeConfig) *orchestrator.Service {
+			return newCLIService(ws, fromAPIRuntimeConfig(config), orchestrator.WithResumeStaleAsyncRuns())
+		})
+		if *dryRun {
+			fmt.Fprintf(stdout, "launcher ready for %s\n", *listenAddress)
+			fmt.Fprintf(stdout, "runtime mode: %s\n", runtimeConfig.mode)
+			fmt.Fprintf(stdout, "runtime provider: %s\n", runtimeConfig.provider)
+			if runtimeConfig.mode == acpruntime.RuntimeModeFake {
+				fmt.Fprintln(stdout, "runtime provider note: ignored in fake mode")
+			}
+			return exitCodeOK
+		}
+		fmt.Fprintf(stdout, "starting ACP onboarding server on %s\n", *listenAddress)
+		if err := server.Serve(context.Background(), *listenAddress); err != nil {
+			fmt.Fprintf(stderr, "serve failed: %v\n", err)
+			return exitCodeValidation
+		}
+		return exitCodeOK
 	}
 
 	ws, err := openOrAutoInitWorkspace(workspaceInitConfig{
@@ -180,7 +205,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	if !*dryRun {
 		service.ReconcileStaleRunsAfterRestart()
 	}
-	server := api.NewServer(ws, service)
+	server := api.NewServerWithRuntime(ws, service, toAPIRuntimeConfig(runtimeConfig))
 	if *dryRun {
 		fmt.Fprintf(stdout, "workspace ready at %s\n", ws.Path)
 		fmt.Fprintf(stdout, "server configured for %s\n", *listenAddress)
@@ -666,7 +691,7 @@ func printRootUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  acp version")
 	fmt.Fprintln(w, "  acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]")
-	fmt.Fprintln(w, "  acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]")
+	fmt.Fprintln(w, "  acp serve [--workspace <abs-path>] [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]")
 	fmt.Fprintln(w, "  acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]")
 	fmt.Fprintln(w, "  acp qa --workspace <abs-path> --question \"<text>\"")
 	fmt.Fprintln(w, "  acp doctor [--workspace <abs-path>] [--repo-path <path> | --repo-git-url <url>] [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--json]")
@@ -674,7 +699,7 @@ func printRootUsage(w io.Writer) {
 	fmt.Fprintln(w, "Commands:")
 	fmt.Fprintln(w, "  version print build version metadata")
 	fmt.Fprintln(w, "  init-workspace create/update workspace.yaml and bootstrap workspace layout")
-	fmt.Fprintln(w, "  serve   load workspace and start local API+UI service")
+	fmt.Fprintln(w, "  serve   start local API+UI service; without --workspace opens onboarding")
 	fmt.Fprintln(w, "  run     validate workspace path and execute init/refresh pipeline")
 	fmt.Fprintln(w, "  qa      ask read-only questions over workspace artifacts")
 	fmt.Fprintln(w, "  doctor  check local install, workspace, repo access, runtime provider, and embedded UI")
@@ -754,6 +779,28 @@ func newCLIService(ws workspace.Root, runtimeConfig resolvedRuntimeConfig, extra
 	}
 	options = append(options, extraOptions...)
 	return orchestrator.NewService(options...)
+}
+
+func toAPIRuntimeConfig(runtimeConfig resolvedRuntimeConfig) api.ServerRuntimeConfig {
+	return api.ServerRuntimeConfig{
+		Mode:               runtimeConfig.mode,
+		Provider:           runtimeConfig.provider,
+		ProviderSource:     runtimeConfig.providerSource,
+		ExecutionOverrides: runtimeConfig.executionOverrides,
+		RunLogsTTL:         runtimeConfig.runLogsTTL,
+		RunLogsMaxRuns:     runtimeConfig.runLogsMaxRuns,
+	}
+}
+
+func fromAPIRuntimeConfig(runtimeConfig api.ServerRuntimeConfig) resolvedRuntimeConfig {
+	return resolvedRuntimeConfig{
+		mode:               runtimeConfig.Mode,
+		provider:           runtimeConfig.Provider,
+		providerSource:     runtimeConfig.ProviderSource,
+		executionOverrides: runtimeConfig.ExecutionOverrides,
+		runLogsTTL:         runtimeConfig.RunLogsTTL,
+		runLogsMaxRuns:     runtimeConfig.RunLogsMaxRuns,
+	}
 }
 
 func envInt(name string, fallback int) int {

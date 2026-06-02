@@ -219,6 +219,24 @@ export type RuntimePermissionsResponse = {
 };
 export type RuntimePermissionDraft = Record<RuntimePermissionKey, string>;
 
+export type OnboardingRuntimeStatus = {
+  selected: boolean;
+  runtime: string;
+  runtime_provider: string;
+  provider_source?: string;
+};
+
+export type OnboardingStatusResponse = {
+  ok: boolean;
+  launcher_mode: boolean;
+  workspace_selected: boolean;
+  workspace_ready: boolean;
+  workspace: string;
+  manifest_present: boolean;
+  runtime: OnboardingRuntimeStatus;
+  can_enter_console: boolean;
+};
+
 export type RuntimeProfileResponse = {
   ok: boolean;
   permissions?: {

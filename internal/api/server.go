@@ -26,15 +26,70 @@ import (
 )
 
 type Server struct {
-	mu        sync.RWMutex
-	workspace workspace.Root
-	service   *orchestrator.Service
+	mu                sync.RWMutex
+	workspace         workspace.Root
+	workspacePath     string
+	workspaceSelected bool
+	runtimeSelected   bool
+	launcherMode      bool
+	service           *orchestrator.Service
+	runtimeConfig     ServerRuntimeConfig
+	serviceFactory    ServiceFactory
 }
 
+type ServerRuntimeConfig struct {
+	Mode               string
+	Provider           acpruntime.Provider
+	ProviderSource     acpruntime.ProviderSource
+	ExecutionOverrides acpruntime.ExecutionOverrides
+	RunLogsTTL         time.Duration
+	RunLogsMaxRuns     int
+}
+
+type ServiceFactory func(workspace.Root, ServerRuntimeConfig) *orchestrator.Service
+
 func NewServer(ws workspace.Root, service *orchestrator.Service) *Server {
+	return NewServerWithRuntime(ws, service, ServerRuntimeConfig{
+		Mode:           acpruntime.RuntimeModeFake,
+		Provider:       acpruntime.ProviderClaudeCode,
+		ProviderSource: acpruntime.ProviderSourceDefault,
+	})
+}
+
+func NewServerWithRuntime(ws workspace.Root, service *orchestrator.Service, runtimeConfig ServerRuntimeConfig) *Server {
+	if strings.TrimSpace(runtimeConfig.Mode) == "" {
+		runtimeConfig.Mode = acpruntime.RuntimeModeFake
+	}
+	if runtimeConfig.Provider == "" {
+		runtimeConfig.Provider = acpruntime.ProviderClaudeCode
+	}
+	if runtimeConfig.ProviderSource == "" {
+		runtimeConfig.ProviderSource = acpruntime.ProviderSourceDefault
+	}
 	return &Server{
-		workspace: ws,
-		service:   service,
+		workspace:         ws,
+		workspacePath:     ws.Path,
+		workspaceSelected: true,
+		runtimeSelected:   true,
+		runtimeConfig:     runtimeConfig,
+		service:           service,
+	}
+}
+
+func NewLauncherServer(runtimeConfig ServerRuntimeConfig, factory ServiceFactory) *Server {
+	if strings.TrimSpace(runtimeConfig.Mode) == "" {
+		runtimeConfig.Mode = acpruntime.RuntimeModeFake
+	}
+	if runtimeConfig.Provider == "" {
+		runtimeConfig.Provider = acpruntime.ProviderClaudeCode
+	}
+	if runtimeConfig.ProviderSource == "" {
+		runtimeConfig.ProviderSource = acpruntime.ProviderSourceDefault
+	}
+	return &Server{
+		launcherMode:   true,
+		runtimeConfig:  runtimeConfig,
+		serviceFactory: factory,
 	}
 }
 
@@ -42,6 +97,9 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/health", s.handleHealth)
+	mux.HandleFunc("/api/onboarding/status", s.handleOnboardingStatus)
+	mux.HandleFunc("/api/onboarding/workspace", s.handleOnboardingWorkspace)
+	mux.HandleFunc("/api/onboarding/runtime", s.handleOnboardingRuntime)
 	mux.HandleFunc("/api/system/doctor", s.handleSystemDoctor)
 	mux.HandleFunc("/api/workspace/validate", s.handleWorkspaceValidate)
 	mux.HandleFunc("/api/workspace/bundle", s.handleWorkspaceBundle)
@@ -64,6 +122,10 @@ func (s *Server) Handler() http.Handler {
 
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if strings.HasPrefix(request.URL.Path, "/api/") {
+			if s.shouldBlockAPIRequest(request.URL.Path) {
+				writeError(writer, http.StatusPreconditionRequired, "workspace_not_selected", "select or create an ACP workspace before using this API")
+				return
+			}
 			mux.ServeHTTP(writer, request)
 			return
 		}
@@ -95,10 +157,96 @@ func (s *Server) getWorkspace() workspace.Root {
 	return s.workspace
 }
 
+func (s *Server) getWorkspacePath() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.workspacePath
+}
+
+func (s *Server) hasReadyWorkspace() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.workspaceSelected && s.workspace.Path != "" && s.service != nil
+}
+
+func (s *Server) getService() *orchestrator.Service {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.service
+}
+
+func (s *Server) isRuntimeSelected() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.runtimeSelected
+}
+
 func (s *Server) setWorkspace(ws workspace.Root) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.workspace = ws
+	s.workspacePath = ws.Path
+	s.workspaceSelected = true
+}
+
+func (s *Server) setDraftWorkspace(path string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.workspace = workspace.Root{}
+	s.workspacePath = path
+	s.workspaceSelected = true
+	s.service = nil
+}
+
+func (s *Server) attachWorkspace(ws workspace.Root) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.workspace = ws
+	s.workspacePath = ws.Path
+	s.workspaceSelected = true
+	if s.serviceFactory != nil {
+		s.service = s.serviceFactory(ws, s.runtimeConfig)
+	}
+}
+
+func (s *Server) setRuntimeConfig(config ServerRuntimeConfig) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if strings.TrimSpace(config.Mode) == "" {
+		config.Mode = acpruntime.RuntimeModeFake
+	}
+	if config.Provider == "" {
+		config.Provider = acpruntime.ProviderClaudeCode
+	}
+	if config.ProviderSource == "" {
+		config.ProviderSource = acpruntime.ProviderSourceDefault
+	}
+	config.ExecutionOverrides = s.runtimeConfig.ExecutionOverrides
+	config.RunLogsTTL = s.runtimeConfig.RunLogsTTL
+	config.RunLogsMaxRuns = s.runtimeConfig.RunLogsMaxRuns
+	s.runtimeConfig = config
+	s.runtimeSelected = true
+	if s.workspaceSelected && s.workspace.Path != "" && s.serviceFactory != nil {
+		s.service = s.serviceFactory(s.workspace, s.runtimeConfig)
+	}
+}
+
+func (s *Server) shouldBlockAPIRequest(apiPath string) bool {
+	if apiPath == "/api/health" || strings.HasPrefix(apiPath, "/api/onboarding/") {
+		return false
+	}
+	s.mu.RLock()
+	selected := s.workspaceSelected
+	ready := selected && s.workspace.Path != "" && s.service != nil
+	pathSelected := selected && strings.TrimSpace(s.workspacePath) != ""
+	s.mu.RUnlock()
+	if ready {
+		return false
+	}
+	if pathSelected && (apiPath == "/api/workspace/manifest" || apiPath == "/api/system/doctor") {
+		return false
+	}
+	return true
 }
 
 func (s *Server) handleHealth(writer http.ResponseWriter, request *http.Request) {
@@ -121,9 +269,9 @@ func (s *Server) handleSystemDoctor(writer http.ResponseWriter, request *http.Re
 		return
 	}
 
-	ws := s.getWorkspace()
+	workspacePath := s.getWorkspacePath()
 	report, err := doctor.Run(request.Context(), doctor.Options{
-		WorkspacePath:       ws.Path,
+		WorkspacePath:       workspacePath,
 		RepoPath:            query.Get("repo_path"),
 		RepoGitURL:          query.Get("repo_git_url"),
 		RuntimeMode:         query.Get("runtime"),
@@ -191,9 +339,17 @@ func (s *Server) handleWorkspaceBundle(writer http.ResponseWriter, request *http
 func (s *Server) handleWorkspaceManifest(writer http.ResponseWriter, request *http.Request) {
 	switch request.Method {
 	case http.MethodGet:
-		ws := s.getWorkspace()
-		content, err := ws.ReadFile(workspace.ManifestFileName)
+		workspacePath := s.getWorkspacePath()
+		if strings.TrimSpace(workspacePath) == "" {
+			writeError(writer, http.StatusPreconditionRequired, "workspace_not_selected", "select or create an ACP workspace before reading workspace.yaml")
+			return
+		}
+		content, err := os.ReadFile(filepath.Join(workspacePath, workspace.ManifestFileName))
 		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				writeJSON(writer, http.StatusOK, map[string]any{"content": ""})
+				return
+			}
 			writeError(writer, http.StatusNotFound, "manifest_read_failed", err.Error())
 			return
 		}
@@ -217,18 +373,37 @@ func (s *Server) handleWorkspaceManifest(writer http.ResponseWriter, request *ht
 			return
 		}
 
-		ws := s.getWorkspace()
-		if err := ws.WriteFile(workspace.ManifestFileName, []byte(payload.Content)); err != nil {
+		workspacePath := s.getWorkspacePath()
+		if strings.TrimSpace(workspacePath) == "" {
+			writeError(writer, http.StatusPreconditionRequired, "workspace_not_selected", "select or create an ACP workspace before saving workspace.yaml")
+			return
+		}
+		if err := os.WriteFile(filepath.Join(workspacePath, workspace.ManifestFileName), []byte(payload.Content), 0o644); err != nil {
 			writeError(writer, http.StatusInternalServerError, "manifest_write_failed", err.Error())
 			return
 		}
 
-		reopened, err := workspace.Open(ws.Path)
+		reopened, err := workspace.Open(workspacePath)
 		if err != nil {
 			writeError(writer, http.StatusInternalServerError, "manifest_reopen_failed", err.Error())
 			return
 		}
-		s.setWorkspace(reopened)
+		if err := reopened.EnsureLayout(); err != nil {
+			writeError(writer, http.StatusInternalServerError, "workspace_layout_failed", err.Error())
+			return
+		}
+		if err := reopened.EnsureBaselineBundle(); err != nil {
+			writeError(writer, http.StatusInternalServerError, "workspace_baseline_failed", err.Error())
+			return
+		}
+		if s.hasReadyWorkspace() {
+			s.setWorkspace(reopened)
+		} else {
+			s.attachWorkspace(reopened)
+			if service := s.getService(); service != nil {
+				service.ReconcileStaleRunsAfterRestart()
+			}
+		}
 		writeJSON(writer, http.StatusOK, map[string]any{"ok": true})
 	default:
 		writeMethodNotAllowed(writer, http.MethodGet+", "+http.MethodPut)
@@ -755,7 +930,16 @@ func (s *Server) handleQARunsPost(writer http.ResponseWriter, request *http.Requ
 		writeError(writer, http.StatusBadRequest, "question_required", "question is required")
 		return
 	}
-	runID, err := s.service.StartAsyncRun(context.Background(), orchestrator.RunRequest{
+	if !s.isRuntimeSelected() {
+		writeError(writer, http.StatusBadRequest, "runtime_not_selected", "select a runner before starting Q&A")
+		return
+	}
+	service := s.getService()
+	if service == nil {
+		writeError(writer, http.StatusPreconditionRequired, "workspace_not_selected", "select or create an ACP workspace before starting Q&A")
+		return
+	}
+	runID, err := service.StartAsyncRun(context.Background(), orchestrator.RunRequest{
 		Workspace:      s.getWorkspace(),
 		Pipeline:       orchestrator.PipelineQA,
 		NonInteractive: true,
@@ -896,8 +1080,38 @@ func (s *Server) handlePipelineStart(writer http.ResponseWriter, request *http.R
 		return
 	}
 
-	runID, err := s.service.StartAsyncRun(context.Background(), orchestrator.RunRequest{
-		Workspace:      s.getWorkspace(),
+	if !s.isRuntimeSelected() {
+		writeError(writer, http.StatusBadRequest, "runtime_not_selected", "select a runner before starting analysis")
+		return
+	}
+	service := s.getService()
+	if service == nil {
+		writeError(writer, http.StatusPreconditionRequired, "workspace_not_selected", "select or create an ACP workspace before starting analysis")
+		return
+	}
+	ws := s.getWorkspace()
+	report := ws.Validate(request.Context(), workspace.ValidateOptions{
+		ResolveRepos: true,
+		FetchGit:     false,
+		VerifyRefs:   true,
+	})
+	if !report.OK {
+		writeJSON(writer, http.StatusBadRequest, map[string]any{
+			"ok":        false,
+			"workspace": ws.Path,
+			"error": map[string]string{
+				"code":    "workspace_not_ready",
+				"message": "fix workspace, repository and runtime readiness blockers before starting analysis",
+			},
+			"errors":         report.Errors,
+			"warnings":       report.Warnings,
+			"resolved_repos": report.ResolvedRepos,
+		})
+		return
+	}
+
+	runID, err := service.StartAsyncRun(context.Background(), orchestrator.RunRequest{
+		Workspace:      ws,
 		Pipeline:       pipeline,
 		NonInteractive: true,
 	})

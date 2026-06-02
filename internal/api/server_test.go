@@ -43,6 +43,136 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 }
 
+func TestLauncherBlocksWorkspaceAPIsUntilWorkspaceSelected(t *testing.T) {
+	t.Parallel()
+
+	server := NewLauncherServer(testServerRuntimeConfig(), testLauncherServiceFactory())
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Post(httpServer.URL+"/api/workspace/validate", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatalf("POST /api/workspace/validate: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusPreconditionRequired {
+		t.Fatalf("expected 428 before workspace selection, got %d", response.StatusCode)
+	}
+
+	statusResponse, err := http.Get(httpServer.URL + "/api/onboarding/status")
+	if err != nil {
+		t.Fatalf("GET /api/onboarding/status: %v", err)
+	}
+	defer statusResponse.Body.Close()
+	if statusResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected onboarding status 200, got %d", statusResponse.StatusCode)
+	}
+	var status map[string]any
+	if err := json.NewDecoder(statusResponse.Body).Decode(&status); err != nil {
+		t.Fatalf("decode onboarding status: %v", err)
+	}
+	if status["workspace_selected"].(bool) {
+		t.Fatalf("expected no workspace selected in launcher status: %#v", status)
+	}
+}
+
+func TestDirectModeOnboardingStatusReflectsRuntimeConfig(t *testing.T) {
+	t.Parallel()
+
+	wsServer := newTestServer(t)
+	ws := wsServer.getWorkspace()
+	server := NewServerWithRuntime(ws, orchestrator.NewService(orchestrator.WithHistoryWorkspace(ws)), ServerRuntimeConfig{
+		Mode:           acpruntime.RuntimeModeHeadless,
+		Provider:       acpruntime.ProviderQwenCode,
+		ProviderSource: acpruntime.ProviderSourceOverride,
+	})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Get(httpServer.URL + "/api/onboarding/status")
+	if err != nil {
+		t.Fatalf("GET /api/onboarding/status: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected onboarding status 200, got %d", response.StatusCode)
+	}
+	var status struct {
+		CanEnterConsole bool `json:"can_enter_console"`
+		Runtime         struct {
+			Selected        bool   `json:"selected"`
+			Runtime         string `json:"runtime"`
+			RuntimeProvider string `json:"runtime_provider"`
+			ProviderSource  string `json:"provider_source"`
+		} `json:"runtime"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&status); err != nil {
+		t.Fatalf("decode onboarding status: %v", err)
+	}
+	if !status.CanEnterConsole || !status.Runtime.Selected {
+		t.Fatalf("expected direct mode ready runtime status, got %+v", status)
+	}
+	if status.Runtime.Runtime != acpruntime.RuntimeModeHeadless {
+		t.Fatalf("expected headless runtime, got %q", status.Runtime.Runtime)
+	}
+	if status.Runtime.RuntimeProvider != string(acpruntime.ProviderQwenCode) {
+		t.Fatalf("expected qwen provider, got %q", status.Runtime.RuntimeProvider)
+	}
+	if status.Runtime.ProviderSource != string(acpruntime.ProviderSourceOverride) {
+		t.Fatalf("expected override provider source, got %q", status.Runtime.ProviderSource)
+	}
+}
+
+func TestLauncherWorkspaceManifestAndRuntimeSelection(t *testing.T) {
+	t.Parallel()
+
+	server := NewLauncherServer(testServerRuntimeConfig(), testLauncherServiceFactory())
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	root := t.TempDir()
+	workspacePath := filepath.Join(root, "arch-workspace")
+	repoPath := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("create repo path: %v", err)
+	}
+
+	workspaceResponse := postJSON(t, httpServer.URL+"/api/onboarding/workspace", fmt.Sprintf(`{"path":%q,"create":true}`, workspacePath))
+	defer workspaceResponse.Body.Close()
+	if workspaceResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected workspace selection 200, got %d", workspaceResponse.StatusCode)
+	}
+	if _, err := os.Stat(filepath.Join(workspacePath, ".git")); err != nil {
+		t.Fatalf("expected draft workspace git init: %v", err)
+	}
+
+	manifest := fmt.Sprintf("version: 1\nrepos:\n  - name: sample\n    path: %q\ndocs:\n  imports_path: %q\n", repoPath, "./docs/imports")
+	manifestResponse := postJSONWithMethod(t, http.MethodPut, httpServer.URL+"/api/workspace/manifest", fmt.Sprintf(`{"content":%q}`, manifest))
+	defer manifestResponse.Body.Close()
+	if manifestResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected manifest save 200, got %d", manifestResponse.StatusCode)
+	}
+
+	runtimeResponse := postJSON(t, httpServer.URL+"/api/onboarding/runtime", `{"runtime":"fake","runtime_provider":"claude-code"}`)
+	if runtimeResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected runtime selection 200, got %d", runtimeResponse.StatusCode)
+	}
+	defer runtimeResponse.Body.Close()
+	var status map[string]any
+	if err := json.NewDecoder(runtimeResponse.Body).Decode(&status); err != nil {
+		t.Fatalf("decode runtime status: %v", err)
+	}
+	if !status["can_enter_console"].(bool) {
+		t.Fatalf("expected launcher ready after workspace manifest and runtime selection: %#v", status)
+	}
+
+	validateResponse := postJSON(t, httpServer.URL+"/api/workspace/validate", "{}")
+	defer validateResponse.Body.Close()
+	if validateResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected workspace validate 200 after manifest save, got %d", validateResponse.StatusCode)
+	}
+}
+
 func TestSystemDoctorEndpointReturnsReadinessChecks(t *testing.T) {
 	t.Parallel()
 
@@ -3233,6 +3363,44 @@ repos:
 		orchestrator.WithRunner(runner),
 	)
 	return NewServer(ws, service)
+}
+
+func testServerRuntimeConfig() ServerRuntimeConfig {
+	return ServerRuntimeConfig{
+		Mode:           acpruntime.RuntimeModeFake,
+		Provider:       acpruntime.ProviderClaudeCode,
+		ProviderSource: acpruntime.ProviderSourceDefault,
+		RunLogsTTL:     168 * time.Hour,
+		RunLogsMaxRuns: 200,
+	}
+}
+
+func testLauncherServiceFactory() ServiceFactory {
+	return func(ws workspace.Root, _ ServerRuntimeConfig) *orchestrator.Service {
+		return orchestrator.NewService(
+			orchestrator.WithHistoryWorkspace(ws),
+			orchestrator.WithRunner(fakeruntime.Runner{}),
+		)
+	}
+}
+
+func postJSON(t *testing.T, url string, body string) *http.Response {
+	t.Helper()
+	return postJSONWithMethod(t, http.MethodPost, url, body)
+}
+
+func postJSONWithMethod(t *testing.T, method string, url string, body string) *http.Response {
+	t.Helper()
+	request, err := http.NewRequest(method, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("create %s request: %v", method, err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, url, err)
+	}
+	return response
 }
 
 func writeHeadlessRunnerStub(t *testing.T, runtimeName string) string {

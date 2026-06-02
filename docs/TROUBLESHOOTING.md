@@ -38,10 +38,25 @@ git ls-remote --heads https://github.com/org/private-repo.git
 
 ```bash
 mkdir -p "$HOME/acp-workspaces"
-acp doctor --workspace "$HOME/acp-workspaces/my-service"
+acp serve --runtime fake
 ```
 
 Workspace является git-репозиторием с generated architecture artifacts. ACP не пишет в анализируемый user repo.
+Если вы используете direct-mode, проверьте путь через doctor:
+
+```bash
+acp doctor --workspace "$HOME/acp-workspaces/my-service"
+```
+
+## API вернул workspace_not_selected
+
+`acp serve` без `--workspace` стартует launcher/onboarding режим. До выбора workspace доступны `/api/health` и `/api/onboarding/*`; workspace-bound endpoints возвращают `428 workspace_not_selected`.
+
+Решение: откройте UI, выберите или создайте workspace в шаге `Workspace`, затем сохраните sources и runner. Для scripts/CI используйте direct-mode:
+
+```bash
+acp serve --workspace "$HOME/acp-workspaces/my-service" --runtime fake
+```
 
 ## Port 8080 занят
 
@@ -49,7 +64,7 @@ Workspace является git-репозиторием с generated architectur
 
 ```bash
 acp doctor --listen 127.0.0.1:8081
-acp serve --workspace "$HOME/acp-workspaces/my-service" --listen 127.0.0.1:8081
+acp serve --listen 127.0.0.1:8081
 ```
 
 ## Embedded UI missing
@@ -59,15 +74,17 @@ acp serve --workspace "$HOME/acp-workspaces/my-service" --listen 127.0.0.1:8081
 
 ```bash
 make build
-./bin/acp serve --workspace "$HOME/acp-workspaces/my-service"
+./bin/acp serve
 ```
 
 ## Headless provider command not found
 
 Для fake runtime provider command не нужен.
-Для live анализа установите provider или задайте override:
+Для live анализа установите provider или задайте override. В UI-first режиме runner выбирается в onboarding; direct-mode можно запускать сразу с workspace:
 
 ```bash
+ACP_CLAUDE_CMD=claude acp serve --runtime headless --runtime-provider claude-code
+
 ACP_CLAUDE_CMD=claude acp serve --workspace "$HOME/acp-workspaces/my-service" --runtime headless --runtime-provider claude-code
 ACP_QWEN_CMD=qwen acp serve --workspace "$HOME/acp-workspaces/my-service" --runtime headless --runtime-provider qwen-code
 ACP_CODEX_CMD=codex acp serve --workspace "$HOME/acp-workspaces/my-service" --runtime headless --runtime-provider codex-code
@@ -75,10 +92,10 @@ ACP_CODEX_CMD=codex acp serve --workspace "$HOME/acp-workspaces/my-service" --ru
 
 ## UI показывает validation errors
 
-Откройте `Setup`, проверьте:
+В onboarding откройте `Sources`; после входа в Console V2 откройте `Source`. Проверьте:
 - repo source mode: `GitHub/GitLab URL` или `Local folder`
 - `Repo name` уникален внутри workspace
 - для local folder указан абсолютный путь к git checkout
 - для URL локальный `git` может выполнить `ls-remote`
 
-После исправления нажмите `Save and validate workspace.yaml`.
+После исправления нажмите `Save and validate sources`.

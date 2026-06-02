@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AppShell } from "./components/AppShell";
 import { BaselineGitPanel } from "./components/BaselineGitPanel";
+import { OnboardingShell } from "./components/OnboardingShell";
 import { RuntimeProfileSettingsPanel } from "./components/RuntimeProfileSettingsPanel";
 import {
   AnalysisStagePanel,
@@ -23,6 +24,7 @@ import {
   runtimeTimeoutLabels,
   type Diagnostic,
   type GuidedRepo,
+  type OnboardingStatusResponse,
   type RuntimeExecutionKey,
   type RuntimePermissionKey,
   type RuntimeTimeoutKey,
@@ -32,6 +34,7 @@ import { buildStageOptions } from "./lib/stageModel";
 import { useRunExplorer } from "./hooks/useRunExplorer";
 import { useRuntimeSettings } from "./hooks/useRuntimeSettings";
 import { useWorkspaceSetup } from "./hooks/useWorkspaceSetup";
+import { loadOnboardingStatus, selectOnboardingRuntime, selectOnboardingWorkspace } from "./lib/onboardingApi";
 import { loadSystemDoctor } from "./lib/systemApi";
 
 export default function App() {
@@ -45,6 +48,10 @@ export default function App() {
   const [setupDoctorResult, setSetupDoctorResult] = useState<Awaited<ReturnType<typeof loadSystemDoctor>> | null>(null);
   const [setupDoctorStatus, setSetupDoctorStatus] = useState("");
   const [firstRunStatus, setFirstRunStatus] = useState("");
+  const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatusResponse | null>(null);
+  const [onboardingWorkspacePath, setOnboardingWorkspacePath] = useState("");
+  const [onboardingCreateWorkspace, setOnboardingCreateWorkspace] = useState(true);
+  const [consoleReady, setConsoleReady] = useState(false);
   const [analysisFocusSignal, setAnalysisFocusSignal] = useState(0);
   const [askPrimaryActionSignal, setAskPrimaryActionSignal] = useState(0);
 
@@ -195,12 +202,106 @@ export default function App() {
   }, [activeStage, baselineEditorArtifacts, loadSelectedEditorContent, loadWizardContract, selectedEditorLoadedPath, selectedEditorPath, wizardContractLoaded]);
 
   async function bootstrapApp() {
+    const status = await loadOnboardingStatus();
+    syncOnboardingStatus(status);
+    if (!status.can_enter_console) {
+      setConsoleReady(false);
+      return;
+    }
+    await bootstrapConsoleData({ validateWorkspace: true });
+    setConsoleReady(true);
+  }
+
+  async function bootstrapConsoleData(options: { validateWorkspace?: boolean } = {}) {
     await bootstrapRuns();
     await bootstrapWorkspaceSetup();
     await loadRuntimeTimeouts();
     await loadRuntimeExecution();
     await loadRuntimePermissions();
     await loadRuntimeProfile();
+    if (options.validateWorkspace) {
+      await handleValidateWorkspace();
+    }
+  }
+
+  function syncOnboardingStatus(status: OnboardingStatusResponse) {
+    setOnboardingStatus(status);
+    if (status.workspace && !onboardingWorkspacePath.trim()) {
+      setOnboardingWorkspacePath(status.workspace);
+    }
+    if (status.runtime.runtime) {
+      setSetupRuntime(status.runtime.runtime);
+    }
+    if (status.runtime.runtime_provider) {
+      setSetupRuntimeProvider(status.runtime.runtime_provider);
+    }
+  }
+
+  async function refreshOnboardingStatus() {
+    const status = await loadOnboardingStatus();
+    syncOnboardingStatus(status);
+    return status;
+  }
+
+  async function handleOnboardingWorkspaceSelect() {
+    setBusy(true);
+    setError(null);
+    try {
+      const status = await selectOnboardingWorkspace(onboardingWorkspacePath, onboardingCreateWorkspace);
+      syncOnboardingStatus(status);
+      await bootstrapWorkspaceSetup();
+      if (status.workspace_ready && status.manifest_present) {
+        await handleValidateWorkspace();
+      }
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "workspace selection failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleOnboardingSaveSources() {
+    await handleSetupSaveGuidedWorkspaceSetup();
+    const status = await refreshOnboardingStatus();
+    if (status.can_enter_console) {
+      await bootstrapConsoleData({ validateWorkspace: false });
+    }
+  }
+
+  async function handleOnboardingSaveRuntime() {
+    setBusy(true);
+    setError(null);
+    try {
+      const status = await selectOnboardingRuntime(setupRuntime, setupRuntimeProvider);
+      syncOnboardingStatus(status);
+      const validation = status.can_enter_console && validateResult?.ok !== true ? await handleValidateWorkspace() : validateResult;
+      if (status.can_enter_console) {
+        await bootstrapConsoleData({ validateWorkspace: validation?.ok !== true });
+      }
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "runner selection failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleOnboardingEnterConsole(): Promise<boolean> {
+    const status = await refreshOnboardingStatus();
+    const validation = validateResult?.ok === true ? validateResult : await handleValidateWorkspace();
+    if (!status.can_enter_console || validation?.ok !== true) {
+      setError("Validate sources and select a runner before opening the console.");
+      return false;
+    }
+    await bootstrapConsoleData({ validateWorkspace: false });
+    setConsoleReady(true);
+    return true;
+  }
+
+  async function handleOnboardingRunFirstAnalysis() {
+    const entered = await handleOnboardingEnterConsole();
+    if (entered) {
+      await handleSetupFirstRun("analysis");
+    }
   }
 
   async function handleSetupDoctorCheck() {
@@ -653,6 +754,39 @@ export default function App() {
         void handleGitCommit();
         break;
     }
+  }
+
+  if (!consoleReady || onboardingStatus?.can_enter_console !== true) {
+    return (
+      <OnboardingShell
+        busy={busy}
+        error={error}
+        status={onboardingStatus}
+        workspacePath={onboardingWorkspacePath}
+        createWorkspace={onboardingCreateWorkspace}
+        guidedRepos={guidedRepos}
+        guidedDocsImportsPath={guidedDocsImportsPath}
+        validateResult={validateResult}
+        doctorResult={setupDoctorResult}
+        setupRuntime={setupRuntime}
+        setupRuntimeProvider={setupRuntimeProvider}
+        firstRunStatus={firstRunStatus}
+        onWorkspacePathChange={setOnboardingWorkspacePath}
+        onCreateWorkspaceChange={setOnboardingCreateWorkspace}
+        onSelectWorkspace={() => void handleOnboardingWorkspaceSelect()}
+        onRepoChange={handleSetupRepoChange}
+        onAddRepo={handleSetupAddRepo}
+        onRemoveRepo={handleSetupRemoveRepo}
+        onDocsImportsPathChange={handleSetupDocsImportsPathChange}
+        onSaveSources={() => void handleOnboardingSaveSources()}
+        onRuntimeChange={handleSetupRuntimeChange}
+        onRuntimeProviderChange={handleSetupRuntimeProviderChange}
+        onSaveRuntime={() => void handleOnboardingSaveRuntime()}
+        onCheckDoctor={() => void handleSetupDoctorCheck()}
+        onEnterConsole={() => void handleOnboardingEnterConsole()}
+        onRunFirstAnalysis={() => void handleOnboardingRunFirstAnalysis()}
+      />
+    );
   }
 
   return (

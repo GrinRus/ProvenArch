@@ -186,7 +186,7 @@ Status:
 ## Epic 14 — GitHub/GitLab CI Trigger Mode (MVP)
 Acceptance:
 - `cmd/acp` поддерживает non-interactive запуск без UI для GitHub/GitLab CI jobs
-- `acp serve --workspace <abs-path>` поднимает single-workspace-per-process service
+- `acp serve --workspace <abs-path>` поднимает direct-mode single-workspace-per-process service для scripts/CI, while `acp serve` without workspace starts UI onboarding
 - batch mode работает с тем же `workspace.yaml` и теми же pipeline step IDs
 - hook-triggered workflow и manual pipeline button/job запускают тот же ACP flow
 - SCM hooks обрабатываются CI provider; native ACP webhook listener / external SCM app integration остаются вне MVP
@@ -306,6 +306,55 @@ Suggested PR slices:
   - update README/ARCHITECTURE UI description only after implementation
   - update `docs/TESTING_STRATEGY.md` and `docs/RELEASE_LIVE_E2E_RUNBOOK.md` with V2 live E2E flow
   - archive or update the active ExecPlan after owner review/merge
+
+## Epic 17 — Onboarding-first Workspace, Sources and Runner Setup
+
+Status: implemented as beta baseline in the current onboarding-first branch; provider-live release gate remains unchanged.
+
+Acceptance:
+- `acp serve` can start a local onboarding UI without requiring `--workspace` or repo flags up front.
+- Existing direct mode remains supported: `acp serve --workspace <path>` opens the normal single-workspace console path for scripts, CI, existing users and live E2E.
+- Onboarding is a pre-console setup surface, not a ninth product stage.
+- The first onboarding decision is architecture workspace selection: create a new workspace path or reopen an existing workspace.
+- Workspace create/open validates writable path, fixed layout readiness and git initialization, with actionable inline errors.
+- A new workspace can exist in draft setup state before `workspace.yaml` is valid, but pipeline actions remain disabled until a valid manifest is saved.
+- Target repositories are configured in UI through existing `workspace.yaml.repos[]` semantics.
+- One or more target repos are supported; each repo has unique `name`, exactly one source (`path` or `git_url`) and optional `ref`.
+- Repo validation supports local checkout paths and GitHub/GitLab-style URLs through local `git` auth context; ACP does not add a credential store.
+- Runner selection is mandatory before the first analysis.
+- `fake` is shown as the recommended first walkthrough runner and needs no external provider command.
+- Live runners remain explicit opt-in: `claude-code`, `qwen-code`, `codex-code`; provider command/auth readiness is surfaced before run.
+- No source repository mutation happens during onboarding validation or fake analysis.
+- Existing workspace schema, runtime artifact contracts and CLI batch `acp run` behavior are unchanged unless a later slice performs full schema/docs/fixtures sync.
+- Deterministic onboarding UI/e2e coverage exists, while release-facing provider-live frontend shell remains `UI_E2E_SCENARIO=init-inspect` unless a separate owner-approved live-gate slice changes it.
+
+Suggested PR slices:
+- `17A Launcher + workspace selection foundation`
+  - allow `acp serve` without `--workspace` to start loopback onboarding UI
+  - preserve `acp serve --workspace <path>` direct mode
+  - add onboarding status and workspace create/open APIs
+  - support workspace layout/git init before valid `workspace.yaml`
+  - add first UI screen for workspace path validation and create/open
+- `17B Onboarding source repositories`
+  - move first-run repo selection into onboarding while reusing Source-stage repo table semantics
+  - support add/remove multiple repos, Git URL/local path mode, optional `ref`, duplicate-name checks and docs imports path
+  - save valid repo setup through existing `workspace.yaml`
+  - show row-level validation and recovery states before enabling readiness/run
+- `17C Mandatory runner selection`
+  - add onboarding runner step with `fake`, `claude-code`, `qwen-code`, `codex-code`
+  - show provider command override hints and availability diagnostics
+  - keep `fake` deterministic and always available
+  - wire selected runner into first-run service/runtime state without changing artifact contracts
+- `17D Onboarding to Console V2 transition`
+  - add final readiness summary and transition into existing `Source -> Readiness -> Charter -> Analysis -> Review -> Proposals -> Ask -> Publish` shell
+  - keep Source editable after onboarding for repo changes
+  - ensure first analysis is disabled until workspace, repos and runner are valid
+  - preserve activity drawer/inspector/top-strip state after transition
+- `17E Onboarding tests, docs and live E2E hardening`
+  - deterministic Playwright/UI flow from blank `acp serve` to fake first analysis
+  - direct-mode `init-inspect` regression for existing live E2E
+  - README/INSTALL/TROUBLESHOOTING updates distinguishing UI-first setup, direct mode and multi-repo setup
+  - no new required provider-live release scenario without owner-approved release-gate decision
 
 ## Cleanup follow-up (post-beta, owner confirmation required)
 

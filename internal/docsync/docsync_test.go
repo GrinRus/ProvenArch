@@ -464,7 +464,7 @@ func TestCLIHelpSurfaceMatchesCommands(t *testing.T) {
 	helpSource := readDoc(t, "cmd/acp/main.go")
 	helpTokens := []string{
 		"acp init-workspace --workspace <abs-path> ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]",
-		"acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]",
+		"acp serve [--workspace <abs-path>] [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ((--repo-name <name> (--repo-path <path> | --repo-git-url <url>) [--repo-ref <ref>]) | --repos-file <path>) [--docs-imports-path ./docs/imports]]",
 		"acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--non-interactive]",
 		"acp qa --workspace <abs-path> --question \\\"<text>\\\"",
 	}
@@ -516,13 +516,13 @@ func TestCLIDocsPointToCanonicalSources(t *testing.T) {
 
 	forbiddenByDoc := map[string][]string{
 		"cmd/acp/README.md": {
-			"acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code]",
+			"acp serve [--workspace <abs-path>] [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code]",
 			"acp run --workspace <abs-path> --pipeline init|refresh [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code]",
 			"--max-parallel-tasks <n>",
 			"--run-logs-ttl-hours",
 		},
 		"docs/spec/API_SPEC.md": {
-			"acp serve --workspace <abs-path> [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ... [--docs-imports-path <path>]]",
+			"acp serve [--workspace <abs-path>] [--runtime fake|headless] [--runtime-provider claude-code|qwen-code|codex-code] [--execution-strategy sequential|parallel] [--max-parallel-tasks <n>] [--failure-policy fail_fast|best_effort] [--auto-init ... [--docs-imports-path <path>]]",
 			"ACP_RUNTIME_STEP_TIMEOUT_SEC",
 			"ACP_EXECUTION_STRATEGY",
 		},

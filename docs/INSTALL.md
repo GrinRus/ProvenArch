@@ -54,6 +54,21 @@ ACP_VERSION=v0.1.1 INSTALL_DIR=/usr/local/bin sh install.sh
 ## Первый запуск
 
 ```bash
+mkdir -p "$HOME/acp-workspaces"
+acp serve --runtime fake
+```
+
+Откройте [http://127.0.0.1:8080](http://127.0.0.1:8080).
+При запуске без `--workspace` UI откроет onboarding:
+
+1. `Workspace`: выберите или создайте architecture workspace, например `$HOME/acp-workspaces/my-service`.
+2. `Sources`: добавьте один или несколько target repositories через Git URL или local checkout path.
+3. `Runner`: выберите `fake` для первого deterministic walkthrough.
+4. `Ready`: откройте Console V2 или запустите первый analysis.
+
+Direct-mode для scripts, CI и опытных пользователей остаётся доступным:
+
+```bash
 acp doctor --workspace "$HOME/acp-workspaces/my-service" --repo-git-url https://github.com/org/my-service.git
 
 acp serve \
@@ -63,8 +78,6 @@ acp serve \
   --repo-git-url https://github.com/org/my-service.git \
   --runtime fake
 ```
-
-Откройте [http://127.0.0.1:8080](http://127.0.0.1:8080), пройдите `Setup -> First run`, нажмите `Save and validate workspace.yaml`, затем `Run first analysis`.
 
 ## Реальный headless runtime
 

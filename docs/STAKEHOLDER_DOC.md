@@ -25,10 +25,11 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 | Q&A capability with UI + CLI + public API surface | target upgraded | UI uses async `/api/qa/runs`; deterministic `internal/qa` + `acp qa` + `POST /api/qa/ask` remain compatibility/fake baseline |
 | Public `POST /api/qa/ask` | done (Epic 11) | read-only wrapper over deterministic workspace-backed QA service |
 | User-friendly install + first-run readiness surface | done (usability hardening) | `.goreleaser.yml`, `.github/workflows/release.yml`, `install.sh`, `LICENSE`, `cmd/acp/main.go` (`acp version`, `acp doctor`), `internal/api/server.go` (`GET /api/system/doctor`), `ui/src/components/StageRail.tsx`, `ui/src/components/StagePanels.tsx`, `ui/src/App.test.tsx` |
+| Onboarding-first workspace/source/runner setup | done (Epic 17 baseline) | `acp serve` without `--workspace` starts local onboarding; UI selects/creates workspace, configures multi-repo `repos[]`, requires runner choice and then enters Console V2. Direct `acp serve --workspace` remains compatibility path. |
 
 Epic matrix:
-- done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15
-- follow-up: none in current beta matrix
+- done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15, 17
+- follow-up: none active for MVP stakeholder matrix
 - out of MVP: 12, 13
 
 ---
@@ -54,11 +55,12 @@ Epic matrix:
 Ниже — ожидаемая “история” использования MVP от нуля до результата:
 
 1) **Подготовка workspace**
-- пользователь поднимает сервис одной командой `acp serve --workspace ... --auto-init ((--repo-name ... (--repo-path ... | --repo-git-url ...) [--repo-ref ...]) | --repos-file ...) [--docs-imports-path ...]`;
-- при `--auto-init` ACP создаёт `workspace.yaml` и fixed layout автоматически;
-- при bootstrap ACP автоматически выполняет `git init` в workspace root, если `.git` отсутствует;
+- пользователь поднимает сервис одной командой `acp serve --runtime fake`;
+- UI открывает onboarding: выбирает или создаёт `arch-workspace`, ACP готовит fixed layout и `git init` для workspace root;
+- в шаге `Sources` пользователь добавляет один или несколько target repos через local checkout path или Git URL; sources сохраняются в существующий `workspace.yaml.repos[]`;
 - складывает выгрузки docs (например из Confluence) в `docs.imports_path` (default `docs/imports/`);
-- ведёт `<docs.imports_path>/index.yaml` как metadata index импортированных материалов.
+- ведёт `<docs.imports_path>/index.yaml` как metadata index импортированных материалов;
+- в шаге `Runner` выбирает `fake` для deterministic walkthrough или explicit live provider.
 
 2) **Шаг 0: Конституция проекта**
 - открывает UI → мастер (wizard) по “Конституции”:
@@ -453,7 +455,8 @@ Wizard из блоков-шаблонов:
 
 ### 10.1. Ручной режим MVP
 В MVP обновления инициируются вручную:
-- самый короткий старт: `acp serve --workspace ... --auto-init ((--repo-name ... (--repo-path ... | --repo-git-url ...) [--repo-ref ...]) | --repos-file ...) [--docs-imports-path ...] --runtime fake`
+- самый короткий старт: `acp serve --runtime fake`, затем onboarding UI выбирает workspace, target repos и runner
+- direct compatibility старт: `acp serve --workspace ... --auto-init ((--repo-name ... (--repo-path ... | --repo-git-url ...) [--repo-ref ...]) | --repos-file ...) [--docs-imports-path ...] --runtime fake`
 - первый bootstrap workspace выполняется через `acp init-workspace --workspace ... ((--repo-name ... (--repo-path ... | --repo-git-url ...) [--repo-ref ...]) | --repos-file ...)`
 - первый materialization запуск: `acp run --workspace ... --pipeline init --runtime fake --non-interactive`
 - для live запуска: `acp run --workspace ... --pipeline init --runtime headless --runtime-provider qwen-code --non-interactive` (или `claude-code` / `codex-code`)
