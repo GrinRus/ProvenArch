@@ -99,10 +99,7 @@ func TestHeadlessRunnerSucceedsWithValidDraftArtifacts(t *testing.T) {
 		t.Fatalf("mkdir draft root: %v", err)
 	}
 
-	runner := HeadlessRunner{
-		Command: writeDraftStubRunner(t),
-		Args:    []string{writeRoot, draftRoot, "run-codex"},
-	}
+	runner := newStubHeadlessRunner(writeDraftStubRunner(t), writeRoot, draftRoot, "run-codex")
 	task := acpruntime.Task{
 		RunID:             "run-codex",
 		StepID:            "init.step0.constitution",
@@ -140,10 +137,7 @@ func TestHeadlessRunnerFailsWhenArtifactsAreMissing(t *testing.T) {
 		t.Fatalf("mkdir draft root: %v", err)
 	}
 
-	runner := HeadlessRunner{
-		Command: writeNoopStubRunner(t),
-		Args:    []string{"noop"},
-	}
+	runner := newStubHeadlessRunner(writeNoopStubRunner(t), "noop")
 	task := acpruntime.Task{
 		RunID:             "run-codex",
 		StepID:            "init.step0.constitution",
@@ -178,10 +172,7 @@ func TestHeadlessRunnerPreservesStdoutExcerptOnProcessFailure(t *testing.T) {
 		t.Fatalf("mkdir draft root: %v", err)
 	}
 
-	runner := HeadlessRunner{
-		Command: writeFailingStubRunner(t),
-		Args:    []string{"noop"},
-	}
+	runner := newStubHeadlessRunner(writeFailingStubRunner(t), "noop")
 	task := acpruntime.Task{
 		RunID:             "run-codex",
 		StepID:            "init.step0.constitution",
@@ -326,6 +317,13 @@ func writeFailingStubRunner(t *testing.T) string {
 
 	script := "#!/usr/bin/env bash\nset -eu\nprintf '%s\\n' 'codex stub failed after emitting output'\nexit 1\n"
 	return testutil.WriteExecutableScript(t, "codex-failing-stub.sh", script)
+}
+
+func newStubHeadlessRunner(script string, args ...string) HeadlessRunner {
+	return HeadlessRunner{
+		Command: "bash",
+		Args:    append([]string{script}, args...),
+	}
 }
 
 func assertCodexArg(t *testing.T, args []string, want string) {
