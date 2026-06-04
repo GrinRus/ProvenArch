@@ -2,6 +2,26 @@
 
 All notable user-facing changes are tracked here. ProvenArch uses SemVer-style release tags, with `v0.x` treated as beta/pre-release foundation.
 
+## v0.1.5 - 2026-06-04
+
+CI-only beta patch release for release workflow cleanup after `v0.1.4`.
+
+Highlights:
+- Updated the release workflow's Syft installer action to Node 24-compatible `anchore/sbom-action/download-syft@v0.24.0` on pinned commit `e22c389904149dbc22b58101806040fa8d37a610`.
+- Updated the release workflow's GoReleaser action to Node 24-compatible `goreleaser/goreleaser-action@v7.2.2` on pinned commit `5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89`.
+- Preserved the existing release permissions, `github-release` environment gate, SBOM/provenance flow, GoReleaser arguments, checksums, and pinned-SHA policy.
+- No product behavior, backend API, CLI flag, workspace schema, runtime artifact contract, or provider contract changed in this patch.
+
+Verification notes:
+- PR #100 merged after green PR checks and green `main` CI for merge commit `afa3ff8`.
+- This patch is intended to make future release runs free of Node 20 / CodeQL v3 deprecation annotations.
+- Fresh trusted-machine `release-fast` was not run for this patch. This release does not claim canonical `RELEASE READY` status without a fresh `reports/release_verdict_<matrix-id>.json`.
+
+Known limitations:
+- `v0.1.5` remains a beta/pre-v1 release. Public behavior and artifact contracts can still evolve before `v1.0.0`.
+- Hosted/multi-tenant mode and security/compliance enforcement remain out of scope.
+- Canonical release readiness still requires trusted-machine release gate evidence from `reports/release_verdict_<matrix-id>.json` verified by `scripts/verify-release-verdict.py`.
+
 ## v0.1.4 - 2026-06-04
 
 CI-only beta patch release for GitHub Actions hygiene and clean UI startup polish.

@@ -59,7 +59,7 @@ Tracker reconciliation from 2026-05-07 consolidated historical active plans into
 
 ### Continuous Backlog Queue Policy
 
-Current engineering queue starts with `EP-20260604-v014-ci-product-release`, then returns to owner-selected backlog work. `EP-20260602-onboarding-first-startup` and `EP-20260527-ui-console-v2` remain visible for owner review/archive bookkeeping, but they are not the next engineering workstream.
+Current engineering queue is finishing `EP-20260604-v014-ci-product-release` with the `v0.1.5` release-workflow cleanup patch, then returns to owner-selected backlog work. `EP-20260602-onboarding-first-startup` and `EP-20260527-ui-console-v2` remain visible for owner review/archive bookkeeping, but they are not the next engineering workstream.
 
 Task selection rules:
 - Completed plans whose only remaining item is owner review, merge/archive bookkeeping, or historical evidence retention are not next engineering work.
@@ -70,14 +70,16 @@ Task selection rules:
 EP-20260604-v014-ci-product-release
 
 ### Context
-After `v0.1.3`, the next patch release should remove GitHub Actions deprecation warnings and polish the clean UI startup path used by first-time and returning local operators. The product scope is deliberately small: recent workspace shortcuts, safer reopen/resume behavior and run bootstrap selection. Release mode remains owner-approved CI-only beta; trusted `release-fast` is not part of this plan unless the owner starts a separate gate.
+After `v0.1.3`, the next patch release should remove GitHub Actions deprecation warnings and polish the clean UI startup path used by first-time and returning local operators. The product scope is deliberately small: recent workspace shortcuts, safer reopen/resume behavior and run bootstrap selection. `v0.1.4` shipped that product scope, and the only remaining cleanup is `v0.1.5`: a metadata/workflow patch so the next public release run uses Node 24-compatible Anchore/Goreleaser release actions. Release mode remains owner-approved CI-only beta; trusted `release-fast` is not part of this plan unless the owner starts a separate gate.
 
 ### Goals (must have)
 - [x] Modernize pinned GitHub Actions to Node 24-compatible action versions and CodeQL v4 without changing permissions, gates, SBOM/provenance or pinned-SHA policy.
 - [x] Add local-only Recent workspaces to onboarding with newest-first ordering, limit 10, missing-path state, `Open` and `Forget`.
 - [x] Reopen existing workspaces by hydrating `workspace.yaml` sources, allowing valid manifests to proceed to `Ready` after runner selection and routing invalid manifests to `Sources` diagnostics.
 - [x] Resume newest active run on console bootstrap; otherwise select newest completed run and open `Review` when artifacts exist.
-- [ ] Prepare `v0.1.4` release metadata and tag final green `main` after metadata PR/main CI.
+- [x] Prepare `v0.1.4` release metadata and tag final green `main` after metadata PR/main CI.
+- [x] Merge release workflow follow-up PR #100 so future tag workflows use Node 24-compatible Anchore/Goreleaser actions.
+- [ ] Prepare `v0.1.5` release metadata and tag final green `main` after metadata PR/main CI.
 
 ### Non-goals
 - [x] No workspace schema, runtime artifact schema, provider contract, CLI `acp run`, direct `acp serve --workspace` or provider-live release-gate changes.
@@ -86,6 +88,9 @@ After `v0.1.3`, the next patch release should remove GitHub Actions deprecation 
 
 ### Acceptance criteria
 - [x] CI hygiene PR and main CI are green with no Node 20 / CodeQL v3 deprecation annotations.
+- [x] Release workflow follow-up PR #100 is merged and `main` CI is green after updating Anchore/Goreleaser release actions to Node 24-compatible pinned versions.
+- [ ] `v0.1.5` release workflow succeeds without Node 20 / CodeQL v3 deprecation annotations.
+- [ ] `ACP_VERSION=v0.1.5` and `ACP_VERSION=latest` install smokes resolve version `0.1.5`; `acp serve --runtime fake --dry-run` reports launcher readiness.
 - [x] Onboarding status exposes local recents; create/open records recents; forget removes a recent entry; missing paths are visible and not openable.
 - [x] UI tests cover recents, reopen existing workspace, missing recent forget, runner-required state and active/completed run bootstrap.
 - [x] Deterministic fake UI walkthrough from clean launcher to Analysis/Review/Publish remains passable.
@@ -95,6 +100,8 @@ After `v0.1.3`, the next patch release should remove GitHub Actions deprecation 
 - 2026-06-04: Merged CI hygiene PR #97 into `main` (`bc45d1c`); PR and main CI passed after pinned GitHub Actions moved to Node 24-compatible versions and CodeQL v4.
 - 2026-06-04: Started product polish branch `codex/onboarding-resume-polish`: added local Recent workspaces API/UI, reopen/resume copy and newest active/newest completed run bootstrap tests. During rendered fake walkthrough found and fixed a premature `/api/workspace/bundle` call that produced `428 workspace_not_selected` in browser console after selecting a draft workspace. Validation passed: `git diff --check`, `go test ./internal/docsync`, focused `go test ./internal/api`, UI unit suite `69/69`, Full DoD (`make contracts`, `make test`, `make lint`, `make build`) and Playwright rendered smoke from clean launcher to Analysis/Review/Publish with no browser console issues or HTTP >=400 responses. Product PR #98 merged into `main` at `5337e61`, and `main` CI passed; `v0.1.4` release metadata/tag still pending.
 - 2026-06-04: Started `v0.1.4` release metadata branch after green `main`; scope is changelog/latest-release docs only, with CI-only beta/no trusted `release-fast` wording.
+- 2026-06-04: Published `v0.1.4` as a GitHub prerelease from tag commit `9de4abaf6549510e45b2616ba8742b01c1912b03`; release workflow `26942766883` succeeded, release URL is `https://github.com/GrinRus/ProvenArch/releases/tag/v0.1.4`, and install smoke passed for explicit `ACP_VERSION=v0.1.4` plus `ACP_VERSION=latest`. Fresh trusted-machine `release-fast` was not run, so canonical `RELEASE READY` is not claimed.
+- 2026-06-04: The `v0.1.4` release run still emitted Node 20 deprecation annotations for `anchore/sbom-action/download-syft@v0.20.6` and `goreleaser/goreleaser-action@v6`. Follow-up PR #100 updated them to Node 24-compatible pinned commits for `anchore/sbom-action/download-syft@v0.24.0` and `goreleaser/goreleaser-action@v7.2.2`; PR #100 merged into `main` at `afa3ff8`, and `main` CI passed. `v0.1.5` is the planned tiny public patch to publish a release run with that cleanup.
 
 ### Plan ID
 EP-20260602-onboarding-first-startup
