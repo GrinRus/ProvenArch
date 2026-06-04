@@ -238,7 +238,11 @@ func normalizeOnboardingWorkspacePath(rawPath string) (string, *onboardingPathEr
 			return absPath, nil
 		}
 	}
-	return "", &onboardingPathError{status: http.StatusBadRequest, code: "workspace_path_outside_allowed_roots", message: "workspace path must be under the current user home directory or system temp directory"}
+	return "", &onboardingPathError{
+		status:  http.StatusBadRequest,
+		code:    "workspace_path_outside_allowed_roots",
+		message: fmt.Sprintf("workspace path must be under an allowed root: %s", strings.Join(onboardingWorkspaceAllowedRoots(), ", ")),
+	}
 }
 
 func hasParentPathSegment(rawPath string) bool {
@@ -254,11 +258,29 @@ func hasParentPathSegment(rawPath string) bool {
 
 func onboardingWorkspaceAllowedRoots() []string {
 	roots := []string{}
+	addRoot := func(root string) {
+		root = filepath.Clean(strings.TrimSpace(root))
+		if root == "" || !filepath.IsAbs(root) {
+			return
+		}
+		for _, existing := range roots {
+			if existing == root {
+				return
+			}
+		}
+		roots = append(roots, root)
+	}
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		roots = append(roots, filepath.Clean(home))
+		addRoot(home)
 	}
 	if tmp := strings.TrimSpace(os.TempDir()); tmp != "" {
-		roots = append(roots, filepath.Clean(tmp))
+		addRoot(tmp)
+	}
+	addRoot("/tmp")
+	for _, root := range append([]string(nil), roots...) {
+		if resolved, err := filepath.EvalSymlinks(root); err == nil {
+			addRoot(resolved)
+		}
 	}
 	return roots
 }

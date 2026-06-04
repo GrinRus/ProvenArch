@@ -6,6 +6,7 @@ import { RuntimeProfileSettingsPanel } from "./RuntimeProfileSettingsPanel";
 import { RunStatusPanel } from "./RunStatusPanel";
 import { ArtifactPathButton, StatusBadge } from "./ConsolePrimitives";
 import { getQARun, listQARuns, startQAQuestion, type QARunResponse } from "../lib/qaApi";
+import { runReviewErrorCount, runReviewWarningCount } from "../lib/runReviewMetrics";
 import { formatTimestamp } from "../lib/runState";
 import type {
   Artifact,
@@ -891,6 +892,8 @@ export function AnalysisStagePanel({
   const issueRows = shardRows.filter((row) => row.status === "failed" || row.status === "warning");
   const blockerRows = shardRows.filter((row) => row.status === "failed");
   const runtimeLabel = setupRuntime === "fake" ? "fake" : `${setupRuntime}/${setupRuntimeProvider}`;
+  const warningCount = runReviewWarningCount(runStatus, runReviewSummary);
+  const errorCount = runReviewErrorCount(runStatus, runReviewSummary);
 
   const focusBlockerDetails = useCallback(() => {
     blockerDetailsRef.current?.scrollIntoView?.({ block: "center" });
@@ -949,7 +952,8 @@ export function AnalysisStagePanel({
         runId={runId}
         runStatus={runStatus}
         runtimeLabel={runtimeLabel}
-        selectedRunWarnings={selectedRunWarnings}
+        warningCount={warningCount}
+        errorCount={errorCount}
         stepTimeline={stepTimeline}
         issueCount={issueRows.length}
         blockerCount={blockerRows.length}
@@ -1014,7 +1018,8 @@ function AnalysisRunProgress({
   runId,
   runStatus,
   runtimeLabel,
-  selectedRunWarnings,
+  warningCount,
+  errorCount,
   stepTimeline,
   issueCount,
   blockerCount,
@@ -1023,7 +1028,8 @@ function AnalysisRunProgress({
   runId: string | null;
   runStatus: RunStatusResponse | null;
   runtimeLabel: string;
-  selectedRunWarnings: string[];
+  warningCount: number;
+  errorCount: number;
   stepTimeline: AnalysisStep[];
   issueCount: number;
   blockerCount: number;
@@ -1061,7 +1067,9 @@ function AnalysisRunProgress({
         </div>
         <div>
           <span className="metric-label">Warnings/errors</span>
-          <strong>{selectedRunWarnings.length + issueCount + (runStatus?.error_code ? 1 : 0)}</strong>
+          <strong>
+            {warningCount} / {errorCount}
+          </strong>
         </div>
       </div>
       <button type="button" data-testid="analysis-review-blocker-btn" onClick={onReviewBlocker} disabled={!hasBlocker}>
@@ -3389,6 +3397,8 @@ export function PublishStagePanel({
       sample: `+${summary.additions} / -${summary.deletions}`,
     })) ?? [];
   const visibleFolderSummaries = realFolderSummaries.length > 0 ? realFolderSummaries : folderSummaries;
+  const diffScopeTitle = gitDiffScopeTitle(gitDiff);
+  const diffScopeHint = gitDiffScopeHint(gitDiff);
 
   useEffect(() => {
     if (activePreviewPath && selectedArtifact !== activePreviewPath) {
@@ -3444,12 +3454,20 @@ export function PublishStagePanel({
         <section className="publish-diff-summary" data-testid="publish-diff-summary">
           <div className="panel-subheader">
             <div>
-              <h2>Folder diff summary</h2>
-              <p className="hint">Workspace Git diff from the local architecture workspace repository.</p>
+              <h2>{diffScopeTitle}</h2>
+              <p className="hint">{diffScopeHint}</p>
             </div>
             <StatusBadge tone={gitDiff && !gitDiff.empty ? "ok" : publishArtifacts.length > 0 ? "info" : "warn"}>
               {gitDiff ? `${gitDiff.files.length} changed` : `${publishArtifacts.length} refs`}
             </StatusBadge>
+          </div>
+          <div className="actions compact-actions">
+            <button type="button" className="secondary-action" onClick={() => onLoadGitDiff({})}>
+              Load selected run diff
+            </button>
+            <button type="button" className="secondary-action" onClick={() => onLoadGitDiff({ runId: null })}>
+              Load full workspace diff
+            </button>
           </div>
           {gitDiffStatus ? <p className={gitDiff?.empty ? "status ok" : "status warn"}>{gitDiffStatus}</p> : null}
           {visibleFolderSummaries.length === 0 ? (
@@ -3537,7 +3555,8 @@ export function PublishStagePanel({
             ) : null}
             {publishView === "diff" ? (
               <>
-                <h2>Git diff</h2>
+                <h2>{diffScopeTitle}</h2>
+                <p className="hint">{diffScopeHint}</p>
                 <GitDiffView gitDiff={gitDiff} status={gitDiffStatus} onSelectFile={(path) => onLoadGitDiff({ path })} />
               </>
             ) : null}
@@ -3684,6 +3703,17 @@ function publishFolderLabel(path: string): string {
     return `reports/${parts[1]}`;
   }
   return parts[0] || "workspace";
+}
+
+function gitDiffScopeTitle(gitDiff: GitDiffResponse | null): string {
+  return gitDiff?.run_id ? "Selected run Git diff" : "Full workspace Git diff";
+}
+
+function gitDiffScopeHint(gitDiff: GitDiffResponse | null): string {
+  if (gitDiff?.run_id) {
+    return "Run-scoped view shows changed workspace artifacts linked to the selected run. Load the full workspace diff to inspect all uncommitted files.";
+  }
+  return "Full workspace view shows all uncommitted files in the local architecture workspace repository.";
 }
 
 function buildPublishGateItems({

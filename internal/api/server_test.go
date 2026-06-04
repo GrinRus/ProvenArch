@@ -43,6 +43,36 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 }
 
+func TestSystemInfoEndpointReturnsBuildMetadataBeforeWorkspaceSelection(t *testing.T) {
+	t.Parallel()
+
+	config := testServerRuntimeConfig()
+	config.Build = BuildInfo{Version: "0.1.2", Commit: "abc123", Built: "2026-06-02T13:20:26Z"}
+	server := NewLauncherServer(config, testLauncherServiceFactory())
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Get(httpServer.URL + "/api/system/info")
+	if err != nil {
+		t.Fatalf("GET /api/system/info: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", response.StatusCode)
+	}
+	var payload struct {
+		Version string `json:"version"`
+		Commit  string `json:"commit"`
+		Built   string `json:"built"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode system info: %v", err)
+	}
+	if payload.Version != "0.1.2" || payload.Commit != "abc123" || payload.Built != "2026-06-02T13:20:26Z" {
+		t.Fatalf("unexpected build metadata: %+v", payload)
+	}
+}
+
 func TestLauncherBlocksWorkspaceAPIsUntilWorkspaceSelected(t *testing.T) {
 	t.Parallel()
 
@@ -73,6 +103,15 @@ func TestLauncherBlocksWorkspaceAPIsUntilWorkspaceSelected(t *testing.T) {
 	}
 	if status["workspace_selected"].(bool) {
 		t.Fatalf("expected no workspace selected in launcher status: %#v", status)
+	}
+
+	infoResponse, err := http.Get(httpServer.URL + "/api/system/info")
+	if err != nil {
+		t.Fatalf("GET /api/system/info: %v", err)
+	}
+	defer infoResponse.Body.Close()
+	if infoResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected system info 200 before workspace selection, got %d", infoResponse.StatusCode)
 	}
 }
 
@@ -183,6 +222,17 @@ func TestNormalizeOnboardingWorkspacePath(t *testing.T) {
 	}
 	if normalized != filepath.Clean(validTemp) {
 		t.Fatalf("expected cleaned temp path %q, got %q", filepath.Clean(validTemp), normalized)
+	}
+
+	if filepath.IsAbs("/tmp") {
+		tmpAlias := filepath.Join("/tmp", "acp-onboarding-test")
+		normalized, err := normalizeOnboardingWorkspacePath(tmpAlias)
+		if err != nil {
+			t.Fatalf("expected /tmp workspace path to be accepted: %+v", err)
+		}
+		if normalized != filepath.Clean(tmpAlias) {
+			t.Fatalf("expected cleaned /tmp path %q, got %q", filepath.Clean(tmpAlias), normalized)
+		}
 	}
 
 	if home, homeErr := os.UserHomeDir(); homeErr == nil && strings.TrimSpace(home) != "" {
@@ -1787,6 +1837,7 @@ func TestPipelineRunReviewSummaryEndpointMapsCanonicalSteps(t *testing.T) {
 			StepID        string   `json:"step_id"`
 			Key           string   `json:"key"`
 			State         string   `json:"state"`
+			Provider      string   `json:"provider"`
 			ArtifactCount int      `json:"artifact_count"`
 			ArtifactPaths []string `json:"artifact_paths"`
 			LastMessage   string   `json:"last_message"`
@@ -1816,9 +1867,47 @@ func TestPipelineRunReviewSummaryEndpointMapsCanonicalSteps(t *testing.T) {
 		if got.StepID != want.stepID || got.Key != want.key || got.State != "done" {
 			t.Fatalf("unexpected step %d: got %+v want step=%q key=%q state=done", index, got, want.stepID, want.key)
 		}
+		if got.Provider != "fake" {
+			t.Fatalf("expected fake provider for release fake run presentation, got step %d provider %q", index, got.Provider)
+		}
 	}
 	if payload.Steps[2].ArtifactCount == 0 || !containsString(payload.Steps[2].ArtifactPaths, "reports/as-is/overview.md") {
 		t.Fatalf("expected as-is step artifacts to include overview.md, got %+v", payload.Steps[2])
+	}
+}
+
+func TestBuildRunReviewStepsUsesFakeProviderAndUniqueWarningCounts(t *testing.T) {
+	t.Parallel()
+
+	runInfo := orchestrator.RunInfo{
+		RunID:         "run-1",
+		Pipeline:      "init",
+		Status:        orchestrator.RunStatusSucceeded,
+		CurrentStep:   "init.step4.proposals",
+		StepProviders: map[string]string{acpruntime.StepProviderStep1Collect: string(acpruntime.ProviderClaudeCode)},
+		Warnings:      []string{"init.step1.collect: duplicate warning"},
+	}
+	logs := []orchestrator.RunLogEntry{
+		{
+			StepID:  "init.step1.collect",
+			Level:   orchestrator.RunLogLevelWarning,
+			Message: "runtime shard planner warning",
+			Fields:  map[string]any{"warning": "duplicate warning"},
+		},
+		{StepID: "init.step1.collect", Level: orchestrator.RunLogLevelWarning, Message: "unique step warning"},
+		{StepID: "init.step1.collect", Level: orchestrator.RunLogLevelError, Message: "step failed once"},
+	}
+
+	steps := buildRunReviewSteps(runInfo, nil, logs, acpruntime.RuntimeModeFake)
+	collect := steps[1]
+	if collect.Provider != "fake" {
+		t.Fatalf("expected fake provider label, got %q", collect.Provider)
+	}
+	if collect.WarningsCount != 1 {
+		t.Fatalf("expected only unique step warning count, got %d", collect.WarningsCount)
+	}
+	if collect.ErrorsCount != 1 {
+		t.Fatalf("expected one step error, got %d", collect.ErrorsCount)
 	}
 }
 

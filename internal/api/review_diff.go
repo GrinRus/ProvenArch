@@ -66,7 +66,8 @@ func (s *Server) handlePipelineRunReviewSummary(writer http.ResponseWriter, runI
 		writeError(writer, http.StatusInternalServerError, "run_logs_unavailable", err.Error())
 		return
 	}
-	steps := buildRunReviewSteps(runInfo, artifacts, logs)
+	runtimeConfig := s.getRuntimeConfig()
+	steps := buildRunReviewSteps(runInfo, artifacts, logs, runtimeConfig.Mode)
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"run_id":       runInfo.RunID,
 		"pipeline":     runInfo.Pipeline,
@@ -104,7 +105,7 @@ func readAllRunLogs(service *orchestrator.Service, runID string) ([]orchestrator
 	return logs, nil
 }
 
-func buildRunReviewSteps(runInfo orchestrator.RunInfo, artifacts []orchestrator.Artifact, logs []orchestrator.RunLogEntry) []runReviewStepSummary {
+func buildRunReviewSteps(runInfo orchestrator.RunInfo, artifacts []orchestrator.Artifact, logs []orchestrator.RunLogEntry, runtimeMode string) []runReviewStepSummary {
 	currentIndex := runReviewStepIndex(runInfo.CurrentStep)
 	loggedIndex := -1
 	for _, entry := range logs {
@@ -126,7 +127,7 @@ func buildRunReviewSteps(runInfo orchestrator.RunInfo, artifacts []orchestrator.
 		stepArtifacts := artifactPathsForReviewStep(definition.key, artifacts)
 		stepLogs := logsForReviewStep(definition.key, logs)
 		taskrunPaths := taskrunPathsForLogs(stepLogs)
-		warnings, errorsCount := countReviewLogLevels(stepLogs)
+		warnings, errorsCount := countReviewLogLevels(stepLogs, runInfo.Warnings)
 		lastMessage := lastReviewLogMessage(stepLogs)
 		if lastMessage == "" && index == activeIndex {
 			lastMessage = strings.TrimSpace(runInfo.Error)
@@ -139,7 +140,7 @@ func buildRunReviewSteps(runInfo orchestrator.RunInfo, artifacts []orchestrator.
 			Key:           definition.key,
 			Label:         definition.label,
 			State:         runReviewStepState(runInfo.Status, index, activeIndex),
-			Provider:      runInfo.StepProviders[definition.key],
+			Provider:      runReviewProviderLabel(runInfo.StepProviders[definition.key], runtimeMode),
 			ArtifactCount: len(stepArtifacts),
 			ArtifactPaths: stepArtifacts,
 			TaskrunPaths:  taskrunPaths,
@@ -267,16 +268,57 @@ func taskrunPathsForLogs(logs []orchestrator.RunLogEntry) []string {
 	return paths
 }
 
-func countReviewLogLevels(logs []orchestrator.RunLogEntry) (warnings int, errorsCount int) {
+func countReviewLogLevels(logs []orchestrator.RunLogEntry, runWarnings []string) (warnings int, errorsCount int) {
+	runWarningMessages := map[string]struct{}{}
+	for _, warning := range runWarnings {
+		for _, variant := range reviewWarningMessageVariants(warning) {
+			runWarningMessages[variant] = struct{}{}
+		}
+	}
 	for _, entry := range logs {
 		switch entry.Level {
 		case orchestrator.RunLogLevelWarning:
+			if _, exists := runWarningMessages[normalizeReviewWarningMessage(reviewWarningLogMessage(entry))]; exists {
+				continue
+			}
 			warnings += 1
 		case orchestrator.RunLogLevelError:
 			errorsCount += 1
 		}
 	}
 	return warnings, errorsCount
+}
+
+func runReviewProviderLabel(provider string, runtimeMode string) string {
+	if strings.TrimSpace(runtimeMode) == acpruntime.RuntimeModeFake {
+		return "fake"
+	}
+	return strings.TrimSpace(provider)
+}
+
+func normalizeReviewWarningMessage(message string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(message)), " ")
+}
+
+func reviewWarningLogMessage(entry orchestrator.RunLogEntry) string {
+	if value, ok := entry.Fields["warning"].(string); ok && strings.TrimSpace(value) != "" {
+		return value
+	}
+	return entry.Message
+}
+
+func reviewWarningMessageVariants(message string) []string {
+	normalized := normalizeReviewWarningMessage(message)
+	if normalized == "" {
+		return nil
+	}
+	variants := []string{normalized}
+	if separator := strings.Index(normalized, ": "); separator >= 0 {
+		if suffix := strings.TrimSpace(normalized[separator+2:]); suffix != "" {
+			variants = append(variants, suffix)
+		}
+	}
+	return variants
 }
 
 func lastReviewLogMessage(logs []orchestrator.RunLogEntry) string {

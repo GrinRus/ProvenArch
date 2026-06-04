@@ -25,6 +25,7 @@ type FetchMockState = {
   qaRunResponses?: Record<string, MockJSON>;
   onboardingStatus?: MockJSON;
   onboardingWorkspaceSelectionStatus?: MockJSON;
+  systemInfo?: MockJSON;
 };
 
 function jsonResponse(body: MockJSON, status = 200): Response {
@@ -285,6 +286,16 @@ function createFetchMock(state: FetchMockState = {}) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     const method = (init?.method ?? "GET").toUpperCase();
+
+    if (method === "GET" && url === "/api/system/info") {
+      return jsonResponse(
+        state.systemInfo ?? {
+          version: "0.1.2",
+          commit: "fa3c633",
+          built: "2026-06-02T13:20:26Z",
+        },
+      );
+    }
 
     if (method === "GET" && url === "/api/onboarding/status") {
       return jsonResponse(onboardingStatus);
@@ -607,10 +618,12 @@ function createFetchMock(state: FetchMockState = {}) {
     if (method === "GET" && url.startsWith("/api/git/diff")) {
       const parsed = new URL(url, "http://localhost");
       const selectedPath = parsed.searchParams.get("path");
+      const requestedRunID = parsed.searchParams.get("run_id");
+      const scopedGitDiff = { ...defaultGitDiff, run_id: requestedRunID } as MockJSON;
       if (!selectedPath) {
-        return jsonResponse(defaultGitDiff);
+        return jsonResponse(scopedGitDiff);
       }
-      const files = (defaultGitDiff.files as MockJSON[] | undefined) ?? [];
+      const files = (scopedGitDiff.files as MockJSON[] | undefined) ?? [];
       const selectedFile = files.find((file) => file.path === selectedPath) ?? {
         path: selectedPath,
         folder: selectedPath.includes("/") ? selectedPath.slice(0, selectedPath.lastIndexOf("/")) : ".",
@@ -620,7 +633,7 @@ function createFetchMock(state: FetchMockState = {}) {
         binary: false,
       };
       return jsonResponse({
-        ...defaultGitDiff,
+        ...scopedGitDiff,
         selected_path: selectedPath,
         selected_file: selectedFile,
       });
@@ -668,6 +681,23 @@ describe("App", () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
+
+  it("renders release build metadata from the system info endpoint", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        systemInfo: {
+          version: "0.1.2",
+          commit: "fa3c633",
+          built: "2026-06-02T13:20:26Z",
+        },
+      }),
+    );
+
+    await renderConsoleApp();
+
+    await waitFor(() => expect(screen.getByTestId("top-status-bar")).toHaveTextContent("v0.1.2 beta"));
+  }, 15_000);
 
   it("supports stage navigation and settings relocation without compatibility controls", async () => {
     vi.stubGlobal("fetch", createFetchMock());
@@ -1369,6 +1399,7 @@ describe("App", () => {
 
     expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("reports/coverage"));
+    expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("Selected run Git diff");
     expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("model");
     expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("proposals");
     expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("Confirm owner sign-off");
@@ -1384,8 +1415,12 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByTestId("publish-panel")).toHaveTextContent("Coverage ready for publication."));
 
     fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
+    expect(screen.getByTestId("publish-panel")).toHaveTextContent("Selected run Git diff");
     expect(screen.getByTestId("git-diff-view")).toHaveTextContent("Workspace Git diff loaded.");
     expect(screen.getByTestId("git-diff-hunks")).toHaveTextContent("Workspace Git diff is reviewable.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Load full workspace diff" }));
+    await waitFor(() => expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("Full workspace Git diff"));
 
     expect(screen.getByTestId("publish-preview-tabs")).toHaveTextContent("Changelog");
     expect(screen.getByTestId("publish-preview-tabs")).not.toHaveTextContent("Checklist");
@@ -1402,6 +1437,7 @@ describe("App", () => {
 
     expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/commit")).toHaveLength(1);
     expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/proposal-branch")).toHaveLength(1);
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith("/api/git/diff") && !String(call[0]).includes("run_id="))).toBe(true);
   });
 
   it("keeps raw proposal and changelog artifacts when a final run index is available", async () => {
@@ -2005,6 +2041,7 @@ describe("App", () => {
     expect(progress).toHaveTextContent(runID);
     expect(progress).toHaveTextContent("fake");
     expect(progress).toHaveTextContent("init.step1.collect");
+    expect(progress).toHaveTextContent("1 / 1");
     expect(within(progress).getByTestId("analysis-review-blocker-btn")).not.toBeDisabled();
 
     const timeline = screen.getByTestId("analysis-run-timeline");

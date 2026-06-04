@@ -36,7 +36,7 @@ import { useRunExplorer } from "./hooks/useRunExplorer";
 import { useRuntimeSettings } from "./hooks/useRuntimeSettings";
 import { useWorkspaceSetup } from "./hooks/useWorkspaceSetup";
 import { loadOnboardingStatus, selectOnboardingRuntime, selectOnboardingWorkspace } from "./lib/onboardingApi";
-import { loadSystemDoctor } from "./lib/systemApi";
+import { loadSystemDoctor, loadSystemInfo, type SystemInfoResponse } from "./lib/systemApi";
 
 export default function App() {
   const [activeStage, setActiveStage] = useState<StageId>("source");
@@ -52,6 +52,7 @@ export default function App() {
   const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatusResponse | null>(null);
   const [onboardingWorkspacePath, setOnboardingWorkspacePath] = useState("");
   const [onboardingCreateWorkspace, setOnboardingCreateWorkspace] = useState(true);
+  const [systemInfo, setSystemInfo] = useState<SystemInfoResponse | null>(null);
   const [consoleReady, setConsoleReady] = useState(false);
   const [analysisFocusSignal, setAnalysisFocusSignal] = useState(0);
   const [askPrimaryActionSignal, setAskPrimaryActionSignal] = useState(0);
@@ -208,6 +209,9 @@ export default function App() {
   }, [activeStage, baselineEditorArtifacts, loadSelectedEditorContent, loadWizardContract, selectedEditorLoadedPath, selectedEditorPath, wizardContractLoaded]);
 
   async function bootstrapApp() {
+    void loadSystemInfo()
+      .then(setSystemInfo)
+      .catch(() => setSystemInfo(null));
     const status = await loadOnboardingStatus();
     syncOnboardingStatus(status);
     if (!status.can_enter_console) {
@@ -813,8 +817,9 @@ export default function App() {
   }
 
   return (
-    <AppShell
-      workspacePath={validateResult?.workspace ?? workspaceRootPath ?? "bound workspace"}
+      <AppShell
+        buildInfo={systemInfo}
+        workspacePath={validateResult?.workspace ?? workspaceRootPath ?? "bound workspace"}
       repoCount={validateResult?.resolved_repos?.length ?? guidedRepos.length}
       runtimeMode={setupRuntime}
       runtimeProvider={setupRuntimeProvider}

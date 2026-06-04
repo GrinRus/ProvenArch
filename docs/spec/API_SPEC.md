@@ -30,6 +30,18 @@
 { "status": "ok" }
 ```
 
+### GET `/api/system/info`
+Возвращает build metadata текущего `acp serve` процесса для UI shell. Endpoint доступен до выбора workspace и не меняет workspace.
+
+**200**
+```json
+{
+  "version": "0.1.2",
+  "commit": "fa3c6333b25942947156aa636a5a9b90cc65eb57",
+  "built": "2026-06-02T13:20:26Z"
+}
+```
+
 ### GET `/api/system/doctor`
 Возвращает read-only readiness checklist для first-run UI и локальной диагностики.
 Endpoint не меняет workspace.
