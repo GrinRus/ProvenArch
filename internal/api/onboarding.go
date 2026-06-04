@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
@@ -45,6 +46,7 @@ func (s *Server) handleOnboardingWorkspace(writer http.ResponseWriter, request *
 	if err != nil {
 		if errors.Is(err, workspace.ErrManifestMissing) {
 			s.setDraftWorkspace(workspacePath)
+			_ = recordOnboardingRecentWorkspace(workspacePath, time.Now())
 			writeJSON(writer, http.StatusOK, s.onboardingStatusPayload())
 			return
 		}
@@ -62,6 +64,31 @@ func (s *Server) handleOnboardingWorkspace(writer http.ResponseWriter, request *
 	s.attachWorkspace(ws)
 	if service := s.getService(); service != nil {
 		service.ReconcileStaleRunsAfterRestart()
+	}
+	_ = recordOnboardingRecentWorkspace(workspacePath, time.Now())
+	writeJSON(writer, http.StatusOK, s.onboardingStatusPayload())
+}
+
+func (s *Server) handleOnboardingRecentWorkspaceForget(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		writeMethodNotAllowed(writer, http.MethodPost)
+		return
+	}
+	var payload struct {
+		Path string `json:"path"`
+	}
+	if err := decodeStrictJSON(request, &payload); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid_request_body", "invalid request body")
+		return
+	}
+	workspacePath, pathErr := normalizeOnboardingWorkspacePath(payload.Path)
+	if pathErr != nil {
+		writeError(writer, pathErr.status, pathErr.code, pathErr.message)
+		return
+	}
+	if err := forgetOnboardingRecentWorkspace(workspacePath); err != nil {
+		writeError(writer, http.StatusBadRequest, "recent_workspace_forget_failed", err.Error())
+		return
 	}
 	writeJSON(writer, http.StatusOK, s.onboardingStatusPayload())
 }
@@ -121,6 +148,7 @@ func (s *Server) onboardingStatusPayload() map[string]any {
 			"provider_source":  string(runtimeConfig.ProviderSource),
 		},
 		"can_enter_console": workspaceReady && runtimeSelected,
+		"recent_workspaces": loadOnboardingRecentWorkspaces(),
 	}
 }
 

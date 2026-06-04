@@ -303,6 +303,12 @@ export type OnboardingRuntimeStatus = {
   provider_source?: string;
 };
 
+export type OnboardingRecentWorkspace = {
+  path: string;
+  last_opened_at: string;
+  exists: boolean;
+};
+
 export type OnboardingStatusResponse = {
   ok: boolean;
   launcher_mode: boolean;
@@ -312,6 +318,7 @@ export type OnboardingStatusResponse = {
   manifest_present: boolean;
   runtime: OnboardingRuntimeStatus;
   can_enter_console: boolean;
+  recent_workspaces?: OnboardingRecentWorkspace[];
 };
 
 export type RuntimeProfileResponse = {

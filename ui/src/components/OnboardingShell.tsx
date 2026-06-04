@@ -1,4 +1,4 @@
-import type { Diagnostic, DoctorResponse, GuidedRepo, OnboardingStatusResponse, RepoSourceMode, ValidateResponse } from "../lib/appContracts";
+import type { Diagnostic, DoctorResponse, GuidedRepo, OnboardingRecentWorkspace, OnboardingStatusResponse, RepoSourceMode, ValidateResponse } from "../lib/appContracts";
 
 type OnboardingShellProps = {
   busy: boolean;
@@ -16,6 +16,8 @@ type OnboardingShellProps = {
   onWorkspacePathChange: (value: string) => void;
   onCreateWorkspaceChange: (value: boolean) => void;
   onSelectWorkspace: () => void;
+  onOpenRecentWorkspace: (path: string) => void;
+  onForgetRecentWorkspace: (path: string) => void;
   onRepoChange: (id: string, patch: Partial<GuidedRepo>) => void;
   onAddRepo: () => void;
   onRemoveRepo: (id: string) => void;
@@ -45,6 +47,8 @@ export function OnboardingShell({
   onWorkspacePathChange,
   onCreateWorkspaceChange,
   onSelectWorkspace,
+  onOpenRecentWorkspace,
+  onForgetRecentWorkspace,
   onRepoChange,
   onAddRepo,
   onRemoveRepo,
@@ -58,6 +62,7 @@ export function OnboardingShell({
   onRunFirstAnalysis,
 }: OnboardingShellProps) {
   const workspaceReady = status?.workspace_selected ?? false;
+  const recentWorkspaces = status?.recent_workspaces ?? [];
   const repoDiagnosticsByID = buildRepoDiagnostics(guidedRepos, validateResult);
   const hasRepoDraftErrors = Array.from(repoDiagnosticsByID.values()).some((diagnostics) => diagnostics.some((diagnostic) => diagnostic.level === "error"));
   const sourcesReady = validateResult?.ok === true && !hasRepoDraftErrors;
@@ -108,6 +113,7 @@ export function OnboardingShell({
               {createWorkspace ? "Create or open workspace" : "Open workspace"}
             </button>
             {status?.workspace_selected ? <p className="status">Selected: {status.workspace}</p> : null}
+            <RecentWorkspacesList recentWorkspaces={recentWorkspaces} busy={busy} onOpen={onOpenRecentWorkspace} onForget={onForgetRecentWorkspace} />
           </section>
 
           <section className="onboarding-card" data-testid="onboarding-sources-step">
@@ -234,6 +240,56 @@ export function OnboardingShell({
       </section>
     </main>
   );
+}
+
+function RecentWorkspacesList({
+  recentWorkspaces,
+  busy,
+  onOpen,
+  onForget,
+}: {
+  recentWorkspaces: OnboardingRecentWorkspace[];
+  busy: boolean;
+  onOpen: (path: string) => void;
+  onForget: (path: string) => void;
+}) {
+  if (recentWorkspaces.length === 0) {
+    return <p className="recent-workspace-empty">No recent workspaces yet.</p>;
+  }
+  return (
+    <div className="recent-workspace-list" data-testid="onboarding-recent-workspaces">
+      <div className="recent-workspace-list-heading">
+        <strong>Recent workspaces</strong>
+        <span>{recentWorkspaces.length}/10</span>
+      </div>
+      {recentWorkspaces.map((workspace) => (
+        <div className={workspace.exists ? "recent-workspace-row" : "recent-workspace-row is-missing"} key={workspace.path}>
+          <div>
+            <code>{workspace.path}</code>
+            <span>
+              {workspace.exists ? "available" : "missing"} · {formatRecentWorkspaceTimestamp(workspace.last_opened_at)}
+            </span>
+          </div>
+          <div className="recent-workspace-actions">
+            <button type="button" className="link-button" onClick={() => onOpen(workspace.path)} disabled={busy || !workspace.exists}>
+              Open
+            </button>
+            <button type="button" className="inline-danger" onClick={() => onForget(workspace.path)} disabled={busy}>
+              Forget
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function formatRecentWorkspaceTimestamp(value: string): string {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) {
+    return "last opened recently";
+  }
+  return `last opened ${new Date(parsed).toISOString().replace("T", " ").replace(".000Z", " UTC")}`;
 }
 
 function StatusPill({ label, ready }: { label: string; ready: boolean }) {

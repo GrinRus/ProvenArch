@@ -70,7 +70,19 @@ export function pickBootstrapRun<T extends { status: string; started_at: string 
       newestActiveStartedAt = startedAt;
     }
   }
-  return newestActive ?? items[0];
+  if (newestActive) {
+    return newestActive;
+  }
+  let newestTerminal: T | null = null;
+  let newestTerminalStartedAt = Number.NEGATIVE_INFINITY;
+  for (const item of items) {
+    const startedAt = parseTimeOrMin(item.started_at);
+    if (newestTerminal === null || startedAt > newestTerminalStartedAt) {
+      newestTerminal = item;
+      newestTerminalStartedAt = startedAt;
+    }
+  }
+  return newestTerminal;
 }
 
 export function reconcileSelectedRunID<T extends { run_id: string; status: string; started_at: string }>(

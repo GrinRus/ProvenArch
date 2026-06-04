@@ -12,6 +12,7 @@ type FetchMockState = {
   runStatus?: Record<string, MockJSON>;
   runArtifacts?: Record<string, MockJSON>;
   runReviewSummary?: Record<string, MockJSON>;
+  runList?: MockJSON[];
   gitDiff?: MockJSON;
   artifactText?: Record<string, string>;
   baselineBundleWarnings?: MockJSON[];
@@ -217,6 +218,7 @@ function createFetchMock(state: FetchMockState = {}) {
       provider_source: "default",
     },
     can_enter_console: true,
+    recent_workspaces: [],
   };
 
   const artifactText: Record<string, string> = {
@@ -302,15 +304,33 @@ function createFetchMock(state: FetchMockState = {}) {
     }
 
     if (method === "POST" && url === "/api/onboarding/workspace") {
+      const payload = JSON.parse(String(init?.body ?? "{}")) as { path?: string; create?: boolean };
       onboardingStatus =
         state.onboardingWorkspaceSelectionStatus ?? {
           ...onboardingStatus,
           workspace_selected: true,
           workspace_ready: false,
           manifest_present: false,
-          workspace: "/tmp/onboarding-workspace",
+          workspace: payload.path ?? "/tmp/onboarding-workspace",
           can_enter_console: false,
+          recent_workspaces: [
+            {
+              path: payload.path ?? "/tmp/onboarding-workspace",
+              last_opened_at: "2026-06-04T10:00:00Z",
+              exists: true,
+            },
+            ...(((onboardingStatus.recent_workspaces as MockJSON[] | undefined) ?? []).filter((item) => item.path !== payload.path)),
+          ].slice(0, 10),
         };
+      return jsonResponse(onboardingStatus);
+    }
+
+    if (method === "POST" && url === "/api/onboarding/recent-workspaces/forget") {
+      const payload = JSON.parse(String(init?.body ?? "{}")) as { path?: string };
+      onboardingStatus = {
+        ...onboardingStatus,
+        recent_workspaces: ((onboardingStatus.recent_workspaces as MockJSON[] | undefined) ?? []).filter((workspace) => workspace.path !== payload.path),
+      };
       return jsonResponse(onboardingStatus);
     }
 
@@ -329,6 +349,9 @@ function createFetchMock(state: FetchMockState = {}) {
     }
 
     if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+      if (state.runList) {
+        return jsonResponse({ items: state.runList });
+      }
       if (state.runStarted) {
         return jsonResponse({
           items: [
@@ -749,6 +772,7 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("onboarding-workspace-save"));
 
     await screen.findByText("Selected: /tmp/onboarding-workspace");
+    expect(fetchMock.mock.calls.some((call) => call[0] === "/api/workspace/bundle")).toBe(false);
     fireEvent.click(screen.getByTestId("onboarding-sources-save"));
 
     expect(await screen.findByText("Sources validated.")).toBeInTheDocument();
@@ -816,6 +840,106 @@ describe("App", () => {
 
     fireEvent.click(screen.getByTestId("onboarding-enter-console"));
     expect(await screen.findByTestId("top-status-bar")).toBeInTheDocument();
+  });
+
+  it("opens an available recent workspace from launcher recents", async () => {
+    const fetchMock = createFetchMock({
+      onboardingStatus: {
+        ok: true,
+        launcher_mode: true,
+        workspace_selected: false,
+        workspace_ready: false,
+        workspace: "",
+        manifest_present: false,
+        runtime: {
+          selected: false,
+          runtime: "fake",
+          runtime_provider: "claude-code",
+          provider_source: "default",
+        },
+        can_enter_console: false,
+        recent_workspaces: [
+          {
+            path: "/tmp/recent-workspace",
+            last_opened_at: "2026-06-04T10:00:00Z",
+            exists: true,
+          },
+        ],
+      },
+      onboardingWorkspaceSelectionStatus: {
+        ok: true,
+        launcher_mode: true,
+        workspace_selected: true,
+        workspace_ready: true,
+        workspace: "/tmp/recent-workspace",
+        manifest_present: true,
+        runtime: {
+          selected: false,
+          runtime: "fake",
+          runtime_provider: "claude-code",
+          provider_source: "default",
+        },
+        can_enter_console: false,
+        recent_workspaces: [
+          {
+            path: "/tmp/recent-workspace",
+            last_opened_at: "2026-06-04T10:00:00Z",
+            exists: true,
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    const recents = await screen.findByTestId("onboarding-recent-workspaces");
+    expect(recents).toHaveTextContent("/tmp/recent-workspace");
+    fireEvent.click(within(recents).getByRole("button", { name: "Open" }));
+
+    await screen.findByText("Selected: /tmp/recent-workspace");
+    const workspaceCall = fetchMock.mock.calls.find((call) => call[0] === "/api/onboarding/workspace" && (call[1] as RequestInit | undefined)?.method === "POST");
+    expect(JSON.parse(String((workspaceCall?.[1] as RequestInit | undefined)?.body ?? "{}"))).toMatchObject({
+      path: "/tmp/recent-workspace",
+      create: false,
+    });
+  });
+
+  it("lets the operator forget a missing recent workspace", async () => {
+    const fetchMock = createFetchMock({
+      onboardingStatus: {
+        ok: true,
+        launcher_mode: true,
+        workspace_selected: false,
+        workspace_ready: false,
+        workspace: "",
+        manifest_present: false,
+        runtime: {
+          selected: false,
+          runtime: "fake",
+          runtime_provider: "claude-code",
+          provider_source: "default",
+        },
+        can_enter_console: false,
+        recent_workspaces: [
+          {
+            path: "/tmp/missing-workspace",
+            last_opened_at: "2026-06-04T09:00:00Z",
+            exists: false,
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    const recents = await screen.findByTestId("onboarding-recent-workspaces");
+    expect(within(recents).getByRole("button", { name: "Open" })).toBeDisabled();
+    fireEvent.click(within(recents).getByRole("button", { name: "Forget" }));
+
+    await screen.findByText("No recent workspaces yet.");
+    expect(fetchMock).toHaveBeenCalledWith("/api/onboarding/recent-workspaces/forget", expect.objectContaining({ method: "POST" }));
   });
 
   it("restores workspace validation state when booting an already ready console", async () => {
@@ -1078,6 +1202,56 @@ describe("App", () => {
     expect(screen.getByTestId("stage-review")).toHaveClass("is-selected");
     expect(screen.queryByTestId("workspace-panel")).not.toBeInTheDocument();
     expect(screen.getByTestId("right-inspector")).toHaveTextContent(/review/i);
+  });
+
+  it("opens Analysis by default when the newest run is still active even with partial artifacts", async () => {
+    const runID = "run-active";
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runID,
+        runList: [
+          {
+            run_id: runID,
+            pipeline: "init",
+            status: "running",
+            started_at: "2026-04-03T12:10:00Z",
+            finished_at: null,
+            warnings: [],
+            error_code: null,
+            error: null,
+          },
+        ],
+        runStatus: {
+          [runID]: {
+            run_id: runID,
+            pipeline: "init",
+            status: "running",
+            started_at: "2026-04-03T12:10:00Z",
+            finished_at: null,
+            current_step: "init.step2.asis_docs",
+            warnings: [],
+            error_code: null,
+            error: null,
+          },
+        },
+        runArtifacts: {
+          [runID]: {
+            run_id: runID,
+            artifacts: [
+              { path: "reports/as-is/overview.md", kind: "report", label: "Partial overview" },
+            ],
+          },
+        },
+      }),
+    );
+
+    await renderConsoleApp();
+
+    expect(await screen.findByTestId("runs-control-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("stage-analysis")).toHaveClass("is-selected");
+    expect(screen.getByText(`Resumed active run ${runID}.`)).toBeInTheDocument();
+    expect(screen.queryByTestId("review-panel")).not.toBeInTheDocument();
   });
 
   it("renders Review V2 evidence workbench and domain-map partial state", async () => {
@@ -2425,8 +2599,8 @@ describe("App", () => {
               run_id: "run-old",
               pipeline: "refresh",
               status: "succeeded",
-              started_at: "2026-04-03T12:00:00Z",
-              finished_at: "2026-04-03T12:00:30Z",
+              started_at: "2026-04-03T12:02:00Z",
+              finished_at: "2026-04-03T12:02:30Z",
               warnings: [],
               error_code: null,
               error: null,
@@ -2450,8 +2624,8 @@ describe("App", () => {
           run_id: "run-old",
           pipeline: "refresh",
           status: "succeeded",
-          started_at: "2026-04-03T12:00:00Z",
-          finished_at: "2026-04-03T12:00:30Z",
+          started_at: "2026-04-03T12:02:00Z",
+          finished_at: "2026-04-03T12:02:30Z",
           warnings: [],
           error_code: null,
           error: null,
