@@ -270,6 +270,97 @@ func TestNormalizeOnboardingWorkspacePath(t *testing.T) {
 	}
 }
 
+func TestOnboardingRecentWorkspacesRecordListAndForget(t *testing.T) {
+	recentsPath := filepath.Join(t.TempDir(), "recent-workspaces.json")
+	withOnboardingRecentWorkspacesPath(t, recentsPath)
+
+	server := NewLauncherServer(testServerRuntimeConfig(), testLauncherServiceFactory())
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	root := t.TempDir()
+	firstWorkspace := filepath.Join(root, "first-workspace")
+	secondWorkspace := filepath.Join(root, "second-workspace")
+
+	firstResponse := postJSON(t, httpServer.URL+"/api/onboarding/workspace", fmt.Sprintf(`{"path":%q,"create":true}`, firstWorkspace))
+	defer firstResponse.Body.Close()
+	if firstResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected first workspace selection 200, got %d", firstResponse.StatusCode)
+	}
+	secondResponse := postJSON(t, httpServer.URL+"/api/onboarding/workspace", fmt.Sprintf(`{"path":%q,"create":true}`, secondWorkspace))
+	defer secondResponse.Body.Close()
+	if secondResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected second workspace selection 200, got %d", secondResponse.StatusCode)
+	}
+	if err := os.RemoveAll(firstWorkspace); err != nil {
+		t.Fatalf("remove first workspace: %v", err)
+	}
+
+	statusResponse, err := http.Get(httpServer.URL + "/api/onboarding/status")
+	if err != nil {
+		t.Fatalf("GET onboarding status: %v", err)
+	}
+	defer statusResponse.Body.Close()
+	var status struct {
+		RecentWorkspaces []onboardingRecentWorkspace `json:"recent_workspaces"`
+	}
+	if err := json.NewDecoder(statusResponse.Body).Decode(&status); err != nil {
+		t.Fatalf("decode onboarding status: %v", err)
+	}
+	if len(status.RecentWorkspaces) != 2 {
+		t.Fatalf("expected 2 recent workspaces, got %#v", status.RecentWorkspaces)
+	}
+	if status.RecentWorkspaces[0].Path != secondWorkspace || !status.RecentWorkspaces[0].Exists {
+		t.Fatalf("expected newest existing second workspace first, got %#v", status.RecentWorkspaces[0])
+	}
+	if status.RecentWorkspaces[1].Path != firstWorkspace || status.RecentWorkspaces[1].Exists {
+		t.Fatalf("expected missing first workspace second, got %#v", status.RecentWorkspaces[1])
+	}
+
+	forgetResponse := postJSON(t, httpServer.URL+"/api/onboarding/recent-workspaces/forget", fmt.Sprintf(`{"path":%q}`, firstWorkspace))
+	defer forgetResponse.Body.Close()
+	if forgetResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected forget response 200, got %d", forgetResponse.StatusCode)
+	}
+	var forgetStatus struct {
+		RecentWorkspaces []onboardingRecentWorkspace `json:"recent_workspaces"`
+	}
+	if err := json.NewDecoder(forgetResponse.Body).Decode(&forgetStatus); err != nil {
+		t.Fatalf("decode forget status: %v", err)
+	}
+	if len(forgetStatus.RecentWorkspaces) != 1 || forgetStatus.RecentWorkspaces[0].Path != secondWorkspace {
+		t.Fatalf("expected only second workspace after forget, got %#v", forgetStatus.RecentWorkspaces)
+	}
+}
+
+func TestOnboardingRecentWorkspacesLimitNewestFirst(t *testing.T) {
+	recentsPath := filepath.Join(t.TempDir(), "recent-workspaces.json")
+	withOnboardingRecentWorkspacesPath(t, recentsPath)
+
+	root := t.TempDir()
+	baseTime := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
+	for index := 0; index < 12; index++ {
+		workspacePath := filepath.Join(root, fmt.Sprintf("workspace-%02d", index))
+		if err := os.MkdirAll(workspacePath, 0o755); err != nil {
+			t.Fatalf("create workspace %d: %v", index, err)
+		}
+		if err := recordOnboardingRecentWorkspace(workspacePath, baseTime.Add(time.Duration(index)*time.Minute)); err != nil {
+			t.Fatalf("record workspace %d: %v", index, err)
+		}
+	}
+
+	recents := loadOnboardingRecentWorkspaces()
+	if len(recents) != onboardingRecentWorkspaceLimit {
+		t.Fatalf("expected limit %d, got %d", onboardingRecentWorkspaceLimit, len(recents))
+	}
+	if want := filepath.Join(root, "workspace-11"); recents[0].Path != want {
+		t.Fatalf("expected newest workspace %q first, got %q", want, recents[0].Path)
+	}
+	if want := filepath.Join(root, "workspace-02"); recents[len(recents)-1].Path != want {
+		t.Fatalf("expected oldest retained workspace %q last, got %q", want, recents[len(recents)-1].Path)
+	}
+}
+
 func TestSystemDoctorEndpointReturnsReadinessChecks(t *testing.T) {
 	t.Parallel()
 
@@ -3859,6 +3950,17 @@ func testLauncherServiceFactory() ServiceFactory {
 			orchestrator.WithRunner(fakeruntime.Runner{}),
 		)
 	}
+}
+
+func withOnboardingRecentWorkspacesPath(t *testing.T, path string) {
+	t.Helper()
+	previous := onboardingRecentWorkspacesPath
+	onboardingRecentWorkspacesPath = func() (string, error) {
+		return path, nil
+	}
+	t.Cleanup(func() {
+		onboardingRecentWorkspacesPath = previous
+	})
 }
 
 func postJSON(t *testing.T, url string, body string) *http.Response {

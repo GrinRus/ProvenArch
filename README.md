@@ -108,10 +108,14 @@ acp serve --runtime fake
 
 В onboarding UI:
 
-1. `Workspace`: создайте или откройте `arch-workspace`, например `$HOME/acp-workspaces/my-service`. ACP инициализирует fixed layout и git в workspace.
+1. `Workspace`: создайте или откройте `arch-workspace`, например `$HOME/acp-workspaces/my-service`. ACP инициализирует fixed layout и git в workspace. Успешно открытые workspaces попадают в локальный список Recent workspaces; missing entries можно забыть без изменения самого workspace.
 2. `Sources`: добавьте один или несколько target repos через GitHub/GitLab URL или local checkout path, optional `ref` и `docs.imports_path`.
 3. `Runner`: выберите runner. Для первого walkthrough используйте `fake`; live providers (`claude-code`, `qwen-code`, `codex-code`) включаются явно.
 4. `Ready`: проверьте summary и откройте Console V2 или сразу запустите первый `init` analysis.
+
+Если вы открываете уже существующий workspace, onboarding загружает repos из `workspace.yaml`.
+Валидный manifest можно сразу довести до `Ready` после выбора runner; manifest с ошибками вернёт
+оператора к `Sources` с actionable diagnostics.
 
 После onboarding основной UI остаётся прежним:
 
@@ -120,6 +124,10 @@ acp serve --runtime fake
 3. `Charter`: проверьте wizard summary, domain/team card overview, стартовый architecture charter и baseline prompts.
 4. `Analysis`: запустите или отслеживайте `init`/`refresh` analysis через mission control, timeline, shard/log table и warning/error drilldown.
 5. `Review` / `Proposals` / `Ask` / `Publish`: просмотрите coverage, artifacts, diagrams, proposals, задайте read-only Q&A с run history/citations/safety panel и подготовьте git changes.
+
+При повторном открытии Console V2 выбирает newest active run и открывает `Analysis`; если активных
+прогонов нет, но есть завершённый run с артефактами, UI открывает `Review`. Empty/stale/no-run
+states остаются явными в run strip и mission control.
 
 Опытные пользователи, scripts, CI и live E2E могут по-прежнему открыть direct-mode console сразу на известном workspace. Ниже используется уже склонированный локальный Git checkout. Для GitHub/GitLab URL замените `--repo-path "$HOME/src/my-service"` на `--repo-git-url https://github.com/org/my-service.git`.
 
@@ -258,7 +266,7 @@ UI показывает то же состояние через stage-based cons
 
 - `Source` / `Readiness`: repo table, repo sources, `workspace.yaml`, validation diagnostics, readiness cards, doctor checklist и runtime profile summary;
 - `Charter`: wizard summary, domain/team card overview, baseline prompt bundle status и editor для `charter/*`/`skills/*`;
-- `Analysis`: run mission control, canonical `step0..step4` timeline, shard/log table with drilldown, event timeline, raw agent stream, pending permissions и cancel;
+- `Analysis`: run mission control, canonical `step0..step4` timeline, shard/log table with drilldown, event timeline, raw agent stream, pending permissions, cancel и bootstrap resume newest active/newest completed run;
 - `Review`: evidence tabs, grouped artifact explorer, markdown/Mermaid preview, coverage/open-question/trust summary и artifact-derived Domain Map по `model/entities/*`, `model/edges/*`, `reports/agent-outputs/domains/*`;
 - `Proposals`: proposal/changelog review room with package list, preview/evidence/changelog/diff tabs, quality blockers and publication path;
 - `Ask`: async agent-backed Q&A поверх existing workspace artifacts через `POST /api/qa/runs`, with run history, selected answer, confidence/citations/unresolved and read-only safety/audit artifact links; legacy deterministic `POST /api/qa/ask` остаётся compatibility endpoint;

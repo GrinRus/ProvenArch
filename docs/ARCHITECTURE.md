@@ -22,7 +22,8 @@
    - Экспортирует API под `/api/*`
    - `serve` без `--workspace` поднимает loopback launcher/onboarding UI: workspace выбирается или создаётся в UI, затем server session attaches ровно один active workspace без restart процесса
    - `serve --workspace <path>` сохраняет direct-mode single-workspace-per-process local API+UI service для scripts, CI, live E2E и опытных пользователей
-   - launcher API поддерживает `/api/onboarding/status`, `/api/onboarding/workspace`, `/api/onboarding/runtime`; workspace-bound endpoints до выбора workspace возвращают `428 workspace_not_selected`
+   - launcher API поддерживает `/api/onboarding/status`, `/api/onboarding/workspace`, `/api/onboarding/runtime` и локальное forget действие для Recent workspaces; workspace-bound endpoints до выбора workspace возвращают `428 workspace_not_selected`
+   - Recent workspaces хранятся как local-only user config metadata вне `workspace.yaml` и не являются переносимым workspace contract
    - `serve --auto-init` bootstrap-ит workspace manifest/layout при отсутствии `workspace.yaml`
    - bootstrap (`init-workspace`/`serve --auto-init`) автоматически делает `git init` для workspace root при отсутствии `.git`
    - startup для `serve` lenient: без блокирующего repo preflight; readiness diagnostics доступны через `/api/workspace/validate`
@@ -55,7 +56,7 @@
    - setup/baseline/wizard/git state и actions остаются за facade `useWorkspaceSetup`, но внутри разделены на `useManifestEditor`, `useBaselineEditor`, `useWizardEditor` и `useGitActions`; runtime settings живут в отдельном hook, а run explorer разделён на `useRunSelection`, `useRunPolling`, `useRunActions`, `useRunArtifacts` и `useRunLogs`
    - Runtime profile (`timeouts` + `execution` + `permissions`) доступен в `Readiness -> Advanced runtime settings`, включая effective per-step providers; это не отдельная primary stage
    - Показывает run dashboard (queued/running/succeeded/failed), включая завершённые run'ы из persisted history
-   - При bootstrap авто-выбирает newest active run (`queued/running`), иначе первый run в history
+   - При bootstrap авто-выбирает newest active run (`queued/running`), иначе newest completed run в history
    - При bootstrap UI остаётся на `Source` для пустого workspace, но автоматически открывает `Analysis` для active run и `Review` для выбранного completed run с уже доступными artifacts
    - Если выбранный run исчезает из history и есть новый доступный run, UI переключается на него; если history временно пуста, но status endpoint ещё возвращает выбранный run, UI сохраняет текущий selection и не делает ложный auto-switch
    - Показывает `Run status` выбранного run с полным warnings list (`RunInfo.warnings`), `error_code` и `error`
@@ -77,7 +78,7 @@
    - runtime profile patch validation/merge/manifest rewrite живёт в shared internal package `internal/runtimeprofile`, а API handlers остаются только HTTP adapter layer
    - live e2e poll timeout-ы берутся из effective config (`/api/runtime/timeouts`) с env override
    - Критичные UI-контролы для live e2e снабжены стабильными `data-testid` (`validate/run/status/artifacts/logs`)
-   - First-run flow начинается до Console V2: пользователь выбирает/создаёт workspace, добавляет один или несколько repos через существующее `workspace.yaml.repos[]`, выбирает runner (`fake` recommended, live providers explicit opt-in), проходит readiness summary и только затем входит в stages `Source / Readiness / Charter / Analysis`
+   - First-run flow начинается до Console V2: пользователь выбирает/создаёт workspace или открывает Recent workspace, добавляет один или несколько repos через существующее `workspace.yaml.repos[]`, выбирает runner (`fake` recommended, live providers explicit opt-in), проходит readiness summary и только затем входит в stages `Source / Readiness / Charter / Analysis`
    - После onboarding `Source` остаётся editable для изменения repos/imports; GitHub/GitLab URL является default entry, local folder остаётся supported mode, raw `workspace.yaml` editor спрятан в Advanced, readiness checklist берётся из `GET /api/system/doctor`, первый `init` запускается кнопкой `Run first analysis`
 
 3) **Orchestrator (`internal/orchestrator`)** *(implemented baseline)*

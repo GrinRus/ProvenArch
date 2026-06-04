@@ -122,8 +122,11 @@ export function useRunActions({
     const bootstrapRun = pickBootstrapRun(initialRuns);
     if (bootstrapRun) {
       await handleSelectRun(bootstrapRun.run_id, { silentErrors: true });
+      setRunActionStatus(activeRunResumeMessage(bootstrapRun.status, bootstrapRun.run_id));
+      return;
     }
-  }, [handleSelectRun, loadRunList, setRunList]);
+    setRunActionStatus("No runs yet. Start the first analysis to create reviewable artifacts.");
+  }, [handleSelectRun, loadRunList, setRunActionStatus, setRunList]);
 
   const pollRunUpdates = useRunUpdatePolling({
     clearArtifacts,
@@ -278,4 +281,11 @@ export function useRunActions({
     handleSelectRun,
     handleCancelSelectedRun,
   };
+}
+
+function activeRunResumeMessage(status: string, runID: string): string {
+  if (status === "running" || status === "queued") {
+    return `Resumed active run ${runID}.`;
+  }
+  return `Selected latest completed run ${runID}.`;
 }

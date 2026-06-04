@@ -35,7 +35,7 @@ import { buildStageOptions } from "./lib/stageModel";
 import { useRunExplorer } from "./hooks/useRunExplorer";
 import { useRuntimeSettings } from "./hooks/useRuntimeSettings";
 import { useWorkspaceSetup } from "./hooks/useWorkspaceSetup";
-import { loadOnboardingStatus, selectOnboardingRuntime, selectOnboardingWorkspace } from "./lib/onboardingApi";
+import { forgetOnboardingRecentWorkspace, loadOnboardingStatus, selectOnboardingRuntime, selectOnboardingWorkspace } from "./lib/onboardingApi";
 import { loadSystemDoctor, loadSystemInfo, type SystemInfoResponse } from "./lib/systemApi";
 
 export default function App() {
@@ -253,18 +253,39 @@ export default function App() {
     return status;
   }
 
-  async function handleOnboardingWorkspaceSelect() {
+  async function handleOnboardingWorkspaceSelect(path = onboardingWorkspacePath, create = onboardingCreateWorkspace) {
     setBusy(true);
     setError(null);
     try {
-      const status = await selectOnboardingWorkspace(onboardingWorkspacePath, onboardingCreateWorkspace);
+      const status = await selectOnboardingWorkspace(path, create);
+      setOnboardingWorkspacePath(status.workspace || path);
+      setOnboardingCreateWorkspace(create);
       syncOnboardingStatus(status);
-      await bootstrapWorkspaceSetup();
       if (status.workspace_ready && status.manifest_present) {
+        await bootstrapWorkspaceSetup();
         await handleValidateWorkspace();
       }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "workspace selection failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleOpenRecentWorkspace(path: string) {
+    setOnboardingWorkspacePath(path);
+    setOnboardingCreateWorkspace(false);
+    await handleOnboardingWorkspaceSelect(path, false);
+  }
+
+  async function handleForgetRecentWorkspace(path: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      const status = await forgetOnboardingRecentWorkspace(path);
+      syncOnboardingStatus(status);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "failed to forget recent workspace");
     } finally {
       setBusy(false);
     }
@@ -447,14 +468,14 @@ export default function App() {
     if (userSelectedStageRef.current || autoOpenedStageRef.current) {
       return;
     }
-    if (artifactCount > 0) {
-      autoOpenedStageRef.current = true;
-      setActiveStage("review");
-      return;
-    }
     if (selectedRunIsActive) {
       autoOpenedStageRef.current = true;
       setActiveStage("analysis");
+      return;
+    }
+    if (artifactCount > 0) {
+      autoOpenedStageRef.current = true;
+      setActiveStage("review");
     }
   }, [artifactCount, selectedRunIsActive]);
 
@@ -801,6 +822,8 @@ export default function App() {
         onWorkspacePathChange={setOnboardingWorkspacePath}
         onCreateWorkspaceChange={setOnboardingCreateWorkspace}
         onSelectWorkspace={() => void handleOnboardingWorkspaceSelect()}
+        onOpenRecentWorkspace={(path) => void handleOpenRecentWorkspace(path)}
+        onForgetRecentWorkspace={(path) => void handleForgetRecentWorkspace(path)}
         onRepoChange={handleSetupRepoChange}
         onAddRepo={handleSetupAddRepo}
         onRemoveRepo={handleSetupRemoveRepo}

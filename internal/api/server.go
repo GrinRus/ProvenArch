@@ -107,6 +107,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/onboarding/status", s.handleOnboardingStatus)
 	mux.HandleFunc("/api/onboarding/workspace", s.handleOnboardingWorkspace)
 	mux.HandleFunc("/api/onboarding/runtime", s.handleOnboardingRuntime)
+	mux.HandleFunc("/api/onboarding/recent-workspaces/forget", s.handleOnboardingRecentWorkspaceForget)
 	mux.HandleFunc("/api/system/info", s.handleSystemInfo)
 	mux.HandleFunc("/api/system/doctor", s.handleSystemDoctor)
 	mux.HandleFunc("/api/workspace/validate", s.handleWorkspaceValidate)

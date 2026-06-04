@@ -59,12 +59,41 @@ Tracker reconciliation from 2026-05-07 consolidated historical active plans into
 
 ### Continuous Backlog Queue Policy
 
-Current engineering queue starts with `EP-20260602-onboarding-first-startup`; implement Epic 17 slices in `docs/BACKLOG.md` order (`17A` -> `17E`) unless a blocker creates a narrower prerequisite slice. `EP-20260527-ui-console-v2` remains visible for owner review/archive bookkeeping, but it is not the next engineering workstream.
+Current engineering queue starts with `EP-20260604-v014-ci-product-release`, then returns to owner-selected backlog work. `EP-20260602-onboarding-first-startup` and `EP-20260527-ui-console-v2` remain visible for owner review/archive bookkeeping, but they are not the next engineering workstream.
 
 Task selection rules:
 - Completed plans whose only remaining item is owner review, merge/archive bookkeeping, or historical evidence retention are not next engineering work.
 - Owner-decision and trusted-host/live-release items remain explicit blockers; do not run or edit them as normal backlog tasks without the required owner/trusted-machine prerequisites.
 - Each selected slice gets a decision-complete ExecPlan/update before implementation, one focused implementation pass, self-review/fix loops, Full DoD (`make contracts`, `make test`, `make lint`, `make build`), then one commit.
+
+### Plan ID
+EP-20260604-v014-ci-product-release
+
+### Context
+After `v0.1.3`, the next patch release should remove GitHub Actions deprecation warnings and polish the clean UI startup path used by first-time and returning local operators. The product scope is deliberately small: recent workspace shortcuts, safer reopen/resume behavior and run bootstrap selection. Release mode remains owner-approved CI-only beta; trusted `release-fast` is not part of this plan unless the owner starts a separate gate.
+
+### Goals (must have)
+- [x] Modernize pinned GitHub Actions to Node 24-compatible action versions and CodeQL v4 without changing permissions, gates, SBOM/provenance or pinned-SHA policy.
+- [x] Add local-only Recent workspaces to onboarding with newest-first ordering, limit 10, missing-path state, `Open` and `Forget`.
+- [x] Reopen existing workspaces by hydrating `workspace.yaml` sources, allowing valid manifests to proceed to `Ready` after runner selection and routing invalid manifests to `Sources` diagnostics.
+- [x] Resume newest active run on console bootstrap; otherwise select newest completed run and open `Review` when artifacts exist.
+- [ ] Merge product polish to `main`, then prepare `v0.1.4` release metadata and tag final green `main`.
+
+### Non-goals
+- [x] No workspace schema, runtime artifact schema, provider contract, CLI `acp run`, direct `acp serve --workspace` or provider-live release-gate changes.
+- [x] No hosted workspace picker, browser directory picker or source repository mutation.
+- [x] No canonical `RELEASE READY` claim without a fresh verifier-backed `release_verdict_*.json`.
+
+### Acceptance criteria
+- [x] CI hygiene PR and main CI are green with no Node 20 / CodeQL v3 deprecation annotations.
+- [x] Onboarding status exposes local recents; create/open records recents; forget removes a recent entry; missing paths are visible and not openable.
+- [x] UI tests cover recents, reopen existing workspace, missing recent forget, runner-required state and active/completed run bootstrap.
+- [x] Deterministic fake UI walkthrough from clean launcher to Analysis/Review/Publish remains passable.
+- [x] `git diff --check`, `make contracts`, `make test`, `make lint`, `make build` pass before commit.
+
+### Progress log
+- 2026-06-04: Merged CI hygiene PR #97 into `main` (`bc45d1c`); PR and main CI passed after pinned GitHub Actions moved to Node 24-compatible versions and CodeQL v4.
+- 2026-06-04: Started product polish branch `codex/onboarding-resume-polish`: added local Recent workspaces API/UI, reopen/resume copy and newest active/newest completed run bootstrap tests. During rendered fake walkthrough found and fixed a premature `/api/workspace/bundle` call that produced `428 workspace_not_selected` in browser console after selecting a draft workspace. Validation passed: `git diff --check`, `go test ./internal/docsync`, focused `go test ./internal/api`, UI unit suite `69/69`, Full DoD (`make contracts`, `make test`, `make lint`, `make build`) and Playwright rendered smoke from clean launcher to Analysis/Review/Publish with no browser console issues or HTTP >=400 responses. Product PR/merge and `v0.1.4` release metadata still pending.
 
 ### Plan ID
 EP-20260602-onboarding-first-startup

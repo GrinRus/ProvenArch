@@ -61,10 +61,14 @@ acp serve --runtime fake
 Откройте [http://127.0.0.1:8080](http://127.0.0.1:8080).
 При запуске без `--workspace` UI откроет onboarding:
 
-1. `Workspace`: выберите или создайте architecture workspace, например `$HOME/acp-workspaces/my-service`.
+1. `Workspace`: выберите или создайте architecture workspace, например `$HOME/acp-workspaces/my-service`. Успешно открытые workspaces сохраняются в локальный список Recent workspaces; missing entries можно удалить кнопкой `Forget`.
 2. `Sources`: добавьте один или несколько target repositories через Git URL или local checkout path.
 3. `Runner`: выберите `fake` для первого deterministic walkthrough.
 4. `Ready`: откройте Console V2 или запустите первый analysis.
+
+При reopening существующего workspace UI загружает repos из `workspace.yaml`. Если manifest валиден,
+после выбора runner можно сразу перейти в Console V2; если manifest невалиден, onboarding оставит
+оператора в `Sources` с actionable diagnostics.
 
 Launcher workspace path должен быть dedicated directory под текущим `$HOME` или system temp
 directory; используйте direct-mode `--workspace` для automation/advanced paths.
