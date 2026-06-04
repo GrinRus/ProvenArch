@@ -18,7 +18,7 @@ operator CLI / UI -> ACP Go orchestrator -> runtime provider -> staged artifacts
 > **Статус:** MVP beta / pre-v1 foundation. Public API, artifact contracts и UX могут меняться до `v1.0.0`.
 > **Стек реализации:** Go backend/orchestrator + embedded React/TypeScript UI.
 > **Runtime анализа:** deterministic `fake` baseline или headless providers `claude-code`, `qwen-code`, `codex-code`.
-> **Последняя ревизия README:** 2026-06-02.
+> **Последняя ревизия README:** 2026-06-04.
 
 ## Что это
 
@@ -69,7 +69,7 @@ Go и Node.js нужны только для разработки ProvenArch и�
 
 Release status:
 
-- latest public release: `v0.1.2`;
+- latest public release: `v0.1.3`;
 - license: Apache-2.0;
 - maturity: MVP beta / pre-v1 foundation.
 

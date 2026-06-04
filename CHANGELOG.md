@@ -2,6 +2,28 @@
 
 All notable user-facing changes are tracked here. ProvenArch uses SemVer-style release tags, with `v0.x` treated as beta/pre-release foundation.
 
+## v0.1.3 - 2026-06-04
+
+CI-only beta patch release for clean UI onboarding fixes after `v0.1.2`.
+
+Highlights:
+- Fixed the Console V2 top status release label: the UI now reads local build metadata through `/api/system/info` instead of showing a hardcoded `v0.1.1 beta` label.
+- Improved first-run onboarding workspace path handling on macOS: `/tmp/...` is accepted as an alias for the system temp root while root paths, relative paths, traversal, NUL bytes, and paths outside allowed home/temp roots remain blocked.
+- Made fake runtime presentation consistent in long-run review: fake runs show provider `fake` in review summaries and Analysis step cards even when the process-level fallback provider is `claude-code`.
+- Deduplicated run-level and step-level warnings so ActiveRunStrip, Analysis mission control, and `/api/pipeline/runs/<run_id>/review-summary` show the same warning total.
+- Clarified Publish Git diff scope: selected-run diffs and full-workspace diffs now have explicit labels and hints.
+
+Verification notes:
+- PR #93 was merged after green PR checks and green `main` CI for merge commit `1e6087e`.
+- Local validation for the patch passed: `go test ./internal/api`, `git diff --check`, `make contracts`, `make test`, `make lint`, `make build`, and `./bin/acp serve --runtime fake --dry-run`.
+- Browser QA passed for clean onboarding with `/tmp/...`, local source repo setup, fake runner selection, first analysis, Review, selected-run diff, full-workspace diff, and empty browser console warnings/errors.
+- Fresh trusted-machine `release-fast` was not run for this patch. This release does not claim canonical `RELEASE READY` status without a fresh `reports/release_verdict_<matrix-id>.json`.
+
+Known limitations:
+- `v0.1.3` remains a beta/pre-v1 release. Public behavior and artifact contracts can still evolve before `v1.0.0`.
+- Hosted/multi-tenant mode and security/compliance enforcement remain out of scope.
+- Canonical release readiness still requires trusted-machine release gate evidence from `reports/release_verdict_<matrix-id>.json` verified by `scripts/verify-release-verdict.py`.
+
 ## v0.1.2 - 2026-06-02
 
 CI-only beta release for onboarding-first startup and long-run review UX.
