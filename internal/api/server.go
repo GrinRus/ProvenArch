@@ -44,6 +44,13 @@ type ServerRuntimeConfig struct {
 	ExecutionOverrides acpruntime.ExecutionOverrides
 	RunLogsTTL         time.Duration
 	RunLogsMaxRuns     int
+	Build              BuildInfo
+}
+
+type BuildInfo struct {
+	Version string `json:"version"`
+	Commit  string `json:"commit"`
+	Built   string `json:"built"`
 }
 
 type ServiceFactory func(workspace.Root, ServerRuntimeConfig) *orchestrator.Service
@@ -100,6 +107,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/onboarding/status", s.handleOnboardingStatus)
 	mux.HandleFunc("/api/onboarding/workspace", s.handleOnboardingWorkspace)
 	mux.HandleFunc("/api/onboarding/runtime", s.handleOnboardingRuntime)
+	mux.HandleFunc("/api/system/info", s.handleSystemInfo)
 	mux.HandleFunc("/api/system/doctor", s.handleSystemDoctor)
 	mux.HandleFunc("/api/workspace/validate", s.handleWorkspaceValidate)
 	mux.HandleFunc("/api/workspace/bundle", s.handleWorkspaceBundle)
@@ -176,6 +184,12 @@ func (s *Server) getService() *orchestrator.Service {
 	return s.service
 }
 
+func (s *Server) getRuntimeConfig() ServerRuntimeConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.runtimeConfig
+}
+
 func (s *Server) isRuntimeSelected() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -222,6 +236,9 @@ func (s *Server) setRuntimeConfig(config ServerRuntimeConfig) {
 	if config.ProviderSource == "" {
 		config.ProviderSource = acpruntime.ProviderSourceDefault
 	}
+	if strings.TrimSpace(config.Build.Version) == "" {
+		config.Build = s.runtimeConfig.Build
+	}
 	config.ExecutionOverrides = s.runtimeConfig.ExecutionOverrides
 	config.RunLogsTTL = s.runtimeConfig.RunLogsTTL
 	config.RunLogsMaxRuns = s.runtimeConfig.RunLogsMaxRuns
@@ -233,7 +250,7 @@ func (s *Server) setRuntimeConfig(config ServerRuntimeConfig) {
 }
 
 func (s *Server) shouldBlockAPIRequest(apiPath string) bool {
-	if apiPath == "/api/health" || strings.HasPrefix(apiPath, "/api/onboarding/") {
+	if apiPath == "/api/health" || apiPath == "/api/system/info" || strings.HasPrefix(apiPath, "/api/onboarding/") {
 		return false
 	}
 	s.mu.RLock()
@@ -256,6 +273,30 @@ func (s *Server) handleHealth(writer http.ResponseWriter, request *http.Request)
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleSystemInfo(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		writeMethodNotAllowed(writer, http.MethodGet)
+		return
+	}
+
+	s.mu.RLock()
+	build := s.runtimeConfig.Build
+	s.mu.RUnlock()
+	writeJSON(writer, http.StatusOK, map[string]string{
+		"version": normalizeBuildInfoValue(build.Version, "dev"),
+		"commit":  normalizeBuildInfoValue(build.Commit, "none"),
+		"built":   normalizeBuildInfoValue(build.Built, "unknown"),
+	})
+}
+
+func normalizeBuildInfoValue(value string, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 func (s *Server) handleSystemDoctor(writer http.ResponseWriter, request *http.Request) {

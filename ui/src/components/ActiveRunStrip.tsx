@@ -1,5 +1,6 @@
 import { StatusBadge } from "./ConsolePrimitives";
 import type { RunReviewSummaryResponse, RunStatusResponse } from "../lib/appContracts";
+import { runReviewErrorCount, runReviewWarningCount } from "../lib/runReviewMetrics";
 
 type ActiveRunStripProps = {
   runStatus: RunStatusResponse | null;
@@ -23,8 +24,8 @@ export function ActiveRunStrip({
   const steps = reviewSummary?.steps ?? [];
   const activeStep = steps.find((step) => step.state === "active" || step.state === "failed");
   const doneCount = steps.filter((step) => step.state === "done").length;
-  const warningCount = steps.reduce((total, step) => total + step.warnings_count, 0) + (runStatus?.warnings?.length ?? 0);
-  const errorCount = steps.reduce((total, step) => total + step.errors_count, 0) + (runStatus?.error_code ? 1 : 0);
+  const warningCount = runReviewWarningCount(runStatus, reviewSummary);
+  const errorCount = runReviewErrorCount(runStatus, reviewSummary);
   const status = runStatus?.status ?? reviewSummary?.status ?? "idle";
   const runID = runStatus?.run_id ?? reviewSummary?.run_id;
   const currentStep = runStatus?.current_step ?? reviewSummary?.current_step ?? activeStep?.step_id ?? "not running";

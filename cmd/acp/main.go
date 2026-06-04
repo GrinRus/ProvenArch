@@ -789,6 +789,11 @@ func toAPIRuntimeConfig(runtimeConfig resolvedRuntimeConfig) api.ServerRuntimeCo
 		ExecutionOverrides: runtimeConfig.executionOverrides,
 		RunLogsTTL:         runtimeConfig.runLogsTTL,
 		RunLogsMaxRuns:     runtimeConfig.runLogsMaxRuns,
+		Build: api.BuildInfo{
+			Version: version,
+			Commit:  commit,
+			Built:   date,
+		},
 	}
 }
 

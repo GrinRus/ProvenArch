@@ -1,4 +1,7 @@
+import type { SystemInfoResponse } from "../lib/systemApi";
+
 type TopStatusBarProps = {
+  buildInfo: SystemInfoResponse | null;
   workspacePath: string;
   repoCount: number;
   runtimeMode: string;
@@ -9,13 +12,15 @@ type TopStatusBarProps = {
   onRefresh: () => void;
 };
 
-export function TopStatusBar({ workspacePath, repoCount, runtimeMode, runtimeProvider, permissionMode, gitStatus, healthLabel, onRefresh }: TopStatusBarProps) {
+export function TopStatusBar({ buildInfo, workspacePath, repoCount, runtimeMode, runtimeProvider, permissionMode, gitStatus, healthLabel, onRefresh }: TopStatusBarProps) {
   const localTime = new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date());
+  const buildLabel = buildVersionLabel(buildInfo);
+  const buildTitle = buildInfo ? `commit ${buildInfo.commit || "none"} · built ${buildInfo.built || "unknown"}` : "Build metadata unavailable";
 
   return (
     <header className="top-status-bar" data-testid="top-status-bar">
@@ -30,7 +35,9 @@ export function TopStatusBar({ workspacePath, repoCount, runtimeMode, runtimePro
         </div>
         <div>
           <p className="brand-name">Proven Arch</p>
-          <p className="brand-version">v0.1.1 beta</p>
+          <p className="brand-version" title={buildTitle}>
+            {buildLabel}
+          </p>
         </div>
       </div>
 
@@ -76,6 +83,14 @@ export function TopStatusBar({ workspacePath, repoCount, runtimeMode, runtimePro
       </div>
     </header>
   );
+}
+
+function buildVersionLabel(buildInfo: SystemInfoResponse | null): string {
+  const version = buildInfo?.version?.trim() ?? "";
+  if (!version || version === "dev") {
+    return "dev build";
+  }
+  return `${version.startsWith("v") ? version : `v${version}`} beta`;
 }
 
 function TopMetaIcon({ type }: { type: "workspace" | "repos" | "runtime" | "permission" | "git" | "time" }) {
