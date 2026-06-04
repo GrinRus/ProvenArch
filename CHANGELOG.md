@@ -2,6 +2,28 @@
 
 All notable user-facing changes are tracked here. ProvenArch uses SemVer-style release tags, with `v0.x` treated as beta/pre-release foundation.
 
+## v0.1.4 - 2026-06-04
+
+CI-only beta patch release for GitHub Actions hygiene and clean UI startup polish.
+
+Highlights:
+- Modernized pinned GitHub Actions to Node 24-compatible action versions and CodeQL v4 while preserving permissions, timeouts, release environment gates, SBOM/provenance, and pinned-SHA policy.
+- Added local-only Recent workspaces to onboarding: successful workspace create/open records the workspace outside `workspace.yaml`, the launcher shows newest-first recents with `Open` and `Forget`, and missing paths are visible but not openable.
+- Improved reopen flow for existing workspaces: onboarding hydrates sources from `workspace.yaml`, valid manifests can proceed to `Ready` after runner selection, and invalid manifests route the operator back to `Sources` with diagnostics.
+- Improved run review resume: Console V2 selects the newest active run on bootstrap, otherwise selects the newest completed run and opens `Review` when artifacts exist.
+- Fixed a rendered UI startup regression where selecting a new draft workspace could trigger `/api/workspace/bundle` before `workspace.yaml` existed, causing a noisy `428 workspace_not_selected` browser console error.
+
+Verification notes:
+- PR #97 modernized GitHub Actions pins and merged after green PR checks and green `main` CI for merge commit `bc45d1c`.
+- PR #98 shipped product polish and merged after green PR checks and green `main` CI for merge commit `5337e61`.
+- Local validation for product polish passed: `git diff --check`, `go test ./internal/docsync`, focused `go test ./internal/api`, UI unit suite `69/69`, `make contracts`, `make test`, `make lint`, `make build`, and Playwright rendered smoke from clean launcher to Analysis/Review/Publish with no browser console issues or HTTP >=400 responses.
+- Fresh trusted-machine `release-fast` was not run for this patch. This release does not claim canonical `RELEASE READY` status without a fresh `reports/release_verdict_<matrix-id>.json`.
+
+Known limitations:
+- `v0.1.4` remains a beta/pre-v1 release. Public behavior and artifact contracts can still evolve before `v1.0.0`.
+- Hosted/multi-tenant mode and security/compliance enforcement remain out of scope.
+- Canonical release readiness still requires trusted-machine release gate evidence from `reports/release_verdict_<matrix-id>.json` verified by `scripts/verify-release-verdict.py`.
+
 ## v0.1.3 - 2026-06-04
 
 CI-only beta patch release for clean UI onboarding fixes after `v0.1.2`.

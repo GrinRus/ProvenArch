@@ -77,7 +77,7 @@ After `v0.1.3`, the next patch release should remove GitHub Actions deprecation 
 - [x] Add local-only Recent workspaces to onboarding with newest-first ordering, limit 10, missing-path state, `Open` and `Forget`.
 - [x] Reopen existing workspaces by hydrating `workspace.yaml` sources, allowing valid manifests to proceed to `Ready` after runner selection and routing invalid manifests to `Sources` diagnostics.
 - [x] Resume newest active run on console bootstrap; otherwise select newest completed run and open `Review` when artifacts exist.
-- [ ] Merge product polish to `main`, then prepare `v0.1.4` release metadata and tag final green `main`.
+- [ ] Prepare `v0.1.4` release metadata and tag final green `main` after metadata PR/main CI.
 
 ### Non-goals
 - [x] No workspace schema, runtime artifact schema, provider contract, CLI `acp run`, direct `acp serve --workspace` or provider-live release-gate changes.
@@ -93,7 +93,8 @@ After `v0.1.3`, the next patch release should remove GitHub Actions deprecation 
 
 ### Progress log
 - 2026-06-04: Merged CI hygiene PR #97 into `main` (`bc45d1c`); PR and main CI passed after pinned GitHub Actions moved to Node 24-compatible versions and CodeQL v4.
-- 2026-06-04: Started product polish branch `codex/onboarding-resume-polish`: added local Recent workspaces API/UI, reopen/resume copy and newest active/newest completed run bootstrap tests. During rendered fake walkthrough found and fixed a premature `/api/workspace/bundle` call that produced `428 workspace_not_selected` in browser console after selecting a draft workspace. Validation passed: `git diff --check`, `go test ./internal/docsync`, focused `go test ./internal/api`, UI unit suite `69/69`, Full DoD (`make contracts`, `make test`, `make lint`, `make build`) and Playwright rendered smoke from clean launcher to Analysis/Review/Publish with no browser console issues or HTTP >=400 responses. Product PR/merge and `v0.1.4` release metadata still pending.
+- 2026-06-04: Started product polish branch `codex/onboarding-resume-polish`: added local Recent workspaces API/UI, reopen/resume copy and newest active/newest completed run bootstrap tests. During rendered fake walkthrough found and fixed a premature `/api/workspace/bundle` call that produced `428 workspace_not_selected` in browser console after selecting a draft workspace. Validation passed: `git diff --check`, `go test ./internal/docsync`, focused `go test ./internal/api`, UI unit suite `69/69`, Full DoD (`make contracts`, `make test`, `make lint`, `make build`) and Playwright rendered smoke from clean launcher to Analysis/Review/Publish with no browser console issues or HTTP >=400 responses. Product PR #98 merged into `main` at `5337e61`, and `main` CI passed; `v0.1.4` release metadata/tag still pending.
+- 2026-06-04: Started `v0.1.4` release metadata branch after green `main`; scope is changelog/latest-release docs only, with CI-only beta/no trusted `release-fast` wording.
 
 ### Plan ID
 EP-20260602-onboarding-first-startup
