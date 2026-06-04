@@ -79,7 +79,8 @@ After `v0.1.3`, the next patch release should remove GitHub Actions deprecation 
 - [x] Resume newest active run on console bootstrap; otherwise select newest completed run and open `Review` when artifacts exist.
 - [x] Prepare `v0.1.4` release metadata and tag final green `main` after metadata PR/main CI.
 - [x] Merge release workflow follow-up PR #100 so future tag workflows use Node 24-compatible Anchore/Goreleaser actions.
-- [ ] Prepare `v0.1.5` release metadata and tag final green `main` after metadata PR/main CI.
+- [x] Prepare `v0.1.5` release metadata and tag final green `main` after metadata PR/main CI.
+- [ ] After owner review, archive this completed release/product plan as bookkeeping-only work.
 
 ### Non-goals
 - [x] No workspace schema, runtime artifact schema, provider contract, CLI `acp run`, direct `acp serve --workspace` or provider-live release-gate changes.
@@ -89,8 +90,8 @@ After `v0.1.3`, the next patch release should remove GitHub Actions deprecation 
 ### Acceptance criteria
 - [x] CI hygiene PR and main CI are green with no Node 20 / CodeQL v3 deprecation annotations.
 - [x] Release workflow follow-up PR #100 is merged and `main` CI is green after updating Anchore/Goreleaser release actions to Node 24-compatible pinned versions.
-- [ ] `v0.1.5` release workflow succeeds without Node 20 / CodeQL v3 deprecation annotations.
-- [ ] `ACP_VERSION=v0.1.5` and `ACP_VERSION=latest` install smokes resolve version `0.1.5`; `acp serve --runtime fake --dry-run` reports launcher readiness.
+- [x] `v0.1.5` release workflow succeeds without Node 20 / CodeQL v3 deprecation annotations.
+- [x] `ACP_VERSION=v0.1.5` and `ACP_VERSION=latest` install smokes resolve version `0.1.5`; `acp serve --runtime fake --dry-run` reports launcher readiness.
 - [x] Onboarding status exposes local recents; create/open records recents; forget removes a recent entry; missing paths are visible and not openable.
 - [x] UI tests cover recents, reopen existing workspace, missing recent forget, runner-required state and active/completed run bootstrap.
 - [x] Deterministic fake UI walkthrough from clean launcher to Analysis/Review/Publish remains passable.
@@ -102,6 +103,7 @@ After `v0.1.3`, the next patch release should remove GitHub Actions deprecation 
 - 2026-06-04: Started `v0.1.4` release metadata branch after green `main`; scope is changelog/latest-release docs only, with CI-only beta/no trusted `release-fast` wording.
 - 2026-06-04: Published `v0.1.4` as a GitHub prerelease from tag commit `9de4abaf6549510e45b2616ba8742b01c1912b03`; release workflow `26942766883` succeeded, release URL is `https://github.com/GrinRus/ProvenArch/releases/tag/v0.1.4`, and install smoke passed for explicit `ACP_VERSION=v0.1.4` plus `ACP_VERSION=latest`. Fresh trusted-machine `release-fast` was not run, so canonical `RELEASE READY` is not claimed.
 - 2026-06-04: The `v0.1.4` release run still emitted Node 20 deprecation annotations for `anchore/sbom-action/download-syft@v0.20.6` and `goreleaser/goreleaser-action@v6`. Follow-up PR #100 updated them to Node 24-compatible pinned commits for `anchore/sbom-action/download-syft@v0.24.0` and `goreleaser/goreleaser-action@v7.2.2`; PR #100 merged into `main` at `afa3ff8`, and `main` CI passed. `v0.1.5` is the planned tiny public patch to publish a release run with that cleanup.
+- 2026-06-04: Published `v0.1.5` as a GitHub prerelease from tag commit `fb3071e66212942ba2dcc899e3e6c4292ddf9fa4`; release workflow `26946062981` succeeded without Node 20 / CodeQL v3 deprecation strings in release logs. Release URL is `https://github.com/GrinRus/ProvenArch/releases/tag/v0.1.5`; assets include four platform archives, per-archive SBOM JSON files and `checksums.txt`; provenance attestation verified for `acp_darwin_arm64.tar.gz`. Install smoke passed for explicit `ACP_VERSION=v0.1.5` and `ACP_VERSION=latest`, both resolving `acp version 0.1.5` at commit `fb3071e`, and `acp serve --runtime fake --dry-run` reported launcher readiness. Fresh trusted-machine `release-fast` was not run, so canonical `RELEASE READY` is not claimed.
 
 ### Plan ID
 EP-20260602-onboarding-first-startup
