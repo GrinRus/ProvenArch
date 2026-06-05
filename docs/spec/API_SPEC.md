@@ -81,9 +81,71 @@ Query params optional:
 - `warn` — не блокирует первый fake walkthrough, но пользователь может улучшить конфигурацию
 - `fail` — user-fixable blocker
 
+Headless provider readiness reports stable Provider ID separately from executable command.
+Command resolution:
+- `claude-code`: `ACP_CLAUDE_CMD` -> `claude` -> legacy `claude-code`
+- `qwen-code`: `ACP_QWEN_CMD` -> `qwen`
+- `codex-code`: `ACP_CODEX_CMD` -> `codex`
+
+Example fail message:
+```json
+{
+  "id": "runtime_provider",
+  "label": "Runtime provider",
+  "status": "fail",
+  "message": "Provider ID: claude-code; executable not found; checked: claude, claude-code",
+  "suggestion": "Install claude or set ACP_CLAUDE_CMD to the provider command. Legacy command claude-code is also supported."
+}
+```
+
 **400**
 - `invalid_doctor_request`
 - `doctor_failed`
+
+### GET `/api/onboarding/path-suggestions`
+Local-only launcher endpoint for searchable path comboboxes. Endpoint is available before
+workspace selection, never writes to target repos, never clones repos and does not change
+`workspace.yaml`.
+
+Query params:
+- `kind=workspace|repo`
+- `query=<typed path or filter text>`
+
+Workspace suggestions include Recent workspaces, `$HOME/acp-workspaces`, `$HOME`, system temp
+root and safe discovered child directories under allowed launcher roots. Repo suggestions include
+paths already present in the selected/draft `workspace.yaml`, common source roots (`$HOME/src`,
+`$HOME/Projects`, `$HOME/code`), current process cwd when safe, and discovered `.git` directories.
+
+Each item:
+- `path`: absolute local path
+- `label`: display label, usually basename
+- `exists`: whether the path currently exists as a directory
+- `kind`: `workspace`, `git_repo` or `directory`
+- `source`: `recent`, `manifest`, `common`, `cwd`, `query` or `discovered`
+
+**200**
+```json
+{
+  "ok": true,
+  "kind": "repo",
+  "query": "/Users/me/src",
+  "items": [
+    {
+      "path": "/Users/me/src/payments",
+      "label": "payments",
+      "exists": true,
+      "kind": "git_repo",
+      "source": "discovered"
+    }
+  ]
+}
+```
+
+**400**
+- `path_suggestion_kind_invalid`
+- `path_suggestion_query_invalid`
+- `path_suggestion_query_traversal`
+- `path_suggestion_query_root`
 
 ### POST `/api/workspace/validate`
 Проверяет bound workspace:
@@ -1019,7 +1081,7 @@ Native SCM webhook listener/hosted control plane остаются вне MVP; re
 - `serve` startup работает в lenient mode: сервис стартует без блокирующего repo preflight; readiness diagnostics доступны через `POST /api/workspace/validate`.
 - default runtime mode: `fake` (required deterministic CI surface), `headless` — opt-in.
 - effective provider per step: `workspace.yaml.runtime.profile.steps.<step>.provider > CLI/env global provider > claude-code`.
-- provider-specific command envs: `ACP_CLAUDE_CMD`, `ACP_QWEN_CMD`, `ACP_CODEX_CMD`.
+- provider-specific command envs: `ACP_CLAUDE_CMD`, `ACP_QWEN_CMD`, `ACP_CODEX_CMD`; without env override ACP resolves `claude-code` to `claude` then legacy `claude-code`, `qwen-code` to `qwen`, and `codex-code` to `codex`.
 - при `--runtime fake` provider value валидируется как config fallback, live provider command не выполняется, а runtime execution metadata пишет provider `fake`.
 - GitHub/GitLab hooks/manual jobs для required CI/CD должны использовать CLI batch mode с deterministic defaults (`--runtime fake`).
 - API-trigger не должен превращаться в hosted control plane в рамках MVP.

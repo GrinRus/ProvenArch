@@ -1,4 +1,5 @@
 import type { Diagnostic, DoctorResponse, GuidedRepo, OnboardingRecentWorkspace, OnboardingStatusResponse, RepoSourceMode, ValidateResponse } from "../lib/appContracts";
+import { LocalPathCombobox } from "./LocalPathCombobox";
 
 type OnboardingShellProps = {
   busy: boolean;
@@ -96,15 +97,15 @@ export function OnboardingShell({
                 <p className="hint">This is where ACP writes architecture artifacts. Source repos stay read-only inputs.</p>
               </div>
             </div>
-            <div className="field">
-              <label htmlFor="onboardingWorkspacePath">Architecture workspace path</label>
-              <input
-                id="onboardingWorkspacePath"
-                value={workspacePath}
-                placeholder="/Users/me/acp-workspaces/my-system"
-                onChange={(event) => onWorkspacePathChange(event.target.value)}
-              />
-            </div>
+            <LocalPathCombobox
+              id="onboardingWorkspacePath"
+              label="Architecture workspace path"
+              kind="workspace"
+              value={workspacePath}
+              placeholder="/Users/me/acp-workspaces/my-system"
+              testID="onboarding-workspace-path-combobox"
+              onChange={onWorkspacePathChange}
+            />
             <label className="checkbox-row">
               <input type="checkbox" checked={createWorkspace} onChange={(event) => onCreateWorkspaceChange(event.target.checked)} />
               <span>Create path if missing</span>
@@ -116,7 +117,7 @@ export function OnboardingShell({
             <RecentWorkspacesList recentWorkspaces={recentWorkspaces} busy={busy} onOpen={onOpenRecentWorkspace} onForget={onForgetRecentWorkspace} />
           </section>
 
-          <section className="onboarding-card" data-testid="onboarding-sources-step">
+          <section className="onboarding-card onboarding-card-sources" data-testid="onboarding-sources-step">
             <div className="card-heading">
               <span className="step-index">2</span>
               <div>
@@ -148,14 +149,28 @@ export function OnboardingShell({
                       <option value="path">Local folder</option>
                     </select>
                   </div>
-                  <div className="field is-wide">
-                    <label htmlFor={`onboardingRepoSource-${repo.id}`}>{repo.mode === "path" ? "Local checkout path" : "Repository URL"}</label>
-                    <input
+                  {repo.mode === "path" ? (
+                    <LocalPathCombobox
                       id={`onboardingRepoSource-${repo.id}`}
-                      value={repo.mode === "path" ? repo.path : repo.git_url}
-                      onChange={(event) => onRepoChange(repo.id, repo.mode === "path" ? { path: event.target.value } : { git_url: event.target.value })}
+                      label="Local checkout path"
+                      kind="repo"
+                      value={repo.path}
+                      testID={`onboarding-repo-path-combobox-${repo.id}`}
+                      onChange={(value) => onRepoChange(repo.id, { path: value })}
+                      onSelect={(suggestion) => {
+                        const patch: Partial<GuidedRepo> = { path: suggestion.path };
+                        if (!repo.name.trim()) {
+                          patch.name = repoNameFromPath(suggestion.path);
+                        }
+                        onRepoChange(repo.id, patch);
+                      }}
                     />
-                  </div>
+                  ) : (
+                    <div className="field is-wide">
+                      <label htmlFor={`onboardingRepoSource-${repo.id}`}>Repository URL</label>
+                      <input id={`onboardingRepoSource-${repo.id}`} value={repo.git_url} onChange={(event) => onRepoChange(repo.id, { git_url: event.target.value })} />
+                    </div>
+                  )}
                   <div className="field">
                     <label htmlFor={`onboardingRepoRef-${repo.id}`}>ref optional</label>
                     <input id={`onboardingRepoRef-${repo.id}`} value={repo.ref} onChange={(event) => onRepoChange(repo.id, { ref: event.target.value })} />
@@ -211,6 +226,7 @@ export function OnboardingShell({
               </button>
             </div>
             {doctorResult ? <p className={doctorResult.ok ? "status" : "error-text"}>{doctorResult.ok ? "Runner and local readiness passed." : "Readiness has blockers."}</p> : null}
+            {doctorResult ? <OnboardingDoctorChecklist doctorResult={doctorResult} /> : null}
           </section>
 
           <section className="onboarding-card" data-testid="onboarding-ready-step">
@@ -296,6 +312,12 @@ function StatusPill({ label, ready }: { label: string; ready: boolean }) {
   return <span className={ready ? "status-pill is-ready" : "status-pill"}>{label}</span>;
 }
 
+function repoNameFromPath(pathValue: string): string {
+  const normalized = pathValue.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  const parts = normalized.split("/");
+  return parts[parts.length - 1] || "repo";
+}
+
 function RepoDiagnostics({ diagnostics }: { diagnostics: Diagnostic[] }) {
   if (diagnostics.length === 0) {
     return null;
@@ -308,6 +330,21 @@ function RepoDiagnostics({ diagnostics }: { diagnostics: Diagnostic[] }) {
           {diagnostic.suggestion ? <span> Next: {diagnostic.suggestion}</span> : null}
         </p>
       ))}
+    </div>
+  );
+}
+
+function OnboardingDoctorChecklist({ doctorResult }: { doctorResult: DoctorResponse }) {
+  return (
+    <div className="status-block compact" data-testid="onboarding-doctor-result">
+      <ul className="check-list">
+        {doctorResult.checks.map((check) => (
+          <li className={`check ${check.status}`} key={check.id}>
+            <strong>{check.label}:</strong> {check.message}
+            {check.suggestion ? <span> Next: {check.suggestion}</span> : null}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

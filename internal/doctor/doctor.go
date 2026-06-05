@@ -236,31 +236,33 @@ func checkRuntimeProvider(mode string, provider acpruntime.Provider, lookPath fu
 	if mode == acpruntime.RuntimeModeFake {
 		return pass("runtime_provider", "Runtime provider", "fake runtime selected; no headless provider command required")
 	}
-	command := providerCommand(provider)
-	path, err := lookPath(command)
-	if err != nil {
-		return fail("runtime_provider", "Runtime provider", fmt.Sprintf("headless provider %s command %q is not available", provider, command), providerSuggestion(provider))
+	commands := providerCommands(provider)
+	for _, command := range commands {
+		path, err := lookPath(command)
+		if err == nil {
+			return pass("runtime_provider", "Runtime provider", fmt.Sprintf("Provider ID: %s; executable: %s found at %s", provider, command, path))
+		}
 	}
-	return pass("runtime_provider", "Runtime provider", fmt.Sprintf("headless provider %s command found at %s", provider, path))
+	return fail("runtime_provider", "Runtime provider", fmt.Sprintf("Provider ID: %s; executable not found; checked: %s", provider, strings.Join(commands, ", ")), providerSuggestion(provider))
 }
 
-func providerCommand(provider acpruntime.Provider) string {
+func providerCommands(provider acpruntime.Provider) []string {
 	switch provider {
 	case acpruntime.ProviderQwenCode:
 		if value := strings.TrimSpace(os.Getenv("ACP_QWEN_CMD")); value != "" {
-			return value
+			return []string{value}
 		}
-		return "qwen"
+		return []string{"qwen"}
 	case acpruntime.ProviderCodexCode:
 		if value := strings.TrimSpace(os.Getenv("ACP_CODEX_CMD")); value != "" {
-			return value
+			return []string{value}
 		}
-		return "codex"
+		return []string{"codex"}
 	default:
 		if value := strings.TrimSpace(os.Getenv("ACP_CLAUDE_CMD")); value != "" {
-			return value
+			return []string{value}
 		}
-		return "claude-code"
+		return []string{"claude", "claude-code"}
 	}
 }
 
@@ -271,7 +273,7 @@ func providerSuggestion(provider acpruntime.Provider) string {
 	case acpruntime.ProviderCodexCode:
 		return "Install codex or set ACP_CODEX_CMD to the provider command."
 	default:
-		return "Install claude-code or set ACP_CLAUDE_CMD to the provider command."
+		return "Install claude or set ACP_CLAUDE_CMD to the provider command. Legacy command claude-code is also supported."
 	}
 }
 

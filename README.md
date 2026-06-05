@@ -18,7 +18,7 @@ operator CLI / UI -> ACP Go orchestrator -> runtime provider -> staged artifacts
 > **Статус:** MVP beta / pre-v1 foundation. Public API, artifact contracts и UX могут меняться до `v1.0.0`.
 > **Стек реализации:** Go backend/orchestrator + embedded React/TypeScript UI.
 > **Runtime анализа:** deterministic `fake` baseline или headless providers `claude-code`, `qwen-code`, `codex-code`.
-> **Последняя ревизия README:** 2026-06-04.
+> **Последняя ревизия README:** 2026-06-05.
 
 ## Что это
 
@@ -101,7 +101,7 @@ pipeline wiring, validators и publication artifacts без AI provider.
 ```bash
 mkdir -p "$HOME/acp-workspaces"
 
-acp serve --runtime fake
+acp serve
 ```
 
 Откройте [http://127.0.0.1:8080](http://127.0.0.1:8080).
@@ -110,7 +110,7 @@ acp serve --runtime fake
 
 1. `Workspace`: создайте или откройте `arch-workspace`, например `$HOME/acp-workspaces/my-service`. ACP инициализирует fixed layout и git в workspace. Успешно открытые workspaces попадают в локальный список Recent workspaces; missing entries можно забыть без изменения самого workspace.
 2. `Sources`: добавьте один или несколько target repos через GitHub/GitLab URL или local checkout path, optional `ref` и `docs.imports_path`.
-3. `Runner`: выберите runner. Для первого walkthrough используйте `fake`; live providers (`claude-code`, `qwen-code`, `codex-code`) включаются явно.
+3. `Runner`: выберите runner. Для первого walkthrough используйте default `fake`; live providers (`claude-code`, `qwen-code`, `codex-code`) включаются явно.
 4. `Ready`: проверьте summary и откройте Console V2 или сразу запустите первый `init` analysis.
 
 Если вы открываете уже существующий workspace, onboarding загружает repos из `workspace.yaml`.
@@ -181,20 +181,19 @@ Provider ID - это значение для `--runtime-provider`; executable co
 
 | Runtime mode/provider ID | Executable command | Typical use |
 | --- | --- | --- |
-| `--runtime fake` | не требуется | Первый walkthrough и deterministic baseline |
-| `--runtime headless --runtime-provider claude-code` | `claude-code`, либо `ACP_CLAUDE_CMD=claude` | Default live analysis provider |
+| `--runtime fake` или default `acp serve` | не требуется | Первый walkthrough и deterministic baseline |
+| `--runtime headless --runtime-provider claude-code` | `ACP_CLAUDE_CMD`, затем `claude`, затем legacy `claude-code` | Default live analysis provider |
 | `--runtime headless --runtime-provider qwen-code` | `qwen`, либо `ACP_QWEN_CMD=<command>` | Optional live analysis provider |
 | `--runtime headless --runtime-provider codex-code` | `codex`, либо `ACP_CODEX_CMD=<command>` | Optional live analysis provider |
 
 `--runtime headless` - opt-in режим для live анализа; default локальный baseline остается
-`--runtime fake`.
+`fake`, поэтому для чистого UI onboarding достаточно `acp serve`.
 
-Пример live CLI smoke через Claude CLI. Если ваш binary называется `claude-code`, строку
-`export ACP_CLAUDE_CMD=claude` можно не задавать.
+Пример live CLI smoke через Claude CLI. Если ваш binary называется `claude`, env override
+не нужен; если команда называется иначе, задайте `ACP_CLAUDE_CMD`. Explicit
+`ACP_CLAUDE_CMD=claude` остаётся валидным, но для обычной установки больше не требуется.
 
 ```bash
-export ACP_CLAUDE_CMD=claude
-
 acp doctor \
   --workspace "$HOME/acp-workspaces/my-service" \
   --repo-path "$HOME/src/my-service" \
@@ -212,8 +211,6 @@ acp run \
 Тот же workspace можно открыть в UI:
 
 ```bash
-export ACP_CLAUDE_CMD=claude
-
 acp serve \
   --workspace "$HOME/acp-workspaces/my-service" \
   --runtime headless \

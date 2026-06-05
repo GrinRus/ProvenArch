@@ -13,6 +13,22 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/testutil"
 )
 
+func TestQwenCommandNamePrefersEnvOverride(t *testing.T) {
+	t.Setenv("ACP_QWEN_CMD", "/custom/qwen")
+
+	runner := HeadlessRunner{}
+	if got, want := runner.commandName(), "/custom/qwen"; got != want {
+		t.Fatalf("expected env override command %q, got %q", want, got)
+	}
+}
+
+func TestQwenCommandNameDefaultsToQwen(t *testing.T) {
+	runner := HeadlessRunner{}
+	if got, want := runner.commandName(), "qwen"; got != want {
+		t.Fatalf("expected default command %q, got %q", want, got)
+	}
+}
+
 func TestRunClassifiesProviderUnavailableWhenArtifactsAreMissingAfterSuccessfulProcess(t *testing.T) {
 	t.Parallel()
 

@@ -68,6 +68,49 @@ Task selection rules:
 - Each selected slice gets a decision-complete ExecPlan/update before implementation, one focused implementation pass, self-review/fix loops, Full DoD (`make contracts`, `make test`, `make lint`, `make build`), then one commit.
 
 ### Plan ID
+EP-20260605-provider-commands-onboarding-paths
+
+### Context
+Clean UI startup in `v0.1.5` works, but first live-provider use exposed a confusing boundary: ACP provider IDs use stable adapter names (`claude-code`, `qwen-code`, `codex-code`), while local binaries are usually `claude`, `qwen`, and `codex`. `qwen-code` and `codex-code` already default to the expected binary names; `claude-code` still defaults to `claude-code`, so a normal Homebrew Claude install fails readiness until the operator sets `ACP_CLAUDE_CMD`. The onboarding screen also relies on typed paths only and can become hard to scan with long paths or diagnostics.
+
+### Goals (must have)
+- [x] Keep provider IDs unchanged while normalizing executable resolution: `claude-code` resolves `ACP_CLAUDE_CMD -> claude -> claude-code`, `qwen-code` resolves `ACP_QWEN_CMD -> qwen`, and `codex-code` resolves `ACP_CODEX_CMD -> codex`.
+- [x] Add local-only onboarding path suggestions for workspace and local repo paths without writing to target repos or changing workspace schema.
+- [x] Add searchable path comboboxes for workspace and local repo rows while preserving typed path entry and explicit create/open/save actions.
+- [x] Polish onboarding rendering for desktop, narrow desktop and mobile so long paths, missing recents, duplicate repo names and runner command errors stay readable.
+- [x] Sync README/install/API docs with provider ID vs executable wording and clean `acp serve` onboarding guidance.
+- [ ] Owner review/merge/archive after implementation validation.
+
+### Non-goals
+- [x] No provider ID, CLI flag, workspace schema, runtime artifact contract, source repo write-policy or provider-live release gate changes.
+- [x] No native OS/browser directory picker, hosted picker, repo cloning, or source repo mutation in the path suggestion API.
+- [x] No change to direct `acp serve --workspace ...` behavior.
+
+### Approach
+1) Add provider command-resolution helpers/tests so readiness can discover the installed `claude` binary while retaining legacy `claude-code`.
+2) Add `/api/onboarding/path-suggestions?kind=workspace|repo&query=...` with bounded local directory suggestions under safe roots.
+3) Add typed contracts/API client and a reusable `LocalPathCombobox`; wire it into `OnboardingShell` for workspace and `Local folder` source rows.
+4) Adjust onboarding CSS for stable grids, wrapping/ellipsis and mobile one-column behavior.
+5) Update README, `docs/INSTALL.md` and `docs/spec/API_SPEC.md`; validate with focused backend/UI tests and Full DoD.
+
+### Files expected to change
+- `internal/runtime/*`, `internal/api/*`
+- `ui/src/components/*`, `ui/src/lib/*`, `ui/src/App.test.tsx`, `ui/src/styles.css`
+- `README.md`, `docs/INSTALL.md`, `docs/spec/API_SPEC.md`, `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Claude readiness works when only `claude` is on PATH; explicit `ACP_CLAUDE_CMD` still wins.
+- [x] Qwen/Codex command defaults remain `qwen` and `codex`.
+- [x] Workspace and local repo path dropdowns render suggestions, fill fields and keep manual typing intact.
+- [x] Path suggestion API rejects invalid kind, NUL/traversal/root escape and unsafe symlink escape.
+- [x] Onboarding has no horizontal overflow at `1440x960`, `1024x768`, `390x1200`.
+- [x] Direct-mode server startup remains unchanged.
+
+### Progress log
+- 2026-06-05: Started implementation slice after owner reported normal `claude` install was not discovered by `claude-code` readiness and requested onboarding path dropdowns/rendering polish.
+- 2026-06-05: Implemented provider command resolution, `/api/onboarding/path-suggestions`, workspace/repo path comboboxes, onboarding rendering polish and provider/executable readiness copy; focused backend/UI/doc sync tests passed before Full DoD.
+
+### Plan ID
 EP-20260527-live-e2e-ui-ux-operator-flow
 
 ### Context

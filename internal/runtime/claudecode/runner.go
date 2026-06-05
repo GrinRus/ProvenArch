@@ -3,6 +3,7 @@ package claudecode
 import (
 	"context"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -27,6 +28,9 @@ func (r HeadlessRunner) commandName() string {
 		command = strings.TrimSpace(os.Getenv("ACP_CLAUDE_CMD"))
 	}
 	if command == "" {
+		if _, err := exec.LookPath("claude"); err == nil {
+			return "claude"
+		}
 		command = "claude-code"
 	}
 	return command

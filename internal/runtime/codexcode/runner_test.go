@@ -14,6 +14,22 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/testutil"
 )
 
+func TestCodexCommandNamePrefersEnvOverride(t *testing.T) {
+	t.Setenv("ACP_CODEX_CMD", "/custom/codex")
+
+	runner := HeadlessRunner{}
+	if got, want := runner.commandName(), "/custom/codex"; got != want {
+		t.Fatalf("expected env override command %q, got %q", want, got)
+	}
+}
+
+func TestCodexCommandNameDefaultsToCodex(t *testing.T) {
+	runner := HeadlessRunner{}
+	if got, want := runner.commandName(), "codex"; got != want {
+		t.Fatalf("expected default command %q, got %q", want, got)
+	}
+}
+
 func TestHeadlessRunnerPreflightFailsWhenCommandMissing(t *testing.T) {
 	t.Parallel()
 

@@ -1,5 +1,5 @@
 import { fetchJSON } from "./api";
-import type { OnboardingStatusResponse } from "./appContracts";
+import type { OnboardingPathSuggestionsResponse, OnboardingStatusResponse } from "./appContracts";
 
 export async function loadOnboardingStatus(): Promise<OnboardingStatusResponse> {
   return fetchJSON<OnboardingStatusResponse>("/api/onboarding/status");
@@ -27,4 +27,9 @@ export async function forgetOnboardingRecentWorkspace(path: string): Promise<Onb
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path }),
   });
+}
+
+export async function loadOnboardingPathSuggestions(kind: "workspace" | "repo", query: string): Promise<OnboardingPathSuggestionsResponse> {
+  const params = new URLSearchParams({ kind, query });
+  return fetchJSON<OnboardingPathSuggestionsResponse>(`/api/onboarding/path-suggestions?${params.toString()}`);
 }

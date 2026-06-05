@@ -22,7 +22,7 @@
    - Экспортирует API под `/api/*`
    - `serve` без `--workspace` поднимает loopback launcher/onboarding UI: workspace выбирается или создаётся в UI, затем server session attaches ровно один active workspace без restart процесса
    - `serve --workspace <path>` сохраняет direct-mode single-workspace-per-process local API+UI service для scripts, CI, live E2E и опытных пользователей
-   - launcher API поддерживает `/api/onboarding/status`, `/api/onboarding/workspace`, `/api/onboarding/runtime` и локальное forget действие для Recent workspaces; workspace-bound endpoints до выбора workspace возвращают `428 workspace_not_selected`
+   - launcher API поддерживает `/api/onboarding/status`, `/api/onboarding/workspace`, `/api/onboarding/runtime`, `/api/onboarding/path-suggestions` и локальное forget действие для Recent workspaces; workspace-bound endpoints до выбора workspace возвращают `428 workspace_not_selected`
    - Recent workspaces хранятся как local-only user config metadata вне `workspace.yaml` и не являются переносимым workspace contract
    - `serve --auto-init` bootstrap-ит workspace manifest/layout при отсутствии `workspace.yaml`
    - bootstrap (`init-workspace`/`serve --auto-init`) автоматически делает `git init` для workspace root при отсутствии `.git`
@@ -210,7 +210,7 @@
    - live provider approve-loop включается только если provider даёт structured permission events; без stable protocol `managed` fail-fast без PTY/expect text parsing
    - headless provider scope включает `arch-workspace` и resolved repo directories для текущих `repo_scope/repo_scopes`, чтобы provider видел source evidence из реальных checkout-ов
    - command overrides:
-     - `ACP_CLAUDE_CMD` (default `claude-code`)
+     - `ACP_CLAUDE_CMD` (default resolution `claude`, then legacy `claude-code`)
      - `ACP_QWEN_CMD` (default `qwen`)
      - `ACP_CODEX_CMD` (default `codex`)
    - live batch preflight records selected-provider readiness before deep matrix execution; command/probe/auth/quota failures, codex CLI compatibility blockers (for example `gpt-5.5` on an old Codex CLI) and selected-provider artifact smoke failure are operational blockers, not product verdicts; provider `model`/`modelUsage` telemetry is diagnostic text and does not block readiness
