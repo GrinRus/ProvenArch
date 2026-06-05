@@ -1,11 +1,45 @@
 package claudecode
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
+
+func TestClaudeCommandNamePrefersEnvOverride(t *testing.T) {
+	t.Setenv("ACP_CLAUDE_CMD", "/custom/claude")
+
+	runner := HeadlessRunner{}
+	if got, want := runner.commandName(), "/custom/claude"; got != want {
+		t.Fatalf("expected env override command %q, got %q", want, got)
+	}
+}
+
+func TestClaudeCommandNamePrefersClaudeBinaryBeforeLegacyClaudeCode(t *testing.T) {
+	binDir := t.TempDir()
+	writeExecutable(t, filepath.Join(binDir, "claude"))
+	writeExecutable(t, filepath.Join(binDir, "claude-code"))
+	t.Setenv("PATH", binDir)
+
+	runner := HeadlessRunner{}
+	if got, want := runner.commandName(), "claude"; got != want {
+		t.Fatalf("expected default command %q, got %q", want, got)
+	}
+}
+
+func TestClaudeCommandNameFallsBackToLegacyClaudeCode(t *testing.T) {
+	binDir := t.TempDir()
+	writeExecutable(t, filepath.Join(binDir, "claude-code"))
+	t.Setenv("PATH", binDir)
+
+	runner := HeadlessRunner{}
+	if got, want := runner.commandName(), "claude-code"; got != want {
+		t.Fatalf("expected legacy fallback command %q, got %q", want, got)
+	}
+}
 
 func TestClaudeAdapterClassifiesSilentRetryExhaustionAsUnavailable(t *testing.T) {
 	t.Parallel()
@@ -49,6 +83,13 @@ func TestClaudeAdapterClassifiesSilentRetryExhaustionAsUnavailable(t *testing.T)
 	policy = (claudeAdapter{}).RecoveryPolicy(acpruntime.Task{StepID: "init.step2.asis_docs"})
 	if policy.RetryZeroOutputPreArtifactStallOnce {
 		t.Fatalf("claude as-is zero-output pre-artifact fail-fast behavior must remain unchanged, got %+v", policy)
+	}
+}
+
+func writeExecutable(t *testing.T, path string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte("#!/usr/bin/env bash\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write executable %s: %v", path, err)
 	}
 }
 

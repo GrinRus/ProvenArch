@@ -309,6 +309,21 @@ export type OnboardingRecentWorkspace = {
   exists: boolean;
 };
 
+export type OnboardingPathSuggestion = {
+  path: string;
+  label: string;
+  exists: boolean;
+  kind: string;
+  source: string;
+};
+
+export type OnboardingPathSuggestionsResponse = {
+  ok: boolean;
+  kind: "workspace" | "repo";
+  query: string;
+  items: OnboardingPathSuggestion[];
+};
+
 export type OnboardingStatusResponse = {
   ok: boolean;
   launcher_mode: boolean;

@@ -55,7 +55,7 @@ Epic matrix:
 Ниже — ожидаемая “история” использования MVP от нуля до результата:
 
 1) **Подготовка workspace**
-- пользователь поднимает сервис одной командой `acp serve --runtime fake`;
+- пользователь поднимает сервис одной командой `acp serve`; default runtime остаётся `fake`;
 - UI открывает onboarding: выбирает или создаёт `arch-workspace`, либо открывает Recent workspace; ACP готовит fixed layout и `git init` для workspace root;
 - в шаге `Sources` пользователь добавляет один или несколько target repos через local checkout path или Git URL; sources сохраняются в существующий `workspace.yaml.repos[]`;
 - складывает выгрузки docs (например из Confluence) в `docs.imports_path` (default `docs/imports/`);
@@ -456,7 +456,7 @@ Wizard из блоков-шаблонов:
 
 ### 10.1. Ручной режим MVP
 В MVP обновления инициируются вручную:
-- самый короткий старт: `acp serve --runtime fake`, затем onboarding UI выбирает workspace, target repos и runner
+- самый короткий старт: `acp serve`, затем onboarding UI выбирает workspace, target repos и runner; default runtime остаётся `fake`
 - direct compatibility старт: `acp serve --workspace ... --auto-init ((--repo-name ... (--repo-path ... | --repo-git-url ...) [--repo-ref ...]) | --repos-file ...) [--docs-imports-path ...] --runtime fake`
 - первый bootstrap workspace выполняется через `acp init-workspace --workspace ... ((--repo-name ... (--repo-path ... | --repo-git-url ...) [--repo-ref ...]) | --repos-file ...)`
 - первый materialization запуск: `acp run --workspace ... --pipeline init --runtime fake --non-interactive`

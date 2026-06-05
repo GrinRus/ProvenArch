@@ -26,6 +26,8 @@ type FetchMockState = {
   qaRunResponses?: Record<string, MockJSON>;
   onboardingStatus?: MockJSON;
   onboardingWorkspaceSelectionStatus?: MockJSON;
+  pathSuggestions?: MockJSON[];
+  doctorResponse?: MockJSON;
   systemInfo?: MockJSON;
 };
 
@@ -303,6 +305,28 @@ function createFetchMock(state: FetchMockState = {}) {
       return jsonResponse(onboardingStatus);
     }
 
+    if (method === "GET" && url.startsWith("/api/onboarding/path-suggestions")) {
+      const parsed = new URL(url, "http://localhost");
+      const kind = parsed.searchParams.get("kind") ?? "workspace";
+      const query = parsed.searchParams.get("query") ?? "";
+      return jsonResponse({
+        ok: true,
+        kind,
+        query,
+        items:
+          state.pathSuggestions ??
+          [
+            {
+              path: kind === "repo" ? "/tmp/my-service" : "/tmp/onboarding-workspace",
+              label: kind === "repo" ? "my-service" : "onboarding-workspace",
+              exists: true,
+              kind: kind === "repo" ? "git_repo" : "workspace",
+              source: "query",
+            },
+          ],
+      });
+    }
+
     if (method === "POST" && url === "/api/onboarding/workspace") {
       const payload = JSON.parse(String(init?.body ?? "{}")) as { path?: string; create?: boolean };
       onboardingStatus =
@@ -454,16 +478,18 @@ function createFetchMock(state: FetchMockState = {}) {
     }
 
     if (method === "GET" && url.startsWith("/api/system/doctor")) {
-      return jsonResponse({
-        ok: true,
-        summary: "ready",
-        checks: [
-          { id: "git", label: "Git", status: "pass", message: "git found" },
-          { id: "workspace", label: "Workspace", status: "pass", message: "workspace is writable" },
-          { id: "embedded_ui", label: "Embedded UI", status: "pass", message: "embedded UI assets are present" },
-          { id: "runtime_provider", label: "Runtime provider", status: "pass", message: "fake runtime selected" },
-        ],
-      });
+      return jsonResponse(
+        state.doctorResponse ?? {
+          ok: true,
+          summary: "ready",
+          checks: [
+            { id: "git", label: "Git", status: "pass", message: "git found" },
+            { id: "workspace", label: "Workspace", status: "pass", message: "workspace is writable" },
+            { id: "embedded_ui", label: "Embedded UI", status: "pass", message: "embedded UI assets are present" },
+            { id: "runtime_provider", label: "Runtime provider", status: "pass", message: "fake runtime selected" },
+          ],
+        },
+      );
     }
 
     if (method === "GET" && url.startsWith("/api/artifacts?path=")) {
@@ -785,6 +811,113 @@ describe("App", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/onboarding/workspace", expect.objectContaining({ method: "POST" }));
     expect(fetchMock).toHaveBeenCalledWith("/api/workspace/manifest", expect.objectContaining({ method: "PUT" }));
     expect(fetchMock).toHaveBeenCalledWith("/api/onboarding/runtime", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("fills onboarding workspace and local repo paths from suggestions", async () => {
+    const fetchMock = createFetchMock({
+      onboardingStatus: {
+        ok: true,
+        launcher_mode: true,
+        workspace_selected: false,
+        workspace_ready: false,
+        workspace: "",
+        manifest_present: false,
+        runtime: {
+          selected: false,
+          runtime: "fake",
+          runtime_provider: "claude-code",
+          provider_source: "default",
+        },
+        can_enter_console: false,
+      },
+      pathSuggestions: [
+        {
+          path: "/tmp/suggested-workspace",
+          label: "suggested-workspace",
+          exists: true,
+          kind: "workspace",
+          source: "query",
+        },
+        {
+          path: "/tmp/my-service",
+          label: "my-service",
+          exists: true,
+          kind: "git_repo",
+          source: "query",
+        },
+      ],
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    const workspaceInput = await screen.findByLabelText("Architecture workspace path");
+    fireEvent.focus(workspaceInput);
+    fireEvent.click(await screen.findByRole("option", { name: /suggested-workspace/i }));
+    expect(workspaceInput).toHaveValue("/tmp/suggested-workspace");
+
+    fireEvent.click(screen.getByTestId("onboarding-workspace-save"));
+    await screen.findByText("Selected: /tmp/suggested-workspace");
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Source type"), { target: { value: "path" } });
+    const repoPathInput = await screen.findByLabelText("Local checkout path");
+    fireEvent.focus(repoPathInput);
+    fireEvent.click(await screen.findByRole("option", { name: /my-service/i }));
+
+    expect(repoPathInput).toHaveValue("/tmp/my-service");
+    expect(screen.getByLabelText("Name")).toHaveValue("my-service");
+  });
+
+  it("shows provider ID and executable guidance for missing onboarding runner commands", async () => {
+    const fetchMock = createFetchMock({
+      onboardingStatus: {
+        ok: true,
+        launcher_mode: true,
+        workspace_selected: false,
+        workspace_ready: false,
+        workspace: "",
+        manifest_present: false,
+        runtime: {
+          selected: false,
+          runtime: "fake",
+          runtime_provider: "claude-code",
+          provider_source: "default",
+        },
+        can_enter_console: false,
+      },
+      doctorResponse: {
+        ok: false,
+        summary: "needs attention",
+        checks: [
+          { id: "git", label: "Git", status: "pass", message: "git found" },
+          {
+            id: "runtime_provider",
+            label: "Runtime provider",
+            status: "fail",
+            message: "Provider ID: claude-code; executable not found; checked: claude, claude-code",
+            suggestion: "Install claude or set ACP_CLAUDE_CMD to the provider command.",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.change(await screen.findByLabelText("Architecture workspace path"), {
+      target: { value: "/tmp/onboarding-workspace" },
+    });
+    fireEvent.click(screen.getByTestId("onboarding-workspace-save"));
+    await screen.findByText("Selected: /tmp/onboarding-workspace");
+
+    fireEvent.change(screen.getByLabelText("Runtime"), { target: { value: "headless" } });
+    fireEvent.click(screen.getByText("Check readiness"));
+
+    const doctorPanel = await screen.findByTestId("onboarding-doctor-result");
+    expect(doctorPanel).toHaveTextContent("Provider ID: claude-code");
+    expect(doctorPanel).toHaveTextContent("checked: claude, claude-code");
+    expect(doctorPanel).toHaveTextContent("ACP_CLAUDE_CMD");
   });
 
   it("reopens an existing workspace and enters console after validation without rewriting sources", async () => {

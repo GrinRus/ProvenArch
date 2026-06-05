@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -268,6 +269,127 @@ func TestNormalizeOnboardingWorkspacePath(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestOnboardingWorkspacePathSuggestionsBeforeWorkspaceSelection(t *testing.T) {
+	t.Parallel()
+
+	server := NewLauncherServer(testServerRuntimeConfig(), testLauncherServiceFactory())
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	query := filepath.Join(os.TempDir(), "acp-suggestion-workspace")
+	response, err := http.Get(httpServer.URL + "/api/onboarding/path-suggestions?kind=workspace&query=" + url.QueryEscape(query))
+	if err != nil {
+		t.Fatalf("GET workspace suggestions: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected workspace suggestions 200, got %d", response.StatusCode)
+	}
+
+	var payload struct {
+		OK    bool                       `json:"ok"`
+		Kind  string                     `json:"kind"`
+		Items []onboardingPathSuggestion `json:"items"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode workspace suggestions: %v", err)
+	}
+	if !payload.OK || payload.Kind != "workspace" {
+		t.Fatalf("unexpected workspace suggestions payload: %+v", payload)
+	}
+	if !containsPathSuggestion(payload.Items, filepath.Clean(query), "workspace") {
+		t.Fatalf("expected query workspace suggestion %q in %s", query, pathSuggestionDebugString(payload.Items))
+	}
+}
+
+func TestOnboardingRepoPathSuggestionsClassifyGitDirectories(t *testing.T) {
+	t.Parallel()
+
+	repoPath := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(filepath.Join(repoPath, ".git"), 0o755); err != nil {
+		t.Fatalf("create repo-like directory: %v", err)
+	}
+	server := NewLauncherServer(testServerRuntimeConfig(), testLauncherServiceFactory())
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Get(httpServer.URL + "/api/onboarding/path-suggestions?kind=repo&query=" + url.QueryEscape(repoPath))
+	if err != nil {
+		t.Fatalf("GET repo suggestions: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected repo suggestions 200, got %d", response.StatusCode)
+	}
+	var payload struct {
+		Items []onboardingPathSuggestion `json:"items"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode repo suggestions: %v", err)
+	}
+	if !containsPathSuggestion(payload.Items, filepath.Clean(repoPath), "git_repo") {
+		t.Fatalf("expected git_repo suggestion %q in %s", repoPath, pathSuggestionDebugString(payload.Items))
+	}
+}
+
+func TestOnboardingPathSuggestionsRejectUnsafeInputs(t *testing.T) {
+	t.Parallel()
+
+	server := NewLauncherServer(testServerRuntimeConfig(), testLauncherServiceFactory())
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	cases := []string{
+		"/api/onboarding/path-suggestions?kind=bad&query=" + url.QueryEscape(filepath.Join(os.TempDir(), "acp")),
+		"/api/onboarding/path-suggestions?kind=repo&query=" + url.QueryEscape(filepath.Clean(os.TempDir())+string(filepath.Separator)+".."+string(filepath.Separator)+"escape"),
+		"/api/onboarding/path-suggestions?kind=repo&query=" + url.QueryEscape(string(filepath.Separator)),
+	}
+	for _, pathValue := range cases {
+		response, err := http.Get(httpServer.URL + pathValue)
+		if err != nil {
+			t.Fatalf("GET unsafe suggestion case %q: %v", pathValue, err)
+		}
+		if response.StatusCode != http.StatusBadRequest {
+			response.Body.Close()
+			t.Fatalf("expected 400 for %q, got %d", pathValue, response.StatusCode)
+		}
+		response.Body.Close()
+	}
+}
+
+func TestOnboardingRepoPathSuggestionsRejectSymlinkEscape(t *testing.T) {
+	t.Parallel()
+
+	linkPath := filepath.Join(os.TempDir(), "acp-symlink-escape-"+strings.NewReplacer("/", "-", " ", "-").Replace(t.Name()))
+	_ = os.Remove(linkPath)
+	if err := os.Symlink(string(filepath.Separator), linkPath); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Remove(linkPath)
+	})
+	if _, ok := normalizeRepoSuggestionPath(linkPath); ok {
+		t.Fatalf("expected symlink escape %q to be rejected", linkPath)
+	}
+}
+
+func containsPathSuggestion(items []onboardingPathSuggestion, pathValue string, kind string) bool {
+	for _, item := range items {
+		if filepath.Clean(item.Path) == filepath.Clean(pathValue) && item.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func pathSuggestionDebugString(items []onboardingPathSuggestion) string {
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		parts = append(parts, fmt.Sprintf("%s:%s:%s", item.Source, item.Kind, item.Path))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func TestOnboardingRecentWorkspacesRecordListAndForget(t *testing.T) {

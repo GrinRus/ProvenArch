@@ -38,7 +38,7 @@ git ls-remote --heads https://github.com/org/private-repo.git
 
 ```bash
 mkdir -p "$HOME/acp-workspaces"
-acp serve --runtime fake
+acp serve
 ```
 
 Workspace является git-репозиторием с generated architecture artifacts. ACP не пишет в анализируемый user repo.
@@ -80,14 +80,22 @@ make build
 ## Headless provider command not found
 
 Для fake runtime provider command не нужен.
-Для live анализа установите provider или задайте override. В UI-first режиме runner выбирается в onboarding; direct-mode можно запускать сразу с workspace:
+Для live анализа установите provider или задайте override. В UI-first режиме runner выбирается в onboarding; direct-mode можно запускать сразу с workspace.
+
+Для `claude-code` ACP ищет `ACP_CLAUDE_CMD`, затем обычный executable `claude`, затем legacy `claude-code`. Если `which claude` проходит, override обычно не нужен.
 
 ```bash
-ACP_CLAUDE_CMD=claude acp serve --runtime headless --runtime-provider claude-code
+acp serve --runtime headless --runtime-provider claude-code
 
-ACP_CLAUDE_CMD=claude acp serve --workspace "$HOME/acp-workspaces/my-service" --runtime headless --runtime-provider claude-code
+acp serve --workspace "$HOME/acp-workspaces/my-service" --runtime headless --runtime-provider claude-code
 ACP_QWEN_CMD=qwen acp serve --workspace "$HOME/acp-workspaces/my-service" --runtime headless --runtime-provider qwen-code
 ACP_CODEX_CMD=codex acp serve --workspace "$HOME/acp-workspaces/my-service" --runtime headless --runtime-provider codex-code
+```
+
+Если provider binary называется иначе:
+
+```bash
+ACP_CLAUDE_CMD=/path/to/claude acp serve --runtime headless --runtime-provider claude-code
 ```
 
 ## UI показывает validation errors

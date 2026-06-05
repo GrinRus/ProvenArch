@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
@@ -63,6 +64,69 @@ func TestRunHeadlessMissingProviderFails(t *testing.T) {
 	check := findCheck(t, report, "runtime_provider")
 	if check.Status != StatusFail {
 		t.Fatalf("expected runtime provider failure, got %+v", check)
+	}
+}
+
+func TestRunHeadlessClaudeReportsProviderIDAndExecutable(t *testing.T) {
+	report, err := Run(context.Background(), Options{
+		WorkspacePath:       t.TempDir(),
+		RuntimeMode:         acpruntime.RuntimeModeHeadless,
+		RuntimeProvider:     string(acpruntime.ProviderClaudeCode),
+		EmbeddedUIAvailable: true,
+		LookPath: func(name string) (string, error) {
+			switch name {
+			case "git":
+				return "/usr/bin/git", nil
+			case "claude":
+				return "/opt/homebrew/bin/claude", nil
+			default:
+				return "", errors.New("missing")
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("doctor run: %v", err)
+	}
+	if !report.OK {
+		t.Fatalf("expected report OK, got %+v", report)
+	}
+	check := findCheck(t, report, "runtime_provider")
+	if check.Status != StatusPass {
+		t.Fatalf("expected runtime provider pass, got %+v", check)
+	}
+	if !strings.Contains(check.Message, "Provider ID: claude-code") || !strings.Contains(check.Message, "executable: claude") {
+		t.Fatalf("expected provider ID and executable in message, got %q", check.Message)
+	}
+}
+
+func TestRunHeadlessClaudeMissingProviderListsCandidates(t *testing.T) {
+	report, err := Run(context.Background(), Options{
+		WorkspacePath:       t.TempDir(),
+		RuntimeMode:         acpruntime.RuntimeModeHeadless,
+		RuntimeProvider:     string(acpruntime.ProviderClaudeCode),
+		EmbeddedUIAvailable: true,
+		LookPath: func(name string) (string, error) {
+			if name == "git" {
+				return "/usr/bin/git", nil
+			}
+			return "", errors.New("missing")
+		},
+	})
+	if err != nil {
+		t.Fatalf("doctor run: %v", err)
+	}
+	if report.OK {
+		t.Fatalf("expected report to fail")
+	}
+	check := findCheck(t, report, "runtime_provider")
+	if check.Status != StatusFail {
+		t.Fatalf("expected runtime provider failure, got %+v", check)
+	}
+	if !strings.Contains(check.Message, "checked: claude, claude-code") {
+		t.Fatalf("expected candidate commands in message, got %q", check.Message)
+	}
+	if !strings.Contains(check.Suggestion, "ACP_CLAUDE_CMD") || !strings.Contains(check.Suggestion, "claude") {
+		t.Fatalf("expected Claude override suggestion, got %q", check.Suggestion)
 	}
 }
 

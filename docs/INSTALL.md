@@ -55,7 +55,7 @@ ACP_VERSION=v0.1.5 INSTALL_DIR=/usr/local/bin sh install.sh
 
 ```bash
 mkdir -p "$HOME/acp-workspaces"
-acp serve --runtime fake
+acp serve
 ```
 
 Откройте [http://127.0.0.1:8080](http://127.0.0.1:8080).
@@ -63,7 +63,7 @@ acp serve --runtime fake
 
 1. `Workspace`: выберите или создайте architecture workspace, например `$HOME/acp-workspaces/my-service`. Успешно открытые workspaces сохраняются в локальный список Recent workspaces; missing entries можно удалить кнопкой `Forget`.
 2. `Sources`: добавьте один или несколько target repositories через Git URL или local checkout path.
-3. `Runner`: выберите `fake` для первого deterministic walkthrough.
+3. `Runner`: выберите default `fake` для первого deterministic walkthrough.
 4. `Ready`: откройте Console V2 или запустите первый analysis.
 
 При reopening существующего workspace UI загружает repos из `workspace.yaml`. Если manifest валиден,
@@ -88,23 +88,21 @@ acp serve \
 
 ## Реальный headless runtime
 
-Для первого walkthrough используйте `--runtime fake`.
+Для первого walkthrough достаточно `acp serve`: default runtime остаётся `fake`.
 Для live анализа установите один из provider commands и перезапустите сервис.
 Provider ID передается через `--runtime-provider`, а executable command можно переопределить
 через env var:
 
 | Provider ID | Default/override command |
 | --- | --- |
-| `claude-code` | `claude-code`, либо `ACP_CLAUDE_CMD=claude` |
+| `claude-code` | `ACP_CLAUDE_CMD`, затем `claude`, затем legacy `claude-code` |
 | `qwen-code` | `qwen`, либо `ACP_QWEN_CMD=<command>` |
 | `codex-code` | `codex`, либо `ACP_CODEX_CMD=<command>` |
 
-Перед live-анализом проверьте provider. Для Claude CLI чаще всего достаточно явного
-`ACP_CLAUDE_CMD=claude`:
+Перед live-анализом проверьте provider. Для Claude CLI с binary `claude` env override не нужен;
+если команда называется иначе, задайте `ACP_CLAUDE_CMD`:
 
 ```bash
-export ACP_CLAUDE_CMD=claude
-
 acp doctor \
   --workspace "$HOME/acp-workspaces/my-service" \
   --repo-git-url https://github.com/org/my-service.git \
