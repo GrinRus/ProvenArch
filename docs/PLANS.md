@@ -60,7 +60,7 @@ Tracker reconciliation from 2026-05-07 consolidated historical active plans into
 
 ### Continuous Backlog Queue Policy
 
-Current engineering queue has no active engineering slice after the `v0.1.5` post-release cleanup. The next implementation workstream must be selected by the owner from the reference backlog or a new ExecPlan; trusted live validation and release-fast remain manual owner-triggered gates, not default backlog work.
+Current engineering queue has no active engineering slice after PR #104; the remaining `v0.1.6` work is release metadata/tagging bookkeeping. The next implementation workstream must be selected by the owner from the reference backlog or a new ExecPlan; trusted live validation and release-fast remain manual owner-triggered gates, not default backlog work.
 
 Task selection rules:
 - Completed plans whose only remaining item is owner review, merge/archive bookkeeping, or historical evidence retention are not next engineering work.
@@ -79,7 +79,8 @@ Clean UI startup in `v0.1.5` works, but first live-provider use exposed a confus
 - [x] Add searchable path comboboxes for workspace and local repo rows while preserving typed path entry and explicit create/open/save actions.
 - [x] Polish onboarding rendering for desktop, narrow desktop and mobile so long paths, missing recents, duplicate repo names and runner command errors stay readable.
 - [x] Sync README/install/API docs with provider ID vs executable wording and clean `acp serve` onboarding guidance.
-- [ ] Owner review/merge/archive after implementation validation.
+- [x] Owner review/merge complete; archive remains post-release housekeeping after `v0.1.6`.
+- [ ] Publish `v0.1.6` release metadata/tag, verify install smoke, then archive this completed plan during post-release housekeeping.
 
 ### Non-goals
 - [x] No provider ID, CLI flag, workspace schema, runtime artifact contract, source repo write-policy or provider-live release gate changes.
@@ -109,6 +110,8 @@ Clean UI startup in `v0.1.5` works, but first live-provider use exposed a confus
 ### Progress log
 - 2026-06-05: Started implementation slice after owner reported normal `claude` install was not discovered by `claude-code` readiness and requested onboarding path dropdowns/rendering polish.
 - 2026-06-05: Implemented provider command resolution, `/api/onboarding/path-suggestions`, workspace/repo path comboboxes, onboarding rendering polish and provider/executable readiness copy; focused backend/UI/doc sync tests passed before Full DoD.
+- 2026-06-05: PR #104 merged into `main` at `47a691e` after green PR checks and green post-merge `main` CI; remote feature branch was deleted.
+- 2026-06-06: Started `v0.1.6` CI-only beta release metadata branch to publish PR #104 changes in downloadable release artifacts. Fresh trusted `release-fast` remains skipped, so canonical `RELEASE READY` is not claimed.
 
 ### Plan ID
 EP-20260527-live-e2e-ui-ux-operator-flow
