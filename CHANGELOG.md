@@ -2,6 +2,28 @@
 
 All notable user-facing changes are tracked here. ProvenArch uses SemVer-style release tags, with `v0.x` treated as beta/pre-release foundation.
 
+## v0.1.6 - 2026-06-06
+
+CI-only beta patch release for provider command resolution and onboarding path picker polish after `v0.1.5`.
+
+Highlights:
+- Normalized the boundary between stable ACP provider IDs and local executable names: `claude-code` now resolves `ACP_CLAUDE_CMD`, then `claude`, then legacy `claude-code`, while `qwen-code` and `codex-code` keep their `qwen`/`codex` defaults with env override support.
+- Improved readiness/onboarding copy so the UI separates provider ID from executable command and reports actionable override guidance when a command is missing.
+- Added local-only onboarding path suggestions and searchable comboboxes for architecture workspace paths and local target repository paths.
+- Polished onboarding rendering for long paths, diagnostics, missing recents, duplicate repo names and narrow/mobile viewports.
+- Updated install, troubleshooting, API and stakeholder documentation so clean UI startup is documented as `acp serve` with default `fake` runtime.
+
+Verification notes:
+- PR #104 merged after green PR checks and green `main` CI for merge commit `47a691e`.
+- Local validation for the product patch passed before merge: `git diff --check`, `make contracts`, `make test`, `make lint`, `make build`, `./bin/acp serve --dry-run` and rendered onboarding smoke.
+- Release metadata validation passed before tagging: `git diff --check`, docs sync, release distribution/install tests, `make contracts`, `make test`, `make lint` and `make build`.
+- Fresh trusted-machine `release-fast` was not run for this patch. This release does not claim canonical `RELEASE READY` status without a fresh `reports/release_verdict_<matrix-id>.json`.
+
+Known limitations:
+- `v0.1.6` remains a beta/pre-v1 release. Public behavior and artifact contracts can still evolve before `v1.0.0`.
+- Hosted/multi-tenant mode and security/compliance enforcement remain out of scope.
+- Canonical release readiness still requires trusted-machine release gate evidence from `reports/release_verdict_<matrix-id>.json` verified by `scripts/verify-release-verdict.py`.
+
 ## v0.1.5 - 2026-06-04
 
 CI-only beta patch release for release workflow cleanup after `v0.1.4`.
