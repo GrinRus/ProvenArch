@@ -56,6 +56,23 @@ func TestValidateCollectManifestRejectsProviderToolDocumentPath(t *testing.T) {
 	}
 }
 
+func TestValidateCollectManifestRejectsBootstrapOnlyDocument(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	manifest := bootstrapCollectManifest()
+	writeManifest(t, writeRoot, manifest)
+	writeDoc(t, writeRoot, "payments-overview.md", "# Payments Overview\n\n<!-- "+CollectBootstrapReplaceMarker+" -->\n\n## Observations\n- `src/payment_handler.go` defines the payment service entrypoint.\n")
+
+	err := ValidateCollectManifestInRoot(writeRoot)
+	if err == nil {
+		t.Fatalf("expected bootstrap-only collect document to fail validation")
+	}
+	if !strings.Contains(err.Error(), "bootstrap-only collect document") {
+		t.Fatalf("expected bootstrap-only document validation error, got %v", err)
+	}
+}
+
 func TestValidateCollectManifestRejectsForbiddenSemanticAliasesBySchema(t *testing.T) {
 	t.Parallel()
 

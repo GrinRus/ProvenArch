@@ -244,7 +244,7 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			lines = append(lines,
 				fmt.Sprintf(`- Root-file collect shard detected: path_scopes contains root-level files only: %s.`, strings.Join(rootFileScopes, ", ")),
 				`- For this root-file shard, read only the listed root files first; do not recursively sweep top-level directories or unrelated source trees.`,
-				`- Produce one concise root overview document in write_root, then write shard-pack-manifest.json for that document and exit successfully.`,
+				`- Produce one concise evidence-backed root overview document in write_root, remove any bootstrap marker, then write an enriched shard-pack-manifest.json for that document before exiting successfully.`,
 			)
 		}
 		lines = append(lines,
