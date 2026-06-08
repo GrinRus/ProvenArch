@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GrinRus/ProvenArch/internal/artifactquality"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
 
@@ -163,6 +164,35 @@ func TestRuntimeArtifactSnapshotRequiresFullQAContextValidation(t *testing.T) {
 	}
 }
 
+func TestRuntimeArtifactSnapshotRejectsBootstrapOnlyCollectDocument(t *testing.T) {
+	root := t.TempDir()
+	writeRoot := filepath.Join(root, "reports", "taskruns", "run-collect-1", "staging", "shards", "payments-src")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	writeCollectManifest(t, writeRoot)
+	writeTextFile(t, filepath.Join(writeRoot, "payments-overview.md"), "# Payments Overview\n\n<!-- "+artifactquality.CollectBootstrapReplaceMarker+" -->\n\n## Observations\n- Repository scope: payments.\n")
+
+	snapshot := runtimeArtifactSnapshot(acpruntime.Task{
+		RunID:     "run-collect-1",
+		StepID:    "init.step1.collect",
+		WriteRoot: writeRoot,
+	})
+	if !snapshot.ArtifactObserved || snapshot.Valid || snapshot.State != "invalid" {
+		t.Fatalf("expected bootstrap-only collect snapshot to be invalid, got %+v", snapshot)
+	}
+
+	writeTextFile(t, filepath.Join(writeRoot, "payments-overview.md"), "# Payments Overview\n\n## Observations\n- `src/payment_handler.go` defines the payment API.\n\n## Evidence\n- `src/payment_handler.go`\n")
+	snapshot = runtimeArtifactSnapshot(acpruntime.Task{
+		RunID:     "run-collect-1",
+		StepID:    "init.step1.collect",
+		WriteRoot: writeRoot,
+	})
+	if !snapshot.ArtifactObserved || !snapshot.Valid || snapshot.State != "valid" {
+		t.Fatalf("expected enriched collect snapshot to be valid, got %+v", snapshot)
+	}
+}
+
 func writeQAAnswer(t *testing.T, writeRoot string, citations []map[string]string) {
 	t.Helper()
 	writeJSONFile(t, filepath.Join(writeRoot, "qa-answer.json"), map[string]any{
@@ -178,6 +208,65 @@ func writeQAAnswer(t *testing.T, writeRoot string, citations []map[string]string
 	})
 }
 
+func writeCollectManifest(t *testing.T, writeRoot string) {
+	t.Helper()
+	writeJSONFile(t, filepath.Join(writeRoot, ShardPackManifestFileName), map[string]any{
+		"version":       1,
+		"run_id":        "run-collect-1",
+		"step_id":       "init.step1.collect",
+		"shard_id":      "payments-src",
+		"domain_id":     "payments",
+		"agent_role":    "shard-analyst",
+		"artifact_root": "reports/taskruns/run-collect-1/staging/shards/payments-src",
+		"repo_scopes":   []string{"payments"},
+		"path_scopes":   []string{"src"},
+		"documents": []map[string]any{
+			{
+				"id":             "doc.payments.src.overview",
+				"kind":           "report",
+				"title":          "Payments Overview",
+				"path":           "payments-overview.md",
+				"canonical_path": "reports/as-is/payments-src/payments-overview.md",
+				"topics":         []string{"payments"},
+				"citation_ids":   []string{"cite.payments.src.overview"},
+			},
+		},
+		"citations": []map[string]any{
+			{
+				"id":           "cite.payments.src.overview",
+				"repo":         "payments",
+				"path":         "src/payment_handler.go",
+				"claim_ids":    []string{"claim.payments.src.overview"},
+				"document_ids": []string{"doc.payments.src.overview"},
+			},
+		},
+		"semantic": map[string]any{
+			"coverage": map[string]any{
+				"observed": []string{"payments API"},
+				"missing":  []string{},
+				"notes":    []string{"Observed from concrete source files."},
+			},
+			"questions": []map[string]any{},
+			"entities": []map[string]any{
+				{
+					"id":   "svc.payments",
+					"type": "service",
+					"name": "Payments",
+					"provenance": map[string]any{
+						"kind":       "observation",
+						"confidence": 0.8,
+						"evidence": []map[string]any{
+							{"repo": "payments", "path": "src/payment_handler.go"},
+						},
+					},
+				},
+			},
+			"edges":    []map[string]any{},
+			"findings": []map[string]any{},
+		},
+	})
+}
+
 func writeJSONFile(t *testing.T, path string, payload any) {
 	t.Helper()
 	raw, err := json.MarshalIndent(payload, "", "  ")
@@ -186,6 +275,16 @@ func writeJSONFile(t *testing.T, path string, payload any) {
 	}
 	raw = append(raw, '\n')
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func writeTextFile(t *testing.T, path string, value string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", path, err)
+	}
+	if err := os.WriteFile(path, []byte(value), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
 }
