@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -63,5 +65,27 @@ func TestRuntimeExecutionFromFailureReturnsFalseForGenericError(t *testing.T) {
 
 	if _, ok := runtimeExecutionFromFailure(acpruntime.Task{}, acpruntime.ProviderClaudeCode, errors.New("boom"), time.Now().UTC()); ok {
 		t.Fatalf("expected generic error to be ignored")
+	}
+}
+
+func TestCollectManifestDocumentTextsReadsOnlyWriteRootDocuments(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "overview.md"), []byte("# Overview\n"), 0o644); err != nil {
+		t.Fatalf("write overview: %v", err)
+	}
+	docs := []contracts.AuthoredDocument{
+		{Path: "overview.md"},
+		{Path: "../outside.md"},
+		{Path: "/tmp/outside.md"},
+	}
+
+	texts := collectManifestDocumentTexts(root, docs)
+	if got, want := texts["overview.md"], "# Overview\n"; got != want {
+		t.Fatalf("overview text = %q, want %q", got, want)
+	}
+	if _, ok := texts["../outside.md"]; ok {
+		t.Fatalf("escaped document path must not be read: %#v", texts)
 	}
 }
