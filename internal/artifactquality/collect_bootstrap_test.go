@@ -32,6 +32,56 @@ func TestCollectManifestBootstrapOnlyIgnoresEnrichedDocument(t *testing.T) {
 	}
 }
 
+func TestCollectManifestBootstrapOnlyDetectsMarkerEvenWithRichSemantic(t *testing.T) {
+	t.Parallel()
+
+	manifest := bootstrapCollectManifest()
+	manifest.Semantic.Coverage.Missing = nil
+	manifest.Semantic.Coverage.Notes = []string{"Observed payment API, ledger calls, and queue processing from concrete source files."}
+	manifest.Semantic.Entities = append(manifest.Semantic.Entities, contracts.Entity{
+		ID:   "svc.ledger",
+		Type: "service",
+		Name: "Ledger",
+		Provenance: contracts.Provenance{
+			Kind:       "observation",
+			Confidence: 0.8,
+			Evidence:   []contracts.Evidence{{Repo: "payments", Path: "src/ledger_client.go"}},
+		},
+	})
+	manifest.Semantic.Edges = append(manifest.Semantic.Edges, contracts.Edge{
+		ID:   "edge.payments.ledger.write",
+		Type: "depends_on",
+		From: "svc.payments.src",
+		To:   "svc.ledger",
+		Name: "writes accepted payments",
+		Provenance: contracts.Provenance{
+			Kind:       "observation",
+			Confidence: 0.8,
+			Evidence:   []contracts.Evidence{{Repo: "payments", Path: "src/ledger_client.go"}},
+		},
+	})
+	manifest.Semantic.Findings = []contracts.Finding{{
+		ID:          "finding.payments.retry.visibility",
+		Severity:    "medium",
+		Title:       "Payment retry visibility is split across handler and queue code",
+		Description: "Operational retry behavior is split between the payment handler and queue worker.",
+		RuleID:      "rule.operational.visibility",
+		RelatedIDs:  []string{"svc.payments.src"},
+		Provenance: contracts.Provenance{
+			Kind:       "inference",
+			Confidence: 0.7,
+			Evidence:   []contracts.Evidence{{Repo: "payments", Path: "src/payment_handler.go"}},
+		},
+	}}
+	docs := map[string]string{
+		"payments-overview.md": "# Payments Overview\n\n<!-- " + CollectBootstrapReplaceMarker + " -->\n\n## Observations\n- `src/payment_handler.go` defines the payment service entrypoint.\n",
+	}
+
+	if !CollectManifestBootstrapOnly(manifest, docs) {
+		t.Fatalf("expected marker-bearing collect document to be classified as bootstrap-only")
+	}
+}
+
 func bootstrapCollectManifest() contracts.ShardPackManifest {
 	return contracts.ShardPackManifest{
 		Version:      1,

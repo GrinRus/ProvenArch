@@ -189,7 +189,7 @@ func TestDocFirstFilesystemPolicyAddsRootFileShardHint(t *testing.T) {
 		`Root-file collect shard detected: path_scopes contains root-level files only:`,
 		`.gitignore, LICENSE, Makefile, README.md, pom.xml`,
 		`read only the listed root files first; do not recursively sweep top-level directories`,
-		`Produce one concise root overview document in write_root, then write shard-pack-manifest.json`,
+		`Produce one concise evidence-backed root overview document in write_root, remove any bootstrap marker, then write an enriched shard-pack-manifest.json`,
 	}
 	for _, needle := range required {
 		if !strings.Contains(policy, needle) {

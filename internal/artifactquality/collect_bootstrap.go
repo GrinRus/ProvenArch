@@ -12,16 +12,20 @@ func CollectManifestBootstrapOnly(manifest contracts.ShardPackManifest, document
 	if len(manifest.Documents) == 0 || len(documentTextByPath) == 0 {
 		return false
 	}
-	if !collectManifestSemanticBootstrapOnly(manifest.Semantic) {
-		return false
-	}
+	hasBootstrapDocument := false
 	for _, document := range manifest.Documents {
 		text := documentTextByPath[strings.TrimSpace(document.Path)]
 		if collectDocumentBootstrapOnly(text) {
-			return true
+			if strings.Contains(text, CollectBootstrapReplaceMarker) {
+				return true
+			}
+			hasBootstrapDocument = true
 		}
 	}
-	return false
+	if !hasBootstrapDocument {
+		return false
+	}
+	return collectManifestSemanticBootstrapOnly(manifest.Semantic)
 }
 
 func CollectDocumentBootstrapOnly(text string) bool {
