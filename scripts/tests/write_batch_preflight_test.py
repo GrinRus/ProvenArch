@@ -294,13 +294,13 @@ class WriteBatchPreflightTest(unittest.TestCase):
             "  count=$((count + 1))\n"
             "  printf '%s\\n' \"$count\" > \"$attempts\"\n"
             "  if [ \"$count\" = \"1\" ]; then printf '%s\\n' 'API Error: 403 permission_error usage limit'; fi\n"
-            "  sleep 3\n"
+            "  sleep 5\n"
             "  exit 0\n"
             "fi\n"
             "printf '%s\n' 'ACP_READY'\n",
         )
         old_timeout = os.environ.get("ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC")
-        os.environ["ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC"] = "2"
+        os.environ["ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC"] = "4"
         try:
             result = self.module.probe_provider_readiness("claude", command, str(REPO_ROOT))
         finally:
