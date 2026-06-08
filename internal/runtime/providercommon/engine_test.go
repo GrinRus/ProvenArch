@@ -717,6 +717,81 @@ EOF
 	}
 }
 
+func TestRunHeadlessProviderUsesCollectPairRepairForBootstrapOnlyAuthoredDoc(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-bootstrap-doc-pair-repair")
+	docRel := steppolicy.SuggestedCollectDocumentPath(task)
+	manifest := strings.Replace(collectManifestJSON(task), `"path": "overview.md"`, `"path": "`+docRel+`"`, 1)
+	docPath := filepath.Join(task.WriteRoot, filepath.FromSlash(docRel))
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(filepath.Dir(docPath)) + `
+cat >` + shellQuote(docPath) + ` <<'EOF'
+# Bank Overview
+
+<!-- ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT -->
+
+## Observations
+- Repository scope: bank-of-anthos.
+- Primary scoped evidence path: ` + "`README.md`" + `.
+
+## Evidence
+- Primary evidence path: ` + "`README.md`" + `
+
+## Follow-up
+- Owner mapping evidence not confirmed from the initial scoped evidence path.
+EOF
+`
+	manifestOnlyRepairScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'manifest-only repair must not run for bootstrap-only docs' >&2
+exit 9
+`
+	pairRepairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(docPath) + ` <<'EOF'
+# Bank Overview
+
+## Observations
+- README.md identifies Bank of Anthos as the analyzed service surface.
+- Kubernetes manifests define the deployable service boundary for review.
+
+## Evidence
+- README.md
+- kubernetes-manifests
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + manifest + `
+EOF
+`
+	runner := testAdapter{
+		command:           writeEngineScript(t, initialScript),
+		repairCommand:     writeEngineScript(t, manifestOnlyRepairScript),
+		pairRepairCommand: writeEngineScript(t, pairRepairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+			RepairCollectArtifactPairOnce: true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected collect pair repair success for bootstrap-only doc, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	raw, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatalf("read repaired doc: %v", err)
+	}
+	if strings.Contains(string(raw), "ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT") {
+		t.Fatalf("expected pair repair to replace bootstrap doc marker, got:\n%s", raw)
+	}
+}
+
 func TestRunHeadlessProviderRepairsNonSilentNoArtifactCollectWithPairRepair(t *testing.T) {
 	t.Parallel()
 

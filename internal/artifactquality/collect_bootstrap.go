@@ -24,6 +24,10 @@ func CollectManifestBootstrapOnly(manifest contracts.ShardPackManifest, document
 	return false
 }
 
+func CollectDocumentBootstrapOnly(text string) bool {
+	return collectDocumentBootstrapOnly(text)
+}
+
 func collectDocumentBootstrapOnly(text string) bool {
 	lower := strings.ToLower(strings.TrimSpace(text))
 	if lower == "" {
