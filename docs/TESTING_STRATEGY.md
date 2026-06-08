@@ -196,6 +196,7 @@ Release workflow hardening:
 - strict collect validation:
   - artifact-root-prefixed, absolute, missing-file, directory and hidden provider/tool `documents[].path` (`.qwen/`, `.claude/`, `.codex/`, `.git/`, `node_modules/`) fail-ятся без rewrite
   - referenced authored collect docs с `ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT` или unchanged scaffold prose fail-ятся до apply, чтобы сработал collect pair-repair вместо manifest-only repair
+  - collect artifact monitor snapshot использует тот же strict validation и не считает parse-only manifest с bootstrap markdown валидным controlled-stop сигналом
   - missing required metadata fail-ится без autofill
   - collect pair recovery запускается один раз только при no authored artifacts + non-empty provider diagnostics и разрешает писать только suggested authored doc + `shard-pack-manifest.json`
   - manifest-only runtime repair запускается один раз только при authored docs + missing/invalid `shard-pack-manifest.json`
