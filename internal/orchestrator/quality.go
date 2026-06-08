@@ -542,6 +542,9 @@ func assessRunArtifactInventory(
 			Path:     inventory.FinalIndexPath,
 		})
 	}
+	if nontrivial && finalIndexOK {
+		signals = append(signals, semanticScaffoldSignals(finalIndex, inventory)...)
+	}
 	if nontrivial && surfaceCount(inventory, "model_entities") == 0 {
 		signals = append(signals, runQualitySignal{
 			Code:     "artifact_quality.model_entities_missing",
@@ -553,6 +556,7 @@ func assessRunArtifactInventory(
 	signals = append(signals, placeholderArtifactSignals(ws)...)
 	signals = append(signals, findingsCoverageGapSignals(ws, finalIndex, finalIndexOK)...)
 	signals = append(signals, gapOnlyDiagramSignals(ws, inventory, nontrivial)...)
+	signals = append(signals, scaffoldDiagramSignals(ws, inventory, nontrivial)...)
 	signals = append(signals, hiddenProviderDocumentSignals(ws, runID)...)
 	return inventory, normalizeRunQualitySignals(signals)
 }
@@ -801,6 +805,48 @@ func hasCriticalCoverageGap(values []string) bool {
 	return false
 }
 
+func semanticScaffoldSignals(finalIndex contracts.FinalRunIndex, inventory runArtifactInventory) []runQualitySignal {
+	semantic := finalIndex.Semantic
+	entities := len(semantic.Entities)
+	edges := len(semantic.Edges)
+	findings := len(semantic.Findings)
+	if inventory.Semantic.CanonicalDocuments < 8 || entities < 4 || edges < 3 || findings == 0 {
+		return nil
+	}
+	containerEdges := 0
+	for _, edge := range semantic.Edges {
+		edgeType := strings.ToLower(strings.TrimSpace(edge.Type))
+		edgeName := strings.ToLower(strings.TrimSpace(edge.Name))
+		if edgeType == "contains" || strings.Contains(edgeName, "contains scoped surface") {
+			containerEdges++
+		}
+	}
+	if containerEdges != edges {
+		return nil
+	}
+	genericOwnerFindings := 0
+	for _, finding := range semantic.Findings {
+		title := strings.ToLower(strings.TrimSpace(finding.Title))
+		description := strings.ToLower(strings.TrimSpace(finding.Description))
+		ruleID := strings.ToLower(strings.TrimSpace(finding.RuleID))
+		if title == "owner mapping not confirmed" &&
+			strings.Contains(ruleID, "owner.mapping") &&
+			strings.Contains(description, "scoped evidence identifies") &&
+			strings.Contains(description, "does not confirm an owning team") {
+			genericOwnerFindings++
+		}
+	}
+	if genericOwnerFindings*100 < findings*80 {
+		return nil
+	}
+	return []runQualitySignal{{
+		Code:     "artifact_quality.semantic_scaffold_only",
+		Severity: "warning",
+		Message:  "artifact_quality: semantic model is non-empty but only contains scaffold-like repo/shard containment and generic owner-gap findings",
+		Path:     inventory.FinalIndexPath,
+	}}
+}
+
 func gapOnlyDiagramSignals(ws workspace.Root, inventory runArtifactInventory, nontrivial bool) []runQualitySignal {
 	if !nontrivial || inventory.Semantic.Entities > 0 {
 		return nil
@@ -821,6 +867,31 @@ func gapOnlyDiagramSignals(ws workspace.Root, inventory runArtifactInventory, no
 		}
 	}
 	return signals
+}
+
+func scaffoldDiagramSignals(ws workspace.Root, inventory runArtifactInventory, nontrivial bool) []runQualitySignal {
+	if !nontrivial || inventory.Semantic.Entities < 4 {
+		return nil
+	}
+	text, ok := readWorkspaceText(ws, "reports/diagrams/c4-context.mmd")
+	if !ok {
+		return nil
+	}
+	lower := strings.ToLower(text)
+	if !strings.Contains(lower, "gap: no evidence-backed external systems") ||
+		!strings.Contains(lower, "gap: no evidence-backed actors") ||
+		!strings.Contains(lower, "gap: no evidence-backed relationships") {
+		return nil
+	}
+	if strings.Contains(text, "Service:") || strings.Contains(text, "External:") || strings.Contains(text, "Actor:") {
+		return nil
+	}
+	return []runQualitySignal{{
+		Code:     "artifact_quality.c4_context_scaffold_only",
+		Severity: "warning",
+		Message:  "artifact_quality: C4 context diagram still shows only diagnostic gap nodes despite a non-empty semantic model",
+		Path:     "reports/diagrams/c4-context.mmd",
+	}}
 }
 
 func hiddenProviderDocumentSignals(ws workspace.Root, runID string) []runQualitySignal {
