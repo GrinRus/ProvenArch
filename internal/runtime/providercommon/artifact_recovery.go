@@ -3,8 +3,11 @@ package providercommon
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/GrinRus/ProvenArch/internal/artifactquality"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 )
@@ -149,7 +152,11 @@ func recoverCollectArtifactPairRepair(ctx context.Context, task acpruntime.Task,
 		return false, acpruntime.Result{}, nil
 	}
 	snapshot := runtimeArtifactSnapshot(task)
-	if snapshot.AuthoredFiles > 0 || !resultHasProviderDiagnostics(result) {
+	bootstrapOnlyDocs := collectWriteRootHasBootstrapOnlyAuthoredDoc(task)
+	if snapshot.AuthoredFiles > 0 && !bootstrapOnlyDocs {
+		return false, acpruntime.Result{}, nil
+	}
+	if !resultHasProviderDiagnostics(result) && !bootstrapOnlyDocs {
 		return false, acpruntime.Result{}, nil
 	}
 	repairAdapter, ok := adapter.(CollectArtifactPairRepairAdapter)
@@ -243,6 +250,9 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 	if snapshot.AuthoredFiles <= 0 {
 		return false, acpruntime.Result{}, nil
 	}
+	if collectWriteRootHasBootstrapOnlyAuthoredDoc(task) {
+		return false, acpruntime.Result{}, nil
+	}
 	repairAdapter, ok := adapter.(CollectManifestRepairAdapter)
 	if !ok {
 		return false, acpruntime.Result{}, nil
@@ -296,6 +306,34 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 	}
 	emitCollectManifestRepairCompletedDiagnostic(task, adapter.Provider(), "")
 	return true, repairResult, nil
+}
+
+func collectWriteRootHasBootstrapOnlyAuthoredDoc(task acpruntime.Task) bool {
+	root := filepath.Clean(strings.TrimSpace(task.WriteRoot))
+	if root == "" || root == "." {
+		return false
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry == nil || entry.IsDir() {
+			continue
+		}
+		name := strings.TrimSpace(entry.Name())
+		if name == "" || name == ShardPackManifestFileName || name == "runtime-execution.json" {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			continue
+		}
+		if artifactquality.CollectDocumentBootstrapOnly(string(raw)) {
+			return true
+		}
+	}
+	return false
 }
 
 func recoverValidatorVerdictRepair(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, validationErr error, stage string) (bool, acpruntime.Result, error) {
