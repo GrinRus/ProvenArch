@@ -88,7 +88,7 @@ func draftArtifactRepairFileTemplate(task acpruntime.Task, output runtimedrafts.
 			"items:",
 			"  - id: baseline",
 			"    title: Baseline Runtime Draft",
-			"    notes: Provider focused recovery wrote the required draft artifact set.",
+			"    notes: Runtime draft recovery initialized the required artifact set for this run.",
 		}, "\n")
 	}
 	switch canonicalPath {
@@ -103,15 +103,15 @@ func draftArtifactRepairFileTemplate(task acpruntime.Task, output runtimedrafts.
 			"- Owner mapping details need follow-up review in the promoted reports.",
 			"",
 			"## Notes",
-			"- Provider focused recovery wrote this draft artifact under the required draft_final_root.",
+			"- Review staged shard manifests, validator findings, and owner gaps before promotion.",
 		}, "\n")
 	case "reports/agent-outputs/architect/summary.md":
 		return strings.Join([]string{
 			"# Architect Summary",
 			"",
 			"## Summary",
-			"- Provider focused recovery produced the required as-is draft publish surface.",
-			"- Review collected shard manifests before treating this diagnostic output as release evidence.",
+			"- Runtime draft recovery initialized the required as-is publish surface.",
+			"- Treat this as diagnostic evidence until collected shard manifests and validator findings are reviewed.",
 			"",
 			"## Next Checks",
 			"- Validate owner mappings and staged findings in the following runtime steps.",
@@ -121,7 +121,7 @@ func draftArtifactRepairFileTemplate(task acpruntime.Task, output runtimedrafts.
 			"# Runtime Proposal Changelog",
 			"",
 			"## Changes",
-			"- Provider focused recovery wrote the required proposal changelog draft.",
+			"- Runtime draft recovery initialized the proposal changelog surface.",
 			"",
 			"## Notes",
 			"- Promote only after validator artifacts pass.",
@@ -135,8 +135,8 @@ func draftArtifactRepairFileTemplate(task acpruntime.Task, output runtimedrafts.
 			"- Step: " + strings.TrimSpace(task.StepID),
 			"",
 			"## Summary",
-			"- Provider focused recovery wrote this draft artifact to satisfy the runtime draft contract.",
-			"- Use collected shard manifests and validator output as the evidence source for final review.",
+			"- Runtime draft recovery initialized this artifact for the scoped analysis step.",
+			"- Use collected shard manifests and validator output as the evidence source before final review.",
 		}, "\n")
 	}
 }

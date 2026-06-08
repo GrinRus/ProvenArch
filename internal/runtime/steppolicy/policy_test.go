@@ -250,6 +250,26 @@ func TestCollectManifestTaskSkeletonParsesAsShardPackManifest(t *testing.T) {
 	if got, want := manifest.Citations[0].Path, "src/main.go"; got != want {
 		t.Fatalf("citation path = %q, want %q", got, want)
 	}
+	if got := len(manifest.Semantic.Entities); got < 2 {
+		t.Fatalf("semantic entities length = %d, want >= 2 in skeleton:\n%s", got, raw)
+	}
+	if got := len(manifest.Semantic.Edges); got < 1 {
+		t.Fatalf("semantic edges length = %d, want >= 1 in skeleton:\n%s", got, raw)
+	}
+	if got := len(manifest.Semantic.Findings); got < 1 {
+		t.Fatalf("semantic findings length = %d, want >= 1 in skeleton:\n%s", got, raw)
+	}
+	for _, entity := range manifest.Semantic.Entities {
+		if len(entity.Provenance.Evidence) == 0 {
+			t.Fatalf("semantic entity %s has no provenance evidence in skeleton:\n%s", entity.ID, raw)
+		}
+		if got, want := entity.Provenance.Evidence[0].Path, "src/main.go"; got != want {
+			t.Fatalf("semantic entity %s evidence path = %q, want %q", entity.ID, got, want)
+		}
+	}
+	if got, want := manifest.Semantic.Findings[0].Provenance.Evidence[0].Path, "src/main.go"; got != want {
+		t.Fatalf("semantic finding evidence path = %q, want %q", got, want)
+	}
 	if strings.Contains(raw, "scaffold") {
 		t.Fatalf("collect manifest skeleton should avoid scaffold wording in provider-authored artifacts:\n%s", raw)
 	}
@@ -291,9 +311,21 @@ func TestRefreshCollectManifestTaskSkeletonMatchesRefreshPolicyMinimums(t *testi
 	if got := len(manifest.Semantic.Questions); got < 1 {
 		t.Fatalf("refresh questions length = %d, want >= 1 in skeleton:\n%s", got, raw)
 	}
+	if got := len(manifest.Semantic.Entities); got < 2 {
+		t.Fatalf("refresh semantic entities length = %d, want >= 2 in skeleton:\n%s", got, raw)
+	}
+	if got := len(manifest.Semantic.Edges); got < 1 {
+		t.Fatalf("refresh semantic edges length = %d, want >= 1 in skeleton:\n%s", got, raw)
+	}
+	if got := len(manifest.Semantic.Findings); got < 1 {
+		t.Fatalf("refresh semantic findings length = %d, want >= 1 in skeleton:\n%s", got, raw)
+	}
 	question := manifest.Semantic.Questions[0]
 	if strings.TrimSpace(question.ID) == "" || strings.TrimSpace(question.Text) == "" {
 		t.Fatalf("refresh skeleton question must include id and text, got %+v in:\n%s", question, raw)
+	}
+	if len(question.RelatedIDs) == 0 {
+		t.Fatalf("refresh skeleton question must reference the scoped semantic entity, got %+v in:\n%s", question, raw)
 	}
 	if got, want := manifest.Citations[0].Path, "README.md"; got != want {
 		t.Fatalf("root-file citation path = %q, want %q", got, want)
@@ -326,6 +358,9 @@ func TestCollectManifestTaskSkeletonPrefersUsefulRootEvidenceWithRepairCandidate
 	if got, want := manifest.Citations[0].Path, "README.md"; got != want {
 		t.Fatalf("root-file repair citation path = %q, want %q", got, want)
 	}
+	if got, want := manifest.Semantic.Entities[0].Provenance.Evidence[0].Path, "README.md"; got != want {
+		t.Fatalf("root-file semantic evidence path = %q, want %q", got, want)
+	}
 }
 
 func TestCollectEarlyPairWriteCommandPrefersUsefulRootEvidence(t *testing.T) {
@@ -348,6 +383,9 @@ func TestCollectEarlyPairWriteCommandPrefersUsefulRootEvidence(t *testing.T) {
 		"Primary scoped evidence path: `README.md`",
 		`"path": "README.md"`,
 		`"questions": [`,
+		`"entities": [`,
+		`"edges": [`,
+		`"findings": [`,
 		`"coverage": {`,
 	} {
 		if !strings.Contains(command, needle) {
@@ -572,6 +610,16 @@ func TestAsIsFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
 	if got := strings.Count(section, "ACP_DRAFT_FILE"); got != 6 {
 		t.Fatalf("expected three as-is draft file heredocs, got delimiter count %d:\n%s", got, section)
 	}
+	for _, forbidden := range []string{
+		"Provider wrote this draft artifact",
+		"Provider wrote the required",
+		"drafted required runtime artifacts",
+		"no findings reported.",
+	} {
+		if strings.Contains(section, forbidden) {
+			t.Fatalf("as-is first-action drafts must not include placeholder marker %q:\n%s", forbidden, section)
+		}
+	}
 }
 
 func TestProposalsFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
@@ -615,6 +663,16 @@ func TestProposalsFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
 	}
 	if got := strings.Count(section, "ACP_DRAFT_FILE"); got != 4 {
 		t.Fatalf("expected two proposals draft file heredocs, got delimiter count %d:\n%s", got, section)
+	}
+	for _, forbidden := range []string{
+		"Provider wrote this draft artifact",
+		"Provider wrote the required",
+		"drafted required runtime artifacts",
+		"no findings reported.",
+	} {
+		if strings.Contains(section, forbidden) {
+			t.Fatalf("proposals first-action drafts must not include placeholder marker %q:\n%s", forbidden, section)
+		}
 	}
 }
 

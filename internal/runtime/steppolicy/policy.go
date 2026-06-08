@@ -511,32 +511,55 @@ func runtimeDraftFirstActionFileTemplate(task acpruntime.Task, output runtimedra
 			"# Runtime Recommendations",
 			"",
 			"## Summary",
-			"- Provider wrote the required proposals draft artifact set for this run.",
+			"- Current run evidence should be reviewed before promotion.",
+			"- Owner mappings and unresolved coverage gaps remain the first follow-up surfaces.",
 			"",
 			"## Recommendation",
-			"- Review collected evidence, validator findings, and coverage gaps before promotion.",
+			"- Promote only recommendations that cite collected shard manifests, validator findings, or final coverage output.",
 		}, "\n")
 	case "reports/changelog/runtime-proposals.md":
 		return strings.Join([]string{
 			"# Runtime Proposal Changelog",
 			"",
 			"## Changes",
-			"- Provider wrote the required proposal draft surface.",
+			"- Runtime proposal surface initialized for this analysis run.",
+			"- Changes must remain traceable to collected evidence, findings, or coverage gaps before promotion.",
 			"",
 			"## Notes",
 			"- Promote only after artifact validation succeeds.",
 		}, "\n")
 	default:
+		scopeLines := runtimeDraftScopeLines(task)
 		return strings.Join([]string{
 			"# " + title,
 			"",
 			"## Scope",
-			"- Run: " + strings.TrimSpace(task.RunID),
-			"- Step: " + strings.TrimSpace(task.StepID),
+			strings.Join(scopeLines, "\n"),
 			"",
 			"## Summary",
-			"- Provider wrote this draft artifact under the required draft_final_root.",
+			"- Draft surface initialized for the scoped repository analysis.",
+			"- Final content must stay tied to collected shard evidence and validator output.",
 		}, "\n")
+	}
+}
+
+func runtimeDraftScopeLines(task acpruntime.Task) []string {
+	repo := PrimaryTaskRepoScope(task.RepoScope, task.RepoScopes)
+	if repo == "" {
+		repo = "repo"
+	}
+	pathScopes := strings.Join(nonEmptyList(task.PathScopes), ", ")
+	if pathScopes == "" {
+		pathScopes = collectEvidencePath(task, nil)
+	}
+	if pathScopes == "" {
+		pathScopes = "README.md"
+	}
+	return []string{
+		"- Run: " + strings.TrimSpace(task.RunID),
+		"- Step: " + strings.TrimSpace(task.StepID),
+		"- Repository scope: " + repo,
+		"- Path scopes: " + pathScopes,
 	}
 }
 
@@ -641,7 +664,6 @@ func CollectManifestTaskSkeleton(task acpruntime.Task, docPaths []string, eviden
 	}
 
 	coverageMissing := collectCoverageMissingSkeleton(task)
-	questions := collectQuestionsSkeleton(task, idStem, topic)
 	manifest := contracts.ShardPackManifest{
 		Version:      1,
 		RunID:        runID,
@@ -654,17 +676,7 @@ func CollectManifestTaskSkeleton(task acpruntime.Task, docPaths []string, eviden
 		PathScopes:   nonEmptyList(task.PathScopes),
 		Documents:    documents,
 		Citations:    citations,
-		Semantic: contracts.SemanticSnapshot{
-			Coverage: contracts.Coverage{
-				Observed: []string{topic},
-				Missing:  coverageMissing,
-				Notes:    []string{"Collect manifest covers the assigned shard scope with evidence paths listed in citations."},
-			},
-			Questions: questions,
-			Entities:  []contracts.Entity{},
-			Edges:     []contracts.Edge{},
-			Findings:  []contracts.Finding{},
-		},
+		Semantic:     collectSemanticSkeleton(task, repo, evidencePath, shardSlug, idStem, topic, coverageMissing),
 	}
 	raw, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -1325,6 +1337,101 @@ func collectQuestionsSkeleton(task acpruntime.Task, idStem string, topic string)
 			Text:     fmt.Sprintf("Which team owns the %s surface and its operational escalation path?", subject),
 			Priority: "medium",
 		},
+	}
+}
+
+func collectSemanticSkeleton(task acpruntime.Task, repo string, evidencePath string, shardSlug string, idStem string, topic string, coverageMissing []string) contracts.SemanticSnapshot {
+	repoStem := idComponent(firstNonEmpty(repo, "repo"))
+	shardStem := idComponent(firstNonEmpty(idStem, shardSlug, topic, "shard"))
+	repoEntityID := "svc." + repoStem
+	shardEntityID := "svc." + shardStem
+	if shardEntityID == repoEntityID {
+		shardEntityID = shardEntityID + ".surface"
+	}
+	if strings.TrimSpace(topic) == "" {
+		topic = shardSlug
+	}
+	if strings.TrimSpace(topic) == "" {
+		topic = "architecture"
+	}
+	if strings.TrimSpace(repo) == "" {
+		repo = "repo"
+	}
+	if strings.TrimSpace(evidencePath) == "" {
+		evidencePath = "README.md"
+	}
+	evidence := []contracts.Evidence{{
+		Repo: repo,
+		Path: evidencePath,
+	}}
+	questions := collectQuestionsSkeleton(task, shardStem, topic)
+	if len(questions) == 0 {
+		questions = []contracts.Question{{
+			ID:         fmt.Sprintf("question.%s.owner.mapping", shardStem),
+			Text:       fmt.Sprintf("Which team owns the %s surface and its operational escalation path?", strings.TrimSpace(topic)),
+			Priority:   "medium",
+			RelatedIDs: []string{shardEntityID},
+		}}
+	}
+	for idx := range questions {
+		if len(questions[idx].RelatedIDs) == 0 {
+			questions[idx].RelatedIDs = []string{shardEntityID}
+		}
+	}
+	return contracts.SemanticSnapshot{
+		Coverage: contracts.Coverage{
+			Observed: []string{topic},
+			Missing:  coverageMissing,
+			Notes:    []string{"Collect manifest covers the assigned shard scope with evidence paths listed in citations."},
+		},
+		Questions: questions,
+		Entities: []contracts.Entity{
+			{
+				ID:   repoEntityID,
+				Type: "service",
+				Name: titleFromSlug(repoStem),
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.55,
+					Evidence:   evidence,
+				},
+			},
+			{
+				ID:   shardEntityID,
+				Type: "service",
+				Name: titleFromSlug(firstNonEmpty(shardSlug, topic, "Scoped Surface")),
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.55,
+					Evidence:   evidence,
+				},
+			},
+		},
+		Edges: []contracts.Edge{{
+			ID:   fmt.Sprintf("edge.%s.contained-by-repo", shardStem),
+			Type: "contains",
+			From: repoEntityID,
+			To:   shardEntityID,
+			Name: "contains scoped surface",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 0.45,
+				Evidence:   evidence,
+			},
+		}},
+		Findings: []contracts.Finding{{
+			ID:          fmt.Sprintf("finding.%s.owner.mapping", shardStem),
+			Severity:    "medium",
+			Title:       "Owner mapping not confirmed",
+			Description: fmt.Sprintf("Scoped evidence identifies the %s surface but does not confirm an owning team or escalation path.", strings.TrimSpace(topic)),
+			RuleID:      "rule.owner.mapping.required",
+			RelatedIDs:  []string{shardEntityID},
+			Provenance: contracts.Provenance{
+				Kind:       "inference",
+				Confidence: 0.45,
+				Evidence:   evidence,
+			},
+		}},
 	}
 }
 

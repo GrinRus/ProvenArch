@@ -25,10 +25,10 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 		collectManifestRepairWriteCommand(task.WriteRoot, manifestTarget, skeleton),
 		"Immediate repair action:",
 		fmt.Sprintf("- Write exactly one file now: %q.", manifestTarget),
-		"- Do not begin with broad analysis. The heredoc above is already the complete valid repair artifact.",
+		"- Do not begin with broad analysis. The heredoc above is the minimal evidence-backed repair artifact for this shard.",
 		"- Do not rewrite existing authored markdown documents.",
 		"- If shard-pack-manifest.json already exists but is invalid, do not inspect or patch it; overwrite it from the heredoc command.",
-		"- Copy the heredoc JSON exactly during repair. Do not make factual edits before the file validates.",
+		"- Copy the heredoc JSON during repair and preserve semantic.entities, semantic.edges, semantic.findings, coverage, and evidence repo/path fields.",
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
 		"Use the JSON embedded in the first repair command above as the skeleton and target content.",
 		"Artifact-only repair contract:",
@@ -67,7 +67,7 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 	repairLines = append(repairLines, compactCollectManifestValidationChecklist(strings.TrimSpace(task.ArtifactRoot))...)
 	repairLines = append(repairLines,
 		`- Repair-mode note: if schemas/* or docs/spec/* are absent from the runtime workspace, do not look for them; use this embedded checklist.`,
-		`- The task-specific JSON skeleton above is the complete repair artifact; write it exactly from the heredoc command, do not make factual edits in repair mode, then exit.`,
+		`- The task-specific JSON skeleton above is the repair artifact; write it from the heredoc command, preserve its semantic signal, then exit.`,
 	)
 	sections = append(sections, strings.Join(repairLines, "\n"))
 	return strings.Join(sections, "\n\n")
@@ -116,7 +116,7 @@ func overwriteCollectManifestRepairInstructions() []string {
 		"- Do not read, diff, or patch an existing invalid shard-pack-manifest.json; replace it.",
 		"- Do not search the filesystem for schemas/*, docs/spec/*, examples, prior manifests, sibling shards, raw logs, or reports/taskruns history.",
 		"- Do not rewrite authored markdown documents and do not create any file other than shard-pack-manifest.json.",
-		"- Treat the heredoc JSON as the complete repair artifact. Do not perform additional factual edits; validation, not stdout, is the success surface.",
+		"- Treat the heredoc JSON as the repair artifact. Preserve embedded evidence-backed semantic entries; validation, not stdout, is the success surface.",
 	}
 }
 

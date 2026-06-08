@@ -336,11 +336,13 @@ func TestQwenRepairCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 		"Run this exact command as your next filesystem action",
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
 		"<<'ACP_MANIFEST_JSON'",
-		"Copy the heredoc JSON exactly during repair",
+		"Copy the heredoc JSON during repair and preserve semantic.entities",
 		"Do not read, diff, or patch an existing invalid shard-pack-manifest.json",
 		"Final action must be: write only write_root/shard-pack-manifest.json",
 		"overview.md",
 		`"path": "overview.md"`,
+		`"entities": [`,
+		`"findings": [`,
 	} {
 		if !strings.Contains(args, token) {
 			t.Fatalf("expected qwen repair prompt arg to contain %q, got %v", token, spec.Args)

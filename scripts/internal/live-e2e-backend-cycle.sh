@@ -311,6 +311,7 @@ append_run_result_row_once() {
   local coverage_observed=0
   local coverage_missing=0
   local warnings=0
+  local artifact_quality_count=0
   local domain_collect_steps=0
   local mock_flag=0
   local zero_signal=1
@@ -320,7 +321,7 @@ append_run_result_row_once() {
     local metrics
     if metrics="$(quality_metrics "$quality_path" 2>/dev/null)"; then
       local quality_status
-      IFS=$'\t' read -r quality_status signal_score semantic_entities semantic_edges findings questions coverage_observed coverage_missing warnings domain_collect_steps mock_flag zero_signal runtime_versions <<<"$metrics"
+      IFS=$'\t' read -r quality_status signal_score semantic_entities semantic_edges findings questions coverage_observed coverage_missing warnings artifact_quality_count domain_collect_steps mock_flag zero_signal runtime_versions <<<"$metrics"
     else
       warnings=1
     fi
@@ -706,6 +707,10 @@ questions = metric('questions_count')
 coverage_observed = metric('coverage_observed')
 coverage_missing = metric('coverage_missing')
 warnings = metric('warnings_count')
+run_warnings = payload.get('run_warnings') or []
+if not isinstance(run_warnings, list):
+    run_warnings = []
+artifact_quality_count = sum(1 for item in run_warnings if str(item).startswith('artifact_quality:'))
 
 runtime_blob = ",".join(str(item) for item in runtime_versions)
 runtime_lower = runtime_blob.lower()
@@ -732,6 +737,7 @@ print("\t".join([
     str(coverage_observed),
     str(coverage_missing),
     str(warnings),
+    str(artifact_quality_count),
     str(domain_collect_steps),
     str(mock_flag),
     str(zero_signal),
@@ -985,9 +991,9 @@ run_cli_pipeline() {
     die "invalid quality summary for run $run_id at $quality_path"
   fi
 
-  local quality_status signal_score semantic_entities semantic_edges findings questions coverage_observed coverage_missing warnings
+  local quality_status signal_score semantic_entities semantic_edges findings questions coverage_observed coverage_missing warnings artifact_quality_count
   local domain_collect_steps mock_flag zero_signal runtime_versions
-  IFS=$'\t' read -r quality_status signal_score semantic_entities semantic_edges findings questions coverage_observed coverage_missing warnings domain_collect_steps mock_flag zero_signal runtime_versions <<<"$metrics"
+  IFS=$'\t' read -r quality_status signal_score semantic_entities semantic_edges findings questions coverage_observed coverage_missing warnings artifact_quality_count domain_collect_steps mock_flag zero_signal runtime_versions <<<"$metrics"
 
   if [[ "$quality_status" != "succeeded" ]]; then
     append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
@@ -1002,6 +1008,11 @@ run_cli_pipeline() {
     if [[ "$zero_signal" == "1" ]]; then
       append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
       die "headless run $run_id produced zero-signal quality summary"
+    fi
+    if [[ "$artifact_quality_count" != "0" ]]; then
+      append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
+      FAILURE_REASON="quality"
+      die "headless run $run_id produced artifact_quality blockers: count=$artifact_quality_count"
     fi
     if [[ "$TARGET_PROFILE" == "ai-advent" && "$domain_collect_steps" -le 0 ]]; then
       append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"

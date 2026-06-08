@@ -219,7 +219,7 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		"cat > ",
 		"<<'ACP_MANIFEST_JSON'",
 		"do not inspect or patch it; overwrite it from the heredoc command",
-		"Copy the heredoc JSON exactly during repair",
+		"Copy the heredoc JSON during repair and preserve semantic.entities",
 		"Write or replace only write_root/shard-pack-manifest.json.",
 		"Exact allowed write target:",
 		"Final action must be: write only write_root/shard-pack-manifest.json, then exit successfully.",
@@ -234,13 +234,16 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		`"path": "docs/deep-dive.md"`,
 		`"path": "overview.md"`,
 		`"path": "src/README.md"`,
+		`"entities": [`,
+		`"edges": [`,
+		`"findings": [`,
 		"COLLECT MANIFEST REPAIR INSTRUCTIONS:",
 		"Execute the preferred heredoc write command",
 		"Do not read, diff, or patch an existing invalid shard-pack-manifest.json; replace it.",
 		"COLLECT MANIFEST REPAIR CHECKLIST:",
 		`artifact_root must remain exactly "reports/taskruns/run-1/staging/shards/payments"`,
 		"forbidden legacy aliases:",
-		"complete repair artifact; write it exactly from the heredoc command",
+		"write it from the heredoc command, preserve its semantic signal",
 	}
 	for _, token := range expectedTokens {
 		if !strings.Contains(prompt, token) {
@@ -252,6 +255,15 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 	}
 	if strings.Contains(prompt, "Previous artifact contract failure") {
 		t.Fatalf("repair prompt should not include validation-error cues that invite patching instead of heredoc overwrite:\n%s", prompt)
+	}
+	for _, forbidden := range []string{
+		"complete valid repair artifact",
+		"complete repair artifact",
+		"Do not make factual edits before the file validates",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("repair prompt must not frame the artifact as a content-free valid skeleton via %q:\n%s", forbidden, prompt)
+		}
 	}
 	skeletonIndex := strings.Index(prompt, "TASK-SPECIFIC MANIFEST JSON SKELETON:")
 	firstCommandIndex := strings.Index(prompt, "FIRST COLLECT MANIFEST REPAIR COMMAND:")
@@ -508,6 +520,14 @@ func TestComposeDraftArtifactRepairPromptNamesExactTargets(t *testing.T) {
 	}
 	if strings.Contains(prompt, artifactquality.AsIsDraftManifestCanonicalExample()) {
 		t.Fatalf("draft repair prompt should stay compact and not include the full generic as-is canonical example")
+	}
+	for _, forbidden := range []string{
+		"Provider focused recovery wrote",
+		"Provider focused recovery produced",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("draft repair prompt must not write provider-placeholder text %q:\n%s", forbidden, prompt)
+		}
 	}
 	if strings.Count(prompt, "FIRST AS-IS DRAFT COMMAND:") != 1 {
 		t.Fatalf("draft repair prompt must contain one as-is first command heading:\n%s", prompt)
