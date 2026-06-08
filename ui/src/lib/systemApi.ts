@@ -1,5 +1,5 @@
 import { fetchJSON } from "./api";
-import type { DoctorResponse } from "./appContracts";
+import type { DoctorResponse, SystemVersionResponse } from "./appContracts";
 
 export type DoctorRequest = {
   runtime?: string;
@@ -18,4 +18,8 @@ export async function loadSystemDoctor(request: DoctorRequest = {}): Promise<Doc
   }
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return fetchJSON<DoctorResponse>(`/api/system/doctor${suffix}`);
+}
+
+export async function loadSystemVersion(): Promise<SystemVersionResponse> {
+  return fetchJSON<SystemVersionResponse>("/api/system/version");
 }

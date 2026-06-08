@@ -1,4 +1,8 @@
 type TopStatusBarProps = {
+  buildVersion: string;
+  buildCommit: string;
+  buildBuilt: string;
+  uiBundle: string;
   workspacePath: string;
   repoCount: number;
   runtimeMode: string;
@@ -9,13 +13,28 @@ type TopStatusBarProps = {
   onRefresh: () => void;
 };
 
-export function TopStatusBar({ workspacePath, repoCount, runtimeMode, runtimeProvider, permissionMode, gitStatus, healthLabel, onRefresh }: TopStatusBarProps) {
+export function TopStatusBar({
+  buildVersion,
+  buildCommit,
+  buildBuilt,
+  uiBundle,
+  workspacePath,
+  repoCount,
+  runtimeMode,
+  runtimeProvider,
+  permissionMode,
+  gitStatus,
+  healthLabel,
+  onRefresh,
+}: TopStatusBarProps) {
   const localTime = new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date());
+  const versionLabel = buildVersion.trim() || "dev";
+  const buildTitle = `commit=${buildCommit || "none"} built=${buildBuilt || "unknown"} ui=${uiBundle || "embedded"}`;
 
   return (
     <header className="top-status-bar" data-testid="top-status-bar">
@@ -30,7 +49,9 @@ export function TopStatusBar({ workspacePath, repoCount, runtimeMode, runtimePro
         </div>
         <div>
           <p className="brand-name">Proven Arch</p>
-          <p className="brand-version">v0.1.1 beta</p>
+          <p className="brand-version" title={buildTitle} data-testid="brand-version">
+            {versionLabel}
+          </p>
         </div>
       </div>
 

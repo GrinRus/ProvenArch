@@ -49,6 +49,30 @@ async function fetchRunObservation(api: APIRequestContext, runID: string): Promi
   };
 }
 
+async function fetchArtifactText(api: APIRequestContext, artifactPath: string): Promise<string> {
+  const response = await api.get(`/api/artifacts?path=${encodeURIComponent(artifactPath)}`);
+  expect(response.ok(), `artifact API should return ${artifactPath}`).toBe(true);
+  return await response.text();
+}
+
+function expectReadableArtifactText(artifactPath: string, content: string, minCharacters = 320): void {
+  const text = content.trim();
+  expect(text, `${artifactPath} should not be empty`).not.toBe("");
+  expect(text.length, `${artifactPath} should contain evidence-backed content`).toBeGreaterThanOrEqual(minCharacters);
+  expect(text, `${artifactPath} should not be a bootstrap/scaffold artifact`).not.toMatch(
+    /(Provider wrote|Drafted required runtime artifacts|Select artifact to inspect|Loading\.\.\.|No findings reported\.|No proposals yet|No changelog yet)/i
+  );
+}
+
+function expectReadableDiagramArtifact(artifactPath: string, content: string): void {
+  const text = content.trim();
+  expect(text, `${artifactPath} should contain Mermaid content`).toMatch(/^(flowchart|graph)\b|```mermaid/i);
+  expect(text, `${artifactPath} should not be gap-only C4 output`).toMatch(/(Service:|Datastore:|External:|Actor:|-->|---|\buses\b|\bcalls\b)/i);
+  expect(text, `${artifactPath} should not only describe missing diagram evidence`).not.toMatch(
+    /Gap: no evidence-backed (services|containers|relationships|actors|external systems)[\s\S]*Gap: no evidence-backed/i
+  );
+}
+
 function observationShowsProductiveProgress(previous: RunObservation | null, current: RunObservation): boolean {
   if (current.status === "running" && current.currentStep !== "") {
     if (previous === null) {
@@ -159,6 +183,8 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await page.goto("/");
   await expect(page.getByTestId("console-shell")).toBeVisible();
   await expect(page.getByTestId("top-status-bar")).toContainText("Proven Arch");
+  await expect(page.getByTestId("brand-version")).not.toHaveText(/v0\.1\.1 beta/i);
+  await expect(page.getByTestId("brand-version")).toHaveText(/^(dev|v?\d|\w)/);
   await expect(page.getByTestId("stage-rail")).toBeVisible();
   await expect(page.getByTestId("right-inspector")).toBeVisible();
   await expect(page.getByTestId("activity-drawer")).toBeVisible();
@@ -252,6 +278,9 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect
     .poll(async () => ((await selectedDiagramPath.textContent()) ?? "").trim(), { timeout: 30_000 })
     .toMatch(/reports\/diagrams\//i);
+  const selectedDiagramPathText = ((await selectedDiagramPath.textContent()) ?? "").trim();
+  const selectedDiagramRaw = await fetchArtifactText(request, selectedDiagramPathText);
+  expectReadableDiagramArtifact(selectedDiagramPathText, selectedDiagramRaw);
 
   await expect
     .poll(
@@ -273,15 +302,23 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
     )
     .toBe(true);
 
-  const firstArtifactButton = reviewArtifactExplorer.locator("button.link-button").first();
-  await expect(firstArtifactButton).toBeVisible();
-  await firstArtifactButton.click();
+  const preferredReadableArtifactButton =
+    (await reviewArtifactExplorer.getByRole("button", { name: /reports\/as-is\/overview\.md/i }).count()) > 0
+      ? reviewArtifactExplorer.getByRole("button", { name: /reports\/as-is\/overview\.md/i }).first()
+      : (await reviewArtifactExplorer.getByRole("button", { name: /reports\/coverage\/summary\.md/i }).count()) > 0
+        ? reviewArtifactExplorer.getByRole("button", { name: /reports\/coverage\/summary\.md/i }).first()
+        : reviewArtifactExplorer.locator("button.link-button").first();
+  await expect(preferredReadableArtifactButton).toBeVisible();
+  await preferredReadableArtifactButton.click();
 
   const artifactContent = page.getByTestId("run-artifact-content");
   await expect(artifactContent).toBeVisible();
   await expect
     .poll(async () => (await artifactContent.textContent())?.trim() ?? "")
     .not.toMatch(/^(Select artifact to inspect\.|Loading\.\.\.)$/);
+  const selectedArtifactPath = ((await page.getByTestId("run-artifact-selected-path").textContent()) ?? "").trim();
+  const selectedArtifactText = ((await artifactContent.textContent()) ?? "").trim();
+  expectReadableArtifactText(selectedArtifactPath, selectedArtifactText);
 
   await expectOperatorInspectorSurfaces(page);
   await captureEvidenceScreenshot(page, "frontend-review-desktop.png");

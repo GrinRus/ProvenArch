@@ -64,6 +64,7 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
+	api.SetBuildInfo(version, commit, date)
 	if len(args) == 0 || isHelp(args[0]) {
 		printRootUsage(stdout)
 		return exitCodeOK

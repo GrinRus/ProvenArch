@@ -97,6 +97,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/health", s.handleHealth)
+	mux.HandleFunc("/api/system/version", s.handleSystemVersion)
 	mux.HandleFunc("/api/onboarding/status", s.handleOnboardingStatus)
 	mux.HandleFunc("/api/onboarding/workspace", s.handleOnboardingWorkspace)
 	mux.HandleFunc("/api/onboarding/runtime", s.handleOnboardingRuntime)
@@ -233,7 +234,7 @@ func (s *Server) setRuntimeConfig(config ServerRuntimeConfig) {
 }
 
 func (s *Server) shouldBlockAPIRequest(apiPath string) bool {
-	if apiPath == "/api/health" || strings.HasPrefix(apiPath, "/api/onboarding/") {
+	if apiPath == "/api/health" || apiPath == "/api/system/version" || strings.HasPrefix(apiPath, "/api/onboarding/") {
 		return false
 	}
 	s.mu.RLock()
@@ -256,6 +257,14 @@ func (s *Server) handleHealth(writer http.ResponseWriter, request *http.Request)
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleSystemVersion(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		writeMethodNotAllowed(writer, http.MethodGet)
+		return
+	}
+	writeJSON(writer, http.StatusOK, CurrentBuildInfo())
 }
 
 func (s *Server) handleSystemDoctor(writer http.ResponseWriter, request *http.Request) {

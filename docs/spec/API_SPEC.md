@@ -30,6 +30,19 @@
 { "status": "ok" }
 ```
 
+### GET `/api/system/version`
+Возвращает metadata запущенного ACP binary/UI bundle. Endpoint доступен и в launcher mode до выбора workspace, чтобы onboarding/live screenshots показывали фактическую сборку под тестом.
+
+**200**
+```json
+{
+  "version": "dev",
+  "commit": "none",
+  "built": "unknown",
+  "ui_bundle": "embedded"
+}
+```
+
 ### GET `/api/system/doctor`
 Возвращает read-only readiness checklist для first-run UI и локальной диагностики.
 Endpoint не меняет workspace.

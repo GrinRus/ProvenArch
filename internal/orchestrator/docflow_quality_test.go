@@ -1,13 +1,17 @@
 package orchestrator
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
+	"github.com/GrinRus/ProvenArch/internal/reports"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
 func TestAssessRefreshArtifactWarningsFlagsBankLikeCollapseFixture(t *testing.T) {
@@ -119,6 +123,92 @@ func TestRuntimeDiagnosticCountersSurfaceRepairStallPressure(t *testing.T) {
 	}
 }
 
+func TestAssessRunArtifactInventoryFlagsSparseCurrentRun(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	ws := workspace.Root{Path: root}
+	runID := "run-sparse"
+	writeWorkspaceText(t, root, "reports/as-is/overview.md", "# As-Is Overview\n\nProvider wrote this draft artifact for the as-is step.\n")
+	writeWorkspaceText(t, root, "reports/agent-outputs/architect/summary.md", "# Architect Summary\n\nProvider wrote this draft artifact for the as-is step.\n")
+	writeWorkspaceText(t, root, "proposals/runtime-recommendations.md", "# Runtime Recommendations\n\nDrafted required runtime artifacts for this step.\n")
+	writeWorkspaceText(t, root, "reports/changelog/runtime-proposals.md", "# Runtime Changelog\n\nDrafted required runtime artifacts for this step.\n")
+	writeWorkspaceText(t, root, "reports/coverage/summary.md", "# Coverage\n\n## Missing\n- owner mappings\n- operational runbooks\n")
+	writeWorkspaceText(t, root, "reports/coverage/open-questions.md", "# Open Questions\n\n- Who owns this service?\n")
+	writeWorkspaceText(t, root, "reports/findings/findings.md", "# Findings\n\nNo findings reported.\n")
+	writeWorkspaceText(t, root, "reports/diagrams/c4-context.mmd", "flowchart LR\n  System[\"Workspace System\"]\n  GapExternal[\"Gap: no evidence-backed external systems\"]\n")
+	writeWorkspaceText(t, root, "reports/diagrams/c4-container.mmd", "flowchart LR\n  System[\"Workspace System\"]\n  GapServices[\"Gap: no evidence-backed services\"]\n")
+	writeWorkspaceJSON(t, root, filepath.Join("reports", "taskruns", runID, "staging", "final", finalRunIndexFile), contracts.FinalRunIndex{
+		Version:           1,
+		RunID:             runID,
+		Pipeline:          "refresh",
+		GeneratedAt:       time.Date(2026, 6, 8, 10, 0, 0, 0, time.UTC).Format(time.RFC3339),
+		CitationIndexPath: filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "staging", "final", citationIndexFile)),
+		CanonicalDocuments: []contracts.FinalRunDocument{
+			sparseFinalDocument("doc.overview", "report", "Overview", "reports/as-is/overview.md"),
+			sparseFinalDocument("doc.coverage", "coverage", "Coverage", "reports/coverage/summary.md"),
+			sparseFinalDocument("doc.questions", "questions", "Questions", "reports/coverage/open-questions.md"),
+			sparseFinalDocument("doc.findings", "findings", "Findings", "reports/findings/findings.md"),
+		},
+		Topics: []contracts.TopicIndexEntry{},
+		Semantic: contracts.SemanticSnapshot{
+			Coverage: contracts.Coverage{
+				Observed: []string{"ftgo"},
+				Missing:  []string{"owner mappings", "operational runbooks"},
+				Notes:    []string{},
+			},
+			Questions: []contracts.Question{{ID: "q.owner", Text: "Who owns this service?"}},
+			Entities:  []contracts.Entity{},
+			Edges:     []contracts.Edge{},
+			Findings:  []contracts.Finding{},
+		},
+	})
+	writeWorkspaceText(t, root, filepath.Join("reports", "taskruns", runID, "staging", "shards", "ftgo", "shard-pack-manifest.json"), `{
+  "documents": [
+    {"path": ".qwen/skills/acp-collect-shard-execution/SKILL.md"}
+  ]
+}`)
+
+	inventory, signals := assessRunArtifactInventory(
+		ws,
+		runID,
+		RunStatusSucceeded,
+		reports.ReportRenderContext{ReportMode: reports.ReportModeNormal},
+	)
+	if !inventory.FinalIndexPresent {
+		t.Fatalf("expected final index to be present: %#v", inventory)
+	}
+	if inventory.Semantic.Entities != 0 || inventory.Semantic.CoverageMissing != 2 {
+		t.Fatalf("unexpected semantic inventory: %#v", inventory.Semantic)
+	}
+	for _, code := range []string{
+		"artifact_quality.empty_semantic_model",
+		"artifact_quality.model_entities_missing",
+		"artifact_quality.placeholder_artifact",
+		"artifact_quality.findings_empty_with_coverage_gap",
+		"artifact_quality.c4_gap_only",
+		"artifact_quality.hidden_provider_document",
+	} {
+		if !hasRunQualitySignal(signals, code) {
+			t.Fatalf("expected signal %s in %#v", code, signals)
+		}
+	}
+}
+
+func sparseFinalDocument(id string, kind string, title string, canonicalPath string) contracts.FinalRunDocument {
+	return contracts.FinalRunDocument{
+		ID:            id,
+		Kind:          kind,
+		Title:         title,
+		CanonicalPath: canonicalPath,
+		StagedPath:    filepath.ToSlash(filepath.Join("reports", "taskruns", "run-sparse", "staging", "final", canonicalPath)),
+		Topics:        []string{},
+		CitationIDs:   []string{},
+		SourceShards:  []string{"ftgo"},
+		Status:        "staged",
+	}
+}
+
 func loadRefreshArtifactFixtureSet(
 	t *testing.T,
 	root string,
@@ -174,6 +264,26 @@ func loadRefreshArtifactFixtureSet(
 	}
 
 	return manifests, finalIndex, citationIndex, validatorVerdict
+}
+
+func writeWorkspaceText(t *testing.T, root string, rel string, content string) {
+	t.Helper()
+	abs := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatalf("mkdir %q: %v", rel, err)
+	}
+	if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %q: %v", rel, err)
+	}
+}
+
+func writeWorkspaceJSON(t *testing.T, root string, rel string, value any) {
+	t.Helper()
+	raw, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal %q: %v", rel, err)
+	}
+	writeWorkspaceText(t, root, rel, string(append(raw, '\n')))
 }
 
 func hasRunQualitySignal(signals []runQualitySignal, code string) bool {

@@ -76,6 +76,36 @@ func TestLauncherBlocksWorkspaceAPIsUntilWorkspaceSelected(t *testing.T) {
 	}
 }
 
+func TestSystemVersionEndpointIsAvailableBeforeWorkspaceSelection(t *testing.T) {
+	t.Parallel()
+
+	server := NewLauncherServer(testServerRuntimeConfig(), testLauncherServiceFactory())
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	response, err := http.Get(httpServer.URL + "/api/system/version")
+	if err != nil {
+		t.Fatalf("GET /api/system/version: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("expected status 200 before workspace selection, got %d body=%s", response.StatusCode, string(body))
+	}
+	var payload struct {
+		Version  string `json:"version"`
+		Commit   string `json:"commit"`
+		Built    string `json:"built"`
+		UIBundle string `json:"ui_bundle"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode version payload: %v", err)
+	}
+	if payload.Version == "" || payload.Commit == "" || payload.Built == "" || payload.UIBundle != "embedded" {
+		t.Fatalf("unexpected version payload: %+v", payload)
+	}
+}
+
 func TestDirectModeOnboardingStatusReflectsRuntimeConfig(t *testing.T) {
 	t.Parallel()
 

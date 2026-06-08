@@ -67,6 +67,142 @@ Task selection rules:
 - Each selected slice gets a decision-complete ExecPlan/update before implementation, one focused implementation pass, self-review/fix loops, Full DoD (`make contracts`, `make test`, `make lint`, `make build`), then one commit.
 
 ### Plan ID
+EP-20260608-medium-live-e2e-quality-ui
+
+### Context
+Run a medium live E2E assessment on a trusted local host after a user-reported weak local result: sparse artifacts and missing C4 diagrams. This is an operator evaluation, not a product code slice. The run must follow `acp-e2e-live-gate` and `docs/RELEASE_LIVE_E2E_RUNBOOK.md`: use direct public harness commands, avoid wrapper scripts, avoid canonical matrix edits, and classify host/provider/path blockers separately from ACP product defects.
+
+The medium non-release profile is `regres long`: `posthog` (`single-path`, medium shard bucket) plus `ftgo-application` (`single-git_url`, medium shard bucket), default qwen-only baseline with `RUN_COUNT=1`. Because the current worktree may need this plan update, execute the harness from a separate clean worktree.
+
+### Goals (must have)
+- [ ] Run host/tree/provider/path preflight for the medium live E2E profile.
+- [ ] Launch `regres long` through `scripts/full-run-batch-matrix.sh` using the public planner/harness path.
+- [ ] Keep frontend init inspection enabled so UI artifact readability can be assessed from real UI/API evidence.
+- [ ] Inspect `run_matrix_*`, `quality_report_*`, `reports/taskruns/*-quality.json`, promoted reports, diagrams and raw taskrun metadata.
+- [ ] Evaluate whether the resulting artifacts are substantive, evidence-backed and complete enough for architecture review.
+- [ ] Evaluate whether the UI makes the generated artifacts discoverable and readable without relying only on filesystem inspection.
+
+### Non-goals
+- [ ] Do not change runtime contracts, schemas, canonical matrix files or curated repo files.
+- [ ] Do not treat this non-release diagnostic as release readiness.
+- [ ] Do not bypass provider/toolchain/path prechecks with test-only overrides.
+- [ ] Do not add a new wrapper around the matrix harness.
+
+### Approach
+1) Record this ExecPlan and keep the live run itself in a separate clean worktree.
+2) Run fail-fast host checks: writable roots, clean tree, exact Go/Node toolchain, provider command, canonical path repo availability for `posthog`.
+3) Generate the medium command with `scripts/live-e2e-plan.py --mode regres --size long --providers qwen --frontend-mode per_run --format shell`.
+4) Execute the printed `scripts/full-run-batch-matrix.sh` command and monitor profile status, driver logs, inventories and generated reports.
+5) Inspect backend quality outputs and promoted workspace artifacts, including C4 diagram presence/content.
+6) Inspect frontend live E2E outputs and, where possible, open the resulting UI workspace for manual readability checks.
+7) Report the black-box assessment with evidence paths, failure class if any, and concrete gaps.
+
+### Files expected to change
+- `docs/PLANS.md`
+- Optional operator assessment under `reports/` if a durable report is useful after the run
+
+### Acceptance criteria
+- [ ] Preflight result is classified as passed or a concrete operational blocker.
+- [ ] Medium harness command is recorded and launched only if preflight passes.
+- [ ] Artifact quality is assessed from generated machine reports and direct artifact inspection.
+- [ ] UI readability is assessed from frontend init evidence and manual UI/API inspection.
+- [ ] Final answer names the primary failure class or confirms no blocking quality issue was found.
+
+### Risks
+- Medium live runs can take hours and can fail due to provider auth/quota/timeout rather than ACP defects.
+- `posthog` path checkout may be missing or not pinned on the current host.
+- Frontend inspection depends on successful backend snapshots; if backend fails, UI evidence may be dependent-skip rather than an independent UI result.
+
+### Progress log
+- 2026-06-08: Started medium live E2E artifact quality and UI readability assessment plan.
+- 2026-06-08: Medium `regres long` diagnostic was mixed: `single-path/posthog` stopped as `operational_host_preflight_failed` because qwen headless probe timed out; `single-git_url/ftgo` backend and frontend hard-passed but produced operator-unusable artifacts. Root-cause triage points at enforced runtime prompt/quality policy, not C4 rendering: command-first collect/as-is/validator skeletons are valid with empty semantic model or placeholder drafts, qwen draft valid-artifact stop can accept those files, validator can return `PASS` with empty findings/questions for single-repo owner/dependency gaps, and live quality gates score/report this as warnings/analysis loss rather than hard failure. C4 diagrams are gap-only because promoted `final-run-index.json` has `semantic.entities=[]` and `semantic.edges=[]`.
+- 2026-06-08: Added the remaining live-loop hardening surface: `/api/system/version` exposes actual running build metadata before workspace selection, Console V2 top bar no longer hard-codes `v0.1.1 beta`, and frontend live `init-inspect` now checks selected Review markdown and C4 Mermaid content for readability/placeholder/gap-only failures through `/api/artifacts`.
+
+### Plan ID
+EP-20260608-live-artifact-quality-hardening
+
+### Context
+Follow-up to `EP-20260608-medium-live-e2e-quality-ui`. The medium live run showed that a provider can produce structurally valid but substantively unusable analysis artifacts: placeholder top-level reports, empty findings, empty semantic model, gap-only C4 diagrams, generic proposal/changelog files, and at least one taskrun/staging document sourced from a provider tool directory instead of repository evidence. The frontend review UI then presents these artifacts as reviewable/ready because it mostly checks artifact presence and open-question counts.
+
+This is a product-quality slice. It must keep the existing local-first/entity-per-file contracts intact unless explicitly synchronized through schemas, docs, validators, fixtures and tests.
+
+### Goals (must have)
+- [ ] Define and enforce an artifact-quality rubric across all analysis outputs: charter, collect shard manifests/docs, as-is reports, coverage/questions, findings, semantic model, C4 diagrams, proposals/changelog, taskrun indexes, citation indexes, and frontend review surfaces.
+- [ ] Audit prompt correctness for each artifact-producing step (`collect`, `as-is`, `findings/validator`, `proposals`) so prompts require evidence-backed, non-placeholder content before final acceptance.
+- [ ] Make placeholder or skeleton-only promoted artifacts fail quality gates for nontrivial live targets instead of passing with a low signal score.
+- [ ] Make an empty semantic model a hard quality failure when collect/as-is completed against a non-empty repository.
+- [ ] Make gap-only C4 diagrams a hard quality failure when the semantic model is empty or unusable.
+- [ ] Reject hidden/provider/tooling files such as `.qwen/`, `.claude/`, `.codex/`, `.git/`, and similar generated side-effects from shard document manifests and promoted canonical docs.
+- [ ] Require findings/questions to reflect critical coverage gaps. For example, owner/dependency/operational gaps must not coexist with `No findings reported.` in normal report mode.
+- [ ] Update frontend review/readiness so the UI surfaces artifact-quality blockers and keeps generated artifacts readable without raw runtime noise dominating the review surface.
+- [ ] Replace the hard-coded UI `v0.1.1 beta` label with runtime/build metadata so live screenshots show the actual binary/UI version under test.
+- [ ] Update live E2E scoring so backend and frontend hard-pass require quality-readable artifacts, not only completed runs and screenshot capture.
+- [ ] Evaluate artifact quality from the actual artifacts produced by each run. Do not rely on a copied bad-run fixture as the release/live verdict source.
+
+### Non-goals
+- [ ] Do not tune the curated release matrices or repo fixtures to hide the observed qwen behavior.
+- [ ] Do not create a persistent `ftgo` bad-output fixture as the main quality gate. The live gate must inspect the current run's artifact tree every time.
+- [ ] Do not remove the gap-node diagram fallback; it remains useful diagnostic output, but it must not be counted as a successful C4 result.
+- [ ] Do not require live network/provider calls in required CI.
+- [ ] Do not introduce hosted-mode or security/compliance enforcement scope.
+
+### Approach
+1) Implement a per-run artifact inventory/evaluator that walks the actual promoted workspace and taskrun/staging outputs for the selected backend/frontend run. It must score every artifact surface produced by that run, including missing surfaces.
+2) Harden artifact canonicalization and docflow validation so shard documents must be inside the allowed workspace artifact surface and must not come from hidden/provider/tool/runtime side-effect directories.
+3) Extend backend run-quality evaluation to emit `artifact_quality:` warnings or blocking signals for sparse top-level reports, placeholder text (`Provider wrote...`), empty semantic entities/edges, gap-only diagrams, missing model files, empty findings with critical coverage gaps, and placeholder proposals/changelog.
+4) Add prompt snapshot/contract tests that verify the assembled prompts place skeleton-first commands in a bootstrap role only, require repository evidence and semantic extraction, and forbid final success from generic placeholder text.
+5) Tighten runtime prompt policy in `steppolicy`/`promptcontract`: first-action skeletons may bootstrap required files, but normal runs must enrich them before final acceptance; single-repo validator prompts must not return `PASS` with zero findings/questions when coverage gaps remain.
+6) Extend `scripts/e2e_batch_report.py` and Python tests so dynamically inspected bad artifact shapes classify as `quality_gates_failed`/`semantic_hard_fail`, including backend and frontend-selected provider surfaces. Tests may build small temporary artifact trees inline, but must not depend on a persistent copied live-run fixture.
+7) Extend review API/UI with artifact-quality status per step and review surface. The UI should show hard blockers for empty model/gap-only C4/placeholders, distinguish baseline support files from analysis outputs, and keep artifact previews legible on desktop/mobile.
+8) Update docs/runbook/testing strategy to document the quality rubric and rerun the medium live profile only after the dynamic evaluator and local tests pass.
+
+### Files expected to change
+- `internal/artifactquality/canonicalize.go`
+- `internal/contracts/docflow.go`
+- `internal/orchestrator/docflow.go`
+- `internal/orchestrator/quality.go`
+- `internal/runtime/promptcontract/promptcontract.go`
+- `internal/runtime/promptcontract/promptcontract_test.go`
+- `internal/runtime/steppolicy/policy.go`
+- `internal/runtime/steppolicy/policy_test.go`
+- `internal/runtime/qwencode/runner.go`
+- `internal/reports/compiler.go`
+- `scripts/e2e_batch_report.py`
+- `scripts/tests/batch_failure_classification_test.py`
+- `scripts/tests/frontend_live_e2e_contract_test.py`
+- `internal/api/review_diff.go`
+- `ui/src/components/TopStatusBar.tsx`
+- `ui/src/components/StagePanels.tsx`
+- `docs/spec/PIPELINE_SPEC.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- Related unit/integration tests that construct temporary artifact trees or inspect generated run outputs
+
+### Acceptance criteria
+- [ ] Every live/backend/frontend run quality report includes a fresh artifact inventory and quality verdict for all produced and expected analysis surfaces.
+- [ ] The observed sparse `ftgo` artifact shape fails when detected by the dynamic evaluator, without relying on a persisted copied fixture.
+- [ ] Hidden/provider tool document paths in shard manifests are rejected before promotion and covered by unit tests.
+- [ ] Backend quality JSON contains explicit `artifact_quality:` signals for every blocked artifact class found in the current run inventory.
+- [ ] Prompt contract tests prove artifact-producing prompts require evidence-backed content, semantic entities/edges where applicable, and explicit non-placeholder final criteria.
+- [ ] C4 gap-only output is visible as diagnostic output but is not counted as a successful C4 diagram in quality/readiness.
+- [ ] Frontend review UI shows hard blockers for empty semantic model, gap-only diagrams, placeholder reports/proposals, and empty findings with critical coverage gaps.
+- [ ] Frontend screenshots display version metadata from the running app/build, not a hard-coded release string.
+- [ ] Frontend live E2E contract verifies not only screenshots/selectors but also artifact readability and quality blocker surfacing.
+- [ ] Docs and runbook explain the rubric and how to inspect all resulting artifacts after a live run.
+- [ ] Full DoD for the slice passes: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Risks
+- Providers may need prompt changes that increase runtime duration; keep hard gates deterministic and let live gates validate provider-specific behavior.
+- Empty findings can be valid for tiny deterministic or toy targets, so quality rules need an explicit nontrivial-target threshold instead of a blanket ban.
+- Some generated support artifacts under `skills/` are expected baseline files. The quality rubric must separate baseline support surfaces from analysis outputs.
+
+### Progress log
+- 2026-06-08: Audited the failed medium live run artifact surfaces. Backend/frontend promoted workspaces have no `model/` files, C4 is gap-only, findings/proposals/changelog/top-level overviews are placeholders, shard manifests have citations but no entities/edges/findings, and one init shard staged a `.qwen/skills/.../SKILL.md` provider-side-effect file as an as-is document. UI review/readiness currently surfaces artifact presence but not these substantive quality failures. The top status bar also hard-codes `v0.1.1 beta`, so screenshots can mislead operators about the tested build version.
+- 2026-06-08: Updated the plan to avoid making a persistent bad-run fixture the quality source of truth. The live gate must dynamically inspect and score the current run's generated artifacts every time; tests can use temporary in-test artifact trees only to protect evaluator behavior.
+- 2026-06-08: Started implementation slice for dynamic backend artifact quality. Added fresh run artifact inventory to quality summary, blocking `artifact_quality:*` signals for sparse current-run surfaces, and collect manifest rejection for provider/tool side-effect document paths; no persistent bad-run fixture added.
+- 2026-06-08: Completed the first backend/prompt hardening slice. Prompt policy now treats collect/as-is/proposals first-action skeletons as bootstrap-only, not final-acceptable content. Full local DoD passed with exact Node candidate: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
 EP-20260602-onboarding-first-startup
 
 ### Context

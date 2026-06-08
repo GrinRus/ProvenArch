@@ -9,6 +9,10 @@ import type { InspectorItem, NextAction, StageId, StageOption } from "../lib/con
 import type { RunLogEntry, RunReviewSummaryResponse, RunStatusResponse } from "../lib/appContracts";
 
 type AppShellProps = {
+  buildVersion: string;
+  buildCommit: string;
+  buildBuilt: string;
+  uiBundle: string;
   workspacePath: string;
   repoCount: number;
   runtimeMode: string;
@@ -52,6 +56,10 @@ type AppShellProps = {
 };
 
 export function AppShell({
+  buildVersion,
+  buildCommit,
+  buildBuilt,
+  uiBundle,
   workspacePath,
   repoCount,
   runtimeMode,
@@ -96,6 +104,10 @@ export function AppShell({
   return (
     <main className="console-shell" data-testid="console-shell">
       <TopStatusBar
+        buildVersion={buildVersion}
+        buildCommit={buildCommit}
+        buildBuilt={buildBuilt}
+        uiBundle={uiBundle}
         workspacePath={workspacePath}
         repoCount={repoCount}
         runtimeMode={runtimeMode}
