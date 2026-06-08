@@ -26,9 +26,7 @@ type FetchMockState = {
   qaRunResponses?: Record<string, MockJSON>;
   onboardingStatus?: MockJSON;
   onboardingWorkspaceSelectionStatus?: MockJSON;
-  pathSuggestions?: MockJSON[];
-  doctorResponse?: MockJSON;
-  systemInfo?: MockJSON;
+  systemVersion?: MockJSON;
 };
 
 function jsonResponse(body: MockJSON, status = 200): Response {
@@ -291,12 +289,13 @@ function createFetchMock(state: FetchMockState = {}) {
     const url = typeof input === "string" ? input : input.toString();
     const method = (init?.method ?? "GET").toUpperCase();
 
-    if (method === "GET" && url === "/api/system/info") {
+    if (method === "GET" && url === "/api/system/version") {
       return jsonResponse(
-        state.systemInfo ?? {
-          version: "0.1.2",
-          commit: "fa3c633",
-          built: "2026-06-02T13:20:26Z",
+        state.systemVersion ?? {
+          version: "dev",
+          commit: "none",
+          built: "unknown",
+          ui_bundle: "embedded",
         },
       );
     }
@@ -1084,6 +1083,26 @@ describe("App", () => {
     await waitFor(() => expect(fetchMock.mock.calls.some((call) => call[0] === "/api/workspace/validate")).toBe(true));
     expect(screen.getByTestId("source-repo-table")).toHaveTextContent("resolved");
     expect(screen.getByTestId("top-status-bar")).toHaveTextContent("workspace valid");
+  });
+
+  it("shows running build metadata instead of the latest public release label", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        systemVersion: {
+          version: "dev-local",
+          commit: "abc123",
+          built: "2026-06-08T10:00:00Z",
+          ui_bundle: "embedded",
+        },
+      }),
+    );
+
+    await renderConsoleApp();
+
+    expect(screen.getByTestId("brand-version")).toHaveTextContent("dev-local");
+    expect(screen.getByTestId("brand-version")).not.toHaveTextContent("v0.1.1 beta");
+    expect(screen.getByTestId("brand-version")).toHaveAttribute("title", expect.stringContaining("commit=abc123"));
   });
 
   it("shows recoverable duplicate repo-name errors during onboarding source setup", async () => {

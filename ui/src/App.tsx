@@ -28,6 +28,7 @@ import {
   type RuntimeExecutionKey,
   type RuntimePermissionKey,
   type RuntimeTimeoutKey,
+  type SystemVersionResponse,
 } from "./lib/appContracts";
 import type { InspectorItem, NextAction, StageId } from "./lib/consoleTypes";
 import type { LoadGitDiffOptions } from "./lib/gitDiffApi";
@@ -35,8 +36,8 @@ import { buildStageOptions } from "./lib/stageModel";
 import { useRunExplorer } from "./hooks/useRunExplorer";
 import { useRuntimeSettings } from "./hooks/useRuntimeSettings";
 import { useWorkspaceSetup } from "./hooks/useWorkspaceSetup";
-import { forgetOnboardingRecentWorkspace, loadOnboardingStatus, selectOnboardingRuntime, selectOnboardingWorkspace } from "./lib/onboardingApi";
-import { loadSystemDoctor, loadSystemInfo, type SystemInfoResponse } from "./lib/systemApi";
+import { loadOnboardingStatus, selectOnboardingRuntime, selectOnboardingWorkspace } from "./lib/onboardingApi";
+import { loadSystemDoctor, loadSystemVersion } from "./lib/systemApi";
 
 export default function App() {
   const [activeStage, setActiveStage] = useState<StageId>("source");
@@ -47,6 +48,12 @@ export default function App() {
   const [setupRuntime, setSetupRuntime] = useState("fake");
   const [setupRuntimeProvider, setSetupRuntimeProvider] = useState("claude-code");
   const [setupDoctorResult, setSetupDoctorResult] = useState<Awaited<ReturnType<typeof loadSystemDoctor>> | null>(null);
+  const [systemVersion, setSystemVersion] = useState<SystemVersionResponse>({
+    version: "dev",
+    commit: "none",
+    built: "unknown",
+    ui_bundle: "embedded",
+  });
   const [setupDoctorStatus, setSetupDoctorStatus] = useState("");
   const [firstRunStatus, setFirstRunStatus] = useState("");
   const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatusResponse | null>(null);
@@ -209,9 +216,7 @@ export default function App() {
   }, [activeStage, baselineEditorArtifacts, loadSelectedEditorContent, loadWizardContract, selectedEditorLoadedPath, selectedEditorPath, wizardContractLoaded]);
 
   async function bootstrapApp() {
-    void loadSystemInfo()
-      .then(setSystemInfo)
-      .catch(() => setSystemInfo(null));
+    await bootstrapSystemVersion();
     const status = await loadOnboardingStatus();
     syncOnboardingStatus(status);
     if (!status.can_enter_console) {
@@ -220,6 +225,19 @@ export default function App() {
     }
     await bootstrapConsoleData({ validateWorkspace: true });
     setConsoleReady(true);
+  }
+
+  async function bootstrapSystemVersion() {
+    try {
+      setSystemVersion(await loadSystemVersion());
+    } catch {
+      setSystemVersion({
+        version: "dev",
+        commit: "none",
+        built: "unknown",
+        ui_bundle: "embedded",
+      });
+    }
   }
 
   async function bootstrapConsoleData(options: { validateWorkspace?: boolean } = {}) {
@@ -840,9 +858,12 @@ export default function App() {
   }
 
   return (
-      <AppShell
-        buildInfo={systemInfo}
-        workspacePath={validateResult?.workspace ?? workspaceRootPath ?? "bound workspace"}
+    <AppShell
+      buildVersion={systemVersion.version}
+      buildCommit={systemVersion.commit}
+      buildBuilt={systemVersion.built}
+      uiBundle={systemVersion.ui_bundle}
+      workspacePath={validateResult?.workspace ?? workspaceRootPath ?? "bound workspace"}
       repoCount={validateResult?.resolved_repos?.length ?? guidedRepos.length}
       runtimeMode={setupRuntime}
       runtimeProvider={setupRuntimeProvider}

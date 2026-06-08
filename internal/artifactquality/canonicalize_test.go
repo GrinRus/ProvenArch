@@ -32,6 +32,30 @@ func TestValidateCollectManifestRejectsContractInvalidCompatibilityPayload(t *te
 	}
 }
 
+func TestValidateCollectManifestRejectsProviderToolDocumentPath(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	payload := validCollectManifestPayload()
+	payload["documents"].([]any)[0].(map[string]any)["path"] = ".qwen/skills/acp-collect-shard-execution/SKILL.md"
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), raw, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	writeDoc(t, writeRoot, ".qwen/skills/acp-collect-shard-execution/SKILL.md", "# Tool side effect\n")
+
+	err = ValidateCollectManifestInRoot(writeRoot)
+	if err == nil {
+		t.Fatalf("expected provider tool document path to fail validation")
+	}
+	if !strings.Contains(err.Error(), ".qwen") {
+		t.Fatalf("expected validation error to mention provider tool component, got %v", err)
+	}
+}
+
 func TestValidateCollectManifestRejectsForbiddenSemanticAliasesBySchema(t *testing.T) {
 	t.Parallel()
 

@@ -218,25 +218,26 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 	case "init.step1.collect", "refresh.step1.collect":
 		lines = append(lines,
 			`- Do NOT delegate to agent/subagent helpers and do NOT use todo_write-style planning.`,
-			`- Before the first filesystem write inside write_root, keep repository exploration minimal and converge quickly on the first authored doc plus shard-pack-manifest.json.`,
+			`- Before the first filesystem write inside write_root, keep repository exploration minimal and converge quickly on the first authored doc plus shard-pack-manifest.json bootstrap pair.`,
 			`- Produce runtime-authored documents in write_root and then write shard-pack-manifest.json in write_root.`,
 			`- Early pair-write requirement: write the suggested overview doc and shard-pack-manifest.json as one focused artifact pair before any broad second-pass repository sweep.`,
 			fmt.Sprintf(`- Suggested collect authored doc path for this shard: %q. Prefer exactly this single doc path unless already writing an existing clearer authored doc.`, SuggestedCollectDocumentPath(task)),
 			fmt.Sprintf(`- Absolute collect targets for the early pair-write: %q and %q.`, filepath.Join(strings.TrimSpace(task.WriteRoot), filepath.FromSlash(SuggestedCollectDocumentPath(task))), filepath.Join(strings.TrimSpace(task.WriteRoot), "shard-pack-manifest.json")),
-			fmt.Sprintf(`- Minimal collect target shape: write %q + "shard-pack-manifest.json" early, then record remaining uncertainty in coverage/questions instead of continuing open-ended exploration.`, SuggestedCollectDocumentPath(task)),
-			`- Do not wait for a complete broad repository sweep before writing shard-pack-manifest.json; once the first authored doc covers the assigned shard scope, write the manifest and record remaining gaps in semantic.coverage.missing.`,
+			fmt.Sprintf(`- Minimal collect target shape: write %q + "shard-pack-manifest.json" early, then enrich that pair from concrete repository evidence and record remaining uncertainty in coverage/questions instead of continuing open-ended exploration.`, SuggestedCollectDocumentPath(task)),
+			`- Do not wait for a complete broad repository sweep before writing shard-pack-manifest.json; after the bootstrap pair exists, enrich the manifest with concrete observed evidence for the assigned shard scope and record remaining gaps in semantic.coverage.missing.`,
 			`- Immediately after writing the first authored doc, write shard-pack-manifest.json by adapting the task-specific JSON skeleton embedded in the first-action command section; keep exact metadata keys and replace only evidence/content values you actually observed.`,
 			`- Do not exit after writing markdown only; every collect shard must finish with a valid shard-pack-manifest.json.`,
+			`- Do not treat the first-action skeleton or generic scaffold prose as final-acceptable content; before final exit, replace placeholder text and empty semantic arrays with evidence-backed content where the repository evidence supports it.`,
 			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and semantic snapshot.`,
 			`- In shard-pack-manifest.json, semantic MUST include coverage, questions, entities, edges, and findings.`,
 			`- Use only canonical collect vocabulary: semantic.coverage.observed, semantic.questions[*].id + semantic.questions[*].text, semantic.edges[*].type, and object-shaped provenance blocks.`,
 			`- Every semantic.questions[] item must include id and text; every semantic.findings[] item must include id, severity, title, and provenance.`,
 			`- Do NOT emit semantic payloads on stdout; keep semantic only inside shard-pack-manifest.json.`,
 			`- You may be flexible in document structure, but promotion and rendering depend on manifest citations/topics remaining accurate.`,
-			`- After the first filesystem write inside write_root, stop broad repository exploration; only minimal manifest/JSON repair is allowed afterwards.`,
+			`- After the first filesystem write inside write_root, avoid broad repository exploration; only targeted evidence reads needed to enrich the current shard manifest/document and minimal manifest/JSON repair are allowed afterwards.`,
 			`- After writing shard-pack-manifest.json, do NOT continue broad list_directory/read_file sweeps across repo roots.`,
 			`- Do NOT read reports/taskruns/**, raw runtime logs, or previously generated shard-pack-manifest.json files as schema examples during collect.`,
-			`- If authored docs and shard-pack-manifest.json already exist in write_root, stop and exit successfully.`,
+			`- If authored docs and shard-pack-manifest.json already exist in write_root, stop only after confirming they contain evidence-backed content for this shard and are not unchanged bootstrap placeholders.`,
 		)
 		if rootFileScopes := rootFileShardPathScopes(task.PathScopes); len(rootFileScopes) > 0 {
 			lines = append(lines,
@@ -281,8 +282,9 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Write asis-draft-manifest.json in write_root.`,
 			`- Write overview.md, summary.md, and architect-summary.md only under draft_final_root.`,
 			`- Use the FIRST AS-IS DRAFT COMMAND skeleton above as the first draft artifact set; do not wait for broad analysis before creating the required files.`,
+			`- The first draft artifact set is bootstrap-only; before final exit, replace placeholder scaffold text with evidence-backed as-is content from staged final artifacts.`,
 			`- Use staged final evidence from read_context_roots only; do NOT read sibling baseline workspaces or previously published as-is drafts as templates.`,
-			`- If asis-draft-manifest.json already describes the publish surface, stop after artifact validation; do NOT re-register draft artifacts through any legacy metadata op.`,
+			`- If asis-draft-manifest.json already describes the publish surface, stop only after confirming referenced draft files are not unchanged bootstrap placeholders; do NOT re-register draft artifacts through any legacy metadata op.`,
 			`- Compiler may materialize indexes and derived technical artifacts only; canonical narratives come from your drafts.`,
 		)
 		lines = append(lines, artifactquality.AsIsDraftManifestContractLines()...)
@@ -296,7 +298,8 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Write proposals-draft-manifest.json in write_root.`,
 			`- Draft final docs only under draft_final_root.`,
 			`- Allowed canonical targets are proposals/* and reports/changelog/*.`,
-			`- If proposals-draft-manifest.json already describes the publish surface, stop after artifact validation; do NOT re-register draft artifacts through any legacy metadata op.`,
+			`- The first proposals draft artifact set is bootstrap-only; before final exit, replace placeholder scaffold text with evidence-backed proposal/changelog content from validated staged artifacts.`,
+			`- If proposals-draft-manifest.json already describes the publish surface, stop only after confirming referenced draft files are not unchanged bootstrap placeholders; do NOT re-register draft artifacts through any legacy metadata op.`,
 			`- Promotion remains deterministic; your drafts become publish candidates only after compile/publish gates.`,
 		)
 		lines = append(lines, artifactquality.ProposalsDraftManifestContractLines()...)
@@ -354,7 +357,7 @@ func CollectFirstActionSection(task acpruntime.Task) string {
 		fmt.Sprintf(`- Exact manifest target: %q.`, manifestTarget),
 		"FIRST COLLECT ARTIFACT PAIR COMMAND:",
 		"Run this exact command as the next filesystem action after checking whether both target files already exist; do not call read_file, list_directory, grep_search, glob, find, rg, or any repository exploration before this command:",
-		"- The embedded skeleton is intentionally valid before additional evidence; do not improve or rewrite it before the first pair exists.",
+		"- The embedded skeleton is bootstrap-only: write it to establish the required pair, then enrich it before final exit; do not treat an unchanged skeleton as final-acceptable output.",
 		CollectEarlyPairWriteCommand(task),
 	}, "\n")
 }

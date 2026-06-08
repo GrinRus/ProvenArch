@@ -31,7 +31,7 @@
    - `run` выполняет deterministic `init|refresh` pipeline в local/batch/non-interactive execution
    - `qa` даёт deterministic compatibility ответы по артефактам workspace; UI target Ask использует async runtime-backed Q&A runs
    - `doctor` выполняет read-only readiness checks для local install/workspace/repo/runtime/UI; CLI exit codes: `0` ready, `1` user-fixable issues, `2` invalid flags/internal request error
-   - `version` / `--version` печатает build metadata (`version`, `commit`, `built`) для проверки release binary без workspace
+   - `version` / `--version` печатает build metadata (`version`, `commit`, `built`) для проверки release binary без workspace; UI получает те же runtime metadata через `GET /api/system/version`, доступный до выбора workspace
    - runtime selector process-scoped: `fake` default для required CI, `headless` opt-in
    - global provider selector остаётся process-level fallback: `--runtime-provider` > `ACP_RUNTIME_PROVIDER` > `claude-code`
    - effective provider resolution внутри run step-scoped: `workspace.yaml.runtime.profile.steps.<step>.provider` переопределяет global fallback только для выбранного шага
@@ -46,7 +46,7 @@
    - Prod: `npm run build` → `ui/dist` встраивается в Go бинарь
    - Live browser e2e: Playwright optional smoke (`ui/e2e/live-flow.spec.ts`, `npm run e2e:live --prefix ui`)
    - UI first-run entrypoint использует pre-console `OnboardingShell`, а не девятую product stage: `Workspace -> Sources -> Runner -> Ready`, затем переход в Console V2
-   - UI shell организован как Proven Arch console: top health strip (workspace path, repo count, runtime/provider, permission mode, Git publication state), product-flow rail `Source / Readiness / Charter / Analysis / Review / Proposals / Ask / Publish`, центральная рабочая область, right inspector (`Next action`, blockers, evidence refs, workspace health, runtime safety, Git publication) и bottom activity drawer для logs/events
+   - UI shell организован как Proven Arch console: top health strip (actual build/version metadata, workspace path, repo count, runtime/provider, permission mode, Git publication state), product-flow rail `Source / Readiness / Charter / Analysis / Review / Proposals / Ask / Publish`, центральная рабочая область, right inspector (`Next action`, blockers, evidence refs, workspace health, runtime safety, Git publication) и bottom activity drawer для logs/events
    - Guided setup поддерживает multi-repo (`repos[]`) с add/remove rows и optional `ref`; Source показывает repo table с name/source/ref, validation state и явным advanced-only статусом для analysis include/exclude
    - Readiness показывает summary cards для workspace, repositories, runtime provider, permissions и artifacts, а также compact runtime profile summary перед advanced settings
    - Показывает repo overview в validate surface: `resolved_repos` + diagnostics, сгруппированные по repo

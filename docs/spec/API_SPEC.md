@@ -30,15 +30,16 @@
 { "status": "ok" }
 ```
 
-### GET `/api/system/info`
-Возвращает build metadata текущего `acp serve` процесса для UI shell. Endpoint доступен до выбора workspace и не меняет workspace.
+### GET `/api/system/version`
+Возвращает metadata запущенного ACP binary/UI bundle. Endpoint доступен и в launcher mode до выбора workspace, чтобы onboarding/live screenshots показывали фактическую сборку под тестом.
 
 **200**
 ```json
 {
-  "version": "0.1.2",
-  "commit": "fa3c6333b25942947156aa636a5a9b90cc65eb57",
-  "built": "2026-06-02T13:20:26Z"
+  "version": "dev",
+  "commit": "none",
+  "built": "unknown",
+  "ui_bundle": "embedded"
 }
 ```
 

@@ -356,6 +356,9 @@ func validateShardDocumentRelativePath(rawPath string, artifactRoot string) stri
 	if workspacePrefix := forbiddenWorkspaceLevelDocumentPrefix(cleaned); workspacePrefix != "" {
 		return fmt.Sprintf("must be artifact_root-relative, not workspace-level path starting with %q", workspacePrefix)
 	}
+	if component := forbiddenProviderToolDocumentComponent(cleaned); component != "" {
+		return fmt.Sprintf("must not reference provider/tool side-effect path component %q", component)
+	}
 	if duplicatedArtifactRootPrefix(cleaned, artifactRoot) {
 		return "must be artifact_root-relative and must not repeat artifact_root"
 	}
@@ -367,6 +370,18 @@ func forbiddenWorkspaceLevelDocumentPrefix(cleanedPath string) string {
 	for _, prefix := range []string{"reports/", "charter/", "proposals/"} {
 		if strings.HasPrefix(normalized, prefix) {
 			return prefix
+		}
+	}
+	return ""
+}
+
+func forbiddenProviderToolDocumentComponent(cleanedPath string) string {
+	normalized := filepath.ToSlash(strings.TrimSpace(cleanedPath))
+	for _, component := range strings.Split(normalized, "/") {
+		trimmed := strings.TrimSpace(strings.ToLower(component))
+		switch trimmed {
+		case ".qwen", ".claude", ".codex", ".git", ".hg", ".svn", "node_modules":
+			return component
 		}
 	}
 	return ""

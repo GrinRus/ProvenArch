@@ -145,10 +145,15 @@ func TestComposeArtifactOnlyPromptKeepsRefreshCollectFirstActionTaskSpecific(t *
 		`"path": "README.md"`,
 		`"questions": [`,
 		`"missing": [`,
+		"bootstrap-only",
+		"do not treat an unchanged skeleton as final-acceptable output",
 	} {
 		if !strings.Contains(prompt, token) {
 			t.Fatalf("expected refresh collect prompt to contain %q, got:\n%s", token, prompt)
 		}
+	}
+	if strings.Contains(prompt, "intentionally valid before additional evidence") {
+		t.Fatalf("collect prompt must not treat the first-action skeleton as final-acceptable output:\n%s", prompt)
 	}
 	if !strings.HasPrefix(prompt, "You are ACP runtime provider \"qwen-code\".\n\nCOLLECT FIRST-ACTION ARTIFACT PAIR:") {
 		t.Fatalf("expected collect first-action section immediately after provider identity, got:\n%s", prompt)
@@ -737,6 +742,8 @@ func TestComposeArtifactOnlyPromptAddsAsIsDraftCanonicalSection(t *testing.T) {
 		"cat > \"$draft_root/overview.md\" <<'ACP_DRAFT_FILE'",
 		"cat > \"$draft_root/summary.md\" <<'ACP_DRAFT_FILE'",
 		"cat > \"$draft_root/architect-summary.md\" <<'ACP_DRAFT_FILE'",
+		"The first draft artifact set is bootstrap-only",
+		"replace placeholder scaffold text with evidence-backed as-is content",
 		"AS-IS DRAFT MANIFEST CANONICAL SHAPE:",
 		`asis-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="as_is", agent_role, and outputs[].`,
 		`overview.md -> reports/as-is/overview.md`,
@@ -859,6 +866,8 @@ func TestComposeArtifactOnlyPromptAddsProposalsDraftCanonicalSection(t *testing.
 		"cat > \"$write_root/proposals-draft-manifest.json\" <<'ACP_DRAFT_MANIFEST_JSON'",
 		"cat > \"$draft_root/proposal.md\" <<'ACP_DRAFT_FILE'",
 		"cat > \"$draft_root/changelog.md\" <<'ACP_DRAFT_FILE'",
+		"The first proposals draft artifact set is bootstrap-only",
+		"replace placeholder scaffold text with evidence-backed proposal/changelog content",
 		"PROPOSALS DRAFT MANIFEST CANONICAL SHAPE:",
 		`proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="proposals", agent_role, optional summary, and outputs[].`,
 		`outputs[].canonical_path values are allowed only under proposals/* or reports/changelog/*.`,

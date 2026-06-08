@@ -10,7 +10,10 @@ import type { RunLogEntry, RunReviewSummaryResponse, RunStatusResponse } from ".
 import type { SystemInfoResponse } from "../lib/systemApi";
 
 type AppShellProps = {
-  buildInfo: SystemInfoResponse | null;
+  buildVersion: string;
+  buildCommit: string;
+  buildBuilt: string;
+  uiBundle: string;
   workspacePath: string;
   repoCount: number;
   runtimeMode: string;
@@ -54,7 +57,10 @@ type AppShellProps = {
 };
 
 export function AppShell({
-  buildInfo,
+  buildVersion,
+  buildCommit,
+  buildBuilt,
+  uiBundle,
   workspacePath,
   repoCount,
   runtimeMode,
@@ -99,7 +105,10 @@ export function AppShell({
   return (
     <main className="console-shell" data-testid="console-shell">
       <TopStatusBar
-        buildInfo={buildInfo}
+        buildVersion={buildVersion}
+        buildCommit={buildCommit}
+        buildBuilt={buildBuilt}
+        uiBundle={uiBundle}
         workspacePath={workspacePath}
         repoCount={repoCount}
         runtimeMode={runtimeMode}
