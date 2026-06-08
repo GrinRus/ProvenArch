@@ -159,6 +159,7 @@ This is a product-quality slice. It must keep the existing local-first/entity-pe
 
 ### Files expected to change
 - `internal/artifactquality/canonicalize.go`
+- `internal/artifactquality/collect_bootstrap.go`
 - `internal/contracts/docflow.go`
 - `internal/orchestrator/docflow.go`
 - `internal/orchestrator/quality.go`
@@ -204,6 +205,7 @@ This is a product-quality slice. It must keep the existing local-first/entity-pe
 - 2026-06-08: Completed the first backend/prompt hardening slice. Prompt policy now treats collect/as-is/proposals first-action skeletons as bootstrap-only, not final-acceptable content. Full local DoD passed with exact Node candidate: `make contracts`, `make test`, `make lint`, `make build`.
 - 2026-06-08: Medium `regres long` diagnostic on `claude-code,codex-code` reproduced product-quality blockers before qwen recovery: collect manifests had citations/docs but no semantic entities/edges/findings, C4 was gap-only, promoted reports/proposals contained placeholder text, and frontend `init-inspect` failed on gap-only C4 before Review/mobile readability could be assessed. Current fix slice makes collect skeleton/repair artifacts carry minimal evidence-backed semantic signal, removes provider-placeholder draft text from normal and focused repair paths, and makes backend-cycle fail fast on fresh `artifact_quality:*` warnings before dependent frontend.
 - 2026-06-08: Follow-up `claude-code` fresh run proved the empty-model blocker was fixed (`entities=17`, `edges=16`, `findings=16+`), but operator quality was still not acceptable: semantic output was scaffold-like repo/shard containment with repeated owner-gap findings, and C4 context still showed gap-only context nodes. Added dynamic `artifact_quality.semantic_scaffold_only` and `artifact_quality.c4_context_scaffold_only` blockers from temporary in-test artifact trees, not from a persisted bad-run fixture.
+- 2026-06-08: Next fresh `claude-code,codex-code` diagnostic (`regres-long-posthog-ftgo-20260608T223130Z`) was stopped after direct staging inspection showed unchanged collect first-action artifacts: markdown still carried generic repository/path/owner-gap prose and manifests kept repo/shard `contains` plus generic owner-gap findings. The fix adds a collect bootstrap detector, emits `artifact_quality:*` when accepted collect manifests retain unchanged bootstrap docs/semantic, and strengthens the normal collect prompt with post-command targeted evidence enrichment plus `ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT` removal before successful exit.
 
 ### Plan ID
 EP-20260602-onboarding-first-startup

@@ -227,14 +227,15 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Do not wait for a complete broad repository sweep before writing shard-pack-manifest.json; after the bootstrap pair exists, enrich the manifest with concrete observed evidence for the assigned shard scope and record remaining gaps in semantic.coverage.missing.`,
 			`- Immediately after writing the first authored doc, write shard-pack-manifest.json by adapting the task-specific JSON skeleton embedded in the first-action command section; keep exact metadata keys and replace only evidence/content values you actually observed.`,
 			`- Do not exit after writing markdown only; every collect shard must finish with a valid shard-pack-manifest.json.`,
-			`- Do not treat the first-action skeleton or generic scaffold prose as final-acceptable content; before final exit, replace placeholder text and empty semantic arrays with evidence-backed content where the repository evidence supports it.`,
+			`- Do not treat the first-action skeleton or generic scaffold prose as final-acceptable content; before final exit, replace placeholder text, remove ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT, and replace empty or generic semantic arrays with evidence-backed content where the repository evidence supports it.`,
 			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and semantic snapshot.`,
 			`- In shard-pack-manifest.json, semantic MUST include coverage, questions, entities, edges, and findings.`,
 			`- Use only canonical collect vocabulary: semantic.coverage.observed, semantic.questions[*].id + semantic.questions[*].text, semantic.edges[*].type, and object-shaped provenance blocks.`,
 			`- Every semantic.questions[] item must include id and text; every semantic.findings[] item must include id, severity, title, and provenance.`,
 			`- Do NOT emit semantic payloads on stdout; keep semantic only inside shard-pack-manifest.json.`,
 			`- You may be flexible in document structure, but promotion and rendering depend on manifest citations/topics remaining accurate.`,
-			`- After the first filesystem write inside write_root, avoid broad repository exploration; only targeted evidence reads needed to enrich the current shard manifest/document and minimal manifest/JSON repair are allowed afterwards.`,
+			`- After the first filesystem write inside write_root, perform one targeted evidence pass against the existing repo entrypoint hints and assigned path scopes, then overwrite the authored doc and shard-pack-manifest.json with enriched content before successful exit.`,
+			`- After that targeted evidence pass, avoid broad repository exploration; only targeted evidence reads needed to enrich the current shard manifest/document and minimal manifest/JSON repair are allowed afterwards.`,
 			`- After writing shard-pack-manifest.json, do NOT continue broad list_directory/read_file sweeps across repo roots.`,
 			`- Do NOT read reports/taskruns/**, raw runtime logs, or previously generated shard-pack-manifest.json files as schema examples during collect.`,
 			`- If authored docs and shard-pack-manifest.json already exist in write_root, stop only after confirming they contain evidence-backed content for this shard and are not unchanged bootstrap placeholders.`,
@@ -359,6 +360,10 @@ func CollectFirstActionSection(task acpruntime.Task) string {
 		"Run this exact command as the next filesystem action after checking whether both target files already exist; do not call read_file, list_directory, grep_search, glob, find, rg, or any repository exploration before this command:",
 		"- The embedded skeleton is bootstrap-only: write it to establish the required pair, then enrich it before final exit; do not treat an unchanged skeleton as final-acceptable output.",
 		CollectEarlyPairWriteCommand(task),
+		"POST-COMMAND ENRICHMENT REQUIREMENT:",
+		"- After the command succeeds, do one targeted evidence pass using the existing repo entrypoint hints and assigned path_scopes, then overwrite the exact authored document and shard-pack-manifest.json targets with evidence-backed content.",
+		"- Successful final output must not contain ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT, generic owner-mapping-only findings, or only repo/shard contains edges when concrete repository files support richer entities, relationships, coverage, or findings.",
+		"- Exiting successfully immediately after the heredoc command is invalid; an unchanged bootstrap pair is an artifact_quality blocker.",
 	}, "\n")
 }
 
@@ -580,6 +585,8 @@ func collectDocumentInitialTemplate(task acpruntime.Task, docRel string) string 
 	title := titleFromSlug(titleSlug)
 	return strings.Join([]string{
 		"# " + title,
+		"",
+		"<!-- " + artifactquality.CollectBootstrapReplaceMarker + " -->",
 		"",
 		"## Scope",
 		"- Repository: " + repo,

@@ -147,6 +147,9 @@ func TestComposeArtifactOnlyPromptKeepsRefreshCollectFirstActionTaskSpecific(t *
 		`"missing": [`,
 		"bootstrap-only",
 		"do not treat an unchanged skeleton as final-acceptable output",
+		"POST-COMMAND ENRICHMENT REQUIREMENT:",
+		"ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT",
+		"unchanged bootstrap pair is an artifact_quality blocker",
 	} {
 		if !strings.Contains(prompt, token) {
 			t.Fatalf("expected refresh collect prompt to contain %q, got:\n%s", token, prompt)
