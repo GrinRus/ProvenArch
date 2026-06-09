@@ -229,6 +229,8 @@ func recoveredCollectSemantic(task acpruntime.Task, docs []collectManifestRuntim
 
 	observed := []string{topic, "provider-authored collect document"}
 	seenTerms := map[string]struct{}{}
+	termEntityIDs := []string{}
+	termNames := []string{}
 	for _, doc := range docs {
 		docStem := idComponent(strings.TrimSuffix(doc.RelPath, filepath.Ext(doc.RelPath)))
 		docEntityID := "doc." + shardStem + "." + docStem
@@ -264,17 +266,33 @@ func recoveredCollectSemantic(task acpruntime.Task, docs []collectManifestRuntim
 			}
 			seenTerms[key] = struct{}{}
 			observed = append(observed, term)
-			if len(entities) >= 10 {
+			if len(entities) >= 14 {
 				continue
 			}
-			termEntityID := "cmp." + shardStem + "." + idComponent(key)
+			entityType := collectRuntimeRecoveryEntityType(term)
+			termEntityID := collectRuntimeRecoveryEntityID(entityType, shardStem, key)
 			entities = append(entities, contracts.Entity{
 				ID:   termEntityID,
-				Type: "component",
-				Name: titleFromSlug(key),
+				Type: entityType,
+				Name: collectRuntimeRecoveryEntityName(term, key),
 				Provenance: contracts.Provenance{
 					Kind:       "observation",
-					Confidence: 0.5,
+					Confidence: 0.58,
+					Evidence:   evidence,
+				},
+			})
+			termEntityIDs = append(termEntityIDs, termEntityID)
+			termNames = append(termNames, collectRuntimeRecoveryEntityName(term, key))
+			edgeType := collectRuntimeRecoveryEdgeType(term, entityType)
+			edges = append(edges, contracts.Edge{
+				ID:   "edge." + shardStem + "." + idComponent(edgeType) + "." + idComponent(key),
+				Type: edgeType,
+				From: shardEntityID,
+				To:   termEntityID,
+				Name: fmt.Sprintf("%s %s %s", titleFromSlug(shardSlug), strings.ReplaceAll(edgeType, "_", " "), collectRuntimeRecoveryEntityName(term, key)),
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.56,
 					Evidence:   evidence,
 				},
 			})
@@ -292,10 +310,56 @@ func recoveredCollectSemantic(task acpruntime.Task, docs []collectManifestRuntim
 			})
 		}
 	}
+	if len(termEntityIDs) == 0 {
+		for _, fallback := range collectRuntimeRecoveryFallbackTerms(task, shardSlug, topic) {
+			key := slugComponent(fallback)
+			if key == "" {
+				continue
+			}
+			if _, exists := seenTerms[key]; exists {
+				continue
+			}
+			seenTerms[key] = struct{}{}
+			entityType := collectRuntimeRecoveryEntityType(fallback)
+			termEntityID := collectRuntimeRecoveryEntityID(entityType, shardStem, key)
+			entityName := collectRuntimeRecoveryEntityName(fallback, key)
+			entities = append(entities, contracts.Entity{
+				ID:   termEntityID,
+				Type: entityType,
+				Name: entityName,
+				Provenance: contracts.Provenance{
+					Kind:       "inference",
+					Confidence: 0.48,
+					Evidence:   evidence,
+				},
+			})
+			termEntityIDs = append(termEntityIDs, termEntityID)
+			termNames = append(termNames, entityName)
+			edgeType := collectRuntimeRecoveryEdgeType(fallback, entityType)
+			edges = append(edges, contracts.Edge{
+				ID:   "edge." + shardStem + "." + idComponent(edgeType) + "." + idComponent(key),
+				Type: edgeType,
+				From: shardEntityID,
+				To:   termEntityID,
+				Name: fmt.Sprintf("%s %s %s", titleFromSlug(shardSlug), strings.ReplaceAll(edgeType, "_", " "), entityName),
+				Provenance: contracts.Provenance{
+					Kind:       "inference",
+					Confidence: 0.48,
+					Evidence:   evidence,
+				},
+			})
+			observed = append(observed, fallback)
+			break
+		}
+	}
 
 	missing := []string{"provider did not complete shard-pack-manifest.json before runtime contract recovery"}
 	if cause != nil {
 		missing = append(missing, "manifest-only provider repair failure: "+compactRecoveryCause(cause))
+	}
+	observedNames := "the provider-authored collect documents"
+	if len(termNames) > 0 {
+		observedNames = strings.Join(termNames[:minInt(len(termNames), 6)], ", ")
 	}
 	questionIDStem := idComponent(firstNonEmptyString(shardSlug, "collect-recovery"))
 	return contracts.SemanticSnapshot{
@@ -309,7 +373,7 @@ func recoveredCollectSemantic(task acpruntime.Task, docs []collectManifestRuntim
 		},
 		Questions: []contracts.Question{{
 			ID:         "question." + questionIDStem + ".manifest_recovery_followup",
-			Text:       "Should this shard be rerun for richer provider-authored manifest semantics, or is the recovered manifest sufficient for the current diagnostic analysis?",
+			Text:       fmt.Sprintf("Should this shard be rerun for richer provider-authored manifest semantics around %s, or is the recovered manifest sufficient for the current diagnostic analysis?", observedNames),
 			Priority:   "medium",
 			RelatedIDs: []string{shardEntityID},
 		}},
@@ -319,9 +383,9 @@ func recoveredCollectSemantic(task acpruntime.Task, docs []collectManifestRuntim
 			ID:          "finding." + questionIDStem + ".manifest_recovery_applied",
 			Severity:    "medium",
 			Title:       "Collect manifest recovered from authored documents",
-			Description: "The provider wrote collect markdown but did not complete shard-pack-manifest.json during the primary or manifest-only repair process. Runtime recovery reconstructed the manifest from the provider-authored documents so downstream validation can surface remaining quality gaps instead of accepting an empty shard.",
+			Description: fmt.Sprintf("The provider wrote collect markdown that identified %s but did not complete shard-pack-manifest.json during the primary or manifest-only repair process. Runtime recovery reconstructed the manifest from the provider-authored documents so downstream validation can surface remaining quality gaps instead of accepting an empty shard.", observedNames),
 			RuleID:      "rule.collect_manifest.runtime_recovery",
-			RelatedIDs:  []string{shardEntityID},
+			RelatedIDs:  append([]string{shardEntityID}, termEntityIDs[:minInt(len(termEntityIDs), 4)]...),
 			Provenance: contracts.Provenance{
 				Kind:       "inference",
 				Confidence: 0.55,
@@ -329,6 +393,75 @@ func recoveredCollectSemantic(task acpruntime.Task, docs []collectManifestRuntim
 			},
 		}},
 	}
+}
+
+func collectRuntimeRecoveryEntityType(name string) string {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	if containsAnySubstring(lower, "postgres", "redis", "clickhouse", "kafka", "redpanda", "minio", "elasticsearch", "database", " db", "db ") {
+		return "datastore"
+	}
+	if containsAnySubstring(lower, "service", "worker", "api", "ingestion", "capture", "web", "temporal", "celery", "cli", "parser", "runtime", "sdk") {
+		return "service"
+	}
+	return "component"
+}
+
+func collectRuntimeRecoveryEdgeType(name string, entityType string) string {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	if entityType == "datastore" {
+		return "depends_on"
+	}
+	if containsAnySubstring(lower, "docker", "compose", "turbo", "pnpm", "uv", "pytest", "ruff", "mypy", "tsconfig", "package.json", "pyproject", "env", "makefile", "config", "deploy") {
+		return "configures"
+	}
+	return "uses"
+}
+
+func collectRuntimeRecoveryEntityID(entityType string, shardStem string, key string) string {
+	prefix := "cmp"
+	switch entityType {
+	case "datastore":
+		prefix = "ds"
+	case "service":
+		prefix = "svc"
+	}
+	return prefix + "." + shardStem + "." + idComponent(key)
+}
+
+func collectRuntimeRecoveryEntityName(term string, key string) string {
+	term = strings.TrimSpace(term)
+	if term != "" {
+		return term
+	}
+	return titleFromSlug(key)
+}
+
+func collectRuntimeRecoveryFallbackTerms(task acpruntime.Task, shardSlug string, topic string) []string {
+	values := []string{}
+	values = append(values, task.DomainID, task.ShardID, topic, shardSlug)
+	values = append(values, task.PathScopes...)
+	for _, value := range values {
+		if term := normalizeRecoveryTerm(value); term != "" {
+			return []string{term}
+		}
+	}
+	return nil
+}
+
+func containsAnySubstring(value string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(value, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func minInt(a int, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func collectRuntimeRecoveryDocTitle(relPath string, text string) string {
