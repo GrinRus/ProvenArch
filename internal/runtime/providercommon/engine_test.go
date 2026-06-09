@@ -36,6 +36,46 @@ func TestRunHeadlessProviderSucceedsWithValidArtifacts(t *testing.T) {
 	}
 }
 
+func TestNormalizeActivityPolicyAppliesDiagnosticEnvOverrides(t *testing.T) {
+	t.Setenv("ACP_PROVIDER_PRE_ARTIFACT_STALL_SEC", "301")
+	t.Setenv("ACP_PROVIDER_RETRY_PRE_ARTIFACT_STALL_SEC", "302")
+	t.Setenv("ACP_PROVIDER_POST_ARTIFACT_STALL_SEC", "303")
+	t.Setenv("ACP_PROVIDER_PARTIAL_ARTIFACT_STALL_SEC", "304")
+	t.Setenv("ACP_PROVIDER_VALID_ARTIFACT_STOP_SEC", "305")
+
+	policy := normalizeActivityPolicy(ActivityPolicy{})
+
+	if got, want := policy.PreArtifactStallWindow, 301*time.Second; got != want {
+		t.Fatalf("pre artifact window = %s, want %s", got, want)
+	}
+	if got, want := policy.RetryPreArtifactStallWindow, 302*time.Second; got != want {
+		t.Fatalf("retry pre artifact window = %s, want %s", got, want)
+	}
+	if got, want := policy.PostArtifactStallWindow, 303*time.Second; got != want {
+		t.Fatalf("post artifact window = %s, want %s", got, want)
+	}
+	if got, want := policy.PartialArtifactStallWindow, 304*time.Second; got != want {
+		t.Fatalf("partial artifact window = %s, want %s", got, want)
+	}
+	if got, want := policy.ValidArtifactStopWindow, 305*time.Second; got != want {
+		t.Fatalf("valid artifact stop window = %s, want %s", got, want)
+	}
+}
+
+func TestNormalizeActivityPolicyIgnoresInvalidDiagnosticEnvOverrides(t *testing.T) {
+	t.Setenv("ACP_PROVIDER_PRE_ARTIFACT_STALL_SEC", "bad")
+	t.Setenv("ACP_PROVIDER_POST_ARTIFACT_STALL_SEC", "-1")
+
+	policy := normalizeActivityPolicy(ActivityPolicy{})
+
+	if got, want := policy.PreArtifactStallWindow, defaultPreArtifactStallWindow; got != want {
+		t.Fatalf("pre artifact window = %s, want default %s", got, want)
+	}
+	if got, want := policy.PostArtifactStallWindow, defaultPostArtifactStallWindow; got != want {
+		t.Fatalf("post artifact window = %s, want default %s", got, want)
+	}
+}
+
 func TestRunHeadlessProviderManagedPermissionsFailFastWithoutProtocol(t *testing.T) {
 	t.Parallel()
 
