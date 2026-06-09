@@ -37,7 +37,7 @@ Runtime write policy:
 - runtime не имеет права писать в `workspace.yaml`, `schemas/*`, `docs/spec/*`, `charter/*` и анализируемые user repos
 - `runtime.profile.permissions.mode=trusted_full_access` сохраняет текущие provider full-access flags; opt-in `managed` отключает их и auto-approves только reads внутри `read_context_roots` и writes внутри `write_root`/`draft_final_root`
 - managed requests для shell/network/package install/unknown tools не auto-approved; в non-interactive `approval_channel=fail_fast` это terminal `runtime_permission_required`
-- MVP runtime write audit is detect-only: unexpected mutations of protected workspace surfaces or analyzed repo working trees are surfaced as run warnings/logs (`runtime_write_audit_unexpected_mutation`, `runtime_write_audit_repo_skipped`) and do not fail, restore, or sandbox the provider process
+- MVP runtime write audit is detect-only: unexpected mutations of protected workspace surfaces or analyzed repo working trees are surfaced as run warnings/logs (`runtime_write_audit_unexpected_mutation`, `runtime_write_audit_repo_skipped`) and do not fail, restore, or sandbox the provider process; if a repo status cannot be read after runtime, ACP reports `runtime_write_audit_repo_skipped` with `status_unavailable_after_runtime` instead of fabricating a changed path
 
 > MVP policy фиксирует step-scoped runtime provider contract: effective provider для шага выбирается как `workspace step override > CLI/env global provider > claude-code`; semantic stdout payloads не поддерживаются.
 > CLI/process runtime mode задаётся флагом `--runtime fake|headless` (`fake` default, `headless` opt-in), global fallback provider — `--runtime-provider claude-code|qwen-code|codex-code` (env fallback `ACP_RUNTIME_PROVIDER`).
