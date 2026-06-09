@@ -25,7 +25,13 @@ func ValidateCollectManifestInRoot(writeRoot string) error {
 	if err != nil {
 		return err
 	}
-	return validateCollectManifestDocumentFiles(writeRoot, manifest.Documents)
+	if err := validateCollectManifestDocumentFiles(writeRoot, manifest.Documents); err != nil {
+		return err
+	}
+	if CollectManifestSemanticBootstrapOnly(manifest) {
+		return fmt.Errorf("shard pack manifest is invalid: semantic snapshot is bootstrap-only collect scaffold")
+	}
+	return nil
 }
 
 func ValidateCollectManifestBytes(raw []byte) error {

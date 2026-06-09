@@ -124,6 +124,23 @@ func TestValidateCollectManifestRejectsRecoveryEvidenceFallbackDocument(t *testi
 	}
 }
 
+func TestValidateCollectManifestRejectsBootstrapOnlySemanticSkeleton(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	manifest := bootstrapCollectManifest()
+	writeManifest(t, writeRoot, manifest)
+	writeDoc(t, writeRoot, "payments-overview.md", "# Payments Overview\n\n## Observations\n- `src/payment_handler.go` defines the payment service entrypoint.\n- `src/ledger_client.go` calls the ledger write API when a payment is accepted.\n\n## Evidence\n- `src/payment_handler.go`\n- `src/ledger_client.go`\n")
+
+	err := ValidateCollectManifestInRoot(writeRoot)
+	if err == nil {
+		t.Fatalf("expected unchanged semantic skeleton to fail validation")
+	}
+	if !strings.Contains(err.Error(), "semantic snapshot is bootstrap-only collect scaffold") {
+		t.Fatalf("expected semantic scaffold validation error, got %v", err)
+	}
+}
+
 func TestValidateCollectManifestRejectsForbiddenSemanticAliasesBySchema(t *testing.T) {
 	t.Parallel()
 
