@@ -315,7 +315,7 @@ Editable prompt pack layer подключается к `step0.constitution`, `st
 
 Artifact ownership taxonomy:
 
-- provider-authored: runtime manifests, draft files, shard packs и validator outputs;
+- provider-authored: normal runtime manifests, draft files, shard packs и validator outputs; collect manifest runtime recovery помечается отдельно и строится только из already-authored shard docs;
 - orchestrator-authored: run indexes, citation indexes, shard plans/summaries, logs/history;
 - compiler-derived: promoted reports, diagrams, normalized renderers и `model/*`.
 
