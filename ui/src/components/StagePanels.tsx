@@ -3506,7 +3506,7 @@ export function PublishStagePanel({
           </div>
         </section>
 
-        <section className="publish-preview-panel">
+        <section className="publish-preview-panel" data-testid="publish-preview-panel">
           <div className="publish-preview-tabs" role="tablist" aria-label="Publish preview tabs" data-testid="publish-preview-tabs">
             {(["preview", "diff", "evidence", "changelog"] as const).map((view) => (
               <button
@@ -3521,19 +3521,23 @@ export function PublishStagePanel({
               </button>
             ))}
           </div>
-          <div className="publish-tab-panel">
+          <div className="publish-tab-panel" data-testid="publish-tab-panel">
             {publishView === "preview" ? (
-              <>
+              <div className="publish-selected-preview" data-testid="publish-selected-preview">
                 <h2>Selected artifact preview</h2>
                 {selectedPublishArtifact ? (
                   <>
                     <p className="hint">{selectedPublishArtifact.path}</p>
-                    {selectedPublishContent ? <pre>{selectedPublishContent}</pre> : <p className="empty-state">Select an artifact to load its preview in this Publish room.</p>}
+                    {selectedPublishContent ? (
+                      <pre data-testid="publish-selected-preview-content">{selectedPublishContent}</pre>
+                    ) : (
+                      <p className="empty-state" data-testid="publish-selected-preview-empty">Select an artifact to load its preview in this Publish room.</p>
+                    )}
                   </>
                 ) : (
-                  <p className="empty-state">No artifact selected for publication preview.</p>
+                  <p className="empty-state" data-testid="publish-selected-preview-empty">No artifact selected for publication preview.</p>
                 )}
-              </>
+              </div>
             ) : null}
             {publishView === "diff" ? (
               <>

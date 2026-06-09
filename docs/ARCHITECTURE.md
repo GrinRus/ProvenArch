@@ -241,7 +241,7 @@
 8) **Reports (`internal/reports`)** *(implemented baseline)*
    - primary narrative surfaces в docs-first path приходят из runtime-authored staged docs
    - compiler layer используется только как deterministic renderer/materializer для derived technical surfaces
-   - в derived layer генерирует evidence-first C4 Mermaid set: `Context`, `Container`, per-service `Component`, per-service `Code`
+   - в derived layer генерирует evidence-first C4 Mermaid set: `Context`, `Container`, per-service `Component`, per-service `Code`; `Context` сначала показывает external/team relations, а при их отсутствии использует bounded fallback из evidence-backed internal service/datastore relations, чтобы non-empty semantic model не превращался в gap-only context
    - materialize-ит индекс диаграмм `reports/diagrams/index.md` для UI filtering/open flow
    - формирует `reports/changelog/*` по итерациям
 

@@ -475,7 +475,7 @@ code {
 
 .activity-drawer {
   min-width: 0;
-  max-height: 32vh;
+  max-height: min(24vh, 16rem);
   border-top: 1px solid var(--line);
   background: var(--surface);
   padding: 0.7rem 1rem 0.9rem;
@@ -1457,7 +1457,7 @@ code {
   display: grid;
   grid-template-columns: minmax(210px, 0.72fr) minmax(340px, 1.35fr) minmax(240px, 0.82fr);
   gap: 0.8rem;
-  align-items: start;
+  align-items: stretch;
 }
 
 .review-artifact-explorer,
@@ -1471,6 +1471,32 @@ code {
   border: 1px solid var(--line-soft);
   border-radius: 0.48rem;
   background: var(--surface-muted);
+}
+
+.review-artifact-explorer,
+.review-evidence-preview {
+  display: grid;
+  gap: 0.62rem;
+  align-content: start;
+}
+
+.review-evidence-preview {
+  min-height: min(56vh, 34rem);
+}
+
+[data-testid="run-artifact-content-panel"],
+[data-testid="run-diagram-content-panel"] {
+  min-width: 0;
+  min-height: min(44vh, 27rem);
+  display: grid;
+  grid-template-rows: auto minmax(12rem, 1fr);
+  gap: 0.5rem;
+}
+
+[data-testid="run-artifact-selected-path"],
+[data-testid="run-diagram-selected-path"] {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .artifact-group-list {
@@ -1536,12 +1562,15 @@ code {
 .review-evidence-preview pre,
 .review-source-lists pre {
   margin: 0;
-  max-height: 360px;
+  min-height: 12rem;
+  max-height: min(52vh, 36rem);
   overflow: auto;
   border: 1px solid var(--line-soft);
   border-radius: 0.42rem;
   background: var(--surface);
   padding: 0.62rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -2100,7 +2129,7 @@ code {
   display: grid;
   grid-template-columns: minmax(240px, 0.78fr) minmax(360px, 1.28fr) minmax(270px, 0.86fr);
   gap: 0.8rem;
-  align-items: start;
+  align-items: stretch;
 }
 
 .publish-diff-summary,
@@ -2112,6 +2141,13 @@ code {
   border: 1px solid var(--line-soft);
   border-radius: 0.48rem;
   background: var(--surface-muted);
+}
+
+.publish-preview-panel {
+  min-height: min(56vh, 34rem);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
 }
 
 .publish-folder-list,
@@ -2231,6 +2267,8 @@ code {
 
 .publish-tab-panel {
   min-width: 0;
+  min-height: min(44vh, 27rem);
+  display: grid;
   padding: 0.62rem;
   border: 1px solid var(--line-soft);
   border-radius: 0.42rem;
@@ -2246,6 +2284,13 @@ code {
   margin-top: 0.65rem;
 }
 
+.publish-selected-preview,
+.publish-changelog-preview {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+}
+
 .publish-changelog-preview h3 {
   margin: 0;
   font-size: 0.84rem;
@@ -2253,8 +2298,15 @@ code {
 
 .publish-tab-panel pre {
   margin: 0.4rem 0 0;
-  max-height: 430px;
+  min-height: 12rem;
+  max-height: min(52vh, 36rem);
   overflow: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 0.42rem;
+  background: var(--surface-muted);
+  padding: 0.62rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -3023,6 +3075,10 @@ code {
   .publish-review-room,
   .publish-side-column {
     grid-template-columns: 1fr;
+  }
+
+  .review-evidence-preview {
+    order: -1;
   }
 
   .domain-map-summary-grid {
