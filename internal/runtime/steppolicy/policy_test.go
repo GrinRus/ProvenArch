@@ -55,13 +55,13 @@ func TestDocFirstFilesystemPolicyDefinesSharedCollectRepairSurface(t *testing.T)
 		`Write ONLY inside write_root.`,
 		`Suggested collect authored doc path for this shard:`,
 		`Early pair-write requirement: write the suggested overview doc and shard-pack-manifest.json as one focused marker-free artifact pair`,
-		`Minimal collect target shape: write "payments-overview.md" + "shard-pack-manifest.json" early as validation-ready scoped evidence`,
+		`Minimal collect target shape: write "payments-overview.md" + "shard-pack-manifest.json" early as a seed-only scoped evidence surface`,
 		`Do not wait for a complete broad repository sweep before writing shard-pack-manifest.json`,
 		`TASK-SPECIFIC COLLECT MANIFEST JSON SKELETON: use the heredoc JSON embedded in the first-action command section above`,
 		`COLLECT MANIFEST CONTRACT CHECKLIST:`,
 		`The task-specific collect manifest JSON skeleton above is normative`,
 		`Do not exit after writing markdown only; every collect shard must finish with a valid shard-pack-manifest.json.`,
-		`The first-action pair is intentionally validation-ready but minimal`,
+		`The first-action pair is intentionally seed-only and must not be final output`,
 		`After the first filesystem write inside write_root, perform one targeted evidence pass against the existing repo entrypoint hints and assigned path scopes`,
 		`After that targeted evidence pass, avoid broad repository exploration; only targeted evidence reads needed to enrich the current shard manifest/document and minimal manifest/JSON repair are allowed afterwards.`,
 		`After writing shard-pack-manifest.json, do NOT continue broad list_directory/read_file sweeps across repo roots.`,
@@ -144,9 +144,9 @@ func TestCollectFirstActionSectionWritesExactPair(t *testing.T) {
 		`FIRST COLLECT ARTIFACT PAIR COMMAND:`,
 		`Run this exact command as the next filesystem action after checking whether both target files already exist`,
 		`do not call read_file, list_directory, grep_search, glob, find, rg, or any repository exploration before this command`,
-		`The embedded pair is marker-free and validation-ready`,
+		`The embedded pair is marker-free but seed-only`,
 		`POST-COMMAND ENRICHMENT REQUIREMENT:`,
-		`Exiting successfully immediately after the heredoc command is acceptable only if the written pair remains valid, marker-free, and explicitly records scoped evidence plus coverage gaps.`,
+		`Exiting successfully immediately after the heredoc command is invalid; overwrite the exact pair with evidence-backed content first.`,
 		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md' <<'ACP_COLLECT_DOC'`,
 		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json' <<'ACP_MANIFEST_JSON'`,
 		`"path": "payments-overview.md"`,
@@ -460,7 +460,7 @@ func TestCollectEarlyPairWriteCommandPrefersUsefulRootEvidence(t *testing.T) {
 		`Owner mapping evidence not confirmed from the initial scoped evidence path`,
 	} {
 		if strings.Contains(command, forbidden) {
-			t.Fatalf("normal collect early pair command must be marker-free validation-ready content, found %q:\n%s", forbidden, command)
+			t.Fatalf("normal collect early pair command must be marker-free seed content, found %q:\n%s", forbidden, command)
 		}
 	}
 }

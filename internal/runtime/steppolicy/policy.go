@@ -218,16 +218,16 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 	case "init.step1.collect", "refresh.step1.collect":
 		lines = append(lines,
 			`- Do NOT delegate to agent/subagent helpers and do NOT use todo_write-style planning.`,
-			`- Before the first filesystem write inside write_root, keep repository exploration minimal and converge quickly on the first validation-ready authored doc plus shard-pack-manifest.json pair.`,
+			`- Before the first filesystem write inside write_root, keep repository exploration minimal and converge quickly on the first contract-shaped authored doc plus shard-pack-manifest.json seed pair.`,
 			`- Produce runtime-authored documents in write_root and then write shard-pack-manifest.json in write_root.`,
 			`- Early pair-write requirement: write the suggested overview doc and shard-pack-manifest.json as one focused marker-free artifact pair before any broad second-pass repository sweep.`,
 			fmt.Sprintf(`- Suggested collect authored doc path for this shard: %q. Prefer exactly this single doc path unless already writing an existing clearer authored doc.`, SuggestedCollectDocumentPath(task)),
 			fmt.Sprintf(`- Absolute collect targets for the early pair-write: %q and %q.`, filepath.Join(strings.TrimSpace(task.WriteRoot), filepath.FromSlash(SuggestedCollectDocumentPath(task))), filepath.Join(strings.TrimSpace(task.WriteRoot), "shard-pack-manifest.json")),
-			fmt.Sprintf(`- Minimal collect target shape: write %q + "shard-pack-manifest.json" early as validation-ready scoped evidence, then enrich that pair from concrete repository evidence and record remaining uncertainty in coverage/questions instead of continuing open-ended exploration.`, SuggestedCollectDocumentPath(task)),
+			fmt.Sprintf(`- Minimal collect target shape: write %q + "shard-pack-manifest.json" early as a seed-only scoped evidence surface, then enrich that pair from concrete repository evidence and record remaining uncertainty in coverage/questions instead of continuing open-ended exploration.`, SuggestedCollectDocumentPath(task)),
 			`- Do not wait for a complete broad repository sweep before writing shard-pack-manifest.json; after the initial pair exists, enrich the manifest with concrete observed evidence for the assigned shard scope and record remaining gaps in semantic.coverage.missing.`,
 			`- Immediately after writing the first authored doc, write shard-pack-manifest.json by adapting the task-specific JSON skeleton embedded in the first-action command section; keep exact metadata keys and replace only evidence/content values you actually observed.`,
 			`- Do not exit after writing markdown only; every collect shard must finish with a valid shard-pack-manifest.json.`,
-			`- The first-action pair is intentionally validation-ready but minimal; before final exit, replace generic content with richer evidence-backed content where the repository evidence supports it.`,
+			`- The first-action pair is intentionally seed-only and must not be final output; before final exit, replace generic content with richer evidence-backed content where the repository evidence supports it.`,
 			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and semantic snapshot.`,
 			`- In shard-pack-manifest.json, semantic MUST include coverage, questions, entities, edges, and findings.`,
 			`- Use only canonical collect vocabulary: semantic.coverage.observed, semantic.questions[*].id + semantic.questions[*].text, semantic.edges[*].type, and object-shaped provenance blocks.`,
@@ -375,12 +375,12 @@ func CollectFirstActionSection(task acpruntime.Task) string {
 		fmt.Sprintf(`- Exact manifest target: %q.`, manifestTarget),
 		"FIRST COLLECT ARTIFACT PAIR COMMAND:",
 		"Run this exact command as the next filesystem action after checking whether both target files already exist; do not call read_file, list_directory, grep_search, glob, find, rg, or any repository exploration before this command:",
-		"- The embedded pair is marker-free and validation-ready: write it to establish the required pair, then enrich it before final exit when concrete repository evidence is available.",
+		"- The embedded pair is marker-free but seed-only: write it to establish the required pair, then enrich it before final exit when concrete repository evidence is available.",
 		CollectEarlyPairWriteCommand(task),
 		"POST-COMMAND ENRICHMENT REQUIREMENT:",
 		"- After the command succeeds, do one targeted evidence pass using the existing repo entrypoint hints and assigned path_scopes, then overwrite the exact authored document and shard-pack-manifest.json targets with evidence-backed content.",
 		"- Successful final output must remain marker-free and must not collapse to generic owner-mapping-only findings or only repo/shard contains edges when concrete repository files support richer entities, relationships, coverage, or findings.",
-		"- Exiting successfully immediately after the heredoc command is acceptable only if the written pair remains valid, marker-free, and explicitly records scoped evidence plus coverage gaps.",
+		"- Exiting successfully immediately after the heredoc command is invalid; overwrite the exact pair with evidence-backed content first.",
 	}, "\n")
 }
 
@@ -607,7 +607,7 @@ func collectDocumentInitialTemplate(task acpruntime.Task, docRel string) string 
 		"",
 		"## Evidence Summary",
 		"- Primary scoped evidence path: `" + evidencePath + "`.",
-		"- This initial collect pair is validation-ready and intentionally bounded to the assigned shard scope.",
+		"- This initial collect pair is a seed-only scoped evidence surface for the assigned shard.",
 		"",
 		"## Evidence Surface",
 	}
@@ -646,7 +646,7 @@ func collectDocumentRecoveryTemplate(task acpruntime.Task, docRel string) string
 		"- Repository scope: " + repo + ".",
 		"- Assigned scope summary: " + scopeText + ".",
 		"- Primary scoped evidence path: `" + markdownCodeSpan(evidencePath) + "`.",
-		"- This document is a validation-ready collect recovery fallback for a shard whose first collect attempt did not complete with enriched artifacts.",
+		"- This document is a seed-only collect recovery fallback for a shard whose first collect attempt did not complete with enriched artifacts.",
 		"",
 		"## Evidence Surface",
 	}
@@ -1613,7 +1613,7 @@ func collectRecoverySemanticSkeleton(task acpruntime.Task, repo string, evidence
 			Observed: []string{topic, "collect recovery fallback"},
 			Missing:  missing,
 			Notes: []string{
-				fmt.Sprintf("Focused collect recovery preserved a validation-ready shard pair using scoped evidence path %q.", evidencePath),
+				fmt.Sprintf("Focused collect recovery preserved a seed-only shard pair using scoped evidence path %q.", evidencePath),
 				"Follow-up collection should enrich responsibilities, dependencies, and ownership details when provider execution completes normally.",
 			},
 		},
@@ -1663,7 +1663,7 @@ func collectRecoverySemanticSkeleton(task acpruntime.Task, repo string, evidence
 			ID:          fmt.Sprintf("finding.%s.collect.recovery.minimal_evidence", questionIDStem),
 			Severity:    "medium",
 			Title:       "Collect recovery used minimal scoped evidence",
-			Description: fmt.Sprintf("The provider recovered the %s shard from a validation-ready fallback after the initial collect attempt remained incomplete. Additional evidence should be collected when provider execution completes normally.", strings.TrimSpace(topic)),
+			Description: fmt.Sprintf("The provider recovered the %s shard from a seed-only fallback after the initial collect attempt remained incomplete. Additional evidence should be collected when provider execution completes normally.", strings.TrimSpace(topic)),
 			RuleID:      "rule.collect_recovery.minimal_evidence",
 			RelatedIDs:  []string{shardEntityID},
 			Provenance: contracts.Provenance{

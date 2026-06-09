@@ -182,6 +182,16 @@ func TestRuntimeArtifactSnapshotRejectsBootstrapOnlyCollectDocument(t *testing.T
 		t.Fatalf("expected bootstrap-only collect snapshot to be invalid, got %+v", snapshot)
 	}
 
+	writeTextFile(t, filepath.Join(writeRoot, "payments-overview.md"), "# Payments Overview\n\n## Scope\n- Repository scope: payments.\n- Assigned scope summary: `src`.\n\n## Evidence Summary\n- Primary scoped evidence path: `src`.\n- This initial collect pair is a seed-only scoped evidence surface for the assigned shard.\n\n## Evidence Surface\n- `src`: scoped repository evidence available to this collect shard.\n\n## Initial Findings\n- The assigned evidence surface is traceable, but ownership, runtime responsibility, and escalation details need confirmation from richer repository evidence.\n\n## Coverage Gaps\n- Confirm concrete owners, runtime responsibilities, dependencies, and operational escalation paths for this shard.\n")
+	snapshot = runtimeArtifactSnapshot(acpruntime.Task{
+		RunID:     "run-collect-1",
+		StepID:    "init.step1.collect",
+		WriteRoot: writeRoot,
+	})
+	if !snapshot.ArtifactObserved || snapshot.Valid || snapshot.State != "invalid" {
+		t.Fatalf("expected marker-free seed collect snapshot to be invalid, got %+v", snapshot)
+	}
+
 	writeTextFile(t, filepath.Join(writeRoot, "payments-overview.md"), "# Payments Overview\n\n## Observations\n- `src/payment_handler.go` defines the payment API.\n\n## Evidence\n- `src/payment_handler.go`\n")
 	snapshot = runtimeArtifactSnapshot(acpruntime.Task{
 		RunID:     "run-collect-1",
