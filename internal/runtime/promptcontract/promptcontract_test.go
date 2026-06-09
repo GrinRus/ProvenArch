@@ -237,6 +237,14 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		"SKELETON USE:",
 		"Use this JSON only as the task-specific schema/key/type guide, not as final content.",
 		"Copying this skeleton unchanged is invalid",
+		"COLLECT MANIFEST REPAIR WRITE SHAPE:",
+		"After reading the authored documents, use the shell heredoc shape below for the single manifest write.",
+		"Do not run it with placeholder text or copied skeleton content; fill the JSON body with evidence-backed values first.",
+		`manifest_target=`,
+		`cat > "$manifest_target" <<'ACP_MANIFEST_JSON'`,
+		`"<replace with authored doc objects from write_root>"`,
+		`"<named systems/services/components/datastores/config surfaces>"`,
+		`test -s "$manifest_target"`,
 		"SEMANTIC EXTRACTION REQUIREMENT:",
 		"Evidence-rich authored documents require concrete semantic.entities beyond the repo plus shard wrapper.",
 		"Evidence-rich authored documents require concrete semantic.edges beyond repo/shard contains relationships",
@@ -287,9 +295,6 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		"Do not make factual edits before the file validates",
 		"FIRST COLLECT MANIFEST REPAIR COMMAND:",
 		"Run this exact command as your next filesystem action",
-		"mkdir -p ",
-		"cat > ",
-		"<<'ACP_MANIFEST_JSON'",
 		"Copy the heredoc JSON",
 		"Execute the preferred heredoc write command",
 		"write it from the heredoc command",
@@ -302,14 +307,15 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 	skeletonIndex := strings.Index(prompt, "TASK-SPECIFIC MANIFEST JSON SKELETON:")
 	evidenceIndex := strings.Index(prompt, "COLLECT MANIFEST EVIDENCE-FIRST REPAIR:")
 	skeletonUseIndex := strings.Index(prompt, "SKELETON USE:")
+	writeShapeIndex := strings.Index(prompt, "COLLECT MANIFEST REPAIR WRITE SHAPE:")
 	semanticIndex := strings.Index(prompt, "SEMANTIC EXTRACTION REQUIREMENT:")
 	contractIndex := strings.Index(prompt, "Artifact-only repair contract:")
 	instructionIndex := strings.Index(prompt, "COLLECT MANIFEST REPAIR INSTRUCTIONS:")
 	checklistIndex := strings.Index(prompt, "COLLECT MANIFEST REPAIR CHECKLIST:")
-	if evidenceIndex < 0 || skeletonIndex < 0 || skeletonUseIndex < 0 || semanticIndex < 0 || contractIndex < 0 || instructionIndex < 0 || checklistIndex < 0 {
+	if evidenceIndex < 0 || skeletonIndex < 0 || skeletonUseIndex < 0 || writeShapeIndex < 0 || semanticIndex < 0 || contractIndex < 0 || instructionIndex < 0 || checklistIndex < 0 {
 		t.Fatalf("expected repair prompt to contain skeleton, instructions, and canonical sections:\n%s", prompt)
 	}
-	if !(evidenceIndex < skeletonIndex && skeletonIndex < skeletonUseIndex && skeletonUseIndex < semanticIndex && semanticIndex < contractIndex && contractIndex < instructionIndex && instructionIndex < checklistIndex) {
+	if !(evidenceIndex < skeletonIndex && skeletonIndex < skeletonUseIndex && skeletonUseIndex < writeShapeIndex && writeShapeIndex < semanticIndex && semanticIndex < contractIndex && contractIndex < instructionIndex && instructionIndex < checklistIndex) {
 		t.Fatalf("expected repair prompt to put evidence-first instructions before skeleton guide, contract, repair instructions, and canonical reference:\n%s", prompt)
 	}
 	if strings.Count(prompt, "TASK-SPECIFIC MANIFEST JSON SKELETON:") != 1 {
@@ -321,8 +327,11 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 	if strings.Count(prompt, "SEMANTIC EXTRACTION REQUIREMENT:") != 1 {
 		t.Fatalf("repair prompt should include exactly one semantic extraction requirement section:\n%s", prompt)
 	}
-	if strings.Count(prompt, "ACP_MANIFEST_JSON") != 0 {
-		t.Fatalf("manifest-only repair prompt must not include a heredoc command around the skeleton:\n%s", prompt)
+	if strings.Count(prompt, "COLLECT MANIFEST REPAIR WRITE SHAPE:") != 1 {
+		t.Fatalf("repair prompt should include exactly one write-shape section:\n%s", prompt)
+	}
+	if strings.Count(prompt, "ACP_MANIFEST_JSON") != 2 {
+		t.Fatalf("manifest-only repair prompt should include one heredoc write shape, got:\n%s", prompt)
 	}
 	if strings.Contains(prompt, artifactquality.CollectManifestCanonicalExample()) {
 		t.Fatalf("repair prompt should not include a second generic canonical JSON example after the task skeleton:\n%s", prompt)

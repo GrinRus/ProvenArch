@@ -33,6 +33,11 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 		"- Use this JSON only as the task-specific schema/key/type guide, not as final content.",
 		"- Replace skeleton citations, coverage, questions, entities, edges, findings, titles, and descriptions with facts from authored docs and allowed repository evidence.",
 		"- Copying this skeleton unchanged is invalid and will be rejected as scaffold-only output.",
+		"COLLECT MANIFEST REPAIR WRITE SHAPE:",
+		"- After reading the authored documents, use the shell heredoc shape below for the single manifest write.",
+		"- Do not run it with placeholder text or copied skeleton content; fill the JSON body with evidence-backed values first.",
+		"- Do not keep exploring after the manifest write; exit after the file is complete and evidence-backed.",
+		collectManifestRepairWriteShape(manifestTarget),
 		"SEMANTIC EXTRACTION REQUIREMENT:",
 		"- Before writing shard-pack-manifest.json, extract semantic signal from the authored documents: named systems, runtimes, services, data stores, build/deploy/test/config surfaces, and material risks or gaps.",
 		"- Evidence-rich authored documents require concrete semantic.entities beyond the repo plus shard wrapper.",
@@ -82,6 +87,36 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 	)
 	sections = append(sections, strings.Join(repairLines, "\n"))
 	return strings.Join(sections, "\n\n")
+}
+
+func collectManifestRepairWriteShape(manifestTarget string) string {
+	target := shellSingleQuote(strings.TrimSpace(manifestTarget))
+	return strings.Join([]string{
+		"manifest_target=" + target,
+		"cat > \"$manifest_target\" <<'ACP_MANIFEST_JSON'",
+		"{",
+		"  \"version\": 1,",
+		"  \"run_id\": \"<keep task run_id>\",",
+		"  \"step_id\": \"<keep task step_id>\",",
+		"  \"shard_id\": \"<keep task shard_id>\",",
+		"  \"domain_id\": \"<keep task domain_id>\",",
+		"  \"agent_role\": \"<keep task agent_role>\",",
+		"  \"artifact_root\": \"<keep task artifact_root>\",",
+		"  \"repo_scopes\": [\"<keep task repo_scopes>\"],",
+		"  \"path_scopes\": [\"<keep task path_scopes>\"],",
+		"  \"documents\": [\"<replace with authored doc objects from write_root>\"],",
+		"  \"citations\": [\"<replace with concrete repo/path citations>\"],",
+		"  \"semantic\": {",
+		"    \"coverage\": {\"observed\": [\"<concrete observed surfaces>\"], \"missing\": [\"<known gaps>\"], \"notes\": [\"<specific notes>\"]},",
+		"    \"questions\": [\"<stable id/text questions when evidence is incomplete>\"],",
+		"    \"entities\": [\"<named systems/services/components/datastores/config surfaces>\"],",
+		"    \"edges\": [\"<non-contains relationships when evidence supports them>\"],",
+		"    \"findings\": [\"<material owner/runtime/config/deploy/test/security findings>\" ]",
+		"  }",
+		"}",
+		"ACP_MANIFEST_JSON",
+		"test -s \"$manifest_target\"",
+	}, "\n")
 }
 
 func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task acpruntime.Task, validationErr error) string {
