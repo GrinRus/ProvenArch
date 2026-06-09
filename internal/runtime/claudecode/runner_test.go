@@ -62,6 +62,12 @@ func TestClaudeAdapterUsesExtendedPreArtifactWindowForArtifactSteps(t *testing.T
 	if got, want := policy.PreArtifactStallWindow, 180*time.Second; got != want {
 		t.Fatalf("expected claude pre-artifact window %s, got %s", want, got)
 	}
+	if got, want := policy.PostArtifactStallWindow, 90*time.Second; got != want {
+		t.Fatalf("expected claude collect post-artifact enrichment window %s, got %s", want, got)
+	}
+	if got, want := policy.PartialArtifactStallWindow, 90*time.Second; got != want {
+		t.Fatalf("expected claude collect partial-artifact enrichment window %s, got %s", want, got)
+	}
 
 	policy = (claudeAdapter{}).ActivityPolicy(acpruntime.Task{StepID: "init.step2.asis_docs"})
 	if !policy.MonitorArtifacts || !policy.MonitorPreArtifact {
@@ -69,5 +75,8 @@ func TestClaudeAdapterUsesExtendedPreArtifactWindowForArtifactSteps(t *testing.T
 	}
 	if got, want := policy.PreArtifactStallWindow, 180*time.Second; got != want {
 		t.Fatalf("expected claude draft pre-artifact window %s, got %s", want, got)
+	}
+	if policy.PostArtifactStallWindow != 0 || policy.PartialArtifactStallWindow != 0 {
+		t.Fatalf("draft steps must keep shared post-artifact defaults, got %+v", policy)
 	}
 }

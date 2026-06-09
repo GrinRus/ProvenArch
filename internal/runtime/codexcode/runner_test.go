@@ -76,6 +76,12 @@ func TestCodexAdapterMonitorsPreArtifactStallsForArtifactSteps(t *testing.T) {
 	if policy.PreArtifactStallWindow != 0 {
 		t.Fatalf("codex must keep default shared pre-artifact window, got %+v", policy)
 	}
+	if got, want := policy.PostArtifactStallWindow, 90*time.Second; got != want {
+		t.Fatalf("expected codex collect post-artifact enrichment window %s, got %s", want, got)
+	}
+	if got, want := policy.PartialArtifactStallWindow, 90*time.Second; got != want {
+		t.Fatalf("expected codex collect partial-artifact enrichment window %s, got %s", want, got)
+	}
 
 	policy = (codexAdapter{}).ActivityPolicy(acpruntime.Task{StepID: "init.step0.constitution"})
 	if !policy.MonitorArtifacts || !policy.MonitorPreArtifact {
@@ -83,6 +89,9 @@ func TestCodexAdapterMonitorsPreArtifactStallsForArtifactSteps(t *testing.T) {
 	}
 	if policy.PreArtifactStallWindow != 0 {
 		t.Fatalf("codex draft policy must keep default shared pre-artifact window, got %+v", policy)
+	}
+	if policy.PostArtifactStallWindow != 0 || policy.PartialArtifactStallWindow != 0 {
+		t.Fatalf("draft steps must keep shared post-artifact defaults, got %+v", policy)
 	}
 }
 

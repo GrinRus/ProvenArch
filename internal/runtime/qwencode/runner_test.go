@@ -85,6 +85,12 @@ func TestQwenAdapterMonitorsPreArtifactStallsForArtifactSteps(t *testing.T) {
 	if got, want := policy.PreArtifactStallWindow, 180*time.Second; got != want {
 		t.Fatalf("expected qwen pre-artifact window %s, got %s", want, got)
 	}
+	if got, want := policy.PostArtifactStallWindow, 90*time.Second; got != want {
+		t.Fatalf("expected qwen collect post-artifact enrichment window %s, got %s", want, got)
+	}
+	if got, want := policy.PartialArtifactStallWindow, 90*time.Second; got != want {
+		t.Fatalf("expected qwen collect partial-artifact enrichment window %s, got %s", want, got)
+	}
 	if policy.ValidArtifactStopWindow != 0 {
 		t.Fatalf("collect steps must not use qwen valid-artifact stop window, got %+v", policy)
 	}
@@ -95,6 +101,9 @@ func TestQwenAdapterMonitorsPreArtifactStallsForArtifactSteps(t *testing.T) {
 	}
 	if got, want := policy.PreArtifactStallWindow, 180*time.Second; got != want {
 		t.Fatalf("expected qwen draft pre-artifact window %s, got %s", want, got)
+	}
+	if policy.PostArtifactStallWindow != 0 {
+		t.Fatalf("qwen draft must keep shared post-artifact default, got %+v", policy)
 	}
 	if got, want := policy.ValidArtifactStopWindow, 2*time.Minute; got != want {
 		t.Fatalf("expected qwen draft valid-artifact stop window %s, got %s", want, got)
