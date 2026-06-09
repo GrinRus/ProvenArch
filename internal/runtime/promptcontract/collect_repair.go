@@ -33,6 +33,13 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 		"- Use this JSON only as the task-specific schema/key/type guide, not as final content.",
 		"- Replace skeleton citations, coverage, questions, entities, edges, findings, titles, and descriptions with facts from authored docs and allowed repository evidence.",
 		"- Copying this skeleton unchanged is invalid and will be rejected as scaffold-only output.",
+		"SEMANTIC EXTRACTION REQUIREMENT:",
+		"- Before writing shard-pack-manifest.json, extract semantic signal from the authored documents: named systems, runtimes, services, data stores, build/deploy/test/config surfaces, and material risks or gaps.",
+		"- Evidence-rich authored documents require concrete semantic.entities beyond the repo plus shard wrapper.",
+		"- Evidence-rich authored documents require concrete semantic.edges beyond repo/shard contains relationships, using relationships such as uses, configures, depends_on, runs, exposes, stores, builds, or deploys when supported by evidence.",
+		"- Evidence-rich authored documents require semantic.findings or semantic.questions beyond a generic owner-mapping gap when the authored docs describe real stack, deploy, environment, testing, licensing, or operational concerns.",
+		"- A manifest with many citations but only repo/shard entities, only contains edges, and only Owner mapping not confirmed is invalid scaffold-only semantic output.",
+		"- Coverage notes must state concrete observed architecture/configuration surfaces; do not use generic notes like \"Collect manifest covers the assigned shard scope\" as proof of completeness.",
 		"Artifact-only repair contract:",
 		"- Do not return semantic JSON or any semantic payload on stdout.",
 		"- Write or replace only write_root/shard-pack-manifest.json.",
@@ -126,6 +133,7 @@ func overwriteCollectManifestRepairInstructions() []string {
 		"- Do not search the filesystem for schemas/*, docs/spec/*, examples, prior manifests, sibling shards, raw logs, or reports/taskruns history.",
 		"- Do not rewrite authored markdown documents and do not create any file other than shard-pack-manifest.json.",
 		"- Treat the embedded JSON as a schema guide only. Build semantic entities, edges, findings, coverage, questions, and citations from the authored docs and allowed repository evidence.",
+		"- Do not collapse semantic output to repo/shard wrappers plus owner mapping; cite concrete components and relationships already described in the authored docs.",
 		"- Validation, not stdout, is the success surface; do not claim validation unless the backend accepts the artifact.",
 	}
 }

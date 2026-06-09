@@ -237,6 +237,11 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		"SKELETON USE:",
 		"Use this JSON only as the task-specific schema/key/type guide, not as final content.",
 		"Copying this skeleton unchanged is invalid",
+		"SEMANTIC EXTRACTION REQUIREMENT:",
+		"Evidence-rich authored documents require concrete semantic.entities beyond the repo plus shard wrapper.",
+		"Evidence-rich authored documents require concrete semantic.edges beyond repo/shard contains relationships",
+		"semantic.findings or semantic.questions beyond a generic owner-mapping gap",
+		"A manifest with many citations but only repo/shard entities, only contains edges, and only Owner mapping not confirmed is invalid scaffold-only semantic output.",
 		"Write or replace only write_root/shard-pack-manifest.json.",
 		"Exact allowed write target:",
 		"Final action must be: write only write_root/shard-pack-manifest.json, then exit successfully.",
@@ -259,6 +264,7 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		"Perform a bounded evidence pass over existing authored documents and listed repository evidence candidates before writing shard-pack-manifest.json.",
 		"Do not read, diff, or patch an existing invalid shard-pack-manifest.json; replace it after the evidence pass.",
 		"Treat the embedded JSON as a schema guide only.",
+		"Do not collapse semantic output to repo/shard wrappers plus owner mapping",
 		"COLLECT MANIFEST REPAIR CHECKLIST:",
 		`artifact_root must remain exactly "reports/taskruns/run-1/staging/shards/payments"`,
 		"forbidden legacy aliases:",
@@ -296,13 +302,14 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 	skeletonIndex := strings.Index(prompt, "TASK-SPECIFIC MANIFEST JSON SKELETON:")
 	evidenceIndex := strings.Index(prompt, "COLLECT MANIFEST EVIDENCE-FIRST REPAIR:")
 	skeletonUseIndex := strings.Index(prompt, "SKELETON USE:")
+	semanticIndex := strings.Index(prompt, "SEMANTIC EXTRACTION REQUIREMENT:")
 	contractIndex := strings.Index(prompt, "Artifact-only repair contract:")
 	instructionIndex := strings.Index(prompt, "COLLECT MANIFEST REPAIR INSTRUCTIONS:")
 	checklistIndex := strings.Index(prompt, "COLLECT MANIFEST REPAIR CHECKLIST:")
-	if evidenceIndex < 0 || skeletonIndex < 0 || skeletonUseIndex < 0 || contractIndex < 0 || instructionIndex < 0 || checklistIndex < 0 {
+	if evidenceIndex < 0 || skeletonIndex < 0 || skeletonUseIndex < 0 || semanticIndex < 0 || contractIndex < 0 || instructionIndex < 0 || checklistIndex < 0 {
 		t.Fatalf("expected repair prompt to contain skeleton, instructions, and canonical sections:\n%s", prompt)
 	}
-	if !(evidenceIndex < skeletonIndex && skeletonIndex < skeletonUseIndex && skeletonUseIndex < contractIndex && contractIndex < instructionIndex && instructionIndex < checklistIndex) {
+	if !(evidenceIndex < skeletonIndex && skeletonIndex < skeletonUseIndex && skeletonUseIndex < semanticIndex && semanticIndex < contractIndex && contractIndex < instructionIndex && instructionIndex < checklistIndex) {
 		t.Fatalf("expected repair prompt to put evidence-first instructions before skeleton guide, contract, repair instructions, and canonical reference:\n%s", prompt)
 	}
 	if strings.Count(prompt, "TASK-SPECIFIC MANIFEST JSON SKELETON:") != 1 {
@@ -310,6 +317,9 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 	}
 	if strings.Count(prompt, "COLLECT MANIFEST EVIDENCE-FIRST REPAIR:") != 1 {
 		t.Fatalf("repair prompt should include exactly one evidence-first repair section:\n%s", prompt)
+	}
+	if strings.Count(prompt, "SEMANTIC EXTRACTION REQUIREMENT:") != 1 {
+		t.Fatalf("repair prompt should include exactly one semantic extraction requirement section:\n%s", prompt)
 	}
 	if strings.Count(prompt, "ACP_MANIFEST_JSON") != 0 {
 		t.Fatalf("manifest-only repair prompt must not include a heredoc command around the skeleton:\n%s", prompt)
