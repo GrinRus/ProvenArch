@@ -100,6 +100,15 @@ func TestCollectDocumentBootstrapOnlyDetectsMarkerFreeRecoveryBootstrap(t *testi
 	}
 }
 
+func TestCollectDocumentBootstrapOnlyAllowsRecoveryEvidenceSummary(t *testing.T) {
+	t.Parallel()
+
+	text := "# Payments Overview\n\n## Recovery Evidence Summary\n- Repository scope: payments.\n- Assigned scope summary: `src`, `README.md`.\n- Primary scoped evidence path: `README.md`.\n- This document is a validation-ready collect recovery fallback for a shard whose first collect attempt did not complete with enriched artifacts.\n\n## Evidence Surface\n- `README.md`: scoped repository evidence available to the collect shard.\n- `src`: scoped repository evidence available to the collect shard.\n\n## Recovery Notes\n- The recovery pair records concrete scoped paths so downstream compilation can preserve traceability instead of accepting an empty or marker-only shard.\n\n## Remaining Questions\n- Confirm concrete ownership, runtime responsibilities, and operational escalation evidence for this shard.\n"
+	if CollectDocumentBootstrapOnly(text) {
+		t.Fatalf("expected recovery evidence summary to remain validation-eligible")
+	}
+}
+
 func bootstrapCollectManifest() contracts.ShardPackManifest {
 	return contracts.ShardPackManifest{
 		Version:      1,

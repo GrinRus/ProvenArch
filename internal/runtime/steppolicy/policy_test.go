@@ -165,7 +165,7 @@ func TestCollectFirstActionSectionWritesExactPair(t *testing.T) {
 	}
 }
 
-func TestCollectRecoveryPairWriteCommandRequiresEnrichmentBeforeValidation(t *testing.T) {
+func TestCollectRecoveryPairWriteCommandWritesValidationReadyFallback(t *testing.T) {
 	t.Parallel()
 
 	task := acpruntime.Task{
@@ -182,10 +182,13 @@ func TestCollectRecoveryPairWriteCommandRequiresEnrichmentBeforeValidation(t *te
 	command := CollectRecoveryPairWriteCommand(task)
 	required := []string{
 		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md' <<'ACP_COLLECT_DOC'`,
-		`ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT`,
-		`Evidence candidate used for the recovery manifest`,
+		`## Recovery Evidence Summary`,
+		`## Evidence Surface`,
+		`## Recovery Notes`,
 		`Remaining Questions`,
 		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json' <<'ACP_MANIFEST_JSON'`,
+		`collect recovery fallback`,
+		`Collect recovery used minimal scoped evidence`,
 		`"path": "payments-overview.md"`,
 	}
 	for _, needle := range required {
@@ -194,7 +197,11 @@ func TestCollectRecoveryPairWriteCommandRequiresEnrichmentBeforeValidation(t *te
 		}
 	}
 	for _, forbidden := range []string{
-		`Primary scoped evidence path:`,
+		`ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT`,
+		`Recovery Bootstrap`,
+		`Recovery Summary`,
+		`Evidence candidate used for the recovery manifest`,
+		`Collect manifest covers the assigned shard scope`,
 		`Owner mapping evidence not confirmed from the initial scoped evidence path`,
 	} {
 		if strings.Contains(command, forbidden) {
