@@ -672,6 +672,71 @@ done
 	}
 }
 
+func TestRunHeadlessProviderRecoversCollectManifestWhenProviderRepairDoesNotWriteManifest(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-runtime-recovery")
+	repoRoot := filepath.Join(task.Workspace, "repos", "bank-of-anthos")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Bank of Anthos\n"), 0o644); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	task.ReadContextRoots = []string{repoRoot}
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+mkdir -p ` + shellQuote(filepath.Join(task.WriteRoot, "docs")) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Payment Runtime Overview
+
+## Services
+- **Ledger API**: records payment operations.
+- **Transaction Worker**: processes queued account changes.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "docs", "overview.md")) + ` <<'EOF'
+# Runtime Dependency Overview
+
+## Dependencies
+- **Account Service**: provides account data.
+EOF
+`
+	repairScript := `#!/usr/bin/env bash
+set -eu
+exit 0
+`
+	runner := testAdapter{
+		command:       writeEngineScript(t, initialScript),
+		repairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected deterministic collect manifest recovery success, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName))
+	if err != nil {
+		t.Fatalf("read recovered manifest: %v", err)
+	}
+	if !strings.Contains(string(raw), "collect_manifest.runtime_recovery") {
+		t.Fatalf("expected runtime recovery finding in manifest, got %s", raw)
+	}
+	if !strings.Contains(string(raw), `"type": "documents"`) {
+		t.Fatalf("expected non-container semantic edges in recovered manifest, got %s", raw)
+	}
+	if strings.Contains(string(raw), `"Owner mapping not confirmed"`) {
+		t.Fatalf("recovered manifest should not use bootstrap owner-mapping finding, got %s", raw)
+	}
+}
+
 func TestRunHeadlessProviderRepairsCollectManifestWithMissingReferencedDocumentPath(t *testing.T) {
 	task := newCollectTask(t, "run-collect-repair-missing-doc-ref")
 	badManifest := strings.Replace(collectManifestJSON(task), `"path": "overview.md"`, `"path": "overivew.md"`, 1)
@@ -1163,7 +1228,7 @@ exit 2
 	}
 }
 
-func TestRunHeadlessProviderClassifiesQwenPartialCollectArtifactsAsContractFailure(t *testing.T) {
+func TestRunHeadlessProviderRecoversQwenPartialCollectArtifactsWithAuthoredDocs(t *testing.T) {
 	t.Parallel()
 
 	task := newCollectTask(t, "run-collect-partial")
@@ -1183,19 +1248,19 @@ printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot
 		},
 	}
 
-	_, err := RunHeadlessProvider(context.Background(), task, runner)
-	if err == nil {
-		t.Fatal("expected collect contract failure")
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected runtime collect manifest recovery success, got %v", err)
 	}
-	var runnerErr acpruntime.RunnerError
-	if !errors.As(err, &runnerErr) {
-		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
 	}
-	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
-		t.Fatalf("expected runtime_contract_failed for partial collect artifacts, got %s (%v)", runnerErr.Code, err)
+	raw, err := os.ReadFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName))
+	if err != nil {
+		t.Fatalf("read recovered manifest: %v", err)
 	}
-	if !strings.Contains(runnerErr.Error(), "manifest-only collect repair") {
-		t.Fatalf("expected manifest repair context in error, got %v", err)
+	if !strings.Contains(string(raw), "runtime_recovery") {
+		t.Fatalf("expected recovered manifest claim/finding marker, got %s", raw)
 	}
 }
 

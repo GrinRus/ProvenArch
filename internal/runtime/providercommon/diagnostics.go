@@ -184,6 +184,31 @@ func emitCollectManifestRepairExhaustedDiagnostic(task acpruntime.Task, provider
 	emitDiagnostic(task, "collect manifest repair exhausted", fields)
 }
 
+func emitCollectManifestDeterministicRecoveryCompletedDiagnostic(task acpruntime.Task, provider acpruntime.Provider, report collectManifestRuntimeRecoveryReport) {
+	fields := map[string]any{
+		"provider":       string(provider),
+		"shard_id":       strings.TrimSpace(task.ShardID),
+		"recovery_mode":  "collect_manifest_runtime_recovery",
+		"document_count": report.DocumentCount,
+		"entity_count":   report.EntityCount,
+		"edge_count":     report.EdgeCount,
+		"evidence_path":  strings.TrimSpace(report.EvidencePath),
+	}
+	emitDiagnostic(task, "collect manifest runtime recovery completed", fields)
+}
+
+func emitCollectManifestDeterministicRecoveryFailedDiagnostic(task acpruntime.Task, provider acpruntime.Provider, cause error) {
+	fields := map[string]any{
+		"provider":      string(provider),
+		"shard_id":      strings.TrimSpace(task.ShardID),
+		"recovery_mode": "collect_manifest_runtime_recovery",
+	}
+	if cause != nil {
+		fields["validation_error"] = strings.TrimSpace(cause.Error())
+	}
+	emitDiagnostic(task, "collect manifest runtime recovery failed", fields)
+}
+
 func emitFocusedArtifactRepairScheduledDiagnostic(task acpruntime.Task, provider acpruntime.Provider, mode string, stage string, snapshot artifactSnapshot, cause error) {
 	fields := snapshot.diagnosticFields()
 	fields["provider"] = string(provider)

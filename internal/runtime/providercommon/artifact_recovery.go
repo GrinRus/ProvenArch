@@ -292,6 +292,9 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 				}
 			}
 			emitCollectManifestRepairExhaustedDiagnostic(task, adapter.Provider(), repairStalled.Diagnostic, repairErr)
+			if recovered, recoveredResult, recoveredErr := recoverCollectManifestDeterministicallyAfterRepairFailure(task, adapter, repairResult, beforeRepairFiles, repairErr); recovered {
+				return true, recoveredResult, recoveredErr
+			}
 			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_manifest_repair", "manifest-only collect repair stalled before valid artifacts were available", repairErr)
 		}
 		return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, repairResult, repairErr)
@@ -301,9 +304,29 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 	}
 	if err := adapter.ValidateArtifacts(task); err != nil {
 		emitCollectManifestRepairExhaustedDiagnostic(task, adapter.Provider(), runtimeArtifactSnapshot(task).stallDiagnostic(), err)
+		if recovered, recoveredResult, recoveredErr := recoverCollectManifestDeterministicallyAfterRepairFailure(task, adapter, repairResult, beforeRepairFiles, err); recovered {
+			return true, recoveredResult, recoveredErr
+		}
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_manifest_repair", "manifest-only collect repair did not produce valid collect artifacts", err)
 	}
 	emitCollectManifestRepairCompletedDiagnostic(task, adapter.Provider(), "")
+	return true, repairResult, nil
+}
+
+func recoverCollectManifestDeterministicallyAfterRepairFailure(task acpruntime.Task, adapter ProviderAdapter, repairResult acpruntime.Result, beforeRepairFiles writeRootFileSnapshot, cause error) (bool, acpruntime.Result, error) {
+	report, err := recoverCollectManifestFromAuthoredDocs(task, cause)
+	if err != nil {
+		emitCollectManifestDeterministicRecoveryFailedDiagnostic(task, adapter.Provider(), err)
+		return false, acpruntime.Result{}, nil
+	}
+	if err := validateCollectManifestRepairWriteSet(task, beforeRepairFiles); err != nil {
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_manifest_runtime_recovery", "deterministic collect manifest recovery wrote outside shard-pack-manifest.json", err)
+	}
+	if err := adapter.ValidateArtifacts(task); err != nil {
+		emitCollectManifestDeterministicRecoveryFailedDiagnostic(task, adapter.Provider(), err)
+		return false, acpruntime.Result{}, nil
+	}
+	emitCollectManifestDeterministicRecoveryCompletedDiagnostic(task, adapter.Provider(), report)
 	return true, repairResult, nil
 }
 
