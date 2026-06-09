@@ -218,16 +218,16 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 	case "init.step1.collect", "refresh.step1.collect":
 		lines = append(lines,
 			`- Do NOT delegate to agent/subagent helpers and do NOT use todo_write-style planning.`,
-			`- Before the first filesystem write inside write_root, keep repository exploration minimal and converge quickly on the first authored doc plus shard-pack-manifest.json bootstrap pair.`,
+			`- Before the first filesystem write inside write_root, keep repository exploration minimal and converge quickly on the first validation-ready authored doc plus shard-pack-manifest.json pair.`,
 			`- Produce runtime-authored documents in write_root and then write shard-pack-manifest.json in write_root.`,
-			`- Early pair-write requirement: write the suggested overview doc and shard-pack-manifest.json as one focused artifact pair before any broad second-pass repository sweep.`,
+			`- Early pair-write requirement: write the suggested overview doc and shard-pack-manifest.json as one focused marker-free artifact pair before any broad second-pass repository sweep.`,
 			fmt.Sprintf(`- Suggested collect authored doc path for this shard: %q. Prefer exactly this single doc path unless already writing an existing clearer authored doc.`, SuggestedCollectDocumentPath(task)),
 			fmt.Sprintf(`- Absolute collect targets for the early pair-write: %q and %q.`, filepath.Join(strings.TrimSpace(task.WriteRoot), filepath.FromSlash(SuggestedCollectDocumentPath(task))), filepath.Join(strings.TrimSpace(task.WriteRoot), "shard-pack-manifest.json")),
-			fmt.Sprintf(`- Minimal collect target shape: write %q + "shard-pack-manifest.json" early, then enrich that pair from concrete repository evidence and record remaining uncertainty in coverage/questions instead of continuing open-ended exploration.`, SuggestedCollectDocumentPath(task)),
-			`- Do not wait for a complete broad repository sweep before writing shard-pack-manifest.json; after the bootstrap pair exists, enrich the manifest with concrete observed evidence for the assigned shard scope and record remaining gaps in semantic.coverage.missing.`,
+			fmt.Sprintf(`- Minimal collect target shape: write %q + "shard-pack-manifest.json" early as validation-ready scoped evidence, then enrich that pair from concrete repository evidence and record remaining uncertainty in coverage/questions instead of continuing open-ended exploration.`, SuggestedCollectDocumentPath(task)),
+			`- Do not wait for a complete broad repository sweep before writing shard-pack-manifest.json; after the initial pair exists, enrich the manifest with concrete observed evidence for the assigned shard scope and record remaining gaps in semantic.coverage.missing.`,
 			`- Immediately after writing the first authored doc, write shard-pack-manifest.json by adapting the task-specific JSON skeleton embedded in the first-action command section; keep exact metadata keys and replace only evidence/content values you actually observed.`,
 			`- Do not exit after writing markdown only; every collect shard must finish with a valid shard-pack-manifest.json.`,
-			`- Do not treat the first-action skeleton or generic scaffold prose as final-acceptable content; before final exit, replace placeholder text, remove ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT, and replace empty or generic semantic arrays with evidence-backed content where the repository evidence supports it.`,
+			`- The first-action pair is intentionally validation-ready but minimal; before final exit, replace generic content with richer evidence-backed content where the repository evidence supports it.`,
 			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and semantic snapshot.`,
 			`- In shard-pack-manifest.json, semantic MUST include coverage, questions, entities, edges, and findings.`,
 			`- Use only canonical collect vocabulary: semantic.coverage.observed, semantic.questions[*].id + semantic.questions[*].text, semantic.edges[*].type, and object-shaped provenance blocks.`,
@@ -238,7 +238,7 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- After that targeted evidence pass, avoid broad repository exploration; only targeted evidence reads needed to enrich the current shard manifest/document and minimal manifest/JSON repair are allowed afterwards.`,
 			`- After writing shard-pack-manifest.json, do NOT continue broad list_directory/read_file sweeps across repo roots.`,
 			`- Do NOT read reports/taskruns/**, raw runtime logs, or previously generated shard-pack-manifest.json files as schema examples during collect.`,
-			`- If authored docs and shard-pack-manifest.json already exist in write_root, stop only after confirming they contain evidence-backed content for this shard and are not unchanged bootstrap placeholders.`,
+			`- If authored docs and shard-pack-manifest.json already exist in write_root, stop only after confirming they contain marker-free scoped evidence for this shard and are not placeholder prose.`,
 		)
 		if rootFileScopes := rootFileShardPathScopes(task.PathScopes); len(rootFileScopes) > 0 {
 			lines = append(lines,
@@ -370,17 +370,17 @@ func CollectFirstActionSection(task acpruntime.Task) string {
 	manifestTarget := filepath.Join(writeRoot, "shard-pack-manifest.json")
 	return strings.Join([]string{
 		"COLLECT FIRST-ACTION ARTIFACT PAIR:",
-		"- This collect step must start by writing the task-specific artifact pair before broad repository instructions.",
+		"- This collect step must start by writing the task-specific marker-free artifact pair before broad repository instructions.",
 		fmt.Sprintf(`- Exact authored document target: %q.`, docTarget),
 		fmt.Sprintf(`- Exact manifest target: %q.`, manifestTarget),
 		"FIRST COLLECT ARTIFACT PAIR COMMAND:",
 		"Run this exact command as the next filesystem action after checking whether both target files already exist; do not call read_file, list_directory, grep_search, glob, find, rg, or any repository exploration before this command:",
-		"- The embedded skeleton is bootstrap-only: write it to establish the required pair, then enrich it before final exit; do not treat an unchanged skeleton as final-acceptable output.",
+		"- The embedded pair is marker-free and validation-ready: write it to establish the required pair, then enrich it before final exit when concrete repository evidence is available.",
 		CollectEarlyPairWriteCommand(task),
 		"POST-COMMAND ENRICHMENT REQUIREMENT:",
 		"- After the command succeeds, do one targeted evidence pass using the existing repo entrypoint hints and assigned path_scopes, then overwrite the exact authored document and shard-pack-manifest.json targets with evidence-backed content.",
-		"- Successful final output must not contain ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT, generic owner-mapping-only findings, or only repo/shard contains edges when concrete repository files support richer entities, relationships, coverage, or findings.",
-		"- Exiting successfully immediately after the heredoc command is invalid; an unchanged bootstrap pair is an artifact_quality blocker.",
+		"- Successful final output must remain marker-free and must not collapse to generic owner-mapping-only findings or only repo/shard contains edges when concrete repository files support richer entities, relationships, coverage, or findings.",
+		"- Exiting successfully immediately after the heredoc command is acceptable only if the written pair remains valid, marker-free, and explicitly records scoped evidence plus coverage gaps.",
 	}, "\n")
 }
 
@@ -594,32 +594,36 @@ func collectDocumentInitialTemplate(task acpruntime.Task, docRel string) string 
 	if evidencePath == "" {
 		evidencePath = "README.md"
 	}
-	scopeText := strings.Join(nonEmptyList(task.PathScopes), ", ")
-	if scopeText == "" {
-		scopeText = evidencePath
-	}
+	scopeText := collectRecoveryScopeSummary(task, evidencePath)
+	evidenceExamples := collectRecoveryEvidencePaths(task, nil, 6)
 	titleSlug := slugComponent(strings.TrimSuffix(filepath.Base(docRel), filepath.Ext(docRel)))
 	title := titleFromSlug(titleSlug)
-	return strings.Join([]string{
+	lines := []string{
 		"# " + title,
 		"",
-		"<!-- " + artifactquality.CollectBootstrapReplaceMarker + " -->",
-		"",
 		"## Scope",
-		"- Repository: " + repo,
-		"- Path scopes: " + scopeText,
-		"",
-		"## Observations",
 		"- Repository scope: " + repo + ".",
+		"- Assigned scope summary: " + scopeText + ".",
+		"",
+		"## Evidence Summary",
 		"- Primary scoped evidence path: `" + evidencePath + "`.",
+		"- This initial collect pair is validation-ready and intentionally bounded to the assigned shard scope.",
 		"",
-		"## Evidence",
-		"- Primary evidence path: `" + evidencePath + "`",
+		"## Evidence Surface",
+	}
+	for _, path := range evidenceExamples {
+		lines = append(lines, "- `"+markdownCodeSpan(path)+"`: scoped repository evidence available to this collect shard.")
+	}
+	lines = append(lines,
 		"",
-		"## Follow-up",
-		"- Owner mapping evidence not confirmed from the initial scoped evidence path.",
+		"## Initial Findings",
+		"- The assigned evidence surface is traceable, but ownership, runtime responsibility, and escalation details need confirmation from richer repository evidence.",
 		"",
-	}, "\n")
+		"## Coverage Gaps",
+		"- Confirm concrete owners, runtime responsibilities, dependencies, and operational escalation paths for this shard.",
+		"",
+	)
+	return strings.Join(lines, "\n")
 }
 
 func collectDocumentRecoveryTemplate(task acpruntime.Task, docRel string) string {
