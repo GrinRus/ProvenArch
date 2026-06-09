@@ -90,6 +90,40 @@ func TestValidateCollectManifestRejectsLowSignalRecoveryDocument(t *testing.T) {
 	}
 }
 
+func TestValidateCollectManifestRejectsMarkerFreeInitialSeedDocument(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	manifest := bootstrapCollectManifest()
+	writeManifest(t, writeRoot, manifest)
+	writeDoc(t, writeRoot, "payments-overview.md", "# Payments Overview\n\n## Scope\n- Repository scope: payments.\n- Assigned scope summary: `src`.\n\n## Evidence Summary\n- Primary scoped evidence path: `src`.\n- This initial collect pair is a seed-only scoped evidence surface for the assigned shard.\n\n## Evidence Surface\n- `src`: scoped repository evidence available to this collect shard.\n\n## Initial Findings\n- The assigned evidence surface is traceable, but ownership, runtime responsibility, and escalation details need confirmation from richer repository evidence.\n\n## Coverage Gaps\n- Confirm concrete owners, runtime responsibilities, dependencies, and operational escalation paths for this shard.\n")
+
+	err := ValidateCollectManifestInRoot(writeRoot)
+	if err == nil {
+		t.Fatalf("expected marker-free initial seed collect document to fail validation")
+	}
+	if !strings.Contains(err.Error(), "bootstrap-only collect document") {
+		t.Fatalf("expected seed document validation error, got %v", err)
+	}
+}
+
+func TestValidateCollectManifestRejectsRecoveryEvidenceFallbackDocument(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	manifest := bootstrapCollectManifest()
+	writeManifest(t, writeRoot, manifest)
+	writeDoc(t, writeRoot, "payments-overview.md", "# Payments Overview\n\n## Recovery Evidence Summary\n- Repository scope: payments.\n- Assigned scope summary: `src`.\n- Primary scoped evidence path: `src`.\n- This document is a seed-only collect recovery fallback for a shard whose first collect attempt did not complete with enriched artifacts.\n\n## Evidence Surface\n- `src`: scoped repository evidence available to the collect shard.\n\n## Recovery Notes\n- The recovery pair records concrete scoped paths so downstream compilation can preserve traceability instead of accepting an empty or marker-only shard.\n\n## Remaining Questions\n- Confirm concrete ownership, runtime responsibilities, and operational escalation evidence for this shard.\n")
+
+	err := ValidateCollectManifestInRoot(writeRoot)
+	if err == nil {
+		t.Fatalf("expected recovery evidence fallback collect document to fail validation")
+	}
+	if !strings.Contains(err.Error(), "bootstrap-only collect document") {
+		t.Fatalf("expected recovery fallback validation error, got %v", err)
+	}
+}
+
 func TestValidateCollectManifestRejectsForbiddenSemanticAliasesBySchema(t *testing.T) {
 	t.Parallel()
 

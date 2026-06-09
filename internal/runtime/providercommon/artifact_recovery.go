@@ -152,11 +152,10 @@ func recoverCollectArtifactPairRepair(ctx context.Context, task acpruntime.Task,
 		return false, acpruntime.Result{}, nil
 	}
 	snapshot := runtimeArtifactSnapshot(task)
-	bootstrapOnlyDocs := collectWriteRootHasBootstrapOnlyAuthoredDoc(task)
-	if snapshot.AuthoredFiles > 0 && !bootstrapOnlyDocs {
+	if snapshot.AuthoredFiles > 0 {
 		return false, acpruntime.Result{}, nil
 	}
-	if !resultHasProviderDiagnostics(result) && !bootstrapOnlyDocs {
+	if !resultHasProviderDiagnostics(result) {
 		return false, acpruntime.Result{}, nil
 	}
 	repairAdapter, ok := adapter.(CollectArtifactPairRepairAdapter)

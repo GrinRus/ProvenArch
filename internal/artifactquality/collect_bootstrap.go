@@ -40,6 +40,9 @@ func collectDocumentBootstrapOnly(text string) bool {
 	if strings.Contains(text, CollectBootstrapReplaceMarker) {
 		return true
 	}
+	if collectDocumentInitialSeedOnly(lower) {
+		return true
+	}
 	if collectDocumentRecoveryScaffoldOnly(lower) {
 		return true
 	}
@@ -60,6 +63,23 @@ func collectDocumentBootstrapOnly(text string) bool {
 	return true
 }
 
+func collectDocumentInitialSeedOnly(lower string) bool {
+	if strings.Contains(lower, "## evidence summary") &&
+		strings.Contains(lower, "## evidence surface") &&
+		strings.Contains(lower, "## initial findings") &&
+		strings.Contains(lower, "## coverage gaps") &&
+		strings.Contains(lower, "scoped repository evidence available to this collect shard") &&
+		strings.Contains(lower, "ownership, runtime responsibility, and escalation details need confirmation") &&
+		strings.Contains(lower, "confirm concrete owners, runtime responsibilities, dependencies, and operational escalation paths") {
+		return true
+	}
+	if strings.Contains(lower, "this initial collect pair is a seed-only scaffold") &&
+		strings.Contains(lower, "overwrite it with repository-specific evidence before final exit") {
+		return true
+	}
+	return false
+}
+
 func collectDocumentRecoveryScaffoldOnly(lower string) bool {
 	if strings.Contains(lower, "## recovery bootstrap") &&
 		strings.Contains(lower, "evidence candidate used for the recovery manifest:") &&
@@ -72,6 +92,14 @@ func collectDocumentRecoveryScaffoldOnly(lower string) bool {
 		strings.Contains(lower, "additional repository-specific details should be enriched by the provider") &&
 		strings.Contains(lower, "## remaining questions") &&
 		strings.Contains(lower, "confirm concrete ownership, runtime responsibilities, and operational escalation evidence") {
+		return true
+	}
+	if strings.Contains(lower, "## recovery evidence summary") &&
+		(strings.Contains(lower, "validation-ready collect recovery fallback") ||
+			strings.Contains(lower, "seed-only collect recovery fallback") ||
+			strings.Contains(lower, "collect recovery fallback")) &&
+		strings.Contains(lower, "## recovery notes") &&
+		strings.Contains(lower, "downstream compilation can preserve traceability instead of accepting an empty or marker-only shard") {
 		return true
 	}
 	return false

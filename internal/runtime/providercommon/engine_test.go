@@ -717,7 +717,7 @@ EOF
 	}
 }
 
-func TestRunHeadlessProviderUsesCollectPairRepairForBootstrapOnlyAuthoredDoc(t *testing.T) {
+func TestRunHeadlessProviderRejectsBootstrapOnlyAuthoredDocWithoutPairRepair(t *testing.T) {
 	t.Parallel()
 
 	task := newCollectTask(t, "run-collect-bootstrap-doc-pair-repair")
@@ -741,6 +741,9 @@ cat >` + shellQuote(docPath) + ` <<'EOF'
 
 ## Follow-up
 - Owner mapping evidence not confirmed from the initial scoped evidence path.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + manifest + `
 EOF
 `
 	manifestOnlyRepairScript := `#!/usr/bin/env bash
@@ -776,19 +779,19 @@ EOF
 		},
 	}
 
-	result, err := RunHeadlessProvider(context.Background(), task, runner)
-	if err != nil {
-		t.Fatalf("expected collect pair repair success for bootstrap-only doc, got %v", err)
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatalf("expected bootstrap-only authored collect doc to fail without pair repair")
 	}
-	if result.Execution.Status != "succeeded" {
-		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	if !strings.Contains(err.Error(), "bootstrap-only collect document") {
+		t.Fatalf("expected bootstrap-only validation error, got %v", err)
 	}
 	raw, err := os.ReadFile(docPath)
 	if err != nil {
-		t.Fatalf("read repaired doc: %v", err)
+		t.Fatalf("read original doc: %v", err)
 	}
-	if strings.Contains(string(raw), "ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT") {
-		t.Fatalf("expected pair repair to replace bootstrap doc marker, got:\n%s", raw)
+	if !strings.Contains(string(raw), "ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT") {
+		t.Fatalf("expected bootstrap doc marker to remain because pair repair must not run, got:\n%s", raw)
 	}
 }
 

@@ -11,7 +11,7 @@ func TestCollectManifestBootstrapOnlyDetectsUnchangedFirstActionPair(t *testing.
 
 	manifest := bootstrapCollectManifest()
 	docs := map[string]string{
-		"payments-overview.md": "# Payments Overview\n\n## Scope\n- Repository: payments\n\n## Observations\n- Repository scope: payments.\n- Primary scoped evidence path: `src`.\n\n## Evidence\n- Primary evidence path: `src`\n\n## Follow-up\n- Owner mapping evidence not confirmed from the initial scoped evidence path.\n",
+		"payments-overview.md": "# Payments Overview\n\n## Scope\n- Repository scope: payments.\n- Assigned scope summary: `src`.\n\n## Evidence Summary\n- Primary scoped evidence path: `src`.\n- This initial collect pair is a seed-only scoped evidence surface for the assigned shard.\n\n## Evidence Surface\n- `src`: scoped repository evidence available to this collect shard.\n\n## Initial Findings\n- The assigned evidence surface is traceable, but ownership, runtime responsibility, and escalation details need confirmation from richer repository evidence.\n\n## Coverage Gaps\n- Confirm concrete owners, runtime responsibilities, dependencies, and operational escalation paths for this shard.\n",
 	}
 
 	if !CollectManifestBootstrapOnly(manifest, docs) {
@@ -100,12 +100,12 @@ func TestCollectDocumentBootstrapOnlyDetectsMarkerFreeRecoveryBootstrap(t *testi
 	}
 }
 
-func TestCollectDocumentBootstrapOnlyAllowsRecoveryEvidenceSummary(t *testing.T) {
+func TestCollectDocumentBootstrapOnlyRejectsRecoveryEvidenceSummary(t *testing.T) {
 	t.Parallel()
 
-	text := "# Payments Overview\n\n## Recovery Evidence Summary\n- Repository scope: payments.\n- Assigned scope summary: `src`, `README.md`.\n- Primary scoped evidence path: `README.md`.\n- This document is a validation-ready collect recovery fallback for a shard whose first collect attempt did not complete with enriched artifacts.\n\n## Evidence Surface\n- `README.md`: scoped repository evidence available to the collect shard.\n- `src`: scoped repository evidence available to the collect shard.\n\n## Recovery Notes\n- The recovery pair records concrete scoped paths so downstream compilation can preserve traceability instead of accepting an empty or marker-only shard.\n\n## Remaining Questions\n- Confirm concrete ownership, runtime responsibilities, and operational escalation evidence for this shard.\n"
-	if CollectDocumentBootstrapOnly(text) {
-		t.Fatalf("expected recovery evidence summary to remain validation-eligible")
+	text := "# Payments Overview\n\n## Recovery Evidence Summary\n- Repository scope: payments.\n- Assigned scope summary: `src`, `README.md`.\n- Primary scoped evidence path: `README.md`.\n- This document is a seed-only collect recovery fallback for a shard whose first collect attempt did not complete with enriched artifacts.\n\n## Evidence Surface\n- `README.md`: scoped repository evidence available to the collect shard.\n- `src`: scoped repository evidence available to the collect shard.\n\n## Recovery Notes\n- The recovery pair records concrete scoped paths so downstream compilation can preserve traceability instead of accepting an empty or marker-only shard.\n\n## Remaining Questions\n- Confirm concrete ownership, runtime responsibilities, and operational escalation evidence for this shard.\n"
+	if !CollectDocumentBootstrapOnly(text) {
+		t.Fatalf("expected recovery evidence summary to be classified as low-signal bootstrap-only")
 	}
 }
 
