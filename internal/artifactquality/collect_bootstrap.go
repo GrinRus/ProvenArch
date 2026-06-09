@@ -40,6 +40,9 @@ func collectDocumentBootstrapOnly(text string) bool {
 	if strings.Contains(text, CollectBootstrapReplaceMarker) {
 		return true
 	}
+	if collectDocumentRecoveryScaffoldOnly(lower) {
+		return true
+	}
 	required := []string{
 		"## observations",
 		"repository scope:",
@@ -55,6 +58,23 @@ func collectDocumentBootstrapOnly(text string) bool {
 		}
 	}
 	return true
+}
+
+func collectDocumentRecoveryScaffoldOnly(lower string) bool {
+	if strings.Contains(lower, "## recovery bootstrap") &&
+		strings.Contains(lower, "evidence candidate used for the recovery manifest:") &&
+		strings.Contains(lower, "replace this recovery bootstrap with concrete repository evidence") {
+		return true
+	}
+	if strings.Contains(lower, "## recovery summary") &&
+		strings.Contains(lower, "evidence candidate used for the recovery manifest:") &&
+		strings.Contains(lower, "## evidence candidates") &&
+		strings.Contains(lower, "additional repository-specific details should be enriched by the provider") &&
+		strings.Contains(lower, "## remaining questions") &&
+		strings.Contains(lower, "confirm concrete ownership, runtime responsibilities, and operational escalation evidence") {
+		return true
+	}
+	return false
 }
 
 func collectManifestSemanticBootstrapOnly(semantic contracts.SemanticSnapshot) bool {

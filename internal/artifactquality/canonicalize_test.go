@@ -73,6 +73,23 @@ func TestValidateCollectManifestRejectsBootstrapOnlyDocument(t *testing.T) {
 	}
 }
 
+func TestValidateCollectManifestRejectsLowSignalRecoveryDocument(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	manifest := bootstrapCollectManifest()
+	writeManifest(t, writeRoot, manifest)
+	writeDoc(t, writeRoot, "payments-overview.md", "# Payments Overview\n\n## Recovery Summary\n- Repository: payments\n- Assigned scope: src\n- Evidence candidate used for the recovery manifest: `src`.\n\n## Evidence Candidates\n- `src` is the first scoped repository path encoded in the recovery manifest.\n- Additional repository-specific details should be enriched by the provider when available within the repair window.\n\n## Remaining Questions\n- Confirm concrete ownership, runtime responsibilities, and operational escalation evidence for this shard.\n")
+
+	err := ValidateCollectManifestInRoot(writeRoot)
+	if err == nil {
+		t.Fatalf("expected low-signal recovery collect document to fail validation")
+	}
+	if !strings.Contains(err.Error(), "bootstrap-only collect document") {
+		t.Fatalf("expected low-signal recovery document validation error, got %v", err)
+	}
+}
+
 func TestValidateCollectManifestRejectsForbiddenSemanticAliasesBySchema(t *testing.T) {
 	t.Parallel()
 

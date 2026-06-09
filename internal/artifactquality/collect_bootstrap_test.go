@@ -82,6 +82,24 @@ func TestCollectManifestBootstrapOnlyDetectsMarkerEvenWithRichSemantic(t *testin
 	}
 }
 
+func TestCollectDocumentBootstrapOnlyDetectsLowSignalRecoveryScaffold(t *testing.T) {
+	t.Parallel()
+
+	text := "# Payments Overview\n\n## Recovery Summary\n- Repository: payments\n- Assigned scope: src\n- Evidence candidate used for the recovery manifest: `src`.\n\n## Evidence Candidates\n- `src` is the first scoped repository path encoded in the recovery manifest.\n- Additional repository-specific details should be enriched by the provider when available within the repair window.\n\n## Remaining Questions\n- Confirm concrete ownership, runtime responsibilities, and operational escalation evidence for this shard.\n"
+	if !CollectDocumentBootstrapOnly(text) {
+		t.Fatalf("expected low-signal recovery scaffold to be classified as bootstrap-only")
+	}
+}
+
+func TestCollectDocumentBootstrapOnlyDetectsMarkerFreeRecoveryBootstrap(t *testing.T) {
+	t.Parallel()
+
+	text := "# Payments Overview\n\n## Recovery Bootstrap\n- Repository: payments\n- Assigned scope: src\n- Evidence candidate used for the recovery manifest: `src`.\n\n## Required Enrichment\n- `src` is the first scoped repository path encoded in the recovery manifest.\n- Replace this recovery bootstrap with concrete repository evidence from the assigned path scopes before final exit.\n\n## Remaining Questions\n- Confirm concrete ownership, runtime responsibilities, and operational escalation evidence for this shard.\n"
+	if !CollectDocumentBootstrapOnly(text) {
+		t.Fatalf("expected marker-free recovery bootstrap to be classified as bootstrap-only")
+	}
+}
+
 func bootstrapCollectManifest() contracts.ShardPackManifest {
 	return contracts.ShardPackManifest{
 		Version:      1,
