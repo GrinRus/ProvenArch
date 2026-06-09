@@ -303,6 +303,7 @@ Release workflow hardening:
   - terminal-success backend runs (`result=passed`, `quality_gates=passed`, `run-status.env state=completed process_exit=0`) остаются `failure_class=none`, даже если raw provider logs содержат recovered `runner_unavailable`/429 diagnostics
   - terminal quality failures (`failure_reason=quality` или `quality_gates=failed`) классифицируются как `quality_gates_failed`, даже если stale classifier rows/raw logs содержат `runner_unavailable`
   - quality summary/matrix counters агрегируют `repair_attempts`, `repair_exhausted`, `fresh_retries`, `focused_repairs`, `stall_count`, `pre_artifact_stalls`, `post_artifact_stalls`, `zero_output_pre_artifact_stalls`, `partial_failure_count` и `quality_alerts`; non-exhausted repair/stall pressure visible but non-blocking, partial failures remain blockers
+  - provider activity timeout overrides (`ACP_PROVIDER_*_ARTIFACT_STALL_SEC`, `ACP_PROVIDER_VALID_ARTIFACT_STOP_SEC`) are covered by focused unit tests and counted as diagnostic timeout overrides by the matrix release guard; release-mode tests must keep them blocked.
   - batch report evidence tests проверяют, что `collect_partial_shard_failures`, focused recovery exhaustion/write-set violations и missing headless rows with runtime logs surfaced as per-run issue details, а не теряются за aggregate failure class
 - `scripts/full-run-batch-matrix.sh` — официальный local trusted-machine harness:
   - canonical input: `E2E_MATRIX_FILE`

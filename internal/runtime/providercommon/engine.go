@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -281,7 +283,39 @@ func normalizeActivityPolicy(policy ActivityPolicy) ActivityPolicy {
 	if policy.PostTerminateDrain <= 0 {
 		policy.PostTerminateDrain = defaultPostTerminateDrain
 	}
+	policy = applyActivityPolicyEnvOverrides(policy)
 	return policy
+}
+
+func applyActivityPolicyEnvOverrides(policy ActivityPolicy) ActivityPolicy {
+	if value := positiveSecondsEnv("ACP_PROVIDER_PRE_ARTIFACT_STALL_SEC"); value > 0 {
+		policy.PreArtifactStallWindow = value
+	}
+	if value := positiveSecondsEnv("ACP_PROVIDER_RETRY_PRE_ARTIFACT_STALL_SEC"); value > 0 {
+		policy.RetryPreArtifactStallWindow = value
+	}
+	if value := positiveSecondsEnv("ACP_PROVIDER_POST_ARTIFACT_STALL_SEC"); value > 0 {
+		policy.PostArtifactStallWindow = value
+	}
+	if value := positiveSecondsEnv("ACP_PROVIDER_PARTIAL_ARTIFACT_STALL_SEC"); value > 0 {
+		policy.PartialArtifactStallWindow = value
+	}
+	if value := positiveSecondsEnv("ACP_PROVIDER_VALID_ARTIFACT_STOP_SEC"); value > 0 {
+		policy.ValidArtifactStopWindow = value
+	}
+	return policy
+}
+
+func positiveSecondsEnv(key string) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return 0
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds <= 0 {
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func MonitorsRuntimeArtifacts(task acpruntime.Task) bool {

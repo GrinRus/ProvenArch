@@ -104,6 +104,7 @@ Artifact-quality policy для generated regress/release команд остаё
 - `artifact_quality:*` warning поднимается в `quality_gates_failed` и блокирует strict verdict.
 - `totals.repair_attempts`, `fresh_retries`, `focused_repairs`, `repair_exhausted`, `stall_count`, `pre_artifact_stalls`, `post_artifact_stalls`, `zero_output_pre_artifact_stalls` и `partial_failure_count` являются обязательной visible telemetry в quality/matrix reports;
 - non-exhausted repair/stall pressure не превращает successful backend run в failure само по себе, но `partial_failure_count > 0` остаётся strict blocker.
+- Diagnostic-only provider activity windows can be raised with `ACP_PROVIDER_PRE_ARTIFACT_STALL_SEC`, `ACP_PROVIDER_RETRY_PRE_ARTIFACT_STALL_SEC`, `ACP_PROVIDER_POST_ARTIFACT_STALL_SEC`, `ACP_PROVIDER_PARTIAL_ARTIFACT_STALL_SEC` and `ACP_PROVIDER_VALID_ARTIFACT_STOP_SEC`; the matrix harness treats them as timeout overrides and blocks them in release mode.
 
 ## 1) Scope и ограничения
 

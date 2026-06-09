@@ -1163,6 +1163,20 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertIn("release-mode requires all providers", combined_output)
         self.assertFalse((self.e2e_tmp_root / "reports" / f"release_verdict_{matrix_id}.json").exists())
 
+    def test_release_matrix_rejects_provider_activity_timeout_override(self) -> None:
+        matrix_file = self._write_matrix_file(["baseline", "parallel-default"])
+        matrix_id = "release-test-provider-activity-timeout-blocked"
+        result = self._run_matrix(
+            matrix_file,
+            matrix_id,
+            extra_env={"ACP_PROVIDER_POST_ARTIFACT_STALL_SEC": "600"},
+        )
+        combined_output = result.stdout + "\n" + result.stderr
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("release guard blocked diagnostic timeout overrides", combined_output)
+        self.assertFalse(self.sentinel_path.exists())
+        self.assertFalse((self.e2e_tmp_root / "reports" / f"release_verdict_{matrix_id}.json").exists())
+
     def test_release_slice_with_single_git_and_multi_path_passes(self) -> None:
         matrix_file = self._write_matrix_file(
             ["baseline", "parallel-default"],
