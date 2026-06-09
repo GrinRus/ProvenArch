@@ -145,18 +145,22 @@ func TestComposeArtifactOnlyPromptKeepsRefreshCollectFirstActionTaskSpecific(t *
 		`"path": "README.md"`,
 		`"questions": [`,
 		`"missing": [`,
-		"bootstrap-only",
-		"do not treat an unchanged skeleton as final-acceptable output",
+		"marker-free and validation-ready",
+		"validation-ready scoped evidence",
 		"POST-COMMAND ENRICHMENT REQUIREMENT:",
-		"ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT",
-		"unchanged bootstrap pair is an artifact_quality blocker",
 	} {
 		if !strings.Contains(prompt, token) {
 			t.Fatalf("expected refresh collect prompt to contain %q, got:\n%s", token, prompt)
 		}
 	}
-	if strings.Contains(prompt, "intentionally valid before additional evidence") {
-		t.Fatalf("collect prompt must not treat the first-action skeleton as final-acceptable output:\n%s", prompt)
+	for _, forbidden := range []string{
+		"ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT",
+		"bootstrap-only",
+		"unchanged bootstrap pair is an artifact_quality blocker",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("normal collect prompt must not contain bootstrap marker/wording %q:\n%s", forbidden, prompt)
+		}
 	}
 	if !strings.HasPrefix(prompt, "You are ACP runtime provider \"qwen-code\".\n\nCOLLECT FIRST-ACTION ARTIFACT PAIR:") {
 		t.Fatalf("expected collect first-action section immediately after provider identity, got:\n%s", prompt)
