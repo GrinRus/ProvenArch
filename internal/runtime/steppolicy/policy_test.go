@@ -165,7 +165,7 @@ func TestCollectFirstActionSectionWritesExactPair(t *testing.T) {
 	}
 }
 
-func TestCollectRecoveryPairWriteCommandOmitsBootstrapMarker(t *testing.T) {
+func TestCollectRecoveryPairWriteCommandRequiresEnrichmentBeforeValidation(t *testing.T) {
 	t.Parallel()
 
 	task := acpruntime.Task{
@@ -182,6 +182,7 @@ func TestCollectRecoveryPairWriteCommandOmitsBootstrapMarker(t *testing.T) {
 	command := CollectRecoveryPairWriteCommand(task)
 	required := []string{
 		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md' <<'ACP_COLLECT_DOC'`,
+		`ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT`,
 		`Evidence candidate used for the recovery manifest`,
 		`Remaining Questions`,
 		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json' <<'ACP_MANIFEST_JSON'`,
@@ -193,7 +194,6 @@ func TestCollectRecoveryPairWriteCommandOmitsBootstrapMarker(t *testing.T) {
 		}
 	}
 	for _, forbidden := range []string{
-		`ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT`,
 		`Primary scoped evidence path:`,
 		`Owner mapping evidence not confirmed from the initial scoped evidence path`,
 	} {
