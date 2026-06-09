@@ -349,6 +349,10 @@ func TestQwenRepairCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
 		"SKELETON USE:",
 		"Copying this skeleton unchanged is invalid",
+		"COLLECT MANIFEST REPAIR WRITE SHAPE:",
+		"After reading the authored documents, use the shell heredoc shape below for the single manifest write.",
+		"Do not run it with placeholder text or copied skeleton content; fill the JSON body with evidence-backed values first.",
+		`cat > "$manifest_target" <<'ACP_MANIFEST_JSON'`,
 		"SEMANTIC EXTRACTION REQUIREMENT:",
 		"Evidence-rich authored documents require concrete semantic.entities beyond the repo plus shard wrapper.",
 		"Evidence-rich authored documents require concrete semantic.edges beyond repo/shard contains relationships",
@@ -372,7 +376,6 @@ func TestQwenRepairCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 	for _, forbidden := range []string{
 		"FIRST COLLECT MANIFEST REPAIR COMMAND:",
 		"Run this exact command as your next filesystem action",
-		"<<'ACP_MANIFEST_JSON'",
 		"Copy the heredoc JSON",
 		"write it from the heredoc command",
 	} {
