@@ -782,11 +782,74 @@ exit 0
 	if !strings.Contains(string(raw), "collect_manifest.runtime_recovery") {
 		t.Fatalf("expected runtime recovery finding in manifest, got %s", raw)
 	}
-	if !strings.Contains(string(raw), `"type": "documents"`) {
-		t.Fatalf("expected non-container semantic edges in recovered manifest, got %s", raw)
+	if !strings.Contains(string(raw), `"type": "uses"`) {
+		t.Fatalf("expected non-container usage edges in recovered manifest, got %s", raw)
 	}
 	if strings.Contains(string(raw), `"Owner mapping not confirmed"`) {
 		t.Fatalf("recovered manifest should not use bootstrap owner-mapping finding, got %s", raw)
+	}
+}
+
+func TestRunHeadlessProviderRecoversScaffoldCollectManifestBeforeProviderRepair(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-scaffold-runtime-recovery")
+	repairMarker := filepath.Join(task.Workspace, "scaffold-manifest-repair-called")
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# PostHog CLI Common Overview
+
+## Runtime surfaces
+- **PostHog CLI**: exposes developer commands for project operations.
+- **HogQL parser**: parses query expressions used by product analytics flows.
+- **reqwest API client**: calls the PostHog API for remote operations.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + scaffoldCollectManifestJSON(task) + `
+EOF
+`
+	repairScript := `#!/usr/bin/env bash
+set -eu
+printf called > ` + shellQuote(repairMarker) + `
+exit 7
+`
+	runner := testAdapter{
+		command:       writeEngineScript(t, initialScript),
+		repairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected deterministic scaffold collect manifest recovery success, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if _, statErr := os.Stat(repairMarker); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("manifest-only provider repair should not run for scaffold semantic recovery, statErr=%v", statErr)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName))
+	if err != nil {
+		t.Fatalf("read recovered manifest: %v", err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, "collect_manifest.runtime_recovery") {
+		t.Fatalf("expected runtime recovery finding in manifest, got %s", text)
+	}
+	if !strings.Contains(text, `"name": "PostHog CLI"`) || !strings.Contains(text, `"name": "HogQL parser"`) {
+		t.Fatalf("expected recovered manifest to preserve concrete authored-doc concepts, got %s", text)
+	}
+	if !strings.Contains(text, `"type": "uses"`) {
+		t.Fatalf("expected recovered manifest to include non-container usage edges, got %s", text)
+	}
+	if strings.Contains(text, "Owner mapping not confirmed") || strings.Contains(text, "contains scoped surface") {
+		t.Fatalf("recovered manifest should not retain scaffold semantic content, got %s", text)
 	}
 }
 
@@ -2541,6 +2604,124 @@ func collectManifestJSON(task acpruntime.Task) string {
     ],
     "edges": [],
     "findings": []
+  }
+}`
+}
+
+func scaffoldCollectManifestJSON(task acpruntime.Task) string {
+	return `{
+  "version": 1,
+  "run_id": "` + task.RunID + `",
+  "step_id": "init.step1.collect",
+  "shard_id": "posthog-cli-common",
+  "domain_id": "posthog",
+  "agent_role": "shard-analyst",
+  "artifact_root": "` + task.ArtifactRoot + `",
+  "repo_scopes": ["posthog"],
+  "path_scopes": ["cli", "common"],
+  "documents": [
+    {
+      "id": "doc.posthog.cli_common.overview",
+      "kind": "report",
+      "title": "PostHog CLI Common Overview",
+      "path": "overview.md",
+      "canonical_path": "reports/as-is/posthog-cli-common/overview.md",
+      "topics": ["posthog"],
+      "citation_ids": ["cite.posthog.readme"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.posthog.readme",
+      "repo": "posthog",
+      "path": "README.md",
+      "claim_ids": ["claim.posthog.runtime"],
+      "document_ids": ["doc.posthog.cli_common.overview"]
+    }
+  ],
+  "semantic": {
+    "coverage": {
+      "observed": ["scoped surface"],
+      "missing": ["owner mapping evidence not confirmed from scoped repository files"],
+      "notes": ["collect manifest covers the assigned shard scope and evidence paths listed in citations"]
+    },
+    "questions": [
+      {
+        "id": "q.posthog.owner",
+        "text": "Who owns this scoped surface?"
+      }
+    ],
+    "entities": [
+      {
+        "id": "ent.posthog.repo",
+        "name": "PostHog",
+        "type": "domain",
+        "provenance": {
+          "kind": "observation",
+          "confidence": 0.8,
+          "evidence": [
+            {
+              "repo": "posthog",
+              "path": "README.md"
+            }
+          ]
+        }
+      },
+      {
+        "id": "ent.posthog.cli_common",
+        "name": "PostHog CLI Common",
+        "type": "component",
+        "provenance": {
+          "kind": "observation",
+          "confidence": 0.7,
+          "evidence": [
+            {
+              "repo": "posthog",
+              "path": "README.md"
+            }
+          ]
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge.posthog.contains.scoped_surface",
+        "type": "contains",
+        "from": "ent.posthog.repo",
+        "to": "ent.posthog.cli_common",
+        "name": "contains scoped surface",
+        "provenance": {
+          "kind": "observation",
+          "confidence": 0.7,
+          "evidence": [
+            {
+              "repo": "posthog",
+              "path": "README.md"
+            }
+          ]
+        }
+      }
+    ],
+    "findings": [
+      {
+        "id": "finding.posthog.owner_mapping",
+        "severity": "medium",
+        "title": "Owner mapping not confirmed",
+        "description": "Scoped evidence identifies PostHog CLI Common but does not confirm an owning team.",
+        "rule_id": "analysis.owner.mapping",
+        "related_ids": ["ent.posthog.cli_common"],
+        "provenance": {
+          "kind": "observation",
+          "confidence": 0.5,
+          "evidence": [
+            {
+              "repo": "posthog",
+              "path": "README.md"
+            }
+          ]
+        }
+      }
+    ]
   }
 }`
 }

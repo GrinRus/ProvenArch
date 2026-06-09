@@ -256,7 +256,7 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 	if err != nil {
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "collect_manifest_repair", "manifest-only collect repair write-set precheck failed", err)
 	}
-	if collectManifestFileMissing(task) {
+	if collectManifestFileMissing(task) || isCollectManifestSemanticScaffoldFailure(validationErr) {
 		if recovered, recoveredResult, recoveredErr := recoverCollectManifestDeterministically(task, adapter, result, beforeRepairFiles, validationErr); recovered {
 			return true, recoveredResult, recoveredErr
 		}
@@ -342,6 +342,13 @@ func collectManifestFileMissing(task acpruntime.Task) bool {
 	}
 	_, err := os.Stat(filepath.Join(filepath.Clean(root), ShardPackManifestFileName))
 	return errors.Is(err, os.ErrNotExist)
+}
+
+func isCollectManifestSemanticScaffoldFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "semantic snapshot is bootstrap-only collect scaffold")
 }
 
 func collectWriteRootHasBootstrapOnlyAuthoredDoc(task acpruntime.Task) bool {
