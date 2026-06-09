@@ -252,13 +252,18 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 	if collectWriteRootHasBootstrapOnlyAuthoredDoc(task) {
 		return false, acpruntime.Result{}, nil
 	}
-	repairAdapter, ok := adapter.(CollectManifestRepairAdapter)
-	if !ok {
-		return false, acpruntime.Result{}, nil
-	}
 	beforeRepairFiles, err := snapshotWriteRootFiles(task.WriteRoot)
 	if err != nil {
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "collect_manifest_repair", "manifest-only collect repair write-set precheck failed", err)
+	}
+	if collectManifestFileMissing(task) {
+		if recovered, recoveredResult, recoveredErr := recoverCollectManifestDeterministically(task, adapter, result, beforeRepairFiles, validationErr); recovered {
+			return true, recoveredResult, recoveredErr
+		}
+	}
+	repairAdapter, ok := adapter.(CollectManifestRepairAdapter)
+	if !ok {
+		return false, acpruntime.Result{}, nil
 	}
 
 	emitCollectManifestRepairScheduledDiagnostic(task, adapter.Provider(), snapshot, validationErr)
@@ -292,7 +297,7 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 				}
 			}
 			emitCollectManifestRepairExhaustedDiagnostic(task, adapter.Provider(), repairStalled.Diagnostic, repairErr)
-			if recovered, recoveredResult, recoveredErr := recoverCollectManifestDeterministicallyAfterRepairFailure(task, adapter, repairResult, beforeRepairFiles, repairErr); recovered {
+			if recovered, recoveredResult, recoveredErr := recoverCollectManifestDeterministically(task, adapter, repairResult, beforeRepairFiles, repairErr); recovered {
 				return true, recoveredResult, recoveredErr
 			}
 			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_manifest_repair", "manifest-only collect repair stalled before valid artifacts were available", repairErr)
@@ -304,7 +309,7 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 	}
 	if err := adapter.ValidateArtifacts(task); err != nil {
 		emitCollectManifestRepairExhaustedDiagnostic(task, adapter.Provider(), runtimeArtifactSnapshot(task).stallDiagnostic(), err)
-		if recovered, recoveredResult, recoveredErr := recoverCollectManifestDeterministicallyAfterRepairFailure(task, adapter, repairResult, beforeRepairFiles, err); recovered {
+		if recovered, recoveredResult, recoveredErr := recoverCollectManifestDeterministically(task, adapter, repairResult, beforeRepairFiles, err); recovered {
 			return true, recoveredResult, recoveredErr
 		}
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_manifest_repair", "manifest-only collect repair did not produce valid collect artifacts", err)
@@ -313,21 +318,30 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 	return true, repairResult, nil
 }
 
-func recoverCollectManifestDeterministicallyAfterRepairFailure(task acpruntime.Task, adapter ProviderAdapter, repairResult acpruntime.Result, beforeRepairFiles writeRootFileSnapshot, cause error) (bool, acpruntime.Result, error) {
+func recoverCollectManifestDeterministically(task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, beforeRepairFiles writeRootFileSnapshot, cause error) (bool, acpruntime.Result, error) {
 	report, err := recoverCollectManifestFromAuthoredDocs(task, cause)
 	if err != nil {
 		emitCollectManifestDeterministicRecoveryFailedDiagnostic(task, adapter.Provider(), err)
 		return false, acpruntime.Result{}, nil
 	}
 	if err := validateCollectManifestRepairWriteSet(task, beforeRepairFiles); err != nil {
-		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_manifest_runtime_recovery", "deterministic collect manifest recovery wrote outside shard-pack-manifest.json", err)
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "collect_manifest_runtime_recovery", "deterministic collect manifest recovery wrote outside shard-pack-manifest.json", err)
 	}
 	if err := adapter.ValidateArtifacts(task); err != nil {
 		emitCollectManifestDeterministicRecoveryFailedDiagnostic(task, adapter.Provider(), err)
 		return false, acpruntime.Result{}, nil
 	}
 	emitCollectManifestDeterministicRecoveryCompletedDiagnostic(task, adapter.Provider(), report)
-	return true, repairResult, nil
+	return true, result, nil
+}
+
+func collectManifestFileMissing(task acpruntime.Task) bool {
+	root := strings.TrimSpace(task.WriteRoot)
+	if root == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(filepath.Clean(root), ShardPackManifestFileName))
+	return errors.Is(err, os.ErrNotExist)
 }
 
 func collectWriteRootHasBootstrapOnlyAuthoredDoc(task acpruntime.Task) bool {
