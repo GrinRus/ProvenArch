@@ -595,10 +595,11 @@ fi
 	}
 }
 
-func TestRunHeadlessProviderRepairsMissingCollectManifestWithAuthoredDocs(t *testing.T) {
+func TestRunHeadlessProviderRecoversMissingCollectManifestWithAuthoredDocs(t *testing.T) {
 	t.Parallel()
 
 	task := newCollectTask(t, "run-collect-repair")
+	repairMarker := filepath.Join(task.Workspace, "manifest-repair-called")
 	initialScript := `#!/usr/bin/env bash
 set -eu
 mkdir -p ` + shellQuote(task.WriteRoot) + `
@@ -606,6 +607,7 @@ printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot
 `
 	repairScript := `#!/usr/bin/env bash
 set -eu
+printf called > ` + shellQuote(repairMarker) + `
 cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
 ` + collectManifestJSON(task) + `
 EOF
@@ -626,6 +628,16 @@ EOF
 	if result.Execution.Status != "succeeded" {
 		t.Fatalf("unexpected execution status: %+v", result.Execution)
 	}
+	if _, statErr := os.Stat(repairMarker); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("manifest-only repair should not run when deterministic recovery can recover a missing manifest, statErr=%v", statErr)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName))
+	if err != nil {
+		t.Fatalf("read recovered manifest: %v", err)
+	}
+	if !strings.Contains(string(raw), "collect_manifest.runtime_recovery") {
+		t.Fatalf("expected runtime recovery finding in manifest, got %s", raw)
+	}
 }
 
 func TestRunHeadlessProviderStopsCollectManifestRepairAfterValidArtifact(t *testing.T) {
@@ -636,6 +648,7 @@ func TestRunHeadlessProviderStopsCollectManifestRepairAfterValidArtifact(t *test
 set -eu
 mkdir -p ` + shellQuote(task.WriteRoot) + `
 printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + `
+printf '%s\n' '{"version":1}' > ` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + `
 `
 	repairScript := `#!/usr/bin/env bash
 set -eu
@@ -1104,12 +1117,12 @@ func TestCollectPairRepairDoesNotMaskSilentNoArtifactCollect(t *testing.T) {
 	}
 }
 
-func TestRunHeadlessProviderRepairsMissingCollectManifestWithNestedAuthoredDocs(t *testing.T) {
+func TestRunHeadlessProviderRecoversMissingCollectManifestWithNestedAuthoredDocs(t *testing.T) {
 	t.Parallel()
 
 	task := newCollectTask(t, "run-collect-repair-nested")
 	nestedDocPath := filepath.Join(task.WriteRoot, "docs", "overview.md")
-	nestedManifest := strings.Replace(collectManifestJSON(task), `"path": "overview.md"`, `"path": "docs/overview.md"`, 1)
+	repairMarker := filepath.Join(task.Workspace, "nested-manifest-repair-called")
 	initialScript := `#!/usr/bin/env bash
 set -eu
 mkdir -p ` + shellQuote(filepath.Dir(nestedDocPath)) + `
@@ -1117,9 +1130,7 @@ printf '%s\n' '# Nested Collect Overview' > ` + shellQuote(nestedDocPath) + `
 `
 	repairScript := `#!/usr/bin/env bash
 set -eu
-cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
-` + nestedManifest + `
-EOF
+printf called > ` + shellQuote(repairMarker) + `
 `
 	runner := testAdapter{
 		command:       writeEngineScript(t, initialScript),
@@ -1137,6 +1148,16 @@ EOF
 	if result.Execution.Status != "succeeded" {
 		t.Fatalf("unexpected execution status: %+v", result.Execution)
 	}
+	if _, statErr := os.Stat(repairMarker); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("manifest-only repair should not run for missing nested-doc manifest recovery, statErr=%v", statErr)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName))
+	if err != nil {
+		t.Fatalf("read recovered manifest: %v", err)
+	}
+	if !strings.Contains(string(raw), `"path": "docs/overview.md"`) {
+		t.Fatalf("expected recovered manifest to reference nested authored document, got %s", raw)
+	}
 }
 
 func TestRunHeadlessProviderRejectsCollectRepairExtraWrites(t *testing.T) {
@@ -1147,6 +1168,7 @@ func TestRunHeadlessProviderRejectsCollectRepairExtraWrites(t *testing.T) {
 set -eu
 mkdir -p ` + shellQuote(task.WriteRoot) + `
 printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + `
+printf '%s\n' '{"version":1}' > ` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + `
 `
 	repairScript := `#!/usr/bin/env bash
 set -eu
@@ -1191,6 +1213,7 @@ func TestRunHeadlessProviderRejectsCollectRepairExtraWritesBeforeCommandFailure(
 set -eu
 mkdir -p ` + shellQuote(task.WriteRoot) + `
 printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + `
+printf '%s\n' '{"version":1}' > ` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + `
 `
 	repairScript := `#!/usr/bin/env bash
 set -eu
