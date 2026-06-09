@@ -344,6 +344,23 @@ func CollectEarlyPairWriteCommand(task acpruntime.Task) string {
 	}, "\n")
 }
 
+func CollectRecoveryPairWriteCommand(task acpruntime.Task) string {
+	writeRoot := strings.TrimSpace(task.WriteRoot)
+	docRel := SuggestedCollectDocumentPath(task)
+	docTarget := filepath.Join(writeRoot, filepath.FromSlash(docRel))
+	manifestTarget := filepath.Join(writeRoot, "shard-pack-manifest.json")
+	skeleton := CollectManifestTaskSkeleton(task, []string{docRel}, nil)
+	return strings.Join([]string{
+		"mkdir -p " + shellSingleQuote(writeRoot),
+		"cat > " + shellSingleQuote(docTarget) + " <<'ACP_COLLECT_DOC'",
+		collectDocumentRecoveryTemplate(task, docRel),
+		"ACP_COLLECT_DOC",
+		"cat > " + shellSingleQuote(manifestTarget) + " <<'ACP_MANIFEST_JSON'",
+		strings.TrimSpace(skeleton),
+		"ACP_MANIFEST_JSON",
+	}, "\n")
+}
+
 func CollectFirstActionSection(task acpruntime.Task) string {
 	if !acpruntime.IsCollectStep(task.StepID) {
 		return ""
@@ -601,6 +618,39 @@ func collectDocumentInitialTemplate(task acpruntime.Task, docRel string) string 
 		"",
 		"## Follow-up",
 		"- Owner mapping evidence not confirmed from the initial scoped evidence path.",
+		"",
+	}, "\n")
+}
+
+func collectDocumentRecoveryTemplate(task acpruntime.Task, docRel string) string {
+	repo := PrimaryTaskRepoScope(task.RepoScope, task.RepoScopes)
+	if repo == "" {
+		repo = "repo"
+	}
+	evidencePath := collectEvidencePath(task, nil)
+	if evidencePath == "" {
+		evidencePath = "README.md"
+	}
+	scopeText := strings.Join(nonEmptyList(task.PathScopes), ", ")
+	if scopeText == "" {
+		scopeText = evidencePath
+	}
+	titleSlug := slugComponent(strings.TrimSuffix(filepath.Base(docRel), filepath.Ext(docRel)))
+	title := titleFromSlug(titleSlug)
+	return strings.Join([]string{
+		"# " + title,
+		"",
+		"## Recovery Summary",
+		"- Repository: " + repo,
+		"- Assigned scope: " + scopeText,
+		"- Evidence candidate used for the recovery manifest: `" + evidencePath + "`.",
+		"",
+		"## Evidence Candidates",
+		"- `" + evidencePath + "` is the first scoped repository path encoded in the recovery manifest.",
+		"- Additional repository-specific details should be enriched by the provider when available within the repair window.",
+		"",
+		"## Remaining Questions",
+		"- Confirm concrete ownership, runtime responsibilities, and operational escalation evidence for this shard.",
 		"",
 	}, "\n")
 }

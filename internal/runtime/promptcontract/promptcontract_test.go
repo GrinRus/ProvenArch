@@ -360,9 +360,10 @@ func TestComposeCollectArtifactPairRepairPromptWritesExactPairFirst(t *testing.T
 		"COLLECT PAIR WRITE COMMAND:",
 		"cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md' <<'ACP_COLLECT_DOC'",
 		"cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json' <<'ACP_MANIFEST_JSON'",
-		"POST-COMMAND ENRICHMENT REQUIREMENT:",
+		"RECOVERY ACCEPTANCE REQUIREMENT:",
+		"The command writes a validation-acceptable recovery pair without a bootstrap marker",
+		"Evidence candidate used for the recovery manifest",
 		"Successful recovery output must not contain ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT",
-		"unchanged bootstrap pair is an artifact_quality blocker",
 		`"path": "payments-overview.md"`,
 		`"artifact_root": "reports/taskruns/run-1/staging/shards/payments"`,
 		"exact authored document target = \"/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md\"",
@@ -380,6 +381,8 @@ func TestComposeCollectArtifactPairRepairPromptWritesExactPairFirst(t *testing.T
 		"Existing authored documents in write_root",
 		"Do not rewrite existing authored markdown documents",
 		"read, diff, or patch an existing invalid shard-pack-manifest.json",
+		"POST-COMMAND ENRICHMENT REQUIREMENT:",
+		"unchanged bootstrap pair is an artifact_quality blocker",
 	} {
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("collect pair repair prompt must not use manifest-only repair wording %q:\n%s", forbidden, prompt)
