@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import { evaluateDiagramArtifactReadability } from "../src/liveArtifactQuality";
 
 const scenario = (process.env.UI_E2E_SCENARIO ?? "init-inspect").trim().toLowerCase();
 const qaSmoke = (process.env.UI_E2E_QA_SMOKE ?? "0").trim() === "1";
@@ -66,11 +67,9 @@ function expectReadableArtifactText(artifactPath: string, content: string, minCh
 
 function expectReadableDiagramArtifact(artifactPath: string, content: string): void {
   const text = content.trim();
-  expect(text, `${artifactPath} should contain Mermaid content`).toMatch(/^(flowchart|graph)\b|```mermaid/i);
-  expect(text, `${artifactPath} should not be gap-only C4 output`).toMatch(/(Service:|Datastore:|External:|Actor:|-->|---|\buses\b|\bcalls\b)/i);
-  expect(text, `${artifactPath} should not only describe missing diagram evidence`).not.toMatch(
-    /Gap: no evidence-backed (services|containers|relationships|actors|external systems)[\s\S]*Gap: no evidence-backed/i
-  );
+  const readability = evaluateDiagramArtifactReadability(text);
+  expect(readability.hasMermaidSyntax, `${artifactPath} should contain Mermaid content`).toBe(true);
+  expect(readability.hasConcreteEvidence, `${artifactPath} should not be gap-only C4 output`).toBe(true);
 }
 
 async function expectReadableViewportPanel(
