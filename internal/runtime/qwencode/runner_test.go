@@ -312,6 +312,9 @@ func TestQwenRepairCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte("version: 1\nrepos:\n  - name: repo-a\n    path: "+repoRoot+"\n"), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Repo A\n"), 0o644); err != nil {
+		t.Fatalf("write repo evidence: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(writeRoot, "overview.md"), []byte("# Repo A\n"), 0o644); err != nil {
 		t.Fatalf("write authored doc: %v", err)
 	}
@@ -341,13 +344,16 @@ func TestQwenRepairCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 	args := strings.Join(spec.Args, "\n")
 	for _, token := range []string{
 		"collect manifest repair mode",
-		"FIRST COLLECT MANIFEST REPAIR COMMAND:",
-		"Run this exact command as your next filesystem action",
+		"COLLECT MANIFEST EVIDENCE-FIRST REPAIR:",
+		"Read existing authored documents in write_root before writing shard-pack-manifest.json.",
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
-		"<<'ACP_MANIFEST_JSON'",
-		"Copy the heredoc JSON during repair and preserve semantic.entities",
-		"Do not read, diff, or patch an existing invalid shard-pack-manifest.json",
+		"SKELETON USE:",
+		"Copying this skeleton unchanged is invalid",
+		"Do not read, diff, or patch an existing invalid shard-pack-manifest.json; replace it after the evidence pass.",
 		"Final action must be: write only write_root/shard-pack-manifest.json",
+		"Backend validation, not stdout claims, is the success surface.",
+		"Existing authored documents in write_root must drive manifest repair; read them, do not rewrite them.",
+		"Repository evidence candidates available for bounded repair:",
 		"overview.md",
 		`"path": "overview.md"`,
 		`"entities": [`,
@@ -355,6 +361,17 @@ func TestQwenRepairCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 	} {
 		if !strings.Contains(args, token) {
 			t.Fatalf("expected qwen repair prompt arg to contain %q, got %v", token, spec.Args)
+		}
+	}
+	for _, forbidden := range []string{
+		"FIRST COLLECT MANIFEST REPAIR COMMAND:",
+		"Run this exact command as your next filesystem action",
+		"<<'ACP_MANIFEST_JSON'",
+		"Copy the heredoc JSON",
+		"write it from the heredoc command",
+	} {
+		if strings.Contains(args, forbidden) {
+			t.Fatalf("qwen repair prompt must not contain scaffold-first wording %q, got %v", forbidden, spec.Args)
 		}
 	}
 }

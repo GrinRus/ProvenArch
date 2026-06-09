@@ -227,23 +227,27 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 	prompt := ComposeCollectManifestRepairPrompt(acpruntime.ProviderQwenCode, task, os.ErrNotExist)
 	expectedTokens := []string{
 		"collect manifest repair mode",
-		"FIRST COLLECT MANIFEST REPAIR COMMAND:",
-		"Run this exact command as your next filesystem action. Do not analyze, browse, read, diff, patch, or inspect repository files before this write:",
-		"mkdir -p ",
-		"cat > ",
-		"<<'ACP_MANIFEST_JSON'",
-		"do not inspect or patch it; overwrite it from the heredoc command",
-		"Copy the heredoc JSON during repair and preserve semantic.entities",
+		"COLLECT MANIFEST EVIDENCE-FIRST REPAIR:",
+		"Repair shard-pack-manifest.json from the existing authored documents and bounded repository evidence; do not start with a scaffold write.",
+		"Read existing authored documents in write_root before writing shard-pack-manifest.json.",
+		"Read only the listed repository evidence candidates if authored docs need support",
+		"Write exactly one file:",
+		"Do not rewrite existing authored markdown documents.",
+		"overwrite it after the evidence pass",
+		"SKELETON USE:",
+		"Use this JSON only as the task-specific schema/key/type guide, not as final content.",
+		"Copying this skeleton unchanged is invalid",
 		"Write or replace only write_root/shard-pack-manifest.json.",
 		"Exact allowed write target:",
 		"Final action must be: write only write_root/shard-pack-manifest.json, then exit successfully.",
-		"Existing authored documents in write_root are already encoded in the task-specific skeleton; do not rewrite them.",
+		"Backend validation, not stdout claims, is the success surface.",
+		"Existing authored documents in write_root must drive manifest repair; read them, do not rewrite them.",
 		"Do not search the filesystem for schemas/*, docs/spec/*, examples, prior manifests",
 		"sibling shards, raw logs, or reports/taskruns history",
 		"Existing authored document files in write_root:",
 		"docs/deep-dive.md",
 		"overview.md",
-		"Repository evidence candidates are already encoded in the skeleton",
+		"Repository evidence candidates available for bounded repair:",
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
 		`"path": "docs/deep-dive.md"`,
 		`"path": "overview.md"`,
@@ -252,12 +256,13 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		`"edges": [`,
 		`"findings": [`,
 		"COLLECT MANIFEST REPAIR INSTRUCTIONS:",
-		"Execute the preferred heredoc write command",
-		"Do not read, diff, or patch an existing invalid shard-pack-manifest.json; replace it.",
+		"Perform a bounded evidence pass over existing authored documents and listed repository evidence candidates before writing shard-pack-manifest.json.",
+		"Do not read, diff, or patch an existing invalid shard-pack-manifest.json; replace it after the evidence pass.",
+		"Treat the embedded JSON as a schema guide only.",
 		"COLLECT MANIFEST REPAIR CHECKLIST:",
 		`artifact_root must remain exactly "reports/taskruns/run-1/staging/shards/payments"`,
 		"forbidden legacy aliases:",
-		"write it from the heredoc command, preserve its semantic signal",
+		"copied scaffold semantic is invalid",
 	}
 	for _, token := range expectedTokens {
 		if !strings.Contains(prompt, token) {
@@ -274,30 +279,40 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		"complete valid repair artifact",
 		"complete repair artifact",
 		"Do not make factual edits before the file validates",
+		"FIRST COLLECT MANIFEST REPAIR COMMAND:",
+		"Run this exact command as your next filesystem action",
+		"mkdir -p ",
+		"cat > ",
+		"<<'ACP_MANIFEST_JSON'",
+		"Copy the heredoc JSON",
+		"Execute the preferred heredoc write command",
+		"write it from the heredoc command",
+		"preserve semantic.entities",
 	} {
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("repair prompt must not frame the artifact as a content-free valid skeleton via %q:\n%s", forbidden, prompt)
 		}
 	}
 	skeletonIndex := strings.Index(prompt, "TASK-SPECIFIC MANIFEST JSON SKELETON:")
-	firstCommandIndex := strings.Index(prompt, "FIRST COLLECT MANIFEST REPAIR COMMAND:")
+	evidenceIndex := strings.Index(prompt, "COLLECT MANIFEST EVIDENCE-FIRST REPAIR:")
+	skeletonUseIndex := strings.Index(prompt, "SKELETON USE:")
 	contractIndex := strings.Index(prompt, "Artifact-only repair contract:")
 	instructionIndex := strings.Index(prompt, "COLLECT MANIFEST REPAIR INSTRUCTIONS:")
 	checklistIndex := strings.Index(prompt, "COLLECT MANIFEST REPAIR CHECKLIST:")
-	if firstCommandIndex < 0 || skeletonIndex < 0 || contractIndex < 0 || instructionIndex < 0 || checklistIndex < 0 {
+	if evidenceIndex < 0 || skeletonIndex < 0 || skeletonUseIndex < 0 || contractIndex < 0 || instructionIndex < 0 || checklistIndex < 0 {
 		t.Fatalf("expected repair prompt to contain skeleton, instructions, and canonical sections:\n%s", prompt)
 	}
-	if !(firstCommandIndex < skeletonIndex && skeletonIndex < contractIndex && contractIndex < instructionIndex && instructionIndex < checklistIndex) {
-		t.Fatalf("expected compact repair prompt to put exact first command before skeleton note, contract, repair instructions, and canonical reference:\n%s", prompt)
+	if !(evidenceIndex < skeletonIndex && skeletonIndex < skeletonUseIndex && skeletonUseIndex < contractIndex && contractIndex < instructionIndex && instructionIndex < checklistIndex) {
+		t.Fatalf("expected repair prompt to put evidence-first instructions before skeleton guide, contract, repair instructions, and canonical reference:\n%s", prompt)
 	}
 	if strings.Count(prompt, "TASK-SPECIFIC MANIFEST JSON SKELETON:") != 1 {
 		t.Fatalf("repair prompt should include exactly one task-specific JSON skeleton section:\n%s", prompt)
 	}
-	if strings.Count(prompt, "FIRST COLLECT MANIFEST REPAIR COMMAND:") != 1 {
-		t.Fatalf("repair prompt should include exactly one first repair command section:\n%s", prompt)
+	if strings.Count(prompt, "COLLECT MANIFEST EVIDENCE-FIRST REPAIR:") != 1 {
+		t.Fatalf("repair prompt should include exactly one evidence-first repair section:\n%s", prompt)
 	}
-	if strings.Count(prompt, "ACP_MANIFEST_JSON") != 2 {
-		t.Fatalf("repair prompt should include a single heredoc command around the skeleton:\n%s", prompt)
+	if strings.Count(prompt, "ACP_MANIFEST_JSON") != 0 {
+		t.Fatalf("manifest-only repair prompt must not include a heredoc command around the skeleton:\n%s", prompt)
 	}
 	if strings.Contains(prompt, artifactquality.CollectManifestCanonicalExample()) {
 		t.Fatalf("repair prompt should not include a second generic canonical JSON example after the task skeleton:\n%s", prompt)
