@@ -345,14 +345,17 @@ func TestQwenRepairCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 	for _, token := range []string{
 		"collect manifest repair mode",
 		"COLLECT MANIFEST EVIDENCE-FIRST REPAIR:",
-		"Read existing authored documents in write_root before writing shard-pack-manifest.json.",
+		"The first command below reads existing authored documents in write_root before writing shard-pack-manifest.json.",
+		"FIRST COLLECT MANIFEST REPAIR COMMAND:",
+		"Run this exact command as your next filesystem action.",
+		"python3 - ",
+		"ACP_COLLECT_MANIFEST_REPAIR_PY",
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
 		"SKELETON USE:",
 		"Copying this skeleton unchanged is invalid",
-		"COLLECT MANIFEST REPAIR WRITE SHAPE:",
-		"After reading the authored documents, use the shell heredoc shape below for the single manifest write.",
-		"Do not run it with placeholder text or copied skeleton content; fill the JSON body with evidence-backed values first.",
-		`cat > "$manifest_target" <<'ACP_MANIFEST_JSON'`,
+		`"authored_docs":["overview.md"]`,
+		`"evidence_paths":["README.md"]`,
+		`target.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')`,
 		"SEMANTIC EXTRACTION REQUIREMENT:",
 		"Evidence-rich authored documents require concrete semantic.entities beyond the repo plus shard wrapper.",
 		"Evidence-rich authored documents require concrete semantic.edges beyond repo/shard contains relationships",
@@ -374,10 +377,10 @@ func TestQwenRepairCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 		}
 	}
 	for _, forbidden := range []string{
-		"FIRST COLLECT MANIFEST REPAIR COMMAND:",
-		"Run this exact command as your next filesystem action",
 		"Copy the heredoc JSON",
 		"write it from the heredoc command",
+		"COLLECT MANIFEST REPAIR WRITE SHAPE:",
+		`"<replace with authored doc objects from write_root>"`,
 	} {
 		if strings.Contains(args, forbidden) {
 			t.Fatalf("qwen repair prompt must not contain scaffold-first wording %q, got %v", forbidden, spec.Args)
