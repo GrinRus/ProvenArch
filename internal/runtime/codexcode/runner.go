@@ -119,10 +119,10 @@ func (a codexAdapter) ValidateArtifacts(task acpruntime.Task) error {
 
 func (a codexAdapter) ActivityPolicy(task acpruntime.Task) providercommon.ActivityPolicy {
 	monitorArtifacts := providercommon.MonitorsRuntimeArtifacts(task)
-	return providercommon.ActivityPolicy{
+	return providercommon.WithCollectArtifactEnrichmentWindow(task, providercommon.ActivityPolicy{
 		MonitorArtifacts:   monitorArtifacts,
 		MonitorPreArtifact: monitorArtifacts,
-	}
+	})
 }
 
 func (a codexAdapter) RecoveryPolicy(_ acpruntime.Task) providercommon.RecoveryPolicy {

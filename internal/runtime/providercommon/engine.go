@@ -19,6 +19,7 @@ const (
 	defaultPostArtifactStallWindow = 20 * time.Second
 	defaultPreArtifactStallWindow  = 75 * time.Second
 	defaultRetryPreArtifactWindow  = 3 * time.Minute
+	defaultCollectEnrichmentWindow = 90 * time.Second
 	defaultCollectRepairWindow     = 3 * time.Minute
 	defaultFocusedRepairWindow     = 90 * time.Second
 	defaultRepairValidStopWindow   = 250 * time.Millisecond
@@ -109,6 +110,19 @@ type RecoveryPolicy struct {
 	RetryZeroOutputPreArtifactStallOnce         bool
 	RetryTransientProviderUnavailableRepairOnce bool
 	ClassifySilentRetryExhaustionUnavailable    bool
+}
+
+func WithCollectArtifactEnrichmentWindow(task acpruntime.Task, policy ActivityPolicy) ActivityPolicy {
+	if !acpruntime.IsCollectStep(task.StepID) || !policy.MonitorArtifacts {
+		return policy
+	}
+	if policy.PostArtifactStallWindow <= 0 || policy.PostArtifactStallWindow < defaultCollectEnrichmentWindow {
+		policy.PostArtifactStallWindow = defaultCollectEnrichmentWindow
+	}
+	if policy.PartialArtifactStallWindow <= 0 || policy.PartialArtifactStallWindow < defaultCollectEnrichmentWindow {
+		policy.PartialArtifactStallWindow = defaultCollectEnrichmentWindow
+	}
+	return policy
 }
 
 func DefaultUnavailableMarkers() []string {
