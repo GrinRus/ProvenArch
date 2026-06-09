@@ -28,6 +28,10 @@ func CollectManifestBootstrapOnly(manifest contracts.ShardPackManifest, document
 	return collectManifestSemanticBootstrapOnly(manifest.Semantic)
 }
 
+func CollectManifestSemanticBootstrapOnly(manifest contracts.ShardPackManifest) bool {
+	return collectManifestSemanticBootstrapOnly(manifest.Semantic)
+}
+
 func CollectDocumentBootstrapOnly(text string) bool {
 	return collectDocumentBootstrapOnly(text)
 }

@@ -89,8 +89,8 @@ func TestComposeArtifactOnlyPromptAddsCollectLegacyHygieneSection(t *testing.T) 
 	prompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderClaudeCode, task)
 	expectedTokens := []string{
 		"COLLECT MANIFEST CONTRACT CHECKLIST:",
-		"Early pair-write requirement",
-		"Absolute collect targets for the early pair-write",
+		"Evidence-first pair requirement",
+		"Absolute collect targets for the evidence-backed pair",
 		"semantic.coverage MUST use observed/missing/notes",
 		"semantic.questions[*] MUST use id + text",
 		"semantic.findings[*] MUST include id, severity, title, and provenance",
@@ -99,6 +99,7 @@ func TestComposeArtifactOnlyPromptAddsCollectLegacyHygieneSection(t *testing.T) 
 		"The task-specific collect manifest JSON skeleton above is normative",
 		`"artifact_root": "reports/taskruns/run-1/staging/shards/payments"`,
 		`"repo": "payments-service"`,
+		"not be seed-only, scaffold-only, or copied unchanged from the skeleton",
 	}
 	for _, token := range expectedTokens {
 		if !strings.Contains(prompt, token) {
@@ -137,23 +138,29 @@ func TestComposeArtifactOnlyPromptKeepsRefreshCollectFirstActionTaskSpecific(t *
 	}
 	prompt := qwenPrompt
 	for _, token := range []string{
-		"COLLECT FIRST-ACTION ARTIFACT PAIR:",
-		"FIRST COLLECT ARTIFACT PAIR COMMAND:",
+		"COLLECT EVIDENCE-FIRST ARTIFACT PAIR:",
+		"FIRST COLLECT EVIDENCE PASS:",
+		"COLLECT FINAL WRITE REQUIREMENT:",
+		"COLLECT MANIFEST TASK SKELETON:",
+		"SKELETON USE:",
 		"Artifact-only contract:",
 		"DOCS-FIRST FILESYSTEM CONTRACT:",
 		`"step_id": "refresh.step1.collect"`,
 		`"path": "README.md"`,
 		`"questions": [`,
 		`"missing": [`,
-		"marker-free but seed-only",
-		"seed-only scoped evidence surface",
-		"POST-COMMAND ENRICHMENT REQUIREMENT:",
+		"bounded evidence pass before writing artifacts",
+		"do not write a seed-only/bootstrap pair",
+		"Copying this skeleton unchanged is invalid",
 	} {
 		if !strings.Contains(prompt, token) {
 			t.Fatalf("expected refresh collect prompt to contain %q, got:\n%s", token, prompt)
 		}
 	}
 	for _, forbidden := range []string{
+		"FIRST COLLECT ARTIFACT PAIR COMMAND:",
+		"<<'ACP_COLLECT_DOC'",
+		"<<'ACP_MANIFEST_JSON'",
 		"ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT",
 		"bootstrap-only",
 		"unchanged bootstrap pair is an artifact_quality blocker",
@@ -162,20 +169,20 @@ func TestComposeArtifactOnlyPromptKeepsRefreshCollectFirstActionTaskSpecific(t *
 			t.Fatalf("normal collect prompt must not contain bootstrap marker/wording %q:\n%s", forbidden, prompt)
 		}
 	}
-	if !strings.HasPrefix(prompt, "You are ACP runtime provider \"qwen-code\".\n\nCOLLECT FIRST-ACTION ARTIFACT PAIR:") {
-		t.Fatalf("expected collect first-action section immediately after provider identity, got:\n%s", prompt)
+	if !strings.HasPrefix(prompt, "You are ACP runtime provider \"qwen-code\".\n\nCOLLECT EVIDENCE-FIRST ARTIFACT PAIR:") {
+		t.Fatalf("expected collect evidence-first section immediately after provider identity, got:\n%s", prompt)
 	}
-	if got := strings.Count(prompt, "FIRST COLLECT ARTIFACT PAIR COMMAND:"); got != 1 {
-		t.Fatalf("expected first-action command heading exactly once, got %d:\n%s", got, prompt)
+	if got := strings.Count(prompt, "COLLECT MANIFEST TASK SKELETON:"); got != 1 {
+		t.Fatalf("expected collect task skeleton section exactly once, got %d:\n%s", got, prompt)
 	}
-	firstActionIndex := strings.Index(prompt, "FIRST COLLECT ARTIFACT PAIR COMMAND:")
+	firstActionIndex := strings.Index(prompt, "FIRST COLLECT EVIDENCE PASS:")
 	artifactContractIndex := strings.Index(prompt, "Artifact-only contract:")
 	docFirstIndex := strings.Index(prompt, "DOCS-FIRST FILESYSTEM CONTRACT:")
 	if firstActionIndex < 0 || artifactContractIndex < 0 || docFirstIndex < 0 {
-		t.Fatalf("expected first-action, artifact contract, and doc-first sections:\n%s", prompt)
+		t.Fatalf("expected evidence-first, artifact contract, and doc-first sections:\n%s", prompt)
 	}
 	if !(firstActionIndex < artifactContractIndex && artifactContractIndex < docFirstIndex) {
-		t.Fatalf("expected collect first-action command before broad artifact/doc-first contract:\n%s", prompt)
+		t.Fatalf("expected collect evidence-first section before broad artifact/doc-first contract:\n%s", prompt)
 	}
 }
 
