@@ -2,6 +2,7 @@ package promptcontract
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -228,23 +229,24 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 	expectedTokens := []string{
 		"collect manifest repair mode",
 		"COLLECT MANIFEST EVIDENCE-FIRST REPAIR:",
-		"Repair shard-pack-manifest.json from the existing authored documents and bounded repository evidence; do not start with a scaffold write.",
-		"Read existing authored documents in write_root before writing shard-pack-manifest.json.",
+		"Repair shard-pack-manifest.json from the existing authored documents and bounded repository evidence; do not start with a placeholder scaffold.",
+		"The first command below reads existing authored documents in write_root before writing shard-pack-manifest.json.",
 		"Read only the listed repository evidence candidates if authored docs need support",
 		"Write exactly one file:",
 		"Do not rewrite existing authored markdown documents.",
 		"overwrite it after the evidence pass",
+		"FIRST COLLECT MANIFEST REPAIR COMMAND:",
+		"Run this exact command as your next filesystem action.",
+		"Do not manually retype paths, inspect sibling taskruns, read raw logs, or write any other file before this command.",
+		"The command is evidence-derived: it reads authored markdown already in write_root and writes only shard-pack-manifest.json",
+		"python3 - ",
+		"ACP_COLLECT_MANIFEST_REPAIR_PY",
+		`"authored_docs":["docs/deep-dive.md","overview.md"]`,
+		`"evidence_paths":["src/README.md"]`,
 		"SKELETON USE:",
 		"Use this JSON only as the task-specific schema/key/type guide, not as final content.",
 		"Copying this skeleton unchanged is invalid",
-		"COLLECT MANIFEST REPAIR WRITE SHAPE:",
-		"After reading the authored documents, use the shell heredoc shape below for the single manifest write.",
-		"Do not run it with placeholder text or copied skeleton content; fill the JSON body with evidence-backed values first.",
-		`manifest_target=`,
-		`cat > "$manifest_target" <<'ACP_MANIFEST_JSON'`,
-		`"<replace with authored doc objects from write_root>"`,
-		`"<named systems/services/components/datastores/config surfaces>"`,
-		`test -s "$manifest_target"`,
+		`target.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')`,
 		"SEMANTIC EXTRACTION REQUIREMENT:",
 		"Evidence-rich authored documents require concrete semantic.entities beyond the repo plus shard wrapper.",
 		"Evidence-rich authored documents require concrete semantic.edges beyond repo/shard contains relationships",
@@ -293,12 +295,13 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		"complete valid repair artifact",
 		"complete repair artifact",
 		"Do not make factual edits before the file validates",
-		"FIRST COLLECT MANIFEST REPAIR COMMAND:",
-		"Run this exact command as your next filesystem action",
 		"Copy the heredoc JSON",
 		"Execute the preferred heredoc write command",
 		"write it from the heredoc command",
 		"preserve semantic.entities",
+		"COLLECT MANIFEST REPAIR WRITE SHAPE:",
+		`"<replace with authored doc objects from write_root>"`,
+		`"<named systems/services/components/datastores/config surfaces>"`,
 	} {
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("repair prompt must not frame the artifact as a content-free valid skeleton via %q:\n%s", forbidden, prompt)
@@ -306,16 +309,16 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 	}
 	skeletonIndex := strings.Index(prompt, "TASK-SPECIFIC MANIFEST JSON SKELETON:")
 	evidenceIndex := strings.Index(prompt, "COLLECT MANIFEST EVIDENCE-FIRST REPAIR:")
+	commandIndex := strings.Index(prompt, "FIRST COLLECT MANIFEST REPAIR COMMAND:")
 	skeletonUseIndex := strings.Index(prompt, "SKELETON USE:")
-	writeShapeIndex := strings.Index(prompt, "COLLECT MANIFEST REPAIR WRITE SHAPE:")
 	semanticIndex := strings.Index(prompt, "SEMANTIC EXTRACTION REQUIREMENT:")
 	contractIndex := strings.Index(prompt, "Artifact-only repair contract:")
 	instructionIndex := strings.Index(prompt, "COLLECT MANIFEST REPAIR INSTRUCTIONS:")
 	checklistIndex := strings.Index(prompt, "COLLECT MANIFEST REPAIR CHECKLIST:")
-	if evidenceIndex < 0 || skeletonIndex < 0 || skeletonUseIndex < 0 || writeShapeIndex < 0 || semanticIndex < 0 || contractIndex < 0 || instructionIndex < 0 || checklistIndex < 0 {
+	if evidenceIndex < 0 || commandIndex < 0 || skeletonIndex < 0 || skeletonUseIndex < 0 || semanticIndex < 0 || contractIndex < 0 || instructionIndex < 0 || checklistIndex < 0 {
 		t.Fatalf("expected repair prompt to contain skeleton, instructions, and canonical sections:\n%s", prompt)
 	}
-	if !(evidenceIndex < skeletonIndex && skeletonIndex < skeletonUseIndex && skeletonUseIndex < writeShapeIndex && writeShapeIndex < semanticIndex && semanticIndex < contractIndex && contractIndex < instructionIndex && instructionIndex < checklistIndex) {
+	if !(evidenceIndex < commandIndex && commandIndex < skeletonIndex && skeletonIndex < skeletonUseIndex && skeletonUseIndex < semanticIndex && semanticIndex < contractIndex && contractIndex < instructionIndex && instructionIndex < checklistIndex) {
 		t.Fatalf("expected repair prompt to put evidence-first instructions before skeleton guide, contract, repair instructions, and canonical reference:\n%s", prompt)
 	}
 	if strings.Count(prompt, "TASK-SPECIFIC MANIFEST JSON SKELETON:") != 1 {
@@ -327,15 +330,83 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 	if strings.Count(prompt, "SEMANTIC EXTRACTION REQUIREMENT:") != 1 {
 		t.Fatalf("repair prompt should include exactly one semantic extraction requirement section:\n%s", prompt)
 	}
-	if strings.Count(prompt, "COLLECT MANIFEST REPAIR WRITE SHAPE:") != 1 {
-		t.Fatalf("repair prompt should include exactly one write-shape section:\n%s", prompt)
+	if strings.Count(prompt, "FIRST COLLECT MANIFEST REPAIR COMMAND:") != 1 {
+		t.Fatalf("repair prompt should include exactly one first-command section:\n%s", prompt)
 	}
-	if strings.Count(prompt, "ACP_MANIFEST_JSON") != 2 {
-		t.Fatalf("manifest-only repair prompt should include one heredoc write shape, got:\n%s", prompt)
+	if strings.Count(prompt, "ACP_COLLECT_MANIFEST_REPAIR_PY") != 2 {
+		t.Fatalf("manifest-only repair prompt should include one Python repair heredoc, got:\n%s", prompt)
 	}
 	if strings.Contains(prompt, artifactquality.CollectManifestCanonicalExample()) {
 		t.Fatalf("repair prompt should not include a second generic canonical JSON example after the task skeleton:\n%s", prompt)
 	}
+}
+
+func TestCollectManifestRepairFirstCommandWritesValidationReadyManifest(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeRoot := filepath.Join(root, "write-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	doc := strings.Join([]string{
+		"# Payments Runtime Overview",
+		"",
+		"## Technology Stack",
+		"- **Django API** serves payment workflow requests.",
+		"- **Postgres** stores payment ledgers.",
+		"- **Redis** backs async coordination.",
+		"",
+		"## Operational Gaps",
+		"- Owner mapping and escalation still need confirmation.",
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(writeRoot, "overview.md"), []byte(doc), 0o644); err != nil {
+		t.Fatalf("write authored doc: %v", err)
+	}
+	task := acpruntime.Task{
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		ArtifactRoot: "reports/taskruns/run-1/staging/shards/payments",
+		WriteRoot:    writeRoot,
+		ShardID:      "payments",
+		DomainID:     "payments",
+		AgentRole:    "shard-analyst",
+		RepoScopes:   []string{"payments-service"},
+		PathScopes:   []string{"src"},
+	}
+
+	command := collectManifestRepairFirstCommand(task, []string{"overview.md"}, []string{"src/README.md"})
+	output, err := exec.Command("sh", "-c", command).CombinedOutput()
+	if err != nil {
+		t.Fatalf("repair command failed: %v\n%s\ncommand:\n%s", err, output, command)
+	}
+	if err := artifactquality.ValidateCollectManifestInRoot(writeRoot); err != nil {
+		t.Fatalf("repair command wrote invalid manifest: %v\n%s", err, mustReadFile(t, filepath.Join(writeRoot, "shard-pack-manifest.json")))
+	}
+	raw := mustReadFile(t, filepath.Join(writeRoot, "shard-pack-manifest.json"))
+	for _, token := range []string{
+		`"name": "Django API"`,
+		`"name": "Postgres"`,
+		`"type": "uses"`,
+		`"title": "Runtime and configuration surface identified from authored collect evidence"`,
+	} {
+		if !strings.Contains(raw, token) {
+			t.Fatalf("expected repaired manifest to contain %q, got:\n%s", token, raw)
+		}
+	}
+	if strings.Contains(raw, "contains scoped surface") || strings.Contains(raw, "Owner mapping not confirmed") {
+		t.Fatalf("repair command must not write the old bootstrap-only semantic scaffold:\n%s", raw)
+	}
+}
+
+func mustReadFile(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(raw)
 }
 
 func TestComposeCollectManifestRepairPromptPrefersUsefulRootEvidence(t *testing.T) {

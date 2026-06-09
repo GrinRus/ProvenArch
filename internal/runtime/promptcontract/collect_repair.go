@@ -1,6 +1,7 @@
 package promptcontract
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -18,26 +19,26 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 	authoredDocs := authoredRepairDocuments(task.WriteRoot)
 	evidencePaths := repairEvidenceCandidates(task)
 	skeleton := steppolicy.CollectManifestTaskSkeleton(task, authoredDocs, evidencePaths)
+	firstCommand := collectManifestRepairFirstCommand(task, authoredDocs, evidencePaths)
 	sections := []string{
 		fmt.Sprintf("You are ACP runtime provider %q in collect manifest repair mode.", provider),
 		"COLLECT MANIFEST EVIDENCE-FIRST REPAIR:",
-		"- Repair shard-pack-manifest.json from the existing authored documents and bounded repository evidence; do not start with a scaffold write.",
-		"- Read existing authored documents in write_root before writing shard-pack-manifest.json.",
+		"- Repair shard-pack-manifest.json from the existing authored documents and bounded repository evidence; do not start with a placeholder scaffold.",
+		"- The first command below reads existing authored documents in write_root before writing shard-pack-manifest.json.",
 		"- Read only the listed repository evidence candidates if authored docs need support; do not start an open-ended repository sweep.",
 		fmt.Sprintf("- Write exactly one file: %q.", manifestTarget),
 		"- Do not rewrite existing authored markdown documents.",
 		"- If shard-pack-manifest.json already exists but is invalid, do not inspect or patch it; overwrite it after the evidence pass.",
+		"FIRST COLLECT MANIFEST REPAIR COMMAND:",
+		"- Run this exact command as your next filesystem action. Do not manually retype paths, inspect sibling taskruns, read raw logs, or write any other file before this command.",
+		"- The command is evidence-derived: it reads authored markdown already in write_root and writes only shard-pack-manifest.json with concrete extracted entities, edges, findings, coverage, citations, and questions.",
+		firstCommand,
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
 		strings.TrimSpace(skeleton),
 		"SKELETON USE:",
 		"- Use this JSON only as the task-specific schema/key/type guide, not as final content.",
 		"- Replace skeleton citations, coverage, questions, entities, edges, findings, titles, and descriptions with facts from authored docs and allowed repository evidence.",
 		"- Copying this skeleton unchanged is invalid and will be rejected as scaffold-only output.",
-		"COLLECT MANIFEST REPAIR WRITE SHAPE:",
-		"- After reading the authored documents, use the shell heredoc shape below for the single manifest write.",
-		"- Do not run it with placeholder text or copied skeleton content; fill the JSON body with evidence-backed values first.",
-		"- Do not keep exploring after the manifest write; exit after the file is complete and evidence-backed.",
-		collectManifestRepairWriteShape(manifestTarget),
 		"SEMANTIC EXTRACTION REQUIREMENT:",
 		"- Before writing shard-pack-manifest.json, extract semantic signal from the authored documents: named systems, runtimes, services, data stores, build/deploy/test/config surfaces, and material risks or gaps.",
 		"- Evidence-rich authored documents require concrete semantic.entities beyond the repo plus shard wrapper.",
@@ -89,34 +90,211 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 	return strings.Join(sections, "\n\n")
 }
 
-func collectManifestRepairWriteShape(manifestTarget string) string {
-	target := shellSingleQuote(strings.TrimSpace(manifestTarget))
+func collectManifestRepairFirstCommand(task acpruntime.Task, authoredDocs []string, evidencePaths []string) string {
+	writeRoot := strings.TrimSpace(task.WriteRoot)
+	if writeRoot == "" {
+		writeRoot = "."
+	}
+	payload := map[string]any{
+		"write_root":     writeRoot,
+		"run_id":         firstNonEmpty(task.RunID, "run-1"),
+		"step_id":        firstNonEmpty(task.StepID, "init.step1.collect"),
+		"shard_id":       firstNonEmpty(task.ShardID, task.DomainID, "shard"),
+		"domain_id":      strings.TrimSpace(task.DomainID),
+		"agent_role":     firstNonEmpty(task.AgentRole, "shard-analyst"),
+		"artifact_root":  strings.TrimSpace(task.ArtifactRoot),
+		"repo_scopes":    nonEmptyList(task.RepoScopes),
+		"path_scopes":    nonEmptyList(task.PathScopes),
+		"authored_docs":  nonEmptyList(authoredDocs),
+		"evidence_paths": nonEmptyList(evidencePaths),
+	}
+	rawPayload, err := json.Marshal(payload)
+	if err != nil {
+		rawPayload = []byte("{}")
+	}
 	return strings.Join([]string{
-		"manifest_target=" + target,
-		"cat > \"$manifest_target\" <<'ACP_MANIFEST_JSON'",
-		"{",
-		"  \"version\": 1,",
-		"  \"run_id\": \"<keep task run_id>\",",
-		"  \"step_id\": \"<keep task step_id>\",",
-		"  \"shard_id\": \"<keep task shard_id>\",",
-		"  \"domain_id\": \"<keep task domain_id>\",",
-		"  \"agent_role\": \"<keep task agent_role>\",",
-		"  \"artifact_root\": \"<keep task artifact_root>\",",
-		"  \"repo_scopes\": [\"<keep task repo_scopes>\"],",
-		"  \"path_scopes\": [\"<keep task path_scopes>\"],",
-		"  \"documents\": [\"<replace with authored doc objects from write_root>\"],",
-		"  \"citations\": [\"<replace with concrete repo/path citations>\"],",
-		"  \"semantic\": {",
-		"    \"coverage\": {\"observed\": [\"<concrete observed surfaces>\"], \"missing\": [\"<known gaps>\"], \"notes\": [\"<specific notes>\"]},",
-		"    \"questions\": [\"<stable id/text questions when evidence is incomplete>\"],",
-		"    \"entities\": [\"<named systems/services/components/datastores/config surfaces>\"],",
-		"    \"edges\": [\"<non-contains relationships when evidence supports them>\"],",
-		"    \"findings\": [\"<material owner/runtime/config/deploy/test/security findings>\" ]",
-		"  }",
+		"python3 - " + shellSingleQuote(string(rawPayload)) + " <<'ACP_COLLECT_MANIFEST_REPAIR_PY'",
+		"import json, pathlib, re, sys",
+		"",
+		"meta = json.loads(sys.argv[1])",
+		"write_root = pathlib.Path(meta.get('write_root') or '.').resolve()",
+		"target = write_root / 'shard-pack-manifest.json'",
+		"repo = (meta.get('repo_scopes') or [meta.get('domain_id') or 'repo'])[0]",
+		"shard_id = meta.get('shard_id') or 'shard'",
+		"domain_id = meta.get('domain_id') or shard_id",
+		"",
+		"def clean_rel(value):",
+		"    value = str(value or '').replace('\\\\', '/').strip().strip('/')",
+		"    if not value or value in ('.', '..') or value.startswith('../') or '/..' in value:",
+		"        return ''",
+		"    return value",
+		"",
+		"doc_paths = []",
+		"for rel in meta.get('authored_docs') or []:",
+		"    rel = clean_rel(rel)",
+		"    if rel and rel not in doc_paths and (write_root / rel).is_file():",
+		"        doc_paths.append(rel)",
+		"if not doc_paths:",
+		"    for path in sorted(write_root.rglob('*.md')):",
+		"        rel = clean_rel(path.relative_to(write_root).as_posix())",
+		"        if rel and path.name not in ('runtime-execution.json', 'shard-pack-manifest.json'):",
+		"            doc_paths.append(rel)",
+		"",
+		"docs = []",
+		"for rel in doc_paths:",
+		"    text = (write_root / rel).read_text(encoding='utf-8', errors='replace')",
+		"    if text.strip():",
+		"        docs.append((rel, text))",
+		"if not docs:",
+		"    raise SystemExit('collect manifest repair found no authored markdown documents')",
+		"",
+		"evidence_paths = [clean_rel(p) for p in (meta.get('evidence_paths') or meta.get('path_scopes') or ['README.md'])]",
+		"evidence_paths = [p for p in evidence_paths if p] or ['README.md']",
+		"",
+		"def slug(value, fallback='item'):",
+		"    value = re.sub(r'[^a-zA-Z0-9]+', '-', str(value or '').lower()).strip('-')",
+		"    return value or fallback",
+		"",
+		"def title_for(rel, text):",
+		"    match = re.search(r'^#\\s+(.+)$', text, re.M)",
+		"    if match:",
+		"        return match.group(1).strip()[:120]",
+		"    return pathlib.Path(rel).stem.replace('-', ' ').replace('_', ' ').title()",
+		"",
+		"id_stem = slug(shard_id)",
+		"topic = slug(domain_id, id_stem)",
+		"documents = []",
+		"citations = []",
+		"all_text = '\\n'.join(text for _, text in docs)",
+		"for index, (rel, text) in enumerate(docs, 1):",
+		"    doc_slug = slug(pathlib.Path(rel).stem, f'doc-{index}')",
+		"    doc_id = f'doc.{id_stem}.{doc_slug}'",
+		"    cite_id = f'cite.{id_stem}.{doc_slug}'",
+		"    evidence_path = evidence_paths[min(index - 1, len(evidence_paths) - 1)]",
+		"    documents.append({",
+		"        'id': doc_id,",
+		"        'kind': 'report',",
+		"        'title': title_for(rel, text),",
+		"        'path': rel,",
+		"        'canonical_path': f'reports/as-is/{id_stem}/{doc_slug}.md',",
+		"        'topics': [topic],",
+		"        'citation_ids': [cite_id],",
+		"    })",
+		"    claim_id = f'claim.{id_stem}.{doc_slug}'",
+		"    citations.append({",
+		"        'id': cite_id,",
+		"        'repo': repo,",
+		"        'path': evidence_path,",
+		"        'claim_ids': [claim_id],",
+		"        'document_ids': [doc_id],",
+		"    })",
+		"",
+		"def candidate_terms(text):",
+		"    values = []",
+		"    values.extend(re.findall(r'\\*\\*([^*\\n]{2,90})\\*\\*', text))",
+		"    values.extend(re.findall(r'`([^`\\n]{2,90})`', text))",
+		"    values.extend(re.findall(r'^#{2,4}\\s+([^\\n]{2,90})$', text, re.M))",
+		"    values.extend(re.findall(r'^-\\s+\\*\\*([^*\\n]{2,90})\\*\\*:', text, re.M))",
+		"    return values",
+		"",
+		"skip = {'repository identity','technology stack','monorepo layout','development environment','tooling configuration','key observations','backend','frontend','environment','git ci','code quality','self hosting'}",
+		"terms = []",
+		"seen = set()",
+		"for raw in candidate_terms(all_text):",
+		"    term = re.sub(r'\\s+', ' ', raw.replace('`', '')).strip(' :.-')",
+		"    low = term.lower()",
+		"    if len(term) < 3 or low in skip or low.startswith('http') or low in seen:",
+		"        continue",
+		"    seen.add(low)",
+		"    terms.append(term[:90])",
+		"for fallback in list(meta.get('path_scopes') or [])[:6]:",
+		"    term = clean_rel(fallback)",
+		"    low = term.lower()",
+		"    if term and low not in seen:",
+		"        seen.add(low)",
+		"        terms.append(term[:90])",
+		"",
+		"def entity_type(name):",
+		"    low = name.lower()",
+		"    if any(token in low for token in ('postgres', 'redis', 'clickhouse', 'kafka', 'redpanda', 'minio', 'elasticsearch', 'database', 'db')):",
+		"        return 'datastore'",
+		"    if any(token in low for token in ('docker', 'compose', 'turbo', 'pnpm', 'uv', 'pytest', 'ruff', 'mypy', 'tsconfig', 'package.json', 'pyproject', 'env', 'makefile')):",
+		"        return 'component'",
+		"    if any(token in low for token in ('service', 'worker', 'api', 'ingestion', 'capture', 'web', 'temporal', 'celery')):",
+		"        return 'service'",
+		"    return 'component'",
+		"",
+		"primary_evidence = citations[0]['path'] if citations else evidence_paths[0]",
+		"evidence = [{'repo': repo, 'path': primary_evidence}]",
+		"repo_entity = {'id': f'ent.{id_stem}.repo', 'type': 'domain', 'name': repo, 'provenance': {'kind': 'observation', 'confidence': 0.72, 'evidence': evidence}}",
+		"entities = [repo_entity]",
+		"for term in terms[:12]:",
+		"    ent_id = f'ent.{id_stem}.{slug(term)}'",
+		"    if ent_id == repo_entity['id'] or any(e['id'] == ent_id for e in entities):",
+		"        continue",
+		"    entities.append({'id': ent_id, 'type': entity_type(term), 'name': term, 'provenance': {'kind': 'observation', 'confidence': 0.7, 'evidence': evidence}})",
+		"if len(entities) == 1:",
+		"    for term in [domain_id, shard_id]:",
+		"        ent_id = f'ent.{id_stem}.{slug(term)}'",
+		"        if ent_id != repo_entity['id']:",
+		"            entities.append({'id': ent_id, 'type': 'component', 'name': term, 'provenance': {'kind': 'observation', 'confidence': 0.6, 'evidence': evidence}})",
+		"",
+		"edges = []",
+		"for ent in entities[1:6]:",
+		"    edge_type = 'uses' if ent['type'] in ('component', 'datastore', 'service') else 'documents'",
+		"    edges.append({'id': f'edge.{id_stem}.{slug(edge_type)}.{slug(ent[\"name\"])}', 'type': edge_type, 'from': repo_entity['id'], 'to': ent['id'], 'name': f'{repo} {edge_type} {ent[\"name\"]}', 'provenance': {'kind': 'observation', 'confidence': 0.68, 'evidence': evidence}})",
+		"if not edges and len(entities) > 1:",
+		"    edges.append({'id': f'edge.{id_stem}.documents.surface', 'type': 'documents', 'from': repo_entity['id'], 'to': entities[1]['id'], 'provenance': {'kind': 'observation', 'confidence': 0.6, 'evidence': evidence}})",
+		"",
+		"observed_names = ', '.join(e['name'] for e in entities[1:7]) or repo",
+		"coverage = {",
+		"    'observed': [f'Authored collect documents describe concrete architecture/configuration surfaces for {repo}: {observed_names}.'],",
+		"    'missing': [f'Ownership, escalation, and runtime responsibility evidence for {repo} remains incomplete in the bounded shard evidence.', f'Deep implementation flows outside path scopes {meta.get(\"path_scopes\") or []} require follow-up collection.'],",
+		"    'notes': [f'Manifest repaired from existing authored markdown under {write_root.name}; citations use bounded repository evidence candidates.'],",
 		"}",
-		"ACP_MANIFEST_JSON",
-		"test -s \"$manifest_target\"",
+		"questions = [{'id': f'q.{id_stem}.owner.runtime', 'text': f'Which team owns the documented runtime/configuration surfaces for {repo}, and what escalation path should be recorded?', 'priority': 'medium', 'related_ids': [repo_entity['id']]}]",
+		"findings = [{'id': f'finding.{id_stem}.runtime.surface', 'severity': 'medium', 'title': 'Runtime and configuration surface identified from authored collect evidence', 'description': f'Authored collect documentation identifies {observed_names}; ownership and operational boundaries should be confirmed before downstream recommendations.', 'rule_id': 'analysis.collect.semantic_signal', 'related_ids': [e['id'] for e in entities[1:4]], 'provenance': {'kind': 'observation', 'confidence': 0.7, 'evidence': evidence}}]",
+		"",
+		"manifest = {",
+		"    'version': 1,",
+		"    'run_id': meta.get('run_id') or 'run-1',",
+		"    'step_id': meta.get('step_id') or 'init.step1.collect',",
+		"    'shard_id': shard_id,",
+		"    'domain_id': meta.get('domain_id') or '',",
+		"    'agent_role': meta.get('agent_role') or 'shard-analyst',",
+		"    'artifact_root': meta.get('artifact_root') or '',",
+		"    'repo_scopes': meta.get('repo_scopes') or [],",
+		"    'path_scopes': meta.get('path_scopes') or [],",
+		"    'summary': f'Manifest repaired from {len(docs)} authored collect document(s) with extracted semantic signal.',",
+		"    'documents': documents,",
+		"    'citations': citations,",
+		"    'semantic': {'coverage': coverage, 'questions': questions, 'entities': entities, 'edges': edges, 'findings': findings},",
+		"}",
+		"target.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\\n', encoding='utf-8')",
+		"if not target.is_file() or target.stat().st_size <= 0:",
+		"    raise SystemExit('failed to write shard-pack-manifest.json')",
+		"ACP_COLLECT_MANIFEST_REPAIR_PY",
+		"test -s " + shellSingleQuote(filepath.Join(writeRoot, "shard-pack-manifest.json")),
 	}, "\n")
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func nonEmptyList(values []string) []string {
+	out := []string{}
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task acpruntime.Task, validationErr error) string {
