@@ -20,23 +20,26 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 	skeleton := steppolicy.CollectManifestTaskSkeleton(task, authoredDocs, evidencePaths)
 	sections := []string{
 		fmt.Sprintf("You are ACP runtime provider %q in collect manifest repair mode.", provider),
-		"FIRST COLLECT MANIFEST REPAIR COMMAND:",
-		"Run this exact command as your next filesystem action. Do not analyze, browse, read, diff, patch, or inspect repository files before this write:",
-		collectManifestRepairWriteCommand(task.WriteRoot, manifestTarget, skeleton),
-		"Immediate repair action:",
-		fmt.Sprintf("- Write exactly one file now: %q.", manifestTarget),
-		"- Do not begin with broad analysis. The heredoc above is the minimal evidence-backed repair artifact for this shard.",
+		"COLLECT MANIFEST EVIDENCE-FIRST REPAIR:",
+		"- Repair shard-pack-manifest.json from the existing authored documents and bounded repository evidence; do not start with a scaffold write.",
+		"- Read existing authored documents in write_root before writing shard-pack-manifest.json.",
+		"- Read only the listed repository evidence candidates if authored docs need support; do not start an open-ended repository sweep.",
+		fmt.Sprintf("- Write exactly one file: %q.", manifestTarget),
 		"- Do not rewrite existing authored markdown documents.",
-		"- If shard-pack-manifest.json already exists but is invalid, do not inspect or patch it; overwrite it from the heredoc command.",
-		"- Copy the heredoc JSON during repair and preserve semantic.entities, semantic.edges, semantic.findings, coverage, and evidence repo/path fields.",
+		"- If shard-pack-manifest.json already exists but is invalid, do not inspect or patch it; overwrite it after the evidence pass.",
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
-		"Use the JSON embedded in the first repair command above as the skeleton and target content.",
+		strings.TrimSpace(skeleton),
+		"SKELETON USE:",
+		"- Use this JSON only as the task-specific schema/key/type guide, not as final content.",
+		"- Replace skeleton citations, coverage, questions, entities, edges, findings, titles, and descriptions with facts from authored docs and allowed repository evidence.",
+		"- Copying this skeleton unchanged is invalid and will be rejected as scaffold-only output.",
 		"Artifact-only repair contract:",
 		"- Do not return semantic JSON or any semantic payload on stdout.",
 		"- Write or replace only write_root/shard-pack-manifest.json.",
 		fmt.Sprintf("- Exact allowed write target: %q.", manifestTarget),
 		"- Final action must be: write only write_root/shard-pack-manifest.json, then exit successfully.",
-		"- Exit with code 0 only after shard-pack-manifest.json validates.",
+		"- Backend validation, not stdout claims, is the success surface.",
+		"- Exit with code 0 only after shard-pack-manifest.json is complete, evidence-backed, and not copied from the skeleton.",
 		fmt.Sprintf(`- artifact_root (workspace-relative) = %q`, strings.TrimSpace(task.ArtifactRoot)),
 		fmt.Sprintf(`- write_root (absolute) = %q`, strings.TrimSpace(task.WriteRoot)),
 		fmt.Sprintf(`- read_context_roots = %q`, strings.Join(task.ReadContextRoots, ", ")),
@@ -47,7 +50,7 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 		fmt.Sprintf(`- path_scopes = %q`, strings.Join(task.PathScopes, ", ")),
 	}
 	repairLines := []string{
-		"Existing authored documents in write_root are already encoded in the task-specific skeleton; do not rewrite them.",
+		"Existing authored documents in write_root must drive manifest repair; read them, do not rewrite them.",
 	}
 	if len(authoredDocs) > 0 {
 		repairLines = append(repairLines, "Existing authored document files in write_root:")
@@ -56,9 +59,10 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 		}
 	}
 	if len(evidencePaths) > 0 {
-		repairLines = append(repairLines,
-			fmt.Sprintf("- Repository evidence candidates are already encoded in the skeleton (%d path candidates); do not browse for more evidence in repair mode.", len(evidencePaths)),
-		)
+		repairLines = append(repairLines, "Repository evidence candidates available for bounded repair:")
+		for _, rel := range evidencePaths {
+			repairLines = append(repairLines, fmt.Sprintf("- %s", rel))
+		}
 	}
 	repairLines = append(repairLines, overwriteCollectManifestRepairInstructions()...)
 	repairLines = append(repairLines,
@@ -67,7 +71,7 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 	repairLines = append(repairLines, compactCollectManifestValidationChecklist(strings.TrimSpace(task.ArtifactRoot))...)
 	repairLines = append(repairLines,
 		`- Repair-mode note: if schemas/* or docs/spec/* are absent from the runtime workspace, do not look for them; use this embedded checklist.`,
-		`- The task-specific JSON skeleton above is the repair artifact; write it from the heredoc command, preserve its semantic signal, then exit.`,
+		`- The task-specific JSON skeleton above is a schema guide only; copied scaffold semantic is invalid even when the JSON schema passes.`,
 	)
 	sections = append(sections, strings.Join(repairLines, "\n"))
 	return strings.Join(sections, "\n\n")
@@ -117,21 +121,13 @@ func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task a
 func overwriteCollectManifestRepairInstructions() []string {
 	return []string{
 		"COLLECT MANIFEST REPAIR INSTRUCTIONS:",
-		"- Execute the preferred heredoc write command, or perform an equivalent single-file overwrite of shard-pack-manifest.json.",
-		"- Do not read, diff, or patch an existing invalid shard-pack-manifest.json; replace it.",
+		"- Perform a bounded evidence pass over existing authored documents and listed repository evidence candidates before writing shard-pack-manifest.json.",
+		"- Do not read, diff, or patch an existing invalid shard-pack-manifest.json; replace it after the evidence pass.",
 		"- Do not search the filesystem for schemas/*, docs/spec/*, examples, prior manifests, sibling shards, raw logs, or reports/taskruns history.",
 		"- Do not rewrite authored markdown documents and do not create any file other than shard-pack-manifest.json.",
-		"- Treat the heredoc JSON as the repair artifact. Preserve embedded evidence-backed semantic entries; validation, not stdout, is the success surface.",
+		"- Treat the embedded JSON as a schema guide only. Build semantic entities, edges, findings, coverage, questions, and citations from the authored docs and allowed repository evidence.",
+		"- Validation, not stdout, is the success surface; do not claim validation unless the backend accepts the artifact.",
 	}
-}
-
-func collectManifestRepairWriteCommand(writeRoot string, manifestTarget string, skeleton string) string {
-	return strings.Join([]string{
-		"mkdir -p " + shellSingleQuote(strings.TrimSpace(writeRoot)),
-		"cat > " + shellSingleQuote(strings.TrimSpace(manifestTarget)) + " <<'ACP_MANIFEST_JSON'",
-		strings.TrimSpace(skeleton),
-		"ACP_MANIFEST_JSON",
-	}, "\n")
 }
 
 func compactCollectManifestValidationChecklist(artifactRoot string) []string {
