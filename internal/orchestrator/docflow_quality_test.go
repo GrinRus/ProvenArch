@@ -151,6 +151,24 @@ func TestArtifactTextPlaceholderLikeFlagsGenericRuntimeChangelog(t *testing.T) {
 	if artifactTextPlaceholderLike(evidenceBackedChangelog) {
 		t.Fatalf("expected evidence-backed changelog to pass placeholder heuristic")
 	}
+
+	liveLikeChangelog := `# Runtime Proposal Changelog
+
+## Changes
+- Replaced bootstrap placeholder with evidence-backed runtime recommendations.
+- All proposal items now cite concrete findings from validator-verdict.json and reports/findings/findings.md.
+
+## Evidence Traceability
+| Proposal Section | Primary Findings | Coverage Gaps / Open Questions |
+|------------------|------------------|-------------------------------|
+| Ownership mapping | finding.posthog.bin.owner, finding.posthog.services.owner | question.posthog.bin.owner |
+
+## Notes
+- Promote only after artifact validation succeeds.
+`
+	if artifactTextPlaceholderLike(liveLikeChangelog) {
+		t.Fatalf("expected traceable live-like changelog to pass placeholder heuristic")
+	}
 }
 
 func TestAssessRunArtifactInventoryFlagsSparseCurrentRun(t *testing.T) {

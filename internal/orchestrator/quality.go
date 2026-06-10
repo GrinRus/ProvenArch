@@ -707,9 +707,12 @@ func artifactTextPlaceholderLike(text string) bool {
 	if strings.Contains(lower, "provider wrote this draft artifact") ||
 		strings.Contains(lower, "drafted required runtime artifacts") ||
 		strings.Contains(lower, "no findings reported.") ||
-		strings.Contains(lower, "runtime proposal surface initialized") ||
-		strings.Contains(lower, "changes must remain traceable to collected evidence") ||
-		strings.Contains(lower, "promote only after artifact validation succeeds") {
+		strings.Contains(lower, "runtime proposal surface initialized") {
+		return true
+	}
+	if !artifactTextHasEvidenceMarkers(lower) &&
+		(strings.Contains(lower, "changes must remain traceable to collected evidence") ||
+			strings.Contains(lower, "promote only after artifact validation succeeds")) {
 		return true
 	}
 	nonEmpty := 0
@@ -726,6 +729,23 @@ func artifactTextPlaceholderLike(text string) bool {
 		}
 	}
 	return nonEmpty <= 4 && noYet
+}
+
+func artifactTextHasEvidenceMarkers(lower string) bool {
+	markers := []string{
+		"finding.",
+		"question.",
+		"reports/findings/",
+		"reports/coverage/",
+		"validator-verdict.json",
+		"evidence traceability",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func findingsCoverageGapSignals(ws workspace.Root, finalIndex contracts.FinalRunIndex, finalIndexOK bool) []runQualitySignal {
