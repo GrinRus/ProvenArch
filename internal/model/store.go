@@ -1,6 +1,7 @@
 package model
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -305,7 +306,25 @@ func safeFileName(id string) string {
 		}
 		out = append(out, '-')
 	}
-	return strings.Trim(string(out), "-")
+	safe := strings.Trim(string(out), "-")
+	if safe == "" {
+		safe = "unknown"
+	}
+	const maxSafeFileNameLength = 160
+	if len(safe) <= maxSafeFileNameLength {
+		return safe
+	}
+	sum := sha256.Sum256([]byte(safe))
+	hash := fmt.Sprintf("%x", sum[:])[:12]
+	prefixLimit := maxSafeFileNameLength - len(hash) - 1
+	if prefixLimit < 1 {
+		return hash
+	}
+	prefix := strings.Trim(safe[:prefixLimit], "-._")
+	if prefix == "" {
+		return hash
+	}
+	return prefix + "-" + hash
 }
 
 func normalizeCanonicalID(id string) string {

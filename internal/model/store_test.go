@@ -74,6 +74,79 @@ func TestApplySemanticSnapshotWritesEntityAndEdgeFiles(t *testing.T) {
 	}
 }
 
+func TestApplySemanticSnapshotBoundsLongEdgeFileNames(t *testing.T) {
+	t.Parallel()
+
+	ws := writeWorkspaceRoot(t)
+	if err := ws.EnsureLayout(); err != nil {
+		t.Fatalf("ensure layout: %v", err)
+	}
+
+	longFrom := "svc." + strings.Repeat("ftgo.order.service.api.", 8) + "overview"
+	longTo := "doc." + strings.Repeat("ftgo.order.service.api.", 8) + "documents"
+	store := NewStore(ws)
+	_, err := store.ApplySemanticSnapshot(contracts.SemanticSnapshot{
+		Entities: []contracts.Entity{
+			{
+				ID:   longFrom,
+				Type: "service",
+				Name: "Long From",
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.9,
+					Evidence:   []contracts.Evidence{{Repo: "ftgo-application", Path: "README.adoc"}},
+				},
+			},
+			{
+				ID:   longTo,
+				Type: "document",
+				Name: "Long To",
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.9,
+					Evidence:   []contracts.Evidence{{Repo: "ftgo-application", Path: "README.adoc"}},
+				},
+			},
+		},
+		Edges: []contracts.Edge{
+			{
+				Type: "documents",
+				From: longFrom,
+				To:   longTo,
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.8,
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("apply semantic snapshot with long edge id: %v", err)
+	}
+
+	edgeFiles, err := filepath.Glob(filepath.Join(ws.Path, "model", "edges", "*.yaml"))
+	if err != nil {
+		t.Fatalf("glob edge files: %v", err)
+	}
+	if len(edgeFiles) != 1 {
+		t.Fatalf("expected one edge file, got %d: %v", len(edgeFiles), edgeFiles)
+	}
+	if got := len(filepath.Base(edgeFiles[0])); got > 180 {
+		t.Fatalf("expected bounded edge filename, got length %d for %q", got, filepath.Base(edgeFiles[0]))
+	}
+	content, err := os.ReadFile(edgeFiles[0])
+	if err != nil {
+		t.Fatalf("read edge file: %v", err)
+	}
+	var edge contracts.Edge
+	if err := yaml.Unmarshal(content, &edge); err != nil {
+		t.Fatalf("unmarshal edge: %v", err)
+	}
+	if !strings.Contains(edge.ID, "ftgo.order.service.api") {
+		t.Fatalf("expected full canonical edge id to remain inside YAML, got %q", edge.ID)
+	}
+}
+
 func TestApplySemanticSnapshotRejectsUnknownOwnerTeam(t *testing.T) {
 	t.Parallel()
 

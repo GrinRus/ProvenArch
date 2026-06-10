@@ -123,6 +123,36 @@ func TestRuntimeDiagnosticCountersSurfaceRepairStallPressure(t *testing.T) {
 	}
 }
 
+func TestArtifactTextPlaceholderLikeFlagsGenericRuntimeChangelog(t *testing.T) {
+	t.Parallel()
+
+	genericChangelog := `# Runtime Proposal Changelog
+
+## Changes
+- Runtime proposal surface initialized for this analysis run.
+- Changes must remain traceable to collected evidence, findings, or coverage gaps before promotion.
+
+## Notes
+- Promote only after artifact validation succeeds.
+`
+	if !artifactTextPlaceholderLike(genericChangelog) {
+		t.Fatalf("expected generic runtime changelog to be placeholder-like")
+	}
+
+	evidenceBackedChangelog := `# Runtime Proposal Changelog
+
+## Changes
+- Added recommendations for finding.ftgo.hardcoded-aws-credentials and finding.ftgo.legacy-k8s-api.
+
+## Evidence
+- reports/findings/findings.md
+- reports/coverage/open-questions.md
+`
+	if artifactTextPlaceholderLike(evidenceBackedChangelog) {
+		t.Fatalf("expected evidence-backed changelog to pass placeholder heuristic")
+	}
+}
+
 func TestAssessRunArtifactInventoryFlagsSparseCurrentRun(t *testing.T) {
 	t.Parallel()
 

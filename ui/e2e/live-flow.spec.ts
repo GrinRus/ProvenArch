@@ -114,7 +114,12 @@ function observationShowsProductiveProgress(previous: RunObservation | null, cur
   return current.artifactCount > previous.artifactCount || current.warningsCount > previous.warningsCount;
 }
 
-async function waitForInitInspectRun(api: APIRequestContext, runID: string): Promise<void> {
+async function captureRunFailureScreenshot(page: Page): Promise<void> {
+  await page.getByTestId("stage-analysis").click().catch(() => undefined);
+  await captureEvidenceScreenshot(page, "frontend-analysis-failed-desktop.png").catch(() => undefined);
+}
+
+async function waitForInitInspectRun(api: APIRequestContext, page: Page, runID: string): Promise<void> {
   const initDeadline = Date.now() + initTimeoutMs;
   let lastObservation: RunObservation | null = null;
   let sawProductiveProgress = false;
@@ -127,6 +132,7 @@ async function waitForInitInspectRun(api: APIRequestContext, runID: string): Pro
       return;
     }
     if (observation.status === "failed") {
+      await captureRunFailureScreenshot(page);
       throw new Error(
         `run ${runID} terminated before inspect stage: status=failed error_code=${observation.errorCode || "-"} current_step=${observation.currentStep || "-"}`
       );
@@ -247,7 +253,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
     body: runID,
     contentType: "text/plain"
   });
-  await waitForInitInspectRun(request, runID);
+  await waitForInitInspectRun(request, page, runID);
 
   await page.getByTestId("stage-analysis").click();
   await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
