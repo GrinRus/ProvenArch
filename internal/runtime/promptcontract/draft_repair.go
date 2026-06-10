@@ -174,6 +174,12 @@ func ComposeDraftArtifactRepairPrompt(provider acpruntime.Provider, task acprunt
 		"- Absolute target checks must use write_root/draft_final_root exactly; relative CWD checks are invalid.",
 	)
 	switch strings.TrimSpace(task.StepID) {
+	case "init.step0.constitution":
+		lines = append(lines,
+			"- The heredoc charter overview is a bootstrap-only repair target, not valid final content.",
+			"- Before final exit, replace recovery scaffold text in charter-overview.md with evidence-backed constitution content from read_context_roots, repo scope, and charter wizard contract when available.",
+			"- Final action must be: ensure constitution-draft.json and every referenced draft file exist, charter-overview.md has no unchanged bootstrap/recovery scaffold, and baseline-subagents.yaml is a valid baseline bundle.",
+		)
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
 		lines = append(lines,
 			"- The heredoc as-is files are bootstrap-only repair targets, not valid final content.",
@@ -200,7 +206,7 @@ func draftRepairFirstCommandIntro(task acpruntime.Task) (string, string) {
 	switch strings.TrimSpace(task.StepID) {
 	case "init.step0.constitution":
 		return "FIRST CONSTITUTION DRAFT COMMAND:",
-			"Run this exact shell command as the next filesystem action; it writes constitution-draft.json plus every referenced draft file as the first valid artifact set:"
+			"Run this exact shell command as the next filesystem action; it writes constitution-draft.json plus every referenced draft file as the first bootstrap draft set:"
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
 		return "FIRST AS-IS DRAFT COMMAND:",
 			"Run this exact shell command as the next filesystem action; it writes asis-draft-manifest.json plus overview.md, summary.md, and architect-summary.md as the first bootstrap draft set:"

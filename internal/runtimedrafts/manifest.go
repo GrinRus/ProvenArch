@@ -189,7 +189,7 @@ func ValidateOutputsExist(draftRoot string, manifest Manifest) error {
 
 func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string) error {
 	switch strings.TrimSpace(stepID) {
-	case "init.step2.asis_docs", "refresh.step2.asis_docs", "init.step4.proposals", "refresh.step4.proposals":
+	case "init.step0.constitution", "init.step2.asis_docs", "refresh.step2.asis_docs", "init.step4.proposals", "refresh.step4.proposals":
 	default:
 		return nil
 	}
@@ -258,6 +258,8 @@ func decodeManifest(raw []byte) (Manifest, error) {
 
 func validateStepSpecificOutputs(manifest Manifest, stepID string) error {
 	switch strings.TrimSpace(stepID) {
+	case "init.step0.constitution":
+		return validateConstitutionDraftOutputs(manifest.Outputs)
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
 		return validateAsIsDraftOutputs(manifest.Outputs)
 	case "init.step4.proposals", "refresh.step4.proposals":
@@ -265,6 +267,51 @@ func validateStepSpecificOutputs(manifest Manifest, stepID string) error {
 	default:
 		return nil
 	}
+}
+
+func validateConstitutionDraftOutputs(outputs []Output) error {
+	required := map[string]string{
+		"charter/overview.md":   "charter-overview.md",
+		"skills/subagents.yaml": "baseline-subagents.yaml",
+	}
+	byCanonicalPath := make(map[string]Output, len(outputs))
+	problems := []string{}
+
+	for idx, output := range outputs {
+		canonicalPath := filepath.ToSlash(path.Clean(strings.TrimSpace(output.CanonicalPath)))
+		if canonicalPath == "" || canonicalPath == "." {
+			continue
+		}
+		if _, exists := byCanonicalPath[canonicalPath]; exists {
+			problems = append(problems, fmt.Sprintf("outputs[%d].canonical_path %q must be unique", idx, canonicalPath))
+			continue
+		}
+		byCanonicalPath[canonicalPath] = output
+	}
+
+	for canonicalPath, requiredPath := range required {
+		output, ok := byCanonicalPath[canonicalPath]
+		if !ok {
+			problems = append(problems, fmt.Sprintf("outputs must include %q", canonicalPath))
+			continue
+		}
+		actualPath := filepath.ToSlash(filepath.Clean(strings.TrimSpace(output.Path)))
+		if actualPath != requiredPath {
+			problems = append(problems, fmt.Sprintf("output %q must use path %q", canonicalPath, requiredPath))
+		}
+	}
+
+	for canonicalPath := range byCanonicalPath {
+		if _, ok := required[canonicalPath]; !ok {
+			problems = append(problems, fmt.Sprintf("output %q is outside the allowed constitution publish surface", canonicalPath))
+		}
+	}
+
+	if len(problems) == 0 {
+		return nil
+	}
+	sort.Strings(problems)
+	return fmt.Errorf("runtime draft manifest outputs are invalid: %s", strings.Join(problems, "; "))
 }
 
 func validateAsIsDraftOutputs(outputs []Output) error {
