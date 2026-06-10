@@ -706,7 +706,10 @@ func artifactTextPlaceholderLike(text string) bool {
 	lower := strings.ToLower(text)
 	if strings.Contains(lower, "provider wrote this draft artifact") ||
 		strings.Contains(lower, "drafted required runtime artifacts") ||
-		strings.Contains(lower, "no findings reported.") {
+		strings.Contains(lower, "no findings reported.") ||
+		strings.Contains(lower, "runtime proposal surface initialized") ||
+		strings.Contains(lower, "changes must remain traceable to collected evidence") ||
+		strings.Contains(lower, "promote only after artifact validation succeeds") {
 		return true
 	}
 	nonEmpty := 0

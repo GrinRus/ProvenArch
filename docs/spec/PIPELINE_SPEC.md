@@ -295,6 +295,7 @@ Step 2 policy:
 - runtime draft parsing для `step2` strict: unknown top-level fields и legacy envelopes (`repo_scopes`, `compatibility`, `step_contract=null`, неканонические coverage outputs) reject-ятся до publish
 - `final-run-index.json` и `citation-index.json` используют один deterministic `document_id` mapping, который наследует `manifest.Documents[*].id`; provider-authored `document_ids` remap-ятся в этот canonical namespace до validator
 - staged semantic assembly нормализует `evidence.repo` к логическому repo scope, сводит generated checkout-dir aliases и дедуплицирует entity aliases/related references до validator
+- derived `model/entities/*.yaml` и `model/edges/*.yaml` используют deterministic bounded filenames; при длинном canonical id filename обрезается с hash suffix, а полный `id` сохраняется внутри YAML
 - если evidence incomplete, staged reports materialize-ятся с incomplete banner, но не promote-ятся без validator `PASS`
 - run quality summary (`reports/taskruns/<run_id>-quality.json`) строит fresh artifact inventory по текущему promoted workspace + `reports/taskruns/<run_id>/staging/**`: expected/produced surfaces, final semantic counts, missing model files, placeholder reports/proposals, gap-only C4, empty findings при critical coverage gaps и hidden provider/tool document refs фиксируются как `artifact_quality:*` signals для succeeded normal runs. C4 `Context` считается gap-only blocker, если semantic model non-empty, но диаграмма не смогла показать ни external/team relation, ни bounded evidence-backed internal service/datastore relation.
 - если collect status = `unusable`, live runtime для `step2.asis_docs`, `step3.findings` и `step4.proposals` не запускается; orchestrator детерминированно пересобирает triage-only staged docflow только из persisted collect artifacts, а terminal/root cause остаётся collect failure
@@ -348,7 +349,8 @@ Runtime proposal contract:
 - `outputs[].path` relative только к `draft_final_root`, `outputs[].canonical_path` workspace-relative и unique;
 - allowed publish surface для `outputs[].canonical_path`: только `proposals/*` и `reports/changelog/*`;
 - normal provider prompt должен показывать command-first heredoc write-set (`FIRST PROPOSALS DRAFT COMMAND`) для exact `write_root/proposals-draft-manifest.json` и referenced files под `draft_final_root`; command block встречается один раз, поздние sections ссылаются на canonical shape без повторного heredoc;
-- legacy/final-index-like envelopes (`pipeline`, `step`, `generated_at`, `domain_id`, `proposals[]`, `info_findings_noted`, `orphan_coverage_gaps`) являются contract drift и reject-ятся strict parser-ом до promotion.
+- legacy/final-index-like envelopes (`pipeline`, `step`, `generated_at`, `domain_id`, `proposals[]`, `info_findings_noted`, `orphan_coverage_gaps`) являются contract drift и reject-ятся strict parser-ом до promotion;
+- successful proposal/changelog draft outputs stage into `reports/taskruns/<run_id>/staging/final/` and are included in the same `final-run-index.json` before validator-gated promotion copies them to `proposals/*` and `reports/changelog/*`.
 
 ## Iteration changelog (MVP)
 - На каждую итерацию orchestrator формирует:
@@ -443,4 +445,4 @@ Publish policy:
 - legacy/final-index-like envelopes запрещены: top-level `pipeline`, `step`, `generated_at`, `domain_id`, `proposals[]`, `info_findings_noted`, `orphan_coverage_gaps` должны hard-fail-иться strict parser-ом;
 - deterministic promoter проверяет schema/semantic/validator gates;
 - обязательного human approve нет;
-- canonical `proposals/*` и `reports/changelog/*` публикуются автоматически только после successful gates.
+- canonical `proposals/*` и `reports/changelog/*` публикуются автоматически только после successful gates and are represented in `final-run-index.json`.
