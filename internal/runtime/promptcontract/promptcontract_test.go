@@ -723,10 +723,14 @@ func TestComposeDraftArtifactRepairPromptWritesValidConstitutionSubagentsYaml(t 
 	prompt := ComposeDraftArtifactRepairPrompt(acpruntime.ProviderClaudeCode, task, os.ErrNotExist)
 	for _, token := range []string{
 		"FIRST CONSTITUTION DRAFT COMMAND:",
+		"first bootstrap draft set",
 		"write_root='/tmp/workspace/reports/taskruns/run-1/constitution'",
 		"draft_root='/tmp/workspace/reports/taskruns/run-1/staging/final'",
 		"cat > \"$draft_root/baseline-subagents.yaml\" <<'ACP_DRAFT_FILE'",
 		"test -s \"$draft_root/baseline-subagents.yaml\"",
+		"The heredoc charter overview is a bootstrap-only repair target, not valid final content.",
+		"replace recovery scaffold text in charter-overview.md with evidence-backed constitution content",
+		"charter-overview.md has no unchanged bootstrap/recovery scaffold",
 		"agents:",
 		"id: domain-analyst",
 		"id: architect-aggregator",
@@ -960,11 +964,14 @@ func TestComposeArtifactOnlyPromptAddsConstitutionFirstActionCommand(t *testing.
 		"cat > \"$write_root/constitution-draft.json\" <<'ACP_DRAFT_MANIFEST_JSON'",
 		"cat > \"$draft_root/charter-overview.md\" <<'ACP_DRAFT_FILE'",
 		"cat > \"$draft_root/baseline-subagents.yaml\" <<'ACP_DRAFT_FILE'",
+		"The heredoc charter overview is bootstrap-only",
 		"Artifact-only contract:",
 		`"step_id": "init.step0.constitution"`,
 		`"step_contract": "constitution"`,
 		`"canonical_path": "charter/overview.md"`,
 		`"canonical_path": "skills/subagents.yaml"`,
+		"replace placeholder scaffold text in charter-overview.md with evidence-backed charter content",
+		"stop only after confirming charter-overview.md is not an unchanged bootstrap placeholder",
 		"constitution-draft.json must use the exact runtime draft manifest shape shown below",
 	}
 	for _, token := range expectedTokens {

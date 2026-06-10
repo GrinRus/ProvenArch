@@ -209,6 +209,8 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Write constitution-draft.json in write_root.`,
 			`- Write the referenced draft files exactly at draft_final_root/charter-overview.md and draft_final_root/baseline-subagents.yaml.`,
 			`- Do NOT place the draft files under draft_final_root/charter/ or draft_final_root/skills/; those are canonical publish paths, not draft file locations.`,
+			`- The first constitution draft artifact set is bootstrap-only; before final exit, replace placeholder scaffold text in charter-overview.md with evidence-backed charter content from the configured repository scope and charter wizard contract when available.`,
+			`- If constitution-draft.json already describes the publish surface, stop only after confirming charter-overview.md is not an unchanged bootstrap placeholder; baseline-subagents.yaml may remain the baseline bundle.`,
 			`- constitution-draft.json must use the exact runtime draft manifest shape shown below; do not emit legacy constitution schemas.`,
 			`- outputs[] must map charter-overview.md -> charter/overview.md and baseline-subagents.yaml -> skills/subagents.yaml exactly.`,
 			`- Exact constitution-draft.json example (replace IDs/summary only, keep keys/types and output mapping):`,
@@ -407,6 +409,7 @@ func ConstitutionFirstActionSection(task acpruntime.Task) string {
 	return strings.Join([]string{
 		"CONSTITUTION FIRST-ACTION DRAFT ARTIFACTS:",
 		"- This constitution step must start by writing constitution-draft.json and its referenced draft files before broad workspace analysis.",
+		"- The heredoc charter overview is bootstrap-only; replace it with evidence-backed charter content before successful exit.",
 		fmt.Sprintf(`- Exact constitution draft manifest target: %q.`, manifestTarget),
 		fmt.Sprintf(`- Draft files must be written only under draft_final_root: %q.`, strings.TrimSpace(task.DraftFinalRoot)),
 		"FIRST CONSTITUTION DRAFT COMMAND:",
@@ -1195,6 +1198,7 @@ func DraftArtifactRepairHints(task acpruntime.Task, validationErr error) []strin
 			`- constitution-draft.json exact required outputs[] entries are: {"path":"charter-overview.md","canonical_path":"charter/overview.md","kind":"charter","title":"Constitution"} and {"path":"baseline-subagents.yaml","canonical_path":"skills/subagents.yaml","kind":"bundle","title":"Baseline Subagents"}.`,
 			`- Do NOT emit legacy constitution shapes such as schema_version, system_id, services, relations, governance, coverage_notes, or version:"0.1.0".`,
 			`- Draft files referenced by constitution-draft.json must exist under draft_final_root before the runtime process exits successfully.`,
+			`- charter-overview.md must be evidence-backed final content, not unchanged first-action or recovery scaffold text; baseline-subagents.yaml may remain the baseline YAML bundle.`,
 		)
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
 		lines = append(lines,
