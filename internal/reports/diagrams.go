@@ -16,6 +16,7 @@ const (
 )
 
 func (c Compiler) CompileC4Diagrams(entities []contracts.Entity, edges []contracts.Edge) ([]Artifact, error) {
+	entities = uniqueEntitiesByID(entities)
 	entityByID := make(map[string]contracts.Entity, len(entities))
 	for _, entity := range entities {
 		entityByID[entity.ID] = entity
@@ -213,7 +214,7 @@ func buildC4ContextDiagram(
 			relationCount++
 		}
 	}
-	if relationCount == 0 {
+	if relationCount == 0 || (externalCount == 0 && serviceCount > 1) {
 		relationCount += writeInternalContextFallback(&builder, services, filterEntitiesByType(entities, "datastore"), edges)
 	}
 	if relationCount == 0 {
@@ -221,6 +222,31 @@ func buildC4ContextDiagram(
 		builder.WriteString("  System -.-> GapRelations\n")
 	}
 	return builder.String()
+}
+
+func uniqueEntitiesByID(entities []contracts.Entity) []contracts.Entity {
+	byID := make(map[string]contracts.Entity, len(entities))
+	for _, entity := range entities {
+		id := strings.TrimSpace(entity.ID)
+		if id == "" {
+			continue
+		}
+		entity.ID = id
+		existing, ok := byID[id]
+		if !ok || (!entityHasEvidence(existing) && entityHasEvidence(entity)) {
+			byID[id] = entity
+		}
+	}
+	ids := make([]string, 0, len(byID))
+	for id := range byID {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	out := make([]contracts.Entity, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, byID[id])
+	}
+	return out
 }
 
 func buildC4ContainerDiagram(

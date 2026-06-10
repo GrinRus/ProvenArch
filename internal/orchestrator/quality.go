@@ -707,12 +707,20 @@ func artifactTextPlaceholderLike(text string) bool {
 	if strings.Contains(lower, "provider wrote this draft artifact") ||
 		strings.Contains(lower, "drafted required runtime artifacts") ||
 		strings.Contains(lower, "no findings reported.") ||
-		strings.Contains(lower, "runtime proposal surface initialized") {
+		strings.Contains(lower, "draft surface initialized for the scoped repository analysis") ||
+		strings.Contains(lower, "final content must stay tied to collected shard evidence and validator output") ||
+		strings.Contains(lower, "runtime proposal surface initialized") ||
+		strings.Contains(lower, "runtime draft recovery initialized") ||
+		strings.Contains(lower, "draft recovery initialized") ||
+		strings.Contains(lower, "treat this as diagnostic evidence until") {
 		return true
 	}
 	if !artifactTextHasEvidenceMarkers(lower) &&
 		(strings.Contains(lower, "changes must remain traceable to collected evidence") ||
-			strings.Contains(lower, "promote only after artifact validation succeeds")) {
+			strings.Contains(lower, "promote only after artifact validation succeeds") ||
+			strings.Contains(lower, "current run evidence should be reviewed before promotion") ||
+			strings.Contains(lower, "owner mappings and unresolved coverage gaps remain the first follow-up surfaces") ||
+			strings.Contains(lower, "promote only recommendations that cite collected shard manifests")) {
 		return true
 	}
 	nonEmpty := 0
