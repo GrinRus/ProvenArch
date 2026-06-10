@@ -157,7 +157,6 @@ func ComposeDraftArtifactRepairPrompt(provider acpruntime.Provider, task acprunt
 		"- Copy the heredoc artifacts exactly first. Do not manually retype or transform absolute paths; keep slash-separated path components unchanged.",
 		"- Do not claim files are written or verified unless the exact test -s checks in the command pass.",
 		"- Do not write shard-pack-manifest.json, validator-verdict.json, raw logs, sibling taskruns, or repository files.",
-		"- Final action must be: write the draft manifest plus its referenced draft_final_root files, then exit successfully.",
 		fmt.Sprintf(`- write_root (absolute) = %q`, strings.TrimSpace(task.WriteRoot)),
 		fmt.Sprintf(`- draft_final_root (absolute) = %q`, strings.TrimSpace(task.DraftFinalRoot)),
 		fmt.Sprintf(`- manifest_file = %q`, manifestFile),
@@ -176,11 +175,23 @@ func ComposeDraftArtifactRepairPrompt(provider acpruntime.Provider, task acprunt
 	)
 	switch strings.TrimSpace(task.StepID) {
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
+		lines = append(lines,
+			"- The heredoc as-is files are bootstrap-only repair targets, not valid final content.",
+			"- Before final exit, replace recovery scaffold text with evidence-backed as-is content from read_context_roots.",
+			"- Final action must be: ensure asis-draft-manifest.json and every referenced draft file exist and no referenced draft file contains unchanged bootstrap/recovery scaffold.",
+		)
 		lines = append(lines, "AS-IS DRAFT MANIFEST CANONICAL SHAPE:")
 		lines = append(lines, artifactquality.AsIsDraftManifestContractLines()...)
 	case "init.step4.proposals", "refresh.step4.proposals":
+		lines = append(lines,
+			"- The heredoc proposal/changelog files are bootstrap-only repair targets, not valid final content.",
+			"- Before final exit, replace recovery scaffold text with evidence-backed proposal/changelog content from validated staged artifacts.",
+			"- Final action must be: ensure proposals-draft-manifest.json and every referenced draft file exist and no referenced draft file contains unchanged bootstrap/recovery scaffold.",
+		)
 		lines = append(lines, "PROPOSALS DRAFT MANIFEST CANONICAL SHAPE:")
 		lines = append(lines, artifactquality.ProposalsDraftManifestContractLines()...)
+	default:
+		lines = append(lines, "- Final action must be: write the draft manifest plus its referenced draft_final_root files, then exit successfully.")
 	}
 	return strings.Join(lines, "\n")
 }
@@ -192,10 +203,10 @@ func draftRepairFirstCommandIntro(task acpruntime.Task) (string, string) {
 			"Run this exact shell command as the next filesystem action; it writes constitution-draft.json plus every referenced draft file as the first valid artifact set:"
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
 		return "FIRST AS-IS DRAFT COMMAND:",
-			"Run this exact shell command as the next filesystem action; it writes asis-draft-manifest.json plus overview.md, summary.md, and architect-summary.md as the first valid artifact set:"
+			"Run this exact shell command as the next filesystem action; it writes asis-draft-manifest.json plus overview.md, summary.md, and architect-summary.md as the first bootstrap draft set:"
 	case "init.step4.proposals", "refresh.step4.proposals":
 		return "FIRST PROPOSALS DRAFT COMMAND:",
-			"Run this exact shell command as the next filesystem action; it writes proposals-draft-manifest.json plus every referenced draft file as the first valid artifact set:"
+			"Run this exact shell command as the next filesystem action; it writes proposals-draft-manifest.json plus every referenced draft file as the first bootstrap draft set:"
 	default:
 		return "FIRST RUNTIME DRAFT COMMAND:",
 			"Run this exact shell command as the next filesystem action; it writes the runtime draft manifest plus every referenced draft file as the first valid artifact set:"

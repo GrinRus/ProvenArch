@@ -171,6 +171,39 @@ func TestArtifactTextPlaceholderLikeFlagsGenericRuntimeChangelog(t *testing.T) {
 	}
 }
 
+func TestArtifactTextPlaceholderLikeFlagsRuntimeDraftBootstrapSurfaces(t *testing.T) {
+	t.Parallel()
+
+	asIsBootstrap := `# System Overview
+
+## Scope
+- Run: run_20260610_125214_001
+- Step: init.step2.asis_docs
+- Repository scope: posthog
+- Path scopes: .
+
+## Summary
+- Draft surface initialized for the scoped repository analysis.
+- Final content must stay tied to collected shard evidence and validator output.
+`
+	if !artifactTextPlaceholderLike(asIsBootstrap) {
+		t.Fatalf("expected as-is runtime draft bootstrap to be placeholder-like")
+	}
+
+	proposalBootstrap := `# Runtime Recommendations
+
+## Summary
+- Current run evidence should be reviewed before promotion.
+- Owner mappings and unresolved coverage gaps remain the first follow-up surfaces.
+
+## Recommendation
+- Promote only recommendations that cite collected shard manifests, validator findings, or final coverage output.
+`
+	if !artifactTextPlaceholderLike(proposalBootstrap) {
+		t.Fatalf("expected runtime recommendation bootstrap to be placeholder-like")
+	}
+}
+
 func TestAssessRunArtifactInventoryFlagsSparseCurrentRun(t *testing.T) {
 	t.Parallel()
 
