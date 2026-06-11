@@ -7,7 +7,6 @@ import { StageRail } from "./StageRail";
 import { TopStatusBar } from "./TopStatusBar";
 import type { InspectorItem, NextAction, StageId, StageOption } from "../lib/consoleTypes";
 import type { RunLogEntry, RunReviewSummaryResponse, RunStatusResponse } from "../lib/appContracts";
-import type { SystemInfoResponse } from "../lib/systemApi";
 
 type AppShellProps = {
   buildVersion: string;

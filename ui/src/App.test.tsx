@@ -13,11 +13,12 @@ type FetchMockState = {
   runStatus?: Record<string, MockJSON>;
   runArtifacts?: Record<string, MockJSON>;
   runReviewSummary?: Record<string, MockJSON>;
-  runList?: MockJSON[];
   gitDiff?: MockJSON;
   artifactText?: Record<string, string>;
   baselineBundleWarnings?: MockJSON[];
   cancelResponses?: Record<string, { status: number; body?: MockJSON }>;
+  doctorResponse?: MockJSON;
+  pathSuggestions?: MockJSON[];
   validateResponse?: MockJSON;
   validateStatus?: number;
   manifestContent?: string;
@@ -741,21 +742,22 @@ describe("App", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders release build metadata from the system info endpoint", async () => {
+  it("renders release build metadata from the system version endpoint", async () => {
     vi.stubGlobal(
       "fetch",
       createFetchMock({
-        systemInfo: {
-          version: "0.1.2",
+        systemVersion: {
+          version: "v0.1.2",
           commit: "fa3c633",
           built: "2026-06-02T13:20:26Z",
+          ui_bundle: "embedded",
         },
       }),
     );
 
     await renderConsoleApp();
 
-    await waitFor(() => expect(screen.getByTestId("top-status-bar")).toHaveTextContent("v0.1.2 beta"));
+    await waitFor(() => expect(screen.getByTestId("top-status-bar")).toHaveTextContent("v0.1.2"));
   }, 15_000);
 
   it("supports stage navigation and settings relocation without compatibility controls", async () => {

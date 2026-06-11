@@ -1,5 +1,3 @@
-import type { SystemInfoResponse } from "../lib/systemApi";
-
 type TopStatusBarProps = {
   buildVersion: string;
   buildCommit: string;
@@ -99,14 +97,6 @@ export function TopStatusBar({
       </div>
     </header>
   );
-}
-
-function buildVersionLabel(buildInfo: SystemInfoResponse | null): string {
-  const version = buildInfo?.version?.trim() ?? "";
-  if (!version || version === "dev") {
-    return "dev build";
-  }
-  return `${version.startsWith("v") ? version : `v${version}`} beta`;
 }
 
 function TopMetaIcon({ type }: { type: "workspace" | "repos" | "runtime" | "permission" | "git" | "time" }) {

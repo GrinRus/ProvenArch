@@ -253,7 +253,7 @@ func (s *Server) setRuntimeConfig(config ServerRuntimeConfig) {
 }
 
 func (s *Server) shouldBlockAPIRequest(apiPath string) bool {
-	if apiPath == "/api/health" || apiPath == "/api/system/version" || strings.HasPrefix(apiPath, "/api/onboarding/") {
+	if apiPath == "/api/health" || apiPath == "/api/system/version" || apiPath == "/api/system/info" || strings.HasPrefix(apiPath, "/api/onboarding/") {
 		return false
 	}
 	s.mu.RLock()
@@ -284,6 +284,21 @@ func (s *Server) handleSystemVersion(writer http.ResponseWriter, request *http.R
 		return
 	}
 	writeJSON(writer, http.StatusOK, CurrentBuildInfo())
+}
+
+func (s *Server) handleSystemInfo(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		writeMethodNotAllowed(writer, http.MethodGet)
+		return
+	}
+	s.mu.RLock()
+	info := s.runtimeConfig.Build
+	s.mu.RUnlock()
+	writeJSON(writer, http.StatusOK, map[string]string{
+		"version": firstNonEmpty(info.Version, "dev"),
+		"commit":  firstNonEmpty(info.Commit, "none"),
+		"built":   firstNonEmpty(info.Built, "unknown"),
+	})
 }
 
 func (s *Server) handleSystemDoctor(writer http.ResponseWriter, request *http.Request) {

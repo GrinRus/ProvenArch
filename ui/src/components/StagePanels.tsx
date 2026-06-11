@@ -6,6 +6,7 @@ import { RuntimeProfileSettingsPanel } from "./RuntimeProfileSettingsPanel";
 import { RunStatusPanel } from "./RunStatusPanel";
 import { ArtifactPathButton, StatusBadge } from "./ConsolePrimitives";
 import { getQARun, listQARuns, startQAQuestion, type QARunResponse } from "../lib/qaApi";
+import { runReviewErrorCount, runReviewWarningCount } from "../lib/runReviewMetrics";
 import { formatTimestamp, parseTimeOrMin } from "../lib/runState";
 import type {
   Artifact,

@@ -36,7 +36,7 @@ import { buildStageOptions } from "./lib/stageModel";
 import { useRunExplorer } from "./hooks/useRunExplorer";
 import { useRuntimeSettings } from "./hooks/useRuntimeSettings";
 import { useWorkspaceSetup } from "./hooks/useWorkspaceSetup";
-import { loadOnboardingStatus, selectOnboardingRuntime, selectOnboardingWorkspace } from "./lib/onboardingApi";
+import { forgetOnboardingRecentWorkspace, loadOnboardingStatus, selectOnboardingRuntime, selectOnboardingWorkspace } from "./lib/onboardingApi";
 import { loadSystemDoctor, loadSystemVersion } from "./lib/systemApi";
 
 export default function App() {
@@ -59,7 +59,6 @@ export default function App() {
   const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatusResponse | null>(null);
   const [onboardingWorkspacePath, setOnboardingWorkspacePath] = useState("");
   const [onboardingCreateWorkspace, setOnboardingCreateWorkspace] = useState(true);
-  const [systemInfo, setSystemInfo] = useState<SystemInfoResponse | null>(null);
   const [consoleReady, setConsoleReady] = useState(false);
   const [analysisFocusSignal, setAnalysisFocusSignal] = useState(0);
   const [askPrimaryActionSignal, setAskPrimaryActionSignal] = useState(0);
