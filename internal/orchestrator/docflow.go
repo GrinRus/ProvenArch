@@ -193,7 +193,8 @@ type DocflowBuildResult struct {
 
 func (e *pipelineExecution) assembleStagedDocFlow() error {
 	repoAliases := newSemanticRepoAliasResolver(e.resolvedRepoPaths, e.shardPacks)
-	baseSemantic := aggregateSemanticSnapshot(e.shardPacks, repoAliases)
+	evidencePaths := newSemanticEvidencePathResolver(e.resolvedRepoPaths, repoAliases)
+	baseSemantic := aggregateSemanticSnapshot(e.shardPacks, repoAliases, evidencePaths)
 	e.semanticBase = &baseSemantic
 	result, err := buildStagedDocflow(DocflowBuildInput{
 		RunID:             e.runID,
@@ -262,7 +263,8 @@ func buildStagedDocflow(input DocflowBuildInput) (DocflowBuildResult, error) {
 	stageRoot := workspace.Root{Path: stageRootAbs}
 
 	repoAliases := newSemanticRepoAliasResolver(input.ResolvedRepoPaths, input.ShardPacks)
-	semantic := normalizeSemanticSnapshot(input.Semantic, repoAliases)
+	evidencePaths := newSemanticEvidencePathResolver(input.ResolvedRepoPaths, repoAliases)
+	semantic := normalizeSemanticSnapshot(input.Semantic, repoAliases, evidencePaths)
 	documentInfos := aggregateDocumentInfos(input.ShardPacks)
 	stageStore := model.NewStore(stageRoot)
 	if _, err := stageStore.ApplySemanticSnapshot(contracts.SemanticSnapshot{
@@ -713,6 +715,10 @@ type semanticRepoAliasResolver struct {
 	slug  map[string]string
 }
 
+type semanticEvidencePathResolver struct {
+	rootsByRepo map[string]string
+}
+
 func newSemanticRepoAliasResolver(resolvedRepoPaths map[string]string, manifests []contracts.ShardPackManifest) semanticRepoAliasResolver {
 	resolver := semanticRepoAliasResolver{
 		exact: map[string]string{},
@@ -777,7 +783,72 @@ func (r semanticRepoAliasResolver) canonical(repo string) string {
 	return repo
 }
 
-func aggregateSemanticSnapshot(manifests []contracts.ShardPackManifest, repoAliases semanticRepoAliasResolver) contracts.SemanticSnapshot {
+func newSemanticEvidencePathResolver(resolvedRepoPaths map[string]string, repoAliases semanticRepoAliasResolver) semanticEvidencePathResolver {
+	resolver := semanticEvidencePathResolver{rootsByRepo: map[string]string{}}
+	for repoScope, repoPath := range resolvedRepoPaths {
+		repoPath = strings.TrimSpace(repoPath)
+		if repoPath == "" {
+			continue
+		}
+		canonical := repoAliases.canonical(repoScope)
+		if canonical == "" {
+			canonical = strings.TrimSpace(repoScope)
+		}
+		if canonical == "" {
+			continue
+		}
+		resolver.rootsByRepo[strings.ToLower(canonical)] = filepath.Clean(repoPath)
+	}
+	return resolver
+}
+
+func (r semanticEvidencePathResolver) resolve(repo string, evidencePath string) string {
+	evidencePath = normalizeSemanticPath(evidencePath)
+	if evidencePath == "" || filepath.IsAbs(evidencePath) || len(r.rootsByRepo) == 0 {
+		return evidencePath
+	}
+	root := strings.TrimSpace(r.rootsByRepo[strings.ToLower(strings.TrimSpace(repo))])
+	if root == "" {
+		return evidencePath
+	}
+	return resolveUniqueExtensionlessEvidencePath(root, evidencePath)
+}
+
+func resolveUniqueExtensionlessEvidencePath(root string, evidencePath string) string {
+	cleanRel := filepath.Clean(filepath.FromSlash(evidencePath))
+	if cleanRel == "." || cleanRel == ".." || strings.HasPrefix(cleanRel, ".."+string(os.PathSeparator)) {
+		return evidencePath
+	}
+	if filepath.Ext(cleanRel) != "" {
+		return filepath.ToSlash(cleanRel)
+	}
+	exact := filepath.Join(root, cleanRel)
+	if _, err := os.Stat(exact); err == nil {
+		return filepath.ToSlash(cleanRel)
+	}
+	parent := filepath.Dir(exact)
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return filepath.ToSlash(cleanRel)
+	}
+	base := filepath.Base(exact)
+	matches := make([]string, 0, 1)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasPrefix(name, base+".") {
+			matches = append(matches, name)
+		}
+	}
+	if len(matches) != 1 {
+		return filepath.ToSlash(cleanRel)
+	}
+	return filepath.ToSlash(filepath.Join(filepath.Dir(cleanRel), matches[0]))
+}
+
+func aggregateSemanticSnapshot(manifests []contracts.ShardPackManifest, repoAliases semanticRepoAliasResolver, evidencePaths semanticEvidencePathResolver) contracts.SemanticSnapshot {
 	snapshot := contracts.SemanticSnapshot{
 		Coverage:  contracts.Coverage{},
 		Questions: []contracts.Question{},
@@ -815,27 +886,31 @@ func aggregateSemanticSnapshot(manifests []contracts.ShardPackManifest, repoAlia
 	sort.Slice(snapshot.Entities, func(i, j int) bool { return snapshot.Entities[i].ID < snapshot.Entities[j].ID })
 	sort.Slice(snapshot.Edges, func(i, j int) bool { return snapshot.Edges[i].ID < snapshot.Edges[j].ID })
 	sort.Slice(snapshot.Findings, func(i, j int) bool { return snapshot.Findings[i].ID < snapshot.Findings[j].ID })
-	return normalizeSemanticSnapshot(snapshot, repoAliases)
+	return normalizeSemanticSnapshot(snapshot, repoAliases, evidencePaths)
 }
 
-func normalizeSemanticSnapshot(snapshot contracts.SemanticSnapshot, repoAliases semanticRepoAliasResolver) contracts.SemanticSnapshot {
+func normalizeSemanticSnapshot(snapshot contracts.SemanticSnapshot, repoAliases semanticRepoAliasResolver, evidenceResolvers ...semanticEvidencePathResolver) contracts.SemanticSnapshot {
+	evidencePaths := semanticEvidencePathResolver{}
+	if len(evidenceResolvers) > 0 {
+		evidencePaths = evidenceResolvers[0]
+	}
 	snapshot.Coverage.Observed = dedupeSemanticStrings(snapshot.Coverage.Observed)
 	snapshot.Coverage.Missing = dedupeSemanticStrings(canonicalizeCoverageMissing(snapshot.Coverage.Missing))
 	snapshot.Coverage.Notes = dedupeSemanticStrings(snapshot.Coverage.Notes)
 
-	entities, entityRemap := dedupeSemanticEntities(snapshot.Entities, repoAliases)
+	entities, entityRemap := dedupeSemanticEntities(snapshot.Entities, repoAliases, evidencePaths)
 	snapshot.Entities = entities
-	snapshot.Edges = dedupeSemanticEdges(snapshot.Edges, repoAliases, entityRemap)
-	snapshot.Findings = dedupeSemanticFindings(snapshot.Findings, repoAliases, entityRemap)
+	snapshot.Edges = dedupeSemanticEdges(snapshot.Edges, repoAliases, evidencePaths, entityRemap)
+	snapshot.Findings = dedupeSemanticFindings(snapshot.Findings, repoAliases, evidencePaths, entityRemap)
 	snapshot.Questions = mergeQuestions(nil, rewriteSemanticQuestions(snapshot.Questions, entityRemap))
 	return snapshot
 }
 
-func dedupeSemanticEntities(entities []contracts.Entity, repoAliases semanticRepoAliasResolver) ([]contracts.Entity, map[string]string) {
+func dedupeSemanticEntities(entities []contracts.Entity, repoAliases semanticRepoAliasResolver, evidencePaths semanticEvidencePathResolver) ([]contracts.Entity, map[string]string) {
 	normalizedGroups := map[string][]contracts.Entity{}
 	order := []string{}
 	for _, entity := range entities {
-		entity = normalizeSemanticEntity(entity, repoAliases)
+		entity = normalizeSemanticEntity(entity, repoAliases, evidencePaths)
 		key := semanticEntityDedupKey(entity)
 		if _, exists := normalizedGroups[key]; !exists {
 			order = append(order, key)
@@ -866,14 +941,14 @@ func dedupeSemanticEntities(entities []contracts.Entity, repoAliases semanticRep
 	return mergedEntities, remap
 }
 
-func normalizeSemanticEntity(entity contracts.Entity, repoAliases semanticRepoAliasResolver) contracts.Entity {
+func normalizeSemanticEntity(entity contracts.Entity, repoAliases semanticRepoAliasResolver, evidencePaths semanticEvidencePathResolver) contracts.Entity {
 	entity.ID = strings.TrimSpace(entity.ID)
 	entity.Type = strings.TrimSpace(entity.Type)
 	entity.Name = strings.TrimSpace(entity.Name)
 	entity.OwnerTeamID = strings.TrimSpace(entity.OwnerTeamID)
 	entity.Aliases = dedupeExactStrings(entity.Aliases)
 	entity.Tags = dedupeSemanticStrings(entity.Tags)
-	entity.Provenance = normalizeSemanticProvenance(entity.Provenance, repoAliases)
+	entity.Provenance = normalizeSemanticProvenance(entity.Provenance, repoAliases, evidencePaths)
 	return entity
 }
 
@@ -894,7 +969,7 @@ func mergeSemanticEntity(winner contracts.Entity, candidate contracts.Entity) co
 	return winner
 }
 
-func dedupeSemanticEdges(edges []contracts.Edge, repoAliases semanticRepoAliasResolver, entityRemap map[string]string) []contracts.Edge {
+func dedupeSemanticEdges(edges []contracts.Edge, repoAliases semanticRepoAliasResolver, evidencePaths semanticEvidencePathResolver, entityRemap map[string]string) []contracts.Edge {
 	grouped := map[string][]contracts.Edge{}
 	order := []string{}
 	for _, edge := range edges {
@@ -903,7 +978,7 @@ func dedupeSemanticEdges(edges []contracts.Edge, repoAliases semanticRepoAliasRe
 		edge.Name = strings.TrimSpace(edge.Name)
 		edge.From = rewriteSemanticID(edge.From, entityRemap)
 		edge.To = rewriteSemanticID(edge.To, entityRemap)
-		edge.Provenance = normalizeSemanticProvenance(edge.Provenance, repoAliases)
+		edge.Provenance = normalizeSemanticProvenance(edge.Provenance, repoAliases, evidencePaths)
 		key := semanticEdgeDedupKey(edge)
 		if _, exists := grouped[key]; !exists {
 			order = append(order, key)
@@ -933,7 +1008,7 @@ func dedupeSemanticEdges(edges []contracts.Edge, repoAliases semanticRepoAliasRe
 	return merged
 }
 
-func dedupeSemanticFindings(findings []contracts.Finding, repoAliases semanticRepoAliasResolver, entityRemap map[string]string) []contracts.Finding {
+func dedupeSemanticFindings(findings []contracts.Finding, repoAliases semanticRepoAliasResolver, evidencePaths semanticEvidencePathResolver, entityRemap map[string]string) []contracts.Finding {
 	grouped := map[string][]contracts.Finding{}
 	order := []string{}
 	for _, finding := range findings {
@@ -943,7 +1018,7 @@ func dedupeSemanticFindings(findings []contracts.Finding, repoAliases semanticRe
 		finding.Severity = strings.TrimSpace(finding.Severity)
 		finding.RuleID = strings.TrimSpace(finding.RuleID)
 		finding.RelatedIDs = rewriteSemanticRelatedIDs(finding.RelatedIDs, entityRemap)
-		finding.Provenance = normalizeSemanticProvenance(finding.Provenance, repoAliases)
+		finding.Provenance = normalizeSemanticProvenance(finding.Provenance, repoAliases, evidencePaths)
 		key := semanticFindingDedupKey(finding)
 		if _, exists := grouped[key]; !exists {
 			order = append(order, key)
@@ -1032,13 +1107,17 @@ func rewriteSemanticID(value string, entityRemap map[string]string) string {
 	return value
 }
 
-func normalizeSemanticProvenance(provenance contracts.Provenance, repoAliases semanticRepoAliasResolver) contracts.Provenance {
+func normalizeSemanticProvenance(provenance contracts.Provenance, repoAliases semanticRepoAliasResolver, evidencePaths semanticEvidencePathResolver) contracts.Provenance {
 	provenance.Kind = strings.TrimSpace(provenance.Kind)
-	provenance.Evidence = normalizeSemanticEvidenceSet(provenance.Evidence, repoAliases)
+	provenance.Evidence = normalizeSemanticEvidenceSet(provenance.Evidence, repoAliases, evidencePaths)
 	return provenance
 }
 
-func normalizeSemanticEvidenceSet(evidence []contracts.Evidence, repoAliases semanticRepoAliasResolver) []contracts.Evidence {
+func normalizeSemanticEvidenceSet(evidence []contracts.Evidence, repoAliases semanticRepoAliasResolver, evidenceResolvers ...semanticEvidencePathResolver) []contracts.Evidence {
+	evidencePaths := semanticEvidencePathResolver{}
+	if len(evidenceResolvers) > 0 {
+		evidencePaths = evidenceResolvers[0]
+	}
 	type keyedEvidence struct {
 		key      string
 		evidence contracts.Evidence
@@ -1048,6 +1127,7 @@ func normalizeSemanticEvidenceSet(evidence []contracts.Evidence, repoAliases sem
 	for _, item := range evidence {
 		item.Repo = repoAliases.canonical(item.Repo)
 		item.Path = normalizeSemanticPath(item.Path)
+		item.Path = evidencePaths.resolve(item.Repo, item.Path)
 		item.Ref = strings.TrimSpace(item.Ref)
 		item.ExcerptHash = strings.TrimSpace(item.ExcerptHash)
 		item.Excerpt = strings.TrimSpace(item.Excerpt)
