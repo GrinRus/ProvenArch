@@ -259,6 +259,8 @@ Release workflow hardening:
 - UI results diagrams surface:
   - navigation through `Review`
   - diagram artifact listing and Mermaid preview render
+  - deterministic UI coverage for failed latest run + previous successful run recovery in Review, so
+    operators can reach the complete artifact set after a failed refresh
   - live `init-inspect` reads selected diagram content through `/api/artifacts` and fails gap-only C4 output instead of accepting a rendered placeholder diagram
 - UI version/readability surface:
   - deterministic UI/API tests cover `GET /api/system/version` before workspace selection and top-bar display of actual build metadata
