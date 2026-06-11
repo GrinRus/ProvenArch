@@ -1028,6 +1028,9 @@ export default function App() {
 
       {activeStage === "review" ? (
         <ReviewStagePanel
+          runId={runId}
+          runStatus={runStatus}
+          runList={runList}
           coverageSummary={coverageSummary}
           openQuestions={openQuestions}
           nonDiagramArtifacts={nonDiagramArtifacts}
@@ -1040,6 +1043,7 @@ export default function App() {
           gitDiff={gitDiff}
           gitDiffStatus={gitDiffStatus}
           onLoadGitDiff={handleLoadGitDiff}
+          onSelectRun={(id) => void handleSelectRun(id)}
           onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
         />
       ) : null}

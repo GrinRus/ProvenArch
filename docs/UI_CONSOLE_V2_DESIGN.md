@@ -125,6 +125,8 @@ Must show:
 - citations and claim coverage;
 - findings, coverage gaps and trust status;
 - Git publication status.
+- if the selected/latest run failed with a partial artifact set, a recovery action that opens the
+  most recent successful run artifacts without hiding the failed run blocker.
 
 ### 6. Review - Domain Map
 
@@ -243,7 +245,10 @@ empty/partial state rather than changing backend contracts implicitly.
   - selected run artifacts from `GET /api/pipeline/runs/<run_id>/artifacts`;
   - artifact content from existing open-artifact flow;
   - coverage/open questions derived from promoted reports and run artifacts;
-  - Mermaid preview remains frontend rendering over `.mmd` artifact content.
+  - Mermaid preview remains frontend rendering over `.mmd` artifact content, with large C4 diagrams
+    presented in a scrollable canvas rather than shrunk to an unreadable thumbnail;
+  - failed selected runs may expose only partial artifacts; the UI must keep those blockers visible
+    while offering direct navigation to the latest successful run artifacts when available.
 - Review - Domain Map:
   - derived model artifacts under `model/entities/*.yaml` and `model/edges/*.yaml`;
   - domain agent outputs under `reports/agent-outputs/domains/*.md`;

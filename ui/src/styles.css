@@ -1497,6 +1497,33 @@ code {
   box-shadow: 0 0 0 1px var(--line-soft);
 }
 
+.review-run-recovery {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin: 0.55rem 0 0.75rem;
+  padding: 0.72rem;
+  border: 1px solid rgba(184, 83, 9, 0.24);
+  border-radius: 0.48rem;
+  background: rgba(250, 176, 5, 0.1);
+}
+
+.review-run-recovery div {
+  min-width: 0;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.review-run-recovery span {
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+
+.review-run-recovery button {
+  flex: 0 0 auto;
+}
+
 .review-workbench {
   min-width: 0;
   display: grid;
@@ -2115,9 +2142,10 @@ code {
 }
 
 .diagram-svg svg {
-  width: 100%;
+  width: max-content;
   height: auto;
-  min-width: 250px;
+  min-width: 44rem;
+  max-width: none;
 }
 
 .qa-answer {
@@ -3441,6 +3469,6 @@ code {
   }
 
   .diagram-svg svg {
-    min-width: 0;
+    min-width: 36rem;
   }
 }

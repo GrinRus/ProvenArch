@@ -98,6 +98,16 @@ The medium non-release profile is `regres long`: `posthog` (`single-path`, mediu
 6) Inspect frontend live E2E outputs and, where possible, open the resulting UI workspace for manual readability checks.
 7) Report the black-box assessment with evidence paths, failure class if any, and concrete gaps.
 
+### Progress notes
+- 2026-06-11: Re-ran medium diagnostics with extended activity windows on `claude-code` and
+  `codex-code`. `codex-code` stopped at provider readiness (`quota_or_permission`), while
+  `claude-code` produced a substantive PostHog `init` artifact set before the later `refresh`
+  failed on provider quota. Manual UI review found the root operator issue: Review defaulted to the
+  latest failed partial run artifact set, hiding the complete successful init artifacts unless the
+  operator switched runs from Analysis. The UI now keeps the failed-run blocker visible and offers a
+  Review recovery action to open the latest successful artifacts; C4 preview also uses a scrollable
+  canvas so large diagrams are not reduced to unreadable thumbnails.
+
 ### Files expected to change
 - `docs/PLANS.md`
 - Optional operator assessment under `reports/` if a durable report is useful after the run
