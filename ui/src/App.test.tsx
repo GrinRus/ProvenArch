@@ -1384,7 +1384,7 @@ describe("App", () => {
             finished_at: "2026-04-03T12:12:00Z",
             warnings: [],
             error_code: "runner_unavailable",
-            error: "provider quota exhausted",
+            error: "runtime unavailable",
           },
           {
             run_id: successfulRunID,
@@ -1406,7 +1406,7 @@ describe("App", () => {
             finished_at: "2026-04-03T12:12:00Z",
             warnings: [],
             error_code: "runner_unavailable",
-            error: "provider quota exhausted",
+            error: "runtime unavailable",
           },
           [successfulRunID]: {
             run_id: successfulRunID,
@@ -1442,7 +1442,7 @@ describe("App", () => {
             current_step: "refresh.step2.asis_docs",
             warnings: [],
             error_code: "runner_unavailable",
-            error: "provider quota exhausted",
+            error: "runtime unavailable",
             steps: [],
           },
           [successfulRunID]: {
@@ -1461,7 +1461,7 @@ describe("App", () => {
         artifactText: {
           "reports/coverage/summary.md": "# Coverage Summary\n\nAnalysis incomplete.\n",
           "reports/as-is/overview.md": "# Complete overview\n\nEvidence-backed architecture output.\n",
-          "reports/diagrams/c4-context.mmd": "flowchart LR\n  A[PostHog] --> B[Backend]\n",
+          "reports/diagrams/c4-context.mmd": "flowchart LR\n  A[Workspace System] --> B[Backend]\n",
         },
       }),
     );
