@@ -60,7 +60,7 @@ Tracker reconciliation from 2026-05-07 consolidated historical active plans into
 
 ### Continuous Backlog Queue Policy
 
-Current engineering queue has no active engineering slice after PR #104; the remaining `v0.1.6` work is release metadata/tagging bookkeeping. The next implementation workstream must be selected by the owner from the reference backlog or a new ExecPlan; trusted live validation and release-fast remain manual owner-triggered gates, not default backlog work.
+Current engineering queue has no active engineering slice after PR #110; the remaining `v0.1.7` work is release metadata/tagging bookkeeping. The next implementation workstream must be selected by the owner from the reference backlog or a new ExecPlan; trusted live validation and release-fast remain manual owner-triggered gates, not default backlog work.
 
 Task selection rules:
 - Completed plans whose only remaining item is owner review, merge/archive bookkeeping, or historical evidence retention are not next engineering work.
@@ -262,6 +262,12 @@ This is a product-quality slice. It must keep the existing local-first/entity-pe
   valid work, but a traceable changelog hit a false `artifact_quality.placeholder_artifact` because it
   included a generic validation note. The fix narrows placeholder detection so bootstrap/generic
   proposal text remains blocked while traceable finding/question-backed changelog content passes.
+- 2026-06-11: PR #110 merged into `main` at `e68d35c` after green PR checks, green post-merge `main`
+  CI, and local `make contracts`, `make test`, `make lint`, `make build`. Started `v0.1.7` CI-only
+  beta release metadata branch to publish the live artifact quality hardening in downloadable release
+  artifacts. Canonical live release gate remains blocked on this host because Open edX/OpenStack
+  canonical path checkouts under `/tmp/provenarch-live-e2e` are missing; no `RELEASE READY` claim is
+  made without a fresh `release_verdict_*.json`.
 
 ### Plan ID
 EP-20260602-onboarding-first-startup
@@ -276,7 +282,8 @@ Clean UI startup in `v0.1.5` works, but first live-provider use exposed a confus
 - [x] Polish onboarding rendering for desktop, narrow desktop and mobile so long paths, missing recents, duplicate repo names and runner command errors stay readable.
 - [x] Sync README/install/API docs with provider ID vs executable wording and clean `acp serve` onboarding guidance.
 - [x] Owner review/merge complete; archive remains post-release housekeeping after `v0.1.6`.
-- [ ] Publish `v0.1.6` release metadata/tag, verify install smoke, then archive this completed plan during post-release housekeeping.
+- [x] Publish `v0.1.6` release metadata/tag and verify install smoke.
+- [ ] Archive this completed plan during post-release housekeeping.
 
 ### Non-goals
 - [x] No provider ID, CLI flag, workspace schema, runtime artifact contract, source repo write-policy or provider-live release gate changes.

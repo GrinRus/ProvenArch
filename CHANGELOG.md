@@ -2,6 +2,29 @@
 
 All notable user-facing changes are tracked here. ProvenArch uses SemVer-style release tags, with `v0.x` treated as beta/pre-release foundation.
 
+## v0.1.7 - 2026-06-11
+
+CI-only beta patch release for live artifact quality hardening and Review UI readability after `v0.1.6`.
+
+Highlights:
+- Added stronger live-run artifact quality gates for placeholder/scaffold-only reports, empty semantic models, gap-only C4 diagrams, incomplete citation/final indexes, sparse findings, and unusable proposal/changelog outputs.
+- Hardened collect/runtime prompt contracts and recovery paths so valid structure alone is not enough: collect manifests must carry evidence-backed semantic signal, provider/tool side-effect paths are rejected, and deterministic manifest recovery is constrained to current authored shard docs plus bounded repo evidence.
+- Improved generated architecture model and C4 compilation so relationship-backed context diagrams can be produced from extracted entities/edges instead of silently accepting gap-only output as success.
+- Improved Review and Publish readability: artifact previews stay legible on desktop/mobile, C4/Mermaid previews use scrollable space, failed-run states point operators to the latest successful artifacts, and live frontend checks now inspect readable artifact content instead of only screenshots/selectors.
+- Added `GET /api/system/version` and updated the top status bar to show the actual running build metadata instead of a hard-coded `v0.1.1 beta` label.
+- Anonymized live-derived regression material so local provider paths and run-specific details do not leak into product fixtures.
+
+Verification notes:
+- PR #110 merged after green PR checks and green `main` CI for merge commit `e68d35c`.
+- Local validation for the product patch passed before merge: `make contracts`, `make test`, `make lint` and `make build`.
+- Release metadata validation passed before tagging: `git diff --check`, docs sync, release distribution checks, `make contracts`, `make test`, `make lint` and `make build`.
+- Fresh canonical trusted-machine `release long/full` was not run for this patch. Preflight found the current host writable and provider binaries available, but canonical Open edX/OpenStack path checkouts under `/tmp/provenarch-live-e2e` were missing, so this release does not claim canonical `RELEASE READY` status without a fresh `reports/release_verdict_<matrix-id>.json`.
+
+Known limitations:
+- `v0.1.7` remains a beta/pre-v1 release. Public behavior and artifact contracts can still evolve before `v1.0.0`.
+- Hosted/multi-tenant mode and security/compliance enforcement remain out of scope.
+- Canonical release readiness still requires trusted-machine release gate evidence from `reports/release_verdict_<matrix-id>.json` verified by `scripts/verify-release-verdict.py`.
+
 ## v0.1.6 - 2026-06-06
 
 CI-only beta patch release for provider command resolution and onboarding path picker polish after `v0.1.5`.
