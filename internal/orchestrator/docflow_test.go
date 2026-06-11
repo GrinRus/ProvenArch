@@ -722,24 +722,24 @@ func TestNormalizeSemanticSnapshotResolvesUniqueExtensionlessEvidencePaths(t *te
 			t.Fatalf("write repo fixture file: %v", err)
 		}
 	}
-	writeRepoFile("nodejs/src/utils/db/postgres.ts")
-	writeRepoFile("nodejs/src/utils/db/redis.ts")
+	writeRepoFile("src/utils/db/primary-store.ts")
+	writeRepoFile("src/utils/db/cache-store.ts")
 	writeRepoFile("src/config.ts")
 	writeRepoFile("src/config.go")
 
-	resolvedRepos := map[string]string{"posthog": repoRoot}
+	resolvedRepos := map[string]string{"sample-repo": repoRoot}
 	repoAliases := newSemanticRepoAliasResolver(resolvedRepos, nil)
 	evidencePaths := newSemanticEvidencePathResolver(resolvedRepos, repoAliases)
 	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{
 		Entities: []contracts.Entity{
 			{
-				ID:   "db.postgres",
+				ID:   "db.primary",
 				Type: "datastore",
-				Name: "Postgres",
+				Name: "Primary Store",
 				Provenance: contracts.Provenance{
 					Kind:       "observation",
 					Confidence: 0.8,
-					Evidence:   []contracts.Evidence{{Repo: "posthog", Path: "nodejs/src/utils/db/postgres"}},
+					Evidence:   []contracts.Evidence{{Repo: "sample-repo", Path: "src/utils/db/primary-store"}},
 				},
 			},
 			{
@@ -749,32 +749,32 @@ func TestNormalizeSemanticSnapshotResolvesUniqueExtensionlessEvidencePaths(t *te
 				Provenance: contracts.Provenance{
 					Kind:       "observation",
 					Confidence: 0.7,
-					Evidence:   []contracts.Evidence{{Repo: "posthog", Path: "src/config"}},
+					Evidence:   []contracts.Evidence{{Repo: "sample-repo", Path: "src/config"}},
 				},
 			},
 		},
 		Edges: []contracts.Edge{
 			{
-				ID:   "edge.redis",
+				ID:   "edge.cache",
 				Type: "reads",
 				From: "svc.config",
-				To:   "db.redis",
+				To:   "db.cache",
 				Provenance: contracts.Provenance{
 					Kind:       "observation",
 					Confidence: 0.7,
-					Evidence:   []contracts.Evidence{{Repo: "posthog", Path: "nodejs/src/utils/db/redis"}},
+					Evidence:   []contracts.Evidence{{Repo: "sample-repo", Path: "src/utils/db/cache-store"}},
 				},
 			},
 		},
 		Findings: []contracts.Finding{
 			{
-				ID:       "finding.redis",
+				ID:       "finding.cache",
 				Severity: "medium",
-				Title:    "Redis dependency",
+				Title:    "Cache store dependency",
 				Provenance: contracts.Provenance{
 					Kind:       "observation",
 					Confidence: 0.7,
-					Evidence:   []contracts.Evidence{{Repo: "posthog", Path: "nodejs/src/utils/db/redis"}},
+					Evidence:   []contracts.Evidence{{Repo: "sample-repo", Path: "src/utils/db/cache-store"}},
 				},
 			},
 		},
@@ -784,16 +784,16 @@ func TestNormalizeSemanticSnapshotResolvesUniqueExtensionlessEvidencePaths(t *te
 	for _, entity := range snapshot.Entities {
 		entitiesByID[entity.ID] = entity
 	}
-	if got, want := entitiesByID["db.postgres"].Provenance.Evidence[0].Path, "nodejs/src/utils/db/postgres.ts"; got != want {
+	if got, want := entitiesByID["db.primary"].Provenance.Evidence[0].Path, "src/utils/db/primary-store.ts"; got != want {
 		t.Fatalf("expected unique extensionless entity evidence path to resolve, got=%q want=%q", got, want)
 	}
 	if got, want := entitiesByID["svc.config"].Provenance.Evidence[0].Path, "src/config"; got != want {
 		t.Fatalf("expected ambiguous extensionless entity evidence path to stay unchanged, got=%q want=%q", got, want)
 	}
-	if got, want := snapshot.Edges[0].Provenance.Evidence[0].Path, "nodejs/src/utils/db/redis.ts"; got != want {
+	if got, want := snapshot.Edges[0].Provenance.Evidence[0].Path, "src/utils/db/cache-store.ts"; got != want {
 		t.Fatalf("expected unique extensionless edge evidence path to resolve, got=%q want=%q", got, want)
 	}
-	if got, want := snapshot.Findings[0].Provenance.Evidence[0].Path, "nodejs/src/utils/db/redis.ts"; got != want {
+	if got, want := snapshot.Findings[0].Provenance.Evidence[0].Path, "src/utils/db/cache-store.ts"; got != want {
 		t.Fatalf("expected unique extensionless finding evidence path to resolve, got=%q want=%q", got, want)
 	}
 }

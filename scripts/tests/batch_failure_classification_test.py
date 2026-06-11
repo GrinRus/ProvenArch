@@ -74,11 +74,11 @@ class BatchFailureClassificationTest(unittest.TestCase):
 
     def test_evidence_path_resolves_unique_extensionless_repo_file(self) -> None:
         workspace = self.root / "workspace"
-        repo = self.root / "posthog"
-        write_text(repo / "nodejs/src/utils/db/postgres.ts", "export const postgres = true\n")
-        write_text(repo / "nodejs/src/utils/db/redis.ts", "export const redis = true\n")
+        repo = self.root / "sample-repo"
+        write_text(repo / "src/utils/db/primary-store.ts", "export const primaryStore = true\n")
+        write_text(repo / "src/utils/db/cache-store.ts", "export const cacheStore = true\n")
 
-        ok, reason = self.module.evidence_path_resolves("nodejs/src/utils/db/postgres", [repo], workspace)
+        ok, reason = self.module.evidence_path_resolves("src/utils/db/primary-store", [repo], workspace)
 
         self.assertTrue(ok, reason)
 
