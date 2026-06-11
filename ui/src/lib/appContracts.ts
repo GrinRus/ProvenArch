@@ -34,6 +34,13 @@ export type DoctorResponse = {
   checks: DoctorCheck[];
 };
 
+export type SystemVersionResponse = {
+  version: string;
+  commit: string;
+  built: string;
+  ui_bundle: string;
+};
+
 export type BaselineBundleEditableArtifact = {
   path: string;
   label: string;

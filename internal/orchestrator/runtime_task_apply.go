@@ -2,9 +2,12 @@ package orchestrator
 
 import (
 	"fmt"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 
+	"github.com/GrinRus/ProvenArch/internal/artifactquality"
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
@@ -26,6 +29,18 @@ func (e *pipelineExecution) applyCollectRuntimeExecution(
 		return runtimeTaskExecution{}, err
 	}
 	e.shardPacks = append(e.shardPacks, manifest)
+	if artifactquality.CollectManifestBootstrapOnly(manifest, collectManifestDocumentTexts(task.WriteRoot, manifest.Documents)) {
+		warning := fmt.Sprintf(
+			"artifact_quality: collect shard %s retained unchanged bootstrap first-action artifacts; provider did not enrich repository evidence",
+			strings.TrimSpace(task.ShardID),
+		)
+		e.warnings = append(e.warnings, warning)
+		e.logWarn(stepID, domainID, "collect manifest bootstrap-only quality warning", map[string]any{
+			"task_id":  task.TaskID,
+			"shard_id": task.ShardID,
+			"warning":  warning,
+		})
+	}
 
 	applyReport, err := e.store.ApplySemanticSnapshot(contracts.SemanticSnapshot{
 		Entities: manifest.Semantic.Entities,
@@ -92,6 +107,38 @@ func (e *pipelineExecution) applyCollectRuntimeExecution(
 		Apply:          applyReport,
 		ShardManifest:  &manifest,
 	}, nil
+}
+
+func collectManifestDocumentTexts(writeRoot string, documents []contracts.AuthoredDocument) map[string]string {
+	root := filepath.Clean(strings.TrimSpace(writeRoot))
+	if root == "" || root == "." || len(documents) == 0 {
+		return nil
+	}
+	texts := map[string]string{}
+	for _, document := range documents {
+		rawPath := filepath.ToSlash(strings.TrimSpace(document.Path))
+		if rawPath == "" {
+			continue
+		}
+		cleanRel := filepath.Clean(filepath.FromSlash(rawPath))
+		if filepath.IsAbs(cleanRel) || cleanRel == "." || cleanRel == ".." || strings.HasPrefix(cleanRel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		absPath := filepath.Join(root, cleanRel)
+		relToRoot, err := filepath.Rel(root, absPath)
+		if err != nil || relToRoot == ".." || strings.HasPrefix(relToRoot, ".."+string(filepath.Separator)) {
+			continue
+		}
+		raw, err := os.ReadFile(absPath)
+		if err != nil {
+			continue
+		}
+		texts[rawPath] = string(raw)
+	}
+	if len(texts) == 0 {
+		return nil
+	}
+	return texts
 }
 
 func (e *pipelineExecution) applyValidatorRuntimeExecution(

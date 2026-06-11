@@ -1509,10 +1509,18 @@ if step_id == "init.step0.constitution":
         "constitution-draft.json",
         [
             {
-                "path": "overview.md",
+                "path": "charter-overview.md",
                 "canonical_path": "charter/overview.md",
                 "kind": "charter",
                 "title": "Stub Constitution",
+                "content": "# Stub Constitution\n\n## Scope\n- Stub runner evidence: README.md.\n",
+            },
+            {
+                "path": "baseline-subagents.yaml",
+                "canonical_path": "skills/subagents.yaml",
+                "kind": "bundle",
+                "title": "Baseline Subagents",
+                "content": "agents: []\n",
             }
         ],
     )

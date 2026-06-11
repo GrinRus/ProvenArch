@@ -104,6 +104,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/health", s.handleHealth)
+	mux.HandleFunc("/api/system/version", s.handleSystemVersion)
 	mux.HandleFunc("/api/onboarding/status", s.handleOnboardingStatus)
 	mux.HandleFunc("/api/onboarding/workspace", s.handleOnboardingWorkspace)
 	mux.HandleFunc("/api/onboarding/runtime", s.handleOnboardingRuntime)
@@ -252,7 +253,7 @@ func (s *Server) setRuntimeConfig(config ServerRuntimeConfig) {
 }
 
 func (s *Server) shouldBlockAPIRequest(apiPath string) bool {
-	if apiPath == "/api/health" || apiPath == "/api/system/info" || strings.HasPrefix(apiPath, "/api/onboarding/") {
+	if apiPath == "/api/health" || apiPath == "/api/system/version" || apiPath == "/api/system/info" || strings.HasPrefix(apiPath, "/api/onboarding/") {
 		return false
 	}
 	s.mu.RLock()
@@ -277,28 +278,27 @@ func (s *Server) handleHealth(writer http.ResponseWriter, request *http.Request)
 	writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+func (s *Server) handleSystemVersion(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		writeMethodNotAllowed(writer, http.MethodGet)
+		return
+	}
+	writeJSON(writer, http.StatusOK, CurrentBuildInfo())
+}
+
 func (s *Server) handleSystemInfo(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodGet {
 		writeMethodNotAllowed(writer, http.MethodGet)
 		return
 	}
-
 	s.mu.RLock()
-	build := s.runtimeConfig.Build
+	info := s.runtimeConfig.Build
 	s.mu.RUnlock()
 	writeJSON(writer, http.StatusOK, map[string]string{
-		"version": normalizeBuildInfoValue(build.Version, "dev"),
-		"commit":  normalizeBuildInfoValue(build.Commit, "none"),
-		"built":   normalizeBuildInfoValue(build.Built, "unknown"),
+		"version": firstNonEmpty(info.Version, "dev"),
+		"commit":  firstNonEmpty(info.Commit, "none"),
+		"built":   firstNonEmpty(info.Built, "unknown"),
 	})
-}
-
-func normalizeBuildInfoValue(value string, fallback string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return fallback
-	}
-	return value
 }
 
 func (s *Server) handleSystemDoctor(writer http.ResponseWriter, request *http.Request) {

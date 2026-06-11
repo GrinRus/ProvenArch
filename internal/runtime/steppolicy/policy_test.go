@@ -54,17 +54,19 @@ func TestDocFirstFilesystemPolicyDefinesSharedCollectRepairSurface(t *testing.T)
 	required := []string{
 		`Write ONLY inside write_root.`,
 		`Suggested collect authored doc path for this shard:`,
-		`Early pair-write requirement: write the suggested overview doc and shard-pack-manifest.json as one focused artifact pair`,
-		`Minimal collect target shape: write "payments-overview.md" + "shard-pack-manifest.json" early`,
+		`Before the first filesystem write inside write_root, perform one bounded evidence pass over the existing repo entrypoint hints and assigned path_scopes`,
+		`Evidence-first pair requirement: after the bounded evidence pass, write the suggested overview doc and shard-pack-manifest.json as one focused marker-free evidence-backed artifact pair`,
+		`Minimal collect target shape: write "payments-overview.md" + "shard-pack-manifest.json" with concrete observed evidence`,
 		`Do not wait for a complete broad repository sweep before writing shard-pack-manifest.json`,
-		`TASK-SPECIFIC COLLECT MANIFEST JSON SKELETON: use the heredoc JSON embedded in the first-action command section above`,
+		`TASK-SPECIFIC COLLECT MANIFEST JSON SKELETON: use the JSON embedded in the collect evidence-first section above as a schema/key/type guide`,
 		`COLLECT MANIFEST CONTRACT CHECKLIST:`,
 		`The task-specific collect manifest JSON skeleton above is normative`,
 		`Do not exit after writing markdown only; every collect shard must finish with a valid shard-pack-manifest.json.`,
-		`After the first filesystem write inside write_root, stop broad repository exploration; only minimal manifest/JSON repair is allowed afterwards.`,
+		`The final collect pair must not be seed-only, scaffold-only, or copied unchanged from the skeleton`,
+		`After writing the evidence-backed pair, avoid broad repository exploration; only minimal manifest/JSON repair needed for the current shard is allowed afterwards.`,
 		`After writing shard-pack-manifest.json, do NOT continue broad list_directory/read_file sweeps across repo roots.`,
 		`Do NOT read reports/taskruns/**, raw runtime logs, or previously generated shard-pack-manifest.json files as schema examples during collect.`,
-		`If authored docs and shard-pack-manifest.json already exist in write_root, stop and exit successfully.`,
+		`If authored docs and shard-pack-manifest.json already exist in write_root, stop only after confirming they contain marker-free scoped evidence for this shard and are not placeholder prose.`,
 		`documents[].path MUST be artifact_root-relative only`,
 		`semantic.entities[*].provenance.evidence[*], semantic.edges[*].provenance.evidence[*], and semantic.findings[*].provenance.evidence[*] item MUST include non-empty repo and path values`,
 		`Citation-only semantic evidence objects are forbidden`,
@@ -114,15 +116,15 @@ func TestDocFirstFilesystemPolicyDefersCollectEntrypointHintsUntilFirstPair(t *t
 	}
 
 	policy := DocFirstFilesystemPolicy(task)
-	if !strings.Contains(policy, "Existing repo entrypoint hints (after the first collect artifact pair exists, read only these first when further evidence is needed):") {
-		t.Fatalf("collect entrypoint hints must be deferred until after first pair write, got:\n%s", policy)
+	if !strings.Contains(policy, "Existing repo entrypoint hints (read these first for the bounded collect evidence pass):") {
+		t.Fatalf("collect entrypoint hints must guide the bounded evidence pass, got:\n%s", policy)
 	}
 	if strings.Contains(policy, "Existing repo entrypoint hints (read only these first when relevant):") {
-		t.Fatalf("collect entrypoint hints must not instruct provider to read before first pair write, got:\n%s", policy)
+		t.Fatalf("collect entrypoint hints must use the collect-specific bounded evidence wording, got:\n%s", policy)
 	}
 }
 
-func TestCollectFirstActionSectionWritesExactPair(t *testing.T) {
+func TestCollectFirstActionSectionDefinesEvidenceFirstTargets(t *testing.T) {
 	t.Parallel()
 
 	task := acpruntime.Task{
@@ -138,13 +140,16 @@ func TestCollectFirstActionSectionWritesExactPair(t *testing.T) {
 
 	section := CollectFirstActionSection(task)
 	required := []string{
-		`COLLECT FIRST-ACTION ARTIFACT PAIR:`,
-		`FIRST COLLECT ARTIFACT PAIR COMMAND:`,
-		`Run this exact command as the next filesystem action after checking whether both target files already exist`,
-		`do not call read_file, list_directory, grep_search, glob, find, rg, or any repository exploration before this command`,
-		`The embedded skeleton is intentionally valid before additional evidence; do not improve or rewrite it before the first pair exists.`,
-		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md' <<'ACP_COLLECT_DOC'`,
-		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json' <<'ACP_MANIFEST_JSON'`,
+		`COLLECT EVIDENCE-FIRST ARTIFACT PAIR:`,
+		`FIRST COLLECT EVIDENCE PASS:`,
+		`COLLECT FINAL WRITE REQUIREMENT:`,
+		`COLLECT MANIFEST TASK SKELETON:`,
+		`SKELETON USE:`,
+		`bounded evidence pass before writing artifacts; do not write a seed-only/bootstrap pair`,
+		`Write the authored document and shard-pack-manifest.json only after they contain evidence-backed content from the bounded evidence pass.`,
+		`Copying this skeleton unchanged is invalid and will be rejected as scaffold-only output.`,
+		`Exact authored document target: "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md".`,
+		`Exact manifest target: "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json".`,
 		`"path": "payments-overview.md"`,
 		`"artifact_root": "reports/taskruns/run-1/staging/shards/payments"`,
 	}
@@ -153,8 +158,61 @@ func TestCollectFirstActionSectionWritesExactPair(t *testing.T) {
 			t.Fatalf("expected first-action section to contain %q, got:\n%s", needle, section)
 		}
 	}
-	if got := strings.Count(section, "FIRST COLLECT ARTIFACT PAIR COMMAND:"); got != 1 {
-		t.Fatalf("expected one first-action command heading, got %d:\n%s", got, section)
+	for _, forbidden := range []string{
+		`FIRST COLLECT ARTIFACT PAIR COMMAND:`,
+		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md' <<'ACP_COLLECT_DOC'`,
+		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json' <<'ACP_MANIFEST_JSON'`,
+		`ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT`,
+		`unchanged bootstrap pair`,
+	} {
+		if strings.Contains(section, forbidden) {
+			t.Fatalf("normal collect first-action must not contain bootstrap marker/wording %q:\n%s", forbidden, section)
+		}
+	}
+}
+
+func TestCollectRecoveryPairWriteCommandWritesValidationReadyFallback(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		TaskID:       "task-1",
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		WriteRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments",
+		ArtifactRoot: "reports/taskruns/run-1/staging/shards/payments",
+		RepoScopes:   []string{"payments"},
+		PathScopes:   []string{"payments"},
+		ShardID:      "payments",
+	}
+
+	command := CollectRecoveryPairWriteCommand(task)
+	required := []string{
+		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md' <<'ACP_COLLECT_DOC'`,
+		`## Recovery Evidence Summary`,
+		`## Evidence Surface`,
+		`## Recovery Notes`,
+		`Remaining Questions`,
+		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json' <<'ACP_MANIFEST_JSON'`,
+		`collect recovery fallback`,
+		`Collect recovery used minimal scoped evidence`,
+		`"path": "payments-overview.md"`,
+	}
+	for _, needle := range required {
+		if !strings.Contains(command, needle) {
+			t.Fatalf("expected recovery command to contain %q, got:\n%s", needle, command)
+		}
+	}
+	for _, forbidden := range []string{
+		`ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT`,
+		`Recovery Bootstrap`,
+		`Recovery Summary`,
+		`Evidence candidate used for the recovery manifest`,
+		`Collect manifest covers the assigned shard scope`,
+		`Owner mapping evidence not confirmed from the initial scoped evidence path`,
+	} {
+		if strings.Contains(command, forbidden) {
+			t.Fatalf("recovery command must not contain bootstrap scaffold %q:\n%s", forbidden, command)
+		}
 	}
 }
 
@@ -182,7 +240,7 @@ func TestDocFirstFilesystemPolicyAddsRootFileShardHint(t *testing.T) {
 		`Root-file collect shard detected: path_scopes contains root-level files only:`,
 		`.gitignore, LICENSE, Makefile, README.md, pom.xml`,
 		`read only the listed root files first; do not recursively sweep top-level directories`,
-		`Produce one concise root overview document in write_root, then write shard-pack-manifest.json`,
+		`Produce one concise evidence-backed root overview document in write_root, then write an enriched shard-pack-manifest.json`,
 	}
 	for _, needle := range required {
 		if !strings.Contains(policy, needle) {
@@ -248,6 +306,26 @@ func TestCollectManifestTaskSkeletonParsesAsShardPackManifest(t *testing.T) {
 	if got, want := manifest.Citations[0].Path, "src/main.go"; got != want {
 		t.Fatalf("citation path = %q, want %q", got, want)
 	}
+	if got := len(manifest.Semantic.Entities); got < 2 {
+		t.Fatalf("semantic entities length = %d, want >= 2 in skeleton:\n%s", got, raw)
+	}
+	if got := len(manifest.Semantic.Edges); got < 1 {
+		t.Fatalf("semantic edges length = %d, want >= 1 in skeleton:\n%s", got, raw)
+	}
+	if got := len(manifest.Semantic.Findings); got < 1 {
+		t.Fatalf("semantic findings length = %d, want >= 1 in skeleton:\n%s", got, raw)
+	}
+	for _, entity := range manifest.Semantic.Entities {
+		if len(entity.Provenance.Evidence) == 0 {
+			t.Fatalf("semantic entity %s has no provenance evidence in skeleton:\n%s", entity.ID, raw)
+		}
+		if got, want := entity.Provenance.Evidence[0].Path, "src/main.go"; got != want {
+			t.Fatalf("semantic entity %s evidence path = %q, want %q", entity.ID, got, want)
+		}
+	}
+	if got, want := manifest.Semantic.Findings[0].Provenance.Evidence[0].Path, "src/main.go"; got != want {
+		t.Fatalf("semantic finding evidence path = %q, want %q", got, want)
+	}
 	if strings.Contains(raw, "scaffold") {
 		t.Fatalf("collect manifest skeleton should avoid scaffold wording in provider-authored artifacts:\n%s", raw)
 	}
@@ -289,9 +367,21 @@ func TestRefreshCollectManifestTaskSkeletonMatchesRefreshPolicyMinimums(t *testi
 	if got := len(manifest.Semantic.Questions); got < 1 {
 		t.Fatalf("refresh questions length = %d, want >= 1 in skeleton:\n%s", got, raw)
 	}
+	if got := len(manifest.Semantic.Entities); got < 2 {
+		t.Fatalf("refresh semantic entities length = %d, want >= 2 in skeleton:\n%s", got, raw)
+	}
+	if got := len(manifest.Semantic.Edges); got < 1 {
+		t.Fatalf("refresh semantic edges length = %d, want >= 1 in skeleton:\n%s", got, raw)
+	}
+	if got := len(manifest.Semantic.Findings); got < 1 {
+		t.Fatalf("refresh semantic findings length = %d, want >= 1 in skeleton:\n%s", got, raw)
+	}
 	question := manifest.Semantic.Questions[0]
 	if strings.TrimSpace(question.ID) == "" || strings.TrimSpace(question.Text) == "" {
 		t.Fatalf("refresh skeleton question must include id and text, got %+v in:\n%s", question, raw)
+	}
+	if len(question.RelatedIDs) == 0 {
+		t.Fatalf("refresh skeleton question must reference the scoped semantic entity, got %+v in:\n%s", question, raw)
 	}
 	if got, want := manifest.Citations[0].Path, "README.md"; got != want {
 		t.Fatalf("root-file citation path = %q, want %q", got, want)
@@ -324,65 +414,8 @@ func TestCollectManifestTaskSkeletonPrefersUsefulRootEvidenceWithRepairCandidate
 	if got, want := manifest.Citations[0].Path, "README.md"; got != want {
 		t.Fatalf("root-file repair citation path = %q, want %q", got, want)
 	}
-}
-
-func TestCollectEarlyPairWriteCommandPrefersUsefulRootEvidence(t *testing.T) {
-	t.Parallel()
-
-	task := acpruntime.Task{
-		RunID:        "run-1",
-		StepID:       "refresh.step1.collect",
-		ArtifactRoot: "reports/taskruns/run-1/staging/shards/root-files",
-		WriteRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/shards/root-files",
-		RepoScopes:   []string{"bank"},
-		PathScopes:   []string{".gitignore", "LICENSE", "Makefile", "README.md", "pom.xml"},
-		ShardID:      "bank-root-files",
-		DomainID:     "bank",
-		AgentRole:    "shard-analyst",
-	}
-
-	command := CollectEarlyPairWriteCommand(task)
-	for _, needle := range []string{
-		"Primary scoped evidence path: `README.md`",
-		`"path": "README.md"`,
-		`"questions": [`,
-		`"coverage": {`,
-	} {
-		if !strings.Contains(command, needle) {
-			t.Fatalf("expected early pair command to contain %q, got:\n%s", needle, command)
-		}
-	}
-	if strings.Contains(command, "Primary scoped evidence path: `.gitignore`") || strings.Contains(command, "Primary evidence path: `.gitignore`") {
-		t.Fatalf("root-file shard should prefer README.md over .gitignore evidence, got:\n%s", command)
-	}
-}
-
-func TestCollectEarlyPairWriteCommandAvoidsAuthoringInstructionsInArtifacts(t *testing.T) {
-	t.Parallel()
-
-	task := acpruntime.Task{
-		RunID:        "run-1",
-		StepID:       "init.step1.collect",
-		ArtifactRoot: "reports/taskruns/run-1/staging/shards/source-docs",
-		WriteRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/shards/source-docs",
-		RepoScopes:   []string{"bank"},
-		PathScopes:   []string{"src"},
-		ShardID:      "bank-source-docs",
-		DomainID:     "payments",
-		AgentRole:    "shard-analyst",
-	}
-
-	command := CollectEarlyPairWriteCommand(task)
-	for _, forbidden := range []string{
-		"Record concrete",
-		"first citation surface",
-		"before exit",
-		"before exiting",
-		"owner mappings if absent",
-	} {
-		if strings.Contains(command, forbidden) {
-			t.Fatalf("collect early pair command should not persist authoring instruction %q:\n%s", forbidden, command)
-		}
+	if got, want := manifest.Semantic.Entities[0].Provenance.Evidence[0].Path, "README.md"; got != want {
+		t.Fatalf("root-file semantic evidence path = %q, want %q", got, want)
 	}
 }
 
@@ -570,6 +603,16 @@ func TestAsIsFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
 	if got := strings.Count(section, "ACP_DRAFT_FILE"); got != 6 {
 		t.Fatalf("expected three as-is draft file heredocs, got delimiter count %d:\n%s", got, section)
 	}
+	for _, forbidden := range []string{
+		"Provider wrote this draft artifact",
+		"Provider wrote the required",
+		"drafted required runtime artifacts",
+		"no findings reported.",
+	} {
+		if strings.Contains(section, forbidden) {
+			t.Fatalf("as-is first-action drafts must not include placeholder marker %q:\n%s", forbidden, section)
+		}
+	}
 }
 
 func TestProposalsFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
@@ -613,6 +656,16 @@ func TestProposalsFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
 	}
 	if got := strings.Count(section, "ACP_DRAFT_FILE"); got != 4 {
 		t.Fatalf("expected two proposals draft file heredocs, got delimiter count %d:\n%s", got, section)
+	}
+	for _, forbidden := range []string{
+		"Provider wrote this draft artifact",
+		"Provider wrote the required",
+		"drafted required runtime artifacts",
+		"no findings reported.",
+	} {
+		if strings.Contains(section, forbidden) {
+			t.Fatalf("proposals first-action drafts must not include placeholder marker %q:\n%s", forbidden, section)
+		}
 	}
 }
 
@@ -757,6 +810,8 @@ func TestDocFirstFilesystemPolicyDefinesCanonicalAsIsDraftSurface(t *testing.T) 
 		`Write asis-draft-manifest.json in write_root.`,
 		`Write overview.md, summary.md, and architect-summary.md only under draft_final_root.`,
 		`Use the FIRST AS-IS DRAFT COMMAND skeleton above as the first draft artifact set`,
+		`The first draft artifact set is bootstrap-only`,
+		`replace placeholder scaffold text with evidence-backed as-is content`,
 		`Use staged final evidence from read_context_roots only; do NOT read sibling baseline workspaces`,
 		`asis-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="as_is", agent_role, and outputs[].`,
 		`"step_contract": "as_is"`,
@@ -810,6 +865,8 @@ func TestDocFirstFilesystemPolicyDefinesCanonicalProposalsDraftSurface(t *testin
 	required := []string{
 		`Write proposals-draft-manifest.json in write_root.`,
 		`Allowed canonical targets are proposals/* and reports/changelog/*.`,
+		`The first proposals draft artifact set is bootstrap-only`,
+		`replace placeholder scaffold text with evidence-backed proposal/changelog content`,
 		`proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="proposals", agent_role, optional summary, and outputs[].`,
 		`Do NOT add legacy top-level fields such as pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps.`,
 		`"step_contract": "proposals"`,

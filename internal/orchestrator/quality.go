@@ -3,11 +3,14 @@ package orchestrator
 import (
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/GrinRus/ProvenArch/internal/contracts"
 	"github.com/GrinRus/ProvenArch/internal/reports"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
@@ -89,28 +92,63 @@ type runQualitySignal struct {
 }
 
 type runQualitySummary struct {
-	Version         int                         `json:"version"`
-	RunID           string                      `json:"run_id"`
-	Pipeline        string                      `json:"pipeline"`
-	Status          RunStatus                   `json:"status"`
-	ErrorCode       string                      `json:"error_code,omitempty"`
-	Error           string                      `json:"error,omitempty"`
-	GeneratedAt     string                      `json:"generated_at"`
-	RuntimeVersions []string                    `json:"runtime_versions"`
-	Failure         runFailureClassification    `json:"failure"`
-	RunWarnings     []string                    `json:"run_warnings,omitempty"`
-	QualitySignals  []runQualitySignal          `json:"quality_signals,omitempty"`
-	EvidenceState   reports.ReportRenderContext `json:"evidence_state"`
-	Totals          runQualityTotals            `json:"totals"`
-	Steps           []runtimeStepQuality        `json:"steps"`
+	Version           int                         `json:"version"`
+	RunID             string                      `json:"run_id"`
+	Pipeline          string                      `json:"pipeline"`
+	Status            RunStatus                   `json:"status"`
+	ErrorCode         string                      `json:"error_code,omitempty"`
+	Error             string                      `json:"error,omitempty"`
+	GeneratedAt       string                      `json:"generated_at"`
+	RuntimeVersions   []string                    `json:"runtime_versions"`
+	Failure           runFailureClassification    `json:"failure"`
+	RunWarnings       []string                    `json:"run_warnings,omitempty"`
+	QualitySignals    []runQualitySignal          `json:"quality_signals,omitempty"`
+	EvidenceState     reports.ReportRenderContext `json:"evidence_state"`
+	ArtifactInventory runArtifactInventory        `json:"artifact_inventory"`
+	Totals            runQualityTotals            `json:"totals"`
+	Steps             []runtimeStepQuality        `json:"steps"`
+}
+
+type runArtifactInventory struct {
+	RunID             string                        `json:"run_id"`
+	FinalIndexPath    string                        `json:"final_index_path,omitempty"`
+	FinalIndexPresent bool                          `json:"final_index_present"`
+	Semantic          runArtifactSemanticInventory  `json:"semantic"`
+	Surfaces          []runArtifactSurfaceInventory `json:"surfaces"`
+}
+
+type runArtifactSemanticInventory struct {
+	CanonicalDocuments int `json:"canonical_documents"`
+	Entities           int `json:"entities"`
+	Edges              int `json:"edges"`
+	Findings           int `json:"findings"`
+	Questions          int `json:"questions"`
+	CoverageObserved   int `json:"coverage_observed"`
+	CoverageMissing    int `json:"coverage_missing"`
+}
+
+type runArtifactSurfaceInventory struct {
+	Name     string   `json:"name"`
+	Expected bool     `json:"expected"`
+	Count    int      `json:"count"`
+	Status   string   `json:"status"`
+	Paths    []string `json:"paths,omitempty"`
+}
+
+type artifactSurfaceDefinition struct {
+	name     string
+	expected bool
+	prefixes []string
 }
 
 func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode string, errorMessage string, failure runFailureClassification) (Artifact, error) {
 	versions := normalizeRuntimeVersions(e.runtimeVersions)
 	renderContext := e.terminalRenderContext(status)
+	artifactInventory, artifactInventorySignals := assessRunArtifactInventory(e.workspace, e.runID, status, renderContext)
 	runWarnings := append([]string(nil), e.warnings...)
 	qualitySignals := artifactQualitySignalsFromWarnings(e.warnings)
 	qualitySignals = append(qualitySignals, assessLiveReportSurfaceSignals(e.workspace, renderContext, status)...)
+	qualitySignals = append(qualitySignals, artifactInventorySignals...)
 	qualitySignals = append(qualitySignals, runtimeRecoveryQualitySignals(e.runtimeRecoveryCounters, len(e.partialFailures))...)
 	for _, signal := range qualitySignals {
 		runWarnings = append(runWarnings, signal.Message)
@@ -153,20 +191,21 @@ func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode s
 	totals.PartialFailureCount = len(e.partialFailures)
 
 	summary := runQualitySummary{
-		Version:         1,
-		RunID:           e.runID,
-		Pipeline:        string(e.pipeline),
-		Status:          status,
-		ErrorCode:       strings.TrimSpace(errorCode),
-		Error:           strings.TrimSpace(errorMessage),
-		GeneratedAt:     e.clock().UTC().Format(time.RFC3339),
-		RuntimeVersions: versions,
-		Failure:         normalizeRunFailureClassification(failure),
-		RunWarnings:     runWarnings,
-		QualitySignals:  qualitySignals,
-		EvidenceState:   renderContext,
-		Totals:          totals,
-		Steps:           steps,
+		Version:           1,
+		RunID:             e.runID,
+		Pipeline:          string(e.pipeline),
+		Status:            status,
+		ErrorCode:         strings.TrimSpace(errorCode),
+		Error:             strings.TrimSpace(errorMessage),
+		GeneratedAt:       e.clock().UTC().Format(time.RFC3339),
+		RuntimeVersions:   versions,
+		Failure:           normalizeRunFailureClassification(failure),
+		RunWarnings:       runWarnings,
+		QualitySignals:    qualitySignals,
+		EvidenceState:     renderContext,
+		ArtifactInventory: artifactInventory,
+		Totals:            totals,
+		Steps:             steps,
 	}
 
 	content, err := json.MarshalIndent(summary, "", "  ")
@@ -445,6 +484,515 @@ func assessLiveReportSurfaceSignals(ws workspace.Root, ctx reports.ReportRenderC
 	}
 
 	return normalizeRunQualitySignals(signals)
+}
+
+func assessRunArtifactInventory(
+	ws workspace.Root,
+	runID string,
+	status RunStatus,
+	ctx reports.ReportRenderContext,
+) (runArtifactInventory, []runQualitySignal) {
+	runID = strings.TrimSpace(runID)
+	inventory := runArtifactInventory{
+		RunID:          runID,
+		FinalIndexPath: filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "staging", "final", finalRunIndexFile)),
+	}
+	finalIndex, finalIndexOK := loadRunFinalIndex(ws, runID)
+	inventory.FinalIndexPresent = finalIndexOK
+	if finalIndexOK {
+		inventory.Semantic = runArtifactSemanticInventory{
+			CanonicalDocuments: len(finalIndex.CanonicalDocuments),
+			Entities:           len(finalIndex.Semantic.Entities),
+			Edges:              len(finalIndex.Semantic.Edges),
+			Findings:           len(finalIndex.Semantic.Findings),
+			Questions:          len(finalIndex.Semantic.Questions),
+			CoverageObserved:   len(finalIndex.Semantic.Coverage.Observed),
+			CoverageMissing:    len(finalIndex.Semantic.Coverage.Missing),
+		}
+	}
+	inventory.Surfaces = collectRunArtifactSurfaceInventory(ws, runID)
+
+	if status != RunStatusSucceeded || ctx.ReportMode != reports.ReportModeNormal {
+		return inventory, nil
+	}
+
+	signals := []runQualitySignal{}
+	nontrivial := isNontrivialArtifactInventory(inventory)
+	if !finalIndexOK {
+		signals = append(signals, runQualitySignal{
+			Code:     "artifact_quality.final_index_missing",
+			Severity: "warning",
+			Message:  "artifact_quality: current run artifact inventory is missing final-run-index.json",
+			Path:     inventory.FinalIndexPath,
+		})
+	}
+	if nontrivial && finalIndexOK && inventory.Semantic.Entities == 0 {
+		signals = append(signals, runQualitySignal{
+			Code:     "artifact_quality.empty_semantic_model",
+			Severity: "warning",
+			Message:  "artifact_quality: current run produced reviewable documents but final semantic model has zero entities",
+			Path:     inventory.FinalIndexPath,
+		})
+	}
+	if nontrivial && finalIndexOK && inventory.Semantic.Entities > 1 && inventory.Semantic.Edges == 0 {
+		signals = append(signals, runQualitySignal{
+			Code:     "artifact_quality.empty_semantic_edges",
+			Severity: "warning",
+			Message:  "artifact_quality: current run produced multiple semantic entities but no semantic edges",
+			Path:     inventory.FinalIndexPath,
+		})
+	}
+	if nontrivial && finalIndexOK {
+		signals = append(signals, semanticScaffoldSignals(finalIndex, inventory)...)
+	}
+	if nontrivial && surfaceCount(inventory, "model_entities") == 0 {
+		signals = append(signals, runQualitySignal{
+			Code:     "artifact_quality.model_entities_missing",
+			Severity: "warning",
+			Message:  "artifact_quality: current run has no promoted model/entities artifacts",
+			Path:     "model/entities",
+		})
+	}
+	signals = append(signals, placeholderArtifactSignals(ws)...)
+	signals = append(signals, findingsCoverageGapSignals(ws, finalIndex, finalIndexOK)...)
+	signals = append(signals, gapOnlyDiagramSignals(ws, inventory, nontrivial)...)
+	signals = append(signals, scaffoldDiagramSignals(ws, inventory, nontrivial)...)
+	signals = append(signals, hiddenProviderDocumentSignals(ws, runID)...)
+	return inventory, normalizeRunQualitySignals(signals)
+}
+
+func collectRunArtifactSurfaceInventory(ws workspace.Root, runID string) []runArtifactSurfaceInventory {
+	definitions := []artifactSurfaceDefinition{
+		{name: "charter", expected: true, prefixes: []string{"charter/"}},
+		{name: "skills", expected: true, prefixes: []string{"skills/"}},
+		{name: "as_is", expected: true, prefixes: []string{"reports/as-is/"}},
+		{name: "coverage", expected: true, prefixes: []string{"reports/coverage/"}},
+		{name: "findings", expected: true, prefixes: []string{"reports/findings/"}},
+		{name: "agent_outputs", expected: true, prefixes: []string{"reports/agent-outputs/"}},
+		{name: "model_entities", expected: true, prefixes: []string{"model/entities/"}},
+		{name: "model_edges", expected: false, prefixes: []string{"model/edges/"}},
+		{name: "diagrams", expected: true, prefixes: []string{"reports/diagrams/"}},
+		{name: "proposals", expected: true, prefixes: []string{"proposals/"}},
+		{name: "changelog", expected: true, prefixes: []string{"reports/changelog/"}},
+		{name: "taskrun", expected: true, prefixes: []string{filepath.ToSlash(filepath.Join("reports", "taskruns", strings.TrimSpace(runID))) + "/"}},
+	}
+	paths := listWorkspaceFiles(ws)
+	surfaces := make([]runArtifactSurfaceInventory, 0, len(definitions))
+	for _, definition := range definitions {
+		matches := []string{}
+		for _, rel := range paths {
+			for _, prefix := range definition.prefixes {
+				if strings.HasPrefix(rel, prefix) {
+					matches = append(matches, rel)
+					break
+				}
+			}
+		}
+		status := "present"
+		if len(matches) == 0 {
+			status = "missing"
+		}
+		surfaces = append(surfaces, runArtifactSurfaceInventory{
+			Name:     definition.name,
+			Expected: definition.expected,
+			Count:    len(matches),
+			Status:   status,
+			Paths:    sampleArtifactPaths(matches, 16),
+		})
+	}
+	return surfaces
+}
+
+func listWorkspaceFiles(ws workspace.Root) []string {
+	root := strings.TrimSpace(ws.Path)
+	if root == "" {
+		return nil
+	}
+	paths := []string{}
+	_ = filepath.WalkDir(root, func(absPath string, entry fs.DirEntry, err error) error {
+		if err != nil || entry == nil || entry.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, absPath)
+		if relErr != nil {
+			return nil
+		}
+		paths = append(paths, filepath.ToSlash(rel))
+		return nil
+	})
+	sort.Strings(paths)
+	return paths
+}
+
+func sampleArtifactPaths(paths []string, limit int) []string {
+	if len(paths) == 0 || limit <= 0 {
+		return nil
+	}
+	sampled := append([]string(nil), paths...)
+	sort.Strings(sampled)
+	if len(sampled) > limit {
+		sampled = sampled[:limit]
+	}
+	return sampled
+}
+
+func surfaceCount(inventory runArtifactInventory, name string) int {
+	for _, surface := range inventory.Surfaces {
+		if surface.Name == name {
+			return surface.Count
+		}
+	}
+	return 0
+}
+
+func isNontrivialArtifactInventory(inventory runArtifactInventory) bool {
+	if inventory.Semantic.CanonicalDocuments >= 4 {
+		return true
+	}
+	if inventory.Semantic.CoverageObserved > 0 || inventory.Semantic.CoverageMissing > 0 {
+		return true
+	}
+	if surfaceCount(inventory, "as_is") >= 2 {
+		return true
+	}
+	return false
+}
+
+func loadRunFinalIndex(ws workspace.Root, runID string) (contracts.FinalRunIndex, bool) {
+	if strings.TrimSpace(runID) == "" {
+		return contracts.FinalRunIndex{}, false
+	}
+	rel := filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "staging", "final", finalRunIndexFile))
+	abs, err := ws.Resolve(rel)
+	if err != nil {
+		return contracts.FinalRunIndex{}, false
+	}
+	raw, err := os.ReadFile(abs)
+	if err != nil {
+		return contracts.FinalRunIndex{}, false
+	}
+	index, err := contracts.ParseFinalRunIndex(raw)
+	if err != nil {
+		return contracts.FinalRunIndex{}, false
+	}
+	return index, true
+}
+
+func placeholderArtifactSignals(ws workspace.Root) []runQualitySignal {
+	paths := []string{
+		"charter/overview.md",
+		"reports/as-is/overview.md",
+		"reports/agent-outputs/architect/summary.md",
+		"proposals/runtime-recommendations.md",
+		"reports/changelog/runtime-proposals.md",
+	}
+	signals := []runQualitySignal{}
+	for _, rel := range paths {
+		text, ok := readWorkspaceText(ws, rel)
+		if !ok || !artifactTextPlaceholderLike(text) {
+			continue
+		}
+		signals = append(signals, runQualitySignal{
+			Code:     "artifact_quality.placeholder_artifact",
+			Severity: "warning",
+			Message:  "artifact_quality: promoted analysis artifact is placeholder-like: " + rel,
+			Path:     rel,
+		})
+	}
+	return signals
+}
+
+func artifactTextPlaceholderLike(text string) bool {
+	lower := strings.ToLower(text)
+	if strings.Contains(lower, "provider wrote this draft artifact") ||
+		strings.Contains(lower, "drafted required runtime artifacts") ||
+		strings.Contains(lower, "no findings reported.") ||
+		strings.Contains(lower, "draft surface initialized for the scoped repository analysis") ||
+		strings.Contains(lower, "final content must stay tied to collected shard evidence and validator output") ||
+		strings.Contains(lower, "runtime proposal surface initialized") ||
+		strings.Contains(lower, "runtime draft recovery initialized") ||
+		strings.Contains(lower, "draft recovery initialized") ||
+		strings.Contains(lower, "treat this as diagnostic evidence until") {
+		return true
+	}
+	if !artifactTextHasEvidenceMarkers(lower) &&
+		(strings.Contains(lower, "changes must remain traceable to collected evidence") ||
+			strings.Contains(lower, "promote only after artifact validation succeeds") ||
+			strings.Contains(lower, "current run evidence should be reviewed before promotion") ||
+			strings.Contains(lower, "owner mappings and unresolved coverage gaps remain the first follow-up surfaces") ||
+			strings.Contains(lower, "promote only recommendations that cite collected shard manifests")) {
+		return true
+	}
+	nonEmpty := 0
+	noYet := false
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		nonEmpty++
+		lineLower := strings.ToLower(trimmed)
+		if strings.Contains(lineLower, "no ") && strings.Contains(lineLower, " yet") {
+			noYet = true
+		}
+	}
+	return nonEmpty <= 4 && noYet
+}
+
+func artifactTextHasEvidenceMarkers(lower string) bool {
+	markers := []string{
+		"finding.",
+		"question.",
+		"reports/findings/",
+		"reports/coverage/",
+		"validator-verdict.json",
+		"evidence traceability",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func findingsCoverageGapSignals(ws workspace.Root, finalIndex contracts.FinalRunIndex, finalIndexOK bool) []runQualitySignal {
+	missingTerms := []string{}
+	if finalIndexOK {
+		missingTerms = append(missingTerms, finalIndex.Semantic.Coverage.Missing...)
+	}
+	if coverageText, ok := readWorkspaceText(ws, "reports/coverage/summary.md"); ok {
+		missingTerms = append(missingTerms, markdownSectionBullets(coverageText, "Missing")...)
+	}
+	if !hasCriticalCoverageGap(missingTerms) {
+		return nil
+	}
+	findingsText, ok := readWorkspaceText(ws, "reports/findings/findings.md")
+	if !ok {
+		return []runQualitySignal{{
+			Code:     "artifact_quality.findings_missing_for_coverage_gap",
+			Severity: "warning",
+			Message:  "artifact_quality: critical coverage gaps are present but findings report is missing",
+			Path:     "reports/findings/findings.md",
+		}}
+	}
+	if finalIndexOK && len(finalIndex.Semantic.Findings) > 0 && !strings.Contains(findingsText, "No findings reported.") {
+		return nil
+	}
+	hasStructuredFinding := strings.Contains(findingsText, "## ") &&
+		(strings.Contains(findingsText, "- Severity:") || strings.Contains(strings.ToLower(findingsText), "severity"))
+	if hasStructuredFinding && !strings.Contains(findingsText, "No findings reported.") {
+		return nil
+	}
+	return []runQualitySignal{{
+		Code:     "artifact_quality.findings_empty_with_coverage_gap",
+		Severity: "warning",
+		Message:  "artifact_quality: critical coverage gaps are present but findings report is empty or placeholder-like",
+		Path:     "reports/findings/findings.md",
+	}}
+}
+
+func markdownSectionBullets(text string, sectionTitle string) []string {
+	title := strings.ToLower(strings.TrimSpace(sectionTitle))
+	inSection := false
+	values := []string{}
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## ") {
+			current := strings.TrimSpace(strings.TrimPrefix(trimmed, "## "))
+			inSection = strings.EqualFold(current, title)
+			continue
+		}
+		if strings.HasPrefix(trimmed, "# ") {
+			inSection = false
+			continue
+		}
+		if !inSection || !strings.HasPrefix(trimmed, "- ") {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
+		if value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
+}
+
+func hasCriticalCoverageGap(values []string) bool {
+	for _, value := range values {
+		normalized := strings.ToLower(strings.TrimSpace(value))
+		if normalized == "" {
+			continue
+		}
+		if strings.Contains(normalized, "owner") ||
+			strings.Contains(normalized, "operational") ||
+			strings.Contains(normalized, "runbook") ||
+			strings.Contains(normalized, "external dependency") ||
+			strings.Contains(normalized, "external dependencies") ||
+			strings.Contains(normalized, "dependency map") {
+			return true
+		}
+	}
+	return false
+}
+
+func semanticScaffoldSignals(finalIndex contracts.FinalRunIndex, inventory runArtifactInventory) []runQualitySignal {
+	semantic := finalIndex.Semantic
+	entities := len(semantic.Entities)
+	edges := len(semantic.Edges)
+	findings := len(semantic.Findings)
+	if inventory.Semantic.CanonicalDocuments < 8 || entities < 4 || edges < 3 || findings == 0 {
+		return nil
+	}
+	containerEdges := 0
+	for _, edge := range semantic.Edges {
+		edgeType := strings.ToLower(strings.TrimSpace(edge.Type))
+		edgeName := strings.ToLower(strings.TrimSpace(edge.Name))
+		if edgeType == "contains" || strings.Contains(edgeName, "contains scoped surface") {
+			containerEdges++
+		}
+	}
+	if containerEdges != edges {
+		return nil
+	}
+	genericOwnerFindings := 0
+	for _, finding := range semantic.Findings {
+		title := strings.ToLower(strings.TrimSpace(finding.Title))
+		description := strings.ToLower(strings.TrimSpace(finding.Description))
+		ruleID := strings.ToLower(strings.TrimSpace(finding.RuleID))
+		if title == "owner mapping not confirmed" &&
+			strings.Contains(ruleID, "owner.mapping") &&
+			strings.Contains(description, "scoped evidence identifies") &&
+			strings.Contains(description, "does not confirm an owning team") {
+			genericOwnerFindings++
+		}
+	}
+	if genericOwnerFindings*100 < findings*80 {
+		return nil
+	}
+	return []runQualitySignal{{
+		Code:     "artifact_quality.semantic_scaffold_only",
+		Severity: "warning",
+		Message:  "artifact_quality: semantic model is non-empty but only contains scaffold-like repo/shard containment and generic owner-gap findings",
+		Path:     inventory.FinalIndexPath,
+	}}
+}
+
+func gapOnlyDiagramSignals(ws workspace.Root, inventory runArtifactInventory, nontrivial bool) []runQualitySignal {
+	if !nontrivial || inventory.Semantic.Entities > 0 {
+		return nil
+	}
+	signals := []runQualitySignal{}
+	for _, rel := range []string{"reports/diagrams/c4-context.mmd", "reports/diagrams/c4-container.mmd"} {
+		text, ok := readWorkspaceText(ws, rel)
+		if !ok {
+			continue
+		}
+		if strings.Contains(text, "Gap:") {
+			signals = append(signals, runQualitySignal{
+				Code:     "artifact_quality.c4_gap_only",
+				Severity: "warning",
+				Message:  "artifact_quality: C4 diagram is diagnostic gap-only because the semantic model has no entities: " + rel,
+				Path:     rel,
+			})
+		}
+	}
+	return signals
+}
+
+func scaffoldDiagramSignals(ws workspace.Root, inventory runArtifactInventory, nontrivial bool) []runQualitySignal {
+	if !nontrivial || inventory.Semantic.Entities < 4 {
+		return nil
+	}
+	text, ok := readWorkspaceText(ws, "reports/diagrams/c4-context.mmd")
+	if !ok {
+		return nil
+	}
+	lower := strings.ToLower(text)
+	if !strings.Contains(lower, "gap: no evidence-backed external systems") ||
+		!strings.Contains(lower, "gap: no evidence-backed actors") ||
+		!strings.Contains(lower, "gap: no evidence-backed relationships") {
+		return nil
+	}
+	if strings.Contains(text, "Service:") || strings.Contains(text, "External:") || strings.Contains(text, "Actor:") {
+		return nil
+	}
+	return []runQualitySignal{{
+		Code:     "artifact_quality.c4_context_scaffold_only",
+		Severity: "warning",
+		Message:  "artifact_quality: C4 context diagram still shows only diagnostic gap nodes despite a non-empty semantic model",
+		Path:     "reports/diagrams/c4-context.mmd",
+	}}
+}
+
+func hiddenProviderDocumentSignals(ws workspace.Root, runID string) []runQualitySignal {
+	root := strings.TrimSpace(ws.Path)
+	runID = strings.TrimSpace(runID)
+	if root == "" || runID == "" {
+		return nil
+	}
+	stagingRoot := filepath.Join(root, "reports", "taskruns", runID, "staging")
+	signals := []runQualitySignal{}
+	_ = filepath.WalkDir(stagingRoot, func(absPath string, entry fs.DirEntry, err error) error {
+		if err != nil || entry == nil || entry.IsDir() || entry.Name() != "shard-pack-manifest.json" {
+			return nil
+		}
+		raw, readErr := os.ReadFile(absPath)
+		if readErr != nil {
+			return nil
+		}
+		var payload struct {
+			Documents []struct {
+				Path string `json:"path"`
+			} `json:"documents"`
+		}
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return nil
+		}
+		relManifest, relErr := filepath.Rel(root, absPath)
+		if relErr != nil {
+			relManifest = absPath
+		}
+		for _, document := range payload.Documents {
+			component := forbiddenProviderArtifactPathComponent(document.Path)
+			if component == "" {
+				continue
+			}
+			rel := filepath.ToSlash(relManifest)
+			signals = append(signals, runQualitySignal{
+				Code:     "artifact_quality.hidden_provider_document",
+				Severity: "warning",
+				Message:  "artifact_quality: shard manifest references provider/tool side-effect document path component " + component,
+				Path:     rel,
+			})
+		}
+		return nil
+	})
+	return signals
+}
+
+func forbiddenProviderArtifactPathComponent(rawPath string) string {
+	normalized := filepath.ToSlash(filepath.Clean(filepath.FromSlash(strings.TrimSpace(rawPath))))
+	for _, component := range strings.Split(normalized, "/") {
+		trimmed := strings.TrimSpace(strings.ToLower(component))
+		switch trimmed {
+		case ".qwen", ".claude", ".codex", ".git", ".hg", ".svn", "node_modules":
+			return component
+		}
+	}
+	return ""
+}
+
+func readWorkspaceText(ws workspace.Root, rel string) (string, bool) {
+	abs, err := ws.Resolve(rel)
+	if err != nil {
+		return "", false
+	}
+	raw, err := os.ReadFile(abs)
+	if err != nil {
+		return "", false
+	}
+	return string(raw), true
 }
 
 func reportHasIncompleteBanner(text string) bool {

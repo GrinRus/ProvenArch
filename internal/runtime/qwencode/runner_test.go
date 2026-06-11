@@ -101,6 +101,12 @@ func TestQwenAdapterMonitorsPreArtifactStallsForArtifactSteps(t *testing.T) {
 	if got, want := policy.PreArtifactStallWindow, 180*time.Second; got != want {
 		t.Fatalf("expected qwen pre-artifact window %s, got %s", want, got)
 	}
+	if got, want := policy.PostArtifactStallWindow, 90*time.Second; got != want {
+		t.Fatalf("expected qwen collect post-artifact enrichment window %s, got %s", want, got)
+	}
+	if got, want := policy.PartialArtifactStallWindow, 90*time.Second; got != want {
+		t.Fatalf("expected qwen collect partial-artifact enrichment window %s, got %s", want, got)
+	}
 	if policy.ValidArtifactStopWindow != 0 {
 		t.Fatalf("collect steps must not use qwen valid-artifact stop window, got %+v", policy)
 	}
@@ -111,6 +117,9 @@ func TestQwenAdapterMonitorsPreArtifactStallsForArtifactSteps(t *testing.T) {
 	}
 	if got, want := policy.PreArtifactStallWindow, 180*time.Second; got != want {
 		t.Fatalf("expected qwen draft pre-artifact window %s, got %s", want, got)
+	}
+	if policy.PostArtifactStallWindow != 0 {
+		t.Fatalf("qwen draft must keep shared post-artifact default, got %+v", policy)
 	}
 	if got, want := policy.ValidArtifactStopWindow, 2*time.Minute; got != want {
 		t.Fatalf("expected qwen draft valid-artifact stop window %s, got %s", want, got)
@@ -319,6 +328,9 @@ func TestQwenRepairCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte("version: 1\nrepos:\n  - name: repo-a\n    path: "+repoRoot+"\n"), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Repo A\n"), 0o644); err != nil {
+		t.Fatalf("write repo evidence: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(writeRoot, "overview.md"), []byte("# Repo A\n"), 0o644); err != nil {
 		t.Fatalf("write authored doc: %v", err)
 	}
@@ -348,18 +360,46 @@ func TestQwenRepairCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 	args := strings.Join(spec.Args, "\n")
 	for _, token := range []string{
 		"collect manifest repair mode",
+		"COLLECT MANIFEST EVIDENCE-FIRST REPAIR:",
+		"The first command below reads existing authored documents in write_root before writing shard-pack-manifest.json.",
 		"FIRST COLLECT MANIFEST REPAIR COMMAND:",
-		"Run this exact command as your next filesystem action",
+		"Run this exact command as your next filesystem action.",
+		"python3 - ",
+		"ACP_COLLECT_MANIFEST_REPAIR_PY",
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
-		"<<'ACP_MANIFEST_JSON'",
-		"Copy the heredoc JSON exactly during repair",
-		"Do not read, diff, or patch an existing invalid shard-pack-manifest.json",
+		"SKELETON USE:",
+		"Copying this skeleton unchanged is invalid",
+		`"authored_docs":["overview.md"]`,
+		`"evidence_paths":["README.md"]`,
+		`target.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')`,
+		"SEMANTIC EXTRACTION REQUIREMENT:",
+		"Evidence-rich authored documents require concrete semantic.entities beyond the repo plus shard wrapper.",
+		"Evidence-rich authored documents require concrete semantic.edges beyond repo/shard contains relationships",
+		"semantic.findings or semantic.questions beyond a generic owner-mapping gap",
+		"A manifest with many citations but only repo/shard entities, only contains edges, and only Owner mapping not confirmed is invalid scaffold-only semantic output.",
+		"Do not read, diff, or patch an existing invalid shard-pack-manifest.json; replace it after the evidence pass.",
 		"Final action must be: write only write_root/shard-pack-manifest.json",
+		"Backend validation, not stdout claims, is the success surface.",
+		"Existing authored documents in write_root must drive manifest repair; read them, do not rewrite them.",
+		"Repository evidence candidates available for bounded repair:",
+		"Do not collapse semantic output to repo/shard wrappers plus owner mapping",
 		"overview.md",
 		`"path": "overview.md"`,
+		`"entities": [`,
+		`"findings": [`,
 	} {
 		if !strings.Contains(args, token) {
 			t.Fatalf("expected qwen repair prompt arg to contain %q, got %v", token, spec.Args)
+		}
+	}
+	for _, forbidden := range []string{
+		"Copy the heredoc JSON",
+		"write it from the heredoc command",
+		"COLLECT MANIFEST REPAIR WRITE SHAPE:",
+		`"<replace with authored doc objects from write_root>"`,
+	} {
+		if strings.Contains(args, forbidden) {
+			t.Fatalf("qwen repair prompt must not contain scaffold-first wording %q, got %v", forbidden, spec.Args)
 		}
 	}
 }

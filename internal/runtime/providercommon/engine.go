@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +21,7 @@ const (
 	defaultPostArtifactStallWindow = 20 * time.Second
 	defaultPreArtifactStallWindow  = 75 * time.Second
 	defaultRetryPreArtifactWindow  = 3 * time.Minute
+	defaultCollectEnrichmentWindow = 90 * time.Second
 	defaultCollectRepairWindow     = 3 * time.Minute
 	defaultFocusedRepairWindow     = 90 * time.Second
 	defaultRepairValidStopWindow   = 250 * time.Millisecond
@@ -109,6 +112,19 @@ type RecoveryPolicy struct {
 	RetryZeroOutputPreArtifactStallOnce         bool
 	RetryTransientProviderUnavailableRepairOnce bool
 	ClassifySilentRetryExhaustionUnavailable    bool
+}
+
+func WithCollectArtifactEnrichmentWindow(task acpruntime.Task, policy ActivityPolicy) ActivityPolicy {
+	if !acpruntime.IsCollectStep(task.StepID) || !policy.MonitorArtifacts {
+		return policy
+	}
+	if policy.PostArtifactStallWindow <= 0 || policy.PostArtifactStallWindow < defaultCollectEnrichmentWindow {
+		policy.PostArtifactStallWindow = defaultCollectEnrichmentWindow
+	}
+	if policy.PartialArtifactStallWindow <= 0 || policy.PartialArtifactStallWindow < defaultCollectEnrichmentWindow {
+		policy.PartialArtifactStallWindow = defaultCollectEnrichmentWindow
+	}
+	return policy
 }
 
 func DefaultUnavailableMarkers() []string {
@@ -267,7 +283,39 @@ func normalizeActivityPolicy(policy ActivityPolicy) ActivityPolicy {
 	if policy.PostTerminateDrain <= 0 {
 		policy.PostTerminateDrain = defaultPostTerminateDrain
 	}
+	policy = applyActivityPolicyEnvOverrides(policy)
 	return policy
+}
+
+func applyActivityPolicyEnvOverrides(policy ActivityPolicy) ActivityPolicy {
+	if value := positiveSecondsEnv("ACP_PROVIDER_PRE_ARTIFACT_STALL_SEC"); value > 0 {
+		policy.PreArtifactStallWindow = value
+	}
+	if value := positiveSecondsEnv("ACP_PROVIDER_RETRY_PRE_ARTIFACT_STALL_SEC"); value > 0 {
+		policy.RetryPreArtifactStallWindow = value
+	}
+	if value := positiveSecondsEnv("ACP_PROVIDER_POST_ARTIFACT_STALL_SEC"); value > 0 {
+		policy.PostArtifactStallWindow = value
+	}
+	if value := positiveSecondsEnv("ACP_PROVIDER_PARTIAL_ARTIFACT_STALL_SEC"); value > 0 {
+		policy.PartialArtifactStallWindow = value
+	}
+	if value := positiveSecondsEnv("ACP_PROVIDER_VALID_ARTIFACT_STOP_SEC"); value > 0 {
+		policy.ValidArtifactStopWindow = value
+	}
+	return policy
+}
+
+func positiveSecondsEnv(key string) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return 0
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds <= 0 {
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func MonitorsRuntimeArtifacts(task acpruntime.Task) bool {

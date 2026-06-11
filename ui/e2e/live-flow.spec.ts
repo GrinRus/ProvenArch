@@ -1,6 +1,7 @@
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import { evaluateDiagramArtifactReadability } from "../src/liveArtifactQuality";
 
 const scenario = (process.env.UI_E2E_SCENARIO ?? "init-inspect").trim().toLowerCase();
 const qaSmoke = (process.env.UI_E2E_QA_SMOKE ?? "0").trim() === "1";
@@ -49,6 +50,55 @@ async function fetchRunObservation(api: APIRequestContext, runID: string): Promi
   };
 }
 
+async function fetchArtifactText(api: APIRequestContext, artifactPath: string): Promise<string> {
+  const response = await api.get(`/api/artifacts?path=${encodeURIComponent(artifactPath)}`);
+  expect(response.ok(), `artifact API should return ${artifactPath}`).toBe(true);
+  return await response.text();
+}
+
+function expectReadableArtifactText(artifactPath: string, content: string, minCharacters = 320): void {
+  const text = content.trim();
+  expect(text, `${artifactPath} should not be empty`).not.toBe("");
+  expect(text.length, `${artifactPath} should contain evidence-backed content`).toBeGreaterThanOrEqual(minCharacters);
+  expect(text, `${artifactPath} should not be a bootstrap/scaffold artifact`).not.toMatch(
+    /(Provider wrote|Drafted required runtime artifacts|Select artifact to inspect|Loading\.\.\.|No findings reported\.|No proposals yet|No changelog yet)/i
+  );
+}
+
+function expectReadableDiagramArtifact(artifactPath: string, content: string): void {
+  const text = content.trim();
+  const readability = evaluateDiagramArtifactReadability(text);
+  expect(readability.hasMermaidSyntax, `${artifactPath} should contain Mermaid content`).toBe(true);
+  expect(readability.hasConcreteEvidence, `${artifactPath} should not be gap-only C4 output`).toBe(true);
+}
+
+async function expectReadableViewportPanel(
+  page: Page,
+  locator: Locator,
+  label: string,
+  minVisibleHeight = 140,
+  minVisibleWidth = 240
+): Promise<void> {
+  await expect(locator, `${label} should be visible`).toBeVisible();
+  await expect
+    .poll(
+      async () => {
+        await locator.scrollIntoViewIfNeeded();
+        const viewport = page.viewportSize();
+        const box = await locator.boundingBox();
+        if (!viewport || !box) {
+          return 0;
+        }
+        const visibleWidth = Math.max(0, Math.min(box.x + box.width, viewport.width) - Math.max(box.x, 0));
+        const visibleHeight = Math.max(0, Math.min(box.y + box.height, viewport.height) - Math.max(box.y, 0));
+        const requiredWidth = Math.min(minVisibleWidth, Math.max(120, viewport.width - 24));
+        return visibleWidth >= requiredWidth ? visibleHeight : 0;
+      },
+      { timeout: 10_000, message: `${label} should have readable viewport area` }
+    )
+    .toBeGreaterThanOrEqual(minVisibleHeight);
+}
+
 function observationShowsProductiveProgress(previous: RunObservation | null, current: RunObservation): boolean {
   if (current.status === "running" && current.currentStep !== "") {
     if (previous === null) {
@@ -64,7 +114,12 @@ function observationShowsProductiveProgress(previous: RunObservation | null, cur
   return current.artifactCount > previous.artifactCount || current.warningsCount > previous.warningsCount;
 }
 
-async function waitForInitInspectRun(api: APIRequestContext, runID: string): Promise<void> {
+async function captureRunFailureScreenshot(page: Page): Promise<void> {
+  await page.getByTestId("stage-analysis").click().catch(() => undefined);
+  await captureEvidenceScreenshot(page, "frontend-analysis-failed-desktop.png").catch(() => undefined);
+}
+
+async function waitForInitInspectRun(api: APIRequestContext, page: Page, runID: string): Promise<void> {
   const initDeadline = Date.now() + initTimeoutMs;
   let lastObservation: RunObservation | null = null;
   let sawProductiveProgress = false;
@@ -77,6 +132,7 @@ async function waitForInitInspectRun(api: APIRequestContext, runID: string): Pro
       return;
     }
     if (observation.status === "failed") {
+      await captureRunFailureScreenshot(page);
       throw new Error(
         `run ${runID} terminated before inspect stage: status=failed error_code=${observation.errorCode || "-"} current_step=${observation.currentStep || "-"}`
       );
@@ -159,6 +215,8 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await page.goto("/");
   await expect(page.getByTestId("console-shell")).toBeVisible();
   await expect(page.getByTestId("top-status-bar")).toContainText("Proven Arch");
+  await expect(page.getByTestId("brand-version")).not.toHaveText(/v0\.1\.1 beta/i);
+  await expect(page.getByTestId("brand-version")).toHaveText(/^(dev|v?\d|\w)/);
   await expect(page.getByTestId("stage-rail")).toBeVisible();
   await expect(page.getByTestId("right-inspector")).toBeVisible();
   await expect(page.getByTestId("activity-drawer")).toBeVisible();
@@ -195,7 +253,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
     body: runID,
     contentType: "text/plain"
   });
-  await waitForInitInspectRun(request, runID);
+  await waitForInitInspectRun(request, page, runID);
 
   await page.getByTestId("stage-analysis").click();
   await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
@@ -252,6 +310,9 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect
     .poll(async () => ((await selectedDiagramPath.textContent()) ?? "").trim(), { timeout: 30_000 })
     .toMatch(/reports\/diagrams\//i);
+  const selectedDiagramPathText = ((await selectedDiagramPath.textContent()) ?? "").trim();
+  const selectedDiagramRaw = await fetchArtifactText(request, selectedDiagramPathText);
+  expectReadableDiagramArtifact(selectedDiagramPathText, selectedDiagramRaw);
 
   await expect
     .poll(
@@ -272,16 +333,27 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
       { timeout: 30_000 }
     )
     .toBe(true);
+  await expectReadableViewportPanel(page, diagramPanel, "Review Mermaid/C4 preview");
 
-  const firstArtifactButton = reviewArtifactExplorer.locator("button.link-button").first();
-  await expect(firstArtifactButton).toBeVisible();
-  await firstArtifactButton.click();
+  const preferredReadableArtifactButton =
+    (await reviewArtifactExplorer.getByRole("button", { name: /reports\/as-is\/overview\.md/i }).count()) > 0
+      ? reviewArtifactExplorer.getByRole("button", { name: /reports\/as-is\/overview\.md/i }).first()
+      : (await reviewArtifactExplorer.getByRole("button", { name: /reports\/coverage\/summary\.md/i }).count()) > 0
+        ? reviewArtifactExplorer.getByRole("button", { name: /reports\/coverage\/summary\.md/i }).first()
+        : reviewArtifactExplorer.locator("button.link-button").first();
+  await expect(preferredReadableArtifactButton).toBeVisible();
+  await preferredReadableArtifactButton.click();
 
   const artifactContent = page.getByTestId("run-artifact-content");
   await expect(artifactContent).toBeVisible();
   await expect
     .poll(async () => (await artifactContent.textContent())?.trim() ?? "")
     .not.toMatch(/^(Select artifact to inspect\.|Loading\.\.\.)$/);
+  const selectedArtifactPath = ((await page.getByTestId("run-artifact-selected-path").textContent()) ?? "").trim();
+  const selectedArtifactText = ((await artifactContent.textContent()) ?? "").trim();
+  expectReadableArtifactText(selectedArtifactPath, selectedArtifactText);
+  await expectReadableViewportPanel(page, page.getByTestId("run-artifact-content-panel"), "Review artifact preview panel");
+  await expectReadableViewportPanel(page, artifactContent, "Review artifact text preview", 120);
 
   await expectOperatorInspectorSurfaces(page);
   await captureEvidenceScreenshot(page, "frontend-review-desktop.png");
@@ -312,9 +384,18 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await page.getByTestId("stage-publish").click();
   await expect(page.getByTestId("publish-panel")).toBeVisible();
   await expect(page.getByTestId("publish-diff-summary")).toBeVisible();
+  await expect(page.getByTestId("publish-preview-panel")).toBeVisible();
   await expect(page.getByTestId("publish-preview-tabs")).toBeVisible();
   await expect(page.getByTestId("publish-gate-panel")).toBeVisible();
   await expect(page.getByTestId("publish-commit-plan")).toBeVisible();
+  const publishPreviewContent = page.getByTestId("publish-selected-preview-content");
+  await expect(publishPreviewContent).toBeVisible();
+  await expect
+    .poll(async () => (await publishPreviewContent.textContent())?.trim() ?? "", { timeout: 30_000 })
+    .not.toMatch(/^(Select an artifact to load its preview in this Publish room\.|Loading\.\.\.)$/);
+  expectReadableArtifactText("Publish selected artifact preview", ((await publishPreviewContent.textContent()) ?? "").trim(), 240);
+  await expectReadableViewportPanel(page, page.getByTestId("publish-preview-panel"), "Publish preview panel");
+  await expectReadableViewportPanel(page, publishPreviewContent, "Publish selected artifact preview", 120);
   await expect(page.getByTestId("git-publication-panel")).toContainText("proposal/beta-refresh");
   await expectOperatorInspectorSurfaces(page);
   await captureEvidenceScreenshot(page, "frontend-publish-desktop.png");
@@ -324,6 +405,12 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await page.getByTestId("stage-review").click();
   await page.setViewportSize({ width: 390, height: 1200 });
   await expect(page.getByTestId("review-panel")).toBeVisible();
+  const mobileArtifactContent = page.getByTestId("run-artifact-content");
+  await expect
+    .poll(async () => (await mobileArtifactContent.textContent())?.trim() ?? "", { timeout: 30_000 })
+    .not.toMatch(/^(Select artifact to inspect\.|Loading\.\.\.)$/);
+  await expectReadableViewportPanel(page, page.getByTestId("review-evidence-preview"), "Mobile Review evidence preview", 180, 300);
+  await expectReadableViewportPanel(page, mobileArtifactContent, "Mobile Review artifact text", 140, 300);
   const mobileBodyText = (((await page.locator("body").innerText()) ?? "").replace(/\s+/g, ""));
   expect(mobileBodyText).not.toContain("SetupBaselineRunsResultsSettingsCoverageArtifactsDiagrams");
   await captureEvidenceScreenshot(page, "frontend-review-mobile.png");

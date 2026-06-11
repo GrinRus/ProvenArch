@@ -8,15 +8,17 @@ type MockJSON = Record<string, unknown>;
 type FetchMockState = {
   runID?: string;
   runStarted?: boolean;
+  runList?: MockJSON[];
   runLogs?: Record<string, MockJSON>;
   runStatus?: Record<string, MockJSON>;
   runArtifacts?: Record<string, MockJSON>;
   runReviewSummary?: Record<string, MockJSON>;
-  runList?: MockJSON[];
   gitDiff?: MockJSON;
   artifactText?: Record<string, string>;
   baselineBundleWarnings?: MockJSON[];
   cancelResponses?: Record<string, { status: number; body?: MockJSON }>;
+  doctorResponse?: MockJSON;
+  pathSuggestions?: MockJSON[];
   validateResponse?: MockJSON;
   validateStatus?: number;
   manifestContent?: string;
@@ -26,9 +28,7 @@ type FetchMockState = {
   qaRunResponses?: Record<string, MockJSON>;
   onboardingStatus?: MockJSON;
   onboardingWorkspaceSelectionStatus?: MockJSON;
-  pathSuggestions?: MockJSON[];
-  doctorResponse?: MockJSON;
-  systemInfo?: MockJSON;
+  systemVersion?: MockJSON;
 };
 
 function jsonResponse(body: MockJSON, status = 200): Response {
@@ -291,12 +291,13 @@ function createFetchMock(state: FetchMockState = {}) {
     const url = typeof input === "string" ? input : input.toString();
     const method = (init?.method ?? "GET").toUpperCase();
 
-    if (method === "GET" && url === "/api/system/info") {
+    if (method === "GET" && url === "/api/system/version") {
       return jsonResponse(
-        state.systemInfo ?? {
-          version: "0.1.2",
-          commit: "fa3c633",
-          built: "2026-06-02T13:20:26Z",
+        state.systemVersion ?? {
+          version: "dev",
+          commit: "none",
+          built: "unknown",
+          ui_bundle: "embedded",
         },
       );
     }
@@ -521,25 +522,35 @@ function createFetchMock(state: FetchMockState = {}) {
       return jsonResponse({ run_id: runID, status: "queued" });
     }
 
-    if (method === "POST" && url === `/api/pipeline/runs/${runID}/cancel`) {
-      const configured = state.cancelResponses?.[runID];
+    const cancelMatch = url.match(/^\/api\/pipeline\/runs\/([^/]+)\/cancel$/);
+    if (method === "POST" && cancelMatch) {
+      const requestedRunID = decodeURIComponent(cancelMatch[1]);
+      const configured = state.cancelResponses?.[requestedRunID];
       return jsonResponse(configured?.body ?? { ok: true }, configured?.status ?? 202);
     }
 
-    if (method === "GET" && url === `/api/pipeline/runs/${runID}`) {
-      return jsonResponse((runStatus[runID] ?? {}) as MockJSON);
+    const runStatusMatch = url.match(/^\/api\/pipeline\/runs\/([^/]+)$/);
+    if (method === "GET" && runStatusMatch) {
+      const requestedRunID = decodeURIComponent(runStatusMatch[1]);
+      return jsonResponse((runStatus[requestedRunID] ?? {}) as MockJSON);
     }
 
-    if (method === "GET" && url === `/api/pipeline/runs/${runID}/review-summary`) {
-      return jsonResponse((runReviewSummary[runID] ?? {}) as MockJSON);
+    const runReviewMatch = url.match(/^\/api\/pipeline\/runs\/([^/]+)\/review-summary$/);
+    if (method === "GET" && runReviewMatch) {
+      const requestedRunID = decodeURIComponent(runReviewMatch[1]);
+      return jsonResponse((runReviewSummary[requestedRunID] ?? {}) as MockJSON);
     }
 
-    if (method === "GET" && url === `/api/pipeline/runs/${runID}/artifacts`) {
-      return jsonResponse((runArtifacts[runID] ?? { run_id: runID, artifacts: [] }) as MockJSON);
+    const runArtifactsMatch = url.match(/^\/api\/pipeline\/runs\/([^/]+)\/artifacts$/);
+    if (method === "GET" && runArtifactsMatch) {
+      const requestedRunID = decodeURIComponent(runArtifactsMatch[1]);
+      return jsonResponse((runArtifacts[requestedRunID] ?? { run_id: requestedRunID, artifacts: [] }) as MockJSON);
     }
 
-    if (method === "GET" && url.startsWith(`/api/pipeline/runs/${runID}/logs?`)) {
-      return jsonResponse((runLogs[runID] ?? { run_id: runID, items: [], next_cursor: 0, eof: true }) as MockJSON);
+    const runLogsMatch = url.match(/^\/api\/pipeline\/runs\/([^/]+)\/logs\?/);
+    if (method === "GET" && runLogsMatch) {
+      const requestedRunID = decodeURIComponent(runLogsMatch[1]);
+      return jsonResponse((runLogs[requestedRunID] ?? { run_id: requestedRunID, items: [], next_cursor: 0, eof: true }) as MockJSON);
     }
 
     if (method === "POST" && url === "/api/artifacts/write") {
@@ -731,21 +742,22 @@ describe("App", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders release build metadata from the system info endpoint", async () => {
+  it("renders release build metadata from the system version endpoint", async () => {
     vi.stubGlobal(
       "fetch",
       createFetchMock({
-        systemInfo: {
-          version: "0.1.2",
+        systemVersion: {
+          version: "v0.1.2",
           commit: "fa3c633",
           built: "2026-06-02T13:20:26Z",
+          ui_bundle: "embedded",
         },
       }),
     );
 
     await renderConsoleApp();
 
-    await waitFor(() => expect(screen.getByTestId("top-status-bar")).toHaveTextContent("v0.1.2 beta"));
+    await waitFor(() => expect(screen.getByTestId("top-status-bar")).toHaveTextContent("v0.1.2"));
   }, 15_000);
 
   it("supports stage navigation and settings relocation without compatibility controls", async () => {
@@ -1086,6 +1098,26 @@ describe("App", () => {
     expect(screen.getByTestId("top-status-bar")).toHaveTextContent("workspace valid");
   });
 
+  it("shows running build metadata instead of the latest public release label", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        systemVersion: {
+          version: "dev-local",
+          commit: "abc123",
+          built: "2026-06-08T10:00:00Z",
+          ui_bundle: "embedded",
+        },
+      }),
+    );
+
+    await renderConsoleApp();
+
+    expect(screen.getByTestId("brand-version")).toHaveTextContent("dev-local");
+    expect(screen.getByTestId("brand-version")).not.toHaveTextContent("v0.1.1 beta");
+    expect(screen.getByTestId("brand-version")).toHaveAttribute("title", expect.stringContaining("commit=abc123"));
+  });
+
   it("shows recoverable duplicate repo-name errors during onboarding source setup", async () => {
     vi.stubGlobal(
       "fetch",
@@ -1337,54 +1369,117 @@ describe("App", () => {
     expect(screen.getByTestId("right-inspector")).toHaveTextContent(/review/i);
   });
 
-  it("opens Analysis by default when the newest run is still active even with partial artifacts", async () => {
-    const runID = "run-active";
+  it("offers last successful artifacts when Review opens on a failed partial run", async () => {
+    const failedRunID = "run-refresh-failed";
+    const successfulRunID = "run-init-success";
     vi.stubGlobal(
       "fetch",
       createFetchMock({
-        runID,
+        runID: failedRunID,
+        runStarted: true,
         runList: [
           {
-            run_id: runID,
-            pipeline: "init",
-            status: "running",
+            run_id: failedRunID,
+            pipeline: "refresh",
+            status: "failed",
             started_at: "2026-04-03T12:10:00Z",
-            finished_at: null,
+            finished_at: "2026-04-03T12:12:00Z",
+            warnings: [],
+            error_code: "runner_unavailable",
+            error: "runtime unavailable",
+          },
+          {
+            run_id: successfulRunID,
+            pipeline: "init",
+            status: "succeeded",
+            started_at: "2026-04-03T12:00:00Z",
+            finished_at: "2026-04-03T12:08:00Z",
             warnings: [],
             error_code: null,
             error: null,
           },
         ],
         runStatus: {
-          [runID]: {
-            run_id: runID,
-            pipeline: "init",
-            status: "running",
+          [failedRunID]: {
+            run_id: failedRunID,
+            pipeline: "refresh",
+            status: "failed",
             started_at: "2026-04-03T12:10:00Z",
-            finished_at: null,
-            current_step: "init.step2.asis_docs",
+            finished_at: "2026-04-03T12:12:00Z",
+            warnings: [],
+            error_code: "runner_unavailable",
+            error: "runtime unavailable",
+          },
+          [successfulRunID]: {
+            run_id: successfulRunID,
+            pipeline: "init",
+            status: "succeeded",
+            started_at: "2026-04-03T12:00:00Z",
+            finished_at: "2026-04-03T12:08:00Z",
             warnings: [],
             error_code: null,
             error: null,
           },
         },
         runArtifacts: {
-          [runID]: {
-            run_id: runID,
+          [failedRunID]: {
+            run_id: failedRunID,
+            artifacts: [{ path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" }],
+          },
+          [successfulRunID]: {
+            run_id: successfulRunID,
             artifacts: [
-              { path: "reports/as-is/overview.md", kind: "report", label: "Partial overview" },
+              { path: "reports/as-is/overview.md", kind: "report", label: "As-is overview" },
+              { path: "reports/diagrams/c4-context.mmd", kind: "diagram", label: "C4 context" },
             ],
           },
+        },
+        runReviewSummary: {
+          [failedRunID]: {
+            run_id: failedRunID,
+            pipeline: "refresh",
+            status: "failed",
+            started_at: "2026-04-03T12:10:00Z",
+            finished_at: "2026-04-03T12:12:00Z",
+            current_step: "refresh.step2.asis_docs",
+            warnings: [],
+            error_code: "runner_unavailable",
+            error: "runtime unavailable",
+            steps: [],
+          },
+          [successfulRunID]: {
+            run_id: successfulRunID,
+            pipeline: "init",
+            status: "succeeded",
+            started_at: "2026-04-03T12:00:00Z",
+            finished_at: "2026-04-03T12:08:00Z",
+            current_step: "init.step4.proposals",
+            warnings: [],
+            error_code: null,
+            error: null,
+            steps: [],
+          },
+        },
+        artifactText: {
+          "reports/coverage/summary.md": "# Coverage Summary\n\nAnalysis incomplete.\n",
+          "reports/as-is/overview.md": "# Complete overview\n\nEvidence-backed architecture output.\n",
+          "reports/diagrams/c4-context.mmd": "flowchart LR\n  A[Workspace System] --> B[Backend]\n",
         },
       }),
     );
 
     await renderConsoleApp();
 
-    expect(await screen.findByTestId("runs-control-panel")).toBeInTheDocument();
-    expect(screen.getByTestId("stage-analysis")).toHaveClass("is-selected");
-    expect(screen.getByText(`Resumed active run ${runID}.`)).toBeInTheDocument();
-    expect(screen.queryByTestId("review-panel")).not.toBeInTheDocument();
+    const recovery = await screen.findByTestId("review-run-recovery");
+    expect(recovery).toHaveTextContent(successfulRunID);
+    expect(screen.getByTestId("review-artifact-explorer")).not.toHaveTextContent("reports/diagrams");
+
+    fireEvent.click(within(recovery).getByRole("button", { name: /open last successful artifacts/i }));
+
+    await waitFor(() => expect(screen.queryByTestId("review-run-recovery")).not.toBeInTheDocument());
+    const explorer = screen.getByTestId("review-artifact-explorer");
+    expect(explorer).toHaveTextContent("reports/diagrams");
+    await waitFor(() => expect(screen.getByTestId("run-artifact-content")).toHaveTextContent("# Complete overview"));
   });
 
   it("renders Review V2 evidence workbench and domain-map partial state", async () => {

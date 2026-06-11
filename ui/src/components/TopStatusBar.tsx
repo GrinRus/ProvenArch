@@ -1,7 +1,8 @@
-import type { SystemInfoResponse } from "../lib/systemApi";
-
 type TopStatusBarProps = {
-  buildInfo: SystemInfoResponse | null;
+  buildVersion: string;
+  buildCommit: string;
+  buildBuilt: string;
+  uiBundle: string;
   workspacePath: string;
   repoCount: number;
   runtimeMode: string;
@@ -12,15 +13,28 @@ type TopStatusBarProps = {
   onRefresh: () => void;
 };
 
-export function TopStatusBar({ buildInfo, workspacePath, repoCount, runtimeMode, runtimeProvider, permissionMode, gitStatus, healthLabel, onRefresh }: TopStatusBarProps) {
+export function TopStatusBar({
+  buildVersion,
+  buildCommit,
+  buildBuilt,
+  uiBundle,
+  workspacePath,
+  repoCount,
+  runtimeMode,
+  runtimeProvider,
+  permissionMode,
+  gitStatus,
+  healthLabel,
+  onRefresh,
+}: TopStatusBarProps) {
   const localTime = new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date());
-  const buildLabel = buildVersionLabel(buildInfo);
-  const buildTitle = buildInfo ? `commit ${buildInfo.commit || "none"} · built ${buildInfo.built || "unknown"}` : "Build metadata unavailable";
+  const versionLabel = buildVersion.trim() || "dev";
+  const buildTitle = `commit=${buildCommit || "none"} built=${buildBuilt || "unknown"} ui=${uiBundle || "embedded"}`;
 
   return (
     <header className="top-status-bar" data-testid="top-status-bar">
@@ -35,8 +49,8 @@ export function TopStatusBar({ buildInfo, workspacePath, repoCount, runtimeMode,
         </div>
         <div>
           <p className="brand-name">Proven Arch</p>
-          <p className="brand-version" title={buildTitle}>
-            {buildLabel}
+          <p className="brand-version" title={buildTitle} data-testid="brand-version">
+            {versionLabel}
           </p>
         </div>
       </div>
@@ -83,14 +97,6 @@ export function TopStatusBar({ buildInfo, workspacePath, repoCount, runtimeMode,
       </div>
     </header>
   );
-}
-
-function buildVersionLabel(buildInfo: SystemInfoResponse | null): string {
-  const version = buildInfo?.version?.trim() ?? "";
-  if (!version || version === "dev") {
-    return "dev build";
-  }
-  return `${version.startsWith("v") ? version : `v${version}`} beta`;
 }
 
 function TopMetaIcon({ type }: { type: "workspace" | "repos" | "runtime" | "permission" | "git" | "time" }) {

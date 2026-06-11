@@ -7,7 +7,7 @@ import { RunStatusPanel } from "./RunStatusPanel";
 import { ArtifactPathButton, StatusBadge } from "./ConsolePrimitives";
 import { getQARun, listQARuns, startQAQuestion, type QARunResponse } from "../lib/qaApi";
 import { runReviewErrorCount, runReviewWarningCount } from "../lib/runReviewMetrics";
-import { formatTimestamp } from "../lib/runState";
+import { formatTimestamp, parseTimeOrMin } from "../lib/runState";
 import type {
   Artifact,
   Diagnostic,
@@ -1660,6 +1660,9 @@ function RunHistoryTable({
 }
 
 export type ReviewStageProps = {
+  runId: string | null;
+  runStatus: RunStatusResponse | null;
+  runList: RunListItem[];
   coverageSummary: string;
   openQuestions: string;
   nonDiagramArtifacts: Artifact[];
@@ -1672,10 +1675,14 @@ export type ReviewStageProps = {
   gitDiff: GitDiffResponse | null;
   gitDiffStatus: string;
   onLoadGitDiff: (options: LoadGitDiffOptions) => void;
+  onSelectRun: (id: string) => void;
   onOpenArtifact: (path: string) => void;
 };
 
 export function ReviewStagePanel({
+  runId,
+  runStatus,
+  runList,
   coverageSummary,
   openQuestions,
   nonDiagramArtifacts,
@@ -1688,6 +1695,7 @@ export function ReviewStagePanel({
   gitDiff,
   gitDiffStatus,
   onLoadGitDiff,
+  onSelectRun,
   onOpenArtifact,
 }: ReviewStageProps) {
   const [reviewView, setReviewView] = useState<"evidence" | "domain-map">("evidence");
@@ -1718,6 +1726,7 @@ export function ReviewStagePanel({
     coverageSummary,
     openQuestions,
   });
+  const lastSuccessfulRun = findLastSuccessfulRun(runList, runId);
   function handleOpenDomainMapArtifact(path: string) {
     onOpenArtifact(path);
     setReviewView("evidence");
@@ -1741,6 +1750,20 @@ export function ReviewStagePanel({
             {nonDiagramArtifacts.length + diagramArtifacts.length} artifacts
           </StatusBadge>
         </div>
+        {runStatus?.status === "failed" && lastSuccessfulRun ? (
+          <section className="review-run-recovery" data-testid="review-run-recovery">
+            <div>
+              <strong>Latest selected run failed before complete evidence was available.</strong>
+              <span>
+                Review is showing {allArtifacts.length} artifact refs from {runId ?? "the failed run"}. Last successful run{" "}
+                <code>{lastSuccessfulRun.run_id}</code> is available for artifact review.
+              </span>
+            </div>
+            <button type="button" onClick={() => onSelectRun(lastSuccessfulRun.run_id)}>
+              Open last successful artifacts
+            </button>
+          </section>
+        ) : null}
         <div className="review-tabs" role="tablist" aria-label="Review views">
           <button
             type="button"
@@ -1792,6 +1815,13 @@ export function ReviewStagePanel({
       </section>
     </div>
   );
+}
+
+function findLastSuccessfulRun(runList: RunListItem[], currentRunID: string | null): RunListItem | null {
+  const successfulRuns = runList
+    .filter((run) => run.status === "succeeded" && run.run_id !== currentRunID)
+    .sort((left, right) => parseTimeOrMin(right.started_at) - parseTimeOrMin(left.started_at));
+  return successfulRuns[0] ?? null;
 }
 
 function ReviewDomainMap({
@@ -3524,7 +3554,7 @@ export function PublishStagePanel({
           </div>
         </section>
 
-        <section className="publish-preview-panel">
+        <section className="publish-preview-panel" data-testid="publish-preview-panel">
           <div className="publish-preview-tabs" role="tablist" aria-label="Publish preview tabs" data-testid="publish-preview-tabs">
             {(["preview", "diff", "evidence", "changelog"] as const).map((view) => (
               <button
@@ -3539,19 +3569,23 @@ export function PublishStagePanel({
               </button>
             ))}
           </div>
-          <div className="publish-tab-panel">
+          <div className="publish-tab-panel" data-testid="publish-tab-panel">
             {publishView === "preview" ? (
-              <>
+              <div className="publish-selected-preview" data-testid="publish-selected-preview">
                 <h2>Selected artifact preview</h2>
                 {selectedPublishArtifact ? (
                   <>
                     <p className="hint">{selectedPublishArtifact.path}</p>
-                    {selectedPublishContent ? <pre>{selectedPublishContent}</pre> : <p className="empty-state">Select an artifact to load its preview in this Publish room.</p>}
+                    {selectedPublishContent ? (
+                      <pre data-testid="publish-selected-preview-content">{selectedPublishContent}</pre>
+                    ) : (
+                      <p className="empty-state" data-testid="publish-selected-preview-empty">Select an artifact to load its preview in this Publish room.</p>
+                    )}
                   </>
                 ) : (
-                  <p className="empty-state">No artifact selected for publication preview.</p>
+                  <p className="empty-state" data-testid="publish-selected-preview-empty">No artifact selected for publication preview.</p>
                 )}
-              </>
+              </div>
             ) : null}
             {publishView === "diff" ? (
               <>

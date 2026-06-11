@@ -52,7 +52,8 @@ func (e *pipelineExecution) completeRuntimeWriteAudit(stepID string, domainID st
 	for root, beforeStatus := range before.repoStatuses {
 		afterStatus, ok := afterStatuses[root]
 		if !ok {
-			afterStatus = []string{"<repo status unavailable after runtime>"}
+			e.reportRuntimeWriteAuditRepoSkipped(stepID, domainID, task, root, "status_unavailable_after_runtime")
+			continue
 		}
 		if !sameStringSlice(beforeStatus, afterStatus) {
 			e.reportRuntimeWriteAuditWarning(stepID, domainID, task, "repo", root, changedRepoStatusPaths(beforeStatus, afterStatus))
@@ -60,14 +61,18 @@ func (e *pipelineExecution) completeRuntimeWriteAudit(stepID string, domainID st
 	}
 
 	for _, skipped := range before.skippedRepos {
-		e.addWarning(fmt.Sprintf("%s: repo root skipped (%s): %s", runtimeWriteAuditRepoSkipped, skipped.Reason, skipped.Root))
-		e.logWarn(stepID, domainID, runtimeWriteAuditRepoSkipped, map[string]any{
-			"audit_code": runtimeWriteAuditRepoSkipped,
-			"task_id":    task.TaskID,
-			"root":       skipped.Root,
-			"reason":     skipped.Reason,
-		})
+		e.reportRuntimeWriteAuditRepoSkipped(stepID, domainID, task, skipped.Root, skipped.Reason)
 	}
+}
+
+func (e *pipelineExecution) reportRuntimeWriteAuditRepoSkipped(stepID string, domainID string, task acpruntime.Task, root string, reason string) {
+	e.addWarning(fmt.Sprintf("%s: repo root skipped (%s): %s", runtimeWriteAuditRepoSkipped, reason, root))
+	e.logWarn(stepID, domainID, runtimeWriteAuditRepoSkipped, map[string]any{
+		"audit_code": runtimeWriteAuditRepoSkipped,
+		"task_id":    task.TaskID,
+		"root":       root,
+		"reason":     reason,
+	})
 }
 
 func (e *pipelineExecution) reportRuntimeWriteAuditWarning(stepID string, domainID string, task acpruntime.Task, category string, root string, changed []string) {
@@ -267,12 +272,14 @@ func changedSnapshotPaths(before map[string]string, after map[string]string) []s
 func changedRepoStatusPaths(before []string, after []string) []string {
 	seen := map[string]struct{}{}
 	for _, line := range append(append([]string(nil), before...), after...) {
-		line = strings.TrimSpace(line)
-		if line == "" {
+		line = strings.TrimRight(line, "\r\n")
+		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		if len(line) > 3 {
+		if len(line) > 3 && line[2] == ' ' {
 			line = strings.TrimSpace(line[3:])
+		} else {
+			line = strings.TrimSpace(line)
 		}
 		seen[line] = struct{}{}
 	}

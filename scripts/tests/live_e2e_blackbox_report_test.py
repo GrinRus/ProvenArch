@@ -20,6 +20,13 @@ class LiveE2EBlackBoxReportTest(unittest.TestCase):
         helper_path = self.repo_root / "scripts" / "internal" / "live-e2e-evaluator.sh"
         self.assertFalse(helper_path.exists())
 
+    def test_backend_cycle_fail_fasts_headless_artifact_quality_blockers(self) -> None:
+        helper = (self.repo_root / "scripts" / "internal" / "live-e2e-backend-cycle.sh").read_text(encoding="utf-8")
+        self.assertIn("artifact_quality_count", helper)
+        self.assertIn("startswith('artifact_quality:')", helper)
+        self.assertIn("headless run $run_id produced artifact_quality blockers", helper)
+        self.assertIn('FAILURE_REASON="quality"', helper)
+
     def test_matrix_harness_has_no_script_authored_operator_decisions(self) -> None:
         matrix_script = (self.repo_root / "scripts" / "full-run-batch-matrix.sh").read_text(encoding="utf-8")
         self.assertIn('BATCH_SCRIPT="${BATCH_SCRIPT:-$PROVENARCH_ROOT/scripts/full-run-batch.sh}"', matrix_script)

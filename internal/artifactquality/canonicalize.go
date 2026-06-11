@@ -25,7 +25,13 @@ func ValidateCollectManifestInRoot(writeRoot string) error {
 	if err != nil {
 		return err
 	}
-	return validateCollectManifestDocumentFiles(writeRoot, manifest.Documents)
+	if err := validateCollectManifestDocumentFiles(writeRoot, manifest.Documents); err != nil {
+		return err
+	}
+	if CollectManifestSemanticBootstrapOnly(manifest) {
+		return fmt.Errorf("shard pack manifest is invalid: semantic snapshot is bootstrap-only collect scaffold")
+	}
+	return nil
 }
 
 func ValidateCollectManifestBytes(raw []byte) error {
@@ -73,6 +79,15 @@ func validateCollectManifestDocumentFiles(writeRoot string, documents []contract
 		}
 		if info.IsDir() {
 			problems = append(problems, fmt.Sprintf("%s references a directory, not a document file: %q", label, rawPath))
+			continue
+		}
+		raw, readErr := os.ReadFile(absPath)
+		if readErr != nil {
+			problems = append(problems, fmt.Sprintf("%s read document file %q: %v", label, rawPath, readErr))
+			continue
+		}
+		if CollectDocumentBootstrapOnly(string(raw)) {
+			problems = append(problems, fmt.Sprintf("%s references bootstrap-only collect document file %q", label, rawPath))
 		}
 	}
 	if len(problems) > 0 {

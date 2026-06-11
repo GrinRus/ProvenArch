@@ -186,7 +186,7 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 	}
 	if entrypointHints := CollectRepoEntrypointHints(task); len(entrypointHints) > 0 {
 		if isCollectStep(task.StepID) {
-			lines = append(lines, fmt.Sprintf(`- Existing repo entrypoint hints (after the first collect artifact pair exists, read only these first when further evidence is needed): %s`, strings.Join(entrypointHints, ", ")))
+			lines = append(lines, fmt.Sprintf(`- Existing repo entrypoint hints (read these first for the bounded collect evidence pass): %s`, strings.Join(entrypointHints, ", ")))
 		} else {
 			lines = append(lines, fmt.Sprintf(`- Existing repo entrypoint hints (read only these first when relevant): %s`, strings.Join(entrypointHints, ", ")))
 		}
@@ -209,6 +209,8 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Write constitution-draft.json in write_root.`,
 			`- Write the referenced draft files exactly at draft_final_root/charter-overview.md and draft_final_root/baseline-subagents.yaml.`,
 			`- Do NOT place the draft files under draft_final_root/charter/ or draft_final_root/skills/; those are canonical publish paths, not draft file locations.`,
+			`- The first constitution draft artifact set is bootstrap-only; before final exit, replace placeholder scaffold text in charter-overview.md with evidence-backed charter content from the configured repository scope and charter wizard contract when available.`,
+			`- If constitution-draft.json already describes the publish surface, stop only after confirming charter-overview.md is not an unchanged bootstrap placeholder; baseline-subagents.yaml may remain the baseline bundle.`,
 			`- constitution-draft.json must use the exact runtime draft manifest shape shown below; do not emit legacy constitution schemas.`,
 			`- outputs[] must map charter-overview.md -> charter/overview.md and baseline-subagents.yaml -> skills/subagents.yaml exactly.`,
 			`- Exact constitution-draft.json example (replace IDs/summary only, keep keys/types and output mapping):`,
@@ -218,40 +220,41 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 	case "init.step1.collect", "refresh.step1.collect":
 		lines = append(lines,
 			`- Do NOT delegate to agent/subagent helpers and do NOT use todo_write-style planning.`,
-			`- Before the first filesystem write inside write_root, keep repository exploration minimal and converge quickly on the first authored doc plus shard-pack-manifest.json.`,
+			`- Before the first filesystem write inside write_root, perform one bounded evidence pass over the existing repo entrypoint hints and assigned path_scopes; do not start an open-ended repository sweep.`,
 			`- Produce runtime-authored documents in write_root and then write shard-pack-manifest.json in write_root.`,
-			`- Early pair-write requirement: write the suggested overview doc and shard-pack-manifest.json as one focused artifact pair before any broad second-pass repository sweep.`,
+			`- Evidence-first pair requirement: after the bounded evidence pass, write the suggested overview doc and shard-pack-manifest.json as one focused marker-free evidence-backed artifact pair.`,
 			fmt.Sprintf(`- Suggested collect authored doc path for this shard: %q. Prefer exactly this single doc path unless already writing an existing clearer authored doc.`, SuggestedCollectDocumentPath(task)),
-			fmt.Sprintf(`- Absolute collect targets for the early pair-write: %q and %q.`, filepath.Join(strings.TrimSpace(task.WriteRoot), filepath.FromSlash(SuggestedCollectDocumentPath(task))), filepath.Join(strings.TrimSpace(task.WriteRoot), "shard-pack-manifest.json")),
-			fmt.Sprintf(`- Minimal collect target shape: write %q + "shard-pack-manifest.json" early, then record remaining uncertainty in coverage/questions instead of continuing open-ended exploration.`, SuggestedCollectDocumentPath(task)),
-			`- Do not wait for a complete broad repository sweep before writing shard-pack-manifest.json; once the first authored doc covers the assigned shard scope, write the manifest and record remaining gaps in semantic.coverage.missing.`,
-			`- Immediately after writing the first authored doc, write shard-pack-manifest.json by adapting the task-specific JSON skeleton embedded in the first-action command section; keep exact metadata keys and replace only evidence/content values you actually observed.`,
+			fmt.Sprintf(`- Absolute collect targets for the evidence-backed pair: %q and %q.`, filepath.Join(strings.TrimSpace(task.WriteRoot), filepath.FromSlash(SuggestedCollectDocumentPath(task))), filepath.Join(strings.TrimSpace(task.WriteRoot), "shard-pack-manifest.json")),
+			fmt.Sprintf(`- Minimal collect target shape: write %q + "shard-pack-manifest.json" with concrete observed evidence; record remaining uncertainty in coverage/questions instead of continuing open-ended exploration.`, SuggestedCollectDocumentPath(task)),
+			`- Do not wait for a complete broad repository sweep before writing shard-pack-manifest.json; the bounded evidence pass is enough when it records observed evidence and remaining gaps honestly.`,
+			`- When writing shard-pack-manifest.json, adapt the task-specific JSON skeleton embedded in the collect evidence-first section; keep exact metadata keys and replace skeleton evidence/content values with facts you actually observed.`,
 			`- Do not exit after writing markdown only; every collect shard must finish with a valid shard-pack-manifest.json.`,
+			`- The final collect pair must not be seed-only, scaffold-only, or copied unchanged from the skeleton; use evidence-backed content where repository files support it.`,
 			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and semantic snapshot.`,
 			`- In shard-pack-manifest.json, semantic MUST include coverage, questions, entities, edges, and findings.`,
 			`- Use only canonical collect vocabulary: semantic.coverage.observed, semantic.questions[*].id + semantic.questions[*].text, semantic.edges[*].type, and object-shaped provenance blocks.`,
 			`- Every semantic.questions[] item must include id and text; every semantic.findings[] item must include id, severity, title, and provenance.`,
 			`- Do NOT emit semantic payloads on stdout; keep semantic only inside shard-pack-manifest.json.`,
 			`- You may be flexible in document structure, but promotion and rendering depend on manifest citations/topics remaining accurate.`,
-			`- After the first filesystem write inside write_root, stop broad repository exploration; only minimal manifest/JSON repair is allowed afterwards.`,
+			`- After writing the evidence-backed pair, avoid broad repository exploration; only minimal manifest/JSON repair needed for the current shard is allowed afterwards.`,
 			`- After writing shard-pack-manifest.json, do NOT continue broad list_directory/read_file sweeps across repo roots.`,
 			`- Do NOT read reports/taskruns/**, raw runtime logs, or previously generated shard-pack-manifest.json files as schema examples during collect.`,
-			`- If authored docs and shard-pack-manifest.json already exist in write_root, stop and exit successfully.`,
+			`- If authored docs and shard-pack-manifest.json already exist in write_root, stop only after confirming they contain marker-free scoped evidence for this shard and are not placeholder prose.`,
 		)
 		if rootFileScopes := rootFileShardPathScopes(task.PathScopes); len(rootFileScopes) > 0 {
 			lines = append(lines,
 				fmt.Sprintf(`- Root-file collect shard detected: path_scopes contains root-level files only: %s.`, strings.Join(rootFileScopes, ", ")),
 				`- For this root-file shard, read only the listed root files first; do not recursively sweep top-level directories or unrelated source trees.`,
-				`- Produce one concise root overview document in write_root, then write shard-pack-manifest.json for that document and exit successfully.`,
+				`- Produce one concise evidence-backed root overview document in write_root, then write an enriched shard-pack-manifest.json for that document before exiting successfully.`,
 			)
 		}
 		lines = append(lines,
-			`TASK-SPECIFIC COLLECT MANIFEST JSON SKELETON: use the heredoc JSON embedded in the first-action command section above; do not copy a generic manifest example.`,
+			`TASK-SPECIFIC COLLECT MANIFEST JSON SKELETON: use the JSON embedded in the collect evidence-first section above as a schema/key/type guide; do not copy it unchanged and do not copy a generic manifest example.`,
 			`COLLECT MANIFEST CONTRACT CHECKLIST:`,
 		)
 		lines = append(lines, artifactquality.CollectManifestContractLines(strings.TrimSpace(task.ArtifactRoot))...)
 		lines = append(lines,
-			`- The task-specific collect manifest JSON skeleton above is normative for field names and value types; copy that skeleton, not a generic example.`,
+			`- The task-specific collect manifest JSON skeleton above is normative for field names and value types; replace skeleton evidence/content values with observed repository evidence.`,
 		)
 		lines = append(lines, artifactquality.ClaimIDContractLines()...)
 		lines = append(lines,
@@ -281,8 +284,9 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Write asis-draft-manifest.json in write_root.`,
 			`- Write overview.md, summary.md, and architect-summary.md only under draft_final_root.`,
 			`- Use the FIRST AS-IS DRAFT COMMAND skeleton above as the first draft artifact set; do not wait for broad analysis before creating the required files.`,
+			`- The first draft artifact set is bootstrap-only; before final exit, replace placeholder scaffold text with evidence-backed as-is content from staged final artifacts.`,
 			`- Use staged final evidence from read_context_roots only; do NOT read sibling baseline workspaces or previously published as-is drafts as templates.`,
-			`- If asis-draft-manifest.json already describes the publish surface, stop after artifact validation; do NOT re-register draft artifacts through any legacy metadata op.`,
+			`- If asis-draft-manifest.json already describes the publish surface, stop only after confirming referenced draft files are not unchanged bootstrap placeholders; do NOT re-register draft artifacts through any legacy metadata op.`,
 			`- Compiler may materialize indexes and derived technical artifacts only; canonical narratives come from your drafts.`,
 		)
 		lines = append(lines, artifactquality.AsIsDraftManifestContractLines()...)
@@ -296,7 +300,8 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Write proposals-draft-manifest.json in write_root.`,
 			`- Draft final docs only under draft_final_root.`,
 			`- Allowed canonical targets are proposals/* and reports/changelog/*.`,
-			`- If proposals-draft-manifest.json already describes the publish surface, stop after artifact validation; do NOT re-register draft artifacts through any legacy metadata op.`,
+			`- The first proposals draft artifact set is bootstrap-only; before final exit, replace placeholder scaffold text with evidence-backed proposal/changelog content from validated staged artifacts.`,
+			`- If proposals-draft-manifest.json already describes the publish surface, stop only after confirming referenced draft files are not unchanged bootstrap placeholders; do NOT re-register draft artifacts through any legacy metadata op.`,
 			`- Promotion remains deterministic; your drafts become publish candidates only after compile/publish gates.`,
 		)
 		lines = append(lines, artifactquality.ProposalsDraftManifestContractLines()...)
@@ -323,16 +328,16 @@ func SuggestedCollectDocumentPath(task acpruntime.Task) string {
 	return "overview.md"
 }
 
-func CollectEarlyPairWriteCommand(task acpruntime.Task) string {
+func CollectRecoveryPairWriteCommand(task acpruntime.Task) string {
 	writeRoot := strings.TrimSpace(task.WriteRoot)
 	docRel := SuggestedCollectDocumentPath(task)
 	docTarget := filepath.Join(writeRoot, filepath.FromSlash(docRel))
 	manifestTarget := filepath.Join(writeRoot, "shard-pack-manifest.json")
-	skeleton := CollectManifestTaskSkeleton(task, []string{docRel}, nil)
+	skeleton := CollectRecoveryManifestTaskSkeleton(task, []string{docRel}, nil)
 	return strings.Join([]string{
 		"mkdir -p " + shellSingleQuote(writeRoot),
 		"cat > " + shellSingleQuote(docTarget) + " <<'ACP_COLLECT_DOC'",
-		collectDocumentInitialTemplate(task, docRel),
+		collectDocumentRecoveryTemplate(task, docRel),
 		"ACP_COLLECT_DOC",
 		"cat > " + shellSingleQuote(manifestTarget) + " <<'ACP_MANIFEST_JSON'",
 		strings.TrimSpace(skeleton),
@@ -348,14 +353,24 @@ func CollectFirstActionSection(task acpruntime.Task) string {
 	docTarget := filepath.Join(writeRoot, filepath.FromSlash(SuggestedCollectDocumentPath(task)))
 	manifestTarget := filepath.Join(writeRoot, "shard-pack-manifest.json")
 	return strings.Join([]string{
-		"COLLECT FIRST-ACTION ARTIFACT PAIR:",
-		"- This collect step must start by writing the task-specific artifact pair before broad repository instructions.",
+		"COLLECT EVIDENCE-FIRST ARTIFACT PAIR:",
+		"- This collect step must start with a bounded evidence pass before writing artifacts; do not write a seed-only/bootstrap pair.",
 		fmt.Sprintf(`- Exact authored document target: %q.`, docTarget),
 		fmt.Sprintf(`- Exact manifest target: %q.`, manifestTarget),
-		"FIRST COLLECT ARTIFACT PAIR COMMAND:",
-		"Run this exact command as the next filesystem action after checking whether both target files already exist; do not call read_file, list_directory, grep_search, glob, find, rg, or any repository exploration before this command:",
-		"- The embedded skeleton is intentionally valid before additional evidence; do not improve or rewrite it before the first pair exists.",
-		CollectEarlyPairWriteCommand(task),
+		"FIRST COLLECT EVIDENCE PASS:",
+		"- Read only existing repo entrypoint hints and assigned path_scopes needed for this shard before the first write; do not inspect reports/taskruns, raw logs, sibling shards, or archive docs.",
+		"- Keep the evidence pass bounded: root-file shards read only listed root files first; directory shards inspect only representative entrypoint/build/config/source files needed to explain this shard.",
+		"COLLECT FINAL WRITE REQUIREMENT:",
+		"- Write the authored document and shard-pack-manifest.json only after they contain evidence-backed content from the bounded evidence pass.",
+		"- If both target files already exist, overwrite them unless they already contain marker-free, non-placeholder, evidence-backed content for this shard.",
+		"- Do not exit after writing markdown only; shard-pack-manifest.json is required.",
+		"- Successful final output must remain marker-free and must not collapse to generic owner-mapping-only findings or only repo/shard contains edges when concrete repository files support richer entities, relationships, coverage, or findings.",
+		"COLLECT MANIFEST TASK SKELETON:",
+		strings.TrimSpace(CollectManifestTaskSkeleton(task, []string{SuggestedCollectDocumentPath(task)}, nil)),
+		"SKELETON USE:",
+		"- Use the JSON above as the task-specific schema/key/type guide, not as final content.",
+		"- Replace skeleton citations, coverage, questions, entities, edges, findings, titles, and descriptions with facts observed in repository files.",
+		"- Copying this skeleton unchanged is invalid and will be rejected as scaffold-only output.",
 	}, "\n")
 }
 
@@ -394,6 +409,7 @@ func ConstitutionFirstActionSection(task acpruntime.Task) string {
 	return strings.Join([]string{
 		"CONSTITUTION FIRST-ACTION DRAFT ARTIFACTS:",
 		"- This constitution step must start by writing constitution-draft.json and its referenced draft files before broad workspace analysis.",
+		"- The heredoc charter overview is bootstrap-only; replace it with evidence-backed charter content before successful exit.",
 		fmt.Sprintf(`- Exact constitution draft manifest target: %q.`, manifestTarget),
 		fmt.Sprintf(`- Draft files must be written only under draft_final_root: %q.`, strings.TrimSpace(task.DraftFinalRoot)),
 		"FIRST CONSTITUTION DRAFT COMMAND:",
@@ -508,36 +524,59 @@ func runtimeDraftFirstActionFileTemplate(task acpruntime.Task, output runtimedra
 			"# Runtime Recommendations",
 			"",
 			"## Summary",
-			"- Provider wrote the required proposals draft artifact set for this run.",
+			"- Current run evidence should be reviewed before promotion.",
+			"- Owner mappings and unresolved coverage gaps remain the first follow-up surfaces.",
 			"",
 			"## Recommendation",
-			"- Review collected evidence, validator findings, and coverage gaps before promotion.",
+			"- Promote only recommendations that cite collected shard manifests, validator findings, or final coverage output.",
 		}, "\n")
 	case "reports/changelog/runtime-proposals.md":
 		return strings.Join([]string{
 			"# Runtime Proposal Changelog",
 			"",
 			"## Changes",
-			"- Provider wrote the required proposal draft surface.",
+			"- Runtime proposal surface initialized for this analysis run.",
+			"- Changes must remain traceable to collected evidence, findings, or coverage gaps before promotion.",
 			"",
 			"## Notes",
 			"- Promote only after artifact validation succeeds.",
 		}, "\n")
 	default:
+		scopeLines := runtimeDraftScopeLines(task)
 		return strings.Join([]string{
 			"# " + title,
 			"",
 			"## Scope",
-			"- Run: " + strings.TrimSpace(task.RunID),
-			"- Step: " + strings.TrimSpace(task.StepID),
+			strings.Join(scopeLines, "\n"),
 			"",
 			"## Summary",
-			"- Provider wrote this draft artifact under the required draft_final_root.",
+			"- Draft surface initialized for the scoped repository analysis.",
+			"- Final content must stay tied to collected shard evidence and validator output.",
 		}, "\n")
 	}
 }
 
-func collectDocumentInitialTemplate(task acpruntime.Task, docRel string) string {
+func runtimeDraftScopeLines(task acpruntime.Task) []string {
+	repo := PrimaryTaskRepoScope(task.RepoScope, task.RepoScopes)
+	if repo == "" {
+		repo = "repo"
+	}
+	pathScopes := strings.Join(nonEmptyList(task.PathScopes), ", ")
+	if pathScopes == "" {
+		pathScopes = collectEvidencePath(task, nil)
+	}
+	if pathScopes == "" {
+		pathScopes = "README.md"
+	}
+	return []string{
+		"- Run: " + strings.TrimSpace(task.RunID),
+		"- Step: " + strings.TrimSpace(task.StepID),
+		"- Repository scope: " + repo,
+		"- Path scopes: " + pathScopes,
+	}
+}
+
+func collectDocumentRecoveryTemplate(task acpruntime.Task, docRel string) string {
 	repo := PrimaryTaskRepoScope(task.RepoScope, task.RepoScopes)
 	if repo == "" {
 		repo = "repo"
@@ -546,33 +585,46 @@ func collectDocumentInitialTemplate(task acpruntime.Task, docRel string) string 
 	if evidencePath == "" {
 		evidencePath = "README.md"
 	}
-	scopeText := strings.Join(nonEmptyList(task.PathScopes), ", ")
-	if scopeText == "" {
-		scopeText = evidencePath
-	}
+	scopeText := collectRecoveryScopeSummary(task, evidencePath)
+	evidenceExamples := collectRecoveryEvidencePaths(task, nil, 6)
 	titleSlug := slugComponent(strings.TrimSuffix(filepath.Base(docRel), filepath.Ext(docRel)))
 	title := titleFromSlug(titleSlug)
-	return strings.Join([]string{
+	lines := []string{
 		"# " + title,
 		"",
-		"## Scope",
-		"- Repository: " + repo,
-		"- Path scopes: " + scopeText,
-		"",
-		"## Observations",
+		"## Recovery Evidence Summary",
 		"- Repository scope: " + repo + ".",
-		"- Primary scoped evidence path: `" + evidencePath + "`.",
+		"- Assigned scope summary: " + scopeText + ".",
+		"- Primary scoped evidence path: `" + markdownCodeSpan(evidencePath) + "`.",
+		"- This document is a seed-only collect recovery fallback for a shard whose first collect attempt did not complete with enriched artifacts.",
 		"",
-		"## Evidence",
-		"- Primary evidence path: `" + evidencePath + "`",
+		"## Evidence Surface",
+	}
+	for _, path := range evidenceExamples {
+		lines = append(lines, "- `"+markdownCodeSpan(path)+"`: scoped repository evidence available to the collect shard.")
+	}
+	lines = append(lines,
 		"",
-		"## Follow-up",
-		"- Owner mapping evidence not confirmed from the initial scoped evidence path.",
+		"## Recovery Notes",
+		"- The recovery pair records concrete scoped paths so downstream compilation can preserve traceability instead of accepting an empty or marker-only shard.",
+		"- Additional provider enrichment should replace this fallback with more specific responsibilities, dependencies, and ownership evidence when available.",
 		"",
-	}, "\n")
+		"## Remaining Questions",
+		"- Confirm concrete ownership, runtime responsibilities, and operational escalation evidence for this shard.",
+		"",
+	)
+	return strings.Join(lines, "\n")
 }
 
 func CollectManifestTaskSkeleton(task acpruntime.Task, docPaths []string, evidencePaths []string) string {
+	return collectManifestTaskSkeleton(task, docPaths, evidencePaths, false)
+}
+
+func CollectRecoveryManifestTaskSkeleton(task acpruntime.Task, docPaths []string, evidencePaths []string) string {
+	return collectManifestTaskSkeleton(task, docPaths, evidencePaths, true)
+}
+
+func collectManifestTaskSkeleton(task acpruntime.Task, docPaths []string, evidencePaths []string, recovery bool) string {
 	cleanDocPaths := make([]string, 0, len(docPaths))
 	seenDocs := map[string]struct{}{}
 	for _, docPath := range docPaths {
@@ -638,7 +690,10 @@ func CollectManifestTaskSkeleton(task acpruntime.Task, docPaths []string, eviden
 	}
 
 	coverageMissing := collectCoverageMissingSkeleton(task)
-	questions := collectQuestionsSkeleton(task, idStem, topic)
+	semantic := collectSemanticSkeleton(task, repo, evidencePath, shardSlug, idStem, topic, coverageMissing)
+	if recovery {
+		semantic = collectRecoverySemanticSkeleton(task, repo, evidencePath, shardSlug, idStem, topic, coverageMissing)
+	}
 	manifest := contracts.ShardPackManifest{
 		Version:      1,
 		RunID:        runID,
@@ -651,17 +706,7 @@ func CollectManifestTaskSkeleton(task acpruntime.Task, docPaths []string, eviden
 		PathScopes:   nonEmptyList(task.PathScopes),
 		Documents:    documents,
 		Citations:    citations,
-		Semantic: contracts.SemanticSnapshot{
-			Coverage: contracts.Coverage{
-				Observed: []string{topic},
-				Missing:  coverageMissing,
-				Notes:    []string{"Collect manifest covers the assigned shard scope with evidence paths listed in citations."},
-			},
-			Questions: questions,
-			Entities:  []contracts.Entity{},
-			Edges:     []contracts.Edge{},
-			Findings:  []contracts.Finding{},
-		},
+		Semantic:     semantic,
 	}
 	raw, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -1153,6 +1198,7 @@ func DraftArtifactRepairHints(task acpruntime.Task, validationErr error) []strin
 			`- constitution-draft.json exact required outputs[] entries are: {"path":"charter-overview.md","canonical_path":"charter/overview.md","kind":"charter","title":"Constitution"} and {"path":"baseline-subagents.yaml","canonical_path":"skills/subagents.yaml","kind":"bundle","title":"Baseline Subagents"}.`,
 			`- Do NOT emit legacy constitution shapes such as schema_version, system_id, services, relations, governance, coverage_notes, or version:"0.1.0".`,
 			`- Draft files referenced by constitution-draft.json must exist under draft_final_root before the runtime process exits successfully.`,
+			`- charter-overview.md must be evidence-backed final content, not unchanged first-action or recovery scaffold text; baseline-subagents.yaml may remain the baseline YAML bundle.`,
 		)
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
 		lines = append(lines,
@@ -1264,6 +1310,72 @@ func collectEvidencePath(task acpruntime.Task, evidencePaths []string) string {
 	return firstNonEmptyPath(task.PathScopes)
 }
 
+func collectRecoveryScopeSummary(task acpruntime.Task, fallbackEvidence string) string {
+	scopes := nonEmptyList(task.PathScopes)
+	if len(scopes) == 0 {
+		if strings.TrimSpace(fallbackEvidence) != "" {
+			return "`" + markdownCodeSpan(fallbackEvidence) + "`"
+		}
+		return "repository entrypoint evidence"
+	}
+	examples := collectRecoveryEvidencePaths(task, nil, 5)
+	if len(scopes) <= 8 {
+		values := make([]string, 0, len(scopes))
+		for _, scope := range scopes {
+			values = append(values, "`"+markdownCodeSpan(scope)+"`")
+		}
+		return strings.Join(values, ", ")
+	}
+	values := make([]string, 0, len(examples))
+	for _, example := range examples {
+		values = append(values, "`"+markdownCodeSpan(example)+"`")
+	}
+	return fmt.Sprintf("%d assigned paths; examples: %s", len(scopes), strings.Join(values, ", "))
+}
+
+func collectRecoveryEvidencePaths(task acpruntime.Task, evidencePaths []string, limit int) []string {
+	seen := map[string]struct{}{}
+	paths := []string{}
+	add := func(path string) {
+		path = filepath.ToSlash(strings.Trim(strings.TrimSpace(path), "/"))
+		if path == "" || path == "." {
+			return
+		}
+		if _, exists := seen[path]; exists {
+			return
+		}
+		seen[path] = struct{}{}
+		paths = append(paths, path)
+	}
+	add(collectEvidencePath(task, evidencePaths))
+	for _, path := range evidencePaths {
+		add(path)
+	}
+	pathScopes := nonEmptyList(task.PathScopes)
+	if rootFileScopes := rootFileShardPathScopes(pathScopes); len(rootFileScopes) > 0 {
+		preferred := preferredRootFileEvidencePath(rootFileScopes)
+		add(preferred)
+		for _, path := range rootFileScopes {
+			add(path)
+		}
+	} else {
+		for _, path := range pathScopes {
+			add(path)
+		}
+	}
+	if len(paths) == 0 {
+		paths = append(paths, "README.md")
+	}
+	if limit > 0 && len(paths) > limit {
+		return append([]string{}, paths[:limit]...)
+	}
+	return append([]string{}, paths...)
+}
+
+func markdownCodeSpan(value string) string {
+	return strings.ReplaceAll(strings.TrimSpace(value), "`", "'")
+}
+
 func preferredRootFileEvidencePath(pathScopes []string) string {
 	preferred := []func(string) bool{
 		func(value string) bool {
@@ -1322,6 +1434,195 @@ func collectQuestionsSkeleton(task acpruntime.Task, idStem string, topic string)
 			Text:     fmt.Sprintf("Which team owns the %s surface and its operational escalation path?", subject),
 			Priority: "medium",
 		},
+	}
+}
+
+func collectSemanticSkeleton(task acpruntime.Task, repo string, evidencePath string, shardSlug string, idStem string, topic string, coverageMissing []string) contracts.SemanticSnapshot {
+	repoStem := idComponent(firstNonEmpty(repo, "repo"))
+	shardStem := idComponent(firstNonEmpty(idStem, shardSlug, topic, "shard"))
+	repoEntityID := "svc." + repoStem
+	shardEntityID := "svc." + shardStem
+	if shardEntityID == repoEntityID {
+		shardEntityID = shardEntityID + ".surface"
+	}
+	if strings.TrimSpace(topic) == "" {
+		topic = shardSlug
+	}
+	if strings.TrimSpace(topic) == "" {
+		topic = "architecture"
+	}
+	if strings.TrimSpace(repo) == "" {
+		repo = "repo"
+	}
+	if strings.TrimSpace(evidencePath) == "" {
+		evidencePath = "README.md"
+	}
+	evidence := []contracts.Evidence{{
+		Repo: repo,
+		Path: evidencePath,
+	}}
+	questions := collectQuestionsSkeleton(task, shardStem, topic)
+	if len(questions) == 0 {
+		questions = []contracts.Question{{
+			ID:         fmt.Sprintf("question.%s.owner.mapping", shardStem),
+			Text:       fmt.Sprintf("Which team owns the %s surface and its operational escalation path?", strings.TrimSpace(topic)),
+			Priority:   "medium",
+			RelatedIDs: []string{shardEntityID},
+		}}
+	}
+	for idx := range questions {
+		if len(questions[idx].RelatedIDs) == 0 {
+			questions[idx].RelatedIDs = []string{shardEntityID}
+		}
+	}
+	return contracts.SemanticSnapshot{
+		Coverage: contracts.Coverage{
+			Observed: []string{topic},
+			Missing:  coverageMissing,
+			Notes:    []string{"Collect manifest covers the assigned shard scope with evidence paths listed in citations."},
+		},
+		Questions: questions,
+		Entities: []contracts.Entity{
+			{
+				ID:   repoEntityID,
+				Type: "service",
+				Name: titleFromSlug(repoStem),
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.55,
+					Evidence:   evidence,
+				},
+			},
+			{
+				ID:   shardEntityID,
+				Type: "service",
+				Name: titleFromSlug(firstNonEmpty(shardSlug, topic, "Scoped Surface")),
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.55,
+					Evidence:   evidence,
+				},
+			},
+		},
+		Edges: []contracts.Edge{{
+			ID:   fmt.Sprintf("edge.%s.contained-by-repo", shardStem),
+			Type: "contains",
+			From: repoEntityID,
+			To:   shardEntityID,
+			Name: "contains scoped surface",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 0.45,
+				Evidence:   evidence,
+			},
+		}},
+		Findings: []contracts.Finding{{
+			ID:          fmt.Sprintf("finding.%s.owner.mapping", shardStem),
+			Severity:    "medium",
+			Title:       "Owner mapping not confirmed",
+			Description: fmt.Sprintf("Scoped evidence identifies the %s surface but does not confirm an owning team or escalation path.", strings.TrimSpace(topic)),
+			RuleID:      "rule.owner.mapping.required",
+			RelatedIDs:  []string{shardEntityID},
+			Provenance: contracts.Provenance{
+				Kind:       "inference",
+				Confidence: 0.45,
+				Evidence:   evidence,
+			},
+		}},
+	}
+}
+
+func collectRecoverySemanticSkeleton(task acpruntime.Task, repo string, evidencePath string, shardSlug string, idStem string, topic string, coverageMissing []string) contracts.SemanticSnapshot {
+	repoStem := idComponent(firstNonEmpty(repo, "repo"))
+	shardStem := idComponent(firstNonEmpty(idStem, shardSlug, topic, "shard"))
+	repoEntityID := "svc." + repoStem
+	shardEntityID := "svc." + shardStem
+	if shardEntityID == repoEntityID {
+		shardEntityID = shardEntityID + ".surface"
+	}
+	if strings.TrimSpace(topic) == "" {
+		topic = shardSlug
+	}
+	if strings.TrimSpace(topic) == "" {
+		topic = "architecture"
+	}
+	if strings.TrimSpace(repo) == "" {
+		repo = "repo"
+	}
+	if strings.TrimSpace(evidencePath) == "" {
+		evidencePath = "README.md"
+	}
+	evidence := []contracts.Evidence{{
+		Repo: repo,
+		Path: evidencePath,
+	}}
+	missing := append([]string{}, coverageMissing...)
+	missing = append(missing, "richer collect evidence pass did not complete before recovery fallback")
+	questionIDStem := idComponent(firstNonEmpty(shardStem, topic, "collect.recovery"))
+	return contracts.SemanticSnapshot{
+		Coverage: contracts.Coverage{
+			Observed: []string{topic, "collect recovery fallback"},
+			Missing:  missing,
+			Notes: []string{
+				fmt.Sprintf("Focused collect recovery preserved a seed-only shard pair using scoped evidence path %q.", evidencePath),
+				"Follow-up collection should enrich responsibilities, dependencies, and ownership details when provider execution completes normally.",
+			},
+		},
+		Questions: []contracts.Question{
+			{
+				ID:         fmt.Sprintf("question.%s.recovery.enrichment", questionIDStem),
+				Text:       fmt.Sprintf("Which concrete responsibilities, dependencies, and owners should be promoted for the %s surface beyond the recovery fallback?", strings.TrimSpace(topic)),
+				Priority:   "medium",
+				RelatedIDs: []string{shardEntityID},
+			},
+		},
+		Entities: []contracts.Entity{
+			{
+				ID:   repoEntityID,
+				Type: "service",
+				Name: titleFromSlug(repoStem),
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.55,
+					Evidence:   evidence,
+				},
+			},
+			{
+				ID:   shardEntityID,
+				Type: "component",
+				Name: titleFromSlug(firstNonEmpty(shardSlug, topic, "Scoped Surface")),
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.5,
+					Evidence:   evidence,
+				},
+			},
+		},
+		Edges: []contracts.Edge{{
+			ID:   fmt.Sprintf("edge.%s.recovery-evidence", questionIDStem),
+			Type: "documents",
+			From: repoEntityID,
+			To:   shardEntityID,
+			Name: "documents scoped recovery evidence",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 0.45,
+				Evidence:   evidence,
+			},
+		}},
+		Findings: []contracts.Finding{{
+			ID:          fmt.Sprintf("finding.%s.collect.recovery.minimal_evidence", questionIDStem),
+			Severity:    "medium",
+			Title:       "Collect recovery used minimal scoped evidence",
+			Description: fmt.Sprintf("The provider recovered the %s shard from a seed-only fallback after the initial collect attempt remained incomplete. Additional evidence should be collected when provider execution completes normally.", strings.TrimSpace(topic)),
+			RuleID:      "rule.collect_recovery.minimal_evidence",
+			RelatedIDs:  []string{shardEntityID},
+			Provenance: contracts.Provenance{
+				Kind:       "inference",
+				Confidence: 0.5,
+				Evidence:   evidence,
+			},
+		}},
 	}
 }
 

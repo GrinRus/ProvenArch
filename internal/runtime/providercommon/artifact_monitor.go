@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GrinRus/ProvenArch/internal/artifactquality"
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	"github.com/GrinRus/ProvenArch/internal/qa"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
@@ -193,13 +194,11 @@ func collectArtifactSnapshot(writeRoot string) artifactSnapshot {
 		snapshot.ArtifactObserved = true
 		snapshot.LastMutation = info.ModTime().UTC()
 		snapshot.State = "present"
-		if raw, readErr := os.ReadFile(manifestPath); readErr == nil {
-			if _, parseErr := contracts.ParseShardPackManifest(raw); parseErr == nil {
-				snapshot.Valid = true
-				snapshot.State = "valid"
-			} else {
-				snapshot.State = "invalid"
-			}
+		if validateErr := artifactquality.ValidateCollectManifestInRoot(writeRoot); validateErr == nil {
+			snapshot.Valid = true
+			snapshot.State = "valid"
+		} else {
+			snapshot.State = "invalid"
 		}
 	}
 	cleanRoot := filepath.Clean(writeRoot)

@@ -115,6 +115,9 @@ func ValidateRequiredManifest(
 	if err := ValidateOutputsExist(draftRoot, manifest); err != nil {
 		return Manifest{}, nil, err
 	}
+	if err := ValidateOutputContent(draftRoot, manifest, stepID); err != nil {
+		return Manifest{}, nil, err
+	}
 	return manifest, raw, nil
 }
 
@@ -184,6 +187,36 @@ func ValidateOutputsExist(draftRoot string, manifest Manifest) error {
 	return nil
 }
 
+func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string) error {
+	switch strings.TrimSpace(stepID) {
+	case "init.step0.constitution", "init.step2.asis_docs", "refresh.step2.asis_docs", "init.step4.proposals", "refresh.step4.proposals":
+	default:
+		return nil
+	}
+
+	cleanDraftRoot := filepath.Clean(strings.TrimSpace(draftRoot))
+	problems := []string{}
+	for idx, output := range manifest.Outputs {
+		relPath := filepath.Clean(strings.TrimSpace(output.Path))
+		if relPath == "" || relPath == "." {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(cleanDraftRoot, relPath))
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("outputs[%d].path %q cannot be read for content validation: %v", idx, output.Path, err))
+			continue
+		}
+		if runtimeDraftTextBootstrapOnly(string(raw)) {
+			problems = append(problems, fmt.Sprintf("outputs[%d].path %q references bootstrap-only placeholder draft content", idx, output.Path))
+		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	sort.Strings(problems)
+	return fmt.Errorf("runtime draft manifest outputs are invalid: %s", strings.Join(problems, "; "))
+}
+
 func validateRelativeDraftPath(value string) error {
 	clean := filepath.ToSlash(filepath.Clean(strings.TrimSpace(value)))
 	if clean == "." || clean == "" {
@@ -225,6 +258,8 @@ func decodeManifest(raw []byte) (Manifest, error) {
 
 func validateStepSpecificOutputs(manifest Manifest, stepID string) error {
 	switch strings.TrimSpace(stepID) {
+	case "init.step0.constitution":
+		return validateConstitutionDraftOutputs(manifest.Outputs)
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
 		return validateAsIsDraftOutputs(manifest.Outputs)
 	case "init.step4.proposals", "refresh.step4.proposals":
@@ -232,6 +267,51 @@ func validateStepSpecificOutputs(manifest Manifest, stepID string) error {
 	default:
 		return nil
 	}
+}
+
+func validateConstitutionDraftOutputs(outputs []Output) error {
+	required := map[string]string{
+		"charter/overview.md":   "charter-overview.md",
+		"skills/subagents.yaml": "baseline-subagents.yaml",
+	}
+	byCanonicalPath := make(map[string]Output, len(outputs))
+	problems := []string{}
+
+	for idx, output := range outputs {
+		canonicalPath := filepath.ToSlash(path.Clean(strings.TrimSpace(output.CanonicalPath)))
+		if canonicalPath == "" || canonicalPath == "." {
+			continue
+		}
+		if _, exists := byCanonicalPath[canonicalPath]; exists {
+			problems = append(problems, fmt.Sprintf("outputs[%d].canonical_path %q must be unique", idx, canonicalPath))
+			continue
+		}
+		byCanonicalPath[canonicalPath] = output
+	}
+
+	for canonicalPath, requiredPath := range required {
+		output, ok := byCanonicalPath[canonicalPath]
+		if !ok {
+			problems = append(problems, fmt.Sprintf("outputs must include %q", canonicalPath))
+			continue
+		}
+		actualPath := filepath.ToSlash(filepath.Clean(strings.TrimSpace(output.Path)))
+		if actualPath != requiredPath {
+			problems = append(problems, fmt.Sprintf("output %q must use path %q", canonicalPath, requiredPath))
+		}
+	}
+
+	for canonicalPath := range byCanonicalPath {
+		if _, ok := required[canonicalPath]; !ok {
+			problems = append(problems, fmt.Sprintf("output %q is outside the allowed constitution publish surface", canonicalPath))
+		}
+	}
+
+	if len(problems) == 0 {
+		return nil
+	}
+	sort.Strings(problems)
+	return fmt.Errorf("runtime draft manifest outputs are invalid: %s", strings.Join(problems, "; "))
 }
 
 func validateAsIsDraftOutputs(outputs []Output) error {
@@ -321,4 +401,59 @@ func validateProposalsDraftOutputs(outputs []Output) error {
 func isAllowedProposalsCanonicalPath(canonicalPath string) bool {
 	clean := filepath.ToSlash(path.Clean(strings.TrimSpace(canonicalPath)))
 	return strings.HasPrefix(clean, "proposals/") || strings.HasPrefix(clean, "reports/changelog/")
+}
+
+func runtimeDraftTextBootstrapOnly(text string) bool {
+	lower := strings.ToLower(text)
+	hardMarkers := []string{
+		"provider wrote this draft artifact",
+		"drafted required runtime artifacts",
+		"draft surface initialized for the scoped repository analysis",
+		"final content must stay tied to collected shard evidence and validator output",
+		"runtime proposal surface initialized for this analysis run",
+		"runtime draft recovery initialized",
+		"draft recovery initialized",
+		"treat this as diagnostic evidence until",
+	}
+	for _, marker := range hardMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+
+	softMarkers := []string{
+		"current run evidence should be reviewed before promotion",
+		"owner mappings and unresolved coverage gaps remain the first follow-up surfaces",
+		"promote only recommendations that cite collected shard manifests",
+		"changes must remain traceable to collected evidence",
+		"promote only after artifact validation succeeds",
+	}
+	if runtimeDraftTextHasEvidenceMarker(lower) {
+		return false
+	}
+	for _, marker := range softMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftTextHasEvidenceMarker(lower string) bool {
+	markers := []string{
+		"reports/findings/",
+		"reports/coverage/",
+		"reports/as-is/",
+		"validator-verdict.json",
+		"final-run-index.json",
+		"finding.",
+		"question.",
+		"cite.",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }

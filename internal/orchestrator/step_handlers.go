@@ -2,10 +2,12 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/model"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
+	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
 type domainCollectPreparation struct {
@@ -536,6 +539,11 @@ func (e *pipelineExecution) runStepProposals(ctx context.Context, stepID string)
 		Label: "Proposals Draft Manifest",
 	})
 	if e.validatorVerdict != nil {
+		if e.proposalsDraftManifest != nil {
+			if err := e.stageProposalDraftOutputsForFinalIndex(); err != nil {
+				return err
+			}
+		}
 		e.logInfo(stepID, "", "promoting validated staged artifacts", nil)
 		if err := e.promoteValidatedArtifacts(); err != nil {
 			return err
@@ -597,6 +605,97 @@ func (e *pipelineExecution) runStepProposals(ctx context.Context, stepID string)
 	}
 	e.logInfo(e.stepStatus.CurrentStep, "", "proposals and changelog compiled", map[string]any{
 		"artifacts": len(e.artifacts),
+	})
+	return nil
+}
+
+func (e *pipelineExecution) stageProposalDraftOutputsForFinalIndex() error {
+	if e.proposalsDraftManifest == nil {
+		return nil
+	}
+	if e.finalRunIndex == nil {
+		return fmt.Errorf("stage proposal draft outputs: final run index is missing")
+	}
+	if e.citationIndex == nil {
+		return fmt.Errorf("stage proposal draft outputs: citation index is missing")
+	}
+	stageRootRel := runtimeFinalArtifactRoot(e.runID)
+	stageRootAbs, err := e.workspace.Resolve(stageRootRel)
+	if err != nil {
+		return err
+	}
+	stageRoot := workspace.Root{Path: stageRootAbs}
+	draftArtifacts, err := applyRuntimeDraftOutputs(
+		stageRoot,
+		e.proposalsDraftRoot,
+		*e.proposalsDraftManifest,
+		stageRootRel,
+		func(target string) bool {
+			return strings.HasPrefix(target, "proposals/") || strings.HasPrefix(target, "reports/changelog/")
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	artifactsByPath := map[string]Artifact{}
+	for _, document := range e.finalRunIndex.CanonicalDocuments {
+		stagedPath := strings.TrimSpace(document.StagedPath)
+		if stagedPath == "" {
+			continue
+		}
+		artifactsByPath[stagedPath] = Artifact{
+			Path:  stagedPath,
+			Kind:  document.Kind,
+			Label: document.Title,
+		}
+	}
+	for _, artifact := range draftArtifacts {
+		artifactsByPath[artifact.Path] = artifact
+	}
+	artifactPaths := make([]string, 0, len(artifactsByPath))
+	for artifactPath := range artifactsByPath {
+		artifactPaths = append(artifactPaths, artifactPath)
+	}
+	sort.Strings(artifactPaths)
+	stageArtifacts := make([]Artifact, 0, len(artifactPaths))
+	for _, artifactPath := range artifactPaths {
+		stageArtifacts = append(stageArtifacts, artifactsByPath[artifactPath])
+	}
+
+	generatedAt, parseErr := time.Parse(time.RFC3339, strings.TrimSpace(e.finalRunIndex.GeneratedAt))
+	if parseErr != nil {
+		generatedAt = e.clock().UTC()
+	}
+	finalRunIndex, err := buildFinalRunIndex(
+		e.runID,
+		string(e.pipeline),
+		generatedAt,
+		stageArtifacts,
+		e.shardPacks,
+		aggregateDocumentInfos(e.shardPacks),
+		*e.citationIndex,
+		e.finalRunIndex.Semantic,
+	)
+	if err != nil {
+		return err
+	}
+	finalIndexRaw, err := json.MarshalIndent(finalRunIndex, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal final run index with proposal drafts: %w", err)
+	}
+	finalIndexRaw = append(finalIndexRaw, '\n')
+	if err := stageRoot.WriteFile(finalRunIndexFile, finalIndexRaw); err != nil {
+		return err
+	}
+	parsedFinalRunIndex, err := contracts.ParseFinalRunIndex(finalIndexRaw)
+	if err != nil {
+		return err
+	}
+	e.finalRunIndex = &parsedFinalRunIndex
+	e.logInfo(e.stepStatus.CurrentStep, "", "proposal drafts staged into final run index", map[string]any{
+		"draft_artifacts":     len(draftArtifacts),
+		"canonical_documents": len(e.finalRunIndex.CanonicalDocuments),
 	})
 	return nil
 }

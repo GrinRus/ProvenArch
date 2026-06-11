@@ -3,8 +3,11 @@ package providercommon
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/GrinRus/ProvenArch/internal/artifactquality"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 )
@@ -149,7 +152,10 @@ func recoverCollectArtifactPairRepair(ctx context.Context, task acpruntime.Task,
 		return false, acpruntime.Result{}, nil
 	}
 	snapshot := runtimeArtifactSnapshot(task)
-	if snapshot.AuthoredFiles > 0 || !resultHasProviderDiagnostics(result) {
+	if snapshot.AuthoredFiles > 0 {
+		return false, acpruntime.Result{}, nil
+	}
+	if !resultHasProviderDiagnostics(result) {
 		return false, acpruntime.Result{}, nil
 	}
 	repairAdapter, ok := adapter.(CollectArtifactPairRepairAdapter)
@@ -243,13 +249,21 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 	if snapshot.AuthoredFiles <= 0 {
 		return false, acpruntime.Result{}, nil
 	}
-	repairAdapter, ok := adapter.(CollectManifestRepairAdapter)
-	if !ok {
+	if collectWriteRootHasBootstrapOnlyAuthoredDoc(task) {
 		return false, acpruntime.Result{}, nil
 	}
 	beforeRepairFiles, err := snapshotWriteRootFiles(task.WriteRoot)
 	if err != nil {
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "collect_manifest_repair", "manifest-only collect repair write-set precheck failed", err)
+	}
+	if collectManifestFileMissing(task) || isCollectManifestSemanticScaffoldFailure(validationErr) {
+		if recovered, recoveredResult, recoveredErr := recoverCollectManifestDeterministically(task, adapter, result, beforeRepairFiles, validationErr); recovered {
+			return true, recoveredResult, recoveredErr
+		}
+	}
+	repairAdapter, ok := adapter.(CollectManifestRepairAdapter)
+	if !ok {
+		return false, acpruntime.Result{}, nil
 	}
 
 	emitCollectManifestRepairScheduledDiagnostic(task, adapter.Provider(), snapshot, validationErr)
@@ -283,6 +297,9 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 				}
 			}
 			emitCollectManifestRepairExhaustedDiagnostic(task, adapter.Provider(), repairStalled.Diagnostic, repairErr)
+			if recovered, recoveredResult, recoveredErr := recoverCollectManifestDeterministically(task, adapter, repairResult, beforeRepairFiles, repairErr); recovered {
+				return true, recoveredResult, recoveredErr
+			}
 			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_manifest_repair", "manifest-only collect repair stalled before valid artifacts were available", repairErr)
 		}
 		return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, repairResult, repairErr)
@@ -292,10 +309,74 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 	}
 	if err := adapter.ValidateArtifacts(task); err != nil {
 		emitCollectManifestRepairExhaustedDiagnostic(task, adapter.Provider(), runtimeArtifactSnapshot(task).stallDiagnostic(), err)
+		if recovered, recoveredResult, recoveredErr := recoverCollectManifestDeterministically(task, adapter, repairResult, beforeRepairFiles, err); recovered {
+			return true, recoveredResult, recoveredErr
+		}
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_manifest_repair", "manifest-only collect repair did not produce valid collect artifacts", err)
 	}
 	emitCollectManifestRepairCompletedDiagnostic(task, adapter.Provider(), "")
 	return true, repairResult, nil
+}
+
+func recoverCollectManifestDeterministically(task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, beforeRepairFiles writeRootFileSnapshot, cause error) (bool, acpruntime.Result, error) {
+	report, err := recoverCollectManifestFromAuthoredDocs(task, cause)
+	if err != nil {
+		emitCollectManifestDeterministicRecoveryFailedDiagnostic(task, adapter.Provider(), err)
+		return false, acpruntime.Result{}, nil
+	}
+	if err := validateCollectManifestRepairWriteSet(task, beforeRepairFiles); err != nil {
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "collect_manifest_runtime_recovery", "deterministic collect manifest recovery wrote outside shard-pack-manifest.json", err)
+	}
+	if err := adapter.ValidateArtifacts(task); err != nil {
+		emitCollectManifestDeterministicRecoveryFailedDiagnostic(task, adapter.Provider(), err)
+		return false, acpruntime.Result{}, nil
+	}
+	emitCollectManifestDeterministicRecoveryCompletedDiagnostic(task, adapter.Provider(), report)
+	return true, result, nil
+}
+
+func collectManifestFileMissing(task acpruntime.Task) bool {
+	root := strings.TrimSpace(task.WriteRoot)
+	if root == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(filepath.Clean(root), ShardPackManifestFileName))
+	return errors.Is(err, os.ErrNotExist)
+}
+
+func isCollectManifestSemanticScaffoldFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "semantic snapshot is bootstrap-only collect scaffold")
+}
+
+func collectWriteRootHasBootstrapOnlyAuthoredDoc(task acpruntime.Task) bool {
+	root := filepath.Clean(strings.TrimSpace(task.WriteRoot))
+	if root == "" || root == "." {
+		return false
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry == nil || entry.IsDir() {
+			continue
+		}
+		name := strings.TrimSpace(entry.Name())
+		if name == "" || name == ShardPackManifestFileName || name == "runtime-execution.json" {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			continue
+		}
+		if artifactquality.CollectDocumentBootstrapOnly(string(raw)) {
+			return true
+		}
+	}
+	return false
 }
 
 func recoverValidatorVerdictRepair(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, validationErr error, stage string) (bool, acpruntime.Result, error) {

@@ -70,6 +70,106 @@ func TestValidateRequiredManifestAcceptsCanonicalConstitutionDraft(t *testing.T)
 	}
 }
 
+func TestValidateRequiredManifestRejectsConstitutionBootstrapDraftContent(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	bootstrapDraft := `# Constitution
+
+## Scope
+- Run: run-1
+- Step: init.step0.constitution
+- Repository scope: posthog
+- Path scopes: .
+
+## Summary
+- Draft surface initialized for the scoped repository analysis.
+- Final content must stay tied to collected shard evidence and validator output.
+`
+	if err := os.WriteFile(filepath.Join(draftRoot, "charter-overview.md"), []byte(bootstrapDraft), 0o644); err != nil {
+		t.Fatalf("write charter overview: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "baseline-subagents.yaml"), []byte("agents: []\n"), 0o644); err != nil {
+		t.Fatalf("write baseline subagents: %v", err)
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step0.constitution",
+  "step_contract": "constitution",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "charter-overview.md", "canonical_path": "charter/overview.md", "kind": "charter", "title": "Constitution"},
+    {"path": "baseline-subagents.yaml", "canonical_path": "skills/subagents.yaml", "kind": "bundle", "title": "Baseline Subagents"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ConstitutionManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "init.step0.constitution", "constitution", []string{ConstitutionManifestFile})
+	if err == nil {
+		t.Fatalf("expected bootstrap constitution draft content to be rejected")
+	}
+	if !strings.Contains(err.Error(), "bootstrap-only placeholder draft content") {
+		t.Fatalf("expected bootstrap placeholder error, got %v", err)
+	}
+}
+
+func TestValidateRequiredManifestRejectsConstitutionDraftOutsideAllowedPublishSurface(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	for relPath, content := range map[string]string{
+		"charter-overview.md":     "# Constitution\n\n## Scope\n- Repo evidence: `README.md`.\n",
+		"baseline-subagents.yaml": "agents: []\n",
+		"extra.md":                "# Extra\n",
+	} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(content), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step0.constitution",
+  "step_contract": "constitution",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "charter-overview.md", "canonical_path": "charter/overview.md"},
+    {"path": "baseline-subagents.yaml", "canonical_path": "skills/subagents.yaml"},
+    {"path": "extra.md", "canonical_path": "reports/as-is/extra.md"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ConstitutionManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "init.step0.constitution", "constitution", []string{ConstitutionManifestFile})
+	if err == nil {
+		t.Fatalf("expected invalid constitution publish surface to be rejected")
+	}
+	if !strings.Contains(err.Error(), "outside the allowed constitution publish surface") {
+		t.Fatalf("expected constitution publish surface error, got %v", err)
+	}
+}
+
 func TestValidateRequiredManifestRejectsObservedContractInvalidStep0Shapes(t *testing.T) {
 	t.Parallel()
 
@@ -175,6 +275,60 @@ func TestValidateRequiredManifestAcceptsCanonicalAsIsDraft(t *testing.T) {
 	}
 	if got, want := len(loaded.Outputs), 4; got != want {
 		t.Fatalf("unexpected output count: got=%d want=%d", got, want)
+	}
+}
+
+func TestValidateRequiredManifestRejectsAsIsBootstrapDraftContent(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	bootstrapDraft := `# System Overview
+
+## Scope
+- Run: run-1
+- Step: init.step2.asis_docs
+- Repository scope: posthog
+- Path scopes: .
+
+## Summary
+- Draft surface initialized for the scoped repository analysis.
+- Final content must stay tied to collected shard evidence and validator output.
+`
+	for _, relPath := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(bootstrapDraft), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step2.asis_docs",
+  "step_contract": "as_is",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "overview.md", "canonical_path": "reports/as-is/overview.md", "kind": "report", "title": "System Overview"},
+    {"path": "summary.md", "canonical_path": "reports/coverage/summary.md", "kind": "report", "title": "Coverage Summary"},
+    {"path": "architect-summary.md", "canonical_path": "reports/agent-outputs/architect/summary.md", "kind": "agent-output", "title": "Architect Summary"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, AsIsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "init.step2.asis_docs", "as_is", []string{AsIsManifestFile})
+	if err == nil {
+		t.Fatalf("expected bootstrap as-is draft content to be rejected")
+	}
+	if !strings.Contains(err.Error(), "bootstrap-only placeholder draft content") {
+		t.Fatalf("expected bootstrap placeholder error, got %v", err)
 	}
 }
 
@@ -351,6 +505,66 @@ func TestValidateRequiredManifestAcceptsCanonicalProposalsDraft(t *testing.T) {
 	}
 }
 
+func TestValidateRequiredManifestRejectsProposalsBootstrapDraftContent(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	for relPath, content := range map[string]string{
+		"proposal.md": `# Runtime Recommendations
+
+## Summary
+- Current run evidence should be reviewed before promotion.
+- Owner mappings and unresolved coverage gaps remain the first follow-up surfaces.
+
+## Recommendation
+- Promote only recommendations that cite collected shard manifests, validator findings, or final coverage output.
+`,
+		"changelog.md": `# Runtime Proposal Changelog
+
+## Changes
+- Runtime proposal surface initialized for this analysis run.
+- Changes must remain traceable to collected evidence, findings, or coverage gaps before promotion.
+
+## Notes
+- Promote only after artifact validation succeeds.
+`,
+	} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(content), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "proposal.md", "canonical_path": "proposals/runtime-recommendations.md", "kind": "proposal", "title": "Runtime Recommendations"},
+    {"path": "changelog.md", "canonical_path": "reports/changelog/runtime-proposals.md", "kind": "changelog", "title": "Runtime Proposal Changelog"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "init.step4.proposals", "proposals", []string{ProposalsManifestFile})
+	if err == nil {
+		t.Fatalf("expected bootstrap proposals draft content to be rejected")
+	}
+	if !strings.Contains(err.Error(), "bootstrap-only placeholder draft content") {
+		t.Fatalf("expected bootstrap placeholder error, got %v", err)
+	}
+}
+
 func TestValidateRequiredManifestRejectsObservedContractInvalidProposalsEnvelope(t *testing.T) {
 	t.Parallel()
 
@@ -479,6 +693,12 @@ func TestValidateRequiredManifestRejectsMissingReferencedDraftFile(t *testing.T)
       "canonical_path": "charter/overview.md",
       "kind": "charter",
       "title": "Constitution"
+    },
+    {
+      "path": "baseline-subagents.yaml",
+      "canonical_path": "skills/subagents.yaml",
+      "kind": "bundle",
+      "title": "Baseline Subagents"
     }
   ]
 }`

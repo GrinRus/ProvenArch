@@ -36,6 +36,46 @@ func TestRunHeadlessProviderSucceedsWithValidArtifacts(t *testing.T) {
 	}
 }
 
+func TestNormalizeActivityPolicyAppliesDiagnosticEnvOverrides(t *testing.T) {
+	t.Setenv("ACP_PROVIDER_PRE_ARTIFACT_STALL_SEC", "301")
+	t.Setenv("ACP_PROVIDER_RETRY_PRE_ARTIFACT_STALL_SEC", "302")
+	t.Setenv("ACP_PROVIDER_POST_ARTIFACT_STALL_SEC", "303")
+	t.Setenv("ACP_PROVIDER_PARTIAL_ARTIFACT_STALL_SEC", "304")
+	t.Setenv("ACP_PROVIDER_VALID_ARTIFACT_STOP_SEC", "305")
+
+	policy := normalizeActivityPolicy(ActivityPolicy{})
+
+	if got, want := policy.PreArtifactStallWindow, 301*time.Second; got != want {
+		t.Fatalf("pre artifact window = %s, want %s", got, want)
+	}
+	if got, want := policy.RetryPreArtifactStallWindow, 302*time.Second; got != want {
+		t.Fatalf("retry pre artifact window = %s, want %s", got, want)
+	}
+	if got, want := policy.PostArtifactStallWindow, 303*time.Second; got != want {
+		t.Fatalf("post artifact window = %s, want %s", got, want)
+	}
+	if got, want := policy.PartialArtifactStallWindow, 304*time.Second; got != want {
+		t.Fatalf("partial artifact window = %s, want %s", got, want)
+	}
+	if got, want := policy.ValidArtifactStopWindow, 305*time.Second; got != want {
+		t.Fatalf("valid artifact stop window = %s, want %s", got, want)
+	}
+}
+
+func TestNormalizeActivityPolicyIgnoresInvalidDiagnosticEnvOverrides(t *testing.T) {
+	t.Setenv("ACP_PROVIDER_PRE_ARTIFACT_STALL_SEC", "bad")
+	t.Setenv("ACP_PROVIDER_POST_ARTIFACT_STALL_SEC", "-1")
+
+	policy := normalizeActivityPolicy(ActivityPolicy{})
+
+	if got, want := policy.PreArtifactStallWindow, defaultPreArtifactStallWindow; got != want {
+		t.Fatalf("pre artifact window = %s, want default %s", got, want)
+	}
+	if got, want := policy.PostArtifactStallWindow, defaultPostArtifactStallWindow; got != want {
+		t.Fatalf("post artifact window = %s, want default %s", got, want)
+	}
+}
+
 func TestRunHeadlessProviderManagedPermissionsFailFastWithoutProtocol(t *testing.T) {
 	t.Parallel()
 
@@ -595,10 +635,11 @@ fi
 	}
 }
 
-func TestRunHeadlessProviderRepairsMissingCollectManifestWithAuthoredDocs(t *testing.T) {
+func TestRunHeadlessProviderRecoversMissingCollectManifestWithAuthoredDocs(t *testing.T) {
 	t.Parallel()
 
 	task := newCollectTask(t, "run-collect-repair")
+	repairMarker := filepath.Join(task.Workspace, "manifest-repair-called")
 	initialScript := `#!/usr/bin/env bash
 set -eu
 mkdir -p ` + shellQuote(task.WriteRoot) + `
@@ -606,6 +647,7 @@ printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot
 `
 	repairScript := `#!/usr/bin/env bash
 set -eu
+printf called > ` + shellQuote(repairMarker) + `
 cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
 ` + collectManifestJSON(task) + `
 EOF
@@ -626,6 +668,16 @@ EOF
 	if result.Execution.Status != "succeeded" {
 		t.Fatalf("unexpected execution status: %+v", result.Execution)
 	}
+	if _, statErr := os.Stat(repairMarker); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("manifest-only repair should not run when deterministic recovery can recover a missing manifest, statErr=%v", statErr)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName))
+	if err != nil {
+		t.Fatalf("read recovered manifest: %v", err)
+	}
+	if !strings.Contains(string(raw), "collect_manifest.runtime_recovery") {
+		t.Fatalf("expected runtime recovery finding in manifest, got %s", raw)
+	}
 }
 
 func TestRunHeadlessProviderStopsCollectManifestRepairAfterValidArtifact(t *testing.T) {
@@ -636,6 +688,7 @@ func TestRunHeadlessProviderStopsCollectManifestRepairAfterValidArtifact(t *test
 set -eu
 mkdir -p ` + shellQuote(task.WriteRoot) + `
 printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + `
+printf '%s\n' '{"version":1}' > ` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + `
 `
 	repairScript := `#!/usr/bin/env bash
 set -eu
@@ -669,6 +722,134 @@ done
 	}
 	if result.Execution.Status != "succeeded" {
 		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+}
+
+func TestRunHeadlessProviderRecoversCollectManifestWhenProviderRepairDoesNotWriteManifest(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-runtime-recovery")
+	repoRoot := filepath.Join(task.Workspace, "repos", "bank-of-anthos")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Bank of Anthos\n"), 0o644); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	task.ReadContextRoots = []string{repoRoot}
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+mkdir -p ` + shellQuote(filepath.Join(task.WriteRoot, "docs")) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Payment Runtime Overview
+
+## Services
+- **Ledger API**: records payment operations.
+- **Transaction Worker**: processes queued account changes.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "docs", "overview.md")) + ` <<'EOF'
+# Runtime Dependency Overview
+
+## Dependencies
+- **Account Service**: provides account data.
+EOF
+`
+	repairScript := `#!/usr/bin/env bash
+set -eu
+exit 0
+`
+	runner := testAdapter{
+		command:       writeEngineScript(t, initialScript),
+		repairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected deterministic collect manifest recovery success, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName))
+	if err != nil {
+		t.Fatalf("read recovered manifest: %v", err)
+	}
+	if !strings.Contains(string(raw), "collect_manifest.runtime_recovery") {
+		t.Fatalf("expected runtime recovery finding in manifest, got %s", raw)
+	}
+	if !strings.Contains(string(raw), `"type": "uses"`) {
+		t.Fatalf("expected non-container usage edges in recovered manifest, got %s", raw)
+	}
+	if strings.Contains(string(raw), `"Owner mapping not confirmed"`) {
+		t.Fatalf("recovered manifest should not use bootstrap owner-mapping finding, got %s", raw)
+	}
+}
+
+func TestRunHeadlessProviderRecoversScaffoldCollectManifestBeforeProviderRepair(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-scaffold-runtime-recovery")
+	repairMarker := filepath.Join(task.Workspace, "scaffold-manifest-repair-called")
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# PostHog CLI Common Overview
+
+## Runtime surfaces
+- **PostHog CLI**: exposes developer commands for project operations.
+- **HogQL parser**: parses query expressions used by product analytics flows.
+- **reqwest API client**: calls the PostHog API for remote operations.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + scaffoldCollectManifestJSON(task) + `
+EOF
+`
+	repairScript := `#!/usr/bin/env bash
+set -eu
+printf called > ` + shellQuote(repairMarker) + `
+exit 7
+`
+	runner := testAdapter{
+		command:       writeEngineScript(t, initialScript),
+		repairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected deterministic scaffold collect manifest recovery success, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if _, statErr := os.Stat(repairMarker); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("manifest-only provider repair should not run for scaffold semantic recovery, statErr=%v", statErr)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName))
+	if err != nil {
+		t.Fatalf("read recovered manifest: %v", err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, "collect_manifest.runtime_recovery") {
+		t.Fatalf("expected runtime recovery finding in manifest, got %s", text)
+	}
+	if !strings.Contains(text, `"name": "PostHog CLI"`) || !strings.Contains(text, `"name": "HogQL parser"`) {
+		t.Fatalf("expected recovered manifest to preserve concrete authored-doc concepts, got %s", text)
+	}
+	if !strings.Contains(text, `"type": "uses"`) {
+		t.Fatalf("expected recovered manifest to include non-container usage edges, got %s", text)
+	}
+	if strings.Contains(text, "Owner mapping not confirmed") || strings.Contains(text, "contains scoped surface") {
+		t.Fatalf("recovered manifest should not retain scaffold semantic content, got %s", text)
 	}
 }
 
@@ -714,6 +895,84 @@ EOF
 	}
 	if !strings.Contains(string(raw), `"path": "overview.md"`) {
 		t.Fatalf("expected repaired manifest to reference authored document, got %s", raw)
+	}
+}
+
+func TestRunHeadlessProviderRejectsBootstrapOnlyAuthoredDocWithoutPairRepair(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-bootstrap-doc-pair-repair")
+	docRel := steppolicy.SuggestedCollectDocumentPath(task)
+	manifest := strings.Replace(collectManifestJSON(task), `"path": "overview.md"`, `"path": "`+docRel+`"`, 1)
+	docPath := filepath.Join(task.WriteRoot, filepath.FromSlash(docRel))
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(filepath.Dir(docPath)) + `
+cat >` + shellQuote(docPath) + ` <<'EOF'
+# Bank Overview
+
+<!-- ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT -->
+
+## Observations
+- Repository scope: bank-of-anthos.
+- Primary scoped evidence path: ` + "`README.md`" + `.
+
+## Evidence
+- Primary evidence path: ` + "`README.md`" + `
+
+## Follow-up
+- Owner mapping evidence not confirmed from the initial scoped evidence path.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + manifest + `
+EOF
+`
+	manifestOnlyRepairScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'manifest-only repair must not run for bootstrap-only docs' >&2
+exit 9
+`
+	pairRepairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(docPath) + ` <<'EOF'
+# Bank Overview
+
+## Observations
+- README.md identifies Bank of Anthos as the analyzed service surface.
+- Kubernetes manifests define the deployable service boundary for review.
+
+## Evidence
+- README.md
+- kubernetes-manifests
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + manifest + `
+EOF
+`
+	runner := testAdapter{
+		command:           writeEngineScript(t, initialScript),
+		repairCommand:     writeEngineScript(t, manifestOnlyRepairScript),
+		pairRepairCommand: writeEngineScript(t, pairRepairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+			RepairCollectArtifactPairOnce: true,
+		},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatalf("expected bootstrap-only authored collect doc to fail without pair repair")
+	}
+	if !strings.Contains(err.Error(), "bootstrap-only collect document") {
+		t.Fatalf("expected bootstrap-only validation error, got %v", err)
+	}
+	raw, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatalf("read original doc: %v", err)
+	}
+	if !strings.Contains(string(raw), "ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT") {
+		t.Fatalf("expected bootstrap doc marker to remain because pair repair must not run, got:\n%s", raw)
 	}
 }
 
@@ -961,12 +1220,12 @@ func TestCollectPairRepairDoesNotMaskSilentNoArtifactCollect(t *testing.T) {
 	}
 }
 
-func TestRunHeadlessProviderRepairsMissingCollectManifestWithNestedAuthoredDocs(t *testing.T) {
+func TestRunHeadlessProviderRecoversMissingCollectManifestWithNestedAuthoredDocs(t *testing.T) {
 	t.Parallel()
 
 	task := newCollectTask(t, "run-collect-repair-nested")
 	nestedDocPath := filepath.Join(task.WriteRoot, "docs", "overview.md")
-	nestedManifest := strings.Replace(collectManifestJSON(task), `"path": "overview.md"`, `"path": "docs/overview.md"`, 1)
+	repairMarker := filepath.Join(task.Workspace, "nested-manifest-repair-called")
 	initialScript := `#!/usr/bin/env bash
 set -eu
 mkdir -p ` + shellQuote(filepath.Dir(nestedDocPath)) + `
@@ -974,9 +1233,7 @@ printf '%s\n' '# Nested Collect Overview' > ` + shellQuote(nestedDocPath) + `
 `
 	repairScript := `#!/usr/bin/env bash
 set -eu
-cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
-` + nestedManifest + `
-EOF
+printf called > ` + shellQuote(repairMarker) + `
 `
 	runner := testAdapter{
 		command:       writeEngineScript(t, initialScript),
@@ -994,6 +1251,16 @@ EOF
 	if result.Execution.Status != "succeeded" {
 		t.Fatalf("unexpected execution status: %+v", result.Execution)
 	}
+	if _, statErr := os.Stat(repairMarker); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("manifest-only repair should not run for missing nested-doc manifest recovery, statErr=%v", statErr)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName))
+	if err != nil {
+		t.Fatalf("read recovered manifest: %v", err)
+	}
+	if !strings.Contains(string(raw), `"path": "docs/overview.md"`) {
+		t.Fatalf("expected recovered manifest to reference nested authored document, got %s", raw)
+	}
 }
 
 func TestRunHeadlessProviderRejectsCollectRepairExtraWrites(t *testing.T) {
@@ -1004,6 +1271,7 @@ func TestRunHeadlessProviderRejectsCollectRepairExtraWrites(t *testing.T) {
 set -eu
 mkdir -p ` + shellQuote(task.WriteRoot) + `
 printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + `
+printf '%s\n' '{"version":1}' > ` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + `
 `
 	repairScript := `#!/usr/bin/env bash
 set -eu
@@ -1048,6 +1316,7 @@ func TestRunHeadlessProviderRejectsCollectRepairExtraWritesBeforeCommandFailure(
 set -eu
 mkdir -p ` + shellQuote(task.WriteRoot) + `
 printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + `
+printf '%s\n' '{"version":1}' > ` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + `
 `
 	repairScript := `#!/usr/bin/env bash
 set -eu
@@ -1085,7 +1354,7 @@ exit 2
 	}
 }
 
-func TestRunHeadlessProviderClassifiesQwenPartialCollectArtifactsAsContractFailure(t *testing.T) {
+func TestRunHeadlessProviderRecoversQwenPartialCollectArtifactsWithAuthoredDocs(t *testing.T) {
 	t.Parallel()
 
 	task := newCollectTask(t, "run-collect-partial")
@@ -1105,19 +1374,19 @@ printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot
 		},
 	}
 
-	_, err := RunHeadlessProvider(context.Background(), task, runner)
-	if err == nil {
-		t.Fatal("expected collect contract failure")
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected runtime collect manifest recovery success, got %v", err)
 	}
-	var runnerErr acpruntime.RunnerError
-	if !errors.As(err, &runnerErr) {
-		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
 	}
-	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
-		t.Fatalf("expected runtime_contract_failed for partial collect artifacts, got %s (%v)", runnerErr.Code, err)
+	raw, err := os.ReadFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName))
+	if err != nil {
+		t.Fatalf("read recovered manifest: %v", err)
 	}
-	if !strings.Contains(runnerErr.Error(), "manifest-only collect repair") {
-		t.Fatalf("expected manifest repair context in error, got %v", err)
+	if !strings.Contains(string(raw), "runtime_recovery") {
+		t.Fatalf("expected recovered manifest claim/finding marker, got %s", raw)
 	}
 }
 
@@ -2335,6 +2604,124 @@ func collectManifestJSON(task acpruntime.Task) string {
     ],
     "edges": [],
     "findings": []
+  }
+}`
+}
+
+func scaffoldCollectManifestJSON(task acpruntime.Task) string {
+	return `{
+  "version": 1,
+  "run_id": "` + task.RunID + `",
+  "step_id": "init.step1.collect",
+  "shard_id": "posthog-cli-common",
+  "domain_id": "posthog",
+  "agent_role": "shard-analyst",
+  "artifact_root": "` + task.ArtifactRoot + `",
+  "repo_scopes": ["posthog"],
+  "path_scopes": ["cli", "common"],
+  "documents": [
+    {
+      "id": "doc.posthog.cli_common.overview",
+      "kind": "report",
+      "title": "PostHog CLI Common Overview",
+      "path": "overview.md",
+      "canonical_path": "reports/as-is/posthog-cli-common/overview.md",
+      "topics": ["posthog"],
+      "citation_ids": ["cite.posthog.readme"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.posthog.readme",
+      "repo": "posthog",
+      "path": "README.md",
+      "claim_ids": ["claim.posthog.runtime"],
+      "document_ids": ["doc.posthog.cli_common.overview"]
+    }
+  ],
+  "semantic": {
+    "coverage": {
+      "observed": ["scoped surface"],
+      "missing": ["owner mapping evidence not confirmed from scoped repository files"],
+      "notes": ["collect manifest covers the assigned shard scope and evidence paths listed in citations"]
+    },
+    "questions": [
+      {
+        "id": "q.posthog.owner",
+        "text": "Who owns this scoped surface?"
+      }
+    ],
+    "entities": [
+      {
+        "id": "ent.posthog.repo",
+        "name": "PostHog",
+        "type": "domain",
+        "provenance": {
+          "kind": "observation",
+          "confidence": 0.8,
+          "evidence": [
+            {
+              "repo": "posthog",
+              "path": "README.md"
+            }
+          ]
+        }
+      },
+      {
+        "id": "ent.posthog.cli_common",
+        "name": "PostHog CLI Common",
+        "type": "component",
+        "provenance": {
+          "kind": "observation",
+          "confidence": 0.7,
+          "evidence": [
+            {
+              "repo": "posthog",
+              "path": "README.md"
+            }
+          ]
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge.posthog.contains.scoped_surface",
+        "type": "contains",
+        "from": "ent.posthog.repo",
+        "to": "ent.posthog.cli_common",
+        "name": "contains scoped surface",
+        "provenance": {
+          "kind": "observation",
+          "confidence": 0.7,
+          "evidence": [
+            {
+              "repo": "posthog",
+              "path": "README.md"
+            }
+          ]
+        }
+      }
+    ],
+    "findings": [
+      {
+        "id": "finding.posthog.owner_mapping",
+        "severity": "medium",
+        "title": "Owner mapping not confirmed",
+        "description": "Scoped evidence identifies PostHog CLI Common but does not confirm an owning team.",
+        "rule_id": "analysis.owner.mapping",
+        "related_ids": ["ent.posthog.cli_common"],
+        "provenance": {
+          "kind": "observation",
+          "confidence": 0.5,
+          "evidence": [
+            {
+              "repo": "posthog",
+              "path": "README.md"
+            }
+          ]
+        }
+      }
+    ]
   }
 }`
 }

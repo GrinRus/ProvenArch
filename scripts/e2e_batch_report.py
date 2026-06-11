@@ -773,12 +773,31 @@ def evidence_path_resolves(path_value: str, repo_roots: list[Path], workspace: P
         candidate_variants.append(Path(*parts[1:]))
 
     roots = [workspace, *repo_roots]
+    ambiguous_extensionless = False
     for variant in candidate_variants:
         for root in roots:
             resolved = root / variant
             if resolved.exists():
                 return True, "ok"
+            extension_matches = unique_extensionless_path_matches(resolved)
+            if len(extension_matches) == 1:
+                return True, "ok"
+            if len(extension_matches) > 1:
+                ambiguous_extensionless = True
+    if ambiguous_extensionless:
+        return False, "ambiguous extensionless relative path"
     return False, "relative path missing in repos/workspace"
+
+
+def unique_extensionless_path_matches(resolved: Path) -> list[Path]:
+    if resolved.suffix:
+        return []
+    parent = resolved.parent
+    if not parent.exists() or not parent.is_dir():
+        return []
+    prefix = resolved.name + "."
+    matches = [child for child in parent.iterdir() if child.is_file() and child.name.startswith(prefix)]
+    return sorted(matches)
 
 
 def is_power_target(repo_roots: list[Path], declared_meta: dict[str, Any]) -> bool:

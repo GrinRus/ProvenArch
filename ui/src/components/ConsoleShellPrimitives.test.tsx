@@ -156,6 +156,8 @@ describe("console shell primitives", () => {
     render(<ActivityDrawer {...handlers} selectedRunId="run-empty" selectedRunStatus="running" logs={[]} renderedLogs="" runLogsStatus="" canExport={false} taskrunPaths={[]} />);
 
     expect(screen.getByTestId("activity-drawer")).toHaveAccessibleName("Selected run activity drawer");
+    expect(screen.getByTestId("activity-drawer")).not.toHaveAttribute("open");
+    expect(screen.getByTestId("activity-drawer-toggle")).toHaveTextContent("Activity / Events");
     expect(screen.getByText("0 log entries for run-empty")).toBeInTheDocument();
     expect(screen.getByTestId("activity-empty-state")).toHaveTextContent("Logs will appear when the selected run emits events or raw output.");
     expect(screen.getByTestId("run-logs-copy-btn")).toBeDisabled();
@@ -169,6 +171,7 @@ describe("console shell primitives", () => {
 
     const { rerender } = render(<ActivityDrawer {...handlers} logs={[]} renderedLogs="" runLogsStatus="" canExport={false} taskrunPaths={[]} />);
 
+    expect(screen.getByTestId("activity-drawer")).not.toHaveAttribute("open");
     expect(screen.getByText("No selected run")).toBeInTheDocument();
     expect(screen.getByTestId("activity-empty-state")).toHaveTextContent("Start or select a run to stream activity.");
 
@@ -229,7 +232,9 @@ describe("console shell primitives", () => {
     );
 
     expect(screen.getByText("2 log entries for run-logs")).toBeInTheDocument();
-    expect(screen.getByText("Logs copied.")).toBeInTheDocument();
+    expect(screen.getByTestId("activity-drawer")).not.toHaveAttribute("open");
+    expect(screen.getByTestId("activity-drawer-toggle")).toHaveTextContent("Logs copied.");
+    expect(screen.getAllByText("Logs copied.").length).toBeGreaterThan(0);
     expect(screen.getByTestId("activity-events-table")).toHaveTextContent("runtime output");
     expect(screen.getByTestId("activity-events-table")).toHaveTextContent("provider emitted warning");
     expect(screen.getByText("Runtime execution artifacts (1)")).toBeInTheDocument();

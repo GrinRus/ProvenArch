@@ -291,6 +291,136 @@ func TestPromoteValidatedArtifactsRemovesStaleManagedCanonicalFiles(t *testing.T
 	}
 }
 
+func TestStageProposalDraftOutputsUpdatesFinalRunIndex(t *testing.T) {
+	t.Parallel()
+
+	workspaceRoot := t.TempDir()
+	ws := workspace.Root{Path: workspaceRoot}
+	runID := "run-1"
+	stagedOverview := filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "staging", "final", "reports", "as-is", "overview.md"))
+	if err := ws.WriteFile(stagedOverview, []byte("# Overview\n")); err != nil {
+		t.Fatalf("write staged overview: %v", err)
+	}
+	draftRoot := filepath.Join(workspaceRoot, "reports", "taskruns", runID, "staging", "drafts", "step4_proposals")
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "proposal.md"), []byte("# Proposal\n\nEvidence-backed recommendation.\n"), 0o644); err != nil {
+		t.Fatalf("write proposal draft: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "changelog.md"), []byte("# Changelog\n\n- Added evidence-backed proposal.\n"), 0o644); err != nil {
+		t.Fatalf("write changelog draft: %v", err)
+	}
+
+	execution := &pipelineExecution{
+		runID:     runID,
+		pipeline:  PipelineInit,
+		workspace: ws,
+		pipelineRunProgressState: pipelineRunProgressState{
+			stepStatus: RunInfo{CurrentStep: "init.step4.proposals"},
+		},
+		pipelineSemanticDocflowState: pipelineSemanticDocflowState{
+			shardPacks: []contracts.ShardPackManifest{
+				{
+					ShardID: "payments",
+					Documents: []contracts.AuthoredDocument{
+						{
+							ID:            "doc.overview",
+							Kind:          "report",
+							Title:         "Overview",
+							Path:          "overview.md",
+							CanonicalPath: "reports/as-is/overview.md",
+							CitationIDs:   []string{"cite.overview"},
+						},
+					},
+					Citations: []contracts.DocumentCitation{
+						{
+							ID:          "cite.overview",
+							Repo:        "payments",
+							Path:        "README.md",
+							DocumentIDs: []string{"doc.overview"},
+						},
+					},
+				},
+			},
+			citationIndex: &contracts.CitationIndex{
+				Version:     1,
+				RunID:       runID,
+				GeneratedAt: time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC).Format(time.RFC3339),
+				Citations: []contracts.DocumentCitation{
+					{
+						ID:          "cite.overview",
+						Repo:        "payments",
+						Path:        "README.md",
+						DocumentIDs: []string{"doc.overview"},
+					},
+				},
+			},
+			finalRunIndex: &contracts.FinalRunIndex{
+				Version:           1,
+				RunID:             runID,
+				Pipeline:          string(PipelineInit),
+				GeneratedAt:       time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC).Format(time.RFC3339),
+				CitationIndexPath: runtimeCitationIndexPath(runID),
+				CanonicalDocuments: []contracts.FinalRunDocument{
+					{
+						ID:            "doc.overview",
+						Kind:          "report",
+						Title:         "Overview",
+						CanonicalPath: "reports/as-is/overview.md",
+						StagedPath:    stagedOverview,
+						CitationIDs:   []string{"cite.overview"},
+						SourceShards:  []string{"payments"},
+						Status:        "staged",
+					},
+				},
+				Semantic: contracts.SemanticSnapshot{
+					Coverage:  contracts.Coverage{Observed: []string{}, Missing: []string{}, Notes: []string{}},
+					Questions: []contracts.Question{},
+					Entities:  []contracts.Entity{},
+					Edges:     []contracts.Edge{},
+					Findings:  []contracts.Finding{},
+				},
+			},
+		},
+		pipelineDraftState: pipelineDraftState{
+			proposalsDraftRoot: draftRoot,
+			proposalsDraftManifest: &runtimeDraftManifest{
+				Version:      1,
+				RunID:        runID,
+				StepID:       "init.step4.proposals",
+				StepContract: "proposals",
+				AgentRole:    "architect",
+				Outputs: []runtimeDraftOutput{
+					{Path: "proposal.md", CanonicalPath: "proposals/runtime-recommendations.md", Kind: "proposal", Title: "Runtime Recommendations"},
+					{Path: "changelog.md", CanonicalPath: "reports/changelog/runtime-proposals.md", Kind: "changelog", Title: "Runtime Proposal Changelog"},
+				},
+			},
+		},
+	}
+
+	if err := execution.stageProposalDraftOutputsForFinalIndex(); err != nil {
+		t.Fatalf("stage proposal drafts: %v", err)
+	}
+	raw, err := ws.ReadFile(runtimeFinalRunIndexPath(runID))
+	if err != nil {
+		t.Fatalf("read final run index: %v", err)
+	}
+	finalIndex, err := contracts.ParseFinalRunIndex(raw)
+	if err != nil {
+		t.Fatalf("parse final run index: %v", err)
+	}
+	if !finalIndexHasCanonicalPath(finalIndex, "proposals/runtime-recommendations.md") {
+		t.Fatalf("expected proposal in final index: %#v", finalIndex.CanonicalDocuments)
+	}
+	if !finalIndexHasCanonicalPath(finalIndex, "reports/changelog/runtime-proposals.md") {
+		t.Fatalf("expected changelog in final index: %#v", finalIndex.CanonicalDocuments)
+	}
+	if _, err := ws.ReadFile(filepath.ToSlash(filepath.Join(runtimeFinalArtifactRoot(runID), "reports", "changelog", "runtime-proposals.md"))); err != nil {
+		t.Fatalf("expected staged changelog draft: %v", err)
+	}
+}
+
 func TestValidateStagedArtifactsReportsMissingStagedDocument(t *testing.T) {
 	t.Parallel()
 
@@ -341,6 +471,15 @@ func TestValidateStagedArtifactsReportsMissingStagedDocument(t *testing.T) {
 	if !found {
 		t.Fatalf("expected missing_staged_document issue, got %#v", issues)
 	}
+}
+
+func finalIndexHasCanonicalPath(index contracts.FinalRunIndex, canonicalPath string) bool {
+	for _, document := range index.CanonicalDocuments {
+		if document.CanonicalPath == canonicalPath {
+			return true
+		}
+	}
+	return false
 }
 
 func TestValidateStagedArtifactsDetectsCitationAndTopicIssues(t *testing.T) {
@@ -566,6 +705,96 @@ func TestNormalizeSemanticSnapshotDedupesRepoAliasEntitiesAndRewritesReferences(
 	}
 	if got := snapshot.Entities[0].Provenance.Evidence[0].Repo; got != "bank-of-anthos" {
 		t.Fatalf("expected repo alias normalization to logical repo scope, got %q", got)
+	}
+}
+
+func TestNormalizeSemanticSnapshotResolvesUniqueExtensionlessEvidencePaths(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	writeRepoFile := func(rel string) {
+		t.Helper()
+		abs := filepath.Join(repoRoot, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatalf("create repo fixture dir: %v", err)
+		}
+		if err := os.WriteFile(abs, []byte("fixture"), 0o644); err != nil {
+			t.Fatalf("write repo fixture file: %v", err)
+		}
+	}
+	writeRepoFile("src/utils/db/primary-store.ts")
+	writeRepoFile("src/utils/db/cache-store.ts")
+	writeRepoFile("src/config.ts")
+	writeRepoFile("src/config.go")
+
+	resolvedRepos := map[string]string{"sample-repo": repoRoot}
+	repoAliases := newSemanticRepoAliasResolver(resolvedRepos, nil)
+	evidencePaths := newSemanticEvidencePathResolver(resolvedRepos, repoAliases)
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{
+		Entities: []contracts.Entity{
+			{
+				ID:   "db.primary",
+				Type: "datastore",
+				Name: "Primary Store",
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.8,
+					Evidence:   []contracts.Evidence{{Repo: "sample-repo", Path: "src/utils/db/primary-store"}},
+				},
+			},
+			{
+				ID:   "svc.config",
+				Type: "service",
+				Name: "Config",
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.7,
+					Evidence:   []contracts.Evidence{{Repo: "sample-repo", Path: "src/config"}},
+				},
+			},
+		},
+		Edges: []contracts.Edge{
+			{
+				ID:   "edge.cache",
+				Type: "reads",
+				From: "svc.config",
+				To:   "db.cache",
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.7,
+					Evidence:   []contracts.Evidence{{Repo: "sample-repo", Path: "src/utils/db/cache-store"}},
+				},
+			},
+		},
+		Findings: []contracts.Finding{
+			{
+				ID:       "finding.cache",
+				Severity: "medium",
+				Title:    "Cache store dependency",
+				Provenance: contracts.Provenance{
+					Kind:       "observation",
+					Confidence: 0.7,
+					Evidence:   []contracts.Evidence{{Repo: "sample-repo", Path: "src/utils/db/cache-store"}},
+				},
+			},
+		},
+	}, repoAliases, evidencePaths)
+
+	entitiesByID := map[string]contracts.Entity{}
+	for _, entity := range snapshot.Entities {
+		entitiesByID[entity.ID] = entity
+	}
+	if got, want := entitiesByID["db.primary"].Provenance.Evidence[0].Path, "src/utils/db/primary-store.ts"; got != want {
+		t.Fatalf("expected unique extensionless entity evidence path to resolve, got=%q want=%q", got, want)
+	}
+	if got, want := entitiesByID["svc.config"].Provenance.Evidence[0].Path, "src/config"; got != want {
+		t.Fatalf("expected ambiguous extensionless entity evidence path to stay unchanged, got=%q want=%q", got, want)
+	}
+	if got, want := snapshot.Edges[0].Provenance.Evidence[0].Path, "src/utils/db/cache-store.ts"; got != want {
+		t.Fatalf("expected unique extensionless edge evidence path to resolve, got=%q want=%q", got, want)
+	}
+	if got, want := snapshot.Findings[0].Provenance.Evidence[0].Path, "src/utils/db/cache-store.ts"; got != want {
+		t.Fatalf("expected unique extensionless finding evidence path to resolve, got=%q want=%q", got, want)
 	}
 }
 

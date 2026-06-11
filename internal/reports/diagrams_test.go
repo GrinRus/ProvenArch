@@ -409,6 +409,303 @@ func TestCompileC4ContextDiagramRendersEvidenceBackedRelations(t *testing.T) {
 	}
 }
 
+func TestCompileC4ContextDiagramKeepsInternalRelationsWhenOnlyActorRelationExists(t *testing.T) {
+	t.Parallel()
+
+	ws := writeReportsWorkspace(t)
+	compiler := NewCompiler(ws)
+
+	entities := []contracts.Entity{
+		{
+			ID:   "team.security",
+			Type: "team",
+			Name: "Security Team",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 1,
+				Evidence: []contracts.Evidence{
+					{Repo: "sample", Path: "CODEOWNERS"},
+				},
+			},
+		},
+		{
+			ID:   "svc.capture",
+			Type: "service",
+			Name: "Capture Service",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 1,
+				Evidence: []contracts.Evidence{
+					{Repo: "sample", Path: "services/capture/main.go"},
+				},
+			},
+		},
+		{
+			ID:   "svc.ingestion",
+			Type: "service",
+			Name: "Ingestion Service",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 1,
+				Evidence: []contracts.Evidence{
+					{Repo: "sample", Path: "services/ingestion/main.go"},
+				},
+			},
+		},
+		{
+			ID:   "db.events",
+			Type: "datastore",
+			Name: "Events Store",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 1,
+				Evidence: []contracts.Evidence{
+					{Repo: "sample", Path: "db/events.sql"},
+				},
+			},
+		},
+	}
+	edges := []contracts.Edge{
+		{
+			ID:   "edge.security.capture",
+			Type: "owns",
+			From: "team.security",
+			To:   "svc.capture",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 0.9,
+				Evidence: []contracts.Evidence{
+					{Repo: "sample", Path: "CODEOWNERS"},
+				},
+			},
+		},
+		{
+			ID:   "edge.capture.ingestion",
+			Type: "publishes_to",
+			From: "svc.capture",
+			To:   "svc.ingestion",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 0.9,
+				Evidence: []contracts.Evidence{
+					{Repo: "sample", Path: "services/capture/publisher.go"},
+				},
+			},
+		},
+		{
+			ID:   "edge.ingestion.events",
+			Type: "persists_to",
+			From: "svc.ingestion",
+			To:   "db.events",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 0.9,
+				Evidence: []contracts.Evidence{
+					{Repo: "sample", Path: "services/ingestion/store.go"},
+				},
+			},
+		},
+	}
+
+	if _, err := compiler.CompileC4Diagrams(entities, edges); err != nil {
+		t.Fatalf("compile c4 diagrams: %v", err)
+	}
+
+	contextContent, err := os.ReadFile(filepath.Join(ws.Path, "reports/diagrams/c4-context.mmd"))
+	if err != nil {
+		t.Fatalf("read context diagram: %v", err)
+	}
+	contextText := string(contextContent)
+
+	for _, expected := range []string{
+		"team_team_security --> System",
+		"Evidence-backed workspace internals",
+		"Service: Capture Service",
+		"Service: Ingestion Service",
+		"Datastore: Events Store",
+		"ctx_svc_capture -->|publishes_to| ctx_svc_ingestion",
+		"ctx_svc_ingestion -->|persists_to| ctx_db_events",
+	} {
+		if !strings.Contains(contextText, expected) {
+			t.Fatalf("expected %q in context diagram, got:\n%s", expected, contextText)
+		}
+	}
+}
+
+func TestCompileC4ContextDiagramUsesInternalRelationsWhenNoExternalActors(t *testing.T) {
+	t.Parallel()
+
+	ws := writeReportsWorkspace(t)
+	compiler := NewCompiler(ws)
+
+	entities := []contracts.Entity{
+		{
+			ID:   "svc.orders",
+			Type: "service",
+			Name: "orders",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 1,
+				Evidence: []contracts.Evidence{
+					{Repo: "sample", Path: "services/orders/main.go"},
+				},
+			},
+		},
+		{
+			ID:   "svc.kitchen",
+			Type: "service",
+			Name: "kitchen",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 1,
+				Evidence: []contracts.Evidence{
+					{Repo: "sample", Path: "services/kitchen/main.go"},
+				},
+			},
+		},
+		{
+			ID:   "db.orders",
+			Type: "datastore",
+			Name: "orders-db",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 1,
+				Evidence: []contracts.Evidence{
+					{Repo: "sample", Path: "db/orders.sql"},
+				},
+			},
+		},
+	}
+	edges := []contracts.Edge{
+		{
+			ID:   "edge.orders.kitchen",
+			Type: "calls",
+			From: "svc.orders",
+			To:   "svc.kitchen",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 0.9,
+				Evidence: []contracts.Evidence{
+					{Repo: "sample", Path: "services/orders/kitchen_client.go"},
+				},
+			},
+		},
+		{
+			ID:   "edge.orders.db",
+			Type: "uses",
+			From: "svc.orders",
+			To:   "db.orders",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 0.9,
+				Evidence: []contracts.Evidence{
+					{Repo: "sample", Path: "services/orders/repository.go"},
+				},
+			},
+		},
+	}
+
+	if _, err := compiler.CompileC4Diagrams(entities, edges); err != nil {
+		t.Fatalf("compile c4 diagrams: %v", err)
+	}
+
+	contextContent, err := os.ReadFile(filepath.Join(ws.Path, "reports/diagrams/c4-context.mmd"))
+	if err != nil {
+		t.Fatalf("read context diagram: %v", err)
+	}
+	contextText := string(contextContent)
+
+	if strings.Contains(contextText, "Gap: no evidence-backed relationships") {
+		t.Fatalf("did not expect relationship gap with internal evidence-backed edges, got:\n%s", contextText)
+	}
+	for _, expected := range []string{
+		"Evidence-backed workspace internals",
+		"Service: orders",
+		"Service: kitchen",
+		"Datastore: orders-db",
+		"ctx_svc_orders -->|calls| ctx_svc_kitchen",
+		"ctx_svc_orders -->|uses| ctx_db_orders",
+	} {
+		if !strings.Contains(contextText, expected) {
+			t.Fatalf("expected %q in context diagram, got:\n%s", expected, contextText)
+		}
+	}
+}
+
+func TestCompileC4DiagramsDeduplicatesEntityIDs(t *testing.T) {
+	t.Parallel()
+
+	ws := writeReportsWorkspace(t)
+	compiler := NewCompiler(ws)
+
+	entities := []contracts.Entity{
+		{
+			ID:   "svc.orders",
+			Type: "service",
+			Name: "orders",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 1,
+				Evidence: []contracts.Evidence{
+					{Repo: "sample", Path: "services/orders/main.go"},
+				},
+			},
+		},
+		{
+			ID:   "svc.orders",
+			Type: "service",
+			Name: "orders duplicate",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 1,
+				Evidence: []contracts.Evidence{
+					{Repo: "sample", Path: "services/orders/handler.go"},
+				},
+			},
+		},
+		{
+			ID:   "db.orders",
+			Type: "datastore",
+			Name: "orders-db",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 1,
+				Evidence: []contracts.Evidence{
+					{Repo: "sample", Path: "db/orders.sql"},
+				},
+			},
+		},
+	}
+	edges := []contracts.Edge{
+		{
+			ID:   "edge.orders.db",
+			Type: "uses",
+			From: "svc.orders",
+			To:   "db.orders",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 0.9,
+				Evidence: []contracts.Evidence{
+					{Repo: "sample", Path: "services/orders/repository.go"},
+				},
+			},
+		},
+	}
+
+	if _, err := compiler.CompileC4Diagrams(entities, edges); err != nil {
+		t.Fatalf("compile c4 diagrams: %v", err)
+	}
+
+	containerContent, err := os.ReadFile(filepath.Join(ws.Path, "reports/diagrams/c4-container.mmd"))
+	if err != nil {
+		t.Fatalf("read container diagram: %v", err)
+	}
+	containerText := string(containerContent)
+	if got := strings.Count(containerText, `svc_svc_orders["Service:`); got != 1 {
+		t.Fatalf("expected one service node for duplicate entity id, got %d:\n%s", got, containerText)
+	}
+}
+
 func writeReportsWorkspace(t *testing.T) workspace.Root {
 	t.Helper()
 

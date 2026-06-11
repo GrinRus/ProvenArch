@@ -127,11 +127,11 @@ func (a claudeAdapter) ValidateArtifacts(task acpruntime.Task) error {
 
 func (a claudeAdapter) ActivityPolicy(task acpruntime.Task) providercommon.ActivityPolicy {
 	monitorArtifacts := providercommon.MonitorsRuntimeArtifacts(task)
-	return providercommon.ActivityPolicy{
+	return providercommon.WithCollectArtifactEnrichmentWindow(task, providercommon.ActivityPolicy{
 		MonitorArtifacts:       monitorArtifacts,
 		MonitorPreArtifact:     monitorArtifacts,
 		PreArtifactStallWindow: 180 * time.Second,
-	}
+	})
 }
 
 func (a claudeAdapter) RecoveryPolicy(task acpruntime.Task) providercommon.RecoveryPolicy {

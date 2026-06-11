@@ -106,7 +106,7 @@ func (a qwenAdapter) ActivityPolicy(task acpruntime.Task) providercommon.Activit
 	if runtimedrafts.IsDraftStep(task.StepID) {
 		policy.ValidArtifactStopWindow = 2 * time.Minute
 	}
-	return policy
+	return providercommon.WithCollectArtifactEnrichmentWindow(task, policy)
 }
 
 func (a qwenAdapter) RecoveryPolicy(_ acpruntime.Task) providercommon.RecoveryPolicy {

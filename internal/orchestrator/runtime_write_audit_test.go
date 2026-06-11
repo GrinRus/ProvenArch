@@ -79,6 +79,60 @@ func TestRuntimeWriteAuditWarnsOnRepoMutation(t *testing.T) {
 	}
 }
 
+func TestRuntimeWriteAuditReportsUnavailableRepoStatusAsSkipped(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+
+	ws := writeAuditWorkspace(t)
+	repoRoot := writeAuditGitRepo(t)
+	task := writeAuditTask(ws, []string{repoRoot})
+	execution, logs := newWriteAuditExecution(ws)
+
+	before := beginRuntimeWriteAudit(task)
+	if len(before.repoStatuses) == 0 {
+		t.Fatal("expected audited repo status before runtime")
+	}
+	if err := os.RemoveAll(repoRoot); err != nil {
+		t.Fatalf("remove repo root: %v", err)
+	}
+	execution.completeRuntimeWriteAudit("init.step1.collect", "", task, before)
+
+	if hasWarningContaining(execution.warnings, runtimeWriteAuditUnexpectedMutation) {
+		t.Fatalf("unavailable repo status must not be reported as mutation: %#v", execution.warnings)
+	}
+	if !hasWarningContaining(execution.warnings, runtimeWriteAuditRepoSkipped) {
+		t.Fatalf("expected repo skipped warning, got %#v", execution.warnings)
+	}
+	if !hasLogField(logs, "reason", "status_unavailable_after_runtime") {
+		t.Fatalf("expected unavailable-after-runtime reason, got %#v", logs)
+	}
+	if hasLogField(logs, "changed_paths", "po status unavailable after runtime>") {
+		t.Fatalf("unexpected truncated unavailable sentinel in changed_paths: %#v", logs)
+	}
+}
+
+func TestChangedRepoStatusPathsOnlyStripsGitPorcelainPrefix(t *testing.T) {
+	t.Parallel()
+
+	paths := changedRepoStatusPaths(nil, []string{
+		" M README.md",
+		"?? notes.md",
+		"<repo status unavailable after runtime>",
+	})
+
+	if !stringSliceContains(paths, "README.md") || !stringSliceContains(paths, "notes.md") {
+		t.Fatalf("expected git porcelain paths, got %#v", paths)
+	}
+	if !stringSliceContains(paths, "<repo status unavailable after runtime>") {
+		t.Fatalf("expected non-porcelain sentinel to stay intact, got %#v", paths)
+	}
+	if stringSliceContains(paths, "po status unavailable after runtime>") {
+		t.Fatalf("sentinel must not be trimmed like porcelain output, got %#v", paths)
+	}
+}
+
 func TestRuntimeWriteAuditLogsNonGitRepoSkip(t *testing.T) {
 	t.Parallel()
 
@@ -192,6 +246,15 @@ func hasLogField(logs *[]RunLogEntry, key string, value string) bool {
 			continue
 		}
 		if got, ok := entry.Fields[key].(string); ok && got == value {
+			return true
+		}
+	}
+	return false
+}
+
+func stringSliceContains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
 			return true
 		}
 	}

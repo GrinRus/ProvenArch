@@ -10,7 +10,13 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 )
 
+const (
+	maxContextInternalNodes = 14
+	maxContextInternalEdges = 24
+)
+
 func (c Compiler) CompileC4Diagrams(entities []contracts.Entity, edges []contracts.Edge) ([]Artifact, error) {
+	entities = uniqueEntitiesByID(entities)
 	entityByID := make(map[string]contracts.Entity, len(entities))
 	for _, entity := range entities {
 		entityByID[entity.ID] = entity
@@ -208,11 +214,39 @@ func buildC4ContextDiagram(
 			relationCount++
 		}
 	}
+	if relationCount == 0 || (externalCount == 0 && serviceCount > 1) {
+		relationCount += writeInternalContextFallback(&builder, services, filterEntitiesByType(entities, "datastore"), edges)
+	}
 	if relationCount == 0 {
 		builder.WriteString("  GapRelations[\"Gap: no evidence-backed relationships\"]\n")
 		builder.WriteString("  System -.-> GapRelations\n")
 	}
 	return builder.String()
+}
+
+func uniqueEntitiesByID(entities []contracts.Entity) []contracts.Entity {
+	byID := make(map[string]contracts.Entity, len(entities))
+	for _, entity := range entities {
+		id := strings.TrimSpace(entity.ID)
+		if id == "" {
+			continue
+		}
+		entity.ID = id
+		existing, ok := byID[id]
+		if !ok || (!entityHasEvidence(existing) && entityHasEvidence(entity)) {
+			byID[id] = entity
+		}
+	}
+	ids := make([]string, 0, len(byID))
+	for id := range byID {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	out := make([]contracts.Entity, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, byID[id])
+	}
+	return out
 }
 
 func buildC4ContainerDiagram(
@@ -460,6 +494,144 @@ type systemRelation struct {
 	nodeToSystem bool
 }
 
+type internalContextNode struct {
+	id     string
+	nodeID string
+	label  string
+	shape  string
+}
+
+type internalContextRelation struct {
+	id    string
+	from  string
+	to    string
+	label string
+}
+
+func writeInternalContextFallback(builder *strings.Builder, services []contracts.Entity, datastores []contracts.Entity, edges []contracts.Edge) int {
+	if builder == nil {
+		return 0
+	}
+	candidates := map[string]internalContextNode{}
+	for _, service := range services {
+		if !entityHasEvidence(service) {
+			continue
+		}
+		candidates[service.ID] = internalContextNode{
+			id:     service.ID,
+			nodeID: mermaidNodeID("ctx", service.ID),
+			label:  "Service: " + service.Name,
+			shape:  "box",
+		}
+	}
+	for _, datastore := range datastores {
+		if !entityHasEvidence(datastore) {
+			continue
+		}
+		candidates[datastore.ID] = internalContextNode{
+			id:     datastore.ID,
+			nodeID: mermaidNodeID("ctx", datastore.ID),
+			label:  "Datastore: " + datastore.Name,
+			shape:  "database",
+		}
+	}
+	if len(candidates) == 0 {
+		return 0
+	}
+
+	relations := make([]internalContextRelation, 0)
+	for _, edge := range edges {
+		if !edgeHasEvidence(edge) {
+			continue
+		}
+		from := strings.TrimSpace(edge.From)
+		to := strings.TrimSpace(edge.To)
+		if from == "" || to == "" {
+			continue
+		}
+		if _, ok := candidates[from]; !ok {
+			continue
+		}
+		if _, ok := candidates[to]; !ok {
+			continue
+		}
+		relations = append(relations, internalContextRelation{
+			id:    edge.ID,
+			from:  from,
+			to:    to,
+			label: edge.Type,
+		})
+	}
+	if len(relations) == 0 {
+		return 0
+	}
+	sort.Slice(relations, func(i, j int) bool {
+		left := relations[i]
+		right := relations[j]
+		if left.from != right.from {
+			return left.from < right.from
+		}
+		if left.to != right.to {
+			return left.to < right.to
+		}
+		if left.label != right.label {
+			return left.label < right.label
+		}
+		return left.id < right.id
+	})
+
+	included := map[string]struct{}{}
+	selectedRelations := make([]internalContextRelation, 0, minInt(len(relations), maxContextInternalEdges))
+	for _, relation := range relations {
+		nextNodes := 0
+		if _, ok := included[relation.from]; !ok {
+			nextNodes++
+		}
+		if relation.to != relation.from {
+			if _, ok := included[relation.to]; !ok {
+				nextNodes++
+			}
+		}
+		if len(included)+nextNodes > maxContextInternalNodes {
+			continue
+		}
+		included[relation.from] = struct{}{}
+		included[relation.to] = struct{}{}
+		selectedRelations = append(selectedRelations, relation)
+		if len(selectedRelations) >= maxContextInternalEdges {
+			break
+		}
+	}
+	if len(selectedRelations) == 0 {
+		return 0
+	}
+
+	nodeIDs := make([]string, 0, len(included))
+	for id := range included {
+		nodeIDs = append(nodeIDs, id)
+	}
+	sort.Strings(nodeIDs)
+
+	builder.WriteString("  subgraph InternalContext[\"Evidence-backed workspace internals\"]\n")
+	for _, id := range nodeIDs {
+		node := candidates[id]
+		switch node.shape {
+		case "database":
+			builder.WriteString(fmt.Sprintf("    %s[(\"%s\")]\n", node.nodeID, escapeMermaidLabel(node.label)))
+		default:
+			builder.WriteString(fmt.Sprintf("    %s[\"%s\"]\n", node.nodeID, escapeMermaidLabel(node.label)))
+		}
+	}
+	builder.WriteString("  end\n")
+
+	for _, relation := range selectedRelations {
+		fromNode := candidates[relation.from].nodeID
+		toNode := candidates[relation.to].nodeID
+		builder.WriteString(fmt.Sprintf("  %s -->|%s| %s\n", fromNode, escapeMermaidLabel(relation.label), toNode))
+	}
+	return len(selectedRelations)
+}
+
 func writeSystemRelation(builder *strings.Builder, systemNodeID string, targetNodeID string, relation systemRelation) bool {
 	if builder == nil {
 		return false
@@ -519,4 +691,11 @@ func topPathSegment(path string) string {
 		return ""
 	}
 	return strings.TrimSpace(parts[0])
+}
+
+func minInt(left int, right int) int {
+	if left < right {
+		return left
+	}
+	return right
 }

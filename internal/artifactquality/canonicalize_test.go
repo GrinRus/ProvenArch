@@ -32,6 +32,115 @@ func TestValidateCollectManifestRejectsContractInvalidCompatibilityPayload(t *te
 	}
 }
 
+func TestValidateCollectManifestRejectsProviderToolDocumentPath(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	payload := validCollectManifestPayload()
+	payload["documents"].([]any)[0].(map[string]any)["path"] = ".qwen/skills/acp-collect-shard-execution/SKILL.md"
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), raw, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	writeDoc(t, writeRoot, ".qwen/skills/acp-collect-shard-execution/SKILL.md", "# Tool side effect\n")
+
+	err = ValidateCollectManifestInRoot(writeRoot)
+	if err == nil {
+		t.Fatalf("expected provider tool document path to fail validation")
+	}
+	if !strings.Contains(err.Error(), ".qwen") {
+		t.Fatalf("expected validation error to mention provider tool component, got %v", err)
+	}
+}
+
+func TestValidateCollectManifestRejectsBootstrapOnlyDocument(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	manifest := bootstrapCollectManifest()
+	writeManifest(t, writeRoot, manifest)
+	writeDoc(t, writeRoot, "payments-overview.md", "# Payments Overview\n\n<!-- "+CollectBootstrapReplaceMarker+" -->\n\n## Observations\n- `src/payment_handler.go` defines the payment service entrypoint.\n")
+
+	err := ValidateCollectManifestInRoot(writeRoot)
+	if err == nil {
+		t.Fatalf("expected bootstrap-only collect document to fail validation")
+	}
+	if !strings.Contains(err.Error(), "bootstrap-only collect document") {
+		t.Fatalf("expected bootstrap-only document validation error, got %v", err)
+	}
+}
+
+func TestValidateCollectManifestRejectsLowSignalRecoveryDocument(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	manifest := bootstrapCollectManifest()
+	writeManifest(t, writeRoot, manifest)
+	writeDoc(t, writeRoot, "payments-overview.md", "# Payments Overview\n\n## Recovery Summary\n- Repository: payments\n- Assigned scope: src\n- Evidence candidate used for the recovery manifest: `src`.\n\n## Evidence Candidates\n- `src` is the first scoped repository path encoded in the recovery manifest.\n- Additional repository-specific details should be enriched by the provider when available within the repair window.\n\n## Remaining Questions\n- Confirm concrete ownership, runtime responsibilities, and operational escalation evidence for this shard.\n")
+
+	err := ValidateCollectManifestInRoot(writeRoot)
+	if err == nil {
+		t.Fatalf("expected low-signal recovery collect document to fail validation")
+	}
+	if !strings.Contains(err.Error(), "bootstrap-only collect document") {
+		t.Fatalf("expected low-signal recovery document validation error, got %v", err)
+	}
+}
+
+func TestValidateCollectManifestRejectsMarkerFreeInitialSeedDocument(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	manifest := bootstrapCollectManifest()
+	writeManifest(t, writeRoot, manifest)
+	writeDoc(t, writeRoot, "payments-overview.md", "# Payments Overview\n\n## Scope\n- Repository scope: payments.\n- Assigned scope summary: `src`.\n\n## Evidence Summary\n- Primary scoped evidence path: `src`.\n- This initial collect pair is a seed-only scoped evidence surface for the assigned shard.\n\n## Evidence Surface\n- `src`: scoped repository evidence available to this collect shard.\n\n## Initial Findings\n- The assigned evidence surface is traceable, but ownership, runtime responsibility, and escalation details need confirmation from richer repository evidence.\n\n## Coverage Gaps\n- Confirm concrete owners, runtime responsibilities, dependencies, and operational escalation paths for this shard.\n")
+
+	err := ValidateCollectManifestInRoot(writeRoot)
+	if err == nil {
+		t.Fatalf("expected marker-free initial seed collect document to fail validation")
+	}
+	if !strings.Contains(err.Error(), "bootstrap-only collect document") {
+		t.Fatalf("expected seed document validation error, got %v", err)
+	}
+}
+
+func TestValidateCollectManifestRejectsRecoveryEvidenceFallbackDocument(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	manifest := bootstrapCollectManifest()
+	writeManifest(t, writeRoot, manifest)
+	writeDoc(t, writeRoot, "payments-overview.md", "# Payments Overview\n\n## Recovery Evidence Summary\n- Repository scope: payments.\n- Assigned scope summary: `src`.\n- Primary scoped evidence path: `src`.\n- This document is a seed-only collect recovery fallback for a shard whose first collect attempt did not complete with enriched artifacts.\n\n## Evidence Surface\n- `src`: scoped repository evidence available to the collect shard.\n\n## Recovery Notes\n- The recovery pair records concrete scoped paths so downstream compilation can preserve traceability instead of accepting an empty or marker-only shard.\n\n## Remaining Questions\n- Confirm concrete ownership, runtime responsibilities, and operational escalation evidence for this shard.\n")
+
+	err := ValidateCollectManifestInRoot(writeRoot)
+	if err == nil {
+		t.Fatalf("expected recovery evidence fallback collect document to fail validation")
+	}
+	if !strings.Contains(err.Error(), "bootstrap-only collect document") {
+		t.Fatalf("expected recovery fallback validation error, got %v", err)
+	}
+}
+
+func TestValidateCollectManifestRejectsBootstrapOnlySemanticSkeleton(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	manifest := bootstrapCollectManifest()
+	writeManifest(t, writeRoot, manifest)
+	writeDoc(t, writeRoot, "payments-overview.md", "# Payments Overview\n\n## Observations\n- `src/payment_handler.go` defines the payment service entrypoint.\n- `src/ledger_client.go` calls the ledger write API when a payment is accepted.\n\n## Evidence\n- `src/payment_handler.go`\n- `src/ledger_client.go`\n")
+
+	err := ValidateCollectManifestInRoot(writeRoot)
+	if err == nil {
+		t.Fatalf("expected unchanged semantic skeleton to fail validation")
+	}
+	if !strings.Contains(err.Error(), "semantic snapshot is bootstrap-only collect scaffold") {
+		t.Fatalf("expected semantic scaffold validation error, got %v", err)
+	}
+}
+
 func TestValidateCollectManifestRejectsForbiddenSemanticAliasesBySchema(t *testing.T) {
 	t.Parallel()
 

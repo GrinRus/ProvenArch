@@ -475,10 +475,50 @@ code {
 
 .activity-drawer {
   min-width: 0;
-  max-height: 32vh;
   border-top: 1px solid var(--line);
   background: var(--surface);
-  padding: 0.7rem 1rem 0.9rem;
+  overflow: visible;
+}
+
+.activity-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 2.8rem;
+  padding: 0.55rem 1rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.activity-summary-copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.05rem;
+}
+
+.activity-summary-copy strong {
+  font-size: 0.86rem;
+}
+
+.activity-summary-copy .hint,
+.activity-summary-status {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-summary-status {
+  flex: none;
+  max-width: 16rem;
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+  font-weight: 760;
+}
+
+.activity-drawer-body {
+  max-height: min(24vh, 14rem);
+  padding: 0 1rem 0.85rem;
   overflow: auto;
   scrollbar-gutter: stable;
 }
@@ -1457,12 +1497,39 @@ code {
   box-shadow: 0 0 0 1px var(--line-soft);
 }
 
+.review-run-recovery {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin: 0.55rem 0 0.75rem;
+  padding: 0.72rem;
+  border: 1px solid rgba(184, 83, 9, 0.24);
+  border-radius: 0.48rem;
+  background: rgba(250, 176, 5, 0.1);
+}
+
+.review-run-recovery div {
+  min-width: 0;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.review-run-recovery span {
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+
+.review-run-recovery button {
+  flex: 0 0 auto;
+}
+
 .review-workbench {
   min-width: 0;
   display: grid;
   grid-template-columns: minmax(210px, 0.72fr) minmax(340px, 1.35fr) minmax(240px, 0.82fr);
   gap: 0.8rem;
-  align-items: start;
+  align-items: stretch;
 }
 
 .review-artifact-explorer,
@@ -1476,6 +1543,32 @@ code {
   border: 1px solid var(--line-soft);
   border-radius: 0.48rem;
   background: var(--surface-muted);
+}
+
+.review-artifact-explorer,
+.review-evidence-preview {
+  display: grid;
+  gap: 0.62rem;
+  align-content: start;
+}
+
+.review-evidence-preview {
+  min-height: min(56vh, 34rem);
+}
+
+[data-testid="run-artifact-content-panel"],
+[data-testid="run-diagram-content-panel"] {
+  min-width: 0;
+  min-height: min(44vh, 27rem);
+  display: grid;
+  grid-template-rows: auto minmax(12rem, 1fr);
+  gap: 0.5rem;
+}
+
+[data-testid="run-artifact-selected-path"],
+[data-testid="run-diagram-selected-path"] {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .artifact-group-list {
@@ -1541,12 +1634,15 @@ code {
 .review-evidence-preview pre,
 .review-source-lists pre {
   margin: 0;
-  max-height: 360px;
+  min-height: 12rem;
+  max-height: min(52vh, 36rem);
   overflow: auto;
   border: 1px solid var(--line-soft);
   border-radius: 0.42rem;
   background: var(--surface);
   padding: 0.62rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -2046,9 +2142,10 @@ code {
 }
 
 .diagram-svg svg {
-  width: 100%;
+  width: max-content;
   height: auto;
-  min-width: 250px;
+  min-width: 44rem;
+  max-width: none;
 }
 
 .qa-answer {
@@ -2105,7 +2202,7 @@ code {
   display: grid;
   grid-template-columns: minmax(240px, 0.78fr) minmax(360px, 1.28fr) minmax(270px, 0.86fr);
   gap: 0.8rem;
-  align-items: start;
+  align-items: stretch;
 }
 
 .publish-diff-summary,
@@ -2117,6 +2214,13 @@ code {
   border: 1px solid var(--line-soft);
   border-radius: 0.48rem;
   background: var(--surface-muted);
+}
+
+.publish-preview-panel {
+  min-height: min(56vh, 34rem);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
 }
 
 .publish-folder-list,
@@ -2236,6 +2340,8 @@ code {
 
 .publish-tab-panel {
   min-width: 0;
+  min-height: min(44vh, 27rem);
+  display: grid;
   padding: 0.62rem;
   border: 1px solid var(--line-soft);
   border-radius: 0.42rem;
@@ -2251,6 +2357,13 @@ code {
   margin-top: 0.65rem;
 }
 
+.publish-selected-preview,
+.publish-changelog-preview {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+}
+
 .publish-changelog-preview h3 {
   margin: 0;
   font-size: 0.84rem;
@@ -2258,8 +2371,15 @@ code {
 
 .publish-tab-panel pre {
   margin: 0.4rem 0 0;
-  max-height: 430px;
+  min-height: 12rem;
+  max-height: min(52vh, 36rem);
   overflow: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 0.42rem;
+  background: var(--surface-muted);
+  padding: 0.62rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -3219,6 +3339,10 @@ code {
     grid-template-columns: 1fr;
   }
 
+  .review-evidence-preview {
+    order: -1;
+  }
+
   .domain-map-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -3226,13 +3350,17 @@ code {
 
 @media (max-width: 680px) {
   .work-area,
-  .right-inspector,
-  .activity-drawer {
+  .right-inspector {
     padding: 0.65rem;
   }
 
-  .activity-drawer {
+  .activity-summary {
+    padding: 0.55rem 0.65rem;
+  }
+
+  .activity-drawer-body {
     max-height: 220px;
+    padding: 0 0.65rem 0.65rem;
   }
 
   .columns,
@@ -3341,6 +3469,6 @@ code {
   }
 
   .diagram-svg svg {
-    min-width: 0;
+    min-width: 36rem;
   }
 }
