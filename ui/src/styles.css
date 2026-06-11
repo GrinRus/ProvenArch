@@ -475,10 +475,50 @@ code {
 
 .activity-drawer {
   min-width: 0;
-  max-height: min(24vh, 16rem);
   border-top: 1px solid var(--line);
   background: var(--surface);
-  padding: 0.7rem 1rem 0.9rem;
+  overflow: visible;
+}
+
+.activity-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 2.8rem;
+  padding: 0.55rem 1rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.activity-summary-copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.05rem;
+}
+
+.activity-summary-copy strong {
+  font-size: 0.86rem;
+}
+
+.activity-summary-copy .hint,
+.activity-summary-status {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-summary-status {
+  flex: none;
+  max-width: 16rem;
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+  font-weight: 760;
+}
+
+.activity-drawer-body {
+  max-height: min(24vh, 14rem);
+  padding: 0 1rem 0.85rem;
   overflow: auto;
   scrollbar-gutter: stable;
 }
@@ -3088,13 +3128,17 @@ code {
 
 @media (max-width: 680px) {
   .work-area,
-  .right-inspector,
-  .activity-drawer {
+  .right-inspector {
     padding: 0.65rem;
   }
 
-  .activity-drawer {
+  .activity-summary {
+    padding: 0.55rem 0.65rem;
+  }
+
+  .activity-drawer-body {
     max-height: 220px;
+    padding: 0 0.65rem 0.65rem;
   }
 
   .columns,

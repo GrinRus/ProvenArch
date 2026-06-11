@@ -72,6 +72,27 @@ class BatchFailureClassificationTest(unittest.TestCase):
         npm.chmod(0o755)
         env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
 
+    def test_evidence_path_resolves_unique_extensionless_repo_file(self) -> None:
+        workspace = self.root / "workspace"
+        repo = self.root / "posthog"
+        write_text(repo / "nodejs/src/utils/db/postgres.ts", "export const postgres = true\n")
+        write_text(repo / "nodejs/src/utils/db/redis.ts", "export const redis = true\n")
+
+        ok, reason = self.module.evidence_path_resolves("nodejs/src/utils/db/postgres", [repo], workspace)
+
+        self.assertTrue(ok, reason)
+
+    def test_evidence_path_rejects_ambiguous_extensionless_repo_file(self) -> None:
+        workspace = self.root / "workspace"
+        repo = self.root / "ambiguous"
+        write_text(repo / "src/config.ts", "export const config = true\n")
+        write_text(repo / "src/config.go", "package config\n")
+
+        ok, reason = self.module.evidence_path_resolves("src/config", [repo], workspace)
+
+        self.assertFalse(ok)
+        self.assertEqual("ambiguous extensionless relative path", reason)
+
     def _create_fixture_run_dir(self, run_dir: Path) -> None:
         write_text(
             run_dir / "session-summary.md",
