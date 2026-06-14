@@ -2,7 +2,7 @@
 
 Этот runbook фиксирует manual pre-release gate на trusted локальной машине.
 Новый wrapper-скрипт не используется: local `manual-live-e2e workflow` является operator procedure on trusted host, not GitHub Actions workflow. Агент запускает существующий matrix harness напрямую (`full-run-batch-matrix.sh` -> `full-run-batch.sh` -> internal backend-cycle helper -> `e2e_batch_report.py`).
-Layering: live-e2e skill -> local trusted-machine operator procedure -> direct public harness commands -> ACP runtime/provider/UI evidence. Scripts produce setup/execution artifacts and machine verdicts only; operator/SWE-agent produces the separate black-box assessment over that evidence.
+Layering: live-e2e skill -> local trusted-machine operator procedure -> direct public harness commands -> ACP runtime/provider/UI evidence. Scripts produce setup/execution artifacts and machine execution verdicts only; запускающий SWE-agent separately пишет UX assessment и artifact-quality assessment over that evidence.
 
 Canonical source of truth для live profile taxonomy:
 - `examples/e2e-profile-catalog.yaml`
@@ -13,14 +13,14 @@ Canonical source of truth для live profile taxonomy:
 
 Canonical live E2E flow теперь является operator-driven black-box evaluation. Агент не начинает с чтения итогового отчёта: он планирует шаг, запускает или инспектирует только публичную поверхность, фиксирует evidence, классифицирует результат и принимает следующее решение.
 
-После каждой фазы оператор фиксирует шаг в текущем ответе или в manual report `reports/operator_blackbox_assessment_<matrix-id>.md`:
+После каждой execution-фазы оператор фиксирует шаг в текущем ответе или в optional manual report `reports/operator_blackbox_assessment_<matrix-id>.md`:
 
 ```text
 goal: <что доказываем>
 action: <какую публичную поверхность вызвали/прочитали>
 observed evidence: <команды, UI/API/log/report/artifact/verifier paths>
 status: passed|failed|skipped|blocked
-primary classification: none|operational_host_preflight_failed|precheck_failed|runtime_timeout|runner_unavailable|runtime_contract_failed|runtime_flow_failed|quality_gates_failed|release_verdict_FAIL|...
+primary classification: none|operational_host_preflight_failed|precheck_failed|runner_unavailable|runtime_timeout|runtime_contract_failed|runtime_flow_failed|frontend_failed|infra_incomplete_cycle|infra_signal_terminated|release_verdict_FAIL|...
 next decision: <continue|stop|rerun diagnostic|verify verdict|final report>
 ```
 
@@ -34,16 +34,16 @@ next decision: <continue|stop|rerun diagnostic|verify verdict|final report>
 
 Запрещено использовать compatibility aliases, command shims, test-only overrides или править canonical matrix/curated repo files под текущую машину. Host/provider/path blockers останавливают прогон как `operational_host_preflight_failed`.
 
-Harness не пишет machine-authored black-box step reports. Удалённые `blackbox_e2e_steps_*` не являются release evidence; их заменяет ручной operator assessment поверх фактических artifacts/reports/verifier output.
+Harness не пишет machine-authored black-box step reports. Удалённые `blackbox_e2e_steps_*` не являются release evidence. Для release readiness обязательны два отдельных SWE reports: `reports/swe_ux_assessment_<matrix-id>.md` и `reports/swe_artifact_quality_assessment_<matrix-id>.md`.
 
 Canonical flow:
 1. host/tree/provider/path preflight;
 2. selector and direct command planning;
 3. matrix execution monitoring;
-4. backend artifact and quality inspection;
-5. frontend UI/API init inspection;
-6. release verdict verification;
-7. final black-box report.
+4. backend execution evidence inspection;
+5. frontend UI/API init inspection and UX evidence capture;
+6. release execution verdict verification;
+7. SWE UX assessment and SWE artifact-quality assessment.
 
 ## 0) Canonical profile catalog
 
@@ -67,8 +67,9 @@ Current shard classification:
 - `medium`: `posthog=24`, `ftgo=37`
 - `full`: `sentry-ecosystem=104`
 
-Release verdict для readiness берётся только из `reports/release_verdict_<matrix-id>.json`.
-Для `release full` composite readiness означает, что все constituent `release_verdict_<matrix-id>.json` имеют `PASS`.
+`reports/release_verdict_<matrix-id>.json` является только machine execution verdict.
+Для final release readiness дополнительно нужны `reports/swe_ux_assessment_<matrix-id>.md` и `reports/swe_artifact_quality_assessment_<matrix-id>.md` с matching `matrix_id` и `decision: accepted`.
+Для `release full` composite readiness означает, что все constituent `release_verdict_<matrix-id>.json` имеют `PASS`, и для каждого constituent matrix-id существуют оба accepted SWE reports.
 
 ### 0.1) Flexible command generator (no wrapper)
 
@@ -98,12 +99,12 @@ Flexible selectors:
 | `regres complex` | diagnostic/regression | Temporal, Backstage, Airflow, Appwrite, Saleor | selected provider(s) | implicit baseline | `5 × providers × RUN_COUNT` |
 | `release fast|long|full` | release | canonical release slices | all three providers only | `baseline + parallel-default` | unchanged |
 
-Artifact-quality policy для generated regress/release команд остаётся штатной:
-- каждый backend run должен иметь `reports/taskruns/<run_id>-quality.json`;
-- `quality_report_<batch-id>.md` должен агрегировать только реально выбранные providers/run indexes;
-- `artifact_quality:*` warning поднимается в `quality_gates_failed` и блокирует strict verdict.
-- `totals.repair_attempts`, `fresh_retries`, `focused_repairs`, `repair_exhausted`, `stall_count`, `pre_artifact_stalls`, `post_artifact_stalls`, `zero_output_pre_artifact_stalls` и `partial_failure_count` являются обязательной visible telemetry в quality/matrix reports;
-- non-exhausted repair/stall pressure не превращает successful backend run в failure само по себе, но `partial_failure_count > 0` остаётся strict blocker.
+Execution/reporting policy для generated regress/release команд:
+- каждый backend run may emit `reports/taskruns/<run_id>-quality.json`, but that file is telemetry/evidence only;
+- `execution_report_<batch-id>.md` агрегирует только реально выбранные providers/run indexes;
+- `artifact_quality:*` warnings are preserved as artifact-quality evidence and never convert batch/matrix/release execution verdict into `FAIL`;
+- `totals.repair_attempts`, `fresh_retries`, `focused_repairs`, `repair_exhausted`, `stall_count`, `pre_artifact_stalls`, `post_artifact_stalls`, `zero_output_pre_artifact_stalls`, `partial_failure_count` и `quality_alerts` являются visible execution telemetry в execution/matrix reports;
+- non-exhausted repair/stall pressure не превращает successful backend run в failure само по себе, но `partial_failure_count > 0` остаётся execution/runtime-flow blocker.
 - Diagnostic-only provider activity windows can be raised with `ACP_PROVIDER_PRE_ARTIFACT_STALL_SEC`, `ACP_PROVIDER_RETRY_PRE_ARTIFACT_STALL_SEC`, `ACP_PROVIDER_POST_ARTIFACT_STALL_SEC`, `ACP_PROVIDER_PARTIAL_ARTIFACT_STALL_SEC` and `ACP_PROVIDER_VALID_ARTIFACT_STOP_SEC`; the matrix harness treats them as timeout overrides and blocks them in release mode.
 
 ## 1) Scope и ограничения
@@ -159,7 +160,7 @@ Live harness выполняет DoD/UI precheck только на exact Node.js 
 ACP_NODE_TOOL_CANDIDATES=/path/to/node-22.21.1/bin ./scripts/full-run-batch-matrix.sh
 ```
 
-Для release evidence использовать стабильный toolchain path вне `/tmp`: временные распаковки Node могут исчезнуть между diagnostic и release runs и превратить backend/frontend checks в `quality_gates_failed`/`precheck_failed` без продуктового ACP дефекта.
+Для release evidence использовать стабильный toolchain path вне `/tmp`: временные распаковки Node могут исчезнуть между diagnostic и release runs и превратить backend/frontend checks в `precheck_failed` без продуктового ACP дефекта.
 
 Не использовать `ACP_NODE_VERSION_CHECK=0` или `BATCH_SKIP_PRECHECK=1` для canonical acceptance или manual diagnostics; исправить toolchain/host вместо обхода precheck.
 
@@ -591,7 +592,7 @@ ACP_APPLY_TIMEOUTS_VIA_API=1 \
 Addon slice `examples/e2e-matrix.release-full.ftgo-sentry.yaml` несёт `timeout_profile=extended-window`.
 
 Composite readiness rule:
-- `release full` считается готовым только если все три constituent `release_verdict_<matrix-id>.json` имеют `PASS`.
+- `release full` считается готовым только если все три constituent `release_verdict_<matrix-id>.json` имеют `PASS` и для каждого constituent matrix-id заполнены accepted SWE UX/artifact-quality reports.
 - `release fast` и `release long` можно использовать как самостоятельные slice verdicts.
 
 В release-mode (`MATRIX_ID=release-*`) matrix harness автоматически выставляет:
@@ -613,9 +614,13 @@ Release guard rules:
 - `release_verdict_<matrix-id>.json`
 - `run_matrix_<batch-id>.md`
 - `run_matrix_<batch-id>.tsv`
-- `quality_report_<batch-id>.md`
+- `execution_report_<batch-id>.md`
 - `frontend_e2e_matrix_<batch-id>.md`
-- `reports/operator_blackbox_assessment_<matrix-id>.md` (manual, если нужен durable reasoning report)
+- `reports/swe_ux_assessment_<matrix-id>.md` с `matrix_id: <matrix-id>` и `decision: accepted`
+- `reports/swe_artifact_quality_assessment_<matrix-id>.md` с `matrix_id: <matrix-id>` и `decision: accepted`
+
+Optional:
+- `reports/operator_blackbox_assessment_<matrix-id>.md` для дополнительного durable reasoning поверх evidence, но он не заменяет два SWE reports.
 
 Non-release/diagnostic matrix пишет neutral result:
 - `matrix_result_<matrix-id>.md`
@@ -626,7 +631,7 @@ Pre-tag/offline check:
 python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json
 ```
 
-Скрипт только проверяет уже созданный release-mode `release_verdict_<matrix-id>.json`: `verdict=PASS`, `release_state=RELEASE READY`, `release_contract.mode=release`, `release_contract.contract_status=passed`, exact release providers `qwen-code|claude-code|codex-code`, selected run indexes `["1"]`, и `strict_status=passed` во всех records. Он не запускает live harness и не является wrapper-скриптом поверх `scripts/full-run-batch-matrix.sh`.
+Скрипт проверяет уже созданный release-mode `release_verdict_<matrix-id>.json`: `verdict=PASS`, `release_state=RELEASE READY`, `release_contract.mode=release`, `release_contract.contract_status=passed`, exact release providers `qwen-code|claude-code|codex-code`, selected run indexes `["1"]`, и `strict_status=passed` во всех records. Затем он проверяет два companion reports рядом с verdict JSON: `swe_ux_assessment_<matrix-id>.md` и `swe_artifact_quality_assessment_<matrix-id>.md`, оба с matching `matrix_id` и `accepted` decision. Он не запускает live harness и не является wrapper-скриптом поверх `scripts/full-run-batch-matrix.sh`.
 
 Дополнительные для triage:
 - `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/*`
@@ -647,16 +652,18 @@ Blocking signals:
 - `runtime:shard-artifacts`
 - `runtime:shard-metadata`
 
-### 6.2 Cross-repo coverage hardening
+### 6.2 Artifact truthfulness and cross-repo review
 
 Проверяем:
-- для multi-profile (`expected_repo_count >= 2`) нет `analysis:cross-repo-missing`;
+- для multi-profile (`expected_repo_count >= 2`) SWE artifact report explicitly reviews whether cross-repo evidence is present or missing;
 - evidence и authored artifacts действительно ссылаются на несколько repo scopes, а не схлопываются в single-repo narrative;
 - cross-repo signal считается присутствующим, если есть explicit `semantic.edges[]`, либо repo coverage через `citations[].repo` плюс finding provenance по нескольким repos, либо question `related_ids` по нескольким repo scopes при наличии repo-specific citations; старый edge-only report check слишком узок для focused recovery outputs;
-- `path` и `git_url` profiles сохраняют одинаковую strict semantics по shard-plan/runtime-flow checks.
+- `path` и `git_url` profiles сохраняют одинаковую execution semantics по shard-plan/runtime-flow checks.
 
-Blocking signals:
-- `analysis:cross-repo-missing`
+Artifact-quality findings:
+- misleading interpretation;
+- weak or absent cross-repo evidence;
+- non-actionable or decision-unready summaries.
 
 ### 6.3 Execution profile semantics
 
@@ -701,17 +708,16 @@ Zero tolerance:
 - `summary_missing`
 - `infra_signal_terminated`
 - `infra_incomplete_cycle`
-- `quality_gates_failed`
 - `precheck_failed`
 
 Дополнительно:
 - если run завершился `run_partial_failed` и `reports/taskruns/<run_id>-quality.json.evidence_state.report_mode=incomplete`, generated markdown artifacts (`as-is/findings/coverage/proposals/agent-outputs`) читать только как triage-only artifacts; banner/triage-only wording обязаны явно указывать на incomplete analysis, а не имитировать пустой успешный verdict.
-- для `init.step1.collect` и `refresh.step1.collect` normal collect prompt начинает task-specific surface с `COLLECT EVIDENCE-FIRST ARTIFACT PAIR` сразу после provider identity: provider делает bounded evidence pass по existing repo entrypoint hints и assigned `path_scopes`, не читает `reports/taskruns/**`, raw logs, sibling shards или archive docs, и только после этого пишет suggested authored doc + `shard-pack-manifest.json` как marker-free evidence-backed pair. Task-specific manifest skeleton в prompt является schema/key/type guide, а не готовым heredoc artifact; copying unchanged skeleton или generic owner-gap/contains-only semantic считается scaffold-only contract drift. Collect validation reject-ит legacy marker/scaffold prose, marker-free unchanged seed prose, `Recovery Evidence Summary` fallback prose и scaffold-only semantic snapshot (`contains scoped surface` + generic owner mapping gap), чтобы stale/controlled stop не закреплял полупустой collect output. Общий runtime может сделать одну collect pair-recovery попытку только если provider оставил stdout/stderr diagnostics и не записал authored artifacts; bootstrap/seed-only authored docs не маскируются pair-recovery success. Если non-bootstrap authored docs уже есть, но `write_root/shard-pack-manifest.json` отсутствует или existing manifest failed only как scaffold-only semantic snapshot, runtime должен сначала применить `collect_manifest_runtime_recovery`; manifest-only provider repair остается для structural-invalid existing manifest или fallback после failed runtime recovery. Pair recovery heredoc остаётся seed recovery surface и должен быть rewritten evidence-backed перед successful exit. Manifest-only repair пишет только `shard-pack-manifest.json`, начинается с `COLLECT MANIFEST EVIDENCE-FIRST REPAIR` и содержит `FIRST COLLECT MANIFEST REPAIR COMMAND`; provider выполняет exact command as next filesystem action. Command читает authored markdown under `write_root`, использует listed repo evidence candidates/path scopes как bounded citation surface, извлекает documents/citations/entities/edges/findings/coverage/questions и пишет единственный allowed target. Exact skeleton остаётся schema guide, placeholder/copied skeleton invalid, а evidence-rich docs должны давать concrete semantic entities beyond repo/shard wrappers, non-contains relationships и findings/questions beyond generic owner mapping; citations-only enrichment вокруг generic semantic не green. Repair prompts instruct overwrite for invalid manifests after evidence pass rather than read/diff/patch, не повторяют validation-error field cues, а engine write-set guards запрещают лишние writes; stdout claims like "validated" are diagnostics only. `collect_manifest_runtime_recovery` строит manifest только из already-authored markdown под `write_root`, extracts concrete named service/component/datastore entities with usage/dependency/configuration edges and bounded repo/path evidence, пишет только `shard-pack-manifest.json`, логирует `collect manifest runtime recovery completed`, а acceptance всё равно зависит от strict validation + `artifact_quality:*` gates + operator artifact review.
+- для `init.step1.collect` и `refresh.step1.collect` normal collect prompt начинает task-specific surface с `COLLECT EVIDENCE-FIRST ARTIFACT PAIR` сразу после provider identity: provider делает bounded evidence pass по existing repo entrypoint hints и assigned `path_scopes`, не читает `reports/taskruns/**`, raw logs, sibling shards или archive docs, и только после этого пишет suggested authored doc + `shard-pack-manifest.json` как marker-free evidence-backed pair. Task-specific manifest skeleton в prompt является schema/key/type guide, а не готовым heredoc artifact; copying unchanged skeleton или generic owner-gap/contains-only semantic считается scaffold-only contract drift. Collect validation reject-ит legacy marker/scaffold prose, marker-free unchanged seed prose, `Recovery Evidence Summary` fallback prose и scaffold-only semantic snapshot (`contains scoped surface` + generic owner mapping gap), чтобы stale/controlled stop не закреплял полупустой collect output. Общий runtime может сделать одну collect pair-recovery попытку только если provider оставил stdout/stderr diagnostics и не записал authored artifacts; bootstrap/seed-only authored docs не маскируются pair-recovery success. Если non-bootstrap authored docs уже есть, но `write_root/shard-pack-manifest.json` отсутствует или existing manifest failed only как scaffold-only semantic snapshot, runtime должен сначала применить `collect_manifest_runtime_recovery`; manifest-only provider repair остается для structural-invalid existing manifest или fallback после failed runtime recovery. Pair recovery heredoc остаётся seed recovery surface и должен быть rewritten evidence-backed перед successful exit. Manifest-only repair пишет только `shard-pack-manifest.json`, начинается с `COLLECT MANIFEST EVIDENCE-FIRST REPAIR` и содержит `FIRST COLLECT MANIFEST REPAIR COMMAND`; provider выполняет exact command as next filesystem action. Command читает authored markdown under `write_root`, использует listed repo evidence candidates/path scopes как bounded citation surface, извлекает documents/citations/entities/edges/findings/coverage/questions и пишет единственный allowed target. Exact skeleton остаётся schema guide, placeholder/copied skeleton invalid, а evidence-rich docs должны давать concrete semantic entities beyond repo/shard wrappers, non-contains relationships и findings/questions beyond generic owner mapping; citations-only enrichment вокруг generic semantic не green. Repair prompts instruct overwrite for invalid manifests after evidence pass rather than read/diff/patch, не повторяют validation-error field cues, а engine write-set guards запрещают лишние writes; stdout claims like "validated" are diagnostics only. `collect_manifest_runtime_recovery` строит manifest только из already-authored markdown под `write_root`, extracts concrete named service/component/datastore entities with usage/dependency/configuration edges and bounded repo/path evidence, пишет только `shard-pack-manifest.json`, логирует `collect manifest runtime recovery completed`; remaining truthfulness/readability risk belongs to the SWE artifact-quality report, not to machine execution verdict.
 - все required artifacts должны писаться/проверяться по exact absolute `write_root`/`draft_final_root`; relative CWD checks вроде `test -f validator-verdict.json` или `test -f nova-overview.md` не считаются валидным runtime artifact target.
-- `init|refresh.step3.findings` начинает normal prompt с `FIRST VALIDATOR VERDICT COMMAND` сразу после provider identity: provider пишет минимальный валидный `write_root/validator-verdict.json` skeleton до broad validation instructions. Для multi-repo validator tasks этот first-action skeleton уже содержит PASS-compatible cross-repo finding и question с `related_ids` плюс repo/path evidence, чтобы первый валидный artifact не конфликтовал с `analysis:cross-repo-missing`; `issues[]` остаётся только для technical validator problems. Шаг может выполнить одну focused validator-verdict repair попытку при missing/invalid verdict; repair prompt использует тот же command-first absolute heredoc skeleton, `checked_paths` указывает на staged final artifacts, а не validator `write_root`; `issues[]` использует canonical `code/severity/message` shape, legacy finding-shaped issue fields остаются `runtime_contract_failed`.
+- `init|refresh.step3.findings` начинает normal prompt с `FIRST VALIDATOR VERDICT COMMAND` сразу после provider identity: provider пишет минимальный валидный `write_root/validator-verdict.json` skeleton до broad validation instructions. Для multi-repo validator tasks этот first-action skeleton уже содержит PASS-compatible cross-repo finding и question с `related_ids` плюс repo/path evidence, чтобы первый валидный artifact не конфликтовал с artifact-truthfulness expectations; `issues[]` остаётся только для technical validator problems. Шаг может выполнить одну focused validator-verdict repair попытку при missing/invalid verdict; repair prompt использует тот же command-first absolute heredoc skeleton, `checked_paths` указывает на staged final artifacts, а не validator `write_root`; `issues[]` использует canonical `code/severity/message` shape, legacy finding-shaped issue fields остаются `runtime_contract_failed`.
 - `init.step0.constitution` начинает normal prompt с `FIRST CONSTITUTION DRAFT COMMAND` сразу после provider identity: provider пишет `write_root/constitution-draft.json` и referenced draft files под `draft_final_root` до broad workspace analysis. `baseline-subagents.yaml` в этом first-action set должен быть валидным `skills/subagents.yaml` YAML bundle (`agents:`), иначе следующий refresh обязан остановиться на workspace validation.
 - draft steps (`step0/2/4`) могут выполнить одну focused draft-artifact repair попытку: provider пишет только step manifest в `write_root` и referenced files под `draft_final_root`; repair prompt начинается с command-first heredoc artifact set для manifest + draft files, задаёт `write_root`/`draft_root` из exact absolute paths один раз и дальше пишет через `"$write_root/..."` / `"$draft_root/..."`, выполняет `test -s` checks для manifest и каждого referenced draft file, запрещает broad analysis и ручное перепечатывание/переписывание path components до первого валидного draft set; ACP-side manifest/verdict/draft autofill запрещён.
-- `init|refresh.step2.asis_docs` normal и repair prompts начинают as-is surface с единственного `FIRST AS-IS DRAFT COMMAND`: команда пишет `write_root/asis-draft-manifest.json` и три required draft files под `draft_final_root` (`overview.md`, `summary.md`, `architect-summary.md`) до broad as-is analysis; этот first draft set является bootstrap-only и должен быть обогащён staged evidence-backed content перед final exit; manifest success без реально существующих referenced files остаётся `runtime_contract_failed`, а unchanged placeholder drafts блокируются shared runtime draft validation до valid-artifact stop и повторно downstream quality gate через `artifact_quality:*`.
+- `init|refresh.step2.asis_docs` normal и repair prompts начинают as-is surface с единственного `FIRST AS-IS DRAFT COMMAND`: команда пишет `write_root/asis-draft-manifest.json` и три required draft files под `draft_final_root` (`overview.md`, `summary.md`, `architect-summary.md`) до broad as-is analysis; этот first draft set является bootstrap-only и должен быть обогащён staged evidence-backed content перед final exit; manifest success без реально существующих referenced files остаётся `runtime_contract_failed`, а unchanged placeholder drafts блокируются shared runtime draft validation до valid-artifact stop; remaining artifact quality is reviewed in `swe_artifact_quality_assessment_<matrix-id>.md`.
 - `init|refresh.step4.proposals` normal и repair prompts начинают proposals surface с единственного `FIRST PROPOSALS DRAFT COMMAND`: команда пишет `write_root/proposals-draft-manifest.json` и referenced proposal/changelog files под `draft_final_root`; unchanged first-action recommendation/changelog scaffold invalid на shared runtime draft validation, даже если manifest shape и files существуют.
 - collect repair intentionally runs with narrow read scope: current `write_root` + repo evidence roots only. Broader ACP workspace, sibling `reports/taskruns`, raw logs, archive docs and old shard manifests are excluded; embedded prompt contract/schema text is authoritative when runtime workspace does not contain `schemas/*` or `docs/spec/*`.
 - root-file collect shards должны читать только перечисленные root-level files, писать один evidence-backed root overview doc без bootstrap marker и enriched `shard-pack-manifest.json`, без recursive sweep по top-level directories.
@@ -734,9 +740,9 @@ Zero tolerance:
 - staged `citation-index.json` и `final-run-index.json` должны использовать один deterministic `document_id` namespace, наследующий `manifest.Documents[*].id`; semantic assembly перед validator обязана нормализовать `evidence.repo` к логическому repo scope и дедуплицировать alias entities/related refs.
 - если collect evidence = `unusable`, `init|refresh.step2.asis_docs`, `init|refresh.step3.findings` и `init|refresh.step4.proposals` не должны запускать live provider: staged final set собирается только из persisted collect artifacts и дальше остаётся triage-only incomplete surface.
 - owner-gap остаётся visible signal в `coverage/findings/questions`, но owner-only residual без технических validator issues не должен сам по себе блокировать verdict; такой кейс допустимо увидеть как `validator-verdict = PASS` с сохранёнными findings/questions.
-- `reports/taskruns/<run_id>-quality.json` обязан содержать fresh `artifact_inventory` для текущего run: promoted workspace surfaces, taskrun/staging surfaces и semantic counts из текущего `final-run-index.json`. `run_warnings` с префиксом `artifact_quality:` считаются canonical live gate blocker даже при schema-valid `validator-verdict.json = PASS`; backend-cycle helper fail-fast-ит headless slot с `FAILURE_REASON=quality` до запуска dependent frontend, если fresh quality summary уже содержит такие blockers. Типовые blockers — refresh final set с несколькими canonical docs и единственным generic `cite.runtime-summary`, placeholder top-level reports/proposals, empty semantic model, semantic model that is non-empty but scaffold-only (`contains`-only repo/shard entities + generic owner-gap findings), missing `model/entities`, gap-only/scaffold-only C4, empty findings при owner/operational/dependency coverage gaps и shard manifests, которые ссылаются на provider/tool side-effect paths.
-- acceptable reuse-pattern допускается только если frozen refresh artifacts сохраняют хотя бы один rich collect shard с repo-specific citations; reuse-only manifests без такого shard'а считаются low-signal collapse.
-- `profile_matrix_<matrix-id>` и `quality_report_<batch-id>` агрегируют только реально выбранные `selected_providers` и `selected_run_indexes`; qwen-only `run1` regression run не должен материализовать synthetic `2x5` deficits.
+- `reports/taskruns/<run_id>-quality.json` обязан содержать fresh `artifact_inventory` для текущего run: promoted workspace surfaces, taskrun/staging surfaces и semantic counts из текущего `final-run-index.json`. `run_warnings` с префиксом `artifact_quality:` сохраняются как telemetry/evidence for SWE artifact-quality report и не являются machine execution blockers. Типовые artifact findings — refresh final set с несколькими canonical docs и единственным generic `cite.runtime-summary`, placeholder top-level reports/proposals, empty semantic model, semantic model that is non-empty but scaffold-only (`contains`-only repo/shard entities + generic owner-gap findings), missing `model/entities`, gap-only/scaffold-only C4, empty findings при owner/operational/dependency coverage gaps и shard manifests, которые ссылаются на provider/tool side-effect paths.
+- acceptable reuse-pattern допускается только если frozen refresh artifacts сохраняют хотя бы один rich collect shard с repo-specific citations; reuse-only manifests без такого shard'а являются artifact-quality finding for manual assessment.
+- `profile_matrix_<matrix-id>` и `execution_report_<batch-id>` агрегируют только реально выбранные `selected_providers` и `selected_run_indexes`; qwen-only `run1` regression run не должен материализовать synthetic `2x5` deficits.
 - internal shard-plan/shard-summary JSON обязаны содержать non-empty `meta.runtime.name` / `meta.runtime.version`; пустой runtime meta считается contract drift, а не допустимым partial state.
 - structural shard coalescing для больших repos сохраняет module marker leaf shard groups внутри top-level dirs, пока итоговый shard count остаётся в `maxAutoShardsPerRepo`; если top-level groups не помещаются в cap, они детерминированно merge-ятся в bounded buckets и получают warning.
 - live triage от `2026-04-17` зафиксировал один надёжный blocker для canonical `regres fast`: `single-git_url` на `qwen-code` завершился runtime contract failure после event-stream chatter и неполного artifact-only collect recovery; последующий `multi-path`/Open edX run был прерван вручную и не считается самостоятельным продуктовым failure signal.
@@ -754,11 +760,11 @@ Zero tolerance:
 - если terminal logs показывают `read shard document ... no such file or directory` или collect validation фиксирует missing `documents[].path` reference, primary failure class должен быть `runtime_contract_failed`, даже если stale classifier row или raw provider diagnostics содержат `runner_unavailable` markers;
 - если terminal logs показывают `parse runtime draft manifest` вместе с `unknown field`, primary failure class для batch/reporting должен быть `runtime_contract_failed` даже при одновременных `runner_unavailable` capacity/429 маркерах;
 - если terminal logs показывают `validator verdict is FAIL`, primary failure class для batch/reporting должен быть `runtime_flow_failed`, но только когда run не классифицирован как terminal runtime/provider failure (`runtime_timeout`, `runner_unavailable`, `runtime_contract_failed`);
-- если `session-summary.md` фиксирует terminal success (`result=passed`, `quality_gates=passed`, API `succeeded`) и `run-status.env state=completed process_exit=0`, shell/Python classifiers не должны поднимать `runner_unavailable`/`runtime_contract_failed` только из-за raw provider diagnostics from recovered attempts;
-- если `session-summary.md` фиксирует terminal `failure_reason=quality` или `quality_gates=failed`, shell/Python classifiers должны считать это `quality_gates_failed` и игнорировать stale `runner_unavailable` rows/noise от более ранних raw provider attempts;
-- для terminal runtime/provider failures (`runtime_timeout`, `runner_unavailable`, `runtime_contract_failed`) не эскалировать secondary `runtime_flow_failed`/`analysis:cross-repo-missing` только из-за неполных refresh/runtime artifacts;
+- если `session-summary.md` фиксирует terminal success (`result=passed`, API `succeeded`) и `run-status.env state=completed process_exit=0`, shell/Python classifiers не должны поднимать `runner_unavailable`/`runtime_contract_failed` только из-за raw provider diagnostics from recovered attempts;
+- legacy terminal quality fields in historical summaries are treated as unsupported legacy execution evidence during migration; active harness must not emit them;
+- для terminal runtime/provider failures (`runtime_timeout`, `runner_unavailable`, `runtime_contract_failed`) не эскалировать secondary `runtime_flow_failed` только из-за неполных refresh/runtime artifacts;
 - per-run evidence в batch report должен явно показывать `collect_partial_shard_failures`, focused recovery exhaustion/write-set violations и наличие runtime logs/metadata, если `run-results.tsv` не содержит ожидаемые headless rows;
-- backend-cycle helper под `scripts/full-run-batch.sh` должен писать failed headless `init`/`refresh` rows в существующем 17-field `run-results.tsv` формате, когда CLI уже вернул `run_id`, и делать best-effort snapshot даже при missing/invalid quality summary; runtime artifacts/logs после terminal provider/runtime failure не должны выглядеть как missing-row infra gap;
+- backend-cycle helper под `scripts/full-run-batch.sh` должен писать failed headless `init`/`refresh` rows в существующем 17-field `run-results.tsv` формате, когда CLI уже вернул `run_id`, и делать best-effort snapshot даже при missing/invalid run telemetry summary; runtime artifacts/logs после terminal provider/runtime failure не должны выглядеть как missing-row infra gap;
 - terminal `session-summary.md` вместе с `run-status.env state=process_failed summary_written=yes` считать завершившимся deterministic pipeline failure; такой run не должен переопределяться в `infra_incomplete_cycle` только из-за mismatch `completed_*`, неполного `run-results.tsv` или classifier fallback.
 - backend-cycle helper обязан поддерживать running-heartbeat в `run-status.env` (`updated_at`, `last_pipeline_stage`, `last_runtime_provider`, `last_progress_at`) и сам писать terminal sentinel при `completed|process_failed|signal_terminated`.
 - если `session-summary.md` отсутствует, но batch shell успел дойти до classifier или завершился через `EXIT` trap, trusted harness обязан materialize-ить `infra_incomplete_cycle` или `infra_signal_terminated` через per-run `run-status.env`; отсутствие summary больше не считается допустимым silent gap.
@@ -771,7 +777,7 @@ Zero tolerance:
 - Live frontend shell поддерживает только `UI_E2E_SCENARIO=init-inspect`; cancellation/page-close behavior покрывается deterministic fake-runtime UI/API tests вне live release gate.
 - `init-inspect` обязан видеть actual build metadata из `/api/system/version` в top status bar; hard-coded public release label вроде `v0.1.1 beta` не является допустимым evidence для source/live builds.
 - `init-inspect` обязан проверить readability выбранных Review artifacts через UI и `/api/artifacts`: markdown preview не должен быть placeholder/scaffold, C4 raw Mermaid не должен быть gap-only, Review/Publish preview panels должны иметь viewport-visible читаемую область, а screenshots должны подтверждать читаемый desktop/mobile Review surface.
-- `UI_E2E_QA_SMOKE=1` включает дополнительный non-release Ask UX smoke поверх `init-inspect`: вопрос отправляется через stage `Ask`, проверяются run history, read-only audit/safety path, answer, confidence, citations, unresolved assumptions, context-pack/runtime-execution links и сохраняется `frontend-ask-desktop.png` when produced. Этот флаг не является canonical release readiness input и не должен включаться в release matrices.
+- `UI_E2E_QA_SMOKE=1` включает дополнительный non-release Ask UX smoke поверх `init-inspect`: вопрос отправляется через stage `Ask`, проверяются run history, read-only audit/safety path, answer, confidence, citations, unresolved assumptions, context-pack/runtime-execution links и сохраняется `frontend-ask-desktop.png` when produced. Этот флаг не является canonical machine execution verdict input и не должен включаться в release matrices; Ask-flow evidence remains mandatory in `swe_ux_assessment_<matrix-id>.md`.
 - Domain Map, cancel and page-close coverage остаются deterministic UI/API или fake-fixture diagnostics до отдельного owner-approved live-gate slice; не добавлять `ask-readonly`, `domain-map-diagnostic` или page-close как public frontend live scenarios.
 - frontend init-inspect budget берётся из effective runtime timeout profile/API и, если задан `ACP_PIPELINE_TIMEOUT_SEC`, может быть поднят до `pipeline_timeout+30s`; fixed cap не применяется по умолчанию. Diagnostic `UI_E2E_INIT_TIMEOUT_CAP_SEC` допустим только как явное manual ограничение и не должен использоваться в canonical release slices.
 - `snapshot_reports_missing` после terminal backend failure считается dependent frontend skipped/blocked evidence, а не independent frontend regression.
@@ -850,30 +856,37 @@ ACP_APPLY_TIMEOUTS_VIA_API=1 \
 
 ## 7) Strict release acceptance
 
-Release `PASS` только если одновременно:
+Machine execution `PASS` требует:
 1. Во всех `profile+sweep` строках `strict_status=passed`.
 2. Для каждого `profile+sweep`: `backend_total_runs=3`, `backend_hard_pass=3`.
-3. `runtime_contract_failed/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/summary_missing/precheck_failed = 0`.
-4. `semantic_hard_fail=0`, `off_topic_hits=0`.
-5. `artifact_source` только `snapshot` (без `workspace-fallback`).
-6. Нет `analysis:evidence-scope` и `analysis:cross-repo-missing`.
-7. Нет runtime flow violations (`runtime:*`, `runtime_flow_failed`).
-8. Frontend live init-inspect smoke: `passed` для всех трёх release providers (`qwen`, `claude`, `codex`).
-9. Нет artifact-quality blockers (`artifact_quality:*` в run warnings / batch quality report).
+3. `runtime_contract_failed/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/summary_missing/precheck_failed = 0`.
+4. `artifact_source` только `snapshot` (без `workspace-fallback`).
+5. Нет runtime flow violations (`runtime:*`, `runtime_flow_failed`).
+6. Frontend live init-inspect smoke: `passed` для всех трёх release providers (`qwen`, `claude`, `codex`).
 
-Любое нарушение => `RELEASE BLOCKED`.
+Final release readiness требует все три accepted evidence signals:
+1. `release_verdict_<matrix-id>.json = PASS`.
+2. `swe_ux_assessment_<matrix-id>.md` содержит matching `matrix_id` и `decision: accepted`.
+3. `swe_artifact_quality_assessment_<matrix-id>.md` содержит matching `matrix_id` и `decision: accepted`.
+
+Если любой manual UX/artifact report отсутствует или не `accepted`, release считается `RELEASE BLOCKED`, даже при machine execution `PASS`.
 
 ## 8) Agent verdict output
 
-Machine source of truth для release readiness:
+Machine source of truth для execution readiness:
 - `release_verdict_<matrix-id>.md/.json`
+
+Composite release evidence:
+- `release_verdict_<matrix-id>.json = PASS`
+- `swe_ux_assessment_<matrix-id>.md = accepted`
+- `swe_artifact_quality_assessment_<matrix-id>.md = accepted`
 
 Перед tag/release выполнить offline verifier:
 ```bash
 python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json
 ```
 
-Operator/SWE-agent assessment не заменяет verifier-backed verdict. Если нужен durable reasoning layer, заполнить `reports/operator_blackbox_assessment_<matrix-id>.md` по шаблону `docs/templates/LIVE_E2E_OPERATOR_ASSESSMENT.md` и связать final decision с concrete evidence paths.
+SWE-agent assessments не заменяют verifier-backed execution verdict, но являются обязательными companion inputs для release readiness. Optional `reports/operator_blackbox_assessment_<matrix-id>.md` по шаблону `docs/templates/LIVE_E2E_OPERATOR_ASSESSMENT.md` можно использовать как дополнительный reasoning layer.
 
 ## 9) Common blockers (операционный triage)
 
@@ -895,7 +908,7 @@ Operator/SWE-agent assessment не заменяет verifier-backed verdict. Е�
 - Для `claude` отдельный text-only `ACP_READY` timeout не является release blocker: readiness должна подтверждаться `--version` + artifact smoke с sentinel write. Exhausted artifact-smoke timeout остаётся host/provider blocker.
 
 5. `collect_manifest_missing` / `shard-pack-manifest.json is missing` на `init.step1.collect`
-- Политика triage: если provider оставил diagnostics, но не написал authored artifacts, общий engine должен сделать одну collect pair-recovery попытку с command-first suggested doc + manifest skeleton targets; если в `write_root` есть non-bootstrap authored docs и manifest отсутствует или existing manifest rejected как scaffold-only semantic, общий engine должен сначала восстановить manifest через `collect_manifest_runtime_recovery`. Manifest-only provider repair запускается для structural-invalid existing manifest или fallback после failed runtime recovery: `COLLECT MANIFEST EVIDENCE-FIRST REPAIR` + `FIRST COLLECT MANIFEST REPAIR COMMAND` выполняется как next filesystem action, читает existing authored docs/listed evidence и пишет только `write_root/shard-pack-manifest.json` with concrete semantic extraction. Если repair provider продолжает работать после валидного `shard-pack-manifest.json`, short valid-artifact stop завершает процесс и success всё равно зависит только от validation. Runtime-recovered run не считается green автоматически и должен пройти `quality_gates_failed=0`, отсутствие `artifact_quality:*` и ручную проверку полноты artifacts. Writes outside allowed collect repair set или failure после runtime recovery остаются `runtime_contract_failed`.
+- Политика triage: если provider оставил diagnostics, но не написал authored artifacts, общий engine должен сделать одну collect pair-recovery попытку с command-first suggested doc + manifest skeleton targets; если в `write_root` есть non-bootstrap authored docs и manifest отсутствует или existing manifest rejected как scaffold-only semantic, общий engine должен сначала восстановить manifest через `collect_manifest_runtime_recovery`. Manifest-only provider repair запускается для structural-invalid existing manifest или fallback после failed runtime recovery: `COLLECT MANIFEST EVIDENCE-FIRST REPAIR` + `FIRST COLLECT MANIFEST REPAIR COMMAND` выполняется как next filesystem action, читает existing authored docs/listed evidence и пишет только `write_root/shard-pack-manifest.json` with concrete semantic extraction. Если repair provider продолжает работать после валидного `shard-pack-manifest.json`, short valid-artifact stop завершает процесс и success всё равно зависит только от validation. Runtime-recovered run не считается artifact-quality accepted автоматически: completeness/truthfulness/readability проверяет `swe_artifact_quality_assessment_<matrix-id>.md`. Writes outside allowed collect repair set или failure после runtime recovery остаются `runtime_contract_failed`.
 - Если authored docs отсутствуют и provider был полностью silent, `qwen-code` делает один bounded fresh retry с warning telemetry; если focused collect-pair или draft-artifact repair вернул transient provider API/transport текст без artifacts, `qwen-code` делает один bounded focused-repair retry. Exhausted silent/API retry остаётся `runner_unavailable`. `claude-code` делает bounded silent retry для constitution/collect/validator/proposals steps (`init.step0.constitution`, `init|refresh.step1.collect`, `init|refresh.step3.findings`, `init|refresh.step4.proposals`) и сохраняет zero-output fail-fast для as-is/non-scoped steps; exhausted scoped silence остаётся `runner_unavailable`. Partial authored artifacts у всех providers остаются `runtime_contract_failed`, если manifest/draft/verdict невалиден после focused repair.
 
 6. `Selected model is at capacity` / `429` / `rate limited` в task logs
@@ -918,12 +931,17 @@ Operator/SWE-agent assessment не заменяет verifier-backed verdict. Е�
 ```text
 VERDICT: PASS|FAIL
 Matrix ID: <matrix-id>
-Release State: RELEASE READY|RELEASE BLOCKED
+Machine execution state: PASS|FAIL
+UX assessment: accepted|rejected|inconclusive|blocked|missing
+Artifact quality assessment: accepted|rejected|inconclusive|blocked|missing
+Composite release readiness: READY|BLOCKED
 Blocking reasons:
 - ...
 Evidence:
 - /tmp/provenarch-test_arch_project/reports/release_verdict_<matrix-id>.md
 - /tmp/provenarch-test_arch_project/reports/profile_matrix_<matrix-id>.md
+- /tmp/provenarch-test_arch_project/reports/swe_ux_assessment_<matrix-id>.md
+- /tmp/provenarch-test_arch_project/reports/swe_artifact_quality_assessment_<matrix-id>.md
 ```
 
 В execution report для смешанных сигналов обязательно указывать `primary failure class` отдельно от secondary evidence (например `runtime_contract_failed` + `runner_unavailable`).

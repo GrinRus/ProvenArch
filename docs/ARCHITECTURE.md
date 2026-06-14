@@ -160,7 +160,7 @@
    - child batch публикует `batch-owner.env` heartbeat в `BATCH_ROOT`; stale `profile-status/*.json = running` без живого owner pid или со stale owner heartbeat reconciles-ится в terminal `failed/infra_incomplete_cycle`
    - terminal `validator verdict is FAIL` классифицируется как `runtime_flow_failed`; `runtime_contract_failed` остаётся только для active runtime artifact/manifest/required-output failures
    - generic `codex` plugin/Cloudflare/state-db warnings (`plugins/featured`, Cloudflare HTML, cache/state-db permission noise) считаются secondary telemetry и не должны сами поднимать `runner_unavailable`
-   - batch semantic gate `analysis:cross-repo-missing` требует real multi-repo signal, но принимает его из explicit `semantic.edges[]`, finding provenance по нескольким repos или question `related_ids` по нескольким repo scopes при наличии repo-specific citation coverage
+   - batch report telemetry records semantic/artifact findings such as `analysis:cross-repo-missing` when multi-repo signal is weak; release execution verdicts do not fail on this artifact-truthfulness telemetry, and final acceptance is handled by `swe_artifact_quality_assessment_<matrix-id>.md`
    - multi-repo validator prompts write a first-action `validator-verdict.json` skeleton that already carries one cross-repo finding/question with repo/path provenance; single-repo validator skeletons remain empty except for technical `issues[]`
    - Run logs retention policy (TTL + max runs) запускается при старте сервиса, перед run и после run
    - (опционально) делает git commit

@@ -35,6 +35,15 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         self.assertIn('ACP_FRONTEND_REASON_API_UNREACHABLE="api_unreachable"', body)
         self.assertIn('ACP_FRONTEND_REASON_SERVER_EXITED="server_exited"', body)
         self.assertIn('ACP_FRONTEND_REASON_RUNTIME_RUN_FAILED="runtime_run_failed"', body)
+        for reason in (
+            "artifact_preview_unreadable",
+            "navigation_confusing",
+            "publish_decision_blocked",
+            "ask_flow_blocked",
+            "mobile_review_unusable",
+            "partial_state_unclear",
+        ):
+            self.assertIn(reason, body)
 
     def test_live_flow_uses_independent_api_request_context(self) -> None:
         spec_path = self.repo_root / "ui" / "e2e" / "live-flow.spec.ts"

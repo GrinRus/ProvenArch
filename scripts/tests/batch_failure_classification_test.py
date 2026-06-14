@@ -101,7 +101,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: infra_incomplete_cycle",
                     "- expected_runs: 10",
                     "- completed_runs: 2",
@@ -265,7 +265,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
         for path in [
             reports_root / f"run_matrix_{batch_id}.md",
             reports_root / f"run_matrix_{batch_id}.tsv",
-            reports_root / f"quality_report_{batch_id}.md",
+            reports_root / f"execution_report_{batch_id}.md",
             reports_root / f"frontend_e2e_matrix_{batch_id}.md",
             e2e_root / "runs" / batch_id / "report-paths.txt",
         ]:
@@ -417,7 +417,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: passed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: none",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -744,7 +744,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: passed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: none",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -885,10 +885,11 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual(1, result.zero_output_pre_artifact_stalls)
         self.assertEqual(1, result.partial_failure_count)
         self.assertEqual(1, result.quality_alerts)
-        self.assertIn("quality:repair-heavy", result.issues)
-        self.assertIn("quality:stall-pressure", result.issues)
-        self.assertIn("quality:partial-failures", result.issues)
-        self.assertTrue(result.quality_gates_failed)
+        self.assertIn("execution:repair-heavy", result.issues)
+        self.assertIn("execution:stall-pressure", result.issues)
+        self.assertIn("execution:partial-failures", result.issues)
+        self.assertTrue(result.runtime_flow_failed)
+        self.assertEqual("runtime_flow_failed", result.failure_class)
 
     def test_python_report_aggregates_failed_raw_stall_metadata(self) -> None:
         write_json(
@@ -918,8 +919,8 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual(1, result.pre_artifact_stalls)
         self.assertEqual(0, result.post_artifact_stalls)
         self.assertEqual(1, result.zero_output_pre_artifact_stalls)
-        self.assertIn("quality:stall-pressure", result.issues)
-        self.assertTrue(any("quality/runtime-stalls-raw" in detail for detail in result.issue_details))
+        self.assertIn("execution:stall-pressure", result.issues)
+        self.assertTrue(any("execution/runtime-stalls-raw" in detail for detail in result.issue_details))
 
     def test_python_report_prefers_runtime_flow_failed_when_validator_verdict_failed(self) -> None:
         run_dir = self.root / "run-validator-verdict-fail-python"
@@ -931,7 +932,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: pipeline_command_failed",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -992,7 +993,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: pipeline_command_failed",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -1053,7 +1054,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: runtime_contract_failed",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -1100,7 +1101,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: pipeline_command_failed",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -1167,7 +1168,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: skipped",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: runtime_timeout",
                     "- expected_runs: 4",
                     "- completed_runs: 2",
@@ -1262,7 +1263,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: runtime_contract_failed",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -1306,7 +1307,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: runtime_contract_failed",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -1413,7 +1414,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
                     "- expected_headless_runs: 2",
@@ -1634,7 +1635,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
 
         self.assertNotIn("runtime:execution-semantics", issues)
 
-    def test_python_report_escalates_artifact_quality_warning_to_quality_gate_failure(self) -> None:
+    def test_python_report_records_artifact_quality_warning_without_execution_failure(self) -> None:
         run_dir = self.root / "run-artifact-quality"
         self._create_artifact_quality_fixture_run_dir(run_dir)
 
@@ -1651,73 +1652,10 @@ class BatchFailureClassificationTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual("quality_gates_failed", result.failure_class)
-        self.assertTrue(result.quality_gates_failed)
-        self.assertFalse(result.hard_pass)
-        self.assertIn("quality:artifact-quality", result.issues)
-
-    def test_python_report_quality_failure_ignores_stale_runner_unavailable_classifier(self) -> None:
-        run_dir = self.root / "run-quality-with-stale-runner-classifier"
-        self._create_fixture_run_dir(run_dir)
-        shutil.rmtree(run_dir / "arch-workspace", ignore_errors=True)
-        write_text(
-            run_dir / "session-summary.md",
-            "\n".join(
-                [
-                    "# Session Summary",
-                    "",
-                    "- result: failed",
-                    "- quality_gates: failed",
-                    "- failure_reason: quality",
-                    "- expected_runs: 4",
-                    "- completed_runs: 4",
-                    "- expected_headless_runs: 2",
-                    "- completed_headless_runs: 2",
-                    "- running_runs_detected: 0",
-                    "- termination_signal: none",
-                    "",
-                    "## API Simulation",
-                    "- status: succeeded",
-                    "",
-                ]
-            ),
-        )
-        write_text(
-            run_dir / "run-status.env",
-            "\n".join(
-                [
-                    "provider=codex-code",
-                    "run_index=1",
-                    "state=process_failed",
-                    "process_exit=1",
-                    "termination_signal=none",
-                    "failure_reason=quality",
-                    "summary_written=yes",
-                    "",
-                ]
-            ),
-        )
-
-        result = self.module.evaluate_run(
-            provider="qwen-code",
-            run_index=1,
-            run_dir=run_dir,
-            preflight={},
-            classification_row={
-                "failure_class": "runner_unavailable",
-                "failure_subclass": "none",
-                "cancellation_like": "0",
-                "process_exit": "1",
-            },
-        )
-
-        self.assertEqual("quality_gates_failed", result.failure_class)
-        self.assertTrue(result.quality_gates_failed)
-        self.assertFalse(result.runner_unavailable)
-        self.assertTrue(
-            any("ignored stale runner_unavailable" in detail for detail in result.issue_details),
-            result.issue_details,
-        )
+        self.assertEqual("none", result.failure_class)
+        self.assertEqual(1, result.artifact_quality_findings)
+        self.assertTrue(result.hard_pass)
+        self.assertIn("artifact:quality-warning", result.issues)
 
     def test_shell_classifier_reads_taskrun_logs_and_returns_runtime_contract_failed(self) -> None:
         script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
@@ -1751,7 +1689,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: runtime_contract_failed",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -1801,7 +1739,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: pipeline_command_failed",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -1853,7 +1791,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: pipeline_command_failed",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -1919,7 +1857,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: skipped",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: runtime_timeout",
                     "- expected_runs: 4",
                     "- completed_runs: 2",
@@ -2056,70 +1994,6 @@ class BatchFailureClassificationTest(unittest.TestCase):
         fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
         self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
         self.assertEqual("none", fields[2], classifications_tsv.read_text(encoding="utf-8"))
-
-    def test_shell_classifier_prefers_quality_gate_failure_over_runner_noise(self) -> None:
-        run_dir = self.root / "run-quality-with-runner-noise-shell"
-        self._create_fixture_run_dir(run_dir)
-        shutil.rmtree(run_dir / "arch-workspace", ignore_errors=True)
-        write_text(
-            run_dir / "session-summary.md",
-            "\n".join(
-                [
-                    "# Session Summary",
-                    "",
-                    "- result: failed",
-                    "- quality_gates: failed",
-                    "- failure_reason: quality",
-                    "- expected_runs: 4",
-                    "- completed_runs: 4",
-                    "- expected_headless_runs: 2",
-                    "- completed_headless_runs: 2",
-                    "- running_runs_detected: 0",
-                    "- termination_signal: none",
-                    "",
-                    "## API Simulation",
-                    "- status: succeeded",
-                    "",
-                ]
-            ),
-        )
-        write_text(
-            run_dir / "run-status.env",
-            "\n".join(
-                [
-                    "provider=codex-code",
-                    "run_index=1",
-                    "state=process_failed",
-                    "process_exit=1",
-                    "termination_signal=none",
-                    "failure_reason=quality",
-                    "summary_written=yes",
-                    "",
-                ]
-            ),
-        )
-        write_text(run_dir / "full-run.log", "run failed (runner_unavailable): stale raw provider noise\n")
-
-        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
-        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
-        classifications_tsv = self.root / "backend-run-classifications-quality-vs-runner.tsv"
-        command = (
-            prelude
-            + "\n"
-            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
-            + f'classify_run_failure "codex-code" "1" {shlex.quote(str(run_dir))} "1"\n'
-        )
-        completed = subprocess.run(
-            ["bash", "-lc", command],
-            check=True,
-            capture_output=True,
-            text=True,
-            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
-        )
-        self.assertEqual("", completed.stdout.strip(), completed.stdout)
-        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
-        self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
-        self.assertEqual("quality_gates_failed", fields[2], classifications_tsv.read_text(encoding="utf-8"))
 
     def test_shell_runner_unavailable_signature_keeps_real_capacity_when_noise_is_separate(self) -> None:
         script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
@@ -2330,7 +2204,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: pipeline_command_failed",
                     "- expected_runs: 10",
                     "- completed_runs: 2",
@@ -2399,7 +2273,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: pipeline_command_failed",
                     "- expected_runs: 10",
                     "- completed_runs: 10",
@@ -2687,7 +2561,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: pipeline_command_failed",
                     "- expected_runs: 10",
                     "- completed_runs: 2",
@@ -2761,7 +2635,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: pipeline_command_failed",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -3389,7 +3263,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertIn("| qwen-code | 3 | failed | browser_closed |", matrix_text)
         self.assertIn("| qwen-code | 4 | failed | runtime_run_failed |", matrix_text)
 
-    def test_quality_report_respects_selected_provider_surface(self) -> None:
+    def test_execution_report_respects_selected_provider_surface(self) -> None:
         reports_root = self.root / "reports-selected"
         quality_path = reports_root / "quality.md"
         frontend = [
@@ -3433,7 +3307,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
             },
         }
 
-        self.module.write_quality_report(
+        self.module.write_execution_report(
             quality_path,
             "batch-qwen-only",
             runs,
@@ -3448,7 +3322,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertNotIn("2/2", report)
         self.assertNotIn("| claude-code |", report)
 
-    def test_quality_report_marks_frontend_skipped_as_not_run(self) -> None:
+    def test_execution_report_marks_frontend_skipped_as_not_run(self) -> None:
         reports_root = self.root / "reports-frontend-skipped"
         quality_path = reports_root / "quality.md"
         frontend = [
@@ -3491,7 +3365,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
             },
         }
 
-        self.module.write_quality_report(
+        self.module.write_execution_report(
             quality_path,
             "batch-codex-skipped-frontend",
             runs,

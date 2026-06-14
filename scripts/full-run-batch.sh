@@ -60,7 +60,6 @@ RUNNER_UNAVAILABLE_FAILURES=0
 INFRA_SIGNAL_TERMINATED_FAILURES=0
 INFRA_INCOMPLETE_CYCLE_FAILURES=0
 RUNTIME_TIMEOUT_FAILURES=0
-QUALITY_GATES_FAILED_FAILURES=0
 SUMMARY_MISSING_FAILURES=0
 PRECHECK_FAILED_FAILURES=0
 RUNTIME_FLOW_FAILED_FAILURES=0
@@ -706,7 +705,7 @@ contains_collect_document_path_contract_signature() {
 is_explicit_failure_class() {
   local value="$1"
   case "$value" in
-    runtime_timeout|runner_unavailable|runtime_contract_failed|infra_signal_terminated|quality_gates_failed|runtime_flow_failed)
+    runtime_timeout|runner_unavailable|runtime_contract_failed|infra_signal_terminated|runtime_flow_failed)
       return 0
       ;;
     *)
@@ -982,7 +981,6 @@ classify_run_failure() {
   local run_class="none"
   local run_subclass="none"
   local cancellation_like=0
-  local quality_gates_status=""
   local run_status_path="$run_dir/run-status.env"
   local run_status_state=""
   local run_status_signal=""
@@ -1060,7 +1058,6 @@ classify_run_failure() {
     fi
   else
     summary_result="$(summary_scalar "$summary_path" "result" | awk '{print $1}')"
-    quality_gates_status="$(summary_scalar "$summary_path" "quality_gates" | awk '{print $1}')"
     failure_reason="$(summary_scalar "$summary_path" "failure_reason" | awk '{print $1}')"
     expected_runs="$(summary_scalar "$summary_path" "expected_runs" | awk '{print $1}')"
     completed_runs="$(summary_scalar "$summary_path" "completed_runs" | awk '{print $1}')"
@@ -1073,7 +1070,7 @@ classify_run_failure() {
   if [[ -f "$summary_path" && "$run_status_state" == "process_failed" && "$run_status_summary_written" == "yes" ]]; then
     terminal_pipeline_failure=1
   fi
-  if [[ "$summary_result" == "passed" && "$quality_gates_status" == "passed" && "$process_exit" =~ ^[0-9]+$ && "$process_exit" -eq 0 ]]; then
+  if [[ "$summary_result" == "passed" && "$process_exit" =~ ^[0-9]+$ && "$process_exit" -eq 0 ]]; then
     terminal_success=1
   fi
   if [[ "$terminal_success" != "1" ]]; then
@@ -1095,12 +1092,6 @@ classify_run_failure() {
   if [[ "$run_class" == "none" ]]; then
     if [[ "$failure_reason" == "runtime_timeout" || "$termination_signal" == "timeout" ]]; then
       run_class="runtime_timeout"
-    fi
-  fi
-
-  if [[ "$run_class" == "none" ]]; then
-    if [[ "$failure_reason" == "quality" || "$quality_gates_status" == "failed" ]]; then
-      run_class="quality_gates_failed"
     fi
   fi
 
@@ -1238,9 +1229,6 @@ increment_failure_class_counter() {
     runtime_timeout)
       RUNTIME_TIMEOUT_FAILURES=$((RUNTIME_TIMEOUT_FAILURES + 1))
       ;;
-    quality_gates_failed)
-      QUALITY_GATES_FAILED_FAILURES=$((QUALITY_GATES_FAILED_FAILURES + 1))
-      ;;
     summary_missing)
       SUMMARY_MISSING_FAILURES=$((SUMMARY_MISSING_FAILURES + 1))
       ;;
@@ -1330,7 +1318,7 @@ finalize_provider_readiness_failure() {
   local reason="${1:-unknown provider readiness failure}"
   record_operational_preflight_failed_classifications "$reason"
   log "provider readiness failed: $reason"
-  log "generating quality reports for batch=$BATCH_ID (operational_host_preflight_failed)"
+  log "generating execution reports for batch=$BATCH_ID (operational_host_preflight_failed)"
   if (
     cd "$PROVENARCH_ROOT"
     python3 scripts/e2e_batch_report.py \
@@ -1343,7 +1331,7 @@ finalize_provider_readiness_failure() {
   else
     log "report generation failed after provider readiness failure (see $BATCH_ROOT/report-paths.txt if present)"
   fi
-  log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
+  log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
   die "operational_host_preflight_failed: selected provider readiness failed: $reason"
 }
 
@@ -1351,7 +1339,7 @@ finalize_precheck_failure() {
   local reason="$1"
   record_precheck_failed_classifications
   log "precheck failed: $reason"
-  log "generating quality reports for batch=$BATCH_ID (precheck_failed)"
+  log "generating execution reports for batch=$BATCH_ID (precheck_failed)"
   if (
     cd "$PROVENARCH_ROOT"
     python3 scripts/e2e_batch_report.py \
@@ -1364,8 +1352,8 @@ finalize_precheck_failure() {
   else
     log "report generation failed after precheck failure (see $BATCH_ROOT/report-paths.txt if present)"
   fi
-  log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
-  die "batch precheck failed: reason=$reason precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
+  log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
+  die "batch precheck failed: reason=$reason precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
 }
 
 prepare_target_repos_file() {
@@ -1598,7 +1586,6 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
         "RUN_STATUS_FILE=$(run_status_file "$run_dir")" \
         "KEEP_TMP=1" \
         "ITERATIONS=1" \
-        "RUN_QUALITY_GATES=1" \
         "PROFILE_ID=${PROFILE_ID:-adhoc}" \
         "PROFILE_SOURCE_KIND=$PROFILE_SOURCE_KIND_FOR_FULL_RUN" \
         "EXPECTED_REPO_COUNT=$EXPECTED_REPO_COUNT_RESOLVED" \
@@ -1675,7 +1662,7 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
   fi
 done
 
-log "generating quality reports for batch=$BATCH_ID"
+log "generating execution reports for batch=$BATCH_ID"
 if ! (
   cd "$PROVENARCH_ROOT"
   python3 scripts/e2e_batch_report.py \
@@ -1689,10 +1676,10 @@ fi
 log "report paths:"
 cat "$BATCH_ROOT/report-paths.txt"
 
-log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
+log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
 
 if [[ "$failed_runs" -ne 0 || "$frontend_failures" -ne 0 ]]; then
-  die "batch completed with failures: full_run_failed=$failed_runs frontend_failed=$frontend_failures precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES quality_gates_failed=$QUALITY_GATES_FAILED_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
+  die "batch completed with failures: full_run_failed=$failed_runs frontend_failed=$frontend_failures precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
 fi
 
 log "batch completed successfully"

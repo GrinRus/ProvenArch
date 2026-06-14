@@ -47,7 +47,8 @@ class LiveE2EPlanTest(unittest.TestCase):
         self.assertEqual(payload["selected_providers"], ["codex-code"])
         self.assertEqual(payload["selected_run_indexes"], ["1"])
         self.assertEqual(payload["target_repo_sets"], ["bank-of-anthos"])
-        self.assertTrue(payload["quality"]["required"])
+        self.assertEqual("execution_report_<batch-id>.md", payload["execution"]["batch_execution_report"])
+        self.assertEqual("reports/taskruns/<run_id>-quality.json", payload["execution"]["run_telemetry_json"])
 
         commands = payload["commands"]
         self.assertEqual(len(commands), 1)
@@ -162,19 +163,24 @@ class LiveE2EPlanTest(unittest.TestCase):
             self.assertNotIn("BATCH_PROVIDER_FILTER", env)
             self.assertTrue(command["release_mode"])
 
-    def test_regres_and_release_plans_declare_existing_quality_gate(self) -> None:
+    def test_regres_and_release_plans_declare_execution_reporting_and_manual_assessments(self) -> None:
         for args in (
             ("--mode", "regres", "--size", "fast", "--providers", "codex"),
             ("--mode", "regres", "--size", "complex", "--providers", "qwen"),
             ("--mode", "release", "--size", "full"),
         ):
             payload = self.build_plan(mode=args[1], size=args[3], providers=args[5] if len(args) > 5 else "")
-            quality = payload["quality"]
-            self.assertTrue(quality["required"])
-            self.assertEqual("reports/taskruns/<run_id>-quality.json", quality["run_quality_json"])
-            self.assertEqual("quality_report_<batch-id>.md", quality["batch_quality_report"])
-            self.assertEqual("quality_gates_failed", quality["blocking_failure_class"])
-            self.assertEqual("artifact_quality:", quality["artifact_quality_warning_prefix"])
+            execution = payload["execution"]
+            self.assertEqual("reports/taskruns/<run_id>-quality.json", execution["run_telemetry_json"])
+            self.assertEqual("execution_report_<batch-id>.md", execution["batch_execution_report"])
+            self.assertIn("machine_verdict", execution)
+            manual = payload["manual_assessments"]
+            self.assertEqual("accepted", manual["accepted_decision"])
+            self.assertEqual("reports/swe_ux_assessment_<matrix-id>.md", manual["ux_report"])
+            self.assertEqual(
+                "reports/swe_artifact_quality_assessment_<matrix-id>.md",
+                manual["artifact_quality_report"],
+            )
 
     def test_shell_output_contains_direct_harness_commands_only(self) -> None:
         result = self.run_plan("--mode", "regres", "--size", "fast", "--providers", "codex")

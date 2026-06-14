@@ -23,7 +23,6 @@ TMP_ROOT="${TMP_ROOT:-}"
 RUN_STATUS_FILE="${RUN_STATUS_FILE:-}"
 KEEP_TMP="${KEEP_TMP:-0}"
 ITERATIONS="${ITERATIONS:-1}"
-RUN_QUALITY_GATES="${RUN_QUALITY_GATES:-1}"
 RUN_LOGS_TTL_HOURS="${RUN_LOGS_TTL_HOURS:-168}"
 RUN_LOGS_MAX_RUNS="${RUN_LOGS_MAX_RUNS:-200}"
 APPLY_TIMEOUTS_VIA_API="${ACP_APPLY_TIMEOUTS_VIA_API:-1}"
@@ -44,7 +43,6 @@ TERMINATION_SIGNAL=""
 API_SIM_STATUS="not_started"
 API_INIT_RUN_ID=""
 API_INIT_FINAL_STATUS=""
-QUALITY_GATES_STATUS="not_run"
 LAST_SIGNAL=""
 HEADLESS_PROVIDER=""
 HEADLESS_CMD=""
@@ -79,10 +77,6 @@ if [[ ! "$ITERATIONS" =~ ^[1-9][0-9]*$ ]]; then
 fi
 if [[ "$KEEP_TMP" != "0" && "$KEEP_TMP" != "1" ]]; then
   echo "KEEP_TMP must be 0 or 1, got: $KEEP_TMP" >&2
-  exit 1
-fi
-if [[ "$RUN_QUALITY_GATES" != "0" && "$RUN_QUALITY_GATES" != "1" ]]; then
-  echo "RUN_QUALITY_GATES must be 0 or 1, got: $RUN_QUALITY_GATES" >&2
   exit 1
 fi
 if [[ "$APPLY_TIMEOUTS_VIA_API" != "0" && "$APPLY_TIMEOUTS_VIA_API" != "1" ]]; then
@@ -120,7 +114,6 @@ SNAPSHOT_DIR="$TMP_ROOT/snapshots"
 SUMMARY_PATH="$TMP_ROOT/session-summary.md"
 FULL_RUN_LOG="$TMP_ROOT/full-run.log"
 RUN_RESULTS_TSV="$TMP_ROOT/run-results.tsv"
-QUALITY_LOG="$TMP_ROOT/quality-gates.log"
 VALIDATE_JSON="$TMP_ROOT/workspace-validate.json"
 API_INIT_START_JSON="$TMP_ROOT/api-init-start.json"
 API_INIT_STATUS_JSON="$TMP_ROOT/api-init-status.json"
@@ -982,13 +975,13 @@ run_cli_pipeline() {
   quality_path="$workspace_path/reports/taskruns/${run_id}-quality.json"
   if [[ ! -f "$quality_path" ]]; then
     append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "failed" "$workspace_path" "$output_path"
-    die "missing quality summary for run $run_id at $quality_path"
+    die "missing run telemetry summary for run $run_id at $quality_path"
   fi
 
   local metrics
   if ! metrics="$(quality_metrics "$quality_path")"; then
     append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "failed" "$workspace_path" "$output_path"
-    die "invalid quality summary for run $run_id at $quality_path"
+    die "invalid run telemetry summary for run $run_id at $quality_path"
   fi
 
   local quality_status signal_score semantic_entities semantic_edges findings questions coverage_observed coverage_missing warnings artifact_quality_count
@@ -997,7 +990,7 @@ run_cli_pipeline() {
 
   if [[ "$quality_status" != "succeeded" ]]; then
     append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
-    die "quality summary status is not succeeded for run $run_id: $quality_status"
+    die "run telemetry summary status is not succeeded for run $run_id: $quality_status"
   fi
 
   if [[ "$runtime_mode" == "headless" ]]; then
@@ -1006,33 +999,26 @@ run_cli_pipeline() {
       die "headless run $run_id uses mock/fake runtime version ($runtime_versions)"
     fi
     if [[ "$zero_signal" == "1" ]]; then
-      append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
-      die "headless run $run_id produced zero-signal quality summary"
+      log "headless run $run_id produced zero-signal telemetry; leaving for SWE artifact assessment"
     fi
     if [[ "$artifact_quality_count" != "0" ]]; then
-      append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
-      FAILURE_REASON="quality"
-      die "headless run $run_id produced artifact_quality blockers: count=$artifact_quality_count"
+      log "headless run $run_id produced artifact_quality telemetry findings: count=$artifact_quality_count"
     fi
     if [[ "$TARGET_PROFILE" == "ai-advent" && "$domain_collect_steps" -le 0 ]]; then
-      append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
-      die "headless run $run_id has no domain collect signal in quality summary"
+      log "headless run $run_id has no domain collect telemetry signal; leaving for SWE artifact assessment"
     fi
   fi
 
   if [[ "$runtime_mode" == "headless" && "$pipeline" == "refresh" ]]; then
     if [[ -n "$previous_signal" ]] && (( signal_score < previous_signal )); then
-      append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
-      die "quality regression: last run signal ($signal_score) is lower than previous run signal ($previous_signal) in iteration $iteration"
+      log "headless refresh telemetry signal decreased: previous=$previous_signal current=$signal_score"
     fi
     check_headless_refresh_semantic_quality "$workspace_path" "$run_id" || {
-      append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
-      die "headless refresh semantic quality checks failed for run $run_id"
+      log "headless refresh semantic telemetry checks found findings for run $run_id"
     }
     if [[ "$TARGET_PROFILE" == "ai-advent" ]]; then
       check_ai_advent_text_signal "$workspace_path" "$run_id" || {
-        append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
-        die "ai-advent textual quality check failed for run $run_id"
+        log "ai-advent textual telemetry check found findings for run $run_id"
       }
     fi
   fi
@@ -1202,13 +1188,7 @@ PY
     echo "- $WORKSPACE_HEADLESS/reports/taskruns/run-history.json"
     echo "- $WORKSPACE_HEADLESS/reports/taskruns/logs/"
     echo "- $SNAPSHOT_DIR"
-    if [[ "$QUALITY_GATES_STATUS" == "passed" ]]; then
-      echo "- quality_gates: passed ($QUALITY_LOG)"
-    elif [[ "$QUALITY_GATES_STATUS" == "failed" ]]; then
-      echo "- quality_gates: failed ($QUALITY_LOG)"
-    else
-      echo "- quality_gates: skipped"
-    fi
+    echo "- execution_gate: live runtime/frontend evidence only"
     echo
 
     if [[ "$result" == "failed" ]]; then
@@ -1535,31 +1515,6 @@ if ! validate_runtime_cycle_completion; then
   echo "$local_line"
   echo "$local_line" >&4
   exit 1
-fi
-
-if [[ "$RUN_QUALITY_GATES" == "1" ]]; then
-  log "run quality gates: make contracts test lint build"
-  LAST_PIPELINE_STAGE="quality_gates"
-  write_running_run_status_heartbeat
-  if ! (
-    cd "$PROVENARCH_ROOT"
-    # Run project gates with neutral runtime env so defaults in tests are stable.
-    quality_env_cmd=("env" "-u" "ACP_RUNTIME_PROVIDER" "-u" "ACP_QWEN_CMD" "-u" "ACP_CLAUDE_CMD" "-u" "ACP_CODEX_CMD" "-u" "ACP_APPLY_TIMEOUTS_VIA_API")
-    for key in "${ACP_TIMEOUT_ENV_KEYS[@]}"; do
-      quality_env_cmd+=("-u" "$key")
-    done
-    for key in "${ACP_EXECUTION_ENV_KEYS[@]}"; do
-      quality_env_cmd+=("-u" "$key")
-    done
-    "${quality_env_cmd[@]}" make contracts test lint build >"$QUALITY_LOG" 2>&1
-  ); then
-    QUALITY_GATES_STATUS="failed"
-    FAILURE_REASON="quality"
-    die "quality gates failed (see $QUALITY_LOG)"
-  fi
-  QUALITY_GATES_STATUS="passed"
-else
-  QUALITY_GATES_STATUS="skipped"
 fi
 
 for path in \

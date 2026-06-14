@@ -11,7 +11,8 @@
 - Live headless providers проверяются только optional smoke на trusted machine/runner и не блокируют merge.
 - Отдельно от merge-gates используется manual pre-release live gate:
   - `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
-  - verdict `PASS|FAIL` с policy strict zero-failure.
+  - machine execution verdict `PASS|FAIL` с policy strict zero-failure.
+  - final release readiness = execution `PASS` + accepted SWE UX assessment + accepted SWE artifact-quality assessment.
 
 ## 2) Тестовая пирамида MVP
 
@@ -270,7 +271,8 @@ Release workflow hardening:
   - provider-live domain-map execution is not part of release readiness until a separate owner-approved live-gate slice defines stable semantics
 - UI Ask UX smoke:
   - optional `UI_E2E_QA_SMOKE=1` checks run history, read-only safety, answer panel, citations panel, confidence/unresolved signals and context-pack/runtime-execution links
-  - screenshot refs are evidence-only and do not influence release verdicts
+  - screenshot refs are evidence-only and do not influence machine execution verdicts
+  - release UX readiness still requires Ask-flow evidence in `swe_ux_assessment_<matrix-id>.md`
 - UI Publish gate coverage:
   - deterministic UI tests check folder summary, selected artifact preview, explicit diff partial state, publish gate/checklist, commit plan and existing Git actions
 - UI run lifecycle operability:
@@ -287,25 +289,25 @@ Release workflow hardening:
 
 ### Optional live-runner smoke
 - Local `manual-live-e2e workflow` is the trusted-machine operator procedure from `docs/RELEASE_LIVE_E2E_RUNBOOK.md`, not a GitHub Actions workflow.
-- Scripts produce machine evidence and verifier-backed verdicts only. Operator/SWE-agent produces the separate black-box assessment over public evidence; harness no longer generates `blackbox_e2e_steps_*`.
+- Scripts produce machine execution evidence and verifier-backed execution verdicts only. Запускающий SWE-agent produces separate UX and artifact-quality assessments over public evidence; harness no longer generates `blackbox_e2e_steps_*`.
 - `scripts/live-e2e-plan.py` — catalog-driven command generator for direct matrix harness invocations:
   - does not execute the harness and does not replace `scripts/full-run-batch-matrix.sh`
   - supports flexible selectors `smoke tiny`, `regres fast|long|full|complex`, `release fast|long|full`
   - `smoke tiny` is `1 repo × 1 run × 1 provider` for fastest trusted-machine signal
   - `regres complex` is diagnostic-only product/feature rotation over Temporal, Backstage, Airflow, Appwrite and Saleor; it is not a release readiness signal
-  - generated `regres`/`release` commands rely on the existing quality path: `reports/taskruns/<run_id>-quality.json`, `quality_report_<batch-id>.md`, `quality_gates_failed=0`, no `artifact_quality:*`
+  - generated `regres`/`release` commands rely on execution reporting: `execution_report_<batch-id>.md`; `reports/taskruns/<run_id>-quality.json` remains telemetry/evidence only and `artifact_quality:*` warnings must not fail batch/matrix/release execution verdicts
 - `scripts/full-run-batch.sh` — canonical live batch + frontend live e2e:
   - canonical input: `TARGET_REPOS_FILE`
   - direct-only runtime commands: `claude`, `qwen`, `codex`
   - selected-provider readiness записывается в `preflight.json`; version + provider-specific bounded headless probe + artifact smoke ловят missing binary, auth/quota, codex CLI compatibility и no-write host/provider failures до deep run; для `claude` artifact smoke является основным headless readiness gate, allowlist-ит temp write dir через `--add-dir` и получает один bounded retry на timeout/no-output; provider `model`/`modelUsage` telemetry не является blocker
-  - backend quality source-of-truth: только `snapshots/<run_id>/reports/*`; `reports/taskruns/<run_id>-quality.json.artifact_inventory` должен каждый раз заново описывать фактические promoted/taskrun surfaces текущего run, а не ссылаться на сохранённую bad-run fixture
-  - headless backend slot fail-fast-ит как `quality` до dependent frontend, если fresh `reports/taskruns/<run_id>-quality.json.run_warnings` уже содержит `artifact_quality:*`; frontend readability checks не должны маскировать пустую semantic model, scaffold-only semantic model, gap-only/scaffold-only C4 или placeholder promoted artifacts
+  - backend execution source-of-truth: только `snapshots/<run_id>/reports/*`; `reports/taskruns/<run_id>-quality.json.artifact_inventory` должен каждый раз заново описывать фактические promoted/taskrun surfaces текущего run, а не ссылаться на сохранённую bad-run fixture
+  - `artifact_quality:*` remains artifact-quality telemetry for SWE review and must not be converted into an execution failure before dependent frontend checks
   - placeholder promoted-artifact checks distinguish bootstrap/generic proposal text from evidence-backed proposal/changelog artifacts: boilerplate validation notes alone are not blockers when the artifact carries concrete finding/question ids and findings/coverage traceability
-  - hard-fail checks: `analysis:off-topic`, `analysis:evidence-scope`, `analysis:cross-doc`, `analysis:cross-repo-missing`; cross-repo presence can be satisfied by explicit `semantic.edges[]`, by findings with multi-repo provenance evidence, or by questions with multi-repo `related_ids` when repo-wide `citations[].repo` coverage exists, and report details must name the missing dimension. Prompt-contract tests cover the multi-repo validator first-action skeleton so qwen/codex cannot complete `step3` with an empty valid verdict before cross-repo policy is applied.
+  - artifact-quality report tests cover misleading/off-topic interpretation, weak evidence density, useless C4/Mermaid and missing cross-repo truthfulness as manual SWE assessment criteria, not machine execution hard-fail checks
   - frontend smoke работает на отдельной `frontend-workspace` копии run snapshot и не мутирует backend baseline; `snapshot_reports_missing` после terminal backend failure записывается как dependent skipped frontend status, а не independent frontend regression
-  - terminal-success backend runs (`result=passed`, `quality_gates=passed`, `run-status.env state=completed process_exit=0`) остаются `failure_class=none`, даже если raw provider logs содержат recovered `runner_unavailable`/429 diagnostics
-  - terminal quality failures (`failure_reason=quality` или `quality_gates=failed`) классифицируются как `quality_gates_failed`, даже если stale classifier rows/raw logs содержат `runner_unavailable`
-  - quality summary/matrix counters агрегируют `repair_attempts`, `repair_exhausted`, `fresh_retries`, `focused_repairs`, `stall_count`, `pre_artifact_stalls`, `post_artifact_stalls`, `zero_output_pre_artifact_stalls`, `partial_failure_count` и `quality_alerts`; non-exhausted repair/stall pressure visible but non-blocking, partial failures remain blockers
+  - terminal-success backend runs (`result=passed`, `run-status.env state=completed process_exit=0`) остаются `failure_class=none`, даже если raw provider logs содержат recovered `runner_unavailable`/429 diagnostics
+  - legacy terminal quality fields are unsupported migration evidence; active harness must not emit old quality-gate fields or classify them as release blockers
+  - execution report/matrix telemetry counters агрегируют `repair_attempts`, `repair_exhausted`, `fresh_retries`, `focused_repairs`, `stall_count`, `pre_artifact_stalls`, `post_artifact_stalls`, `zero_output_pre_artifact_stalls`, `partial_failure_count` и `quality_alerts`; non-exhausted repair/stall pressure visible but non-blocking, partial failures remain blockers
   - provider activity timeout overrides (`ACP_PROVIDER_*_ARTIFACT_STALL_SEC`, `ACP_PROVIDER_VALID_ARTIFACT_STOP_SEC`) are covered by focused unit tests and counted as diagnostic timeout overrides by the matrix release guard; release-mode tests must keep them blocked.
   - batch report evidence tests проверяют, что `collect_partial_shard_failures`, focused recovery exhaustion/write-set violations и missing headless rows with runtime logs surfaced as per-run issue details, а не теряются за aggregate failure class
 - `scripts/full-run-batch-matrix.sh` — официальный local trusted-machine harness:
@@ -318,9 +320,9 @@ Release workflow hardening:
   - matrix invariant: для одного `profile_id` shard-plan должен совпадать между `baseline` и `parallel-default`
   - для `source_kind=git_url` refs должны быть pinned
   - child batch stdin is detached from the planned profile/sweep combinations file; regression coverage forces a dummy child to drain stdin and still requires all matrix rows to execute
-  - release-mode пишет только `reports/release_verdict_<matrix-id>.json/.md`; non-release/diagnostic mode пишет neutral `reports/matrix_result_<matrix-id>.json/.md` без `release_state`
-  - итоговый release decision брать только из release-mode `reports/release_verdict_<matrix-id>.json`
-  - pre-tag/offline verifier: `python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json`; скрипт проверяет release-mode contract/providers/run indexes/records и не запускает live harness
+  - release-mode пишет machine execution verdict `reports/release_verdict_<matrix-id>.json/.md`; non-release/diagnostic mode пишет neutral `reports/matrix_result_<matrix-id>.json/.md` без `release_state`
+  - итоговый release decision составной: `release_verdict_<matrix-id>.json = PASS`, `swe_ux_assessment_<matrix-id>.md = accepted`, `swe_artifact_quality_assessment_<matrix-id>.md = accepted`
+  - pre-tag/offline verifier: `python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json`; скрипт проверяет release-mode contract/providers/run indexes/records plus matching accepted SWE reports и не запускает live harness
 - `scripts/frontend-live-e2e.sh` и `npm run e2e:live --prefix ui` используют Playwright:
   - local wrapper поддерживает `claude-code`, `qwen-code`, `codex-code`
   - canonical toggles: `UI_E2E_EXPECTED_REPO_COUNT`, `UI_E2E_SCENARIO=init-inspect`, `UI_E2E_OUTPUT_DIR`

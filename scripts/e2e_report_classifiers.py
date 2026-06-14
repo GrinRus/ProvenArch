@@ -8,10 +8,9 @@ FAILURE_CLASS_PRECEDENCE = {
     "runtime_contract_failed": 2,
     "runner_unavailable": 3,
     "infra_signal_terminated": 4,
-    "quality_gates_failed": 5,
-    "infra_incomplete_cycle": 6,
-    "runtime_flow_failed": 7,
-    "precheck_failed": 8,
+    "infra_incomplete_cycle": 5,
+    "runtime_flow_failed": 6,
+    "precheck_failed": 7,
     "none": 99,
 }
 
@@ -51,7 +50,6 @@ def terminal_success_summary(
     summary_exists: bool,
     run_status_exists: bool,
     result_value: str,
-    quality_gates_value: str,
     api_status: str,
     run_state: str,
     process_exit: int,
@@ -60,7 +58,6 @@ def terminal_success_summary(
         summary_exists
         and run_status_exists
         and str(result_value or "") == "passed"
-        and str(quality_gates_value or "") == "passed"
         and str(api_status or "") == "succeeded"
         and str(run_state or "").strip() == "completed"
         and process_exit == 0

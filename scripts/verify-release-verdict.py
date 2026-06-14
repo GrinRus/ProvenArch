@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
-"""Verify an existing release_verdict_<matrix-id>.json without running live E2E."""
+"""Verify release evidence produced by live E2E without running live E2E."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
 
 RELEASE_PROVIDERS = ["qwen-code", "claude-code", "codex-code"]
 RELEASE_RUN_INDEXES = ["1"]
+MANUAL_ASSESSMENTS = {
+    "ux": "swe_ux_assessment_{matrix_id}.md",
+    "artifact_quality": "swe_artifact_quality_assessment_{matrix_id}.md",
+}
 
 
 def load_payload(path: Path) -> dict[str, Any]:
@@ -69,18 +74,69 @@ def verify_payload(payload: dict[str, Any]) -> list[str]:
     return failures
 
 
+def parse_markdown_scalar(text: str, key: str) -> str:
+    pattern = rf"^\s*(?:[-*]\s*)?{re.escape(key)}\s*:\s*(.+?)\s*$"
+    match = re.search(pattern, text, flags=re.IGNORECASE | re.MULTILINE)
+    return match.group(1).strip() if match else ""
+
+
+def matrix_id_from_verdict_path(path: Path) -> str:
+    match = re.fullmatch(r"release_verdict_(.+)\.json", path.name)
+    return match.group(1) if match else ""
+
+
+def verify_manual_assessment(path: Path, matrix_id: str, label: str) -> list[str]:
+    failures: list[str] = []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return [f"{label} assessment file not found: {path}"]
+    except OSError as exc:
+        return [f"failed to read {label} assessment file {path}: {exc}"]
+
+    observed_matrix_id = parse_markdown_scalar(text, "matrix_id")
+    if observed_matrix_id != matrix_id:
+        failures.append(
+            f"{label} assessment matrix_id must be {matrix_id!r}, got {observed_matrix_id!r}"
+        )
+
+    decision = parse_markdown_scalar(text, "decision") or parse_markdown_scalar(text, "status")
+    if decision.lower() != "accepted":
+        failures.append(f"{label} assessment decision/status must be accepted, got {decision!r}")
+    return failures
+
+
+def verify_manual_assessments(verdict_path: Path, matrix_id: str) -> list[str]:
+    reports_root = verdict_path.parent
+    failures: list[str] = []
+    for label, template in MANUAL_ASSESSMENTS.items():
+        path = reports_root / template.format(matrix_id=matrix_id)
+        failures.extend(verify_manual_assessment(path, matrix_id, label))
+    return failures
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("verdict_json", type=Path, help="Path to reports/release_verdict_<matrix-id>.json")
     args = parser.parse_args(argv)
 
     payload = load_payload(args.verdict_json)
+    matrix_id = str(payload.get("matrix_id", "")).strip()
+    path_matrix_id = matrix_id_from_verdict_path(args.verdict_json)
     failures = verify_payload(payload)
+    if not matrix_id:
+        failures.append("matrix_id must be present")
+    elif path_matrix_id and path_matrix_id != matrix_id:
+        failures.append(
+            f"matrix_id must match verdict filename {path_matrix_id!r}, got {matrix_id!r}"
+        )
+    else:
+        failures.extend(verify_manual_assessments(args.verdict_json, matrix_id))
     if failures:
         for failure in failures:
-            print(f"release verdict not ready: {failure}", file=sys.stderr)
+            print(f"release evidence not ready: {failure}", file=sys.stderr)
         return 1
-    print(f"release verdict ready: {args.verdict_json}")
+    print(f"release evidence ready: {args.verdict_json}")
     return 0
 
 

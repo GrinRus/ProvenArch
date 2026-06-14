@@ -1066,3 +1066,25 @@ Progress log:
 - 2026-05-28: Completed `16B Source + Readiness consolidation`: Source now has a repo table with explicit advanced-only analysis scope state, Readiness has workspace/repo/runtime/permission/artifact summary cards plus a compact runtime profile summary. No backend/API/schema/live-shell changes.
 - 2026-05-28: Completed `16C Charter workbench`: Charter now shows wizard summary, domain/team card overview, baseline prompt bundle status, explicit partial states for missing cards, and a no-404 empty editor selection before existing artifact editor/Git helper actions. No backend/API/schema/live-shell changes.
 - 2026-05-28: Completed `16D` through `16N`, finishing Analysis mission control, Review evidence/domain map, Proposals review room, Ask read-only console, Publish gate, UI coverage, live E2E selector/operator-journey migration, optional Ask/domain-map diagnostics and testing/runbook sync. Epic 16 implementation acceptance is complete; remaining item is owner review/merge/archive bookkeeping.
+
+### Plan ID
+EP-20260613-live-e2e-execution-ux-artifact-gate
+
+Status: done.
+
+Context:
+Live E2E release evidence mixed machine execution quality with artifact/UX quality. The new release model keeps product behavior unchanged, removes the old mixed gate, and makes release readiness composite: machine execution `PASS`, accepted SWE UX report, and accepted SWE artifact-quality report.
+
+Goals:
+- [x] Convert live E2E harness/reporting to execution-only machine verdicts.
+- [x] Preserve `reports/taskruns/<run_id>-quality.json` as telemetry/evidence only.
+- [x] Add required SWE UX and artifact-quality assessment templates and verifier checks.
+- [x] Update live E2E docs/runbooks/catalog/agent instructions.
+- [x] Update script tests for execution reports, telemetry-only artifact findings, and composite release evidence.
+
+Validation:
+- [x] Targeted script tests: `python3 -m unittest scripts.tests.verify_release_verdict_test scripts.tests.live_e2e_plan_test scripts.tests.live_e2e_blackbox_report_test scripts.tests.frontend_live_e2e_contract_test scripts.tests.matrix_release_contract_test scripts.tests.batch_failure_classification_test`
+- [x] Full DoD: `make contracts`, `make test`, `make lint`, `make build` with exact Node `22.21.1`.
+
+Progress log:
+- 2026-06-13: Implemented execution-only harness/reporting, required SWE UX/artifact-quality reports, docs/runbook/catalog updates, verifier checks and tests.
