@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 import re
 
 FAILURE_CLASS_PRECEDENCE = {
@@ -131,47 +132,57 @@ def text_has_collect_document_path_contract_signature(text: str) -> bool:
     return any(re.search(pattern, haystack, flags=re.IGNORECASE) for pattern in patterns)
 
 
+def extract_focused_recovery_reason_counts(text: str) -> Counter[str]:
+    counts: Counter[str] = Counter()
+    for raw_line in str(text or "").splitlines():
+        haystack = raw_line.lower()
+        if not haystack.strip():
+            continue
+        if (
+            "collect manifest repair exhausted" in haystack
+            or "manifest-only collect repair stalled" in haystack
+            or "manifest-only collect repair did not produce valid collect artifacts" in haystack
+        ):
+            counts["collect_manifest_repair_exhausted"] += 1
+        if (
+            ("focused artifact repair exhausted" in haystack and "validator_verdict_repair" in haystack)
+            or "verdict-only validator repair stalled" in haystack
+            or "verdict-only validator repair did not produce a valid validator verdict contract" in haystack
+        ):
+            counts["validator_verdict_repair_exhausted"] += 1
+        if (
+            "validator verdict recovery write-set precheck failed" in haystack
+            or "verdict-only validator repair wrote outside validator-verdict.json" in haystack
+            or "validator repair wrote forbidden" in haystack
+        ):
+            counts["validator_verdict_repair_write_set_violation"] += 1
+        if (
+            ("focused artifact repair exhausted" in haystack and "draft_artifact_repair" in haystack)
+            or "draft artifact repair stalled" in haystack
+            or "draft artifact repair did not produce valid draft artifact contract" in haystack
+        ):
+            counts["draft_artifact_repair_exhausted"] += 1
+        if (
+            ("focused artifact repair exhausted" in haystack and "draft_artifact_enrichment" in haystack)
+            or "draft artifact enrichment stalled" in haystack
+            or "draft artifact enrichment did not produce valid draft artifact contract" in haystack
+        ):
+            counts["draft_artifact_enrichment_exhausted"] += 1
+        if (
+            "draft recovery write_root precheck failed" in haystack
+            or "draft recovery draft_final_root precheck failed" in haystack
+            or "draft recovery wrote outside the draft artifact write set" in haystack
+            or "draft repair wrote forbidden write_root files" in haystack
+            or "draft enrichment write_root precheck failed" in haystack
+            or "draft enrichment draft_final_root precheck failed" in haystack
+            or "draft enrichment wrote outside the draft artifact write set" in haystack
+        ):
+            counts["draft_artifact_repair_write_set_violation"] += 1
+    return counts
+
+
 def extract_focused_recovery_reason_tags(text: str) -> set[str]:
-    haystack = str(text or "").lower()
+    counts = extract_focused_recovery_reason_counts(text)
     tags: set[str] = set()
-    if (
-        "collect manifest repair exhausted" in haystack
-        or "manifest-only collect repair stalled" in haystack
-        or "manifest-only collect repair did not produce valid collect artifacts" in haystack
-    ):
-        tags.add("collect_manifest_repair_exhausted")
-    if (
-        ("focused artifact repair exhausted" in haystack and "validator_verdict_repair" in haystack)
-        or "verdict-only validator repair stalled" in haystack
-        or "verdict-only validator repair did not produce a valid validator verdict contract" in haystack
-    ):
-        tags.add("validator_verdict_repair_exhausted")
-    if (
-        "validator verdict recovery write-set precheck failed" in haystack
-        or "verdict-only validator repair wrote outside validator-verdict.json" in haystack
-        or "validator repair wrote forbidden" in haystack
-    ):
-        tags.add("validator_verdict_repair_write_set_violation")
-    if (
-        ("focused artifact repair exhausted" in haystack and "draft_artifact_repair" in haystack)
-        or "draft artifact repair stalled" in haystack
-        or "draft artifact repair did not produce valid draft artifact contract" in haystack
-    ):
-        tags.add("draft_artifact_repair_exhausted")
-    if (
-        ("focused artifact repair exhausted" in haystack and "draft_artifact_enrichment" in haystack)
-        or "draft artifact enrichment stalled" in haystack
-        or "draft artifact enrichment did not produce valid draft artifact contract" in haystack
-    ):
-        tags.add("draft_artifact_enrichment_exhausted")
-    if (
-        "draft recovery write_root precheck failed" in haystack
-        or "draft recovery draft_final_root precheck failed" in haystack
-        or "draft recovery wrote outside the draft artifact write set" in haystack
-        or "draft repair wrote forbidden write_root files" in haystack
-        or "draft enrichment write_root precheck failed" in haystack
-        or "draft enrichment draft_final_root precheck failed" in haystack
-        or "draft enrichment wrote outside the draft artifact write set" in haystack
-    ):
-        tags.add("draft_artifact_repair_write_set_violation")
+    tags.update(counts.keys())
     return tags

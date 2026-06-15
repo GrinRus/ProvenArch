@@ -1496,6 +1496,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"validator_verdict_repair"}',
                     '{"level":"error","message":"draft recovery wrote outside the draft artifact write set"}',
                     '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"draft_artifact_enrichment"}',
+                    '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"draft_artifact_enrichment"}',
                 ]
             )
             + "\n",
@@ -1519,8 +1520,8 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertIn("validator_verdict_repair_exhausted", focused_details)
         self.assertIn("draft_artifact_enrichment_exhausted", focused_details)
         self.assertIn("draft_artifact_repair_write_set_violation", focused_details)
-        self.assertEqual(2, result.focused_repairs)
-        self.assertEqual(2, result.repair_exhausted)
+        self.assertEqual(4, result.focused_repairs)
+        self.assertEqual(3, result.repair_exhausted)
         self.assertIn("execution:repair-exhausted", result.issues)
 
     def test_python_report_prefers_parse_signature_contract_failure_over_runner_unavailable(self) -> None:

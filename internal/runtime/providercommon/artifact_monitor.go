@@ -3,6 +3,7 @@ package providercommon
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -373,13 +374,57 @@ func validateDraftArtifactRepairWriteSet(task acpruntime.Task, beforeWriteRoot w
 	if err != nil {
 		return err
 	}
-	draftRootChanges := unexpectedRepairMutations(beforeDraftRoot, afterDraftRoot, func(_ string, _ writeRootFileState) bool {
-		return true
-	})
+	allowedDraftRootChange := allowedDraftRootRepairMutation(task)
+	draftRootChanges := unexpectedRepairMutations(beforeDraftRoot, afterDraftRoot, allowedDraftRootChange)
 	if len(draftRootChanges) > 0 {
 		return fmt.Errorf("draft repair wrote forbidden draft_final_root files: %s", strings.Join(draftRootChanges, "; "))
 	}
 	return nil
+}
+
+func allowedDraftRootRepairMutation(task acpruntime.Task) func(string, writeRootFileState) bool {
+	allowedFiles := map[string]struct{}{}
+	allowedDirs := map[string]struct{}{}
+	for _, output := range loadAllowedDraftOutputs(task) {
+		rel := filepath.ToSlash(filepath.Clean(strings.TrimSpace(output.Path)))
+		if rel == "" || rel == "." || strings.HasPrefix(rel, "../") || filepath.IsAbs(rel) {
+			continue
+		}
+		allowedFiles[rel] = struct{}{}
+		dir := filepath.ToSlash(filepath.Dir(filepath.FromSlash(rel)))
+		for dir != "" && dir != "." {
+			allowedDirs[dir] = struct{}{}
+			next := filepath.ToSlash(filepath.Dir(filepath.FromSlash(dir)))
+			if next == dir {
+				break
+			}
+			dir = next
+		}
+	}
+	return func(path string, state writeRootFileState) bool {
+		path = filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
+		if state.IsDir {
+			_, ok := allowedDirs[path]
+			return ok
+		}
+		_, ok := allowedFiles[path]
+		return ok
+	}
+}
+
+func loadAllowedDraftOutputs(task acpruntime.Task) []runtimedrafts.Output {
+	manifestFile := runtimedrafts.ManifestFileForStep(task.StepID)
+	if manifestFile == "" {
+		return nil
+	}
+	if manifest, _, err := runtimedrafts.Load(task.WriteRoot, manifestFile); err == nil {
+		return manifest.Outputs
+	}
+	var fallback runtimedrafts.Manifest
+	if err := json.Unmarshal([]byte(steppolicy.RuntimeDraftManifestTaskSkeleton(task)), &fallback); err != nil {
+		return nil
+	}
+	return fallback.Outputs
 }
 
 func unexpectedRepairMutations(before writeRootFileSnapshot, after writeRootFileSnapshot, allowed func(string, writeRootFileState) bool) []string {

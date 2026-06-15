@@ -16,6 +16,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from e2e_report_classifiers import (
+    extract_focused_recovery_reason_counts,
     extract_focused_recovery_reason_tags,
     failure_class_rank,
     should_ignore_classified_incomplete_for_terminal_process,
@@ -182,9 +183,10 @@ def extract_quality_runtime_counters(quality_payload: dict[str, Any]) -> dict[st
     return counters
 
 
-def focused_recovery_counter_floor(reason_tags: set[str]) -> tuple[int, int]:
-    exhausted = len({tag for tag in reason_tags if tag in FOCUSED_REPAIR_EXHAUSTED_REASON_TAGS})
-    return exhausted, exhausted
+def focused_recovery_counter_floor(reason_counts: Counter[str]) -> tuple[int, int]:
+    focused = sum(reason_counts.values())
+    exhausted = sum(count for tag, count in reason_counts.items() if tag in FOCUSED_REPAIR_EXHAUSTED_REASON_TAGS)
+    return focused, exhausted
 
 
 def extract_raw_runtime_stall_counters(paths: list[Path]) -> Counter[str]:
@@ -1438,6 +1440,7 @@ def evaluate_run(
     parse_stages: set[str] = set()
     raw_outputs: set[str] = set()
     focused_recovery_reasons: set[str] = set()
+    focused_recovery_counts: Counter[str] = Counter()
     runtime_metadata_count = 0
     runtime_log_count = 0
     structured_runner_error_sources = [summary_path, full_run_log]
@@ -1462,6 +1465,7 @@ def evaluate_run(
             continue
         text = read_text_file(source_path)
         focused_recovery_reasons.update(extract_focused_recovery_reason_tags(text))
+        focused_recovery_counts.update(extract_focused_recovery_reason_counts(text))
         if not terminal_success:
             if text_has_runtime_contract_parse_signature(text):
                 runtime_contract_parse_failed_hit = True
@@ -1489,6 +1493,7 @@ def evaluate_run(
             continue
         text = read_text_file(source_path)
         focused_recovery_reasons.update(extract_focused_recovery_reason_tags(text))
+        focused_recovery_counts.update(extract_focused_recovery_reason_counts(text))
         if not terminal_success:
             if text_has_runtime_contract_parse_signature(text):
                 runtime_contract_parse_failed_hit = True
@@ -1513,7 +1518,7 @@ def evaluate_run(
             details.append(f"reliability/runner-errors -> raw_outputs={sorted(raw_outputs)[:5]}")
     if focused_recovery_reasons:
         details.append(f"reliability/focused-recovery -> reasons={sorted(focused_recovery_reasons)}")
-        focused_floor, exhausted_floor = focused_recovery_counter_floor(focused_recovery_reasons)
+        focused_floor, exhausted_floor = focused_recovery_counter_floor(focused_recovery_counts)
         if focused_floor > focused_repairs:
             focused_repairs = focused_floor
         if exhausted_floor > repair_exhausted:

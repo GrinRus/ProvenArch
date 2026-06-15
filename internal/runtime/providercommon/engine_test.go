@@ -1921,6 +1921,46 @@ func TestRunHeadlessProviderRejectsDraftEnrichmentExtraWriteRootFiles(t *testing
 	}
 }
 
+func TestRunHeadlessProviderRejectsDraftEnrichmentUnreferencedDraftRootFiles(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-extra-draft-root")
+	repairScript := asIsBootstrapDraftScript(task, "exit 0")
+	enrichmentScript := asIsDraftScript(
+		task,
+		[]string{"overview.md", "summary.md", "architect-summary.md"},
+		"printf '%s\\n' '# Extra' > "+shellQuote(filepath.Join(task.DraftFinalRoot, "extra.md"))+"\n",
+	)
+	runner := testAdapter{
+		command:                writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nexit 0\n"),
+		draftRepairCommand:     writeEngineScript(t, repairScript),
+		draftEnrichmentCommand: writeEngineScript(t, enrichmentScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:     true,
+			RepairDraftArtifactsOnce:          true,
+			RepairDraftArtifactEnrichmentOnce: true,
+		},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected draft enrichment write-set contract failure")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "draft enrichment wrote outside the draft artifact write set") {
+		t.Fatalf("expected draft enrichment write-set failure, got %v", err)
+	}
+	if !strings.Contains(runnerErr.Error(), "forbidden draft_final_root files") {
+		t.Fatalf("expected draft_final_root write-set detail, got %v", err)
+	}
+}
+
 func TestRunHeadlessProviderRetriesTransientAPIErrorDraftArtifactRepair(t *testing.T) {
 	task := newAsIsDraftTask(t, "run-asis-draft-repair-api-retry")
 	diagnostics := []acpruntime.DiagnosticEvent{}
