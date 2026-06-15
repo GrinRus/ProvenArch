@@ -97,6 +97,12 @@ QUALITY_COUNTER_KEYS = (
     "zero_output_pre_artifact_stalls",
     "partial_failure_count",
 )
+FOCUSED_REPAIR_EXHAUSTED_REASON_TAGS = (
+    "collect_manifest_repair_exhausted",
+    "validator_verdict_repair_exhausted",
+    "draft_artifact_repair_exhausted",
+    "draft_artifact_enrichment_exhausted",
+)
 
 FRONTEND_PROVIDERS = ("qwen-code", "claude-code", "codex-code")
 FRONTEND_LIVE_RESULT_FILENAME = "frontend-e2e-result.json"
@@ -174,6 +180,11 @@ def extract_quality_runtime_counters(quality_payload: dict[str, Any]) -> dict[st
     signals = quality_payload.get("quality_signals") or []
     counters["quality_alerts"] = len(signals) if isinstance(signals, list) else 0
     return counters
+
+
+def focused_recovery_counter_floor(reason_tags: set[str]) -> tuple[int, int]:
+    exhausted = len({tag for tag in reason_tags if tag in FOCUSED_REPAIR_EXHAUSTED_REASON_TAGS})
+    return exhausted, exhausted
 
 
 def extract_raw_runtime_stall_counters(paths: list[Path]) -> Counter[str]:
@@ -1502,6 +1513,18 @@ def evaluate_run(
             details.append(f"reliability/runner-errors -> raw_outputs={sorted(raw_outputs)[:5]}")
     if focused_recovery_reasons:
         details.append(f"reliability/focused-recovery -> reasons={sorted(focused_recovery_reasons)}")
+        focused_floor, exhausted_floor = focused_recovery_counter_floor(focused_recovery_reasons)
+        if focused_floor > focused_repairs:
+            focused_repairs = focused_floor
+        if exhausted_floor > repair_exhausted:
+            repair_exhausted = exhausted_floor
+        if exhausted_floor > 0:
+            issues.append("execution:repair-exhausted")
+            details.append(
+                "execution/runtime-recovery -> "
+                f"focused_repairs={focused_repairs} repair_exhausted={repair_exhausted} "
+                "source=focused-recovery-reasons"
+            )
     if runtime_contract_failed_hit:
         issues.append("reliability:runtime-contract-failed")
     if runner_unavailable_hit:

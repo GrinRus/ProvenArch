@@ -2188,7 +2188,9 @@ for rec in records:
         f"{stats['hard']}/{stats['total']} | {stats['semantic_hard_fail']} | {stats['off_topic_hits']} | {stats['artifact_non_snapshot']} | "
         f"{stats['evidence_scope_hits']} | {stats['cross_repo_missing_hits']} | "
         f"{int(stats['runtime_flow_failed']) + int(stats['runtime_flow_issue_hits'])} | "
-        f"repair={stats['repair_attempts']}; stalls={stats['stall_count']} (pre={stats['pre_artifact_stalls']}; post={stats['post_artifact_stalls']}); zero_pre={stats['zero_output_pre_artifact_stalls']}; partial={stats['partial_failure_count']}; alerts={stats['quality_alerts']} | "
+        f"repair={stats['repair_attempts']}; exhausted={stats['repair_exhausted']}; focused={stats['focused_repairs']}; "
+        f"stalls={stats['stall_count']} (pre={stats['pre_artifact_stalls']}; post={stats['post_artifact_stalls']}); "
+        f"zero_pre={stats['zero_output_pre_artifact_stalls']}; partial={stats['partial_failure_count']}; alerts={stats['quality_alerts']} | "
         f"{frontend_statuses['frontend_qwen_status']}/{frontend_statuses['frontend_claude_status']}/{frontend_statuses['frontend_codex_status']} | "
         f"{'; '.join(blockers) if blockers else '-'} | {rec['run_matrix_md']} | {rec['execution_report_md']} |"
     )

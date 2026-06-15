@@ -1519,6 +1519,9 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertIn("validator_verdict_repair_exhausted", focused_details)
         self.assertIn("draft_artifact_enrichment_exhausted", focused_details)
         self.assertIn("draft_artifact_repair_write_set_violation", focused_details)
+        self.assertEqual(2, result.focused_repairs)
+        self.assertEqual(2, result.repair_exhausted)
+        self.assertIn("execution:repair-exhausted", result.issues)
 
     def test_python_report_prefers_parse_signature_contract_failure_over_runner_unavailable(self) -> None:
         run_dir = self.root / "run-parse-signature-python"
