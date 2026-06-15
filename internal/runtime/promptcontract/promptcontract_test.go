@@ -689,6 +689,7 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"draft artifact enrichment focused recovery mode",
 		"Immediate draft artifact enrichment action:",
 		"Do not run the earlier heredoc/bootstrap draft command again.",
+		"First action: read the current draft manifest",
 		"/tmp/workspace/reports/taskruns/run-1/asis/asis-draft-manifest.json",
 		"/tmp/workspace/reports/taskruns/run-1/staging/final",
 		"overview.md -> reports/as-is/overview.md",
@@ -697,7 +698,10 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"Final content MUST NOT include these scaffold markers:",
 		"Runtime draft recovery initialized",
 		"Use collected shard manifests and validator output as the evidence source before final review",
+		"A no-op rewrite is invalid",
 		"Enrich overview.md, summary.md, and architect-summary.md from collected shard manifests",
+		"decision-ready operator summary",
+		"coverage gaps",
 	} {
 		if !strings.Contains(prompt, token) {
 			t.Fatalf("expected draft enrichment prompt to contain %q, got:\n%s", token, prompt)

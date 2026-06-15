@@ -1879,8 +1879,51 @@ func TestRunHeadlessProviderRejectsBootstrapOnlyDraftAfterEnrichment(t *testing.
 	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
 		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
 	}
-	if !strings.Contains(runnerErr.Error(), "draft artifact enrichment did not produce valid draft artifact contract") {
+	if !strings.Contains(runnerErr.Error(), "draft_artifact_enrichment_noop_or_scaffold") {
 		t.Fatalf("expected enrichment failure, got %v", err)
+	}
+}
+
+func TestRunHeadlessProviderRejectsStalledBootstrapOnlyDraftAfterEnrichment(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-stalled-scaffold")
+	repairScript := asIsBootstrapDraftScript(task, "exit 0")
+	enrichmentScript := asIsBootstrapDraftScript(task, "sleep 5")
+	runner := testAdapter{
+		command:                writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nexit 0\n"),
+		draftRepairCommand:     writeEngineScript(t, repairScript),
+		draftEnrichmentCommand: writeEngineScript(t, enrichmentScript),
+		activity: ActivityPolicy{
+			MonitorArtifacts:           true,
+			MonitorPreArtifact:         true,
+			PreArtifactStallWindow:     50 * time.Millisecond,
+			PostArtifactStallWindow:    50 * time.Millisecond,
+			PartialArtifactStallWindow: 50 * time.Millisecond,
+			PollInterval:               10 * time.Millisecond,
+			TerminateGrace:             10 * time.Millisecond,
+			PostTerminateDrain:         time.Millisecond,
+		},
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:     true,
+			RepairDraftArtifactsOnce:          true,
+			RepairDraftArtifactEnrichmentOnce: true,
+		},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected stalled bootstrap-only draft enrichment to fail")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "draft_artifact_enrichment_noop_or_scaffold") {
+		t.Fatalf("expected noop/scaffold enrichment failure, got %v", err)
 	}
 }
 

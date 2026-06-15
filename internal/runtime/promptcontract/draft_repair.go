@@ -213,6 +213,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		"- Do not return semantic JSON or any semantic payload on stdout.",
 		"- Do not run the earlier heredoc/bootstrap draft command again.",
 		"- Do not create or preserve recovery scaffold text as final content.",
+		"- First action: read the current draft manifest, then read staged shard manifests/authored shard docs/final-run-index/citation-index evidence available under the allowed read roots before rewriting markdown.",
 		fmt.Sprintf("- Read and keep the existing manifest target in write_root: %q.", manifestTarget),
 		fmt.Sprintf("- Rewrite draft content only under draft_final_root: %q.", strings.TrimSpace(task.DraftFinalRoot)),
 		"- Allowed write targets are the step draft manifest in write_root and referenced draft files under draft_final_root.",
@@ -241,9 +242,10 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		"- Keep the manifest contract shape: version=1, run_id, step_id, step_contract, agent_role, outputs[].",
 		"- Every outputs[].path must stay relative to draft_final_root and every referenced draft file must exist before exit.",
 		"- Replace bootstrap-only markdown with evidence-backed content that cites concrete repositories, staged artifacts, files, services, modules, findings, or coverage gaps visible in the allowed read roots.",
+		"- A no-op rewrite is invalid: every referenced markdown draft must be rewritten with marker-free evidence-backed content, not merely re-saved unchanged.",
 		"- Preserve valid non-markdown support bundles when they are already canonical; for constitution, baseline-subagents.yaml may remain the baseline YAML bundle.",
 		"- Final content MUST NOT include these scaffold markers: Runtime draft recovery initialized; draft recovery initialized; Treat this as diagnostic evidence until; Use collected shard manifests and validator output as the evidence source before final review; Draft surface initialized; Current run evidence should be reviewed; Runtime proposal surface initialized.",
-		"- Final action must be: ensure the draft manifest and every referenced draft file exist, then ensure no referenced markdown draft contains unchanged bootstrap/recovery scaffold text.",
+		"- Final action must be: ensure the draft manifest and every referenced draft file exist, then ensure every referenced markdown draft changed and contains no unchanged bootstrap/recovery scaffold text.",
 	)
 	switch strings.TrimSpace(task.StepID) {
 	case "init.step0.constitution":
@@ -255,6 +257,8 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		lines = append(lines,
 			"- Enrich overview.md, summary.md, and architect-summary.md from collected shard manifests, authored shard docs, final indexes, citations, staged model evidence, and allowed repo evidence roots.",
 			"- Include enough repository/path and staged artifact references for an operator to understand the architecture surface and remaining coverage gaps.",
+			"- Include a decision-ready operator summary: what is complete, what is missing, and what the operator should inspect or decide next.",
+			"- Include explicit coverage gaps when any planned shard, repo path, citation, or staged evidence surface is partial or missing.",
 		)
 	case "init.step4.proposals", "refresh.step4.proposals":
 		lines = append(lines,

@@ -267,6 +267,41 @@ run_result_row_exists() {
     "$RUN_RESULTS_TSV"
 }
 
+resolve_failed_run_id_from_workspace() {
+  local workspace_path="$1"
+  local pipeline="$2"
+  python3 - "$workspace_path" "$pipeline" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+workspace = Path(sys.argv[1])
+pipeline = (sys.argv[2] or "").strip()
+taskruns = workspace / "reports" / "taskruns"
+candidates = []
+if taskruns.exists():
+    for path in taskruns.glob("run_*-quality.json"):
+        run_id = path.name[:-len("-quality.json")]
+        candidates.append((path.stat().st_mtime, run_id))
+    raw_root = taskruns / "raw"
+    if raw_root.exists():
+        for path in raw_root.glob("run_*-meta.json"):
+            text = path.name
+            match = re.match(r"(run_[0-9_]+)-", text)
+            if not match:
+                continue
+            if pipeline and f"-{pipeline}." not in text:
+                continue
+            candidates.append((path.stat().st_mtime, match.group(1)))
+
+if not candidates:
+    sys.exit(0)
+candidates.sort()
+print(candidates[-1][1])
+PY
+}
+
 append_run_result_row_once() {
   local iteration="$1"
   local runtime_mode="$2"
@@ -277,6 +312,9 @@ append_run_result_row_once() {
   local workspace_path="$7"
   local output_path="$8"
 
+  if [[ -z "$run_id" ]]; then
+    run_id="$(resolve_failed_run_id_from_workspace "$workspace_path" "$pipeline" || true)"
+  fi
   if [[ -z "$run_id" ]]; then
     return 0
   fi

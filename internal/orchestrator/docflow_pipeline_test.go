@@ -278,6 +278,66 @@ func TestDocFlowSkipsAsIsRuntimeWhenCollectEvidenceIsUnusable(t *testing.T) {
 	}
 }
 
+func TestDocFlowSkipsDownstreamRuntimeWhenCollectEvidenceIsPartial(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	runner := &collectPartialFailureRunner{}
+	service := NewService(
+		WithRunner(runner),
+		WithExecutionOverrides(acpruntime.ExecutionOverrides{
+			FailurePolicy: strPtr(acpruntime.ExecutionFailurePolicyBestEffort),
+		}),
+		WithClock(func() time.Time {
+			return time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
+		}),
+	)
+
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err == nil {
+		t.Fatalf("expected run error when collect evidence is partial")
+	}
+	if info.Status != RunStatusFailed {
+		t.Fatalf("expected failed status, got %s", info.Status)
+	}
+	if info.ErrorCode != runErrorCodePartialFailed {
+		t.Fatalf("expected partial failure error code, got %q (%s)", info.ErrorCode, info.Error)
+	}
+	if runner.asIsInvocationCount() != 0 {
+		t.Fatalf("expected as-is runtime to be skipped, got %d invocations", runner.asIsInvocationCount())
+	}
+	if runner.proposalsInvocationCount() != 0 {
+		t.Fatalf("expected proposals runtime to be skipped, got %d invocations", runner.proposalsInvocationCount())
+	}
+	if !strings.Contains(info.Error, "step1.collect") {
+		t.Fatalf("expected collect partial failure summary, got %q", info.Error)
+	}
+
+	quality := readRunQuality(t, ws.Path, info.RunID)
+	if quality.EvidenceState.ReportMode != "incomplete" {
+		t.Fatalf("expected incomplete report mode, got %#v", quality.EvidenceState)
+	}
+	if got := quality.EvidenceState.Collect.Status; got != "partial" {
+		t.Fatalf("expected partial collect status, got %#v", quality.EvidenceState.Collect)
+	}
+	if !containsString(quality.EvidenceState.Reasons, "collect_partial_shard_failures") {
+		t.Fatalf("expected collect_partial_shard_failures reason, got %#v", quality.EvidenceState.Reasons)
+	}
+	if !containsString(quality.EvidenceState.Reasons, "asis_docs_skipped_due_to_partial_collect") {
+		t.Fatalf("expected as-is partial skip reason, got %#v", quality.EvidenceState.Reasons)
+	}
+	if !containsString(quality.EvidenceState.Reasons, "findings_skipped_due_to_partial_collect") {
+		t.Fatalf("expected findings partial skip reason, got %#v", quality.EvidenceState.Reasons)
+	}
+	if !containsString(quality.EvidenceState.Reasons, "proposals_skipped_due_to_partial_collect") {
+		t.Fatalf("expected proposals partial skip reason, got %#v", quality.EvidenceState.Reasons)
+	}
+}
+
 func TestManagedFakeRuntimeAutoApprovesEnvelopePermissionRequests(t *testing.T) {
 	t.Parallel()
 
@@ -397,12 +457,20 @@ type collectFailureRunner struct {
 	proposalsInvoked int
 }
 
+type collectPartialFailureRunner struct {
+	mu               sync.Mutex
+	collectFailed    bool
+	asIsInvoked      int
+	proposalsInvoked int
+}
+
 type permissionRequiredRunner struct{}
 
 func (docflowFailingValidatorRunner) Preflight(context.Context) error  { return nil }
 func (docflowPartialCanonicalRunner) Preflight(context.Context) error  { return nil }
 func (docflowOwnerGapValidatorRunner) Preflight(context.Context) error { return nil }
 func (*collectFailureRunner) Preflight(context.Context) error          { return nil }
+func (*collectPartialFailureRunner) Preflight(context.Context) error   { return nil }
 func (permissionRequiredRunner) Preflight(context.Context) error       { return nil }
 
 func (docflowFailingValidatorRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
@@ -468,6 +536,37 @@ func (r *collectFailureRunner) Run(ctx context.Context, task acpruntime.Task) (a
 	}
 }
 
+func (r *collectPartialFailureRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	switch task.StepID {
+	case "init.step1.collect", "refresh.step1.collect":
+		r.mu.Lock()
+		if !r.collectFailed {
+			r.collectFailed = true
+			r.mu.Unlock()
+			return acpruntime.Result{}, acpruntime.WrapRunnerError(
+				acpruntime.ProviderClaudeCode,
+				acpruntime.ErrorCodeRuntimeContract,
+				"collect manifest contract invalid",
+				errors.New("partial shard pack manifest is invalid"),
+			)
+		}
+		r.mu.Unlock()
+		return fakeruntime.Runner{}.Run(ctx, task)
+	case "init.step2.asis_docs", "refresh.step2.asis_docs":
+		r.mu.Lock()
+		r.asIsInvoked++
+		r.mu.Unlock()
+		return acpruntime.Result{}, fmt.Errorf("unexpected as-is runtime invocation")
+	case "init.step4.proposals", "refresh.step4.proposals":
+		r.mu.Lock()
+		r.proposalsInvoked++
+		r.mu.Unlock()
+		return acpruntime.Result{}, fmt.Errorf("unexpected proposals runtime invocation")
+	default:
+		return fakeruntime.Runner{}.Run(ctx, task)
+	}
+}
+
 func (permissionRequiredRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
 	if task.RuntimePermissions.Mode != acpruntime.PermissionModeManaged {
 		return acpruntime.Result{}, fmt.Errorf("expected managed runtime permissions, got %q", task.RuntimePermissions.Mode)
@@ -499,6 +598,18 @@ func (r *collectFailureRunner) asIsInvocationCount() int {
 }
 
 func (r *collectFailureRunner) proposalsInvocationCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.proposalsInvoked
+}
+
+func (r *collectPartialFailureRunner) asIsInvocationCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.asIsInvoked
+}
+
+func (r *collectPartialFailureRunner) proposalsInvocationCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.proposalsInvoked

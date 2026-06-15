@@ -3,6 +3,7 @@ package providercommon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -569,10 +570,14 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 		var enrichmentStalled StallError
 		if errors.As(enrichmentErr, &enrichmentStalled) {
 			if policy.AcceptValidArtifactsAfterStop {
-				if err := adapter.ValidateArtifacts(task); err == nil {
+				if err := validateDraftArtifactEnrichmentOutcome(task, beforeDraftRoot, adapter.ValidateArtifacts(task)); err == nil {
 					emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "completed_after_controlled_stop", runtimeArtifactSnapshot(task))
 					emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", enrichmentStalled.Diagnostic.StallPhase)
 					return true, enrichmentResult, nil
+				} else if isDraftEnrichmentNoopOrScaffoldFailure(err) {
+					emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "stalled", runtimeArtifactSnapshot(task))
+					emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", enrichmentStalled.Diagnostic, err)
+					return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft_artifact_enrichment_noop_or_scaffold", err)
 				}
 			}
 			emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "stalled", runtimeArtifactSnapshot(task))
@@ -581,14 +586,56 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 		}
 		return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, enrichmentResult, enrichmentErr)
 	}
-	if err := adapter.ValidateArtifacts(task); err != nil {
+	if err := validateDraftArtifactEnrichmentOutcome(task, beforeDraftRoot, adapter.ValidateArtifacts(task)); err != nil {
 		emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "invalid", runtimeArtifactSnapshot(task))
 		emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
+		if isDraftEnrichmentNoopOrScaffoldFailure(err) {
+			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft_artifact_enrichment_noop_or_scaffold", err)
+		}
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft artifact enrichment did not produce valid draft artifact contract", err)
 	}
 	emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "completed", runtimeArtifactSnapshot(task))
 	emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", "")
 	return true, enrichmentResult, nil
+}
+
+func validateDraftArtifactEnrichmentOutcome(task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot, validationErr error) error {
+	if validationErr != nil {
+		if isDraftBootstrapOnlyValidationFailure(validationErr) {
+			return fmt.Errorf("draft_artifact_enrichment_noop_or_scaffold: %w", validationErr)
+		}
+		return validationErr
+	}
+	if !draftMarkdownOutputsChanged(task, beforeDraftRoot) {
+		return fmt.Errorf("draft_artifact_enrichment_noop_or_scaffold: no referenced markdown draft files changed")
+	}
+	return nil
+}
+
+func draftMarkdownOutputsChanged(task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot) bool {
+	afterDraftRoot, err := snapshotWriteRootFiles(task.DraftFinalRoot)
+	if err != nil {
+		return false
+	}
+	for _, output := range loadAllowedDraftOutputs(task) {
+		rel := filepath.ToSlash(filepath.Clean(strings.TrimSpace(output.Path)))
+		if rel == "" || rel == "." || strings.HasPrefix(rel, "../") || filepath.IsAbs(rel) {
+			continue
+		}
+		if strings.ToLower(filepath.Ext(rel)) != ".md" {
+			continue
+		}
+		beforeState, beforeExists := beforeDraftRoot[rel]
+		afterState, afterExists := afterDraftRoot[rel]
+		if beforeExists != afterExists || (afterExists && beforeState != afterState) {
+			return true
+		}
+	}
+	return false
+}
+
+func isDraftEnrichmentNoopOrScaffoldFailure(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "draft_artifact_enrichment_noop_or_scaffold")
 }
 
 func isDraftBootstrapOnlyValidationFailure(err error) bool {

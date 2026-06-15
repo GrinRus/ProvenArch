@@ -26,6 +26,8 @@ class LiveE2EBlackBoxReportTest(unittest.TestCase):
         self.assertIn("startswith('artifact_quality:')", helper)
         self.assertIn("headless run $run_id produced artifact_quality telemetry findings", helper)
         self.assertIn("leaving for SWE artifact assessment", helper)
+        self.assertIn("resolve_failed_run_id_from_workspace", helper)
+        self.assertIn('run_id="$(resolve_failed_run_id_from_workspace "$workspace_path" "$pipeline" || true)"', helper)
         self.assertNotIn('FAILURE_REASON="quality"', helper)
 
     def test_matrix_harness_has_no_script_authored_operator_decisions(self) -> None:

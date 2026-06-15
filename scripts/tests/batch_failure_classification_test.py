@@ -13,6 +13,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 E2E_BATCH_REPORT_PATH = REPO_ROOT / "scripts" / "e2e_batch_report.py"
 FULL_RUN_BATCH_SCRIPT = REPO_ROOT / "scripts" / "full-run-batch.sh"
+BACKEND_CYCLE_SCRIPT = REPO_ROOT / "scripts" / "internal" / "live-e2e-backend-cycle.sh"
 
 
 def load_e2e_batch_report_module():
@@ -1523,6 +1524,100 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual(4, result.focused_repairs)
         self.assertEqual(3, result.repair_exhausted)
         self.assertIn("execution:repair-exhausted", result.issues)
+
+    def test_python_report_does_not_double_count_focused_recovery_when_quality_counters_exist(self) -> None:
+        run_dir = self.root / "run-focused-recovery-no-double-count"
+        self._create_fixture_run_dir(run_dir)
+        quality_path = run_dir / "snapshots" / "refresh-run" / "reports" / "taskruns" / "refresh-run-quality.json"
+        payload = json.loads(quality_path.read_text(encoding="utf-8"))
+        payload.setdefault("totals", {}).update(
+            {
+                "repair_attempts": 1,
+                "repair_exhausted": 1,
+                "fresh_retries": 0,
+                "focused_repairs": 1,
+                "stall_count": 0,
+                "pre_artifact_stalls": 0,
+                "post_artifact_stalls": 0,
+                "zero_output_pre_artifact_stalls": 0,
+                "partial_failure_count": 0,
+            }
+        )
+        write_json(quality_path, payload)
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            "\n".join(
+                [
+                    '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"validator_verdict_repair"}',
+                    '{"level":"error","message":"draft recovery wrote outside the draft artifact write set"}',
+                    '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"draft_artifact_enrichment"}',
+                    '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"draft_artifact_enrichment"}',
+                ]
+            )
+            + "\n",
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "runtime_contract_failed",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual(1, result.focused_repairs)
+        self.assertEqual(1, result.repair_exhausted)
+        self.assertIn("execution:repair-exhausted", result.issues)
+        self.assertTrue(any("reliability/focused-recovery" in detail for detail in result.issue_details))
+        self.assertFalse(any("source=focused-recovery-reasons" in detail for detail in result.issue_details))
+
+    def test_backend_cycle_appends_failed_headless_row_from_workspace_quality_fallback(self) -> None:
+        workspace = self.root / "headless-workspace"
+        taskruns = workspace / "reports" / "taskruns"
+        taskruns.mkdir(parents=True)
+        run_id = "run_20260615_120000_abcd"
+        write_json(taskruns / f"{run_id}-quality.json", {"totals": {}})
+        run_results = self.root / "run-results.tsv"
+        run_results.write_text("", encoding="utf-8")
+        functions = "\n".join(
+            [
+                extract_bash_function(BACKEND_CYCLE_SCRIPT.read_text(encoding="utf-8"), "run_result_row_exists"),
+                extract_bash_function(BACKEND_CYCLE_SCRIPT.read_text(encoding="utf-8"), "resolve_failed_run_id_from_workspace"),
+                extract_bash_function(BACKEND_CYCLE_SCRIPT.read_text(encoding="utf-8"), "append_run_result_row_once"),
+            ]
+        )
+        command = "\n".join(
+            [
+                "set -euo pipefail",
+                f"RUN_RESULTS_TSV={shlex.quote(str(run_results))}",
+                "RUN_RESULTS_EXPECTED_FIELDS=17",
+                "snapshot_run_artifacts() { return 0; }",
+                "quality_metrics() { return 1; }",
+                functions,
+                (
+                    "append_run_result_row_once 1 headless claude-code init '' failed "
+                    f"{shlex.quote(str(workspace))} reports"
+                ),
+                f"cat {shlex.quote(str(run_results))}",
+            ]
+        )
+
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        fields = completed.stdout.strip().split("\t")
+        self.assertEqual(17, len(fields), completed.stdout)
+        self.assertEqual(["1", "headless", "claude-code", "init", run_id, "failed"], fields[:6])
 
     def test_python_report_prefers_parse_signature_contract_failure_over_runner_unavailable(self) -> None:
         run_dir = self.root / "run-parse-signature-python"

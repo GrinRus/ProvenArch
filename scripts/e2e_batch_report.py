@@ -1365,6 +1365,7 @@ def evaluate_run(
             int(quality_counter_totals.get(key, 0)),
             int(raw_stall_counter_totals.get(key, 0)),
         )
+    has_runtime_counter_source = any(int(quality_counter_totals.get(key, 0)) > 0 for key in QUALITY_COUNTER_KEYS)
 
     repair_attempts = int(quality_counter_totals.get("repair_attempts", 0))
     repair_exhausted = int(quality_counter_totals.get("repair_exhausted", 0))
@@ -1519,12 +1520,14 @@ def evaluate_run(
     if focused_recovery_reasons:
         details.append(f"reliability/focused-recovery -> reasons={sorted(focused_recovery_reasons)}")
         focused_floor, exhausted_floor = focused_recovery_counter_floor(focused_recovery_counts)
-        if focused_floor > focused_repairs:
-            focused_repairs = focused_floor
-        if exhausted_floor > repair_exhausted:
-            repair_exhausted = exhausted_floor
-        if exhausted_floor > 0:
+        if not has_runtime_counter_source:
+            if focused_floor > focused_repairs:
+                focused_repairs = focused_floor
+            if exhausted_floor > repair_exhausted:
+                repair_exhausted = exhausted_floor
+        if exhausted_floor > 0 and "execution:repair-exhausted" not in issues:
             issues.append("execution:repair-exhausted")
+        if exhausted_floor > 0 and not has_runtime_counter_source:
             details.append(
                 "execution/runtime-recovery -> "
                 f"focused_repairs={focused_repairs} repair_exhausted={repair_exhausted} "
