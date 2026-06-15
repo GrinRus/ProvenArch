@@ -658,6 +658,14 @@ def collect_repo_roots(run_dir: Path, declared_meta: dict[str, Any]) -> list[Pat
 
 def resolve_reports_root(run_dir: Path, run_id: str) -> tuple[Path, str]:
     snapshot_reports = run_dir / "snapshots" / run_id / "reports"
+    if snapshot_reports.exists():
+        return snapshot_reports, "snapshot"
+    for workspace_root in workspace_candidates(run_dir):
+        reports_root = workspace_root / "reports"
+        if (reports_root / "taskruns" / f"{run_id}-quality.json").exists():
+            return reports_root, "workspace"
+        if (reports_root / "taskruns" / run_id).exists():
+            return reports_root, "workspace"
     return snapshot_reports, "snapshot"
 
 
@@ -1383,7 +1391,11 @@ def evaluate_run(
         if not row:
             continue
         run_id = str(row.get("run_id", "")).strip()
-        reports_root = run_dir / "snapshots" / run_id / "reports"
+        reports_root, source = resolve_reports_root(run_dir, run_id)
+        if source != "snapshot":
+            artifact_source = source
+            snapshot_ok = False
+            details.append(f"reliability/snapshot-missing -> using non-snapshot reports_root={reports_root} source={source}")
         if not reports_root.exists():
             snapshot_ok = False
             details.append(f"reliability/snapshot-missing -> missing {reports_root}")

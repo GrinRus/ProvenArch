@@ -89,6 +89,13 @@ type DraftArtifactRepairAdapter interface {
 	DraftArtifactRepairCommandSpec(acpruntime.Task, error) (CommandSpec, error)
 }
 
+// DraftArtifactEnrichmentAdapter is implemented by adapters that can run a
+// second-stage draft enrichment prompt after a bootstrap-only draft repair set
+// exists but still fails strict draft validation.
+type DraftArtifactEnrichmentAdapter interface {
+	DraftArtifactEnrichmentCommandSpec(acpruntime.Task, error) (CommandSpec, error)
+}
+
 type ActivityPolicy struct {
 	MonitorArtifacts            bool
 	MonitorPreArtifact          bool
@@ -108,6 +115,7 @@ type RecoveryPolicy struct {
 	RepairCollectArtifactPairOnce               bool
 	RepairValidatorVerdictOnce                  bool
 	RepairDraftArtifactsOnce                    bool
+	RepairDraftArtifactEnrichmentOnce           bool
 	RetryInvalidOrMissingArtifactsOnce          bool
 	RetryZeroOutputPreArtifactStallOnce         bool
 	RetryTransientProviderUnavailableRepairOnce bool

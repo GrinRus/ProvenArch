@@ -121,6 +121,10 @@ func (a claudeAdapter) DraftArtifactRepairCommandSpec(task acpruntime.Task, vali
 	return providercommon.BuildFocusedRepairCommandSpec(task, acpruntime.ProviderClaudeCode, providercommon.FocusedRepairDraftArtifacts, validationErr, a.commandSpecWithPrompt)
 }
 
+func (a claudeAdapter) DraftArtifactEnrichmentCommandSpec(task acpruntime.Task, validationErr error) (providercommon.CommandSpec, error) {
+	return providercommon.BuildFocusedRepairCommandSpec(task, acpruntime.ProviderClaudeCode, providercommon.FocusedRepairDraftEnrichment, validationErr, a.commandSpecWithPrompt)
+}
+
 func (a claudeAdapter) ValidateArtifacts(task acpruntime.Task) error {
 	return providercommon.ValidateRuntimeArtifacts(task, acpruntime.ProviderClaudeCode)
 }
@@ -141,6 +145,7 @@ func (a claudeAdapter) RecoveryPolicy(task acpruntime.Task) providercommon.Recov
 		RepairCollectArtifactPairOnce:            true,
 		RepairValidatorVerdictOnce:               true,
 		RepairDraftArtifactsOnce:                 true,
+		RepairDraftArtifactEnrichmentOnce:        true,
 		RetryInvalidOrMissingArtifactsOnce:       true,
 		ClassifySilentRetryExhaustionUnavailable: true,
 	}

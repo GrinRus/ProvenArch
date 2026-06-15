@@ -1809,6 +1809,118 @@ func TestRunHeadlessProviderRepairsAsIsDraftArtifactsWithAllDraftFiles(t *testin
 	}
 }
 
+func TestRunHeadlessProviderEnrichesBootstrapOnlyDraftAfterRepairStall(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-after-stall")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	repairScript := asIsBootstrapDraftScript(task, "sleep 5")
+	enrichmentScript := asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, "exit 0")
+	runner := testAdapter{
+		command:                writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nexit 0\n"),
+		draftRepairCommand:     writeEngineScript(t, repairScript),
+		draftEnrichmentCommand: writeEngineScript(t, enrichmentScript),
+		activity: ActivityPolicy{
+			MonitorArtifacts:           true,
+			MonitorPreArtifact:         true,
+			PreArtifactStallWindow:     50 * time.Millisecond,
+			PostArtifactStallWindow:    50 * time.Millisecond,
+			PartialArtifactStallWindow: 50 * time.Millisecond,
+			PollInterval:               10 * time.Millisecond,
+			TerminateGrace:             10 * time.Millisecond,
+			PostTerminateDrain:         time.Millisecond,
+		},
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:     true,
+			RepairDraftArtifactsOnce:          true,
+			RepairDraftArtifactEnrichmentOnce: true,
+		},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected draft enrichment success after scaffold repair stall, got %v", err)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("expected draft_artifact_enrichment scheduled diagnostic, got %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair completed", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("expected draft_artifact_enrichment completed diagnostic, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderRejectsBootstrapOnlyDraftAfterEnrichment(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-invalid")
+	repairScript := asIsBootstrapDraftScript(task, "exit 0")
+	enrichmentScript := asIsBootstrapDraftScript(task, "exit 0")
+	runner := testAdapter{
+		command:                writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nexit 0\n"),
+		draftRepairCommand:     writeEngineScript(t, repairScript),
+		draftEnrichmentCommand: writeEngineScript(t, enrichmentScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:     true,
+			RepairDraftArtifactsOnce:          true,
+			RepairDraftArtifactEnrichmentOnce: true,
+		},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected bootstrap-only draft enrichment to fail")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "draft artifact enrichment did not produce valid draft artifact contract") {
+		t.Fatalf("expected enrichment failure, got %v", err)
+	}
+}
+
+func TestRunHeadlessProviderRejectsDraftEnrichmentExtraWriteRootFiles(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-extra-write")
+	repairScript := asIsBootstrapDraftScript(task, "exit 0")
+	enrichmentScript := asIsDraftScript(
+		task,
+		[]string{"overview.md", "summary.md", "architect-summary.md"},
+		"printf '%s\\n' '# Extra' > "+shellQuote(filepath.Join(task.WriteRoot, "extra.md"))+"\n",
+	)
+	runner := testAdapter{
+		command:                writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nexit 0\n"),
+		draftRepairCommand:     writeEngineScript(t, repairScript),
+		draftEnrichmentCommand: writeEngineScript(t, enrichmentScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:     true,
+			RepairDraftArtifactsOnce:          true,
+			RepairDraftArtifactEnrichmentOnce: true,
+		},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected draft enrichment write-set contract failure")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "draft enrichment wrote outside the draft artifact write set") {
+		t.Fatalf("expected draft enrichment write-set failure, got %v", err)
+	}
+}
+
 func TestRunHeadlessProviderRetriesTransientAPIErrorDraftArtifactRepair(t *testing.T) {
 	task := newAsIsDraftTask(t, "run-asis-draft-repair-api-retry")
 	diagnostics := []acpruntime.DiagnosticEvent{}
@@ -2305,6 +2417,7 @@ type testAdapter struct {
 	pairRepairCommand      string
 	validatorRepairCommand string
 	draftRepairCommand     string
+	draftEnrichmentCommand string
 	promptBytes            int
 	activity               ActivityPolicy
 	recovery               RecoveryPolicy
@@ -2369,6 +2482,13 @@ func (a testAdapter) DraftArtifactRepairCommandSpec(acpruntime.Task, error) (Com
 		return CommandSpec{}, errors.New("draft repair command is unavailable")
 	}
 	return CommandSpec{Command: a.draftRepairCommand}, nil
+}
+
+func (a testAdapter) DraftArtifactEnrichmentCommandSpec(acpruntime.Task, error) (CommandSpec, error) {
+	if strings.TrimSpace(a.draftEnrichmentCommand) == "" {
+		return CommandSpec{}, errors.New("draft enrichment command is unavailable")
+	}
+	return CommandSpec{Command: a.draftEnrichmentCommand}, nil
 }
 
 func (a testAdapter) ValidateArtifacts(task acpruntime.Task) error {
@@ -2811,6 +2931,36 @@ func asIsDraftScript(task acpruntime.Task, files []string, tail string) string {
 			"# "+strings.TrimSuffix(name, filepath.Ext(name)),
 			"",
 			"Provider authored as-is draft artifact.",
+			"EOF",
+		)
+	}
+	lines = append(lines, tail)
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func asIsBootstrapDraftScript(task acpruntime.Task, tail string) string {
+	lines := []string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"write_root=" + shellQuote(task.WriteRoot),
+		"draft_root=" + shellQuote(task.DraftFinalRoot),
+		"mkdir -p \"$write_root\" \"$draft_root\"",
+		"cat >\"$write_root/asis-draft-manifest.json\" <<'EOF'",
+		steppolicy.RuntimeDraftManifestTaskSkeleton(task),
+		"EOF",
+	}
+	for _, name := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		lines = append(lines,
+			"cat >\"$draft_root/"+name+"\" <<'EOF'",
+			"# "+strings.TrimSuffix(name, filepath.Ext(name)),
+			"",
+			"## Scope",
+			"- Run: "+task.RunID,
+			"- Step: "+task.StepID,
+			"",
+			"## Summary",
+			"- Runtime draft recovery initialized this artifact for the scoped analysis step.",
+			"- Use collected shard manifests and validator output as the evidence source before final review.",
 			"EOF",
 		)
 	}

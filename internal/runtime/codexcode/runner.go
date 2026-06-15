@@ -113,6 +113,10 @@ func (a codexAdapter) DraftArtifactRepairCommandSpec(task acpruntime.Task, valid
 	return providercommon.BuildFocusedRepairCommandSpec(task, acpruntime.ProviderCodexCode, providercommon.FocusedRepairDraftArtifacts, validationErr, a.commandSpecWithPrompt)
 }
 
+func (a codexAdapter) DraftArtifactEnrichmentCommandSpec(task acpruntime.Task, validationErr error) (providercommon.CommandSpec, error) {
+	return providercommon.BuildFocusedRepairCommandSpec(task, acpruntime.ProviderCodexCode, providercommon.FocusedRepairDraftEnrichment, validationErr, a.commandSpecWithPrompt)
+}
+
 func (a codexAdapter) ValidateArtifacts(task acpruntime.Task) error {
 	return providercommon.ValidateRuntimeArtifacts(task, acpruntime.ProviderCodexCode)
 }
@@ -127,11 +131,12 @@ func (a codexAdapter) ActivityPolicy(task acpruntime.Task) providercommon.Activi
 
 func (a codexAdapter) RecoveryPolicy(_ acpruntime.Task) providercommon.RecoveryPolicy {
 	return providercommon.RecoveryPolicy{
-		AcceptValidArtifactsAfterStop: true,
-		RepairCollectManifestOnce:     true,
-		RepairCollectArtifactPairOnce: true,
-		RepairValidatorVerdictOnce:    true,
-		RepairDraftArtifactsOnce:      true,
+		AcceptValidArtifactsAfterStop:     true,
+		RepairCollectManifestOnce:         true,
+		RepairCollectArtifactPairOnce:     true,
+		RepairValidatorVerdictOnce:        true,
+		RepairDraftArtifactsOnce:          true,
+		RepairDraftArtifactEnrichmentOnce: true,
 	}
 }
 

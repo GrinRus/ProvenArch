@@ -671,6 +671,51 @@ func TestComposeDraftArtifactRepairPromptNamesExactTargets(t *testing.T) {
 	}
 }
 
+func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step2.asis_docs",
+		StepContract:      "as_is",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/asis",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
+	}
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, os.ErrNotExist)
+	for _, token := range []string{
+		"draft artifact enrichment focused recovery mode",
+		"Immediate draft artifact enrichment action:",
+		"Do not run the earlier heredoc/bootstrap draft command again.",
+		"/tmp/workspace/reports/taskruns/run-1/asis/asis-draft-manifest.json",
+		"/tmp/workspace/reports/taskruns/run-1/staging/final",
+		"overview.md -> reports/as-is/overview.md",
+		"summary.md -> reports/coverage/summary.md",
+		"architect-summary.md -> reports/agent-outputs/architect/summary.md",
+		"Final content MUST NOT include these scaffold markers:",
+		"Runtime draft recovery initialized",
+		"Use collected shard manifests and validator output as the evidence source before final review",
+		"Enrich overview.md, summary.md, and architect-summary.md from collected shard manifests",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected draft enrichment prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"ACP_DRAFT_FILE",
+		"ACP_DRAFT_MANIFEST_JSON",
+		"cat >",
+		"FIRST AS-IS DRAFT COMMAND:",
+		"Runtime draft recovery initialized this artifact for the scoped analysis step.",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("draft enrichment prompt must not contain bootstrap heredoc/scaffold %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
 func TestComposeArtifactOnlyPromptIncludesQAFirstActionAndPromptPack(t *testing.T) {
 	t.Parallel()
 

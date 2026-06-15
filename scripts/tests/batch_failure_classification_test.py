@@ -891,6 +891,46 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertTrue(result.runtime_flow_failed)
         self.assertEqual("runtime_flow_failed", result.failure_class)
 
+    def test_python_report_uses_workspace_quality_for_non_snapshot_failed_runs(self) -> None:
+        run_dir = self.root / "run-workspace-quality-fallback"
+        self._create_fixture_run_dir(run_dir)
+        workspace_reports = run_dir / "arch-workspace" / "reports"
+        shutil.copytree(run_dir / "snapshots" / "refresh-run" / "reports", workspace_reports, dirs_exist_ok=True)
+        shutil.rmtree(run_dir / "snapshots" / "refresh-run")
+
+        quality_path = workspace_reports / "taskruns" / "refresh-run-quality.json"
+        payload = json.loads(quality_path.read_text(encoding="utf-8"))
+        payload.setdefault("totals", {}).update(
+            {
+                "repair_attempts": 2,
+                "repair_exhausted": 1,
+                "fresh_retries": 0,
+                "focused_repairs": 2,
+                "stall_count": 1,
+                "pre_artifact_stalls": 0,
+                "post_artifact_stalls": 1,
+                "zero_output_pre_artifact_stalls": 0,
+                "partial_failure_count": 0,
+            }
+        )
+        write_json(quality_path, payload)
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+        )
+
+        self.assertEqual("workspace", result.artifact_source)
+        self.assertFalse(result.hard_pass)
+        self.assertEqual(2, result.repair_attempts)
+        self.assertEqual(1, result.repair_exhausted)
+        self.assertEqual(2, result.focused_repairs)
+        self.assertEqual(1, result.post_artifact_stalls)
+        self.assertIn("execution:repair-exhausted", result.issues)
+        self.assertTrue(any("using non-snapshot reports_root" in detail for detail in result.issue_details))
+
     def test_python_report_aggregates_failed_raw_stall_metadata(self) -> None:
         write_json(
             self.run_dir / "arch-workspace/reports/taskruns/raw/qwen-step2-meta.json",
@@ -1455,6 +1495,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                 [
                     '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"validator_verdict_repair"}',
                     '{"level":"error","message":"draft recovery wrote outside the draft artifact write set"}',
+                    '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"draft_artifact_enrichment"}',
                 ]
             )
             + "\n",
@@ -1476,6 +1517,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
         focused_details = "\n".join(result.issue_details)
         self.assertIn("reliability/focused-recovery", focused_details)
         self.assertIn("validator_verdict_repair_exhausted", focused_details)
+        self.assertIn("draft_artifact_enrichment_exhausted", focused_details)
         self.assertIn("draft_artifact_repair_write_set_violation", focused_details)
 
     def test_python_report_prefers_parse_signature_contract_failure_over_runner_unavailable(self) -> None:

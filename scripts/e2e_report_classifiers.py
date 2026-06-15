@@ -159,10 +159,19 @@ def extract_focused_recovery_reason_tags(text: str) -> set[str]:
     ):
         tags.add("draft_artifact_repair_exhausted")
     if (
+        ("focused artifact repair exhausted" in haystack and "draft_artifact_enrichment" in haystack)
+        or "draft artifact enrichment stalled" in haystack
+        or "draft artifact enrichment did not produce valid draft artifact contract" in haystack
+    ):
+        tags.add("draft_artifact_enrichment_exhausted")
+    if (
         "draft recovery write_root precheck failed" in haystack
         or "draft recovery draft_final_root precheck failed" in haystack
         or "draft recovery wrote outside the draft artifact write set" in haystack
         or "draft repair wrote forbidden write_root files" in haystack
+        or "draft enrichment write_root precheck failed" in haystack
+        or "draft enrichment draft_final_root precheck failed" in haystack
+        or "draft enrichment wrote outside the draft artifact write set" in haystack
     ):
         tags.add("draft_artifact_repair_write_set_violation")
     return tags

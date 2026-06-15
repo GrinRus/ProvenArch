@@ -273,6 +273,16 @@ func emitDraftArtifactRepairSnapshotDiagnostic(task acpruntime.Task, provider ac
 	emitDiagnostic(task, "draft artifact repair snapshot", fields)
 }
 
+func emitDraftArtifactEnrichmentSnapshotDiagnostic(task acpruntime.Task, provider acpruntime.Provider, outcome string, snapshot artifactSnapshot) {
+	fields := snapshot.diagnosticFields()
+	fields["provider"] = string(provider)
+	fields["shard_id"] = strings.TrimSpace(task.ShardID)
+	fields["step_id"] = strings.TrimSpace(task.StepID)
+	fields["recovery_mode"] = "draft_artifact_enrichment"
+	fields["outcome"] = strings.TrimSpace(outcome)
+	emitDiagnostic(task, "draft artifact enrichment snapshot", fields)
+}
+
 func (d StallDiagnostic) fields(provider acpruntime.Provider, task acpruntime.Task, action string) map[string]any {
 	fields := map[string]any{
 		"provider":            string(provider),

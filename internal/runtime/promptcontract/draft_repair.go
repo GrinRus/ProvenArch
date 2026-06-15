@@ -202,6 +202,88 @@ func ComposeDraftArtifactRepairPrompt(provider acpruntime.Provider, task acprunt
 	return strings.Join(lines, "\n")
 }
 
+func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acpruntime.Task, validationErr error) string {
+	manifestFile := runtimedrafts.ManifestFileForStep(task.StepID)
+	manifestTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), manifestFile)
+	skeleton := steppolicy.RuntimeDraftManifestTaskSkeleton(task)
+	outputs := draftEnrichmentOutputs(skeleton)
+	lines := []string{
+		fmt.Sprintf("You are ACP runtime provider %q in draft artifact enrichment focused recovery mode.", provider),
+		"Immediate draft artifact enrichment action:",
+		"- Do not return semantic JSON or any semantic payload on stdout.",
+		"- Do not run the earlier heredoc/bootstrap draft command again.",
+		"- Do not create or preserve recovery scaffold text as final content.",
+		fmt.Sprintf("- Read and keep the existing manifest target in write_root: %q.", manifestTarget),
+		fmt.Sprintf("- Rewrite draft content only under draft_final_root: %q.", strings.TrimSpace(task.DraftFinalRoot)),
+		"- Allowed write targets are the step draft manifest in write_root and referenced draft files under draft_final_root.",
+		"- Use only read_context_roots, the current write_root/draft_final_root files, staged evidence, and selected repository evidence roots already available to this provider.",
+		"- Do not write shard-pack-manifest.json, validator-verdict.json, raw logs, sibling taskruns, workspace source-of-truth files, or repository files.",
+		fmt.Sprintf(`- write_root (absolute) = %q`, strings.TrimSpace(task.WriteRoot)),
+		fmt.Sprintf(`- draft_final_root (absolute) = %q`, strings.TrimSpace(task.DraftFinalRoot)),
+		fmt.Sprintf(`- manifest_file = %q`, manifestFile),
+		fmt.Sprintf(`- step_contract = %q`, strings.TrimSpace(task.StepContract)),
+		"DRAFT ENRICHMENT TARGETS:",
+	}
+	if len(outputs) == 0 {
+		lines = append(lines, "- Read the existing draft manifest outputs[] and enrich every referenced markdown draft file.")
+	} else {
+		for _, output := range outputs {
+			lines = append(lines, fmt.Sprintf(
+				"- %s -> %s (%s)",
+				strings.TrimSpace(output.Path),
+				strings.TrimSpace(output.CanonicalPath),
+				strings.TrimSpace(output.Kind),
+			))
+		}
+	}
+	lines = append(lines,
+		"DRAFT ENRICHMENT RULES:",
+		"- Keep the manifest contract shape: version=1, run_id, step_id, step_contract, agent_role, outputs[].",
+		"- Every outputs[].path must stay relative to draft_final_root and every referenced draft file must exist before exit.",
+		"- Replace bootstrap-only markdown with evidence-backed content that cites concrete repositories, staged artifacts, files, services, modules, findings, or coverage gaps visible in the allowed read roots.",
+		"- Preserve valid non-markdown support bundles when they are already canonical; for constitution, baseline-subagents.yaml may remain the baseline YAML bundle.",
+		"- Final content MUST NOT include these scaffold markers: Runtime draft recovery initialized; draft recovery initialized; Treat this as diagnostic evidence until; Use collected shard manifests and validator output as the evidence source before final review; Draft surface initialized; Current run evidence should be reviewed; Runtime proposal surface initialized.",
+		"- Final action must be: ensure the draft manifest and every referenced draft file exist, then ensure no referenced markdown draft contains unchanged bootstrap/recovery scaffold text.",
+	)
+	switch strings.TrimSpace(task.StepID) {
+	case "init.step0.constitution":
+		lines = append(lines,
+			"- Enrich charter-overview.md with concrete constitution content from read_context_roots, repo scope, and charter wizard contract when available.",
+			"- Do not rewrite baseline-subagents.yaml unless it is invalid; it must remain a valid baseline agents bundle.",
+		)
+	case "init.step2.asis_docs", "refresh.step2.asis_docs":
+		lines = append(lines,
+			"- Enrich overview.md, summary.md, and architect-summary.md from collected shard manifests, authored shard docs, final indexes, citations, staged model evidence, and allowed repo evidence roots.",
+			"- Include enough repository/path and staged artifact references for an operator to understand the architecture surface and remaining coverage gaps.",
+		)
+	case "init.step4.proposals", "refresh.step4.proposals":
+		lines = append(lines,
+			"- Enrich proposal and changelog drafts from validated staged findings, coverage gaps, questions, citations, and proposal candidates.",
+			"- Proposals must be actionable and traceable to staged evidence; do not leave generic validation notes as the only content.",
+		)
+	}
+	if validationErr != nil {
+		lines = append(lines, fmt.Sprintf(`- Previous draft artifact validation failure: %s`, compactDraftEnrichmentHint(validationErr.Error())))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func compactDraftEnrichmentHint(value string) string {
+	normalized := strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	if len(normalized) <= 320 {
+		return normalized
+	}
+	return normalized[:317] + "..."
+}
+
+func draftEnrichmentOutputs(skeleton string) []runtimedrafts.Output {
+	var manifest runtimedrafts.Manifest
+	if err := json.Unmarshal([]byte(skeleton), &manifest); err != nil {
+		return nil
+	}
+	return manifest.Outputs
+}
+
 func draftRepairFirstCommandIntro(task acpruntime.Task) (string, string) {
 	switch strings.TrimSpace(task.StepID) {
 	case "init.step0.constitution":
