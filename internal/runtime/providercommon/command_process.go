@@ -366,7 +366,7 @@ func cloneDiagnosticMap(values map[string]any) map[string]any {
 }
 
 func activityPolicyDiagnostics(policy ActivityPolicy) map[string]any {
-	return map[string]any{
+	fields := map[string]any{
 		"monitor_artifacts":                  policy.MonitorArtifacts,
 		"monitor_pre_artifact":               policy.MonitorPreArtifact,
 		"pre_artifact_stall_window_ms":       policy.PreArtifactStallWindow.Milliseconds(),
@@ -378,6 +378,10 @@ func activityPolicyDiagnostics(policy ActivityPolicy) map[string]any {
 		"terminate_grace_ms":                 policy.TerminateGrace.Milliseconds(),
 		"post_terminate_drain_ms":            policy.PostTerminateDrain.Milliseconds(),
 	}
+	if !policy.FreshArtifactMutationAfter.IsZero() {
+		fields["fresh_artifact_mutation_after_utc"] = policy.FreshArtifactMutationAfter.UTC().Format(time.RFC3339Nano)
+	}
+	return fields
 }
 
 func allowlistedProviderEnvDiagnostics() map[string]any {

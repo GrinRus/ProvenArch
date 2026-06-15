@@ -99,6 +99,7 @@ type DraftArtifactEnrichmentAdapter interface {
 type ActivityPolicy struct {
 	MonitorArtifacts            bool
 	MonitorPreArtifact          bool
+	FreshArtifactMutationAfter  time.Time
 	PreArtifactStallWindow      time.Duration
 	RetryPreArtifactStallWindow time.Duration
 	PostArtifactStallWindow     time.Duration

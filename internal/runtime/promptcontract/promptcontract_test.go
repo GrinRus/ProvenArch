@@ -690,6 +690,8 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"Immediate draft artifact enrichment action:",
 		"Do not run the earlier heredoc/bootstrap draft command again.",
 		"First action: read the current draft manifest",
+		"Fresh mutation is required",
+		"rewrite every markdown target",
 		"/tmp/workspace/reports/taskruns/run-1/asis/asis-draft-manifest.json",
 		"/tmp/workspace/reports/taskruns/run-1/staging/final",
 		"overview.md -> reports/as-is/overview.md",

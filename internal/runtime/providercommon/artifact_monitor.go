@@ -69,6 +69,7 @@ func monitorArtifactStall(ctx context.Context, task acpruntime.Task, tracker *co
 		case <-time.After(policy.PollInterval):
 		}
 		snapshot := runtimeArtifactSnapshot(task)
+		snapshot = applyFreshArtifactMutationPolicy(snapshot, policy)
 		lastPipe := tracker.LastRead()
 		lastMutation := snapshot.LastMutation
 		if snapshot.ArtifactObserved {
@@ -137,6 +138,23 @@ func monitorArtifactStall(ctx context.Context, task acpruntime.Task, tracker *co
 			},
 		}, true
 	}
+}
+
+func applyFreshArtifactMutationPolicy(snapshot artifactSnapshot, policy ActivityPolicy) artifactSnapshot {
+	if policy.FreshArtifactMutationAfter.IsZero() || !snapshot.ArtifactObserved {
+		return snapshot
+	}
+	if snapshot.LastMutation.After(policy.FreshArtifactMutationAfter) {
+		return snapshot
+	}
+	snapshot.ArtifactObserved = false
+	snapshot.Valid = false
+	snapshot.State = "stale_artifacts"
+	snapshot.AuthoredFiles = 0
+	snapshot.WriteRootAuthoredFiles = 0
+	snapshot.DraftRootAuthoredFiles = 0
+	snapshot.LastMutation = time.Time{}
+	return snapshot
 }
 
 func runtimeArtifactSnapshot(task acpruntime.Task) artifactSnapshot {

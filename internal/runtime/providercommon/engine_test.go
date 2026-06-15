@@ -2448,6 +2448,46 @@ func TestMonitorArtifactStallTripsPreArtifactWindow(t *testing.T) {
 	}
 }
 
+func TestMonitorArtifactStallIgnoresStaleArtifactsUntilFreshMutation(t *testing.T) {
+	t.Parallel()
+
+	task := newDraftTask(t, "run-monitor-stale-artifacts")
+	if err := os.WriteFile(filepath.Join(task.WriteRoot, "constitution-draft.json"), []byte(`{"version":1}`), 0o644); err != nil {
+		t.Fatalf("write stale manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, "charter-overview.md"), []byte("# stale\n"), 0o644); err != nil {
+		t.Fatalf("write stale draft: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tracker := newCommandActivityTracker(time.Now().Add(-time.Second))
+	done := make(chan StallError, 1)
+	go func() {
+		err, stalled := monitorArtifactStall(ctx, task, tracker, ActivityPolicy{
+			MonitorArtifacts:           true,
+			MonitorPreArtifact:         true,
+			FreshArtifactMutationAfter: time.Now().UTC().Add(time.Second),
+			PreArtifactStallWindow:     20 * time.Millisecond,
+			PostArtifactStallWindow:    20 * time.Millisecond,
+			PartialArtifactStallWindow: 20 * time.Millisecond,
+			PollInterval:               5 * time.Millisecond,
+		})
+		if stalled {
+			done <- err
+		}
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrStalledBeforeArtifacts) {
+			t.Fatalf("expected stale artifacts to use pre-artifact stall, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected monitor to trip pre-artifact window for stale artifacts")
+	}
+}
+
 func TestMonitorArtifactStallUsesPartialArtifactWindow(t *testing.T) {
 	t.Parallel()
 
@@ -2475,6 +2515,41 @@ func TestMonitorArtifactStallUsesPartialArtifactWindow(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 	cancel()
+}
+
+func TestAllDraftMarkdownOutputsChangedRequiresEveryMarkdownTarget(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-all-draft-markdown-changed")
+	if err := os.WriteFile(filepath.Join(task.WriteRoot, "asis-draft-manifest.json"), []byte(steppolicy.RuntimeDraftManifestTaskSkeleton(task)), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	for _, name := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, name), []byte("# "+name+"\n\nProvider authored as-is draft.\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	before, err := snapshotWriteRootFiles(task.DraftFinalRoot)
+	if err != nil {
+		t.Fatalf("snapshot before: %v", err)
+	}
+	if !allDraftMarkdownOutputsChanged(task, writeRootFileSnapshot{}) {
+		t.Fatal("expected initial draft files to count as changed from an empty snapshot")
+	}
+	if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, "summary.md"), []byte("# summary\n\nProvider authored update.\n"), 0o644); err != nil {
+		t.Fatalf("rewrite summary: %v", err)
+	}
+	if allDraftMarkdownOutputsChanged(task, before) {
+		t.Fatal("expected partial markdown rewrite to be rejected")
+	}
+	for _, name := range []string{"overview.md", "architect-summary.md"} {
+		if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, name), []byte("# "+name+"\n\nProvider authored update.\n"), 0o644); err != nil {
+			t.Fatalf("rewrite %s: %v", name, err)
+		}
+	}
+	if !allDraftMarkdownOutputsChanged(task, before) {
+		t.Fatal("expected all markdown rewrites to be accepted")
+	}
 }
 
 func TestCollectArtifactSnapshotIgnoresRuntimeExecutionMetadata(t *testing.T) {

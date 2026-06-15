@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/artifactquality"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
@@ -557,9 +558,19 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 	}
 
 	emitFocusedArtifactRepairScheduledDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", stage, runtimeArtifactSnapshot(task), validationErr)
-	enrichmentResult, enrichmentErr, commandErr := runFocusedArtifactRepairCommand(ctx, task, adapter, result, func() (CommandSpec, error) {
-		return enrichmentAdapter.DraftArtifactEnrichmentCommandSpec(task, validationErr)
-	})
+	enrichmentResult, enrichmentErr, commandErr := runFocusedArtifactRepairCommandWithPolicy(
+		ctx,
+		task,
+		adapter,
+		result,
+		func() (CommandSpec, error) {
+			return enrichmentAdapter.DraftArtifactEnrichmentCommandSpec(task, validationErr)
+		},
+		func(policy ActivityPolicy) ActivityPolicy {
+			policy.FreshArtifactMutationAfter = time.Now().UTC().Add(-time.Millisecond)
+			return policy
+		},
+	)
 	if commandErr != nil {
 		return true, acpruntime.Result{}, commandErr
 	}
@@ -606,17 +617,18 @@ func validateDraftArtifactEnrichmentOutcome(task acpruntime.Task, beforeDraftRoo
 		}
 		return validationErr
 	}
-	if !draftMarkdownOutputsChanged(task, beforeDraftRoot) {
-		return fmt.Errorf("draft_artifact_enrichment_noop_or_scaffold: no referenced markdown draft files changed")
+	if !allDraftMarkdownOutputsChanged(task, beforeDraftRoot) {
+		return fmt.Errorf("draft_artifact_enrichment_noop_or_scaffold: not all referenced markdown draft files changed")
 	}
 	return nil
 }
 
-func draftMarkdownOutputsChanged(task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot) bool {
+func allDraftMarkdownOutputsChanged(task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot) bool {
 	afterDraftRoot, err := snapshotWriteRootFiles(task.DraftFinalRoot)
 	if err != nil {
 		return false
 	}
+	seenMarkdown := false
 	for _, output := range loadAllowedDraftOutputs(task) {
 		rel := filepath.ToSlash(filepath.Clean(strings.TrimSpace(output.Path)))
 		if rel == "" || rel == "." || strings.HasPrefix(rel, "../") || filepath.IsAbs(rel) {
@@ -625,13 +637,14 @@ func draftMarkdownOutputsChanged(task acpruntime.Task, beforeDraftRoot writeRoot
 		if strings.ToLower(filepath.Ext(rel)) != ".md" {
 			continue
 		}
+		seenMarkdown = true
 		beforeState, beforeExists := beforeDraftRoot[rel]
 		afterState, afterExists := afterDraftRoot[rel]
-		if beforeExists != afterExists || (afterExists && beforeState != afterState) {
-			return true
+		if beforeExists == afterExists && (!afterExists || beforeState == afterState) {
+			return false
 		}
 	}
-	return false
+	return seenMarkdown
 }
 
 func isDraftEnrichmentNoopOrScaffoldFailure(err error) bool {
@@ -646,11 +659,18 @@ func isDraftBootstrapOnlyValidationFailure(err error) bool {
 }
 
 func runFocusedArtifactRepairCommand(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, baseResult acpruntime.Result, buildSpec func() (CommandSpec, error)) (acpruntime.Result, error, error) {
+	return runFocusedArtifactRepairCommandWithPolicy(ctx, task, adapter, baseResult, buildSpec, nil)
+}
+
+func runFocusedArtifactRepairCommandWithPolicy(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, baseResult acpruntime.Result, buildSpec func() (CommandSpec, error), configure func(ActivityPolicy) ActivityPolicy) (acpruntime.Result, error, error) {
 	spec, err := buildSpec()
 	if err != nil {
 		return acpruntime.Result{}, nil, classifyCommandFailure(adapter, task, baseResult, err)
 	}
 	repairPolicy := focusedRepairActivityPolicy(adapter.ActivityPolicy(task), true)
+	if configure != nil {
+		repairPolicy = configure(repairPolicy)
+	}
 	repairResult, repairErr := runCommandSpec(ctx, task, spec, repairPolicy)
 	return repairResult, repairErr, nil
 }
