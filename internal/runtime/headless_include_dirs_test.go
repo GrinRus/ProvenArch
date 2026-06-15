@@ -129,6 +129,43 @@ func TestResolveHeadlessValidatorRepairIncludeDirectoriesUsesOnlyVerdictAndStage
 	}
 }
 
+func TestResolveHeadlessDraftEnrichmentIncludeDirectoriesUsesBoundedTaskrunEvidence(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "arch-workspace")
+	taskrunRoot := filepath.Join(workspace, "reports", "taskruns", "run-1")
+	writeRoot := filepath.Join(taskrunRoot, "runtime", "step2_as_is")
+	draftRoot := filepath.Join(taskrunRoot, "staging", "drafts", "step2_as_is")
+	stagedShards := filepath.Join(taskrunRoot, "staging", "shards")
+	stagedFinal := filepath.Join(taskrunRoot, "staging", "final")
+	repoRoot := filepath.Join(root, "posthog")
+	for _, dir := range []string{workspace, writeRoot, draftRoot, stagedShards, stagedFinal, repoRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	manifest := "version: 1\nrepos:\n  - name: posthog\n    path: " + repoRoot + "\n"
+	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	got := ResolveHeadlessDraftEnrichmentIncludeDirectories(Task{
+		StepID:           "init.step2.asis_docs",
+		Workspace:        workspace,
+		WriteRoot:        writeRoot,
+		DraftFinalRoot:   draftRoot,
+		RepoScopes:       []string{"posthog"},
+		ReadContextRoots: []string{workspace, stagedShards, stagedFinal, repoRoot},
+	})
+
+	want := []string{writeRoot, draftRoot, stagedShards, stagedFinal}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected draft enrichment include dirs:\n got=%v\nwant=%v", got, want)
+	}
+}
+
 func TestResolveHeadlessIncludeDirectoriesFallsBackToWorkspaceValidate(t *testing.T) {
 	t.Parallel()
 

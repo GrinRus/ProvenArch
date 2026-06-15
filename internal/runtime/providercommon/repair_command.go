@@ -41,8 +41,10 @@ func focusedRepairIncludeDirectories(task acpruntime.Task, kind FocusedRepairKin
 		return acpruntime.ResolveHeadlessCollectRepairIncludeDirectories(task)
 	case FocusedRepairValidatorVerdict:
 		return acpruntime.ResolveHeadlessValidatorRepairIncludeDirectories(task)
-	case FocusedRepairDraftArtifacts, FocusedRepairDraftEnrichment:
+	case FocusedRepairDraftArtifacts:
 		return acpruntime.ResolveHeadlessDraftRepairIncludeDirectories(task)
+	case FocusedRepairDraftEnrichment:
+		return acpruntime.ResolveHeadlessDraftEnrichmentIncludeDirectories(task)
 	default:
 		return acpruntime.ResolveHeadlessIncludeDirectories(task)
 	}

@@ -135,6 +135,75 @@ func ResolveHeadlessDraftRepairIncludeDirectories(task Task) []string {
 	return dirs.values()
 }
 
+// ResolveHeadlessDraftEnrichmentIncludeDirectories returns a bounded recovery
+// scope for scaffold-only draft enrichment. Unlike first-pass draft repair, it
+// must not expose the whole headless workspace or source repo for large
+// medium/full runs; providers should enrich from current draft files and the
+// current taskrun staging evidence without reading every repository file.
+func ResolveHeadlessDraftEnrichmentIncludeDirectories(task Task) []string {
+	dirs := newOrderedExistingDirs(6)
+
+	dirs.add(task.WriteRoot)
+	dirs.add(task.DraftFinalRoot)
+
+	taskrunRoot := taskRunRootFromRuntimeArtifactPath(task.DraftFinalRoot)
+	if taskrunRoot == "" {
+		taskrunRoot = taskRunRootFromRuntimeArtifactPath(task.WriteRoot)
+	}
+	if taskrunRoot != "" {
+		dirs.add(filepath.Join(taskrunRoot, "staging", "shards"))
+		dirs.add(filepath.Join(taskrunRoot, "staging", "final"))
+	}
+
+	for _, root := range task.ReadContextRoots {
+		if shouldIncludeDraftEnrichmentReadRoot(root, taskrunRoot) {
+			dirs.add(root)
+		}
+	}
+
+	if strings.TrimSpace(task.StepID) == "init.step0.constitution" {
+		workspace := strings.TrimSpace(task.Workspace)
+		if workspace != "" {
+			addResolvedRepoScopeDirectories(dirs.add, filepath.Clean(workspace), headlessRepoScopeFilter(task))
+		}
+	}
+	return dirs.values()
+}
+
+func taskRunRootFromRuntimeArtifactPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	slash := filepath.ToSlash(filepath.Clean(path))
+	for _, marker := range []string{"/staging/drafts/", "/staging/shards/", "/staging/final", "/runtime/"} {
+		if idx := strings.Index(slash, marker); idx > 0 {
+			return filepath.FromSlash(slash[:idx])
+		}
+	}
+	return ""
+}
+
+func shouldIncludeDraftEnrichmentReadRoot(root string, taskrunRoot string) bool {
+	root = strings.TrimSpace(root)
+	if root == "" || taskrunRoot == "" {
+		return false
+	}
+	cleanRoot := filepath.Clean(root)
+	cleanTaskrun := filepath.Clean(taskrunRoot)
+	rel, err := filepath.Rel(cleanTaskrun, cleanRoot)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return false
+	}
+	slash := filepath.ToSlash(rel)
+	return slash == "staging/shards" ||
+		strings.HasPrefix(slash, "staging/shards/") ||
+		slash == "staging/final" ||
+		strings.HasPrefix(slash, "staging/final/") ||
+		slash == "staging/drafts" ||
+		strings.HasPrefix(slash, "staging/drafts/")
+}
+
 type orderedExistingDirs struct {
 	valuesList []string
 	seen       map[string]struct{}
