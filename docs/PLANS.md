@@ -71,11 +71,12 @@ Task selection rules:
 EP-20260616-live-e2e-recovery-rerun-loop
 
 ### Context
-Diagnostic `claude-code` medium (`regres long`) live run exposed two harness/runtime issues before a clean strict-medium acceptance loop can continue: `draft_artifact_enrichment` for `step2.asis_docs` did not rewrite all bootstrap draft files, and batch reporting let a stale `runner_unavailable` classifier row override collect partial root cause. The user requested fix -> DoD -> commit -> live rerun loop across `claude-code`/`codex-code` with target rotation, without product UI/API changes or canonical matrix/repo edits.
+Diagnostic `claude-code` medium (`regres long`) live runs exposed harness/runtime issues before a clean strict-medium acceptance loop can continue: `draft_artifact_enrichment` for `step2.asis_docs` did not rewrite all bootstrap draft files, batch reporting let a stale `runner_unavailable` classifier row override collect partial root cause, and the `f2e962f` rerun showed fully silent collect fresh retry exhaustion falling straight to `runner_unavailable` without a focused collect-pair repair attempt. The user requested fix -> DoD -> commit -> live rerun loop across `claude-code`/`codex-code` with target rotation, without product UI/API changes or canonical matrix/repo edits.
 
 ### Goals (must have)
 - [ ] Harden step2 draft enrichment prompt/contract so enrichment reads bounded staged evidence and write-first overwrites `overview.md`, `summary.md`, and `architect-summary.md`.
 - [ ] Keep bootstrap/noop enrichment as `runtime_contract_failed` / `draft_artifact_enrichment_noop_or_scaffold`; do not add deterministic synthesis as a hidden success path.
+- [ ] Run one provider-authored collect-pair repair after exhausted fully silent collect retry before terminal `runner_unavailable`, while keeping invalid/noop repair terminal.
 - [ ] Fix report classification so collect partial failures remain primary `runtime_flow_failed` while provider class is secondary evidence.
 - [ ] Update tests and live E2E docs/runbooks for the changed runtime/reporting behavior.
 - [ ] Run full DoD, commit, then rerun strict medium live E2E from a clean tree.
@@ -95,6 +96,9 @@ Diagnostic `claude-code` medium (`regres long`) live run exposed two harness/run
 ### Files expected to change
 - `internal/runtime/promptcontract/draft_repair.go`
 - `internal/runtime/promptcontract/promptcontract_test.go`
+- `internal/runtime/providercommon/artifact_recovery.go`
+- `internal/runtime/providercommon/engine_test.go`
+- `scripts/e2e_report_classifiers.py`
 - `scripts/e2e_batch_report.py`
 - `scripts/tests/batch_failure_classification_test.py`
 - `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
@@ -105,6 +109,7 @@ Diagnostic `claude-code` medium (`regres long`) live run exposed two harness/run
 
 ### Acceptance criteria
 - [ ] Prompt tests prove step2 enrichment has exact write-first targets and banned bootstrap scaffold.
+- [ ] Providercommon tests prove exhausted fully silent collect retry invokes collect-pair repair and invalid/noop repair remains terminal.
 - [ ] Script tests prove partial collect root cause is not overridden by stale provider classifier rows.
 - [ ] Full DoD passes before rerun.
 - [ ] Strict medium rerun evidence is reported across execution quality, artifact quality and UX quality.
@@ -115,6 +120,7 @@ Diagnostic `claude-code` medium (`regres long`) live run exposed two harness/run
 
 ### Progress log
 - 2026-06-16: Started fix slice from the failed `regres-long-posthog-ftgo-20260616T033256Z` diagnostic evidence.
+- 2026-06-16: Committed draft enrichment/reporting fix `f2e962f`; strict medium `claude-code` rerun `regres-long-posthog-ftgo-20260616T062005Z` still failed with partial collect (`posthog` 2 failed shards, `ftgo` 8 failed shards). Reports correctly kept primary `runtime_flow_failed`, selected-provider totals, `execution_report_*`, and no legacy mixed quality artifacts, but runtime showed repeated fully silent collect retry exhaustion without focused `collect_pair_repair`. Current fix slice adds that recovery path plus classifier/docs coverage.
 
 ### Plan ID
 EP-20260608-medium-live-e2e-quality-ui

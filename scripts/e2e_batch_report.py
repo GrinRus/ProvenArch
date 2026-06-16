@@ -99,6 +99,7 @@ QUALITY_COUNTER_KEYS = (
     "partial_failure_count",
 )
 FOCUSED_REPAIR_EXHAUSTED_REASON_TAGS = (
+    "collect_pair_repair_exhausted",
     "collect_manifest_repair_exhausted",
     "validator_verdict_repair_exhausted",
     "draft_artifact_repair_exhausted",

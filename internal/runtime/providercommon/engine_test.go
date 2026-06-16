@@ -1179,12 +1179,37 @@ printf '%s\n' '# Repair Notes' > ` + shellQuote(filepath.Join(task.WriteRoot, "r
 	}
 }
 
-func TestCollectPairRepairDoesNotMaskSilentNoArtifactCollect(t *testing.T) {
+func TestRunHeadlessProviderRepairsSilentRetryExhaustedCollectWithPairRepair(t *testing.T) {
 	t.Parallel()
 
-	task := newCollectTask(t, "run-collect-pair-repair-silent")
+	task := newCollectTask(t, "run-collect-pair-repair-silent-retry")
+	docRel := steppolicy.SuggestedCollectDocumentPath(task)
+	manifest := strings.Replace(collectManifestJSON(task), `"path": "overview.md"`, `"path": "`+docRel+`"`, 1)
+	docAbs := filepath.Join(task.WriteRoot, filepath.FromSlash(docRel))
+	repairScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(filepath.Dir(docAbs)) + `
+cat >` + shellQuote(docAbs) + ` <<'EOF'
+# Collect Overview
+
+## Observations
+- README.md identifies the assigned collect surface for this shard.
+- Deployment and source files should be reviewed before downstream recommendations.
+
+## Evidence
+- README.md
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + manifest + `
+EOF
+`
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
 	runner := testAdapter{
-		command: writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 5\n"),
+		command:           writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 5\n"),
+		pairRepairCommand: writeEngineScript(t, repairScript),
 		activity: ActivityPolicy{
 			MonitorArtifacts:            true,
 			MonitorPreArtifact:          true,
@@ -1200,15 +1225,60 @@ func TestCollectPairRepairDoesNotMaskSilentNoArtifactCollect(t *testing.T) {
 			AcceptValidArtifactsAfterStop:            true,
 			RepairCollectArtifactPairOnce:            true,
 			RetryInvalidOrMissingArtifactsOnce:       true,
+			RetryZeroOutputPreArtifactStallOnce:      true,
 			ClassifySilentRetryExhaustionUnavailable: true,
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	result, err := RunHeadlessProvider(ctx, task, runner)
+	if err != nil {
+		t.Fatalf("expected silent collect retry exhaustion to run collect pair repair, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair scheduled diagnostic, got %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair completed", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair completed diagnostic, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderFailsSilentCollectWhenPairRepairProducesNoArtifacts(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-pair-repair-silent-empty")
+	runner := testAdapter{
+		command:           writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 5\n"),
+		pairRepairCommand: writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nexit 0\n"),
+		activity: ActivityPolicy{
+			MonitorArtifacts:            true,
+			MonitorPreArtifact:          true,
+			PreArtifactStallWindow:      20 * time.Millisecond,
+			RetryPreArtifactStallWindow: 20 * time.Millisecond,
+			PostArtifactStallWindow:     20 * time.Millisecond,
+			PartialArtifactStallWindow:  20 * time.Millisecond,
+			PollInterval:                5 * time.Millisecond,
+			PostTerminateDrain:          10 * time.Millisecond,
+			TerminateGrace:              10 * time.Millisecond,
+		},
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:            true,
+			RepairCollectArtifactPairOnce:            true,
+			RetryInvalidOrMissingArtifactsOnce:       true,
+			RetryZeroOutputPreArtifactStallOnce:      true,
+			ClassifySilentRetryExhaustionUnavailable: true,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	_, err := RunHeadlessProvider(ctx, task, runner)
 	if err == nil {
-		t.Fatal("expected silent collect to remain provider unavailable")
+		t.Fatal("expected empty collect pair repair to fail")
 	}
 	var runnerErr acpruntime.RunnerError
 	if !errors.As(err, &runnerErr) {
@@ -1217,8 +1287,8 @@ func TestCollectPairRepairDoesNotMaskSilentNoArtifactCollect(t *testing.T) {
 	if runnerErr.Code != acpruntime.ErrorCodeRunnerUnavailable {
 		t.Fatalf("expected runner_unavailable, got %s (%v)", runnerErr.Code, err)
 	}
-	if strings.Contains(runnerErr.Error(), "collect_pair_repair") {
-		t.Fatalf("silent no-artifact collect should not enter collect pair repair, got %v", err)
+	if !strings.Contains(runnerErr.Error(), "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair failure, got %v", err)
 	}
 }
 

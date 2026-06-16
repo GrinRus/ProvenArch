@@ -115,6 +115,9 @@ func recoverAfterStall(ctx context.Context, task acpruntime.Task, adapter Provid
 				}
 			}
 			emitRetryExhaustedDiagnostic(task, adapter.Provider(), retryStalled.Diagnostic, "fresh_process")
+			if recovered, recoveredResult, recoveredErr := recoverCollectArtifactPairRepairAfterSilentRetryExhaustion(ctx, task, adapter, retryResult, retryErr); recovered {
+				return true, recoveredResult, recoveredErr
+			}
 			if shouldClassifySilentRetryExhaustionUnavailable(policy, task, retryResult) {
 				return true, acpruntime.Result{}, wrapProviderUnavailable(adapter, task, "retry", retryResult, "provider unavailable after fresh-process stall retry", retryErr)
 			}
@@ -149,6 +152,21 @@ func recoverFocusedArtifactRepair(ctx context.Context, task acpruntime.Task, ada
 }
 
 func recoverCollectArtifactPairRepair(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, validationErr error, stage string) (bool, acpruntime.Result, error) {
+	return recoverCollectArtifactPairRepairWithOptions(ctx, task, adapter, result, validationErr, stage, false)
+}
+
+func recoverCollectArtifactPairRepairAfterSilentRetryExhaustion(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, validationErr error) (bool, acpruntime.Result, error) {
+	policy := adapter.RecoveryPolicy(task)
+	if !policy.RepairCollectArtifactPairOnce || !acpruntime.IsCollectStep(task.StepID) {
+		return false, acpruntime.Result{}, nil
+	}
+	if !shouldClassifySilentRetryExhaustionUnavailable(policy, task, result) {
+		return false, acpruntime.Result{}, nil
+	}
+	return recoverCollectArtifactPairRepairWithOptions(ctx, task, adapter, result, validationErr, "retry_silent_exhausted", true)
+}
+
+func recoverCollectArtifactPairRepairWithOptions(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, validationErr error, stage string, allowSilentNoArtifact bool) (bool, acpruntime.Result, error) {
 	policy := adapter.RecoveryPolicy(task)
 	if !policy.RepairCollectArtifactPairOnce || !acpruntime.IsCollectStep(task.StepID) {
 		return false, acpruntime.Result{}, nil
@@ -157,7 +175,7 @@ func recoverCollectArtifactPairRepair(ctx context.Context, task acpruntime.Task,
 	if snapshot.AuthoredFiles > 0 {
 		return false, acpruntime.Result{}, nil
 	}
-	if !resultHasProviderDiagnostics(result) {
+	if !allowSilentNoArtifact && !resultHasProviderDiagnostics(result) {
 		return false, acpruntime.Result{}, nil
 	}
 	repairAdapter, ok := adapter.(CollectArtifactPairRepairAdapter)

@@ -139,6 +139,12 @@ def extract_focused_recovery_reason_counts(text: str) -> Counter[str]:
         if not haystack.strip():
             continue
         if (
+            ("focused artifact repair exhausted" in haystack and "collect_pair_repair" in haystack)
+            or "collect pair recovery stalled" in haystack
+            or "collect pair recovery did not produce valid collect artifacts" in haystack
+        ):
+            counts["collect_pair_repair_exhausted"] += 1
+        if (
             "collect manifest repair exhausted" in haystack
             or "manifest-only collect repair stalled" in haystack
             or "manifest-only collect repair did not produce valid collect artifacts" in haystack

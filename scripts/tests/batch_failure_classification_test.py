@@ -1569,6 +1569,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
             "\n".join(
                 [
                     '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"validator_verdict_repair"}',
+                    '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"collect_pair_repair"}',
                     '{"level":"error","message":"draft recovery wrote outside the draft artifact write set"}',
                     '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"draft_artifact_enrichment"}',
                     '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"draft_artifact_enrichment"}',
@@ -1592,11 +1593,12 @@ class BatchFailureClassificationTest(unittest.TestCase):
 
         focused_details = "\n".join(result.issue_details)
         self.assertIn("reliability/focused-recovery", focused_details)
+        self.assertIn("collect_pair_repair_exhausted", focused_details)
         self.assertIn("validator_verdict_repair_exhausted", focused_details)
         self.assertIn("draft_artifact_enrichment_exhausted", focused_details)
         self.assertIn("draft_artifact_repair_write_set_violation", focused_details)
-        self.assertEqual(4, result.focused_repairs)
-        self.assertEqual(3, result.repair_exhausted)
+        self.assertEqual(5, result.focused_repairs)
+        self.assertEqual(4, result.repair_exhausted)
         self.assertIn("execution:repair-exhausted", result.issues)
 
     def test_python_report_does_not_double_count_focused_recovery_when_quality_counters_exist(self) -> None:
@@ -1623,6 +1625,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
             "\n".join(
                 [
                     '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"validator_verdict_repair"}',
+                    '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"collect_pair_repair"}',
                     '{"level":"error","message":"draft recovery wrote outside the draft artifact write set"}',
                     '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"draft_artifact_enrichment"}',
                     '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"draft_artifact_enrichment"}',
