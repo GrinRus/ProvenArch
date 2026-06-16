@@ -20,7 +20,7 @@ goal: <что доказываем>
 action: <какую публичную поверхность вызвали/прочитали>
 observed evidence: <команды, UI/API/log/report/artifact/verifier paths>
 status: passed|failed|skipped|blocked
-primary classification: none|operational_host_preflight_failed|precheck_failed|runner_unavailable|runtime_timeout|runtime_contract_failed|runtime_flow_failed|frontend_failed|infra_incomplete_cycle|infra_signal_terminated|release_verdict_FAIL|...
+primary classification: none|operational_host_preflight_failed|precheck_failed|runner_unavailable|runtime_timeout|runtime_contract_failed|runtime_flow_failed|frontend_failed|infra_disk_exhausted|infra_incomplete_cycle|infra_signal_terminated|release_verdict_FAIL|...
 next decision: <continue|stop|rerun diagnostic|verify verdict|final report>
 ```
 
@@ -192,6 +192,7 @@ PY
 ```bash
 export PATH=/opt/homebrew/bin:$PATH
 qwen --version
+df -Pk /tmp/provenarch-test_arch_project
 python3 - <<'PY'
 from pathlib import Path
 for path in [
@@ -208,6 +209,8 @@ PY
 ```
 
 Если любой шаг выше падает, фиксировать как `operational_host_preflight_failed` и не интерпретировать как продуктовый ACP дефект.
+
+Matrix harness также проверяет свободное место перед deep batch. По умолчанию `E2E_MATRIX_MIN_FREE_KB=5242880` (5 GiB) применяется к `E2E_TMP_ROOT`, `REPORTS_ROOT` и `MATRIX_ROOT`; значение `0` отключает только этот disk guard для локальной диагностики. Недостаток места materialize-ится как `operational_host_preflight_failed` с blocking reason `insufficient free disk space` до запуска child batch. Если диск закончился уже после preflight и отчеты оборвались на shell/runtime writes, классифицировать текущий прогон как `infra_disk_exhausted`, освободить host storage и rerun с чистого дерева.
 
 Matrix preflight также выполняет selected-provider live smoke перед deep batch:
 - `--version` probe;

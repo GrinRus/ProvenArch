@@ -157,6 +157,7 @@
    - Materialize-ит per-run quality summary `reports/taskruns/<run_id>-quality.json` (signal metrics/runtime versions + `evidence_state.collect/findings/report_mode/reasons`)
    - Runtime repo scopes для all-repo шагов вычисляются напрямую из `workspace.yaml`; legacy repo-selection mode/summary artifact не входят в active contract
    - trusted batch/matrix harness не оставляет terminal-less child runs: если per-run `run-status.env` отсутствует или остаётся `running` после завершения child batch, outer reconciliation переводит его в terminal `failed` с `failure_reason=infra_incomplete_cycle`
+   - trusted batch/matrix host preflight проверяет writable roots и минимальное свободное место (`E2E_MATRIX_MIN_FREE_KB`, default 5 GiB) для `E2E_TMP_ROOT`, `REPORTS_ROOT` и `MATRIX_ROOT`; low-disk blocker останавливает matrix как `operational_host_preflight_failed` до child batch
    - child batch публикует `batch-owner.env` heartbeat в `BATCH_ROOT`; stale `profile-status/*.json = running` без живого owner pid или со stale owner heartbeat reconciles-ится в terminal `failed/infra_incomplete_cycle`
    - terminal `validator verdict is FAIL` классифицируется как `runtime_flow_failed`; `runtime_contract_failed` остаётся только для active runtime artifact/manifest/required-output failures
    - generic `codex` plugin/Cloudflare/state-db warnings (`plugins/featured`, Cloudflare HTML, cache/state-db permission noise) считаются secondary telemetry и не должны сами поднимать `runner_unavailable`

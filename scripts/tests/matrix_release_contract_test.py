@@ -805,6 +805,33 @@ class MatrixReleaseContractTest(unittest.TestCase):
         inventory_path = Path(status["inventory_json"])
         self.assertTrue(inventory_path.exists(), f"missing operational inventory: {inventory_path}")
 
+    def test_low_disk_preflight_materializes_operational_blocker_report(self) -> None:
+        matrix_file = self._write_matrix_file(None, include_profiles=["single-path"])
+        matrix_id = "matrix-test-low-disk-preflight"
+        result = self._run_matrix(
+            matrix_file,
+            matrix_id,
+            extra_env={"E2E_MATRIX_MIN_FREE_KB": str(10**15)},
+            release_mode="0",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.sentinel_path.exists(), "child batch must not start after low-disk preflight")
+
+        verdict = self._load_matrix_result(matrix_id)
+        self.assertEqual("FAIL", verdict["result"])
+        self.assertEqual("non-release", verdict["mode"])
+        self.assertIn("insufficient free disk space", verdict["blocking_reasons"][0])
+
+        status_path = self.e2e_tmp_root / "matrix" / matrix_id / "profile-status" / "matrix-operational-preflight.json"
+        self.assertTrue(status_path.exists(), f"missing operational profile status: {status_path}")
+        status = json.loads(status_path.read_text(encoding="utf-8"))
+        self.assertEqual("failed", status["status"])
+        self.assertEqual("operational_host_preflight_failed", status["failure_reason"])
+        self.assertIn("insufficient free disk space", status["operational_blocker"])
+
+        inventory_path = Path(status["inventory_json"])
+        self.assertTrue(inventory_path.exists(), f"missing operational inventory: {inventory_path}")
+
     def test_path_sha_mismatch_materializes_profile_operational_blocker_without_child_run(self) -> None:
         repo, _head = self._create_git_repo("sha-mismatch")
         repos_file = self.tmp_root / "matrix-inputs" / "single-path-sha-mismatch.repos.yaml"

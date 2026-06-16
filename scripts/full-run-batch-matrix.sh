@@ -32,6 +32,7 @@ MATRIX_DRIVER_LOG="${MATRIX_DRIVER_LOG:-$MATRIX_ROOT/driver.log}"
 MATRIX_TIMEOUT_PROFILE_FILE="${MATRIX_TIMEOUT_PROFILE_FILE:-$MATRIX_ROOT/timeout-profile.txt}"
 MATRIX_PROFILE_STATUS_HEARTBEAT_SEC="${MATRIX_PROFILE_STATUS_HEARTBEAT_SEC:-10}"
 MATRIX_PROFILE_STATUS_STALE_SEC="${MATRIX_PROFILE_STATUS_STALE_SEC:-0}"
+E2E_MATRIX_MIN_FREE_KB="${E2E_MATRIX_MIN_FREE_KB:-5242880}"
 PROFILE_REPOS_FILE_RESOLVED=""
 PROFILE_SOURCE_KIND_EFFECTIVE=""
 PROFILE_EXPECTED_REPO_COUNT_RESOLVED=0
@@ -334,6 +335,32 @@ ensure_writable_dir() {
   rm -f "$probe" >/dev/null 2>&1 || true
 }
 
+ensure_min_free_space() {
+  local path="$1"
+  local label="$2"
+  local min_free_kb="$3"
+  if [[ ! "$min_free_kb" =~ ^[0-9]+$ ]]; then
+    operational_host_preflight_failed "E2E_MATRIX_MIN_FREE_KB must be a non-negative integer, got '$min_free_kb'"
+  fi
+  if (( min_free_kb == 0 )); then
+    return 0
+  fi
+  if ! mkdir -p "$path" 2>/dev/null; then
+    operational_host_preflight_failed "cannot create $label directory at $path"
+  fi
+  local free_kb
+  if ! free_kb="$(df -Pk "$path" 2>/dev/null | awk 'NR == 2 {print $4}')"; then
+    operational_host_preflight_failed "failed to read free disk space for $label at $path"
+  fi
+  if [[ ! "$free_kb" =~ ^[0-9]+$ ]]; then
+    operational_host_preflight_failed "failed to parse free disk space for $label at $path"
+  fi
+  if (( free_kb < min_free_kb )); then
+    operational_host_preflight_failed "$label has insufficient free disk space: path=$path free_kb=$free_kb required_kb=$min_free_kb"
+  fi
+  log "host preflight: $label free_kb=$free_kb required_kb=$min_free_kb"
+}
+
 run_host_preflight_checks() {
   if array_contains "qwen-code" "${MATRIX_SELECTED_PROVIDERS[@]-}"; then
     local qwen_path
@@ -351,6 +378,9 @@ run_host_preflight_checks() {
   ensure_writable_dir "$REPORTS_ROOT" "reports_root"
   ensure_writable_dir "$MATRIX_ROOT" "matrix_root"
   ensure_writable_dir "$MATRIX_STATUS_ROOT" "matrix_status_root"
+  ensure_min_free_space "$E2E_TMP_ROOT" "e2e_tmp_root" "$E2E_MATRIX_MIN_FREE_KB"
+  ensure_min_free_space "$REPORTS_ROOT" "reports_root" "$E2E_MATRIX_MIN_FREE_KB"
+  ensure_min_free_space "$MATRIX_ROOT" "matrix_root" "$E2E_MATRIX_MIN_FREE_KB"
 }
 
 normalize_release_mode() {
