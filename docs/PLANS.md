@@ -68,6 +68,55 @@ Task selection rules:
 - Each selected slice gets a decision-complete ExecPlan/update before implementation, one focused implementation pass, self-review/fix loops, Full DoD (`make contracts`, `make test`, `make lint`, `make build`), then one commit.
 
 ### Plan ID
+EP-20260616-live-e2e-recovery-rerun-loop
+
+### Context
+Diagnostic `claude-code` medium (`regres long`) live run exposed two harness/runtime issues before a clean strict-medium acceptance loop can continue: `draft_artifact_enrichment` for `step2.asis_docs` did not rewrite all bootstrap draft files, and batch reporting let a stale `runner_unavailable` classifier row override collect partial root cause. The user requested fix -> DoD -> commit -> live rerun loop across `claude-code`/`codex-code` with target rotation, without product UI/API changes or canonical matrix/repo edits.
+
+### Goals (must have)
+- [ ] Harden step2 draft enrichment prompt/contract so enrichment reads bounded staged evidence and write-first overwrites `overview.md`, `summary.md`, and `architect-summary.md`.
+- [ ] Keep bootstrap/noop enrichment as `runtime_contract_failed` / `draft_artifact_enrichment_noop_or_scaffold`; do not add deterministic synthesis as a hidden success path.
+- [ ] Fix report classification so collect partial failures remain primary `runtime_flow_failed` while provider class is secondary evidence.
+- [ ] Update tests and live E2E docs/runbooks for the changed runtime/reporting behavior.
+- [ ] Run full DoD, commit, then rerun strict medium live E2E from a clean tree.
+
+### Non-goals
+- [ ] Do not change product UI/API behavior.
+- [ ] Do not edit canonical matrix files, curated repo files, or provider command shims.
+- [ ] Do not treat diagnostic non-release evidence as release readiness.
+
+### Approach
+1) Patch promptcontract and reporting classification with focused unit/script tests.
+2) Synchronize `docs/RELEASE_LIVE_E2E_RUNBOOK.md`, `docs/spec/PIPELINE_SPEC.md`, `docs/ARCHITECTURE.md`, and `docs/TESTING_STRATEGY.md`.
+3) Run targeted tests, then full DoD (`make contracts`, `make test`, `make lint`, `make build`).
+4) Commit the fix slice.
+5) Run `regres long` medium through direct `scripts/full-run-batch-matrix.sh` for `claude-code`; evaluate execution, artifact and UX quality; continue the requested provider/target loop if blockers remain.
+
+### Files expected to change
+- `internal/runtime/promptcontract/draft_repair.go`
+- `internal/runtime/promptcontract/promptcontract_test.go`
+- `scripts/e2e_batch_report.py`
+- `scripts/tests/batch_failure_classification_test.py`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/spec/PIPELINE_SPEC.md`
+- `docs/ARCHITECTURE.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [ ] Prompt tests prove step2 enrichment has exact write-first targets and banned bootstrap scaffold.
+- [ ] Script tests prove partial collect root cause is not overridden by stale provider classifier rows.
+- [ ] Full DoD passes before rerun.
+- [ ] Strict medium rerun evidence is reported across execution quality, artifact quality and UX quality.
+
+### Risks
+- Live providers can still fail due to quota/auth/timeout, which must be classified separately from ACP regressions.
+- The stricter prompt can increase provider work in medium/full runs; bounded staged evidence limits the blast radius.
+
+### Progress log
+- 2026-06-16: Started fix slice from the failed `regres-long-posthog-ftgo-20260616T033256Z` diagnostic evidence.
+
+### Plan ID
 EP-20260608-medium-live-e2e-quality-ui
 
 ### Context

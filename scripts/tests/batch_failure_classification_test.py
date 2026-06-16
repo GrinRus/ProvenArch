@@ -892,6 +892,80 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertTrue(result.runtime_flow_failed)
         self.assertEqual("runtime_flow_failed", result.failure_class)
 
+    def test_python_report_keeps_partial_collect_root_cause_over_runner_unavailable_classifier(self) -> None:
+        run_dir = self.root / "run-partial-vs-runner-unavailable-python"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- execution_gate: live runtime/frontend evidence only",
+                    "- failure_reason: run_partial_failed",
+                    "- expected_runs: 4",
+                    "- completed_runs: 4",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 2",
+                    "- running_runs_detected: 0",
+                    "- termination_signal: none",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+        write_text(run_dir / "full-run.log", "run failed (run_partial_failed): partial shard failures (1)\n")
+        write_text(run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson", '{"level":"info","message":"partial shard failure evidence"}\n')
+        write_text(run_dir / "arch-workspace/reports/taskruns/raw/runtime.stderr.txt", "partial shard failure evidence\n")
+        quality_path = run_dir / "snapshots" / "refresh-run" / "reports" / "taskruns" / "refresh-run-quality.json"
+        payload = json.loads(quality_path.read_text(encoding="utf-8"))
+        payload.setdefault("totals", {})["partial_failure_count"] = 1
+        write_json(quality_path, payload)
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "runner_unavailable",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("runtime_flow_failed", result.failure_class)
+        self.assertTrue(result.runtime_flow_failed)
+        self.assertFalse(result.runner_unavailable)
+        self.assertEqual(1, result.partial_failure_count)
+        self.assertTrue(
+            any("partial collect shard failures keep runtime_flow_failed" in detail for detail in result.issue_details),
+            result.issue_details,
+        )
+
+        contract_classifier_result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "runtime_contract_failed",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+        self.assertEqual("runtime_flow_failed", contract_classifier_result.failure_class)
+        self.assertTrue(contract_classifier_result.runtime_flow_failed)
+        self.assertTrue(
+            any("partial collect shard failures keep runtime_flow_failed" in detail for detail in contract_classifier_result.issue_details),
+            contract_classifier_result.issue_details,
+        )
+
     def test_python_report_uses_workspace_quality_for_non_snapshot_failed_runs(self) -> None:
         run_dir = self.root / "run-workspace-quality-fallback"
         self._create_fixture_run_dir(run_dir)
