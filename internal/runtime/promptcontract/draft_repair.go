@@ -213,7 +213,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		"- Do not return semantic JSON or any semantic payload on stdout.",
 		"- Do not run the earlier heredoc/bootstrap draft command again.",
 		"- Do not create or preserve recovery scaffold text as final content.",
-		"- First action: read the current draft manifest, then make a bounded evidence pass over staged shard manifests, final-run-index, citation-index, and only a small representative set of authored shard docs before rewriting markdown.",
+		"- First focused work unit: read the current draft manifest, make a bounded evidence pass over staged shard manifests, final-run-index, citation-index, and only a small representative set of authored shard docs, then immediately overwrite every referenced markdown target before any optional extended analysis.",
 		"- Fresh mutation is required: the harness ignores pre-existing bootstrap files until you rewrite every markdown target in this enrichment command.",
 		"- Do not spend the whole run reading evidence without a write; make a marker-free evidence-backed rewrite for every markdown target, then refine it if time remains.",
 		fmt.Sprintf("- Read and keep the existing manifest target in write_root: %q.", manifestTarget),
@@ -268,6 +268,13 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		lines = append(lines,
 			"- Enrich proposal and changelog drafts from validated staged findings, coverage gaps, questions, citations, and proposal candidates.",
 			"- Proposals must be actionable and traceable to staged evidence; do not leave generic validation notes as the only content.",
+			"- STEP4 WRITE-FIRST SEQUENCE: read proposals-draft-manifest.json, read final-run-index.json and citation-index.json if present, read validator/finding summaries and at most 6 high-signal shard manifests or authored shard docs, then overwrite proposal.md and changelog.md under draft_final_root before any optional extra analysis.",
+			fmt.Sprintf("- Exact required proposal draft overwrite target: %q.", filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "proposal.md")),
+			fmt.Sprintf("- Exact required changelog draft overwrite target: %q.", filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "changelog.md")),
+			"- proposal.md must contain: Decision / recommended operator action; Evidence used with repo/path or staged artifact references; Proposed changes or follow-up plan; Risks, gaps, and out-of-scope notes.",
+			"- changelog.md must contain: Updated architecture/proposal surfaces; Findings/proposals summary; Evidence index or citation references; Residual coverage gaps.",
+			"- If staged evidence is sparse, write the gap explicitly with the exact missing staged surface instead of keeping bootstrap scaffold.",
+			"- Final self-check: both proposal.md and changelog.md were freshly overwritten in this focused call, name concrete staged evidence or repo/path references when available, and contain none of the banned scaffold markers.",
 		)
 	}
 	if validationErr != nil {

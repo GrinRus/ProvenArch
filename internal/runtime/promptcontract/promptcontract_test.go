@@ -689,7 +689,7 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"draft artifact enrichment focused recovery mode",
 		"Immediate draft artifact enrichment action:",
 		"Do not run the earlier heredoc/bootstrap draft command again.",
-		"First action: read the current draft manifest",
+		"First focused work unit: read the current draft manifest",
 		"bounded evidence pass",
 		"bounded_read_context_roots",
 		"Fresh mutation is required",
@@ -722,6 +722,61 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 	} {
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("draft enrichment prompt must not contain bootstrap heredoc/scaffold %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptForProposalsRequiresWriteFirstTargets(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step4.proposals",
+		StepContract:      "proposals",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/proposals",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"proposals-draft-manifest.json", "proposal.md", "changelog.md"},
+	}
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, os.ErrInvalid)
+	for _, token := range []string{
+		"draft artifact enrichment focused recovery mode",
+		"First focused work unit: read the current draft manifest",
+		"then immediately overwrite every referenced markdown target",
+		"proposal.md -> proposals/runtime-recommendations.md",
+		"changelog.md -> reports/changelog/runtime-proposals.md",
+		"STEP4 WRITE-FIRST SEQUENCE",
+		"read proposals-draft-manifest.json",
+		"read final-run-index.json and citation-index.json if present",
+		"at most 6 high-signal shard manifests or authored shard docs",
+		"/tmp/workspace/reports/taskruns/run-1/staging/final/proposal.md",
+		"/tmp/workspace/reports/taskruns/run-1/staging/final/changelog.md",
+		"proposal.md must contain: Decision / recommended operator action",
+		"Evidence used with repo/path or staged artifact references",
+		"Risks, gaps, and out-of-scope notes",
+		"changelog.md must contain: Updated architecture/proposal surfaces",
+		"Evidence index or citation references",
+		"Residual coverage gaps",
+		"If staged evidence is sparse, write the gap explicitly",
+		"Final self-check: both proposal.md and changelog.md were freshly overwritten",
+		"Final content MUST NOT include these scaffold markers:",
+		"Runtime proposal surface initialized",
+		"Previous draft artifact validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected proposals draft enrichment prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"ACP_DRAFT_FILE",
+		"ACP_DRAFT_MANIFEST_JSON",
+		"cat >",
+		"FIRST PROPOSALS DRAFT COMMAND:",
+		"Runtime proposal surface initialized for this analysis run.",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("proposals draft enrichment prompt must not contain bootstrap heredoc/scaffold %q:\n%s", forbidden, prompt)
 		}
 	}
 }
