@@ -133,9 +133,11 @@ done`
 	runner := testAdapter{
 		command: writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, tail)),
 		activity: ActivityPolicy{
-			MonitorArtifacts:           true,
-			MonitorPreArtifact:         true,
-			PreArtifactStallWindow:     5 * time.Second,
+			MonitorArtifacts:   true,
+			MonitorPreArtifact: true,
+			// This test exercises the valid-artifact stop path; keep the
+			// pre-artifact budget roomy enough for loaded live prechecks.
+			PreArtifactStallWindow:     20 * time.Second,
 			PostArtifactStallWindow:    time.Second,
 			PartialArtifactStallWindow: time.Second,
 			ValidArtifactStopWindow:    50 * time.Millisecond,
@@ -146,7 +148,7 @@ done`
 		recovery: RecoveryPolicy{AcceptValidArtifactsAfterStop: true},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	result, err := RunHeadlessProvider(ctx, task, runner)
 	if err != nil {
