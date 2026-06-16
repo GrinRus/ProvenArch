@@ -328,23 +328,6 @@ func SuggestedCollectDocumentPath(task acpruntime.Task) string {
 	return "overview.md"
 }
 
-func CollectRecoveryPairWriteCommand(task acpruntime.Task) string {
-	writeRoot := strings.TrimSpace(task.WriteRoot)
-	docRel := SuggestedCollectDocumentPath(task)
-	docTarget := filepath.Join(writeRoot, filepath.FromSlash(docRel))
-	manifestTarget := filepath.Join(writeRoot, "shard-pack-manifest.json")
-	skeleton := CollectRecoveryManifestTaskSkeleton(task, []string{docRel}, nil)
-	return strings.Join([]string{
-		"mkdir -p " + shellSingleQuote(writeRoot),
-		"cat > " + shellSingleQuote(docTarget) + " <<'ACP_COLLECT_DOC'",
-		collectDocumentRecoveryTemplate(task, docRel),
-		"ACP_COLLECT_DOC",
-		"cat > " + shellSingleQuote(manifestTarget) + " <<'ACP_MANIFEST_JSON'",
-		strings.TrimSpace(skeleton),
-		"ACP_MANIFEST_JSON",
-	}, "\n")
-}
-
 func CollectFirstActionSection(task acpruntime.Task) string {
 	if !acpruntime.IsCollectStep(task.StepID) {
 		return ""
@@ -576,55 +559,11 @@ func runtimeDraftScopeLines(task acpruntime.Task) []string {
 	}
 }
 
-func collectDocumentRecoveryTemplate(task acpruntime.Task, docRel string) string {
-	repo := PrimaryTaskRepoScope(task.RepoScope, task.RepoScopes)
-	if repo == "" {
-		repo = "repo"
-	}
-	evidencePath := collectEvidencePath(task, nil)
-	if evidencePath == "" {
-		evidencePath = "README.md"
-	}
-	scopeText := collectRecoveryScopeSummary(task, evidencePath)
-	evidenceExamples := collectRecoveryEvidencePaths(task, nil, 6)
-	titleSlug := slugComponent(strings.TrimSuffix(filepath.Base(docRel), filepath.Ext(docRel)))
-	title := titleFromSlug(titleSlug)
-	lines := []string{
-		"# " + title,
-		"",
-		"## Recovery Evidence Summary",
-		"- Repository scope: " + repo + ".",
-		"- Assigned scope summary: " + scopeText + ".",
-		"- Primary scoped evidence path: `" + markdownCodeSpan(evidencePath) + "`.",
-		"- This document is a seed-only collect recovery fallback for a shard whose first collect attempt did not complete with enriched artifacts.",
-		"",
-		"## Evidence Surface",
-	}
-	for _, path := range evidenceExamples {
-		lines = append(lines, "- `"+markdownCodeSpan(path)+"`: scoped repository evidence available to the collect shard.")
-	}
-	lines = append(lines,
-		"",
-		"## Recovery Notes",
-		"- The recovery pair records concrete scoped paths so downstream compilation can preserve traceability instead of accepting an empty or marker-only shard.",
-		"- Additional provider enrichment should replace this fallback with more specific responsibilities, dependencies, and ownership evidence when available.",
-		"",
-		"## Remaining Questions",
-		"- Confirm concrete ownership, runtime responsibilities, and operational escalation evidence for this shard.",
-		"",
-	)
-	return strings.Join(lines, "\n")
-}
-
 func CollectManifestTaskSkeleton(task acpruntime.Task, docPaths []string, evidencePaths []string) string {
-	return collectManifestTaskSkeleton(task, docPaths, evidencePaths, false)
+	return collectManifestTaskSkeleton(task, docPaths, evidencePaths)
 }
 
-func CollectRecoveryManifestTaskSkeleton(task acpruntime.Task, docPaths []string, evidencePaths []string) string {
-	return collectManifestTaskSkeleton(task, docPaths, evidencePaths, true)
-}
-
-func collectManifestTaskSkeleton(task acpruntime.Task, docPaths []string, evidencePaths []string, recovery bool) string {
+func collectManifestTaskSkeleton(task acpruntime.Task, docPaths []string, evidencePaths []string) string {
 	cleanDocPaths := make([]string, 0, len(docPaths))
 	seenDocs := map[string]struct{}{}
 	for _, docPath := range docPaths {
@@ -691,9 +630,6 @@ func collectManifestTaskSkeleton(task acpruntime.Task, docPaths []string, eviden
 
 	coverageMissing := collectCoverageMissingSkeleton(task)
 	semantic := collectSemanticSkeleton(task, repo, evidencePath, shardSlug, idStem, topic, coverageMissing)
-	if recovery {
-		semantic = collectRecoverySemanticSkeleton(task, repo, evidencePath, shardSlug, idStem, topic, coverageMissing)
-	}
 	manifest := contracts.ShardPackManifest{
 		Version:      1,
 		RunID:        runID,
@@ -1310,72 +1246,6 @@ func collectEvidencePath(task acpruntime.Task, evidencePaths []string) string {
 	return firstNonEmptyPath(task.PathScopes)
 }
 
-func collectRecoveryScopeSummary(task acpruntime.Task, fallbackEvidence string) string {
-	scopes := nonEmptyList(task.PathScopes)
-	if len(scopes) == 0 {
-		if strings.TrimSpace(fallbackEvidence) != "" {
-			return "`" + markdownCodeSpan(fallbackEvidence) + "`"
-		}
-		return "repository entrypoint evidence"
-	}
-	examples := collectRecoveryEvidencePaths(task, nil, 5)
-	if len(scopes) <= 8 {
-		values := make([]string, 0, len(scopes))
-		for _, scope := range scopes {
-			values = append(values, "`"+markdownCodeSpan(scope)+"`")
-		}
-		return strings.Join(values, ", ")
-	}
-	values := make([]string, 0, len(examples))
-	for _, example := range examples {
-		values = append(values, "`"+markdownCodeSpan(example)+"`")
-	}
-	return fmt.Sprintf("%d assigned paths; examples: %s", len(scopes), strings.Join(values, ", "))
-}
-
-func collectRecoveryEvidencePaths(task acpruntime.Task, evidencePaths []string, limit int) []string {
-	seen := map[string]struct{}{}
-	paths := []string{}
-	add := func(path string) {
-		path = filepath.ToSlash(strings.Trim(strings.TrimSpace(path), "/"))
-		if path == "" || path == "." {
-			return
-		}
-		if _, exists := seen[path]; exists {
-			return
-		}
-		seen[path] = struct{}{}
-		paths = append(paths, path)
-	}
-	add(collectEvidencePath(task, evidencePaths))
-	for _, path := range evidencePaths {
-		add(path)
-	}
-	pathScopes := nonEmptyList(task.PathScopes)
-	if rootFileScopes := rootFileShardPathScopes(pathScopes); len(rootFileScopes) > 0 {
-		preferred := preferredRootFileEvidencePath(rootFileScopes)
-		add(preferred)
-		for _, path := range rootFileScopes {
-			add(path)
-		}
-	} else {
-		for _, path := range pathScopes {
-			add(path)
-		}
-	}
-	if len(paths) == 0 {
-		paths = append(paths, "README.md")
-	}
-	if limit > 0 && len(paths) > limit {
-		return append([]string{}, paths[:limit]...)
-	}
-	return append([]string{}, paths...)
-}
-
-func markdownCodeSpan(value string) string {
-	return strings.ReplaceAll(strings.TrimSpace(value), "`", "'")
-}
-
 func preferredRootFileEvidencePath(pathScopes []string) string {
 	preferred := []func(string) bool{
 		func(value string) bool {
@@ -1526,100 +1396,6 @@ func collectSemanticSkeleton(task acpruntime.Task, repo string, evidencePath str
 			Provenance: contracts.Provenance{
 				Kind:       "inference",
 				Confidence: 0.45,
-				Evidence:   evidence,
-			},
-		}},
-	}
-}
-
-func collectRecoverySemanticSkeleton(task acpruntime.Task, repo string, evidencePath string, shardSlug string, idStem string, topic string, coverageMissing []string) contracts.SemanticSnapshot {
-	repoStem := idComponent(firstNonEmpty(repo, "repo"))
-	shardStem := idComponent(firstNonEmpty(idStem, shardSlug, topic, "shard"))
-	repoEntityID := "svc." + repoStem
-	shardEntityID := "svc." + shardStem
-	if shardEntityID == repoEntityID {
-		shardEntityID = shardEntityID + ".surface"
-	}
-	if strings.TrimSpace(topic) == "" {
-		topic = shardSlug
-	}
-	if strings.TrimSpace(topic) == "" {
-		topic = "architecture"
-	}
-	if strings.TrimSpace(repo) == "" {
-		repo = "repo"
-	}
-	if strings.TrimSpace(evidencePath) == "" {
-		evidencePath = "README.md"
-	}
-	evidence := []contracts.Evidence{{
-		Repo: repo,
-		Path: evidencePath,
-	}}
-	missing := append([]string{}, coverageMissing...)
-	missing = append(missing, "richer collect evidence pass did not complete before recovery fallback")
-	questionIDStem := idComponent(firstNonEmpty(shardStem, topic, "collect.recovery"))
-	return contracts.SemanticSnapshot{
-		Coverage: contracts.Coverage{
-			Observed: []string{topic, "collect recovery fallback"},
-			Missing:  missing,
-			Notes: []string{
-				fmt.Sprintf("Focused collect recovery preserved a seed-only shard pair using scoped evidence path %q.", evidencePath),
-				"Follow-up collection should enrich responsibilities, dependencies, and ownership details when provider execution completes normally.",
-			},
-		},
-		Questions: []contracts.Question{
-			{
-				ID:         fmt.Sprintf("question.%s.recovery.enrichment", questionIDStem),
-				Text:       fmt.Sprintf("Which concrete responsibilities, dependencies, and owners should be promoted for the %s surface beyond the recovery fallback?", strings.TrimSpace(topic)),
-				Priority:   "medium",
-				RelatedIDs: []string{shardEntityID},
-			},
-		},
-		Entities: []contracts.Entity{
-			{
-				ID:   repoEntityID,
-				Type: "service",
-				Name: titleFromSlug(repoStem),
-				Provenance: contracts.Provenance{
-					Kind:       "observation",
-					Confidence: 0.55,
-					Evidence:   evidence,
-				},
-			},
-			{
-				ID:   shardEntityID,
-				Type: "component",
-				Name: titleFromSlug(firstNonEmpty(shardSlug, topic, "Scoped Surface")),
-				Provenance: contracts.Provenance{
-					Kind:       "observation",
-					Confidence: 0.5,
-					Evidence:   evidence,
-				},
-			},
-		},
-		Edges: []contracts.Edge{{
-			ID:   fmt.Sprintf("edge.%s.recovery-evidence", questionIDStem),
-			Type: "documents",
-			From: repoEntityID,
-			To:   shardEntityID,
-			Name: "documents scoped recovery evidence",
-			Provenance: contracts.Provenance{
-				Kind:       "observation",
-				Confidence: 0.45,
-				Evidence:   evidence,
-			},
-		}},
-		Findings: []contracts.Finding{{
-			ID:          fmt.Sprintf("finding.%s.collect.recovery.minimal_evidence", questionIDStem),
-			Severity:    "medium",
-			Title:       "Collect recovery used minimal scoped evidence",
-			Description: fmt.Sprintf("The provider recovered the %s shard from a seed-only fallback after the initial collect attempt remained incomplete. Additional evidence should be collected when provider execution completes normally.", strings.TrimSpace(topic)),
-			RuleID:      "rule.collect_recovery.minimal_evidence",
-			RelatedIDs:  []string{shardEntityID},
-			Provenance: contracts.Provenance{
-				Kind:       "inference",
-				Confidence: 0.5,
 				Evidence:   evidence,
 			},
 		}},

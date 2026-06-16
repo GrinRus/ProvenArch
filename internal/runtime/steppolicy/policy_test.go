@@ -171,51 +171,6 @@ func TestCollectFirstActionSectionDefinesEvidenceFirstTargets(t *testing.T) {
 	}
 }
 
-func TestCollectRecoveryPairWriteCommandWritesValidationReadyFallback(t *testing.T) {
-	t.Parallel()
-
-	task := acpruntime.Task{
-		TaskID:       "task-1",
-		RunID:        "run-1",
-		StepID:       "init.step1.collect",
-		WriteRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments",
-		ArtifactRoot: "reports/taskruns/run-1/staging/shards/payments",
-		RepoScopes:   []string{"payments"},
-		PathScopes:   []string{"payments"},
-		ShardID:      "payments",
-	}
-
-	command := CollectRecoveryPairWriteCommand(task)
-	required := []string{
-		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md' <<'ACP_COLLECT_DOC'`,
-		`## Recovery Evidence Summary`,
-		`## Evidence Surface`,
-		`## Recovery Notes`,
-		`Remaining Questions`,
-		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json' <<'ACP_MANIFEST_JSON'`,
-		`collect recovery fallback`,
-		`Collect recovery used minimal scoped evidence`,
-		`"path": "payments-overview.md"`,
-	}
-	for _, needle := range required {
-		if !strings.Contains(command, needle) {
-			t.Fatalf("expected recovery command to contain %q, got:\n%s", needle, command)
-		}
-	}
-	for _, forbidden := range []string{
-		`ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT`,
-		`Recovery Bootstrap`,
-		`Recovery Summary`,
-		`Evidence candidate used for the recovery manifest`,
-		`Collect manifest covers the assigned shard scope`,
-		`Owner mapping evidence not confirmed from the initial scoped evidence path`,
-	} {
-		if strings.Contains(command, forbidden) {
-			t.Fatalf("recovery command must not contain bootstrap scaffold %q:\n%s", forbidden, command)
-		}
-	}
-}
-
 func TestDocFirstFilesystemPolicyAddsRootFileShardHint(t *testing.T) {
 	t.Parallel()
 

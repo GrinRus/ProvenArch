@@ -301,20 +301,35 @@ func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task a
 	docRel := steppolicy.SuggestedCollectDocumentPath(task)
 	docTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), filepath.FromSlash(docRel))
 	manifestTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), "shard-pack-manifest.json")
+	evidencePaths := repairEvidenceCandidates(task)
+	skeleton := steppolicy.CollectManifestTaskSkeleton(task, []string{docRel}, evidencePaths)
 	lines := []string{
 		fmt.Sprintf("You are ACP runtime provider %q in collect artifact pair focused recovery mode.", provider),
-		"Immediate recovery action:",
-		"- Run the exact shell command below as your next command. Do not inspect repository files first.",
-		fmt.Sprintf("- Write exactly two files now: %q and %q.", docTarget, manifestTarget),
-		"- The command writes a marker-free seed recovery pair with scoped evidence paths encoded in both the document and manifest; it is not sufficient final output until enriched.",
-		"- Do not browse for more evidence before this write. Record uncertainty in semantic.coverage.missing/questions.",
+		"COLLECT PAIR EVIDENCE-FIRST REPAIR:",
+		"- This repair is not a bootstrap/fallback writer. Do not create a seed-only or recovery-summary pair.",
+		"- First read bounded repository evidence from the exact read_context_roots/path_scopes below, then write final evidence-backed artifacts.",
+		fmt.Sprintf("- Write exactly two files after the evidence pass: %q and %q.", docTarget, manifestTarget),
 		"- Do not write any file outside the exact write_root collect pair.",
-		"COLLECT PAIR WRITE COMMAND:",
-		steppolicy.CollectRecoveryPairWriteCommand(task),
+		"- Do not delete existing files, run rm -f, use git rev-parse, rely on cwd discovery, inspect sibling reports/taskruns, or read raw logs.",
+		"- If bounded repo evidence cannot be read, exit non-zero without writing fallback scaffold.",
+		"FIRST COLLECT PAIR REPAIR WORKFLOW:",
+		"- Read at most the listed evidence candidates and representative files under assigned path_scopes using the exact absolute read_context_roots.",
+		"- Explain concrete components, runtime/config/deploy/test/data surfaces, ownership gaps, and dependencies in the markdown document.",
+		"- Build shard-pack-manifest.json from that markdown plus the same repo/path evidence: documents, citations, semantic.coverage, semantic.questions, semantic.entities, semantic.edges, and semantic.findings.",
+		"- Use repo/path provenance for every semantic evidence object; stdout claims are diagnostics only.",
+		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
+		strings.TrimSpace(skeleton),
+		"SKELETON USE:",
+		"- Use this JSON only as the task-specific schema/key/type guide, not as final content.",
+		"- Replace skeleton citations, coverage, questions, entities, edges, findings, titles, and descriptions with facts from allowed repository evidence.",
+		"- Copying this skeleton unchanged is invalid and will be rejected as scaffold-only output.",
 		"RECOVERY ACCEPTANCE REQUIREMENT:",
-		"- After the command succeeds, if provider execution continues, do one targeted evidence pass using existing repo entrypoint hints and assigned path_scopes, then overwrite the exact authored document and shard-pack-manifest.json targets with richer evidence-backed content.",
 		"- Successful recovery output must not contain ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT, Recovery Bootstrap/Recovery Summary scaffold text, Recovery Evidence Summary fallback prose, or the normal collect first-action scaffold prose.",
-		"- Exiting successfully immediately after the heredoc command is invalid; overwrite the exact pair with evidence-backed content first.",
+		"- Successful recovery output must not say seed-only collect recovery fallback, Additional provider enrichment should replace, or Treat this as diagnostic evidence until.",
+		"- A manifest with many citations but only repo/shard wrapper entities, only contains edges, or only generic owner-mapping findings is invalid.",
+		"- Exit successfully only after both exact targets are complete, marker-free, and evidence-backed.",
+		"FINAL SELF-CHECK COMMAND:",
+		"test -s " + shellSingleQuote(docTarget) + " && test -s " + shellSingleQuote(manifestTarget) + " && ! grep -E 'ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT|Recovery Bootstrap|Recovery Summary|Recovery Evidence Summary|seed-only collect recovery fallback|Additional provider enrichment should replace|Treat this as diagnostic evidence until' " + shellSingleQuote(docTarget) + " " + shellSingleQuote(manifestTarget),
 		"Artifact-only recovery contract:",
 		"- Do not return semantic JSON or any semantic payload on stdout.",
 		"- Final action must be: write the enriched recovery overview document and shard-pack-manifest.json under write_root, then exit successfully.",
@@ -323,13 +338,20 @@ func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task a
 		fmt.Sprintf(`- write_root (absolute) = %q`, strings.TrimSpace(task.WriteRoot)),
 		fmt.Sprintf(`- exact authored document target = %q`, docTarget),
 		fmt.Sprintf(`- exact manifest target = %q`, manifestTarget),
+		fmt.Sprintf(`- read_context_roots = %q`, strings.Join(task.ReadContextRoots, ", ")),
 		fmt.Sprintf(`- repo_scopes = %q`, strings.Join(task.RepoScopes, ", ")),
 		fmt.Sprintf(`- path_scopes = %q`, strings.Join(task.PathScopes, ", ")),
 		"COLLECT PAIR RECOVERY CHECKLIST:",
 	}
+	if len(evidencePaths) > 0 {
+		lines = append(lines, "Bounded repository evidence candidates:")
+		for _, rel := range evidencePaths {
+			lines = append(lines, "- "+rel)
+		}
+	}
 	lines = append(lines, compactCollectManifestValidationChecklist(strings.TrimSpace(task.ArtifactRoot))...)
 	lines = append(lines,
-		"- Use the heredoc JSON above as the task-specific skeleton. Do not infer schema from prior reports/taskruns artifacts or raw logs.",
+		"- Use the embedded JSON above as the task-specific skeleton. Do not infer schema from prior reports/taskruns artifacts or raw logs.",
 		"- This is provider-authored recovery; ACP will only validate artifacts and write the runtime-execution metadata.",
 	)
 	if detail := errorText(validationErr); detail != "" {

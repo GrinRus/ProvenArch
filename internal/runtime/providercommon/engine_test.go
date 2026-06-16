@@ -2560,6 +2560,71 @@ func TestMonitorArtifactStallIgnoresStaleArtifactsUntilFreshMutation(t *testing.
 	}
 }
 
+func TestMonitorArtifactStallTripsInvalidArtifactWindowDespitePipeActivity(t *testing.T) {
+	t.Parallel()
+
+	task := newDraftTask(t, "run-monitor-invalid-active-pipe")
+	if err := os.WriteFile(filepath.Join(task.WriteRoot, "constitution-draft.json"), []byte(`{"version":1}`), 0o644); err != nil {
+		t.Fatalf("write invalid manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, "charter-overview.md"), []byte("# bootstrap\n"), 0o644); err != nil {
+		t.Fatalf("write invalid draft: %v", err)
+	}
+	old := time.Now().Add(-time.Second)
+	for _, path := range []string{
+		filepath.Join(task.WriteRoot, "constitution-draft.json"),
+		filepath.Join(task.DraftFinalRoot, "charter-overview.md"),
+	} {
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatalf("chtimes %s: %v", path, err)
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tracker := newCommandActivityTracker(time.Now().UTC())
+	keepPipeFresh := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-keepPipeFresh:
+				return
+			case at := <-ticker.C:
+				tracker.Note(at)
+			}
+		}
+	}()
+	defer close(keepPipeFresh)
+
+	done := make(chan StallError, 1)
+	go func() {
+		err, stalled := monitorArtifactStall(ctx, task, tracker, ActivityPolicy{
+			MonitorArtifacts:           true,
+			MonitorPreArtifact:         true,
+			PostArtifactStallWindow:    time.Hour,
+			PartialArtifactStallWindow: 20 * time.Millisecond,
+			PollInterval:               5 * time.Millisecond,
+		})
+		if stalled {
+			done <- err
+		}
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrStalledAfterArtifacts) {
+			t.Fatalf("expected invalid artifact post-artifact stall, got %v", err)
+		}
+		if got := err.Diagnostic.ArtifactState; got != "invalid" {
+			t.Fatalf("expected invalid artifact state, got %q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected invalid artifact stall despite fresh pipe activity")
+	}
+}
+
 func TestMonitorArtifactStallUsesPartialArtifactWindow(t *testing.T) {
 	t.Parallel()
 

@@ -452,41 +452,49 @@ func TestComposeCollectManifestRepairPromptPrefersUsefulRootEvidence(t *testing.
 	}
 }
 
-func TestComposeCollectArtifactPairRepairPromptWritesExactPairFirst(t *testing.T) {
+func TestComposeCollectArtifactPairRepairPromptIsEvidenceFirstNoSeed(t *testing.T) {
 	t.Parallel()
 
+	repoRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Payments\n\nRuntime entrypoint.\n"), 0o644); err != nil {
+		t.Fatalf("write evidence file: %v", err)
+	}
 	task := acpruntime.Task{
 		RunID:             "run-1",
 		StepID:            "init.step1.collect",
 		ArtifactRoot:      "reports/taskruns/run-1/staging/shards/payments",
 		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments",
+		ReadContextRoots:  []string{repoRoot},
 		ShardID:           "payments",
 		DomainID:          "payments",
 		AgentRole:         "shard-analyst",
 		RepoScopes:        []string{"payments-service"},
-		PathScopes:        []string{"."},
+		PathScopes:        []string{"README.md"},
 		ExpectedArtifacts: []string{"shard-pack-manifest.json"},
 	}
 
 	prompt := ComposeCollectArtifactPairRepairPrompt(acpruntime.ProviderCodexCode, task, os.ErrNotExist)
 	expectedTokens := []string{
 		"collect artifact pair focused recovery mode",
-		"Run the exact shell command below as your next command. Do not inspect repository files first.",
-		`Write exactly two files now: "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md" and "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json".`,
-		"COLLECT PAIR WRITE COMMAND:",
-		"cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md' <<'ACP_COLLECT_DOC'",
-		"cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json' <<'ACP_MANIFEST_JSON'",
+		"COLLECT PAIR EVIDENCE-FIRST REPAIR:",
+		"This repair is not a bootstrap/fallback writer",
+		`Write exactly two files after the evidence pass: "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/root-overview.md" and "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json".`,
+		"Do not delete existing files, run rm -f, use git rev-parse, rely on cwd discovery",
+		"FIRST COLLECT PAIR REPAIR WORKFLOW:",
+		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
 		"RECOVERY ACCEPTANCE REQUIREMENT:",
-		"The command writes a marker-free seed recovery pair",
-		"if provider execution continues, do one targeted evidence pass",
 		"Recovery Evidence Summary",
-		"collect recovery fallback",
+		"seed-only collect recovery fallback",
+		"Additional provider enrichment should replace",
+		"FINAL SELF-CHECK COMMAND:",
+		"! grep -E",
 		"Successful recovery output must not contain ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT",
-		"Exiting successfully immediately after the heredoc command is invalid",
-		`"path": "payments-overview.md"`,
+		`"path": "root-overview.md"`,
 		`"artifact_root": "reports/taskruns/run-1/staging/shards/payments"`,
-		"exact authored document target = \"/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md\"",
+		"exact authored document target = \"/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/root-overview.md\"",
 		"exact manifest target = \"/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json\"",
+		"Bounded repository evidence candidates:",
+		"- README.md",
 		"Do not infer schema from prior reports/taskruns artifacts or raw logs.",
 		"Previous collect artifact validation failure",
 	}
@@ -500,6 +508,12 @@ func TestComposeCollectArtifactPairRepairPromptWritesExactPairFirst(t *testing.T
 		"Existing authored documents in write_root",
 		"Do not rewrite existing authored markdown documents",
 		"read, diff, or patch an existing invalid shard-pack-manifest.json",
+		"COLLECT PAIR WRITE COMMAND:",
+		"cat > ",
+		"ACP_COLLECT_DOC",
+		"ACP_MANIFEST_JSON",
+		"The command writes a marker-free seed recovery pair",
+		"Exiting successfully immediately after the heredoc command is invalid",
 		"POST-COMMAND ENRICHMENT REQUIREMENT:",
 		"marker-bearing recovery bootstrap pair",
 		"Evidence candidate used for the recovery manifest",
@@ -508,9 +522,6 @@ func TestComposeCollectArtifactPairRepairPromptWritesExactPairFirst(t *testing.T
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("collect pair repair prompt must not use manifest-only repair wording %q:\n%s", forbidden, prompt)
 		}
-	}
-	if strings.Count(prompt, "ACP_COLLECT_DOC") != 2 || strings.Count(prompt, "ACP_MANIFEST_JSON") != 2 {
-		t.Fatalf("expected one collect doc heredoc and one manifest heredoc:\n%s", prompt)
 	}
 }
 

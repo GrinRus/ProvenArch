@@ -97,6 +97,19 @@ func monitorArtifactStall(ctx context.Context, task acpruntime.Task, tracker *co
 			stallWindow := policy.PostArtifactStallWindow
 			if !snapshot.Valid {
 				stallWindow = policy.PartialArtifactStallWindow
+				if !lastMutation.IsZero() && time.Since(lastMutation) >= stallWindow {
+					return StallError{
+						Sentinel: ErrStalledAfterArtifacts,
+						Diagnostic: StallDiagnostic{
+							StallPhase:            StallPhasePostArtifact,
+							ArtifactState:         snapshot.State,
+							ArtifactObserved:      snapshot.ArtifactObserved,
+							AuthoredFileCount:     snapshot.AuthoredFiles,
+							LastPipeActivity:      lastPipe,
+							LastWriteRootMutation: lastMutation,
+						},
+					}, true
+				}
 			}
 			if !lastPipe.IsZero() && time.Since(lastPipe) < stallWindow {
 				continue

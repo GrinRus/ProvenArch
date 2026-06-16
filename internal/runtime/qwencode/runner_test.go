@@ -328,7 +328,7 @@ func TestQwenRepairCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte("version: 1\nrepos:\n  - name: repo-a\n    path: "+repoRoot+"\n"), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Repo A\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Repo A\n\nRuntime entrypoint.\n"), 0o644); err != nil {
 		t.Fatalf("write repo evidence: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(writeRoot, "overview.md"), []byte("# Repo A\n"), 0o644); err != nil {
@@ -446,10 +446,11 @@ func TestQwenCollectArtifactPairRepairCommandSpecUsesPromptOnly(t *testing.T) {
 	for _, token := range []string{
 		"-p",
 		"collect artifact pair focused recovery mode",
-		"Run the exact shell command below as your next command. Do not inspect repository files first.",
-		"COLLECT PAIR WRITE COMMAND:",
-		"<<'ACP_COLLECT_DOC'",
-		"<<'ACP_MANIFEST_JSON'",
+		"COLLECT PAIR EVIDENCE-FIRST REPAIR:",
+		"This repair is not a bootstrap/fallback writer",
+		"FIRST COLLECT PAIR REPAIR WORKFLOW:",
+		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
+		"FINAL SELF-CHECK COMMAND:",
 		"root-overview.md",
 		"shard-pack-manifest.json",
 		`"path": "root-overview.md"`,
@@ -457,6 +458,16 @@ func TestQwenCollectArtifactPairRepairCommandSpecUsesPromptOnly(t *testing.T) {
 	} {
 		if !strings.Contains(args, token) {
 			t.Fatalf("expected qwen collect pair repair prompt arg to contain %q, got %v", token, spec.Args)
+		}
+	}
+	for _, forbidden := range []string{
+		"COLLECT PAIR WRITE COMMAND:",
+		"<<'ACP_COLLECT_DOC'",
+		"<<'ACP_MANIFEST_JSON'",
+		"The command writes a marker-free seed recovery pair",
+	} {
+		if strings.Contains(args, forbidden) {
+			t.Fatalf("qwen collect pair repair prompt must not contain seed-first wording %q, got %v", forbidden, spec.Args)
 		}
 	}
 }
