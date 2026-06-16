@@ -17,8 +17,10 @@ import (
 )
 
 const (
-	successfulZeroOutputRetryWindow  = 30 * time.Second
-	successfulZeroOutputRetryTimeout = 45 * time.Second
+	successfulZeroOutputRetryWindow      = 30 * time.Second
+	successfulZeroOutputRetryTimeout     = 45 * time.Second
+	successfulArtifactWriteWindow        = 500 * time.Millisecond
+	successfulCollectPairRecoveryTimeout = 30 * time.Second
 )
 
 func TestRunHeadlessProviderSucceedsWithValidArtifacts(t *testing.T) {
@@ -706,9 +708,11 @@ done
 		command:       writeEngineScript(t, initialScript),
 		repairCommand: writeEngineScript(t, repairScript),
 		activity: ActivityPolicy{
-			PollInterval:       5 * time.Millisecond,
-			PostTerminateDrain: 10 * time.Millisecond,
-			TerminateGrace:     10 * time.Millisecond,
+			MonitorArtifacts:        true,
+			ValidArtifactStopWindow: 50 * time.Millisecond,
+			PollInterval:            5 * time.Millisecond,
+			PostTerminateDrain:      10 * time.Millisecond,
+			TerminateGrace:          10 * time.Millisecond,
 		},
 		recovery: RecoveryPolicy{
 			AcceptValidArtifactsAfterStop: true,
@@ -716,7 +720,7 @@ done
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), successfulCollectPairRecoveryTimeout)
 	defer cancel()
 	result, err := RunHeadlessProvider(ctx, task, runner)
 	if err != nil {
@@ -1004,8 +1008,8 @@ EOF
 			MonitorPreArtifact:          false,
 			PreArtifactStallWindow:      250 * time.Millisecond,
 			RetryPreArtifactStallWindow: 250 * time.Millisecond,
-			PostArtifactStallWindow:     20 * time.Millisecond,
-			PartialArtifactStallWindow:  20 * time.Millisecond,
+			PostArtifactStallWindow:     successfulArtifactWriteWindow,
+			PartialArtifactStallWindow:  successfulArtifactWriteWindow,
 			PollInterval:                5 * time.Millisecond,
 			PostTerminateDrain:          10 * time.Millisecond,
 			TerminateGrace:              10 * time.Millisecond,
@@ -1016,7 +1020,7 @@ EOF
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), successfulCollectPairRecoveryTimeout)
 	defer cancel()
 	result, err := RunHeadlessProvider(ctx, task, runner)
 	if err != nil {
@@ -1146,8 +1150,8 @@ printf '%s\n' '# Repair Notes' > ` + shellQuote(filepath.Join(task.WriteRoot, "r
 			MonitorPreArtifact:          false,
 			PreArtifactStallWindow:      250 * time.Millisecond,
 			RetryPreArtifactStallWindow: 250 * time.Millisecond,
-			PostArtifactStallWindow:     20 * time.Millisecond,
-			PartialArtifactStallWindow:  20 * time.Millisecond,
+			PostArtifactStallWindow:     successfulArtifactWriteWindow,
+			PartialArtifactStallWindow:  successfulArtifactWriteWindow,
 			PollInterval:                5 * time.Millisecond,
 			PostTerminateDrain:          10 * time.Millisecond,
 			TerminateGrace:              10 * time.Millisecond,
@@ -1158,7 +1162,7 @@ printf '%s\n' '# Repair Notes' > ` + shellQuote(filepath.Join(task.WriteRoot, "r
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), successfulCollectPairRecoveryTimeout)
 	defer cancel()
 	_, err := RunHeadlessProvider(ctx, task, runner)
 	if err == nil {
@@ -1215,8 +1219,8 @@ EOF
 			MonitorPreArtifact:          true,
 			PreArtifactStallWindow:      20 * time.Millisecond,
 			RetryPreArtifactStallWindow: 20 * time.Millisecond,
-			PostArtifactStallWindow:     20 * time.Millisecond,
-			PartialArtifactStallWindow:  20 * time.Millisecond,
+			PostArtifactStallWindow:     successfulArtifactWriteWindow,
+			PartialArtifactStallWindow:  successfulArtifactWriteWindow,
 			PollInterval:                5 * time.Millisecond,
 			PostTerminateDrain:          10 * time.Millisecond,
 			TerminateGrace:              10 * time.Millisecond,
@@ -1230,7 +1234,7 @@ EOF
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), successfulCollectPairRecoveryTimeout)
 	defer cancel()
 	result, err := RunHeadlessProvider(ctx, task, runner)
 	if err != nil {
@@ -1553,7 +1557,7 @@ EOF
 				MonitorPreArtifact:          true,
 				PreArtifactStallWindow:      20 * time.Millisecond,
 				RetryPreArtifactStallWindow: successfulZeroOutputRetryWindow,
-				PostArtifactStallWindow:     20 * time.Millisecond,
+				PostArtifactStallWindow:     successfulArtifactWriteWindow,
 				PollInterval:                5 * time.Millisecond,
 				PostTerminateDrain:          10 * time.Millisecond,
 				TerminateGrace:              10 * time.Millisecond,
@@ -2235,7 +2239,7 @@ func TestRunHeadlessProviderRetriesZeroOutputProposalsStallWhenPolicyAllows(t *t
 				MonitorPreArtifact:          true,
 				PreArtifactStallWindow:      20 * time.Millisecond,
 				RetryPreArtifactStallWindow: successfulZeroOutputRetryWindow,
-				PostArtifactStallWindow:     20 * time.Millisecond,
+				PostArtifactStallWindow:     successfulArtifactWriteWindow,
 				PollInterval:                5 * time.Millisecond,
 				PostTerminateDrain:          10 * time.Millisecond,
 				TerminateGrace:              10 * time.Millisecond,
