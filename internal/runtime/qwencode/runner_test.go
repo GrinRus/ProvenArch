@@ -447,14 +447,12 @@ func TestQwenCollectArtifactPairRepairCommandSpecUsesPromptOnly(t *testing.T) {
 	for _, token := range []string{
 		"-p",
 		"collect artifact pair focused recovery mode",
-		"COLLECT PAIR EVIDENCE-FIRST REPAIR:",
+		"COLLECT PAIR WRITE-FIRST EVIDENCE REPAIR:",
 		"This repair is not a bootstrap/fallback writer",
-		"FIRST COLLECT PAIR REPAIR PREFLIGHT COMMAND:",
-		"The next item after preflight completion must be a filesystem command",
-		"First post-preflight work unit: execute one bounded filesystem command",
-		"ACP_COLLECT_PAIR_REPAIR_PREFLIGHT_PY",
-		"collect_pair_repair_preflight",
-		"COLLECT PAIR REPAIR WRITE WORKFLOW:",
+		"Do not run a separate read-only preflight",
+		"Your next action must be one bounded filesystem command",
+		"FIRST COLLECT PAIR REPAIR WRITE-FIRST COMMAND:",
+		"COLLECT PAIR REPAIR EVIDENCE LIMITS:",
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
 		"FINAL SELF-CHECK COMMAND:",
 		"root-overview.md",
@@ -467,6 +465,9 @@ func TestQwenCollectArtifactPairRepairCommandSpecUsesPromptOnly(t *testing.T) {
 		}
 	}
 	for _, forbidden := range []string{
+		"FIRST COLLECT PAIR REPAIR PREFLIGHT COMMAND:",
+		"ACP_COLLECT_PAIR_REPAIR_PREFLIGHT_PY",
+		"collect_pair_repair_preflight",
 		"COLLECT PAIR WRITE COMMAND:",
 		"<<'ACP_COLLECT_DOC'",
 		"<<'ACP_MANIFEST_JSON'",

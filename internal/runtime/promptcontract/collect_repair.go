@@ -189,27 +189,25 @@ func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task a
 	manifestTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), "shard-pack-manifest.json")
 	evidencePaths := repairEvidenceCandidates(task)
 	skeleton := steppolicy.CollectManifestTaskSkeleton(task, []string{docRel}, evidencePaths)
-	firstCommand := collectPairRepairPreflightCommand(task, docRel, evidencePaths)
 	lines := []string{
 		fmt.Sprintf("You are ACP runtime provider %q in collect artifact pair focused recovery mode.", provider),
-		"COLLECT PAIR EVIDENCE-FIRST REPAIR:",
+		"COLLECT PAIR WRITE-FIRST EVIDENCE REPAIR:",
 		"- This repair is not a bootstrap/fallback writer. Do not create a seed-only or recovery-summary pair.",
-		"- Run the exact read-only preflight command below as your next command; do not create your own evidence sweep command.",
-		"- The preflight output is the complete bounded evidence packet for this repair. After it returns, do not run another read/list/search command against the repository.",
-		"- Do not answer with a plan, status note, or analysis-only message after the preflight. The next item after preflight completion must be a filesystem command that writes the markdown document and shard-pack-manifest.json.",
+		"- Do not run a separate read-only preflight and do not print an evidence packet as the only action.",
+		"- Do not answer with a plan, status note, or analysis-only message before the writes.",
 		"- Forbidden analysis-only phrases before the writes: I have enough evidence; I am now writing; I'm now writing; I will write; I will now write; ready to write; the manifest will cite.",
-		"- Your next filesystem action after the preflight must write the markdown document, and the same command or the immediately following filesystem action must write shard-pack-manifest.json.",
+		"- Your next action must be one bounded filesystem command that reads allowed evidence and writes the markdown document first, then shard-pack-manifest.json, before any optional explanation.",
+		"- The first command may read only read_context_roots and listed evidence candidates, at most 8 files and 6000 bytes per file; do not run open-ended find/grep/sed/tree sweeps.",
 		"- Write the markdown document first as concise evidence-backed content, then write the manifest that references it; do not emit prose, status, or optional enrichment until both exact targets are non-empty and marker-free.",
-		fmt.Sprintf("- Write exactly two files after the evidence pass: %q and %q.", docTarget, manifestTarget),
+		fmt.Sprintf("- Write exactly two files in the first command: %q and %q.", docTarget, manifestTarget),
 		"- Do not write any file outside the exact write_root collect pair.",
 		"- Do not delete existing files, run rm -f, use git rev-parse, rely on cwd discovery, inspect sibling reports/taskruns, or read raw logs.",
 		"- If bounded repo evidence cannot be read, exit non-zero without writing fallback scaffold.",
-		"FIRST COLLECT PAIR REPAIR PREFLIGHT COMMAND:",
-		"- Run this exact command now. It is read-only and prints a capped evidence packet; do not manually retype paths or expand the evidence set.",
-		firstCommand,
-		"COLLECT PAIR REPAIR WRITE WORKFLOW:",
-		"- Use only the preflight output and listed task metadata below; do not open unlisted path_scopes after this bounded pass.",
-		"- First post-preflight work unit: execute one bounded filesystem command that writes the final evidence-backed markdown and the final manifest before any optional explanation.",
+		"FIRST COLLECT PAIR REPAIR WRITE-FIRST COMMAND:",
+		"- Execute one filesystem command now. It must both read the bounded evidence and write the final markdown + manifest before returning.",
+		"- You may use shell or Python, but any heredoc content must be final provider-authored evidence-backed content, never placeholders or copied skeleton text.",
+		"COLLECT PAIR REPAIR EVIDENCE LIMITS:",
+		"- Use only the listed task metadata and bounded repository evidence candidates below.",
 		"- Do not read lockfiles, generated baselines, test duration indexes, raw logs, reports/taskruns history, or files larger than 96 KiB during collect pair repair.",
 		"- Explain concrete components, runtime/config/deploy/test/data surfaces, ownership gaps, and dependencies in the markdown document.",
 		"- Build shard-pack-manifest.json from that markdown plus the same repo/path evidence: documents, citations, semantic.coverage, semantic.questions, semantic.entities, semantic.edges, and semantic.findings.",
@@ -256,103 +254,6 @@ func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task a
 		lines = append(lines, fmt.Sprintf("- Previous collect artifact validation failure: %s", detail))
 	}
 	return strings.Join(lines, "\n")
-}
-
-func collectPairRepairPreflightCommand(task acpruntime.Task, docRel string, evidencePaths []string) string {
-	writeRoot := strings.TrimSpace(task.WriteRoot)
-	if writeRoot == "" {
-		writeRoot = "."
-	}
-	docTarget := filepath.Join(writeRoot, filepath.FromSlash(docRel))
-	manifestTarget := filepath.Join(writeRoot, "shard-pack-manifest.json")
-	payload := map[string]any{
-		"write_root":      writeRoot,
-		"doc_target":      docTarget,
-		"manifest_target": manifestTarget,
-		"doc_path":        filepath.ToSlash(docRel),
-		"run_id":          firstNonEmpty(task.RunID, "run-1"),
-		"step_id":         firstNonEmpty(task.StepID, "init.step1.collect"),
-		"shard_id":        firstNonEmpty(task.ShardID, task.DomainID, "shard"),
-		"domain_id":       strings.TrimSpace(task.DomainID),
-		"agent_role":      firstNonEmpty(task.AgentRole, "shard-analyst"),
-		"artifact_root":   strings.TrimSpace(task.ArtifactRoot),
-		"repo_scopes":     nonEmptyList(task.RepoScopes),
-		"path_scopes":     nonEmptyList(task.PathScopes),
-		"read_roots":      nonEmptyList(task.ReadContextRoots),
-		"evidence_paths":  nonEmptyList(evidencePaths),
-		"max_files":       8,
-		"max_bytes":       6000,
-	}
-	rawPayload, err := json.Marshal(payload)
-	if err != nil {
-		rawPayload = []byte("{}")
-	}
-	return strings.Join([]string{
-		"python3 - " + shellSingleQuote(string(rawPayload)) + " <<'ACP_COLLECT_PAIR_REPAIR_PREFLIGHT_PY'",
-		"import json, pathlib, sys",
-		"",
-		"meta = json.loads(sys.argv[1])",
-		"max_files = int(meta.get('max_files') or 8)",
-		"max_bytes = int(meta.get('max_bytes') or 6000)",
-		"roots = []",
-		"for raw in meta.get('read_roots') or []:",
-		"    try:",
-		"        root = pathlib.Path(str(raw)).resolve()",
-		"    except Exception:",
-		"        continue",
-		"    if root.is_dir() and root not in roots:",
-		"        roots.append(root)",
-		"",
-		"def clean_rel(value):",
-		"    value = str(value or '').replace('\\\\', '/').strip().strip('/')",
-		"    if not value or value in ('.', '..') or value.startswith('../') or '/..' in value:",
-		"        return ''",
-		"    return value",
-		"",
-		"selected = []",
-		"seen = set()",
-		"evidence_paths = meta.get('evidence_paths') or meta.get('path_scopes') or ['README.md']",
-		"for rel in evidence_paths:",
-		"    rel = clean_rel(rel)",
-		"    if not rel or rel in seen:",
-		"        continue",
-		"    seen.add(rel)",
-		"    for root in roots:",
-		"        path = (root / rel).resolve()",
-		"        try:",
-		"            path.relative_to(root)",
-		"        except ValueError:",
-		"            continue",
-		"        if not path.is_file():",
-		"            continue",
-		"        size = path.stat().st_size",
-		"        if size > 96 * 1024:",
-		"            continue",
-		"        raw = path.read_bytes()[:max_bytes]",
-		"        text = raw.decode('utf-8', errors='replace')",
-		"        selected.append({'path': rel, 'bytes': size, 'truncated_to_bytes': min(size, max_bytes), 'preview': text})",
-		"        break",
-		"    if len(selected) >= max_files:",
-		"        break",
-		"if not selected:",
-		"    raise SystemExit('collect pair repair found no bounded repository evidence candidates')",
-		"",
-		"summary = {",
-		"    'mode': 'collect_pair_repair_preflight',",
-		"    'writes_artifacts': False,",
-		"    'next_filesystem_actions': ['write_markdown_document', 'write_shard_pack_manifest', 'run_final_self_check'],",
-		"    'doc_target': meta.get('doc_target'),",
-		"    'manifest_target': meta.get('manifest_target'),",
-		"    'doc_path': meta.get('doc_path'),",
-		"    'artifact_root': meta.get('artifact_root'),",
-		"    'repo_scopes': meta.get('repo_scopes') or [],",
-		"    'path_scopes': meta.get('path_scopes') or [],",
-		"    'evidence': selected,",
-		"}",
-		"print(json.dumps(summary, indent=2, ensure_ascii=False))",
-		"ACP_COLLECT_PAIR_REPAIR_PREFLIGHT_PY",
-		"test -d " + shellSingleQuote(writeRoot),
-	}, "\n")
 }
 
 func overwriteCollectManifestRepairInstructions() []string {
