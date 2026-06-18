@@ -575,10 +575,13 @@ func TestComposeCollectArtifactPairRepairPromptIsEvidenceFirstNoSeed(t *testing.
 		"Forbidden analysis-only phrases before the writes: I have enough evidence",
 		"I am now writing",
 		"Your next action must be one bounded filesystem command",
-		"at most 8 files and 6000 bytes per file",
+		"at most 8 files and at most the first 6000 bytes from each file",
 		"The first command must not contain a hard-coded required phrase list",
 		"missing expected evidence",
 		"Before writing, the only allowed evidence prechecks are structural",
+		"at least one allowed evidence file yielded bytes after bounded prefix reads",
+		"truncate to the first 6000 bytes or skip that candidate and continue",
+		"do not abort the repair with errors such as `read file exceeds size limit`",
 		"Do not add any other pre-write `raise SystemExit`/`exit 1` checks",
 		"Keep the first command mechanically simple: no Python f-strings",
 		"build JSON as dictionaries/lists, and write it with `json.dumps`",
@@ -594,6 +597,7 @@ func TestComposeCollectArtifactPairRepairPromptIsEvidenceFirstNoSeed(t *testing.
 		"Do not read lockfiles, generated baselines, test duration indexes",
 		"Do not verify claims with a provider-invented exact phrase checklist",
 		"Use short observed snippets, package names, service names, config keys, and file paths from the bytes actually read",
+		"read a bounded prefix or skip oversized candidates",
 		"Do not abort before writing because your own generated script has no entities/edges/findings",
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
 		"RECOVERY ACCEPTANCE REQUIREMENT:",
@@ -637,6 +641,8 @@ func TestComposeCollectArtifactPairRepairPromptIsEvidenceFirstNoSeed(t *testing.
 		"marker-bearing recovery bootstrap pair",
 		"Evidence candidate used for the recovery manifest",
 		"unchanged bootstrap pair is an artifact_quality blocker",
+		"raise SystemExit('read file exceeds size limit')",
+		`raise SystemExit("read file exceeds size limit")`,
 	} {
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("collect pair repair prompt must not use manifest-only repair wording %q:\n%s", forbidden, prompt)
