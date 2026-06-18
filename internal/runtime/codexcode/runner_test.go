@@ -51,6 +51,8 @@ func TestDefaultCodexArgsKeepNoninteractiveDiagnosticMode(t *testing.T) {
 	assertCodexArg(t, args, "--json")
 	assertCodexArg(t, args, "--color")
 	assertCodexArg(t, args, "never")
+	assertCodexArg(t, args, "--ignore-user-config")
+	assertCodexArg(t, args, "--ignore-rules")
 	assertCodexArg(t, args, "--skip-git-repo-check")
 	assertCodexArg(t, args, "--sandbox")
 	assertCodexArg(t, args, "danger-full-access")

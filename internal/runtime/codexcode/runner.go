@@ -158,6 +158,8 @@ func buildCodexArgsWithPermissions(cwd string, includeDirs []string, permissions
 		"exec",
 		"--json",
 		"--color", "never",
+		"--ignore-user-config",
+		"--ignore-rules",
 		"--skip-git-repo-check",
 	}
 	if strings.TrimSpace(permissions.Mode) == acpruntime.PermissionModeManaged {
