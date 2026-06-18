@@ -75,6 +75,63 @@ func TestManagedCodexArgsOmitDangerFullAccess(t *testing.T) {
 	assertCodexArg(t, args, "workspace-write")
 }
 
+func TestCodexCommandSpecUsesIsolatedAuthOnlyHome(t *testing.T) {
+	sourceHome := t.TempDir()
+	isolatedBase := t.TempDir()
+	t.Setenv("CODEX_HOME", sourceHome)
+	t.Setenv("ACP_CODEX_ISOLATED_HOME_BASE", isolatedBase)
+	if err := os.WriteFile(filepath.Join(sourceHome, "auth.json"), []byte(`{"OPENAI_API_KEY":"test"}`), 0o600); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceHome, "installation_id"), []byte("install-test\n"), 0o644); err != nil {
+		t.Fatalf("write installation id: %v", err)
+	}
+	for _, rel := range []string{"config.toml", "rules/live.rules", "skills/custom/SKILL.md", ".tmp/plugins/plugin.json"} {
+		path := filepath.Join(sourceHome, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", rel, err)
+		}
+		if err := os.WriteFile(path, []byte("ambient"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	workspaceDir := t.TempDir()
+	writeRoot := filepath.Join(workspaceDir, "reports", "taskruns", "run-codex", "staging", "shards", "root")
+	task := acpruntime.Task{
+		TaskID:    "task-codex",
+		RunID:     "run-codex",
+		StepID:    "init.step1.collect",
+		Workspace: workspaceDir,
+		WriteRoot: writeRoot,
+	}
+	spec, err := (codexAdapter{runner: HeadlessRunner{Command: "codex-test"}}).CommandSpec(task)
+	if err != nil {
+		t.Fatalf("command spec: %v", err)
+	}
+	isolatedHome := strings.TrimSpace(spec.Env["CODEX_HOME"])
+	if isolatedHome == "" {
+		t.Fatalf("expected CODEX_HOME override in command spec")
+	}
+	if isolatedHome == sourceHome {
+		t.Fatalf("expected isolated home, got source home %s", isolatedHome)
+	}
+	if !strings.HasPrefix(isolatedHome, filepath.Clean(isolatedBase)+string(os.PathSeparator)) {
+		t.Fatalf("expected isolated home under base %s, got %s", isolatedBase, isolatedHome)
+	}
+	if _, err := os.Stat(filepath.Join(isolatedHome, "auth.json")); err != nil {
+		t.Fatalf("expected copied auth: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(isolatedHome, "installation_id")); err != nil {
+		t.Fatalf("expected copied installation id: %v", err)
+	}
+	for _, rel := range []string{"config.toml", "rules", "skills", ".tmp", "plugins"} {
+		if _, err := os.Stat(filepath.Join(isolatedHome, filepath.FromSlash(rel))); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("expected %s to be absent from isolated home, stat err=%v", rel, err)
+		}
+	}
+}
+
 func TestCodexAdapterUsesSharedUnavailableMarkers(t *testing.T) {
 	t.Parallel()
 

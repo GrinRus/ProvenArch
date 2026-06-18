@@ -36,8 +36,11 @@ type CommandSpec struct {
 	Provider acpruntime.Provider
 	Command  string
 	Args     []string
-	Stdin    io.Reader
-	Dir      string
+	// Env contains provider-specific environment overrides. Values are merged
+	// over os.Environ() immediately before process start.
+	Env   map[string]string
+	Stdin io.Reader
+	Dir   string
 	// PromptBytes records the provider prompt payload size without requiring
 	// diagnostics to inspect or consume stdin readers.
 	PromptBytes int

@@ -474,6 +474,28 @@ func TestRedactedEnvValueOmitsSecretLikeCommandValues(t *testing.T) {
 	}
 }
 
+func TestMergedCommandEnvAppliesOverrides(t *testing.T) {
+	t.Parallel()
+
+	env := mergedCommandEnv([]string{"A=old", "B=keep"}, map[string]string{"A": "new", "CODEX_HOME": "/tmp/codex-home"})
+	got := map[string]string{}
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			got[key] = value
+		}
+	}
+	if got["A"] != "new" {
+		t.Fatalf("expected A override, got %q from %v", got["A"], env)
+	}
+	if got["B"] != "keep" {
+		t.Fatalf("expected existing B to remain, got %q from %v", got["B"], env)
+	}
+	if got["CODEX_HOME"] != "/tmp/codex-home" {
+		t.Fatalf("expected CODEX_HOME override, got %q from %v", got["CODEX_HOME"], env)
+	}
+}
+
 func TestForwardStreamOutputRedactsSecretLikeText(t *testing.T) {
 	t.Parallel()
 

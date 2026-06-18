@@ -39,6 +39,9 @@ func runCommandSpec(ctx context.Context, task acpruntime.Task, spec CommandSpec,
 	if dir := strings.TrimSpace(spec.Dir); dir != "" {
 		cmd.Dir = dir
 	}
+	if len(spec.Env) > 0 {
+		cmd.Env = mergedCommandEnv(os.Environ(), spec.Env)
+	}
 	if spec.Stdin != nil {
 		cmd.Stdin = spec.Stdin
 	}
@@ -230,7 +233,7 @@ func newProviderCommandDiagnostics(spec CommandSpec, task acpruntime.Task, polic
 		IncludeDirs:    normalizeDiagnosticPaths(spec.IncludeDirs),
 		PromptBytes:    spec.PromptBytes,
 		ActivityPolicy: activityPolicyDiagnostics(policy),
-		Environment:    allowlistedProviderEnvDiagnostics(),
+		Environment:    allowlistedProviderEnvDiagnostics(spec.Env),
 		TimeoutProfile: cloneDiagnosticMap(task.RuntimeTimeoutProfile),
 		Permissions: map[string]any{
 			"mode":             strings.TrimSpace(task.RuntimePermissions.Mode),
@@ -384,12 +387,13 @@ func activityPolicyDiagnostics(policy ActivityPolicy) map[string]any {
 	return fields
 }
 
-func allowlistedProviderEnvDiagnostics() map[string]any {
+func allowlistedProviderEnvDiagnostics(overrides map[string]string) map[string]any {
 	keys := []string{
 		acpruntime.RuntimeProviderEnv,
 		"ACP_CLAUDE_CMD",
 		"ACP_QWEN_CMD",
 		"ACP_CODEX_CMD",
+		"CODEX_HOME",
 		acpruntime.RuntimeStepTimeoutEnv,
 		acpruntime.RuntimeHeartbeatEnv,
 		acpruntime.PipelineTimeoutEnv,
@@ -406,7 +410,9 @@ func allowlistedProviderEnvDiagnostics() map[string]any {
 	}
 	out := map[string]any{}
 	for _, key := range keys {
-		if value, ok := os.LookupEnv(key); ok {
+		if value, ok := overrides[key]; ok {
+			out[key] = redactedEnvValue(key, value)
+		} else if value, ok := os.LookupEnv(key); ok {
 			out[key] = redactedEnvValue(key, value)
 		} else {
 			out[key] = map[string]any{"present": false}
@@ -437,6 +443,7 @@ func isRawDiagnosticEnv(key string) bool {
 	case "ACP_CLAUDE_CMD",
 		"ACP_QWEN_CMD",
 		"ACP_CODEX_CMD",
+		"CODEX_HOME",
 		acpruntime.RuntimeProviderEnv,
 		acpruntime.RuntimeStepTimeoutEnv,
 		acpruntime.RuntimeHeartbeatEnv,
@@ -455,6 +462,39 @@ func isRawDiagnosticEnv(key string) bool {
 	default:
 		return false
 	}
+}
+
+func mergedCommandEnv(base []string, overrides map[string]string) []string {
+	if len(overrides) == 0 {
+		return append([]string(nil), base...)
+	}
+	values := make(map[string]string, len(base)+len(overrides))
+	order := make([]string, 0, len(base)+len(overrides))
+	for _, entry := range base {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || strings.TrimSpace(key) == "" {
+			continue
+		}
+		if _, exists := values[key]; !exists {
+			order = append(order, key)
+		}
+		values[key] = value
+	}
+	for key, value := range overrides {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, exists := values[key]; !exists {
+			order = append(order, key)
+		}
+		values[key] = value
+	}
+	out := make([]string, 0, len(order))
+	for _, key := range order {
+		out = append(out, key+"="+values[key])
+	}
+	return out
 }
 
 func isSecretFlag(arg string) bool {
