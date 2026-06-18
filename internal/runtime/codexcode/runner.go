@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
@@ -145,10 +146,14 @@ func (a codexAdapter) ValidateArtifacts(task acpruntime.Task) error {
 
 func (a codexAdapter) ActivityPolicy(task acpruntime.Task) providercommon.ActivityPolicy {
 	monitorArtifacts := providercommon.MonitorsRuntimeArtifacts(task)
-	return providercommon.WithCollectArtifactEnrichmentWindow(task, providercommon.ActivityPolicy{
+	policy := providercommon.WithCollectArtifactEnrichmentWindow(task, providercommon.ActivityPolicy{
 		MonitorArtifacts:   monitorArtifacts,
 		MonitorPreArtifact: monitorArtifacts,
 	})
+	if acpruntime.IsCollectStep(task.StepID) {
+		policy.PreArtifactStallWindow = 3 * time.Minute
+	}
+	return policy
 }
 
 func (a codexAdapter) RecoveryPolicy(_ acpruntime.Task) providercommon.RecoveryPolicy {

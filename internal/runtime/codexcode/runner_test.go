@@ -162,8 +162,8 @@ func TestCodexAdapterMonitorsPreArtifactStallsForArtifactSteps(t *testing.T) {
 	if !policy.MonitorArtifacts || !policy.MonitorPreArtifact {
 		t.Fatalf("expected collect artifact and pre-artifact monitoring, got %+v", policy)
 	}
-	if policy.PreArtifactStallWindow != 0 {
-		t.Fatalf("codex must keep default shared pre-artifact window, got %+v", policy)
+	if got, want := policy.PreArtifactStallWindow, 3*time.Minute; got != want {
+		t.Fatalf("expected codex collect pre-artifact window %s, got %s", want, got)
 	}
 	if got, want := policy.PostArtifactStallWindow, 90*time.Second; got != want {
 		t.Fatalf("expected codex collect post-artifact enrichment window %s, got %s", want, got)
