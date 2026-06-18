@@ -486,6 +486,64 @@ func TestCollectRepairEvidenceCandidatesSkipLargeAndGeneratedFiles(t *testing.T)
 	}
 }
 
+func TestCollectRepairEvidenceCandidatesAreRankedAndCapped(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	names := []string{
+		".cursorignore",
+		".dockerignore",
+		".editorconfig",
+		".gitignore",
+		".watchmanconfig",
+		"README.md",
+		"AGENTS.md",
+		"CONTRIBUTING.md",
+		"package.json",
+		"pyproject.toml",
+		"docker-compose.base.yml",
+		"docker-compose.dev.yml",
+		"Dockerfile",
+		"Dockerfile.node",
+		".env.example",
+		"posthog.json",
+		"pnpm-workspace.yaml",
+		"tsconfig.json",
+		"pytest.ini",
+		"tach.toml",
+		"turbo.json",
+		"LICENSE",
+		"Makefile",
+	}
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(repoRoot, name), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	task := acpruntime.Task{
+		ReadContextRoots: []string{repoRoot},
+		PathScopes:       names,
+	}
+
+	candidates := repairEvidenceCandidates(task)
+	if len(candidates) != 12 {
+		t.Fatalf("expected capped candidate set of 12, got %d: %#v", len(candidates), candidates)
+	}
+	wantPrefix := []string{"AGENTS.md", "CONTRIBUTING.md", "README.md", "package.json", "pyproject.toml"}
+	for i, want := range wantPrefix {
+		if candidates[i] != want {
+			t.Fatalf("expected ranked candidate %d to be %q, got %#v", i, want, candidates)
+		}
+	}
+	for _, forbidden := range []string{".cursorignore", ".dockerignore", ".editorconfig", ".gitignore", ".watchmanconfig"} {
+		for _, got := range candidates {
+			if got == forbidden {
+				t.Fatalf("expected dotfile %q to fall outside capped repair evidence, got %#v", forbidden, candidates)
+			}
+		}
+	}
+}
+
 func TestComposeCollectArtifactPairRepairPromptIsEvidenceFirstNoSeed(t *testing.T) {
 	t.Parallel()
 
@@ -512,12 +570,19 @@ func TestComposeCollectArtifactPairRepairPromptIsEvidenceFirstNoSeed(t *testing.
 		"collect artifact pair focused recovery mode",
 		"COLLECT PAIR EVIDENCE-FIRST REPAIR:",
 		"This repair is not a bootstrap/fallback writer",
+		"Run the exact read-only preflight command below as your next command",
+		"The preflight output is the complete bounded evidence packet for this repair",
+		"Your next filesystem action after the preflight must write the markdown document",
 		"Write the markdown document first as concise evidence-backed content, then write the manifest that references it",
-		"After writing the markdown document, do not read another repository file",
 		`Write exactly two files after the evidence pass: "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/root-overview.md" and "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json".`,
 		"Do not delete existing files, run rm -f, use git rev-parse, rely on cwd discovery",
-		"FIRST COLLECT PAIR REPAIR WORKFLOW:",
-		"Read only the listed evidence candidates below",
+		"FIRST COLLECT PAIR REPAIR PREFLIGHT COMMAND:",
+		"ACP_COLLECT_PAIR_REPAIR_PREFLIGHT_PY",
+		"collect_pair_repair_preflight",
+		`"max_files":8`,
+		`"max_bytes":6000`,
+		"COLLECT PAIR REPAIR WRITE WORKFLOW:",
+		"Use only the preflight output and listed task metadata below",
 		"Do not read lockfiles, generated baselines, test duration indexes",
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
 		"RECOVERY ACCEPTANCE REQUIREMENT:",
@@ -551,6 +616,7 @@ func TestComposeCollectArtifactPairRepairPromptIsEvidenceFirstNoSeed(t *testing.
 		"cat > ",
 		"ACP_COLLECT_DOC",
 		"ACP_MANIFEST_JSON",
+		"sed -n",
 		"The command writes a marker-free seed recovery pair",
 		"Exiting successfully immediately after the heredoc command is invalid",
 		"POST-COMMAND ENRICHMENT REQUIREMENT:",
