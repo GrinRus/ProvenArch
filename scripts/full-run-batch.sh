@@ -787,15 +787,21 @@ run_frontend_live_e2e() {
   local frontend_workspace="$output_dir/frontend-workspace"
   local run_results_path="$backend_run_dir/run-results.tsv"
   local refresh_run_id=""
+  local refresh_status=""
   local snapshot_reports=""
   local runtime_cmd
   runtime_cmd="$(runtime_cmd_for_provider "$provider")"
 
   mkdir -p "$output_dir"
   if [[ -f "$run_results_path" ]]; then
-    refresh_run_id="$(awk -F'\t' '$2=="headless" && $4=="refresh" {print $5}' "$run_results_path" | tail -n1)"
+    local refresh_row
+    refresh_row="$(awk -F'\t' '$2=="headless" && $4=="refresh" {line=$0} END{print line}' "$run_results_path")"
+    if [[ -n "$refresh_row" ]]; then
+      refresh_run_id="$(awk -F'\t' '{print $5}' <<<"$refresh_row")"
+      refresh_status="$(awk -F'\t' '{print $6}' <<<"$refresh_row")"
+    fi
   fi
-  if [[ -n "$refresh_run_id" ]]; then
+  if [[ -n "$refresh_run_id" && "$refresh_status" == "succeeded" ]]; then
     snapshot_reports="$backend_run_dir/snapshots/$refresh_run_id/reports"
   fi
 
@@ -816,7 +822,7 @@ run_frontend_live_e2e() {
     return 1
   fi
 
-  if [[ -z "$refresh_run_id" || ! -d "$snapshot_reports" ]]; then
+  if [[ -z "$refresh_run_id" || "$refresh_status" != "succeeded" || ! -d "$snapshot_reports" ]]; then
     local backend_failure_reason
     local backend_state
     backend_failure_reason="$(read_status_field "$backend_run_dir/run-status.env" "failure_reason")"
@@ -834,7 +840,7 @@ run_frontend_live_e2e() {
         "$output_dir/server.log" \
         "$output_dir/playwright.log" \
         "$run_index"
-      log "frontend e2e skipped provider=$provider run=${run_index:-summary} reason=$ACP_FRONTEND_REASON_SNAPSHOT_REPORTS_MISSING backend_state=${backend_state:-unknown} backend_failure_reason=${backend_failure_reason:-none}"
+      log "frontend e2e skipped provider=$provider run=${run_index:-summary} reason=$ACP_FRONTEND_REASON_SNAPSHOT_REPORTS_MISSING backend_state=${backend_state:-unknown} backend_failure_reason=${backend_failure_reason:-none} refresh_run_id=${refresh_run_id:-unknown} refresh_status=${refresh_status:-unknown}"
       return 0
     fi
     write_frontend_status_json \
@@ -849,7 +855,7 @@ run_frontend_live_e2e() {
       "$output_dir/server.log" \
       "$output_dir/playwright.log" \
       "$run_index"
-    log "frontend e2e failed provider=$provider run=${run_index:-summary} reason=$ACP_FRONTEND_REASON_SNAPSHOT_REPORTS_MISSING refresh_run_id=${refresh_run_id:-unknown} snapshot_reports=${snapshot_reports:-unset}"
+    log "frontend e2e failed provider=$provider run=${run_index:-summary} reason=$ACP_FRONTEND_REASON_SNAPSHOT_REPORTS_MISSING refresh_run_id=${refresh_run_id:-unknown} refresh_status=${refresh_status:-unknown} snapshot_reports=${snapshot_reports:-unset}"
     return 1
   fi
 

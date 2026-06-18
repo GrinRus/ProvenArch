@@ -3420,6 +3420,66 @@ class BatchFailureClassificationTest(unittest.TestCase):
         )
         self.assertIn("skipped:snapshot_reports_missing", completed.stdout.strip(), completed.stdout)
 
+    def test_shell_frontend_failed_refresh_snapshot_is_not_eligible(self) -> None:
+        backend_run_dir = self.root / "frontend-backend-failed-refresh-snapshot"
+        output_dir = self.root / "frontend-output-failed-refresh"
+        (backend_run_dir / "arch-workspace").mkdir(parents=True, exist_ok=True)
+        write_text(
+            backend_run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=codex-code",
+                    "run_index=1",
+                    "state=process_failed",
+                    "process_exit=1",
+                    "termination_signal=none",
+                    "failure_reason=runtime_contract_failed",
+                    "summary_written=yes",
+                ]
+            )
+            + "\n",
+        )
+        write_text(
+            backend_run_dir / "run-results.tsv",
+            "\n".join(
+                [
+                    "1\theadless\tcodex-code\tinit\tinit-run\tsucceeded\t0\t0\t0\t0\t0\t0\t0\t0\tcodex-code@headless\t/tmp/init-quality.json\t/tmp/init.log",
+                    "1\theadless\tcodex-code\trefresh\trefresh-run\tfailed\t0\t0\t0\t0\t0\t0\t0\t1\tcodex-code@headless\t/tmp/refresh-quality.json\t/tmp/refresh.log",
+                ]
+            )
+            + "\n",
+        )
+        (backend_run_dir / "snapshots/refresh-run/reports/as-is").mkdir(parents=True, exist_ok=True)
+        write_text(
+            backend_run_dir / "snapshots/refresh-run/reports/as-is/overview.md",
+            "# Failed Refresh Scaffold\n",
+        )
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        result_path = output_dir / "frontend-e2e-result.json"
+        command = (
+            prelude
+            + "\n"
+            + f'run_frontend_live_e2e "codex-code" {shlex.quote(str(backend_run_dir))} {shlex.quote(str(output_dir))} "1"\n'
+            + "python3 - <<'PY'\n"
+            + "import json\n"
+            + f"from pathlib import Path\np = Path({str(result_path)!r})\n"
+            + "payload = json.loads(p.read_text(encoding='utf-8'))\n"
+            + "print(payload['status'] + ':' + payload['reason'])\n"
+            + f"print('frontend_workspace_exists=' + str((Path({str(output_dir)!r}) / 'frontend-workspace').exists()).lower())\n"
+            + "PY\n"
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertIn("skipped:snapshot_reports_missing", completed.stdout.strip(), completed.stdout)
+        self.assertIn("frontend_workspace_exists=false", completed.stdout.strip(), completed.stdout)
+
     def test_python_frontend_matrix_supports_per_run_results(self) -> None:
         batch_root = self.root / "batch"
         reports_root = self.root / "reports"
