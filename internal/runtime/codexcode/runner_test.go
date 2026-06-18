@@ -51,6 +51,17 @@ func TestDefaultCodexArgsKeepNoninteractiveDiagnosticMode(t *testing.T) {
 	assertCodexArg(t, args, "--json")
 	assertCodexArg(t, args, "--color")
 	assertCodexArg(t, args, "never")
+	for _, feature := range []string{
+		"plugins",
+		"remote_plugin",
+		"plugin_sharing",
+		"apps",
+		"enable_mcp_apps",
+		"tool_suggest",
+		"skill_mcp_dependency_install",
+	} {
+		assertCodexFlagValue(t, args, "--disable", feature)
+	}
 	assertCodexArg(t, args, "--ignore-user-config")
 	assertCodexArg(t, args, "--ignore-rules")
 	assertCodexArg(t, args, "--skip-git-repo-check")
@@ -113,6 +124,9 @@ func TestCodexCommandSpecUsesIsolatedAuthOnlyHome(t *testing.T) {
 	if isolatedHome == "" {
 		t.Fatalf("expected CODEX_HOME override in command spec")
 	}
+	assertCodexFlagValue(t, spec.Args, "--disable", "plugins")
+	assertCodexFlagValue(t, spec.Args, "--disable", "remote_plugin")
+	assertCodexFlagValue(t, spec.Args, "--disable", "apps")
 	if isolatedHome == sourceHome {
 		t.Fatalf("expected isolated home, got source home %s", isolatedHome)
 	}
@@ -415,6 +429,16 @@ func assertCodexArg(t *testing.T, args []string, want string) {
 	if !codexSliceContains(args, want) {
 		t.Fatalf("expected arg %q in %v", want, args)
 	}
+}
+
+func assertCodexFlagValue(t *testing.T, args []string, flag string, value string) {
+	t.Helper()
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && args[i+1] == value {
+			return
+		}
+	}
+	t.Fatalf("expected %s %s in %v", flag, value, args)
 }
 
 func codexSliceContains(values []string, want string) bool {
