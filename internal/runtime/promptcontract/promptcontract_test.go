@@ -457,6 +457,35 @@ func TestComposeCollectManifestRepairPromptPrefersUsefulRootEvidence(t *testing.
 	}
 }
 
+func TestCollectRepairEvidenceCandidatesSkipLargeAndGeneratedFiles(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	for _, file := range []struct {
+		path string
+		body string
+	}{
+		{path: "README.md", body: "# Runtime\n"},
+		{path: ".test_durations", body: strings.Repeat("slow-test\n", 20000)},
+		{path: "pnpm-lock.yaml", body: "lockfileVersion: '9.0'\n"},
+		{path: "uv.lock", body: strings.Repeat("package = []\n", 20000)},
+		{path: "large-config.json", body: strings.Repeat("{\"entry\":true}\n", 12000)},
+	} {
+		if err := os.WriteFile(filepath.Join(repoRoot, file.path), []byte(file.body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", file.path, err)
+		}
+	}
+	task := acpruntime.Task{
+		ReadContextRoots: []string{repoRoot},
+		PathScopes:       []string{"README.md", ".test_durations", "pnpm-lock.yaml", "uv.lock", "large-config.json"},
+	}
+
+	candidates := repairEvidenceCandidates(task)
+	if got := strings.Join(candidates, ","); got != "README.md" {
+		t.Fatalf("expected only useful bounded evidence candidate, got %q", got)
+	}
+}
+
 func TestComposeCollectArtifactPairRepairPromptIsEvidenceFirstNoSeed(t *testing.T) {
 	t.Parallel()
 
@@ -484,9 +513,12 @@ func TestComposeCollectArtifactPairRepairPromptIsEvidenceFirstNoSeed(t *testing.
 		"COLLECT PAIR EVIDENCE-FIRST REPAIR:",
 		"This repair is not a bootstrap/fallback writer",
 		"Write the markdown document first as concise evidence-backed content, then write the manifest that references it",
+		"After writing the markdown document, do not read another repository file",
 		`Write exactly two files after the evidence pass: "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/root-overview.md" and "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json".`,
 		"Do not delete existing files, run rm -f, use git rev-parse, rely on cwd discovery",
 		"FIRST COLLECT PAIR REPAIR WORKFLOW:",
+		"Read only the listed evidence candidates below",
+		"Do not read lockfiles, generated baselines, test duration indexes",
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
 		"RECOVERY ACCEPTANCE REQUIREMENT:",
 		"Recovery Evidence Summary",

@@ -1302,6 +1302,83 @@ func TestRunHeadlessProviderFailsSilentCollectWhenPairRepairProducesNoArtifacts(
 	}
 }
 
+func TestRunHeadlessProviderRecoversManifestAfterPartialPairRepairStall(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-pair-partial-manifest-recovery")
+	docRel := steppolicy.SuggestedCollectDocumentPath(task)
+	docAbs := filepath.Join(task.WriteRoot, filepath.FromSlash(docRel))
+	repairScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(filepath.Dir(docAbs)) + `
+cat >` + shellQuote(docAbs) + ` <<'EOF'
+# Collect Repair Overview
+
+## Runtime Surfaces
+- **Payments API** exposes request handlers for account activity.
+- **Ledger Worker** persists balance changes.
+- **Postgres** stores transaction state.
+
+## Operational Gaps
+- Ownership and escalation are not confirmed in this shard.
+EOF
+sleep 5
+`
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	runner := testAdapter{
+		command:           writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 5\n"),
+		pairRepairCommand: writeEngineScript(t, repairScript),
+		activity: ActivityPolicy{
+			MonitorArtifacts:            true,
+			MonitorPreArtifact:          true,
+			PreArtifactStallWindow:      20 * time.Millisecond,
+			RetryPreArtifactStallWindow: 20 * time.Millisecond,
+			PostArtifactStallWindow:     20 * time.Millisecond,
+			PartialArtifactStallWindow:  20 * time.Millisecond,
+			PollInterval:                5 * time.Millisecond,
+			PostTerminateDrain:          10 * time.Millisecond,
+			TerminateGrace:              10 * time.Millisecond,
+		},
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:            true,
+			RepairCollectArtifactPairOnce:            true,
+			RepairCollectManifestOnce:                true,
+			RetryInvalidOrMissingArtifactsOnce:       true,
+			RetryZeroOutputPreArtifactStallOnce:      true,
+			ClassifySilentRetryExhaustionUnavailable: true,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), successfulCollectPairRecoveryTimeout)
+	defer cancel()
+	result, err := RunHeadlessProvider(ctx, task, runner)
+	if err != nil {
+		t.Fatalf("expected partial pair repair to recover missing manifest, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair exhausted diagnostic, got %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "collect manifest runtime recovery completed", "recovery_mode", "collect_manifest_runtime_recovery") {
+		t.Fatalf("expected runtime manifest recovery diagnostic, got %#v", diagnostics)
+	}
+	if !hasRuntimeWarning(result.Execution.Warnings, "collect_manifest_runtime_recovery reconstructed shard-pack-manifest.json") {
+		t.Fatalf("expected runtime recovery warning, got %#v", result.Execution.Warnings)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName))
+	if err != nil {
+		t.Fatalf("read recovered manifest: %v", err)
+	}
+	if !strings.Contains(string(raw), "collect_manifest.runtime_recovery") {
+		t.Fatalf("expected runtime recovery finding in manifest, got %s", raw)
+	}
+}
+
 func TestRunHeadlessProviderRecoversMissingCollectManifestWithNestedAuthoredDocs(t *testing.T) {
 	t.Parallel()
 

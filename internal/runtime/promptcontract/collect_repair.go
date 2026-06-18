@@ -195,12 +195,14 @@ func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task a
 		"- This repair is not a bootstrap/fallback writer. Do not create a seed-only or recovery-summary pair.",
 		"- First read bounded repository evidence from the exact read_context_roots/path_scopes below, then write final evidence-backed artifacts.",
 		"- Write the markdown document first as concise evidence-backed content, then write the manifest that references it; do not add optional enrichment until both exact targets are non-empty and marker-free.",
+		"- After writing the markdown document, do not read another repository file; your next filesystem action must write shard-pack-manifest.json, then run the final self-check.",
 		fmt.Sprintf("- Write exactly two files after the evidence pass: %q and %q.", docTarget, manifestTarget),
 		"- Do not write any file outside the exact write_root collect pair.",
 		"- Do not delete existing files, run rm -f, use git rev-parse, rely on cwd discovery, inspect sibling reports/taskruns, or read raw logs.",
 		"- If bounded repo evidence cannot be read, exit non-zero without writing fallback scaffold.",
 		"FIRST COLLECT PAIR REPAIR WORKFLOW:",
-		"- Read at most the listed evidence candidates and representative files under assigned path_scopes using the exact absolute read_context_roots.",
+		"- Read only the listed evidence candidates below using the exact absolute read_context_roots; do not open unlisted path_scopes after this bounded pass.",
+		"- Do not read lockfiles, generated baselines, test duration indexes, raw logs, reports/taskruns history, or files larger than 96 KiB during collect pair repair.",
 		"- Explain concrete components, runtime/config/deploy/test/data surfaces, ownership gaps, and dependencies in the markdown document.",
 		"- Build shard-pack-manifest.json from that markdown plus the same repo/path evidence: documents, citations, semantic.coverage, semantic.questions, semantic.entities, semantic.edges, and semantic.findings.",
 		"- Use repo/path provenance for every semantic evidence object; stdout claims are diagnostics only.",
@@ -305,9 +307,12 @@ func repairEvidenceCandidates(task acpruntime.Task) []string {
 	writeRoot := filepath.Clean(strings.TrimSpace(task.WriteRoot))
 	seen := map[string]struct{}{}
 	candidates := []string{}
-	add := func(path string) {
+	add := func(path string, info os.FileInfo) {
 		path = filepath.ToSlash(strings.TrimSpace(path))
 		if path == "" {
+			return
+		}
+		if !repairEvidenceCandidateAllowed(path, info) {
 			return
 		}
 		if _, ok := seen[path]; ok {
@@ -340,7 +345,7 @@ func repairEvidenceCandidates(task acpruntime.Task) []string {
 				continue
 			}
 			if !info.IsDir() {
-				add(scope)
+				add(scope, info)
 				continue
 			}
 			_ = filepath.WalkDir(target, func(path string, entry os.DirEntry, err error) error {
@@ -361,11 +366,40 @@ func repairEvidenceCandidates(task acpruntime.Task) []string {
 				if relErr != nil {
 					return nil
 				}
-				add(rel)
+				info, infoErr := entry.Info()
+				if infoErr != nil {
+					return nil
+				}
+				add(rel, info)
 				return nil
 			})
 		}
 	}
 	sort.Strings(candidates)
 	return candidates
+}
+
+func repairEvidenceCandidateAllowed(path string, info os.FileInfo) bool {
+	if info == nil || info.IsDir() {
+		return false
+	}
+	const maxRepairEvidenceBytes = 96 * 1024
+	if info.Size() > maxRepairEvidenceBytes {
+		return false
+	}
+	name := strings.ToLower(filepath.Base(path))
+	if name == "" {
+		return false
+	}
+	switch name {
+	case ".test_durations", "mypy-baseline.txt", "ty-baseline.txt", "pnpm-lock.yaml", "package-lock.json", "yarn.lock", "uv.lock", "go.sum":
+		return false
+	}
+	if strings.HasSuffix(name, ".lock") || strings.HasSuffix(name, "-lock.yaml") || strings.HasSuffix(name, "-lock.json") {
+		return false
+	}
+	if strings.HasPrefix(name, "coverage.") || strings.HasSuffix(name, ".snap") || strings.HasSuffix(name, ".snapshot") {
+		return false
+	}
+	return true
 }
