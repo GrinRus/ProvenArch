@@ -1,6 +1,7 @@
 package promptcontract
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -230,7 +231,8 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		"collect manifest repair mode",
 		"COLLECT MANIFEST EVIDENCE-FIRST REPAIR:",
 		"Repair shard-pack-manifest.json from the existing authored documents and bounded repository evidence; do not start with a placeholder scaffold.",
-		"The first command below reads existing authored documents in write_root before writing shard-pack-manifest.json.",
+		"The first command below is a read-only evidence preflight",
+		"After the preflight, you must author shard-pack-manifest.json yourself",
 		"Read only the listed repository evidence candidates if authored docs need support",
 		"Write exactly one file:",
 		"Do not rewrite existing authored markdown documents.",
@@ -238,7 +240,7 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		"FIRST COLLECT MANIFEST REPAIR COMMAND:",
 		"Run this exact command as your next filesystem action.",
 		"Do not manually retype paths, inspect sibling taskruns, read raw logs, or write any other file before this command.",
-		"The command is evidence-derived: it reads authored markdown already in write_root and writes only shard-pack-manifest.json",
+		"The command is read-only: it reads authored markdown already in write_root",
 		"python3 - ",
 		"ACP_COLLECT_MANIFEST_REPAIR_PY",
 		`"authored_docs":["docs/deep-dive.md","overview.md"]`,
@@ -246,7 +248,6 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		"SKELETON USE:",
 		"Use this JSON only as the task-specific schema/key/type guide, not as final content.",
 		"Copying this skeleton unchanged is invalid",
-		`target.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')`,
 		"SEMANTIC EXTRACTION REQUIREMENT:",
 		"Evidence-rich authored documents require concrete semantic.entities beyond the repo plus shard wrapper.",
 		"Evidence-rich authored documents require concrete semantic.edges beyond repo/shard contains relationships",
@@ -298,6 +299,8 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		"Copy the heredoc JSON",
 		"Execute the preferred heredoc write command",
 		"write it from the heredoc command",
+		`target.write_text(`,
+		`"writes_manifest":true`,
 		"preserve semantic.entities",
 		"COLLECT MANIFEST REPAIR WRITE SHAPE:",
 		`"<replace with authored doc objects from write_root>"`,
@@ -341,7 +344,7 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 	}
 }
 
-func TestCollectManifestRepairFirstCommandWritesValidationReadyManifest(t *testing.T) {
+func TestCollectManifestRepairPreflightCommandIsReadOnly(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -376,27 +379,29 @@ func TestCollectManifestRepairFirstCommandWritesValidationReadyManifest(t *testi
 		PathScopes:   []string{"src"},
 	}
 
-	command := collectManifestRepairFirstCommand(task, []string{"overview.md"}, []string{"src/README.md"})
+	command := collectManifestRepairPreflightCommand(task, []string{"overview.md"}, []string{"src/README.md"})
 	output, err := exec.Command("sh", "-c", command).CombinedOutput()
 	if err != nil {
-		t.Fatalf("repair command failed: %v\n%s\ncommand:\n%s", err, output, command)
+		t.Fatalf("repair preflight command failed: %v\n%s\ncommand:\n%s", err, output, command)
 	}
-	if err := artifactquality.ValidateCollectManifestInRoot(writeRoot); err != nil {
-		t.Fatalf("repair command wrote invalid manifest: %v\n%s", err, mustReadFile(t, filepath.Join(writeRoot, "shard-pack-manifest.json")))
+	if _, err := os.Stat(filepath.Join(writeRoot, "shard-pack-manifest.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("repair preflight must not write shard-pack-manifest.json, statErr=%v\noutput:\n%s", err, output)
 	}
-	raw := mustReadFile(t, filepath.Join(writeRoot, "shard-pack-manifest.json"))
+	raw := string(output)
 	for _, token := range []string{
-		`"name": "Django API"`,
-		`"name": "Postgres"`,
-		`"type": "uses"`,
-		`"title": "Runtime and configuration surface identified from authored collect evidence"`,
+		`"mode": "collect_manifest_repair_preflight"`,
+		`"writes_manifest": false`,
+		`"authored_doc_count": 1`,
+		`"path": "overview.md"`,
+		"Django API",
+		"src/README.md",
 	} {
 		if !strings.Contains(raw, token) {
-			t.Fatalf("expected repaired manifest to contain %q, got:\n%s", token, raw)
+			t.Fatalf("expected repair preflight output to contain %q, got:\n%s", token, raw)
 		}
 	}
-	if strings.Contains(raw, "contains scoped surface") || strings.Contains(raw, "Owner mapping not confirmed") {
-		t.Fatalf("repair command must not write the old bootstrap-only semantic scaffold:\n%s", raw)
+	if strings.Contains(command, "target.write_text") || strings.Contains(command, "Manifest repaired from") {
+		t.Fatalf("repair preflight command must not contain manifest synthesis writer:\n%s", command)
 	}
 }
 
@@ -478,6 +483,7 @@ func TestComposeCollectArtifactPairRepairPromptIsEvidenceFirstNoSeed(t *testing.
 		"collect artifact pair focused recovery mode",
 		"COLLECT PAIR EVIDENCE-FIRST REPAIR:",
 		"This repair is not a bootstrap/fallback writer",
+		"Write the markdown document first as concise evidence-backed content, then write the manifest that references it",
 		`Write exactly two files after the evidence pass: "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/root-overview.md" and "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json".`,
 		"Do not delete existing files, run rm -f, use git rev-parse, rely on cwd discovery",
 		"FIRST COLLECT PAIR REPAIR WORKFLOW:",
@@ -489,6 +495,7 @@ func TestComposeCollectArtifactPairRepairPromptIsEvidenceFirstNoSeed(t *testing.
 		"FINAL SELF-CHECK COMMAND:",
 		"! grep -E",
 		"Successful recovery output must not contain ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT",
+		"A noop, zero-output, unchanged skeleton, or partially-written repair is terminal",
 		`"path": "root-overview.md"`,
 		`"artifact_root": "reports/taskruns/run-1/staging/shards/payments"`,
 		"exact authored document target = \"/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/root-overview.md\"",

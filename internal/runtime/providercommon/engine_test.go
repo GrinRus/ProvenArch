@@ -781,6 +781,12 @@ exit 0
 	if result.Execution.Status != "succeeded" {
 		t.Fatalf("unexpected execution status: %+v", result.Execution)
 	}
+	if !hasRuntimeWarning(result.Execution.Warnings, "collect_manifest_runtime_recovery reconstructed shard-pack-manifest.json") {
+		t.Fatalf("expected runtime recovery warning, got %#v", result.Execution.Warnings)
+	}
+	if recovery, ok := result.Diagnostics["collect_manifest_runtime_recovery"].(map[string]any); !ok || recovery["source"] != "runtime_recovery" || recovery["provider_authored"] != false {
+		t.Fatalf("expected explicit runtime recovery diagnostics, got %#v", result.Diagnostics)
+	}
 	raw, err := os.ReadFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName))
 	if err != nil {
 		t.Fatalf("read recovered manifest: %v", err)
@@ -1456,6 +1462,9 @@ printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot
 	}
 	if result.Execution.Status != "succeeded" {
 		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if !hasRuntimeWarning(result.Execution.Warnings, "collect_manifest_runtime_recovery reconstructed shard-pack-manifest.json") {
+		t.Fatalf("expected runtime recovery warning, got %#v", result.Execution.Warnings)
 	}
 	raw, err := os.ReadFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName))
 	if err != nil {
@@ -3303,6 +3312,15 @@ func hasDiagnosticField(events []acpruntime.DiagnosticEvent, message string, key
 			continue
 		}
 		if got, ok := event.Fields[key].(string); ok && got == value {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRuntimeWarning(warnings []string, needle string) bool {
+	for _, warning := range warnings {
+		if strings.Contains(warning, needle) {
 			return true
 		}
 	}

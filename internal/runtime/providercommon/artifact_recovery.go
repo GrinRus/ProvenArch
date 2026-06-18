@@ -352,7 +352,39 @@ func recoverCollectManifestDeterministically(task acpruntime.Task, adapter Provi
 		return false, acpruntime.Result{}, nil
 	}
 	emitCollectManifestDeterministicRecoveryCompletedDiagnostic(task, adapter.Provider(), report)
+	result = markCollectManifestRuntimeRecovered(result, report)
 	return true, result, nil
+}
+
+func markCollectManifestRuntimeRecovered(result acpruntime.Result, report collectManifestRuntimeRecoveryReport) acpruntime.Result {
+	if result.Diagnostics == nil {
+		result.Diagnostics = map[string]any{}
+	}
+	result.Diagnostics["collect_manifest_runtime_recovery"] = map[string]any{
+		"recovery_mode":       "collect_manifest_runtime_recovery",
+		"source":              "runtime_recovery",
+		"provider_authored":   false,
+		"document_count":      report.DocumentCount,
+		"entity_count":        report.EntityCount,
+		"edge_count":          report.EdgeCount,
+		"evidence_path":       strings.TrimSpace(report.EvidencePath),
+		"manual_quality_gate": "artifact_quality_assessment",
+	}
+	warning := "runtime_recovery: collect_manifest_runtime_recovery reconstructed shard-pack-manifest.json from provider-authored markdown; treat as recovery evidence, not normal provider-authored manifest success"
+	if !containsRuntimeWarning(result.Execution.Warnings, warning) {
+		result.Execution.Warnings = append(result.Execution.Warnings, warning)
+	}
+	return result
+}
+
+func containsRuntimeWarning(values []string, expected string) bool {
+	expected = strings.TrimSpace(expected)
+	for _, value := range values {
+		if strings.TrimSpace(value) == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func collectManifestFileMissing(task acpruntime.Task) bool {

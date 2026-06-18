@@ -361,7 +361,8 @@ func TestQwenRepairCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 	for _, token := range []string{
 		"collect manifest repair mode",
 		"COLLECT MANIFEST EVIDENCE-FIRST REPAIR:",
-		"The first command below reads existing authored documents in write_root before writing shard-pack-manifest.json.",
+		"The first command below is a read-only evidence preflight",
+		"After the preflight, you must author shard-pack-manifest.json yourself",
 		"FIRST COLLECT MANIFEST REPAIR COMMAND:",
 		"Run this exact command as your next filesystem action.",
 		"python3 - ",
@@ -371,7 +372,7 @@ func TestQwenRepairCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 		"Copying this skeleton unchanged is invalid",
 		`"authored_docs":["overview.md"]`,
 		`"evidence_paths":["README.md"]`,
-		`target.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')`,
+		`'writes_manifest': False`,
 		"SEMANTIC EXTRACTION REQUIREMENT:",
 		"Evidence-rich authored documents require concrete semantic.entities beyond the repo plus shard wrapper.",
 		"Evidence-rich authored documents require concrete semantic.edges beyond repo/shard contains relationships",

@@ -251,7 +251,7 @@ func RunHeadlessProvider(ctx context.Context, task acpruntime.Task, adapter Prov
 			if recoveredErr != nil {
 				return acpruntime.Result{}, recoveredErr
 			}
-			recoveredResult.Execution = acpruntime.NewExecution(task, adapter.Provider(), adapter.RuntimeVersion(), "succeeded", time.Now().UTC(), nil)
+			recoveredResult.Execution = acpruntime.NewExecution(task, adapter.Provider(), adapter.RuntimeVersion(), "succeeded", time.Now().UTC(), recoveredResult.Execution.Warnings)
 			return recoveredResult, nil
 		}
 		return acpruntime.Result{}, classifyCommandFailure(adapter, task, result, runErr)
@@ -261,7 +261,7 @@ func RunHeadlessProvider(ctx context.Context, task acpruntime.Task, adapter Prov
 			if recoveredErr != nil {
 				return acpruntime.Result{}, recoveredErr
 			}
-			recoveredResult.Execution = acpruntime.NewExecution(task, adapter.Provider(), adapter.RuntimeVersion(), "succeeded", time.Now().UTC(), nil)
+			recoveredResult.Execution = acpruntime.NewExecution(task, adapter.Provider(), adapter.RuntimeVersion(), "succeeded", time.Now().UTC(), recoveredResult.Execution.Warnings)
 			return recoveredResult, nil
 		}
 		return acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "contract", "artifact validation failed", err)
