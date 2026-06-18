@@ -91,7 +91,8 @@ func TestComposeArtifactOnlyPromptAddsCollectLegacyHygieneSection(t *testing.T) 
 	prompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderClaudeCode, task)
 	expectedTokens := []string{
 		"COLLECT MANIFEST CONTRACT CHECKLIST:",
-		"Evidence-first pair requirement",
+		"Evidence-write pair requirement",
+		"The first collect filesystem action must be one mechanically simple bounded evidence-write action",
 		"Absolute collect targets for the evidence-backed pair",
 		"semantic.coverage MUST use observed/missing/notes",
 		"semantic.questions[*] MUST use id + text",
@@ -141,7 +142,7 @@ func TestComposeArtifactOnlyPromptKeepsRefreshCollectFirstActionTaskSpecific(t *
 	prompt := qwenPrompt
 	for _, token := range []string{
 		"COLLECT EVIDENCE-FIRST ARTIFACT PAIR:",
-		"FIRST COLLECT EVIDENCE PASS:",
+		"FIRST COLLECT BOUNDED WRITE ACTION:",
 		"COLLECT FINAL WRITE REQUIREMENT:",
 		"COLLECT MANIFEST TASK SKELETON:",
 		"SKELETON USE:",
@@ -151,8 +152,13 @@ func TestComposeArtifactOnlyPromptKeepsRefreshCollectFirstActionTaskSpecific(t *
 		`"path": "README.md"`,
 		`"questions": [`,
 		`"missing": [`,
-		"bounded evidence pass before writing artifacts",
-		"do not write a seed-only/bootstrap pair",
+		"next filesystem action must be one mechanically simple action that reads bounded evidence and writes both exact targets before returning",
+		"inspect at most 8 representative entrypoint/build/config/source files",
+		"Read at most the first 6000 bytes from any file.",
+		"Do not emit analysis-only prose",
+		"Do not use generated source-code strings, Python f-strings, .format templates",
+		"start by writing an evidence-backed artifact pair; do not write a seed-only pair",
+		"Normal collect must not depend on collect_pair_repair as the expected path to success.",
 		"Copying this skeleton unchanged is invalid",
 	} {
 		if !strings.Contains(prompt, token) {
@@ -177,7 +183,7 @@ func TestComposeArtifactOnlyPromptKeepsRefreshCollectFirstActionTaskSpecific(t *
 	if got := strings.Count(prompt, "COLLECT MANIFEST TASK SKELETON:"); got != 1 {
 		t.Fatalf("expected collect task skeleton section exactly once, got %d:\n%s", got, prompt)
 	}
-	firstActionIndex := strings.Index(prompt, "FIRST COLLECT EVIDENCE PASS:")
+	firstActionIndex := strings.Index(prompt, "FIRST COLLECT BOUNDED WRITE ACTION:")
 	artifactContractIndex := strings.Index(prompt, "Artifact-only contract:")
 	docFirstIndex := strings.Index(prompt, "DOCS-FIRST FILESYSTEM CONTRACT:")
 	if firstActionIndex < 0 || artifactContractIndex < 0 || docFirstIndex < 0 {
