@@ -963,6 +963,49 @@ Residual blockers:
 - 2026-05-07: Performed non-live prerequisite check only. Worktree and provider binary paths look ready for an owner-approved trusted-machine run, but provider auth/quota and pinned repo/path prerequisites are unverified. Live matrix execution remains blocked until explicit approval.
 
 ### Plan ID
+EP-20260618-live-e2e-quality-loop
+
+### Context
+Medium live E2E validation now uses the canonical non-release `regres long` matrix (`posthog + ftgo`, `RUN_COUNT=1`) with one selected provider at a time. The current loop starts with `codex-code`, then `claude-code`, and repeats the affected provider until execution quality, artifact completeness, and UX/manual evidence are clean. Generated live evidence is diagnostic and must not be committed.
+
+### Goals (must have)
+- [x] Keep product UI/API behavior, canonical matrix files, and curated repo files unchanged
+- [x] Preserve execution/UX/artifact quality separation; `artifact_quality:*` remains telemetry/evidence only
+- [x] Fix live-observed draft enrichment no-op/scaffold failure without ACP-side deterministic product synthesis
+- [x] Fix frontend snapshot eligibility so failed headless refresh rows cannot start heavy UI smoke as if they were valid snapshots
+- [x] Fix live-observed collect pair repair preflight-only/status-only no-op so post-preflight provider output must mutate markdown + manifest before prose
+- [ ] Produce clean strict medium `codex-code` evidence
+- [ ] Produce clean strict medium `claude-code` evidence
+- [ ] Record execution, artifact completeness/truthfulness, and UX findings for each rerun
+
+### Non-goals
+- [x] Do not add wrapper scripts around `scripts/full-run-batch-matrix.sh`
+- [x] Do not bypass provider/path preflight with test-only env flags
+- [x] Do not edit `examples/e2e-matrix.regres-long.yaml` or curated repo files to fit the current machine
+- [x] Do not treat SWE manual UX/artifact reports as core AOR runtime inputs
+
+### Approach
+1) Implement the smallest runtime/reporting/docs/test fix slice for the current live blocker.
+2) Run `make contracts`, `make test`, `make lint`, and `make build`.
+3) Commit the fix before any live rerun.
+4) Run direct `scripts/full-run-batch-matrix.sh` from a clean tree using planner-generated `regres long` provider env.
+5) Inspect matrix/profile/run/execution/frontend reports, taskrun quality JSON, raw provider metadata, staged manifests/docs, final/citation indexes, and screenshots/logs.
+6) If any P0/P1 execution bug, artifact incompleteness/misleading output, or UX blocker remains, open the next narrow fix slice and repeat.
+
+### Acceptance criteria
+- [ ] Latest strict medium `codex-code` run passes selected-provider backend totals with no synthetic provider deficits
+- [ ] Latest strict medium `claude-code` run passes selected-provider backend totals with no synthetic provider deficits
+- [ ] No unresolved `runtime_contract_failed`, `runner_unavailable`, `runtime_timeout`, `runtime_flow_failed`, or `frontend_failed` remains for the accepted medium evidence
+- [ ] No old mixed quality gate artifacts (`quality_report_*`, `quality_gates_failed`, `failure_reason=quality`, `RUN_QUALITY_GATES`) appear in generated evidence
+- [ ] Artifact completeness includes planned/succeeded/failed shard accounting, final/citation indexes, proposals, publish readiness, and decision-ready summaries
+- [ ] UX evidence is accepted when frontend runs, or explicitly inconclusive/not applicable with no hidden blocker when frontend is skipped
+
+### Progress log
+- 2026-06-18: Codex strict medium run `regres-long-posthog-ftgo-20260618T083335Z` failed in `refresh.step2.asis_docs`: `draft_artifact_enrichment` printed analysis-only status and left bootstrap markdown unchanged. Fixed write-first draft enrichment prompt/contract, reporting tests, frontend snapshot eligibility, docs, and committed `7c1df8e`.
+- 2026-06-18: Codex rerun `regres-long-posthog-ftgo-20260618T131738Z` proved the draft enrichment fix for `init.step0.constitution`, then exposed a collect pair repair no-op: `collect_pair_repair_preflight` returned bounded evidence, provider printed “I am now writing”/status prose, but did not execute the required filesystem write before stall. The known-bad diagnostic was stopped early to implement the next narrow fix.
+- 2026-06-18: Tightened collect pair repair prompt/contract so post-preflight plan/status/analysis-only prose is invalid and the next item must be a filesystem command that writes the evidence-backed markdown plus `shard-pack-manifest.json`. Targeted prompt/adapter tests passed; full DoD passed with pinned Node 22.21.1 (`make contracts`, `make test`, `make lint`, `make build`).
+
+### Plan ID
 EP-20260507-cleanup-owner-decisions
 
 ### Context

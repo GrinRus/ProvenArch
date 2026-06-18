@@ -450,6 +450,8 @@ func TestQwenCollectArtifactPairRepairCommandSpecUsesPromptOnly(t *testing.T) {
 		"COLLECT PAIR EVIDENCE-FIRST REPAIR:",
 		"This repair is not a bootstrap/fallback writer",
 		"FIRST COLLECT PAIR REPAIR PREFLIGHT COMMAND:",
+		"The next item after preflight completion must be a filesystem command",
+		"First post-preflight work unit: execute one bounded filesystem command",
 		"ACP_COLLECT_PAIR_REPAIR_PREFLIGHT_PY",
 		"collect_pair_repair_preflight",
 		"COLLECT PAIR REPAIR WRITE WORKFLOW:",
