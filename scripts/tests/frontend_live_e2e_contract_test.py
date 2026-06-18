@@ -57,6 +57,17 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         self.assertNotIn("page.request", body)
         self.assertNotIn("page.waitForTimeout", body)
 
+    def test_live_flow_opens_activity_drawer_before_log_mode_actions(self) -> None:
+        spec_path = self.repo_root / "ui" / "e2e" / "live-flow.spec.ts"
+        body = spec_path.read_text(encoding="utf-8")
+        self.assertIn("expectActivityDrawerOpen", body)
+        self.assertIn('getByTestId("activity-drawer-toggle").click({ timeout: 10_000 })', body)
+        self.assertIn('getByTestId("run-logs-mode-select")).toBeVisible({ timeout: 10_000 })', body)
+        self.assertIn('selectRunLogsMode(page, "events")', body)
+        self.assertIn('selectRunLogsMode(page, "raw")', body)
+        self.assertIn('selectRunLogsMode(page, "all")', body)
+        self.assertNotIn('getByTestId("run-logs-mode-select").selectOption("events")', body)
+
     def test_live_flow_uses_v2_visible_selectors_without_hidden_compat_controls(self) -> None:
         spec_path = self.repo_root / "ui" / "e2e" / "live-flow.spec.ts"
         body = spec_path.read_text(encoding="utf-8")
@@ -103,6 +114,7 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         body = config_path.read_text(encoding="utf-8")
         self.assertNotIn("ACP_UI_CANCEL_POLL_TIMEOUT_SEC", body)
         self.assertNotIn("cancelTimeout", body)
+        self.assertIn("actionTimeout: 60 * 1000", body)
 
     def test_shell_only_allows_init_inspect(self) -> None:
         body = self.script_path.read_text(encoding="utf-8")

@@ -175,6 +175,21 @@ async function expectOperatorInspectorSurfaces(page: Page): Promise<void> {
   await expect(page.getByTestId("git-publication-panel")).toBeVisible();
 }
 
+async function expectActivityDrawerOpen(page: Page): Promise<void> {
+  const drawer = page.getByTestId("activity-drawer");
+  await expect(drawer).toBeVisible();
+  const isOpen = await drawer.evaluate((element) => element.hasAttribute("open"));
+  if (!isOpen) {
+    await page.getByTestId("activity-drawer-toggle").click({ timeout: 10_000 });
+  }
+  await expect(page.getByTestId("run-logs-mode-select")).toBeVisible({ timeout: 10_000 });
+}
+
+async function selectRunLogsMode(page: Page, mode: "events" | "raw" | "all"): Promise<void> {
+  await expectActivityDrawerOpen(page);
+  await page.getByTestId("run-logs-mode-select").selectOption(mode, { timeout: 10_000 });
+}
+
 async function expectAlreadyInitializedWorkspaceNavigation(page: Page): Promise<void> {
   await page.reload();
   await expect(page.getByTestId("review-panel")).toBeVisible();
@@ -261,13 +276,13 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect(selectedRunButton).toBeVisible();
   await selectedRunButton.click();
 
-  await page.getByTestId("run-logs-mode-select").selectOption("events");
+  await selectRunLogsMode(page, "events");
   const logsContent = page.getByTestId("run-logs-content");
   await expect
     .poll(async () => (await logsContent.textContent()) ?? "", { timeout: 30_000 })
     .toContain("[EVENT]");
 
-  await page.getByTestId("run-logs-mode-select").selectOption("raw");
+  await selectRunLogsMode(page, "raw");
   await expect
     .poll(
       async () => {
@@ -280,7 +295,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
     )
     .toBe(true);
 
-  await page.getByTestId("run-logs-mode-select").selectOption("all");
+  await selectRunLogsMode(page, "all");
   await expect(page.getByTestId("activity-events-table")).toBeVisible();
   await page.getByTestId("stage-analysis").click();
   await expect(page.getByTestId("analysis-run-progress")).toBeVisible();

@@ -697,6 +697,7 @@ Blocking signals:
 - frontend `init-inspect` = `passed` для всех трёх release providers (`qwen-code`, `claude-code`, `codex-code`);
 - frontend init smoke стартует из snapshot/backend `arch-workspace` выбранного backend run и проверяет Console V2 пользовательский результат через UI/API/artifact inspection: `Source -> Readiness -> Analysis -> Review -> Publish`;
 - V2 shell assertions должны видеть top health strip, stage rail, right inspector, bottom activity drawer, workspace health, runtime safety, blocker/next action, evidence/artifact refs и Git publication path;
+- Activity / Events drawer должен быть раскрыт перед проверкой log mode controls; hidden log controls должны падать как bounded `frontend_failed`, а не ждать полного runtime polling budget;
 - diagnostic screenshot refs должны помогать triage, но не менять release verdict semantics: `frontend-source-desktop.png`, `frontend-readiness-desktop.png`, `frontend-analysis-desktop.png`, `frontend-review-desktop.png`, `frontend-publish-desktop.png` и `frontend-review-mobile.png`;
 - cancellation coverage не является live provider release gate: её проверять в deterministic fake-runtime UI/API tests, где можно надёжно доказать `run_canceled` без provider/runtime flakiness.
 

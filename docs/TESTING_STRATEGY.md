@@ -337,6 +337,7 @@ Release workflow hardening:
   - long-running run polling использует independent API request context и не зависит от lifetime browser page, которая нужна только для UI assertions
   - init poll budget берётся из effective runtime timeouts and may be raised to `ACP_PIPELINE_TIMEOUT_SEC+30`; fixed cap is opt-in diagnostic only
   - `frontend-e2e-result.json` keeps scenario, reason, run id, last run status/error/current step and diagnostic refs stable; screenshots, traces and videos remain evidence metadata and do not change release verdict semantics
+  - live UI smoke раскрывает Activity / Events drawer before interacting with log-mode controls, and Playwright action timeouts are bounded so hidden controls fail as `frontend_failed` instead of consuming the full runtime polling budget
 - Этот документ фиксирует policy, invariants и required gates; пошаговые live/release cookbook команды не дублируются здесь.
 
 ## 8) Acceptance для testing strategy
