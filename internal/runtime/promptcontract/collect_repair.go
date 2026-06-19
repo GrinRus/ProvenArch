@@ -146,7 +146,7 @@ func firstNonEmpty(values ...string) string {
 }
 
 func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task acpruntime.Task, validationErr error) string {
-	docRel := steppolicy.SuggestedCollectDocumentPath(task)
+	docRel := collectArtifactPairRepairDocumentPath(task, validationErr)
 	docTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), filepath.FromSlash(docRel))
 	manifestTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), "shard-pack-manifest.json")
 	evidencePaths := repairEvidenceCandidates(task)
@@ -169,6 +169,7 @@ func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task a
 		"- Derive claims from observed snippets after reading. If a planned claim is not present in the snippets, omit it or record a coverage gap; do not abort the whole repair because a guessed phrase is absent.",
 		"- Write the markdown document first as concise evidence-backed content, then write the manifest that references it; do not emit prose, status, or optional enrichment until both exact targets are non-empty and marker-free.",
 		fmt.Sprintf("- Write exactly two files in the first command: %q and %q.", docTarget, manifestTarget),
+		"- If the authored document target already exists, rewrite it completely from observed evidence; do not leave stale missing-path claims in place.",
 		"- Do not write any file outside the exact write_root collect pair.",
 		"- Do not delete existing files, run rm -f, use git rev-parse, rely on cwd discovery, inspect sibling reports/taskruns, or read raw logs.",
 		"- If bounded repo evidence cannot be read, exit non-zero without writing fallback scaffold.",
@@ -229,6 +230,103 @@ func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task a
 		lines = append(lines, fmt.Sprintf("- Previous collect artifact validation failure: %s", detail))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func collectArtifactPairRepairDocumentPath(task acpruntime.Task, validationErr error) string {
+	staleDocs := authoredDocumentsMentioningMissingRepoEvidencePaths(task.WriteRoot, validationErr)
+	for _, rel := range staleDocs {
+		if strings.ToLower(filepath.Ext(rel)) == ".md" {
+			return rel
+		}
+	}
+	authoredDocs := authoredRepairDocuments(task.WriteRoot)
+	for _, rel := range authoredDocs {
+		if strings.ToLower(filepath.Ext(rel)) == ".md" {
+			return rel
+		}
+	}
+	return steppolicy.SuggestedCollectDocumentPath(task)
+}
+
+func authoredDocumentsMentioningMissingRepoEvidencePaths(writeRoot string, err error) []string {
+	missingPaths := missingRepoEvidencePathsFromError(err)
+	if len(missingPaths) == 0 {
+		return nil
+	}
+	writeRoot = strings.TrimSpace(writeRoot)
+	if writeRoot == "" {
+		return nil
+	}
+	cleanRoot := filepath.Clean(writeRoot)
+	if _, statErr := os.Stat(cleanRoot); statErr != nil {
+		return nil
+	}
+	missing := map[string]struct{}{}
+	for _, path := range missingPaths {
+		path = strings.TrimSpace(path)
+		if path != "" {
+			missing[path] = struct{}{}
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	docs := []string{}
+	_ = filepath.WalkDir(cleanRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil || entry == nil || entry.IsDir() {
+			return nil
+		}
+		if strings.ToLower(filepath.Ext(entry.Name())) != ".md" {
+			return nil
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		text := string(raw)
+		for missingPath := range missing {
+			if strings.Contains(text, missingPath) {
+				rel, relErr := filepath.Rel(cleanRoot, path)
+				if relErr == nil && strings.TrimSpace(rel) != "" && rel != "." {
+					docs = append(docs, filepath.ToSlash(rel))
+				}
+				return nil
+			}
+		}
+		return nil
+	})
+	sort.Strings(docs)
+	return docs
+}
+
+func missingRepoEvidencePathsFromError(err error) []string {
+	if err == nil {
+		return nil
+	}
+	const marker = `repo evidence path "`
+	text := err.Error()
+	paths := []string{}
+	seen := map[string]struct{}{}
+	for {
+		idx := strings.Index(text, marker)
+		if idx < 0 {
+			break
+		}
+		text = text[idx+len(marker):]
+		end := strings.Index(text, `"`)
+		if end < 0 {
+			break
+		}
+		path := strings.TrimSpace(text[:end])
+		if path != "" {
+			if _, ok := seen[path]; !ok {
+				seen[path] = struct{}{}
+				paths = append(paths, path)
+			}
+		}
+		text = text[end+1:]
+	}
+	return paths
 }
 
 func overwriteCollectManifestRepairInstructions() []string {

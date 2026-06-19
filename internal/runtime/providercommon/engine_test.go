@@ -992,6 +992,157 @@ exit 0
 	}
 }
 
+func TestRunHeadlessProviderEscalatesMissingRepoEvidenceInMarkdownToPairRepair(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-missing-repo-evidence-pair-repair")
+	repoRoot := filepath.Join(task.Workspace, "repos", "bank-of-anthos")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Bank of Anthos\n\nRuntime entrypoint.\n"), 0o644); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	task.ReadContextRoots = []string{repoRoot}
+	badManifest := strings.ReplaceAll(collectManifestJSON(task), `"path": "README.md"`, `"path": "missing-evidence.md"`)
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Collect Overview
+
+## Evidence
+- missing-evidence.md is the configured runtime evidence file.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + badManifest + `
+EOF
+`
+	manifestOnlyRepairScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'manifest-only repair must not run when markdown cites missing repo evidence' >&2
+exit 9
+`
+	pairRepairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Collect Overview
+
+## Evidence
+- README.md identifies Bank of Anthos as the assigned runtime surface.
+
+## Gap
+- The previous missing-evidence.md reference was not present in the repo and is excluded from citations.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+`
+	runner := testAdapter{
+		command:           writeEngineScript(t, initialScript),
+		repairCommand:     writeEngineScript(t, manifestOnlyRepairScript),
+		pairRepairCommand: writeEngineScript(t, pairRepairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+			RepairCollectArtifactPairOnce: true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected missing repo evidence markdown to be repaired as a pair, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair scheduled diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "collect manifest repair scheduled", "recovery_mode", "collect_manifest_repair") {
+		t.Fatalf("manifest-only repair must not run for markdown with missing repo evidence claims: %#v", diagnostics)
+	}
+	docRaw, err := os.ReadFile(filepath.Join(task.WriteRoot, "overview.md"))
+	if err != nil {
+		t.Fatalf("read repaired doc: %v", err)
+	}
+	if !strings.Contains(string(docRaw), "README.md identifies Bank of Anthos") {
+		t.Fatalf("expected pair repair to rewrite authored markdown, got:\n%s", docRaw)
+	}
+}
+
+func TestRunHeadlessProviderRejectsMissingRepoEvidencePairRepairNoopMarkdown(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-missing-repo-evidence-pair-noop")
+	repoRoot := filepath.Join(task.Workspace, "repos", "bank-of-anthos")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Bank of Anthos\n"), 0o644); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	task.ReadContextRoots = []string{repoRoot}
+	badManifest := strings.ReplaceAll(collectManifestJSON(task), `"path": "README.md"`, `"path": "missing-evidence.md"`)
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Collect Overview
+
+## Evidence
+- missing-evidence.md is the configured runtime evidence file.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "aaa-general.md")) + ` <<'EOF'
+# General Note
+
+README.md exists but this file did not contain the stale missing evidence claim.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + badManifest + `
+EOF
+`
+	pairRepairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "aaa-general.md")) + ` <<'EOF'
+# General Note
+
+README.md was rewritten, but the stale overview.md claim remains untouched.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+`
+	runner := testAdapter{
+		command:           writeEngineScript(t, initialScript),
+		pairRepairCommand: writeEngineScript(t, pairRepairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+			RepairCollectArtifactPairOnce: true,
+		},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected pair repair that leaves stale markdown unchanged to fail")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "collect_pair_repair_noop_or_stale_markdown") {
+		t.Fatalf("expected stale markdown repair failure, got %v", err)
+	}
+}
+
 func TestRunHeadlessProviderRejectsBootstrapOnlyAuthoredDocWithoutPairRepair(t *testing.T) {
 	t.Parallel()
 

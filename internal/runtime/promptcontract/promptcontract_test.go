@@ -1,6 +1,7 @@
 package promptcontract
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -678,6 +679,57 @@ func TestComposeCollectArtifactPairRepairPromptIsEvidenceFirstNoSeed(t *testing.
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("collect pair repair prompt must not use manifest-only repair wording %q:\n%s", forbidden, prompt)
 		}
+	}
+}
+
+func TestComposeCollectArtifactPairRepairPromptTargetsExistingAuthoredMarkdown(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Payments\n\nRuntime entrypoint.\n"), 0o644); err != nil {
+		t.Fatalf("write evidence file: %v", err)
+	}
+	writeRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(writeRoot, "payments-overview.md"), []byte("# stale\n\n`missing-evidence.md`\n"), 0o644); err != nil {
+		t.Fatalf("write authored doc: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "aaa-general.md"), []byte("# general\n\nREADME.md\n"), 0o644); err != nil {
+		t.Fatalf("write secondary authored doc: %v", err)
+	}
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step1.collect",
+		ArtifactRoot:      "reports/taskruns/run-1/staging/shards/payments",
+		WriteRoot:         writeRoot,
+		ReadContextRoots:  []string{repoRoot},
+		ShardID:           "payments",
+		DomainID:          "payments",
+		AgentRole:         "shard-analyst",
+		RepoScopes:        []string{"payments-service"},
+		PathScopes:        []string{"README.md"},
+		ExpectedArtifacts: []string{"shard-pack-manifest.json"},
+	}
+
+	prompt := ComposeCollectArtifactPairRepairPrompt(acpruntime.ProviderCodexCode, task, fmt.Errorf("repo evidence path %q is missing under resolved repo root", "missing-evidence.md"))
+	docTarget := filepath.Join(writeRoot, "payments-overview.md")
+	manifestTarget := filepath.Join(writeRoot, "shard-pack-manifest.json")
+	expectedTokens := []string{
+		fmt.Sprintf("Write exactly two files in the first command: %q and %q.", docTarget, manifestTarget),
+		"If the authored document target already exists, rewrite it completely from observed evidence",
+		"do not leave stale missing-path claims in place",
+		fmt.Sprintf("exact authored document target = %q", docTarget),
+		`"path": "payments-overview.md"`,
+	}
+	for _, token := range expectedTokens {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected existing-doc pair repair prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	if strings.Contains(prompt, `"path": "root-overview.md"`) {
+		t.Fatalf("pair repair prompt should target existing authored markdown, got:\n%s", prompt)
+	}
+	if strings.Contains(prompt, `exact authored document target = "`+filepath.Join(writeRoot, "aaa-general.md")+`"`) {
+		t.Fatalf("pair repair prompt should not pick unrelated authored markdown before stale markdown, got:\n%s", prompt)
 	}
 }
 

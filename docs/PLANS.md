@@ -1113,6 +1113,7 @@ Strict medium `codex-code` diagnostic run `regres-long-posthog-ftgo-20260618T225
 
 ### Progress log
 - 2026-06-19: Strict medium `codex-code` rerun `regres-long-posthog-ftgo-20260619T002751Z` reached non-release machine `PASS` for selected provider totals (`2/2`) with frontend PASS and no legacy mixed quality-gate artifacts, proving execution/artifact quality separation. Manual artifact review rejected the result because promoted FTGO docs cited non-existent Maven `pom.xml` files in a Gradle repo; `artifact_quality:*` telemetry surfaced evidence-scope warnings but correctly did not flip the machine verdict.
+- 2026-06-19: Strict medium `codex-code` rerun `regres-long-posthog-ftgo-20260619T194014Z` was stopped during PostHog refresh after `posthog-share-staticfiles` reproduced a narrower blocker: manifest-only repair changed invalid citations from missing `share/Caddyfile` / `staticfiles/admin/tailwind.css` to existing files, but left the authored markdown claiming those missing paths. The fix escalates structural missing-repo-evidence manifests to collect pair repair when existing markdown still names the missing path, requires fresh markdown rewrite, and treats stale/noop markdown as terminal `runtime_contract_failed`.
 
 ---
 

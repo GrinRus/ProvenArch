@@ -364,14 +364,38 @@ func validateCollectArtifactPairRepairWriteSet(task acpruntime.Task, before writ
 	if err != nil {
 		return err
 	}
-	allowedDocPath := filepath.ToSlash(steppolicy.SuggestedCollectDocumentPath(task))
+	allowedDocPaths := collectArtifactPairRepairAllowedDocPaths(task, before)
 	changes := unexpectedRepairMutations(before, after, func(path string, _ writeRootFileState) bool {
-		return path == ShardPackManifestFileName || path == allowedDocPath
+		if path == ShardPackManifestFileName {
+			return true
+		}
+		_, ok := allowedDocPaths[path]
+		return ok
 	})
 	if len(changes) == 0 {
 		return nil
 	}
 	return fmt.Errorf("collect pair recovery wrote forbidden files: %s", strings.Join(changes, "; "))
+}
+
+func collectArtifactPairRepairAllowedDocPaths(task acpruntime.Task, before writeRootFileSnapshot) map[string]struct{} {
+	allowed := map[string]struct{}{
+		filepath.ToSlash(steppolicy.SuggestedCollectDocumentPath(task)): {},
+	}
+	for path, state := range before {
+		if state.IsDir {
+			continue
+		}
+		clean := filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
+		if clean == "" || clean == "." || clean == ShardPackManifestFileName || clean == "runtime-execution.json" {
+			continue
+		}
+		if strings.ToLower(filepath.Ext(clean)) != ".md" {
+			continue
+		}
+		allowed[clean] = struct{}{}
+	}
+	return allowed
 }
 
 func unexpectedCollectRepairMutations(before writeRootFileSnapshot, after writeRootFileSnapshot) []string {
