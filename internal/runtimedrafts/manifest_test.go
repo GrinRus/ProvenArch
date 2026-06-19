@@ -651,6 +651,57 @@ func TestValidateRequiredManifestRejectsProposalsBootstrapDraftContent(t *testin
 	}
 }
 
+func TestValidateRequiredManifestRejectsProposalsCopiedBootstrapSummary(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	copiedSummary := `# Runtime Recommendations
+
+## Decision / Recommended Operator Action
+Use staged evidence from final-run-index.json and cite.posthog.services.runtime-compose before accepting proposals.
+
+## Evidence Used
+- "summary": "Drafted required runtime artifacts for this step."
+- cite.posthog.services.runtime-compose
+`
+	for _, relPath := range []string{"proposal.md", "changelog.md"} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(copiedSummary), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "summary": "Drafted required runtime artifacts for this step.",
+  "outputs": [
+    {"path": "proposal.md", "canonical_path": "proposals/runtime-recommendations.md", "kind": "proposal", "title": "Runtime Recommendations"},
+    {"path": "changelog.md", "canonical_path": "reports/changelog/runtime-proposals.md", "kind": "changelog", "title": "Runtime Proposal Changelog"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "refresh.step4.proposals", "proposals", []string{ProposalsManifestFile})
+	if err == nil {
+		t.Fatalf("expected copied bootstrap summary in proposals markdown to be rejected")
+	}
+	if !strings.Contains(err.Error(), "bootstrap-only placeholder draft content") {
+		t.Fatalf("expected bootstrap placeholder error, got %v", err)
+	}
+}
+
 func TestValidateRequiredManifestRejectsObservedContractInvalidProposalsEnvelope(t *testing.T) {
 	t.Parallel()
 

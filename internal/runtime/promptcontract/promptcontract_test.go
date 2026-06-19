@@ -945,6 +945,10 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"If staged evidence is sparse, write the exact missing staged surface",
 		"Final self-check: overview.md, summary.md, and architect-summary.md were freshly overwritten",
 		"Final content MUST NOT include these scaffold markers:",
+		"Drafted required runtime artifacts for this step",
+		"Provider wrote this draft artifact",
+		"Read the current draft manifest only for contract fields and exact outputs",
+		"do not quote or copy its bootstrap summary",
 		"Runtime draft recovery initialized",
 		"Use collected shard manifests and validator output as the evidence source before final review",
 		"Do not read every staged shard document",
@@ -953,6 +957,9 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"Enrich overview.md, summary.md, and architect-summary.md from collected shard manifests, bounded authored shard docs",
 		"decision-ready operator summary",
 		"coverage gaps",
+		"For shard completeness, derive planned/succeeded/failed from typed shard-plan/shard-summary artifacts when visible",
+		"Never count the words failed/error/summary lexically inside manifests or markdown",
+		"If planned shard status is not explicitly visible, write planned=unknown",
 	} {
 		if !strings.Contains(prompt, token) {
 			t.Fatalf("expected draft enrichment prompt to contain %q, got:\n%s", token, prompt)
@@ -1005,8 +1012,11 @@ func TestComposeDraftArtifactEnrichmentPromptForProposalsRequiresWriteFirstTarge
 		"Evidence index or citation references",
 		"Residual coverage gaps",
 		"If staged evidence is sparse, write the gap explicitly",
+		"Do not treat proposals-draft-manifest.json summary text, canonical_path examples, or bootstrap output metadata as findings/proposals",
+		"record an explicit no-actionable-proposal gap",
 		"Final self-check: both proposal.md and changelog.md were freshly overwritten",
 		"Final content MUST NOT include these scaffold markers:",
+		"Drafted required runtime artifacts for this step",
 		"Runtime proposal surface initialized",
 		"Previous draft artifact validation failure:",
 	} {
