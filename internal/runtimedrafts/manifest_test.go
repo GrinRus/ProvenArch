@@ -504,6 +504,48 @@ func TestValidateRequiredManifestRejectsAsIsDraftLegacyOutputSurface(t *testing.
 	}
 }
 
+func TestValidateRequiredManifestRejectsOutputLogicalPathAlias(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	for _, relPath := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte("# Evidence-backed draft\n\nreports/as-is/overview.md\n"), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step2.asis_docs",
+  "step_contract": "as_is",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "overview.md", "canonical_path": "reports/as-is/overview.md", "logical_path": "reports/as-is/overview.md"},
+    {"path": "summary.md", "canonical_path": "reports/coverage/summary.md"},
+    {"path": "architect-summary.md", "canonical_path": "reports/agent-outputs/architect/summary.md"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, AsIsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "init.step2.asis_docs", "as_is", []string{AsIsManifestFile})
+	if err == nil {
+		t.Fatalf("expected logical_path output alias to be rejected")
+	}
+	if !strings.Contains(err.Error(), `unknown field "logical_path"`) {
+		t.Fatalf("expected strict unknown logical_path error, got %v", err)
+	}
+}
+
 func TestValidateRequiredManifestAcceptsCanonicalProposalsDraft(t *testing.T) {
 	t.Parallel()
 

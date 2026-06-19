@@ -251,6 +251,7 @@ func AsIsDraftManifestContractLines() []string {
 		`- outputs[] MUST include exactly these required publish mappings: overview.md -> reports/as-is/overview.md, summary.md -> reports/coverage/summary.md, architect-summary.md -> reports/agent-outputs/architect/summary.md.`,
 		`- Additional outputs are allowed only under reports/as-is/<domain>/overview.md.`,
 		`- outputs[].path MUST stay relative to draft_final_root and outputs[].canonical_path MUST stay workspace-relative.`,
+		`- outputs[] items may contain only path, canonical_path, kind, and title; do NOT add aliases such as logical_path.`,
 	}
 }
 
@@ -296,6 +297,7 @@ func ProposalsDraftManifestContractLines() []string {
 		`- proposals-draft-manifest.json MUST validate against the ACP runtime draft manifest contract.`,
 		`- proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="proposals", agent_role, outputs[], and optional summary/updated_at.`,
 		`- outputs[].path MUST stay relative to draft_final_root and outputs[].canonical_path MUST stay workspace-relative.`,
+		`- outputs[] items may contain only path, canonical_path, kind, and title; do NOT add aliases such as logical_path.`,
 		`- outputs[].canonical_path values are allowed only under proposals/* or reports/changelog/*.`,
 		`- outputs[].canonical_path values MUST be unique.`,
 		`- Do NOT add legacy top-level fields such as pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps.`,

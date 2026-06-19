@@ -1,9 +1,7 @@
 package promptcontract
 
 import (
-	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -238,20 +236,26 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		"collect manifest repair mode",
 		"COLLECT MANIFEST EVIDENCE-FIRST REPAIR:",
 		"Repair shard-pack-manifest.json from the existing authored documents and bounded repository evidence; do not start with a placeholder scaffold.",
-		"The first command below is a read-only evidence preflight",
-		"After the preflight, you must author shard-pack-manifest.json yourself",
+		"Do not run a separate read-only preflight",
+		"Do not answer with a plan, status note, or analysis-only message before the write.",
+		"Forbidden analysis-only phrases before the write: I have enough evidence",
+		"The first command below is a write-first provider-authored command contract",
+		"No deterministic helper writes the manifest for you",
 		"Read only the listed repository evidence candidates if authored docs need support",
 		"Write exactly one file:",
 		"Do not rewrite existing authored markdown documents.",
 		"overwrite it after the evidence pass",
 		"FIRST COLLECT MANIFEST REPAIR COMMAND:",
-		"Run this exact command as your next filesystem action.",
-		"Do not manually retype paths, inspect sibling taskruns, read raw logs, or write any other file before this command.",
-		"The command is read-only: it reads authored markdown already in write_root",
-		"python3 - ",
-		"ACP_COLLECT_MANIFEST_REPAIR_PY",
-		`"authored_docs":["docs/deep-dive.md","overview.md"]`,
-		`"evidence_paths":["src/README.md"]`,
+		"Execute one bounded filesystem command as your next action.",
+		"The command must read authored markdown already in write_root",
+		"write the final shard-pack-manifest.json before it returns",
+		"preflight-only completion is a failed no-op repair",
+		"First command contract:",
+		"read bounded authored markdown under write_root",
+		"write the final provider-authored manifest",
+		"Exact manifest write target:",
+		"Authored markdown inputs already present under write_root:",
+		"Bounded repository evidence candidates:",
 		"SKELETON USE:",
 		"Use this JSON only as the task-specific schema/key/type guide, not as final content.",
 		"Copying this skeleton unchanged is invalid",
@@ -279,8 +283,9 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		`"edges": [`,
 		`"findings": [`,
 		"COLLECT MANIFEST REPAIR INSTRUCTIONS:",
-		"Perform a bounded evidence pass over existing authored documents and listed repository evidence candidates before writing shard-pack-manifest.json.",
+		"Perform a bounded evidence pass over existing authored documents and listed repository evidence candidates inside the same first command that writes shard-pack-manifest.json.",
 		"Do not read, diff, or patch an existing invalid shard-pack-manifest.json; replace it after the evidence pass.",
+		"Do not stop after status prose such as \"I have enough evidence\"",
 		"Treat the embedded JSON as a schema guide only.",
 		"Do not collapse semantic output to repo/shard wrappers plus owner mapping",
 		"COLLECT MANIFEST REPAIR CHECKLIST:",
@@ -308,6 +313,11 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		"write it from the heredoc command",
 		`target.write_text(`,
 		`"writes_manifest":true`,
+		"read-only evidence preflight",
+		"After the preflight",
+		"writes_manifest",
+		"ACP_COLLECT_MANIFEST_REPAIR_PY",
+		"collect_manifest_repair_preflight",
 		"preserve semantic.entities",
 		"COLLECT MANIFEST REPAIR WRITE SHAPE:",
 		`"<replace with authored doc objects from write_root>"`,
@@ -343,15 +353,12 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 	if strings.Count(prompt, "FIRST COLLECT MANIFEST REPAIR COMMAND:") != 1 {
 		t.Fatalf("repair prompt should include exactly one first-command section:\n%s", prompt)
 	}
-	if strings.Count(prompt, "ACP_COLLECT_MANIFEST_REPAIR_PY") != 2 {
-		t.Fatalf("manifest-only repair prompt should include one Python repair heredoc, got:\n%s", prompt)
-	}
 	if strings.Contains(prompt, artifactquality.CollectManifestCanonicalExample()) {
 		t.Fatalf("repair prompt should not include a second generic canonical JSON example after the task skeleton:\n%s", prompt)
 	}
 }
 
-func TestCollectManifestRepairPreflightCommandIsReadOnly(t *testing.T) {
+func TestCollectManifestRepairGuidanceIsWriteFirst(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -386,29 +393,29 @@ func TestCollectManifestRepairPreflightCommandIsReadOnly(t *testing.T) {
 		PathScopes:   []string{"src"},
 	}
 
-	command := collectManifestRepairPreflightCommand(task, []string{"overview.md"}, []string{"src/README.md"})
-	output, err := exec.Command("sh", "-c", command).CombinedOutput()
-	if err != nil {
-		t.Fatalf("repair preflight command failed: %v\n%s\ncommand:\n%s", err, output, command)
-	}
-	if _, err := os.Stat(filepath.Join(writeRoot, "shard-pack-manifest.json")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("repair preflight must not write shard-pack-manifest.json, statErr=%v\noutput:\n%s", err, output)
-	}
-	raw := string(output)
+	guidance := collectManifestRepairWriteFirstGuidance(task, []string{"overview.md"}, []string{"src/README.md"})
 	for _, token := range []string{
-		`"mode": "collect_manifest_repair_preflight"`,
-		`"writes_manifest": false`,
-		`"authored_doc_count": 1`,
-		`"path": "overview.md"`,
-		"Django API",
+		"First command contract:",
+		"read bounded authored markdown under write_root",
+		"write the final provider-authored manifest",
+		"run a local `test -s`/JSON parse check after the write",
+		filepath.Join(writeRoot, "shard-pack-manifest.json"),
+		"overview.md",
 		"src/README.md",
 	} {
-		if !strings.Contains(raw, token) {
-			t.Fatalf("expected repair preflight output to contain %q, got:\n%s", token, raw)
+		if !strings.Contains(guidance, token) {
+			t.Fatalf("expected repair guidance to contain %q, got:\n%s", token, guidance)
 		}
 	}
-	if strings.Contains(command, "target.write_text") || strings.Contains(command, "Manifest repaired from") {
-		t.Fatalf("repair preflight command must not contain manifest synthesis writer:\n%s", command)
+	for _, forbidden := range []string{
+		"collect_manifest_repair_preflight",
+		"writes_manifest",
+		"read-only",
+		"print(json.dumps",
+	} {
+		if strings.Contains(guidance, forbidden) {
+			t.Fatalf("repair guidance must not preserve old preflight token %q:\n%s", forbidden, guidance)
+		}
 	}
 }
 
@@ -842,6 +849,11 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"bounded_read_context_roots",
 		"Fresh mutation is required",
 		"rewrite every markdown target",
+		"Prefer not to rewrite the draft manifest during enrichment",
+		"The only allowed output object keys are path, canonical_path, kind, and title",
+		"Never add logical_path",
+		"Preserve outputs[].path and outputs[].canonical_path exactly",
+		"update only top-level summary or updated_at",
 		"/tmp/workspace/reports/taskruns/run-1/asis/asis-draft-manifest.json",
 		"/tmp/workspace/reports/taskruns/run-1/staging/final",
 		"overview.md -> reports/as-is/overview.md",
@@ -883,6 +895,7 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"cat >",
 		"FIRST AS-IS DRAFT COMMAND:",
 		"Runtime draft recovery initialized this artifact for the scoped analysis step.",
+		`"logical_path"`,
 	} {
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("draft enrichment prompt must not contain bootstrap heredoc/scaffold %q:\n%s", forbidden, prompt)

@@ -1,7 +1,6 @@
 package promptcontract
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -19,20 +18,24 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 	authoredDocs := authoredRepairDocuments(task.WriteRoot)
 	evidencePaths := repairEvidenceCandidates(task)
 	skeleton := steppolicy.CollectManifestTaskSkeleton(task, authoredDocs, evidencePaths)
-	firstCommand := collectManifestRepairPreflightCommand(task, authoredDocs, evidencePaths)
+	firstCommand := collectManifestRepairWriteFirstGuidance(task, authoredDocs, evidencePaths)
 	sections := []string{
 		fmt.Sprintf("You are ACP runtime provider %q in collect manifest repair mode.", provider),
 		"COLLECT MANIFEST EVIDENCE-FIRST REPAIR:",
 		"- Repair shard-pack-manifest.json from the existing authored documents and bounded repository evidence; do not start with a placeholder scaffold.",
-		"- The first command below is a read-only evidence preflight; it reads existing authored documents in write_root and prints a bounded summary, but it does not write shard-pack-manifest.json.",
-		"- After the preflight, you must author shard-pack-manifest.json yourself from the observed markdown and allowed repository evidence; no deterministic helper writes the manifest for you.",
+		"- Do not run a separate read-only preflight and do not print an evidence packet as the only action.",
+		"- Do not answer with a plan, status note, or analysis-only message before the write.",
+		"- Forbidden analysis-only phrases before the write: I have enough evidence; I will write; I will now write; ready to write; the manifest will cite.",
+		"- The first command below is a write-first provider-authored command contract: it must read existing authored documents plus bounded evidence and write shard-pack-manifest.json before returning.",
+		"- No deterministic helper writes the manifest for you; you must author shard-pack-manifest.json from the observed markdown and allowed repository evidence.",
 		"- Read only the listed repository evidence candidates if authored docs need support; do not start an open-ended repository sweep.",
 		fmt.Sprintf("- Write exactly one file: %q.", manifestTarget),
 		"- Do not rewrite existing authored markdown documents.",
 		"- If shard-pack-manifest.json already exists but is invalid, do not inspect or patch it; overwrite it after the evidence pass.",
 		"FIRST COLLECT MANIFEST REPAIR COMMAND:",
-		"- Run this exact command as your next filesystem action. Do not manually retype paths, inspect sibling taskruns, read raw logs, or write any other file before this command.",
-		"- The command is read-only: it reads authored markdown already in write_root, verifies there is material to repair from, and prints the exact bounded evidence surface.",
+		"- Execute one bounded filesystem command as your next action. Do not inspect sibling taskruns, read raw logs, or write any other file before this command.",
+		"- The command must read authored markdown already in write_root, optionally read the listed evidence candidates, and write the final shard-pack-manifest.json before it returns.",
+		"- The command must not stop after printing evidence or saying what it will write; preflight-only completion is a failed no-op repair.",
 		firstCommand,
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
 		strings.TrimSpace(skeleton),
@@ -91,77 +94,41 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 	return strings.Join(sections, "\n\n")
 }
 
-func collectManifestRepairPreflightCommand(task acpruntime.Task, authoredDocs []string, evidencePaths []string) string {
+func collectManifestRepairWriteFirstGuidance(task acpruntime.Task, authoredDocs []string, evidencePaths []string) string {
 	writeRoot := strings.TrimSpace(task.WriteRoot)
 	if writeRoot == "" {
 		writeRoot = "."
 	}
-	payload := map[string]any{
-		"write_root":     writeRoot,
-		"run_id":         firstNonEmpty(task.RunID, "run-1"),
-		"step_id":        firstNonEmpty(task.StepID, "init.step1.collect"),
-		"shard_id":       firstNonEmpty(task.ShardID, task.DomainID, "shard"),
-		"domain_id":      strings.TrimSpace(task.DomainID),
-		"agent_role":     firstNonEmpty(task.AgentRole, "shard-analyst"),
-		"artifact_root":  strings.TrimSpace(task.ArtifactRoot),
-		"repo_scopes":    nonEmptyList(task.RepoScopes),
-		"path_scopes":    nonEmptyList(task.PathScopes),
-		"authored_docs":  nonEmptyList(authoredDocs),
-		"evidence_paths": nonEmptyList(evidencePaths),
+	manifestTarget := filepath.Join(writeRoot, "shard-pack-manifest.json")
+	lines := []string{
+		"- First command contract:",
+		"  - read bounded authored markdown under write_root;",
+		"  - read only listed repository evidence candidates if needed;",
+		"  - write the final provider-authored manifest to " + shellSingleQuote(manifestTarget) + " before returning;",
+		"  - run a local `test -s`/JSON parse check after the write.",
+		"- Exact manifest write target: " + shellSingleQuote(manifestTarget),
+		"- Authored markdown inputs already present under write_root:",
 	}
-	rawPayload, err := json.Marshal(payload)
-	if err != nil {
-		rawPayload = []byte("{}")
+	if len(authoredDocs) == 0 {
+		lines = append(lines, "  - discover non-empty *.md files under write_root with a bounded depth and ignore shard-pack-manifest.json/runtime-execution.json.")
+	} else {
+		for _, rel := range authoredDocs {
+			lines = append(lines, "  - "+rel)
+		}
 	}
-	return strings.Join([]string{
-		"python3 - " + shellSingleQuote(string(rawPayload)) + " <<'ACP_COLLECT_MANIFEST_REPAIR_PY'",
-		"import json, pathlib, sys",
-		"",
-		"meta = json.loads(sys.argv[1])",
-		"write_root = pathlib.Path(meta.get('write_root') or '.').resolve()",
-		"target = write_root / 'shard-pack-manifest.json'",
-		"",
-		"def clean_rel(value):",
-		"    value = str(value or '').replace('\\\\', '/').strip().strip('/')",
-		"    if not value or value in ('.', '..') or value.startswith('../') or '/..' in value:",
-		"        return ''",
-		"    return value",
-		"",
-		"doc_paths = []",
-		"for rel in meta.get('authored_docs') or []:",
-		"    rel = clean_rel(rel)",
-		"    if rel and rel not in doc_paths and (write_root / rel).is_file():",
-		"        doc_paths.append(rel)",
-		"if not doc_paths:",
-		"    for path in sorted(write_root.rglob('*.md')):",
-		"        rel = clean_rel(path.relative_to(write_root).as_posix())",
-		"        if rel and path.name not in ('runtime-execution.json', 'shard-pack-manifest.json'):",
-		"            doc_paths.append(rel)",
-		"",
-		"docs = []",
-		"for rel in doc_paths:",
-		"    text = (write_root / rel).read_text(encoding='utf-8', errors='replace')",
-		"    if text.strip():",
-		"        docs.append({'path': rel, 'bytes': len(text.encode('utf-8')), 'preview': ' '.join(text.split())[:280]})",
-		"if not docs:",
-		"    raise SystemExit('collect manifest repair found no authored markdown documents')",
-		"",
-		"evidence_paths = [clean_rel(p) for p in (meta.get('evidence_paths') or meta.get('path_scopes') or ['README.md', 'README.adoc'])]",
-		"evidence_paths = [p for p in evidence_paths if p] or ['README.md', 'README.adoc']",
-		"summary = {",
-		"    'mode': 'collect_manifest_repair_preflight',",
-		"    'target': target.as_posix(),",
-		"    'writes_manifest': False,",
-		"    'authored_doc_count': len(docs),",
-		"    'authored_docs': docs[:12],",
-		"    'evidence_paths': evidence_paths[:12],",
-		"    'repo_scopes': meta.get('repo_scopes') or [],",
-		"    'path_scopes': meta.get('path_scopes') or [],",
-		"}",
-		"print(json.dumps(summary, indent=2, ensure_ascii=False))",
-		"ACP_COLLECT_MANIFEST_REPAIR_PY",
-		"test -d " + shellSingleQuote(writeRoot),
-	}, "\n")
+	lines = append(lines, "- Bounded repository evidence candidates:")
+	if len(evidencePaths) == 0 {
+		lines = append(lines, "  - README.md", "  - README.adoc")
+	} else {
+		for _, rel := range evidencePaths {
+			lines = append(lines, "  - "+rel)
+		}
+	}
+	lines = append(lines,
+		"- Do not emit only this evidence list. The same first command must write shard-pack-manifest.json.",
+		"- Do not use a copied skeleton or generic repo/shard wrapper semantic as the final manifest.",
+	)
+	return strings.Join(lines, "\n")
 }
 
 func firstNonEmpty(values ...string) string {
@@ -171,16 +138,6 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func nonEmptyList(values []string) []string {
-	out := []string{}
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			out = append(out, trimmed)
-		}
-	}
-	return out
 }
 
 func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task acpruntime.Task, validationErr error) string {
@@ -269,8 +226,9 @@ func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task a
 func overwriteCollectManifestRepairInstructions() []string {
 	return []string{
 		"COLLECT MANIFEST REPAIR INSTRUCTIONS:",
-		"- Perform a bounded evidence pass over existing authored documents and listed repository evidence candidates before writing shard-pack-manifest.json.",
+		"- Perform a bounded evidence pass over existing authored documents and listed repository evidence candidates inside the same first command that writes shard-pack-manifest.json.",
 		"- Do not read, diff, or patch an existing invalid shard-pack-manifest.json; replace it after the evidence pass.",
+		"- Do not stop after status prose such as \"I have enough evidence\" or \"I am replacing\"; that is a no-op repair unless shard-pack-manifest.json was already written.",
 		"- Do not search the filesystem for schemas/*, docs/spec/*, examples, prior manifests, sibling shards, raw logs, or reports/taskruns history.",
 		"- Do not rewrite authored markdown documents and do not create any file other than shard-pack-manifest.json.",
 		"- Treat the embedded JSON as a schema guide only. Build semantic entities, edges, findings, coverage, questions, and citations from the authored docs and allowed repository evidence.",
