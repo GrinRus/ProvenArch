@@ -35,7 +35,7 @@ func ValidateRuntimeArtifacts(task acpruntime.Task, provider acpruntime.Provider
 }
 
 func ValidateCollectArtifacts(task acpruntime.Task, provider acpruntime.Provider) error {
-	return artifactquality.ValidateCollectManifestInRoot(task.WriteRoot)
+	return artifactquality.ValidateCollectManifestInRootWithRepoRoots(task.WriteRoot, collectTaskRepoRoots(task))
 }
 
 func ValidateDraftArtifacts(task acpruntime.Task) error {
@@ -99,4 +99,73 @@ func NonEmptyStage(stage string) string {
 		return "unknown"
 	}
 	return stage
+}
+
+func collectTaskRepoRoots(task acpruntime.Task) map[string]string {
+	scopes := nonEmptyUniqueStrings(append([]string{task.RepoScope}, task.RepoScopes...))
+	if len(scopes) == 0 {
+		return nil
+	}
+	candidates := collectTaskRepoRootCandidates(task)
+	if len(candidates) == 0 {
+		return nil
+	}
+	roots := map[string]string{}
+	for idx, scope := range scopes {
+		if idx < len(candidates) {
+			roots[scope] = candidates[idx]
+		}
+	}
+	if len(scopes) == 1 && len(candidates) == 1 {
+		roots[scopes[0]] = candidates[0]
+	}
+	return roots
+}
+
+func collectTaskRepoRootCandidates(task acpruntime.Task) []string {
+	exclude := map[string]struct{}{}
+	for _, value := range []string{task.Workspace, task.WriteRoot, task.DraftFinalRoot} {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			exclude[filepath.Clean(trimmed)] = struct{}{}
+		}
+	}
+	out := []string{}
+	seen := map[string]struct{}{}
+	for _, root := range task.ReadContextRoots {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		clean := filepath.Clean(root)
+		if _, skip := exclude[clean]; skip {
+			continue
+		}
+		info, err := os.Stat(clean)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		if _, exists := seen[clean]; exists {
+			continue
+		}
+		seen[clean] = struct{}{}
+		out = append(out, clean)
+	}
+	return out
+}
+
+func nonEmptyUniqueStrings(values []string) []string {
+	out := []string{}
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
 }

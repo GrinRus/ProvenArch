@@ -486,6 +486,85 @@ func TestValidateCollectManifestRejectsDirectoryDocumentPath(t *testing.T) {
 	}
 }
 
+func TestValidateCollectManifestRejectsMissingCitationRepoPath(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	repoRoot := t.TempDir()
+	writeDoc(t, writeRoot, "overview.md", "# Payments Overview\n\n## Observations\n- `README.md` describes payments.\n")
+	writeRepoFile(t, repoRoot, "README.md", "# Payments\n")
+
+	payload := validCollectManifestPayload()
+	payload["citations"].([]any)[0].(map[string]any)["path"] = "pom.xml"
+	raw, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), append(raw, '\n'), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	err = ValidateCollectManifestInRootWithRepoRoots(writeRoot, map[string]string{"payments-service": repoRoot})
+	if err == nil {
+		t.Fatalf("expected missing citation repo path to fail validation")
+	}
+	if !strings.Contains(err.Error(), `citations[0] repo evidence path "pom.xml" is missing`) {
+		t.Fatalf("expected missing citation path error, got %v", err)
+	}
+}
+
+func TestValidateCollectManifestRejectsMissingSemanticEvidenceRepoPath(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	repoRoot := t.TempDir()
+	writeDoc(t, writeRoot, "overview.md", "# Payments Overview\n\n## Observations\n- `README.md` describes payments.\n")
+	writeRepoFile(t, repoRoot, "README.md", "# Payments\n")
+
+	payload := validCollectManifestPayload()
+	entity := semanticSliceItem(payload, "entities", 0)
+	evidence := entity["provenance"].(map[string]any)["evidence"].([]any)
+	evidence[0].(map[string]any)["path"] = "src/missing.go"
+	raw, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), append(raw, '\n'), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	err = ValidateCollectManifestInRootWithRepoRoots(writeRoot, map[string]string{"payments-service": repoRoot})
+	if err == nil {
+		t.Fatalf("expected missing semantic evidence repo path to fail validation")
+	}
+	if !strings.Contains(err.Error(), `semantic.entities[0].provenance.evidence[0] repo evidence path "src/missing.go" is missing`) {
+		t.Fatalf("expected missing semantic evidence path error, got %v", err)
+	}
+}
+
+func TestValidateCollectManifestAcceptsGeneratedRepoRootSuffixAlias(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	repoParent := t.TempDir()
+	repoRoot := filepath.Join(repoParent, "payments-service-d542d7e34d40")
+	writeDoc(t, writeRoot, "overview.md", "# Payments Overview\n\n## Observations\n- `README.md` describes payments.\n")
+	writeRepoFile(t, repoRoot, "README.md", "# Payments\n")
+
+	payload := validCollectManifestPayload()
+	raw, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), append(raw, '\n'), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	if err := ValidateCollectManifestInRootWithRepoRoots(writeRoot, map[string]string{"payments-service": repoRoot}); err != nil {
+		t.Fatalf("expected generated repo root suffix alias to validate: %v", err)
+	}
+}
+
 func TestValidateCollectManifestRejectsMissingRequiredMetadataWithoutAutofill(t *testing.T) {
 	t.Parallel()
 
@@ -701,5 +780,16 @@ func writeDoc(t *testing.T, writeRoot string, rel string, content string) {
 	}
 	if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
 		t.Fatalf("write doc %q: %v", rel, err)
+	}
+}
+
+func writeRepoFile(t *testing.T, repoRoot string, rel string, content string) {
+	t.Helper()
+	abs := filepath.Join(repoRoot, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatalf("mkdir for repo file %q: %v", rel, err)
+	}
+	if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
+		t.Fatalf("write repo file %q: %v", rel, err)
 	}
 }

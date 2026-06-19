@@ -1352,6 +1352,7 @@ func writeWorkspace(t *testing.T) string {
 	if err := os.MkdirAll(repoPath, 0o755); err != nil {
 		t.Fatalf("create sample repo path: %v", err)
 	}
+	writeTestRepoReadme(t, repoPath, "# Sample\n")
 	manifestPath := filepath.Join(root, "workspace.yaml")
 	manifest := "version: 1\nrepos:\n  - name: sample\n    path: " + repoPath + "\n"
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
@@ -1368,6 +1369,7 @@ func writeWorkspaceWithExecutionProfile(t *testing.T, strategy string, maxParall
 	if err := os.MkdirAll(repoPath, 0o755); err != nil {
 		t.Fatalf("create sample repo path: %v", err)
 	}
+	writeTestRepoReadme(t, repoPath, "# Sample\n")
 	manifest := strings.Join([]string{
 		"version: 1",
 		"repos:",
@@ -1451,6 +1453,21 @@ def first_non_empty_list(mapping, keys):
 def slugify(value):
     return re.sub(r'[^a-z0-9]+', '-', value.lower()).strip('-') or "stub"
 
+def infer_repo_scope_from_shard(shard):
+    slug = slugify(shard)
+    for suffix in [
+        "-readme-md",
+        "-makefile",
+        "-dockerfile",
+        "-package-json",
+        "-pom-xml",
+        "-build-gradle",
+        "-settings-gradle",
+    ]:
+        if slug.endswith(suffix) and len(slug) > len(suffix):
+            return slug[:-len(suffix)]
+    return slug
+
 task = {}
 if raw:
     try:
@@ -1473,6 +1490,10 @@ if not repo_scopes:
     if repo_scope:
         repo_scopes = [repo_scope]
 path_scopes = first_non_empty_list(task, ["path_scopes", "PathScopes"])
+if not repo_scopes:
+    inferred_repo_scope = infer_repo_scope_from_shard(shard_id)
+    if inferred_repo_scope:
+        repo_scopes = [inferred_repo_scope]
 
 def write_runtime_draft(manifest_name, outputs, default_step_contract="draft"):
     if not write_root or not draft_root:
@@ -1688,6 +1709,7 @@ agent_role = policy_value("agent_role") or "architect"
 step_contract = policy_value("step_contract") or "draft"
 current_step = step_id()
 run_id = run_id_from_path(write_root or draft_root or "/tmp/run-1")
+repo_scope = policy_value("repo_scope") or policy_value("RepoScope") or "sample"
 
 if current_step == "init.step0.constitution":
     os.makedirs(write_root, exist_ok=True)
@@ -1810,7 +1832,7 @@ else:
         "shard_id": shard_id,
         "agent_role": "shard-analyst",
         "artifact_root": artifact_root,
-        "repo_scopes": [],
+        "repo_scopes": [repo_scope] if repo_scope else [],
         "path_scopes": [],
         "summary": "stub codex shard pack",
         "documents": [
@@ -1828,7 +1850,7 @@ else:
         "citations": [
             {
                 "id": "cite." + shard_id,
-                "repo": "stub-repo",
+                "repo": repo_scope or "sample",
                 "path": "README.md",
                 "claim_ids": ["claim.stub"],
                 "document_ids": ["doc." + shard_id]
@@ -1866,6 +1888,16 @@ func outputField(output string, key string) string {
 		}
 	}
 	return ""
+}
+
+func writeTestRepoReadme(t *testing.T, repoPath string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("create repo path for README: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoPath, "README.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write repo README: %v", err)
+	}
 }
 
 func hasDoctorCLIResultCheck(checks []struct {

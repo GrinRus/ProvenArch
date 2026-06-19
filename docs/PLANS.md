@@ -1108,6 +1108,30 @@ Strict medium `codex-code` diagnostic run `regres-long-posthog-ftgo-20260618T225
 - [x] Existing unknown-field tests still reject legacy manifest drift.
 - [ ] Latest strict medium `codex-code` and `claude-code` runs pass with artifact/UX quality accepted or explicitly non-applicable with no blocker.
 
+### Progress log
+- 2026-06-19: Strict medium `codex-code` rerun `regres-long-posthog-ftgo-20260619T002751Z` reached non-release machine `PASS` for selected provider totals (`2/2`) with frontend PASS and no legacy mixed quality-gate artifacts, proving execution/artifact quality separation. Manual artifact review rejected the result because promoted FTGO docs cited non-existent Maven `pom.xml` files in a Gradle repo; `artifact_quality:*` telemetry surfaced evidence-scope warnings but correctly did not flip the machine verdict.
+
+---
+
+## Live E2E Collect Repo Evidence Path Strictness
+
+### Context
+The same strict medium `codex-code` run proved that missing repo evidence paths can leak past collect validation into promoted `step2` markdown: FTGO final docs referenced `ftgo-order-service/pom.xml` and `ftgo-order-service-api/pom.xml`, while the pinned repo only contains Gradle build files for those modules. This is not a manual quality preference; it is a broken runtime evidence contract because collect citations/provenance pointed to files that do not exist under the resolved repo root.
+
+### Plan
+- [x] Validate `citations[].repo/path` against resolved collect repo roots when task context is available.
+- [x] Validate semantic provenance evidence paths for entities, edges, and findings against the same resolved repo roots.
+- [x] Keep existing validation behavior for callers that do not have repo-root context, so deterministic fixtures and offline contract tests remain scoped.
+- [x] Update collect prompt/contract wording so providers remove unsupported claims or record coverage gaps instead of citing guessed files.
+- [x] Add targeted unit coverage for missing citation paths, missing semantic evidence paths, generated repo-root suffix aliases, and runtime collect task validation.
+- [ ] Run full DoD, commit, and rerun affected strict medium `codex-code`.
+
+### Acceptance
+- [x] A collect manifest that cites a missing repo file fails as `runtime_contract_failed` / repair input before downstream `step2` can promote the claim.
+- [x] Existing `artifact_quality:*` telemetry remains non-gating for machine execution verdict; this fix only enforces concrete runtime evidence paths in collect contracts.
+- [ ] Latest strict medium `codex-code` rerun no longer promotes missing repo/path evidence into final artifacts.
+- [ ] Latest strict medium `claude-code` rerun remains pending after Codex produces clean strict medium evidence.
+
 ---
 
 ## Implemented vs Planned (operational mirror)

@@ -198,6 +198,7 @@ Release workflow hardening:
 - runtime draft manifest metadata: optional `updated_at` is accepted, while legacy/envelope fields such as `repo_scopes`, `compatibility`, `generated_at`, `pipeline`, or `proposals[]` remain invalid
 - strict collect validation:
   - artifact-root-prefixed, absolute, missing-file, directory and hidden provider/tool `documents[].path` (`.qwen/`, `.claude/`, `.codex/`, `.git/`, `node_modules/`) fail-ятся без rewrite
+  - missing or guessed repo evidence paths in `citations[].path` and `semantic.*[].provenance.evidence[].path` fail when resolved repo roots are available, including generated repo root suffix aliases
   - referenced authored collect docs с `ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT`, unchanged marker-free seed prose или recovery fallback prose fail-ятся до apply и не маскируются pair-repair success
   - collect artifact monitor snapshot использует тот же strict validation и не считает parse-only manifest с bootstrap markdown валидным controlled-stop сигналом
   - missing required metadata fail-ится без autofill

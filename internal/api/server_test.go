@@ -2421,6 +2421,7 @@ func TestRunDetailAndArtifactsLoadFromPersistedHistoryAfterRestart(t *testing.T)
 	if err := os.MkdirAll(repoPath, 0o755); err != nil {
 		t.Fatalf("create repo path: %v", err)
 	}
+	writeAPITestRepoReadme(t, repoPath, "# Payments Service\n")
 	manifest := `version: 1
 repos:
   - name: payments-service
@@ -2942,6 +2943,7 @@ func TestRuntimeProfileGetIncludesStepProviders(t *testing.T) {
 	if err := os.MkdirAll(repoPath, 0o755); err != nil {
 		t.Fatalf("create repo path: %v", err)
 	}
+	writeAPITestRepoReadme(t, repoPath, "# Payments Service\n")
 	manifest := `version: 1
 repos:
   - name: payments-service
@@ -3083,6 +3085,7 @@ func TestRunStatusIncludesEffectiveStepProviders(t *testing.T) {
 	if err := os.MkdirAll(repoPath, 0o755); err != nil {
 		t.Fatalf("create repo path: %v", err)
 	}
+	writeAPITestRepoReadme(t, repoPath, "# Payments Service\n")
 	manifest := `version: 1
 repos:
   - name: payments-service
@@ -4197,6 +4200,21 @@ def first_non_empty_list(mapping, keys):
 def slugify(value):
     return re.sub(r'[^a-z0-9]+', '-', value.lower()).strip('-') or "stub"
 
+def infer_repo_scope_from_shard(shard):
+    slug = slugify(shard)
+    for suffix in [
+        "-readme-md",
+        "-makefile",
+        "-dockerfile",
+        "-package-json",
+        "-pom-xml",
+        "-build-gradle",
+        "-settings-gradle",
+    ]:
+        if slug.endswith(suffix) and len(slug) > len(suffix):
+            return slug[:-len(suffix)]
+    return slug
+
 task = {}
 if raw:
     try:
@@ -4219,6 +4237,10 @@ if not repo_scopes:
     if repo_scope:
         repo_scopes = [repo_scope]
 path_scopes = first_non_empty_list(task, ["path_scopes", "PathScopes"])
+if not repo_scopes:
+    inferred_repo_scope = infer_repo_scope_from_shard(shard_id)
+    if inferred_repo_scope:
+        repo_scopes = [inferred_repo_scope]
 question = first_non_empty(task, ["question", "Question"]) or from_prompt("question") or from_prompt("Question")
 context_pack_path = first_non_empty(task, ["context_pack_path", "ContextPackPath"]) or from_prompt("context_pack_path") or from_prompt("ContextPackPath")
 
@@ -4425,10 +4447,46 @@ func writeManifestRootWithRoot(t *testing.T, root string, manifest string) strin
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("create root: %v", err)
 	}
+	seedExistingManifestRepoReadmes(t, manifest)
 	if err := os.WriteFile(filepath.Join(root, "workspace.yaml"), []byte(manifest), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
 	return root
+}
+
+func seedExistingManifestRepoReadmes(t *testing.T, manifest string) {
+	t.Helper()
+	for _, line := range strings.Split(manifest, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "path: ") {
+			continue
+		}
+		repoPath := strings.TrimSpace(strings.TrimPrefix(trimmed, "path: "))
+		if repoPath == "" {
+			continue
+		}
+		info, err := os.Stat(repoPath)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		readmePath := filepath.Join(repoPath, "README.md")
+		if _, err := os.Stat(readmePath); err == nil {
+			continue
+		}
+		if err := os.WriteFile(readmePath, []byte("# Test Repository\n"), 0o644); err != nil {
+			t.Fatalf("write test repo README %s: %v", readmePath, err)
+		}
+	}
+}
+
+func writeAPITestRepoReadme(t *testing.T, repoPath string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("create repo path for README: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoPath, "README.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write repo README: %v", err)
+	}
 }
 
 func runGitTestCommand(t *testing.T, dir string, args ...string) {
