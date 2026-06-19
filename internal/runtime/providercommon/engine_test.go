@@ -932,6 +932,66 @@ EOF
 	}
 }
 
+func TestRunHeadlessProviderRejectsStructuralInvalidCollectManifestAfterRepairExhaustion(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-repair-structural-invalid-exhausted")
+	repoRoot := filepath.Join(task.Workspace, "repos", "bank-of-anthos")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Bank of Anthos\n"), 0o644); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	task.ReadContextRoots = []string{repoRoot}
+	badManifest := strings.ReplaceAll(collectManifestJSON(task), `"path": "README.md"`, `"path": "missing-evidence.md"`)
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + badManifest + `
+EOF
+`
+	repairScript := `#!/usr/bin/env bash
+set -eu
+exit 0
+`
+	runner := testAdapter{
+		command:       writeEngineScript(t, initialScript),
+		repairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+		},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected exhausted structural manifest repair to fail")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "manifest-only collect repair did not produce valid collect artifacts") {
+		t.Fatalf("expected manifest repair exhaustion to remain terminal, got %v", err)
+	}
+	if !hasDiagnosticField(diagnostics, "collect manifest repair exhausted", "recovery_mode", "collect_manifest_repair") {
+		t.Fatalf("expected collect manifest repair exhausted diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "collect manifest runtime recovery completed", "recovery_mode", "collect_manifest_runtime_recovery") {
+		t.Fatalf("structural-invalid manifest repair exhaustion must not be converted into deterministic recovery success: %#v", diagnostics)
+	}
+}
+
 func TestRunHeadlessProviderRejectsBootstrapOnlyAuthoredDocWithoutPairRepair(t *testing.T) {
 	t.Parallel()
 

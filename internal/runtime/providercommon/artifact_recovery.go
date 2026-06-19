@@ -329,9 +329,6 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 				}
 			}
 			emitCollectManifestRepairExhaustedDiagnostic(task, adapter.Provider(), repairStalled.Diagnostic, repairErr)
-			if recovered, recoveredResult, recoveredErr := recoverCollectManifestDeterministically(task, adapter, repairResult, beforeRepairFiles, repairErr); recovered {
-				return true, recoveredResult, recoveredErr
-			}
 			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_manifest_repair", "manifest-only collect repair stalled before valid artifacts were available", repairErr)
 		}
 		return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, repairResult, repairErr)
@@ -341,9 +338,6 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 	}
 	if err := adapter.ValidateArtifacts(task); err != nil {
 		emitCollectManifestRepairExhaustedDiagnostic(task, adapter.Provider(), runtimeArtifactSnapshot(task).stallDiagnostic(), err)
-		if recovered, recoveredResult, recoveredErr := recoverCollectManifestDeterministically(task, adapter, repairResult, beforeRepairFiles, err); recovered {
-			return true, recoveredResult, recoveredErr
-		}
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_manifest_repair", "manifest-only collect repair did not produce valid collect artifacts", err)
 	}
 	emitCollectManifestRepairCompletedDiagnostic(task, adapter.Provider(), "")
