@@ -29,6 +29,8 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 		"- The first command below is a write-first provider-authored command contract: it must read existing authored documents plus bounded evidence and write shard-pack-manifest.json before returning.",
 		"- No deterministic helper writes the manifest for you; you must author shard-pack-manifest.json from the observed markdown and allowed repository evidence.",
 		"- Read only the listed repository evidence candidates if authored docs need support; do not start an open-ended repository sweep.",
+		"- Repository evidence in citations/provenance must be file-level: path_scopes may guide discovery, but directories or missing paths must become coverage gaps/questions, never citation paths.",
+		"- JSON syntax-only checks such as jq empty or python3 -m json.tool are insufficient; the first command must also prove every citation/provenance repo path is an existing file.",
 		fmt.Sprintf("- Write exactly one file: %q.", manifestTarget),
 		"- Do not rewrite existing authored markdown documents.",
 		"- If shard-pack-manifest.json already exists but is invalid, do not inspect or patch it; overwrite it after the evidence pass.",
@@ -104,8 +106,9 @@ func collectManifestRepairWriteFirstGuidance(task acpruntime.Task, authoredDocs 
 		"- First command contract:",
 		"  - read bounded authored markdown under write_root;",
 		"  - read only listed repository evidence candidates if needed;",
+		"  - verify every manifest citation/provenance repo path with file-level checks such as test -f, rg --files, or portable find ... -type f -print;",
 		"  - write the final provider-authored manifest to " + shellSingleQuote(manifestTarget) + " before returning;",
-		"  - run a local `test -s`/JSON parse check after the write.",
+		"  - run a local `test -s`/JSON parse check plus file-level evidence path checks after the write.",
 		"- Exact manifest write target: " + shellSingleQuote(manifestTarget),
 		"- Authored markdown inputs already present under write_root:",
 	}
@@ -126,6 +129,8 @@ func collectManifestRepairWriteFirstGuidance(task acpruntime.Task, authoredDocs 
 	}
 	lines = append(lines,
 		"- Do not emit only this evidence list. The same first command must write shard-pack-manifest.json.",
+		"- Do not cite repository directories. If a candidate is directory-only or missing, record it in coverage.missing/questions instead of citations/provenance.",
+		"- Use python3, not python; do not use GNU-only find -printf; do not assign to the zsh-reserved status variable.",
 		"- Do not use a copied skeleton or generic repo/shard wrapper semantic as the final manifest.",
 	)
 	return strings.Join(lines, "\n")
@@ -179,6 +184,9 @@ func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task a
 		"- Explain concrete components, runtime/config/deploy/test/data surfaces, ownership gaps, and dependencies in the markdown document.",
 		"- Build shard-pack-manifest.json from that markdown plus the same repo/path evidence: documents, citations, semantic.coverage, semantic.questions, semantic.entities, semantic.edges, and semantic.findings.",
 		"- Use repo/path provenance for every semantic evidence object; stdout claims are diagnostics only.",
+		"- Every citation/provenance path must be a concrete existing repository file; directories and missing paths are coverage gaps/questions, not evidence.",
+		"- JSON syntax-only checks such as jq empty or python3 -m json.tool are insufficient; include file-level citation/provenance checks before a successful exit.",
+		"- Use python3, not python; do not use GNU-only find -printf; do not assign to the zsh-reserved status variable.",
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
 		strings.TrimSpace(skeleton),
 		"SKELETON USE:",
@@ -231,6 +239,8 @@ func overwriteCollectManifestRepairInstructions() []string {
 		"- Do not stop after status prose such as \"I have enough evidence\" or \"I am replacing\"; that is a no-op repair unless shard-pack-manifest.json was already written.",
 		"- Do not search the filesystem for schemas/*, docs/spec/*, examples, prior manifests, sibling shards, raw logs, or reports/taskruns history.",
 		"- Do not rewrite authored markdown documents and do not create any file other than shard-pack-manifest.json.",
+		"- Do not cite directory paths in citations/provenance; resolve them to concrete existing files or move them to coverage.missing/questions.",
+		"- Syntax-valid JSON alone is not a valid repair; verify citation/provenance paths are existing files before exiting successfully.",
 		"- Treat the embedded JSON as a schema guide only. Build semantic entities, edges, findings, coverage, questions, and citations from the authored docs and allowed repository evidence.",
 		"- Do not collapse semantic output to repo/shard wrappers plus owner mapping; cite concrete components and relationships already described in the authored docs.",
 		"- Validation, not stdout, is the success surface; do not claim validation unless the backend accepts the artifact.",

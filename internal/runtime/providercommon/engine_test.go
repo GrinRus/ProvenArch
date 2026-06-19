@@ -2035,6 +2035,39 @@ func TestRunHeadlessProviderEnrichesBootstrapOnlyDraftAfterRepairStall(t *testin
 	}
 }
 
+func TestRunHeadlessProviderSkipsDraftRepairForBootstrapOnlyDraft(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-direct")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	enrichmentScript := asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, "exit 0")
+	runner := testAdapter{
+		command:                writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
+		draftEnrichmentCommand: writeEngineScript(t, enrichmentScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:     true,
+			RepairDraftArtifactsOnce:          true,
+			RepairDraftArtifactEnrichmentOnce: true,
+		},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected direct draft enrichment success for bootstrap-only draft, got %v", err)
+	}
+	if hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "draft_artifact_repair") {
+		t.Fatalf("bootstrap-only draft validation must skip scaffold draft repair, got %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("expected draft_artifact_enrichment scheduled diagnostic, got %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair completed", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("expected draft_artifact_enrichment completed diagnostic, got %#v", diagnostics)
+	}
+}
+
 func TestRunHeadlessProviderRejectsBootstrapOnlyDraftAfterEnrichment(t *testing.T) {
 	t.Parallel()
 

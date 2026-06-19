@@ -497,6 +497,9 @@ func recoverDraftArtifactRepair(ctx context.Context, task acpruntime.Task, adapt
 	if !policy.RepairDraftArtifactsOnce || !runtimedrafts.IsDraftStep(task.StepID) {
 		return false, acpruntime.Result{}, nil
 	}
+	if isDraftBootstrapOnlyValidationFailure(validationErr) {
+		return recoverDraftArtifactEnrichment(ctx, task, adapter, result, validationErr, stage+"_bootstrap_only")
+	}
 	repairAdapter, ok := adapter.(DraftArtifactRepairAdapter)
 	if !ok {
 		return false, acpruntime.Result{}, nil
