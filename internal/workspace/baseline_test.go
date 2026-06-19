@@ -249,7 +249,7 @@ func TestBaselineProposalsPromptPackRequiresCanonicalDraftManifest(t *testing.T)
 	}
 
 	expected := []string{
-		"proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract=\"proposals\", agent_role, optional summary, and outputs[].",
+		"proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract=\"proposals\", agent_role, outputs[], and optional summary/updated_at.",
 		"outputs[].canonical_path values are allowed only under proposals/* or reports/changelog/*.",
 		"Do NOT add legacy top-level fields such as pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps.",
 		"Do NOT emit final-index-like proposal envelopes; proposals-draft-manifest.json is only the runtime draft publish map.",

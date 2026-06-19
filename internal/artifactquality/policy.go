@@ -243,8 +243,8 @@ func ValidatorVerdictCanonicalExample() string {
 func AsIsDraftManifestContractLines() []string {
 	return []string{
 		`- asis-draft-manifest.json MUST validate against the ACP runtime draft manifest contract.`,
-		`- asis-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="as_is", agent_role, and outputs[].`,
-		`- Do NOT add legacy top-level fields such as repo_scopes, path_scopes, compatibility, or alternate metadata envelopes.`,
+		`- asis-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="as_is", agent_role, and outputs[]; optional top-level metadata is limited to summary and updated_at.`,
+		`- Do NOT add legacy top-level fields such as repo_scopes, path_scopes, compatibility, generated_at, or alternate metadata envelopes.`,
 		`- outputs[] MUST include exactly these required publish mappings: overview.md -> reports/as-is/overview.md, summary.md -> reports/coverage/summary.md, architect-summary.md -> reports/agent-outputs/architect/summary.md.`,
 		`- Additional outputs are allowed only under reports/as-is/<domain>/overview.md.`,
 		`- outputs[].path MUST stay relative to draft_final_root and outputs[].canonical_path MUST stay workspace-relative.`,
@@ -291,7 +291,7 @@ func AsIsDraftManifestCanonicalExample() string {
 func ProposalsDraftManifestContractLines() []string {
 	return []string{
 		`- proposals-draft-manifest.json MUST validate against the ACP runtime draft manifest contract.`,
-		`- proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="proposals", agent_role, optional summary, and outputs[].`,
+		`- proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="proposals", agent_role, outputs[], and optional summary/updated_at.`,
 		`- outputs[].path MUST stay relative to draft_final_root and outputs[].canonical_path MUST stay workspace-relative.`,
 		`- outputs[].canonical_path values are allowed only under proposals/* or reports/changelog/*.`,
 		`- outputs[].canonical_path values MUST be unique.`,

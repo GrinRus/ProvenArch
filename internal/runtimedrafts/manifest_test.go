@@ -278,6 +278,50 @@ func TestValidateRequiredManifestAcceptsCanonicalAsIsDraft(t *testing.T) {
 	}
 }
 
+func TestValidateRequiredManifestAcceptsAsIsDraftUpdatedAtMetadata(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	for _, relPath := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte("# Evidence-backed draft\n"), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step2.asis_docs",
+  "step_contract": "as_is",
+  "agent_role": "architect",
+  "summary": "Drafted required runtime artifacts for this step.",
+  "outputs": [
+    {"path": "overview.md", "canonical_path": "reports/as-is/overview.md", "kind": "report", "title": "System Overview"},
+    {"path": "summary.md", "canonical_path": "reports/coverage/summary.md", "kind": "report", "title": "Coverage Summary"},
+    {"path": "architect-summary.md", "canonical_path": "reports/agent-outputs/architect/summary.md", "kind": "agent-output", "title": "Architect Summary"}
+  ],
+  "updated_at": "2026-06-19T00:12:40.516612+00:00"
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, AsIsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	loaded, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "refresh.step2.asis_docs", "as_is", []string{AsIsManifestFile})
+	if err != nil {
+		t.Fatalf("expected updated_at metadata to validate: %v", err)
+	}
+	if loaded.UpdatedAt != "2026-06-19T00:12:40.516612+00:00" {
+		t.Fatalf("unexpected updated_at: %q", loaded.UpdatedAt)
+	}
+}
+
 func TestValidateRequiredManifestRejectsAsIsBootstrapDraftContent(t *testing.T) {
 	t.Parallel()
 

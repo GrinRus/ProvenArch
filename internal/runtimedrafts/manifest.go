@@ -26,6 +26,7 @@ type Manifest struct {
 	StepContract string   `json:"step_contract"`
 	AgentRole    string   `json:"agent_role"`
 	Summary      string   `json:"summary,omitempty"`
+	UpdatedAt    string   `json:"updated_at,omitempty"`
 	Outputs      []Output `json:"outputs"`
 }
 

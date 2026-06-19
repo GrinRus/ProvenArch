@@ -10,7 +10,7 @@ func TestProposalsDraftManifestContractLinesDefineCanonicalSurface(t *testing.T)
 
 	joined := strings.Join(ProposalsDraftManifestContractLines(), "\n")
 	required := []string{
-		`proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="proposals", agent_role, optional summary, and outputs[].`,
+		`proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="proposals", agent_role, outputs[], and optional summary/updated_at.`,
 		`outputs[].canonical_path values are allowed only under proposals/* or reports/changelog/*.`,
 		`outputs[].canonical_path values MUST be unique.`,
 		`pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps`,

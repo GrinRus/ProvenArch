@@ -195,6 +195,7 @@ Release workflow hardening:
 - valid persisted runtime execution metadata
 - invalid runtime execution metadata
 - invalid artifact contracts (`shard-pack-manifest`, `validator-verdict`, draft manifests)
+- runtime draft manifest metadata: optional `updated_at` is accepted, while legacy/envelope fields such as `repo_scopes`, `compatibility`, `generated_at`, `pipeline`, or `proposals[]` remain invalid
 - strict collect validation:
   - artifact-root-prefixed, absolute, missing-file, directory and hidden provider/tool `documents[].path` (`.qwen/`, `.claude/`, `.codex/`, `.git/`, `node_modules/`) fail-ятся без rewrite
   - referenced authored collect docs с `ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT`, unchanged marker-free seed prose или recovery fallback prose fail-ятся до apply и не маскируются pair-repair success

@@ -780,7 +780,7 @@ func TestDocFirstFilesystemPolicyDefinesCanonicalAsIsDraftSurface(t *testing.T) 
 		`The first draft artifact set is bootstrap-only`,
 		`replace placeholder scaffold text with evidence-backed as-is content`,
 		`Use staged final evidence from read_context_roots only; do NOT read sibling baseline workspaces`,
-		`asis-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="as_is", agent_role, and outputs[].`,
+		`asis-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="as_is", agent_role, and outputs[]; optional top-level metadata is limited to summary and updated_at.`,
 		`"step_contract": "as_is"`,
 		`"canonical_path": "reports/as-is/overview.md"`,
 	}
@@ -834,7 +834,7 @@ func TestDocFirstFilesystemPolicyDefinesCanonicalProposalsDraftSurface(t *testin
 		`Allowed canonical targets are proposals/* and reports/changelog/*.`,
 		`The first proposals draft artifact set is bootstrap-only`,
 		`replace placeholder scaffold text with evidence-backed proposal/changelog content`,
-		`proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="proposals", agent_role, optional summary, and outputs[].`,
+		`proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="proposals", agent_role, outputs[], and optional summary/updated_at.`,
 		`Do NOT add legacy top-level fields such as pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps.`,
 		`"step_contract": "proposals"`,
 		`"canonical_path": "proposals/proposal-baseline/proposal.md"`,

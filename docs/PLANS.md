@@ -1092,6 +1092,24 @@ Residual blockers:
 
 ---
 
+## Live E2E Draft Manifest Metadata Tolerance
+
+### Context
+Strict medium `codex-code` diagnostic run `regres-long-posthog-ftgo-20260618T225252Z` reached PostHog `refresh.step2.asis_docs` after successful collect, but failed as `runtime_contract_failed` during `draft_artifact_enrichment`. The provider rewrote evidence-backed markdown and produced a valid publish mapping, but added top-level `updated_at` to `asis-draft-manifest.json`; the shared draft parser rejected it as an unknown field.
+
+### Plan
+- [x] Keep runtime draft manifests strict and continue rejecting legacy/envelope fields such as `repo_scopes`, `compatibility`, `generated_at`, `pipeline`, and `proposals[]`.
+- [x] Allow only bounded optional metadata `updated_at` alongside existing `summary`.
+- [x] Update prompt contract wording, schema docs, runbook, and tests.
+- [ ] Rerun strict medium `codex-code`; then run strict medium `claude-code` if Codex produces clean evidence.
+
+### Acceptance
+- [x] `updated_at` in `asis-draft-manifest.json` validates without changing execution/artifact quality separation.
+- [x] Existing unknown-field tests still reject legacy manifest drift.
+- [ ] Latest strict medium `codex-code` and `claude-code` runs pass with artifact/UX quality accepted or explicitly non-applicable with no blocker.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.

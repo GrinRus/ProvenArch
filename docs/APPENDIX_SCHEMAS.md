@@ -196,6 +196,7 @@ Shared required fields:
 
 Allowed common optional fields:
 - `summary`
+- `updated_at` (string metadata timestamp; ignored by orchestration decisions)
 - `outputs[].kind`
 - `outputs[].title`
 
