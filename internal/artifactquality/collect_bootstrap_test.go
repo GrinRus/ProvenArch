@@ -109,6 +109,15 @@ func TestCollectDocumentBootstrapOnlyRejectsRecoveryEvidenceSummary(t *testing.T
 	}
 }
 
+func TestCollectDocumentBootstrapOnlyDetectsInterruptedTemporaryArtifact(t *testing.T) {
+	t.Parallel()
+
+	text := "# Bin Overview\n\nThis shard covers the PostHog repository `bin` path scope. The first bounded evidence read was attempted against the configured PostHog entrypoint hints and `bin` scope, but shell glob handling interrupted the listing before file contents were emitted. This initial artifact records only the assigned scoped surface and will be repaired with concrete file-level evidence after the artifact pair exists.\n\n## Observed Surface\n\n- Repository scope: `posthog`.\n- Assigned path scope: `bin`.\n- Required authored artifact: `bin-overview.md`.\n\n## Evidence Gaps\n\n- Concrete `bin` file roles still require file-level confirmation.\n- Owner mapping and escalation evidence are not confirmed.\n- Operational dependency evidence is not confirmed.\n"
+	if !CollectDocumentBootstrapOnly(text) {
+		t.Fatalf("expected interrupted temporary collect artifact to be classified as bootstrap-only")
+	}
+}
+
 func bootstrapCollectManifest() contracts.ShardPackManifest {
 	return contracts.ShardPackManifest{
 		Version:      1,

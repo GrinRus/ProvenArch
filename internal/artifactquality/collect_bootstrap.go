@@ -50,6 +50,9 @@ func collectDocumentBootstrapOnly(text string) bool {
 	if collectDocumentRecoveryScaffoldOnly(lower) {
 		return true
 	}
+	if collectDocumentTemporaryRecoveryOnly(lower) {
+		return true
+	}
 	required := []string{
 		"## observations",
 		"repository scope:",
@@ -111,6 +114,27 @@ func collectDocumentRecoveryScaffoldOnly(lower string) bool {
 			strings.Contains(lower, "collect recovery fallback")) &&
 		strings.Contains(lower, "## recovery notes") &&
 		strings.Contains(lower, "downstream compilation can preserve traceability instead of accepting an empty or marker-only shard") {
+		return true
+	}
+	return false
+}
+
+func collectDocumentTemporaryRecoveryOnly(lower string) bool {
+	if strings.Contains(lower, "first bounded evidence read was attempted") &&
+		strings.Contains(lower, "initial artifact records only") &&
+		strings.Contains(lower, "will be repaired with concrete") {
+		return true
+	}
+	if strings.Contains(lower, "first bounded read was attempted") &&
+		strings.Contains(lower, "requires concrete evidence repair") {
+		return true
+	}
+	if strings.Contains(lower, "not yet confirmed after interrupted first read") &&
+		strings.Contains(lower, "concrete evidence repair") {
+		return true
+	}
+	if strings.Contains(lower, "shell glob handling interrupted") &&
+		strings.Contains(lower, "will be repaired with concrete file-level evidence") {
 		return true
 	}
 	return false

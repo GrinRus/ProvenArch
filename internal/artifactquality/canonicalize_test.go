@@ -147,6 +147,29 @@ func TestValidateCollectManifestRejectsFailureOnlyCollectDocument(t *testing.T) 
 	}
 }
 
+func TestValidateCollectManifestRejectsInterruptedTemporaryCollectDocument(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	payload := validCollectManifestPayload()
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), raw, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	writeDoc(t, writeRoot, "overview.md", "# Bin Overview\n\nThis shard covers the PostHog repository `bin` path scope. The first bounded evidence read was attempted against the configured PostHog entrypoint hints and `bin` scope, but shell glob handling interrupted the listing before file contents were emitted. This initial artifact records only the assigned scoped surface and will be repaired with concrete file-level evidence after the artifact pair exists.\n\n## Observed Surface\n\n- Repository scope: `posthog`.\n- Assigned path scope: `bin`.\n- Required authored artifact: `bin-overview.md`.\n\n## Evidence Gaps\n\n- Concrete `bin` file roles still require file-level confirmation.\n- Owner mapping and escalation evidence are not confirmed.\n- Operational dependency evidence is not confirmed.\n")
+
+	err = ValidateCollectManifestInRoot(writeRoot)
+	if err == nil {
+		t.Fatalf("expected interrupted temporary collect document to fail validation")
+	}
+	if !strings.Contains(err.Error(), "bootstrap-only collect document") {
+		t.Fatalf("expected interrupted temporary document validation error, got %v", err)
+	}
+}
+
 func TestValidateCollectManifestRejectsBootstrapOnlySemanticSkeleton(t *testing.T) {
 	t.Parallel()
 

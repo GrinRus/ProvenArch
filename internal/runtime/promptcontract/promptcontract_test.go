@@ -101,6 +101,7 @@ func TestComposeArtifactOnlyPromptAddsCollectLegacyHygieneSection(t *testing.T) 
 		`"artifact_root": "reports/taskruns/run-1/staging/shards/payments"`,
 		`"repo": "payments-service"`,
 		"not be seed-only, scaffold-only, or copied unchanged from the skeleton",
+		`must not describe itself as an initial/temporary artifact, interrupted evidence read, or content that "will be repaired"`,
 	}
 	for _, token := range expectedTokens {
 		if !strings.Contains(prompt, token) {
@@ -632,6 +633,8 @@ func TestComposeCollectArtifactPairRepairPromptIsEvidenceFirstNoSeed(t *testing.
 		"Recovery Evidence Summary",
 		"seed-only collect recovery fallback",
 		"Additional provider enrichment should replace",
+		"first bounded evidence read was attempted",
+		"will be repaired with concrete",
 		"FINAL SELF-CHECK COMMAND:",
 		"! grep -E",
 		"Successful recovery output must not contain ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT",
