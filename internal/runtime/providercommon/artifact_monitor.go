@@ -173,7 +173,7 @@ func applyFreshArtifactMutationPolicy(snapshot artifactSnapshot, policy Activity
 func runtimeArtifactSnapshot(task acpruntime.Task) artifactSnapshot {
 	switch acpruntime.StepProviderKeyForStepID(task.StepID) {
 	case acpruntime.StepProviderStep1Collect:
-		return collectArtifactSnapshot(task.WriteRoot)
+		return collectArtifactSnapshotForTask(task)
 	case acpruntime.StepProviderStep3Findings:
 		return validatorArtifactSnapshot(task.WriteRoot)
 	case acpruntime.StepProviderQA:
@@ -216,6 +216,14 @@ func qaAnswerArtifactSnapshot(task acpruntime.Task) artifactSnapshot {
 }
 
 func collectArtifactSnapshot(writeRoot string) artifactSnapshot {
+	return collectArtifactSnapshotInRoot(writeRoot, nil)
+}
+
+func collectArtifactSnapshotForTask(task acpruntime.Task) artifactSnapshot {
+	return collectArtifactSnapshotInRoot(task.WriteRoot, collectTaskRepoRoots(task))
+}
+
+func collectArtifactSnapshotInRoot(writeRoot string, repoRoots map[string]string) artifactSnapshot {
 	snapshot := artifactSnapshot{}
 	writeRoot = strings.TrimSpace(writeRoot)
 	if writeRoot == "" {
@@ -226,7 +234,7 @@ func collectArtifactSnapshot(writeRoot string) artifactSnapshot {
 		snapshot.ArtifactObserved = true
 		snapshot.LastMutation = info.ModTime().UTC()
 		snapshot.State = "present"
-		if validateErr := artifactquality.ValidateCollectManifestInRoot(writeRoot); validateErr == nil {
+		if validateErr := artifactquality.ValidateCollectManifestInRootWithRepoRoots(writeRoot, repoRoots); validateErr == nil {
 			snapshot.Valid = true
 			snapshot.State = "valid"
 		} else {

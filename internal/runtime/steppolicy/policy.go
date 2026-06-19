@@ -795,6 +795,7 @@ func repoEntrypointEvidencePath(task acpruntime.Task, repo string) string {
 	}
 	patterns := []string{
 		"README.md",
+		"README.adoc",
 		"README.rst",
 		"README",
 		"Makefile",

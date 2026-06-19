@@ -1696,6 +1696,69 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual(17, len(fields), completed.stdout)
         self.assertEqual(["1", "headless", "claude-code", "init", run_id, "failed"], fields[:6])
 
+    def test_backend_cycle_appends_failed_api_init_row(self) -> None:
+        workspace = self.root / "baseline-workspace"
+        taskruns = workspace / "reports" / "taskruns"
+        taskruns.mkdir(parents=True)
+        run_id = "run_20260619_071543_001"
+        write_json(
+            taskruns / f"{run_id}-quality.json",
+            {
+                "status": "failed",
+                "runtime_versions": ["fake@fake"],
+                "totals": {
+                    "signal_score": 0,
+                    "semantic_entities": 0,
+                    "semantic_edges": 0,
+                    "findings_count": 0,
+                    "questions_count": 0,
+                    "coverage_observed": 0,
+                    "coverage_missing": 0,
+                    "warnings_count": 16,
+                },
+            },
+        )
+        run_results = self.root / "run-results.tsv"
+        run_results.write_text("", encoding="utf-8")
+        script_text = BACKEND_CYCLE_SCRIPT.read_text(encoding="utf-8")
+        functions = "\n".join(
+            [
+                extract_bash_function(script_text, "run_result_row_exists"),
+                extract_bash_function(script_text, "resolve_failed_run_id_from_workspace"),
+                extract_bash_function(script_text, "append_run_result_row_once"),
+                extract_bash_function(script_text, "append_api_init_run_result_row"),
+            ]
+        )
+        command = "\n".join(
+            [
+                "set -euo pipefail",
+                f"RUN_RESULTS_TSV={shlex.quote(str(run_results))}",
+                "RUN_RESULTS_EXPECTED_FIELDS=17",
+                "HEADLESS_PROVIDER=codex-code",
+                f"WORKSPACE_BASELINE={shlex.quote(str(workspace))}",
+                f"API_INIT_RUN_ID={shlex.quote(run_id)}",
+                f"API_INIT_STATUS_JSON={shlex.quote(str(self.root / 'api-init-status.json'))}",
+                "snapshot_run_artifacts() { return 0; }",
+                "quality_metrics() { printf '%s\\n' $'failed\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t16\\t0\\t0\\t1\\t1\\tfake@fake'; }",
+                functions,
+                "append_api_init_run_result_row failed",
+                f"cat {shlex.quote(str(run_results))}",
+            ]
+        )
+
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        fields = completed.stdout.strip().split("\t")
+        self.assertEqual(17, len(fields), completed.stdout)
+        self.assertEqual(["1", "fake", "codex-code", "init", run_id, "failed"], fields[:6])
+        self.assertEqual("fake@fake", fields[14])
+
     def test_python_report_prefers_parse_signature_contract_failure_over_runner_unavailable(self) -> None:
         run_dir = self.root / "run-parse-signature-python"
         self._create_fixture_run_dir(run_dir)

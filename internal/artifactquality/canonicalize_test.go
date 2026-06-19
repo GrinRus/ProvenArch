@@ -124,6 +124,29 @@ func TestValidateCollectManifestRejectsRecoveryEvidenceFallbackDocument(t *testi
 	}
 }
 
+func TestValidateCollectManifestRejectsFailureOnlyCollectDocument(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	payload := validCollectManifestPayload()
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), raw, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	writeDoc(t, writeRoot, "overview.md", "# Services Overview\n\nThe first bounded evidence read failed before repository files were inspected. No repository evidence was emitted before the failure.\n\n## Evidence Status\n\n- Current evidence result: no file content observed before the bounded read failed\n- This is a bounded collection failure, not architecture evidence.\n")
+
+	err = ValidateCollectManifestInRoot(writeRoot)
+	if err == nil {
+		t.Fatalf("expected failure-only collect document to fail validation")
+	}
+	if !strings.Contains(err.Error(), "bootstrap-only collect document") {
+		t.Fatalf("expected failure-only document validation error, got %v", err)
+	}
+}
+
 func TestValidateCollectManifestRejectsBootstrapOnlySemanticSkeleton(t *testing.T) {
 	t.Parallel()
 
@@ -510,6 +533,36 @@ func TestValidateCollectManifestRejectsMissingCitationRepoPath(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `citations[0] repo evidence path "pom.xml" is missing`) {
 		t.Fatalf("expected missing citation path error, got %v", err)
+	}
+}
+
+func TestValidateCollectManifestRejectsDirectoryCitationRepoPath(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	repoRoot := t.TempDir()
+	writeDoc(t, writeRoot, "overview.md", "# Payments Overview\n\n## Observations\n- `services` contains service code.\n")
+	writeRepoFile(t, repoRoot, "README.md", "# Payments\n")
+	if err := os.Mkdir(filepath.Join(repoRoot, "services"), 0o755); err != nil {
+		t.Fatalf("mkdir services evidence directory: %v", err)
+	}
+
+	payload := validCollectManifestPayload()
+	payload["citations"].([]any)[0].(map[string]any)["path"] = "services"
+	raw, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), append(raw, '\n'), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	err = ValidateCollectManifestInRootWithRepoRoots(writeRoot, map[string]string{"payments-service": repoRoot})
+	if err == nil {
+		t.Fatalf("expected directory citation repo path to fail validation")
+	}
+	if !strings.Contains(err.Error(), `citations[0] repo evidence path "services" is a directory`) {
+		t.Fatalf("expected directory citation path error, got %v", err)
 	}
 }
 

@@ -146,8 +146,8 @@ func collectManifestRepairPreflightCommand(task acpruntime.Task, authoredDocs []
 		"if not docs:",
 		"    raise SystemExit('collect manifest repair found no authored markdown documents')",
 		"",
-		"evidence_paths = [clean_rel(p) for p in (meta.get('evidence_paths') or meta.get('path_scopes') or ['README.md'])]",
-		"evidence_paths = [p for p in evidence_paths if p] or ['README.md']",
+		"evidence_paths = [clean_rel(p) for p in (meta.get('evidence_paths') or meta.get('path_scopes') or ['README.md', 'README.adoc'])]",
+		"evidence_paths = [p for p in evidence_paths if p] or ['README.md', 'README.adoc']",
 		"summary = {",
 		"    'mode': 'collect_manifest_repair_preflight',",
 		"    'target': target.as_posix(),",
@@ -412,7 +412,7 @@ func sortRepairEvidenceCandidates(candidates []string) {
 func repairEvidenceCandidateRank(path string) int {
 	name := strings.ToLower(filepath.Base(path))
 	switch name {
-	case "readme.md", "agents.md", "claude.md", "contributing.md":
+	case "readme.md", "readme.adoc", "readme.rst", "readme.txt", "agents.md", "claude.md", "contributing.md":
 		return 0
 	case "package.json", "pyproject.toml", "go.mod", "pom.xml", "build.gradle", "settings.gradle", "cargo.toml":
 		return 1

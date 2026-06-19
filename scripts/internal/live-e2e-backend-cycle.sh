@@ -362,6 +362,14 @@ append_run_result_row_once() {
     "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$signal_score" "$semantic_entities" "$semantic_edges" "$findings" "$questions" "$coverage_observed" "$coverage_missing" "$warnings" "$runtime_versions" "$quality_path" "$output_path" >> "$RUN_RESULTS_TSV"
 }
 
+append_api_init_run_result_row() {
+  local status="${1:-failed}"
+  if [[ -z "${API_INIT_RUN_ID:-}" ]]; then
+    return 0
+  fi
+  append_run_result_row_once "1" "fake" "${HEADLESS_PROVIDER:-fake}" "init" "$API_INIT_RUN_ID" "$status" "$WORKSPACE_BASELINE" "$API_INIT_STATUS_JSON"
+}
+
 refresh_runtime_cycle_metrics() {
   if [[ -f "$RUN_RESULTS_TSV" ]]; then
     local metrics
@@ -1440,6 +1448,7 @@ PY
   fi
   if [[ "$init_status" == "failed" ]]; then
     API_INIT_FINAL_STATUS="$init_status"
+    append_api_init_run_result_row "$init_status"
     die "API init run failed (see $API_INIT_STATUS_JSON and $SERVER_LOG)"
   fi
   api_init_elapsed=$((API_INIT_TIMEOUT_SEC - (api_init_deadline - SECONDS)))
@@ -1453,6 +1462,7 @@ PY
 done
 if [[ "$init_status" != "succeeded" ]]; then
   API_INIT_FINAL_STATUS="$init_status"
+  append_api_init_run_result_row "${init_status:-failed}"
   die "API init run did not finish in time (run_id=$API_INIT_RUN_ID)"
 fi
 API_INIT_FINAL_STATUS="$init_status"

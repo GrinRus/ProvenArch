@@ -242,12 +242,15 @@ func validateRepoEvidencePathExists(repoRoot string, evidencePath string) error 
 	if relToRoot == ".." || strings.HasPrefix(relToRoot, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("repo evidence path %q must not escape repo root", evidencePath)
 	}
-	if _, err := os.Stat(absPath); err == nil {
+	if info, err := os.Stat(absPath); err == nil {
+		if info.IsDir() {
+			return fmt.Errorf("repo evidence path %q is a directory, not a file", evidencePath)
+		}
 		return nil
 	}
 	if filepath.Ext(cleanRel) == "" {
 		if resolved, ok := resolveUniqueExtensionlessRepoEvidencePath(root, cleanRel); ok {
-			if _, err := os.Stat(filepath.Join(root, resolved)); err == nil {
+			if info, err := os.Stat(filepath.Join(root, resolved)); err == nil && !info.IsDir() {
 				return nil
 			}
 		}

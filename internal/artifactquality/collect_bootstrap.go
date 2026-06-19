@@ -85,6 +85,13 @@ func collectDocumentInitialSeedOnly(lower string) bool {
 }
 
 func collectDocumentRecoveryScaffoldOnly(lower string) bool {
+	if strings.Contains(lower, "no repository evidence was emitted") &&
+		(strings.Contains(lower, "bounded collection failure") ||
+			strings.Contains(lower, "current evidence result: no file content observed") ||
+			strings.Contains(lower, "first bounded evidence read") ||
+			strings.Contains(lower, "bounded read failed")) {
+		return true
+	}
 	if strings.Contains(lower, "## recovery bootstrap") &&
 		strings.Contains(lower, "evidence candidate used for the recovery manifest:") &&
 		strings.Contains(lower, "replace this recovery bootstrap with concrete repository evidence") {
