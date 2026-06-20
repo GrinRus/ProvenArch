@@ -107,7 +107,9 @@ func collectRuntimeRecoveryDocs(writeRoot string) ([]collectManifestRuntimeRecov
 			return err
 		}
 		text := strings.TrimSpace(string(raw))
-		if text == "" || artifactquality.CollectDocumentBootstrapOnly(text) {
+		if text == "" ||
+			artifactquality.CollectDocumentBootstrapOnly(text) ||
+			artifactquality.CollectDocumentRuntimeProcessContaminated(text) {
 			return nil
 		}
 		docs = append(docs, collectManifestRuntimeRecoveryDoc{

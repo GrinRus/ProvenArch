@@ -356,12 +356,23 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 	if snapshot.AuthoredFiles <= 0 {
 		return false, acpruntime.Result{}, nil
 	}
-	if collectWriteRootHasBootstrapOnlyAuthoredDoc(task) {
-		return false, acpruntime.Result{}, nil
-	}
 	beforeRepairFiles, err := snapshotWriteRootFiles(task.WriteRoot)
 	if err != nil {
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "collect_manifest_repair", "manifest-only collect repair write-set precheck failed", err)
+	}
+	if processDocs := collectProcessContaminatedAuthoredDocs(task); len(processDocs) > 0 {
+		if recovered, recoveredResult, recoveredErr := recoverCollectArtifactPairRepairWithOptions(ctx, task, adapter, result, validationErr, stage+"_process_contaminated_markdown", collectArtifactPairRepairOptions{
+			allowNoProviderDiagnostics:               true,
+			allowExistingAuthoredFiles:               true,
+			requiredExistingAuthoredDocMutationPaths: stringSliceSet(processDocs),
+			allowManifestFallback:                    false,
+		}); recovered {
+			return true, recoveredResult, recoveredErr
+		}
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "collect_pair_repair", "collect pair recovery is required for process-contaminated authored markdown", validationErr)
+	}
+	if collectWriteRootHasBootstrapOnlyAuthoredDoc(task) {
+		return false, acpruntime.Result{}, nil
 	}
 	if staleDocs := collectAuthoredDocsMentioningMissingRepoEvidencePaths(task, validationErr); len(staleDocs) > 0 {
 		if recovered, recoveredResult, recoveredErr := recoverCollectArtifactPairRepairWithOptions(ctx, task, adapter, result, validationErr, stage+"_repo_evidence_mismatch", collectArtifactPairRepairOptions{
@@ -521,6 +532,40 @@ func collectWriteRootHasBootstrapOnlyAuthoredDoc(task acpruntime.Task) bool {
 		}
 	}
 	return false
+}
+
+func collectProcessContaminatedAuthoredDocs(task acpruntime.Task) []string {
+	root := filepath.Clean(strings.TrimSpace(task.WriteRoot))
+	if root == "" || root == "." {
+		return nil
+	}
+	found := []string{}
+	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry == nil || entry.IsDir() {
+			return nil
+		}
+		name := strings.TrimSpace(entry.Name())
+		if name == "" || name == ShardPackManifestFileName || name == "runtime-execution.json" {
+			return nil
+		}
+		if strings.ToLower(filepath.Ext(name)) != ".md" {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil || strings.TrimSpace(rel) == "" || rel == "." {
+			return nil
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		if artifactquality.CollectDocumentRuntimeProcessContaminated(string(raw)) {
+			found = append(found, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	sort.Strings(found)
+	return found
 }
 
 func collectAuthoredDocsMentioningMissingRepoEvidencePaths(task acpruntime.Task, err error) []string {

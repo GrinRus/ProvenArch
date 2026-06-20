@@ -36,6 +36,10 @@ func CollectDocumentBootstrapOnly(text string) bool {
 	return collectDocumentBootstrapOnly(text)
 }
 
+func CollectDocumentRuntimeProcessContaminated(text string) bool {
+	return collectDocumentRuntimeProcessContaminated(text)
+}
+
 func collectDocumentBootstrapOnly(text string) bool {
 	lower := strings.ToLower(strings.TrimSpace(text))
 	if lower == "" {
@@ -68,6 +72,40 @@ func collectDocumentBootstrapOnly(text string) bool {
 		}
 	}
 	return true
+}
+
+func collectDocumentRuntimeProcessContaminated(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"bounded read",
+		"bounded evidence read",
+		"bounded collection",
+		"bounded pass",
+		"first bounded evidence",
+		"first bounded read",
+		"initial bounded evidence",
+		"initial bounded read",
+		"not present during bounded",
+		"missing expected evidence",
+		"guessed path",
+		"guessed file",
+		"guessed evidence",
+		"guessed repo",
+		"guessed repository",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	if strings.Contains(lower, "expected ") &&
+		(strings.Contains(lower, " was not present") || strings.Contains(lower, " is not present")) &&
+		(strings.Contains(lower, "path") || strings.Contains(lower, "file") || strings.Contains(lower, "repo") || strings.Contains(lower, "repository")) {
+		return true
+	}
+	return false
 }
 
 func collectDocumentInitialSeedOnly(lower string) bool {

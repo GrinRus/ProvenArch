@@ -1140,6 +1140,25 @@ The same strict medium `codex-code` run proved that missing repo evidence paths 
 
 ---
 
+## Live E2E Collect Process Narration Strictness
+
+### Context
+Strict medium `codex-code` rerun `regres-long-posthog-ftgo-20260620T023512Z` preserved selected-provider execution reporting but exposed a narrower collect artifact-quality contract gap: some accepted/derived markdown still narrated runtime collection mechanics (`bounded read`, guessed or expected-missing paths) instead of clean operator-facing architecture evidence. Those strings can later contaminate `step2` as-is docs even when the machine verdict separation is working.
+
+### Plan
+- [x] Reject process-contaminated collect markdown in strict collect validation.
+- [x] Route existing process-contaminated authored markdown to provider-authored `collect_pair_repair` with mandatory fresh rewrite of the same markdown target.
+- [x] Keep deterministic `collect_manifest_runtime_recovery` limited to process-clean authored markdown so it cannot turn runtime narration into hidden success.
+- [x] Update prompt contracts, docs, and tests for process-narration/guessed-path bans.
+- [ ] Run full DoD, commit, and rerun affected strict medium `codex-code`.
+
+### Acceptance
+- [x] Final collect docs mentioning bounded reads/passes, guessed paths/files/evidence, expected-missing path checks, recovery attempts, or later repair fail validation.
+- [x] Manifest-only recovery does not accept process-contaminated markdown.
+- [ ] Latest strict medium `codex-code` rerun no longer promotes process-narrated collect evidence into final artifacts.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.

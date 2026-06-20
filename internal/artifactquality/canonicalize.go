@@ -93,8 +93,13 @@ func validateCollectManifestDocumentFiles(writeRoot string, documents []contract
 			problems = append(problems, fmt.Sprintf("%s read document file %q: %v", label, rawPath, readErr))
 			continue
 		}
-		if CollectDocumentBootstrapOnly(string(raw)) {
+		text := string(raw)
+		if CollectDocumentBootstrapOnly(text) {
 			problems = append(problems, fmt.Sprintf("%s references bootstrap-only collect document file %q", label, rawPath))
+			continue
+		}
+		if CollectDocumentRuntimeProcessContaminated(text) {
+			problems = append(problems, fmt.Sprintf("%s references process-contaminated collect document file %q", label, rawPath))
 		}
 	}
 	if len(problems) > 0 {

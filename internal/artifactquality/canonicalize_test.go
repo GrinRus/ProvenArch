@@ -170,6 +170,52 @@ func TestValidateCollectManifestRejectsInterruptedTemporaryCollectDocument(t *te
 	}
 }
 
+func TestValidateCollectManifestRejectsRuntimeProcessNarrationDocument(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	payload := validCollectManifestPayload()
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), raw, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	writeDoc(t, writeRoot, "overview.md", "# Services Overview\n\nThe initial bounded read includes README.md and Makefile, but later files still require collection. This is runtime collection mechanics, not operator-facing architecture evidence.\n")
+
+	err = ValidateCollectManifestInRoot(writeRoot)
+	if err == nil {
+		t.Fatalf("expected runtime process narration collect document to fail validation")
+	}
+	if !strings.Contains(err.Error(), "process-contaminated collect document") {
+		t.Fatalf("expected process-contaminated document validation error, got %v", err)
+	}
+}
+
+func TestValidateCollectManifestRejectsGuessedPathNarrationDocument(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	payload := validCollectManifestPayload()
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), raw, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	writeDoc(t, writeRoot, "overview.md", "# Services Overview\n\nExpected src/test/java/EndToEndTest.java path was not present, so this artifact keeps the guessed path as a follow-up note.\n")
+
+	err = ValidateCollectManifestInRoot(writeRoot)
+	if err == nil {
+		t.Fatalf("expected guessed path collect document to fail validation")
+	}
+	if !strings.Contains(err.Error(), "process-contaminated collect document") {
+		t.Fatalf("expected process-contaminated document validation error, got %v", err)
+	}
+}
+
 func TestValidateCollectManifestRejectsBootstrapOnlySemanticSkeleton(t *testing.T) {
 	t.Parallel()
 

@@ -1075,6 +1075,79 @@ EOF
 	}
 }
 
+func TestRunHeadlessProviderEscalatesProcessContaminatedMarkdownToPairRepair(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-process-contaminated-pair-repair")
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Collect Overview
+
+The initial bounded read includes README.md, but this artifact still records runtime collection mechanics instead of operator-facing architecture evidence.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+`
+	manifestOnlyRepairScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'manifest-only repair must not run for process-contaminated markdown' >&2
+exit 9
+`
+	pairRepairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Collect Overview
+
+## Evidence
+- README.md identifies Bank of Anthos as the assigned runtime surface.
+
+## Coverage Gaps
+- Ownership and escalation paths are not confirmed in the observed shard evidence.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+`
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	runner := testAdapter{
+		command:           writeEngineScript(t, initialScript),
+		repairCommand:     writeEngineScript(t, manifestOnlyRepairScript),
+		pairRepairCommand: writeEngineScript(t, pairRepairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+			RepairCollectArtifactPairOnce: true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected process-contaminated markdown to be repaired as a pair, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair scheduled diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "collect manifest repair scheduled", "recovery_mode", "collect_manifest_repair") {
+		t.Fatalf("manifest-only repair must not run for process-contaminated markdown: %#v", diagnostics)
+	}
+	docRaw, err := os.ReadFile(filepath.Join(task.WriteRoot, "overview.md"))
+	if err != nil {
+		t.Fatalf("read repaired doc: %v", err)
+	}
+	if strings.Contains(strings.ToLower(string(docRaw)), "bounded read") {
+		t.Fatalf("expected pair repair to remove process narration, got:\n%s", docRaw)
+	}
+}
+
 func TestRunHeadlessProviderRejectsMissingRepoEvidencePairRepairNoopMarkdown(t *testing.T) {
 	t.Parallel()
 
