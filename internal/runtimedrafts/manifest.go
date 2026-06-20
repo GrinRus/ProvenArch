@@ -427,6 +427,14 @@ func runtimeDraftTextBootstrapOnly(text string) bool {
 		"runtime draft recovery initialized",
 		"draft recovery initialized",
 		"treat this as diagnostic evidence until",
+		"bootstrap-only placeholder",
+		"placeholder draft content",
+		"placeholder draft text",
+		"placeholder content",
+		"placeholder proposal content",
+		"replace placeholder",
+		"replaced placeholder",
+		"replacing placeholders",
 	}
 	for _, marker := range hardMarkers {
 		if strings.Contains(lower, marker) {

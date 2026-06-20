@@ -807,6 +807,118 @@ Promote this proposal surface only as an evidence-indexed follow-up queue. The e
 	}
 }
 
+func TestValidateRequiredManifestRejectsGenericPlaceholderReplacementNarration(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name         string
+		stepID       string
+		contract     string
+		manifest     string
+		files        map[string]string
+		manifestFile string
+	}{
+		{
+			name:         "as-is placeholder content",
+			stepID:       "refresh.step2.asis_docs",
+			contract:     "as_is",
+			manifestFile: AsIsManifestFile,
+			files: map[string]string{
+				"overview.md":          "# Overview\n\nEvidence: reports/as-is/overview.md\n",
+				"summary.md":           "# Coverage Summary\n\nThe evidence set is readable enough to replace placeholder content with an operator-facing coverage statement.\n\nEvidence: final-run-index.json\n",
+				"architect-summary.md": "# Architect Summary\n\nEvidence: cite.ftgo.accounting.contracts.authorize\n",
+			},
+			manifest: `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step2.asis_docs",
+  "step_contract": "as_is",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "overview.md", "canonical_path": "reports/as-is/overview.md", "kind": "report", "title": "System Overview"},
+    {"path": "summary.md", "canonical_path": "reports/coverage/summary.md", "kind": "report", "title": "Coverage Summary"},
+    {"path": "architect-summary.md", "canonical_path": "reports/agent-outputs/architect/summary.md", "kind": "agent-output", "title": "Architect Summary"}
+  ]
+}`,
+		},
+		{
+			name:         "proposal placeholder content",
+			stepID:       "refresh.step4.proposals",
+			contract:     "proposals",
+			manifestFile: ProposalsManifestFile,
+			files: map[string]string{
+				"proposal.md":  "# Runtime Proposal Recommendations\n\nEvidence: final-run-index.json\n",
+				"changelog.md": "# Runtime Proposal Changelog\n\n- Replaced placeholder proposal content with operator-facing runtime recommendations for ftgo-application.\n\nEvidence: cite.ftgo.accounting.contracts.authorize\n",
+			},
+			manifest: `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "proposal.md", "canonical_path": "proposals/runtime-recommendations.md", "kind": "proposal", "title": "Runtime Recommendations"},
+    {"path": "changelog.md", "canonical_path": "reports/changelog/runtime-proposals.md", "kind": "changelog", "title": "Runtime Proposal Changelog"}
+  ]
+}`,
+		},
+		{
+			name:         "constitution placeholder text",
+			stepID:       "init.step0.constitution",
+			contract:     "constitution",
+			manifestFile: ConstitutionManifestFile,
+			files: map[string]string{
+				"charter-overview.md":     "# Constitution\n\nValidation failures caused by placeholder draft text are resolved by replacing placeholders with concrete scope, evidence, and operating principles.\n\nEvidence: README.md\n",
+				"baseline-subagents.yaml": "version: 1\n",
+			},
+			manifest: `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step0.constitution",
+  "step_contract": "constitution",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "charter-overview.md", "canonical_path": "charter/overview.md", "kind": "charter", "title": "Constitution"},
+    {"path": "baseline-subagents.yaml", "canonical_path": "skills/subagents.yaml", "kind": "bundle", "title": "Baseline Subagents"}
+  ]
+}`,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tempDir := t.TempDir()
+			writeRoot := filepath.Join(tempDir, "write-root")
+			draftRoot := filepath.Join(tempDir, "draft-root")
+			if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+				t.Fatalf("mkdir write root: %v", err)
+			}
+			if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+				t.Fatalf("mkdir draft root: %v", err)
+			}
+			for relPath, content := range tc.files {
+				if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(content), 0o644); err != nil {
+					t.Fatalf("write draft file %s: %v", relPath, err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(writeRoot, tc.manifestFile), []byte(tc.manifest), 0o644); err != nil {
+				t.Fatalf("write manifest: %v", err)
+			}
+
+			_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", tc.stepID, tc.contract, []string{tc.manifestFile})
+			if err == nil {
+				t.Fatalf("expected generic placeholder replacement narration to be rejected")
+			}
+			if !strings.Contains(err.Error(), "bootstrap-only placeholder draft content") {
+				t.Fatalf("expected bootstrap placeholder error, got %v", err)
+			}
+		})
+	}
+}
+
 func TestValidateRequiredManifestRejectsObservedContractInvalidProposalsEnvelope(t *testing.T) {
 	t.Parallel()
 
