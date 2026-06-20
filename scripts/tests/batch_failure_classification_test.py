@@ -409,6 +409,154 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertFalse((reports_root / f"blackbox_e2e_steps_{batch_id}.jsonl").exists())
         self.assertFalse((reports_root / f"blackbox_e2e_steps_{batch_id}.md").exists())
 
+    def test_full_run_batch_ui_precheck_timeout_records_evidence(self) -> None:
+        repos_file = self.root / "repos.yaml"
+        write_text(
+            repos_file,
+            "\n".join(
+                [
+                    "repos:",
+                    "  - name: ui-precheck",
+                    "    git_url: https://example.invalid/ui-precheck.git",
+                    "    ref: 1111111111111111111111111111111111111111",
+                    "",
+                ]
+            ),
+        )
+        qwen_stub = self.root / "qwen-ready-stub.sh"
+        write_text(
+            qwen_stub,
+            "#!/bin/sh\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' 'qwen 1.0'; exit 0; fi\n"
+            "if [ \"${1:-}\" = \"-p\" ]; then printf '%s\n' 'ACP_READY'; exit 0; fi\n"
+            "if [ \"${1:-}\" = \"--chat-recording\" ]; then\n"
+            "  mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"\n"
+            "  printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"\n"
+            "  printf '%s\n' 'Done.'\n"
+            "  exit 0\n"
+            "fi\n"
+            "printf 'unexpected args: %s\\n' \"$*\" >&2\n"
+            "exit 2\n",
+        )
+        qwen_stub.chmod(0o755)
+
+        required_node_version = (REPO_ROOT / ".node-version").read_text(encoding="utf-8").strip()
+        node_dir = self.root / "node-timeout"
+        node_dir.mkdir()
+        node = node_dir / "node"
+        write_text(
+            node,
+            "#!/usr/bin/env bash\n"
+            "set -Eeuo pipefail\n"
+            "if [[ \"${1:-}\" == '-p' ]]; then\n"
+            "  case \"${2:-}\" in\n"
+            f"    *process.versions.node*) printf '%s\\n' '{required_node_version}' ;;\n"
+            "    *process.arch*) case \"$(uname -m 2>/dev/null || true)\" in arm64|aarch64) printf '%s\\n' 'arm64' ;; *) printf '%s\\n' 'x64' ;; esac ;;\n"
+            "    *) printf '\\n' ;;\n"
+            "  esac\n"
+            "  exit 0\n"
+            "fi\n"
+            f"if [[ \"${{1:-}}\" == '--version' ]]; then printf '%s\\n' 'v{required_node_version}'; exit 0; fi\n"
+            "printf '%s\\n' \"$0\"\n",
+        )
+        npm = node_dir / "npm"
+        write_text(
+            npm,
+            "#!/usr/bin/env bash\n"
+            "set -Eeuo pipefail\n"
+            "if [[ \"${1:-}\" == '--version' ]]; then printf '%s\\n' '10.9.8'; exit 0; fi\n"
+            "printf 'fake npm intentionally hanging for args: %s\\n' \"$*\" >&2\n"
+            "sleep 60\n",
+        )
+        node.chmod(0o755)
+        npm.chmod(0o755)
+        fake_host_bin = self.root / "fake-host-bin-ui-timeout"
+        fake_host_bin.mkdir()
+        fake_make = fake_host_bin / "make"
+        write_text(
+            fake_make,
+            "#!/bin/sh\n"
+            "printf 'fake make succeeded: %s\\n' \"$*\"\n"
+            "exit 0\n",
+        )
+        fake_make.chmod(0o755)
+
+        batch_id = "ui-precheck-timeout"
+        e2e_root = self.root / "e2e-ui-timeout"
+        reports_root = e2e_root / "reports"
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key
+            in {
+                "PATH",
+                "HOME",
+                "TMPDIR",
+                "TMP",
+                "TEMP",
+                "USER",
+                "LOGNAME",
+                "LANG",
+                "LC_ALL",
+                "LC_CTYPE",
+                "SHELL",
+                "PYENV_ROOT",
+            }
+        }
+        env.update(
+            {
+                "BATCH_ID": batch_id,
+                "E2E_TMP_ROOT": str(e2e_root),
+                "REPORTS_ROOT": str(reports_root),
+                "TARGET_REPOS_FILE": str(repos_file),
+                "PROFILE_ID": "single-git_url",
+                "PROFILE_SOURCE_KIND": "git_url",
+                "PROFILE_EXPECTED_REPO_COUNT": "1",
+                "RUN_COUNT": "1",
+                "BATCH_PROVIDER_FILTER": "qwen-code",
+                "BATCH_RUN_SELECTION": "1",
+                "BATCH_FRONTEND_MODE": "never",
+                "ACP_QWEN_CMD_BIN": str(qwen_stub),
+                "ACP_CLAUDE_CMD_BIN": "true",
+                "ACP_CODEX_CMD_BIN": "true",
+                "ACP_NODE_TOOL_CANDIDATES": str(node_dir),
+                "ACP_NODE_TOOL_CANDIDATES_ONLY": "1",
+                "ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC": "5",
+                "ACP_PREFLIGHT_ARTIFACT_SMOKE_TIMEOUT_SEC": "5",
+                "ACP_LIVE_PRECHECK_UI_TIMEOUT_SEC": "1",
+                "BATCH_OWNER_HEARTBEAT_SEC": "1",
+            }
+        )
+        env["PATH"] = f"{node_dir}{os.pathsep}{fake_host_bin}{os.pathsep}{env.get('PATH', '')}"
+
+        completed = subprocess.run(
+            [str(FULL_RUN_BATCH_SCRIPT)],
+            cwd=REPO_ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+
+        self.assertNotEqual(0, completed.returncode, msg=completed.stdout + completed.stderr)
+        combined_output = completed.stderr + completed.stdout
+        self.assertIn("UI npm install precheck timed out after 1s", combined_output)
+        self.assertIn("precheck_failed", combined_output)
+        ui_log = e2e_root / "runs" / batch_id / "precheck-ui-npm.log"
+        self.assertTrue(ui_log.exists())
+        ui_log_text = ui_log.read_text(encoding="utf-8")
+        self.assertIn("[precheck-timeout] npm ci --prefix ui timed out", ui_log_text)
+        self.assertIn("fake npm intentionally hanging", ui_log_text)
+
+        run_matrix = (reports_root / f"run_matrix_{batch_id}.md").read_text(encoding="utf-8")
+        execution_report = (reports_root / f"execution_report_{batch_id}.md").read_text(encoding="utf-8")
+        self.assertIn("precheck_failed", run_matrix)
+        self.assertIn("precheck_failed", execution_report)
+        self.assertFalse((reports_root / f"quality_report_{batch_id}.md").exists())
+        self.assertFalse((reports_root / f"blackbox_e2e_steps_{batch_id}.jsonl").exists())
+        self.assertFalse((reports_root / f"blackbox_e2e_steps_{batch_id}.md").exists())
+
     def _create_passed_run_dir_with_raw_runner_noise(self, run_dir: Path) -> None:
         self._create_fixture_run_dir(run_dir)
         write_text(

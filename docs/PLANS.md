@@ -79,6 +79,7 @@ Diagnostic `claude-code` medium (`regres long`) live runs exposed harness/runtim
 - [ ] Run one provider-authored collect-pair repair after exhausted fully silent collect retry before terminal `runner_unavailable`, while keeping invalid/noop repair terminal.
 - [ ] Make collect-pair repair evidence-first without seed/fallback heredoc, and stop invalid observed artifacts by no-fresh-mutation window even when provider stdout remains active.
 - [ ] Fix report classification so collect partial failures remain primary `runtime_flow_failed` while provider class is secondary evidence.
+- [ ] Ensure live UI dependency/browser precheck cannot hang indefinitely; timeout must become `precheck_failed` with log/report evidence before headless runtime starts.
 - [ ] Update tests and live E2E docs/runbooks for the changed runtime/reporting behavior.
 - [ ] Run full DoD, commit, then rerun strict medium live E2E from a clean tree.
 
@@ -112,6 +113,7 @@ Diagnostic `claude-code` medium (`regres long`) live runs exposed harness/runtim
 - [ ] Prompt tests prove step2 enrichment has exact write-first targets and banned bootstrap scaffold.
 - [ ] Providercommon tests prove exhausted fully silent collect retry invokes collect-pair repair and invalid/noop repair remains terminal.
 - [ ] Script tests prove partial collect root cause is not overridden by stale provider classifier rows.
+- [ ] Script tests prove a hung UI precheck command is terminated and reported as `precheck_failed`.
 - [ ] Full DoD passes before rerun.
 - [ ] Strict medium rerun evidence is reported across execution quality, artifact quality and UX quality.
 
@@ -134,6 +136,7 @@ Diagnostic `claude-code` medium (`regres long`) live runs exposed harness/runtim
 - 2026-06-18: After commit `2edf6cf`, diagnostic `codex-code` strict medium rerun `regres-long-posthog-ftgo-20260618T153313Z` confirmed the f-string failure was removed and the root-file shard still recovered, but `posthog-bin` exhausted collect pair repair with no artifacts because Codex added a file-size hard gate (`read file exceeds size limit`) after reading a candidate larger than the per-file budget. The run was interrupted once this acceptance blocker was captured. Current slice keeps the evidence-bounded contract but changes the repair instruction to read bounded prefixes or skip oversized candidates and continue; terminal no-write failure is allowed only when no allowed evidence yields bytes.
 - 2026-06-19: Strict medium `codex-code` rerun `regres-long-posthog-ftgo-20260619T074026Z` passed PostHog machine execution plus frontend smoke, but failed FTGO refresh `step2.asis_docs` as `runtime_contract_failed`: `draft_artifact_enrichment` rewrote the three markdown drafts, then rewrote `asis-draft-manifest.json.outputs[]` with an invalid `logical_path` alias. The same run still showed repeated collect manifest repair no-write/status-only behavior that runtime recovered as explicit telemetry. Current slice keeps strict parsing, forbids output aliases in draft contracts, tells enrichment to preserve existing `outputs[]` mappings, and changes manifest-only collect repair from read-only preflight to a write-first provider-authored command contract.
 - 2026-06-19: After commit `9f2820d`, strict medium `codex-code` rerun `regres-long-posthog-ftgo-20260619T172527Z` confirmed bootstrap-only draft validation now routes straight to `draft_artifact_enrichment`, but PostHog refresh accepted `posthog-bin/bin-overview.md` as a completed collect shard even though the markdown said the first bounded evidence read was interrupted, the artifact was initial-only, and it "will be repaired with concrete file-level evidence". The run was interrupted during frontend-triggered PostHog collect after this acceptance blocker was captured. Current slice makes interrupted temporary collect markdown contract-invalid regardless of semantic richness, adds live-pattern regression tests, and updates collect prompt/runbook wording so these artifacts fail before downstream `step2` can mask them.
+- 2026-06-20: After commit `25bb2d1`, strict medium `codex-code` rerun `regres-long-posthog-ftgo-20260620T064659Z` did not reach headless runtime: `npm ci --prefix ui` in UI precheck hung with no log progress while registry was reachable, requiring manual interrupt. Current slice bounds UI dependency/browser precheck via `ACP_LIVE_PRECHECK_UI_TIMEOUT_SEC`, materializes timeout as `precheck_failed`, and adds script/docs coverage so precheck hangs cannot silently block the live loop.
 
 ### Plan ID
 EP-20260608-medium-live-e2e-quality-ui

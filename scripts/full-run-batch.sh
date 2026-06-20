@@ -34,6 +34,7 @@ BATCH_RUN_SELECTION="${BATCH_RUN_SELECTION:-all}"
 BATCH_SKIP_PRECHECK="${BATCH_SKIP_PRECHECK:-0}"
 BATCH_FRONTEND_MODE="${BATCH_FRONTEND_MODE:-auto}"
 UI_E2E_HEADED="${UI_E2E_HEADED:-0}"
+ACP_LIVE_PRECHECK_UI_TIMEOUT_SEC="${ACP_LIVE_PRECHECK_UI_TIMEOUT_SEC:-1800}"
 E2E_TMP_ROOT="${E2E_TMP_ROOT:-/tmp/provenarch-test_arch_project}"
 BATCH_ROOT="${BATCH_ROOT:-$E2E_TMP_ROOT/runs/$BATCH_ID}"
 REPORTS_ROOT="${REPORTS_ROOT:-$E2E_TMP_ROOT/reports}"
@@ -930,6 +931,58 @@ run_dod_precheck_make() {
   "${env_cmd[@]}" make contracts test lint build
 }
 
+run_precheck_command_with_timeout() {
+  local label="$1"
+  local timeout_sec="$2"
+  local log_path="$3"
+  shift 3
+  python3 - "$timeout_sec" "$log_path" "$label" "$@" <<'PY'
+import os
+import shlex
+import signal
+import subprocess
+import sys
+import time
+
+timeout_sec = int(sys.argv[1])
+log_path = sys.argv[2]
+label = sys.argv[3]
+cmd = sys.argv[4:]
+started = time.monotonic()
+
+os.makedirs(os.path.dirname(log_path), exist_ok=True)
+with open(log_path, "wb", buffering=0) as log:
+    log.write(f"[precheck] running {label} with timeout={timeout_sec}s\n".encode("utf-8"))
+    proc = subprocess.Popen(cmd, stdout=log, stderr=log, start_new_session=True)
+    try:
+        rc = proc.wait(timeout=timeout_sec)
+    except subprocess.TimeoutExpired:
+        elapsed = int(time.monotonic() - started)
+        command = shlex.join(cmd)
+        log.write(
+            (
+                f"\n[precheck-timeout] {label} timed out after {elapsed}s "
+                f"(limit={timeout_sec}s): {command}\n"
+            ).encode("utf-8")
+        )
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            log.write(b"[precheck-timeout] process group ignored SIGTERM; sending SIGKILL\n")
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.wait()
+        raise SystemExit(124)
+    raise SystemExit(rc)
+PY
+}
+
 run_node_toolchain_precheck() {
   local required_node_version="${ACP_NODE_VERSION:-}"
   if [[ -z "$required_node_version" && -f "$PROVENARCH_ROOT/.node-version" ]]; then
@@ -1417,6 +1470,9 @@ fi
 if [[ "$BATCH_SKIP_PRECHECK" == "1" && "${ACP_TEST_ALLOW_BATCH_SKIP_PRECHECK:-0}" != "1" ]]; then
   die "BATCH_SKIP_PRECHECK is no longer a public live E2E shortcut; run precheck or set ACP_TEST_ALLOW_BATCH_SKIP_PRECHECK=1 only in hermetic tests"
 fi
+if [[ ! "$ACP_LIVE_PRECHECK_UI_TIMEOUT_SEC" =~ ^[0-9]+$ ]] || [[ "$ACP_LIVE_PRECHECK_UI_TIMEOUT_SEC" -le 0 ]]; then
+  die "ACP_LIVE_PRECHECK_UI_TIMEOUT_SEC must be a positive integer number of seconds, got '$ACP_LIVE_PRECHECK_UI_TIMEOUT_SEC'"
+fi
 case "$BATCH_FRONTEND_MODE" in
   auto|always|never|per_run)
     ;;
@@ -1559,13 +1615,39 @@ else
     finalize_precheck_failure "make contracts test lint build failed (see $BATCH_ROOT/precheck-make.log)"
   fi
 
-  log "installing UI dependencies and Playwright browser"
-  if ! (
+  log "installing UI dependencies and Playwright browser (timeout=${ACP_LIVE_PRECHECK_UI_TIMEOUT_SEC}s per command)"
+  set +e
+  (
     cd "$PROVENARCH_ROOT"
-    "$PROVENARCH_ROOT/scripts/run-npm.sh" ci --prefix ui >"$BATCH_ROOT/precheck-ui-npm.log" 2>&1
-    "$PROVENARCH_ROOT/scripts/run-npm.sh" exec --prefix ui playwright install chromium >"$BATCH_ROOT/precheck-playwright.log" 2>&1
-  ); then
-    finalize_precheck_failure "UI precheck failed (see $BATCH_ROOT/precheck-ui-npm.log and $BATCH_ROOT/precheck-playwright.log)"
+    run_precheck_command_with_timeout \
+      "npm ci --prefix ui" \
+      "$ACP_LIVE_PRECHECK_UI_TIMEOUT_SEC" \
+      "$BATCH_ROOT/precheck-ui-npm.log" \
+      "$PROVENARCH_ROOT/scripts/run-npm.sh" ci --prefix ui
+  )
+  ui_npm_rc=$?
+  set -e
+  if [[ "$ui_npm_rc" -eq 124 ]]; then
+    finalize_precheck_failure "UI npm install precheck timed out after ${ACP_LIVE_PRECHECK_UI_TIMEOUT_SEC}s (see $BATCH_ROOT/precheck-ui-npm.log)"
+  elif [[ "$ui_npm_rc" -ne 0 ]]; then
+    finalize_precheck_failure "UI npm install precheck failed (see $BATCH_ROOT/precheck-ui-npm.log)"
+  fi
+
+  set +e
+  (
+    cd "$PROVENARCH_ROOT"
+    run_precheck_command_with_timeout \
+      "playwright install chromium" \
+      "$ACP_LIVE_PRECHECK_UI_TIMEOUT_SEC" \
+      "$BATCH_ROOT/precheck-playwright.log" \
+      "$PROVENARCH_ROOT/scripts/run-npm.sh" exec --prefix ui playwright install chromium
+  )
+  ui_playwright_rc=$?
+  set -e
+  if [[ "$ui_playwright_rc" -eq 124 ]]; then
+    finalize_precheck_failure "Playwright browser install precheck timed out after ${ACP_LIVE_PRECHECK_UI_TIMEOUT_SEC}s (see $BATCH_ROOT/precheck-playwright.log)"
+  elif [[ "$ui_playwright_rc" -ne 0 ]]; then
+    finalize_precheck_failure "Playwright browser install precheck failed (see $BATCH_ROOT/precheck-playwright.log)"
   fi
 fi
 
