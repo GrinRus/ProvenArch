@@ -207,6 +207,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 	manifestTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), manifestFile)
 	skeleton := steppolicy.RuntimeDraftManifestTaskSkeleton(task)
 	outputs := draftEnrichmentOutputs(skeleton)
+	statusEvidenceFiles := draftEnrichmentShardStatusEvidenceFiles(task)
 	lines := []string{
 		fmt.Sprintf("You are ACP runtime provider %q in draft artifact enrichment focused recovery mode.", provider),
 		"Immediate draft artifact enrichment action:",
@@ -232,8 +233,35 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		fmt.Sprintf(`- draft_final_root (absolute) = %q`, strings.TrimSpace(task.DraftFinalRoot)),
 		fmt.Sprintf(`- manifest_file = %q`, manifestFile),
 		fmt.Sprintf(`- step_contract = %q`, strings.TrimSpace(task.StepContract)),
-		"DRAFT ENRICHMENT TARGETS:",
+		"DRAFT ENRICHMENT TARGET IDENTITY:",
+		fmt.Sprintf("- current_run_id = %q", strings.TrimSpace(task.RunID)),
+		fmt.Sprintf("- current_step_id = %q", strings.TrimSpace(task.StepID)),
+		fmt.Sprintf("- current_domain_id = %q", strings.TrimSpace(task.DomainID)),
+		fmt.Sprintf("- current_repo_scope = %q", strings.TrimSpace(task.RepoScope)),
+		fmt.Sprintf("- current_repo_scopes = %s", strings.Join(task.RepoScopes, ", ")),
+		"- Current target identity comes from repo_scope/repo_scopes/domain_id and the current staged artifacts, not from matrix id, batch id, profile id, workspace path, or run-folder names.",
+		"- If current_repo_scopes contains exactly one repo, final markdown must not name sibling matrix targets or other repositories unless an allowed staged artifact, final index, citation index, or shard status file explicitly names that repo as evidence.",
+		"- Matrix/profile/batch names such as combined multi-target folder names are harness labels, not architecture evidence.",
+		"DRAFT ENRICHMENT CURRENT-RUN SHARD STATUS EVIDENCE:",
 	}
+	if len(statusEvidenceFiles) == 0 {
+		lines = append(lines,
+			"- No current-run typed shard-plan/shard-summary files were visible in the allowed read roots; use observed staging/shards coverage and call unknowns out explicitly.",
+		)
+	} else {
+		lines = append(lines,
+			"- Read these exact current-run typed shard-plan/shard-summary files before falling back to staging/shards counts:",
+		)
+		for _, file := range statusEvidenceFiles {
+			lines = append(lines, fmt.Sprintf("- %s", file))
+		}
+	}
+	lines = append(lines,
+		"- For typed shard-summary JSON with items[], planned = len(items), succeeded = count of items where status == \"succeeded\", failed = count of items where status == \"failed\"; pending/checkpointed/other statuses are incomplete coverage and must be named separately.",
+		"- Do not report planned=unknown or failed=unknown when a readable current-run typed shard-summary items[] list is available.",
+		"- Do not infer shard counts from lexical occurrences of words such as failed/error/summary inside markdown or manifests.",
+		"DRAFT ENRICHMENT TARGETS:",
+	)
 	if len(outputs) == 0 {
 		lines = append(lines, "- Read the existing draft manifest outputs[] and enrich every referenced markdown draft file.")
 	} else {
@@ -269,13 +297,13 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
 		lines = append(lines,
 			"- Enrich overview.md, summary.md, and architect-summary.md from collected shard manifests, bounded authored shard docs, final indexes, citations, and staged model evidence.",
-			"- STEP2 WRITE-FIRST SEQUENCE: your next filesystem command must read asis-draft-manifest.json, all available shard-pack-manifest.json summaries, final-run-index.json and citation-index.json if present, and at most 6 high-signal shard manifests or authored shard docs, then overwrite overview.md, summary.md, and architect-summary.md under draft_final_root before any optional extra analysis.",
+			"- STEP2 WRITE-FIRST SEQUENCE: your next filesystem command must read asis-draft-manifest.json, current-run typed shard-plan/shard-summary files listed above when present, all available shard-pack-manifest.json summaries, final-run-index.json and citation-index.json if present, and at most 6 high-signal shard manifests or authored shard docs, then overwrite overview.md, summary.md, and architect-summary.md under draft_final_root before any optional extra analysis.",
 			fmt.Sprintf("- Exact required as-is overview overwrite target: %q.", filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "overview.md")),
 			fmt.Sprintf("- Exact required coverage summary overwrite target: %q.", filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "summary.md")),
 			fmt.Sprintf("- Exact required architect summary overwrite target: %q.", filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "architect-summary.md")),
 			"- overview.md must contain: architecture surface summary; concrete repositories, paths, services/modules/integrations or staged artifact references; and explicit coverage gaps.",
 			"- summary.md must contain: planned/succeeded/failed shard completeness; evidence density/readability notes; key citations or staged artifact refs; and remaining gaps.",
-			"- For shard completeness, derive planned/succeeded/failed from typed shard-plan/shard-summary artifacts when visible; otherwise use observed shard directories and shard-pack-manifest.json counts. Never count the words failed/error/summary lexically inside manifests or markdown.",
+			"- For shard completeness, derive planned/succeeded/failed from typed shard-plan/shard-summary artifacts when visible, including shard-summary items[].status; otherwise use observed shard directories and shard-pack-manifest.json counts. Never count the words failed/error/summary lexically inside manifests or markdown.",
 			"- If planned shard status is not explicitly visible, write planned=unknown, succeeded=<observed shard-pack-manifest.json count>, failed=unknown, and name the missing typed shard-plan/shard-summary surface instead of fabricating failed counts.",
 			"- architect-summary.md must contain: decision-ready operator summary with what is complete, what is missing, what the operator should inspect or decide next, and any residual risk.",
 			"- Include enough repository/path and staged artifact references for an operator to understand the architecture surface and remaining coverage gaps.",
@@ -291,12 +319,14 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		lines = append(lines,
 			"- Enrich proposal and changelog drafts from validated staged findings, coverage gaps, questions, citations, and proposal candidates.",
 			"- Proposals must be actionable and traceable to staged evidence; do not leave generic validation notes as the only content.",
-			"- STEP4 WRITE-FIRST SEQUENCE: read proposals-draft-manifest.json, read final-run-index.json and citation-index.json if present, read validator/finding summaries and at most 6 high-signal shard manifests or authored shard docs, then overwrite proposal.md and changelog.md under draft_final_root before any optional extra analysis.",
+			"- STEP4 WRITE-FIRST SEQUENCE: read proposals-draft-manifest.json, current-run typed shard-plan/shard-summary files listed above when present, final-run-index.json and citation-index.json if present, validator/finding summaries and at most 6 high-signal shard manifests or authored shard docs, then overwrite proposal.md and changelog.md under draft_final_root before any optional extra analysis.",
 			"- Do not treat proposals-draft-manifest.json summary text, canonical_path examples, or bootstrap output metadata as findings/proposals. Use validator/finding/coverage/proposal evidence; if none is visible, record an explicit no-actionable-proposal gap.",
 			fmt.Sprintf("- Exact required proposal draft overwrite target: %q.", filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "proposal.md")),
 			fmt.Sprintf("- Exact required changelog draft overwrite target: %q.", filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "changelog.md")),
 			"- proposal.md must contain: Decision / recommended operator action; Evidence used with repo/path or staged artifact references; Proposed changes or follow-up plan; Risks, gaps, and out-of-scope notes.",
 			"- changelog.md must contain: Updated architecture/proposal surfaces; Findings/proposals summary; Evidence index or citation references; Residual coverage gaps.",
+			"- Do not report 0 authored markdown shard documents unless you actually globbed staging/shards/**/*.md in the allowed roots and found none; otherwise give the observed count or omit the count.",
+			"- Do not mention placeholder replacement or recovery mechanics in operator-facing proposal/changelog content.",
 			"- Do not write phrases like 'the enrichment read the current draft manifest', 'bounded staged evidence', 'recovery pass', or 'proposal surface only as a follow-up queue' as the primary recommendation. Convert findings into concrete operator decisions and explicitly state no-actionable-proposal only when evidence is absent.",
 			"- If staged evidence is sparse, write the gap explicitly with the exact missing staged surface instead of keeping bootstrap scaffold.",
 			"- Final self-check: both proposal.md and changelog.md were freshly overwritten in this focused call, name concrete staged evidence or repo/path references when available, and contain none of the banned scaffold markers.",
@@ -306,6 +336,52 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		lines = append(lines, fmt.Sprintf(`- Previous draft artifact validation failure: %s`, compactDraftEnrichmentHint(validationErr.Error())))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func draftEnrichmentShardStatusEvidenceFiles(task acpruntime.Task) []string {
+	workspaceRoot := strings.TrimSpace(task.Workspace)
+	runID := strings.TrimSpace(task.RunID)
+	if workspaceRoot == "" || runID == "" {
+		return nil
+	}
+	collectStep := draftEnrichmentCollectStepID(task.StepID)
+	if collectStep == "" {
+		return nil
+	}
+	stepSlug := strings.ReplaceAll(collectStep, ".", "-")
+	taskrunsRoot := filepath.Join(filepath.Clean(workspaceRoot), "reports", "taskruns")
+	patterns := []string{
+		filepath.Join(taskrunsRoot, fmt.Sprintf("%s-%s-shard-plan*.json", runID, stepSlug)),
+		filepath.Join(taskrunsRoot, fmt.Sprintf("%s-%s-shard-summary*.json", runID, stepSlug)),
+	}
+	files := make([]string, 0, 2)
+	seen := map[string]struct{}{}
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		for _, match := range matches {
+			cleaned := filepath.Clean(match)
+			if _, ok := seen[cleaned]; ok {
+				continue
+			}
+			seen[cleaned] = struct{}{}
+			files = append(files, cleaned)
+		}
+	}
+	return files
+}
+
+func draftEnrichmentCollectStepID(stepID string) string {
+	switch strings.TrimSpace(stepID) {
+	case "init.step2.asis_docs", "init.step4.proposals":
+		return "init.step1.collect"
+	case "refresh.step2.asis_docs", "refresh.step4.proposals":
+		return "refresh.step1.collect"
+	default:
+		return ""
+	}
 }
 
 func compactDraftEnrichmentHint(value string) string {

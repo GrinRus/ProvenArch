@@ -150,6 +150,9 @@ func ResolveHeadlessDraftEnrichmentIncludeDirectories(task Task) []string {
 	if taskrunRoot == "" {
 		taskrunRoot = taskRunRootFromRuntimeArtifactPath(task.WriteRoot)
 	}
+	if statusRoot := currentRunShardStatusReportsRoot(task, taskrunRoot); statusRoot != "" {
+		dirs.add(statusRoot)
+	}
 	if taskrunRoot != "" {
 		dirs.add(filepath.Join(taskrunRoot, "staging", "shards"))
 		dirs.add(filepath.Join(taskrunRoot, "staging", "final"))
@@ -168,6 +171,28 @@ func ResolveHeadlessDraftEnrichmentIncludeDirectories(task Task) []string {
 		}
 	}
 	return dirs.values()
+}
+
+func currentRunShardStatusReportsRoot(task Task, taskrunRoot string) string {
+	taskrunRoot = strings.TrimSpace(taskrunRoot)
+	runID := strings.TrimSpace(task.RunID)
+	if taskrunRoot == "" || runID == "" {
+		return ""
+	}
+	taskrunsRoot := filepath.Dir(filepath.Clean(taskrunRoot))
+	if filepath.Base(taskrunsRoot) != "taskruns" {
+		return ""
+	}
+	for _, pattern := range []string{
+		filepath.Join(taskrunsRoot, runID+"-*-step1-collect-shard-plan*.json"),
+		filepath.Join(taskrunsRoot, runID+"-*-step1-collect-shard-summary*.json"),
+	} {
+		matches, err := filepath.Glob(pattern)
+		if err == nil && len(matches) > 0 {
+			return taskrunsRoot
+		}
+	}
+	return ""
 }
 
 func taskRunRootFromRuntimeArtifactPath(path string) string {

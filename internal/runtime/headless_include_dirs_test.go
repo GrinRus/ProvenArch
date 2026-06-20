@@ -166,6 +166,42 @@ func TestResolveHeadlessDraftEnrichmentIncludeDirectoriesUsesBoundedTaskrunEvide
 	}
 }
 
+func TestResolveHeadlessDraftEnrichmentIncludeDirectoriesAddsCurrentRunShardStatusRoot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "arch-workspace")
+	taskrunsRoot := filepath.Join(workspace, "reports", "taskruns")
+	taskrunRoot := filepath.Join(taskrunsRoot, "run-1")
+	writeRoot := filepath.Join(taskrunRoot, "runtime", "step2_as_is")
+	draftRoot := filepath.Join(taskrunRoot, "staging", "drafts", "step2_as_is")
+	stagedShards := filepath.Join(taskrunRoot, "staging", "shards")
+	stagedFinal := filepath.Join(taskrunRoot, "staging", "final")
+	for _, dir := range []string{writeRoot, draftRoot, stagedShards, stagedFinal} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	summaryPath := filepath.Join(taskrunsRoot, "run-1-init-step1-collect-shard-summary-payments.json")
+	if err := os.WriteFile(summaryPath, []byte(`{"items":[{"status":"succeeded"}]}`), 0o644); err != nil {
+		t.Fatalf("write shard summary: %v", err)
+	}
+
+	got := ResolveHeadlessDraftEnrichmentIncludeDirectories(Task{
+		RunID:          "run-1",
+		StepID:         "init.step2.asis_docs",
+		Workspace:      workspace,
+		WriteRoot:      writeRoot,
+		DraftFinalRoot: draftRoot,
+		RepoScopes:     []string{"payments"},
+	})
+
+	want := []string{writeRoot, draftRoot, taskrunsRoot, stagedShards, stagedFinal}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected draft enrichment include dirs:\n got=%v\nwant=%v", got, want)
+	}
+}
+
 func TestResolveHeadlessIncludeDirectoriesFallsBackToWorkspaceValidate(t *testing.T) {
 	t.Parallel()
 

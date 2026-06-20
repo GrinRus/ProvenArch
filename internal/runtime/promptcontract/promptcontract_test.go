@@ -1027,6 +1027,66 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 	}
 }
 
+func TestComposeDraftArtifactEnrichmentPromptNamesShardStatusEvidenceAndTargetIdentity(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	taskrunsRoot := filepath.Join(workspace, "reports", "taskruns")
+	if err := os.MkdirAll(taskrunsRoot, 0o755); err != nil {
+		t.Fatalf("mkdir taskruns root: %v", err)
+	}
+	planPath := filepath.Join(taskrunsRoot, "run-1-refresh-step1-collect-shard-plan-ftgo-application.json")
+	summaryPath := filepath.Join(taskrunsRoot, "run-1-refresh-step1-collect-shard-summary-ftgo-application.json")
+	if err := os.WriteFile(planPath, []byte(`{"items":[{"shard_id":"a"}]}`), 0o644); err != nil {
+		t.Fatalf("write shard plan: %v", err)
+	}
+	if err := os.WriteFile(summaryPath, []byte(`{"items":[{"status":"succeeded"},{"status":"failed"}]}`), 0o644); err != nil {
+		t.Fatalf("write shard summary: %v", err)
+	}
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "refresh.step2.asis_docs",
+		StepContract:      "as_is",
+		DomainID:          "ftgo-application",
+		RepoScope:         "ftgo-application",
+		RepoScopes:        []string{"ftgo-application"},
+		AgentRole:         "architect",
+		Workspace:         workspace,
+		WriteRoot:         filepath.Join(workspace, "reports", "taskruns", "run-1", "runtime", "step2_as_is"),
+		DraftFinalRoot:    filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "drafts", "step2_as_is"),
+		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
+	}
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderCodexCode, task, os.ErrInvalid)
+	for _, token := range []string{
+		"DRAFT ENRICHMENT TARGET IDENTITY:",
+		`current_run_id = "run-1"`,
+		`current_step_id = "refresh.step2.asis_docs"`,
+		`current_domain_id = "ftgo-application"`,
+		`current_repo_scope = "ftgo-application"`,
+		"current_repo_scopes = ftgo-application",
+		"Current target identity comes from repo_scope/repo_scopes/domain_id",
+		"not from matrix id, batch id, profile id, workspace path, or run-folder names",
+		"final markdown must not name sibling matrix targets or other repositories unless an allowed staged artifact",
+		"Matrix/profile/batch names such as combined multi-target folder names are harness labels, not architecture evidence.",
+		"DRAFT ENRICHMENT CURRENT-RUN SHARD STATUS EVIDENCE:",
+		"Read these exact current-run typed shard-plan/shard-summary files",
+		planPath,
+		summaryPath,
+		"planned = len(items)",
+		"status == \"succeeded\"",
+		"status == \"failed\"",
+		"Do not report planned=unknown or failed=unknown when a readable current-run typed shard-summary items[] list is available.",
+		"current-run typed shard-plan/shard-summary files listed above when present",
+		"including shard-summary items[].status",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected draft enrichment prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
 func TestComposeDraftArtifactEnrichmentPromptForProposalsRequiresWriteFirstTargets(t *testing.T) {
 	t.Parallel()
 
@@ -1049,7 +1109,8 @@ func TestComposeDraftArtifactEnrichmentPromptForProposalsRequiresWriteFirstTarge
 		"changelog.md -> reports/changelog/runtime-proposals.md",
 		"STEP4 WRITE-FIRST SEQUENCE",
 		"read proposals-draft-manifest.json",
-		"read final-run-index.json and citation-index.json if present",
+		"current-run typed shard-plan/shard-summary files listed above when present",
+		"final-run-index.json and citation-index.json if present",
 		"at most 6 high-signal shard manifests or authored shard docs",
 		"/tmp/workspace/reports/taskruns/run-1/staging/final/proposal.md",
 		"/tmp/workspace/reports/taskruns/run-1/staging/final/changelog.md",
@@ -1059,6 +1120,8 @@ func TestComposeDraftArtifactEnrichmentPromptForProposalsRequiresWriteFirstTarge
 		"changelog.md must contain: Updated architecture/proposal surfaces",
 		"Evidence index or citation references",
 		"Residual coverage gaps",
+		"Do not report 0 authored markdown shard documents unless you actually globbed staging/shards/**/*.md",
+		"Do not mention placeholder replacement or recovery mechanics",
 		"If staged evidence is sparse, write the gap explicitly",
 		"Do not treat proposals-draft-manifest.json summary text, canonical_path examples, or bootstrap output metadata as findings/proposals",
 		"record an explicit no-actionable-proposal gap",
