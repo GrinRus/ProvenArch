@@ -1009,6 +1009,7 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"For shard completeness, derive planned/succeeded/failed from typed shard-plan/shard-summary artifacts when visible",
 		"Never count the words failed/error/summary lexically inside manifests or markdown",
 		"If planned shard status is not explicitly visible, write planned=unknown",
+		"Do not list final-run-index.json or citation-index.json from a different run_id as current-run evidence",
 		"Translate runtime evidence into architecture facts, coverage gaps, and operator decisions",
 	} {
 		if !strings.Contains(prompt, token) {
@@ -1072,6 +1073,7 @@ func TestComposeDraftArtifactEnrichmentPromptNamesShardStatusEvidenceAndTargetId
 		"not from matrix id, batch id, profile id, workspace path, or run-folder names",
 		"final markdown must not name sibling matrix targets or other repositories unless an allowed staged artifact",
 		"Matrix/profile/batch names such as combined multi-target folder names are harness labels, not architecture evidence.",
+		"Final markdown must not cite taskrun identifiers other than current_run_id",
 		"DRAFT ENRICHMENT CURRENT-RUN SHARD STATUS EVIDENCE:",
 		"Read these exact current-run typed shard-plan/shard-summary files",
 		planPath,
@@ -1080,6 +1082,8 @@ func TestComposeDraftArtifactEnrichmentPromptNamesShardStatusEvidenceAndTargetId
 		"status == \"succeeded\"",
 		"status == \"failed\"",
 		"Do not report planned=unknown or failed=unknown when a readable current-run typed shard-summary items[] list is available.",
+		"When a readable typed shard-summary shows failed=0 and no pending/checkpointed/other statuses",
+		`"failed shards require rerun"`,
 		"current-run typed shard-plan/shard-summary files listed above when present",
 		"including shard-summary items[].status",
 	} {
@@ -1123,6 +1127,8 @@ func TestComposeDraftArtifactEnrichmentPromptForProposalsRequiresWriteFirstTarge
 		"Evidence index or citation references",
 		"Residual coverage gaps",
 		"Do not report 0 authored markdown shard documents unless you actually globbed staging/shards/**/*.md",
+		"Do not ask the operator to re-run or repair non-succeeded shards when the current-run typed shard-summary shows failed=0",
+		"Do not list final-run-index.json, citation-index.json, validator verdicts, or shard summaries from a different run_id",
 		"Do not mention placeholder replacement, placeholder proposal content, replaced placeholder content, or recovery mechanics",
 		"placeholder proposal content",
 		"replaced placeholder content",

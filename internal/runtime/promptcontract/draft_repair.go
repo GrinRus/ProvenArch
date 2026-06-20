@@ -242,6 +242,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		"- Current target identity comes from repo_scope/repo_scopes/domain_id and the current staged artifacts, not from matrix id, batch id, profile id, workspace path, or run-folder names.",
 		"- If current_repo_scopes contains exactly one repo, final markdown must not name sibling matrix targets or other repositories unless an allowed staged artifact, final index, citation index, or shard status file explicitly names that repo as evidence.",
 		"- Matrix/profile/batch names such as combined multi-target folder names are harness labels, not architecture evidence.",
+		"- Final markdown must not cite taskrun identifiers other than current_run_id. If older workspace artifacts are visible, do not use them as current-run evidence and do not list their run_* paths as reviewed indexes.",
 		"DRAFT ENRICHMENT CURRENT-RUN SHARD STATUS EVIDENCE:",
 	}
 	if len(statusEvidenceFiles) == 0 {
@@ -259,6 +260,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 	lines = append(lines,
 		"- For typed shard-summary JSON with items[], planned = len(items), succeeded = count of items where status == \"succeeded\", failed = count of items where status == \"failed\"; pending/checkpointed/other statuses are incomplete coverage and must be named separately.",
 		"- Do not report planned=unknown or failed=unknown when a readable current-run typed shard-summary items[] list is available.",
+		"- When a readable typed shard-summary shows failed=0 and no pending/checkpointed/other statuses, write that there are no failed or incomplete shards. Do not write generic conditional phrases such as \"if present above\", \"any failed or incomplete shards\", \"failed shards require rerun\", or \"failed or incomplete shards remain coverage gaps\".",
 		"- Do not infer shard counts from lexical occurrences of words such as failed/error/summary inside markdown or manifests.",
 		"DRAFT ENRICHMENT TARGETS:",
 	)
@@ -305,6 +307,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			"- summary.md must contain: planned/succeeded/failed shard completeness; evidence density/readability notes; key citations or staged artifact refs; and remaining gaps.",
 			"- For shard completeness, derive planned/succeeded/failed from typed shard-plan/shard-summary artifacts when visible, including shard-summary items[].status; otherwise use observed shard directories and shard-pack-manifest.json counts. Never count the words failed/error/summary lexically inside manifests or markdown.",
 			"- If planned shard status is not explicitly visible, write planned=unknown, succeeded=<observed shard-pack-manifest.json count>, failed=unknown, and name the missing typed shard-plan/shard-summary surface instead of fabricating failed counts.",
+			"- Do not list final-run-index.json or citation-index.json from a different run_id as current-run evidence. Current-run markdown may mention only current_run_id taskrun paths.",
 			"- architect-summary.md must contain: decision-ready operator summary with what is complete, what is missing, what the operator should inspect or decide next, and any residual risk.",
 			"- Include enough repository/path and staged artifact references for an operator to understand the architecture surface and remaining coverage gaps.",
 			"- Include a decision-ready operator summary: what is complete, what is missing, and what the operator should inspect or decide next.",
@@ -326,6 +329,8 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			"- proposal.md must contain: Decision / recommended operator action; Evidence used with repo/path or staged artifact references; Proposed changes or follow-up plan; Risks, gaps, and out-of-scope notes.",
 			"- changelog.md must contain: Updated architecture/proposal surfaces; Findings/proposals summary; Evidence index or citation references; Residual coverage gaps.",
 			"- Do not report 0 authored markdown shard documents unless you actually globbed staging/shards/**/*.md in the allowed roots and found none; otherwise give the observed count or omit the count.",
+			"- Do not ask the operator to re-run or repair non-succeeded shards when the current-run typed shard-summary shows failed=0 and no incomplete statuses; write an explicit no-shard-coverage-blocker statement instead.",
+			"- Do not list final-run-index.json, citation-index.json, validator verdicts, or shard summaries from a different run_id as current-run proposal evidence.",
 			"- Do not mention placeholder replacement, placeholder proposal content, replaced placeholder content, or recovery mechanics in operator-facing proposal/changelog content.",
 			"- Do not write phrases like 'the enrichment read the current draft manifest', 'bounded staged evidence', 'recovery pass', or 'proposal surface only as a follow-up queue' as the primary recommendation. Convert findings into concrete operator decisions and explicitly state no-actionable-proposal only when evidence is absent.",
 			"- If staged evidence is sparse, write the gap explicitly with the exact missing staged surface instead of keeping bootstrap scaffold.",

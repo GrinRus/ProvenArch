@@ -919,6 +919,106 @@ func TestValidateRequiredManifestRejectsGenericPlaceholderReplacementNarration(t
 	}
 }
 
+func TestValidateRequiredManifestRejectsForeignRunIDReferences(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "overview.md"), []byte(`# As-Is Overview
+
+Current coverage uses reports/as-is/overview.md and final-run-index.json.
+Run indexes reviewed: run_20260620_181032_001/staging/final/final-run-index.json.
+`), 0o644); err != nil {
+		t.Fatalf("write overview: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "summary.md"), []byte("# Coverage\n\nEvidence: final-run-index.json\n"), 0o644); err != nil {
+		t.Fatalf("write summary: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "architect-summary.md"), []byte("# Architect Summary\n\nEvidence: cite.ftgo.accounting.contracts.authorize\n"), 0o644); err != nil {
+		t.Fatalf("write architect summary: %v", err)
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run_20260620_184900_001",
+  "step_id": "refresh.step2.asis_docs",
+  "step_contract": "as_is",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "overview.md", "canonical_path": "reports/as-is/overview.md", "kind": "report", "title": "System Overview"},
+    {"path": "summary.md", "canonical_path": "reports/coverage/summary.md", "kind": "report", "title": "Coverage Summary"},
+    {"path": "architect-summary.md", "canonical_path": "reports/agent-outputs/architect/summary.md", "kind": "agent-output", "title": "Architect Summary"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, AsIsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run_20260620_184900_001", "refresh.step2.asis_docs", "as_is", []string{AsIsManifestFile})
+	if err == nil {
+		t.Fatalf("expected foreign run id reference to be rejected")
+	}
+	if !strings.Contains(err.Error(), `references foreign taskrun "run_20260620_181032_001"`) {
+		t.Fatalf("expected foreign taskrun error, got %v", err)
+	}
+}
+
+func TestValidateRequiredManifestRejectsGenericShardGapWording(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "proposal.md"), []byte(`# Runtime Recommendations
+
+Evidence: final-run-index.json and cite.ftgo.accounting.contracts.authorize.
+Failed shards require rerun or manual review before implementation.
+`), 0o644); err != nil {
+		t.Fatalf("write proposal: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "changelog.md"), []byte(`# Runtime Proposal Changelog
+
+Evidence: reports/changelog/runtime-proposals.md.
+Failed or incomplete shards remain coverage gaps until rerun or manually reviewed.
+`), 0o644); err != nil {
+		t.Fatalf("write changelog: %v", err)
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run_20260620_184900_001",
+  "step_id": "refresh.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "proposal.md", "canonical_path": "proposals/runtime-recommendations.md", "kind": "proposal", "title": "Runtime Recommendations"},
+    {"path": "changelog.md", "canonical_path": "reports/changelog/runtime-proposals.md", "kind": "changelog", "title": "Runtime Proposal Changelog"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run_20260620_184900_001", "refresh.step4.proposals", "proposals", []string{ProposalsManifestFile})
+	if err == nil {
+		t.Fatalf("expected generic shard-gap wording to be rejected")
+	}
+	if !strings.Contains(err.Error(), "generic conditional shard-gap wording") {
+		t.Fatalf("expected generic shard-gap wording error, got %v", err)
+	}
+}
+
 func TestValidateRequiredManifestRejectsObservedContractInvalidProposalsEnvelope(t *testing.T) {
 	t.Parallel()
 

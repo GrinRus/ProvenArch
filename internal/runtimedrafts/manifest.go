@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -116,7 +117,7 @@ func ValidateRequiredManifest(
 	if err := ValidateOutputsExist(draftRoot, manifest); err != nil {
 		return Manifest{}, nil, err
 	}
-	if err := ValidateOutputContent(draftRoot, manifest, stepID); err != nil {
+	if err := ValidateOutputContent(draftRoot, manifest, stepID, runID); err != nil {
 		return Manifest{}, nil, err
 	}
 	return manifest, raw, nil
@@ -188,7 +189,7 @@ func ValidateOutputsExist(draftRoot string, manifest Manifest) error {
 	return nil
 }
 
-func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string) error {
+func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string, runID string) error {
 	switch strings.TrimSpace(stepID) {
 	case "init.step0.constitution", "init.step2.asis_docs", "refresh.step2.asis_docs", "init.step4.proposals", "refresh.step4.proposals":
 	default:
@@ -207,8 +208,15 @@ func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string) e
 			problems = append(problems, fmt.Sprintf("outputs[%d].path %q cannot be read for content validation: %v", idx, output.Path, err))
 			continue
 		}
-		if runtimeDraftTextBootstrapOnly(string(raw)) {
+		text := string(raw)
+		if runtimeDraftTextBootstrapOnly(text) {
 			problems = append(problems, fmt.Sprintf("outputs[%d].path %q references bootstrap-only placeholder draft content", idx, output.Path))
+		}
+		if foreignRunID := runtimeDraftTextForeignRunID(text, runID); foreignRunID != "" {
+			problems = append(problems, fmt.Sprintf("outputs[%d].path %q references foreign taskrun %q instead of current run_id %q", idx, output.Path, foreignRunID, strings.TrimSpace(runID)))
+		}
+		if runtimeDraftTextHasGenericShardGapWording(text) {
+			problems = append(problems, fmt.Sprintf("outputs[%d].path %q uses generic conditional shard-gap wording instead of exact current-run shard status", idx, output.Path))
 		}
 	}
 	if len(problems) == 0 {
@@ -453,6 +461,42 @@ func runtimeDraftTextBootstrapOnly(text string) bool {
 		return false
 	}
 	for _, marker := range softMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+var liveRunIDPattern = regexp.MustCompile(`\brun_[0-9]{8}_[0-9]{6}_[0-9]{3}\b`)
+
+func runtimeDraftTextForeignRunID(text string, expectedRunID string) string {
+	expected := strings.TrimSpace(expectedRunID)
+	if expected == "" {
+		return ""
+	}
+	for _, match := range liveRunIDPattern.FindAllString(text, -1) {
+		if match != expected {
+			return match
+		}
+	}
+	return ""
+}
+
+func runtimeDraftTextHasGenericShardGapWording(text string) bool {
+	lower := strings.ToLower(text)
+	markers := []string{
+		"if present above",
+		"if failed or incomplete shard",
+		"any failed or incomplete shard",
+		"any failed, pending, checkpointed",
+		"failed or incomplete shards remain",
+		"failed or incomplete typed shard statuses",
+		"re-run or repair any non-succeeded collection shards",
+		"failed shards require rerun",
+		"incomplete statuses require confirmation",
+	}
+	for _, marker := range markers {
 		if strings.Contains(lower, marker) {
 			return true
 		}
