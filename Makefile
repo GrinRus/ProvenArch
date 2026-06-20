@@ -26,7 +26,12 @@ test-stress:
 	$(GO) test ./internal/orchestrator -run '^$(STRESS_TEST)$$' -count=30
 
 lint:
-	@fmt_files="$$(gofmt -l $(GO_FILES))"; \
+	@gofmt_bin="$$($(GO) env GOROOT)/bin/gofmt"; \
+	if [ ! -x "$$gofmt_bin" ]; then \
+		echo "gofmt not found at $$gofmt_bin"; \
+		exit 1; \
+	fi; \
+	fmt_files="$$("$$gofmt_bin" -l $(GO_FILES))"; \
 	if [ -n "$$fmt_files" ]; then \
 		echo "Unformatted Go files:"; \
 		echo "$$fmt_files"; \

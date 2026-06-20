@@ -2271,25 +2271,56 @@ def write_frontend_matrix(path: Path, frontend: list[dict[str, Any]], providers:
             "",
             "## Run Details",
             "",
-            "| provider | run | status | reason | base_url | workspace | runtime_command | server_log | playwright_log |",
-            "|---|---:|---|---|---|---|---|---|---|",
+            "| provider | run | status | reason | runtime_details | base_url | workspace | runtime_command | server_log | playwright_log |",
+            "|---|---:|---|---|---|---|---|---|---|---|",
         ]
     )
     for provider in active_providers:
         items = grouped.get(provider, [])
         if not items:
-            lines.append(f"| {provider} | 0 | missing | missing_result | - | - | - | - | - |")
+            lines.append(f"| {provider} | 0 | missing | missing_result | - | - | - | - | - | - |")
             continue
         for payload in items:
             run_index = int(payload.get("run_index", 0) or 0)
             run_label = str(run_index) if run_index > 0 else "-"
             lines.append(
                 "| "
-                f"{provider} | {run_label} | {payload.get('status', '-')} | {payload.get('reason', '-')} | "
-                f"{payload.get('base_url', '-')} | {payload.get('workspace', '-')} | {payload.get('runtime_command', '-')} | "
-                f"{payload.get('server_log', '-')} | {payload.get('playwright_log', '-')} |"
+                f"{md_cell(provider)} | {run_label} | {md_cell(payload.get('status', '-'))} | {md_cell(payload.get('reason', '-'))} | "
+                f"{md_cell(frontend_runtime_details(payload))} | {md_cell(payload.get('base_url', '-'))} | "
+                f"{md_cell(payload.get('workspace', '-'))} | {md_cell(payload.get('runtime_command', '-'))} | "
+                f"{md_cell(payload.get('server_log', '-'))} | {md_cell(payload.get('playwright_log', '-'))} |"
             )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def md_cell(value: Any) -> str:
+    text = str(value if value is not None else "-").strip() or "-"
+    return text.replace("|", "\\|").replace("\n", " ")
+
+
+def frontend_runtime_details(payload: dict[str, Any]) -> str:
+    details: list[str] = []
+    run_id = str(payload.get("run_id") or "").strip()
+    if run_id:
+        details.append(f"run_id={run_id}")
+    last_status = str(payload.get("last_run_status") or "").strip()
+    if last_status:
+        details.append(f"last_run_status={last_status}")
+    error_code = str(payload.get("last_run_error_code") or "").strip()
+    if error_code:
+        details.append(f"error_code={error_code}")
+    current_step = str(payload.get("last_run_current_step") or "").strip()
+    if current_step:
+        details.append(f"current_step={current_step}")
+    diagnostic_refs = payload.get("diagnostic_refs")
+    if isinstance(diagnostic_refs, dict):
+        screenshots = diagnostic_refs.get("screenshots")
+        if isinstance(screenshots, list) and screenshots:
+            details.append(f"screenshots={len(screenshots)}")
+        results_dir = str(diagnostic_refs.get("playwright_results") or "").strip()
+        if results_dir:
+            details.append(f"playwright_results={results_dir}")
+    return "; ".join(details) if details else "-"
 
 
 def frontend_live_verdict_lines(frontend: list[dict[str, Any]], providers: list[str] | None = None) -> list[str]:

@@ -3577,6 +3577,17 @@ class BatchFailureClassificationTest(unittest.TestCase):
                 "workspace": "/tmp/qwen-run4",
                 "base_url": "http://127.0.0.1:18084",
                 "runtime_command": "qwen",
+                "run_id": "run_frontend_failed",
+                "last_run_status": "failed",
+                "last_run_error_code": "run_partial_failed",
+                "last_run_current_step": "init.step4.proposals",
+                "diagnostic_refs": {
+                    "playwright_results": "/tmp/qwen-run4/playwright-results",
+                    "screenshots": [
+                        "/tmp/qwen-run4/playwright-results/frontend-source-desktop.png",
+                        "/tmp/qwen-run4/playwright-results/frontend-analysis-failed-desktop.png",
+                    ],
+                },
             },
         )
         write_json(
@@ -3603,6 +3614,10 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertIn("| qwen-code | 1 | passed | ok |", matrix_text)
         self.assertIn("| qwen-code | 3 | failed | browser_closed |", matrix_text)
         self.assertIn("| qwen-code | 4 | failed | runtime_run_failed |", matrix_text)
+        self.assertIn("run_id=run_frontend_failed", matrix_text)
+        self.assertIn("error_code=run_partial_failed", matrix_text)
+        self.assertIn("current_step=init.step4.proposals", matrix_text)
+        self.assertIn("screenshots=2", matrix_text)
 
     def test_execution_report_respects_selected_provider_surface(self) -> None:
         reports_root = self.root / "reports-selected"

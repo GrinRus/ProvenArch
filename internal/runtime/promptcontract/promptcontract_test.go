@@ -944,7 +944,11 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"all three step2 markdown targets must be freshly overwritten",
 		"If staged evidence is sparse, write the exact missing staged surface",
 		"Final self-check: overview.md, summary.md, and architect-summary.md were freshly overwritten",
-		"Final content MUST NOT include these scaffold markers:",
+		"Final markdown must read as an operator-facing architecture/report/proposal artifact",
+		"Final content MUST NOT include these scaffold/recovery markers:",
+		"This draft is grounded in the current step manifest",
+		"bounded staged evidence",
+		"recovery pass",
 		"Drafted required runtime artifacts for this step",
 		"Provider wrote this draft artifact",
 		"Read the current draft manifest only for contract fields and exact outputs",
@@ -960,6 +964,7 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"For shard completeness, derive planned/succeeded/failed from typed shard-plan/shard-summary artifacts when visible",
 		"Never count the words failed/error/summary lexically inside manifests or markdown",
 		"If planned shard status is not explicitly visible, write planned=unknown",
+		"Translate runtime evidence into architecture facts, coverage gaps, and operator decisions",
 	} {
 		if !strings.Contains(prompt, token) {
 			t.Fatalf("expected draft enrichment prompt to contain %q, got:\n%s", token, prompt)
@@ -1015,9 +1020,13 @@ func TestComposeDraftArtifactEnrichmentPromptForProposalsRequiresWriteFirstTarge
 		"Do not treat proposals-draft-manifest.json summary text, canonical_path examples, or bootstrap output metadata as findings/proposals",
 		"record an explicit no-actionable-proposal gap",
 		"Final self-check: both proposal.md and changelog.md were freshly overwritten",
-		"Final content MUST NOT include these scaffold markers:",
+		"Final markdown must read as an operator-facing architecture/report/proposal artifact",
+		"Final content MUST NOT include these scaffold/recovery markers:",
+		"current draft manifest",
+		"enrichment read",
 		"Drafted required runtime artifacts for this step",
 		"Runtime proposal surface initialized",
+		"Convert findings into concrete operator decisions",
 		"Previous draft artifact validation failure:",
 	} {
 		if !strings.Contains(prompt, token) {

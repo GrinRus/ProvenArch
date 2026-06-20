@@ -253,10 +253,11 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		"- If you update manifest metadata, update only top-level summary or updated_at and leave outputs[] byte-for-byte equivalent for path/canonical_path/kind/title.",
 		"- Every outputs[].path must stay relative to draft_final_root and every referenced draft file must exist before exit.",
 		"- Replace bootstrap-only markdown with evidence-backed content that cites concrete repositories, staged artifacts, files, services, modules, findings, or coverage gaps visible in the allowed read roots.",
+		"- Final markdown must read as an operator-facing architecture/report/proposal artifact, not as a runtime recovery log. Do not make draft manifests, draft roots, enrichment, recovery, bounded reads, or staged evidence mechanics the subject of the report.",
 		"- Do not read every staged shard document. Prefer all shard-pack-manifest.json files plus at most 6 authored markdown docs selected for architectural signal, then cite remaining coverage as summarized from manifests/indexes.",
 		"- A no-op rewrite is invalid: every referenced markdown draft must be freshly rewritten with marker-free evidence-backed content, not merely re-saved unchanged.",
 		"- Preserve valid non-markdown support bundles when they are already canonical; for constitution, baseline-subagents.yaml may remain the baseline YAML bundle.",
-		"- Final content MUST NOT include these scaffold markers: Provider wrote this draft artifact; Drafted required runtime artifacts for this step; Draft surface initialized for the scoped repository analysis; Final content must stay tied to collected shard evidence and validator output; Runtime draft recovery initialized; draft recovery initialized; Treat this as diagnostic evidence until; Use collected shard manifests and validator output as the evidence source before final review; Draft surface initialized; Current run evidence should be reviewed; Runtime proposal surface initialized.",
+		"- Final content MUST NOT include these scaffold/recovery markers: Provider wrote this draft artifact; Drafted required runtime artifacts for this step; Draft surface initialized for the scoped repository analysis; This draft is grounded in the current step manifest; current draft manifest; manifest target remains; draft_final_root; bounded staged evidence; bounded read; recovery pass; recovery action; enrichment read; enrichment pass; Final content must stay tied to collected shard evidence and validator output; Runtime draft recovery initialized; draft recovery initialized; Treat this as diagnostic evidence until; Use collected shard manifests and validator output as the evidence source before final review; Draft surface initialized; Current run evidence should be reviewed; Runtime proposal surface initialized.",
 		"- Final action must be: ensure the draft manifest and every referenced draft file exist, then ensure every referenced markdown draft changed and contains no unchanged bootstrap/recovery scaffold text.",
 	)
 	switch strings.TrimSpace(task.StepID) {
@@ -280,6 +281,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			"- Include enough repository/path and staged artifact references for an operator to understand the architecture surface and remaining coverage gaps.",
 			"- Include a decision-ready operator summary: what is complete, what is missing, and what the operator should inspect or decide next.",
 			"- Include explicit coverage gaps when any planned shard, repo path, citation, or staged evidence surface is partial or missing.",
+			"- Do not write phrases like 'the required draft outputs are present', 'manifest target remains', 'bounded staged evidence', or 'this draft is grounded in the current step manifest'. Translate runtime evidence into architecture facts, coverage gaps, and operator decisions.",
 			"- Do not stop after writing only one markdown target; all three step2 markdown targets must be freshly overwritten in this focused call.",
 			"- Do not stop after saying you have enough evidence; that sentence is not an artifact and will be treated as a failed no-op enrichment.",
 			"- If staged evidence is sparse, write the exact missing staged surface or shard coverage gap instead of keeping bootstrap scaffold.",
@@ -295,6 +297,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			fmt.Sprintf("- Exact required changelog draft overwrite target: %q.", filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "changelog.md")),
 			"- proposal.md must contain: Decision / recommended operator action; Evidence used with repo/path or staged artifact references; Proposed changes or follow-up plan; Risks, gaps, and out-of-scope notes.",
 			"- changelog.md must contain: Updated architecture/proposal surfaces; Findings/proposals summary; Evidence index or citation references; Residual coverage gaps.",
+			"- Do not write phrases like 'the enrichment read the current draft manifest', 'bounded staged evidence', 'recovery pass', or 'proposal surface only as a follow-up queue' as the primary recommendation. Convert findings into concrete operator decisions and explicitly state no-actionable-proposal only when evidence is absent.",
 			"- If staged evidence is sparse, write the gap explicitly with the exact missing staged surface instead of keeping bootstrap scaffold.",
 			"- Final self-check: both proposal.md and changelog.md were freshly overwritten in this focused call, name concrete staged evidence or repo/path references when available, and contain none of the banned scaffold markers.",
 		)
