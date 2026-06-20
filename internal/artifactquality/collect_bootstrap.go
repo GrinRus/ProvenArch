@@ -100,10 +100,54 @@ func collectDocumentRuntimeProcessContaminated(text string) bool {
 			return true
 		}
 	}
-	if strings.Contains(lower, "expected ") &&
-		(strings.Contains(lower, " was not present") || strings.Contains(lower, " is not present")) &&
-		(strings.Contains(lower, "path") || strings.Contains(lower, "file") || strings.Contains(lower, "repo") || strings.Contains(lower, "repository")) {
+	if collectDocumentExpectedMissingConcretePath(lower) {
 		return true
+	}
+	return false
+}
+
+func collectDocumentExpectedMissingConcretePath(lower string) bool {
+	for _, exact := range []string{
+		"expected path was not present",
+		"expected path is not present",
+		"expected file was not present",
+		"expected file is not present",
+		"expected repo was not present",
+		"expected repo is not present",
+		"expected repository was not present",
+		"expected repository is not present",
+	} {
+		if strings.Contains(lower, exact) {
+			return true
+		}
+	}
+	for _, suffix := range []string{
+		" path was not present",
+		" path is not present",
+		" file was not present",
+		" file is not present",
+		" repo was not present",
+		" repo is not present",
+		" repository was not present",
+		" repository is not present",
+	} {
+		start := 0
+		for {
+			idx := strings.Index(lower[start:], suffix)
+			if idx < 0 {
+				break
+			}
+			idx += start
+			prefix := lower[:idx]
+			expected := strings.LastIndex(prefix, "expected ")
+			if expected >= 0 {
+				phrase := strings.TrimSpace(prefix[expected+len("expected "):])
+				if strings.ContainsAny(phrase, `/\.`) || strings.Contains(phrase, "\\") {
+					return true
+				}
+			}
+			start = idx + len(suffix)
+		}
 	}
 	return false
 }

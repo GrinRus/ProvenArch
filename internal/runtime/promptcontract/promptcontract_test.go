@@ -551,8 +551,8 @@ func TestCollectRepairEvidenceCandidatesAreRankedAndCapped(t *testing.T) {
 	}
 
 	candidates := repairEvidenceCandidates(task)
-	if len(candidates) != 12 {
-		t.Fatalf("expected capped candidate set of 12, got %d: %#v", len(candidates), candidates)
+	if len(candidates) != 18 {
+		t.Fatalf("expected capped candidate set of 18, got %d: %#v", len(candidates), candidates)
 	}
 	wantPrefix := []string{"AGENTS.md", "CONTRIBUTING.md", "README.md", "package.json", "pyproject.toml"}
 	for i, want := range wantPrefix {
@@ -566,6 +566,47 @@ func TestCollectRepairEvidenceCandidatesAreRankedAndCapped(t *testing.T) {
 				t.Fatalf("expected dotfile %q to fall outside capped repair evidence, got %#v", forbidden, candidates)
 			}
 		}
+	}
+}
+
+func TestCollectRepairEvidenceCandidatesKeepEachPathScope(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	for _, file := range []string{
+		"cli/README.md",
+		"cli/Cargo.toml",
+		"cli/CHANGELOG.md",
+		"cli/src/api/client.rs",
+		"cli/src/main.rs",
+		"cli/tests/cli.rs",
+		"common/README.md",
+		"common/hogvm/README.md",
+		"common/hogql_parser/pyproject.toml",
+		"common/hogli/README.md",
+	} {
+		path := filepath.Join(repoRoot, filepath.FromSlash(file))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", file, err)
+		}
+		if err := os.WriteFile(path, []byte(file+"\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", file, err)
+		}
+	}
+	task := acpruntime.Task{
+		ReadContextRoots: []string{repoRoot},
+		PathScopes:       []string{"cli", "common"},
+	}
+
+	candidates := repairEvidenceCandidates(task)
+	joined := strings.Join(candidates, "\n")
+	for _, want := range []string{"cli/README.md", "cli/Cargo.toml", "common/README.md", "common/hogql_parser/pyproject.toml"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected multi-scope repair candidates to include %q, got:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "cli/package.json") || strings.Contains(joined, "common/hogvm/python/README.md") {
+		t.Fatalf("repair candidates must only list existing files, got:\n%s", joined)
 	}
 }
 

@@ -193,6 +193,9 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 	} else if isPromptHintedStep(task.StepID) {
 		lines = append(lines, `- Repo entrypoint hints are limited to actually existing files; do not assume README.md exists when it is absent.`)
 	}
+	if scopeHints := CollectPathScopeFileHints(task); len(scopeHints) > 0 && isCollectStep(task.StepID) {
+		lines = append(lines, fmt.Sprintf(`- Existing path-scope file candidates (use these concrete files for bounded collect before citing deeper paths): %s`, strings.Join(scopeHints, ", ")))
+	}
 	switch strings.TrimSpace(task.StepID) {
 	case acpruntime.StepIDQAAsk:
 		lines = append(lines,
@@ -342,7 +345,7 @@ func CollectFirstActionSection(task acpruntime.Task) string {
 	writeRoot := strings.TrimSpace(task.WriteRoot)
 	docTarget := filepath.Join(writeRoot, filepath.FromSlash(SuggestedCollectDocumentPath(task)))
 	manifestTarget := filepath.Join(writeRoot, "shard-pack-manifest.json")
-	return strings.Join([]string{
+	lines := []string{
 		"COLLECT EVIDENCE-FIRST ARTIFACT PAIR:",
 		"- This collect step must start by writing an evidence-backed artifact pair; do not write a seed-only pair.",
 		fmt.Sprintf(`- Exact authored document target: %q.`, docTarget),
@@ -373,7 +376,14 @@ func CollectFirstActionSection(task acpruntime.Task) string {
 		"- Use the JSON above as the task-specific schema/key/type guide, not as final content.",
 		"- Replace skeleton citations, coverage, questions, entities, edges, findings, titles, and descriptions with facts observed in repository files.",
 		"- Copying this skeleton unchanged is invalid and will be rejected as scaffold-only output.",
-	}, "\n")
+	}
+	if scopeHints := CollectPathScopeFileHints(task); len(scopeHints) > 0 {
+		lines = append(lines[:7], append([]string{
+			"- Existing path-scope file candidates for this collect shard:",
+			"  - " + strings.Join(scopeHints, "\n  - "),
+		}, lines[7:]...)...)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func ValidatorVerdictWriteCommand(task acpruntime.Task) string {
@@ -1231,6 +1241,166 @@ func CollectRepoEntrypointHints(task acpruntime.Task) []string {
 		}
 	}
 	return hints
+}
+
+func CollectPathScopeFileHints(task acpruntime.Task) []string {
+	if len(task.ReadContextRoots) == 0 || len(task.PathScopes) == 0 {
+		return nil
+	}
+	workspace := filepath.Clean(strings.TrimSpace(task.Workspace))
+	writeRoot := filepath.Clean(strings.TrimSpace(task.WriteRoot))
+	seen := map[string]struct{}{}
+	hints := []string{}
+	add := func(path string, info os.FileInfo) {
+		path = filepath.ToSlash(strings.TrimSpace(path))
+		if path == "" || !collectPathScopeHintAllowed(path, info) {
+			return
+		}
+		if _, ok := seen[path]; ok {
+			return
+		}
+		seen[path] = struct{}{}
+		hints = append(hints, path)
+	}
+	for _, root := range task.ReadContextRoots {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		cleanRoot := filepath.Clean(root)
+		if (workspace != "." && cleanRoot == workspace) || (writeRoot != "." && cleanRoot == writeRoot) {
+			continue
+		}
+		if strings.Contains(filepath.ToSlash(cleanRoot), "/reports/taskruns/") {
+			continue
+		}
+		info, err := os.Stat(cleanRoot)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		for _, scope := range task.PathScopes {
+			for _, rel := range collectPathScopeFileHintsForScope(cleanRoot, scope) {
+				info, err := os.Stat(filepath.Join(cleanRoot, filepath.FromSlash(rel)))
+				if err != nil {
+					continue
+				}
+				add(rel, info)
+			}
+		}
+	}
+	sortCollectPathScopeFileHints(hints)
+	if len(hints) > 18 {
+		hints = hints[:18]
+	}
+	return hints
+}
+
+func collectPathScopeFileHintsForScope(root string, scope string) []string {
+	scope = strings.Trim(strings.TrimSpace(scope), string(filepath.Separator))
+	scope = strings.Trim(scope, "/")
+	if scope == "" {
+		return nil
+	}
+	target := filepath.Join(root, filepath.FromSlash(scope))
+	info, err := os.Stat(target)
+	if err != nil {
+		return nil
+	}
+	if !info.IsDir() {
+		if collectPathScopeHintAllowed(scope, info) {
+			return []string{filepath.ToSlash(scope)}
+		}
+		return nil
+	}
+	hints := []string{}
+	_ = filepath.WalkDir(target, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry == nil {
+			return nil
+		}
+		if entry.IsDir() {
+			switch entry.Name() {
+			case ".git", "node_modules", ".venv", "__pycache__":
+				return filepath.SkipDir
+			default:
+				return nil
+			}
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil || !collectPathScopeHintAllowed(rel, info) {
+			return nil
+		}
+		hints = append(hints, filepath.ToSlash(rel))
+		return nil
+	})
+	sortCollectPathScopeFileHints(hints)
+	if len(hints) > 6 {
+		hints = hints[:6]
+	}
+	return hints
+}
+
+func sortCollectPathScopeFileHints(hints []string) {
+	sort.Slice(hints, func(i, j int) bool {
+		leftRank := collectPathScopeHintRank(hints[i])
+		rightRank := collectPathScopeHintRank(hints[j])
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+		return hints[i] < hints[j]
+	})
+}
+
+func collectPathScopeHintRank(path string) int {
+	name := strings.ToLower(filepath.Base(path))
+	switch name {
+	case "readme.md", "readme.adoc", "readme.rst", "readme.txt", "contributing.md":
+		return 0
+	case "package.json", "pyproject.toml", "go.mod", "pom.xml", "build.gradle", "settings.gradle", "cargo.toml":
+		return 1
+	case "docker-compose.yml", "docker-compose.yaml", "dockerfile", "makefile":
+		return 2
+	case ".env.example", "workspace.yaml", "skaffold.yaml", "catalog-info.yaml":
+		return 3
+	}
+	if strings.HasPrefix(name, "dockerfile") || strings.HasPrefix(name, "docker-compose.") {
+		return 4
+	}
+	if strings.HasSuffix(name, ".md") {
+		return 5
+	}
+	if strings.HasPrefix(name, ".") {
+		return 9
+	}
+	return 6
+}
+
+func collectPathScopeHintAllowed(path string, info os.FileInfo) bool {
+	if info == nil || info.IsDir() {
+		return false
+	}
+	const maxCollectPathScopeHintBytes = 96 * 1024
+	if info.Size() > maxCollectPathScopeHintBytes {
+		return false
+	}
+	name := strings.ToLower(filepath.Base(path))
+	if name == "" {
+		return false
+	}
+	switch name {
+	case ".test_durations", "mypy-baseline.txt", "ty-baseline.txt", "pnpm-lock.yaml", "package-lock.json", "yarn.lock", "uv.lock", "go.sum":
+		return false
+	}
+	if strings.HasSuffix(name, ".lock") || strings.HasSuffix(name, "-lock.yaml") || strings.HasSuffix(name, "-lock.json") {
+		return false
+	}
+	if strings.HasPrefix(name, "coverage.") || strings.HasSuffix(name, ".snap") || strings.HasSuffix(name, ".snapshot") {
+		return false
+	}
+	return true
 }
 
 func firstNonEmpty(values ...string) string {

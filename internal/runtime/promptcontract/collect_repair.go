@@ -418,50 +418,65 @@ func repairEvidenceCandidates(task acpruntime.Task) []string {
 			continue
 		}
 		for _, scope := range task.PathScopes {
-			scope = strings.Trim(strings.TrimSpace(scope), string(filepath.Separator))
-			scope = strings.Trim(scope, "/")
-			if scope == "" {
-				continue
-			}
-			target := filepath.Join(cleanRoot, filepath.FromSlash(scope))
-			info, err := os.Stat(target)
-			if err != nil {
-				continue
-			}
-			if !info.IsDir() {
-				add(scope, info)
-				continue
-			}
-			_ = filepath.WalkDir(target, func(path string, entry os.DirEntry, err error) error {
+			for _, rel := range repairEvidenceCandidatesForScope(cleanRoot, scope) {
+				info, err := os.Stat(filepath.Join(cleanRoot, filepath.FromSlash(rel)))
 				if err != nil {
-					return nil
-				}
-				if len(candidates) >= 24 {
-					return filepath.SkipAll
-				}
-				if entry.IsDir() {
-					name := entry.Name()
-					if name == ".git" || name == "node_modules" || name == ".venv" {
-						return filepath.SkipDir
-					}
-					return nil
-				}
-				rel, relErr := filepath.Rel(cleanRoot, path)
-				if relErr != nil {
-					return nil
-				}
-				info, infoErr := entry.Info()
-				if infoErr != nil {
-					return nil
+					continue
 				}
 				add(rel, info)
-				return nil
-			})
+			}
 		}
 	}
 	sortRepairEvidenceCandidates(candidates)
-	if len(candidates) > 12 {
-		candidates = candidates[:12]
+	if len(candidates) > 18 {
+		candidates = candidates[:18]
+	}
+	return candidates
+}
+
+func repairEvidenceCandidatesForScope(cleanRoot string, scope string) []string {
+	scope = strings.Trim(strings.TrimSpace(scope), string(filepath.Separator))
+	scope = strings.Trim(scope, "/")
+	if scope == "" {
+		return nil
+	}
+	target := filepath.Join(cleanRoot, filepath.FromSlash(scope))
+	info, err := os.Stat(target)
+	if err != nil {
+		return nil
+	}
+	if !info.IsDir() {
+		if repairEvidenceCandidateAllowed(scope, info) {
+			return []string{filepath.ToSlash(scope)}
+		}
+		return nil
+	}
+	candidates := []string{}
+	_ = filepath.WalkDir(target, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if entry.IsDir() {
+			name := entry.Name()
+			if name == ".git" || name == "node_modules" || name == ".venv" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, relErr := filepath.Rel(cleanRoot, path)
+		if relErr != nil {
+			return nil
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil || !repairEvidenceCandidateAllowed(rel, info) {
+			return nil
+		}
+		candidates = append(candidates, filepath.ToSlash(rel))
+		return nil
+	})
+	sortRepairEvidenceCandidates(candidates)
+	if len(candidates) > 6 {
+		candidates = candidates[:6]
 	}
 	return candidates
 }

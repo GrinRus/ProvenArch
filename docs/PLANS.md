@@ -1159,6 +1159,26 @@ Strict medium `codex-code` rerun `regres-long-posthog-ftgo-20260620T023512Z` pre
 
 ---
 
+## Live E2E Collect Path-Scope Evidence Fairness
+
+### Context
+Strict medium `codex-code` rerun `regres-long-posthog-ftgo-20260620T051657Z` ran from clean commit `6057fbb` with selected provider `codex-code` only. The new execution/UX/artifact split held: `matrix_result_*` stayed non-release, selected-provider totals were `0/2`, `execution_report_*` replaced legacy quality reports, frontend was `skipped` because snapshots were missing, and no old `quality_report_*` / `quality_gates_failed` / `failure_reason=quality` evidence appeared. Backend failed in collect for both targets: PostHog `posthog-cli-common` cited stale missing paths (`cli/package.json`, `cli/docker-compose.yml`, `common/hogvm/python/README.md`) and `collect_pair_repair` produced only Codex lifecycle output; FTGO had 15/16 succeeded shards but `ftgo-restaurant-service-api...` was falsely routed to process-contamination repair because a legitimate missing Swagger spec coverage gap said an expected resource path was not present.
+
+### Plan
+- [x] Narrow process-contamination detection so concrete missing path claims remain invalid, but operator-facing missing spec/scope coverage gaps are allowed.
+- [x] Add concrete path-scope file candidates to normal collect prompts, selected fairly per assigned directory scope.
+- [x] Apply the same per-scope candidate fairness to collect pair/manifest repair prompts.
+- [x] Add tests for `cli/common`-style multi-scope candidates and the missing-spec coverage-gap false positive.
+- [ ] Run full DoD, commit, and rerun affected strict medium `codex-code`.
+
+### Acceptance
+- [x] Multi-scope candidates include real files from later scopes and do not list nonexistent stale paths.
+- [x] `expected src/test/... path was not present` remains invalid process contamination.
+- [x] `no OpenAPI/Swagger spec was observed under this scope` remains a valid coverage gap when not used as citation/provenance evidence.
+- [ ] Latest strict medium `codex-code` rerun reaches collect completion without the `posthog-cli-common` stale-path blocker or FTGO missing-spec false positive.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.

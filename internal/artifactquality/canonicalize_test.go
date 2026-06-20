@@ -216,6 +216,25 @@ func TestValidateCollectManifestRejectsGuessedPathNarrationDocument(t *testing.T
 	}
 }
 
+func TestValidateCollectManifestAllowsMissingSpecCoverageGap(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	payload := validCollectManifestPayload()
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), raw, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	writeDoc(t, writeRoot, "overview.md", "# Services Overview\n\nThe scoped API module depends on shared events and exposes a Restaurant Service surface.\n\n## Gaps And Questions\n\nThe scoped evidence does not include a concrete OpenAPI/Swagger file under `ftgo-restaurant-service-api-spec`, and the expected Swagger resource path was not present in the scoped files.\n")
+
+	if err := ValidateCollectManifestInRoot(writeRoot); err != nil {
+		t.Fatalf("expected missing spec coverage gap to pass validation, got %v", err)
+	}
+}
+
 func TestValidateCollectManifestRejectsBootstrapOnlySemanticSkeleton(t *testing.T) {
 	t.Parallel()
 

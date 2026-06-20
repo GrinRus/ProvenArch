@@ -1002,3 +1002,72 @@ func TestCollectRepoEntrypointHintsIncludesOwnershipFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestCollectPathScopeFileHintsKeepEachDirectoryScope(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	for _, file := range []string{
+		"cli/README.md",
+		"cli/Cargo.toml",
+		"cli/src/main.rs",
+		"common/README.md",
+		"common/hogql_parser/pyproject.toml",
+		"common/hogvm/README.md",
+	} {
+		path := filepath.Join(repoRoot, filepath.FromSlash(file))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", file, err)
+		}
+		if err := os.WriteFile(path, []byte(file+"\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", file, err)
+		}
+	}
+
+	hints := CollectPathScopeFileHints(acpruntime.Task{
+		StepID:           "init.step1.collect",
+		ReadContextRoots: []string{repoRoot},
+		PathScopes:       []string{"cli", "common"},
+	})
+	joined := strings.Join(hints, "\n")
+	for _, needle := range []string{"cli/README.md", "cli/Cargo.toml", "common/README.md", "common/hogql_parser/pyproject.toml"} {
+		if !strings.Contains(joined, needle) {
+			t.Fatalf("expected path-scope hints to contain %q, got:\n%s", needle, joined)
+		}
+	}
+}
+
+func TestCollectFirstActionSectionIncludesPathScopeFileHints(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	for _, file := range []string{"cli/README.md", "common/README.md"} {
+		path := filepath.Join(repoRoot, filepath.FromSlash(file))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", file, err)
+		}
+		if err := os.WriteFile(path, []byte(file+"\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", file, err)
+		}
+	}
+
+	section := CollectFirstActionSection(acpruntime.Task{
+		RunID:            "run-1",
+		StepID:           "init.step1.collect",
+		WriteRoot:        "/tmp/workspace/reports/taskruns/run-1/staging/shards/cli-common",
+		ReadContextRoots: []string{repoRoot},
+		ShardID:          "cli-common",
+		DomainID:         "posthog",
+		RepoScopes:       []string{"posthog"},
+		PathScopes:       []string{"cli", "common"},
+	})
+	for _, needle := range []string{
+		"Existing path-scope file candidates for this collect shard:",
+		"cli/README.md",
+		"common/README.md",
+	} {
+		if !strings.Contains(section, needle) {
+			t.Fatalf("expected collect first action section to contain %q, got:\n%s", needle, section)
+		}
+	}
+}
