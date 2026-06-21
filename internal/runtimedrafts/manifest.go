@@ -503,11 +503,47 @@ func runtimeDraftTextHasGenericShardGapWording(text string) bool {
 		"incomplete statuses require confirmation",
 	}
 	for _, marker := range markers {
-		if strings.Contains(lower, marker) {
+		if runtimeDraftTextContainsGenericShardGapMarker(lower, marker) {
 			return true
 		}
 	}
 	return false
+}
+
+func runtimeDraftTextContainsGenericShardGapMarker(lower string, marker string) bool {
+	searchFrom := 0
+	for {
+		rel := strings.Index(lower[searchFrom:], marker)
+		if rel < 0 {
+			return false
+		}
+		idx := searchFrom + rel
+		if marker == "failed or incomplete shards remain" && runtimeDraftTextAllowedNoShardCoverageBlockerLine(lower, idx) {
+			searchFrom = idx + len(marker)
+			continue
+		}
+		return true
+	}
+}
+
+func runtimeDraftTextAllowedNoShardCoverageBlockerLine(lower string, markerIdx int) bool {
+	lineStart := strings.LastIndex(lower[:markerIdx], "\n")
+	if lineStart < 0 {
+		lineStart = 0
+	} else {
+		lineStart++
+	}
+	lineEndRel := strings.Index(lower[markerIdx:], "\n")
+	lineEnd := len(lower)
+	if lineEndRel >= 0 {
+		lineEnd = markerIdx + lineEndRel
+	}
+	line := strings.TrimSpace(lower[lineStart:lineEnd])
+	line = strings.TrimLeft(line, "-*0123456789. )\t")
+	if !strings.HasPrefix(line, "no failed or incomplete shards remain") {
+		return false
+	}
+	return strings.Contains(line, "current-run") && (strings.Contains(line, "typed shard summary") || strings.Contains(line, "typed shard status"))
 }
 
 func runtimeDraftTextHasStaleIndexAvailabilityClaim(text string) bool {

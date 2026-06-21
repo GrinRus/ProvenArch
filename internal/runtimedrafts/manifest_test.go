@@ -1019,6 +1019,65 @@ Failed or incomplete shards remain coverage gaps until rerun or manually reviewe
 	}
 }
 
+func TestValidateRequiredManifestAllowsExactNoShardCoverageBlockerStatement(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "proposal.md"), []byte(`# Runtime Recommendations
+
+## Decision / Recommended Operator Action
+Proceed without a shard coverage blocker for this current run. Evidence: current-run shard summary run_20260620_184900_001-refresh-step1-collect-shard-summary-ftgo.json reports 16 planned, 16 succeeded, and 0 failed shard items.
+
+## Evidence Used
+- cite.ftgo.accounting.contracts.authorize -> ftgo-order-service/src/main/java/net/chrisrichardson/ftgo/orderservice/domain/Order.java
+
+## Risks, Gaps, and Out-of-Scope Notes
+- There are no failed or incomplete shards in the current-run typed shard summary.
+`), 0o644); err != nil {
+		t.Fatalf("write proposal: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "changelog.md"), []byte(`# Runtime Proposal Changelog
+
+## Findings/Proposals Summary
+- Current-run shard coverage is complete: 16 planned, 16 succeeded, 0 failed, and 0 incomplete typed shard statuses.
+
+## Evidence Index or Citation References
+- run_20260620_184900_001-refresh-step1-collect-shard-summary-ftgo.json
+- cite.ftgo.accounting.contracts.authorize -> ftgo-order-service/src/main/java/net/chrisrichardson/ftgo/orderservice/domain/Order.java
+
+## Residual Coverage Gaps
+- No failed or incomplete shards remain as a coverage blocker in the current-run typed shard summary.
+`), 0o644); err != nil {
+		t.Fatalf("write changelog: %v", err)
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run_20260620_184900_001",
+  "step_id": "refresh.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "proposal.md", "canonical_path": "proposals/runtime-recommendations.md", "kind": "proposal", "title": "Runtime Recommendations"},
+    {"path": "changelog.md", "canonical_path": "reports/changelog/runtime-proposals.md", "kind": "changelog", "title": "Runtime Proposal Changelog"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	if _, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run_20260620_184900_001", "refresh.step4.proposals", "proposals", []string{ProposalsManifestFile}); err != nil {
+		t.Fatalf("expected exact no-shard-coverage-blocker statement to validate, got %v", err)
+	}
+}
+
 func TestValidateRequiredManifestRejectsStaleFinalIndexAvailabilityClaim(t *testing.T) {
 	t.Parallel()
 

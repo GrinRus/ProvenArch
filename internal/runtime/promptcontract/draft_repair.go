@@ -260,7 +260,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 	lines = append(lines,
 		"- For typed shard-summary JSON with items[], planned = len(items), succeeded = count of items where status == \"succeeded\", failed = count of items where status == \"failed\"; pending/checkpointed/other statuses are incomplete coverage and must be named separately.",
 		"- Do not report planned=unknown or failed=unknown when a readable current-run typed shard-summary items[] list is available.",
-		"- When a readable typed shard-summary shows failed=0 and no pending/checkpointed/other statuses, write that there are no failed or incomplete shards. Do not write generic conditional phrases such as \"if present above\", \"any failed or incomplete shards\", \"failed shards require rerun\", or \"failed or incomplete shards remain coverage gaps\".",
+		"- When a readable typed shard-summary shows failed=0 and no pending/checkpointed/other statuses, write exact current-run counts and an explicit no-shard-coverage-blocker statement such as \"Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.\" Do not write generic conditional phrases such as \"if present above\", \"any failed or incomplete shards\", \"failed shards require rerun\", or \"failed or incomplete shards remain coverage gaps\".",
 		"- Do not infer shard counts from lexical occurrences of words such as failed/error/summary inside markdown or manifests.",
 		"DRAFT ENRICHMENT TARGETS:",
 	)
@@ -332,7 +332,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			"- proposal.md must contain: Decision / recommended operator action; Evidence used with repo/path or staged artifact references; Proposed changes or follow-up plan; Risks, gaps, and out-of-scope notes.",
 			"- changelog.md must contain: Updated architecture/proposal surfaces; Findings/proposals summary; Evidence index or citation references; Residual coverage gaps.",
 			"- Do not report 0 authored markdown shard documents unless you actually globbed staging/shards/**/*.md in the allowed roots and found none; otherwise give the observed count or omit the count.",
-			"- Do not ask the operator to re-run or repair non-succeeded shards when the current-run typed shard-summary shows failed=0 and no incomplete statuses; write an explicit no-shard-coverage-blocker statement instead.",
+			"- Do not ask the operator to re-run or repair non-succeeded shards when the current-run typed shard-summary shows failed=0 and no incomplete statuses; write exact planned/succeeded/failed/incomplete counts plus an explicit no-shard-coverage-blocker statement in both proposal.md and changelog.md instead.",
 			"- Do not list final-run-index.json, citation-index.json, validator verdicts, or shard summaries from a different run_id as current-run proposal evidence.",
 			"- When final-run-index.json or citation-index.json are present for current_run_id, summarize counts, selected document titles, citation ids, and repo/path references. Do not paste raw object payloads, Python-style dict snippets, `{'id': ...}`, or truncated JSON fragments.",
 			"- Do not claim citation detail is limited or unavailable when current-run citation-index.json contains citation entries. State the observed citation count or omit the claim.",
