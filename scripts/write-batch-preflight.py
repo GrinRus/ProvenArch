@@ -27,6 +27,17 @@ PROVIDER_UNAVAILABLE_MARKERS = (
 )
 
 ARTIFACT_SMOKE_SENTINEL_TEXT = "ACP_ARTIFACT_SMOKE_READY"
+CODEX_RUNTIME_DISABLE_ARGS = (
+    "--disable", "plugins",
+    "--disable", "remote_plugin",
+    "--disable", "plugin_sharing",
+    "--disable", "apps",
+    "--disable", "enable_mcp_apps",
+    "--disable", "tool_suggest",
+    "--disable", "skill_mcp_dependency_install",
+    "--ignore-user-config",
+    "--ignore-rules",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -145,6 +156,7 @@ def headless_probe_invocation(provider: str) -> tuple[list[str], str]:
             "--json",
             "--color",
             "never",
+            *CODEX_RUNTIME_DISABLE_ARGS,
             "--skip-git-repo-check",
             "--sandbox",
             "danger-full-access",
@@ -189,6 +201,7 @@ def artifact_smoke_invocation(provider: str, sentinel_path: Path) -> tuple[list[
             "--json",
             "--color",
             "never",
+            *CODEX_RUNTIME_DISABLE_ARGS,
             "--skip-git-repo-check",
             "--sandbox",
             "danger-full-access",
@@ -222,6 +235,15 @@ def run_probe_command(
 
 
 def run_artifact_smoke(provider: str, command: str, repo_root: str) -> tuple[bool, str, str]:
+    return run_artifact_smoke_with_env(provider, command, repo_root, None)
+
+
+def run_artifact_smoke_with_env(
+    provider: str,
+    command: str,
+    repo_root: str,
+    env_extra: dict[str, str] | None,
+) -> tuple[bool, str, str]:
     with tempfile.TemporaryDirectory(prefix="acp-provider-smoke-") as tempdir:
         sentinel_path = Path(tempdir) / "write-dir" / "sentinel.txt"
         smoke_args, smoke_stdin = artifact_smoke_invocation(provider, sentinel_path)
@@ -232,16 +254,20 @@ def run_artifact_smoke(provider: str, command: str, repo_root: str) -> tuple[boo
         last_combined = ""
         for attempt in range(1, max_attempts + 1):
             timeout_sec = probe_timeout_sec() if provider == "claude" else artifact_smoke_timeout_sec()
+            smoke_env = dict(env_extra or {})
+            smoke_env.update(
+                {
+                    "ACP_PREFLIGHT_SMOKE_SENTINEL": str(sentinel_path),
+                    "ACP_PREFLIGHT_SMOKE_TEXT": ARTIFACT_SMOKE_SENTINEL_TEXT,
+                }
+            )
             try:
                 completed = run_probe_command(
                     command,
                     smoke_args,
                     repo_root,
                     smoke_stdin,
-                    {
-                        "ACP_PREFLIGHT_SMOKE_SENTINEL": str(sentinel_path),
-                        "ACP_PREFLIGHT_SMOKE_TEXT": ARTIFACT_SMOKE_SENTINEL_TEXT,
-                    },
+                    smoke_env,
                     timeout_sec=timeout_sec,
                 )
             except subprocess.TimeoutExpired as exc:
@@ -296,6 +322,30 @@ def run_artifact_smoke(provider: str, command: str, repo_root: str) -> tuple[boo
         return False, last_reason, last_combined
 
 
+def source_codex_home() -> Path:
+    raw = os.environ.get("CODEX_HOME", "").strip()
+    if raw:
+        return Path(raw).expanduser()
+    return Path.home() / ".codex"
+
+
+def prepare_codex_preflight_home(target_home: Path) -> None:
+    target_home.mkdir(mode=0o700, parents=True, exist_ok=True)
+    source_home = source_codex_home()
+    for name in ("auth.json", "installation_id"):
+        src = source_home / name
+        try:
+            stat = src.stat()
+        except OSError:
+            continue
+        if not src.is_file():
+            continue
+        mode = 0o600 if name == "auth.json" else 0o644
+        dst = target_home / name
+        dst.write_bytes(src.read_bytes())
+        os.chmod(dst, mode)
+
+
 def probe_provider_readiness(
     provider: str,
     command: str,
@@ -312,9 +362,18 @@ def probe_provider_readiness(
             "reason": "",
         }
 
+    codex_tempdir: tempfile.TemporaryDirectory[str] | None = None
+    probe_env: dict[str, str] | None = None
+    if provider == "codex":
+        codex_tempdir = tempfile.TemporaryDirectory(prefix="acp-codex-preflight-home-")
+        prepare_codex_preflight_home(Path(codex_tempdir.name))
+        probe_env = {"CODEX_HOME": codex_tempdir.name}
+
     try:
-        completed = run_probe_command(command, ["--version"], repo_root)
+        completed = run_probe_command(command, ["--version"], repo_root, env_extra=probe_env)
     except FileNotFoundError:
+        if codex_tempdir is not None:
+            codex_tempdir.cleanup()
         return {
             "provider": provider,
             "status": "unavailable",
@@ -322,6 +381,8 @@ def probe_provider_readiness(
             "reason": f"command not found: {command}",
         }
     except Exception as exc:  # pragma: no cover - defensive shell failure path
+        if codex_tempdir is not None:
+            codex_tempdir.cleanup()
         return {
             "provider": provider,
             "status": "unavailable",
@@ -332,6 +393,8 @@ def probe_provider_readiness(
     combined = "\n".join(part for part in [version_line, completed.stdout, completed.stderr] if part).strip()
     normalized = combined.lower()
     if any(marker in normalized for marker in PROVIDER_UNAVAILABLE_MARKERS):
+        if codex_tempdir is not None:
+            codex_tempdir.cleanup()
         return {
             "provider": provider,
             "status": "unavailable",
@@ -339,6 +402,8 @@ def probe_provider_readiness(
             "reason": combined or f"{provider} probe reported quota or permission failure",
         }
     if completed.returncode != 0:
+        if codex_tempdir is not None:
+            codex_tempdir.cleanup()
         return {
             "provider": provider,
             "status": "unavailable",
@@ -348,6 +413,8 @@ def probe_provider_readiness(
     if provider == "codex":
         blocker = codex_model_version_blocker(combined, codex_config_text)
         if blocker:
+            if codex_tempdir is not None:
+                codex_tempdir.cleanup()
             return {
                 "provider": provider,
                 "status": "unavailable",
@@ -357,8 +424,10 @@ def probe_provider_readiness(
     probe_args, probe_stdin = headless_probe_invocation(provider)
     if probe_args:
         try:
-            headless_completed = run_probe_command(command, probe_args, repo_root, probe_stdin)
+            headless_completed = run_probe_command(command, probe_args, repo_root, probe_stdin, env_extra=probe_env)
         except subprocess.TimeoutExpired as exc:
+            if codex_tempdir is not None:
+                codex_tempdir.cleanup()
             return {
                 "provider": provider,
                 "status": "unavailable",
@@ -366,6 +435,8 @@ def probe_provider_readiness(
                 "reason": f"{provider} headless probe timed out after {exc.timeout}s",
             }
         except Exception as exc:  # pragma: no cover - defensive shell failure path
+            if codex_tempdir is not None:
+                codex_tempdir.cleanup()
             return {
                 "provider": provider,
                 "status": "unavailable",
@@ -379,6 +450,8 @@ def probe_provider_readiness(
             combined = "\n".join(part for part in [combined, headless_combined] if part).strip()
         normalized = combined.lower()
         if any(marker in normalized for marker in PROVIDER_UNAVAILABLE_MARKERS):
+            if codex_tempdir is not None:
+                codex_tempdir.cleanup()
             return {
                 "provider": provider,
                 "status": "unavailable",
@@ -386,18 +459,22 @@ def probe_provider_readiness(
                 "reason": combined or f"{provider} headless probe reported quota or permission failure",
             }
         if headless_completed.returncode != 0:
+            if codex_tempdir is not None:
+                codex_tempdir.cleanup()
             return {
                 "provider": provider,
                 "status": "unavailable",
                 "subclass": "headless_probe_failed",
                 "reason": combined or f"{provider} headless probe exited with code {headless_completed.returncode}",
             }
-    smoke_ok, smoke_reason, smoke_output = run_artifact_smoke(provider, command, repo_root)
+    smoke_ok, smoke_reason, smoke_output = run_artifact_smoke_with_env(provider, command, repo_root, probe_env)
     if smoke_output:
         combined = "\n".join(part for part in [combined, smoke_output] if part).strip()
     if smoke_reason:
         normalized_smoke = "\n".join(part for part in [smoke_reason, smoke_output] if part).lower()
         if any(marker in normalized_smoke for marker in PROVIDER_UNAVAILABLE_MARKERS):
+            if codex_tempdir is not None:
+                codex_tempdir.cleanup()
             return {
                 "provider": provider,
                 "status": "unavailable",
@@ -406,6 +483,8 @@ def probe_provider_readiness(
                 "artifact_smoke": "failed",
             }
     if not smoke_ok:
+        if codex_tempdir is not None:
+            codex_tempdir.cleanup()
         return {
             "provider": provider,
             "status": "unavailable",
@@ -413,6 +492,8 @@ def probe_provider_readiness(
             "reason": smoke_reason,
             "artifact_smoke": "failed",
         }
+    if codex_tempdir is not None:
+        codex_tempdir.cleanup()
     return {
         "provider": provider,
         "status": "ready",
