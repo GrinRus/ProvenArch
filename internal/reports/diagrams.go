@@ -53,8 +53,10 @@ func (c Compiler) CompileC4Diagrams(entities []contracts.Entity, edges []contrac
 
 	componentPaths := []string{}
 	codePaths := []string{}
+	serviceSlugs := uniqueMermaidArtifactSlugs(services)
 	for _, service := range services {
-		componentPath := fmt.Sprintf("reports/diagrams/components/%s.mmd", sanitizeProposalSlug(service.ID))
+		serviceSlug := serviceSlugs[service.ID]
+		componentPath := fmt.Sprintf("reports/diagrams/components/%s.mmd", serviceSlug)
 		componentDiagram := buildC4ComponentDiagram(service, entities, edges)
 		if err := c.workspace.WriteFile(componentPath, []byte(componentDiagram)); err != nil {
 			return nil, err
@@ -66,7 +68,7 @@ func (c Compiler) CompileC4Diagrams(entities []contracts.Entity, edges []contrac
 		})
 		componentPaths = append(componentPaths, componentPath)
 
-		codePath := fmt.Sprintf("reports/diagrams/code/%s.mmd", sanitizeProposalSlug(service.ID))
+		codePath := fmt.Sprintf("reports/diagrams/code/%s.mmd", serviceSlug)
 		codeDiagram := buildC4CodeDiagram(service, entityByID, edges)
 		if err := c.workspace.WriteFile(codePath, []byte(codeDiagram)); err != nil {
 			return nil, err
@@ -260,11 +262,12 @@ func buildC4ContainerDiagram(
 	builder.WriteString("  subgraph Workspace[\"Workspace Containers\"]\n")
 
 	nodeKinds := map[string]string{}
+	nodeIDs := newMermaidIDAllocator()
 	for _, service := range services {
 		if !entityHasEvidence(service) {
 			continue
 		}
-		nodeID := mermaidNodeID("svc", service.ID)
+		nodeID := nodeIDs.Next("svc", service.ID)
 		builder.WriteString(fmt.Sprintf("    %s[\"Service: %s\"]\n", nodeID, escapeMermaidLabel(service.Name)))
 		nodeKinds[service.ID] = nodeID
 	}
@@ -272,7 +275,7 @@ func buildC4ContainerDiagram(
 		if !entityHasEvidence(datastore) {
 			continue
 		}
-		nodeID := mermaidNodeID("db", datastore.ID)
+		nodeID := nodeIDs.Next("db", datastore.ID)
 		builder.WriteString(fmt.Sprintf("    %s[(\"Datastore: %s\")]\n", nodeID, escapeMermaidLabel(datastore.Name)))
 		nodeKinds[datastore.ID] = nodeID
 	}
@@ -282,7 +285,7 @@ func buildC4ContainerDiagram(
 		if !entityHasEvidence(ext) {
 			continue
 		}
-		nodeID := mermaidNodeID("ext", ext.ID)
+		nodeID := nodeIDs.Next("ext", ext.ID)
 		builder.WriteString(fmt.Sprintf("  %s[\"External: %s\"]\n", nodeID, escapeMermaidLabel(ext.Name)))
 		nodeKinds[ext.ID] = nodeID
 	}
@@ -317,8 +320,9 @@ func buildC4ComponentDiagram(service contracts.Entity, entities []contracts.Enti
 	componentIDs := map[string]struct{}{
 		service.ID: {},
 	}
+	nodeIDs := newMermaidIDAllocator()
 	nodeByEntityID := map[string]string{
-		service.ID: mermaidNodeID("svc", service.ID),
+		service.ID: nodeIDs.Next("svc", service.ID),
 	}
 	for _, entity := range entities {
 		if !entityHasEvidence(entity) {
@@ -327,7 +331,7 @@ func buildC4ComponentDiagram(service contracts.Entity, entities []contracts.Enti
 		if strings.HasPrefix(entity.Type, "api.") && strings.Contains(entity.ID, "."+serviceSlug+".") {
 			componentEntities = append(componentEntities, entity)
 			componentIDs[entity.ID] = struct{}{}
-			nodeByEntityID[entity.ID] = mermaidNodeID("cmp", entity.ID)
+			nodeByEntityID[entity.ID] = nodeIDs.Next("cmp", entity.ID)
 		}
 	}
 	sort.Slice(componentEntities, func(i, j int) bool {
@@ -380,7 +384,8 @@ func buildC4ComponentDiagram(service contracts.Entity, entities []contracts.Enti
 func buildC4CodeDiagram(service contracts.Entity, entityByID map[string]contracts.Entity, edges []contracts.Edge) string {
 	builder := strings.Builder{}
 	builder.WriteString("flowchart TB\n")
-	serviceNodeID := mermaidNodeID("svc", service.ID)
+	nodeIDs := newMermaidIDAllocator()
+	serviceNodeID := nodeIDs.Next("svc", service.ID)
 	builder.WriteString(fmt.Sprintf("  %s[\"Code: %s\"]\n", serviceNodeID, escapeMermaidLabel(service.Name)))
 
 	paths := map[string]struct{}{}
@@ -424,7 +429,7 @@ func buildC4CodeDiagram(service contracts.Entity, entityByID map[string]contract
 	}
 
 	for _, path := range pathList {
-		nodeID := mermaidNodeID("path", service.ID+"-"+path)
+		nodeID := nodeIDs.Next("path", service.ID+"-"+path)
 		builder.WriteString(fmt.Sprintf("  %s[\"%s/\"]\n", nodeID, escapeMermaidLabel(path)))
 		builder.WriteString(fmt.Sprintf("  %s --> %s\n", serviceNodeID, nodeID))
 	}
@@ -657,6 +662,47 @@ func mermaidNodeID(prefix string, value string) string {
 		return prefix + "_unknown"
 	}
 	return prefix + "_" + strings.ReplaceAll(slugutil.Slugify(value), "-", "_")
+}
+
+type mermaidIDAllocator struct {
+	seen map[string]int
+}
+
+func newMermaidIDAllocator() *mermaidIDAllocator {
+	return &mermaidIDAllocator{seen: map[string]int{}}
+}
+
+func (a *mermaidIDAllocator) Next(prefix string, value string) string {
+	base := mermaidNodeID(prefix, value)
+	count := a.seen[base]
+	a.seen[base] = count + 1
+	if count == 0 {
+		return base
+	}
+	return fmt.Sprintf("%s_%d", base, count+1)
+}
+
+func uniqueMermaidArtifactSlugs(entities []contracts.Entity) map[string]string {
+	slugs := make(map[string]string, len(entities))
+	seen := map[string]int{}
+	for _, entity := range entities {
+		id := strings.TrimSpace(entity.ID)
+		if id == "" {
+			continue
+		}
+		base := sanitizeProposalSlug(id)
+		if strings.TrimSpace(base) == "" {
+			base = "entity"
+		}
+		count := seen[base]
+		seen[base] = count + 1
+		if count == 0 {
+			slugs[id] = base
+			continue
+		}
+		slugs[id] = fmt.Sprintf("%s-%d", base, count+1)
+	}
+	return slugs
 }
 
 func escapeMermaidLabel(value string) string {

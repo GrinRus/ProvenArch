@@ -589,6 +589,22 @@ func runtimeDraftTextHasStaleIndexZeroClaim(text string) bool {
 			return true
 		}
 	}
+	for _, line := range strings.Split(lower, "\n") {
+		if !strings.Contains(line, "final-run-index") {
+			continue
+		}
+		for _, zeroMarker := range []string{
+			"0 observed document entries",
+			"0 observed documents",
+			"0 canonical document",
+			"0 indexed document",
+			"0 document entries",
+		} {
+			if strings.Contains(line, zeroMarker) {
+				return true
+			}
+		}
+	}
 	return false
 }
 

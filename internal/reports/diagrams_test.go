@@ -706,6 +706,102 @@ func TestCompileC4DiagramsDeduplicatesEntityIDs(t *testing.T) {
 	}
 }
 
+func TestCompileC4DiagramsAvoidsSanitizedNodeAndPathCollisions(t *testing.T) {
+	t.Parallel()
+
+	ws := writeReportsWorkspace(t)
+	compiler := NewCompiler(ws)
+
+	entities := []contracts.Entity{
+		{
+			ID:   "svc.ftgo.order-service",
+			Type: "service",
+			Name: "FTGO Order Service create-order saga reply endpoint",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 1,
+				Evidence: []contracts.Evidence{
+					{Repo: "sample", Path: "ftgo-order-service/src/main/java/ReplyEndpoint.java"},
+				},
+			},
+		},
+		{
+			ID:   "svc.ftgo.order.service",
+			Type: "service",
+			Name: "FTGO Order Service",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 1,
+				Evidence: []contracts.Evidence{
+					{Repo: "sample", Path: "ftgo-order-service/src/main/java/OrderService.java"},
+				},
+			},
+		},
+		{
+			ID:   "db.ftgo.order-service",
+			Type: "datastore",
+			Name: "FTGO Order Service Database",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 1,
+				Evidence: []contracts.Evidence{
+					{Repo: "sample", Path: "ftgo-order-service/schema.sql"},
+				},
+			},
+		},
+	}
+	edges := []contracts.Edge{
+		{
+			ID:   "edge.ftgo.order-service.db",
+			Type: "uses",
+			From: "svc.ftgo.order-service",
+			To:   "db.ftgo.order-service",
+			Provenance: contracts.Provenance{
+				Kind:       "observation",
+				Confidence: 0.9,
+				Evidence: []contracts.Evidence{
+					{Repo: "sample", Path: "ftgo-order-service/src/main/resources/application.yml"},
+				},
+			},
+		},
+	}
+
+	if _, err := compiler.CompileC4Diagrams(entities, edges); err != nil {
+		t.Fatalf("compile c4 diagrams: %v", err)
+	}
+
+	containerContent, err := os.ReadFile(filepath.Join(ws.Path, "reports/diagrams/c4-container.mmd"))
+	if err != nil {
+		t.Fatalf("read container diagram: %v", err)
+	}
+	containerText := string(containerContent)
+	for _, expected := range []string{
+		`svc_svc_ftgo_order_service["Service: FTGO Order Service create-order saga reply endpoint"]`,
+		`svc_svc_ftgo_order_service_2["Service: FTGO Order Service"]`,
+		`svc_svc_ftgo_order_service -->|uses| db_db_ftgo_order_service`,
+	} {
+		if !strings.Contains(containerText, expected) {
+			t.Fatalf("expected %q in container diagram, got:\n%s", expected, containerText)
+		}
+	}
+	if got := strings.Count(containerText, `svc_svc_ftgo_order_service["Service:`); got != 1 {
+		t.Fatalf("expected unsuffixed colliding service node once, got %d:\n%s", got, containerText)
+	}
+	if got := strings.Count(containerText, `svc_svc_ftgo_order_service_2["Service:`); got != 1 {
+		t.Fatalf("expected suffixed colliding service node once, got %d:\n%s", got, containerText)
+	}
+	for _, rel := range []string{
+		"reports/diagrams/components/svc-ftgo-order-service.mmd",
+		"reports/diagrams/components/svc-ftgo-order-service-2.mmd",
+		"reports/diagrams/code/svc-ftgo-order-service.mmd",
+		"reports/diagrams/code/svc-ftgo-order-service-2.mmd",
+	} {
+		if _, err := os.Stat(filepath.Join(ws.Path, rel)); err != nil {
+			t.Fatalf("expected collision-free diagram artifact %q: %v", rel, err)
+		}
+	}
+}
+
 func writeReportsWorkspace(t *testing.T) workspace.Root {
 	t.Helper()
 

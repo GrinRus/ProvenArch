@@ -1226,6 +1226,27 @@ Strict medium `codex-code` rerun `regres-long-posthog-ftgo-20260621T022237Z` rea
 
 ---
 
+## Live E2E Proposal Count And Mermaid Collision Follow-Up
+
+### Context
+Strict medium `codex-code` rerun `regres-long-posthog-ftgo-20260621T193026Z` reached non-release machine `PASS` for selected-provider totals (`2/2`) with frontend PASS and no legacy mixed quality-gate artifacts. Manual artifact review still found two artifact-quality issues: FTGO proposal/changelog used the variant `final-run-index.json (0 observed document entries)` even though the current `final-run-index.json` had `51` `canonical_documents`, and FTGO C4 container output duplicated a Mermaid node id for distinct service ids that normalized to the same slug.
+
+### Plan
+- [x] Reject parenthesized/styled stale zero-document `final-run-index` claims in runtime draft markdown.
+- [x] Make C4 diagram generation collision-free for sanitized Mermaid node ids.
+- [x] Make generated component/code diagram artifact paths collision-free for distinct entity ids that normalize to the same slug.
+- [x] Update spec/runbook/testing docs and targeted tests.
+- [x] Run full DoD.
+- [ ] Commit and rerun affected strict medium evidence.
+
+### Acceptance
+- [x] Proposal/changelog drafts cannot pass validation with `final-run-index.json (0 observed document entries)` without validated zero-document evidence.
+- [x] Distinct model entity ids such as `svc.foo-bar` and `svc.foo.bar` produce distinct Mermaid node ids and distinct diagram artifact paths.
+- [ ] Latest strict medium `codex-code` rerun has accepted artifact quality for proposal index truthfulness and C4/Mermaid usefulness.
+- [ ] Latest strict medium `claude-code` rerun remains pending after Codex produces clean strict medium evidence.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.

@@ -1188,27 +1188,39 @@ Final artifact index references:
 func TestValidateRequiredManifestRejectsStaleFinalIndexZeroDocumentClaim(t *testing.T) {
 	t.Parallel()
 
-	tempDir := t.TempDir()
-	writeRoot := filepath.Join(tempDir, "write-root")
-	draftRoot := filepath.Join(tempDir, "draft-root")
-	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
-		t.Fatalf("mkdir write root: %v", err)
-	}
-	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
-		t.Fatalf("mkdir draft root: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(draftRoot, "proposal.md"), []byte(`# Runtime Recommendations
+	for name, proposalText := range map[string]string{
+		"contains-zero": `# Runtime Recommendations
 
 Evidence: reports/findings/findings.md, final-run-index.json, and citation-index.json.
 Final-run-index.json contains 0 observed document entries, so the operator should inspect staged docs manually.
 Selected citation: cite.ftgo.accounting.authorize.contract -> ftgo-accounting-service-contracts/src/main/resources/contracts/Authorize.groovy.
-`), 0o644); err != nil {
-		t.Fatalf("write proposal: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(draftRoot, "changelog.md"), []byte("# Runtime Proposal Changelog\n\nEvidence: reports/changelog/runtime-proposals.md and cite.ftgo.accounting.authorize.contract.\n"), 0o644); err != nil {
-		t.Fatalf("write changelog: %v", err)
-	}
-	manifest := `{
+`,
+		"paren-zero": `# Runtime Recommendations
+
+Evidence used:
+- Final run index: reports/taskruns/run_20260620_184900_001/staging/final/final-run-index.json (0 observed document entries)
+- Citation index: reports/taskruns/run_20260620_184900_001/staging/final/citation-index.json (92 citation entries)
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tempDir := t.TempDir()
+			writeRoot := filepath.Join(tempDir, "write-root")
+			draftRoot := filepath.Join(tempDir, "draft-root")
+			if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+				t.Fatalf("mkdir write root: %v", err)
+			}
+			if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+				t.Fatalf("mkdir draft root: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(draftRoot, "proposal.md"), []byte(proposalText), 0o644); err != nil {
+				t.Fatalf("write proposal: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(draftRoot, "changelog.md"), []byte("# Runtime Proposal Changelog\n\nEvidence: reports/changelog/runtime-proposals.md and cite.ftgo.accounting.authorize.contract.\n"), 0o644); err != nil {
+				t.Fatalf("write changelog: %v", err)
+			}
+			manifest := `{
   "version": 1,
   "run_id": "run_20260620_184900_001",
   "step_id": "refresh.step4.proposals",
@@ -1219,16 +1231,18 @@ Selected citation: cite.ftgo.accounting.authorize.contract -> ftgo-accounting-se
     {"path": "changelog.md", "canonical_path": "reports/changelog/runtime-proposals.md", "kind": "changelog", "title": "Runtime Proposal Changelog"}
   ]
 }`
-	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
-		t.Fatalf("write manifest: %v", err)
-	}
+			if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+				t.Fatalf("write manifest: %v", err)
+			}
 
-	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run_20260620_184900_001", "refresh.step4.proposals", "proposals", []string{ProposalsManifestFile})
-	if err == nil {
-		t.Fatalf("expected stale zero-document final-index claim to be rejected")
-	}
-	if !strings.Contains(err.Error(), "claims current-run final-run-index has zero observed documents") {
-		t.Fatalf("expected stale zero-document final-index error, got %v", err)
+			_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run_20260620_184900_001", "refresh.step4.proposals", "proposals", []string{ProposalsManifestFile})
+			if err == nil {
+				t.Fatalf("expected stale zero-document final-index claim to be rejected")
+			}
+			if !strings.Contains(err.Error(), "claims current-run final-run-index has zero observed documents") {
+				t.Fatalf("expected stale zero-document final-index error, got %v", err)
+			}
+		})
 	}
 }
 
