@@ -1185,6 +1185,53 @@ Final artifact index references:
 	}
 }
 
+func TestValidateRequiredManifestRejectsStaleFinalIndexZeroDocumentClaim(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "proposal.md"), []byte(`# Runtime Recommendations
+
+Evidence: reports/findings/findings.md, final-run-index.json, and citation-index.json.
+Final-run-index.json contains 0 observed document entries, so the operator should inspect staged docs manually.
+Selected citation: cite.ftgo.accounting.authorize.contract -> ftgo-accounting-service-contracts/src/main/resources/contracts/Authorize.groovy.
+`), 0o644); err != nil {
+		t.Fatalf("write proposal: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "changelog.md"), []byte("# Runtime Proposal Changelog\n\nEvidence: reports/changelog/runtime-proposals.md and cite.ftgo.accounting.authorize.contract.\n"), 0o644); err != nil {
+		t.Fatalf("write changelog: %v", err)
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run_20260620_184900_001",
+  "step_id": "refresh.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "proposal.md", "canonical_path": "proposals/runtime-recommendations.md", "kind": "proposal", "title": "Runtime Recommendations"},
+    {"path": "changelog.md", "canonical_path": "reports/changelog/runtime-proposals.md", "kind": "changelog", "title": "Runtime Proposal Changelog"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run_20260620_184900_001", "refresh.step4.proposals", "proposals", []string{ProposalsManifestFile})
+	if err == nil {
+		t.Fatalf("expected stale zero-document final-index claim to be rejected")
+	}
+	if !strings.Contains(err.Error(), "claims current-run final-run-index has zero observed documents") {
+		t.Fatalf("expected stale zero-document final-index error, got %v", err)
+	}
+}
+
 func TestValidateRequiredManifestRejectsRawStructuredEvidenceDump(t *testing.T) {
 	t.Parallel()
 
@@ -1229,6 +1276,58 @@ Citation/index surface:
 	}
 	if !strings.Contains(err.Error(), "raw structured evidence dumps") {
 		t.Fatalf("expected raw structured evidence dump error, got %v", err)
+	}
+}
+
+func TestValidateRequiredManifestRejectsMalformedMarkdownEvidenceReferences(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	overview := "# System Overview\n\n" +
+		"Evidence: reports/as-is/overview.md, final-run-index.json, and cite.posthog.runtime.compose.\n\n" +
+		"Concrete repository/path references observed in the selected staged evidence include:\n" +
+		"- ` area.\n\n" +
+		"The workspace depends on services and queues, then use `\n" +
+		"- ` defines runtime provider resources for the review surface.\n"
+	if err := os.WriteFile(filepath.Join(draftRoot, "overview.md"), []byte(overview), 0o644); err != nil {
+		t.Fatalf("write overview: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "summary.md"), []byte("# Coverage Summary\n\nEvidence: reports/coverage/summary.md and cite.posthog.runtime.compose.\n"), 0o644); err != nil {
+		t.Fatalf("write summary: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "architect-summary.md"), []byte("# Architect Summary\n\nEvidence: reports/agent-outputs/architect/summary.md and cite.posthog.runtime.compose.\n"), 0o644); err != nil {
+		t.Fatalf("write architect summary: %v", err)
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run_20260620_184900_001",
+  "step_id": "refresh.step2.asis_docs",
+  "step_contract": "as_is",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "overview.md", "canonical_path": "reports/as-is/overview.md", "kind": "report", "title": "System Overview"},
+    {"path": "summary.md", "canonical_path": "reports/coverage/summary.md", "kind": "report", "title": "Coverage Summary"},
+    {"path": "architect-summary.md", "canonical_path": "reports/agent-outputs/architect/summary.md", "kind": "agent-output", "title": "Architect Summary"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, AsIsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run_20260620_184900_001", "refresh.step2.asis_docs", "as_is", []string{AsIsManifestFile})
+	if err == nil {
+		t.Fatalf("expected malformed markdown evidence references to be rejected")
+	}
+	if !strings.Contains(err.Error(), "malformed markdown inline-code") {
+		t.Fatalf("expected malformed markdown error, got %v", err)
 	}
 }
 

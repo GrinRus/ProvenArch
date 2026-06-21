@@ -211,8 +211,8 @@ starting point for V2 implementation:
   implementation slices must not plan work against those files or restore their compatibility DOM;
 - hidden compatibility controls/testids were removed from the UI shell; selector migration must use
   visible operator controls only;
-- the live frontend harness currently supports only `UI_E2E_SCENARIO=init-inspect`; optional Ask
-  coverage is controlled by `UI_E2E_QA_SMOKE=1` and is diagnostic/non-release evidence;
+- the live frontend harness currently supports only `UI_E2E_SCENARIO=init-inspect`; Ask coverage
+  is collected by default through `UI_E2E_QA_SMOKE=1` and is diagnostic/non-release UX evidence;
 - `frontend-e2e-result.json` already includes screenshot refs when screenshots are produced, while
   Playwright trace/screenshot/video retention stays in `ui/playwright.live.config.ts`.
 
@@ -276,10 +276,11 @@ Release-facing live scenario:
   a separate owner-approved live-gate slice expands the release surface.
 
 Non-release and deterministic UI coverage:
-- `UI_E2E_QA_SMOKE=1`: optional Ask smoke layered on `init-inspect`; it checks async `qa.ask`,
+- `UI_E2E_QA_SMOKE=1`: default Ask smoke layered on `init-inspect`; it checks async `qa.ask`,
   run history, read-only safety, answer/citations panels, context-pack/runtime-execution links and
-  screenshots. It is not a machine execution verdict input; release UX readiness still requires
-  Ask-flow evidence in `swe_ux_assessment_<matrix-id>.md`.
+  screenshots. It is UX evidence rather than a standalone release verdict source; explicit
+  `UI_E2E_QA_SMOKE=0` is diagnostic-only and must be recorded as residual risk in
+  `swe_ux_assessment_<matrix-id>.md`.
 - cancellation/page-close behavior: cover through deterministic fake-runtime UI/API tests and
   frontend reason taxonomy, not through provider-live release scenarios.
 - Review Domain Map: cover with unit/component/fake-fixture diagnostics first; do not add a live

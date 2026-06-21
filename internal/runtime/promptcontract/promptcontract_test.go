@@ -1004,6 +1004,7 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"at most 6 authored markdown docs",
 		"A no-op rewrite is invalid",
 		"Final markdown must summarize structured JSON evidence in readable prose or compact bullets.",
+		"every inline-code/path backtick pair must be balanced",
 		"Do not paste raw JSON, Python dict/list reprs",
 		"Enrich overview.md, summary.md, and architect-summary.md from collected shard manifests, bounded authored shard docs",
 		"decision-ready operator summary",
@@ -1017,6 +1018,7 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"do not write that current-run final/citation indexes are missing, not found, or unavailable",
 		"If final-run-index.json or citation-index.json are present for current_run_id, summarize counts",
 		"Do not paste raw object payloads, `documents=[{...}]`, `citations=[{...}]`, or Python-style dict snippets.",
+		"Do not write broken path bullets such as a lone backtick",
 		"Translate runtime evidence into architecture facts, coverage gaps, and operator decisions",
 	} {
 		if !strings.Contains(prompt, token) {
@@ -1142,6 +1144,7 @@ func TestComposeDraftArtifactEnrichmentPromptForProposalsRequiresWriteFirstTarge
 		"Final markdown must summarize structured JSON evidence in readable prose or compact bullets.",
 		"When final-run-index.json or citation-index.json are present for current_run_id, summarize counts",
 		"Do not write stale index availability claims such as `No current-run final-run-index document list was available`",
+		"Do not write stale zero-count claims such as `final-run-index.json contains 0 observed document entries`",
 		"Do not paste raw object payloads, Python-style dict snippets, `{'id': ...}`, or truncated JSON fragments.",
 		"Do not claim citation detail is limited or unavailable when current-run citation-index.json contains citation entries.",
 		"Do not mention placeholder replacement, placeholder proposal content, replaced placeholder content, or recovery mechanics",

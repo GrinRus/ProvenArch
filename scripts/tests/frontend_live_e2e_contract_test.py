@@ -124,22 +124,23 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         self.assertNotIn("domain-map-diagnostic", body)
         self.assertNotIn("runtime-cancel-stub", body)
 
-    def test_qa_smoke_defaults_to_disabled_and_is_forwarded(self) -> None:
+    def test_qa_smoke_defaults_to_enabled_and_is_forwarded(self) -> None:
         body = self.script_path.read_text(encoding="utf-8")
-        self.assertIn('UI_E2E_QA_SMOKE="${UI_E2E_QA_SMOKE:-0}"', body)
+        self.assertIn('UI_E2E_QA_SMOKE="${UI_E2E_QA_SMOKE:-1}"', body)
         self.assertIn('UI_E2E_QA_SMOKE="$UI_E2E_QA_SMOKE"', body)
 
     def test_success_result_includes_screenshot_refs(self) -> None:
         result = self._run_frontend_harness("success_with_screenshots", expect_success=True)
         self.assertEqual("passed", result["status"])
         screenshots = result["diagnostic_refs"]["screenshots"]
-        self.assertEqual(6, len(screenshots))
+        self.assertEqual(7, len(screenshots))
         for name in [
             "frontend-source-desktop.png",
             "frontend-readiness-desktop.png",
             "frontend-analysis-desktop.png",
             "frontend-review-desktop.png",
             "frontend-publish-desktop.png",
+            "frontend-ask-desktop.png",
             "frontend-review-mobile.png",
         ]:
             self.assertTrue(any(str(path).endswith(name) for path in screenshots))
@@ -347,6 +348,7 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
                     "frontend-analysis-desktop.png",
                     "frontend-review-desktop.png",
                     "frontend-publish-desktop.png",
+                    *(["frontend-ask-desktop.png"] if os.environ.get("UI_E2E_QA_SMOKE") == "1" else []),
                     "frontend-review-mobile.png",
                 ]:
                     (output_dir / name).write_bytes(b"\\x89PNG\\r\\n\\x1a\\n")

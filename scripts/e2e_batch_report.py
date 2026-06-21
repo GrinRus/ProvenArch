@@ -2317,6 +2317,8 @@ def frontend_runtime_details(payload: dict[str, Any]) -> str:
         screenshots = diagnostic_refs.get("screenshots")
         if isinstance(screenshots, list) and screenshots:
             details.append(f"screenshots={len(screenshots)}")
+            ask_screenshot = any(str(path).endswith("frontend-ask-desktop.png") for path in screenshots)
+            details.append(f"ask_screenshot={'present' if ask_screenshot else 'missing'}")
         results_dir = str(diagnostic_refs.get("playwright_results") or "").strip()
         if results_dir:
             details.append(f"playwright_results={results_dir}")

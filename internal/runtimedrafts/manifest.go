@@ -221,8 +221,14 @@ func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string, r
 		if runtimeDraftTextHasStaleIndexAvailabilityClaim(text) {
 			problems = append(problems, fmt.Sprintf("outputs[%d].path %q claims current-run final/citation indexes are unavailable instead of omitting downstream index status", idx, output.Path))
 		}
+		if runtimeDraftTextHasStaleIndexZeroClaim(text) {
+			problems = append(problems, fmt.Sprintf("outputs[%d].path %q claims current-run final-run-index has zero observed documents without validated zero-document evidence", idx, output.Path))
+		}
 		if runtimeDraftTextHasRawStructuredEvidenceDump(text) {
 			problems = append(problems, fmt.Sprintf("outputs[%d].path %q includes raw structured evidence dumps instead of readable summaries", idx, output.Path))
+		}
+		if runtimeDraftTextHasMalformedMarkdown(text) {
+			problems = append(problems, fmt.Sprintf("outputs[%d].path %q contains malformed markdown inline-code or code-fence syntax", idx, output.Path))
 		}
 	}
 	if len(problems) == 0 {
@@ -570,6 +576,22 @@ func runtimeDraftTextHasStaleIndexAvailabilityClaim(text string) bool {
 	return false
 }
 
+func runtimeDraftTextHasStaleIndexZeroClaim(text string) bool {
+	lower := strings.ToLower(text)
+	markers := []string{
+		"final-run-index.json contains 0 observed document entries",
+		"final-run-index contains 0 observed document entries",
+		"current-run final-run-index document entries: 0",
+		"current-run final-run-index documents: 0",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func runtimeDraftTextHasRawStructuredEvidenceDump(text string) bool {
 	markers := []string{
 		"{'id':",
@@ -601,6 +623,24 @@ func runtimeDraftTextHasRawStructuredEvidenceDump(text string) bool {
 		}
 	}
 	return false
+}
+
+func runtimeDraftTextHasMalformedMarkdown(text string) bool {
+	inFence := false
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
+		if strings.Count(line, "`")%2 != 0 {
+			return true
+		}
+	}
+	return inFence
 }
 
 func runtimeDraftTextHasEvidenceMarker(lower string) bool {
