@@ -557,6 +557,10 @@ func runtimeDraftTextHasStaleIndexAvailabilityClaim(text string) bool {
 		"current-run final-run-index.json or citation-index.json were unavailable",
 		"final-run-index.json and citation-index.json were not present",
 		"final-run-index.json and citation-index.json unavailable",
+		"no current-run final-run-index document list was available",
+		"no current-run final-run-index document list is available",
+		"final-run-index document list was unavailable",
+		"final-run-index document list is unavailable",
 	}
 	for _, marker := range markers {
 		if strings.Contains(lower, marker) {

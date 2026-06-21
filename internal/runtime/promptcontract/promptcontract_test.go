@@ -1141,6 +1141,7 @@ func TestComposeDraftArtifactEnrichmentPromptForProposalsRequiresWriteFirstTarge
 		"Do not list final-run-index.json, citation-index.json, validator verdicts, or shard summaries from a different run_id",
 		"Final markdown must summarize structured JSON evidence in readable prose or compact bullets.",
 		"When final-run-index.json or citation-index.json are present for current_run_id, summarize counts",
+		"Do not write stale index availability claims such as `No current-run final-run-index document list was available`",
 		"Do not paste raw object payloads, Python-style dict snippets, `{'id': ...}`, or truncated JSON fragments.",
 		"Do not claim citation detail is limited or unavailable when current-run citation-index.json contains citation entries.",
 		"Do not mention placeholder replacement, placeholder proposal content, replaced placeholder content, or recovery mechanics",

@@ -1129,6 +1129,62 @@ Current-run index surfaces checked:
 	}
 }
 
+func TestValidateRequiredManifestRejectsStaleFinalIndexDocumentListClaim(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "proposal.md"), []byte(`# Runtime Recommendations
+
+Evidence: current-run shard summary, final-run-index.json, and citation-index.json.
+
+Final artifact index references:
+- No current-run final-run-index document list was available.
+
+Selected citation: cite.ftgo.accounting.authorize.contract -> ftgo-accounting-service-contracts/src/main/resources/contracts/Authorize.groovy.
+`), 0o644); err != nil {
+		t.Fatalf("write proposal: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "changelog.md"), []byte(`# Runtime Proposal Changelog
+
+Evidence: reports/changelog/runtime-proposals.md and cite.ftgo.accounting.authorize.contract.
+
+Final artifact index references:
+- No current-run final-run-index document list was available.
+`), 0o644); err != nil {
+		t.Fatalf("write changelog: %v", err)
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run_20260620_184900_001",
+  "step_id": "refresh.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "proposal.md", "canonical_path": "proposals/runtime-recommendations.md", "kind": "proposal", "title": "Runtime Recommendations"},
+    {"path": "changelog.md", "canonical_path": "reports/changelog/runtime-proposals.md", "kind": "changelog", "title": "Runtime Proposal Changelog"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run_20260620_184900_001", "refresh.step4.proposals", "proposals", []string{ProposalsManifestFile})
+	if err == nil {
+		t.Fatalf("expected stale final-index document-list claim to be rejected")
+	}
+	if !strings.Contains(err.Error(), "claims current-run final/citation indexes are unavailable") {
+		t.Fatalf("expected stale final-index document-list error, got %v", err)
+	}
+}
+
 func TestValidateRequiredManifestRejectsRawStructuredEvidenceDump(t *testing.T) {
 	t.Parallel()
 

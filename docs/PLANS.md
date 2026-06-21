@@ -1206,6 +1206,25 @@ Strict medium `codex-code` rerun `regres-long-posthog-ftgo-20260620T203021Z` rea
 
 ---
 
+## Live E2E Proposal Final-Index Truthfulness
+
+### Context
+Strict medium `codex-code` rerun `regres-long-posthog-ftgo-20260621T022237Z` reached non-release machine `PASS` for selected-provider totals (`2/2`) and frontend PASS. Runtime recovery behaved correctly for bootstrap-only drafts, but manual artifact review rejected FTGO proposals: `proposals/runtime-recommendations.md` and `reports/changelog/runtime-proposals.md` stated `No current-run final-run-index document list was available` even though `final-run-index.json` was present with `51` canonical documents.
+
+### Plan
+- [x] Extend runtime draft validation to reject stale final-index document-list availability claims.
+- [x] Update `step4.proposals` enrichment prompt to require canonical document count summaries when `final-run-index.json` is present and omission when it is absent.
+- [x] Add regression coverage using the observed FTGO stale phrase.
+- [x] Update live E2E docs/spec/architecture wording.
+- [ ] Run full DoD, commit, and rerun affected strict medium `codex-code`.
+
+### Acceptance
+- [x] Proposal/changelog drafts cannot pass validation with `No current-run final-run-index document list was available`.
+- [ ] Latest strict medium `codex-code` rerun has accepted artifact quality for proposal index truthfulness and decision readiness.
+- [ ] Latest strict medium `claude-code` rerun remains pending after Codex produces clean strict medium evidence.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.
