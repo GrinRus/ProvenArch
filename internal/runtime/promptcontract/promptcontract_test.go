@@ -1,6 +1,7 @@
 package promptcontract
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1005,6 +1006,8 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"A no-op rewrite is invalid",
 		"Final markdown must summarize structured JSON evidence in readable prose or compact bullets.",
 		"every inline-code/path backtick pair must be balanced",
+		"Do not copy raw authored-shard prose fragments that contain backticks",
+		"Do not end prose sentences with stray backticks",
 		"Do not paste raw JSON, Python dict/list reprs",
 		"Enrich overview.md, summary.md, and architect-summary.md from collected shard manifests, bounded authored shard docs",
 		"decision-ready operator summary",
@@ -1019,6 +1022,7 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"If final-run-index.json or citation-index.json are present for current_run_id, summarize counts",
 		"Do not paste raw object payloads, `documents=[{...}]`, `citations=[{...}]`, or Python-style dict snippets.",
 		"Do not write broken path bullets such as a lone backtick",
+		"Do not paste sampled authored-shard snippets as semicolon-separated prose",
 		"Translate runtime evidence into architecture facts, coverage gaps, and operator decisions",
 	} {
 		if !strings.Contains(prompt, token) {
@@ -1146,6 +1150,7 @@ func TestComposeDraftArtifactEnrichmentPromptForProposalsRequiresWriteFirstTarge
 		"Do not write stale index availability claims such as `No current-run final-run-index document list was available`",
 		"Do not write stale zero-count claims such as `final-run-index.json contains 0 observed document entries`",
 		"Do not paste raw object payloads, Python-style dict snippets, `{'id': ...}`, or truncated JSON fragments.",
+		"Do not paste sampled shard markdown snippets with inline-code markers into proposal.md or changelog.md",
 		"Do not claim citation detail is limited or unavailable when current-run citation-index.json contains citation entries.",
 		"Do not mention placeholder replacement, placeholder proposal content, replaced placeholder content, or recovery mechanics",
 		"placeholder proposal content",
@@ -1176,6 +1181,34 @@ func TestComposeDraftArtifactEnrichmentPromptForProposalsRequiresWriteFirstTarge
 	} {
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("proposals draft enrichment prompt must not contain bootstrap heredoc/scaffold %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptAddsMarkdownSyntaxRetryHint(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step4.proposals",
+		StepContract:      "proposals",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/proposals",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"proposals-draft-manifest.json", "proposal.md", "changelog.md"},
+	}
+	err := errors.New(`runtime draft manifest outputs are invalid: outputs[0].path "proposal.md" contains malformed markdown inline-code or code-fence syntax`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderCodexCode, task, err)
+	for _, token := range []string{
+		"DRAFT ENRICHMENT MARKDOWN SYNTAX RETRY:",
+		"The previous enrichment attempt failed because at least one referenced markdown file had malformed inline-code or code-fence syntax.",
+		"Preserve the evidence-backed meaning, but remove or balance all inline backticks before exit.",
+		"Prefer plain text service/module names over inline-code when summarizing sampled shard prose.",
+		"Do not copy truncated shard excerpts, raw snippets, or semicolon lists that may carry half-open backticks.",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected markdown syntax retry prompt to contain %q, got:\n%s", token, prompt)
 		}
 	}
 }

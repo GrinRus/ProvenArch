@@ -286,6 +286,8 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		"- Final markdown must read as an operator-facing architecture/report/proposal artifact, not as a runtime recovery log. Do not make draft manifests, draft roots, enrichment, recovery, bounded reads, or staged evidence mechanics the subject of the report.",
 		"- Final markdown must summarize structured JSON evidence in readable prose or compact bullets. Do not paste raw JSON, Python dict/list reprs, `documents=[{...}]`, `citations=[{...}]`, `{'id': ...}`, or truncated object fragments.",
 		"- Final markdown must be syntactically readable: every inline-code/path backtick pair must be balanced on the same non-fence line, and code fences must be closed before exit.",
+		"- Do not copy raw authored-shard prose fragments that contain backticks, especially truncated excerpts. Paraphrase signals instead, or write paths without inline-code formatting when truncating or summarizing.",
+		"- Do not end prose sentences with stray backticks. If any summary text contains an unmatched backtick, remove the backtick or rewrite the sentence before exit.",
 		"- Do not read every staged shard document. Prefer all shard-pack-manifest.json files plus at most 6 authored markdown docs selected for architectural signal, then cite remaining coverage as summarized from manifests/indexes.",
 		"- A no-op rewrite is invalid: every referenced markdown draft must be freshly rewritten with marker-free evidence-backed content, not merely re-saved unchanged.",
 		"- Preserve valid non-markdown support bundles when they are already canonical; for constitution, baseline-subagents.yaml may remain the baseline YAML bundle.",
@@ -313,6 +315,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			"- final-run-index.json and citation-index.json are downstream/final staging artifacts and may not exist yet during step2. If they are absent, omit final-index availability from the as-is markdown; do not write that current-run final/citation indexes are missing, not found, or unavailable.",
 			"- If final-run-index.json or citation-index.json are present for current_run_id, summarize counts, document titles, citation ids, and repo/path references in concise markdown. Do not paste raw object payloads, `documents=[{...}]`, `citations=[{...}]`, or Python-style dict snippets.",
 			"- Do not write broken path bullets such as a lone backtick, partial prose inside backticks, or unbalanced inline-code/path references.",
+			"- Do not paste sampled authored-shard snippets as semicolon-separated prose when they contain inline-code markers. Convert sampled evidence into short paraphrased facts and balanced path references.",
 			"- architect-summary.md must contain: decision-ready operator summary with what is complete, what is missing, what the operator should inspect or decide next, and any residual risk.",
 			"- Include enough repository/path and staged artifact references for an operator to understand the architecture surface and remaining coverage gaps.",
 			"- Include a decision-ready operator summary: what is complete, what is missing, and what the operator should inspect or decide next.",
@@ -337,6 +340,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			"- Do not ask the operator to re-run or repair non-succeeded shards when the current-run typed shard-summary shows failed=0 and no incomplete statuses; write exact planned/succeeded/failed/incomplete counts plus an explicit no-shard-coverage-blocker statement in both proposal.md and changelog.md instead.",
 			"- Do not list final-run-index.json, citation-index.json, validator verdicts, or shard summaries from a different run_id as current-run proposal evidence.",
 			"- When final-run-index.json or citation-index.json are present for current_run_id, summarize counts, selected document titles, citation ids, and repo/path references. Do not paste raw object payloads, Python-style dict snippets, `{'id': ...}`, or truncated JSON fragments.",
+			"- Do not paste sampled shard markdown snippets with inline-code markers into proposal.md or changelog.md. If a sampled signal includes backticks, paraphrase it in plain text or use a fully balanced path reference.",
 			"- Do not write stale index availability claims such as `No current-run final-run-index document list was available`; if final-run-index.json is absent, omit that index status, and if it is present, summarize the observed canonical document count.",
 			"- Do not write stale zero-count claims such as `final-run-index.json contains 0 observed document entries` unless you have validated a current-run zero-document index; normally, summarize the observed canonical document count or omit the count.",
 			"- Do not claim citation detail is limited or unavailable when current-run citation-index.json contains citation entries. State the observed citation count or omit the claim.",
@@ -347,9 +351,22 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		)
 	}
 	if validationErr != nil {
+		if draftEnrichmentValidationMentionsMalformedMarkdown(validationErr) {
+			lines = append(lines,
+				"DRAFT ENRICHMENT MARKDOWN SYNTAX RETRY:",
+				"- The previous enrichment attempt failed because at least one referenced markdown file had malformed inline-code or code-fence syntax.",
+				"- Rewrite every referenced markdown file again. Preserve the evidence-backed meaning, but remove or balance all inline backticks before exit.",
+				"- Prefer plain text service/module names over inline-code when summarizing sampled shard prose. Use inline-code only for short complete paths or identifiers with both opening and closing backticks on the same line.",
+				"- Do not copy truncated shard excerpts, raw snippets, or semicolon lists that may carry half-open backticks.",
+			)
+		}
 		lines = append(lines, fmt.Sprintf(`- Previous draft artifact validation failure: %s`, compactDraftEnrichmentHint(validationErr.Error())))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func draftEnrichmentValidationMentionsMalformedMarkdown(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "malformed markdown inline-code")
 }
 
 func draftEnrichmentShardStatusEvidenceFiles(task acpruntime.Task) []string {

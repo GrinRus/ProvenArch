@@ -2352,6 +2352,33 @@ func TestRunHeadlessProviderSkipsDraftRepairForBootstrapOnlyDraft(t *testing.T) 
 	}
 }
 
+func TestRunHeadlessProviderRetriesDraftEnrichmentMalformedMarkdown(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-markdown-syntax")
+	enrichmentScript := asIsMalformedThenValidEnrichmentScript(task)
+	runner := testAdapter{
+		command:                writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
+		draftEnrichmentCommand: writeEngineScript(t, enrichmentScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:     true,
+			RepairDraftArtifactsOnce:          true,
+			RepairDraftArtifactEnrichmentOnce: true,
+		},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected malformed markdown syntax retry to recover draft enrichment, got %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.DraftFinalRoot, "overview.md"))
+	if err != nil {
+		t.Fatalf("read overview: %v", err)
+	}
+	if !strings.Contains(string(raw), "Valid overview after markdown syntax retry") {
+		t.Fatalf("expected second enrichment content, got:\n%s", string(raw))
+	}
+}
+
 func TestRunHeadlessProviderRejectsBootstrapOnlyDraftAfterEnrichment(t *testing.T) {
 	t.Parallel()
 
@@ -3690,6 +3717,54 @@ func asIsBootstrapDraftScript(task acpruntime.Task, tail string) string {
 	}
 	lines = append(lines, tail)
 	return strings.Join(lines, "\n") + "\n"
+}
+
+func asIsMalformedThenValidEnrichmentScript(task acpruntime.Task) string {
+	return strings.Join([]string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"write_root=" + shellQuote(task.WriteRoot),
+		"draft_root=" + shellQuote(task.DraftFinalRoot),
+		"state=" + shellQuote(filepath.Join(task.Workspace, "markdown-syntax-retry-state")),
+		"mkdir -p \"$write_root\" \"$draft_root\"",
+		"cat >\"$write_root/asis-draft-manifest.json\" <<'EOF'",
+		steppolicy.RuntimeDraftManifestTaskSkeleton(task),
+		"EOF",
+		"if [[ ! -f \"$state\" ]]; then",
+		"  printf '%s\\n' first >\"$state\"",
+		"  cat >\"$draft_root/overview.md\" <<'EOF'",
+		"# Overview",
+		"",
+		"Evidence path `reports/taskruns/current/staging/shards/example.md remains half-open.",
+		"EOF",
+		"  cat >\"$draft_root/summary.md\" <<'EOF'",
+		"# Summary",
+		"",
+		"Provider authored summary with valid evidence.",
+		"EOF",
+		"  cat >\"$draft_root/architect-summary.md\" <<'EOF'",
+		"# Architect Summary",
+		"",
+		"Provider authored architect summary with valid evidence.",
+		"EOF",
+		"  exit 0",
+		"fi",
+		"cat >\"$draft_root/overview.md\" <<'EOF'",
+		"# Overview",
+		"",
+		"Valid overview after markdown syntax retry with reports/taskruns/current/staging/shards/example.md evidence.",
+		"EOF",
+		"cat >\"$draft_root/summary.md\" <<'EOF'",
+		"# Summary",
+		"",
+		"Valid summary after markdown syntax retry with concrete staged evidence.",
+		"EOF",
+		"cat >\"$draft_root/architect-summary.md\" <<'EOF'",
+		"# Architect Summary",
+		"",
+		"Valid architect summary after markdown syntax retry with operator decision evidence.",
+		"EOF",
+	}, "\n") + "\n"
 }
 
 func compactDraftScript(task acpruntime.Task) string {

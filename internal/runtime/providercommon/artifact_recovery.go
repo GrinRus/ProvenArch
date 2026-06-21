@@ -875,6 +875,8 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 					emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "stalled", runtimeArtifactSnapshot(task))
 					emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", enrichmentStalled.Diagnostic, err)
 					return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft_artifact_enrichment_noop_or_scaffold", err)
+				} else if shouldRetryDraftMalformedMarkdownEnrichment(stage, err) {
+					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_markdown_syntax")
 				}
 			}
 			emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "stalled", runtimeArtifactSnapshot(task))
@@ -888,6 +890,9 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 		emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
 		if isDraftEnrichmentNoopOrScaffoldFailure(err) {
 			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft_artifact_enrichment_noop_or_scaffold", err)
+		}
+		if shouldRetryDraftMalformedMarkdownEnrichment(stage, err) {
+			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_markdown_syntax")
 		}
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft artifact enrichment did not produce valid draft artifact contract", err)
 	}
@@ -935,6 +940,12 @@ func allDraftMarkdownOutputsChanged(task acpruntime.Task, beforeDraftRoot writeR
 
 func isDraftEnrichmentNoopOrScaffoldFailure(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "draft_artifact_enrichment_noop_or_scaffold")
+}
+
+func shouldRetryDraftMalformedMarkdownEnrichment(stage string, err error) bool {
+	return strings.TrimSpace(stage) != "draft_artifact_enrichment_markdown_syntax" &&
+		err != nil &&
+		strings.Contains(err.Error(), "malformed markdown inline-code")
 }
 
 func isDraftBootstrapOnlyValidationFailure(err error) bool {
