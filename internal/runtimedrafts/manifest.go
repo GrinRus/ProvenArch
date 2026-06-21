@@ -218,6 +218,12 @@ func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string, r
 		if runtimeDraftTextHasGenericShardGapWording(text) {
 			problems = append(problems, fmt.Sprintf("outputs[%d].path %q uses generic conditional shard-gap wording instead of exact current-run shard status", idx, output.Path))
 		}
+		if runtimeDraftTextHasStaleIndexAvailabilityClaim(text) {
+			problems = append(problems, fmt.Sprintf("outputs[%d].path %q claims current-run final/citation indexes are unavailable instead of omitting downstream index status", idx, output.Path))
+		}
+		if runtimeDraftTextHasRawStructuredEvidenceDump(text) {
+			problems = append(problems, fmt.Sprintf("outputs[%d].path %q includes raw structured evidence dumps instead of readable summaries", idx, output.Path))
+		}
 	}
 	if len(problems) == 0 {
 		return nil
@@ -498,6 +504,59 @@ func runtimeDraftTextHasGenericShardGapWording(text string) bool {
 	}
 	for _, marker := range markers {
 		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftTextHasStaleIndexAvailabilityClaim(text string) bool {
+	lower := strings.ToLower(text)
+	markers := []string{
+		"no readable current-run final-run-index.json",
+		"no current-run final-run-index.json",
+		"current-run final index and citation index availability is: not present",
+		"current-run final-run-index.json or citation-index.json was not present",
+		"current-run final-run-index.json or citation-index.json was unavailable",
+		"current-run final-run-index.json or citation-index.json were unavailable",
+		"final-run-index.json and citation-index.json were not present",
+		"final-run-index.json and citation-index.json unavailable",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftTextHasRawStructuredEvidenceDump(text string) bool {
+	markers := []string{
+		"{'id':",
+		"{ 'id':",
+		"documents=[{",
+		"citations=[{",
+		"claim_ids':",
+		"document_ids':",
+		"'repo':",
+		"'path':",
+	}
+	hits := 0
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			hits++
+		}
+	}
+	if hits >= 2 {
+		return true
+	}
+	lines := strings.Split(text, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- {'") || strings.HasPrefix(trimmed, "* {'") {
+			return true
+		}
+		if strings.Contains(trimmed, "documents=[{") || strings.Contains(trimmed, "citations=[{") {
 			return true
 		}
 	}

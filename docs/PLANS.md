@@ -1185,6 +1185,26 @@ Strict medium `codex-code` rerun `regres-long-posthog-ftgo-20260620T051657Z` ran
 
 ---
 
+## Live E2E Draft Artifact Readability And Index Timing
+
+### Context
+Strict medium `codex-code` rerun `regres-long-posthog-ftgo-20260620T203021Z` reached non-release machine `PASS` for selected-provider totals (`2/2`) with frontend PASS and no legacy mixed quality-gate artifacts. Manual artifact review still rejected the result: some final `step2.asis_docs` markdown claimed current-run `final-run-index.json` / `citation-index.json` were unavailable even though final staging later contained those indexes, and some `step4` proposal/changelog content pasted raw Python-style citation dictionaries/truncated JSON fragments instead of readable operator evidence.
+
+### Plan
+- [x] Reject stale current-run final/citation-index unavailable claims in runtime draft markdown.
+- [x] Reject raw structured evidence dumps in operator-facing draft markdown.
+- [x] Update draft enrichment prompts so providers omit downstream index availability during step2 when indexes are not yet present, and summarize index/citation evidence instead of pasting raw objects.
+- [x] Update docs and targeted prompt/validation tests.
+- [ ] Run full DoD, commit, and rerun affected strict medium `codex-code`.
+
+### Acceptance
+- [x] `step2` no longer promotes stale `final-run-index/citation-index not found` claims.
+- [x] `step4` proposal/changelog drafts cannot pass validation with raw `{'id': ...}` / `documents=[{...}]` / `citations=[{...}]` dumps.
+- [ ] Latest strict medium `codex-code` rerun has accepted artifact quality for readability, index truthfulness and decision readiness.
+- [ ] Latest strict medium `claude-code` rerun remains pending after Codex produces clean strict medium evidence.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.
