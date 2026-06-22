@@ -242,6 +242,72 @@ func TestScheduleRuntimeShardRunsFailFastDoesNotStartNextSequentialShard(t *test
 	}
 }
 
+func TestScheduleRuntimeShardRunsBestEffortAbortsAfterRepeatedRunnerUnavailable(t *testing.T) {
+	t.Parallel()
+
+	plans := []runtimeShardPlan{
+		{ShardID: "shard-1"},
+		{ShardID: "shard-2"},
+		{ShardID: "shard-3"},
+		{ShardID: "shard-4"},
+		{ShardID: "shard-5"},
+		{ShardID: "shard-6"},
+	}
+	entries := make([]runtimeShardSummaryEntry, 0, len(plans))
+	index := make(map[string]int, len(plans))
+	for idx, plan := range plans {
+		index[plan.ShardID] = idx
+		entries = append(entries, runtimeShardSummaryEntry{
+			ShardID:   plan.ShardID,
+			Status:    "failed",
+			ErrorCode: string(acpruntime.ErrorCodeRunnerUnavailable),
+			Error:     "claude-code became unavailable before required artifacts",
+		})
+	}
+	summaryState := &runtimeShardSummaryState{
+		singleShard: false,
+		entries:     entries,
+		index:       index,
+	}
+	execution := pipelineExecution{}
+
+	results, terminalErr := execution.scheduleRuntimeShardRuns(
+		context.Background(),
+		"refresh.step1.collect",
+		"domain-test",
+		plans,
+		summaryState,
+		runtimeShardExecutionOptions{
+			Strategy:      "sequential",
+			MaxParallel:   1,
+			FailurePolicy: "best_effort",
+			BestEffort:    true,
+		},
+		"domain-test",
+	)
+	if terminalErr == nil {
+		t.Fatalf("expected terminal error after repeated runner_unavailable shards")
+	}
+	if code := shardErrorCode(terminalErr); code != string(acpruntime.ErrorCodeRunnerUnavailable) {
+		t.Fatalf("expected terminal error_code %q, got %q (%v)", acpruntime.ErrorCodeRunnerUnavailable, code, terminalErr)
+	}
+	if len(results) != len(plans) {
+		t.Fatalf("unexpected result count: got=%d want=%d", len(results), len(plans))
+	}
+	for idx := 0; idx < collectBestEffortRunnerUnavailableAbortThreshold; idx++ {
+		if results[idx].Err == nil {
+			t.Fatalf("expected result %d to contain replayed runner_unavailable error", idx)
+		}
+	}
+	if results[collectBestEffortRunnerUnavailableAbortThreshold].Err != nil ||
+		results[collectBestEffortRunnerUnavailableAbortThreshold].Prepared.Task.TaskID != "" {
+		t.Fatalf("expected shard after threshold to remain undispatched, got prepared=%+v err=%v",
+			results[collectBestEffortRunnerUnavailableAbortThreshold].Prepared.Task,
+			results[collectBestEffortRunnerUnavailableAbortThreshold].Err,
+		)
+	}
+}
+
 func TestStructuralShardCoalescingPreservesMarkerLeafGroupsWithinCap(t *testing.T) {
 	t.Parallel()
 

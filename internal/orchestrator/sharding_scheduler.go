@@ -5,7 +5,11 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
+
+const collectBestEffortRunnerUnavailableAbortThreshold = 5
 
 func (e *pipelineExecution) scheduleRuntimeShardRuns(
 	ctx context.Context,
@@ -47,29 +51,49 @@ func (s defaultShardScheduler) ScheduleRuntimeShardRuns(ctx context.Context, req
 
 	runCtx := ctx
 	cancel := func() {}
-	if !options.BestEffort {
+	abortOnCollectRunnerUnavailable := options.BestEffort &&
+		workerCount == 1 &&
+		acpruntime.IsCollectStep(request.StepID)
+	if !options.BestEffort || abortOnCollectRunnerUnavailable {
 		runCtx, cancel = context.WithCancel(ctx)
 	}
 	defer cancel()
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	var firstErr error
+	var terminalErr error
+	consecutiveRunnerUnavailable := 0
 	nextIndex := 0
 
 	recordResult := func(index int, result runtimeShardRunResult) {
 		mu.Lock()
 		defer mu.Unlock()
 		results[index] = result
-		if result.Err != nil && !options.BestEffort && firstErr == nil {
-			firstErr = result.Err
+		if result.Err == nil {
+			consecutiveRunnerUnavailable = 0
+			return
+		}
+		if !options.BestEffort && terminalErr == nil {
+			terminalErr = result.Err
 			cancel()
+			return
+		}
+		if abortOnCollectRunnerUnavailable {
+			if shardErrorCode(result.Err) == string(acpruntime.ErrorCodeRunnerUnavailable) {
+				consecutiveRunnerUnavailable++
+			} else {
+				consecutiveRunnerUnavailable = 0
+			}
+			if consecutiveRunnerUnavailable >= collectBestEffortRunnerUnavailableAbortThreshold && terminalErr == nil {
+				terminalErr = fmt.Errorf("collect aborted after %d consecutive runner_unavailable shards: %w", consecutiveRunnerUnavailable, result.Err)
+				cancel()
+			}
 		}
 	}
 	nextJob := func() (int, runtimeShardPlan, bool) {
 		mu.Lock()
 		defer mu.Unlock()
-		if firstErr != nil && !options.BestEffort {
+		if terminalErr != nil {
 			return 0, runtimeShardPlan{}, false
 		}
 		if nextIndex >= len(plans) {
@@ -98,7 +122,7 @@ func (s defaultShardScheduler) ScheduleRuntimeShardRuns(ctx context.Context, req
 
 	mu.Lock()
 	defer mu.Unlock()
-	return results, firstErr
+	return results, terminalErr
 }
 
 func (e *pipelineExecution) runRuntimeShard(
@@ -122,7 +146,7 @@ func (e *pipelineExecution) runRuntimeShard(
 	if entry.Status == "failed" {
 		return runtimeShardRunResult{
 			Plan: plan,
-			Err:  fmt.Errorf("%s", shardFailureMessage(entry)),
+			Err:  shardFailureError(entry),
 		}
 	}
 

@@ -449,9 +449,17 @@ func composeDraftArtifactEnrichmentNoActionRetryPrompt(provider acpruntime.Provi
 	switch strings.TrimSpace(task.StepID) {
 	case "init.step0.constitution":
 		lines = append(lines,
+			fmt.Sprintf("- Exact required constitution overview overwrite target: %q.", filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "charter-overview.md")),
+			"- Read bounded repository entrypoint evidence from the allowed read_context_roots before writing the step0 summary; collected shard/final/validator evidence does not exist yet.",
 			"- For step0, overwrite charter-overview.md with target identity, repository evidence, architecture scope, operating principles/constraints, coverage gaps, and a decision-ready operator summary.",
 			"- Preserve baseline-subagents.yaml when it is already a valid baseline bundle.",
 		)
+		if candidates := draftEnrichmentStep0EvidenceCandidates(task); len(candidates) > 0 {
+			lines = append(lines, "- STEP0 bounded repository evidence candidates:")
+			for _, candidate := range candidates {
+				lines = append(lines, "- "+candidate)
+			}
+		}
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
 		lines = append(lines,
 			"- For step2, overwrite overview.md, summary.md, and architect-summary.md.",

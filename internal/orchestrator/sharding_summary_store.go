@@ -131,6 +131,15 @@ func shardFailureMessage(entry runtimeShardSummaryEntry) string {
 	return message
 }
 
+func shardFailureError(entry runtimeShardSummaryEntry) error {
+	message := shardFailureMessage(entry)
+	code := strings.TrimSpace(entry.ErrorCode)
+	if code == "" {
+		return fmt.Errorf("%s", message)
+	}
+	return acpruntime.WrapRunnerError("", acpruntime.ErrorCode(code), message, nil)
+}
+
 func shardErrorCode(err error) string {
 	code, _, ok := acpruntime.ClassifyError(err)
 	if !ok {
@@ -277,7 +286,15 @@ func (s *runtimeShardSummaryState) markFailedError(plan runtimeShardPlan, taskID
 }
 
 func (s *runtimeShardSummaryState) markAborted(plan runtimeShardPlan) error {
-	return s.markFailed(plan, "", "shard not executed because fail_fast aborted remaining work", "")
+	return s.markAbortedWith(plan, "shard not executed because fail_fast aborted remaining work", "")
+}
+
+func (s *runtimeShardSummaryState) markAbortedWith(plan runtimeShardPlan, message string, errorCode string) error {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		message = "shard not executed because scheduler aborted remaining work"
+	}
+	return s.markFailed(plan, "", message, strings.TrimSpace(errorCode))
 }
 
 func (s *runtimeShardSummaryState) updateLocked(

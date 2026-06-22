@@ -855,6 +855,12 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 		},
 		func(policy ActivityPolicy) ActivityPolicy {
 			policy.FreshArtifactMutationAfter = time.Now().UTC().Add(-time.Millisecond)
+			if strings.TrimSpace(task.StepID) == "init.step0.constitution" {
+				if policy.PreArtifactStallWindow < 2*time.Minute {
+					policy.PreArtifactStallWindow = 2 * time.Minute
+				}
+				policy.PreArtifactWallClockWindow = 2 * time.Minute
+			}
 			return policy
 		},
 	)

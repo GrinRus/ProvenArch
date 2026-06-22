@@ -1350,6 +1350,43 @@ func TestComposeDraftArtifactEnrichmentPromptAddsNoActionRetryMode(t *testing.T)
 	}
 }
 
+func TestComposeDraftArtifactEnrichmentPromptStep0NoActionRetryNamesEvidenceCandidates(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	repoDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("PostHog analytics platform\n"), 0o644); err != nil {
+		t.Fatalf("write repo readme: %v", err)
+	}
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step0.constitution",
+		StepContract:      "constitution",
+		AgentRole:         "architect",
+		Workspace:         workspaceDir,
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/runtime/step0_constitution",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step0_constitution",
+		ReadContextRoots:  []string{workspaceDir, repoDir},
+		ExpectedArtifacts: []string{"constitution-draft.json", "charter-overview.md", "baseline-subagents.yaml"},
+	}
+	err := errors.New(`draft_artifact_enrichment_no_action_retry: draft_artifact_enrichment_noop_or_scaffold: outputs[0].path "charter-overview.md" references bootstrap-only placeholder draft content`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"draft artifact enrichment no-action retry mode",
+		`Exact required constitution overview overwrite target: "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step0_constitution/charter-overview.md".`,
+		"Read bounded repository entrypoint evidence from the allowed read_context_roots before writing the step0 summary",
+		"STEP0 bounded repository evidence candidates:",
+		filepath.Join(repoDir, "README.md"),
+		"For step0, overwrite charter-overview.md with target identity",
+		"Preserve baseline-subagents.yaml when it is already a valid baseline bundle.",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected step0 no-action retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
 func TestComposeDraftArtifactEnrichmentPromptAddsPrintedCommandRetryMode(t *testing.T) {
 	t.Parallel()
 
