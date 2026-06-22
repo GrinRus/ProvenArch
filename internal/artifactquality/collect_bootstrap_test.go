@@ -118,6 +118,15 @@ func TestCollectDocumentBootstrapOnlyDetectsInterruptedTemporaryArtifact(t *test
 	}
 }
 
+func TestCollectDocumentRuntimeProcessContaminatedDetectsBoundedPass(t *testing.T) {
+	t.Parallel()
+
+	text := "# FTGO Kitchen Service\n\n## Coverage Gaps\n- Runtime telemetry, SLAs, and production deployment configuration were not examined in this bounded pass.\n"
+	if !CollectDocumentRuntimeProcessContaminated(text) {
+		t.Fatalf("expected bounded pass wording to be classified as runtime process contamination")
+	}
+}
+
 func bootstrapCollectManifest() contracts.ShardPackManifest {
 	return contracts.ShardPackManifest{
 		Version:      1,

@@ -712,6 +712,8 @@ Zero tolerance:
 - `runtime_contract_failed`
 - collect shard failures where normal or focused repair cites missing/guessed repo paths; inspect whether concrete path-scope file candidates covered every assigned directory scope before accepting the failure as provider-only
 - process-contaminated collect markdown (`bounded read/pass`, guessed paths, concrete expected-missing path checks) is invalid, but clean coverage gaps such as “no OpenAPI/Swagger spec was observed under this scope” should not be classified as runtime process narration
+- collect coverage gaps must not use runtime-process wording such as “not examined in this bounded pass”; use operator-facing wording such as “not confirmed in scoped repository evidence” instead
+- collect manifests must not add legacy top-level `claims`/`claim_map`/`metadata`/`validation`/`compatibility`, and `citations[].claim_ids` must not contain unreplaced template tokens such as `SHARD`, `<shard>`, `<claim>`, `TODO`, or `REPLACE_ME`
 - `runner_unavailable`
 - `summary_missing`
 - `infra_signal_terminated`
