@@ -1290,6 +1290,57 @@ func TestComposeDraftArtifactEnrichmentPromptAddsMarkdownSyntaxRetryHint(t *test
 	}
 }
 
+func TestComposeDraftArtifactEnrichmentPromptAddsNoActionRetryMode(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "refresh.step4.proposals",
+		StepContract:      "proposals",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/proposals",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"proposals-draft-manifest.json", "proposal.md", "changelog.md"},
+	}
+	err := errors.New(`draft_artifact_enrichment_no_action_retry: draft_artifact_enrichment_noop_or_scaffold: outputs[0].path "proposal.md" references bootstrap-only placeholder draft content`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderCodexCode, task, err)
+	for _, token := range []string{
+		"draft artifact enrichment no-action retry mode",
+		"DRAFT ENRICHMENT NO-ACTION RETRY:",
+		"Your next response must be exactly one filesystem command",
+		"The command must use python3",
+		"overwrite every markdown target listed below before it exits",
+		"/tmp/workspace/reports/taskruns/run-1/proposals/proposals-draft-manifest.json",
+		"/tmp/workspace/reports/taskruns/run-1/staging/final",
+		"proposal.md -> proposals/runtime-recommendations.md",
+		"changelog.md -> reports/changelog/runtime-proposals.md",
+		"Also read current-run staging/final final-run-index.json and citation-index.json if present.",
+		"Also read validator/finding/coverage/proposal summaries",
+		"For step4, overwrite proposal.md and changelog.md.",
+		"proposal.md must include Decision / recommended operator action",
+		"changelog.md must include updated architecture/proposal surfaces",
+		"no-shard-coverage-blocker statement",
+		"Previous draft artifact validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected no-action retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"ACP_DRAFT_FILE",
+		"ACP_DRAFT_MANIFEST_JSON",
+		"cat >",
+		"FIRST PROPOSALS DRAFT COMMAND:",
+		"STEP4 WRITE-FIRST SEQUENCE",
+		"Runtime proposal surface initialized for this analysis run.",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("no-action retry prompt must stay compact and avoid bootstrap/scaffold %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
 func TestComposeArtifactOnlyPromptIncludesQAFirstActionAndPromptPack(t *testing.T) {
 	t.Parallel()
 

@@ -876,6 +876,9 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 					if shouldRetryDraftMissingPythonEnrichment(stage, enrichmentResult, err) {
 						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_python3_retry")
 					}
+					if shouldRetryDraftNoActionEnrichment(stage, err) {
+						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftNoActionRetryError(err), "draft_artifact_enrichment_no_action_retry")
+					}
 					emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "stalled", runtimeArtifactSnapshot(task))
 					emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", enrichmentStalled.Diagnostic, err)
 					return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft_artifact_enrichment_noop_or_scaffold", err)
@@ -894,16 +897,20 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 	}
 	if err := validateDraftArtifactEnrichmentOutcome(task, beforeDraftRoot, adapter.ValidateArtifacts(task)); err != nil {
 		emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "invalid", runtimeArtifactSnapshot(task))
-		emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
 		if isDraftEnrichmentNoopOrScaffoldFailure(err) {
 			if shouldRetryDraftMissingPythonEnrichment(stage, enrichmentResult, err) {
 				return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_python3_retry")
 			}
+			if shouldRetryDraftNoActionEnrichment(stage, err) {
+				return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftNoActionRetryError(err), "draft_artifact_enrichment_no_action_retry")
+			}
+			emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
 			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft_artifact_enrichment_noop_or_scaffold", err)
 		}
 		if shouldRetryDraftMalformedMarkdownEnrichment(stage, err) {
 			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_markdown_syntax")
 		}
+		emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft artifact enrichment did not produce valid draft artifact contract", err)
 	}
 	emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "completed", runtimeArtifactSnapshot(task))
@@ -956,6 +963,18 @@ func shouldRetryDraftMalformedMarkdownEnrichment(stage string, err error) bool {
 	return strings.TrimSpace(stage) != "draft_artifact_enrichment_markdown_syntax" &&
 		err != nil &&
 		strings.Contains(err.Error(), "malformed markdown inline-code")
+}
+
+func shouldRetryDraftNoActionEnrichment(stage string, err error) bool {
+	return strings.TrimSpace(stage) != "draft_artifact_enrichment_no_action_retry" &&
+		isDraftEnrichmentNoopOrScaffoldFailure(err)
+}
+
+func draftNoActionRetryError(err error) error {
+	if err == nil {
+		return errors.New("draft_artifact_enrichment_no_action_retry")
+	}
+	return fmt.Errorf("draft_artifact_enrichment_no_action_retry: %w", err)
 }
 
 func shouldRetryDraftMissingPythonEnrichment(stage string, result acpruntime.Result, err error) bool {

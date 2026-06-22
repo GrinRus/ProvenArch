@@ -209,6 +209,9 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 	skeleton := steppolicy.RuntimeDraftManifestTaskSkeleton(task)
 	outputs := draftEnrichmentOutputs(skeleton)
 	statusEvidenceFiles := draftEnrichmentShardStatusEvidenceFiles(task)
+	if draftEnrichmentValidationMentionsNoActionRetry(validationErr) {
+		return composeDraftArtifactEnrichmentNoActionRetryPrompt(provider, task, manifestFile, manifestTarget, outputs, statusEvidenceFiles, validationErr)
+	}
 	lines := []string{
 		fmt.Sprintf("You are ACP runtime provider %q in draft artifact enrichment focused recovery mode.", provider),
 		"Immediate draft artifact enrichment action:",
@@ -380,8 +383,87 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 	return strings.Join(lines, "\n")
 }
 
+func composeDraftArtifactEnrichmentNoActionRetryPrompt(provider acpruntime.Provider, task acpruntime.Task, manifestFile string, manifestTarget string, outputs []runtimedrafts.Output, statusEvidenceFiles []string, validationErr error) string {
+	lines := []string{
+		fmt.Sprintf("You are ACP runtime provider %q in draft artifact enrichment no-action retry mode.", provider),
+		"DRAFT ENRICHMENT NO-ACTION RETRY:",
+		"- The previous focused enrichment did not freshly replace every referenced markdown target with valid evidence-backed content.",
+		"- Your next response must be exactly one filesystem command, not a plan, not prose, not a status note.",
+		"- The command must use python3, read bounded current-run evidence, and overwrite every markdown target listed below before it exits.",
+		"- Do not run or copy the earlier heredoc/bootstrap draft command.",
+		"- Do not write deterministic filler, raw JSON dumps, placeholder text, or recovery mechanics as final markdown.",
+		fmt.Sprintf("- Manifest target to read/preserve: %q.", manifestTarget),
+		fmt.Sprintf("- Draft root for markdown overwrites: %q.", strings.TrimSpace(task.DraftFinalRoot)),
+		fmt.Sprintf(`- write_root = %q`, strings.TrimSpace(task.WriteRoot)),
+		fmt.Sprintf(`- draft_final_root = %q`, strings.TrimSpace(task.DraftFinalRoot)),
+		fmt.Sprintf(`- manifest_file = %q`, manifestFile),
+		fmt.Sprintf(`- current_run_id = %q`, strings.TrimSpace(task.RunID)),
+		fmt.Sprintf(`- current_step_id = %q`, strings.TrimSpace(task.StepID)),
+		fmt.Sprintf(`- bounded_read_context_roots = %q`, strings.Join(task.ReadContextRoots, ", ")),
+		"- Allowed writes: the existing step draft manifest in write_root and referenced draft files under draft_final_root only.",
+		"- If you update the manifest, preserve each outputs[] path/canonical_path/kind/title exactly; never add logical_path, target, output_path, or aliases.",
+		"- Required markdown overwrite targets:",
+	}
+	if len(outputs) == 0 {
+		lines = append(lines, "- Load outputs[] from the existing manifest and overwrite every referenced markdown target.")
+	} else {
+		for _, output := range outputs {
+			if strings.ToLower(filepath.Ext(strings.TrimSpace(output.Path))) != ".md" {
+				continue
+			}
+			lines = append(lines, fmt.Sprintf(
+				"- %s -> %s (%s)",
+				strings.TrimSpace(output.Path),
+				strings.TrimSpace(output.CanonicalPath),
+				strings.TrimSpace(output.Kind),
+			))
+		}
+	}
+	if len(statusEvidenceFiles) > 0 {
+		lines = append(lines, "- Read these current-run shard status files if present:")
+		for _, file := range statusEvidenceFiles {
+			lines = append(lines, "- "+file)
+		}
+	}
+	lines = append(lines,
+		"- Also read current-run staging/final final-run-index.json and citation-index.json if present.",
+		"- Also read validator/finding/coverage/proposal summaries and up to 6 high-signal staging/shards manifests or authored markdown docs.",
+		"- Banned final markdown markers: Runtime draft recovery initialized; Treat this as diagnostic evidence until; Use collected shard manifests; Runtime proposal surface initialized; Current run evidence should be reviewed; placeholder; bootstrap-only; recovery pass; enrichment read; bounded staged evidence; current draft manifest; draft_final_root; replace placeholder; replaced placeholder; replacing placeholders.",
+		"- Final self-check inside the command: every markdown target was freshly overwritten, is marker-free, has balanced backticks/fences, and contains operator-facing evidence, gaps, and next decision content.",
+	)
+	switch strings.TrimSpace(task.StepID) {
+	case "init.step0.constitution":
+		lines = append(lines,
+			"- For step0, overwrite charter-overview.md with target identity, repository evidence, architecture scope, operating principles/constraints, coverage gaps, and a decision-ready operator summary.",
+			"- Preserve baseline-subagents.yaml when it is already a valid baseline bundle.",
+		)
+	case "init.step2.asis_docs", "refresh.step2.asis_docs":
+		lines = append(lines,
+			"- For step2, overwrite overview.md, summary.md, and architect-summary.md.",
+			"- overview.md must summarize architecture surfaces with concrete repo/path or staged-artifact evidence.",
+			"- summary.md must state shard completeness from typed shard status when visible plus evidence density/readability and gaps.",
+			"- architect-summary.md must state what is complete, what is missing, and what the operator should inspect or decide next.",
+		)
+	case "init.step4.proposals", "refresh.step4.proposals":
+		lines = append(lines,
+			"- For step4, overwrite proposal.md and changelog.md.",
+			"- proposal.md must include Decision / recommended operator action, evidence used, proposed changes or follow-up plan, risks/gaps/out-of-scope.",
+			"- changelog.md must include updated architecture/proposal surfaces, findings/proposals summary, evidence index/citation refs, and residual coverage gaps.",
+			"- If typed shard status shows all shards succeeded, write exact planned/succeeded/failed/incomplete counts and an explicit no-shard-coverage-blocker statement.",
+		)
+	}
+	if validationErr != nil {
+		lines = append(lines, fmt.Sprintf(`- Previous draft artifact validation failure: %s`, compactDraftEnrichmentHint(validationErr.Error())))
+	}
+	return strings.Join(lines, "\n")
+}
+
 func draftEnrichmentValidationMentionsMalformedMarkdown(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "malformed markdown inline-code")
+}
+
+func draftEnrichmentValidationMentionsNoActionRetry(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "draft_artifact_enrichment_no_action_retry")
 }
 
 func draftEnrichmentShardStatusEvidenceFiles(task acpruntime.Task) []string {
