@@ -197,6 +197,12 @@ func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task a
 		"- Every citation/provenance path must be a concrete existing repository file; directories and missing paths are coverage gaps/questions, not evidence.",
 		"- JSON syntax-only checks such as jq empty or python3 -m json.tool are insufficient; include file-level citation/provenance checks before a successful exit.",
 		"- Use python3, not python; do not use GNU-only find -printf; do not assign to the zsh-reserved status variable.",
+	}
+	if focus := collectArtifactPairRepairValidationFocus(validationErr); len(focus) > 0 {
+		lines = append(lines, "VALIDATION-SPECIFIC REPAIR FOCUS:")
+		lines = append(lines, focus...)
+	}
+	lines = append(lines,
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
 		strings.TrimSpace(skeleton),
 		"SKELETON USE:",
@@ -211,7 +217,7 @@ func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task a
 		"- Exit successfully only after both exact targets are complete, marker-free, and evidence-backed.",
 		"- A noop, zero-output, unchanged skeleton, or partially-written repair is terminal; exit non-zero instead of claiming success when either exact target is missing or unchanged.",
 		"FINAL SELF-CHECK COMMAND:",
-		"test -s " + shellSingleQuote(docTarget) + " && test -s " + shellSingleQuote(manifestTarget) + " && ! grep -E 'ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT|Recovery Bootstrap|Recovery Summary|Recovery Evidence Summary|seed-only collect recovery fallback|Additional provider enrichment should replace|Treat this as diagnostic evidence until|first bounded evidence read was attempted|initial artifact records only|will be repaired with concrete|bounded read|bounded pass|guessed path|guessed file|guessed evidence|missing expected evidence|expected path was not present|expected file was not present' " + shellSingleQuote(docTarget) + " " + shellSingleQuote(manifestTarget),
+		"test -s "+shellSingleQuote(docTarget)+" && test -s "+shellSingleQuote(manifestTarget)+" && ! grep -E 'ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT|Recovery Bootstrap|Recovery Summary|Recovery Evidence Summary|seed-only collect recovery fallback|Additional provider enrichment should replace|Treat this as diagnostic evidence until|first bounded evidence read was attempted|initial artifact records only|will be repaired with concrete|bounded read|bounded pass|guessed path|guessed file|guessed evidence|missing expected evidence|expected path was not present|expected file was not present' "+shellSingleQuote(docTarget)+" "+shellSingleQuote(manifestTarget),
 		"Artifact-only recovery contract:",
 		"- Do not return semantic JSON or any semantic payload on stdout.",
 		"- Final action must be: write the enriched recovery overview document and shard-pack-manifest.json under write_root, then exit successfully.",
@@ -224,7 +230,7 @@ func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task a
 		fmt.Sprintf(`- repo_scopes = %q`, strings.Join(task.RepoScopes, ", ")),
 		fmt.Sprintf(`- path_scopes = %q`, strings.Join(task.PathScopes, ", ")),
 		"COLLECT PAIR RECOVERY CHECKLIST:",
-	}
+	)
 	if len(evidencePaths) > 0 {
 		lines = append(lines, "Bounded repository evidence candidates:")
 		for _, rel := range evidencePaths {
@@ -240,6 +246,37 @@ func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task a
 		lines = append(lines, fmt.Sprintf("- Previous collect artifact validation failure: %s", detail))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func collectArtifactPairRepairValidationFocus(validationErr error) []string {
+	detail := strings.ToLower(errorText(validationErr))
+	if strings.TrimSpace(detail) == "" {
+		return nil
+	}
+	lines := []string{}
+	if strings.Contains(detail, "repo evidence path") && strings.Contains(detail, "directory") {
+		lines = append(lines,
+			"- Immediate repair objective: replace every directory-only citation/provenance repo path with concrete existing file paths before writing the manifest.",
+			"- Start from the directory names mentioned by the validation failure, but cite only files discovered under those directories or listed evidence candidates.",
+			"- Use file-level checks for every replacement path; if no concrete file supports a claim, remove that claim or record a coverage gap/question.",
+			"- The rewritten markdown may mention a directory only as scope context, never as a cited/provenance evidence path.",
+		)
+	}
+	if strings.Contains(detail, "process-contaminated") || strings.Contains(detail, "process contaminated") {
+		lines = append(lines,
+			"- Immediate repair objective: rewrite the existing process-contaminated markdown target with final operator-facing architecture evidence before writing the manifest.",
+			"- Remove runtime/process language from the markdown: bounded reads, bounded passes, guessed paths/files/evidence, expected-missing path checks, recovery mechanics, and repair narration.",
+			"- Do not keep the old markdown and only patch shard-pack-manifest.json; both the markdown document and manifest must be freshly rewritten from observed repository evidence.",
+			"- The final markdown may describe unsupported evidence only as a concrete coverage gap, using repository/domain language rather than repair-process language.",
+		)
+	}
+	if strings.Contains(detail, "runtime_stalled_before_artifacts") {
+		lines = append(lines,
+			"- Immediate repair objective: write the markdown document and shard-pack-manifest.json in the first filesystem command before any optional analysis.",
+			"- Do not wait for broad repository exploration; use the listed candidates and record missing details as coverage gaps/questions.",
+		)
+	}
+	return lines
 }
 
 func collectArtifactPairRepairDocumentPath(task acpruntime.Task, validationErr error) string {

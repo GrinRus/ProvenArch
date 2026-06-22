@@ -206,7 +206,7 @@ func recoverCollectArtifactPairRepairWithOptions(ctx context.Context, task acpru
 	buildRepairSpec := func() (CommandSpec, error) {
 		return repairAdapter.CollectArtifactPairRepairCommandSpec(task, validationErr)
 	}
-	repairResult, repairErr, commandErr := runFocusedArtifactRepairCommand(ctx, task, adapter, result, buildRepairSpec)
+	repairResult, repairErr, commandErr := runCollectArtifactPairRepairCommand(ctx, task, adapter, result, buildRepairSpec)
 	if commandErr != nil {
 		return true, acpruntime.Result{}, commandErr
 	}
@@ -242,7 +242,7 @@ func recoverCollectArtifactPairRepairWithOptions(ctx context.Context, task acpru
 	if err := adapter.ValidateArtifacts(task); err != nil {
 		if shouldRetryTransientProviderUnavailableArtifactRepair(policy, repairResult, err, adapter.UnavailableMarkers()) {
 			emitFocusedArtifactRepairRetryScheduledDiagnostic(task, adapter.Provider(), "collect_pair_repair", err)
-			retryResult, retryErr, retryCommandErr := runFocusedArtifactRepairCommand(ctx, task, adapter, repairResult, buildRepairSpec)
+			retryResult, retryErr, retryCommandErr := runCollectArtifactPairRepairCommand(ctx, task, adapter, repairResult, buildRepairSpec)
 			if retryCommandErr != nil {
 				return true, acpruntime.Result{}, retryCommandErr
 			}
@@ -1062,6 +1062,17 @@ func runFocusedArtifactRepairCommand(ctx context.Context, task acpruntime.Task, 
 	return runFocusedArtifactRepairCommandWithPolicy(ctx, task, adapter, baseResult, buildSpec, nil)
 }
 
+func runCollectArtifactPairRepairCommand(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, baseResult acpruntime.Result, buildSpec func() (CommandSpec, error)) (acpruntime.Result, error, error) {
+	return runFocusedArtifactRepairCommandWithPolicy(
+		ctx,
+		task,
+		adapter,
+		baseResult,
+		buildSpec,
+		collectArtifactPairRepairActivityPolicy,
+	)
+}
+
 func runFocusedArtifactRepairCommandWithPolicy(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, baseResult acpruntime.Result, buildSpec func() (CommandSpec, error), configure func(ActivityPolicy) ActivityPolicy) (acpruntime.Result, error, error) {
 	spec, err := buildSpec()
 	if err != nil {
@@ -1073,6 +1084,23 @@ func runFocusedArtifactRepairCommandWithPolicy(ctx context.Context, task acprunt
 	}
 	repairResult, repairErr := runCommandSpec(ctx, task, spec, repairPolicy)
 	return repairResult, repairErr, nil
+}
+
+func collectArtifactPairRepairActivityPolicy(policy ActivityPolicy) ActivityPolicy {
+	policy.FreshArtifactMutationAfter = time.Now().UTC().Add(-time.Millisecond)
+	if policy.PreArtifactStallWindow < defaultCollectRepairWindow {
+		policy.PreArtifactStallWindow = defaultCollectRepairWindow
+	}
+	if policy.PreArtifactWallClockWindow < defaultCollectRepairWindow {
+		policy.PreArtifactWallClockWindow = defaultCollectRepairWindow
+	}
+	if policy.PostArtifactStallWindow < defaultCollectRepairWindow {
+		policy.PostArtifactStallWindow = defaultCollectRepairWindow
+	}
+	if policy.PartialArtifactStallWindow < defaultCollectRepairWindow {
+		policy.PartialArtifactStallWindow = defaultCollectRepairWindow
+	}
+	return policy
 }
 
 func focusedRepairActivityPolicy(base ActivityPolicy, monitorPreArtifact bool) ActivityPolicy {

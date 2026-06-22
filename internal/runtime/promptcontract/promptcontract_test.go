@@ -738,6 +738,47 @@ func TestComposeCollectArtifactPairRepairPromptIsEvidenceFirstNoSeed(t *testing.
 	}
 }
 
+func TestComposeCollectArtifactPairRepairPromptAddsValidationSpecificFocus(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Payments\n\nRuntime entrypoint.\n"), 0o644); err != nil {
+		t.Fatalf("write evidence file: %v", err)
+	}
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step1.collect",
+		ArtifactRoot:      "reports/taskruns/run-1/staging/shards/payments",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments",
+		ReadContextRoots:  []string{repoRoot},
+		ShardID:           "payments",
+		DomainID:          "payments",
+		AgentRole:         "shard-analyst",
+		RepoScopes:        []string{"payments-service"},
+		PathScopes:        []string{"src"},
+		ExpectedArtifacts: []string{"shard-pack-manifest.json"},
+	}
+
+	prompt := ComposeCollectArtifactPairRepairPrompt(
+		acpruntime.ProviderClaudeCode,
+		task,
+		fmt.Errorf(`shard pack manifest is invalid: citations[0] repo evidence path "src" is a directory, not a file; documents[0].path references process-contaminated collect document file "src-overview.md"; runtime_stalled_before_artifacts`),
+	)
+
+	for _, token := range []string{
+		"VALIDATION-SPECIFIC REPAIR FOCUS:",
+		"replace every directory-only citation/provenance repo path with concrete existing file paths",
+		"cite only files discovered under those directories or listed evidence candidates",
+		"rewrite the existing process-contaminated markdown target",
+		"Do not keep the old markdown and only patch shard-pack-manifest.json",
+		"write the markdown document and shard-pack-manifest.json in the first filesystem command",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected validation-specific collect pair repair prompt token %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
 func TestComposeCollectArtifactPairRepairPromptTargetsExistingAuthoredMarkdown(t *testing.T) {
 	t.Parallel()
 
