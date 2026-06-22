@@ -3,6 +3,7 @@ package promptcontract
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -296,10 +297,23 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 	)
 	switch strings.TrimSpace(task.StepID) {
 	case "init.step0.constitution":
+		charterTarget := filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "charter-overview.md")
 		lines = append(lines,
+			"- STEP0 CONSTITUTION WRITE-FIRST SEQUENCE: collected shards and validator output do not exist yet for this step. Do not wait for later pipeline evidence.",
+			"- Your next filesystem command must read the current constitution-draft.json, current charter-overview.md, and bounded repository entrypoint evidence from read_context_roots, then overwrite charter-overview.md under draft_final_root before any optional extra analysis.",
+			fmt.Sprintf("- Exact required constitution overview overwrite target: %q.", charterTarget),
 			"- Enrich charter-overview.md with concrete constitution content from read_context_roots, repo scope, and charter wizard contract when available.",
+			"- charter-overview.md must contain: target identity; repository evidence used with repo/path references; architecture scope; operating principles or constraints; coverage gaps; and a decision-ready operator summary.",
+			"- If repository evidence is sparse, write the exact missing evidence category as a coverage gap; do not keep bootstrap text or mention that collected shards/validator output will arrive later.",
 			"- Do not rewrite baseline-subagents.yaml unless it is invalid; it must remain a valid baseline agents bundle.",
+			"- Final self-check: charter-overview.md was freshly overwritten in this focused call, includes at least one concrete repo/path evidence reference when available, and contains none of the banned scaffold markers.",
 		)
+		if candidates := draftEnrichmentStep0EvidenceCandidates(task); len(candidates) > 0 {
+			lines = append(lines, "- STEP0 bounded repository evidence candidates:")
+			for _, candidate := range candidates {
+				lines = append(lines, "- "+candidate)
+			}
+		}
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
 		lines = append(lines,
 			"- Enrich overview.md, summary.md, and architect-summary.md from collected shard manifests, bounded authored shard docs, final indexes, citations, and staged model evidence.",
@@ -402,6 +416,61 @@ func draftEnrichmentShardStatusEvidenceFiles(task acpruntime.Task) []string {
 		}
 	}
 	return files
+}
+
+func draftEnrichmentStep0EvidenceCandidates(task acpruntime.Task) []string {
+	candidateRelPaths := []string{
+		"README.md",
+		"AGENTS.md",
+		"package.json",
+		"pyproject.toml",
+		"go.mod",
+		"pom.xml",
+		"build.gradle",
+		"settings.gradle",
+		"docker-compose.yml",
+		"docker-compose.yaml",
+		filepath.Join(".github", "CODEOWNERS"),
+	}
+	workspaceRoot := filepath.Clean(strings.TrimSpace(task.Workspace))
+	out := make([]string, 0, 8)
+	seen := map[string]struct{}{}
+	for _, root := range task.ReadContextRoots {
+		cleanRoot := filepath.Clean(strings.TrimSpace(root))
+		if cleanRoot == "." || cleanRoot == "" {
+			continue
+		}
+		if workspaceRoot != "." && workspaceRoot != "" && pathIsUnder(cleanRoot, workspaceRoot) {
+			continue
+		}
+		for _, rel := range candidateRelPaths {
+			candidate := filepath.Clean(filepath.Join(cleanRoot, rel))
+			if _, ok := seen[candidate]; ok {
+				continue
+			}
+			info, err := os.Stat(candidate)
+			if err != nil || info.IsDir() {
+				continue
+			}
+			seen[candidate] = struct{}{}
+			out = append(out, candidate)
+			if len(out) >= 8 {
+				return out
+			}
+		}
+	}
+	return out
+}
+
+func pathIsUnder(pathValue string, root string) bool {
+	if pathValue == "" || root == "" {
+		return false
+	}
+	rel, err := filepath.Rel(root, pathValue)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (!strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != "..")
 }
 
 func draftEnrichmentCollectStepID(stepID string) string {

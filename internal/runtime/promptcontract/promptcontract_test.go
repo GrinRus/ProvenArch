@@ -1055,6 +1055,70 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 	}
 }
 
+func TestComposeDraftArtifactEnrichmentPromptForConstitutionRequiresWriteFirstRepoEvidence(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	repoRoot := filepath.Join(t.TempDir(), "posthog")
+	if err := os.MkdirAll(filepath.Join(repoRoot, ".github"), 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	for path, body := range map[string]string{
+		"README.md":          "# PostHog\n",
+		"package.json":       `{"name":"posthog"}`,
+		".github/CODEOWNERS": "* @posthog/team\n",
+	} {
+		fullPath := filepath.Join(repoRoot, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", fullPath, err)
+		}
+		if err := os.WriteFile(fullPath, []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", fullPath, err)
+		}
+	}
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step0.constitution",
+		StepContract:      "constitution",
+		DomainID:          "posthog",
+		RepoScope:         "posthog",
+		RepoScopes:        []string{"posthog"},
+		AgentRole:         "architect",
+		Workspace:         workspace,
+		WriteRoot:         filepath.Join(workspace, "reports", "taskruns", "run-1", "runtime", "step0_constitution"),
+		DraftFinalRoot:    filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "drafts", "step0_constitution"),
+		ReadContextRoots:  []string{workspace, repoRoot},
+		ExpectedArtifacts: []string{"constitution-draft.json", "charter-overview.md", "baseline-subagents.yaml"},
+	}
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, os.ErrInvalid)
+	for _, token := range []string{
+		"STEP0 CONSTITUTION WRITE-FIRST SEQUENCE",
+		"collected shards and validator output do not exist yet for this step",
+		"Do not wait for later pipeline evidence.",
+		"Your next filesystem command must read the current constitution-draft.json",
+		"then overwrite charter-overview.md under draft_final_root before any optional extra analysis",
+		filepath.Join(task.DraftFinalRoot, "charter-overview.md"),
+		"charter-overview.md must contain: target identity; repository evidence used with repo/path references",
+		"coverage gaps; and a decision-ready operator summary",
+		"do not keep bootstrap text or mention that collected shards/validator output will arrive later",
+		"baseline-subagents.yaml unless it is invalid",
+		"Final self-check: charter-overview.md was freshly overwritten",
+		"STEP0 bounded repository evidence candidates:",
+		filepath.Join(repoRoot, "README.md"),
+		filepath.Join(repoRoot, "package.json"),
+		filepath.Join(repoRoot, ".github", "CODEOWNERS"),
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected step0 enrichment prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	if strings.Contains(prompt, filepath.Join(workspace, "README.md")) {
+		t.Fatalf("step0 enrichment prompt should not use workspace root files as repo evidence candidates:\n%s", prompt)
+	}
+}
+
 func TestComposeDraftArtifactEnrichmentPromptNamesShardStatusEvidenceAndTargetIdentity(t *testing.T) {
 	t.Parallel()
 
